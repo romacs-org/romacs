@@ -3039,19 +3039,19 @@ def ui_review(args, base):
         a.eval(f'(progn (romacs-agent-send {a.s(sid)} {lisp_text(ASK_PROMPT)}) t)')
         a.until(sid, lambda: pending(sid) > 0, 300, 'a question asked')
         # The question asked, with its Blue: anything else fails the capture.
-        asked = a.eval(f'(let* ((s {a.s(sid)}) (request (gethash (car (hash-table-keys (romacs-agent-approvals s))) '
-                       '(romacs-agent-approvals s)))) (and (equal (gethash "tool_name" request) "AskUserQuestion") '
-                       '(member "Blue" (plist-get (cdr (car (romacs-agent--claude-questions (gethash "input" request)))) :options)) t))')
-        if asked != 't':
-            raise RuntimeError('the agent asked something other than the colour question')
+        # Its id is kept, and that request alone is answered.
+        asked = a.eval(f'(let* ((s {a.s(sid)}) (id (car (hash-table-keys (romacs-agent-approvals s)))) '
+                       '(request (gethash id (romacs-agent-approvals s)))) '
+                       '(and (equal (gethash "tool_name" request) "AskUserQuestion") '
+                       '(member "Blue" (plist-get (cdr (car (romacs-agent--claude-questions (gethash "input" request)))) :options)) id))')
+        if not asked.startswith('"'):
+            raise RuntimeError(f'the agent asked something other than the colour question: {asked}')
         themed('waiting')
-        # Answered only as the question it is; anything else is denied, so
-        # the capture never approves a plan or a tool.
-        a.eval(f'(let* ((s {a.s(sid)}) (id (car (hash-table-keys (romacs-agent-approvals s)))) '
-               '(request (gethash id (romacs-agent-approvals s)))) '
-               '(if (equal (gethash "tool_name" request) "AskUserQuestion") '
-               '(romacs-agent-respond s id (list :answers (list (cons (car (car (romacs-agent--claude-questions (gethash "input" request)))) "Blue"))) nil (quote user)) '
-               '(romacs-agent-respond s id nil "a review capture answers only its question" (quote user))) t)')
+        answered = a.eval(f'(let* ((s {a.s(sid)}) (request (gethash {asked} (romacs-agent-approvals s)))) '
+                          f'(when request (romacs-agent-respond s {asked} (list :answers (list (cons (car (car '
+                          '(romacs-agent--claude-questions (gethash "input" request)))) "Blue"))) nil (quote user)) t))')
+        if answered != 't':
+            raise RuntimeError(f'the colour question {asked} was no longer pending')
         a.idle(sid, 300)
         themed('idle')
         return {'ok': True, 'shots': shots}

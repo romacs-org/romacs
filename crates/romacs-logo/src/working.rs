@@ -4,9 +4,10 @@
 //!
 //! Idle, the thread lies slack and still; running, a wave travels along
 //! it, and a bright bead rides it, a step for each piece of progress the
-//! work reports (its beats); waiting on its user, it is
-//! taut and pulses; failed, it is cut.  A frame is a pure function of the
-//! work's state, its beats, the thread's colour and the seconds of motion.
+//! work reports (its beats); waiting on its user, it is taut and pulses
+//! toward the text's colour, never dimmer than its own; failed, it is
+//! cut.  A frame is a pure function of the work's state, its beats, the
+//! thread's colour and the seconds of motion.
 use crate::Cell;
 
 /// How the work goes.
@@ -38,7 +39,9 @@ pub fn thread(cols: usize, work: Work, beats: u64, colour: u32, bead_colour: u32
         Work::Waiting => (0.0, 1.0),
     };
     let bead = (beats as usize).wrapping_mul(STEP) % cols.max(1);
-    let pulse = 0.55 + 0.45 * (0.5 + 0.5 * (tau * moved).sin());
+    // Waiting: up to half way to the text's colour and back, a second a
+    // beat; both ends as readable as the theme made them.
+    let pulse = 0.25 + 0.25 * (tau * moved).sin();
     (0..cols).map(|cell| {
         // Failed: cut in its middle, when it has room for a cut (as
         // romacs-working-still cuts its still frame).
@@ -57,22 +60,25 @@ pub fn thread(cols: usize, work: Work, beats: u64, colour: u32, bead_colour: u32
         if work == Work::Running && cell == bead {
             return (char::from_u32(0x2800 + u32::from(bits)).unwrap_or(' '), Some(bead_colour));
         }
-        let shade = match work {
-            Work::Running => 1.0,
-            Work::Waiting => pulse,
-            Work::Idle => 0.6,
-            Work::Failed => 1.0,
+        let shown = match work {
+            Work::Waiting => mix(colour, bead_colour, pulse),
+            Work::Idle => scale(colour, 0.6),
+            Work::Running | Work::Failed => colour,
         };
-        (char::from_u32(0x2800 + u32::from(bits)).unwrap_or(' '), Some(scale(colour, shade)))
+        (char::from_u32(0x2800 + u32::from(bits)).unwrap_or(' '), Some(shown))
     }).collect()
 }
 
-/// COLOUR's channels times SHADE, toward white past 1.
+/// COLOUR's channels times SHADE.
 fn scale(colour: u32, shade: f64) -> u32 {
+    mix(0, colour, shade)
+}
+
+/// The colour AMOUNT (0 to 1) of the way from A to B, channel by channel.
+fn mix(a: u32, b: u32, amount: f64) -> u32 {
     let channel = |shift: u32| {
-        let c = f64::from((colour >> shift) & 0xff);
-        let v = if shade <= 1.0 { c * shade } else { c + (255.0 - c) * (shade - 1.0) };
-        (v.round().clamp(0.0, 255.0) as u32) << shift
+        let (x, y) = (f64::from((a >> shift) & 0xff), f64::from((b >> shift) & 0xff));
+        ((x + (y - x) * amount).round().clamp(0.0, 255.0) as u32) << shift
     };
     channel(16) | channel(8) | channel(0)
 }
@@ -93,6 +99,11 @@ mod tests {
         assert!(a.iter().all(|c| c.0 == '⠿'), "taut and solid, as its still frame");
         assert_eq!(a.iter().map(|c| c.0).collect::<Vec<_>>(), b.iter().map(|c| c.0).collect::<Vec<_>>());
         assert_ne!(a[0].1, b[0].1);
+        // It brightens toward the text's colour, never darkens below its own.
+        for moved in [0.0, 0.25, 0.5, 0.75] {
+            let c = thread(1, Work::Waiting, 0, 0x808080, 0xffffff, moved)[0].1.unwrap_or(0);
+            assert!((0x80..=0xc0).contains(&(c & 0xff)), "{c:06x} at {moved}");
+        }
     }
 
     #[test]

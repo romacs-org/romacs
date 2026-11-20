@@ -237,6 +237,16 @@
     (draw :type 'delta :text "root text")
     (should (string-match-p "│ · completed\n[^│]*root text" (romacs-agent-log-tests--transcript)))))
 
+(ert-deftest romacs-agent-log-several-answers-keep-their-questions ()
+  (let ((one (make-hash-table :test #'equal)) (two (make-hash-table :test #'equal)))
+    (puthash "Colour?" "Blue" one)
+    (puthash "Colour?" "Blue" two)
+    (puthash "Size?" "Large" two)
+    (should (string-suffix-p "answered: Blue" (romacs-agent-log--answer-text "user" "allow" "once" nil one)))
+    (let ((text (romacs-agent-log--answer-text "user" "allow" "once" nil two)))
+      (should (string-match-p "Colour\\? → Blue" text))
+      (should (string-match-p "Size\\? → Large" text)))))
+
 (ert-deftest romacs-agent-log-a-block-waits-until-its-answer-is-written ()
   (romacs-agent-log-tests--with
     (puthash "q" t (romacs-agent-approvals session))

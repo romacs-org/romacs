@@ -116,5 +116,20 @@ background near black."
   (romacs-working-tests--theme '((accent . "#d35f5f")) '((error . "#d35f5f") (link . "#d35f5f") (default . "#d45f5e"))
     (should (equal (romacs-working--running-colour) "#d45f5e"))))
 
+;; The bead rides the thread in the text's colour: a running colour that
+;; is the text's own is set apart, its hue kept, and stays readable.
+(ert-deftest romacs-working-running-stands-apart-from-the-bead ()
+  (require 'romacs-theme)
+  (romacs-working-tests--theme nil '((default . "#bebebe"))
+    (let ((apart (romacs-working--readable (romacs-working--apart "#bebebe"))))
+      (should (romacs-working--far-p apart '("#bebebe")))
+      (should (>= (romacs-color-contrast apart "#121212") 4.5)))
+    (should (equal (romacs-working--apart "#5fafd7") "#5fafd7"))))
+
+(ert-deftest romacs-working-reads-any-form-of-colour ()
+  (should (equal (romacs-working--hex "#abc123") "#abc123"))
+  (should (equal (romacs-working--hex "#ffffff") "#ffffff"))
+  (should-not (romacs-working--hex nil)))
+
 (provide 'romacs-working-tests)
 ;;; romacs-working-tests.el ends here

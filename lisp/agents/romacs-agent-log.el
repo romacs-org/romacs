@@ -593,7 +593,12 @@ answer says what was chosen, never that a tool was allowed."
   (if (and (hash-table-p answers) (equal decision "allow"))
       (concat (propertize "✔ " 'face 'romacs-agent-log-allowed)
               (if (equal by "user") "answered: " "answered by Romacs: ")
-              (mapconcat (lambda (question) (format "%s" (gethash question answers))) (hash-table-keys answers) " · "))
+              ;; One question: its answer; more: each question with its own.
+              (let ((one (= (hash-table-count answers) 1)))
+                (mapconcat (lambda (question)
+                             (if one (format "%s" (gethash question answers))
+                               (format "%s → %s" question (gethash question answers))))
+                           (hash-table-keys answers) " · ")))
   (let ((allowed (equal decision "allow")))
     (concat (propertize (if allowed "✔ " "✘ ") 'face (if allowed 'romacs-agent-log-allowed 'romacs-agent-log-denied))
             (pcase by ("user" (if allowed "allowed by you" "denied by you"))
@@ -754,10 +759,11 @@ session does, then the composer's prompt."
                 ('failed 'romacs-agent-log-denied) (_ 'romacs-agent-log-rule))))
     (let* ((label (concat " " (propertize (cdr doing) 'face (list face 'bold)) " "))
            ;; A dim rule after it fences the composer off the transcript,
-           ;; as wide as the window leaves it, never wrapping; none when
-           ;; that is short.
-           (width (if-let* ((window (get-buffer-window (current-buffer) t))) (window-body-width window) 80))
-           (rule (- (min width 100) 1 romacs-agent-log--thread-cols (string-width label))))
+           ;; as wide as the narrowest window showing it leaves it, never
+           ;; wrapping in any; none when that is short.
+           (windows (get-buffer-window-list (current-buffer) nil t))
+           (width (if windows (apply #'min (mapcar #'window-body-width windows)) 80))
+           (rule (- width 1 romacs-agent-log--thread-cols (string-width label))))
       (concat (romacs-working-still romacs-agent-log--thread-cols (romacs-agent-log--work doing))
               label
               (if (>= rule 8) (propertize (make-string rule ?─) 'face 'romacs-agent-log-rule) "")
