@@ -586,8 +586,7 @@ a state root of its own, and a service of its own on `socket'."
             (should (wait (romacs-agent-client-revision (romacs-agent-remote-client source))))
             (setq remote (romacs-agent-remote-chat id))
             (should-not (eq remote local))
-            (should (wait (null (buffer-local-value 'romacs-agent-remote--held remote))))
-            (should (string-search "answer 3" (funcall text remote)))
+            (should (wait (string-search "answer 3" (funcall text remote))))
             (should (equal (funcall text remote) (funcall text local)))
             (run-hook-with-args 'romacs-agent-event-functions session
                                 (list :type 'status :text "live now" :seq 20 :last t :time (float-time)))
@@ -600,7 +599,66 @@ a state root of its own, and a service of its own on `socket'."
                           (romacs-agent-board--render buffer 100)
                           (funcall text buffer))))
               (should (string-search "stored" (board source)))
-              (should (equal (board source) (board romacs-agent-log-local)))))
+              (should (equal (board source) (board romacs-agent-log-local)))
+              ;; Running a tool: what it runs and how long, as drawn here.
+              (setf (romacs-agent-state session) 'running (romacs-agent-activity session) "Grep"
+                    (romacs-agent-turn-start session) (- (float-time) 75))
+              (run-hook-with-args 'romacs-agent-event-functions session
+                                  (list :type 'status :text "working" :seq 21 :last t :time (float-time)))
+              (should (wait (equal (gethash "activity" (gethash id (romacs-agent-client-rows (romacs-agent-remote-client source))))
+                                   "Grep")))
+              (should (string-search "Grep" (board source)))
+              (should (equal (board source) (board romacs-agent-log-local)))
+              ;; Shown, not acted on: no command of this editor's reaches it.
+              (let ((romacs-agent-board-source source))
+                (with-current-buffer (romacs-agent-board--buffer)
+                  (goto-char (point-min))
+                  (romacs-agent-board-next 2)
+                  (should-error (romacs-agent-board-settle) :type 'user-error)
+                  (should-error (romacs-agent-board-settle-finished) :type 'user-error)
+                  (should-error (romacs-agent-board-new) :type 'user-error)))))
+        (romacs-agent-remote-disconnect)
+        (kill-buffer local)
+        (when remote (kill-buffer remote))))))
+
+(ert-deftest romacs-agent-service-a-remote-chat-reads-all-it-is-told ()
+  ;; A remote chat is drawn whole when its history comes in replies cut
+  ;; short; its earlier turns are read as the local chat's are; killed,
+  ;; it follows the session no longer.
+  (require 'romacs-agent-remote)
+  (romacs-agent-service-tests--with-stored
+    (romacs-agent-service-start socket)
+    (let* ((romacs-agent-remote--source nil) (romacs-agent-log-turns 1)
+           (source (romacs-agent-remote-connect socket))
+           (client (romacs-agent-remote-client source))
+           (local (romacs-agent-log-chat session))
+           (remote nil)
+           (text (lambda (buffer) (with-current-buffer buffer (buffer-substring-no-properties (point-min) (point-max))))))
+      (unwind-protect
+          (progn
+            (should (wait (romacs-agent-client-revision client)))
+            (let ((romacs-agent-service--history-bytes 1))
+              (setq remote (romacs-agent-remote-chat id))
+              (should (wait (string-search "answer 3" (funcall text remote)))))
+            (should (string-search "earlier turns" (funcall text remote)))
+            (should (equal (funcall text remote) (funcall text local)))
+            (with-current-buffer local (romacs-agent-log-earlier))
+            (with-current-buffer remote (romacs-agent-log-earlier))
+            (should (wait (string-search "answer 2" (funcall text remote))))
+            (should (equal (funcall text remote) (funcall text local)))
+            ;; The connection gone, the chat says so; connected again, it
+            ;; is drawn afresh.
+            (romacs-agent-client-close client)
+            (should (wait (string-search "connection ended" (funcall text remote))))
+            (setq client (romacs-agent-remote-client (romacs-agent-remote-connect socket)))
+            (should (wait (not (string-search "connection ended" (funcall text remote)))))
+            (should (wait (string-search "answer 3" (funcall text remote))))
+            (with-current-buffer local (romacs-agent-log--clear) (romacs-agent-log-source-fill romacs-agent-log-local session))
+            (should (equal (funcall text remote) (funcall text local)))
+            (kill-buffer remote)
+            (setq remote nil)
+            (should-not (gethash id (romacs-agent-client-follows client)))
+            (should (wait (null (romacs-agent-service--subscriptions id)))))
         (romacs-agent-remote-disconnect)
         (kill-buffer local)
         (when remote (kill-buffer remote))))))

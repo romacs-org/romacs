@@ -49,7 +49,8 @@ whether another must follow it (AGAIN: t, or `whole' for all the list)."
   (pending (make-hash-table :test #'eql))
   (next 0)
   watch again
-  (sessions (make-hash-table :test #'equal)))
+  (sessions (make-hash-table :test #'equal))
+  (follows (make-hash-table :test #'equal)))
 
 (defun romacs-agent-client--instance ()
   (or romacs-agent-client-instance
@@ -86,13 +87,16 @@ whether another must follow it (AGAIN: t, or `whole' for all the list)."
   (romacs-agent-rpc-close (romacs-agent-client-rpc client)))
 
 (defun romacs-agent-client--sentinel (process _event)
-  "The connection ended: every request waiting on it is told so."
+  "The connection ended: every request waiting on it is told so, and so is
+whatever follows a session through it."
   (unless (process-live-p process)
     (when-let* ((client (process-get process 'romacs-agent-client)))
       (let ((callbacks (hash-table-values (romacs-agent-client-pending client))))
         (clrhash (romacs-agent-client-pending client))
         (dolist (callback callbacks)
-          (ignore-errors (funcall callback nil (romacs-agent-client--gone))))))))
+          (ignore-errors (funcall callback nil (romacs-agent-client--gone)))))
+      (dolist (id (hash-table-keys (romacs-agent-client-follows client)))
+        (run-hook-with-args 'romacs-agent-client-follow-functions client id '(ended))))))
 
 (defun romacs-agent-client--gone ()
   (romacs-agent-rpc-object "code" -32603 "message" "The service connection ended"
@@ -288,6 +292,139 @@ units are not to be joined to that history."
       (let ((request (copy-hash-table params)))
         (puthash "id" id request)
         (romacs-agent-client-request client "agents/session.history" request #'part)))))
+
+;;; Following a session
+
+;; A session followed is drawn whole and kept whole: its units in order,
+;; each once, whatever the connection misses read as history.  Each open,
+;; the first and one to recover, is a generation: what it reads is drawn
+;; afresh, and a reply of an earlier generation is dropped.  While
+;; history is read, the live units that come are held, then applied.
+;; History read under another epoch or adapter than the open's, or a
+;; reset, opens the session again.
+
+(defvar romacs-agent-client-follow-functions nil
+  "Functions called with a client, a session's id and what came of
+following it: (drawn UNITS FROM), all of it to draw afresh, its units
+beginning at seq FROM (nil, at its start); (more UNITS), units that
+follow those drawn; (row ROW), its row now; (failed ERROR), not
+followed; (ended), the connection gone.")
+
+(cl-defstruct (romacs-agent-client--follow (:constructor romacs-agent-client--follow-make) (:copier nil))
+  "A session followed: the TURNS and RECORDS its drawing begins with, the
+GENERATION of its open, the CURSOR the open answered (its epoch and
+adapter what history must be read under), the SEQ of the last record
+drawn, and while history is read (PULLING), the live notices HELD,
+newest first."
+  turns records (generation 0) cursor (seq 0) pulling held)
+
+(defun romacs-agent-client-follow (client id turns records)
+  "Follow session ID on CLIENT, drawn from its last TURNS turns, no more
+than RECORDS records: `romacs-agent-client-follow-functions' is told."
+  (puthash id (romacs-agent-client--follow-make :turns turns :records records) (romacs-agent-client-follows client))
+  (romacs-agent-client-open client id))
+
+(defun romacs-agent-client-unfollow (client id)
+  "Stop following session ID on CLIENT."
+  (when (gethash id (romacs-agent-client-follows client))
+    (remhash id (romacs-agent-client-follows client))
+    (when (romacs-agent-client-live-p client) (romacs-agent-client-close-session client id))))
+
+(defun romacs-agent-client--tell (client id notice)
+  (run-hook-with-args 'romacs-agent-client-follow-functions client id notice))
+
+(defun romacs-agent-client--followed (client id notice)
+  "What came of session ID's open on CLIENT, applied to its following."
+  (when-let* ((follow (gethash id (romacs-agent-client-follows client))))
+    (pcase notice
+      (`(opened ,reply)
+       (let ((generation (cl-incf (romacs-agent-client--follow-generation follow))))
+         (setf (romacs-agent-client--follow-cursor follow) (gethash "cursor" reply)
+               (romacs-agent-client--follow-seq follow) 0
+               (romacs-agent-client--follow-pulling follow) t
+               (romacs-agent-client--follow-held follow) nil)
+         (when (hash-table-p (gethash "row" reply)) (romacs-agent-client--tell client id (list 'row (gethash "row" reply))))
+         (romacs-agent-client--read
+          client id follow generation 'drawn (gethash "seq" (gethash "cursor" reply))
+          (romacs-agent-rpc-object "upto" (gethash "seq" (gethash "cursor" reply))
+                                   "turns" (romacs-agent-client--follow-turns follow)
+                                   "records" (romacs-agent-client--follow-records follow)))))
+      (`(event ,params)
+       (if (romacs-agent-client--follow-pulling follow)
+           (push params (romacs-agent-client--follow-held follow))
+         (romacs-agent-client--apply client id follow params)))
+      (`(changed ,params) (romacs-agent-client--tell client id (list 'row (gethash "row" params))))
+      (`(failed ,error)
+       (remhash id (romacs-agent-client-follows client))
+       (romacs-agent-client--tell client id (list 'failed error))))))
+
+(add-hook 'romacs-agent-client-session-functions #'romacs-agent-client--followed)
+
+(defun romacs-agent-client--apply (client id follow params)
+  "Apply PARAMS, a live `agents/event' of session ID, to its FOLLOW: a gap
+read as history, a unit past what is drawn passed on."
+  (let ((gap (gethash "gap" params)) (seq (gethash "seq" params)))
+    (cond
+     ((hash-table-p gap)
+      (let ((after (max (romacs-agent-client--follow-seq follow) (gethash "after" gap))) (upto (gethash "upto" gap)))
+        (when (< after upto)
+          (setf (romacs-agent-client--follow-pulling follow) t)
+          (romacs-agent-client--read client id follow (romacs-agent-client--follow-generation follow) 'more upto
+                                     (romacs-agent-rpc-object "after" after "upto" upto)))))
+     ((and (integerp seq) (> seq (romacs-agent-client--follow-seq follow)))
+      (setf (romacs-agent-client--follow-seq follow) seq)
+      (romacs-agent-client--tell client id (list 'more (list params)))))))
+
+(defun romacs-agent-client--read (client id follow generation kind upto params &optional earlier)
+  "Read session ID's history PARAMS asks for, to UPTO, a reply that stops
+short read on from where it stopped; then tell it as KIND (`drawn' or
+`more') and apply the live notices held.  EARLIER is what was read
+before it stopped, (UNITS . FROM).  A reset, or history of another epoch
+or adapter, opens it again."
+  (romacs-agent-client-history
+   client id params
+   (lambda (result)
+     (when (and (eq (gethash id (romacs-agent-client-follows client)) follow)
+                (= generation (romacs-agent-client--follow-generation follow)))
+       (pcase result
+         (`(error ,error)
+          (remhash id (romacs-agent-client-follows client))
+          (romacs-agent-client--tell client id (list 'failed error)))
+         (`(,_ ,_ t ,_) (romacs-agent-client-open client id))
+         (`(,read ,cursor ,_ ,from)
+          (let ((units (append (car earlier) read)) (from (if earlier (cdr earlier) from))
+                (stopped (gethash "seq" cursor)))
+            (if (and (integerp stopped) (< stopped upto) read)
+                (romacs-agent-client--read client id follow generation kind upto
+                                           (romacs-agent-rpc-object "after" stopped "upto" upto) (cons units from))
+              (setf (romacs-agent-client--follow-seq follow) (max upto (romacs-agent-client--follow-seq follow)))
+              (romacs-agent-client--tell client id (if (eq kind 'drawn) (list 'drawn units from) (list 'more units)))
+              (romacs-agent-client--release client id follow)))))))
+   (romacs-agent-client--follow-cursor follow)))
+
+(defun romacs-agent-client--release (client id follow)
+  "Apply the live notices FOLLOW held while its history was read, in
+order, until one reads history again: those after it held for then."
+  (let ((held (reverse (romacs-agent-client--follow-held follow))))
+    (setf (romacs-agent-client--follow-pulling follow) nil (romacs-agent-client--follow-held follow) nil)
+    (while held
+      (romacs-agent-client--apply client id follow (pop held))
+      (when (romacs-agent-client--follow-pulling follow)
+        (setf (romacs-agent-client--follow-held follow) (reverse held) held nil)))))
+
+(defun romacs-agent-client-earlier (client id upto turns records callback)
+  "Read session ID's TURNS turns up to seq UPTO, no more than RECORDS, on
+CLIENT, under the epoch it is followed by: CALLBACK is called with
+\(UNITS FROM), or (error ERROR), or (reset) when that history is gone."
+  (let ((follow (gethash id (romacs-agent-client-follows client))))
+    (romacs-agent-client-history
+     client id (romacs-agent-rpc-object "upto" upto "turns" turns "records" records)
+     (lambda (result)
+       (pcase result
+         (`(error ,_) (funcall callback result))
+         (`(,_ ,_ t ,_) (funcall callback '(reset)))
+         (`(,units ,_ ,_ ,from) (funcall callback (list units from)))))
+     (and follow (romacs-agent-client--follow-cursor follow)))))
 
 (provide 'romacs-agent-client)
 ;;; romacs-agent-client.el ends here

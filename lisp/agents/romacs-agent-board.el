@@ -70,15 +70,20 @@ the store keeps them (`romacs-agent-store-folded').")
 \(`romacs-agent-store-unloaded'), by id, and their children: (BY-ID
 . CHILDREN), CHILDREN a table from a parent's id to them.")
 
+(defun romacs-agent-board--own-p ()
+  "Whether the board shows this editor's own sessions, which its session
+commands act on and its registry knows (`romacs-agent-board-source')."
+  (romacs-agent-log-source-commands-p romacs-agent-board-source))
+
 (defun romacs-agent-board--parent (session)
   "The known session SESSION was delegated by, or nil."
   (let ((parent (plist-get (romacs-agent-options session) :parent)))
-    (or (romacs-agent-loaded parent)
+    (or (and (romacs-agent-board--own-p) (romacs-agent-loaded parent))
         (and romacs-agent-board--unloaded (gethash parent (car romacs-agent-board--unloaded))))))
 
 (defun romacs-agent-board--children (session)
   "The sessions SESSION delegated, loaded or not."
-  (append (romacs-agent-children session)
+  (append (and (romacs-agent-board--own-p) (romacs-agent-children session))
           (and romacs-agent-board--unloaded
                (gethash (romacs-agent-id session) (cdr romacs-agent-board--unloaded)))))
 
@@ -586,7 +591,14 @@ another buffer now runs the board's window hooks too."
 
 ;;; Commands
 
+(defun romacs-agent-board--acting ()
+  "Refuse, unless this editor acts on the sessions the board shows."
+  (unless (romacs-agent-board--own-p)
+    (user-error "These sessions are another machine's: shown, not acted on from here")))
+
 (defun romacs-agent-board--session ()
+  "The session on this line, to act on."
+  (romacs-agent-board--acting)
   (romacs-agent-board--live (or (plist-get (romacs-agent-board--row) :session) (user-error "No thread on this line"))))
 
 (defun romacs-agent-board-next (&optional n)
@@ -771,6 +783,7 @@ its next activity.  A settled one, bring back."
 (defun romacs-agent-board-settle-finished ()
   "Settle every thread shown with nothing going on."
   (interactive nil romacs-agent-board-mode)
+  (romacs-agent-board--acting)
   (let ((finished (romacs-agent-board--finished (romacs-agent-board--shown-rows))))
     (unless finished (user-error "No finished threads"))
     (when (y-or-n-p (format "Settle %d finished thread%s? " (length finished) (if (cdr finished) "s" "")))
@@ -784,6 +797,7 @@ its next activity.  A settled one, bring back."
 (defun romacs-agent-board-new ()
   "Start a new thread, in this row's project."
   (interactive nil romacs-agent-board-mode)
+  (romacs-agent-board--acting)
   (let* ((row (romacs-agent-board--row))
          (cwd (cond ((plist-get row :session) (romacs-agent-cwd (plist-get row :session)))
                     ((plist-get row :cwd))

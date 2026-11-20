@@ -377,14 +377,15 @@ JSON-RPC errors with numeric codes and =data.kind=:
   {"id": "...", "title": "...", "cwd": "...", "project": "...", "parent": null,
    "harness": "claude", "provider": "claude", "model": "...", "effort": null,
    "state": "starting|running|waiting-approval|idle|detached|unstarted|ended",
-   "key": "working", "pending": 0, "queued": 0,
-   "last_time": 0.0, "cost": null, "context_used": null, "context_window": null,
+   "key": "working", "pending": 0, "queued": 0, "activity": null, "turn_start": null,
+   "input_seq": 0, "done_seq": 0, "seen_seq": null, "settled_seq": null, "last_time": 0.0, "cost": null, "context_used": null, "context_window": null,
    "children": 0}
   #+end_src
   Every field is present; =null= means unknown.  =key= is the session's
   state as this machine's board shows it (=romacs-agent-board--key=),
   made by the service alone: a client draws it, never derives it.
-  =pending= counts the session's pending requests.
+  =pending= counts the session's pending requests.  The seqs are those a
+  store row keeps: a client makes its session of a row as a row's is made.
 
 ** One session
 Live state and history are separate.  Live state is small, and is
