@@ -299,10 +299,14 @@ fn pump<S: Read + Write>(ws: &mut WebSocket<S>, local: UnixStream, carry: fn(&st
         }
     }
     // What the local end sent before it ended goes still, the WebSocket's
-    // end or a write that failed whatever.
+    // end or a write that failed whatever: a queue's worth at most, each
+    // waited for a poll, so a service that goes on sending ends here too.
     refill();
-    while let Ok(Some(line)) = lines.try_recv() {
-        if ws.send(Message::text(line)).is_err() { break }
+    for _ in 0..QUEUE {
+        match lines.recv_timeout(POLL) {
+            Ok(Some(line)) => { if ws.send(Message::text(line)).is_err() { break } }
+            _ => break,
+        }
     }
     let _ = writing.shutdown(std::net::Shutdown::Both);
     drop(lines);
@@ -570,7 +574,7 @@ mod tests {
 
     #[test]
     fn the_runtime_directory_is_read_as_its_components_spell_it() {
-        assert_eq!(runtime_dir_of(Some("/run/user/1000/".into())).unwrap(), PathBuf::from("/run/user/1000"));
+        assert_eq!(runtime_dir_of(Some("/run/user/1000/".into())).unwrap().as_os_str(), "/run/user/1000");
         assert!(runtime_dir_of(Some("relative".into())).is_err());
         assert!(runtime_dir_of(None).is_err());
     }
