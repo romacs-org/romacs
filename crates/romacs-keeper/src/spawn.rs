@@ -6,13 +6,11 @@
 //! carries everything the child's start depends on, whole: nothing is
 //! inherited from the spawner but what the spec names.
 //!
-//! Descriptors, the pty, the pidfd and the reaping of a failed start go
-//! through rustix. Four things stay direct C library calls, because no
-//! crate in the lock file covers them safely: `fork` and everything the
-//! child does before its `execve` ([`Plan::child`]); `waitid` with
-//! `WNOWAIT` over any child ([`wait`]), whose answer must name the pid,
-//! which rustix's `WaitIdStatus` does not give; and a signal that rustix's
-//! `Signal` cannot name ([`signal`]): realtime signals and 0.
+//! Descriptors, the pty, the pidfd, waits and reaping go through rustix.
+//! Two things stay direct C library calls, because no crate in the lock
+//! file covers them safely: `fork` and everything the child does before
+//! its `execve` ([`Plan::child`]), and a signal that rustix's `Signal`
+//! cannot name ([`signal`]): realtime signals and 0.
 
 use std::ffi::CString;
 use std::io;
@@ -20,7 +18,7 @@ use std::os::fd::{AsFd, AsRawFd, OwnedFd, RawFd};
 
 use romacs_record::{Error, Reader, Writer};
 use rustix::io::Errno;
-use rustix::process::{Pid, Signal};
+use rustix::process::{Pid, Signal, WaitId, WaitIdOptions, WaitIdStatus, WaitOptions, WaitStatus};
 use rustix::pty::OpenptFlags;
 
 use crate::proto::count;
@@ -200,16 +198,7 @@ pub fn spawn(spec: &Spec) -> io::Result<Child> {
     let floor = theirs.iter().map(|(fd, _)| *fd).max().unwrap_or(2).max(2) + 1;
     let pty = spec.fds.iter().zip(&theirs).find(|((_, end), _)| *end == End::Pty).map(|(_, (_, fd))| fd.as_raw_fd());
     let plan = Plan { spec, cwd: &cwd, argv: &argv, env: &env, theirs: &theirs, failure: failure.as_raw_fd(), floor, pty };
-    // SAFETY: fork in a possibly threaded process: the child runs only
-    // `Plan::child`, which makes system calls alone (no allocation, no
-    // lock, no unwinding) on memory prepared above, and ends in execve or
-    // _exit. No crate in the lock file forks safely: rustix's fork is part
-    // of its unstable runtime API, and std's spawn cannot hand the child
-    // exactly the spec (its descriptors by number, its controlling pty).
-    let raw = os(unsafe { libc::fork() })?;
-    if raw == 0 {
-        plan.child();
-    }
+    let raw = plan.fork()?;
     drop((failure, theirs));
     let child = pid(raw)?;
     // PID is this process's unreaped child, so the number cannot have been reused.
@@ -247,6 +236,23 @@ struct Plan<'a> {
 }
 
 impl Plan<'_> {
+    /// Fork: the child becomes the program ([`Self::child`]), and the
+    /// parent gets its pid.
+    #[expect(unsafe_code, reason = "fork: see the SAFETY comment")]
+    fn fork(&self) -> io::Result<i32> {
+        // SAFETY: fork in a possibly threaded process: the child runs only
+        // `Plan::child`, which makes system calls alone (no allocation, no
+        // lock, no unwinding) on memory prepared before the fork, and ends
+        // in execve or _exit. No crate in the lock file forks safely:
+        // rustix's fork is part of its unstable runtime API, and std's
+        // spawn cannot hand the child exactly the spec (its descriptors by
+        // number, its controlling pty).
+        // UNSAFE(rustix's fork is unsafe; std's spawn cannot follow the spec)
+        let raw = os(unsafe { libc::fork() })?;
+        if raw == 0 { self.child(); }
+        Ok(raw)
+    }
+
     /// Become the program, or write the errno of what failed to the report
     /// pipe and exit.
     ///
@@ -259,6 +265,7 @@ impl Plan<'_> {
     /// here), and rustix's signal disposition, signal mask and `execve`
     /// calls are unsafe runtime functions, its resource limits a closed
     /// enum where the spec carries a number.
+    #[expect(unsafe_code, reason = "the child's system calls: see the SAFETY comment")]
     fn child(&self) -> ! {
         let mut report = self.failure;
         macro_rules! fail { ($errno:expr) => {{
@@ -272,6 +279,7 @@ impl Plan<'_> {
         // prepared before the fork and descriptors this process owns. The
         // pointers given to execve are NUL-terminated strings and
         // null-terminated arrays that outlive the call.
+        // UNSAFE(raw descriptor moves, signal dispositions and execve: rustix's are unsafe)
         unsafe {
             for signal in 1..=64 {
                 libc::signal(signal, libc::SIG_DFL);
@@ -334,6 +342,18 @@ pub enum Status {
 }
 
 impl Status {
+    fn of_wait(status: WaitStatus) -> Self {
+        if let Some(code) = status.exit_status() { return Status::Exited(code); }
+        if let Some(signal) = status.terminating_signal() { return Status::Signaled(signal); }
+        status.stopping_signal().map_or(Status::Continued, Status::Stopped)
+    }
+
+    fn of_waitid(status: &WaitIdStatus) -> Self {
+        if let Some(code) = status.exit_status() { return Status::Exited(code); }
+        if let Some(signal) = status.terminating_signal() { return Status::Signaled(signal); }
+        status.stopping_signal().or(status.trapping_signal()).map_or(Status::Continued, Status::Stopped)
+    }
+
     #[must_use]
     pub fn ended(self) -> bool { matches!(self, Status::Exited(_) | Status::Signaled(_)) }
 
@@ -363,46 +383,22 @@ impl Status {
     }
 }
 
-/// How `waitid` names whom to wait for.
-#[derive(Clone, Copy)]
-pub enum Whom<'a> {
-    /// Any child, left waitable: a look at who changed.
-    PeekAny,
-    Child(&'a OwnedFd),
-    Pid(i32),
+/// The change of state of the child PIDFD names, if one is pending. Never
+/// blocks; an exit reaps the child.
+#[must_use]
+pub fn wait(pidfd: &OwnedFd) -> Option<Status> {
+    let options = WaitIdOptions::NOHANG | WaitIdOptions::EXITED | WaitIdOptions::STOPPED | WaitIdOptions::CONTINUED;
+    rustix::process::waitid(WaitId::PidFd(pidfd.as_fd()), options).ok().flatten().map(|status| Status::of_waitid(&status))
 }
 
-/// A child's change of state, if one is pending: its pid and new status.
-/// Never blocks. With [`Whom::Child`] and [`Whom::Pid`] the change is
-/// consumed, and an exit reaps the child.
-///
-/// A direct `waitid`: the peek over any child must learn the pid it found,
-/// and rustix's `WaitIdStatus` does not carry one. One call serves all
-/// three, so a wait has one mechanism.
+/// Any child's change of state, if one is pending: its pid and new status.
+/// Never blocks; an exit reaps the child. Only for a process that is the
+/// parent of every child it may meet (the keeper): elsewhere it would take
+/// a change another part of the process waits for.
 #[must_use]
-pub fn wait(whom: Whom<'_>) -> Option<(i32, Status)> {
-    let (kind, id, peek) = match whom {
-        Whom::PeekAny => (libc::P_ALL, 0, libc::WNOWAIT),
-        Whom::Child(pidfd) => (libc::P_PIDFD, pidfd.as_raw_fd().cast_unsigned(), 0),
-        Whom::Pid(pid) => (libc::P_PID, pid.cast_unsigned(), 0),
-    };
-    // SAFETY: a zeroed siginfo is valid; waitid fills it or leaves si_pid 0.
-    let info = unsafe {
-        let mut info: libc::siginfo_t = std::mem::zeroed();
-        let options = libc::WNOHANG | libc::WEXITED | libc::WSTOPPED | libc::WCONTINUED | peek;
-        if libc::waitid(kind, id, &raw mut info, options) != 0 { return None; }
-        info
-    };
-    // SAFETY: waitid succeeded, so the SIGCHLD fields of the union are set.
-    let (pid, value) = unsafe { (info.si_pid(), info.si_status()) };
-    let status = match info.si_code {
-        _ if pid == 0 => return None,
-        libc::CLD_EXITED => Status::Exited(value),
-        libc::CLD_KILLED | libc::CLD_DUMPED => Status::Signaled(value),
-        libc::CLD_STOPPED | libc::CLD_TRAPPED => Status::Stopped(value),
-        _ => Status::Continued,
-    };
-    Some((pid, status))
+pub fn wait_any() -> Option<(i32, Status)> {
+    let options = WaitOptions::NOHANG | WaitOptions::UNTRACED | WaitOptions::CONTINUED;
+    rustix::process::waitpid(None, options).ok().flatten().map(|(pid, status)| (pid.as_raw_nonzero().get(), Status::of_wait(status)))
 }
 
 /// Send SIGNAL to the process PIDFD names, or to its process group when
@@ -424,6 +420,7 @@ pub fn signal(pidfd: &OwnedFd, group: Option<i32>, signal: i32) -> io::Result<()
 /// realtime signal, or 0, which only asks whether the process is there.
 /// rustix makes one only by an unsafe constructor, so the system calls are
 /// made directly.
+#[expect(unsafe_code, reason = "kill and pidfd_send_signal by number: see the SAFETY comment")]
 fn signal_by_number(pidfd: std::os::fd::BorrowedFd<'_>, group: Option<i32>, signal: i32) -> io::Result<()> {
     // A leader is a pid, as for a named signal: never 0, which would name
     // the keeper's own group.
@@ -431,6 +428,7 @@ fn signal_by_number(pidfd: std::os::fd::BorrowedFd<'_>, group: Option<i32>, sign
     // SAFETY: both calls take integers and a null siginfo, no memory of
     // this process. The pidfd names one process for good; the group's
     // leader is the caller's unreaped child.
+    // UNSAFE(rustix makes a signal it does not name only by an unsafe constructor)
     os(unsafe {
         match group {
             Some(leader) => libc::kill(-leader.as_raw_nonzero().get(), signal),
