@@ -58,14 +58,16 @@ fn lead_buffer_list_puts_its_buffers_first() {
 }
 
 /// The order through collections that move every object (forced: every
-/// collection compacts, one at every allocation), with buffers made, buried,
-/// recorded and killed in between.
+/// collection compacts, one every 50 allocations), with buffers made, buried,
+/// recorded and killed in between. The collector's verifier runs at each,
+/// checking that every buffer in the order is held by its name slot.
 #[test]
 fn buffer_order_survives_moving_collections() {
     let mut vm = romacs_vm::Vm::new();
     vm.install_lisp_prelude().unwrap();
     vm.set_gc_moving(true);
-    vm.set_gc_stress(1);
+    vm.set_gc_stress(50);
+    vm.set_gc_verify(true);
     let source = format!(r#"(let* ((names {NAMES}) (log nil)
              (churn (lambda () (dotimes (_ 300) (make-string 10 ?x)) (garbage-collect))))
       (dotimes (i 6) (get-buffer-create (format "bo-%d" i)))

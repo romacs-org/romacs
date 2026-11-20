@@ -37,6 +37,7 @@ impl Vm {
     /// ROOTS: every entry is marked, and every function, region and obarray
     /// symbol is in CODE, REGIONS and SYMBOLS, the mark's own.
     pub(super) fn check_reachable(&mut self, roots: &[Value], code: &[bool], regions: &[bool], symbols: &HashSet<usize>) {
+        self.check_order_named();
         let reached = self.reference_walk(roots);
         let marked = [self.conses.marks().collect::<Vec<_>>(), self.closures.marks().collect(), self.cells.marks().collect(), self.objects.marks().collect()];
         for (t, (reached, marked)) in reached.tables.iter().zip(&marked).enumerate() {
@@ -52,6 +53,17 @@ impl Vm {
         }
         if let Some(slot) = reached.symbols.iter().find(|slot| !symbols.contains(slot)) {
             panic!("the reference marker reached obarray symbol {slot}, which the mark did not");
+        }
+    }
+
+    /// Panic unless every buffer in the buffer list's order is its name
+    /// slot's value (`#:vm2-buffer:NAME`): the order keeps nothing alive, so
+    /// that slot is what holds the buffer (buffer_order.rs).
+    fn check_order_named(&self) {
+        for buffer in self.buffer_order.iter() {
+            let name = self.buffer_state(buffer).ok().and_then(|s| s.name.clone());
+            let held = name.as_ref().and_then(|n| self.names.get(&format!("#:vm2-buffer:{n}"))).is_some_and(|&slot| self.slots[slot].value == buffer);
+            assert!(held, "the buffer order holds {buffer:?} (named {name:?}), which no name slot holds");
         }
     }
 
