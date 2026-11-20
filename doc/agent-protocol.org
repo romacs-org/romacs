@@ -302,6 +302,7 @@ JSON-RPC errors with numeric codes and =data.kind=:
 | -32015 | cid-conflict     | a client id reused with a different command |
 | -32016 | busy             | the session is changing hands (handoff); retry |
 | -32017 | stale            | a continuation token expired; start the call again |
+| -32018 | not-kept         | a command ran, but how it ended was not kept: it may have taken effect |
 | -32603 | internal         | with a message |
 
 ** Generations, revisions and cursors
@@ -563,7 +564,8 @@ paging ever holds live delivery back.
   =unknown= before it takes effect, which waits for that, then its result.  Kept 24 hours, the newest
   10,000 at most, pruned when the editor is idle.
 - *Repeats.*
-  - A repeated =cid= gets the recorded outcome.  One kept =unknown= (the
+  - A repeated =cid= gets the recorded outcome; a start recorded
+    =queued= is read again from its session while it is loaded.  One kept =unknown= (the
     service stopped before its result was kept) is never run again.
   - A =cid= reused with different params is refused (=cid-conflict=).
   - A repeat after its row expired is a new command.

@@ -863,7 +863,7 @@ result was kept), is never run again: its state is unknown."
                         ;; Not kept: said so, as a repeat finds it admitted,
                         ;; its end unknown.
                         (if (equal written '(ok t)) (answer result at json)
-                          (answer (list 'error -32603 "internal" "How the command ended was not kept: its state is unknown"))))
+                          (answer (list 'error -32018 "not-kept" "How the command ended was not kept: it may have taken effect"))))
                       at)))
                  (failed (err)
                    (if (eq (car err) 'romacs-agent-service-error)

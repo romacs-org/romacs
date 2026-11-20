@@ -236,7 +236,9 @@ and REFUSED, when given, called then."
      (lambda (_result error)
        (when error
          (message "%s: %s" method (gethash "message" error))
-         (when refused (funcall refused)))))))
+         ;; One whose end was not kept may have taken effect: not refused.
+         (unless (let ((data (gethash "data" error))) (and (hash-table-p data) (equal (gethash "kind" data) "not-kept")))
+           (when refused (funcall refused))))))))
 
 (cl-defmethod romacs-agent-log-source-send ((source romacs-agent-remote) session text &optional when)
   "Send SESSION TEXT through SOURCE's service, WHEN as the chat says it."
