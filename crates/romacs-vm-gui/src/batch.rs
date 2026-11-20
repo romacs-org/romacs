@@ -193,11 +193,12 @@ fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool) {
     // whole), and the installation's themes, `custom-theme-load-path''s `t':
     // the themes/ of `data-directory', the runtime tree's etc/ (forwarded.rs),
     // which every session loads its stock theme from, wherever
-    // ROMACS_LISP_DIR puts lisp/.
+    // ROMACS_LISP_DIR puts lisp/: canonical, as lisp/ is (`lisp_root`) and
+    // a load names its file, through a symlinked runtime root too.
     let mut runtime = vec![dir.clone()];
     runtime.extend(super::startup::bundled_load_path(&dir).unwrap_or_default());
-    let themes = romacs_vm::host::runtime_root().join("etc/themes");
-    runtime.extend(Some(themes).filter(|themes| themes.is_dir()));
+    let themes = romacs_vm::host::canonicalize(&romacs_vm::host::runtime_root().join("etc/themes"));
+    runtime.extend(themes.ok().filter(|themes| themes.is_dir()));
     let environment = compile_environment(&store);
     let recipe = recipe(&dir);
     let worlds = store.join("worlds");
