@@ -85,8 +85,9 @@ whether another must follow it (AGAIN: t, or `whole' for all the list)."
 (defun romacs-agent-client-close (client)
   "Close CLIENT's connection to its service, dropping what it held unsent.
 Closing ends the connection at once: its sentinel calls each request
-still waiting on a reply with the `disconnected' error, and tells each
-session followed through it that it ended."
+still waiting on a reply with the `disconnected' error, then runs
+`romacs-agent-client-follow-functions' with (ended) for each session
+followed through it."
   (romacs-agent-rpc-close (romacs-agent-client-rpc client)))
 
 (defun romacs-agent-client--sentinel (process _event)
@@ -109,8 +110,9 @@ whatever follows a session through it."
   "Ask CLIENT's service METHOD with PARAMS; CALLBACK is called with the
 result and nil, or nil and the error, once its reply comes; with the
 `disconnected' error at once when CLIENT is not live, or when the
-connection ends before the reply.  A request that cannot be sent (over the
-message limit) signals, and nothing waits on it.  The request's id."
+connection ends before the reply (as it does when its send queue
+overflows).  A request over the message limit signals, and nothing waits
+on it.  The request's id."
   (let ((id (cl-incf (romacs-agent-client-next client))))
     (if (not (romacs-agent-client-live-p client))
         (funcall callback nil (romacs-agent-client--gone))
@@ -251,8 +253,9 @@ earlier one ignored, a later one (a gap) or a stale notice watched again."
 
 (defun romacs-agent-client-open (client id)
   "Open session ID on CLIENT.  `romacs-agent-client-session-functions'
-is told (opening), then (opened REPLY) or (failed ERROR), then each
-notice of the session whose revision is the one after the revision held.
+is told (opening), then (opened REPLY) or (failed ERROR) unless it is
+closed or opened again first, then each notice of the session whose
+revision is the one after the revision held.
 A notice that comes while it opens is dropped, and one that skips a
 revision opens it again."
   (let ((asked (list 'opening)))
@@ -269,8 +272,9 @@ revision opens it again."
            (run-hook-with-args 'romacs-agent-client-session-functions client id (list 'opened result))))))))
 
 (defun romacs-agent-client-close-session (client id)
-  "Stop following session ID on CLIENT: forget its open here, and ask the
-service to send this connection no more of it."
+  "End this connection's subscription to session ID on CLIENT: forget its
+open here, and ask the service to send no more of it.  A session followed
+stays followed: `romacs-agent-client-unfollow' ends that."
   (remhash id (romacs-agent-client-sessions client))
   (romacs-agent-client-request client "agents/session.close" (romacs-agent-rpc-object "id" id) #'ignore))
 
@@ -299,7 +303,9 @@ history is read, against the open's."
 
 (defun romacs-agent-client-history (client id params callback &optional expect)
   "Ask CLIENT's service for session ID's history (`agents/session.history'
-with PARAMS: upto, and after, or turns and records), every page of it;
+with PARAMS: upto, with after, or with turns and records, both optional),
+every page of it; a reply may still stop short of upto, its CURSOR saying
+where, for the caller to read on from;
 CALLBACK is called with (UNITS CURSOR RESET FROM), UNITS the record units
 in order (nil on a reset), FROM, for a read with no after that leaves
 earlier records out, the seq its records begin at (a record with nothing

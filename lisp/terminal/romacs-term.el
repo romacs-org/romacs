@@ -47,8 +47,8 @@ is unset or empty.")
 (defvar romacs-term--closing nil)
 (defvar romacs-term-session nil
   "The terminal session a terminal buffer shows, local to it: nil in any
-other buffer, while a terminal buffer is being made or restored, and once
-it is killed.  It stays after the program exits: `romacs-term-running-p'
+other buffer, in a terminal buffer until its session is attached, and
+once it is killed.  It stays after the program exits: `romacs-term-running-p'
 says whether the program runs.")
 (defvar kill-ring nil)
 
@@ -56,7 +56,8 @@ says whether the program runs.")
   '("C-c" "C-x" "C-u" "C-g" "C-h" "C-l" "M-x" "M-o" "C-y" "M-y" "C-v" "M-v")
   "Keys that keep their Emacs bindings in a terminal running a program.
 Each is a `kbd' string.  While the window follows the cursor on the normal
-screen, every other key goes to the program, but for
+screen, every other key not bound in `romacs-term-mode-map' goes to the
+program, but for
 `romacs-term-shell-exceptions' and `romacs-term-history-map' at the
 shell's prompt; the alternate screen keeps `romacs-term-alternate-exceptions'
 instead.  After changing this outside Customize, run
@@ -69,7 +70,8 @@ prompt.  They move point, as in shell-mode, which leaves the cursor for
 the scrollback until typing returns; the shell's history is on M-p and
 M-n (`romacs-term-history-map'), and Up and Down.  A program the shell runs
 in the foreground (a REPL, a pager, fzf) gets them while the window follows
-the cursor.  Each is a `kbd' string.  After changing this outside Customize, run
+the cursor on the normal screen; the alternate screen keeps only
+`romacs-term-alternate-exceptions'.  Each is a `kbd' string.  After changing this outside Customize, run
 `romacs-term-update-keymaps'.")
 
 (defvar romacs-term-alternate-exceptions '("C-x" "M-x" "C-g")
@@ -120,9 +122,11 @@ the generated bindings (its third element, `romacs-term--passthrough-base').")
     (define-key map [?\M-p] 'romacs-term-previous-input)
     (define-key map [?\M-n] 'romacs-term-next-input)
     map)
-  "Keys that recall the shell's history.  They are bound while the shell
-has the terminal, and in a window away from the cursor whatever runs; a
-program the shell runs gets them while the window follows the cursor.")
+  "Keys that recall the shell's history.  They are bound on the normal
+screen while the shell has the terminal, and in a window away from the
+cursor; there they put the window back on the cursor and send Up or Down
+to whatever runs.  A program the shell runs gets them while the window
+follows the cursor.")
 (defvar romacs-term--shell
   (list 'keymap romacs-term-mode-map romacs-term-history-map (make-sparse-keymap))
   "The shell route's keymap: `romacs-term-mode-map', whose bindings win, and
@@ -480,8 +484,10 @@ exited.  Any other buffer of that name is someone's text: a `user-error'."
 `default-directory'.  With a numeric prefix ARG N, *romacs-term*<N> instead;
 with \\[universal-argument] alone, a new terminal.  A terminal whose program
 has exited starts afresh.
-While the window follows the cursor, keys go to the program, except
-`romacs-term-keymap-exceptions'.  C-c C-c
+While the window follows the cursor on the normal screen, keys go to the
+program, except `romacs-term-keymap-exceptions' and the keys of
+`romacs-term-mode-map'; the shell's prompt and the alternate screen keep
+the keys their own lists name.  C-c C-c
 sends Ctrl-C; C-y and M-y send kills; M-p and M-n recall the shell's
 history.  C-c C-j, moving point off the cursor, or scrolling back makes the
 window a plain Emacs buffer until you type or press C-c C-j again."

@@ -43,8 +43,9 @@ obsolete, with no current name or for an older major version."
 
 (defun romacs-commands--predicate (buffer)
   "M-x's predicate in BUFFER, as simple.el's: a command that
-`read-extended-command-predicate' accepts.  A predicate that signals is
-taken to accept, its error shown, unless `debug-on-error' is set."
+`read-extended-command-predicate' accepts (any command, when it is nil).
+A predicate that signals an error is taken to accept, the error shown
+(`condition-case-unless-debug')."
   (lambda (sym)
     (and (commandp sym)
          (cond ((null read-extended-command-predicate))

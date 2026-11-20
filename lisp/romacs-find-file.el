@@ -17,10 +17,10 @@
 (defvar auto-mode-alist '(("\\.el\\'" . emacs-lisp-mode)))
 (defvar romacs-find-file-mode-function 'romacs-find-file-set-auto-mode
   "Function called with no argument in a buffer `romacs-find-file-noselect'
-has just read its file into, before `find-file-hook' (and, for a missing
-file, after `find-file-not-found-functions'), to choose the buffer's mode;
-nil leaves the mode as it is.  A file already visited is not read again,
-and this is not called.")
+newly visits, after its file is read (for a missing file, after
+`find-file-not-found-functions') and before `find-file-hook', to choose
+the buffer's mode; nil leaves the mode as it is.  A file already visited
+is not visited again, and this is not called.")
 
 (defun romacs-find-file--check-syntax (filename)
   "Reject unsupported filename syntax before any filesystem access."
