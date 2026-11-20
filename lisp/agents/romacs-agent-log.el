@@ -687,7 +687,8 @@ unless a note said who gave it, that it was answered."
                                                     (and (plist-get event :interrupted) "interrupted")
                                                     (when-let* ((s (plist-get event :duration))) (format "%ds" (round s)))
                                                     (when-let* ((c (plist-get event :cost))) (format "$%.2f" c))
-                                                    (format-time-string "%H:%M" (plist-get event :time))))
+                                                    ;; A transcript's turns may not say when they ended.
+                                                    (when-let* ((time (plist-get event :time))) (format-time-string "%H:%M" time))))
                                     " · "))
                        'face 'romacs-agent-log-rule))))
 

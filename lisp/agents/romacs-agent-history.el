@@ -646,11 +646,6 @@ for SESSION: its end, from a prompt on."
 
 (defvar-local romacs-agent-history--item nil "The transcript this view shows.")
 
-(defvar-keymap romacs-agent-history-mode-map
-  :doc "Keys of a harness transcript's view."
-  :parent special-mode-map
-  "r" #'romacs-agent-history-resume-this)
-
 (defvar-keymap romacs-agent-history-text-map
   :doc "Keys of a harness transcript's text: a chat's, but read-only."
   :parent romacs-agent-log-transcript-map
@@ -660,6 +655,10 @@ for SESSION: its end, from a prompt on."
   "e" #'undefined
   "q" #'quit-window
   "r" #'romacs-agent-history-resume-this)
+
+(defvar-keymap romacs-agent-history-mode-map
+  :doc "Keys of a harness transcript's view: its text's, wherever point is."
+  :parent romacs-agent-history-text-map)
 
 (define-derived-mode romacs-agent-history-mode romacs-agent-log-mode "Agent history"
   "A harness's own transcript, read-only, drawn as a chat's transcript:

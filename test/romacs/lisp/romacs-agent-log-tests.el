@@ -322,6 +322,12 @@
             (should-not (eq (romacs-agent-log--menu-slots) one))
             (should-not (eq (romacs-agent-log--menu-slots) shared))))))))
 
+(ert-deftest romacs-agent-log-a-turn-that-says-no-time-shows-none ()
+  ;; A transcript's turn may not say when it ended: never the clock now.
+  (romacs-agent-log-tests--with
+    (draw :type 'done :duration 9)
+    (should (string-match-p "✻ 9s\n" (romacs-agent-log-tests--transcript)))))
+
 (ert-deftest romacs-agent-log-several-answers-keep-their-questions ()
   (let ((one (make-hash-table :test #'equal)) (two (make-hash-table :test #'equal)))
     (puthash "Colour?" "Blue" one)

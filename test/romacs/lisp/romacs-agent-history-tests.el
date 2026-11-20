@@ -111,7 +111,11 @@
               (should (eq map romacs-agent-history-text-map))
               (should (eq (lookup-key map "r") #'romacs-agent-history-resume-this))
               (should (eq (lookup-key map [remap self-insert-command]) #'undefined))
-              (should (eq (lookup-key map "n") #'romacs-agent-log-next)))))
+              (should (eq (lookup-key map "n") #'romacs-agent-log-next)))
+            ;; As opened, point past the text: its keys still read it.
+            (goto-char (point-max))
+            (should (eq (key-binding "p") #'romacs-agent-log-previous))
+            (should (eq (key-binding "r") #'romacs-agent-history-resume-this))))
       (when (buffer-live-p buffer) (kill-buffer buffer))
       (delete-file file))))
 
