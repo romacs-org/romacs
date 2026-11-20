@@ -589,7 +589,8 @@ Live, in a chat no window shows, the echo area says so too."
         (when-let* ((keys (text-property-any start end 'romacs-agent-log-keys t)))
           (delete-region keys (or (next-single-property-change keys 'romacs-agent-log-keys nil end) end)))
         (add-face-text-property start end 'romacs-agent-log-note)
-        (remove-text-properties start end '(keymap nil))
+        ;; It answers nothing any more: no keys, no request to answer.
+        (remove-text-properties start end '(keymap nil romacs-agent-log-request nil))
         (put-text-property start end 'keymap romacs-agent-log-transcript-map)))
     (setq romacs-agent-log--asks (delq block romacs-agent-log--asks))))
 

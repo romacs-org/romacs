@@ -407,7 +407,13 @@
       (romacs-agent-log-earlier))
     (let ((live (cadr (assoc "live" romacs-agent-log--asks))))
       (should (= (length romacs-agent-log--asks) 1))
-      (should-not (text-property-any (point-min) live 'romacs-agent-log-keys t)))
+      (should-not (text-property-any (point-min) live 'romacs-agent-log-keys t))
+      ;; The earlier copy answers nothing itself: the chat's keys there
+      ;; answer the live block, shown first.
+      (should-not (text-property-any (point-min) live 'romacs-agent-log-request "live"))
+      (goto-char (point-min))
+      (should (equal (romacs-agent-log--ask-here) "live"))
+      (should (= (point) live)))
     (remhash "live" (romacs-agent-approvals session))
     (draw :type 'answered :request-id "live")
     (should-not (text-property-any (point-min) romacs-agent-log--end 'romacs-agent-log-keys t))))
