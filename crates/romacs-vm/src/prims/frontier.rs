@@ -39,8 +39,22 @@ fn list_elements(cx: &mut Leaf<'_>, list: Value) -> Result<Vec<Value>, Fault> {
 
 /// Character codes of STRING as fns.c reads them: SREF bytes for unibyte,
 /// decoded characters (raw bytes as #x3FFF80..) for multibyte.
-fn string_codes(cx: &Leaf<'_>, string: Value) -> Result<Vec<Value>, Fault> {
-    Ok(cx.string_view(string)?.chars().map(|c| Value::integer(i64::from(c)).unwrap()).collect())
+/// STRING's character codes, a part at a time, the quit probe asked
+/// between parts. Stopped, the poll quits, or, nothing to quit for after
+/// all, the codes are taken again unpolled: nothing is made from them yet.
+fn string_codes(cx: &mut Leaf<'_>, string: Value) -> Result<Vec<Value>, Fault> {
+    let code = |c: u32| Value::integer(i64::from(c)).expect("a character is a fixnum");
+    let stop = cx.native_stop();
+    let (mut codes, mut stopped) = (Vec::new(), false);
+    for part in cx.string_view(string)?.char_parts(crate::quit::KERNEL_CHUNK) {
+        codes.extend(part.map(code));
+        if stop.due() { stopped = true; break; }
+    }
+    if stopped {
+        cx.native_poll()?;
+        codes = cx.string_view(string)?.chars().map(code).collect();
+    }
+    Ok(codes)
 }
 
 fn allocate_vector(cx: &mut Leaf<'_>, values: Vec<Value>) -> Value {
@@ -77,7 +91,12 @@ fn vconcat_values(cx: &mut Leaf<'_>, sequences: &[Value]) -> Result<Vec<Value>, 
         } else if let Ok(items) = cx.vector_values(arg) {
             values.extend(items);
         } else if let Ok(bits) = cx.bool_vector(arg) {
-            values.extend((0..bits.len).map(|i| if bits.get(i).unwrap() { Value::TRUE } else { Value::NIL }));
+            // Its bits (a copy) a chunk at a time, polled between.
+            let len = bits.len;
+            for start in (0..len).step_by(crate::quit::KERNEL_CHUNK) {
+                if start > 0 { cx.native_poll()?; }
+                values.extend((start..(start + crate::quit::KERNEL_CHUNK).min(len)).map(|i| if bits.get(i).unwrap() { Value::TRUE } else { Value::NIL }));
+            }
         } else if cx.string_view(arg).is_ok() {
             values.extend(string_codes(cx, arg)?);
         } else {

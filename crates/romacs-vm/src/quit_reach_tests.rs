@@ -626,6 +626,8 @@ fn equal_polls_for_itself_and_never_inside_a_hash_lookup() {
 fn list_walks_quit_inside_their_own_scope() {
     use crate::Primitive::{CopySequence, Nreverse};
     reaches("vconcat", "(setq l (make-list 50000 1))", "(list l)", "(= (length l) 50000)");
+    reaches("vconcat", "(setq s (make-string 50000 ?a))", "(list s)", "t");
+    reaches("vconcat", "(setq b (make-bool-vector 50000 t))", "(list b)", "t");
     for p in [CopySequence, Nreverse] {
         let (mut vm, signal) = busy_vm();
         let list = eval(&mut vm, "(setq l (make-list 50000 1))");
