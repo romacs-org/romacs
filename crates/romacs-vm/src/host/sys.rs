@@ -5,7 +5,7 @@
 //!
 //! rustix, the system-call layer, has no user database (NSS is the C
 //! library's), `posix_spawn`, getaddrinfo, sysconf, alarm, getrusage,
-//! `ioprio_set`, `perf_event_open`, mkostemp, another thread's CPU clock, or
+//! `ioprio_set`, `perf_event_open`, another thread's CPU clock, or
 //! the C library's error and signal texts. Its close is unsafe, its read and
 //! write need a borrowed descriptor (and borrowing a raw number is unsafe),
 //! its fchmodat refuses NOFOLLOW, and its kill and `pidfd_send_signal` take
@@ -221,22 +221,40 @@ pub(super) fn chmod(path: &CStr, mode: u32, nofollow: bool) -> io::Result<()> {
     status(unsafe { libc::fchmodat(libc::AT_FDCWD, path.as_ptr(), mode as libc::mode_t, flags) })
 }
 
-/// mkostemp: a new close-on-exec file named TEMPLATE (NUL-free) with its
-/// trailing XXXXXX replaced, and that name.
+/// mkostemp, as the C library's: a new file named TEMPLATE with its
+/// trailing XXXXXX replaced by letters and digits, created exclusively,
+/// read-write, mode 0600 and close-on-exec, and that name. EINVAL when
+/// TEMPLATE holds a NUL or does not end in XXXXXX.
 pub(super) fn temp_file(template: &[u8]) -> io::Result<(Vec<u8>, File)> {
-    let mut name = CString::new(template).map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))?.into_bytes_with_nul();
-    // UNSAFE(rustix has no mkostemp)
-    // SAFETY: NAME is a NUL-terminated buffer mkostemp rewrites in place;
-    // a non-negative result is a new descriptor this process owns.
-    let file = unsafe {
-        let fd = libc::mkostemp(name.as_mut_ptr().cast(), libc::O_CLOEXEC);
-        if fd < 0 {
-            return Err(io::Error::last_os_error());
+    temp_file_from(template, || {
+        let mut bytes = [0u8; 6];
+        rustix::rand::getrandom(&mut bytes[..], rustix::rand::GetRandomFlags::empty())?;
+        Ok(bytes)
+    })
+}
+
+/// `temp_file` with its random bytes from RANDOM, one draw a name tried:
+/// a taken name draws again, as often as the C library tries (62³).
+fn temp_file_from(template: &[u8], mut random: impl FnMut() -> io::Result<[u8; 6]>) -> io::Result<(Vec<u8>, File)> {
+    const LETTERS: &[u8; 62] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    use rustix::fs::{Mode, OFlags};
+    if template.contains(&0) || !template.ends_with(b"XXXXXX") {
+        return Err(io::Error::from_raw_os_error(libc::EINVAL));
+    }
+    let mut name = template.to_vec();
+    let stem = name.len() - 6;
+    for _ in 0..62u32.pow(3) {
+        for (slot, byte) in name[stem..].iter_mut().zip(random()?) {
+            *slot = LETTERS[usize::from(byte) % LETTERS.len()];
         }
-        File::from_raw_fd(fd)
-    };
-    name.pop();
-    Ok((name, file))
+        let flags = OFlags::RDWR | OFlags::CREATE | OFlags::EXCL | OFlags::CLOEXEC;
+        match rustix::fs::open(name.as_slice(), flags, Mode::RUSR | Mode::WUSR) {
+            Ok(fd) => return Ok((name, File::from(fd))),
+            Err(rustix::io::Errno::EXIST) => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Err(io::Error::from_raw_os_error(libc::EEXIST))
 }
 
 // Processes.
@@ -525,5 +543,47 @@ mod tests {
         let unwound = std::panic::catch_unwind(|| with_signals_blocked(|| panic!("inside")));
         assert!(unwound.is_err());
         assert_eq!(blocked(), before, "the mask comes back when F unwinds");
+    }
+
+    /// A fresh directory of this test's own under the temporary directory.
+    fn scratch(test: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("romacs-sys-{test}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        dir
+    }
+
+    #[test]
+    fn temp_file_refuses_a_template_without_its_xs() {
+        for template in [&b"/tmp/romacs-XXXXX"[..], b"/tmp/romacs-XXXXXX-", b"/tmp/rom\0acs-XXXXXX"] {
+            assert_eq!(temp_file(template).err().and_then(|e| e.raw_os_error()), Some(libc::EINVAL));
+        }
+    }
+
+    #[test]
+    fn temp_file_makes_a_private_close_on_exec_file() {
+        use std::os::unix::{ffi::OsStrExt, fs::PermissionsExt};
+        let dir = scratch("temp-new");
+        let template = [dir.as_os_str().as_bytes(), b"/f-XXXXXX"].concat();
+        let (name, file) = temp_file(&template).expect("temp file");
+        assert_eq!(name.len(), template.len());
+        assert!(name[name.len() - 6..].iter().all(u8::is_ascii_alphanumeric));
+        let meta = std::fs::metadata(std::ffi::OsStr::from_bytes(&name)).expect("made");
+        assert_eq!(meta.permissions().mode() & 0o777 & !0o600, 0, "no one but the owner");
+        assert!(rustix::io::fcntl_getfd(&file).expect("flags").contains(rustix::io::FdFlags::CLOEXEC));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn temp_file_draws_again_past_a_taken_name() {
+        use std::os::unix::ffi::OsStrExt;
+        let dir = scratch("temp-taken");
+        std::fs::write(dir.join("f-aaaaaa"), "taken").unwrap();
+        let template = [dir.as_os_str().as_bytes(), b"/f-XXXXXX"].concat();
+        let mut draws = [[0u8; 6], [0u8; 6], [1u8; 6]].into_iter();
+        let (name, _) = temp_file_from(&template, || Ok(draws.next().expect("a draw"))).expect("temp file");
+        assert!(name.ends_with(b"/f-bbbbbb"), "two draws of the taken name, then a free one");
+        assert_eq!(std::fs::read(dir.join("f-aaaaaa")).unwrap(), b"taken", "the taken file untouched");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }
