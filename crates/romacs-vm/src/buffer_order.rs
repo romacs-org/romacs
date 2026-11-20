@@ -4,8 +4,9 @@
 //! bury is O(1) and nothing is consed until `buffer-list` asks.
 //!
 //! Each live buffer holds its node's index (`BufferState::order_node`), plain
-//! data. The nodes hold the buffers, which the collector visits as roots
-//! (`visit_values`), as it did the Lisp list this replaces.
+//! data. The nodes name the buffers without keeping them: each is held by
+//! its name slot, and a moving collection rewrites the nodes
+//! (`visit_values`).
 use crate::Value;
 
 #[derive(Clone, Debug, Default, romacs_snapshot::Snapshot)]

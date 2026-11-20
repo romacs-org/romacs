@@ -85,8 +85,9 @@ const FIELDS: &[(&str, Class)] = &[
     ("debug_event_slots", Free), ("keymap_generation", Free), ("process_jobs", Free), ("subprocesses", Free),
     ("environment_snapshot", Free), ("trapped", Free), ("retrap", Free), ("doc_file", Free),
     ("terminal_host", Free), ("terminal_bindings", Root),
-    // The buffer list's order: each node's buffer, a root (buffer_order.rs).
-    ("buffer_order", Root),
+    // The buffer list's order keeps nothing alive: each node's buffer is held
+    // by its name slot and rewritten by a moving collection (buffer_order.rs).
+    ("buffer_order", Cache),
     ("pending_specials", Free), ("file_specials", Free), ("seed_file_specials", Free), ("file_level_request", Free),
     ("lazy_regime", Free), ("interpreting_source", Free), ("defer_expansion_errors", Free), ("evaluating", Free), ("quit_unwinding", Free),
     // Weak: one whose error a Rust caller discarded goes at the next collection.
