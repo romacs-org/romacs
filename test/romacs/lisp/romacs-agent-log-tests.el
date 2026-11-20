@@ -281,6 +281,14 @@
         (should (equal (substring-no-properties (romacs-agent-log--worker-label 0)) "⚠ asks"))
         (should (equal (substring-no-properties (romacs-agent-log--worker-label 1)) "● builds"))
         (should-not (romacs-agent-log--worker-label 2))
+        ;; A digit opens the worker it showed; one finished since is the board's.
+        (let (shown)
+          (cl-letf (((symbol-function 'romacs-agent-show) (lambda (child &rest _) (setq shown child))))
+            (setf (romacs-agent-state (nth 2 children)) 'idle)
+            (let ((last-command-event ?2)) (romacs-agent-log-open-worker))
+            (should (equal (romacs-agent-title shown) "builds"))
+            (let ((last-command-event ?1)) (should-error (romacs-agent-log-open-worker) :type 'user-error))
+            (setf (romacs-agent-state (nth 2 children)) 'waiting-approval)))
         ;; Its values read as values, never dim as a command it cannot run.
         (let ((romacs-agent-ui--session session))
           (dolist (label (list (romacs-agent-ui--effort-label) (romacs-agent-ui--model-label)))
