@@ -107,8 +107,12 @@ const COMPILE_STORE: &str = "ROMACS_COMPILED_LISP_STORE";
 
 /// A compile process's whole environment, for the store STORE: the
 /// [`COMPILE_INHERITS`] names, a HOME and temporary directory of its own
-/// in the store (HOME is its working directory too) and the C.UTF-8
-/// locale. None of the user's HOME, XDG directories, locale or identity
+/// in the store (HOME is its working directory too), the C.UTF-8 locale
+/// and compiled Lisp on. It is the compile world's too, which a compile
+/// process builds, so the compile identity asks that world's environment
+/// records of it; what differs from one compile to the next (the file
+/// compiled, the process that started it: `compiled_lisp::compile_command`)
+/// is no part of it. None of the user's HOME, XDG directories, locale or identity
 /// reaches a compile, as none reaches GNU's installed `.elc`
 /// files, which `make` compiled: what a compile makes of a file is the
 /// same under every HOME, and every HOME shares it.
@@ -116,7 +120,8 @@ fn compile_environment(store: &Path) -> Vec<(OsString, OsString)> {
     COMPILE_INHERITS.iter()
         .filter_map(|name| Some((OsString::from(name), std::env::var_os(name)?)))
         .chain([("HOME".into(), store.join("home").into()), ("TMPDIR".into(), store.join("tmp").into()),
-                ("LANG".into(), "C.UTF-8".into()), (COMPILE_STORE.into(), store.into())])
+                ("LANG".into(), "C.UTF-8".into()), (COMPILE_STORE.into(), store.into()),
+                ("ROMACS_COMPILED_LISP".into(), "on".into())])
         .collect()
 }
 
@@ -229,7 +234,7 @@ fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool) {
         identity: Box::new({
             let world = std::sync::OnceLock::new();
             let roots: Vec<PathBuf> = root.iter().cloned().collect();
-            let environment = compile_processes.clone();
+            let environment = compile_processes;
             move || {
                 let world = world.get_or_init(|| World::new(worlds.clone(), recipe.clone()).ok()).as_ref()?;
                 let (source, lisp) = compile_lisp_digest(world, &roots, &environment, RESTORED.get());
