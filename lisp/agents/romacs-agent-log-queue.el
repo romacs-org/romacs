@@ -182,6 +182,8 @@ where it waits meanwhile; RET there puts it back in its place."
       (user-error "The composer holds a draft: send or clear it first"))
     (romacs-agent-log-queue--change 'hold item t)
     (setq romacs-agent-log-queue--editing item)
+    ;; Its row says it is held, whatever tells views of the change.
+    (romacs-agent-log--separator t)
     (goto-char (point-max))
     (insert (romacs-agent-item-text item))
     (message "Editing a queued message: RET puts it back in its place, said anew")))

@@ -101,6 +101,8 @@
           (romacs-agent-log-queue-tests--key romacs-agent-log-queue-map "e")
           (should (equal (buffer-substring-no-properties romacs-agent-log--input (point-max)) "second"))
           (should (romacs-agent-item-held (cadr (romacs-agent-queue session))))
+          (should (text-property-search-backward 'romacs-agent-log-queued nil nil))
+          (should (string-match-p "✎ second" (buffer-substring-no-properties romacs-agent-log--end romacs-agent-log--input)))
           (romacs-agent-log-queue-tests--compose "second, edited")
           ;; RET: back in its place, said anew, nothing sent.
           (romacs-agent-log-queue-tests--key romacs-agent-log-mode-map "RET")
