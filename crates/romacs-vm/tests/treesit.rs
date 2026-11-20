@@ -784,6 +784,71 @@ fn a_buffer_no_frame_shows_is_never_parsed() {
     assert_eq!(romacs_vm::treesit_parses_on_this_thread(), evaluator, "and not on the evaluator");
 }
 
+/// Edits that keep the text's length, so the region a thread's tree covers
+/// still matches: each turns a parameter into a pointer, a different tree.
+const SAME_LENGTH_EDITS: &str = "(dolist (at (list (point-min) (/ (point-max) 2) (- (point-max) 40))) \
+    (goto-char at) (forward-line 0) (search-forward \"(int \") (delete-char -1) (insert \"*\"))";
+
+/// Edits that change the text's length at its start, middle and end.
+const RESIZING_EDITS: &str = "(goto-char (point-min)) (insert \"struct s { int x; };\\n\") \
+    (goto-char (/ (point-max) 2)) (forward-line 0) (delete-region (point) (progn (forward-line 3) (point))) \
+    (insert \"static int g (void) { return 0; }\\n\") \
+    (goto-char (point-max)) (insert \"int last (int b) { return b; }\\n\")";
+
+/// A VM whose shown buffer NAME, of about xdisp.c's size, has its first
+/// parse on a thread, then takes EDITS while that parse runs: edits the
+/// thread's tree never saw.
+fn edited_during_first_parse(name: &str, edits: &str) -> Vm {
+    let mut vm = first_parse_vm(name, 32_000, true);
+    deferred_frame(&mut vm);
+    vm.eval_source(&format!("(with-current-buffer \"{name}\" \
+        (unless (romacs--treesit-parsing-p) (error \"the first parse is not on its thread\")) \
+        {edits} \
+        (unless (romacs--treesit-parsing-p) (error \"the parse ended before the edits\")))")).unwrap();
+    vm
+}
+
+/// The frames after EDITS made during NAME's first parse land a tree that
+/// is the edited text's own, with no parse on the evaluator.
+fn frames_land_the_edited_tree(name: &str, edits: &str) {
+    let mut vm = edited_during_first_parse(name, edits);
+    let before = romacs_vm::treesit_parses_on_this_thread();
+    for _ in 0..8 {
+        wait_landed(&mut vm, name);
+        while deferred_frame(&mut vm) {}
+        let parsing = vm.eval_source(&format!("(with-current-buffer \"{name}\" (romacs--treesit-parsing-p))"))
+            .unwrap().display().unwrap();
+        if parsing == "nil" { break; }
+    }
+    assert_eq!(tree_is_a_parse(&mut vm, name), "t", "the frames' tree is the edited text's");
+    assert_eq!(romacs_vm::treesit_parses_on_this_thread(), before + 1,
+        "the evaluator parsed only the check's own buffer");
+}
+
+/// Edits made while a first parse runs on its thread reach the tree the
+/// frames then use: the landed tree, behind the text, takes the edits and
+/// parses again on a thread from there.
+#[test]
+fn edits_during_a_first_parse_reach_the_tree_the_frames_land() {
+    frames_land_the_edited_tree("ts-edit-frame", SAME_LENGTH_EDITS);
+}
+
+/// Edits that move the text's end during a first parse on its thread also
+/// reach the tree the frames land.
+#[test]
+fn resizing_edits_during_a_first_parse_reach_the_tree_the_frames_land() {
+    frames_land_the_edited_tree("ts-edit-resize", RESIZING_EDITS);
+}
+
+/// Edits made while a first parse runs on its thread reach the tree a query
+/// then asks for: the query waits for the thread and parses the edits from
+/// the tree it gives.
+#[test]
+fn edits_during_a_first_parse_reach_the_tree_a_query_gets() {
+    let mut vm = edited_during_first_parse("ts-edit-query", SAME_LENGTH_EDITS);
+    assert_eq!(tree_is_a_parse(&mut vm, "ts-edit-query"), "t", "the query's tree is the edited text's");
+}
+
 /// Lisp that asks for a tree while its first parse runs on a thread waits
 /// for it, and a C-g ends the wait as it ends any wait: the query quits,
 /// the parse runs on, and the next query gets its tree.
