@@ -37,7 +37,7 @@ fn process_forget(cx, id: Integer) { cx.process_forget(id.0) }}
 // Parse the JSON text SOURCE, a string: an object as an alist with string keys, an
 // array as a list, null as `json-null', false as `json-false', true as t, and a number as an
 // integer when the parser reads it as one (no fraction or exponent, not -0, and within 64
-// bits), else as a float.  Signals an error on invalid JSON, and on such an integer too
-// large for a fixnum.
+// bits), else as a float.  Signals an error on invalid JSON, on such an integer too large
+// for a fixnum, and on a number too large for a float.
 defsubr! { name = "romacs-json-read", gnu = "romacs:json", effect = Pure,
 fn process_json_read(cx, source: Value) { cx.process_json_read(source) }}

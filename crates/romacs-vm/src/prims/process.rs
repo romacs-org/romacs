@@ -343,11 +343,11 @@ fn proc_make(cx, name: Value) { cx.make_process(name) }}
 
 // PROCESS's FIELD, a symbol: one of `name', `command', `filter', `sentinel', `log',
 // `buffer', `childp', `plist', `type', `mark', `status', `decode', `encode', `stderrproc' and
-// `tty-name'; the number `pid' (-2 for a process that has a pty and no command, nil while
-// there is none) or `nbytes-read'; or t or nil for `alive', `infd' and `outfd' (whether that
-// channel is open), `raw-status-new' and the flags `romacs--proc-set' sets.  For `status',
-// the status is brought up to date first.  Any other FIELD signals an error.  For
-// subprocess.el.
+// `tty-name'; the number `pid' (-2 for a process `make-process' made with no command, whether
+// or not a pty opened, nil while there is none) or `nbytes-read'; or t or nil for `alive',
+// `infd' and `outfd' (whether that channel is open), `raw-status-new' and the flags
+// `romacs--proc-set' sets.  For `status', the status is brought up to date first.  Any
+// other FIELD signals an error.  For subprocess.el.
 defsubr! { name = "romacs--proc-get", gnu = "romacs:process", effect = Reads,
 fn proc_get(cx, process: Value, field: Value) {
     // GNU reads p->status only after update_status.
