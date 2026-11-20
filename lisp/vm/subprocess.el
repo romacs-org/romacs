@@ -1271,8 +1271,9 @@ what `find-operation-coding-system' sees after the operation."
                   (if inherit-process-coding-system
                       (funcall 'after-insert-file-set-buffer-file-coding-system
                                (string-bytes (cdr result)))))))
-          ;; A quit with output read before it: inserted above, as GNU's
-          ;; call_process inserts each block it reads, then the quit.
+          ;; A quit with output read before it: inserted above, all of it
+          ;; (GNU's call_process drops a partly filled block:
+          ;; VM2-CALLPROC-QUIT-OUTPUT), then the quit.
           (if (eq (car result) 'quit) (signal 'quit nil))
           (let ((status (romacs--wait-status (car result))))
             (if (eq (car status) 'signal)

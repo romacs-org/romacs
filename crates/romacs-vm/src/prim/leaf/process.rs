@@ -1401,8 +1401,9 @@ impl Leaf<'_> {
         let (bytes, quit) = self.call_process_wait(pid, reader)?;
         if let Some(quit) = quit {
             // What the child wrote before the quit is the caller's to insert,
-            // as GNU's call_process inserts each block it reads: (quit . BYTES),
-            // after which the caller signals the quit (subprocess.el).
+            // all of it, where GNU's call_process drops a partly filled block
+            // (VM2-CALLPROC-QUIT-OUTPUT): (quit . BYTES), after which the
+            // caller signals the quit (subprocess.el).
             let quit_symbol = self.sym("quit");
             return match quit {
                 Fault::Signal(condition, _) if condition == quit_symbol && !bytes.is_empty() => {
