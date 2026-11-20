@@ -347,7 +347,7 @@ class Report(unittest.TestCase):
 
 class Epoch(unittest.TestCase):
     def test_lisp_vm_beside_romacs_vm_rust_names_the_epoch(self):
-        status, _, findings = check.epoch({'lisp/vm/keyboard.el', 'crates/romacs-vm/src/prims/keyboard.rs'}, False, 2, 2)
+        status, _, findings = check.epoch({'lisp/vm/keyboard.el', 'crates/romacs-vm/src/prims/keyboard.rs'}, False, '2\n', '2\n')
         self.assertEqual(status, 'ok')
         self.assertEqual(len(findings), 1)
         self.assertIn('lisp/vm/keyboard.el', findings[0])
@@ -355,21 +355,25 @@ class Epoch(unittest.TestCase):
 
     def test_a_raised_epoch_or_lisp_alone_is_quiet(self):
         both = {'lisp/vm/keyboard.el', 'crates/romacs-vm/src/prims/keyboard.rs'}
-        self.assertEqual(check.epoch(both | {check.EPOCH}, False, 3, 2)[:3:2], ('ok', []))
-        self.assertEqual(check.epoch(both, True, 3, 2)[:3:2], ('ok', []))
-        self.assertEqual(check.epoch({'lisp/vm/keyboard.el'}, False, 2, 2)[2], [])
-        self.assertEqual(check.epoch({'crates/romacs-vm/src/prims/keyboard.rs'}, False, 2, 2)[2], [])
+        self.assertEqual(check.epoch(both | {check.EPOCH}, True, '3\n', '2\n')[:3:2], ('ok', []))
+        self.assertEqual(check.epoch({'lisp/vm/keyboard.el'}, False, '2\n', '2\n')[2], [])
+        self.assertEqual(check.epoch({'crates/romacs-vm/src/prims/keyboard.rs'}, False, '2\n', '2\n')[2], [])
 
     def test_a_raise_not_above_the_trunk_fails_with_the_next_number(self):
-        for names, changed, ours in [({check.EPOCH}, False, 3), (set(), True, 3), (set(), True, 2), (set(), True, None)]:
-            status, _, findings = check.epoch(names, changed, ours, 3)
-            self.assertEqual(status, 'FAIL', (names, changed, ours))
+        for ours in ['3\n', '2\n']:
+            status, _, findings = check.epoch(set(), True, ours, '3\n')
+            self.assertEqual(status, 'FAIL', ours)
             self.assertIn('raise it to 4', findings[0])
 
-    def test_a_commit_changes_the_file_only_when_it_differs_from_every_parent(self):
-        blob = {'base': 'e2', 'trunk': 'e3', 'lane': 'e3', 'taken': 'e3', 'own': 'e4'}
-        lines = [['lane', 'base'], ['taken', 'lane', 'trunk'], ['own', 'taken', 'trunk']]
-        self.assertEqual(check.own_changes(lines, blob), ['lane', 'own'])
+    def test_an_epoch_file_without_a_whole_number_fails(self):
+        for raised, tip in [(True, None), (False, '3\n')]:
+            self.assertEqual(check.epoch(set(), raised, 'oops\n', tip)[0], 'FAIL')
+
+    def test_the_newest_change_decides_and_a_merge_taking_the_trunks_is_none(self):
+        value = {'base': 2, 'trunk': 3, 'lane': 3, 'taken': 3, 'own': 4, 'revert': 2, 'still': 2}
+        self.assertTrue(check.last_change([['own', 'taken', 'trunk'], ['taken', 'lane', 'trunk'], ['lane', 'base']], value))
+        self.assertFalse(check.last_change([['revert', 'lane'], ['lane', 'base']], value))
+        self.assertIsNone(check.last_change([['taken', 'still', 'trunk'], ['still', 'base']], value))
 
 
 class EpochHistory(unittest.TestCase):
@@ -437,7 +441,7 @@ class EpochHistory(unittest.TestCase):
         self.git('checkout', '-q', '-b', 'third', 'beta~1')
         self.commit('third', {'c.txt': 'c\n'})
         self.git('merge', '-q', '--no-ff', '-m', 'merge beta', 'beta')
-        self.assertEqual(check.epoch_history(self.repo, 'beta'), (False, 3, 3))
+        self.assertEqual(check.epoch_history(self.repo, 'beta'), (False, '3\n', '3\n'))
         self.assertEqual(self.stage()[:3:2], ('ok', []))
 
     def test_a_raise_made_in_a_merge_commit_counts(self):
@@ -445,7 +449,32 @@ class EpochHistory(unittest.TestCase):
         self.commit('fourth', {'d.txt': 'd\n'})
         self.git('merge', '-q', '--no-ff', '--no-commit', 'beta')
         self.commit('merge beta, raising', {check.EPOCH: '4\n'})
-        self.assertEqual(check.epoch_history(self.repo, 'beta'), (True, 4, 3))
+        self.assertEqual(check.epoch_history(self.repo, 'beta'), (True, '4\n', '3\n'))
+
+    def test_a_reverted_raise_raises_nothing_as_a_lane_or_merged(self):
+        self.git('checkout', '-q', '-b', 'reverted', 'beta~1')
+        self.commit('raise', {check.EPOCH: '3\n'})
+        self.commit('revert the raise', {check.EPOCH: '2\n'})
+        self.commit('docs', {'e.txt': 'e\n'})
+        self.assertEqual(self.stage()[:3:2], ('ok', []))
+        self.git('checkout', '-q', '--detach', 'beta')
+        self.git('merge', '-q', '--no-ff', '-m', 'land reverted', 'reverted')
+        self.assertEqual(self.stage()[:3:2], ('ok', []))
+
+    def test_a_formatting_edit_raises_nothing_and_hides_no_raise(self):
+        self.git('checkout', '-q', '-b', 'blank', 'beta')
+        self.commit('blank line', {check.EPOCH: '3\n\n'})
+        self.assertEqual(self.stage()[:3:2], ('ok', []))
+        self.git('checkout', '-q', 'second')
+        self.commit('blank line', {check.EPOCH: '3\n\n'})
+        self.assertEqual(self.stage()[0], 'FAIL')
+
+    def test_an_uncommitted_raise_counts(self):
+        self.git('checkout', '-q', '-b', 'dirty', 'beta')
+        (self.repo / check.EPOCH).write_text('3\n')
+        self.assertFalse(check.epoch_history(self.repo, 'beta')[0])
+        (self.repo / check.EPOCH).write_text('4\n')
+        self.assertEqual(check.epoch_history(self.repo, 'beta'), (True, '4\n', '3\n'))
 
 
 if __name__ == '__main__':

@@ -26,7 +26,8 @@ and what the merge queue holds it to.
 - A stage that could not run leaves its check incomplete, never passed:
   `tools/dev-check` exits 2 for it, 1 for a failure.
 - A check holds a branch to its merge-base with the trunk, not to the trunk's
-  tip.
+  tip; the runtime epoch is the exception: `tools/dev-check` holds a raise
+  above the tip's, since two equal raises merge without a conflict.
 - `tools/test-elisp` refuses, before any host runs, a file with a top-level
   `(ert-deftest`; a file that registers no `romacs-deftest` as it loads fails
   the run by name. A file whose leading comments say
