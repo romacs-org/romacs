@@ -3285,6 +3285,7 @@ name = "romacs-gnu-tests"
 version = "0.1.0"
 dependencies = [
  "romacs-vm",
+ "rustix",
  "serde_json",
 ]
 
