@@ -13,7 +13,8 @@ fn freeze(cx, object: Value) {
     cx.freeze(object)
 }}
 
-// Whether OBJECT is frozen: in a region `freeze' made.
+// Whether OBJECT is frozen: in a region `freeze' made, or one a frozen value taken
+// from another isolate was placed in.
 defsubr! { name = "frozen-p", gnu = "romacs:frozen", effect = Pure,
 fn frozen_p(cx, object: Value) {
     Ok(if cx.frozen_p(object) { Value::TRUE } else { Value::NIL })
