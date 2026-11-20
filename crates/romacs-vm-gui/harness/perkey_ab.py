@@ -28,7 +28,7 @@ the sessions' own scatter, and only its median says which way it leans.
 The verdict of a phase:
 - a regression when its median instruction delta is past --bound (percent)
   and it is not NOISY;
-- a regression too under the bound, a consistent rise, when it rose and is
+- a regression too at or under the bound, a consistent rise, when it rose and is
   not NOISY (every candidate session counted more than every base session,
   so every pair rose), the median delta is more than RISE_FLOOR (1.5) times
   the wider of the two arms' spreads, and at least RISE_PAIRS (3) pairs
@@ -43,7 +43,7 @@ itself gives three pairs that all rose 1 time in 8.  Simulated (independent
 sessions, normal scatter), it reads as a consistent rise about 1 phase in 120
 at 3 pairs and 1 in 1,100 at 4; at a floor of 1 times the spread it would be
 1 in 40 at 3 pairs.  Phases share sessions, so a run's rate is at most three
-times a phase's.
+times a phase's (four with --populate's region phase).
 
 Information only, never in the verdict: wall time per key, from
 --latency-pairs pairs of perkey_live's latency sessions (key enqueue to
@@ -83,7 +83,8 @@ def compare(base, candidate, bound):
         pairs = [(b, c) for b, c in zip(base.get(name, []), candidate.get(name, []))
                  if b is not None and c is not None and b > 0 and c > 0]
         if len(pairs) < 2:
-            report[name] = {'pairs': len(pairs), 'verdict': 'inconclusive', 'reason': 'fewer than 2 pairs', 'noisy': None}
+            report[name] = {'pairs': len(pairs), 'verdict': 'inconclusive', 'reason': 'fewer than 2 pairs',
+                            'rise_floor_pct': None, 'noisy': None}
             continue
         bs, cs = [b for b, _ in pairs], [c for _, c in pairs]
         arms = {'base': pk.spread(bs), 'candidate': pk.spread(cs)}
@@ -116,12 +117,12 @@ def table(report, bound, pairs):
              f"{RISE_FLOOR}x the wider spread, {RISE_PAIRS} pairs or more)"]
     for name, p in report.items():
         if 'delta_pct' not in p:
-            lines.append(f"  {name:12} {p['pairs']} pairs counted: inconclusive")
+            lines.append(f"  {name:12} {p['pairs']} pairs counted: inconclusive ({p['reason']})")
             continue
         b, c = p['base'], p['candidate']
         lines.append(f"  {name:12} {b['median'] / 1e6:7.3f}M [{100 * b['spread']:.1f}%]  {c['median'] / 1e6:7.3f}M "
                      f"[{100 * c['spread']:.1f}%]  {p['delta_pct']:+.2f}% [{p['delta_range_pct'][0]:+.2f} .. "
-                     f"{p['delta_range_pct'][1]:+.2f}]  {p['pairs']} pairs  {p['verdict']}"
+                     f"{p['delta_range_pct'][1]:+.2f}]  floor {p['rise_floor_pct']:.2f}%  {p['pairs']} pairs  {p['verdict']}"
                      f"{f' ({reason})' if (reason := p['reason']) else ''}{' NOISY' if p['noisy'] else ''}")
     return '\n'.join(lines)
 

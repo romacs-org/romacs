@@ -95,7 +95,11 @@ class Verdicts(unittest.TestCase):
         rows = {line.split()[0]: line for line in ab.table(report, 2.0, 3).splitlines()[1:]}
         self.assertIn('3 pairs', rows['self-insert'])
         self.assertIn('2 pairs', rows['C-n'])
-        self.assertIn('0 pairs counted: inconclusive', rows['C-f'])
+        self.assertIn('0 pairs counted: inconclusive (fewer than 2 pairs)', rows['C-f'])
+        self.assertIsNone(report['C-f']['rise_floor_pct'])
+        # The floor that decided a close result is printed, not left to the
+        # rounded spreads.
+        self.assertIn('floor 0.00%', rows['self-insert'])
 
     def test_a_phase_one_arm_lacks_is_inconclusive(self):
         report = ab.compare({'region': [1, 1]}, {}, 2.0)
