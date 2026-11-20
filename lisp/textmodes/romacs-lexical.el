@@ -19,6 +19,7 @@
 ;;; Code:
 
 (require 'romacs-scanner)
+(require 'romacs-theme)
 
 (defgroup romacs-lexical nil
   "Code coloured by its lexical classes alone."
@@ -34,13 +35,36 @@ text's own colour by default, a call being no more than code.")
   "A diff's removed line, to the window's edge.")
 (defface romacs-lexical-hunk '((t :inherit diff-header :extend t))
   "A diff's hunk header: a band, never a line's colour.")
+(defface romacs-lexical-added-sign '((t :inherit (diff-indicator-added romacs-lexical-added)))
+  "An added line's `+', in the theme's colour for additions, on its band.")
+(defface romacs-lexical-removed-sign '((t :inherit (diff-indicator-removed romacs-lexical-removed)))
+  "A removed line's `-', in the theme's colour for removals, on its band.")
+
+(defun romacs-lexical--derive (&rest _)
+  "Band a hunk header in the theme's `diff-header' background where it
+stands apart from the text's, else in the text's background a tenth of
+the way to its colour: a band on every theme, its colour still the
+header's.  As the face's default spec, so a theme's own spec wins."
+  (let* ((bg (romacs-color-hex (face-background 'default nil t)))
+         (fg (romacs-color-hex (face-foreground 'default nil t)))
+         (theirs (and (facep 'diff-header) (romacs-color-hex (face-background 'diff-header nil t))))
+         (band (cond ((and theirs bg (> (romacs-color-contrast theirs bg) 1.08)) theirs)
+                     ((and bg fg) (romacs-color-mix bg fg 0.1)))))
+    (face-spec-set 'romacs-lexical-hunk
+                   `((t :inherit diff-header ,@(and band `(:background ,band)) :extend t))
+                   'face-defface-spec)))
+
+(add-hook 'enable-theme-functions #'romacs-lexical--derive)
+(add-hook 'disable-theme-functions #'romacs-lexical--derive)
+(romacs-lexical--derive)
 
 (defcustom romacs-lexical-faces
   '((comment . font-lock-comment-face) (string . font-lock-string-face)
     (number . font-lock-number-face) (keyword . font-lock-builtin-face)
     (char . font-lock-constant-face) (head . romacs-lexical-head) (form . font-lock-keyword-face)
     (name . font-lock-function-name-face)
-    (added . romacs-lexical-added) (removed . romacs-lexical-removed) (hunk . romacs-lexical-hunk))
+    (added . romacs-lexical-added) (removed . romacs-lexical-removed) (hunk . romacs-lexical-hunk)
+    (added-sign . romacs-lexical-added-sign) (removed-sign . romacs-lexical-removed-sign))
   "The face of each lexical class.  A class left out gets no face."
   :type '(alist :key-type symbol :value-type face))
 
@@ -145,9 +169,12 @@ digits, letters, dots and underscores (hex, exponents, suffixes)."
 
 (defun romacs-lexical--diff (state char)
   "The `diff' family's step: a line's first character says its class,
-which holds to its end; its newline starts the next line afresh."
+which holds to its end, an added or removed line's sign a class of its
+own; its newline starts the next line afresh."
   (cond ((= char ?\n) 'bol)
-        ((eq state 'bol) (pcase char (?+ 'added) (?- 'removed) (?@ 'hunk) (_ 'context)))
+        ((eq state 'bol) (pcase char (?+ 'added-sign) (?- 'removed-sign) (?@ 'hunk) (_ 'context)))
+        ((eq state 'added-sign) 'added)
+        ((eq state 'removed-sign) 'removed)
         (t state)))
 
 (define-scanner romacs-lexical--lisp-scanner (romacs-scanner-marking #'romacs-lexical--lisp) 'code
@@ -173,7 +200,7 @@ which holds to its end; its newline starts the next line afresh."
     ('keyword 'keyword)
     ('head 'head)
     ((or 'char 'char-escape 'char-end) 'char)
-    ((or 'added 'removed 'hunk) state)
+    ((or 'added 'removed 'hunk 'added-sign 'removed-sign) state)
     (_ nil)))
 
 ;;; Colouring
@@ -198,7 +225,7 @@ which holds to its end; its newline starts the next line afresh."
         (when (and (eq class 'head) (string-match-p romacs-lexical-lisp-forms (buffer-substring-no-properties at next)))
           (setq class 'form))
         ;; A diff's line is coloured through its newline, a band.
-        (when (and (memq class '(added removed hunk)) (< next end) (eq (char-after next) ?\n))
+        (when (and (memq class '(added removed hunk added-sign removed-sign)) (< next end) (eq (char-after next) ?\n))
           (setq next (1+ next)))
         ;; After a definition's head, its name; its list of arguments
         ;; calls nothing.
@@ -222,7 +249,10 @@ which holds to its end; its newline starts the next line afresh."
 classes, each face in front of those there.  Return non-nil when
 LANGUAGE has a family (`romacs-lexical-languages'), else do nothing."
   (when-let* ((family (romacs-lexical-family language)))
-    (when (eq family 'diff) (require 'diff-mode))
+    ;; Its faces, the hunk's band then derived from them.
+    (when (and (eq family 'diff) (not (featurep 'diff-mode)))
+      (require 'diff-mode)
+      (romacs-lexical--derive))
     (pcase-dolist (`(,from ,to ,class) (romacs-lexical-spans family beg end))
       (when-let* ((face (alist-get class romacs-lexical-faces)))
         (add-face-text-property from to face)))

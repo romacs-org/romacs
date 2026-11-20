@@ -33,7 +33,26 @@
 (ert-deftest romacs-lexical-diff-lines ()
   (should (equal (romacs-lexical-tests--spans 'diff "@@ -1 +1 @@\n-old\n+new\n same\n")
                  ;; Each a band: through its newline.
-                 '(("@@ -1 +1 @@\n" hunk) ("-old\n" removed) ("+new\n" added)))))
+                 '(("@@ -1 +1 @@\n" hunk) ("-" removed-sign) ("old\n" removed) ("+" added-sign) ("new\n" added)))))
+
+(ert-deftest romacs-lexical-hunk-is-a-band-on-every-theme ()
+  (require 'diff-mode)
+  ;; A theme whose diff header has no background of its own still bands
+  ;; the hunk: the text's background toward its colour.
+  (cl-letf (((symbol-function 'face-background)
+             (lambda (face &rest _) (pcase face ('default "#eff1f5") ('diff-header nil))))
+            ((symbol-function 'face-foreground) (lambda (&rest _) "#4c4f69")))
+    (romacs-lexical--derive)
+    (let ((band (plist-get (cdr (car (get 'romacs-lexical-hunk 'face-defface-spec))) :background)))
+      (should band)
+      (should (> (romacs-color-contrast band "#eff1f5") 1.08))))
+  ;; Its own, where it stands apart.
+  (cl-letf (((symbol-function 'face-background)
+             (lambda (face &rest _) (pcase face ('default "#121212") ('diff-header "#1e1e1e"))))
+            ((symbol-function 'face-foreground) (lambda (&rest _) "#bebebe")))
+    (romacs-lexical--derive)
+    (should (equal (plist-get (cdr (car (get 'romacs-lexical-hunk 'face-defface-spec))) :background) "#1e1e1e")))
+  (romacs-lexical--derive))
 
 (ert-deftest romacs-lexical-colours-only-a-known-language ()
   (with-temp-buffer
