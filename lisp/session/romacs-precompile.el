@@ -17,8 +17,9 @@
 ;; process at a time, at the idle CPU and I/O priority, started only once
 ;; the session has been idle `romacs-precompile-idle-delay' seconds.  It
 ;; never touches the Lisp heap, and the session does no work for it
-;; between keys or while idle.  This file is its switch.  Not in GNU
-;; (ledger/divergences VM2-LOADPRECOMPILE).
+;; between keys or while idle.  This file is its switch; the primitive
+;; `romacs-compiled-lisp-stats' says what the session's loads took.  Not
+;; in GNU (ledger/divergences VM2-LOADPRECOMPILE).
 
 ;;; Code:
 

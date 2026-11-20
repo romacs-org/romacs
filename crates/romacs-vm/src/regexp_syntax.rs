@@ -507,6 +507,8 @@ impl Vm {
     /// The current syntax table and SUBJECT's syntax-table properties (the
     /// current buffer's when None) for one engine call.
     pub(super) fn regexp_syntax(&mut self, subject: Option<Value>) -> SearchResult<SyntaxSource> {
+        #[cfg(test)]
+        super::note(&super::PREPARED, 1);
         let index = self.buffer_index()?;
         self.regexp_syntax_of(index, subject)
     }

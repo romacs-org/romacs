@@ -54,6 +54,7 @@ romacs-test-fonts.workspace = true
 tracing-test.workspace = true
 jpeg-encoder.workspace = true
 image-extras.workspace = true
+rustix.workspace = true
 
 [lints]
 workspace = true

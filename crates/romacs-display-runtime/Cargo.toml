@@ -61,7 +61,6 @@ png.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 smithay-clipboard.workspace = true
-x11-dl.workspace = true
 rustix = { workspace = true, features = ["time"] }
 wayland-backend.workspace = true
 wayland-client.workspace = true

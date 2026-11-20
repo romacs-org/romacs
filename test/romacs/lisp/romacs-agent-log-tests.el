@@ -1039,7 +1039,11 @@
   ;; A definition before or after its reference, across batches: faced as
   ;; the whole reply would be.
   (dolist (pieces '(("[r]: https://example.org\n\nSee [docs][r].\n\nTail." " more.")
-                    ("See [docs][r].\n\nMid.\n\n" "[r]: https://example.org\n\nTail.")))
+                    ("See [docs][r].\n\nMid.\n\n" "[r]: https://example.org\n\nTail.")
+                    ;; In a quote, after the reference has gone by.
+                    ("See [docs][r].\n\nOne.\n\nTwo.\n\n" "> [r]: https://example.org\n\nTail.")
+                    ;; Its label across two lines.
+                    ("See [docs][two words].\n\nOne.\n\nTwo.\n\n" "[two\nwords]: https://example.org\n\nTail.")))
     (romacs-agent-log-tests--with
       (dolist (piece pieces)
         (draw :type 'delta :text piece)
@@ -1050,6 +1054,13 @@
       (draw :type 'done :time 0)
       (search-backward "docs")
       (should (memq 'romacs-markdown-link (ensure-list (get-text-property (point) 'face)))))))
+
+(ert-deftest romacs-agent-log-a-definition-in-code-is-no-definition ()
+  ;; A [key]: value line in a code block leaves the cheap restart on.
+  (romacs-agent-log-tests--with
+    (draw :type 'delta :text "```ts\n[key]: value\n```\n\nAn [inline](http://[::1]:8080/) link.\n\nAfter.")
+    (romacs-agent-log-faces--batch (current-buffer))
+    (should-not romacs-agent-log-faces--whole)))
 
 (ert-deftest romacs-agent-log-header-key-takes-any-colour-name ()
   ;; A theme's named colours, not #rrggbb: the key's face is still made.

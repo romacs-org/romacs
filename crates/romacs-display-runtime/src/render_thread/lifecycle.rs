@@ -322,23 +322,7 @@ impl RenderApp {
         self.service_models(now);
         self.refresh_monitor_snapshot(event_loop, true);
         self.complete_pending_scale_changes();
-        self.presentation_observer.dispatch_pending(
-            self.renderer
-                .as_ref()
-                .map(|renderer| renderer.device().as_ref()),
-            |frame| {
-                self.frame_windows
-                    .get(frame)?
-                    .lifecycle
-                    .native()
-                    .and_then(|native| {
-                        native
-                            .surface
-                            .as_ref()
-                            .map(|surface| (surface, native.surface_generation))
-                    })
-            },
-        );
+        self.presentation_observer.dispatch_pending();
         if self.process_commands_with_waker(Some(event_loop.create_proxy())) {
             self.handle_exiting();
             event_loop.exit();
