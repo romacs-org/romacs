@@ -38,6 +38,11 @@ SCRUBBED = ('DISPLAY', 'WAYLAND_DISPLAY', 'NOTMUCH_CONFIG', 'NOTMUCH_DATABASE', 
 FINDING = re.compile(r'^(?P<file>.+?):\d+: (?P<level>error|warning|hint): (?P<text>.*)$')
 FAILING = ('error', 'warning')
 COMPLETE = re.compile(r'^romacs-lint: \d+ files?, ', re.MULTILINE)
+# The one failure that names a file's own limit: the host cannot hold its text
+# (crates/romacs-vm/src/text.rs), as for charset text past Unicode. Any other
+# early end, a signal or another message under the same status included, says
+# nothing about the file.
+UNREADABLE = 'unreadable text'
 
 
 def host(given):
@@ -114,17 +119,17 @@ def judged(names, results, based):
     """What to report of RESULTS, each file of NAMES's findings or the cause
     of its lint's giving none (`lint_each'), against BASED, the base's results
     by name (None: no base, every finding shown): (SHOWN, OLDER, QUIET,
-    BROKEN, UNBASED). A file the host failed on here as at the base, for the
-    same cause and not a timeout, is QUIET, named but not judged, while
-    another file has a result: when none has, the host itself may be what
-    failed, so each is BROKEN, as is any other file with no result here. A
-    file the base gave no result for has every finding new (UNBASED names
-    it); one the base lacks too."""
+    BROKEN, UNBASED). A file whose text the host cannot hold, here and at the
+    base alike (UNREADABLE), is QUIET, named but not judged, while another
+    file has a result: when none has, the host itself may be what failed, so
+    each is BROKEN, as is any other file with no result here, whatever the
+    base gave. A file the base gave no result for has every finding new
+    (UNBASED names it); one the base lacks too."""
     shown = [line for found in results if not failed(found) for line in found]
     if based is None or all(failed(found) for found in results):
         return shown, 0, [], [name for name, found in zip(names, results) if failed(found)], []
     quiet = [name for name, found in zip(names, results)
-             if failed(found) and found != 'timeout' and based.get(name) == found]
+             if found == UNREADABLE and based.get(name) == UNREADABLE]
     broken = [name for name, found in zip(names, results) if failed(found) and name not in quiet]
     unbased = [name for name, found in zip(names, results) if not failed(found) and failed(based.get(name))]
     before = [line for found in based.values() if not failed(found) for line in found]
@@ -149,7 +154,8 @@ def lint(binary, arguments, timeout, root=ROOT):
     another version, so the launcher, not the Lisp, says where a file is.
     STATUS is None unless the lint ran to its closing line: a host that did
     not start, a file that ended the host as it loaded, a timeout. CAUSE says
-    which, as `timeout' or `exit N', or is None when the lint finished."""
+    which: UNREADABLE when the host ended on the file's text, else `timeout'
+    or `exit N'; None when the lint finished."""
     command = [str(binary), '-Q', '--batch', '-l', str(ROOT / 'lisp/emacs-lisp/romacs-lint.el'), '-f', 'romacs-lint-batch']
     with tempfile.TemporaryDirectory(prefix='romacs-lint-') as home:
         try:
@@ -161,7 +167,17 @@ def lint(binary, arguments, timeout, root=ROOT):
     output = '\n'.join(named_from(line, home, root) for line in done.stdout.splitlines())
     return ((done.returncode if finished else None), output,
             done.stderr + ('' if finished else f'the host exited {done.returncode} before the lint finished\n'),
-            None if finished else f'exit {done.returncode}')
+            cause_of(finished, done.returncode, done.stderr))
+
+
+def cause_of(finished, status, errors):
+    """Why a host that exited with STATUS, writing ERRORS, gave no result: UNREADABLE
+    when it ended on the judged file's text, else `exit STATUS'; None when FINISHED."""
+    if finished:
+        return None
+    if status == 255 and errors.rstrip().splitlines()[-1:] == ['invalid Unicode text']:
+        return UNREADABLE
+    return f'exit {status}'
 
 
 def lint_each(binary, options, files, timeout, root=ROOT, jobs=4):

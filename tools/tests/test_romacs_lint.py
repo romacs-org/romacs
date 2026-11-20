@@ -69,10 +69,21 @@ class JudgedTest(unittest.TestCase):
     A, B = 'lisp/session/a.el', 'lisp/session/b.el'
     DIED = 'exit 255'
 
-    def test_a_file_the_host_fails_on_alike_here_and_at_the_base_is_named_not_judged(self):
-        shown, older, quiet, broken, unbased = lint.judged([self.A, self.B], [[OLD, NEW], self.DIED],
-                                                           {self.A: [OLD], self.B: self.DIED})
+    def test_a_file_whose_text_the_host_cannot_hold_here_and_at_the_base_is_named_not_judged(self):
+        shown, older, quiet, broken, unbased = lint.judged([self.A, self.B], [[OLD, NEW], lint.UNREADABLE],
+                                                           {self.A: [OLD], self.B: lint.UNREADABLE})
         self.assertEqual((shown, older, quiet, broken, unbased), ([NEW], 1, [self.B], [], []))
+
+    def test_a_like_failure_that_names_no_limit_of_the_file_is_broken(self):
+        # A signal (both runs killed), or the same status with another message, says nothing about the file.
+        for cause in ('exit -9', self.DIED):
+            self.assertEqual(lint.judged([self.A, self.B], [[OLD], cause], {self.A: [OLD], self.B: cause})[3], [self.B])
+
+    def test_only_the_hosts_text_error_names_a_files_own_limit(self):
+        self.assertEqual(lint.cause_of(False, 255, 'Loading...\ninvalid Unicode text\n'), lint.UNREADABLE)
+        self.assertEqual(lint.cause_of(False, 255, 'Symbol\u2019s value as variable is void: x\n'), 'exit 255')
+        self.assertEqual(lint.cause_of(False, -9, ''), 'exit -9')
+        self.assertIsNone(lint.cause_of(True, 1, ''))
 
     def test_a_timeout_is_never_as_at_the_base(self):
         self.assertEqual(lint.judged([self.A, self.B], [[OLD], 'timeout'], {self.A: [OLD], self.B: 'timeout'})[3], [self.B])
