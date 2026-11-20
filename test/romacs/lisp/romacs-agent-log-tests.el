@@ -9,7 +9,8 @@
       (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
   (require 'romacs-agent)
   (require 'romacs-agent-claude)
-  (require 'romacs-agent-log))
+  (require 'romacs-agent-log)
+  (require 'romacs-agent-menu))
 
 (defmacro romacs-agent-log-tests--with (&rest body)
   "BODY in a chat of `session', its events drawn by `draw'."
@@ -275,34 +276,34 @@
                           (romacs-agent--make :id "c2" :state 'idle :title "finished")
                           (romacs-agent--make :id "c3" :state 'waiting-approval :title "asks"))))
       (cl-letf (((symbol-function 'romacs-agent-children) (lambda (_) children)))
-        (should (equal (substring-no-properties (romacs-agent-log--menu-title)) "Agent · lane chat"))
+        (should (equal (substring-no-properties (romacs-agent-menu--title)) "Agent · lane chat"))
         ;; A finished one is the board's; one waiting on the user first.
-        (should (equal (mapcar #'romacs-agent-title (romacs-agent-log--workers)) '("asks" "builds")))
-        (should (equal (substring-no-properties (romacs-agent-log--worker-label 0)) "◆ asks you · asks"))
-        (should (equal (substring-no-properties (romacs-agent-log--worker-label 1)) "● running · builds"))
-        (should-not (romacs-agent-log--worker-label 2))
+        (should (equal (mapcar #'romacs-agent-title (romacs-agent-menu--workers)) '("asks" "builds")))
+        (should (equal (substring-no-properties (romacs-agent-menu--worker-label 0)) "◆ asks you · asks"))
+        (should (equal (substring-no-properties (romacs-agent-menu--worker-label 1)) "● running · builds"))
+        (should-not (romacs-agent-menu--worker-label 2))
         ;; A long title is what a cut row loses, its state never.
         (setf (romacs-agent-title (nth 0 children)) (make-string 60 ?x))
-        (should (string-prefix-p "● running · " (substring-no-properties (romacs-agent-log--worker-label 1))))
+        (should (string-prefix-p "● running · " (substring-no-properties (romacs-agent-menu--worker-label 1))))
         (setf (romacs-agent-title (nth 0 children)) "builds")
         ;; A digit opens the worker it showed; one finished since is the board's.
         (let (shown)
           (cl-letf (((symbol-function 'romacs-agent-show) (lambda (child &rest _) (setq shown child))))
             (setf (romacs-agent-state (nth 2 children)) 'idle)
-            (let ((last-command-event ?2)) (romacs-agent-log-open-worker))
+            (let ((last-command-event ?2)) (romacs-agent-menu-open-worker))
             (should (equal (romacs-agent-title shown) "builds"))
-            (let ((last-command-event ?1)) (should-error (romacs-agent-log-open-worker) :type 'user-error))
+            (let ((last-command-event ?1)) (should-error (romacs-agent-menu-open-worker) :type 'user-error))
             ;; All finished while it is open: its keys still dispatch (the
             ;; group has no :if), each saying so.
             (setf (romacs-agent-state (car children)) 'idle)
-            (should-not (romacs-agent-log--workers))
+            (should-not (romacs-agent-menu--workers))
             (let ((group (seq-find (lambda (group) (equal (plist-get group :name) "Workers"))
-                                   (apply #'append (keymap-popup--meta romacs-agent-log-actions-map 'descriptions)))))
+                                   (apply #'append (keymap-popup--meta romacs-agent-menu-map 'descriptions)))))
               (should group)
               (should-not (plist-get group :if)))
-            (let ((last-command-event ?2)) (should-error (romacs-agent-log-open-worker) :type 'user-error))
+            (let ((last-command-event ?2)) (should-error (romacs-agent-menu-open-worker) :type 'user-error))
             ;; Each chat its own rows.
-            (should-not (eq romacs-agent-log--menu-workers (default-value 'romacs-agent-log--menu-workers)))
+            (should-not (eq romacs-agent-menu--shown (default-value 'romacs-agent-menu--shown)))
             (setf (romacs-agent-state (car children)) 'running)
             (setf (romacs-agent-state (nth 2 children)) 'waiting-approval)))
         ;; Its values read as values, never dim as a command it cannot run.
@@ -315,12 +316,12 @@
 (ert-deftest romacs-agent-log-menu-rows-are-each-chats-own ()
   ;; Even over a shared default a load left behind.
   (let ((shared (make-vector 9 nil)))
-    (cl-letf (((default-value 'romacs-agent-log--menu-workers) shared))
+    (cl-letf (((default-value 'romacs-agent-menu--shown) shared))
       (with-temp-buffer
-        (let ((one (romacs-agent-log--menu-slots)))
+        (let ((one (romacs-agent-menu--slots)))
           (with-temp-buffer
-            (should-not (eq (romacs-agent-log--menu-slots) one))
-            (should-not (eq (romacs-agent-log--menu-slots) shared))))))))
+            (should-not (eq (romacs-agent-menu--slots) one))
+            (should-not (eq (romacs-agent-menu--slots) shared))))))))
 
 (ert-deftest romacs-agent-log-several-answers-keep-their-questions ()
   (let ((one (make-hash-table :test #'equal)) (two (make-hash-table :test #'equal)))
