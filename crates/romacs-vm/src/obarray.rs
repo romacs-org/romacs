@@ -256,13 +256,13 @@ impl Vm {
 /// The key text (symkey.rs) of a name's BYTES (CHARS characters): the
 /// name's own bytes, borrowed, when they are their key text (ASCII, or
 /// multibyte Unicode text without the key's escape); escaped otherwise. A
-/// unibyte name's bytes above 127 are raw-byte characters.
+/// unibyte name with bytes above 127 is marked so (`symkey::unibyte_key`).
 pub(super) fn symbol_key(bytes: &[u8], chars: usize) -> Option<std::borrow::Cow<'_, str>> {
     use std::borrow::Cow;
     if bytes.is_ascii() { return std::str::from_utf8(bytes).ok().map(Cow::Borrowed); }
     // A unibyte name: its bytes above 127 name raw-byte characters, though
     // they may read as UTF-8 (romacs#326).
-    if chars == bytes.len() { return Some(Cow::Owned(crate::symkey::from_internal(&crate::text::octets_to_multibyte(bytes)))); }
+    if chars == bytes.len() { return Some(Cow::Owned(crate::symkey::unibyte_key(bytes))); }
     if let Ok(text) = std::str::from_utf8(bytes) && !text.contains(crate::symkey::ESC) { return Some(Cow::Borrowed(text)); }
     Some(Cow::Owned(crate::symkey::from_internal(bytes)))
 }

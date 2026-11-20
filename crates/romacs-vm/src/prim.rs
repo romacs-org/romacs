@@ -633,9 +633,16 @@ mod leaf {
         /// its name: the same character count, byte count and bytes, read in
         /// place, with nothing copied.
         pub(crate) fn string_equal(&self, v: Value, w: Value) -> std::result::Result<bool, Fault> {
+            use std::borrow::Cow;
+            // A symbol's name as GNU compares it: characters and bytes, an
+            // escaped key's decoded (symkey.rs).
             let text = |v| match self.symbol_text(v) {
-                Some(name) => Ok((name.chars().count(), name.as_bytes())),
-                None => self.vm.str_view(v).map(|s| (s.chars, s.bytes)).ok_or(Fault::Wrong("stringp", v)),
+                Some(name) => Ok(match crate::symkey::lisp_name(name) {
+                    Some((bytes, false)) => (bytes.len(), Cow::Owned(bytes)),
+                    Some((internal, true)) => (crate::symkey::internal_chars(&internal), Cow::Owned(internal)),
+                    None => (name.chars().count(), Cow::Borrowed(name.as_bytes())),
+                }),
+                None => self.vm.str_view(v).map(|s| (s.chars, Cow::Borrowed(s.bytes))).ok_or(Fault::Wrong("stringp", v)),
             };
             Ok(text(v)? == text(w)?)
         }
@@ -1550,8 +1557,10 @@ mod leaf {
             if let Ok(slot) = self.symbol_slot(symbol)
                 && let Some(&name) = self.vm.obarray_symbol_names.get(&slot) { return Ok(name); }
             let name = self.symbol_name(symbol)?;
-            let value = match crate::symkey::to_internal(&name) {
-                Some(internal) => self.make_string(internal, true),
+            // A unibyte name's is unibyte (symkey.rs), as GNU keeps it.
+            let value = match crate::symkey::lisp_name(&name) {
+                Some((bytes, false)) => self.byte_string(&bytes),
+                Some((internal, true)) => self.make_string(internal, true),
                 None if name.is_ascii() => self.byte_string(name.as_bytes()),
                 None => self.string(&name),
             };
