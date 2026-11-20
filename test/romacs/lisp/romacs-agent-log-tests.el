@@ -384,6 +384,20 @@
     (should (string-match-p "the harness exited with it unanswered" (romacs-agent-log-tests--transcript)))
     (should-not romacs-agent-log--asks)))
 
+(ert-deftest romacs-agent-log-earlier-turns-draw-no-live-asks ()
+  ;; An approval in the earlier turns whose settling the shown ones hold.
+  (romacs-agent-log-tests--with
+    (ignore #'draw)
+    (setq romacs-agent-log--from 5)
+    (cl-letf (((symbol-function 'romacs-agent--journal-tail) (lambda (&rest _) '(nil)))
+              ((symbol-function 'romacs-agent-events-p) #'ignore)
+              ((symbol-function 'romacs-agent-log--replay)
+               (lambda (s &rest _) (romacs-agent-log-draw s '(:type approval :request-id "old" :tool "Bash")))))
+      (romacs-agent-log-earlier))
+    (should-not (text-property-any (point-min) romacs-agent-log--end 'romacs-agent-log-keys t))
+    (should-not (text-property-any (point-min) romacs-agent-log--end 'keymap romacs-agent-log-ask-map))
+    (should-not romacs-agent-log--asks)))
+
 (ert-deftest romacs-agent-log-a-block-waits-until-its-answer-is-written ()
   (romacs-agent-log-tests--with
     (puthash "q" t (romacs-agent-approvals session))
