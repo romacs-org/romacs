@@ -199,6 +199,7 @@ fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool) {
     } else {
         vec![]
     };
+    let compile_processes = environment.clone();
     romacs_vm::compiled_lisp::configure(romacs_vm::compiled_lisp::Config {
         compiler,
         environment,
@@ -221,13 +222,17 @@ fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool) {
         // (a source boot, a session, a tree's process) loads what was
         // compiled, so it takes the published manifest checked against the
         // files now (`World::lisp_files_digest`): a changed file gives no
-        // identity, and the load compiles, which rebuilds the world.
+        // identity, and the load compiles, which rebuilds the world. Its
+        // environment records are asked of the compile environment, where
+        // the world is built and restored, not of this process's: a
+        // session's or an installer's LOGNAME is none of a compile's.
         identity: Box::new({
             let world = std::sync::OnceLock::new();
             let roots: Vec<PathBuf> = root.iter().cloned().collect();
+            let environment = compile_processes.clone();
             move || {
                 let world = world.get_or_init(|| World::new(worlds.clone(), recipe.clone()).ok()).as_ref()?;
-                let (source, lisp) = compile_lisp_digest(world, &roots, RESTORED.get());
+                let (source, lisp) = compile_lisp_digest(world, &roots, &environment, RESTORED.get());
                 diagnose(&serde_json::json!({"compile_identity": source, "lisp": lisp}));
                 let lisp = lisp?;
                 let libraries = romacs_vm::world::store::libraries_identity().ok()?;
@@ -327,13 +332,14 @@ fn tree_root(dir: &Path) -> Option<PathBuf> {
 /// world) is keyed by, named relative to ROOTS, and which manifest gave it:
 /// `restored`, the manifest of the world this process RESTORED, when that
 /// is WORLD (a compile process), else `published`, WORLD's published
-/// manifest checked against the files now (`configure_store` says why).
-fn compile_lisp_digest(world: &World, roots: &[PathBuf], restored: Option<&(PathBuf, [u8; 32], serde_json::Value)>)
-    -> (&'static str, Option<String>) {
+/// manifest checked against the files now, its environment records against
+/// ENVIRONMENT, a compile process's (`configure_store` says why).
+fn compile_lisp_digest(world: &World, roots: &[PathBuf], environment: &[(OsString, OsString)],
+                       restored: Option<&(PathBuf, [u8; 32], serde_json::Value)>) -> (&'static str, Option<String>) {
     match restored {
         Some((store, key, manifest)) if *store == world.store && *key == world.key =>
             ("restored", romacs_vm::world::store::lisp_digest(manifest, roots)),
-        _ => ("published", world.lisp_files_digest(roots)),
+        _ => ("published", world.lisp_files_digest(roots, environment)),
     }
 }
 
@@ -538,10 +544,10 @@ mod tests {
         let digest = |m| romacs_vm::world::store::lisp_digest(m, &roots);
         assert_ne!(digest(&v1), digest(&v2));
         let restored = (store.clone(), key, v1.clone());
-        assert_eq!(compile_lisp_digest(&world, &roots, Some(&restored)), ("restored", digest(&v1)), "the restored world");
-        assert_eq!(compile_lisp_digest(&world, &roots, None), ("published", digest(&v2)), "the published world");
+        assert_eq!(compile_lisp_digest(&world, &roots, &[], Some(&restored)), ("restored", digest(&v1)), "the restored world");
+        assert_eq!(compile_lisp_digest(&world, &roots, &[], None), ("published", digest(&v2)), "the published world");
         let elsewhere = (store.join("other"), key, v1.clone());
-        assert_eq!(compile_lisp_digest(&world, &roots, Some(&elsewhere)), ("published", digest(&v2)), "another store's world");
+        assert_eq!(compile_lisp_digest(&world, &roots, &[], Some(&elsewhere)), ("published", digest(&v2)), "another store's world");
         let _ = std::fs::remove_dir_all(&store);
     }
 }

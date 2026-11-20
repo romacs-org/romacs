@@ -512,7 +512,7 @@ impl World {
         checked_store(&store, host::getenv("HOME").map(PathBuf::from).as_deref()).map_err(fail)?;
         let key = world_key(&store, &recipe, false).map_err(fail)?;
         let world = World { store, key, recipe };
-        let manifest = if replay { world.checked_manifest(false) } else { world.published_manifest() }
+        let manifest = if replay { world.checked_manifest(false, None) } else { world.published_manifest() }
             .map_err(|reason| world.explained(reason))?;
         let image = world.checked_image(&manifest, false)?;
         Ok((world, image))
@@ -555,8 +555,17 @@ impl World {
     /// (`lisp_digest`). None when no world was published, or a file its
     /// build read has changed since: no process that did not restore this
     /// world keys compiled Lisp by a world that would be built again.
-    pub fn lisp_files_digest(&self, roots: &[PathBuf]) -> Option<String> {
-        lisp_digest(&self.valid_manifest().ok()?, roots)
+    ///
+    /// ENVIRONMENT is the whole environment of the processes that restore
+    /// this world, a compile process's for the compile world: its
+    /// environment records are asked of it, not of this process's, which
+    /// may differ (a session's LOGNAME, which no compile process has). A
+    /// world build records no per-process name (the names `pinned_env`
+    /// sets are pinned), so ENVIRONMENT answers each as its builder saw it.
+    /// No verdict is kept: the digest cache holds file contents by stat,
+    /// whatever the environment.
+    pub fn lisp_files_digest(&self, roots: &[PathBuf], environment: &[(OsString, OsString)]) -> Option<String> {
+        lisp_digest(&self.checked_manifest(true, Some(environment)).ok()?, roots)
     }
 
     /// Whether a launch would restore this world now: its manifest holds
@@ -583,13 +592,14 @@ impl World {
     /// stat first (`held_read`), a path probe directly (`held_probe`), and
     /// a record the build made twice once.
     fn valid_manifest(&self) -> Result<Json, Json> {
-        self.checked_manifest(true)
+        self.checked_manifest(true, None)
     }
 
     /// `valid_manifest`, the digest cache filled with each file read asked
     /// again when REMEMBER, as a store this process may write is (not an
-    /// installation's).
-    fn checked_manifest(&self, remember: bool) -> Result<Json, Json> {
+    /// installation's), and each environment record asked of ENVIRONMENT
+    /// when given (`env_record`), else of this process.
+    fn checked_manifest(&self, remember: bool, environment: Option<&[(OsString, OsString)]>) -> Result<Json, Json> {
         let manifest = self.published()?;
         // A build asks many facts more than once: each record, its site
         // aside, is asked again once.
@@ -601,13 +611,28 @@ impl World {
                 || host::unrecorded(|| Self::held_probe(record) || self.held_read(record, remember)) {
                 continue;
             }
-            match host::replay(record) {
+            let now = match environment {
+                Some(environment) if record["kind"] == "env" => Some(Self::env_record(&expected, environment)),
+                _ => host::replay(record),
+            };
+            match now {
                 Some(now) if now == expected => {}
                 now => return Err(json!({"stale": expected, "now": now})),
             }
         }
         captured(&manifest)?;
         Ok(manifest)
+    }
+
+    /// The environment record EXPECTED, its site aside, as a process whose
+    /// whole environment is ENVIRONMENT makes it: every form of lookup
+    /// records the process's value of the name (`host::lisp_env`).
+    fn env_record(expected: &Json, environment: &[(OsString, OsString)]) -> Json {
+        let value = environment.iter().find(|(name, _)| host::encoded(name.as_encoded_bytes()) == expected["name"])
+            .map(|(_, value)| host::encoded(value.as_encoded_bytes()));
+        let mut now = expected.clone();
+        now["value"] = value.unwrap_or(Json::Null);
+        now
     }
 
     /// Whether RECORD is a path probe (existence, file or directory) whose
@@ -1581,7 +1606,7 @@ mod tests {
         let world = World { store: store.clone(), key: [0x5a; 32], recipe: vec![] };
         std::fs::write(world.file(".json"), serde_json::json!({"records": [record(sha.clone())]}).to_string()).unwrap();
         let entry = || world.read_entry(&std::fs::metadata(&file).unwrap());
-        assert!(world.checked_manifest(false).is_ok());
+        assert!(world.checked_manifest(false, None).is_ok());
         assert!(!entry().exists(), "an installation's store is not written");
         assert!(world.valid_manifest().is_ok());
         assert_eq!(std::fs::read_to_string(entry()).unwrap(), sha);
@@ -1638,18 +1663,43 @@ mod tests {
         publish(&in_b, restored.to_string());
         publish(&in_a, manifest("00".repeat(32)).to_string());
         let roots = [b.clone()];
-        assert_eq!(in_b.lisp_files_digest(&roots), lisp_digest(&restored, &roots));
-        assert!(in_a.lisp_files_digest(&roots).is_none(), "another store's stale world, same key");
+        assert_eq!(in_b.lisp_files_digest(&roots, &[]), lisp_digest(&restored, &roots));
+        assert!(in_a.lisp_files_digest(&roots, &[]).is_none(), "another store's stale world, same key");
         publish(&in_b, manifest("00".repeat(32)).to_string());
-        assert!(in_b.lisp_files_digest(&roots).is_none(), "the same store's manifest published again, stale");
+        assert!(in_b.lisp_files_digest(&roots, &[]).is_none(), "the same store's manifest published again, stale");
         // The restored world's preloaded file changes, and a valid world is published again.
         std::fs::write(&file, "y").unwrap();
         publish(&in_b, manifest(hex(&sha256(b"y"))).to_string());
-        let published = in_b.lisp_files_digest(&roots);
+        let published = in_b.lisp_files_digest(&roots, &[]);
         assert!(published.is_some());
         assert_ne!(lisp_digest(&restored, &roots), published, "the restored world keys as the new one");
         let _ = std::fs::remove_dir_all(&a);
         let _ = std::fs::remove_dir_all(&b);
+    }
+
+    /// The digest asks a world's environment records of the environment of
+    /// the processes that restore it, not of the asking process's: a
+    /// compile world, built where no LOGNAME is set, holds for a session
+    /// that has one. A launch's own check still asks its own environment.
+    #[test]
+    fn a_worlds_digest_asks_its_environment_records_of_the_given_environment() {
+        let store = marked_store("digest-env");
+        let file = store.join("subr.el");
+        std::fs::write(&file, "x").unwrap();
+        // A name no test process has, recorded with a value.
+        let name = "ROMACS_TEST_DIGEST_ENV_NAME";
+        let world = World { store: store.clone(), key: [0x5e; 32], recipe: vec![] };
+        std::fs::write(world.file(".json"), serde_json::json!({"records": [
+            {"kind": "file-read", "path": file.to_str().unwrap(), "result": {"len": 1, "sha256": hex(&sha256(b"x"))}},
+            {"kind": "env", "form": "initial", "name": name, "value": "compile", "site": "x.el:1"}]}).to_string()).unwrap();
+        let roots = [store.clone()];
+        let compile = [(OsString::from("LANG"), OsString::from("C.UTF-8")), (OsString::from(name), OsString::from("compile"))];
+        assert!(world.lisp_files_digest(&roots, &compile).is_some(), "the compile environment's value holds");
+        assert!(world.lisp_files_digest(&roots, &compile[..1]).is_none(), "the name unset there: stale");
+        let other = [(OsString::from(name), OsString::from("session"))];
+        assert!(world.lisp_files_digest(&roots, &other).is_none(), "another value: stale");
+        assert!(world.valid_manifest().is_err_and(|why| why.get("stale").is_some()), "a launch asks its own environment");
+        let _ = std::fs::remove_dir_all(&store);
     }
 
     /// Two listings of one directory are two facts: one stopped before any
