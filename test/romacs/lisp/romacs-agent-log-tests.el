@@ -28,6 +28,10 @@
        (cl-flet ((draw (&rest event) (romacs-agent-log-draw session event) (romacs-agent-log--separator)))
          ,@body))))
 
+;; What runs before a redisplay: a batch session has no host to run it.
+(unless (fboundp 'romacs--run-window-change-functions)
+  (load (expand-file-name "../vm/window-change.el" (file-name-directory (locate-library "romacs-agent.el"))) nil t))
+
 (defun romacs-agent-log-tests--transcript ()
   (buffer-substring-no-properties (point-min) romacs-agent-log--end))
 
@@ -237,6 +241,42 @@
     (draw :type 'delta :text "root text")
     (should (string-match-p "│ · completed\n[^│]*root text" (romacs-agent-log-tests--transcript)))))
 
+(ert-deftest romacs-agent-log-rule-fits-the-windows-showing-the-chat ()
+  (romacs-agent-log-tests--with
+    (ignore #'draw)
+    (let ((rule (lambda () (save-excursion (goto-char romacs-agent-log--end)
+                                           (how-many "─" (point) (line-end-position)))))
+          (chat (current-buffer)))
+      (puthash "L" chat romacs-agent-log--chats)
+      (unwind-protect
+          (save-window-excursion
+            (delete-other-windows)
+            (switch-to-buffer chat)
+            ;; The hooks run as the host delivers window changes before a
+            ;; redisplay.
+            (romacs--run-window-change-functions)
+            (let ((narrow (split-window-right (- (window-total-width) 30))))
+              (set-window-buffer narrow chat)
+              (romacs--run-window-change-functions)
+              (let ((short (funcall rule)))
+                ;; The narrower window leaves no room for the rule to wrap in.
+                (should (< (+ romacs-agent-log--thread-cols short) (window-body-width narrow)))
+                ;; It shows another buffer: the rule fits the wider one again.
+                (set-window-buffer narrow (get-buffer-create "*romacs-agent-log-tests other*"))
+                (romacs--run-window-change-functions)
+                (should (> (funcall rule) short)))))
+        (remhash "L" romacs-agent-log--chats)))))
+
+(ert-deftest romacs-agent-log-several-answers-keep-their-questions ()
+  (let ((one (make-hash-table :test #'equal)) (two (make-hash-table :test #'equal)))
+    (puthash "Colour?" "Blue" one)
+    (puthash "Colour?" "Blue" two)
+    (puthash "Size?" "Large" two)
+    (should (string-suffix-p "answered: Blue" (romacs-agent-log--answer-text "user" "allow" "once" nil one)))
+    (let ((text (romacs-agent-log--answer-text "user" "allow" "once" nil two)))
+      (should (string-match-p "Colour\\? → Blue" text))
+      (should (string-match-p "Size\\? → Large" text)))))
+
 (ert-deftest romacs-agent-log-a-block-waits-until-its-answer-is-written ()
   (romacs-agent-log-tests--with
     (puthash "q" t (romacs-agent-approvals session))
@@ -246,11 +286,14 @@
       (puthash "Colour?" "Blue" answers)
       (draw :type 'attributed :request-id "q" :by "user" :decision "allow" :scope "once" :answers answers))
     ;; Said who answered, and what; still answerable until the harness has it.
-    (should (string-match-p "allowed by you\n  Colour\\? → Blue" (romacs-agent-log-tests--transcript)))
+    (should (string-match-p "✔ answered: Blue" (romacs-agent-log-tests--transcript)))
+    (should-not (string-match-p "allowed by you" (romacs-agent-log-tests--transcript)))
     (should (assoc "q" romacs-agent-log--asks))
     (remhash "q" (romacs-agent-approvals session))
     (draw :type 'answered :request-id "q" :behavior "allow")
     (should-not romacs-agent-log--asks)
+    ;; Its keys answer nothing any more: gone.
+    (should-not (string-match-p "decline" (romacs-agent-log-tests--transcript)))
     (should-not (string-match-p "not recorded" (romacs-agent-log-tests--transcript)))))
 
 (ert-deftest romacs-agent-log-ret-on-an-approval-only-shows-it ()

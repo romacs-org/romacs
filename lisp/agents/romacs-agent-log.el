@@ -44,6 +44,7 @@
 (require 'romacs-agent-store)
 
 (require 'keymap-popup)
+(require 'romacs-working)
 
 ;; The actions the chat's menu offers on its session are the chat's of
 ;; before (romacs-agent-ui.el), which read the session from here too.
@@ -93,13 +94,14 @@ line above them brings earlier ones."
   "A message the user sent.")
 (defface romacs-agent-log-thinking '((t :inherit (shadow italic)))
   "What the agent thinks.")
-(defface romacs-agent-log-tool '((t :inherit font-lock-function-name-face))
-  "A tool call's name.")
+(defface romacs-agent-log-tool '((t :inherit romacs-working-running))
+  "A tool call's mark and name: the theme's own colour for work, never a
+syntax face's, which a theme may draw as red as an error.")
 (defface romacs-agent-log-output '((t :inherit shadow))
   "A tool's output, and its input's lines.")
 (defface romacs-agent-log-note '((t :inherit shadow))
   "A status line: what the harness or Romacs says of the session.")
-(defface romacs-agent-log-ask '((t :inherit warning :extend t :inverse-video nil :weight bold))
+(defface romacs-agent-log-ask '((t :inherit romacs-working-waiting :extend t :weight bold))
   "An approval or a question that waits on the user.")
 (defface romacs-agent-log-allowed '((t :inherit success))
   "An answer that allowed.")
@@ -149,6 +151,7 @@ NEWLINES the line breaks it ended in so far, held until text follows.")
 (defvar-local romacs-agent-log--attributed nil
   "Request ids whose answer was drawn with who gave it.")
 (defvar-local romacs-agent-log--state nil "What the separator last said.")
+(defvar-local romacs-agent-log--width nil "The columns the separator was last made for.")
 (defvar-local romacs-agent-log--prompts nil
   "The user's prompts this chat has drawn, the newest first: what M-p recalls.")
 (defvar-local romacs-agent-log--recalled nil
@@ -632,8 +635,12 @@ Live, in a chat no window shows, the echo area says so too."
                                                 'romacs-agent-log-deny "deny"))))
          (text (concat (propertize (concat "⚠ " head) 'face 'romacs-agent-log-ask)
                        (if why (concat "\n  " (propertize why 'face 'romacs-agent-log-note)) "")
-                       (if body (concat "\n" (propertize (replace-regexp-in-string "^" "  " body) 'face 'romacs-agent-log-output)) "")
-                       "\n  " keys "\n")))
+                       ;; Its question and choices in the text's own face: the
+                       ;; decision reads first, after the heading.
+                       (if body (concat "\n" (propertize (replace-regexp-in-string "^" "  " body)
+                                                          'face (if questions 'default 'romacs-agent-log-output)))
+                         "")
+                       "\n" (propertize (concat "  " keys "\n") 'romacs-agent-log-keys t))))
     (let ((start (copy-marker romacs-agent-log--end)))
       (romacs-agent-log--put (propertize (romacs-agent-log--entry text 'ask event)
                                          'romacs-agent-log-request id
@@ -647,6 +654,9 @@ Live, in a chat no window shows, the echo area says so too."
   (when-let* ((block (assoc id romacs-agent-log--asks)))
     (pcase-let ((`(,_ ,start . ,end) block))
       (romacs-agent-log--writing
+        ;; Its keys answer nothing any more: their row goes.
+        (when-let* ((keys (text-property-any start end 'romacs-agent-log-keys t)))
+          (delete-region keys (or (next-single-property-change keys 'romacs-agent-log-keys nil end) end)))
         (add-face-text-property start end 'romacs-agent-log-note)
         (remove-text-properties start end '(keymap nil))
         (put-text-property start end 'keymap romacs-agent-log-transcript-map)))
@@ -654,7 +664,17 @@ Live, in a chat no window shows, the echo area says so too."
 
 (defun romacs-agent-log--answer-text (by decision scope reason &optional answers)
   "Who answered, and how: BY `user' or `policy', DECISION allow or deny;
-ANSWERS, a table of question to answer, what was answered."
+ANSWERS, a table of question to answer, what was answered: a question's
+answer says what was chosen, never that a tool was allowed."
+  (if (and (hash-table-p answers) (equal decision "allow"))
+      (concat (propertize "✔ " 'face 'romacs-agent-log-allowed)
+              (if (equal by "user") "answered: " "answered by Romacs: ")
+              ;; One question: its answer; more: each question with its own.
+              (let ((one (= (hash-table-count answers) 1)))
+                (mapconcat (lambda (question)
+                             (if one (format "%s" (gethash question answers))
+                               (format "%s → %s" question (gethash question answers))))
+                           (hash-table-keys answers) " · ")))
   (let ((allowed (equal decision "allow")))
     (concat (propertize (if allowed "✔ " "✘ ") 'face (if allowed 'romacs-agent-log-allowed 'romacs-agent-log-denied))
             (pcase by ("user" (if allowed "allowed by you" "denied by you"))
@@ -662,10 +682,7 @@ ANSWERS, a table of question to answer, what was answered."
                    (_ (if allowed "allowed" "denied")))
             (if (equal scope "session") " for this session" "")
             (if (and reason (not (string-empty-p reason))) (concat ": " reason) "")
-            (if (hash-table-p answers)
-                (mapconcat (lambda (question) (format "\n  %s → %s" question (gethash question answers)))
-                           (hash-table-keys answers) "")
-              ""))))
+            ""))))
 
 (defun romacs-agent-log--answered (event)
   "Draw answer EVENT, from the harness's records: its block settled, and,
@@ -789,29 +806,56 @@ unless a note said who gave it, that it was answered."
 (defun romacs-agent-log--doing (session)
   "What SESSION does now, as the separator says it: (STATE . WORDS)."
   (pcase (if (romacs-agent-log--pending) 'waiting-approval (romacs-agent-state session))
-    ('waiting-approval (cons 'waiting (substitute-command-keys
-                                        (concat "waits on you: \\<romacs-agent-log-mode-map>\\[romacs-agent-log-allow] allow · "
-                                                "\\[romacs-agent-log-deny] deny · \\[romacs-agent-log-next-ask] goes to it"))))
+    ('waiting-approval
+     (let ((question (when-let* ((ask (car (romacs-agent-log--pending))))
+                       (get-text-property (cadr ask) 'romacs-agent-log-questions))))
+       (cons 'waiting (substitute-command-keys
+                       (concat "⚠ waits on you: \\<romacs-agent-log-mode-map>\\[romacs-agent-log-allow] "
+                               (if question "choose" "allow") " · \\[romacs-agent-log-deny] "
+                               (if question "decline" "deny") " · \\[romacs-agent-log-next-ask] goes to it")))))
     ((or 'starting 'running)
      (cons 'working (if-let* ((block (romacs-agent-log--block romacs-agent-log--current)))
                         (format "running %s" (plist-get (cdr block) :name))
                       "working")))
+    ;; A turn that failed and is not yet seen: said so, until the next.
+    ('idle (if (romacs-agent-failed session) (cons 'failed "failed") (cons 'idle "idle")))
     (state (cons 'idle (format "%s" state)))))
 
-(defun romacs-agent-log--separator-text (doing)
-  "The separator for DOING, (STATE . WORDS): what the session does, then
-the composer's prompt."
-  (let ((face (pcase (car doing) ('waiting 'romacs-agent-log-ask) ('working 'romacs-agent-log-tool) (_ 'romacs-agent-log-rule))))
-    (concat (propertize (concat (pcase (car doing) ('waiting "⚠") ('working "◉") (_ "○")) " " (cdr doing) " ")
-                        'face face)
-            (propertize (make-string 40 ?─) 'face 'romacs-agent-log-rule)
-            "\n" (propertize "❯ " 'face 'romacs-agent-log-prompt))))
+(defconst romacs-agent-log--thread-cols 8
+  "Characters of the working thread that starts the separator.")
+
+(defun romacs-agent-log--work (doing)
+  "The working thread's work for DOING (`romacs-working')."
+  (pcase (car doing) ('waiting 'waiting) ('working 'running) ('failed 'failed) (_ 'idle)))
+
+(defun romacs-agent-log--rule-width ()
+  "The columns the narrowest window showing the chat leaves its separator:
+its last width when none shows it."
+  (if-let* ((windows (get-buffer-window-list (current-buffer) nil t)))
+      (apply #'min (mapcar #'window-body-width windows))
+    (or romacs-agent-log--width 80)))
+
+(defun romacs-agent-log--separator-text (doing width)
+  "The separator for DOING, (STATE . WORDS), in WIDTH columns: the working
+thread, what the session does, then the composer's prompt."
+  (let ((face (pcase (car doing) ('waiting 'romacs-agent-log-ask) ('working 'romacs-working-running)
+                ('failed 'romacs-agent-log-denied) (_ 'romacs-agent-log-rule))))
+    (let* ((label (concat " " (propertize (cdr doing) 'face (list face 'bold)) " "))
+           ;; A dim rule after it fences the composer off the transcript,
+           ;; never wrapping; none when that is short.
+           (rule (- width 1 romacs-agent-log--thread-cols (string-width label))))
+      (concat (romacs-working-still romacs-agent-log--thread-cols (romacs-agent-log--work doing))
+              label
+              (if (>= rule 8) (propertize (make-string rule ?─) 'face 'romacs-agent-log-rule) "")
+              "\n" (propertize "❯ " 'face 'romacs-agent-log-prompt)))))
 
 (defun romacs-agent-log--separator (&optional force)
-  "Write the separator again when what the session does changed."
-  (let ((doing (romacs-agent-log--doing romacs-agent-log--session)))
-    (when (or force (not (equal doing romacs-agent-log--state)))
-      (setq romacs-agent-log--state doing)
+  "Write the separator again when what the session does, or the room the
+windows showing it leave, changed."
+  (let ((doing (romacs-agent-log--doing romacs-agent-log--session))
+        (width (romacs-agent-log--rule-width)))
+    (when (or force (not (equal doing romacs-agent-log--state)) (not (eql width romacs-agent-log--width)))
+      (setq romacs-agent-log--state doing romacs-agent-log--width width)
       (romacs-agent-log--writing
         (save-excursion
           ;; The new one put before the old one goes: a point in the
@@ -822,11 +866,13 @@ the composer's prompt."
             ;; A field of its own: word motion and kills in the composer
             ;; stop at its start, as in a comint buffer; line motion
             ;; crosses it (a field binds it only within a line).
-            (insert (propertize (romacs-agent-log--sealed (romacs-agent-log--separator-text doing))
+            (insert (propertize (romacs-agent-log--sealed (romacs-agent-log--separator-text doing width))
                                 'field 'romacs-agent-log-separator))
             (delete-region (point) (+ (point) old))
             (set-marker romacs-agent-log--input (point))
-            (set-marker romacs-agent-log--end start)))))))
+            (set-marker romacs-agent-log--end start))))
+      ;; The thread moves as the session does, drawn by the display.
+      (romacs-working-set (current-buffer) (romacs-agent-log--work doing)))))
 
 (defvar-local romacs-agent-log--title nil "The title the chat's name was made from.")
 (defvar-local romacs-agent-log--header-made nil
@@ -884,12 +930,21 @@ already is not.  Each source's live events come here."
         (setq romacs-agent-log--title (romacs-agent-title session))
         (romacs-agent-log--set-session session))
       (romacs-agent-log-draw session event)
+      (romacs-agent-log--progress event)
       (when (and seq (plist-get event :last)) (setq romacs-agent-log--seq seq))
       (romacs-agent-log--separator)
       (when (eq (car romacs-agent-log--state) 'working) (romacs-agent-log--tick-start))
       (romacs-agent-log--header-show))))
 
 (add-hook 'romacs-agent-event-functions #'romacs-agent-log--on-event)
+
+(defun romacs-agent-log--progress (event)
+  "Step the working thread on for EVENT when it is progress: a call begun
+or ended, a line of its output, a message ended."
+  (pcase (plist-get event :type)
+    ((or 'tool 'message-end) (romacs-working-advance (current-buffer)))
+    ;; A line of output each.
+    ('tool-output (romacs-working-advance (current-buffer) (cl-count ?\n (or (plist-get event :text) ""))))))
 
 ;;; Replay
 
@@ -1001,6 +1056,8 @@ where the chat reads and acts on SESSION, this editor by default
               romacs-agent-log--input (point-min-marker))
         (set-marker-insertion-type romacs-agent-log--end t)
         (romacs-agent-log--separator t)
+        (romacs-working-show buffer buffer romacs-agent-log--end romacs-agent-log--thread-cols
+                             (romacs-agent-log--work romacs-agent-log--state))
         (puthash (romacs-agent-id session) buffer chats)
         (add-hook 'window-buffer-change-functions #'romacs-agent-log--shown nil t)))
     (unless later (with-current-buffer buffer (romacs-agent-log--ensure-filled)))
@@ -1024,6 +1081,18 @@ drew forgotten, its markers let go, its composer kept."
     (romacs-agent-log-source-fill romacs-agent-log--source romacs-agent-log--session)
     (romacs-agent-log--separator t)
     (romacs-agent-log--header-show)))
+
+(defun romacs-agent-log--refit (_frame)
+  "A window started or stopped showing a buffer, or it or its frame went:
+each chat still shown, whatever its source, fits its rule to the windows
+showing it.  One shown nowhere is fitted when it shows again."
+  (dolist (buffer (delete-dups (mapcar #'window-buffer (window-list-1 nil 'nomini t))))
+    (with-current-buffer buffer
+      (when (and (derived-mode-p 'romacs-agent-log-mode) romacs-agent-log--input)
+        (romacs-agent-log--separator)))))
+
+(add-hook 'window-buffer-change-functions #'romacs-agent-log--refit)
+(add-hook 'after-delete-frame-functions #'romacs-agent-log--refit)
 
 (defun romacs-agent-log--shown (_window)
   "A window shows this chat: drawn now, when it was not, its header made
@@ -1446,6 +1515,8 @@ On the transcript's text:
   (setq-local scroll-conservatively 101)
   (setq-local header-line-format "")
   (setq-local desktop-save-buffer #'romacs-agent-log--desktop-save)
+  ;; The separator's rule fits the window it is shown in.
+  (add-hook 'window-size-change-functions (lambda (_) (when romacs-agent-log--input (romacs-agent-log--separator))) nil t)
   (add-hook 'after-change-functions #'romacs-agent-log--composer-plain nil t))
 
 (provide 'romacs-agent-log)
