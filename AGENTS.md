@@ -85,6 +85,10 @@ possible; say so where you do.
   a primitive's Rust file. What a caller should know of a function is put on the
   function, beside the better path's definition, and the lint tells each caller:
   `(put 'FUNCTION 'romacs-lint-hint "...")`.
+- Every public definition and every command in Romacs's own Lisp (as
+  `lisp/bundled.json` lays it out) has a docstring that says what its body
+  does, read from the body, not guessed from the name; the lint holds new ones
+  to it.
 - Ask the machine what it offers before writing Lisp for it: `(romacs-dev-guide
   "QUERY")`, or the MCP tool `romacs_dev_guide`, describes a function (a
   primitive's effect class and Rust file, what callers are told of it) or
@@ -272,8 +276,10 @@ The other commands:
 - Lisp lint on a prebuilt or installed host: `python3 tools/romacs-lint FILE ...`,
   what the change adds since its merge-base with beta. `--all` shows older findings
   too, `--binary` names the host; an installed host answers in about a second.
-- Editable Lisp checks on a prebuilt host: `python3 tools/test-elisp`. Its
-  `--test`, `--match`, file arguments, and `--core` option support smaller checks.
+- Romacs's own `romacs-test` files (`romacs-deftest`, in `test/romacs/romacs-test/`)
+  on a prebuilt host: `python3 tools/test-elisp`. Its `--test`, `--match`, file
+  arguments, and `--core` (the bare VM) support smaller checks. ERT files run with
+  `tools/test-ert`.
 - Bundled packages' real ERT suites on a prebuilt host, as GNU's `make check`:
   `make check`, `make check-expensive`, `make check-all`, `make check-MODULE`
   (`make check-list` names the modules: a package like `gnosis`, or one library),

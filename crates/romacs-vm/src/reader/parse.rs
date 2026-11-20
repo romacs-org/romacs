@@ -69,8 +69,75 @@ struct Reader<'a, 'r, 'm, 'b, 'g> {
     labels: BTreeMap<u64, usize>,
     /// The root of a `(CONDITION . DATA)` the read failed with, when known.
     signal: Option<usize>,
+    /// The string's or buffer's next characters, decoded in one leaf call
+    /// rather than one each (`Chunk`).
+    chunk: Chunk,
     #[cfg(test)]
     collect_subforms: bool,
+}
+
+/// The next characters of a string or buffer stream, read ahead in one leaf
+/// call: each one's code and width, and how many the reader has taken. A
+/// buffer stream's position is the reader's own (`at`) until the read ends or
+/// Lisp runs, when it is left in the buffer's point or the marker
+/// (`Reader::commit`); a chunk is dropped whenever Lisp may have run.
+#[derive(Default)]
+struct Chunk {
+    chars: Vec<(u32, u8)>,
+    taken: usize,
+    /// Characters the next refill reads: doubled at each, up to `CHUNK_MAX`.
+    want: usize,
+    /// A buffer stream's byte position, once the read has asked for it.
+    at: Option<usize>,
+    /// A string stream's characters read one at a time so far: a short read
+    /// never pays for a chunk (`DIRECT_FIRST`).
+    direct: usize,
+}
+
+/// The first refill's size and the largest. Small under test, so the suites
+/// cross a refill at every character.
+const CHUNK_FIRST: usize = if cfg!(test) { 1 } else { 32 };
+const CHUNK_MAX: usize = if cfg!(test) { 3 } else { 8192 };
+/// A string stream's first characters, read one at a time as before chunks:
+/// most reads from a string are this short. One under test, so the suites
+/// cross from one path to the other.
+const DIRECT_FIRST: usize = if cfg!(test) { 1 } else { 8 };
+
+impl Chunk {
+    fn next(&mut self) -> Option<(u32, u8)> {
+        let c = self.chars.get(self.taken).copied()?;
+        self.taken += 1;
+        Some(c)
+    }
+    /// The width of the character taken last, given back; None when the
+    /// chunk no longer holds it.
+    fn back(&mut self) -> Option<u8> {
+        self.taken = self.taken.checked_sub(1)?;
+        Some(self.chars[self.taken].1)
+    }
+    /// CHARS read ahead, REQUESTED of them asked for: the next refill
+    /// asks for twice as many.
+    fn refilled(&mut self, chars: Vec<(u32, u8)>, requested: usize) {
+        self.want = (requested * 2).clamp(CHUNK_FIRST, CHUNK_MAX);
+        self.chars = chars;
+        self.taken = 0;
+    }
+    /// The characters read ahead dropped, and the next refill back to its
+    /// first size: what was read ahead went unused.
+    fn drop_ahead(&mut self) {
+        self.chars.clear();
+        self.taken = 0;
+        self.want = 0;
+    }
+    /// N characters taken past the chunk's reader, as a string literal's run
+    /// takes them: the chunk keeps its place when it holds them all.
+    fn skip(&mut self, n: usize) {
+        if self.taken + n <= self.chars.len() {
+            self.taken += n;
+        } else {
+            self.drop_ahead();
+        }
+    }
 }
 /// The character at the start of BYTES of a Lisp string read as a stream,
 /// and its width: a unibyte string's bytes above 127 are raw bytes.
@@ -96,6 +163,9 @@ impl Reader<'_, '_, '_, '_, '_> {
     /// `char-from-name`), and the frame dropped: its value, when an integer.
     /// A read without the permission refuses: it reads Romacs's own text.
     fn call(&mut self, frame: RootFrame) -> Result<Option<i64>> {
+        // Lisp may move the stream or change its text: leave the position
+        // where the read has reached, and read on afresh after.
+        self.commit()?;
         let called = match self.gc.as_mut() {
             Some(gc) => crate::threaded::call_frame(self.m, gc.by_ref(), &frame, (), |_, (), value| value.map(crate::Value::integer_value)),
             None => Err("this read calls no Lisp: no function stream, and no `\\N{NAME}' by name".into()),
@@ -112,6 +182,7 @@ impl Reader<'_, '_, '_, '_, '_> {
         let (None, None, &Input::String { root, byte, character, end }) = (self.lookahead, &self.error, &self.input) else { return false };
         let (run, unicode, byte, after) = self.m.leaf((std::mem::take(s), (root, byte, character, end)), build::string_run);
         *s = run;
+        self.chunk.skip(after - character);
         self.at += after - character;
         self.input = Input::String { root, byte, character: after, end };
         unicode
@@ -135,28 +206,70 @@ impl Reader<'_, '_, '_, '_, '_> {
                 if *character >= *end {
                     return Ok(None);
                 }
-                let (c, width) = self.m.leaf((*root, *byte), build::string_char)?;
+                let (root, from, left) = (*root, *byte, *end - *character);
+                let (c, width) = match self.chunk.next() {
+                    Some(c) => c,
+                    None if self.chunk.direct < DIRECT_FIRST => {
+                        self.chunk.direct += 1;
+                        let (c, width) = self.m.leaf((root, from), build::string_char)?;
+                        (c, build::width_u8(width))
+                    }
+                    None => {
+                        let n = self.chunk.want.clamp(CHUNK_FIRST, CHUNK_MAX).min(left);
+                        let chars = self.m.leaf((root, from, n), build::string_chars)?;
+                        self.chunk.refilled(chars, n);
+                        self.chunk.next().ok_or("string stream changed length")?
+                    }
+                };
+                let Input::String { character, byte, .. } = &mut self.input else { unreachable!() };
                 *character += 1;
-                *byte += width;
+                *byte += usize::from(width);
                 Ok(Some(c))
             }
             Input::Function { root } => {
                 let frame = self.m.leaf((*root, None), build::stream_call)?;
                 Ok(self.call(frame)?.filter(|n| (0..=0x3fffff).contains(n)).map(|n| n as u32))
             }
-            Input::Buffer { root } => self.m.leaf(*root, build::buffer_get),
+            Input::Buffer { root } => {
+                let root = *root;
+                let at = match self.chunk.at {
+                    Some(at) => at,
+                    None => self.m.leaf(root, build::buffer_start)?,
+                };
+                if self.chunk.taken == self.chunk.chars.len() {
+                    let n = self.chunk.want.clamp(CHUNK_FIRST, CHUNK_MAX);
+                    let chars = self.m.leaf((root, at, n), build::buffer_chars)?;
+                    self.chunk.refilled(chars, n);
+                }
+                let Some((c, width)) = self.chunk.next() else {
+                    self.chunk.at = Some(at);
+                    return Ok(None);
+                };
+                self.chunk.at = Some(at + usize::from(width));
+                Ok(Some(c))
+            }
         }
+    }
+    /// A buffer stream's position left in the buffer (its point, or the
+    /// marker) at what the read has taken, and the characters read ahead
+    /// dropped; nothing for another stream.
+    fn commit(&mut self) -> Result<()> {
+        if let (Input::Buffer { root }, Some(at)) = (&self.input, self.chunk.at) {
+            self.m.leaf((*root, at), build::buffer_commit)?;
+        }
+        self.chunk.at = None;
+        self.chunk.drop_ahead();
+        Ok(())
     }
     fn unget(&mut self, c: u32) -> Result<()> {
         match &mut self.input {
             Input::Host { byte, .. } => *byte -= host_width(c),
-            Input::String {
-                root,
-                character,
-                byte,
-                ..
-            } => {
-                let width = self.m.leaf((*root, c), build::string_width)?;
+            Input::String { root, .. } => {
+                let width = match self.chunk.back() {
+                    Some(width) => usize::from(width),
+                    None => self.m.leaf((*root, c), build::string_width)?,
+                };
+                let Input::String { character, byte, .. } = &mut self.input else { unreachable!() };
                 *character -= 1;
                 *byte -= width;
             }
@@ -164,7 +277,15 @@ impl Reader<'_, '_, '_, '_, '_> {
                 let frame = self.m.leaf((*root, Some(c)), build::stream_call)?;
                 self.call(frame)?;
             }
-            Input::Buffer { root } => self.m.leaf((*root, c), build::buffer_unget)?,
+            Input::Buffer { root } => {
+                let root = *root;
+                if let (Some(at), Some(width)) = (self.chunk.at, self.chunk.back()) {
+                    self.chunk.at = Some(at - usize::from(width));
+                } else {
+                    self.commit()?;
+                    self.m.leaf((root, c), build::buffer_unget)?;
+                }
+            }
         }
         Ok(())
     }
@@ -829,6 +950,7 @@ pub(super) fn read_input<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Opt
         eof: false,
         labels: BTreeMap::new(),
         signal: None,
+        chunk: Chunk::default(),
         #[cfg(test)]
         collect_subforms: false,
     };
@@ -859,6 +981,11 @@ pub(super) fn read_input<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Opt
             };
             Err(if let Some(bytes) = bytes { format!("{message} at byte {bytes}") } else { message })
         }
+    };
+    // A buffer stream is left where the read reached, whatever its outcome.
+    let result = match (reader.commit(), result) {
+        (Err(e), Ok(_)) => Err(e),
+        (_, result) => result,
     };
     reader.m.leaf((result, reader.signal, mark, b), move |vm, (result, signal, mark, b)| {
         let read = match result {
@@ -904,6 +1031,7 @@ mod tests {
                 eof: false,
                 labels: BTreeMap::new(),
                 signal: None,
+                chunk: Chunk::default(),
                 collect_subforms: true,
             };
             let root = reader.form(0);

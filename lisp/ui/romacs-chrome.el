@@ -221,14 +221,21 @@ else the bar's foreground."
         romacs-chrome-mark-red
       (face-foreground 'mode-line-active nil t))))
 
+(defvar romacs-chrome-faces-functions nil
+  "Functions called with no argument once the chrome's derived faces are
+set (`romacs-chrome--set-faces'): faces derived from them in turn (a
+menu's keys from the glow and the glass) follow.")
+
 (defun romacs-chrome--set-faces (&rest _)
-  "Make `romacs-chrome-derived-faces' the faces' default specs.  A
-theme's spec for a face still wins (faces.el `face-spec-recalc').
-Run from `enable-theme-functions' and `disable-theme-functions'."
+  "Make `romacs-chrome-derived-faces' the faces' default specs, then run
+`romacs-chrome-faces-functions'.  A theme's spec for a face still wins
+\(faces.el `face-spec-recalc').  Run from `enable-theme-functions' and
+`disable-theme-functions', at startup and after the init."
   (pcase-dolist (`(,face . ,attributes) (romacs-chrome-derived-faces))
     (let ((spec `((t ,@attributes))))
       (when (and (facep face) (not (equal spec (get face 'face-defface-spec))))
-        (face-spec-set face spec 'face-defface-spec)))))
+        (face-spec-set face spec 'face-defface-spec))))
+  (run-hooks 'romacs-chrome-faces-functions))
 
 (defun romacs-chrome--parameters (classic)
   "The root frame's chrome parameters, GNU's look when CLASSIC, which no

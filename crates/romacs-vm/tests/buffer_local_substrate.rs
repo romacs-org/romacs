@@ -82,3 +82,25 @@ fn buffer_local_value_checks_symbol_before_buffer() {
 fn local_wrong_types_and_void_value() {
     check("(list (condition-case e (local-variable-p 3) (wrong-type-argument (car e))) (condition-case e (buffer-local-value 'bl-void (current-buffer)) (void-variable e)) (condition-case e (kill-local-variable 3) (wrong-type-argument (car e))))", "(wrong-type-argument (void-variable bl-void) wrong-type-argument)");
 }
+
+/// `kill-all-local-variables` walks only what the buffer holds; what it
+/// resets and keeps is GNU's (each expected value from pinned GNU 45b0f769).
+#[test]
+fn kill_all_resets_what_the_buffer_holds_as_gnu_does() {
+    // The case table, syntax table and local map return to the standard ones.
+    check("(with-temp-buffer (set-case-table (copy-sequence (standard-case-table))) (let ((before (eq (current-case-table) (standard-case-table)))) (kill-all-local-variables) (list before (eq (current-case-table) (standard-case-table)))))", "(nil t)");
+    check("(with-temp-buffer (set-syntax-table (copy-syntax-table)) (kill-all-local-variables) (eq (syntax-table) (standard-syntax-table)))", "t");
+    check("(with-temp-buffer (use-local-map (make-sparse-keymap)) (kill-all-local-variables) (current-local-map))", "nil");
+    // Of thirty Lisp locals, the permanent ones alone survive.
+    check("(with-temp-buffer (dotimes (i 30) (let ((s (intern (format \"kl-v%d\" i)))) (set (make-local-variable s) i) (when (= 0 (% i 3)) (put s 'permanent-local t)))) (kill-all-local-variables) (let (out) (dotimes (i 30) (when (local-variable-p (intern (format \"kl-v%d\" i))) (push i out))) (nreverse out)))", "(0 3 6 9 12 15 18 21 24 27)");
+    // Built-ins the buffer set return to their defaults; `truncate-lines' is permanent.
+    check("(with-temp-buffer (setq fill-column 33 tab-width 3 truncate-lines t) (kill-all-local-variables) (list fill-column tab-width truncate-lines (local-variable-p 'fill-column) (local-variable-p 'tab-width) (local-variable-p 'truncate-lines)))", "(70 8 t nil nil t)");
+    // Afterwards the buffer holds the built-ins local in every buffer, and nothing else.
+    check("(with-temp-buffer (setq fill-column 33) (set (make-local-variable 'kl-x) 1) (kill-all-local-variables) (let ((n 0) (gone t)) (dolist (e (buffer-local-variables)) (setq n (1+ n)) (when (memq (if (consp e) (car e) e) '(kl-x fill-column)) (setq gone nil))) (list n gone (local-variable-p 'enable-multibyte-characters))))", "(19 t t)");
+    // A Romacs regression check, not a GNU value: GNU's `change-major-mode-hook'
+    // is a forwarded variable, which `defvaralias' refuses there (eval.c). Here
+    // the hook is found through the alias, as `run-hooks' finds it.
+    check("(progn (defvar kl-ran nil) (defvar kl-my-hook nil) (defvaralias 'change-major-mode-hook 'kl-my-hook) (setq kl-my-hook (list (lambda () (setq kl-ran t)))) (with-temp-buffer (kill-all-local-variables)) kl-ran)", "t");
+    // KILL-PERMANENT `reset' clears permanent locals and the visit's built-ins too.
+    check("(with-temp-buffer (setq fill-column 33 buffer-read-only t) (set (make-local-variable 'kl-y) 2) (put 'kl-y 'permanent-local t) (kill-all-local-variables 'reset) (list fill-column buffer-read-only (local-variable-p 'kl-y)))", "(70 nil nil)");
+}
