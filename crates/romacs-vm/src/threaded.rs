@@ -4557,7 +4557,11 @@ unsafe fn cached_primitive(
         enter_native(&mut e, r, pc, target, start, argc);
         let base = r.offset_from(e.vm.stack.as_ptr()) as usize;
         let p = prim::legacy(target).expect("legacy primitive");
-        let Some(value) = primitive_value(&mut e, p, base + start, argc, call) else {
+        // Charged to P in the gap probe, as the uncached path charges it.
+        crate::gap_probe::enter(e.vm, move || crate::legacy_primitive_name(p));
+        let value = primitive_value(&mut e, p, base + start, argc, call);
+        crate::gap_probe::exit(e.vm);
+        let Some(value) = value else {
             return Value::UNBOUND;
         };
         leave_native(&mut e);
