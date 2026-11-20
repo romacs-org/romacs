@@ -506,17 +506,19 @@ count: slack, so a row's last column is not cut."
   "Draw BUFFER's board COLUMNS wide, by default as wide as its windows:
 each window showing it keeps the row at its point and at its start."
   (with-current-buffer buffer
-    (setq romacs-agent-board--drawn-source romacs-agent-board-source)
     (let* ((windows (romacs-agent-board--windows buffer))
            (spots (mapcar (lambda (window)
                             (list window (romacs-agent-board--spot (window-point window))
                                   (romacs-agent-board--spot (window-start window))))
                           windows)))
-      (romacs-agent-board--draw
-       (romacs-agent-board-rows (romacs-agent-board--sessions)
-                                (and (not romacs-agent-board--settled) (romacs-agent-board-source-history romacs-agent-board-source))
-                                (romacs-agent-board--view))
-       (or columns (romacs-agent-board--columns buffer)))
+      (let ((source romacs-agent-board-source))
+        (romacs-agent-board--draw
+         (romacs-agent-board-rows (romacs-agent-board--sessions)
+                                  (and (not romacs-agent-board--settled) (romacs-agent-board-source-history source))
+                                  (romacs-agent-board--view))
+         (or columns (romacs-agent-board--columns buffer)))
+        ;; Its rows are SOURCE's once drawn: only then are they acted on as such.
+        (setq romacs-agent-board--drawn-source source))
       (pcase-dolist (`(,window ,at ,start) spots)
         (set-window-point window (romacs-agent-board--back at))
         (set-window-start window (save-excursion (goto-char (romacs-agent-board--back start)) (line-beginning-position))

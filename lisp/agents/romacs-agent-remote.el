@@ -81,7 +81,8 @@ date from it: the same record for its id each time."
           (romacs-agent-done-seq session) (or (funcall get "done_seq") 0)
           (romacs-agent-seen-seq session) (funcall get "seen_seq")
           (romacs-agent-settled-seq session) (funcall get "settled_seq")
-          (romacs-agent-failed session) (eq (gethash "failed" row) t))
+          ;; A service that says no `failed' says so by its key.
+          (romacs-agent-failed session) (or (eq (gethash "failed" row) t) (equal (gethash "key" row) "failed")))
     session))
 
 ;;; The chat
@@ -157,26 +158,32 @@ are read.")
 
 (cl-defmethod romacs-agent-log-source-earlier ((source romacs-agent-remote) session)
   "Draw SESSION's turns before those the chat shows, read from its service:
-once, and only while the chat still begins where it did."
-  (let ((end romacs-agent-log--from) (buffer (current-buffer)))
+once, through the chat's own source, and only while the chat still
+begins where it did; its history gone, the chat is drawn afresh."
+  (let* ((end romacs-agent-log--from) (buffer (current-buffer)) (id (romacs-agent-id session))
+         (client (romacs-agent-remote-client source)))
     (unless end (user-error "This chat shows the session from its start"))
     (when romacs-agent-remote--earlier (user-error "Its earlier turns are being read"))
+    (unless (and client (romacs-agent-client-live-p client))
+      (user-error (substitute-command-keys "Not connected: \\[romacs-agents-remote] connects")))
     (setq romacs-agent-remote--earlier end)
-    (unless (romacs-agent-client-earlier
-             (romacs-agent-remote--client) (romacs-agent-id session) (1- end)
-             romacs-agent-log-turns romacs-agent-log-records
-             (lambda (result)
-               (when (buffer-live-p buffer)
-                 (with-current-buffer buffer
-                   (let ((current (eql romacs-agent-remote--earlier romacs-agent-log--from)))
-                     (setq romacs-agent-remote--earlier nil)
-                     (pcase result
-                       (`(error ,error) (message "Earlier turns not read: %s" (gethash "message" error)))
-                       ('(reset) (message "Its history moved: the chat is drawn afresh"))
-                       (`(,units ,from)
-                        (when current
-                          (romacs-agent-log--draw-above
-                           session from (lambda () (dolist (unit units) (romacs-agent-remote--draw-unit session unit))))))))))))
+    (unless (condition-case err
+                (romacs-agent-client-earlier
+                 client id (1- end) romacs-agent-log-turns romacs-agent-log-records
+                 (lambda (result)
+                   (when (buffer-live-p buffer)
+                     (with-current-buffer buffer
+                       (let ((current (and (eql romacs-agent-remote--earlier romacs-agent-log--from)
+                                           (eq client (romacs-agent-remote-client source)))))
+                         (setq romacs-agent-remote--earlier nil)
+                         (pcase result
+                           (`(error ,error) (message "Earlier turns not read: %s" (gethash "message" error)))
+                           ('(reset) (when current (romacs-agent-client-open client id)))
+                           (`(,units ,from)
+                            (when current
+                              (romacs-agent-log--draw-above
+                               session from (lambda () (dolist (unit units) (romacs-agent-remote--draw-unit session unit))))))))))))
+              (error (setq romacs-agent-remote--earlier nil) (signal (car err) (cdr err))))
       (setq romacs-agent-remote--earlier nil)
       (user-error "This chat is not followed: open it again"))))
 
