@@ -1879,10 +1879,13 @@ alists.  Return a list (key separator description)."
 (defun which-key--compute-binding (binding)
   "Replace BINDING with remapped binding if it exists.
 Requires `which-key-compute-remaps' to be non-nil."
-  (copy-sequence (symbol-name
-                  (or (and which-key-compute-remaps
-                           (command-remapping binding))
-                      binding))))
+  (let ((remap (and which-key-compute-remaps (command-remapping binding))))
+    ;; A remap to a function object is named as a binding to one is.
+    (copy-sequence (cond ((null remap) (symbol-name binding))
+                         ((symbolp remap) (symbol-name remap))
+                         ((eq 'lambda (car-safe remap)) "lambda")
+                         ((eq 'closure (car-safe remap)) "closure")
+                         (t "function")))))
 
 (defun which-key--get-menu-item-binding (def)
   "Retrieve binding for menu-item."

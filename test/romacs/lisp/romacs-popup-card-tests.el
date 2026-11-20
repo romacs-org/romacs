@@ -22,6 +22,19 @@ naming no key goes last."
   ;; A card's key carries its event: no parsing.
   (should (eq (romacs-popup--key-event (propertize "x" 'romacs-popup-event 'f12)) 'f12)))
 
+(ert-deftest romacs-popup-card-a-command-remapped-to-a-function ()
+  "With `which-key-compute-remaps', a command remapped to a function
+object still sorts: named as which-key names a binding to one."
+  (require 'which-key)
+  (let ((map (make-sparse-keymap)) (old (current-global-map)) (which-key-compute-remaps t))
+    (define-key map [f12 ?a] #'find-file)
+    (define-key map [remap find-file] (lambda () (interactive)))
+    (unwind-protect
+        (progn (use-global-map map)
+               (should (equal (mapcar (lambda (e) (cdr (nth 7 e))) (romacs-popup--card-entries [f12]))
+                              (list (which-key--compute-binding 'find-file)))))
+      (use-global-map old))))
+
 (defun romacs-popup-card-tests--entry (key label binding &optional prefix-p source)
   "An entry as `romacs-popup--card-entry' makes it."
   (list key label prefix-p (or source 'global) 0 binding nil (cons key label)))
