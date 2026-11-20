@@ -498,6 +498,18 @@ fn call_process_s_reap_hands_a_live_child_on_at_its_deadline() {
 /// hash table's `equal` lookups, run inside a primitive's quit scope with a
 /// press pending, walk to their end, so an insert that rehashes never stops
 /// halfway.
+/// A walk of many short vectors, none a chunk long (512 of 512), asks too:
+/// its steps count over all of them.
+#[test]
+fn equal_polls_over_many_short_vectors() {
+    let (mut vm, signal) = busy_vm();
+    eval(&mut vm, "(setq va (let (l) (dotimes (_ 512) (push (make-vector 512 1) l)) (vconcat l)) vb (copy-tree va t))");
+    let [va, vb] = ["va", "vb"].map(|name| eval(&mut vm, name));
+    assert_eq!(vm.equal_site_kernel(va, vb), Value::TRUE, "with no press the walk ends");
+    assert!(signal.interrupt(), "a busy evaluator takes the press");
+    assert_eq!(vm.equal_site_kernel(va, vb), Value::UNBOUND, "the walk stops at its poll");
+}
+
 #[test]
 fn equal_polls_for_itself_and_never_inside_a_hash_lookup() {
     use crate::Primitive::Puthash;

@@ -418,17 +418,24 @@ pub(super) fn is_hash_primitive(p: Primitive) -> bool {
 struct Walk {
     seen: Option<HashMap<u64, Vec<u64>>>,
     polled: bool,
+    /// Steps since the walk last asked, over all its spines and vectors: a
+    /// structure of many short ones (2048 vectors of 2048) asks too.
+    steps: usize,
 }
 
 impl Walk {
     fn polled() -> Self {
         Self { polled: true, ..Self::default() }
     }
-    /// Whether the walk stops here, asked only where a spine or vector has
-    /// taken another `WALK_CHUNK` steps: polled, and the quit probe due.
+    /// Whether the walk stops here, N more steps taken: polled, another
+    /// `WALK_CHUNK` steps taken since it last asked, and the quit probe due.
     #[inline]
-    fn stopped(&self, vm: &Vm) -> bool {
-        self.polled && probe_due(vm)
+    fn stopped(&mut self, n: usize, vm: &Vm) -> bool {
+        if !self.polled { return false; }
+        self.steps += n;
+        if self.steps < WALK_CHUNK { return false; }
+        self.steps = 0;
+        probe_due(vm)
     }
 }
 
@@ -905,7 +912,7 @@ impl Vm {
                     return Ok(false);
                 }
             }
-            if x.len() == WALK_CHUNK && walk.stopped(self) { return Err(HashFault::Stopped); }
+            if walk.stopped(x.len(), self) { return Err(HashFault::Stopped); }
         }
         Ok(true)
     }
@@ -952,9 +959,11 @@ impl Vm {
             // The tortoise's own count paces a polled walk's asks.
             if steps.is_multiple_of(WALK_CHUNK as u64) {
                 if steps.is_power_of_two() { tortoise = a; }
-                if walk.stopped(self) { return Err(HashFault::Stopped); }
+                if walk.stopped(WALK_CHUNK, self) { return Err(HashFault::Stopped); }
             }
         }
+        // The spine's steps past its last chunk count toward the walk's next ask.
+        if walk.stopped((steps % WALK_CHUNK as u64) as usize, self) { return Err(HashFault::Stopped); }
         if b_circular {
             return Ok((a, b, Some(false)));
         }
