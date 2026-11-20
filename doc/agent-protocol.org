@@ -229,45 +229,31 @@ started by older builds keep working.
     A request over those bounds is refused with =-32600=, its =id= not
     echoed when that is what is too long, as the MCP endpoint already
     does.  So a reply never exceeds the limit;
-  - every string over 64 KiB in an event, a pending request or a queue
-    entry (a tool's input or output, a message) carries its first 64 KiB
-    and ={"truncated":{"bytes":N,"ref":R}}=; =agents/output {ref, offset,
-    length}= pages the rest;
   - every unit is bounded.  A unit is what a reply or a notification is
-    made of: a record unit, a pending request, a queue entry, a row, an
-    open item of a page's context, a catalog entry (a project, a
-    provider with its models).  One still over 256 KiB encoded after
-    truncation is replaced by its key fields and a reference, fetched
-    whole through =agents/output=:
-    - ={"seq":N,"oversize":R}= for a record unit;
-    - ={"handle":H,"kind":K,"oversize":R}= for a pending request;
-    - ={"id":I,"oversize":R}= for a queue entry or an open item;
-    - ={"name":N,"oversize":R}= for a catalog entry.
-
-    The key fields keep it countable and actionable: a client shows a
-    pending request and can answer it before fetching it whole.  Every
-    such form fits by construction:
-    - its ids are the service's own short ids (a pending request's handle
-      included; the harness's own request id stays in the service);
-    - any other key string in it is cut to 1 KiB.
-  - a reply that returns one value too large for the budget returns
-    =oversize= with a reference instead, never a broken message.  An
-    editor tool's result is bounded where it is made: each editor tool
+    made of: a record unit, a pending request, a queue entry, a row, a
+    catalog entry.  A string in one is cut to its first 64 KiB, then, while
+    the unit is over 256 KiB, to 8 KiB and to 1 KiB; each cut is named
+    by its JSON Pointer under its event's =truncated=
+    (={"/output": BYTES}=), as long as it was.  A record unit still over,
+    or not encodable, is sent as ={"events": [], "oversize": true}=, its
+    seq kept.  A pending request, a queue entry and a catalog entry
+    are cut alike, their key fields never; one still over is sent as
+    its key fields and ="oversize": true=: a request keeps its handle,
+    kind and choices, and is answered by its decision; a question that
+    needs its options is answered on the agent's host.  A row's strings
+    are cut to 1,024 characters.  Nothing is fetched whole: a chat needs
+    no more of an output, and the files an agent writes are on its host;
+  - an editor tool's result is bounded where it is made: each editor tool
     caps its own output (64 KiB), as the MCP tools do today
-    (=romacs-mcp-eval-string= refuses a larger value with "exceeds output
-    limit").  The service therefore never fetches a large result from an
-    editor;
-  - =agents/output {ref, offset, length}= treats =length= as a maximum.
-    It returns as much as fits the reply budget, at least one character
-    unless the output has ended, with the next offset;
+    (=romacs-mcp-eval-string= refuses a larger value).  The service never
+    fetches a large result from an editor;
   - continuation tokens expire.  A =more= token lives while it is used,
     and dies after 60 s unused or when a connection holds more than four.
     An expired token is answered with =-32017= (=stale=), and the client
     starts the call again.  So a stalled client never pins a snapshot;
   - every reply that returns a collection, of any method, pages by
     units; no method returns an unbounded whole.  That covers the open
-    reply's =pending= and =queue=, a history page with its =context=
-    first, the list, and the catalogs (=projects.list= returns projects
+    reply's =pending= and =queue=, a history reply's units, the list, and the catalogs (=projects.list= returns projects
     and =providers.list= returns providers as units).  A method added
     later follows the same rule.  Each reply holds
     whole units and at least one of them, since a unit is at most
@@ -325,16 +311,13 @@ JSON-RPC errors with numeric codes and =data.kind=:
   again.
 - *List revision.*  One counter per generation, raised by every change to
   any row.
-- *Session revision.*  One counter per session per generation, raised by
-  everything that changes what a client mirrors of the session: a
-  record's events, a pending request added or resolved, a row or queue
-  change.  It orders all of a session's notifications.
+- *Session revision.*  One counter per open of a session on a connection,
+  from 0 in its reply, raised by each notice of it: a record's events, a
+  pending request added or resolved, a row or queue change.
 - *Session cursor.*  A cursor is ={"seq":N,"epoch":E,"adapter":A}=.
-  - =N= is the seq of the last record whose events were delivered.  All
-    records sharing a seq (legacy staged journals have a few) are
-    delivered together, as one unit, so seq alone resumes without
-    ambiguity.  Seq works for journal-backed sessions too, and no
-    =VACUUM= changes it.
+  - =N= is the seq of the last record whose events were delivered.  A
+    seq is one unit: of records sharing one (legacy staged journals have
+    a few), the first is folded, as the editor folds them.
   - =E= is the session's epoch, 0 for none (=epochs= in the store).  A
     record's events depend on the records before it: a streamed
     message's whole record raises no text, its deltas having raised it.
@@ -347,23 +330,19 @@ JSON-RPC errors with numeric codes and =data.kind=:
     read before either always carries an older epoch.
   - =A= is the adapter version: a digest of the driver that made the
     events.
-- *Epoch changes reach live subscribers.*  Every cursor a notification
-  carries has the session's epoch.  A raised epoch of a subscribed
-  session (a deletion or a flip) is followed by =agents/session.reset
-  {session, revision, epoch}=.  A client that sees an epoch other than its cursor's, in that
-  or in any later notification, discards its history and resume cursor
-  and reopens before it advances anything.
+- *Epochs are read where history is.*  An open and each page carry the
+  cursor with its epoch and adapter; a page of another than the open's
+  makes the client discard its history and open again.  A live event
+  carries its seq alone.  Records a client was sent live can still be
+  compacted once the harness stops; its next history read sees the
+  epoch move.
 - *A client's resume cursor* is the end of what it holds without a gap:
   the highest seq below which it holds every record unit.  Live events
   past a gap it is still pulling never advance it, so a second
   disconnect resumes from before the gap.
 - *Resume.*  A client resumes by reopening: it gets the state at once,
-  and pulls the records after its old cursor as history pages (exclusive
-  of =N=).  It is answered =reset= instead, and draws the session afresh
-  from the last turns, when:
-  - the epoch differs;
-  - the adapter version differs;
-  - the gap exceeds the catch-up bound (4,000 records or 8 MiB).
+  and pulls the records after its old cursor as history (Pages); answered
+  =reset=, it draws the session afresh from the last turns.
 
 ** Delivery order
 - *Per connection, in order.*  For each subscription (the list, or one
@@ -414,18 +393,24 @@ paging ever holds live delivery back.
 
 - *Open.*  =agents/session.open {id}=.  The service, on its main VM and
   atomically, registers the subscription and captures the session
-  revision V, the high-water cursor H and the state: row, pending and
-  answering requests, queue, and the items open at H.  The reply:
+  revision V, the cursor H of its last record kept and the state: row,
+  pending and answering requests, queue.  Opening reads: a session not
+  loaded stays so, and has no live events until an editor loads it.
+  Live events follow H for this subscription alone: a unit at or below
+  it (a supervisor's replay on attach) is never sent it.  The reply:
   #+begin_src json
   {"revision": V, "cursor": H, "row": {}, "pending": [], "answering": [],
-   "queue": [], "undelivered": [], "open": [], "more": null}
+   "queue": [], "undelivered": [], "more": null}
   #+end_src
   A queue entry is ={"id","text","mode":"now|next|steer","position","images":[]}=.
-  An open item is ={"id","kind":"tool|message|thinking","name","text","input"}=.
+  An item under way at H (a tool, a message) is drawn from history.
 - *Notifications follow at once*, in revision order from V+1, whatever
   the client does next:
-  - =agents/event {session, revision, cursor, events}=: the events of one
-    record unit;
+  - =agents/event {session, revision, seq, events, gap?}=: the events
+    of one record unit.  A load that folded records with no events (a
+    worker's fold, a journal read with no supervisor) is sent at once as
+    an event with no events and =gap {after, upto}=: the records with
+    =after < seq ≤ upto=, which the client pulls as history;
   - =agents/pending.added {session, revision, request}=;
   - =agents/pending.answering {session, revision, handle}=;
   - =agents/pending.taken {session, revision, handle}=;
@@ -458,33 +443,27 @@ paging ever holds live delivery back.
   cannot be lost.
 
 ** Pages
-- *Immutable.*  History pages hold records before a cursor the open
-  returned, which never change except as the epoch says.  Each page is read
-  in one read transaction that also reads the epoch.  A page whose epoch
-  is not the client's cursor's answers =reset=, and the client reopens.
-- *Bounds.*  A page holds whole record units, in order, between =first=
-  and =last=.  It starts at a turn's first record when it can.  Its size
-  bounds are:
-  - N turns;
-  - 4,000 records;
-  - 8 MiB of events;
-  - 768 KiB per reply.
-
-  A page that stops at the reply bound says =more=;
-  =agents/page {more}= continues it.
-- *Methods.*  =agents/session.history {id, upto: CURSOR, after?:
-  CURSOR, turns: N}=.  Its bounds are =after < seq ≤ upto=:
-  - without =after=, it returns the last N turns ending at =upto=;
-    repeat with =upto= set to just before the page's =first= to go
-    further back;
-  - with =after=, it returns every record in the range, in pages.
-- *Context.*  A single turn bigger than the bounds is cut at a record
-  unit inside it, and its page's =context= holds the items open at
-  =first= (a tool started and not finished, a partial message), with
-  their ids.  The worker folds from the turn's first record to compute
-  it, within a worker budget of 4 s.  If that budget runs out, =context=
-  is =null= and =complete= is false: a client draws an event whose item
-  it never saw (a tool's output) under an "earlier item" placeholder.
+- *Method.*  =agents/session.history {id, upto, after?, turns?}=, its
+  bounds =after < seq ≤ upto=:
+  - without =after=, the last =turns= turns (3 by default, 50 at most)
+    ending at =upto=, fewer when they start further back than 20,000
+    records; a turn starts at its row's first record, or past the last
+    row's end;
+    =upto= set to just before the first unit goes further back;
+  - with =after=, every record unit in the range.  A range over 4,000
+    records, or one whose turn starts further back than 20,000, answers
+    =reset=: the client draws the session afresh.
+- *Read as live.*  The service replays from the first record of the turn
+  the range begins in, so each unit's events are those live delivery
+  sent (a message's text never twice), between the editor's other work.
+  A reply's units can begin mid-turn, after units the client holds.
+- *Reply.*  ={"cursor": {seq, epoch, adapter}, "units": [{seq, events}],
+  "reset", "more"}=, paged by units.  Past 8 MiB of units it stops, its
+  cursor's seq where: the client asks on from there.  The epoch is read
+  before and after the replay: moved, the reply is =reset=.  A client
+  compares a reply's epoch and adapter with those its history was read
+  under, and draws afresh on any other.  A session still in a journal
+  (one an install found running) has none served (=unsupported=).
 
 ** Pending requests
 - *Request (normative):*
@@ -767,7 +746,7 @@ holds no agent logic.
 ** The client model: =romacs-agent-client.el=
 A passive mirror:
 - the list's rows and revision;
-- each open session's snapshot, pending requests, queue, open items and
+- each open session's snapshot, pending requests, queue and
   events;
 - one function per command.
 
@@ -862,8 +841,10 @@ Once the service runs on its own, an agent's editor tool needs an editor.
   - Attribution is persisted only in the =answer= note, replayed as
     =attributed=; an earlier =romacsAnswer= field beside the response is
     not.
-  - The chat view's history deduplicates by the cursor above (seq, all
-    records of a seq together), the same contract as the protocol's.
+  - The chat view's history deduplicates by the cursor above (a seq is
+    one unit, its first record folded), the same contract as the
+    protocol's; its replays fold into copies made the same way
+    (=romacs-agent--scratch=), which never act on the live session.
 
 * Slices
 Each slice is landable on its own:
@@ -889,9 +870,8 @@ Each slice is landable on its own:
     - a reconnect across compaction;
     - an oversized event and a paged reply: a unit just over and just
       under 256 KiB with the largest permitted request =id= and token, a
-      page whose =context= alone exceeds a reply, a catalog with a
-      provider over 256 KiB and another entry after it, an editor tool result over the budget, an expired
-      continuation;
+      catalog with a provider over 256 KiB and another entry after it,
+      an editor tool result over the budget, an expired continuation;
     - two clients answering one request;
     - a command repeated across a service restart;
     - the extra local hop measured.

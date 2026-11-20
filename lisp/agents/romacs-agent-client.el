@@ -9,7 +9,9 @@
 ;; mirrors what the service serves.  It folds nothing and has no policy
 ;; and no timer that acts: it shows what the service says.
 ;;
-;; This part mirrors the session list: its rows by id and its revision.
+;; It mirrors the session list, and each session it opens.
+;;
+;; The list: its rows by id and its revision.
 ;; One watch at a time reads the list: its pages are staged apart and
 ;; the rows and revision published together once it is whole, then the
 ;; notifications that came meanwhile are applied.  A gap or a stale
@@ -24,6 +26,12 @@
 (defvar romacs-agent-client-rows-functions nil
   "Functions called with a client, the ids of the rows that changed and
 those removed, after its list changed.")
+
+(defvar romacs-agent-client-session-functions nil
+  "Functions called with a client, a session's id, and what came of it:
+\=(opened REPLY), (event PARAMS) or (changed PARAMS), each in the order
+its revisions give, or (failed ERROR) when an open, the first or one to
+recover, is refused: nothing more comes of it until it is opened again.")
 
 (defvar romacs-agent-client-instance nil
   "This process's name as a client, kept across its connections: a UUID
@@ -40,7 +48,8 @@ whether another must follow it (AGAIN: t, or `whole' for all the list)."
   (revision nil)
   (pending (make-hash-table :test #'eql))
   (next 0)
-  watch again)
+  watch again
+  (sessions (make-hash-table :test #'equal)))
 
 (defun romacs-agent-client--instance ()
   (or romacs-agent-client-instance
@@ -117,6 +126,8 @@ result and nil, or nil and the error, once its reply comes."
       (let ((callback (gethash id (romacs-agent-client-pending client))))
         (remhash id (romacs-agent-client-pending client))
         (funcall callback (gethash "result" message) (gethash "error" message))))
+     ((member method '("agents/event" "agents/session.changed"))
+      (romacs-agent-client--session-notice client method (gethash "params" message)))
      ((equal method "agents/sessions.changed")
       (let ((params (gethash "params" message)) (watch (romacs-agent-client-watch client)))
         (if watch
@@ -204,6 +215,77 @@ earlier one ignored, a later one (a gap) or a stale notice watched again."
           (push id removed))
         (setf (romacs-agent-client-revision client) revision)
         (run-hook-with-args 'romacs-agent-client-rows-functions client changed removed))))))
+
+;;; Sessions
+
+;; Each session opened is, by id, the state of its open: (opening) while
+;; it is asked, then [REVISION] once it is answered.  A reply
+;; is applied only while the state it was asked with is still the
+;; session's; a notice before it is an earlier subscription's, as the
+;; service answers an open before it sends anything of it, and is dropped.
+
+(defun romacs-agent-client-open (client id)
+  "Open session ID on CLIENT: its reply, then each event and change of it,
+reach `romacs-agent-client-session-functions'."
+  (let ((asked (list 'opening)))
+    (puthash id asked (romacs-agent-client-sessions client))
+    (romacs-agent-client-request
+     client "agents/session.open" (romacs-agent-rpc-object "id" id)
+     (lambda (result error)
+       (when (eq (gethash id (romacs-agent-client-sessions client)) asked)
+         (if error
+             (progn (remhash id (romacs-agent-client-sessions client))
+                    (run-hook-with-args 'romacs-agent-client-session-functions client id (list 'failed error)))
+           (puthash id (vector (gethash "revision" result)) (romacs-agent-client-sessions client))
+           (run-hook-with-args 'romacs-agent-client-session-functions client id (list 'opened result))))))))
+
+(defun romacs-agent-client-close-session (client id)
+  "Close session ID on CLIENT."
+  (remhash id (romacs-agent-client-sessions client))
+  (romacs-agent-client-request client "agents/session.close" (romacs-agent-rpc-object "id" id) #'ignore))
+
+(defun romacs-agent-client--session-notice (client method params)
+  "Apply METHOD's PARAMS to their session: dropped while it opens, the next
+revision passed on (an event's `gap', records it was never sent live,
+for its reader to pull as history), an earlier one ignored, a missed one
+answered by opening it again.  Its history's epoch is checked where
+history is read, against the open's."
+  (let* ((id (gethash "session" params)) (state (gethash id (romacs-agent-client-sessions client)))
+         (revision (gethash "revision" params)))
+    (cond
+     ((null state))
+     ((eq (car-safe state) 'opening))
+     ((not (integerp revision)))
+     ((<= revision (aref state 0)))
+     ((/= revision (1+ (aref state 0)))
+      (romacs-agent-client-open client id))
+     (t
+      (aset state 0 revision)
+      (run-hook-with-args 'romacs-agent-client-session-functions client id
+                          (list (if (equal method "agents/event") 'event 'changed) params))))))
+
+(defun romacs-agent-client-history (client id params callback &optional expect)
+  "Ask CLIENT's service for session ID's history (`agents/session.history'
+with PARAMS: upto, after or turns), every page of it; CALLBACK is called
+with (UNITS CURSOR RESET), UNITS the record units in order, or with
+\=(error ERROR).  With EXPECT, the cursor (a table) the history already
+held was read under, a reply of another epoch or adapter is a reset: its
+units are not to be joined to that history."
+  (let ((units nil))
+    (cl-labels ((part (result error)
+                  (if error (funcall callback (list 'error error))
+                    (setq units (append units (append (gethash "units" result) nil)))
+                    (if (stringp (gethash "more" result))
+                        (romacs-agent-client-request client "agents/page"
+                                                     (romacs-agent-rpc-object "more" (gethash "more" result)) #'part)
+                      (let* ((cursor (gethash "cursor" result))
+                             (reset (or (eq (gethash "reset" result) t)
+                                        (and expect (not (and (equal (gethash "epoch" cursor) (gethash "epoch" expect))
+                                                              (equal (gethash "adapter" cursor) (gethash "adapter" expect))))))))
+                        (funcall callback (list (and (not reset) units) cursor reset)))))))
+      (let ((request (copy-hash-table params)))
+        (puthash "id" id request)
+        (romacs-agent-client-request client "agents/session.history" request #'part)))))
 
 (provide 'romacs-agent-client)
 ;;; romacs-agent-client.el ends here
