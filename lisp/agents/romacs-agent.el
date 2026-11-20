@@ -1935,7 +1935,10 @@ is let go, however it is read (live, a replay, a journal read here)."
                             ((hash-table-p note)
                              (pcase (gethash "type" note)
                                ("run" (list (list :type 'run)))
-                               ("plan" (list (list :type 'status :text (if (eq (gethash "on" note) t) "plan mode" "plan mode off"))))
+                               ;; Romacs's own switch of plan mode: an event of its
+                               ;; own (what a view does on it), and said.
+                               ("plan" (list (list :type 'plan-switch :on (eq (gethash "on" note) t))
+                                             (list :type 'status :text (if (eq (gethash "on" note) t) "plan mode" "plan mode off"))))
                                ;; Who answered an approval, and how (`romacs-agent-respond').
                                ("answer" (list (list :type 'attributed :request-id (gethash "request" note)
                                                      ;; Older notes name only who.
@@ -4398,12 +4401,11 @@ an actor, a plist of :kind (`user' or `policy'), :login and :client.  A
 note says so in SESSION's records first, so every view shows who decided
 (doc/agent-protocol.org, Attribution)."
   (unless (gethash request-id (romacs-agent-approvals session)) (user-error "No such approval request"))
-  (let ((line (funcall (romacs-agent--harness-get session :respond) session request-id allow message))
-        ;; Its presented plan allowed: the harness back in the mode it had
-        ;; before plan mode, as its own client does (its driver's
-        ;; :presented-plan-p).
-        (plan (and allow (when-let* ((plan-p (romacs-agent--harness-get session :presented-plan-p)))
-                           (funcall plan-p session request-id)))))
+  (let* ((plan (when-let* ((plan-p (romacs-agent--harness-get session :presented-plan-p)))
+                 (funcall plan-p session request-id)))
+         ;; A presented plan is allowed once: no rule for the session.
+         (allow (if (and plan allow) t allow))
+         (line (funcall (romacs-agent--harness-get session :respond) session request-id allow message)))
     (when-let* ((actor (romacs-agent--actor by)))
       (romacs-agent--note session (romacs-mcp--object
                                    "type" "answer" "request" request-id "by" (symbol-name (plist-get actor :kind))
@@ -4416,7 +4418,9 @@ note says so in SESSION's records first, so every view shows who decided
                                                  (puthash question answer object))
                                                object))))
     (romacs-agent--line session line)
-    (when plan (romacs-agent-set-plan session nil))))
+    ;; Its presented plan allowed: the harness back in the mode it had
+    ;; before plan mode, as its own client does.
+    (when (and plan allow) (romacs-agent-set-plan session nil))))
 
 (defun romacs-agent--host-pid (session)
   (let ((host (romacs-agent--read-json (expand-file-name "host.json" (romacs-agent-dir session)))))
