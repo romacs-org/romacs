@@ -345,7 +345,8 @@ struct PrimitiveRow {
 /// The docstring of the primitive whose defsubr! is at 1-based LINE of
 /// LINES: the run of `//` comment lines directly above it, each less its
 /// `//` and the one space after, joined by newlines. `///` and `//!` lines
-/// end the run, as does a line that is no comment. None without one.
+/// end the run, as does a line that is no comment. None without one, or
+/// when the run holds no text: `documentation` would show nothing.
 fn doc_above(lines: &[&str], line: usize) -> Option<String> {
     let comment = |text: &str| {
         let text = text.trim_start();
@@ -354,7 +355,7 @@ fn doc_above(lines: &[&str], line: usize) -> Option<String> {
     };
     let mut doc: Vec<String> = lines[..line - 1].iter().rev().map_while(|l| comment(l)).collect();
     doc.reverse();
-    (!doc.is_empty()).then(|| doc.join("\n"))
+    doc.iter().any(|line| !line.is_empty()).then(|| doc.join("\n"))
 }
 
 fn declaration(path: &Path, ts: &[Token], pos: usize, module: &str, source: &str) -> PrimitiveRow {
