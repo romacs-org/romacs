@@ -1377,16 +1377,13 @@ it finished since.")
     (cons (propertize "●" 'face 'romacs-working-running) (propertize "running" 'face '(romacs-working-running bold)))))
 
 (defun romacs-agent-log--worker-label (index)
-  "The menu's row of the worker at INDEX: a mark of what it does, then its
-title, so a long title is what the menu cuts; nil, no row, when there is
-none.  The row's digit then opens what it showed."
+  "The menu's row of the worker at INDEX: a mark and a word for what it
+does, then its title, so a long title is what the menu cuts; nil, no
+row, when there is none.  The row's digit then opens what it showed."
   (when-let* ((child (aset (romacs-agent-log--menu-slots) index (nth index (romacs-agent-log--workers)))))
-    (let* ((state (romacs-agent-log--worker-state child))
-           ;; The title gives way, never the state: a popup cuts a row at
-           ;; `keymap-popup--max-description-width'.
-           (room (- keymap-popup--max-description-width (string-width (car state)) 4 (string-width (cdr state)))))
-      (concat (car state) " " (truncate-string-to-width (romacs-agent-title child) (max 1 room) nil nil t)
-              " · " (cdr state)))))
+    ;; Its state first: whatever cuts the row, at any width, cuts the title.
+    (let ((state (romacs-agent-log--worker-state child)))
+      (concat (car state) " " (cdr state) " · " (romacs-agent-title child)))))
 
 (defun romacs-agent-log--open-worker (child)
   "Open worker CHILD's chat, unless it finished since it was shown."

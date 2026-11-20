@@ -3098,8 +3098,8 @@ def chat_menu(args, base):
         def well_formed(text):
             rows = text.splitlines()
             first = lambda word: next((i for i, row in enumerate(rows) if word in row), None)
-            waiting, running = first('needs approval · asks you'), first('long build · running')
-            return ('Agent · ' in text and 'Model: fake-model' in text and 'Effort: default' in text
+            waiting, running = first('asks you · needs approval'), first('running · long build')
+            return ('Agent · say ready' in text and 'Model: fake-model' in text and 'Effort: default' in text
                     and 'Plan mode: off' in text and 'broken task' not in text and 'finished task' not in text
                     and waiting is not None and running is not None and waiting < running)
 

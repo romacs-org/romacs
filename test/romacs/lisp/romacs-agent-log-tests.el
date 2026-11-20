@@ -278,14 +278,12 @@
         (should (equal (substring-no-properties (romacs-agent-log--menu-title)) "Agent · lane chat"))
         ;; A finished one is the board's; one waiting on the user first.
         (should (equal (mapcar #'romacs-agent-title (romacs-agent-log--workers)) '("asks" "builds")))
-        (should (equal (substring-no-properties (romacs-agent-log--worker-label 0)) "◆ asks · asks you"))
-        (should (equal (substring-no-properties (romacs-agent-log--worker-label 1)) "● builds · running"))
+        (should (equal (substring-no-properties (romacs-agent-log--worker-label 0)) "◆ asks you · asks"))
+        (should (equal (substring-no-properties (romacs-agent-log--worker-label 1)) "● running · builds"))
         (should-not (romacs-agent-log--worker-label 2))
-        ;; A long title gives way to its state.
+        ;; A long title is what a cut row loses, its state never.
         (setf (romacs-agent-title (nth 0 children)) (make-string 60 ?x))
-        (let ((label (romacs-agent-log--worker-label 1)))
-          (should (<= (string-width label) keymap-popup--max-description-width))
-          (should (string-suffix-p "· running" label)))
+        (should (string-prefix-p "● running · " (substring-no-properties (romacs-agent-log--worker-label 1))))
         (setf (romacs-agent-title (nth 0 children)) "builds")
         ;; A digit opens the worker it showed; one finished since is the board's.
         (let (shown)
