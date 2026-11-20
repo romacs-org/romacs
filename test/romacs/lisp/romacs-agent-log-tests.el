@@ -297,6 +297,8 @@
               (should group)
               (should-not (plist-get group :if)))
             (let ((last-command-event ?2)) (should-error (romacs-agent-log-open-worker) :type 'user-error))
+            ;; Each chat its own rows.
+            (should-not (eq romacs-agent-log--menu-workers (default-value 'romacs-agent-log--menu-workers)))
             (setf (romacs-agent-state (car children)) 'running)
             (setf (romacs-agent-state (nth 2 children)) 'waiting-approval)))
         ;; Its values read as values, never dim as a command it cannot run.
