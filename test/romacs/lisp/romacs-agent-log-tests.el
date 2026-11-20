@@ -1300,17 +1300,31 @@ none when dropped.")
 
 (ert-deftest romacs-agent-log-rounds-surface-is-a-block-that-shows ()
   ;; On black as on white, apart from the background.
-  (dolist (pair '(("#000000" . "#e0e0e0") ("#ffffff" . "#202020") ("#121212" . "#bebebe")))
+  (dolist (pair '(("#000000" . "#e0e0e0") ("#ffffff" . "#202020") ("#121212" . "#bebebe") ("#000000" . "#767676")))
     (should (>= (romacs-color-contrast (romacs-color-band (car pair) (cdr pair)) (car pair)) 1.15)))
+  ;; Derived on each theme change, a block to the window's edge.
+  (should (memq #'romacs-agent-log-rounds--derive enable-theme-functions))
+  (should (memq #'romacs-agent-log-rounds--derive disable-theme-functions))
+  (cl-letf (((symbol-function 'face-background) (lambda (&rest _) "#000000"))
+            ((symbol-function 'face-foreground) (lambda (&rest _) "#767676")))
+    (romacs-agent-log-rounds--derive)
+    (let ((spec (cdr (car (get 'romacs-agent-log-you 'face-defface-spec)))))
+      (should (eq (plist-get spec :extend) t))
+      (should (>= (romacs-color-contrast (plist-get spec :background) "#000000") 1.15))))
+  (romacs-agent-log-rounds--derive)
   ;; From its first line through its newline, the blank line before it
   ;; the transcript's.
   (romacs-agent-log-tests--with
     (draw :type 'input :text "first" :request 1)
-    (draw :type 'input :text "second" :request 2)
+    (draw :type 'input :text "second\nthird" :request 2)
     (goto-char (point-min))
     (search-forward "second")
     (let ((line (line-beginning-position)))
       (should (memq 'romacs-agent-log-you (ensure-list (get-text-property line 'face))))
+      ;; Its newlines, between its lines and after its last.
+      (should (memq 'romacs-agent-log-you (ensure-list (get-text-property (line-end-position) 'face))))
+      (forward-line 1)
+      (should (looking-at "third"))
       (should (memq 'romacs-agent-log-you (ensure-list (get-text-property (line-end-position) 'face))))
       (should-not (memq 'romacs-agent-log-you (ensure-list (get-text-property (1- line) 'face)))))))
 

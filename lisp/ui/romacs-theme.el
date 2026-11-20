@@ -189,11 +189,11 @@ colours (no `color-values')."
 
 (defun romacs-color-band (bg fg &optional contrast)
   "BG, #rrggbb, mixed toward FG until it stands CONTRAST (1.15 by default)
-apart from BG, or a third of the way there: a surface or a band that
-shows on a black background as on a white one."
+apart from BG, or FG itself when nothing short of it does: a surface or
+a band that shows on a black background as on a white one."
   (let ((contrast (or contrast 1.15)) (amount 0.05) band)
-    (while (progn (setq band (romacs-color-mix bg fg amount))
-                  (and (< (romacs-color-contrast band bg) contrast) (< amount 0.33)))
+    (while (progn (setq band (romacs-color-mix bg fg (min amount 1.0)))
+                  (and (< (romacs-color-contrast band bg) contrast) (< amount 1.0)))
       (setq amount (+ amount 0.02)))
     band))
 
