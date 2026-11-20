@@ -9,7 +9,8 @@
       (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
   (require 'romacs-agent)
   (require 'romacs-agent-claude)
-  (require 'romacs-agent-log))
+  (require 'romacs-agent-log)
+  (require 'romacs-agent-menu))
 
 (defmacro romacs-agent-log-tests--with (&rest body)
   "BODY in a chat of `session', its events drawn by `draw'."
@@ -127,7 +128,7 @@
     (should (string-match-p "1 waits on you" (romacs-agent-log--header)))
     ;; Answered by the user: who and how, and the block no longer waits.
     (remhash "b1" (romacs-agent-approvals session))
-    (draw :type 'attributed :request-id "b1" :by "user" :decision "deny" :scope "once" :reason "not now")
+    (draw :type 'attributed :request-id "b1" :actor '(:kind "user" :client "editor") :decision "deny" :scope "once" :reason "not now")
     (draw :type 'answered :request-id "b1" :behavior "deny")
     (should (string-match-p "✘ denied by you: not now" (romacs-agent-log-tests--transcript)))
     (should-not (string-match-p "not recorded" (romacs-agent-log-tests--transcript)))
@@ -135,7 +136,7 @@
 
 (ert-deftest romacs-agent-log-an-answer-says-who-gave-it ()
   (romacs-agent-log-tests--with
-    (draw :type 'attributed :request-id "x" :by "policy" :decision "allow" :scope "once")
+    (draw :type 'attributed :request-id "x" :actor '(:kind "policy") :decision "allow" :scope "once")
     (draw :type 'answered :request-id "x" :behavior "allow")
     (draw :type 'answered :request-id "y" :behavior "deny")
     (let ((text (romacs-agent-log-tests--transcript)))
@@ -267,15 +268,227 @@
                 (should (> (funcall rule) short)))))
         (remhash "L" romacs-agent-log--chats)))))
 
+(ert-deftest romacs-agent-log-menu-lists-the-workers-at-work ()
+  (romacs-agent-log-tests--with
+    (ignore #'draw)
+    (setf (romacs-agent-title session) "lane chat")
+    (let ((children (list (romacs-agent--make :id "c1" :state 'running :title "builds")
+                          (romacs-agent--make :id "c2" :state 'idle :title "finished")
+                          (romacs-agent--make :id "c3" :state 'waiting-approval :title "asks"))))
+      (cl-letf (((symbol-function 'romacs-agent-children) (lambda (_) children)))
+        (should (equal (substring-no-properties (romacs-agent-menu--title)) "Agent · lane chat"))
+        ;; A finished one is the board's; one waiting on the user first.
+        (should (equal (mapcar #'romacs-agent-title (romacs-agent-menu--workers)) '("asks" "builds")))
+        (should (equal (substring-no-properties (romacs-agent-menu--worker-label 0)) "◆ asks you · asks"))
+        (should (equal (substring-no-properties (romacs-agent-menu--worker-label 1)) "● running · builds"))
+        (should-not (romacs-agent-menu--worker-label 2))
+        ;; A long title is what a cut row loses, its state never.
+        (setf (romacs-agent-title (nth 0 children)) (make-string 60 ?x))
+        (should (string-prefix-p "● running · " (substring-no-properties (romacs-agent-menu--worker-label 1))))
+        (setf (romacs-agent-title (nth 0 children)) "builds")
+        ;; A digit opens the worker it showed; one finished since is the board's.
+        (let (shown)
+          (cl-letf (((symbol-function 'romacs-agent-show) (lambda (child &rest _) (setq shown child))))
+            (setf (romacs-agent-state (nth 2 children)) 'idle)
+            (let ((last-command-event ?2)) (romacs-agent-menu-open-worker))
+            (should (equal (romacs-agent-title shown) "builds"))
+            (let ((last-command-event ?1)) (should-error (romacs-agent-menu-open-worker) :type 'user-error))
+            ;; All finished while it is open: its keys still dispatch (the
+            ;; group has no :if), each saying so.
+            (setf (romacs-agent-state (car children)) 'idle)
+            (should-not (romacs-agent-menu--workers))
+            (let ((group (seq-find (lambda (group) (equal (plist-get group :name) "Workers"))
+                                   (apply #'append (keymap-popup--meta romacs-agent-menu-map 'descriptions)))))
+              (should group)
+              (should-not (plist-get group :if)))
+            (let ((last-command-event ?2)) (should-error (romacs-agent-menu-open-worker) :type 'user-error))
+            ;; Each chat its own rows.
+            (should-not (eq romacs-agent-menu--shown (default-value 'romacs-agent-menu--shown)))
+            (setf (romacs-agent-state (car children)) 'running)
+            (setf (romacs-agent-state (nth 2 children)) 'waiting-approval)))
+        ;; Its values read as values, never dim as a command it cannot run.
+        (let ((romacs-agent-ui--session session))
+          (dolist (label (list (romacs-agent-ui--effort-label) (romacs-agent-ui--model-label)))
+            (should (string-match-p "default" label))
+            (should-not (memq 'romacs-agent-effort-default
+                              (ensure-list (get-text-property (string-match "default" label) 'face label))))))))))
+
+(ert-deftest romacs-agent-log-menu-rows-are-each-chats-own ()
+  ;; Even over a shared default a load left behind.
+  (let ((shared (make-vector 9 nil)))
+    (cl-letf (((default-value 'romacs-agent-menu--shown) shared))
+      (with-temp-buffer
+        (let ((one (romacs-agent-menu--slots)))
+          (with-temp-buffer
+            (should-not (eq (romacs-agent-menu--slots) one))
+            (should-not (eq (romacs-agent-menu--slots) shared))))))))
+
 (ert-deftest romacs-agent-log-several-answers-keep-their-questions ()
   (let ((one (make-hash-table :test #'equal)) (two (make-hash-table :test #'equal)))
     (puthash "Colour?" "Blue" one)
     (puthash "Colour?" "Blue" two)
     (puthash "Size?" "Large" two)
-    (should (string-suffix-p "answered: Blue" (romacs-agent-log--answer-text "user" "allow" "once" nil one)))
-    (let ((text (romacs-agent-log--answer-text "user" "allow" "once" nil two)))
+    (should (string-suffix-p "answered: Blue" (romacs-agent-log--answer-text '(:kind "user") "allow" "once" nil one)))
+    (let ((text (romacs-agent-log--answer-text '(:kind "user") "allow" "once" nil two)))
       (should (string-match-p "Colour\\? → Blue" text))
       (should (string-match-p "Size\\? → Large" text)))))
+
+(ert-deftest romacs-agent-log-an-answer-says-its-actor ()
+  ;; Another client's answer says which; the harness's own says so.
+  (should (string-match-p "allowed by you (via phone)"
+                          (romacs-agent-log--answer-text '(:kind "user" :client "phone") "allow" "once" nil)))
+  (should (string-match-p "denied by the harness" (romacs-agent-log--answer-text '(:kind "harness") "deny" "once" nil)))
+  (should (string-match-p "\\`✔ allowed\\'" (substring-no-properties
+                                               (romacs-agent-log--answer-text '(:kind "unknown") "allow" "once" nil))))
+  (romacs-agent-log-tests--with
+    (puthash "h" t (romacs-agent-approvals session))
+    (draw :type 'approval :request-id "h" :tool "Bash" :input (romacs-agent-log-tests--input "command" "ls"))
+    (remhash "h" (romacs-agent-approvals session))
+    (draw :type 'answered :request-id "h" :how 'harness)
+    (should (string-match-p "settled by the harness" (romacs-agent-log-tests--transcript)))
+    ;; Answered, then settled by the harness before it took the answer.
+    (puthash "g" t (romacs-agent-approvals session))
+    (draw :type 'approval :request-id "g" :tool "Bash")
+    (draw :type 'attributed :request-id "g" :actor '(:kind "user") :decision "allow" :scope "once")
+    (remhash "g" (romacs-agent-approvals session))
+    (draw :type 'answered :request-id "g" :how 'harness)
+    (should (string-match-p "an answer not delivered: the harness settled it first" (romacs-agent-log-tests--transcript))))
+  ;; An older note named no one: its answer is said, never as Romacs's.
+  (let ((answers (make-hash-table :test #'equal)))
+    (puthash "Colour?" "Blue" answers)
+    (should (equal (substring-no-properties (romacs-agent-log--answer-text '(:kind "unknown") "allow" "once" nil answers))
+                   "✔ answered: Blue")))
+  ;; Policy's answer from another client says which too.
+  (should (string-match-p "allowed by Romacs.*(via phone)"
+                          (romacs-agent-log--answer-text '(:kind "policy" :client "phone") "allow" "once" nil))))
+
+(ert-deftest romacs-agent-log-asks-left-open-say-how-they-ended ()
+  (romacs-agent-log-tests--with
+    (dolist (id '("a" "b" "c")) (puthash id t (romacs-agent-approvals session)))
+    (dolist (id '("a" "b" "c")) (draw :type 'approval :request-id id :tool "Bash"))
+    ;; Answered by the user, its answer never taken; one still waited on.
+    (draw :type 'attributed :request-id "a" :actor '(:kind "user") :decision "allow" :scope "once")
+    (remhash "a" (romacs-agent-approvals session))
+    (remhash "b" (romacs-agent-approvals session))
+    (draw :type 'done)
+    (let ((text (romacs-agent-log-tests--transcript)))
+      (should (string-match-p "an answer not delivered" text))
+      (should (string-match-p "the turn ended with it unanswered" text)))
+    (should (equal (mapcar #'car romacs-agent-log--asks) '("c")))
+    ;; In a replay, what the session waited on then decides, not now.
+    (remhash "c" (romacs-agent-approvals session))
+    (let ((romacs-agent-log--replaying (romacs-agent--make :id "L" :approvals (make-hash-table :test #'equal))))
+      (puthash "c" t (romacs-agent-approvals romacs-agent-log--replaying))
+      (romacs-agent-log-draw session '(:type done)))
+    (should (equal (mapcar #'car romacs-agent-log--asks) '("c")))
+    (draw :type 'exit :status 1)
+    (should (string-match-p "the harness exited with it unanswered" (romacs-agent-log-tests--transcript)))
+    (should-not romacs-agent-log--asks)
+    (should-not romacs-agent-log--ended-asks)))
+
+(ert-deftest romacs-agent-log-a-history-drawn-whole-says-each-ask-once ()
+  ;; Another machine's history, drawn before what it waits on now: an ask
+  ;; settled later in it says how, once; one left open says its turn ended.
+  (romacs-agent-log-tests--with
+    (let ((romacs-agent-log--closes-deferred t))
+      (draw :type 'approval :request-id "e" :tool "Bash")
+      (draw :type 'approval :request-id "f" :tool "Bash")
+      (draw :type 'done)
+      (draw :type 'answered :request-id "e" :how 'harness))
+    (should (equal (mapcar #'car romacs-agent-log--ended-asks) '("f")))
+    (romacs-agent-log--sync-asks session)
+    (let ((text (romacs-agent-log-tests--transcript)))
+      (should (= 1 (how-many "the turn ended with it unanswered" (point-min) (point-max))))
+      (should (string-match-p "harness" text)))
+    (should-not romacs-agent-log--asks)
+    (should-not romacs-agent-log--ended-asks)))
+
+(ert-deftest romacs-agent-log-an-ask-said-late-keeps-its-place ()
+  ;; Said where its turn ended: a reply streaming since goes on unbroken.
+  (romacs-agent-log-tests--with
+    (let ((romacs-agent-log--closes-deferred t))
+      (draw :type 'approval :request-id "h" :tool "Bash")
+      (draw :type 'done)
+      (draw :type 'delta :message "m" :text "Hel"))
+    (romacs-agent-log--sync-asks session)
+    (draw :type 'delta :message "m" :text "lo there")
+    (let ((text (romacs-agent-log-tests--transcript)))
+      (should (string-match-p "Hello there" text))
+      (should (< (string-search "the turn ended with it unanswered" text) (string-search "Hello" text))))))
+
+(ert-deftest romacs-agent-log-an-ask-ends-where-it-first-ended ()
+  ;; Its harness exited with it open; a later run's turn ends: it ended
+  ;; at the exit, said once.
+  (romacs-agent-log-tests--with
+    (let ((romacs-agent-log--closes-deferred t))
+      (draw :type 'approval :request-id "i" :tool "Bash")
+      (draw :type 'exit :status 1)
+      (draw :type 'delta :message "m2" :text "later run")
+      (draw :type 'done))
+    (romacs-agent-log--sync-asks session)
+    (let ((text (romacs-agent-log-tests--transcript)))
+      (should (= 1 (how-many "the harness exited with it unanswered" (point-min) (point-max))))
+      (should-not (string-match-p "the turn ended with it unanswered" text))
+      (should (< (string-search "exited with it unanswered" text) (string-search "later run" text))))
+    (should-not romacs-agent-log--ended-asks)))
+
+(ert-deftest romacs-agent-log-an-answer-without-its-actor-says-who ()
+  ;; A service older than :actor sends who alone.
+  (romacs-agent-log-tests--with
+    (draw :type 'attributed :request-id "g" :by "policy" :decision "allow" :scope "once")
+    (should (string-match-p "allowed by Romacs" (romacs-agent-log-tests--transcript)))))
+
+(ert-deftest romacs-agent-log-an-ask-let-go-after-its-exit-says-so ()
+  ;; Another machine's service sends the exit before it lets the ask go:
+  ;; said once it does, not lost.
+  (romacs-agent-log-tests--with
+    (puthash "d" t (romacs-agent-approvals session))
+    (draw :type 'approval :request-id "d" :tool "Bash")
+    (draw :type 'exit :status 1)
+    (should-not (string-match-p "exited with it unanswered" (romacs-agent-log-tests--transcript)))
+    (should (equal (mapcar #'car romacs-agent-log--asks) '("d")))
+    (remhash "d" (romacs-agent-approvals session))
+    (romacs-agent-log--sync-asks session)
+    (romacs-agent-log--sync-asks session)
+    (let ((text (romacs-agent-log-tests--transcript)))
+      (should (string-match-p "the harness exited with it unanswered" text))
+      (should (= 1 (how-many "exited with it unanswered" (point-min) (point-max)))))
+    (should-not romacs-agent-log--asks)
+    (should-not romacs-agent-log--ended-asks)))
+
+(ert-deftest romacs-agent-log-earlier-turns-draw-no-live-asks ()
+  ;; An approval in the earlier turns whose settling the shown ones hold.
+  (romacs-agent-log-tests--with
+    (setq romacs-agent-log--from 5)
+    (cl-letf (((symbol-function 'romacs-agent--journal-tail) (lambda (&rest _) '(nil)))
+              ((symbol-function 'romacs-agent-events-p) #'ignore)
+              ((symbol-function 'romacs-agent-log--replay)
+               (lambda (s &rest _) (romacs-agent-log-draw s '(:type approval :request-id "old" :tool "Bash")))))
+      (romacs-agent-log-earlier))
+    (should-not (text-property-any (point-min) romacs-agent-log--end 'romacs-agent-log-keys t))
+    (should-not (text-property-any (point-min) romacs-agent-log--end 'keymap romacs-agent-log-ask-map))
+    (should-not romacs-agent-log--asks)
+    ;; One still waited on: its keys only in its live block, at the end.
+    (puthash "live" t (romacs-agent-approvals session))
+    (romacs-agent-log--sync-asks session)
+    (setq romacs-agent-log--from 5)
+    (cl-letf (((symbol-function 'romacs-agent--journal-tail) (lambda (&rest _) '(nil)))
+              ((symbol-function 'romacs-agent-events-p) #'ignore)
+              ((symbol-function 'romacs-agent-log--replay)
+               (lambda (s &rest _) (romacs-agent-log-draw s '(:type approval :request-id "live" :tool "Bash")))))
+      (romacs-agent-log-earlier))
+    (let ((live (cadr (assoc "live" romacs-agent-log--asks))))
+      (should (= (length romacs-agent-log--asks) 1))
+      (should-not (text-property-any (point-min) live 'romacs-agent-log-keys t))
+      ;; The earlier copy answers nothing itself: the chat's keys there
+      ;; answer the live block, shown first.
+      (should-not (text-property-any (point-min) live 'romacs-agent-log-request "live"))
+      (goto-char (point-min))
+      (should (equal (romacs-agent-log--ask-here) "live"))
+      (should (= (point) live)))
+    (remhash "live" (romacs-agent-approvals session))
+    (draw :type 'answered :request-id "live")
+    (should-not (text-property-any (point-min) romacs-agent-log--end 'romacs-agent-log-keys t))))
 
 (ert-deftest romacs-agent-log-a-block-waits-until-its-answer-is-written ()
   (romacs-agent-log-tests--with
@@ -284,7 +497,7 @@
           :questions '(("Colour?" :options ("Red" "Blue"))))
     (let ((answers (make-hash-table :test #'equal)))
       (puthash "Colour?" "Blue" answers)
-      (draw :type 'attributed :request-id "q" :by "user" :decision "allow" :scope "once" :answers answers))
+      (draw :type 'attributed :request-id "q" :actor '(:kind "user" :client "editor") :decision "allow" :scope "once" :answers answers))
     ;; Said who answered, and what; still answerable until the harness has it.
     (should (string-match-p "✔ answered: Blue" (romacs-agent-log-tests--transcript)))
     (should-not (string-match-p "allowed by you" (romacs-agent-log-tests--transcript)))
@@ -455,6 +668,43 @@
       (romacs-agent--raise session '(:type approval :request-id "p2" :tool "ExitPlanMode" :plan t :user t))
       (romacs-agent-respond session "p2" t nil 'user)
       (should (equal planned '(nil))))))
+
+(ert-deftest romacs-agent-log-an-answer-is-noted-with-its-actor ()
+  (let ((session (romacs-agent--make :id "N" :harness 'claude :seq 0
+                                     :tools (make-hash-table :test #'equal) :streamed (make-hash-table :test #'equal)))
+        (request (make-hash-table :test #'equal))
+        notes raised)
+    (puthash "tool_name" "Bash" request)
+    (puthash "b" request (romacs-agent-approvals session))
+    (puthash "c" request (romacs-agent-approvals session))
+    (cl-letf (((symbol-function 'romacs-agent--line) #'ignore)
+              ((symbol-function 'romacs-agent--note) (lambda (_s note) (push note notes))))
+      (romacs-agent-respond session "b" t nil 'user)
+      ;; A request is answered once: a second answer is refused, noted by no one.
+      (should-error (romacs-agent-respond session "b" nil "no" 'policy) :type 'user-error)
+      (should (= (length notes) 1))
+      (romacs-agent-respond session "c" nil "no" '(:kind policy :login "ci" :client "phone")))
+    (pcase-let ((`(,second ,first) notes))
+      (should (equal (gethash "by" first) "user"))
+      (should (equal (gethash "login" first) (user-login-name)))
+      (should (equal (gethash "client" first) "editor"))
+      (should (equal (gethash "client" second) "phone"))
+      ;; Read back, the note says its actor; an older one only who.
+      (cl-letf (((symbol-function 'romacs-agent--raise) (lambda (_s event) (push event raised))))
+        (let ((record (make-hash-table :test #'equal)))
+          (puthash "seq" 1 record)
+          (puthash "note" second record)
+          (romacs-agent--record session record))
+        (let ((record (make-hash-table :test #'equal)) (old (make-hash-table :test #'equal)))
+          (puthash "type" "answer" old)
+          (puthash "request" "b" old)
+          (puthash "decision" "allow" old)
+          (puthash "seq" 2 record)
+          (puthash "note" old record)
+          (romacs-agent--record session record)))
+      (let ((events (seq-filter (lambda (event) (eq (plist-get event :type) 'attributed)) (reverse raised))))
+        (should (equal (plist-get (car events) :actor) '(:kind "policy" :login "ci" :client "phone")))
+        (should (equal (plist-get (cadr events) :actor) '(:kind "unknown" :login nil :client nil)))))))
 
 (ert-deftest romacs-agent-log-a-turn-end-ends-what-runs ()
   (romacs-agent-log-tests--with

@@ -21,8 +21,13 @@ pub(super) fn native_stack_room() -> bool {
 #[inline(always)]
 pub(super) fn stack_pointer() -> usize {
     let sp: usize;
+    // SAFETY: the instruction copies the stack pointer into a register and
+    // touches no memory, stack or flags, as its options declare.
+    // UNSAFE(inline asm: no crate reads the stack pointer without a call)
     #[cfg(target_arch = "x86_64")]
     unsafe { std::arch::asm!("mov {}, rsp", out(reg) sp, options(nomem, nostack, preserves_flags)) };
+    // SAFETY: as above, on aarch64.
+    // UNSAFE(inline asm: no crate reads the stack pointer without a call)
     #[cfg(target_arch = "aarch64")]
     unsafe { std::arch::asm!("mov {}, sp", out(reg) sp, options(nomem, nostack, preserves_flags)) };
     #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]

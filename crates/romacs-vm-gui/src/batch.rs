@@ -45,6 +45,12 @@ pub fn run(args: Vec<String>, quick: bool, store: Option<PathBuf>) -> Result<(),
         let mut vm = Vm::new();
         vm.set_frame_geometry(1000, 700, 20, 10)?;
         super::startup::initialize_files_from_sources(&mut vm, &[], &root)?;
+        // A file of Romacs's Lisp that signalled, which a session goes on
+        // without, fails a headless run: each, with its file and line.
+        let noted = super::startup::noted_lisp_errors(&mut vm)?;
+        if !noted.is_empty() {
+            return Err(noted.iter().filter_map(|error| error["error"].as_str()).collect::<Vec<_>>().join("\n"));
+        }
         if let Some(path) = init {
             if !super::user_init::load(&mut vm, &path)? {
                 return Err(format!("Explicit init file does not exist: {}", path.display()));
@@ -280,12 +286,14 @@ pub fn compile_lisp(file: PathBuf, store: Option<PathBuf>) -> Result<(), String>
             let dirs: Vec<PathBuf> = path.lines().map(PathBuf::from).collect();
             vm.set_load_path(&dirs)?;
         }
-        // The tree's compile checks what it finds on the same `load-path'.
-        println!("romacs-compile-load-path: {}", serde_json::to_string(&vm.compile_load_path()?).map_err(|e| e.to_string())?);
+        let load_path = vm.compile_load_path()?;
         let (artifact, held) = vm.compile_lisp_file(&file)?;
-        if held { println!("romacs-compile-held"); }
-        println!("romacs-compiled: {}", artifact.display());
-        vm.shutdown_background_processes()
+        vm.shutdown_background_processes()?;
+        // For a person reading the compile log; the process that started this
+        // one reads its record alone. The tree's compile checks what it finds
+        // on the same `load-path'.
+        println!("romacs-compile: {} {}", if held { "held" } else { "compiled" }, artifact.display());
+        romacs_vm::compiled_lisp::write_record(&artifact, held, load_path)
     })?.join().map_err(|_| "compile process panicked".to_owned())?
 }
 

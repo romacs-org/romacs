@@ -740,7 +740,8 @@ a state root of its own, and a service of its own on `socket'."
                           (lambda (_c _id notice) (when (eq (car notice) 'pending-resolved) (setq resolved (cadr notice)))))
                 ;; Who answered is said a unit before the answer: kept for it.
                 (run-hook-with-args 'romacs-agent-event-functions session
-                                    (list :type 'attributed :request-id "q-new" :by "user" :decision "deny" :reason "no milk"
+                                    (list :type 'attributed :request-id "q-new" :decision "deny" :reason "no milk"
+                                          :actor '(:kind "user" :login "ada" :client "x220")
                                           :seq 21 :last t :time (float-time)))
                 (remhash "q-new" (romacs-agent-approvals session))
                 (run-hook-with-args 'romacs-agent-event-functions session
@@ -748,6 +749,8 @@ a state root of its own, and a service of its own on `socket'."
                 (should (wait resolved))
                 (should (equal (gethash "how" resolved) "answered"))
                 (should (equal (gethash "kind" (gethash "actor" resolved)) "user"))
+                (should (equal (gethash "login" (gethash "actor" resolved)) "ada"))
+                (should (equal (gethash "client" (gethash "actor" resolved)) "x220"))
                 (should (equal (gethash "reason" resolved) "no milk"))
                 (should (= (hash-table-count (romacs-agent-client--follow-pending follow)) 2)))))
         (romacs-agent-remote-disconnect)
@@ -761,7 +764,7 @@ a state root of its own, and a service of its own on `socket'."
   (require 'romacs-agent-remote)
   (romacs-agent-service-tests--with-stored
     (romacs-agent-service-start socket)
-    (let* ((romacs-agent-remote--source nil) (romacs-agent-approval-policy 'ask) (calls nil)
+    (let* ((romacs-agent-remote--source nil) (romacs-agent-approval-policy 'ask) (calls nil) (notes nil)
            (romacs-agent-service--commands (make-hash-table :test #'equal))
            (romacs-agent-service--answering (make-hash-table :test #'equal))
            (source (romacs-agent-remote-connect socket)) (client (romacs-agent-remote-client source))
@@ -777,7 +780,7 @@ a state root of its own, and a service of its own on `socket'."
                 ;; Answered as the harness is written to: its line.
                 ((symbol-function 'romacs-agent--line)
                  (lambda (_s line &rest _) (push (list 'line (if (stringp line) line (json-serialize line))) calls)))
-                ((symbol-function 'romacs-agent--note) #'ignore))
+                ((symbol-function 'romacs-agent--note) (lambda (_s note) (push note notes))))
         (unwind-protect
             (progn
               (should (wait (romacs-agent-client-revision client)))
@@ -813,6 +816,9 @@ a state root of its own, and a service of its own on `socket'."
                                                                                                        "decision" "allow")))))
                                "request-gone"))
                 (should (equal (gethash "state" (car (funcall answer "c2"))) "written"))
+                ;; Credited to its caller: its login and its client's instance.
+                (should (equal (gethash "login" (car notes)) (user-login-name)))
+                (should (equal (gethash "client" (car notes)) (romacs-agent-client--instance)))
                 (should (eq (car (car calls)) 'line))
                 (should (string-search "Coffee" (cadr (car calls))))
                 (should (equal (gethash "kind" (gethash "data" (cadr (funcall answer "c3")))) "request-gone")))

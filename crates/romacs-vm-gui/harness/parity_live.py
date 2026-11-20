@@ -176,12 +176,21 @@ def alive_at(probe_dir):
         return None
 
 
+# The line Romacs's startup stops with: its screen then stays up until the
+# window is closed, so the process lives on (main.rs hold_failed_startup).
+STARTUP_FAILED = b'romacs: evaluator stopped: '
+
+
 class Engine:
     """One editor in its own private compositor, home and database copy."""
 
     def __init__(self, name, argv, root, lisp, env, timeout):
         self.name, self.argv, self.root, self.lisp, self.timeout = name, argv, root, lisp, timeout
         self.env, self.serial, self.processes = env, 0, []
+        # The editor's stderr under the root (a pattern: a launcher may keep
+        # it in a directory it makes), how far startup_failed read it, and
+        # what it found.
+        self.editor_log, self.log_read, self.failed = 'engine.log', 0, None
         self.probe_dir = root / 'probe'
         # A runtime directory for the editor alone; the compositor keeps
         # the root, where its socket's path is short enough to bind.
@@ -196,6 +205,16 @@ class Engine:
             raise
 
     def launch(self, tools):
+        self.spawn(tools)
+        wait(lambda: alive_at(self.probe_dir) is not None or self.startup_failed(), self.timeout * 4, f'{self.name} init',
+             self.process, .02)
+        if alive_at(self.probe_dir) is None:
+            raise RuntimeError(f'{self.name} init: {self.failed}')
+        self.startup_seconds = alive_at(self.probe_dir) - self.started
+        return self
+
+    def spawn(self, tools):
+        """The compositor and the editor, started; nothing waits for its init."""
         self.tools = tools
         (self.root / 'labwc').mkdir()
         (self.root / 'labwc/rc.xml').write_text(RC_XML)
@@ -209,16 +228,26 @@ class Engine:
         self.processes.append(subprocess.Popen([f'{tools}/wtype', '-s', '86400000', '-k', 'Shift_L'],
                                                env=self.env, stdout=log, stderr=log))
         time.sleep(.3)
-        started = time.time()
+        self.started = time.time()
         output = (self.root / 'engine.log').open('w')
         if self.editor_runtime:
             self.env.update(XDG_RUNTIME_DIR=str(self.editor_runtime), WAYLAND_DISPLAY=str(socket))
         self.process = subprocess.Popen(self.argv, env=self.env, cwd=self.root / 'work', preexec_fn=ptraceable,
                                         stdin=subprocess.DEVNULL, stdout=output, stderr=output)
         self.processes.append(self.process)
-        wait(lambda: alive_at(self.probe_dir) is not None, self.timeout * 4, f'{self.name} init', self.process, .02)
-        self.startup_seconds = alive_at(self.probe_dir) - started
         return self
+
+    def startup_failed(self):
+        """The line the editor's startup stopped with, once its log has it:
+        read on from where the last look left off, whole lines only."""
+        path = self.failed is None and next(self.root.glob(self.editor_log), None)
+        if path:
+            with path.open('rb') as log:
+                log.seek(self.log_read)
+                whole, newline, _ = log.read().rpartition(b'\n')
+            self.log_read += len(whole) + len(newline)
+            self.failed = next((line.decode(errors='replace') for line in whole.split(b'\n') if line.startswith(STARTUP_FAILED)), None)
+        return self.failed
 
     def randr(self, width, height):
         # PARITY_OUTPUT_SCALE: a HiDPI output (2 is a scale-2 display) for

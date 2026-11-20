@@ -81,6 +81,10 @@ mod fail_stack_parity_tests;
 mod start_anchor_tests;
 
 #[cfg(test)]
+#[path = "tests/reads_lookup_test.rs"]
+mod reads_lookup_tests;
+
+#[cfg(test)]
 #[path = "tests/syntax_lead_test.rs"]
 mod syntax_lead_tests;
 
