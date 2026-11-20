@@ -12,6 +12,8 @@
 // parameters (geometry, handles, callbacks); folding them into structs is a
 // separate refactor, so this bulk category is allowed crate-wide.
 #![allow(clippy::too_many_arguments)]
+// Unsafe code lives in `wayland_guest` alone, behind safe functions.
+#![deny(unsafe_code)]
 
 pub mod backend;
 pub(crate) mod clipboard;
@@ -22,6 +24,9 @@ pub mod paint_host;
 mod presentation;
 mod presentation_feedback;
 pub mod thread_comm;
+#[cfg(target_os = "linux")]
+#[expect(unsafe_code, reason = "winit and smithay-clipboard hand out Wayland objects only as raw pointers")]
+mod wayland_guest;
 #[cfg(target_os = "linux")]
 mod wayland_toplevel_icon;
 mod window_chrome;

@@ -16,16 +16,15 @@
 //! and destroys every object it was given.
 
 use super::text_policy::{TextMime, TextRead};
+use crate::wayland_guest::Guest;
 
-use std::ffi::c_void;
 use std::io::{ErrorKind, Read};
 use std::os::fd::AsFd;
-use std::ptr::NonNull;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
-use wayland_backend::client::{Backend, WaylandError};
+use wayland_backend::client::WaylandError;
 use wayland_client::globals::{BindError, GlobalListContents, registry_queue_init};
 use wayland_client::protocol::{wl_registry, wl_seat};
 use wayland_client::{
@@ -109,25 +108,17 @@ impl Dispatch<ext_data_control_offer_v1::ExtDataControlOfferV1, OfferMimes> for 
 
 /// A private event queue on the shared display, bound to data-control.
 pub(super) struct DataControlReader {
-    connection: Connection,
+    guest: Guest,
     queue: EventQueue<ReaderState>,
     manager: ext_data_control_manager_v1::ExtDataControlManagerV1,
     seat: wl_seat::WlSeat,
 }
 
 impl DataControlReader {
-    /// Bind data-control on `display`, or `Ok(None)` when the compositor
-    /// does not offer it (or offers no seat).
-    ///
-    /// # Safety
-    ///
-    /// `display` must be a live `wl_display` that outlives the reader.
-    pub(super) unsafe fn connect(display: NonNull<c_void>) -> Result<Option<Self>, String> {
-        // SAFETY: guaranteed by the caller.  A foreign backend never
-        // disconnects the display it borrows.
-        let backend = unsafe { Backend::from_foreign_display(display.as_ptr().cast()) };
-        let connection = Connection::from_backend(backend);
-        let (globals, queue) = registry_queue_init::<ReaderState>(&connection)
+    /// Bind data-control on GUEST's display, or `Ok(None)` when the
+    /// compositor does not offer it (or offers no seat).
+    pub(super) fn connect(guest: Guest) -> Result<Option<Self>, String> {
+        let (globals, queue) = registry_queue_init::<ReaderState>(guest.connection())
             .map_err(|err| format!("data-control registry: {err}"))?;
         let handle = queue.handle();
         let manager: ext_data_control_manager_v1::ExtDataControlManagerV1 =
@@ -151,7 +142,7 @@ impl DataControlReader {
             .registry()
             .bind::<wl_seat::WlSeat, _, _>(seat, 1, &handle, ());
         Ok(Some(Self {
-            connection,
+            guest,
             queue,
             manager,
             seat,
@@ -178,7 +169,7 @@ impl DataControlReader {
             offer.destroy();
         }
         device.destroy();
-        let _ = self.connection.flush();
+        let _ = self.guest.connection().flush();
         result
     }
 
@@ -204,7 +195,7 @@ impl DataControlReader {
         offer.receive(mime.as_str().to_owned(), writer.as_fd());
         // Only the selection owner may hold the write end, or EOF never comes.
         drop(writer);
-        match self.connection.flush() {
+        match self.guest.connection().flush() {
             // A full socket sends the request later; the deadline still holds.
             Ok(()) => {}
             Err(WaylandError::Io(err)) if err.kind() == ErrorKind::WouldBlock => {}
@@ -218,7 +209,7 @@ impl DataControlReader {
 impl Drop for DataControlReader {
     fn drop(&mut self) {
         self.manager.destroy();
-        let _ = self.connection.flush();
+        let _ = self.guest.connection().flush();
     }
 }
 

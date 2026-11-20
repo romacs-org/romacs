@@ -10,6 +10,10 @@ impl PresentationObserver {
             wayland: wayland::PresentationObserver::new(),
         }
     }
+    /// Winit's display, where receipts are requested.
+    pub(crate) fn attach(&mut self, display: winit::event_loop::OwnedDisplayHandle) {
+        self.wayland.attach(display);
+    }
     pub(crate) fn before_present(
         &mut self,
         window: &dyn winit::window::Window,
