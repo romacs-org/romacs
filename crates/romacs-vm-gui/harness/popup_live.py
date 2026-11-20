@@ -1110,7 +1110,9 @@ def main():
                     row = glyphs_at.get(top + y)
                     if not row:
                         continue
-                    left = row[0][0]  # the line's first character, a space or not, is a glyph
+                    # Column 0 is the window's text left (a row that starts
+                    # with an empty column starts with a stretch, no glyph).
+                    left = probe['text-left']
                     for start in (m.start() for m in re.finditer(r'(?<=  )\S', line_text)):
                         x = left + start * column
                         if not any(abs(gx - x) < 1.5 and ch == line_text[start] for gx, ch in row):
