@@ -150,12 +150,6 @@ approve) always comes to the user."
   :type '(choice (const :tag "Allow every tool call" allow) (const :tag "Ask" ask))
   :group 'romacs-agent)
 
-(defcustom romacs-agent-suggestions t
-  "Whether a chat's empty composer offers the prompt its harness predicts
-the user sends next, when its driver can ask for one (:suggestions).  A
-harness asks at its launch; the composer stops showing them at once."
-  :type 'boolean :group 'romacs-agent)
-
 (defvar romacs-agent-input-functions nil
   "Functions called with a session and a request id once a user's message
 is written to its harness: before the harness has acted on it, whenever
@@ -475,14 +469,6 @@ nothing on its user's behalf: what it does not allow waits on the user."
 \(questions, a plan), by request id: the rest the `allow' policy answers.
 Its run's, kept in the driver's state."
   (plist-get (romacs-agent-driver-state session) :asks))
-
-(defun romacs-agent-suggestion (session)
-  "The prompt SESSION's harness predicts the user sends next, or nil: given
-after a turn's end, gone when the next turn starts or the run ends.  Its
-run's, kept in the driver's state, and offered only while SESSION is idle:
-one stopped, ended or detached takes no prompt from it."
-  (and (eq (romacs-agent-state session) 'idle)
-       (plist-get (romacs-agent-driver-state session) :suggestion)))
 
 (defun romacs-agent--set-asks (session asks)
   (setf (romacs-agent-driver-state session) (plist-put (romacs-agent-driver-state session) :asks asks)))
@@ -856,9 +842,6 @@ instances) is derived again when it changes.")
       `rate-limit' event naming every window that binds the account,
       or nil when that is not known now.  An account at its limit is
       asked again and again (`romacs-agent-room-check-interval');
-  :suggestions WORDS   optional: the words its command line asks for a
-      predicted next prompt by (`romacs-agent--suggestion-words'), each a
-      `suggestion' event (:text) after a turn's end;
   :native-id-p (STRING)   whether STRING can name its conversation;
   :forks (SESSION)   present when a session can start from another's
       conversation as it stands, by the harness's own fork (its options'
@@ -1290,11 +1273,6 @@ brief."
     (append (when-let* ((model (plist-get options :model))) (list model-flag model))
             (when-let* ((effort (plist-get options :effort))) (list effort-flag effort)))))
 
-(defun romacs-agent--suggestion-words (session)
-  "The words SESSION's command line asks for predicted prompts by, while
-`romacs-agent-suggestions' is on: its driver's :suggestions."
-  (and romacs-agent-suggestions (romacs-agent--harness-get session :suggestions)))
-
 (defun romacs-agent--line (session object &optional journal)
   "Write OBJECT as one line to SESSION's harness; JOURNAL, when given, is
 what the journal keeps of it: a message (`romacs-agent--input'), which
@@ -1647,9 +1625,8 @@ on whatever becomes of this server."
                   (setf (romacs-agent-driver-state session) state)))
     ;; Whether the turn is a compaction (/compact, or /compact INSTRUCTIONS);
     ;; a steer into a running one leaves it so.
-    ;; A turn starting makes its last prediction moot.
     ('input (setf (romacs-agent-driver-state session)
-                  (plist-put (plist-put (romacs-agent-driver-state session) :suggestion nil) :compact-turn
+                  (plist-put (romacs-agent-driver-state session) :compact-turn
                              ;; A steer: a turn its records began, not ended
                                  ;; (running from a prompt's write is no such turn).
                              (or (and (> (or (romacs-agent-input-seq session) 0) (romacs-agent-done-seq session))
@@ -1696,13 +1673,6 @@ on whatever becomes of this server."
              (setf (romacs-agent-activity session) (plist-get event :name))))
     ;; A plan presented, by any harness: its turn's.
     ('plan (setf (romacs-agent-planned-seq session) (romacs-agent-input-seq session)))
-    ;; The prompt predicted next: only between turns (one arriving after
-    ;; the next prompt is about the turn before), as the journal says, so
-    ;; one replayed to a session attaching again, detached till then, counts.
-    ('suggestion (when (and (memq (romacs-agent-state session) '(idle detached))
-                            (<= (or (romacs-agent-input-seq session) 0) (romacs-agent-completed-seq session)))
-                   (setf (romacs-agent-driver-state session)
-                         (plist-put (romacs-agent-driver-state session) :suggestion (plist-get event :text)))))
     ;; Its harness would not go into plan mode: the session is not in it.
     ('plan-refused (when (romacs-agent--live-p session)
                      (romacs-agent--set-options session (romacs-agent--without (romacs-agent-options session) '(:plan :plan-from)))))
