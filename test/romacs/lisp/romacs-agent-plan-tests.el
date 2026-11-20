@@ -12,6 +12,9 @@
   (require 'romacs-agent-codex)
   (require 'romacs-agent-ui))
 
+;; The real `romacs-agent-respond', for tests the fixture stubs it in.
+(defalias 'romacs-agent-plan-tests--respond (symbol-function 'romacs-agent-respond))
+
 (defmacro romacs-agent-plan-tests--with (harness &rest body)
   "BODY with `session' of HARNESS, live; `written' and `answered' collect."
   (declare (indent 1))
@@ -182,6 +185,50 @@
       ;; Nothing to write live: the next turn carries it.
       (should-not written)
       (should (equal (gethash "mode" (funcall mode)) "plan")))))
+
+(ert-deftest romacs-agent-plan-claude-proceeds-out-of-plan-mode ()
+  ;; Its presented plan allowed: Claude Code back in the mode it had before
+  ;; plan mode, as its own client sets it, so the next tool call is no
+  ;; plan mode's to block.
+  (romacs-agent-plan-tests--with 'claude
+    (romacs-agent-set-plan session t)
+    (setq written nil)
+    (let ((request (make-hash-table :test #'equal)))
+      (puthash "tool_name" "ExitPlanMode" request)
+      (puthash "p1" request (romacs-agent-approvals session)))
+    (cl-letf (((symbol-function 'romacs-agent-respond) (symbol-function 'romacs-agent-plan-tests--respond))
+              ((symbol-function 'romacs-agent--claude-respond) (lambda (&rest _) (romacs-mcp--object "type" "control_response"))))
+      (romacs-agent-respond session "p1" t nil 'user))
+    (should-not (plist-get (romacs-agent-options session) :plan))
+    (should (cl-some (lambda (line) (let ((request (gethash "request" line)))
+                                      (and (hash-table-p request)
+                                           (equal (gethash "mode" request) "bypassPermissions"))))
+                     written))
+    ;; Another request allowed is no plan: plan mode stays as it is.
+    (romacs-agent-set-plan session t)
+    (puthash "e1" (make-hash-table :test #'equal) (romacs-agent-approvals session))
+    (cl-letf (((symbol-function 'romacs-agent-respond) (symbol-function 'romacs-agent-plan-tests--respond))
+              ((symbol-function 'romacs-agent--claude-respond) (lambda (&rest _) (romacs-mcp--object "type" "control_response"))))
+      (romacs-agent-respond session "e1" t nil 'user))
+    (should (plist-get (romacs-agent-options session) :plan))))
+
+(ert-deftest romacs-agent-plan-codex-proceeds-out-of-plan-mode ()
+  ;; Codex's plan is no request: its event says it is proceeded with by
+  ;; leaving plan mode, and the next turn says the default mode.
+  (romacs-agent-plan-tests--with 'codex
+    (setf (romacs-agent-model session) "gpt-6.1-sol" (romacs-agent-harness-session session) "th"
+          (romacs-agent-driver-state session) (list :experimental t))
+    (romacs-agent-set-plan session t)
+    (should (plist-get (car (romacs-agent--codex-item
+                              session (romacs-mcp--object "type" "plan" "id" "p1" "text" "1. do it") t))
+                       :proceed))
+    (with-temp-buffer
+      (romacs-agent-log-mode)
+      (setq romacs-agent-log--session session)
+      (cl-letf (((symbol-function 'romacs-agent-log--loaded) (lambda () session)))
+        (romacs-agent-log-proceed)))
+    (should (equal (gethash "mode" (gethash "collaborationMode" (gethash "params" (romacs-agent--codex-turn session 1 []))))
+                   "default"))))
 
 (provide 'romacs-agent-plan-tests)
 ;;; romacs-agent-plan-tests.el ends here

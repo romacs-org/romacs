@@ -687,6 +687,26 @@ unless a note said who gave it, that it was answered."
 (defun romacs-agent-log--note (event text)
   (romacs-agent-log--line event 'note (concat "· " text) 'romacs-agent-log-note))
 
+(defun romacs-agent-log--proceed-row (session event)
+  "The keys under plan EVENT of SESSION when proceeding with it is leaving
+plan mode (its driver marks it :proceed) and SESSION is in plan mode."
+  (if (and (plist-get event :proceed) (plist-get (romacs-agent-options session) :plan))
+      (propertize (concat "\n  " (romacs-agent-log--key 'romacs-agent-log-proceed 'romacs-agent-log-plan-map)
+                          " proceed, leaving plan mode")
+                  'romacs-agent-log-keys t 'keymap romacs-agent-log-plan-map)
+    ""))
+
+(defun romacs-agent-log-proceed ()
+  "Proceed with the plan presented: its session leaves plan mode, back in
+the mode it had, and the next message carries it out."
+  (interactive nil romacs-agent-log-mode)
+  (romacs-agent-set-plan (romacs-agent-log--loaded) nil)
+  ;; Its keys answer nothing any more.
+  (when-let* ((at (text-property-any (line-beginning-position) (line-end-position) 'romacs-agent-log-keys t)))
+    (romacs-agent-log--writing
+      (delete-region (1- at) (or (next-single-property-change at 'romacs-agent-log-keys nil romacs-agent-log--end)
+                                 romacs-agent-log--end)))))
+
 (defun romacs-agent-log-draw (session event)
   "Draw SESSION's EVENT in the current chat."
   (pcase (plist-get event :type)
@@ -717,7 +737,8 @@ unless a note said who gave it, that it was answered."
                                                                         (plist-get event :answers))))
     ('answered (romacs-agent-log--answered event))
     ('plan (romacs-agent-log--line event 'plan (concat (propertize "📋 Plan\n" 'face 'romacs-agent-log-prompt)
-                                                       (plist-get event :text))))
+                                                       (plist-get event :text)
+                                                       (romacs-agent-log--proceed-row session event))))
     ('done (setq romacs-agent-log--current nil romacs-agent-log--early nil)
            (romacs-agent-log--close-asks session event 'turn-end)
            (romacs-agent-log--done event))
@@ -1393,6 +1414,11 @@ A character typed on it goes to the composer."
   "w" #'romacs-agent-log-copy
   "e" #'romacs-agent-log-earlier
   "g" #'romacs-agent-log-composer)
+
+(defvar-keymap romacs-agent-log-plan-map
+  :doc "Keys of a plan to proceed with by leaving plan mode."
+  :parent romacs-agent-log-transcript-map
+  "y" #'romacs-agent-log-proceed)
 
 (defvar-keymap romacs-agent-log-ask-map
   :doc "Keys of an approval waiting on the user."

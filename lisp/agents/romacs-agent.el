@@ -840,6 +840,11 @@ instances) is derived again when it changes.")
       `rate-limit' event naming every window that binds the account,
       or nil when that is not known now.  An account at its limit is
       asked again and again (`romacs-agent-room-check-interval');
+  :presented-plan-p (SESSION ID)   optional: whether request ID is the
+      plan the harness presents, its allowing taking it out of plan mode
+      (`romacs-agent-respond'); a harness whose plans are no request marks
+      its `plan' events :proceed instead, which the chat offers to proceed
+      with by leaving plan mode;
   :native-id-p (STRING)   whether STRING can name its conversation;
   :forks (SESSION)   present when a session can start from another's
       conversation as it stands, by the harness's own fork (its options'
@@ -4393,7 +4398,12 @@ an actor, a plist of :kind (`user' or `policy'), :login and :client.  A
 note says so in SESSION's records first, so every view shows who decided
 (doc/agent-protocol.org, Attribution)."
   (unless (gethash request-id (romacs-agent-approvals session)) (user-error "No such approval request"))
-  (let ((line (funcall (romacs-agent--harness-get session :respond) session request-id allow message)))
+  (let ((line (funcall (romacs-agent--harness-get session :respond) session request-id allow message))
+        ;; Its presented plan allowed: the harness back in the mode it had
+        ;; before plan mode, as its own client does (its driver's
+        ;; :presented-plan-p).
+        (plan (and allow (when-let* ((plan-p (romacs-agent--harness-get session :presented-plan-p)))
+                           (funcall plan-p session request-id)))))
     (when-let* ((actor (romacs-agent--actor by)))
       (romacs-agent--note session (romacs-mcp--object
                                    "type" "answer" "request" request-id "by" (symbol-name (plist-get actor :kind))
@@ -4405,7 +4415,8 @@ note says so in SESSION's records first, so every view shows who decided
                                                (pcase-dolist (`(,question . ,answer) (and (consp allow) (plist-get allow :answers)))
                                                  (puthash question answer object))
                                                object))))
-    (romacs-agent--line session line)))
+    (romacs-agent--line session line)
+    (when plan (romacs-agent-set-plan session nil))))
 
 (defun romacs-agent--host-pid (session)
   (let ((host (romacs-agent--read-json (expand-file-name "host.json" (romacs-agent-dir session)))))

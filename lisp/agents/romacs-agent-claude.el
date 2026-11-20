@@ -278,6 +278,13 @@ in mode FROM (the default when it had none)."
                       "request" (romacs-mcp--object "subtype" "set_permission_mode"
                                                     "mode" (if on "plan" (or from "default")))))
 
+(defun romacs-agent--claude-presented-plan-p (session id)
+  "Whether SESSION's request ID is the plan Claude Code presents: its
+ExitPlanMode call, whose allowing its own client follows by setting the
+mode it had before plan mode."
+  (let ((request (gethash id (romacs-agent-approvals session))))
+    (and (hash-table-p request) (equal (gethash "tool_name" request) "ExitPlanMode"))))
+
 (defun romacs-agent--claude-cache-ttl (usage)
   "Seconds the prompt cache a request with USAGE wrote lives: an hour or
 five minutes, as it says; nil when it wrote none (served wholly from the
@@ -885,6 +892,7 @@ environment."
   :renew #'romacs-agent--claude-renew
   :next #'romacs-agent--claude-next
   :plan #'romacs-agent--claude-plan
+  :presented-plan-p #'romacs-agent--claude-presented-plan-p
   :select #'romacs-agent--claude-select
   :argv #'romacs-agent--claude-argv
   :input #'romacs-agent--claude-user
