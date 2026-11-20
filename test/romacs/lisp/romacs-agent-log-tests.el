@@ -281,6 +281,12 @@
         (should (equal (substring-no-properties (romacs-agent-log--worker-label 0)) "◆ asks · asks you"))
         (should (equal (substring-no-properties (romacs-agent-log--worker-label 1)) "● builds · running"))
         (should-not (romacs-agent-log--worker-label 2))
+        ;; A long title gives way to its state.
+        (setf (romacs-agent-title (nth 0 children)) (make-string 60 ?x))
+        (let ((label (romacs-agent-log--worker-label 1)))
+          (should (<= (string-width label) keymap-popup--max-description-width))
+          (should (string-suffix-p "· running" label)))
+        (setf (romacs-agent-title (nth 0 children)) "builds")
         ;; A digit opens the worker it showed; one finished since is the board's.
         (let (shown)
           (cl-letf (((symbol-function 'romacs-agent-show) (lambda (child &rest _) (setq shown child))))

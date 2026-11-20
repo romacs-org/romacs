@@ -1346,8 +1346,12 @@ it finished since.")
 title, so a long title is what the menu cuts; nil, no row, when there is
 none.  The row's digit then opens what it showed."
   (when-let* ((child (aset (romacs-agent-log--menu-slots) index (nth index (romacs-agent-log--workers)))))
-    (let ((state (romacs-agent-log--worker-state child)))
-      (concat (car state) " " (romacs-agent-title child) " · " (cdr state)))))
+    (let* ((state (romacs-agent-log--worker-state child))
+           ;; The title gives way, never the state: a popup cuts a row at
+           ;; `keymap-popup--max-description-width'.
+           (room (- keymap-popup--max-description-width (string-width (car state)) 4 (string-width (cdr state)))))
+      (concat (car state) " " (truncate-string-to-width (romacs-agent-title child) (max 1 room) nil nil t)
+              " · " (cdr state)))))
 
 (defun romacs-agent-log--open-worker (child)
   "Open worker CHILD's chat, unless it finished since it was shown."
