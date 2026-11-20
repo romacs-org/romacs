@@ -1034,3 +1034,25 @@ none when dropped.")
         (should (= romacs-agent-log--input (point-max)))
         (call-interactively (keymap-lookup romacs-agent-log-mode-map "C-c C-r"))
         (should (equal (romacs-agent-title session) "named"))))))
+
+(ert-deftest romacs-agent-log-attach-takes-the-clipboard-s-image ()
+  ;; C-c C-a with an image in the clipboard saves it with the session and
+  ;; puts its path in the composer.
+  (romacs-agent-log-tests--with
+    (ignore #'draw)
+    (let ((dir (make-temp-file "romacs-attach" t)))
+      (unwind-protect
+          (cl-letf (((symbol-function 'romacs-agent-menu--clipboard-image-type) (lambda () "image/png"))
+                    ((symbol-function 'romacs-agent-log--loaded) #'identity)
+                    ((symbol-function 'romacs-agent-dir) (lambda (_) dir))
+                    ((symbol-function 'call-process)
+                     (lambda (program _in out &rest _)
+                       (should (equal program "wl-paste"))
+                       (with-temp-file (cadr out) (insert "PNG"))
+                       0)))
+            (call-interactively (keymap-lookup romacs-agent-log-mode-map "C-c C-a"))
+            (let ((path (buffer-substring-no-properties romacs-agent-log--input (point-max))))
+              (should (string-prefix-p (expand-file-name "attachments/clipboard-" dir) path))
+              (should (string-suffix-p ".png" path))
+              (should (file-exists-p path))))
+        (delete-directory dir t)))))
