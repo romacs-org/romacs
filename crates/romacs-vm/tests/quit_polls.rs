@@ -41,7 +41,7 @@ const LONG: &[(&str, &str)] = &[
     ("prim/leaf/sqlite.rs", "pub(crate) fn sqlite_select("),
     ("treesit/native.rs", "pub(crate) fn parse_until("),
     ("treesit/native.rs", "pub(crate) fn matches("),
-    ("prim/leaf/process.rs", "fn call_process_wait("),
+    ("prim/leaf/call_process_wait.rs", "fn call_process_wait("),
     // Measured by the probe (a3/GAPS.md).
     ("prim/leaf/coding.rs", "fn coding_convert(&mut self"),
     ("prim/leaf/casing.rs", "pub(crate) fn case_mappings("),

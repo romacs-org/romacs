@@ -2028,10 +2028,11 @@ mod leaf {
     pub(crate) mod treesit;
     pub(crate) mod inotify;
     mod process;
+    mod call_process_wait;
     mod gnutls;
     pub(crate) use process::{CallOutput, Target, strerror};
     #[cfg(test)]
-    pub(crate) use process::ChildEnd;
+    pub(crate) use call_process_wait::ChildEnd;
     mod random;
     mod labeled_restrictions;
     mod hash_walk;
