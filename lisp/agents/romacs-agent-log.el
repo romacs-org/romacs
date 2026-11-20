@@ -437,26 +437,32 @@ and its usage after it).  RET still shows all of it."
       (setq report (substring report 0 (match-beginning 0))))
     (string-trim report)))
 
-(defun romacs-agent-log--lines (text limit)
-  "TEXT's first LIMIT lines and how many it has: (SHOWN . COUNT)."
+(defun romacs-agent-log--lines (text limit &optional tail)
+  "TEXT's first LIMIT lines, or with TAIL its last, and how many it has:
+\(SHOWN . COUNT)."
   (let* ((lines (split-string (string-trim-right (or text "")) "\n"))
          (count (length lines)))
-    (cons (string-join (seq-take lines limit) "\n") count)))
+    (cons (string-join (if tail (last lines limit) (seq-take lines limit)) "\n") count)))
 
-(defun romacs-agent-log--output (output face full)
+(defun romacs-agent-log--output (output face full &optional tail)
   "OUTPUT under its call, `⎿' first, its first lines in FACE, then how
-many more there are; FULL, (INPUT . OUTPUT), is what RET on it shows."
-  (pcase-let ((`(,shown . ,count) (romacs-agent-log--lines output romacs-agent-log-output-lines)))
-    (let ((text (concat (propertize "  ⎿ " 'face 'romacs-agent-log-rule)
-                        (let ((shown (propertize (replace-regexp-in-string "\n" "\n    " (if (string-empty-p shown) "(no output)" shown) t t)
-                                                 'face face)))
-                          (if (eq face 'romacs-agent-log-output) (romacs-agent-log-faces-output shown) shown))
-                        (if (> count romacs-agent-log-output-lines)
-                            (propertize (format "\n    … %d more lines · %s shows all" (- count romacs-agent-log-output-lines)
-                                                (romacs-agent-log--key 'romacs-agent-log-open))
-                                        'face 'romacs-agent-log-note)
-                          "")
-                        "\n")))
+many more there are; with TAIL, how many came before, then its last
+lines, as a command's output ran.  FULL, (INPUT . OUTPUT), is what RET
+on it shows."
+  (pcase-let ((`(,shown . ,count) (romacs-agent-log--lines output romacs-agent-log-output-lines tail)))
+    (let* ((more (and (> count romacs-agent-log-output-lines)
+                      (propertize (let ((n (- count romacs-agent-log-output-lines)))
+                                    (format "… %d %s line%s · %s shows all" n (if tail "earlier" "more") (if (= n 1) "" "s")
+                                            (romacs-agent-log--key 'romacs-agent-log-open)))
+                                  'face 'romacs-agent-log-note)))
+           (shown (propertize (replace-regexp-in-string "\n" "\n    " (if (string-empty-p shown) "(no output)" shown) t t)
+                              'face face))
+           (shown (if (eq face 'romacs-agent-log-output) (romacs-agent-log-faces-output shown) shown))
+           (text (concat (propertize "  ⎿ " 'face 'romacs-agent-log-rule)
+                         (if (and more tail) (concat more "\n    ") "")
+                         shown
+                         (if (and more (not tail)) (concat "\n    " more) "")
+                         "\n")))
       (propertize text 'romacs-agent-log-full full))))
 
 (defun romacs-agent-log--json (value)
@@ -482,12 +488,17 @@ renderer's, else its name and the brief of its input."
                                   100 nil nil (truncate-string-ellipsis))))
                       (if (string-empty-p brief) "" (concat "(" brief ")")))))))
 
+(defun romacs-agent-log--one-line (text)
+  "TEXT, a row, on one line: its line breaks spaces (RET shows it whole)."
+  (and text (replace-regexp-in-string "[ \t]*[\n\r]+[ \t]*" " " text t t)))
+
 (defun romacs-agent-log--call (event)
   "The first line of tool call EVENT, its mark first."
   (let ((input (plist-get event :input)))
     (concat (propertize "● " 'face 'romacs-agent-log-tool)
-            (romacs-agent-log--call-row (romacs-agent-rows-name (plist-get event :name))
-                                        (if (hash-table-p input) input (make-hash-table :test #'equal))))))
+            (romacs-agent-log--one-line
+             (romacs-agent-log--call-row (romacs-agent-rows-name (plist-get event :name))
+                                         (if (hash-table-p input) input (make-hash-table :test #'equal)))))))
 
 (defun romacs-agent-log--ended-row (block output)
   "BLOCK's row, its call ended well with OUTPUT, rewritten to say what came
@@ -496,7 +507,8 @@ of it (`romacs-agent-rows-ended'), after its mark."
          (name (plist-get props :name))
          (input (let ((input (plist-get props :input))) (if (hash-table-p input) input (make-hash-table :test #'equal))))
          (start (plist-get props :start))
-         (ended (condition-case err (romacs-agent-rows-ended name input (romacs-agent-log--call-row name input) output)
+         (ended (condition-case err (romacs-agent-log--one-line
+                                     (romacs-agent-rows-ended name input (romacs-agent-log--call-row name input) output))
                   (error (message "The row of %s failed: %s" name (error-message-string err)) nil))))
     (when ended
       (save-excursion
@@ -504,7 +516,8 @@ of it (`romacs-agent-rows-ended'), after its mark."
         (let ((end (line-end-position)))
           (when (search-forward "● " end t)
             (let ((properties (list 'romacs-agent-log-seq (get-text-property start 'romacs-agent-log-seq)
-                                    'romacs-agent-log-full (get-text-property start 'romacs-agent-log-full))))
+                                    'romacs-agent-log-full (get-text-property start 'romacs-agent-log-full)
+                                    'romacs-agent-log-tool (get-text-property start 'romacs-agent-log-tool))))
               (romacs-agent-log--writing
                 (delete-region (point) end)
                 (insert (romacs-agent-log--sealed (apply #'propertize ended properties)))))))))))
@@ -515,11 +528,11 @@ of it (`romacs-agent-rows-ended'), after its mark."
 
 (defun romacs-agent-log--under-call (name output failed)
   "What goes under a call of tool NAME that ended with OUTPUT, FAILED or
-not, as (TEXT . FACE), or nil: an error, a subagent's report, or a
-command's last lines.  Anything else is RET away."
-  (cond (failed (cons (romacs-agent-log--failure output) 'romacs-agent-log-denied))
-        ((member name '("Agent" "Task")) (cons (romacs-agent-log--report output) 'romacs-agent-log-output))
-        ((romacs-agent-rows-tail-p name) (cons output 'romacs-agent-log-output))))
+not, as (TEXT FACE TAIL), or nil: an error, a subagent's report, or a
+command's last lines (TAIL).  Anything else is RET away."
+  (cond (failed (list (romacs-agent-log--failure output) 'romacs-agent-log-denied))
+        ((member name '("Agent" "Task")) (list (romacs-agent-log--report output) 'romacs-agent-log-output))
+        ((romacs-agent-rows-tail-p name) (list output 'romacs-agent-log-output t))))
 
 (defun romacs-agent-log--live (block text)
   "BLOCK's output streamed so far grows by TEXT: its last lines show under
@@ -588,11 +601,7 @@ its call, in place of those shown before."
                ;; Its input as it ended: some calls fill theirs in only then.
                (when-let* ((input (plist-get event :input))
                            ((not (equal input (plist-get props :input)))))
-                 (setcdr block (plist-put (cdr block) :input input))
-                 (romacs-agent-log--writing
-                   (put-text-property (plist-get props :start)
-                                      (save-excursion (goto-char (plist-get props :start)) (line-end-position))
-                                      'romacs-agent-log-full (list input))))
+                 (setcdr block (plist-put (cdr block) :input input)))
                ;; Its row says what came of it; RET on it shows all.
                (let ((full (cons (plist-get (cdr block) :input) output)))
                  (romacs-agent-log--writing
@@ -601,7 +610,7 @@ its call, in place of those shown before."
                                       'romacs-agent-log-full full))
                  (unless failed (romacs-agent-log--ended-row block output))
                  (when-let* ((under (romacs-agent-log--under-call (plist-get props :name) output failed)))
-                   (romacs-agent-log--put (romacs-agent-log--indent (romacs-agent-log--output (car under) (cdr under) full)
+                   (romacs-agent-log--put (romacs-agent-log--indent (romacs-agent-log--output (nth 0 under) (nth 1 under) full (nth 2 under))
                                                                     (plist-get props :depth))
                                           block)))
                ;; A call stays open while work its harness runs under it
@@ -622,7 +631,7 @@ its call, in place of those shown before."
                                 (if failed "" (romacs-agent-rows-outcome output)))
                         'tool event)
                        (if-let* ((under (romacs-agent-log--under-call name output failed)))
-                           (romacs-agent-log--output (car under) (cdr under) (cons nil output))
+                           (romacs-agent-log--output (nth 0 under) (nth 1 under) (cons nil output) (nth 2 under))
                          ""))
                'romacs-agent-log-full (cons nil output))))))))))
 

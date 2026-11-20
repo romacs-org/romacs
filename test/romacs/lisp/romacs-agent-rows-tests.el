@@ -183,8 +183,12 @@
   ;; names, a list's length, a line, or how many lines; never the payload.
   (should (equal (substring-no-properties (romacs-agent-rows-outcome "{\"status\":\"queued\",\"title\":\"x\",\"log\":\"…\"}"))
                  " · queued · x"))
-  (should (equal (substring-no-properties (romacs-agent-rows-outcome "{\"error\":\"no such task\",\"status\":\"x\"}"))
-                 " · no such task"))
+  (let ((said (romacs-agent-rows-outcome "{\"error\":\"no such task\",\"status\":\"x\"}")))
+    (should (equal (substring-no-properties said) " · no such task"))
+    ;; The error in its face, not dimmed.
+    (should (eq (get-text-property (string-search "no" said) 'face said) 'romacs-agent-error)))
+  ;; An object naming nothing: how many fields.
+  (should (equal (substring-no-properties (romacs-agent-rows-outcome "{\"a\":1,\"b\":2}")) " · 2 fields"))
   (should (equal (substring-no-properties (romacs-agent-rows-outcome "[1,2,3]")) " · 3 items"))
   (should (equal (substring-no-properties (romacs-agent-rows-outcome "ok")) " · ok"))
   (should (equal (substring-no-properties (romacs-agent-rows-outcome "a\nb\nc")) " · 3 lines"))

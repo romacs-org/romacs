@@ -79,11 +79,12 @@
       (draw :type 'tool :state 'started :id "t" :name "Bash" :input (romacs-agent-log-tests--input "command" "seq 5"))
       (draw :type 'tool :state 'completed :id "t" :output "1\n2\n3\n4\n5")
       (let ((text (romacs-agent-log-tests--transcript)))
-        (should (string-match-p "⎿ 1\n    2\n    … 3 more lines · RET shows all" text))
+        ;; A command's last lines, as it ran: how many came before them.
+        (should (string-match-p "⎿ … 3 earlier lines · RET shows all\n    4\n    5\n" text))
         (should-not (string-match-p "\n    3\n" text))
         ;; RET shows all of it.
         (goto-char (point-min))
-        (search-forward "more lines")
+        (search-forward "earlier lines")
         (save-window-excursion (romacs-agent-log-open))
         (with-current-buffer "*agent output*"
           (should (string-match-p "seq 5" (buffer-string)))
@@ -102,7 +103,8 @@
       (draw :type 'tool :state 'completed :id "c" :output "one\ntwo\nthree")
       (let ((text (romacs-agent-log-tests--transcript)))
         (should-not (string-match-p "so far" text))
-        (should (string-match-p "make[^\n]*\n  ⎿ one\n    two\n    … 1 more lines · RET shows all\nafter" text))))))
+        ;; Ended: the same last lines it showed as it ran stay.
+        (should (string-match-p "make[^\n]*\n  ⎿ … 1 earlier line · RET shows all\n    two\n    three\nafter" text))))))
 
 (ert-deftest romacs-agent-log-subagent-work-goes-under-its-call ()
   (romacs-agent-log-tests--with
@@ -1022,9 +1024,16 @@
       (search-forward "lane x")
       (save-window-excursion (romacs-agent-log-open))
       (with-current-buffer "*agent output*"
-        (should (string-match-p "a long report" (buffer-string)))
+        ;; Its renderer's details first, then the raw answer.
+        (should (string-match-p "lane x · running\n\na long report\n\nInput:" (buffer-string)))
         (should (string-match-p "Output:\n{" (buffer-string)))
-        (kill-buffer)))))
+        (kill-buffer)))
+    ;; A title of several lines: the row on one line, under its mark.
+    (draw :type 'tool :state 'started :id "d" :name "mcp__romacs__romacs_delegate_task"
+          :input (romacs-agent-log-tests--input "title" "two\nlines"))
+    (draw :type 'tool :state 'completed :id "d" :output "{\"title\":\"two\\nlines\",\"state\":\"running\"}")
+    (should (string-match-p "⑂ two lines · running\n" (romacs-agent-log-tests--transcript)))
+    (should-not (string-match-p "^lines" (romacs-agent-log-tests--transcript)))))
 
 (ert-deftest romacs-agent-log-a-streamed-reply-keeps-its-link-definitions ()
   ;; A definition before or after its reference, across batches: faced as

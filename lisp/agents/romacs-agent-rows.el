@@ -95,30 +95,31 @@ items, or how many when they are records), any other text as it is."
       (romacs-agent-rows--dim (concat " · " state))
     ""))
 
-(defconst romacs-agent-rows--outcome-keys '("error" "message" "status" "state" "title" "name" "id")
-  "The keys of a JSON answer a generic outcome says, the first found
-first: an error alone, else a status or state and what it names.")
-
 (defun romacs-agent-rows-outcome (output)
   "What OUTPUT, a call's answer, came to as a row says it after the call,
-dim after a dot: a JSON object's error, else its status or state and its
-title, name or id; a list's length; a text's one line, else how many
-lines; nothing for no output."
+after a dim dot: a JSON object's error, in the error face; else its
+status or state and its title, name or id, else how many fields it has;
+a list's length; a text's one line, else how many lines; nothing for no
+output."
   (let* ((value (and (stringp output) (string-match-p "\\`[ \t\n]*[[{]" output)
                      (ignore-errors (json-parse-string output :null-object nil :false-object nil))))
+         (error (and (hash-table-p value) (romacs-agent-rows--field value "error")))
          (said
-          (cond ((hash-table-p value)
-                 (if-let* ((error (romacs-agent-rows--field value "error")))
-                     (propertize (romacs-agent-rows--line error) 'face 'romacs-agent-error)
-                   (let ((state (or (romacs-agent-rows--field value "status") (romacs-agent-rows--field value "state")))
-                         (what (seq-some (lambda (key) (romacs-agent-rows--field value key)) '("title" "name" "id"))))
-                     (string-join (delq nil (list state (and what (truncate-string-to-width (romacs-agent-rows--line what) 60 nil nil "…"))))
-                                  " · "))))
+          (cond (error nil)
+                ((hash-table-p value)
+                 (let ((state (or (romacs-agent-rows--field value "status") (romacs-agent-rows--field value "state")))
+                       (what (seq-some (lambda (key) (romacs-agent-rows--field value key)) '("title" "name" "id"))))
+                   (if (or state what)
+                       (string-join (delq nil (list state (and what (truncate-string-to-width (romacs-agent-rows--line what) 60 nil nil "…"))))
+                                    " · ")
+                     (romacs-agent-rows--plural (hash-table-count value) "field"))))
                 ((vectorp value) (romacs-agent-rows--plural (length value) "item"))
                 ((or (not (stringp output)) (string-empty-p (string-trim output))) nil)
                 ((= (romacs-agent-rows--lines output) 1) (truncate-string-to-width (string-trim output) 60 nil nil "…"))
                 (t (romacs-agent-rows--plural (romacs-agent-rows--lines output) "line")))))
-    (if (or (null said) (string-empty-p said)) "" (concat (romacs-agent-rows--dim " · ") (romacs-agent-rows--dim said)))))
+    (cond (error (concat (romacs-agent-rows--dim " · ") (propertize (romacs-agent-rows--line error) 'face 'romacs-agent-error)))
+          ((or (null said) (string-empty-p said)) "")
+          (t (romacs-agent-rows--dim (concat " · " said))))))
 
 (defun romacs-agent-rows-ended (name input row output)
   "The row of tool NAME's call with INPUT, first drawn as ROW, once it
