@@ -1249,7 +1249,7 @@ impl Leaf<'_> {
                 Ok(n) => bytes.extend_from_slice(&buf[..n]),
             }
         }
-        Ok(bytes)
+        Ok((bytes, None))
     }
 
     /// QUIT, raised while call_process waits for child PID, once the child

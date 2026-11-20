@@ -46,7 +46,7 @@ fn string_codes(cx: &mut Leaf<'_>, string: Value) -> Result<Vec<Value>, Fault> {
     let code = |c: u32| Value::integer(i64::from(c)).expect("a character is a fixnum");
     let stop = cx.native_stop();
     let (mut codes, mut stopped) = (Vec::new(), false);
-    for part in cx.string_view(string)?.char_parts(crate::quit::KERNEL_CHUNK) {
+    for part in cx.string_view_from(string, 0)?.char_parts(crate::quit::KERNEL_CHUNK) {
         codes.extend(part.map(code));
         if stop.due() { stopped = true; break; }
     }
