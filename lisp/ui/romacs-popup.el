@@ -511,6 +511,7 @@ replacement names it; a key bound to anything else never is."
 (defvar which-key-mode)
 (declare-function make-which-key--pages "which-key")
 (declare-function which-key--maybe-replace "which-key" (key-binding))
+(declare-function which-key--compute-binding "which-key" (binding))
 (declare-function which-key--popup-showing-p "which-key" ())
 
 (defvar romacs-popup--card nil
@@ -563,8 +564,8 @@ precedence order."
   "WINNER of PREFIX as the card shows it: (KEY LABEL PREFIX-P SOURCE ORDER
 BINDING ALSO SORT), ALSO nil (`romacs-popup--card-merge' fills it),
 SORT the binding as which-key's own sort sees it, (FULL-KEY . NAME): the
-whole sequence (a range `a .. z'), carrying its event (a range's first)
-as `romacs-popup-event', and the command's name; or nil to leave it out
+whole sequence's description, carrying its event (a range's first) as
+`romacs-popup-event', and the command's name; or nil to leave it out
 \(`ignore', `undefined', a which-key replacement to nil)."
   (pcase-let* ((`(,key ,binding ,source ,order) winner)
                (item (and (eq (car-safe binding) 'menu-item) binding))
@@ -579,10 +580,16 @@ as `romacs-popup-event', and the command's name; or nil to leave it out
                            (prefix-p "prefix")
                            (t (or (romacs-popup--hint-label binding) "function"))))
                (map (and prefix-p (if (symbolp binding) (indirect-function binding) binding)))
-               (sort-key (cons (propertize (string-trim (concat (key-description prefix) " "
-                                                                (string-replace ".." " .. " key-desc)))
+               ;; As which-key's own collection makes it: the whole sequence
+               ;; described at once (a range as its cons event), and a
+               ;; command's name after `which-key-compute-remaps'.
+               (sort-key (cons (propertize (key-description (vconcat prefix (if (= (length key) 2)
+                                                                                (vector (cons (aref key 0) (aref key 1)))
+                                                                              key)))
                                            'romacs-popup-event (aref key 0))
-                               name)))
+                               (if (and binding (symbolp binding) (fboundp 'which-key--compute-binding))
+                                   (which-key--compute-binding binding)
+                                 name))))
     (unless (memq binding '(ignore undefined))
       (cond
        ((and item (stringp (nth 1 item))) (list key-desc (nth 1 item) prefix-p source order binding nil sort-key))
