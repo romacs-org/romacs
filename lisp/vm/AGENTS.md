@@ -15,6 +15,9 @@ executable.
   Lisp that no longer fits it. Lisp that runs with the Rust as it is raises
   nothing. `tools/dev-check` names a change of this directory beside
   romacs-vm's Rust that leaves the epoch alone; it cannot tell which it is.
+- A raise ends above the trunk tip's epoch: two changes raised to one number
+  merge with no conflict. `tools/dev-check`, which the merge queue runs on
+  the merged tree, fails one that does not.
 
 ## Tests
 - `cargo test -p romacs-vm --test vm_lisp_from_tree`: an edited file here is

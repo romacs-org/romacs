@@ -9,7 +9,8 @@
       (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
   (require 'romacs-agent)
   (require 'romacs-agent-claude)
-  (require 'romacs-agent-log))
+  (require 'romacs-agent-log)
+  (require 'romacs-agent-menu))
 
 (defmacro romacs-agent-log-tests--with (&rest body)
   "BODY in a chat of `session', its events drawn by `draw'."
@@ -27,6 +28,10 @@
        (romacs-agent-log--separator t)
        (cl-flet ((draw (&rest event) (romacs-agent-log-draw session event) (romacs-agent-log--separator)))
          ,@body))))
+
+;; What runs before a redisplay: a batch session has no host to run it.
+(unless (fboundp 'romacs--run-window-change-functions)
+  (load (expand-file-name "../vm/window-change.el" (file-name-directory (locate-library "romacs-agent.el"))) nil t))
 
 (defun romacs-agent-log-tests--transcript ()
   (buffer-substring-no-properties (point-min) romacs-agent-log--end))
@@ -237,6 +242,97 @@
     (draw :type 'delta :text "root text")
     (should (string-match-p "│ · completed\n[^│]*root text" (romacs-agent-log-tests--transcript)))))
 
+(ert-deftest romacs-agent-log-rule-fits-the-windows-showing-the-chat ()
+  (romacs-agent-log-tests--with
+    (ignore #'draw)
+    (let ((rule (lambda () (save-excursion (goto-char romacs-agent-log--end)
+                                           (how-many "─" (point) (line-end-position)))))
+          (chat (current-buffer)))
+      (puthash "L" chat romacs-agent-log--chats)
+      (unwind-protect
+          (save-window-excursion
+            (delete-other-windows)
+            (switch-to-buffer chat)
+            ;; The hooks run as the host delivers window changes before a
+            ;; redisplay.
+            (romacs--run-window-change-functions)
+            (let ((narrow (split-window-right (- (window-total-width) 30))))
+              (set-window-buffer narrow chat)
+              (romacs--run-window-change-functions)
+              (let ((short (funcall rule)))
+                ;; The narrower window leaves no room for the rule to wrap in.
+                (should (< (+ romacs-agent-log--thread-cols short) (window-body-width narrow)))
+                ;; It shows another buffer: the rule fits the wider one again.
+                (set-window-buffer narrow (get-buffer-create "*romacs-agent-log-tests other*"))
+                (romacs--run-window-change-functions)
+                (should (> (funcall rule) short)))))
+        (remhash "L" romacs-agent-log--chats)))))
+
+(ert-deftest romacs-agent-log-menu-lists-the-workers-at-work ()
+  (romacs-agent-log-tests--with
+    (ignore #'draw)
+    (setf (romacs-agent-title session) "lane chat")
+    (let ((children (list (romacs-agent--make :id "c1" :state 'running :title "builds")
+                          (romacs-agent--make :id "c2" :state 'idle :title "finished")
+                          (romacs-agent--make :id "c3" :state 'waiting-approval :title "asks"))))
+      (cl-letf (((symbol-function 'romacs-agent-children) (lambda (_) children)))
+        (should (equal (substring-no-properties (romacs-agent-menu--title)) "Agent · lane chat"))
+        ;; A finished one is the board's; one waiting on the user first.
+        (should (equal (mapcar #'romacs-agent-title (romacs-agent-menu--workers)) '("asks" "builds")))
+        (should (equal (substring-no-properties (romacs-agent-menu--worker-label 0)) "◆ asks you · asks"))
+        (should (equal (substring-no-properties (romacs-agent-menu--worker-label 1)) "● running · builds"))
+        (should-not (romacs-agent-menu--worker-label 2))
+        ;; A long title is what a cut row loses, its state never.
+        (setf (romacs-agent-title (nth 0 children)) (make-string 60 ?x))
+        (should (string-prefix-p "● running · " (substring-no-properties (romacs-agent-menu--worker-label 1))))
+        (setf (romacs-agent-title (nth 0 children)) "builds")
+        ;; A digit opens the worker it showed; one finished since is the board's.
+        (let (shown)
+          (cl-letf (((symbol-function 'romacs-agent-show) (lambda (child &rest _) (setq shown child))))
+            (setf (romacs-agent-state (nth 2 children)) 'idle)
+            (let ((last-command-event ?2)) (romacs-agent-menu-open-worker))
+            (should (equal (romacs-agent-title shown) "builds"))
+            (let ((last-command-event ?1)) (should-error (romacs-agent-menu-open-worker) :type 'user-error))
+            ;; All finished while it is open: its keys still dispatch (the
+            ;; group has no :if), each saying so.
+            (setf (romacs-agent-state (car children)) 'idle)
+            (should-not (romacs-agent-menu--workers))
+            (let ((group (seq-find (lambda (group) (equal (plist-get group :name) "Workers"))
+                                   (apply #'append (keymap-popup--meta romacs-agent-menu-map 'descriptions)))))
+              (should group)
+              (should-not (plist-get group :if)))
+            (let ((last-command-event ?2)) (should-error (romacs-agent-menu-open-worker) :type 'user-error))
+            ;; Each chat its own rows.
+            (should-not (eq romacs-agent-menu--shown (default-value 'romacs-agent-menu--shown)))
+            (setf (romacs-agent-state (car children)) 'running)
+            (setf (romacs-agent-state (nth 2 children)) 'waiting-approval)))
+        ;; Its values read as values, never dim as a command it cannot run.
+        (let ((romacs-agent-ui--session session))
+          (dolist (label (list (romacs-agent-ui--effort-label) (romacs-agent-ui--model-label)))
+            (should (string-match-p "default" label))
+            (should-not (memq 'romacs-agent-effort-default
+                              (ensure-list (get-text-property (string-match "default" label) 'face label))))))))))
+
+(ert-deftest romacs-agent-log-menu-rows-are-each-chats-own ()
+  ;; Even over a shared default a load left behind.
+  (let ((shared (make-vector 9 nil)))
+    (cl-letf (((default-value 'romacs-agent-menu--shown) shared))
+      (with-temp-buffer
+        (let ((one (romacs-agent-menu--slots)))
+          (with-temp-buffer
+            (should-not (eq (romacs-agent-menu--slots) one))
+            (should-not (eq (romacs-agent-menu--slots) shared))))))))
+
+(ert-deftest romacs-agent-log-several-answers-keep-their-questions ()
+  (let ((one (make-hash-table :test #'equal)) (two (make-hash-table :test #'equal)))
+    (puthash "Colour?" "Blue" one)
+    (puthash "Colour?" "Blue" two)
+    (puthash "Size?" "Large" two)
+    (should (string-suffix-p "answered: Blue" (romacs-agent-log--answer-text "user" "allow" "once" nil one)))
+    (let ((text (romacs-agent-log--answer-text "user" "allow" "once" nil two)))
+      (should (string-match-p "Colour\\? → Blue" text))
+      (should (string-match-p "Size\\? → Large" text)))))
+
 (ert-deftest romacs-agent-log-a-block-waits-until-its-answer-is-written ()
   (romacs-agent-log-tests--with
     (puthash "q" t (romacs-agent-approvals session))
@@ -246,11 +342,14 @@
       (puthash "Colour?" "Blue" answers)
       (draw :type 'attributed :request-id "q" :by "user" :decision "allow" :scope "once" :answers answers))
     ;; Said who answered, and what; still answerable until the harness has it.
-    (should (string-match-p "allowed by you\n  Colour\\? → Blue" (romacs-agent-log-tests--transcript)))
+    (should (string-match-p "✔ answered: Blue" (romacs-agent-log-tests--transcript)))
+    (should-not (string-match-p "allowed by you" (romacs-agent-log-tests--transcript)))
     (should (assoc "q" romacs-agent-log--asks))
     (remhash "q" (romacs-agent-approvals session))
     (draw :type 'answered :request-id "q" :behavior "allow")
     (should-not romacs-agent-log--asks)
+    ;; Its keys answer nothing any more: gone.
+    (should-not (string-match-p "decline" (romacs-agent-log-tests--transcript)))
     (should-not (string-match-p "not recorded" (romacs-agent-log-tests--transcript)))))
 
 (ert-deftest romacs-agent-log-ret-on-an-approval-only-shows-it ()
@@ -408,7 +507,9 @@
       (romacs-agent-respond session "p" nil "more" 'user)
       (should-not planned)
       ;; Proceeding, however answered (here, the board's way): out of it.
-      (romacs-agent-respond session "p" t nil 'user)
+      (puthash "p2" request (romacs-agent-approvals session))
+      (romacs-agent--raise session '(:type approval :request-id "p2" :tool "ExitPlanMode" :plan t :user t))
+      (romacs-agent-respond session "p2" t nil 'user)
       (should (equal planned '(nil))))))
 
 (ert-deftest romacs-agent-log-a-turn-end-ends-what-runs ()
@@ -435,6 +536,98 @@
     (draw :type 'tool :state 'started :id "x" :name "Bash" :input (romacs-agent-log-tests--input "command" "seq 2"))
     (draw :type 'tool-output :id "x" :text "line 2\n")
     (should (string-match-p "⋮ running: 2 lines so far\n    line 1\n    line 2" (romacs-agent-log-tests--transcript)))))
+
+(ert-deftest romacs-agent-log-interrupt-and-send-asks-the-live-session ()
+  ;; A restored chat shows its row, idle; its session, loaded, runs a
+  ;; turn: that turn is interrupted, the text sent first once it ends.
+  (romacs-agent-log-tests--with
+    (let ((live (romacs-agent--make :id "L" :harness 'claude :state 'running)) (calls nil))
+      (setf (romacs-agent-state session) 'idle)
+      (cl-letf (((symbol-function 'romacs-agent-loaded) (lambda (_) nil))
+                ((symbol-function 'romacs-agent-get) (lambda (_) live))
+                ((symbol-function 'romacs-agent-interrupt) (lambda (s) (push (list 'interrupt s) calls)))
+                ((symbol-function 'romacs-agent-send-later) (lambda (s text &optional first) (push (list 'later s text first) calls)))
+                ((symbol-function 'romacs-agent-send) (lambda (s text &rest _) (push (list 'send s text) calls))))
+        (goto-char (point-max))
+        (insert "stop that")
+        (romacs-agent-log-interrupt-and-send))
+      (should (equal (reverse calls) (list (list 'interrupt live) (list 'later live "stop that" t)))))))
+
+;; A chat's source.
+
+(cl-defstruct (romacs-agent-log-tests--source (:constructor romacs-agent-log-tests--source))
+  calls approvals (chats (make-hash-table :test #'equal)))
+
+(defun romacs-agent-log-tests--called (source &rest call)
+  (push call (romacs-agent-log-tests--source-calls source)))
+
+(cl-defmethod romacs-agent-log-source-fill ((source romacs-agent-log-tests--source) session)
+  (romacs-agent-log-tests--called source 'fill)
+  (romacs-agent-log-draw session '(:type input :text "from the source" :seq 1 :last t)))
+(cl-defmethod romacs-agent-log-source-send ((source romacs-agent-log-tests--source) _session text &optional when)
+  (romacs-agent-log-tests--called source 'send text when))
+(cl-defmethod romacs-agent-log-source-interrupt ((source romacs-agent-log-tests--source) _session)
+  (romacs-agent-log-tests--called source 'interrupt))
+(cl-defmethod romacs-agent-log-source-respond ((source romacs-agent-log-tests--source) _session id allow reason)
+  (romacs-agent-log-tests--called source 'respond id allow reason))
+(cl-defmethod romacs-agent-log-source-seen ((source romacs-agent-log-tests--source) _session)
+  (romacs-agent-log-tests--called source 'seen))
+(cl-defmethod romacs-agent-log-source-chats ((source romacs-agent-log-tests--source))
+  (romacs-agent-log-tests--source-chats source))
+(cl-defmethod romacs-agent-log-source-approvals ((source romacs-agent-log-tests--source) _session)
+  (romacs-agent-log-tests--source-approvals source))
+
+(ert-deftest romacs-agent-log-reads-and-acts-through-its-source ()
+  ;; A chat of another source draws what it gives and acts through it
+  ;; alone: none of this editor's sessions is touched, its policy answers
+  ;; none of its requests, and its session commands are not offered.
+  (let* ((source (romacs-agent-log-tests--source :approvals (make-hash-table :test #'equal)))
+         (session (romacs-agent--make :id "S-remote" :harness 'claude :state 'running :title "far"))
+         (romacs-agent-approval-policy 'allow)
+         (buffer (romacs-agent-log-chat session nil source)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'romacs-agent-send) (lambda (&rest _) (error "Sent here")))
+                  ((symbol-function 'romacs-agent-send-later) (lambda (&rest _) (error "Queued here")))
+                  ((symbol-function 'romacs-agent-interrupt) (lambda (&rest _) (error "Interrupted here")))
+                  ((symbol-function 'romacs-agent-respond) (lambda (&rest _) (error "Answered here")))
+                  ((symbol-function 'romacs-agent-mark-seen) (lambda (&rest _) (error "Seen here"))))
+          (with-current-buffer buffer
+            (should (string-match-p "from the source" (buffer-string)))
+            (should-not (romacs-agent-log--commands-p))
+            (should-not romacs-agent-ui--session)
+            (should-not desktop-save-buffer)
+            (should (stringp warm-restart-left-out))
+            ;; Drawn, it holds nothing typed; a draft typed, it does.
+            (should-not (buffer-modified-p))
+            (cl-flet ((type (text) (goto-char (point-max)) (insert text)))
+              (type "now")
+              (should (buffer-modified-p))
+              (romacs-agent-log-send)
+              (should-not (buffer-modified-p))
+              (type "later") (romacs-agent-log-queue)
+              (romacs-agent-log-interrupt)
+              (type "after") (romacs-agent-log-interrupt-and-send))
+            (puthash "r1" t (romacs-agent-log-tests--source-approvals source))
+            (romacs-agent-log-draw session '(:type approval :request-id "r1" :tool "Bash"))
+            (goto-char (point-max))
+            (romacs-agent-log-allow)
+            (romacs-agent-log-deny "no")
+            (romacs-agent-log-show session nil source)
+            (should (equal (reverse (romacs-agent-log-tests--source-calls source))
+                           '((fill) (send "now" nil) (send "later" later) (interrupt) (send "after" interrupt)
+                             (respond "r1" t nil) (respond "r1" nil "no") (seen)))))
+          ;; This editor's own session of the same id has a chat of its own.
+          (let ((local (romacs-agent-log-chat (romacs-agent--make :id "S-remote" :harness 'claude :state 'idle) t)))
+            (unwind-protect
+                (progn (should-not (eq local buffer))
+                       (should (eq (buffer-local-value 'romacs-agent-log--source local) romacs-agent-log-local))
+                       (with-current-buffer local
+                         (should (romacs-agent-log--commands-p))
+                         (should romacs-agent-ui--session)
+                         (should desktop-save-buffer)))
+              (remhash "S-remote" romacs-agent-log--chats)
+              (kill-buffer local))))
+      (kill-buffer buffer))))
 
 (provide 'romacs-agent-log-tests)
 ;;; romacs-agent-log-tests.el ends here

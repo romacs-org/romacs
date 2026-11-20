@@ -81,11 +81,29 @@ room tall, not the frame's whole height."
 
 (ert-deftest romacs-grid-pages-what-will-not-fit ()
   "A menu taller than its room pages; a block taller than a page goes in
-chunks, its title on the first."
+as few chunks as the room allows, as even as they can be, its title on
+the first."
   (let* ((pages (romacs-grid-pages (list (romacs-grid-tests--block "Tall" 20 6)) 8 20)))
     (should (= (length pages) 3))
     (should (equal (romacs-grid-tests--text (car (car pages))) "Tall"))
-    (should (equal (mapcar #'length pages) '(8 8 5)))))
+    (should (equal (mapcar #'length pages) '(7 7 7)))))
+
+(ert-deftest romacs-grid-splits-a-tall-block-evenly ()
+  "A tall block's columns differ by at most a line, so wide lines that
+share a column on even chunks are not split into one each, forcing a
+page."
+  (let ((block (lambda (widths) (mapcar (lambda (w) (make-string w ?x)) widths))))
+    (should (= 1 (length (romacs-grid-pages (list (funcall block '(6 6 6 15 6 15))) 5 24 nil 5))))
+    (should (= 1 (length (romacs-grid-pages (list (funcall block '(6 6 6 6 6 6 6 15 15 6))) 4 33 nil 4))))
+    (should (= 1 (length (romacs-grid-pages (list (funcall block '(6 6 6 6 6 6 15 15 6 6))) 4 33 nil 4))))))
+
+(ert-deftest romacs-grid-chunks-score-columns-as-drawn ()
+  "A chunk is as wide as its widest item drawn beside the chunk's widest
+key, so long keys share a column where that is narrower: 3+2 here, where
+2+3 would put a long key beside each wide label."
+  (let* ((items (cl-mapcar #'cons '(8 1 8 1 1) '(3 3 4 4 3)))
+         (chunks (romacs-grid-chunks items 3 #'car (lambda (item k) (+ k 2 (cdr item))))))
+    (should (equal (mapcar #'length chunks) '(3 2)))))
 
 (ert-deftest romacs-grid-pages-use-the-width ()
   "A paged menu's last page lays its groups out side by side where they
@@ -98,6 +116,34 @@ fit, not down one column of a card sized for the first page."
     (should (= (length pages) 2))
     ;; D and E share a row on the last page.
     (should (string-match-p "D +E" (substring-no-properties (car (car (last pages))))))))
+
+(ert-deftest romacs-grid-balances-its-pages ()
+  "Pages share the blocks evenly: the fewest pages filling allows, each
+as short as that count lets them be, so the last is not a remnant."
+  (let* ((blocks (mapcar (lambda (n) (romacs-grid-tests--block (format "G%d" n) 4 10)) (number-sequence 1 6)))
+         ;; One column of 20 columns: two blocks (11 rows) a page fit 12.
+         (pages (romacs-grid-pages blocks 17 20)))
+    (should (= (length pages) 2))
+    (should (equal (mapcar #'length pages) '(17 17)))))
+
+(ert-deftest romacs-grid-balances-past-a-budget-that-needs-more-pages ()
+  "A fill's page count need not fall as its budget grows: the balance
+finds the least budget for the count, not one a halving search lands on."
+  (let* ((blocks (cl-mapcar (lambda (h w) (make-list h (make-string w ?x))) '(3 5 2 3 3) '(9 2 1 8 4)))
+         (pages (romacs-grid-pages blocks 15 13)))
+    (should (= (length pages) 2))
+    (should (<= (apply #'max (mapcar #'length pages)) 8))))
+
+(ert-deftest romacs-grid-pages-share-column-starts ()
+  "Every page puts its columns where the others do, so turning a page
+moves nothing sideways."
+  (let* ((blocks (list (romacs-grid-tests--block "Wide" 9 30) (romacs-grid-tests--block "B" 9 6)
+                       (romacs-grid-tests--block "Narrow" 9 4) (romacs-grid-tests--block "D" 9 6)))
+         (pages (romacs-grid-pages blocks 10 50))
+         (second-column (lambda (page) (let ((case-fold-search nil))
+                                         (string-match " \\(B\\|D\\)\\'" (substring-no-properties (car page)))))))
+    (should (= (length pages) 2))
+    (should (= (funcall second-column (car pages)) (funcall second-column (cadr pages))))))
 
 (ert-deftest romacs-grid-cuts-at-a-word ()
   "A line wider than the room is cut at a word, with the ellipsis; a

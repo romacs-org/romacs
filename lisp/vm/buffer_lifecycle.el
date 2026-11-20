@@ -65,12 +65,14 @@
                                        (buffer-name other))))))
                     (setq tail (cdr tail)))))
             ;; replace_buffer_in_windows (buffer.c:2044), absent before
-            ;; window.el; then the buffer stops being current, for
+            ;; window.el, and skipped for a buffer no window named while
+            ;; window.el's definition stands (`romacs--windows-may-name-p');
+            ;; then the buffer stops being current, for
             ;; `other-buffer''s choice (buffer.c:2059), or for the
             ;; finish's other_buffer_safely where it has none.  A buffer
             ;; that is its own choice, or the minibuffer's only fallback,
             ;; is not killed.
-            (if (and (buffer-live-p buffer) (fboundp 'replace-buffer-in-windows))
+            (if (and (buffer-live-p buffer) (romacs--windows-may-name-p buffer))
                 (replace-buffer-in-windows buffer))
             (if (and (buffer-live-p buffer) (eq buffer (current-buffer)))
                 (let ((other (other-buffer buffer)))
@@ -91,26 +93,12 @@
                   (romacs--kill-buffer-processes buffer))
               (romacs--kill-buffer-finish buffer)))
         nil)))
-  (defun romacs--other-buffer (buffer visible-ok frame)
-    ;; Fother_buffer (buffer.c:1758) for live FRAME: the first live,
-    ;; unhidden buffer other than BUFFER that FRAME's `buffer-predicate'
-    ;; accepts, preferring one no visible window shows unless VISIBLE-OK;
-    ;; else `get-scratch-buffer-create''s, or nil if it fails.  VM2 keeps
-    ;; no frame buffer list (VM2-FRAME1), so the buffer list alone is
-    ;; scanned.
-    (let ((pred (frame-parameter frame 'buffer-predicate))
-          (tail (buffer-list)) (found nil) (notsogood nil))
-      (while (and tail (not found))
-        (let ((b (car tail)))
-          (if (and (not (eq b buffer)) (buffer-live-p b)
-                   (not (eq (aref (buffer-name b) 0) ?\s))
-                   (or (null pred) (funcall pred b)))
-              (if (or visible-ok (null (get-buffer-window b 'visible)))
-                  (setq found b)
-                (or notsogood (setq notsogood b)))))
-        (setq tail (cdr tail)))
-      (or found notsogood
-          (condition-case nil (get-scratch-buffer-create) (error nil)))))
+  (defun romacs--scratch-safely ()
+    ;; `other-buffer''s last resort (buffer.c:1812): safe_calln of
+    ;; `get-scratch-buffer-create', redisplay inhibited, nil for any
+    ;; signal; a throw passes.
+    (let ((inhibit-redisplay t))
+      (condition-case nil (get-scratch-buffer-create) (t nil))))
   (defun romacs--indirect-buffer-made (buffer base clone inhibit)
     ;; Fmake_indirect_buffer after its buffer exists (buffer.c:938): a
     ;; clone forgets its base's save query and file number and runs its

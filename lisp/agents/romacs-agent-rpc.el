@@ -35,11 +35,14 @@ socket still holds part of one (HELD), and what its owner keeps (DATA)."
   (romacs-agent-rpc--make :process process :data data))
 
 (defun romacs-agent-rpc-live-p (rpc)
+  "Non-nil while RPC's process is live."
   (process-live-p (romacs-agent-rpc-process rpc)))
 
 (defun romacs-agent-rpc-lines (rpc chunk)
-  "The whole lines CHUNK completes on RPC, in order, the rest kept; `over'
-when a line is longer than a message may be, which its peer is closed for."
+  "The whole lines CHUNK completes on RPC, in order, empty ones dropped and
+the unfinished rest kept for the next chunk; `over' when a line, the rest
+included, is over `romacs-agent-rpc-message-limit' bytes (the caller
+closes the peer)."
   (let* ((text (concat (romacs-agent-rpc-partial rpc) chunk))
          (lines (split-string text "\n")))
     (setf (romacs-agent-rpc-partial rpc) (car (last lines)))
@@ -62,20 +65,25 @@ is no JSON object."
     object))
 
 (defun romacs-agent-rpc-result (id result)
+  "A JSON-RPC 2.0 success reply to request ID, carrying RESULT."
   (romacs-agent-rpc-object "jsonrpc" "2.0" "id" id "result" result))
 
 (defun romacs-agent-rpc-error (id code kind message &optional data)
-  "An error reply to ID: CODE and its KIND (`data.kind'), MESSAGE, and
-DATA's fields beside the kind."
+  "An error reply to ID (null when nil): CODE and its KIND (`data.kind'),
+MESSAGE, and DATA's fields beside the kind.  DATA, a table, is the reply's
+data itself: its \"kind\" is set in place."
   (let ((fields (or data (make-hash-table :test #'equal))))
     (puthash "kind" kind fields)
     (romacs-agent-rpc-object "jsonrpc" "2.0" "id" (or id :null)
                              "error" (romacs-agent-rpc-object "code" code "message" message "data" fields))))
 
 (defun romacs-agent-rpc-notification (method params)
+  "A JSON-RPC 2.0 notification of METHOD with PARAMS: it has no id, so
+no reply answers it."
   (romacs-agent-rpc-object "jsonrpc" "2.0" "method" method "params" params))
 
 (defun romacs-agent-rpc-request (id method params)
+  "A JSON-RPC 2.0 request of METHOD with PARAMS, which its reply answers by ID."
   (romacs-agent-rpc-object "jsonrpc" "2.0" "id" id "method" method "params" params))
 
 (defun romacs-agent-rpc-encode (message)

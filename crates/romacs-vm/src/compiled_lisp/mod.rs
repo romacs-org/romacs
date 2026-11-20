@@ -29,6 +29,7 @@
 //! as a GNU installation without `.elc` files.
 mod background;
 mod codec;
+pub(crate) mod stats;
 mod tree;
 pub(crate) mod store;
 mod unit;
@@ -38,6 +39,8 @@ mod compiled_lisp_tests;
 use crate::*;
 pub(crate) use background::{note_idle, start as start_background, stop as stop_background};
 pub use tree::compile_tree;
+pub(crate) use stats::Route;
+use stats::Miss;
 use serde_json::{Value as Json, json};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -49,7 +52,9 @@ pub struct Config {
     /// Empty when this process compiles nothing: it loads what is
     /// compiled already, and source otherwise.
     pub compiler: Vec<OsString>,
-    /// A compile process's whole environment.
+    /// A compile process's whole environment, compiled Lisp on in it
+    /// (ROMACS_COMPILED_LISP=on), but for what each compile adds
+    /// (`compile_command`).
     pub environment: Vec<(OsString, OsString)>,
     /// The variables of ENVIRONMENT that come from the session starting
     /// the compile: a compile's reads of them are observed inputs. The
@@ -88,6 +93,13 @@ struct Configured {
     /// A compile of a tree's (`tree`): its publications leave the store's
     /// maintenance to the tree's end.
     no_prune: bool,
+    /// A compile process's channel to the process that started it: the
+    /// file it writes its record to (`write_record`).
+    record: Option<PathBuf>,
+    /// This process's temporary directory, where the records of the
+    /// compile processes it starts are made (`run_compile`): its own, not
+    /// the shared store, so a record a killed process leaves is no store's.
+    scratch: PathBuf,
     // CELL(Plain)
     identity: std::sync::OnceLock<String>,
 }
@@ -117,6 +129,13 @@ pub fn configure(config: Config) {
     let chain = host::getenv(CHAIN).map(|c| c.to_string_lossy().into_owned()).unwrap_or_default();
     let trace = host::getenv("ROMACS_COMPILED_LISP_TRACE").is_some();
     let no_prune = host::getenv(NO_PRUNE).is_some();
+    // Taken out of the environment, as PARENT is: compile-time code that
+    // reads `process-environment' sees no path of this one compile.
+    let record = host::getenv(RECORD).map(PathBuf::from);
+    if record.is_some() {
+        host::unset_env(RECORD);
+    }
+    let scratch = scratch_dir(host::getenv("TMPDIR"));
     if host::getenv(BACKGROUND).is_some() {
         host::lower_priority(host::Priority::Idle);
     }
@@ -130,10 +149,28 @@ pub fn configure(config: Config) {
         std::thread::spawn(|| {
             std::thread::sleep(std::time::Duration::from_secs(600));
             eprintln!("romacs-compile: deadline passed");
+            // A nested compile this process waits on keeps its record file
+            // in this process's temporary directory (the store's tmp/, the
+            // compile environment's): a few bytes left there, read by
+            // nothing. A stated limit; see `run_compile`.
             std::process::exit(124);
         });
     }
-    let _ = CONFIG.set(Configured { config, chain, trace, no_prune, identity: std::sync::OnceLock::new() });
+    let _ = CONFIG.set(Configured { config, chain, trace, no_prune, record, scratch, identity: std::sync::OnceLock::new() });
+}
+
+/// Count a load of PATH that took ROUTE, once its input is in hand
+/// (`stats`).
+pub(crate) fn note_load(path: &Path, route: Route) {
+    stats::note(path, route, compiles());
+}
+
+/// This process's compiled loads so far (`stats`), with the store and the
+/// compile identity that keyed them: None while unknown (no store, or no
+/// load has asked the identity yet).
+pub(crate) fn stats() -> (stats::Stats, Option<&'static Path>, Option<&'static str>) {
+    let identity = configured().and_then(|c| c.identity.get()).map(String::as_str);
+    (stats::snapshot(), store_dir(), identity)
 }
 
 /// Whether this process may compile Lisp: it loads compiled Lisp and runs
@@ -173,6 +210,79 @@ pub const BACKGROUND: &str = "ROMACS_COMPILE_BACKGROUND";
 /// without pruning the store (`tree`, which prunes once at its end).
 const NO_PRUNE: &str = "ROMACS_COMPILE_NO_PRUNE";
 
+/// In a compile process's environment: the file it writes its record to,
+/// the one thing the process that started it reads of it. Its standard
+/// output, with whatever the file's compile-time code prints, is dropped,
+/// and its standard error appended to the compile log (`run_compile`).
+const RECORD: &str = "ROMACS_COMPILE_RECORD";
+
+/// A compile process's record (`write_record`): the artifact it published,
+/// whether one holding already was there (so it compiled nothing), and the
+/// `load-path' it searched.
+#[derive(Debug, PartialEq)]
+pub(crate) struct Record {
+    pub(crate) artifact: PathBuf,
+    pub(crate) held: bool,
+    pub(crate) load_path: Vec<String>,
+}
+
+impl Record {
+    /// The record's text: the artifact by its name in STORE, which the
+    /// two processes share (an artifact's name there is ASCII).
+    fn text(&self, store: &Path) -> Option<String> {
+        let artifact = self.artifact.strip_prefix(store).ok()?.to_str()?;
+        Some(json!({"artifact": artifact, "held": self.held, "load_path": self.load_path}).to_string())
+    }
+
+    /// The record TEXT says, its artifact in STORE.
+    fn read(text: &[u8], store: &Path) -> Option<Record> {
+        let json: Json = serde_json::from_slice(text).ok()?;
+        Some(Record {
+            artifact: store.join(json["artifact"].as_str()?),
+            held: json["held"].as_bool()?,
+            load_path: serde_json::from_value(json["load_path"].clone()).ok()?,
+        })
+    }
+}
+
+/// In a compile process, write its record for the process that started it:
+/// ARTIFACT, HELD when it was there already, and the LOAD_PATH searched.
+/// Nothing when no process asked for one (a compile run by hand).
+///
+/// # Errors
+///
+/// When the artifact is not in the store, or the record cannot be written.
+pub fn write_record(artifact: &Path, held: bool, load_path: Vec<String>) -> std::result::Result<(), String> {
+    let Some(configured) = configured() else { return Ok(()) };
+    let Some(file) = &configured.record else { return Ok(()) };
+    let record = Record { artifact: artifact.to_owned(), held, load_path };
+    let text = record.text(&configured.config.store)
+        .ok_or_else(|| format!("{}: not an artifact of {}", artifact.display(), configured.config.store.display()))?;
+    host::write(file, text).map_err(|e| format!("{}: {e}", file.display()))
+}
+
+/// This process's temporary directory from TMPDIR, else /tmp, absolute:
+/// the compile processes it starts work in another directory.
+fn scratch_dir(tmpdir: Option<OsString>) -> PathBuf {
+    let dir = tmpdir.filter(|dir| !dir.is_empty()).map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    host::absolute(&dir).unwrap_or(dir)
+}
+
+/// A compile process's record file, removed however the compile ends.
+struct RecordFile(PathBuf);
+
+impl Drop for RecordFile {
+    fn drop(&mut self) {
+        let _ = host::remove_file(&self.0);
+    }
+}
+
+/// A new file in this process's temporary directory for the record of a
+/// compile process `run_compile` starts.
+fn record_file(configured: &Configured) -> Option<RecordFile> {
+    host::temp_file(&configured.scratch.join("romacs-compile-record-XXXXXX")).ok().map(|(path, _)| RecordFile(path))
+}
+
 /// The compile process for the source file PATH on LOAD_PATH, as
 /// (PROGRAM ARGS ENVIRONMENT): None when this process compiles nothing, or
 /// PATH is being compiled already up the chain (its compile-time loads
@@ -200,7 +310,6 @@ fn compile_command(configured: &Configured, path: &Path, load_path: &[String])
         (CHAIN.into(), format!("{}{name}\n", configured.chain).into()),
         (LOAD_PATH.into(), load_path.join("\n").into()),
         (PARENT.into(), host::pid().to_string().into()),
-        ("ROMACS_COMPILED_LISP".into(), "on".into()),
     ]);
     if configured.no_prune {
         environment.push((NO_PRUNE.into(), "1".into()));
@@ -209,29 +318,27 @@ fn compile_command(configured: &Configured, path: &Path, load_path: &[String])
 }
 
 /// Run the compile process PROGRAM ARGS in ENVIRONMENT, its standard error
-/// appended to STORE's compile log, within the compile deadline: its
-/// standard output when it succeeded.
-fn run_compile(store: &Path, program: OsString, args: Vec<OsString>, environment: Vec<(OsString, OsString)>) -> Option<String> {
+/// appended to the store's compile log, within the compile deadline: its
+/// record (`RECORD`) when it succeeded. Its standard output, what the
+/// file's compile-time code prints, is dropped, as it always was: nothing
+/// reads it, and no log write can fail the compile.
+fn run_compile(configured: &Configured, program: OsString, args: Vec<OsString>, mut environment: Vec<(OsString, OsString)>) -> Option<Record> {
+    let store = &configured.config.store;
     let log = store::generation(store).join("compile.log");
     let _ = host::create_dir_all(store::generation(store));
     let stderr = host::open_output(&log, host::OpenOptions::new().append(true).create(true))
         .map(std::process::Stdio::from)
         .unwrap_or_else(|_| std::process::Stdio::null());
+    let record = record_file(configured)?;
+    environment.push((RECORD.into(), record.0.clone().into()));
     let mut command = host::command(program).ok()?;
     command.args(args)
         .env_clear()
         .envs(environment)
         .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
         .stderr(stderr);
     let mut child = command.spawn().ok()?;
-    let mut stdout = child.stdout.take().expect("piped");
-    let reader = std::thread::spawn(move || {
-        use std::io::Read;
-        let mut out = String::new();
-        let _ = stdout.read_to_string(&mut out);
-        out
-    });
     let deadline = host::monotonic() + std::time::Duration::from_secs(600);
     let status = loop {
         match child.try_wait() {
@@ -244,8 +351,9 @@ fn run_compile(store: &Path, program: OsString, args: Vec<OsString>, environment
             }
         }
     };
-    let out = reader.join().unwrap_or_default();
-    status.is_some_and(|s| s.success()).then_some(out)
+    let text = host::read_file(&record.0);
+    status.is_some_and(|s| s.success()).then_some(())?;
+    Record::read(&text.ok()?, store)
 }
 
 /// The `.el` files under DIR, its subdirectories' after its own, each
@@ -337,7 +445,7 @@ fn inputs_hold(store: &Path, artifact: &store::Artifact, load_path: &str,
             }),
             _ => {
                 let now = host::replay(record);
-                let holds = now.as_ref() == Some(record);
+                let holds = now.as_ref().is_some_and(|now| host::same_fact(record, now));
                 if !holds && configured().is_some_and(|c| c.trace) {
                     crate::host::event_line("romacs-compiled-lisp", &json!({"stale": record, "now": now}));
                 }
@@ -396,36 +504,36 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
     /// up this compile's chain (a cycle: gnus-sum's compile requires
     /// gnus-art, which requires gnus-sum), whatever the store holds, so a
     /// compile's result never depends on whether another one published
-    /// first.
-    pub(crate) fn compiled_load(&mut self, path: &Path) -> Result<Option<Compiled>> {
-        let Some(configured) = configured() else { return Ok(None) };
+    /// first. With it, the route the load takes (`stats`), which the
+    /// loader counts once the load's input is in hand.
+    pub(crate) fn compiled_load(&mut self, path: &Path) -> Result<(Route, Option<Compiled>)> {
+        let Some(configured) = configured() else { return Ok((Route::Off, None)) };
         let config = &configured.config;
         if configured.chain.lines().any(|file| Path::new(file) == path) {
-            return Ok(None);
+            return Ok((Route::Miss(Miss::Chain), None));
         }
         let load_path = self.load_path_roots()?;
-        let Ok(found) = self.stored(configured, path, &load_path) else { return Ok(None) };
-        let (artifact, data) = match found {
-            Some(found) => found,
+        let Ok(found) = self.stored(configured, path, &load_path) else { return Ok((Route::Miss(Miss::Unreadable), None)) };
+        let (route, artifact, data) = match found {
+            Some((artifact, data)) => (Route::Taken, artifact, data),
+            None if config.compiler.is_empty() => return Ok((Route::Miss(Miss::ReadOnly), None)),
             None if config.defer_misses => {
-                if !config.compiler.is_empty() {
-                    background::note_miss(path, &load_path);
-                }
-                return Ok(None);
+                background::note_miss(path, &load_path);
+                return Ok((Route::Miss(Miss::Deferred), None));
             }
-            None => match self.compile_now(config, path, &load_path)? {
-                Some(artifact) => match store::open(&artifact) {
-                    Ok(data) => (artifact, data),
-                    Err(_) => return Ok(None),
-                },
-                None => return Ok(None),
+            None => match self.compile_now(path, &load_path)?
+                .and_then(|(artifact, held)| store::open(&artifact).ok().map(|data| (artifact, held, data))) {
+                // A compile that found an artifact holding already (another
+                // process published it since this one looked) compiled nothing.
+                Some((artifact, held, data)) => (if held { Route::Taken } else { Route::Compiled }, artifact, data),
+                None => return Ok((Route::Miss(Miss::Failed), None)),
             },
         };
         if !matches!(data.status, store::Status::Compiled) {
-            return Ok(None);
+            return Ok((Route::Miss(Miss::NotCompiled), None));
         }
         store::note_use(&config.store, &artifact, path);
-        Ok(Some(Compiled { artifact, artifact_data: data }))
+        Ok((route, Some(Compiled { artifact, artifact_data: data })))
     }
 
     /// PATH's stored artifact whose inputs hold on LOAD_PATH, if any; Err
@@ -442,17 +550,16 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
     }
 
     /// Compile PATH in a compile process now: the artifact it published,
-    /// or None when it did not, or PATH is being compiled already up the
-    /// chain (its compile-time loads read source, as GNU's would with no
-    /// `.elc`).
-    fn compile_now(&mut self, config: &Config, path: &Path, load_path: &[String]) -> Result<Option<PathBuf>> {
+    /// and whether it held already (its `Record`), or None when it did
+    /// not, or PATH is being compiled already up the chain (its
+    /// compile-time loads read source, as GNU's would with no `.elc`).
+    fn compile_now(&mut self, path: &Path, load_path: &[String]) -> Result<Option<(PathBuf, bool)>> {
         let Some(configured) = configured() else { return Ok(None) };
         let Some((program, args, environment)) = compile_command(configured, path, load_path) else { return Ok(None) };
         if configured.trace {
             crate::host::event_line("romacs-compiled-lisp", &json!({"compile": path.to_string_lossy()}));
         }
-        Ok(run_compile(&config.store, program, args, environment)
-            .and_then(|out| out.lines().rev().find_map(|line| line.strip_prefix("romacs-compiled: ")).map(PathBuf::from)))
+        Ok(run_compile(configured, program, args, environment).map(|record| (record.artifact, record.held)))
     }
 
     /// Install unit INDEX of a compiled load, with SLOTS for its names:
