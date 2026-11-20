@@ -27,11 +27,8 @@ impl Leaf<'_> {
         if let Some(&name) = self.vm.permanent_symbol_names.get(&value.0) {
             return self.string_view(name);
         }
-        let name = self.symbol_name(value)?;
-        Ok(crate::lstring::OwnedStr {
-            chars: name.chars().count(),
-            bytes: name.into_bytes(),
-            multibyte: true,
-        })
+        // No name made yet: the one its key stands for, not the key.
+        let key = self.symbol_key(value).ok_or(Fault::Wrong("symbolp", value))?;
+        Ok(self.read_symbol_name(value, key, |name| name.to_owned()))
     }
 }

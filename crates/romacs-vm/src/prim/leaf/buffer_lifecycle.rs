@@ -108,6 +108,58 @@ impl Leaf<'_> {
     pub fn other_buffer_candidate(&self, b: Value, buffer: Value) -> bool {
         b != buffer && self.vm.buffer_state(b).is_ok_and(|s| s.live && !s.name.as_deref().is_some_and(|n| n.starts_with(' ')))
     }
+    /// `other-buffer''s choice against BUFFER with no frame predicate
+    /// (buffer.c Fother_buffer): the first candidate no visible window shows,
+    /// unless VISIBLE-OK, else the first candidate. None when there is no
+    /// candidate, where `other-buffer' falls back to `*scratch*'. No Lisp
+    /// runs, so one walk of the windows finds the visible buffers.
+    pub fn other_buffer_unpredicated(&mut self, buffer: Value, visible_ok: bool) -> std::result::Result<Option<Value>, Fault> {
+        let visible = if visible_ok { Vec::new() } else { self.windows().visible_buffers()? };
+        let mut notsogood = None;
+        for b in self.buffer_order() {
+            if !self.other_buffer_candidate(b, buffer) { continue; }
+            if !visible.contains(&b) { return Ok(Some(b)); }
+            notsogood.get_or_insert(b);
+        }
+        Ok(notsogood)
+    }
+    /// `kill-buffer' without its Lisp half (`kill_is_plain'): the buffer to be
+    /// current after BUFFER's kill when that half would do nothing for
+    /// BUFFER but make it current, else None. These conditions make it plain:
+    /// 1. the windows exist, and BUFFER, live, is not the minibuffer window's
+    ///    buffer, nor is the current buffer, where the half asks
+    ///    `other-buffer' again. Before the windows exist the half's
+    ///    `(minibuffer-window)' makes them, giving the mini-window its buffer,
+    ///    which may be BUFFER;
+    /// 2. its hooks are inhibited, so no query, kill or buffer-list hook runs;
+    /// 3. it names no file, so there is nothing to save or unlock;
+    /// 4. no indirect buffer was made on it;
+    /// 5. no process has it;
+    /// 6. `replace-buffer-in-windows' needn't run (`windows_may_name');
+    /// 7. when it is current, the selected frame has no `buffer-predicate' and
+    ///    `other-buffer''s scan finds a candidate; with none, the half's
+    ///    `*scratch*' fallback decides.
+    pub fn plain_kill(&mut self, buffer: Value) -> std::result::Result<Option<Value>, Fault> {
+        let current = self.current_buffer()?;
+        let Some(mini) = self.vm.minibuffer_window_buffer() else { return Ok(None) };
+        let Ok(state) = self.vm.buffer_state(buffer) else { return Ok(None) };
+        if !state.live || !state.inhibit_buffer_hooks || mini == buffer || mini == current
+            || self.vm.buffer_names_a_file(buffer)
+            || matches!(self.vm.object_if(buffer), Some(Object::Buffer(b)) if !b.indirect.is_empty())
+            || self.buffer_process(buffer) != Value::NIL
+            || self.windows_may_name(buffer) {
+            return Ok(None);
+        }
+        if buffer != current { return Ok(Some(current)); }
+        let frame = self.windows().decode_live_frame(Value::NIL)?;
+        let key = self.intern("buffer-predicate");
+        if self.windows().stored_frame_parameter(frame, key)? != Value::NIL { return Ok(None); }
+        self.other_buffer_unpredicated(buffer, false)
+    }
+    /// BUFFER, live, is current: `set-buffer' with no name to look up.
+    pub fn make_current(&mut self, buffer: Value) {
+        self.vm.slots[self.vm.buffer_slot].value = buffer;
+    }
     /// The buffer list's order as it stands, dead buffers not yet dropped
     /// included.
     pub fn buffer_order(&self) -> Vec<Value> {

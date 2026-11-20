@@ -3,7 +3,9 @@
 //! rejects it, so an unrelated failure (a typo, a missing import) cannot pass
 //! for the property; the plain tests here are the positive controls. A
 //! `heap_boundary/fail/` program holds a `Local` across a call that can collect,
-//! or reaches for the raw moving index. The rooting rule's are romacs-brand's own.
+//! or reaches for the raw moving index. A `threaded_core/fail/` program is a
+//! handler body misusing the threaded engine's capabilities. The rooting
+//! rule's are romacs-brand's own.
 //!
 //! No `pass` program for trybuild: one makes it `cargo build` this crate, where
 //! with only failures it runs `cargo check`.
@@ -19,6 +21,9 @@ fn the_compiler_enforces_the_boundaries() {
     let t = trybuild::TestCases::new();
     t.compile_fail("tests/heap_boundary/fail/*.rs");
     t.compile_fail("tests/snapshot_safe/fail/*.rs");
+    // The threaded engine's audited core: what a handler body cannot do
+    // (lisp-speed.md §13.6). `control` fails only on its marker lint.
+    t.compile_fail("tests/threaded_core/fail/*.rs");
 }
 
 /// Positive control: the sealed API is usable. Results are read inside one

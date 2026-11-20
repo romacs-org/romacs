@@ -483,9 +483,10 @@ an approval or questions for the user, anything else refused."
                                 "\n\n")))
            (unless (string-empty-p text) (list (list :type 'thinking :text text))))))
       ("contextCompaction" (when completed (list (list :type 'status :text "Context compacted"))))
-      ;; A plan proposed (plan mode): the completed item is the plan.
+      ;; A plan proposed (plan mode): the completed item is the plan, no
+      ;; request; proceeding with it is leaving plan mode (:proceed).
       ("plan" (when (and completed (stringp (gethash "text" item)))
-                (list (list :type 'plan :text (gethash "text" item)))))
+                (list (list :type 'plan :text (gethash "text" item) :proceed t))))
       ((or "userMessage" "hookPrompt" "todo_list" "error") nil)
       (_ (romacs-agent--codex-tool-events session id item completed)))))
 
