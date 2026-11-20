@@ -37,6 +37,7 @@
 (require 'romacs-agent-turns)
 (require 'romacs-agent-drawn)
 (require 'romacs-agent-log)
+(require 'romacs-agent-menu)
 
 ;;;###autoload
 (defvar romacs-agents-map
@@ -72,13 +73,14 @@ fork), said by no one: the quietest row.")
   '((((background light)) :foreground "gray70")
     (t :foreground "gray30"))
   "The rule closing a turn and above the composer.")
-(defface romacs-agent-running '((t :inherit font-lock-keyword-face))
-  "What is running: a tool's mark, the live rule.")
+(defface romacs-agent-running '((t :inherit romacs-working-running))
+  "What is running: a tool's mark, the live rule.  The working thread's
+colour, which no theme's syntax faces can make read as an error.")
 (defface romacs-agent-dim '((t :inherit shadow))
   "Settled rows, thinking, folded output and metadata.")
 (defface romacs-agent-done '((t :inherit success))
   "A settled mark.")
-(defface romacs-agent-approval '((t :inherit warning :weight bold))
+(defface romacs-agent-approval '((t :inherit romacs-working-waiting :weight bold))
   "An approval the harness waits for.")
 (defface romacs-agent-plan '((t :inherit font-lock-constant-face))
   "A plan presented, waiting to be taken up." :group 'romacs-agent)
@@ -1931,9 +1933,9 @@ order, or nil when none is news."
   "A chip of something that finished well.")
 (defface romacs-agent-chip-failed '((t :inherit (error romacs-agent-chip)))
   "A chip of something that failed.")
-(defface romacs-agent-chip-working '((t :inherit (font-lock-keyword-face romacs-agent-chip)))
+(defface romacs-agent-chip-working '((t :inherit (romacs-working-running romacs-agent-chip)))
   "A chip of something still working.")
-(defface romacs-agent-chip-you '((t :inherit (warning romacs-agent-chip)))
+(defface romacs-agent-chip-you '((t :inherit (romacs-working-waiting romacs-agent-chip)))
   "A chip of something waiting for the user.")
 (defface romacs-agent-approval-row '((t :inherit secondary-selection :extend t))
   "The row of something waiting for the user: tinted across the window.")
@@ -3696,7 +3698,8 @@ with a prefix argument, asked for."
          (harness (and session (romacs-agent-harness session)))
          (shown (lambda (model)
                   (propertize (or (and model (romacs-agent-ui--instance nil harness model nil)) "default")
-                              'face (if model 'romacs-agent-model 'romacs-agent-effort-default))))
+                              ;; A menu's value is never dim: dim is a command it cannot run.
+                              'face 'bold)))
          (now (and session (or (plist-get (romacs-agent--selection session) :model) (romacs-agent-model session))))
          (next (and session (plist-get (romacs-agent--wanted session) :model))))
     (concat "Model: " (funcall shown now)
@@ -3851,8 +3854,8 @@ and changes nothing; its plan comes as a card to implement."
 
 (defun romacs-agent-ui--plan-label ()
   (if (and romacs-agent-ui--session (plist-get (romacs-agent-options romacs-agent-ui--session) :plan))
-      (concat "Plan mode: " (propertize "on" 'face 'warning))
-    "Plan mode: off"))
+      (concat "Plan mode: " (propertize "on" 'face 'bold))
+    (concat "Plan mode: " (propertize "off" 'face 'bold))))
 
 (defun romacs-agent-chat-new ()
   "Start a new session, in this one's directory."
@@ -3888,8 +3891,9 @@ and changes nothing; its plan comes as a card to implement."
   (let* ((session romacs-agent-ui--session)
          (now (and session (plist-get (romacs-agent--selection session) :effort)))
          (next (and session (plist-get (romacs-agent--wanted session) :effort))))
-    (concat "Effort: " (romacs-agent-ui--effort now)
-            (if (equal now next) "" (concat " → " (romacs-agent-ui--effort next))))))
+    ;; A menu's value is never dim: dim is a command it cannot run.
+    (cl-flet ((shown (effort) (propertize (or effort "default") 'face 'bold)))
+      (concat "Effort: " (shown now) (if (equal now next) "" (concat " → " (shown next)))))))
 
 (require 'keymap-popup)
 (require 'romacs-agent-diff)

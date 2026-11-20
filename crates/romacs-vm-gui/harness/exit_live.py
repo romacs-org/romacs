@@ -23,8 +23,31 @@ summariser, summarises them.
   compositor  the session's compositor killed (SIGKILL): the session ends
               with status 1, stderr saying `romacs-exit' with the reason
               display-lost.
+  startup-failed  a session whose GNU Lisp chain has no bootstrap file
+              (ROMACS_LISP_DIR, a tree of links without it), so its
+              startup fails: the launch screen stays, saying "Startup
+              failed" over the step that failed, red, and the error under
+              it, until the window is closed (Alt+F4): status 1, stderr
+              saying `romacs-exit' with the reason evaluator-error and the
+              file.  Always the binary itself, without a world.
+  lisp-error-first  romacs-startup.el's first form signals, which startup
+              goes on past: the session's first frame shows that error
+              (its file named) at once.
+  lisp-error-first-world  lisp-error-first restored from a world built
+              over the broken file, which keeps its build's errors: the
+              same, from the world's.
+  lisp-error-first-world-failed  that world restored by a session whose
+              launch font is out of range, so it fails before its startup
+              steps: its screen shows the world's first error above that.
+  lisp-error-first-failed  the same with the bootstrap gone too, so the
+              start fails: its screen shows romacs-startup.el's error
+              above what failed after it ("Then: ...").
+  startup-failed-server  the same as a server whose client asked for its
+              window at its start (--serve NAME --serve-frame): the
+              window it asked for shows the same screen, and the same
+              close ends it.
 
-usage: exit_live.py --romacs BIN --output DIR [--workflow NAME]...
+usage: exit_live.py --romacs BIN (or --binary BIN) --output DIR [--workflow NAME]...
                    [--launcher LAUNCHER --launcher-runtime REL --launcher-sessions REL [--sessions SUMMARISER]]
 """
 import argparse
@@ -38,6 +61,14 @@ import time
 
 import parity_live
 from parity_live import C, K, M, T, Engine, lisp_string, plist, prepare_world, private_tree, wait
+
+# The GNU chain's first file (lisp/session/): without it no Lisp starts.
+BOOTSTRAP = 'romacs-loadup-bootstrap.el'
+# Romacs's first startup file (lisp/session/), and what a broken one signals.
+STARTUP = 'romacs-startup.el'
+BROKEN = 'broken on purpose'
+# A launch font size a launch refuses before its startup steps (6..72 points).
+BAD_FONT_SIZE = '99'
 
 INIT = ''';; -*- lexical-binding: t -*-
 (setq inhibit-startup-screen t initial-scratch-message nil)
@@ -85,13 +116,49 @@ def start(args, base, name):
         env['ROMACS_USAGE_LOG'] = str(root / 'usage.jsonl')
         argv = [args.romacs, '--loadup']
     prepare_world(args.romacs, env, root / 'work')
-    engine = Engine('romacs', argv, root, None, env, args.timeout).start(args.tools)
+    engine = Engine('romacs', argv, root, None, env, args.timeout)
+    if args.launcher:
+        # The launcher keeps the editor's stderr in the session's directory.
+        engine.editor_log = str((home / args.launcher_sessions).relative_to(root) / '*' / 'stderr.log')
+    engine.start(args.tools)
     # Keys typed before the window has the keyboard are lost.
     ready(engine, '(eq (frame-focus-state) t)', 'focus')
     if args.launcher:
         session = next((home / args.launcher_sessions).glob('*/'))
         return engine, session / 'stderr.log', session / 'usage.jsonl'
     return engine, root / 'engine.log', root / 'usage.jsonl'
+
+
+def start_failed(args, base, name, serve=(), breaks=('bootstrap',), world=False):
+    """A session for workflow NAME over this checkout's Lisp tree but for
+    BREAKS: `bootstrap', the chain's bootstrap file gone, so its startup
+    fails; `startup', romacs-startup.el's first form signalling, which
+    startup goes on past.  Launched with SERVE's arguments too, and from a
+    world it builds first when WORLD.  Nothing waits for an init."""
+    root, _home, env = private_tree('romacs', base, args.tools, prefix=f'exit-{name}-')
+    lisp = root / 'lisp'
+    (lisp / 'session').mkdir(parents=True)
+    for entry in (parity_live.ROOT / 'lisp').iterdir():
+        if entry.name != 'session':
+            (lisp / entry.name).symlink_to(entry)
+    for entry in (parity_live.ROOT / 'lisp/session').iterdir():
+        if entry.name == STARTUP and 'startup' in breaks:
+            (lisp / 'session' / STARTUP).write_text(f'(error "{BROKEN}")\n' + entry.read_text())
+        elif entry.name != BOOTSTRAP or 'bootstrap' not in breaks:
+            (lisp / 'session' / entry.name).symlink_to(entry)
+    env.update(ROMACS_LISP_DIR=str(lisp), ROMACS_GUI_FONT='Iosevka', ROMACS_GUI_FONT_SIZE='14')
+    # A binary copied out of its build (a check's) finds its tree by name.
+    if 'ROMACS_RUNTIME_ROOT' in os.environ:
+        env['ROMACS_RUNTIME_ROOT'] = os.environ['ROMACS_RUNTIME_ROOT']
+    if not world:
+        env['ROMACS_WORLD'] = 'off'
+    engine = Engine('romacs', [args.romacs, '--loadup', *serve], root, None, env, args.timeout)
+    try:
+        engine.spawn(args.tools)
+    except Exception:
+        engine.stop()
+        raise
+    return engine, root / 'engine.log', None
 
 
 def exit_line(log):
@@ -137,7 +204,8 @@ def run_kill_emacs(engine, stderr, usage):
             and not any(c == 'ul-ask' and m != 'lisp-interaction-mode' for c, m in counts),
         'prompt command timed from the read': [r['mode'] for r in slow if r['command'] == 'ul-ask'] == ['lisp-interaction-mode']
             and all(300 <= r['ms'] < 1300 for r in slow if r['command'] == 'ul-ask'),
-        'error with <file>': {'kind': 'error', 'command': 'ul-error', 'error': '(error . "<file>")'} in errors,
+        # A record says more of an error than this (its mode, its backtrace): these, at least.
+        'error with <file>': any(r.get('command') == 'ul-error' and r.get('error') == '(error . "<file>")' for r in errors),
         'no typed text or file name': SECRET_TEXT not in text and 'private-notes' not in text,
     }
     return checks, {'status': status, 'exit': exit_line(stderr), 'usage': lines}
@@ -154,12 +222,106 @@ def run_compositor(engine, stderr, usage):
     return checks, {'status': status, 'exit': line}
 
 
-WORKFLOWS = {'kill-emacs': run_kill_emacs, 'compositor': run_compositor}
+def screen_text(engine):
+    """What the screen shows, read back (grim, tesseract)."""
+    shot = engine.root / 'screen.png'
+    subprocess.run([f'{engine.tools}/grim', str(shot)], env=engine.env, check=True, timeout=30, capture_output=True)
+    return subprocess.run([f'{engine.tools}/tesseract', str(shot), '-'], capture_output=True, text=True, timeout=60).stdout
 
 
-def main():
+def run_startup_failed(engine, stderr, usage):
+    wait(engine.startup_failed, engine.timeout, 'the failed startup', engine.process)
+
+    # The window shows once the display has started, which may be after the error.
+    def shown():
+        text = screen_text(engine)
+        return text if 'Startup failed' in text else None
+    screen = wait(shown, engine.timeout, 'the failed startup shown', engine.process, 1)
+    time.sleep(2)
+    held = engine.process.poll() is None
+    engine.keys(M('F4'))
+    status = ended(engine)
+    line = exit_line(stderr)
+    checks = {
+        'the window outlives the error': held,
+        'the screen says at which step the startup failed': 'Starting Lisp' in screen,
+        # Read without whitespace: the path before it wraps the line anywhere.
+        'and why': 'Nosuchfileordirectory' in ''.join(screen.split()),
+        'closed: status 1': status == 1,
+        'romacs-exit evaluator-error naming the file': bool(line) and line['reason'] == 'evaluator-error'
+            and line['status'] == 1 and BOOTSTRAP in line['detail'],
+    }
+    return checks, {'status': status, 'exit': line, 'screen': screen}
+
+
+def start_world_failed(args, base, name):
+    """lisp-error-first-world's world, then a session restored from it
+    that fails before its startup steps: a launch font out of range."""
+    first, _, _ = start_failed(args, base, f'{name}-build', breaks=('startup',), world=True)
+    log = first.root / 'engine.log'
+    try:
+        wait(lambda: '"diagnostic":"paint"' in log.read_text(errors='replace'), first.timeout * 4,
+             "the world's first session", first.process)
+    finally:
+        first.stop()
+    root, _home, env = private_tree('romacs', base, args.tools, prefix=f'exit-{name}-')
+    for key in ('HOME', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME', 'ROMACS_LISP_DIR', 'ROMACS_GUI_FONT'):
+        env[key] = first.env[key]
+    env['ROMACS_GUI_FONT_SIZE'] = BAD_FONT_SIZE
+    engine = Engine('romacs', [args.romacs, '--loadup'], root, None, env, args.timeout)
+    try:
+        engine.spawn(args.tools)
+    except Exception:
+        engine.stop()
+        raise
+    return engine, root / 'engine.log', None
+
+
+def run_first_lisp_error(engine, stderr, usage):
+    """The first noted Lisp error is what the user sees first: on a failed
+    start's screen, above what failed after it; in a degraded session's
+    first frame, at once."""
+    log = engine.root / 'engine.log'
+    wait(lambda: engine.startup_failed() or '"diagnostic":"paint"' in log.read_text(errors='replace'),
+         engine.timeout * 4, 'a failed start or a first paint', engine.process)
+
+    def shown():
+        text = ' '.join(screen_text(engine).split())
+        return text if BROKEN in text else None
+    screen = wait(shown, engine.timeout, 'the first Lisp error shown', engine.process, 1)
+    failed = bool(engine.startup_failed())
+    # Read without whitespace: a long path wraps anywhere on the screen.
+    compact = ''.join(screen.split())
+    first, then, symptom = compact.find(STARTUP), compact.lower().find('then:'), compact.find('(void-')
+    world = engine.env.get('ROMACS_WORLD') != 'off'
+    checks = {
+        'restored from its world, when it had one': not world or '"mode":"restored"' in log.read_text(errors='replace'),
+        'the first error shown, its file named': first >= 0,
+        'before what failed after it': then < 0 or first < then,
+        'no symptom shown without its cause': symptom < 0 or 0 <= then < symptom,
+        'a failed start shows what failed after it': not failed or then >= 0,
+    }
+    if engine.env.get('ROMACS_GUI_FONT_SIZE') == BAD_FONT_SIZE:
+        checks['it failed, on the launch font'] = failed and 'fontsizemustbe' in compact[max(then, 0):]
+    return checks, {'failed': failed, 'screen': screen}
+
+
+WORKFLOWS = {'kill-emacs': run_kill_emacs, 'compositor': run_compositor, 'startup-failed': run_startup_failed,
+             'startup-failed-server': run_startup_failed, 'lisp-error-first': run_first_lisp_error,
+             'lisp-error-first-failed': run_first_lisp_error, 'lisp-error-first-world': run_first_lisp_error,
+             'lisp-error-first-world-failed': run_first_lisp_error}
+STARTS = {'startup-failed': start_failed,
+          'startup-failed-server': lambda args, base, name: start_failed(args, base, name, ('--serve', 'exit-live', '--serve-frame')),
+          'lisp-error-first': lambda args, base, name: start_failed(args, base, name, breaks=('startup',)),
+          'lisp-error-first-failed': lambda args, base, name: start_failed(args, base, name, breaks=('startup', 'bootstrap')),
+          'lisp-error-first-world': lambda args, base, name: start_failed(args, base, name, breaks=('startup',), world=True),
+          'lisp-error-first-world-failed': start_world_failed}
+
+
+def main(default=None):
+    """Run the workflows named, else DEFAULT's, else every one."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--romacs', required=True)
+    parser.add_argument('--romacs', '--binary', dest='romacs', required=True)
     parser.add_argument('--launcher', help='run each session through this launcher')
     parser.add_argument('--launcher-runtime', help="with --launcher: where, under HOME, it finds the build's runtime")
     parser.add_argument('--launcher-sessions', help='with --launcher: where, under HOME, it keeps per-session logs')
@@ -176,12 +338,12 @@ def main():
     output = Path(args.output)
     output.mkdir(parents=True)
     report = {'romacs': args.romacs, 'launcher': args.launcher, 'workflows': []}
-    for name in args.workflow or list(WORKFLOWS):
+    for name in args.workflow or default or list(WORKFLOWS):
         entry = {'workflow': name}
         report['workflows'].append(entry)
         engine = None
         try:
-            engine, stderr, usage = start(args, Path(args.work), name)
+            engine, stderr, usage = STARTS.get(name, start)(args, Path(args.work), name)
             checks, entry['observed'] = WORKFLOWS[name](engine, stderr, usage)
             entry['checks'] = checks
             if args.launcher and args.sessions:

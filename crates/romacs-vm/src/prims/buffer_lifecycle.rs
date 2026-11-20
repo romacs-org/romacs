@@ -118,6 +118,22 @@ fn other_buffer_fallback(cx: &mut Leaf<'_>) -> Next {
     lifecycle_lisp(cx, "romacs--scratch-safely", vec![])
 }
 
+// The kill's question before `replace-buffer-in-windows` (buffer.c:2044):
+// t when it must call it for BUFFER (`windows_may_name').
+defsubr! { name = "romacs--windows-may-name-p", gnu = "buffer.c:2044", effect = Reads,
+fn windows_may_name_p(cx, buffer: Value) {
+    Ok(if cx.windows_may_name(buffer) { Value::TRUE } else { Value::NIL })
+}}
+// window.el, right after defining `replace-buffer-in-windows', which
+// window.c's replace_buffer_in_windows calls by name: DEFINITION, the one it
+// made, unwrapped from any advice a reload kept around it, is what a kill
+// may skip for a buffer no window names.
+defsubr! { name = "romacs--window-replacer-defined", gnu = "window.c:3722", effect = Global,
+fn window_replacer_defined(cx, definition: Value) {
+    cx.note_window_replacer(definition);
+    Ok(Value::NIL)
+}}
+
 defsubr! { name = "make-indirect-buffer", gnu = "buffer.c:807", effect = Global,
 fn make_indirect_buffer(cx, base_buffer: Value, name: Value; optional clone: Value, inhibit_buffer_hooks: Value) -> Step {
     let inhibit = inhibit_buffer_hooks != Value::NIL;

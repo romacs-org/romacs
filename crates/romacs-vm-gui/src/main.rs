@@ -63,6 +63,43 @@ const EVALUATOR_STACK_SIZE: usize = 64 * 1024 * 1024;
 /// `kill-emacs''s exit status, unwinding the live evaluator (`evaluate').
 struct SessionEnd(i32);
 
+/// How the evaluator's RESULT ends the session, and whether it failed (a
+/// failed startup's screen then holds, `failed_screen`): an error, or a
+/// panic other than `kill-emacs`'s unwinding, which ends it as a panic.
+fn evaluator_end(result: std::thread::Result<Result<exit::Exit, String>>) -> (exit::Exit, bool) {
+    match result {
+        Ok(Ok(end)) => (end, false),
+        Ok(Err(error)) => {
+            eprintln!("romacs: evaluator stopped: {error}");
+            (exit::Exit::new("evaluator-error", error, 1), true)
+        }
+        Err(payload) => if let Ok(end) = payload.downcast::<SessionEnd>() {
+            (exit::Exit::new("kill-emacs", "", end.0), false)
+        } else {
+            // Reported by the panic hook as it happened (exit.rs); said as
+            // an error's end is, which a harness watches for.
+            let end = exit::panicked("evaluator");
+            eprintln!("romacs: evaluator stopped: {}", end.detail);
+            (end, true)
+        },
+    }
+}
+
+#[cfg(test)]
+mod evaluator_end_tests {
+    use super::*;
+
+    #[test]
+    fn an_error_or_a_panic_fails_and_kill_emacs_ends() {
+        let ended = |status| exit::Exit::new("kill-emacs", "", status);
+        assert_eq!(evaluator_end(Ok(Ok(ended(0)))), (ended(0), false));
+        assert_eq!(evaluator_end(Ok(Err("boom".into()))), (exit::Exit::new("evaluator-error", "boom", 1), true));
+        assert_eq!(evaluator_end(Err(Box::new(SessionEnd(3)))), (ended(3), false));
+        let (end, failed) = evaluator_end(Err(Box::new("a bug")));
+        assert_eq!((end.reason, end.status, failed), ("panic", 101, true));
+    }
+}
+
 fn spawn_evaluator<F, T>(evaluate: F) -> Result<std::thread::JoinHandle<T>, String>
 where
     F: FnOnce() -> T + Send + 'static,
@@ -913,7 +950,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
     let (result_tx, result_rx) = std::sync::mpsc::channel();
     let start = phases.as_ref().map(startup::Phases::start);
     let serving = serve.is_some();
-    let early_window = match &serve {
+    let mut early_window = match &serve {
         Some(_) if serve_frame => Some(sender.realize(romacs_display_runtime::paint_host::INITIAL_FRAME, width, height, "romacs".into())?),
         _ => None,
     };
@@ -968,24 +1005,24 @@ fn run() -> Result<Option<exit::Exit>, String> {
             }
         }); });
         startup::mark_phase(if restored.is_some() { "world-restored" } else { "world-none" });
+        // What both loops share (prompt.rs), the launch screen with it: a
+        // startup that fails keeps its screen (`hold_failed_startup`).
+        let host = std::rc::Rc::new(std::cell::RefCell::new(prompt::Shared { presentation: first_presentation, loading, ..Default::default() }));
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             evaluate(&sender, floor, force_gc, g1, live, launch, width, height, load_user_init, quick, restored,
-                     isolate_world, store_problem, first_presentation, loading, quit, prune, serve, serve_landing, early_window)
+                     isolate_world, store_problem, &host, quit, prune, serve, serve_landing, &mut early_window)
         }));
-        let end = match result {
-            Ok(Ok(end)) => end,
-            Ok(Err(error)) => {
-                eprintln!("romacs: evaluator stopped: {error}");
-                exit::Exit::new("evaluator-error", error, 1)
-            }
-            Err(payload) => match payload.downcast::<SessionEnd>() {
-                Ok(end) => exit::Exit::new("kill-emacs", "", end.0),
-                Err(payload) => std::panic::resume_unwind(payload),
-            },
-        };
+        let (end, failed) = evaluator_end(result);
+        let error = failed.then(|| end.detail.clone());
         // The end goes first: dropping the sender closes the window, and
-        // the window's end lets the main thread look for it.
-        let _ = result_tx.send(end);
+        // the window's end lets the main thread look for it.  A failed
+        // startup's screen waits for its window and holds after it, so a
+        // display that ends meanwhile still ends the session with it.
+        let screen = send_end_then(&result_tx, Ended { held: failed, end },
+                                   || error.and_then(|error| failed_screen(&host, &mut early_window, &error)));
+        if let Some(screen) = screen { hold_failed_startup(screen, &sender, &host); }
+        // A screen still up stops before the window goes: its painter holds it.
+        drop(host);
         drop(sender);
     })?;
     let host = host.run();
@@ -995,7 +1032,8 @@ fn run() -> Result<Option<exit::Exit>, String> {
     // kills its children.
     let wait = if exit::evaluator_ended(&host) { std::time::Duration::from_secs(2) } else { std::time::Duration::ZERO };
     let verdict = match result_rx.recv_timeout(wait) {
-        Ok(end) => match worker.join() {
+        Ok(Ended { end, held: true }) => exit::Verdict::Ended(end),
+        Ok(Ended { end, held: false }) => match worker.join() {
             Ok(()) => exit::Verdict::Ended(end),
             Err(_) => exit::Verdict::Panicked,
         },
@@ -1003,6 +1041,89 @@ fn run() -> Result<Option<exit::Exit>, String> {
         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => exit::Verdict::Running,
     };
     Ok(Some(exit::session(host, verdict)))
+}
+
+/// The evaluator's end, as the main thread gets it.
+struct Ended {
+    end: exit::Exit,
+    /// A failed startup's, sent before its screen waits for its window and
+    /// holds (`hold_failed_startup`): its thread, which has no VM left to
+    /// drop and may wait on the user, is not joined.
+    held: bool,
+}
+
+/// Send END to the main thread, then WAIT (a failed startup's screen
+/// waiting for its window): the end is there whatever ends the display
+/// during the wait.
+fn send_end_then<T>(result_tx: &std::sync::mpsc::Sender<Ended>, end: Ended, wait: impl FnOnce() -> T) -> T {
+    let _ = result_tx.send(end);
+    wait()
+}
+
+#[cfg(test)]
+mod send_end_tests {
+    use super::*;
+
+    #[test]
+    fn a_failed_startup_s_end_is_sent_before_its_screen_waits() {
+        let (sent, ends) = std::sync::mpsc::channel();
+        let end = Ended { held: true, end: exit::Exit::new("evaluator-error", "x", 1) };
+        let found = send_end_then(&sent, end, || ends.try_recv().ok());
+        let found = found.expect("the end was there when the wait began");
+        assert!(found.held);
+        assert_eq!(found.end, exit::Exit::new("evaluator-error", "x", 1));
+    }
+}
+
+/// How often a failed startup's screen looks for a termination signal,
+/// whose wake went with the session.
+const FAILED_SIGNAL_LOOK: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// Startup failed with ERROR: its launch screen, taken from HOST and saying
+/// so.  There is one before the session's first paint takes the window,
+/// and only while that window shows: a server's window that Lisp hid
+/// shows nothing, and no close would come for it.  A server's window asked
+/// for at its start (`early_window`, not yet taken while the screen is
+/// up) is waited for as the session waits for it: one never made shows
+/// nothing either.
+fn failed_screen(host: &std::cell::RefCell<prompt::Shared>, early_window: &mut Option<crossbeam_channel::Receiver<Result<(), String>>>,
+                 error: &str) -> Option<loading::Loading> {
+    // No screen to show: no wait for a window to show it in.
+    if host.borrow().loading.is_none() { return None; }
+    // A window asked for at the start is not yet shown, only being made.
+    let early = early_window.take().map(|ready| made(&ready));
+    if early == Some(false) { return None; }
+    let screen = { let mut shared = host.borrow_mut(); if early.is_some() || shared.window_shown() { shared.loading.take() } else { None } }?;
+    loading::fail(error, startup::first_noted_lisp_error().as_deref());
+    Some(screen)
+}
+
+/// Whether the window READY answers for was made within the 30 s the
+/// session would wait; a termination signal ends the wait.
+fn made(ready: &crossbeam_channel::Receiver<Result<(), String>>) -> bool {
+    let deadline = Instant::now() + std::time::Duration::from_secs(30);
+    while Instant::now() < deadline && romacs_vm::host::termination_signal(true).is_none() {
+        match ready.recv_timeout(FAILED_SIGNAL_LOOK) {
+            Ok(made) => return made.is_ok(),
+            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
+            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return false,
+        }
+    }
+    false
+}
+
+/// Keep a failed startup's SCREEN until the user closes the window, a
+/// termination signal comes, or the display goes.  Nothing is retried.
+fn hold_failed_startup(screen: loading::Loading, sender: &PaintSender, host: &std::cell::RefCell<prompt::Shared>) {
+    let mut closed = { let shared = host.borrow(); shared.closed || shared.pending.iter().any(prompt::closes) };
+    while !closed && romacs_vm::host::termination_signal(true).is_none() {
+        closed = match terminal_wait::wait(sender.input(), &crossbeam_channel::never(), Some(FAILED_SIGNAL_LOOK), &[]) {
+            terminal_wait::Wake::Input(event) => prompt::closes(&event),
+            terminal_wait::Wake::Closed => true,
+            terminal_wait::Wake::Terminal | terminal_wait::Wake::Process | terminal_wait::Wake::Timeout => false,
+        };
+    }
+    drop(screen);
 }
 /// `--loadup-report [EXPR...]`: run `--loadup`'s GNU Lisp chain exactly as
 /// the GUI's startup does, on the same 64 MiB evaluator, with no window; print
@@ -1310,20 +1431,25 @@ fn evaluate(
     // Why the world store could not be used, when it could not: said once
     // the session is up.
     store_problem: Option<String>,
-    first_presentation: u64,
-    loading: Option<loading::Loading>,
+    // What both loops share, the launch screen with it: the caller keeps
+    // a failed startup's screen (`hold_failed_startup`).
+    shared: &std::rc::Rc<std::cell::RefCell<prompt::Shared>>,
     quit: Option<std::sync::Arc<romacs_vm::QuitSignal>>,
     after_first_frame: Option<impl FnOnce()>,
     serve: Option<String>,
     serve_landing: bool,
-    early_window: Option<crossbeam_channel::Receiver<Result<(), String>>>,
+    // A server's window asked for at its start, ready when this answers:
+    // the caller's, taken by whichever waits for it (a window made after
+    // its waiter is dropped is destroyed), so a failed startup's screen
+    // can wait for it too.
+    early_window: &mut Option<crossbeam_channel::Receiver<Result<(), String>>>,
 ) -> Result<exit::Exit, String> {
-    let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout::LayoutEngine::new()?));
-    startup::mark_phase("layout-engine");
     let (mut vm, carry) = match restored {
         Some((vm, carry)) => {
             let mut vm = *vm;
             vm.world_reinit();
+            // Its build's first Lisp error, first, whatever fails after it.
+            if let Err(error) = startup::first_noted_from_world(&mut vm) { eprintln!("romacs: world Lisp errors: {error}"); }
             (vm, Some(carry))
         }
         None => (Vm::new(), None),
@@ -1341,6 +1467,10 @@ fn evaluate(
         (_, _, startup::Launch::Loadup | startup::Launch::GnuOnly) => { vm.eval_source("(setq isolate-boot 'source)")?; }
         _ => { vm.eval_source("(setq isolate-boot 'bare)")?; }
     }
+    // After the world's first Lisp error is taken: an engine that fails to
+    // start ends a session whose screen shows that error first.
+    let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout::LayoutEngine::new()?));
+    startup::mark_phase("layout-engine");
     // Measuring primitives ask the engine that paints (VM2-WTPS1).
     vm.set_layout_host(Some(Box::new(measure::Host { engine: engine.clone() })));
     // The window's session ends with `kill-emacs': its hook has run, so the
@@ -1455,7 +1585,7 @@ fn evaluate(
             eprintln!("romacs: world store warning: {error}");
         }
         // Romacs's own Lisp that failed to load, which the launch went on without.
-        if launch == startup::Launch::Loadup && let Err(error) = startup::report_lisp_errors(&mut vm) {
+        if let Err(error) = startup::report_lisp_errors(&mut vm) {
             eprintln!("romacs: Lisp errors: {error}");
         }
         let finished = match launch {
@@ -1472,10 +1602,20 @@ fn evaluate(
         match finished {
             Err(error) => {
                 eprintln!("romacs: startup after init failed: {error}");
-                let _ = echo::show(&mut vm, &error);
+                // Shown with the first Lisp error startup went past, often its cause.
+                let shown = startup::first_noted_lisp_error().map_or_else(|| error.clone(),
+                    |first| format!("Romacs Lisp failed: {first}; then: {error}"));
+                let _ = echo::show(&mut vm, &shown);
             }
-            // Not fatal: a quit typed late (`quit-flag') may end it.
-            Ok(()) => if let Err(error) = echo::show_current_message(&mut vm) { eprintln!("romacs: startup message: {error}"); },
+            Ok(()) => {
+                // A session that came up degraded says why first.
+                if let Some(first) = startup::first_noted_lisp_error() {
+                    let _ = echo::show(&mut vm, &format!("Romacs Lisp failed: {first}"));
+                // Not fatal: a quit typed late (`quit-flag') may end it.
+                } else if let Err(error) = echo::show_current_message(&mut vm) {
+                    eprintln!("romacs: startup message: {error}");
+                }
+            }
         }
         startup::mark_phase("finish-loadup");
         eprintln!("romacs: {}", started.status());
@@ -1501,9 +1641,7 @@ fn evaluate(
         vm.eval_source(if g1 { include_str!("../g1.el") } else { SCENE })?;
     }
     // A live GUI has a keyboard: prompts read it mid-command (prompt.rs).
-    let host = std::rc::Rc::new(std::cell::RefCell::new(prompt::Shared::default()));
-    host.borrow_mut().presentation = first_presentation;
-    host.borrow_mut().loading = loading;
+    let host = shared.clone();
     let last_presentation = || host.borrow().presentation;
     if live {
         vm.set_host_input(Some(Box::new(prompt::GuiHost { shared: host.clone(), sender: sender.clone(), engine: engine.clone(), images: images.clone(), terminal_ready: terminal_ready.clone(), processes: vec![] })));
@@ -1528,7 +1666,7 @@ fn evaluate(
     let first_submitted = Instant::now();
     // A window asked for at the server's start is the session's first: it
     // gets the first paint, as a session's window does.
-    let early = early_window.map(|ready| ready.recv_timeout(std::time::Duration::from_secs(30)).map_err(|e| e.to_string()).and_then(|r| r));
+    let early = early_window.take().map(|ready| ready.recv_timeout(std::time::Duration::from_secs(30)).map_err(|e| e.to_string()).and_then(|r| r));
     if let Some(Err(error)) = &early { eprintln!("romacs: server window: {error}"); }
     if let (Some(Ok(())), Some(server)) = (&early, host.borrow_mut().server.as_mut()) { server.shown = true; }
     // The session's first paint takes the window from the launch screen.

@@ -45,6 +45,12 @@ pub fn run(args: Vec<String>, quick: bool, store: Option<PathBuf>) -> Result<(),
         let mut vm = Vm::new();
         vm.set_frame_geometry(1000, 700, 20, 10)?;
         super::startup::initialize_files_from_sources(&mut vm, &[], &root)?;
+        // A file of Romacs's Lisp that signalled, which a session goes on
+        // without, fails a headless run: each, with its file and line.
+        let noted = super::startup::noted_lisp_errors(&mut vm)?;
+        if !noted.is_empty() {
+            return Err(noted.iter().filter_map(|error| error["error"].as_str()).collect::<Vec<_>>().join("\n"));
+        }
         if let Some(path) = init {
             if !super::user_init::load(&mut vm, &path)? {
                 return Err(format!("Explicit init file does not exist: {}", path.display()));

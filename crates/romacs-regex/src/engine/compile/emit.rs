@@ -30,6 +30,8 @@ impl CompiledPattern {
             target_multibyte: true,
             can_be_null: false,
             uses_syntax: false,
+            uses_categories: false,
+            reads_table: false,
             used_syntax: false,
             translate: None,
             multibyte_charsets: FxHashMap::default(),

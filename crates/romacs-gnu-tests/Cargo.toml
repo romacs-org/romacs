@@ -11,6 +11,9 @@ description = "Per-deftest runner for GNU Emacs's own test suite (test/gnu/test)
 romacs-vm = { path = "../../crates/romacs-vm" }
 serde_json = "1"
 
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true, features = ["stdio"] }
+
 [[bin]]
 name = "romacs-gnu-ert"
 path = "src/main.rs"

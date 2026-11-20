@@ -112,6 +112,42 @@ fn a_missing_explicit_init_file_is_an_error() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// A file of Romacs's Lisp that signals while a `--batch DIR` workspace is
+/// set up fails the run, naming the file and its line, though a session
+/// goes on past it: DIR's own file, whatever DIR is named.
+#[test]
+fn a_batch_workspace_fails_on_a_lisp_file_that_signals() {
+    use std::io::Write;
+    let romacs = env!("CARGO_BIN_EXE_romacs-vm-gui");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let dir = std::env::temp_dir().join(format!("romacs-batch-broken-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let lisp = dir.join("sources");
+    std::fs::create_dir_all(&lisp).unwrap();
+    for entry in std::fs::read_dir(root.join("lisp")).unwrap() {
+        let entry = entry.unwrap();
+        std::os::unix::fs::symlink(entry.path(), lisp.join(entry.file_name())).unwrap();
+    }
+    std::os::unix::fs::symlink(root.join("etc"), dir.join("etc")).unwrap();
+    let dired = std::fs::read_to_string(root.join("lisp/romacs-dired.el")).unwrap() + "\n(error \"broken on purpose\")\n";
+    std::fs::remove_file(lisp.join("romacs-dired.el")).unwrap();
+    std::fs::write(lisp.join("romacs-dired.el"), dired).unwrap();
+    let mut child = Command::new(romacs)
+        .arg("--batch").arg(&lisp)
+        .env("HOME", &dir).env("XDG_CONFIG_HOME", &dir).env("ROMACS_LISP_DIR", &lisp)
+        .stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped())
+        .spawn().unwrap();
+    child.stdin.take().unwrap().write_all(b"42").unwrap();
+    let output = child.wait_with_output().unwrap();
+    let (stdout, stderr) = (String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    std::fs::remove_dir_all(&dir).unwrap();
+    assert!(!output.status.success() && !stdout.contains("42"), "{stdout}{stderr}");
+    // The run's own error, its last line: the noted error, not only the
+    // loader's line as it noted it.
+    let last = stderr.lines().last().unwrap_or_default();
+    assert!(last.contains("sources/romacs-dired.el: line ") && last.contains("broken on purpose"), "{stderr}");
+}
+
 /// A batch program's settings stay out of an init, as a session's do
 /// (lisp/session/romacs-saved-settings.el, in the chain): `disable-command' creates no
 /// ~/.emacs, and with an init named, both writers save beside it.
