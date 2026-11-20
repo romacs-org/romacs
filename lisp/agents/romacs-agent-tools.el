@@ -489,9 +489,13 @@ by counting characters from the start."
       (and ok (nreverse wakes)))))
 
 (defconst romacs-agent--reply-line-regexp
-  (concat "\n\\(?:Reply to \\(?:this message\\|this result\\) with [^\n]*"
-          "\\|Its sender is outside Romacs and has no reply route[^\n]*\\)[ \t\n]*")
-  "The line `romacs-agent--message-reply-line' writes after an envelope.")
+  (concat "\n\\(?:"
+          "Reply to this message with SendMessage(to=\"[^\"\n]*\", message=\\.\\.\\.)\\."
+          "\\|Reply to this \\(?:message\\|result\\) with romacs_task_reply(messageId=\"[^\"\n]*\", text=\\.\\.\\.)\\."
+          "\\|Its sender is outside Romacs and has no reply route: it reads only your turn's reply\\."
+          "\\)[ \t]*\\(?:\n[ \t\n]*\\|\\'\\)")
+  "The line `romacs-agent--message-reply-line' writes after an envelope,
+each of its forms whole, and the space after it.")
 
 (defun romacs-agent-incoming-of (text)
   "TEXT, written to an agent as a user's turn, read as what came from

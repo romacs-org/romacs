@@ -1082,7 +1082,7 @@
 ;;; Rounds
 
 (ert-deftest romacs-agent-log-rounds-tell-the-user-from-elsewhere ()
-  (should (equal (romacs-agent-incoming-of "<romacs-message id=\"m-1\" kind=\"parent\" from=\"lead\">\nGo on\n</romacs-message>\nReply to this message with x.")
+  (should (equal (romacs-agent-incoming-of "<romacs-message id=\"m-1\" kind=\"parent\" from=\"lead\">\nGo on\n</romacs-message>\nReply to this message with romacs_task_reply(messageId=\"m-1\", text=...).")
                  '((:from "lead" :state "parent" :text "Go on"))))
   (should-not (romacs-agent-incoming-of "my own words"))
   (romacs-agent-log-tests--with
@@ -1108,12 +1108,14 @@
     (should-not (memq 'romacs-agent-log-you (ensure-list (get-text-property (match-beginning 0) 'face)))))
   ;; Only whole envelopes, each of a batch; anything else is the user's.
   (should (equal (mapcar (lambda (i) (plist-get i :text))
-                         (romacs-agent-incoming-of (concat "<romacs-message id=\"1\" kind=\"child\" from=\"a\">\none\n</romacs-message>\nReply to this message with x.\n\n"
-                                                           "<romacs-message id=\"2\" kind=\"child\" from=\"b\">\ntwo\n</romacs-message>\nReply to this message with y.")))
+                         (romacs-agent-incoming-of (concat "<romacs-message id=\"1\" kind=\"child\" from=\"a\">\none\n</romacs-message>\nReply to this message with romacs_task_reply(messageId=\"1\", text=...).\n\n"
+                                                           "<romacs-message id=\"2\" kind=\"child\" from=\"b\">\ntwo\n</romacs-message>\nReply to this message with romacs_task_reply(messageId=\"2\", text=...).")))
                  '("one" "two")))
   (should-not (romacs-agent-incoming-of "<romacs-message-example> is a tag I mean"))
   ;; Only as its sender writes it: with the line saying how to answer.
   (should-not (romacs-agent-incoming-of "<romacs-message id=\"1\" from=\"a\">\nan example\n</romacs-message>"))
+  ;; A line of the user's own after it is no sender's footer.
+  (should-not (romacs-agent-incoming-of "<romacs-message id=\"1\" from=\"a\">\nan example\n</romacs-message>\nReply to this message with an explanation of these tags."))
   (let ((message (romacs-agent-make-message "m-3" "external" '(:name "far") nil "from outside")))
     (should (equal (romacs-agent-incoming-of (romacs-agent--message-envelope message "from outside"))
                    '((:from "far" :state "external" :text "from outside")))))
