@@ -2,6 +2,7 @@
 
 (scaling-probe key-card-replacements :gui t :n 50 :steps 1
   :setup (progn
+           (scaling--card-order)
            (require 'which-key)
            (let ((map (make-sparse-keymap)))
              (dotimes (i 40) (define-key map (vector 'f12 (+ #x1000 i)) (scaling--card-command i)))

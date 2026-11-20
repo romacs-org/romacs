@@ -98,9 +98,12 @@ one) gives its keys its link colour, else the text's.  Run from
                      ;; what can be acted on; else the text's own.
                      (romacs-chrome--chromatic (face-foreground 'link nil t))
                      (face-foreground 'default nil t)))
-         (key (and (stringp accent) (romacs-popup-legible accent)))
-         (dim (face-foreground 'romacs-popup-dim nil t))
-         (also (and (stringp dim) (romacs-popup-legible dim))))
+         ;; Only a colour the floor computed: an unknown one leaves the
+         ;; face its inherited colour.
+         (floored (lambda (color) (let ((c (and (stringp color) (romacs-popup-legible color))))
+                                    (and c (string-match-p "\\`#[[:xdigit:]]\\{6\\}\\'" c) c))))
+         (key (funcall floored accent))
+         (also (funcall floored (face-foreground 'romacs-popup-dim nil t))))
     (romacs-popup--set-spec 'romacs-popup-key `((t :inherit romacs-layer-glow :weight bold ,@(and key (list :foreground key)))))
     (romacs-popup--set-spec 'romacs-popup-also `((t :inherit romacs-popup-dim ,@(and also (list :foreground also)))))))
 

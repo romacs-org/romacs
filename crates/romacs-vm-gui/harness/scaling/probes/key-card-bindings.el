@@ -5,6 +5,7 @@
 ;; each map, one replacement pass per entry, one layout; linear in each.
 (scaling-probe key-card-bindings :gui t :n 100 :steps 1
   :setup (let ((map (make-sparse-keymap)))
+           (scaling--card-order)
            (dotimes (i n) (define-key map (vector 'f12 (+ #x1000 i)) (scaling--card-command i)))
            (use-local-map map)
            (switch-to-buffer (get-buffer-create "scaling-card")))

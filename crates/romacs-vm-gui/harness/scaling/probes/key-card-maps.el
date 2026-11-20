@@ -2,6 +2,7 @@
 
 (scaling-probe key-card-maps :gui t :n 20 :steps 1
   :setup (progn
+           (scaling--card-order)
            (dotimes (i n)
              (let ((map (make-sparse-keymap)) (mode (intern (format "scaling-card-mode-%d" i))))
                (define-key map (vector 'f12 (+ #x1000 i)) (scaling--card-command i))
