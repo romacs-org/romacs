@@ -278,11 +278,6 @@
         (should (equal (romacs-agent-log--menu-title) "Agent · lane chat"))
         ;; A finished one is the board's; one waiting on the user first.
         (should (equal (mapcar #'romacs-agent-title (romacs-agent-log--workers)) '("asks" "builds")))
-        ;; The menu takes them as it opens, the only way M-x offers.
-        (should-not (funcall (get 'romacs-agent-log-actions-map-popup 'completion-predicate)
-                             'romacs-agent-log-actions-map-popup (current-buffer)))
-        (cl-letf (((symbol-function 'romacs-agent-log-actions-map-popup) #'ignore))
-          (romacs-agent-log-actions))
         (should (equal (substring-no-properties (romacs-agent-log--worker-label 0)) "⚠ asks"))
         (should (equal (substring-no-properties (romacs-agent-log--worker-label 1)) "● builds"))
         (should-not (romacs-agent-log--worker-label 2))
@@ -293,10 +288,14 @@
             (let ((last-command-event ?2)) (romacs-agent-log-open-worker))
             (should (equal (romacs-agent-title shown) "builds"))
             (let ((last-command-event ?1)) (should-error (romacs-agent-log-open-worker) :type 'user-error))
-            ;; All finished while it is open: its rows and keys stay, each saying so.
+            ;; All finished while it is open: its keys still dispatch (the
+            ;; group has no :if), each saying so.
             (setf (romacs-agent-state (car children)) 'idle)
             (should-not (romacs-agent-log--workers))
-            (should (> (length romacs-agent-log--menu-workers) 0))
+            (let ((group (seq-find (lambda (group) (equal (plist-get group :name) "Workers"))
+                                   (apply #'append (keymap-popup--meta romacs-agent-log-actions-map 'descriptions)))))
+              (should group)
+              (should-not (plist-get group :if)))
             (let ((last-command-event ?2)) (should-error (romacs-agent-log-open-worker) :type 'user-error))
             (setf (romacs-agent-state (car children)) 'running)
             (setf (romacs-agent-state (nth 2 children)) 'waiting-approval)))

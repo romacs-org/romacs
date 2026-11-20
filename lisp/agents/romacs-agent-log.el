@@ -1322,9 +1322,9 @@ the user first: a finished one is the board's."
       (append (seq-filter (lambda (child) (eq (romacs-agent-state child) 'waiting-approval)) live)
               (seq-remove (lambda (child) (eq (romacs-agent-state child) 'waiting-approval)) live)))))
 
-(defvar-local romacs-agent-log--menu-workers nil
-  "The workers at work when the menu opened, a vector: its digits show
-them and open the one they showed, saying so when it finished since.")
+(defvar-local romacs-agent-log--menu-workers (make-vector 9 nil)
+  "The worker each digit's row last showed, however the menu was opened:
+a digit opens that one, saying so when it finished since.")
 
 (defun romacs-agent-log--worker-mark (child)
   (if (eq (romacs-agent-state child) 'waiting-approval)
@@ -1333,8 +1333,9 @@ them and open the one they showed, saying so when it finished since.")
 
 (defun romacs-agent-log--worker-label (index)
   "The menu's row of the worker at INDEX: a mark of what it does, then its
-title, so a long title is what the menu cuts; nil when there is none."
-  (when-let* ((child (and (< index (length romacs-agent-log--menu-workers)) (aref romacs-agent-log--menu-workers index))))
+title, so a long title is what the menu cuts; nil, no row, when there is
+none.  The row's digit then opens what it showed."
+  (when-let* ((child (aset romacs-agent-log--menu-workers index (nth index (romacs-agent-log--workers)))))
     (concat (romacs-agent-log--worker-mark child) " " (romacs-agent-title child))))
 
 (defun romacs-agent-log--open-worker (child)
@@ -1347,8 +1348,7 @@ title, so a long title is what the menu cuts; nil when there is none."
   "Open the chat of the worker the menu showed on the digit just pressed."
   (interactive nil romacs-agent-log-mode)
   (let ((index (- last-command-event ?1)))
-    (romacs-agent-log--open-worker (or (and (< -1 index (length romacs-agent-log--menu-workers))
-                                            (aref romacs-agent-log--menu-workers index))
+    (romacs-agent-log--open-worker (or (and (< -1 index 9) (aref romacs-agent-log--menu-workers index))
                                        (user-error "No such worker")))))
 
 (defun romacs-agent-log-workers ()
@@ -1360,13 +1360,6 @@ title, so a long title is what the menu cuts; nil when there is none."
                         workers)))
     (romacs-agent-log--open-worker
      (cdr (assoc (completing-read "Worker: " (romacs-agent--ordered-table (mapcar #'car named)) nil t) named)))))
-
-(defun romacs-agent-log-actions ()
-  "Show the chat's actions, its workers as they are now: the menu keeps
-them while it is open."
-  (interactive nil romacs-agent-log-mode)
-  (setq romacs-agent-log--menu-workers (vconcat (seq-take (romacs-agent-log--workers) 9)))
-  (romacs-agent-log-actions-map-popup))
 
 (keymap-popup-define romacs-agent-log-actions-map
   "Actions of an agent chat: what waits on you, the turn, what it runs on,
@@ -1401,7 +1394,9 @@ the session, the view."
   :group "View"
   "e" ("Earlier turns" romacs-agent-log-earlier)
   "w" ("Copy the entry at point" romacs-agent-log-copy)
-  :group ("Workers" :if (lambda () (> (length romacs-agent-log--menu-workers) 0)))
+  ;; No :if: a group whose rows are all empty is not drawn, and a digit
+  ;; whose worker finished since says so rather than falling through.
+  :group "Workers"
   "1" ((lambda () (romacs-agent-log--worker-label 0)) romacs-agent-log-open-worker)
   "2" ((lambda () (romacs-agent-log--worker-label 1)) romacs-agent-log-open-worker)
   "3" ((lambda () (romacs-agent-log--worker-label 2)) romacs-agent-log-open-worker)
@@ -1421,7 +1416,7 @@ A character typed on it goes to the composer."
   "<remap> <self-insert-command>" #'romacs-agent-log-type
   "SPC" #'scroll-up-command
   "DEL" #'scroll-down-command
-  "?" #'romacs-agent-log-actions
+  "?" #'romacs-agent-log-actions-map-popup
   "n" #'romacs-agent-log-next
   "p" #'romacs-agent-log-previous
   "M-n" #'romacs-agent-log-next-prompt
@@ -1451,13 +1446,11 @@ A character typed on it goes to the composer."
   "C-c C-p" #'romacs-agent-log-next-ask
   "C-c C-j" #'romacs-agent-log-composer
   "C-c C-b" #'romacs-agents
-  "C-c C-o" #'romacs-agent-log-actions
+  "C-c C-o" #'romacs-agent-log-actions-map-popup
   "M-p" #'romacs-agent-log-history-previous
   "M-n" #'romacs-agent-log-history-next)
 
-;; The menu opens through `romacs-agent-log-actions', which takes its
-;; workers first: M-x offers that, not the popup's own launcher.
-(put 'romacs-agent-log-actions-map-popup 'completion-predicate #'ignore)
+(put 'romacs-agent-log-actions-map-popup 'command-modes '(romacs-agent-log-mode))
 
 (define-derived-mode romacs-agent-log-mode fundamental-mode "Agent"
   "An agent session's chat: its transcript, and below, the composer.
