@@ -34,8 +34,9 @@ fn terminal_transport_counts(cx, session: Integer) {
 }}
 
 // Send BYTES, a string, to terminal SESSION as input.  Signals
-// `romacs-terminal-not-running' once its program has ended, and an error for an unknown
-// SESSION.  Returns nil.
+// `romacs-terminal-not-running' when its program has ended before the send, an error when
+// the host's write fails, as it does when the program ends meanwhile, and an error for an
+// unknown SESSION.  Returns nil.
 defsubr! { name = "romacs--term-send", gnu = "romacs:terminal", effect = Global,
 fn terminal_send(cx, session: Integer, bytes: Value) {
     cx.terminal_send(session.0, bytes)
@@ -97,8 +98,8 @@ fn terminal_encode_event(cx, event: Value; optional application_cursor: Value) {
 // Send the input EVENT to terminal SESSION as the bytes a terminal sends for it, in
 // the cursor mode the terminal is in now; a list event, which has none, sends nothing.
 // Signals as `romacs--term-encode-event' does for EVENT; an unknown SESSION signals an
-// error for any EVENT, and `romacs-terminal-not-running' only when there are bytes to send.
-// Returns nil.
+// error for any EVENT, and when there are bytes to send it signals as `romacs--term-send'
+// does.  Returns nil.
 defsubr! { name = "romacs--term-send-event", gnu = "romacs:terminal", effect = Global,
 fn terminal_send_event(cx, session: Integer, event: Value) {
     cx.terminal_send_event(session.0, event)

@@ -832,7 +832,8 @@ fn romacs_recalc_faces_except(cx, frame: Value, modified: Value) {
 // The work of `face-spec-choose', as faces.el does it: the attributes of the last
 // `default' clause before the first display clause of the face spec SPEC that matches FRAME
 // (nil for the selected frame), followed by that clause's; with no clause matching, the
-// last `default' clause's attributes, or NO-MATCH-RETVAL when SPEC has none.
+// attributes of SPEC's last `default' clause, or NO-MATCH-RETVAL when it has none or that
+// clause gives none.
 defsubr! { name = "romacs--face-spec-choose", gnu = "romacs:faces", effect = Reads,
 fn romacs_face_spec_choose(cx, spec: Value; optional frame: Value, no_match_retval: Value) {
     let keys = cx.face_keys();
