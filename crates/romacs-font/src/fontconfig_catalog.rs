@@ -91,6 +91,12 @@ pub(crate) fn register_font_file(path: &std::path::Path) -> bool {
     if handle().is_none() {
         return false;
     }
+    // A reload adds the file again, maybe after the working directory moved,
+    // so it is kept by its absolute name, as Fontconfig names its faces.
+    // HOST(std::path::absolute): reads the working directory for a relative PATH
+    let Ok(path) = std::path::absolute(path) else {
+        return false;
+    };
     let Ok(file) = CString::new(path.as_os_str().as_bytes()) else {
         return false;
     };
