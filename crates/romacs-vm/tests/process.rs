@@ -279,10 +279,10 @@ fn a_quit_in_call_process_keeps_the_output_read() {
     assert!(latency < Duration::from_millis(100), "the call ended {latency:?} after C-g");
 }
 
-/// C-g during a call-process a macro's expansion runs, as `eval' compiles
+/// C-g during a call-process a macro's expansion runs, as `eval` compiles
 /// the form that calls it, with output read: the quit stays C-g's through
 /// the output's insertion and its signal, so the expansion defers it to the
-/// call's reach (`quit_watched'), which raises it without expanding the
+/// call's reach (`quit_watched`), which raises it without expanding the
 /// macro, and running its child, a second time. The child counts its runs
 /// in a file; only the first writes and waits.
 #[test]
