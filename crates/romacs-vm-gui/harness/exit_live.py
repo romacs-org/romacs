@@ -245,7 +245,8 @@ def run_startup_failed(engine, stderr, usage):
     checks = {
         'the window outlives the error': held,
         'the screen says at which step the startup failed': 'Starting Lisp' in screen,
-        'and why': 'No such file or directory' in screen,
+        # Read without whitespace: the path before it wraps the line anywhere.
+        'and why': 'Nosuchfileordirectory' in ''.join(screen.split()),
         'closed: status 1': status == 1,
         'romacs-exit evaluator-error naming the file': bool(line) and line['reason'] == 'evaluator-error'
             and line['status'] == 1 and BOOTSTRAP in line['detail'],
