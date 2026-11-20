@@ -98,7 +98,8 @@ impl Leaf<'_> {
             let mode = if inhibit { 0 } else if eol == self.intern("dos") { 1 } else if eol == self.intern("mac") { 2 } else { 0 };
             let mut bytes = Vec::with_capacity(source.bytes().len() + 3);
             if kind == self.intern("utf-8") && self.vector_get(attrs, num(24))? != Value::NIL { bytes.extend_from_slice(&[239, 187, 191]); }
-            encode_internal_plain(source.bytes(), mode, &mut bytes);
+            encode_internal_plain(source.bytes(), mode, &mut bytes, pass);
+            if pass.stopped { return self.coding_stopped(string, coding, nocopy, buffer, encode, ascii_fast); }
             return self.coding_string_result(buffer, last, name, bytes, false, Vec::new());
         }
         let tokens = if encode && kind == self.intern("utf-8") && !source.is_multibyte() {
@@ -443,7 +444,21 @@ pub(super) enum CodingToken { Byte(u8), Character(u32) }
 /// GNU's internal form, appended to OUT: a raw-byte character (its lead C0
 /// or C1) is its byte, any other character its own bytes, and a line end
 /// is LF, CRLF (MODE 1) or CR (MODE 2), as `consume_chars` converts it.
-fn encode_internal_plain(internal: &[u8], mode: usize, out: &mut Vec<u8>) {
+/// PASS is asked between windows of about [`CHUNK`] bytes, each ending
+/// past a raw byte's lead (C0 or C1, never a UTF-8 lead) and its follower.
+fn encode_internal_plain(internal: &[u8], mode: usize, out: &mut Vec<u8>, pass: &mut Pass) {
+    let mut rest = internal;
+    while !rest.is_empty() {
+        let mut end = rest.len().min(CHUNK);
+        if end < rest.len() && matches!(rest[end - 1], 0xc0 | 0xc1) { end += 1; }
+        encode_internal_window(&rest[..end], mode, out);
+        rest = &rest[end..];
+        if !rest.is_empty() && !pass.check() { return; }
+    }
+}
+
+/// One window of `encode_internal_plain`, which never splits a raw byte.
+fn encode_internal_window(internal: &[u8], mode: usize, out: &mut Vec<u8>) {
     let mut rest = internal;
     loop {
         let next = if mode == 0 { memchr::memchr2(0xc0, 0xc1, rest) } else { memchr::memchr3(b'\n', 0xc0, 0xc1, rest) };
