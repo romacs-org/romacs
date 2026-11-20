@@ -31,10 +31,10 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tungstenite::protocol::WebSocketConfig;
 use tungstenite::{Message, WebSocket};
 
@@ -67,9 +67,17 @@ fn ws_config() -> WebSocketConfig {
     WebSocketConfig::default().max_message_size(Some(MESSAGE_LIMIT)).max_frame_size(Some(MESSAGE_LIMIT))
 }
 
+/// The runtime directory, as its components spell it: a trailing `/` would
+/// have its symlink followed where it is checked.
 fn runtime_dir() -> Result<PathBuf, String> {
-    std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from)
-        .ok_or_else(|| "XDG_RUNTIME_DIR is not set: the relay's sockets live there".into())
+    runtime_dir_of(std::env::var_os("XDG_RUNTIME_DIR"))
+}
+
+fn runtime_dir_of(value: Option<std::ffi::OsString>) -> Result<PathBuf, String> {
+    let dir = value.map(PathBuf::from)
+        .ok_or_else(|| "XDG_RUNTIME_DIR is not set: the relay's sockets live there".to_owned())?;
+    if !dir.is_absolute() { return Err(format!("{}: XDG_RUNTIME_DIR is not absolute", dir.display())) }
+    Ok(dir.components().collect())
 }
 
 fn default_socket() -> Result<PathBuf, String> {
@@ -120,27 +128,43 @@ impl<S: Write> Write for Prefixed<S> {
     fn flush(&mut self) -> std::io::Result<()> { self.inner.flush() }
 }
 
-/// A stream whose reads give LEFT bytes, then would block until it is
-/// refilled (`refill`); unbounded until first refilled, for a handshake.
+/// A stream whose reads give LEFT bytes within a turn of `POLL`, then would
+/// block until it is refilled (`refill`); unbounded until first refilled,
+/// for a handshake.
 struct Budgeted<S> {
     inner: S,
     left: Arc<AtomicUsize>,
+    /// The turn's end, in microseconds since START; `u64::MAX` for none.
+    until: Arc<AtomicU64>,
+    start: Instant,
 }
 
 impl<S> Budgeted<S> {
-    fn new(inner: S) -> Self { Budgeted { inner, left: Arc::new(AtomicUsize::new(usize::MAX)) } }
+    fn new(inner: S) -> Self {
+        Budgeted { inner, left: Arc::new(AtomicUsize::new(usize::MAX)), until: Arc::new(AtomicU64::new(u64::MAX)),
+                   start: Instant::now() }
+    }
 
-    /// What gives the stream its next turn's bytes.
+    /// What gives the stream its next turn: its bytes and its time.
     fn refill(&self) -> impl Fn() + use<S> {
-        let left = self.left.clone();
-        move || left.store(BUDGET, Ordering::Relaxed)
+        let (left, until, start) = (self.left.clone(), self.until.clone(), self.start);
+        move || {
+            left.store(BUDGET, Ordering::Relaxed);
+            let end = start.elapsed() + POLL;
+            until.store(u64::try_from(end.as_micros()).unwrap_or(u64::MAX), Ordering::Relaxed);
+        }
+    }
+
+    fn turn_over(&self) -> bool {
+        let until = self.until.load(Ordering::Relaxed);
+        until != u64::MAX && u64::try_from(self.start.elapsed().as_micros()).unwrap_or(u64::MAX) > until
     }
 }
 
 impl<S: Read> Read for Budgeted<S> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let left = self.left.load(Ordering::Relaxed);
-        if left == 0 { return Err(std::io::ErrorKind::WouldBlock.into()) }
+        if left == 0 || self.turn_over() { return Err(std::io::ErrorKind::WouldBlock.into()) }
         let most = buf.len().min(left);
         let n = self.inner.read(&mut buf[..most])?;
         self.left.store(left.saturating_sub(n), Ordering::Relaxed);
@@ -274,9 +298,14 @@ fn pump<S: Read + Write>(ws: &mut WebSocket<S>, local: UnixStream, carry: fn(&st
             }
         }
     }
+    // What the local end sent before it ended goes still, the WebSocket's
+    // end or a write that failed whatever.
+    refill();
+    while let Ok(Some(line)) = lines.try_recv() {
+        if ws.send(Message::text(line)).is_err() { break }
+    }
     let _ = writing.shutdown(std::net::Shutdown::Both);
     drop(lines);
-    refill();
     let _ = ws.close(None);
     let _ = ws.flush();
 }
@@ -534,6 +563,16 @@ mod tests {
         assert_eq!(stream.read(&mut buf).unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
         refill();
         assert_eq!(stream.read(&mut buf[..10]).unwrap(), 10);
+        // A turn's time spent, its bytes left whatever: it gives way.
+        std::thread::sleep(POLL + Duration::from_millis(5));
+        assert_eq!(stream.read(&mut buf[..10]).unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
+    }
+
+    #[test]
+    fn the_runtime_directory_is_read_as_its_components_spell_it() {
+        assert_eq!(runtime_dir_of(Some("/run/user/1000/".into())).unwrap(), PathBuf::from("/run/user/1000"));
+        assert!(runtime_dir_of(Some("relative".into())).is_err());
+        assert!(runtime_dir_of(None).is_err());
     }
 
     fn head(lines: &[&str]) -> Head {
