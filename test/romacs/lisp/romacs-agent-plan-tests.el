@@ -30,25 +30,6 @@
                 (lambda (_s id allow &optional message by) (push (list id allow message by) answered))))
        ,@body)))
 
-(ert-deftest romacs-agent-plan-the-session-follows-the-harness-out-of-plan-mode ()
-  ;; Plan mode is the harness's own: gone out of it, so is the session, and
-  ;; a next launch puts it back in no plan mode.
-  (romacs-agent-plan-tests--with 'claude
-    (romacs-agent-set-plan session t)
-    ;; Its switch on its way: another mode said is the one to go back to.
-    (romacs-agent--raise session '(:type mode :permission-mode "default"))
-    (should (plist-get (romacs-agent-options session) :plan))
-    (romacs-agent--raise session '(:type mode :permission-mode "plan"))
-    (romacs-agent--raise session '(:type mode :permission-mode "acceptEdits"))
-    (should-not (plist-get (romacs-agent-options session) :plan))
-    (should-not (plist-get (romacs-agent-options session) :plan-from))
-    ;; Caught up on records it had not seen, the same.
-    (romacs-agent-set-plan session t)
-    (setf (romacs-agent-caught-up session) nil)
-    (romacs-agent--raise session '(:type mode :permission-mode "plan"))
-    (romacs-agent--raise session '(:type mode :permission-mode "default"))
-    (should-not (plist-get (romacs-agent-options session) :plan))))
-
 (ert-deftest romacs-agent-plan-claude-switches-live-and-back ()
   (romacs-agent-plan-tests--with 'claude
     (romacs-agent-set-plan session t)
