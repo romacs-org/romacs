@@ -72,8 +72,9 @@ impl Leaf<'_> {
         } else { Ok(value) }
     }
     pub(crate) fn buffer_local_inventory(&mut self, buffer: Value) -> Out {
-        // Inherent locals appear even before their first Lisp lookup.
-        for name in ["major-mode", "mode-name", "buffer-file-name", "buffer-read-only", "buffer-file-format"] {
+        // The built-ins local in every buffer appear even before their first
+        // Lisp lookup, as GNU lists them all (buffer.c Fbuffer_local_variables).
+        for name in crate::forwarded::always_local_names() {
             self.intern(name);
         }
         // Snapshot slot IDs, not borrowed values, before allocating list cells.
@@ -93,12 +94,20 @@ impl Leaf<'_> {
         }
         Ok(self.vm.list_value(&entries))
     }
+    /// `change-major-mode-hook', the symbol, unless its current binding is
+    /// void or nil. The binding is `run-hooks''s own, found through any
+    /// variable alias.
+    pub(crate) fn change_major_mode_hook(&mut self) -> std::result::Result<Option<Value>, Fault> {
+        let hook = Value::reference(self.vm.change_major_mode_hook_slot + 1, 7);
+        Ok(self.variable_value(hook)?.filter(|&value| value != Value::NIL).map(|_| hook))
+    }
     pub(crate) fn reset_buffer_locals(&mut self, kill_permanent: Value) -> Out {
         let buffer = self.decode_buffer(Value::NIL)?;
-        let permanent = self.intern("permanent-local");
-        let permanent_hook = self.intern("permanent-local-hook");
-        let reset = self.intern("reset");
-        for slot in self.vm.local_candidates(buffer.index(0).unwrap() - 1) {
+        let permanent = Value::reference(self.vm.permanent_local_slot + 1, 7);
+        let permanent_hook = Value::reference(self.vm.permanent_local_hook_slot + 1, 7);
+        // Only what the buffer holds: a built-in it never set has nothing to
+        // reset, and one local in every buffer is reset below or never.
+        for slot in self.vm.held_local_slots(buffer.index(0).unwrap() - 1) {
             if self.vm.indirect_variable(slot) != slot { continue; }
             let symbol = Value::reference(slot + 1, 7);
             if !self.has_buffer_local(symbol, buffer)? { continue; }
@@ -144,7 +153,7 @@ impl Leaf<'_> {
             }
         }
         let index = buffer.index(0).unwrap() - 1;
-        if kill_permanent == reset { self.vm.reset_forwarded_visit(index); }
+        if kill_permanent != Value::NIL && kill_permanent == self.intern("reset") { self.vm.reset_forwarded_visit(index); }
         let case_tables = self.standard_case_roots()?;
         match self.vm.objects.entry_mut(index) {
             Object::Buffer(b) => { b.local_keymap = Value::NIL; b.syntax_table = Value::NIL; b.category_table = Value::NIL; b.case_tables = case_tables; }
