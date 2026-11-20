@@ -230,9 +230,10 @@
         (with-current-buffer buf
           (let ((lines (split-string (buffer-string) "\n" t)))
             (should (string-match-p "\\`Menu +q  Dismiss menu\\'" (car lines)))
-            ;; Right-aligned: the hint's stretch ends where the hint starts.
-            (should (equal (plist-get (cdr (get-text-property 5 'display)) :align-to)
-                           (- (car (keymap-popup--session-get buf :size)) (string-width "q  Dismiss menu"))))
+            ;; Right-aligned: the hint's stretch ends at the window's right
+            ;; edge less the hint and the continuation column.
+            (should (equal (plist-get (cdr (get-text-property (text-property-not-all (point-min) (point-max) 'display nil) 'display)) :align-to)
+                           `(- right ,(1+ (string-width "q  Dismiss menu")))))
             (should-not (seq-some (lambda (l) (string-match-p "Dismiss" l)) (cdr lines)))))
         ;; Too narrow for both: the title alone, the hint in the footer.
         (cl-letf (((symbol-function 'keymap-popup--room) (lambda (&rest _) (cons 20 nil))))

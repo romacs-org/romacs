@@ -1520,11 +1520,14 @@ page's size, (COLUMNS . LINES), as the session's `:pages' and `:size'."
         (erase-buffer)
         (when title
           (insert title)
-          ;; The hint at the card's right edge: a stretch, so what the
-          ;; title paints wider than its cells cannot move it.
+          ;; The hint at the text's right edge, short of the column a
+          ;; fringe-less window keeps for its continuation glyph: wherever
+          ;; the backend's window ends, however wide the card grew for a
+          ;; row painted wider than its cells; two spaces first, so a title
+          ;; painted wide still leaves a gap.
           (when hint
-            (insert (propertize (make-string (max 1 (- width (string-width title) (string-width hint))) ?\s)
-                                'display `(space :align-to ,(- width (string-width hint))))
+            (insert "  " (propertize (make-string (max 1 (- width (string-width title) (string-width hint) 2)) ?\s)
+                                     'display `(space :align-to (- right ,(1+ (string-width hint)))))
                     hint))
           (insert "\n\n"))
         ;; Every page as tall as the tallest, so the footer stays put.

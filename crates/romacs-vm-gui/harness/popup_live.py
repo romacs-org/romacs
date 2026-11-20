@@ -970,10 +970,11 @@ def check_child_frame(args, output, report, env, process, state, keys, glyphs, l
         centre = probe['inset'] + probe['parent-text-width'] / 2
         if abs(left + width / 2 - centre) > 1 or top + height != probe['chrome-bottom'] - probe['margin']:
             raise AssertionError(f"panel at {left},{top} {width}x{height}, centre {centre}, chrome bottom {probe['chrome-bottom']}")
-        if not lines or lines[0].strip() != probe['description']:
-            raise AssertionError(f'title row {lines[:1]}, description {probe["description"]!r}')
+        # The title row: the description, the exit hint at its right.
+        if not lines or not lines[0].strip().startswith(probe['description']) or not lines[0].rstrip().endswith('Dismiss menu'):
+            raise AssertionError(f'title row {lines[:1]}, description {probe["description"]!r} then the exit hint')
         bar = ' '.join(t for _, t in shown['root_mode_lines'])
-        if 'Dismiss' in bar or lines[0].strip() in bar:
+        if 'Dismiss' in bar or probe['description'] in bar:
             raise AssertionError(f'status bar shows the popup: {bar!r}')
         report['checks'].append({'panel_title': lines[0], 'panel_rows': len(lines)})
     # The root frame's windows are as they were with the popup gone.
