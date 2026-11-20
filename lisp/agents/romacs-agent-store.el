@@ -47,7 +47,10 @@
     "create index if not exists sessions_parent on sessions (parent, request)"
     "create table if not exists board_folds (project text primary key)"
     "create table if not exists queued (session text not null, id text not null, position real not null,
-       item text not null, primary key (session, id))")
+       item text not null, primary key (session, id))"
+    "create table if not exists commands (key text primary key, digest text not null, outcome text not null,
+       at real not null)"
+    "create index if not exists commands_at on commands (at)")
   "The table and its indexes, made when the database is opened.")
 
 (defconst romacs-agent-store--version 5
@@ -608,6 +611,37 @@ on one loads it, `romacs-agent-get')."
           (mapcar (lambda (row) (unless (romacs-agent-loaded (car row)) (romacs-agent-store--row-of row)))
                   (sqlite-select db (concat "select " romacs-agent-store--row-columns
                                             " from sessions order by last_time desc"))))))
+
+;;; The agents service's commands (doc/agent-protocol.org, Commands)
+
+(defun romacs-agent-store-command (key)
+  "The command KEY names, as it was kept: (DIGEST . OUTCOME), OUTCOME the
+JSON of its result; nil when none is."
+  (when-let* ((db (romacs-agent-store--open))
+              (row (car (ignore-errors (sqlite-select db "select digest, outcome from commands where key = ?" (list key))))))
+    (cons (car row) (cadr row))))
+
+(defun romacs-agent-store-command-put (key digest outcome)
+  "Keep the command KEY names, of params DIGEST, its OUTCOME the JSON of
+its result, by the writer."
+  (romacs-agent-write 'romacs-agent-store--command-row (list key digest outcome (float-time)) nil (list 'command key)))
+
+(defun romacs-agent-store--command-row (key digest outcome at)
+  (when-let* ((db (romacs-agent-store--open)))
+    (sqlite-execute db "insert or replace into commands (key, digest, outcome, at) values (?, ?, ?, ?)"
+                    (list key digest outcome at))))
+
+(defun romacs-agent-store-commands-prune (before most)
+  "Let go of the commands kept before time BEFORE, and of all but the
+MOST newest, by the writer."
+  (romacs-agent-write 'romacs-agent-store--commands-pruned (list before most)))
+
+(defun romacs-agent-store--commands-pruned (before most)
+  (when-let* ((db (romacs-agent-store--open)))
+    (sqlite-execute db "delete from commands where at < ?" (list before))
+    (sqlite-execute db (concat "delete from commands where key in (select key from commands"
+                               " order by at desc limit -1 offset ?)")
+                    (list most))))
 
 ;;; Messages waiting in a session's queue (romacs#287)
 

@@ -165,10 +165,10 @@ user's alone, replacing only a stale socket of this user's."
 
 (cl-defstruct (romacs-agent-service--peer (:constructor romacs-agent-service--peer-make) (:copier nil))
   "What the service keeps of a connection: whether it said hello, its
-identity, whether it watches the list, its continuation tokens, each
+identity, its client's INSTANCE, whether it watches the list, its continuation tokens, each
 \(TOKEN TIME . STATE), and its subscriptions to sessions (OPEN, a table
 by id of `romacs-agent-service--subscription's)."
-  hello identity watching tokens (open (make-hash-table :test #'equal)))
+  hello identity instance watching tokens (open (make-hash-table :test #'equal)))
 
 (defun romacs-agent-service--accept (_listener process _message)
   (let ((rpc (romacs-agent-rpc-make process (romacs-agent-service--peer-make
@@ -219,7 +219,10 @@ message, `agents/transport'.  Any other first message closes it."
     ("agents/page" . romacs-agent-service--page)
     ("agents/session.open" . romacs-agent-service--open)
     ("agents/session.close" . romacs-agent-service--close)
-    ("agents/session.history" . romacs-agent-service--history))
+    ("agents/session.history" . romacs-agent-service--history)
+    ("agents/send" . romacs-agent-service--send)
+    ("agents/answer" . romacs-agent-service--answer-request)
+    ("agents/interrupt" . romacs-agent-service--interrupt))
   "Each method served and its function, called with the connection and
 the params; it returns the result, or signals `romacs-agent-service-error',
 or returns a function, called with a responder that sends the result (or,
@@ -286,8 +289,10 @@ from a client, of which none is defined, is ignored."
     (unless (= major (car romacs-agent-service-version))
       (romacs-agent-service--fail -32013 "unsupported" "Another major version"
                                   (romacs-agent-rpc-object "served" (vconcat romacs-agent-service-version))))
-    (let ((peer (romacs-agent-rpc-data rpc)))
-      (setf (romacs-agent-service--peer-hello peer) t)
+    (let ((peer (romacs-agent-rpc-data rpc)) (client (gethash "client" params)))
+      (setf (romacs-agent-service--peer-hello peer) t
+            (romacs-agent-service--peer-instance peer)
+            (let ((instance (and (hash-table-p client) (gethash "instance" client)))) (and (stringp instance) instance)))
       (romacs-agent-rpc-object
        "version" (vector major (min minor (cadr romacs-agent-service-version)))
        "server" (romacs-agent-rpc-object "host" (system-name) "build" emacs-version
@@ -508,7 +513,13 @@ takes tens of milliseconds, never while the user types."
     (setq romacs-agent-service--idle-timer
           (run-with-idle-timer 2 nil (lambda ()
                                        (setq romacs-agent-service--idle-timer nil)
-                                       (romacs-agent-service--refresh t))))))
+                                       (romacs-agent-service--refresh t)
+                                       (when (> (- (float-time) romacs-agent-service--pruned-at) 3600)
+                                         (setq romacs-agent-service--pruned-at (float-time))
+                                         (romacs-agent-service--commands-prune)))))))
+
+(defvar romacs-agent-service--pruned-at 0
+  "When the commands kept were last pruned: once an hour, at idle.")
 
 (defun romacs-agent-service--poll ()
   "The rows other processes wrote since the last look may have changed;
@@ -760,6 +771,158 @@ event."
               (unless (equal sent []) (romacs-agent-service--send-unit rpc subscription id seq sent))
               (romacs-agent-service--pending-changed rpc subscription session events))))))))
 
+;;; Commands
+
+(defconst romacs-agent-service--command-life (* 24 60 60)
+  "The seconds a command run is kept for its repeats (Commands, Repeats).")
+
+(defconst romacs-agent-service--command-most 10000
+  "The most commands kept; the oldest go first.")
+
+(defvar romacs-agent-service--commands (make-hash-table :test #'equal)
+  "The commands run while the service runs, by key: (DIGEST . OUTCOME),
+OUTCOME the JSON of its result.  The store keeps them across its
+restarts (`romacs-agent-store-command').")
+
+(defvar romacs-agent-service--answering (make-hash-table :test #'equal)
+  "The requests an answer is admitted for, (SESSION . HARNESS-ID): a
+second answer, or the policy's, finds them gone (Admission).")
+
+(defun romacs-agent-service--command (rpc params effect)
+  "Run the command PARAMS ask for once, by its client's id (cid): EFFECT
+is called and its result, a table with its state, kept and returned.
+The same command again gets the result kept; the same cid with other
+params is refused (cid-conflict).  A command kept as admitted, its
+effect unknown (the service stopped before its result was kept), is
+never run again: its state is unknown."
+  (let* ((peer (romacs-agent-rpc-data rpc)) (cid (gethash "cid" params)))
+    (unless (stringp cid) (romacs-agent-service--fail -32602 "bad-params" "A command carries its cid"))
+    (let* ((identity (romacs-agent-service--peer-identity peer))
+           (key (format "%s %s %s" (or (and (hash-table-p identity) (gethash "login" identity)) "")
+                        (or (romacs-agent-service--peer-instance peer) "") cid))
+           (digest (let ((rest (copy-hash-table params))) (remhash "cid" rest)
+                        (secure-hash 'sha1 (json-serialize rest))))
+           (kept (or (gethash key romacs-agent-service--commands) (romacs-agent-store-command key))))
+      (cond
+       ((and kept (not (equal (car kept) digest)))
+        (romacs-agent-service--fail -32015 "cid-conflict" "This cid named another command"))
+       (kept (or (ignore-errors (json-parse-string (cdr kept) :null-object :null :false-object :false))
+                 (romacs-agent-rpc-object "state" "unknown")))
+       (t
+        ;; Kept before its effect: a service that stops before its result
+        ;; is kept runs it no second time.
+        (let ((admitted (json-serialize (romacs-agent-rpc-object "state" "unknown"))))
+          (puthash key (cons digest admitted) romacs-agent-service--commands)
+          (romacs-agent-store-command-put key digest admitted))
+        (let* ((result (condition-case err (funcall effect)
+                         (romacs-agent-service-error
+                          (remhash key romacs-agent-service--commands)
+                          (signal (car err) (cdr err)))))
+               (json (json-serialize result)))
+          (puthash key (cons digest json) romacs-agent-service--commands)
+          (romacs-agent-store-command-put key digest json)
+          result))))))
+
+(defun romacs-agent-service--commands-prune ()
+  "Let go of the commands past their life, and of all but the newest
+`romacs-agent-service--command-most': at idle, never per command."
+  (let ((before (- (float-time) romacs-agent-service--command-life)))
+    (when (> (hash-table-count romacs-agent-service--commands) romacs-agent-service--command-most)
+      (clrhash romacs-agent-service--commands))
+    (romacs-agent-store-commands-prune before romacs-agent-service--command-most)))
+
+(defun romacs-agent-service--live-session (params)
+  "The session PARAMS name by id, loaded to act on: unknown-session when
+there is none."
+  (let ((id (gethash "id" params)))
+    (or (and (stringp id) (romacs-agent-get id))
+        (romacs-agent-service--fail -32010 "unknown-session" "No such session"))))
+
+(defun romacs-agent-service--sent-state (session item)
+  "The state of ITEM, a message sent SESSION: queued while it waits."
+  (romacs-agent-rpc-object "state" (if (memq item (romacs-agent-queue session)) "queued" "written")))
+
+(defun romacs-agent-service--send (rpc params)
+  "`agents/send': the user's TEXT to session ID, MODE now (into the turn
+under way, when one runs), steer (the same) or next (once it ends)."
+  (romacs-agent-service--command
+   rpc params
+   (lambda ()
+     (let ((session (romacs-agent-service--live-session params)) (text (gethash "text" params))
+           (mode (gethash "mode" params)) (images (append (gethash "images" params) nil)))
+       (unless (and (stringp text) (member mode '("now" "next" "steer")) (cl-every #'stringp images))
+         (romacs-agent-service--fail -32602 "bad-params" "text, mode now, next or steer, and images paths"))
+       (condition-case err
+           (romacs-agent-service--sent-state
+            session (if (equal mode "next")
+                        (romacs-agent-send-later session text nil images)
+                      (romacs-agent-send session text nil nil images)))
+         (user-error (romacs-agent-service--fail -32012 "not-live" (error-message-string err))))))))
+
+(defun romacs-agent-service--interrupt (rpc params)
+  "`agents/interrupt': session ID's turn under way interrupted."
+  (romacs-agent-service--command
+   rpc params
+   (lambda ()
+     (condition-case err
+         (progn (romacs-agent-interrupt (romacs-agent-service--live-session params))
+                (romacs-agent-rpc-object "state" "written"))
+       (user-error (romacs-agent-service--fail -32012 "not-live" (error-message-string err)))))))
+
+(defun romacs-agent-service--asked-by (session handle)
+  "The harness's id of what SESSION waits on that HANDLE (a table) names,
+and its approval event, or nil."
+  (let ((found nil))
+    (maphash (lambda (id asked)
+               (when (equal (gethash "id" (gethash "handle" (cdr asked))) (gethash "id" handle))
+                 (setq found (cons id (car asked)))))
+             (romacs-agent-service--requests session))
+    found))
+
+(defun romacs-agent-service--given-answers (event answers)
+  "ANSWERS, a table of question id to {options, text}, as the harness
+takes them for EVENT's questions: ((QUESTION . ANSWER) ...)."
+  (cl-loop for (text . props) in (plist-get event :questions) for q from 1
+           for given = (and (hash-table-p answers) (gethash (format "q%d" q) answers))
+           when (hash-table-p given)
+           collect (cons text (string-join
+                               (append (cl-loop for option across (or (gethash "options" given) [])
+                                                for index = (and (stringp option) (string-prefix-p "o" option)
+                                                                 (string-to-number (substring option 1)))
+                                                for label = (and index (> index 0) (nth (1- index) (plist-get props :options)))
+                                                when label collect label)
+                                       (let ((free (gethash "text" given))) (and (stringp free) (list free))))
+                               ", "))))
+
+(defun romacs-agent-service--answer-request (rpc params)
+  "`agents/answer': session ID's request HANDLE answered: DECISION allow
+or deny, SCOPE once or session, REASON told the agent when it denies,
+ANSWERS to its questions.  Reserved as it is admitted: a second answer
+finds it gone."
+  (romacs-agent-service--command
+   rpc params
+   (lambda ()
+     (let* ((session (romacs-agent-service--live-session params)) (handle (gethash "handle" params))
+            (decision (gethash "decision" params)) (scope (gethash "scope" params)) (reason (gethash "reason" params))
+            (asked (and (hash-table-p handle) (romacs-agent-service--asked-by session handle)))
+            (reserved (and asked (cons (romacs-agent-id session) (car asked)))))
+       (unless (member decision '("allow" "deny"))
+         (romacs-agent-service--fail -32602 "bad-params" "decision allow or deny"))
+       (when (or (null asked) (gethash reserved romacs-agent-service--answering))
+         (romacs-agent-service--fail -32011 "request-gone" "That request is answered, settled or gone"))
+       (puthash reserved t romacs-agent-service--answering)
+       (condition-case err
+           (progn
+             (romacs-agent-respond
+              session (car asked)
+              (and (equal decision "allow")
+                   (let ((answers (romacs-agent-service--given-answers (cdr asked) (gethash "answers" params))))
+                     (cond (answers (list :answers answers)) ((equal scope "session") (list :always t)) (t t))))
+              (and (stringp reason) reason) 'user)
+             (romacs-agent-rpc-object "state" "written"))
+         (error (remhash reserved romacs-agent-service--answering)
+                (romacs-agent-service--fail -32012 "not-live" (error-message-string err))))))))
+
 ;;; Pending requests
 
 (defun romacs-agent-service--requests (session &optional events)
@@ -810,6 +973,7 @@ it no longer waits on, EVENTS the record unit that changed it, if any."
     (maphash (lambda (harness-id asked)
                (unless (gethash harness-id now)
                  (remhash harness-id known)
+                 (remhash (cons id harness-id) romacs-agent-service--answering)
                  (let ((params (romacs-agent-service--resolution harness-id events)))
                    (puthash "handle" (gethash "handle" (cdr asked)) params)
                    (romacs-agent-service--notify rpc subscription id "agents/pending.resolved" params))))

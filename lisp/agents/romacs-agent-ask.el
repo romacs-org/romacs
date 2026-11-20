@@ -287,16 +287,21 @@ clear of PLACE, the question's row in its chat, (WINDOW . POSITION)."
     (with-current-buffer buffer (romacs-agent-ask--follow))
     (romacs-popup-take-keys buffer)))
 
-(defun romacs-agent-ask-open (session id questions &optional place)
+(defvar-local romacs-agent-ask--respond nil
+  "What the layer's answers are sent with: a function of the allow
+`romacs-agent-respond' takes, or nil, that function itself.")
+
+(defun romacs-agent-ask-open (session id questions &optional place respond)
   "Show the layer asking SESSION's QUESTIONS, request ID, where they are
 answered, clear of PLACE, their row in the chat, (WINDOW . POSITION),
-and return its buffer."
+and return its buffer.  RESPOND, when given, sends its answers, called
+with the allow `romacs-agent-respond' takes (another machine's session)."
   (let ((buffer (get-buffer-create (romacs-agent-ask--buffer-name session id))))
     (with-current-buffer buffer
       (unless (derived-mode-p 'romacs-agent-ask-mode)
         (romacs-agent-ask-mode)
         (setq romacs-agent-ask--session session romacs-agent-ask--id id
-              romacs-agent-ask--questions questions))
+              romacs-agent-ask--questions questions romacs-agent-ask--respond respond))
       (romacs-agent-ask--draw))
     (when (display-graphic-p) (romacs-agent-ask--show buffer place))
     buffer))
@@ -350,7 +355,9 @@ them.")
         (session romacs-agent-ask--session) (id romacs-agent-ask--id))
     (unless chosen (user-error "Answer each question first"))
     (run-hook-with-args 'romacs-agent-ask-sent-functions session id chosen)
-    (romacs-agent-respond session id (list :answers (romacs-agent-ask-answers chosen)) nil 'user)
+    (if romacs-agent-ask--respond
+        (funcall romacs-agent-ask--respond (list :answers (romacs-agent-ask-answers chosen)))
+      (romacs-agent-respond session id (list :answers (romacs-agent-ask-answers chosen)) nil 'user))
     (romacs-agent-ask-close session id)))
 
 (defun romacs-agent-ask--choose (index label)

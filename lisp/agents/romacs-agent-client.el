@@ -55,11 +55,7 @@ whether another must follow it (AGAIN: t, or `whole' for all the list)."
   (follows (make-hash-table :test #'equal)))
 
 (defun romacs-agent-client--instance ()
-  (or romacs-agent-client-instance
-      (setq romacs-agent-client-instance
-            (format "%04x%04x-%04x-4%03x-%04x-%04x%04x%04x"
-                    (random 65536) (random 65536) (random 65536) (random 4096)
-                    (logior #x8000 (random 16384)) (random 65536) (random 65536) (random 65536)))))
+  (or romacs-agent-client-instance (setq romacs-agent-client-instance (romacs-agent-client--uuid))))
 
 (defun romacs-agent-client-connect (socket)
   "Connect to the service at SOCKET, say hello and watch its list.  The client."
@@ -115,6 +111,21 @@ result and nil, or nil and the error, once its reply comes."
           (romacs-agent-rpc-send (romacs-agent-client-rpc client) (romacs-agent-rpc-request id method params))
         (error (remhash id (romacs-agent-client-pending client)) (signal (car err) (cdr err)))))
     id))
+
+(defun romacs-agent-client-command (client method params callback)
+  "Ask CLIENT's service to run the command METHOD with PARAMS, named by a
+client id (cid) of its own, made here: CALLBACK as for
+`romacs-agent-client-request'.  The cid, which a repeat of the command
+names it by."
+  (let ((cid (romacs-agent-client--uuid)) (params (copy-hash-table params)))
+    (puthash "cid" cid params)
+    (romacs-agent-client-request client method params callback)
+    cid))
+
+(defun romacs-agent-client--uuid ()
+  (format "%04x%04x-%04x-4%03x-%04x-%04x%04x%04x"
+          (random 65536) (random 65536) (random 65536) (random 4096)
+          (logior #x8000 (random 16384)) (random 65536) (random 65536) (random 65536)))
 
 (defun romacs-agent-client--filter (process chunk)
   (when-let* ((client (process-get process 'romacs-agent-client)))

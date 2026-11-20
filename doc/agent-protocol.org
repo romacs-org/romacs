@@ -558,92 +558,42 @@ paging ever holds live delivery back.
 ** Commands
 - *Client ids.*  Every command carries =cid=.  The pair (connection
   identity, client instance, =cid=) names it.
-- *The command table.*  =commands= in the store holds each command's:
-  - key and method;
-  - a digest of its params;
-  - state and outcome;
-  - for =start=, the new session's id;
-  - for =send=, the =romacsRequest= tag its =in= record carries; for
-    =answer=, its request's handle.
-- *Committed before its effect.*  A command's row is committed with
-  state =admitted= before it takes effect.
-  - Every message the service writes for a =send= carries the command's
-    =romacsRequest= tag, a per-turn run's =--input= prompt included.  The
-    v0.1 host takes the tag (=--input-tag=) into the prompt's =in=
-    record, so recovery always finds a delivered command by its tag.
-  - Before any handoff of a queued item, the item is marked
-    =dispatching= in the store: before its line is written to an
-    attached host, and before a per-turn run is launched for it (with the
-    run's unit name, in the same transaction).
-  - Launches are tracked from slice 1 on: every host the service starts
-    gets its own unit, and the service never falls back to an untracked
-    =setsid= launch; if the unit cannot be made, the command fails.  A
-    unit pending or activating counts as in flight.
-  - A queued =send= writes its queue item and its row's transition to
-    =queued=, with the item's id, in one transaction of the store, so
-    recovery finds the item through the row.
-  - A =start= records its milestones in its row:
-    - =allocated=: the new id and directory, committed before anything
-      else;
-    - =launched=: the host started;
-    - =prompted=: the prompt recorded.
+- *The command table.*  =commands= in the store keeps each command by
+  its key: a digest of its params, and its outcome, kept as =unknown=
+  before it takes effect, then its result.  Kept 24 hours, the newest
+  10,000 at most, pruned when the editor is idle.
 - *Repeats.*
-  - A repeated =cid= gets the recorded outcome.
-  - One in flight is coalesced with it.
+  - A repeated =cid= gets the recorded outcome.  One kept =unknown= (the
+    service stopped before its result was kept) is never run again.
   - A =cid= reused with different params is refused (=cid-conflict=).
-  - A row is kept while its command is unfinished: queued, or with its
-    effect unconfirmed.  It expires 24 hours after it is finalized, and
-    a repeat after that is a new command.
-- *Recovery after a restart.*  A row still =admitted= or =written= is
-  resolved from the records, never run again:
-  - a =start= reports the last milestone reached with the session's id;
-    one never =allocated= is =unknown=;
-  - a =send= whose =romacsRequest= tag is in an =in= record, or an
-    =answer= whose response to its request is in its run's records, is
-    =recorded=.  For an answer that only confirms the recording: its
-    request stays =answering= until one of its own clearing events (its
-    =written= record, settlement, the turn's end, the exit) is in the
-    records too;
-  - a =send= whose queue item is still kept is =queued=.  A queue item
-    is deleted only in the transaction that finalizes its command, once
-    its tagged =in= record is observed, never before it is sent.  After a
-    restart, the service reconciles first:
-    - an item whose tag is in the records is finalized;
-    - an item not marked =dispatching= was never handed off, and is
-      dispatched when its turn comes;
-    - an item marked =dispatching= is never handed off again by the
-      service.  If its run's unit is active, the service waits on it.
-      Otherwise, its tag not being in the records, it leaves the queue
-      for the session's =undelivered= list in one transaction, and its
-      command's outcome is =unknown=.  Automatic dispatch is at most once.
-- *Reconciled whenever a handoff ends, not only after a restart.*  When
-  a handoff can no longer produce its tagged =in= record (the write to
-  the host failed, the host connection ended, or the per-turn run's unit
-  exited), the service checks the records for the tag:
-  - found: the item is finalized;
-  - not found: the item moves to =undelivered=, atomically, with outcome
-    =unknown=.
-
-  The same rule runs live and in recovery.
-- *Undelivered.*  An undelivered entry
-  (={"id","text","images","since","cid"}=) is part of the state:
-  - it is in the open reply's =undelivered=;
-  - it arrives live through =agents/undelivered.changed {session,
-    revision, added, removed}=.
-
-  Clients show each as "may not have been sent".  Only the user acts on
-  it: =agents/send= sends it again (a new command), and
-  =agents/undelivered.dismiss {cid, id, entry}= drops it.
-  - anything else is =unknown=.
+  - A repeat after its row expired is a new command.
+- *Delivery.*  A =send= goes through the session's queue.  The queue's
+  items are kept in the store, and the message's =in= record names the
+  item it was (=romacsQueued=), so no item goes twice across a restart.
+  Its =in= record carries the message's =romacsRequest= tag.
+- *Start* (=agents/start=, next): its milestones (=allocated=,
+  =launched=, =prompted=) are kept in its row, a repeat reporting the last
+  reached.  Every host the service starts gets a unit of its own, never
+  an untracked =setsid= launch, and a unit pending or activating counts
+  as in flight.
+- *With the service in its own process (S6+):*
+  - a queued item is marked =dispatching= before it is handed off, and
+    an item marked so is never handed off again;
+  - when a handoff can no longer give its tagged =in= record, live or
+    after a restart, the records are read for the tag: found, the item
+    is done; not, it moves to the session's =undelivered= list, its
+    command =unknown=;
+  - undelivered entries (={"id","text","images","since","cid"}=) are in
+    the open reply's =undelivered= and come as =agents/undelivered.changed=;
+    clients show each as "may not have been sent", and only the user
+    sends it again (=agents/send=) or drops it
+    (=agents/undelivered.dismiss=).
 - *Admission.*  Each command is admitted atomically at the authority.
   =answer= reserves its request at admission: a second answer, or
-  policy, gets =request-gone=.  The reservation ends:
-  - when the request resolves (=pending.resolved=);
-  - or, when delivery's outcome is =unknown=, after the service has
-    reattached and read the records.  If the answer's =in= record is
-    there, it is =recorded= and the request is =answering=, until its own
-    clearing events (as above).  If not, the reservation is released and
-    the request is answerable again.
+  policy, gets =request-gone=.  The reservation ends when the request
+  resolves (=pending.resolved=), or when its answer could not be given.
+  It is the running service's: after a restart the records say whether
+  the request still waits.
 - *Outcome.*  Each result carries ="state"=:
   - =queued=: held by the service, as a message waiting for a turn;
   - =written=: sent to the host;
@@ -653,6 +603,8 @@ paging ever holds live delivery back.
   - =unknown=.
 
   What the harness then did arrives as events.
+
+Served: =send=, =answer=, =interrupt=; the others come in their slices.
 
 | method | params | result |
 |--------+--------+--------|
