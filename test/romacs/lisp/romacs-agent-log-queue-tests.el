@@ -1,0 +1,177 @@
+;;; romacs-agent-log-queue-tests.el --- What waits to be sent, in a chat -*- lexical-binding: t; -*-
+(require 'ert)
+(require 'cl-lib)
+(require 'romacs-mcp)
+
+;; Loading romacs-agent installs romacs-agent-tools: the endpoint's
+;; registrations are left as they were.
+(let ((romacs-mcp-call-function romacs-mcp-call-function)
+      (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
+  (require 'romacs-agent)
+  (require 'romacs-agent-claude)
+  (require 'romacs-agent-log)
+  (require 'romacs-agent-menu))
+(require 'romacs-agent-test-attached)
+(require 'romacs-agent-test-stored)
+
+;; These tests start no supervisor or harness.
+(advice-add 'romacs-agent--check-companions :override #'ignore)
+
+;; What runs before a redisplay: a batch session has no host to run it.
+(unless (fboundp 'romacs--run-window-change-functions)
+  (load (expand-file-name "../vm/window-change.el" (file-name-directory (locate-library "romacs-agent.el"))) nil t))
+
+(defmacro romacs-agent-log-queue-tests--chat (session &rest body)
+  "BODY in a chat of SESSION, its separator drawn."
+  (declare (indent 1))
+  `(with-temp-buffer
+     (romacs-agent-log-mode)
+     (setq romacs-agent-log--session ,session
+           romacs-agent-log--end (point-min-marker)
+           romacs-agent-log--input (point-min-marker))
+     (set-marker-insertion-type romacs-agent-log--end t)
+     (romacs-agent-log--separator t)
+     ,@body))
+
+(defun romacs-agent-log-queue-tests--rows ()
+  "The texts of the queued rows the chat shows, in order."
+  (let ((at romacs-agent-log--end) (rows nil))
+    (while (setq at (text-property-not-all at romacs-agent-log--input 'romacs-agent-log-queued nil))
+      (let ((end (or (next-single-property-change at 'romacs-agent-log-queued nil romacs-agent-log--input) romacs-agent-log--input)))
+        (push (string-trim (substring (buffer-substring-no-properties at end) 4)) rows)
+        (setq at end)))
+    (nreverse rows)))
+
+(defun romacs-agent-log-queue-tests--compose (text)
+  "Make the composer say TEXT, point at its end."
+  (goto-char (point-max))
+  (delete-region romacs-agent-log--input (point-max))
+  (insert text))
+
+(ert-deftest romacs-agent-log-queue-acceptance ()
+  ;; Three queued; the second edited in the composer, the first dropped:
+  ;; the agent gets exactly the edited second, then the third, in order,
+  ;; and the store keeps what the queue holds, no more.
+  (romacs-agent-test-with-store
+    (make-directory (file-name-directory (romacs-agent-store--file)) t)
+    (should (romacs-agent-store--open))
+    (let* ((id "c0c0c0c0-0000-4000-8000-000000000000")
+           (session (romacs-agent-test-attach
+                     (romacs-agent--make :id id :harness 'claude :state 'running :title "q")
+                     t))
+           (sent nil))
+      (romacs-agent-send-later session "first")
+      (romacs-agent-send-later session "second")
+      (romacs-agent-send-later session "third")
+      (romacs-agent-log-queue-tests--chat session
+        (should (equal (romacs-agent-log-queue-tests--rows) '("first" "second" "third")))
+        ;; n twice: the second.
+        (goto-char romacs-agent-log--end)
+        (romacs-agent-log-queue-next)
+        (romacs-agent-log-queue-next)
+        (should (equal (romacs-agent-item-text (romacs-agent-log-queue--item-at)) "second"))
+        ;; e: in the composer, held in its place.
+        (romacs-agent-log-queue-edit)
+        (should (equal (buffer-substring-no-properties romacs-agent-log--input (point-max)) "second"))
+        (should (romacs-agent-item-held (cadr (romacs-agent-queue session))))
+        (romacs-agent-log-queue-tests--compose "second, edited")
+        ;; RET: back in its place, said anew, nothing sent.
+        (romacs-agent-log-send)
+        (should (string-empty-p (buffer-substring-no-properties romacs-agent-log--input (point-max))))
+        (should (equal (romacs-agent-log-queue-tests--rows) '("first" "second, edited" "third")))
+        (should (equal (mapcar #'car (romacs-agent-store-queued id)) '("first" "second, edited" "third")))
+        ;; d on the first.
+        (goto-char romacs-agent-log--end)
+        (romacs-agent-log-queue-next)
+        (romacs-agent-log-queue-drop)
+        (should (equal (romacs-agent-log-queue-tests--rows) '("second, edited" "third")))
+        (should (equal (mapcar #'car (romacs-agent-store-queued id)) '("second, edited" "third"))))
+      ;; The turn ends, then the next: each goes at a turn's end.
+      (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_ object &optional _journal) (push object sent)))
+                ((symbol-function 'romacs-agent--fold-now) #'ignore))
+        (dotimes (_ 3)
+          (setf (romacs-agent-state session) 'idle)
+          (romacs-agent--dispatch session)))
+      (should (equal (mapcar (lambda (object) (gethash "content" (gethash "message" object))) (nreverse sent))
+                     '("second, edited" "third")))
+      (should-not (romacs-agent-queue session))
+      (should-not (romacs-agent-store-queued id)))))
+
+(ert-deftest romacs-agent-log-queue-holds-what-is-edited ()
+  ;; Held to edit, the head and what waits behind it wait; an empty
+  ;; composer puts it back as it was, and it goes.
+  (let* ((session (romacs-agent-test-attach
+                   (romacs-agent--make :id "c1c1c1c1-0000-4000-8000-000000000000" :harness 'claude :state 'running)
+                   t))
+         (sent nil))
+    (romacs-agent-send-later session "one")
+    (romacs-agent-send-later session "two")
+    (romacs-agent-log-queue-tests--chat session
+      (romacs-agent-log-queue-edit)
+      (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_ object &optional _journal) (push object sent)))
+                ((symbol-function 'romacs-agent--fold-now) #'ignore))
+        (setf (romacs-agent-state session) 'idle)
+        (romacs-agent--dispatch session)
+        (should-not sent)
+        (romacs-agent-log-queue-tests--compose "")
+        (romacs-agent-log-send)
+        (should (equal (romacs-agent-log-queue-tests--rows) '("one" "two")))
+        (romacs-agent--dispatch session)
+        (should (equal (gethash "content" (gethash "message" (car sent))) "one"))))))
+
+(ert-deftest romacs-agent-log-queue-moves-and-keeps-others-messages ()
+  ;; M-p and M-n change places; another session's message shows but
+  ;; does not change; a draft in the composer is never overwritten.
+  (let ((session (romacs-agent-test-attach
+                  (romacs-agent--make :id "c2c2c2c2-0000-4000-8000-000000000000" :harness 'claude :state 'running)
+                  t)))
+    (romacs-agent-send-later session "mine")
+    (romacs-agent-send-later session "theirs" nil nil nil (list (list :from "lane x" :text "theirs")))
+    (romacs-agent-send-later session "last")
+    (romacs-agent-log-queue-tests--chat session
+      (goto-char romacs-agent-log--end)
+      (romacs-agent-log-queue-next)
+      (romacs-agent-log-queue-later)
+      (should (equal (romacs-agent-log-queue-tests--rows) '("theirs" "mine" "last")))
+      (should (equal (romacs-agent-item-text (romacs-agent-log-queue--item-at)) "mine"))
+      (romacs-agent-log-queue-sooner)
+      (should (equal (romacs-agent-log-queue-tests--rows) '("mine" "theirs" "last")))
+      (romacs-agent-log-queue-next)
+      (should-error (romacs-agent-log-queue-drop) :type 'user-error)
+      (should-error (romacs-agent-log-queue-edit) :type 'user-error)
+      (romacs-agent-log-queue-tests--compose "a draft")
+      (goto-char romacs-agent-log--end)
+      (romacs-agent-log-queue-next)
+      (should-error (romacs-agent-log-queue-edit) :type 'user-error)
+      (should (equal (buffer-substring-no-properties romacs-agent-log--input (point-max)) "a draft")))))
+
+(ert-deftest romacs-agent-log-queue-keys-run-in-the-chat ()
+  ;; Its row's keys and the menu's rows run commands of this mode.
+  (dolist (key '("n" "p" "e" "RET" "d" "M-p" "M-n"))
+    (let ((command (keymap-lookup romacs-agent-log-queue-map key)))
+      (should (commandp command))
+      (should (memq 'romacs-agent-log-mode (command-modes command)))))
+  (let (commands)
+    (map-keymap (lambda (_ binding)
+                  ;; A menu row's (menu-item NAME COMMAND . PROPS).
+                  (when (eq (car-safe binding) 'menu-item) (setq binding (nth 2 binding)))
+                  (when (symbolp binding) (push binding commands)))
+                romacs-agent-menu-map)
+    (dolist (command '(romacs-agent-log-queue-edit romacs-agent-log-queue-drop
+                       romacs-agent-log-queue-sooner romacs-agent-log-queue-later))
+      (should (memq command commands)))))
+
+(ert-deftest romacs-agent-log-queue-rows-scale ()
+  ;; Many waiting: one row each, drawn in time linear in their number.
+  (let* ((items (lambda (n) (mapcar (lambda (i) (romacs-agent-item (format "message %d" i) :kind 'next)) (number-sequence 1 n))))
+         (time (lambda (n) (let ((list (funcall items n)) (start (float-time)))
+                             (romacs-agent-log-queue-rows list 80)
+                             (- (float-time) start)))))
+    (should (= (length (split-string (romacs-agent-log-queue-rows (funcall items 50) 80) "\n" t)) 50))
+    (funcall time 200)
+    ;; Ten times the rows, well under a hundred times the time.
+    (let ((small (max (funcall time 200) 1e-4)) (large (funcall time 2000)))
+      (should (< large (* 40 small))))))
+
+(provide 'romacs-agent-log-queue-tests)
+;;; romacs-agent-log-queue-tests.el ends here

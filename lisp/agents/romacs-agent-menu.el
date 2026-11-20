@@ -370,6 +370,12 @@ the session, the view."
   "u" ("Roll back this turn (C-u: last)" romacs-agent-chat-rollback
        :inapt-if (lambda () (not (romacs-agent--harness-free-p romacs-agent-log--session))))
   "D" ("Diff this turn (C-u: session)" romacs-agent-chat-diff)
+  :group ("Queued" :if (lambda () (and romacs-agent-log--session
+                                       (romacs-agent-log-source-queue romacs-agent-log--source romacs-agent-log--session))))
+  "Q" ("Edit a queued message" romacs-agent-log-queue-edit)
+  "X" ("Drop a queued message" romacs-agent-log-queue-drop)
+  "<" ("Send it sooner" romacs-agent-log-queue-sooner)
+  ">" ("Send it later" romacs-agent-log-queue-later)
   :group ("Runs on" :if #'romacs-agent-log--commands-p)
   "m" (#'romacs-agent-menu--model-label romacs-agent-chat-model)
   "E" (#'romacs-agent-menu--effort-label romacs-agent-chat-effort)
