@@ -3667,7 +3667,7 @@ relaunch until the run it ends has gone."
 
 (cl-defstruct (romacs-agent-item (:type list) (:copier nil)
                                  (:constructor romacs-agent-item
-                                               (text &key images messages delivered valid (kind 'now) own token id position kept)))
+                                               (text &key images messages delivered valid (kind 'now) own token id position kept user)))
   "A message waiting for its harness.  KIND says when it may go: `now', a
 steer into the turn under way as it was sent (TURN, that turn's number,
 set at admission) while that turn runs and its harness can steer it,
@@ -3678,9 +3678,11 @@ it.  DELIVERED is called once it is written.  IMAGES and MESSAGES as
 `romacs-agent--input' says.  One that is all data (no DELIVERED, no
 VALID, no TOKEN) is kept across a restart (`romacs-agent--keep-item'): ID names it,
 POSITION orders it, KEPT says its record is there.  FRONT: put ahead of
-what waited (`romacs-agent--enqueue-first').  HELD: the user edits it,
-so it and what waits behind it wait (`romacs-agent-queue-hold')."
-  text images messages delivered valid kind own token turn id position kept front held)
+what waited (`romacs-agent--enqueue-first').  USER: its user wrote it in
+a chat, theirs to change (`romacs-agent-queue-own-p').  HELD: the user
+edits it, so it and what waits behind it wait (`romacs-agent-queue-hold');
+`sending' as it is written, no longer theirs to change."
+  text images messages delivered valid kind own token turn id position kept front user held)
 
 (defun romacs-agent--turn-under-way-p (session)
   "Whether SESSION's records, or the message written last, have a turn
@@ -3743,9 +3745,12 @@ passing those waiting for a new turn.  A hold's own prompt waits first."
               ((romacs-agent--open-p session (romacs-agent-item-token head))))
     (cond ((romacs-agent-item-held head) nil)
           ((romacs-agent--goes-p session head) head)
-          (t (cl-find-if (lambda (item) (and (romacs-agent-item-turn item) (not (romacs-agent-item-held item))
-                                             (romacs-agent--steer-p session item)))
-                         (cdr (romacs-agent-queue session)))))))
+          ;; A steer passes what waits for a new turn, never what its
+          ;; user holds: that and what waits behind it wait.
+          (t (cl-loop for item in (cdr (romacs-agent-queue session))
+                      until (romacs-agent-item-held item)
+                      when (and (romacs-agent-item-turn item) (romacs-agent--steer-p session item))
+                      return item)))))
 
 (defun romacs-agent--dispatch (session)
   "Write the first of SESSION's waiting messages that may go
@@ -3774,8 +3779,11 @@ queue.  Called wherever what the predicate reads may have changed."
                 ;; between the two finds it sent by its id in the journal
                 ;; (`romacs-agent--sent-queued') and sends it no second time.
                 (romacs-agent--unkeep-item session next)
+                ;; Its user can no longer change it: it is being written.
+                (setf (romacs-agent-item-held next) 'sending)
                 (condition-case err (romacs-agent--write session next)
-                  (error (romacs-agent--keep-item session next)
+                  (error (setf (romacs-agent-item-held next) nil)
+                         (romacs-agent--keep-item session next)
                          (signal (car err) (cdr err))))
                 (romacs-agent--dequeue session next)
                 (when (romacs-agent-item-delivered next) (funcall (romacs-agent-item-delivered next)))
@@ -3867,12 +3875,14 @@ it, and sends it again."
     (error (when item (romacs-agent--dequeue session item))
            (signal (car err) (cdr err)))))
 
-(defun romacs-agent-send-later (session text &optional first images valid messages)
+(defun romacs-agent-send-later (session text &optional first images valid messages user)
   "Send TEXT to SESSION, with the attached IMAGES, as a turn of its own:
 once the turn under way ends, now when none is; FIRST puts it ahead of
 the messages already waiting.  VALID, when given, is asked before it
-goes: nil drops it.  MESSAGES: from other sessions (`romacs-agent--input')."
-  (romacs-agent--admit session (romacs-agent-item text :images images :messages messages :valid valid :kind 'next)
+goes: nil drops it.  MESSAGES: from other sessions (`romacs-agent--input').
+USER: its user wrote it, theirs to change while it waits."
+  (romacs-agent--admit session (romacs-agent-item text :images images :messages messages :valid valid :kind 'next
+                                                  :user user)
                        first))
 
 ;;; Lifecycle
@@ -4292,15 +4302,16 @@ window (`romacs-agent--launch-tries'), as long as attaching is tried."
       (when (> tries 0)
         (run-at-time 0.1 nil #'romacs-agent--when-attached session function (1- tries))))))
 
-(defun romacs-agent-send (session text &optional delivered valid images messages)
+(defun romacs-agent-send (session text &optional delivered valid images messages user)
   "Send TEXT to SESSION's harness as the user's next message, then call
 DELIVERED, when given: at once when it may go (`romacs-agent--may-write-p'),
 into the turn under way when its harness takes that, else once it may.
 VALID, when given, is asked as it goes: nil drops it.  IMAGES are the
 files the user attached to it.  MESSAGES: it comes from other sessions
-\(`romacs-agent--input').  `user-error' when its harness ended: resume it."
+\(`romacs-agent--input').  USER: its user wrote it, theirs to change
+while it waits.  `user-error' when its harness ended: resume it."
   (romacs-agent--admit session (romacs-agent-item text :images images :messages messages
-                                                  :delivered delivered :valid valid)))
+                                                  :delivered delivered :valid valid :user user)))
 
 (defun romacs-agent--enqueue-first (session item)
   "Put ITEM ahead of what waits for SESSION's harness."
@@ -4312,7 +4323,8 @@ files the user attached to it.  MESSAGES: it comes from other sessions
   (push item (romacs-agent-queue session))
   (cl-incf (romacs-agent-queue-length session))
   (unless (romacs-agent-queue-tail session) (setf (romacs-agent-queue-tail session) (romacs-agent-queue session)))
-  (romacs-agent--keep-item session item))
+  (romacs-agent--keep-item session item)
+  (romacs-agent--changed session))
 
 (defun romacs-agent--enqueue (session item)
   (unless (romacs-agent-item-position item)
@@ -4327,7 +4339,8 @@ files the user attached to it.  MESSAGES: it comes from other sessions
         (setcdr (romacs-agent-queue-tail session) cell)
       (setf (romacs-agent-queue session) cell))
     (setf (romacs-agent-queue-tail session) cell))
-  (romacs-agent--keep-item session item))
+  (romacs-agent--keep-item session item)
+  (romacs-agent--changed session))
 
 (defun romacs-agent--dequeue (session item)
   "Take ITEM (by identity) out of SESSION's queue; non-nil when it was there."
@@ -4340,21 +4353,29 @@ files the user attached to it.  MESSAGES: it comes from other sessions
             (romacs-agent-queue-tail session) (last (romacs-agent-queue session))))
     (cl-decf (romacs-agent-queue-length session))
     (romacs-agent--unkeep-item session item)
+    (romacs-agent--changed session)
     t))
 
 ;;; The queue as its user changes it
 
 (defun romacs-agent-queue-own-p (item)
-  "Whether ITEM, waiting, is its user's own message, all data: one they
-may edit, move or drop.  Another session's message, Romacs's own prompt,
-or one a caller waits on (DELIVERED, VALID) is not."
-  (and (romacs-agent--keepable-p item) (not (romacs-agent-item-messages item)) (not (romacs-agent-item-own item))))
+  "Whether ITEM, waiting, is its user's own message, all data, not being
+written: one they may edit, move or drop.  Only one its user wrote in a
+chat (USER) is: another session's message, Romacs's own prompt or a
+message it makes, or one a caller waits on (DELIVERED, VALID), is not."
+  (and (romacs-agent-item-user item) (romacs-agent--keepable-p item)
+       (not (romacs-agent-item-messages item)) (not (romacs-agent-item-own item))
+       (not (eq (romacs-agent-item-held item) 'sending))))
+
+(defun romacs-agent--queue-mine (session item)
+  "Whether ITEM waits for SESSION and is its user's to change."
+  (and (memq item (romacs-agent-queue session)) (romacs-agent-queue-own-p item)))
 
 (defun romacs-agent-queue-hold (session item held)
   "Hold ITEM, waiting for SESSION, while its user edits it (HELD non-nil),
 or let it go: held, it and what waits behind it wait.  Nil when ITEM is
-no longer waiting."
-  (when (memq item (romacs-agent-queue session))
+no longer waiting, or not its user's to change."
+  (when (romacs-agent--queue-mine session item)
     (setf (romacs-agent-item-held item) held)
     (unless held (romacs-agent--dispatch-soon session))
     (romacs-agent--changed session)
@@ -4362,37 +4383,44 @@ no longer waiting."
 
 (defun romacs-agent-queue-edit (session item text)
   "Make ITEM, waiting for SESSION, say TEXT, in its place, and let it go:
-its kept record too.  Nil when ITEM is no longer waiting."
-  (when (memq item (romacs-agent-queue session))
+its kept record's text too, never its place.  Nil when ITEM is no
+longer waiting, or not its user's to change."
+  (when (romacs-agent--queue-mine session item)
     (setf (romacs-agent-item-text item) text)
     (when (romacs-agent-item-kept item)
-      (romacs-agent-store-queued-put (romacs-agent-id session) item))
+      (romacs-agent-store-queued-text (romacs-agent-id session) item))
     (romacs-agent-queue-hold session item nil)))
 
 (defun romacs-agent-queue-drop (session item)
   "Take ITEM out of SESSION's queue, unsent, its kept record with it.  Nil
-when ITEM is no longer waiting."
-  (when (romacs-agent--dequeue session item)
+when ITEM is no longer waiting, or not its user's to change."
+  (when (and (romacs-agent--queue-mine session item) (romacs-agent--dequeue session item))
     (romacs-agent--dispatch-soon session)
     (romacs-agent--changed session)
     t))
 
 (defun romacs-agent-queue-move (session item delta)
   "Move ITEM DELTA places in SESSION's queue (-1 one sooner, 1 one later):
-it and the one there change places and positions, kept records too.  Nil
-when ITEM is no longer waiting or has no place there."
+it and the one there change places, positions and being put first, so
+a load merging kept messages keeps the order chosen; the kept records'
+whole order with them.  Nil when ITEM is no longer waiting, not its
+user's to change, or has no place there."
   (let* ((queue (romacs-agent-queue session))
-         (at (cl-position item queue))
+         (at (and (romacs-agent--queue-mine session item) (cl-position item queue)))
          (to (and at (+ at delta))))
     (when (and at (<= 0 to) (< to (length queue)))
       (let* ((other (nth to queue))
-             (position (romacs-agent-item-position item)))
+             (position (romacs-agent-item-position item))
+             (front (romacs-agent-item-front item)))
         ;; The cells stay, their items change places: the tail holds.
         (setf (nth at queue) other (nth to queue) item
               (romacs-agent-item-position item) (romacs-agent-item-position other)
-              (romacs-agent-item-position other) position)
+              (romacs-agent-item-position other) position
+              (romacs-agent-item-front item) (romacs-agent-item-front other)
+              (romacs-agent-item-front other) front)
+        ;; Every kept one's place, in one write that stands for all.
         (romacs-agent-store-queued-reorder (romacs-agent-id session)
-                                           (cl-remove-if-not #'romacs-agent-item-kept (list item other)))
+                                           (cl-remove-if-not #'romacs-agent-item-kept queue))
         (romacs-agent--dispatch-soon session)
         (romacs-agent--changed session)
         t))))
@@ -4455,6 +4483,7 @@ loaded or not."
 
 (declare-function romacs-agent-store-queued-put "romacs-agent-store" (id item))
 (declare-function romacs-agent-store-queued-reorder "romacs-agent-store" (id items))
+(declare-function romacs-agent-store-queued-text "romacs-agent-store" (id item))
 (declare-function romacs-agent-store-queued-delete "romacs-agent-store" (id item-id))
 (declare-function romacs-agent-store--file "romacs-agent-store" ())
 (declare-function romacs-agent-store-queued-clear "romacs-agent-store" (id))

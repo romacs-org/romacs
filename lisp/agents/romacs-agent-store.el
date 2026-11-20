@@ -672,7 +672,8 @@ MOST newest, by the writer."
    (romacs-mcp--object "text" (romacs-agent-item-text item)
                        "images" (vconcat (romacs-agent-item-images item))
                        "messages" (vconcat (mapcar #'romacs-agent--message-json (romacs-agent-item-messages item)))
-                       "own" (or (romacs-agent-item-own item) :null))))
+                       "own" (or (romacs-agent-item-own item) :null)
+                       "user" (if (romacs-agent-item-user item) t :false))))
 
 (defun romacs-agent-store--item-of (id position json)
   "The queued message a row keeps: ID, POSITION and its JSON.  A steer
@@ -682,6 +683,7 @@ comes back as a turn of its own: the turn it steered is no next run's."
                        :images (append (gethash "images" object) nil)
                        :messages (mapcar #'romacs-agent--message-of (gethash "messages" object))
                        :kind 'next :own (romacs-agent--value (gethash "own" object))
+                       :user (eq (gethash "user" object) t)
                        :id id :position position :kept t)))
 
 (defun romacs-agent-store-queued-put (id item)
@@ -690,6 +692,20 @@ comes back as a turn of its own: the turn it steered is no next run's."
                       (list id (romacs-agent-item-id item) (romacs-agent-item-position item)
                             (romacs-agent-store--item-json item))
                       nil (list 'queued id (romacs-agent-item-id item))))
+
+(defun romacs-agent-store-queued-text (id item)
+  "Make the kept row of ITEM, waiting for the session ID names, say what
+ITEM does now, its place left as it is, by the writer."
+  (romacs-agent-write 'romacs-agent-store--queued-text
+                      (list id (romacs-agent-item-id item) (romacs-agent-store--item-json item))
+                      nil (list 'queued-text id (romacs-agent-item-id item))))
+
+(defun romacs-agent-store--queued-text (id item-id json)
+  "Make the row ITEM-ID of session ID say JSON, here; a row let go
+meanwhile stays gone.  A failure signals."
+  (let ((db (or (romacs-agent-store--open) (error "No agents store to keep a queued message in"))))
+    (sqlite-execute db "update queued set item = ? where session = ? and id = ?" (list json id item-id))
+    t))
 
 (defun romacs-agent-store-queued-reorder (id items)
   "Move the rows of ITEMS, waiting for the session ID names, to their
@@ -763,8 +779,11 @@ may take it.  A cancelled task's is let go."
         ;; What was sent as it loaded goes after what was kept, but what
         ;; was put first: placed by its order, not by the clock, and its
         ;; place kept for a restart after.
-        (let ((order (append (cl-remove-if-not #'romacs-agent-item-front waiting) kept
-                             (cl-remove-if #'romacs-agent-item-front waiting))))
+        (let ((order (let ((cut (1+ (or (cl-position-if #'romacs-agent-item-front waiting :from-end t) -1))))
+                       ;; Kept ones after the last put first, the order
+                       ;; of those waiting as it stands (a user may have
+                       ;; moved one past another).
+                       (append (seq-take waiting cut) kept (seq-drop waiting cut)))))
           (setf (romacs-agent-queue session) nil (romacs-agent-queue-tail session) nil
                 (romacs-agent-queue-length session) 0)
           (when waiting

@@ -149,6 +149,10 @@ user's own spec still wins."
 (defvar-local romacs-agent-log--text-map nil
   "The keys of this buffer's transcript text, when not a chat's
 \(`romacs-agent-log-transcript-map'): a view with no composer has its own.")
+(defvar-local romacs-agent-log--rows nil "The rows the separator was last drawn with.")
+(defvar-local romacs-agent-log-queue--editing nil
+  "The queued message the composer holds to edit, or nil
+\(romacs-agent-log-queue.el).")
 (defvar-local romacs-agent-log--input nil
   "Marker: the composer's start, after the separator.")
 (defvar-local romacs-agent-log--seq 0 "The seq of the last record drawn.")
@@ -1117,25 +1121,28 @@ windows showing it leave, changed."
     (when (or force (not (equal doing romacs-agent-log--state)) (not (eql width romacs-agent-log--width))
               (not (equal-including-properties rows romacs-agent-log--rows)))
       (setq romacs-agent-log--state doing romacs-agent-log--width width romacs-agent-log--rows rows)
-      (romacs-agent-log--writing
-        (save-excursion
-          ;; The new one put before the old one goes: a point in the
-          ;; composer stays there, one at the transcript's end stays there.
-          (let ((start (marker-position romacs-agent-log--end))
-                (old (- romacs-agent-log--input romacs-agent-log--end)))
-            (goto-char start)
-            ;; A field of its own: word motion and kills in the composer
-            ;; stop at its start, as in a comint buffer; line motion
-            ;; crosses it (a field binds it only within a line).
-            (insert (propertize (romacs-agent-log--sealed (romacs-agent-log--separator-text doing width rows))
-                                'field 'romacs-agent-log-separator))
-            (delete-region (point) (+ (point) old))
-            (set-marker romacs-agent-log--input (point))
-            (set-marker romacs-agent-log--end start))))
+      (let ((on (get-text-property (point) 'romacs-agent-log-queued)))
+        (romacs-agent-log--writing
+          (save-excursion
+            ;; The new one put before the old one goes: a point in the
+            ;; composer stays there, one at the transcript's end stays there.
+            (let ((start (marker-position romacs-agent-log--end))
+                  (old (- romacs-agent-log--input romacs-agent-log--end)))
+              (goto-char start)
+              ;; A field of its own: word motion and kills in the composer
+              ;; stop at its start, as in a comint buffer; line motion
+              ;; crosses it (a field binds it only within a line).
+              (insert (propertize (romacs-agent-log--sealed (romacs-agent-log--separator-text doing width rows))
+                                  'field 'romacs-agent-log-separator))
+              (delete-region (point) (+ (point) old))
+              (set-marker romacs-agent-log--input (point))
+              (set-marker romacs-agent-log--end start))))
+      ;; Point on a queued row stays on it while it waits.
+      (when-let* ((on) (at (text-property-any romacs-agent-log--end romacs-agent-log--input 'romacs-agent-log-queued on)))
+        (goto-char at)))
       ;; The thread moves as the session does, drawn by the display.
       (romacs-working-set (current-buffer) (romacs-agent-log--work doing)))))
 
-(defvar-local romacs-agent-log--rows nil "The rows the separator was last drawn with.")
 (defvar-local romacs-agent-log--title nil "The title the chat's name was made from.")
 (defvar-local romacs-agent-log--header-made nil
   "What the header was last made from: made again only when it differs.")
@@ -1425,8 +1432,11 @@ session, this editor's by default."
 ;; (desktop.el, warm-restart.el) carries which session it shows and the
 ;; composer's unsent text; its transcript is drawn from the records.
 (defun romacs-agent-log--desktop-save (_dirname)
+  ;; A queued message in the composer to edit is no draft: it waits
+  ;; where it was, as it was, for the next session.
   (list :session (romacs-agent-id romacs-agent-log--session)
-        :draft (buffer-substring-no-properties romacs-agent-log--input (point-max))))
+        :draft (if romacs-agent-log-queue--editing ""
+                 (buffer-substring-no-properties romacs-agent-log--input (point-max)))))
 
 (defun romacs-agent-log-desktop-restore (_file _name misc)
   "The chat of MISC's session with its draft, drawn when a window first
@@ -1463,11 +1473,12 @@ shows it; its session loaded only then, as its records are read."
     (pcase when
       ((guard (string-empty-p text)) (when (and (eq when 'interrupt) (romacs-agent-log--running-p session))
                                        (romacs-agent-interrupt session)))
-      ('later (romacs-agent-send-later session text))
+      ;; Its user's: theirs to change while it waits.
+      ('later (romacs-agent-send-later session text nil nil nil nil t))
       ((and 'interrupt (guard (romacs-agent-log--running-p session)))
        (romacs-agent-interrupt session)
-       (romacs-agent-send-later session text t))
-      (_ (romacs-agent-send session text)))))
+       (romacs-agent-send-later session text t nil nil nil t))
+      (_ (romacs-agent-send session text nil nil nil nil t)))))
 
 (cl-defmethod romacs-agent-log-source-interrupt ((_source romacs-agent-log-local-source) session)
   (romacs-agent-interrupt (romacs-agent-log--loaded session)))
@@ -1507,7 +1518,6 @@ shows it; its session loaded only then, as its records are read."
 (defun romacs-agent-log--draft ()
   (string-trim (buffer-substring-no-properties romacs-agent-log--input (point-max))))
 
-(defvar-local romacs-agent-log-queue--editing)
 (declare-function romacs-agent-log-queue-put-back "romacs-agent-log-queue" ())
 
 (defun romacs-agent-log--deliver (send)

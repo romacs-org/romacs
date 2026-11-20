@@ -23,9 +23,6 @@
 
 (require 'romacs-agent-log)
 
-(defvar-local romacs-agent-log-queue--editing nil
-  "The queued message the composer holds to edit, or nil.")
-
 (defface romacs-agent-log-queued '((t :inherit romacs-agent-log-note))
   "A message waiting for the turn under way to end.")
 (defface romacs-agent-log-queued-mark '((t :inherit romacs-working-waiting))
@@ -161,11 +158,13 @@ as the composer says it; an empty composer leaves it as it was."
   (interactive nil romacs-agent-log-mode)
   (let ((item (or romacs-agent-log-queue--editing (user-error "The composer holds no queued message")))
         (text (string-trim (buffer-substring-no-properties romacs-agent-log--input (point-max)))))
-    (setq romacs-agent-log-queue--editing nil)
+    ;; Held to edit until it is back: a failure leaves the composer as it
+    ;; is, still putting it back.
     (if (string-empty-p text)
         (romacs-agent-log-queue--change 'hold item nil)
       (romacs-agent-log-queue--change 'edit item text)
       (romacs-agent-log--writing (delete-region romacs-agent-log--input (point-max))))
+    (setq romacs-agent-log-queue--editing nil)
     (romacs-agent-log--separator t)
     (romacs-agent-log-queue--goto item)))
 
@@ -183,7 +182,11 @@ as the composer says it; an empty composer leaves it as it was."
 
 (defun romacs-agent-log-queue--move (delta)
   "Move the queued message at point (else the first) DELTA places."
-  (let ((item (romacs-agent-log-queue--own (romacs-agent-log-queue--target))))
+  (let* ((item (romacs-agent-log-queue--own (romacs-agent-log-queue--target)))
+         (items (romacs-agent-log-source-queue romacs-agent-log--source romacs-agent-log--session))
+         (to (+ (or (cl-position item items) 0) delta)))
+    (cond ((< to 0) (user-error "It goes first already"))
+          ((>= to (length items)) (user-error "It goes last already")))
     (romacs-agent-log-queue--change 'move item delta)
     (romacs-agent-log--separator t)
     (romacs-agent-log-queue--goto item)))
@@ -207,6 +210,7 @@ as the composer says it; an empty composer leaves it as it was."
     (setq romacs-agent-log-queue--editing nil)))
 
 (add-hook 'kill-buffer-hook #'romacs-agent-log-queue--release)
+(add-hook 'change-major-mode-hook #'romacs-agent-log-queue--release)
 
 (provide 'romacs-agent-log-queue)
 ;;; romacs-agent-log-queue.el ends here
