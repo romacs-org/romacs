@@ -64,6 +64,15 @@ impl Leaf<'_> {
         Ok((bytes, None))
     }
 
+    /// The quit call-process's wait took, raised again once the output read
+    /// before it is inserted (`romacs--call-process-quit`): C-g's, as
+    /// `maybe_quit` raised it, so the expansion it leaves defers it
+    /// (`quit_watched`).
+    pub(crate) fn call_process_requit(&mut self) -> Fault {
+        self.vm.quit_unwinding = true;
+        Fault::Signal(self.sym("quit"), Value::NIL)
+    }
+
     /// QUIT, raised while `call_process` waits for child PID, once the child
     /// is stopped (`call_process_stop`, GRACE as it takes it).
     fn call_process_quit(&mut self, pid: i32, pidfd: Option<&OwnedFd>, quit: Fault, grace: Option<std::time::Duration>) -> Fault {

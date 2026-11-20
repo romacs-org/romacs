@@ -1273,8 +1273,8 @@ what `find-operation-coding-system' sees after the operation."
                                (string-bytes (cdr result)))))))
           ;; A quit with output read before it: inserted above, all of it
           ;; (GNU's call_process drops a partly filled block:
-          ;; VM2-CALLPROC-QUIT-OUTPUT), then the quit.
-          (if (eq (car result) 'quit) (signal 'quit nil))
+          ;; VM2-CALLPROC-QUIT-OUTPUT), then the quit, raised again as C-g's.
+          (if (eq (car result) 'quit) (romacs--call-process-quit))
           (let ((status (romacs--wait-status (car result))))
             (if (eq (car status) 'signal)
                 (romacs--signal-text (cdr status))

@@ -1248,14 +1248,13 @@ impl Leaf<'_> {
             // What the child wrote before the quit is the caller's to insert,
             // all of it, where GNU's call_process drops a partly filled block
             // (VM2-CALLPROC-QUIT-OUTPUT): (quit . BYTES), after which the
-            // caller signals the quit (subprocess.el). The quit stays C-g's
-            // (`quit_unwinding` left set) through the insertion to that
-            // signal, so an expansion it leaves defers it to the form's reach
-            // (`quit_watched`) rather than running the macro, and its child,
-            // again.
+            // caller raises the quit again (`romacs--call-process-quit`).
+            // Until then it is no quit unwinding: the Lisp that inserts the
+            // output runs as any other, and a catch in it takes nothing.
             let quit_symbol = self.sym("quit");
             return match quit {
                 Fault::Signal(condition, _) if condition == quit_symbol && !bytes.is_empty() => {
+                    self.vm.quit_unwinding = false;
                     let text = self.make_string(bytes, false);
                     Ok(self.cons(quit_symbol, text))
                 }
