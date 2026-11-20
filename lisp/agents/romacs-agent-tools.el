@@ -342,6 +342,8 @@ the caller has not had yet, goes with it when given.  The whole record
 is romacs_task_status's."
   (let ((task (romacs-agent-tools--task session)) (ack (romacs-mcp--object)))
     (dolist (key romacs-agent-tools--ack-keys) (puthash key (gethash key task) ack))
+    ;; A limit's text is the turn's reply: its result again.
+    (when (hash-table-p (gethash "limit" ack)) (remhash "text" (gethash "limit" ack)))
     (puthash "resultChars" (length (or (romacs-agent-reply session) "")) ack)
     (when result (puthash "result" result ack))
     ack))
@@ -889,7 +891,7 @@ otherwise withdraw the call (and retire this wait) and drop its answer."
        (let ((status (romacs-agent-tools--status child)) (seq (romacs-agent-done-seq child)))
          (cond ((member status '("completed" "failed"))
                 (let ((new (romacs-agent-tools--wanted-p child seq)))
-                  (romacs-agent-tools--answer child seq)
+                  (when new (romacs-agent-tools--answer child seq))
                   (list (romacs-agent-tools--ack
                          child (and new (romacs-agent-tools--wake-result
                                          (romacs-agent-id child) (or (romacs-agent-reply child) "")))))))

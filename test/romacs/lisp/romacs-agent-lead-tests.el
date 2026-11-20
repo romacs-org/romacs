@@ -221,6 +221,12 @@ wait gives the end it waited for once, in place of its wake."
                                                                              "message" "again"))))
         (funcall short record)
         (should (string-prefix-p "m-" (gethash "messageId" record))))
+      ;; Ended at its usage limit: the limit's text is that result too.
+      (setf (romacs-agent-limited child) (list :provider "claude" :text big))
+      (let ((limit (gethash "limit" (romacs-agent-tools--cancel (romacs-agent-lead-tests--args
+                                                                  "taskId" (romacs-agent-id child))))))
+        (should (equal (gethash "provider" limit) "claude"))
+        (should-not (gethash "text" limit)))
       (should (equal (gethash "result" (romacs-agent-tools--task child)) big)))))
 
 (ert-deftest romacs-agent-lead-resume-is-idempotent-and-owned ()
