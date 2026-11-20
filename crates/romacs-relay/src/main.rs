@@ -20,7 +20,9 @@
 //! does at home. When either end goes, so does the other.
 //!
 //! Its sockets are in directories of the user's alone, under
-//! `$XDG_RUNTIME_DIR`: only a stale socket of the user's is ever replaced.
+//! `$XDG_RUNTIME_DIR`, the directories between them the user's and
+//! writable by no one else: only a stale socket of the user's is ever
+//! replaced.
 //! Every read is bounded (a request head, a line, a WebSocket message), and
 //! every write is given a deadline, so a stalled peer ends its connection
 //! rather than pin the relay.
@@ -368,12 +370,21 @@ fn private(meta: &std::fs::Metadata, uid: u32) -> bool {
     meta.is_dir() && meta.uid() == uid && meta.mode() & 0o077 == 0
 }
 
-/// Make SOCKET's directory one of the user's alone, under the runtime
-/// directory, itself the user's alone: each directory below it made so when
-/// missing, and one there already refused unless it is so, never changed.
+/// Whether META is a directory of UID's that no one else may change: an
+/// editor's own (`romacs/`, `romacs/agents/`) is made 0755.
+fn closed(meta: &std::fs::Metadata, uid: u32) -> bool {
+    meta.is_dir() && meta.uid() == uid && meta.mode() & 0o022 == 0
+}
+
 fn private_dir(socket: &Path) -> Result<PathBuf, String> {
-    let uid = own_uid()?;
-    let runtime = runtime_dir()?;
+    private_dir_in(runtime_dir()?, socket, own_uid()?)
+}
+
+/// Make SOCKET's directory one of the user's alone, under RUNTIME, itself
+/// the user's alone: each directory below it made so when missing, one there
+/// already between them refused unless no one else may change it, and
+/// SOCKET's own refused unless it is the user's alone; none changed.
+fn private_dir_in(runtime: PathBuf, socket: &Path, uid: u32) -> Result<PathBuf, String> {
     let meta = std::fs::symlink_metadata(&runtime).map_err(|e| format!("{}: {e}", runtime.display()))?;
     if !private(&meta, uid) { return Err(format!("{}: the runtime directory is not the user's alone", runtime.display())) }
     // No one else may replace it: each directory above it the user's or
@@ -387,13 +398,18 @@ fn private_dir(socket: &Path) -> Result<PathBuf, String> {
     let below = socket.parent().and_then(|dir| dir.strip_prefix(&runtime).ok())
         .ok_or_else(|| format!("{}: a socket lives under {}", socket.display(), runtime.display()))?;
     let mut dir = runtime;
-    for part in below.components() {
+    let mut parts = below.components().peekable();
+    while let Some(part) = parts.next() {
         dir.push(part);
         if std::fs::symlink_metadata(&dir).is_err() {
             std::fs::DirBuilder::new().mode(0o700).create(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         }
         let meta = std::fs::symlink_metadata(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-        if !private(&meta, uid) { return Err(format!("{}: not a directory of the user's alone", dir.display())) }
+        if parts.peek().is_some() {
+            if !closed(&meta, uid) { return Err(format!("{}: a directory others may change", dir.display())) }
+        } else if !private(&meta, uid) {
+            return Err(format!("{}: not a directory of the user's alone", dir.display()));
+        }
     }
     Ok(dir)
 }
@@ -577,6 +593,32 @@ mod tests {
         assert_eq!(runtime_dir_of(Some("/run/user/1000/".into())).unwrap().as_os_str(), "/run/user/1000");
         assert!(runtime_dir_of(Some("relative".into())).is_err());
         assert!(runtime_dir_of(None).is_err());
+    }
+
+    #[test]
+    fn a_socket_has_a_directory_of_its_own_below_an_editors() {
+        let mode = |dir: &Path, mode| std::fs::set_permissions(dir, std::os::unix::fs::PermissionsExt::from_mode(mode)).unwrap();
+        let uid = own_uid().unwrap();
+        let runtime = std::env::temp_dir().join(format!("romacs-relay-dir-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&runtime);
+        std::fs::create_dir_all(runtime.join("romacs/agents")).unwrap();
+        mode(&runtime, 0o700);
+        // As an editor makes them: 0755.
+        mode(&runtime.join("romacs"), 0o755);
+        mode(&runtime.join("romacs/agents"), 0o755);
+        let made = private_dir_in(runtime.clone(), &runtime.join("romacs/agents/remote/remote.sock"), uid).unwrap();
+        assert_eq!(std::fs::metadata(&made).unwrap().mode() & 0o777, 0o700);
+        // The socket's own directory open to others: refused, not changed.
+        assert!(private_dir_in(runtime.clone(), &runtime.join("romacs/agents/remote.sock"), uid).is_err());
+        assert_eq!(std::fs::metadata(runtime.join("romacs/agents")).unwrap().mode() & 0o777, 0o755);
+        // One between that others may write to: refused.
+        mode(&runtime.join("romacs"), 0o775);
+        assert!(private_dir_in(runtime.clone(), &runtime.join("romacs/agents/remote/remote.sock"), uid).is_err());
+        // A runtime directory open to others: refused.
+        mode(&runtime.join("romacs"), 0o755);
+        mode(&runtime, 0o755);
+        assert!(private_dir_in(runtime.clone(), &runtime.join("romacs/agents/remote/remote.sock"), uid).is_err());
+        std::fs::remove_dir_all(&runtime).unwrap();
     }
 
     fn head(lines: &[&str]) -> Head {
