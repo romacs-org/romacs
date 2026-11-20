@@ -1211,9 +1211,10 @@ impl Leaf<'_> {
     /// `call_process`'s wait for child PID: what it wrote to READER until the
     /// pipe closed, then its end, each a quittable wait (`Vm::poll_quittable`).
     /// A C-g ends the child as `call_process_cleanup` does
-    /// (`call_process_stop`) and quits; under `inhibit-quit` the wait goes on
-    /// without looking at the press again.
-    fn call_process_wait(&mut self, pid: i32, mut reader: Option<OwnedFd>) -> Result<Vec<u8>> {
+    /// (`call_process_stop`) and ends the wait with the quit beside what was
+    /// read before it; under `inhibit-quit` the wait goes on without looking
+    /// at the press again.
+    fn call_process_wait(&mut self, pid: i32, mut reader: Option<OwnedFd>) -> Result<(Vec<u8>, Option<Fault>)> {
         let pidfd = crate::host::pidfd_open(pid);
         let mut bytes = Vec::new();
         let mut buf = vec![0; 64 * 1024];
@@ -1223,7 +1224,7 @@ impl Leaf<'_> {
             // does, asked before each wait: one an `inhibit-quit' since
             // unbound held, or one whose wake ended the last wait.
             if let Some(quit) = self.vm.worker_quit() {
-                return Err(self.call_process_quit(pid, pidfd.as_ref(), quit, Some(Self::WORKER_GRACE)));
+                return Ok((bytes, Some(self.call_process_quit(pid, pidfd.as_ref(), quit, Some(Self::WORKER_GRACE)))));
             }
             let (fds, tick) = match (&reader, &pidfd) {
                 (Some(read), _) => (vec![(read.as_raw_fd(), libc::POLLIN)], None),
@@ -1237,7 +1238,7 @@ impl Leaf<'_> {
                 .map_err(|e| self.file_errno("Waiting for process", &e))?;
             if revents.first().is_none_or(|&r| r == 0) {
                 if let Err(quit) = self.native_poll() {
-                    return Err(self.call_process_quit(pid, pidfd.as_ref(), quit, None));
+                    return Ok((bytes, Some(self.call_process_quit(pid, pidfd.as_ref(), quit, None))));
                 }
                 held = self.vm.quit.pressed();
                 continue;
@@ -1397,7 +1398,21 @@ impl Leaf<'_> {
             self.vm.subprocesses.deleted.push((pid, None));
             return Ok(Value::NIL);
         }
-        let bytes = self.call_process_wait(pid, reader)?;
+        let (bytes, quit) = self.call_process_wait(pid, reader)?;
+        if let Some(quit) = quit {
+            // What the child wrote before the quit is the caller's to insert,
+            // as GNU's call_process inserts each block it reads: (quit . BYTES),
+            // after which the caller signals the quit (subprocess.el).
+            let quit_symbol = self.sym("quit");
+            return match quit {
+                Fault::Signal(condition, _) if condition == quit_symbol && !bytes.is_empty() => {
+                    self.vm.quit_unwinding = false;
+                    let text = self.make_string(bytes, false);
+                    Ok(self.cons(quit_symbol, text))
+                }
+                quit => Err(quit),
+            };
+        }
         let status = sp::wait_blocking(pid).map_err(|e| self.file_errno("Waiting for process", &e))?;
         let text = self.make_string(bytes, false);
         Ok(self.cons(fixnum(status.into()), text))
