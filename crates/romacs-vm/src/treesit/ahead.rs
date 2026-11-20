@@ -176,12 +176,15 @@ impl Vm {
     /// Bring the reparses of BUFFER's text up to the frame about to be
     /// built: with START, one begins for each parser an edit left to
     /// reparse and that has none; one that landed behind the text begins
-    /// again from its tree. A parser that has no tree, in a text whose visit
-    /// started no early parse, begins its first parse: the frame shows the
-    /// text, not the parse, and nothing parses before a frame shows it.
+    /// again from its tree. A parser that has no tree, in a text that has
+    /// none and no early parse, begins its first parse: the frame shows the
+    /// text, not the parse, and nothing parses before a frame shows it. A
+    /// parser added to a text with a tree (a twin of one that took the early
+    /// parse's) copies or parses it when asked, as before.
     pub(crate) fn treesit_run_ahead(&mut self, buffer: Value, start: bool) -> crate::Result<State> {
         let Some(wake) = self.process_jobs.wake() else { return Ok(State::None) };
-        let first = self.treesit_text_of(buffer)?.is_some_and(|text| text.treesit.early.is_none());
+        let first = self.treesit_text_of(buffer)?.is_some_and(|text| text.treesit.early.is_none())
+            && !self.treesit_has_tree(buffer)?;
         let cores = self.treesit_cores(buffer)?;
         let mut state = State::None;
         for (parser, core) in cores {

@@ -849,6 +849,42 @@ fn edits_during_a_first_parse_reach_the_tree_a_query_gets() {
     assert_eq!(tree_is_a_parse(&mut vm, "ts-edit-query"), "t", "the query's tree is the edited text's");
 }
 
+/// A visit's early parse feeds every parser of the text: the parser that
+/// takes its tree first has it, and its twin, asked after a frame, copies
+/// it. No frame starts a second first parse for the twin. The parses are
+/// counted in a process of its own.
+#[test]
+fn a_twin_of_the_early_parses_parser_copies_its_tree() {
+    const CHILD: &str = "ROMACS_TREESIT_EARLY_TWIN_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let own = own_test::name(module_path!(), "a_twin_of_the_early_parses_parser_copies_its_tree");
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &own, "--nocapture", "--test-threads", "1"]).env(CHILD, "1").output().unwrap();
+        assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains("1 passed"),
+            "child: {}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        return;
+    }
+    let mut vm = gnu_lisp(&[]);
+    vm.set_gc_stress(0);
+    vm.eval_source("(require 'treesit)").unwrap();
+    let before = romacs_vm::treesit_parses_in_process();
+    vm.eval_source(&format!("(progn {SYSTEM_SETUP} \
+        (with-current-buffer (get-buffer-create \"ts-early-twin\") \
+          (dotimes (i 4000) (insert (format \"int f%d (int a) {{ return a + %d; }}\\n\" i i))) \
+          (romacs--treesit-parse-early 'c) \
+          (setq treesit-test-parser (treesit-parser-create 'c) treesit-test-twin (treesit-parser-create 'c nil t 'twin))) \
+        (set-window-buffer nil (get-buffer \"ts-early-twin\")))")).unwrap();
+    vm.set_background_wake(std::sync::Arc::new(|| {}));
+    deferred_frame(&mut vm);
+    vm.eval_source("(with-current-buffer \"ts-early-twin\" (treesit-parser-root-node treesit-test-parser))").unwrap();
+    while deferred_frame(&mut vm) {}
+    deferred_frame(&mut vm);
+    vm.eval_source("(with-current-buffer \"ts-early-twin\" (treesit-parser-root-node treesit-test-twin))").unwrap();
+    while deferred_frame(&mut vm) {}
+    assert_eq!(romacs_vm::treesit_parses_in_process(), before + 1, "the early parse was the text's only parse");
+    assert_eq!(tree_is_a_parse(&mut vm, "ts-early-twin"), "t");
+}
+
 /// Lisp that asks for a tree while its first parse runs on a thread waits
 /// for it, and a C-g ends the wait as it ends any wait: the query quits,
 /// the parse runs on, and the next query gets its tree.
