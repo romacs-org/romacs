@@ -156,9 +156,10 @@ def gnosis_tree(engine, base, args):
 
 
 def gnu_lisp(base):
-    """gnosis and keymap-popup byte-compiled by the pinned GNU, as a GNU
-    user runs them; cached by source hash."""
-    sources = sorted((ROOT / 'lisp/packages/gnosis').glob('*.el')) + [ROOT / 'lisp/packages/keymap-popup/keymap-popup.el']
+    """gnosis and keymap-popup (with romacs-grid, its layout) byte-compiled
+    by the pinned GNU, as a GNU user runs them; cached by source hash."""
+    sources = (sorted((ROOT / 'lisp/packages/gnosis').glob('*.el'))
+               + [ROOT / 'lisp/ui/romacs-grid.el', ROOT / 'lisp/packages/keymap-popup/keymap-popup.el'])
     return lisp_copy(base, 'gnu-gnosis', sources, True)
 
 
