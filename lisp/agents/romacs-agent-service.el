@@ -772,8 +772,9 @@ where it is, its cursor saying so.")
 
 (defun romacs-agent-service--history (rpc params)
   "`agents/session.history': session ID's record units with AFTER < seq
-<= UPTO, or, with no AFTER, those of about its last TURNS prompts up to
-UPTO; replayed from the start of the turn the first is in, so each
+<= UPTO, or, with no AFTER, those of its last TURNS turns up to UPTO
+\(`romacs-agent-service--turn-start'); replayed from the start of the turn
+the first is in, so each
 unit's events are as live they were, between the editor's other work.
 Bounded in records folded and bytes kept; `reset' when its epoch moves
 meanwhile, or a read after a place would fold too many."
@@ -809,13 +810,17 @@ meanwhile, or a read after a place would fold too many."
   "The seq of a turn's start TURNS turns back from before seq END, fewer
 when the older start before seq BEGIN, out of reach; nil when none is in
 reach.  A turn starts at each row's first seq (romacs-agent-turns, each
-turn's kept exactly), and after the last row ends: records past it, the
-turns under way or not yet written, begin with no turn under way."
-  (let* ((rows (romacs-agent-turns-first-seqs session turns end))
-         (last (romacs-agent-turns-last-seq session))
-         (after (if last (1+ last) 0))
+turn's kept exactly), and past the newest such row's end: records there,
+a turn under way or not yet written, begin with no turn under way; with
+no row before END, at the session's start.  The rows are read in one
+statement, one snapshot of them."
+  (let* ((rows (and-let* ((db (romacs-agent-turns--db)))
+                 (sqlite-select db (concat "select first_seq, last_seq from turns where session = ? and first_seq > 0"
+                                           " and first_seq < ? order by first_seq desc limit ?")
+                                (list (romacs-agent-id session) end turns))))
+         (after (if rows (1+ (or (cadr (car rows)) (caar rows))) 0))
          (starts (seq-filter (lambda (seq) (>= seq begin))
-                             (if (< after end) (cons after rows) rows))))
+                             (append (and (< after end) (list after)) (mapcar #'car rows)))))
     (car (last (seq-take starts turns)))))
 
 (defun romacs-agent-service--history-reply (rpc session upto epoch units reset)
