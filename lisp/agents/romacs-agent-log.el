@@ -807,33 +807,31 @@ unless a note said who gave it, that it was answered."
 (defun romacs-agent-log--note (event text)
   (romacs-agent-log--line event 'note (concat "· " text) 'romacs-agent-log-note))
 
-(defun romacs-agent-log--proceed-row (session event)
-  "The keys under plan EVENT of SESSION when proceeding with it is leaving
-plan mode (its driver marks it :proceed), SESSION is in plan mode and
-the plan is live, the latest: an older one's row goes."
-  (if (and (plist-get event :proceed) (plist-get (romacs-agent-options session) :plan)
-           (not romacs-agent-log--replaying))
-      (progn (romacs-agent-log--retire-proceed)
-             (propertize (concat "\n  " (romacs-agent-log--key 'romacs-agent-log-proceed 'romacs-agent-log-plan-map)
-                                 " proceed, leaving plan mode")
-                         'romacs-agent-log-proceed t 'keymap romacs-agent-log-plan-map))
-    ""))
+(defun romacs-agent-log--offers-proceed-p (session event)
+  "Whether plan EVENT of SESSION is offered to proceed with by leaving plan
+mode: its driver marks it :proceed (its plan is no request), SESSION is
+in plan mode, and the plan is live, not replayed."
+  (and (plist-get event :proceed) (plist-get (romacs-agent-options session) :plan)
+       (not romacs-agent-log--replaying)))
 
 (defun romacs-agent-log--retire-proceed ()
-  "The plan offered to proceed with is no more: its row goes."
+  "The plan offered to proceed with is no more: its text offers nothing."
   (save-restriction
     (widen)
     (when-let* ((at (text-property-any (point-min) romacs-agent-log--end 'romacs-agent-log-proceed t)))
-      (romacs-agent-log--writing
-        (delete-region at (or (next-single-property-change at 'romacs-agent-log-proceed nil romacs-agent-log--end)
-                              romacs-agent-log--end))))))
+      (let ((end (or (next-single-property-change at 'romacs-agent-log-proceed nil romacs-agent-log--end)
+                     romacs-agent-log--end)))
+        (romacs-agent-log--writing
+          (remove-text-properties at end '(romacs-agent-log-proceed nil))
+          (put-text-property at end 'keymap (or romacs-agent-log--text-map romacs-agent-log-transcript-map)))))))
 
 (defun romacs-agent-log--proceed-offered ()
   "Where the chat offers to proceed with a plan by leaving plan mode, or
 nil; however the chat is narrowed."
-  (save-restriction
-    (widen)
-    (text-property-any (point-min) romacs-agent-log--end 'romacs-agent-log-proceed t)))
+  (when romacs-agent-log--end
+    (save-restriction
+      (widen)
+      (text-property-any (point-min) romacs-agent-log--end 'romacs-agent-log-proceed t))))
 
 (defun romacs-agent-log-proceed ()
   "Proceed with the plan the chat offers: its session leaves plan mode,
@@ -843,7 +841,8 @@ back in the mode it had, and the next message carries it out."
   (romacs-agent-set-plan (romacs-agent-menu--session) nil)
   ;; Switched: its row offers nothing more, nor the separator.
   (romacs-agent-log--retire-proceed)
-  (save-restriction (widen) (romacs-agent-log--separator)))
+  (save-restriction (widen) (romacs-agent-log--separator))
+  (romacs-agent-log--header-show))
 
 (defun romacs-agent-log-draw (session event)
   "Draw SESSION's EVENT in the current chat."
@@ -878,9 +877,12 @@ back in the mode it had, and the next message carries it out."
                                                                         (plist-get event :answers))))
     ('answered (romacs-agent-log--answered event))
     ('plan-switch (unless (plist-get event :on) (romacs-agent-log--retire-proceed)))
-    ('plan (romacs-agent-log--line event 'plan (concat (propertize "📋 Plan\n" 'face 'romacs-agent-log-prompt)
-                                                       (plist-get event :text)
-                                                       (romacs-agent-log--proceed-row session event))))
+    ('plan (let ((text (concat (propertize "📋 Plan\n" 'face 'romacs-agent-log-prompt) (plist-get event :text))))
+             ;; Offered: the plan's text takes y, the separator says so.
+             (when (romacs-agent-log--offers-proceed-p session event)
+               (romacs-agent-log--retire-proceed)
+               (setq text (propertize text 'romacs-agent-log-proceed t 'keymap romacs-agent-log-plan-map)))
+             (romacs-agent-log--line event 'plan text)))
     ('done (setq romacs-agent-log--current nil romacs-agent-log--early nil)
            (romacs-agent-log--close-asks session event 'turn-end)
            (romacs-agent-log--done event))
@@ -940,7 +942,13 @@ back in the mode it had, and the next message carries it out."
 
 (defun romacs-agent-log--doing (session)
   "What SESSION does now, as the separator says it: (STATE . WORDS)."
-  (pcase (if (romacs-agent-log--pending) 'waiting-approval (romacs-agent-state session))
+  (pcase (cond ((romacs-agent-log--pending) 'waiting-approval)
+               ;; A plan offered waits on the user as a request does.
+               ((and (eq (romacs-agent-state session) 'idle) (romacs-agent-log--proceed-offered)) 'plan-offered)
+               (t (romacs-agent-state session)))
+    ('plan-offered
+     (cons 'waiting (substitute-command-keys
+                     "⚠ plan ready: \\<romacs-agent-log-mode-map>\\[romacs-agent-log-allow] proceeds, leaving plan mode")))
     ('waiting-approval
      (let ((question (when-let* ((ask (car (romacs-agent-log--pending))))
                        (get-text-property (cadr ask) 'romacs-agent-log-questions))))
@@ -953,11 +961,7 @@ back in the mode it had, and the next message carries it out."
                         (format "running %s" (plist-get (cdr block) :name))
                       "working")))
     ;; A turn that failed and is not yet seen: said so, until the next.
-    ('idle (cond ((romacs-agent-failed session) (cons 'failed "failed"))
-                 ((romacs-agent-log--proceed-offered)
-                  (cons 'idle (substitute-command-keys
-                               "plan ready · \\<romacs-agent-log-mode-map>\\[romacs-agent-log-allow] proceeds, leaving plan mode")))
-                 (t (cons 'idle "idle"))))
+    ('idle (if (romacs-agent-failed session) (cons 'failed "failed") (cons 'idle "idle")))
     (state (cons 'idle (format "%s" state)))))
 
 (defconst romacs-agent-log--thread-cols 8
@@ -1036,7 +1040,7 @@ so a redisplay runs no Lisp for it; made only when what it reads changed."
   "The header line: the session's own header, what waits on the user, and
 how long the turn has run."
   (let* ((session romacs-agent-log--session)
-         (pending (length romacs-agent-log--asks))
+         (pending (+ (length romacs-agent-log--asks) (if (romacs-agent-log--proceed-offered) 1 0)))
          (start (romacs-agent-turn-start session)))
     (concat (romacs-agent-ui--header-text (romacs-agent-ui--header-inputs session))
             (if (> pending 0)
@@ -1434,9 +1438,8 @@ block is shown, and it is checked the session still waits on it."
          (pending (romacs-agent-log--pending))
          (ask (if at (assoc at pending) (car pending))))
     (unless ask (user-error (if at "That request is answered" "Nothing waits on you")))
-    (unless at
-      (goto-char (cadr ask))
-      (message "Answering: %s" (string-trim (buffer-substring-no-properties (cadr ask) (line-end-position)))))
+    ;; Shown where it is asked: point at it says which is answered.
+    (unless at (goto-char (cadr ask)))
     (car ask)))
 
 (defun romacs-agent-log-allow (&optional always)
