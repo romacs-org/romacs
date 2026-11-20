@@ -114,7 +114,8 @@ as its live events are drawn."
     (romacs-agent-log--writing (save-excursion (goto-char (point-min)) (insert (romacs-agent-log--earlier-line from)))))
   ;; What streams at its end goes on streaming: the live units that
   ;; follow may carry on its message.
-  (dolist (unit units) (romacs-agent-remote--draw-unit session unit))
+  (let ((romacs-agent-log--closes-deferred t))
+    (dolist (unit units) (romacs-agent-remote--draw-unit session unit)))
   (romacs-agent-log--sync-asks session)
   (romacs-agent-log--separator t)
   (romacs-agent-log--header-show))

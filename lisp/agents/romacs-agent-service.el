@@ -999,6 +999,14 @@ takes them for EVENT's questions: ((QUESTION . ANSWER) ...)."
                                        (let ((free (gethash "text" given))) (and (stringp free) (list free))))
                                ", "))))
 
+(defun romacs-agent-service--actor (rpc)
+  "RPC's caller as the actor answering (`romacs-agent-respond'): its user,
+its login and its client's instance as it said them."
+  (let* ((peer (romacs-agent-rpc-data rpc)) (identity (romacs-agent-service--peer-identity peer)))
+    (list :kind 'user
+          :login (let ((login (and (hash-table-p identity) (gethash "login" identity)))) (and (stringp login) login))
+          :client (romacs-agent-service--peer-instance peer))))
+
 (defun romacs-agent-service--answer-request (rpc params)
   "`agents/answer': session ID's request HANDLE answered: DECISION allow
 or deny, SCOPE once or session, REASON told the agent when it denies,
@@ -1021,7 +1029,7 @@ ANSWERS to its questions.  A request is answered once
               (and (equal decision "allow")
                    (let ((answers (romacs-agent-service--given-answers (cdr asked) (gethash "answers" params))))
                      (cond (answers (list :answers answers)) ((equal scope "session") (list :always t)) (t t))))
-              (and (stringp reason) reason) 'user)
+              (and (stringp reason) reason) (romacs-agent-service--actor rpc))
              (romacs-agent-rpc-object "state" "written"))
          (user-error (romacs-agent-service--fail -32011 "request-gone" (error-message-string err)))
          (error (romacs-agent-service--fail -32012 "not-live" (error-message-string err))))))))
@@ -1180,12 +1188,14 @@ say, and who answered it, its note's (kept since it came):
                  ((cl-find 'exit events :key (lambda (event) (plist-get event :type))) "exit")
                  ((cl-find 'done events :key (lambda (event) (plist-get event :type))) "turn-end")
                  (t "harness"))
-     "actor" (romacs-agent-rpc-object "kind" (cond ((null answered) (if attributed "user" "harness"))
-                                                   ((member (plist-get attributed :by) '("user" "policy")) (plist-get attributed :by))
-                                                   (attributed "user")
-                                                   ((plist-get answered :behavior) "unknown")
-                                                   (t "harness"))
-                                      "login" :null "client" :null)
+     "actor" (let ((actor (plist-get attributed :actor)))
+               ;; Who answered as recorded, else who settled it.
+               (romacs-agent-rpc-object "kind" (cond ((plist-get actor :kind))
+                                                     ((null answered) "harness")
+                                                     ((plist-get answered :behavior) "unknown")
+                                                     (t "harness"))
+                                        "login" (or (plist-get actor :login) :null)
+                                        "client" (or (plist-get actor :client) :null)))
      "decision" (or (plist-get attributed :decision) (plist-get answered :behavior) :null)
      "scope" (or (plist-get attributed :scope) :null)
      "reason" (or (plist-get attributed :reason) :null)

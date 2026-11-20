@@ -284,6 +284,8 @@ journals what its harness writes."
              "params" (romacs-mcp--object "threadId" "th" "turnId" "t1" "itemId" "j" "command" "ls"))
         (notify "serverRequest/resolved" "threadId" "th" "requestId" 3)
         (should (eq (plist-get (car events) :type) 'answered))
+        ;; Settled by the harness, before any answer.
+        (should (eq (plist-get (car events) :how) 'harness))
         (should (= (hash-table-count (romacs-agent-approvals session)) 0)))))))
 
 (defun romacs-agent-codex-tests--question (id text &rest fields)
