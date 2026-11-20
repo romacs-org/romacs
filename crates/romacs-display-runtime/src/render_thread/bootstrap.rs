@@ -179,11 +179,6 @@ impl RenderApp {
             view_formats: vec![],
             desired_maximum_frame_latency: crate::presentation::pacing::MAXIMUM_FRAME_LATENCY,
         };
-        #[cfg(target_os = "linux")]
-        // SAFETY: this surface and device share the renderer instance; configure follows immediately.
-        unsafe {
-            romacs_renderer_wgpu::native_presentation::prepare_surface(&device, &surface);
-        }
         surface.configure(&device, &config);
         romacs_renderer_wgpu::diagnostics::surface_fingerprint(&adapter, &surface, &config);
 
@@ -223,7 +218,6 @@ impl RenderApp {
                 content_insets: Default::default(),
                 window,
                 surface: Some(surface),
-                surface_generation: super::frame_windows::next_surface_generation(),
                 surface_backend: adapter_info.backend,
                 surface_config: config,
                 width: pending_width,

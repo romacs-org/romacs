@@ -126,7 +126,6 @@ fontconfig = "0.11.0"
 # 2.15 re-hinted Liberation Mono and moved them.
 freetype-rs = "0.38.0"
 yeslogic-fontconfig-sys = "6.0.0"
-x11-dl = "2.21"
 core-foundation = "0.10.1"
 serde = { version = "1", features = ["derive", "rc"] }
 nutype = { version = "0.8", features = ["serde"] }
@@ -173,8 +172,7 @@ winit = "=0.31.0-beta.3"
 # "glsl" gates ShaderSource::Glsl, which the render thread needs to compile
 # composed Shadertoy-dialect surface shaders (shader_surface.rs).
 wgpu = { version = "30", features = ["glsl"] }
-# Keep this on the same major version as wgpu: native presentation timing passes
-# wgpu-hal types through wgpu's public HAL interop API.
+# Keep this on the same major version as wgpu, whose Vulkan backend it is.
 # Its `gpu-allocator` collaborator also exchanges nominal `windows` COM types,
 # so a Cargo update must keep the two on compatible Windows binding versions.
 wgpu-hal = { version = "30", features = ["vulkan"] }
@@ -185,7 +183,6 @@ raw-window-handle = "0.6"
 wayland-backend = { version = "0.3.15", features = ["client_system", "dlopen"] }
 wayland-client = { version = "0.31.14", features = ["system", "dlopen"] }
 wayland-protocols = { version = "0.32.12", features = ["client", "staging"] }
-ash = "0.38"
 pollster = "1.0"
 resvg = "0.47"
 # 2D geometry (already linked by usvg) and path tessellation for scenes.

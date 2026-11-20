@@ -3227,7 +3227,6 @@ dependencies = [
  "wgpu",
  "wgpu-hal",
  "winit",
- "x11-dl",
 ]
 
 [[package]]
@@ -3248,7 +3247,6 @@ dependencies = [
  "fontconfig",
  "fontdb",
  "freetype-rs",
- "memmap2",
  "once_cell",
  "romacs-display-protocol",
  "romacs-layout-input",
@@ -3458,7 +3456,6 @@ dependencies = [
 name = "romacs-renderer-wgpu"
 version = "0.0.20"
 dependencies = [
- "ash",
  "bytemuck",
  "cosmic-text",
  "enum_dispatch",

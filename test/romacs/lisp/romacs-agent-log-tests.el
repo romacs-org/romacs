@@ -10,7 +10,8 @@
   (require 'romacs-agent)
   (require 'romacs-agent-claude)
   (require 'romacs-agent-log)
-  (require 'romacs-agent-menu))
+  (require 'romacs-agent-menu)
+  (require 'romacs-agent-board))
 
 (defmacro romacs-agent-log-tests--with (&rest body)
   "BODY in a chat of `session', its events drawn by `draw'."
@@ -961,3 +962,98 @@
 
 (provide 'romacs-agent-log-tests)
 ;;; romacs-agent-log-tests.el ends here
+
+;;; Keys
+
+(defconst romacs-agent-log-tests--chat-keys
+  '(("RET" . romacs-agent-log-send) ("C-j" . newline) ("S-<return>" . newline)
+    ("C-c C-c" . romacs-agent-log-interrupt) ("C-c C-i" . romacs-agent-log-interrupt)
+    ("C-c C-k" . romacs-agent-log-interrupt-and-send) ("C-c C-q" . romacs-agent-log-queue)
+    ("C-c C-s" . romacs-agent-log-steer) ("C-c C-a" . romacs-agent-chat-attach)
+    ("C-c C-d" . romacs-agent-log-deny) ("C-c C-o" . romacs-agent-menu-map-popup)
+    ("C-c C-/" . describe-mode) ("C-c C-n" . romacs-agent-chat-new)
+    ("C-c C-r" . romacs-agent-chat-rename) ("C-c C-e" . romacs-agent-chat-effort)
+    ("C-c C-b" . romacs-agents) ("C-c C-t" . romacs-agents)
+    ("C-c C-j" . romacs-agent-log-composer)
+    ("M-p" . romacs-agent-log-history-previous) ("M-n" . romacs-agent-log-history-next)
+    ;; Dropped with what they acted on: no prompt is predicted to
+    ;; complete, and an attached file is a path in the composer's text,
+    ;; with no tray of images to take one off.
+    ("TAB") ("C-c C-w"))
+  "The keys of the chat before this one, each with its command here, or
+none when dropped.")
+
+(ert-deftest romacs-agent-log-has-the-keys-of-the-chat-before ()
+  (dolist (key romacs-agent-log-tests--chat-keys)
+    (should (equal (cons (car key) (keymap-lookup romacs-agent-log-mode-map (car key)))
+                   key))))
+
+(defun romacs-agent-log-tests--commands (map)
+  (let (commands)
+    (map-keymap (lambda (_ binding)
+                  ;; A menu row's (menu-item NAME COMMAND . PROPS), its
+                  ;; filter not run.
+                  (when (eq (car-safe binding) 'menu-item) (setq binding (nth 2 binding)))
+                  (cond ((keymapp binding) (setq commands (append (romacs-agent-log-tests--commands binding) commands)))
+                        ((and binding (symbolp binding)) (push binding commands))))
+                map)
+    commands))
+
+(ert-deftest romacs-agent-log-every-key-runs-in-the-chat ()
+  ;; A command a chat's key or menu row runs is defined, and offered for
+  ;; this mode, not for a mode since deleted.
+  (should (memq 'romacs-agent-chat-rename (romacs-agent-log-tests--commands romacs-agent-menu-map)))
+  (dolist (command (append (romacs-agent-log-tests--commands romacs-agent-log-mode-map)
+                           (romacs-agent-log-tests--commands romacs-agent-log-ask-map)
+                           (romacs-agent-log-tests--commands romacs-agent-menu-map)))
+    (let ((modes (command-modes command)))
+      ;; Named, so a failure says which.
+      (should (equal (list command (commandp command) (or (null modes) (and (memq 'romacs-agent-log-mode modes) t)))
+                     (list command t t))))))
+
+(ert-deftest romacs-agent-log-session-keys-act-on-the-chat ()
+  ;; From the transcript: C-c C-a puts a path in the composer, C-c C-s
+  ;; sends it, C-c C-r names the session.
+  (romacs-agent-log-tests--with
+    (draw :type 'input :text "first" :request 4)
+    (draw :type 'delta :text "reply")
+    (goto-char (point-min))
+    (let (sent)
+      (cl-letf (((symbol-function 'romacs-agent-menu--clipboard-image-type) #'ignore)
+                ((symbol-function 'read-file-name) (lambda (&rest _) "/tmp/notes.org"))
+                ((symbol-function 'read-string) (lambda (&rest _) "named"))
+                ((symbol-function 'romacs-agent--update-manifest) #'ignore)
+                ((symbol-function 'romacs-agent--changed) #'ignore)
+                ((symbol-function 'romacs-agent-ui--batch) #'ignore)
+                ((symbol-function 'romacs-agent-log--loaded) #'identity)
+                ((symbol-function 'romacs-agent-send) (lambda (_s text &rest _) (setq sent text))))
+        (call-interactively (keymap-lookup romacs-agent-log-mode-map "C-c C-a"))
+        (should (equal (buffer-substring-no-properties romacs-agent-log--input (point-max)) "/tmp/notes.org"))
+        (goto-char (point-min))
+        (call-interactively (keymap-lookup romacs-agent-log-mode-map "C-c C-s"))
+        (should (equal sent "/tmp/notes.org"))
+        (should (= romacs-agent-log--input (point-max)))
+        (call-interactively (keymap-lookup romacs-agent-log-mode-map "C-c C-r"))
+        (should (equal (romacs-agent-title session) "named"))))))
+
+(ert-deftest romacs-agent-log-attach-takes-the-clipboard-s-image ()
+  ;; C-c C-a with an image in the clipboard saves it with the session and
+  ;; puts its path in the composer.
+  (romacs-agent-log-tests--with
+    (ignore #'draw)
+    (let ((dir (make-temp-file "romacs-attach" t)))
+      (unwind-protect
+          (cl-letf (((symbol-function 'romacs-agent-menu--clipboard-image-type) (lambda () "image/png"))
+                    ((symbol-function 'romacs-agent-log--loaded) #'identity)
+                    ((symbol-function 'romacs-agent-dir) (lambda (_) dir))
+                    ((symbol-function 'call-process)
+                     (lambda (program _in out &rest _)
+                       (should (equal program "wl-paste"))
+                       (with-temp-file (cadr out) (insert "PNG"))
+                       0)))
+            (call-interactively (keymap-lookup romacs-agent-log-mode-map "C-c C-a"))
+            (let ((path (buffer-substring-no-properties romacs-agent-log--input (point-max))))
+              (should (string-prefix-p (expand-file-name "attachments/clipboard-" dir) path))
+              (should (string-suffix-p ".png" path))
+              (should (file-exists-p path))))
+        (delete-directory dir t)))))
