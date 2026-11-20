@@ -14,7 +14,6 @@ description = "Evaluator-free font resolution for Romacs: plain-data faces and f
 [dependencies]
 cosmic-text.workspace = true
 fontdb.workspace = true
-memmap2.workspace = true
 once_cell.workspace = true
 romacs-display-protocol.workspace = true
 romacs-layout-input = { path = "../romacs-layout-input" }
