@@ -67,27 +67,36 @@ class AddedTest(unittest.TestCase):
 class JudgedTest(unittest.TestCase):
     """One file the host gives no result for leaves the others judged (romacs#334)."""
     A, B = 'lisp/session/a.el', 'lisp/session/b.el'
+    DIED = 'exit 255'
 
-    def test_a_file_with_no_result_here_and_at_the_base_is_named_not_judged(self):
-        shown, older, quiet, broken, unbased = lint.judged([self.A, self.B], [[OLD, NEW], None], {self.A: [OLD], self.B: None})
+    def test_a_file_the_host_fails_on_alike_here_and_at_the_base_is_named_not_judged(self):
+        shown, older, quiet, broken, unbased = lint.judged([self.A, self.B], [[OLD, NEW], self.DIED],
+                                                           {self.A: [OLD], self.B: self.DIED})
         self.assertEqual((shown, older, quiet, broken, unbased), ([NEW], 1, [self.B], [], []))
 
+    def test_a_timeout_is_never_as_at_the_base(self):
+        self.assertEqual(lint.judged([self.A, self.B], [[OLD], 'timeout'], {self.A: [OLD], self.B: 'timeout'})[3], [self.B])
+        self.assertEqual(lint.judged([self.A, self.B], [[OLD], 'timeout'], {self.A: [OLD], self.B: self.DIED})[3], [self.B])
+
+    def test_a_failure_of_another_cause_than_the_bases_is_broken(self):
+        self.assertEqual(lint.judged([self.A, self.B], [[OLD], 'exit 2'], {self.A: [OLD], self.B: self.DIED})[3], [self.B])
+
     def test_a_file_the_base_gives_no_result_for_has_every_finding_new(self):
-        shown, older, quiet, broken, unbased = lint.judged([self.A, 'lisp/session/b.el'], [[OLD], [HINT]], {self.A: [OLD], self.B: None})
+        shown, older, quiet, broken, unbased = lint.judged([self.A, self.B], [[OLD], [HINT]], {self.A: [OLD], self.B: self.DIED})
         self.assertEqual((shown, older, quiet, broken, unbased), ([HINT], 1, [], [], [self.B]))
 
     def test_no_result_here_for_a_file_the_base_lints_is_broken(self):
-        self.assertEqual(lint.judged([self.A], [None], {self.A: [OLD]})[3], [self.A])
+        self.assertEqual(lint.judged([self.A], [self.DIED], {self.A: [OLD]})[3], [self.A])
 
     def test_no_result_for_a_file_the_base_lacks_is_broken(self):
-        self.assertEqual(lint.judged([self.A], [None], {})[3], [self.A])
+        self.assertEqual(lint.judged([self.A], [self.DIED], {})[3], [self.A])
 
     def test_with_no_base_every_file_without_a_result_is_broken(self):
-        self.assertEqual(lint.judged([self.A, self.B], [[NEW], None], None), ([NEW], 0, [], [self.B], []))
+        self.assertEqual(lint.judged([self.A, self.B], [[NEW], self.DIED], None), ([NEW], 0, [], [self.B], []))
 
     def test_when_no_file_has_a_result_the_host_may_be_what_failed(self):
         # A host that cannot start gives no result for every file, here and at the base alike.
-        self.assertEqual(lint.judged([self.A, self.B], [None, None], {self.A: None, self.B: None}),
+        self.assertEqual(lint.judged([self.A, self.B], [self.DIED, self.DIED], {self.A: self.DIED, self.B: self.DIED}),
                          ([], 0, [], [self.A, self.B], []))
 
     def test_the_summary_names_the_files_left_unjudged(self):
