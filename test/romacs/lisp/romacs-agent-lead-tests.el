@@ -169,8 +169,8 @@ what waited for that end goes."
 
 (ert-deftest romacs-agent-lead-resume-adopts-and-wakes-the-parent ()
   (romacs-agent-lead-tests--with
-    (let* ((task (romacs-agent-lead-tests--adopt cwd "wake" "end"))
-           (child (romacs-agent-get (gethash "taskId" task))))
+    (let* ((child (romacs-agent-get (gethash "taskId" (romacs-agent-lead-tests--adopt cwd "wake" "end"))))
+           (task (romacs-agent-tools--task child)))
       ;; The conversation's own session, its parent's task, resumed in its directory.
       (should (equal (gethash "conversation" task) romacs-agent-lead-tests--thread))
       (should (equal (gethash "parent" task) romacs-agent-lead-tests--lead))
@@ -190,6 +190,38 @@ what waited for that end goes."
       (should (= (length delivered) 1))
       (should (equal (mapcar (lambda (w) (plist-get w :result)) (romacs-agent-tools--wakes-parse (car delivered)))
                      '("state: green" "reported"))))))
+
+(ert-deftest romacs-agent-lead-actions-never-repeat-a-result ()
+  "What acts on a task answers its short record: a result of 50000
+characters is its length there, whole in romacs_task_status alone.  A
+wait gives the end it waited for once, in place of its wake."
+  (romacs-agent-lead-tests--with
+    (let* ((child (romacs-agent-get (gethash "taskId" (romacs-agent-lead-tests--adopt cwd))))
+           (big (make-string 50000 ?r))
+           (short (lambda (record)
+                    (should (equal (gethash "taskId" record) (romacs-agent-id child)))
+                    (should-not (gethash "result" record))
+                    (should (= (gethash "resultChars" record) 50000))
+                    (should (< (length (json-serialize record)) 2000))))
+           (wait (lambda () (car (funcall (cadr (romacs-agent-lead-tests--adopt cwd "mode" "wait")))))))
+      (romacs-agent-lead-tests--end child 3 big)
+      (let ((waited (funcall wait)))
+        (should (equal (gethash "status" waited) "completed"))
+        (should (string-prefix-p (make-string 1000 ?r) (gethash "result" waited)))
+        (should (string-match-p "romacs_task_status" (gethash "result" waited)))
+        (should (< (length (gethash "result" waited)) 16500))
+        (should (= (gethash "resultChars" waited) 50000)))
+      ;; Its wake does not come besides.
+      (romacs-agent-tools--flush lead)
+      (should-not delivered)
+      ;; Asked again, delegated again, sent a message: it had that result.
+      (funcall short (funcall wait))
+      (funcall short (romacs-agent-lead-tests--adopt cwd))
+      (let ((record (romacs-agent-tools--send (romacs-agent-lead-tests--args "taskId" (romacs-agent-id child)
+                                                                             "message" "again"))))
+        (funcall short record)
+        (should (string-prefix-p "m-" (gethash "messageId" record))))
+      (should (equal (gethash "result" (romacs-agent-tools--task child)) big)))))
 
 (ert-deftest romacs-agent-lead-resume-is-idempotent-and-owned ()
   (romacs-agent-lead-tests--with
