@@ -404,6 +404,7 @@ impl Value {
         match tag {
             0 | 3 | 4 | 6 | 7 => self.0 & 7 == tag,
             1 => self.0 & 3 == 1,
+            5 => self.0 & 7 == 2 && self != Self::TRUE,
             _ => self.tag() == tag,
         }
     }
