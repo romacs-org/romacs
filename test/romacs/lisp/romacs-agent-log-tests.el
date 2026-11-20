@@ -387,7 +387,6 @@
 (ert-deftest romacs-agent-log-earlier-turns-draw-no-live-asks ()
   ;; An approval in the earlier turns whose settling the shown ones hold.
   (romacs-agent-log-tests--with
-    (ignore #'draw)
     (setq romacs-agent-log--from 5)
     (cl-letf (((symbol-function 'romacs-agent--journal-tail) (lambda (&rest _) '(nil)))
               ((symbol-function 'romacs-agent-events-p) #'ignore)
@@ -396,7 +395,22 @@
       (romacs-agent-log-earlier))
     (should-not (text-property-any (point-min) romacs-agent-log--end 'romacs-agent-log-keys t))
     (should-not (text-property-any (point-min) romacs-agent-log--end 'keymap romacs-agent-log-ask-map))
-    (should-not romacs-agent-log--asks)))
+    (should-not romacs-agent-log--asks)
+    ;; One still waited on: its keys only in its live block, at the end.
+    (puthash "live" t (romacs-agent-approvals session))
+    (romacs-agent-log--sync-asks session)
+    (setq romacs-agent-log--from 5)
+    (cl-letf (((symbol-function 'romacs-agent--journal-tail) (lambda (&rest _) '(nil)))
+              ((symbol-function 'romacs-agent-events-p) #'ignore)
+              ((symbol-function 'romacs-agent-log--replay)
+               (lambda (s &rest _) (romacs-agent-log-draw s '(:type approval :request-id "live" :tool "Bash")))))
+      (romacs-agent-log-earlier))
+    (let ((live (cadr (assoc "live" romacs-agent-log--asks))))
+      (should (= (length romacs-agent-log--asks) 1))
+      (should-not (text-property-any (point-min) live 'romacs-agent-log-keys t)))
+    (remhash "live" (romacs-agent-approvals session))
+    (draw :type 'answered :request-id "live")
+    (should-not (text-property-any (point-min) romacs-agent-log--end 'romacs-agent-log-keys t))))
 
 (ert-deftest romacs-agent-log-a-block-waits-until-its-answer-is-written ()
   (romacs-agent-log-tests--with

@@ -964,18 +964,12 @@ store, then that many before its end."
       (- end romacs-agent-log-records)
     from))
 
-(defun romacs-agent-log--settle-gone (session)
-  "Settle each block drawn open that SESSION no longer waits on: records
-ending before what settled it drew it open."
-  (let ((approvals (romacs-agent-approvals session)))
-    (dolist (ask romacs-agent-log--asks)
-      (unless (gethash (car ask) approvals) (romacs-agent-log--settle-ask (car ask))))))
-
 (defun romacs-agent-log--sync-asks (session)
   "What SESSION waits on now is what its chat shows waiting, whatever its
 records drew: a block no longer waited on settled, one waited on drawn."
-  (romacs-agent-log--settle-gone session)
   (let ((approvals (romacs-agent-approvals session)))
+    (dolist (ask romacs-agent-log--asks)
+      (unless (gethash (car ask) approvals) (romacs-agent-log--settle-ask (car ask))))
     (maphash (lambda (id request)
                (unless (assoc id romacs-agent-log--asks)
                  (romacs-agent-log--ask-block (romacs-agent-log--request-event id request))))
@@ -1013,8 +1007,10 @@ read as its harness's events read them."
                         romacs-agent-log--input (point-max-marker))
                   (set-marker-insertion-type romacs-agent-log--end t)
                   (romacs-agent-log--replay session from end)
-                  ;; What the shown turns settled is open no more here.
-                  (romacs-agent-log--settle-gone session)
+                  ;; No approval here offers its keys: one settled later
+                  ;; is settled, and one still waited on has its block at
+                  ;; the chat's end (`romacs-agent-log--sync-asks').
+                  (dolist (ask romacs-agent-log--asks) (romacs-agent-log--settle-ask (car ask)))
                   (buffer-substring (point-min) romacs-agent-log--end))))
       (romacs-agent-log--writing
         (save-excursion
