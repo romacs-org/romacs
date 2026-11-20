@@ -33,28 +33,28 @@ fn alphabet(url: bool) -> &'static [u8; 64] {
 fn encoded(cx: &mut Leaf<'_>, octets: &[u8], line_break: bool, pad: bool, url: bool) -> std::result::Result<Vec<u8>, Fault> {
     const SLICE: usize = 3 << 12;
     if octets.len() <= SLICE {
-        let mut out = Vec::with_capacity(octets.len() / 3 * 4 + octets.len() / 57 + 4);
-        encode_into(&mut out, octets, &mut 0, line_break, pad, url);
+        let mut out = Vec::with_capacity(octets.len() / 3 * 4 + 4);
+        encode_into(&mut out, octets, 0, line_break, pad, url);
         return Ok(out);
     }
     cx.quittable(|cx| {
         let mut out = Vec::with_capacity(octets.len() / 3 * 4 + octets.len() / 57 + 4);
-        let mut group = 0;
-        for part in octets.chunks(SLICE) {
-            encode_into(&mut out, part, &mut group, line_break, pad, url);
+        for (n, part) in octets.chunks(SLICE).enumerate() {
+            encode_into(&mut out, part, n * (SLICE / 3), line_break, pad, url);
             if part.len() == SLICE { cx.native_poll()?; }
         }
         Ok(out)
     })
 }
 
-/// fns.c base64_encode_1 over OCTETS, appended to OUT, GROUP counting the
-/// groups written so far, across slices.
-fn encode_into(out: &mut Vec<u8>, octets: &[u8], group: &mut usize, line_break: bool, pad: bool, url: bool) {
+/// fns.c base64_encode_1 over OCTETS, appended to OUT, the groups numbered
+/// from FIRST for the line breaks: the whole input, or a slice of it.
+#[inline]
+fn encode_into(out: &mut Vec<u8>, octets: &[u8], first: usize, line_break: bool, pad: bool, url: bool) {
     let table = alphabet(url);
-    for chunk in octets.chunks(3) {
-        if line_break && *group > 0 && *group % LINE_GROUPS == 0 { out.push(b'\n'); }
-        *group += 1;
+    for (i, chunk) in octets.chunks(3).enumerate() {
+        let group = first + i;
+        if line_break && group > 0 && group % LINE_GROUPS == 0 { out.push(b'\n'); }
         let value = chunk.iter().enumerate().fold(0u32, |v, (i, &b)| v | u32::from(b) << (16 - 8 * i));
         let digits = chunk.len() + 1;
         for i in 0..4 {
@@ -75,18 +75,33 @@ struct Input<'a> {
     stopped: bool,
 }
 
-impl<'a> Input<'a> {
-    fn new(all: &'a [u8], stop: &'a crate::quit::NativeStop) -> Self {
-        let end = CHECK.min(all.len());
-        Self { all, end, bytes: all[..end].iter().copied(), stop, stopped: false }
+/// The decoder's input, a byte at a time: None at its end, or at a stop.
+trait Bytes {
+    fn byte(&mut self) -> Option<u8>;
+}
+
+/// A short input, read whole with no probe.
+impl Bytes for std::iter::Copied<std::slice::Iter<'_, u8>> {
+    #[inline]
+    fn byte(&mut self) -> Option<u8> {
+        self.next()
     }
-    /// The next byte, or None at the input's end or at a stop.
+}
+
+impl Bytes for Input<'_> {
     #[inline]
     fn byte(&mut self) -> Option<u8> {
         match self.bytes.next() {
             Some(c) => Some(c),
             None => self.refill(),
         }
+    }
+}
+
+impl<'a> Input<'a> {
+    fn new(all: &'a [u8], stop: &'a crate::quit::NativeStop) -> Self {
+        let end = CHECK.min(all.len());
+        Self { all, end, bytes: all[..end].iter().copied(), stop, stopped: false }
     }
     #[cold]
     #[inline(never)]
@@ -109,10 +124,11 @@ fn decode(input: &[u8], url: bool, ignore_invalid: bool, stop: &crate::quit::Nat
     decoded
 }
 
-fn decode_from(bytes: &mut Input<'_>, length: usize, url: bool, ignore_invalid: bool) -> Option<Vec<u8>> {
+/// fns.c base64_decode_1 over BYTES, LENGTH of them.
+fn decode_from<B: Bytes>(bytes: &mut B, length: usize, url: bool, ignore_invalid: bool) -> Option<Vec<u8>> {
     // The next significant byte: whitespace, and with IGNORE-INVALID any
     // invalid byte, is skipped.
-    let next = |bytes: &mut Input<'_>| loop {
+    let next = |bytes: &mut B| loop {
         let c = bytes.byte()?;
         let v = digit(c, url);
         if !(v < 0 || (v == 0 && ignore_invalid)) { return Some((c, v)); }
@@ -156,7 +172,7 @@ const CHECK: usize = 1 << 14;
 fn decoded(cx: &mut Leaf<'_>, bytes: &[u8], url: bool, ignore_invalid: bool) -> std::result::Result<Vec<u8>, Fault> {
     // One check's worth of input asks no quit probe.
     if bytes.len() <= CHECK {
-        return decode(bytes, url, ignore_invalid, &crate::quit::NativeStop::never(), &mut false)
+        return decode_from(&mut bytes.iter().copied(), bytes.len(), url, ignore_invalid)
             .ok_or_else(|| Fault::Error("Invalid base64 data".into()));
     }
     cx.quittable(|cx| {
@@ -164,7 +180,7 @@ fn decoded(cx: &mut Leaf<'_>, bytes: &[u8], url: bool, ignore_invalid: bool) -> 
         let mut result = decode(bytes, url, ignore_invalid, &stop, &mut stopped);
         if stopped {
             cx.native_poll()?;
-            result = decode(bytes, url, ignore_invalid, &crate::quit::NativeStop::never(), &mut stopped);
+            result = decode_from(&mut bytes.iter().copied(), bytes.len(), url, ignore_invalid);
         }
         result.ok_or_else(|| Fault::Error("Invalid base64 data".into()))
     })
