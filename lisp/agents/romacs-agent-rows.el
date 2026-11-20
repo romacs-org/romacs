@@ -4,21 +4,23 @@
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
-;; A chat (romacs-agent-ui.el) draws each tool call as a row of its turn's
-;; run.  A tool with a renderer here gets a designed row; any other, its
-;; name and a brief of its input.  Romacs's own tools all read as what
-;; they did, never as JSON, behind Romacs's icon.  A new tool adds a
+;; A chat (romacs-agent-log.el) draws each tool call as one row: what
+;; the agent does, in the user's words, and once it ends what came of
+;; it, never the payload.  A tool with a renderer here gets a designed
+;; row; any other, its name, a brief of its input and a generic outcome
+;; (`romacs-agent-rows-outcome': a status, a title or an error picked
+;; out of a JSON answer, else how many lines).  Romacs's own tools all
+;; read as what they did, behind Romacs's icon.  A new tool adds a
 ;; renderer, never a case in the chat.
 ;;
 ;; A renderer is a plist (`romacs-agent-rows-define'):
 ;;   :row FN       (INPUT): the row's text as the call starts.
 ;;   :ended FN     (INPUT OUTPUT): its text once the call ended well, or
-;;                 nil to keep the first.
-;;   :body FN      (INPUT OUTPUT): what goes under the row (default OUTPUT).
-;;   :shown        the body shows, as a message sent does; else it is folded.
-;;   :card         the row shows while its run is folded; OUTPUT is a task
-;;                 record, whose state and thread the chat adds to it.
-;;   :answers FN   (INPUT): the id of the message the call answers.
+;;                 nil for the row and the generic outcome.
+;;   :body FN      (INPUT OUTPUT): the details RET on the row shows above
+;;                 the raw answer (a table, a list), or nil.
+;;   :tail         the output's last lines show under the row (a
+;;                 command's); any other output is one key away.
 ;; INPUT is the call's arguments, a hash table; OUTPUT its result's text.
 ;; The functions are pure: they read the session table at most, and the
 ;; chat draws what they return.
@@ -35,7 +37,7 @@
 
 (defun romacs-agent-rows-define (name &rest renderer)
   "Draw tool NAME's calls by RENDERER, a plist of :row :ended :body
-:shown :card :answers (this file's Commentary)."
+:tail (this file's Commentary)."
   (puthash name renderer romacs-agent-rows))
 
 (defun romacs-agent-rows-name (name)
@@ -84,6 +86,60 @@ items, or how many when they are records), any other text as it is."
                (push (concat (romacs-agent-rows--dim (concat key "  ")) said) lines))))
          record)
         (string-join (nreverse lines) "\n")))))
+
+;;; What a call came to
+
+(defun romacs-agent-rows--state (record)
+  "RECORD's state, or its status, dim after a dot, or nothing."
+  (if-let* ((state (or (romacs-agent-rows--field record "state") (romacs-agent-rows--field record "status"))))
+      (romacs-agent-rows--dim (concat " · " state))
+    ""))
+
+(defconst romacs-agent-rows--outcome-keys '("error" "message" "status" "state" "title" "name" "id")
+  "The keys of a JSON answer a generic outcome says, the first found
+first: an error alone, else a status or state and what it names.")
+
+(defun romacs-agent-rows-outcome (output)
+  "What OUTPUT, a call's answer, came to as a row says it after the call,
+dim after a dot: a JSON object's error, else its status or state and its
+title, name or id; a list's length; a text's one line, else how many
+lines; nothing for no output."
+  (let* ((value (and (stringp output) (string-match-p "\\`[ \t\n]*[[{]" output)
+                     (ignore-errors (json-parse-string output :null-object nil :false-object nil))))
+         (said
+          (cond ((hash-table-p value)
+                 (if-let* ((error (romacs-agent-rows--field value "error")))
+                     (propertize (romacs-agent-rows--line error) 'face 'romacs-agent-error)
+                   (let ((state (or (romacs-agent-rows--field value "status") (romacs-agent-rows--field value "state")))
+                         (what (seq-some (lambda (key) (romacs-agent-rows--field value key)) '("title" "name" "id"))))
+                     (string-join (delq nil (list state (and what (truncate-string-to-width (romacs-agent-rows--line what) 60 nil nil "…"))))
+                                  " · "))))
+                ((vectorp value) (romacs-agent-rows--plural (length value) "item"))
+                ((or (not (stringp output)) (string-empty-p (string-trim output))) nil)
+                ((= (romacs-agent-rows--lines output) 1) (truncate-string-to-width (string-trim output) 60 nil nil "…"))
+                (t (romacs-agent-rows--plural (romacs-agent-rows--lines output) "line")))))
+    (if (or (null said) (string-empty-p said)) "" (concat (romacs-agent-rows--dim " · ") (romacs-agent-rows--dim said)))))
+
+(defun romacs-agent-rows-ended (name input row output)
+  "The row of tool NAME's call with INPUT, first drawn as ROW, once it
+ended well with OUTPUT: its renderer's :ended, else ROW and the generic
+outcome (`romacs-agent-rows-outcome')."
+  (or (when-let* ((renderer (romacs-agent-rows-get (romacs-agent-rows-name name)))
+                  (ended (plist-get renderer :ended)))
+        (funcall ended (if (hash-table-p input) input (make-hash-table :test #'equal)) output))
+      (concat row (romacs-agent-rows-outcome output))))
+
+(defun romacs-agent-rows-details (name input output)
+  "The details RET on tool NAME's row shows above its raw answer: its
+renderer's :body for INPUT and OUTPUT, or nil."
+  (when-let* ((renderer (romacs-agent-rows-get (romacs-agent-rows-name name)))
+              (body (plist-get renderer :body)))
+    (let ((details (funcall body (if (hash-table-p input) input (make-hash-table :test #'equal)) output)))
+      (and (stringp details) (not (string-empty-p details)) details))))
+
+(defun romacs-agent-rows-tail-p (name)
+  "Whether tool NAME's output shows its last lines under its row."
+  (plist-get (romacs-agent-rows-get (romacs-agent-rows-name name)) :tail))
 
 ;;; Pieces
 
@@ -136,7 +192,7 @@ known."
   (let ((model (and model harness (string-remove-prefix (concat harness "-") model))))
     (cond ((and model provider) (format "%s@%s" model provider)) (model) (provider))))
 
-;;; Messages and delegations: cards
+;;; Messages and delegations
 
 (defun romacs-agent-rows--message-body (input _output)
   "A message this chat sent another thread, quoted and dim
@@ -147,10 +203,16 @@ known."
 (romacs-agent-rows-define
  "romacs_task_send"
  :row (lambda (input) (romacs-agent-rows--romacs
-                       (concat "✉ to " (propertize (romacs-agent-rows--title (romacs-agent-rows--field input "taskId"))
+                       (concat "✉ → " (propertize (romacs-agent-rows--title (romacs-agent-rows--field input "taskId"))
                                                    'face 'romacs-agent-message))))
- :body #'romacs-agent-rows--message-body :shown t :card t
- :answers (lambda (input) (romacs-agent-rows--field input "inReplyTo")))
+ :ended (lambda (input output)
+          (let ((record (romacs-agent-rows--json output)))
+            (romacs-agent-rows--romacs
+             (concat "✉ → " (propertize (or (romacs-agent-rows--field record "title")
+                                           (romacs-agent-rows--title (romacs-agent-rows--field input "taskId")))
+                                       'face 'romacs-agent-message)
+                     (romacs-agent-rows--state record)))))
+ :body #'romacs-agent-rows--message-body)
 
 (romacs-agent-rows-define
  "romacs_task_reply"
@@ -158,12 +220,11 @@ known."
  :row (lambda (_input) (romacs-agent-rows--romacs (concat "✉ " (propertize "reply" 'face 'romacs-agent-message))))
  :ended (lambda (_input output)
           (and-let* ((title (romacs-agent-rows--field (romacs-agent-rows--json output) "title")))
-            (romacs-agent-rows--romacs (concat "✉ to " (propertize title 'face 'romacs-agent-message)))))
- :body #'romacs-agent-rows--message-body :shown t :card t
- :answers (lambda (input) (romacs-agent-rows--field input "messageId")))
+            (romacs-agent-rows--romacs (concat "✉ → " (propertize title 'face 'romacs-agent-message)))))
+ :body #'romacs-agent-rows--message-body)
 
 (defun romacs-agent-rows--delegated (title instance)
-  (concat "⇢ " (propertize title 'face 'romacs-agent-delegate)
+  (concat "⑂ " (propertize title 'face 'romacs-agent-delegate)
           (if instance (romacs-agent-rows--dim (concat " · " instance)) "")))
 
 (romacs-agent-rows-define
@@ -179,23 +240,22 @@ known."
           (when-let* ((record (romacs-agent-rows--json output)))
             (let ((target (gethash "target" input)))
               (romacs-agent-rows--romacs
-               (romacs-agent-rows--delegated
-                (or (romacs-agent-rows--field record "title") (romacs-agent-rows--field input "title") "task")
-                (romacs-agent-rows--instance
-                 (or (romacs-agent-rows--field record "model") (romacs-agent-rows--field target "model"))
-                 (romacs-agent-rows--field record "harness")
-                 (or (romacs-agent-rows--field record "provider") (romacs-agent-rows--field target "provider"))))))))
- ;; A `wait' answers with the task's result: the card holds it.
- :body (lambda (_input output) (or (romacs-agent-rows--field (romacs-agent-rows--json output) "result") ""))
- :card t)
+               (concat (romacs-agent-rows--delegated
+                        (or (romacs-agent-rows--field record "title") (romacs-agent-rows--field input "title") "task")
+                        (romacs-agent-rows--instance
+                         (or (romacs-agent-rows--field record "model") (romacs-agent-rows--field target "model"))
+                         (romacs-agent-rows--field record "harness")
+                         (or (romacs-agent-rows--field record "provider") (romacs-agent-rows--field target "provider"))))
+                       (romacs-agent-rows--state record))))))
+ ;; A `wait' answers with the task's result.
+ :body (lambda (_input output) (romacs-agent-rows--field (romacs-agent-rows--json output) "result")))
 
 ;; A harness's own subagent: the same card, with no task of ours.
 (dolist (name '("Agent" "Task"))
   (romacs-agent-rows-define
    name
    :row (lambda (input) (romacs-agent-rows--delegated (or (romacs-agent-rows--field input "description") "task")
-                                                       (romacs-agent-rows--field input "subagent_type")))
-   :card t))
+                                                       (romacs-agent-rows--field input "subagent_type")))))
 
 ;;; Tasks: one line each
 
@@ -214,7 +274,7 @@ known."
                      (if-let* ((status (romacs-agent-rows--field record "status")))
                          (romacs-agent-rows--dim (concat " · " status))
                        "")))))
- :body (lambda (_input output) (or (romacs-agent-rows--field (romacs-agent-rows--json output) "result") "")))
+ :body (lambda (_input output) (romacs-agent-rows--field (romacs-agent-rows--json output) "result")))
 
 (defun romacs-agent-rows--tasks (output)
   "The task records OUTPUT, a task list's answer, holds."
@@ -259,8 +319,7 @@ known."
                        "")))))
  :body (lambda (_input output)
          (let ((watching (gethash "watching" (or (romacs-agent-rows--json output) (make-hash-table)))))
-           (if (vectorp watching) (mapconcat (lambda (w) (format "%s" w)) watching "\n")
-             (romacs-agent-rows-words output)))))
+           (and (vectorp watching) (mapconcat (lambda (w) (format "%s" w)) watching "\n")))))
 
 ;;; Lisp
 
@@ -274,14 +333,14 @@ known."
         (romacs-agent-rows--romacs
          (concat "λ " (romacs-agent-rows-lisp
                        (replace-regexp-in-string "[ \t\n]+" " " (string-trim (or (romacs-agent-rows--field input "code") "")))))))
- ;; A form its row holds whole is said once, there: under it, what it
- ;; gave.  One of several lines, or long, is there whole too.
- :body (lambda (input output)
-         (let ((code (string-trim (or (romacs-agent-rows--field input "code") ""))))
-           (concat (if (or (string-search "\n" code) (> (string-width code) 60))
-                       (concat (romacs-agent-rows-lisp code) "\n")
-                     "")
-                   (romacs-agent-rows--dim "⇒ ") output))))
+ ;; What it gave, after the form: the form whole, and the answer, RET.
+ :ended (lambda (input output)
+          (let ((code (replace-regexp-in-string "[ \t\n]+" " " (string-trim (or (romacs-agent-rows--field input "code") "")))))
+            (romacs-agent-rows--romacs
+             (concat "λ " (romacs-agent-rows-lisp (truncate-string-to-width code 60 nil nil "…"))
+                     (romacs-agent-rows--dim " ⇒ ")
+                     (truncate-string-to-width (romacs-agent-rows--line output) 60 nil nil "…")))))
+ :body (lambda (input _output) (romacs-agent-rows-lisp (string-trim (or (romacs-agent-rows--field input "code") "")))))
 
 ;;; Tables
 
@@ -364,8 +423,7 @@ known."
          (if-let* ((target (romacs-agent-rows--field input "target")))
              (format "↻ restart into %s after this turn" (abbreviate-file-name target))
            "↻ restart after this turn")))
- :body (lambda (_input output)
-         (or (romacs-agent-rows--field (romacs-agent-rows--json output) "status") (romacs-agent-rows-words output))))
+)
 
 (romacs-agent-rows-define
  "romacs_dev_check"
@@ -383,8 +441,7 @@ known."
                      (romacs-agent-rows--dim
                       (if (eq (romacs-agent-rows--get answer "watched") t) " · told at its end"
                         (concat " · report " (abbreviate-file-name (or (romacs-agent-rows--field answer "report") "?")))))))))
- :body (lambda (_input output) (or (romacs-agent-rows--field (romacs-agent-rows--json output) "next")
-                                  (romacs-agent-rows-words output))))
+ :body (lambda (_input output) (romacs-agent-rows--field (romacs-agent-rows--json output) "next")))
 
 ;;; The harnesses' own tools
 ;;
@@ -429,9 +486,35 @@ found none."
               (string-join words " ")))))
         (t "")))
 
+(defcustom romacs-agent-rows-command-outcomes
+  '(("\\_<git\\(?: -C [^ ]+\\)? commit\\_>" "^\\[[^] ]+ \\([0-9a-f]\\{7,\\}\\)\\] \\(.*\\)$" "✓ committed %s %s")
+    ("\\_<git\\(?: -C [^ ]+\\)? merge\\_>" "^Merge made by\\|^Fast-forward" "✓ merged")
+    ("\\_<forge submit\\_>" "^\\([0-9]\\{8\\}T[0-9]\\{6\\}-[^ \n]+\\)$" "⇡ queued %s")
+    ("\\_<forge watch\\_>" "^landed +[^ ]+ +\\([0-9a-f]\\{7\\}\\)" "✓ landed %s"))
+  "What a shell command's row says it came to: each (COMMAND OUTPUT
+FORMAT), COMMAND a regexp its command matches, OUTPUT one its output
+matches, FORMAT given OUTPUT's groups.  The first that matches says it."
+  :type '(repeat (list regexp regexp string))
+  :group 'romacs-agent)
+
+(defun romacs-agent-rows--command-outcome (command output)
+  "What COMMAND came to, its OUTPUT read by
+`romacs-agent-rows-command-outcomes', or nil."
+  (and (stringp output)
+       (seq-some (pcase-lambda (`(,command-re ,output-re ,format))
+                   (when (and (string-match-p command-re command) (string-match output-re output))
+                     (let ((groups (cl-loop for n from 1 while (match-beginning n) collect (match-string n output))))
+                       (propertize (apply #'format format groups) 'face 'romacs-agent-done))))
+                 romacs-agent-rows-command-outcomes)))
+
 (romacs-agent-rows-define
  "Bash"
- :row (lambda (input) (concat "$ " (romacs-agent-rows--command (romacs-agent-rows--get input "command")))))
+ :row (lambda (input) (concat "$ " (romacs-lexical-string 'shell (romacs-agent-rows--command (romacs-agent-rows--get input "command")))))
+ :ended (lambda (input output)
+          (when-let* ((said (romacs-agent-rows--command-outcome (romacs-agent-rows--command (romacs-agent-rows--get input "command")) output)))
+            (concat "$ " (romacs-lexical-string 'shell (romacs-agent-rows--command (romacs-agent-rows--get input "command")))
+                    (romacs-agent-rows--dim " · ") said)))
+ :tail t)
 
 (defun romacs-agent-rows--read-span (input)
   "Which of a file's lines a Read call took, as words, or nil for all."
@@ -444,7 +527,12 @@ found none."
  "Read"
  :row (lambda (input)
         (concat "◧ " (romacs-agent-rows--path (romacs-agent-rows--field input "file_path")
-                                             (romacs-agent-rows--read-span input)))))
+                                             (romacs-agent-rows--read-span input))))
+ ;; How much it read, never what: RET shows that.
+ :ended (lambda (input output)
+          (concat "◧ " (romacs-agent-rows--path (romacs-agent-rows--field input "file_path")
+                                               (romacs-agent-rows--read-span input))
+                  (romacs-agent-rows--dim (concat " · " (romacs-agent-rows--plural (romacs-agent-rows--lines output) "line"))))))
 
 (defun romacs-agent-rows--change (edits)
   "EDITS, (OLD . NEW) pairs, as the lines they add and take: \"+A −R\"."

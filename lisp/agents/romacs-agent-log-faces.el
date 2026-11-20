@@ -76,5 +76,32 @@ have failed, a line under it that says why."
   (when romacs-agent-log-faces--end (set-marker romacs-agent-log-faces--end nil))
   (setq romacs-agent-log-faces--current nil romacs-agent-log-faces--end nil romacs-agent-log-faces--failed nil))
 
+;;; A command's output
+
+(defcustom romacs-agent-log-faces-output-patterns
+  '(("\\(?:^\\|[ (\"'`]\\)\\([~.]?[[:alnum:]_./-]*[[:alnum:]_-]\\.[[:alnum:]]+:[0-9]+\\(?::[0-9]+\\)?\\)" 1 link)
+    ("\\_<\\(?:error\\|ERROR\\|failed\\|FAILED\\|FAIL\\|panicked\\|fatal\\)\\_>.*" 0 error)
+    ("\\_<\\(?:warning\\|WARNING\\|warn\\)\\_>" 0 warning)
+    ("\\_<\\(?:ok\\|OK\\|PASS\\|passed\\|done\\)\\_>" 0 success)
+    ("\\_<[0-9a-f]\\{7,40\\}\\_>" 0 font-lock-constant-face))
+  "What a command's output shown under its call is faced by: each
+\(REGEXP GROUP FACE), the GROUP of each match of REGEXP in FACE, in front
+of the output's own.  A file:line reference, an error line, a warning, a
+success word and a commit hash, by default."
+  :type '(repeat (list regexp integer face))
+  :group 'romacs-agent)
+
+(defun romacs-agent-log-faces-output (text)
+  "TEXT, a command's output as shown, with the faces of
+`romacs-agent-log-faces-output-patterns' in front of its own."
+  (let ((text (copy-sequence text)))
+    (pcase-dolist (`(,regexp ,group ,face) romacs-agent-log-faces-output-patterns)
+      (let ((at 0))
+        (while (and (< at (length text)) (string-match regexp text at))
+          (when (match-beginning group)
+            (add-face-text-property (match-beginning group) (match-end group) face nil text))
+          (setq at (max (1+ at) (match-end 0))))))
+    text))
+
 (provide 'romacs-agent-log-faces)
 ;;; romacs-agent-log-faces.el ends here

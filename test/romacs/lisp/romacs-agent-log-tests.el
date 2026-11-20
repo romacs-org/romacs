@@ -113,7 +113,8 @@
     (draw :type 'tool :state 'completed :id "r" :parent "a" :output "hello")
     (draw :type 'tool :state 'completed :id "a" :output "2 words")
     (let ((text (romacs-agent-log-tests--transcript)))
-      (should (string-match-p "count[^\n]*\n│ ● [^\n]*n.txt[^\n]*\n│   ⎿ hello\n  ⎿ 2 words\nMain goes on." text)))))
+      ;; A read says how much it read, its text RET away; a report, under its call.
+      (should (string-match-p "count[^\n]*\n│ ● [^\n]*n.txt[^\n]*· 1 line\n  ⎿ 2 words\nMain goes on." text)))))
 
 (ert-deftest romacs-agent-log-an-approval-waits-in-plain-sight ()
   (romacs-agent-log-tests--with
@@ -734,8 +735,11 @@
     (draw :type 'tool :state 'completed :id "b" :input (romacs-agent-log-tests--input "query" "two") :output "B")
     (goto-char (point-min))
     (should (equal (gethash "query" (car (get-text-property (point) 'romacs-agent-log-full))) "one"))
-    (search-forward "⎿ A")
+    ;; Each row says its own query and what came of it.
+    (goto-char (search-forward "◍ one · A"))
+    (goto-char (match-beginning 0))
     (should (equal (gethash "query" (car (get-text-property (point) 'romacs-agent-log-full))) "one"))
+    (should (search-forward "◍ two · B" nil t))
     (goto-char (point-min))
     (romacs-agent-log-next 2)
     (should (equal (gethash "query" (car (get-text-property (point) 'romacs-agent-log-full))) "two"))))
@@ -989,3 +993,35 @@
     (let ((text (romacs-agent-log-tests--transcript)))
       (should (string-match-p "Some text\\." text))
       (should (string-match-p "⚠ shown without its faces: Parser broke" text)))))
+
+;;; What a call came to
+
+(ert-deftest romacs-agent-log-a-call-says-what-it-came-to-not-its-payload ()
+  (romacs-agent-log-tests--with
+    ;; A Romacs tool's JSON answer: its row says it, nothing under it.
+    (draw :type 'tool :state 'started :id "s" :name "mcp__romacs__romacs_task_status"
+          :input (romacs-agent-log-tests--input "taskId" "t1"))
+    (draw :type 'tool :state 'completed :id "s" :output "{\"title\":\"lane x\",\"status\":\"running\",\"result\":\"a long report\"}")
+    ;; A read: how much, its text RET away.
+    (draw :type 'tool :state 'started :id "r" :name "Read" :input (romacs-agent-log-tests--input "file_path" "/a/n.txt"))
+    (draw :type 'tool :state 'completed :id "r" :output "one\ntwo")
+    ;; A failure: its error, as it says it.
+    (draw :type 'tool :state 'started :id "f" :name "Bash" :input (romacs-agent-log-tests--input "command" "make"))
+    (draw :type 'tool :state 'failed :id "f" :output "<tool_use_error>make: no rule</tool_use_error>")
+    (let ((text (romacs-agent-log-tests--transcript)))
+      (should (string-match-p "◷ lane x · running\n" text))
+      (should-not (string-match-p "a long report\\|{" text))
+      (should (string-match-p "◧ n\\.txt  /a · 2 lines\n" text))
+      (should-not (string-match-p "⎿ one" text))
+      (should (string-match-p "\\$ make\n  ⎿ make: no rule\n" text))
+      (goto-char (point-min))
+      (search-forward "make: no rule")
+      (should (memq 'romacs-agent-log-denied (ensure-list (get-text-property (match-beginning 0) 'face))))
+      ;; RET on a row: its details, then the raw answer.
+      (goto-char (point-min))
+      (search-forward "lane x")
+      (save-window-excursion (romacs-agent-log-open))
+      (with-current-buffer "*agent output*"
+        (should (string-match-p "a long report" (buffer-string)))
+        (should (string-match-p "Output:\n{" (buffer-string)))
+        (kill-buffer)))))

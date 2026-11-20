@@ -84,24 +84,25 @@
 (ert-deftest romacs-agent-rows-messages-and-delegations ()
   (romacs-agent-rows-tests--plain
    (should (equal (romacs-agent-rows-tests--draw "romacs_task_send" :row (romacs-agent-rows-tests--table "taskId" "gone"))
-                  "◈ ✉ to a task"))
+                  "◈ ✉ → a task"))
+   ;; Ended: to whom, and how that task is now.
+   (should (equal (romacs-agent-rows-tests--draw "romacs_task_send" :ended (romacs-agent-rows-tests--table "taskId" "gone")
+                                                 "{\"title\":\"lane x\",\"state\":\"running\",\"result\":\"long\"}")
+                  "◈ ✉ → lane x · running"))
    (should (equal (romacs-agent-rows-tests--draw "romacs_task_send" :body
                                                  (romacs-agent-rows-tests--table "message" "one\ntwo") "{}")
                   "┃ one\n┃ two"))
    (should (equal (romacs-agent-rows-tests--draw "romacs_task_reply" :ended (romacs-agent-rows-tests--table)
                                                  "{\"title\":\"lane x\"}")
-                  "◈ ✉ to lane x"))
-   (should (equal (funcall (plist-get (romacs-agent-rows-get "romacs_task_reply") :answers)
-                           (romacs-agent-rows-tests--table "messageId" "m-1"))
-                  "m-1"))
+                  "◈ ✉ → lane x"))
    (let ((input (romacs-agent-rows-tests--table
                  "title" "lane x" "target" (romacs-agent-rows-tests--table "provider" "claude3"))))
-     (should (equal (romacs-agent-rows-tests--draw "romacs_delegate_task" :row input) "◈ ⇢ lane x · claude3"))
+     (should (equal (romacs-agent-rows-tests--draw "romacs_delegate_task" :row input) "◈ ⑂ lane x · claude3"))
      ;; The record says what it runs on, the model without its harness's name.
      (should (equal (romacs-agent-rows-tests--draw
                      "romacs_delegate_task" :ended input
-                     "{\"title\":\"lane x\",\"model\":\"claude-opus-5-5\",\"harness\":\"claude\",\"provider\":\"claude3\"}")
-                    "◈ ⇢ lane x · opus-5-5@claude3")))))
+                     "{\"title\":\"lane x\",\"model\":\"claude-opus-5-5\",\"harness\":\"claude\",\"provider\":\"claude3\",\"state\":\"running\"}")
+                    "◈ ⑂ lane x · opus-5-5@claude3 · running")))))
 
 (ert-deftest romacs-agent-rows-tasks-are-one-line ()
   (romacs-agent-rows-tests--plain
@@ -125,9 +126,11 @@
      ;; One line, in Lisp's colours.
      (should (equal (substring-no-properties row) "◈ λ (defun f () \"doc\")"))
      (should (memq 'font-lock-keyword-face (ensure-list (get-text-property (string-search "defun" row) 'face row))))
-     ;; Folded: the whole form, then what it gave.
+     ;; Ended: the form and what it gave, one line; RET, the form whole.
+     (should (equal (substring-no-properties (romacs-agent-rows-tests--draw "romacs_eval" :ended input "f"))
+                    "◈ λ (defun f () \"doc\") ⇒ f"))
      (should (equal (romacs-agent-rows-tests--draw "romacs_eval" :body input "f")
-                    "(defun f ()\n  \"doc\")\n⇒ f")))))
+                    "(defun f ()\n  \"doc\")")))))
 
 (ert-deftest romacs-agent-rows-tables-line-up ()
   (romacs-agent-rows-tests--plain
@@ -171,25 +174,38 @@
         (should (equal (romacs-agent-rows-tests--draw "romacs_test_tool" :row (romacs-agent-rows-tests--table)) "drawn")))
     (remhash "romacs_test_tool" romacs-agent-rows)))
 
-(ert-deftest romacs-agent-rows-say-a-form-and-an-answer-once ()
-  ;; A short form is its row alone: under it, its value.
-  (should (equal (romacs-agent-rows-tests--draw "romacs_eval" :body (romacs-agent-rows-tests--table "code" "(buffer-size)") "42")
-                 "⇒ 42"))
-  ;; A Romacs tool's answer is words, never JSON.
-  (should (equal (romacs-agent-rows-tests--draw "romacs_task_status" :body (romacs-agent-rows-tests--table)
-                                                "{\"title\":\"lane x\",\"status\":\"running\"}")
-                 ""))
-  (should (equal (romacs-agent-rows-tests--draw "romacs_buffer_read" :body (romacs-agent-rows-tests--table)
-                                                "{\"name\":\"notes\",\"size\":12,\"lines\":[\"a\",\"b\"],\"rows\":[{\"x\":1}]}")
+(ert-deftest romacs-agent-rows-say-what-a-call-came-to ()
+  ;; A form and its value on its row.
+  (should (equal (substring-no-properties
+                  (romacs-agent-rows-tests--draw "romacs_eval" :ended (romacs-agent-rows-tests--table "code" "(buffer-size)") "42"))
+                 "◈ λ (buffer-size) ⇒ 42"))
+  ;; Any other answer, generically: an error, else a status and what it
+  ;; names, a list's length, a line, or how many lines; never the payload.
+  (should (equal (substring-no-properties (romacs-agent-rows-outcome "{\"status\":\"queued\",\"title\":\"x\",\"log\":\"…\"}"))
+                 " · queued · x"))
+  (should (equal (substring-no-properties (romacs-agent-rows-outcome "{\"error\":\"no such task\",\"status\":\"x\"}"))
+                 " · no such task"))
+  (should (equal (substring-no-properties (romacs-agent-rows-outcome "[1,2,3]")) " · 3 items"))
+  (should (equal (substring-no-properties (romacs-agent-rows-outcome "ok")) " · ok"))
+  (should (equal (substring-no-properties (romacs-agent-rows-outcome "a\nb\nc")) " · 3 lines"))
+  (should (equal (romacs-agent-rows-outcome "") ""))
+  (should (equal (substring-no-properties (romacs-agent-rows-ended "some_tool" nil "● some_tool" "{\"state\":\"done\"}"))
+                 "● some_tool · done"))
+  ;; A command's: a commit, a request queued.
+  (should (equal (substring-no-properties
+                  (romacs-agent-rows-tests--draw "Bash" :ended (romacs-agent-rows-tests--table "command" "git commit -S -m x")
+                                                 "[fix/a 8d19aa448] agents: Do it\n 2 files changed"))
+                 "$ git commit -S -m x · ✓ committed 8d19aa448 agents: Do it"))
+  (should (equal (substring-no-properties
+                  (romacs-agent-rows-tests--draw "Bash" :ended (romacs-agent-rows-tests--table "command" "forge submit feat/x")
+                                                 "20261120T182628-feat-x-6c8da7d2\n"))
+                 "$ forge submit feat/x · ⇡ queued 20261120T182628-feat-x-6c8da7d2"))
+  (should (romacs-agent-rows-tail-p "Bash"))
+  (should-not (romacs-agent-rows-tail-p "Read"))
+  ;; Details RET shows: a Romacs tool's answer as words, never JSON.
+  (should (equal (romacs-agent-rows-details "romacs_buffer_read" nil
+                                            "{\"name\":\"notes\",\"size\":12,\"lines\":[\"a\",\"b\"],\"rows\":[{\"x\":1}]}")
                  "name  notes\nsize  12\nlines  a, b\nrows  1 items"))
-  (should (equal (romacs-agent-rows-tests--draw "romacs_buffer_read" :body (romacs-agent-rows-tests--table) "plain text")
-                 "plain text"))
-  ;; A text of several lines, whole, under its key.
-  (should (equal (romacs-agent-rows-tests--draw "romacs_buffer_read" :body (romacs-agent-rows-tests--table)
-                                                "{\"text\":\"one\\ntwo\\nthree\"}")
-                 "text  \n  one\n  two\n  three"))
-  ;; A renderer whose body says nothing: the answer as words, here none.
-  (should (equal (romacs-agent-rows-tests--draw "romacs_limits" :body (romacs-agent-rows-tests--table) "{\"harnesses\":[]}")
-                 "")))
+  (should-not (romacs-agent-rows-details "Read" nil "text")))
 
 ;;; romacs-agent-rows-tests.el ends here
