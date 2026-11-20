@@ -1441,15 +1441,16 @@ override also shadows any exit below that prefix."
          (full (delq nil (list (and exit (concat (make-string (max 0 (- 3 (string-width exit))) ?\s)
                                                  (funcall key exit) "  "
                                                  (if (keymap-popup--session-get buf :stack) "Back" "Dismiss menu")))
-                               (and count (string-join (delq nil (list count
-                                                                       (and next (concat (funcall key next) " next"))
-                                                                       (and previous (concat (funcall key previous) " previous"))))
-                                                       "  ")))))
+                               ;; The page and the ways off it, one group.
+                               (and count (concat count " · "
+                                                  (string-join (delq nil (list (and next (concat (funcall key next) " next"))
+                                                                               (and previous (concat (funcall key previous) " previous"))))
+                                                               "  "))))))
          ;; Narrower forms: the exit's words go, then the directions'.
-         (medium (delq nil (list (and exit (funcall key exit)) count
+         (medium (delq nil (list (and exit (funcall key exit)) (and count (concat count " ·"))
                                  (and next (concat (funcall key next) " next"))
                                  (and previous (concat (funcall key previous) " previous")))))
-         (short (delq nil (list (and exit (funcall key exit)) count
+         (short (delq nil (list (and exit (funcall key exit)) (and count (concat count " ·"))
                                 (and next (funcall key next)) (and previous (funcall key previous)))))
          (line (lambda (parts) (and parts (concat (if exit "" "  ") (string-join parts "     "))))))
     (cond ((or (null columns) (<= (string-width (or (funcall line full) "")) columns)) (funcall line full))

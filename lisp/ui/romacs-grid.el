@@ -127,20 +127,36 @@ each a list of blocks."
 
 ;;;; Pages
 
-(defun romacs-grid--flow-pages (blocks rows columns)
-  "BLOCKS (each at most ROWS lines) in pages, each one band of a flow at
-most ROWS high: each page takes the most blocks whose flow fits.  A
-paged menu fills its room, so each page's flow is its shortest (the
-most columns the width holds), not one kept to half the rows."
+(defun romacs-grid--fill-pages (blocks budget columns)
+  "BLOCKS in pages, each the most blocks, in order, whose shortest flow
+within COLUMNS is at most BUDGET rows: a list of pages, each a list of
+blocks."
   (let (pages)
     (while blocks
       (let ((n 1))
         (while (and (< n (length blocks))
-                    (<= (romacs-grid--band-height (romacs-grid--flow (seq-take blocks (1+ n)) nil columns)) rows))
+                    (<= (romacs-grid--band-height (romacs-grid--flow (seq-take blocks (1+ n)) nil columns)) budget))
           (setq n (1+ n)))
-        (push (list (romacs-grid--flow (seq-take blocks n) nil columns)) pages)
+        (push (seq-take blocks n) pages)
         (setq blocks (nthcdr n blocks))))
     (nreverse pages)))
+
+(defun romacs-grid--flow-pages (blocks rows columns)
+  "BLOCKS (each at most ROWS lines) in pages of one band each, at most
+ROWS high: as few pages as filling them allows, balanced, the least
+budget of rows that still needs no more pages (as `romacs-grid--balance'
+balances columns), so a last page is not a remnant.  A paged menu fills
+its room, so each page's flow is its shortest (the most columns the
+width holds), not one kept to half the rows."
+  ;; Upward from the tallest block, not by halving: a greedy fill's page
+  ;; count need not fall as its budget grows (a block it now takes can
+  ;; push a wide pair apart).
+  (let* ((count (length (romacs-grid--fill-pages blocks rows columns)))
+         (pages (cl-loop for budget from (apply #'max 1 (mapcar #'length blocks)) to rows
+                         for fill = (romacs-grid--fill-pages blocks budget columns)
+                         when (<= (length fill) count) return fill)))
+    (mapcar (lambda (page) (list (romacs-grid--flow page nil columns)))
+            (or pages (romacs-grid--fill-pages blocks rows columns)))))
 
 (defun romacs-grid--declared (blocks bands)
   "BLOCKS split into BANDS (how many blocks each band has), each block
@@ -235,10 +251,18 @@ Commentary).  No blocks is one empty page."
       (list (romacs-grid--page-lines declared declared-widths)))
      (t
       (let ((chunks (mapcan (lambda (block) (romacs-grid--chunks block rows)) blocks)))
-        (mapcar (lambda (page) (romacs-grid--page-lines page (romacs-grid--position-widths page)))
-                (if (and rows (> (romacs-grid--band-height (romacs-grid--flow chunks rows columns)) rows))
-                    (romacs-grid--flow-pages chunks rows columns)
-                  (list (list (romacs-grid--flow chunks rows columns))))))))))
+        (let* ((pages (if (and rows (> (romacs-grid--band-height (romacs-grid--flow chunks rows columns)) rows))
+                          (romacs-grid--flow-pages chunks rows columns)
+                        (list (list (romacs-grid--flow chunks rows columns)))))
+               ;; One column start per position on every page, each page
+               ;; taking those of its own columns where they fit: turning a
+               ;; page moves nothing.
+               (shared (romacs-grid--position-widths (apply #'append pages))))
+          (mapcar (lambda (page)
+                    (let ((own (seq-take shared (length (romacs-grid--position-widths page)))))
+                      (romacs-grid--page-lines page (if (<= (romacs-grid--band-width own) columns) own
+                                                      (romacs-grid--position-widths page)))))
+                  pages)))))))
 
 (defun romacs-grid-width (pages)
   "The widest line of PAGES, in columns."
