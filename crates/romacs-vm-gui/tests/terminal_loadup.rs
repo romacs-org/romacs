@@ -91,13 +91,14 @@ fn a_terminal_over_gnu_lisp_routes_keys_and_keeps_the_minibuffer_s() {
         use romacs_display_runtime::backend::wgpu::{ROMACS_CTRL_MASK as C, ROMACS_META_MASK as M};
         let keys = vec![key('m', C), key('i', C), key('[', C), key('m', C | M), key(' ', C), key('?', C),
                         CommandEvent::Named("tab".into())];
+        let bytes = [&b"\r"[..], b"\t", b"\x1b", b"\x1b\r", b"\0", b"\x7f", b"\t"].map(<[u8]>::to_vec);
         for event in &keys {
             assert!(vm.terminal_passthrough_key(event).unwrap(), "GUI_KEY_ON_THE_FAST_PATH {event:?}");
         }
+        assert_eq!(std::mem::take(&mut state.borrow_mut().sent), bytes, "GUI_KEYS_SEND_THEIR_CONTROL_CHARACTERS");
         let signals = type_keys(&mut vm, keys, 7);
         assert!(signals.iter().all(Option::is_none), "{signals:?}");
-        assert_eq!(std::mem::take(&mut state.borrow_mut().sent),
-                   [&b"\r"[..], b"\t", b"\x1b", b"\x1b\r", b"\0", b"\x7f", b"\t"].map(<[u8]>::to_vec), "GUI_KEYS_SEND_THEIR_CONTROL_CHARACTERS");
+        assert_eq!(std::mem::take(&mut state.borrow_mut().sent), bytes, "AND_THROUGH_THE_COMMAND_LOOP");
         // An exception keeps a key with Emacs by either spelling: "TAB" the
         // Tab key and Ctrl+i, "C-<m>" Ctrl+m alone.
         vm.eval_source("(let ((romacs-term-keymap-exceptions (append '(\"TAB\" \"C-<m>\") romacs-term-keymap-exceptions))
@@ -107,6 +108,7 @@ fn a_terminal_over_gnu_lisp_routes_keys_and_keeps_the_minibuffer_s() {
             assert_eq!(vm.terminal_passthrough_key(&CommandEvent::Named(event.into())).unwrap(), sent, "EXCEPTION_BY_EITHER_SPELLING {event}");
         }
         vm.eval_source("(romacs-term-update-keymaps)").unwrap();
+        state.borrow_mut().sent.clear();
         // While a minibuffer reads, even with the terminal's window selected,
         // the keys are the minibuffer's.
         vm.eval_source("(setq romacs--minibuf-level 1)").unwrap();

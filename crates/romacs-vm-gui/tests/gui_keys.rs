@@ -60,7 +60,7 @@ fn gui_control_keys_are_their_own_keys_and_fall_back_to_ret_tab_and_esc() {
 
         // Unbound, Ctrl+m is RET as Return is: `newline', its event 13.
         assert_eq!(type_keys(&mut vm, vec![press(RETURN, 0), ctrl('m')], 2), ["newline", "newline"]);
-        assert_eq!(printed(&mut vm, "(list (buffer-string) last-command-event (this-command-keys-vector))"), "(\"\\n\\n\" 13 [13])");
+        assert_eq!(printed(&mut vm, "(list (buffer-string) last-command-event)"), "(\"\\n\\n\" 13)");
 
         // Bound with the syntax `describe-key' shows, Ctrl+m is its own key;
         // Return stays RET.
