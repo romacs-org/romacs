@@ -3095,27 +3095,29 @@ def chat_menu(args, base):
                 '(and (buffer-live-p keymap-popup--buffer) (with-current-buffer keymap-popup--buffer '
                 '(buffer-substring-no-properties (point-min) (point-max))))')) or ''
 
-        shots, result = [], {}
+        def well_formed(text):
+            rows = text.splitlines()
+            first = lambda word: next((i for i, row in enumerate(rows) if word in row), None)
+            waiting, running = first('needs approval · asks you'), first('long build · running')
+            return ('Agent · ' in text and 'Model: fake-model' in text and 'Effort: default' in text
+                    and 'Plan mode: off' in text and 'broken task' not in text and 'finished task' not in text
+                    and waiting is not None and running is not None and waiting < running)
+
+        shots, result = [], {'menus': {}}
         for theme in UI_THEMES:
             a.eval(f'(progn (mapc (function disable-theme) custom-enabled-themes) (load-theme (quote {theme}) t) t)')
             a.keys('-M', 'ctrl', '-k', 'c', '-k', 'o', '-m', 'ctrl')
             until(lambda: 'Workers' in menu(), 15, 'menu open')
             a.eval('(progn (redisplay t) t)')
             time.sleep(.5)
-            result.setdefault('menu', menu())
+            result['menus'][theme] = menu()
             path = base / f'{theme}-menu.png'
             subprocess.run([f'{args.tools}/grim', str(path)], env=a.env, check=True, timeout=30)
             shots.append(str(path))
             a.keys('-M', 'ctrl', '-k', 'g', '-m', 'ctrl')
             until(lambda: not menu(), 15, 'menu closed')
-        text = result['menu']
-        rows = text.splitlines()
-        first = lambda word: next((i for i, row in enumerate(rows) if word in row), None)
-        result['ok'] = ('Agent · ' in text and 'Model:' in text and 'Effort:' in text
-                        and 'long build' in text and 'needs approval' in text
-                        and 'broken task' not in text and 'finished task' not in text
-                        and first('needs approval') is not None and first('long build') is not None
-                        and first('needs approval') <= first('long build'))
+        result['menu'] = result['menus'][UI_THEMES[0]]
+        result['ok'] = all(well_formed(text) for text in result['menus'].values())
         result['shots'] = shots
         return result
     finally:
