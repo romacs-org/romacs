@@ -35,19 +35,32 @@ object still sorts: named as which-key names a binding to one."
                               (list (which-key--compute-binding 'find-file)))))
       (use-global-map old))))
 
+(ert-deftest romacs-popup-card-legible-on-the-glass ()
+  "A caller's colour moved until it reads on the menus' glass at AA; one
+that reads already, or an unknown one, unchanged."
+  (require 'romacs-theme)
+  (let ((spec (get 'romacs-popup 'face-defface-spec)))
+    (unwind-protect
+        (progn
+          (face-spec-set 'romacs-popup '((t :background "#202020")) 'face-defface-spec)
+          (should (>= (romacs-color-contrast (romacs-popup-legible "#303030") "#202020") 4.5))
+          (should (equal (romacs-popup-legible "#ffffff") "#ffffff"))
+          (should (equal (romacs-popup-legible "no-such-colour") "no-such-colour")))
+      (face-spec-set 'romacs-popup spec 'face-defface-spec))))
+
 (defun romacs-popup-card-tests--entry (key label binding &optional prefix-p source)
   "An entry as `romacs-popup--card-entry' makes it."
   (list key label prefix-p (or source 'global) 0 binding nil (cons key label)))
 
 (ert-deftest romacs-popup-card-keys-group-by-modifier ()
-  "Unmodified keys first (letters, digits, punctuation, named keys), then
-each modifier's together: C-SPC and C-+ sit with C-a."
+  "Unmodified keys first (letters, digits, punctuation, named keys, SPC
+among them), then each modifier's together: C-SPC and C-+ sit with C-a."
   (should (equal (romacs-popup-card-tests--sorted
                   (list ?\C-a 'C-left ?+ ?\t ?b ?B ?a ?1 ?\s 'left ?\d (aref (kbd "C-SPC") 0)
                         (aref (kbd "C-+") 0) (aref (kbd "M-x") 0) (aref (kbd "C-M-x") 0) 'f10 'f2 ?\e
                         (aref (kbd "M-RET") 0) (aref (kbd "M-DEL") 0) 'C-M-left ?\C-@))
-                 '("a" "b" "B" "1" "SPC" "+" "DEL" "ESC" "TAB" "<f2>" "<f10>" "<left>"
-                   "C-a" "C-SPC" "C-+" "C-@" "C-<left>" "M-x" "M-DEL" "M-RET" "C-M-x" "C-M-<left>"))))
+                 '("a" "b" "B" "1" "+" "DEL" "ESC" "SPC" "TAB" "<f2>" "<f10>" "<left>"
+                   "C-a" "C-+" "C-@" "C-SPC" "C-<left>" "M-x" "M-DEL" "M-RET" "C-M-x" "C-M-<left>"))))
 
 (defun romacs-popup-card-tests--keys (rows)
   "Each of ROWS as its keys: the first, then the others."

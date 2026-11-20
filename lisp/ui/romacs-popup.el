@@ -56,14 +56,39 @@ keys' labels in plain weight; dim is for what cannot be used.")
 
 (declare-function romacs-color-floor-on "romacs-theme" (fg backgrounds minimum))
 
+(defface romacs-popup-also '((t :inherit romacs-popup-dim))
+  "The other keys a command in a key-hint card has, after its label: the
+theme's dim text, made legible on the menu's glass (`romacs-popup-legible').")
+
 (defconst romacs-popup-key-contrast 4.5
-  "The contrast a menu's keys keep on its glass, WCAG AA for text.")
+  "The contrast a menu's text keeps on its glass, WCAG AA for text.")
+
+(defun romacs-popup-legible (color &optional contrast)
+  "COLOR moved in lightness until it reads on the menus' glass (the
+`romacs-popup' face's background) at CONTRAST, by default
+`romacs-popup-key-contrast', as #RRGGBB; COLOR itself when either colour
+is unknown.  For a caller's own colours on a menu: the glass, not the
+editor's background, is what they are drawn over."
+  (let* ((hex (lambda (c) (cond ((not (stringp c)) nil)
+                                 ;; As written: only a name needs the display.
+                                 ((string-match-p "\\`#[[:xdigit:]]\\{6\\}\\'" c) c)
+                                 ((color-defined-p c) (romacs-chrome--hex c)))))
+         (fg (funcall hex color))
+         (glass (funcall hex (or (face-background 'romacs-popup nil t) (face-background 'default nil t)))))
+    (or (and (fboundp 'romacs-color-floor-on) fg glass
+             (romacs-color-floor-on fg (list glass) (or contrast romacs-popup-key-contrast)))
+        color)))
+
+(defun romacs-popup--set-spec (face spec)
+  "Make SPEC FACE's default spec, unless it is already."
+  (unless (equal spec (get face 'face-defface-spec))
+    (face-spec-set face spec 'face-defface-spec)))
 
 (defun romacs-popup--key-spec (&rest _)
-  "Make `romacs-popup-key' the theme's accent (`romacs-layer-glow') moved
-in lightness until it reads on the menu's glass at
-`romacs-popup-key-contrast'; a theme whose accent is a grey (a
-monochrome one) gives its keys its link colour, else the text's.  Run from
+  "Make `romacs-popup-key' the theme's accent (`romacs-layer-glow') and
+`romacs-popup-also' its dim text, each legible on the menu's glass
+\(`romacs-popup-legible'); a theme whose accent is a grey (a monochrome
+one) gives its keys its link colour, else the text's.  Run from
 `romacs-chrome-faces-functions', once the glow and glass are set."
   (let* ((accent (face-foreground 'romacs-layer-glow nil t))
          ;; A grey accent (a monochrome theme's) has no hue to set keys
@@ -73,14 +98,11 @@ monochrome one) gives its keys its link colour, else the text's.  Run from
                      ;; what can be acted on; else the text's own.
                      (romacs-chrome--chromatic (face-foreground 'link nil t))
                      (face-foreground 'default nil t)))
-         (glass (or (face-background 'romacs-popup nil t) (face-background 'default nil t)))
-         (legible (and (fboundp 'romacs-color-floor-on) (stringp accent) (stringp glass)
-                       (color-defined-p accent) (color-defined-p glass)
-                       (romacs-color-floor-on (romacs-chrome--hex accent) (list (romacs-chrome--hex glass))
-                                              romacs-popup-key-contrast)))
-         (spec `((t :inherit romacs-layer-glow :weight bold ,@(and legible (list :foreground legible))))))
-    (unless (equal spec (get 'romacs-popup-key 'face-defface-spec))
-      (face-spec-set 'romacs-popup-key spec 'face-defface-spec))))
+         (key (and (stringp accent) (romacs-popup-legible accent)))
+         (dim (face-foreground 'romacs-popup-dim nil t))
+         (also (and (stringp dim) (romacs-popup-legible dim))))
+    (romacs-popup--set-spec 'romacs-popup-key `((t :inherit romacs-layer-glow :weight bold ,@(and key (list :foreground key)))))
+    (romacs-popup--set-spec 'romacs-popup-also `((t :inherit romacs-popup-dim ,@(and also (list :foreground also)))))))
 
 ;; Whenever the chrome has derived the glow and the glass.
 (add-hook 'romacs-chrome-faces-functions #'romacs-popup--key-spec)
@@ -658,10 +680,10 @@ command's name; `romacs-popup-prefix-keys' for an anonymous one; else
   "EVENT's place among a card's keys, a list for `romacs-popup--rank<':
 unmodified keys, then C-, M-, C-M- and other modifiers; within each,
 letters (lower case before upper), digits, punctuation, then named keys
-\(TAB, RET, ESC, DEL, <left>, <f1>...).  TAB, RET, ESC and DEL are
-named keys whatever their modifiers (M-RET is M-, not C-M-)."
+\(SPC, TAB, RET, ESC, DEL, <left>, <f1>...).  SPC, TAB, RET, ESC and
+DEL are named keys whatever their modifiers (M-RET is M-, not C-M-)."
   (let* ((char (and (integerp event) (logand event #x3fffff)))
-         (named-char (memq char '(?\t ?\r ?\e ?\d)))
+         (named-char (memq char '(?\t ?\r ?\e ?\d ?\s)))
          ;; A character's modifiers are its bits, Control too for C-a
          ;; (whose bit is its code); a symbol's are its name's.
          (mods (if char
@@ -759,7 +781,7 @@ after `+') and, unless BARE, the command's other keys
                       'face (if (nth 2 entry) 'romacs-popup-group 'romacs-popup-description))
           (and (nth 6 entry) (not bare)
                ;; Dim: what else runs it, not another key column.
-               (propertize (concat "  " (string-join (nth 6 entry) ", ")) 'face 'romacs-popup-dim))))
+               (propertize (concat "  " (string-join (nth 6 entry) "  ")) 'face 'romacs-popup-also))))
 
 (defun romacs-popup--card-column (entries width)
   "ENTRIES as one card column of lines at most WIDTH columns wide: keys
