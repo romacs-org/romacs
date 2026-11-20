@@ -428,8 +428,12 @@ fn a_compile_that_found_its_artifact_holding_says_so() {
     let (compiled, held) = (compile_record(artifact, false), compile_record(artifact, true));
     assert_eq!(compile_output(&format!("romacs-compile-load-path: []\n{held}\n")), Some((artifact.to_owned(), true)));
     assert_eq!(compile_output(&format!("{compiled}\n")), Some((artifact.to_owned(), false)));
-    // A package printing either record, or the old marker, at compile time.
-    let printed = format!("romacs-compile-held\n{held}\nromacs-compiled-held: /elsewhere.rlc\n{compiled}\n");
+    // A package printing either record, or the old marker, at compile time,
+    // and leaving its last line unfinished, as `princ' does: the process's
+    // record follows on a line of its own (batch.rs `compile_lisp`).
+    let printed = format!("romacs-compile-held\n{held}\nromacs-compiled-held: /elsewhere.rlc\nCompiling...\n{compiled}\n");
     assert_eq!(compile_output(&printed), Some((artifact.to_owned(), false)));
+    // A process that ended before its record: an earlier line is no answer.
+    assert_eq!(compile_output(&format!("{held}\nCompiling...")), None);
     assert_eq!(compile_output("romacs-compile-held\n"), None);
 }

@@ -271,20 +271,22 @@ fn run_compile(store: &Path, program: OsString, args: Vec<OsString>, environment
 const COMPILED: &str = "romacs-compiled: ";
 const HELD: &str = "romacs-compiled-held: ";
 
-/// The record a compile process ends its standard output with: ARTIFACT,
-/// HELD when it was there already (`Vm::compile_lisp_file`).
+/// The record a compile process ends its standard output with, on a line
+/// of its own: ARTIFACT, HELD when it was there already
+/// (`Vm::compile_lisp_file`).
 pub fn compile_record(artifact: &Path, held: bool) -> String {
     format!("{}{}", if held { HELD } else { COMPILED }, artifact.display())
 }
 
 /// What a compile process's standard output OUT says (`compile_record`):
-/// the artifact, and whether it held already. Its last record, as what the
-/// file's compile-time code printed comes before it.
+/// the artifact, and whether it held already. Its last line alone, which
+/// the process writes on a line of its own after everything else; what the
+/// file's compile-time code printed comes before it. None when the last
+/// line is no record: the process did not finish.
 fn compile_output(out: &str) -> Option<(PathBuf, bool)> {
-    out.lines().rev().find_map(|line| {
-        line.strip_prefix(COMPILED).map(|path| (PathBuf::from(path), false))
-            .or_else(|| line.strip_prefix(HELD).map(|path| (PathBuf::from(path), true)))
-    })
+    let line = out.lines().rev().find(|line| !line.is_empty())?;
+    line.strip_prefix(COMPILED).map(|path| (PathBuf::from(path), false))
+        .or_else(|| line.strip_prefix(HELD).map(|path| (PathBuf::from(path), true)))
 }
 
 /// The `.el` files under DIR, its subdirectories' after its own, each
