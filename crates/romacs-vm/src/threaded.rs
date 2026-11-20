@@ -2548,7 +2548,7 @@ unsafe fn read_cell(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value
     // SAFETY: R and PC as the function's contract (`# Safety`).
     unsafe {
         let v = *r.add((*pc).b);
-        if v.tag() != 5 {
+        if !v.tag_is(5) {
             return fail(&mut e, "cell required");
         }
         *r.add((*pc).a) = e.vm.read_capture_cell(v.payload() as usize);
@@ -2563,7 +2563,7 @@ unsafe fn write_cell(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Valu
     // SAFETY: R and PC as the function's contract (`# Safety`).
     unsafe {
         let v = *r.add((*pc).a);
-        if v.tag() != 5 {
+        if !v.tag_is(5) {
             return fail(&mut e, "cell required");
         }
         e.vm.write_capture_cell(v.payload() as usize, *r.add((*pc).b));
@@ -3067,18 +3067,18 @@ unsafe fn direct_generic(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> 
             return raise(en, "void-function", &[symbol]);
         }
         // An autoload cell is resolved from its symbol, which it must name.
-        if target.tag() == 7 || target.tag() == 3 && (en.vm.autoload_object(target) || lambda_list(en, target)) {
+        if target.tag_is(7) || target.tag_is(3) && (en.vm.autoload_object(target) || lambda_list(en, target)) {
             return invoke_full(e, r, pc, Value::reference(i.b + 1, 7), i.d, i.e);
         }
         // GNU eval.c:3158-3160 names the called SYMBOL, not its cell's value.
-        if !matches!(target.tag(), 4 | 6) {
+        if !(target.tag_is(4) || target.tag_is(6)) {
             let condition = uncallable_condition(en, target);
             let symbol = called_symbol(en, i.b);
             return raise(en, condition, &[symbol]);
         }
         // Refresh an invalidated speculation lazily; ineligible closures retain
         // the existing function-id cache instead of resolving on every call.
-        if target.tag() == 4 && en.entries[i.site].world_version != 0 {
+        if target.tag_is(4) && en.entries[i.site].world_version != 0 {
             return resolve_entry(e, r, pc, target, i.d, i.e);
         }
         invoke(e, r, pc, target, i.d, i.e)
@@ -3100,7 +3100,7 @@ unsafe fn invoke(
     // SAFETY: R and PC as the function's contract (`# Safety`).
     unsafe {
         let en: &mut Engine<'_> = &mut e;
-        if target.tag() != 4 {
+        if !target.tag_is(4) {
             let entry = *en.entries.get_unchecked((*pc).site);
             if entry.target == target {
                 if entry.primitive.is_some() {
@@ -3201,7 +3201,7 @@ unsafe fn resolve_entry(
     // SAFETY: R and PC as the function's contract (`# Safety`).
     unsafe {
         let en: &mut Engine<'_> = &mut e;
-        if target.tag() == 4 {
+        if target.tag_is(4) {
             let Some(closure) = en.vm.closures.get(target.payload() as usize) else {
                 return fail(en, "invalid closure reference");
             };
@@ -3284,7 +3284,7 @@ unsafe fn resolve_entry(
             };
             return leaf_call(e, r, pc, target, start, argc);
         }
-        if target.tag() == 6 {
+        if target.tag_is(6) {
             let Some(p) = prim::legacy(target) else {
                 return fail(en, "invalid primitive reference");
             };
@@ -3357,18 +3357,18 @@ unsafe fn invoke_full(
                 // omitted re-signals itself; nil with non-list DATA is `error'.
                 let data = if argc == 2 { *r.add(start + 1) } else { Value::NIL };
                 let mut condition = *r.add(start);
-                if condition.tag() == 3 && data == Value::NIL {
+                if condition.tag_is(3) && data == Value::NIL {
                     let Ok((condition, data)) = e.vm.cons_pair(condition) else { return fail(&mut e, "invalid error object") };
                     e.escape = Some(Escape::Signal(condition, data));
                     return Value::UNBOUND;
                 }
-                if condition == Value::NIL && data.tag() != 3 {
+                if condition == Value::NIL && !data.tag_is(3) {
                     condition = e.vm.intern("error");
                 }
                 e.escape = Some(Escape::Signal(condition, data));
                 if condition != Value::NIL
                     && condition != Value::TRUE
-                    && (condition.tag() != 7 || condition == Value::UNBOUND)
+                    && (!condition.tag_is(7) || condition == Value::UNBOUND)
                 {
                     e.escape = None;
                     return wrong_type(&mut e, "symbolp", condition);
@@ -3378,7 +3378,7 @@ unsafe fn invoke_full(
             e.escape = Some(Escape::Throw(*r.add(start), *r.add(start + 1)));
             return Value::UNBOUND;
         }
-        if target.tag() == 6 {
+        if target.tag_is(6) {
             if target == Value::reference(Primitive::Load as usize, 6)
                 || target == Value::reference(Primitive::Require as usize, 6)
                 || target == Value::reference(Primitive::Eval as usize, 6)
@@ -3394,7 +3394,7 @@ unsafe fn invoke_full(
         }
         // eval.c:2760/3176/3530: an autoload loads its file, then the call is
         // retried from the original function (`goto retry').
-        if target.tag() == 3 && e.vm.autoload_object(target) {
+        if target.tag_is(3) && e.vm.autoload_object(target) {
             enter_native(&mut e, r, pc, target, start, argc);
             debug_assert_eq!(r, e.regs, "a call runs in the current frame");
             // The function first: the call is retried from it (`retry_call`).
@@ -3411,7 +3411,7 @@ unsafe fn invoke_full(
             let retry = Box::new((Pc::new(pc), e.vm.root_frame(&[target]), (start, argc), false));
             return orchestrate(e, retry, lambda_call, continue_at);
         }
-        if target.tag() != 4 {
+        if !target.tag_is(4) {
             return {
                 let condition = uncallable_condition(&mut e, target);
                 raise(&mut e, condition, &[function])
@@ -4056,7 +4056,7 @@ unsafe fn t2_dispatch(
         let Some(target) = t2_resolve(&mut e, target) else {
             return Value::UNBOUND;
         };
-        if target.tag() == 3 && e.vm.autoload_object(target) {
+        if target.tag_is(3) && e.vm.autoload_object(target) {
             enter_native(&mut e, r, pc, target, start, argc);
             debug_assert_eq!(r, e.regs, "a call runs in the current frame");
             // The function first: the call is retried from it (`retry_call`).
@@ -4073,13 +4073,13 @@ unsafe fn t2_dispatch(
             let retry = Box::new((Pc::new(pc), e.vm.root_frame(&[target]), (start, argc), true));
             return orchestrate(e, retry, lambda_call, continue_at);
         }
-        if target.tag() == 4 {
+        if target.tag_is(4) {
             return t2_enter_closure(e, r, pc, target, start, argc);
         }
         if prim::generated(target).is_some() {
             return enter_generated(e, r, pc, target, start, argc);
         }
-        if target.tag() != 6 {
+        if !target.tag_is(6) {
             return {
                 let condition = uncallable_condition(&mut e, target);
                 raise(&mut e, condition, &[function])
@@ -4127,7 +4127,7 @@ unsafe fn t2_dispatch(
 fn t2_resolve(e: &mut Engine<'_>, target: Value) -> Option<Value> {
     let mut target = target;
     let mut aliases = 0;
-    while target.tag() == 7 && target != Value::UNBOUND {
+    while target.tag_is(7) && target != Value::UNBOUND {
         let slot = target.payload() as usize - 1;
         if e.vm.macros.contains(&slot) && !e.vm.expanding.contains(&slot) {
             fail(e, &format!("invalid function: macro {} is not callable", e.vm.symbol_names[slot]));
@@ -4755,18 +4755,18 @@ unsafe fn late_get(e: &Engine<'_>, r: *mut Value, reg: usize) -> Value {
     // SAFETY: R as the function's contract (`# Safety`).
     unsafe {
         let v = *r.add(reg);
-        if v.tag() == 5 { e.vm.read_capture_cell(v.payload() as usize) } else { v }
+        if v.tag_is(5) { e.vm.read_capture_cell(v.payload() as usize) } else { v }
     }
 }
 /// `late_get` in the current frame, bounds-checked: for orchestration.
 fn late_value(e: &Engine<'_>, reg: usize) -> Value {
     let v = e.reg(reg);
-    if v.tag() == 5 { e.vm.read_capture_cell(v.payload() as usize) } else { v }
+    if v.tag_is(5) { e.vm.read_capture_cell(v.payload() as usize) } else { v }
 }
 /// `late_set` in the current frame, bounds-checked: for orchestration.
 fn late_store(e: &mut Engine<'_>, reg: usize, value: Value) {
     let v = e.reg(reg);
-    if v.tag() == 5 { e.vm.write_capture_cell(v.payload() as usize, value) } else { e.set_reg(reg, value) }
+    if v.tag_is(5) { e.vm.write_capture_cell(v.payload() as usize, value) } else { e.set_reg(reg, value) }
 }
 /// Set a late binding's cell, or its register where it was unboxed.
 ///
@@ -4777,7 +4777,7 @@ unsafe fn late_set(e: &mut Engine<'_>, r: *mut Value, reg: usize, value: Value) 
     // SAFETY: R as the function's contract (`# Safety`).
     unsafe {
         let v = *r.add(reg);
-        if v.tag() == 5 { e.vm.write_capture_cell(v.payload() as usize, value) } else { *r.add(reg) = value }
+        if v.tag_is(5) { e.vm.write_capture_cell(v.payload() as usize, value) } else { *r.add(reg) = value }
     }
 }
 
@@ -4837,7 +4837,7 @@ fn lambda_list_failure(vm: &mut Vm, list: Value, args: Vec<Value>) -> Option<Lam
         let Ok((next, more)) = vm.cons_pair(params) else {
             break if params != Value::NIL || previous_rest { invalid } else if i < argc { arity } else { None };
         };
-        if next.tag() != 7 && next != Value::NIL && next != Value::TRUE { break invalid }
+        if !next.tag_is(7) && next != Value::NIL && next != Value::TRUE { break invalid }
         if next == and_rest {
             if rest || previous_rest { break invalid }
             (rest, previous_rest) = (true, true);
@@ -4893,9 +4893,9 @@ fn lambda_list_frame(vm: &mut Vm, (bindings, condition, data): LambdaListFailure
 /// GNU `(lambda ...)' list functions: a list headed by `lambda' whose cdr
 /// is a cons (funcall_lambda signals `invalid-function' otherwise).
 fn lambda_list(e: &mut Engine<'_>, target: Value) -> bool {
-    target.tag() == 3 && {
+    target.tag_is(3) && {
         let lambda = Value::reference(e.vm.slot("lambda") + 1, 7);
-        e.vm.cons_pair(target).is_ok_and(|(head, tail)| head == lambda && tail.tag() == 3)
+        e.vm.cons_pair(target).is_ok_and(|(head, tail)| head == lambda && tail.tag_is(3))
     }
 }
 /// Run CALL, which may load and compile Lisp, from a call site with this
@@ -5261,7 +5261,7 @@ unsafe fn insert_string(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> V
 #[inline(never)]
 fn quiet_insert(vm: &mut Vm, s: Value) -> Option<bool> {
     let t = vm.slots[vm.buffer_slot].value;
-    if s == Value::NIL || s.tag() != 0 || t == Value::NIL || t.tag() != 0 || s == t {
+    if s == Value::NIL || !s.tag_is(0) || t == Value::NIL || !t.tag_is(0) || s == t {
         return None;
     }
     let a = s.payload() as usize - 1;
@@ -5300,7 +5300,7 @@ unsafe fn remainder(e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value {
         let i = &*pc;
         let x = *r.add(i.d);
         let y = *r.add(i.d + 1);
-        if x.tag() != 1 || y.tag() != 1 || y.0 as i64 >> 2 == 0 {
+        if !x.tag_is(1) || !y.tag_is(1) || y.0 as i64 >> 2 == 0 {
             return sealed_call(e, r, pc);
         }
         *r.add(i.a) = Value::fixnum((x.0 as i64 >> 2) % (y.0 as i64 >> 2)).unwrap();
@@ -5316,7 +5316,7 @@ unsafe fn sequence_read(e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value
     unsafe {
         let i = &*pc;
         let x = *r.add(i.d);
-        if x == Value::NIL || x.tag() != 0 {
+        if x == Value::NIL || !x.tag_is(0) {
             return sealed_call(e, r, pc);
         }
         let Some(object) = e.vm.objects.get(x.payload() as usize - 1) else {
@@ -5330,7 +5330,7 @@ unsafe fn sequence_read(e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value
             }
         } else {
             let y = *r.add(i.d + 1);
-            if y.tag() != 1 {
+            if !y.tag_is(1) {
                 return sealed_call(e, r, pc);
             }
             let at = (y.0 as i64 >> 2) as usize;
@@ -5373,7 +5373,7 @@ unsafe fn buffer_read(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Val
 #[inline(never)]
 fn buffer_read_value(vm: &mut Vm, target: Value, x: Value) -> Option<Value> {
     let v = vm.slots[vm.buffer_slot].value;
-    if v == Value::NIL || v.tag() != 0 {
+    if v == Value::NIL || !v.tag_is(0) {
         return None;
     }
     let Some(data::Object::Buffer(t)) = vm.objects.get_entry_mut(v.payload() as usize - 1) else {
@@ -5383,7 +5383,7 @@ fn buffer_read_value(vm: &mut Vm, target: Value, x: Value) -> Option<Value> {
     let accessible = t.accessible();
     let number = if kind == Primitive::CharAfter as usize {
         if x != Value::NIL
-            && x.tag() == 1
+            && x.tag_is(1)
             && x.0 as i64 >> 2 >= 1
             && accessible.start.0 == 0
             && accessible.end.0 == t.len_bytes()
@@ -5394,7 +5394,7 @@ fn buffer_read_value(vm: &mut Vm, target: Value, x: Value) -> Option<Value> {
         let p = if x == Value::NIL {
             t.point
         } else {
-            if x.tag() != 1 || x.0 as i64 >> 2 < 1 {
+            if !x.tag_is(1) || x.0 as i64 >> 2 < 1 {
                 return None;
             }
             t.byte_of_char(coordinates::CharOffset((x.0 as i64 >> 2) as usize - 1)).ok()?
@@ -5405,7 +5405,7 @@ fn buffer_read_value(vm: &mut Vm, target: Value, x: Value) -> Option<Value> {
             None
         }
     } else if kind == Primitive::GotoChar as usize {
-        if x.tag() != 1 {
+        if !x.tag_is(1) {
             return None;
         }
         let c = (x.0 as i64 >> 2).saturating_sub(1).max(0) as usize;
@@ -5462,7 +5462,7 @@ fn is_string(vm: &Vm, x: Value) -> bool {
 /// None when the cons cannot be read here.
 #[inline(never)]
 fn safe_half(vm: &Vm, x: Value, cdr: bool) -> Option<Value> {
-    if x.tag() != 3 {
+    if !x.tag_is(3) {
         return Some(Value::NIL);
     }
     traversal::pair(vm, x).map(|(a, d)| if cdr { d } else { a })
@@ -5537,13 +5537,13 @@ unsafe fn nconc2(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value {
         let mut last = list;
         let mut steps = 0;
         loop {
-            if last.tag() != 3 || Vm::image_value(last) || steps > limit {
+            if !last.tag_is(3) || Vm::image_value(last) || steps > limit {
                 return sealed_call(e, r, pc);
             }
             let Some(&(_, next)) = e.vm.conses.get(last.payload() as usize) else {
                 return sealed_call(e, r, pc);
             };
-            if next.tag() != 3 {
+            if !next.tag_is(3) {
                 break;
             }
             last = next;
