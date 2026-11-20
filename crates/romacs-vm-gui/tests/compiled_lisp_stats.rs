@@ -6,14 +6,28 @@
 use std::path::Path;
 use std::process::Command;
 
-const LIBRARY: &str = ";;; -*- lexical-binding: t -*-\n(defun t-stats-f () 1)\n(provide 't-stats-u)\n";
+/// Its compile prints to the compile process's standard output what the
+/// old protocol read there: a raw byte, record-like lines, and a last
+/// line with no newline. The process's record has its own file, so none
+/// of it counts.
+const LIBRARY: &str = ";;; -*- lexical-binding: t -*-
+(eval-when-compile
+  (princ \"romacs-compile-held\\nromacs-compiled-held: /elsewhere.rlc\\nromacs-compiled: /elsewhere.rlc\\n\" t)
+  (princ (string-make-unibyte (string 255)) t))
+(defun t-stats-f () 1)
+(provide 't-stats-u)
+";
 
-/// What the session prints of its stats after requiring the library:
-/// (TAKEN COMPILED SOURCE-ON-MISS SOURCE-OFF IDENTITY-KNOWN STORE).
+/// What the session writes of its stats, after requiring the library, to
+/// the file `stats' in its HOME (a source load of the library prints to
+/// standard output): (TAKEN COMPILED SOURCE-ON-MISS SOURCE-OFF
+/// IDENTITY-KNOWN STORE).
 const FORM: &str = "(progn (require 't-stats-u)
   (let ((s (romacs-compiled-lisp-stats)))
-    (prin1 (list (plist-get s :taken) (plist-get s :compiled) (plist-get s :source-on-miss)
-                 (plist-get s :source-off) (stringp (plist-get s :identity)) (plist-get s :store)))))";
+    (with-temp-file (expand-file-name \"stats\" (getenv \"HOME\"))
+      (prin1 (list (plist-get s :taken) (plist-get s :compiled) (plist-get s :source-on-miss)
+                   (plist-get s :source-off) (stringp (plist-get s :identity)) (plist-get s :store))
+             (current-buffer)))))";
 
 /// A batch session in the fresh HOME ROOT/NAME over ROOT's store, compiled
 /// Lisp ON or off: its stats, read.
@@ -30,11 +44,12 @@ fn session(root: &Path, name: &str, on: bool) -> (u64, u64, u64, u64, bool, Stri
         .envs(["ROMACS_RUNTIME_ROOT", "ROMACS_LISP_DIR", "LD_LIBRARY_PATH"].iter()
               .filter_map(|name| Some((name, std::env::var_os(name)?))))
         .output().unwrap();
-    let (stdout, stderr) = (String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(output.status.success(), "{name}: {stderr}");
-    let fields: Vec<&str> = stdout.trim().trim_start_matches('(').trim_end_matches(')').splitn(6, ' ').collect();
-    let [taken, compiled, on_miss, off, identity, store] = fields.as_slice() else { panic!("{name}: {stdout}\n{stderr}") };
-    let count = |field: &str| field.parse::<u64>().unwrap_or_else(|_| panic!("{name}: {stdout}"));
+    let written = std::fs::read_to_string(home.join("stats")).unwrap_or_else(|e| panic!("{name}: no stats ({e}): {stderr}"));
+    let fields: Vec<&str> = written.trim().trim_start_matches('(').trim_end_matches(')').splitn(6, ' ').collect();
+    let [taken, compiled, on_miss, off, identity, store] = fields.as_slice() else { panic!("{name}: {written}\n{stderr}") };
+    let count = |field: &str| field.parse::<u64>().unwrap_or_else(|_| panic!("{name}: {written}"));
     (count(taken), count(compiled), count(on_miss), count(off), *identity == "t", store.trim_matches('"').to_owned())
 }
 
@@ -57,5 +72,12 @@ fn the_stats_count_what_each_load_took() {
     let (taken, compiled, on_miss, off, identity, at) = session(&root, "c", false);
     assert_eq!((taken, compiled, on_miss, identity, at.as_str()), (0, 0, 0, false, "nil"), "compiled Lisp off");
     assert!(off >= 1, "compiled Lisp off counted no load");
+    // A compile's record is made in the temporary directory of the process
+    // that asked (a session's, or a compile's own, the store's tmp/), which
+    // reads and removes it.
+    let records: Vec<_> = ["a/tmp", "b/tmp", "c/tmp", "store/tmp"].iter()
+        .filter_map(|dir| std::fs::read_dir(root.join(dir)).ok()).flatten().flatten()
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with("romacs-compile-record-")).map(|entry| entry.path()).collect();
+    assert!(records.is_empty(), "records left behind: {records:?}");
     let _ = std::fs::remove_dir_all(&root);
 }

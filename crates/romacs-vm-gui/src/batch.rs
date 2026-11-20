@@ -266,14 +266,14 @@ pub fn compile_lisp(file: PathBuf, store: Option<PathBuf>) -> Result<(), String>
             let dirs: Vec<PathBuf> = path.lines().map(PathBuf::from).collect();
             vm.set_load_path(&dirs)?;
         }
-        // The tree's compile checks what it finds on the same `load-path'.
-        println!("romacs-compile-load-path: {}", serde_json::to_string(&vm.compile_load_path()?).map_err(|e| e.to_string())?);
+        let load_path = vm.compile_load_path()?;
         let (artifact, held) = vm.compile_lisp_file(&file)?;
         vm.shutdown_background_processes()?;
-        // The last line, on a line of its own: what the file's compile-time
-        // code printed (the same stdout) ends before it, a line or not.
-        println!("\n{}", romacs_vm::compiled_lisp::compile_record(&artifact, held));
-        Ok(())
+        // For a person reading the compile log; the process that started this
+        // one reads its record alone. The tree's compile checks what it finds
+        // on the same `load-path'.
+        println!("romacs-compile: {} {}", if held { "held" } else { "compiled" }, artifact.display());
+        romacs_vm::compiled_lisp::write_record(&artifact, held, load_path)
     })?.join().map_err(|_| "compile process panicked".to_owned())?
 }
 

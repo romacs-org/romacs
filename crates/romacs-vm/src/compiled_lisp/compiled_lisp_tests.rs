@@ -385,7 +385,8 @@ fn a_tree_decides_held_artifacts_itself() {
     let configured = Configured {
         config: Config { compiler: vec![], environment: vec![], inherited: &[], defer_misses: false, store: store.clone(),
                          identity: Box::new(|| Some("env".into())), runtime: vec![], root: None },
-        chain: String::new(), trace: false, no_prune: false, identity: std::sync::OnceLock::new(),
+        chain: String::new(), trace: false, no_prune: false, record: None, scratch: store.join("tmp"),
+        identity: std::sync::OnceLock::new(),
     };
     // A's artifact, published as its compile would, having resolved NAME.
     let publish = |name: &str| {
@@ -419,21 +420,18 @@ fn a_tree_decides_held_artifacts_itself() {
     std::fs::remove_dir_all(&store).unwrap();
 }
 
-/// A compile process says the artifact it published, and whether one
-/// holding already was there, so a load counts it as taken, not compiled:
-/// in its last record, whatever the file's compile-time code printed.
+/// A compile process's record names its artifact in the store both
+/// processes share, says whether it held already, and keeps the
+/// `load-path' searched; a file outside the store has none.
 #[test]
-fn a_compile_that_found_its_artifact_holding_says_so() {
-    let artifact = Path::new("/s/k/a.rlc");
-    let (compiled, held) = (compile_record(artifact, false), compile_record(artifact, true));
-    assert_eq!(compile_output(&format!("romacs-compile-load-path: []\n{held}\n")), Some((artifact.to_owned(), true)));
-    assert_eq!(compile_output(&format!("{compiled}\n")), Some((artifact.to_owned(), false)));
-    // A package printing either record, or the old marker, at compile time,
-    // and leaving its last line unfinished, as `princ' does: the process's
-    // record follows on a line of its own (batch.rs `compile_lisp`).
-    let printed = format!("romacs-compile-held\n{held}\nromacs-compiled-held: /elsewhere.rlc\nCompiling...\n{compiled}\n");
-    assert_eq!(compile_output(&printed), Some((artifact.to_owned(), false)));
-    // A process that ended before its record: an earlier line is no answer.
-    assert_eq!(compile_output(&format!("{held}\nCompiling...")), None);
-    assert_eq!(compile_output("romacs-compile-held\n"), None);
+fn a_compile_record_round_trips_through_its_text() {
+    use std::os::unix::ffi::OsStrExt;
+    let store = Path::new(std::ffi::OsStr::from_bytes(b"/home/u\xff/store"));
+    let record = Record { artifact: store.join("0123456789abcdef/ab12/cd34.rlc"), held: true,
+                          load_path: vec!["/a/lisp".into(), "/b/site-lisp".into()] };
+    let text = record.text(store).unwrap();
+    assert_eq!(Record::read(text.as_bytes(), store), Some(record));
+    let outside = Record { artifact: PathBuf::from("/elsewhere/a.rlc"), held: false, load_path: vec![] };
+    assert_eq!(outside.text(store), None);
+    assert_eq!(Record::read(b"romacs-compiled: /s/a.rlc", store), None);
 }
