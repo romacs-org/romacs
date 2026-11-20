@@ -190,6 +190,10 @@ fn sqlite_interrupts_a_long_statement() {
     let setup = "(progn (setq db (sqlite-open)) (sqlite-execute db \"CREATE TABLE t (x)\"))";
     let insert = "\"WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c WHERE x<200000) INSERT INTO t SELECT x FROM c RETURNING x\"";
     reaches("sqlite-execute", setup, &format!("(list db {insert})"), "(equal (sqlite-select db \"SELECT count(*) FROM t\") '((0)))");
+    // A set's interrupted step ends the set: the next call does not start
+    // it over from its first row.
+    let setup = format!("(setq db (sqlite-open) set (sqlite-select db {query} nil 'set))");
+    reaches("sqlite-next", &setup, "(list set)", "(and (null (sqlite-next set)) (null (sqlite-more-p set)))");
 }
 
 #[test]

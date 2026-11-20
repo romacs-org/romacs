@@ -368,8 +368,11 @@ impl Leaf<'_> {
         let State::Set { statement: slot, eof } = &mut self.sqlite_handle_mut(set).state else { unreachable!("checked") };
         let step = match step {
             Ok(step) => step,
+            // SQLite rolled the interrupted step back and reset the
+            // statement, which would start the set over: the set ends here.
             Err(quit) => {
                 *slot = Some(statement);
+                *eof = true;
                 return Err(quit);
             }
         };
