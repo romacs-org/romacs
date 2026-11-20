@@ -3146,23 +3146,25 @@ drawn as a chat's transcript, across UI_THEMES."""
                 {'type': 'text', 'text': 'There are **three** files: `a.txt`, `b.txt` and `notes.md`.'}]}},
         ]
         path = a.work / 'transcript.jsonl'
-        # Compact, as Claude Code writes its transcripts (the reader takes
-        # each line's "type":"..." as written).
-        path.write_text(''.join(json.dumps(line, separators=(',', ':')) + '\n' for line in lines))
+        # Spaced, as another writer leaves a transcript: read all the same.
+        path.write_text(''.join(json.dumps(line) + '\n' for line in lines))
         a.eval(f'(progn (romacs-agent-history-open (list :path {lisp(path)} :title "list the files" :harness (quote claude) '
                f':provider "claude" :id "h1" :cwd {lisp(a.work)})) (delete-other-windows) t)')
         a.keyboard_ready()
         shots, texts = [], {}
         for theme in UI_THEMES:
-            a.eval(f'(progn (mapc (function disable-theme) custom-enabled-themes) (load-theme (quote {theme}) t) (redisplay t) t)')
+            a.eval(f'(progn (mapc (function disable-theme) custom-enabled-themes) (load-theme (quote {theme}) t) t)')
+            # Its frame drawn in this theme, the view the window shows.
+            until(lambda: a.eval(f'(progn (redisplay t) (and (memq (quote {theme}) custom-enabled-themes) '
+                                 '(derived-mode-p (quote romacs-agent-history-mode)) t))') == 't', 15, f'{theme} shown')
             time.sleep(.4)
-            texts[theme] = parity_live.read_sexp(a.eval('(with-current-buffer "*history: list the files*" '
+            texts[theme] = parity_live.read_sexp(a.eval('(with-current-buffer (window-buffer (selected-window)) '
                                                         '(buffer-substring-no-properties (point-min) (point-max)))'))
             path_png = base / f'{theme}-history.png'
             subprocess.run([f'{args.tools}/grim', str(path_png)], env=a.env, check=True, timeout=30)
             shots.append(str(path_png))
         text = texts[UI_THEMES[0]]
-        return {'ok': ('list the files here' in text and 'three' in text and 'a.txt' in text),
+        return {'ok': all('list the files here' in t and 'three' in t and 'a.txt' in t for t in texts.values()),
                 'text': text[:800], 'shots': shots}
     finally:
         a.close()

@@ -869,7 +869,8 @@ instances) is derived again when it changes.")
       what moves with it to another instance of the harness;
   :history PLIST   reading its transcripts: :files (DIRECTORY LIMIT),
       :find (DIRECTORY ID), the transcript of conversation ID or nil,
-      :keep, :describe and :events (`romacs-agent-history').
+      :keep (OBJECT), whether a transcript line, parsed, is read,
+      :describe and :events (`romacs-agent-history').
 
 The file defining it is kept (:file): a process of this build that reads
 every harness's transcripts (`romacs-agent-history-index-soon') loads it.

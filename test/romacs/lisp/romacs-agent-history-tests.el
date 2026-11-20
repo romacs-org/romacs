@@ -142,7 +142,18 @@
                     "{\"type\": \"event_msg\", \"payload\": {\"type\": \"agent_reasoning\"}}\n"))
           (should (= (length (romacs-agent-history--read file 0 (file-attribute-size (file-attributes file))
                                                          #'romacs-agent-history--codex-keep))
-                     2)))
+                     2))
+          ;; Its keys in any order, and the last line without its newline.
+          (with-temp-file file
+            (insert "{\"payload\": {\"item\": {\"content\": [], \"type\": \"UserMessage\"}, \"type\": \"item_completed\"}, \"type\": \"event_msg\"}\n"
+                    "{\"payload\": {\"type\": \"message\"}, \"type\": \"response_item\"}"))
+          (should (= (length (romacs-agent-history--read file 0 (file-attribute-size (file-attributes file))
+                                                         #'romacs-agent-history--codex-keep))
+                     2))
+          ;; A read ending before the file's end leaves a cut line out.
+          (should (= (length (romacs-agent-history--read file 0 (1- (file-attribute-size (file-attributes file)))
+                                                         #'romacs-agent-history--codex-keep))
+                     1)))
       (when (buffer-live-p buffer) (kill-buffer buffer))
       (delete-file file))))
 
