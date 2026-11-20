@@ -1088,7 +1088,7 @@
                  '((:from "lead" :state "parent" :text "Go on"))))
   (should-not (romacs-agent-incoming-of "my own words"))
   (romacs-agent-log-tests--with
-    ;; The user's message: its gutter and its surface.
+    ;; The user's message: its surface.
     (draw :type 'input :text "do it" :request 1)
     ;; A delegated task's result, written as a turn: from elsewhere.
     (draw :type 'input :text (concat "Delegated task 19a4803e-9e10-44f0-bf91-824484dcfb8c (lane x) [completed, 4 chars]:\n"
@@ -1103,10 +1103,12 @@
       (should-not (string-match-p "❯ Delegated" text)))
     (goto-char (point-min))
     (search-forward "do it")
-    (should (equal (substring-no-properties (get-text-property (match-beginning 0) 'line-prefix)) "▌ "))
     (should (memq 'romacs-agent-log-you (ensure-list (get-text-property (match-beginning 0) 'face))))
     (search-forward "lane x")
-    (should (equal (substring-no-properties (get-text-property (match-beginning 0) 'line-prefix)) "┆ "))
+    (should (memq 'romacs-agent-log-other-head (ensure-list (get-text-property (match-beginning 0) 'face))))
+    ;; Nothing the GUI host does not draw.
+    (should-not (text-property-not-all (point-min) (point-max) 'line-prefix nil))
+    (should-not (text-property-not-all (point-min) (point-max) 'wrap-prefix nil))
     (should-not (memq 'romacs-agent-log-you (ensure-list (get-text-property (match-beginning 0) 'face)))))
   ;; Only whole envelopes, each of a batch; anything else is the user's.
   (should (equal (mapcar (lambda (i) (plist-get i :text))

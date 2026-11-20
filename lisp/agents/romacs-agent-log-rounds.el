@@ -5,15 +5,12 @@
 ;;; Commentary:
 ;; A chat (romacs-agent-log.el) is a run of rounds: a message, and all
 ;; the agent did in answer.  Who each block is reads by shape and colour,
-;; before any word: every line of a block carries its kind's gutter, a
-;; `line-prefix' and `wrap-prefix' of one bar and a space, which draw
-;; beside the text and are no part of it.
+;; before any word:
 ;;
-;; - the user's message opens a round: an accent bar, its lines on a
-;;   tinted surface;
+;; - the user's message opens a round: its lines on a tinted surface;
 ;; - a message from elsewhere (another session's, a delegated task's
 ;;   result, a background task's notice) opens one too, but is not the
-;;   user: a dim broken bar, a head saying whom it is from, its text dim;
+;;   user: a ✉ head saying whom it is from, its text dim;
 ;; - the agent's work keeps its rows; its reply is the text as it is.
 ;; When a round ends, the agent's words before its last are dimmed: its
 ;; answer stands out by what recedes, as in T3 Code's timeline (design:
@@ -23,14 +20,11 @@
 
 (require 'romacs-agent-log)
 
-(defface romacs-agent-log-you-bar '((t :inherit romacs-working-running))
-  "The gutter of the user's messages: the theme's colour for work, never
-a syntax face's.")
 (defface romacs-agent-log-you '((t :extend t))
   "The surface of the user's messages: the background moved a little
 toward the text, derived on each theme change.")
-(defface romacs-agent-log-other-bar '((t :inherit romacs-agent-log-note))
-  "The gutter of what came from elsewhere.")
+(defface romacs-agent-log-other-mark '((t :inherit romacs-agent-log-note))
+  "The mark of what came from elsewhere.")
 (defface romacs-agent-log-other '((t :inherit romacs-agent-log-note))
   "The text of what came from elsewhere: dim, never the user's or the
 agent's own.")
@@ -56,25 +50,19 @@ default spec: told from the transcript on every theme, light or dark."
 (add-hook 'disable-theme-functions #'romacs-agent-log-rounds--derive)
 (romacs-agent-log-rounds--derive)
 
-(defun romacs-agent-log-rounds--gutter (text bar face)
-  "TEXT with every line behind BAR in FACE, as display: line and wrap
-prefixes, no part of the text."
-  (let ((prefix (propertize (concat bar " ") 'face face)))
-    (propertize text 'line-prefix prefix 'wrap-prefix prefix)))
-
 (defun romacs-agent-log-rounds-you (text)
   "TEXT, the user's message as a chat draws it, as its round's opener:
-its gutter and its surface.  The round before it ends."
+its surface.  The round before it ends."
   (romacs-agent-log-rounds-end)
   (let ((text (copy-sequence text)))
     (put-text-property 0 1 'romacs-agent-log-round t text)
     (add-face-text-property 0 (length text) 'romacs-agent-log-you t text)
-    (romacs-agent-log-rounds--gutter text "▌" 'romacs-agent-log-you-bar)))
+    text))
 
 (defun romacs-agent-log-rounds--head (incoming)
   "INCOMING's head: a mark, whom it is from, and its state."
   (let ((state (plist-get incoming :state)))
-    (concat (propertize "✉ " 'face 'romacs-agent-log-other-bar)
+    (concat (propertize "✉ " 'face 'romacs-agent-log-other-mark)
             (propertize (or (plist-get incoming :from) "elsewhere") 'face 'romacs-agent-log-other-head)
             (if (and state (not (string-empty-p state)))
                 (propertize (concat " · " state) 'face 'romacs-agent-log-other)
@@ -98,8 +86,7 @@ not the user's; its first lines dim, RET shows all."
     ;; under a subagent's call is that call's.
     (unless (plist-get event :parent) (romacs-agent-log-rounds-end))
     (romacs-agent-log--line event 'arrival
-                            (let ((text (propertize (romacs-agent-log-rounds--gutter text "┆" 'romacs-agent-log-other-bar)
-                                                    'romacs-agent-log-full (cons nil (or (plist-get incoming :full) body)))))
+                            (let ((text (propertize text 'romacs-agent-log-full (cons nil (or (plist-get incoming :full) body)))))
                               (unless (plist-get event :parent)
                                 (put-text-property 0 1 'romacs-agent-log-round t text))
                               ;; A journaled input's turn: diff and rollback read it.
