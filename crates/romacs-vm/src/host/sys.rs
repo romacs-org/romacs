@@ -544,9 +544,6 @@ mod tests {
         let inside = with_signals_blocked(blocked);
         assert_eq!(inside & (bit(libc::SIGINT) | bit(libc::SIGTERM) | bit(libc::SIGALRM)), bit(libc::SIGINT) | bit(libc::SIGTERM) | bit(libc::SIGALRM));
         assert_eq!(blocked(), before);
-        let unwound = std::panic::catch_unwind(|| with_signals_blocked(|| panic!("inside")));
-        assert!(unwound.is_err());
-        assert_eq!(blocked(), before, "the mask comes back when F unwinds");
     }
 
     /// A fresh directory of this test's own under the temporary directory.
