@@ -8,7 +8,8 @@
 //! processes made by the compile world they built, asked as they ask it: a
 //! world it judged in its own environment was stale for it, and the run
 //! ended after its first compile; and a session of that user, judging it
-//! so, took no artifact and compiled every file it loaded again.
+//! so, took no artifact and compiled every file it loaded again. The
+//! session's own count says so (`romacs-compiled-lisp-stats`).
 use std::path::Path;
 use std::process::Command;
 
@@ -54,15 +55,31 @@ fn an_installers_tree_compile_keys_by_the_world_its_first_compile_built() {
     assert!(summary["files"].as_u64().is_some_and(|n| n > 1000) && summary["compiled"].as_u64().is_some_and(|n| n > 1000),
             "the run did not compile the tree: {summary}");
     // A session of the same user loads what the tree compiled: an artifact
-    // that holds is taken, and no load compiles (a compile of a load is
-    // traced). With no compile identity, every load compiled again.
+    // that holds is taken, and no load compiles (`romacs-compiled-lisp-stats',
+    // written to a file in its HOME). A load that reads source does so only
+    // for a file whose compile refused it (`not-compiled'), as the tree's
+    // compile found. With no compile identity, every load compiled again.
+    let form = "(progn (require 'dired-x)
+      (let ((s (romacs-compiled-lisp-stats)))
+        (with-temp-file (expand-file-name \"stats\" (getenv \"HOME\"))
+          (prin1 (list (featurep 'dired-x) (plist-get s :taken) (plist-get s :compiled)
+                       (mapcar #'cdr (plist-get s :misses)))
+                 (current-buffer)))))";
     let mut session = Command::new(&exe);
-    user(session.args(["--batch", "--eval", "(progn (require 'dired-x) (princ (featurep 'dired-x)))"]));
+    user(session.args(["--batch", "--eval", form]));
     let output = session.env("ROMACS_COMPILED_LISP", "on").env("ROMACS_COMPILED_LISP_STORE", bin.join("romacs-vm-gui.lisp"))
-        .env("ROMACS_COMPILED_LISP_TRACE", "1").output().unwrap();
-    let (stdout, stderr) = (String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
-    assert!(output.status.success() && stdout.trim() == "t", "the session: {}\n{stdout}\n{stderr}", output.status);
-    let compiles: Vec<&str> = stderr.lines().filter(|line| line.starts_with("romacs-compiled-lisp: {\"compile\"")).collect();
-    assert!(compiles.is_empty(), "the session compiled what the tree did:\n{}", compiles.join("\n"));
+        .output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "the session: {}\n{stderr}", output.status);
+    let written = std::fs::read_to_string(home.join("stats")).unwrap_or_else(|e| panic!("the session wrote no stats ({e}): {stderr}"));
+    let inner = written.trim().strip_prefix('(').and_then(|text| text.strip_suffix(')')).unwrap_or_else(|| panic!("{written}"));
+    let mut fields = inner.splitn(4, ' ');
+    let (loaded, taken, compiled, misses) = (fields.next(), fields.next(), fields.next(), fields.next().unwrap_or("nil"));
+    assert_eq!(loaded, Some("t"), "the session did not load dired-x: {written}");
+    assert_eq!(compiled, Some("0"), "the session compiled what the tree did: {written}");
+    assert!(taken.and_then(|n| n.parse::<u64>().ok()).is_some_and(|n| n > 0), "the session took no artifact: {written}");
+    let reasons = misses.trim_start_matches('(').trim_end_matches(')');
+    assert!(reasons == "nil" || reasons.split_whitespace().all(|reason| reason == "not-compiled"),
+            "a load read source for want of an artifact: {written}");
     let _ = std::fs::remove_dir_all(&root);
 }
