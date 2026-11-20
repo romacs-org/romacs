@@ -77,33 +77,33 @@
 ;; GNU's transcriptions each named one character (a precomposed glyph,
 ;; or the invisible vowel sign for "a"); Romacs's are Unicode stacks, and
 ;; "a" is the inherent vowel, "" (ledger/divergences/VM2-TIBETAN-UNICODE.md).
-;; Quail takes a string of other than one character as that many candidates
-;; (none for ""), so each such translation is given as one candidate, the
-;; whole string.
-(defun quail-tibetan--rules (rules)
+;; Quail takes a string as one candidate a character (none for ""), so the
+;; rules whose translation is one unit, the stacks and the vowels, give
+;; each as a one-candidate vector.  The punctuation rules keep their
+;; strings: Wylie `|' offers the special signs, one candidate each.
+(defun quail-tibetan--units (rules)
   "RULES, a symbol whose value is an alist of keys and translations, as Quail
-takes them: a symbol of its own, uninterned, whose value gives a
-translation of other than one character as a one-candidate vector."
+takes them when each translation is one unit: a symbol of its own,
+uninterned, whose value gives each string translation as a one-candidate
+vector."
   (let ((symbol (make-symbol (symbol-name rules))))
     (set symbol (mapcar (lambda (rule)
-                          (let ((translation (cdr rule)))
-                            (if (and (stringp translation) (/= (length translation) 1))
-                                (cons (car rule) (vector translation))
-                              rule)))
+                          (if (stringp (cdr rule)) (cons (car rule) (vector (cdr rule))) rule))
                         (symbol-value rules)))
     symbol))
 
-(defun quail-tibetan--table (table)
-  "TABLE, a state transition table for `quail-map-from-table', each of its
-rules as `quail-tibetan--rules' gives them."
-  (mapcar (lambda (state)
-            (cons (car state)
-                  (mapcar (lambda (transition)
-                            (if (consp transition)
-                                (cons (quail-tibetan--rules (car transition)) (cdr transition))
-                              (quail-tibetan--rules transition)))
-                          (cdr state))))
-          table))
+(defun quail-tibetan--table (units table)
+  "TABLE, a state transition table for `quail-map-from-table', with the
+rules named in UNITS as `quail-tibetan--units' gives them."
+  (let ((rules (lambda (name) (if (memq name units) (quail-tibetan--units name) name))))
+    (mapcar (lambda (state)
+              (cons (car state)
+                    (mapcar (lambda (transition)
+                              (if (consp transition)
+                                  (cons (funcall rules (car transition)) (cdr transition))
+                                (funcall rules transition)))
+                            (cdr state))))
+            table)))
 
 ;;; Wylie transcription based input methods.
 
@@ -215,6 +215,7 @@ rules as `quail-tibetan--rules' gives them."
 (quail-install-map
  (quail-map-from-table
   (quail-tibetan--table
+   '(tibetan-precomposed-transcription-alist tibetan-vowel-transcription-alist)
   '((base-state (tibetan-consonant-transcription-alist . svm-state)
 		(tibetan-precomposed-transcription-alist . svm-state)
 		(tibetan-wylie-non-stacking-alist . svm-state)
@@ -484,6 +485,7 @@ rules as `quail-tibetan--rules' gives them."
 (quail-install-map
  (quail-map-from-table
   (quail-tibetan--table
+   '(tibetan-vowel-tibkey-alist)
   '((base-state (tibetan-consonant-tibkey-alist . s-state)
 		(tibetan-non-stacking-tibkey-alist . s-state)
 		tibetan-subjoined-tibkey-alist

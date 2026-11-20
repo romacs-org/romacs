@@ -60,7 +60,9 @@
 
 (defun tibetan-tests--keyed (method keys)
   "The text input method METHOD inserts for KEYS typed one by one, as its
-input function receives them, with the package's guidance (on for both)."
+input function receives them, with the package's guidance (on for both).
+As the command loop, it gives the input method only printing characters:
+a key left after a translation ends is dropped."
   (with-temp-buffer
     (switch-to-buffer (current-buffer))
     (activate-input-method method)
@@ -68,7 +70,8 @@ input function receives them, with the package's guidance (on for both)."
           (events (listify-key-sequence keys)))
       (while events
         (setq unread-command-events (cdr events))
-        (let ((inserted (funcall input-method-function (car events))))
+        (let ((inserted (and (characterp (car events)) (<= ?\s (car events) 255) (/= (car events) 127)
+                             (funcall input-method-function (car events)))))
           (setq events unread-command-events unread-command-events nil)
           (dolist (char inserted) (when (characterp char) (insert char)))))
       (buffer-substring-no-properties (point-min) (point-max)))))
@@ -81,5 +84,11 @@ input function receives them, with the package's guidance (on for both)."
   (dolist (case '(("tibetan-wylie" "ka " "ཀ་") ("tibetan-wylie" "a " "་") ("tibetan-wylie" "rka " "རྐ་")
                   ("tibetan-wylie" "phyw " "ཕྱྭ་") ("tibetan-tibkey" "qA " "ཀ་") ("tibetan-tibkey" "A " "་")))
     (should (equal (tibetan-tests--keyed (nth 0 case) (nth 1 case)) (nth 2 case)))))
+
+(ert-deftest tibetan-wylie-bar-offers-each-special-sign ()
+  ;; Wylie `|' offers the special signs, one candidate each: `C-f' moves to
+  ;; the second and `C-SPC' takes it.  Given as one unit, `|' inserted
+  ;; them all.  Pinned GNU types the same.
+  (should (equal (tibetan-tests--keyed "tibetan-wylie" (kbd "| C-f C-SPC")) "༁")))
 
 ;;; tibetan-tests.el ends here
