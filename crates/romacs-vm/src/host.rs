@@ -811,7 +811,9 @@ fn source_directory_from(value: Option<OsString>, runtime: impl FnOnce() -> Opti
     if let Some(linked) = runtime.as_ref().map(|dir| dir.join(SOURCE_LINK)).filter(|linked| tree(linked)) {
         return canonicalize(&linked).ok();
     }
-    let installed = runtime.is_some_and(|dir| canonicalize(&dir).ok() != canonicalize(root).ok());
+    // Asked of the file system directly, unrecorded: for an installation
+    // the answer is the same whether its checkout exists or not.
+    let installed = runtime.is_some_and(|dir| std::fs::canonicalize(&dir).ok() != std::fs::canonicalize(root).ok());
     (!installed && tree(root) && entry_type(&root.join(".git")).is_ok()).then(|| root.to_path_buf())
 }
 
@@ -1432,10 +1434,12 @@ fn decoded(field: &Json) -> Option<Vec<u8>> {
 
 /// Whether RECORDED, a keyed fact as its site aside recorded it, still
 /// holds as NOW, the same question's answer now ([`replay`]'s). A file's
-/// stat is compared without its device and inode: where the file lies,
-/// which a copy, a restore or a reflink of the tree changes, while what was
-/// kept of it (its content, bound by its file-read records, and its length,
-/// mode, owner and mtime) stays. A copy that drops mtimes changes it.
+/// stat is compared without its device, inode and link count: where the
+/// file lies and how many names it has, which a copy, a restore or a
+/// reflink of the tree changes (a hard-linked installation's file has two
+/// names, its copy one), while what was kept of it (its content, bound by
+/// its file-read records, and its length, mode, owner and mtime) stays. A
+/// copy that drops mtimes changes it.
 pub fn same_fact(recorded: &Json, now: &Json) -> bool {
     let placeless = |record: &Json| {
         let mut record = record.clone();
@@ -1443,6 +1447,7 @@ pub fn same_fact(recorded: &Json, now: &Json) -> bool {
             && let Some(result) = record["result"].as_object_mut() {
             result.remove("dev");
             result.remove("ino");
+            result.remove("nlink");
         }
         record
     };
@@ -3259,9 +3264,35 @@ mod tests {
         let stat = |dev: u64, ino: u64, len: u64| json!({"kind": "probe", "path": "/t/f.el", "probe": "fstat",
             "result": {"mode": 33188, "len": len, "mtime": [1, 2], "dev": dev, "ino": ino, "nlink": 1, "uid": 1, "gid": 1}});
         assert!(same_fact(&stat(1, 2, 3), &stat(9, 8, 3)), "another device and inode");
+        let mut linked = stat(1, 2, 3);
+        linked["result"]["nlink"] = json!(2);
+        assert!(same_fact(&linked, &stat(1, 2, 3)), "another link count: a hard-linked file and its copy");
         assert!(!same_fact(&stat(1, 2, 3), &stat(1, 2, 4)), "another length");
         let other = |result: u64| json!({"kind": "probe", "path": "/t", "probe": "fs-type", "result": result});
         assert!(!same_fact(&other(1), &other(2)), "no field of another kind is left out");
+    }
+    /// A world built by an installation, whose runtime tree is not the
+    /// checkout its binary was built from, records nothing of that
+    /// checkout: it holds once the checkout is gone.
+    #[test]
+    fn an_installations_build_records_nothing_of_its_checkout() {
+        let dir = std::env::temp_dir().join(format!("romacs-installed-build-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let checkout = dir.join("checkout");
+        std::fs::create_dir_all(checkout.join("crates/romacs-vm/src/prims")).unwrap();
+        std::fs::create_dir(checkout.join(".git")).unwrap();
+        let installed = dir.join("share/romacs");
+        std::fs::create_dir_all(&installed).unwrap();
+        enter_build(Pinned { clock: SystemTime::UNIX_EPOCH, pid: 0, seed: [0; 4] });
+        begin_recipe();
+        let found = source_directory_from(None, || Some(installed.clone()), &checkout);
+        let trace = leave_build().expect("a build trace");
+        assert_eq!(found, None);
+        let named: Vec<_> = trace["records"].as_array().unwrap().iter()
+            .filter(|r| decoded(&r["path"]).is_some_and(|p| p.starts_with(checkout.as_os_str().as_bytes())))
+            .collect();
+        assert!(named.is_empty(), "records of the checkout: {named:?}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
     /// A late wake samples once, at the next deadline after it.
     #[test]
