@@ -423,6 +423,32 @@ fn kernels_the_engine_runs_quit_per_chunk() {
     }
 }
 
+/// A native poll quits while a form compiles and a macro expands, as the
+/// engine's safepoint quits the expander: the compiler defers that quit to
+/// the form's reach. Here the printer runs inside an expansion as the
+/// compiler sets one up; under `inhibit-quit` it runs to its end.
+#[test]
+fn a_native_poll_quits_inside_a_compiling_macro_expansion() {
+    let (mut vm, signal) = busy_vm();
+    eval(&mut vm, "(setq l (make-list 50000 'a))");
+    let call = prepare(&mut vm, "prin1-to-string", "(list l)");
+    vm.compile_depth += 1;
+    vm.expanding.push(0);
+    assert!(signal.interrupt(), "a busy evaluator takes the press");
+    let outcome = invoke(&mut vm, call);
+    assert!(quit_signalled(&mut vm, &outcome), "the printer's poll did not quit inside the expansion");
+    vm.quit_unwinding = false;
+    let inhibit = vm.slot("inhibit-quit");
+    vm.slots[inhibit].value = Value::TRUE;
+    let call = prepare(&mut vm, "prin1-to-string", "(list l)");
+    assert!(signal.interrupt());
+    assert!(invoke(&mut vm, call).is_ok(), "under inhibit-quit the print ends with a value");
+    assert!(signal.due(), "inhibit-quit holds the press");
+    vm.slots[inhibit].value = Value::NIL;
+    vm.expanding.pop();
+    vm.compile_depth -= 1;
+}
+
 /// A C-g an `inhibit-quit` held, released before the call, leaves
 /// `quit-flag` set and no press: a native poll quits for it at once, as GNU's
 /// `maybe_quit` reads `Vquit_flag`, through the mutable poll (`append`'s

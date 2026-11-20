@@ -287,9 +287,11 @@ impl Vm {
         }
     }
     /// Whether a quit raised in a native loop would be acted on: the
-    /// evaluator is busy, and no form is compiling.
+    /// evaluator is busy. A form compiling runs Lisp only in its macros'
+    /// expansions, whose quit, a safepoint's or a native poll's, the
+    /// compiler already defers to the form's reach (`expansion_failed').
     pub(crate) fn native_quit_reached(&self) -> bool {
-        self.quit.busy() && self.compile_depth == 0 && self.expanding.is_empty()
+        self.quit.busy()
     }
 
     /// GNU maybe_quit at a safepoint, with handle_interrupt for each press
