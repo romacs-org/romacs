@@ -92,7 +92,6 @@ impl Stats {
     }
 }
 
-// CELL(Plain)
 static STATS: std::sync::Mutex<Stats> = std::sync::Mutex::new(Stats::new());
 
 /// Count a load of PATH that took ROUTE, in a process that COMPILES or not.
