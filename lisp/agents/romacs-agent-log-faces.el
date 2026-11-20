@@ -30,15 +30,22 @@ nil.")
   "Whether the streaming reply defines a link reference, so it is read
 whole each time: a reference anywhere in it may name that definition.")
 
+(defconst romacs-agent-log-faces--label
+  "^[ \t]*\\(?:\\(?:>\\|[-*+]\\|[0-9]+[.)]\\)[ \t]*\\)*\\(\\[\\(?:[^]\\\\]\\|\\\\.\\)+\\]\\):"
+  "A line that may open a link definition: `[label]:' after spaces and
+quote or list markers, its label across lines if need be.")
+
 (defun romacs-agent-log-faces--defines-p (beg end)
-  "Whether BEG..END, just faced, defines a link reference: a `[label]:'
-the parse faced as a definition (its URL face), so none in code, and
-one in a quote or a list item too."
+  "Whether BEG..END, just faced, defines a link reference: a line opening
+with `[label]:' that the parse faced as a definition (its URL face), so
+none in code or inline; with no URL face, one outside code."
   (let ((url (alist-get 'url romacs-markdown-faces)) (found nil))
     (save-excursion
       (goto-char beg)
-      (while (and (not found) (re-search-forward "\\[[^]\n]+\\]:" end t))
-        (setq found (and url (memq url (ensure-list (get-text-property (match-beginning 0) 'face)))))))
+      (while (and (not found) (re-search-forward romacs-agent-log-faces--label end t))
+        (let ((faces (ensure-list (get-text-property (match-beginning 1) 'face))))
+          (setq found (if url (memq url faces)
+                        (not (or (memq 'romacs-markdown-code-block faces) (memq 'romacs-markdown-code faces))))))))
     found))
 
 (defvar-local romacs-agent-log-faces--failed nil
