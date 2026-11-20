@@ -21,16 +21,6 @@ slow-timeout = { period = "600s", terminate-after = 1, grace-period = "0s" }
 filter = 'test(/(^|::)the_compiler_enforces_the_boundaries$/)'
 slow-timeout = { period = "1800s", terminate-after = 1, grace-period = "0s" }
 
-# An installer's tree compile (compiled_lisp_install.rs) runs four compile
-# processes into a fresh store: it takes four test threads, and compiles
-# every file of lisp/, which took 2 to 7 min at load 30 and 19 min under
-# heavier load. A wrong verdict is its failure, not time. tools/gate writes
-# the same override for its runs.
-[[profile.default.overrides]]
-filter = 'test(/(^|::)an_installers_tree_compile_keys_by_the_world_its_first_compile_built$/)'
-slow-timeout = { period = "1800s", terminate-after = 1, grace-period = "0s" }
-threads-required = 4
-
 # The batch scaling probes bound each session by its CPU (scaling_live.py);
 # load stretches their wall time, not their work. The test ends on those
 # bounds, and on a hung session's own wall-clock backstop.

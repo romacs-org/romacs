@@ -522,12 +522,6 @@ def build_and_run(src, run_dir, expr, threads, run, t0, suites, repeat=1):
                           '[[profile.default.overrides]]\n'
                           "filter = 'test(/(^|::)parity_ratchet_census_warm$/)'\n"
                           'slow-timeout = { period = "1200s", terminate-after = 1, grace-period = "0s" }\n'
-                          # An installer's tree compile, four compile processes
-                          # into a fresh store (.config/nextest.toml says more).
-                          '[[profile.default.overrides]]\n'
-                          "filter = 'test(/(^|::)an_installers_tree_compile_keys_by_the_world_its_first_compile_built$/)'\n"
-                          'slow-timeout = { period = "1800s", terminate-after = 1, grace-period = "0s" }\n'
-                          'threads-required = 4\n'
                           '[[profile.default.overrides]]\n'
                           "filter = 'test(=batch_probes_scale_within_their_budgets)'\n"
                           'slow-timeout = { period = "3600s", terminate-after = 1, grace-period = "0s" }\n')
