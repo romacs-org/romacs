@@ -329,6 +329,31 @@
     (draw :type 'done :duration 9)
     (should (string-match-p "✻ 9s\n" (romacs-agent-log-tests--transcript)))))
 
+(ert-deftest romacs-agent-log-a-turn-at-point-is-its-prompts ()
+  ;; Each prompt says the turn it starts: a diff or a rollback of the turn
+  ;; at point reads it; the attach puts a file's path in the composer.
+  (romacs-agent-log-tests--with
+    (draw :type 'input :text "first" :request 4)
+    (draw :type 'delta :text "reply one")
+    (draw :type 'done :time 0)
+    (draw :type 'input :text "second" :request 7)
+    (draw :type 'delta :text "reply two")
+    (goto-char (point-min))
+    (should (equal (romacs-agent-log--turn-here) 4))
+    (search-forward "reply one")
+    (should (equal (romacs-agent-log--turn-here) 4))
+    (search-forward "reply two")
+    (should (equal (romacs-agent-log--turn-here) 7))
+    (let (asked)
+      (cl-letf (((symbol-function 'romacs-agent-diff--checkpoints) #'ignore)
+                ((symbol-function 'y-or-n-p) #'always)
+                ((symbol-function 'romacs-agent-rollback) (lambda (_s request &rest _) (setq asked request))))
+        (search-backward "reply one")
+        (romacs-agent-chat-rollback))
+      (should (equal asked 4)))
+    (romacs-agent-chat-attach "/tmp/shot one.png")
+    (should (equal (buffer-substring-no-properties romacs-agent-log--input (point-max)) "/tmp/shot one.png"))))
+
 (ert-deftest romacs-agent-log-several-answers-keep-their-questions ()
   (let ((one (make-hash-table :test #'equal)) (two (make-hash-table :test #'equal)))
     (puthash "Colour?" "Blue" one)

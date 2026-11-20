@@ -656,7 +656,11 @@ unless a note said who gave it, that it was answered."
                      (t (propertize "❯ " 'face 'romacs-agent-log-prompt)))))
     (romacs-agent-log--line event 'prompt
                             (concat (if (and (null messages) (> romacs-agent-log--end (point-min))) "\n" "")
-                                    head
+                                    ;; The turn it starts, by its request: a diff
+                                    ;; or a rollback of the turn at point reads it.
+                                    (if-let* ((request (plist-get event :request)))
+                                        (propertize head 'romacs-agent-log-turn request)
+                                      head)
                                     (propertize (string-trim text) 'face (if messages nil 'romacs-agent-log-prompt))
                                     (if images (propertize (format "  [%d image%s]" (length images) (if (cdr images) "s" ""))
                                                            'face 'romacs-agent-log-note)
@@ -986,6 +990,15 @@ read as its harness's events read them."
     (pcase-let ((`(,_ ,method ,params) request))
       (list :type 'approval :request-id id :tool method :input params
             :questions (and (equal method "item/tool/requestUserInput") (romacs-agent--codex-questions params))))))
+
+(defun romacs-agent-log--turn-here ()
+  "The request id of the turn at point: its prompt's, at or before point;
+nil before the first."
+  (save-excursion
+    (let ((pos (min (point) (max (point-min) (1- romacs-agent-log--end)))))
+      (while (and (> pos (point-min)) (not (get-text-property pos 'romacs-agent-log-turn)))
+        (setq pos (or (previous-single-property-change pos 'romacs-agent-log-turn) (point-min))))
+      (get-text-property pos 'romacs-agent-log-turn))))
 
 (defun romacs-agent-log-earlier ()
   "Show the turns before those this chat shows, above them."

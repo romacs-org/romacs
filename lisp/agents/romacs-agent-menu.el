@@ -19,6 +19,8 @@
 (require 'romacs-agent-log)
 
 (declare-function romacs-agents "romacs-agent-board" ())
+(declare-function romacs-agent-resume-time "romacs-agent-tools" (session))
+(declare-function romacs-agent-tools--cancel-resume "romacs-agent-tools" (session &optional why))
 (declare-function romacs-agent-ui--batch "romacs-agent-ui" ())
 (declare-function romacs-agent-ui--selection-label "romacs-agent-ui" (selection))
 (declare-function romacs-agent-ui--instance "romacs-agent-ui" (provider harness model default))
@@ -245,6 +247,69 @@ and changes nothing; its plan comes as a card to implement."
     (cl-flet ((shown (effort) (propertize (or effort "default") 'face 'bold)))
       (concat "Effort: " (shown now) (if (equal now next) "" (concat " → " (shown next)))))))
 
+;;; What the chat does with its turns and files
+
+(defun romacs-agent-menu--last-prompt (session)
+  "The request id of SESSION's last prompt still in its conversation."
+  (car (last (delq nil (mapcar #'romacs-agent--record-request
+                               (romacs-agent--live-records (romacs-agent--journal-records session)))))))
+
+(defun romacs-agent-chat-rollback (&optional last)
+  "Take this session back to just before the turn at point (with a prefix
+argument LAST, its last turn): its conversation, and its files when the
+turn has a checkpoint.  Without one, offer the conversation alone.  Files
+changed meanwhile by something else are named, and restored only when
+you say so."
+  (interactive "P" romacs-agent-log-mode)
+  (let* ((session romacs-agent-log--session)
+         (request (or (if last (romacs-agent-menu--last-prompt session) (romacs-agent-log--turn-here))
+                      (user-error "No turn here")))
+         (files (seq-find (lambda (c) (and (equal (car c) request) (eq (nth 1 c) 'start)))
+                          (romacs-agent-diff--checkpoints session))))
+    (unless (if files (y-or-n-p "Roll back to before this turn, its conversation and its files? ")
+              (y-or-n-p "No checkpoint of this turn's files: roll back its conversation only? "))
+      (user-error "Not rolled back"))
+    (cl-labels ((go (force)
+                  (romacs-agent-rollback
+                   session request
+                   (lambda (outcome)
+                     ;; Asked from the command loop, not from git's sentinel.
+                     (run-at-time 0 nil
+                                  (lambda ()
+                                    (pcase outcome
+                                      (`(:done ,n) (message "Rolled back %d turn%s" n (if (= n 1) "" "s")))
+                                      (`(:clobbered ,names)
+                                       (if (yes-or-no-p (format "Changed meanwhile by something else: %s.  Restore them anyway? "
+                                                                (string-join names ", ")))
+                                           (go t)
+                                         (message "Not rolled back")))
+                                      (`(:error ,why) (message "Not rolled back: %s" why))))))
+                   :files (and files t) :force force)))
+      (go nil))))
+
+(defun romacs-agent-chat-diff (&optional all)
+  "Show what the turn at point changed in the project (the last turn
+from the composer) in `diff-mode', in another window; with a prefix
+argument ALL, what every turn of the session did."
+  (interactive "P" romacs-agent-log-mode)
+  (let ((session romacs-agent-log--session))
+    (romacs-agent-diff-turn session (unless all (or (and (< (point) romacs-agent-log--end) (romacs-agent-log--turn-here))
+                                                    (romacs-agent-diff-current session)
+                                                    (user-error "No turn yet"))))))
+
+(defun romacs-agent-chat-cancel-resume ()
+  "This session no longer resumes by itself when its limit resets."
+  (interactive nil romacs-agent-log-mode)
+  (romacs-agent-tools--cancel-resume romacs-agent-log--session "cancelled by hand"))
+
+(defun romacs-agent-chat-attach (file)
+  "Put FILE's path in the composer: the agent reads it where it is, no
+copy is made."
+  (interactive (list (read-file-name "Attach: " nil nil t)) romacs-agent-log-mode)
+  (goto-char (point-max))
+  (unless (or (= (point) romacs-agent-log--input) (memq (char-before) '(?\s ?\n))) (insert " "))
+  (insert (expand-file-name file)))
+
 (keymap-popup-define romacs-agent-menu-map
   "Actions of an agent chat: what waits on you, the turn, what it runs on,
 the session, the view."
@@ -260,12 +325,17 @@ the session, the view."
   "i" ("Interrupt" romacs-agent-log-interrupt :inapt-if (lambda () (not (romacs-agent-log--running-p))))
   "k" ("Interrupt, then send" romacs-agent-log-interrupt-and-send)
   "q" ("Send when the turn ends" romacs-agent-log-queue)
+  "u" ("Roll back to before this turn (C-u: the last)" romacs-agent-chat-rollback
+       :inapt-if (lambda () (not (romacs-agent--harness-free-p romacs-agent-log--session))))
+  "D" ("Diff of this turn (C-u: all)" romacs-agent-chat-diff)
   :group "Runs on"
   "m" (#'romacs-agent-menu--model-label romacs-agent-chat-model)
   "E" (#'romacs-agent-menu--effort-label romacs-agent-chat-effort)
   "P" (#'romacs-agent-menu--plan-label romacs-agent-chat-plan)
   "H" ("Go on under another instance" romacs-agent-chat-handoff)
   "N" ("Next account with room" romacs-agent-chat-next-account)
+  "z" ("Cancel the resume at its limit's reset" romacs-agent-chat-cancel-resume
+       :if (lambda () (and romacs-agent-log--session (romacs-agent-resume-time romacs-agent-log--session))))
   ;; No :if: a group whose rows are all empty is not drawn, and a digit
   ;; whose worker finished since says so rather than falling through.
   :group "Workers"
@@ -292,7 +362,8 @@ the session, the view."
   "x" ("Stop" romacs-agent-chat-stop)
   :group "View"
   "e" ("Earlier turns" romacs-agent-log-earlier)
-  "w" ("Copy the entry at point" romacs-agent-log-copy))
+  "w" ("Copy the entry at point" romacs-agent-log-copy)
+  "A" ("Attach a file (its path)" romacs-agent-chat-attach))
 
 (put 'romacs-agent-menu-map-popup 'command-modes '(romacs-agent-log-mode))
 
