@@ -40,10 +40,12 @@ impl Leaf<'_> {
         }
         // Character positions holding FROM.
         // Polled between chunks: nothing is changed yet.
+        // Validated above to lie in the accessible region, so at least 1.
+        let position = |at: i64| usize::try_from(at - 1).map_err(|_| Fault::Error("Args out of range".into()));
+        let span = position(lo)?..position(hi)?;
         let hits: Vec<usize> = match &self.vm.objects[index] {
             data::Object::Buffer(_) => {
                 let mut hits = Vec::new();
-                let span = (lo - 1) as usize..(hi - 1) as usize;
                 for chunk in span.clone().step_by(super::quit_poll::POLL_STEPS as usize) {
                     let data::Object::Buffer(b) = &self.vm.objects[index] else { unreachable!("checked above") };
                     for at in chunk..span.end.min(chunk + super::quit_poll::POLL_STEPS as usize) {
@@ -56,7 +58,6 @@ impl Leaf<'_> {
             data::Object::ByteBuffer(_) => {
                 const PART: usize = 1 << 16;
                 let mut hits = Vec::new();
-                let span = (lo - 1) as usize..(hi - 1) as usize;
                 for chunk in span.clone().step_by(PART) {
                     let data::Object::ByteBuffer(b) = &self.vm.objects[index] else { unreachable!("checked above") };
                     hits.extend((chunk..span.end.min(chunk + PART)).filter(|&at| u32::from(b.bytes[at]) == from_c));

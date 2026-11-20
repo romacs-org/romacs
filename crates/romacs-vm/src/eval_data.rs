@@ -80,7 +80,7 @@ impl Vm {
             let mut stopped = false;
             for (n, part) in text.char_parts(KERNEL_CHUNK).enumerate() {
                 if n > 0 && self.kernel_stop_due::<SCOPED>() { stopped = true; break; }
-                prefix.extend(part.map(|c| Value::integer(i64::from(c)).expect("a character is a fixnum")));
+                for c in part { prefix.push(Value::integer(i64::from(c))?); }
             }
             stopped
         };
@@ -88,7 +88,7 @@ impl Vm {
             self.kernel_poll::<SCOPED>()?;
             prefix.truncate(before);
             let text = self.str_view(string).ok_or("string required")?;
-            prefix.extend(text.chars().map(|c| Value::integer(i64::from(c)).expect("a character is a fixnum")));
+            for c in text.chars() { prefix.push(Value::integer(i64::from(c))?); }
         }
         Ok(())
     }
@@ -456,6 +456,9 @@ impl Vm {
     }
 
     fn print_body(&self, value: Value, quoted: bool, options: &PrintOptions, depth: usize) -> Result<String> {
+        use std::fmt::Write;
+        // A string's codes printed between two asks of the quit probe.
+        const PART: usize = 1 << 14;
         if depth > 100 { return Err("print nesting limit exceeded".into()); }
         if let Some(view) = self.str_view(value) {
             let properties = if quoted { self.print_string_properties(value) } else { Vec::new() };
@@ -465,19 +468,17 @@ impl Vm {
             // A part at a time, the quit probe asked between parts, as the
             // print's other walks ask it (`PRINT_STOPPED`): nothing is
             // returned before the whole text is.
-            const PART: usize = 1 << 14;
             for (n, part) in codes.chunks(PART).enumerate() {
                 if n > 0 && self.native_stop_due() { return Err(PRINT_STOPPED.into()); }
                 for (j, &code) in part.iter().enumerate() {
                     let i = n * PART + j;
-                    use std::fmt::Write;
                     // princ into a buffer escapes a unibyte string's raw bytes too.
                     if code > lstring::MAX_5_BYTE_CHAR || (!view.is_multibyte() && code >= 128 && (quoted || options.buffer)) {
                         if !view.is_multibyte() && code >= 128 && !options.nonascii {
                             return Err("printing raw-byte strings to callbacks is not supported".into());
                         }
                         let byte = if code > lstring::MAX_5_BYTE_CHAR { code - lstring::BYTE8_OFFSET } else { code };
-                        write!(out, "\\{:03o}", byte).unwrap();
+                        write!(out, "\\{byte:03o}").unwrap();
                         hex = false;
                     } else if quoted && options.multibyte && code >= 128 {
                         write!(out, "\\x{code:04x}").unwrap(); hex = true;
@@ -518,7 +519,6 @@ impl Vm {
                         if limit < count { parts.push("...".into()); }
                         format!("({})", parts.join(" "))
                     };
-                    use std::fmt::Write;
                     write!(out, " {start} {end} {printed}").unwrap();
                 }
                 out.push(')');

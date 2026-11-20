@@ -266,7 +266,7 @@ fn a_termination_supersedes_a_pending_interrupt() {
     assert_eq!(out, "t", "{out}");
 }
 
-/// A worker cancelled during a long `call-process' whose child runs the
+/// A worker cancelled during a long `call-process` whose child runs the
 /// shell SCRIPT with its paths as arguments: $1 for its pid, $2 for the
 /// ready file, written once it waits, and $3 for the pid of the helper it
 /// starts when HELPER. The milliseconds from the cancel to the quit, once
@@ -304,7 +304,7 @@ fn cancel_call_process(name: &str, script: &str, helper: bool) -> String {
     ms.trim_end_matches(')').to_string()
 }
 
-/// A worker's cancel during a long `call-process' stops the child, as a
+/// A worker's cancel during a long `call-process` stops the child, as a
 /// C-g's quit does (SIGINT to its group), and quits within the bound.
 #[test]
 fn an_interrupt_stops_a_workers_call_process() {
@@ -323,7 +323,7 @@ fn an_interrupt_kills_a_workers_child_that_ignores_sigint() {
     assert!(ms.parse::<u64>().unwrap() < 1000, "{ms} ms");
 }
 
-/// A shell's `&' job starts with SIGINT ignored, so the shell ends on the
+/// A shell's `&` job starts with SIGINT ignored, so the shell ends on the
 /// SIGINT and leaves it running: the worker's stop kills the whole group.
 #[test]
 fn an_interrupt_kills_a_workers_call_process_helper() {

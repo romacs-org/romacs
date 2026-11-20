@@ -217,7 +217,7 @@ fn local_sockets_match_pinned_gnu() {
 }
 
 /// C-g during call-process's wait, once its child has written 128 KiB and
-/// gone to sleep: the output read is in the buffer, as GNU's call_process
+/// gone to sleep: the output read is in the buffer, as GNU's `call_process`
 /// inserts each block it reads (callproc.c) before the quit unwinds it. The
 /// press lands once the child's marker file exists, and the call must end
 /// within 100 ms of it.
@@ -236,7 +236,7 @@ fn a_quit_in_call_process_keeps_the_output_read() {
         std::thread::spawn(move || {
             let start = Instant::now();
             while !marker.exists() {
-                assert!(start.elapsed() < Duration::from_secs(60), "the child never wrote its marker");
+                assert!(start.elapsed() < Duration::from_mins(1), "the child never wrote its marker");
                 std::thread::sleep(Duration::from_millis(1));
             }
             assert!(signal.interrupt(), "a busy evaluator takes the press");
@@ -247,12 +247,12 @@ fn a_quit_in_call_process_keeps_the_output_read() {
     let value = vm.eval_source(&format!(r#"(progn (setq default-directory "/")
         (with-temp-buffer (let ((coding-system-for-read 'no-conversion))
           (list (condition-case nil (call-process "sh" nil t nil "-c" {script:?} "sh" {:?}) (quit 'quit)) (buffer-size)))))"#,
-        marker.display().to_string())).and_then(|v| v.display());
+        marker.display().to_string())).and_then(romacs_vm::Local::display);
     let ended = Instant::now();
-    let pressed = presser.join().unwrap();
+    let pressed_at = presser.join().unwrap();
     std::fs::remove_dir_all(&base).unwrap();
     assert_eq!(value.as_deref(), Ok("(quit 131072)"));
-    let latency = ended.saturating_duration_since(pressed);
+    let latency = ended.saturating_duration_since(pressed_at);
     assert!(latency < Duration::from_millis(100), "the call ended {latency:?} after C-g");
 }
 

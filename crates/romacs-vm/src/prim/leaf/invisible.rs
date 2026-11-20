@@ -104,20 +104,19 @@ impl Leaf<'_> {
     pub fn native_current_column(&mut self) -> super::super::Out {
         let rule = self.vm.width_rule().map_err(Fault::Error)?;
         let stop = self.native_stop();
-        let column = match self.line_column(&rule, &stop)? {
-            Some(column) => column,
-            None => {
-                // Stopped for the probe: the poll quits, or, nothing to quit
-                // for after all, the line is counted again unpolled.
-                self.native_poll()?;
-                self.line_column(&rule, &crate::quit::NativeStop::never())?.expect("never stops")
-            }
+        let column = if let Some(column) = self.line_column(&rule, &stop)? {
+            column
+        } else {
+            // Stopped for the probe: the poll quits, or, nothing to quit
+            // for after all, the line is counted again unpolled.
+            self.native_poll()?;
+            self.line_column(&rule, &crate::quit::NativeStop::never())?.expect("never stops")
         };
         Value::integer(column as i64).map_err(Fault::Error)
     }
     /// Point's column in its line, its widths folded where the text lies,
     /// chunk by chunk, STOP asked between chunks: None once it stopped.
-    /// Nothing is copied. A raw byte shows as `\NNN': four columns, like a
+    /// Nothing is copied. A raw byte shows as `\NNN`: four columns, like a
     /// C1 control; a unibyte buffer's byte above 127 likewise.
     fn line_column(&mut self, rule: &crate::width_rule::WidthRule, stop: &crate::quit::NativeStop) -> std::result::Result<Option<usize>, Fault> {
         use crate::text::Newlines as _;

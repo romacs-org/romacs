@@ -710,7 +710,9 @@ fn call_kernel(vm: &mut Vm, p: crate::Primitive, args: &[Value], engine: bool) -
 fn gated_kernels_take_their_scope_at_their_first_chunk() {
     use crate::Primitive::{Append, CopySequence, Max, Min, Nreverse};
     const K: usize = crate::quit::KERNEL_CHUNK;
-    let kernels: [(crate::Primitive, fn(usize) -> String); 7] = [
+    // Each kernel, with the form making its arguments, N elements long.
+    type Kernel = (crate::Primitive, fn(usize) -> String);
+    let kernels: [Kernel; 7] = [
         (Nreverse, |n| format!("(list (make-list {n} 1))")),
         (CopySequence, |n| format!("(list (make-list {n} 1))")),
         (Append, |n| format!("(list (make-list {n} 1) nil)")),
@@ -738,10 +740,10 @@ fn gated_kernels_take_their_scope_at_their_first_chunk() {
 }
 
 /// `nreverse`'s walk hands off to its polled continuation once Brent's
-/// power reaches KERNEL_CHUNK, after KERNEL_CHUNK - 1 steps: on either side
+/// power reaches `KERNEL_CHUNK`, after `KERNEL_CHUNK` - 1 steps: on either side
 /// of that, and across it, a proper list comes back reversed, and a list
 /// whose cycle the walk finds before the hand-off or after it signals
-/// `circular-list' with the list itself, as fns.c's Fnreverse does.
+/// `circular-list` with the list itself, as fns.c's `Fnreverse` does.
 #[test]
 fn nreverse_is_one_walk_across_its_hand_off() {
     const K: usize = crate::quit::KERNEL_CHUNK;

@@ -43,16 +43,16 @@ fn list_elements(cx: &mut Leaf<'_>, list: Value) -> Result<Vec<Value>, Fault> {
 /// between parts. Stopped, the poll quits, or, nothing to quit for after
 /// all, the codes are taken again unpolled: nothing is made from them yet.
 fn string_codes(cx: &mut Leaf<'_>, string: Value) -> Result<Vec<Value>, Fault> {
-    let code = |c: u32| Value::integer(i64::from(c)).expect("a character is a fixnum");
+    let code = |c: u32| Value::integer(i64::from(c)).map_err(Fault::Error);
     let stop = cx.native_stop();
     let (mut codes, mut stopped) = (Vec::new(), false);
     for part in cx.string_view_from(string, 0)?.char_parts(crate::quit::KERNEL_CHUNK) {
-        codes.extend(part.map(code));
+        for c in part { codes.push(code(c)?); }
         if stop.due() { stopped = true; break; }
     }
     if stopped {
         cx.native_poll()?;
-        codes = cx.string_view(string)?.chars().map(code).collect();
+        codes = cx.string_view(string)?.chars().map(code).collect::<Result<_, _>>()?;
     }
     Ok(codes)
 }
@@ -80,7 +80,7 @@ fn vconcat(cx; rest sequences) {
     cx.quittable(|cx| vconcat_values(cx, sequences)).map(|values| allocate_vector(cx, values))
 }}
 
-/// concat_to_vector (fns.c:1114): every argument's type and length is
+/// `concat_to_vector` (fns.c:1114): every argument's type and length is
 /// checked, in order, before the result exists.
 fn vconcat_values(cx: &mut Leaf<'_>, sequences: &[Value]) -> Result<Vec<Value>, Fault> {
     let mut values = Vec::new();

@@ -114,6 +114,8 @@ fn string(cx; rest args) {
 
 defsubr! { name = "make-string", gnu = "alloc.c:make-string", effect = Pure,
 fn make_string(cx, length: Value, initial: Value; optional multibyte: Value) {
+    // Bytes filled between two polls; a string of one part never polls.
+    const PART: usize = 1 << 14;
     let count = length.integer_value().and_then(|n| usize::try_from(n).ok())
         .ok_or(Fault::Wrong("wholenump", length))?;
     let code = character(initial)?;
@@ -123,7 +125,6 @@ fn make_string(cx, length: Value, initial: Value; optional multibyte: Value) {
         .ok_or_else(|| Fault::Error("String overflow".into()))?;
     let mut bytes = Vec::new();
     bytes.try_reserve_exact(size).map_err(|_| Fault::Error("String overflow".into()))?;
-    const PART: usize = 1 << 14;
     let fill = |bytes: &mut Vec<u8>, n: usize| for _ in 0..n { bytes.extend_from_slice(&unit); };
     if count <= PART {
         fill(&mut bytes, count);

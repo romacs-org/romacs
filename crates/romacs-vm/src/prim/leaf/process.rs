@@ -1252,7 +1252,7 @@ impl Leaf<'_> {
         Ok((bytes, None))
     }
 
-    /// QUIT, raised while call_process waits for child PID, once the child
+    /// QUIT, raised while `call_process` waits for child PID, once the child
     /// is stopped (`call_process_stop`, GRACE as it takes it).
     fn call_process_quit(&mut self, pid: i32, pidfd: Option<&OwnedFd>, quit: Fault, grace: Option<std::time::Duration>) -> Fault {
         // A4's abort offer reads this: HandedOff leaves a live child owned
@@ -1337,7 +1337,7 @@ impl Leaf<'_> {
     const KILL_GRACE: std::time::Duration = std::time::Duration::from_millis(100);
 
     /// How long a worker's quit gives its child's SIGINT before SIGKILL: well
-    /// inside `isolate-interrupt-timeout', the spawner's own escalation.
+    /// inside `isolate-interrupt-timeout`, the spawner's own escalation.
     const WORKER_GRACE: std::time::Duration = std::time::Duration::from_millis(200);
 
     /// How often a wait without a pidfd asks whether the child has ended.

@@ -128,7 +128,7 @@ impl<'a> Input<'a> {
     }
 }
 
-/// fns.c base64_decode_1 (unibyte result), None for invalid data, or for
+/// fns.c `base64_decode_1` (unibyte result), None for invalid data, or for
 /// a stop: STOP is asked once each 16 KB read, and a stop sets STOPPED.
 fn decode(input: &[u8], url: bool, ignore_invalid: bool, stop: &crate::quit::NativeStop, stopped: &mut bool) -> Option<Vec<u8>> {
     let mut bytes = Input::new(input, stop);
@@ -137,7 +137,7 @@ fn decode(input: &[u8], url: bool, ignore_invalid: bool, stop: &crate::quit::Nat
     decoded
 }
 
-/// fns.c base64_decode_1 over BYTES, LENGTH of them.
+/// fns.c `base64_decode_1` over BYTES, LENGTH of them.
 fn decode_from<B: Bytes>(bytes: &mut B, length: usize, url: bool, ignore_invalid: bool) -> Option<Vec<u8>> {
     // The next significant byte: whitespace, and with IGNORE-INVALID any
     // invalid byte, is skipped.

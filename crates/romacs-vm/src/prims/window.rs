@@ -486,7 +486,7 @@ fn vertical_motion(cx, lines: Value; optional window: Value, cur_col: Value) {
 
 defsubr! { name = "line-pixel-height", gnu = "xdisp.c:1545", effect = Reads,
 fn line_pixel_height(cx) {
-    cx.quittable(|cx| cx.line_pixel_height())
+    cx.quittable(Leaf::line_pixel_height)
 }}
 
 defsubr! { name = "window-scroll-bars", gnu = "window.c:8898", effect = Reads,

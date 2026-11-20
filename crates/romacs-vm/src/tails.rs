@@ -142,8 +142,8 @@ impl Vm {
     }
 
     /// The rest of `core_nreverse`'s walk, from a restart of Brent's check
-    /// that set SLOW to FAST with a power of KERNEL_CHUNK: the same steps,
-    /// polled each KERNEL_CHUNK of them (`Vm::kernel_poll`), which writes
+    /// that set SLOW to FAST with a power of `KERNEL_CHUNK`: the same steps,
+    /// polled each `KERNEL_CHUNK` of them (`Vm::kernel_poll`), which writes
     /// nothing. Ok at the walk's end or at the cycle it found.
     #[cold]
     #[inline(never)]
