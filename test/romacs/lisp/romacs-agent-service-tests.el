@@ -857,7 +857,12 @@ a state root of its own, and a service of its own on `socket'."
                (first (car (funcall ask "agents/start" params)))
                (again (car (funcall ask "agents/start" params))))
           (should (stringp (gethash "id" first)))
+          ;; Its launch waiting for its records' place: queued.
+          (should (equal (gethash "state" first) "queued"))
           (should (equal (gethash "id" again) (gethash "id" first)))
+          ;; Kept in the store: a service started again names the same one.
+          (clrhash romacs-agent-service--commands)
+          (should (equal (gethash "id" (car (funcall ask "agents/start" params))) (gethash "id" first)))
           (should (= (length launched) 1))
           (should (plist-get (car launched) :tracked))
           (should (equal (romacs-agent-title (romacs-agent-loaded (gethash "id" first))) "far start")))

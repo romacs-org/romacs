@@ -361,11 +361,16 @@ prompt; its chat shown once the service lists it."
                                    (and cwd (directory-file-name cwd))))
          (provider (if (cdr providers) (completing-read "Provider: " providers nil t nil nil (car providers))
                      (car providers)))
-         (prompt (read-string "First prompt (RET: none): ")))
+         (prompt (progn
+                   ;; A path on the other machine, as typed: nothing of it is
+                   ;; read here.
+                   (unless (and (string-prefix-p "/" project) (not (string-match-p "\\`/[^/:]+:" project)))
+                     (user-error "A project on the other machine is an absolute path there: %s" project))
+                   (read-string "First prompt (RET: none): "))))
     (romacs-agent-remote--lists source)
     (romacs-agent-client-command
      (romacs-agent-remote-client source) "agents/start"
-     (romacs-agent-rpc-object "cwd" (expand-file-name project "/") "provider" (or provider :null)
+     (romacs-agent-rpc-object "cwd" project "provider" (or provider :null)
                               "prompt" (if (string-empty-p prompt) :null prompt))
      (lambda (result error)
        (if error (message "Not started: %s" (gethash "message" error))

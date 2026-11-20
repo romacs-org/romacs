@@ -617,10 +617,26 @@ on one loads it, `romacs-agent-get')."
 (defun romacs-agent-store-command (key since)
   "The command KEY names, as it was kept since time SINCE: (DIGEST .
 OUTCOME), OUTCOME the JSON of its result; nil when none is."
+  ;; A read that fails is said, never taken for no command.
   (when-let* ((db (romacs-agent-store--open))
-              (row (car (ignore-errors (sqlite-select db "select digest, outcome from commands where key = ? and at >= ?"
-                                                      (list key since))))))
+              (row (car (sqlite-select db "select digest, outcome from commands where key = ? and at >= ?"
+                                       (list key since)))))
     (cons (car row) (cadr row))))
+
+(defun romacs-agent-store-command-admit (key digest outcome done)
+  "Admit the command KEY names, of params DIGEST, kept as OUTCOME, by the
+writer, in one step: DONE called with (ok t) once it is, (ok (DIGEST .
+OUTCOME)) when one of KEY was kept already, as it was, or (error ERR)."
+  (romacs-agent-write 'romacs-agent-store--command-admitted (list key digest outcome (float-time)) done (list 'command key)))
+
+(defun romacs-agent-store--command-admitted (key digest outcome at)
+  (let ((db (or (romacs-agent-store--open) (error "The agents' store could not be opened"))))
+    (if (> (sqlite-execute db "insert or ignore into commands (key, digest, outcome, at) values (?, ?, ?, ?)"
+                           (list key digest outcome at))
+           0)
+        t
+      (let ((row (car (sqlite-select db "select digest, outcome from commands where key = ?" (list key)))))
+        (cons (car row) (cadr row))))))
 
 (defun romacs-agent-store-command-put (key digest outcome &optional done)
   "Keep the command KEY names, of params DIGEST, its OUTCOME the JSON of

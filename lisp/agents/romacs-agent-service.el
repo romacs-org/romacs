@@ -809,14 +809,19 @@ the JSON of its result, or (waiting RESPOND ...) while its admission is
 kept, those its repeats wait with.  The store keeps them across its
 restarts (`romacs-agent-store-command').")
 
+(defvar romacs-agent-service--progress nil
+  "While a command's effect runs, a function keeping what it reached, a
+result's table: a repeat after the service stops gets that.")
+
 (defun romacs-agent-service--command (rpc method params effect)
   "Run the command METHOD with PARAMS once, by its client's id (cid):
 EFFECT is called once its admission is kept in the store, and its result,
-a table with its state, kept and answered.  The same command again gets
-the result kept, or waits with the first; the same cid with another
-method or other params is refused (cid-conflict).  A command kept as
-admitted, its effect unknown (the service stopped before its result was
-kept), is never run again: its state is unknown."
+a table with its state, kept and answered; EFFECT may instead return a
+function, called with one that takes its result once it has it.  The same
+command again gets the result kept, or waits with the first; the same cid
+with another method or other params is refused (cid-conflict).  A command
+kept as admitted, its effect unknown (the service stopped before its
+result was kept), is never run again: its state is unknown."
   (let* ((peer (romacs-agent-rpc-data rpc)) (cid (gethash "cid" params)))
     (unless (stringp cid) (romacs-agent-service--fail -32602 "bad-params" "A command carries its cid"))
     (let* ((identity (romacs-agent-service--peer-identity peer))
@@ -830,41 +835,60 @@ kept), is never run again: its state is unknown."
         (romacs-agent-service--fail -32015 "cid-conflict" "This cid named another command"))
        ((and kept (eq (car-safe (cddr kept)) 'waiting))
         (lambda (respond) (setcdr (cddr kept) (cons respond (cdr (cddr kept))))))
-       (kept (or (ignore-errors (json-parse-string (cddr kept) :null-object :null :false-object :false))
-                 (romacs-agent-rpc-object "state" "unknown")))
+       (kept (let ((result (romacs-agent-service--kept-result (cddr kept))))
+               (if (eq (car-safe result) 'error) (apply #'romacs-agent-service--fail (cdr result)) result)))
        (t
         (lambda (respond)
           (let ((entry (cons digest (cons (float-time) (list 'waiting respond)))))
             (puthash key entry romacs-agent-service--commands)
-            ;; Kept before its effect: a service that stops before its
-            ;; result is kept runs it no second time.
-            (romacs-agent-store-command-put
-             key digest (json-serialize (romacs-agent-rpc-object "state" "unknown"))
-             (lambda (answer)
-               (let ((result (if (not (and (eq (car answer) 'ok) (eq (cadr answer) t)))
-                                 (progn (remhash key romacs-agent-service--commands)
-                                        (list 'error -32603 "internal" "The command was not kept: not run"))
-                               (condition-case err
-                                   (let ((romacs-agent-service--progress
-                                          ;; What it reached, kept for a repeat after a stop.
-                                          (lambda (outcome) (romacs-agent-store-command-put key digest (json-serialize outcome)))))
-                                     (funcall effect))
-                                 (romacs-agent-service-error
-                                  (remhash key romacs-agent-service--commands)
-                                  (pcase-let ((`(,code ,kind ,text) (cdr err))) (list 'error code kind text)))
-                                 ((error quit) (remhash key romacs-agent-service--commands)
-                                  (list 'error -32603 "internal" (error-message-string err)))))))
-                 ;; Its repeats as they are now: one may have come while it ran.
-                 (let ((waiting (cdr (cddr entry))))
-                   (unless (eq (car-safe result) 'error)
-                     (let ((json (json-serialize result)))
-                       (setcdr entry (cons (float-time) json))
-                       (romacs-agent-store-command-put key digest json)))
-                   (dolist (respond waiting) (funcall respond result)))))))))))))
+            (cl-labels
+                ((complete (result)
+                   ;; Its repeats as they are now: one may have come while it ran.
+                   ;; Kept as it ended, refused too: a repeat gets the same.
+                   (let ((waiting (cdr (cddr entry)))
+                         (json (json-serialize
+                                (if (eq (car-safe result) 'error)
+                                    (romacs-agent-rpc-object "refused" (vconcat (cdr result)))
+                                  result))))
+                     (setcdr entry (cons (float-time) json))
+                     (romacs-agent-store-command-put key digest json)
+                     (dolist (respond waiting) (funcall respond result))))
+                 (failed (err)
+                   (if (eq (car err) 'romacs-agent-service-error)
+                       (pcase-let ((`(,code ,kind ,text) (cdr err))) (list 'error code kind text))
+                     (list 'error -32603 "internal" (error-message-string err))))
+                 (run ()
+                   (condition-case err
+                       (let* ((romacs-agent-service--progress
+                               ;; What it reached, kept for a repeat after a stop.
+                               (lambda (outcome &optional done)
+                                 (romacs-agent-store-command-put key digest (json-serialize outcome) done)))
+                              (result (funcall effect)))
+                         (if (functionp result)
+                             (funcall result (lambda (result) (complete result)))
+                           (complete result)))
+                     ((romacs-agent-service-error error quit) (complete (failed err))))))
+              ;; Admitted once, in one step of the store: kept as admitted
+              ;; before its effect, so a service that stops before its
+              ;; result is kept runs it no second time; one there already
+              ;; is a repeat.
+              (romacs-agent-store-command-admit
+               key digest (json-serialize (romacs-agent-rpc-object "state" "unknown"))
+               (lambda (answer)
+                 (pcase answer
+                   (`(ok t) (run))
+                   (`(ok (,stored . ,outcome))
+                    (complete (if (equal stored digest) (romacs-agent-service--kept-result outcome)
+                                (list 'error -32015 "cid-conflict" "This cid named another command"))))
+                   (_ (complete (list 'error -32603 "internal" "The command was not kept: not run"))))))))))))))
 
-(defvar romacs-agent-service--progress nil
-  "While a command's effect runs, a function keeping what it reached, a
-result's table: a repeat after the service stops gets that.")
+(defun romacs-agent-service--kept-result (json)
+  "The result JSON, a kept command's, says: unknown when it says none,
+\(error CODE KIND MESSAGE) when it was refused."
+  (let ((result (ignore-errors (json-parse-string json :null-object :null :false-object :false))))
+    (cond ((null result) (romacs-agent-rpc-object "state" "unknown"))
+          ((vectorp (gethash "refused" result)) (cons 'error (append (gethash "refused" result) nil)))
+          (t result))))
 
 (defun romacs-agent-service--kept (key)
   "The command KEY names as it is kept, (DIGEST TIME . OUTCOME), within its
@@ -994,19 +1018,29 @@ repeat after the service stops names it."
             (cwd (funcall get "cwd")) (progress romacs-agent-service--progress))
        (unless (and cwd (file-name-absolute-p cwd) (file-directory-p cwd))
          (romacs-agent-service--fail -32602 "bad-params" "cwd, a directory on the agents' host"))
-       (condition-case err
-           (let ((session (romacs-agent-start
-                           cwd (funcall get "prompt") (funcall get "title") (funcall get "provider")
-                           (append (list :tracked t)
-                                   (and (funcall get "model") (list :model (funcall get "model")))
-                                   (and (funcall get "effort") (list :effort (funcall get "effort")))
-                                   (and (funcall get "parent") (list :parent (funcall get "parent"))))
-                           (lambda (session)
-                             (when progress
-                               (funcall progress (romacs-agent-rpc-object "state" "unknown" "id" (romacs-agent-id session)
-                                                                          "milestone" "allocated")))))))
-             (romacs-agent-rpc-object "state" "written" "id" (romacs-agent-id session)))
-         (user-error (romacs-agent-service--fail -32602 "bad-params" (error-message-string err))))))))
+       ;; Its id made, and kept, before anything of it is: a repeat after a
+       ;; stop names it, whatever came of its start.
+       (let ((id (romacs-agent--uuid)))
+         (lambda (finish)
+           (funcall progress (romacs-agent-rpc-object "state" "unknown" "id" id "milestone" "allocated")
+                    (lambda (answer)
+                      (funcall finish
+                               (if (not (equal answer '(ok t)))
+                                   (list 'error -32603 "internal" "Its id was not kept: not started")
+                                 (condition-case err
+                                     (let ((session (romacs-agent-start
+                                                     cwd (funcall get "prompt") (funcall get "title") (funcall get "provider")
+                                                     (append (list :id id :tracked t)
+                                                             (and (funcall get "model") (list :model (funcall get "model")))
+                                                             (and (funcall get "effort") (list :effort (funcall get "effort")))
+                                                             (and (funcall get "parent") (list :parent (funcall get "parent")))))))
+                                       ;; Its host started, or (a launch waiting for its
+                                       ;; records' place) to start: queued.
+                                       (romacs-agent-rpc-object
+                                        "state" (if (or (romacs-agent-unit session) (romacs-agent--per-turn-p session)) "written" "queued")
+                                        "id" id))
+                                   (user-error (list 'error -32602 "bad-params" (error-message-string err)))
+                                   ((error quit) (list 'error -32603 "internal" (error-message-string err))))))))))))))
 
 (defun romacs-agent-service--projects-list (_rpc _params)
   "`agents/projects.list': each directory sessions worked in, the last

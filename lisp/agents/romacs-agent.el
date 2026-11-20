@@ -3922,7 +3922,8 @@ goes: nil drops it.  MESSAGES: from other sessions (`romacs-agent--input')."
 
 (defconst romacs-agent--option-keys
   '((:model . "model") (:effort . "effort") (:role . "role") (:parent . "parent") (:request . "clientRequestId")
-    (:wake . "wake") (:worktree . "worktree") (:branch . "branch") (:plan . "plan") (:plan-from . "planFrom") (:fork . "forkedFrom"))
+    (:wake . "wake") (:worktree . "worktree") (:branch . "branch") (:plan . "plan") (:plan-from . "planFrom") (:fork . "forkedFrom")
+    (:tracked . "tracked"))
   "A session's start options and their manifest names.")
 
 (defun romacs-agent--options-object (options)
@@ -4043,10 +4044,9 @@ to it."
                               (romacs-agent--environment-arguments)
                               (cons "--" command)))))
         (setf (romacs-agent-unit session) unit)
-      ;; A session the agents service started is tracked, or not started.
+      ;; A session the agents service started is tracked, or not started:
+      ;; said as a launch that failed is.
       (when (plist-get (romacs-agent-options session) :tracked)
-        (setf (romacs-agent-state session) 'ended)
-        (romacs-agent--changed session)
         (error "Session %s is not started: no user unit could be made for its host" (romacs-agent-title session)))
       (let ((coding-system-for-write 'utf-8-unix)
             (process-environment (romacs-agent--harness-environment)))
@@ -4108,7 +4108,8 @@ instance's model and effort (the effort only when it fits the model)."
 PROVIDER (a name in `romacs-agent-providers', by default
 `romacs-agent-default-provider'), sending PROMPT when given.  OPTIONS is a plist: :model and :effort for
 the harness, :role, :parent (the delegating session's id) and :request
-\(its client request id) for the record.  KNOWN, when given, is called
+\(its client request id) for the record, :id its id when it is made
+before it.  KNOWN, when given, is called
 with the session before its harness starts.  Return the session.
 Interactively, open the chat without sending an initial prompt."
   (interactive (romacs-agent--start-arguments (romacs-agent--project-default)))
@@ -4117,8 +4118,9 @@ Interactively, open the chat without sending an initial prompt."
          (name (plist-get instance :name))
          (session (progn
                     (romacs-agent--create
-                     :id (romacs-agent--uuid) :harness (plist-get instance :harness) :provider name
-                     :options (romacs-agent--instance-options instance options)
+                     :id (or (plist-get options :id) (romacs-agent--uuid)) :harness (plist-get instance :harness) :provider name
+                     :options (romacs-agent--instance-options instance (cl-loop for (key value) on options by #'cddr
+                                                                                unless (eq key :id) append (list key value)))
                      :config-dir (romacs-agent--config-dir instance) :cwd (expand-file-name cwd)
                      ;; The project's name until the first prompt names it.
                      :title (or title (file-name-nondirectory (directory-file-name (expand-file-name cwd))))

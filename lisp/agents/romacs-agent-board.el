@@ -812,7 +812,9 @@ its next activity.  A settled one, bring back."
   "Start a new thread, in this row's project, where the board's sessions
 run (`romacs-agent-board-source')."
   (interactive nil romacs-agent-board-mode)
-  (when (eq romacs-agent-board--drawn-source 'drawing) (romacs-agent-board--acting))
+  ;; Its row's directory is the drawn rows' source's: started there only.
+  (unless (eq (or romacs-agent-board--drawn-source romacs-agent-board-source) romacs-agent-board-source)
+    (user-error "The board shows another source's sessions: draw it again (g)"))
   (let* ((row (romacs-agent-board--row))
          (cwd (cond ((plist-get row :session) (romacs-agent-cwd (plist-get row :session)))
                     ((plist-get row :cwd))
