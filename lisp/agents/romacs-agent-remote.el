@@ -390,7 +390,10 @@ prompt; its chat shown once the service lists it."
 ;;; Connecting
 
 (defun romacs-agent-remote--socket ()
-  (expand-file-name "remote.sock" (romacs-agent--runtime-root)))
+  "The local socket `romacs-relay connect' listens on: in a directory of
+its own, which the relay makes the user's alone (the editor makes
+`romacs-agent--runtime-root' 0755)."
+  (expand-file-name "remote/remote.sock" (romacs-agent--runtime-root)))
 
 (defun romacs-agent-remote-connect (&optional socket)
   "Show another machine's agent sessions: connect to the service whose
