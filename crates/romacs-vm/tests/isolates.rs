@@ -268,11 +268,12 @@ fn a_termination_supersedes_a_pending_interrupt() {
 
 /// A worker cancelled during a long `call-process' whose child runs the
 /// shell SCRIPT with its paths as arguments: $1 for its pid, $2 for the
-/// ready file, written once it waits, and $3 for a helper's pid if it
-/// starts one. The milliseconds from the cancel to the quit, once the call
-/// quit, the worker served its next job, and the /proc entries of the child
-/// and of any helper went (reaped, not zombies) while the worker lives.
-fn cancel_call_process(name: &str, script: &str) -> String {
+/// ready file, written once it waits, and $3 for the pid of the helper it
+/// starts when HELPER. The milliseconds from the cancel to the quit, once
+/// the call quit, the worker served its next job, and, while the worker
+/// lives, the child was reaped (its /proc entry gone) and the helper is not
+/// live (gone, or a zombie its new parent has yet to reap).
+fn cancel_call_process(name: &str, script: &str, helper: bool) -> String {
     let mut vm = vm();
     let hs = Handshake::new(name);
     let (pidfile, helperfile) = (hs.0.join("pid"), hs.0.join("helper"));
@@ -292,12 +293,12 @@ fn cancel_call_process(name: &str, script: &str) -> String {
           (list result (condition-case e (isolate-await (isolate-spawn '+ 1 1 :isolate iso)) (error (car e))) ms)))", hs.await_ready()));
     let (head, ms) = out.rsplit_once(' ').unwrap_or((&out, ""));
     assert_eq!(head, "(interrupted 2", "{out}");
-    let mut pids = vec![std::fs::read_to_string(&pidfile).unwrap()];
-    pids.extend(std::fs::read_to_string(&helperfile).ok());
-    for pid in pids {
-        let pid: i64 = pid.trim().parse().unwrap();
-        let proc = std::path::PathBuf::from(format!("/proc/{pid}"));
-        assert!(settles(|| !proc.exists()), "{pid}'s /proc entry outlived the cancel, the worker still live");
+    let pid_in = |file: &std::path::Path| -> i64 { std::fs::read_to_string(file).unwrap_or_else(|e| panic!("{}: {e}", file.display())).trim().parse().unwrap() };
+    let child = pid_in(&pidfile);
+    assert!(settles(|| !std::path::Path::new(&format!("/proc/{child}")).exists()), "child {child} was not reaped, the worker still live");
+    if helper {
+        let helper = pid_in(&helperfile);
+        assert!(settles(|| !process_exists(helper)), "helper {helper} outlived the cancel, the worker still live");
     }
     eval(&mut vm, "(isolate-kill-all)");
     ms.trim_end_matches(')').to_string()
@@ -307,7 +308,7 @@ fn cancel_call_process(name: &str, script: &str) -> String {
 /// C-g's quit does (SIGINT to its group), and quits within the bound.
 #[test]
 fn an_interrupt_stops_a_workers_call_process() {
-    let ms = cancel_call_process("call-process", "echo $$ > \"$1\"; : > \"$2\"; exec sleep 30");
+    let ms = cancel_call_process("call-process", "echo $$ > \"$1\"; : > \"$2\"; exec sleep 30", false);
     eprintln!("call-process interrupt to quit: {ms} ms");
     assert!(ms.parse::<u64>().unwrap() < 500, "{ms} ms");
 }
@@ -317,7 +318,7 @@ fn an_interrupt_stops_a_workers_call_process() {
 /// within the grace and a margin.
 #[test]
 fn an_interrupt_kills_a_workers_child_that_ignores_sigint() {
-    let ms = cancel_call_process("call-process-trap", "trap '' INT HUP; echo $$ > \"$1\"; : > \"$2\"; exec sleep 30");
+    let ms = cancel_call_process("call-process-trap", "trap '' INT HUP; echo $$ > \"$1\"; : > \"$2\"; exec sleep 30", false);
     eprintln!("call-process interrupt to quit, SIGINT ignored: {ms} ms");
     assert!(ms.parse::<u64>().unwrap() < 1000, "{ms} ms");
 }
@@ -326,7 +327,7 @@ fn an_interrupt_kills_a_workers_child_that_ignores_sigint() {
 /// SIGINT and leaves it running: the worker's stop kills the whole group.
 #[test]
 fn an_interrupt_kills_a_workers_call_process_helper() {
-    let ms = cancel_call_process("call-process-helper", "sleep 30 & echo $! > \"$3\"; echo $$ > \"$1\"; : > \"$2\"; wait");
+    let ms = cancel_call_process("call-process-helper", "sleep 30 & echo $! > \"$3\"; echo $$ > \"$1\"; : > \"$2\"; wait", true);
     eprintln!("call-process interrupt to quit, with a helper: {ms} ms");
     assert!(ms.parse::<u64>().unwrap() < 1000, "{ms} ms");
 }
