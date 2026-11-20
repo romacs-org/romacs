@@ -9,6 +9,7 @@
 #   bin/romacs-vm-gui  bin/romacs-keeper  bin/romacs-mcp  bin/romacs-agent-host
 #   bin/romacs, which runs romacs-vm-gui with GNU's Lisp unless told otherwise
 #   share/romacs/{lisp,etc,assets/fonts}  share/applications  share/icons
+#   COPYING, and licenses/ for the FreeType and libpng built in
 #
 # The binary finds share/romacs beside its bin/ (host::runtime_root), so the
 # tree works wherever it is unpacked. tools/ci/smoke-release checks the
@@ -48,6 +49,8 @@ mkdir -p "$stage/share/romacs/assets"
 cp -r "$repo/assets/fonts" "$stage/share/romacs/assets/"
 bash "$repo/tools/install-linux-desktop-assets.sh" "$stage"
 cp "$repo/COPYING" "$stage/"
+# The notices of the FreeType and libpng linked into the executables.
+sh "$repo/crates/vendor/freetype-sys/install-notices.sh" "$stage/licenses"
 
 tar -C "$out_dir" --sort=name --owner=0 --group=0 --numeric-owner \
     -czf "$stage.tar.gz" "$name"

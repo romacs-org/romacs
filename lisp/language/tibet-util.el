@@ -1,4 +1,4 @@
-;;; tibet-util.el --- utilities for Tibetan   -*- coding: utf-8-emacs; lexical-binding: t; -*-
+;;; tibet-util.el --- utilities for Tibetan   -*- coding: utf-8; lexical-binding: t; -*-
 
 ;; Copyright (C) 1997, 2001-2026 Free Software Foundation, Inc.
 ;; Copyright (C) 1995, 1996, 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004,
@@ -85,10 +85,8 @@ Returns non-nil if CH is Tibetan.  Otherwise, returns nil."
 	    ;; Tibetan sequence.
 	    (setq i (match-end 0)
 		  this-trans
-		  (car (rassoc
-			(cdr (assoc (match-string 0 str)
-				    tibetan-precomposition-rule-alist))
-			tibetan-precomposed-transcription-alist)))
+		  (car (rassoc (match-string 0 str)
+			       tibetan-precomposed-transcription-alist)))
 	  (setq ch (substring str i (1+ i))
 		i (1+ i)
 		this-trans
@@ -117,11 +115,7 @@ The returned string has no composition information."
 	    idx (match-end 0))
       (let ((t-char (cdr (assoc subtrans
 				tibetan-precomposed-transcription-alist))))
-	(if t-char
-	    ;; SUBTRANS corresponds to a transcription for
-	    ;; precomposable Tibetan sequence.
-	    (setq t-char (car (rassoc t-char
-				      tibetan-precomposition-rule-alist)))
+	(unless t-char
 	  (setq t-char
 		(cdr
 		 (or (assoc subtrans tibetan-consonant-transcription-alist)
@@ -173,7 +167,7 @@ The returned string has no composition information."
     ;; If 'a follows a consonant, turn it into the subjoined form.
     ;; * Disabled by Tomabechi 2000/06/09 *
     ;; Because in Unicode, འ may follow directly a consonant without
-    ;; any intervening vowel, as in མཁ����འ་=མ ཁ འ not མ ཁ ���� འ
+    ;; any intervening vowel, as in མཁའ་=མ ཁ འ, with no vowel sign before འ
     ;;(if (and (= char ?འ)
     ;;	     (aref (char-category-set (car last)) ?0))
     ;;	(setq char ?ཱ)) ;; modified for new font by Tomabechi 1999/12/10
@@ -195,16 +189,9 @@ The returned string has no composition information."
 
      ;; Compose lower vowel sign vertically under.
      ((aref (char-category-set char) ?3)
-      (if (or (eq char ?����) ;; `����' and `཰' should not visible when composed.
-	      (eq char #xF70))
+      (if (eq char #xF70) ;; `཰' should not be visible when composed.
 	  (setq rule nil)
 	(setq rule stack-under)))
-     ;; Transform ra-mgo (superscribed r) if followed by a subjoined
-     ;; consonant other than w, ', y, r.
-     ((and (= (car last) ?ར)
-	   (not (memq char '(?ྭ ?ཱ ?ྱ ?ྲ))))
-      (setcar last ?����) ;; modified for newfont by Tomabechi 1999/12/10
-      (setq rule stack-under))
      ;; Transform initial base consonant if followed by a subjoined
      ;; consonant but 'a.
      (t
@@ -234,15 +221,8 @@ The returned string has no composition information."
       (let ((from idx)
 	    (to (match-end 0))
 	    components)
-	(if (eq (string-match tibetan-precomposition-rule-regexp str idx) idx)
-	    (setq idx (match-end 0)
-		  components
-		  (list (string-to-char
-			 (cdr
-			  (assoc (match-string 0 str)
-				 tibetan-precomposition-rule-alist)))))
-	  (setq components (list (aref str idx))
-		idx (1+ idx)))
+	(setq components (list (aref str idx))
+	      idx (1+ idx))
 	(while (< idx to)
 	  (tibetan-add-components components (aref str idx))
 	  (setq idx (1+ idx)))
@@ -266,62 +246,28 @@ The returned string has no composition information."
 		(to (match-end 0))
 		components)
 	    (goto-char from)
-	    (if (looking-at tibetan-precomposition-rule-regexp)
-		(progn
-		  (setq components
-			(list (string-to-char
-			       (cdr
-				(assoc (match-string 0)
-				       tibetan-precomposition-rule-alist)))))
-		  (goto-char (match-end 0)))
-	      (setq components (list (char-after from)))
-	      (forward-char 1))
+	    (setq components (list (char-after from)))
+	    (forward-char 1)
 	    (while (< (point) to)
 	      (tibetan-add-components components (following-char))
 	      (forward-char 1))
 	    (compose-region from to components)))))) ;; )
 
-(defvar tibetan-decompose-precomposition-alist
-  (mapcar (lambda (x) (cons (string-to-char (cdr x)) (car x)))
-	  tibetan-precomposition-rule-alist))
-
 ;;;###autoload
 (defun tibetan-decompose-region (from to)
   "Decompose Tibetan text in the region FROM and TO.
-This is different from `decompose-region' because precomposed
-Tibetan characters are decomposed into normal Tibetan character
-sequences."
+Romacs keeps Tibetan text in Unicode, with no precomposed glyphs, so
+this removes the compositions `decompose-region' removes."
   (interactive "r")
-  (save-restriction
-    (narrow-to-region from to)
-    (decompose-region from to)
-    (goto-char from)
-    (while (not (eobp))
-      (let* ((char (following-char))
-	     (slot (assq char tibetan-decompose-precomposition-alist)))
-	(if slot
-	    (progn
-	      (delete-char 1)
-	      (insert (cdr slot)))
-	  (forward-char 1))))))
+  (decompose-region from to))
 
 
 ;;;###autoload
 (defun tibetan-decompose-string (str)
   "Decompose Tibetan string STR.
-This is different from `decompose-string' because precomposed
-Tibetan characters are decomposed into normal Tibetan character
-sequences."
-  (let ((new "")
-	(len (length str))
-	(idx 0)
-	char slot)
-    (while (< idx len)
-      (setq char (aref str idx)
-	    slot (assq (aref str idx) tibetan-decompose-precomposition-alist)
-	    new (concat new (if slot (cdr slot) (char-to-string char)))
-	    idx (1+ idx)))
-    new))
+Romacs keeps Tibetan text in Unicode, with no precomposed glyphs, so
+this is STR's characters without their compositions."
+  (substring-no-properties str))
 
 ;;;
 ;;; This variable is used to avoid repeated decomposition.
@@ -379,8 +325,7 @@ See also docstring of the function `tibetan-compose-region'."
 ;;;
 
 (defvar tibetan-canonicalize-for-unicode-alist
-  '(("����" . "")	;; remove vowel a
-    ("ཱི" . "ཱི") ;; decompose vowels whose use is ``discouraged'' in Unicode 3.0
+  '(("ཱི" . "ཱི") ;; decompose vowels whose use is ``discouraged'' in Unicode 3.0
     ("ཱུ" . "ཱུ")
     ("ྲྀ" . "ྲྀ")
     ("ཷ" . "ྲཱྀ")
@@ -390,7 +335,7 @@ See also docstring of the function `tibetan-compose-region'."
   "Rules for canonicalizing Tibetan vowels for Unicode.")
 
 (defvar tibetan-canonicalize-for-unicode-regexp
-  "[����ཱཱིུྲྀཷླྀཹཱྀ]"
+  "[ཱཱིུྲྀཷླྀཹཱྀ]"
   "Regexp for Tibetan vowels to be canonicalized in Unicode.")
 
 (defun tibetan-canonicalize-for-unicode-region (from to)

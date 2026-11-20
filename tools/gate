@@ -524,7 +524,13 @@ def build_and_run(src, run_dir, expr, threads, run, t0, suites, repeat=1):
                           'slow-timeout = { period = "1200s", terminate-after = 1, grace-period = "0s" }\n'
                           '[[profile.default.overrides]]\n'
                           "filter = 'test(=batch_probes_scale_within_their_budgets)'\n"
-                          'slow-timeout = { period = "3600s", terminate-after = 1, grace-period = "0s" }\n')
+                          'slow-timeout = { period = "3600s", terminate-after = 1, grace-period = "0s" }\n'
+                          # The Lisp tree's compile, four compile processes, cold
+                          # for each new build (.config/nextest.toml says more).
+                          '[[profile.default.overrides]]\n'
+                          "filter = 'test(/(^|::)every_file_of_the_lisp_tree_compiles_but_the_known_failures$/)'\n"
+                          'slow-timeout = { period = "1800s", terminate-after = 1, grace-period = "0s" }\n'
+                          'threads-required = 4\n')
         nextest = ['cargo', 'nextest']
         config_flags = ['--config-file', str(config), '--user-config-file', 'none']
         flags = cargo_flags(src)

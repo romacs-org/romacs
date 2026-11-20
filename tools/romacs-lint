@@ -3,7 +3,8 @@
 
 The host loads each file and holds what it names to what the machine defines:
 unknown functions, wrong argument counts, untrue `declare-function`s, free and
-unused variables, line pins, and hints for what Romacs offers instead. One
+unused variables, line pins, undocumented public definitions in Romacs's own
+Lisp, and hints for what Romacs offers instead. One
 finding a line, with its fix.
 
 Each file is linted in a machine of its own, since loading a file can change
@@ -13,8 +14,12 @@ the tree; the launcher gives each finding's file from the root it is held to,
 whatever the judged code prints it from. By default it reports what the change
 adds: the files' text at the base (the
 merge-base with the trunk, or --base) is linted the same way, and a finding
-the base also gives is counted, not shown. --all shows every finding. Exit 1
-when an error or a warning is shown, 2 when the host gave no result.
+the base also gives is counted, not shown. --all shows every finding. Each
+file stands alone: one the host gives no result for is named, with its cause
+and whether the base gave none too, and the others are still judged; a file
+the base gives no result for has every finding counted new. Exit 1 when an
+error or a warning is shown, else 2 when a file was left unjudged (the check
+is incomplete, never passed), else 0.
 
 An installed host (one beside its `romacs-vm-gui.worlds`) restores its batch
 world, so a run takes about a second; a build's host boots from source.
@@ -91,12 +96,45 @@ def added(candidate, base):
     return fresh
 
 
-def summary(files, lines, base, older):
-    """The closing line: what was counted, and against what."""
+def summary(files, lines, base, older, unjudged=0):
+    """The closing line: what was counted, against what, and how many more
+    files the host gave no result for (UNJUDGED), which leave the run incomplete."""
     levels = Counter(FINDING.match(line)['level'] for line in lines)
     counts = ', '.join(f'{levels[level]} {level}{"" if levels[level] == 1 else "s"}' for level in ('error', 'warning', 'hint'))
     since = f' new since {base[:12]} ({older} older not shown; --all shows them)' if base else ''
-    return f'romacs-lint: {files} file{"" if files == 1 else "s"}, {counts}{since}'
+    left = f'; {unjudged} more gave no result, so the lint is incomplete' if unjudged else ''
+    return f'romacs-lint: {files} file{"" if files == 1 else "s"}, {counts}{since}{left}'
+
+
+def verdict(shown, unjudged):
+    """The exit status: 1 when a shown finding is an error or a warning, else 2
+    when a file was left UNJUDGED (incomplete, never passed), else 0."""
+    if any(FINDING.match(line)['level'] in FAILING for line in shown):
+        return 1
+    return 2 if unjudged else 0
+
+
+def failed(result):
+    """Whether a file's RESULT is no result: its cause, not its findings."""
+    return isinstance(result, str)
+
+
+def judged(names, results, based):
+    """What to report of RESULTS, each file of NAMES's findings or the cause
+    of its lint's giving none (`lint_each'), against BASED, the base's results
+    by name (None: no base, every finding shown): (SHOWN, OLDER, QUIET,
+    BROKEN, UNBASED). A file with no result here is left unjudged: QUIET when
+    the base gave none for it either, else BROKEN. A file the base gave no
+    result for has every finding new (UNBASED names it); one the base lacks too."""
+    shown = [line for found in results if not failed(found) for line in found]
+    if based is None:
+        return shown, 0, [], [name for name, found in zip(names, results) if failed(found)], []
+    quiet = [name for name, found in zip(names, results) if failed(found) and failed(based.get(name))]
+    broken = [name for name, found in zip(names, results) if failed(found) and name not in quiet]
+    unbased = [name for name, found in zip(names, results) if not failed(found) and failed(based.get(name))]
+    before = [line for found in based.values() if not failed(found) for line in found]
+    fresh = added(shown, before)
+    return fresh, len(shown) - len(fresh), quiet, broken, unbased
 
 
 def named_from(line, home, root):
@@ -115,29 +153,41 @@ def lint(binary, arguments, timeout, root=ROOT):
     ROOT. The lint loads the file it judges, which may be the lint itself in
     another version, so the launcher, not the Lisp, says where a file is.
     STATUS is None unless the lint ran to its closing line: a host that did
-    not start, a file that ended the host as it loaded, a timeout."""
+    not start, a file that ended the host as it loaded, a timeout. CAUSE says
+    which, as `timeout' or `exit N', or is None when the lint finished."""
     command = [str(binary), '-Q', '--batch', '-l', str(ROOT / 'lisp/emacs-lisp/romacs-lint.el'), '-f', 'romacs-lint-batch']
     with tempfile.TemporaryDirectory(prefix='romacs-lint-') as home:
         try:
             done = subprocess.run(command + arguments, env=environment(binary, Path(home)), cwd=home,
                                   capture_output=True, text=True, errors='replace', timeout=timeout)
         except subprocess.TimeoutExpired:
-            return None, '', f'no result within {timeout:g}s\n'
+            return None, '', f'no result within {timeout:g}s\n', 'timeout'
     finished = done.returncode in (0, 1) and COMPLETE.search(done.stdout)
     output = '\n'.join(named_from(line, home, root) for line in done.stdout.splitlines())
-    return (done.returncode if finished else None), output, done.stderr + ('' if finished else f'the host exited {done.returncode} before the lint finished\n')
+    return ((done.returncode if finished else None), output,
+            done.stderr + ('' if finished else f'the host exited {done.returncode} before the lint finished\n'),
+            None if finished else f'exit {done.returncode}')
 
 
 def lint_each(binary, options, files, timeout, root=ROOT, jobs=4):
     """Lint each of FILES in a machine of its own, with the lint's OPTIONS:
-    (FINDINGS, ERRORS), each finding's file given from ROOT; FINDINGS None
-    when a file's lint gave no result."""
+    (RESULTS, ERRORS), one per file in order: its findings with each file
+    given from ROOT, or, when that file's lint gave no result, its cause
+    (`timeout' or `exit N', see `lint')."""
+    if not files:
+        return [], ''
     with ThreadPoolExecutor(max_workers=max(1, min(jobs, len(files)))) as pool:
         runs = list(pool.map(lambda file: lint(binary, [*options, str(file)], timeout, root), files))
-    errors = ''.join(errors for _, _, errors in runs)
-    if any(status is None for status, _, _ in runs):
-        return None, errors
-    return [line for _, output, _ in runs for line in findings(output)], errors
+    errors = ''.join(errors for _, _, errors, _ in runs)
+    return [findings(output) if cause is None else cause for _, output, _, cause in runs], errors
+
+
+def name(path, root=ROOT):
+    """PATH as findings give it: from ROOT when under it."""
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return str(path)
 
 
 def renames(status):
@@ -188,29 +238,35 @@ def main():
     missing = [str(path) for path in args.files if not path.is_file()]
     if missing:
         parser.error('no such file: ' + ', '.join(missing))
-    files = [path.resolve() for path in args.files]
+    # A file named twice is one file: its findings and the base's compare once.
+    files = list(dict.fromkeys(path.resolve() for path in args.files))
     base = args.base or merge_base(ROOT, os.environ.get('ROMACS_BASE', 'beta'))
-    shown, errors = lint_each(binary, ['--base', base] if base else [], files, args.timeout)
-    if shown is None:
-        sys.stderr.write(errors)
-        print('romacs-lint: the host gave no result', file=sys.stderr)
-        return 2
-    older = 0
-    if base and not args.all:
+    results, errors = lint_each(binary, ['--base', base] if base else [], files, args.timeout)
+    names = [name(path) for path in files]
+    based = None
+    # No result for any file here: nothing the base could change, so no base run.
+    if base and not args.all and not all(failed(found) for found in results):
         with tempfile.TemporaryDirectory(prefix='romacs-lint-base-') as directory:
-            had = [Path(directory) / name for name in base_files(ROOT, base, files, Path(directory))]
-            before, base_errors = (lint_each(binary, ['--root', str(ROOT)], had, args.timeout, Path(directory))
-                                   if had else ([], ''))
-        if before is None:
-            sys.stderr.write(base_errors)
-            print('romacs-lint: the base did not lint: every finding counts as new', file=sys.stderr)
-            before = []
-        fresh = added(shown, before)
-        shown, older = fresh, len(shown) - len(fresh)
+            had = base_files(ROOT, base, files, Path(directory))
+            before, base_errors = lint_each(binary, ['--root', str(ROOT)], [Path(directory) / n for n in had],
+                                            args.timeout, Path(directory))
+        based = dict(zip(had, before))
+    shown, older, quiet, broken, unbased = judged(names, results, based)
+    causes = dict(zip(names, results))
+    if broken:
+        sys.stderr.write(errors)
+        print(f'romacs-lint: the host gave no result for {", ".join(f"{n} ({causes[n]})" for n in broken)}', file=sys.stderr)
+    for unjudged in quiet:
+        print(f'romacs-lint: {unjudged} gives no result ({causes[unjudged]}), nor did it at the base ({based[unjudged]})',
+              file=sys.stderr)
+    if unbased:
+        sys.stderr.write(base_errors)
+        print(f'romacs-lint: the base did not lint {", ".join(unbased)}: its findings count as new', file=sys.stderr)
     for line in shown:
         print(line)
-    print(summary(len(files), shown, None if args.all else base, older))
-    return 1 if any(FINDING.match(line)['level'] in FAILING for line in shown) else 0
+    unjudged = len(quiet) + len(broken)
+    print(summary(len(files) - unjudged, shown, None if args.all else base, older, unjudged))
+    return verdict(shown, unjudged)
 
 
 if __name__ == '__main__':

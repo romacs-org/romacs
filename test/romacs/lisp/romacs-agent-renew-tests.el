@@ -147,7 +147,7 @@ state root that has said two things, its writes to its harness in
           (should (equal (cadr (member "--session-id" argv)) native))
           (should-not (member "--resume" argv))))
       ;; The chat draws it.
-      (let ((buffer (save-window-excursion (romacs-agent-show session))))
+      (let ((buffer (save-window-excursion (romacs-agent-ui--show-chat session))))
         (unwind-protect
             (should (string-search "── renewed: a new conversation (context full) ──"
                                    (with-current-buffer buffer (buffer-string))))

@@ -138,8 +138,9 @@ impl Vm {
 /// Capture VM, and CARRY, what the embedder keeps beside it, into FILE as an
 /// image keyed KEY: none unless the VM is at rest. The arena is this
 /// process's heap; nothing else allocates while the image is written, and
-/// the process exits after it. CARRY travels as it is, unencoded: the key
-/// binds the embedder, so its restorer knows CARRY's type.
+/// the process exits after it. CARRY travels as it is, unencoded: the image
+/// records its type's tag and name, and `restore` checks both beside the
+/// key.
 pub fn capture<T: super::safe::SnapshotSafe + super::safe::Schema>(vm: Vm, mut carry: T, file: &std::fs::File, key: [u8; 32]) -> Result<usize, String> {
     let mut vm = vm.at_rest_for_image()?;
     // A restore makes the image's entries the indices below each table's
@@ -155,6 +156,9 @@ pub fn capture<T: super::safe::SnapshotSafe + super::safe::Schema>(vm: Vm, mut c
     let root = image_root(vm, carry);
     let fields = ImageFields { len: 0, root, counters, executable: arena::executable_base(), key, carry: carry_tag::<T>(),
                                carry_name: carry_name::<T>() };
+    // UNSAFE(write_image's root is a promise only this caller can keep)
+    // SAFETY: ROOT is the Box `image_root` leaked for this capture, which the
+    // image owns from here and `restore` takes back.
     let written = unsafe { arena::write_image(file, fields) }.map_err(|e| format!("world image: {e}"))?;
     // The VM stays allocated: the image owns it, and this process exits.
     whole_in_memory(file, written).map(|()| written)
@@ -277,6 +281,11 @@ pub fn restore<T: super::safe::SnapshotSafe + 'static>(key: &[u8; 32]) -> Result
     }
     crate::expand::raise_generated(fields.counters[0]);
     crate::char_table::restore_counters([fields.counters[1], fields.counters[2]]);
+    // UNSAFE(an image's root is a Box another process leaked: no type carries it across)
+    // SAFETY: the image was made by this binary (KEY binds it) and carried a
+    // T (its carry tag and name checked above), so its root is the
+    // `Box<(Vm, T)>` `image_root` leaked, mapped where it was made; TAKEN
+    // lets it be taken once.
     let mut root = unsafe { Box::from_raw(fields.root as *mut (Vm, T)) };
     // The at-rest fields are this process's to make, before anything runs.
     // Only the VM, the image's root, has them (`#[snapshot(root)]`).

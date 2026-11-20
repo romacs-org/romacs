@@ -532,6 +532,13 @@ an approval or questions for the user, anything else refused."
       ("item/reasoning/summaryTextDelta"
        (puthash (gethash "itemId" params) t (romacs-agent-streamed session))
        (list (list :type 'thinking :text (gethash "delta" params))))
+      ;; A command's output as it runs, and an MCP call's progress: shown
+      ;; under their call while it runs.
+      ("item/commandExecution/outputDelta"
+       (list (list :type 'tool-output :id (gethash "itemId" params) :text (gethash "delta" params))))
+      ("item/mcpToolCall/progress"
+       (when-let* ((message (romacs-agent--value (gethash "message" params))))
+         (list (list :type 'tool-output :id (gethash "itemId" params) :text (concat message "\n")))))
       ("item/reasoning/summaryPartAdded"
        (when (> (gethash "summaryIndex" params 0) 0) (list (list :type 'thinking :text "\n\n"))))
       ("turn/plan/updated" (list (list :type 'status :text (romacs-agent--codex-plan params))))
@@ -581,12 +588,14 @@ an approval or questions for the user, anything else refused."
        (list (list :type 'status :text (or (gethash "message" params) (gethash "summary" params)))))
       ((or "thread/started" "thread/status/changed" "thread/settings/updated" "thread/compacted"
            "mcpServer/startupStatus/updated" "remoteControl/status/changed" "skills/changed"
-           "item/commandExecution/outputDelta" "item/fileChange/outputDelta" "item/fileChange/patchUpdated"
-           "item/reasoning/textDelta" "item/plan/delta" "item/mcpToolCall/progress"
-           "hook/started" "hook/completed" "turn/diff/updated")
+           "item/fileChange/outputDelta" "item/fileChange/patchUpdated"
+           "item/reasoning/textDelta" "item/plan/delta"
+           "hook/started" "hook/completed" "turn/diff/updated"
+           ;; Its own bookkeeping, nothing a person reads.
+           "turn/moderationMetadata" "thread/readState/changed")
        nil)
       ((pred (string-prefix-p "account/")) nil)
-      (_ (list (list :type 'unknown :raw params))))))
+      (_ (list (list :type 'unknown :raw params :method method))))))
 
 ;;; `codex exec --json''s lines, as earlier sessions journaled them
 

@@ -366,6 +366,15 @@ fn decide_empty(cx: &mut Leaf<'_>, mut r: Vec<Value>) -> Next {
 /// Enter the decision's extent: DATA = (MULTIBYTE UNDO . BUFFER), then the
 /// bytes as unibyte text with undo off, then the protected call.
 fn decide_closure(cx: &mut Leaf<'_>, closure: Value, saved: &[Value]) -> Next {
+    // The decision is made on an empty buffer (fileio.c: "we can get here
+    // only if the buffer was empty before the insertion"), but a
+    // first-change-hook or before-change function run since may have
+    // inserted text. GNU keeps that text before the file's; VM2 refuses
+    // before the exchange touches the buffer's text, multibyteness, undo
+    // list or markers (ledger/divergences/VM2-IFC-HOOKTEXT1.md).
+    if !cx.buffer_shape()?.empty {
+        return Err(refuse("insert-file-contents deciding its coding in a buffer a change hook has edited"));
+    }
     let mut r = saved.to_vec();
     let name = r[DATA];
     let buffer = cx.current_buffer()?;

@@ -15,11 +15,19 @@
 //! too (so a session that ends inside one still says it), and is said on
 //! stderr at [`ONGOING`], so a wedged session leaves a trace.
 //!
-//!   {"kind":"stall","ms":MS,"during":"startup"|"session","buffer":B,
-//!    "samples":[[FUNCTION...],...]}
+//!   {"kind":"stall","ms":MS,"cpu_ms":CPU,"gc_ms":GC,"instructions":N,
+//!    "during":"startup"|"session","buffer":B,"samples":[[FUNCTION...],...]}
 //!
-//! MS is how long the span ran; each sample the stack's functions,
-//! innermost first, a second apart from the first second.
+//! MS is how long the span ran; CPU the evaluator thread's CPU time in it;
+//! GC the wall time its collections took, marks given up for a key
+//! included; N the instructions it retired (absent where the kernel gives
+//! no counter).  MS well above CPU is a span that waited (on the disk, a
+//! process, a starved host), CPU near MS one that computed.  GC is a share
+//! of MS, not of CPU: a collection waiting on its marking threads or
+//! descheduled counts in it.  An `ongoing` record has no CPU, GC or N: the
+//! watchdog's thread cannot read the evaluator's meters.
+//! Each sample is the stack's functions, innermost first, a second apart
+//! from the first second.
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -38,10 +46,55 @@ const ONGOING: Duration = Duration::from_secs(10);
 /// When the evaluator's span of work began, in nanoseconds past [`epoch`]
 /// plus one; 0 while it waits for input.
 static SINCE: AtomicU64 = AtomicU64::new(0);
+/// The evaluator thread's meters when its span began ([`Meters::now`]):
+/// CPU time and collection time in nanoseconds, instructions retired
+/// ([`NO_COUNT`] without a counter).
+static CPU_SINCE: AtomicU64 = AtomicU64::new(0);
+static GC_SINCE: AtomicU64 = AtomicU64::new(0);
+static INSTRUCTIONS_SINCE: AtomicU64 = AtomicU64::new(NO_COUNT);
+/// An instruction count the kernel did not give.
+const NO_COUNT: u64 = u64::MAX;
 /// The threshold in nanoseconds, once the watchdog runs.
 static THRESHOLD: AtomicU64 = AtomicU64::new(u64::MAX);
-/// The stalls that ended, (start, end), for the watchdog to record.
-static ENDED: Mutex<Vec<(u64, u64)>> = Mutex::new(Vec::new());
+/// The stalls that ended, for the watchdog to record.
+static ENDED: Mutex<Vec<Ended>> = Mutex::new(Vec::new());
+
+/// A stall that ended: its span's start and end, and what the evaluator's
+/// meters counted over it.
+#[derive(Debug, Clone, Copy)]
+struct Ended {
+    since: u64,
+    end: u64,
+    spent: Meters,
+}
+
+/// What the calling thread's meters read, or what they counted between two
+/// readings: CPU time and collection time in nanoseconds, instructions.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Meters {
+    cpu: u64,
+    gc: u64,
+    instructions: Option<u64>,
+}
+
+impl Meters {
+    fn now() -> Self {
+        Self {
+            cpu: u64::try_from(romacs_vm::host::thread_cpu_time().as_nanos()).unwrap_or(u64::MAX),
+            gc: u64::try_from(romacs_vm::host::collection_time().as_nanos()).unwrap_or(u64::MAX),
+            instructions: romacs_vm::host::instruction_count(),
+        }
+    }
+
+    /// What was counted from START to self.
+    fn since(self, start: Self) -> Self {
+        Self {
+            cpu: self.cpu.saturating_sub(start.cpu),
+            gc: self.gc.saturating_sub(start.gc),
+            instructions: self.instructions.zip(start.instructions).map(|(end, start)| end.saturating_sub(start)),
+        }
+    }
+}
 /// The stall being watched, and startup's span's start: the watchdog's
 /// thread looks at them, and so does the session's last take of the
 /// records (`look_now`).
@@ -54,8 +107,15 @@ fn epoch() -> Instant {
 
 fn now() -> u64 { u64::try_from(epoch().elapsed().as_nanos()).unwrap_or(u64::MAX - 1) + 1 }
 
-/// The evaluator left its wait: its span of work begins.
-pub fn working() { SINCE.store(now(), Ordering::Relaxed); }
+/// The evaluator left its wait: its span of work begins.  Its meters are
+/// read now, on its thread, and again only if the span turns out a stall.
+pub fn working() {
+    let start = Meters::now();
+    CPU_SINCE.store(start.cpu, Ordering::Relaxed);
+    GC_SINCE.store(start.gc, Ordering::Relaxed);
+    INSTRUCTIONS_SINCE.store(start.instructions.unwrap_or(NO_COUNT), Ordering::Relaxed);
+    SINCE.store(now(), Ordering::Relaxed);
+}
 
 /// The evaluator waits for input: its span of work ended, a stall kept when
 /// it ran past the threshold.
@@ -64,7 +124,13 @@ pub fn waiting() {
     if since == 0 { return; }
     let end = now();
     if end - since >= THRESHOLD.load(Ordering::Relaxed) {
-        ENDED.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push((since, end));
+        let start = Meters {
+            cpu: CPU_SINCE.load(Ordering::Relaxed),
+            gc: GC_SINCE.load(Ordering::Relaxed),
+            instructions: Some(INSTRUCTIONS_SINCE.load(Ordering::Relaxed)).filter(|&n| n != NO_COUNT),
+        };
+        let spent = Meters::now().since(start);
+        ENDED.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(Ended { since, end, spent });
     }
 }
 
@@ -116,14 +182,22 @@ fn stack(snapshot: &serde_json::Value) -> (Vec<String>, Option<String>) {
     (frames, buffer)
 }
 
-/// STALL's record, NS long, during startup when STARTUP; ONGOING while it
-/// still runs.
-fn record(stall: &Stall, ns: u64, startup: bool, ongoing: bool) -> String {
+/// STALL's record, NS long, during startup when STARTUP, with what the
+/// meters counted over it when it ended (SPENT); none while it still runs
+/// (`ongoing`).
+fn record(stall: &Stall, ns: u64, startup: bool, spent: Option<Meters>) -> String {
     let mut line = serde_json::json!({
         "kind": "stall", "ms": Duration::from_nanos(ns).as_millis(), "during": if startup { "startup" } else { "session" },
         "buffer": stall.buffer, "samples": stall.samples,
     });
-    if ongoing { line["ongoing"] = serde_json::Value::Bool(true); }
+    match spent {
+        Some(spent) => {
+            line["cpu_ms"] = (spent.cpu / 1_000_000).into();
+            line["gc_ms"] = (spent.gc / 1_000_000).into();
+            if let Some(n) = spent.instructions { line["instructions"] = n.into(); }
+        }
+        None => line["ongoing"] = serde_json::Value::Bool(true),
+    }
     line.to_string()
 }
 
@@ -133,9 +207,9 @@ fn look(stall: &mut Option<Stall>, startup: u64) {
     // An answer asked during a span that has ended belongs to that span.
     if let Some(watched) = stall.as_mut() { watched.collect(); }
     let ended = std::mem::take(&mut *ENDED.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
-    for (since, end) in ended {
+    for Ended { since, end, spent } in ended {
         let done = stall.take_if(|s| s.since == since).unwrap_or(Stall { since, ..Stall::default() });
-        let line = record(&done, end - since, since == startup, false);
+        let line = record(&done, end - since, since == startup, Some(spent));
         crate::stderr::line(&format!("romacs-stall: {line}"));
         romacs_vm::host::note_stall(line);
     }
@@ -152,7 +226,7 @@ fn look(stall: &mut Option<Stall>, startup: u64) {
         watched.asked = Some(romacs_vm::host::inspect_raise());
         watched.last = Some(Instant::now());
     }
-    let line = record(watched, ran, since == startup, true);
+    let line = record(watched, ran, since == startup, None);
     if Duration::from_nanos(ran) >= ONGOING && !watched.said_ongoing {
         watched.said_ongoing = true;
         crate::stderr::line(&format!("romacs-stall: {line}"));
@@ -201,12 +275,41 @@ mod tests {
     #[test]
     fn a_record_says_how_long_and_where() {
         let stall = Stall { samples: vec![vec!["notmuch-hello".into()]], buffer: Some("*notmuch-hello*".into()), ..Stall::default() };
-        let line: serde_json::Value = serde_json::from_str(&record(&stall, 5_159_000_000, false, false)).unwrap();
+        let spent = Meters { cpu: 1_204_000_000, gc: 300_000_000, instructions: Some(9_000_000_000) };
+        let line: serde_json::Value = serde_json::from_str(&record(&stall, 5_159_000_000, false, Some(spent))).unwrap();
         assert_eq!(line["kind"], "stall");
         assert_eq!(line["ms"], 5159);
+        assert_eq!(line["cpu_ms"], 1204);
+        assert_eq!(line["gc_ms"], 300);
+        assert_eq!(line["instructions"], 9_000_000_000_u64);
         assert_eq!(line["during"], "session");
         assert_eq!(line["samples"][0][0], "notmuch-hello");
         assert!(line.get("ongoing").is_none());
+        let going: serde_json::Value = serde_json::from_str(&record(&stall, 5_159_000_000, false, None)).unwrap();
+        assert_eq!(going["ongoing"], true);
+        for meter in ["cpu_ms", "gc_ms", "instructions"] {
+            assert!(going.get(meter).is_none(), "the watchdog's thread cannot read the evaluator's meters: {meter}");
+        }
+        let uncounted = Meters { instructions: None, ..spent };
+        let line: serde_json::Value = serde_json::from_str(&record(&stall, 5_159_000_000, false, Some(uncounted))).unwrap();
+        assert_eq!(line["cpu_ms"], 1204);
+        assert!(line.get("instructions").is_none(), "no counter, no count");
+    }
+
+    /// The meters count the calling thread's own CPU time: 20 ms computed
+    /// and 40 ms asleep count about 20 ms of the 60.  Read as the watchdog
+    /// reads them, without its shared wait hooks, which other tests drive.
+    #[test]
+    fn the_meters_count_computing_not_waiting() {
+        let (start, wall) = (Meters::now(), Instant::now());
+        let cpu = romacs_vm::host::thread_cpu_time();
+        while romacs_vm::host::thread_cpu_time() - cpu < Duration::from_millis(20) { std::hint::spin_loop(); }
+        std::thread::sleep(Duration::from_millis(40));
+        let (spent, wall) = (Meters::now().since(start), wall.elapsed());
+        assert!(spent.cpu >= 20_000_000, "{spent:?}");
+        let wall = u64::try_from(wall.as_nanos()).unwrap();
+        assert!(spent.cpu + 30_000_000 <= wall, "the sleep is waiting, not CPU: {spent:?} of {wall}");
+        assert_eq!(spent.gc, 0, "no collection ran on this thread");
     }
 
     /// A span past the threshold that ends between two looks is kept by
@@ -221,7 +324,7 @@ mod tests {
         waiting();
         let ended = std::mem::take(&mut *ENDED.lock().unwrap());
         assert_eq!(ended.len(), 1);
-        assert!(ended[0].1 - ended[0].0 >= 2_000_000);
+        assert!(ended[0].end - ended[0].since >= 2_000_000);
         THRESHOLD.store(u64::MAX, Ordering::Relaxed);
     }
 

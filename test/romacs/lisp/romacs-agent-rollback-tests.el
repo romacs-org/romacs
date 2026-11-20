@@ -413,7 +413,7 @@ and its resume reads none of the session's records."
      (romacs-mcp--object "note" (romacs-mcp--object "type" "rollback" "to" 9 "turns" 1 "prompt" "dropped prompt"
                                                     "files" t)))
     (romacs-agent-test-stored session)
-    (let ((buffer (save-window-excursion (romacs-agent-show session))))
+    (let ((buffer (save-window-excursion (romacs-agent-ui--show-chat session))))
       (unwind-protect
           (with-current-buffer buffer
             (let ((text (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))

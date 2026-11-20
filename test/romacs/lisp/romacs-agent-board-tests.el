@@ -124,6 +124,21 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
       (should (= (string-width line) 100))
       (should (string-match-p "\\`  Working +Port the theme +claude · opus-5-5 +now *\\'" line)))))
 
+(ert-deftest romacs-agent-board-a-deep-chain-keeps-its-titles-in-view ()
+  (romacs-agent-board-tests--with
+    (dotimes (i 40)
+      (mk (format "c%02d" i) (format "link %d" i) 'idle (- 100 i)
+          :options (and (> i 0) (list :parent (format "c%02d" (1- i))))))
+    ;; Filtered to the last: every thread above it shows, each a level
+    ;; deeper, and each row indents no further than the last level.
+    (let* ((rows (rows :words '("39")))
+           (deep (car (last rows)))
+           (line (substring-no-properties (romacs-agent-board--line deep 80))))
+      (should (= (plist-get deep :depth) 39))
+      (should (= (string-width line) 80))
+      (should (string-match-p (format "\\`%s +link 39 " (make-string (* 2 (1+ romacs-agent-board--max-indent-depth)) ?\s))
+                              line)))))
+
 (ert-deftest romacs-agent-board-a-thread-shows-in-its-own-section ()
   (romacs-agent-board-tests--with
     (mk "lead" "lead" 'idle 10)
@@ -165,7 +180,7 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
   `(let ((shown nil))
      (with-temp-buffer
        (romacs-agent-board-mode)
-       (cl-letf (((symbol-function 'romacs-agent-show) (lambda (session &optional action) (push (list session action) shown)))
+       (cl-letf (((symbol-function 'romacs-agent-show) (lambda (session &optional action _source) (push (list session action) shown)))
                  ((symbol-function 'romacs-agent-board--columns) (lambda (_) 100)))
          (romacs-agent-board--redraw)
          ,@body))))
@@ -252,7 +267,7 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
     (romacs-agent-board-tests--board
       (let ((answered nil))
         (cl-letf (((symbol-function 'romacs-agent-respond)
-                   (lambda (session id allow) (push (list (romacs-agent-id session) id allow) answered))))
+                   (lambda (session id allow &rest _) (push (list (romacs-agent-id session) id allow) answered))))
           (should (equal (romacs-agent-board-tests--at) "tool"))
           (romacs-agent-board-approve)
           (should (equal answered '(("tool" "r1" t))))

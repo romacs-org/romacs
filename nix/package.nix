@@ -15,6 +15,12 @@ let
     # data files too, which the Cargo-only filter would drop.
     filter = path: type: lib.hasInfix "/crates/vendor/" path || craneLib.filterCargoSources path type;
   };
+  # The upstream crates under crates/vendor/ alone, so the dependency
+  # build that copies them is not rebuilt by every edit of Romacs's own.
+  vendorSrc = builtins.path {
+    path = source + "/crates/vendor";
+    name = "romacs-vendor-crates";
+  };
   # VM2 has no legacy video feature forwarding or dump pipeline.
   productionCapabilities = {
     cargoFeatures = [ ];
@@ -60,6 +66,14 @@ let
       # Keep dependency artifacts stable across commits. Let buildDepsOnly
       # synthesize its dummy source to avoid import-from-derivation.
       version = "0.0.0";
+      # The upstream crates under crates/vendor/ are dependencies, and
+      # registry crates build against them (freetype-rs against
+      # freetype-sys): the dummy source keeps their real files.
+      extraDummyScript = ''
+        rm -rf $out/crates/vendor
+        cp -r ${vendorSrc} $out/crates/vendor
+        chmod -R +w $out/crates/vendor
+      '';
     }
   );
   linuxWrapArgs =
@@ -148,6 +162,8 @@ craneLib.buildPackage (
       cp -r etc "$out/share/romacs/"
       mkdir -p "$out/share/romacs/assets"
       cp -r assets/fonts "$out/share/romacs/assets/"
+      # The notices of the FreeType and libpng linked into the executables.
+      sh crates/vendor/freetype-sys/install-notices.sh "$out/share/doc/romacs/licenses"
 
       # GNU Emacs installs this version-independent site-lisp root.
       # Nixpkgs' emacsPackagesFor wrapper composes its generated site-start

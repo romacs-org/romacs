@@ -336,9 +336,26 @@ struct PrimitiveRow {
     effect: String,
     source: String,
     line: usize,
-    test_only: bool,
+    gate: Option<&'static str>,
     arity: usize,
     max: Option<usize>,
+    doc: Option<String>,
+}
+
+/// The docstring of the primitive whose defsubr! is at 1-based LINE of
+/// LINES: the run of `//` comment lines directly above it, each less its
+/// `//` and the one space after, joined by newlines. `///` and `//!` lines
+/// end the run, as does a line that is no comment. None without one, or
+/// when the run holds no text: `documentation` would show nothing.
+fn doc_above(lines: &[&str], line: usize) -> Option<String> {
+    let comment = |text: &str| {
+        let text = text.trim_start();
+        (text.starts_with("//") && !text.starts_with("///") && !text.starts_with("//!"))
+            .then(|| text[2..].strip_prefix(' ').unwrap_or(&text[2..]).trim_end().to_owned())
+    };
+    let mut doc: Vec<String> = lines[..line - 1].iter().rev().map_while(|l| comment(l)).collect();
+    doc.reverse();
+    doc.iter().any(|line| !line.is_empty()).then(|| doc.join("\n"))
 }
 
 fn declaration(path: &Path, ts: &[Token], pos: usize, module: &str, source: &str) -> PrimitiveRow {
@@ -434,9 +451,10 @@ fn declaration(path: &Path, ts: &[Token], pos: usize, module: &str, source: &str
         effect,
         source: source.to_owned(),
         line: h.line,
-        test_only: is_test_source(source),
+        gate: source_gate(source),
         arity,
         max: (!many).then_some(arity + optional),
+        doc: None,
     }
 }
 
@@ -466,9 +484,23 @@ fn json_string(value: &str) -> String {
     out
 }
 
-fn is_test_source(source: &str) -> bool {
-    source.contains("/tests/") || source.ends_with("/tests.rs")
-        || source.ends_with("_test.rs") || source.ends_with("_tests.rs")
+/// The cfg a primitive source is compiled under, or None for a shipped one:
+/// test sources under the crate's own unit tests, `*_test_hooks.rs` under
+/// the `test-hooks` feature, which every test target of the crate enables
+/// (its worker binaries too). Neither enters the shipped manifest.
+fn source_gate(source: &str) -> Option<&'static str> {
+    if source.contains("/tests/") || source.ends_with("/tests.rs")
+        || source.ends_with("_test.rs") || source.ends_with("_tests.rs") {
+        Some("test")
+    } else if source.ends_with("_test_hooks.rs") {
+        Some("feature = \"test-hooks\"")
+    } else {
+        None
+    }
+}
+/// The attribute text that compiles an item under GATE.
+fn gate_attribute(gate: Option<&str>) -> String {
+    gate.map_or_else(String::new, |gate| format!("#[cfg({gate})] "))
 }
 
 fn generate_primitives(root: &Path, out: &Path) {
@@ -509,12 +541,14 @@ fn generate_primitives(root: &Path, out: &Path) {
                 path.display()
             );
             assert!(
-                mods.insert(module.clone(), (path, is_test_source(&source)))
+                mods.insert(module.clone(), (path, source_gate(&source)))
                     .is_none(),
                 "duplicate primitive module {module}"
             );
         }
-        let ts = tokens(path, &fs::read_to_string(path).unwrap());
+        let text = fs::read_to_string(path).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        let ts = tokens(path, &text);
         for (i, token) in ts.iter().enumerate() {
             if token.text == "static"
                 || (token.text == "thread_local" && ts.get(i + 1).is_some_and(|t| t.text == "!"))
@@ -526,11 +560,23 @@ fn generate_primitives(root: &Path, out: &Path) {
                 );
             }
             if token.text == "defsubr" && ts.get(i + 1).is_some_and(|t| t.text == "!") {
-                rows.push(declaration(path, &ts, i, &module, &source));
+                let mut row = declaration(path, &ts, i, &module, &source);
+                // A primitive Romacs adds has no record in GNU's DOC: the
+                // comment above its defsubr! is its docstring, and one
+                // without that comment is refused here.
+                if row.gnu.starts_with("romacs:") {
+                    row.doc = doc_above(&lines, token.line);
+                    if row.doc.is_none() {
+                        primitive_error(path, token.line, &format!(
+                            "{} is a Romacs primitive with no docstring: write what it takes and returns in a \
+                             `//` comment directly above its defsubr!", row.name));
+                    }
+                }
+                rows.push(row);
             }
         }
     }
-    rows.sort_by(|a, b| a.test_only.cmp(&b.test_only).then_with(|| a.name.cmp(&b.name)));
+    rows.sort_by(|a, b| a.gate.cmp(&b.gate).then_with(|| a.name.cmp(&b.name)));
     let mut rust_names = std::collections::BTreeSet::new();
     let mut names = std::collections::BTreeSet::new();
     for row in &rows {
@@ -595,10 +641,10 @@ fn generate_primitives(root: &Path, out: &Path) {
     }
     let modules: String = mods
         .iter()
-        .map(|(module, (path, test_only))| {
+        .map(|(module, (path, gate))| {
             format!(
                 "{}#[path = {:?}] pub(crate) mod {module};\n",
-                if *test_only { "#[cfg(test)] " } else { "" },
+                gate_attribute(*gate),
                 path.display().to_string()
             )
         })
@@ -611,12 +657,19 @@ fn generate_primitives(root: &Path, out: &Path) {
             } else {
                 format!("{}::", r.module)
             };
-            format!("    {}prims::{module}{}::DESC,\n", if r.test_only { "#[cfg(test)] " } else { "" }, r.ident)
+            format!("    {}prims::{module}{}::DESC,\n", gate_attribute(r.gate), r.ident)
         })
         .collect();
-    let manifest: Vec<_> = rows.iter().filter(|r| !r.test_only).map(|r| format!(
+    let manifest: Vec<_> = rows.iter().filter(|r| r.gate.is_none()).map(|r| format!(
         "{{\"name\":{},\"rust\":{},\"ident\":{},\"gnu\":{},\"effect\":{},\"min\":{},\"max\":{}}}",
         json_string(&r.name), json_string(&format!("{}:{}", r.source, r.line)), json_string(&r.ident), json_string(&r.gnu), json_string(&r.effect), r.arity, r.max.map_or_else(|| json_string("many"), |n| n.to_string()))).collect();
+    let mut docs: Vec<(&str, &str)> = rows.iter()
+        .filter_map(|r| r.doc.as_deref().map(|doc| (r.name.as_str(), doc))).collect();
+    docs.sort_unstable();
+    let docs: String = docs.iter().map(|(name, doc)| format!("    ({name:?}, {doc:?}),\n")).collect();
+    fs::write(out.join("primitive_docs.rs"), format!(
+        "/// Each Romacs primitive's docstring by name, sorted (build.rs `doc_above`).\n\
+         pub(crate) const PRIMITIVE_DOCS: &[(&str, &str)] = &[\n{docs}];\n")).unwrap();
     fs::write(out.join("prims_mods.rs"), modules).unwrap();
     fs::write(
         out.join("generated_prims.rs"),

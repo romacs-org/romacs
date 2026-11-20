@@ -187,13 +187,8 @@ pub(super) fn var(cx: &mut Leaf<'_>, name: &str) -> std::result::Result<Value, F
     Ok(cx.variable_value(symbol)?.unwrap_or(Value::NIL))
 }
 
-/// STRINGP: VM2 keeps a unibyte string with octets above 127 as `Bytes'.
-fn stringp(cx: &Leaf<'_>, v: Value) -> bool {
-    matches!(cx.kind(v), Kind::String | Kind::Bytes)
-}
-
 fn symbol_is(cx: &mut Leaf<'_>, v: Value, names: &[&str]) -> bool {
-    cx.kind(v) == Kind::Symbol && cx.symbol_name(v).is_ok_and(|n| names.contains(&n.as_str()))
+    cx.is_symbol(v) && cx.symbol_name(v).is_ok_and(|n| names.contains(&n.as_str()))
 }
 
 /// GNU `Fexpand_file_name (NAME, Qnil)', then THEN with the expansion:
@@ -236,7 +231,7 @@ pub(super) fn auto_saving(cx: &mut Leaf<'_>) -> std::result::Result<Option<u32>,
 /// Fstring_equal of its file name and its auto-save file name.
 pub(super) fn auto_saving_into_visited(cx: &mut Leaf<'_>) -> std::result::Result<bool, Fault> {
     let (file, auto) = (var(cx, "buffer-file-name")?, var(cx, "buffer-auto-save-file-name")?);
-    Ok(stringp(cx, file) && stringp(cx, auto) && cx.string_bytes(file)? == cx.string_bytes(auto)?)
+    Ok(cx.is_string(file) && cx.is_string(auto) && cx.string_bytes(file)? == cx.string_bytes(auto)?)
 }
 
 pub(super) fn returned(_: &mut Leaf<'_>, value: Value, _: &[Value]) -> Next {
@@ -291,7 +286,7 @@ fn insert_file_contents(cx, filename: Value; optional visit: Value, beg: Value, 
     let empty_undo = visit != Value::NIL && var(cx, "buffer-undo-list")? == Value::NIL && shape.empty;
     let empty_undo = if empty_undo { Value::TRUE } else { Value::NIL };
     // fileio.c:4153-4155: CHECK_STRING inside Fexpand_file_name.
-    if !stringp(cx, filename) { return Err(Fault::Wrong("stringp", filename)); }
+    if !cx.is_string(filename) { return Err(Fault::Wrong("stringp", filename)); }
     expanding(cx, filename, insert_expanded, vec![visit, beg, end, replace, empty_undo])
 }}
 
@@ -399,7 +394,7 @@ fn handler_member(cx: &Leaf<'_>, value: Value, list: Value) -> std::result::Resu
 /// GNU fileio.c:370: greatest match position wins, first entry wins ties.
 /// Matching does not change match data or honor case-fold-search.
 pub(super) fn find_file_name_handler(cx: &mut Leaf<'_>, filename: Value, operation: Value) -> Out {
-    if !stringp(cx, filename) { return Err(Fault::Wrong("stringp", filename)); }
+    if !cx.is_string(filename) { return Err(Fault::Wrong("stringp", filename)); }
     let operations_key = cx.intern("operations");
     let inhibited = if var(cx, "inhibit-file-name-operation")? == operation {
         var(cx, "inhibit-file-name-handlers")?
@@ -416,7 +411,7 @@ pub(super) fn find_file_name_handler(cx: &mut Leaf<'_>, filename: Value, operati
         if steps & 4095 == 0 && steps.is_power_of_two() { tortoise = chain; }
         let Some((pattern, handler)) = cx.pair(entry) else { continue };
         let mut operations = Value::NIL;
-        if handler == Value::NIL || handler == Value::TRUE || cx.kind(handler) == Kind::Symbol {
+        if cx.is_symbol(handler) {
             let mut plist = cx.symbol_plist(handler)?;
             for _ in 0..=cx.list_limit() {
                 let Some((key, rest)) = cx.pair(plist) else { break };
@@ -425,7 +420,7 @@ pub(super) fn find_file_name_handler(cx: &mut Leaf<'_>, filename: Value, operati
                 plist = rest;
             }
         }
-        if !stringp(cx, pattern) { continue; }
+        if !cx.is_string(pattern) { continue; }
         let Some(at) = cx.file_name_match(pattern, filename)? else { continue };
         if position.is_some_and(|old| at <= old) { continue; }
         if operations != Value::NIL && !handler_member(cx, operation, operations)? { continue; }
@@ -459,7 +454,7 @@ fn write_region(cx, start: Value, end: Value, filename: Value; optional append: 
     // become ordered positions, once in range, before the name is expanded
     // or a handler sees them.
     let shape = cx.buffer_shape()?;
-    let (start, end) = if start != Value::NIL && !stringp(cx, start) {
+    let (start, end) = if start != Value::NIL && !cx.is_string(start) {
         let (b, e) = (position(cx, start)?, position(cx, end)?);
         let (b, e) = (Value::integer(b.min(e)).map_err(Fault::Error)?, Value::integer(b.max(e)).map_err(Fault::Error)?);
         if !(shape.begv <= b.integer_value().unwrap() && e.integer_value().unwrap() <= shape.zv) {
@@ -490,7 +485,7 @@ fn write_expanded(cx: &mut Leaf<'_>, name: Value, saved: &[Value]) -> Next {
     }
     let mut saved = saved.to_vec();
     saved.push(name);
-    if stringp(cx, visit) { return expanding(cx, visit, write_visit_expanded, saved); }
+    if cx.is_string(visit) { return expanding(cx, visit, write_visit_expanded, saved); }
     write_visit_expanded(cx, name, &saved)
 }
 
@@ -501,14 +496,14 @@ fn write_visit_expanded(cx: &mut Leaf<'_>, visit_file: Value, saved: &[Value]) -
     let lock = if lockname != Value::NIL { lockname } else { visit_file };
     let operation = cx.intern("write-region");
     let mut f = find_file_name_handler(cx, name, operation)?;
-    if f == Value::NIL && stringp(cx, visit) { f = find_file_name_handler(cx, visit, operation)?; }
+    if f == Value::NIL && cx.is_string(visit) { f = find_file_name_handler(cx, visit, operation)?; }
     if f != Value::NIL {
         let args = vec![operation, start, end, name, append, visit, lock, mustbenew];
         return Ok(Step::Call { f, args, then: write_handled, saved: vec![visit, visit_file] });
     }
     // A nil START widens and means BEGV..ZV; else the validated region.
     let shape = cx.buffer_shape()?;
-    let region = if start != Value::NIL && !stringp(cx, start) {
+    let region = if start != Value::NIL && !cx.is_string(start) {
         let (b, e) = (position(cx, start)?, position(cx, end)?);
         Some((b.min(e), b.max(e)))
     } else { None };
@@ -518,18 +513,18 @@ fn write_visit_expanded(cx: &mut Leaf<'_>, visit_file: Value, saved: &[Value]) -
     let format = if auto_saving(cx)?.is_some() && auto_format != Value::TRUE { auto_format } else { var(cx, "buffer-file-format")? };
     if var(cx, "write-region-annotate-functions")? != Value::NIL
         || var(cx, "write-region-post-annotation-function")? != Value::NIL
-        || (!stringp(cx, start) && format != Value::NIL) {
+        || (!cx.is_string(start) && format != Value::NIL) {
         return Err(refuse("write-region annotations"));
     }
     // choose_write_coding_system's CODING_MODE_SELECTIVE_DISPLAY (fileio.c:5455).
-    if !stringp(cx, start) && var(cx, "selective-display")? == Value::TRUE {
+    if !cx.is_string(start) && var(cx, "selective-display")? == Value::TRUE {
         return Err(refuse("write-region with selective-display t"));
     }
     // A nil START widens (fileio.c:5593) and then means BEGV..ZV.
     let (b, e) = match region { Some(r) => r, None => (1, shape.z) };
     let fixnum = |n: i64| Value::integer(n).map_err(Fault::Error);
     let widen = start == Value::NIL;
-    let (start, end) = if stringp(cx, start) { (start, end) } else { (fixnum(b)?, fixnum(e)?) };
+    let (start, end) = if cx.is_string(start) { (start, end) } else { (fixnum(b)?, fixnum(e)?) };
     // fileio.c:5583 save_restriction_save holds from here through the coding
     // choice and the write, across its Lisp calls and non-local exits. The
     // arguments reach the body live, not quoted: `eval' copies constants.
@@ -546,7 +541,7 @@ fn write_visit_expanded(cx: &mut Leaf<'_>, visit_file: Value, saved: &[Value]) -
 /// is recorded, and the handler's value returned.
 fn write_handled(cx: &mut Leaf<'_>, val: Value, saved: &[Value]) -> Next {
     let [visit, visit_file] = saved[..2] else { unreachable!() };
-    if visit == Value::TRUE || stringp(cx, visit) {
+    if visit == Value::TRUE || cx.is_string(visit) {
         cx.set_buffer_modified(Value::NIL, true)?;
         cx.bset("buffer-file-name", visit_file)?;
     }
@@ -563,7 +558,7 @@ defsubr! { name = "romacs--write-region-body", gnu = "fileio.c:5617", effect = G
 fn write_region_body(cx, start: Value, end: Value, filename: Value, append: Value, visit: Value,
                      lockname: Value, mustbenew: Value, visit_file: Value) -> Step {
     use super::write_coding as w;
-    if !stringp(cx, start) {
+    if !cx.is_string(start) {
         for v in [start, end] { if v.integer_value().is_none() { return Err(Fault::Wrong("fixnump", v)); } }
     }
     let mut r = vec![Value::NIL; w::REGISTERS];
@@ -595,7 +590,7 @@ pub(super) fn write_chosen(cx: &mut Leaf<'_>, r: &[Value]) -> Next {
     let (start, end, append, coding) = (r[w::START], r[w::END], r[w::APPEND], r[w::VAL]);
     let lcsu = cx.intern("last-coding-system-used");
     cx.store_variable(lcsu, coding)?;
-    let text = if stringp(cx, start) { start } else {
+    let text = if cx.is_string(start) { start } else {
         // A Lisp call during the choice may have edited the buffer.
         let (b, e) = (start.integer_value().unwrap(), end.integer_value().unwrap());
         let shape = cx.buffer_shape()?;
@@ -642,7 +637,7 @@ fn write_unlocked(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
     let (visit, visit_file) = (saved[w::VISIT], saved[w::VISIT_FILE]);
     // fileio.c:5835-5857: an auto-save into the visited file unlocks it.
     let into_visited = auto_saving(cx)?.is_some() && auto_saving_into_visited(cx)?;
-    if visit == Value::TRUE || stringp(cx, visit) {
+    if visit == Value::TRUE || cx.is_string(visit) {
         let modtime = insert_coding::modtime_of(cx, data);
         cx.fileio_set_modtime(modtime)?;
         cx.set_buffer_modified(Value::NIL, true)?;
@@ -660,7 +655,7 @@ fn write_unlocked(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
 /// other than nil, t or a string) nor an auto-save names the file it
 /// wrote, as `message' does.
 fn report_written(cx: &mut Leaf<'_>, append: Value, visit: Value, visit_file: Value) -> Next {
-    let quietly = visit != Value::NIL && visit != Value::TRUE && !stringp(cx, visit);
+    let quietly = visit != Value::NIL && visit != Value::TRUE && !cx.is_string(visit);
     if quietly || auto_saving(cx)?.is_some() || var(cx, "noninteractive")? != Value::NIL {
         return Ok(Step::Done(Value::NIL));
     }
@@ -677,7 +672,7 @@ fn written_nil(_: &mut Leaf<'_>, _: Value, _: &[Value]) -> Next { Ok(Step::Done(
 fn write_file(cx: &mut Leaf<'_>, r: &[Value], encoded: Value) -> Out {
     use super::write_coding as w;
     let (name, append, visit, mustbenew) = (r[w::FILENAME], r[w::APPEND], r[w::VISIT], r[w::MUSTBENEW]);
-    let visiting = visit == Value::TRUE || stringp(cx, visit);
+    let visiting = visit == Value::TRUE || cx.is_string(visit);
     let path = file_name_path(cx, name)?;
     let bytes = cx.string_view(encoded)?.bytes().to_vec();
     let excl = symbol_is(cx, mustbenew, &["excl"]);

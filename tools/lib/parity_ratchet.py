@@ -21,8 +21,10 @@ that load. A count is the length of its member list.
         member with its current verdict -- also when a gain elsewhere hides the
         loss in the count. A new member with nothing lost is FAIL-WITH-
         INSTRUCTION (exit 3): the improvement must be recorded explicitly. A
-        measurement that did not run, ran nothing, or measured a different
-        denominator is RED (exit 4), never PASS.
+        measurement that did not run, ran nothing, or measured a different GNU
+        test denominator is RED (exit 4), never PASS. A census's population is
+        the tree's (census_population), counted each time and never recorded;
+        a loaded member that left it is lost like any other.
         --accept-gains keeps those regression checks but reports genuine gains
         as PASS without changing recorded floors. The gate uses this mode;
         improvements stay in its run output, not generated-evidence commits.
@@ -48,8 +50,8 @@ that load. A count is the length of its member list.
         consistent, and against the merge-base with master no recorded member
         was dropped without a `lowerings` entry naming it.
     parity_ratchet.py verify --candidate [--base REV]
-        Static candidate check: no member, denominator or floor may decrease,
-        even with a lowering record. Does not replay probe evidence or measure.
+        Static candidate check: no member, GNU test denominator or floor may
+        decrease, even with a lowering record. Does not replay probe evidence or measure.
 
 The checker never writes the ratchet file: a ratchet that updates itself is not
 a ratchet.
@@ -88,6 +90,10 @@ RATCHET_NAME = 'ledger/parity-ratchet.json'
 RATCHET_BEFORE = 'parity-ratchet.json'
 CHARACTERISED = ('src/fns-tests.el', 'src/data-tests.el', 'lisp/subr-tests.el')
 CENSUS_MODES = ('warm', 'cold')
+# What a census measures over: counted from the tree each time (census_population),
+# so the ratchet never stores them. A stored copy went stale when lisp/ moved
+# (0a3f55579) and refused every census until re-recorded.
+CENSUS_DENOMINATORS = frozenset({'gnu_target_total', 'shared_total', 'files_measured'})
 GATE_SHARDS = 71
 PREFIX = 'parity-ratchet:'
 EXIT_PASS, EXIT_LOWER, EXIT_INVALID, EXIT_HIGHER, EXIT_NOT_MEASURED = 0, 1, 2, 3, 4
@@ -330,7 +336,7 @@ def measure_census(root: pathlib.Path, mode: str, binary: str, workers: int, tim
         f = r.get('first_failure') or {}
         return f"{f.get('classification')}: {(f.get('error') or '')[:160]}"
     return {'kind': 'census', 'mode': mode, 'files_measured': len(gnu), 'files_reported': reported,
-            'files_executed': len(rows),
+            'files_executed': len(rows), 'population': sorted(gnu), 'support_population': sorted(support),
             'generated_support': {
                 'total': len(support),
                 'reported': sum(r['forms_evaluated'] is not None for r in rows if r['file'] in support),
@@ -484,12 +490,20 @@ def load_ratchet(root: pathlib.Path, *, evidence: bool = True) -> dict:
     if not path.is_file():
         raise Refusal(EXIT_INVALID, f'{path} does not exist; record it: {RECORD_COMMAND}')
     data = json.loads(path.read_text())
-    problems = consistency(data)
+    problems = consistency(data) + stored_denominators(data)
     if evidence and not problems and data.get('schema') == 2:
         problems = regeneration_problems(data, load_evidence(root))
     if problems:
         raise Refusal(EXIT_INVALID, f'{path} is inconsistent:\n  ' + '\n  '.join(problems))
     return data
+
+
+def stored_denominators(data: dict) -> list[str]:
+    """The census sizes the file stores. Earlier versions stored them; the current one may not."""
+    return [f'census.{mode} stores {stored}: the census population is the tree\'s (census_population), '
+            'measured each time, never recorded'
+            for mode in CENSUS_MODES
+            if (stored := sorted(set((data.get('census') or {}).get(mode) or {}) & CENSUS_DENOMINATORS))]
 
 
 def consistency(data: dict) -> list[str]:
@@ -536,9 +550,6 @@ def consistency(data: dict) -> list[str]:
             out.append(f'census.{mode}.gnu_parity_loaded {c.get("gnu_parity_loaded")} != {len(loaded)} files listed')
         if not loaded:
             out.append(f'census.{mode} floor is zero: a ratchet at zero protects nothing')
-        for key in ('gnu_target_total', 'shared_total', 'files_measured'):
-            if not isinstance(c.get(key), int) or c[key] <= 0:
-                out.append(f'census.{mode}.{key} must be a positive denominator')
     if data.get('schema') == 2:
         out += honest_consistency(g)
     for i, low in enumerate(data.get('lowerings') or []):
@@ -640,8 +651,8 @@ def compare(floor: dict[str, list[str]], measured: dict[str, list[str]], verdict
         have, want = set(measured[unit]), set(floor.get(unit, []))
         entry = {'unit': unit, 'floor': len(want), 'measured': len(have),
                  'lost': sorted(want - have), 'gained': sorted(have - want)}
-        entry['lost_why'] = {m: verdicts.get(m.split(':', 1)[-1] if unit.startswith('census') else
-                                             f"{unit.split(':', 1)[1]}::{m}", '?') for m in entry['lost']}
+        entry['lost_why'] = {m: verdicts.get(m, 'left the census population') if unit.startswith('census') else
+                             verdicts.get(f"{unit.split(':', 1)[1]}::{m}", '?') for m in entry['lost']}
         key = 'lower' if entry['lost'] else 'higher' if entry['gained'] else 'equal'
         result[key].append(entry)
     return result
@@ -684,10 +695,6 @@ def denominators(data: dict, m: dict) -> list[str]:
             if want is not None and m['tests_per_file'].get(f) != want:
                 problems.append(f'{f}: measured {m["tests_per_file"].get(f)} GNU tests, recorded {want}')
     else:
-        c = data['census'][m['mode']]
-        for key in ('gnu_target_total', 'shared_total', 'files_measured'):
-            if m[key] != c[key]:
-                problems.append(f'census-{m["mode"]}: {key} measured {m[key]}, recorded {c[key]}')
         if m['files_reported'] != m['files_measured']:
             problems.append(f'census-{m["mode"]}: partial pristine GNU report '
                             f'{m["files_reported"]}/{m["files_measured"]}; unreported {m.get("unreported")}')
@@ -716,6 +723,16 @@ def recorded_class(data: dict, unit: str, member: str) -> str:
     return f" [recorded class {c['class']}]" if c else ''
 
 
+def verdicts_of(m: dict) -> dict[str, str]:
+    """M's verdicts, by member. A census answers for its population, the GNU libraries it may credit:
+    a recorded member outside it left the census (a library moved to lisp/GENERATED is support, whose
+    own verdict may say it loaded)."""
+    if m['kind'] != 'census':
+        return m['verdicts']
+    population = set(m['population'])
+    return {f: v for f, v in m['verdicts'].items() if f in population}
+
+
 def report(unit_label: str, data: dict, m: dict, *, accept_gains: bool = False) -> int:
     """Print the verdict for one measurement; return its exit status."""
     problems = denominators(data, m)
@@ -725,13 +742,13 @@ def report(unit_label: str, data: dict, m: dict, *, accept_gains: bool = False) 
               f'generated support loaded {len(support["loaded"])}/{support["total"]}, '
               f'reported {support["reported"]}; not GNU parity credit')
     if problems:
-        print(f'{PREFIX} NOT-MEASURED {unit_label}: the denominator moved, so the floors no longer describe '
+        print(f'{PREFIX} NOT-MEASURED {unit_label}: the measured population moved, so the floors no longer describe '
               'this measurement:\n  ' + '\n  '.join(problems)
               + f'\n  if the measured thing was really replaced, record it explicitly: {RECORD_COMMAND}')
         return EXIT_NOT_MEASURED
     fl = floors(data)
     units = measured_units(m)
-    result = compare(fl, units, m['verdicts'])
+    result = compare(fl, units, verdicts_of(m))
     entries = result['lower'] + result['higher'] + result['equal']
     protected = [u for u in units if u.startswith('gnu:') or u.startswith('census-')]
     floor_total = sum(len(fl.get(u, [])) for u in protected)
@@ -892,11 +909,11 @@ LEDGER_NAME = 'parity-ratchet-unconfirmed.jsonl'
 FINGERPRINTED = ('lisp', 'test/gnu/test', 'test/gnu/harness', 'test/gnu/tools', 'test/gnu/baseline',
                  'test/gnu/run.py', 'ledger/gnu-tests-pin.json', 'ledger/gnu-test-exclusions.toml', 'tools/lisp-census',
                  'tools/lib/lisp-census-oracle.el', 'tools/lib/parity_ratchet.py', 'test/gnu/member-evidence-policy.json',
-                 'ledger/parity-reference.toml',
+                 'ledger/parity-reference.toml', 'tools/lib/lisp_layout.py',
                  RATCHET_NAME)
 
 
-def input_fingerprint(root: pathlib.Path) -> str:
+def input_fingerprint(root: pathlib.Path, evidence: bool = True) -> str:
     """Content of everything a measurement reads besides the binary."""
     h = hashlib.sha256()
     for rel in FINGERPRINTED:
@@ -906,7 +923,7 @@ def input_fingerprint(root: pathlib.Path) -> str:
         h.update(f'{rel}\0{len(paths)}\n'.encode())
         for q in paths:
             h.update(f'{q.relative_to(root)}\0'.encode() + hashlib.sha256(q.read_bytes()).digest())
-    if os.environ.get('ROMACS_MEMBER_EVIDENCE') or os.environ.get('ROMACS_VACUITY_RECEIPT'):
+    if evidence and (os.environ.get('ROMACS_MEMBER_EVIDENCE') or os.environ.get('ROMACS_VACUITY_RECEIPT')):
         sys.path.insert(0, str(root / 'test/gnu/tools'))
         from vacuity_binding import evidence_paths
         receipt, members = evidence_paths()
@@ -989,12 +1006,14 @@ def incomparable(data: dict, m: dict, again: dict, lost: dict, fingerprint: str,
     if m['kind'] == 'gnu' and sorted(again.get('files', [])) != sorted(u[4:] for u in lost):
         return 'the confirming run measured different GNU test files than the losses name'
     problems = denominators(data, again)
+    if m['kind'] == 'census' and any(again.get(k) != m.get(k) for k in ('population', 'support_population')):
+        problems.append('the census population differs from the first run\'s')
     if problems:
         return 'the confirming run measured a different denominator: ' + '; '.join(problems[:3])
     if not m.get('binary_sha256') or again.get('binary_sha256') != m['binary_sha256']:
         return (f"the confirming run used another binary (sha256 {str(again.get('binary_sha256'))[:12]}, "
                 f"first run {str(m.get('binary_sha256'))[:12]})")
-    if input_fingerprint(root) != fingerprint:
+    if input_fingerprint(root, evidence=m['kind'] == 'gnu') != fingerprint:
         return 'the measured inputs changed between the first run and the confirmation'
     return None
 
@@ -1119,8 +1138,11 @@ def freeze(binary: str | None, into: pathlib.Path, name: str, root: pathlib.Path
 
 def cmd_check(args) -> int:
     root = pathlib.Path(args.root).resolve()
-    data = load_ratchet(root)
     units = units_for(root, args.tier, args.unit)
+    # The probe evidence classifies GNU-suite members only; a census check
+    # (the landing check runs census-cold) has none to read.
+    gnu_units = any(u.startswith('gnu-') for u in units)
+    data = load_ratchet(root, evidence=gnu_units)
     gnu_ert, census = args.gnu_ert, args.census_bin
     if gnu_ert is None and any(u.startswith('gnu-') for u in units):
         gnu_ert = str(cargo_build(root, ['-p', 'romacs-gnu-tests', '--bin', 'romacs-gnu-ert']) / 'romacs-gnu-ert')
@@ -1131,13 +1153,15 @@ def cmd_check(args) -> int:
             gnu_ert = freeze(gnu_ert, pathlib.Path(frozen), 'romacs-gnu-ert', root)
         if any(u.startswith('census-') for u in units):
             census = freeze(census, pathlib.Path(frozen), 'romacs-vm-census', root)
-        fingerprint = input_fingerprint(root)
+        # The probe evidence is an input of GNU units only.
+        fingerprints = {gnu: input_fingerprint(root, evidence=gnu)
+                        for gnu in {u.startswith('gnu-') for u in units}}
         # Always measured here, never replayed from a file: a saved measurement
         # could say anything, so there is no option to supply one.
         measurements = [(u, measure_unit(root, u, gnu_ert, census, args.jobs)) for u in units]
         worst = EXIT_PASS
         for unit, m in measurements:
-            m = confirm_losses(root, data, m, gnu_ert, census, args.jobs, fingerprint)
+            m = confirm_losses(root, data, m, gnu_ert, census, args.jobs, fingerprints[m['kind'] == 'gnu'])
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf):
                 status = report(unit, data, m, accept_gains=getattr(args, 'accept_gains', False))
@@ -1326,8 +1350,7 @@ def cmd_record(args) -> int:
                  'vacuous_budget may only decrease, and a budget member that stops passing is progress.',
         'gnu_suite': honest_suite(gnu['files'], gnu['tests_per_file'], gnu['members'], gnu['classes'], real_ert),
         'census': {mode: {'gnu_parity_loaded': len(c['members'][f'census-{mode}']),
-                          'gnu_target_total': c['gnu_target_total'], 'shared_total': c['shared_total'],
-                          'files_measured': c['files_measured'], 'chain': c['chain'],
+                          'chain': c['chain'],
                           'loaded': c['members'][f'census-{mode}']}
                    for mode, c in cen.items()},
         'lowerings': [],
@@ -1365,8 +1388,8 @@ def cmd_record(args) -> int:
           f"{g['honest']['vacuous_budget']}", flush=True)
     print(f"{PREFIX} recorded {path.name}: GNU suite passed {g['passed']}/{g['gnu_tests']} in {g['file_count']} files "
           f"(characterised {g['characterised']}); census warm {data['census']['warm']['gnu_parity_loaded']}/"
-          f"{data['census']['warm']['gnu_target_total']}, cold {data['census']['cold']['gnu_parity_loaded']}/"
-          f"{data['census']['cold']['gnu_target_total']}. Review the diff and commit it.")
+          f"{cen['warm']['gnu_target_total']}, cold {data['census']['cold']['gnu_parity_loaded']}/"
+          f"{cen['cold']['gnu_target_total']}. Review the diff and commit it.")
     return 0
 
 
@@ -1486,10 +1509,6 @@ def candidate_problems(old: dict, new: dict, label: str) -> list[str]:
     for f, count in old['gnu_suite']['tests_per_file'].items():
         if new['gnu_suite']['tests_per_file'].get(f, 0) < count:
             problems.append(f'{label}: {f}: GNU test denominator lowered')
-    for mode in CENSUS_MODES:
-        for key in ('gnu_target_total', 'shared_total', 'files_measured'):
-            if new['census'][mode][key] < old['census'][mode][key]:
-                problems.append(f'{label}: census-{mode}: {key} lowered')
     return problems
 
 

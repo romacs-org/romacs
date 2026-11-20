@@ -332,3 +332,28 @@ fn native_nil_ranges_keep_unicode_fallback_outside_ascii() {
         r#"(nil ("à"))"#,
     );
 }
+
+/// The prefix test across byte domains and candidate kinds, as pinned GNU
+/// answers it: a unibyte input's raw byte matches a multibyte name's raw-byte
+/// character and not `ÿ`; alist keys, symbols and plain strings are names,
+/// other keys are skipped; the empty input matches every name.
+#[test]
+fn prefix_test_across_byte_domains_and_candidate_kinds() {
+    let mut vm = Vm::new();
+    vm.set_collection_floor(1);
+    let value = vm
+        .eval_source(
+            r#"(equal
+  (list (all-completions (unibyte-string 255) (list (string #x3fffff ?a) (string #x3fffff) "ÿ" (unibyte-string 255 ?c) (unibyte-string 254)))
+        (all-completions "ÿ" (list (unibyte-string 255) "ÿx" (string #x3fffff) "y"))
+        (all-completions "a" (list (list "ab") (cons 1 2) 'ab "ac" nil (list 'ad)))
+        (try-completion "zz" (list "zz" "zzy"))
+        (test-completion "ab" (list "ab" "abc"))
+        (all-completions "" (list "x" 3 'y))
+        (all-completions "αβ" (list "αβγ" "αx" (string-to-multibyte "ab"))))
+  (list (list (string #x3fffff ?a) (string #x3fffff) (unibyte-string 255 ?c)) (list "ÿx") (list "ab" "ab" "ac" "ad")
+        "zz" t (list "x" "y") (list "αβγ")))"#,
+        )
+        .unwrap();
+    assert_eq!(value.display().unwrap(), "t");
+}

@@ -199,9 +199,9 @@ fn an_agent_chat_comes_back_on_its_session_with_its_draft() {
     let restored = batch(&dir, &format!(
         "(warm-restart-restore-image {image})
          (wrt-print \"CHATS\" (cl-loop for b in (buffer-list)
-                                       when (eq (buffer-local-value 'major-mode b) 'romacs-agent-chat-mode)
-                                       collect (with-current-buffer b (list (buffer-name) (romacs-agent-id romacs-agent-ui--session)
-                                                                            (romacs-agent-ui--composer-text)))))",
+                                       when (eq (buffer-local-value 'major-mode b) 'romacs-agent-log-mode)
+                                       collect (with-current-buffer b (list (buffer-name) (romacs-agent-id romacs-agent-log--session)
+                                                                            (romacs-agent-log--draft)))))",
         image = lisp(&image)));
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(tagged(&written, "STRATEGY"), "handler");

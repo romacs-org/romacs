@@ -3,9 +3,7 @@
  "census": {
   "cold": {
    "chain": null,
-   "files_measured": 1596,
    "gnu_parity_loaded": 116,
-   "gnu_target_total": 1596,
    "loaded": [
     "lisp/case-table.el",
     "lisp/cedet/cedet-cscope.el",
@@ -123,8 +121,7 @@
     "lisp/url/url-domsuf.el",
     "lisp/w32-vars.el",
     "lisp/widget.el"
-   ],
-   "shared_total": 1596
+   ]
   },
   "warm": {
    "chain": [
@@ -279,9 +276,7 @@
      "loaded": true
     }
    ],
-   "files_measured": 1596,
    "gnu_parity_loaded": 398,
-   "gnu_target_total": 1596,
    "loaded": [
     "lisp/abbrev.el",
     "lisp/align.el",
@@ -681,8 +676,7 @@
     "lisp/xdg.el",
     "lisp/xml.el",
     "lisp/xt-mouse.el"
-   ],
-   "shared_total": 1596
+   ]
   }
  },
  "gnu_suite": {
