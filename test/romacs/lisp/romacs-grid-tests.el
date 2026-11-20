@@ -81,11 +81,29 @@ room tall, not the frame's whole height."
 
 (ert-deftest romacs-grid-pages-what-will-not-fit ()
   "A menu taller than its room pages; a block taller than a page goes in
-chunks, its title on the first."
+as few chunks as the room allows, as even as they can be, its title on
+the first."
   (let* ((pages (romacs-grid-pages (list (romacs-grid-tests--block "Tall" 20 6)) 8 20)))
     (should (= (length pages) 3))
     (should (equal (romacs-grid-tests--text (car (car pages))) "Tall"))
-    (should (equal (mapcar #'length pages) '(8 8 5)))))
+    (should (equal (mapcar #'length pages) '(7 7 7)))))
+
+(ert-deftest romacs-grid-splits-a-tall-block-evenly ()
+  "A tall block's columns differ by at most a line, so wide lines that
+share a column on even chunks are not split into one each, forcing a
+page."
+  (let ((block (lambda (widths) (mapcar (lambda (w) (make-string w ?x)) widths))))
+    (should (= 1 (length (romacs-grid-pages (list (funcall block '(6 6 6 15 6 15))) 5 24 nil 5))))
+    (should (= 1 (length (romacs-grid-pages (list (funcall block '(6 6 6 6 6 6 6 15 15 6))) 4 33 nil 4))))
+    (should (= 1 (length (romacs-grid-pages (list (funcall block '(6 6 6 6 6 6 15 15 6 6))) 4 33 nil 4))))))
+
+(ert-deftest romacs-grid-chunks-score-columns-as-drawn ()
+  "A chunk is as wide as its widest item drawn beside the chunk's widest
+key, so long keys share a column where that is narrower: 3+2 here, where
+2+3 would put a long key beside each wide label."
+  (let* ((items (cl-mapcar #'cons '(8 1 8 1 1) '(3 3 4 4 3)))
+         (chunks (romacs-grid-chunks items 3 #'car (lambda (item k) (+ k 2 (cdr item))))))
+    (should (equal (mapcar #'length chunks) '(3 2)))))
 
 (ert-deftest romacs-grid-pages-use-the-width ()
   "A paged menu's last page lays its groups out side by side where they
