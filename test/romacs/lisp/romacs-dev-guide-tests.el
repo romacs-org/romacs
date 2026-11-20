@@ -36,6 +36,20 @@ its effect class where its definition declares one."
       (should (string-match-p "primitive, pure" (car lines)))
       (should (equal (nth 1 lines) "  pure: depends on its arguments alone")))))
 
+(ert-deftest romacs-dev-guide-tests-describe-romacs-primitive ()
+  "A primitive Romacs adds is described by the comment above its defsubr!:
+`documentation' gives that text and `describe-function' shows it."
+  (let ((text (romacs-dev-guide "romacs-syntax-summaries-stats")))
+    (should (string-match-p "Counters of the current buffer's syntax summaries" text))
+    (should-not (string-match-p "no docstring" text)))
+  ;; Read through `substitute-command-keys' as any docstring is.
+  (let ((text-quoting-style 'straight))
+    (should (string-match-p "'mouse_position_hook'" (documentation 'romacs--pointer))))
+  (save-window-excursion
+    (describe-function 'romacs-json-read)
+    (with-current-buffer (help-buffer)
+      (should (string-match-p "Parse the JSON text SOURCE" (buffer-string))))))
+
 (ert-deftest romacs-dev-guide-tests-callers-are-told ()
   "What the owner of a better path put on a function is part of what it is."
   (put 'romacs-dev-guide-tests--helper 'romacs-lint-hint "the machine serves this another way")

@@ -1,4 +1,4 @@
-;;; tibetan.el --- Quail package for inputting Tibetan characters -*-coding: utf-8-emacs; lexical-binding: t; -*-
+;;; tibetan.el --- Quail package for inputting Tibetan characters -*-coding: utf-8; lexical-binding: t; -*-
 
 ;; Copyright (C) 1997, 2001-2026 Free Software Foundation, Inc.
 ;; Copyright (C) 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2005,
@@ -68,11 +68,42 @@
       ;; transcribed by tibetan-transcription-to-tibetan, thus STR
       ;; contains ASCII string now.  In that case, use the current
       ;; characters set in quail-current-str.
-      (if (> (aref str 0) 255)
+      (if (and (> (length str) 0) (> (aref str 0) 255))
 	  (setq quail-current-str (tibetan-compose-string str))
 	(or quail-current-str
 	    (setq quail-current-str quail-current-key)))))
   control-flag)
+
+;; GNU's transcriptions each named one character (a precomposed glyph,
+;; or the invisible vowel sign for "a"); Romacs's are Unicode stacks, and
+;; "a" is the inherent vowel, "" (ledger/divergences/VM2-TIBETAN-UNICODE.md).
+;; Quail takes a string as one candidate a character (none for ""), so the
+;; rules whose translation is one unit, the stacks and the vowels, give
+;; each as a one-candidate vector.  The punctuation rules keep their
+;; strings: Wylie `|' offers the special signs, one candidate each.
+(defun quail-tibetan--units (rules)
+  "RULES, a symbol whose value is an alist of keys and translations, as Quail
+takes them when each translation is one unit: a symbol of its own,
+uninterned, whose value gives each string translation as a one-candidate
+vector."
+  (let ((symbol (make-symbol (symbol-name rules))))
+    (set symbol (mapcar (lambda (rule)
+                          (if (stringp (cdr rule)) (cons (car rule) (vector (cdr rule))) rule))
+                        (symbol-value rules)))
+    symbol))
+
+(defun quail-tibetan--table (units table)
+  "TABLE, a state transition table for `quail-map-from-table', with the
+rules named in UNITS as `quail-tibetan--units' gives them."
+  (let ((rules (lambda (name) (if (memq name units) (quail-tibetan--units name) name))))
+    (mapcar (lambda (state)
+              (cons (car state)
+                    (mapcar (lambda (transition)
+                              (if (consp transition)
+                                  (cons (funcall rules (car transition)) (cdr transition))
+                                (funcall rules transition)))
+                            (cdr state))))
+            table)))
 
 ;;; Wylie transcription based input methods.
 
@@ -183,6 +214,8 @@
 ;;;             as specified in Unicode v.3
 (quail-install-map
  (quail-map-from-table
+  (quail-tibetan--table
+   '(tibetan-precomposed-transcription-alist tibetan-vowel-transcription-alist)
   '((base-state (tibetan-consonant-transcription-alist . svm-state)
 		(tibetan-precomposed-transcription-alist . svm-state)
 		(tibetan-wylie-non-stacking-alist . svm-state)
@@ -196,7 +229,7 @@
 		(tibetan-modifier-transcription-alist . m-state))
     (vm-state (tibetan-vowel-transcription-alist . vm-state)
 	      (tibetan-modifier-transcription-alist . m-state))
-    (m-state (tibetan-modifier-transcription-alist . m-state)))))
+    (m-state (tibetan-modifier-transcription-alist . m-state))))))
 
 ;;;
 ;;; TibKey key alignment based input method
@@ -440,7 +473,7 @@
        vowel sign for `a'.
     2. Tsheg is assigned to SPC key.  You can input a space
        by typing `>'.
-    4. To avoid the default stacking ���� and to obtain གཡ,
+    4. To avoid the default stacking གྱ and to obtain གཡ,
        type `E' instead of `v' (=ཡ).
     3. There are many characters that are not supported in the
        current implementation (especially special signs).
@@ -451,6 +484,8 @@
 
 (quail-install-map
  (quail-map-from-table
+  (quail-tibetan--table
+   '(tibetan-vowel-tibkey-alist)
   '((base-state (tibetan-consonant-tibkey-alist . s-state)
 		(tibetan-non-stacking-tibkey-alist . s-state)
 		tibetan-subjoined-tibkey-alist
@@ -459,6 +494,6 @@
 		tibetan-punctuation-tibkey-alist)
     (s-state (tibetan-subjoined-tibkey-alist . s-state)
 	     (tibetan-vowel-tibkey-alist . m-state))
-    (m-state tibetan-modifier-tibkey-alist))))
+    (m-state tibetan-modifier-tibkey-alist)))))
 
 ;;; tibetan.el ends here

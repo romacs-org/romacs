@@ -4,16 +4,26 @@
 //! VM2-FROZEN).
 use super::*;
 
+// Freeze OBJECT: an immutable copy of its whole value graph in a new frozen region,
+// or OBJECT itself when it is a region's root already, a fixnum, nil or t.  A symbol is not
+// copied: one in the initial obarray is the same symbol, its value, function and plist as
+// mutable as ever, and any other a new uninterned symbol of its name.  A graph holding a
+// value that cannot be frozen signals (error "Cannot freeze" VALUE PATH).  Writing into a
+// frozen value signals an error; `thaw' gives a mutable copy back.
 defsubr! { name = "freeze", gnu = "romacs:frozen", effect = Global,
 fn freeze(cx, object: Value) {
     cx.freeze(object)
 }}
 
+// Whether OBJECT is frozen: in a region `freeze' made, or one a frozen value taken
+// from another isolate was placed in.
 defsubr! { name = "frozen-p", gnu = "romacs:frozen", effect = Pure,
 fn frozen_p(cx, object: Value) {
     Ok(if cx.frozen_p(object) { Value::TRUE } else { Value::NIL })
 }}
 
+// A private, mutable copy of the frozen value graph OBJECT; a value that is not frozen
+// is returned as it is.
 defsubr! { name = "thaw", gnu = "romacs:frozen", effect = Global,
 fn thaw(cx, object: Value) {
     cx.thaw(object)
