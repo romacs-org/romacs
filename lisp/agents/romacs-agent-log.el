@@ -1373,8 +1373,8 @@ it finished since.")
 (defun romacs-agent-log--worker-state (child)
   "CHILD's state in the menu: the board's mark and a word, in its face."
   (if (eq (romacs-agent-state child) 'waiting-approval)
-      (cons (propertize "◆" 'face 'romacs-working-waiting) (propertize "asks you" 'face 'romacs-working-waiting))
-    (cons (propertize "●" 'face 'romacs-working-running) (propertize "running" 'face 'romacs-working-running))))
+      (cons (propertize "◆" 'face 'romacs-working-waiting) (propertize "asks you" 'face '(romacs-working-waiting bold)))
+    (cons (propertize "●" 'face 'romacs-working-running) (propertize "running" 'face '(romacs-working-running bold)))))
 
 (defun romacs-agent-log--worker-label (index)
   "The menu's row of the worker at INDEX: a mark of what it does, then its
