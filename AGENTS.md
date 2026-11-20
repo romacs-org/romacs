@@ -85,6 +85,10 @@ possible; say so where you do.
   a primitive's Rust file. What a caller should know of a function is put on the
   function, beside the better path's definition, and the lint tells each caller:
   `(put 'FUNCTION 'romacs-lint-hint "...")`.
+- Every public definition and every command in Romacs's own Lisp (as
+  `lisp/bundled.json` lays it out) has a docstring that says what its body
+  does, read from the body, not guessed from the name; the lint holds new ones
+  to it.
 - Ask the machine what it offers before writing Lisp for it: `(romacs-dev-guide
   "QUERY")`, or the MCP tool `romacs_dev_guide`, describes a function (a
   primitive's effect class and Rust file, what callers are told of it) or

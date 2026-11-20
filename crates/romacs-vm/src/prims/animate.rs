@@ -10,10 +10,6 @@ use super::*;
 defsubr! { name = "romacs--display-animates", gnu = "romacs:display", effect = Reads,
 fn display_animates(cx) { cx.display_animates() }}
 
-// The host frame's native window, for a server session whose window comes
-// and goes (lisp/session/romacs-server.el): ACTION `show' makes it anew when it was
-// closed and asks for the focus, `hide' closes it and keeps the session,
-// `query' only asks. t when a window shows after the request.
 // What startup is doing: STAGE a symbol or string naming the step (`init',
 // `agents', `restore'), LABEL what it is at, or nil, for the screen a
 // launch shows until its first frame (nothing once that frame shows, or
@@ -24,7 +20,8 @@ fn display_animates(cx) { cx.display_animates() }}
 // the first frame does (romacs-progress-view.el).  t when the launch screen
 // showed it, its counts and failure as a bar of its own; with a STATE,
 // `romacs-gui-loadup--progress-view' is told, when it is defined (the card
-// past the screen; a failure there is said, and startup goes on).
+// past the screen; a failure there is said, and startup goes on), unless
+// the launch screen showed it and its :status is other than `running'.
 defsubr! { name = "romacs-startup-progress", gnu = "romacs:display", effect = Global,
 fn startup_progress(cx, stage: Value; optional label: Value, state: Value) -> Step {
     let shown = cx.startup_progress(stage, label, state)?;
@@ -37,7 +34,15 @@ fn startup_progress(cx, stage: Value; optional label: Value, state: Value) -> St
     Ok(Step::Call { f: view, args: vec![shown], then: shown_by_view, saved: vec![shown] })
 }}
 fn shown_by_view(_: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next { Ok(Step::Done(saved[0])) }
+// Where the pointer is over the host frame, in pixels: (X . Y), as GNU's
+// `mouse_position_hook' finds it; nil with no pointer over the frame, or no display.
 defsubr! { name = "romacs--pointer", gnu = "romacs:display", effect = Reads,
 fn pointer(cx) { cx.pointer() }}
+// The host frame's native window, for a server session whose window comes
+// and goes (lisp/session/romacs-server.el): ACTION `show' makes it anew when it was
+// closed, else raises it; `hide' closes it and keeps the session; `query' only asks.
+// t when a window shows after the request, nil when none does or the host has no native
+// windows; a session that is not a server's shows its window always.  Any other ACTION
+// signals an error.
 defsubr! { name = "romacs--native-window", gnu = "romacs:display", effect = Global,
 fn native_window(cx, action: Value) { cx.native_window(action) }}

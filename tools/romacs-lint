@@ -3,7 +3,8 @@
 
 The host loads each file and holds what it names to what the machine defines:
 unknown functions, wrong argument counts, untrue `declare-function`s, free and
-unused variables, line pins, and hints for what Romacs offers instead. One
+unused variables, line pins, undocumented public definitions in Romacs's own
+Lisp, and hints for what Romacs offers instead. One
 finding a line, with its fix.
 
 Each file is linted in a machine of its own, since loading a file can change

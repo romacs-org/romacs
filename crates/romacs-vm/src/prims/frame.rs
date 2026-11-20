@@ -536,22 +536,38 @@ defsubr! { name = "romacs--host-minibuffer", gnu = "romacs:frame", effect = Glob
 fn romacs_host_minibuffer(cx, frame: Value) {
     cx.windows().host_minibuffer(frame)
 }}
+// The window the selected frame's status bar shows: the selected window, or while it
+// is the minibuffer window of an active minibuffer the window that minibuffer was entered
+// from, while that is one of the top-level frame's ordinary windows; else that frame's own
+// selected window, or, when that is its minibuffer window, the ordinary window selected
+// last.
 defsubr! { name = "romacs-status-bar-window", gnu = "romacs:frame", effect = Reads,
 fn romacs_status_bar_window(cx) {
     cx.windows().status_bar_window()
 }}
+// The height in pixels the selected frame's top-level frame's last layout left for its
+// status bar, 0 while it shows none.
 defsubr! { name = "romacs-status-bar-height", gnu = "romacs:frame", effect = Reads,
 fn romacs_status_bar_height(cx) {
     Ok(Value::integer(i64::from(cx.windows().status_bar_height())).unwrap())
 }}
+// For the character COLUMN, counted from 0, of the status bar as last expanded,
+// (WINDOW STRING COLUMN): the window whose line it is, and that text, a string with the
+// properties a click reads.  nil past the end of that line, before any expansion, or when
+// its window is gone.
 defsubr! { name = "romacs--status-bar-target", gnu = "romacs:frame", effect = Reads,
 fn romacs_status_bar_target(cx, column: Value) {
     cx.windows().status_bar_target(column)
 }}
+// The text the status bar shows, placed as the painter places it, with the widths the
+// host measures (with no host, as many columns as each character's width); nil while it shows
+// none.  Expands the bar's mode line now, unless the last expansion is still current.
 defsubr! { name = "romacs--status-bar-text", gnu = "romacs:frame", effect = Reads,
 fn romacs_status_bar_text(cx) {
     cx.windows().status_bar_text()
 }}
+// The live child frame of the selected frame's top-level frame that hosts its
+// minibuffer window, or nil when the minibuffer is not hosted in one.
 defsubr! { name = "romacs--minibuffer-host", gnu = "romacs:frame", effect = Reads,
 fn romacs_minibuffer_host(cx) {
     cx.windows().minibuffer_host()
