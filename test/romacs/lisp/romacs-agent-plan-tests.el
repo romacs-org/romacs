@@ -262,7 +262,13 @@
         (save-restriction
           (narrow-to-region (point-min) (1+ (point-min)))
           (should (romacs-agent-log--proceed-offered)))
+        (should (= (romacs-agent-log--waiting-count) 1))
+        ;; A failed turn says it failed, the offer or not.
+        (setf (romacs-agent-failed session) t)
+        (should (equal (cdr (romacs-agent-log--doing session)) "failed"))
+        (setf (romacs-agent-failed session) nil)
         (romacs-agent-log-draw session '(:type rolled-back :to 1 :turns 1 :prompt "x"))
+        (should (= (romacs-agent-log--waiting-count) 0))
         ;; Narrowed, C-c C-y proceeds and the separator says so.
         (romacs-agent-set-plan session t)
         (romacs-agent-log-draw session '(:type plan :text "4. last" :proceed t))

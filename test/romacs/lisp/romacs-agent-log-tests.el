@@ -952,3 +952,17 @@
 
 (provide 'romacs-agent-log-tests)
 ;;; romacs-agent-log-tests.el ends here
+
+(ert-deftest romacs-agent-log-a-hidden-request-is-not-answered-blind ()
+  ;; Narrowed away from what waits, C-c C-y says so rather than answer.
+  (romacs-agent-log-tests--with
+    (draw :type 'delta :text "before")
+    (puthash "q" t (romacs-agent-approvals session))
+    (draw :type 'approval :request-id "q" :tool "Bash" :input (romacs-agent-log-tests--input "command" "make"))
+    (let (answered)
+      (cl-letf (((symbol-function 'romacs-agent-respond) (lambda (&rest args) (push args answered))))
+        (save-restriction
+          (narrow-to-region (point-min) (+ (point-min) 3))
+          (goto-char (point-min))
+          (should-error (romacs-agent-log-allow) :type 'user-error)))
+      (should-not answered))))

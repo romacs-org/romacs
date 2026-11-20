@@ -944,7 +944,9 @@ back in the mode it had, and the next message carries it out."
   "What SESSION does now, as the separator says it: (STATE . WORDS)."
   (pcase (cond ((romacs-agent-log--pending) 'waiting-approval)
                ;; A plan offered waits on the user as a request does.
-               ((and (eq (romacs-agent-state session) 'idle) (romacs-agent-log--proceed-offered)) 'plan-offered)
+               ((and (eq (romacs-agent-state session) 'idle) (not (romacs-agent-failed session))
+                     (romacs-agent-log--proceed-offered))
+                'plan-offered)
                (t (romacs-agent-state session)))
     ('plan-offered
      (cons 'waiting (substitute-command-keys
@@ -1021,13 +1023,17 @@ windows showing it leave, changed."
 (defvar-local romacs-agent-log--header-made nil
   "What the header was last made from: made again only when it differs.")
 
+(defun romacs-agent-log--waiting-count ()
+  "How many things wait on the user here: its approvals, and a plan offered."
+  (+ (length romacs-agent-log--asks) (if (romacs-agent-log--proceed-offered) 1 0)))
+
 (defun romacs-agent-log--header-show ()
   "Make the header say what the session says now: a value, never a form,
 so a redisplay runs no Lisp for it; made only when what it reads changed."
   (let* ((session romacs-agent-log--session)
          (start (romacs-agent-turn-start session))
          (running (and (null romacs-agent-log--asks) (memq (romacs-agent-state session) '(starting running))))
-         (inputs (list (romacs-agent-ui--header-inputs session) (length romacs-agent-log--asks)
+         (inputs (list (romacs-agent-ui--header-inputs session) (romacs-agent-log--waiting-count)
                        (and start running (round (- (float-time) start))))))
     (unless (equal inputs romacs-agent-log--header-made)
       (setq romacs-agent-log--header-made inputs)
@@ -1040,7 +1046,7 @@ so a redisplay runs no Lisp for it; made only when what it reads changed."
   "The header line: the session's own header, what waits on the user, and
 how long the turn has run."
   (let* ((session romacs-agent-log--session)
-         (pending (+ (length romacs-agent-log--asks) (if (romacs-agent-log--proceed-offered) 1 0)))
+         (pending (romacs-agent-log--waiting-count))
          (start (romacs-agent-turn-start session)))
     (concat (romacs-agent-ui--header-text (romacs-agent-ui--header-inputs session))
             (if (> pending 0)
@@ -1438,8 +1444,12 @@ block is shown, and it is checked the session still waits on it."
          (pending (romacs-agent-log--pending))
          (ask (if at (assoc at pending) (car pending))))
     (unless ask (user-error (if at "That request is answered" "Nothing waits on you")))
-    ;; Shown where it is asked: point at it says which is answered.
-    (unless at (goto-char (cadr ask)))
+    ;; Shown where it is asked: point at it says which is answered.  One
+    ;; outside what a narrowed chat shows is not answered blind.
+    (unless at
+      (unless (<= (point-min) (cadr ask) (point-max))
+        (user-error "What waits on you is outside what the chat shows: widen it"))
+      (goto-char (cadr ask)))
     (car ask)))
 
 (defun romacs-agent-log-allow (&optional always)
