@@ -24,7 +24,10 @@ struct DeviceFeatures {
 }
 impl DeviceFeatures {
     fn query(adapter: &vulkan::Adapter) -> Option<Self> {
-        if adapter.shared_instance().instance_api_version() < vk::API_VERSION_1_1 {
+        if adapter.shared_instance().instance_api_version() < vk::API_VERSION_1_1
+            || adapter.physical_device_capabilities().properties().api_version
+                < vk::API_VERSION_1_1
+        {
             return None;
         }
         if !requested()
@@ -52,8 +55,9 @@ impl DeviceFeatures {
             ..Default::default()
         };
         // SAFETY: both extension structs and output feature storage remain live
-        // during this query on the adapter's own physical device, and the
-        // instance is Vulkan 1.1 (checked above), which has the query.
+        // during this query on the adapter's own physical device, and both the
+        // instance and the device are Vulkan 1.1 (checked above), which has
+        // the core query.
         // UNSAFE(ash's raw Vulkan call; ash 0.38 has no present-timing features)
         unsafe {
             adapter
@@ -128,8 +132,11 @@ fn enabled(device: &vulkan::Device) -> bool {
 /// Call before each surface configure. Unsupported devices retain ordinary WSI.
 ///
 /// # Safety
-/// Device and surface must originate from the same Vulkan instance, and the
-/// device must be the one used for the subsequent configure. Neither may be
+/// Device and surface must originate from the same Vulkan instance, the
+/// device's physical device must support presenting to the surface, and the
+/// device must be the one used for the subsequent configure. A device carrying
+/// the timing extensions must also have the `presentTiming` and `presentId2`
+/// features enabled, as `request_device` does. Neither may be
 /// reconfigured or destroyed concurrently with this call.
 // UNSAFE(wgpu's &self configure lets only the caller pin device and surface)
 pub unsafe fn prepare_surface(device: &wgpu::Device, surface: &wgpu::Surface<'_>) -> bool {
@@ -139,10 +146,12 @@ pub unsafe fn prepare_surface(device: &wgpu::Device, surface: &wgpu::Surface<'_>
     // SAFETY: immutable HAL guards borrow this live device/surface. No handle is
     // retained; native capability queries finish before either guard is dropped.
     // The surface-capabilities query runs on the device's physical device and
-    // instance, which the caller promises the surface belongs to; its chained
-    // output structs live on this frame through the call. Enabling timing
-    // needs the device to carry both extensions (`enabled`) and the surface to
-    // report the first-pixel stage and present IDs, both checked first.
+    // instance, which the caller promises the surface belongs to and is
+    // supported by; its chained output structs live on this frame through
+    // the call. Enabling timing
+    // needs the device to carry both extensions (`enabled`, with their feature
+    // bits on by the caller's contract) and the surface to report the
+    // first-pixel stage and present IDs, both checked first.
     // UNSAFE(wgpu's as_hal, and present-timing calls ash 0.38 does not wrap)
     unsafe {
         let Some(device) = device.as_hal::<Vulkan>() else {
