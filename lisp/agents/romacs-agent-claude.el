@@ -228,7 +228,9 @@ of a background task (<task-notification>): (:from :state :text), or nil."
     (let ((tag (lambda (name) (and (string-match (format "<%s>\\(\\(?:.\\|\n\\)*?\\)</%s>" name name) text)
                                    (string-trim (match-string 1 text))))))
       (list :from "background task" :state (funcall tag "status")
-            :text (or (funcall tag "summary") (funcall tag "result") "")))))
+            :text (or (funcall tag "summary") (funcall tag "result") "")
+            ;; RET shows all of it, its result too.
+            :full text))))
 
 (defun romacs-agent--claude-incoming (text)
   "TEXT, a user's turn nobody typed, as what came from elsewhere: Claude
@@ -240,9 +242,9 @@ Code's notification, another session's message or a task's wakes
 
 (defun romacs-agent--claude-injected (text parent)
   "The events of TEXT, a turn nobody typed: what came from elsewhere, as
-`incoming' events, else a local command's output.  The compaction's own
+`arrival' events, else a local command's output.  The compaction's own
 \"Compacted\" is already said by its row."
-  (or (mapcar (lambda (incoming) (append (list :type 'incoming :parent parent) incoming))
+  (or (mapcar (lambda (incoming) (append (list :type 'arrival :parent parent) incoming))
               (romacs-agent--claude-incoming text))
       (let ((output (string-trim (replace-regexp-in-string "</?local-command-\\(?:stdout\\|stderr\\)>" "" text))))
         (unless (member output '("" "Compacted"))
@@ -393,6 +395,10 @@ cache, it reports none) or does not say."
                     (and (> (length content) 0) (equal (gethash "type" (aref content 0)) "text")))
                 (romacs-agent--claude-peer line (romacs-agent--text-of content))))
           ((stringp content) (romacs-agent--claude-injected content parent))
+          ;; Text blocks of what came from elsewhere (no tool's result).
+          ((and (not (cl-some (lambda (b) (and (hash-table-p b) (equal (gethash "type" b) "tool_result"))) content))
+                (romacs-agent--claude-incoming (romacs-agent--text-of content)))
+           (romacs-agent--claude-injected (romacs-agent--text-of content) parent))
           (t
            (cl-loop for block across content
                     for btype = (gethash "type" block)

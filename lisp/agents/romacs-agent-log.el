@@ -857,8 +857,12 @@ unless a note said who gave it, that it was answered."
 :text (`romacs-agent-log-rounds-incoming'), or nil for the user's own
 words: the messages Romacs delivered, else what its text says it is."
   (if-let* ((messages (plist-get event :messages)))
-      (list (list :from (mapconcat (lambda (m) (or (plist-get (plist-get m :from) :name) "a session")) messages ", ")
-                  :state (plist-get (car messages) :kind) :text (plist-get event :text)))
+      ;; Each as Romacs delivered it: whom from, a wake's state or the
+      ;; message's kind, its own body.
+      (mapcar (lambda (m) (list :from (or (plist-get (plist-get m :from) :name) "a session")
+                                :state (or (plist-get (plist-get m :wake) :state) (plist-get m :kind))
+                                :text (or (plist-get m :text) (plist-get event :text))))
+              messages)
     (romacs-agent-incoming-of (plist-get event :text))))
 
 (defun romacs-agent-log--prompt (event)
@@ -912,8 +916,8 @@ from elsewhere, opening one of its own."
   "Draw SESSION's EVENT in the current chat."
   (pcase (plist-get event :type)
     ('input (romacs-agent-log--prompt event))
-    ('incoming (romacs-agent-log-rounds-incoming event event))
     ('incoming (romacs-agent-log--prompt event))
+    ('arrival (romacs-agent-log-rounds-incoming event event))
     ('delta (when-let* ((text (plist-get event :text))) (romacs-agent-log--stream event 'text text)))
     ('thinking (when-let* ((text (plist-get event :text))) (romacs-agent-log--stream event 'thinking text)))
     ('message-end (if-let* ((block (romacs-agent-log--block (plist-get event :parent))))

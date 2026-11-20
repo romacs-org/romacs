@@ -64,8 +64,10 @@ prefixes, no part of the text."
 
 (defun romacs-agent-log-rounds-you (text)
   "TEXT, the user's message as a chat draws it, as its round's opener:
-its gutter and its surface."
+its gutter and its surface.  The round before it ends."
+  (romacs-agent-log-rounds-end)
   (let ((text (copy-sequence text)))
+    (put-text-property 0 1 'romacs-agent-log-round t text)
     (add-face-text-property 0 (length text) 'romacs-agent-log-you t text)
     (romacs-agent-log-rounds--gutter text "▌" 'romacs-agent-log-you-bar)))
 
@@ -92,18 +94,26 @@ not the user's; its first lines dim, RET shows all."
                                                (romacs-agent-log--key 'romacs-agent-log-open))
                                        'face 'romacs-agent-log-note)
                          ""))))
-    (romacs-agent-log--line event 'incoming
-                            (propertize (romacs-agent-log-rounds--gutter text "┆" 'romacs-agent-log-other-bar)
-                                        'romacs-agent-log-full (cons nil body)))))
+    ;; A top-level arrival opens a round, the one before it ended; one
+    ;; under a subagent's call is that call's.
+    (unless (plist-get event :parent) (romacs-agent-log-rounds-end))
+    (romacs-agent-log--line event 'arrival
+                            (let ((text (propertize (romacs-agent-log-rounds--gutter text "┆" 'romacs-agent-log-other-bar)
+                                                    'romacs-agent-log-full (cons nil (or (plist-get incoming :full) body)))))
+                              (unless (plist-get event :parent)
+                                (put-text-property 0 1 'romacs-agent-log-round t text))
+                              ;; A journaled input's turn: diff and rollback read it.
+                              (if-let* ((request (plist-get event :request)))
+                                  (propertize text 'romacs-agent-log-turn request)
+                                text)))))
 
 (defun romacs-agent-log-rounds--start ()
-  "Where the round now ending began: its opener's entry, else the start."
+  "Where the round now ending began: its top-level opener, else the start."
   (let ((at romacs-agent-log--end) (found nil))
-    (while (and (not found) (setq at (previous-single-property-change at 'romacs-agent-log-entry nil (point-min)))
+    (while (and (not found) (setq at (previous-single-property-change at 'romacs-agent-log-round nil (point-min)))
                 (> at (point-min)))
-      (when (memq (get-text-property at 'romacs-agent-log-entry) '(prompt incoming))
-        (setq found at)))
-    (or found (point-min))))
+      (when (get-text-property at 'romacs-agent-log-round) (setq found at)))
+    (or found (and (get-text-property (point-min) 'romacs-agent-log-round) (point-min)) (point-min))))
 
 (defun romacs-agent-log-rounds-end ()
   "The round ending: the agent's words before its last recede, so its
@@ -115,9 +125,12 @@ answer stands out.  Faces only: no text moves."
     (romacs-agent-log--writing
       (dolist (start (cdr texts))
         ;; An entry is marked at its first character: it runs to the next's.
-        (add-face-text-property start (or (text-property-not-all (1+ start) romacs-agent-log--end 'romacs-agent-log-entry nil)
-                                          romacs-agent-log--end)
-                                'romacs-agent-log-other)))))
+        ;; Receded once: a round ends at its turn's end and again as the
+        ;; next opens.
+        (unless (memq 'romacs-agent-log-other (ensure-list (get-text-property start 'face)))
+          (add-face-text-property start (or (text-property-not-all (1+ start) romacs-agent-log--end 'romacs-agent-log-entry nil)
+                                            romacs-agent-log--end)
+                                  'romacs-agent-log-other))))))
 
 (provide 'romacs-agent-log-rounds)
 ;;; romacs-agent-log-rounds.el ends here

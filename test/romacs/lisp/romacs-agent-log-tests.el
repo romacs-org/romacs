@@ -1105,7 +1105,45 @@
     (should (memq 'romacs-agent-log-you (ensure-list (get-text-property (match-beginning 0) 'face))))
     (search-forward "lane x")
     (should (equal (substring-no-properties (get-text-property (match-beginning 0) 'line-prefix)) "┆ "))
-    (should-not (memq 'romacs-agent-log-you (ensure-list (get-text-property (match-beginning 0) 'face))))))
+    (should-not (memq 'romacs-agent-log-you (ensure-list (get-text-property (match-beginning 0) 'face)))))
+  ;; Only whole envelopes, each of a batch; anything else is the user's.
+  (should (equal (mapcar (lambda (i) (plist-get i :text))
+                         (romacs-agent-incoming-of (concat "<romacs-message id=\"1\" kind=\"child\" from=\"a\">\none\n</romacs-message>\nReply to this message with x.\n\n"
+                                                           "<romacs-message id=\"2\" kind=\"child\" from=\"b\">\ntwo\n</romacs-message>\nReply to this message with y.")))
+                 '("one" "two")))
+  (should-not (romacs-agent-incoming-of "<romacs-message-example> is a tag I mean"))
+  (should-not (romacs-agent-incoming-of "<romacs-message id=\"1\">\nnever closed"))
+  ;; Delivered by Romacs: each message its own, a wake's state its state.
+  (romacs-agent-log-tests--with
+    (draw :type 'input :text "x" :request 9
+          :messages (list (list :kind "child" :from '(:name "lane a") :wake '(:state "completed") :text "A done")
+                          (list :kind "child" :from '(:name "lane b") :text "B says")))
+    (let ((text (romacs-agent-log-tests--transcript)))
+      (should (string-match-p "✉ lane a · completed\nA done" text))
+      (should (string-match-p "✉ lane b · child\nB says" text)))
+    ;; Its turn anchored: diff and rollback read it.
+    (goto-char (point-min))
+    (search-forward "A done")
+    (should (equal (get-text-property (match-beginning 0) 'romacs-agent-log-turn) 9))))
+
+(ert-deftest romacs-agent-log-an-arrival-mid-turn-ends-the-round-before ()
+  ;; A notification arriving within a turn: the words before it recede.
+  (romacs-agent-log-tests--with
+    (draw :type 'input :text "go" :request 1)
+    (draw :type 'delta :text "Working on it.")
+    (draw :type 'tool :state 'started :id "t" :name "Bash" :input (romacs-agent-log-tests--input "command" "ls"))
+    (draw :type 'tool :state 'completed :id "t" :output "a")
+    (draw :type 'delta :text "Started the build.")
+    (draw :type 'arrival :from "background task" :state "completed" :text "Build done" :full "<task-notification>…")
+    (draw :type 'delta :text "The build passed.")
+    (draw :type 'done :time 0)
+    (goto-char (point-min))
+    (search-forward "Working on")
+    (should (memq 'romacs-agent-log-other (ensure-list (get-text-property (match-beginning 0) 'face))))
+    (search-forward "Started the build")
+    (should-not (memq 'romacs-agent-log-other (ensure-list (get-text-property (match-beginning 0) 'face))))
+    (search-forward "The build passed")
+    (should-not (memq 'romacs-agent-log-other (ensure-list (get-text-property (match-beginning 0) 'face))))))
 
 (ert-deftest romacs-agent-log-a-round-s-answer-stands-out ()
   ;; Its end: the agent's words before its last recede.

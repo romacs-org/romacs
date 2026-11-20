@@ -251,3 +251,27 @@
       (should (string-search "4 transcripts" (with-output-to-string (romacs-agent-history-index-batch)))))
     (should (= tries 3))
     (should (= patience romacs-agent-store-patient))))
+
+(ert-deftest romacs-agent-history-arrivals-are-rounds-of-their-own ()
+  ;; A notification Claude Code wrote into a transcript: an arrival, a
+  ;; round of its own, its answer's turn ended; never the user's prompt.
+  (let ((file (make-temp-file "romacs-history" nil ".jsonl")))
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (dolist (line '("{\"type\":\"user\",\"timestamp\":\"2026-11-20T10:00:00Z\",\"message\":{\"content\":\"build it\"}}"
+                            "{\"type\":\"assistant\",\"message\":{\"id\":\"m1\",\"content\":[{\"type\":\"text\",\"text\":\"Started.\"}]}}"
+                            "{\"type\":\"user\",\"timestamp\":\"2026-11-20T10:01:00Z\",\"message\":{\"content\":\"<task-notification>\\n<status>completed</status>\\n<summary>Build done</summary>\\n<result>all 40 ok</result>\\n</task-notification>\"}}"
+                            "{\"type\":\"assistant\",\"message\":{\"id\":\"m2\",\"content\":[{\"type\":\"text\",\"text\":\"It passed.\"}]}}"))
+              (insert line "\n")))
+          (let* ((events (car (romacs-agent-history-events 'claude (list :path file :size (file-attribute-size (file-attributes file))))))
+                 (types (mapcar (lambda (e) (plist-get e :type)) events))
+                 (arrival (seq-find (lambda (e) (eq (plist-get e :type) 'arrival)) events)))
+            (should (equal (plist-get arrival :text) "Build done"))
+            (should (string-match-p "all 40 ok" (plist-get arrival :full)))
+            (should-not (seq-find (lambda (e) (and (eq (plist-get e :type) 'input)
+                                                   (string-match-p "task-notification" (plist-get e :text))))
+                                  events))
+            ;; Each round ended: one turn end after each opener.
+            (should (= (cl-count 'done types) 2))))
+      (delete-file file))))
