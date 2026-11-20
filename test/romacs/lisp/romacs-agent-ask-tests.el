@@ -116,4 +116,3 @@
           (cl-letf (((symbol-function 'this-command-keys-vector) (lambda () [?2])))
             (romacs-agent-ask-pick-number)))
         (should (equal sent '("r3" (:answers (("Which way?" . "Virtual"))))))))))
-

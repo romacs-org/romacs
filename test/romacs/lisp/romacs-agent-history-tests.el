@@ -106,6 +106,8 @@
           (with-current-buffer buffer
             (should buffer-read-only)
             (should-not romacs-agent-log--input)
+            ;; Not a chat's mode: none of its composing commands applies.
+            (should-not (derived-mode-p 'romacs-agent-log-mode))
             (should (string-match-p "hello there" (buffer-string)))
             (let ((map (get-text-property (point-min) 'keymap)))
               (should (eq map romacs-agent-history-text-map))

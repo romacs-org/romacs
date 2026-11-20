@@ -354,6 +354,52 @@
     (romacs-agent-chat-attach "/tmp/shot one.png")
     (should (equal (buffer-substring-no-properties romacs-agent-log--input (point-max)) "/tmp/shot one.png"))))
 
+(ert-deftest romacs-agent-log-prompt-motion-lands-on-its-turn ()
+  ;; Prompt motion lands on a prompt's first character, its leading blank
+  ;; line: the turn there is that prompt's.
+  (romacs-agent-log-tests--with
+    (draw :type 'input :text "first" :request 4)
+    (draw :type 'done :time 0)
+    (draw :type 'input :text "second" :request 7)
+    (goto-char romacs-agent-log--end)
+    (romacs-agent-log-previous-prompt 1)
+    (should (equal (romacs-agent-log--turn-here) 7))
+    (should (equal (romacs-agent-log--turn-text 7) "❯ second"))
+    ;; Rolled back to before it: from there on dimmed, and said.
+    (draw :type 'rolled-back :to 7 :turns 1 :prompt "second" :files t)
+    (should (memq 'romacs-agent-log-note (ensure-list (get-text-property (text-property-any (point-min) romacs-agent-log--end 'romacs-agent-log-turn 7) 'face))))
+    (should (string-match-p "↶ rolled back 1 turn and their files to before: second" (romacs-agent-log-tests--transcript)))
+    ;; From the composer, a rollback asks for the turn.
+    (goto-char (point-max))
+    (should-error (romacs-agent-chat-rollback) :type 'user-error)))
+
+(ert-deftest romacs-agent-log-a-compaction-opens-whole ()
+  (romacs-agent-log-tests--with
+    (draw :type 'compacted :text (mapconcat #'number-to-string (number-sequence 1 30) "\n"))
+    (goto-char (point-min))
+    (search-forward "context compacted")
+    (should (equal (cdr (get-text-property (point) 'romacs-agent-log-full)) (mapconcat #'number-to-string (number-sequence 1 30) "\n")))
+    (should (string-match-p "more lines" (romacs-agent-log-tests--transcript)))))
+
+(ert-deftest romacs-agent-log-an-old-chat-s-desktop-comes-back-here ()
+  (should (eq (cdr (assq 'romacs-agent-chat-mode desktop-buffer-mode-handlers)) #'romacs-agent-log-desktop-restore))
+  (should (eq (indirect-function 'romacs-agent-chat-mode) (indirect-function 'romacs-agent-log-mode))))
+
+(ert-deftest romacs-agent-log-a-command-acts-on-the-registered-session ()
+  ;; A restored chat shows its session's row until used: a command acts
+  ;; on the session itself, loaded.
+  (romacs-agent-log-tests--with
+    (ignore #'draw)
+    (let ((registered (romacs-agent--make :id "L" :harness 'claude :state 'idle
+                                          :tools (make-hash-table :test #'equal) :streamed (make-hash-table :test #'equal)))
+          stopped)
+      (cl-letf (((symbol-function 'romacs-agent-loaded) (lambda (_) nil))
+                ((symbol-function 'romacs-agent-get) (lambda (_) registered))
+                ((symbol-function 'yes-or-no-p) #'always)
+                ((symbol-function 'romacs-agent-stop) (lambda (s) (setq stopped s))))
+        (romacs-agent-chat-stop))
+      (should (eq stopped registered)))))
+
 (ert-deftest romacs-agent-log-several-answers-keep-their-questions ()
   (let ((one (make-hash-table :test #'equal)) (two (make-hash-table :test #'equal)))
     (puthash "Colour?" "Blue" one)

@@ -16,27 +16,6 @@
                                     :title "chat" :dir dir :tools (make-hash-table :test #'equal))))
      (unwind-protect (with-temp-buffer ,@body)
        (delete-directory dir t))))
-
-(defun romacs-agent-attach-tests--pick-through (layouts)
-  "Pick with the frame's layout going through LAYOUTS, one per key, the
-size hook firing as `read-key' waits: the result and the layouts shown."
-  (let* ((dir (make-temp-file "romacs-images" t)) (shown nil) (now (car layouts)) (next (cdr layouts)))
-    (unwind-protect
-        (progn
-          (write-region "x" nil (expand-file-name "a.png" dir) nil 'silent)
-          (cl-letf (((symbol-function 'romacs-agent-images--frame-layout) (lambda () now))
-                    ((symbol-function 'romacs-agent-images--show) (lambda (_ _p layout) (push layout shown)))
-                    ((symbol-function 'romacs-agent-images--draw-preview) #'ignore)
-                    ((symbol-function 'romacs-layer-hide) #'ignore)
-                    ((symbol-function 'romacs-layer--root-frame) (lambda () 'root))
-                    ((symbol-function 'read-key)
-                     (lambda (&rest _)
-                       (setq now (if next (pop next) now))
-                       (run-hook-with-args 'window-size-change-functions 'root)
-                       (if unread-command-events (pop unread-command-events) ?\C-g))))
-            (list (romacs-agent-images-pick dir) (reverse shown) window-size-change-functions)))
-      (delete-directory dir t))))
-
 (ert-deftest romacs-agent-only-the-supervisor-s-record-names-a-prompt-s-images ()
   ;; As the journal holds them: a per-turn prompt, and words shaped like one.
   (let* ((events nil)
@@ -169,4 +148,3 @@ size hook firing as `read-key' waits: the result and the layouts shown."
         (romacs-agent--input session "see" (list link)))
       (should-not (gethash "images" (cadr kept)))
       (should (stringp (gethash "content" (gethash "message" (car kept))))))))
-

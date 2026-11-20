@@ -144,103 +144,11 @@ start launched, its manifest written."
     (cl-letf (((symbol-function 'process-live-p) (lambda (process) (eq process 'live))))
       (should (romacs-agent-fork source)))
     (should launched)))
-
-(defun romacs-agent-fork-tests--turns (session from to)
-  "Write turns FROM to TO, a prompt and its end each, as SESSION's journal
-after LEAD, a list of objects written first (their seqs from 1)."
-  (write-region (mapconcat
-                 (lambda (n)
-                   (concat (json-serialize
-                            (romacs-mcp--object
-                             "in" (romacs-mcp--object "message" (romacs-mcp--object "content" (format "question %d" n) "role" "user")
-                                                      "romacsRequest" n "type" "user")
-                             "seq" (1- (* 2 n)) "t" n))
-                           "\n"
-                           (json-serialize (romacs-mcp--object "out" (romacs-mcp--object "result" "ok" "type" "result")
-                                                               "seq" (* 2 n) "t" n))
-                           "\n"))
-                 (number-sequence from to) "")
-                nil (expand-file-name "journal.jsonl" (romacs-agent-dir session)) nil 'silent))
-
-(defun romacs-agent-fork-tests--plain (title)
-  "A Claude session TITLE recorded under the state root, nothing written
-in it yet: its journal is the test's to write, as a fork's moved later."
-  (let ((session (romacs-agent--create :id (romacs-agent--uuid) :harness 'claude :provider "claude" :cwd "/work/p"
-                                       :title title :state 'idle :turns 1 :options '(:model "m" :effort "high"))))
-    (romacs-agent--manifest session nil)
-    session))
-
-(defun romacs-agent-fork-tests--note-then (fork note-objects lines)
-  "Write FORK's journal: NOTE-OBJECTS as its notes, seqs from 1, then
-LINES, objects with their own seqs."
-  (let ((seq 0))
-    (write-region (concat (mapconcat (lambda (note) (concat (json-serialize (romacs-mcp--object "note" note "seq" (cl-incf seq) "t" seq)) "\n"))
-                                     note-objects "")
-                          (mapconcat (lambda (line) (concat (json-serialize line) "\n")) lines ""))
-                  nil (expand-file-name "journal.jsonl" (romacs-agent-dir fork)) nil 'silent)))
-
-;; A fork's turns taken of its source are rows of its own (seqs 1..N, its
-;; note at N+1), each naming its source, kept drawn under the fork's id.
-
-(defun romacs-agent-fork-tests--form (text)
-  "A drawn form of one turn saying TEXT."
-  (with-temp-buffer
-    (insert (propertize "> " 'face 'romacs-agent-dim)
-            (propertize text 'romacs-agent-input t 'face 'romacs-agent-prompt) "\n")
-    (romacs-agent-drawn-form (point-min) (point-max))))
-
-(defun romacs-agent-fork-tests--borrowed (fork source texts &optional drawn)
-  "FORK as a fork of SOURCE that took TEXTS, its first turns: its note at
-seq N+1 and a turn of its own after, its records stored; `turns-page'
-then answers with a borrowed row before its own for each of TEXTS,
-seqs 1..N, kept drawn under FORK's id when DRAWN (all by default) holds
-its seq."
-  (let* ((n (length texts)) (id (romacs-agent-id fork)) (seq n))
-    (romacs-agent-fork-tests--note-then
-     fork nil
-     (list (romacs-mcp--object "note" (romacs-mcp--object "from" (romacs-agent-id source) "seq" n "title" "Plan"
-                                                          "turns" n "type" "fork")
-                               "seq" (cl-incf seq) "t" seq)
-           (romacs-mcp--object "in" (romacs-mcp--object "message" (romacs-mcp--object "content" "fork's own" "role" "user")
-                                                        "romacsRequest" 1 "type" "user")
-                               "seq" (cl-incf seq) "t" seq)
-           (romacs-mcp--object "out" (romacs-mcp--object "result" "ok" "type" "result") "seq" (cl-incf seq) "t" seq)))
-    (setf (romacs-agent-seq fork) seq)
-    (romacs-agent-test-stored fork)
-    (cl-loop for text in texts for first from 1
-             when (or (null drawn) (memq first drawn))
-             do (romacs-agent-drawn-put (romacs-agent-turns--db) id first (romacs-agent-fork-tests--form text)))
-    (cl-loop for first from n downto 1
-             collect (list :first-seq first :last-seq first :source-session (romacs-agent-id source)
-                           :source-first-seq (* 2 first)))))
-
-(defun romacs-agent-fork-tests--paged (borrowed)
-  "`romacs-agent-turns-page' with BORROWED, rows newest first, under the
-session's own."
-  (let ((page (symbol-function 'romacs-agent-turns-page)))
-    (lambda (session &optional before limit)
-      (let* ((limit (or limit 20))
-             (own (funcall page session before most-positive-fixnum))
-             (rows (append (plist-get own :rows)
-                           (seq-filter (lambda (row) (or (null before) (< (plist-get row :first-seq) before))) borrowed))))
-        (list :rows (seq-take rows limit) :after (plist-get own :after) :more (> (length rows) limit))))))
-
 (ert-deftest romacs-agent-fork-names ()
   ;; A fork's fork is no "(fork) (fork)"; one whose only turn was cut has
   ;; a conversation.
   (romacs-agent-fork-tests--with 'claude (:title "Plan (fork)" :turns 0 :input-seq 4)
     (should (equal (romacs-agent-title (romacs-agent-fork source)) "Plan (fork)"))))
-
-(defun romacs-agent-fork-tests--notes (session)
-  "The fork notes in SESSION's journal, as (SEQ AFTER)."
-  (let ((notes nil))
-    (romacs-agent--read-journal
-     session (lambda (record)
-               (let ((note (gethash "note" record)))
-                 (when (and (hash-table-p note) (equal (gethash "type" note) "fork"))
-                   (push (list (gethash "seq" note) (gethash "after" note)) notes)))))
-    (nreverse notes)))
-
 (ert-deftest romacs-agent-fork-of-an-unspoken-fork ()
   (romacs-agent-fork-tests--with 'claude (:turns 0 :options '(:fork "x"))
     (should (string-match-p "send it a message first"

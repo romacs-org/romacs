@@ -660,14 +660,15 @@ for SESSION: its end, from a prompt on."
   :doc "Keys of a harness transcript's view: its text's, wherever point is."
   :parent romacs-agent-history-text-map)
 
-(define-derived-mode romacs-agent-history-mode romacs-agent-log-mode "Agent history"
-  "A harness's own transcript, read-only, drawn as a chat's transcript:
-\\[romacs-agent-history-resume-this] goes on with it.
+(define-derived-mode romacs-agent-history-mode special-mode "Agent history"
+  "A harness's own transcript, read-only, drawn as a chat's transcript
+\(romacs-agent-log.el) with no composer, so none of a chat's composing
+commands applies: \\[romacs-agent-history-resume-this] goes on with it.
 \\{romacs-agent-history-text-map}"
   :interactive nil
-  (setq-local desktop-save-buffer nil)
-  (setq romacs-agent-log--text-map romacs-agent-history-text-map)
-  (setq buffer-read-only t))
+  (setq-local truncate-lines nil word-wrap t)
+  (setq-local header-line-format "")
+  (setq romacs-agent-log--text-map romacs-agent-history-text-map))
 
 ;;;###autoload
 (defun romacs-agent-history-open (item &optional action)

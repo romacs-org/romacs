@@ -655,16 +655,18 @@ unless a note said who gave it, that it was answered."
                      (messages (propertize "✉ " 'face 'romacs-agent-log-note))
                      (t (propertize "❯ " 'face 'romacs-agent-log-prompt)))))
     (romacs-agent-log--line event 'prompt
-                            (concat (if (and (null messages) (> romacs-agent-log--end (point-min))) "\n" "")
-                                    ;; The turn it starts, by its request: a diff
-                                    ;; or a rollback of the turn at point reads it.
-                                    (if-let* ((request (plist-get event :request)))
-                                        (propertize head 'romacs-agent-log-turn request)
-                                      head)
-                                    (propertize (string-trim text) 'face (if messages nil 'romacs-agent-log-prompt))
-                                    (if images (propertize (format "  [%d image%s]" (length images) (if (cdr images) "s" ""))
-                                                           'face 'romacs-agent-log-note)
-                                      "")))))
+                            (let ((line (concat (if (and (null messages) (> romacs-agent-log--end (point-min))) "\n" "")
+                                                head
+                                                (propertize (string-trim text) 'face (if messages nil 'romacs-agent-log-prompt))
+                                                (if images (propertize (format "  [%d image%s]" (length images) (if (cdr images) "s" ""))
+                                                                       'face 'romacs-agent-log-note)
+                                                  ""))))
+                              ;; The turn it starts, by its request, on all of it
+                              ;; (where prompt motion lands too): a diff or a
+                              ;; rollback of the turn at point reads it.
+                              (if-let* ((request (plist-get event :request)))
+                                  (propertize line 'romacs-agent-log-turn request)
+                                line)))))
 
 (defun romacs-agent-log--done (event)
   "Draw turn end EVENT: a rule with its time, cost and why it failed."
@@ -683,6 +685,19 @@ unless a note said who gave it, that it was answered."
 
 (defun romacs-agent-log--note (event text)
   (romacs-agent-log--line event 'note (concat "· " text) 'romacs-agent-log-note))
+
+(defun romacs-agent-log--rolled-back (event)
+  "Draw rollback EVENT: the turns it took back dimmed, from the prompt
+it went back to before on (they stay readable, as the records keep
+them), and a note of how many, whether their files came back, and that
+prompt."
+  (when-let* ((at (text-property-any (point-min) romacs-agent-log--end 'romacs-agent-log-turn (plist-get event :to))))
+    (romacs-agent-log--writing (add-face-text-property at romacs-agent-log--end 'romacs-agent-log-note)))
+  (let ((turns (or (plist-get event :turns) 0)))
+    (romacs-agent-log--note event (format "↶ rolled back %d turn%s%s to before: %s" turns (if (= turns 1) "" "s")
+                                          (if (plist-get event :files) " and their files" "")
+                                          (truncate-string-to-width (car (split-string (or (plist-get event :prompt) "") "\n"))
+                                                                    60 nil nil t)))))
 
 (defun romacs-agent-log-draw (session event)
   "Draw SESSION's EVENT in the current chat."
@@ -725,9 +740,17 @@ unless a note said who gave it, that it was answered."
     ('status (when-let* ((text (plist-get event :text))
                          ((not (member text '("requesting" "selection armed")))))
                (romacs-agent-log--note event text)))
-    ('compacted (romacs-agent-log--note event (concat "context compacted\n"
-                                                      (car (romacs-agent-log--lines (plist-get event :text)
-                                                                                    romacs-agent-log-output-lines)))))
+    ('compacted (let* ((summary (or (plist-get event :text) ""))
+                       (lines (romacs-agent-log--lines summary romacs-agent-log-output-lines)))
+                  ;; Its first lines, and the whole summary on RET.
+                  (romacs-agent-log--note event (propertize
+                                                 (concat "context compacted\n" (car lines)
+                                                         (if (> (cdr lines) romacs-agent-log-output-lines)
+                                                             (format "\n… %d more lines · %s shows all"
+                                                                     (- (cdr lines) romacs-agent-log-output-lines)
+                                                                     (romacs-agent-log--key 'romacs-agent-log-open))
+                                                           ""))
+                                                 'romacs-agent-log-full (cons nil summary)))))
     ('exit (setq romacs-agent-log--current nil romacs-agent-log--early nil)
            (romacs-agent-log--close-asks session event 'exit)
            (unless (and (romacs-agent--per-turn-p session) (eql (plist-get event :status) 0))
@@ -735,7 +758,7 @@ unless a note said who gave it, that it was answered."
     ('renewed (romacs-agent-log--note event (format "renewed: a new conversation%s"
                                                     (if-let* ((why (plist-get event :why))) (format " (%s)" why) ""))))
     ('forked (romacs-agent-log--note event (format "forked from %s" (or (plist-get event :title) (plist-get event :from)))))
-    ('rolled-back (romacs-agent-log--note event (format "rolled back %s turn(s)" (or (plist-get event :turns) "?"))))
+    ('rolled-back (romacs-agent-log--rolled-back event))
     ('replied (romacs-agent-log--note event (format "replied to %s" (plist-get event :message))))
     ('selection (cl-flet ((label (selection)
                             (mapconcat #'identity (or (delq nil (list (plist-get selection :model) (plist-get selection :effort)))
@@ -1000,6 +1023,15 @@ nil before the first."
         (setq pos (or (previous-single-property-change pos 'romacs-agent-log-turn) (point-min))))
       (get-text-property pos 'romacs-agent-log-turn))))
 
+(defun romacs-agent-log--turn-text (request)
+  "The prompt of the turn REQUEST starts, as the chat shows it, or nil
+when the chat does not show it."
+  (when-let* ((at (text-property-any (point-min) romacs-agent-log--end 'romacs-agent-log-turn request)))
+    (save-excursion
+      (goto-char at)
+      (skip-chars-forward "\n")
+      (string-trim (buffer-substring-no-properties (point) (line-end-position))))))
+
 (defun romacs-agent-log-earlier ()
   "Show the turns before those this chat shows, above them."
   (interactive nil romacs-agent-log-mode)
@@ -1125,6 +1157,10 @@ shows it; its session loaded only then, as its records are read."
 
 (defvar desktop-buffer-mode-handlers)
 (add-to-list 'desktop-buffer-mode-handlers '(romacs-agent-log-mode . romacs-agent-log-desktop-restore))
+;; A desktop or warm-restart image saved before the old chat view went
+;; names its mode: its session and draft come back in this chat.
+(define-obsolete-function-alias 'romacs-agent-chat-mode #'romacs-agent-log-mode "0.0.21")
+(add-to-list 'desktop-buffer-mode-handlers '(romacs-agent-chat-mode . romacs-agent-log-desktop-restore))
 
 ;;; Commands
 
