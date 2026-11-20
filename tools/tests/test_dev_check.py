@@ -420,9 +420,9 @@ class EpochHistory(unittest.TestCase):
         self.git('merge', '-q', '--no-ff', '-m', 'land first', 'first')
 
     def git(self, *args):
-        # A throwaway fixture: no identity or signing key of the caller's.
-        subprocess.run(['git', '-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', *args],
-                       cwd=self.repo, check=True, stdout=subprocess.DEVNULL)
+        # A throwaway fixture: no identity, signing key or line-ending conversion of the caller's.
+        subprocess.run(['git', '-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false',
+                        '-c', 'core.autocrlf=false', *args], cwd=self.repo, check=True, stdout=subprocess.DEVNULL)
 
     def commit(self, message, files):
         for name, text in files.items():
