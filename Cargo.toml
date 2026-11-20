@@ -173,7 +173,7 @@ winit = "=0.31.0-beta.3"
 # "glsl" gates ShaderSource::Glsl, which the render thread needs to compile
 # composed Shadertoy-dialect surface shaders (shader_surface.rs).
 wgpu = { version = "30", features = ["glsl"] }
-# Keep this on the same major version as wgpu: the DMA-BUF importer passes
+# Keep this on the same major version as wgpu: native presentation timing passes
 # wgpu-hal types through wgpu's public HAL interop API.
 # Its `gpu-allocator` collaborator also exchanges nominal `windows` COM types,
 # so a Cargo update must keep the two on compatible Windows binding versions.

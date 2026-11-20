@@ -231,7 +231,7 @@ fn read_bounded(path: std::path::PathBuf) -> Result<ObjMesh, ObjError> {
         .expect("read_obj_file blocked instead of rejecting a non-regular file")
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn fifo_and_symlink_to_fifo_are_rejected_without_blocking() {
     let dir = scratch("fifo-anchor.obj", b"")
@@ -240,9 +240,14 @@ fn fifo_and_symlink_to_fifo_are_rejected_without_blocking() {
         .to_path_buf();
     let fifo = dir.join("pipe.obj");
     let _ = std::fs::remove_file(&fifo);
-    let c = std::ffi::CString::new(fifo.as_os_str().as_encoded_bytes()).unwrap();
-    // SAFETY: C is a live NUL-terminated path for the duration of the call.
-    assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0, "mkfifo");
+    rustix::fs::mknodat(
+        rustix::fs::CWD,
+        &fifo,
+        rustix::fs::FileType::Fifo,
+        rustix::fs::Mode::from_raw_mode(0o600),
+        0,
+    )
+    .expect("mkfifo");
     let link = dir.join("link.obj");
     let _ = std::fs::remove_file(&link);
     std::os::unix::fs::symlink(&fifo, &link).unwrap();

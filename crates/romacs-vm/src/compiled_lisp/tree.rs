@@ -156,20 +156,14 @@ fn compile_child(configured: &Configured, path: &Path) -> (Outcome, Option<Vec<S
         return (Outcome::Failed("not compiled by this process".into()), None);
     };
     environment.push((NO_PRUNE.into(), "1".into()));
-    let Some(out) = run_compile(&configured.config.store, program, args, environment) else {
-        return (Outcome::Failed("the compile process failed (see the compile log)".into()), None);
-    };
-    let load_path = out.lines().find_map(|line| line.strip_prefix("romacs-compile-load-path: "))
-        .and_then(|text| serde_json::from_str(text).ok());
-    let held = out.lines().any(|line| line == "romacs-compile-held");
-    let Some(artifact) = out.lines().rev().find_map(|line| line.strip_prefix("romacs-compiled: ")).map(PathBuf::from) else {
-        return (Outcome::Failed("the compile process published nothing".into()), load_path);
+    let Some(Record { artifact, held, load_path }) = run_compile(configured, program, args, environment) else {
+        return (Outcome::Failed("the compile process published nothing (see the compile log)".into()), None);
     };
     let outcome = match store::open(&artifact) {
         Ok(data) => Outcome::Published { artifact, held, status: data.status },
         Err(why) => Outcome::Failed(why),
     };
-    (outcome, load_path)
+    (outcome, Some(load_path))
 }
 
 /// The `.el` files of the trees ROOTS, each once by its canonical name.
