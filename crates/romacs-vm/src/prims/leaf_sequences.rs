@@ -100,7 +100,7 @@ fn sort_keyed(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
 /// A stable sort of ORDER by COMPARE that polls as it goes: runs of RUN
 /// elements sorted alone, then merged pairwise a level at a time, a poll
 /// every RUN merged elements. Nothing outside ORDER is written.
-fn sort_polled<T: Copy>(cx: &mut Leaf<'_>, order: &mut [T], run: usize,
+pub(crate) fn sort_polled<T: Copy>(cx: &mut Leaf<'_>, order: &mut [T], run: usize,
                         mut compare: impl FnMut(&mut Leaf<'_>, &T, &T) -> std::cmp::Ordering) -> std::result::Result<(), Fault> {
     use std::cmp::Ordering::Less;
     for chunk in order.chunks_mut(run) {

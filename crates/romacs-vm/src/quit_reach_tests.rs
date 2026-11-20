@@ -108,10 +108,37 @@ fn a_digest_quits_between_chunks() {
 
 #[test]
 fn a_native_sort_quits_and_leaves_its_list() {
+    // A list quits in the walk that reads it, before the native sort.
     let setup = "(setq l (let (l) (dotimes (i 20000) (push (% (* i 7919) 10007) l)) l) copy (copy-sequence l))";
     reaches("sort", setup, "(list l #'<)", "(equal l copy)");
     let strings = "(setq l (mapcar #'number-to-string (let (l) (dotimes (i 20000) (push (% (* i 7919) 10007) l)) l)) copy (copy-sequence l))";
     reaches("sort", strings, "(list l #'string-lessp)", "(equal l copy)");
+    // A vector has no such walk: it quits at the native sort's own poll,
+    // after its run, and the vector is as it was.
+    let setup = "(setq v (vconcat (let (l) (dotimes (i 20000) (push (% (* i 7919) 10007) l)) l)) copy (copy-sequence v))";
+    reaches("sort", setup, "(list v #'<)", "(equal v copy)");
+    let strings = "(setq v (vconcat (mapcar #'number-to-string (let (l) (dotimes (i 20000) (push (% (* i 7919) 10007) l)) l))) copy (copy-sequence v))";
+    reaches("sort", strings, "(list v #'string-lessp)", "(equal v copy)");
+}
+
+/// The polled sort's merges poll too: a press that comes once its runs are
+/// sorted, at the merge's first compare across two runs, quits at the
+/// merge's poll. Each run of 4 holds values of one `value / 4`.
+#[test]
+fn a_native_sort_quits_in_its_merge() {
+    let (mut vm, signal) = busy_vm();
+    // The scope the sort's own entry grants.
+    vm.native_quit = true;
+    let run = 4;
+    let mut order: Vec<usize> = (0..64).rev().collect();
+    let mut pressed = false;
+    let outcome = crate::prim::prims::leaf_sequences::sort_polled(&mut Leaf::new(&mut vm), &mut order, run, |_, a, b| {
+        if a / run != b / run && !pressed { pressed = signal.interrupt(); }
+        a.cmp(b)
+    }).map(|()| Value::NIL);
+    assert!(pressed, "the merge compared across runs");
+    assert!(quit_signalled(&mut vm, &outcome), "the merge did not quit at its poll");
+    vm.quit_unwinding = false;
 }
 
 /// A syntax table where `;` starts a comment a newline ends and `'` is an
