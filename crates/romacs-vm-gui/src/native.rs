@@ -59,13 +59,11 @@ fn keysym(k: u32, modifiers: u32) -> Option<CommandEvent> {
 }
 
 /// A character typed with MODIFIERS, as keyboard.c `make_lispy_event'
-/// makes it: Shift is already in the character, and in a chord a letter's
+/// makes it: Shift is already in the character, and with Ctrl a letter's
 /// case follows Shift whatever caps lock says.
 fn character(c: char, modifiers: u32) -> Option<CommandEvent> {
-    let c = if modifiers & !SHIFT == 0 { c }
-        else if modifiers & SHIFT != 0 { single(c.to_uppercase()).unwrap_or(c) }
-        else { single(c.to_lowercase()).unwrap_or(c) };
     if modifiers & CTRL != 0 {
+        let c = if modifiers & SHIFT != 0 { single(c.to_uppercase()).unwrap_or(c) } else { single(c.to_lowercase()).unwrap_or(c) };
         let base = c.to_ascii_lowercase();
         if GUI_CONTROL_KEYS.contains(&base) {
             let shift = if c.is_ascii_uppercase() { SHIFT } else { 0 };

@@ -244,13 +244,15 @@ mod tests {
     }
     /// The GUI's `C-m', `C-i' and `C-[' are RET, TAB and ESC through
     /// `function-key-map' unless bound themselves, the Tab key's `tab' is
-    /// TAB, and C-SPC sets the mark, in the workspace too (VM2-GUI-KEYS).
+    /// TAB and `M-tab' M-TAB, and C-SPC sets the mark, in the workspace too
+    /// (VM2-GUI-KEYS).
     #[test]
     fn gui_control_keys_read_as_ret_tab_and_esc_unless_bound() {
         let mut vm = Vm::new();
         vm.set_frame_geometry(1600, 1000, 20, 10).unwrap();
         crate::startup::initialize(&mut vm).unwrap();
-        vm.eval_source("(erase-buffer) (defun gk-tab () (interactive) (insert \"<tab>\")) (global-set-key [9] 'gk-tab)").unwrap();
+        vm.eval_source("(erase-buffer) (defun gk-tab () (interactive) (insert \"<tab>\")) (global-set-key [9] 'gk-tab)
+                        (global-set-key [?\\M-\\t] 'ignore)").unwrap();
         let mut keys = Commands::default();
         let mut run = |vm: &mut Vm, event: CommandEvent| {
             let out = keys.dispatch(vm, event).unwrap().unwrap();
@@ -260,6 +262,7 @@ mod tests {
         assert_eq!(run(&mut vm, CommandEvent::Named("C-m".into())), ("romacs-newline".into(), "13".into()));
         assert_eq!(run(&mut vm, CommandEvent::Named("C-i".into())), ("gk-tab".into(), "9".into()));
         assert_eq!(run(&mut vm, CommandEvent::Named("tab".into())), ("gk-tab".into(), "9".into()));
+        assert_eq!(run(&mut vm, CommandEvent::Named("M-tab".into())).0, "ignore");
         assert_eq!(run(&mut vm, CommandEvent::Character((1 << 26) | 32)).0, "set-mark-command");
         vm.eval_source("(setq mark-active nil) (global-set-key [C-m] 'beginning-of-line)").unwrap();
         assert_eq!(run(&mut vm, CommandEvent::Named("C-m".into())).0, "beginning-of-line");

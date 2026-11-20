@@ -43,7 +43,8 @@ fn keys() -> Vec<InputEvent> {
 fn lisp(event: &CommandEvent) -> String {
     match event {
         CommandEvent::Character(code) => code.to_string(),
-        CommandEvent::Named(name) => format!("'{name}"),
+        // By name: `C-[' does not read as a symbol.
+        CommandEvent::Named(name) => format!("(intern {name:?})"),
     }
 }
 

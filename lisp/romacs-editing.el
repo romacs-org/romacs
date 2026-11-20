@@ -471,7 +471,10 @@ Read-only text is copied before deletion signals its ordinary read-only error."
   (define-key function-key-map [escape] [?\e]))
 (unless (lookup-key function-key-map [tab])
   (put 'tab 'ascii-character ?\t)
-  (define-key function-key-map [tab] [?\t]))
+  (define-key function-key-map [tab] [?\t])
+  ;; common-win.el's alternative, which a window-system frame installs
+  ;; under GNU's Lisp: Meta+Tab is M-TAB.
+  (define-key function-key-map [M-tab] [?\M-\t]))
 
 ;; Ctrl+i, Ctrl+m and Ctrl+[ are keys of their own on the GUI, the symbol
 ;; events `C-i', `C-m' and `C-[' (native.rs), where a terminal could send
@@ -501,7 +504,9 @@ EVENT the symbol the GUI delivers, LEGACY the character a terminal sent."
                 events))))
     (nreverse events)))
 
+;; `read-char' reads each as its character (`ascii-character').
 (dolist (pair (romacs-gui-control-key-events))
+  (put (car pair) 'ascii-character (cdr pair))
   (define-key function-key-map (vector (car pair)) (vector (cdr pair))))
 (defun romacs-newline (n)
   "Insert N newlines: RET in a workspace without simple.el's `newline'."

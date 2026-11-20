@@ -98,6 +98,15 @@ fn a_terminal_over_gnu_lisp_routes_keys_and_keeps_the_minibuffer_s() {
         assert!(signals.iter().all(Option::is_none), "{signals:?}");
         assert_eq!(std::mem::take(&mut state.borrow_mut().sent),
                    [&b"\r"[..], b"\t", b"\x1b", b"\x1b\r", b"\0", b"\x7f", b"\t"].map(<[u8]>::to_vec), "GUI_KEYS_SEND_THEIR_CONTROL_CHARACTERS");
+        // An exception keeps a key with Emacs by either spelling: "TAB" the
+        // Tab key and Ctrl+i, "C-<m>" Ctrl+m alone.
+        vm.eval_source("(let ((romacs-term-keymap-exceptions (append '(\"TAB\" \"C-<m>\") romacs-term-keymap-exceptions))
+                          (romacs-term-shell-exceptions nil))
+                      (romacs-term-update-keymaps))").unwrap();
+        for (event, sent) in [("tab", false), ("C-i", false), ("C-m", false), ("return", true)] {
+            assert_eq!(vm.terminal_passthrough_key(&CommandEvent::Named(event.into())).unwrap(), sent, "EXCEPTION_BY_EITHER_SPELLING {event}");
+        }
+        vm.eval_source("(romacs-term-update-keymaps)").unwrap();
         // While a minibuffer reads, even with the terminal's window selected,
         // the keys are the minibuffer's.
         vm.eval_source("(setq romacs--minibuf-level 1)").unwrap();

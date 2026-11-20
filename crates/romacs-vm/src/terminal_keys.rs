@@ -78,7 +78,7 @@ pub(crate) fn encode(event: KeyEvent<'_>, application_cursor: bool) -> Result<Ve
             // `C-m' is CR, `C-i' TAB, `C-[' ESC (VM2-GUI-KEYS).
             _ => {
                 let mut chars = name.chars();
-                chars.next().filter(|_| chars.next().is_none())
+                chars.next().filter(|_| event.control && chars.next().is_none())
             }
         },
     };
