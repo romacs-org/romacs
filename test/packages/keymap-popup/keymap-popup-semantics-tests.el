@@ -211,6 +211,39 @@
     (execute-kbd-macro (kbd "q"))
     (should-not (keymap-popup--popup-buffer))))
 
+;; With a title, the exit hint ends the title row, right-aligned at the
+;; card's width, and a one-page menu has no footer; without room for both
+;; the hint stays in the footer.
+(ert-deftest keymap-popup-semantics-exit-hint-in-the-title-row ()
+  (keymap-popup-input--with-source
+    (let* ((backend (keymap-popup-backend-side-window))
+           (keymap-popup-backend
+            (lambda () (list :show (plist-get backend :show) :fit (plist-get backend :fit)
+                             :hide (plist-get backend :hide) :title t)))
+           (map (make-sparse-keymap)))
+      (keymap-set map "a" #'ignore)
+      (keymap-popup-attach map '("a" ("A longer action label" ignore :stay-open t))
+                           :exit-key "q" :description "Menu")
+      (keymap-popup map)
+      (let* ((buf (keymap-popup--popup-buffer))
+             (columns (keymap-popup--rows-to-columns (keymap-popup--active-descriptions buf))))
+        (with-current-buffer buf
+          (let ((lines (split-string (buffer-string) "\n" t)))
+            (should (string-match-p "\\`Menu +q  Dismiss menu\\'" (car lines)))
+            ;; Right-aligned: the hint's stretch ends where the hint starts.
+            (should (equal (plist-get (cdr (get-text-property 5 'display)) :align-to)
+                           (- (car (keymap-popup--session-get buf :size)) (string-width "q  Dismiss menu"))))
+            (should-not (seq-some (lambda (l) (string-match-p "Dismiss" l)) (cdr lines)))))
+        ;; Too narrow for both: the title alone, the hint in the footer.
+        (cl-letf (((symbol-function 'keymap-popup--room) (lambda (&rest _) (cons 20 nil))))
+          (keymap-popup--write-rendered buf columns))
+        (with-current-buffer buf
+          (let ((lines (split-string (buffer-string) "\n" t)))
+            (should (equal (substring-no-properties (car lines)) "Menu"))
+            (should (string-match-p "q  Dismiss menu" (car (last lines)))))))
+      (execute-kbd-macro (kbd "q"))
+      (should-not (keymap-popup--popup-buffer)))))
+
 (ert-deftest keymap-popup-semantics-exit-control-prefix-conflict ()
   (dolist (exit '("C-u" "C-u x"))
     (keymap-popup-input--with-source

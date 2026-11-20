@@ -850,12 +850,17 @@ def multiset(runs):
 
 def romacs_menu(gnu):
     """GNU's runs as Romacs's menu deliberately draws them
-    (ledger/divergences/VM2-MENU-LAYERS.md): the title is the menu's
-    description in `keymap-popup-title', without the exit key the footer
-    already shows, and a submenu's label ends in ` ›' instead of a syntax
-    face's colour."""
-    title = [[text, ['keymap-popup-title']] for text, faces in gnu['title'] if faces != ['keymap-popup-key']]
-    body = [[text + ' ›', faces] if faces == ['keymap-popup-submenu'] else [text, faces] for text, faces in gnu['body']]
+    (ledger/divergences/VM2-MENU-LAYERS.md): the title row is the menu's
+    description in `keymap-popup-title' and, right-aligned, the exit hint
+    GNU's footer shows (its key and `Dismiss menu'), which leaves the body;
+    a submenu's label ends in ` ›' instead of a syntax face's colour."""
+    exit_key = next(text for text, faces in gnu['title'] if faces == ['keymap-popup-key'])
+    hint = [[exit_key, ['keymap-popup-key']], ['Dismiss menu', None]]
+    title = [[text, ['keymap-popup-title']] for text, faces in gnu['title'] if faces != ['keymap-popup-key']] + hint
+    body = list(gnu['body'])
+    for run in hint:
+        body.remove(run)
+    body = [[text + ' ›', faces] if faces == ['keymap-popup-submenu'] else [text, faces] for text, faces in body]
     return {'title': title, 'body': body}
 
 
