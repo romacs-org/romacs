@@ -703,16 +703,17 @@ the plan is live, the latest: an older one's row goes."
   "The plan offered to proceed with is no more: its row goes."
   (when-let* ((at (text-property-any (point-min) romacs-agent-log--end 'romacs-agent-log-proceed t)))
     (romacs-agent-log--writing
-      (delete-region (1- at) (or (next-single-property-change at 'romacs-agent-log-proceed nil romacs-agent-log--end)
-                                 romacs-agent-log--end)))))
+      (delete-region at (or (next-single-property-change at 'romacs-agent-log-proceed nil romacs-agent-log--end)
+                            romacs-agent-log--end)))))
 
 (defun romacs-agent-log-proceed ()
   "Proceed with the plan presented at point: its session leaves plan mode,
 back in the mode it had, and the next message carries it out."
   (interactive nil romacs-agent-log-mode)
   (unless (get-text-property (point) 'romacs-agent-log-proceed) (user-error "No plan to proceed with here"))
-  (romacs-agent-log--retire-proceed)
-  (romacs-agent-set-plan (romacs-agent-log--loaded) nil))
+  (romacs-agent-set-plan (romacs-agent-log--loaded) nil)
+  ;; Switched: its row offers nothing more.
+  (romacs-agent-log--retire-proceed))
 
 (defun romacs-agent-log-draw (session event)
   "Draw SESSION's EVENT in the current chat."

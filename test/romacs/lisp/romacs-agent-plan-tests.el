@@ -241,7 +241,9 @@
         (romacs-agent-log-draw session '(:type plan :text "1. do it" :proceed t))
         (goto-char (text-property-any (point-min) (point-max) 'romacs-agent-log-proceed t))
         (call-interactively (lookup-key (get-text-property (point) 'keymap) "y"))
-        (should-not (text-property-any (point-min) (point-max) 'romacs-agent-log-proceed t))))
+        (should-not (text-property-any (point-min) (point-max) 'romacs-agent-log-proceed t))
+        ;; The plan's own text whole.
+        (should (string-match-p "1\\. do it\n" (buffer-substring-no-properties (point-min) romacs-agent-log--end)))))
     (should (equal (gethash "mode" (gethash "collaborationMode" (gethash "params" (romacs-agent--codex-turn session 1 []))))
                    "default"))))
 
