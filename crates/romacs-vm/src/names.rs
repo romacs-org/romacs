@@ -8,7 +8,14 @@ use std::borrow::Cow;
 pub(crate) struct Names {
     /// By a name's internal multibyte bytes (`key_of`, `text_key`), its slot.
     slots: NameMap<Box<[u8]>, usize>,
+    /// Whether some key interned holds the escape's bytes (`symkey::ESC`):
+    /// only such a key could equal, byte for byte, key text that escapes
+    /// (`get`).
+    escaped: bool,
 }
+
+/// `symkey::ESC` in UTF-8.
+const ESC_BYTES: [u8; 3] = [0xEF, 0xB7, 0x90];
 
 /// The key of a Lisp name given as BYTES of CHARS characters: its internal
 /// multibyte bytes. A multibyte or all-ASCII name is its own bytes; a
@@ -26,12 +33,28 @@ pub(crate) fn text_key(name: &str) -> Box<[u8]> {
 }
 
 impl Names {
-    /// The slot of the name with key text NAME, when it is interned. An ASCII
-    /// name, as nearly every name a Rust caller gives, is its own key.
-    #[inline]
+    /// The slot of the name with key text NAME, when it is interned. Key
+    /// text without the escape is its own key, and key text with it can equal
+    /// only a key holding the escape's bytes: unless one is interned, NAME's
+    /// own bytes find it, and only a miss asks whether NAME escapes.
+    #[inline(always)]
     pub(crate) fn get(&self, name: &str) -> Option<&usize> {
-        if name.is_ascii() { self.slots.get(name.as_bytes()) } else { self.get_text(name) }
+        if self.escaped { return self.get_text(name); }
+        match self.slots.get(name.as_bytes()) {
+            Some(slot) => Some(slot),
+            None => self.get_escaped(name),
+        }
     }
+    /// NAME's slot when its own bytes found none: by the key its escapes
+    /// stand for, if it has any.
+    #[cold]
+    #[inline(never)]
+    fn get_escaped(&self, name: &str) -> Option<&usize> {
+        if name.is_ascii() { return None; }
+        self.slots.get(&crate::symkey::to_internal(name)?[..])
+    }
+    #[cold]
+    #[inline(never)]
     fn get_text(&self, name: &str) -> Option<&usize> {
         match crate::symkey::to_internal(name) {
             Some(key) => self.slots.get(&key[..]),
@@ -52,6 +75,7 @@ impl Names {
     }
     /// Make the name whose key (`key_of`, `text_key`) is KEY name SLOT.
     pub(crate) fn insert_key(&mut self, key: Box<[u8]>, slot: usize) -> Option<usize> {
+        self.escaped |= key.windows(ESC_BYTES.len()).any(|w| w == ESC_BYTES);
         self.slots.insert(key, slot)
     }
     /// Forget the name with key text NAME.
@@ -60,9 +84,11 @@ impl Names {
     }
     /// Forget every name: the slots they named.
     pub(crate) fn take_slots(&mut self) -> Vec<usize> {
+        self.escaped = false;
         self.slots.drain().map(|(_, slot)| slot).collect()
     }
     pub(crate) fn clear(&mut self) {
+        self.escaped = false;
         self.slots.clear();
     }
     pub(crate) fn len(&self) -> usize {
@@ -97,5 +123,28 @@ mod tests {
         assert_eq!(names.get("é"), Some(&2));
         names.remove("é");
         assert_eq!((names.get("é"), names.len()), (None, 1));
+    }
+
+    #[test]
+    fn key_text_that_escapes_finds_its_name_and_never_one_whose_bytes_it_spells() {
+        let mut names = Names::default();
+        // A raw byte, as key text: U+FDD0 and two Plane 15 characters. Its
+        // key holds no U+FDD0, so lookups stay on the direct path.
+        let mut raw = String::new();
+        crate::symkey::push_char(&mut raw, 0x3F_FF80);
+        names.insert(&raw, 1);
+        assert_eq!((names.get(&raw), names.escaped), (Some(&1), false), "found by the key its escape stands for");
+        // A name spelt "a" and two genuine U+FDD0: its key is those bytes.
+        let mut doubled = String::from("a");
+        crate::symkey::push_char(&mut doubled, 0xFDD0);
+        crate::symkey::push_char(&mut doubled, 0xFDD0);
+        names.insert(&doubled, 2);
+        assert_eq!((names.get(&doubled), names.escaped), (Some(&2), true));
+        // The key text "a" + U+FDD0 + U+FDD0 names "a" and one U+FDD0, never
+        // interned, though its own bytes are the doubled name's key.
+        let single = "a\u{fdd0}\u{fdd0}";
+        assert_eq!(names.get_bytes(single.as_bytes()), Some(&2), "the bytes do spell the doubled name's key");
+        assert_eq!(names.get(single), None);
+        assert_eq!(names.get(&raw), Some(&1));
     }
 }

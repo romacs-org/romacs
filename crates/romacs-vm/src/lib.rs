@@ -2182,7 +2182,8 @@ impl Vm {
             self.command_set.changed(slot);
         }
     }
-    /// Whether SLOT's symbol is interned in the initial obarray.
+    /// Whether SLOT's symbol is interned in the initial obarray: whether
+    /// SLOT's own name names it (`names`), found without hashing the name.
     fn in_initial_obarray(&self, slot: usize) -> bool {
         self.initial_obarray.get(slot).copied().unwrap_or(false)
     }
