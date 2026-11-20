@@ -386,6 +386,29 @@
     (should-not romacs-agent-log--asks)
     (should-not romacs-agent-log--ended-asks)))
 
+(ert-deftest romacs-agent-log-a-history-drawn-whole-says-each-ask-once ()
+  ;; Another machine's history, drawn before what it waits on now: an ask
+  ;; settled later in it says how, once; one left open says its turn ended.
+  (romacs-agent-log-tests--with
+    (let ((romacs-agent-log--closes-deferred t))
+      (draw :type 'approval :request-id "e" :tool "Bash")
+      (draw :type 'approval :request-id "f" :tool "Bash")
+      (draw :type 'done)
+      (draw :type 'answered :request-id "e" :how 'harness))
+    (should (equal (mapcar #'car romacs-agent-log--ended-asks) '("f")))
+    (romacs-agent-log--sync-asks session)
+    (let ((text (romacs-agent-log-tests--transcript)))
+      (should (= 1 (how-many "the turn ended with it unanswered" (point-min) (point-max))))
+      (should (string-match-p "harness" text)))
+    (should-not romacs-agent-log--asks)
+    (should-not romacs-agent-log--ended-asks)))
+
+(ert-deftest romacs-agent-log-an-answer-without-its-actor-says-who ()
+  ;; A service older than :actor sends who alone.
+  (romacs-agent-log-tests--with
+    (draw :type 'attributed :request-id "g" :by "policy" :decision "allow" :scope "once")
+    (should (string-match-p "allowed by Romacs" (romacs-agent-log-tests--transcript)))))
+
 (ert-deftest romacs-agent-log-an-ask-let-go-after-its-exit-says-so ()
   ;; Another machine's service sends the exit before it lets the ask go:
   ;; said once it does, not lost.

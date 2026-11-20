@@ -42,7 +42,7 @@
     (unknown raw method)
     (approval (request request) parent policy)
     (answered (request-id handle) behavior answers (how symbol))
-    (attributed (request-id handle) (actor list) decision scope reason answers))
+    (attributed (request-id handle) by (actor list) decision scope reason answers))
   "Each event type the protocol sends, then its fields.  A field's JSON
 name is its keyword's, with `_' for `-'.  A field is a symbol, or (FIELD
 KIND) for one a client reads back other than as JSON parses it

@@ -1984,6 +1984,9 @@ is let go, however it is read (live, a replay, a journal read here)."
                                ("plan" (list (list :type 'status :text (if (eq (gethash "on" note) t) "plan mode" "plan mode off"))))
                                ;; Who answered an approval, and how (`romacs-agent-respond').
                                ("answer" (list (list :type 'attributed :request-id (gethash "request" note)
+                                                     ;; Who alone too: a client of protocol 1.0
+                                                     ;; older than :actor reads it.
+                                                     :by (or (romacs-agent--value (gethash "by" note)) "unknown")
                                                      ;; Older notes name only who.
                                                      :actor (list :kind (or (romacs-agent--value (gethash "by" note)) "unknown")
                                                                   :login (romacs-agent--value (gethash "login" note))

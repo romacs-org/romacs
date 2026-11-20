@@ -138,6 +138,11 @@ NEWLINES the line breaks it ended in so far, held until text follows.")
   "Approval blocks drawn, by request id: (START . END) markers.")
 (defvar-local romacs-agent-log--attributed nil
   "Request ids whose answer was drawn with who gave it.")
+(defvar romacs-agent-log--closes-deferred nil
+  "Non-nil while a source's history is drawn whole, what it waits on now
+said only after: an ask open at a turn's end is said to have ended once
+the history is drawn, unless an answer in it settles it.")
+
 (defvar-local romacs-agent-log--ended-asks nil
   "Asks open when their turn ended or harness exited, still listed as
 waited on by their source, each (ID . WHY): said once the source lets
@@ -670,11 +675,13 @@ recorded answer settles its block."
              (why (cond ((member id romacs-agent-log--attributed) "an answer not delivered: the harness never took it")
                         ((eq how 'exit) "the harness exited with it unanswered")
                         (t "the turn ended with it unanswered"))))
-        (cond ((not (gethash id approvals))
+        (cond ((and (not (gethash id approvals)) (not romacs-agent-log--closes-deferred))
                (romacs-agent-log--settle-ask id)
                (romacs-agent-log--note event why)
                (setq romacs-agent-log--ended-asks (assoc-delete-all id romacs-agent-log--ended-asks)))
-              ;; Still listed by a source that says so later: said then.
+              ;; Still listed by a source that says so later, or drawn
+              ;; from a source's history before what it waits on now:
+              ;; said once it lets it go, unless an answer settles it.
               ((not romacs-agent-log--replaying)
                (setf (alist-get id romacs-agent-log--ended-asks nil nil #'equal) why)))))))
 
@@ -714,6 +721,8 @@ from a client other than this editor says which."
 unless a note said who gave it, that it was answered."
   (let ((id (plist-get event :request-id)))
     (romacs-agent-log--settle-ask id)
+    ;; Settled: no longer left to say its turn ended with it open.
+    (setq romacs-agent-log--ended-asks (assoc-delete-all id romacs-agent-log--ended-asks))
     ;; Settled by the harness over an answer it never took.
     (when (and (eq (plist-get event :how) 'harness) (member id romacs-agent-log--attributed))
       (romacs-agent-log--note event "an answer not delivered: the harness settled it first"))
@@ -786,7 +795,10 @@ unless a note said who gave it, that it was answered."
     ;; Who answered: said, the block settled once its answer is written.
     ('attributed (push (plist-get event :request-id) romacs-agent-log--attributed)
                  (romacs-agent-log--line event 'answer
-                                         (romacs-agent-log--answer-text (plist-get event :actor) (plist-get event :decision)
+                                         ;; A service older than :actor says who alone.
+                                         (romacs-agent-log--answer-text (or (plist-get event :actor)
+                                                                            (list :kind (or (plist-get event :by) "unknown")))
+                                                                        (plist-get event :decision)
                                                                         (plist-get event :scope) (plist-get event :reason)
                                                                         (plist-get event :answers))))
     ('answered (romacs-agent-log--answered event))
