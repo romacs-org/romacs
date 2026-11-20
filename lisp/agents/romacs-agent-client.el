@@ -393,10 +393,11 @@ from where a reply stopped asks no more at a time.")
                 (romacs-agent-client--end-follow client id error)))
              (t
               (setf (romacs-agent-client--follow-stale follow) 0)
+              ;; Told with its history, once that is read: what waits is
+              ;; never drawn without what came before it.
               (let ((pending (romacs-agent-client--follow-pending follow)))
                 (clrhash pending)
-                (dolist (request requests) (puthash (gethash "id" (gethash "handle" request)) request pending))
-                (romacs-agent-client--tell client id (list 'pending pending)))
+                (dolist (request requests) (puthash (gethash "id" (gethash "handle" request)) request pending)))
               (romacs-agent-client--read
                client id follow generation 'drawn (gethash "seq" (gethash "cursor" reply))
                (romacs-agent-rpc-object "upto" (gethash "seq" (gethash "cursor" reply))
@@ -476,6 +477,8 @@ or adapter, opens it again."
                                                                     "upto" (min upto (+ stopped romacs-agent-client--catch-up)))
                                            (cons units from))
               (setf (romacs-agent-client--follow-seq follow) (max upto (romacs-agent-client--follow-seq follow)))
+              (when (eq kind 'drawn)
+                (romacs-agent-client--tell client id (list 'pending (romacs-agent-client--follow-pending follow))))
               (romacs-agent-client--tell client id (if (eq kind 'drawn) (list 'drawn units from) (list 'more units)))
               (romacs-agent-client--release client id follow)))))))
    (romacs-agent-client--follow-cursor follow)))

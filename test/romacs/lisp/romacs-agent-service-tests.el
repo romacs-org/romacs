@@ -707,11 +707,22 @@ a state root of its own, and a service of its own on `socket'."
       (unwind-protect
           (progn
             (should (wait (romacs-agent-client-revision client)))
-            ;; What waits, a request a reply: paged.
-            (let ((romacs-agent-service--unit-budget 1))
+            ;; What waits, a request a reply: paged; told with its history,
+            ;; never before it.
+            (let ((romacs-agent-service--unit-budget 1) (told nil))
+              (add-hook 'romacs-agent-client-follow-functions
+                        (lambda (c id notice)
+                          (unless (eq (car notice) 'row)
+                            ;; With each notice, how far its history is read.
+                            (push (cons (car notice) (romacs-agent-client--follow-seq (gethash id (romacs-agent-client-follows c))))
+                                  told))))
               (setq remote (romacs-agent-remote-chat id))
-              (should (wait (and (string-search "Tea or coffee?" (funcall text remote))
-                                 (string-search "Sugar?" (funcall text remote))))))
+              ;; Drawn whole: its history, then what it waits on.
+              (should (wait (and (string-search "answer 3" (funcall text remote))
+                                 (string-search "Tea or coffee?" (funcall text remote))
+                                 (string-search "Sugar?" (funcall text remote)))))
+              (should (equal (mapcar #'car (reverse told)) '(pending drawn)))
+              (should (> (cdr (car (last told))) 0)))
             (should (equal (funcall text remote) (funcall text local)))
             (let ((follow (gethash id (romacs-agent-client-follows client))))
               (should (= (hash-table-count (romacs-agent-client--follow-pending follow)) 2))
