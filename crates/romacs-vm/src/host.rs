@@ -784,7 +784,11 @@ pub const SOURCE_LINK: &str = "source";
 /// is (`per_process_env`: a world build reads and records none, and a
 /// restored VM asks again, `Vm::world_reinit`), none if it names no tree;
 /// else the tree the runtime tree's [`SOURCE_LINK`] names, else the build's
-/// own root while it is a git checkout of one, else none.  A gate's build
+/// own root while it is a git checkout of one and the runtime tree is that
+/// checkout's (a development binary's), else none.  An installation's
+/// processes never name the checkout it was built from, which its installer
+/// deletes: the worlds and compiled Lisp they make would record it, and
+/// their every later process would find them stale.  A gate's build
 /// slot mirrors a checkout without `.git`, so a build made there names no
 /// tree it would not find again.  Every way of starting a session finds the
 /// same one, as the link belongs to the runtime tree.  The checks are kinds
@@ -802,11 +806,13 @@ fn source_directory_from(value: Option<OsString>, runtime: impl FnOnce() -> Opti
         // Absolute, so a buffer's own directory never resolves it.
         return std::path::absolute(&dir).ok().filter(|dir| tree(dir));
     }
+    let runtime = runtime();
     // The tree itself, so its files are visited under their own names.
-    if let Some(linked) = runtime().map(|dir| dir.join(SOURCE_LINK)).filter(|linked| tree(linked)) {
+    if let Some(linked) = runtime.as_ref().map(|dir| dir.join(SOURCE_LINK)).filter(|linked| tree(linked)) {
         return canonicalize(&linked).ok();
     }
-    (tree(root) && entry_type(&root.join(".git")).is_ok()).then(|| root.to_path_buf())
+    let installed = runtime.is_some_and(|dir| canonicalize(&dir).ok() != canonicalize(root).ok());
+    (!installed && tree(root) && entry_type(&root.join(".git")).is_ok()).then(|| root.to_path_buf())
 }
 
 /// The checkout this crate was built from: a compile-time path that no
@@ -1422,6 +1428,25 @@ fn decoded(field: &Json) -> Option<Vec<u8>> {
     }
     let hex = field["hex"].as_str()?;
     (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok()).collect()
+}
+
+/// Whether RECORDED, a keyed fact as its site aside recorded it, still
+/// holds as NOW, the same question's answer now ([`replay`]'s). A file's
+/// stat is compared without its device and inode: where the file lies,
+/// which a copy, a restore or a reflink of the tree changes, while what was
+/// kept of it (its content, bound by its file-read records, and its length,
+/// mode, owner and mtime) stays. A copy that drops mtimes changes it.
+pub fn same_fact(recorded: &Json, now: &Json) -> bool {
+    let placeless = |record: &Json| {
+        let mut record = record.clone();
+        if record["kind"] == "probe" && matches!(record["probe"].as_str(), Some("stat" | "lstat" | "fstat"))
+            && let Some(result) = record["result"].as_object_mut() {
+            result.remove("dev");
+            result.remove("ino");
+        }
+        record
+    };
+    recorded == now || placeless(recorded) == placeless(now)
 }
 
 /// The record a keyed RECORD's query makes now, its site aside: the host's
@@ -3198,7 +3223,9 @@ mod tests {
         assert!(probes.iter().all(|p| p == "IsDir" || p == "entry-type"), "{probes:?}, found {found:?}");
     }
     /// An installed runtime holds no Rust: its `source` link names the
-    /// tree, before the build's own checkout; the variable comes first.
+    /// tree; the variable comes first. The build's own checkout only for a
+    /// runtime tree that is that checkout, or none: an installation never
+    /// names the checkout it was built from.
     #[test]
     fn source_directory_follows_the_runtime_trees_link() {
         let dir = std::env::temp_dir().join(format!("romacs-source-link-{}", std::process::id()));
@@ -3218,11 +3245,23 @@ mod tests {
         };
         assert_eq!(found(None, &runtime), Some(checkout.clone()), "the link before the build's checkout");
         assert_eq!(found(Some(&named), &runtime), Some(named.clone()), "the variable before the link");
-        assert_eq!(found(None, &dir.join("unlinked")), Some(build.clone()), "no link: the build's checkout");
+        assert_eq!(found(None, &dir.join("unlinked")), None, "an installed tree without a link: none, not the build's checkout");
+        assert_eq!(found(None, &build), Some(build.clone()), "the runtime tree is the build's checkout: it");
         assert_eq!(source_directory_from(None, || None, &build), Some(build.clone()), "no runtime tree: the build's checkout");
         std::fs::remove_dir_all(&checkout).unwrap();
-        assert_eq!(found(None, &runtime), Some(build.clone()), "a link to no tree: the build's checkout");
+        assert_eq!(found(None, &runtime), None, "a link to no tree: none");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+    /// A file's stat holds whatever its device and inode, which a copy
+    /// changes; any other field still decides, and other kinds compare whole.
+    #[test]
+    fn a_stat_holds_across_a_copy_of_the_file() {
+        let stat = |dev: u64, ino: u64, len: u64| json!({"kind": "probe", "path": "/t/f.el", "probe": "fstat",
+            "result": {"mode": 33188, "len": len, "mtime": [1, 2], "dev": dev, "ino": ino, "nlink": 1, "uid": 1, "gid": 1}});
+        assert!(same_fact(&stat(1, 2, 3), &stat(9, 8, 3)), "another device and inode");
+        assert!(!same_fact(&stat(1, 2, 3), &stat(1, 2, 4)), "another length");
+        let other = |result: u64| json!({"kind": "probe", "path": "/t", "probe": "fs-type", "result": result});
+        assert!(!same_fact(&other(1), &other(2)), "no field of another kind is left out");
     }
     /// A late wake samples once, at the next deadline after it.
     #[test]

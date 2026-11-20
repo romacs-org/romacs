@@ -337,7 +337,7 @@ fn inputs_hold(store: &Path, artifact: &store::Artifact, load_path: &str,
             }),
             _ => {
                 let now = host::replay(record);
-                let holds = now.as_ref() == Some(record);
+                let holds = now.as_ref().is_some_and(|now| host::same_fact(record, now));
                 if !holds && configured().is_some_and(|c| c.trace) {
                     crate::host::event_line("romacs-compiled-lisp", &json!({"stale": record, "now": now}));
                 }
