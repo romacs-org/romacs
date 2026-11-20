@@ -398,11 +398,13 @@ pub fn wait(pidfd: &OwnedFd) -> Option<Status> {
 #[must_use]
 pub fn wait_any() -> Option<(i32, Status)> {
     let options = WaitOptions::NOHANG | WaitOptions::UNTRACED | WaitOptions::CONTINUED;
-    rustix::process::waitpid(None, options).ok().flatten().map(|(pid, status)| (pid.as_raw_nonzero().get(), Status::of_wait(status)))
+    rustix::process::wait(options).ok().flatten().map(|(pid, status)| (pid.as_raw_nonzero().get(), Status::of_wait(status)))
 }
 
 /// Send SIGNAL to the process PIDFD names, or to its process group when
 /// GROUP names the group's leader pid (the child of a spec with a session).
+/// That leader must be the caller's unreaped child, so its pid still names
+/// the group.
 ///
 /// # Errors
 /// The system's refusal; `ESRCH` once the process is gone.
@@ -426,8 +428,7 @@ fn signal_by_number(pidfd: std::os::fd::BorrowedFd<'_>, group: Option<i32>, sign
     // the keeper's own group.
     let group = group.map(pid).transpose()?;
     // SAFETY: both calls take integers and a null siginfo, no memory of
-    // this process. The pidfd names one process for good; the group's
-    // leader is the caller's unreaped child.
+    // this process.
     // UNSAFE(rustix makes a signal it does not name only by an unsafe constructor)
     os(unsafe {
         match group {

@@ -117,7 +117,10 @@ impl Table {
 
     pub fn remove(&mut self, handle: Handle) {
         self.set_owner(handle, 0);
-        if let Some(child) = self.handles.remove(&handle).and_then(|entry| entry.child) { self.pids.remove(&child.pid); }
+        if let Some(child) = self.handles.remove(&handle).and_then(|entry| entry.child) {
+            // A reaped child's pid may name another's by now.
+            if self.pids.get(&child.pid) == Some(&handle) { self.pids.remove(&child.pid); }
+        }
     }
 
     /// The table as a flat buffer, and every descriptor it names: those
@@ -218,7 +221,8 @@ impl Table {
                 if number < 0 { return Err(Error::Truncated); }
                 let pidfd = fd(number);
                 let (status, leader, unreported) = (Status::read(&mut e)?, e.u8()? != 0, e.u8()? != 0);
-                table.pids.insert(pid, handle);
+                // A reaped child's pid may name another process by now.
+                if !status.ended() { table.pids.insert(pid, handle); }
                 entry.child = pidfd.map(|pidfd| Child { pid, pidfd, status, leader, unreported });
             }
             if let Some(a) = table.attachments.get_mut(&entry.owner) { a.owned += 1; }
