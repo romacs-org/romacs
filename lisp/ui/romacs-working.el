@@ -9,9 +9,10 @@
 ;; how a piece of work goes:
 ;;
 ;;   idle     slack and still: a line sagging in its middle
-;;   running  a wave travels along it; a bead, its dots in the text's
-;;            colour, rides it a step for each piece of progress
-;;   waiting  a taut, solid bar, pulsing: the work waits on its user
+;;   running  a wave travels along it; a knot, thicker and in the
+;;            text's colour, rides it a step for each piece of progress
+;;   waiting  a taut, solid bar, still (no clock runs while the user is
+;;            asked): the work waits on its user
 ;;   failed   cut, still
 ;;
 ;; Any module shows one over COLS characters of its own text (a long
@@ -127,7 +128,6 @@ its error's."
    (lambda (hue) (and hue (<= 30 hue 70)))))
 
 (declare-function romacs-color-floor "romacs-theme" (fg bg minimum))
-(declare-function romacs-color-mix "romacs-theme" (a b amount))
 
 (defun romacs-working--hex (colour)
   "COLOUR as #rrggbb, whatever form the theme gave it in; nil when the
@@ -143,22 +143,11 @@ frame cannot resolve it."
         (romacs-color-floor colour background 4.5)
       colour)))
 
-(defun romacs-working--apart (colour)
-  "COLOUR, or when it is near the theme's foreground, the colour the
-progress bead is drawn in, COLOUR a third of the way to the background:
-the bead must stand out of the thread it rides."
-  (let ((foreground (face-foreground 'default nil t))
-        (background (face-background 'default nil t)))
-    (if (and colour foreground background (fboundp 'romacs-color-mix)
-             (not (romacs-working--far-p colour (list foreground))))
-        (romacs-color-mix (romacs-working--hex colour) (romacs-working--hex background) 0.35)
-      colour)))
-
 (defun romacs-working--derive (&rest _)
   "Make the running and waiting faces the theme's colours for them, each
 readable on its background, as their default specs: a theme's or the
 user's own spec still wins."
-  (pcase-dolist (`(,face . ,colour) `((romacs-working-running . ,(romacs-working--apart (romacs-working--running-colour)))
+  (pcase-dolist (`(,face . ,colour) `((romacs-working-running . ,(romacs-working--running-colour))
                                      (romacs-working-waiting . ,(romacs-working--waiting-colour))))
     (let ((colour (romacs-working--readable colour)))
       (face-spec-set face (if colour `((t :foreground ,colour)) '((t :inherit default))) 'face-defface-spec))))
@@ -176,7 +165,7 @@ user's own spec still wins."
   (intern (format "romacs-working-%s" work)))
 
 (defun romacs-working--moving-p (work)
-  (memq work '(running waiting)))
+  (eq work 'running))
 
 (defun romacs-working-still (cols work)
   "COLS characters of the thread for WORK at rest, in its face: idle a

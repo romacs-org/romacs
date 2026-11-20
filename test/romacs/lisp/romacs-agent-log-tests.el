@@ -237,6 +237,29 @@
     (draw :type 'delta :text "root text")
     (should (string-match-p "│ · completed\n[^│]*root text" (romacs-agent-log-tests--transcript)))))
 
+(ert-deftest romacs-agent-log-rule-fits-the-windows-showing-the-chat ()
+  (romacs-agent-log-tests--with
+    (ignore #'draw)
+    (let ((rule (lambda () (save-excursion (goto-char romacs-agent-log--end)
+                                           (how-many "─" (point) (line-end-position)))))
+          (chat (current-buffer)))
+      (puthash "L" chat romacs-agent-log--chats)
+      (unwind-protect
+          (save-window-excursion
+            (delete-other-windows)
+            (switch-to-buffer chat)
+            (let ((narrow (split-window-right (- (window-total-width) 30))))
+              (set-window-buffer narrow chat)
+              (romacs-agent-log--refit nil)
+              (let ((short (funcall rule)))
+                ;; The narrower window leaves no room for the rule to wrap in.
+                (should (< (+ romacs-agent-log--thread-cols short) (window-body-width narrow)))
+                ;; It shows another buffer: the rule fits the wider one again.
+                (set-window-buffer narrow (get-buffer-create "*romacs-agent-log-tests other*"))
+                (romacs-agent-log--refit nil)
+                (should (> (funcall rule) short)))))
+        (remhash "L" romacs-agent-log--chats)))))
+
 (ert-deftest romacs-agent-log-several-answers-keep-their-questions ()
   (let ((one (make-hash-table :test #'equal)) (two (make-hash-table :test #'equal)))
     (puthash "Colour?" "Blue" one)

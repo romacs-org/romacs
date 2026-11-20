@@ -3,11 +3,11 @@
 //! thread while the evaluator may be busy (lisp/ui/romacs-working.el).
 //!
 //! Idle, the thread lies slack and still; running, a wave travels along
-//! it, and a bright bead rides it, a step for each piece of progress the
-//! work reports (its beats); waiting on its user, it is taut and pulses
-//! toward the text's colour, never dimmer than its own; failed, it is
-//! cut.  A frame is a pure function of the work's state, its beats, the
-//! thread's colour and the seconds of motion.
+//! it, and a knot rides it, a step for each piece of progress the work
+//! reports (its beats); waiting on its user, it is taut and still, as no
+//! clock runs while the user is asked; failed, it is cut.  A frame is a
+//! pure function of the work's state, its beats, the thread's colour and
+//! the seconds of motion.
 use crate::Cell;
 
 /// How the work goes.
@@ -29,8 +29,8 @@ const SPEED: f64 = 0.45;
 const STEP: usize = 1;
 
 /// COLS cells of the thread for WORK in COLOUR (RGB), BEATS of progress
-/// reported, after MOVED seconds; its bead, the wave's own dots where it
-/// is, in BEAD (the text's colour, the most contrast the theme has).
+/// reported, after MOVED seconds; its bead, a knot of the wave's dots
+/// where it is, in BEAD_COLOUR (the text's colour).
 pub fn thread(cols: usize, work: Work, beats: u64, colour: u32, bead_colour: u32, moved: f64) -> Vec<Cell> {
     let tau = std::f64::consts::TAU;
     let (amplitude, centre) = match work {
@@ -39,9 +39,6 @@ pub fn thread(cols: usize, work: Work, beats: u64, colour: u32, bead_colour: u32
         Work::Waiting => (0.0, 1.0),
     };
     let bead = (beats as usize).wrapping_mul(STEP) % cols.max(1);
-    // Waiting: up to half way to the text's colour and back, a second a
-    // beat; both ends as readable as the theme made them.
-    let pulse = 0.25 + 0.25 * (tau * moved).sin();
     (0..cols).map(|cell| {
         // Failed: cut in its middle, when it has room for a cut (as
         // romacs-working-still cuts its still frame).
@@ -53,33 +50,28 @@ pub fn thread(cols: usize, work: Work, beats: u64, colour: u32, bead_colour: u32
         for (x, column) in DOTS.iter().enumerate() {
             let dot = (cell * 2 + x) as f64;
             let y = centre + amplitude * (tau * (dot / WAVE - SPEED * moved)).sin();
-            bits |= column[(y.round() as usize).min(3)];
+            let row = (y.round() as usize).min(3);
+            bits |= column[row];
+            // The knot: the wave's dot thickened by its neighbours above
+            // and below, so its shape tells it from the thread whatever
+            // the colours.
+            if work == Work::Running && cell == bead {
+                bits |= column[row.saturating_sub(1)] | column[(row + 1).min(3)];
+            }
             // Taut: a solid bar three dots thick, as its still frame.
             if work == Work::Waiting { bits |= column[0] | column[1] | column[2]; }
         }
         if work == Work::Running && cell == bead {
             return (char::from_u32(0x2800 + u32::from(bits)).unwrap_or(' '), Some(bead_colour));
         }
-        let shown = match work {
-            Work::Waiting => mix(colour, bead_colour, pulse),
-            Work::Idle => scale(colour, 0.6),
-            Work::Running | Work::Failed => colour,
-        };
+        let shown = if work == Work::Idle { scale(colour, 0.6) } else { colour };
         (char::from_u32(0x2800 + u32::from(bits)).unwrap_or(' '), Some(shown))
     }).collect()
 }
 
 /// COLOUR's channels times SHADE.
 fn scale(colour: u32, shade: f64) -> u32 {
-    mix(0, colour, shade)
-}
-
-/// The colour AMOUNT (0 to 1) of the way from A to B, channel by channel.
-fn mix(a: u32, b: u32, amount: f64) -> u32 {
-    let channel = |shift: u32| {
-        let (x, y) = (f64::from((a >> shift) & 0xff), f64::from((b >> shift) & 0xff));
-        ((x + (y - x) * amount).round().clamp(0.0, 255.0) as u32) << shift
-    };
+    let channel = |shift: u32| ((f64::from((colour >> shift) & 0xff) * shade).round().clamp(0.0, 255.0) as u32) << shift;
     channel(16) | channel(8) | channel(0)
 }
 
@@ -94,15 +86,18 @@ mod tests {
     }
 
     #[test]
-    fn waiting_pulses_in_place() {
-        let (a, b) = (thread(8, Work::Waiting, 0, 0xd48a20, 0xffffff, 0.0), thread(8, Work::Waiting, 0, 0xd48a20, 0xffffff, 0.25));
-        assert!(a.iter().all(|c| c.0 == '⠿'), "taut and solid, as its still frame");
-        assert_eq!(a.iter().map(|c| c.0).collect::<Vec<_>>(), b.iter().map(|c| c.0).collect::<Vec<_>>());
-        assert_ne!(a[0].1, b[0].1);
-        // It brightens toward the text's colour, never darkens below its own.
-        for moved in [0.0, 0.25, 0.5, 0.75] {
-            let c = thread(1, Work::Waiting, 0, 0x808080, 0xffffff, moved)[0].1.unwrap_or(0);
-            assert!((0x80..=0xc0).contains(&(c & 0xff)), "{c:06x} at {moved}");
+    fn waiting_is_taut_and_still() {
+        let a = thread(8, Work::Waiting, 0, 0xd48a20, 0xffffff, 0.0);
+        assert!(a.iter().all(|c| c.0 == '⠿' && c.1 == Some(0xd48a20)), "taut and solid, as its still frame, in its colour");
+        assert_eq!(a, thread(8, Work::Waiting, 0, 0xd48a20, 0xffffff, 0.25), "no clock runs while the user is asked");
+    }
+
+    #[test]
+    fn the_knot_is_told_by_its_shape_whatever_the_colours() {
+        let dots = |cells: &[Cell], at: usize| (cells[at].0 as u32 - 0x2800).count_ones();
+        for moved in [0.0, 0.3, 1.1] {
+            let (knotted, bare) = (thread(12, Work::Running, 5, 0xbebebe, 0xbebebe, moved), thread(12, Work::Running, 0, 0xbebebe, 0xbebebe, moved));
+            assert!(dots(&knotted, 5) > dots(&bare, 5), "at {moved}");
         }
     }
 
@@ -111,7 +106,7 @@ mod tests {
         let bright = |cells: Vec<Cell>| cells.iter().position(|c| c.1 == Some(0xffffff));
         let at = bright(thread(12, Work::Running, 3, 0x808080, 0xffffff, 0.0));
         assert_eq!(at, Some(3));
-        // The bead is the wave's own dots, so the wave reads through it,
+        // The bead is a knot in the wave, so the wave reads through it,
         // and a one-cell thread still moves.
         assert_ne!(thread(12, Work::Running, 3, 0x808080, 0xffffff, 0.0)[3].0, '⣿');
         assert_ne!(thread(1, Work::Running, 0, 0x808080, 0xffffff, 0.0), thread(1, Work::Running, 0, 0x808080, 0xffffff, 0.6));

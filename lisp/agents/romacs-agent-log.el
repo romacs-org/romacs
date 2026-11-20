@@ -149,6 +149,7 @@ NEWLINES the line breaks it ended in so far, held until text follows.")
 (defvar-local romacs-agent-log--attributed nil
   "Request ids whose answer was drawn with who gave it.")
 (defvar-local romacs-agent-log--state nil "What the separator last said.")
+(defvar-local romacs-agent-log--width nil "The columns the separator was last made for.")
 (defvar-local romacs-agent-log--prompts nil
   "The user's prompts this chat has drawn, the newest first: what M-p recalls.")
 (defvar-local romacs-agent-log--recalled nil
@@ -752,17 +753,21 @@ unless a note said who gave it, that it was answered."
   "The working thread's work for DOING (`romacs-working')."
   (pcase (car doing) ('waiting 'waiting) ('working 'running) ('failed 'failed) (_ 'idle)))
 
-(defun romacs-agent-log--separator-text (doing)
-  "The separator for DOING, (STATE . WORDS): the working thread, what the
-session does, then the composer's prompt."
+(defun romacs-agent-log--rule-width ()
+  "The columns the narrowest window showing the chat leaves its separator:
+its last width when none shows it."
+  (if-let* ((windows (get-buffer-window-list (current-buffer) nil t)))
+      (apply #'min (mapcar #'window-body-width windows))
+    (or romacs-agent-log--width 80)))
+
+(defun romacs-agent-log--separator-text (doing width)
+  "The separator for DOING, (STATE . WORDS), in WIDTH columns: the working
+thread, what the session does, then the composer's prompt."
   (let ((face (pcase (car doing) ('waiting 'romacs-agent-log-ask) ('working 'romacs-working-running)
                 ('failed 'romacs-agent-log-denied) (_ 'romacs-agent-log-rule))))
     (let* ((label (concat " " (propertize (cdr doing) 'face (list face 'bold)) " "))
            ;; A dim rule after it fences the composer off the transcript,
-           ;; as wide as the narrowest window showing it leaves it, never
-           ;; wrapping in any; none when that is short.
-           (windows (get-buffer-window-list (current-buffer) nil t))
-           (width (if windows (apply #'min (mapcar #'window-body-width windows)) 80))
+           ;; never wrapping; none when that is short.
            (rule (- width 1 romacs-agent-log--thread-cols (string-width label))))
       (concat (romacs-working-still romacs-agent-log--thread-cols (romacs-agent-log--work doing))
               label
@@ -770,10 +775,12 @@ session does, then the composer's prompt."
               "\n" (propertize "❯ " 'face 'romacs-agent-log-prompt)))))
 
 (defun romacs-agent-log--separator (&optional force)
-  "Write the separator again when what the session does changed."
-  (let ((doing (romacs-agent-log--doing romacs-agent-log--session)))
-    (when (or force (not (equal doing romacs-agent-log--state)))
-      (setq romacs-agent-log--state doing)
+  "Write the separator again when what the session does, or the room the
+windows showing it leave, changed."
+  (let ((doing (romacs-agent-log--doing romacs-agent-log--session))
+        (width (romacs-agent-log--rule-width)))
+    (when (or force (not (equal doing romacs-agent-log--state)) (not (eql width romacs-agent-log--width)))
+      (setq romacs-agent-log--state doing romacs-agent-log--width width)
       (romacs-agent-log--writing
         (save-excursion
           ;; The new one put before the old one goes: a point in the
@@ -784,7 +791,7 @@ session does, then the composer's prompt."
             ;; A field of its own: word motion and kills in the composer
             ;; stop at its start, as in a comint buffer; line motion
             ;; crosses it (a field binds it only within a line).
-            (insert (propertize (romacs-agent-log--sealed (romacs-agent-log--separator-text doing))
+            (insert (propertize (romacs-agent-log--sealed (romacs-agent-log--separator-text doing width))
                                 'field 'romacs-agent-log-separator))
             (delete-region (point) (+ (point) old))
             (set-marker romacs-agent-log--input (point))
@@ -1002,6 +1009,17 @@ records now, or with LATER when a window first shows it."
     (romacs-agent-log--fill)
     (romacs-agent-log--separator t)
     (romacs-agent-log--header-show)))
+
+(defun romacs-agent-log--refit (_frame)
+  "A window started or stopped showing a buffer, or went: each chat's rule
+fits the windows that still show it."
+  (maphash (lambda (_id buffer)
+             (when (buffer-live-p buffer)
+               (with-current-buffer buffer
+                 (when romacs-agent-log--input (romacs-agent-log--separator)))))
+           romacs-agent-log--chats))
+
+(add-hook 'window-buffer-change-functions #'romacs-agent-log--refit)
 
 (defun romacs-agent-log--shown (_window)
   "A window shows this chat: drawn now, when it was not, its header made
@@ -1372,7 +1390,7 @@ On the transcript's text:
   (setq-local header-line-format "")
   (setq-local desktop-save-buffer #'romacs-agent-log--desktop-save)
   ;; The separator's rule fits the window it is shown in.
-  (add-hook 'window-size-change-functions (lambda (_) (when romacs-agent-log--input (romacs-agent-log--separator t))) nil t)
+  (add-hook 'window-size-change-functions (lambda (_) (when romacs-agent-log--input (romacs-agent-log--separator))) nil t)
   (add-hook 'after-change-functions #'romacs-agent-log--composer-plain nil t))
 
 (provide 'romacs-agent-log)
