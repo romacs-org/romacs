@@ -2,7 +2,7 @@
 //! There is no dependency on the old evaluator, reader, or byte compiler.
 #![deny(private_interfaces, private_bounds)]
 // A Fault has drop glue (`Error(String)`), so an eager `ok_or(Fault::..)` builds one and calls its destructor on
-// every success. The lazy form builds it on failure only.
+// every success. The lazy form builds it on failure only; tests/fault_lazy_lint.rs refuses the eager one.
 #![expect(clippy::unnecessary_lazy_evaluations, reason = "Fault has drop glue: an eager Fault costs a destructor call on every success")]
 #[cfg(test)]
 mod callint_tests;
