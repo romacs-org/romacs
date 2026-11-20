@@ -306,6 +306,24 @@
     (draw :type 'answered :request-id "h" :how 'harness)
     (should (string-match-p "settled by the harness" (romacs-agent-log-tests--transcript)))))
 
+(ert-deftest romacs-agent-log-asks-left-open-say-how-they-ended ()
+  (romacs-agent-log-tests--with
+    (dolist (id '("a" "b" "c")) (puthash id t (romacs-agent-approvals session)))
+    (dolist (id '("a" "b" "c")) (draw :type 'approval :request-id id :tool "Bash"))
+    ;; Answered by the user, its answer never taken; one still waited on.
+    (draw :type 'attributed :request-id "a" :actor '(:kind "user") :decision "allow" :scope "once")
+    (remhash "a" (romacs-agent-approvals session))
+    (remhash "b" (romacs-agent-approvals session))
+    (draw :type 'done)
+    (let ((text (romacs-agent-log-tests--transcript)))
+      (should (string-match-p "an answer not delivered" text))
+      (should (string-match-p "the turn ended with it unanswered" text)))
+    (should (equal (mapcar #'car romacs-agent-log--asks) '("c")))
+    (remhash "c" (romacs-agent-approvals session))
+    (draw :type 'exit :status 1)
+    (should (string-match-p "the harness exited with it unanswered" (romacs-agent-log-tests--transcript)))
+    (should-not romacs-agent-log--asks)))
+
 (ert-deftest romacs-agent-log-a-block-waits-until-its-answer-is-written ()
   (romacs-agent-log-tests--with
     (puthash "q" t (romacs-agent-approvals session))

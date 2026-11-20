@@ -148,6 +148,8 @@ NEWLINES the line breaks it ended in so far, held until text follows.")
   "Approval blocks drawn, by request id: (START . END) markers.")
 (defvar-local romacs-agent-log--attributed nil
   "Request ids whose answer was drawn with who gave it.")
+(defvar-local romacs-agent-log--delivered nil
+  "Request ids whose answer the harness's records have: it took it.")
 (defvar-local romacs-agent-log--state nil "What the separator last said.")
 (defvar-local romacs-agent-log--width nil "The columns the separator was last made for.")
 (defvar-local romacs-agent-log--prompts nil
@@ -587,6 +589,21 @@ Live, in a chat no window shows, the echo area says so too."
         (put-text-property start end 'keymap romacs-agent-log-transcript-map)))
     (setq romacs-agent-log--asks (delq block romacs-agent-log--asks))))
 
+(defun romacs-agent-log--close-asks (session event how)
+  "SESSION's turn ended or its harness exited (HOW, `turn-end' or `exit',
+at EVENT) with approvals drawn open: each it no longer waits on settled,
+and said why.  One answered whose answer the harness's records never had
+was not delivered."
+  (dolist (ask romacs-agent-log--asks)
+    (when-let* ((id (car ask))
+                ((not (gethash id (romacs-agent-approvals session)))))
+      (romacs-agent-log--settle-ask id)
+      (romacs-agent-log--note event (cond ((and (member id romacs-agent-log--attributed)
+                                                (not (member id romacs-agent-log--delivered)))
+                                           "an answer not delivered: the harness never took it")
+                                          ((eq how 'exit) "the harness exited with it unanswered")
+                                          (t "the turn ended with it unanswered"))))))
+
 (defun romacs-agent-log--answer-text (actor decision scope reason &optional answers)
   "Who answered, and how: ACTOR a plist of :kind (\"user\", \"policy\",
 \"harness\" or \"unknown\"), :login and :client; DECISION allow or deny;
@@ -619,6 +636,7 @@ from a client other than this editor says which."
   "Draw answer EVENT, from the harness's records: its block settled, and,
 unless a note said who gave it, that it was answered."
   (let ((id (plist-get event :request-id)))
+    (push id romacs-agent-log--delivered)
     (romacs-agent-log--settle-ask id)
     (unless (member id romacs-agent-log--attributed)
       (romacs-agent-log--line event 'answer
@@ -696,6 +714,7 @@ unless a note said who gave it, that it was answered."
     ('plan (romacs-agent-log--line event 'plan (concat (propertize "📋 Plan\n" 'face 'romacs-agent-log-prompt)
                                                        (plist-get event :text))))
     ('done (setq romacs-agent-log--current nil romacs-agent-log--early nil)
+           (romacs-agent-log--close-asks session event 'turn-end)
            (romacs-agent-log--done event))
     ('error (romacs-agent-log--line event 'error (concat "✘ " (or (plist-get event :text) "error")) 'romacs-agent-log-denied))
     ('unstarted (romacs-agent-log--line event 'error (concat "✘ " (or (plist-get event :text) "never started"))
@@ -708,6 +727,7 @@ unless a note said who gave it, that it was answered."
                                                       (car (romacs-agent-log--lines (plist-get event :text)
                                                                                     romacs-agent-log-output-lines)))))
     ('exit (setq romacs-agent-log--current nil romacs-agent-log--early nil)
+           (romacs-agent-log--close-asks session event 'exit)
            (unless (and (romacs-agent--per-turn-p session) (eql (plist-get event :status) 0))
              (romacs-agent-log--note event (format "harness exited (%s)" (plist-get event :status)))))
     ('renewed (romacs-agent-log--note event (format "renewed: a new conversation%s"
