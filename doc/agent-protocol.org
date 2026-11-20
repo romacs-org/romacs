@@ -536,9 +536,10 @@ paging ever holds live delivery back.
     ={"type":"answer","request","by","decision","scope","reason","login","client"}=,
     which replays as an =attributed= event; then it writes the response
     line.
-  - The note and the response line carry the same =romacsRequest= tag.
-    An =answer= note counts as an answer only once the response with its
-    tag is recorded.  A note whose response never came (the process
+  - The note names the harness's request id; with =handle.run=, the
+    run it was asked in, that pairs it with its response line.  An
+    =answer= note counts as an answer only once that response is
+    recorded.  A note whose response never came (the process
     died between them) leaves the request pending, and is drawn as "an
     answer not delivered".
   - The service reads the actor from that note.  An answer without one
@@ -560,11 +561,11 @@ paging ever holds live delivery back.
   - a digest of its params;
   - state and outcome;
   - for =start=, the new session's id;
-  - for =send= and =answer=, the =romacsRequest= tag its =in= record
-    carries.
+  - for =send=, the =romacsRequest= tag its =in= record carries; for
+    =answer=, its request's handle.
 - *Committed before its effect.*  A command's row is committed with
   state =admitted= before it takes effect.
-  - Every line the service writes for a command carries the command's
+  - Every message the service writes for a =send= carries the command's
     =romacsRequest= tag, a per-turn run's =--input= prompt included.  The
     v0.1 host takes the tag (=--input-tag=) into the prompt's =in=
     record, so recovery always finds a delivered command by its tag.
@@ -595,8 +596,9 @@ paging ever holds live delivery back.
   resolved from the records, never run again:
   - a =start= reports the last milestone reached with the session's id;
     one never =allocated= is =unknown=;
-  - a =send= or =answer= whose =romacsRequest= tag is in an =in= record
-    is =recorded=.  For an answer that only confirms the recording: its
+  - a =send= whose =romacsRequest= tag is in an =in= record, or an
+    =answer= whose response to its request is in its run's records, is
+    =recorded=.  For an answer that only confirms the recording: its
     request stays =answering= until one of its own clearing events (its
     =written= record, settlement, the turn's end, the exit) is in the
     records too;
