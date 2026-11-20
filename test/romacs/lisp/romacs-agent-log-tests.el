@@ -436,5 +436,58 @@
     (draw :type 'tool-output :id "x" :text "line 2\n")
     (should (string-match-p "⋮ running: 2 lines so far\n    line 1\n    line 2" (romacs-agent-log-tests--transcript)))))
 
+;; A chat's source.
+
+(cl-defstruct (romacs-agent-log-tests--source (:constructor romacs-agent-log-tests--source)) calls approvals)
+
+(defun romacs-agent-log-tests--called (source &rest call)
+  (push call (romacs-agent-log-tests--source-calls source)))
+
+(cl-defmethod romacs-agent-log-source-fill ((source romacs-agent-log-tests--source) session)
+  (romacs-agent-log-tests--called source 'fill)
+  (romacs-agent-log-draw session '(:type input :text "from the source" :seq 1 :last t)))
+(cl-defmethod romacs-agent-log-source-send ((source romacs-agent-log-tests--source) _session text &optional when)
+  (romacs-agent-log-tests--called source 'send text when))
+(cl-defmethod romacs-agent-log-source-interrupt ((source romacs-agent-log-tests--source) _session)
+  (romacs-agent-log-tests--called source 'interrupt))
+(cl-defmethod romacs-agent-log-source-respond ((source romacs-agent-log-tests--source) _session id allow reason)
+  (romacs-agent-log-tests--called source 'respond id allow reason))
+(cl-defmethod romacs-agent-log-source-seen ((source romacs-agent-log-tests--source) _session)
+  (romacs-agent-log-tests--called source 'seen))
+(cl-defmethod romacs-agent-log-source-approvals ((source romacs-agent-log-tests--source) _session)
+  (romacs-agent-log-tests--source-approvals source))
+
+(ert-deftest romacs-agent-log-reads-and-acts-through-its-source ()
+  ;; A chat of another source draws what it gives and acts through it
+  ;; alone: none of this editor's sessions is touched.
+  (let* ((source (romacs-agent-log-tests--source :approvals (make-hash-table :test #'equal)))
+         (session (romacs-agent--make :id "S-remote" :harness 'claude :state 'running :title "far"))
+         (romacs-agent-approval-policy 'ask)
+         (buffer (romacs-agent-log-chat session nil source)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'romacs-agent-send) (lambda (&rest _) (error "Sent here")))
+                  ((symbol-function 'romacs-agent-send-later) (lambda (&rest _) (error "Queued here")))
+                  ((symbol-function 'romacs-agent-interrupt) (lambda (&rest _) (error "Interrupted here")))
+                  ((symbol-function 'romacs-agent-respond) (lambda (&rest _) (error "Answered here")))
+                  ((symbol-function 'romacs-agent-mark-seen) (lambda (&rest _) (error "Seen here"))))
+          (with-current-buffer buffer
+            (should (string-match-p "from the source" (buffer-string)))
+            (cl-flet ((type (text) (goto-char (point-max)) (insert text)))
+              (type "now") (romacs-agent-log-send)
+              (type "later") (romacs-agent-log-queue)
+              (romacs-agent-log-interrupt)
+              (type "after") (romacs-agent-log-interrupt-and-send))
+            (puthash "r1" t (romacs-agent-log-tests--source-approvals source))
+            (romacs-agent-log-draw session '(:type approval :request-id "r1" :tool "Bash"))
+            (goto-char (point-max))
+            (romacs-agent-log-allow)
+            (romacs-agent-log-deny "no")
+            (romacs-agent-log-show session)
+            (should (equal (reverse (romacs-agent-log-tests--source-calls source))
+                           '((fill) (send "now" nil) (send "later" later) (interrupt) (interrupt) (send "after" first)
+                             (respond "r1" t nil) (respond "r1" nil "no") (seen))))))
+      (remhash "S-remote" romacs-agent-log--chats)
+      (kill-buffer buffer))))
+
 (provide 'romacs-agent-log-tests)
 ;;; romacs-agent-log-tests.el ends here
