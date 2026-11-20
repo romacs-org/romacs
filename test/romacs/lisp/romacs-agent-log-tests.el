@@ -150,10 +150,10 @@
     (let ((romacs-agent-approval-policy 'allow))
       (draw :type 'approval :request-id "p" :tool "Edit")
       (should-not (string-match-p "⚠" (romacs-agent-log-tests--transcript)))
-      ;; In plan mode the user is asked.
+      ;; In plan mode too: plan mode is the harness's own.
       (setf (romacs-agent-options session) '(:plan t))
       (draw :type 'approval :request-id "q" :tool "Edit")
-      (should (string-match-p "⚠ The agent wants to run Edit" (romacs-agent-log-tests--transcript))))))
+      (should-not (string-match-p "⚠" (romacs-agent-log-tests--transcript))))))
 
 (ert-deftest romacs-agent-log-point-moves-freely-while-a-turn-runs ()
   (romacs-agent-log-tests--with
@@ -627,6 +627,17 @@
     (draw :type 'answered :request-id "live")
     (should-not (text-property-any (point-min) romacs-agent-log--end 'romacs-agent-log-keys t))))
 
+(ert-deftest romacs-agent-log-a-plan-takes-no-rule-for-the-session ()
+  (romacs-agent-log-tests--with
+    (puthash "p" t (romacs-agent-approvals session))
+    (draw :type 'approval :request-id "p" :tool "ExitPlanMode" :plan t :user t)
+    (let (answered)
+      (cl-letf (((symbol-function 'romacs-agent-respond) (lambda (&rest args) (push args answered))))
+        (should-error (romacs-agent-log-allow-always) :type 'user-error)
+        (should-not answered)
+        (romacs-agent-log-allow)
+        (should (equal (nth 2 (car answered)) t))))))
+
 (ert-deftest romacs-agent-log-a-block-waits-until-its-answer-is-written ()
   (romacs-agent-log-tests--with
     (puthash "q" t (romacs-agent-approvals session))
@@ -786,26 +797,6 @@
     (romacs-agent-log--separator)
     (should (string-match-p "working" (buffer-substring-no-properties romacs-agent-log--end romacs-agent-log--input)))))
 
-(ert-deftest romacs-agent-log-proceeding-with-a-plan-leaves-plan-mode ()
-  (let ((session (romacs-agent--make :id "P" :harness 'claude :options '(:plan t)
-                                     :tools (make-hash-table :test #'equal) :streamed (make-hash-table :test #'equal)))
-        (request (make-hash-table :test #'equal))
-        planned)
-    (puthash "tool_name" "ExitPlanMode" request)
-    (puthash "p" request (romacs-agent-approvals session))
-    (romacs-agent--raise session '(:type approval :request-id "p" :tool "ExitPlanMode" :plan t :user t))
-    (cl-letf (((symbol-function 'romacs-agent--line) #'ignore)
-              ((symbol-function 'romacs-agent--note) #'ignore)
-              ((symbol-function 'romacs-agent-set-plan) (lambda (_s on) (push on planned))))
-      ;; Kept planning: still in plan mode.
-      (romacs-agent-respond session "p" nil "more" 'user)
-      (should-not planned)
-      ;; Proceeding, however answered (here, the board's way): out of it.
-      (puthash "p2" request (romacs-agent-approvals session))
-      (romacs-agent--raise session '(:type approval :request-id "p2" :tool "ExitPlanMode" :plan t :user t))
-      (romacs-agent-respond session "p2" t nil 'user)
-      (should (equal planned '(nil))))))
-
 (ert-deftest romacs-agent-log-an-answer-is-noted-with-its-actor ()
   (let ((session (romacs-agent--make :id "N" :harness 'claude :seq 0
                                      :tools (make-hash-table :test #'equal) :streamed (make-hash-table :test #'equal)))
@@ -960,8 +951,19 @@
               (kill-buffer local))))
       (kill-buffer buffer))))
 
-(provide 'romacs-agent-log-tests)
-;;; romacs-agent-log-tests.el ends here
+(ert-deftest romacs-agent-log-a-hidden-request-is-not-answered-blind ()
+  ;; Narrowed away from what waits, C-c C-y says so rather than answer.
+  (romacs-agent-log-tests--with
+    (draw :type 'delta :text "before")
+    (puthash "q" t (romacs-agent-approvals session))
+    (draw :type 'approval :request-id "q" :tool "Bash" :input (romacs-agent-log-tests--input "command" "make"))
+    (let (answered)
+      (cl-letf (((symbol-function 'romacs-agent-respond) (lambda (&rest args) (push args answered))))
+        (save-restriction
+          (narrow-to-region (point-min) (+ (point-min) 3))
+          (goto-char (point-min))
+          (should-error (romacs-agent-log-allow) :type 'user-error)))
+      (should-not answered))))
 
 ;;; Keys
 
@@ -1057,3 +1059,6 @@ none when dropped.")
               (should (string-suffix-p ".png" path))
               (should (file-exists-p path))))
         (delete-directory dir t)))))
+
+(provide 'romacs-agent-log-tests)
+;;; romacs-agent-log-tests.el ends here
