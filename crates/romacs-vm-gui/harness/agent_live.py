@@ -59,6 +59,8 @@ TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
              said so and the board drawn again.
   chat_menu  the chat's actions menu by its key, its workers at work,
              across the UI review's themes.
+  history_view  a harness transcript's read-only view, as a chat's
+             transcript, across the UI review's themes.
   select     a new model or effort in a running session: live between
              turns, armed during one, restarted when refused, carried by
              Codex's next turn, across a server restart.
@@ -3127,6 +3129,45 @@ def chat_menu(args, base):
         a.close()
 
 
+def history_view(args, base):
+    """A harness transcript's read-only view (the agent board's history),
+drawn as a chat's transcript, across UI_THEMES."""
+    a = Agents(args, base, 'hv')
+    try:
+        a.up()
+        a.work.mkdir(parents=True, exist_ok=True)
+        lines = [
+            {'type': 'user', 'message': {'role': 'user', 'content': 'list the files here, then say how many'}},
+            {'type': 'assistant', 'message': {'id': 'm1', 'content': [
+                {'type': 'text', 'text': 'Listing them.'},
+                {'type': 'tool_use', 'id': 't1', 'name': 'Bash', 'input': {'command': 'ls', 'description': 'List files'}}]}},
+            {'type': 'user', 'message': {'content': [{'type': 'tool_result', 'tool_use_id': 't1', 'content': 'a.txt\nb.txt\nnotes.md'}]}},
+            {'type': 'assistant', 'message': {'id': 'm2', 'content': [
+                {'type': 'text', 'text': 'There are **three** files: `a.txt`, `b.txt` and `notes.md`.'}]}},
+        ]
+        path = a.work / 'transcript.jsonl'
+        # Compact, as Claude Code writes its transcripts (the reader takes
+        # each line's "type":"..." as written).
+        path.write_text(''.join(json.dumps(line, separators=(',', ':')) + '\n' for line in lines))
+        a.eval(f'(progn (romacs-agent-history-open (list :path {lisp(path)} :title "list the files" :harness (quote claude) '
+               f':provider "claude" :id "h1" :cwd {lisp(a.work)})) (delete-other-windows) t)')
+        a.keyboard_ready()
+        shots, texts = [], {}
+        for theme in UI_THEMES:
+            a.eval(f'(progn (mapc (function disable-theme) custom-enabled-themes) (load-theme (quote {theme}) t) (redisplay t) t)')
+            time.sleep(.4)
+            texts[theme] = parity_live.read_sexp(a.eval('(with-current-buffer "*history: list the files*" '
+                                                        '(buffer-substring-no-properties (point-min) (point-max)))'))
+            path_png = base / f'{theme}-history.png'
+            subprocess.run([f'{args.tools}/grim', str(path_png)], env=a.env, check=True, timeout=30)
+            shots.append(str(path_png))
+        text = texts[UI_THEMES[0]]
+        return {'ok': ('list the files here' in text and 'three' in text and 'a.txt' in text),
+                'text': text[:800], 'shots': shots}
+    finally:
+        a.close()
+
+
 LONG_WORKER = 'review every caller of the display protocol and report what each one reads'
 UI_RUN_PROMPT = 'Run this shell command and wait for it: for i in $(seq 1 60); do echo step $i; sleep 0.5; done. Then say done.'
 CODEX_PROMPT = ('Think briefly, then run this shell command and wait for it: '
@@ -3676,7 +3717,7 @@ def history_real(args, base):
         a.close()
 
 
-WORKFLOWS = {'chat_menu': chat_menu, 'host': host, 'sockets': sockets, 'reap': reap, 'deadline': deadline, 'providers': providers, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe,
+WORKFLOWS = {'chat_menu': chat_menu, 'history_view': history_view, 'host': host, 'sockets': sockets, 'reap': reap, 'deadline': deadline, 'providers': providers, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe,
              'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race, 'restart-rollback': restart_rollback, 'restart-hang': restart_hang, 'renew': renew,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
              'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode,

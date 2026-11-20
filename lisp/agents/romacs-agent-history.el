@@ -49,6 +49,10 @@ one with nothing to resume.")
 
 ;;; Reading
 
+(defconst romacs-agent-history--type-re "\"type\"[ \t]*:[ \t]*\"\\([^\"]*\\)\""
+  "A line's \"type\" and its value, as any JSON writer spaces it: a
+transcript a harness writes compactly, or another wrote again.")
+
 (defun romacs-agent-history--read (file beg end keep)
   "The JSON objects of FILE's complete lines between bytes BEG and END, in
 order, that KEEP accepts: it is called with a line's first \"type\" and
@@ -65,7 +69,7 @@ BEG or END cuts is left out."
       (while (search-forward "\n" nil t)
         (let ((line-end (1- (point))) (line-start (line-beginning-position 0)))
           (goto-char line-start)
-          (when (and (re-search-forward "\"type\":\"\\([^\"]*\\)\"" line-end t)
+          (when (and (re-search-forward romacs-agent-history--type-re line-end t)
                      (funcall keep (match-string 1) line-end))
             (let ((object (ignore-errors
                             (json-parse-string (decode-coding-string (buffer-substring-no-properties line-start line-end)
@@ -77,7 +81,7 @@ BEG or END cuts is left out."
 
 (defun romacs-agent-history--payload-type (line-end)
   "The next \"type\" on the line, before LINE-END: a Codex payload's."
-  (and (re-search-forward "\"type\":\"\\([^\"]*\\)\"" line-end t) (match-string 1)))
+  (and (re-search-forward romacs-agent-history--type-re line-end t) (match-string 1)))
 
 (defun romacs-agent-history--title (text)
   "TEXT's first line, as a title (`romacs-agent--task-line'); nil for
@@ -186,7 +190,7 @@ project it was run, or nil."
     ("event_msg"
      (pcase (romacs-agent-history--payload-type line-end)
        ((or "user_message" "task_complete" "token_count") t)
-       ("item_completed" (save-excursion (re-search-forward "\"item\":{\"type\":\"UserMessage\"" line-end t)))))))
+       ("item_completed" (save-excursion (re-search-forward "\"item\"[ \t]*:[ \t]*{[ \t]*\"type\"[ \t]*:[ \t]*\"UserMessage\"" line-end t)))))))
 
 (defun romacs-agent-history--codex-files (dir limit)
   "Codex's rollouts under DIR, newest days first, until LIMIT are found:
