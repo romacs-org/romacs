@@ -30,8 +30,16 @@ nil.")
   "Whether the streaming reply defines a link reference, so it is read
 whole each time: a reference anywhere in it may name that definition.")
 
-(defconst romacs-agent-log-faces--definition "^ \\{0,3\\}\\[[^]\n]+\\]:"
-  "A line that defines a Markdown link reference.")
+(defun romacs-agent-log-faces--defines-p (beg end)
+  "Whether BEG..END, just faced, defines a link reference: a `[label]:'
+the parse faced as a definition (its URL face), so none in code, and
+one in a quote or a list item too."
+  (let ((url (alist-get 'url romacs-markdown-faces)) (found nil))
+    (save-excursion
+      (goto-char beg)
+      (while (and (not found) (re-search-forward "\\[[^]\n]+\\]:" end t))
+        (setq found (and url (memq url (ensure-list (get-text-property (match-beginning 0) 'face)))))))
+    found))
 
 (defvar-local romacs-agent-log-faces--failed nil
   "Why the streaming reply's faces failed, or nil.")
@@ -44,17 +52,19 @@ whole each time: a reference anywhere in it may name that definition.")
 read as a document from the top-level block there, the blocks from the
 one before where it last ended written again; keep why, should it fail."
   (unless romacs-agent-log-faces--failed
-    (unless romacs-agent-log-faces--whole
-      (save-excursion
-        (goto-char (or romacs-agent-log-faces--current start))
-        (setq romacs-agent-log-faces--whole (re-search-forward romacs-agent-log-faces--definition end t))))
     (condition-case err
         (romacs-agent-log--writing
-          (let ((from (if romacs-agent-log-faces--whole
-                          ;; Read whole: a definition reaches back as well.
-                          (progn (romacs-markdown-fontify-region start end) start)
-                        (romacs-markdown-fontify-region (or romacs-agent-log-faces--current start) end
-                                                        romacs-agent-log-faces--end))))
+          (let* ((read-from (or romacs-agent-log-faces--current start))
+                 (from (if romacs-agent-log-faces--whole
+                           ;; Read whole: a definition reaches back as well.
+                           (progn (romacs-markdown-fontify-region start end) start)
+                         (romacs-markdown-fontify-region read-from end romacs-agent-log-faces--end))))
+            ;; A definition just read: whole from now on, and now.
+            (when (and (not romacs-agent-log-faces--whole)
+                       (romacs-agent-log-faces--defines-p read-from end))
+              (setq romacs-agent-log-faces--whole t)
+              (romacs-markdown-fontify-region start end)
+              (setq from start))
             (setq romacs-agent-log-faces--current (set-marker (or romacs-agent-log-faces--current (make-marker)) from)
                   romacs-agent-log-faces--end (set-marker (or romacs-agent-log-faces--end (make-marker)) end))))
       (error (setq romacs-agent-log-faces--failed (error-message-string err))

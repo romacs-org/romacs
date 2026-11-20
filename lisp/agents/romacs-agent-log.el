@@ -329,12 +329,14 @@ else (nil . 0), at the end."
   (let ((parent (romacs-agent-log--block (plist-get event :parent))))
     (if parent (cons parent (1+ (plist-get (cdr parent) :depth))) (cons nil 0))))
 
-(defun romacs-agent-log--close-stream ()
-  "End what streams: a message gets its Markdown faces."
+(defun romacs-agent-log--close-stream (&optional discard)
+  "End what streams: a message gets its Markdown faces, unless DISCARD,
+its text about to go."
   (when romacs-agent-log--stream
     (pcase-let ((`(,kind ,start ,at ,_) romacs-agent-log--stream))
       (setq romacs-agent-log--stream nil)
-      (when (eq kind 'text) (romacs-agent-log-faces-end start at))
+      (if discard (romacs-agent-log-faces-drop)
+        (when (eq kind 'text) (romacs-agent-log-faces-end start at)))
       (set-marker start nil)
       (set-marker at nil))))
 
@@ -1199,8 +1201,7 @@ where the chat reads and acts on SESSION, this editor by default
   "Empty the current chat's transcript, to draw its session afresh: what it
 drew forgotten, its markers let go, its composer kept."
   ;; What streams is dropped, not faced: its text goes too.
-  (romacs-agent-log-faces-drop)
-  (romacs-agent-log--close-stream)
+  (romacs-agent-log--close-stream 'discard)
   (when romacs-agent-log--blocks
     (mapc #'romacs-agent-log--close-block (hash-table-values romacs-agent-log--blocks)))
   (pcase-dolist (`(,_ ,start . ,end) romacs-agent-log--asks) (set-marker start nil) (set-marker end nil))
