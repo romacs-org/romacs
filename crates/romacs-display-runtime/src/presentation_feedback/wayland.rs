@@ -246,10 +246,8 @@ impl Session {
         size: (u32, u32),
         scale: f64,
     ) -> Result<(), String> {
-        let surface = self.guest.surface(window)?;
-        self.next_submission += 1;
         let submission = Submission {
-            serial: self.next_submission,
+            serial: self.next_submission + 1,
             draw_seq: romacs_display_protocol::present_trace::current_draw(),
             frame,
             layout,
@@ -257,11 +255,15 @@ impl Session {
             height: size.1,
             scale,
         };
-        self.receipts
-            .pending
-            .requested(submission.serial, observe_platform_now());
+        let surface = window
+            .cast_ref::<winit::platform::wayland::Window>()
+            .ok_or("presentation receipts require a Wayland window")?
+            .surface();
+        let requested = observe_platform_now();
         self.presentation
-            .feedback(&surface, &self.queue.handle(), submission);
+            .feedback(surface, &self.queue.handle(), submission);
+        self.next_submission = submission.serial;
+        self.receipts.pending.requested(submission.serial, requested);
         tracing::debug!(?submission, "requested native presentation feedback");
         Ok(())
     }

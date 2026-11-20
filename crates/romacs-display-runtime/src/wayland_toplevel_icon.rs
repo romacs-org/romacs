@@ -147,9 +147,9 @@ impl WaylandIconSession {
         protocol_icon.set_name(ROMACS_APPLICATION.icon_name().as_str().to_owned());
         protocol_icon.add_buffer(&buffer, 1);
 
-        let toplevel = self.guest.toplevel(window).map_err(ToplevelIconError::Protocol)?;
-
-        self.manager.set_icon(&toplevel, Some(&protocol_icon));
+        self.guest
+            .set_toplevel_icon(&self.manager, window, &protocol_icon)
+            .map_err(ToplevelIconError::Protocol)?;
 
         // set_icon snapshots the immutable icon. Destroying these temporary
         // protocol objects also makes their Rust/file resources deterministic.

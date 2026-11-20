@@ -13,16 +13,19 @@
 //! winit's display connected for the rest of the process: its event queues
 //! hold its backend beyond the guest, so no drop order could bound them, and
 //! winit makes one event loop, so one display, a process. A window's objects
-//! are taken only from a window on the guest's display.
+//! are taken only from a window on the guest's display, and only for the one
+//! request a function here makes: winit owns them. (A window's `wl_surface`
+//! needs none of this: winit lends it as a proxy, `Window::surface`.)
 
 use std::ffi::c_void;
 use std::ptr::NonNull;
 
-use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
+use raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
 use wayland_backend::client::{Backend, ObjectId};
-use wayland_client::protocol::wl_surface::WlSurface;
 use wayland_client::{Connection, Proxy};
 use wayland_protocols::xdg::shell::client::xdg_toplevel::XdgToplevel;
+use wayland_protocols::xdg::toplevel_icon::v1::client::xdg_toplevel_icon_manager_v1::XdgToplevelIconManagerV1;
+use wayland_protocols::xdg::toplevel_icon::v1::client::xdg_toplevel_icon_v1::XdgToplevelIconV1;
 use winit::event_loop::OwnedDisplayHandle;
 use winit::platform::wayland::WindowExtWayland;
 use winit::window::Window;
@@ -49,6 +52,8 @@ fn kept_display(display: &OwnedDisplayHandle) -> Option<NonNull<c_void>> {
 pub(crate) struct Guest {
     connection: Connection,
     display: OwnedDisplayHandle,
+    /// The address of the `wl_display` the guest borrows, as it made it.
+    raw: usize,
 }
 
 impl Guest {
@@ -64,6 +69,7 @@ impl Guest {
         Some(Self {
             connection: Connection::from_backend(backend),
             display,
+            raw: raw.as_ptr() as usize,
         })
     }
 
@@ -75,56 +81,46 @@ impl Guest {
         &self.display
     }
 
-    /// Whether WINDOW lives on this guest's display.
-    pub(crate) fn serves(&self, window: &dyn Window) -> bool {
-        wayland_display(window).is_some_and(|display| Some(display) == wayland_display(&self.display))
+    /// Show ICON as WINDOW's toplevel icon, through MANAGER.
+    pub(crate) fn set_toplevel_icon(
+        &self,
+        manager: &XdgToplevelIconManagerV1,
+        window: &dyn Window,
+        icon: &XdgToplevelIconV1,
+    ) -> Result<(), String> {
+        // MANAGER and ICON on this guest's backend: their liveness check and
+        // their use in the request then hold one lock, as their destruction does.
+        if !self.owns(manager) || !self.owns(icon) {
+            return Err("the icon is not this guest's".into());
+        }
+        let id = self.window_toplevel(window)?;
+        let toplevel = XdgToplevel::from_id(&self.connection, id).map_err(|error| error.to_string())?;
+        manager.set_icon(&toplevel, Some(icon));
+        Ok(())
     }
 
-    /// WINDOW's `wl_surface`, for requests on this guest.
-    pub(crate) fn surface(&self, window: &dyn Window) -> Result<WlSurface, String> {
-        let id = self.window_object(window, WindowObject::Surface)?;
-        WlSurface::from_id(&self.connection, id).map_err(|error| error.to_string())
+    /// Whether PROXY is an object of this guest's backend.
+    fn owns(&self, proxy: &impl Proxy) -> bool {
+        proxy.backend().upgrade() == Some(self.connection.backend())
     }
 
-    /// WINDOW's `xdg_toplevel`, for requests on this guest.
-    pub(crate) fn toplevel(&self, window: &dyn Window) -> Result<XdgToplevel, String> {
-        let id = self.window_object(window, WindowObject::Toplevel)?;
-        XdgToplevel::from_id(&self.connection, id).map_err(|error| error.to_string())
-    }
-
-    fn window_object(&self, window: &dyn Window, object: WindowObject) -> Result<ObjectId, String> {
-        if !self.serves(window) {
+    /// WINDOW's `xdg_toplevel`, for one request on this guest before the
+    /// caller returns: the proxy made of it never leaves this module.
+    fn window_toplevel(&self, window: &dyn Window) -> Result<ObjectId, String> {
+        if wayland_display(window).map(|display| display.as_ptr() as usize) != Some(self.raw) {
             return Err("the window is not on this Wayland display".into());
         }
-        let (interface, proxy) = match object {
-            WindowObject::Surface => match window
-                .window_handle()
-                .map_err(|error| error.to_string())?
-                .as_raw()
-            {
-                RawWindowHandle::Wayland(handle) => (WlSurface::interface(), handle.surface),
-                _ => return Err("the window has no Wayland surface".into()),
-            },
-            WindowObject::Toplevel => (
-                XdgToplevel::interface(),
-                window.xdg_toplevel().ok_or("the window has no xdg_toplevel")?,
-            ),
-        };
-        // SAFETY: PROXY is WINDOW's live wl_surface or xdg_toplevel, as winit
-        // hands them out, and the WINDOW borrow keeps it alive through this
-        // call; from_ptr checks its interface. Winit made it through
-        // wayland-backend, so the id shares its liveness flag: a request after
-        // winit destroys it fails with InvalidId. WINDOW is on the guest's
-        // display (checked above), so the guest's requests reach its owner.
-        // UNSAFE(winit hands out a window's Wayland objects only as raw pointers, and wayland-backend takes one only through ObjectId::from_ptr)
-        unsafe { ObjectId::from_ptr(interface, proxy.as_ptr().cast()) }
+        let toplevel = window.xdg_toplevel().ok_or("the window has no xdg_toplevel")?;
+        // SAFETY: TOPLEVEL is WINDOW's xdg_toplevel. Winit hands it out only
+        // as this pointer, never as a proxy, and destroys it only when the
+        // Window drops, so the WINDOW borrow keeps it alive through this call
+        // and the caller's one request; from_ptr checks its interface. WINDOW
+        // is on the display the guest borrows (checked above), so that request
+        // reaches the object's owner.
+        // UNSAFE(winit hands out a window's xdg_toplevel only as a raw pointer, and wayland-backend takes one only through ObjectId::from_ptr)
+        unsafe { ObjectId::from_ptr(XdgToplevel::interface(), toplevel.as_ptr().cast()) }
             .map_err(|error| error.to_string())
     }
-}
-
-enum WindowObject {
-    Surface,
-    Toplevel,
 }
 
 /// smithay-clipboard on winit's Wayland display.
