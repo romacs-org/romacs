@@ -495,6 +495,7 @@ pub fn regex_compile_lisp_with_translation(
                         laststart = Some(bpos!());
                         pending_exact = None;
                         buf.uses_syntax = true;
+                        buf.reads_table = true;
                         emit_op!(RegexOp::WordBound);
                     }
 
@@ -503,6 +504,7 @@ pub fn regex_compile_lisp_with_translation(
                         laststart = Some(bpos!());
                         pending_exact = None;
                         buf.uses_syntax = true;
+                        buf.reads_table = true;
                         emit_op!(RegexOp::NotWordBound);
                     }
 
@@ -511,6 +513,7 @@ pub fn regex_compile_lisp_with_translation(
                         laststart = Some(bpos!());
                         pending_exact = None;
                         buf.uses_syntax = true;
+                        buf.reads_table = true;
                         emit_op!(RegexOp::WordBeg);
                     }
 
@@ -519,6 +522,7 @@ pub fn regex_compile_lisp_with_translation(
                         laststart = Some(bpos!());
                         pending_exact = None;
                         buf.uses_syntax = true;
+                        buf.reads_table = true;
                         emit_op!(RegexOp::WordEnd);
                     }
 
@@ -536,12 +540,14 @@ pub fn regex_compile_lisp_with_translation(
                                 laststart = Some(bpos!());
                                 pending_exact = None;
                                 buf.uses_syntax = true;
+                        buf.reads_table = true;
                                 emit_op!(RegexOp::SymBeg);
                             }
                             b'>' => {
                                 laststart = Some(bpos!());
                                 pending_exact = None;
                                 buf.uses_syntax = true;
+                        buf.reads_table = true;
                                 emit_op!(RegexOp::SymEnd);
                             }
                             _ => {
@@ -557,6 +563,7 @@ pub fn regex_compile_lisp_with_translation(
                         laststart = Some(bpos!());
                         pending_exact = None;
                         buf.uses_syntax = true;
+                        buf.reads_table = true;
                         emit_op!(RegexOp::SyntaxSpec);
                         emit!(u8::from(SyntaxClass::Word));
                     }
@@ -566,6 +573,7 @@ pub fn regex_compile_lisp_with_translation(
                         laststart = Some(bpos!());
                         pending_exact = None;
                         buf.uses_syntax = true;
+                        buf.reads_table = true;
                         emit_op!(RegexOp::NotSyntaxSpec);
                         emit!(u8::from(SyntaxClass::Word));
                     }
@@ -582,6 +590,7 @@ pub fn regex_compile_lisp_with_translation(
                         laststart = Some(bpos!());
                         pending_exact = None;
                         buf.uses_syntax = true;
+                        buf.reads_table = true;
                         emit_op!(RegexOp::SyntaxSpec);
                         emit!(sc);
                     }
@@ -598,6 +607,7 @@ pub fn regex_compile_lisp_with_translation(
                         laststart = Some(bpos!());
                         pending_exact = None;
                         buf.uses_syntax = true;
+                        buf.reads_table = true;
                         emit_op!(RegexOp::NotSyntaxSpec);
                         emit!(sc);
                     }
@@ -613,6 +623,7 @@ pub fn regex_compile_lisp_with_translation(
                         p += 1;
                         laststart = Some(bpos!());
                         pending_exact = None;
+                        buf.uses_categories = true;
                         emit_op!(RegexOp::CategorySpec);
                         emit!(cat);
                     }
@@ -628,6 +639,7 @@ pub fn regex_compile_lisp_with_translation(
                         p += 1;
                         laststart = Some(bpos!());
                         pending_exact = None;
+                        buf.uses_categories = true;
                         emit_op!(RegexOp::NotCategorySpec);
                         emit!(cat);
                     }
