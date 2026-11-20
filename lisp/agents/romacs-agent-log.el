@@ -354,6 +354,15 @@ its text about to go."
       (set-marker start nil)
       (set-marker at nil))))
 
+(defun romacs-agent-log--kind-before (pos)
+  "The kind of the entry POS ends, or nil: an entry is marked at its first
+character (`romacs-agent-log--entry')."
+  (let ((at pos) (kind nil))
+    (while (and (not kind) (> at (point-min)))
+      (setq at (previous-single-property-change at 'romacs-agent-log-entry nil (point-min))
+            kind (get-text-property at 'romacs-agent-log-entry)))
+    kind))
+
 (defun romacs-agent-log--entry (text kind event)
   "TEXT as one entry of KIND for EVENT: a line or more, ending in a newline,
 known to n and p."
@@ -394,6 +403,10 @@ parent call."
              (held (+ (if new 0 (nth 3 romacs-agent-log--stream)) lead)))
         (when new
           (romacs-agent-log--close-stream)
+          ;; The agent's words after its thinking or its work stand a blank
+          ;; line apart, not run on from them.
+          (when (and (eq kind 'text) (memq (romacs-agent-log--kind-before romacs-agent-log--end) '(thinking tool)))
+            (romacs-agent-log--put "\n"))
           ;; Its line ended at once, its text put before that newline: the
           ;; separator is never on its line.
           (let ((start (copy-marker romacs-agent-log--end)))

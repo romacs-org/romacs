@@ -10,8 +10,8 @@
 ;; - the user's message opens a round: its lines on a tinted surface;
 ;; - a message from elsewhere (another session's, a delegated task's
 ;;   result, a background task's notice) opens one too, but is not the
-;;   user: a ⇠ head saying whom it is from, its first lines quoted dim
-;;   behind a bar, a blank line after;
+;;   user: quoted behind a bar from its head, ← and whom it is from, to
+;;   its first lines, dim, a blank line after;
 ;; - the agent's work keeps its rows; its reply is the text as it is.
 ;; When a round ends, the agent's words before its last are dimmed: its
 ;; answer stands out by what recedes, as in T3 Code's timeline (design:
@@ -67,7 +67,7 @@ before it ends."
 (defun romacs-agent-log-rounds--head (incoming)
   "INCOMING's head: a mark, whom it is from, and its state."
   (let ((state (plist-get incoming :state)))
-    (concat (propertize "⇠ " 'face 'romacs-agent-log-other-mark)
+    (concat (propertize "← " 'face 'romacs-agent-log-other-mark)
             (propertize (or (plist-get incoming :from) "elsewhere") 'face 'romacs-agent-log-other-head)
             (if (and state (not (string-empty-p state)))
                 (propertize (concat " · " state) 'face 'romacs-agent-log-other)
@@ -76,15 +76,21 @@ before it ends."
 (defun romacs-agent-log-rounds-incoming (event incoming)
   "Draw INCOMING, from EVENT, a message from elsewhere: a round of its own,
 not the user's; its first lines dim, RET shows all."
-  (let* ((body (string-trim (or (plist-get incoming :text) "")))
+  (let* ((bar (propertize "┃ " 'face 'romacs-agent-log-other-mark 'romacs-agent-decor t))
+         (body (string-trim (or (plist-get incoming :text) "")))
          (lines (split-string body "\n"))
          (shown (seq-take lines romacs-agent-log-rounds-other-lines))
          (more (- (length lines) (length shown)))
-         (bar (propertize "┃ " 'face 'romacs-agent-log-other-mark 'romacs-agent-decor t))
-         (text (concat "\n" (romacs-agent-log-rounds--head incoming) "\n"
+         ;; One blank line before it: an arrival before ends in its own.
+         ;; Its bar from its head down: the mark of what came in.
+         (text (concat (if (and (not (plist-get event :parent)) (> romacs-agent-log--end (+ (point-min) 1))
+                                (equal (buffer-substring-no-properties (- romacs-agent-log--end 2) romacs-agent-log--end) "\n\n"))
+                           ""
+                         "\n")
+                       bar (romacs-agent-log-rounds--head incoming) "\n"
                        ;; Quoted, each line one row, so its bar runs unbroken.
                        (mapconcat (lambda (line)
-                                    (concat bar (propertize (truncate-string-to-width line romacs-agent-log-output-width
+                                    (concat bar (propertize (truncate-string-to-width line (- romacs-agent-log-output-width (length bar))
                                                                                       nil nil (truncate-string-ellipsis))
                                                             'face 'romacs-agent-log-other)))
                                   shown "\n")

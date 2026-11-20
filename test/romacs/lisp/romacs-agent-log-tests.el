@@ -57,7 +57,7 @@
       (should (string-match-p "∴ I should run wc." text))
       (should (string-match-p "wc -l notes.txt" text))
       ;; The output under its call, before what followed the call.
-      (should (string-match-p "wc -l notes.txt[^\n]*\n  ⎿ 2 notes.txt\nRunning it now." text))
+      (should (string-match-p "wc -l notes.txt[^\n]*\n  ⎿ 2 notes.txt\n\nRunning it now." text))
       (should (string-match-p "✻ 9s · \\$0.12" text)))))
 
 (ert-deftest romacs-agent-log-streams-without-blank-trails ()
@@ -72,7 +72,7 @@
     (draw :type 'message-end)
     (draw :type 'input :text "next")
     (should (equal (romacs-agent-log-tests--transcript)
-                   "∴ I think.\nPara one.\n\nPara two.\n\n❯ next\n"))))
+                   "∴ I think.\n\nPara one.\n\nPara two.\n\n❯ next\n"))))
 
 (ert-deftest romacs-agent-log-long-output-says-how-much-more ()
   (romacs-agent-log-tests--with
@@ -100,12 +100,12 @@
       (draw :type 'tool-output :id "c" :text "one\ntwo\n")
       (draw :type 'tool-output :id "c" :text "three\n")
       (let ((text (romacs-agent-log-tests--transcript)))
-        (should (string-match-p "make[^\n]*\n  ⋮ running: 3 lines so far, the last 2\n    two\n    three\nafter" text)))
+        (should (string-match-p "make[^\n]*\n  ⋮ running: 3 lines so far, the last 2\n    two\n    three\n\nafter" text)))
       (draw :type 'tool :state 'completed :id "c" :output "one\ntwo\nthree")
       (let ((text (romacs-agent-log-tests--transcript)))
         (should-not (string-match-p "so far" text))
         ;; Ended: the same last lines it showed as it ran stay.
-        (should (string-match-p "make[^\n]*\n  ⎿ … 1 earlier line · RET shows all\n    two\n    three\nafter" text))))))
+        (should (string-match-p "make[^\n]*\n  ⎿ … 1 earlier line · RET shows all\n    two\n    three\n\nafter" text))))))
 
 (ert-deftest romacs-agent-log-subagent-work-goes-under-its-call ()
   (romacs-agent-log-tests--with
@@ -117,7 +117,7 @@
     (draw :type 'tool :state 'completed :id "a" :output "2 words")
     (let ((text (romacs-agent-log-tests--transcript)))
       ;; A read says how much it read, its text RET away; a report, under its call.
-      (should (string-match-p "count[^\n]*\n│ ● [^\n]*n.txt[^\n]*· 1 line\n  ⎿ 2 words\nMain goes on." text)))))
+      (should (string-match-p "count[^\n]*\n│ ● [^\n]*n.txt[^\n]*· 1 line\n  ⎿ 2 words\n\nMain goes on." text)))))
 
 (ert-deftest romacs-agent-log-an-approval-waits-in-plain-sight ()
   (romacs-agent-log-tests--with
@@ -717,7 +717,7 @@
     ;; Known by its task alone, then ended: under its call still.
     (draw :type 'task :task "t1" :state 'backgrounded)
     (draw :type 'task :id "b" :state 'completed :summary "slept")
-    (should (string-match-p "  ⎿ Running in the background\n│ · moved to the background\n│ · completed: slept\nroot goes on"
+    (should (string-match-p "  ⎿ Running in the background\n│ · moved to the background\n│ · completed: slept\n\nroot goes on"
                             (romacs-agent-log-tests--transcript)))
     (should-not (romacs-agent-log--block "b"))))
 
@@ -1098,8 +1098,8 @@
       (romacs-agent-log-draw session event))
     (let ((text (romacs-agent-log-tests--transcript)))
       (should (string-match-p "❯ do it" text))
-      (should (string-match-p "⇠ lane x · completed\n┃ done" text))
-      (should (string-match-p "⇠ background task · completed\n┃ Build done" text))
+      (should (string-match-p "┃ ← lane x · completed\n┃ done" text))
+      (should (string-match-p "┃ ← background task · completed\n┃ Build done" text))
       (should-not (string-match-p "❯ Delegated" text)))
     (goto-char (point-min))
     (search-forward "do it")
@@ -1130,8 +1130,8 @@
           :messages (list (list :kind "child" :from '(:name "lane a") :wake '(:state "completed") :text "A done")
                           (list :kind "child" :from '(:name "lane b") :text "B says")))
     (let ((text (romacs-agent-log-tests--transcript)))
-      (should (string-match-p "⇠ lane a · completed\n┃ A done" text))
-      (should (string-match-p "⇠ lane b · child\n┃ B says" text)))
+      (should (string-match-p "┃ ← lane a · completed\n┃ A done" text))
+      (should (string-match-p "┃ ← lane b · child\n┃ B says" text)))
     ;; Its turn anchored: diff and rollback read it.
     (goto-char (point-min))
     (search-forward "A done")
@@ -1304,20 +1304,35 @@ none when dropped.")
     (should (>= (romacs-color-contrast (romacs-color-band (car pair) (cdr pair)) (car pair)) 1.15)))
   ;; None that would hide the text.
   (should-not (romacs-color-band "#000000" "#141414"))
+  ;; Apart, but the text would not read on it.
+  (should-not (romacs-color-band "#000000" "#505050"))
+  ;; The least band that stands apart, found between steps.
+  (let ((band (romacs-color-band "#090909" "#696969" 1.2)))
+    (should band)
+    (should (>= (romacs-color-contrast band "#090909") 1.2))
+    (should (>= (romacs-color-contrast "#696969" band) 3.0)))
   ;; Derived as a theme is enabled and again as it goes, a block to the
   ;; window's edge, as the face is realized.
-  (let ((theme (make-symbol "romacs-rounds-test")))
+  (let ((base (make-symbol "romacs-rounds-base")) (theme (make-symbol "romacs-rounds-test")))
+    (dolist (pair `((,base . "#ffffff") (,theme . "#000000")))
+      (custom-declare-theme (car pair) nil)
+      (put (car pair) 'theme-settings nil))
+    (custom-theme-set-faces base '(default ((t :background "#ffffff" :foreground "#202020"))))
+    (custom-theme-set-faces theme '(default ((t :background "#000000" :foreground "#767676"))))
     (unwind-protect
         (progn
-          (custom-declare-theme theme nil)
-          (put theme 'theme-settings nil)
-          (custom-theme-set-faces theme '(default ((t :background "#000000" :foreground "#767676"))))
-          (enable-theme theme)
-          (should (eq (face-attribute 'romacs-agent-log-you :extend nil t) t))
-          (should (>= (romacs-color-contrast (face-attribute 'romacs-agent-log-you :background nil t) "#000000") 1.15)))
-      (disable-theme theme))
-    (should-not (equal (face-attribute 'romacs-agent-log-you :background nil t)
-                       (romacs-color-band "#000000" "#767676" 1.2))))
+          (enable-theme base)
+          (let ((before (face-attribute 'romacs-agent-log-you :background nil t)))
+            (should (>= (romacs-color-contrast before "#ffffff") 1.2))
+            (enable-theme theme)
+            (should (eq (face-attribute 'romacs-agent-log-you :extend nil t) t))
+            (let ((surface (face-attribute 'romacs-agent-log-you :background nil t)))
+              (should (>= (romacs-color-contrast surface "#000000") 1.2))
+              (should (>= (romacs-color-contrast "#767676" surface) 3.0)))
+            (disable-theme theme)
+            (should (equal (face-attribute 'romacs-agent-log-you :background nil t) before))))
+      (disable-theme theme)
+      (disable-theme base)))
   ;; From its first line through its newline, the blank line before it
   ;; the transcript's.
   (romacs-agent-log-tests--with
@@ -1344,7 +1359,13 @@ none when dropped.")
                                      "Reply to this message with romacs_task_reply(messageId=\"m-1\", text=...)."))
     (draw :type 'delta :text "On it.")
     (let ((text (romacs-agent-log-tests--transcript)))
-      (should (string-match-p "⇠ lead · parent\n┃ Go on\n┃ and on\n\nOn it." text)))
+      (should (string-match-p "┃ ← lead · parent\n┃ Go on\n┃ and on\n\nOn it." text)))
+    ;; Two in a row: one blank line between them.
+    (draw :type 'input :text (concat "<romacs-message id=\"m-2\" kind=\"parent\" from=\"lead\">\nAgain\n</romacs-message>\n"
+                                     "Reply to this message with romacs_task_reply(messageId=\"m-2\", text=...)."))
+    (draw :type 'input :text (concat "<romacs-message id=\"m-3\" kind=\"parent\" from=\"lead\">\nThird\n</romacs-message>\n"
+                                     "Reply to this message with romacs_task_reply(messageId=\"m-3\", text=...)."))
+    (should (string-match-p "┃ Again\n\n┃ ← lead · parent\n┃ Third" (romacs-agent-log-tests--transcript)))
     (goto-char (point-min))
     (search-forward "Go on")
     (should (equal (filter-buffer-substring (line-beginning-position) (line-end-position)) "Go on"))))
