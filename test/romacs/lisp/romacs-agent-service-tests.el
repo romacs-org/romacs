@@ -414,6 +414,24 @@ and `wait' waiting until its form holds (5 s at most)."
         (should (wait (cl-find 'changed (car log) :key #'cadr)))
         (should (equal (gethash "state" (gethash "row" (nth 2 (cl-find 'changed (car log) :key #'cadr)))) "idle"))))))
 
+(ert-deftest romacs-agent-service-binds-a-relay-s-caller ()
+  ;; On the relay's socket the first message says who called; hello then
+  ;; answers that identity.  Anything else first closes the connection.
+  (romacs-agent-service-tests--with
+    (romacs-agent-service-start socket)
+    (let* ((relay (expand-file-name "service-relay.sock" (file-name-directory socket)))
+           (named (romacs-agent-service-tests--raw relay))
+           (unnamed (romacs-agent-service-tests--raw relay)))
+      (process-send-string named "{\"jsonrpc\":\"2.0\",\"method\":\"agents/transport\",\"params\":{\"via\":\"tailnet\",\"login\":\"me@example\",\"peer\":\"Me\"}}\n")
+      (process-send-string named "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"agents/hello\",\"params\":{\"protocol\":\"romacs-agents\",\"version\":[1,0]}}\n")
+      (should (wait (process-get named 'lines)))
+      (should (equal (json-serialize (gethash "identity" (gethash "result" (car (process-get named 'lines)))))
+                     "{\"via\":\"tailnet\",\"login\":\"me@example\",\"peer\":\"Me\"}"))
+      (process-send-string unnamed "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"agents/hello\",\"params\":{\"protocol\":\"romacs-agents\",\"version\":[1,0]}}\n")
+      (should (wait (not (process-live-p unnamed))))
+      (should-not (process-get unnamed 'lines))
+      (delete-process named))))
+
 ;;; History
 
 (defun romacs-agent-service-tests--line (seq key value)
