@@ -234,6 +234,7 @@ and changes nothing; its plan comes as a card to implement."
     (romacs-agent-set-plan session (not (plist-get (romacs-agent-options session) :plan)))))
 
 (defun romacs-agent-menu--plan-label ()
+  "The plan mode entry: whether the chat's session plans now."
   (if (and romacs-agent-log--session (plist-get (romacs-agent-options romacs-agent-log--session) :plan))
       (concat "Plan mode: " (propertize "on" 'face 'bold))
     (concat "Plan mode: " (propertize "off" 'face 'bold))))
