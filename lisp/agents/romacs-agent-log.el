@@ -1322,21 +1322,48 @@ the user first: a finished one is the board's."
       (append (seq-filter (lambda (child) (eq (romacs-agent-state child) 'waiting-approval)) live)
               (seq-remove (lambda (child) (eq (romacs-agent-state child) 'waiting-approval)) live)))))
 
+(defvar-local romacs-agent-log--menu-workers nil
+  "The workers the menu's digits show, a vector: a digit opens the one it
+showed, whatever finished since.")
+
+(defun romacs-agent-log--worker-mark (child)
+  (if (eq (romacs-agent-state child) 'waiting-approval)
+      (propertize "⚠" 'face 'romacs-working-waiting)
+    (propertize "●" 'face 'romacs-working-running)))
+
 (defun romacs-agent-log--worker-label (index)
   "The menu's row of the worker at INDEX: a mark of what it does, then its
-title, so a long title is what the menu cuts; nil when there is none."
-  (when-let* ((child (nth index (romacs-agent-log--workers))))
-    (concat (if (eq (romacs-agent-state child) 'waiting-approval)
-                (propertize "⚠" 'face 'romacs-working-waiting)
-              (propertize "●" 'face 'romacs-working-running))
-            " " (romacs-agent-title child))))
+title, so a long title is what the menu cuts; nil when there is none.
+The first row's drawing takes the workers the digits show."
+  (when (= index 0) (setq romacs-agent-log--menu-workers (vconcat (seq-take (romacs-agent-log--workers) 9))))
+  (when-let* ((child (and (< index (length romacs-agent-log--menu-workers)) (aref romacs-agent-log--menu-workers index))))
+    (concat (romacs-agent-log--worker-mark child) " " (romacs-agent-title child))))
+
+(defun romacs-agent-log--open-worker (child)
+  "Open worker CHILD's chat, unless it finished since it was shown."
+  (unless (memq child (romacs-agent-log--workers))
+    (user-error "%s is no longer at work: the board has it" (romacs-agent-title child)))
+  (romacs-agent-show child '(display-buffer-same-window)))
 
 (defun romacs-agent-log-open-worker ()
-  "Open the chat of the worker on the menu row of the digit just pressed."
+  "Open the chat of the worker the menu showed on the digit just pressed."
   (interactive nil romacs-agent-log-mode)
-  (romacs-agent-show (or (nth (- last-command-event ?1) (romacs-agent-log--workers))
-                         (user-error "No such worker"))
-                     '(display-buffer-same-window)))
+  (let ((index (- last-command-event ?1)))
+    (romacs-agent-log--open-worker (or (and (< -1 index (length romacs-agent-log--menu-workers))
+                                            (aref romacs-agent-log--menu-workers index))
+                                       (user-error "No such worker")))))
+
+(defun romacs-agent-log-workers ()
+  "Open the chat of one of the workers at work, chosen by its title."
+  (interactive nil romacs-agent-log-mode)
+  (let* ((workers (or (romacs-agent-log--workers) (user-error "No worker is at work")))
+         (seen (make-hash-table :test #'equal))
+         (named (mapcar (lambda (child)
+                          (let* ((title (romacs-agent-title child)) (n (cl-incf (gethash title seen 0))))
+                            (cons (if (= n 1) title (format "%s <%d>" title n)) child)))
+                        workers)))
+    (romacs-agent-log--open-worker
+     (cdr (assoc (completing-read "Worker: " (romacs-agent--ordered-table (mapcar #'car named)) nil t) named)))))
 
 (keymap-popup-define romacs-agent-log-actions-map
   "Actions of an agent chat: what waits on you, the turn, what it runs on,
@@ -1380,7 +1407,10 @@ the session, the view."
   "6" ((lambda () (romacs-agent-log--worker-label 5)) romacs-agent-log-open-worker)
   "7" ((lambda () (romacs-agent-log--worker-label 6)) romacs-agent-log-open-worker)
   "8" ((lambda () (romacs-agent-log--worker-label 7)) romacs-agent-log-open-worker)
-  "9" ((lambda () (romacs-agent-log--worker-label 8)) romacs-agent-log-open-worker))
+  "9" ((lambda () (romacs-agent-log--worker-label 8)) romacs-agent-log-open-worker)
+  "o" ((lambda () (let ((n (length (romacs-agent-log--workers))))
+                    (and (> n 9) (format "All %d at work" n))))
+       romacs-agent-log-workers))
 
 (defvar-keymap romacs-agent-log-transcript-map
   :doc "Keys of a chat's transcript: a `keymap' text property, as a view's.
