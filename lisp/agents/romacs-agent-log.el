@@ -224,16 +224,17 @@ policy, as SOURCE has it: no other source's requests."
 and the others of the chat's menu) act on SOURCE's sessions."
   nil)
 
-(cl-defgeneric romacs-agent-log-source-saved (_source _session _draft)
-  "What a saved desktop keeps of a chat of SOURCE's SESSION, its composer
-holding DRAFT, to restore it by (`romacs-agent-log-desktop-restore'); nil
-when it is not restored."
+(cl-defgeneric romacs-agent-log-source-restorable-p (_source)
+  "Whether a chat of SOURCE's is saved with the desktop and restored
+\(`romacs-agent-log-desktop-restore'): it is not, as of no source here."
   nil)
 
 (defun romacs-agent-log--set-session (session)
-  "Make SESSION the current chat's, named by its title."
+  "Make SESSION the current chat's, named by its title; the session this
+editor's session commands act on (`romacs-agent-ui--session'), when they
+act on its source's."
   (setq romacs-agent-log--session session)
-  (setq-local romacs-agent-ui--session session)
+  (setq-local romacs-agent-ui--session (and (romacs-agent-log--commands-p) session))
   (let ((name (romacs-agent-log--buffer-name session)))
     (unless (equal (buffer-name) name) (rename-buffer name t)))
   (romacs-agent-log--header-show))
@@ -994,6 +995,7 @@ where the chat reads and acts on SESSION, this editor by default
       (with-current-buffer buffer
         (romacs-agent-log-mode)
         (setq romacs-agent-log--source source)
+        (unless (romacs-agent-log-source-restorable-p source) (setq-local desktop-save-buffer nil))
         (romacs-agent-log--set-session session)
         (setq romacs-agent-log--end (point-min-marker)
               romacs-agent-log--input (point-min-marker))
@@ -1042,8 +1044,8 @@ session, this editor's by default."
 ;; (desktop.el, warm-restart.el) carries which session it shows and the
 ;; composer's unsent text; its transcript is drawn from the records.
 (defun romacs-agent-log--desktop-save (_dirname)
-  (romacs-agent-log-source-saved romacs-agent-log--source romacs-agent-log--session
-                                 (buffer-substring-no-properties romacs-agent-log--input (point-max))))
+  (list :session (romacs-agent-id romacs-agent-log--session)
+        :draft (buffer-substring-no-properties romacs-agent-log--input (point-max))))
 
 (defun romacs-agent-log-desktop-restore (_file _name misc)
   "The chat of MISC's session with its draft, drawn when a window first
@@ -1102,8 +1104,8 @@ shows it; its session loaded only then, as its records are read."
 (cl-defmethod romacs-agent-log-source-commands-p ((_source romacs-agent-log-local-source))
   t)
 
-(cl-defmethod romacs-agent-log-source-saved ((_source romacs-agent-log-local-source) session draft)
-  (list :session (romacs-agent-id session) :draft draft))
+(cl-defmethod romacs-agent-log-source-restorable-p ((_source romacs-agent-log-local-source))
+  t)
 
 (defun romacs-agent-log--commands-p ()
   "Whether this editor's session commands act on the chat's session."

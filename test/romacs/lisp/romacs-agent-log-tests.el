@@ -493,7 +493,8 @@
           (with-current-buffer buffer
             (should (string-match-p "from the source" (buffer-string)))
             (should-not (romacs-agent-log--commands-p))
-            (should-not (romacs-agent-log--desktop-save nil))
+            (should-not romacs-agent-ui--session)
+            (should-not desktop-save-buffer)
             (cl-flet ((type (text) (goto-char (point-max)) (insert text)))
               (type "now") (romacs-agent-log-send)
               (type "later") (romacs-agent-log-queue)
@@ -513,7 +514,10 @@
             (unwind-protect
                 (progn (should-not (eq local buffer))
                        (should (eq (buffer-local-value 'romacs-agent-log--source local) romacs-agent-log-local))
-                       (should (with-current-buffer local (romacs-agent-log--commands-p))))
+                       (with-current-buffer local
+                         (should (romacs-agent-log--commands-p))
+                         (should romacs-agent-ui--session)
+                         (should desktop-save-buffer)))
               (remhash "S-remote" romacs-agent-log--chats)
               (kill-buffer local))))
       (kill-buffer buffer))))
