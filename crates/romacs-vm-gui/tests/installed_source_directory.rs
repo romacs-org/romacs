@@ -22,9 +22,10 @@ fn an_installation_never_names_the_checkout_it_was_built_from() {
         use std::os::unix::fs::DirBuilderExt;
         std::fs::DirBuilder::new().mode(0o700).create(&store).unwrap();
     }
-    // The runtime tree, a copy of the checkout's (hard links): another tree.
+    // The runtime tree, a copy of the checkout's (shared extents where the
+    // file system has them): another tree, whatever mount the target is on.
     for dir in ["lisp", "etc"] {
-        let copied = Command::new("cp").arg("-al").arg(checkout.join(dir)).arg(&share).status().unwrap();
+        let copied = Command::new("cp").args(["-a", "--reflink=auto"]).arg(checkout.join(dir)).arg(&share).status().unwrap();
         assert!(copied.success(), "copying {dir}");
     }
     let exe = bin.join("romacs-vm-gui");

@@ -922,6 +922,22 @@ pub fn metadata(path: impl AsRef<Path>) -> io::Result<Metadata> {
     result
 }
 
+/// Whether DIR names the directory this process runs in (`.`), by device
+/// and inode, as GNU's emacs_wd asks it of PWD. The working directory is a
+/// per-process fact, pinned in a world build ([`current_dir`]), and so is
+/// this answer: every process asks it again (`startup_directory`), and
+/// nothing of either stat is recorded, as a copy or restore of the store
+/// gives the builder's pinned directory another device and inode.
+pub fn names_working_directory(dir: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let stat = |path: &Path| {
+        let absolute = flight_path(path);
+        crate::flight::stat("stat", || bytes(path), absolute.as_deref(), false, || std::fs::metadata(path),
+                            |s, ns| retime(path, s, ns, true))
+    };
+    matches!((stat(dir), stat(Path::new("."))), (Ok(a), Ok(b)) if a.dev() == b.dev() && a.ino() == b.ino())
+}
+
 pub fn symlink_metadata(path: impl AsRef<Path>) -> io::Result<Metadata> {
     let absolute = flight_path(path.as_ref());
     let result = crate::flight::stat("lstat", || bytes(path.as_ref()), absolute.as_deref(), false, || std::fs::symlink_metadata(&path),
@@ -3293,6 +3309,21 @@ mod tests {
             .collect();
         assert!(named.is_empty(), "records of the checkout: {named:?}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+    /// Whether PWD names the working directory is asked of the host, and
+    /// a build records nothing of it: the builder's pinned directory is
+    /// another file in every copy of its store.
+    #[test]
+    fn whether_pwd_names_the_working_directory_is_no_input() {
+        let here = std::env::current_dir().unwrap();
+        enter_build(Pinned { clock: SystemTime::UNIX_EPOCH, pid: 0, seed: [0; 4] });
+        begin_recipe();
+        let same = names_working_directory(&here);
+        let other = names_working_directory(Path::new("/"));
+        let trace = leave_build().expect("a build trace");
+        assert!(same && (other == (here == Path::new("/"))));
+        let probes: Vec<_> = trace["records"].as_array().unwrap().iter().filter(|r| r["kind"] == "probe").collect();
+        assert!(probes.is_empty(), "{probes:?}");
     }
     /// A late wake samples once, at the next deadline after it.
     #[test]
