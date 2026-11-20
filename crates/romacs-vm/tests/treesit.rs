@@ -284,6 +284,46 @@ fn a_small_edit_shows_for_one_frame_before_its_parse() {
     assert!(!vm.deferred_parse_done(), "zero shows nothing early");
 }
 
+/// An overwrite charges the frame's budget each changed character's old
+/// and new width, not the span it covers: upcasing two letters 10 KB apart
+/// is a small edit, three two-byte letters are not.
+#[test]
+fn casing_two_letters_far_apart_shows_before_its_parse() {
+    let mut vm = gnu_lisp(&[]);
+    vm.set_gc_stress(0);
+    vm.eval_source("(require 'treesit)").unwrap();
+    let setup = format!("(progn {SYSTEM_SETUP} \
+        (defvar romacs-treesit-show-before-parse 8) \
+        (setq parsed 0) \
+        (defalias 'treesit-test-parsed (lambda (_ranges _parser) (setq parsed (1+ parsed)))) \
+        (set-window-buffer nil (get-buffer-create \"ts\")) (set-buffer \"ts\") \
+        (insert \"INT a;\\n\") (dotimes (_ 1000) (insert \"INT X0123;\\n\")) (insert \"INT b;\\n\") \
+        (setq treesit-test-parser (treesit-parser-create 'c)) \
+        (treesit-parser-add-notifier treesit-test-parser 'treesit-test-parsed) \
+        (add-hook 'pre-redisplay-functions (lambda (_) (treesit-parser-root-node treesit-test-parser))) \
+        (add-hook 'after-change-functions (lambda (beg end _) (put-text-property beg end 'fontified nil))) \
+        (setq fontification-functions (list (lambda (pos) (put-text-property pos (point-max) 'fontified t)))))");
+    vm.eval_source(&setup).unwrap();
+    vm.frame_snapshot(800, 600).unwrap();
+    let parsed = |vm: &mut Vm| vm.eval_source("parsed").and_then(|v| v.display()).unwrap();
+    let frame = |vm: &mut Vm| {
+        vm.defer_parse().unwrap();
+        vm.frame_snapshot(800, 600).unwrap();
+        (vm.deferred_parse_done(), parsed(vm))
+    };
+    let start = parsed(&mut vm);
+    let after = |n: i64| (start.parse::<i64>().unwrap() + n).to_string();
+    vm.eval_source("(upcase-region 1 (point-max))").unwrap();
+    assert_eq!(frame(&mut vm), (true, after(0)), "two changed letters wait for no parse");
+    assert_eq!(frame(&mut vm), (false, after(1)), "the frame after parses");
+    vm.eval_source("(downcase-region 1 (point-max))").unwrap();
+    assert_eq!(frame(&mut vm), (false, after(2)), "every letter changed waits for its parse");
+    vm.eval_source("(progn (upcase-region 1 (point-max)) (goto-char 1) (insert \"é;\\né;\\né;\\n\"))").unwrap();
+    assert_eq!(frame(&mut vm), (false, after(3)));
+    vm.eval_source("(upcase-region 1 (point-max))").unwrap();
+    assert_eq!(frame(&mut vm), (false, after(4)), "three é, 2 + 2 bytes each, wait for their parse");
+}
+
 /// Rows of 25 pixels, cells of 10.
 struct Cells;
 impl romacs_vm::LayoutHost for Cells {

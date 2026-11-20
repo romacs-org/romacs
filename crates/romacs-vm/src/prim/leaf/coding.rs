@@ -546,6 +546,14 @@ fn coding_decode_utf8(tokens: &[CodingToken], bom: bool, dos: bool) -> Vec<u32> 
                 if matches!(token, CodingToken::Byte(_)) { after_cr = Some(token); }
             }
             chars.push(i32::from(byte));
+            // The ASCII run that follows, taken whole, unless a CR's
+            // lookahead comes first: one tight loop, not a token step a byte.
+            if after_cr.is_none() {
+                while at < tokens.len() && let CodingToken::Byte(ascii) = tokens[at] && ascii < 128 && !(dos && ascii == b'\r') {
+                    chars.push(i32::from(ascii));
+                    at += 1;
+                }
+            }
             continue;
         }
         let mut bytes = [0; 5];

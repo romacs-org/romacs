@@ -490,16 +490,29 @@ chip of the task's results arriving."
         (delete-region start (prop-match-end found))
         (romacs-agent-ui--insert-at start chip)))))
 
+(defun romacs-agent-ui--parent-of (id)
+  "The id of the session that delegated the one ID names, or nil, loading
+no session: from it loaded, its row, else its manifest (a row not filled
+yet, as an install draws turns before it fills rows).  A preview, held to
+its time, asks the loaded one alone."
+  (if-let* ((child (or (romacs-agent-loaded id)
+                       (and (not romacs-agent-ui--previewing) (romacs-agent-store-row-session id)))))
+      (plist-get (romacs-agent-options child) :parent)
+    (when-let* (((not romacs-agent-ui--previewing))
+                (manifest (romacs-agent--read-json
+                           (expand-file-name "manifest.json" (expand-file-name id (romacs-agent--state-root)))))
+                (options (gethash "options" manifest))
+                ((hash-table-p options)))
+      (romacs-agent--value (gethash "parent" options)))))
+
 (defun romacs-agent-ui--wakes (session text)
   "TEXT, a message to SESSION, as the wakes of tasks it delegated, or nil:
 what the user wrote stays theirs, whatever it looks like."
   (let ((wakes (romacs-agent-tools--wakes-parse text)))
     (and wakes
          (cl-every (lambda (wake)
-                     ;; A preview loads no session: a child loaded, or none.
-                     (when-let* ((child (if romacs-agent-ui--previewing (romacs-agent-loaded (plist-get wake :id))
-                                          (romacs-agent-get (plist-get wake :id)))))
-                       (equal (plist-get (romacs-agent-options child) :parent) (romacs-agent-id session))))
+                     (when-let* ((id (plist-get wake :id)))
+                       (equal (romacs-agent-ui--parent-of id) (romacs-agent-id session))))
                    wakes)
          wakes)))
 
@@ -3640,8 +3653,11 @@ the session stays."
                romacs-agent-chat-mode)
   (let ((session romacs-agent-ui--session))
     (setf (romacs-agent-title session) title (romacs-agent-title-auto session) nil)
-    (romacs-agent--update-manifest session)
+    ;; Its views drawn again now, and once its row says it: those of a
+    ;; session not loaded read the row.
+    (romacs-agent--update-manifest session #'romacs-agent-ui--batch)
     (rename-buffer (format "*agent: %s*" title) t)
+    (romacs-agent--changed session)
     (romacs-agent-ui--batch)))
 
 (defun romacs-agent-chat-effort (effort)

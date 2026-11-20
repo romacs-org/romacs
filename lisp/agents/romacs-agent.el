@@ -850,6 +850,12 @@ instances) is derived again when it changes.")
       unparsed, when it says nothing else: a list of (:id :failed :parent
       :bytes :seq :time), else nil.  A chat's replay draws such calls'
       ends from it and parses their outputs only when they are opened;
+  :usage (HOME CALLBACK)   optional: ask, asynchronously, the usage of
+      the account configured at HOME (its configuration directory,
+      absolute), without a turn: CALLBACK is called once with a
+      `rate-limit' event naming every window that binds the account,
+      or nil when that is not known now.  An account at its limit is
+      asked again and again (`romacs-agent-room-check-interval');
   :suggestions WORDS   optional: the words its command line asks for a
       predicted next prompt by (`romacs-agent--suggestion-words'), each a
       `suggestion' event (:text) after a turn's end;
@@ -1809,9 +1815,15 @@ nothing while `romacs-agent--manifest-frozen'."
         (cl-loop for (name value) on fields by #'cddr do (puthash name value manifest))
         (romacs-agent--write-json file manifest)))))
 
-(defun romacs-agent--update-manifest (session)
-  "Write SESSION's title back to its manifest."
-  (romacs-agent--manifest-put session "title" (romacs-agent-title session) "titleAuto" :false))
+(declare-function romacs-agent-store-title "romacs-agent-store" (id title &optional then again))
+
+(defun romacs-agent--update-manifest (session &optional then)
+  "Write SESSION's title back to its manifest, and to its row: a kept
+state rewrites no row for a rename.  THEN, when given, is called once
+the row is written (`romacs-agent-store-title')."
+  (romacs-agent--manifest-put session "title" (romacs-agent-title session) "titleAuto" :false)
+  (unless (or romacs-agent--manifest-frozen (not (file-exists-p (romacs-agent-store--file))))
+    (romacs-agent-store-title (romacs-agent-id session) (romacs-agent-title session) then)))
 
 (defun romacs-agent-activity-seq (session)
   "The seq of SESSION's last turn activity: its last prompt or turn end."
@@ -2849,7 +2861,9 @@ window was.")
     (when-let* ((kept (ignore-errors (with-temp-buffer (insert-file-contents (romacs-agent--room-file))
                                                        (read (current-buffer))))))
       (pcase-dolist (`(,name . ,room) kept)
-        (unless (gethash name romacs-agent--room) (puthash name room romacs-agent--room)))))
+        (unless (gethash name romacs-agent--room) (puthash name room romacs-agent--room))))
+    ;; Kept spent: they may have room by now, asked soon.
+    (romacs-agent--room-watch 10))
   romacs-agent--room)
 
 (defun romacs-agent--with-lock (file function)
@@ -2901,37 +2915,104 @@ wrote there meanwhile, under its lock: each account's newer report wins."
       (with-temp-file temporary (prin1 rows (current-buffer)))
       (rename-file temporary file t))))
 
+(defvar romacs-agent-room-functions nil
+  "Functions called with an instance's name once a report gives it room
+again, after it was at its limit: what waits for its reset goes on.")
+
 (defun romacs-agent--note-room (session event)
   "Keep EVENT, a `rate-limit' report of SESSION's harness, as its
-instance's, unless an older one: a replay reports the past too.  Its
-overage spent is no instance's limit: only the models that need usage
-credits are refused, and the others run."
+instance's (`romacs-agent-note-room')."
+  (romacs-agent-note-room (romacs-agent-provider session) event))
+
+(defun romacs-agent-note-room (provider event)
+  "Keep EVENT, a `rate-limit' report of instance PROVIDER's usage, as its
+own, unless an older one: a replay reports the past too.  Its overage
+spent is no instance's limit: only the models that need usage credits
+are refused, and the others run.  An instance it gives room again runs
+`romacs-agent-room-functions'."
   (let* ((table (romacs-agent--room-table))
-         (known (gethash (romacs-agent-provider session) table))
+         (known (gethash provider table))
+         (spent (not (romacs-agent-room provider)))
          (time (or (plist-get event :time) (float-time))))
     (unless (or (and known (> (plist-get known :time) time))
                 (and (eq (plist-get event :status) 'rejected)
                      (string-match-p "overage" (format "%s" (plist-get event :window)))))
-      (let* ((windows (romacs-agent--room-windows
-                       (romacs-agent--room-kept-windows known)
-                       ;; One that names no windows reports its own.
-                       (or (plist-get event :windows)
+      (let* ((reported (or (plist-get event :windows)
+                           ;; One that names no windows reports its own.
                            (and (plist-get event :window)
                                 (list (list :name (romacs-agent--room-window-name (plist-get event :window))
                                             :status (plist-get event :status) :used (plist-get event :used)
-                                            :resets (plist-get event :resets)))))
-                       time))
+                                            :resets (plist-get event :resets))))))
+             (windows (romacs-agent--room-windows
+                       (romacs-agent--room-kept-windows known) reported time))
              (room (append (or (romacs-agent--room-binding windows time)
                                (list :status (plist-get event :status) :used (plist-get event :used)
                                      :resets (plist-get event :resets) :window (plist-get event :window)))
                            (list :time time :windows windows))))
-        (puthash (romacs-agent-provider session) room table)
+        (puthash provider room table)
         ;; On disk what a restart needs: not each request's use, but each
         ;; window's state, and its use once it is worth a word (every 5%).
         (unless (and known (cl-every (lambda (key) (equal (plist-get known key) (plist-get room key)))
                                      '(:status :resets :window))
                      (equal (romacs-agent--room-gist (plist-get known :windows)) (romacs-agent--room-gist windows)))
-          (romacs-agent--keep-room))))))
+          (romacs-agent--keep-room))
+        (unless (eq spent (not (romacs-agent-room provider)))
+          (romacs-agent--room-watch)
+          (when spent (run-hook-with-args 'romacs-agent-room-functions provider)))))))
+
+;;; Asking spent accounts again
+
+(defcustom romacs-agent-room-check-interval 600
+  "Seconds between asks of each account at its limit for its usage, by
+its harness's driver (its :usage), while one is: an account whose limit
+reset early, or was lifted, gets room again without a turn on it.  nil
+never asks; the reports turns make are then all that is known."
+  :type '(choice (number :tag "Seconds") (const :tag "Never" nil))
+  :group 'romacs-agent)
+
+(defvar romacs-agent--room-timer nil
+  "The timer asking the spent accounts again (`romacs-agent-check-room').")
+
+(defvar romacs-agent--room-asking (make-hash-table :test #'equal)
+  "The instances whose usage is being asked now, each to t.")
+
+(defun romacs-agent--room-spent-instances ()
+  "The enabled instances at their limit whose driver can ask their usage."
+  (cl-remove-if-not (lambda (i) (and (plist-get i :enabled) (not (romacs-agent-room (plist-get i :name)))
+                                     (plist-get (romacs-agent--driver-of (plist-get i :harness)) :usage)))
+                    (romacs-agent-instances)))
+
+(defun romacs-agent--room-watch (&optional first)
+  "Ask the spent accounts again every `romacs-agent-room-check-interval'
+while there is one (the first time in FIRST seconds, default that
+interval); with none, stop."
+  (let ((due (and romacs-agent-room-check-interval (romacs-agent--room-spent-instances))))
+    (cond ((and due (not romacs-agent--room-timer))
+           (setq romacs-agent--room-timer
+                 (run-at-time (or first romacs-agent-room-check-interval) romacs-agent-room-check-interval
+                              #'romacs-agent-check-room)))
+          ((and (not due) romacs-agent--room-timer)
+           (cancel-timer romacs-agent--room-timer)
+           (setq romacs-agent--room-timer nil)))))
+
+(defun romacs-agent-check-room ()
+  "Ask each account at its limit for its usage now, without a turn: each
+answer is kept as its report (`romacs-agent-note-room'), so one with room
+again draws new work, and what waited for its reset goes on."
+  (interactive)
+  (dolist (instance (romacs-agent--room-spent-instances))
+    (let ((name (plist-get instance :name)) (harness (plist-get instance :harness)))
+      (unless (gethash name romacs-agent--room-asking)
+        (puthash name t romacs-agent--room-asking)
+        (condition-case err
+            (funcall (plist-get (romacs-agent--driver-of harness) :usage)
+                     (romacs-agent--home harness (plist-get instance :config-dir))
+                     (lambda (report)
+                       (remhash name romacs-agent--room-asking)
+                       (when report (romacs-agent-note-room name report))))
+          (error (remhash name romacs-agent--room-asking)
+                 (message "Asking %s's usage: %s" name (error-message-string err)))))))
+  (romacs-agent--room-watch))
 
 (defun romacs-agent--room-window-name (name)
   "NAME, a window's as reports of before named it, as windows are now."

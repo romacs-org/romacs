@@ -12,6 +12,7 @@
 
 (require 'romacs-agent)
 (require 'romacs-agent-gate)
+(require 'parse-time)
 
 (defun romacs-agent--claude-forking (session)
   "Whether SESSION, a fork, still has to be made: Claude Code writes the
@@ -459,6 +460,111 @@ cache, it reports none) or does not say."
       ("tool_progress" nil)
       (_ (list (list :type 'unknown :raw line))))))
 
+;;; An account's usage, asked without a turn
+
+(defconst romacs-agent--claude-usage-url "https://api.anthropic.com/api/oauth/usage?skip_spend=1"
+  "Where Claude Code itself reads its account's usage (its /usage view):
+every window's, nothing spent asking.")
+
+(defconst romacs-agent--claude-usage-windows '("five_hour" "seven_day" "seven_day_opus" "seven_day_sonnet")
+  "The windows asked, those turns report too (`romacs-agent--claude-windows').")
+
+(defun romacs-agent--claude-token (home)
+  "The Claude.ai sign-in kept at HOME: (TOKEN . EXPIRES), EXPIRES in
+seconds since the epoch, or nil."
+  (when-let* ((object (romacs-agent--read-json (expand-file-name ".credentials.json" home)))
+              (oauth (gethash "claudeAiOauth" object))
+              ((hash-table-p oauth))
+              (token (gethash "accessToken" oauth))
+              ((stringp token)))
+    (cons token (/ (or (gethash "expiresAt" oauth) 0) 1000.0))))
+
+(defun romacs-agent--claude-usage-report (object time)
+  "OBJECT, what Claude's usage endpoint answered, as a `rate-limit' event
+as of TIME: each window binding the account, its use (a percentage
+there) as a fraction, refused once full, one it names as null unused;
+nil when it names none."
+  (let ((windows
+         (delq nil (mapcar (lambda (name)
+                             (when-let* ((window (pcase (gethash name object 'absent)
+                                                   ('absent nil)
+                                                   ((and found (pred hash-table-p)) found)
+                                                   (_ (make-hash-table :test #'equal))))
+                                         (percent (gethash "utilization" window 0))
+                                         ((numberp percent)))
+                               (let ((used (/ percent 100.0)) (resets (gethash "resets_at" window)))
+                                 (list :name name :status (if (>= used 1.0) 'rejected 'allowed) :used used
+                                       :resets (and (stringp resets)
+                                                    (float-time (parse-iso8601-time-string resets)))))))
+                           romacs-agent--claude-usage-windows))))
+    (when windows
+      (let ((fullest (car (sort (copy-sequence windows) (lambda (a b) (> (plist-get a :used) (plist-get b :used)))))))
+        (list :type 'rate-limit :time time
+              :status (if (cl-find 'rejected windows :key (lambda (w) (plist-get w :status))) 'rejected 'allowed)
+              :used (plist-get fullest :used) :resets (plist-get fullest :resets) :window (plist-get fullest :name)
+              :windows windows)))))
+
+(defun romacs-agent--claude-run (name command environment then)
+  "Run COMMAND in ENVIRONMENT, its stdout kept; THEN is called with it and
+its exit status once it ends.  The process is returned."
+  (let ((out (generate-new-buffer (format " *%s*" name) t))
+        (process-environment environment))
+    (make-process
+     :name name :buffer out :command command :connection-type 'pipe :noquery t
+     :sentinel (lambda (process _event)
+                 (unless (process-live-p process)
+                   (let ((text (with-current-buffer out (buffer-string))))
+                     (kill-buffer out)
+                     (funcall then text (process-exit-status process))))))))
+
+(defun romacs-agent--claude-fetch-usage (token callback)
+  "Ask the usage endpoint by TOKEN; CALLBACK with its report or nil, as of
+when it was asked: a turn's report made meanwhile is newer.  The token
+goes to curl on its stdin, never on a command line."
+  (let* ((asked (float-time))
+         (process
+         (romacs-agent--claude-run
+          "romacs-agent-usage"
+          (list "curl" "--silent" "--max-time" "20" "--header" "@-"
+                "--header" "anthropic-beta: oauth-2025-04-20" "--write-out" "\n%{http_code}"
+                romacs-agent--claude-usage-url)
+          process-environment
+          (lambda (text status)
+            (funcall callback
+                     (when-let* (((eql status 0))
+                                 (end (string-search "\n" text (max 0 (- (length text) 5))))
+                                 ((equal (substring text (1+ end)) "200"))
+                                 (object (ignore-errors (json-parse-string (substring text 0 end)
+                                                                           :object-type 'hash-table
+                                                                           :null-object nil :false-object nil))))
+                       (and (hash-table-p object) (romacs-agent--claude-usage-report object asked))))))))
+    (process-send-string process (format "Authorization: Bearer %s\n" token))
+    (process-send-eof process)))
+
+(defun romacs-agent--claude-usage (home callback)
+  "Ask the usage of the account signed in at HOME (`:usage' of
+`romacs-agent-define-harness'); CALLBACK with its report, or nil when not
+known: no sign-in, no answer.  A token expired is renewed by Claude Code
+itself, in place (`claude auth status'): renewing it here would rotate the
+account's tokens under its sessions."
+  (let ((fresh (lambda (sign-in) (and sign-in (> (cdr sign-in) (+ (float-time) 60))))))
+    (if-let* ((sign-in (romacs-agent--claude-token home)) ((funcall fresh sign-in)))
+        (romacs-agent--claude-fetch-usage (car sign-in) callback)
+      (if (null (romacs-agent--claude-token home))
+          (funcall callback nil)
+        (romacs-agent--claude-run
+         "romacs-agent-sign-in" (list romacs-agent-claude-program "auth" "status" "--json")
+         ;; Its default directory is its variable unset, as a session's.
+         (let ((environment (romacs-agent--harness-environment)))
+           (if (equal home (romacs-agent--home 'claude nil)) environment
+             (cons (concat "CLAUDE_CONFIG_DIR=" home) environment)))
+         (lambda (_text _status)
+           (let ((sign-in (romacs-agent--claude-token home)))
+             (if (not (funcall fresh sign-in))
+                 (funcall callback nil)
+               (condition-case nil (romacs-agent--claude-fetch-usage (car sign-in) callback)
+                 (error (funcall callback nil)))))))))))
+
 (defun romacs-agent--claude-limit-status (status)
   (pcase status ("rejected" 'rejected) ("allowed_warning" 'warning) (_ 'allowed)))
 
@@ -788,6 +894,7 @@ environment."
   :interrupt #'romacs-agent--claude-interrupt
   :respond #'romacs-agent--claude-respond
   :events #'romacs-agent--claude-events
+  :usage #'romacs-agent--claude-usage
   :input-events #'romacs-agent--claude-input-events
   ;; A turn the harness's end cut short goes on (Claude Code's own switch).
   :resume-environment '("CLAUDE_CODE_RESUME_INTERRUPTED_TURN=1")

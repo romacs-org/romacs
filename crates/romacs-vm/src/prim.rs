@@ -1637,6 +1637,20 @@ mod leaf {
             symbols.sort_unstable_by_key(|v| v.0);
             symbols
         }
+        /// `symbolp`: exactly where `kind` answers Symbol, without the
+        /// object classification `kind` runs first.
+        pub fn is_symbol(&self, v: Value) -> bool {
+            v == Value::NIL || v == Value::TRUE || self.symbol_slot(v).is_ok()
+        }
+        /// `stringp`: exactly where `kind` answers String or Bytes (a unibyte
+        /// string with octets above 127 is `Bytes`), by `kind`'s own arms.
+        pub fn is_string(&self, v: Value) -> bool {
+            match self.vm.object_if(v) {
+                Some(data::Object::String(_) | data::Object::RawString(_) | data::Object::Bytes(_)) => true,
+                Some(_) => false,
+                None => Vm::image_string(v),
+            }
+        }
         pub fn kind(&self, v: Value) -> Kind {
             if v == Value::NIL || v == Value::TRUE {
                 return Kind::Symbol;

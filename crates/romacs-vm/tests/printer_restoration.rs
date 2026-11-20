@@ -15,6 +15,9 @@ fn cases() -> Vec<(&'static str, String)> {
         ("(prin1-to-string (propertize (unibyte-string 255 97) 'p t))", "#(\"\\377a\" 0 2 (p t))".into()),
         ("(let ((o (obarray-make 4))) (intern \"a\" o) (intern \"b\" o) (unintern \"a\" o) (prin1-to-string o))", "#<obarray n=1>".into()),
         ("(let ((print-circle t) (o (obarray-make 1))) (prin1-to-string (list o o)))", "(#<obarray n=0> #<obarray n=0>)".into()),
+        // The initial obarray counts its symbols, a fresh one included, as `mapatoms' walks them.
+        ("(let ((n 0)) (intern \"printer-count-fresh\") (mapatoms (lambda (_) (setq n (1+ n)))) \
+          (prin1-to-string (equal (prin1-to-string obarray) (format \"#<obarray n=%d>\" n))))", "t".into()),
         ("(prin1-to-string (propertize \"abc\" 'face 'bold 'help-echo \"help\"))", "#(\"abc\" 0 3 (face bold help-echo \"help\"))".into()),
         ("(let ((s (copy-sequence \"αβc\"))) (put-text-property 1 2 'face 'bold s) (prin1-to-string s))", "#(\"αβc\" 1 2 (face bold))".into()),
         ("(let ((s (copy-sequence \"αβc\"))) (put-text-property 1 2 'face 'bold s) (prin1-to-string s t))", "αβc".into()),
