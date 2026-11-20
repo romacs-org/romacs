@@ -13,8 +13,12 @@ the tree; the launcher gives each finding's file from the root it is held to,
 whatever the judged code prints it from. By default it reports what the change
 adds: the files' text at the base (the
 merge-base with the trunk, or --base) is linted the same way, and a finding
-the base also gives is counted, not shown. --all shows every finding. Exit 1
-when an error or a warning is shown, 2 when the host gave no result.
+the base also gives is counted, not shown. --all shows every finding. Each
+file stands alone: a file the host gives no result for, here and at the base
+alike, is named and not judged, and the others are; a file the base gives no
+result for has every finding counted new. Exit 1 when an error or a warning is
+shown, 2 when the host gave no result for a file it lints at the base (any
+file, with --all or no base).
 
 An installed host (one beside its `romacs-vm-gui.worlds`) restores its batch
 world, so a run takes about a second; a build's host boots from source.
@@ -91,12 +95,34 @@ def added(candidate, base):
     return fresh
 
 
-def summary(files, lines, base, older):
-    """The closing line: what was counted, and against what."""
+def summary(files, lines, base, older, quiet=0):
+    """The closing line: what was counted, against what, and how many files
+    gave no result here as at the base (QUIET)."""
     levels = Counter(FINDING.match(line)['level'] for line in lines)
     counts = ', '.join(f'{levels[level]} {level}{"" if levels[level] == 1 else "s"}' for level in ('error', 'warning', 'hint'))
     since = f' new since {base[:12]} ({older} older not shown; --all shows them)' if base else ''
-    return f'romacs-lint: {files} file{"" if files == 1 else "s"}, {counts}{since}'
+    unjudged = f'; {quiet} more gave no result, as at the base' if quiet else ''
+    return f'romacs-lint: {files} file{"" if files == 1 else "s"}, {counts}{since}{unjudged}'
+
+
+def judged(names, results, based):
+    """What to report of RESULTS, each file of NAMES's findings or None when
+    its lint gave no result, against BASED, the base's results by name (None:
+    no base, every finding shown): (SHOWN, OLDER, QUIET, BROKEN, UNBASED).
+    A file with no result here and none at the base is QUIET, named but not
+    judged, while another file has a result: when none has, the host itself
+    may be what failed, so each is BROKEN. One with no result here only is
+    BROKEN. A file the base gave no result for has every finding new (UNBASED
+    names it); one the base lacks too."""
+    shown = [line for found in results if found is not None for line in found]
+    if based is None or all(found is None for found in results):
+        return shown, 0, [], [name for name, found in zip(names, results) if found is None], []
+    quiet = [name for name, found in zip(names, results) if found is None and name in based and based[name] is None]
+    broken = [name for name, found in zip(names, results) if found is None and name not in quiet]
+    unbased = [name for name, found in zip(names, results) if found is not None and name in based and based[name] is None]
+    before = [line for found in based.values() if found is not None for line in found]
+    fresh = added(shown, before)
+    return fresh, len(shown) - len(fresh), quiet, broken, unbased
 
 
 def named_from(line, home, root):
@@ -130,14 +156,22 @@ def lint(binary, arguments, timeout, root=ROOT):
 
 def lint_each(binary, options, files, timeout, root=ROOT, jobs=4):
     """Lint each of FILES in a machine of its own, with the lint's OPTIONS:
-    (FINDINGS, ERRORS), each finding's file given from ROOT; FINDINGS None
-    when a file's lint gave no result."""
+    (RESULTS, ERRORS), one per file in order, its findings with each file
+    given from ROOT, or None when that file's lint gave no result."""
+    if not files:
+        return [], ''
     with ThreadPoolExecutor(max_workers=max(1, min(jobs, len(files)))) as pool:
         runs = list(pool.map(lambda file: lint(binary, [*options, str(file)], timeout, root), files))
     errors = ''.join(errors for _, _, errors in runs)
-    if any(status is None for status, _, _ in runs):
-        return None, errors
-    return [line for _, output, _ in runs for line in findings(output)], errors
+    return [None if status is None else findings(output) for status, output, _ in runs], errors
+
+
+def name(path, root=ROOT):
+    """PATH as findings give it: from ROOT when under it."""
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return str(path)
 
 
 def renames(status):
@@ -190,26 +224,28 @@ def main():
         parser.error('no such file: ' + ', '.join(missing))
     files = [path.resolve() for path in args.files]
     base = args.base or merge_base(ROOT, os.environ.get('ROMACS_BASE', 'beta'))
-    shown, errors = lint_each(binary, ['--base', base] if base else [], files, args.timeout)
-    if shown is None:
-        sys.stderr.write(errors)
-        print('romacs-lint: the host gave no result', file=sys.stderr)
-        return 2
-    older = 0
+    results, errors = lint_each(binary, ['--base', base] if base else [], files, args.timeout)
+    names = [name(path) for path in files]
+    based = None
     if base and not args.all:
         with tempfile.TemporaryDirectory(prefix='romacs-lint-base-') as directory:
-            had = [Path(directory) / name for name in base_files(ROOT, base, files, Path(directory))]
-            before, base_errors = (lint_each(binary, ['--root', str(ROOT)], had, args.timeout, Path(directory))
-                                   if had else ([], ''))
-        if before is None:
-            sys.stderr.write(base_errors)
-            print('romacs-lint: the base did not lint: every finding counts as new', file=sys.stderr)
-            before = []
-        fresh = added(shown, before)
-        shown, older = fresh, len(shown) - len(fresh)
+            had = base_files(ROOT, base, files, Path(directory))
+            before, base_errors = lint_each(binary, ['--root', str(ROOT)], [Path(directory) / n for n in had],
+                                            args.timeout, Path(directory))
+        based = dict(zip(had, before))
+    shown, older, quiet, broken, unbased = judged(names, results, based)
+    if broken:
+        sys.stderr.write(errors)
+        print(f'romacs-lint: the host gave no result for {", ".join(broken)}', file=sys.stderr)
+        return 2
+    if unbased:
+        sys.stderr.write(base_errors)
+        print(f'romacs-lint: the base did not lint {", ".join(unbased)}: its findings count as new', file=sys.stderr)
+    for unjudged in quiet:
+        print(f'romacs-lint: {unjudged} gives no result, as at the base', file=sys.stderr)
     for line in shown:
         print(line)
-    print(summary(len(files), shown, None if args.all else base, older))
+    print(summary(len(files) - len(quiet), shown, None if args.all else base, older, len(quiet)))
     return 1 if any(FINDING.match(line)['level'] in FAILING for line in shown) else 0
 
 

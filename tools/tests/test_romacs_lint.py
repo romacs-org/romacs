@@ -63,5 +63,38 @@ class AddedTest(unittest.TestCase):
                          'romacs-lint: 1 file, 0 errors, 0 warnings, 0 hints new since abcdef012345 (3 older not shown; --all shows them)')
 
 
+
+class JudgedTest(unittest.TestCase):
+    """One file the host gives no result for leaves the others judged (romacs#334)."""
+    A, B = 'lisp/session/a.el', 'lisp/session/b.el'
+
+    def test_a_file_with_no_result_here_and_at_the_base_is_named_not_judged(self):
+        shown, older, quiet, broken, unbased = lint.judged([self.A, self.B], [[OLD, NEW], None], {self.A: [OLD], self.B: None})
+        self.assertEqual((shown, older, quiet, broken, unbased), ([NEW], 1, [self.B], [], []))
+
+    def test_a_file_the_base_gives_no_result_for_has_every_finding_new(self):
+        shown, older, quiet, broken, unbased = lint.judged([self.A, 'lisp/session/b.el'], [[OLD], [HINT]], {self.A: [OLD], self.B: None})
+        self.assertEqual((shown, older, quiet, broken, unbased), ([HINT], 1, [], [], [self.B]))
+
+    def test_no_result_here_for_a_file_the_base_lints_is_broken(self):
+        self.assertEqual(lint.judged([self.A], [None], {self.A: [OLD]})[3], [self.A])
+
+    def test_no_result_for_a_file_the_base_lacks_is_broken(self):
+        self.assertEqual(lint.judged([self.A], [None], {})[3], [self.A])
+
+    def test_with_no_base_every_file_without_a_result_is_broken(self):
+        self.assertEqual(lint.judged([self.A, self.B], [[NEW], None], None), ([NEW], 0, [], [self.B], []))
+
+    def test_when_no_file_has_a_result_the_host_may_be_what_failed(self):
+        # A host that cannot start gives no result for every file, here and at the base alike.
+        self.assertEqual(lint.judged([self.A, self.B], [None, None], {self.A: None, self.B: None}),
+                         ([], 0, [], [self.A, self.B], []))
+
+    def test_the_summary_names_the_files_left_unjudged(self):
+        self.assertEqual(lint.summary(1, [], 'abcdef0123456789', 2, 1),
+                         'romacs-lint: 1 file, 0 errors, 0 warnings, 0 hints new since abcdef012345 '
+                         '(2 older not shown; --all shows them); 1 more gave no result, as at the base')
+
+
 if __name__ == '__main__':
     unittest.main()
