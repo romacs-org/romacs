@@ -49,20 +49,19 @@ impl Hasher for KeyHasher {
 /// `symkey::ESC` in UTF-8.
 const ESC_BYTES: [u8; 3] = [0xEF, 0xB7, 0x90];
 
-/// The key of a Lisp name given as BYTES of CHARS characters. A multibyte
-/// or all-ASCII name is its own bytes; a unibyte name with a byte above
-/// 127 is its bytes behind 0xFF, which internal multibyte text never
-/// holds, as GNU's `oblookup` tells names apart by character count and
-/// bytes: the unibyte bytes C3 A9 (two characters) are not the multibyte
-/// "é" (one), nor the unibyte E9 the multibyte raw byte E9.
+/// The key of a Lisp name given as BYTES of CHARS characters: its internal
+/// multibyte bytes. A multibyte or all-ASCII name is its own bytes; a
+/// unibyte name with a byte above 127 names raw-byte characters, as GNU's
+/// `oblookup` tells it apart by its character count, so the unibyte bytes
+/// C3 A9 (two characters) are not the multibyte "é" (one).
 pub(crate) fn key_of(bytes: &[u8], chars: usize) -> Cow<'_, [u8]> {
-    if chars < bytes.len() || bytes.is_ascii() { Cow::Borrowed(bytes) } else { Cow::Owned([&[0xFF], bytes].concat()) }
+    if chars < bytes.len() || bytes.is_ascii() { Cow::Borrowed(bytes) } else { Cow::Owned(crate::text::octets_to_multibyte(bytes)) }
 }
 
 /// The key of a name given as key text (`symkey`): its own bytes when it is
 /// plain Unicode text, else the internal bytes its escapes stand for.
 pub(crate) fn text_key(name: &str) -> Box<[u8]> {
-    crate::symkey::names_key(name).map_or_else(|| name.as_bytes().into(), Vec::into_boxed_slice)
+    crate::symkey::to_internal(name).map_or_else(|| name.as_bytes().into(), Vec::into_boxed_slice)
 }
 
 impl Names {
@@ -84,12 +83,12 @@ impl Names {
     #[inline(never)]
     fn get_escaped(&self, name: &str) -> Option<&usize> {
         if name.is_ascii() { return None; }
-        self.slots.get(&crate::symkey::names_key(name)?[..])
+        self.slots.get(&crate::symkey::to_internal(name)?[..])
     }
     #[cold]
     #[inline(never)]
     fn get_text(&self, name: &str) -> Option<&usize> {
-        match crate::symkey::names_key(name) {
+        match crate::symkey::to_internal(name) {
             Some(key) => self.slots.get(&key[..]),
             None => self.slots.get(name.as_bytes()),
         }

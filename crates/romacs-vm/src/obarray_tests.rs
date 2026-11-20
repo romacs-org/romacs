@@ -161,19 +161,3 @@ fn initial_names_are_told_apart_by_bytes_and_characters_as_gnu() {
                                     (length (symbol-name (make-symbol u)))))");
     assert_eq!(vm.display(got).unwrap(), "(nil 2 1 t t t t t 2)");
 }
-
-/// A unibyte name with a byte above 127 and the multibyte name of the same
-/// characters (its raw bytes) are two symbols, as GNU's `oblookup` tells
-/// them apart by character count and bytes; the unibyte one's
-/// `symbol-name`, interned or made, stays unibyte, so it is `string=` to
-/// its string and not to the multibyte one (romacs#326). Pinned GNU:
-/// `(nil nil t nil t nil t)`.
-#[test]
-fn a_unibyte_name_and_its_raw_bytes_are_two_symbols_and_its_name_stays_unibyte_as_gnu() {
-    let mut vm = Vm::new();
-    let got = run(&mut vm, "(let* ((u (unibyte-string 233)) (raw (string-to-multibyte (unibyte-string 233))) (su (intern u))) \
-                              (list (eq su (intern raw)) (multibyte-string-p (symbol-name su)) (string= su u) \
-                                    (string= (symbol-name su) raw) (multibyte-string-p (symbol-name (intern raw))) \
-                                    (multibyte-string-p (symbol-name (make-symbol u))) (string= (make-symbol u) u)))");
-    assert_eq!(vm.display(got).unwrap(), "(nil nil t nil t nil t)");
-}

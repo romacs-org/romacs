@@ -10,21 +10,10 @@
 //! names are therefore their own keys. Every place a name becomes Lisp
 //! text again (`symbol-name', the printer's output) decodes the key, so
 //! Lisp never sees the escape.
-//!
-//! A unibyte name with a byte above 127 is another name than the
-//! multibyte one of the same characters (GNU's `oblookup' tells them apart
-//! by character count and bytes), and its `symbol-name' is unibyte: its
-//! key starts with the escape and `UNIBYTE`, then its bytes as characters,
-//! those above 127 as raw-byte characters. Text decoded from a key drops
-//! the mark (`to_internal'); a name's table key and `symbol-name' keep it
-//! (`names_key', `unibyte_name').
 
 /// The escape: a noncharacter, reserved for internal use.
 pub(crate) const ESC: char = '\u{fdd0}';
 const PLANE15: u32 = 0xF_0000;
-/// After the escape, the mark of a unibyte name: the Plane 15 character
-/// just past those an escaped code uses.
-const UNIBYTE: char = '\u{f0800}';
 
 /// Append internal character CODE to KEY.
 pub(crate) fn push_char(key: &mut String, code: u32) {
@@ -57,61 +46,8 @@ pub(crate) fn from_internal(bytes: &[u8]) -> String {
     key
 }
 
-/// The key of a unibyte name of BYTES, some above 127.
-pub(crate) fn unibyte_key(bytes: &[u8]) -> String {
-    let mut key = String::from(ESC);
-    key.push(UNIBYTE);
-    key.push_str(&from_internal(&crate::text::octets_to_multibyte(bytes)));
-    key
-}
-
-/// The bytes of the unibyte name KEY stands for, or None when it is not one.
-pub(crate) fn unibyte_name(key: &str) -> Option<Vec<u8>> {
-    let rest = key.strip_prefix(ESC)?.strip_prefix(UNIBYTE)?;
-    let internal = to_internal(rest).unwrap_or_else(|| rest.as_bytes().to_vec());
-    let mut bytes = Vec::with_capacity(internal.len());
-    let mut at = 0;
-    while at < internal.len() {
-        let (code, width) = crate::lstring::string_char(&internal[at..]);
-        // ASCII as itself, a raw-byte character as its byte.
-        bytes.push(if code < 0x80 { code as u8 } else { (code - 0x3F_FF00) as u8 });
-        at += width;
-    }
-    Some(bytes)
-}
-
-/// The Lisp name key text KEY stands for: its bytes and whether they are
-/// multibyte, or None when KEY is plain text, its own multibyte bytes.
-pub(crate) fn lisp_name(key: &str) -> Option<(Vec<u8>, bool)> {
-    match unibyte_name(key) {
-        Some(bytes) => Some((bytes, false)),
-        None => to_internal(key).map(|internal| (internal, true)),
-    }
-}
-
-/// How many characters internal multibyte BYTES hold.
-pub(crate) fn internal_chars(bytes: &[u8]) -> usize {
-    let (mut at, mut chars) = (0, 0);
-    while at < bytes.len() {
-        at += crate::lstring::string_char(&bytes[at..]).1;
-        chars += 1;
-    }
-    chars
-}
-
-/// The names table's key (names.rs) of key text KEY, or None when KEY is
-/// its own: a unibyte name's bytes behind 0xFF, which internal multibyte
-/// text never holds, else the internal bytes.
-pub(crate) fn names_key(key: &str) -> Option<Vec<u8>> {
-    match unibyte_name(key) {
-        Some(bytes) => Some([&[0xFF], &bytes[..]].concat()),
-        None => to_internal(key),
-    }
-}
-
 /// The internal multibyte bytes KEY stands for, or None when KEY is plain
-/// Unicode text (its own bytes). A unibyte name's mark is dropped: its
-/// bytes above 127 are raw-byte characters in the text.
+/// Unicode text (its own bytes).
 pub(crate) fn to_internal(key: &str) -> Option<Vec<u8>> {
     if !key.contains(ESC) { return None; }
     let mut out = Vec::with_capacity(key.len());
@@ -121,7 +57,6 @@ pub(crate) fn to_internal(key: &str) -> Option<Vec<u8>> {
         let code = if c != ESC { u32::from(c) } else {
             match chars.peek().copied() {
                 Some(ESC) => { chars.next(); u32::from(ESC) }
-                Some(UNIBYTE) => { chars.next(); continue; }
                 Some(hi) if (PLANE15..PLANE15 + 0x800).contains(&u32::from(hi)) => {
                     chars.next();
                     let lo = chars.next().map_or(0, u32::from).wrapping_sub(PLANE15) & 0x7ff;
