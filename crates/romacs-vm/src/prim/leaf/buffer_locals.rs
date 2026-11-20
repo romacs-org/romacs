@@ -94,13 +94,12 @@ impl Leaf<'_> {
         }
         Ok(self.vm.list_value(&entries))
     }
-    /// `change-major-mode-hook', the symbol, unless it is void or nil in the
-    /// current buffer.
+    /// `change-major-mode-hook', the symbol, unless its current binding is
+    /// void or nil. The binding is `run-hooks''s own, found through any
+    /// variable alias.
     pub(crate) fn change_major_mode_hook(&mut self) -> std::result::Result<Option<Value>, Fault> {
-        let buffer = self.decode_buffer(Value::NIL)?;
-        let slot = self.vm.change_major_mode_hook_slot;
-        let value = self.vm.value_in_buffer(slot, buffer).map_err(Fault::Error)?;
-        Ok((value != Value::NIL && value != Value::UNBOUND).then(|| Value::reference(slot + 1, 7)))
+        let hook = Value::reference(self.vm.change_major_mode_hook_slot + 1, 7);
+        Ok(self.variable_value(hook)?.filter(|&value| value != Value::NIL).map(|_| hook))
     }
     pub(crate) fn reset_buffer_locals(&mut self, kill_permanent: Value) -> Out {
         let buffer = self.decode_buffer(Value::NIL)?;

@@ -1126,7 +1126,9 @@ impl PerBuffer {
     pub(crate) fn get(&self, i: u16) -> Option<Value> {
         self.0.get(i as usize).copied().flatten()
     }
-    /// The forwarded indices it holds a value for.
+    /// The forwarded indices it holds a value for. The scan covers every
+    /// slot allocated so far, which reach the highest index ever stored in
+    /// this buffer: at most the 58 per-buffer built-ins, whatever it holds now.
     pub(crate) fn set_indices(&self) -> impl Iterator<Item = usize> + '_ {
         self.0.iter().enumerate().filter_map(|(i, value)| value.is_some().then_some(i))
     }
