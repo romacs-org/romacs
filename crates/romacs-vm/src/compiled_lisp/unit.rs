@@ -229,6 +229,40 @@ impl<'a> Encoder<'a> {
         }
         Ok(())
     }
+    /// The char-table V: its subtype, default, parent and extra slots, and
+    /// its own values as runs, read from V itself (a copy rebuilds its
+    /// ASCII slot from its root). Not stored, and so its file is loaded as
+    /// source: a Unicode property table, whose blocks decode through its
+    /// extra slots; one whose ASCII slot is not its root's (a literal's
+    /// detached slot), which runs cannot keep; and one whose parent is no
+    /// char-table, which no table made from the runs could have.
+    fn char_table(&mut self, v: Value, out: &mut Writer) -> Result<()> {
+        let Object::CharTable(t) = self.vm.object(v)? else { return Err("not a char-table".into()) };
+        if self.vm.is_uniprop_table(t) {
+            return Err("a constant that cannot be serialised: char-table".into());
+        }
+        if t.validate_mapping().is_err() {
+            return Err("a constant that cannot be serialised: a char-table whose ASCII slot is not its root's".into());
+        }
+        if t.parent() != Value::NIL && !matches!(self.vm.object(t.parent()), Ok(Object::CharTable(_))) {
+            return Err("a constant that cannot be serialised: a char-table whose parent is not a char-table".into());
+        }
+        let (fields, extras, runs) = ([t.purpose(), t.default(), t.parent()], t.extras().to_vec(), t.own_runs()?);
+        out.byte(NODE_CHAR_TABLE);
+        for field in fields {
+            let r = self.value(field)?;
+            Self::write_ref(out, r);
+        }
+        self.refs(out, &extras)?;
+        out.n(runs.len());
+        for (from, to, value) in runs {
+            out.u(u64::from(from));
+            out.u(u64::from(to));
+            let r = self.value(value)?;
+            Self::write_ref(out, r);
+        }
+        Ok(())
+    }
     fn encode_node(&mut self, v: Value) -> Result<Vec<u8>> {
         let mut out = Writer::default();
         if v.tag() == 3 {
@@ -267,6 +301,10 @@ impl<'a> Encoder<'a> {
             out.byte(1);
             out.data(text.as_bytes());
             out.n(0);
+            return Ok(out.bytes);
+        }
+        if let Ok(Object::CharTable(_)) = self.vm.object(v) {
+            self.char_table(v, &mut out)?;
             return Ok(out.bytes);
         }
         let object = self.vm.object(v)?.clone();
@@ -317,35 +355,6 @@ impl<'a> Encoder<'a> {
                 out.byte(NODE_BOOL_VECTOR);
                 out.n(b.len);
                 out.data(&b.bytes);
-            }
-            // A char-table: its subtype, default, parent and extra slots,
-            // and its own values as runs. Not stored, and so its file is
-            // loaded as source: a Unicode property table, whose blocks
-            // decode through its extra slots; one whose ASCII slot is not
-            // its root's (a literal's detached slot), which runs cannot
-            // keep; and one whose parent is no char-table, which no table
-            // made from the runs could have.
-            Object::CharTable(t) if !self.vm.is_uniprop_table(&t) => {
-                if t.validate_mapping().is_err() {
-                    return Err("a constant that cannot be serialised: a char-table whose ASCII slot is not its root's".into());
-                }
-                if t.parent() != Value::NIL && !matches!(self.vm.object(t.parent()), Ok(Object::CharTable(_))) {
-                    return Err("a constant that cannot be serialised: a char-table whose parent is not a char-table".into());
-                }
-                out.byte(NODE_CHAR_TABLE);
-                for field in [t.purpose(), t.default(), t.parent()] {
-                    let r = self.value(field)?;
-                    Self::write_ref(&mut out, r);
-                }
-                self.refs(&mut out, t.extras())?;
-                let runs = t.own_runs()?;
-                out.n(runs.len());
-                for (from, to, value) in runs {
-                    out.u(u64::from(from));
-                    out.u(u64::from(to));
-                    let r = self.value(value)?;
-                    Self::write_ref(&mut out, r);
-                }
             }
             other => return Err(format!("a constant that cannot be serialised: {}", object_kind(&other))),
         }
