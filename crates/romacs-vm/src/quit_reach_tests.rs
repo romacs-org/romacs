@@ -387,7 +387,7 @@ fn a_quit_scope_ends_at_lisp_entry() {
 /// the source cache's direct tier, which has no escape channel, calls it.
 #[test]
 fn kernels_the_engine_runs_quit_per_chunk() {
-    use crate::Primitive::{Append, DeepEqual, Format, Min};
+    use crate::Primitive::{Append, DeepEqual, Format, Max, Min};
     fn call(vm: &mut Vm, p: crate::Primitive, args: &[Value], scoped: bool) -> crate::Result<Value> {
         let start = vm.stack.len();
         vm.stack.extend_from_slice(args);
@@ -396,7 +396,7 @@ fn kernels_the_engine_runs_quit_per_chunk() {
         outcome
     }
     for (p, args) in [(Append, "(list (make-list 50000 1) nil)"), (Append, "(list (make-string 50000 ?a) nil)"),
-                      (Min, "(make-list 50000 1)"), (Format, "(list \"%S\" (make-list 50000 'a))"),
+                      (Min, "(make-list 50000 1)"), (Max, "(make-list 50000 1)"), (Format, "(list \"%S\" (make-list 50000 'a))"),
                       (DeepEqual, "(list (make-list 50000 1) (make-list 50000 1))")] {
         let (mut vm, signal) = busy_vm();
         let list = eval(&mut vm, args);
@@ -599,6 +599,15 @@ fn list_walks_quit_inside_their_own_scope() {
         vm.propagated_escape = None;
         vm.quit_unwinding = false;
         assert_eq!(eval(&mut vm, "(length l)").integer_value(), Some(50000), "{p:?}: the list is whole");
+        // Under inhibit-quit it runs to its end and the press waits.
+        eval(&mut vm, "(setq inhibit-quit t)");
+        assert!(signal.interrupt());
+        let start = vm.stack.len();
+        vm.stack.push(list);
+        let outcome = vm.inside_quit_scope(|vm| vm.primitive(p, start, 1));
+        vm.stack.truncate(start);
+        assert!(outcome.is_ok(), "{p:?}: under inhibit-quit the call ends with a value");
+        assert!(signal.due(), "{p:?}: inhibit-quit holds the press");
     }
 }
 
