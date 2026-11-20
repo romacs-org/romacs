@@ -87,3 +87,34 @@ fn noto_sans_named_instances_cover_thin_to_black() {
     assert!(!weights.contains(&350), "350 is not a named instance");
     assert!(!weights.contains(&950), "950 is not a named instance");
 }
+
+/// The variation data FreeType reads from a pinned variable font: its named
+/// instances' weights and axis tuples, and the `wght` the probe applies,
+/// seen in the glyph outline it draws.
+#[test]
+fn noto_sans_mono_variations_reach_freetype() {
+    let file = romacs_test_fonts::noto_sans_mono_variable().to_str().unwrap();
+    assert_eq!(named_instance_wght_values(file, 0), [100, 200, 300, 400, 500, 600, 700, 800, 900]);
+    let wght = u32::from_be_bytes(*b"wght");
+    let coords = |instance: u32| -> Vec<(u32, u32)> {
+        named_instance_variation_coords(file, instance << 16).iter().map(|coord| (coord.tag(), coord.value_bits())).collect()
+    };
+    assert_eq!(coords(1), [(wght, 100f32.to_bits())]);
+    assert_eq!(coords(5), [(wght, 500f32.to_bits())]);
+    assert_eq!(coords(9), [(wght, 900f32.to_bits())]);
+    assert_eq!(coords(10), Vec::new(), "there are nine named instances");
+    // The stem of `l` thickens with the weight applied.
+    let stem = |weight: Option<f32>| {
+        let library = Library::init().unwrap();
+        let mut face = library.new_face(file, 0).unwrap();
+        if let Some(weight) = weight {
+            apply_wght_axis(&library, &mut face, weight);
+        }
+        face.set_pixel_sizes(64, 64).unwrap();
+        face.load_char(usize::from(b'l'), LoadFlag::NO_HINTING).unwrap();
+        let metrics = face.glyph().metrics();
+        (metrics.width, metrics.horiBearingX)
+    };
+    assert_eq!([None, Some(100.0), Some(700.0), Some(900.0)].map(stem),
+               [(1884, 328), (1761, 410), (2007, 246), (2130, 164)]);
+}

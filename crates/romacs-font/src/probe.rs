@@ -77,6 +77,9 @@ use freetype::Library;
 use freetype::face::LoadFlag;
 use freetype::freetype_sys as ft;
 
+#[expect(unsafe_code, reason = "FreeType's variation calls, which freetype-rs does not wrap")]
+mod variations;
+
 /// Probe `file`[`face_index`] like GNU `font_open_entity`: try
 /// `pixel_size`, bumping upward (at most 15 times) until average
 /// width and height are positive.
@@ -157,16 +160,18 @@ pub fn named_instance_wght_values(file: &str, face_index: u32) -> Vec<u16> {
     let Ok(mut face) = library.new_face(file, face_index as isize) else {
         return Vec::new();
     };
-    let Some(mm) = MmVar::of(&library, &mut face) else {
+    let Some(var) = variations::of(&library, &mut face) else {
         return Vec::new();
     };
-    let Some(wght) = mm.axes().iter().position(|axis| axis.tag == WGHT) else {
+    let Some(wght) = var.axes.iter().position(|axis| axis.tag == WGHT) else {
         return Vec::new();
     };
-    let mut weights: Vec<u16> = mm
-        .named_styles()
+    let mut weights: Vec<u16> = var
+        .named_styles
+        .iter()
+        .filter_map(|coords| coords.get(wght))
         // FT_Fixed 16.16 → integer CSS weight.
-        .map(|coords| (coords[wght] as f64 / 65536.0).round())
+        .map(|&value| (value as f64 / 65536.0).round())
         .filter(|value| (1.0..=1000.0).contains(value))
         .map(|value| value as u16)
         .collect();
@@ -192,16 +197,16 @@ pub fn named_instance_variation_coords(
     let Ok(mut face) = library.new_face(file, (face_selector & 0xffff) as isize) else {
         return Vec::new();
     };
-    let Some(mm) = MmVar::of(&library, &mut face) else {
+    let Some(var) = variations::of(&library, &mut face) else {
         return Vec::new();
     };
-    let Some(coords) = mm.named_styles().nth(named_instance - 1) else {
+    let Some(coords) = var.named_styles.get(named_instance - 1) else {
         return Vec::new();
     };
-    mm.axes()
+    var.axes
         .iter()
         .zip(coords)
-        .filter(|&(axis, value)| *value != axis.def)
+        .filter(|&(axis, value)| *value != axis.default)
         .filter_map(|(axis, value)| FontVariationCoord::try_new(axis.tag as u32, *value as f32 / 65536.0))
         .collect()
 }
@@ -222,85 +227,19 @@ pub fn postscript_name(file: &str, face_selector: u32) -> Option<String> {
 /// Set the `wght` design axis (OT axis units == CSS weight), leaving
 /// all other axes at their defaults. No-op for non-variable fonts.
 fn apply_wght_axis(library: &Library, face: &mut freetype::Face, wght: f32) {
-    let Some(mm) = MmVar::of(library, face) else {
+    let Some(var) = variations::of(library, face) else {
         return;
     };
-    let coords: Vec<ft::FT_Fixed> = mm
-        .axes()
+    let coords: Vec<ft::FT_Fixed> = var
+        .axes
         .iter()
-        .map(|axis| if axis.tag == WGHT { (f64::from(wght) * 65536.0) as ft::FT_Fixed } else { axis.def })
+        .map(|axis| if axis.tag == WGHT { (f64::from(wght) * 65536.0) as ft::FT_Fixed } else { axis.default })
         .collect();
-    set_design_coordinates(face, coords);
+    variations::set_design_coordinates(face, &coords);
 }
 
 /// The `wght` axis tag.
 const WGHT: ft::FT_ULong = u32::from_be_bytes(*b"wght") as ft::FT_ULong;
-
-/// A face's variation data (`FT_Get_MM_Var`), released with its library.
-struct MmVar<'a> {
-    library: &'a Library,
-    mm: std::ptr::NonNull<ft::FT_MM_Var>,
-}
-
-impl<'a> MmVar<'a> {
-    /// FACE's variation data; None for a face without variations.
-    fn of(library: &'a Library, face: &mut freetype::Face) -> Option<Self> {
-        let mut mm: *mut ft::FT_MM_Var = std::ptr::null_mut();
-        // SAFETY: the face is live and mutably borrowed; FreeType writes into
-        // `mm` the address of a copy it allocates for the caller, which
-        // outlives the face.
-        let error = unsafe { ft::FT_Get_MM_Var(face.raw_mut(), &mut mm) };
-        if error != 0 {
-            return None;
-        }
-        std::ptr::NonNull::new(mm).map(|mm| Self { library, mm })
-    }
-
-    fn axes(&self) -> &[ft::FT_Var_Axis] {
-        // SAFETY: FreeType allocated the structure for this owner, which
-        // frees it only on drop; `axis` holds `num_axis` entries.
-        unsafe {
-            let mm = self.mm.as_ref();
-            if mm.num_axis == 0 { &[] } else { std::slice::from_raw_parts(mm.axis, mm.num_axis as usize) }
-        }
-    }
-
-    /// Each named instance's design coordinates, one per axis.
-    fn named_styles(&self) -> impl Iterator<Item = &[ft::FT_Fixed]> {
-        let axes = self.axes().len();
-        // SAFETY: as in `axes`; `namedstyle` holds `num_namedstyles`
-        // entries, and each entry's `coords` one value per axis.
-        let styles = unsafe {
-            let mm = self.mm.as_ref();
-            if mm.num_namedstyles == 0 {
-                &[]
-            } else {
-                std::slice::from_raw_parts(mm.namedstyle, mm.num_namedstyles as usize)
-            }
-        };
-        styles.iter().map(move |style| {
-            // SAFETY: as above.
-            unsafe { if axes == 0 { &[] } else { std::slice::from_raw_parts(style.coords, axes) } }
-        })
-    }
-}
-
-impl Drop for MmVar<'_> {
-    fn drop(&mut self) {
-        // SAFETY: the structure came from FT_Get_MM_Var on a face of this
-        // library and is released once.
-        unsafe { ft::FT_Done_MM_Var(self.library.raw(), self.mm.as_ptr()) };
-    }
-}
-
-/// Set FACE's design coordinates, one per axis.
-fn set_design_coordinates(face: &mut freetype::Face, mut coords: Vec<ft::FT_Fixed>) {
-    // SAFETY: the face is live and mutably borrowed; `coords` holds the
-    // count passed, and FreeType copies it.
-    unsafe {
-        ft::FT_Set_Var_Design_Coordinates(face.raw_mut(), coords.len() as ft::FT_UInt, coords.as_mut_ptr());
-    }
-}
 
 fn probe_at_exact_px(face: &freetype::Face, pixel_size: u32) -> Option<FontPxMetrics> {
     face.set_pixel_sizes(pixel_size, pixel_size).ok()?;
@@ -540,10 +479,17 @@ pub fn otf_capability(file: &str, face_index: u32) -> Option<OtfCapability> {
 /// FILE mapped, not copied: a font collection runs to tens of megabytes,
 /// of which the layout tables are a small part. FreeType maps font files
 /// the same way.
+#[expect(unsafe_code, reason = "memmap2's map is unsafe by contract")]
 fn mapped(file: &str) -> std::io::Result<memmap2::Mmap> {
     let file = std::fs::File::open(file)?;
-    // SAFETY: the map is read-only and dropped before this observation
-    // returns; a font file truncated meanwhile faults, as FreeType's do.
+    // SAFETY: memmap2's contract is that nothing changes the file while it
+    // is mapped. Nothing in this crate writes a font file; the map is read-only
+    // and lives only while `otf_capability_in` parses it with ttf-parser,
+    // which bounds-checks every read. Another process rewriting the file in
+    // that window is the hazard every reader of a mapped font accepts
+    // (FreeType maps font files too); it is not excluded here.
+    // UNSAFE(memmap2 is the mapping crate and its map is unsafe by contract;
+    // reading the file instead copies tens of megabytes per collection)
     unsafe { memmap2::Mmap::map(&file) }
 }
 
