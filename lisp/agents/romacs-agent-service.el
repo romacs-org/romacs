@@ -338,6 +338,7 @@ the board; its children are counted where the rows are kept."
      "done_seq" (or (romacs-agent-done-seq session) 0)
      "seen_seq" (or (romacs-agent-seen-seq session) :null)
      "settled_seq" (or (romacs-agent-settled-seq session) :null)
+     "failed" (if (romacs-agent-failed session) t :false)
      "last_time" (romacs-agent-service--number (romacs-agent-last-time session))
      "cost" (romacs-agent-service--number (romacs-agent-cost session))
      "context_used" (romacs-agent-service--number (romacs-agent-context-used session))
@@ -346,18 +347,18 @@ the board; its children are counted where the rows are kept."
 
 (defun romacs-agent-service--whole-rows ()
   "Every session this machine's board shows, as rows by id, their keys the
-board's own of this editor's sessions (`romacs-agent-board-source-key',
-`romacs-agent-board-source-sessions').  Its view of the unloaded ones is the
+board's own of this editor's sessions, whatever its board shows
+\(`romacs-agent-board-source').  Its view of the unloaded ones is the
 service's own, kept for the rows made before the next whole pass: the
 board's stays the board's, as the rows it shows hold its sessions."
-  (let ((romacs-agent-board--unloaded nil))
+  (let ((romacs-agent-board--unloaded nil) (romacs-agent-board-source romacs-agent-log-local))
     (let* ((sessions (romacs-agent-board-source-sessions romacs-agent-log-local))
            (rows (make-hash-table :test #'equal :size (length sessions))))
       (setq romacs-agent-service--unloaded romacs-agent-board--unloaded)
       (dolist (session sessions)
         (let ((id (romacs-agent-id session)))
           (unless (gethash id rows)
-            (puthash id (romacs-agent-service-row session (romacs-agent-board-source-key romacs-agent-log-local session)) rows))))
+            (puthash id (romacs-agent-service-row session (romacs-agent-board--key session)) rows))))
       rows)))
 
 (defun romacs-agent-service--session (id)
@@ -395,11 +396,11 @@ batch is looked up before any key is made, as a key reads others."
               (when old (push old todo))
               (when-let* ((kids (gethash id children)))
                 (maphash (lambda (kid _) (push kid todo)) kids)))))))
-    (let ((romacs-agent-board--unloaded romacs-agent-service--unloaded))
+    (let ((romacs-agent-board--unloaded romacs-agent-service--unloaded) (romacs-agent-board-source romacs-agent-log-local))
       (mapcar (lambda (id)
                 (let ((session (gethash id sessions)))
                   (cons id (and (not (eq session :gone))
-                                (romacs-agent-service-row session (romacs-agent-board-source-key romacs-agent-log-local session))))))
+                                (romacs-agent-service-row session (romacs-agent-board--key session))))))
               (nreverse order)))))
 
 (defun romacs-agent-service--apply (list updates)

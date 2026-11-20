@@ -42,8 +42,9 @@ as `romacs-relay connect' takes it (wss://HOST/agents), or nil."
 (cl-defstruct (romacs-agent-remote (:constructor romacs-agent-remote--make) (:copier nil))
   "Another machine's sessions as a chat's source: the CLIENT of its
 service, the RELAY process that carries it here, the mirror of each of
-its sessions, by id (SESSIONS), and their CHATS by id."
-  client relay
+its sessions, by id (SESSIONS), their CHATS by id, and while it connects,
+the DIAL its one attempt is named by."
+  client relay dial
   (sessions (make-hash-table :test #'equal))
   (chats (make-hash-table :test #'equal)))
 
@@ -79,7 +80,8 @@ date from it: the same record for its id each time."
           (romacs-agent-input-seq session) (funcall get "input_seq")
           (romacs-agent-done-seq session) (or (funcall get "done_seq") 0)
           (romacs-agent-seen-seq session) (funcall get "seen_seq")
-          (romacs-agent-settled-seq session) (funcall get "settled_seq"))
+          (romacs-agent-settled-seq session) (funcall get "settled_seq")
+          (romacs-agent-failed session) (eq (gethash "failed" row) t))
     session))
 
 ;;; The chat
@@ -105,11 +107,12 @@ as its live events are drawn."
 (defun romacs-agent-remote--drawn (session units from)
   "Draw SESSION afresh: UNITS, beginning at seq FROM (nil, its start)."
   (romacs-agent-log--clear)
-  (setq romacs-agent-log--from from)
+  (setq romacs-agent-log--from from romacs-agent-remote--earlier nil)
   (when from
     (romacs-agent-log--writing (save-excursion (goto-char (point-min)) (insert (romacs-agent-log--earlier-line from)))))
+  ;; What streams at its end goes on streaming: the live units that
+  ;; follow may carry on its message.
   (dolist (unit units) (romacs-agent-remote--draw-unit session unit))
-  (romacs-agent-log--close-stream)
   (romacs-agent-log--sync-asks session)
   (romacs-agent-log--separator t)
   (romacs-agent-log--header-show))
@@ -152,22 +155,34 @@ the chat is killed."
               nil t)
     (romacs-agent-client-follow (romacs-agent-remote-client source) id romacs-agent-log-turns romacs-agent-log-records)))
 
+(defvar-local romacs-agent-remote--earlier nil
+  "Where the chat began when its earlier turns were asked for, while they
+are read.")
+
 (cl-defmethod romacs-agent-log-source-earlier ((source romacs-agent-remote) session)
-  "Draw SESSION's turns before those the chat shows, read from its service."
+  "Draw SESSION's turns before those the chat shows, read from its service:
+once, and only while the chat still begins where it did."
   (let ((end romacs-agent-log--from) (buffer (current-buffer)))
     (unless end (user-error "This chat shows the session from its start"))
-    (romacs-agent-client-earlier
-     (romacs-agent-remote-client source) (romacs-agent-id session) (1- end)
-     romacs-agent-log-turns romacs-agent-log-records
-     (lambda (result)
-       (when (buffer-live-p buffer)
-         (with-current-buffer buffer
-           (pcase result
-             (`(error ,error) (message "Earlier turns not read: %s" (gethash "message" error)))
-             ('(reset) (message "Its history moved: the chat is drawn afresh"))
-             (`(,units ,from)
-              (romacs-agent-log--draw-above
-               session from (lambda () (dolist (unit units) (romacs-agent-remote--draw-unit session unit))))))))))))
+    (when romacs-agent-remote--earlier (user-error "Its earlier turns are being read"))
+    (setq romacs-agent-remote--earlier end)
+    (unless (romacs-agent-client-earlier
+             (romacs-agent-remote--client) (romacs-agent-id session) (1- end)
+             romacs-agent-log-turns romacs-agent-log-records
+             (lambda (result)
+               (when (buffer-live-p buffer)
+                 (with-current-buffer buffer
+                   (let ((current (eql romacs-agent-remote--earlier romacs-agent-log--from)))
+                     (setq romacs-agent-remote--earlier nil)
+                     (pcase result
+                       (`(error ,error) (message "Earlier turns not read: %s" (gethash "message" error)))
+                       ('(reset) (message "Its history moved: the chat is drawn afresh"))
+                       (`(,units ,from)
+                        (when current
+                          (romacs-agent-log--draw-above
+                           session from (lambda () (dolist (unit units) (romacs-agent-remote--draw-unit session unit))))))))))))
+      (setq romacs-agent-remote--earlier nil)
+      (user-error "This chat is not followed: open it again"))))
 
 (defun romacs-agent-remote--waits (source id requests)
   "SOURCE's session ID waits on REQUESTS, a table of handle id to request:
@@ -258,7 +273,7 @@ afresh.  The source."
   (let ((source (or romacs-agent-remote--source (romacs-agent-remote--make))))
     (setq romacs-agent-remote--source source romacs-agent-board-source source)
     (when (romacs-agent-remote-client source) (romacs-agent-client-close (romacs-agent-remote-client source)))
-    (setf (romacs-agent-remote-client source) nil)
+    (setf (romacs-agent-remote-client source) nil (romacs-agent-remote-dial source) nil)
     (if socket
         (romacs-agent-remote--connected source (romacs-agent-client-connect socket))
       (unless romacs-agent-remote-host (user-error "No machine named: set `romacs-agent-remote-host'"))
@@ -268,19 +283,22 @@ afresh.  The source."
               (make-process :name "romacs-relay" :buffer (generate-new-buffer " *romacs-relay*") :noquery t
                             :command (list romacs-agent-remote-relay "connect" romacs-agent-remote-host
                                            "--socket" (romacs-agent-remote--socket)))))
-      (romacs-agent-remote--dial source (+ (float-time) 10)))
+      (let ((dial (list 'dial)))
+        (setf (romacs-agent-remote-dial source) dial)
+        (romacs-agent-remote--dial source dial (+ (float-time) 10))))
     source))
 
-(defun romacs-agent-remote--dial (source deadline)
+(defun romacs-agent-remote--dial (source dial deadline)
   "Connect SOURCE through its relay once it listens, trying again a moment
-later until DEADLINE: a socket there before it, a stale one, refuses
-until the relay replaces it."
+later until DEADLINE, while DIAL is its attempt: a socket there before
+it, a stale one, refuses until the relay replaces it."
   (let ((relay (romacs-agent-remote-relay source)))
-    (when (eq source romacs-agent-remote--source)
+    (when (and (eq source romacs-agent-remote--source) (eq dial (romacs-agent-remote-dial source)))
       (if-let* ((client (ignore-error file-error (romacs-agent-client-connect (romacs-agent-remote--socket)))))
-          (romacs-agent-remote--connected source client)
+          (progn (setf (romacs-agent-remote-dial source) nil)
+                 (romacs-agent-remote--connected source client))
         (if (and (process-live-p relay) (< (float-time) deadline))
-            (run-at-time 0.05 nil #'romacs-agent-remote--dial source deadline)
+            (run-at-time 0.05 nil #'romacs-agent-remote--dial source dial deadline)
           (when (process-live-p relay) (delete-process relay))
           (message "No relay to %s: %s" romacs-agent-remote-host
                    (with-current-buffer (process-buffer relay) (string-trim (buffer-string)))))))))
@@ -298,7 +316,9 @@ until the relay replaces it."
   (when-let* ((source romacs-agent-remote--source))
     (setq romacs-agent-remote--source nil romacs-agent-board-source romacs-agent-log-local)
     (when (romacs-agent-remote-client source) (romacs-agent-client-close (romacs-agent-remote-client source)))
-    (when (process-live-p (romacs-agent-remote-relay source)) (delete-process (romacs-agent-remote-relay source)))))
+    (when (process-live-p (romacs-agent-remote-relay source)) (delete-process (romacs-agent-remote-relay source)))
+    ;; The board shows this editor's own again.
+    (romacs-agent-board--refresh)))
 
 (defun romacs-agent-remote--client ()
   "The client of the other machine shown, connected, or a user error."
