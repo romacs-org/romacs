@@ -201,11 +201,17 @@ on a white one.  Nil when no band does that and keeps FG readable on it
     (let ((low (if (= amount 0.05) 0.0 (- amount 0.02))) (high (min amount 1.0)))
       (when (>= (romacs-color-contrast band bg) contrast)
         (dotimes (_ 8)
-          (let* ((mid (/ (+ low high) 2)) (try (romacs-color-mix bg fg mid)))
-            (if (>= (romacs-color-contrast try bg) contrast) (setq high mid band try) (setq low mid))))))
-    (and (>= (romacs-color-contrast band bg) contrast)
-         (>= (romacs-color-contrast fg band) 3.0)
-         band)))
+          (let ((mid (/ (+ low high) 2)))
+            (if (>= (romacs-color-contrast (romacs-color-mix bg fg mid) bg) contrast) (setq high mid) (setq low mid))))
+        ;; A mix is rounded to whole channels, its contrasts not quite
+        ;; even along the way: the first nearby one that meets both.
+        (let ((at (max 0.0 (- high 0.01))) (found nil))
+          (while (and (not found) (<= at (min 1.0 (+ high 0.02))))
+            (let ((try (romacs-color-mix bg fg at)))
+              (when (and (>= (romacs-color-contrast try bg) contrast) (>= (romacs-color-contrast fg try) 3.0))
+                (setq found try)))
+            (setq at (+ at 0.001)))
+          found)))))
 
 (defun romacs-color-legible (color &optional background contrast)
   "COLOR moved in lightness until it reads on BACKGROUND (the default

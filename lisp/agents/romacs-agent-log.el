@@ -350,7 +350,11 @@ end before TEXT."
   "TEXT with every line indented for a subagent DEPTH deep."
   (if (zerop depth) text
     (let ((bar (propertize (concat (make-string (* 2 (1- depth)) ?\s) "│ ") 'face 'romacs-agent-log-rule)))
-      (replace-regexp-in-string "^\\(.\\)" (lambda (match) (concat bar match)) text t t))))
+      ;; The bar opens what its line does.
+      (replace-regexp-in-string "^\\(.\\)"
+                                (lambda (match)
+                                  (concat (propertize bar 'romacs-agent-log-full (get-text-property 0 'romacs-agent-log-full match)) match))
+                                text t t))))
 
 (defun romacs-agent-log--where (event)
   "Where EVENT is drawn: (BLOCK . DEPTH), under its parent's open call,

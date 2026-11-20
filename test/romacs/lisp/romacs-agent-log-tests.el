@@ -1306,6 +1306,11 @@ none when dropped.")
   (should-not (romacs-color-band "#000000" "#141414"))
   ;; Apart, but the text would not read on it.
   (should-not (romacs-color-band "#000000" "#505050"))
+  ;; Rounded mixes: a nearby one that meets both floors is found.
+  (let ((band (romacs-color-band "#3f51c7" "#16e827" 1.3)))
+    (should band)
+    (should (>= (romacs-color-contrast band "#3f51c7") 1.3))
+    (should (>= (romacs-color-contrast "#16e827" band) 3.0)))
   ;; Below the first step: the least mix, not the step's.
   (should (< (romacs-color-contrast (romacs-color-band "#ffffff" "#000000" 1.01) "#ffffff") 1.05))
   ;; The least band that stands apart, found between steps.
@@ -1422,6 +1427,21 @@ none when dropped.")
       (should round)
       (should (< round (point))))
     (should (string-match-p "Build done\n\n\\'" (romacs-agent-log-tests--transcript)))))
+
+;;; Under a call
+
+(ert-deftest romacs-agent-log-rounds-quote-under-a-call-opens-from-its-indent ()
+  ;; A quote under a subagent's call: RET at a row's first column, on the
+  ;; call's bar, opens it whole.
+  (romacs-agent-log-tests--with
+    (draw :type 'tool :state 'started :id "a1" :name "Agent" :input (romacs-agent-log-tests--input "description" "sub"))
+    (let ((romacs-agent-log-rounds-other-lines 1))
+      (dolist (event (romacs-agent--claude-injected "<task-notification>\n<status>completed</status>\n<summary>one\ntwo\nthree</summary>\n</task-notification>" "a1"))
+        (romacs-agent-log-draw session event)))
+    (goto-char (point-min))
+    (search-forward "shows all")
+    (should (string-prefix-p "│ " (buffer-substring-no-properties (line-beginning-position) (line-end-position))))
+    (should (get-text-property (line-beginning-position) 'romacs-agent-log-full))))
 
 (provide 'romacs-agent-log-tests)
 ;;; romacs-agent-log-tests.el ends here
