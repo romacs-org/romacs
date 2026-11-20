@@ -559,7 +559,11 @@ impl World {
     /// ENVIRONMENT is the whole environment of the processes that restore
     /// this world, a compile process's for the compile world: its
     /// environment records are asked of it, not of this process's, which
-    /// may differ (a session's LOGNAME, which no compile process has).
+    /// may differ (a session's LOGNAME, which no compile process has). A
+    /// world build records no per-process name (the names `pinned_env`
+    /// sets are pinned), so ENVIRONMENT answers each as its builder saw it.
+    /// No verdict is kept: the digest cache holds file contents by stat,
+    /// whatever the environment.
     pub fn lisp_files_digest(&self, roots: &[PathBuf], environment: &[(OsString, OsString)]) -> Option<String> {
         lisp_digest(&self.checked_manifest(true, Some(environment)).ok()?, roots)
     }
