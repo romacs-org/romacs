@@ -3,6 +3,9 @@
 //! messages both ways, interrupt, kill, pidfd child reporting and
 //! retirement, no zombie and no orphan, a refused worker, the world
 //! refusal.
+#[path = "support/tree_lisp.rs"]
+mod tree_lisp;
+
 use romacs_vm::Vm;
 
 fn vm() -> Vm {
@@ -313,4 +316,29 @@ fn a_retired_worker_ends_without_a_wait_or_a_death_report() {
     let pid: i64 = out.trim_start_matches('(').split_whitespace().next().unwrap().parse().unwrap();
     assert!(out.ends_with(" t t nil nil nil nil)"), "{out}");
     assert!(settles(|| !process_exists(pid)), "retired worker {pid} survived");
+}
+
+/// Every condition isolate.el settles a dead worker's jobs with, or signals
+/// itself, is an `isolate-error`, so an awaiter's handler for it catches
+/// each: one used and never defined reaches the awaiter as a peculiar error.
+#[test]
+fn every_condition_isolate_el_raises_is_an_isolate_error() {
+    let source = tree_lisp::text("vm/isolate.el");
+    // `(romacs--isolate-dead ISOLATE 'NAME ...)` and `(signal 'NAME ...)`.
+    let quoted = |text: &str| text.strip_prefix('\'').map(|text| {
+        text.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '-').collect::<String>()
+    });
+    let mut names: Vec<String> = source.match_indices("romacs--isolate-dead ")
+        .filter_map(|(at, marker)| source[at + marker.len()..].split_once(' ').and_then(|(_, rest)| quoted(rest)))
+        .chain(source.match_indices("(signal ").filter_map(|(at, marker)| quoted(&source[at + marker.len()..])))
+        .filter(|name| name.starts_with("isolate-"))
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    assert!(names.iter().any(|n| n == "isolate-world-unavailable") && names.iter().any(|n| n == "isolate-died"), "{names:?}");
+    let mut vm = vm();
+    for name in names {
+        assert_eq!(eval(&mut vm, &format!("(and (memq 'isolate-error (get '{name} 'error-conditions)) t)")), "t",
+                   "{name} is no isolate-error");
+    }
 }

@@ -1135,11 +1135,9 @@ dependencies = [
 [[package]]
 name = "freetype-sys"
 version = "0.23.0"
-source = "git+https://github.com/eval-exec/freetype-sys?rev=a4eb0a7cf08d9b503bda7d7261c97f8973d34bf1#a4eb0a7cf08d9b503bda7d7261c97f8973d34bf1"
 dependencies = [
  "cc",
  "libz-sys",
- "pkg-config",
 ]
 
 [[package]]
@@ -3505,6 +3503,7 @@ version = "0.0.20"
 name = "romacs-vm"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "crossbeam-deque",
  "errno",
  "flate2",

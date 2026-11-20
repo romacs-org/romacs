@@ -36,6 +36,7 @@
 (require 'romacs-markdown)
 (require 'romacs-agent-turns)
 (require 'romacs-agent-drawn)
+(require 'romacs-agent-log)
 
 ;;;###autoload
 (defvar romacs-agents-map
@@ -489,16 +490,29 @@ chip of the task's results arriving."
         (delete-region start (prop-match-end found))
         (romacs-agent-ui--insert-at start chip)))))
 
+(defun romacs-agent-ui--parent-of (id)
+  "The id of the session that delegated the one ID names, or nil, loading
+no session: from it loaded, its row, else its manifest (a row not filled
+yet, as an install draws turns before it fills rows).  A preview, held to
+its time, asks the loaded one alone."
+  (if-let* ((child (or (romacs-agent-loaded id)
+                       (and (not romacs-agent-ui--previewing) (romacs-agent-store-row-session id)))))
+      (plist-get (romacs-agent-options child) :parent)
+    (when-let* (((not romacs-agent-ui--previewing))
+                (manifest (romacs-agent--read-json
+                           (expand-file-name "manifest.json" (expand-file-name id (romacs-agent--state-root)))))
+                (options (gethash "options" manifest))
+                ((hash-table-p options)))
+      (romacs-agent--value (gethash "parent" options)))))
+
 (defun romacs-agent-ui--wakes (session text)
   "TEXT, a message to SESSION, as the wakes of tasks it delegated, or nil:
 what the user wrote stays theirs, whatever it looks like."
   (let ((wakes (romacs-agent-tools--wakes-parse text)))
     (and wakes
          (cl-every (lambda (wake)
-                     ;; A preview loads no session: a child loaded, or none.
-                     (when-let* ((child (if romacs-agent-ui--previewing (romacs-agent-loaded (plist-get wake :id))
-                                          (romacs-agent-get (plist-get wake :id)))))
-                       (equal (plist-get (romacs-agent-options child) :parent) (romacs-agent-id session))))
+                     (when-let* ((id (plist-get wake :id)))
+                       (equal (romacs-agent-ui--parent-of id) (romacs-agent-id session))))
                    wakes)
          wakes)))
 
@@ -1399,7 +1413,7 @@ prompt's does."
                                 'romacs-agent-compaction (plist-get event :text)))
         ;; A tool call the policy answers asks no one: its card shows it; a
         ;; plan presented shows as its plan.
-        ((and 'approval (guard (or (plist-get event :plan) (romacs-agent--auto-p event)))) nil)
+        ((and 'approval (guard (romacs-agent--auto-answer-p session event))) nil)
         ('plan
          (romacs-agent-ui--line session event "── Proposed plan ──" 'face 'romacs-agent-section)
          (romacs-agent-ui--insert (concat (string-trim (or (plist-get event :text) "")) "\n"))
@@ -2526,8 +2540,13 @@ composer as it is."
      (romacs-agent-ui--fill (current-buffer)))))
 
 (defun romacs-agent-show (session &optional action)
-  "Show SESSION's chat buffer, made from its journal when new, as
-`pop-to-buffer' does with ACTION."
+  "Show SESSION's chat (romacs-agent-log.el), as `pop-to-buffer' does
+with ACTION."
+  (romacs-agent-log-show session action))
+
+(defun romacs-agent-ui--show-chat (session &optional action)
+  "Show SESSION's chat buffer of before, made from its journal when new, as
+`pop-to-buffer' does with ACTION: its tests', until it is deleted."
   (let ((buffer (romacs-agent-buffer session)))
     (unless (buffer-live-p buffer) (setq buffer (romacs-agent-ui--make-chat session)))
     ;; Shown first: its rules fit its window.
@@ -3257,7 +3276,7 @@ PROPERTY: the previous one is the run point is in, past its start."
   (let* ((id (or (romacs-agent-ui--approval-here) (user-error "No approval here")))
          (questions (plist-get (gethash id (romacs-agent-ui--asks)) :questions)))
     (if questions (romacs-agent-ask-open romacs-agent-ui--session id questions (romacs-agent-ui--asked-place id))
-      (romacs-agent-respond romacs-agent-ui--session id t))))
+      (romacs-agent-respond romacs-agent-ui--session id t nil 'user))))
 
 (defun romacs-agent-chat-answer ()
   "Answer the questions on this row, in their layer."
@@ -3339,14 +3358,14 @@ of the session; a question is answered instead."
   (interactive nil romacs-agent-chat-mode)
   (if (romacs-agent-ui--asking-p) (romacs-agent-chat-allow)
     (let ((id (or (romacs-agent-ui--approval-here) (user-error "No approval here"))))
-      (romacs-agent-respond romacs-agent-ui--session id (list :always t)))))
+      (romacs-agent-respond romacs-agent-ui--session id (list :always t) nil 'user))))
 
 (defun romacs-agent-chat-deny ()
   "Deny the tool call the harness asks about."
   (interactive nil romacs-agent-chat-mode)
   (let ((id (romacs-agent-ui--approval-here)))
     (unless id (user-error "No approval here"))
-    (romacs-agent-respond romacs-agent-ui--session id nil)))
+    (romacs-agent-respond romacs-agent-ui--session id nil nil 'user)))
 
 ;;; Chat actions
 
@@ -3634,7 +3653,9 @@ the session stays."
                romacs-agent-chat-mode)
   (let ((session romacs-agent-ui--session))
     (setf (romacs-agent-title session) title (romacs-agent-title-auto session) nil)
-    (romacs-agent--update-manifest session)
+    ;; Its views drawn again now, and once its row says it: those of a
+    ;; session not loaded read the row.
+    (romacs-agent--update-manifest session #'romacs-agent-ui--batch)
     (rename-buffer (format "*agent: %s*" title) t)
     (romacs-agent-ui--batch)))
 

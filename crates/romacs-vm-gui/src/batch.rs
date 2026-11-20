@@ -212,14 +212,28 @@ fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool) {
         // the libraries it loaded, the compile world's geometry and the Lisp
         // its build read, named relative to the tree. Not the executable's
         // file: two builds of one commit differ there (romacs#277). The world
-        // is made once (its key still binds the executable); only whether its
-        // build was published is asked again.
+        // is made once (its key still binds the executable).
+        //
+        // Which manifest names the Lisp. A process that restored the compile
+        // world (a compile process) takes the manifest of the image it runs
+        // (`RESTORED`), unchecked: the key then labels what it compiles with
+        // the code that compiled it, whatever was published since. If a
+        // preloaded file changed, that key is one no loader's matches, which
+        // costs an unused artifact, never a wrong load. Any other process
+        // (a source boot, a session, a tree's process) loads what was
+        // compiled, so it takes the published manifest checked against the
+        // files now (`World::lisp_files_digest`): a changed file gives no
+        // identity, and the load compiles, which rebuilds the world.
         identity: Box::new({
             let world = std::sync::OnceLock::new();
             let roots: Vec<PathBuf> = root.iter().cloned().collect();
             move || {
-                let lisp = world.get_or_init(|| World::new(worlds.clone(), recipe.clone()).ok()).as_ref()?
-                    .lisp_files_digest(&roots)?;
+                let world = world.get_or_init(|| World::new(worlds.clone(), recipe.clone()).ok()).as_ref()?;
+                let lisp = match RESTORED.get() {
+                    Some((store, key, manifest)) if *store == world.store && *key == world.key =>
+                        romacs_vm::world::store::lisp_digest(manifest, &roots)?,
+                    _ => world.lisp_files_digest(&roots)?,
+                };
                 let libraries = romacs_vm::world::store::libraries_identity().ok()?;
                 Some(format!("compile build {} libraries {libraries} {GEOMETRY} lisp {lisp}", env!("ROMACS_BUILD_ID")))
             }
@@ -246,6 +260,8 @@ pub fn compile_lisp(file: PathBuf, store: Option<PathBuf>) -> Result<(), String>
             let dirs: Vec<PathBuf> = path.lines().map(PathBuf::from).collect();
             vm.set_load_path(&dirs)?;
         }
+        // The tree's compile checks what it finds on the same `load-path'.
+        println!("romacs-compile-load-path: {}", serde_json::to_string(&vm.compile_load_path()?).map_err(|e| e.to_string())?);
         let (artifact, held) = vm.compile_lisp_file(&file)?;
         if held { println!("romacs-compile-held"); }
         println!("romacs-compiled: {}", artifact.display());
@@ -302,6 +318,14 @@ fn restarted(mut vm: Vm) -> Result<Vm, String> {
     Ok(vm)
 }
 
+/// The world this process restored, by its store and key, with the manifest
+/// of the image it runs: what compiled Lisp it makes is keyed by. A process
+/// static, as the compiled-Lisp configuration is: that configuration, with
+/// its identity, is made before `boot` runs (`compiled_lisp::configure`
+/// reads the process while it is single threaded) and asked lazily by
+/// loads long after, where `boot`'s result is out of reach.
+static RESTORED: std::sync::OnceLock<(PathBuf, [u8; 32], serde_json::Value)> = std::sync::OnceLock::new();
+
 /// The batch session's VM up to the chain's end: a world restored, then
 /// this process's startup steps; else the chain from source, as a session
 /// without worlds boots, while a builder prepares the world for the next
@@ -319,8 +343,9 @@ fn boot(store: Option<PathBuf>, wait: bool) -> Result<Vm, String> {
     let launched = romacs_vm::flight::without(|| world(store, &dir).map(|world| (world.launch::<()>(|| builder_args(&world), wait, |_| {}), world)));
     let Some((launched, world)) = launched else { return chain(&dir) };
     match launched {
-        Launch::Restored { vm, .. } => {
+        Launch::Restored { vm, manifest, .. } => {
             diagnose(&serde_json::json!({"mode": "restored", "store": world.store, "guard": format!("{:?}", romacs_vm::world::arena::executable_guard())}));
+            let _ = RESTORED.set((world.store.clone(), world.key, manifest));
             restarted(*vm)
         }
         Launch::Build => {

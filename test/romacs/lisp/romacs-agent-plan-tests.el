@@ -27,7 +27,7 @@
                ((symbol-function 'romacs-agent--note) #'ignore)
                ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args)))
                ((symbol-function 'romacs-agent-respond)
-                (lambda (_s id allow &optional message) (push (list id allow message) answered))))
+                (lambda (_s id allow &optional message by) (push (list id allow message by) answered))))
        ,@body)))
 
 (ert-deftest romacs-agent-plan-claude-switches-live-and-back ()
@@ -119,27 +119,40 @@
     (should-not (plist-get (romacs-agent-options session) :plan))
     (should (eq (romacs-agent--claude-next session) :ready))))
 
-(ert-deftest romacs-agent-plan-tool-calls-are-refused-in-plan-mode ()
+(ert-deftest romacs-agent-plan-tool-calls-in-plan-mode-ask-the-user ()
   (romacs-agent-plan-tests--with 'claude
     (let ((romacs-agent-approval-policy 'allow))
       (setf (romacs-agent-options session) '(:plan t))
       (puthash "e1" t (romacs-agent-approvals session))
       (romacs-agent--raise session '(:type approval :request-id "e1" :tool "Edit"))
-      (should (equal answered (list (list "e1" nil romacs-agent--plan-tool-refused)))))))
+      ;; Romacs denies nothing on the user's behalf: the user is asked.
+      (should-not answered)
+      (should (member "e1" (romacs-agent-asks session)))
+      (should (eq (romacs-agent-state session) 'waiting-approval))
+      ;; Nor on catching up.
+      (romacs-agent--allow-tool-calls session)
+      (should-not answered))))
 
-(ert-deftest romacs-agent-plan-a-plan-met-on-catching-up-is-captured ()
+(ert-deftest romacs-agent-plan-tool-calls-out-of-plan-mode-are-allowed-by-romacs ()
+  (romacs-agent-plan-tests--with 'claude
+    (let ((romacs-agent-approval-policy 'allow))
+      (puthash "e2" t (romacs-agent-approvals session))
+      (romacs-agent--raise session '(:type approval :request-id "e2" :tool "Edit"))
+      ;; Allowed, and said to be Romacs's answer.
+      (should (equal answered (list (list "e2" t nil 'policy)))))))
+
+(ert-deftest romacs-agent-plan-a-plan-met-on-catching-up-waits-on-the-user ()
   (romacs-agent-plan-tests--with 'claude
     (let ((romacs-agent-approval-policy 'allow))
       (setf (romacs-agent-caught-up session) nil)
       (puthash "x9" t (romacs-agent-approvals session))
       (romacs-agent--raise session '(:type approval :request-id "x9" :tool "ExitPlanMode" :plan t :user t))
-      (should-not answered)
       (setf (romacs-agent-caught-up session) t)
       (romacs-agent--allow-tool-calls session)
-      ;; Stopped, never allowed.
-      (should (equal answered (list (list "x9" nil romacs-agent--plan-captured)))))))
+      (should-not answered)
+      (should (member "x9" (romacs-agent-asks session))))))
 
-(ert-deftest romacs-agent-plan-claude-s-plan-is-captured ()
+(ert-deftest romacs-agent-plan-claude-s-plan-is-asked ()
   (romacs-agent-plan-tests--with 'claude
     (let ((events (romacs-agent--claude-events
                    session (romacs-mcp--object
@@ -148,9 +161,9 @@
                                                           "input" (romacs-mcp--object "plan" "1. Do it."))))))
       (should (equal (car events) '(:type plan :text "1. Do it.")))
       (dolist (event events) (romacs-agent--raise session event))
-      ;; Told to stop, as T3 Code tells it; never left waiting on the user.
-      (should (equal answered (list (list "x1" nil romacs-agent--plan-captured))))
-      (should-not (eq (romacs-agent-state session) 'waiting-approval)))))
+      ;; Shown to the user, who answers it: never answered for them.
+      (should-not answered)
+      (should (eq (romacs-agent-state session) 'waiting-approval)))))
 
 (ert-deftest romacs-agent-plan-codex-says-its-mode-each-turn ()
   (romacs-agent-plan-tests--with 'codex

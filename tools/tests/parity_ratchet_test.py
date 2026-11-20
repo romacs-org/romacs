@@ -42,8 +42,7 @@ def ratchet(passing=None, warm=('lisp/a.el', 'lisp/b.el'), cold=('lisp/a.el',)):
                       'passed': sum(len(v) for v in passing.values()),
                       'characterised': {f: len(passing.get(f, [])) for f in pr.CHARACTERISED},
                       'passing': {f: sorted(v) for f, v in passing.items() if v}},
-        'census': {m: {'gnu_parity_loaded': len(v), 'gnu_target_total': 1596, 'shared_total': 1590,
-                       'files_measured': 1811, 'chain': None, 'loaded': sorted(v)}
+        'census': {m: {'gnu_parity_loaded': len(v), 'chain': None, 'loaded': sorted(v)}
                    for m, v in (('warm', warm), ('cold', cold))},
         'lowerings': [],
     }
@@ -59,10 +58,13 @@ def gnu_measurement(members, tests=10):
             'seconds': 0.1}
 
 
-def census_measurement(mode, loaded, files_measured=1811):
+def census_measurement(mode, loaded, files_measured=1811, population=('lisp/a.el', 'lisp/b.el', 'lisp/c.el')):
+    """A census of POPULATION (with LOADED) in which LOADED load."""
     return {'kind': 'census', 'mode': mode, 'files_measured': files_measured, 'files_reported': files_measured,
-            'unreported': [], 'gnu_target_total': 1596, 'shared_total': 1590,
-            'members': {f'census-{mode}': loaded}, 'verdicts': {f: 'missing_variable: x' for f in loaded},
+            'unreported': [], 'gnu_target_total': files_measured, 'shared_total': files_measured,
+            'members': {f'census-{mode}': loaded}, 'population': sorted({*population, *loaded}),
+            'support_population': [],
+            'verdicts': {f: 'loaded' if f in loaded else 'missing_variable: x' for f in {*population, *loaded}},
             'chain': None, 'seconds': 0.1}
 
 
@@ -133,9 +135,29 @@ class Compare(unittest.TestCase):
         self.assertEqual(status, pr.EXIT_NOT_MEASURED, out)
         self.assertNotIn('PASS', out)
 
-    def test_census_denominator_change_is_not_measured(self):
+    def test_census_population_size_is_measured_not_recorded(self):
         status, out = run_report(ratchet(), 'census-cold', census_measurement('cold', ['lisp/a.el'], 1700))
-        self.assertEqual(status, pr.EXIT_NOT_MEASURED, out)
+        self.assertEqual(status, pr.EXIT_PASS, out)
+
+    def test_a_recorded_member_outside_the_population_is_lost(self):
+        m = census_measurement('warm', ['lisp/a.el'], population=('lisp/a.el', 'lisp/c.el'))
+        status, out = run_report(ratchet(), 'census-warm', m)
+        self.assertEqual(status, pr.EXIT_LOWER, out)
+        self.assertIn('- lisp/b.el: now left the census population', out)
+
+    def test_a_member_moved_to_support_is_lost_though_it_loads(self):
+        m = census_measurement('warm', ['lisp/a.el'], population=('lisp/a.el', 'lisp/c.el'))
+        m['verdicts']['lisp/b.el'] = 'loaded'
+        m['support_population'] = ['lisp/b.el']
+        status, out = run_report(ratchet(), 'census-warm', m)
+        self.assertEqual(status, pr.EXIT_LOWER, out)
+        self.assertIn('- lisp/b.el: now left the census population', out)
+
+    def test_a_stored_census_denominator_is_refused(self):
+        data = ratchet()
+        self.assertEqual(pr.stored_denominators(data), [])
+        data['census']['cold']['files_measured'] = 1594
+        self.assertEqual(len(pr.stored_denominators(data)), 1, pr.stored_denominators(data))
 
 
 class Record(unittest.TestCase):
@@ -301,11 +323,13 @@ class AlternatingLoss(unittest.TestCase):
         self.assertIn(LOST2, out)
 
 
-def real_census_run(mode, missing=(), files_measured=None):
-    data = pr.load_ratchet(ROOT)
-    c = data['census'][mode]
-    m = census_measurement(mode, sorted(set(c['loaded']) - set(missing)), files_measured or c['files_measured'])
-    m.update(gnu_target_total=c['gnu_target_total'], shared_total=c['shared_total'], binary_sha256='0' * 64)
+def real_census_run(mode, missing=(), partial=False):
+    """A census of the recorded members, MISSING not loading; PARTIAL leaves one file unreported."""
+    c = pr.load_ratchet(ROOT)['census'][mode]
+    m = census_measurement(mode, sorted(set(c['loaded']) - set(missing)), 1811, population=c['loaded'])
+    m['binary_sha256'] = '0' * 64
+    if partial:
+        m.update(files_reported=m['files_measured'] - 1, unreported=[c['loaded'][-1]])
     return m
 
 
@@ -458,10 +482,18 @@ class CheckConfirmation(unittest.TestCase):
 
     def test_a_partial_census_confirmation_clears_nothing(self):
         loaded = pr.load_ratchet(ROOT)['census']['warm']['loaded']
-        partial = real_census_run('warm', files_measured=1)
+        partial = real_census_run('warm', partial=True)
         status, out, _ = check_with_runs([real_census_run('warm', [loaded[0]]), partial], unit='census-warm')
         self.assertEqual(status, pr.EXIT_LOWER, out)
         self.assertIn('different denominator', out)
+
+    def test_a_census_confirmation_over_another_population_clears_nothing(self):
+        loaded = pr.load_ratchet(ROOT)['census']['warm']['loaded']
+        other = real_census_run('warm')
+        other['population'] = sorted({*other['population'], 'lisp/elsewhere.el'})
+        status, out, _ = check_with_runs([real_census_run('warm', [loaded[0]]), other], unit='census-warm')
+        self.assertEqual(status, pr.EXIT_LOWER, out)
+        self.assertIn("census population differs from the first run's", out)
 
     def test_a_whole_census_confirmation_clears(self):
         loaded = pr.load_ratchet(ROOT)['census']['warm']['loaded']
@@ -473,7 +505,7 @@ class CheckConfirmation(unittest.TestCase):
     def test_inputs_that_changed_between_runs_clear_nothing(self):
         saved = pr.input_fingerprint
         values = iter(['before', 'after'])
-        pr.input_fingerprint = lambda root: next(values)
+        pr.input_fingerprint = lambda root, evidence=True: next(values)
         try:
             status, out, _ = check_with_runs([real_fns_run([LOST]), real_fns_run([])])
         finally:
@@ -1053,7 +1085,6 @@ class CensusPopulation(unittest.TestCase):
                 measured = self.measure(row_edit=lambda row: dict(row, forms_evaluated=None, loaded=False)
                                         if row['file'] == missing else row)
                 data = ratchet(cold=('lisp/a.el', 'lisp/b.el'))
-                data['census']['cold'].update(gnu_target_total=2, shared_total=2, files_measured=2)
                 status, text = run_report(data, 'census-cold', measured)
                 self.assertEqual(status, pr.EXIT_NOT_MEASURED, text)
                 self.assertNotIn('PASS', text)
