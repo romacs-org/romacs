@@ -79,9 +79,11 @@ whether another must follow it (AGAIN: t, or `whole' for all the list)."
     client))
 
 (defun romacs-agent-client-live-p (client)
+  "Non-nil while CLIENT's connection to its service is live."
   (romacs-agent-rpc-live-p (romacs-agent-client-rpc client)))
 
 (defun romacs-agent-client-close (client)
+  "Close CLIENT's connection to its service, dropping what it held unsent."
   (romacs-agent-rpc-close (romacs-agent-client-rpc client)))
 
 (defun romacs-agent-client--sentinel (process _event)
@@ -102,7 +104,8 @@ whatever follows a session through it."
 
 (defun romacs-agent-client-request (client method params callback)
   "Ask CLIENT's service METHOD with PARAMS; CALLBACK is called with the
-result and nil, or nil and the error, once its reply comes."
+result and nil, or nil and the error, once its reply comes, or at once
+with the `disconnected' error when CLIENT is not live.  The request's id."
   (let ((id (cl-incf (romacs-agent-client-next client))))
     (if (not (romacs-agent-client-live-p client))
         (funcall callback nil (romacs-agent-client--gone))
@@ -288,8 +291,8 @@ history is read, against the open's."
 (defun romacs-agent-client-history (client id params callback &optional expect)
   "Ask CLIENT's service for session ID's history (`agents/session.history'
 with PARAMS: upto, after or turns), every page of it; CALLBACK is called
-with (UNITS CURSOR RESET FROM), UNITS the record units in order, FROM
-the seq they begin at when earlier records are not read, or with
+with (UNITS CURSOR RESET FROM), UNITS the record units in order (nil on
+a reset), FROM the seq they begin at when earlier records are not read, or with
 \=(error ERROR).  With EXPECT, the cursor (a table) the history already
 held was read under, a reply of another epoch or adapter is a reset: its
 units are not to be joined to that history."

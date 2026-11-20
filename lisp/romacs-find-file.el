@@ -15,7 +15,10 @@
 (defvar find-file-hook nil)
 (defvar find-file-not-found-functions nil)
 (defvar auto-mode-alist '(("\\.el\\'" . emacs-lisp-mode)))
-(defvar romacs-find-file-mode-function 'romacs-find-file-set-auto-mode)
+(defvar romacs-find-file-mode-function 'romacs-find-file-set-auto-mode
+  "Function called with no argument in a buffer `romacs-find-file-noselect'
+has just read its file into (or found missing), before `find-file-hook',
+to choose the buffer's mode; nil chooses none.")
 
 (defun romacs-find-file--check-syntax (filename)
   "Reject unsupported filename syntax before any filesystem access."

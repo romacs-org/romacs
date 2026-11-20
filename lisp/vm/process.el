@@ -10,11 +10,16 @@
 
 ;;; Code:
 
-(defvar romacs-process-handlers nil)
+(defvar romacs-process-handlers nil
+  "The background commands still owed their callback: (ID . CALLBACK) for
+each `romacs-process-start' started and neither
+`romacs-process-dispatch-ready' nor `romacs-process-forget' retired.")
 
 (defun romacs-process-start (argv input directory timeout callback)
   "Start ARGV with INPUT in DIRECTORY, bounded by TIMEOUT seconds.
-CALLBACK receives (STATUS STDOUT STDERR ERROR) on evaluator-side completion."
+Once it completes, `romacs-process-dispatch-ready' calls CALLBACK on the
+evaluator with one argument, the list (STATUS STDOUT STDERR ERROR); a
+non-nil value from it says it changed what is shown.  The command's id."
   (let ((id (romacs--process-start argv input directory timeout)))
     (setq romacs-process-handlers (cons (cons id callback) romacs-process-handlers))
     id))

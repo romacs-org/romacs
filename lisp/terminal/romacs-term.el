@@ -41,9 +41,13 @@
 
 (defvar romacs-term-shell nil
   "Shell override; nil uses the native host's configured user shell ($SHELL).")
-(defvar romacs-term-mode-hook nil)
+(defvar romacs-term-mode-hook nil
+  "Normal hook run in a terminal buffer once it has its session.")
 (defvar romacs-term--closing nil)
-(defvar romacs-term-session nil)
+(defvar romacs-term-session nil
+  "The terminal session a terminal buffer shows, local to it; nil in any
+other buffer, and set back to nil as the buffer is killed and its session
+closed.")
 (defvar kill-ring nil)
 
 (defvar romacs-term-keymap-exceptions
@@ -58,8 +62,9 @@ terminal: its process group is the terminal's foreground one, as at its
 prompt.  They move point, as in shell-mode, which leaves the cursor for
 the scrollback until typing returns; the shell's history is on M-p and
 M-n (`romacs-term-history-map'), and Up and Down.  A program the shell runs
-in the foreground (a REPL, a pager, fzf) gets them.  Each is a `kbd' string.  After changing this outside
-Customize, run `romacs-term-update-keymaps'.")
+in the foreground (a REPL, a pager, fzf) gets them.  Each is a `kbd'
+string.  After changing this outside Customize, run
+`romacs-term-update-keymaps'.")
 
 (defvar romacs-term-alternate-exceptions '("C-x" "M-x" "C-g")
   "Keys that keep their Emacs bindings while a program has the alternate
@@ -92,8 +97,9 @@ rebuild the generated keymaps."
     (define-key map [?\M-y] 'romacs-term-yank-pop)
     map)
   "Keys of a terminal buffer: C-c C-c interrupts, C-c C-j leaves the
-cursor and returns to it, and C-y and M-y send kills.  While a program runs, a binding made here wins over the keys sent
-to it, and survives `romacs-term-update-keymaps'.")
+cursor and returns to it, and C-y and M-y send kills.  While a program
+runs, a binding made here wins over the keys sent to it, and survives
+`romacs-term-update-keymaps'.")
 
 ;; The key the mode line names, of the two that interrupt.
 (put 'romacs-term-interrupt :advertised-binding [3 3])

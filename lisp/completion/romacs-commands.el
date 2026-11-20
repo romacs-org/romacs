@@ -125,6 +125,11 @@ other predicate gets simple.el's table over the obarray."
          table-pred))))))
 
 (defun read-extended-command-1 (prompt initial-input)
+  "Read a command's name for M-x, as simple.el's does: PROMPT (\"M-x \"
+when nil) after the prefix argument it is given, INITIAL-INPUT in the
+minibuffer, a name M-x's predicate accepts in the current buffer
+required, from the commands the runtime keeps (`romacs-commands--table'),
+the name read saved on `extended-command-history'.  The name, a string."
   (let* ((buffer (current-buffer))
          (pred (romacs-commands--predicate buffer)))
     (minibuffer-with-setup-hook
