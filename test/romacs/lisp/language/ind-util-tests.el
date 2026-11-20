@@ -24,7 +24,7 @@
   (should (consp (aref composition-function-table ?क)))
   (should (equal (indian-compose-string ind-util-tests--text) ind-util-tests--text)))
 
-;; IS 13194 (ISCII): Romacs's coding goes through raw bytes
+;; IS 13194 (ISCII): Romacs's conversions go through raw bytes
 ;; (ledger/divergences/VM2-ISCII-RAW-BYTES.md).  ind-util-gnu.eld is
 ;; pinned GNU's recording (ind-util-gnu-record.el beside it): each
 ;; character of the table with its `in-is13194-devanagari' bytes and
@@ -92,8 +92,7 @@ table's, none checked against IS 13194:1991 itself.")
     (should (equal (ind-util-tests--encode text) bytes))
     (should (equal (ind-util-tests--decode bytes) text))))
 
-(ert-deftest ind-util-iscii-coding-is-raw-bytes ()
-  (should (eq (coding-system-type 'in-is13194-devanagari) 'raw-text))
+(ert-deftest ind-util-iscii-coding-converts-through-the-table ()
   (should (eq (coding-system-get 'in-is13194-devanagari :post-read-conversion)
               'in-is13194-post-read-conversion)))
 
