@@ -212,9 +212,23 @@
           (dolist (face '(default font-lock-keyword-face font-lock-string-face link error minibuffer-prompt))
             (romacs-should (>= (romacs-color-contrast (funcall fg face) bg) 4.5)))
           (romacs-should (>= (romacs-color-contrast (funcall fg 'font-lock-comment-face) bg) 3.0))
-          (dolist (on (list (cdr (assq 'glass resolved)) (cdr (assq 'selection resolved))))
-            (romacs-should (>= (romacs-color-contrast (funcall fg 'romacs-complete-match) on) 4.5))))))
+          ;; Matches on the panel's glass and its selected row, and the
+          ;; selected candidate's text on its row.
+          (let ((row (cdr (assq 'glass-selection resolved))))
+            (dolist (on (list (cdr (assq 'glass resolved)) row))
+              (romacs-should (>= (romacs-color-contrast (funcall fg 'romacs-complete-match) on) 4.5)))
+            (romacs-should (>= (romacs-color-contrast (funcall fg 'romacs-complete-current) row) 4.5))))))
     (romacs-should (equal custom-enabled-themes enabled))))
+
+(romacs-deftest romacs-theme-a-selected-row-keeps-a-shared-foreground ()
+  ;; A mid-grey background and a white accent leave no tint at which one
+  ;; colour reads on both the glass and the row: the row is the glass.
+  (let* ((resolved (romacs-theme-resolve
+                    '((mode dark) (bg "#606060") (fg "#ffffff") (accent "#ffffff")
+                      (red "#ff8080") (green "#80ff80") (yellow "#ffff80")
+                      (blue "#8080ff") (magenta "#ff80ff") (cyan "#80ffff"))))
+         (glass (cdr (assq 'glass resolved))) (row (cdr (assq 'glass-selection resolved))))
+    (romacs-should (romacs-theme--shared-aa-p glass row))))
 
 (romacs-deftest romacs-theme-every-shipped-theme-has-no-fringe-strip ()
   ;; Fringes, window dividers and the vertical border are the window
@@ -384,7 +398,8 @@
           (romacs-should (equal (funcall tokens) (romacs-style--over romacs-style-flat romacs-style-modern)))
           (load-theme 'rum t)
           (romacs-should (eq (romacs-style--scheme) 'rum))
-          (romacs-should (equal (funcall tokens) romacs-style-flat))
+          ;; Flat's, lit as rum's faces light it.
+          (romacs-should (equal (funcall tokens) (romacs-style--over romacs-style-flat (romacs-style-lighting "#000000" "#d48a20"))))
           ;; A theme's plist, then the user's, each over the last.
           (deftheme romacs-style-test)
           (custom-theme-set-faces 'romacs-style-test '(default ((t :background "#101010"))))
@@ -407,6 +422,35 @@
       (romacs-should (eql (romacs-style--option 'romacs-pane-radius :radius-pane style) 10)))
     (let ((romacs-pane-radius 3))
       (romacs-should (eql (romacs-style--option 'romacs-pane-radius :radius-pane style) 3)))))
+
+(romacs-deftest romacs-style-lighting-follows-the-theme ()
+  ;; A dense, broad shadow on a dark background; a faint, tight one on a
+  ;; light background, where a dense one is a smudge.
+  (let ((dark (romacs-style-lighting "#121212" "#e68e0d"))
+        (light (romacs-style-lighting "#ffffff" "#3548cf")))
+    (romacs-should (equal (plist-get dark :shadow-layer) '(18 6 0.55)))
+    (romacs-should (equal (plist-get light :shadow-layer) '(10 4 0.14)))
+    ;; The more the accent stands off the background, the fainter its glow.
+    (romacs-should (< (nth 1 (plist-get dark :glow-layer))
+                      (nth 1 (plist-get (romacs-style-lighting "#3f3f3f" "#8cd0d3") :glow-layer))
+                      (nth 1 (plist-get romacs-style-flat :glow-layer))))))
+
+(romacs-deftest romacs-style-published-after-the-faces ()
+  ;; A third party's theme sets no glow: the style published once the
+  ;; theme is enabled lights the glow derived from its cursor.
+  (let ((enabled custom-enabled-themes))
+    (unwind-protect
+        (progn
+          (mapc #'disable-theme custom-enabled-themes)
+          (deftheme romacs-style-lit)
+          (custom-theme-set-faces 'romacs-style-lit
+                                  '(default ((t :background "#ffffff" :foreground "#000000")))
+                                  '(cursor ((t :background "#3548cf"))))
+          (enable-theme 'romacs-style-lit)
+          (romacs-should (equal (plist-get romacs-style--resolved :glow-layer)
+                                (plist-get (romacs-style-lighting "#ffffff" "#3548cf") :glow-layer))))
+      (mapc #'disable-theme custom-enabled-themes)
+      (dolist (theme (reverse enabled)) (enable-theme theme)))))
 
 (romacs-deftest romacs-style-the-wire-is-numbers ()
   (romacs-should (equal (romacs-style--wire romacs-style-flat) [8 4 18 6 0.55 14 0.35])))
