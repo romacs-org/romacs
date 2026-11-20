@@ -210,7 +210,13 @@
       (romacs-agent-log-queue-tests--row 1)
       (should-not (romacs-agent-log-queue-not-here-p))
       (should (romacs-agent-log-queue-not-here-p -1))
-      (should-not (romacs-agent-log-queue-not-here-p 1)))))
+      (should-not (romacs-agent-log-queue-not-here-p 1))
+      ;; Edit inapt with a draft; drop inapt on the one being edited.
+      (should-not (romacs-agent-log-queue-cannot-edit-p))
+      (romacs-agent-log-queue-tests--key romacs-agent-log-queue-map "e")
+      (romacs-agent-log-queue-tests--row 1)
+      (should (romacs-agent-log-queue-cannot-edit-p))
+      (should (romacs-agent-log-queue-cannot-drop-p)))))
 
 (ert-deftest romacs-agent-log-queue-a-held-message-gone-leaves-a-draft ()
   ;; Taken from the queue while held (its records failed it): putting it

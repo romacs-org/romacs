@@ -372,8 +372,8 @@ the session, the view."
   "D" ("Diff this turn (C-u: session)" romacs-agent-chat-diff)
   :group ("Queued" :if (lambda () (and romacs-agent-log--session
                                        (romacs-agent-log-source-queue romacs-agent-log--source romacs-agent-log--session))))
-  "Q" ("Edit the queued message here" romacs-agent-log-queue-edit :inapt-if #'romacs-agent-log-queue-not-here-p)
-  "X" ("Drop the queued message here" romacs-agent-log-queue-drop :inapt-if #'romacs-agent-log-queue-not-here-p)
+  "Q" ("Edit the queued message here" romacs-agent-log-queue-edit :inapt-if #'romacs-agent-log-queue-cannot-edit-p)
+  "X" ("Drop the queued message here" romacs-agent-log-queue-drop :inapt-if #'romacs-agent-log-queue-cannot-drop-p)
   "<" ("Send it sooner" romacs-agent-log-queue-sooner :inapt-if (lambda () (romacs-agent-log-queue-not-here-p -1)))
   ">" ("Send it later" romacs-agent-log-queue-later :inapt-if (lambda () (romacs-agent-log-queue-not-here-p 1)))
   :group ("Runs on" :if #'romacs-agent-log--commands-p)

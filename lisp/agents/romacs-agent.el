@@ -3781,10 +3781,14 @@ queue.  Called wherever what the predicate reads may have changed."
                 (romacs-agent--unkeep-item session next)
                 ;; Its user can no longer change it: it is being written.
                 (setf (romacs-agent-item-held next) 'sending)
+                ;; A write cut short, by an error or by a quit while it
+                ;; waits on the harness, gives it back: kept again, its
+                ;; user's again; a restore finds it sent by its id if it
+                ;; went (`romacs-agent--sent-queued').
                 (condition-case err (romacs-agent--write session next)
-                  (error (setf (romacs-agent-item-held next) nil)
-                         (romacs-agent--keep-item session next)
-                         (signal (car err) (cdr err))))
+                  ((error quit) (setf (romacs-agent-item-held next) nil)
+                   (romacs-agent--keep-item session next)
+                   (signal (car err) (cdr err))))
                 (romacs-agent--dequeue session next)
                 (when (romacs-agent-item-delivered next) (funcall (romacs-agent-item-delivered next)))
                 (setq more t)))

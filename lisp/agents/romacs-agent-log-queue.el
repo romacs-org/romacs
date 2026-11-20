@@ -159,6 +159,18 @@ with DELTA, it has no place DELTA away: a menu row's own test."
     (not (and at (romacs-agent-queue-own-p item)
               (or (null delta) (< -1 (+ at delta) (length items)))))))
 
+(defun romacs-agent-log-queue-cannot-edit-p ()
+  "Whether the row at point's message cannot go to the composer: none of
+its user's there, the composer holding a draft or another being edited."
+  (or (romacs-agent-log-queue-not-here-p) romacs-agent-log-queue--editing
+      (not (string-blank-p (buffer-substring-no-properties romacs-agent-log--input (point-max))))))
+
+(defun romacs-agent-log-queue-cannot-drop-p ()
+  "Whether the row at point's message cannot be dropped: none of its
+user's there, or it is the one being edited."
+  (or (romacs-agent-log-queue-not-here-p)
+      (eq (romacs-agent-log-queue--item-at) romacs-agent-log-queue--editing)))
+
 (defun romacs-agent-log-queue-edit ()
   "Edit the queued message at point (else the first) in the composer: held
 where it waits meanwhile; RET there puts it back in its place."
