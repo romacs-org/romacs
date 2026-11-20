@@ -8,8 +8,10 @@ both).  Pairs run back to back, so a load that drifts during the run drifts
 both arms alike, and they alternate which arm runs first: the base in the
 first pair, the candidate in the second, and so on (A B, B A, A B ...).  A
 session that reads a little higher for running second then raises the
-deltas of some pairs and lowers others, so it cannot make every pair rise.
-Run an even number of pairs to cancel it in the median too.  Both arms read
+deltas of some pairs and lowers others, so it cannot make every pair rise
+while pairs of both orders count for a phase (a rejected session can leave
+only one).  Run an even number of pairs to cancel it in the median too,
+nearly: each delta is relative to its own pair's base.  Both arms read
 the same environment: set ROMACS_RUNTIME_ROOT to one runtime tree both
 binaries are compatible with, to compare the binaries alone.  Left unset,
 each binary finds its runtime tree as it normally does, and a delta can
@@ -39,11 +41,12 @@ The verdict of a phase:
   counted.  Such a rise with fewer pairs is inconclusive;
 - inconclusive when it is past the bound but NOISY, or fewer than two pairs
   counted;
-- otherwise flat or better.  A phase whose every pair rose and that is no
-  regression says so in its reason: "every pair rose, inside the floor"
-  (the arms apart, the median delta not past the floor) or "every pair
-  rose, the arms overlap".  It leans up by less than the sessions' scatter
-  shows: a quieter run, with smaller spreads, would decide it.
+- otherwise flat or better.  A flat phase whose every pair rose says so in
+  its reason: "every pair rose, inside the floor" when the arms stand apart
+  but the median delta is not past the floor, "every pair rose, the arms
+  overlap" when some sessions of the two arms read alike.  It leans up by
+  less than the sessions' scatter shows: a quieter run, with smaller
+  spreads, would decide it.
 
 A consistent rise lands on every key, so the bound does not excuse it; the
 floor and the pair count keep noise from reading as one.  One binary against
