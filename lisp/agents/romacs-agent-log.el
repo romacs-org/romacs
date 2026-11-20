@@ -1363,7 +1363,8 @@ a vector of nine, the chat's own: a digit opens that one, saying so when
 it finished since.")
 
 (defun romacs-agent-log--menu-slots ()
-  (unless (and (vectorp romacs-agent-log--menu-workers) (= (length romacs-agent-log--menu-workers) 9))
+  (unless (and (local-variable-p 'romacs-agent-log--menu-workers)
+               (vectorp romacs-agent-log--menu-workers) (= (length romacs-agent-log--menu-workers) 9))
     (setq romacs-agent-log--menu-workers (make-vector 9 nil)))
   romacs-agent-log--menu-workers)
 

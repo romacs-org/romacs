@@ -308,6 +308,16 @@
             (should-not (memq 'romacs-agent-effort-default
                               (ensure-list (get-text-property (string-match "default" label) 'face label))))))))))
 
+(ert-deftest romacs-agent-log-menu-rows-are-each-chats-own ()
+  ;; Even over a shared default a load left behind.
+  (let ((shared (make-vector 9 nil)))
+    (cl-letf (((default-value 'romacs-agent-log--menu-workers) shared))
+      (with-temp-buffer
+        (let ((one (romacs-agent-log--menu-slots)))
+          (with-temp-buffer
+            (should-not (eq (romacs-agent-log--menu-slots) one))
+            (should-not (eq (romacs-agent-log--menu-slots) shared))))))))
+
 (ert-deftest romacs-agent-log-several-answers-keep-their-questions ()
   (let ((one (make-hash-table :test #'equal)) (two (make-hash-table :test #'equal)))
     (puthash "Colour?" "Blue" one)
