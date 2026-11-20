@@ -1,5 +1,6 @@
 ;;; romacs-theme-test.el --- Palettes, derived slots and faces -*- lexical-binding: t -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; romacs-test: editor (needs the romacs-theme library on the editor's load-path)
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;; lisp/ui/romacs-theme.el's colours, palettes and faces, in the machine's own

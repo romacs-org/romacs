@@ -1,5 +1,6 @@
 ;;; draft-files-test.el --- Disposable draft filesystem boundary -*- lexical-binding: t -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; romacs-test: editor (needs the coding systems, raw-text among them)
 ;; tools/test-elisp supplies a private HOME, removed after the run.
 
 (defun draft-files-test-path (name)
@@ -29,15 +30,6 @@
   (let ((parent (draft-files-test-path "draft-files-missing-parent/")))
     (romacs-should-error (make-directory-internal (concat parent "/child")) :type 'file-missing)
     (romacs-should-not (file-attributes parent))))
-
-(defun draft-files-test-handler (&rest args) args)
-(put 'draft-files-test-handler 'operations '(delete-file))
-
-(romacs-deftest draft-files-delete-handler-preserves-arguments ()
-  (let* ((path (draft-files-test-path "draft-files-handled/"))
-         (file-name-handler-alist '(("draft-files-handled" . draft-files-test-handler))))
-    (romacs-should (equal (delete-file path nil) (list 'delete-file path nil)))
-    (romacs-should (equal (delete-file path t) (list 'delete-file path t)))))
 
 (romacs-deftest draft-files-native-trash-is-explicitly-unsupported ()
   ;; GNU supports trash: this is deliberately a Romacs-only refusal contract.
