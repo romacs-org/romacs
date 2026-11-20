@@ -1302,6 +1302,12 @@ impl Leaf<'_> {
                 }
             }
         }
+        // A worker's stop ends the whole group, not its leader alone: a
+        // helper the leader left behind (a shell starts its `&' jobs with
+        // SIGINT ignored) would outlive the cancel. The leader is not reaped
+        // yet (`sp::exited' waits with WNOWAIT), so its group id cannot have
+        // been reused, and this SIGKILL reaches only the child's own group.
+        if grace.is_some() { kill(libc::SIGKILL); }
         self.call_process_reap(pid, &fds, Self::KILL_GRACE)
     }
 

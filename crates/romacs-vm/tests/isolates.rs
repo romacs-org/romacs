@@ -267,18 +267,19 @@ fn a_termination_supersedes_a_pending_interrupt() {
 }
 
 /// A worker cancelled during a long `call-process' whose child runs the
-/// shell PRELUDE, then writes its pid and the ready file (paths given as
-/// arguments) and execs `sleep 30': the milliseconds from the cancel to the
-/// quit, once the call quit, the worker served its next job, and the child's
-/// /proc entry went (reaped, not a zombie) while the worker lives.
-fn cancel_call_process(name: &str, prelude: &str) -> String {
+/// shell SCRIPT with its paths as arguments: $1 for its pid, $2 for the
+/// ready file, written once it waits, and $3 for a helper's pid if it
+/// starts one. The milliseconds from the cancel to the quit, once the call
+/// quit, the worker served its next job, and the /proc entries of the child
+/// and of any helper went (reaped, not zombies) while the worker lives.
+fn cancel_call_process(name: &str, script: &str) -> String {
     let mut vm = vm();
     let hs = Handshake::new(name);
-    let pidfile = hs.0.join("pid");
-    let script = format!("{prelude} echo $$ > \"$1\"; : > \"$2\"; exec sleep 30");
+    let (pidfile, helperfile) = (hs.0.join("pid"), hs.0.join("helper"));
     // call-process's own primitive, whose wait this is: the bare VM's Lisp
     // call-process needs GNU's coding systems.
-    let argv = [String::from("sh"), "-c".into(), script, "sh".into(), pidfile.display().to_string(), hs.0.join("ready").display().to_string()];
+    let argv = [String::from("sh"), "-c".into(), script.into(), "sh".into(), pidfile.display().to_string(),
+                hs.0.join("ready").display().to_string(), helperfile.display().to_string()];
     let argv: Vec<String> = argv.iter().map(|a| serde_json::to_string(a).unwrap()).collect();
     let job = format!("'(lambda () (romacs--call-process-run '({}) nil \"/\" \"/dev/null\" nil nil t) 'waited)", argv.join(" "));
     let out = eval(&mut vm, &format!("(let* ((iso (isolate-create)) \
@@ -291,9 +292,13 @@ fn cancel_call_process(name: &str, prelude: &str) -> String {
           (list result (condition-case e (isolate-await (isolate-spawn '+ 1 1 :isolate iso)) (error (car e))) ms)))", hs.await_ready()));
     let (head, ms) = out.rsplit_once(' ').unwrap_or((&out, ""));
     assert_eq!(head, "(interrupted 2", "{out}");
-    let child: i64 = std::fs::read_to_string(&pidfile).unwrap().trim().parse().unwrap();
-    let proc = std::path::PathBuf::from(format!("/proc/{child}"));
-    assert!(settles(|| !proc.exists()), "child {child}'s /proc entry outlived the cancel, the worker still live");
+    let mut pids = vec![std::fs::read_to_string(&pidfile).unwrap()];
+    pids.extend(std::fs::read_to_string(&helperfile).ok());
+    for pid in pids {
+        let pid: i64 = pid.trim().parse().unwrap();
+        let proc = std::path::PathBuf::from(format!("/proc/{pid}"));
+        assert!(settles(|| !proc.exists()), "{pid}'s /proc entry outlived the cancel, the worker still live");
+    }
     eval(&mut vm, "(isolate-kill-all)");
     ms.trim_end_matches(')').to_string()
 }
@@ -302,7 +307,7 @@ fn cancel_call_process(name: &str, prelude: &str) -> String {
 /// C-g's quit does (SIGINT to its group), and quits within the bound.
 #[test]
 fn an_interrupt_stops_a_workers_call_process() {
-    let ms = cancel_call_process("call-process", "");
+    let ms = cancel_call_process("call-process", "echo $$ > \"$1\"; : > \"$2\"; exec sleep 30");
     eprintln!("call-process interrupt to quit: {ms} ms");
     assert!(ms.parse::<u64>().unwrap() < 500, "{ms} ms");
 }
@@ -312,8 +317,17 @@ fn an_interrupt_stops_a_workers_call_process() {
 /// within the grace and a margin.
 #[test]
 fn an_interrupt_kills_a_workers_child_that_ignores_sigint() {
-    let ms = cancel_call_process("call-process-trap", "trap '' INT HUP;");
+    let ms = cancel_call_process("call-process-trap", "trap '' INT HUP; echo $$ > \"$1\"; : > \"$2\"; exec sleep 30");
     eprintln!("call-process interrupt to quit, SIGINT ignored: {ms} ms");
+    assert!(ms.parse::<u64>().unwrap() < 1000, "{ms} ms");
+}
+
+/// A shell's `&' job starts with SIGINT ignored, so the shell ends on the
+/// SIGINT and leaves it running: the worker's stop kills the whole group.
+#[test]
+fn an_interrupt_kills_a_workers_call_process_helper() {
+    let ms = cancel_call_process("call-process-helper", "sleep 30 & echo $! > \"$3\"; echo $$ > \"$1\"; : > \"$2\"; wait");
+    eprintln!("call-process interrupt to quit, with a helper: {ms} ms");
     assert!(ms.parse::<u64>().unwrap() < 1000, "{ms} ms");
 }
 
