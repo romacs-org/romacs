@@ -84,17 +84,17 @@
 (ert-deftest romacs-agent-rows-messages-and-delegations ()
   (romacs-agent-rows-tests--plain
    (should (equal (romacs-agent-rows-tests--draw "romacs_task_send" :row (romacs-agent-rows-tests--table "taskId" "gone"))
-                  "◈ ✉ → a task"))
+                  "◈ ✉\uFE0E → a task"))
    ;; Ended: to whom, and how that task is now.
    (should (equal (romacs-agent-rows-tests--draw "romacs_task_send" :ended (romacs-agent-rows-tests--table "taskId" "gone")
                                                  "{\"title\":\"lane x\",\"state\":\"running\",\"result\":\"long\"}")
-                  "◈ ✉ → lane x · running"))
+                  "◈ ✉\uFE0E → lane x · sent"))
    (should (equal (romacs-agent-rows-tests--draw "romacs_task_send" :body
                                                  (romacs-agent-rows-tests--table "message" "one\ntwo") "{}")
                   "┃ one\n┃ two"))
    (should (equal (romacs-agent-rows-tests--draw "romacs_task_reply" :ended (romacs-agent-rows-tests--table)
                                                  "{\"title\":\"lane x\"}")
-                  "◈ ✉ → lane x"))
+                  "◈ ✉\uFE0E → lane x"))
    (let ((input (romacs-agent-rows-tests--table
                  "title" "lane x" "target" (romacs-agent-rows-tests--table "provider" "claude3"))))
      (should (equal (romacs-agent-rows-tests--draw "romacs_delegate_task" :row input) "◈ ⑂ lane x · claude3"))
@@ -102,7 +102,7 @@
      (should (equal (romacs-agent-rows-tests--draw
                      "romacs_delegate_task" :ended input
                      "{\"title\":\"lane x\",\"model\":\"claude-opus-5-5\",\"harness\":\"claude\",\"provider\":\"claude3\",\"state\":\"running\"}")
-                    "◈ ⑂ lane x · opus-5-5@claude3 · running")))))
+                    "◈ ⑂ lane x · opus-5-5@claude3 · started")))))
 
 (ert-deftest romacs-agent-rows-tasks-are-one-line ()
   (romacs-agent-rows-tests--plain
@@ -205,6 +205,10 @@
                                                  "20261120T182628-feat-x-6c8da7d2\n"))
                  "$ forge submit feat/x · ⇡ queued 20261120T182628-feat-x-6c8da7d2"))
   (should (romacs-agent-rows-tail-p "Bash"))
+  ;; A command longer than a row holds says its description; RET, itself.
+  (should (equal (romacs-agent-rows-tests--draw "Bash" :row (romacs-agent-rows-tests--table
+                                                            "command" (make-string 80 ?x) "description" "List the worktrees"))
+                 "$ List the worktrees"))
   (should-not (romacs-agent-rows-tail-p "Read"))
   ;; Details RET shows: a Romacs tool's answer as words, never JSON.
   (should (equal (romacs-agent-rows-details "romacs_buffer_read" nil

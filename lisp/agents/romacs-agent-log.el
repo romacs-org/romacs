@@ -64,7 +64,7 @@
 (declare-function romacs-agent--codex-questions "romacs-agent-codex" (params))
 (declare-function romacs-agent-history-events "romacs-agent-history" (harness imported))
 
-(defcustom romacs-agent-log-output-lines 8
+(defcustom romacs-agent-log-output-lines 5
   "How many lines of a tool's output, or of its input, a chat shows
 under its call; RET on it shows all of it."
   :type 'natnum :group 'romacs-agent)
@@ -102,7 +102,7 @@ key colour raised to 4.5:1 on the header line: each as its default spec.
 A theme's or the user's own spec still wins."
   (let ((colour (romacs-color-legible (face-foreground 'shadow nil t))))
     ;; A tool's output, and every dim word of a chat's rows: read, 4.5:1.
-    (dolist (face '(romacs-agent-log-output romacs-agent-dim))
+    (dolist (face '(romacs-agent-log-output romacs-agent-dim romacs-agent-log-note))
       (when (facep face)
         (face-spec-set face (if colour `((t :foreground ,colour)) '((t :inherit shadow))) 'face-defface-spec))))
   (let* ((key (face-foreground 'help-key-binding nil t))
@@ -113,9 +113,10 @@ A theme's or the user's own spec still wins."
 
 (add-hook 'enable-theme-functions #'romacs-agent-log--derive)
 (add-hook 'disable-theme-functions #'romacs-agent-log--derive)
-(romacs-agent-log--derive)
 (defface romacs-agent-log-note '((t :inherit shadow))
   "A status line: what the harness or Romacs says of the session.")
+;; Its faces derived once its dim faces are defined.
+(romacs-agent-log--derive)
 (defface romacs-agent-log-ask '((t :inherit romacs-working-waiting :extend t :weight bold))
   "An approval or a question that waits on the user.")
 (defface romacs-agent-log-allowed '((t :inherit success))
@@ -546,7 +547,9 @@ not, as (TEXT FACE TAIL), or nil: an error, a subagent's report, or a
 command's last lines (TAIL).  Anything else is RET away."
   (cond (failed (list (romacs-agent-log--failure output) 'romacs-agent-log-denied))
         ((member name '("Agent" "Task")) (list (romacs-agent-log--report output) 'romacs-agent-log-output))
-        ((romacs-agent-rows-tail-p name) (list output 'romacs-agent-log-output t))))
+        ((romacs-agent-rows-tail-p name)
+         ;; The harness's own trailer is no line of the command's.
+         (list (replace-regexp-in-string "\n*Shell cwd was reset to [^\n]*\n*\\'" "" output) 'romacs-agent-log-output t))))
 
 (defun romacs-agent-log--live (block text)
   "BLOCK's output streamed so far grows by TEXT: its last lines show under

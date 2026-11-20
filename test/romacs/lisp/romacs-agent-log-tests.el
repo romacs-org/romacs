@@ -1010,6 +1010,10 @@
     ;; A failure: its error, as it says it.
     (draw :type 'tool :state 'started :id "f" :name "Bash" :input (romacs-agent-log-tests--input "command" "make"))
     (draw :type 'tool :state 'failed :id "f" :output "<tool_use_error>make: no rule</tool_use_error>")
+    ;; A command's tail without the harness's own trailer.
+    (draw :type 'tool :state 'started :id "l" :name "Bash" :input (romacs-agent-log-tests--input "command" "ls"))
+    (draw :type 'tool :state 'completed :id "l" :output "a.txt\nShell cwd was reset to /home/x")
+    (should-not (string-match-p "Shell cwd" (romacs-agent-log-tests--transcript)))
     (let ((text (romacs-agent-log-tests--transcript)))
       (should (string-match-p "◷ lane x · running\n" text))
       (should-not (string-match-p "a long report\\|{" text))
@@ -1032,7 +1036,7 @@
     (draw :type 'tool :state 'started :id "d" :name "mcp__romacs__romacs_delegate_task"
           :input (romacs-agent-log-tests--input "title" "two\nlines"))
     (draw :type 'tool :state 'completed :id "d" :output "{\"title\":\"two\\nlines\",\"state\":\"running\"}")
-    (should (string-match-p "⑂ two lines · running\n" (romacs-agent-log-tests--transcript)))
+    (should (string-match-p "⑂ two lines · started\n" (romacs-agent-log-tests--transcript)))
     ;; A subagent's call: RET on its rewritten row shows its details too.
     (draw :type 'tool :state 'started :id "a" :name "Agent" :input (romacs-agent-log-tests--input "description" "sub"))
     (draw :type 'tool :state 'started :id "n" :name "mcp__romacs__romacs_task_status" :parent "a"
