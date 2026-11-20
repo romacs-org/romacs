@@ -514,7 +514,7 @@ each window showing it keeps the row at its point and at its start."
       (let ((source romacs-agent-board-source))
         ;; Its rows are no one's while they are drawn: a draw cut short
         ;; leaves them so.
-        (setq romacs-agent-board--drawn-source nil)
+        (setq romacs-agent-board--drawn-source 'drawing)
         (romacs-agent-board--draw
          (romacs-agent-board-rows (romacs-agent-board--sessions)
                                   (and (not romacs-agent-board--settled) (romacs-agent-board-source-history source))
@@ -599,12 +599,14 @@ another buffer now runs the board's window hooks too."
 
 (defvar-local romacs-agent-board--drawn-source nil
   "The source whose sessions the board shows, drawn whole
-\(`romacs-agent-board-source'); nil while it is drawn, or never was.")
+\(`romacs-agent-board-source'); `drawing' while it is drawn, nil when it
+never was.")
 
 (defun romacs-agent-board--acting ()
   "Refuse, unless this editor acts on the sessions the board shows, drawn
-whole."
-  (unless (and romacs-agent-board--drawn-source (romacs-agent-log-source-commands-p romacs-agent-board--drawn-source))
+whole: none while it is drawn."
+  (unless (and (not (eq romacs-agent-board--drawn-source 'drawing))
+               (romacs-agent-log-source-commands-p (or romacs-agent-board--drawn-source romacs-agent-board-source)))
     (user-error "These sessions are another machine's: shown, not acted on from here")))
 
 (defun romacs-agent-board--session ()
@@ -761,6 +763,7 @@ where it is answered."
 (defun romacs-agent-board-resume ()
   "Resume this thread, or go on with this transcript as a thread."
   (interactive nil romacs-agent-board-mode)
+  (romacs-agent-board--acting)
   (let ((row (romacs-agent-board--row)))
     (if (eq (plist-get row :kind) 'history)
         (romacs-agent-history-resume (plist-get row :item) romacs-agent-board--here)
