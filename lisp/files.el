@@ -1567,6 +1567,72 @@ containing it, until no links are left at any level.
 	       (rest (substring filename (match-end 0))))
 	   (setq filename (concat (expand-file-name first-part) rest)))))
 
+  ;; A local name with no file name handler, on the outermost call, is
+  ;; walked natively (LISP-NATIVE-TRUENAME); the walk returns nil to leave
+  ;; a name to the algorithm below, which also answers inside a handler's
+  ;; own call, where some operations' handlers are inhibited.
+  (or (and (null counter) (null prev-dirs) (not (eq system-type 'windows-nt))
+           (null inhibit-file-name-operation) (null inhibit-file-name-handlers)
+           (let ((name (file-truename--local-name filename)))
+             (and name
+                  ;; First: it signals on a circular handler alist, which
+                  ;; the scan below then never meets.
+                  (not (find-file-name-handler name 'file-truename))
+                  (not (file-truename--links-virtualized-p))
+                  (let ((walk (romacs--file-truename-local name)))
+                    ;; Through links, the walk also names what each one
+                    ;; spliced in: GNU's walk asks for a handler of each.
+                    (if (stringp walk)
+                        walk
+                      (let ((spliced (cdr walk)))
+                        (while (and spliced (not (find-file-name-handler (car spliced) 'file-truename)))
+                          (setq spliced (cdr spliced)))
+                        (and walk (null spliced) (car walk))))))))
+      (file-truename--walk filename counter prev-dirs)))
+
+(defun file-truename--links-virtualized-p ()
+  "Whether a file name handler answers `file-symlink-p' but not `file-truename'.
+Such a handler (its `operations' property names the one, not the other)
+can make a link GNU's walk follows where the disk has none, which the
+native walk cannot see. A handler without the property is asked of
+every operation, so the native walk's `file-truename' checks find it."
+  (let ((handlers file-name-handler-alist) found)
+    (while (and handlers (not found))
+      (let* ((handler (cdr-safe (car handlers)))
+             (operations (and (symbolp handler) (get handler 'operations))))
+        (setq found (and (memq 'file-symlink-p operations)
+                         (not (memq 'file-truename operations)))
+              handlers (cdr handlers))))
+    found))
+
+(defun file-truename--local-name (filename)
+  "FILENAME made absolute for the native walk, or nil to leave it to GNU's.
+`default-directory' is read only for a relative name, as GNU's algorithm
+reads it. Only its `~' or `~USER' prefix is expanded: `.' and `..' are
+the walk's to resolve after any link, as GNU resolves them."
+  (cond ((file-name-absolute-p filename) filename)
+        ((null default-directory) nil)
+        (t
+         ;; Joined without `file-name-as-directory', which asks for a file
+         ;; name handler too: the caller asks once, of the joined name.
+         (let ((dir (cond ((string-prefix-p "/" default-directory) default-directory)
+                          ;; `~' alone reads HOME, as `expand-file-name' does
+                          ;; when HOME is an absolute name already normal.
+                          ((and (or (string-prefix-p "~/" default-directory)
+                                    (equal default-directory "~"))
+                                (let ((home (getenv "HOME")))
+                                  (and home (string-prefix-p "/" home)
+                                       (not (string-match-p "//\\|/\\.\\.?\\(?:/\\|\\'\\)" home))
+                                       (concat (if (string-suffix-p "/" home) (substring home 0 -1) home)
+                                               (substring default-directory 1))))))
+                          ((string-match "\\`~[^/]*" default-directory)
+                           (concat (expand-file-name (match-string 0 default-directory))
+                                   (substring default-directory (match-end 0)))))))
+           (and dir (concat dir (unless (string-suffix-p "/" dir) "/") filename))))))
+
+(defun file-truename--walk (filename counter prev-dirs)
+  "GNU's `file-truename' algorithm: FILENAME's true name, COUNTER and
+PREV-DIRS as `file-truename' takes them."
   (or counter (setq counter (list 100)))
   (let (done
 	;; For speed, remove the ange-ftp completion handler from the list.
