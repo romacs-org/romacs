@@ -10,8 +10,8 @@
 //! write need a borrowed descriptor (and borrowing a raw number is unsafe),
 //! its fchmodat refuses NOFOLLOW, and its kill and `pidfd_send_signal` take
 //! only named signals and no flags. Its fork, sigaction, sigprocmask and
-//! `exit_group` are in its runtime module, for C runtimes that replace the C
-//! library rather than run beside it.
+//! `exit_group` are in its runtime module, a feature left off here: it is for
+//! C runtimes that replace the C library rather than run beside it.
 use std::ffi::{CStr, CString};
 use std::fs::File;
 use std::io;
@@ -306,12 +306,14 @@ pub(super) fn spawn(argv: &[CString], env: &[CString], dir: &CStr, fds: [RawFd; 
     }
 }
 
-/// Remove NAME from the environment. The caller runs before any other
-/// thread starts.
+/// Remove NAME from the environment. The caller runs while no other thread
+/// reads or writes the environment.
 pub(super) fn remove_env(name: &str) {
     // UNSAFE(std's remove_var is unsafe: the environment is the C library's, unguarded against other threads)
-    // SAFETY: the process is single threaded here (the caller's contract),
-    // so no other thread reads the environment while it changes.
+    // SAFETY: rests on the caller's contract, `host::unset_env`'s: no other
+    // thread reads or writes the environment while it changes. A caller
+    // that runs beside another thread (flight's start_from_environment, on
+    // the evaluator thread) breaks it, and is its own to move earlier.
     unsafe { std::env::remove_var(name) };
 }
 
@@ -345,7 +347,7 @@ pub(super) fn fork() -> io::Result<i32> {
 /// End this process now with CODE: no destructor, atexit handler or
 /// buffered output of it runs.
 pub(super) fn exit_at_once(code: i32) -> ! {
-    // UNSAFE(std has no exit that skips atexit handlers, and rustix's exit_group is in its runtime module, not for a process with a C library)
+    // UNSAFE(std has no exit that skips atexit handlers; rustix's exit_group is in its runtime module, a feature romacs-vm leaves off as meant for C runtimes that replace the C library; signal-hook's safe low_level::exit is in the lock only as another crate's dependency, not romacs-vm's)
     // SAFETY: `_exit' takes only a status; it ends the process at once, and
     // nothing of this process (destructor, atexit handler, other thread) runs
     // after it. No safe std call exits without running atexit handlers.
@@ -412,12 +414,15 @@ pub(super) fn with_signals_blocked<T>(f: impl FnOnce() -> T) -> T {
 /// pthread_sigmask(SIG_SETMASK) of this thread to MASK, or to every signal
 /// when None: the mask before.
 fn set_signal_mask(mask: Option<&libc::sigset_t>) -> libc::sigset_t {
-    let mut all = std::mem::MaybeUninit::<libc::sigset_t>::uninit();
-    let mut old = std::mem::MaybeUninit::<libc::sigset_t>::uninit();
+    // Zeroed: libc's sigset_t is 128 bytes, of which the kernel's mask that
+    // pthread_sigmask writes into OLD is only the first 8.
+    let mut all = std::mem::MaybeUninit::<libc::sigset_t>::zeroed();
+    let mut old = std::mem::MaybeUninit::<libc::sigset_t>::zeroed();
     // UNSAFE(rustix's sigprocmask is in its runtime module, for C runtimes only, and no crate in the lock fills a sigset_t safely)
     // SAFETY: sigfillset and pthread_sigmask write only the locals they are
-    // given, and MASK is a set an earlier call filled; SIG_SETMASK is a valid
-    // `how', so pthread_sigmask has filled OLD before it is read.
+    // given, and MASK is a set an earlier call returned. OLD is all zero
+    // bytes, a valid sigset_t, before pthread_sigmask writes the old mask
+    // into it, so it is initialized whatever the call wrote.
     unsafe {
         let mask = match mask {
             Some(mask) => std::ptr::from_ref(mask),
