@@ -9,6 +9,8 @@ impl Leaf<'_> {
     /// reached from redisplay, outside this scope, answer inspections only.
     /// GNU's display iterator quits nowhere; `vertical-motion` over a long
     /// buffer should.
+    // Inlined, as `Vm::inside_quit_scope`.
+    #[inline(always)]
     pub(crate) fn quittable<T>(&mut self, body: impl FnOnce(&mut Self) -> std::result::Result<T, Fault>) -> std::result::Result<T, Fault> {
         let outer = std::mem::replace(&mut self.vm.native_quit, true);
         let result = body(self);

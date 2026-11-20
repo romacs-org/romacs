@@ -186,6 +186,8 @@ impl Vm {
     /// its steps (a comparator, a C library's callback) asks
     /// [`Self::native_stop`] instead, stops at a consistent point, and polls
     /// here.
+    // Out of line: a loop reaches it once a chunk, never on its short path.
+    #[cold]
     pub(crate) fn native_poll(&mut self) -> std::result::Result<(), crate::prim::Fault> {
         if crate::host::inspect_pending() { self.with_site_leaf(|vm| vm.inspect_capture()); }
         if !self.native_quit || !self.native_quit_reached() { return Ok(()); }
@@ -211,6 +213,8 @@ impl Vm {
     /// [`Self::poll_quit`] leaves it; the failure is [`ESCAPED`]. Reached
     /// without one (the source cache's direct tier calls the same kernels),
     /// it only answers inspections.
+    // Out of line, as `native_poll`.
+    #[cold]
     pub(crate) fn native_poll_text(&mut self) -> crate::Result<()> {
         if crate::host::inspect_pending() { self.with_site_leaf(|vm| vm.inspect_capture()); }
         if !self.native_quit || !self.native_quit_reached() { return Ok(()); }
@@ -226,6 +230,8 @@ impl Vm {
     /// (a subr watcher). A primitive Lisp calls so starts outside one, and a
     /// predicate's `puthash` never quits inside the caller's scope. Lisp a
     /// primitive calls by `Step::Call` runs after the scope has closed.
+    // Inlined into each caller: a save, a store and a restore around BODY.
+    #[inline(always)]
     pub(crate) fn outside_quit_scope<T>(&mut self, body: impl FnOnce(&mut Self) -> T) -> T {
         let outer = std::mem::replace(&mut self.native_quit, false);
         let result = body(self);
@@ -236,6 +242,8 @@ impl Vm {
     /// BODY inside a quit scope, granted at a primitive's own entry where
     /// its caller raises the escape a poll leaves (`Leaf::quittable` for a
     /// leaf, the engine's call target for a kernel, the reader's entry).
+    // Inlined, as `outside_quit_scope`: a call target grants it every call.
+    #[inline(always)]
     pub(crate) fn inside_quit_scope<T>(&mut self, body: impl FnOnce(&mut Self) -> T) -> T {
         let outer = std::mem::replace(&mut self.native_quit, true);
         let result = body(self);
