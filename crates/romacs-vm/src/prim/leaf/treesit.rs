@@ -678,6 +678,7 @@ impl Leaf<'_> {
             let mut c = core.borrow_mut();
             c.tree = Some(new);
             c.need_reparse = false;
+            c.waiting_slot = false;
             c.fresh = old.is_none() && behind.is_none();
         }
         self.ts_parser_mut(parser).timestamp += 1;

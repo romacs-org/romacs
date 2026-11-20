@@ -67,8 +67,6 @@ impl Ahead {
         let (sender, result) = mpsc::channel();
         let visible = job.visible;
         std::thread::Builder::new().name("treesit-reparse".into()).spawn(move || {
-            // The slot outlives the text.
-            let _slot = slot;
             let text = text;
             let old = job.old.map(native::Loose::tree);
             let mut parser = native::Parser::new();
@@ -81,8 +79,12 @@ impl Ahead {
                     (new.loose(), changed)
                 })
             }).flatten();
-            // The copy shares the parser's subtrees: release it here.
+            // The copy shares the parser's subtrees: release it here. The slot
+            // outlives the text, and is free before the wake, so the frame it
+            // wakes finds it for a parse waiting on one.
             drop(old);
+            drop(text);
+            drop(slot);
             let _ = sender.send(tree);
             note_early_landed();
             wake();
@@ -146,9 +148,13 @@ impl Vm {
     fn treesit_cores(&mut self, buffer: Value) -> crate::Result<Vec<(Value, Rc<std::cell::RefCell<Core>>)>> {
         Ok(self.treesit_text_of(buffer)?.map_or_else(Vec::new, |text| text.treesit.parsers.clone()))
     }
-    /// Whether a reparse of BUFFER's text is still on its thread.
+    /// Whether a reparse of BUFFER's text is still on its thread, or a
+    /// first parse waits for one.
     pub(crate) fn treesit_ahead_running(&mut self, buffer: Value) -> crate::Result<bool> {
-        Ok(self.treesit_cores(buffer)?.iter().any(|(_, core)| core.borrow_mut().ahead.as_mut().is_some_and(|ahead| !ahead.ready())))
+        Ok(self.treesit_cores(buffer)?.iter().any(|(_, core)| {
+            let mut c = core.borrow_mut();
+            (c.tree.is_none() && c.waiting_slot) || c.ahead.as_mut().is_some_and(|ahead| !ahead.ready())
+        }))
     }
     /// Whether a parser of BUFFER's text has a tree.
     pub(crate) fn treesit_has_tree(&mut self, buffer: Value) -> crate::Result<bool> {

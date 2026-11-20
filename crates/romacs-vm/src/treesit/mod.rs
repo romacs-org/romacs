@@ -177,13 +177,15 @@ impl Early {
         let (sender, result) = mpsc::channel();
         let grammar = language.clone();
         std::thread::Builder::new().name("treesit-parse".into()).spawn(move || {
-            // The slot outlives the text.
-            let _slot = slot;
             let text = text;
             let mut parser = native::Parser::new();
             parser.set_language(&grammar);
-            let reader = Reader::new(Some(&text), ((visible.0 - 1) as usize, (visible.1 - 1) as usize));
-            let _ = sender.send(parser.parse(None, &reader).map(Tree::loose));
+            let tree = parser.parse(None, &Reader::new(Some(&text), ((visible.0 - 1) as usize, (visible.1 - 1) as usize)));
+            // The slot outlives the text, and is free before the wake, so
+            // the frame it wakes finds it for a parse waiting on one.
+            drop(text);
+            drop(slot);
+            let _ = sender.send(tree.map(Tree::loose));
             note_early_landed();
             if let Some(wake) = wake { wake(); }
         }).ok()?;

@@ -712,6 +712,16 @@ fn a_first_parse_on_a_thread_reads_the_accessible_text() {
 /// thread ends starts it on its thread. The evaluator never parses it.
 #[test]
 fn a_first_parse_waits_for_a_free_thread() {
+    // The threads are the process's: hold them in a process of its own.
+    const CHILD: &str = "ROMACS_TREESIT_SLOTS_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let own = own_test::name(module_path!(), "a_first_parse_waits_for_a_free_thread");
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &own, "--nocapture", "--test-threads", "1"]).env(CHILD, "1").output().unwrap();
+        assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains("1 passed"),
+            "child: {}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        return;
+    }
     let mut vm = first_parse_vm("ts-wait", 400, false);
     // Four early parses of large texts hold every thread.
     vm.eval_source("(let ((text (apply #'concat (make-list 64000 \"int g (int a) { return a - 1; }\\n\")))) \
@@ -729,8 +739,8 @@ fn a_first_parse_waits_for_a_free_thread() {
         if vm.eval_source("(with-current-buffer \"ts-hold-3\" (romacs--treesit-parsing-p))").unwrap().display().unwrap() == "nil" { break; }
         std::thread::sleep(std::time::Duration::from_micros(500));
     }
-    // The thread's end wakes a frame, which starts the waiting parse.
-    vm.land_treesit();
+    // A thread's end wakes the frame, which starts the waiting parse.
+    assert!(vm.land_treesit(), "the ended threads wake the waiting window");
     deferred_frame(&mut vm);
     wait_landed(&mut vm, "ts-wait");
     while deferred_frame(&mut vm) {}
