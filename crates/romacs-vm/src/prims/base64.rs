@@ -26,17 +26,28 @@ fn alphabet(url: bool) -> &'static [u8; 64] {
     else { b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/" }
 }
 
-/// OCTETS encoded, inside the caller's own scope: 3-byte-aligned slices
-/// encode to text that concatenates exactly, so the encoder takes the input
-/// a slice at a time and polls between slices, the group count carried on
-/// for the line breaks. Nothing is made before it ends.
+/// Input octets encoded between two polls: a whole number of groups.
+const SLICE: usize = 3 << 12;
+
+/// OCTETS encoded: a slice or less whole and unpolled, in the caller's
+/// body; a longer input by `encoded_sliced`.
+#[inline]
 fn encoded(cx: &mut Leaf<'_>, octets: &[u8], line_break: bool, pad: bool, url: bool) -> std::result::Result<Vec<u8>, Fault> {
-    const SLICE: usize = 3 << 12;
     if octets.len() <= SLICE {
         let mut out = Vec::with_capacity(octets.len() / 3 * 4 + 4);
         encode_into(&mut out, octets, 0, line_break, pad, url);
         return Ok(out);
     }
+    encoded_sliced(cx, octets, line_break, pad, url)
+}
+
+/// OCTETS encoded, inside the caller's own scope: 3-byte-aligned slices
+/// encode to text that concatenates exactly, so the encoder takes the input
+/// a slice at a time and polls between slices, the group count carried on
+/// for the line breaks. Nothing is made before it ends.
+#[cold]
+#[inline(never)]
+fn encoded_sliced(cx: &mut Leaf<'_>, octets: &[u8], line_break: bool, pad: bool, url: bool) -> std::result::Result<Vec<u8>, Fault> {
     cx.quittable(|cx| {
         let mut out = Vec::with_capacity(octets.len() / 3 * 4 + octets.len() / 57 + 4);
         for (n, part) in octets.chunks(SLICE).enumerate() {
@@ -166,15 +177,23 @@ fn decode_from<B: Bytes>(bytes: &mut B, length: usize, url: bool, ignore_invalid
 /// Input bytes read between two asks of the quit probe.
 const CHECK: usize = 1 << 14;
 
-/// BYTES decoded, inside the caller's own scope: the decode stops for the
-/// quit probe, and the poll quits or, nothing to quit for after all, the
-/// bytes are decoded again unpolled. Nothing is made before it ends.
+/// BYTES decoded: one check's worth or less whole, asking no quit probe,
+/// in the caller's body; a longer input by `decoded_probed`.
+#[inline]
 fn decoded(cx: &mut Leaf<'_>, bytes: &[u8], url: bool, ignore_invalid: bool) -> std::result::Result<Vec<u8>, Fault> {
-    // One check's worth of input asks no quit probe.
     if bytes.len() <= CHECK {
         return decode_from(&mut bytes.iter().copied(), bytes.len(), url, ignore_invalid)
             .ok_or_else(|| Fault::Error("Invalid base64 data".into()));
     }
+    decoded_probed(cx, bytes, url, ignore_invalid)
+}
+
+/// BYTES decoded, inside the caller's own scope: the decode stops for the
+/// quit probe, and the poll quits or, nothing to quit for after all, the
+/// bytes are decoded again unpolled. Nothing is made before it ends.
+#[cold]
+#[inline(never)]
+fn decoded_probed(cx: &mut Leaf<'_>, bytes: &[u8], url: bool, ignore_invalid: bool) -> std::result::Result<Vec<u8>, Fault> {
     cx.quittable(|cx| {
         let (stop, mut stopped) = (cx.native_stop(), false);
         let mut result = decode(bytes, url, ignore_invalid, &stop, &mut stopped);
