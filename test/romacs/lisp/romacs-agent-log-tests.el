@@ -1302,16 +1302,22 @@ none when dropped.")
   ;; On black as on white, apart from the background.
   (dolist (pair '(("#000000" . "#e0e0e0") ("#ffffff" . "#202020") ("#121212" . "#bebebe") ("#000000" . "#767676")))
     (should (>= (romacs-color-contrast (romacs-color-band (car pair) (cdr pair)) (car pair)) 1.15)))
-  ;; Derived on each theme change, a block to the window's edge.
-  (should (memq #'romacs-agent-log-rounds--derive enable-theme-functions))
-  (should (memq #'romacs-agent-log-rounds--derive disable-theme-functions))
-  (cl-letf (((symbol-function 'face-background) (lambda (&rest _) "#000000"))
-            ((symbol-function 'face-foreground) (lambda (&rest _) "#767676")))
-    (romacs-agent-log-rounds--derive)
-    (let ((spec (cdr (car (get 'romacs-agent-log-you 'face-defface-spec)))))
-      (should (eq (plist-get spec :extend) t))
-      (should (>= (romacs-color-contrast (plist-get spec :background) "#000000") 1.15))))
-  (romacs-agent-log-rounds--derive)
+  ;; None that would hide the text.
+  (should-not (romacs-color-band "#000000" "#141414"))
+  ;; Derived as a theme is enabled and again as it goes, a block to the
+  ;; window's edge, as the face is realized.
+  (let ((theme (make-symbol "romacs-rounds-test")))
+    (unwind-protect
+        (progn
+          (custom-declare-theme theme nil)
+          (put theme 'theme-settings nil)
+          (custom-theme-set-faces theme '(default ((t :background "#000000" :foreground "#767676"))))
+          (enable-theme theme)
+          (should (eq (face-attribute 'romacs-agent-log-you :extend nil t) t))
+          (should (>= (romacs-color-contrast (face-attribute 'romacs-agent-log-you :background nil t) "#000000") 1.15)))
+      (disable-theme theme))
+    (should-not (equal (face-attribute 'romacs-agent-log-you :background nil t)
+                       (romacs-color-band "#000000" "#767676" 1.2))))
   ;; From its first line through its newline, the blank line before it
   ;; the transcript's.
   (romacs-agent-log-tests--with
