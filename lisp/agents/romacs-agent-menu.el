@@ -267,11 +267,11 @@ you say so."
                             ((>= (point) romacs-agent-log--end)
                              (user-error (substitute-command-keys
                                           "Put point on a turn, or \\[universal-argument] for the last")))
-                            (t (romacs-agent-log--turn-here)))
+                            (t (romacs-agent-log-turns-here)))
                       (user-error "No turn here")))
          (files (seq-find (lambda (c) (and (equal (car c) request) (eq (nth 1 c) 'start)))
                           (romacs-agent-diff--checkpoints session))))
-    (unless (let ((turn (truncate-string-to-width (or (romacs-agent-log--turn-text request) "the last turn") 50 nil nil t)))
+    (unless (let ((turn (truncate-string-to-width (or (romacs-agent-log-turns-text request) "the last turn") 50 nil nil t)))
               (if files (y-or-n-p (format "Roll back to before %s, its conversation and its files? " turn))
                 (y-or-n-p (format "No checkpoint of %s's files: roll back its conversation only? " turn))))
       (user-error "Not rolled back"))
@@ -299,7 +299,7 @@ from the composer) in `diff-mode', in another window; with a prefix
 argument ALL, what every turn of the session did."
   (interactive "P" romacs-agent-log-mode)
   (let ((session (romacs-agent-log--loaded)))
-    (romacs-agent-diff-turn session (unless all (or (and (< (point) romacs-agent-log--end) (romacs-agent-log--turn-here))
+    (romacs-agent-diff-turn session (unless all (or (and (< (point) romacs-agent-log--end) (romacs-agent-log-turns-here))
                                                     (romacs-agent-diff-current session)
                                                     (user-error "No turn yet"))))))
 
