@@ -1005,6 +1005,8 @@ impl TextBody {
         let width = |s: &[u8]| match s[0] { 0..=0x7f => 1, 0xc0..=0xdf => 2, 0xe0..=0xef => 3, 0xf0..=0xf7 => 4, 0xf8 => 5, _ => 0 };
         let old = self.internal(r)?;
         let (mut a, mut b, mut changed) = (&old[..], replacement, 0);
+        // NOPOLL: the overwrite's span, walked once beside the overwrite's own copy of it, only in a buffer
+        // with parsers, inside an edit whose hooks ran and which a quit must not cut (a3 REPORT C8, row 1 parsed).
         while !a.is_empty() && !b.is_empty() {
             let (m, n) = (width(a), width(b));
             if m == 0 || n == 0 || m > a.len() || n > b.len() { break; }
