@@ -169,6 +169,9 @@ fn text_loops_quit_before_they_change_anything() {
     reaches("string-width", "(setq s (make-string 50000 ?a))", "(list s)", "t");
     reaches("upcase", "(setq s (make-string 50000 ?a))", "(list s)", "(string= s (make-string 50000 ?a))");
     reaches("subst-char-in-region", text, "(list 1 (point-max) ?a ?b)", "(string= (buffer-string) (make-string 50000 ?a))");
+    // A unibyte buffer's scan polls too.
+    let bytes = "(progn (set-buffer-multibyte nil) (insert (make-string 200000 ?a)) (goto-char 1))";
+    reaches("subst-char-in-region", bytes, "(list 1 (point-max) ?a ?b)", "(string= (buffer-string) (make-string 200000 ?a))");
     reaches("string-distance", "(setq a (make-string 1100 ?a) b (make-string 1100 ?b))", "(list a b)", "t");
 }
 

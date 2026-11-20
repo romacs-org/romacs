@@ -53,7 +53,17 @@ impl Leaf<'_> {
                 }
                 hits
             }
-            data::Object::ByteBuffer(b) => ((lo - 1) as usize..(hi - 1) as usize).filter(|&at| u32::from(b.bytes[at]) == from_c).collect(),
+            data::Object::ByteBuffer(_) => {
+                const PART: usize = 1 << 16;
+                let mut hits = Vec::new();
+                let span = (lo - 1) as usize..(hi - 1) as usize;
+                for chunk in span.clone().step_by(PART) {
+                    let data::Object::ByteBuffer(b) = &self.vm.objects[index] else { unreachable!("checked above") };
+                    hits.extend((chunk..span.end.min(chunk + PART)).filter(|&at| u32::from(b.bytes[at]) == from_c));
+                    self.native_poll()?;
+                }
+                hits
+            }
             _ => unreachable!(),
         };
         Ok((hits.into_iter().map(|at| at as i64 + 1).collect(), hi))
