@@ -42,12 +42,26 @@
     (romacs-agent--raise session '(:type mode :permission-mode "acceptEdits"))
     (should-not (plist-get (romacs-agent-options session) :plan))
     (should-not (plist-get (romacs-agent-options session) :plan-from))
-    ;; Caught up on records it had not seen, the same.
+    ;; Catching up on records it had not seen: nothing kept till caught up,
+    ;; then the leaving taken.
     (romacs-agent-set-plan session t)
     (setf (romacs-agent-caught-up session) nil)
     (romacs-agent--raise session '(:type mode :permission-mode "plan"))
     (romacs-agent--raise session '(:type mode :permission-mode "default"))
-    (should-not (plist-get (romacs-agent-options session) :plan))))
+    (should (plist-get (romacs-agent-options session) :plan))
+    (setf (romacs-agent-caught-up session) t)
+    (run-hook-with-args 'romacs-agent-caught-up-functions session)
+    (should-not (plist-get (romacs-agent-options session) :plan))
+    ;; A replay from the start: an old leaving, then Romacs's switch into
+    ;; plan mode again, which the records' order keeps.
+    (romacs-agent-set-plan session t)
+    (setf (romacs-agent-caught-up session) nil)
+    (romacs-agent--raise session '(:type mode :permission-mode "plan"))
+    (romacs-agent--raise session '(:type mode :permission-mode "default"))
+    (romacs-agent--raise session '(:type status :text "plan mode"))
+    (setf (romacs-agent-caught-up session) t)
+    (run-hook-with-args 'romacs-agent-caught-up-functions session)
+    (should (plist-get (romacs-agent-options session) :plan))))
 
 (ert-deftest romacs-agent-plan-claude-switches-live-and-back ()
   (romacs-agent-plan-tests--with 'claude
