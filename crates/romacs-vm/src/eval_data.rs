@@ -455,34 +455,42 @@ impl Vm {
             let mut out = if quoted { String::from("\"") } else { String::new() };
             let codes: Vec<_> = view.chars().collect();
             let mut hex = false;
-            for (i, &code) in codes.iter().enumerate() {
-                use std::fmt::Write;
-                // princ into a buffer escapes a unibyte string's raw bytes too.
-                if code > lstring::MAX_5_BYTE_CHAR || (!view.is_multibyte() && code >= 128 && (quoted || options.buffer)) {
-                    if !view.is_multibyte() && code >= 128 && !options.nonascii {
-                        return Err("printing raw-byte strings to callbacks is not supported".into());
-                    }
-                    let byte = if code > lstring::MAX_5_BYTE_CHAR { code - lstring::BYTE8_OFFSET } else { code };
-                    write!(out, "\\{:03o}", byte).unwrap();
-                    hex = false;
-                } else if quoted && options.multibyte && code >= 128 {
-                    write!(out, "\\x{code:04x}").unwrap(); hex = true;
-                } else if let Some(c) = char::from_u32(code) {
-                    if hex && c.is_ascii_hexdigit() { out.push_str("\\ "); }
-                    hex = false;
-                    match c {
-                        '\"' | '\\' if quoted => { out.push('\\'); out.push(c); }
-                        '\n' if quoted && options.newlines => out.push_str("\\n"),
-                        '\u{c}' if quoted && options.newlines => out.push_str("\\f"),
-                        _ if quoted && options.controls && (code < 32 || code == 127) => {
-                            let width = if code > 63 || codes.get(i+1).is_some_and(|c| (48..=55).contains(c)) { 3 } else if code > 7 { 2 } else { 1 };
-                            write!(out, "\\{code:0width$o}").unwrap();
+            // A part at a time, the quit probe asked between parts, as the
+            // print's other walks ask it (`PRINT_STOPPED`): nothing is
+            // returned before the whole text is.
+            const PART: usize = 1 << 14;
+            for (n, part) in codes.chunks(PART).enumerate() {
+                if n > 0 && self.native_stop_due() { return Err(PRINT_STOPPED.into()); }
+                for (j, &code) in part.iter().enumerate() {
+                    let i = n * PART + j;
+                    use std::fmt::Write;
+                    // princ into a buffer escapes a unibyte string's raw bytes too.
+                    if code > lstring::MAX_5_BYTE_CHAR || (!view.is_multibyte() && code >= 128 && (quoted || options.buffer)) {
+                        if !view.is_multibyte() && code >= 128 && !options.nonascii {
+                            return Err("printing raw-byte strings to callbacks is not supported".into());
                         }
-                        // Printed text is decoded as a symbol key (symkey.rs).
-                        crate::symkey::ESC => { out.push(c); out.push(c); }
-                        _ => out.push(c),
-                    }
-                } else { return Err("not-unicode-string: printer extended character".into()); }
+                        let byte = if code > lstring::MAX_5_BYTE_CHAR { code - lstring::BYTE8_OFFSET } else { code };
+                        write!(out, "\\{:03o}", byte).unwrap();
+                        hex = false;
+                    } else if quoted && options.multibyte && code >= 128 {
+                        write!(out, "\\x{code:04x}").unwrap(); hex = true;
+                    } else if let Some(c) = char::from_u32(code) {
+                        if hex && c.is_ascii_hexdigit() { out.push_str("\\ "); }
+                        hex = false;
+                        match c {
+                            '\"' | '\\' if quoted => { out.push('\\'); out.push(c); }
+                            '\n' if quoted && options.newlines => out.push_str("\\n"),
+                            '\u{c}' if quoted && options.newlines => out.push_str("\\f"),
+                            _ if quoted && options.controls && (code < 32 || code == 127) => {
+                                let width = if code > 63 || codes.get(i+1).is_some_and(|c| (48..=55).contains(c)) { 3 } else if code > 7 { 2 } else { 1 };
+                                write!(out, "\\{code:0width$o}").unwrap();
+                            }
+                            // Printed text is decoded as a symbol key (symkey.rs).
+                            crate::symkey::ESC => { out.push(c); out.push(c); }
+                            _ => out.push(c),
+                        }
+                    } else { return Err("not-unicode-string: printer extended character".into()); }
+                }
             }
             if quoted { out.push('\"'); }
             if !properties.is_empty() {
