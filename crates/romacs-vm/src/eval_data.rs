@@ -171,8 +171,16 @@ impl Vm {
             if bound_table.is_none() { self.set_print_number_table(table_slot, table)?; }
         }
         if !options.circle { return Ok((self.print_object(value, quoted, &options, 0)?, options.unreadable)); }
+        let index = self.print_number_index;
         self.print_preprocess(value, quoted, &mut options, continuous, table)?;
         let printed = self.print_object(value, quoted, &options, 0);
+        // A render stopped for a quit poll returned no text, so it publishes
+        // none of its labels: the numbering is as it was, for the render that
+        // follows or for none.
+        if printed.as_ref().is_err_and(|error| error == PRINT_STOPPED) {
+            self.print_number_index = index;
+            return Err(PRINT_STOPPED.into());
+        }
         // Listing the unreadable objects is not the print itself.
         if !matches!(options.unreadable, Unreadable::Met(_)) {
             let slot = if bound_table.is_none() { Some(table_slot) } else { None };
