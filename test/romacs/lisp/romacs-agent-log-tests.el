@@ -280,7 +280,13 @@
         (should (equal (mapcar #'romacs-agent-title (romacs-agent-log--workers)) '("asks" "builds")))
         (should (equal (substring-no-properties (romacs-agent-log--worker-label 0)) "⚠ asks"))
         (should (equal (substring-no-properties (romacs-agent-log--worker-label 1)) "● builds"))
-        (should-not (romacs-agent-log--worker-label 2))))))
+        (should-not (romacs-agent-log--worker-label 2))
+        ;; Its values read as values, never dim as a command it cannot run.
+        (let ((romacs-agent-ui--session session))
+          (dolist (label (list (romacs-agent-ui--effort-label) (romacs-agent-ui--model-label)))
+            (should (string-match-p "default" label))
+            (should-not (memq 'romacs-agent-effort-default
+                              (ensure-list (get-text-property (string-match "default" label) 'face label))))))))))
 
 (ert-deftest romacs-agent-log-several-answers-keep-their-questions ()
   (let ((one (make-hash-table :test #'equal)) (two (make-hash-table :test #'equal)))
