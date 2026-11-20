@@ -48,6 +48,8 @@
 ;; before (romacs-agent-ui.el), which read the session from here too.
 (defvar romacs-agent-ui--session)
 (defvar romacs-agent-ui-changed-hook)
+(declare-function romacs-agent-ui--model-label "romacs-agent-ui" ())
+(declare-function romacs-agent-ui--effort-label "romacs-agent-ui" ())
 (declare-function romacs-agent-chat-model "romacs-agent-ui" (model effort))
 (declare-function romacs-agent-chat-effort "romacs-agent-ui" (effort))
 (declare-function romacs-agent-chat-plan "romacs-agent-ui" ())
@@ -1381,8 +1383,8 @@ the session, the view."
   "k" ("Interrupt, then send" romacs-agent-log-interrupt-and-send)
   "q" ("Send when the turn ends" romacs-agent-log-queue)
   :group "Runs on"
-  "m" ("Model" romacs-agent-chat-model)
-  "E" ("Effort" romacs-agent-chat-effort)
+  "m" (#'romacs-agent-ui--model-label romacs-agent-chat-model)
+  "E" (#'romacs-agent-ui--effort-label romacs-agent-chat-effort)
   "P" ("Plan mode on or off" romacs-agent-chat-plan)
   "H" ("Go on under another instance" romacs-agent-chat-handoff)
   "N" ("Next account with room" romacs-agent-chat-next-account)

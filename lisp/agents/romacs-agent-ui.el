@@ -3697,7 +3697,8 @@ with a prefix argument, asked for."
          (harness (and session (romacs-agent-harness session)))
          (shown (lambda (model)
                   (propertize (or (and model (romacs-agent-ui--instance nil harness model nil)) "default")
-                              'face (if model 'romacs-agent-model 'romacs-agent-effort-default))))
+                              ;; A menu's value is never dim: dim is a command it cannot run.
+                              'face (and model 'romacs-agent-model))))
          (now (and session (or (plist-get (romacs-agent--selection session) :model) (romacs-agent-model session))))
          (next (and session (plist-get (romacs-agent--wanted session) :model))))
     (concat "Model: " (funcall shown now)
@@ -3889,8 +3890,9 @@ and changes nothing; its plan comes as a card to implement."
   (let* ((session romacs-agent-ui--session)
          (now (and session (plist-get (romacs-agent--selection session) :effort)))
          (next (and session (plist-get (romacs-agent--wanted session) :effort))))
-    (concat "Effort: " (romacs-agent-ui--effort now)
-            (if (equal now next) "" (concat " → " (romacs-agent-ui--effort next))))))
+    ;; A menu's value is never dim: dim is a command it cannot run.
+    (cl-flet ((shown (effort) (if effort (romacs-agent-ui--effort effort) "default")))
+      (concat "Effort: " (shown now) (if (equal now next) "" (concat " → " (shown next)))))))
 
 (require 'keymap-popup)
 (require 'romacs-agent-diff)
