@@ -1018,6 +1018,7 @@ fn reader_callback_partials_and_source_survive_compaction() {
             signal: None,
             steps: crate::quit::Steps::default(),
             collect_subforms: true,
+            chunk: Chunk::default(),
         };
         let value = reader.form(0).and_then(|value| reader.finish().map(|()| value));
         m.leaf(value, |vm, value| value.and_then(|root| vm.display(vm.external_roots[root])))

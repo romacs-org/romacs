@@ -241,18 +241,68 @@ fn rename_staged(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
         match cx.filesave_rename(&source, &target, false) {
             Ok(()) => return Ok(Step::Done(Value::NIL)),
             Err(e) if e.raw_os_error() == Some(libc::EEXIST) => return Err(refusal("rename-file interactive overwrite confirmation")),
-            Err(e) if e.raw_os_error() == Some(libc::EXDEV) => return Err(refusal("rename-file cross-device copy/delete")),
+            // fileio.c:2809: past the no-replace rename, a non-nil
+            // OK-IF-ALREADY-EXISTS is t.
+            Err(e) if e.raw_os_error() == Some(libc::EXDEV) => return across_devices(cx, source_value, target_value, Value::TRUE, &source),
             Err(e) => return Err(errno(cx, "Renaming", &[source_value, target_value], e)),
         }
     }
     match cx.filesave_rename(&source, &target, overwrite != Value::NIL) {
         Ok(()) => Ok(Step::Done(Value::NIL)),
-        Err(e) if e.raw_os_error() == Some(libc::EXDEV) => Err(refusal("rename-file cross-device copy/delete")),
+        Err(e) if e.raw_os_error() == Some(libc::EXDEV) => {
+            let ok = if overwrite == Value::NIL { Value::NIL } else { Value::TRUE };
+            across_devices(cx, source_value, target_value, ok, &source)
+        }
         // GNU queries before renaming, so EEXIST names only the destination.
         Err(e) if e.raw_os_error() == Some(libc::EEXIST) => Err(already_exists(cx, target_value)),
         Err(e) => Err(errno(cx, "Renaming", &[source_value, target_value], e)),
     }
 }
+
+/// fileio.c:2814-2847, Frename_file once the rename failed with EXDEV: FILE
+/// is copied to NEWNAME as what it is (a directory with `copy-directory`, a
+/// regular file with `copy-file` keeping its times, owner and modes, a
+/// symbolic link as a new link to the same target), then deleted, never
+/// into the trash. Anything else is the rename's error. As GNU's C calls
+/// `Fcopy_file` and `Fmake_symbolic_link` directly, the copy goes through
+/// those primitives, not their Lisp bindings, so advice on them cannot
+/// skip it before the source is deleted; `copy-directory`, `delete-file`
+/// and `delete-directory` are called as Lisp, as GNU calls them.
+fn across_devices(cx: &mut Leaf<'_>, file: Value, newname: Value, ok: Value, source: &std::path::Path) -> Next {
+    let exdev = || std::io::Error::from_raw_os_error(libc::EXDEV);
+    let directory_name = cx.string_bytes(file)?.last() == Some(&b'/');
+    let kind = if directory_name { "directory" } else {
+        let meta = host::symlink_metadata(source).map_err(|e| errno(cx, "Renaming", &[file, newname], e))?;
+        match meta.mode() & libc::S_IFMT {
+            libc::S_IFDIR => "directory",
+            libc::S_IFREG => "file",
+            libc::S_IFLNK => "symlink",
+            _ => return Err(errno(cx, "Renaming", &[file, newname], exdev())),
+        }
+    };
+    let link = if kind == "symlink" {
+        use std::os::unix::ffi::OsStrExt as _;
+        let target = host::read_link(source).map_err(|e| errno(cx, "Renaming", &[file, newname], e))?;
+        super::fileio::file_name_value(cx, target.as_os_str().as_bytes())
+    } else { Value::NIL };
+    let kind = cx.intern(kind);
+    let subr = |name| crate::prim::subr_named(name).ok_or_else(|| Fault::Error(format!("no primitive {name}")));
+    let (copy, symlink) = (subr("copy-file")?, subr("make-symbolic-link")?);
+    let source = "(lambda (copy symlink file newname ok kind target)
+                    (cond ((eq kind 'directory) (copy-directory file newname t nil))
+                          ((eq kind 'file) (funcall copy file newname ok t t t))
+                          (t (funcall symlink target newname ok)))
+                    (let ((delete-by-moving-to-trash nil))
+                      (if (eq kind 'directory) (delete-directory file t) (delete-file file nil)))
+                    nil)";
+    super::insert_coding::closure_then(cx, source, across_devices_closure, vec![copy, symlink, file, newname, ok, kind, link])
+}
+
+fn across_devices_closure(_: &mut Leaf<'_>, closure: Value, saved: &[Value]) -> Next {
+    Ok(Step::Call { f: closure, args: saved.to_vec(), then: renamed, saved: vec![] })
+}
+
+fn renamed(_: &mut Leaf<'_>, _: Value, _: &[Value]) -> Next { Ok(Step::Done(Value::NIL)) }
 
 defsubr! { name = "make-temp-name", gnu = "fileio.c:830", effect = Global,
 fn make_temp_name(cx, prefix: Value) {
@@ -531,18 +581,28 @@ fn copy_staged(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
         Ok(output) => (output, false),
         Err(e) if e.raw_os_error() == Some(libc::EEXIST) => {
             may_replace(cx, ok_if_already_exists, newname, "copy-file")?;
-            let output = host::open_output(&target, host::OpenOptions::new().write(true).truncate(true))
+            // Opened without O_TRUNC, unlike GNU's (fileio.c:2393): the
+            // existing NEWNAME may be FILE itself through a link, and is
+            // truncated only once the check below rules that out.
+            let output = host::open_output(&target, host::OpenOptions::new().write(true))
                 .map_err(|e| errno(cx, "Opening output file", &[newname], e))?;
             (output, true)
         }
         Err(e) => return Err(errno(cx, "Opening output file", &[newname], e)),
     };
     if already_exists {
-        // GNU has already truncated the output when it finds it is the input.
+        // GNU has already truncated the output when it finds it is the input,
+        // losing FILE's data; here the check comes first (ledger/divergences
+        // VM2-COPY-FILE-SAME-FILE).
         let existing = host::file_metadata(&output).map_err(|e| errno(cx, "Output file status", &[newname], e))?;
         if (existing.dev(), existing.ino()) == (status.dev(), status.ino()) {
             let same = std::io::Error::from_raw_os_error(0);
             return Err(errno(cx, "Input and output files are the same", &[file, newname], same));
+        }
+        // GNU's O_TRUNC truncates a regular file and leaves anything else (a
+        // FIFO, a device) as it is; so does this.
+        if existing.file_type().is_file() {
+            host::truncate(&output).map_err(|e| errno(cx, "Opening output file", &[newname], e))?;
         }
     }
     if !host::clone_file(&output, &input) {

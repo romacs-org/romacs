@@ -356,7 +356,7 @@ def session(args, base):
         evaluated = until(lambda: (lambda r: len(r) > answered and r[-1])(a.results(sid)), 30, 'eval answered')
         a.send(sid, 'ask touch approved.txt')
         until(lambda: a.state(sid) == 'waiting-approval', 20, 'approval raised')
-        a.eval(f'(let ((s {a.s(sid)})) (romacs-agent-respond s (car (hash-table-keys (romacs-agent-approvals s))) t))')
+        a.eval(f'(let ((s {a.s(sid)})) (romacs-agent-respond s (car (hash-table-keys (romacs-agent-approvals s))) t nil (quote user)))')
         a.idle(sid)
         approval = next(e['answer'] for e in a.logged() if 'approval' in e)
         a.send(sid, 'slow 200')
@@ -371,9 +371,11 @@ def session(args, base):
         chat = a.chat(sid)
         result = {'edited': edited, 'evaluated': evaluated, 'approval': approval, 'interrupt_s': round(interrupt_s, 2),
                   'attached_after_reshow': attached,
-                  'chat_has': {**{k: k in chat for k in ('> say hello', 'hello from the fake harness', '✓', '◆ Bash asks')},
+                  'chat_has': {**{k: k in chat for k in ('❯ say hello', 'hello from the fake harness',
+                                                         '⚠ The agent wants to run Bash', 'touch approved.txt',
+                                                         '✔ allowed by you', '⎿ 42')},
                                # A Romacs tool's row: its mark, then its name as words.
-                               '✓ ◈ buffer edit': bool(re.search(r'✓ \S+ buffer edit', chat))}}
+                               '● ◈ buffer edit': bool(re.search(r'● \S+ buffer edit', chat))}}
         result['ok'] = (edited == '"ALPHA beta\\n"' and evaluated == '42'
                         and approval.get('behavior') == 'allow'
                         and approval.get('updatedInput', {}).get('run_in_background') is False
@@ -931,11 +933,11 @@ PROBE = '''(let ((times nil))
                                   :dir temporary-file-directory)))
       (romacs-agent-show s)
       (dotimes (i n)
-        (romacs-agent-ui--render s (list :type 'tool :state 'started :id (format "t%d" i) :name "Bash" :seq (1+ i) :last t)))
+        (romacs-agent-log--on-event s (list :type 'tool :state 'started :id (format "t%d" i) :name "Bash" :seq (1+ i) :last t)))
       (let ((start (float-time)))
-        (romacs-agent-ui--render s (list :type 'tool :state 'completed :id "t0" :output "ok" :seq (+ 2 n) :last t))
+        (romacs-agent-log--on-event s (list :type 'tool :state 'completed :id "t0" :output "ok" :seq (+ 2 n) :last t))
         (push (list 'chat n 'complete-us (* 1e6 (- (float-time) start))) times))
-      (kill-buffer (romacs-agent-buffer s))))
+      (kill-buffer (romacs-agent-log-chat s))))
   (prin1-to-string (nreverse times)))'''
 
 
@@ -1803,7 +1805,7 @@ def unicode(args, base):
         sent_text = (sent.get('message') or {}).get('content')
         results = a.results(sid)
         title = a.eval(f'(romacs-agent-title {a.s(sid)})')
-        buffer_name = a.eval(f'(buffer-name (romacs-agent-buffer {a.s(sid)}))')
+        buffer_name = a.eval(f'(buffer-name (romacs-agent-log-chat {a.s(sid)}))')
         # A tool's input and output.
         a.send(sid, 'call romacs_eval ' + json.dumps({'instance': '?', 'code': f'(concat "{UNICODE}")'}))
         a.idle(sid)
@@ -1857,7 +1859,7 @@ def unicode(args, base):
         result = {'chat': chat[:300], 'sent': sent_text, 'results': results, 'title': title, 'buffer': buffer_name,
                   'evaluated': evaluated, 'read': read, 'codex_reply': codex_reply, 'title_again': title_again,
                   'listed': listed, 'view': (view or '')[:200], 'started_in': started_in}
-        result['ok'] = (f'> say {UNICODE}' in chat and UNICODE in chat.split(f'> say {UNICODE}', 1)[1]
+        result['ok'] = (f'❯ say {UNICODE}' in chat and UNICODE in chat.split(f'❯ say {UNICODE}', 1)[1]
                         and sent_text == f'say {UNICODE}' and results and results[0] == UNICODE
                         and UNICODE in title and UNICODE in buffer_name
                         and UNICODE in evaluated['text'] and not evaluated['error']
@@ -2188,7 +2190,7 @@ def rpc(args, base):
         # Its chat drawn again (the journal replayed into a copy): nothing
         # is written to the harness.
         written = len(rpcs())
-        a.eval(f'(progn (kill-buffer (romacs-agent-buffer {a.s(sid)})) (romacs-agent-show {a.s(sid)}) t)')
+        a.eval(f'(progn (kill-buffer (romacs-agent-log-chat {a.s(sid)})) (romacs-agent-show {a.s(sid)}) t)')
         time.sleep(1)
         redraw_writes = [e.get('rpc') for e in rpcs()[written:]]
 
@@ -2379,7 +2381,7 @@ def composer(args, base, real=False):
         a.keyboard_ready()
         time.sleep(1.5)  # the readiness probe's C-g presses, all taken
         sid = a.start('')
-        chat = f'(romacs-agent-buffer {a.s(sid)})'
+        chat = f'(romacs-agent-log-chat {a.s(sid)})'
         a.eval(f'(progn (delete-other-windows) (romacs-agent-show {a.s(sid)}) t)')
         mark = a.eval('(with-current-buffer "*Messages*" (point-max))')
 
@@ -2389,8 +2391,8 @@ def composer(args, base, real=False):
             # whether its text shows: any invisible character, its
             # properties, and its width as laid out in the window.
             return parity_live.read_sexp(a.eval(
-                f'(with-current-buffer {chat} (let ((end (marker-position romacs-agent-ui--end))) '
-                '(list (romacs-agent-ui--composer-text) (point) end (point-max) (buffer-name) '
+                f'(with-current-buffer {chat} (let ((end (marker-position romacs-agent-log--input))) '
+                '(list (romacs-agent-log--draft) (point) end (point-max) (buffer-name) '
                 '(eq (window-buffer (selected-window)) (current-buffer)) (window-start (selected-window)) '
                 '(cl-loop for p from end below (point-max) thereis (invisible-p p)) '
                 '(and (< end (point-max)) (format "%S" (text-properties-at end))) '
@@ -2422,7 +2424,7 @@ def composer(args, base, real=False):
             except RuntimeError:
                 steps[name] = {'state': look(), 'expect': ''}
                 # Cleared for the steps after, whatever the keys did.
-                a.eval(f'(with-current-buffer {chat} (delete-region romacs-agent-ui--end (point-max)))')
+                a.eval(f'(with-current-buffer {chat} (delete-region romacs-agent-log--input (point-max)))')
                 return False
             return True
 
@@ -2434,18 +2436,18 @@ def composer(args, base, real=False):
 
         good = [typed('before_first_prompt', 'say hello from Romacs')]
         turn('first')
-        # A folded call is the transcript's last text while a turn runs (its
-        # output is drawn only when opened): typing then, and after the turn
+        # A call is open while a turn runs: typing then, and after the turn
         # ends, shows.
         release = a.root / 'release-hold'
         a.send(sid, f'hold {release} romacs_eval {{"instance": "?"}}')
-        # Held until released: the call's row stays the transcript's last text.
-        until(lambda: a.eval(f'(with-current-buffer {chat} (and (get-text-property (1- romacs-agent-ui--end) '
-                             '(quote romacs-agent-tool)) t))') == 't', 15, 'tool row last')
-        steps['output_last'] = a.eval(f'(with-current-buffer {chat} (format "%S" (text-properties-at (1- romacs-agent-ui--end))))')
+        # Held until released: the call's output is the transcript's last text.
+        transcript = lambda: parity_live.read_sexp(a.eval(
+            f'(with-current-buffer {chat} (buffer-substring-no-properties (point-min) romacs-agent-log--end))')) or ''
+        last_call = lambda: (lambda tail: '⎿' in tail and '❯' not in tail)(transcript().rsplit('● ', 1)[-1])
+        until(lambda: a.state(sid) == 'running' and last_call(), 15, 'tool output last')
+        steps['output_last'] = a.eval(f'(with-current-buffer {chat} (format "%S" (text-properties-at (1- romacs-agent-log--input))))')
         good.append(typed('while_output_last', 'typed while'))
-        good.append(a.eval(f'(with-current-buffer {chat} (and (get-text-property (1- romacs-agent-ui--end) '
-                           '(quote romacs-agent-tool)) t))') == 't' and a.state(sid) == 'running')
+        good.append(last_call() and a.state(sid) == 'running')
         release.write_text('')
         a.idle(sid)
         good.append(typed('after_output_turn', ' and after', 'typed while and after'))
@@ -2471,15 +2473,15 @@ def composer(args, base, real=False):
         a.keys('menu title')
         a.keys('-k', 'Return')
         until(lambda: a.eval(f'(romacs-agent-title {a.s(sid)})') == '"menu title"', 10, 'renamed from the menu')
-        steps['renamed'] = a.eval(f'(buffer-name (romacs-agent-buffer {a.s(sid)}))')
+        steps['renamed'] = a.eval(f'(buffer-name (romacs-agent-log-chat {a.s(sid)}))')
         good.append(steps['menu_opened'] and 'menu title' in steps['renamed'])
-        a.eval(f'(with-current-buffer {chat} (delete-region romacs-agent-ui--end (point-max)))')
+        a.eval(f'(with-current-buffer {chat} (delete-region romacs-agent-log--input (point-max)))')
         # A message queued while a turn runs is sent when it ends.
         a.keys('slow 30'); a.keys('-k', 'Return')
         until(lambda: a.state(sid) in ('running', 'starting'), 10, 'the slow turn')
         a.keys('say queued one'); a.keys(*ctrl('c'), *ctrl('q'))
         steps['queued_composer'] = look()[0]
-        until(lambda: 'queued one' in a.chat(sid).split('> say queued one', 1)[-1] and '> say queued one' in a.chat(sid),
+        until(lambda: 'queued one' in a.chat(sid).split('❯ say queued one', 1)[-1] and '❯ say queued one' in a.chat(sid),
               40, 'the queued message sent after the turn')
         a.idle(sid)
         good.append(steps['queued_composer'] == '')
@@ -2487,9 +2489,9 @@ def composer(args, base, real=False):
         a.keys('slow 200'); a.keys('-k', 'Return')
         until(lambda: a.state(sid) in ('running', 'starting'), 10, 'the long turn')
         a.keys('say after interrupt'); a.keys(*ctrl('c'), *ctrl('k'))
-        until(lambda: '> say after interrupt' in a.chat(sid), 30, 'sent after the interrupt')
+        until(lambda: '❯ say after interrupt' in a.chat(sid), 30, 'sent after the interrupt')
         a.idle(sid)
-        steps['interrupted_then_sent'] = 'after interrupt' in a.chat(sid).split('> say after interrupt', 1)[-1]
+        steps['interrupted_then_sent'] = 'after interrupt' in a.chat(sid).split('❯ say after interrupt', 1)[-1]
         good.append(steps['interrupted_then_sent'])
         # M-p / M-n walk the composer's history; ? in the transcript opens the
         # menu, C-g closes it; w copies the turn at point.
@@ -2509,23 +2511,23 @@ def composer(args, base, real=False):
 
         def copied():
             steps['copied'] = parity_live.read_sexp(a.eval('(current-kill 0)'))[:40]
-            return steps['copied'].startswith('> say hello from Romacs')
+            return steps['copied'].startswith('❯ say hello from Romacs')
         try:
             until(copied, 10, 'the turn copied')
         except RuntimeError:
             pass
-        good.append(steps['menu_from_transcript'] and (steps['copied'] or '').startswith('> say hello from Romacs'))
+        good.append(steps['menu_from_transcript'] and (steps['copied'] or '').startswith('❯ say hello from Romacs'))
         a.keys('-M', 'alt', '>', '-m', 'alt')
         # The queue is the session's: sent though the chat buffer is gone, and
         # after a Codex turn an interrupt ended (no result).
         a.send(sid, 'slow 30')
         until(lambda: a.state(sid) in ('running', 'starting'), 10, 'a turn to queue behind')
         a.eval(f'(progn (romacs-agent-send-later {a.s(sid)} "say queued unseen") '
-               f'(let ((kill-buffer-query-functions nil)) (kill-buffer (romacs-agent-buffer {a.s(sid)}))) t)')
+               f'(let ((kill-buffer-query-functions nil)) (kill-buffer (romacs-agent-log-chat {a.s(sid)}))) t)')
         until(lambda: 'queued unseen' in (a.results(sid) or [''])[-1], 40, 'the queued message sent with no chat')
         a.idle(sid)
         a.eval(f'(progn (save-window-excursion (romacs-agent-show {a.s(sid)})) '
-               f'(delete-other-windows) (switch-to-buffer (romacs-agent-buffer {a.s(sid)})) (goto-char (point-max)) t)')
+               f'(delete-other-windows) (switch-to-buffer (romacs-agent-log-chat {a.s(sid)})) (goto-char (point-max)) t)')
         a.codex_instance()
         codex = a.start('slow 30', 'codex')
         # Interruptible once Codex has named the turn.
@@ -2538,7 +2540,7 @@ def composer(args, base, real=False):
         good.append(cleared('composer cleared for unicode'))
         good.append(typed('unicode_typed', f'say {UNICODE}'))
         turn('unicode')
-        steps['unicode_sent'] = UNICODE in a.chat(sid).rsplit(f'> say {UNICODE}', 1)[-1]
+        steps['unicode_sent'] = UNICODE in a.chat(sid).rsplit(f'❯ say {UNICODE}', 1)[-1]
         good.append(steps['unicode_sent'])
         good.append(cleared('composer cleared for selection'))
         # With delete-selection-mode, a selection in the composer is
@@ -2565,7 +2567,7 @@ def composer(args, base, real=False):
         yanked = parity_live.read_sexp(a.eval(f'(with-current-buffer {chat} (buffer-substring-no-properties (point-min) (+ (point-min) 5)))'))
         a.keys('-M', 'ctrl', '-k', 'y', '-m', 'ctrl')
         good.append(typed('yanked_transcript', '', yanked))
-        steps['after_change_hook_kept'] = a.eval(f'(with-current-buffer {chat} (and (memq (function romacs-agent-ui--composer-plain) after-change-functions) t))')
+        steps['after_change_hook_kept'] = a.eval(f'(with-current-buffer {chat} (and (memq (function romacs-agent-log--composer-plain) after-change-functions) t))')
         good.append(steps['after_change_hook_kept'] == 't')
         good.append(cleared('composer killed'))
         # A long wrapped transcript: replies far wider than the window.
@@ -2599,7 +2601,7 @@ def composer(args, base, real=False):
         until(lambda: set(parity_live.read_sexp(a.eval('(mapcar (function romacs-agent-id) (romacs-agent-sessions))')) or []) - before,
               10, 'session started')
         sid = next(iter(set(parity_live.read_sexp(a.eval('(mapcar (function romacs-agent-id) (romacs-agent-sessions))'))) - before))
-        chat = f'(romacs-agent-buffer {a.s(sid)})'
+        chat = f'(romacs-agent-log-chat {a.s(sid)})'
         until(lambda: a.eval(f'(eq (window-buffer (selected-window)) {chat})') == 't', 10, 'home chat shown')
         good.append(typed('home_first_prompt', 'say hello from Romacs'))
         turn('home first')
@@ -2784,11 +2786,11 @@ def history(args, base):
             and claude_run and claude_run[-1]['argv'][claude_run[-1]['argv'].index('--resume') + 1] == cid
             and claude_run[-1].get('config_dir') == str(claude_dir)
             and codex_run and codex_run[-1]['resumed'] and codex_run[-1]['codex'] == tid
-            and order(chats[cid], '> list the files here', '> say resumed one')
-            and order(chats[tid], '> count the lines of a.txt', '> say resumed two')
+            and order(chats[cid], '❯ list the files here', '❯ say resumed one')
+            and order(chats[tid], '❯ count the lines of a.txt', '❯ say resumed two')
             and cid not in listed and tid not in listed
             and again[0] in (None, []) and again[1].endswith(f'{cid}.jsonl') and again[2] == tid
-            and order(chat_again, '> list the files here', '> say resumed one')
+            and order(chat_again, '❯ list the files here', '❯ say resumed one')
             and imported_again == ['t', cut] and 'Another Romacs' in (refused or '')
             and cuts == {'aligned': ['b', 'c'], 'in-char': ['c'], 'partial-end': ['a', 'b'], 'whole': ['a', 'b', 'c']}
             and sockets[0] != sockets[1] and twin_runs == threads and twin_failed in (None, [None, None], [])
@@ -2860,6 +2862,135 @@ def real(args, base):
         return result
     finally:
         a.close()
+
+
+def chat_log(args, base):
+    """The chat as its user sees it, with a real Claude Code (--claude-model,
+    default haiku) on its own configuration: screenshots of a turn that
+    thinks, runs a command, reads a file and starts a subagent, with C-p
+    from the composer up through the transcript while it runs; a question
+    the agent asks, waiting in sight; a plan in plan mode, asked of the user
+    and answered by real keys.  Costs money: not a default workflow."""
+    a = Agents(args, base, 'cl')
+    try:
+        a.up()
+        a.providers([('claude', args.claude_config, args.claude_program or real_program('claude'), ['--model', args.claude_model]),
+                     ('codex', args.codex_home, args.codex_program or real_program('codex'),
+                      ['-c', f'model="{args.codex_model}"', '-c', f'model_reasoning_effort="{args.codex_effort}"'])])
+        a.work.mkdir(parents=True, exist_ok=True)
+        (a.work / 'notes.txt').write_text('hello\nworld\n')
+        result, shots = {}, []
+
+        def shot(name):
+            a.eval('(progn (redisplay t) t)')
+            time.sleep(.5)
+            path = base / f'chat-log-{name}.png'
+            subprocess.run([f'{args.tools}/grim', str(path)], env=a.env, check=True, timeout=30)
+            shots.append(str(path))
+
+        def pending(sid):
+            return int(a.eval(f'(hash-table-count (romacs-agent-approvals {a.s(sid)}))'))
+
+        def at_end():
+            a.eval('(with-selected-window (selected-window) (set-buffer (window-buffer)) '
+                   '(goto-char (point-max)) (recenter -1) t)')
+
+        ctrl = lambda key: ['-M', 'ctrl', '-k', key, '-m', 'ctrl']
+        sid = a.eval(f'(let ((session (romacs-agent-start {lisp(a.work)}))) (romacs-agent-show session) '
+                     '(delete-other-windows) (romacs-agent-id session))').strip('"')
+        a.keyboard_ready()
+
+        # A turn of work: C-p climbs out of the composer while it runs.
+        a.eval(f'(progn (romacs-agent-send {a.s(sid)} {lisp_text(TURN_PROMPT)}) t)')
+        until(lambda: a.eval('(and (text-property-any (point-min) romacs-agent-log--end (quote romacs-agent-log-entry) (quote tool)) t)') == 't',
+              patient(300), 'a tool call drawn')
+        at_end()
+        for _ in range(3):
+            a.keys(*ctrl('p'))
+            time.sleep(.1)
+        result['moved_up'] = a.eval('(< (point) (marker-position romacs-agent-log--end))') == 't'
+        result['still_running'] = a.state(sid) != 'idle'
+        shot('moved-up')
+        a.idle(sid, 600)
+        at_end()
+        shot('turn')
+
+        # A question: in sight, answered by the user.
+        a.eval(f'(progn (romacs-agent-send {a.s(sid)} {lisp_text(ASK_PROMPT)}) t)')
+        a.until(sid, lambda: pending(sid) > 0, 300, 'a question asked')
+        at_end()
+        shot('question')
+        result['question_asked'] = pending(sid) > 0
+        if result['question_asked']:
+            # Its own question's words, as the event carried them.
+            a.eval(f'(let* ((s {a.s(sid)}) (id (car (hash-table-keys (romacs-agent-approvals s)))) '
+                   '(question (car (car (romacs-agent--claude-questions (gethash "input" (gethash id (romacs-agent-approvals s)))))))) '
+                   '(romacs-agent-respond s id (list :answers (list (cons question "Blue"))) nil (quote user)) t)')
+        a.idle(sid, 300)
+
+        # A plan, in plan mode: asked of the user, who proceeds by a key.
+        a.eval(f'(progn (romacs-agent-set-plan {a.s(sid)} t) t)')
+        a.eval(f'(progn (romacs-agent-send {a.s(sid)} {lisp_text(PLAN_PROMPT)}) t)')
+        a.until(sid, lambda: pending(sid) > 0, 300, 'a plan asked')
+        at_end()
+        shot('plan')
+        result['plan_asked'] = pending(sid) > 0
+        if result['plan_asked']:
+            a.keys(*(ctrl('c') + ctrl('y')))
+            a.until(sid, lambda: pending(sid) == 0, 60, 'the plan answered')
+            time.sleep(2)
+            at_end()
+            shot('plan-answered')
+        a.idle(sid, 300)
+        text = a.chat(sid)
+
+        # A Codex session: a command's output shows as it runs.
+        codex = a.eval(f'(let ((session (romacs-agent-start {lisp(a.work)} nil nil "codex"))) (romacs-agent-show session) '
+                       '(delete-other-windows) (romacs-agent-id session))').strip('"')
+        a.eval(f'(progn (romacs-agent-send {a.s(codex)} {lisp_text(CODEX_PROMPT)}) t)')
+        try:
+            a.until(codex, lambda: a.eval(f'(with-current-buffer (romacs-agent-log-chat {a.s(codex)}) (and (text-property-any (point-min) romacs-agent-log--end (quote romacs-agent-log-entry) (quote tool)) t))') == 't',
+                    300, 'a Codex command drawn')
+            # Its output shows under its call while it runs, then whole once
+            # it ends: the text from the command's row to the separator.
+            def command_block():
+                """The command's tool entry, its row and what is under it, to
+                the next entry."""
+                return parity_live.read_sexp(a.eval(
+                    f'(with-current-buffer (romacs-agent-log-chat {a.s(codex)}) '
+                    '(let ((pos (point-min)) (found nil)) '
+                    '(while (setq pos (text-property-any pos romacs-agent-log--end (quote romacs-agent-log-entry) (quote tool))) '
+                    '(when (string-match-p "seq 1 40" (buffer-substring-no-properties pos (save-excursion (goto-char pos) (line-end-position)))) '
+                    '(setq found pos)) (setq pos (1+ pos))) '
+                    '(if found (buffer-substring-no-properties found (or (next-single-property-change (1+ found) '
+                    '(quote romacs-agent-log-entry) nil romacs-agent-log--end) romacs-agent-log--end)) "")))')) or ''
+            a.until(codex, lambda: a.state(codex) == 'running'
+                    and re.search(r'⋮ running.*\n\s+line \d+', command_block()) is not None,
+                    120, 'Codex output while it runs')
+            at_end()
+            shot('codex-running')
+            a.idle(codex, 300)
+            at_end()
+            shot('codex-done')
+            result['codex'] = re.search(r'⎿ line 1\n\s+line 2', command_block()) is not None
+        except RuntimeError as error:
+            result['codex'] = repr(error)[:300]
+        result.update({'shots': shots, 'denied_by_romacs': 'denied by Romacs' in text,
+                       'shows': {word: word in text for word in ('seq 1', 'notes.txt', '∴', '⎿', 'allowed by you', '✻')}})
+        result['ok'] = (result['moved_up'] and result['question_asked'] and result['plan_asked'] and result['codex'] is True
+                        and not result['denied_by_romacs'] and all(result['shows'].values()))
+        return result
+    finally:
+        a.close()
+
+
+CODEX_PROMPT = ('Think briefly, then run this shell command and wait for it: '
+                'for i in $(seq 1 40); do echo line $i; sleep 0.25; done. Then say how many lines it printed.')
+ASK_PROMPT = 'Use the AskUserQuestion tool to ask me "Which colour do you prefer?" with the options Red and Blue. Then say what I chose.'
+TURN_PROMPT = ('Think briefly first. Then, one step at a time: run the shell command `seq 1 30` with Bash; '
+               'read notes.txt; use a subagent (the Agent tool) to count the words in notes.txt. '
+               'End with a two-line summary.')
+PLAN_PROMPT = 'Plan how you would add the line "third" to notes.txt. Present the plan; do not edit anything.'
 
 
 def board_keys(args, base):
@@ -3151,7 +3282,7 @@ def chat_view(args, base):
             time.sleep(.5)
 
         # The first prompt of a chat started with none, its window alone.
-        sid = a.eval(f'(let ((session (romacs-agent-start {lisp(a.work)}))) (romacs-agent-show session) '
+        sid = a.eval(f'(let ((session (romacs-agent-start {lisp(a.work)}))) (romacs-agent-ui--show-chat session) '
                      '(romacs-agent-id session))').strip('"')
         a.eval('(progn (delete-other-windows) t)')
         a.keyboard_ready()
@@ -3176,8 +3307,8 @@ def chat_view(args, base):
         child = json.loads(a.called('romacs_delegate_task')['text'])['taskId']
         until(lambda: a.state(child) == 'idle', 20, 'child done')
         a.idle(sid, 30)
-        a.eval(f'(progn (romacs-agent-show {a.s(sid)}) (delete-other-windows) (split-window-right) '
-               f'(other-window 1) (switch-to-buffer (save-window-excursion (romacs-agent-show {a.s(child)}) (current-buffer))) '
+        a.eval(f'(progn (romacs-agent-ui--show-chat {a.s(sid)}) (delete-other-windows) (split-window-right) '
+               f'(other-window 1) (switch-to-buffer (save-window-excursion (romacs-agent-ui--show-chat {a.s(child)}) (current-buffer))) '
                f'(other-window 1) (goto-char (point-max)) t)')
         a.keyboard_ready()
         a.keys('-M', 'ctrl', '-k', 'u', '-m', 'ctrl')
@@ -3203,6 +3334,10 @@ def children(args, base):
     RET one chosen from the list of them; opening a failure takes it out
     of the count."""
     a = Agents(args, base, 'ch')
+    def old_chat(sid):
+        """The old chat's text, read with no view selected."""
+        return parity_live.read_sexp(a.eval(f'(with-current-buffer (save-window-excursion (romacs-agent-ui--show-chat {a.s(sid)})) '
+                                            '(buffer-substring-no-properties (point-min) (point-max)))'))
     try:
         a.up()
         a.work.mkdir(parents=True, exist_ok=True)
@@ -3230,13 +3365,13 @@ def children(args, base):
         a.idle(parent, 60)
         until(lambda: a.state(waiting) == 'waiting-approval', 20, 'child waiting')
 
-        a.eval(f'(progn (romacs-agent-show {a.s(parent)}) (delete-other-windows) t)')
+        a.eval(f'(progn (romacs-agent-ui--show-chat {a.s(parent)}) (delete-other-windows) t)')
         a.keyboard_ready()
 
         def header():
             return parity_live.read_sexp(a.eval(
                 f'(with-current-buffer (romacs-agent-buffer {a.s(parent)}) '
-                '(substring-no-properties header-line-format))'))
+                '(substring-no-properties (format-mode-line header-line-format)))'))
 
         def menu():
             return parity_live.read_sexp(a.eval(
@@ -3281,7 +3416,7 @@ def children(args, base):
         a.keys(rows[0].split('broken task')[0].split()[-1] if rows else '1')
         until(lambda: 'broken task' in (shown() or ''), 15, 'failed child opened')
         result['opened'] = shown()
-        a.eval(f'(progn (romacs-agent-show {a.s(parent)}) (delete-other-windows) t)')
+        a.eval(f'(progn (romacs-agent-ui--show-chat {a.s(parent)}) (delete-other-windows) t)')
         until(lambda: 'failed' not in header(), 15, 'seen failure out of the count')
         result['header_seen'] = header()
 
@@ -3298,11 +3433,11 @@ def children(args, base):
         a.keys('-k', 'Return')
         until(lambda: 'finished task' in (shown() or ''), 15, 'chosen child opened')
         result['chosen'] = shown()
-        a.eval(f'(progn (romacs-agent-show {a.s(parent)}) (delete-other-windows) t)')
+        a.eval(f'(progn (romacs-agent-ui--show-chat {a.s(parent)}) (delete-other-windows) t)')
 
         # The harness's own subagent: counted while it runs; its row goes to its card.
         a.send(parent, 'agent 6 read the code')
-        until(lambda: 'read the code' in a.chat(parent), 15, 'subagent card')
+        until(lambda: 'read the code' in old_chat(parent), 15, 'subagent card')
         # The harness's own subagent counts apart from the delegated threads.
         until(lambda: '1 working' in header(), 15, 'subagent counted')
         result['header_subagent'] = header()
@@ -3396,7 +3531,7 @@ def select(args, base):
         selected(one, 'claude-opus-5-5', 'high')
         a.send(one, 'say after')
         header = parity_live.read_sexp(a.eval(
-            f'(with-current-buffer (romacs-agent-show {a.s(one)}) (substring-no-properties header-line-format))'))
+            f'(with-current-buffer (romacs-agent-show {a.s(one)}) (substring-no-properties (format-mode-line header-line-format)))'))
         armed = a.eval(f'(and (romacs-agent-pending-selection {a.s(one)}) t)')
         gate.touch()
         a.until(one, lambda: 'after' in (a.results(one) or [''])[-1], 30, 'queued message answered')
@@ -3405,7 +3540,7 @@ def select(args, base):
                            'busy': [e['busy'] for e in a.logged() if e.get('control') in ('set_model', 'apply_flag_settings')]}
 
         # The divider, again after a server restart, between the same turns.
-        divider = '  · claude-sonnet-5-5 · low → claude-opus-5-5 · high'
+        divider = '· claude-sonnet-5-5 · low → claude-opus-5-5 · high'
         before = a.chat(one)
         a.restart()
         until(lambda: a.eval(f'(and (romacs-agent-get {lisp_text(one)}) t)') == 't', 15, 'session restored')
@@ -3614,7 +3749,7 @@ def history_real(args, base):
         result = {'claude_session': cid, 'codex_thread': tid, 'answers': answers, 'chats': chats, 'claude_cost': cost,
                   'listed': [line for line in home.splitlines() if 'Remember the word' in line]}
         result['ok'] = (len(result['listed']) == 2 and 'PAPAYA' in answers['PAPAYA'] and 'MANGO' in answers['MANGO']
-                        and all(c.index('> Remember the word') < c.index('> What word') for c in chats.values()))
+                        and all(c.index('❯ Remember the word') < c.index('❯ What word') for c in chats.values()))
         return result
     finally:
         a.close()
@@ -3647,7 +3782,7 @@ def live_rows(args, base):
         until(lambda: a.state(held) == 'running', 30, 'child running')
         a.idle(parent, 60)
 
-        a.eval(f'(progn (romacs-agent-show {a.s(parent)}) (delete-other-windows) t)')
+        a.eval(f'(progn (romacs-agent-ui--show-chat {a.s(parent)}) (delete-other-windows) t)')
         a.keyboard_ready()
 
         def rows():
@@ -3680,7 +3815,7 @@ WORKFLOWS = {'host': host, 'sockets': sockets, 'reap': reap, 'deadline': deadlin
              'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race, 'restart-rollback': restart_rollback, 'restart-hang': restart_hang, 'renew': renew,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
              'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode,
-             'environment': environment, 'logging': logging, 'board_keys': board_keys, 'start_picker': start_picker, 'children': children, 'live_rows': live_rows, 'chat_view': chat_view, 'select': select, 'select-real': select_real, 'rpc': rpc,
+             'environment': environment, 'logging': logging, 'board_keys': board_keys, 'start_picker': start_picker, 'children': children, 'live_rows': live_rows, 'chat_view': chat_view, 'chat_log': chat_log, 'select': select, 'select-real': select_real, 'rpc': rpc,
              'instances': instances, 'mcp_tour': mcp_tour}
 
 

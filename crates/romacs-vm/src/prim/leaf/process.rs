@@ -439,7 +439,16 @@ impl Leaf<'_> {
             return self.process_select_ready(decrypted, Vec::new());
         }
         let timeout = seconds.map(|s| std::time::Duration::from_secs_f64(s.clamp(0.0, 1e7)));
+        // A worker's interrupt or termination is its quit before the wait
+        // blocks (one an `inhibit-quit' since unbound held) and once it ended
+        // the wait; one still held leaves the events to dispatch.
+        if let Some(quit) = self.vm.worker_quit() {
+            return Err(quit);
+        }
         let revents = self.vm.poll_quittable(&fds, timeout).map_err(|e| self.file_errno("Failed select", &e))?;
+        if let Some(quit) = self.vm.worker_quit() {
+            return Err(quit);
+        }
         if revents.iter().all(|&r| r == 0) {
             return Ok(Value::NIL);
         }

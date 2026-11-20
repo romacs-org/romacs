@@ -569,27 +569,35 @@ kept one): what its supervisor writes from there is new."
            imported (integerp seq) (or (null last) (<= last seq))
            (1+ seq)))))
 
+(defconst romacs-agent-store--row-columns
+  "id, dir, harness, provider, model, title, cwd, parent, state, last_time, cost, input_seq, done_seq,
+ seen_seq, settled_seq, effort, plan, permission_mode, context_used, context_window, resume_time"
+  "The columns a session is made from its row alone (`romacs-agent-store--row-of').")
+
+(defun romacs-agent-store--row-of (row)
+  "The session ROW (`romacs-agent-store--row-columns') says, made from it
+alone: one projection, whoever reads rows."
+  (pcase-let ((`(,id ,dir ,harness ,provider ,model ,title ,cwd ,parent ,state ,last ,cost ,input ,done ,seen ,settled
+                 ,effort ,plan ,mode ,used ,window ,resume)
+               row))
+    (romacs-agent--make :id id :dir dir :harness (intern harness) :provider provider :model model
+                        :title title :cwd cwd
+                        :options (append (and parent (list :parent parent)) (and effort (list :effort effort))
+                                         (and (eql plan 1) (list :plan t)) (and resume (list :resume-at resume)))
+                        :state (intern (or state "detached")) :last-time last :cost cost
+                        :input-seq input :done-seq (or done 0) :seen-seq seen :settled-seq settled
+                        :permission-mode mode :context-used used :context-window window)))
+
 (defun romacs-agent-store-row-session (id)
   "The session ID names, made from its row alone (none of its kept state
 read, nor its records): what a chat shows of it before it is used, its
 header's facts too.  Nil with no row.  Acting on it loads it
 \(`romacs-agent-load-session')."
   (when-let* ((db (romacs-agent-store--open))
-              (row (car (sqlite-select db (concat "select dir, harness, provider, model, title, cwd, parent, state,"
-                                                  " last_time, cost, input_seq, done_seq, seen_seq, settled_seq,"
-                                                  " effort, plan, permission_mode, context_used, context_window, resume_time"
+              (row (car (sqlite-select db (concat "select " romacs-agent-store--row-columns
                                                   " from sessions where id = ?")
                                        (list id)))))
-    (pcase-let ((`(,dir ,harness ,provider ,model ,title ,cwd ,parent ,state ,last ,cost ,input ,done ,seen ,settled
-                   ,effort ,plan ,mode ,used ,window ,resume)
-                 row))
-      (romacs-agent--make :id id :dir dir :harness (intern harness) :provider provider :model model
-                          :title title :cwd cwd
-                          :options (append (and parent (list :parent parent)) (and effort (list :effort effort))
-                                           (and (eql plan 1) (list :plan t)) (and resume (list :resume-at resume)))
-                          :state (intern (or state "detached")) :last-time last :cost cost
-                          :input-seq input :done-seq (or done 0) :seen-seq seen :settled-seq settled
-                          :permission-mode mode :context-used used :context-window window))))
+    (romacs-agent-store--row-of row)))
 
 (defun romacs-agent-store-unloaded ()
   "The sessions that have a row but are not loaded, newest first, each a
@@ -597,17 +605,8 @@ session record made from its row alone: to show, not to act on (acting
 on one loads it, `romacs-agent-get')."
   (when-let* ((db (romacs-agent-store--open)))
     (delq nil
-          (mapcar (lambda (row)
-                    (pcase-let ((`(,id ,dir ,harness ,provider ,model ,title ,cwd ,parent ,state ,last ,cost
-                                   ,input ,done ,seen ,settled)
-                                 row))
-                      (unless (romacs-agent-loaded id)
-                        (romacs-agent--make :id id :dir dir :harness (intern harness) :provider provider :model model
-                                            :title title :cwd cwd :options (and parent (list :parent parent))
-                                            :state (intern (or state "detached")) :last-time last :cost cost
-                                            :input-seq input :done-seq (or done 0) :seen-seq seen :settled-seq settled))))
-                  (sqlite-select db (concat "select id, dir, harness, provider, model, title, cwd, parent, state,"
-                                            " last_time, cost, input_seq, done_seq, seen_seq, settled_seq"
+          (mapcar (lambda (row) (unless (romacs-agent-loaded (car row)) (romacs-agent-store--row-of row)))
+                  (sqlite-select db (concat "select " romacs-agent-store--row-columns
                                             " from sessions order by last_time desc"))))))
 
 ;;; Messages waiting in a session's queue (romacs#287)
@@ -748,6 +747,31 @@ quietly nothing when the database cannot be written."
     (sqlite-execute db (if folded "insert or ignore into board_folds values (?)"
                          "delete from board_folds where project = ?")
                     (list project))
+    t))
+
+(defvar romacs-agent-store--titles (make-hash-table :test #'equal)
+  "Each session id to the title its row was last asked to say.")
+
+(defun romacs-agent-store-title (id title &optional then again)
+  "Keep TITLE as what the row of the session ID names says, by the writer:
+a rename reaches the row at once, whatever state its session keeps.
+THEN, when given, is called once it is written, for the views that read
+the row; one that fails is tried once more a moment later, unless AGAIN
+says this is that try (as `romacs-agent-store-put') or a later rename
+was asked for meanwhile."
+  (unless again (puthash id title romacs-agent-store--titles))
+  (when (equal (gethash id romacs-agent-store--titles) title)
+    (romacs-agent-write 'romacs-agent-store--title-row (list id title)
+                        (lambda (answer)
+                          (cond ((eq (car answer) 'ok) (when then (funcall then)))
+                                ((not again) (run-with-idle-timer 1 nil #'romacs-agent-store-title id title then t))))
+                        (list 'title id))))
+
+(defun romacs-agent-store--title-row (id title)
+  "Set the title in the row of the session ID names to TITLE, here, and
+nothing else of it.  A failure signals."
+  (let ((db (or (romacs-agent-store--open) (error "No agents store to keep a title in"))))
+    (sqlite-execute db "update sessions set title = ? where id = ?" (list title id))
     t))
 
 (defun romacs-agent-store-requested (parent request)

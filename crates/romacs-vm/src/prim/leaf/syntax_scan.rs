@@ -81,7 +81,7 @@ fn entry_code(vm: &Vm, table: &crate::char_table::TableReader<'_>, c: u32) -> i3
     cons_code(vm, table.get(c).unwrap_or(Value::NIL))
 }
 fn cons_code(vm: &Vm, entry: Value) -> i32 {
-    if entry.tag() != 3 { return scan::SWHITESPACE; }
+    if !entry.tag_is(3) { return scan::SWHITESPACE; }
     vm.cons_pair(entry).ok().and_then(|(code, _)| code.integer_value()).map_or(0, |code| code as i32)
 }
 
@@ -230,7 +230,7 @@ impl scan::Text for View<'_> {
         if self.properties {
             if let Some(value) = self.property(at.byte) {
                 if self.vm.is_syntax_table(value) { return cons_code(self.vm, self.vm.char_table_get(value, c as usize).unwrap_or(Value::NIL)); }
-                if value.tag() == 3 { return cons_code(self.vm, value); }
+                if value.tag_is(3) { return cons_code(self.vm, value); }
             }
         }
         self.table_syntax(c)

@@ -604,7 +604,7 @@ impl Vm {
             return Ok(text);
         }
         if let Some(data::Object::Obarray(table)) = self.object_if(value) {
-            return Ok(format!("#<obarray n={}>", table.len()));
+            return Ok(format!("#<obarray n={}>", self.obarray_count(table)));
         }
         if let Some(data::Object::Process(process)) = self.object_if(value) {
             // print.c PVEC_PROCESS: the name, inside #<process ...> when escaping.

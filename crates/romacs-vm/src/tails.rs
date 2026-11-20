@@ -46,7 +46,7 @@ impl Vm {
         let mut tortoise = list;
         let mut l: u64 = 0;
         let mut count = 0usize;
-        while tail.tag() == 3 {
+        while tail.tag_is(3) {
             let Ok((_, cdr)) = self.cons_pair(tail) else { break };
             count += 1;
             tail = cdr;
@@ -92,7 +92,7 @@ impl Vm {
             Length => {
                 let x = arg(self, 0);
                 Some(match self.gnu_tails(x) {
-                    TailEnd::Dotted(t) if x.tag() == 3 => wrong(self, "listp", t),
+                    TailEnd::Dotted(t) if x.tag_is(3) => wrong(self, "listp", t),
                     TailEnd::Circular(t) => ("circular-list", vec![t]),
                     _ => wrong(self, "sequencep", x),
                 })
@@ -105,7 +105,7 @@ impl Vm {
                 let x = arg(self, 0);
                 Some(if error.contains("circular") {
                     ("circular-list", vec![x])
-                } else if x.tag() == 3 {
+                } else if x.tag_is(3) {
                     wrong(self, "listp", x)
                 } else {
                     wrong(self, "arrayp", x)
@@ -123,7 +123,7 @@ impl Vm {
                     if v == Value::NIL || self.is_array(v) {
                         continue;
                     }
-                    if v.tag() != 3 {
+                    if !v.tag_is(3) {
                         return Some(wrong(self, "sequencep", v));
                     }
                     // concat_to_list copies the car, then walks FOR_EACH_TAIL
@@ -145,7 +145,7 @@ impl Vm {
         if seq == Value::NIL {
             return Ok(seq);
         }
-        if seq.tag() == 3 {
+        if seq.tag_is(3) {
             // VM2 contract (tests/gc.rs, tests/image_startup.rs): an image
             // cons is never written and the refusal precedes every write.
             // Image edges reach only image objects, so the private prefix ends
@@ -157,7 +157,7 @@ impl Vm {
             // the nearer of its restart and the next poll.
             let mut poll_at = crate::quit::KERNEL_CHUNK;
             let mut stop = power.min(poll_at);
-            while fast.tag() == 3 {
+            while fast.tag_is(3) {
                 if Self::image_value(fast) {
                     return Err(self.refuse_read_only(seq));
                 }
@@ -181,7 +181,7 @@ impl Vm {
             // The reversal is unpolled, bounded by the walk above.
             let mut prev = Value::NIL;
             let mut tail = seq;
-            while tail.tag() == 3 {
+            while tail.tag_is(3) {
                 let i = tail.index(3)?;
                 let next = self.conses[i].1;
                 // "If SEQ contains a cycle, attempting to reverse it in-place
