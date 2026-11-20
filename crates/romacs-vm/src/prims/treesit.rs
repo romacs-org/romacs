@@ -213,8 +213,9 @@ fn romacs_treesit_parse_early(cx, language: Value) {
     cx.ts_parse_early(language)
 }}
 
-// Whether a parse of the current buffer's text is still under way on another thread:
-// its early parse, or a parser's parse ahead.
+// Whether the current buffer still awaits a background parse's result: its early
+// parse, or a parser's parse ahead.  A result it has dropped, as after many edits, is not
+// awaited, though its thread may still run.
 defsubr! { name = "romacs--treesit-parsing-p", gnu = "romacs:treesit", effect = Reads,
 fn romacs_treesit_parsing_p(cx) {
     cx.ts_parsing_p()
@@ -446,14 +447,15 @@ fn treesit_query_capture(cx, node: Value, query: Value; optional beg: Value, end
 // (treesit.el), run here. Lisp is called, in GNU's order, for each face written,
 // for function captures, and for an override other than nil or t.
 
-// Fontify REGION, a cons (START . END), from the captures in NODE between BEG and END
-// of the query in COMBINED, a cons (QUERY . SPANS): SPANS is a vector of the font-lock
-// settings QUERY joins, each (FIRST-PATTERN . OVERRIDE), its first pattern's index and its
-// `override'.  A capture naming a face puts it on its node's part of REGION: with OVERRIDE
-// nil only when no part of that has a face yet, with OVERRIDE t over any, and with another
-// OVERRIDE through `treesit-fontify-with-override'.  A capture naming a function calls it
-// with the captured node, OVERRIDE, START and END.  The query's predicates run as
-// `treesit-query-capture' runs them.  Returns nil.
+// Fontify REGION, a cons (START . END), from every capture of the matches of the
+// query in COMBINED within NODE between BEG and END (either nil for no bound).  COMBINED is
+// a cons (QUERY . SPANS): SPANS is a vector of the font-lock settings QUERY joins, each
+// (FIRST-PATTERN . OVERRIDE), its first pattern's index and its `override'.  A capture
+// naming a face puts it on its node's part of REGION: with OVERRIDE nil only when no part
+// of that has a face yet, with OVERRIDE t over any, and with another OVERRIDE through
+// `treesit-fontify-with-override'.  A capture naming a function calls it with the captured
+// node, OVERRIDE, START and END.  The query's predicates run as `treesit-query-capture'
+// runs them.  Returns nil.
 defsubr! { name = "romacs--treesit-fontify", gnu = "romacs:treesit", effect = Global,
 fn romacs_treesit_fontify(cx, node: Value, combined: Value, beg: Value, end: Value, region: Value) -> Step {
     let (query, spans) = cx.pair(combined).ok_or(Fault::Wrong("consp", combined))?;

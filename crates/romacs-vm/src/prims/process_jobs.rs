@@ -11,10 +11,11 @@ fn process_start(cx, argv: Value, input: Value, directory: Value, seconds: Integ
 }}
 
 // The result of background command ID once it has finished: (STATUS STDOUT STDERR
-// ERROR), STATUS its exit code or nil, STDOUT and STDERR its output as strings, decoded as
-// UTF-8 and each cut at 4 MiB, ERROR a string when it could not run, timed out, was
-// cancelled or wrote more than 4 MiB to either stream, else nil.  nil while it still runs.
-// The result stays until `romacs--process-forget'; an unknown ID signals an error.
+// ERROR), STATUS its exit code or nil, STDOUT and STDERR its output as strings, each cut at
+// 4 MiB of bytes and decoded as UTF-8, invalid bytes replaced, ERROR a string when it could
+// not run, timed out, was cancelled, wrote more than 4 MiB to either stream or its pipes
+// failed, else nil.  nil while it still runs.  The result stays until
+// `romacs--process-forget'; an unknown ID signals an error.
 defsubr! { name = "romacs--process-result", gnu = "romacs:process", effect = Global,
 fn process_result(cx, id: Integer) { cx.process_result(id.0) }}
 
@@ -34,8 +35,8 @@ defsubr! { name = "romacs--process-forget", gnu = "romacs:process", effect = Glo
 fn process_forget(cx, id: Integer) { cx.process_forget(id.0) }}
 
 // Parse the JSON text SOURCE, a string: an object as an alist with string keys, an
-// array as a list, null as `json-null', false as `json-false', true as t, and a number as
-// an integer or a float.  Signals an error on invalid JSON, and on an integer too large for
-// a fixnum.
+// array as a list, null as `json-null', false as `json-false', true as t, and a number as an
+// integer when it has no fraction or exponent and fits in 64 bits, else as a float.
+// Signals an error on invalid JSON, and on such an integer too large for a fixnum.
 defsubr! { name = "romacs-json-read", gnu = "romacs:json", effect = Pure,
 fn process_json_read(cx, source: Value) { cx.process_json_read(source) }}

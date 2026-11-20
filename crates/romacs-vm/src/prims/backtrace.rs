@@ -89,8 +89,9 @@ fn backtrace_debug(cx, level: Value, flag: Value; optional base: Value) -> Step 
 }}
 // Every frame from BASE's outward in one walk, each (EVALD FUNCTION ARGS FLAGS
 // LOCALS), for `backtrace-get-frames' (lisp/emacs-lisp/romacs-backtrace.el), where GNU calls
-// `backtrace--locals' per frame.  The first frame's LOCALS is nil.  nil when BASE is not on
-// the stack.
+// `backtrace--locals' per frame.  BASE is nil for the innermost frame, a function for its
+// nearest activation, or (N . FUNCTION) for N frames out from that.  The first frame's
+// LOCALS is nil.  nil when BASE is not on the stack.
 defsubr! { name = "backtrace--frames-and-locals", gnu = "romacs:backtrace", effect = Reads,
 fn backtrace_frames_and_locals(cx; optional base: Value) -> Step {
     cx.backtrace_frames_and_locals(base).map(Step::Done)

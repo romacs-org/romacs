@@ -777,9 +777,10 @@ fn locally_modified(cx: &mut Leaf<'_>, keys: &FaceKeys, class: &Class, face: Val
 }
 
 // `frame-set-background-mode''s scan: the faces a change of background mode leaves
-// alone on FRAME, each one whose attributes there no longer match its customized, saved or
-// `defface' spec, or that the selected frame's faces do not include; never one with a
-// `face-override-spec'.  nil for a frame showing another frame's faces.
+// alone on FRAME, each one whose attributes there no longer match its spec (the first it has
+// of its customized, saved and `defface' specs), or that the selected frame's faces do not
+// include; never one with a `face-override-spec'.  nil for a frame showing another frame's
+// faces.
 defsubr! { name = "romacs--faces-modified-on", gnu = "romacs:faces", effect = Reads,
 fn romacs_faces_modified_on(cx, frame: Value) {
     // `frame-set-background-mode''s scan: faces that don't match their
@@ -828,10 +829,10 @@ fn romacs_recalc_faces_except(cx, frame: Value, modified: Value) {
     Ok(Value::NIL)
 }}
 
-// The work of `face-spec-choose': the attributes of the first display clause of the
-// face spec SPEC that matches FRAME (nil for the selected frame), followed by those of its
-// `default' clause; the `default' clause's alone when none matches, and NO-MATCH-RETVAL
-// when neither gives any.
+// The work of `face-spec-choose', as faces.el does it: the attributes of the last
+// `default' clause before the first display clause of the face spec SPEC that matches FRAME
+// (nil for the selected frame), followed by that clause's; with no clause matching, the
+// last `default' clause's attributes, or NO-MATCH-RETVAL when SPEC has none.
 defsubr! { name = "romacs--face-spec-choose", gnu = "romacs:faces", effect = Reads,
 fn romacs_face_spec_choose(cx, spec: Value; optional frame: Value, no_match_retval: Value) {
     let keys = cx.face_keys();

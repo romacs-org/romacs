@@ -551,9 +551,10 @@ defsubr! { name = "romacs-status-bar-height", gnu = "romacs:frame", effect = Rea
 fn romacs_status_bar_height(cx) {
     Ok(Value::integer(i64::from(cx.windows().status_bar_height())).unwrap())
 }}
-// For the status bar's character COLUMN, counted from 0, (WINDOW STRING COLUMN): the
-// window whose line it is, and the bar's text as last expanded, a string with the properties
-// a click reads.  nil past the end of its line, or with no status bar.
+// For the character COLUMN, counted from 0, of the status bar as last expanded,
+// (WINDOW STRING COLUMN): the window whose line it is, and that text, a string with the
+// properties a click reads.  nil past the end of that line, before any expansion, or when
+// its window is gone.
 defsubr! { name = "romacs--status-bar-target", gnu = "romacs:frame", effect = Reads,
 fn romacs_status_bar_target(cx, column: Value) {
     cx.windows().status_bar_target(column)

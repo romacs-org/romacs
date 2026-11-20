@@ -65,7 +65,8 @@ fn scroll_start(cx, start: Value, forward: Value, context: Value) {
 }}
 
 // How many whole rows the selected window's text area shows from position START; nil
-// without a layout.
+// without a layout, or in a unibyte buffer.  A START that is no fixnum signals
+// `wrong-type-argument'.
 defsubr! { name = "romacs--rows-shown-from", gnu = "romacs:display", effect = Reads,
 fn rows_shown_from(cx, start: Value) {
     let window = cx.vm_selected_window()?;

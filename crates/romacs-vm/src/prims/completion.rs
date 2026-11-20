@@ -38,8 +38,9 @@ fn romacs_command_symbols(cx) {
     }
     Ok(cx.command_set_symbols())
 }}
-// A number that grows with each definition, each interning of a symbol that has a
-// function definition, and each write to the plist of a symbol in the command set.
+// A number that grows with each definition, each interning or uninterning of a symbol
+// that has a function definition, and each write to the plist of a symbol in the command
+// set.
 defsubr! { name = "romacs-command-epoch", gnu = "romacs:commands", effect = Reads,
 fn romacs_command_epoch(cx) {
     let epoch = i64::try_from(cx.command_set_epoch()).map_err(|_| Fault::Error("command epoch overflow".into()))?;

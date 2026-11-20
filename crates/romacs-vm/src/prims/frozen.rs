@@ -6,10 +6,10 @@ use super::*;
 
 // Freeze OBJECT: an immutable copy of its whole value graph in a new frozen region,
 // or OBJECT itself when it is a region's root already, a fixnum, nil or t.  A symbol is not
-// copied: an interned one is the same symbol, its value, function and plist as mutable as
-// ever, and an uninterned one a new uninterned symbol of its name.  A graph holding a value
-// that cannot be frozen signals (error "Cannot freeze" VALUE PATH).  Writing into a frozen
-// value signals an error; `thaw' gives a mutable copy back.
+// copied: one in the initial obarray is the same symbol, its value, function and plist as
+// mutable as ever, and any other a new uninterned symbol of its name.  A graph holding a
+// value that cannot be frozen signals (error "Cannot freeze" VALUE PATH).  Writing into a
+// frozen value signals an error; `thaw' gives a mutable copy back.
 defsubr! { name = "freeze", gnu = "romacs:frozen", effect = Global,
 fn freeze(cx, object: Value) {
     cx.freeze(object)
