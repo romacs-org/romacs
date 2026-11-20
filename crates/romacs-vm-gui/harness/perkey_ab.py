@@ -117,7 +117,7 @@ def table(report, bound, pairs):
              f"{RISE_FLOOR}x the wider spread, {RISE_PAIRS} pairs or more)"]
     for name, p in report.items():
         if 'delta_pct' not in p:
-            lines.append(f"  {name:12} {p['pairs']} pairs counted: inconclusive ({p['reason']})")
+            lines.append(f"  {name:12} {p['pairs']} pairs counted, floor -: inconclusive ({p['reason']})")
             continue
         b, c = p['base'], p['candidate']
         lines.append(f"  {name:12} {b['median'] / 1e6:7.3f}M [{100 * b['spread']:.1f}%]  {c['median'] / 1e6:7.3f}M "
