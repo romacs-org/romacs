@@ -1461,8 +1461,30 @@ specified by `text-quoting-style'.
 into the output, \\\\==\\[ puts \\[ into the output, and \\\\==\\=` puts \\=` into the
 output.
 
-Return the original STRING if no substitutions are made.
-Otherwise, return a new string."
+Return a new multibyte string, keeping STRING's text properties, even
+when no substitutions are made; an empty result may be shared.  Return
+nil if STRING is nil."
+  (if (help--substitute-nothing-p string)
+      ;; What the full loop returns when it substitutes nothing: a
+      ;; multibyte copy with STRING's properties, made without its
+      ;; temporary buffer.
+      (if (multibyte-string-p string) (copy-sequence string) (string-to-multibyte string))
+    (help--substitute-command-keys string no-face include-menus)))
+
+(defun help--substitute-nothing-p (string)
+  "Whether `substitute-command-keys' has nothing to do in STRING.
+That is a string with no `\\', no grave accent and no apostrophe, the
+characters every substitution starts with, which is multibyte or holds no
+text properties: the forms its copy can be made in at once."
+  (and (stringp string)
+       (not (string-search "\\" string))
+       (not (string-search "`" string))
+       (not (string-search "'" string))
+       (or (multibyte-string-p string)
+           (not (or (text-properties-at 0 string) (next-property-change 0 string))))))
+
+(defun help--substitute-command-keys (string no-face include-menus)
+  "`substitute-command-keys' of STRING with NO-FACE and INCLUDE-MENUS, in full."
   (when (not (null string))
     ;; KEYMAP is either nil (which means search all the active
     ;; keymaps) or a specified local map (which means search just that

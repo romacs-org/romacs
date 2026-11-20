@@ -74,6 +74,14 @@ fn main_result() -> Result<(), String> {
     if stream && dump {
         return Err("--eval-stream and --dump-ir are exclusive".into());
     }
+    // Source text is Lisp a person wrote, which expects the Lisp the VM
+    // itself defines (`mapcar' and the rest of the prelude). It goes in
+    // before the options, so a low GC floor does not slow its install.
+    // --dump-ir only compiles, and prints every function the VM holds: the
+    // prelude would bury the form's own IR, so it is left out there.
+    if source && !dump {
+        vm.install_lisp_prelude()?;
+    }
     for pair in args.chunks(2) {
         if pair.len() == 2 && pair[0] == "--cache-store" {
             vm.set_source_cache_store(std::path::PathBuf::from(&pair[1]))?;
