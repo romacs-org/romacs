@@ -11,11 +11,11 @@
   lint        tools/romacs-lint on the runtime Lisp files the change touches:
               what it adds since the merge-base, as the queue's Lisp tier holds
               it. It runs a Romacs: --binary, else what tools/romacs-lint finds.
-  epoch       etc/romacs-runtime-epoch holds a whole number, and a change that
-              raises it (the newest of its own changes to it, committed or not,
-              ends above what it changed) ends above the trunk tip's: two
-              changes raised to one number would merge without a conflict and
-              ship two contracts as one generation. A change of lisp/vm/ beside
+  epoch       etc/romacs-runtime-epoch holds a whole number, and a change with
+              a raise of its own still in effect (committed or not, and not
+              taken back by a revert of its own) ends above the trunk tip's:
+              two changes raised to one number would merge without a conflict
+              and ship two contracts as one generation. A change of lisp/vm/ beside
               romacs-vm's Rust may be one contract between them: unless it
               raises the epoch, it is named, to raise it if the Lisp needs the
               Rust (lisp/vm/AGENTS.md). Which it is the stage cannot tell, so
@@ -166,11 +166,12 @@ def generated(root):
 # The runtime tree's generation.
 
 EPOCH = 'etc/romacs-runtime-epoch'
+TREE = 'the uncommitted tree'
 
 
 def generation(text):
     """The whole number TEXT, an epoch file's contents, holds; None for no text or another."""
-    return int(text.strip()) if text is not None and text.strip().isdigit() else None
+    return int(text.strip()) if text is not None and re.fullmatch(r'[0-9]+', text.strip()) else None
 
 
 def rank(found):
@@ -178,46 +179,57 @@ def rank(found):
     return -1 if found is None else found
 
 
-def last_change(lines, value):
-    """Whether the newest commit of LINES that changes the generation raises it, or None
-    when none changes it. LINES are `git rev-list --topo-order --parents` lines split,
-    newest first; VALUE maps each commit to its generation. A commit changes it when it
-    differs from every parent's, so a merge that takes the trunk's does not; it raises it
-    when it ends above them all, so a revert does not."""
-    for commit, *parents in lines:
+def raises_in_effect(lines, value):
+    """The branch's own raises of the generation still in effect at its newest commit.
+    LINES are `git rev-list --topo-order --parents` lines split, newest first; VALUE maps
+    each commit and parent to its generation; a parent not in LINES is the trunk's, with
+    none. Each commit's raises come from its own ancestry, parents first. A commit whose
+    generation differs from every parent's changes it (a merge taking a side's does not):
+    above them all it raises it, from the highest of theirs; otherwise it takes back each
+    raise it goes back to the start of, or below, so a revert undoes its raise and no
+    more. Any other commit keeps all its parents' raises, a merge taking the trunk's
+    higher number included: the branch's change still needs its own. A missed raise ships
+    two contracts as one generation and a kept one costs a number, so what is unclear is
+    kept."""
+    start, effect = {}, {}
+    for commit, *parents in reversed(lines):
+        kept = set().union(*(effect.get(parent, set()) for parent in parents))
         if all(value[commit] != value[parent] for parent in parents):
-            return all(rank(value[commit]) > rank(value[parent]) for parent in parents)
-    return None
+            below = max((rank(value[parent]) for parent in parents), default=-1)
+            if rank(value[commit]) > below:
+                kept, start[commit] = kept | {commit}, below
+            else:
+                kept = {raised for raised in kept if rank(value[commit]) > start[raised]}
+        effect[commit] = kept
+    return effect[lines[0][0]] if lines else set()
 
 
 def epoch_history(root, trunk):
-    """(RAISED, OURS, TIP): whether ROOT's change since TRUNK raises the epoch, by its
-    uncommitted tree or else by the newest of its own commits that changes it, and the
-    epoch file's text in ROOT's tree and at TRUNK's tip (None where there is none).
-    On a merged tree the changed paths cannot show a raise: the trunk's equal one hides it."""
+    """(RAISES, OURS, TIP): ROOT's own raises of the epoch since TRUNK still in effect,
+    its uncommitted tree counted as the newest commit, and the epoch file's text in
+    ROOT's tree and at TRUNK's tip (None where there is none). On a merged tree the
+    changed paths cannot show a raise: the trunk's equal one hides it."""
+    head = git(root, 'rev-parse', 'HEAD').stdout.strip()
     lines = [line.split() for line in git(root, 'rev-list', '--topo-order', '--parents', f'{trunk}..HEAD').stdout.splitlines()]
-    commits = sorted({commit for line in lines for commit in line})
+    commits = sorted({head} | {commit for line in lines for commit in line})
     asked = subprocess.run(['git', '-C', str(root), 'cat-file', '--batch-check=%(objectname)'], capture_output=True,
                            text=True, check=True, input=''.join(f'{commit}:{EPOCH}\n' for commit in commits))
     blob = {commit: None if found.endswith(' missing') else found
             for commit, found in zip(commits, asked.stdout.splitlines())}
     text = {found: git(root, 'cat-file', 'blob', found).stdout for found in set(blob.values()) if found}
     value = {commit: generation(text.get(found)) for commit, found in blob.items()}
-
-    def shown(rev):
-        done = git(root, 'show', f'{rev}:{EPOCH}', check=False)
-        return done.stdout if done.returncode == 0 else None
-
     file = root / EPOCH
     ours = file.read_text() if file.exists() else None
-    now, head = generation(ours), generation(shown('HEAD'))
-    raised = rank(now) > rank(head) if now != head else bool(last_change(lines, value))
-    return raised, ours, shown(trunk)
+    if generation(ours) != value[head]:
+        lines, value = [[TREE, head], *lines], {**value, TREE: generation(ours)}
+    tip = git(root, 'show', f'{trunk}:{EPOCH}', check=False)
+    return (sorted(raised if raised == TREE else raised[:12] for raised in raises_in_effect(lines, value)), ours,
+            tip.stdout if tip.returncode == 0 else None)
 
 
 def epoch(names, raised, ours, tip):
     """(STATUS, SUMMARY, FINDINGS) of the runtime tree's generation. NAMES are the
-    change's paths; RAISED, whether it raises the epoch; OURS and TIP, the epoch file's
+    change's paths; RAISED, the commits whose raises of the epoch are in effect; OURS and TIP, the epoch file's
     text in its tree and at the trunk's tip, None where there is none. The file holds a
     whole number, and a raised epoch ends above TIP's. A change of lisp/vm/ beside
     romacs-vm's Rust that leaves the epoch alone may be one contract, and is named."""
@@ -226,8 +238,8 @@ def epoch(names, raised, ours, tip):
         return 'FAIL', f'{EPOCH} holds no whole number', [f'{EPOCH}: {ours.strip()!r}; fix: write the generation as one whole number']
     if raised and top is not None and rank(here) <= top:
         return 'FAIL', f"{EPOCH} is raised to {here}, not above the trunk's {top}", [
-            f'{EPOCH}: the trunk holds generation {top} already, and a merge of two equal raises '
-            f'shows no conflict; fix: merge the trunk in and raise it to {top + 1}']
+            f'{EPOCH}: raised by {", ".join(raised)}, and the trunk holds generation {top} already: a merge of two '
+            f'equal raises shows no conflict; fix: merge the trunk in and raise it to {top + 1}']
     if raised:
         return 'ok', f"{EPOCH} is raised to {here}" + (f", above the trunk's {top}" if top is not None else ''), []
     lisp = sorted(n for n in names if n.startswith('lisp/vm/') and n.endswith('.el'))
