@@ -110,6 +110,12 @@ HARNESS_RULES = (
     # A startup that fails holds its screen until the window is closed: the evaluator's end
     # (main.rs, exit.rs), the screen (loading.rs) and the Lisp errors it shows (startup.rs).
     (re.compile(r'^crates/romacs-vm-gui/src/(?:main|exit|loading|startup)\.rs$'), 'startup_failed'),
+    # The host's keys as Lisp reads them (VM2-GUI-KEYS): the native translation,
+    # the display's key events, the GUI keys' fallbacks and terminal bytes.
+    (re.compile(r'^(?:crates/romacs-vm-gui/src/native\.rs'
+                r'|crates/romacs-display-runtime/src/render_thread/(?:input|window_events)\.rs'
+                r'|crates/romacs-vm/src/terminal_keys\.rs|lisp/romacs-editing\.el'
+                r'|crates/romacs-vm-gui/harness/gui_keys_live\.py)'), 'gui_keys'),
     # The working thread: drawn by the render thread while the main VM is busy.
     (re.compile(r'^(?:lisp/ui/romacs-(?:working|animate)\.el|crates/romacs-logo/src/working\.rs'
                 r'|crates/romacs-display-protocol/src/text_animation\.rs'

@@ -559,12 +559,15 @@ nothing but the echo area.  KEYMAP-READ says a key sequence is being read."
               (and ascii-required (not (and seconds (null val)))
                   (progn
                     ;; A function key with an ASCII equivalent is that
-                    ;; character, with the symbol's modifiers.
+                    ;; character, with the symbol's modifiers; a GUI key
+                    ;; (`C-M-m', romacs-editing.el) names its whole character.
                     (when (symbolp val)
-                      (let* ((mask (get val 'event-symbol-element-mask))
+                      (let* ((own (get val 'ascii-character))
+                             (mask (get val 'event-symbol-element-mask))
                              (ascii (and mask (get (car mask) 'ascii-character))))
-                        (when (and (integerp ascii) (integerp (car (cdr mask))))
-                          (setq val (logior ascii (car (cdr mask)))))))
+                        (cond ((integerp own) (setq val own))
+                              ((and (integerp ascii) (integerp (car (cdr mask))))
+                               (setq val (logior ascii (car (cdr mask))))))))
                     (and (not (integerp val))
                          (if error-nonascii
                              (progn (setq unread-command-events (list val))

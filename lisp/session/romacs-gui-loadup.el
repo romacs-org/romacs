@@ -105,6 +105,10 @@ follows; `romacs-gui-loadup-after-init' ends initialization."
         ;; spec for a colour or graphic display (region's :extend, a
         ;; button's :box) never matches.
         (when initial-window-system
+          ;; The keys' alternative meanings on a window system (common-win.el):
+          ;; M-tab is M-TAB, M-return M-RET, as the Tab and Return keys are
+          ;; function keys here.
+          (x-setup-function-keys (selected-frame))
           (frame-set-background-mode (selected-frame) t)
           (face-set-after-frame-default (selected-frame))
           ;; x-win.el and pgtk-win.el's window-system initialization, and
