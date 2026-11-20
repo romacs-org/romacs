@@ -26,6 +26,13 @@ start.")
   "A marker at where the reply's text ended when it was last faced, or
 nil.")
 
+(defvar-local romacs-agent-log-faces--whole nil
+  "Whether the streaming reply defines a link reference, so it is read
+whole each time: a reference anywhere in it may name that definition.")
+
+(defconst romacs-agent-log-faces--definition "^ \\{0,3\\}\\[[^]\n]+\\]:"
+  "A line that defines a Markdown link reference.")
+
 (defvar-local romacs-agent-log-faces--failed nil
   "Why the streaming reply's faces failed, or nil.")
 
@@ -37,10 +44,17 @@ nil.")
 read as a document from the top-level block there, the blocks from the
 one before where it last ended written again; keep why, should it fail."
   (unless romacs-agent-log-faces--failed
+    (unless romacs-agent-log-faces--whole
+      (save-excursion
+        (goto-char (or romacs-agent-log-faces--current start))
+        (setq romacs-agent-log-faces--whole (re-search-forward romacs-agent-log-faces--definition end t))))
     (condition-case err
         (romacs-agent-log--writing
-          (let ((from (romacs-markdown-fontify-region (or romacs-agent-log-faces--current start) end
-                                                      romacs-agent-log-faces--end)))
+          (let ((from (if romacs-agent-log-faces--whole
+                          ;; Read whole: a definition reaches back as well.
+                          (progn (romacs-markdown-fontify-region start end) start)
+                        (romacs-markdown-fontify-region (or romacs-agent-log-faces--current start) end
+                                                        romacs-agent-log-faces--end))))
             (setq romacs-agent-log-faces--current (set-marker (or romacs-agent-log-faces--current (make-marker)) from)
                   romacs-agent-log-faces--end (set-marker (or romacs-agent-log-faces--end (make-marker)) end))))
       (error (setq romacs-agent-log-faces--failed (error-message-string err))
@@ -50,6 +64,8 @@ one before where it last ended written again; keep why, should it fail."
   "Face what streamed into BUFFER's reply since its last batch."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
+      ;; Called before its timer ran: that one is not needed.
+      (when (timerp romacs-agent-log-faces--timer) (cancel-timer romacs-agent-log-faces--timer))
       (setq romacs-agent-log-faces--timer nil)
       (pcase romacs-agent-log--stream
         (`(text ,start ,at . ,_) (romacs-agent-log-faces--reface start at))))))
@@ -64,7 +80,9 @@ one before where it last ended written again; keep why, should it fail."
 have failed, a line under it that says why."
   (when (timerp romacs-agent-log-faces--timer) (cancel-timer romacs-agent-log-faces--timer))
   (setq romacs-agent-log-faces--timer nil)
-  (romacs-agent-log-faces--reface start at)
+  ;; Faced as far as it went already: nothing is left.
+  (unless (and romacs-agent-log-faces--end (= romacs-agent-log-faces--end at))
+    (romacs-agent-log-faces--reface start at))
   (when romacs-agent-log-faces--failed
     (romacs-agent-log--writing
       (save-excursion
@@ -72,9 +90,15 @@ have failed, a line under it that says why."
         (insert (romacs-agent-log--sealed
                  (propertize (concat "\n⚠ shown without its faces: " romacs-agent-log-faces--failed)
                              'face 'romacs-agent-log-denied))))))
+  (romacs-agent-log-faces-drop))
+
+(defun romacs-agent-log-faces-drop ()
+  "Forget the streaming reply's faces: its timer, markers and state."
+  (when (timerp romacs-agent-log-faces--timer) (cancel-timer romacs-agent-log-faces--timer))
   (when romacs-agent-log-faces--current (set-marker romacs-agent-log-faces--current nil))
   (when romacs-agent-log-faces--end (set-marker romacs-agent-log-faces--end nil))
-  (setq romacs-agent-log-faces--current nil romacs-agent-log-faces--end nil romacs-agent-log-faces--failed nil))
+  (setq romacs-agent-log-faces--timer nil romacs-agent-log-faces--current nil romacs-agent-log-faces--end nil
+        romacs-agent-log-faces--failed nil romacs-agent-log-faces--whole nil))
 
 (provide 'romacs-agent-log-faces)
 ;;; romacs-agent-log-faces.el ends here

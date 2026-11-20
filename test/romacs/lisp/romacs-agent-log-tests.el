@@ -989,3 +989,25 @@
     (let ((text (romacs-agent-log-tests--transcript)))
       (should (string-match-p "Some text\\." text))
       (should (string-match-p "⚠ shown without its faces: Parser broke" text)))))
+
+(ert-deftest romacs-agent-log-a-streamed-reply-keeps-its-link-definitions ()
+  ;; A definition before or after its reference, across batches: faced as
+  ;; the whole reply would be.
+  (dolist (pieces '(("[r]: https://example.org\n\nSee [docs][r].\n\nTail." " more.")
+                    ("See [docs][r].\n\nMid.\n\n" "[r]: https://example.org\n\nTail.")))
+    (romacs-agent-log-tests--with
+      (dolist (piece pieces)
+        (draw :type 'delta :text piece)
+        (romacs-agent-log-faces--batch (current-buffer)))
+      (goto-char (point-min))
+      (search-forward "docs")
+      (should (memq 'romacs-markdown-link (ensure-list (get-text-property (match-beginning 0) 'face))))
+      (draw :type 'done :time 0)
+      (search-backward "docs")
+      (should (memq 'romacs-markdown-link (ensure-list (get-text-property (point) 'face)))))))
+
+(ert-deftest romacs-agent-log-header-key-takes-any-colour-name ()
+  ;; A theme's named colours, not #rrggbb: the key's face is still made.
+  (cl-letf (((symbol-function 'face-foreground) (lambda (&rest _) "grey90"))
+            ((symbol-function 'face-background) (lambda (&rest _) "white")))
+    (romacs-agent-log--derive)))

@@ -135,10 +135,11 @@ frame cannot resolve it."
   (when-let* ((rgb (romacs-working--rgb colour)))
     (apply #'format "#%02x%02x%02x" (mapcar (lambda (c) (round (* 255 c))) rgb))))
 
-(defun romacs-working-readable (colour)
-  "COLOUR raised to WCAG's 4.5:1 on the theme's background, its hue kept."
+(defun romacs-working-readable (colour &optional background)
+  "COLOUR raised to WCAG's 4.5:1 on BACKGROUND, the theme's background by
+default, its hue kept.  Either may be named in any form a frame resolves."
   (let ((colour (romacs-working--hex colour))
-        (background (romacs-working--hex (face-background 'default nil t))))
+        (background (romacs-working--hex (or background (face-background 'default nil t)))))
     (if (and colour background (fboundp 'romacs-color-floor))
         (romacs-color-floor colour background 4.5)
       colour)))
