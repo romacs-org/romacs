@@ -621,13 +621,7 @@ mod leaf {
         /// GNU string-lessp's order, compared in place: a symbol orders by
         /// its name, a string by its characters.
         pub(crate) fn string_order(&self, a: Value, b: Value) -> std::result::Result<std::cmp::Ordering, Fault> {
-            self.with_name_chars(a, |a| self.with_name_chars(b, |b| a.cmp(b)))?
-        }
-        fn with_name_chars<R>(&self, v: Value, f: impl FnOnce(&mut dyn Iterator<Item = u32>) -> R)
-            -> std::result::Result<R, Fault> {
-            if let Some(key) = self.symbol_key(v) { return Ok(self.read_symbol_name(v, key, |name| f(&mut name.chars()))); }
-            let view = self.vm.str_view(v).ok_or(Fault::Wrong("stringp", v))?;
-            Ok(f(&mut view.chars()))
+            self.with_text(a, |a| self.with_text(b, |b| a.chars().cmp(b.chars())))?
         }
         /// GNU string-equal's test (fns.c:339) on V and W as text, a symbol by
         /// its name: the same character count, byte count and bytes, read in

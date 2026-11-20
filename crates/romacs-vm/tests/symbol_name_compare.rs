@@ -1,5 +1,6 @@
-//! `string=', `string-lessp', `assoc-string', `string-version-lessp' and
-//! `string-collate-equalp' read a symbol's name as `symbol-name' gives it,
+//! `string=', `string-lessp', `assoc-string', `string-version-lessp',
+//! `string-collate-equalp' and `value<' read a symbol's name as `symbol-name'
+//! gives it,
 //! also when its key escapes the name (`symkey': a U+FDD0, a raw byte, a code
 //! above U+10FFFF), for interned and uninterned symbols alike, and as a
 //! private obarray keeps it (a unibyte name stays unibyte) (romacs#306). Each
@@ -32,7 +33,7 @@ const CASES: &[(&str, &str)] = &[
     ("(and (assoc-string (make-symbol (char-to-string #xfdd0)) (list (list (char-to-string #xfdd0)))) t)", "t"),
     ("(and (assoc-string (make-symbol (char-to-string #xfdd0)) (list (list (upcase (char-to-string #xfdd0)))) t) t)", "t"),
     ("(and (assoc-string (char-to-string #xfdd0) (list (list (make-symbol (char-to-string #xfdd0))))) t)", "t"),
-    ("(and (assoc-string (intern (concat (char-to-string #xfdd0) \"b\")) (list (list (concat (char-to-string #xfdd0) \"B\"))) t) t)", "t"),
+    ("(and (assoc-string (make-symbol (concat (char-to-string #xfdd0) \"b\")) (list (list (concat (char-to-string #xfdd0) \"B\"))) t) t)", "t"),
     ("(string-version-lessp (char-to-string #xfdd0) (make-symbol (char-to-string #xfdd0)))", "nil"),
     ("(string-version-lessp (make-symbol (char-to-string #xfdd0)) (char-to-string #xfdd0))", "nil"),
     ("(string-collate-equalp (make-symbol (char-to-string #xfdd0)) (char-to-string #xfdd0) \"C\")", "t"),
@@ -60,7 +61,7 @@ const CASES: &[(&str, &str)] = &[
     ("(and (assoc-string (make-symbol (concat \"a\" (char-to-string #xfdd0) \"b\")) (list (list (concat \"a\" (char-to-string #xfdd0) \"b\")))) t)", "t"),
     ("(and (assoc-string (make-symbol (concat \"a\" (char-to-string #xfdd0) \"b\")) (list (list (upcase (concat \"a\" (char-to-string #xfdd0) \"b\")))) t) t)", "t"),
     ("(and (assoc-string (concat \"a\" (char-to-string #xfdd0) \"b\") (list (list (make-symbol (concat \"a\" (char-to-string #xfdd0) \"b\"))))) t)", "t"),
-    ("(and (assoc-string (intern (concat (concat \"a\" (char-to-string #xfdd0) \"b\") \"b\")) (list (list (concat (concat \"a\" (char-to-string #xfdd0) \"b\") \"B\"))) t) t)", "t"),
+    ("(and (assoc-string (make-symbol (concat (concat \"a\" (char-to-string #xfdd0) \"b\") \"b\")) (list (list (concat (concat \"a\" (char-to-string #xfdd0) \"b\") \"B\"))) t) t)", "t"),
     ("(string-version-lessp (concat \"a\" (char-to-string #xfdd0) \"b\") (make-symbol (concat \"a\" (char-to-string #xfdd0) \"b\")))", "nil"),
     ("(string-version-lessp (make-symbol (concat \"a\" (char-to-string #xfdd0) \"b\")) (concat \"a\" (char-to-string #xfdd0) \"b\"))", "nil"),
     ("(string-collate-equalp (make-symbol (concat \"a\" (char-to-string #xfdd0) \"b\")) (concat \"a\" (char-to-string #xfdd0) \"b\") \"C\")", "t"),
@@ -88,7 +89,7 @@ const CASES: &[(&str, &str)] = &[
     ("(and (assoc-string (make-symbol (concat (char-to-string #xfdd0) (char-to-string #xfdd0))) (list (list (concat (char-to-string #xfdd0) (char-to-string #xfdd0))))) t)", "t"),
     ("(and (assoc-string (make-symbol (concat (char-to-string #xfdd0) (char-to-string #xfdd0))) (list (list (upcase (concat (char-to-string #xfdd0) (char-to-string #xfdd0))))) t) t)", "t"),
     ("(and (assoc-string (concat (char-to-string #xfdd0) (char-to-string #xfdd0)) (list (list (make-symbol (concat (char-to-string #xfdd0) (char-to-string #xfdd0)))))) t)", "t"),
-    ("(and (assoc-string (intern (concat (concat (char-to-string #xfdd0) (char-to-string #xfdd0)) \"b\")) (list (list (concat (concat (char-to-string #xfdd0) (char-to-string #xfdd0)) \"B\"))) t) t)", "t"),
+    ("(and (assoc-string (make-symbol (concat (concat (char-to-string #xfdd0) (char-to-string #xfdd0)) \"b\")) (list (list (concat (concat (char-to-string #xfdd0) (char-to-string #xfdd0)) \"B\"))) t) t)", "t"),
     ("(string-version-lessp (concat (char-to-string #xfdd0) (char-to-string #xfdd0)) (make-symbol (concat (char-to-string #xfdd0) (char-to-string #xfdd0))))", "nil"),
     ("(string-version-lessp (make-symbol (concat (char-to-string #xfdd0) (char-to-string #xfdd0))) (concat (char-to-string #xfdd0) (char-to-string #xfdd0)))", "nil"),
     ("(string-collate-equalp (make-symbol (concat (char-to-string #xfdd0) (char-to-string #xfdd0))) (concat (char-to-string #xfdd0) (char-to-string #xfdd0)) \"C\")", "t"),
@@ -116,7 +117,7 @@ const CASES: &[(&str, &str)] = &[
     ("(and (assoc-string (make-symbol (string-to-multibyte (unibyte-string 233))) (list (list (string-to-multibyte (unibyte-string 233))))) t)", "t"),
     ("(and (assoc-string (make-symbol (string-to-multibyte (unibyte-string 233))) (list (list (upcase (string-to-multibyte (unibyte-string 233))))) t) t)", "t"),
     ("(and (assoc-string (string-to-multibyte (unibyte-string 233)) (list (list (make-symbol (string-to-multibyte (unibyte-string 233)))))) t)", "t"),
-    ("(and (assoc-string (intern (concat (string-to-multibyte (unibyte-string 233)) \"b\")) (list (list (concat (string-to-multibyte (unibyte-string 233)) \"B\"))) t) t)", "t"),
+    ("(and (assoc-string (make-symbol (concat (string-to-multibyte (unibyte-string 233)) \"b\")) (list (list (concat (string-to-multibyte (unibyte-string 233)) \"B\"))) t) t)", "t"),
     ("(string-version-lessp (string-to-multibyte (unibyte-string 233)) (make-symbol (string-to-multibyte (unibyte-string 233))))", "nil"),
     ("(string-version-lessp (make-symbol (string-to-multibyte (unibyte-string 233))) (string-to-multibyte (unibyte-string 233)))", "nil"),
     ("(string-collate-equalp (make-symbol (string-to-multibyte (unibyte-string 233))) (string-to-multibyte (unibyte-string 233)) \"C\")", "t"),
@@ -144,7 +145,7 @@ const CASES: &[(&str, &str)] = &[
     ("(and (assoc-string (make-symbol (concat \"a\" (string-to-multibyte (unibyte-string 255)) \"z\")) (list (list (concat \"a\" (string-to-multibyte (unibyte-string 255)) \"z\")))) t)", "t"),
     ("(and (assoc-string (make-symbol (concat \"a\" (string-to-multibyte (unibyte-string 255)) \"z\")) (list (list (upcase (concat \"a\" (string-to-multibyte (unibyte-string 255)) \"z\")))) t) t)", "t"),
     ("(and (assoc-string (concat \"a\" (string-to-multibyte (unibyte-string 255)) \"z\") (list (list (make-symbol (concat \"a\" (string-to-multibyte (unibyte-string 255)) \"z\"))))) t)", "t"),
-    ("(and (assoc-string (intern (concat (concat \"a\" (string-to-multibyte (unibyte-string 255)) \"z\") \"b\")) (list (list (concat (concat \"a\" (string-to-multibyte (unibyte-string 255)) \"z\") \"B\"))) t) t)", "t"),
+    ("(and (assoc-string (make-symbol (concat (concat \"a\" (string-to-multibyte (unibyte-string 255)) \"z\") \"b\")) (list (list (concat (concat \"a\" (string-to-multibyte (unibyte-string 255)) \"z\") \"B\"))) t) t)", "t"),
     ("(string-version-lessp (concat \"a\" (string-to-multibyte (unibyte-string 255)) \"z\") (make-symbol (concat \"a\" (string-to-multibyte (unibyte-string 255)) \"z\")))", "nil"),
     ("(string-version-lessp (make-symbol (concat \"a\" (string-to-multibyte (unibyte-string 255)) \"z\")) (concat \"a\" (string-to-multibyte (unibyte-string 255)) \"z\"))", "nil"),
     ("(string-collate-equalp (make-symbol (concat \"a\" (string-to-multibyte (unibyte-string 255)) \"z\")) (concat \"a\" (string-to-multibyte (unibyte-string 255)) \"z\") \"C\")", "t"),
@@ -172,7 +173,7 @@ const CASES: &[(&str, &str)] = &[
     ("(and (assoc-string (make-symbol (char-to-string #x200000)) (list (list (char-to-string #x200000)))) t)", "t"),
     ("(and (assoc-string (make-symbol (char-to-string #x200000)) (list (list (upcase (char-to-string #x200000)))) t) t)", "t"),
     ("(and (assoc-string (char-to-string #x200000) (list (list (make-symbol (char-to-string #x200000))))) t)", "t"),
-    ("(and (assoc-string (intern (concat (char-to-string #x200000) \"b\")) (list (list (concat (char-to-string #x200000) \"B\"))) t) t)", "t"),
+    ("(and (assoc-string (make-symbol (concat (char-to-string #x200000) \"b\")) (list (list (concat (char-to-string #x200000) \"B\"))) t) t)", "t"),
     ("(string-version-lessp (char-to-string #x200000) (make-symbol (char-to-string #x200000)))", "nil"),
     ("(string-version-lessp (make-symbol (char-to-string #x200000)) (char-to-string #x200000))", "nil"),
     ("(string-collate-equalp (make-symbol (char-to-string #x200000)) (char-to-string #x200000) \"C\")", "t"),
@@ -200,7 +201,7 @@ const CASES: &[(&str, &str)] = &[
     ("(and (assoc-string (make-symbol \"abc\") (list (list \"abc\"))) t)", "t"),
     ("(and (assoc-string (make-symbol \"abc\") (list (list (upcase \"abc\"))) t) t)", "t"),
     ("(and (assoc-string \"abc\" (list (list (make-symbol \"abc\")))) t)", "t"),
-    ("(and (assoc-string (intern (concat \"abc\" \"b\")) (list (list (concat \"abc\" \"B\"))) t) t)", "t"),
+    ("(and (assoc-string (make-symbol (concat \"abc\" \"b\")) (list (list (concat \"abc\" \"B\"))) t) t)", "t"),
     ("(string-version-lessp \"abc\" (make-symbol \"abc\"))", "nil"),
     ("(string-version-lessp (make-symbol \"abc\") \"abc\")", "nil"),
     ("(string-collate-equalp (make-symbol \"abc\") \"abc\" \"C\")", "t"),
@@ -212,6 +213,10 @@ const CASES: &[(&str, &str)] = &[
     ("(let ((s (intern (unibyte-string 233) (obarray-make)))) (and (assoc-string s (list (list (symbol-name s)))) t))", "t"),
     ("(let ((s (intern (unibyte-string 233) (obarray-make)))) (string-version-lessp (symbol-name s) s))", "nil"),
     ("(let ((s (intern (unibyte-string 233) (obarray-make)))) (string-collate-equalp s (symbol-name s) \"C\"))", "t"),
+    ("(value< (intern (char-to-string #x200000)) (intern (char-to-string #x10000)))", "nil"),
+    ("(value< (intern (char-to-string #x10000)) (intern (char-to-string #x200000)))", "t"),
+    ("(value< (make-symbol (char-to-string #xfdd0)) (make-symbol (char-to-string #xfdd1)))", "t"),
+    ("(value< (make-symbol (concat \"a\" (char-to-string #xfdd0))) (make-symbol \"a\"))", "nil"),
 ];
 
 #[test]
