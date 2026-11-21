@@ -17,6 +17,13 @@
 ;; of it: GNU's `deftheme' with those faces where Custom is loaded, the
 ;; faces' own specs where it is not (a launch without GNU's Lisp).
 ;;
+;; A theme sets colours and styles, never the font: text size and family
+;; are the user's.  Under Custom every theme's faces are one map, Modus's
+;; table (lisp/ui/romacs-theme-modus.el), whose sizes and families follow
+;; the typography options alone (`romacs-theme-headings' and the like), so
+;; every theme shows the same; a theme's own rows lose any font attribute
+;; (`romacs-theme-typography-attributes').
+;;
 ;; Everything here is plain Elisp over numbers and strings, without
 ;; color.el, cl-lib or seq: it also runs in the launches whose only Lisp
 ;; is the machine's own prelude.  The machine does the colour arithmetic
@@ -386,10 +393,10 @@ derived by `romacs-theme-rules'."
   "The faces of resolved PALETTE (`romacs-theme-resolve'), as
 `custom-theme-set-faces' takes them: ((FACE ((t ATTRIBUTES))) ...).
 Each text colour is floored against the backgrounds it shows on: 4.5:1
-for text, 3:1 for de-emphasised text.  A row sets colours; where GNU's
-own spec gives a face its font by inheritance (`fixed-pitch',
-`variable-pitch', the mode line's), the row keeps it, since a theme's
-spec replaces the face's own."
+for text, 3:1 for de-emphasised text.  A row sets colours and styles,
+never a size; where GNU's own spec gives a face its font by inheritance
+\(`fixed-pitch', `variable-pitch', the mode line's), the row keeps it,
+since a theme's spec replaces the face's own."
   (let* ((v (lambda (slot) (cdr (assq slot palette))))
          (bg (funcall v 'bg))
          (text (lambda (slot &optional on)
@@ -503,16 +510,15 @@ spec replaces the face's own."
         (funcall face 'romacs-mode-line-warning :inherit 'warning :foreground (funcall text 'warning band))
         (funcall face 'romacs-mode-line-modified :inherit 'warning :foreground (funcall text 'warning band))
         (funcall face 'romacs-mode-line-ok :inherit 'success :foreground (funcall text 'success band))))
-     ;; Headings: Rum's heights and weights (its Modus `headings': 1
-     ;; ultrabold 1.35, 2 semibold 1.2, the rest Modus's bold at 1.15), on
-     ;; outline and Org headings alike.
+     ;; Headings: Rum's weights (its Modus `headings': 1 ultrabold, 2
+     ;; semibold, the rest Modus's bold), on outline and Org headings alike;
+     ;; their sizes are the typography's, not a theme's.
      (let ((rows nil) (level 1))
        (dolist (slot '(red yellow blue magenta green orange cyan fg-dim*))
          (let ((colour (funcall text slot))
-               (height (cond ((= level 1) 1.35) ((= level 2) 1.2) (t 1.15)))
                (weight (cond ((= level 1) 'ultrabold) ((= level 2) 'semibold) (t 'bold))))
            (dolist (name (list (format "outline-%d" level) (format "org-level-%d" level)))
-             (push (funcall face (intern name) :foreground colour :height height :weight weight) rows)))
+             (push (funcall face (intern name) :foreground colour :weight weight) rows)))
          (setq level (1+ level)))
        (nreverse rows))
      ;; The terminal.
@@ -833,19 +839,41 @@ reads the colour, a `romacs-theme-' form evaluates, a list maps."
         ((consp value) (mapcar (lambda (each) (romacs-theme--face-value each env)) value))
         (t value)))
 
+(defconst romacs-theme-typography-attributes '(:family :foundry :height :width :font :fontset)
+  "The face attributes a theme's own rows may not set: text size and
+family are the user's, and every theme shows the typography Modus's table
+gives (`romacs-theme-headings' and its other options).")
+
+(defconst romacs-theme--pitch-faces '(fixed-pitch fixed-pitch-serif variable-pitch)
+  "The faces whose inheritance changes a face's family.")
+
+(defun romacs-theme--without-pitch (inherit)
+  "INHERIT, an `:inherit' value, without `romacs-theme--pitch-faces'."
+  (if (listp inherit)
+      (let ((kept nil))
+        (dolist (face inherit) (unless (memq face romacs-theme--pitch-faces) (push face kept)))
+        (if (cdr kept) (nreverse kept) (car kept)))
+    (and (not (memq inherit romacs-theme--pitch-faces)) inherit)))
+
 (defun romacs-theme--override (row mode env)
   "ROW of `def-romacs-theme''s FACES as (FACE . ATTRIBUTES) for a theme of
-MODE, or nil where it has no branch for MODE."
+MODE, or nil where it has no branch for MODE.  A font attribute
+\(`romacs-theme-typography-attributes', or inheriting a pitch face) is
+dropped: a theme sets colours and styles."
   (let ((attributes (if (memq (nth 1 row) '(&dark &light))
                         (plist-get (cdr row) (if (eq mode 'light) '&light '&dark))
                       (cdr row)))
         (out nil))
     (while attributes
-      (let ((key (car attributes)) (value (nth 1 attributes)))
-        (setq out (append out (list key (if (memq key romacs-theme--colour-attributes)
-                                            (romacs-theme--face-value value env)
-                                          value)))
-              attributes (cdr (cdr attributes)))))
+      (let* ((key (car attributes))
+             (value (cond ((memq key romacs-theme--colour-attributes)
+                           (romacs-theme--face-value (nth 1 attributes) env))
+                          ((eq key :inherit) (romacs-theme--without-pitch (nth 1 attributes)))
+                          (t (nth 1 attributes)))))
+        (unless (or (memq key romacs-theme-typography-attributes)
+                    (and (eq key :inherit) (null value) (nth 1 attributes)))
+          (setq out (append out (list key value))))
+        (setq attributes (cdr (cdr attributes)))))
     (and out (cons (car row) out))))
 
 (defun romacs-theme--delta (floors faces mode env)
@@ -877,9 +905,10 @@ roles, on PALETTE (lisp/ui/romacs-theme-roles.el)."
   (romacs-theme-roles-rows palette (plist-get properties :faces) (plist-get properties :variables)))
 
 (defun romacs-theme--plain-rows (properties resolved)
-  "`romacs-theme-rows''s value for a theme of PROPERTIES without roles of
-its own: with :modus, Modus's table with Romacs's own faces over it and
-:floor's floors, else RESOLVED's faces; :faces on top of either."
+  "`romacs-theme-rows''s value for a theme of PROPERTIES on a Modus
+palette, or in a launch without Custom: with :modus, Modus's table with
+Romacs's own faces over it and :floor's floors, else RESOLVED's faces;
+:faces on top of either."
   (let* ((faces (romacs-theme-faces resolved))
          (modus (plist-get properties :modus))
          (mode (plist-get properties :mode))
@@ -901,14 +930,16 @@ its own: with :modus, Modus's table with Romacs's own faces over it and
 (defun romacs-theme-define (name doc &rest properties)
   "Define theme NAME, documented by DOC, from PROPERTIES :palette (base
 and pinned slots, `romacs-theme-resolve'), :mode and :family.  Where
-Custom is loaded it is GNU's theme, enabled and disabled as any other;
-elsewhere (a launch without GNU's Lisp) its faces are declared as the
-faces' own specs.  With :modus (`romacs-theme--modus-palette') and
-Custom, its faces are Modus's table over that palette, Romacs's own faces
-over them from :palette, then :floor's floors and :faces on top.  With
-:table and Custom, the palette makes every role of that table itself
-\(lisp/ui/romacs-theme-roles.el), floors apply, and :faces and :variables,
-as `def-romacs-theme' takes them, go on top.
+Custom is loaded it is GNU's theme, enabled and disabled as any other,
+and its faces are Modus's table, so every theme maps and sizes faces
+alike: with :modus (`romacs-theme--modus-palette') the table is over that
+palette, Romacs's own faces over it from :palette, then :floor's floors
+and :faces on top; without, the palette makes every role of the table
+itself (lisp/ui/romacs-theme-roles.el), floors apply, and :faces and
+:variables, as `def-romacs-theme' takes them, go on top.  Elsewhere (a
+launch without GNU's Lisp) its faces, `romacs-theme-faces', are declared
+as the faces' own specs.  :faces set no font
+\(`romacs-theme-typography-attributes').
 :style is kept as the theme's `romacs-style' property.  Defining it
 changes no face that shows."
   (let* ((given (plist-get properties :palette))
@@ -917,7 +948,7 @@ changes no face that shows."
          (properties (plist-put (copy-sequence properties) :mode mode))
          (palette (if (assq 'mode given) given (cons (list 'mode mode) given)))
          (custom (fboundp 'custom-theme-set-faces))
-         (rows (if (and custom (plist-get properties :table))
+         (rows (if (and custom (not (plist-get properties :modus)))
                    (romacs-theme--table-rows properties palette)
                  (romacs-theme--plain-rows (if custom properties (plist-put properties :modus nil))
                                            (romacs-theme-resolve palette)))))
@@ -1004,7 +1035,9 @@ colour, a slot's name, or a form over the slots before it, such as
 FACES rows are (FACE :ATTRIBUTE VALUE ...), or (FACE &dark (...) &light
 \(...)) for one list shared by a theme's variants.  Their attributes
 merge over what the palette gives FACE.  A colour attribute's VALUE may
-name a slot or be a `romacs-theme-' form.  VARIABLES rows are (VARIABLE
+name a slot or be a `romacs-theme-' form.  A font attribute
+\(`romacs-theme-typography-attributes', or inheriting a pitch face) is
+ignored: text size and family are the user's.  VARIABLES rows are (VARIABLE
 FORM), the slots bound.
 
 The result is an ordinary theme, a plain `deftheme': `load-theme',
@@ -1014,7 +1047,7 @@ The result is an ordinary theme, a plain `deftheme': `load-theme',
     (while (keywordp (car args))
       (setq keys (append keys (list (car args) (list 'quote (romacs-theme--second args))))
             args (cdr (cdr args))))
-    `(romacs-theme-define ',name ,doc :table t :mode ,(plist-get keys :mode)
+    `(romacs-theme-define ',name ,doc :mode ,(plist-get keys :mode)
                           :family ,(or (plist-get keys :family) (list 'quote name))
                           :style (romacs-theme--check-style ,(plist-get keys :style))
                           :palette (romacs-theme--eval-palette ',(nth 0 args))
