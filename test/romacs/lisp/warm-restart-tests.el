@@ -1558,3 +1558,23 @@ and wait for it to end."
             (should (equal (plist-get whole :kill-ring) '("a kill")))))
       (dolist (b buffers) (with-current-buffer b (set-buffer-modified-p nil)) (kill-buffer b))
       (delete-directory warm-restart-directory t))))
+
+(ert-deftest warm-restart-a-part-that-never-finishes-restores-no-buffer ()
+  ;; Past `warm-restart-part-wait' the restore stops before any buffer:
+  ;; none comes back under code its part did not finish changing.
+  (let* ((warm-restart-directory (make-temp-file "romacs-wr-" t))
+         (file (expand-file-name "part-stuck.txt" warm-restart-directory))
+         (warm-restart-image-part-functions (list (lambda () (cons 'ignore 1))))
+         (warm-restart-part-wait 0.3)
+         image)
+    (unwind-protect
+        (progn
+          (with-temp-file file (insert "text\n"))
+          (with-current-buffer (find-file-noselect file)
+            (setq image (warm-restart-write))
+            (kill-buffer))
+          (let ((report (warm-restart-restore-image image)))
+            (should (string-match-p "not through" (or (plist-get report :error) "")))
+            (should-not (get-file-buffer file))))
+      (when-let* ((b (get-file-buffer file))) (kill-buffer b))
+      (delete-directory warm-restart-directory t))))

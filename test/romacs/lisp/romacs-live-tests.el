@@ -757,6 +757,9 @@ reader; the report."
     (should-not called)))
 
 (ert-deftest romacs-live-a-replay-that-puts-nothing-back-says-why ()
+  (should (string-match-p "1 landed"
+                          (romacs-live-summary '(:label "the ledger" :refusals ("x: a layout changes")
+                                                 :dropped ((:path "a" :why landed))))))
   (should (string-match-p "1 landed, 1 superseded"
                           (romacs-live-summary '(:label "the ledger" :rows nil
                                                  :dropped ((:path "a" :why landed) (:path "b" :why superseded)))))))
@@ -773,10 +776,16 @@ reader; the report."
           (should (equal (plist-get asked :target) installed))
           (romacs-session-reset t)
           (should (equal (plist-get asked :fresh) 'buffers))
-          ;; No watched build: this session's own, never another command's.
+          ;; No watched build: the runtime root when it is a build, else
+          ;; the restart's own command (no target), its runtime kept.
           (let ((romacs-server-build-watch nil))
-            (romacs-session-reset)
-            (should (plist-get asked :target))))
+            (cl-letf (((symbol-function 'romacs-live--runtime-root) (lambda () installed)))
+              (romacs-session-reset)
+              (should-not (plist-get asked :target))
+              (make-symbolic-link (expand-file-name invocation-name invocation-directory)
+                                  (expand-file-name "romacs-vm-gui" installed))
+              (romacs-session-reset)
+              (should (equal (plist-get asked :target) installed)))))
       (delete-directory installed t))))
 
 (ert-deftest romacs-live-forms-diff-names-each-definition ()
