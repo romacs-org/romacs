@@ -84,8 +84,8 @@ against SHA-256s; the 5,000 files are generated and checked by manifest.
 usage: perfbench.py --romacs BIN [--runtime DIR] [--commit SHA] [--only AREA|ROW ...] [--list]
                     [--runs 3] [--max-load 8] [--out ~/.cache/romacs/perf-bench (ROMACS_PERFBENCH_OUT)]
                     [--previous RESULTS.json] [--romacs-source] [--neomacs BIN [--neomacs-commit SHA]]
-A binary installed beside its runtime (lisp/) uses that
-runtime; otherwise give --runtime.
+A binary installed beside its runtime (share/romacs beside its
+bin/, or lisp/ beside it) uses that runtime; otherwise give --runtime.
 """
 import argparse
 import fnmatch
@@ -258,7 +258,10 @@ HEADER_LINES = 146_000  # about 15 MB, the shape of a generated register header
 # Address space for a neomacs batch run, some fifty times what one needs.
 # Romacs reserves a large arena and is not limited this way.
 NEOMACS_MEMORY = 8 << 30
-INSTALL_TREES = ('lisp', 'etc')  # what an installation ships beside its binary
+# What an installation ships beside its binary (tools/package-release's
+# share/romacs): the fonts too, which a session registers from its runtime
+# tree and goes without, silently, when they are missing.
+INSTALL_TREES = ('lisp', 'etc', 'assets/fonts')
 LISP_JOBS = 8  # compile processes at a time, staging an installation
 
 
@@ -648,10 +651,15 @@ def stage_install(cache, binary, runtime):
     Cached per binary and runtime; a staged installation of any other goes,
     each being a few hundred MB.  A live installation's store is never
     written, nor is this done while anything is measured."""
+    # An installation links its trees into share/romacs: each is copied
+    # from where it is, never as a link into a tree the copy lacks.
+    trees = {tree: (runtime / tree).resolve() for tree in INSTALL_TREES}
+    if missing := [tree for tree, source in trees.items() if not source.is_dir()]:
+        raise SystemExit(f'{runtime} is no runtime tree: it has no {", ".join(missing)}')
     digest = hashlib.sha256(binary.read_bytes())
-    for tree in INSTALL_TREES:
-        for path in sorted(p for p in (runtime / tree).rglob('*') if p.is_file()):
-            digest.update(str(path.relative_to(runtime)).encode() + path.read_bytes())
+    for tree, source in trees.items():
+        for path in sorted(p for p in source.rglob('*') if p.is_file()):
+            digest.update(f'{tree}/{path.relative_to(source)}'.encode() + path.read_bytes())
     parent = cache / 'install'
     root = parent / digest.hexdigest()[:16]
     staged, summary = root / 'romacs-vm-gui', root / 'compile-lisp.json'
@@ -661,8 +669,9 @@ def stage_install(cache, binary, runtime):
     for other in parent.iterdir():
         shutil.rmtree(other)
     root.mkdir()
-    for tree in INSTALL_TREES:
-        subprocess.run(['cp', '-a', '--reflink=auto', str(runtime / tree), str(root)], check=True, timeout=600)
+    for tree, source in trees.items():
+        (root / tree).parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(['cp', '-a', '--reflink=auto', str(source), str(root / tree)], check=True, timeout=600)
     shutil.copy2(binary, staged)
     home = root / 'home'
     home.mkdir()
@@ -672,14 +681,27 @@ def stage_install(cache, binary, runtime):
                           env={'PATH': os.environ['PATH'], 'HOME': str(home), 'LANG': 'C.UTF-8',
                                'ROMACS_RUNTIME_ROOT': str(root), 'ROMACS_LISP_DIR': str(root / 'lisp')},
                           stdin=subprocess.DEVNULL, capture_output=True, text=True)
-    # 2: complete, with files that failed to compile and load as source.
-    if done.returncode not in (0, 2):
-        raise SystemExit(f'--compile-lisp-tree failed ({done.returncode}):\n{done.stderr[-4000:]}')
-    report = json.loads(done.stdout.strip().splitlines()[-1])
+    report = compile_report(done.returncode, done.stdout, done.stderr)
     made = {'files': report['files'], 'not_compiled': len(report['source_only']) + len(report['errors']),
             'seconds': round(time.time() - started, 1), 'store_bytes': report['store_bytes']}
     summary.write_text(json.dumps(made))
     return staged, made
+
+
+def compile_report(code, stdout, stderr):
+    """The report `--compile-lisp-tree' ended with CODE, its last line of
+    STDOUT; or the end of its STDERR, the run's failure.  2 is complete,
+    with files that failed to compile and load as source, and is also how a
+    binary refuses before compiling anything (no usable runtime tree): only
+    a report says which."""
+    last = (stdout.strip().splitlines() or [''])[-1]
+    try:
+        report = json.loads(last) if code in (0, 2) else None
+    except json.JSONDecodeError:
+        report = None
+    if not isinstance(report, dict):
+        raise SystemExit(f'--compile-lisp-tree failed ({code}), with no report:\n{stderr[-4000:]}')
+    return report
 
 
 def prepare_batch_world(ctx, env):
@@ -1695,20 +1717,28 @@ def neomacs_build(args):
 
 
 def runtime_of(args):
+    """The runtime tree: --runtime, else the one the binary finds itself
+    (host::runtime_root): ROMACS_RUNTIME_ROOT, share/romacs beside its bin/
+    (an installation, as `current/romacs-vm-gui' names it through a link),
+    or the tree laid out around it."""
     binary = Path(args.romacs).resolve()
-    for candidate in (args.runtime, os.environ.get('ROMACS_RUNTIME_ROOT'), binary.parent):
+    for candidate in (args.runtime, os.environ.get('ROMACS_RUNTIME_ROOT'), binary.parent.parent / 'share/romacs',
+                      binary.parent):
         if candidate and (Path(candidate) / 'lisp/bundled.json').is_file():
             return Path(candidate).resolve()
     raise SystemExit('no runtime: give --runtime DIR (holding lisp/ with its bundled.json)')
 
 
 def commit_of(args):
+    """--commit, else the build.json beside the binary, or at the root of
+    its installation (beside its bin/), where forge writes it."""
     if args.commit:
         return args.commit
-    build = Path(args.romacs).resolve().parent / 'build.json'
-    if build.exists():
-        return json.loads(build.read_text())['commit']
-    raise SystemExit('no build.json beside the binary: give --commit SHA')
+    binary = Path(args.romacs).resolve()
+    for build in (binary.parent / 'build.json', binary.parent.parent / 'build.json'):
+        if build.is_file():
+            return json.loads(build.read_text())['commit']
+    raise SystemExit('no build.json in the binary\'s installation: give --commit SHA')
 
 
 def plan(ctx, wanted, every_member):
@@ -1769,6 +1799,9 @@ def main():
         raise SystemExit('needs ROMACS_GNU_SOURCE, the Emacs tree the fixtures come from')
     os.environ.pop('LD_LIBRARY_PATH', None)  # a toolchain's would break an installed engine
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
+    # Once: an installation's link (`current') may be switched to another
+    # build while this runs, and every lookup below is of one build.
+    args.romacs = str(Path(args.romacs).expanduser().resolve())
     runtime, commit = runtime_of(args), commit_of(args)
     parity_live.GNU = args.gnu
     out_root = Path(args.out).expanduser().resolve()
