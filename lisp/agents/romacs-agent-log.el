@@ -941,7 +941,8 @@ back in the mode it had, and the next message carries it out."
 ;;; The separator and header
 
 (defun romacs-agent-log--doing (session)
-  "What SESSION does now, as the separator says it: (STATE . WORDS)."
+  "What SESSION does now, as the separator says it: (STATE . WORDS).
+WORDS is nil when the working thread says it alone: busy or idle."
   (pcase (cond ((romacs-agent-log--pending) 'waiting-approval)
                ;; A plan offered waits on the user as a request does.
                ((and (eq (romacs-agent-state session) 'idle) (not (romacs-agent-failed session))
@@ -958,12 +959,10 @@ back in the mode it had, and the next message carries it out."
                        (concat "⚠ waits on you: \\<romacs-agent-log-mode-map>\\[romacs-agent-log-allow] "
                                (if question "choose" "allow") " · \\[romacs-agent-log-deny] "
                                (if question "decline" "deny") " · \\[romacs-agent-log-next-ask] goes to it")))))
-    ((or 'starting 'running)
-     (cons 'working (if-let* ((block (romacs-agent-log--block romacs-agent-log--current)))
-                        (format "running %s" (plist-get (cdr block) :name))
-                      "working")))
+    ;; Busy or idle, the thread's motion says; what runs, its row does.
+    ((or 'starting 'running) (cons 'working nil))
     ;; A turn that failed and is not yet seen: said so, until the next.
-    ('idle (if (romacs-agent-failed session) (cons 'failed "failed") (cons 'idle "idle")))
+    ('idle (if (romacs-agent-failed session) (cons 'failed "failed") (cons 'idle nil)))
     (state (cons 'idle (format "%s" state)))))
 
 (defconst romacs-agent-log--thread-cols 8
@@ -982,10 +981,11 @@ its last width when none shows it."
 
 (defun romacs-agent-log--separator-text (doing width)
   "The separator for DOING, (STATE . WORDS), in WIDTH columns: the working
-thread, what the session does, then the composer's prompt."
+thread, what the session does when it needs words, then the composer's
+prompt."
   (let ((face (pcase (car doing) ('waiting 'romacs-agent-log-ask) ('working 'romacs-working-running)
                 ('failed 'romacs-agent-log-denied) (_ 'romacs-agent-log-rule))))
-    (let* ((label (concat " " (propertize (cdr doing) 'face (list face 'bold)) " "))
+    (let* ((label (if (cdr doing) (concat " " (propertize (cdr doing) 'face (list face 'bold)) " ") " "))
            ;; A dim rule after it fences the composer off the transcript,
            ;; never wrapping; none when that is short.
            (rule (- width 1 romacs-agent-log--thread-cols (string-width label))))
