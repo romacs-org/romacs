@@ -106,14 +106,21 @@
       (should-not (string-search "account" (with-temp-buffer
                                              (insert-file-contents (romacs-agent--models-file "claude"))
                                              (buffer-string))))
-      ;; Another program, or the same file changed: what was kept no longer holds.
+      ;; The same program, its file's time changed (a version manager's
+      ;; shim never changes it; a new build may): still its own.
       (set-file-times program (time-add (current-time) 100))
-      (should (equal (mapcar #'car (romacs-agent--models instance)) '("a" "b"))))))
+      (should (equal (mapcar #'car (romacs-agent--models instance)) '("a" "c" "b")))
+      ;; Another program: what was kept no longer holds.
+      (let ((other (expand-file-name "other-claude" root)))
+        (copy-file program other)
+        (should (equal (mapcar #'car (romacs-agent--models (plist-put (copy-sequence instance) :program other)))
+                       '("a" "b")))))))
 
 (ert-deftest romacs-agent-picker-the-run-s-initialize-brings-the-models ()
   (romacs-agent-picker--with
-      ((session (romacs-agent--make :id "s" :harness 'claude :provider "claude"
+      ((session (romacs-agent--make :id "s" :harness 'claude :provider "claude" :caught-up t
                                     :driver-state (list :initialize "romacs-init-1")))
+       (romacs-agent--sessions (let ((table (make-hash-table :test #'equal))) (puthash "s" session table) table))
        (romacs-agent-providers `(("claude" :program ,program))))
     (let* ((response (lambda (request-id body)
                        (romacs-mcp--object "type" "control_response"
@@ -128,10 +135,33 @@
                      '((:type handshake :state (:initialized t)))))
       (should (assoc "model-x" (romacs-agent--models (romacs-agent--configured "claude")))))))
 
+(ert-deftest romacs-agent-picker-a-replayed-initialize-keeps-nothing ()
+  ;; The cache written while another program was configured: a journal
+  ;; replayed in a copy (a batch process filling turns, a chat drawn
+  ;; again) brings an old initialize, under that process's settings.
+  ;; Kept, its stamp named the default program, and the configured one's
+  ;; rows were gone from every picker.  Only the live session keeps.
+  (romacs-agent-picker--with
+      ((live (romacs-agent--make :id "s" :harness 'claude :provider "claude" :caught-up t))
+       (copy (romacs-agent--make :id "s" :harness 'claude :provider "claude" :caught-up t
+                                 :driver-state (list :initialize "romacs-init-1")))
+       (romacs-agent--sessions (let ((table (make-hash-table :test #'equal))) (puthash "s" live table) table))
+       (romacs-agent-providers `(("claude" :program ,program))))
+    (romacs-agent--keep-models (romacs-agent--configured "claude") '(("kept" :label "Kept")))
+    (let ((answer (romacs-agent-picker--answer (romacs-agent-picker--model "x" "model-x" "X" '("low")))))
+      (should (equal (romacs-agent--claude-events
+                      copy (romacs-mcp--object "type" "control_response"
+                                               "response" (romacs-mcp--object "subtype" "success"
+                                                                              "request_id" "romacs-init-1"
+                                                                              "response" answer)))
+                     '((:type handshake :state (:initialized t)))))
+      (should (equal (mapcar #'car (romacs-agent--models (romacs-agent--configured "claude"))) '("kept"))))))
+
 (ert-deftest romacs-agent-picker-refused-answer-keeps-nothing ()
   (romacs-agent-picker--with
-      ((session (romacs-agent--make :id "s" :harness 'claude :provider "claude"
+      ((session (romacs-agent--make :id "s" :harness 'claude :provider "claude" :caught-up t
                                     :driver-state (list :initialize "r")))
+       (romacs-agent--sessions (let ((table (make-hash-table :test #'equal))) (puthash "s" session table) table))
        (romacs-agent-providers `(("claude" :program ,program))))
     ;; Refused, it keeps nothing, yet the run goes on: messages are not held.
     (should (equal (romacs-agent--claude-events

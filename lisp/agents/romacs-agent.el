@@ -1069,11 +1069,12 @@ whatever the editor's own environment and the user manager's say."
                     (romacs-agent--state-root)))
 
 (defun romacs-agent--models-stamp (instance)
-  "What models kept for INSTANCE hold for: its program, resolved, and
-that file's time.  Nil when it is not found."
+  "What models kept for INSTANCE hold for: its program, resolved; nil when
+it is not found.  Not the file's time: a version manager's shim keeps its
+own while the harness behind it changes, and every program is asked again
+on the run's first look and each `romacs-agent-models-refresh-interval'."
   (when-let* ((found (executable-find (plist-get instance :program))))
-    (let ((path (file-truename found)))
-      (format "%s %s" path (format-time-string "%s.%N" (file-attribute-modification-time (file-attributes path)))))))
+    (file-truename found)))
 
 (defun romacs-agent--models-kept (instance)
   "The rows INSTANCE's harness reported, if its present program did."
