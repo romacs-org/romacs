@@ -205,7 +205,7 @@ impl Vm {
             }
             5 => {
                 let i = v.payload() as usize;
-                if first(&mut r.tables[2], i) { values.push(self.cell_pairs.get(&i).copied().unwrap_or(self.cells[i])); }
+                if first(&mut r.tables[2], i) { values.push(self.cell_pairs.get(i).unwrap_or(self.cells[i])); }
             }
             7 if v.payload() >= 1 => {
                 let slot = v.payload() as usize - 1;

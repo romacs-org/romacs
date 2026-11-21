@@ -29,6 +29,7 @@ mod names;
 mod command_set;
 mod command;
 mod interpreted_closure;
+mod cell_pairs;
 mod oclosure;
 mod host_input;
 mod quit;
@@ -1739,7 +1740,7 @@ pub struct Vm {
     reader_trampolines: Vec<Option<usize>>,
     closures: table::Table<Closure>,
     cells: table::Table<Value>,
-    cell_pairs: HashMap<usize, Value>,
+    cell_pairs: cell_pairs::CellPairs,
     /// fns.c `random's generator, seeded from entropy as at GNU startup.
     random: random::Random,
     /// A world build's P tracking (`world`); None outside build mode.
@@ -1995,7 +1996,7 @@ impl Vm {
             reader_trampolines: Vec::new(),
             closures: Default::default(),
             cells: Default::default(),
-            cell_pairs: HashMap::default(),
+            cell_pairs: cell_pairs::CellPairs::default(),
             random: random::Random::from_entropy(),
             tracking: None,
             mktime_offset: 0,
