@@ -101,7 +101,11 @@ inside one (unless its first word is longer)."
            ;; Cut inside a word: back to the end of the one before.
            (word (and (< (length cut) (length text)) (not (memq (aref text (length cut)) '(?\s ?\t)))
                       (string-match "[ \t]+[^ \t]*\\'" cut))))
-      (concat (string-trim-right (if (and word (> word 0)) (substring cut 0 word) cut) "[ \t:,;·+&/-]+") ellipsis))))
+      ;; Ends as a word does: no lone operator or separator before the
+      ;; ellipsis (one a word ends with, as C++'s, stays).
+      (concat (string-trim-right (if (and word (> word 0)) (substring cut 0 word) cut)
+                                 "\\(?:[ \t]+[^[:alnum:] \t]+\\)*[ \t:,;·]*")
+              ellipsis))))
 
 (defun romacs-agent-log-rounds--head (incoming)
   "INCOMING's head: a mark, whom it is from, and its state."

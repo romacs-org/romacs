@@ -106,9 +106,11 @@ behind its mark, seen before it is read."
 (defun romacs-agent-rows--state (record)
   "RECORD's state, or its status, after a dot (`romacs-agent-rows--said-state'),
 or nothing."
-  (if-let* ((state (or (romacs-agent-rows--field record "state") (romacs-agent-rows--field record "status"))))
-      (romacs-agent-rows--said-state state)
-    ""))
+  (let* ((state (romacs-agent-rows--field record "state"))
+         (status (romacs-agent-rows--field record "status"))
+         ;; A failure says so whichever of the two holds it.
+         (said (if (member status '("failed" "error" "cancelled" "unstarted")) status (or state status))))
+    (if said (romacs-agent-rows--said-state said) "")))
 
 (defun romacs-agent-rows-outcome (output)
   "What OUTPUT, a call's answer, came to as a row says it after the call,

@@ -111,6 +111,8 @@
   (should (equal (romacs-agent-log-rounds--words "lane chat (claude3): agents ADE showcase: visible work" 30)
                  (concat "lane chat (claude3): agents" (truncate-string-ellipsis))))
   (should (equal (romacs-agent-log-rounds--words "short" 30) "short"))
+  (should (equal (romacs-agent-log-rounds--words "alpha C++ more text" (+ 9 (string-width (truncate-string-ellipsis))))
+                 (concat "alpha C++" (truncate-string-ellipsis))))
   ;; A word that ends at the cut is kept whole.
   (should (equal (romacs-agent-log-rounds--words "alpha beta more" (+ 10 (string-width (truncate-string-ellipsis))))
                  (concat "alpha beta" (truncate-string-ellipsis))))
@@ -158,7 +160,11 @@
   (should (string-match-p "✗ failed" (romacs-agent-rows--said-state "failed")))
   (should (memq 'romacs-agent-error (ensure-list (get-text-property 4 'face (romacs-agent-rows--said-state "failed")))))
   (should (memq 'bold (ensure-list (get-text-property 4 'face (romacs-agent-rows--said-state "failed")))))
-  (should-not (string-search "✗" (romacs-agent-rows--said-state "running"))))
+  (should-not (string-search "✗" (romacs-agent-rows--said-state "running")))
+  ;; An errored turn: idle, its status failed.
+  (let ((record (make-hash-table :test #'equal)))
+    (puthash "state" "idle" record) (puthash "status" "failed" record)
+    (should (string-search "✗ failed" (romacs-agent-rows--state record)))))
 
 (ert-deftest romacs-agent-eye-every-thinking-paragraph-is-marked ()
   (romacs-agent-eye-tests--chat
