@@ -1754,8 +1754,8 @@ impl Vm {
     /// (`crate::epoch`); the symbol slots written since (`Slots`), those of
     /// obarrays of their own included; the functions changed since
     /// (`Functions`); every lexical pair; and every other root. Nothing a full reclaims beside
-    /// table entries goes: no code is retired, no region, obarray symbol or
-    /// local binding freed, and nothing moves (a table's dead tail is cut,
+    /// table entries and the regions attached since goes: no code is retired, no older
+    /// region, obarray symbol or local binding freed, and nothing moves (a table's dead tail is cut,
     /// as any sweep cuts it). Like a full it has spare programs forget their
     /// lowered code first. With a log or the functions' record lost, it
     /// promotes everything instead.
@@ -1844,7 +1844,7 @@ impl Vm {
         let Some(marked) = self.mark_heap(&again, &none, MarkFor::Minor, clean.into_iter().map(|i| u32::try_from(i).expect("an object index")).collect(), 1, &mut lap) else { unreachable!("no key ends a minor") };
         lap.lap(&mut self.gc_times, Phase::Mark);
         if self.gc_stress.verify {
-            self.check_minor(roots);
+            self.check_minor(roots, &marked.state.region_marks);
         }
         let Marked { marking, own, doomed, payload: marked_payload, state, .. } = marked;
         let MarkState { weak_tables, untraced_lists, obarray_symbols_live: symbols, region_marks: regions, mut shared_seen, .. } = state;
@@ -1852,6 +1852,8 @@ impl Vm {
         self.doom(&doomed);
         self.drop_weak(&weak_tables, untraced_lists, &symbols, &regions);
         self.empty_dead_caches(&symbols, &regions, true);
+        // No weak entry or cache into one is left (above).
+        self.sweep_young_regions(&regions);
         lap.lap(&mut self.gc_times, Phase::Weak);
         self.gc_times.entries = [self.conses.len(), self.closures.len(), self.cells.len(), self.objects.len()];
         self.sweep_in_place(&marking, own);
@@ -1886,6 +1888,8 @@ impl Vm {
     fn settle_minor(&mut self) {
         // A forced collection is over (a full's takes its fillers with it).
         self.gc_stress.shift = false;
+        // What a minor did not free, or a promote-all kept, is old now.
+        self.region_young.clear();
         self.payload_settled = self.gc_payload_bytes;
         self.names_added.clear();
         self.conditions.settle();
@@ -2112,7 +2116,10 @@ impl Vm {
     /// it reads the nodes written since the last collection.
     fn minor_keeps(&self, state: &mut MarkState) {
         state.reading.whole = false;
+        // The regions attached since the last collection are the young ones,
+        // marked as reached (`Vm::sweep_young_regions`); the rest are old.
         state.region_marks.fill(true);
+        for &id in &self.region_young { state.region_marks[id] = false; }
         state.obarray_symbols_live = KeptSymbols::all();
     }
     /// The lowered code a mark starts from: suspended engines', whole. A

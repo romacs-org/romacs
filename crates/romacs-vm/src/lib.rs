@@ -1606,6 +1606,10 @@ pub struct Vm {
     regions: frozen::Regions,
     #[snapshot(at_rest)]
     region_free: Vec<usize>,
+    /// The regions attached since the last collection, which a minor frees
+    /// when it does not reach them (`Vm::sweep_young_regions`).
+    #[snapshot(at_rest)]
+    region_young: Vec<usize>,
     /// Three quarters of the region ids are live: collect at the next entry.
     #[snapshot(at_rest)]
     region_collect: bool,
@@ -1942,6 +1946,7 @@ impl Vm {
             image: None,
             regions: frozen::Regions::default(),
             region_free: Vec::new(),
+            region_young: Vec::new(),
             region_collect: false,
             isolates: isolate::Isolates::default(),
             keeper: None,
