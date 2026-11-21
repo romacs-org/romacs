@@ -226,6 +226,8 @@ is registered anew while its definition is expanded)."
     `(progn (romacs-agent--layout-check ',type ',names (get ',type 'romacs-agent--layout))
             (cl-defstruct ,name ,@doc-and-slots)
             (put ',type 'romacs-agent--layout ',names))))
+;; A live update reads its forms as `cl-defstruct''s (romacs-live-forms.el).
+(put 'romacs-agent--defstruct 'romacs-live-definer 'cl-defstruct)
 
 ;; A romacs-agent.el loaded live over this one is read first: its session
 ;; record, and where it comes from.  One from a branch without this one's
