@@ -252,13 +252,22 @@ refusal as it happened."
 
 (defun romacs--isolate-resolve (future state value)
   "Resolve FUTURE as STATE with VALUE and run its callbacks."
+  (romacs--isolate-notify (romacs--isolate-mark-resolved future state value)))
+
+(defun romacs--isolate-mark-resolved (future state value)
+  "Resolve FUTURE as STATE with VALUE, running none of its callbacks:
+\(FUTURE . CALLBACKS), them in order, for `romacs--isolate-notify'; nil
+when it was resolved already."
   (when (eq (aref future 3) 'pending)
     (aset future 3 state)
     (aset future 4 value)
     (let ((callbacks (aref future 5)))
       (aset future 5 nil)
-      (dolist (callback (reverse callbacks))
-        (funcall callback future)))))
+      (cons future (reverse callbacks)))))
+
+(defun romacs--isolate-notify (resolved)
+  "Run the callbacks RESOLVED, from `romacs--isolate-mark-resolved', names."
+  (romacs--isolate-each (lambda (callback) (funcall callback (car resolved))) (cdr resolved)))
 
 (defun isolate-on-done (future callback)
   "Call CALLBACK with FUTURE once it is resolved, at a wait point; now if it is."
@@ -940,11 +949,29 @@ anything came now."
     (romacs--isolate-pump 0)))
 
 (defun romacs--isolate-settle (isolate state value)
-  "Resolve every pending future of ISOLATE as STATE with VALUE."
-  (let ((pending (aref isolate 5)))
+  "Resolve every pending future of ISOLATE as STATE with VALUE, all before
+any of their callbacks runs, and run each callback whatever an earlier
+one signals."
+  (romacs--isolate-each #'romacs--isolate-notify (romacs--isolate-take-settled isolate state value)))
+
+(defun romacs--isolate-take-settled (isolate state value)
+  "Take ISOLATE's pending futures and resolve them as STATE with VALUE,
+running no callback: what `romacs--isolate-notify' is to run, a list."
+  (let ((pending (aref isolate 5)) (resolved nil))
     (aset isolate 5 nil)
-    (dolist (entry pending)
-      (romacs--isolate-resolve (cdr entry) state value))))
+    (dolist (entry pending (nreverse resolved))
+      (let ((one (romacs--isolate-mark-resolved (cdr entry) state value)))
+        (when one (push one resolved))))))
+
+(defun romacs--isolate-each (function list)
+  "Call FUNCTION on each element of LIST, in order, every one whatever an
+earlier call signals or throws; that exit goes on once all have run.  It
+loops, and nests only past an exit."
+  (while list
+    (let ((done nil) (element (pop list)))
+      (unwind-protect (progn (funcall function element) (setq done t))
+        (unless done
+          (romacs--isolate-each function (prog1 list (setq list nil))))))))
 
 (defun romacs--isolate-dead (isolate event data)
   "ISOLATE's worker is gone for EVENT with DATA: the children it reported
@@ -955,41 +982,55 @@ have sent), its futures settle, the event is reported, and it is forgotten."
     (unless (memq (aref isolate 3) '(killed retired))
       (aset isolate 3 'dead))
     (let ((children (romacs--isolate-signal-children (romacs--isolate-id isolate)))
-          (orphans nil))
+          (orphans nil) (unforked nil) (own nil)
+          ;; A child its zygote never reported was never released, so it
+          ;; ran nothing (its zygote died first): its job runs elsewhere.
+          (resubmit (and (eq (aref isolate 10) 'job) (eq event 'isolate-died)
+                         (null (romacs--isolate-pid (romacs--isolate-id isolate))))))
       (romacs--isolate-forget-role isolate)
+      ;; Out of the dispatch before any callback runs: a pump a callback
+      ;; makes cannot handle this death again.
+      (setq romacs--isolates (delq isolate romacs--isolates))
       (when (eq (aref isolate 10) 'zygote)
         ;; Its children die with it: those with a job settle now (a job
         ;; never started runs elsewhere), whatever they answer meanwhile.
         ;; One that runs stays counted (`isolate-process-limit') until its
-        ;; own exit arrives, which is then no news.  All are ended before
-        ;; any callback runs.
+        ;; own exit arrives, which is then no news.  All are ended, and
+        ;; the futures of those that ran settled (no later frame of theirs
+        ;; answers one), before any callback runs: ORPHANS (CHILD
+        ;; RESOLVED...), UNFORKED the children never reported.
         (dolist (child (copy-sequence romacs--isolates))
           (when (and (eq (aref child 10) 'job) (eq (aref (aref child 11) 1) isolate) (aref child 5))
-            (push child orphans)
-            (when (romacs--isolate-pid (romacs--isolate-id child))
+            (if (null (romacs--isolate-pid (romacs--isolate-id child)))
+                (push child unforked)
+              (push (cons child (romacs--isolate-take-settled child 'isolate-died (list child nil))) orphans)
               (romacs--isolate-signal (romacs--isolate-id child) 9)
               (romacs--isolate-mark-ending child)))))
-      ;; Settled and forgotten whatever a callback signals: no later
-      ;; dispatch sees it.
+      (if resubmit
+          (aset isolate 5 nil)
+        (setq own (romacs--isolate-take-settled isolate event (list isolate data))))
+      ;; Notified, forgotten and reported whatever a callback signals.
       (unwind-protect
-          (unwind-protect
-              (dolist (child (nreverse orphans))
-                (if (null (romacs--isolate-pid (romacs--isolate-id child)))
-                    (romacs--isolate-dead child 'isolate-died nil)
-                  (romacs--isolate-settle child 'isolate-died (list child nil))
-                  (run-hook-with-args 'isolate-error-functions child 'isolate-died (list nil nil))))
-            (if (and (eq (aref isolate 10) 'job) (eq event 'isolate-died)
-                     (null (romacs--isolate-pid (romacs--isolate-id isolate))))
-                ;; A child its zygote never reported was never released, so
-                ;; it ran nothing (its zygote died first): its job runs elsewhere.
-                (progn (aset isolate 5 nil)
-                       (dolist (entry pending) (romacs--isolate-resubmit-or-fail (cdr entry))))
-              (romacs--isolate-settle isolate event (list isolate data))))
+          (romacs--isolate-each
+           #'funcall
+           (list (lambda ()
+                   (romacs--isolate-each
+                    (lambda (orphan)
+                      (unwind-protect (romacs--isolate-each #'romacs--isolate-notify (cdr orphan))
+                        (run-hook-with-args 'isolate-error-functions (car orphan) 'isolate-died (list nil nil))))
+                    (nreverse orphans)))
+                 ;; Each unless a callback's pump has handled its death.
+                 (lambda () (romacs--isolate-each (lambda (child) (when (memq child romacs--isolates)
+                                                                    (romacs--isolate-dead child 'isolate-died nil)))
+                                                  (nreverse unforked)))
+                 (lambda ()
+                   (if resubmit
+                       (romacs--isolate-each (lambda (entry) (romacs--isolate-resubmit-or-fail (cdr entry))) pending)
+                     (romacs--isolate-each #'romacs--isolate-notify own)))))
         (romacs--isolate-close (romacs--isolate-id isolate))
-        (setq romacs--isolates (delq isolate romacs--isolates)))
-      ;; A spare child that dies took no job: it is replaced, not reported.
-      (unless (or retired (and (eq (aref isolate 10) 'job) (null pending)))
-        (run-hook-with-args 'isolate-error-functions isolate event (list data children))))))
+        ;; A spare child that dies took no job: it is replaced, not reported.
+        (unless (or retired (and (eq (aref isolate 10) 'job) (null pending)))
+          (run-hook-with-args 'isolate-error-functions isolate event (list data children)))))))
 
 (defun romacs--isolate-world-refused (isolate reason)
   "ISOLATE's worker could not adopt the world it was told to, for REASON.

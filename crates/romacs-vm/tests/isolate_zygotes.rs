@@ -942,3 +942,46 @@ fn a_worker_booted_without_the_refused_world_says_so() {
                                      (romacs--isolate-degradation (romacs--isolate-make 1 nil nil nil '(\"store\" . \"key\")))))");
     assert_eq!(out, "(((isolate-world-unavailable \"why\" (\"store\" . \"key\"))) nil)");
 }
+
+#[test]
+fn a_signalling_callback_leaves_no_future_of_a_dying_zygote_unsettled() {
+    // romacs#384: a zygote killed while two children run jobs, the callback
+    // of the job notified first pumping, cancelling the other and
+    // signalling: the signal reaches the killer; both futures settled as
+    // died before any callback ran (no later frame of a child, no cancel,
+    // answers one); each child's death and the zygote's are reported, the
+    // zygote's once; and it is gone.
+    let mut vm = vm();
+    ready_zygote(&mut vm);
+    let runs = |f: &str| format!("(let ((iso (isolate-future-isolate {f}))) {RUNS})");
+    let out = eval(&mut vm, &format!("(let* ((a (isolate-spawn '(lambda () (while t))))
+                                             (b (isolate-spawn '(lambda () (while t))))
+                                             (zygote (aref (gethash nil romacs--isolate-zygotes) 1))
+                                             (heard nil) (seen nil) (end (+ (float-time) 20)))
+                                        (while (and (not (and {a} {b})) (< (float-time) end)) (romacs--isolate-pump 0.02))
+                                        ;; The newer child is notified first.
+                                        (isolate-on-done b (lambda (_) (setq seen (aref a 3)) (romacs--isolate-pump 0)
+                                                             (isolate-future-cancel a) (error \"A callback fails\")))
+                                        (let ((isolate-error-functions (list (lambda (iso event _) (push (list (aref iso 10) event) heard)))))
+                                          (list (condition-case e (isolate-kill zygote) (error (cadr e)))
+                                                seen (aref a 3) (aref b 3) (and (memq zygote romacs--isolates) t)
+                                                (progn (romacs--isolate-pump 0.3) (nreverse heard)))))", a = runs("a"), b = runs("b")));
+    assert_eq!(out, "(\"A callback fails\" isolate-died isolate-died isolate-died nil ((job isolate-died) (job isolate-died) (zygote isolate-killed)))");
+    eval(&mut vm, "(isolate-kill-all)");
+}
+
+#[test]
+fn a_signalling_callback_leaves_no_other_future_of_a_killed_worker_unsettled() {
+    // romacs#384: a worker killed with a job running and one queued, the
+    // running one's callback signalling: the queued one settles too.
+    let mut vm = vm();
+    let out = eval(&mut vm, "(let* ((iso (isolate-create))
+                                    (a (progn (isolate-await (isolate-spawn 'list :isolate iso) 20)
+                                              (isolate-spawn '(lambda () (while t)) :isolate iso)))
+                                    (b (isolate-spawn 'list 'queued :isolate iso)))
+                               (romacs--isolate-wait 0.2)
+                               (isolate-on-done a (lambda (_) (error \"A callback fails\")))
+                               (list (condition-case e (isolate-kill iso) (error (cadr e))) (aref a 3) (aref b 3)))");
+    assert_eq!(out, "(\"A callback fails\" isolate-killed isolate-killed)");
+    eval(&mut vm, "(isolate-kill-all)");
+}
