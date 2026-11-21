@@ -92,9 +92,11 @@ executable there running the shell SCRIPT; BINDINGS, of `let*', see them."
         (should (equal (plist-get (cdr (assoc "gpt-6.2-sol" rows)) :label) "GPT-6.2-Sol"))
         ;; Its default effort is kept with it.
         (should (equal (plist-get (cdr (assoc "gpt-6.2-astra" rows)) :default-effort) "medium")))
-      ;; Kept for this program only: another one's cache does not hold.
-      (set-file-times program (time-add (current-time) 100))
-      (should (equal (mapcar #'car (romacs-agent--models instance)) '("gpt-6.1-sol" "gpt-6.2-sol"))))))
+      ;; Kept for this program only: another one's does not hold.
+      (let ((other (expand-file-name "other-codex" root)))
+        (copy-file program other)
+        (should (equal (mapcar #'car (romacs-agent--models (plist-put (copy-sequence instance) :program other)))
+                       '("gpt-6.1-sol" "gpt-6.2-sol")))))))
 
 (ert-deftest romacs-agent-models-a-probe-unanswered-is-stopped ()
   (romacs-agent-models-tests--with "exec sleep 60\n"
