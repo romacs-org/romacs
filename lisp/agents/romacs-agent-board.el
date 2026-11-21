@@ -353,9 +353,8 @@ thread at work, while the board shows."
   "TEXT in exactly WIDTH columns: padded when it fits, a mark of several
 code points kept whole, else cut."
   (let ((text (or text "")))
-    (if (<= (string-width text) width)
-        (concat text (make-string (- width (string-width text)) ?\s))
-      (romacs-truncate text width ?\s))))
+    (let ((cut (if (<= (string-width text) width) text (romacs-truncate text width))))
+      (concat cut (make-string (max 0 (- width (string-width cut))) ?\s)))))
 
 (defun romacs-agent-board--widths (width head)
   "The columns' widths in a row WIDTH wide after HEAD columns: `fill'

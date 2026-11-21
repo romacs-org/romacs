@@ -45,9 +45,14 @@ background.")
 
 (defun romacs-agent-ask--glyph (multi picked)
   "An option's mark: a box for a question taking several, else a dot."
-  (if multi
-      (if picked (romacs-agent-glyph-padded 'checked 'unchecked) (romacs-agent-glyph-padded 'unchecked 'checked))
-    (if picked (romacs-agent-glyph-padded 'picked 'unpicked) (romacs-agent-glyph-padded 'unpicked 'picked))))
+  (apply #'romacs-agent-glyph-padded
+         (if multi (if picked 'checked 'unchecked) (if picked 'picked 'unpicked))
+         (romacs-agent-ask--column multi)))
+
+(defun romacs-agent-ask--column (multi)
+  "The marks that share an option's column: the pair for MULTI or not,
+and the user's own answer's."
+  (if multi '(checked unchecked own) '(picked unpicked own)))
 
 (defun romacs-agent-ask--at-once-p (questions)
   "Whether a pick answers QUESTIONS whole: one question, one choice."
@@ -108,7 +113,7 @@ one pick does not answer it all.  Each choosing row carries
                                      "\n")
                              'romacs-agent-ask (cons index label)))
             (let ((own (cl-set-difference chosen (plist-get props :options) :test #'equal)))
-              (propertize (concat "   " (romacs-agent-glyph 'own) " " (if own (propertize (string-join own ", ") 'face 'romacs-agent-ask-picked)
+              (propertize (concat "   " (apply #'romacs-agent-glyph-padded 'own (romacs-agent-ask--column multi)) " " (if own (propertize (string-join own ", ") 'face 'romacs-agent-ask-picked)
                                             (propertize "Other…" 'face 'romacs-popup-dim))
                                   "\n")
                           'romacs-agent-ask (cons index 'other)))))

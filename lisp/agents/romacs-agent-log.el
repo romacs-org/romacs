@@ -176,6 +176,7 @@ gives it), or nil when they begin at the session's start.")
   (activity nil :documentation "What that work said it does, last.")
   (ended nil :documentation "Its output drawn while that work goes on.")
   (mark nil :documentation "The mark its row was drawn with, its row rewritten after it.")
+  (indent 0 :documentation "The characters before that mark on its row: a subagent's bars.")
   (task-ended nil :documentation "That work over before the call ended."))
 
 (defvar-local romacs-agent-log--blocks nil
@@ -401,10 +402,11 @@ end before TEXT."
 
 (defun romacs-agent-log--marks-changed ()
   "A mark of `romacs-agent-glyph-alist' changed: every chat's separator,
-the composer's mark in it, is written again."
+the composer's mark in it, is written again, a narrowed chat's too."
   (dolist (buffer (buffer-list))
     (when (markerp (buffer-local-value 'romacs-agent-log--input buffer))
-      (with-current-buffer buffer (romacs-agent-log--separator t)))))
+      (with-current-buffer buffer
+        (save-restriction (widen) (romacs-agent-log--separator t))))))
 
 (add-hook 'romacs-agent-glyph-alist-changed-hook #'romacs-agent-log--marks-changed)
 
@@ -680,12 +682,14 @@ of it (`romacs-agent-rows-ended'), after its mark."
     (when ended
       (save-excursion
         (goto-char start)
-        (let ((end (line-end-position)))
-          (when (search-forward (concat (romacs-agent-log-call-mark block) " ") end t)
-            ;; The row's own, at its mark: a subagent's row starts with
-            ;; its indentation.
-            (let* ((mark (match-beginning 0))
-                   (properties (list 'romacs-agent-log-seq (get-text-property mark 'romacs-agent-log-seq)
+        (let* ((end (line-end-position))
+               ;; The row's own, at its mark, after a subagent's bars.
+               (mark (+ start (romacs-agent-log-call-indent block)))
+               (prefix (concat (romacs-agent-log-call-mark block) " "))
+               (body (+ mark (length prefix))))
+          (when (and (<= body end) (equal (buffer-substring-no-properties mark body) prefix))
+            (goto-char body)
+            (let* ((properties (list 'romacs-agent-log-seq (get-text-property mark 'romacs-agent-log-seq)
                                      'romacs-agent-log-full (get-text-property mark 'romacs-agent-log-full)
                                      'romacs-agent-log-tool (get-text-property mark 'romacs-agent-log-tool))))
               (romacs-agent-log--writing
@@ -766,7 +770,8 @@ its call, in place of those shown before."
       (unless romacs-agent-log--blocks (setq romacs-agent-log--blocks (make-hash-table :test #'equal)))
       (puthash id (romacs-agent-log-call--make :id id :name name :input input :depth depth
                                                :parent (and parent (romacs-agent-log-call-id parent))
-                                               :start start :under (funcall place) :mark mark)
+                                               :start start :under (funcall place) :mark mark
+                                               :indent (1- (length (romacs-agent-log--indent "x" depth))))
                romacs-agent-log--blocks)
       (when-let* ((early (alist-get id romacs-agent-log--early nil nil #'equal)))
         (setf (alist-get id romacs-agent-log--early nil t #'equal) nil)
