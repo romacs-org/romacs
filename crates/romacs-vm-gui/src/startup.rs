@@ -1516,6 +1516,8 @@ mod tests {
         presentation.submitted(1, std::time::Instant::now());
         assert!(!presentation.window_close(&mut vm).unwrap(), "native WindowClose bypassed unsaved confirmation");
         assert_eq!(printed(&mut vm, "romacs-gui-quit-requested"), "nil");
+        // The question is the echo area's message, which the idle pass shows.
+        crate::echo::sync_current_message(&mut vm).unwrap();
         let prompt = printed(&mut vm, "(with-current-buffer (window-buffer (minibuffer-window)) (buffer-string))");
         assert!(prompt.contains("(y/n"), "native close must show the keyboard quit prompt: {prompt}");
         assert!(!presentation.ready(), "must not overwrite an in-flight frame");
@@ -1732,6 +1734,8 @@ mod tests {
         printed(&mut vm, "(insert \"unsaved\")");
         chord(&mut vm, 3);
         assert_eq!(printed(&mut vm, "romacs-gui-quit-requested"), "nil", "C-x C-c discarded unsaved work without confirmation");
+        // The question is the echo area's message, shown once the command returns.
+        crate::echo::show_current_message(&mut vm).unwrap();
         let prompt = printed(&mut vm, "(with-current-buffer (window-buffer (minibuffer-window)) (buffer-string))");
         assert!(prompt.contains("(y/n"), "GUI confirmation must be visible, not stdout only: {prompt}");
         key(&mut vm, 110);
