@@ -486,6 +486,39 @@ message is sent, `romacs-agent-send' by default.")
         (should (equal (mapcar #'car (romacs-agent-store-queued id)) '("kept")))
         (should (file-exists-p mark))))))
 
+(ert-deftest romacs-agent-queue-a-failed-open-is-unread ()
+  ;; An open that signals (a lock timed out) is unread, at startup too.
+  (romacs-agent-test-with-store
+    (make-directory (file-name-directory (romacs-agent-store--file)) t)
+    (should (romacs-agent-store--open))
+    (cl-letf (((symbol-function 'romacs-agent-store--open) (lambda () (signal 'error '("database is locked")))))
+      (should-error (romacs-agent-store-queued "x") :type 'romacs-agent-store-unread)
+      (should (funcall (cdr (assq 'queued romacs-agent-mark-kinds)) (expand-file-name "x" (romacs-agent--state-root)) nil)))))
+
+(ert-deftest romacs-agent-queue-a-stale-mark-goes-at-the-next-restore ()
+  ;; A removal that read the store before an earlier delete landed keeps
+  ;; the mark; the next restore, finding nothing, takes it away.
+  (romacs-agent-test-with-store
+    (make-directory (file-name-directory (romacs-agent-store--file)) t)
+    (should (romacs-agent-store--open))
+    (let* ((id "d5d5d5d5-0000-4000-8000-000000000000")
+           (mark (expand-file-name (format "%s.queued" id) (romacs-agent--marks-dir)))
+           (session (romacs-agent-test-attach (romacs-agent--make :id id :harness 'claude :state 'running :title "s") t)))
+      (romacs-agent-send-later session "a")
+      (romacs-agent-send-later session "b")
+      (let ((a (car (romacs-agent-queue session))) (b (cadr (romacs-agent-queue session))))
+        ;; A's delete deferred: B goes while A's row is still there.
+        (cl-letf (((symbol-function 'romacs-agent-store-queued-delete) #'ignore))
+          (romacs-agent--dequeue session a))
+        (romacs-agent--dequeue session b)
+        (should (file-exists-p mark))
+        ;; A's delete lands.
+        (romacs-agent-store-queued-delete id (romacs-agent-item-id a)))
+      (should-not (romacs-agent-store-queued id))
+      (let ((again (romacs-agent-test-attach (romacs-agent--make :id id :harness 'claude :state 'idle :title "s") t)))
+        (romacs-agent-store--requeue again nil))
+      (should-not (file-exists-p mark)))))
+
 (ert-deftest romacs-agent-queue-a-mark-stays-while-the-store-keeps-rows ()
   ;; A row left for the next load (its sending unsure) keeps the session's
   ;; mark when the last message in memory goes.

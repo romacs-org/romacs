@@ -741,15 +741,19 @@ none let it go (ITEM-ID nil: every one of ID's), here.  A failure signals."
   "The messages kept waiting for the session ID names, in order; none when
 there is no store.  A store that cannot be read signals
 `romacs-agent-store-unread': unread rows are never taken for no rows."
-  (let ((db (romacs-agent-store--open)))
+  (let* ((file (romacs-agent-store--file))
+         ;; An open that fails, a lock timed out say, is unread too.
+         (db (condition-case err (romacs-agent-store--open)
+               (error (signal 'romacs-agent-store-unread (list id (error-message-string err)))))))
     (cond
      (db (condition-case err
              (mapcar (lambda (row) (apply #'romacs-agent-store--item-of row))
                      (sqlite-select db "select id, position, item from queued where session = ? order by position"
                                     (list id)))
            (error (signal 'romacs-agent-store-unread (list id (error-message-string err))))))
-     ;; A store there that will not open is unread, not empty.
-     ((file-exists-p (romacs-agent-store--file))
+     ;; A store there that will not open is unread, not empty; a link to
+     ;; one out of reach is there too.
+     ((or (file-exists-p file) (file-symlink-p file))
       (signal 'romacs-agent-store-unread (list id "the store could not be opened"))))))
 
 (defun romacs-agent-store--requeue (session _manifest)
