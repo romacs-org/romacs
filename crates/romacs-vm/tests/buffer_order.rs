@@ -122,18 +122,16 @@ fn buffer_order_holds_a_buffer_whose_name_slot_lisp_cleared() {
     vm.set_gc_moving(true);
     vm.set_gc_stress(50);
     vm.set_gc_verify(true);
-    // No variable keeps bo-z: once its name slot is cleared, only the order
-    // can, so the mark of the order is all that saves it.
-    let source = format!(r##"(let ((names {NAMES}))
-      (get-buffer-create "bo-z")
-      (get-buffer-create "bo-y")
-      (set (intern-soft "#:vm2-buffer:bo-z") nil)
-      (dotimes (_ 300) (make-string 10 ?x))
-      (garbage-collect)
-      (dotimes (_ 300) (make-string 10 ?x))
-      (garbage-collect)
-      (let ((tail (buffer-list)) z)
-        (while tail (if (equal (buffer-name (car tail)) "bo-z") (setq z (car tail))) (setq tail (cdr tail)))
-        (list (funcall names) (buffer-live-p z) (buffer-name z))))"##);
+    // Each step is its own top-level evaluation, which leaves nothing in a
+    // register, and none binds bo-z: once its name slot is cleared, only the
+    // order can keep it, so the mark of the order is all that saves it.
+    for step in [r#"(progn (get-buffer-create "bo-z") (get-buffer-create "bo-y") nil)"#,
+                 r##"(progn (set (intern-soft "#:vm2-buffer:bo-z") nil) nil)"##,
+                 "(progn (dotimes (_ 300) (make-string 10 ?x)) (garbage-collect) (dotimes (_ 300) (make-string 10 ?x)) (garbage-collect) nil)"] {
+        vm.eval_source(step).unwrap();
+    }
+    let source = format!(r#"(let ((names {NAMES}) (tail (buffer-list)) z)
+      (while tail (if (equal (buffer-name (car tail)) "bo-z") (setq z (car tail))) (setq tail (cdr tail)))
+      (list (funcall names) (buffer-live-p z) (buffer-name z)))"#);
     assert_eq!(printed(vm, &source), r#"(("bo-z" "bo-y") t "bo-z")"#);
 }
