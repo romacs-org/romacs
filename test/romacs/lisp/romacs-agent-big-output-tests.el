@@ -105,12 +105,14 @@
           (should (< (length text) 1000)))))))
 
 (ert-deftest romacs-agent-big-output-a-failure-past-the-bound-says-its-size ()
-  (let ((romacs-agent-rows-read-limit 1000))
+  (let ((romacs-agent-rows-read-limit 1000)
+        (output (mapconcat #'number-to-string (number-sequence 1 2000) "\n")))
     (romacs-agent-big-output-tests--with
       (draw :type 'tool :state 'started :id "a" :name "Bash" :input (romacs-agent-big-output-tests--input "command" "make"))
-      (draw :type 'tool :state 'failed :id "a" :output (mapconcat #'number-to-string (number-sequence 1 2000) "\n"))
+      (draw :type 'tool :state 'failed :id "a" :output output)
       (let ((text (buffer-substring-no-properties (point-min) (point-max))))
-        (should (string-match-p "characters in all" text))
+        ;; The answer's size, not the part read, and no count.
+        (should (string-search (concat (romacs-agent-rows-size output) " in all") text))
         (should-not (string-match-p "more lines" text))))))
 
 (ert-deftest romacs-agent-big-output-a-call-never-drawn-is-one-row ()
