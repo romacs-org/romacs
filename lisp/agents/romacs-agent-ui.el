@@ -90,11 +90,13 @@ colour, which no theme's syntax faces can make read as an error.")
 colour, never a syntax face's, which a theme may draw as an error.")
 (defface romacs-agent-section '((t :inherit font-lock-function-name-face :weight bold))
   "A project heading on the home page.")
-(defface romacs-agent-delegate '((t :inherit font-lock-function-name-face :weight bold))
-  "Face of a delegated task's title.")
-(defface romacs-agent-message '((t :inherit font-lock-function-name-face :weight bold))
-  "The other session on a message's card: its sender, or the one it goes to.")
-(defface romacs-agent-message-bar '((t :inherit font-lock-function-name-face))
+(defface romacs-agent-delegate '((t :inherit romacs-working-running :weight bold))
+  "Face of a delegated task's title: the theme's colour for work, never a
+syntax face's, which a theme may draw as red as an error.")
+(defface romacs-agent-message '((t :inherit romacs-working-running :weight bold))
+  "The other session on a message's row: its sender, or the one it goes
+to; the theme's colour for work, never a syntax face's.")
+(defface romacs-agent-message-bar '((t :inherit romacs-working-running))
   "The bar before each line of a message between sessions.")
 (defface romacs-agent-ui-sent '((t :inherit shadow :slant italic))
   "A message this chat sent another thread: set apart from words for the

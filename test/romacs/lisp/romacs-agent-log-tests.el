@@ -80,11 +80,12 @@
       (draw :type 'tool :state 'started :id "t" :name "Bash" :input (romacs-agent-log-tests--input "command" "seq 5"))
       (draw :type 'tool :state 'completed :id "t" :output "1\n2\n3\n4\n5")
       (let ((text (romacs-agent-log-tests--transcript)))
-        (should (string-match-p "⎿ 1\n    2\n    … 3 more lines · RET shows all" text))
+        ;; A command's last lines, as it ran: how many came before them.
+        (should (string-match-p "⎿ … 3 earlier lines · RET shows all\n    4\n    5\n" text))
         (should-not (string-match-p "\n    3\n" text))
         ;; RET shows all of it.
         (goto-char (point-min))
-        (search-forward "more lines")
+        (search-forward "earlier lines")
         (save-window-excursion (romacs-agent-log-open))
         (with-current-buffer "*agent output*"
           (should (string-match-p "seq 5" (buffer-string)))
@@ -103,7 +104,8 @@
       (draw :type 'tool :state 'completed :id "c" :output "one\ntwo\nthree")
       (let ((text (romacs-agent-log-tests--transcript)))
         (should-not (string-match-p "so far" text))
-        (should (string-match-p "make[^\n]*\n  ⎿ one\n    two\n    … 1 more lines · RET shows all\nafter" text))))))
+        ;; Ended: the same last lines it showed as it ran stay.
+        (should (string-match-p "make[^\n]*\n  ⎿ … 1 earlier line · RET shows all\n    two\n    three\nafter" text))))))
 
 (ert-deftest romacs-agent-log-subagent-work-goes-under-its-call ()
   (romacs-agent-log-tests--with
@@ -114,7 +116,8 @@
     (draw :type 'tool :state 'completed :id "r" :parent "a" :output "hello")
     (draw :type 'tool :state 'completed :id "a" :output "2 words")
     (let ((text (romacs-agent-log-tests--transcript)))
-      (should (string-match-p "count[^\n]*\n│ ● [^\n]*n.txt[^\n]*\n│   ⎿ hello\n  ⎿ 2 words\nMain goes on." text)))))
+      ;; A read says how much it read, its text RET away; a report, under its call.
+      (should (string-match-p "count[^\n]*\n│ ● [^\n]*n.txt[^\n]*· 1 line\n  ⎿ 2 words\nMain goes on." text)))))
 
 (ert-deftest romacs-agent-log-an-approval-waits-in-plain-sight ()
   (romacs-agent-log-tests--with
@@ -746,8 +749,11 @@
     (draw :type 'tool :state 'completed :id "b" :input (romacs-agent-log-tests--input "query" "two") :output "B")
     (goto-char (point-min))
     (should (equal (gethash "query" (car (get-text-property (point) 'romacs-agent-log-full))) "one"))
-    (search-forward "⎿ A")
+    ;; Each row says its own query and what came of it.
+    (goto-char (search-forward "◍ one · A"))
+    (goto-char (match-beginning 0))
     (should (equal (gethash "query" (car (get-text-property (point) 'romacs-agent-log-full))) "one"))
+    (should (search-forward "◍ two · B" nil t))
     (goto-char (point-min))
     (romacs-agent-log-next 2)
     (should (equal (gethash "query" (car (get-text-property (point) 'romacs-agent-log-full))) "two"))))
@@ -979,6 +985,60 @@
       (should (string-match-p "Some text\\." text))
       (should (string-match-p "⚠ shown without its faces: Parser broke" text)))))
 
+;;; What a call came to
+
+(ert-deftest romacs-agent-log-a-call-says-what-it-came-to-not-its-payload ()
+  (romacs-agent-log-tests--with
+    ;; A Romacs tool's JSON answer: its row says it, nothing under it.
+    (draw :type 'tool :state 'started :id "s" :name "mcp__romacs__romacs_task_status"
+          :input (romacs-agent-log-tests--input "taskId" "t1"))
+    (draw :type 'tool :state 'completed :id "s" :output "{\"title\":\"lane x\",\"status\":\"running\",\"result\":\"a long report\"}")
+    ;; A read: how much, its text RET away.
+    (draw :type 'tool :state 'started :id "r" :name "Read" :input (romacs-agent-log-tests--input "file_path" "/a/n.txt"))
+    (draw :type 'tool :state 'completed :id "r" :output "one\ntwo")
+    ;; A failure: its error, as it says it.
+    (draw :type 'tool :state 'started :id "f" :name "Bash" :input (romacs-agent-log-tests--input "command" "make"))
+    (draw :type 'tool :state 'failed :id "f" :output "<tool_use_error>make: no rule</tool_use_error>")
+    ;; A command's tail without the harness's own trailer.
+    (draw :type 'tool :state 'started :id "l" :name "Bash" :input (romacs-agent-log-tests--input "command" "ls"))
+    (draw :type 'tool :state 'completed :id "l" :output "a.txt\nShell cwd was reset to /home/x")
+    (should-not (string-match-p "Shell cwd" (romacs-agent-log-tests--transcript)))
+    (let ((text (romacs-agent-log-tests--transcript)))
+      (should (string-match-p "◷ lane x · running\n" text))
+      (should-not (string-match-p "a long report\\|{" text))
+      (should (string-match-p "◧ n\\.txt  /a · 2 lines\n" text))
+      (should-not (string-match-p "⎿ one" text))
+      (should (string-match-p "\\$ make\n  ⎿ make: no rule\n" text))
+      (goto-char (point-min))
+      (search-forward "make: no rule")
+      (should (memq 'romacs-agent-log-denied (ensure-list (get-text-property (match-beginning 0) 'face))))
+      ;; RET on a row: its details, then the raw answer.
+      (goto-char (point-min))
+      (search-forward "lane x")
+      (save-window-excursion (romacs-agent-log-open))
+      (with-current-buffer "*agent output*"
+        ;; Its renderer's details first, then the raw answer.
+        (should (string-match-p "lane x · running\n\na long report\n\nInput:" (buffer-string)))
+        (should (string-match-p "Output:\n{" (buffer-string)))
+        (kill-buffer)))
+    ;; A title of several lines: the row on one line, under its mark.
+    (draw :type 'tool :state 'started :id "d" :name "mcp__romacs__romacs_delegate_task"
+          :input (romacs-agent-log-tests--input "title" "two\nlines"))
+    (draw :type 'tool :state 'completed :id "d" :output "{\"title\":\"two\\nlines\",\"state\":\"running\"}")
+    (should (string-match-p "⑂ two lines · started\n" (romacs-agent-log-tests--transcript)))
+    ;; A subagent's call: RET on its rewritten row shows its details too.
+    (draw :type 'tool :state 'started :id "a" :name "Agent" :input (romacs-agent-log-tests--input "description" "sub"))
+    (draw :type 'tool :state 'started :id "n" :name "mcp__romacs__romacs_task_status" :parent "a"
+          :input (romacs-agent-log-tests--input "taskId" "t2"))
+    (draw :type 'tool :state 'completed :id "n" :parent "a" :output "{\"title\":\"inner\",\"status\":\"done\",\"result\":\"nested report\"}")
+    (goto-char (point-min))
+    (search-forward "◷ inner")
+    (save-window-excursion (romacs-agent-log-open))
+    (with-current-buffer "*agent output*"
+      (should (string-match-p "nested report\n\nInput:" (buffer-string)))
+      (kill-buffer))
+    (should-not (string-match-p "^lines" (romacs-agent-log-tests--transcript)))))
+
 (ert-deftest romacs-agent-log-a-streamed-reply-keeps-its-link-definitions ()
   ;; A definition before or after its reference, across batches: faced as
   ;; the whole reply would be.
@@ -1120,6 +1180,22 @@ none when dropped.")
               (should (string-suffix-p ".png" path))
               (should (file-exists-p path))))
         (delete-directory dir t)))))
+
+;;; A command's output
+
+(ert-deftest romacs-agent-log-output-lines-are-one-row-each ()
+  ;; A long line is cut to the width with an ellipsis, never wrapped.
+  (let* ((romacs-agent-log-output-width 20)
+         (shown (car (romacs-agent-log--lines (concat (make-string 50 ?x) "\nshort") 5))))
+    (should (equal (split-string shown "\n")
+                   (list (truncate-string-to-width (make-string 50 ?x) 20 nil nil (truncate-string-ellipsis)) "short")))))
+
+(ert-deftest romacs-agent-log-output-faces-a-diagnostic-whole ()
+  ;; All of a diagnostic line, from its first character; a plain line none.
+  (let ((text (romacs-agent-log-faces-output "sed: can't read x.el: No such file or directory\nrg: a: IO error (os error 2)\nplain")))
+    (dolist (at '(0 5 48 52))
+      (should (memq 'error (ensure-list (get-text-property at 'face text)))))
+    (should-not (memq 'error (ensure-list (get-text-property (- (length text) 2) 'face text))))))
 
 ;;; A streamed batch's faces, in the cycle that draws it
 
