@@ -95,6 +95,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import sqlite3
 import struct
@@ -3357,10 +3358,11 @@ def board_keys(args, base):
 def start_picker(args, base):
     """Starting a session by real keys through the palette: C-u c on the
     home page, the directory of the project at point, a row found by typing
-    (its instance's group, the harness's reported model among the catalogue's),
+    (its instance's group, a model its harness reported),
     the effort, then the first message in the chat it opens.  The fake
     harnesses record what they were given.
     Each run's initialize answers its models, kept with only their rows;
+    Codex's are asked of it as the palette opens (`model/list');
     with one enabled instance no palette is asked."""
     a = Agents(args, base, 'pk')
     try:
@@ -3395,30 +3397,61 @@ def start_picker(args, base):
                 '(with-current-buffer (window-buffer (active-minibuffer-window)) (minibuffer-contents-no-properties))'))
 
         def asked(text):
-            until(lambda: text in prompt(), 15, f'{text} asked')
+            """Wait for the prompt TEXT; on its timeout, the prompt and input open then."""
+            try:
+                until(lambda: text in prompt(), 15, f'{text} asked')
+            except RuntimeError as error:
+                open_now = prompt()
+                raise RuntimeError(f'{error}; prompt {open_now!r}, echo {a.eval("(current-message)")}; '
+                                   f'{where()}') from None
 
         def on_project(path):
             a.eval('(progn (switch-to-buffer "*romacs-agents*") (delete-other-windows) (goto-char (point-min)) '
                    f'(re-search-forward {lisp_text("^" + path.name + "  ")}) (beginning-of-line) t)')
 
+        def where():
+            """The selected window's buffer and mode, and the minibuffer's input
+            and panel: what a wait that timed out found."""
+            return a.eval(
+                '(prin1-to-string (list (buffer-name (window-buffer (selected-window))) '
+                '(with-current-buffer (window-buffer (selected-window)) major-mode) (minibuffer-depth) '
+                '(and (active-minibuffer-window) (with-current-buffer (window-buffer (active-minibuffer-window)) '
+                '(list (minibuffer-contents-no-properties) romacs-complete--input '
+                '(length romacs-complete--candidates)))) last-command))')
+
+        def narrowed(typed):
+            """Wait until the panel's candidates are those of TYPED, all of it
+            in the input: Return then takes the row it finds, whatever the load."""
+            try:
+                until(lambda: a.eval(
+                    '(with-current-buffer (window-buffer (active-minibuffer-window)) '
+                    f'(and (equal (minibuffer-contents-no-properties) {lisp_text(typed)}) '
+                    '(equal (car-safe romacs-complete--input) (minibuffer-contents-no-properties)) '
+                    'romacs-complete--candidates t))') == 't', 15, f'{typed} narrowed')
+            except RuntimeError as error:
+                raise RuntimeError(f'{error}; {where()}') from None
+
         def pick(project, typed, effort, text):
             """C-u c at PROJECT's section; the row TYPED finds, at EFFORT."""
             on_project(project)
-            a.keys('-M', 'ctrl', '-k', 'u', '-m', 'ctrl')
-            a.keys('c')
+            # One sequence: the prefix cannot be lost between two runs of wtype.
+            a.keys('-M', 'ctrl', '-k', 'u', '-m', 'ctrl', 'c')
             asked('Project directory')
             directory = contents()
             a.keys('-k', 'Return')
             asked('Agent')
             a.keys(typed)
-            time.sleep(.5)
+            narrowed(typed)
             a.keys('-k', 'Return')
             asked('Effort')
             a.keys(effort)
-            time.sleep(.5)
+            narrowed(effort)
             a.keys('-k', 'Return')
             composed(text)
             a.keys('-k', 'Return')
+            # Keys and evaluations come by separate ways: until the Return is
+            # taken, an evaluation switching buffers could take it elsewhere.
+            until(lambda: not holds(text), 15, f'{text} sent')
             return directory
 
         def chat_shown():
@@ -3426,20 +3459,25 @@ def start_picker(args, base):
             return a.eval('(with-current-buffer (window-buffer (selected-window)) '
                           '(and (derived-mode-p (quote romacs-agent-log-mode)) romacs-agent-log--input (not (active-minibuffer-window)) t))') == 't'
 
+        def holds(text):
+            """Whether the selected chat's composer ends with TEXT."""
+            return a.eval('(with-current-buffer (window-buffer (selected-window)) (and romacs-agent-log--input (string-suffix-p '
+                          + lisp_text(text) + ' (buffer-substring-no-properties romacs-agent-log--input (point-max)))))') == 't'
+
         def composed(text):
             """TEXT typed in the chat a start opened: its first message."""
             until(chat_shown, 15, 'chat opened')
             a.keys(text)
-            until(lambda: a.eval('(with-current-buffer (window-buffer (selected-window)) (string-suffix-p '
-                                 + lisp_text(text) + ' (buffer-substring-no-properties romacs-agent-log--input (point-max))))') == 't', 15, f'{text} typed')
+            until(lambda: holds(text), 15, f'{text} typed')
 
-        # The palette, as drawn.
+        # The palette, as drawn: Codex asked for its models as it opened.
+        codex_kept = a.home / '.local/state/romacs/agents/models/codex.json'
         on_project(other)
         a.keys('c')
         asked('Project directory')
         a.keys('-k', 'Return')
         asked('Agent')
-        time.sleep(1)
+        until(codex_kept.exists, 30, 'codex models kept')
         rows = parity_live.read_sexp(a.eval(
             '(mapcar (function car) (romacs-agent--picker-rows))'))
         shot = base / 'start-picker.png'
@@ -3474,7 +3512,7 @@ def start_picker(args, base):
                         and after(claude_argv, '--effort') == 'high'
                         and result['codex_turn'] == ['gpt-6-luna', 'low']
                         and rows[0] == 'Claude Code · default' and 'Claude Code · Fake 1' in rows
-                        and 'Codex · GPT-6.1 Sol' in rows and result['single'] == 'chat')
+                        and 'Codex · GPT-Fake-Sol' in rows and result['single'] == 'chat')
         return result
     finally:
         a.close()
@@ -3712,6 +3750,110 @@ def select_real(args, base):
         a.close()
 
 
+def codex_listed(codex, home, env):
+    """The models CODEX's own app-server answers `model/list' with, its
+    CODEX_HOME HOME, each (id, label): what Romacs is to show."""
+    lines = [{'id': 'initialize:1', 'method': 'initialize',
+              'params': {'clientInfo': {'name': 'agent_live', 'version': '0'}, 'capabilities': {}}},
+             {'method': 'initialized'}, {'id': 'model/list:2', 'method': 'model/list', 'params': {}}]
+    process = subprocess.Popen([codex, 'app-server'], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                               stderr=subprocess.DEVNULL, env={**env, 'CODEX_HOME': str(home)}, text=True)
+    try:
+        process.stdin.write(''.join(json.dumps(line) + '\n' for line in lines))
+        process.stdin.flush()
+        for line in process.stdout:
+            answer = json.loads(line)
+            if answer.get('id') == 'model/list:2':
+                return [(m['model'], m['displayName']) for m in answer['result']['data']]
+        raise RuntimeError('codex app-server ended before model/list answered')
+    finally:
+        process.kill()
+        process.wait()
+
+
+def models_real(args, base):
+    """The models each real harness (--claude-program, --codex-program) reports,
+    in private configuration directories, nothing signed in, no turn taken:
+    none known at first; a real Codex session's model menu (C-c o m) shows
+    what is known and asks Codex in the background, and the open menu comes
+    to list what Codex's own app-server answers `model/list'; opened again
+    it lists the same, and the capabilities tool says the same.  `romacs-agent-refresh-models' asks Claude Code too.
+    Free, but needs the real programs: not a default workflow."""
+    a = Agents(args, base, 'mr')
+    try:
+        a.up()
+        a.work.mkdir(parents=True, exist_ok=True)
+        claude = args.claude_program or real_program('claude')
+        codex = args.codex_program or real_program('codex')
+        homes = {name: a.home / f'.config/{name}-models' for name in ('claude', 'codex')}
+        for home in homes.values():
+            home.mkdir(parents=True)
+        # Codex answers late: the menu is surely open, showing nothing it
+        # reports, before its answer comes.
+        late = a.root / 'late-codex'
+        late.write_text(f'#!/bin/sh\nsleep 3\nexec {shlex.quote(codex)} "$@"\n')
+        late.chmod(0o755)
+        a.providers([('claude', homes['claude'], claude, []), ('codex', homes['codex'], late, [])])
+        kept = a.home / '.local/state/romacs/agents/models'
+
+        def known(name):
+            return parity_live.read_sexp(a.eval(
+                f'(mapcar (function car) (romacs-agent--models (romacs-agent--configured {lisp_text(name)})))')) or []
+
+        listed = codex_listed(codex, homes['codex'], a.env)
+        result = {'before': known('codex'), 'listed': [m for m, _ in listed]}
+        wanted = ['Codex · default'] + ['Codex · ' + label for _, label in listed]
+        sid = a.eval(f'(romacs-agent-id (romacs-agent-start {lisp(a.work)} nil nil "codex"))').strip('"')
+        a.idle(sid, 60)
+        a.eval(f'(progn (romacs-agent-show {a.s(sid)}) (delete-other-windows) t)')
+        a.keyboard_ready()
+
+        def shown():
+            """The rows the open menu's panel shows: the UI's own, not the table asked anew."""
+            return parity_live.read_sexp(a.eval(
+                '(when (active-minibuffer-window) (with-current-buffer (window-buffer (active-minibuffer-window)) '
+                '(mapcar (function substring-no-properties) romacs-complete--candidates)))')) or []
+
+        def menu(name):
+            """The model menu by its keys, held open until its panel shows
+            what Codex lists: the menu never opened again."""
+            a.keys('-M', 'ctrl', '-k', 'c', '-k', 'o', '-m', 'ctrl')
+            until(lambda: a.eval('(buffer-live-p keymap-popup--buffer)') == 't', 15, 'menu open')
+            a.keys('m')
+            first = until(shown, 15, 'models offered')
+            minibuffer = a.eval('(prin1-to-string (window-buffer (active-minibuffer-window)))')
+            until(lambda: shown() == wanted, 60, 'Codex\'s models shown in the open menu')
+            a.eval('(progn (redisplay t) t)')
+            time.sleep(.5)
+            shot = base / f'models-{name}.png'
+            subprocess.run([f'{args.tools}/grim', str(shot)], env=a.env, check=True, timeout=30)
+            same = a.eval('(prin1-to-string (window-buffer (active-minibuffer-window)))') == minibuffer
+            a.keys('-M', 'ctrl', '-k', 'g', '-m', 'ctrl')
+            until(lambda: not shown(), 15, 'menu closed')
+            return {'first': first, 'same_menu': same, 'screenshot': str(shot)}
+
+        # Opened with nothing kept: its rows are computed before Codex is
+        # asked, so the models it shows came to the open menu.
+        result['cold'] = menu('cold')
+        result['kept'] = known('codex')
+        result['warm'] = menu('warm')
+        capabilities = json.loads(parity_live.read_sexp(a.eval(
+            '(decode-coding-string (json-serialize (romacs-agent-tools--capabilities (romacs-mcp--object))) (quote utf-8))')))
+        result['capabilities'] = {p['providerInstanceId']: [m['id'] for m in p['models']]
+                                  for p in capabilities['providers']}
+        a.eval('(progn (romacs-agent-refresh-models) t)')
+        until((kept / 'claude.json').exists, 60, 'claude models kept')
+        result['claude'] = known('claude')
+        result['ok'] = (result['before'] == [] and bool(result['listed'])
+                        and result['cold']['first'] == ['Codex · default']
+                        and result['cold']['same_menu'] and result['warm']['same_menu']
+                        and result['kept'] == result['listed']
+                        and result['capabilities']['codex'] == result['listed'] and bool(result['claude']))
+        return result
+    finally:
+        a.close()
+
+
 def history_real(args, base):
     """A real Claude Code conversation (--claude-model) and a real Codex one
     (--codex-model), each made outside Romacs in the real configuration
@@ -3884,7 +4026,7 @@ WORKFLOWS = {'chat_images': chat_images, 'chat_menu': chat_menu, 'history_view':
              'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race, 'restart-rollback': restart_rollback, 'restart-hang': restart_hang, 'renew': renew,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
              'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode,
-             'environment': environment, 'logging': logging, 'board_keys': board_keys, 'start_picker': start_picker, 'chat_log': chat_log, 'ui_review': ui_review, 'select': select, 'select-real': select_real, 'rpc': rpc,
+             'environment': environment, 'logging': logging, 'board_keys': board_keys, 'start_picker': start_picker, 'chat_log': chat_log, 'ui_review': ui_review, 'select': select, 'select-real': select_real, 'models-real': models_real, 'rpc': rpc,
              'instances': instances, 'mcp_tour': mcp_tour}
 
 

@@ -2,7 +2,8 @@
 """A stand-in for `codex app-server' (codex-cli 0.164), for agent session
 tests (agent_live.py): JSON-RPC lines on stdio, `initialize' then
 `thread/start' or `thread/resume', a `turn/start' per message, `turn/steer'
-into the turn running and `turn/interrupt' ending it.  Its "model" is a
+into the turn running and `turn/interrupt' ending it; `model/list' answers
+MODELS, as codex-cli 0.171 does.  Its "model" is a
 script on the prompt's first line:
 
   say TEXT      reply TEXT
@@ -27,6 +28,15 @@ import uuid
 
 LOG = os.environ.get('FAKE_HARNESS_LOG')
 OUT = threading.Lock()
+# What `model/list' answers.
+MODELS = [
+    {'id': 'gpt-fake-sol', 'model': 'gpt-fake-sol', 'displayName': 'GPT-Fake-Sol', 'description': '',
+     'hidden': False, 'isDefault': True, 'defaultReasoningEffort': 'low',
+     'supportedReasoningEfforts': [{'reasoningEffort': e, 'description': ''} for e in ('low', 'medium', 'high')]},
+    {'id': 'gpt-6-luna', 'model': 'gpt-6-luna', 'displayName': 'GPT-6-Luna', 'description': '',
+     'hidden': False, 'isDefault': False, 'defaultReasoningEffort': 'medium',
+     'supportedReasoningEfforts': [{'reasoningEffort': e, 'description': ''} for e in ('low', 'medium', 'high')]},
+]
 
 
 def emit(obj):
@@ -122,6 +132,8 @@ def main():
         method, rid, params = message.get('method'), message.get('id'), message.get('params') or {}
         if method == 'initialize':
             emit({'id': rid, 'result': {'userAgent': 'fake_codex'}})
+        elif method == 'model/list':
+            emit({'id': rid, 'result': {'data': MODELS, 'nextCursor': None}})
         elif method in ('thread/start', 'thread/resume'):
             thread = Thread(params.get('threadId') or str(uuid.uuid4()), method == 'thread/resume')
             emit({'id': rid, 'result': {'thread': {'id': thread.id}, 'model': params.get('model') or 'fake'}})

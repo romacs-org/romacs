@@ -441,7 +441,9 @@ its text about to go."
     (when-let* ((start (romacs-agent-log-stream-start stream))
                 (at (romacs-agent-log-stream-at stream)))
       (if discard (romacs-agent-log-faces-drop)
-        (when (eq (romacs-agent-log-stream-kind stream) 'text) (romacs-agent-log-faces-end start at)))
+        (when (eq (romacs-agent-log-stream-kind stream) 'text)
+          (romacs-agent-log-faces-end start at)
+          (romacs-agent-log-tables-draw start at)))
       (set-marker start nil)
       (set-marker at nil))))
 
@@ -1567,7 +1569,9 @@ FROM, nil at the session's start."
           (when (get-text-property (point) 'romacs-agent-log-earlier) (delete-region (point) line-end)))
         (insert (if from (romacs-agent-log--earlier-line from) "") text)
         ;; A rollback either side of the new page's start reaches over it.
-        (romacs-agent-log-turns--dim-above (point)))))
+        (romacs-agent-log-turns--dim-above (point))))
+    ;; Its tables were drawn at no window's width.
+    (romacs-agent-log-tables-refit))
   (setq romacs-agent-log--from from))
 
 ;;; The chat
@@ -2105,7 +2109,7 @@ for each message cost a realization each redraw (romacs#377).")
 (defun romacs-agent-log--undecorated (text)
   "TEXT without its decoration, the runs marked `romacs-agent-decor'."
   (if (not (stringp text)) text
-    (let ((at 0) (parts nil))
+    (let ((at 0) (parts nil) (text (romacs-agent-log-tables-source text)))
       (while (< at (length text))
         (let ((next (next-single-property-change at 'romacs-agent-decor text (length text))))
           (unless (get-text-property at 'romacs-agent-decor text)
@@ -2129,6 +2133,7 @@ On the transcript's text:
   (add-function :filter-return (local 'filter-buffer-substring-function) #'romacs-agent-log--undecorated)
   ;; The separator's rule fits the window it is shown in.
   (add-hook 'window-size-change-functions (lambda (_) (when romacs-agent-log--input (romacs-agent-log--separator))) nil t)
+  (add-hook 'window-size-change-functions #'romacs-agent-log-tables-refit nil t)
   (add-hook 'after-change-functions #'romacs-agent-log--composer-plain nil t)
   (add-hook 'after-change-functions #'romacs-agent-log--composer-images nil t))
 
@@ -2137,6 +2142,7 @@ On the transcript's text:
 (require 'romacs-agent-log-turns)
 ;; Its replies' faces as they stream.
 (require 'romacs-agent-log-faces)
+(require 'romacs-agent-log-tables)
 ;; Its rounds, told at a glance.
 (require 'romacs-agent-log-rounds)
 ;;; romacs-agent-log.el ends here
