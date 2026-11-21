@@ -15,7 +15,8 @@
 ;; a caller never told reads the report, whose last line is the verdict.
 ;;
 ;; romacs_live_update loads into this Romacs the Lisp a source has that
-;; it lacks (romacs-live.el).
+;; it lacks (romacs-live.el); romacs_live_test runs that Lisp's suites
+;; (romacs-live-test.el).
 ;;
 ;; romacs_dev_guide answers from this Romacs what it offers for writing
 ;; Lisp for it (romacs-dev-guide.el), and for a worktree what the module
@@ -34,6 +35,7 @@
 ;; Registering the tool must not load romacs-live, and a batch session has
 ;; no bundled autoloads to make its handler a function.
 (autoload 'romacs-live-mcp-update "romacs-live")
+(autoload 'romacs-live-test-mcp "romacs-live-test")
 
 (defconst romacs-mcp-dev--step 0.008
   "How many seconds of a guide search one poll of its request takes: what
@@ -204,7 +206,12 @@ name and the empty query are answered at once."
    (romacs-mcp--schema '(("instance" . "string") ("source" . "string") ("files" . "array") ("repository" . "string")
                          ("plan" . "boolean") ("unbindGone" . "boolean"))
                        nil)
-   #'romacs-live-mcp-update))
+   #'romacs-live-mcp-update)
+  (romacs-mcp-register-tool
+   "romacs_live_test"
+   "Run the ERT suites of the Lisp this Romacs runs live (romacs_live_update's ledger), from the source tree it came from, with the tree's own runner (tools/test-ert): each suite file in its own process with a private HOME, files in parallel, as the merge queue's Lisp check runs them; nothing runs in this session. worktree: the source tree (default: the last update's worktree); modules: library names (default: the ledger's), each running NAME-tests.el and NAME-*-tests.el or its package's suites. Answers when done: summary, passed, files (file, status, tests), failed (test names), logs (each file's output)."
+   (romacs-mcp--schema '(("instance" . "string") ("worktree" . "string") ("modules" . "array")) nil)
+   #'romacs-live-test-mcp))
 
 (provide 'romacs-mcp-dev)
 ;;; romacs-mcp-dev.el ends here

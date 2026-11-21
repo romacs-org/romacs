@@ -142,6 +142,7 @@ def until(predicate, seconds, what):
             outlasted(what, time.time() - started, seconds)
 
 HARNESS = Path(__file__).resolve().parent / 'fake_harness.py'
+TREE = Path(__file__).resolve().parents[3]
 CODEX = Path(__file__).resolve().parent / 'fake_codex.py'
 RPC = Path(__file__).resolve().parent / 'fake_rpc.py'
 RPC_DRIVER = Path(__file__).resolve().parent / 'fakerpc.el'
@@ -1045,6 +1046,9 @@ def tour(work, delegate_target):
         # A plan of loading one Lisp file: what it would do, nothing loaded.
         ('romacs_live_update', {'files': [str(work / 'tour-live.el')], 'plan': True},
          lambda t: '"plan":true' in t and 'tour-live.el' in t),
+        # This tree's runner on a library with no suites: it runs, and says so.
+        ('romacs_live_test', {'worktree': str(TREE), 'modules': ['romacs-live-tour-none']},
+         lambda t: 'No suite ran for romacs-live-tour-none' in t and '"passed":false' in t),
         ('romacs_option_search', {'query': 'kill-ring'}, lambda t: 'kill-ring-max' in t),
         ('romacs_option_describe', {'name': 'kill-ring-max'}, lambda t: 'kill-ring-max' in t),
         ('romacs_option_set', {'name': 'kill-ring-max', 'value': '61'}, lambda t: '61' in t),
@@ -2000,6 +2004,7 @@ def mcp_tour(args, base):
                 'romacs_delegate_task': {'task': 'say toured', 'cwd': str(a.work)},
                 'romacs_task_list': {},
                 'romacs_live_update': {'files': [str(a.work / 'tour-live.el')], 'plan': True},
+                'romacs_live_test': {'worktree': str(TREE), 'modules': ['romacs-live-tour-none']},
             }
             answered, errors, protocol, silent = {}, {}, {}, []
 
