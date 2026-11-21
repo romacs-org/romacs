@@ -58,5 +58,29 @@
     (romacs-markdown-hide-markup (point-min) (point-max))
     (should (eq (get-text-property 1 'invisible) 'fold))))
 
+(ert-deftest romacs-agent-eye-the-user-stands-behind-a-bar ()
+  ;; Each line of the user's message behind a bar in the colour that means
+  ;; them; a message from elsewhere behind a thin one; the bar is never
+  ;; part of what is copied.
+  (let ((session (romacs-agent--make :id "E" :harness 'claude :state 'running
+                                     :tools (make-hash-table :test #'equal)
+                                     :streamed (make-hash-table :test #'equal))))
+    (with-temp-buffer
+      (romacs-agent-log-mode)
+      (setq romacs-agent-log--session session
+            romacs-agent-log--end (point-min-marker)
+            romacs-agent-log--input (point-min-marker))
+      (set-marker-insertion-type romacs-agent-log--end t)
+      (romacs-agent-log-draw session '(:type input :text "first line\nsecond line" :request 1))
+      (goto-char (point-min))
+      (dolist (words '("first line" "second line"))
+        (search-forward words)
+        (let ((bol (line-beginning-position)))
+          (should (eq (char-after bol) ?▌))
+          (should (get-text-property bol 'romacs-agent-decor))
+          (should (memq 'romacs-agent-log-you-bar (ensure-list (get-text-property bol 'face))))))
+      (should (equal (string-trim (romacs-agent-log--undecorated (buffer-substring (point-min) romacs-agent-log--end)))
+                     "❯ first line\nsecond line")))))
+
 (provide 'romacs-agent-eye-tests)
 ;;; romacs-agent-eye-tests.el ends here

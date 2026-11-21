@@ -7,7 +7,9 @@
 ;; the agent did in answer.  Who each block is reads by shape and colour,
 ;; before any word:
 ;;
-;; - the user's message opens a round: its lines on a tinted surface;
+;; - the user's message opens a round: its lines on a tinted surface,
+;;   behind a thick bar in the colour that means the user everywhere
+;;   (`romacs-working-waiting', what waits on them on the board);
 ;; - a message from elsewhere (another session's, a delegated task's
 ;;   result, a background task's notice) opens one too, but is not the
 ;;   user: quoted behind a bar from its head, ← and whom it is from, to
@@ -24,6 +26,9 @@
 (defface romacs-agent-log-you '((t :extend t))
   "The surface of the user's messages: the background moved a little
 toward the text, derived on each theme change.")
+(defface romacs-agent-log-you-bar '((t :inherit romacs-working-waiting))
+  "The bar the user's messages stand behind: the colour that means the
+user, what waits on them, on every view of agents.")
 (defface romacs-agent-log-other-mark '((t :inherit romacs-working-running))
   "The mark of what came from elsewhere, and the bar it is quoted behind:
 the theme's colour for work.")
@@ -59,9 +64,16 @@ its surface, a block to the window's edge from its first line through
 its newline; the blank lines before and after it stay the transcript's.
 The round before it ends."
   (romacs-agent-log-rounds-end)
-  (let ((text (if (string-suffix-p "\n" text) (copy-sequence text) (concat text "\n"))))
+  (let* ((text (if (string-suffix-p "\n" text) (copy-sequence text) (concat text "\n")))
+         (bar (propertize "▌ " 'face 'romacs-agent-log-you-bar 'romacs-agent-decor t))
+         (first (or (string-match "[^\n]" text) 0))
+         ;; Its bar before each of its lines (rows a line wraps to have
+         ;; its surface: the host draws no wrap prefix).
+         (text (concat (substring text 0 first)
+                       (replace-regexp-in-string "^\\(.\\)" (lambda (line) (concat bar line))
+                                                 (substring text first) t t))))
     (put-text-property 0 1 'romacs-agent-log-round t text)
-    (add-face-text-property (or (string-match "[^\n]" text) 0) (length text) 'romacs-agent-log-you t text)
+    (add-face-text-property first (length text) 'romacs-agent-log-you t text)
     (concat text "\n")))
 
 (defun romacs-agent-log-rounds--head (incoming)

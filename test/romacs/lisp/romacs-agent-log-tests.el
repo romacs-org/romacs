@@ -72,7 +72,7 @@
     (draw :type 'message-end)
     (draw :type 'input :text "next")
     (should (equal (romacs-agent-log-tests--transcript)
-                   "∴ I think.\n\nPara one.\n\nPara two.\n\n❯ next\n\n"))))
+                   "∴ I think.\n\nPara one.\n\nPara two.\n\n▌ ❯ next\n\n"))))
 
 (ert-deftest romacs-agent-log-long-output-says-how-much-more ()
   (romacs-agent-log-tests--with
@@ -224,7 +224,7 @@
     (draw :type 'input :text "two")
     (goto-char (point-min))
     (romacs-agent-log-next-prompt 1)
-    (should (looking-at-p "\n❯ two"))
+    (should (looking-at-p "\n▌ ❯ two"))
     ;; Past the last prompt: said, never a hang.
     (should-error (romacs-agent-log-next-prompt 1) :type 'user-error)
     (goto-char (point-min))
@@ -1356,7 +1356,7 @@ none when dropped.")
       ;; Its newlines, between its lines and after its last.
       (should (memq 'romacs-agent-log-you (ensure-list (get-text-property (line-end-position) 'face))))
       (forward-line 1)
-      (should (looking-at "third"))
+      (should (looking-at "▌ third"))
       (should (memq 'romacs-agent-log-you (ensure-list (get-text-property (line-end-position) 'face))))
       (should-not (memq 'romacs-agent-log-you (ensure-list (get-text-property (1- line) 'face)))))))
 
@@ -1410,13 +1410,13 @@ none when dropped.")
     ;; Two prompts: one blank line between.
     (draw :type 'input :text "one" :request 1)
     (draw :type 'input :text "two" :request 2)
-    (should (equal (romacs-agent-log-tests--transcript) "❯ one\n\n❯ two\n\n"))
+    (should (equal (romacs-agent-log-tests--transcript) "▌ ❯ one\n\n▌ ❯ two\n\n"))
     ;; Thinking of line breaks only, a call, then the reply: no trace of
     ;; the thinking, one blank line before the reply.
     (draw :type 'thinking :text "\n\n")
     (draw :type 'tool :state 'started :id "t1" :name "Bash" :input (romacs-agent-log-tests--input "command" "ls"))
     (draw :type 'delta :text "Done.")
-    (should (string-match-p "\\`❯ one\n\n❯ two\n\n● [^\n]*\n\nDone\\.\n\\'" (romacs-agent-log-tests--transcript)))))
+    (should (string-match-p "\\`▌ ❯ one\n\n▌ ❯ two\n\n● [^\n]*\n\nDone\\.\n\\'" (romacs-agent-log-tests--transcript)))))
 
 (ert-deftest romacs-agent-log-rounds-arrival-without-its-call-is-top-level ()
   ;; Its parent call never drawn: a round of its own at the top level.
