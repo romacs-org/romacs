@@ -11,8 +11,11 @@
                   (puthash "command" "make" input)
                   (romacs-agent-show session)
                   (list session input
-                        (mapconcat (lambda (i) (format "line %d of a long build log, with some words" i))
-                                   (number-sequence 1 n) "\n"))))
+                        (concat
+                         (mapconcat (lambda (i) (format "line %d of a long build log, with some words" i))
+                                    (number-sequence 1 n) "\n")
+                         ;; The note Claude Code puts after a command's output.
+                         "\nShell cwd was reset to /tmp\n"))))
   :body (pcase-let ((`(,session ,input ,output) it))
           (romacs-agent-log--on-event session (list :type 'tool :state 'started :id "big" :name "Bash" :input input
                                                     :seq 1 :last t))

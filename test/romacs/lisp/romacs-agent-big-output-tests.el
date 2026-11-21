@@ -45,6 +45,9 @@
   (should (equal (romacs-agent-rows-glimpse "a\nb\nc\n\n  \n" 2 nil nil " \n") '(("a" "b") . 3)))
   ;; A count trims line breaks only: a blank line still counts.
   (should (= (romacs-agent-rows--lines "a\n \n") 2))
+  (should (= (romacs-agent-rows--lines "a\n\n") 2))
+  (should (= (romacs-agent-rows--lines "\n") 1))
+  (should (= (romacs-agent-rows--lines "a\nb") 2))
   (should (equal (romacs-agent-rows-glimpse "a\nb\nc\n" 2 t) '(("b" "c") . 3)))
   (should (equal (romacs-agent-rows-glimpse "abcdef\ngh" 5 nil 3) '(("abc" "gh") . 2)))
   (should (equal (romacs-agent-rows-glimpse "" 5) '(nil . 0)))
@@ -100,6 +103,15 @@
           (should (string-match-p (format "line %d\n" lines) text))
           (should-not (string-match-p (format "line %d\n\\|Shell cwd" (- lines 10)) text))
           (should (< (length text) 1000)))))))
+
+(ert-deftest romacs-agent-big-output-a-failure-past-the-bound-says-its-size ()
+  (let ((romacs-agent-rows-read-limit 1000))
+    (romacs-agent-big-output-tests--with
+      (draw :type 'tool :state 'started :id "a" :name "Bash" :input (romacs-agent-big-output-tests--input "command" "make"))
+      (draw :type 'tool :state 'failed :id "a" :output (mapconcat #'number-to-string (number-sequence 1 2000) "\n"))
+      (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+        (should (string-match-p "characters in all" text))
+        (should-not (string-match-p "more lines" text))))))
 
 (ert-deftest romacs-agent-big-output-a-call-never-drawn-is-one-row ()
   ;; A completion whose start this chat never drew: its row, with a huge

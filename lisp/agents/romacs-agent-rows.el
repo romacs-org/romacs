@@ -492,7 +492,12 @@ found none."
 (defun romacs-agent-rows--lines (text)
   "How many lines TEXT spans, a string's, 0 for none; past
 `romacs-agent-rows-read-limit', how many its first part spans."
-  (if (stringp text) (cdr (romacs-agent-rows-glimpse (romacs-agent-rows-clip text) 0)) 0))
+  (if (or (not (stringp text)) (string-empty-p text)) 0
+    ;; One line more than its line breaks, a last one aside.
+    (with-temp-buffer
+      (insert (romacs-agent-rows-clip text))
+      (when (eq (char-before) ?\n) (delete-char -1))
+      (1+ (- (count-lines (point-min) (point-max)) (if (or (bobp) (eq (char-before) ?\n)) 0 1))))))
 
 (defconst romacs-agent-rows-read-limit (* 1024 1024)
   "The most characters of a tool's output the chat reads on the main VM.

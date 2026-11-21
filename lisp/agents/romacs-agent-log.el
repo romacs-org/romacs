@@ -468,12 +468,15 @@ many more there are; with TAIL, how many came before, then its last
 lines, as a command's output ran.  FULL, (INPUT . OUTPUT), is what RET
 on it shows."
   (pcase-let ((`(,shown . ,count) (romacs-agent-log--lines output romacs-agent-log-output-lines tail)))
+    ;; OUTPUT may be part of what the call answered: past what the chat
+    ;; reads, the answer's size, never the part's count.
+    (unless (romacs-agent-rows-readable-p (cdr full)) (setq count nil))
     (let* ((more (and (or (not count) (> count romacs-agent-log-output-lines))
                       (propertize (concat
                                    (if-let* ((n (and count (- count romacs-agent-log-output-lines))))
                                        (format "… %d %s line%s" n (if tail "earlier" "more") (if (= n 1) "" "s"))
                                      ;; Past what the chat reads: its size.
-                                     (format "… %s in all" (romacs-agent-rows-size output)))
+                                     (format "… %s in all" (romacs-agent-rows-size (cdr full))))
                                    (format " · %s shows all" (romacs-agent-log--key 'romacs-agent-log-open)))
                                   'face 'romacs-agent-log-note)))
            (shown (propertize (replace-regexp-in-string "\n" "\n    " (if (string-empty-p shown) "(no output)" shown) t t)
@@ -574,7 +577,7 @@ command's last lines (TAIL).  Anything else is RET away."
         ((member name '("Agent" "Task")) (list (romacs-agent-log--report (romacs-agent-rows-clip output)) 'romacs-agent-log-output))
         ((romacs-agent-rows-tail-p name)
          ;; The harness's own trailer is no line of the command's.
-         (list (romacs-agent-log--without-trailer output) 'romacs-agent-log-output t))))
+         (list (romacs-agent-log--without-trailer (romacs-agent-rows-clip output t)) 'romacs-agent-log-output t))))
 
 (defun romacs-agent-log--without-trailer (output)
   "A command's OUTPUT without the note its harness puts after it, read at
