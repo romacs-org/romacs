@@ -694,6 +694,16 @@ old one's."
     (mapcar (lambda (var) (format "sets %s, a variable another file defines" var))
             (romacs-live-forms-foreign-setqs (plist-get record :forms) defined))))
 
+(defun romacs-live--entry-fields (record store label)
+  "The ledger entry RECORD's file makes, its copy STORE, from LABEL's source
+unless RECORD names its own; its `:state' still to add."
+  (let ((path (plist-get record :path)))
+    (list :path path :file store :dir (directory-file-name (expand-file-name (plist-get record :new) (romacs-live--store)))
+          :base (plist-get record :base) :new (plist-get record :new)
+          ;; The build's own copy, whatever patches came between.
+          :origin (or (plist-get (romacs-live--entry path) :origin) (plist-get record :build-blob))
+          :source (or (plist-get record :source) label) :time (float-time))))
+
 (defun romacs-live--load (record loaded label defaults roots)
   "Load RECORD's file over the session, handling what a `load' leaves
 wrong; its report row.  A file loads by its name on `load-path': a store
@@ -709,11 +719,7 @@ from the build's tree, once its copy's directory is gone."
          (entry (romacs-live--history-entry loaded-p))
          (name (romacs-live--load-name path roots))
          (store (and (memq action '(load stage)) (romacs-live--store-put (plist-get record :new) name (plist-get record :bytes))))
-         (fields (and store (list :path path :file store :dir (directory-file-name (expand-file-name (plist-get record :new) (romacs-live--store)))
-                                  :base (plist-get record :base) :new (plist-get record :new)
-                                  ;; The build's own copy, whatever patches came between.
-                                  :origin (or (plist-get (romacs-live--entry path) :origin) (plist-get record :build-blob))
-                                  :source (or (plist-get record :source) label) :time (float-time))))
+         (fields (and store (romacs-live--entry-fields record store label)))
          (row (list :path path :action action :diff (plist-get record :diff))))
     (pcase action
       ('stage (romacs-live--set-entry (append fields (list :state 'staged))) row)

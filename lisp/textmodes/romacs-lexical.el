@@ -220,38 +220,54 @@ own; its newline starts the next line afresh."
   "The lexical family LANGUAGE, a symbol, is coloured as, or nil."
   (alist-get language romacs-lexical-languages))
 
+(defun romacs-lexical--span (state before at next end)
+  "The span (FROM TO CLASS) of a run lexed in STATE from AT to NEXT, the
+run before it in BEFORE, END the region's: nil for plain code."
+  (let* ((class (romacs-lexical--class state))
+         ;; A comment's opening slash was lexed before it knew.
+         (at (if (and (eq class 'comment) (eq before 'slash)) (1- at) at)))
+    (pcase class
+      ('nil nil)
+      ;; A head that is a form, not a call.
+      ('head (list at next (if (string-match-p romacs-lexical-lisp-forms (buffer-substring-no-properties at next)) 'form 'head)))
+      ;; A diff's line is coloured through its newline, a band.
+      ((or 'added 'removed 'hunk 'added-sign 'removed-sign)
+       (list at (if (and (< next end) (eq (char-after next) ?\n)) (1+ next) next) class))
+      (_ (list at next class)))))
+
+(defun romacs-lexical--defined-name (span)
+  "The name a definition's head, SPAN, defines, as a span, or nil."
+  (pcase-let ((`(,from ,to ,_) span))
+    (when (string-match-p "\\`\\(?:cl-\\)?def" (buffer-substring-no-properties from to))
+      (save-excursion
+        (goto-char to)
+        (when (looking-at "[ \t\n]+\\([^] \t\n()\"';]+\\)")
+          (list (match-beginning 1) (match-end 1) 'name))))))
+
+(defun romacs-lexical--joined (span spans)
+  "SPANS, the newest first, with SPAN after them: one span with the last
+when it goes on in the same class (a string's escapes, a char's)."
+  (pcase-let ((`(,from ,to ,class) span)
+              (`(,last-from ,last-to ,last-class) (car spans)))
+    (if (and spans (eq last-class class) (= last-to from))
+        (cons (list last-from to class) (cdr spans))
+      (cons span spans))))
+
 (defun romacs-lexical-spans (family beg end)
   "The classes of BEG..END of the current buffer lexed as FAMILY, as
-\(FROM TO CLASS) spans in order, plain code left out."
+\(FROM TO CLASS) spans in order, plain code left out.  After a
+definition's head, its name; its list of arguments calls nothing."
   (let ((runs (romacs-scanner-runs (alist-get family romacs-lexical--families) beg end))
         (before nil) (spans nil) (defining nil))
     (while runs
       (pcase-let* ((`(,at . ,state) (car runs))
-                   (next (or (car-safe (cadr runs)) end))
-                   (class (romacs-lexical--class state))
-                   ;; A comment's opening slash was lexed before it knew.
-                   (at (if (and (eq class 'comment) (eq before 'slash)) (1- at) at))
-                   (last (car spans)))
-        ;; A head that is a form, not a call.
-        (when (and (eq class 'head) (string-match-p romacs-lexical-lisp-forms (buffer-substring-no-properties at next)))
-          (setq class 'form))
-        ;; A diff's line is coloured through its newline, a band.
-        (when (and (memq class '(added removed hunk added-sign removed-sign)) (< next end) (eq (char-after next) ?\n))
-          (setq next (1+ next)))
-        ;; After a definition's head, its name; its list of arguments
-        ;; calls nothing.
-        (when (eq class 'head)
-          (when (eq defining 'arglist) (setq class nil defining nil)))
-        (cond ((null class))
-              ;; The same class on: one span (a string's escapes, a char's).
-              ((and last (eq (nth 2 last) class) (= (nth 1 last) at)) (setcar (cdr last) next))
-              (t (push (list at next class) spans)))
-        (when (and (eq class 'form) (string-match-p "\\`\\(?:cl-\\)?def" (buffer-substring-no-properties at next)))
-          (save-excursion
-            (goto-char next)
-            (when (looking-at "[ \t\n]+\\([^] \t\n()\"';]+\\)")
-              (push (list (match-beginning 1) (match-end 1) 'name) spans)
-              (setq defining 'arglist))))
+                   (span (romacs-lexical--span state before at (or (car-safe (cadr runs)) end) end)))
+        (when (and defining span (eq (nth 2 span) 'head)) (setq span nil defining nil))
+        (when span
+          (setq spans (romacs-lexical--joined span spans))
+          (when-let* ((name (and (eq (nth 2 span) 'form) (romacs-lexical--defined-name span))))
+            (push name spans)
+            (setq defining t)))
         (setq before state runs (cdr runs))))
     (nreverse spans)))
 
