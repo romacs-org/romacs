@@ -153,6 +153,10 @@ def refusal(scenario, result, wanted):
         return f'{len(readings)} readings for {wanted} steps'
     if any(r.get('step-instructions') is None or r.get('instructions') is None for r in readings):
         return 'no instruction counter (romacs-instructions is nil)'
+    if scenario.get('baseline') and any('above-instructions' not in r for r in readings):
+        return 'no baseline was measured: no collection above it is counted'
+    if scenario.get('collects') and any(d['collections'] < 1 for d in steps(readings)):
+        return 'a step ran no collection'
     odd = odd_steps(scenario, steps(readings))
     if len(odd) > ODD * wanted:
         return (f"steps {odd} did not run as many redisplays as the others, with "
@@ -171,14 +175,14 @@ def off(measured, bars):
 
 def verdict(scenario, result, wanted, bars):
     """SCENARIO's row from its session's RESULT: PASS, or FAIL with a reason."""
-    row = {'name': scenario['name'], 'paints': scenario['paints']}
+    row = {'name': scenario['name'], 'paints': scenario['paints'], 'session': result.get('session')}
     problem = refusal(scenario, result, wanted)
     if problem:
         return {**row, 'status': 'FAIL', 'reason': problem}
     deltas = steps(result['readings'])
     odd = odd_steps(scenario, deltas)
     kept = [d for i, d in enumerate(deltas) if i not in odd]
-    row.update(chars=result.get('chars'), figures=figures(kept, deltas), odd=odd, steps=deltas, session=result.get('session'))
+    row.update(chars=result.get('chars'), figures=figures(kept, deltas), odd=odd, steps=deltas)
     if scenario['name'] not in bars:
         return {**row, 'status': 'FAIL', 'reason': 'no bars for this scenario'}
     row['off'] = off(row['figures'], bars[scenario['name']])
@@ -248,7 +252,8 @@ def table(rows):
 def scenarios(binary, home, timeout):
     """The scenarios display_stages.el defines."""
     listed = scaling.batch(binary, home, '(display-stages-list)', timeout, loads=(SCENARIOS,))
-    return [{'name': raw['name'], 'paints': raw.get('paints') is True} for raw in listed]
+    return [{'name': raw['name'], 'paints': raw.get('paints') is True,
+             'collects': raw.get('collects') is True, 'baseline': raw.get('baseline') is True} for raw in listed]
 
 
 def recording(output, home, name):

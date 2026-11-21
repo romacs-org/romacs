@@ -36,10 +36,12 @@
   "Define scenario NAME from PLIST, its :baseline, :setup and :body forms
 made functions.  :baseline, when given, sets up what the scenario's own
 :setup adds to: the session measures a collection there
-(`display-stages--baseline') before :setup runs."
+(`display-stages--baseline') before :setup runs.  :collects says each
+step collects, and is refused when one did not."
   (declare (indent 1))
   `(setf (alist-get ',name display-stages-scenarios)
          (list :paints ,(plist-get plist :paints)
+               :collects ,(plist-get plist :collects)
                :baseline ,(and (plist-member plist :baseline) `(lambda () ,(plist-get plist :baseline)))
                :setup (lambda () ,(plist-get plist :setup))
                :body (lambda (it i) (ignore it i) ,(plist-get plist :body)))))
@@ -227,17 +229,17 @@ line's end; return it."
 ;; before that setup; its whole step is reported beside it.
 
 ;; The world's own collection, with a small buffer shown.
-(display-stages-scenario plain-collected
+(display-stages-scenario plain-collected :collects t
   :setup (display-stages--show (scaling--lines-buffer "stages" 2000))
   :body (garbage-collect))
 ;; What loading the agents adds to a collection, over the world's.
-(display-stages-scenario agents-collected
+(display-stages-scenario agents-collected :collects t
   :baseline (display-stages--show (scaling--lines-buffer "stages" 2000))
   :setup (progn (scaling--agent) (window-buffer (selected-window)))
   :body (display-stages--collect-above))
 ;; A collection in a chat: nothing shown changed.  What the chat adds to
 ;; it, over the agents loaded.
-(display-stages-scenario chat-collected
+(display-stages-scenario chat-collected :collects t
   :baseline (scaling--agent)
   :setup (display-stages--chat 100000)
   :body (display-stages--collect-above))
@@ -303,7 +305,9 @@ line's end; return it."
   "Print each scenario's name and whether its steps paint, one SCALING line each."
   (dolist (scenario (reverse display-stages-scenarios))
     (scaling--print (list :name (symbol-name (car scenario))
-                          :paints (if (plist-get (cdr scenario) :paints) t :json-false)))))
+                          :paints (if (plist-get (cdr scenario) :paints) t :json-false)
+                          :collects (if (plist-get (cdr scenario) :collects) t :json-false)
+                          :baseline (if (plist-get (cdr scenario) :baseline) t :json-false)))))
 
 ;; A step settles by the order of events, not by a wait.  A poll that
 ;; finds it unsettled is owed a redisplay already: the step's own, one
@@ -425,6 +429,23 @@ and redisplays), collections so far, and redisplay's counts."
       ,@(and display-stages--fontified `((fontified-chars . ,display-stages--fontified)))
       ,@(and display-stages--above `((above-instructions . ,display-stages--above))))))
 
+(defun display-stages--after-baseline (plist then)
+  "Call THEN, after measuring PLIST's baseline when it has one: its
+:baseline set up and collected, then, a second on, under the steps'
+collection policy and once redisplayed, `display-stages--baseline'
+measured, in the state the steps run in but for what :setup adds."
+  (if-let* ((baseline (plist-get plist :baseline)))
+      (progn
+        (funcall baseline)
+        (garbage-collect)
+        (run-with-timer 1.0 nil
+                        (lambda ()
+                          (setq romacs-gc-idle-delay nil)
+                          (redisplay t)
+                          (display-stages--measure-baseline)
+                          (funcall then))))
+    (funcall then)))
+
 (defun display-stages-start (name out steps)
   "Run scenario NAME for STEPS steps in this session, then exit.
 Once the session is idle, set the scenario up; then run its steps from a
@@ -439,14 +460,14 @@ stderr, and write the readings to OUT as JSON."
      0.5 nil
      (lambda ()
        (scaling--quiet)
-       (when-let* ((baseline (plist-get plist :baseline)))
-         (funcall baseline)
-         (display-stages--measure-baseline))
-       (setq it (funcall (plist-get plist :setup)))
-       (garbage-collect)
-       (run-with-timer
-        1.0 nil
+       (display-stages--after-baseline
+        plist
         (lambda ()
+          (setq it (funcall (plist-get plist :setup)))
+          (garbage-collect)
+          (run-with-timer
+           1.0 nil
+           (lambda ()
           (let ((step nil) (laid-out nil) (i 0))
             (setq laid-out (lambda ()
                              (if (display-stages--settled-p) (funcall step) (run-with-timer gap nil laid-out)))
@@ -475,7 +496,7 @@ stderr, and write the readings to OUT as JSON."
                            (kill-emacs 0))))
             (scaling--mark (list :stages "start"))
             (scaling--perf "enable")
-            (funcall step))))))))
+            (funcall step))))))))))
 
 (provide 'display-stages)
 ;;; display_stages.el ends here
