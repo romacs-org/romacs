@@ -232,6 +232,7 @@ at the end and, after each step, a digest of its text and properties."
       (pcase-let ((`(,text . ,digests) (romacs-agent-log-golden-tests--golden steps))
                   (`(,want-text . ,want-digests) (alist-get name goldens)))
         (should (equal (list name text) (list name want-text)))
+        (should (equal (list name (length want-digests)) (list name (length steps))))
         ;; The first step that draws otherwise, named.
         (cl-loop for step in steps for digest in digests for want in want-digests
                  do (should (equal (list name step digest) (list name step want))))))))
