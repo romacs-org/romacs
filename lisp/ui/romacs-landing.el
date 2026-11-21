@@ -128,7 +128,7 @@ then run `romacs-landing-hook'."
                         #'romacs-landing--element)
   (run-hooks 'romacs-landing-hook))
 
-(declare-function romacs-gui-loadup-startup-buffer "romacs-gui-loadup")
+(declare-function romacs-gui-loadup-startup-buffer "romacs-gui-command-line")
 
 (defun romacs-landing-show ()
   "Show the *Romacs* landing in the selected window.
