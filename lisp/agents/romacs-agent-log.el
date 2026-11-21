@@ -211,8 +211,18 @@ a message ends with no trail of blank lines."))
 (defvar-local romacs-agent-log--root-kind nil
   "The kind of the last entry drawn at the transcript's top level, not
 under a call: what the agent's next words stand apart from.")
+(cl-defstruct (romacs-agent-log-ask (:constructor romacs-agent-log-ask--make) (:copier nil))
+  "An approval block drawn open."
+  (id nil :documentation "Its request's id.")
+  (start nil :documentation "A marker where its block begins.")
+  (end nil :documentation "A marker where it ends."))
+
 (defvar-local romacs-agent-log--asks nil
-  "Approval blocks drawn, by request id: (START . END) markers.")
+  "The approval blocks drawn open, `romacs-agent-log-ask's, the newest first.")
+
+(defun romacs-agent-log--ask-of (id)
+  "The approval block drawn open for request ID, or nil."
+  (cl-find id romacs-agent-log--asks :key #'romacs-agent-log-ask-id :test #'equal))
 (defvar-local romacs-agent-log--attributed nil
   "Request ids whose answer was drawn with who gave it.")
 (defvar romacs-agent-log--closes-deferred nil
@@ -220,18 +230,29 @@ under a call: what the agent's next words stand apart from.")
 said only after: an ask open at a turn's end is said to have ended once
 the history is drawn, unless an answer in it settles it.")
 
+(cl-defstruct (romacs-agent-log-owed (:constructor romacs-agent-log-owed--make) (:copier nil))
+  "What is owed for an ask's end: its note, put where it ended once its
+source lets the ask go."
+  (id nil :documentation "The ask's request id.")
+  (entry nil :documentation "The note, saying why it ended.")
+  (at nil :documentation "A marker where it ended."))
+
 (defvar-local romacs-agent-log--ended-asks nil
   "Asks open when their turn ended or harness exited, still listed as
-waited on by their source, each (ID ENTRY . AT): ENTRY, saying why, is
-put AT the place it ended, a marker, once the source lets the ask go
+waited on by their source, `romacs-agent-log-owed's: each note is put
+where its ask ended once the source lets the ask go
 \(`romacs-agent-log--sync-asks'), as another machine's does after.")
+
+(defun romacs-agent-log--owed (id)
+  "What is owed for ask ID's end, or nil."
+  (cl-find id romacs-agent-log--ended-asks :key #'romacs-agent-log-owed-id :test #'equal))
 
 (defun romacs-agent-log--drop-ended (id)
   "Forget what is owed for ask ID's end, and return it: (ENTRY . AT)."
-  (when-let* ((ended (assoc id romacs-agent-log--ended-asks)))
-    (setq romacs-agent-log--ended-asks (delq ended romacs-agent-log--ended-asks))
-    (prog1 (cons (cadr ended) (marker-position (cddr ended)))
-      (set-marker (cddr ended) nil))))
+  (when-let* ((owed (romacs-agent-log--owed id)))
+    (setq romacs-agent-log--ended-asks (delq owed romacs-agent-log--ended-asks))
+    (prog1 (cons (romacs-agent-log-owed-entry owed) (marker-position (romacs-agent-log-owed-at owed)))
+      (set-marker (romacs-agent-log-owed-at owed) nil))))
 (defvar romacs-agent-log--replaying nil
   "While a replay draws, the copy of the session its records are read
 into: what the session waited on then, not now.")
@@ -784,37 +805,40 @@ before this chat's first record): at the end, with its output."
           (maphash (lambda (_ block) (when (equal (romacs-agent-log-call-task block) task) (throw 'found block))) blocks)
           nil))))
 
+(defun romacs-agent-log--task-text (event block)
+  "What task EVENT says under BLOCK, its call, or nil there, or nil: its
+start in the background, what it does when that changes, how it ended."
+  (let ((state (plist-get event :state)))
+    (pcase state
+      ('backgrounded "moved to the background")
+      ('progress (let ((activity (plist-get event :activity)))
+                   (and activity (not (and block (equal activity (romacs-agent-log-call-activity block))))
+                        (format "now: %s" activity))))
+      ;; Its summary, but a subagent's: its call's output, drawn, is its report.
+      ((or 'completed 'failed 'stopped)
+       (concat (symbol-name state)
+               (if-let* ((summary (and (not (and block (romacs-agent-log-call-ended block)
+                                                 (member (romacs-agent-log-call-name block) '("Agent" "Task"))))
+                                       (plist-get event :summary))))
+                   (concat ": " summary)
+                 ""))))))
+
 (defun romacs-agent-log--task (event)
   "Draw task EVENT, what work under a call (a subagent, a command) says
-of itself, under that call: its start in the background, what it does
-when that changes, and how it ended; with its call gone, at the end."
+of itself, under that call; with its call gone, at the end.  Its work
+over, a call already ended closes; one still running closes as it ends."
   (let* ((block (romacs-agent-log--task-block event))
          (state (plist-get event :state))
-         (text (pcase state
-                 ('backgrounded "moved to the background")
-                 ('progress (let ((activity (plist-get event :activity)))
-                              (and activity (not (and block (equal activity (romacs-agent-log-call-activity block))))
-                                   (progn (when block (setf (romacs-agent-log-call-activity block) activity))
-                                          (format "now: %s" activity)))))
-                 ;; Its summary, but a subagent's: its call's output, drawn, is its report.
-                 ((or 'completed 'failed 'stopped)
-                  (concat (symbol-name state)
-                          (if-let* ((summary (and (not (and block (romacs-agent-log-call-ended block)
-                                                            (member (romacs-agent-log-call-name block) '("Agent" "Task"))))
-                                                  (plist-get event :summary))))
-                              (concat ": " summary)
-                            ""))))))
-    (when (and block (eq state 'started) (plist-get event :task))
-      (setf (romacs-agent-log-call-task block) (plist-get event :task)))
-    (when text
-      (if (not block)
-          (romacs-agent-log--note event (concat "task " text))
-        (romacs-agent-log--flush block)
-        (romacs-agent-log--put (romacs-agent-log--indent (propertize (concat "· " text "\n") 'face 'romacs-agent-log-note)
-                                                         (1+ (romacs-agent-log-call-depth block)))
-                               block)))
-    ;; Its work over, a call already ended closes; one still running
-    ;; closes as it ends.
+         (text (romacs-agent-log--task-text event block)))
+    (when block
+      (when (and text (eq state 'progress)) (setf (romacs-agent-log-call-activity block) (plist-get event :activity)))
+      (when (and (eq state 'started) (plist-get event :task)) (setf (romacs-agent-log-call-task block) (plist-get event :task))))
+    (cond ((not text))
+          ((not block) (romacs-agent-log--note event (concat "task " text)))
+          (t (romacs-agent-log--flush block)
+             (romacs-agent-log--put (romacs-agent-log--indent (propertize (concat "· " text "\n") 'face 'romacs-agent-log-note)
+                                                              (1+ (romacs-agent-log-call-depth block)))
+                                    block)))
     (when (and block (memq state '(completed failed stopped)))
       (if (romacs-agent-log-call-ended block)
           (romacs-agent-log--close-block block)
@@ -841,54 +865,70 @@ Live, in a chat no window shows, the echo area says so too."
                (propertize "⚠" 'face 'romacs-agent-log-ask) (romacs-agent-title session)
                (substitute-command-keys "\\[romacs-agents] shows it")))))
 
+(defun romacs-agent-log--ask-head (event)
+  "What EVENT, a request, asks of the user, in a few words."
+  (let ((who (if (plist-get event :parent) "A subagent" "The agent")))
+    (cond ((plist-get event :questions) (format "%s asks you:" who))
+          ((plist-get event :plan) (format "%s presents its plan: proceed?" who))
+          (t (format "%s wants to run %s:" who (romacs-agent-rows-name (plist-get event :tool)))))))
+
+(defun romacs-agent-log--ask-body (event)
+  "What EVENT, a request, asks about: its questions and their options, a
+call's input, or nil for a plan, shown above it."
+  (let ((questions (plist-get event :questions)))
+    (cond (questions
+           (mapconcat (lambda (q)
+                        (concat "  " (car q)
+                                (when-let* ((options (plist-get (cdr q) :options)))
+                                  (concat "\n    " (string-join options " · ")))))
+                      questions "\n"))
+          ((plist-get event :plan) nil)
+          (t (let ((json (romacs-agent-log--json (plist-get event :input))))
+               (pcase-let ((`(,shown . ,count) (romacs-agent-log--lines json 30)))
+                 (if-let* ((more (romacs-agent-log--more count 30 json)))
+                     (concat shown "\n" more)
+                   shown)))))))
+
+(defun romacs-agent-log--ask-keys (event)
+  "The keys that answer EVENT, a request, and what each does."
+  (cond ((plist-get event :questions)
+         (romacs-agent-log--keys 'romacs-agent-log-allow "choose" 'romacs-agent-log-deny "decline"))
+        ((plist-get event :plan)
+         (romacs-agent-log--keys 'romacs-agent-log-allow "proceed" 'romacs-agent-log-deny "keep planning, saying why"))
+        (t (romacs-agent-log--keys 'romacs-agent-log-allow "allow" 'romacs-agent-log-allow-always "allow for this session"
+                                   'romacs-agent-log-deny "deny"))))
+
+(defun romacs-agent-log--ask-text (event)
+  "The approval block of EVENT, a request: heading, why, what it asks, keys."
+  (let ((why (plist-get event :description))
+        (body (romacs-agent-log--ask-body event)))
+    (concat (propertize (concat "⚠ " (romacs-agent-log--ask-head event)) 'face 'romacs-agent-log-ask)
+            (if why (concat "\n  " (propertize why 'face 'romacs-agent-log-note)) "")
+            ;; Its question and choices in the text's own face: the
+            ;; decision reads first, after the heading.
+            (if body (concat "\n" (propertize (replace-regexp-in-string "^" "  " body)
+                                               'face (if (plist-get event :questions) 'default 'romacs-agent-log-output)))
+              "")
+            "\n" (propertize (concat "  " (romacs-agent-log--ask-keys event) "\n") 'romacs-agent-log-keys t))))
+
 (defun romacs-agent-log--ask-block (event)
+  "Draw EVENT, a request, as a block its keys answer."
   (romacs-agent-log--close-stream)
-  (let* ((id (plist-get event :request-id))
-         (questions (plist-get event :questions))
-         (plan (plist-get event :plan))
-         (input (plist-get event :input))
-         (who (if (plist-get event :parent) "A subagent" "The agent"))
-         (head (cond (questions (format "%s asks you:" who))
-                     (plan (format "%s presents its plan: proceed?" who))
-                     (t (format "%s wants to run %s:" who (romacs-agent-rows-name (plist-get event :tool))))))
-         (body (cond (questions
-                      (mapconcat (lambda (q)
-                                   (concat "  " (car q)
-                                           (when-let* ((options (plist-get (cdr q) :options)))
-                                             (concat "\n    " (string-join options " · ")))))
-                                 questions "\n"))
-                     (plan nil)
-                     (t (let ((json (romacs-agent-log--json input)))
-                          (pcase-let ((`(,shown . ,count) (romacs-agent-log--lines json 30)))
-                            (if-let* ((more (romacs-agent-log--more count 30 json)))
-                                (concat shown "\n" more)
-                              shown))))))
-         (why (plist-get event :description))
-         (keys (cond (questions (romacs-agent-log--keys 'romacs-agent-log-allow "choose" 'romacs-agent-log-deny "decline"))
-                     (plan (romacs-agent-log--keys 'romacs-agent-log-allow "proceed" 'romacs-agent-log-deny "keep planning, saying why"))
-                     (t (romacs-agent-log--keys 'romacs-agent-log-allow "allow" 'romacs-agent-log-allow-always "allow for this session"
-                                                'romacs-agent-log-deny "deny"))))
-         (text (concat (propertize (concat "⚠ " head) 'face 'romacs-agent-log-ask)
-                       (if why (concat "\n  " (propertize why 'face 'romacs-agent-log-note)) "")
-                       ;; Its question and choices in the text's own face: the
-                       ;; decision reads first, after the heading.
-                       (if body (concat "\n" (propertize (replace-regexp-in-string "^" "  " body)
-                                                          'face (if questions 'default 'romacs-agent-log-output)))
-                         "")
-                       "\n" (propertize (concat "  " keys "\n") 'romacs-agent-log-keys t))))
-    (let ((start (copy-marker romacs-agent-log--end)))
-      (romacs-agent-log--put (propertize (romacs-agent-log--entry text 'ask event)
-                                         'romacs-agent-log-request id
-                                         'romacs-agent-log-full (list input)
-                                         'romacs-agent-log-questions questions
-                                         'romacs-agent-log-plan plan
-                                         'keymap romacs-agent-log-ask-map))
-      (push (cons id (cons start (copy-marker romacs-agent-log--end))) romacs-agent-log--asks))))
+  (let ((id (plist-get event :request-id))
+        (start (copy-marker romacs-agent-log--end)))
+    (romacs-agent-log--put (propertize (romacs-agent-log--entry (romacs-agent-log--ask-text event) 'ask event)
+                                       'romacs-agent-log-request id
+                                       'romacs-agent-log-full (list (plist-get event :input))
+                                       'romacs-agent-log-questions (plist-get event :questions)
+                                       'romacs-agent-log-plan (plist-get event :plan)
+                                       'keymap romacs-agent-log-ask-map))
+    (push (romacs-agent-log-ask--make :id id :start start :end (copy-marker romacs-agent-log--end))
+          romacs-agent-log--asks)))
 
 (defun romacs-agent-log--settle-ask (id)
   "The approval block of request ID answered: no longer a warning."
-  (when-let* ((block (assoc id romacs-agent-log--asks)))
-    (pcase-let ((`(,_ ,start . ,end) block))
+  (when-let* ((ask (romacs-agent-log--ask-of id)))
+    (let ((start (romacs-agent-log-ask-start ask)) (end (romacs-agent-log-ask-end ask)))
       (romacs-agent-log--writing
         ;; Its keys answer nothing any more: their row goes.
         (when-let* ((keys (text-property-any start end 'romacs-agent-log-keys t)))
@@ -897,7 +937,7 @@ Live, in a chat no window shows, the echo area says so too."
         ;; It answers nothing any more: no keys, no request to answer.
         (remove-text-properties start end '(keymap nil romacs-agent-log-request nil))
         (put-text-property start end 'keymap (or romacs-agent-log--text-map romacs-agent-log-transcript-map))))
-    (setq romacs-agent-log--asks (delq block romacs-agent-log--asks))))
+    (setq romacs-agent-log--asks (delq ask romacs-agent-log--asks))))
 
 (defun romacs-agent-log--close-asks (session event how)
   "SESSION's turn ended or its harness exited (HOW, `turn-end' or `exit',
@@ -907,7 +947,7 @@ recorded answer settles its block."
   (let ((approvals (if romacs-agent-log--replaying (romacs-agent-approvals romacs-agent-log--replaying)
                      (romacs-agent-log-source-approvals romacs-agent-log--source session))))
     (dolist (ask romacs-agent-log--asks)
-      (let* ((id (car ask))
+      (let* ((id (romacs-agent-log-ask-id ask))
              (why (cond ((member id romacs-agent-log--attributed) "an answer not delivered: the harness never took it")
                         ((eq how 'exit) "the harness exited with it unanswered")
                         (t "the turn ended with it unanswered"))))
@@ -919,11 +959,11 @@ recorded answer settles its block."
               ;; from a source's history before what it waits on now:
               ;; said, where it first ended, once it lets it go, unless
               ;; an answer settles it.  A later turn's end is not its.
-              ((and (not romacs-agent-log--replaying) (not (assoc id romacs-agent-log--ended-asks)))
+              ((and (not romacs-agent-log--replaying) (not (romacs-agent-log--owed id)))
                (romacs-agent-log--close-stream)
-               (push (cons id (cons (romacs-agent-log--entry (propertize (concat "· " why) 'face 'romacs-agent-log-note)
-                                                             'note event)
-                                    (copy-marker romacs-agent-log--end)))
+               (push (romacs-agent-log-owed--make
+                      :id id :entry (romacs-agent-log--entry (propertize (concat "· " why) 'face 'romacs-agent-log-note) 'note event)
+                      :at (copy-marker romacs-agent-log--end))
                      romacs-agent-log--ended-asks)))))))
 
 (defun romacs-agent-log--answer-text (actor decision scope reason &optional answers)
@@ -1078,6 +1118,83 @@ back in the mode it had, and the next message carries it out."
   (save-restriction (widen) (romacs-agent-log--separator))
   (romacs-agent-log--header-show))
 
+(defun romacs-agent-log--tool-output (event)
+  "Draw EVENT, output a call streams as it runs, under its call; before
+its call (Codex's first line can be), held for it, its last 64K, until
+its turn ends."
+  (when-let* ((text (plist-get event :text)))
+    (if-let* ((block (romacs-agent-log--block (plist-get event :id))))
+        (romacs-agent-log--live block text)
+      (let* ((id (plist-get event :id))
+             (held (concat (alist-get id romacs-agent-log--early nil nil #'equal) text)))
+        (setf (alist-get id romacs-agent-log--early nil nil #'equal)
+              (substring held (max 0 (- (length held) 65536))))))))
+
+(defun romacs-agent-log--attributed (event)
+  "Draw EVENT, who answered a request: said, its block settled once its
+answer is written."
+  (push (plist-get event :request-id) romacs-agent-log--attributed)
+  (romacs-agent-log--line event 'answer
+                          ;; A service older than :actor says who alone.
+                          (romacs-agent-log--answer-text (or (plist-get event :actor)
+                                                             (list :kind (or (plist-get event :by) "unknown")))
+                                                         (plist-get event :decision)
+                                                         (plist-get event :scope) (plist-get event :reason)
+                                                         (plist-get event :answers))))
+
+(defun romacs-agent-log--plan (session event)
+  "Draw EVENT, SESSION's plan; offered, its text takes y, the separator
+says so."
+  (let ((text (concat (propertize "📋 Plan\n" 'face 'romacs-agent-log-prompt) (plist-get event :text))))
+    (when (romacs-agent-log--offers-proceed-p session event)
+      (romacs-agent-log--retire-proceed)
+      (setq text (propertize text 'romacs-agent-log-proceed t 'keymap romacs-agent-log-plan-map)))
+    (romacs-agent-log--line event 'plan text)))
+
+(defun romacs-agent-log--compacted (event)
+  "Draw EVENT, the context compacted: its summary's first lines, all of it
+on RET from anywhere in the entry."
+  (let* ((summary (or (plist-get event :text) ""))
+         (lines (romacs-agent-log--lines summary romacs-agent-log-output-lines)))
+    (romacs-agent-log--line event 'note
+                            (propertize
+                             (concat "· context compacted\n" (car lines)
+                                     (if-let* ((more (romacs-agent-log--more (cdr lines) romacs-agent-log-output-lines summary)))
+                                         (concat "\n" more)
+                                       ""))
+                             'romacs-agent-log-full (cons nil summary))
+                            'romacs-agent-log-note)))
+
+(defun romacs-agent-log--exit (session event)
+  "Draw EVENT, SESSION's harness exited: a turn it cut is a round ended,
+and an exit a per-turn driver's turn did not mean is said."
+  (setq romacs-agent-log--current nil romacs-agent-log--early nil)
+  (romacs-agent-log--close-asks session event 'exit)
+  (romacs-agent-log--close-stream)
+  (romacs-agent-log-rounds-end)
+  (unless (and (romacs-agent--per-turn-p session) (eql (plist-get event :status) 0))
+    (romacs-agent-log--note event (format "harness exited (%s)" (plist-get event :status)))))
+
+(defun romacs-agent-log--selection-label (selection)
+  "SELECTION, a model and effort, as a note says it."
+  (mapconcat #'identity (or (delq nil (list (plist-get selection :model) (plist-get selection :effort)))
+                            '("harness's own"))
+             " · "))
+
+(defun romacs-agent-log--unknown (event)
+  "Draw EVENT, what Romacs does not read of its harness: named, its whole
+on RET."
+  (let* ((raw (plist-get event :raw))
+         (name (or (plist-get event :method)
+                   (and (hash-table-p raw) (stringp (gethash "type" raw)) (gethash "type" raw))
+                   (and (stringp raw) (truncate-string-to-width (car (split-string raw "\n")) 100
+                                                                nil nil (truncate-string-ellipsis)))
+                   "a line Romacs does not read")))
+    (romacs-agent-log--line event 'note
+                            (propertize (concat "· " name)
+                                        'romacs-agent-log-full (cons nil (if (stringp raw) raw (romacs-agent-log--json raw))))
+                            'romacs-agent-log-note)))
+
 (defun romacs-agent-log-draw (session event)
   "Draw SESSION's EVENT in the current chat."
   (pcase (plist-get event :type)
@@ -1092,33 +1209,13 @@ back in the mode it had, and the next message carries it out."
                     (romacs-agent-log--close-stream)))
     ('tool (romacs-agent-log--tool event))
     ('task (romacs-agent-log--task event))
-    ('tool-output (when-let* ((text (plist-get event :text)))
-                    (if-let* ((block (romacs-agent-log--block (plist-get event :id))))
-                        (romacs-agent-log--live block text)
-                      ;; Before its call (Codex's first line can be): held for
-                      ;; it, its last 64K, until its turn ends.
-                      (let* ((id (plist-get event :id))
-                             (held (concat (alist-get id romacs-agent-log--early nil nil #'equal) text)))
-                        (setf (alist-get id romacs-agent-log--early nil nil #'equal)
-                              (substring held (max 0 (- (length held) 65536))))))))
+    ('tool-output (romacs-agent-log--tool-output event))
     ('approval (romacs-agent-log--ask session event))
     ;; Who answered: said, the block settled once its answer is written.
-    ('attributed (push (plist-get event :request-id) romacs-agent-log--attributed)
-                 (romacs-agent-log--line event 'answer
-                                         ;; A service older than :actor says who alone.
-                                         (romacs-agent-log--answer-text (or (plist-get event :actor)
-                                                                            (list :kind (or (plist-get event :by) "unknown")))
-                                                                        (plist-get event :decision)
-                                                                        (plist-get event :scope) (plist-get event :reason)
-                                                                        (plist-get event :answers))))
+    ('attributed (romacs-agent-log--attributed event))
     ('answered (romacs-agent-log--answered event))
     ('plan-switch (unless (plist-get event :on) (romacs-agent-log--retire-proceed)))
-    ('plan (let ((text (concat (propertize "📋 Plan\n" 'face 'romacs-agent-log-prompt) (plist-get event :text))))
-             ;; Offered: the plan's text takes y, the separator says so.
-             (when (romacs-agent-log--offers-proceed-p session event)
-               (romacs-agent-log--retire-proceed)
-               (setq text (propertize text 'romacs-agent-log-proceed t 'keymap romacs-agent-log-plan-map)))
-             (romacs-agent-log--line event 'plan text)))
+    ('plan (romacs-agent-log--plan session event))
     ('done (setq romacs-agent-log--current nil romacs-agent-log--early nil)
            (romacs-agent-log--close-asks session event 'turn-end)
            (romacs-agent-log--done event)
@@ -1130,25 +1227,8 @@ back in the mode it had, and the next message carries it out."
     ('status (when-let* ((text (plist-get event :text))
                          ((not (member text '("requesting" "selection armed")))))
                (romacs-agent-log--note event text)))
-    ('compacted (let* ((summary (or (plist-get event :text) ""))
-                       (lines (romacs-agent-log--lines summary romacs-agent-log-output-lines)))
-                  ;; Its first lines, and the whole summary on RET, from
-                  ;; anywhere in the entry.
-                  (romacs-agent-log--line event 'note
-                                          (propertize
-                                           (concat "· context compacted\n" (car lines)
-                                                   (if-let* ((more (romacs-agent-log--more (cdr lines) romacs-agent-log-output-lines summary)))
-                                                       (concat "\n" more)
-                                                     ""))
-                                           'romacs-agent-log-full (cons nil summary))
-                                          'romacs-agent-log-note)))
-    ('exit (setq romacs-agent-log--current nil romacs-agent-log--early nil)
-           (romacs-agent-log--close-asks session event 'exit)
-           ;; A turn the exit cut is a round ended.
-           (romacs-agent-log--close-stream)
-           (romacs-agent-log-rounds-end)
-           (unless (and (romacs-agent--per-turn-p session) (eql (plist-get event :status) 0))
-             (romacs-agent-log--note event (format "harness exited (%s)" (plist-get event :status)))))
+    ('compacted (romacs-agent-log--compacted event))
+    ('exit (romacs-agent-log--exit session event))
     ('renewed (romacs-agent-log--note event (format "renewed: a new conversation%s"
                                                     (if-let* ((why (plist-get event :why))) (format " (%s)" why) ""))))
     ('forked (romacs-agent-log--note event (format "forked from %s" (or (plist-get event :title) (plist-get event :from)))))
@@ -1156,23 +1236,10 @@ back in the mode it had, and the next message carries it out."
     ('rolled-back (romacs-agent-log--retire-proceed)
                   (romacs-agent-log-turns-rolled-back event))
     ('replied (romacs-agent-log--note event (format "replied to %s" (plist-get event :message))))
-    ('selection (cl-flet ((label (selection)
-                            (mapconcat #'identity (or (delq nil (list (plist-get selection :model) (plist-get selection :effort)))
-                                                      '("harness's own"))
-                                       " · ")))
-                  (romacs-agent-log--note event (format "%s → %s" (label (plist-get event :from)) (label (plist-get event :to))))))
-    ;; What Romacs does not read of its harness: named, its whole on RET.
-    ('unknown (let ((raw (plist-get event :raw)))
-                (romacs-agent-log--line event 'note
-                                        (propertize (concat "· " (or (plist-get event :method)
-                                                                     (and (hash-table-p raw) (stringp (gethash "type" raw))
-                                                                          (gethash "type" raw))
-                                                                     (and (stringp raw) (truncate-string-to-width
-                                                                                         (car (split-string raw "\n")) 100
-                                                                                         nil nil (truncate-string-ellipsis)))
-                                                                     "a line Romacs does not read"))
-                                                    'romacs-agent-log-full (cons nil (if (stringp raw) raw (romacs-agent-log--json raw))))
-                                        'romacs-agent-log-note)))
+    ('selection (romacs-agent-log--note event (format "%s → %s"
+                                                      (romacs-agent-log--selection-label (plist-get event :from))
+                                                      (romacs-agent-log--selection-label (plist-get event :to)))))
+    ('unknown (romacs-agent-log--unknown event))
     ;; State, not content: the header and separator say it.
     (_ nil)))
 
@@ -1192,7 +1259,7 @@ WORDS is nil when the working thread says it alone: busy or idle."
                      "⚠ plan ready: \\<romacs-agent-log-mode-map>\\[romacs-agent-log-allow] proceeds, leaving plan mode · type to keep planning")))
     ('waiting-approval
      (let ((question (when-let* ((ask (car (romacs-agent-log--pending))))
-                       (get-text-property (cadr ask) 'romacs-agent-log-questions))))
+                       (get-text-property (romacs-agent-log-ask-start ask) 'romacs-agent-log-questions))))
        (cons 'waiting (substitute-command-keys
                        (concat "⚠ waits on you: \\<romacs-agent-log-mode-map>\\[romacs-agent-log-allow] "
                                (if question "choose" "allow") " · \\[romacs-agent-log-deny] "
@@ -1404,15 +1471,15 @@ at the transcript's end: its end, from a prompt on
   "What SESSION waits on now is what its chat shows waiting, whatever its
 records drew: a block no longer waited on settled, one waited on drawn."
   (let ((approvals (romacs-agent-log-source-approvals romacs-agent-log--source session)))
-    (dolist (ask romacs-agent-log--asks)
-      (unless (gethash (car ask) approvals)
-        (romacs-agent-log--settle-ask (car ask))
+    (dolist (id (mapcar #'romacs-agent-log-ask-id romacs-agent-log--asks))
+      (unless (gethash id approvals)
+        (romacs-agent-log--settle-ask id)
         ;; Said where it ended: what streams since goes on unbroken.
-        (when-let* ((ended (romacs-agent-log--drop-ended (car ask))))
+        (when-let* ((ended (romacs-agent-log--drop-ended id)))
           (romacs-agent-log--writing
             (save-excursion (goto-char (cdr ended)) (insert (romacs-agent-log--sealed (car ended))))))))
     (maphash (lambda (id request)
-               (unless (assoc id romacs-agent-log--asks)
+               (unless (romacs-agent-log--ask-of id)
                  (romacs-agent-log--ask-block (romacs-agent-log-source-request-event romacs-agent-log--source id request))))
              approvals)))
 
@@ -1443,7 +1510,7 @@ FROM, nil at the session's start."
                 ;; No approval here offers its keys: one settled later
                 ;; is settled, and one still waited on has its block at
                 ;; the chat's end (`romacs-agent-log--sync-asks').
-                (dolist (ask romacs-agent-log--asks) (romacs-agent-log--settle-ask (car ask)))
+                (dolist (id (mapcar #'romacs-agent-log-ask-id romacs-agent-log--asks)) (romacs-agent-log--settle-ask id))
                 (buffer-substring (point-min) romacs-agent-log--end))))
     (romacs-agent-log--writing
       (save-excursion
@@ -1495,8 +1562,10 @@ drew forgotten, its markers let go, its composer kept."
   (romacs-agent-log--close-stream 'discard)
   (when romacs-agent-log--blocks
     (mapc #'romacs-agent-log--close-block (hash-table-values romacs-agent-log--blocks)))
-  (pcase-dolist (`(,_ ,start . ,end) romacs-agent-log--asks) (set-marker start nil) (set-marker end nil))
-  (pcase-dolist (`(,_ ,_ . ,at) romacs-agent-log--ended-asks) (set-marker at nil))
+  (dolist (ask romacs-agent-log--asks)
+    (set-marker (romacs-agent-log-ask-start ask) nil)
+    (set-marker (romacs-agent-log-ask-end ask) nil))
+  (dolist (owed romacs-agent-log--ended-asks) (set-marker (romacs-agent-log-owed-at owed) nil))
   (romacs-agent-log--writing (delete-region (point-min) romacs-agent-log--end))
   (setq romacs-agent-log--current nil romacs-agent-log--early nil romacs-agent-log--asks nil
         romacs-agent-log--attributed nil romacs-agent-log--ended-asks nil
@@ -1687,24 +1756,24 @@ way, when one runs."
 
 (defun romacs-agent-log--pending ()
   "The approvals this chat shows that the live session still waits on,
-the oldest first: (ID START . END)."
+the oldest first, `romacs-agent-log-ask's."
   (let ((approvals (romacs-agent-log--act #'romacs-agent-log-source-approvals)))
-    (reverse (cl-remove-if-not (lambda (ask) (gethash (car ask) approvals)) romacs-agent-log--asks))))
+    (reverse (cl-remove-if-not (lambda (ask) (gethash (romacs-agent-log-ask-id ask) approvals)) romacs-agent-log--asks))))
 
 (defun romacs-agent-log--ask-here ()
   "The approval to answer: the one at point, else the oldest pending; its
 block is shown, and it is checked the session still waits on it."
   (let* ((at (get-text-property (point) 'romacs-agent-log-request))
          (pending (romacs-agent-log--pending))
-         (ask (if at (assoc at pending) (car pending))))
+         (ask (if at (cl-find at pending :key #'romacs-agent-log-ask-id :test #'equal) (car pending))))
     (unless ask (user-error (if at "That request is answered" "Nothing waits on you")))
     ;; Shown where it is asked: point at it says which is answered.  One
     ;; outside what a narrowed chat shows is not answered blind.
     (unless at
-      (unless (<= (point-min) (cadr ask) (point-max))
+      (unless (<= (point-min) (romacs-agent-log-ask-start ask) (point-max))
         (user-error "What waits on you is outside what the chat shows: widen it"))
-      (goto-char (cadr ask)))
-    (car ask)))
+      (goto-char (romacs-agent-log-ask-start ask)))
+    (romacs-agent-log-ask-id ask)))
 
 (defun romacs-agent-log-allow (&optional always)
   "Allow the request at point, else the oldest pending; with ALWAYS, for
@@ -1744,9 +1813,9 @@ REASON when given."
   "Go to the next approval that waits on you, round them all."
   (interactive nil romacs-agent-log-mode)
   (let* ((pending (romacs-agent-log--pending))
-         (next (or (cl-find-if (lambda (ask) (> (cadr ask) (point))) pending) (car pending))))
+         (next (or (cl-find-if (lambda (ask) (> (romacs-agent-log-ask-start ask) (point))) pending) (car pending))))
     (unless next (user-error "Nothing waits on you"))
-    (goto-char (cadr next))
+    (goto-char (romacs-agent-log-ask-start next))
     (recenter)))
 
 (defun romacs-agent-log--move (n)
