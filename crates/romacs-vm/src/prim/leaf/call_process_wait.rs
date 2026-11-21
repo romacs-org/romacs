@@ -67,11 +67,13 @@ impl Leaf<'_> {
     /// The quit call-process's wait took, raised again once the output read
     /// before it is inserted (`romacs--call-process-quit`): C-g's, as
     /// `maybe_quit` raised it, so the expansion it leaves defers it
-    /// (`quit_watched`). Only the wait's token makes it C-g's: called with
-    /// none (from a macro, say), it signals a plain quit, which an expansion
-    /// treats as any error.
-    pub(crate) fn call_process_requit(&mut self) -> Fault {
-        if std::mem::take(&mut self.vm.subprocesses.requit) { self.vm.quit_unwinding = true; }
+    /// (`quit_watched`). Only TOKEN, the wait's own and not yet raised,
+    /// makes it C-g's, and is taken: any other (from a macro, say, or a
+    /// token already raised) signals a plain quit, which an expansion treats
+    /// as any error.
+    pub(crate) fn call_process_requit(&mut self, token: Value) -> Fault {
+        let token = token.integer_value().and_then(|t| u64::try_from(t).ok());
+        if token.is_some_and(|t| self.vm.subprocesses.take_requit(t)) { self.vm.quit_unwinding = true; }
         Fault::Signal(self.sym("quit"), Value::NIL)
     }
 

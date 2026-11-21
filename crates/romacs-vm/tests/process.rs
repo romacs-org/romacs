@@ -284,13 +284,15 @@ fn a_quit_in_call_process_keeps_the_output_read() {
 /// C-g's once the output is inserted (`romacs--call-process-quit`), so the
 /// expansion defers it to the call's reach (`quit_watched`), which raises it
 /// without expanding the macro, and running its child, a second time. Lisp
-/// the insertion runs may catch what it likes meanwhile: here a change hook
-/// that throws to its own catch. The child counts its runs in a file; only
-/// the first writes and waits.
+/// the insertion runs may catch what it likes meanwhile, here a change hook
+/// that throws to its own catch, or run a call-process of its own, which
+/// leaves the outer quit's token alone. The child counts its runs in a
+/// file; only the first writes and waits.
 #[test]
 fn a_quit_in_an_expansions_call_process_runs_its_child_once() {
     let (mut vm, signal, base) = busy_gnu_vm("expansion");
-    for (case, hook) in ["nil", "(lambda (&rest _) (catch 'a (throw 'a nil)))"].into_iter().enumerate() {
+    let hooks = ["nil", "(lambda (&rest _) (catch 'a (throw 'a nil)))", "(lambda (&rest _) (call-process \"true\" nil nil nil))"];
+    for (case, hook) in hooks.into_iter().enumerate() {
         let dir = base.join(case.to_string());
         std::fs::create_dir_all(&dir).unwrap();
         let (marker, pidfile, count) = (dir.join("written"), dir.join("pid"), dir.join("count"));
@@ -312,6 +314,29 @@ fn a_quit_in_an_expansions_call_process_runs_its_child_once() {
         assert_eq!((value.as_deref(), runs.trim()), (Ok("quit"), "1"), "hook {hook}: one C-g quits the call, its child run once");
     }
     std::fs::remove_dir_all(&base).unwrap();
+}
+
+/// C-g during call-process's wait whose output then cannot be inserted (a
+/// read-only buffer): the insertion's error ends the call, and the quit's
+/// token is never raised. No later caller takes it: a macro calling
+/// `romacs--call-process-quit` with no token of its own signals a plain
+/// quit, which its expansion treats as any error.
+#[test]
+fn a_quit_whose_output_is_not_inserted_leaves_no_c_g_quit_behind() {
+    let (mut vm, signal, base) = busy_gnu_vm("read-only");
+    let (marker, pidfile) = (base.join("written"), base.join("pid"));
+    let presser = press_once_drained(&signal, &marker, &pidfile);
+    let script = "echo $$ > \"$2\"; head -c 4096 /dev/zero | tr '\\000' a; : > \"$1\"; exec sleep 30";
+    let value = vm.eval_source(&format!(r#"(progn (setq default-directory "/")
+        (with-temp-buffer (setq buffer-read-only t) (let ((coding-system-for-read 'no-conversion))
+          (condition-case nil (call-process "sh" nil t nil "-c" {script:?} "sh" {:?} {:?}) (buffer-read-only 'read-only) (quit 'quit)))))"#,
+        marker.display().to_string(), pidfile.display().to_string())).and_then(romacs_vm::Local::display);
+    presser.join().unwrap();
+    std::fs::remove_dir_all(&base).unwrap();
+    assert_eq!(value.as_deref(), Ok("read-only"), "the insertion's error ends the call");
+    vm.eval_source("(defmacro quit-stale () (romacs--call-process-quit))").unwrap();
+    let value = vm.eval_source("(eval '(if nil (quit-stale) 'else) t)").and_then(romacs_vm::Local::display);
+    assert_eq!(value.as_deref(), Ok("else"), "the unraised quit was taken by another caller");
 }
 
 // A host outlives its VM: children the VM leaves, running or deleted, are

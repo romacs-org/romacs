@@ -135,13 +135,25 @@ pub(crate) struct Table {
     /// GNU connect_counter: how many connections servers have accepted,
     /// naming those whose peer has no host.
     pub connect_counter: u64,
-    /// call-process's wait returned (quit . BYTES): the quit it took is
-    /// C-g's, to raise again once BYTES are inserted
-    /// (`romacs--call-process-quit`), which takes it.
-    pub requit: bool,
+    /// The tokens of the quits call-process's waits took and returned with
+    /// the output read before them, ((quit . TOKEN) . BYTES), not yet raised
+    /// again (`romacs--call-process-quit`, which takes its own).
+    requits: Vec<u64>,
+    next_requit: u64,
 }
 
 impl Table {
+    /// A new token for a quit a call-process wait took (`requits`).
+    pub(crate) fn issue_requit(&mut self) -> u64 {
+        self.next_requit += 1;
+        self.requits.push(self.next_requit);
+        self.next_requit
+    }
+    /// Whether TOKEN is a quit's not yet raised again, which it then is.
+    pub(crate) fn take_requit(&mut self, token: u64) -> bool {
+        let at = self.requits.iter().position(|&t| t == token);
+        at.map(|at| self.requits.swap_remove(at)).is_some()
+    }
     /// No channel and no child left to reap.
     pub(crate) fn is_empty(&self) -> bool {
         self.channels.is_empty() && self.deleted.is_empty()

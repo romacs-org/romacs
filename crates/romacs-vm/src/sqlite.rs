@@ -25,10 +25,74 @@ fn progress_period() -> c_int {
     PROGRESS_STEPS
 }
 
-/// What the progress handler asks: STOP, while STATEMENT runs.
+/// What the progress handler asks: STOP, while STATEMENT runs (null: none
+/// does, as while a batch prepares its next).
 struct Watch<'a> {
     stop: &'a crate::quit::NativeStop,
-    statement: *mut ffi::sqlite3_stmt,
+    statement: std::cell::Cell<*mut ffi::sqlite3_stmt>,
+}
+
+/// A database's mutex, held until dropped, as `sqlite3_exec` holds it for a
+/// batch: each call inside only enters it again.
+struct Held(*mut ffi::sqlite3_mutex);
+impl Held {
+    fn enter(db: *mut ffi::sqlite3) -> Self {
+        // UNSAFE(this module is libsqlite3-sys's one boundary: the mutex is the library's)
+        // SAFETY: DB is open; a null mutex (no threading) is entered as a no-op.
+        Self(unsafe {
+            let mutex = ffi::sqlite3_db_mutex(db);
+            ffi::sqlite3_mutex_enter(mutex);
+            mutex
+        })
+    }
+}
+impl Drop for Held {
+    fn drop(&mut self) {
+        // UNSAFE(this module is libsqlite3-sys's one boundary: the mutex is the library's)
+        // SAFETY: the mutex was entered by `Held::enter`, on this thread.
+        unsafe { ffi::sqlite3_mutex_leave(self.0) };
+    }
+}
+
+/// BODY with DB's progress handler asking WATCH every [`PROGRESS_STEPS`]
+/// virtual machine instructions, when its probe is armed. Once the probe
+/// says to stop, the step running ends with `SQLITE_INTERRUPT`, which rolls
+/// the statement back (and, for a write inside an explicit transaction, the
+/// transaction), as `sqlite3_interrupt` does. Once the statement has halted,
+/// its work is done, committed in autocommit mode, so the probe is not
+/// asked: a stop there would report a quit with the write kept. The press
+/// then waits for the caller's next poll.
+fn watching<T>(db: *mut ffi::sqlite3, watch: &Watch, body: impl FnOnce() -> T) -> T {
+    /// Removes the handler, however BODY ends, before the watch's borrow does.
+    struct Installed(*mut ffi::sqlite3);
+    impl Drop for Installed {
+        fn drop(&mut self) {
+            // UNSAFE(this module is libsqlite3-sys's one boundary: rusqlite's safe handler needs its own Connection)
+            // SAFETY: the database is open; removing the handler takes no argument.
+            unsafe { ffi::sqlite3_progress_handler(self.0, 0, None, std::ptr::null_mut()) };
+        }
+    }
+    extern "C" fn progress(watch: *mut c_void) -> c_int {
+        // UNSAFE(SQLite hands the handler its argument back as a raw pointer)
+        // SAFETY: the argument is the watch `watching` borrows for as long as
+        // the handler is installed (`Installed` removes it first).
+        let watch = unsafe { &*watch.cast::<Watch>() };
+        let statement = watch.statement.get();
+        // UNSAFE(this module is libsqlite3-sys's one boundary: the statement's state is SQLite's)
+        // SAFETY: a watched statement is live: its watch is cleared before it
+        // is finalized; sqlite3_stmt_busy only reads it.
+        let running = !statement.is_null() && unsafe { ffi::sqlite3_stmt_busy(statement) } != 0;
+        c_int::from(running && watch.stop.due())
+    }
+    if !watch.stop.armed() { return body(); }
+    // UNSAFE(this module is libsqlite3-sys's one boundary: rusqlite's safe handler needs its own Connection)
+    // SAFETY: the database is open; WATCH outlives the installation, which
+    // `Installed` ends before this function returns or unwinds.
+    unsafe { ffi::sqlite3_progress_handler(db, progress_period(), Some(progress), std::ptr::from_ref(watch).cast_mut().cast()) };
+    let installed = Installed(db);
+    let out = body();
+    drop(installed);
+    out
 }
 
 /// An open database. Each statement holds it, so `sqlite3_close` runs once
@@ -50,10 +114,6 @@ impl Drop for Connection {
 pub(crate) struct Statement {
     stmt: *mut ffi::sqlite3_stmt,
     connection: Arc<Connection>,
-    /// It writes nothing: a writing statement (INSERT ... RETURNING) quits
-    /// only through SQLite's own interrupt, which rolls it back, never
-    /// between its rows, where finalizing it would commit its write.
-    readonly: bool,
 }
 // SAFETY: a statement is used by one VM at a time; its database is serialized.
 unsafe impl Send for Statement {}
@@ -104,6 +164,21 @@ fn text(pointer: *const std::ffi::c_char) -> Option<String> {
 }
 
 pub(crate) const BUSY: c_int = ffi::SQLITE_BUSY;
+/// Whether result CODE is `SQLITE_INTERRUPT`: the progress handler's own
+/// stop (`Statement::step`), the only error a quit may stand for.
+pub(crate) fn interrupted(code: c_int) -> bool {
+    code & 0xff == ffi::SQLITE_INTERRUPT
+}
+/// The most memory the library has had in use since the last ask, which resets it
+/// (`SQLITE_STATUS_MEMORY_USED`).
+#[cfg(test)]
+pub(crate) fn memory_highwater() -> i64 {
+    let (mut current, mut highest) = (0, 0);
+    // UNSAFE(this module is libsqlite3-sys's one boundary: the counter is SQLite's)
+    // SAFETY: both pointers are to live locals; the call only writes them.
+    unsafe { ffi::sqlite3_status64(ffi::SQLITE_STATUS_MEMORY_USED, &raw mut current, &raw mut highest, 1) };
+    highest
+}
 pub(crate) const LOCKED: c_int = ffi::SQLITE_LOCKED;
 
 pub(crate) fn version() -> String {
@@ -142,41 +217,57 @@ impl Connection {
     }
     /// The statements of SQL up to its first NUL in turn, each stepped to
     /// its end with STOP asked as it runs (`Statement::step`), as
-    /// `sqlite3_exec` runs them without a callback: true when all succeeded.
-    pub(crate) fn exec(self: &Arc<Self>, sql: &[u8], stop: &crate::quit::NativeStop) -> bool {
-        let mut rest = sql.split(|&b| b == 0).next().unwrap_or_default();
-        while !rest.is_empty() {
-            let Ok((mut statement, used)) = self.prepare_next(rest) else { return false };
-            rest = &rest[used..];
-            // Only blanks or a comment: nothing to run.
-            if statement.stmt.is_null() { continue; }
-            loop {
-                match statement.step(stop) {
-                    Step::Row => {}
-                    Step::Done => break,
-                    Step::Error(_) => return false,
-                }
+    /// `sqlite3_exec` runs them without a callback; the result code of the
+    /// first that failed. The batch is one buffer ended by a NUL, each
+    /// statement prepared from where the last one ended, so the library
+    /// copies none of it (a prepare given a length with no NUL copies the rest).
+    pub(crate) fn exec(self: &Arc<Self>, sql: &[u8], stop: &crate::quit::NativeStop) -> Result<(), c_int> {
+        let mut batch = sql.split(|&b| b == 0).next().unwrap_or_default().to_vec();
+        batch.push(0);
+        let _held = Held::enter(self.db);
+        // One handler for the whole batch, watching each statement in turn.
+        let watch = Watch { stop, statement: std::cell::Cell::new(std::ptr::null_mut()) };
+        watching(self.db, &watch, || {
+            let mut rest = &batch[..];
+            // Up to the NUL, which stays at the end of REST.
+            while rest.len() > 1 {
+                let (mut statement, used) = self.prepare_next(rest, -1).map_err(|e| c_int::try_from(e.code).unwrap_or(ffi::SQLITE_ERROR))?;
+                let used = used.min(rest.len() - 1);
+                // A prepare that consumed nothing leaves nothing it could run.
+                if used == 0 { break; }
+                rest = &rest[used..];
+                // Only blanks or a comment: nothing to run.
+                if statement.stmt.is_null() { continue; }
+                watch.statement.set(statement.stmt);
+                let outcome = loop {
+                    match statement.step_unwatched() {
+                        Step::Row => {}
+                        Step::Done => break Ok(()),
+                        Step::Error(code) => break Err(code),
+                    }
+                };
+                // Unwatched before it is finalized.
+                watch.statement.set(std::ptr::null_mut());
+                drop(statement);
+                outcome?;
             }
-        }
-        true
+            Ok(())
+        })
     }
     /// `sqlite3_prepare_v2` of the first statement in SQL.
     pub(crate) fn prepare(self: &Arc<Self>, sql: &[u8]) -> Result<Statement, PrepareError> {
-        self.prepare_next(sql).map(|(statement, _)| statement)
+        let length = c_int::try_from(sql.len()).unwrap_or(c_int::MAX);
+        self.prepare_next(sql, length).map(|(statement, _)| statement)
     }
-    /// `sqlite3_prepare_v2` of the first statement in SQL, and the bytes of
-    /// SQL it used. An EXPLAIN writes nothing, whatever it explains.
-    fn prepare_next(self: &Arc<Self>, sql: &[u8]) -> Result<(Statement, usize), PrepareError> {
+    /// `sqlite3_prepare_v2` of the first statement in SQL, read for LENGTH
+    /// bytes (or, with -1, to its NUL), and the bytes of SQL it used. An
+    /// EXPLAIN writes nothing, whatever it explains.
+    fn prepare_next(self: &Arc<Self>, sql: &[u8], length: c_int) -> Result<(Statement, usize), PrepareError> {
         let mut stmt = std::ptr::null_mut();
         let mut tail = std::ptr::null();
-        let length = c_int::try_from(sql.len()).unwrap_or(c_int::MAX);
-        // SAFETY: `db` is open; SQL is read for LENGTH bytes, and TAIL is
-        // left within them; a statement prepared without error is live (or
-        // null) when asked whether it writes.
-        let (code, readonly) = unsafe {
-            let code = ffi::sqlite3_prepare_v2(self.db, sql.as_ptr().cast(), length, &mut stmt, std::ptr::from_mut(&mut tail));
-            (code, code == ffi::SQLITE_OK && (ffi::sqlite3_stmt_readonly(stmt) != 0 || ffi::sqlite3_stmt_isexplain(stmt) != 0))
-        };
+        // SAFETY: `db` is open; SQL is read for LENGTH bytes or, with -1, up
+        // to the NUL it then ends with (`exec`), and TAIL is left within them.
+        let code = unsafe { ffi::sqlite3_prepare_v2(self.db, sql.as_ptr().cast(), length, &mut stmt, std::ptr::from_mut(&mut tail)) };
         if code != ffi::SQLITE_OK {
             // SAFETY: finalizing null is a no-op; the error calls read `db`.
             unsafe { ffi::sqlite3_finalize(stmt) };
@@ -189,17 +280,21 @@ impl Connection {
         }
         // SQLite left TAIL within SQL, at or past its start.
         let used = tail.addr().saturating_sub(sql.as_ptr().addr()).min(sql.len());
-        // A prepare that consumed nothing would loop a batch forever.
-        let used = if used == 0 { sql.len() } else { used };
-        Ok((Statement { stmt, connection: self.clone(), readonly }, used))
+        Ok((Statement { stmt, connection: self.clone() }, used))
     }
 }
 
 impl Statement {
     /// Whether the statement writes nothing (`sqlite3_stmt_readonly`), or
-    /// only explains one that would (`sqlite3_stmt_isexplain`).
+    /// only explains one that would (`sqlite3_stmt_isexplain`). A writing
+    /// statement (INSERT ... RETURNING) quits only through the library's own
+    /// interrupt, which rolls it back, never between its rows, where
+    /// finalizing it would commit its write.
     pub(crate) fn readonly(&self) -> bool {
-        self.readonly
+        // UNSAFE(this module is libsqlite3-sys's one boundary: the statement's flags are SQLite's)
+        // SAFETY: `stmt` is a live statement, or null for blank SQL, which
+        // both calls answer for; they only read it.
+        unsafe { ffi::sqlite3_stmt_readonly(self.stmt) != 0 || ffi::sqlite3_stmt_isexplain(self.stmt) != 0 }
     }
     pub(crate) fn address(&self) -> usize {
         self.stmt as usize
@@ -229,48 +324,11 @@ impl Statement {
         };
         if result == ffi::SQLITE_OK { Ok(()) } else { Err(self.connection.errmsg()) }
     }
-    /// `sqlite3_step`, with STOP asked through the database's progress
-    /// handler every [`PROGRESS_STEPS`] virtual machine instructions while
-    /// the statement runs. Once STOP says to stop, the step ends with
-    /// `SQLITE_INTERRUPT`, which rolls the statement back (and, for a write
-    /// inside an explicit transaction, the transaction), as
-    /// `sqlite3_interrupt` does. Once the statement has halted, its work is
-    /// done, committed in autocommit mode, so STOP is not asked: a stop there
-    /// would report a quit with the write kept. The press then waits for the
-    /// caller's next poll.
+    /// `sqlite3_step`, with STOP asked as the statement runs (`watching`).
     pub(crate) fn step(&mut self, stop: &crate::quit::NativeStop) -> Step {
-        /// Removes the handler, however the step ends, before the watch's
-        /// borrow does.
-        struct Installed(*mut ffi::sqlite3);
-        impl Drop for Installed {
-            fn drop(&mut self) {
-                // UNSAFE(this module is libsqlite3-sys's one boundary: rusqlite's safe handler needs its own Connection)
-                // SAFETY: the database is open; removing the handler takes no argument.
-                unsafe { ffi::sqlite3_progress_handler(self.0, 0, None, std::ptr::null_mut()) };
-            }
-        }
-        extern "C" fn progress(watch: *mut c_void) -> c_int {
-            // UNSAFE(SQLite hands the handler its argument back as a raw pointer)
-            // SAFETY: the argument is the watch `step` borrows for as long as
-            // the handler is installed (`Installed` removes it first), and its
-            // statement is the one stepping.
-            let watch = unsafe { &*watch.cast::<Watch>() };
-            // UNSAFE(this module is libsqlite3-sys's one boundary: the statement's state is SQLite's)
-            // SAFETY: the statement is live; sqlite3_stmt_busy only reads it.
-            let running = unsafe { ffi::sqlite3_stmt_busy(watch.statement) } != 0;
-            c_int::from(running && watch.stop.due())
-        }
-        if !stop.armed() { return self.step_unwatched(); }
-        let watch = Watch { stop, statement: self.stmt };
+        let watch = Watch { stop, statement: std::cell::Cell::new(self.stmt) };
         let db = self.connection.db;
-        // UNSAFE(this module is libsqlite3-sys's one boundary: rusqlite's safe handler needs its own Connection)
-        // SAFETY: the database is open; WATCH outlives the installation,
-        // which `Installed` ends before this function returns or unwinds.
-        unsafe { ffi::sqlite3_progress_handler(db, progress_period(), Some(progress), std::ptr::from_ref(&watch).cast_mut().cast()) };
-        let installed = Installed(db);
-        let outcome = self.step_unwatched();
-        drop(installed);
-        outcome
+        watching(db, &watch, || self.step_unwatched())
     }
     /// The statement's virtual machine instructions so far
     /// (`SQLITE_STMTSTATUS_VM_STEP`).

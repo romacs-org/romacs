@@ -36,7 +36,7 @@ const LONG: &[(&str, &str)] = &[
     ("digest.rs", "fn sha3("),
     ("prims/leaf_sequences.rs", "fn sort_native("),
     ("prims/leaf_sequences.rs", "fn sort_polled<T: Copy>("),
-    ("sqlite.rs", "pub(crate) fn step(&mut self, stop: &crate::quit::NativeStop)"),
+    ("sqlite.rs", "fn watching<T>("),
     ("prim/leaf/sqlite.rs", "pub(crate) fn sqlite_execute("),
     ("prim/leaf/sqlite.rs", "pub(crate) fn sqlite_select("),
     ("treesit/native.rs", "pub(crate) fn parse_until("),

@@ -208,7 +208,7 @@ fn sqlite_interrupts_a_long_statement() {
 #[test]
 fn sqlite_select_tells_a_read_from_a_write() {
     let db = crate::sqlite::Connection::open(b":memory:", false, false, true).expect("an in-memory database");
-    assert!(db.exec(b"CREATE TABLE t (x)", &crate::quit::NativeStop::never()));
+    assert!(db.exec(b"CREATE TABLE t (x)", &crate::quit::NativeStop::never()).is_ok());
     let readonly = |sql: &[u8]| db.prepare(sql).unwrap_or_else(|_| panic!("{} prepares", String::from_utf8_lossy(sql))).readonly();
     assert!(readonly(b"SELECT x FROM t"), "a select writes nothing");
     assert!(!readonly(b"INSERT INTO t VALUES (1) RETURNING x"), "an insert returning rows writes");
@@ -233,7 +233,7 @@ fn sqlite_never_quits_with_its_write_kept() {
     // Each statement's instructions, unwatched, on the same tables.
     let never = NativeStop::never();
     let db = Connection::open(b":memory:", false, false, true).expect("an in-memory database");
-    assert!(db.exec(make.as_bytes(), &never));
+    assert!(db.exec(make.as_bytes(), &never).is_ok());
     let instructions = |sql: &str| {
         let mut statement = db.prepare(sql.as_bytes()).unwrap_or_else(|_| panic!("{sql} prepares"));
         while matches!(statement.step(&never), Step::Row) {}
@@ -871,17 +871,80 @@ fn nreverse_is_one_walk_across_its_hand_off() {
     }
 }
 
-/// `romacs--call-process-quit` raises C-g's quit only after the wait that
-/// took one, whose token it takes. Called with no token, as from a macro,
-/// it signals a plain quit, which an expansion treats as any error: the
-/// form in the branch not taken is never reached.
+/// `romacs--call-process-quit` raises C-g's quit only for its wait's own
+/// token, not yet raised, which it takes. Called with none, as from a macro,
+/// or with another quit's, it signals a plain quit, which an expansion
+/// treats as any error: the form in the branch not taken is never reached.
 #[test]
-fn call_process_quit_is_c_g_s_only_after_its_wait() {
+fn call_process_quit_is_c_g_s_only_for_its_wait_s_token() {
     let (mut vm, _signal) = busy_vm();
-    eval(&mut vm, "(defmacro m () (romacs--call-process-quit))");
-    assert_eq!(vm.eval_source("(eval '(if nil (m) 'else) t)").unwrap().display().unwrap(), "else");
-    vm.subprocesses.requit = true;
-    assert_eq!(vm.eval_source("(condition-case nil (romacs--call-process-quit) (quit 'quit))").unwrap().display().unwrap(), "quit");
-    assert!(!vm.subprocesses.requit, "the quit took the wait's token");
+    let (mine, other) = (vm.subprocesses.issue_requit(), vm.subprocesses.issue_requit());
+    let stranger = other + 1;
+    for call in ["(romacs--call-process-quit)".to_string(), format!("(romacs--call-process-quit {stranger})")] {
+        eval(&mut vm, &format!("(defmacro m () {call})"));
+        assert_eq!(vm.eval_source("(eval '(if nil (m) 'else) t)").unwrap().display().unwrap(), "else", "{call}");
+    }
+    assert_eq!(vm.eval_source(&format!("(condition-case nil (romacs--call-process-quit {mine}) (quit 'quit))")).unwrap().display().unwrap(), "quit");
     vm.quit_unwinding = false;
+    assert!(!vm.subprocesses.take_requit(mine), "the quit took its own token");
+    assert!(vm.subprocesses.take_requit(other), "and only its own");
+}
+
+/// A step that fails for its own reason with a press waiting is that error,
+/// not the quit. On an empty `t (x UNIQUE)`, `INSERT OR FAIL ... (1), (1)`
+/// keeps its first row, committed at the halt, and ends with the
+/// constraint; the progress handler's ask is placed at the halt
+/// (`sqlite::PROGRESS_PERIOD`). sqlite-execute signals the constraint,
+/// sqlite-select ends its rows there and a batch returns nil: the row kept,
+/// and the next form takes the press.
+#[test]
+fn a_sqlite_error_with_a_press_waiting_is_itself() {
+    use crate::quit::NativeStop;
+    use crate::sqlite::{Connection, PROGRESS_PERIOD, Step};
+    let (make, insert) = ("CREATE TABLE t (x UNIQUE)", "INSERT OR FAIL INTO t VALUES (1), (1)");
+    let never = NativeStop::never();
+    let db = Connection::open(b":memory:", false, false, true).expect("an in-memory database");
+    assert!(db.exec(make.as_bytes(), &never).is_ok());
+    let mut statement = db.prepare(insert.as_bytes()).unwrap_or_else(|_| panic!("{insert} prepares"));
+    assert!(matches!(statement.step(&never), Step::Error(_)), "the second row conflicts");
+    let whole = i32::try_from(statement.instructions()).expect("a short statement");
+    drop(statement);
+    for (name, ends) in [("sqlite-execute", None), ("sqlite-select", Some("nil")), ("sqlite-execute-batch", Some("nil"))] {
+        let (mut vm, signal) = busy_vm();
+        eval(&mut vm, &format!("(progn (setq db (sqlite-open)) (sqlite-execute db \"{make}\"))"));
+        let call = prepare(&mut vm, name, &format!("(list db \"{insert}\")"));
+        let period = PROGRESS_PERIOD.with(|p| p.replace(whole));
+        assert!(signal.interrupt(), "a busy evaluator takes the press");
+        let outcome = invoke(&mut vm, call);
+        PROGRESS_PERIOD.with(|p| p.set(period));
+        assert!(!quit_signalled(&mut vm, &outcome), "{name}: the constraint, not a quit");
+        match ends {
+            Some(value) => assert_eq!(outcome.as_ref().map(|v| vm.display(*v).unwrap_or_default()).ok().as_deref(), Some(value), "{name}"),
+            None => assert!(matches!(outcome, Err(Fault::Signal(..))), "{name}: the constraint is signaled"),
+        }
+        assert!(signal.due(), "{name}: the press waits for the next poll");
+        assert!(vm.eval_source_raw("(sqlite-select db \"SELECT count(*) FROM t\")").is_err(), "{name}: the form after the call quits");
+        assert!(!signal.due(), "{name}: that form took the press");
+        vm.quit_unwinding = false;
+        vm.propagated_escape = None;
+        assert_eq!(vm.eval_source("(equal (sqlite-select db \"SELECT count(*) FROM t\") '((1)))").unwrap().display().unwrap(), "t", "{name}: the first row was kept");
+    }
+}
+
+/// A batch is prepared statement by statement from one buffer ended by a
+/// NUL, which the library copies none of: running 20,000 statements raises
+/// the most memory it has in use far less than the batch's size, where a
+/// prepare given a length with no NUL would copy the rest of the batch for
+/// each statement.
+#[test]
+fn a_sqlite_batch_is_not_copied_per_statement() {
+    use crate::sqlite::{Connection, memory_highwater};
+    let db = Connection::open(b":memory:", false, false, true).expect("an in-memory database");
+    let batch = "SELECT 1;".repeat(20_000);
+    memory_highwater();
+    let before = memory_highwater();
+    assert!(db.exec(batch.as_bytes(), &crate::quit::NativeStop::never()).is_ok());
+    let peak = memory_highwater() - before;
+    let bound = i64::try_from(batch.len() / 4).expect("a short batch");
+    assert!(peak < bound, "SQLite's memory rose {peak} bytes over a batch of {}", batch.len());
 }

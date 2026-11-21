@@ -266,7 +266,10 @@ impl Leaf<'_> {
     /// statement is rolled back and the quit raised (`Statement::step`).
     fn sqlite_step(&mut self, statement: &mut Statement, probe: &crate::quit::NativeStop) -> std::result::Result<Step, Fault> {
         let step = statement.step(probe);
-        if matches!(step, Step::Error(_)) && probe.due() { self.native_poll()?; }
+        // Only the handler's own stop is the quit: any other error (a
+        // constraint, say, whose statement may have committed rows) is
+        // signaled as itself, and a press waits for the next poll.
+        if matches!(step, Step::Error(code) if crate::sqlite::interrupted(code)) { self.native_poll()?; }
         Ok(step)
     }
 
@@ -325,8 +328,9 @@ impl Leaf<'_> {
         let connection = self.sqlite_connection(db)?;
         let stop = self.native_stop();
         let done = connection.exec(sql, &stop);
-        if !done && stop.due() { self.native_poll()?; }
-        Ok(if done { Value::TRUE } else { Value::NIL })
+        // As `sqlite_step`: only the handler's own stop is the quit.
+        if matches!(done, Err(code) if crate::sqlite::interrupted(code)) { self.native_poll()?; }
+        Ok(if done.is_ok() { Value::TRUE } else { Value::NIL })
     }
     pub(crate) fn sqlite_execute_batch(&mut self, db: Value, statements: Value) -> Out {
         self.sqlite_check(db, false)?;
