@@ -10,7 +10,10 @@
   agents      every AGENTS.md names only what exists (tools/lib/agents_md.py).
   functions   no function of Romacs's own Lisp over the long-function limit
               is added or grows, beside the merge-base's (tools/lib/smells.py
-              check-lisp; tools/lib/lisp_functions.py measures).
+              check-functions: tools/lib/lisp_functions.py measures), nor one of
+              the workspace's non-test Rust over 50 (tools/lib/rust_functions.py),
+              and unwrap()/expect( calls and undocumented unsafe sites in that
+              Rust do not rise.
   lint        tools/romacs-lint on the runtime Lisp files the change touches:
               what it adds since the merge-base, as the queue's Lisp tier holds
               it. It runs a Romacs: --binary, else what tools/romacs-lint finds.
@@ -261,20 +264,20 @@ def agents(root):
 # The Lisp functions' length.
 
 def functions(root, trunk):
-    """(STATUS, SUMMARY, FINDINGS): no own Lisp function over the limit is added or grows."""
+    """(STATUS, SUMMARY, FINDINGS): no long Lisp or Rust function is added or
+    grows, and the Rust floors do not rise."""
     try:
-        found = smells.lisp_held_to_base(root, trunk)
+        found = smells.functions_held_to_base(root, trunk)
     except (ValueError, subprocess.CalledProcessError) as exc:
-        return 'SKIP', 'the Lisp functions were not measured', [f'{exc}; fix: merge the trunk in, or name it with --trunk']
+        return 'SKIP', 'the functions were not measured', [f'{exc}; fix: merge the trunk in, or name it with --trunk']
     lisp = smells.lisp_functions
     failing, warned = lisp.held(found)
     warnings = [f'warning until {lisp.ENFORCED_FROM}: {finding}' for finding in warned]
     if failing:
-        return 'FAIL', f'{len(failing)} failing Lisp function finding(s), {len(warned)} warning(s)', failing + warnings
+        return 'FAIL', f'{len(failing)} failing function finding(s), {len(warned)} warning(s)', failing + warnings
     if warned:
-        return 'ok', (f'{len(warned)} Lisp function finding(s) over {lisp.LONG_FUNCTION_LINES} code lines, '
-                      f'warned until {lisp.ENFORCED_FROM}, then failing'), warned
-    return 'ok', f'no Lisp function over {lisp.LONG_FUNCTION_LINES} code lines added or grown', []
+        return 'ok', (f'{len(warned)} function finding(s), warned until {lisp.ENFORCED_FROM}, then failing'), warnings
+    return 'ok', 'no long Lisp or Rust function added or grown, no Rust floor risen', []
 
 
 # The lint.
