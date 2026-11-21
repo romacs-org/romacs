@@ -169,12 +169,16 @@ class Bars(unittest.TestCase):
     def test_a_collection_row_without_its_collections_or_baseline_is_refused(self):
         quiet = [dict(r, **{'frames-submitted': 0}) for r in readings(STEP, STEP)]
         collects = {'name': 'plain-collected', 'paints': False, 'collects': True}
-        self.assertEqual(d.refusal(collects, {'readings': quiet}, 2), 'a step ran no collection')
-        collected = [dict(r, collections=i) for i, r in enumerate(quiet)]
+        self.assertEqual(d.refusal(collects, {'readings': quiet}, 2), 'a step ran no full collection of its own')
+        # The host's own collections count for nothing: the step's must run.
+        host = [dict(r, collections=i) for i, r in enumerate(quiet)]
+        self.assertEqual(d.refusal(collects, {'readings': host}, 2), 'a step ran no full collection of its own')
+        collected = [dict(r, collected=i) for i, r in enumerate(quiet)]
         self.assertIsNone(d.refusal(collects, {'readings': collected}, 2))
         based = {**collects, 'name': 'chat-collected', 'baseline': True}
         self.assertEqual(d.refusal(based, {'readings': collected}, 2), 'no baseline was measured: no collection above it is counted')
-        above = [dict(r, **{'above-instructions': i}) for i, r in enumerate(collected)]
+        # A collection that costs the baseline's exactly adds nothing, and passes.
+        above = [dict(r, **{'above-instructions': 0}) for r in collected]
         self.assertIsNone(d.refusal(based, {'readings': above}, 2))
 
     def test_a_refused_row_keeps_its_session(self):

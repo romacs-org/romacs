@@ -37,7 +37,8 @@
 made functions.  :baseline, when given, sets up what the scenario's own
 :setup adds to: the session measures a collection there
 (`display-stages--baseline') before :setup runs.  :collects says each
-step collects, and is refused when one did not."
+step runs a full collection of its own (`display-stages--collection'),
+and is refused when one did not."
   (declare (indent 1))
   `(setf (alist-get ',name display-stages-scenarios)
          (list :paints ,(plist-get plist :paints)
@@ -231,7 +232,7 @@ line's end; return it."
 ;; The world's own collection, with a small buffer shown.
 (display-stages-scenario plain-collected :collects t
   :setup (display-stages--show (scaling--lines-buffer "stages" 2000))
-  :body (garbage-collect))
+  :body (display-stages--collection))
 ;; What loading the agents adds to a collection, over the world's.
 (display-stages-scenario agents-collected :collects t
   :baseline (display-stages--show (scaling--lines-buffer "stages" 2000))
@@ -393,11 +394,17 @@ other than the loop's own."
 (defvar display-stages--above nil
   "What the steps' collections ran above `display-stages--baseline', in all.")
 
+(defvar display-stages--collected 0
+  "The full collections the scenario asked for and saw through: not the
+host's own, which `gcs-done' counts too.")
+
 (defun display-stages--collection ()
-  "The instructions one full collection runs now."
+  "The instructions one full collection runs now, counted as one of the
+scenario's own (`display-stages--collected') once it returned."
   (let ((start (romacs-instructions)))
     (garbage-collect)
-    (- (romacs-instructions) start)))
+    (prog1 (- (romacs-instructions) start)
+      (setq display-stages--collected (1+ display-stages--collected)))))
 
 (defun display-stages--measure-baseline ()
   "Set `display-stages--baseline': a collection's median over five, once
@@ -425,7 +432,7 @@ run that loaded more says which."
 and redisplays), collections so far, and redisplay's counts."
   (let* ((stats (romacs--display-stats)) (shown (alist-get 'instructions stats)))
     `((step-instructions . ,(and shown (romacs-instructions) (+ display-stages--work shown)))
-      (collections . ,gcs-done) ,@stats
+      (collections . ,gcs-done) (collected . ,display-stages--collected) ,@stats
       ,@(and display-stages--fontified `((fontified-chars . ,display-stages--fontified)))
       ,@(and display-stages--above `((above-instructions . ,display-stages--above))))))
 
@@ -441,10 +448,19 @@ measured, in the state the steps run in but for what :setup adds."
         (run-with-timer 1.0 nil
                         (lambda ()
                           (setq romacs-gc-idle-delay nil)
-                          (redisplay t)
-                          (display-stages--measure-baseline)
-                          (funcall then))))
+                          (display-stages--when-settled
+                           (lambda ()
+                             (display-stages--measure-baseline)
+                             (funcall then))))))
     (funcall then)))
+
+(defun display-stages--when-settled (then)
+  "Call THEN once a redisplay ran from now and nothing waits to run
+\(`display-stages--settled-p'), as a step is begun."
+  (romacs--redisplay-since-mark t)
+  (let (poll)
+    (setq poll (lambda () (if (display-stages--settled-p) (funcall then) (run-with-timer 0.05 nil poll))))
+    (run-with-timer 0.05 nil poll)))
 
 (defun display-stages-start (name out steps)
   "Run scenario NAME for STEPS steps in this session, then exit.
@@ -496,7 +512,11 @@ stderr, and write the readings to OUT as JSON."
                            (kill-emacs 0))))
             (scaling--mark (list :stages "start"))
             (scaling--perf "enable")
-            (funcall step))))))))))
+            ;; A scenario measured against a baseline starts as settled as
+            ;; its baseline was measured: through the loop's own poll.
+            (if (plist-get plist :baseline)
+                (progn (romacs--redisplay-since-mark t) (run-with-timer gap nil laid-out))
+              (funcall step)))))))))))
 
 (provide 'display-stages)
 ;;; display_stages.el ends here

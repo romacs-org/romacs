@@ -155,8 +155,8 @@ def refusal(scenario, result, wanted):
         return 'no instruction counter (romacs-instructions is nil)'
     if scenario.get('baseline') and any('above-instructions' not in r for r in readings):
         return 'no baseline was measured: no collection above it is counted'
-    if scenario.get('collects') and any(d['collections'] < 1 for d in steps(readings)):
-        return 'a step ran no collection'
+    if scenario.get('collects') and any(d.get('collected', 0) < 1 for d in steps(readings)):
+        return 'a step ran no full collection of its own'
     odd = odd_steps(scenario, steps(readings))
     if len(odd) > ODD * wanted:
         return (f"steps {odd} did not run as many redisplays as the others, with "
