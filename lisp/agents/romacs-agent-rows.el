@@ -108,6 +108,8 @@ after a dim dot: a JSON object's error, in the error face; else its
 status or state and its title, name or id, else how many fields it has;
 a list's length; a text's one line, else how many lines; nothing for no
 output."
+  (if (not (romacs-agent-rows-readable-p output))
+      (romacs-agent-rows--dim (concat " · " (romacs-agent-rows-size output)))
   (let* ((value (and (stringp output) (string-match-p "\\`[ \t\n]*[[{]" output)
                      (ignore-errors (json-parse-string output :null-object nil :false-object nil))))
          (error (and (hash-table-p value) (romacs-agent-rows--field value "error")))
@@ -121,24 +123,28 @@ output."
                                     " · ")
                      (romacs-agent-rows--plural (hash-table-count value) "field"))))
                 ((vectorp value) (romacs-agent-rows--plural (length value) "item"))
-                ((or (not (stringp output)) (string-empty-p (string-trim output))) nil)
+                ((or (not (stringp output)) (not (string-match-p "[^ \t\n\r]" output))) nil)
                 ;; One line: its first clause, without the tool's own
                 ;; name the row says already.
-                ((= (romacs-agent-rows--lines output) 1)
-                 (truncate-string-to-width (string-trim (car (split-string (string-trim output) " *[(;]"))) 48 nil nil "…"))
-                (t (romacs-agent-rows--plural (romacs-agent-rows--lines output) "line")))))
+                (t (let ((count (romacs-agent-rows--lines output)))
+                     (if (/= count 1) (romacs-agent-rows--plural count "line")
+                       (let ((line (romacs-agent-rows--line output)))
+                         (truncate-string-to-width (string-trim (car (split-string (substring line 0 (min (length line) 200)) " *[(;]")))
+                                                   48 nil nil "…"))))))))
     (cond (error (concat (romacs-agent-rows--dim " · ") (propertize (romacs-agent-rows--line error) 'face 'romacs-agent-error)))
           ((or (null said) (string-empty-p said)) "")
-          (t (romacs-agent-rows--dim (concat " · " said))))))
+          (t (romacs-agent-rows--dim (concat " · " said)))))))
 
 (defun romacs-agent-rows-ended (name input row output)
   "The row of tool NAME's call with INPUT, first drawn as ROW, once it
 ended well with OUTPUT: its renderer's :ended, else ROW and the generic
 outcome (`romacs-agent-rows-outcome')."
-  (or (when-let* ((renderer (romacs-agent-rows-get (romacs-agent-rows-name name)))
-                  (ended (plist-get renderer :ended)))
-        (funcall ended (if (hash-table-p input) input (make-hash-table :test #'equal)) output))
-      (concat row (romacs-agent-rows-outcome output))))
+  (cond ((not (romacs-agent-rows-readable-p output))
+         (concat row (romacs-agent-rows--dim (concat " · " (romacs-agent-rows-size output)))))
+        ((when-let* ((renderer (romacs-agent-rows-get (romacs-agent-rows-name name)))
+                     (ended (plist-get renderer :ended)))
+           (funcall ended (if (hash-table-p input) input (make-hash-table :test #'equal)) output)))
+        (t (concat row (romacs-agent-rows-outcome output)))))
 
 (defun romacs-agent-rows-details (name input output)
   "The details RET on tool NAME's row shows above its raw answer: its
@@ -171,13 +177,18 @@ harness's: it keeps its colour as the row settles and dims.")
   (and (hash-table-p table) (gethash key table)))
 
 (defun romacs-agent-rows--json (output)
-  "OUTPUT read as a JSON object, or nil."
-  (let ((value (ignore-errors (json-parse-string output :null-object nil :false-object nil))))
+  "OUTPUT read as a JSON object, or nil; unread past
+`romacs-agent-rows-read-limit'."
+  (let ((value (and (romacs-agent-rows-readable-p output)
+                    (ignore-errors (json-parse-string output :null-object nil :false-object nil)))))
     (and (hash-table-p value) value)))
 
 (defun romacs-agent-rows--line (text)
-  "TEXT's first line, trimmed."
-  (car (split-string (string-trim (or text "")) "\n")))
+  "TEXT's first line that says something, trimmed: read from its start,
+no further than its first 4096 characters."
+  (let* ((head (let ((text (or text ""))) (substring text 0 (min (length text) 4096))))
+         (from (if (string-match "\\`[ \t\n\r]*" head) (match-end 0) 0)))
+    (string-trim (substring head from (string-search "\n" head from)))))
 
 (defun romacs-agent-rows--dim (text)
   (propertize text 'face 'romacs-agent-dim))
@@ -476,11 +487,67 @@ known."
   "How many lines TEXT has that say something: none when it says it
 found none."
   (if (or (not (stringp text)) (string-match-p "\\`[ \t\n]*No \\(?:matches\\|files\\) found" text)) 0
-    (cl-count-if (lambda (line) (string-match-p "[^ \t]" line)) (split-string text "\n"))))
+    (with-temp-buffer (insert text) (how-many "^[ \t]*[^ \t\n]" (point-min) (point-max)))))
 
 (defun romacs-agent-rows--lines (text)
-  "How many lines TEXT spans, a string's, 0 for none."
-  (if (or (not (stringp text)) (string-empty-p text)) 0 (1+ (cl-count ?\n (string-trim-right text "\n")))))
+  "How many lines TEXT spans, a string's, 0 for none; past
+`romacs-agent-rows-read-limit', how many its first part spans."
+  (if (or (not (stringp text)) (string-empty-p text)) 0
+    ;; One line more than its line breaks, a last one aside.
+    (with-temp-buffer
+      (insert (romacs-agent-rows-clip text))
+      (when (eq (char-before) ?\n) (delete-char -1))
+      (1+ (- (count-lines (point-min) (point-max)) (if (or (bobp) (eq (char-before) ?\n)) 0 1))))))
+
+(defconst romacs-agent-rows-read-limit (* 1024 1024)
+  "The most characters of a tool's output the chat reads on the main VM.
+A longer output is read at its first or last this many only, and its
+row says its size, not what its renderer would read in it: drawing a
+call costs the same however much it answered.  RET shows all of it.")
+
+(defun romacs-agent-rows-readable-p (text)
+  "Whether TEXT is short enough for the chat to read whole
+\(`romacs-agent-rows-read-limit')."
+  (or (not (stringp text)) (<= (length text) romacs-agent-rows-read-limit)))
+
+(defun romacs-agent-rows-clip (text &optional tail)
+  "TEXT as far as the chat reads it: whole, or its first (with TAIL, its
+last) `romacs-agent-rows-read-limit' characters."
+  (cond ((romacs-agent-rows-readable-p text) text)
+        (tail (substring text (- (length text) romacs-agent-rows-read-limit)))
+        (t (substring text 0 romacs-agent-rows-read-limit))))
+
+(defun romacs-agent-rows-size (text)
+  "How long TEXT is, as a row says it: \"9.7M characters\"."
+  (format "%s characters" (file-size-human-readable (length text) 'si)))
+
+(defun romacs-agent-rows-extent (text)
+  "How much TEXT holds, as a row says it: its lines, or its size past
+`romacs-agent-rows-read-limit'."
+  (if (romacs-agent-rows-readable-p text)
+      (romacs-agent-rows--plural (romacs-agent-rows--lines text) "line")
+    (romacs-agent-rows-size text)))
+
+(defun romacs-agent-rows-glimpse (text limit &optional tail width blanks)
+  "TEXT's first LIMIT lines, or with TAIL its last, and how many lines it
+spans without its trailing BLANKS (characters, line breaks unless
+given): (LINES . COUNT).  WIDTH, when given, cuts each line to as many
+characters, read no further.  TEXT is read as `romacs-agent-rows-clip'
+has it, walked by the buffer's own motion, never split whole in Lisp;
+past the bound COUNT is nil."
+  (with-temp-buffer
+    (insert (romacs-agent-rows-clip text tail))
+    (skip-chars-backward (or blanks "\n"))
+    (delete-region (point) (point-max))
+    (let ((count (if (bobp) 0 (count-lines (point-min) (point-max))))
+          (cut (lambda (start end) (buffer-substring start (if width (min end (+ start width)) end)))))
+      (goto-char (if tail (point-max) (point-min)))
+      (cons (cl-loop repeat (min limit count)
+                     collect (prog1 (funcall cut (line-beginning-position) (line-end-position))
+                               (forward-line (if tail -1 1)))
+                     into lines
+                     finally return (if tail (nreverse lines) lines))
+            (and (romacs-agent-rows-readable-p text) count)))))
 
 (defun romacs-agent-rows--plural (n word)
   (format "%d %s%s" n word (if (= n 1) "" "s")))
@@ -551,7 +618,7 @@ matches, FORMAT given OUTPUT's groups.  The first that matches says it."
  :ended (lambda (input output)
           (concat "◧ " (romacs-agent-rows--path (romacs-agent-rows--field input "file_path")
                                                (romacs-agent-rows--read-span input))
-                  (romacs-agent-rows--dim (concat " · " (romacs-agent-rows--plural (romacs-agent-rows--lines output) "line"))))))
+                  (romacs-agent-rows--dim (concat " · " (romacs-agent-rows-extent output))))))
 
 (defun romacs-agent-rows--change (edits)
   "EDITS, (OLD . NEW) pairs, as the lines they add and take: \"+A −R\"."
@@ -590,8 +657,7 @@ matches, FORMAT given OUTPUT's groups.  The first that matches says it."
  :row (lambda (input)
         (concat "✎ " (romacs-agent-rows--path (romacs-agent-rows--field input "file_path"))
                 (romacs-agent-rows--dim
-                 (format "  written · %s" (romacs-agent-rows--plural
-                                           (romacs-agent-rows--lines (romacs-agent-rows--field input "content")) "line"))))))
+                 (format "  written · %s" (romacs-agent-rows-extent (or (romacs-agent-rows--field input "content") "")))))))
 
 (defun romacs-agent-rows--where (input)
   "Where a search looked: its path or glob, dim, or nothing."
@@ -688,7 +754,8 @@ call's whole input or output."
   (when-let* ((renderer (romacs-agent-rows-get (romacs-agent-rows-name name))))
     (let ((input (if (hash-table-p input) input (make-hash-table :test #'equal))))
       (list :row (funcall (plist-get renderer :row) input)
-            :ended (and output (plist-get renderer :ended) (funcall (plist-get renderer :ended) input output))))))
+            :ended (and output (romacs-agent-rows-readable-p output) (plist-get renderer :ended)
+                        (funcall (plist-get renderer :ended) input output))))))
 
 ;; A turn's row keeps its calls' texts as drawn (romacs-agent-turns.el).
 (defvar romacs-agent-turns-tool-texts-function)
