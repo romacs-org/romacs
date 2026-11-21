@@ -111,6 +111,8 @@
   (should (equal (romacs-agent-log-rounds--words "lane chat (claude3): agents ADE showcase: visible work" 30)
                  (concat "lane chat (claude3): agents" (truncate-string-ellipsis))))
   (should (equal (romacs-agent-log-rounds--words "short" 30) "short"))
+  (should (equal (romacs-agent-log-rounds--words "lane board-buffer (agent board as a buffer, glanceable + pretty)" 56)
+                 (concat "lane board-buffer (agent board as a buffer, glanceable" (truncate-string-ellipsis))))
   ;; One word longer than the room: cut inside it, as nothing else can.
   (should (<= (string-width (romacs-agent-log-rounds--words (make-string 50 ?x) 30)) 30)))
 
@@ -152,6 +154,7 @@
 (ert-deftest romacs-agent-eye-a-failure-is-marked ()
   (should (string-match-p "✗ failed" (romacs-agent-rows--said-state "failed")))
   (should (memq 'romacs-agent-error (ensure-list (get-text-property 4 'face (romacs-agent-rows--said-state "failed")))))
+  (should (memq 'bold (ensure-list (get-text-property 4 'face (romacs-agent-rows--said-state "failed")))))
   (should-not (string-search "✗" (romacs-agent-rows--said-state "running"))))
 
 (ert-deftest romacs-agent-eye-every-thinking-paragraph-is-marked ()

@@ -100,7 +100,7 @@ state, dim after a dot; a history read later shows the call's moment."
   "STATE, a task's, after a dot: dim, but a failure's in the error face
 behind its mark, seen before it is read."
   (if (member state '("failed" "error" "cancelled" "unstarted"))
-      (concat (romacs-agent-rows--dim " · ") (propertize (concat "✗ " state) 'face 'romacs-agent-error))
+      (concat (romacs-agent-rows--dim " · ") (propertize (concat "✗ " state) 'face '(bold romacs-agent-error)))
     (romacs-agent-rows--dim (concat " · " state))))
 
 (defun romacs-agent-rows--state (record)
@@ -246,7 +246,8 @@ known."
  :row (lambda (_input) (romacs-agent-rows--romacs (concat "✉\uFE0E " (propertize "reply" 'face 'romacs-agent-message))))
  :ended (lambda (_input output)
           (and-let* ((title (romacs-agent-rows--field (romacs-agent-rows--json output) "title")))
-            (romacs-agent-rows--romacs (concat "✉\uFE0E → " (propertize title 'face 'romacs-agent-message)))))
+            (romacs-agent-rows--romacs (concat "✉\uFE0E → " (propertize title 'face 'romacs-agent-message)
+                                               (romacs-agent-rows--dim " · sent")))))
  :body #'romacs-agent-rows--message-body)
 
 (defun romacs-agent-rows--delegated (title instance)

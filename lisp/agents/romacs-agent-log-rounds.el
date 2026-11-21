@@ -99,7 +99,7 @@ inside one (unless its first word is longer)."
     (let* ((ellipsis (truncate-string-ellipsis))
            (cut (truncate-string-to-width text (- width (string-width ellipsis))))
            (word (string-match "[ \t]+[^ \t]*\\'" cut)))
-      (concat (string-trim-right (if (and word (> word 0)) (substring cut 0 word) cut) "[ \t:,;·-]+") ellipsis))))
+      (concat (string-trim-right (if (and word (> word 0)) (substring cut 0 word) cut) "[ \t:,;·+&/-]+") ellipsis))))
 
 (defun romacs-agent-log-rounds--head (incoming)
   "INCOMING's head: a mark, whom it is from, and its state."

@@ -94,7 +94,7 @@
                   "┃ one\n┃ two"))
    (should (equal (romacs-agent-rows-tests--draw "romacs_task_reply" :ended (romacs-agent-rows-tests--table)
                                                  "{\"title\":\"lane x\"}")
-                  "◈ ✉\uFE0E → lane x"))
+                  "◈ ✉\uFE0E → lane x · sent"))
    (let ((input (romacs-agent-rows-tests--table
                  "title" "lane x" "target" (romacs-agent-rows-tests--table "provider" "claude3"))))
      (should (equal (romacs-agent-rows-tests--draw "romacs_delegate_task" :row input) "◈ ⑂ lane x · claude3"))
