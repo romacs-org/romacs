@@ -424,7 +424,16 @@ and a build of that commit: a plist `:top', `:src', `:build', `:commit'."
     (romacs-live-tests--edit fx "lisp/sub/rlt-q.el" (romacs-live-tests--file "rlt-q" "(defun rlt-q-f () 2)"))
     (romacs-live-tests--update fx)
     (should (= (funcall 'rlt-q-f) 2))
-    (should (string-prefix-p (expand-file-name romacs-live-directory) (locate-library "sub/rlt-q")))))
+    (should (string-prefix-p (expand-file-name romacs-live-directory) (locate-library "sub/rlt-q")))
+    ;; The blob's own directory is marked used, not the qualified one's.
+    (let ((blob (directory-file-name (file-name-directory (directory-file-name (file-name-directory (locate-library "sub/rlt-q")))))))
+      (set-file-times blob (time-subtract nil (days-to-time 10)))
+      (romacs-live-tests--edit fx "lisp/sub/rlt-q.el" (romacs-live-tests--file "rlt-q" "(defun rlt-q-f () 3)"))
+      (romacs-live-tests--update fx)
+      (romacs-live-tests--edit fx "lisp/sub/rlt-q.el" (romacs-live-tests--file "rlt-q" "(defun rlt-q-f () 2)"))
+      (romacs-live-tests--update fx)
+      (should (time-less-p (time-subtract nil (days-to-time 1))
+                           (file-attribute-modification-time (file-attributes blob)))))))
 
 (ert-deftest romacs-live-the-users-lambda-key-stays-and-a-conflict-is-said ()
   (romacs-live-tests--with fx

@@ -61,7 +61,7 @@ Romacs source tree."
 (defcustom romacs-live-store-keep-days 7
   "Days a content store directory no session image names is kept after
 it was last used: a session with live files marks its own as used when it
-updates and once a day, so a reset of another one keeps them."
+updates and every hour, so a reset of another one keeps them."
   :type 'natnum)
 
 (defcustom romacs-live-directory nil
@@ -187,8 +187,9 @@ relative to its `load-path' directory); return its file."
             (coding-system-for-write 'no-conversion))
         (write-region bytes nil temporary nil 'silent)
         (rename-file temporary file t)))
-    ;; Used now: a reset elsewhere keeps it from here.
-    (ignore-errors (set-file-times (file-name-directory file)))
+    ;; Used now: a reset elsewhere keeps it from here.  The blob's own
+    ;; directory, whatever subdirectory a qualified name puts the file in.
+    (ignore-errors (set-file-times (expand-file-name blob (romacs-live--store))))
     file))
 
 ;;;; Pruning the store
@@ -197,7 +198,7 @@ relative to its `load-path' directory); return its file."
 (declare-function romacs-restart--directory "warm-restart" ())
 
 (defvar romacs-live--touch-timer nil
-  "The daily timer marking the ledger's store directories used.")
+  "The hourly timer marking the ledger's store directories used.")
 
 (defun romacs-live--touch-ledger ()
   "Mark the store directories the ledger names used now."
@@ -206,10 +207,11 @@ relative to its `load-path' directory); return its file."
       (ignore-errors (set-file-times dir)))))
 
 (defun romacs-live--keep-touching ()
-  "Mark the ledger's directories used now, and daily while it has entries."
+  "Mark the ledger's directories used now, and hourly while it has entries."
   (romacs-live--touch-ledger)
   (cond ((and (plist-get romacs-live-ledger :entries) (not romacs-live--touch-timer))
-         (setq romacs-live--touch-timer (run-at-time 86400 86400 #'romacs-live--touch-ledger)))
+         ;; Hourly: well inside the shortest keep time, a day.
+         (setq romacs-live--touch-timer (run-at-time 3600 3600 #'romacs-live--touch-ledger)))
         ((and (not (plist-get romacs-live-ledger :entries)) romacs-live--touch-timer)
          (cancel-timer romacs-live--touch-timer)
          (setq romacs-live--touch-timer nil))))
