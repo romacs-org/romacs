@@ -992,20 +992,8 @@ have sent), its futures settle, the event is reported, and it is forgotten."
       ;; makes cannot handle this death again.
       (setq romacs--isolates (delq isolate romacs--isolates))
       (when (eq (aref isolate 10) 'zygote)
-        ;; Its children die with it: those with a job settle now (a job
-        ;; never started runs elsewhere), whatever they answer meanwhile.
-        ;; One that runs stays counted (`isolate-process-limit') until its
-        ;; own exit arrives, which is then no news.  All are ended, and
-        ;; the futures of those that ran settled (no later frame of theirs
-        ;; answers one), before any callback runs: ORPHANS (CHILD
-        ;; RESOLVED...), UNFORKED the children never reported.
-        (dolist (child (copy-sequence romacs--isolates))
-          (when (and (eq (aref child 10) 'job) (eq (aref (aref child 11) 1) isolate) (aref child 5))
-            (if (null (romacs--isolate-pid (romacs--isolate-id child)))
-                (push child unforked)
-              (push (cons child (romacs--isolate-take-settled child 'isolate-died (list child nil))) orphans)
-              (romacs--isolate-signal (romacs--isolate-id child) 9)
-              (romacs--isolate-mark-ending child)))))
+        (let ((ended (romacs--isolate-end-children isolate)))
+          (setq orphans (car ended) unforked (cdr ended))))
       (if resubmit
           (aset isolate 5 nil)
         (setq own (romacs--isolate-take-settled isolate event (list isolate data))))
@@ -1013,16 +1001,7 @@ have sent), its futures settle, the event is reported, and it is forgotten."
       (unwind-protect
           (romacs--isolate-each
            #'funcall
-           (list (lambda ()
-                   (romacs--isolate-each
-                    (lambda (orphan)
-                      (unwind-protect (romacs--isolate-each #'romacs--isolate-notify (cdr orphan))
-                        (run-hook-with-args 'isolate-error-functions (car orphan) 'isolate-died (list nil nil))))
-                    (nreverse orphans)))
-                 ;; Each unless a callback's pump has handled its death.
-                 (lambda () (romacs--isolate-each (lambda (child) (when (memq child romacs--isolates)
-                                                                    (romacs--isolate-dead child 'isolate-died nil)))
-                                                  (nreverse unforked)))
+           (list (lambda () (romacs--isolate-notify-orphans orphans unforked))
                  (lambda ()
                    (if resubmit
                        (romacs--isolate-each (lambda (entry) (romacs--isolate-resubmit-or-fail (cdr entry))) pending)
@@ -1031,6 +1010,41 @@ have sent), its futures settle, the event is reported, and it is forgotten."
         ;; A spare child that dies took no job: it is replaced, not reported.
         (unless (or retired (and (eq (aref isolate 10) 'job) (null pending)))
           (run-hook-with-args 'isolate-error-functions isolate event (list data children)))))))
+
+(defun romacs--isolate-end-children (zygote)
+  "ZYGOTE, an isolate, has died: its children with a job die with it
+\(a job never started runs elsewhere), whatever they answer meanwhile.
+One that runs gets SIGKILL and stays counted (`isolate-process-limit')
+until its own exit arrives, which is then no news; its futures are
+settled now, running no callback (no later frame of its answers one).
+\(ORPHANS . UNFORKED): ORPHANS a list of (CHILD RESOLVED...), what
+`romacs--isolate-notify' is to run for it, UNFORKED the children never
+reported, each in the order their deaths are to be told."
+  (let ((orphans nil) (unforked nil))
+    (dolist (child (copy-sequence romacs--isolates))
+      (when (and (eq (aref child 10) 'job) (eq (aref (aref child 11) 1) zygote) (aref child 5))
+        (if (null (romacs--isolate-pid (romacs--isolate-id child)))
+            (push child unforked)
+          (push (cons child (romacs--isolate-take-settled child 'isolate-died (list child nil))) orphans)
+          (romacs--isolate-signal (romacs--isolate-id child) 9)
+          (romacs--isolate-mark-ending child))))
+    (cons (nreverse orphans) (nreverse unforked))))
+
+(defun romacs--isolate-notify-orphans (orphans unforked)
+  "Tell the deaths `romacs--isolate-end-children' found, ORPHANS and
+UNFORKED: each orphan's callbacks, then its death to
+`isolate-error-functions'; each unforked child's death handled, unless a
+callback's pump has handled it meanwhile.  Every one whatever an earlier
+one signals."
+  (unwind-protect
+      (romacs--isolate-each
+       (lambda (orphan)
+         (unwind-protect (romacs--isolate-each #'romacs--isolate-notify (cdr orphan))
+           (run-hook-with-args 'isolate-error-functions (car orphan) 'isolate-died (list nil nil))))
+       orphans)
+    (romacs--isolate-each (lambda (child) (when (memq child romacs--isolates)
+                                            (romacs--isolate-dead child 'isolate-died nil)))
+                          unforked)))
 
 (defun romacs--isolate-world-refused (isolate reason)
   "ISOLATE's worker could not adopt the world it was told to, for REASON.
