@@ -744,7 +744,7 @@ fn live_family(pids: &[i64]) -> Vec<i64> {
     found
 }
 
-/// Lisp: the pids of every isolate the spawner holds, pushed onto `seen'.
+/// Lisp: the pids of every isolate the spawner holds, pushed onto `seen`.
 const NOTE_PIDS: &str = "(dolist (i romacs--isolates)
                            (let ((pid (romacs--isolate-pid (romacs--isolate-id i))))
                              (when (and pid (not (memq pid seen))) (setq seen (cons pid seen)))))";

@@ -394,8 +394,9 @@ fn an_idle_worker_ends_on_sigterm_without_waiting_for_sigkill() {
 /// the world, `isolate-error-functions` hears the same, the world is
 /// forgotten, and the job's retry and the next worker boot from source and
 /// answer, their futures saying they run without it; with zygotes, the
-/// zygote refuses and its waiting job runs from source. The store is a linked copy of the installation's, so the worker
-/// takes the path of any store (`world::adopt`), not the installation's.
+/// zygote refuses and its waiting job runs from source. The store is a
+/// linked copy of the installation's, so the worker takes the path of any
+/// store (`world::adopt`), not the installation's.
 #[test]
 fn a_worker_handed_the_batch_world_refuses_it_and_the_next_boots_from_source() {
     let exe = Path::new(installed::romacs());
