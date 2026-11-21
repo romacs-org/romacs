@@ -634,7 +634,7 @@ mod leaf {
         pub(crate) fn with_text<R>(&self, v: Value, f: impl FnOnce(crate::lstring::StrView<'_>) -> R) -> std::result::Result<R, Fault> {
             match self.symbol_key(v) {
                 Some(key) => Ok(self.read_symbol_name(v, key, f)),
-                None => self.vm.str_view(v).map(f).ok_or(Fault::Wrong("stringp", v)),
+                None => self.vm.str_view(v).map(f).ok_or_else(|| Fault::Wrong("stringp", v)),
             }
         }
         /// V's key when it is a symbol (`nil' and `t' too): its name, escaped
