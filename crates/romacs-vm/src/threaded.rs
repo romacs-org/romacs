@@ -44,6 +44,10 @@ mod global_read_tests;
 #[cfg(test)]
 #[path = "world_epoch_tests.rs"]
 mod world_epoch_tests;
+// The reading of machine code knows x86-64 alone.
+#[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
+#[path = "threaded_dispatch_tests.rs"]
+mod dispatch_tests;
 #[cfg(test)]
 mod control_tests {
     use super::*;
@@ -114,7 +118,7 @@ mod control_tests {
             world_version: 1,
             target: Value::UNBOUND,
             function: 0,
-            entry: std::ptr::null(),
+            lowered: false,
             simple_arity: 0,
             primitive: None,
         };
@@ -144,8 +148,7 @@ mod control_tests {
         assert!(program.free_entries.is_empty());
         // Immediate-only descriptor evaluation never dereferences the argument pointer.
         assert_eq!(
-            // SAFETY: the test's inline body reads no argument.
-            unsafe { program.inline_bodies[0].unwrap().evaluate(std::ptr::null()) },
+            program.inline_bodies[0].unwrap().evaluate(&[]),
             Some(Value::integer(12).unwrap())
         );
         // Past half free, retiring closes the tables and keeps no free list.
@@ -474,14 +477,12 @@ struct EntryCache {
     world_version: u64,
     target: Value,
     function: usize,
-    entry: *const Inst,
+    /// FUNCTION was lowered when the cache was filled: a closure call may
+    /// enter it without asking.
+    lowered: bool,
     simple_arity: usize,
     primitive: Option<PrimitiveCall>,
 }
-
-// SAFETY: its `entry' points into its program's code, and only the engine
-// running that program follows it; a mark's threads read the rest.
-unsafe impl Sync for EntryCache {}
 
 // A deliberately narrow expression language, not copied IR. Operands contain
 // only argument indices or immediate scalars, never an untraced heap Value.
@@ -595,22 +596,20 @@ impl InlineBody {
     // Keep numeric fallbacks and their temporary error values outside the
     // dispatch handler, so LLVM can emit a sibling call to the next opcode.
     #[inline(never)]
-    /// # Safety
-    /// ARGS points at the call's argument registers, at least as many as the
-    /// body has parameters.
-    unsafe fn evaluate(&self, args: *const Value) -> Option<Value> {
+    /// The body on the call's ARGS; None, the generic call, for an argument
+    /// it does not have.
+    fn evaluate(&self, args: &[Value]) -> Option<Value> {
         let read = |operand| match operand {
-            // SAFETY: ARGS as the function's contract; N is one of the body's parameters.
-            InlineOperand::Argument(n) => unsafe { *args.add(n) },
-            InlineOperand::Integer(n) => Value::integer(n).unwrap(),
-            InlineOperand::Nil => Value::NIL,
-            InlineOperand::True => Value::TRUE,
+            InlineOperand::Argument(n) => args.get(n).copied(),
+            InlineOperand::Integer(n) => Value::integer(n).ok(),
+            InlineOperand::Nil => Some(Value::NIL),
+            InlineOperand::True => Some(Value::TRUE),
         };
-        let x = read(self.left);
+        let x = read(self.left)?;
         let Some(p) = self.primitive else {
             return Some(x);
         };
-        let y = read(self.right);
+        let y = read(self.right)?;
         if p == Primitive::Null {
             return Some(if x == Value::NIL {
                 Value::TRUE
@@ -715,7 +714,7 @@ impl Program {
             copy.visit_values(&mut |v| value(*v));
             let entry = self.entries[inst.site];
             value(entry.target);
-            if !entry.entry.is_null() {
+            if entry.lowered {
                 function(entry.function);
             }
         }
@@ -735,7 +734,7 @@ impl Program {
             op.visit_values(&mut |v| values.push(*v));
             let entry = self.entries[inst.site];
             values.push(entry.target);
-            if !entry.entry.is_null() {
+            if entry.lowered {
                 functions.push(entry.function);
             }
         }
@@ -746,7 +745,7 @@ impl Program {
                 self.inline_bodies[inst.site] = None;
                 self.entries[inst.site].world_version = 0;
                 self.entries[inst.site].target = Value::UNBOUND;
-                self.entries[inst.site].entry = std::ptr::null();
+                self.entries[inst.site].lowered = false;
                 self.free_entries.push(inst.site);
             }
         }
@@ -1954,7 +1953,7 @@ fn lower_function(
                     world_version: 0,
                     target: Value::UNBOUND,
                     function: 0,
-                    entry: std::ptr::null(),
+                    lowered: false,
                     simple_arity: usize::MAX,
                     primitive: None,
                 };
@@ -2282,6 +2281,22 @@ fn called_symbol(e: &Engine<'_>, slot: usize) -> Value {
         _ => Value::reference(slot + 1, 7),
     }
 }
+/// Whether SLOT names a macro not being expanded, a cached call's refusal:
+/// out of line, as the set lookups take their key by address.
+#[cold]
+#[inline(never)]
+fn macro_changed(vm: &Vm, slot: usize) -> bool {
+    vm.macros.contains(&slot) && !vm.expanding.contains(&slot)
+}
+/// Signal CONDITION with the called symbol of SLOT as its data: out of line,
+/// so no handler's frame holds the data's array, whose address would keep
+/// the handler's dispatch from being a tail call.
+#[cold]
+#[inline(never)]
+fn raise_called(e: &mut Engine<'_>, condition: &str, slot: usize) -> Value {
+    let symbol = called_symbol(e, slot);
+    raise(e, condition, &[symbol])
+}
 fn raise(e: &mut Engine<'_>, condition: &str, values: &[Value]) -> Value {
     let slot = e.vm.slot(condition);
     let data = e.vm.list_value(values);
@@ -2565,20 +2580,24 @@ unsafe fn ret(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value {
 /// its operands name lie in that frame and code, as lowering checked.
 unsafe fn return_unbind(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value {
     let n = e.vm.dynamic.len() - e.dynamic;
-    let now = unbind_now(&mut e, n);
+    let now = return_unbind_now(&mut e, n);
     debug_assert!(now.is_some() || r == e.regs, "a return runs in the current frame");
     // SAFETY: the function's contract: PC is the return's instruction, in
     // this engine's code, and R its frame.
     unsafe {
         match now {
-            Some(Some(signal)) => {
-                e.escape = Some(signal);
-                Value::UNBOUND
-            }
-            Some(None) => ret(e, r, pc),
+            Some(true) => Value::UNBOUND,
+            Some(false) => ret(e, r, pc),
             None => orchestrate(e, (Pc::new(pc), n), return_lent, continue_at),
         }
     }
+}
+/// `unbind_now` for a return, its signal made the pending escape: whether
+/// one signalled, or None for a lend. Out of line, and a register's worth:
+/// the escape returned through the frame kept `return_unbind`'s `ret` a call.
+#[inline(never)]
+fn return_unbind_now(e: &mut Engine<'_>, n: usize) -> Option<bool> {
+    unbind_now(e, n).map(|signal| signal.map(|signal| e.escape = Some(signal)).is_some())
 }
 /// A return's unbinding with unlet watchers, which may collect; the return
 /// value is read from its register after.
@@ -2805,11 +2824,30 @@ fn debugger_lent<'a, 'b>(m: &mut Orch<'_, 'b, 'a>, gc: Gc<'_, 'b>, form: &Form, 
 /// its operands name lie in that frame and code, as lowering checked.
 unsafe fn debug_on_call(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value {
     debug_assert_eq!(r, e.regs, "a poll runs in the current frame");
-    e.vm.profiler.debug_call = false;
-    let code = e.vm.intern("lambda");
-    let form = Box::new(debugger_form(e.vm, &[code]));
+    let form = entry_form(&mut e);
     // SAFETY: PC is the poll's instruction, in this engine's code.
     orchestrate(e, (unsafe { Pc::new(pc) }, form), debugged_call, continue_at)
+}
+/// An entry stop's work before its lend: `debug-on-next-call` disarmed,
+/// and the debugger's form, `(lambda)`. Out of line, with every address it
+/// takes, so the stop's frame takes none and its continuation is a jump: a
+/// stop can repeat in a loop.
+#[inline(never)]
+#[expect(clippy::unnecessary_box_returns, reason = "a Form returned by value would come back through the stop's frame, whose continuation must stay a jump")]
+fn entry_form(e: &mut Engine<'_>) -> Box<Form> {
+    e.vm.profiler.debug_call = false;
+    let code = e.vm.intern("lambda");
+    Box::new(debugger_form(e.vm, &[code]))
+}
+/// An exit stop's work before its lend, as `entry_form`: the activation's
+/// exit flags from MARK dropped, and the debugger's form, `(exit VALUE)`.
+#[inline(never)]
+#[expect(clippy::unnecessary_box_returns, reason = "a Form returned by value would come back through the stop's frame, whose continuation must stay a jump")]
+fn exit_form(e: &mut Engine<'_>, mark: usize, value: Value) -> Box<Form> {
+    e.vm.backtrace.drop_exit_flags_from(mark);
+    e.vm.debug_hooks_changed();
+    let exit = e.vm.intern("exit");
+    Box::new(debugger_form(e.vm, &[exit, value]))
 }
 #[inline(never)]
 fn debugged_call<'x, 'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, (pc, form): (Pc<'x>, Box<Form>)) -> Continue<'x> {
@@ -2827,11 +2865,7 @@ unsafe fn debug_on_exit(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst, mark
     // SAFETY: R and PC as the function's contract (`# Safety`).
     unsafe {
         debug_assert_eq!(r, e.regs, "a return runs in the current frame");
-        e.vm.backtrace.drop_exit_flags_from(mark);
-        e.vm.debug_hooks_changed();
-        let exit = e.vm.intern("exit");
-        let value = *r.add((*pc).a);
-        let form = Box::new(debugger_form(e.vm, &[exit, value]));
+        let form = exit_form(&mut e, mark, *r.add((*pc).a));
         orchestrate(e, (Pc::new(pc), form), debugged_exit, continue_at)
     }
 }
@@ -2907,7 +2941,7 @@ unsafe fn direct(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value {
             let end = width + e.vm.functions.get_unchecked(entry.function).regs;
             let Some(r) = frame_room(&mut e, r, end) else { return fail(&mut e, "register storage overflow"); };
             if let Some(body) = e.inline_bodies.get_unchecked(i.site)
-                && let Some(value) = body.evaluate(r.add(i.d))
+                && let Some(value) = body.evaluate(std::slice::from_raw_parts(r.add(i.d), i.e as usize))
             {
                 // Poll with the original argument layout, never a copied Value
                 // across collection. Resume rechecks the epoch at this same pc.
@@ -2946,14 +2980,12 @@ unsafe fn direct_generic(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> 
         // Function-cell equality is an authoritative guard, including redefinition
         // back to the original primitive; never assume a sealed symbol table.
         let slot = en.vm.slots.get_unchecked(i.b);
+        if en.vm.caches.get_unchecked(i.c as usize).version != slot.version && macro_changed(en.vm, i.b) {
+            return fail(en, "invalid function: macro dependency changed; resubmit source");
+        }
+        let slot = en.vm.slots.get_unchecked(i.b);
         let cache = en.vm.caches.get_unchecked_mut(i.c as usize);
         if cache.version != slot.version {
-            if en.vm.macros.contains(&i.b) && !en.vm.expanding.contains(&i.b) {
-                return fail(
-                    en,
-                    "invalid function: macro dependency changed; resubmit source",
-                );
-            }
             cache.version = slot.version;
             cache.target = slot.function;
             // A minor's sweep asks these alone whether their target died
@@ -2963,18 +2995,16 @@ unsafe fn direct_generic(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> 
         }
         let target = cache.target;
         if target == Value::UNBOUND || target == Value::NIL {
-            let symbol = called_symbol(en, i.b);
-            return raise(en, "void-function", &[symbol]);
+            return raise_called(en, "void-function", i.b);
         }
         // An autoload cell is resolved from its symbol, which it must name.
-        if target.tag_is(7) || target.tag_is(3) && (en.vm.autoload_object(target) || lambda_list(en, target)) {
+        if target.tag_is(7) || target.tag_is(3) && (autoload(en, target) || lambda_list(en, target)) {
             return invoke_full(e, r, pc, Value::reference(i.b + 1, 7), i.d, i.e as usize);
         }
         // GNU eval.c:3158-3160 names the called SYMBOL, not its cell's value.
         if !(target.tag_is(4) || target.tag_is(6)) {
             let condition = uncallable_condition(en, target);
-            let symbol = called_symbol(en, i.b);
-            return raise(en, condition, &[symbol]);
+            return raise_called(en, condition, i.b);
         }
         // Refresh an invalidated speculation lazily; ineligible closures retain
         // the existing function-id cache instead of resolving on every call.
@@ -3017,7 +3047,7 @@ unsafe fn invoke(
         };
         let function = closure.function;
         let entry = *en.entries.get_unchecked((*pc).site);
-        if entry.function != function || entry.entry.is_null() {
+        if entry.function != function || !entry.lowered {
             return resolve_entry(e, r, pc, target, start, argc);
         }
         if !depth_room(en) { return Value::UNBOUND; }
@@ -3156,7 +3186,7 @@ unsafe fn resolve_entry(
                 // particular environment as the cache key or copy its captures.
                 target: Value::UNBOUND,
                 function,
-                entry: en.code.get_unchecked(function).entry(),
+                lowered: true,
                 primitive: None,
                 simple_arity: {
                     let f = &en.vm.functions[function];
@@ -3167,7 +3197,7 @@ unsafe fn resolve_entry(
                     }
                 },
             };
-            return invoke(e, r, pc, target, start, argc);
+            return invoke_out(e, r, pc, target, start, argc);
         }
         if let Some(d) = prim::generated(target) {
             let Some(leaf) = prim::site_leaf(d, argc) else {
@@ -3178,7 +3208,7 @@ unsafe fn resolve_entry(
                 world_version: 0,
                 target,
                 function: leaf as usize,
-                entry: std::ptr::null(),
+                lowered: false,
                 simple_arity: LEAF_ENTRY + argc,
                 primitive: None,
             };
@@ -3209,7 +3239,7 @@ unsafe fn resolve_entry(
                     world_version: 0,
                     target,
                     function: usize::MAX,
-                    entry: std::ptr::null(),
+                    lowered: false,
                     simple_arity: usize::MAX,
                     primitive: Some(call),
                 };
@@ -3219,7 +3249,22 @@ unsafe fn resolve_entry(
         invoke_full(e, r, pc, target, start, argc)
     }
 }
-#[inline(always)]
+// Out of line: its slow paths hand frame addresses to calls (a root frame,
+// a lambda list's walk), which would keep a caller's dispatch from being a
+// tail call; it ends in `invoke_out`, whose own frame takes none.
+/// `invoke` out of line, for the slow paths that end in it: they hand frame
+/// addresses to calls, which would keep an inlined `invoke`'s dispatch
+/// from being a tail call.
+#[inline(never)]
+/// # Safety
+/// As `invoke`'s.
+// UNSAFE(a raw handler's frame and instruction pointers, the threaded calling convention)
+unsafe fn invoke_out(e: Eng<'_, '_>, r: *mut Value, pc: *const Inst, target: Value, start: usize, argc: usize) -> Value {
+    // UNSAFE(a raw handler's frame and instruction pointers, the threaded calling convention)
+    // SAFETY: R and PC as the function's contract (`# Safety`).
+    unsafe { invoke(e, r, pc, target, start, argc) }
+}
+#[inline(never)]
 /// # Safety
 /// R is the running engine's current frame (`Engine::regs`) and PC an
 /// instruction of the function running in it: the registers and constants
@@ -3247,36 +3292,7 @@ unsafe fn invoke_full(
         if target == Value::reference(Primitive::Throw as usize, 6)
             || target == Value::reference(Primitive::Signal as usize, 6)
         {
-            enter_native(&mut e, r, pc, target, start, argc);
-            let signal = target == Value::reference(Primitive::Signal as usize, 6);
-            if !(argc == 2 || (signal && argc == 1)) {
-                return fail(&mut e, "wrong primitive arity");
-            }
-            if signal {
-                // eval.c Fsignal/signal_or_quit: an error object with DATA
-                // omitted re-signals itself; nil with non-list DATA is `error'.
-                let data = if argc == 2 { *r.add(start + 1) } else { Value::NIL };
-                let mut condition = *r.add(start);
-                if condition.tag_is(3) && data == Value::NIL {
-                    let Ok((condition, data)) = e.vm.cons_pair(condition) else { return fail(&mut e, "invalid error object") };
-                    e.escape = Some(Escape::Signal(condition, data));
-                    return Value::UNBOUND;
-                }
-                if condition == Value::NIL && !data.tag_is(3) {
-                    condition = e.vm.intern("error");
-                }
-                e.escape = Some(Escape::Signal(condition, data));
-                if condition != Value::NIL
-                    && condition != Value::TRUE
-                    && (!condition.tag_is(7) || condition == Value::UNBOUND)
-                {
-                    e.escape = None;
-                    return wrong_type(&mut e, "symbolp", condition);
-                }
-                return Value::UNBOUND;
-            }
-            e.escape = Some(Escape::Throw(*r.add(start), *r.add(start + 1)));
-            return Value::UNBOUND;
+            return invoke_slow(e, r, pc, function, start, argc);
         }
         if target.tag_is(6) {
             if target == Value::reference(Primitive::Load as usize, 6)
@@ -3290,35 +3306,161 @@ unsafe fn invoke_full(
             {
                 return primitive(e, r, pc, target, start, argc);
             }
-            return invoke(e, r, pc, target, start, argc);
+            return invoke_out(e, r, pc, target, start, argc);
         }
+        if target.tag_is(4) {
+            return invoke_out(e, r, pc, target, start, argc);
+        }
+        invoke_slow(e, r, pc, function, start, argc)
+    }
+}
+/// `invoke_full`'s slow targets: `throw` and `signal`, an autoload, a
+/// lambda list, or no function at all. Out of line, so `invoke_full`'s own
+/// frame takes no addresses; and what takes them here (a pair read, a root
+/// frame, a lambda list's walk) is `slow_target`'s, so this frame's
+/// continuation after a lend is a jump: a call there kept a native frame
+/// per call of a lambda list in a loop.
+#[cold]
+#[inline(never)]
+/// Six arguments, all in registers: a seventh would go on the stack, and a
+/// call passing one cannot be a jump. FUNCTION is the called value; what it
+/// resolves to is looked up again here, off the common path.
+///
+/// # Safety
+/// As `invoke_full`'s.
+// UNSAFE(a raw handler's frame and instruction pointers, the threaded calling convention)
+unsafe fn invoke_slow(
+    mut e: Eng<'_, '_>,
+    r: *mut Value,
+    pc: *const Inst,
+    function: Value,
+    start: usize,
+    argc: usize,
+) -> Value {
+    // UNSAFE(a raw handler's frame and instruction pointers, the threaded calling convention)
+    // SAFETY: R and PC as the function's contract (`# Safety`).
+    match unsafe { slow_target(&mut e, r, pc, function, start, argc) } {
+        Slow::Autoload(retry) => orchestrate(e, retry, autoload_call, continue_at),
+        Slow::Lambda(retry) => orchestrate(e, retry, lambda_call, continue_at),
+        Slow::Raise(raised) => orchestrate(e, raised, lambda_list_raise, continue_at),
+        Slow::Done => Value::UNBOUND,
+    }
+}
+/// What a slow target needs next, in two words.
+enum Slow<'x> {
+    /// Load the autoload, then retry the call (`autoload_call`).
+    Autoload(Box<(Pc<'x>, RootFrame, (usize, usize), bool)>),
+    /// Call the lambda list (`lambda_call`).
+    Lambda(Box<(Pc<'x>, RootFrame, (usize, usize), bool)>),
+    /// Raise the lambda list's failure (`lambda_list_raise`).
+    Raise(Box<(RootFrame, usize, usize, &'static str)>),
+    /// Nothing: the call's escape or error is recorded.
+    Done,
+}
+/// `invoke_slow`'s work up to its lend, out of line with the addresses it
+/// takes.
+#[inline(never)]
+/// # Safety
+/// As `invoke_full`'s.
+// UNSAFE(a raw handler's frame and instruction pointers, the threaded calling convention)
+unsafe fn slow_target<'x>(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst, function: Value, start: usize, argc: usize) -> Slow<'x> {
+    // UNSAFE(a raw handler's frame and instruction pointers, the threaded calling convention)
+    // SAFETY: R and PC as the function's contract (`# Safety`).
+    unsafe {
+        let Some(target) = t2_resolve(e, function) else {
+            return Slow::Done;
+        };
+        if target == Value::reference(Primitive::Throw as usize, 6)
+            || target == Value::reference(Primitive::Signal as usize, 6)
+        {
+            enter_native(e, r, pc, target, start, argc);
+            let signal = target == Value::reference(Primitive::Signal as usize, 6);
+            if !(argc == 2 || (signal && argc == 1)) {
+                fail(e, "wrong primitive arity");
+                return Slow::Done;
+            }
+            if signal {
+                // eval.c Fsignal/signal_or_quit: an error object with DATA
+                // omitted re-signals itself; nil with non-list DATA is `error'.
+                let data = if argc == 2 { *r.add(start + 1) } else { Value::NIL };
+                let mut condition = *r.add(start);
+                if condition.tag_is(3) && data == Value::NIL {
+                    let Ok((condition, data)) = e.vm.cons_pair(condition) else {
+                        fail(e, "invalid error object");
+                        return Slow::Done;
+                    };
+                    e.escape = Some(Escape::Signal(condition, data));
+                    return Slow::Done;
+                }
+                if condition == Value::NIL && !data.tag_is(3) {
+                    condition = e.vm.intern("error");
+                }
+                e.escape = Some(Escape::Signal(condition, data));
+                if condition != Value::NIL
+                    && condition != Value::TRUE
+                    && (!condition.tag_is(7) || condition == Value::UNBOUND)
+                {
+                    e.escape = None;
+                    wrong_type(e, "symbolp", condition);
+                    return Slow::Done;
+                }
+                return Slow::Done;
+            }
+            e.escape = Some(Escape::Throw(*r.add(start), *r.add(start + 1)));
+            return Slow::Done;
+        }
+        let lend = lend_target(e, r, pc, (function, target), (start, argc), false);
+        if !matches!(lend, Slow::Done) {
+            return lend;
+        }
+        // A closure went to `invoke_out` from `invoke_full`, and the cell has
+        // not changed since: what is left cannot be called.
+        debug_assert!(!target.tag_is(4), "invoke_full calls a closure itself");
+        raise_uncallable(e, function, target);
+        Slow::Done
+    }
+}
+
+/// The lend a call of TARGET (FUNCTION's value) needs when it is an
+/// autoload or a lambda list, its root frame and box made here, out of line:
+/// they take addresses that would keep the caller's dispatch a call. Done
+/// when TARGET is neither. T2: the call is a continuation's (`retry_call`).
+#[inline(never)]
+/// # Safety
+/// As `invoke_full`'s.
+// UNSAFE(a raw handler's frame and instruction pointers, the threaded calling convention)
+unsafe fn lend_target<'x>(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst, (function, target): (Value, Value), (start, argc): (usize, usize), t2: bool) -> Slow<'x> {
+    // UNSAFE(a raw handler's frame and instruction pointers, the threaded calling convention)
+    // SAFETY: R and PC as the function's contract (`# Safety`).
+    unsafe {
         // eval.c:2760/3176/3530: an autoload loads its file, then the call is
         // retried from the original function (`goto retry').
-        if target.tag_is(3) && e.vm.autoload_object(target) {
-            enter_native(&mut e, r, pc, target, start, argc);
+        if target.tag_is(3) && autoload(e, target) {
+            enter_native(e, r, pc, target, start, argc);
             debug_assert_eq!(r, e.regs, "a call runs in the current frame");
             // The function first: the call is retried from it (`retry_call`).
-            let retry = Box::new((Pc::new(pc), e.vm.root_frame(&[function, target]), (start, argc), false));
-            return orchestrate(e, retry, autoload_call, continue_at);
+            let retry = Box::new((Pc::new(pc), e.vm.root_frame(&[function, target]), (start, argc), t2));
+            return Slow::Autoload(retry);
         }
-        if lambda_list(&mut e, target) {
-            enter_native(&mut e, r, pc, target, start, argc);
+        if lambda_list(e, target) {
+            enter_native(e, r, pc, target, start, argc);
             if let Some(failure) = lambda_list_failure(e.vm, target, std::slice::from_raw_parts(r.add(start), argc).to_vec()) {
-                let raised = lambda_list_frame(e.vm, failure);
-                return orchestrate(e, raised, lambda_list_raise, continue_at);
+                return Slow::Raise(lambda_list_frame(e.vm, failure));
             }
             debug_assert_eq!(r, e.regs, "a call runs in the current frame");
-            let retry = Box::new((Pc::new(pc), e.vm.root_frame(&[target]), (start, argc), false));
-            return orchestrate(e, retry, lambda_call, continue_at);
+            let retry = Box::new((Pc::new(pc), e.vm.root_frame(&[target]), (start, argc), t2));
+            return Slow::Lambda(retry);
         }
-        if !target.tag_is(4) {
-            return {
-                let condition = uncallable_condition(&mut e, target);
-                raise(&mut e, condition, &[function])
-            };
-        }
-        invoke(e, r, pc, target, start, argc)
+        Slow::Done
     }
+}
+/// Raise TARGET, FUNCTION's value, as not callable; out of line, as its
+/// data's list takes an address.
+#[cold]
+#[inline(never)]
+fn raise_uncallable(e: &mut Engine<'_>, function: Value, target: Value) -> Value {
+    let condition = uncallable_condition(e, target);
+    raise(e, condition, &[function])
 }
 /// Cold apply adapter. The spread goes at this caller's end, where the callee's
 /// window starts, so the callee takes it as its arguments; nothing keeps a
@@ -3341,10 +3483,11 @@ unsafe fn apply(
         let base = r.offset_from(e.vm.stack.as_ptr()) as usize;
         let at = base + e.vm.functions.get_unchecked(e.function).regs.max(1);
         // Out of line: the Result's error drop would stop the tail dispatch.
-        let Some((r, target, offset, count)) = t2_prepare_apply(&mut e, r, base + start, argc, at) else {
+        let (r, offset) = t2_prepare_apply(&mut e, r, base + start, argc, at);
+        if r.is_null() {
             return Value::UNBOUND;
-        };
-        e.apply_function = Some(target);
+        }
+        let (target, count) = (e.apply_function.expect("the spread's function"), e.spread_end - offset);
         invoke_full(e, r, pc, target, offset - base, count)
     }
 }
@@ -3638,7 +3781,7 @@ fn retry_call(mut e: Eng<'_, '_>, retry: Box<(Pc<'_>, RootFrame, (usize, usize),
     let (pc, function, (start, argc), t2) = retry_target(&mut e, retry);
     let r = e.regs;
     // SAFETY: as `continue_at`.
-    unsafe { if t2 { t2_dispatch(e, r, pc.get(), function, start, argc) } else { t2_invoke_full(e, r, pc.get(), function, start, argc) } }
+    unsafe { if t2 { t2_dispatch(e, r, pc.get(), function, start, argc) } else { invoke_full(e, r, pc.get(), function, start, argc) } }
 }
 /// RETRY's call, its frame released: out of line, so the box and the frame
 /// are gone before `retry_call`'s dispatch.
@@ -3960,22 +4103,11 @@ unsafe fn t2_dispatch(
         let Some(target) = t2_resolve(&mut e, target) else {
             return Value::UNBOUND;
         };
-        if target.tag_is(3) && e.vm.autoload_object(target) {
-            enter_native(&mut e, r, pc, target, start, argc);
-            debug_assert_eq!(r, e.regs, "a call runs in the current frame");
-            // The function first: the call is retried from it (`retry_call`).
-            let retry = Box::new((Pc::new(pc), e.vm.root_frame(&[function, target]), (start, argc), true));
-            return orchestrate(e, retry, autoload_call, continue_at);
-        }
-        if lambda_list(&mut e, target) {
-            enter_native(&mut e, r, pc, target, start, argc);
-            if let Some(failure) = lambda_list_failure(e.vm, target, std::slice::from_raw_parts(r.add(start), argc).to_vec()) {
-                let raised = lambda_list_frame(e.vm, failure);
-                return orchestrate(e, raised, lambda_list_raise, continue_at);
-            }
-            debug_assert_eq!(r, e.regs, "a call runs in the current frame");
-            let retry = Box::new((Pc::new(pc), e.vm.root_frame(&[target]), (start, argc), true));
-            return orchestrate(e, retry, lambda_call, continue_at);
+        match lend_target(&mut e, r, pc, (function, target), (start, argc), true) {
+            Slow::Autoload(retry) => return orchestrate(e, retry, autoload_call, continue_at),
+            Slow::Lambda(retry) => return orchestrate(e, retry, lambda_call, continue_at),
+            Slow::Raise(raised) => return orchestrate(e, raised, lambda_list_raise, continue_at),
+            Slow::Done => {}
         }
         if target.tag_is(4) {
             return t2_enter_closure(e, r, pc, target, start, argc);
@@ -3984,10 +4116,7 @@ unsafe fn t2_dispatch(
             return enter_generated(e, r, pc, target, start, argc);
         }
         if !target.tag_is(6) {
-            return {
-                let condition = uncallable_condition(&mut e, target);
-                raise(&mut e, condition, &[function])
-            };
+            return raise_uncallable(&mut e, function, target);
         }
         let Some(p) = prim::legacy(target) else {
             return fail(&mut e, "invalid primitive reference");
@@ -3998,15 +4127,16 @@ unsafe fn t2_dispatch(
                 enter_apply(&mut e, r, pc, start, argc);
                 // A continuation's callee starts after its own layout.
                 let at = base + k_width(*r.add(K_SAVED_N), *r.add(K_ARGS_N));
-                let Some((r, target, offset, count)) = t2_prepare_apply(&mut e, r, base + start, argc, at) else {
+                let (r, offset) = t2_prepare_apply(&mut e, r, base + start, argc, at);
+                if r.is_null() {
                     return Value::UNBOUND;
-                };
-                e.apply_function = Some(target);
+                }
+                let (target, count) = (e.apply_function.expect("the spread's function"), e.spread_end - offset);
                 t2_dispatch(e, r, pc, target, offset - base, count)
             }
             // These use neither the site caches nor the caller's width.
             Primitive::Throw | Primitive::Signal | Primitive::Load | Primitive::Require | Primitive::Eval | Primitive::Macroexpand | Primitive::AutoloadDoLoad | Primitive::ReadHostEvent | Primitive::FormatModeLine | Primitive::MakeInterpretedClosure => {
-                t2_invoke_full(e, r, pc, target, start, argc)
+                invoke_full(e, r, pc, target, start, argc)
             }
             _ => {
                 enter_native(&mut e, r, pc, target, start, argc);
@@ -4050,24 +4180,6 @@ fn t2_resolve(e: &mut Engine<'_>, target: Value) -> Option<Value> {
     }
     Some(target)
 }
-/// `invoke_full` out of line, so its alias scratch never joins t2_dispatch.
-#[cold]
-#[inline(never)]
-/// # Safety
-/// R is the running engine's current frame (`Engine::regs`) and PC an
-/// instruction of the function running in it: the registers and constants
-/// its operands name lie in that frame and code, as lowering checked.
-unsafe fn t2_invoke_full(
-    e: Eng<'_, '_>,
-    r: *mut Value,
-    pc: *const Inst,
-    target: Value,
-    start: usize,
-    argc: usize,
-) -> Value {
-    // SAFETY: R and PC as the function's contract (`# Safety`).
-    unsafe { invoke_full(e, r, pc, target, start, argc) }
-}
 /// Spread `apply`'s arguments at AT, the caller's end, where the callee's
 /// window will start; `None` after recording the error. A spread the file
 /// cannot hold grows it first, rebasing every activation (offsets are
@@ -4083,25 +4195,30 @@ unsafe fn t2_prepare_apply(
     start: usize,
     argc: usize,
     at: usize,
-) -> Option<(*mut Value, Value, usize, usize)> {
+) -> (*mut Value, usize) {
+    // Two words, in registers: a wider result would come back through a
+    // pointer into the caller's frame, which keeps `apply`'s dispatch from
+    // being a tail call. The target goes to `apply_function`, the count is
+    // `spread_end` less the offset; a null frame is a failure, set.
     let mut r = r;
     loop {
         match e.vm.prepare_apply(start, argc, at) {
-            Ok(Ok(window)) => {
-                e.stack_used = e.stack_used.max(window.1 + window.2);
-                e.spread_end = window.1 + window.2;
-                return Some((r, window.0, window.1, window.2));
+            Ok(Ok((target, offset, count))) => {
+                e.stack_used = e.stack_used.max(offset + count);
+                e.spread_end = offset + count;
+                e.apply_function = Some(target);
+                return (r, offset);
             }
             Ok(Err(need)) => {
                 let Some(rebased) = grow_registers(e, r, need) else {
                     fail(e, "register storage overflow");
-                    return None;
+                    return (std::ptr::null_mut(), 0);
                 };
                 r = rebased;
             }
             Err(error) => {
                 e.error = Some(error);
-                return None;
+                return (std::ptr::null_mut(), 0);
             }
         }
     }
@@ -4452,6 +4569,8 @@ unsafe fn cached_primitive(
         if e.vm.deferred_writes.is_empty() { advance(e, r, pc) } else { drain_at(e, Pc::new(pc.add(1))) }
     }
 }
+/// A call of a primitive that runs Lisp (`load`, `eval`, ...), as a lend;
+/// the call resumes after it (`loader_body`).
 #[cold]
 /// # Safety
 /// R is the running engine's current frame (`Engine::regs`) and PC an
@@ -4471,27 +4590,12 @@ unsafe fn primitive(
         enter_native(en, r, pc, target, start, argc);
         let base = r.offset_from(en.vm.stack.as_ptr()) as usize;
         let p = prim::legacy(target).expect("legacy primitive");
-        if matches!(p, Primitive::Load | Primitive::Require | Primitive::Eval | Primitive::Macroexpand | Primitive::AutoloadDoLoad | Primitive::ReadHostEvent | Primitive::FormatModeLine | Primitive::MakeInterpretedClosure) {
-            debug_assert_eq!(r, en.regs, "a call runs in the current frame");
-            return orchestrate(e, (Pc::new(pc), Box::new((p, base + start, argc))), loader_body, continue_at);
-        }
-        let mut signal = None;
-        match en
-            .vm
-            .primitive_call(p, base + start, argc, &mut en.error, &mut signal)
-        {
-            Some(value) => {
-                leave_native(en);
-                *r.add((*pc).a) = value;
-                if e.vm.deferred_writes.is_empty() { advance(e, r, pc) } else { drain_at(e, Pc::new(pc.add(1))) }
-            }
-            None => {
-                if let Some((condition, data)) = signal {
-                    en.escape = Some(Escape::Signal(condition, data));
-                }
-                Value::UNBOUND
-            }
-        }
+        debug_assert!(
+            matches!(p, Primitive::Load | Primitive::Require | Primitive::Eval | Primitive::Macroexpand | Primitive::AutoloadDoLoad | Primitive::ReadHostEvent | Primitive::FormatModeLine | Primitive::MakeInterpretedClosure),
+            "invoke_full sends only the primitives that run Lisp here"
+        );
+        debug_assert_eq!(r, en.regs, "a call runs in the current frame");
+        orchestrate(e, (Pc::new(pc), Box::new((p, base + start, argc))), loader_body, continue_at)
     }
 }
 /// Grow the engine's register file to at least NEED slots, doubling, and
@@ -4794,8 +4898,16 @@ fn lambda_list_frame(vm: &mut Vm, (bindings, condition, data): LambdaListFailure
     let values: Vec<Value> = data.iter().copied().chain(bindings.iter().flat_map(|&(param, arg)| [param, arg])).collect();
     Box::new((vm.root_frame(&values), data.len(), bindings.len(), condition))
 }
+/// Whether TARGET is an autoload object (`Vm::autoload_object`).
+// Out of line: its pair read returns through a pointer into the frame.
+#[inline(never)]
+fn autoload(e: &Engine<'_>, target: Value) -> bool {
+    e.vm.autoload_object(target)
+}
 /// GNU `(lambda ...)' list functions: a list headed by `lambda' whose cdr
 /// is a cons (funcall_lambda signals `invalid-function' otherwise).
+// Out of line, as `autoload`.
+#[inline(never)]
 fn lambda_list(e: &mut Engine<'_>, target: Value) -> bool {
     target.tag_is(3) && {
         let lambda = Value::reference(e.vm.slot("lambda") + 1, 7);
@@ -5903,7 +6015,7 @@ mod register_tests {
                 .entries
                 .iter()
                 .any(|entry| entry.function == function
-                    && !entry.entry.is_null()
+                    && entry.lowered
                     && entry.target == Value::UNBOUND),
             "captured/optional function must be cached without retaining a closure identity"
         );
@@ -5981,6 +6093,69 @@ mod register_tests {
             long.abs_diff(short) <= 4096,
             "native stack at the polls: {short} bytes after 20,000 iterations, {long} after 200,000"
         );
+    }
+
+    /// The named calls a loop makes most, each in a loop of its own: a
+    /// generated primitive's site leaf (`symbol-name`), an ordinary
+    /// primitive through its cached entry (`format`), `apply` and `funcall`
+    /// of closures and primitives, a `&rest` closure, T2 continuations'
+    /// callbacks (`romacs--t2-assoc`), calls through aliases, lambda lists,
+    /// `eval` and debugger stops. Each keeps its polls at one depth however
+    /// long it runs, so no dispatch on its way is a call.
+    #[test]
+    fn named_calls_dispatch_in_constant_native_stack() {
+        let bodies = [
+            ("leaf", "(symbol-name 'x)"),
+            ("primitive", "(format \"%d\" i)"),
+            ("apply", "(apply #'+ (list i 1))"),
+            ("funcall", "(funcall (lambda (x) (+ x 1)) i)"),
+            ("rest", "(apply (lambda (&rest xs) (car xs)) i nil)"),
+            ("T2 closure callback", "(romacs--t2-assoc 2 '((1 . a) (2 . b)) (lambda (x k) (= x k)))"),
+            // A call through an alias resolves its target in `invoke_full`:
+            // elisp-benchmarks' eieio member (`slot-value' is an alias of
+            // `eieio-oref') overflowed the native stack there.
+            ("alias of a primitive", "(nd-car nil)"),
+            ("alias of a function", "(nd-id i)"),
+            // The hot paths of functions ALLOWED a break on their lend paths
+            // (`threaded_dispatch_tests.rs`): `apply' of a closure, and a
+            // site whose closure changes every call (`resolve_entry`).
+            ("apply of a closure", "(apply #'nd-identity i nil)"),
+            ("alternating closures", "(funcall (if (= (% i 2) 0) #'nd-identity (lambda (x) x)) i)"),
+            // A T2 continuation's primitive callback (`t2_dispatch`), and a
+            // return through a dynamic binding (`return_unbind`).
+            ("T2 primitive callback", "(romacs--t2-assoc 2 '((1 . a) (2 . b)) #'eql)"),
+            ("dynamic binding", "(nd-bind i)"),
+            // Paths that resume a run after a lend: `eval' (`primitive`), a
+            // `(lambda ...)' list called by name (`invoke_slow`) and as a T2
+            // callback (`t2_dispatch`). Beta's gate build overflowed on both
+            // lambda-list loops.
+            ("eval", "(eval '(+ 1 2))"),
+            ("lambda list by name", "(nd-list i)"),
+            ("funcall of a lambda list", "(funcall '(lambda (x) x) i)"),
+            ("T2 lambda-list callback", "(romacs--t2-assoc 2 '((1 . a) (2 . b)) '(lambda (x k) (= x k)))"),
+            // A debugger stop resumes the run after its lend, and Lisp can
+            // repeat one: `debug-on-next-call' on entry, `backtrace-debug'
+            // on exit, under a debugger that returns.
+            ("debugger entry stop", "(progn (setq debug-on-next-call t) (nd-identity i))"),
+            ("debugger exit stop", "(nd-exit i)"),
+        ];
+        let aliases = "(defalias 'nd-car #'car) (defun nd-identity (x) x) (defalias 'nd-id #'nd-identity) \
+                       (defvar nd-dynamic nil) (defun nd-bind (x) (let ((nd-dynamic x)) nd-dynamic)) \
+                       (fset 'nd-list '(lambda (x) x)) \
+                       (setq debugger (lambda (&rest args) (car (cdr args)))) (defun nd-exit (x) (backtrace-debug 0 t) x)";
+        for (what, body) in bodies {
+            let run = |n: i64| {
+                let (value, depth) =
+                    poll_depth(format!("(progn {aliases} (let ((i 0)) (while (< i {n}) {body} (setq i (1+ i))) i))"));
+                assert_eq!(value, n);
+                depth
+            };
+            let (short, long) = (run(20_000), run(200_000));
+            assert!(
+                long.abs_diff(short) <= 4096,
+                "{what}: native stack at the polls: {short} bytes after 20,000 iterations, {long} after 200,000"
+            );
+        }
     }
 
     /// The control: nesting that does take native stack, `eval` inside `eval`,
