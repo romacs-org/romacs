@@ -160,6 +160,8 @@ fn selection_errors_and_yank_pop_keep_user_orientation() {
     vm.eval_source("(erase-buffer) (kill-new \"old\") (kill-new \"new\") (yank '(4)) (setq last-command 'yank) (yank-pop 1)").unwrap();
     assert_eq!(printed(&mut vm, "(list (point) (mark t) (equal (buffer-string) \"old\"))"), "(1 4 t)", "YANK_POP_PRESERVES_PREFIXED_YANK_ORIENTATION");
     vm.eval_source("(let ((eval-expression-print-length 2)) (eval-expression '(list 1 2 3)))").unwrap();
+    // The value is the echo area's message, shown once the command returns.
+    echo::show_current_message(&mut vm).unwrap();
     assert_eq!(echo::text(&mut vm).unwrap(), "(1 2 ...)", "EVAL_PRINT_CONTROLS_ARE_DYNAMIC");
 }
 
