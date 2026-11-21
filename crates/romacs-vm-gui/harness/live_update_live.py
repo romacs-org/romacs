@@ -261,8 +261,9 @@ def run_tests(engine, entry):
     ready(engine, '(equal (minibuffer-contents-no-properties) "romacs-live-test")', 'the test command typed')
     engine.keys(K('Return'))
     started = time.time()
-    # Longer than the runner's own deadlines, so it ends its batch hosts.
-    wait(lambda: engine.ask('(if romacs-live-test-last 1 0)') == 1, 900, 'the test run', engine.process, .2)
+    # Longer than the runner's own deadlines together (600 s for the batch
+    # world, 600 s a suite file), so it ends its batch hosts itself.
+    wait(lambda: engine.ask('(if romacs-live-test-last 1 0)') == 1, 1500, 'the test run', engine.process, .2)
     entry['test_seconds'] = round(time.time() - started, 3)
     tested = plist(engine.ask('(list :summary (romacs-live-test-summary romacs-live-test-last)'
                               ' :passed (and (romacs-live-test-passed-p romacs-live-test-last) t)'
