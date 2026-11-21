@@ -244,4 +244,28 @@ attach."
           (should (eq (romacs-agent-state session) 'detached)))
       (delete-process process))))
 
+(ert-deftest romacs-agent-reattach-a-quit-in-a-record-leaves-the-rest-going ()
+  ;; A handler that exits nonlocally (a quit) ends its slice: the records
+  ;; after it go on from the timer, in order.
+  (let* ((handled nil) (due nil) (quit t)
+         (romacs-agent--sessions (make-hash-table :test #'equal))
+         (session (romacs-agent--make :id "cccccccc-0000-4000-8000-000000000000" :harness 'claude
+                                      :state 'running :dir "/nonexistent/c" :host-socket "/nonexistent/c.sock"))
+         (process (make-pipe-process :name "romacs-drain-quit" :noquery t)))
+    (process-put process 'romacs-agent session)
+    (setf (romacs-agent-connection session) process)
+    (unwind-protect
+        (cl-letf (((symbol-function 'run-at-time)
+                   (lambda (_time _repeat function &rest args) (setq due (append due (list (cons function args)))) 'timer))
+                  ((symbol-function 'romacs-agent--record)
+                   (lambda (_session record)
+                     (push (gethash "seq" record) handled)
+                     (when (and quit (= (gethash "seq" record) 2)) (setq quit nil) (throw 'quit nil)))))
+          (catch 'quit (romacs-agent--filter process "{\"seq\":1}\n{\"seq\":2}\n{\"seq\":3}\n"))
+          (should (equal handled '(2 1)))
+          (should (= (length due) 1))
+          (while due (let ((timer (pop due))) (apply (car timer) (cdr timer))))
+          (should (equal (reverse handled) '(1 2 3))))
+      (delete-process process))))
+
 ;;; romacs-agent-reattach-tests.el ends here
