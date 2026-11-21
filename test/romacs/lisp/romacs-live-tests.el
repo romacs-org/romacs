@@ -28,6 +28,7 @@
 (defvar rlt-ad-hook)
 (defvar rlt-lk-map)
 (defvar romacs-server-build-watch)
+(defvar warm-restart-directory)
 
 (defun romacs-live-tests--git (dir &rest args)
   "Git ARGS in DIR; its output."
@@ -423,7 +424,16 @@ and a build of that commit: a plist `:top', `:src', `:build', `:commit'."
     (romacs-live-tests--edit fx "lisp/sub/rlt-q.el" (romacs-live-tests--file "rlt-q" "(defun rlt-q-f () 2)"))
     (romacs-live-tests--update fx)
     (should (= (funcall 'rlt-q-f) 2))
-    (should (string-prefix-p (expand-file-name romacs-live-directory) (locate-library "sub/rlt-q")))))
+    (should (string-prefix-p (expand-file-name romacs-live-directory) (locate-library "sub/rlt-q")))
+    ;; The blob's own directory is marked used, not the qualified one's.
+    (let ((blob (directory-file-name (file-name-directory (directory-file-name (file-name-directory (locate-library "sub/rlt-q")))))))
+      (set-file-times blob (time-subtract nil (days-to-time 10)))
+      (romacs-live-tests--edit fx "lisp/sub/rlt-q.el" (romacs-live-tests--file "rlt-q" "(defun rlt-q-f () 3)"))
+      (romacs-live-tests--update fx)
+      (romacs-live-tests--edit fx "lisp/sub/rlt-q.el" (romacs-live-tests--file "rlt-q" "(defun rlt-q-f () 2)"))
+      (romacs-live-tests--update fx)
+      (should (time-less-p (time-subtract nil (days-to-time 1))
+                           (file-attribute-modification-time (file-attributes blob)))))))
 
 (ert-deftest romacs-live-the-users-lambda-key-stays-and-a-conflict-is-said ()
   (romacs-live-tests--with fx
@@ -770,7 +780,9 @@ reader; the report."
          (installed (make-temp-file "romacs-live-installed-" t))
          (romacs-server-build-watch installed))
     (unwind-protect
-        (cl-letf (((symbol-function 'warm-restart-request) (lambda (&rest args) (setq asked args))))
+        (cl-letf (((symbol-function 'warm-restart-request) (lambda (&rest args) (setq asked args)))
+                  ;; The store's pruning has a test of its own, on a store of its own.
+                  ((symbol-function 'romacs-live-prune-store) #'ignore))
           (romacs-session-reset)
           (should (equal (plist-get asked :fresh) 'unsaved))
           (should (equal (plist-get asked :target) installed))
@@ -785,6 +797,41 @@ reader; the report."
               (romacs-session-reset)
               (should (equal (plist-get asked :target) (expand-file-name invocation-name invocation-directory))))))
       (delete-directory installed t))))
+
+(ert-deftest romacs-live-a-prune-keeps-what-a-session-or-image-needs ()
+  ;; Four blobs, three of them unused for ten days: the one a restart's
+  ;; image names stays, the ledger's stays, the recent one stays, the
+  ;; other goes.
+  (let* ((top (file-name-as-directory (make-temp-file "romacs-live-prune-" t)))
+         ;; A quote in the store's path: an image prints it escaped.
+         (romacs-live-directory (expand-file-name "the \"live\" store/" top))
+         (warm-restart-directory (expand-file-name "images/" top))
+         (process-environment (cons (concat "XDG_STATE_HOME=" (expand-file-name "state" top)) process-environment))
+         (blob (lambda (c) (make-string 40 c)))
+         (old (time-subtract nil (days-to-time 10)))
+         (romacs-live-ledger (list :entries (list (list :path "lisp/l.el" :new (funcall blob ?d))))))
+    (unwind-protect
+        (progn
+          (dolist (c '(?a ?b ?c ?d))
+            (let ((dir (expand-file-name (funcall blob c) romacs-live-directory)))
+              (make-directory dir t)
+              (write-region "x" nil (expand-file-name "x.el" dir) nil 'silent)
+              (unless (eq c ?c) (set-file-times dir old))))
+          (make-directory warm-restart-directory t)
+          (write-region (format "(:parts ((romacs-live-restore-ledger :entries ((:file %S)))))"
+                                (expand-file-name (concat (funcall blob ?b) "/x.el") romacs-live-directory))
+                        nil (expand-file-name "pending.image" warm-restart-directory) nil 'silent)
+          ;; An image that cannot be read: nothing is known safe to go.
+          (make-directory (expand-file-name "unreadable.image" warm-restart-directory))
+          (should-not (romacs-live-prune-store))
+          (should (file-directory-p (expand-file-name (funcall blob ?a) romacs-live-directory)))
+          (delete-directory (expand-file-name "unreadable.image" warm-restart-directory))
+          (let ((removed (romacs-live-prune-store)))
+            (should (equal (mapcar #'file-name-nondirectory removed) (list (funcall blob ?a))))
+            (should (file-directory-p (expand-file-name (funcall blob ?b) romacs-live-directory)))
+            (should (file-directory-p (expand-file-name (funcall blob ?c) romacs-live-directory)))
+            (should (file-directory-p (expand-file-name (funcall blob ?d) romacs-live-directory)))))
+      (delete-directory top t))))
 
 (ert-deftest romacs-live-forms-diff-names-each-definition ()
   (let ((diff (romacs-live-forms-diff
