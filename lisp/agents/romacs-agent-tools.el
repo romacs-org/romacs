@@ -508,6 +508,52 @@ by counting characters from the start."
          (t (setq ok nil))))
       (and ok (nreverse wakes)))))
 
+(defconst romacs-agent--reply-line-regexp
+  (concat "\n\\(?:"
+          "Reply to this message with SendMessage(to=\"[^\"\n]*\", message=\\.\\.\\.)\\."
+          "\\|Reply to this \\(?:message\\|result\\) with romacs_task_reply(messageId=\"[^\"\n]*\", text=\\.\\.\\.)\\."
+          "\\|Its sender is outside Romacs and has no reply route: it reads only your turn's reply\\."
+          "\\)[ \t]*\\(?:\n[ \t\n]*\\|\\'\\)")
+  "The line `romacs-agent--message-reply-line' writes after an envelope,
+each of its forms whole, and the space after it.")
+
+(defun romacs-agent-incoming-of (text)
+  "TEXT, written to an agent as a user's turn, read as what came from
+elsewhere: other sessions' messages (whole <romacs-message> envelopes,
+`romacs-agent--message-envelope', each with the line saying how to
+answer it) or a delegated task's wakes.  A list of plists of :from
+\(whom it came from), :state (the message's kind, or the task's state)
+and :text (its body), one per message or wake; nil for anything else,
+the user's own words among them."
+  (cond ((not (stringp text)) nil)
+        ((string-match-p "\\`[ \t\n]*<romacs-message[ >]" text)
+         (let ((at (progn (string-match "\\`[ \t\n]*" text) (match-end 0))) (found nil) (ok t))
+           (while (and ok (< at (length text)))
+             (if (not (eq (string-match "<romacs-message\\( [^>]*\\)?>\n?" text at) at))
+                 (setq ok (string-match-p "\\`[ \t\n]*\\'" (substring text at)) at (length text))
+               (let* ((attributes (or (match-string 1 text) ""))
+                      (open-end (match-end 0))
+                      (close (string-search "</romacs-message>" text open-end))
+                      (attribute (lambda (name)
+                                   (and (string-match (format " %s=\"\\([^\"]*\\)\"" name) attributes)
+                                        (match-string 1 attributes)))))
+                 (if (not close) (setq ok nil)
+                   (push (list :from (or (funcall attribute "from") "a session") :state (funcall attribute "kind")
+                               :text (string-trim-right (substring text open-end close) "\n"))
+                         found)
+                   (setq at (+ close (length "</romacs-message>")))
+                   ;; The line its sender wrote saying how to answer it
+                   ;; (`romacs-agent--message-reply-line'), then space: an
+                   ;; envelope without one is a user's example.
+                   (if (eq (string-match romacs-agent--reply-line-regexp text at) at)
+                       (setq at (match-end 0))
+                     (setq ok nil))))))
+           (and ok found (nreverse found))))
+        ((string-prefix-p "Delegated task " text)
+         (mapcar (lambda (wake) (list :from (plist-get wake :title) :state (plist-get wake :state)
+                                      :text (plist-get wake :result)))
+                 (romacs-agent-tools--wakes-parse text)))))
+
 (defun romacs-agent-tools--wake-parse (text)
   "TEXT read back as one wake (`romacs-agent-tools--wakes-parse'), or nil."
   (let ((wakes (romacs-agent-tools--wakes-parse text)))

@@ -40,19 +40,10 @@ text's own colour by default, a call being no more than code.")
 (defface romacs-lexical-removed-sign '((t :inherit (diff-indicator-removed romacs-lexical-removed)))
   "A removed line's `-', in the theme's colour for removals, on its band.")
 
-(defun romacs-lexical--band (bg fg)
-  "BG mixed toward FG until it stands 1.15:1 apart from BG, or a third of
-the way there: a band on a black background as on a white one."
-  (let ((amount 0.05) band)
-    (while (progn (setq band (romacs-color-mix bg fg amount))
-                  (and (< (romacs-color-contrast band bg) 1.15) (< amount 0.33)))
-      (setq amount (+ amount 0.02)))
-    band))
-
 (defun romacs-lexical--derive (&rest _)
   "Band a hunk header in the theme's `diff-header' background where it
 stands 1.15:1 apart from the text's, else in the text's background mixed
-toward its colour as far (`romacs-lexical--band'): a band on every theme,
+toward its colour as far (`romacs-color-band'): a band on every theme,
 its colour still the header's.  Make a diff line's sign its indicator's
 colour, legible on the line's band.  Each as the face's default spec,
 so a theme's own spec wins."
@@ -60,7 +51,7 @@ so a theme's own spec wins."
          (fg (romacs-color-hex (face-foreground 'default nil t)))
          (theirs (and (facep 'diff-header) (romacs-color-hex (face-background 'diff-header nil t))))
          (band (cond ((and theirs bg (>= (romacs-color-contrast theirs bg) 1.15)) theirs)
-                     ((and bg fg) (romacs-lexical--band bg fg)))))
+                     ((and bg fg) (romacs-color-band bg fg)))))
     (face-spec-set 'romacs-lexical-hunk
                    `((t :inherit diff-header ,@(and band `(:background ,band)) :extend t))
                    'face-defface-spec))

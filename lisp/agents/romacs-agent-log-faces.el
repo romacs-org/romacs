@@ -75,6 +75,8 @@ one before where it last ended written again; keep why, should it fail."
               (setq romacs-agent-log-faces--whole t)
               (romacs-markdown-fontify-region start end)
               (setq from start))
+            ;; Its marks hidden where their faces show what they mean.
+            (romacs-markdown-hide-markup from end)
             (setq romacs-agent-log-faces--current (set-marker (or romacs-agent-log-faces--current (make-marker)) from)
                   romacs-agent-log-faces--end (set-marker (or romacs-agent-log-faces--end (make-marker)) end))))
       (error (setq romacs-agent-log-faces--failed (error-message-string err))
@@ -86,7 +88,7 @@ one before where it last ended written again; keep why, should it fail."
     (with-current-buffer buffer
       (romacs-agent-log-faces--settle)
       (pcase romacs-agent-log--stream
-        (`(text ,start ,at . ,_) (romacs-agent-log-faces--reface start at))))))
+        (`(text ,(and start (pred markerp)) ,at . ,_) (romacs-agent-log-faces--reface start at))))))
 
 (defun romacs-agent-log-faces--plain-p ()
   "Whether what streamed since the reply was last faced is words that can

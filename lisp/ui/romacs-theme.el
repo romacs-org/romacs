@@ -194,6 +194,32 @@ colours (no `color-values')."
         ((and (fboundp 'color-values) (color-values color))
          (apply #'format "#%02x%02x%02x" (mapcar (lambda (v) (ash v -8)) (color-values color))))))
 
+(defun romacs-color-band (bg fg &optional contrast)
+  "BG, #rrggbb, mixed toward FG until it stands CONTRAST (1.15 by default)
+apart from BG: a surface or a band that shows on a black background as
+on a white one.  Nil when no band does that and keeps FG readable on it
+\(3:1), a theme whose text barely stands off its background."
+  (let ((contrast (or contrast 1.15)) (amount 0.05) band)
+    (while (progn (setq band (romacs-color-mix bg fg (min amount 1.0)))
+                  (and (< (romacs-color-contrast band bg) contrast) (< amount 1.0)))
+      (setq amount (+ amount 0.02)))
+    ;; The least mix that stands apart, between the last step and this:
+    ;; the most room left for the text.
+    (let ((low (if (= amount 0.05) 0.0 (- amount 0.02))) (high (min amount 1.0)))
+      (when (>= (romacs-color-contrast band bg) contrast)
+        (dotimes (_ 8)
+          (let ((mid (/ (+ low high) 2)))
+            (if (>= (romacs-color-contrast (romacs-color-mix bg fg mid) bg) contrast) (setq high mid) (setq low mid))))
+        ;; A mix is rounded to whole channels, its contrasts not quite
+        ;; even along the way: the first nearby one that meets both.
+        (let ((at (max 0.0 (- high 0.01))) (found nil))
+          (while (and (not found) (<= at (min 1.0 (+ high 0.02))))
+            (let ((try (romacs-color-mix bg fg at)))
+              (when (and (>= (romacs-color-contrast try bg) contrast) (>= (romacs-color-contrast fg try) 3.0))
+                (setq found try)))
+            (setq at (+ at 0.001)))
+          found)))))
+
 (defun romacs-color-legible (color &optional background contrast)
   "COLOR moved in lightness until it reads on BACKGROUND (the default
 face's, by default) at CONTRAST (WCAG's 4.5:1 for text, by default), its

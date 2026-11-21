@@ -42,6 +42,12 @@
     (cl-loop for (k v) on pairs by #'cddr do (puthash k v table))
     table))
 
+(defun romacs-agent-log-tests--face-p (face faces)
+  "Whether FACE is one of FACES, a face property's value, or what one of
+them inherits."
+  (seq-some (lambda (f) (or (eq f face) (and (symbolp f) (facep f) (memq face (ensure-list (face-attribute f :inherit))))))
+            (ensure-list faces)))
+
 (ert-deftest romacs-agent-log-shows-every-step-in-order ()
   (romacs-agent-log-tests--with
     (draw :type 'input :text "count the lines")
@@ -57,8 +63,10 @@
       (should (string-match-p "∴ I should run wc." text))
       (should (string-match-p "wc -l notes.txt" text))
       ;; The output under its call, before what followed the call.
-      (should (string-match-p "wc -l notes.txt[^\n]*\n  ⎿ 2 notes.txt\nRunning it now." text))
-      (should (string-match-p "✻ 9s · \\$0.12" text)))))
+      (should (string-match-p "\\$ wc -l notes.txt · 2 notes.txt\n\nRunning it now." text))
+      ;; Its rule says how long and when; what it cost is RET away.
+      (should (string-match-p "✻ 9s · [0-9][0-9]:[0-9][0-9]" text))
+      (should-not (string-search "0.12" text)))))
 
 (ert-deftest romacs-agent-log-streams-without-blank-trails ()
   (romacs-agent-log-tests--with
@@ -72,7 +80,7 @@
     (draw :type 'message-end)
     (draw :type 'input :text "next")
     (should (equal (romacs-agent-log-tests--transcript)
-                   "∴ I think.\nPara one.\n\nPara two.\n\n❯ next\n"))))
+                   "∴ I think.\n\nPara one.\n\nPara two.\n\n\n▌ ❯ next\n\n"))))
 
 (ert-deftest romacs-agent-log-long-output-says-how-much-more ()
   (romacs-agent-log-tests--with
@@ -80,12 +88,11 @@
       (draw :type 'tool :state 'started :id "t" :name "Bash" :input (romacs-agent-log-tests--input "command" "seq 5"))
       (draw :type 'tool :state 'completed :id "t" :output "1\n2\n3\n4\n5")
       (let ((text (romacs-agent-log-tests--transcript)))
-        ;; A command's last lines, as it ran: how many came before them.
-        (should (string-match-p "⎿ … 3 earlier lines · RET shows all\n    4\n    5\n" text))
-        (should-not (string-match-p "\n    3\n" text))
-        ;; RET shows all of it.
+        ;; A command that ended well is its row: how many lines it gave.
+        (should (equal text "● $ seq 5 · 5 lines\n"))
+        ;; RET on it shows all of it.
         (goto-char (point-min))
-        (search-forward "earlier lines")
+        (search-forward "seq 5")
         (save-window-excursion (romacs-agent-log-open))
         (with-current-buffer "*agent output*"
           (should (string-match-p "seq 5" (buffer-string)))
@@ -100,12 +107,12 @@
       (draw :type 'tool-output :id "c" :text "one\ntwo\n")
       (draw :type 'tool-output :id "c" :text "three\n")
       (let ((text (romacs-agent-log-tests--transcript)))
-        (should (string-match-p "make[^\n]*\n  ⋮ running: 3 lines so far, the last 2\n    two\n    three\nafter" text)))
+        (should (string-match-p "make[^\n]*\n  ⋮ running: 3 lines so far, the last 2\n    two\n    three\n\nafter" text)))
       (draw :type 'tool :state 'completed :id "c" :output "one\ntwo\nthree")
       (let ((text (romacs-agent-log-tests--transcript)))
         (should-not (string-match-p "so far" text))
-        ;; Ended: the same last lines it showed as it ran stay.
-        (should (string-match-p "make[^\n]*\n  ⎿ … 1 earlier line · RET shows all\n    two\n    three\nafter" text))))))
+        ;; Ended well: its row alone, what it gave RET away.
+        (should (string-match-p "make · 3 lines\n\nafter" text))))))
 
 (ert-deftest romacs-agent-log-subagent-work-goes-under-its-call ()
   (romacs-agent-log-tests--with
@@ -117,7 +124,7 @@
     (draw :type 'tool :state 'completed :id "a" :output "2 words")
     (let ((text (romacs-agent-log-tests--transcript)))
       ;; A read says how much it read, its text RET away; a report, under its call.
-      (should (string-match-p "count[^\n]*\n│ ● [^\n]*n.txt[^\n]*· 1 line\n  ⎿ 2 words\nMain goes on." text)))))
+      (should (string-match-p "⑂ count · 2 words\n│ ● [^\n]*n.txt[^\n]*· 1 line\n\nMain goes on." text)))))
 
 (ert-deftest romacs-agent-log-an-approval-waits-in-plain-sight ()
   (romacs-agent-log-tests--with
@@ -225,7 +232,7 @@
     (draw :type 'input :text "two")
     (goto-char (point-min))
     (romacs-agent-log-next-prompt 1)
-    (should (looking-at-p "\n❯ two"))
+    (should (looking-at-p "\n+▌ ❯ two"))
     ;; Past the last prompt: said, never a hang.
     (should-error (romacs-agent-log-next-prompt 1) :type 'user-error)
     (goto-char (point-min))
@@ -240,7 +247,8 @@
     (draw :type 'tool :state 'completed :id "a" :output "done")
     (let ((text (romacs-agent-log-tests--transcript)))
       (should (string-match-p "│ hello world\n│ next\n│ ● " text))
-      (should (string-match-p "⎿ done" text)))
+      ;; Ended well: its row says its report's first line.
+      (should (string-match-p "⑂ d · done\n" text)))
     ;; A background subagent's later word goes under its call still.
     (draw :type 'task :id "a" :state 'completed :summary "counted")
     (draw :type 'delta :text "root text")
@@ -728,7 +736,7 @@
     ;; Known by its task alone, then ended: under its call still.
     (draw :type 'task :task "t1" :state 'backgrounded)
     (draw :type 'task :id "b" :state 'completed :summary "slept")
-    (should (string-match-p "  ⎿ Running in the background\n│ · moved to the background\n│ · completed: slept\nroot goes on"
+    (should (string-match-p "\\$ sleep 60 · Running in the background\n│ · moved to the background\n│ · completed: slept\n\nroot goes on"
                             (romacs-agent-log-tests--transcript)))
     (should-not (romacs-agent-log--block "b"))))
 
@@ -798,7 +806,7 @@
     (draw :type 'tool :state 'completed :id "a"
           :output "[Subagent hand-back] The text below is the final report. The report follows:\n  2 words\nagentId: abc (use SendMessage)\n<usage>tokens: 5\ntool_uses: 1</usage>")
     (let ((text (romacs-agent-log-tests--transcript)))
-      (should (string-match-p "⎿ 2 words\n" text))
+      (should (string-match-p "⑂ count · 2 words\n" text))
       (should-not (string-match-p "hand-back\\|agentId\\|usage" text)))
     (romacs-agent-log--separator)
     (should (eq (car romacs-agent-log--state) 'working))))
@@ -849,13 +857,13 @@
     (should-not romacs-agent-log--early)))
 
 (ert-deftest romacs-agent-log-a-report-keeps-its-words ()
-  (should (equal (romacs-agent-log--report "Plain words. The report follows:\nmore <usage>inline</usage> text")
+  (should (equal (romacs-agent-rows-report "Plain words. The report follows:\nmore <usage>inline</usage> text")
                  "Plain words. The report follows:\nmore <usage>inline</usage> text"))
-  (should (equal (romacs-agent-log--report "[Subagent hand-back] frame. The report follows:\nbody\nagentId: a1\n<usage>t: 1</usage>\n")
+  (should (equal (romacs-agent-rows-report "[Subagent hand-back] frame. The report follows:\nbody\nagentId: a1\n<usage>t: 1</usage>\n")
                  "body"))
-  (should (equal (romacs-agent-log--report "[Subagent hand-back] f. The report follows:\nsee <usage>x</usage> here\nagentId: a\n<usage>t</usage>")
+  (should (equal (romacs-agent-rows-report "[Subagent hand-back] f. The report follows:\nsee <usage>x</usage> here\nagentId: a\n<usage>t</usage>")
                  "see <usage>x</usage> here"))
-  (should (equal (romacs-agent-log--report "Example: <usage>x</usage>\nThe closing tag is </usage>")
+  (should (equal (romacs-agent-rows-report "Example: <usage>x</usage>\nThe closing tag is </usage>")
                  "Example: <usage>x</usage>\nThe closing tag is </usage>")))
 
 (ert-deftest romacs-agent-log-output-before-its-call-is-kept ()
@@ -1072,6 +1080,110 @@
             ((symbol-function 'face-background) (lambda (&rest _) "white")))
     (romacs-agent-log--derive)))
 
+;;; Rounds
+
+(ert-deftest romacs-agent-log-rounds-tell-the-user-from-elsewhere ()
+  (should (equal (romacs-agent-incoming-of "<romacs-message id=\"m-1\" kind=\"parent\" from=\"lead\">\nGo on\n</romacs-message>\nReply to this message with romacs_task_reply(messageId=\"m-1\", text=...).")
+                 '((:from "lead" :state "parent" :text "Go on"))))
+  (should-not (romacs-agent-incoming-of "my own words"))
+  (romacs-agent-log-tests--with
+    ;; The user's message: its surface.
+    (draw :type 'input :text "do it" :request 1)
+    ;; A delegated task's result, written as a turn: from elsewhere.
+    (draw :type 'input :text (concat "Delegated task 19a4803e-9e10-44f0-bf91-824484dcfb8c (lane x) [completed, 4 chars]:\n"
+                                     "done\n\nReply to this result with romacs_task_reply(messageId=\"m-x\", text=...)."))
+    ;; Claude Code's own notice of a background task.
+    (dolist (event (romacs-agent--claude-injected "<task-notification>\n<status>completed</status>\n<summary>Build done</summary>\n</task-notification>" nil))
+      (romacs-agent-log-draw session event))
+    (let ((text (romacs-agent-log-tests--transcript)))
+      (should (string-match-p "❯ do it" text))
+      (should (string-match-p "┃ ← lane x · completed\n┃ done" text))
+      (should (string-match-p "┃ ← background task · completed\n┃ Build done" text))
+      (should-not (string-match-p "❯ Delegated" text)))
+    (goto-char (point-min))
+    (search-forward "do it")
+    (should (romacs-agent-log-tests--face-p 'romacs-agent-log-you-bar (get-text-property (line-beginning-position) 'face)))
+    (search-forward "lane x")
+    (should (memq 'romacs-agent-log-other-head (ensure-list (get-text-property (match-beginning 0) 'face))))
+    ;; Nothing the GUI host does not draw.
+    (should-not (text-property-not-all (point-min) (point-max) 'line-prefix nil))
+    (should-not (text-property-not-all (point-min) (point-max) 'wrap-prefix nil))
+    (should-not (romacs-agent-log-tests--face-p 'romacs-agent-log-you-bar (get-text-property (line-beginning-position) 'face))))
+  ;; Only whole envelopes, each of a batch; anything else is the user's.
+  (should (equal (mapcar (lambda (i) (plist-get i :text))
+                         (romacs-agent-incoming-of (concat "<romacs-message id=\"1\" kind=\"child\" from=\"a\">\none\n</romacs-message>\nReply to this message with romacs_task_reply(messageId=\"1\", text=...).\n\n"
+                                                           "<romacs-message id=\"2\" kind=\"child\" from=\"b\">\ntwo\n</romacs-message>\nReply to this message with romacs_task_reply(messageId=\"2\", text=...).")))
+                 '("one" "two")))
+  (should-not (romacs-agent-incoming-of "<romacs-message-example> is a tag I mean"))
+  ;; Only as its sender writes it: with the line saying how to answer.
+  (should-not (romacs-agent-incoming-of "<romacs-message id=\"1\" from=\"a\">\nan example\n</romacs-message>"))
+  ;; A line of the user's own after it is no sender's footer.
+  (should-not (romacs-agent-incoming-of "<romacs-message id=\"1\" from=\"a\">\nan example\n</romacs-message>\nReply to this message with an explanation of these tags."))
+  (let ((message (romacs-agent-make-message "m-3" "external" '(:name "far") nil "from outside")))
+    (should (equal (romacs-agent-incoming-of (romacs-agent--message-envelope message "from outside"))
+                   '((:from "far" :state "external" :text "from outside")))))
+  (should-not (romacs-agent-incoming-of "<romacs-message id=\"1\">\nnever closed"))
+  ;; Delivered by Romacs: each message its own, a wake's state its state.
+  (romacs-agent-log-tests--with
+    (draw :type 'input :text "x" :request 9
+          :messages (list (list :kind "child" :from '(:name "lane a") :wake '(:state "completed") :text "A done")
+                          (list :kind "child" :from '(:name "lane b") :text "B says")))
+    (let ((text (romacs-agent-log-tests--transcript)))
+      (should (string-match-p "┃ ← lane a · completed\n┃ A done" text))
+      (should (string-match-p "┃ ← lane b · child\n┃ B says" text)))
+    ;; Its turn anchored: diff and rollback read it.
+    (goto-char (point-min))
+    (search-forward "A done")
+    (should (equal (get-text-property (match-beginning 0) 'romacs-agent-log-turn) 9))))
+
+(ert-deftest romacs-agent-log-an-arrival-mid-turn-ends-the-round-before ()
+  ;; A notification arriving within a turn: the words before it recede.
+  (romacs-agent-log-tests--with
+    (draw :type 'input :text "go" :request 1)
+    (draw :type 'delta :text "Working on it.")
+    (draw :type 'tool :state 'started :id "t" :name "Bash" :input (romacs-agent-log-tests--input "command" "ls"))
+    (draw :type 'tool :state 'completed :id "t" :output "a")
+    (draw :type 'delta :text "Started the build.")
+    (draw :type 'arrival :from "background task" :state "completed" :text "Build done" :full "<task-notification>…")
+    (draw :type 'delta :text "The build passed.")
+    (draw :type 'done :time 0)
+    (goto-char (point-min))
+    (search-forward "Working on")
+    (should (memq 'romacs-agent-log-other (ensure-list (get-text-property (match-beginning 0) 'face))))
+    (search-forward "Started the build")
+    (should-not (memq 'romacs-agent-log-other (ensure-list (get-text-property (match-beginning 0) 'face))))
+    (search-forward "The build passed")
+    (should-not (memq 'romacs-agent-log-other (ensure-list (get-text-property (match-beginning 0) 'face))))))
+
+(ert-deftest romacs-agent-log-a-round-s-answer-stands-out ()
+  ;; Its end: the agent's words before its last recede.
+  (romacs-agent-log-tests--with
+    (draw :type 'input :text "go" :request 1)
+    (draw :type 'delta :text "Looking first.")
+    (draw :type 'tool :state 'started :id "t" :name "Bash" :input (romacs-agent-log-tests--input "command" "ls"))
+    (draw :type 'tool :state 'completed :id "t" :output "a")
+    (draw :type 'delta :text "Here is the answer.")
+    (draw :type 'done :time 0)
+    (goto-char (point-min))
+    (search-forward "Looking")
+    (should (memq 'romacs-agent-log-other (ensure-list (get-text-property (match-beginning 0) 'face))))
+    (search-forward "the answer")
+    (should-not (memq 'romacs-agent-log-other (ensure-list (get-text-property (match-beginning 0) 'face))))))
+
+(ert-deftest romacs-agent-log-an-exit-ends-the-round ()
+  ;; A harness that exits mid-turn: its round ends, its words before the
+  ;; last recede.
+  (romacs-agent-log-tests--with
+    (draw :type 'input :text "go" :request 1)
+    (draw :type 'delta :text "First words.")
+    (draw :type 'tool :state 'started :id "t" :name "Bash" :input (romacs-agent-log-tests--input "command" "ls"))
+    (draw :type 'tool :state 'completed :id "t" :output "a")
+    (draw :type 'delta :text "Last words.")
+    (draw :type 'exit :status 1)
+    (goto-char (point-min))
+    (search-forward "First words")
+    (should (memq 'romacs-agent-log-other (ensure-list (get-text-property (match-beginning 0) 'face))))))
+
 (ert-deftest romacs-agent-log-a-hidden-request-is-not-answered-blind ()
   ;; Narrowed away from what waits, C-c C-y says so rather than answer.
   (romacs-agent-log-tests--with
@@ -1191,6 +1303,124 @@ none when dropped.")
     (dolist (at '(0 5 48 52))
       (should (memq 'error (ensure-list (get-text-property at 'face text)))))
     (should-not (memq 'error (ensure-list (get-text-property (- (length text) 2) 'face text))))))
+
+;;; The user's surface
+
+(ert-deftest romacs-agent-log-rounds-surface-is-a-block-that-shows ()
+  ;; On black as on white, apart from the background.
+  (dolist (pair '(("#000000" . "#e0e0e0") ("#ffffff" . "#202020") ("#121212" . "#bebebe") ("#000000" . "#767676")))
+    (should (>= (romacs-color-contrast (romacs-color-band (car pair) (cdr pair)) (car pair)) 1.15)))
+  ;; None that would hide the text.
+  (should-not (romacs-color-band "#000000" "#141414"))
+  ;; Apart, but the text would not read on it.
+  (should-not (romacs-color-band "#000000" "#505050"))
+  ;; Rounded mixes: a nearby one that meets both floors is found.
+  (let ((band (romacs-color-band "#3f51c7" "#16e827" 1.3)))
+    (should band)
+    (should (>= (romacs-color-contrast band "#3f51c7") 1.3))
+    (should (>= (romacs-color-contrast "#16e827" band) 3.0)))
+  ;; Below the first step: the least mix, not the step's.
+  (should (< (romacs-color-contrast (romacs-color-band "#ffffff" "#000000" 1.01) "#ffffff") 1.05))
+  ;; The least band that stands apart, found between steps.
+  (let ((band (romacs-color-band "#090909" "#696969" 1.2)))
+    (should band)
+    (should (>= (romacs-color-contrast band "#090909") 1.2))
+    (should (>= (romacs-color-contrast "#696969" band) 3.0)))
+  ;; Each line of the user's message behind its bar, blank ones too.
+  (romacs-agent-log-tests--with
+    (draw :type 'input :text "first" :request 1)
+    (draw :type 'input :text "second\n\nthird" :request 2)
+    (goto-char (point-min))
+    (search-forward "second")
+    (forward-line 0)
+    (should (looking-at "▌ ❯ second\n▌ \n▌ third\n"))))
+
+;;; From elsewhere, quoted
+
+(ert-deftest romacs-agent-log-rounds-quote-what-came-from-elsewhere ()
+  ;; Its head, its lines behind a bar, a blank line after; the bar is no
+  ;; part of what one copies.
+  (romacs-agent-log-tests--with
+    (draw :type 'input :text (concat "<romacs-message id=\"m-1\" kind=\"parent\" from=\"lead\">\nGo on\nand on\n</romacs-message>\n"
+                                     "Reply to this message with romacs_task_reply(messageId=\"m-1\", text=...)."))
+    (draw :type 'delta :text "On it.")
+    (let ((text (romacs-agent-log-tests--transcript)))
+      (should (string-match-p "┃ ← lead · parent\n┃ Go on\n┃ and on\n\nOn it." text)))
+    ;; Two in a row: each a round, the air a round opens after between them.
+    (draw :type 'input :text (concat "<romacs-message id=\"m-2\" kind=\"parent\" from=\"lead\">\nAgain\n</romacs-message>\n"
+                                     "Reply to this message with romacs_task_reply(messageId=\"m-2\", text=...)."))
+    (draw :type 'input :text (concat "<romacs-message id=\"m-3\" kind=\"parent\" from=\"lead\">\nThird\n</romacs-message>\n"
+                                     "Reply to this message with romacs_task_reply(messageId=\"m-3\", text=...)."))
+    (should (string-match-p "┃ Again\n\n\n┃ ← lead · parent\n┃ Third" (romacs-agent-log-tests--transcript)))
+    ;; A line cut short: RET shows the rest.
+    (let ((romacs-agent-log-output-width 20) (truncate-string-ellipsis "…"))
+      (draw :type 'input :text (concat "<romacs-message id=\"m-4\" kind=\"parent\" from=\"lead\">\n" (make-string 40 ?x) "\n</romacs-message>\n"
+                                       "Reply to this message with romacs_task_reply(messageId=\"m-4\", text=...).")))
+    (should (string-match-p "┃ x+…\n┃ … [^\n]* shows all" (romacs-agent-log-tests--transcript)))
+    (goto-char (point-min))
+    (search-forward "Go on")
+    (should (equal (filter-buffer-substring (line-beginning-position) (line-end-position)) "Go on"))))
+
+;;; A stream that starts with line breaks
+
+(ert-deftest romacs-agent-log-stream-marks-its-first-text ()
+  ;; Line breaks first, then text: the entry starts at the text, with no
+  ;; blank lines before it; a later reply after work stands apart.
+  (romacs-agent-log-tests--with
+    (draw :type 'input :text "go" :request 1)
+    (draw :type 'delta :text "\n\n")
+    (draw :type 'delta :text "Hello")
+    (should (string-match-p "❯ go\n\nHello" (romacs-agent-log-tests--transcript)))
+    (goto-char (point-min))
+    (search-forward "Hello")
+    (should (eq (get-text-property (match-beginning 0) 'romacs-agent-log-entry) 'text))
+    (draw :type 'tool :state 'started :id "t1" :name "Bash" :input (romacs-agent-log-tests--input "command" "ls"))
+    (draw :type 'delta :text "After.")
+    (should (string-match-p "\n\nAfter\\." (romacs-agent-log-tests--transcript)))))
+
+;;; Blank lines, one at a time
+
+(ert-deftest romacs-agent-log-blank-lines-are-one ()
+  (romacs-agent-log-tests--with
+    ;; Two prompts, two rounds: the air a round opens after between them.
+    (draw :type 'input :text "one" :request 1)
+    (draw :type 'input :text "two" :request 2)
+    (should (equal (romacs-agent-log-tests--transcript) "▌ ❯ one\n\n\n▌ ❯ two\n\n"))
+    ;; Thinking of line breaks only, a call, then the reply: no trace of
+    ;; the thinking, one blank line before the reply.
+    (draw :type 'thinking :text "\n\n")
+    (draw :type 'tool :state 'started :id "t1" :name "Bash" :input (romacs-agent-log-tests--input "command" "ls"))
+    (draw :type 'delta :text "Done.")
+    (should (string-match-p "\\`▌ ❯ one\n\n\n▌ ❯ two\n\n● [^\n]*\n\nDone\\.\n\\'" (romacs-agent-log-tests--transcript)))))
+
+(ert-deftest romacs-agent-log-rounds-arrival-without-its-call-is-top-level ()
+  ;; Its parent call never drawn: a round of its own at the top level.
+  (romacs-agent-log-tests--with
+    (draw :type 'input :text "go" :request 1)
+    (dolist (event (romacs-agent--claude-injected "<task-notification>\n<status>completed</status>\n<summary>Build done</summary>\n</task-notification>" "missing-call"))
+      (romacs-agent-log-draw session event))
+    (goto-char (point-min))
+    (search-forward "background task")
+    (should (text-property-any (point-min) (point) 'romacs-agent-log-round t))
+    (let ((round (text-property-any (1+ (text-property-any (point-min) (point-max) 'romacs-agent-log-round t)) (point-max) 'romacs-agent-log-round t)))
+      (should round)
+      (should (< round (point))))
+    (should (string-match-p "Build done\n\n\\'" (romacs-agent-log-tests--transcript)))))
+
+;;; Under a call
+
+(ert-deftest romacs-agent-log-rounds-quote-under-a-call-opens-from-its-indent ()
+  ;; A quote under a subagent's call: RET at a row's first column, on the
+  ;; call's bar, opens it whole.
+  (romacs-agent-log-tests--with
+    (draw :type 'tool :state 'started :id "a1" :name "Agent" :input (romacs-agent-log-tests--input "description" "sub"))
+    (let ((romacs-agent-log-rounds-other-lines 1))
+      (dolist (event (romacs-agent--claude-injected "<task-notification>\n<status>completed</status>\n<summary>one\ntwo\nthree</summary>\n</task-notification>" "a1"))
+        (romacs-agent-log-draw session event)))
+    (goto-char (point-min))
+    (search-forward "shows all")
+    (should (string-prefix-p "│ " (buffer-substring-no-properties (line-beginning-position) (line-end-position))))
+    (should (get-text-property (line-beginning-position) 'romacs-agent-log-full))))
 
 ;;; A streamed batch's faces, in the cycle that draws it
 

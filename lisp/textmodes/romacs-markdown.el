@@ -178,6 +178,56 @@ document of its own."
       (romacs-markdown--colour-codes codes)
       start)))
 
+(defun romacs-markdown--hidden-faces ()
+  "The faces of the elements whose marks `romacs-markdown-hide-markup'
+hides: inline ones and headings."
+  (delq nil (mapcar (lambda (kind) (alist-get kind romacs-markdown-faces))
+                    '(emphasis strong strike code heading-1 heading-2 heading-3 heading-4 heading-5 heading-6))))
+
+(defun romacs-markdown-hide-markup (beg end)
+  "Make invisible, as `romacs-markdown-markup', the marks BEG..END is
+written with around inline elements and before headings (`**', `_',
+`~~', backticks, `#'), as `romacs-markdown-fontify-region' faced them:
+the text reads as it renders.  Only those characters are hidden, never
+a line break or another element's syntax nested in them (a quote's `>',
+a link's brackets); marks of blocks (fences, quotes, tables) stay, as
+structure.  A mark hidden before that is a mark no more shows again;
+text another property makes invisible is left alone.  A buffer hides
+them while its `buffer-invisibility-spec' has `romacs-markdown-markup'."
+  (let ((markup (alist-get 'markup romacs-markdown-faces))
+        (hidden (romacs-markdown--hidden-faces)))
+    (with-silent-modifications
+      (let ((at beg))
+        (while (< at end)
+          (let* ((next (min (next-single-property-change at 'face nil end)
+                            (next-single-property-change at 'invisible nil end)))
+                 (faces (ensure-list (get-text-property at 'face)))
+                 (invisible (get-text-property at 'invisible))
+                 (hide (and markup (eq (car faces) markup) (seq-some (lambda (face) (memq face hidden)) (cdr faces)))))
+            (when (eq invisible 'romacs-markdown-markup)
+              (remove-text-properties at next '(invisible nil)))
+            (when (and hide (memq invisible '(nil romacs-markdown-markup)))
+              (save-excursion
+                (goto-char at)
+                (while (re-search-forward "[*_~`#=\t -]+" next t)
+                  (put-text-property (match-beginning 0) (match-end 0) 'invisible 'romacs-markdown-markup))))
+            (setq at next)))))))
+
+(defun romacs-markdown-plain-string (text)
+  "TEXT, a line of Markdown, faced and without the marks
+`romacs-markdown-hide-markup' hides: as it reads rendered."
+  (with-temp-buffer
+    (insert text)
+    (romacs-markdown-fontify-region (point-min) (point-max))
+    (romacs-markdown-hide-markup (point-min) (point-max))
+    (let ((at (point-min)) (parts nil))
+      (while (< at (point-max))
+        (let ((next (next-single-property-change at 'invisible nil (point-max))))
+          (unless (eq (get-text-property at 'invisible) 'romacs-markdown-markup)
+            (push (buffer-substring at next) parts))
+          (setq at next)))
+      (apply #'concat (nreverse parts)))))
+
 (defun romacs-markdown-blocks (beg end)
   "The blocks of BEG..END of the current buffer, one Markdown document.
 Each is (KIND START END . PLIST), in document order, a nested block
