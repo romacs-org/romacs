@@ -20,8 +20,10 @@ is bound in the derived mode's buffer and at the propertized text; the old
 key is gone; the user's key stays; the untouched option has its new
 default and the one the user set keeps its value; the preloaded file's new
 function is there; the ledger names both files at their blobs and the mode
-line shows its mark.  A gate build has no compile world (an install's
-compile step makes one), so the compiled-Lisp store is not exercised here.
+line shows its mark.  Worlds and compiled Lisp stay under the private
+root (--world-store).  A gate build has no compile world (only an
+install's whole-tree compile makes one), so the compiled-Lisp store's
+identity is not checked here.
 
 usage: live_update_live.py --binary BIN --output DIR [--work DIR]
 """
@@ -36,7 +38,7 @@ import sys
 import time
 
 import parity_live
-from parity_live import C, K, M, T, Engine, lisp_string, plist, prepare_world, private_tree, wait
+from parity_live import C, K, M, T, Engine, lisp_string, plist, private_tree, wait
 
 TREE = Path(__file__).resolve().parents[3]
 
@@ -76,22 +78,23 @@ OBSERVE = '''(list
  :text (with-current-buffer "journey-text" (key-binding (kbd "C-c b")))
  :options (list live-journey-limit live-journey-chosen)
  :probe (and (fboundp 'subr-x-live-journey-probe) (funcall 'subr-x-live-journey-probe))
- :subr-x (and (cl-find-if (lambda (e) (and (stringp (car e)) (string-suffix-p "/emacs-lisp/subr-x.el" (car e)))) load-history) t)
-)'''
+ :subr-x (and (cl-find-if (lambda (e) (and (stringp (car e)) (string-suffix-p "/emacs-lisp/subr-x.el" (car e)))) load-history) t))'''
 
 
-def git_env():
-    """Git with no ambient repository, index, system or user config: the
-    fixture's own repository only, and no hook of the user's runs."""
+def git_env(private):
+    """Git in PRIVATE's HOME and XDG, with no ambient repository, index,
+    system or user config: the fixture's own repository only, and no hook
+    or attribute of the user's applies."""
     env = {k: v for k, v in os.environ.items() if not k.startswith('GIT_')}
+    env.update({k: v for k, v in private.items() if k == 'HOME' or k.startswith('XDG_')})
     env.update(GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL='/dev/null')
     return env
 
 
-def git(cwd, *args):
+def git(cwd, private, *args):
     return subprocess.run(['git', '-c', 'user.name=Romacs journey', '-c', 'user.email=journey@example.invalid',
                            '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null', *args], cwd=cwd, check=True,
-                          capture_output=True, text=True, env=git_env()).stdout.strip()
+                          capture_output=True, text=True, env=git_env(private)).stdout.strip()
 
 
 def fixture(**kw):
@@ -100,18 +103,18 @@ def fixture(**kw):
     return FIXTURE.format(**values)
 
 
-def build_and_source(root):
+def build_and_source(root, env):
     """A clone of this tree with its working Lisp committed and the fixture
     added (the source), and a runtime root of that commit (the build)."""
     source = root / 'source'
     subprocess.run(['git', '-c', 'core.hooksPath=/dev/null', 'clone', '-q', '--shared', str(TREE), str(source)],
-                   check=True, capture_output=True, env=git_env())
+                   check=True, capture_output=True, env=git_env(env))
     for part in ('lisp', 'etc', 'assets'):
         subprocess.run(['rsync', '-a', '--delete', f'{TREE / part}/', f'{source / part}/'], check=True)
     (source / 'lisp/live-journey.el').write_text(fixture())
-    git(source, 'add', '-A', 'lisp', 'etc', 'assets')
-    git(source, 'commit', '-q', '--allow-empty', '-m', 'journey base')
-    commit = git(source, 'rev-parse', 'HEAD')
+    git(source, env, 'add', '-A', 'lisp', 'etc', 'assets')
+    git(source, env, 'commit', '-q', '--allow-empty', '-m', 'journey base')
+    commit = git(source, env, 'rev-parse', 'HEAD')
     build = root / 'build'
     build.mkdir()
     for part in ('lisp', 'etc', 'assets'):
@@ -134,13 +137,17 @@ def run(args, output, entry):
     """The journey, filling ENTRY as it goes: what it saw stays when it fails."""
     root, home, env = private_tree('romacs', Path(args.work), args.tools, prefix='live-update-')
     entry['root'] = str(root)
-    source, build, commit = build_and_source(root)
+    source, build, commit = build_and_source(root, env)
     env.update(ROMACS_RUNTIME_ROOT=str(build), ROMACS_LISP_DIR=str(build / 'lisp'),
                ROMACS_GUI_FONT='Iosevka', ROMACS_GUI_FONT_SIZE='14')
     (home / '.config/romacs').mkdir()
     (home / '.config/romacs/init.el').write_text(INIT.format(probe=lisp_string(str(parity_live.PROBE))))
-    entry['world_seconds'] = prepare_world(args.romacs, env, root / 'work')
-    engine = Engine('romacs', [args.romacs, '--loadup'], root, None, env, args.timeout)
+    worlds = ['--world-store', str(root / 'worlds')]
+    started = time.time()
+    done = subprocess.run([args.romacs, '--loadup', *worlds, '--world-build'], env=env, cwd=root / 'work',
+                          stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=900)
+    entry['world_seconds'] = round(time.time() - started, 3) if done.returncode == 0 else None
+    engine = Engine('romacs', [args.romacs, '--loadup', *worlds], root, None, env, args.timeout)
     try:
         engine.start(args.tools)
         ready(engine, '(eq (frame-focus-state) t)', 'focus')
@@ -176,7 +183,7 @@ def run(args, output, entry):
         entry['ledger'] = ledger
         entry['mode_line'] = engine.ask('(let ((w (get-buffer-window "journey"))) (substring-no-properties '
                                         '(format-mode-line (buffer-local-value (quote mode-line-format) (window-buffer w)) nil w)))')
-        blobs = {path: git(source, 'hash-object', path) for path in ('lisp/live-journey.el', 'lisp/emacs-lisp/subr-x.el')}
+        blobs = {path: git(source, env, 'hash-object', path) for path in ('lisp/live-journey.el', 'lisp/emacs-lisp/subr-x.el')}
         # A real key press runs the new command in the mode's buffer.
         engine.ask('(progn (setq live-journey-pressed nil) (switch-to-buffer "journey") t)')
         ready(engine, '(equal (buffer-name) "journey")', 'the journey buffer')
