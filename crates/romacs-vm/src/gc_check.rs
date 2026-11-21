@@ -37,7 +37,7 @@ impl Vm {
     /// ROOTS: every entry is marked, and every function, region and obarray
     /// symbol is in CODE, REGIONS and SYMBOLS, the mark's own.
     pub(super) fn check_reachable(&mut self, roots: &[Value], code: &[bool], regions: &[bool], symbols: &HashSet<usize>) {
-        self.check_order_named();
+        self.check_order_live();
         let reached = self.reference_walk(roots);
         let marked = [self.conses.marks().collect::<Vec<_>>(), self.closures.marks().collect(), self.cells.marks().collect(), self.objects.marks().collect()];
         for (t, (reached, marked)) in reached.tables.iter().zip(&marked).enumerate() {
@@ -56,14 +56,11 @@ impl Vm {
         }
     }
 
-    /// Panic unless every buffer in the buffer list's order is its name
-    /// slot's value (`#:vm2-buffer:NAME`): the order keeps nothing alive, so
-    /// that slot is what holds the buffer (buffer_order.rs).
-    fn check_order_named(&self) {
+    /// Panic unless every buffer in the buffer list's order is live: a kill
+    /// takes its buffer out of the order before it dies (buffer_order.rs).
+    fn check_order_live(&self) {
         for buffer in self.buffer_order.iter() {
-            let name = self.buffer_state(buffer).ok().and_then(|s| s.name.clone());
-            let held = name.as_ref().and_then(|n| self.names.get(&format!("#:vm2-buffer:{n}"))).is_some_and(|&slot| self.slots[slot].value == buffer);
-            assert!(held, "the buffer order holds {buffer:?} (named {name:?}), which no name slot holds");
+            assert!(self.buffer_state(buffer).is_ok_and(|s| s.live), "the buffer order holds {buffer:?}, which is not a live buffer");
         }
     }
 
@@ -147,6 +144,7 @@ impl Vm {
             values.extend_from_slice(&binding.away);
             values.extend_from_slice(&binding.unremapped_maps);
         }
+        self.buffer_order.visit_values(&mut |v| values.push(*v));
         if let Some(escape) = &mut self.propagated_escape { escape.visit_values(&mut |v| values.push(*v)); }
         for handler in &mut self.signal_handlers { handler.visit_values(&mut |v| values.push(*v)); }
         self.backtrace.visit_values(&mut |v| values.push(*v));

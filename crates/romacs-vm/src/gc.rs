@@ -1468,10 +1468,6 @@ impl Vm {
         {
             rewrite(v);
         }
-        // The order's buffers are marked through their name slots
-        // (`#:vm2-buffer:NAME`): every buffer in the order has one, as create
-        // sets it, rename moves it and kill clears it with the node. A
-        // moving collection still has to rewrite the nodes.
         self.buffer_order.visit_values(&mut |v| rewrite(v));
         if let Some(escape) = &mut self.propagated_escape {
             escape.visit_values(&mut |v| rewrite(v));
@@ -2076,6 +2072,9 @@ impl Vm {
         }
         pending.extend(self.terminal_bindings.iter().map(|binding| binding.buffer));
         pending.extend(self.terminal_bindings.iter().flat_map(|binding| binding.away.iter().chain(&binding.unremapped_maps).copied()));
+        // The order holds its buffers itself: a name slot is a symbol Lisp
+        // can set, so it is no root to rely on.
+        self.buffer_order.visit_values(&mut |v| pending.push(*v));
         if let Some(escape) = &mut self.propagated_escape {
             escape.visit_values(&mut |v| if keep(v) { pending.push(*v) });
         }

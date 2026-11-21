@@ -110,3 +110,23 @@ fn burying_a_killed_buffer_changes_nothing() {
       (list (funcall names) (memq dead (buffer-list)) (buffer-live-p dead)))"#);
     assert_eq!(printed(vm, &source), r#"(("bo-a" "bo-b") nil nil)"#);
 }
+
+/// A name slot (`#:vm2-buffer:NAME`) is a symbol Lisp can set: cleared, it no
+/// longer holds its buffer, and the order must. Under collections that move
+/// every object and the verifier, the buffer stays live and in `buffer-list`
+/// (the lane's probe, K4 review).
+#[test]
+fn buffer_order_holds_a_buffer_whose_name_slot_lisp_cleared() {
+    let mut vm = romacs_vm::Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.set_gc_moving(true);
+    vm.set_gc_stress(50);
+    vm.set_gc_verify(true);
+    let source = format!(r##"(let* ((names {NAMES}) (z (get-buffer-create "bo-z")))
+      (get-buffer-create "bo-y")
+      (set (intern-soft "#:vm2-buffer:bo-z") nil)
+      (dotimes (_ 300) (make-string 10 ?x))
+      (garbage-collect)
+      (list (funcall names) (buffer-live-p z) (buffer-name z) (eq (car (memq z (buffer-list))) z)))"##);
+    assert_eq!(printed(vm, &source), r#"(("bo-z" "bo-y") t "bo-z" t)"#);
+}
