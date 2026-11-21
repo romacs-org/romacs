@@ -77,6 +77,13 @@ reads none)."
             (should (= (overlay-end block) (point-max)))
             (should (= reads 1))
             (should (equal (buffer-string) (format "[image](%s) why" shot)))
+            ;; Its last character deleted, the images follow the new end.
+            (delete-char -1)
+            (romacs-agent-log-images-composer start)
+            (should (eq (cdr romacs-agent-log-images--composer) block))
+            (should (= (overlay-end block) (point-max)))
+            (insert "y")
+            (romacs-agent-log-images-composer start)
             (delete-region (- (point-max) 5) (point-max))
             (romacs-agent-log-images-composer start)
             (should-not romacs-agent-log-images--composer)

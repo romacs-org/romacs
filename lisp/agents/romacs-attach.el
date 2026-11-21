@@ -961,7 +961,9 @@ before it is given up.")
   "The MIME type to read the clipboard's image as, image/png when it is
 offered (a screenshot's own type), or nil when the clipboard holds none."
   (when (executable-find "wl-paste")
-    (let ((types (process-lines-ignore-status "wl-paste" "--list-types")))
+    ;; The offer's types come from the compositor, not the clipboard's
+    ;; owner; bounded all the same, as the command waits on them.
+    (let ((types (process-lines-ignore-status "timeout" "1" "wl-paste" "--list-types")))
       (or (car (member "image/png" types))
           (seq-find (lambda (type) (string-prefix-p "image/" type)) types)))))
 

@@ -85,7 +85,7 @@ cannot be shown or FILE's header gives no size."
            ;; apart from the rest.
            (count (max 1 (round (* scale (cdr pixels)) line)))
            (h (* count line))
-           (w (max 1 (round (* (car pixels) (/ (float h) (cdr pixels))))))
+           (w (max 1 (min width (round (* (car pixels) (/ (float h) (cdr pixels)))))))
            (image (create-image file nil nil :width w :height h :ascent 'center))
            (rows nil))
       (dotimes (row count)
@@ -173,15 +173,16 @@ between, their images follow the draft's end."
     (if (romacs-agent-log-images--drawn-p links)
         (when-let* ((block (cdr romacs-agent-log-images--composer)))
           (unless (= (overlay-end block) (point-max))
-            (move-overlay block (1- (point-max)) (point-max))))
+            (move-overlay block (max start (1- (point-max))) (point-max))))
       (romacs-agent-log-images--clear)
       (when links
         (let* ((width (romacs-agent-log-images--width))
                (rows (mapcar (lambda (link) (romacs-agent-log-images--rows (nth 2 link) width)) links))
                (shown (delq nil (copy-sequence rows)))
                (block (when shown
+                        ;; Not evaporating: a deleted last character leaves
+                        ;; it to follow the draft's new end.
                         (let ((overlay (make-overlay (1- (point-max)) (point-max) nil t nil)))
-                          (overlay-put overlay 'evaporate t)
                           ;; The cursor at the draft's end stays on its text.
                           (overlay-put overlay 'after-string
                                        (concat (propertize "\n" 'cursor t) (romacs-agent-log-images--stack shown)))
