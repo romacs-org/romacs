@@ -370,8 +370,8 @@ contents, so two equal states print the same."
 
 (ert-deftest romacs-agent-kept-a-long-turn-is-kept-as-it-goes ()
   ;; A turn's records past `romacs-agent--keep-every' since its state was
-  ;; kept: kept again within the turn, so a restart replays at most that
-  ;; many.  Fewer wait for its end.
+  ;; kept: kept again within the turn, once the editor is idle, so a
+  ;; restart replays about that many.  Fewer wait for its end.
   (romacs-agent-kept-tests--with
     (let ((dir (expand-file-name romacs-agent-kept-tests--id (romacs-agent--state-root))))
     (let* ((records (romacs-agent-kept-tests--claude))

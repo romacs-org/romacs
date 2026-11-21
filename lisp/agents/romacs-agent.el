@@ -2359,6 +2359,7 @@ inside itself.  Its end, once seen, waits for them
   (when (romacs-agent--let-go-p process)
     ;; What replaced it is replayed them, from the last record seen.
     (process-put process 'text nil)
+    (process-put process 'queue nil)
     (process-put process 'pending nil)
     (process-put process 'ready nil))
   (unless (process-get process 'draining)
@@ -2368,7 +2369,7 @@ inside itself.  Its end, once seen, waits for them
           (while (and (< (float-time) until) (romacs-agent--line-waits-p process))
             (romacs-agent--filter-lines process until))
         (process-put process 'draining nil)))
-    (cond ((romacs-agent--line-waits-p process) (romacs-agent--drain-soon process))
+    (cond ((romacs-agent--output-waits-p process) (romacs-agent--drain-soon process))
           ((process-get process 'ended)
            (process-put process 'ended nil)
            (romacs-agent--sentinel process nil)))))
@@ -2384,6 +2385,13 @@ chunks come since, which then become that text (`romacs-agent--join')."
       (romacs-agent--join process))
     found))
 
+(defun romacs-agent--output-waits-p (process)
+  "Whether a line of PROCESS's output may wait to be handled: one in its
+text, or chunks come since with a line's end.  Nothing is joined."
+  (or (process-get process 'ready)
+      (let ((text (process-get process 'text)))
+        (and text (string-search "\n" text (process-get process 'start)) t))))
+
 (defconst romacs-agent--join-bytes 1048576
   "How much of a supervisor's output waiting is joined into the text its
 lines are read from at a time (`romacs-agent--join').")
@@ -2392,17 +2400,21 @@ lines are read from at a time (`romacs-agent--join').")
   "PROCESS's text from now: the rest of its text, then its oldest chunks
 waiting, `romacs-agent--join-bytes' of them (one at least).  A replay of
 hundreds of megabytes, read faster than it is handled, is copied a part
-at a time, each once.  What is left may hold a line's end: `ready'."
-  (let ((chunks (nreverse (process-get process 'pending))) (taken nil) (size 0))
-    (while (and chunks (or (null taken) (< size romacs-agent--join-bytes)))
-      (setq size (+ size (length (car chunks))))
-      (push (pop chunks) taken))
+at a time, each once.  The chunks come oldest first from its `queue',
+made of its `pending' ones (newest first) once it is empty, so each is
+turned once.  What is left may hold a line's end: `ready'."
+  (let ((queue (or (process-get process 'queue)
+                   (prog1 (nreverse (process-get process 'pending)) (process-put process 'pending nil))))
+        (taken nil) (size 0))
+    (while (and queue (or (null taken) (< size romacs-agent--join-bytes)))
+      (setq size (+ size (length (car queue))))
+      (push (pop queue) taken))
     (let ((text (process-get process 'text)))
       (process-put process 'text (apply #'concat (if text (substring text (process-get process 'start)) "")
                                         (nreverse taken))))
     (process-put process 'start 0)
-    (process-put process 'pending (nreverse chunks))
-    (process-put process 'ready (and chunks t))))
+    (process-put process 'queue queue)
+    (process-put process 'ready (and (or queue (process-get process 'pending)) t))))
 
 (defun romacs-agent--let-go-p (process)
   "Whether PROCESS is an attachment this editor let go: ended, and another
@@ -2506,7 +2518,7 @@ leaves the lines after it waiting."
   (cond
    ((process-live-p process))
    ;; Its end comes after its records, as they were sent.
-   ((or (process-get process 'draining) (romacs-agent--line-waits-p process))
+   ((or (process-get process 'draining) (romacs-agent--output-waits-p process))
     (process-put process 'ended t)
     (romacs-agent--drain-soon process))
    (t
@@ -4881,10 +4893,12 @@ record since is waiting to be kept in its place."
     (push (list session seq state) romacs-agent--keeping)))
 
 (defconst romacs-agent--keep-every 1000
-  "Records after which a session's state is kept again within a turn: a
-turn's end alone left a long turn's records all to replay after a restart
+  "Records after which a session's state is kept again within a turn, at
+the editor's next idle moment (`romacs-agent--keep-soon'): a turn's end
+alone left a long turn's records all to replay after a restart
 \(2026-11-21: a lane's turn ran 13,000 records past its kept state).  An
-attachment's replay is bounded by this, and a keep costs milliseconds.")
+attachment's replay is this many records, and what came while the editor
+was never idle since; a keep costs milliseconds.")
 
 (defconst romacs-agent--keep-retries 20
   "How many times a session's state that could not be kept is tried again.")
