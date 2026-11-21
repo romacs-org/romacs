@@ -34,9 +34,9 @@
 
 (defvar-local romacs-help--candidates nil
   "Help's candidates in this minibuffer, as (KEY HISTORY NAMES FOLDED),
-KEY as `romacs-help--key' makes it, HISTORY the head of `load-history'
-then, NAMES a hash table of their names and FOLDED, once asked for, one
-from each name's downcased form to the names that have it.  Local to the
+KEY comes from `romacs-help-completion--cache-key', HISTORY is the head
+of `load-history' then, NAMES is a hash table of their names and FOLDED,
+once asked for, maps each downcased name to its spellings.  Local to the
 minibuffer, so each prompt lists them anew.")
 
 (defun romacs-help--kinds (pred)
@@ -67,7 +67,7 @@ index of definitions not loaded yet (`romacs-help-index-request')."
                romacs-help-index))
     names))
 
-(defun romacs-help--key (pred)
+(defun romacs-help-completion--cache-key (pred)
   "What decides help's candidates for PRED within a prompt, besides the
 files loaded: a function defined or the index arriving lists them again."
   (list pred (romacs-command-epoch) romacs-help-index))
@@ -76,7 +76,7 @@ files loaded: a function defined or the index arriving lists them again."
   "Help's candidates for PRED, kept in a minibuffer while the prompt lasts
 and no function is defined or file loaded (`romacs-help--candidates')."
   (if (not (minibufferp)) (romacs-help--names pred)
-    (let ((key (romacs-help--key pred)) (kept romacs-help--candidates))
+    (let ((key (romacs-help-completion--cache-key pred)) (kept romacs-help--candidates))
       (unless (and (equal key (car kept)) (eq (car load-history) (nth 1 kept)))
         (setq romacs-help--candidates (list key (car load-history) (romacs-help--names pred) nil)))
       (nth 2 romacs-help--candidates))))
