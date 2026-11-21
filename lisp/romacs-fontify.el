@@ -239,9 +239,11 @@ state, or nil.  Nothing for a buffer killed meanwhile."
         (let* ((require (cdr (assq major-mode romacs-fontify-isolate-modes)))
                (worker (isolate-pooled-worker require 'busy)))
           (cond ((eq worker 'busy)
+                 ;; Again while the session stays idle, never while typing.
                  (setq romacs-fontify--timer
-                       (run-at-time romacs-fontify-isolate-delay nil
-                                    #'romacs-fontify--start (current-buffer))))
+                       (run-with-idle-timer (time-add (or (current-idle-time) 0)
+                                                      romacs-fontify-isolate-delay)
+                                            nil #'romacs-fontify--start (current-buffer))))
                 (worker (romacs-fontify--submit worker require))))))))
 
 (defun romacs-fontify--submit (worker require)
