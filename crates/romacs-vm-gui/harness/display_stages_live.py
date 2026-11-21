@@ -58,7 +58,8 @@ conses are held under theirs, a ceiling; the redisplays, the windows
 rebuilt, the bands, the layouts and the frames are held to theirs exactly, so a scenario whose
 step no longer does its change fails as one that costs more does, and work
 that removes cost lowers its bars in the same change.  A scenario or figure
-without a bar fails.  --write-bars FILE writes the bars this run would
+without a bar fails; a figure whose bar is "report" is reported, held to
+nothing.  --write-bars FILE writes the bars this run would
 pass: the counts as counted, instructions and conses a tenth higher.
 
 --record profiles each scenario's steps with `perf record', enabled by the
@@ -94,6 +95,8 @@ COUNTS = {'step_instructions': 'step-instructions', 'cycles': 'cycles', 'display
           'frames_submitted': 'frames-submitted', 'lines_laid': 'lines-laid', 'rows_wrapped': 'rows-wrapped'}
 # Figures only the scenarios that count them have.
 OPTIONAL = {'chars_fontified': 'fontified-chars'}
+# A bar that holds nothing: the figure is reported beside the others.
+REPORTED = 'report'
 # The figures whose 90th percentile is held too (a redisplay's: the
 # streamed deltas that add a row), the figures held under a
 # ceiling and the margin --write-bars gives them, and the share of steps
@@ -158,7 +161,8 @@ def off(measured, bars):
     value, bar or None).  Instructions and conses are off over their bar,
     any other count when it differs."""
     return [(figure, value, bars.get(figure)) for figure, value in measured.items()
-            if bars.get(figure) is None or value > bars[figure] or (value < bars[figure] and not margined(figure))]
+            if bars.get(figure) != REPORTED
+            and (bars.get(figure) is None or value > bars[figure] or (value < bars[figure] and not margined(figure)))]
 
 
 def verdict(scenario, result, wanted, bars):
@@ -184,7 +188,7 @@ def verdict(scenario, result, wanted, bars):
 def rebarred(bars, new):
     """BARS with each scenario's figures from NEW, its notes (FIGURE_note)
     kept: why a bar is what it is outlives a recording."""
-    kept = lambda name: {k: v for k, v in bars.get(name, {}).items() if k.endswith('_note')}
+    kept = lambda name: {k: v for k, v in bars.get(name, {}).items() if k.endswith('_note') or v == REPORTED}
     return {**bars, **{name: {**figures, **kept(name)} for name, figures in new.items()}}
 
 

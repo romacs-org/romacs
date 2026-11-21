@@ -589,7 +589,9 @@ collection is off), the windows rebuilt, the
 bands expanded, the layouts asked of the layout host and the frames
 submitted. `display_stages_bars.json` holds each scenario's figures:
 instructions and conses under a ceiling, the counts exactly, so a step
-that no longer does its change fails too. So does a scenario more than a
+that no longer does its change fails too; a figure whose bar is `"report"`
+is reported and holds nothing (a collection's whole step, which moves with
+what the session ran before: romacs#403). So does a scenario more than a
 tenth of whose steps run more or fewer redisplays than the others, or
 paint when they change nothing, or do not when they do, and one whose
 step waits inside its change, running a timer or a redisplay there,

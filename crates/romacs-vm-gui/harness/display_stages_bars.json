@@ -78,7 +78,8 @@
   "display_instructions_p90": 2180000
  },
  "chat-collected": {
-  "step_instructions": 51700000,
+  "step_instructions": "report",
+  "step_instructions_note": "reported, not held: a full collection marks the whole session, world and libraries, and what the session ran before moves it 46.7-52.2M with no change to the chat (romacs#403); the display bars hold this row's claim",
   "cycles": 1,
   "display_instructions": 4160000,
   "display_conses": 154,
