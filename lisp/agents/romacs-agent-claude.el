@@ -644,8 +644,11 @@ alias is no model."
 
 (defun romacs-agent--claude-keep-models (session answer)
   "Keep the models in ANSWER, SESSION's run's `initialize' answer, when it
-names any: one that names none leaves those kept before."
-  (when-let* (((hash-table-p answer)) (rows (romacs-agent--claude-models answer)))
+names any and SESSION's records are its live ones: one that names none
+leaves those kept before, and a replay (a copy drawn again, the journal
+read in a batch process) is an old answer, under settings of its own."
+  (when-let* (((romacs-agent--live-p session)) ((hash-table-p answer))
+              (rows (romacs-agent--claude-models answer)))
     (romacs-agent--keep-models (romacs-agent--instance (romacs-agent-provider session) 'claude) rows)))
 
 (defun romacs-agent--claude-models-probe (instance)

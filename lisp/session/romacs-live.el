@@ -114,6 +114,10 @@ FILES; or with nil when that cannot be known.  nil: never known.")
 
 (defvar romacs-live--running nil "The update in progress, or nil.")
 
+(defvar romacs-live-last-source nil
+  "The source of the last update from one (`romacs-live-survey''s
+`:source'): where `romacs-live-test' finds the suites.")
+
 
 
 ;;;; The build and what the session loaded
@@ -944,6 +948,12 @@ loads) and `:unbind-gone' (as `romacs-live-apply')."
   (when romacs-live--running (user-error "A live update is already running"))
   (setq romacs-live--running source)
   (let ((finish (lambda (report) (setq romacs-live--running nil romacs-live-last-report report)
+                  ;; The tree the ledger came from: where its suites are.
+                  (when (and (cl-some (lambda (r) (memq (plist-get r :action) '(load stage revert dependent)))
+                                      (plist-get report :rows))
+                             (not (plist-get report :plan))
+                             (not (eq (plist-get source :kind) 'ledger)))
+                    (setq romacs-live-last-source source))
                   (funcall callback report))))
     (condition-case err
         (romacs-live--survey-then
