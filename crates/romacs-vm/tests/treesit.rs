@@ -987,7 +987,13 @@ fn a_small_edit_starts_no_first_parse_for_a_twin_never_asked() {
     let before = romacs_vm::treesit_parses_in_process();
     let mut vm = fresh_twins_vm("ts-edit-twin", 4000);
     assert_eq!(romacs_vm::treesit_parses_in_process(), before + 1, "the early parse fed the asked parser");
-    vm.eval_source("(with-current-buffer \"ts-edit-twin\" (goto-char (point-min)) (insert \"x\"))").unwrap();
+    // A small edit: its frame starts the reparse on a thread (`start').
+    vm.eval_source("(progn (defvar romacs-treesit-show-before-parse 8) (setq romacs-treesit-show-before-parse 8) \
+        (with-current-buffer \"ts-edit-twin\" (goto-char 9) (insert \"x\")))").unwrap();
+    let small = vm.eval_source("(with-current-buffer \"ts-edit-twin\" (romacs--treesit-parsing-p))").unwrap().display().unwrap();
+    deferred_frame(&mut vm);
+    let started = vm.eval_source("(with-current-buffer \"ts-edit-twin\" (romacs--treesit-parsing-p))").unwrap().display().unwrap();
+    assert_eq!((small.as_str(), started.as_str()), ("nil", "t"), "the edit's frame started its reparse on a thread");
     for _ in 0..3 {
         deferred_frame(&mut vm);
         wait_landed(&mut vm, "ts-edit-twin");
