@@ -345,6 +345,9 @@ process of KIND (`romacs--isolate-admit-p')."
     (condition-case err
         (romacs--isolate-submit isolate 'romacs--isolate-prepare (list (romacs--isolate-seeds) require (romacs--isolate-warm-functions require))
                                nil nil nil)
+      ;; Gone already: its death is reported once delivered, not hidden
+      ;; as a retirement.
+      (isolate-died (signal (car err) (cdr err)))
       ;; Unprepared, it is no one's: it ends at once.
       (error (isolate-retire isolate) (signal (car err) (cdr err))))
     isolate))
