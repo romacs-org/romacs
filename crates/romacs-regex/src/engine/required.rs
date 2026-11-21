@@ -1,85 +1,116 @@
-//! What every match of a pattern contains, in ASCII, so that a short subject
-//! lacking it fails before the matcher, the existence DFA and the candidate
-//! scan.
+//! The ASCII bytes every match of a pattern consumes, so that a short search
+//! whose text lacks one fails before the candidate scan, the existence DFA
+//! and the matcher: TRAMP's handler pattern needs a `:`, which an ordinary
+//! file name has not, and its miss otherwise runs the backtracker.
 //!
 //! GNU has no counterpart: `fast_string_match` runs the matcher on every
-//! file-name handler and `auto-mode-alist` entry.  The prefix literals are
-//! the literal prefilter's ([`prefix_literal_set`]); the bytes are found by
-//! reachability over the bytecode.
+//! file-name handler and `auto-mode-alist` entry.  A byte is required when no
+//! path from the pattern's start reaches a success without a literal holding
+//! it (reachability over the bytecode).
 
 use crate::engine::opcode::{RegexOp, extract_number, opcode_len};
-use crate::engine::pattern::CompiledPattern;
-use crate::engine::scan::prefix_literal_set;
+use crate::engine::pattern::{CompiledPattern, PREFILTER_MIN_BUILD_SPAN};
 use smallvec::SmallVec;
+use std::cell::{Cell, OnceCell};
 
-/// Most bytes tried as required ones per pattern (each costs a walk of the
-/// bytecode once, and a memchr per short search).
+/// Most bytes kept per pattern (each costs a walk of the bytecode once, and a
+/// memchr per short search).
 const MAX_REQUIRED_BYTES: usize = 4;
 
-/// What every match contains.  A subject holding none of the prefixes, or
-/// missing one of the bytes, cannot match.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct RequiredLiterals {
-    /// One of these starts every match (empty: no prefix set is proven).
-    /// ASCII only, so they are the same bytes in unibyte and multibyte text.
-    prefixes: Vec<Vec<u8>>,
-    /// The first bytes of `prefixes`.
-    first: [bool; 256],
-    /// ASCII bytes every match consumes somewhere.
-    bytes: SmallVec<[u8; MAX_REQUIRED_BYTES]>,
+/// Where a pattern stands in finding its required bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RequiredState {
+    /// Not yet searched over a short span.
+    Unseen,
+    /// One short search done: the second derives the bytes, so a pattern
+    /// searched once pays nothing for them.
+    SeenOnce,
+    /// Nothing to test: no byte is required, or the pattern is case-folded (a
+    /// translation may map any byte onto a literal's) or matches the empty
+    /// string.  Every later search reads this one state and goes on.
+    Absent,
+    /// The bytes are derived and tested on each short search.
+    Bytes,
 }
 
-impl RequiredLiterals {
-    /// Whether `text` (from a search's lowest candidate to its stop) holds
-    /// what every match needs.
-    pub(crate) fn admits(&self, text: &[u8]) -> bool {
-        self.bytes.iter().all(|&byte| memchr::memchr(byte, text).is_some())
-            && (self.prefixes.is_empty() || self.holds_a_prefix(text))
-    }
+/// A compiled pattern's required bytes and how far they are known.
+#[derive(Clone, Debug)]
+pub(crate) struct RequiredBytes {
+    state: Cell<RequiredState>,
+    bytes: OnceCell<SmallVec<[u8; MAX_REQUIRED_BYTES]>>,
+}
 
-    fn holds_a_prefix(&self, text: &[u8]) -> bool {
-        text.iter().enumerate().any(|(at, &byte)| {
-            self.first[byte as usize] && self.prefixes.iter().any(|prefix| text[at..].starts_with(prefix))
-        })
+impl Default for RequiredBytes {
+    fn default() -> Self {
+        Self { state: Cell::new(RequiredState::Unseen), bytes: OnceCell::new() }
     }
 }
 
-/// What every match of `pattern` contains, or `None` when nothing is proven
-/// or the pattern is case-folded (its translation may map any byte onto a
-/// literal's) or matches the empty string.
-pub(crate) fn derive_required_literals(pattern: &CompiledPattern) -> Option<RequiredLiterals> {
+impl RequiredBytes {
+    /// Whether a search should ask [`rejects`]: one load, false for good once
+    /// the pattern has nothing to test.
+    #[inline]
+    pub(crate) fn may_reject(&self) -> bool {
+        self.state.get() != RequiredState::Absent
+    }
+
+    #[cfg(test)]
+    pub(crate) fn state(&self) -> RequiredState {
+        self.state.get()
+    }
+}
+
+/// Whether a search of `pattern` from `start` over `range` (`re_search`'s
+/// arguments) provably fails: its span, from the lowest candidate to the stop
+/// every match ends by (the range's end forward, `start` backward), is shorter
+/// than the prefilter's build span and lacks a required byte.  Out of line, so
+/// a search that has nothing to test pays only [`RequiredBytes::may_reject`].
+#[inline(never)]
+pub(crate) fn rejects(pattern: &CompiledPattern, text: &[u8], start: usize, range: isize) -> bool {
+    let required = &pattern.required;
     if pattern.translate.is_some() || pattern.can_be_null || pattern.buffer.is_empty() {
-        return None;
+        required.state.set(RequiredState::Absent);
+        return false;
     }
-    let prefixes = ascii_prefixes(pattern);
-    let mut first = [false; 256];
-    for prefix in &prefixes {
-        first[prefix[0] as usize] = true;
+    let (lowest, stop) = if range < 0 {
+        (start.saturating_sub(range.unsigned_abs()), start)
+    } else {
+        (start, start.saturating_add(range.unsigned_abs()))
+    };
+    let stop = stop.min(text.len());
+    if lowest >= stop || stop - lowest >= PREFILTER_MIN_BUILD_SPAN {
+        return false;
     }
-    let bytes: SmallVec<[u8; MAX_REQUIRED_BYTES]> = literal_ascii_bytes(&pattern.buffer)
+    match required.state.get() {
+        RequiredState::Unseen => {
+            required.state.set(RequiredState::SeenOnce);
+            return false;
+        }
+        RequiredState::SeenOnce => {
+            let bytes = derive_required_bytes(pattern);
+            required.state.set(if bytes.is_empty() { RequiredState::Absent } else { RequiredState::Bytes });
+            let _ = required.bytes.set(bytes);
+        }
+        RequiredState::Absent | RequiredState::Bytes => {}
+    }
+    let span = &text[lowest..stop];
+    required
+        .bytes
+        .get()
+        .is_some_and(|bytes| bytes.iter().any(|&byte| memchr::memchr(byte, span).is_none()))
+}
+
+/// The ASCII bytes every match of `pattern` consumes (at most
+/// [`MAX_REQUIRED_BYTES`]); empty for a case-folded or nullable pattern.
+pub(crate) fn derive_required_bytes(pattern: &CompiledPattern) -> SmallVec<[u8; MAX_REQUIRED_BYTES]> {
+    if pattern.translate.is_some() || pattern.can_be_null || pattern.buffer.is_empty() {
+        return SmallVec::new();
+    }
+    literal_ascii_bytes(&pattern.buffer)
         .into_iter()
-        .filter(|&byte| prefixes.is_empty() || !prefixes.iter().all(|prefix| prefix.contains(&byte)))
         .filter(|&byte| reaches_end_without(&pattern.buffer, byte) == Some(false))
         .take(MAX_REQUIRED_BYTES)
-        .collect();
-    (!prefixes.is_empty() || !bytes.is_empty()).then_some(RequiredLiterals { prefixes, first, bytes })
-}
-
-/// The prefix set, each literal cut at its first non-ASCII byte (a shorter
-/// prefix of a required prefix is still required); empty when some literal
-/// starts with a non-ASCII byte or no set is proven.
-fn ascii_prefixes(pattern: &CompiledPattern) -> Vec<Vec<u8>> {
-    let Some(literals) = prefix_literal_set(pattern) else {
-        return Vec::new();
-    };
-    let cut: Vec<Vec<u8>> = literals
-        .into_iter()
-        .map(|literal| literal.into_iter().take_while(u8::is_ascii).collect::<Vec<u8>>())
-        .collect();
-    if cut.iter().any(Vec::is_empty) {
-        return Vec::new();
-    }
-    cut
+        .collect()
 }
 
 /// The distinct ASCII bytes of the pattern's literals, in bytecode order.  An

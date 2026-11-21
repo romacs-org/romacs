@@ -3,7 +3,7 @@
 
 use crate::engine::compile::regex_compile;
 use crate::engine::pattern::CompiledPattern;
-use crate::engine::required::derive_required_literals;
+use crate::engine::required::{RequiredState, derive_required_bytes};
 use crate::engine::search::{re_search, with_fastmap_disabled};
 use crate::engine::syntax::DefaultSyntaxLookup;
 
@@ -33,9 +33,10 @@ fn agrees(source: &str, fold: bool, text: &[u8], start: usize, range: isize, poi
     }
 }
 
-/// The file-name handlers' patterns: each has what every match needs.
+/// The file-name handlers' patterns on an ordinary name: tramp, epa and
+/// `\`/:` lack a required byte there; jka-compr's only required byte is `.`.
 #[test]
-fn the_handler_patterns_require_their_literals() {
+fn the_handler_patterns_require_their_bytes() {
     let tramp = compile("\\`/\\(?:-\\|[^/:|]\\{2,\\}\\):", false);
     let epa = compile("\\.gpg\\(~\\|\\.~[0-9]+~\\)?\\'", false);
     let jka = compile(
@@ -43,52 +44,64 @@ fn the_handler_patterns_require_their_literals() {
         false,
     );
     let non_special = compile("\\`/:", false);
+    assert_eq!(derive_required_bytes(&tramp).as_slice(), b"/:");
+    assert_eq!(derive_required_bytes(&epa).as_slice(), b".gp");
+    assert_eq!(derive_required_bytes(&jka).as_slice(), b".");
+    assert_eq!(derive_required_bytes(&non_special).as_slice(), b"/:");
     let name = b"/home/user/.cache/scratch/ffc-none";
-    for (label, pattern) in [("tramp", &tramp), ("epa", &epa), ("jka", &jka), ("non-special", &non_special)] {
-        let required = derive_required_literals(pattern).unwrap_or_else(|| panic!("{label}: nothing derived"));
-        assert!(!required.admits(name), "{label} admits an ordinary name");
+    for pattern in [&tramp, &epa, &jka, &non_special] {
+        for _ in 0..3 {
+            assert_eq!(found(pattern, name, 0, name.len().cast_signed(), 0), None);
+        }
     }
+    assert_eq!(tramp.required.state(), RequiredState::Bytes);
     for (pattern, name) in [
         (&tramp, &b"/ssh:host:/etc"[..]),
         (&epa, b"/tmp/a.gpg"),
         (&jka, b"/tmp/a.tar.gz"),
         (&non_special, b"/:/tmp"),
     ] {
-        assert!(derive_required_literals(pattern).unwrap().admits(name), "{name:?}");
-        assert!(found(pattern, name, 0, name.len().cast_signed(), 0).is_some(), "{name:?}");
+        for _ in 0..3 {
+            assert!(found(pattern, name, 0, name.len().cast_signed(), 0).is_some(), "{name:?}");
+        }
     }
 }
 
-/// Nothing is derived where nothing is proven: a nullable pattern, a
-/// case-folded one, one with no literal; and a literal on an optional path
-/// is not required.
+/// Nothing is required where nothing is proven: a nullable pattern, a
+/// case-folded one, one with no literal; and a byte on an optional path is
+/// not required.
 #[test]
 fn nothing_is_required_without_proof() {
     for (source, fold) in [("a*", false), ("x?:?", false), ("ab:", true), ("[a-c]+", false)] {
-        let derived = derive_required_literals(&compile(source, fold));
-        assert!(derived.is_none(), "{source:?} fold={fold}: {derived:?}");
+        let derived = derive_required_bytes(&compile(source, fold));
+        assert!(derived.is_empty(), "{source:?} fold={fold}: {derived:?}");
     }
-    let optional = derive_required_literals(&compile("x\\(?::\\)?y", false));
-    assert!(optional.is_none_or(|required| required.admits(b"xy")));
+    assert_eq!(derive_required_bytes(&compile("x\\(?::\\)?y", false)).as_slice(), b"xy");
+    assert_eq!(derive_required_bytes(&compile("\\(?:a:\\|b:\\)c", false)).as_slice(), b":c");
 }
 
-/// A pattern searched once derives nothing; the second short search does,
-/// and a long search never does.
+/// A pattern searched once derives nothing; the second short search does, a
+/// folded pattern is settled as having nothing at its first search, and a
+/// long search derives nothing.
 #[test]
-fn the_literals_are_derived_by_the_second_short_search() {
-    let pattern = compile("\\.gpg\\'", false);
+fn the_bytes_are_derived_by_the_second_short_search() {
+    let pattern = compile("q:", false);
     let name = b"/tmp/notes.txt";
     assert_eq!(found(&pattern, name, 0, name.len().cast_signed(), 0), None);
-    assert!(pattern.required.get().is_none());
+    assert_eq!(pattern.required.state(), RequiredState::SeenOnce);
     assert_eq!(found(&pattern, name, 0, name.len().cast_signed(), 0), None);
-    assert!(pattern.required.get().is_some_and(Option::is_some));
+    assert_eq!(pattern.required.state(), RequiredState::Bytes);
 
-    let long = compile("\\.gpg\\'", false);
+    let folded = compile("q:", true);
+    assert_eq!(found(&folded, name, 0, name.len().cast_signed(), 0), None);
+    assert_eq!(folded.required.state(), RequiredState::Absent);
+
+    let long = compile("q:", false);
     let text = vec![b'x'; 1 << 20];
     for _ in 0..3 {
         assert_eq!(found(&long, &text, 0, text.len().cast_signed(), 0), None);
     }
-    assert!(long.required.get().is_none(), "a long search must not derive");
+    assert_eq!(long.required.state(), RequiredState::Unseen, "a long search must not derive");
 }
 
 /// A match ends by the stop (forward, the range's last candidate; backward,

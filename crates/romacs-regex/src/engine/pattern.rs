@@ -6,7 +6,7 @@
 use crate::engine::dfa;
 use crate::engine::fastmap::recompute_fastmap;
 use crate::engine::linear;
-use crate::engine::required::{RequiredLiterals, derive_required_literals};
+use crate::engine::required::RequiredBytes;
 use crate::engine::scan::{
     FoldedScan, FoldedScans, SparseAsciiFastmap, TextRepr, build_folded_scan,
     build_literal_prefilter, sparse_ascii_fastmap,
@@ -203,12 +203,9 @@ pub struct CompiledPattern {
     /// searched a buffer.
     pub(crate) prefilter: std::cell::OnceCell<Option<LiteralPrefilter>>,
 
-    /// What every match contains ([`derive_required_literals`]), derived by
-    /// the pattern's second short search ([`Self::rejects_short`]), so a
-    /// pattern searched once pays nothing for it.
-    pub(crate) required: std::cell::OnceCell<Option<RequiredLiterals>>,
-    /// Whether a short search has run, before `required` is derived.
-    pub(crate) searched_short: std::cell::Cell<bool>,
+    /// The ASCII bytes every match consumes, found by the pattern's second
+    /// short search ([`required::rejects`](crate::engine::required::rejects)).
+    pub(crate) required: RequiredBytes,
 
     /// The zero-width anchor every path from the start meets before it
     /// consumes anything ([`start_anchor`](crate::engine::search::start_anchor)), when that is more than the first
@@ -234,17 +231,6 @@ impl CompiledPattern {
 
     pub(crate) fn syntax_lead(&self) -> Option<&SyntaxLead> {
         self.syntax_lead.get_or_init(|| syntax_lead(self)).as_ref()
-    }
-
-    /// Whether a short `text` (from the lowest candidate to the stop) lacks
-    /// what every match contains, so the search fails without the matcher.
-    pub(crate) fn rejects_short(&self, text: &[u8]) -> bool {
-        let required = match self.required.get() {
-            Some(required) => required,
-            None if !self.searched_short.replace(true) => return false,
-            None => self.required.get_or_init(|| derive_required_literals(self)),
-        };
-        required.as_ref().is_some_and(|required| !required.admits(text))
     }
 
     /// The multi-literal prefilter, built now if it was not yet.

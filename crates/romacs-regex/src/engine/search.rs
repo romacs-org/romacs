@@ -5,6 +5,7 @@
 
 use crate::engine::dfa;
 use crate::engine::linear;
+use crate::engine::required;
 use crate::engine::matcher::fail::{
     MATCHER_OVERFLOWED, MatchScratch, clear_matcher_overflow, fail_stack_overflow_free_span,
     fail_stack_push_sites, matcher_interrupt, matcher_overflow_pending,
@@ -355,22 +356,12 @@ pub fn re_search(
     let use_fastmap = pattern.fastmap_accurate && !pattern.can_be_null && !fastmap_force_disabled();
     let translate = pattern.translate.as_ref();
 
-    // A short search whose text, from its lowest candidate to the stop every
-    // match ends by (the range's end forward, `start` backward), lacks what
-    // every match contains fails here, before the scan, the DFA and the
-    // matcher (`required`): every file-name handler and `auto-mode-alist`
-    // entry on an ordinary name.  Only below the prefilter's build span, so a
-    // long span is never read twice.
-    let (lowest, stop) = if range < 0 {
-        (start.saturating_sub(range.unsigned_abs()), start)
-    } else {
-        (start, start.saturating_add(range.unsigned_abs()))
-    };
-    let stop = stop.min(text_len);
-    if lowest < stop
-        && stop - lowest < PREFILTER_MIN_BUILD_SPAN
+    // A short search whose text lacks a byte every match consumes fails here,
+    // before the scan, the DFA and the matcher (`required`): TRAMP's handler
+    // on an ordinary file name.  A pattern with nothing to test pays one load.
+    if pattern.required.may_reject()
         && !fastmap_force_disabled()
-        && pattern.rejects_short(&text[lowest..stop])
+        && required::rejects(pattern, text, start, range)
     {
         clear_matcher_overflow();
         return None;

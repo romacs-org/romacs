@@ -57,35 +57,6 @@ const PREFILTER_BUDGET: usize = 16_384;
 /// `memchr` already covers those, so a prefilter would add cost without
 /// narrowing the candidate set.
 pub(crate) fn build_literal_prefilter(pattern: &CompiledPattern) -> Option<LiteralPrefilter> {
-    let literals = prefix_literal_set(pattern)?;
-    // If every required literal is a single byte, the fastmap's memchr scan
-    // already skips exactly these positions — a prefilter buys nothing.
-    if literals.iter().all(|l| l.len() <= 1) {
-        return None;
-    }
-
-    // `regex-automata` auto-selects memchr / memmem / Teddy / Aho-Corasick.
-    let pf = RaPrefilter::new(MatchKind::LeftmostFirst, &literals)?;
-    // Only adopt it when the crate deems the scan actually fast (otherwise the
-    // fastmap path is at least as good).
-    if !pf.is_fast() {
-        return None;
-    }
-    if pattern.translate.is_some() {
-        tracing::debug!(
-            target: "romacs::regex",
-            needles = literals.len(),
-            "case-folded literal prefilter"
-        );
-    }
-    Some(LiteralPrefilter { pf, offset: 0 })
-}
-
-/// The literals one of which starts every match of `pattern`, sorted and
-/// without duplicates (a case-folded pattern's in every ASCII spelling), or
-/// `None` when no such set is proven.  What the literal prefilter scans for
-/// and what [`required`](crate::engine::required) rejects a short subject by.
-pub(crate) fn prefix_literal_set(pattern: &CompiledPattern) -> Option<Vec<Vec<u8>>> {
     let fold = match pattern.translate.as_ref() {
         None => None,
         Some(table) => match table.ascii_preimage() {
@@ -128,7 +99,27 @@ pub(crate) fn prefix_literal_set(pattern: &CompiledPattern) -> Option<Vec<Vec<u8
     // Deduplicate (nested alternations can re-derive the same prefix).
     literals.sort();
     literals.dedup();
-    Some(literals)
+    // If every required literal is a single byte, the fastmap's memchr scan
+    // already skips exactly these positions — a prefilter buys nothing.
+    if literals.iter().all(|l| l.len() <= 1) {
+        return None;
+    }
+
+    // `regex-automata` auto-selects memchr / memmem / Teddy / Aho-Corasick.
+    let pf = RaPrefilter::new(MatchKind::LeftmostFirst, &literals)?;
+    // Only adopt it when the crate deems the scan actually fast (otherwise the
+    // fastmap path is at least as good).
+    if !pf.is_fast() {
+        return None;
+    }
+    if fold.is_some() {
+        tracing::debug!(
+            target: "romacs::regex",
+            needles = literals.len(),
+            "case-folded literal prefilter"
+        );
+    }
+    Some(LiteralPrefilter { pf, offset: 0 })
 }
 
 /// Caps on the ASCII case variants of one literal, tried in turn until the
