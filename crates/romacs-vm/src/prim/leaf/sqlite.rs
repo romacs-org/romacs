@@ -262,10 +262,10 @@ impl Leaf<'_> {
         self.sqlite_list(names)
     }
 
-    /// STATEMENT's next step, which a C-g interrupts: the statement is
-    /// rolled back and the quit raised (`Connection::stoppable`).
+    /// STATEMENT's next step, which a C-g interrupts while it runs: the
+    /// statement is rolled back and the quit raised (`Statement::step`).
     fn sqlite_step(&mut self, statement: &mut Statement, probe: &crate::quit::NativeStop) -> std::result::Result<Step, Fault> {
-        let step = statement.connection().clone().stoppable(probe, || statement.step());
+        let step = statement.step(probe);
         if matches!(step, Step::Error(_)) && probe.due() { self.native_poll()?; }
         Ok(step)
     }
@@ -324,7 +324,7 @@ impl Leaf<'_> {
     pub(crate) fn sqlite_exec(&mut self, db: Value, sql: &[u8]) -> Out {
         let connection = self.sqlite_connection(db)?;
         let stop = self.native_stop();
-        let done = connection.stoppable(&stop, || connection.exec(sql));
+        let done = connection.exec(sql, &stop);
         if !done && stop.due() { self.native_poll()?; }
         Ok(if done { Value::TRUE } else { Value::NIL })
     }

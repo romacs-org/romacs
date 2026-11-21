@@ -536,7 +536,9 @@ fn call_process_run(cx, argv: Value, env: Value, dir: Value, infile: Value, outp
 // call-process has inserted the output read before it: as C-g's quit
 // (`quit_unwinding' set), here, with no Lisp between it and the unwind, so
 // a macro expansion it leaves defers it to the form's reach instead of
-// expanding the macro, and running its child, again.
+// expanding the macro, and running its child, again. C-g's only after the
+// wait that took it (its token, `subprocess::Table::requit'); any other
+// call signals a plain quit.
 defsubr! { name = "romacs--call-process-quit", gnu = "callproc.c:351", effect = Global,
 fn call_process_quit(cx) {
     Err(cx.call_process_requit())

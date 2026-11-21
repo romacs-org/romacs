@@ -1206,6 +1206,7 @@ impl Leaf<'_> {
     pub(crate) fn call_process_run(&mut self, argv: &[Vec<u8>], env: &[Vec<u8>], dir: &[u8], infile: &[u8],
                                    output: CallOutput, error: CallOutput, wait: bool) -> Out {
         use std::os::unix::ffi::OsStrExt;
+        self.vm.subprocesses.requit = false;
         let path = |b: &[u8]| std::path::PathBuf::from(std::ffi::OsStr::from_bytes(b));
         let input = crate::host::open_child_input(path(infile)).map_err(|e| {
             let name = self.make_string(infile.to_vec(), false);
@@ -1246,8 +1247,8 @@ impl Leaf<'_> {
         let (bytes, quit) = self.call_process_wait(pid, reader)?;
         if let Some(quit) = quit {
             // What the child wrote before the quit is the caller's to insert,
-            // all of it, where GNU's call_process drops a partly filled block
-            // (VM2-CALLPROC-QUIT-OUTPUT): (quit . BYTES), after which the
+            // all of it, where GNU's call_process without DISPLAY drops a
+            // partly filled block (VM2-CALLPROC-QUIT-OUTPUT): (quit . BYTES), after which the
             // caller raises the quit again (`romacs--call-process-quit`).
             // Until then it is no quit unwinding: the Lisp that inserts the
             // output runs as any other, and a catch in it takes nothing.
@@ -1255,6 +1256,7 @@ impl Leaf<'_> {
             return match quit {
                 Fault::Signal(condition, _) if condition == quit_symbol && !bytes.is_empty() => {
                     self.vm.quit_unwinding = false;
+                    self.vm.subprocesses.requit = true;
                     let text = self.make_string(bytes, false);
                     Ok(self.cons(quit_symbol, text))
                 }

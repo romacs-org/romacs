@@ -208,10 +208,74 @@ fn sqlite_interrupts_a_long_statement() {
 #[test]
 fn sqlite_select_tells_a_read_from_a_write() {
     let db = crate::sqlite::Connection::open(b":memory:", false, false, true).expect("an in-memory database");
-    assert!(db.exec(b"CREATE TABLE t (x)"));
+    assert!(db.exec(b"CREATE TABLE t (x)", &crate::quit::NativeStop::never()));
     let readonly = |sql: &[u8]| db.prepare(sql).unwrap_or_else(|_| panic!("{} prepares", String::from_utf8_lossy(sql))).readonly();
     assert!(readonly(b"SELECT x FROM t"), "a select writes nothing");
     assert!(!readonly(b"INSERT INTO t VALUES (1) RETURNING x"), "an insert returning rows writes");
+    assert!(readonly(b"EXPLAIN INSERT INTO t VALUES (1) RETURNING x"), "an EXPLAIN writes nothing");
+}
+
+/// A press that comes as a writing statement halts, its write committed,
+/// is not that statement's quit: the call returns, its rows kept, and the
+/// press goes to the form after it. The progress handler's ask is placed
+/// at the statement's last instruction (`sqlite::PROGRESS_PERIOD`), its
+/// check after the halt, through sqlite-select, sqlite-execute and a batch.
+/// One instruction earlier, before the halt, the press still stops the
+/// statement, which SQLite rolls back: a quit, and no row kept.
+#[test]
+fn sqlite_never_quits_with_its_write_kept() {
+    use crate::quit::NativeStop;
+    use crate::sqlite::{Connection, PROGRESS_PERIOD, Step};
+    let rows = 7;
+    let make = format!("CREATE TABLE src (x); CREATE TABLE dst (x); \
+        WITH RECURSIVE c(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM c WHERE i<{rows}) INSERT INTO src SELECT i FROM c");
+    let (returning, clear, copy) = ("INSERT INTO dst SELECT x FROM src RETURNING x", "DELETE FROM dst", "INSERT INTO dst SELECT x FROM src");
+    // Each statement's instructions, unwatched, on the same tables.
+    let never = NativeStop::never();
+    let db = Connection::open(b":memory:", false, false, true).expect("an in-memory database");
+    assert!(db.exec(make.as_bytes(), &never));
+    let instructions = |sql: &str| {
+        let mut statement = db.prepare(sql.as_bytes()).unwrap_or_else(|_| panic!("{sql} prepares"));
+        while matches!(statement.step(&never), Step::Row) {}
+        i32::try_from(statement.instructions()).expect("a short statement")
+    };
+    // In the order each runs on an empty table: a plain insert counts the same over rows.
+    let (cleared, whole, copied) = (instructions(clear), instructions(returning), instructions(copy));
+    assert!(cleared < copied, "the batch's first statement ends before its last one's ask");
+    let listed = format!("({})", (1..=rows).map(|i| format!("({i})")).collect::<Vec<_>>().join(" "));
+    let batch = format!("\"{clear}; {copy}\"");
+    let select = format!("(list db \"{returning}\")");
+    for (name, args, period, value) in [
+        ("sqlite-select", select.clone(), whole - 1, None),
+        ("sqlite-execute", select.clone(), whole - 1, None),
+        ("sqlite-select", select.clone(), whole, Some(listed.clone())),
+        ("sqlite-execute", select.clone(), whole, Some(listed.clone())),
+        ("sqlite-execute-batch", format!("(list db {batch})"), copied, Some("t".to_string())),
+    ] {
+        let (mut vm, signal) = busy_vm();
+        eval(&mut vm, &format!("(progn (setq db (sqlite-open)) (sqlite-execute-batch db \"{make}\"))"));
+        let call = prepare(&mut vm, name, &args);
+        let period = PROGRESS_PERIOD.with(|p| p.replace(period));
+        assert!(signal.interrupt(), "a busy evaluator takes the press");
+        let outcome = invoke(&mut vm, call);
+        PROGRESS_PERIOD.with(|p| p.set(period));
+        let shown = outcome.as_ref().map(|v| vm.display(*v).unwrap_or_default()).map_err(|_| quit_signalled(&mut vm, &outcome));
+        let Some(value) = value else {
+            assert_eq!(shown, Err(true), "{name}, asked before the halt: it quits");
+            assert!(!signal.due(), "{name}: the quit took the press");
+            vm.quit_unwinding = false;
+            vm.propagated_escape = None;
+            assert_eq!(vm.eval_source("(equal (sqlite-select db \"SELECT count(*) FROM dst\") '((0)))").unwrap().display().unwrap(), "t", "{name}: the write was rolled back");
+            continue;
+        };
+        assert_eq!(shown, Ok(value), "{name}: the call returns its rows (Err(true): it quit with them kept)");
+        assert!(signal.due(), "{name}: the press waits for the next poll");
+        assert!(vm.eval_source_raw("(sqlite-select db \"SELECT count(*) FROM dst\")").is_err(), "{name}: the form after the call quits");
+        assert!(!signal.due(), "{name}: that form took the press");
+        vm.quit_unwinding = false;
+        vm.propagated_escape = None;
+        assert_eq!(vm.eval_source(&format!("(equal (sqlite-select db \"SELECT count(*) FROM dst\") '(({rows})))")).unwrap().display().unwrap(), "t", "{name}: the write was kept");
+    }
 }
 
 #[test]
@@ -770,6 +834,22 @@ fn nreverse_polls_at_its_first_chunk() {
     assert_eq!(eval(&mut vm, "(equal (list (length l) (car l) (nth 19999 l)) '(20000 1 20000))"), Value::TRUE, "the list is whole");
 }
 
+/// `nreverse`'s polled walk asks before it checks for the cycle: a list
+/// whose last cdr is itself, the cycle found at the step that polls, quits
+/// with a press waiting, the list as it was.
+#[test]
+fn nreverse_polls_at_the_step_that_finds_its_cycle() {
+    let (mut vm, signal) = busy_vm();
+    let args = values_of(&mut vm, "(list (setq l (let (l) (dotimes (i 16384) (push (- 16384 i) l)) (let ((c (nthcdr 16383 l))) (setcdr c c)) l)))");
+    assert!(signal.interrupt(), "a busy evaluator takes the press");
+    let outcome = call_kernel(&mut vm, crate::Primitive::Nreverse, &args, true);
+    assert_eq!(outcome.err().as_deref(), Some(crate::quit::ESCAPED), "no quit at the step that finds the cycle");
+    vm.propagated_escape = None;
+    vm.quit_unwinding = false;
+    let shape = eval(&mut vm, "(let ((c (nthcdr 16383 l))) (list (car l) (car c) (eq (cdr c) c) (car (nthcdr 100 l))))");
+    assert_eq!(vm.display(shape).unwrap(), "(1 16384 t 101)", "the list is unmodified");
+}
+
 /// `nreverse`'s walk hands off to its polled continuation once Brent's
 /// power reaches `KERNEL_CHUNK`, after `KERNEL_CHUNK` - 1 steps: on either side
 /// of that, and across it, a proper list comes back reversed, and a list
@@ -789,4 +869,19 @@ fn nreverse_is_one_walk_across_its_hand_off() {
                             (condition-case e (progn (nreverse l) 'returned) (circular-list (eq (car (cdr e)) l))))");
         assert_eq!(eval(&mut vm, &form), Value::TRUE, "{form}");
     }
+}
+
+/// `romacs--call-process-quit` raises C-g's quit only after the wait that
+/// took one, whose token it takes. Called with no token, as from a macro,
+/// it signals a plain quit, which an expansion treats as any error: the
+/// form in the branch not taken is never reached.
+#[test]
+fn call_process_quit_is_c_g_s_only_after_its_wait() {
+    let (mut vm, _signal) = busy_vm();
+    eval(&mut vm, "(defmacro m () (romacs--call-process-quit))");
+    assert_eq!(vm.eval_source("(eval '(if nil (m) 'else) t)").unwrap().display().unwrap(), "else");
+    vm.subprocesses.requit = true;
+    assert_eq!(vm.eval_source("(condition-case nil (romacs--call-process-quit) (quit 'quit))").unwrap().display().unwrap(), "quit");
+    assert!(!vm.subprocesses.requit, "the quit took the wait's token");
+    vm.quit_unwinding = false;
 }

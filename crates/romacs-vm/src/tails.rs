@@ -157,16 +157,18 @@ impl Vm {
             }
             fast = self.conses[fast.index(3)?].1;
             lam += 1;
+            // Asked before the cycle check: a step that finds the cycle is
+            // still one of the walk's, and a press waiting then quits.
+            until_poll -= 1;
+            if until_poll == 0 {
+                until_poll = crate::quit::KERNEL_CHUNK;
+                self.kernel_poll::<SCOPED>()?;
+            }
             if fast == slow {
                 break;
             }
             if lam == power {
                 (slow, power, lam) = (fast, power * 2, 0);
-            }
-            until_poll -= 1;
-            if until_poll == 0 {
-                until_poll = crate::quit::KERNEL_CHUNK;
-                self.kernel_poll::<SCOPED>()?;
             }
         }
         Ok(())

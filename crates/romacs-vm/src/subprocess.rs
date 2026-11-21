@@ -135,6 +135,10 @@ pub(crate) struct Table {
     /// GNU connect_counter: how many connections servers have accepted,
     /// naming those whose peer has no host.
     pub connect_counter: u64,
+    /// call-process's wait returned (quit . BYTES): the quit it took is
+    /// C-g's, to raise again once BYTES are inserted
+    /// (`romacs--call-process-quit`), which takes it.
+    pub requit: bool,
 }
 
 impl Table {
