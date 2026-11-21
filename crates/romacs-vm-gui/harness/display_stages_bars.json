@@ -80,7 +80,7 @@
  "plain-collected": {
   "step_instructions": "report",
   "cycles": 1,
-  "display_instructions": 2240000,
+  "display_instructions": 2230000,
   "display_conses": 137,
   "windows_rebuilt": 1,
   "band_expansions": 1,
@@ -88,7 +88,7 @@
   "frames_submitted": 0,
   "lines_laid": 0,
   "rows_wrapped": 0,
-  "display_instructions_p90": 2260000,
+  "display_instructions_p90": 2240000,
   "step_instructions_note": "reported, not held: the world's whole collection, which moves with what the session ran before (romacs#403); its display bars hold"
  },
  "agents-collected": {
@@ -102,10 +102,10 @@
   "frames_submitted": 0,
   "lines_laid": 0,
   "rows_wrapped": 0,
-  "above_instructions": 17800000,
-  "display_instructions_p90": 2250000,
+  "above_instructions": 11900000,
+  "display_instructions_p90": 2230000,
   "step_instructions_note": "reported, not held: the whole collection (romacs#403); above_instructions holds what loading the agents adds to it",
-  "above_instructions_note": "the highest of six forge runs (15.70-16.13M above the world, its baseline measured as the steps run) and a tenth"
+  "above_instructions_note": "the highest of six forge runs (10.71-10.76M above the world, its baseline measured once settled, as a step is) and a tenth"
  },
  "chat-collected": {
   "step_instructions": "report",
@@ -120,8 +120,8 @@
   "rows_wrapped": 0,
   "display_instructions_p90": 4180000,
   "step_instructions_note": "reported, not held: a full collection marks the whole session, world and libraries, and what the session ran before moves it (romacs#403); above_instructions holds what the chat adds",
-  "above_instructions": 2400000,
-  "above_instructions_note": "the highest of six forge runs (2.14-2.18M above the agents loaded, its baseline measured as the steps run) and a tenth"
+  "above_instructions": 3250000,
+  "above_instructions_note": "the highest of six forge runs (2.90-2.95M above the agents loaded, its baseline measured once settled, as a step is) and a tenth"
  },
  "cursor-move": {
   "step_instructions": 1860000,
