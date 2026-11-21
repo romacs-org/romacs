@@ -24,8 +24,8 @@ line shows its mark.
 
 Then M-x romacs-restart: the successor puts the ledger's files back from
 its image before the buffers (the same blobs, the new key, the probe, the
-mark).  Then M-x romacs-session-reset onto the build (linked at its top
-as an installer links it): no ledger, the build's code and key, no mark,
+mark).  Then M-x romacs-session-reset onto this build (its executable,
+its runtime kept): no ledger, the build's code and key, no mark,
 no kill ring, the unsaved file buffer carried and the saved one not.
 
 Worlds and compiled Lisp stay under the private
@@ -133,11 +133,6 @@ def build_and_source(root, env):
     return source, build, commit
 
 
-def install_binary(build, binary):
-    """BINARY at BUILD's top, as an installer links it: a restart onto the
-    build (a reset's target) runs it with BUILD as its runtime."""
-    (build / 'romacs-vm-gui').symlink_to(binary)
-
 
 def ready(engine, predicate, what, timeout=None):
     wait(lambda: plist(engine.ask(f'(parity-probe-ready (lambda () {predicate}))')).get('ready'),
@@ -154,7 +149,6 @@ def run(args, output, entry):
     root, home, env = private_tree('romacs', Path(args.work), args.tools, prefix='live-update-')
     entry['root'] = str(root)
     source, build, commit = build_and_source(root, env)
-    install_binary(build, args.romacs)
     env.update(ROMACS_RUNTIME_ROOT=str(build), ROMACS_LISP_DIR=str(build / 'lisp'),
                ROMACS_GUI_FONT='Iosevka', ROMACS_GUI_FONT_SIZE='14')
     (home / '.config/romacs').mkdir()
