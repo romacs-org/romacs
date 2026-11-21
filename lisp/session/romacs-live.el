@@ -968,13 +968,14 @@ of its own refuses: its patches would run unrecorded."
 ;;;###autoload
 (defun romacs-session-reset-target ()
   "The installed build a reset goes to: the one the server watches
-\(`romacs-server-build-watch'), else this session's own build (its
-runtime root, or its binary), never `romacs-restart-command''s."
+\(`romacs-server-build-watch'), else this session's runtime root when it
+is a build (it holds its romacs-vm-gui), else nil: the restart's own
+command, `romacs-restart-command''s or this session's, as `romacs-restart'
+runs it, its runtime kept."
   (let ((watch (bound-and-true-p romacs-server-build-watch))
         (root (romacs-live--runtime-root)))
     (cond ((and (stringp watch) (file-exists-p watch)) watch)
-          ((and root (file-executable-p (expand-file-name "romacs-vm-gui" root))) root)
-          (t (expand-file-name invocation-name invocation-directory)))))
+          ((and root (file-executable-p (expand-file-name "romacs-vm-gui" root))) root))))
 
 ;;;###autoload
 (defun romacs-session-reset (&optional keep-buffers)
@@ -991,7 +992,10 @@ the file buffers and their windows too.  The same supervised restart as
         (live (length (plist-get romacs-live-ledger :entries))))
     (when (or (not (called-interactively-p 'any))
               (yes-or-no-p (format "Reset onto %s%s, dropping histories and the kill ring%s? "
-                                   (abbreviate-file-name target)
+                                   (cond (target (abbreviate-file-name target))
+                                         ((or (bound-and-true-p romacs-restart-command) (getenv "ROMACS_RESTART_COMMAND"))
+                                          "the restart command's build")
+                                         (t "this build"))
                                    (if (> live 0) (format " without its %d live files" live) "")
                                    (if keep-buffers "" " and every buffer but unsaved ones"))))
       (warm-restart-request :target target :fresh (if keep-buffers 'buffers 'unsaved))
@@ -1044,7 +1048,8 @@ paths start at one column.")
 (defun romacs-live-summary (report)
   "One line saying what REPORT did."
   (pcase (romacs-live--outcome report)
-    ('refused (format "Live update refused, nothing loaded: %s" (string-join (plist-get report :refusals) "; ")))
+    ('refused (format "Live update refused, nothing loaded: %s%s" (string-join (plist-get report :refusals) "; ")
+                      (if (plist-get report :dropped) (concat "; " (romacs-live--dropped-text report)) "")))
     ('stopped (format "Live update %s" (plist-get report :stopped)))
     ('planned (format "Live update from %s would touch %d files" (plist-get report :label) (length (plist-get report :rows))))
     ('current (if (plist-get report :dropped)
@@ -1141,6 +1146,20 @@ KIND, the names, what happened to them."
                 (propertize (format-time-string "%H:%M" (plist-get e :time)) 'face 'romacs-live-dim)
                 "\n")))))
 
+(defun romacs-live--insert-dropped (report)
+  "Insert a row for each ledger entry REPORT's replay left out, and why."
+  (dolist (d (plist-get report :dropped))
+    (insert "  " (propertize (string-pad (format "%s" (plist-get d :why)) romacs-live--state-width) 'face
+                             (if (eq (plist-get d :why) 'landed) 'romacs-live-ok 'romacs-live-partial))
+            " " (propertize (plist-get d :path) 'face 'romacs-live-path)
+            (propertize (pcase (plist-get d :why)
+                          ('landed "  the build has it now")
+                          ('superseded "  the build changed it since: not put back")
+                          ('partial "  it failed to load before: not put back")
+                          (_ "  its copy is gone from the store"))
+                        'face 'romacs-live-dim)
+            "\n")))
+
 (defun romacs-live--insert-report (report)
   "Insert REPORT: its outcome first, then where it came from, then a row
 a file."
@@ -1149,7 +1168,8 @@ a file."
     (pcase (romacs-live--outcome report)
       ('refused
        (insert (propertize "⊘ refused" 'face 'romacs-live-partial) " · nothing loaded" "\n")
-       (dolist (reason (plist-get report :refusals)) (insert "  " reason "\n")))
+       (dolist (reason (plist-get report :refusals)) (insert "  " reason "\n"))
+       (romacs-live--insert-dropped report))
       ('stopped (insert (propertize (concat "✗ " (plist-get report :stopped)) 'face 'romacs-live-error) "\n"))
       (outcome
        (insert (pcase outcome
@@ -1163,17 +1183,7 @@ a file."
          (insert "  Forms before the error ran, so some of its changes took effect; the rows list the file's changes.\n"))
        (dolist (row (plist-get report :rows)) (romacs-live--insert-row row))
        (dolist (w (plist-get report :warnings)) (insert "  " (propertize (concat "! " w) 'face 'romacs-live-warning) "\n"))
-       (dolist (d (plist-get report :dropped))
-         (insert "  " (propertize (string-pad (format "%s" (plist-get d :why)) romacs-live--state-width) 'face
-                                  (if (eq (plist-get d :why) 'landed) 'romacs-live-ok 'romacs-live-partial))
-                 " " (propertize (plist-get d :path) 'face 'romacs-live-path)
-                 (propertize (pcase (plist-get d :why)
-                               ('landed "  the build has it now")
-                               ('superseded "  the build changed it since: not put back")
-                               ('partial "  it failed to load before: not put back")
-                               (_ "  its copy is gone from the store"))
-                             'face 'romacs-live-dim)
-                 "\n"))
+       (romacs-live--insert-dropped report)
        (when-let* ((gone (plist-get report :gone)))
          (insert "  " (propertize "gone " 'face 'romacs-live-dim) (mapconcat #'symbol-name gone ", ")
                  (propertize (if (plist-get report :unbound) "  unbound"

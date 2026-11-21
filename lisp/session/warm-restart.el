@@ -46,6 +46,8 @@
 (require 'subr-x)
 (require 'desktop)
 
+(declare-function romacs--isolate-pump "isolate" (timeout))
+(declare-function romacs--timer-check "timers.rs" ())
 (declare-function romacs--session-image-write "session_image.rs" (file form buffers))
 (declare-function romacs--session-image-read "session_image.rs" (file))
 (declare-function romacs--lead-buffer-list "buffer_names.rs" (buffers))
@@ -756,14 +758,18 @@ parts' readers before it restores the buffers regardless."
 
 (defun warm-restart--restore-parts-now (form)
   "The problems of FORM's parts, waiting for their readers here, at most
-`warm-restart-part-wait' seconds: a restore asked of a running session."
+`warm-restart-part-wait' seconds: a restore asked of a running session.
+The wait pumps what readers wait on, processes, timers and worker VMs'
+answers, never the keyboard; past it the restore stops before any buffer
+comes back, the image kept."
   (let ((result :pending) (deadline (+ (float-time) warm-restart-part-wait)))
     (warm-restart--restore-parts form (lambda (problems) (setq result problems)))
     (while (and (eq result :pending) (< (float-time) deadline))
-      (accept-process-output nil 0.05))
-    (if (eq result :pending)
-        (list (list :part 'warm-restart-part-wait :reason "a part's reader did not finish in time"))
-      result)))
+      (if (fboundp 'romacs--isolate-pump) (romacs--isolate-pump 0.05) (accept-process-output nil 0.05))
+      (when (fboundp 'romacs--timer-check) (romacs--timer-check)))
+    (when (eq result :pending)
+      (error "A part of the image was not through in %s s: no buffer restored" warm-restart-part-wait))
+    result))
 
 ;;;###autoload
 (defun warm-restart-write (&optional plan file)
