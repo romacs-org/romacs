@@ -2992,7 +2992,9 @@ def chat_log(args, base):
             a.idle(codex, 300)
             at_end()
             shot('codex-done')
-            result['codex'] = re.search(r'⎿ line 1\n\s+line 2', command_block()) is not None
+            # Ended well: its row alone, how many lines it gave (RET shows them).
+            result['codex'] = (re.search(r'· 40 lines', command_block()) is not None
+                               and '⎿' not in command_block())
         except RuntimeError as error:
             result['codex'] = repr(error)[:300]
         result.update({'shots': shots, 'denied_by_romacs': 'denied by Romacs' in text,
