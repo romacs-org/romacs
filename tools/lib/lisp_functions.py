@@ -402,10 +402,10 @@ def commit_census(root, commit):
 
 
 def report(found, over):
-    rows = sorted(((f.code, f.lines, key, path, f) for key, (path, f) in found.items() if f.lines >= over),
-                  key=lambda r: (-r[0], r[2]))
-    return '\n'.join(f'{code:>5} {lines:>5} {f.data:>5}{" D" if f.declared else "  "} {key}  {path}:{f.line}'
-                     for code, lines, key, path, f in rows)
+    rows = sorted(((f.code, key, path, f) for key, (path, f) in found.items() if f.lines >= over),
+                  key=lambda r: (-r[0], r[1]))
+    return '\n'.join(f'{f.code:>5} {f.lines:>5} {f.data:>5}{" D" if f.declared else "  "} {f.name}  {path}:{f.line}'
+                     for _, _, path, f in rows)
 
 
 def main():
