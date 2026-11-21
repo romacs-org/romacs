@@ -906,11 +906,22 @@ on the run's first look and each `romacs-agent-models-refresh-interval'."
   (when-let* ((found (executable-find (plist-get instance :program))))
     (file-truename found)))
 
+(defun romacs-agent--models-stamp-matches-p (saved path)
+  "Whether SAVED identifies PATH, including an older path-and-time stamp."
+  (and path
+       (or (equal saved path)
+           ;; Older editors can still write the shared cache.
+           (and (stringp saved)
+                (string-prefix-p (concat path " ") saved)
+                (when-let* ((attrs (file-attributes path)))
+                  (equal saved (concat path " " (format-time-string
+                                                 "%s.%N" (file-attribute-modification-time attrs)))))))))
+
 (defun romacs-agent--models-kept (instance)
   "The rows INSTANCE's harness reported, if its present program did."
   (when-let* ((kept (romacs-agent--read-json (romacs-agent--models-file (plist-get instance :name))))
               ((hash-table-p kept))
-              ((equal (gethash "stamp" kept) (romacs-agent--models-stamp instance)))
+              ((romacs-agent--models-stamp-matches-p (gethash "stamp" kept) (romacs-agent--models-stamp instance)))
               ((vectorp (gethash "models" kept))))
     (mapcar (lambda (row)
               (cons (gethash "id" row)
@@ -1242,20 +1253,21 @@ time (`romacs-agent--picker-rows'): grouped by instance, each with its note."
 
 (declare-function romacs-complete-refresh "romacs-complete" (minibuffer))
 
-(defun romacs-agent--pick-row (rows-of)
+(defun romacs-agent--pick-row (rows-of &optional prompt)
   "One of the rows the function ROWS-OF returns (`romacs-agent--picker-rows'),
-asked for, the first the default.  The models are those known: a harness
+asked for, the first the default unless PROMPT names an explicit choice.
+The models are those known: a harness
 due is asked in the background (`romacs-agent--want-models'), and its
 answer shows in the rows while they are asked for."
   (romacs-agent--want-models)
-  (let* ((rows (funcall rows-of)) (default (caar rows)) (minibuffer nil)
+  (let* ((rows (funcall rows-of)) (default (unless prompt (caar rows))) (minibuffer nil)
          (changed (lambda (_instance)
                     (setq rows (funcall rows-of))
                     (when (fboundp 'romacs-complete-refresh) (romacs-complete-refresh minibuffer)))))
     (add-hook 'romacs-agent-models-changed-functions changed)
     (unwind-protect
         (let ((text (minibuffer-with-setup-hook (lambda () (setq minibuffer (current-buffer)))
-                      (completing-read (format-prompt "Agent" default) (romacs-agent--rows-table (lambda () rows))
+                      (completing-read (format-prompt (or prompt "Agent") default) (romacs-agent--rows-table (lambda () rows))
                                        nil t nil nil default))))
           (cons text (cdr (assoc text rows))))
       (remove-hook 'romacs-agent-models-changed-functions changed))))
