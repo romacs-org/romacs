@@ -6,14 +6,17 @@
 ;;; Commentary:
 
 ;; The workspace regime runs no GNU Lisp, so it has no minibuffer.el.
-;; These are its readers of command, file and buffer names
-;; (`read-extended-command', `read-file-name', `read-buffer') and its M-x,
+;; These are its readers of command, file and buffer names and its M-x,
 ;; over one completer: TAB extends the input to the matching candidates'
 ;; common prefix, or else lists up to twelve of them.  M-p and M-n recall
 ;; history (romacs-editing.el); C-g cancels.
 ;;
-;; --loadup does not load this file: GNU's own readers serve there, shown
-;; by icomplete (romacs-completion-defaults.el).
+;; `romacs-workspace-completion-install' puts them in place of
+;; `read-extended-command', `execute-extended-command', `read-file-name'
+;; and `read-buffer'; the file calls it only where GNU's minibuffer.el is
+;; not loaded.  A --loadup session that loads this file, as C-h f does in
+;; completing a `romacs-' name, keeps GNU's readers
+;; (romacs-completion-defaults.el).
 
 ;;; Code:
 
@@ -22,10 +25,8 @@
 (defvar extended-command-history nil)
 (defvar buffer-name-history nil)
 (defvar read-file-name-function 'romacs-read-file-name)
-;; minibuf.c's `read-buffer' calls `read-buffer-function', a C variable.
-(setq read-buffer-function #'romacs-read-buffer)
 
-(defvar romacs-complete--candidates nil
+(defvar romacs-workspace-completion--candidates nil
   "While a reader is active, a function of its input that returns
 \(BASE PREFIX NAMES): NAMES complete PREFIX, the input's tail after BASE.")
 (defvar romacs-complete--kind nil
@@ -35,7 +36,7 @@
   "Extend the input to the matching candidates' common prefix, or list them."
   (interactive)
   (let* ((input (buffer-substring-no-properties romacs-prompt--input-start (point-max)))
-         (found (funcall romacs-complete--candidates input))
+         (found (funcall romacs-workspace-completion--candidates input))
          (base (car found)) (prefix (nth 1 found)) (names (nth 2 found))
          (common nil) (labels "") (count 0))
     (while names
@@ -56,13 +57,14 @@
 
 (defun romacs-complete--read (prompt initial history kind candidates &optional default)
   "Read with PROMPT and INITIAL input, completing over CANDIDATES.
-CANDIDATES is a `romacs-complete--candidates' function, KIND names what it
-offers and HISTORY is the history variable.  DEFAULT is the minibuffer's."
+CANDIDATES is a `romacs-workspace-completion--candidates' function,
+KIND names what it offers and HISTORY is the history variable.  DEFAULT
+is the minibuffer's."
   (let ((romacs-prompt--input-start (1+ (length prompt)))
         (romacs-prompt--history-position nil)
         (romacs-prompt--history-input nil)
         (romacs-prompt--history-variable history)
-        (romacs-complete--candidates candidates)
+        (romacs-workspace-completion--candidates candidates)
         (romacs-complete--kind kind)
         (map (make-sparse-keymap)))
     (set-keymap-parent map minibuffer-local-map)
@@ -97,7 +99,7 @@ GNU's `commandp'; calling it loads the file."
       (setq symbols (cdr symbols)))
     (sort names 'string-lessp)))
 
-(defun read-extended-command (&optional prompt)
+(defun romacs-read-extended-command (&optional prompt)
   "Read an existing interactive command name with completion and history."
   (let ((name (romacs-complete--read (or prompt "M-x ") nil 'extended-command-history "commands"
                                      (lambda (input) (list "" input (romacs-command-names))))))
@@ -106,14 +108,14 @@ GNU's `commandp'; calling it loads the file."
     (romacs-complete--remember 'extended-command-history name)
     name))
 
-(defun execute-extended-command (prefixarg &optional command-name typed)
+(defun romacs-execute-extended-command (prefixarg &optional command-name typed)
   "Invoke a named interactive command using Romacs's ordinary command path.
 M-x reads a name with TAB completion and M-p/M-n history; C-g cancels.
 With COMMAND-NAME supplied, no command-name prompt is opened.  The selected
 command receives PREFIXARG and may open its own ordinary interactive prompt.
 TYPED is accepted for GNU calling compatibility without binding suggestions."
-  (interactive (list current-prefix-arg (read-extended-command)))
-  (let* ((name (or command-name (read-extended-command)))
+  (interactive (list current-prefix-arg (romacs-read-extended-command)))
+  (let* ((name (or command-name (romacs-read-extended-command)))
          (command (if (stringp name) (intern-soft name) name)))
     (unless (romacs-command-p command)
       (signal 'user-error (list "Not an interactive command" name)))
@@ -174,7 +176,7 @@ filename history.  Non-nil MUSTMATCH requires an existing regular file."
     (romacs-complete--remember 'file-name-history result)
     result))
 
-(defun read-file-name (prompt &optional directory default-filename mustmatch initial predicate)
+(defun romacs-workspace-read-file-name (prompt &optional directory default-filename mustmatch initial predicate)
   "Read a filename with the customizable `read-file-name-function'."
   (funcall read-file-name-function prompt directory default-filename mustmatch initial predicate))
 
@@ -212,6 +214,20 @@ C-g cancels.  PREDICATE filtering is explicitly unsupported."
       (signal 'error (list "No live buffer named" result)))
     (romacs-complete--remember 'buffer-name-history result)
     result))
+
+;;;; The workspace's readers
+
+(defun romacs-workspace-completion-install ()
+  "Read command, file and buffer names with this file's readers, in
+place of GNU's: the workspace regime, which has no minibuffer.el."
+  (defalias 'read-extended-command #'romacs-read-extended-command)
+  (defalias 'execute-extended-command #'romacs-execute-extended-command)
+  (defalias 'read-file-name #'romacs-workspace-read-file-name)
+  ;; minibuf.c's `read-buffer' calls `read-buffer-function', a C variable.
+  (setq read-buffer-function #'romacs-read-buffer))
+
+(unless (featurep 'minibuffer)
+  (romacs-workspace-completion-install))
 
 (provide 'romacs-workspace-completion)
 ;;; romacs-workspace-completion.el ends here
