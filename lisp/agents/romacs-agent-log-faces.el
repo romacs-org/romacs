@@ -89,16 +89,23 @@ one before where it last ended written again; keep why, should it fail."
         (`(text ,start ,at . ,_) (romacs-agent-log-faces--reface start at))))))
 
 (defun romacs-agent-log-faces--plain-p ()
-  "Whether what streamed since the reply was last faced is words after
-plain text, no character of which opens, closes or escapes Markdown:
-nothing its faces could change, so it is faced as it is, and the
-reply's faces end there.  Most of a stream is that."
+  "Whether what streamed since the reply was last faced is words that can
+change no face: plain characters (no Markdown opens, closes or escapes
+with them, nor a dot that starts a host name), starting at a word's
+boundary, after text with no face, on a line a paragraph already holds
+\(a letter first, under four spaces), outside a reply read whole for
+its link definitions.  It is faced as it is, and the reply's faces end
+there.  Most of a stream is that."
   (pcase romacs-agent-log--stream
     (`(text ,_ ,at . ,_)
      (let ((end romacs-agent-log-faces--end))
-       (and end (< end at)
+       (and end (< end at) (not romacs-agent-log-faces--whole)
             (null (get-text-property (1- end) 'face))
-            (not (string-match-p "[^[:alnum:] ,.;'?!\"-]" (buffer-substring-no-properties end at)))
+            (let ((new (buffer-substring-no-properties end at)))
+              (and (not (string-match-p "[^[:alnum:] ,.;'?!\"-]" new))
+                   (not (string-match-p "\\.[[:alnum:]]" new))
+                   (or (eq (char-before end) ?\s) (eq (aref new 0) ?\s))))
+            (save-excursion (goto-char end) (forward-line 0) (looking-at " \\{0,3\\}[[:alpha:]]"))
             (progn (set-marker end at) t))))))
 
 (defun romacs-agent-log-faces-soon ()
