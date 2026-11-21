@@ -705,8 +705,11 @@ its call, in place of those shown before."
                (concat (romacs-agent-log--entry
                         (romacs-agent-log--one-line
                          (concat (propertize "● " 'face 'romacs-agent-log-tool)
-                                 (propertize (format "%s ended" name) 'face 'romacs-agent-log-note)
-                                 (if failed "" (romacs-agent-rows-outcome output))))
+                                 ;; Its renderer's ended row where it has one
+                                 ;; (a subagent's report's first line).
+                                 (or (and (not failed) (plist-get (romacs-agent-rows-texts name nil output) :ended))
+                                     (concat (propertize (format "%s ended" name) 'face 'romacs-agent-log-note)
+                                             (if failed "" (romacs-agent-rows-outcome output))))))
                         'tool event)
                        (if-let* ((under (romacs-agent-log--under-call name output failed)))
                            (romacs-agent-log--output (nth 0 under) (nth 1 under) (cons nil output))
@@ -1756,7 +1759,11 @@ REASON when given."
   "Copy the entry at point."
   (interactive nil romacs-agent-log-mode)
   (let* ((start (if (get-text-property (point) 'romacs-agent-log-entry) (point)
-                  (or (previous-single-property-change (point) 'romacs-agent-log-entry) (point-min))))
+                  ;; The change is after the entry's marked first character.
+                  (let ((after (previous-single-property-change (point) 'romacs-agent-log-entry)))
+                    (cond ((null after) (point-min))
+                          ((and (> after (point-min)) (get-text-property (1- after) 'romacs-agent-log-entry)) (1- after))
+                          (t after)))))
          (end (or (next-single-property-change (1+ start) 'romacs-agent-log-entry) romacs-agent-log--end)))
     ;; Its text, its bars and other decoration left out.
     (kill-new (string-trim (substring-no-properties

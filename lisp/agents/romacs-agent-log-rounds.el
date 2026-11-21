@@ -98,7 +98,9 @@ inside one (unless its first word is longer)."
   (if (<= (string-width text) width) text
     (let* ((ellipsis (truncate-string-ellipsis))
            (cut (truncate-string-to-width text (- width (string-width ellipsis))))
-           (word (string-match "[ \t]+[^ \t]*\\'" cut)))
+           ;; Cut inside a word: back to the end of the one before.
+           (word (and (< (length cut) (length text)) (not (memq (aref text (length cut)) '(?\s ?\t)))
+                      (string-match "[ \t]+[^ \t]*\\'" cut))))
       (concat (string-trim-right (if (and word (> word 0)) (substring cut 0 word) cut) "[ \t:,;·+&/-]+") ellipsis))))
 
 (defun romacs-agent-log-rounds--head (incoming)
@@ -126,7 +128,8 @@ not the user's; its first lines dim, RET shows all."
          ;; its first part only: the preview shows a few lines.
          (lines (split-string (romacs-markdown-plain-string (substring body 0 (min (length body) 4096))) "\n" t "[ \t]*"))
          (shown (seq-take lines romacs-agent-log-rounds-other-lines))
-         (more (- (length lines) (length shown)))
+         ;; How many lines it leaves out, when all of it was read.
+         (more (and (<= (length body) 4096) (- (length lines) (length shown))))
          ;; One blank line before it: an arrival before ends in its own.
          ;; Its bar from its head down: the mark of what came in.
          (text (concat (if (and (not parent) (romacs-agent-log--blank-p)) "" "\n")
@@ -136,14 +139,16 @@ not the user's; its first lines dim, RET shows all."
                        ;; or the agent's own words.
                        (mapconcat (lambda (line)
                                     (let ((line (truncate-string-to-width line width nil nil (truncate-string-ellipsis))))
-                                      (add-face-text-property 0 (length line) 'romacs-agent-log-other t line)
+                                      ;; Before its faces: the dim colour wins, they
+                                      ;; keep their weight and slant.
+                                      (add-face-text-property 0 (length line) 'romacs-agent-log-other nil line)
                                       (concat bar line)))
                                   shown "\n")
                        ;; Whatever it leaves out, lines or the ends of lines,
                        ;; RET shows.
-                       (if (or (> more 0) (seq-some (lambda (line) (> (string-width line) width)) shown))
+                       (if (or (not more) (> more 0) (seq-some (lambda (line) (> (string-width line) width)) shown))
                            (concat "\n" bar
-                                   (propertize (concat (if (> more 0) (format "… %d more line%s · " more (if (= more 1) "" "s")) "… ")
+                                   (propertize (concat (if (and more (> more 0)) (format "… %d more line%s · " more (if (= more 1) "" "s")) "… ")
                                                        (romacs-agent-log--key 'romacs-agent-log-open) " shows all")
                                                'face 'romacs-agent-log-note))
                          "")

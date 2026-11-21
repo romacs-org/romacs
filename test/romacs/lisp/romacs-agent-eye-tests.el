@@ -111,6 +111,9 @@
   (should (equal (romacs-agent-log-rounds--words "lane chat (claude3): agents ADE showcase: visible work" 30)
                  (concat "lane chat (claude3): agents" (truncate-string-ellipsis))))
   (should (equal (romacs-agent-log-rounds--words "short" 30) "short"))
+  ;; A word that ends at the cut is kept whole.
+  (should (equal (romacs-agent-log-rounds--words "alpha beta more" (+ 10 (string-width (truncate-string-ellipsis))))
+                 (concat "alpha beta" (truncate-string-ellipsis))))
   (should (equal (romacs-agent-log-rounds--words "lane board-buffer (agent board as a buffer, glanceable + pretty)" 56)
                  (concat "lane board-buffer (agent board as a buffer, glanceable" (truncate-string-ellipsis))))
   ;; One word longer than the room: cut inside it, as nothing else can.
@@ -172,6 +175,22 @@
     (let ((kill-ring nil))
       (romacs-agent-log-copy)
       (should (equal (car kill-ring) "❯ keep **this**")))))
+
+(ert-deftest romacs-agent-eye-copy-takes-a-reply-whole ()
+  ;; From inside its text, w copies the reply from its first character.
+  (romacs-agent-eye-tests--chat
+    (draw :type 'delta :text "**keep** this")
+    (draw :type 'message-end)
+    (goto-char (point-min))
+    (search-forward "this")
+    (let ((kill-ring nil))
+      (romacs-agent-log-copy)
+      (should (equal (car kill-ring) "**keep** this")))))
+
+(ert-deftest romacs-agent-eye-a-preview-dims-over-its-faces ()
+  (let ((line (romacs-markdown-plain-string "see `code`")))
+    (add-face-text-property 0 (length line) 'romacs-agent-log-other nil line)
+    (should (eq (car (ensure-list (get-text-property 5 'face line))) 'romacs-agent-log-other))))
 
 (provide 'romacs-agent-eye-tests)
 ;;; romacs-agent-eye-tests.el ends here
