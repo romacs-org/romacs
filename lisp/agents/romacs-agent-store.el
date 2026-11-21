@@ -751,9 +751,11 @@ there is no store.  A store that cannot be read signals
                      (sqlite-select db "select id, position, item from queued where session = ? order by position"
                                     (list id)))
            (error (signal 'romacs-agent-store-unread (list id (error-message-string err))))))
-     ;; A store there that will not open is unread, not empty; a link to
-     ;; one out of reach is there too.
-     ((or (file-exists-p file) (file-symlink-p file))
+     ;; A store there that will not open is unread, not empty: there
+     ;; unless known absent (a link to one out of reach is there; a
+     ;; lookup that fails is no proof of absence).
+     ((condition-case err (file-attributes file)
+        (error (signal 'romacs-agent-store-unread (list id (error-message-string err)))))
       (signal 'romacs-agent-store-unread (list id "the store could not be opened"))))))
 
 (defun romacs-agent-store--requeue (session _manifest)

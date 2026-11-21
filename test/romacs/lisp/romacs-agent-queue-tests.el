@@ -493,7 +493,11 @@ message is sent, `romacs-agent-send' by default.")
     (should (romacs-agent-store--open))
     (cl-letf (((symbol-function 'romacs-agent-store--open) (lambda () (signal 'error '("database is locked")))))
       (should-error (romacs-agent-store-queued "x") :type 'romacs-agent-store-unread)
-      (should (funcall (cdr (assq 'queued romacs-agent-mark-kinds)) (expand-file-name "x" (romacs-agent--state-root)) nil)))))
+      (should (funcall (cdr (assq 'queued romacs-agent-mark-kinds)) (expand-file-name "x" (romacs-agent--state-root)) nil))
+      ;; Not opened, and its lookup failing: no proof it is gone.
+      (cl-letf (((symbol-function 'romacs-agent-store--open) #'ignore)
+                ((symbol-function 'file-attributes) (lambda (&rest _) (signal 'file-error '("Input/output error")))))
+        (should-error (romacs-agent-store-queued "x") :type 'romacs-agent-store-unread)))))
 
 (ert-deftest romacs-agent-queue-a-stale-mark-goes-at-the-next-restore ()
   ;; A removal that read the store before an earlier delete landed keeps
