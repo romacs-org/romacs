@@ -2368,11 +2368,13 @@ inside itself.  Its end, once seen, waits for them
       (unwind-protect
           (while (and (< (float-time) until) (romacs-agent--line-waits-p process))
             (romacs-agent--filter-lines process until))
-        (process-put process 'draining nil)))
-    (cond ((romacs-agent--output-waits-p process) (romacs-agent--drain-soon process))
-          ((process-get process 'ended)
-           (process-put process 'ended nil)
-           (romacs-agent--sentinel process nil)))))
+        (process-put process 'draining nil)
+        ;; What is left goes on, however the slice ended (a quit in a handler).
+        (when (or (romacs-agent--output-waits-p process) (process-get process 'ended))
+          (romacs-agent--drain-soon process))))
+    (when (and (process-get process 'ended) (not (romacs-agent--output-waits-p process)))
+      (process-put process 'ended nil)
+      (romacs-agent--sentinel process nil))))
 
 (defun romacs-agent--line-waits-p (process)
   "Whether a whole line of PROCESS's output waits to be handled: in the
