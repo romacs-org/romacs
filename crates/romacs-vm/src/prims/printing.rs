@@ -74,7 +74,7 @@ fn answered(cx: &mut Leaf<'_>, saved: Vec<Value>, then: Then) -> Next {
 
 defsubr! { name = "write-char", gnu = "print.c:553", effect = Global,
 fn write_char(cx, character: Value; optional stream: Value) -> Step {
-    let number = character.integer_value().ok_or(Fault::Wrong("fixnump", character))?;
+    let number = character.integer_value().ok_or_else(|| Fault::Wrong("fixnump", character))?;
     let stream = destination(cx, stream)?;
     if stream != Value::TRUE && !matches!(cx.kind(stream), leaf::Kind::Buffer | leaf::Kind::ByteBuffer | leaf::Kind::Marker) {
         return Ok(Step::Call { f: stream, args: vec![Value::integer(i64::from(number as u32)).unwrap()], then: written, saved: vec![character] });
@@ -183,7 +183,7 @@ fn overridden_function(cx: &mut Leaf<'_>, overrides: Value) -> std::result::Resu
         if setting == Value::TRUE {
             function = Some(Value::NIL);
         } else {
-            let (key, value) = cx.pair(setting).ok_or(Fault::Wrong("consp", setting))?;
+            let (key, value) = cx.pair(setting).ok_or_else(|| Fault::Wrong("consp", setting))?;
             let name = if cx.kind(key) == leaf::Kind::Symbol { cx.symbol_name(key)? } else { String::new() };
             // Fassq of an unknown key is nil, which is not a symbol here.
             if !OVERRIDE_KEYS.contains(&name.as_str()) { return Err(Fault::Wrong("symbolp", Value::NIL)); }
@@ -201,7 +201,7 @@ fn overridden_function(cx: &mut Leaf<'_>, overrides: Value) -> std::result::Resu
 // internal bytes when both are nil).
 defsubr! { name = "external-debugging-output", gnu = "print.c:927", effect = Global,
 fn external_debugging_output(cx, character: Value) -> Step {
-    let code = character.integer_value().ok_or(Fault::Wrong("fixnump", character))?;
+    let code = character.integer_value().ok_or_else(|| Fault::Wrong("fixnump", character))?;
     let code = u32::try_from(code).ok().filter(|&c| c <= crate::lstring::MAX_CHAR)
         .ok_or_else(|| Fault::Error("external-debugging-output outside the supported character range".into()))?;
     let mut chars = vec![code];

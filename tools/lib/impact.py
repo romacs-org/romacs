@@ -59,7 +59,8 @@ import test_modules  # noqa: E402
 STRUCTURAL = ('romacs-vm::reentry_sites', 'romacs-vm::compile_boundaries', 'romacs-vm::rooting_brand_rules',
               'romacs-vm::no_remote_references', 'romacs-vm::heap_boundary', 'romacs-vm::oclosure_boundary',
               'romacs-vm::gc_threads_forbidden', 'romacs-vm::primitive_registry', 'romacs-vm::production_registry',
-              'romacs-vm::host_boundary_lint', 'romacs-vm::primitive_gc_boundary', 'romacs-gui-tests::harness_contract')
+              'romacs-vm::host_boundary_lint', 'romacs-vm::fault_lazy_lint', 'romacs-vm::primitive_gc_boundary',
+              'romacs-gui-tests::harness_contract')
 
 # The structural rules whose compile-fail fixtures run the compiler: minutes
 # when their inputs changed, where the rest take seconds once the test target

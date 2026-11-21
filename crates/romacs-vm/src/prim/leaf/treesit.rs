@@ -183,7 +183,7 @@ impl Leaf<'_> {
     fn ts_position(&mut self, pos: Value, buffer: Value) -> R<i64> {
         let n = match self.kind(pos) {
             Kind::Integer => pos.integer_value().unwrap_or(0),
-            Kind::Marker => self.marker_position(pos).flatten().ok_or(Fault::Error("Marker does not point anywhere".into()))?,
+            Kind::Marker => self.marker_position(pos).flatten().ok_or_else(|| Fault::Error("Marker does not point anywhere".into()))?,
             _ => return Err(Fault::Wrong("integer-or-marker-p", pos)),
         };
         let region = self.ts_region(buffer);
@@ -752,8 +752,8 @@ impl Leaf<'_> {
         while tail != Value::NIL {
             let Some((range, next)) = self.pair(tail) else { return Err(Fault::Wrong("listp", ranges)) };
             let Some((b, e)) = self.pair(range) else { return Err(Fault::Wrong("consp", range)) };
-            let b = b.integer_value().filter(|_| self.kind(b) == Kind::Integer).ok_or(Fault::Wrong("fixnump", b))?;
-            let e = e.integer_value().filter(|_| self.kind(e) == Kind::Integer).ok_or(Fault::Wrong("fixnump", e))?;
+            let b = b.integer_value().filter(|_| self.kind(b) == Kind::Integer).ok_or_else(|| Fault::Wrong("fixnump", b))?;
+            let e = e.integer_value().filter(|_| self.kind(e) == Kind::Integer).ok_or_else(|| Fault::Wrong("fixnump", e))?;
             if !(last <= b && b <= e && e <= zv) {
                 return Err(self.ts_message("treesit-range-invalid", "RANGE is either overlapping, out-of-order or out-of-range", &[ranges]));
             }
@@ -1273,7 +1273,7 @@ impl Leaf<'_> {
     pub(crate) fn ts_fontify(&mut self, node: Value, query: Value, beg: Value, end: Value, region: (i64, i64), spans: Value) -> R<Next> {
         let settings = self.vector_values(spans)?.into_iter()
             .map(|span| self.pair(span).and_then(|(first, _)| first.integer_value()).and_then(|first| u32::try_from(first).ok()))
-            .collect::<Option<Vec<u32>>>().ok_or(Fault::Wrong("vectorp", spans))?;
+            .collect::<Option<Vec<u32>>>().ok_or_else(|| Fault::Wrong("vectorp", spans))?;
         let fontify = ts::Fontify { start: region.0, end: region.1, settings, batch: 0, next: (0, 0) };
         self.ts_capture_with(node, query, beg, end, 0, Some((fontify, spans)))
     }
@@ -2177,7 +2177,7 @@ impl Leaf<'_> {
             *field = v.integer_value().unwrap_or(0);
         }
         let buffer = self.current_buffer()?;
-        let text = self.ts_buffer_text_mut(buffer).ok_or(Fault::Error("Tree-sitter needs a multibyte buffer".into()))?;
+        let text = self.ts_buffer_text_mut(buffer).ok_or_else(|| Fault::Error("Tree-sitter needs a multibyte buffer".into()))?;
         text.ts_linecols[1] = Linecol { line: fields[0], col: fields[1], bytepos: fields[2] };
         Ok(Value::NIL)
     }

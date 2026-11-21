@@ -4,14 +4,14 @@
 use super::*;
 
 fn fixnum(value: Value) -> std::result::Result<i64, Fault> {
-    value.integer_value().ok_or(Fault::Wrong("fixnump", value))
+    value.integer_value().ok_or_else(|| Fault::Wrong("fixnump", value))
 }
 fn done(_: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next { Ok(Step::Done(saved[0])) }
 
 defsubr! { name = "insert-char", gnu = "editfns.c:1444", effect = Global,
 fn insert_char(cx, character: Value; optional count: Value, inherit: Value) -> Step {
     let c = character.integer_value().filter(|&c| (0..=crate::lstring::MAX_CHAR as i64).contains(&c))
-        .ok_or(Fault::Wrong("characterp", character))? as u32;
+        .ok_or_else(|| Fault::Wrong("characterp", character))? as u32;
     let mut unit = [0; 5];
     let width = crate::lstring::char_string(c, &mut unit);
     insert_copies(cx, &unit[..width], true, count, inherit)
@@ -81,7 +81,7 @@ fn indent_to(cx, column: Value; optional minimum: Value) -> Step {
 // a short line is indented out to GOAL.
 defsubr! { name = "move-to-column", gnu = "indent.c:1112", effect = Global,
 fn move_to_column(cx, column: Value; optional force: Value) -> Step {
-    let goal = column.integer_value().filter(|&n| n >= 0).ok_or(Fault::Wrong("wholenump", column))?;
+    let goal = column.integer_value().filter(|&n| n >= 0).ok_or_else(|| Fault::Wrong("wholenump", column))?;
     let (reached, prev_byte, prev_column, prev_char) = cx.scan_to_column(goal as usize)?;
     let reached = reached as i64;
     let goal_value = Value::integer(goal).unwrap();

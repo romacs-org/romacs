@@ -1686,7 +1686,7 @@ impl Vm {
             Fwd::Int(i) => {
                 // CHECK_INTEGER; VM2 has no bignums, so every integer fits
                 // and GNU's overflow-error arm is unreachable.
-                let n = value.integer_value().ok_or(Fault::Wrong("integerp", value))?;
+                let n = value.integer_value().ok_or_else(|| Fault::Wrong("integerp", value))?;
                 self.forwarded.ints[i as usize] = n;
             }
             Fwd::Buffer(i) => {

@@ -15,7 +15,7 @@ defsubr! { name = "ngettext", gnu = "editfns.c:3180", effect = Pure,
 fn ngettext(cx, msgid: Value, msgid_plural: Value, n: Value) {
     cx.string_view(msgid)?;
     cx.string_view(msgid_plural)?;
-    cx.bigint_value(n).ok_or(Fault::Wrong("integerp", n))?;
+    cx.bigint_value(n).ok_or_else(|| Fault::Wrong("integerp", n))?;
     Ok(if n.integer_value() == Some(1) { msgid } else { msgid_plural })
 }}
 

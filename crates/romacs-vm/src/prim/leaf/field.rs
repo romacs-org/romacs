@@ -10,7 +10,7 @@ impl Leaf<'_> {
         match self.marker_position(value) {
             Some(Some(n)) => Ok(n),
             Some(None) => Err(Fault::Error("Marker does not point anywhere".into())),
-            None => value.integer_value().ok_or(Fault::Wrong("integer-or-marker-p", value)),
+            None => value.integer_value().ok_or_else(|| Fault::Wrong("integer-or-marker-p", value)),
         }
     }
 
