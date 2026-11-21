@@ -52,8 +52,9 @@ PATH_ATTR = re.compile(r'#\s*\[\s*path\s*=\s*"([^"]+)"\s*\]')
 MOD_DECL = re.compile(r'\bmod\s+([A-Za-z_][A-Za-z0-9_]*)\s*;')
 CONTAINER = re.compile(r'\b(impl|trait|mod)\b')
 # A field's or a parameter's head: what an attribute owns that is no item or
-# statement (`#[cfg(test)] pub(crate) x: T`, `fn f(#[cfg(test)] x: u8)`).
-FIELD = re.compile(r'\s*(?:pub(?:\s*\([^)]*\))?\s+)?(?:mut\s+)?[A-Za-z_][A-Za-z0-9_]*\s*:(?!:)')
+# statement (`#[cfg(test)] pub(crate) x: T`, `fn f(#[cfg(test)] x: u8)`, a
+# struct literal's shorthand `#[cfg(test)] x,`).
+FIELD = re.compile(r'\s*(?:pub(?:\s*\([^)]*\))?\s+)?(?:mut\s+)?[A-Za-z_][A-Za-z0-9_]*\s*(?::(?!:)|,|\})')
 # Macros whose input is tokens, not items: a `fn` in them is no function here.
 TOKEN_MACROS = re.compile(r'\b(?:stringify|concat|quote|quote_spanned)\s*!\s*[(\[{]')
 QUALIFIERS = ('pub', 'async', 'const', 'unsafe', 'extern', 'default')
@@ -122,13 +123,17 @@ def body_start(code, at):
 
 
 def item_end(code, at):
-    """The end of the item or statement starting at AT: its body's close,
-    or its `;`."""
+    """The end of the item or statement starting at AT: its body's close, or
+    its `;`; never past the bracket closing a group it is inside."""
     start = body_start(code, at)
-    if start is not None:
-        return matching(code, start)
-    semi = code.find(';', at)
-    return len(code) if semi < 0 else semi + 1
+    end = matching(code, start) if start is not None else (code.find(';', at) + 1 or len(code))
+    depth = 0
+    for m in BRACKET.finditer(code, at, end):
+        depth += m.group() in '([{'
+        depth -= m.group() in ')]}'
+        if depth < 0:
+            return m.start()
+    return end
 
 
 def requires_test(predicate):
@@ -328,7 +333,7 @@ def test_modules(path, src, code):
         if not any(test_attribute(marked[a]) for a in attrs):
             continue
         named = next((PATH_ATTR.match(src, a[0]) for a in attrs if PATH_ATTR.match(src, a[0])), None)
-        found |= {posixpath.normpath(str(p.parent / named[1]))} if named \
+        found |= {posixpath.normpath(str((within if within != home else p.parent) / named[1]))} if named \
             else {str(within / f'{m[1]}.rs'), str(within / m[1] / 'mod.rs')}
     return found
 

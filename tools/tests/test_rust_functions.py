@@ -145,6 +145,23 @@ class RoundTwoTest(unittest.TestCase):
                          {'crates/a/src/helpers.rs', 'crates/a/src/x/outer/t.rs', 'crates/a/src/x/outer/t/mod.rs'})
 
 
+class RoundThreeTest(unittest.TestCase):
+    def test_a_test_shorthand_field_owns_only_itself(self):
+        src = ('fn make() -> S {\n    S {\n        #[cfg(test)]\n        available,\n        other: 1,\n    }\n}\n'
+               'impl S {\n    fn try_send(&self) {\n        x.unwrap();\n    }\n}\n')
+        census, unwraps, _ = rf.file_census(src)
+        self.assertEqual(([f[0] for f in census], unwraps), (['make', 'S::try_send'], 1))
+
+    def test_a_span_ends_at_its_enclosing_group(self):
+        src = 'fn f() {\n    g(\n        #[cfg(test)]\n        1\n    );\n    y.unwrap();\n}\n'
+        self.assertEqual(rf.file_census(src)[1], 1)
+
+    def test_an_explicit_path_in_an_inline_module_resolves_under_it(self):
+        src = 'mod outer {\n    #[cfg(test)]\n    #[path = "./helper.rs"]\n    mod t;\n}\n'
+        code = rf.unsafe_census.lex(src)[0]
+        self.assertEqual(rf.test_modules('crates/a/src/lib.rs', src, code), {'crates/a/src/outer/helper.rs'})
+
+
 class FloorsTest(unittest.TestCase):
     def test_unwraps_and_undocumented_unsafe_outside_tests(self):
         src = ('fn a() {\n    x.unwrap();\n    y.unwrap_or(1);\n    z.expect("why");\n    // "s.unwrap()"\n'
