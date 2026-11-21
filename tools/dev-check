@@ -268,8 +268,9 @@ def functions(root, trunk):
         return 'SKIP', 'the Lisp functions were not measured', [f'{exc}; fix: merge the trunk in, or name it with --trunk']
     lisp = smells.lisp_functions
     failing, warned = lisp.held(found)
+    warnings = [f'warning until {lisp.ENFORCED_FROM}: {finding}' for finding in warned]
     if failing:
-        return 'FAIL', f'{len(failing)} Lisp function finding(s) over {lisp.LONG_FUNCTION_LINES} code lines', failing
+        return 'FAIL', f'{len(failing)} failing Lisp function finding(s), {len(warned)} warning(s)', failing + warnings
     if warned:
         return 'ok', (f'{len(warned)} Lisp function finding(s) over {lisp.LONG_FUNCTION_LINES} code lines, '
                       f'warned until {lisp.ENFORCED_FROM}, then failing'), warned

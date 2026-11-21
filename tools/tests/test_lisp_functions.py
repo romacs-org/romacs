@@ -54,6 +54,8 @@ class ReaderTest(unittest.TestCase):
         text += "(cl-defmethod f (x &context (window-system pgtk) &optional y) x)\n"
         self.assertEqual([f.name for f in lf.functions(text)],
                          ['m :around (string t)', 'm (integer)', '(setf m) (t list)', 'f (t &context (window-system pgtk))'])
+        self.assertEqual(one('(cl-defmethod g (x &context ((getenv "A") (eql \'b))) x)').name,
+                         'g (t &context ((getenv "A") (eql \'b)))')
 
 
 class LengthTest(unittest.TestCase):
@@ -135,6 +137,17 @@ class RisesTest(unittest.TestCase):
         (grown,) = lf.rises(two, {**lf.long_functions(self.found(path='lisp/ui/a.el', f=44)),
                                   **lf.long_functions(self.found(path='lisp/vm/b.el', f=49))})
         self.assertTrue(grown.startswith('long_functions: lisp/vm/b.el:1: f grew to 49 code lines from 44'), 'one shrinks, one grows')
+        base, base_all = self.long_and_all(('lisp/ui/a.el', 60), ('lisp/vm/b.el', 45))
+        tree, tree_all = self.long_and_all(('lisp/ui/a.el', 40), ('lisp/ui/c.el', 50))
+        (grown,) = lf.rises(base, tree, base_all, tree_all)
+        self.assertTrue(grown.startswith('long_functions: lisp/ui/c.el:1: f grew to 50 code lines from 45'),
+                        'one drops under the limit where it is, the other moves and grows')
+
+    def long_and_all(self, *places):
+        found = {}
+        for path, n in places:
+            found.update(self.found(path=path, f=n))
+        return lf.long_functions(found), found
 
     def test_a_drop_or_a_shrink_passes_a_growth_or_a_new_one_fails(self):
         base = lf.long_functions(self.found(a=50, b=45))

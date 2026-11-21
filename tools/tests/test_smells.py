@@ -219,7 +219,7 @@ class RatchetTest(unittest.TestCase):
             'totals': {'allows': 3, 'todos': 1, 'long_files': 1, 'unsafe_sites': 4, 'unsafe_undocumented': 1,
                        'legacy_primitives': 5, 'primitives_outside_prims': 2, 'vm_replacements': 0,
                        'lint clippy::doc_markdown': 3},
-            'generated': ['fixture.txt'], 'long_functions': {}})
+            'generated': ['fixture.txt'], 'long_functions': {}, 'lisp_keys': []})
 
     def test_at_the_merge_base(self):
         self.assertEqual(rises(now(), now()), [])

@@ -143,7 +143,7 @@ def read(text):
             kids = stack.pop()
             stack[-1].append(Node('list', begin, end, pre, kids, opener))
         else:
-            stack[-1].append(Node(kind, start, end, prefix, (), text[start:end] if kind == 'atom' else None))
+            stack[-1].append(Node(kind, start, end, prefix, (), text[start:end]))
         prefix = ''
     if opened:
         raise ReadError(f'unclosed list at offset {opened[-1][0]}')
@@ -254,7 +254,7 @@ def specializers(args):
 def written(node):
     """NODE as one line of text, its spacing and comments dropped."""
     if node.kind != 'list':
-        return node.text or '""'
+        return node.prefix + node.text
     return node.prefix + node.text + ' '.join(written(k) for k in node.kids) + CLOSER[node.text]
 
 
@@ -333,19 +333,23 @@ def by_name(long):
     return names
 
 
-def paired(base, tree):
+def paired(base, tree, base_keys, tree_keys):
     """[(tree entry, base entry)] of the long functions TREE and BASE share: by
-    key (file and name) first; the rest, a function that moved, by name,
-    longest first.  A tree entry left unpaired is new."""
+    key (file and name) first; then a function that moved, whose key the
+    other side has no function at (BASE_KEYS, TREE_KEYS: every key, short
+    ones too), by name, longest first.  A tree entry left unpaired is new."""
     pairs = [(tree[key], base[key]) for key in sorted(tree) if key in base]
-    had = by_name({key: entry for key, entry in base.items() if key not in tree})
-    rest = by_name({key: entry for key, entry in tree.items() if key not in base})
+    had = by_name({key: entry for key, entry in base.items() if key not in tree_keys})
+    rest = by_name({key: entry for key, entry in tree.items() if key not in base_keys})
     return pairs + [pair for name, entries in sorted(rest.items()) for pair in zip(entries, had.get(name, []))]
 
 
-def rises(base, tree, limit=LONG_FUNCTION_LINES):
-    """Why TREE adds to BASE's long functions, one line each: both long_functions."""
-    pairs = paired(base, tree)
+def rises(base, tree, base_keys=None, tree_keys=None, limit=LONG_FUNCTION_LINES):
+    """Why TREE adds to BASE's long functions, one line each: both
+    long_functions; BASE_KEYS and TREE_KEYS every function's key on each
+    side, default the long ones'."""
+    pairs = paired(base, tree, set(base) if base_keys is None else set(base_keys),
+                   set(tree) if tree_keys is None else set(tree_keys))
     grown = [f'{KIND}: {place}: {name} grew to {code} code lines from {was[0]}; '
              f'fix: move a job out of it into a function of its own, or {DECLARE}'
              for (code, place, name), was in pairs if code > was[0]]

@@ -415,7 +415,8 @@ def summary(now):
     totals.update({key: now['layout'][key] for key in ('legacy_primitives', 'primitives_outside_prims', 'vm_replacements')})
     totals.update({f'lint {lint}': n for lint, n in now['lints'].items()})
     return {'totals': totals, 'generated': list(now['layout']['generated']),
-            'long_functions': lisp_functions.long_functions(now['functions'])}
+            'long_functions': lisp_functions.long_functions(now['functions']),
+            'lisp_keys': sorted(now['functions'])}
 
 
 def declare(what):
@@ -432,7 +433,8 @@ def rises(base, tree):
              for what in sorted(have) if have[what] > had.get(what, 0)]
     return found + [f'generated: {name} is new; declare it with `SMELL(generated): reason` in its first lines'
                     for name in sorted(set(tree['generated']) - set(base['generated']))] \
-        + lisp_functions.rises(base.get('long_functions', {}), tree['long_functions'])
+        + lisp_functions.rises(base.get('long_functions', {}), tree['long_functions'],
+                               base.get('lisp_keys'), tree.get('lisp_keys'))
 
 
 def named(text):
@@ -462,7 +464,7 @@ def lisp_held_to_base(root, rev):
     found, errors = lisp_functions.tree_census(root)
     base, _ = lisp_functions.commit_census(root, merge_base(root, rev))
     return unread(errors) + lisp_functions.rises(lisp_functions.long_functions(base),
-                                                 lisp_functions.long_functions(found))
+                                                 lisp_functions.long_functions(found), base, found)
 
 
 def git(root, *args):
