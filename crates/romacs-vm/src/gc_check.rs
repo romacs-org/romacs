@@ -56,11 +56,14 @@ impl Vm {
         }
     }
 
-    /// Panic unless every buffer in the buffer list's order is live: a kill
-    /// takes its buffer out of the order before it dies (buffer_order.rs).
+    /// Panic unless the buffer list's order is whole (buffer_order.rs): each
+    /// node linked or free, and each linked buffer live, knowing its node. A
+    /// kill takes its buffer out of the order before it dies.
     fn check_order_live(&self) {
-        for buffer in self.buffer_order.iter() {
+        if let Some(fault) = self.buffer_order.fault() { panic!("the buffer order's arena: {fault}"); }
+        for (node, buffer) in self.buffer_order.linked() {
             assert!(self.buffer_state(buffer).is_ok_and(|s| s.live), "the buffer order holds {buffer:?}, which is not a live buffer");
+            assert_eq!(self.order_node(buffer), Some(node), "buffer {buffer:?} does not know its node in the order");
         }
     }
 

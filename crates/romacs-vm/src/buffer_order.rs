@@ -5,9 +5,11 @@
 //!
 //! Each live buffer holds its node's index (`BufferState::order_node`), plain
 //! data. The nodes hold the buffers, which the collector marks and rewrites
-//! as roots (`visit_values`), as it did the Lisp list this replaces. A name
-//! slot (`#:vm2-buffer:NAME`) is a symbol Lisp can set, so it roots nothing
-//! the order may rely on.
+//! as roots (`visit_values`), as it did the Lisp list this replaces. It walks
+//! the links, never the arena: the arena keeps the session's peak number of
+//! nodes, and a collection's work must be the live buffers', not that
+//! history's. A name slot (`#:vm2-buffer:NAME`) is a symbol Lisp can set, so
+//! it roots nothing the order may rely on.
 use crate::Value;
 
 #[derive(Clone, Debug, Default, romacs_snapshot::Snapshot)]
@@ -66,9 +68,38 @@ impl BufferOrder {
     pub(crate) fn iter(&self) -> impl Iterator<Item = Value> + '_ {
         std::iter::successors(self.head, |&at| self.nodes[at as usize].next).map(|at| self.nodes[at as usize].buffer)
     }
-    /// Every buffer the order holds, for the collector to mark or rewrite.
+    /// Every buffer the order holds, front to back, for the collector to
+    /// mark or rewrite: the linked nodes only, so freed ones cost nothing.
     pub(crate) fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
-        for node in &mut self.nodes { visit(&mut node.buffer); }
+        let mut at = self.head;
+        while let Some(i) = at {
+            let node = &mut self.nodes[i as usize];
+            visit(&mut node.buffer);
+            at = node.next;
+        }
+    }
+    /// The linked nodes, front to back, with their buffers.
+    pub(crate) fn linked(&self) -> impl Iterator<Item = (u32, Value)> + '_ {
+        std::iter::successors(self.head, |&at| self.nodes[at as usize].next).map(|at| (at, self.nodes[at as usize].buffer))
+    }
+    /// Why the arena is not whole, if it is not: every node must be linked
+    /// once, both ways, or free once and holding nil.
+    pub(crate) fn fault(&self) -> Option<String> {
+        let mut seen = vec![false; self.nodes.len()];
+        let mut prev = None;
+        for (at, _) in self.linked() {
+            let i = at as usize;
+            if std::mem::replace(&mut seen[i], true) { return Some(format!("node {at} is linked twice")); }
+            if self.nodes[i].prev != prev { return Some(format!("node {at}'s back link is {:?}, not {prev:?}", self.nodes[i].prev)); }
+            prev = Some(at);
+        }
+        if self.tail != prev { return Some(format!("the tail is {:?}, not the last linked node {prev:?}", self.tail)); }
+        for &at in &self.free {
+            let i = at as usize;
+            if std::mem::replace(&mut seen[i], true) { return Some(format!("free node {at} is linked or free twice")); }
+            if self.nodes[i].buffer != Value::NIL { return Some(format!("free node {at} holds {:?}", self.nodes[i].buffer)); }
+        }
+        seen.iter().position(|s| !s).map(|at| format!("node {at} is neither linked nor free"))
     }
     fn link_after_tail(&mut self, at: u32) {
         self.nodes[at as usize].next = None;
@@ -115,5 +146,25 @@ mod tests {
         assert_eq!(order(&o), Vec::<u64>::new());
         o.push_back(v(5));
         assert_eq!(order(&o), [5]);
+        assert_eq!(o.fault(), None);
+    }
+
+    #[test]
+    fn collection_visits_only_the_linked_nodes() {
+        let mut o = BufferOrder::default();
+        let nodes: Vec<u32> = (1..=100).map(|n| o.push_back(v(n))).collect();
+        for &node in &nodes[2..] { o.release(node); }
+        let mut seen = Vec::new();
+        o.visit_values(&mut |b| seen.push(b.0));
+        assert_eq!(seen, [1, 2], "a freed node is no root");
+        assert_eq!(o.fault(), None);
+    }
+
+    #[test]
+    fn fault_names_a_node_lost_from_the_arena() {
+        let mut o = BufferOrder::default();
+        let [_, b, _] = [1, 2, 3].map(|n| o.push_back(v(n)));
+        o.unlink(b);
+        assert_eq!(o.fault().as_deref(), Some("node 1 is neither linked nor free"));
     }
 }

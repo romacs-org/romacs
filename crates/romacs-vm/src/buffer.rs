@@ -643,7 +643,7 @@ impl Vm {
             self.buffer_order.release(node);
         }
     }
-    fn order_node(&self, buffer: Value) -> Option<u32> {
+    pub(crate) fn order_node(&self, buffer: Value) -> Option<u32> {
         self.buffer_state(buffer).ok().and_then(|s| s.order_node)
     }
     /// buffer.c other_buffer_safely, the last defence of Fkill_buffer once

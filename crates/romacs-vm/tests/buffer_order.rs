@@ -82,19 +82,25 @@ fn buffer_order_survives_moving_collections() {
 }
 
 /// A world image keeps the order its builder made: made, buried and killed
-/// before the capture, read after the restore. In the `gnu` target, whose
-/// allocator is the world arena, the session must be the restored world's:
-/// a boot from source would make the same order without any image.
+/// before the capture, read after the restore. The restored order then
+/// takes a bury, a kill and a birth, which need each buffer's node and the
+/// free list as captured; the collector's verifier checks the arena after
+/// them. In the `gnu` target, whose allocator is the world arena, the
+/// session must be the restored world's: a boot from source would make the
+/// same order without any image.
 #[test]
 fn buffer_order_survives_a_world_image() {
     let actual = in_thread(|| {
-        let vm = gnu_lisp_with(r#"(progn (dolist (n '("bo-w1" "bo-w2" "bo-w3" "bo-w4")) (get-buffer-create n))
-                                           (bury-buffer-internal (get-buffer "bo-w1")) (kill-buffer "bo-w3"))"#);
+        let mut vm = gnu_lisp_with(r#"(progn (dolist (n '("bo-w1" "bo-w2" "bo-w3" "bo-w4")) (get-buffer-create n))
+                                               (bury-buffer-internal (get-buffer "bo-w1")) (kill-buffer "bo-w3"))"#);
         assert!(romacs_vm::world::arena::mapped_image().is_some() || !romacs_vm::world::arena::serves_heap(),
                 "no world was restored: run under nextest's process-per-test, as dev-check does");
-        printed(vm, &format!("(funcall {NAMES})"))
+        vm.set_gc_verify(true);
+        printed(vm, &format!(r#"(list (funcall {NAMES})
+                                      (progn (bury-buffer-internal (get-buffer "bo-w2")) (kill-buffer "bo-w4")
+                                             (get-buffer-create "bo-w5") (garbage-collect) (funcall {NAMES})))"#))
     });
-    assert_eq!(actual, r#"("bo-w2" "bo-w4" "bo-w1")"#);
+    assert_eq!(actual, r#"(("bo-w2" "bo-w4" "bo-w1") ("bo-w1" "bo-w2" "bo-w5"))"#);
 }
 
 /// Burying a killed buffer leaves the order as it was: a dead buffer joins
