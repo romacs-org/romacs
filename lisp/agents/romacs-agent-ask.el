@@ -45,7 +45,9 @@ background.")
 
 (defun romacs-agent-ask--glyph (multi picked)
   "An option's mark: a box for a question taking several, else a dot."
-  (romacs-agent-glyph (if multi (if picked 'checked 'unchecked) (if picked 'picked 'unpicked))))
+  (if multi
+      (if picked (romacs-agent-glyph-padded 'checked 'unchecked) (romacs-agent-glyph-padded 'unchecked 'checked))
+    (if picked (romacs-agent-glyph-padded 'picked 'unpicked) (romacs-agent-glyph-padded 'unpicked 'picked))))
 
 (defun romacs-agent-ask--at-once-p (questions)
   "Whether a pick answers QUESTIONS whole: one question, one choice."

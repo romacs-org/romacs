@@ -296,12 +296,9 @@ thread at work, while the board shows."
   (romacs-agent-ui--label (romacs-agent-ui--state-of (plist-get row :key))))
 
 (defun romacs-agent-board-state-width ()
-  "The state column's width: its widest glyph's, or a short word's."
-  (if (equal (substring-no-properties (romacs-agent-ui--label (romacs-agent-ui--state-of 'working)))
-             (romacs-agent-glyph 'working))
-      (apply #'max (delq nil (mapcar (pcase-lambda (`(,_ ,role . ,_)) (and role (string-width (romacs-agent-glyph role))))
-                                     romacs-agent-ui--states)))
-    9))
+  "The state column's width: its widest label's, a word cut to nine."
+  (min 9 (apply #'max 1 (mapcar (lambda (state) (string-width (or (romacs-agent-ui--label state) "")))
+                                romacs-agent-ui--states))))
 
 (defun romacs-agent-board-title (row)
   "ROW's title: dim when settled or only there for context, bold unread."
@@ -353,8 +350,12 @@ thread at work, while the board shows."
 ;;; Lines
 
 (defun romacs-agent-board--cell (text width)
-  "TEXT in exactly WIDTH columns."
-  (romacs-truncate (or text "") width ?\s))
+  "TEXT in exactly WIDTH columns: padded when it fits, a mark of several
+code points kept whole, else cut."
+  (let ((text (or text "")))
+    (if (<= (string-width text) width)
+        (concat text (make-string (- width (string-width text)) ?\s))
+      (romacs-truncate text width ?\s))))
 
 (defun romacs-agent-board--widths (width head)
   "The columns' widths in a row WIDTH wide after HEAD columns: `fill'
@@ -377,11 +378,19 @@ takes what the others and the gaps between them leave."
 columns): deeper ones line up with it, so a row's indent costs the same
 however long its chain, and a chain's titles stay in view.")
 
+(defun romacs-agent-board--fold-mark (row)
+  "ROW's fold mark, open or folded, or blank when it has no threads: as
+wide as the wider mark, so rows line up whichever they show."
+  (let ((blank (make-string (string-width (romacs-agent-glyph-padded 'board-open 'board-closed)) ?\s)))
+    (cond ((null (plist-get row :children)) blank)
+          ((plist-get row :open) (romacs-agent-glyph-padded 'board-open 'board-closed))
+          (t (romacs-agent-glyph-padded 'board-closed 'board-open)))))
+
 (defun romacs-agent-board--thread-line (row width)
   "Thread ROW in a line WIDTH columns wide: its fold, then its columns
 \(`romacs-agent-board-columns')."
   (let* ((head (concat (make-string (* 2 (min (plist-get row :depth) romacs-agent-board--max-indent-depth)) ?\s)
-                       (cond ((null (plist-get row :children)) "  ") ((plist-get row :open) "˅ ") (t "› "))))
+                       (romacs-agent-board--fold-mark row) " "))
          (widths (romacs-agent-board--widths width (string-width head))))
     (cl-flet ((line (live)
                 (concat head (mapconcat #'identity

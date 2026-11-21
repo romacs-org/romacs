@@ -175,6 +175,7 @@ gives it), or nil when they begin at the session's start.")
   (task nil :documentation "The id of the work its harness runs under it.")
   (activity nil :documentation "What that work said it does, last.")
   (ended nil :documentation "Its output drawn while that work goes on.")
+  (mark nil :documentation "The mark its row was drawn with, its row rewritten after it.")
   (task-ended nil :documentation "That work over before the call ended."))
 
 (defvar-local romacs-agent-log--blocks nil
@@ -394,6 +395,19 @@ end before TEXT."
             (when (= under at) (set-marker under (point))))
           (setq block (romacs-agent-log--block (romacs-agent-log-call-parent block))))))))
 
+(defun romacs-agent-log--indent-width (depth)
+  "How many columns a subagent's line DEPTH deep is indented by."
+  (if (zerop depth) 0 (+ (* 2 (1- depth)) (string-width (romacs-agent-glyph 'subagent)) 1)))
+
+(defun romacs-agent-log--marks-changed ()
+  "A mark of `romacs-agent-glyph-alist' changed: every chat's separator,
+the composer's mark in it, is written again."
+  (dolist (buffer (buffer-list))
+    (when (markerp (buffer-local-value 'romacs-agent-log--input buffer))
+      (with-current-buffer buffer (romacs-agent-log--separator t)))))
+
+(add-hook 'romacs-agent-glyph-alist-changed-hook #'romacs-agent-log--marks-changed)
+
 (defun romacs-agent-log--indent (text depth)
   "TEXT with every line indented for a subagent DEPTH deep."
   (if (zerop depth) text
@@ -462,15 +476,23 @@ if none ended, and the start of a line after them."
 (defun romacs-agent-log--thinking-marks (body opens)
   "BODY, thinking, in its face, each paragraph after its first opened with
 the mark, its first too if it OPENS one: none reads as the answer."
-  (propertize (let ((mark (concat (romacs-agent-glyph 'thinking) " ")))
-                (concat (if opens mark "") (replace-regexp-in-string "\n\n" (concat "\n\n" mark) body t t)))
+  (propertize (let* ((mark (concat (romacs-agent-glyph 'thinking) " "))
+                     (hang (romacs-agent-glyph-hang mark)))
+                (concat (if opens mark "")
+                        ;; A paragraph's later lines hang under its first's words.
+                        (replace-regexp-in-string "\n\n?" (lambda (breaks) (concat breaks (if (= (length breaks) 2) mark hang)))
+                                                  body t t)))
               'face 'romacs-agent-log-thinking))
 
 (defun romacs-agent-log--stream-chunk (kind first held body)
   "What BODY, a stream's text of KIND, puts at its end after HELD line
 breaks: at most one blank line parts paragraphs, and its FIRST text,
 the entry's start, has none before it."
-  (let ((parted (if first "" (make-string (min held 2) ?\n)))
+  (let ((parted (cond (first "")
+                      ;; A thinking paragraph's line goes on under its words.
+                      ((and (eq kind 'thinking) (= held 1))
+                       (concat "\n" (romacs-agent-glyph-hang (concat (romacs-agent-glyph 'thinking) " "))))
+                      (t (make-string (min held 2) ?\n))))
         (body (replace-regexp-in-string "\n\n\n+" "\n\n" body)))
     (let ((chunk (concat parted (if (eq kind 'thinking)
                                     (romacs-agent-log--thinking-marks body (or first (>= held 2)))
@@ -659,7 +681,7 @@ of it (`romacs-agent-rows-ended'), after its mark."
       (save-excursion
         (goto-char start)
         (let ((end (line-end-position)))
-          (when (search-forward (concat (romacs-agent-glyph 'tool) " ") end t)
+          (when (search-forward (concat (romacs-agent-log-call-mark block) " ") end t)
             ;; The row's own, at its mark: a subagent's row starts with
             ;; its indentation.
             (let* ((mark (match-beginning 0))
@@ -730,6 +752,7 @@ its call, in place of those shown before."
            (input (plist-get event :input))
            (name (romacs-agent-rows-name (plist-get event :name)))
            (place (lambda () (copy-marker (if parent (romacs-agent-log-call-under parent) romacs-agent-log--end))))
+           (mark (romacs-agent-glyph 'tool))
            (start (funcall place)))
       (romacs-agent-log--put (romacs-agent-log--indent
                               (propertize (romacs-agent-log--entry (romacs-agent-log--call event) 'tool event)
@@ -743,7 +766,7 @@ its call, in place of those shown before."
       (unless romacs-agent-log--blocks (setq romacs-agent-log--blocks (make-hash-table :test #'equal)))
       (puthash id (romacs-agent-log-call--make :id id :name name :input input :depth depth
                                                :parent (and parent (romacs-agent-log-call-id parent))
-                                               :start start :under (funcall place))
+                                               :start start :under (funcall place) :mark mark)
                romacs-agent-log--blocks)
       (when-let* ((early (alist-get id romacs-agent-log--early nil nil #'equal)))
         (setf (alist-get id romacs-agent-log--early nil t #'equal) nil)

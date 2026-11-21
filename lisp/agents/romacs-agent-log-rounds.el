@@ -149,7 +149,7 @@ before it ended, after the air every round begins with."
                (text (concat (if (and (not parent) (romacs-agent-log--blank-p)) "" "\n")
                              bar (romacs-agent-log-rounds--head incoming) "\n"
                              ;; A row's room less its bar and a subagent's indentation.
-                             (romacs-agent-log-rounds--quote incoming (- romacs-agent-log-output-width (string-width bar) (* 2 depth)))
+                             (romacs-agent-log-rounds--quote incoming (- romacs-agent-log-output-width (string-width bar) (romacs-agent-log--indent-width depth)))
                              (if parent "\n" "\n\n"))))
     (unless parent
       (romacs-agent-log-rounds-end)

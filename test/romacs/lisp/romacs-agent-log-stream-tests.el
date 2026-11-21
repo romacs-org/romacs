@@ -23,7 +23,7 @@
 
 (ert-deftest romacs-agent-log-stream-marks-thinking-paragraphs ()
   (let ((marked (romacs-agent-log--thinking-marks "one\n\ntwo\nmore" t)))
-    (should (equal marked "🤔 one\n\n🤔 two\nmore"))
+    (should (equal marked "🤔 one\n\n🤔 two\n   more"))
     (should (eq (get-text-property 0 'face marked) 'romacs-agent-log-thinking))
     (should (eq (get-text-property (1- (length marked)) 'face marked) 'romacs-agent-log-thinking)))
   (should (equal (romacs-agent-log--thinking-marks "on" nil) "on")))
@@ -37,10 +37,11 @@
   (should (equal (romacs-agent-log--stream-chunk 'text nil 5 "c") "\n\nc"))
   (should (equal (romacs-agent-log--stream-chunk 'text nil 1 "c") "\nc"))
   (should-not (get-text-property 0 'romacs-agent-log-entry (romacs-agent-log--stream-chunk 'text nil 0 "c")))
-  ;; Thinking opens each paragraph with its mark; a line run on has none.
+  ;; Thinking opens each paragraph with its mark; a line run on hangs
+  ;; under its words, as wide as the mark.
   (should (equal (romacs-agent-log--stream-chunk 'thinking t 2 "x") "🤔 x"))
   (should (equal (romacs-agent-log--stream-chunk 'thinking nil 2 "y") "\n\n🤔 y"))
-  (should (equal (romacs-agent-log--stream-chunk 'thinking nil 1 "y") "\ny"))
+  (should (equal (romacs-agent-log--stream-chunk 'thinking nil 1 "y") "\n   y"))
   (should-not (get-text-property 0 'face (romacs-agent-log--stream-chunk 'thinking nil 2 "y"))))
 
 (provide 'romacs-agent-log-stream-tests)

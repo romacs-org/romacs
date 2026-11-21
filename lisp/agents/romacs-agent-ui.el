@@ -569,8 +569,14 @@ task's row says it, as a state key."
   "The mark of ROLE, or WORD where glyphs are off or it cannot be drawn,
 in FACE, WORD its help."
   (let ((glyph (romacs-agent-glyph role)))
-    (propertize (if (and romacs-agent-glyphs (char-displayable-p (aref glyph 0))) glyph word)
+    (propertize (if (and romacs-agent-glyphs (romacs-agent-ui--drawable-p glyph)) glyph word)
                 'face face 'help-echo word)))
+
+(defun romacs-agent-ui--drawable-p (glyph)
+  "Whether the frame can draw GLYPH, a mark of one or more characters:
+each character, but the joiners and variation selectors between them."
+  (and (not (string-empty-p glyph))
+       (seq-every-p (lambda (c) (or (memq c '(#x200D #xFE0E #xFE0F)) (char-displayable-p c))) glyph)))
 
 (defun romacs-agent-ui--label (state)
   "STATE's glyph (`romacs-agent-ui--glyph'), or nil for a state without one."
@@ -709,8 +715,9 @@ and the pools whose accounts near their limits."
 ;; where the window ends.
 
 (defun romacs-agent-ui--harness-icon (harness)
-  (let ((icon (or (plist-get (cdr (gethash harness romacs-agent--driver-table)) :icon) (romacs-agent-glyph 'chip-working))))
-    (if (char-displayable-p (aref icon 0)) icon (symbol-name harness))))
+  (let* ((icon (or (plist-get (cdr (gethash harness romacs-agent--driver-table)) :icon) 'chip-working))
+         (icon (if (symbolp icon) (romacs-agent-glyph icon) icon)))
+    (if (romacs-agent-ui--drawable-p icon) icon (symbol-name harness))))
 
 (defun romacs-agent-ui--effort (effort)
   "EFFORT for a person, in its level's face: one Romacs does not know in

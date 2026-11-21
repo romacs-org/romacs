@@ -444,7 +444,7 @@ and its usage after it).  RET still shows all of it."
          (romacs-agent-rows--table
           (mapcar (lambda (p)
                     (let ((models (gethash "models" p)))
-                      (list (if (eq (gethash "enabled" p) t) (romacs-agent-glyph 'ok) "·")
+                      (list (romacs-agent-glyph (if (eq (gethash "enabled" p) t) 'ok 'off))
                             (or (romacs-agent-rows--field p "providerInstanceId") "?")
                             (or (romacs-agent-rows--field p "harness") "")
                             (format "%d models" (if (vectorp models) (length models) 0)))))
@@ -479,7 +479,7 @@ and its usage after it).  RET still shows all of it."
           (cl-loop for harness in (romacs-agent-rows--harnesses output)
                    append (cl-loop for account across (or (gethash "accounts" harness) [])
                                    when (hash-table-p account)
-                                   collect (list (if (eq (gethash "pick" account) t) (romacs-agent-glyph 'chip-working) "·")
+                                   collect (list (romacs-agent-glyph (if (eq (gethash "pick" account) t) 'chip-working 'off))
                                                  (or (romacs-agent-rows--field account "account") "?")
                                                  (romacs-agent-rows--windows account)
                                                  (format "%s sessions" (or (gethash "sessions" account) 0))))))
@@ -626,18 +626,20 @@ holds, the description its caller gave (RET shows the command)."
   "What a shell command's row says it came to: each (COMMAND OUTPUT MARK
 FORMAT), COMMAND a regexp its command matches, OUTPUT one its output
 matches, MARK the role of the glyph before it (`romacs-agent-glyph-alist'),
-FORMAT given OUTPUT's groups.  The first that matches says it."
-  :type '(repeat (list regexp regexp symbol string))
+FORMAT given OUTPUT's groups.  The first that matches says it.  An entry
+of three, (COMMAND OUTPUT FORMAT), says FORMAT alone, its mark in it."
+  :type '(repeat (choice (list regexp regexp symbol string) (list regexp regexp string)))
   :group 'romacs-agent)
 
 (defun romacs-agent-rows--command-outcome (command output)
   "What COMMAND came to, its OUTPUT read by
 `romacs-agent-rows-command-outcomes', or nil."
   (and (stringp output)
-       (seq-some (pcase-lambda (`(,command-re ,output-re ,mark ,format))
+       (seq-some (pcase-lambda (`(,command-re ,output-re . ,said))
                    (when (and (string-match-p command-re command) (string-match output-re output))
-                     (let ((groups (cl-loop for n from 1 while (match-beginning n) collect (match-string n output))))
-                       (propertize (concat (romacs-agent-glyph mark) " " (apply #'format format groups))
+                     (pcase-let ((groups (cl-loop for n from 1 while (match-beginning n) collect (match-string n output)))
+                                 (`(,mark ,format) (if (cdr said) said (cons nil said))))
+                       (propertize (concat (and mark (concat (romacs-agent-glyph mark) " ")) (apply #'format format groups))
                                    'face 'romacs-agent-done))))
                  romacs-agent-rows-command-outcomes)))
 

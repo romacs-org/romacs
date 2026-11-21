@@ -662,7 +662,7 @@ thread: its rollout, wherever its day put it."
             (file-expand-wildcards (expand-file-name (format "sessions/*/*/*/rollout-*-%s.jsonl" thread) home)))))
 
 (romacs-agent-define-harness 'codex
-  :display "Codex" :icon "◎" :t3-driver "codex"
+  :display "Codex" :icon 'codex :t3-driver "codex"
   :config-variable "CODEX_HOME" :config-default "~/.codex"
   :program-option 'romacs-agent-codex-program :arguments-option 'romacs-agent-codex-arguments
   ;; What Codex sets for the commands it runs (codex-cli 0.164, read from

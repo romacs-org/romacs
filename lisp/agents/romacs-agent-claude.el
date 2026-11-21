@@ -902,7 +902,7 @@ environment."
                         (list (concat "file-history/" id) (concat "session-env/" id))))))
 
 (romacs-agent-define-harness 'claude
-  :display "Claude Code" :icon "✳" :t3-driver "claudeAgent"
+  :display "Claude Code" :icon 'claude :t3-driver "claudeAgent"
   :config-variable "CLAUDE_CONFIG_DIR" :config-default "~/.claude"
   :program-option 'romacs-agent-claude-program :arguments-option 'romacs-agent-claude-arguments
   ;; What Claude Code sets for the commands it runs (a parent session's).

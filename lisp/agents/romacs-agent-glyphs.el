@@ -62,6 +62,9 @@
     (task-idle "·" "A task idle, in a list of tasks")
     (step-doing "→" "A plan's step under way")
     (step-todo "○" "A plan's step to do")
+    ;; A harness, where views name it
+    (claude "✳" "Claude Code")
+    (codex "◎" "Codex")
     ;; A session's state, where views show it
     (approval "✋" "A session that needs an approval")
     (question "❓" "A session that asks the user")
@@ -80,6 +83,9 @@
     ;; The board and the answering layer
     (board-threads "▸" "Before a session's thread count on the board")
     (board-history "◇" "Before a session from history on the board")
+    (board-open "˅" "A board row whose threads show")
+    (board-closed "›" "A board row whose threads are folded")
+    (off "·" "Off: an instance disabled, an account not picked")
     (picked "●" "A choice picked, one of several")
     (unpicked "○" "A choice not picked, one of several")
     (checked "☑" "A choice picked, any of several")
@@ -112,6 +118,13 @@ drawn next shows it; a role left out draws its default."
       (pcase (assq role romacs-agent-glyphs--roles)
         (`(,_ ,default ,_) default)
         (_ (error "No mark has the role %S" role)))))
+
+(defun romacs-agent-glyph-padded (role &rest peers)
+  "ROLE's mark padded to the widest of it and PEERS', the marks that share
+its column, so what follows any of them lines up."
+  (let ((mark (romacs-agent-glyph role))
+        (width (apply #'max (mapcar (lambda (r) (string-width (romacs-agent-glyph r))) (cons role peers)))))
+    (concat mark (make-string (- width (string-width mark)) ?\s))))
 
 (defun romacs-agent-glyph-hang (prefix)
   "Spaces as wide as PREFIX, a mark and what pads it: what a line hung

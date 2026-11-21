@@ -798,7 +798,8 @@ instances) is derived again when it changes.")
 (defun romacs-agent-define-harness (harness &rest driver)
   "Define how Romacs runs HARNESS, by DRIVER's keys:
 
-  :display NAME, :icon STRING   its name and its icon in views;
+  :display NAME, :icon ICON     its name and its icon in views, a string
+      or a role of `romacs-agent-glyph-alist';
   :config-variable VARIABLE, :config-default DIRECTORY
       the variable naming its configuration directory, and the
       directory it uses while that is unset;
