@@ -206,8 +206,9 @@ attach."
 (ert-deftest romacs-agent-reattach-a-replay-is-handled-a-turn-at-a-time ()
   ;; A supervisor's records are handled `romacs-agent--drain-turn' seconds
   ;; at a time, the rest from a timer, in the order sent, chunks come in
-  ;; between after them; the attachment's end waits for them all.
-  (let* ((clock 0.0) (handled nil) (due nil)
+  ;; between after them, joined a part at a time; the attachment's end
+  ;; waits for them all.
+  (let* ((clock 0.0) (handled nil) (due nil) (romacs-agent--join-bytes 16)
          (romacs-agent--sessions (make-hash-table :test #'equal))
          (session (romacs-agent--make :id "bbbbbbbb-0000-4000-8000-000000000000" :harness 'claude
                                       :state 'running :dir "/nonexistent/b" :host-socket "/nonexistent/b.sock"))
@@ -229,9 +230,9 @@ attach."
           (romacs-agent--filter process (funcall lines 1 10))
           (should (= (length handled) 3))
           (should (= (length due) 1))
+          ;; Its turn's slice taken: what comes waits for the timer.
           (romacs-agent--filter process (funcall lines 11 12))
-          ;; Handled now too, still in order; one timer still.
-          (should (= (length handled) 6))
+          (should (= (length handled) 3))
           (should (= (length due) 1))
           (delete-process process)
           (romacs-agent--sentinel process "deleted\n")

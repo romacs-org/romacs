@@ -2339,10 +2339,11 @@ Chunks wait as a list, newest first, and are joined once a line's end is
 among them: a long line costs its length, not its length times its
 chunks.  Output that comes while records are handled (a handler waiting
 on a process) waits for them, so records are handled once each, in the
-order they were sent; `romacs-agent--drain' handles them."
+order they were sent; `romacs-agent--drain' handles them, a turn's
+slice at a time: with one taken, the next is its timer's."
   (process-put process 'pending (cons chunk (process-get process 'pending)))
   (when (string-search "\n" chunk) (process-put process 'ready t))
-  (romacs-agent--drain process))
+  (unless (process-get process 'drain-timer) (romacs-agent--drain process)))
 
 (defconst romacs-agent--drain-turn 0.025
   "Seconds of a supervisor's records the editor handles at a time: the
@@ -2367,9 +2368,7 @@ inside itself.  Its end, once seen, waits for them
           (while (and (< (float-time) until) (romacs-agent--line-waits-p process))
             (romacs-agent--filter-lines process until))
         (process-put process 'draining nil)))
-    (cond ((romacs-agent--line-waits-p process)
-           (unless (process-get process 'drain-timer)
-             (process-put process 'drain-timer (run-at-time 0 nil #'romacs-agent--drain-later process))))
+    (cond ((romacs-agent--line-waits-p process) (romacs-agent--drain-soon process))
           ((process-get process 'ended)
            (process-put process 'ended nil)
            (romacs-agent--sentinel process nil)))))
@@ -2377,18 +2376,33 @@ inside itself.  Its end, once seen, waits for them
 (defun romacs-agent--line-waits-p (process)
   "Whether a whole line of PROCESS's output waits to be handled: in the
 text its lines are read from (its `text', from `start'), or else in the
-chunks come since, which then become that text, its rest before them.
-A text is joined only once its lines are all read: a long replay is
-copied once, not once a turn."
-  (let ((text (process-get process 'text)) (start (process-get process 'start)))
-    (or (and text (string-search "\n" text start))
-        (when (process-get process 'ready)
-          (process-put process 'text (apply #'concat (if text (substring text start) "")
-                                            (nreverse (process-get process 'pending))))
-          (process-put process 'start 0)
-          (process-put process 'pending nil)
-          (process-put process 'ready nil)
-          t))))
+chunks come since, which then become that text (`romacs-agent--join')."
+  (let ((found nil))
+    (while (and (not (setq found (let ((text (process-get process 'text)))
+                                   (and text (string-search "\n" text (process-get process 'start))))))
+                (process-get process 'ready))
+      (romacs-agent--join process))
+    found))
+
+(defconst romacs-agent--join-bytes 1048576
+  "How much of a supervisor's output waiting is joined into the text its
+lines are read from at a time (`romacs-agent--join').")
+
+(defun romacs-agent--join (process)
+  "PROCESS's text from now: the rest of its text, then its oldest chunks
+waiting, `romacs-agent--join-bytes' of them (one at least).  A replay of
+hundreds of megabytes, read faster than it is handled, is copied a part
+at a time, each once.  What is left may hold a line's end: `ready'."
+  (let ((chunks (nreverse (process-get process 'pending))) (taken nil) (size 0))
+    (while (and chunks (or (null taken) (< size romacs-agent--join-bytes)))
+      (setq size (+ size (length (car chunks))))
+      (push (pop chunks) taken))
+    (let ((text (process-get process 'text)))
+      (process-put process 'text (apply #'concat (if text (substring text (process-get process 'start)) "")
+                                        (nreverse taken))))
+    (process-put process 'start 0)
+    (process-put process 'pending (nreverse chunks))
+    (process-put process 'ready (and chunks t))))
 
 (defun romacs-agent--let-go-p (process)
   "Whether PROCESS is an attachment this editor let go: ended, and another
@@ -2397,10 +2411,17 @@ until its end is handled."
   (and (not (process-live-p process)) (not (process-get process 'notes-only))
        (not (eq (romacs-agent-connection (process-get process 'romacs-agent)) process))))
 
+(defun romacs-agent--drain-soon (process)
+  "`romacs-agent--drain' PROCESS from a timer, a turn of the command loop
+from now, unless one is set."
+  (unless (process-get process 'drain-timer)
+    (process-put process 'drain-timer (run-at-time 0 nil #'romacs-agent--drain-later process))))
+
 (defun romacs-agent--drain-later (process)
-  "`romacs-agent--drain' PROCESS from its timer."
+  "`romacs-agent--drain' PROCESS from its timer, which, unlike a filter,
+keeps no match data of its own."
   (process-put process 'drain-timer nil)
-  (romacs-agent--drain process))
+  (save-match-data (romacs-agent--drain process)))
 
 (defun romacs-agent--record-failed (session err)
   "Report ERR, raised handling one of SESSION's records, at once: in its
@@ -2487,7 +2508,7 @@ leaves the lines after it waiting."
    ;; Its end comes after its records, as they were sent.
    ((or (process-get process 'draining) (romacs-agent--line-waits-p process))
     (process-put process 'ended t)
-    (romacs-agent--drain process))
+    (romacs-agent--drain-soon process))
    (t
     (let ((session (process-get process 'romacs-agent)))
       (when (eq (romacs-agent-connection session) process)
