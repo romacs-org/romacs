@@ -27,25 +27,23 @@ is missing (do_auto_save_make_dir, its failure ignored)."
         (t nil)))
     file))
 
-(defun romacs--auto-save-list-entry (b)
+(defun romacs--auto-save-list-entry (b name)
   "Buffer B's lines in the auto-save list: its visited file's name, or
-nothing, then its auto-save file's; none when it has no auto-save file."
-  (let ((name (buffer-local-value 'buffer-auto-save-file-name b)))
-    (if (stringp name) (concat (or (buffer-local-value 'buffer-file-name b) "") "\n" name "\n") "")))
+nothing, then NAME, its auto-save file's."
+  (concat (or (buffer-local-value 'buffer-file-name b) "") "\n" name "\n"))
 
-(defun romacs--auto-save-in-pass-p (b handled current-only)
-  "Whether pass HANDLED saves buffer B: nil saves the buffers whose
-auto-save file has no `write-region' handler, t the rest.  With
-CURRENT-ONLY, only the current buffer is saved."
-  (let ((name (buffer-local-value 'buffer-auto-save-file-name b))
-        (saved-size (buffer-local-value 'buffer-saved-size b)))
-    (and (or (not current-only) (eq b (current-buffer)))
-         (stringp name)
-         ;; SAVE_MODIFF < MODIFF and AUTOSAVE_MODIFF < MODIFF.
-         (eq (buffer-modified-p b) t)
-         ;; -1 means auto-saving is off until a real save.
-         (fixnump saved-size) (>= saved-size 0)
-         (or handled (null (find-file-name-handler name 'write-region))))))
+(defun romacs--auto-save-in-pass-p (b name saved-size handled current-only)
+  "Whether pass HANDLED saves buffer B, NAME its auto-save file's name and
+SAVED-SIZE its `buffer-saved-size': nil saves the buffers whose auto-save
+file has no `write-region' handler, t the rest.  With CURRENT-ONLY, only
+the current buffer is saved."
+  (and (or (not current-only) (eq b (current-buffer)))
+       (stringp name)
+       ;; SAVE_MODIFF < MODIFF and AUTOSAVE_MODIFF < MODIFF.
+       (eq (buffer-modified-p b) t)
+       ;; -1 means auto-saving is off until a real save.
+       (fixnump saved-size) (>= saved-size 0)
+       (or handled (null (find-file-name-handler name 'write-region)))))
 
 (defun romacs--auto-save-failed-recently-p (now)
   "Whether the current buffer's auto-save failed less than 20 minutes
@@ -62,13 +60,12 @@ SAVED-SIZE to be auto-saved over it; never with NO-MESSAGE."
        buffer-file-name
        (not no-message)))
 
-(defun romacs--auto-save-buffer (b old no-message announce)
-  "Auto-save buffer B, unless its last failure is recent: `saved', `failed'
-\(warned), `shrunk' (auto-saving off there until a real save, B left
-current, as GNU leaves it) or nil.  ANNOUNCE says \"Auto-saving...\"
-first; OLD is current again after a save."
-  (let ((before (time-convert nil 'integer))
-        (saved-size (buffer-local-value 'buffer-saved-size b)))
+(defun romacs--auto-save-buffer (b saved-size old no-message announce)
+  "Auto-save buffer B, SAVED-SIZE its `buffer-saved-size', unless its last
+failure is recent: `saved', `failed' (warned), `shrunk' (auto-saving off
+there until a real save, B left current, as GNU leaves it) or nil.
+ANNOUNCE says \"Auto-saving...\" first; OLD is current again after a save."
+  (let ((before (time-convert nil 'integer)))
     (unless (with-current-buffer b (romacs--auto-save-failed-recently-p before))
       (set-buffer b)
       (if (romacs--auto-save-shrunk-p saved-size no-message)
@@ -123,12 +120,15 @@ once ours had time to be read."
     (unwind-protect
         (dolist (handled '(nil t))
           (dolist (b (buffer-list))
-            (when (and list-text (not handled))
-              (setq list-text (concat list-text (romacs--auto-save-list-entry b))))
-            (when (romacs--auto-save-in-pass-p b handled current-only)
-              (let ((outcome (romacs--auto-save-buffer b old no-message (not (or auto-saved no-message)))))
-                (when (memq outcome '(saved failed)) (setq auto-saved t))
-                (when (eq outcome 'failed) (setq error-occurred t))))))
+            (let ((name (buffer-local-value 'buffer-auto-save-file-name b))
+                  (saved-size (buffer-local-value 'buffer-saved-size b)))
+              (when (and (stringp name) list-text (not handled))
+                (setq list-text (concat list-text (romacs--auto-save-list-entry b name))))
+              (when (romacs--auto-save-in-pass-p b name saved-size handled current-only)
+                (let ((outcome (romacs--auto-save-buffer b saved-size old no-message
+                                                         (not (or auto-saved no-message)))))
+                  (when (memq outcome '(saved failed)) (setq auto-saved t))
+                  (when (eq outcome 'failed) (setq error-occurred t)))))))
       (romacs--auto-save-done)
       (when listfile (romacs--write-auto-save-list listfile list-text)))
     (setq quit-flag oquit)
@@ -136,4 +136,3 @@ once ours had time to be read."
       (romacs--auto-save-say-done old-message error-occurred))
     nil))
 )
-

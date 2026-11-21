@@ -8,6 +8,7 @@
 ;; it writes, the auto-save list, the shrink rule, its hook and messages.
 
 (require 'ert)
+(require 'cl-lib)
 
 (defmacro romacs-auto-save-tests--with (names &rest body)
   "BODY with a buffer visiting a file under a fresh directory `dir' for
@@ -137,6 +138,14 @@ file named; and `auto-save-list-file-name' nil."
       (let ((here (current-buffer)))
         (do-auto-save t)
         (should (eq (current-buffer) here))))
-    (should (equal (romacs-auto-save-tests--text a) "text"))))
+    (should (equal (romacs-auto-save-tests--text a) "text"))
+    ;; A quit pending before it is pending after it.
+    (let ((inhibit-quit t))
+      (with-current-buffer a (insert " more"))
+      (setq quit-flag t)
+      (do-auto-save t)
+      (should quit-flag)
+      (setq quit-flag nil))
+    (should (equal (romacs-auto-save-tests--text a) "text more"))))
 
 ;;; romacs-auto-save-tests.el ends here
