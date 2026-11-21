@@ -439,7 +439,8 @@ and its usage after it).  RET still shows all of it."
                    output))))
     ;; Its last usage block, then its id line, at its end only.
     (when (string-suffix-p "</usage>" report)
-      (let ((open nil) (from 0))
+      ;; A usage block is a few lines: looked for in the report's end.
+      (let ((open nil) (from (max 0 (- (length report) 2048))))
         (while (setq from (string-search "<usage>" report from))
           (setq open from from (1+ from)))
         ;; A block, closed by the report's last tag: none quoted inside it.
@@ -456,7 +457,7 @@ and its usage after it).  RET still shows all of it."
   (pcase-let ((`(,lines . ,count)
                ;; A character is a column at least: read no more of a line
                ;; than its width needs, and one more for the ellipsis.
-               (romacs-agent-rows-glimpse (or text "") limit tail (1+ romacs-agent-log-output-width))))
+               (romacs-agent-rows-glimpse (or text "") limit tail (1+ romacs-agent-log-output-width) " \t\n\r")))
     (cons (mapconcat (lambda (line) (truncate-string-to-width line romacs-agent-log-output-width nil nil (truncate-string-ellipsis)))
                      lines "\n")
           count)))
@@ -467,10 +468,13 @@ many more there are; with TAIL, how many came before, then its last
 lines, as a command's output ran.  FULL, (INPUT . OUTPUT), is what RET
 on it shows."
   (pcase-let ((`(,shown . ,count) (romacs-agent-log--lines output romacs-agent-log-output-lines tail)))
-    (let* ((more (and (> count romacs-agent-log-output-lines)
-                      (propertize (let ((n (- count romacs-agent-log-output-lines)))
-                                    (format "… %d %s line%s · %s shows all" n (if tail "earlier" "more") (if (= n 1) "" "s")
-                                            (romacs-agent-log--key 'romacs-agent-log-open)))
+    (let* ((more (and (or (not count) (> count romacs-agent-log-output-lines))
+                      (propertize (concat
+                                   (if-let* ((n (and count (- count romacs-agent-log-output-lines))))
+                                       (format "… %d %s line%s" n (if tail "earlier" "more") (if (= n 1) "" "s"))
+                                     ;; Past what the chat reads: its size.
+                                     (format "… %s in all" (romacs-agent-rows-size output)))
+                                   (format " · %s shows all" (romacs-agent-log--key 'romacs-agent-log-open)))
                                   'face 'romacs-agent-log-note)))
            (shown (propertize (replace-regexp-in-string "\n" "\n    " (if (string-empty-p shown) "(no output)" shown) t t)
                               'face face))
@@ -518,10 +522,11 @@ RET shows the rest.")
 `romacs-agent-log--row-chars' before anything reads further (RET shows
 it whole)."
   (and text
-       (let ((row (replace-regexp-in-string "[ \t]*[\n\r]+[ \t]*" " "
-                                            (substring text 0 (min (length text) (* 2 romacs-agent-log--row-chars))) t t)))
-         (if (> (length row) romacs-agent-log--row-chars)
-             (concat (substring row 0 (1- romacs-agent-log--row-chars)) (truncate-string-ellipsis))
+       (let* ((read (min (length text) (* 2 romacs-agent-log--row-chars)))
+              (row (replace-regexp-in-string "[ \t]*[\n\r]+[ \t]*" " " (substring text 0 read) t t))
+              (ellipsis (truncate-string-ellipsis)))
+         (if (or (< read (length text)) (> (length row) romacs-agent-log--row-chars))
+             (concat (substring row 0 (min (length row) (- romacs-agent-log--row-chars (length ellipsis)))) ellipsis)
            row))))
 
 (defun romacs-agent-log--call (event)
@@ -565,8 +570,8 @@ of it (`romacs-agent-rows-ended'), after its mark."
   "What goes under a call of tool NAME that ended with OUTPUT, FAILED or
 not, as (TEXT FACE TAIL), or nil: an error, a subagent's report, or a
 command's last lines (TAIL).  Anything else is RET away."
-  (cond (failed (list (romacs-agent-log--failure output) 'romacs-agent-log-denied))
-        ((member name '("Agent" "Task")) (list (romacs-agent-log--report output) 'romacs-agent-log-output))
+  (cond (failed (list (romacs-agent-log--failure (romacs-agent-rows-clip output)) 'romacs-agent-log-denied))
+        ((member name '("Agent" "Task")) (list (romacs-agent-log--report (romacs-agent-rows-clip output)) 'romacs-agent-log-output))
         ((romacs-agent-rows-tail-p name)
          ;; The harness's own trailer is no line of the command's.
          (list (romacs-agent-log--without-trailer output) 'romacs-agent-log-output t))))
@@ -670,9 +675,10 @@ its call, in place of those shown before."
              (romacs-agent-log--put
               (propertize
                (concat (romacs-agent-log--entry
-                        (concat (propertize "● " 'face 'romacs-agent-log-tool)
-                                (propertize (format "%s ended" name) 'face 'romacs-agent-log-note)
-                                (if failed "" (romacs-agent-rows-outcome output)))
+                        (romacs-agent-log--one-line
+                         (concat (propertize "● " 'face 'romacs-agent-log-tool)
+                                 (propertize (format "%s ended" name) 'face 'romacs-agent-log-note)
+                                 (if failed "" (romacs-agent-rows-outcome output))))
                         'tool event)
                        (if-let* ((under (romacs-agent-log--under-call name output failed)))
                            (romacs-agent-log--output (nth 0 under) (nth 1 under) (cons nil output) (nth 2 under))
