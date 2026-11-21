@@ -34,7 +34,7 @@ impl Leaf<'_> {
         if given != Value::NIL { return Ok(given); }
         let mut regexp = |leaf: &mut Self, name: &str, default: &str| -> std::result::Result<Value, Fault> {
             let value = var(leaf, name)?;
-            Ok(if leaf.is_string(value) { value }
+            Ok(if leaf.is_readable_string(value) { value }
                 else { leaf.vm.allocate_object(Object::String(Box::new(crate::data::LispString::new(default)))) })
         };
         let patterns = [regexp(self, "bidi-paragraph-start-re", bidi::START_RE)?,

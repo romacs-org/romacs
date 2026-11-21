@@ -68,7 +68,7 @@ fn vconcat(cx; rest sequences) {
             values.extend(items);
         } else if let Ok(bits) = cx.bool_vector(arg) {
             values.extend((0..bits.len).map(|i| if bits.get(i).unwrap() { Value::TRUE } else { Value::NIL }));
-        } else if cx.is_string(arg) {
+        } else if cx.is_readable_string(arg) {
             values.extend(string_codes(cx, arg)?);
         } else {
             // GNU also accepts closures; VM2 closures have no GNU slots.

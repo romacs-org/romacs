@@ -593,6 +593,13 @@ mod leaf {
         pub(crate) fn keymap_generation(&self) -> u64 {
             self.vm.keymap_generation()
         }
+        /// Whether `string_view`, `string_bytes` and the other text readers
+        /// accept V, with nothing copied and no error built: `is_string`, and
+        /// for an executable-image string, its pages readable and its text
+        /// valid.
+        pub fn is_readable_string(&self, v: Value) -> bool {
+            self.vm.str_view(v).is_some()
+        }
         pub fn string_view(
             &self,
             v: Value,

@@ -184,7 +184,7 @@ fn completion_expanded(cx: &mut Leaf<'_>, directory: Value, saved: &[Value]) -> 
     let mut ignored = vec![];
     let mut tail = super::fileio::var(cx, "completion-ignored-extensions")?;
     while let Some((element, rest)) = cx.pair(tail) {
-        if cx.is_string(element) { ignored.push(element); }
+        if cx.is_readable_string(element) { ignored.push(element); }
         tail = rest;
     }
     let file_bytes = cx.string_bytes(file)?.len();
