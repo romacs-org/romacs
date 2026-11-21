@@ -91,16 +91,14 @@ pub(crate) fn rejects(pattern: &CompiledPattern, text: &[u8], start: usize, rang
             required.state.set(RequiredState::SeenOnce);
             return false;
         }
-        RequiredState::SeenOnce => match derive_required_byte(pattern) {
-            Some(byte) => {
-                let _ = required.byte.set(byte);
-                required.state.set(RequiredState::Byte);
-            }
-            None => {
+        RequiredState::SeenOnce => {
+            let Some(byte) = derive_required_byte(pattern) else {
                 required.state.set(RequiredState::Absent);
                 return false;
-            }
-        },
+            };
+            let _ = required.byte.set(byte);
+            required.state.set(RequiredState::Byte);
+        }
         RequiredState::Absent | RequiredState::Byte => {}
     }
     let span = &text[lowest..stop];
