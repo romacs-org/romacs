@@ -1158,6 +1158,8 @@ fn a_first_parse_of_a_killed_buffer_is_dropped() {
     let before = romacs_vm::treesit_parses_on_this_thread();
     let control = vm.eval_source(answer).unwrap().display().unwrap();
     let control_parses = romacs_vm::treesit_parses_on_this_thread() - before;
+    assert_eq!(control, "(error treesit-node-buffer-killed)", "a killed buffer's node signals");
+    assert_eq!(control_parses, 1, "a killed buffer's query parses once on the evaluator");
     assert_eq!(killed, control, "a killed buffer's parser answers as any killed buffer's does");
     assert_eq!(killed_parses, control_parses, "its query parses as any killed buffer's does: the thread's tree was dropped");
 }
@@ -1210,7 +1212,9 @@ fn a_killed_indirect_parser_waits_for_nothing_of_a_unibyte_base() {
           (setq treesit-test-indirect (treesit-parser-create 'c))) \
         (kill-buffer \"ts-s29u-ind\") \
         (with-current-buffer \"ts-s29u\" (set-buffer-multibyte nil)))")).unwrap();
+    let before = romacs_vm::treesit_parses_on_this_thread();
     let answer = vm.eval_source("(condition-case e (progn (treesit-parser-root-node treesit-test-indirect) 'answered) (error (car e)))")
         .unwrap().display().unwrap();
-    assert!(!answer.is_empty(), "the query answered");
+    assert_eq!(answer, "answered", "the query answered");
+    assert_eq!(romacs_vm::treesit_parses_on_this_thread(), before + 1, "it parsed once on the evaluator, as a killed buffer's does");
 }
