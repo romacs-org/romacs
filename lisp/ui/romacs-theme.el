@@ -196,6 +196,26 @@ derives the others.")
                (nth 2 (romacs-color--lch (funcall get 'blue))))))
     (if (< (abs (atan (sin da) (cos da))) (* 40 (/ 3.141592653589793 180))) (funcall get 'magenta) (funcall get 'blue))))
 
+(defun romacs-theme--shared-aa-p (a b)
+  "Whether one colour reads at WCAG AA's 4.5:1 on both A and B: black
+or white does, if any colour does."
+  (or (>= (min (romacs-color-contrast "#000000" a) (romacs-color-contrast "#000000" b)) 4.5)
+      (>= (min (romacs-color-contrast "#ffffff" a) (romacs-color-contrast "#ffffff" b)) 4.5)))
+
+(defun romacs-theme--glass-selection (get)
+  "A selected row on glass: the glass tinted toward the accent, by at
+most 22%, as far as one colour still reads on both the glass and the
+row, so a match keeps its colour on either; the glass itself where no
+tint leaves one.  GET reads a slot."
+  (let* ((glass (funcall get 'glass)) (accent (funcall get 'accent))
+         (amounts '(0.22 0.18 0.14 0.1 0.06 0.03)) (found nil))
+    (while (and amounts (not found))
+      (let ((tint (romacs-color-mix glass accent (car amounts))))
+        (when (romacs-theme--shared-aa-p glass tint)
+          (setq found tint)))
+      (setq amounts (cdr amounts)))
+    (or found glass)))
+
 (defconst romacs-theme-rules
   '(;; The base slots a short palette leaves out.
     (bg-dark lift-away bg -0.025)
@@ -219,7 +239,13 @@ derives the others.")
     (brown mix fg-dim red 0.5)
     ;; Chrome.
     (border mix bg fg 0.15)
-    (glass mix bg fg 0.08)
+    ;; Glass: the background lifted the same Oklab lightness on every
+    ;; theme, so a layer stands off a mid-grey one (zenburn) as well.
+    (glass lift-away bg 0.055)
+    ;; A selected row on glass, tinted toward the accent from the glass
+    ;; itself: a theme's own `selection' is for the editor's background
+    ;; and may be darker than the glass.
+    (glass-selection call romacs-theme--glass-selection)
     (hover lift-away bg-alt 0.06)
     (glow . accent)
     (glow-soft chroma accent 0.6)
@@ -430,12 +456,15 @@ spec replaces the face's own."
       (funcall face 'romacs-layer-glow :foreground (funcall v 'glow))
       (funcall face 'romacs-layer-glass :background (funcall v 'glass))
       (funcall face 'romacs-layer-toast :foreground (funcall text 'fg (funcall v 'glass)) :background (funcall v 'glass))
-      (funcall face 'romacs-layer-selection :background (funcall v 'selection))
+      (funcall face 'romacs-layer-selection :background (funcall v 'glass-selection))
       (funcall face 'romacs-landing-mark :foreground (funcall v 'glow))
       (funcall face 'romacs-landing-word :foreground (funcall v 'fg-bright))
-      (funcall face 'romacs-complete-current :background (funcall v 'selection) :extend t)
+      ;; The selected candidate's own text floored on its row, so it reads
+      ;; as well as its neighbours (a match or annotation keeps its face).
+      (funcall face 'romacs-complete-current :background (funcall v 'glass-selection) :extend t
+               :foreground (funcall text 'fg (funcall v 'glass-selection)))
       ;; Matches show on the panel and on its selected row.
-      (funcall face 'romacs-complete-match :foreground (funcall text 'accent (list (funcall v 'glass) (funcall v 'selection))))
+      (funcall face 'romacs-complete-match :foreground (funcall text 'accent (list (funcall v 'glass) (funcall v 'glass-selection))))
       (funcall face 'romacs-complete-prompt :foreground (funcall text 'fg-dim* (funcall v 'glass)))
       (funcall face 'completions-common-part :foreground (funcall text 'accent (list bg (funcall v 'selection))))
       (funcall face 'romacs-comment :foreground (funcall dim 'comment))
