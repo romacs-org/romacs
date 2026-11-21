@@ -221,7 +221,9 @@ relative to its `load-path' directory); return its file."
 image, a kept one, a rollback's; `unreadable' when an image could not be
 read, whose blobs are then unknown."
   (require 'warm-restart)
-  (let ((pattern (concat (regexp-quote (romacs-live--store)) "\\([0-9a-f]\\{40,64\\}\\)/"))
+  ;; The store's path as an image prints it: `prin1''s escapes in place.
+  (let ((pattern (concat (regexp-quote (substring (prin1-to-string (romacs-live--store)) 1 -1))
+                         "\\([0-9a-f]\\{40,64\\}\\)/"))
         (blobs nil))
     (catch 'unreadable
       (dolist (dir (list (warm-restart--directory) (romacs-restart--directory)))

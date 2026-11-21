@@ -803,7 +803,8 @@ reader; the report."
   ;; image names stays, the ledger's stays, the recent one stays, the
   ;; other goes.
   (let* ((top (file-name-as-directory (make-temp-file "romacs-live-prune-" t)))
-         (romacs-live-directory (expand-file-name "store/" top))
+         ;; A quote in the store's path: an image prints it escaped.
+         (romacs-live-directory (expand-file-name "the \"live\" store/" top))
          (warm-restart-directory (expand-file-name "images/" top))
          (process-environment (cons (concat "XDG_STATE_HOME=" (expand-file-name "state" top)) process-environment))
          (blob (lambda (c) (make-string 40 c)))
