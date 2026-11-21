@@ -64,23 +64,20 @@
           (romacs-fontify--drop)
           (romacs-fontify-tests--stop-workers))))))
 
-(ert-deftest romacs-fontify-retries-a-busy-pool-only-when-idle ()
+(ert-deftest romacs-fontify-retries-a-busy-pool-only-after-the-idle-delay ()
   (with-temp-buffer
-    (let ((started 0))
+    (let ((started 0)
+          (romacs-fontify-isolate-delay 2.0))
       (cl-letf (((symbol-function 'romacs-fontify--start) (lambda (_buffer) (cl-incf started))))
         (unwind-protect
             (progn
-              ;; The user is typing: nothing runs, an idle timer waits.
-              (cl-letf (((symbol-function 'current-idle-time) #'ignore))
-                (romacs-fontify--retry (current-buffer)))
+              ;; Even in a pause between keys: nothing runs now; an idle
+              ;; timer of the full delay waits.
+              (romacs-fontify--retry (current-buffer))
               (should (zerop started))
               (should (timer--idle-delay romacs-fontify--timer))
-              (should (eq (timer--function romacs-fontify--timer) #'romacs-fontify--start))
-              (cancel-timer romacs-fontify--timer)
-              ;; Idle: it tries at once.
-              (cl-letf (((symbol-function 'current-idle-time) (lambda () '(0 3 0 0))))
-                (romacs-fontify--retry (current-buffer)))
-              (should (= started 1)))
+              (should (= (float-time (timer--time romacs-fontify--timer)) 2.0))
+              (should (eq (timer--function romacs-fontify--timer) #'romacs-fontify--start)))
           (when (timerp romacs-fontify--timer) (cancel-timer romacs-fontify--timer)))))))
 
 (provide 'romacs-fontify-tests)

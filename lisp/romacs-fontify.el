@@ -245,15 +245,13 @@ state, or nil.  Nothing for a buffer killed meanwhile."
                 (worker (romacs-fontify--submit worker require))))))))
 
 (defun romacs-fontify--retry (buffer)
-  "Fontify BUFFER again now that the pool may have room: at once while the
-session is idle, else once it has been idle `romacs-fontify-isolate-delay'
-seconds, so that a retry never runs while the user types."
-  (if (current-idle-time)
-      (romacs-fontify--start buffer)
-    (when (buffer-live-p buffer)
-      (with-current-buffer buffer
-        (setq romacs-fontify--timer
-              (run-with-idle-timer romacs-fontify-isolate-delay nil #'romacs-fontify--start buffer))))))
+  "Fontify BUFFER again now that the pool may have room, once the session
+has been idle `romacs-fontify-isolate-delay' seconds: at once if it already
+has, never in a pause between keys."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (setq romacs-fontify--timer
+            (run-with-idle-timer romacs-fontify-isolate-delay nil #'romacs-fontify--start buffer)))))
 
 (defun romacs-fontify--submit (worker require)
   "Snapshot this buffer and submit its fontification to WORKER with REQUIRE."
