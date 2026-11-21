@@ -154,7 +154,7 @@ Example: (\"Topmost group\" \"feed1\" (\"subgroup1\" \"feed 2\")
     (define-key map [mouse-1] #'newsticker-treeview-mouse-browse-url)
     (define-key map [mouse-2] #'newsticker-treeview-mouse-browse-url)
     (define-key map "\n" #'newsticker-treeview-browse-url)
-    (define-key map "\C-m" #'newsticker-treeview-browse-url)
+    (define-key map (kbd "RET") #'newsticker-treeview-browse-url)
     (define-key map [(control return)] #'newsticker--treeview-handle-url)
     map)
   "Key map for click-able headings in the newsticker treeview buffers.")
@@ -334,7 +334,7 @@ If string SHOW-FEED is non-nil it is shown in the item string."
         (dolist (key'([mouse-1] [mouse-3]))
           (define-key map key #'newsticker-treeview-tree-click))
         (define-key map "\n" #'newsticker-treeview-show-item)
-        (define-key map "\C-m" #'newsticker-treeview-show-item)
+        (define-key map (kbd "RET") #'newsticker-treeview-show-item)
         (add-text-properties pos1 (point-max)
                              (list :nt-item item
                                    :nt-feed feed
@@ -950,7 +950,7 @@ arguments NT-ID, FEED, VFEED and TOOLTIP are added as properties."
     (dolist (key '([mouse-1] [mouse-3]))
       (define-key map key #'newsticker-treeview-tree-click))
     (define-key map "\n" #'newsticker-treeview-tree-do-click)
-    (define-key map "\C-m" #'newsticker-treeview-tree-do-click)
+    (define-key map (kbd "RET") #'newsticker-treeview-tree-do-click)
     (propertize tag 'face face 'keymap map
                 :nt-id nt-id
                 :nt-feed feed

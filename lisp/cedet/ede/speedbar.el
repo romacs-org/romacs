@@ -42,7 +42,7 @@
   (setq ede-speedbar-key-map (speedbar-make-specialized-keymap))
 
   ;; General viewing things
-  (define-key ede-speedbar-key-map "\C-m" #'speedbar-edit-line)
+  (define-key ede-speedbar-key-map (kbd "RET") #'speedbar-edit-line)
   (define-key ede-speedbar-key-map "+" #'speedbar-expand-line)
   (define-key ede-speedbar-key-map "=" #'speedbar-expand-line)
   (define-key ede-speedbar-key-map "-" #'speedbar-contract-line)

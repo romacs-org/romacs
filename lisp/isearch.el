@@ -611,14 +611,14 @@ This is like `describe-bindings', but displays only Isearch keys."
     ;; This assumes \e is the meta-prefix-char.
     (or (= ?\e meta-prefix-char)
 	(error "Inconsistency in isearch.el"))
-    (define-key map "\e\e\e" 'isearch-cancel)
+    (define-key map (kbd "ESC ESC ESC") 'isearch-cancel)
 
     (define-key map "\C-q" 'isearch-quote-char)
 
-    (define-key map "\r" 'isearch-exit)
+    (define-key map (kbd "RET") 'isearch-exit)
     (define-key map [return] 'isearch-exit)
     (define-key map "\C-j" 'isearch-printing-char)
-    (define-key map "\t" 'isearch-printing-char)
+    (define-key map (kbd "TAB") 'isearch-printing-char)
     (define-key map [?\S-\ ] 'isearch-printing-char)
 
     (define-key map    "\C-w" 'isearch-yank-word-or-char)
@@ -683,8 +683,8 @@ This is like `describe-bindings', but displays only Isearch keys."
 
     ;; The key translations defined in the C-x 8 prefix should add
     ;; characters to the search string.  See iso-transl.el.
-    (define-key map "\C-x8\r" 'isearch-char-by-name)
-    (define-key map "\C-x8e\r" 'isearch-emoji-by-name)
+    (define-key map (kbd "C-x 8 RET") 'isearch-char-by-name)
+    (define-key map (kbd "C-x 8 e RET") 'isearch-emoji-by-name)
     map)
   "Keymap for `isearch-mode'.")
 

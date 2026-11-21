@@ -1565,8 +1565,8 @@ If set will become buffer local.")
     (define-key map ":"        #'electric-verilog-colon)
     ;;(define-key map "="        'electric-verilog-equal)
     (define-key map "`"        #'electric-verilog-tick)
-    (define-key map "\t"       #'electric-verilog-tab)
-    (define-key map "\r"       #'electric-verilog-terminate-line)
+    (define-key map (kbd "TAB")       #'electric-verilog-tab)
+    (define-key map (kbd "RET")       #'electric-verilog-terminate-line)
     ;; backspace/delete key bindings
     (define-key map [backspace]    #'backward-delete-char-untabify)
     (unless (boundp 'delete-key-deletes-forward) ; XEmacs variable
@@ -1584,7 +1584,7 @@ If set will become buffer local.")
     (define-key map "\C-c*"    #'verilog-delete-auto-star-implicit)
     (define-key map "\C-c?"    #'verilog-diff-auto)
     (define-key map "\C-c\C-r" #'verilog-label-be)
-    (define-key map "\C-c\C-i" #'verilog-pretty-declarations)
+    (define-key map (kbd "C-c TAB") #'verilog-pretty-declarations)
     (define-key map "\C-c="    #'verilog-pretty-expr)
     (define-key map "\C-c/"    #'verilog-star-comment)
     (define-key map "\C-c\C-c" #'verilog-comment-region)
@@ -15409,7 +15409,7 @@ and the case items."
   (let ((map (make-sparse-keymap))) ; as described in info pages, make a map
     (set-keymap-parent map verilog-mode-map)
     ;; mouse button bindings
-    (define-key map "\r"            #'verilog-load-file-at-point)
+    (define-key map (kbd "RET")            #'verilog-load-file-at-point)
     (define-key map
       (if (featurep 'xemacs) 'button2 [mouse-2])
       #'verilog-load-file-at-mouse)

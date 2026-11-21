@@ -2017,7 +2017,7 @@ Optional argument USER-SETUP non-nil means  called from function
   ;; disturbing the original bindings in global-map.
   (fset 'edt-default-ESC-prefix (copy-keymap 'ESC-prefix))
   (setq edt-default-global-map (copy-keymap (current-global-map)))
-  (define-key edt-default-global-map "\e" 'edt-default-ESC-prefix)
+  (define-key edt-default-global-map (kbd "ESC") 'edt-default-ESC-prefix)
   (define-prefix-command 'edt-default-gold-map)
   (edt-setup-default-bindings)
   ;; If terminal has additional function keys, the terminal-specific
@@ -2053,7 +2053,7 @@ Optional argument USER-SETUP non-nil means  called from function
   ;; Setup user EDT global map by copying default EDT global map bindings.
   (fset 'edt-user-ESC-prefix (copy-keymap 'edt-default-ESC-prefix))
   (setq edt-user-global-map (copy-keymap edt-default-global-map))
-  (define-key edt-user-global-map "\e" 'edt-user-ESC-prefix)
+  (define-key edt-user-global-map (kbd "ESC") 'edt-user-ESC-prefix)
   ;; If terminal has additional function keys, the user's initialization
   ;; file can assign bindings to them via the optional
   ;; function edt-setup-extra-default-bindings.

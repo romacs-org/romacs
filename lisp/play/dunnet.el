@@ -2328,13 +2328,13 @@ Also prints current score to let user know he has scored."
 ;;;; This section sets up the keymaps for interactive and batch dunnet.
 ;;;;
 
-(define-key dun-mode-map "\r" 'dun-parse)
+(define-key dun-mode-map (kbd "RET") 'dun-parse)
 (defvar-keymap dungeon-batch-map :full t)
 (let (n)
   (setq n 32)
   (while (< 0 (setq n (- n 1)))
     (aset (car (cdr dungeon-batch-map)) n 'dungeon-nil)))
-(define-key dungeon-batch-map "\r" 'exit-minibuffer)
+(define-key dungeon-batch-map (kbd "RET") 'exit-minibuffer)
 (define-key dungeon-batch-map "\n" 'exit-minibuffer)
 
 ;;;;
@@ -2417,7 +2417,7 @@ Also prints current score to let user know he has scored."
   (if dun-logged-in
       (progn
 	(setq dungeon-mode 'unix)
-	(define-key dun-mode-map "\r" 'dun-unix-parse)
+	(define-key dun-mode-map (kbd "RET") 'dun-unix-parse)
 	(dun-mprinc "$ "))))
 
 (defun dun-login ()
@@ -2682,7 +2682,7 @@ drwxr-xr-x  3 root     staff          2048 Jan 1 1970 ..")
 (defun dun-uexit (_args)
   (setq dungeon-mode 'dungeon)
   (dun-mprincl "\nYou step back from the console.")
-  (define-key dun-mode-map "\r" 'dun-parse)
+  (define-key dun-mode-map (kbd "RET") 'dun-parse)
   (if (not dun-batch-mode)
       (dun-messages)))
 
@@ -2854,7 +2854,7 @@ drwxr-xr-x  3 root     staff          2048 Jan 1 1970 ..")
 (defun dun-dos-interface ()
   (dun-dos-boot-msg)
   (setq dungeon-mode 'dos)
-  (define-key dun-mode-map "\r" 'dun-dos-parse)
+  (define-key dun-mode-map (kbd "RET") 'dun-dos-parse)
   (dun-dos-prompt))
 
 (defun dun-dos-type (args)
@@ -2912,7 +2912,7 @@ File not found")))
 (defun dun-dos-exit (_args)
   (setq dungeon-mode 'dungeon)
   (dun-mprincl "\nYou power down the machine and step back.")
-  (define-key dun-mode-map "\r" 'dun-parse)
+  (define-key dun-mode-map (kbd "RET") 'dun-parse)
   (if (not dun-batch-mode)
       (dun-messages)))
 

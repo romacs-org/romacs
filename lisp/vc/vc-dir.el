@@ -393,7 +393,7 @@ an \\+`up-to-date' or \\+`ignored' file."
     ;; Movement.
     (define-key map "n" #'vc-dir-next-line)
     (define-key map " " #'vc-dir-next-line)
-    (define-key map "\t" #'vc-dir-next-directory)
+    (define-key map (kbd "TAB") #'vc-dir-next-directory)
     (define-key map "p" #'vc-dir-previous-line)
     (define-key map [?\S-\ ] #'vc-dir-previous-line)
     (define-key map [backtab] #'vc-dir-previous-directory)
@@ -405,7 +405,7 @@ an \\+`up-to-date' or \\+`ignored' file."
     ;; The remainder.
     (define-key map "f" #'vc-dir-find-file)
     (define-key map "e" #'vc-dir-find-file) ; dired-mode compatibility
-    (define-key map "\C-m" #'vc-dir-find-file)
+    (define-key map (kbd "RET") #'vc-dir-find-file)
     (define-key map "o" #'vc-dir-find-file-other-window)
     (define-key map "\C-o" #'vc-dir-display-file)
     (define-key map "\C-c\C-c" #'vc-dir-kill-dir-status-process)
