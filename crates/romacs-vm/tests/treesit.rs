@@ -1123,7 +1123,8 @@ fn a_query_waiting_on_a_thread_parse_quits_on_c_g() {
 /// on the evaluator what the dead buffer leaves. Every node of either then
 /// signals `treesit-node-buffer-killed', so the parse count is what tells a
 /// dropped tree from an installed one. The threads are a process of its own:
-/// the thread's parse has run, whole, and has its result before the kill.
+/// the thread's parse has run, off the evaluator, and has its result before
+/// the kill.
 #[test]
 fn a_first_parse_of_a_killed_buffer_is_dropped() {
     const CHILD: &str = "ROMACS_TREESIT_KILLED_CHILD";
@@ -1138,14 +1139,15 @@ fn a_first_parse_of_a_killed_buffer_is_dropped() {
     }
     let mut vm = first_parse_vm("ts-killed", 4000, true);
     let parsing = |vm: &mut Vm| vm.eval_source("(with-current-buffer \"ts-killed\" (romacs--treesit-parsing-p))").unwrap().display().unwrap();
-    let whole = romacs_vm::treesit_whole_parses_in_process();
+    let (process, evaluator) = (romacs_vm::treesit_parses_in_process(), romacs_vm::treesit_parses_on_this_thread());
     deferred_frame(&mut vm);
     for _ in 0..40_000 {
         if parsing(&mut vm) == "nil" { break; }
         std::thread::sleep(std::time::Duration::from_micros(500));
     }
     assert_eq!(parsing(&mut vm), "nil", "the thread has its result");
-    assert_eq!(romacs_vm::treesit_whole_parses_in_process(), whole + 1, "the thread parsed the text");
+    assert_eq!(romacs_vm::treesit_parses_in_process(), process + 1, "a thread parsed the text");
+    assert_eq!(romacs_vm::treesit_parses_on_this_thread(), evaluator, "and not the evaluator");
     let answer = "(condition-case e (treesit-node-string (treesit-parser-root-node treesit-test-parser)) (error (list 'error (car e))))";
     vm.eval_source("(kill-buffer \"ts-killed\")").unwrap();
     let before = romacs_vm::treesit_parses_on_this_thread();
@@ -1162,16 +1164,26 @@ fn a_first_parse_of_a_killed_buffer_is_dropped() {
 
 /// A killed indirect buffer's parser takes nothing of its live base's early
 /// parse: its query parses as any killed buffer's does, and the base's own
-/// parser still has that early tree.
+/// parser still has that early tree. The threads are a process of its own,
+/// so the early parse starts.
 #[test]
 fn a_killed_indirect_buffer_takes_nothing_of_its_bases_early_parse() {
+    const CHILD: &str = "ROMACS_TREESIT_KILLED_INDIRECT_EARLY_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let own = own_test::name(module_path!(), "a_killed_indirect_buffer_takes_nothing_of_its_bases_early_parse");
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &own, "--nocapture", "--test-threads", "1"]).env(CHILD, "1").output().unwrap();
+        assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains("1 passed"),
+            "child: {}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        return;
+    }
     let mut vm = gnu_lisp(&[]);
     vm.set_gc_stress(0);
     vm.eval_source("(require 'treesit)").unwrap();
     vm.eval_source(&format!("(progn {SYSTEM_SETUP} \
         (with-current-buffer (get-buffer-create \"ts-s29\") \
           (dotimes (i 4000) (insert (format \"int f%d (int a) {{ return a + %d; }}\\n\" i i))) \
-          (romacs--treesit-parse-early 'c)) \
+          (unless (romacs--treesit-parse-early 'c) (error \"the early parse did not start\"))) \
         (with-current-buffer (make-indirect-buffer \"ts-s29\" \"ts-s29-ind\") \
           (setq treesit-test-indirect (treesit-parser-create 'c))) \
         (kill-buffer \"ts-s29-ind\"))")).unwrap();

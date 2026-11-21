@@ -211,8 +211,6 @@ thread_local! {
 }
 /// The parses every thread of the process has run.
 static PARSES_IN_PROCESS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-/// The parses from no old tree every thread of the process has run.
-static WHOLE_PARSES_IN_PROCESS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 /// How many parses the calling thread has run: what tells a parse the
 /// evaluator paid for from one a parse thread ran for it.
 pub fn parses_on_this_thread() -> usize {
@@ -222,11 +220,6 @@ pub fn parses_on_this_thread() -> usize {
 /// buffer was not parsed at all.
 pub fn parses_in_process() -> usize {
     PARSES_IN_PROCESS.load(std::sync::atomic::Ordering::Relaxed)
-}
-/// How many of those parses started from no old tree: what tells a whole
-/// parse from an incremental one.
-pub fn whole_parses_in_process() -> usize {
-    WHOLE_PARSES_IN_PROCESS.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 pub(crate) struct Parser(tree_sitter::Parser);
@@ -264,9 +257,6 @@ impl Parser {
         let old = old.map(|tree| tree.0.borrow());
         PARSES.with(|n| n.set(n.get() + 1));
         PARSES_IN_PROCESS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        if old.is_none() {
-            WHOLE_PARSES_IN_PROCESS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        }
         let tree = self.0.parse_with_options(&mut |offset, _| source.read(offset), old.as_deref(), None)?;
         Some(Tree(RefCell::new(tree), OnceCell::new()))
     }
