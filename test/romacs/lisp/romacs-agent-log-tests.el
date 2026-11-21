@@ -951,6 +951,67 @@
               (kill-buffer local))))
       (kill-buffer buffer))))
 
+;;; A reply's faces as it streams
+
+(ert-deftest romacs-agent-log-a-reply-is-faced-as-it-streams ()
+  ;; Each batch faces what came; the turn's end the rest.
+  (romacs-agent-log-tests--with
+    (draw :type 'delta :text "Some **bold** words.\n\n```elisp\n(message \"hi\")\n")
+    (romacs-agent-log-faces--batch (current-buffer))
+    (goto-char (point-min))
+    (search-forward "bold")
+    (should (memq 'romacs-markdown-strong (ensure-list (get-text-property (match-beginning 0) 'face))))
+    (search-forward "\"hi")
+    (should (memq 'font-lock-string-face (ensure-list (get-text-property (match-beginning 0) 'face))))
+    (draw :type 'delta :text "```\n\nAnd *more*.")
+    (draw :type 'done :time 0)
+    (goto-char (point-min))
+    (search-forward "more")
+    (should (memq 'romacs-markdown-emphasis (ensure-list (get-text-property (match-beginning 0) 'face))))))
+
+(ert-deftest romacs-agent-log-a-reply-whose-faces-fail-says-so ()
+  ;; Its text stays; a line under it says why.
+  (romacs-agent-log-tests--with
+    (cl-letf (((symbol-function 'romacs-markdown-fontify-region) (lambda (&rest _) (error "Parser broke"))))
+      (draw :type 'delta :text "Some text.")
+      (draw :type 'done :time 0))
+    (let ((text (romacs-agent-log-tests--transcript)))
+      (should (string-match-p "Some text\\." text))
+      (should (string-match-p "⚠ shown without its faces: Parser broke" text)))))
+
+(ert-deftest romacs-agent-log-a-streamed-reply-keeps-its-link-definitions ()
+  ;; A definition before or after its reference, across batches: faced as
+  ;; the whole reply would be.
+  (dolist (pieces '(("[r]: https://example.org\n\nSee [docs][r].\n\nTail." " more.")
+                    ("See [docs][r].\n\nMid.\n\n" "[r]: https://example.org\n\nTail.")
+                    ;; In a quote, after the reference has gone by.
+                    ("See [docs][r].\n\nOne.\n\nTwo.\n\n" "> [r]: https://example.org\n\nTail.")
+                    ;; Its label across two lines.
+                    ("See [docs][two words].\n\nOne.\n\nTwo.\n\n" "[two\nwords]: https://example.org\n\nTail.")))
+    (romacs-agent-log-tests--with
+      (dolist (piece pieces)
+        (draw :type 'delta :text piece)
+        (romacs-agent-log-faces--batch (current-buffer)))
+      (goto-char (point-min))
+      (search-forward "docs")
+      (should (memq 'romacs-markdown-link (ensure-list (get-text-property (match-beginning 0) 'face))))
+      (draw :type 'done :time 0)
+      (search-backward "docs")
+      (should (memq 'romacs-markdown-link (ensure-list (get-text-property (point) 'face)))))))
+
+(ert-deftest romacs-agent-log-a-definition-in-code-is-no-definition ()
+  ;; A [key]: value line in a code block leaves the cheap restart on.
+  (romacs-agent-log-tests--with
+    (draw :type 'delta :text "```ts\n[key]: value\n```\n\nAn [inline](http://[::1]:8080/) link.\n\nAfter.")
+    (romacs-agent-log-faces--batch (current-buffer))
+    (should-not romacs-agent-log-faces--whole)))
+
+(ert-deftest romacs-agent-log-header-key-takes-any-colour-name ()
+  ;; A theme's named colours, not #rrggbb: the key's face is still made.
+  (cl-letf (((symbol-function 'face-foreground) (lambda (&rest _) "grey90"))
+            ((symbol-function 'face-background) (lambda (&rest _) "white")))
+    (romacs-agent-log--derive)))
+
 (ert-deftest romacs-agent-log-a-hidden-request-is-not-answered-blind ()
   ;; Narrowed away from what waits, C-c C-y says so rather than answer.
   (romacs-agent-log-tests--with
@@ -1059,6 +1120,64 @@ none when dropped.")
               (should (string-suffix-p ".png" path))
               (should (file-exists-p path))))
         (delete-directory dir t)))))
+
+;;; A streamed batch's faces, in the cycle that draws it
+
+(ert-deftest romacs-agent-log-faces-come-before-the-redisplay ()
+  ;; A delta's faces wait for the redisplay that draws it, on the chat's
+  ;; own pre-redisplay-functions, never on a timer of their own.
+  (romacs-agent-log-tests--with
+    (let ((timers (length timer-list))
+          (strong (lambda ()
+                    (goto-char (point-min))
+                    (search-forward "bold")
+                    (memq 'romacs-markdown-strong (ensure-list (get-text-property (1- (point)) 'face))))))
+      (draw :type 'delta :text "Some **bold** words.")
+      (should (= (length timer-list) timers))
+      (should (memq #'romacs-agent-log-faces--before-redisplay pre-redisplay-functions))
+      (should-not (funcall strong))
+      (run-hook-with-args 'pre-redisplay-functions (selected-window))
+      (should (funcall strong))
+      (should-not (memq #'romacs-agent-log-faces--before-redisplay pre-redisplay-functions)))))
+
+;; Plain words after plain text: nothing to face, no batch waits.
+(ert-deftest romacs-agent-log-faces-plain-words-need-no-batch ()
+  (romacs-agent-log-tests--with
+    (draw :type 'delta :text "Some **bold** words")
+    (run-hook-with-args 'pre-redisplay-functions (selected-window))
+    (draw :type 'delta :text " and more plain words, as most of a stream is")
+    (should-not (memq #'romacs-agent-log-faces--before-redisplay pre-redisplay-functions))
+    (draw :type 'delta :text " then `code`")
+    (should (memq #'romacs-agent-log-faces--before-redisplay pre-redisplay-functions))
+    (run-hook-with-args 'pre-redisplay-functions (selected-window))
+    (goto-char (point-min))
+    (search-forward "code")
+    (should (get-text-property (match-beginning 0) 'face))))
+
+;; What plain characters may still change: a batch waits for each.
+(ert-deftest romacs-agent-log-faces-plain-words-that-make-a-block-wait ()
+  (dolist (case '(("1" ". item")                  ; an ordered list
+                  ("Intro\n\n    " "echo")       ; indented code
+                  ("[id]\n\n[id]:" " target")   ; a link definition
+                  ("see www" ".example.com")     ; an autolink
+                  ("see " "www.example.com")
+                  ("> hello\n " "world")         ; a quote's lazy line
+                  ("[id]\n\n[id]:\n " "target")))  ; a definition's next line
+    (romacs-agent-log-tests--with
+      (draw :type 'delta :text (car case))
+      (run-hook-with-args 'pre-redisplay-functions (selected-window))
+      (draw :type 'delta :text (cadr case))
+      (should (memq #'romacs-agent-log-faces--before-redisplay pre-redisplay-functions)))))
+
+(ert-deftest romacs-agent-log-faces-a-definition-on-its-next-line-faces-its-reference ()
+  (romacs-agent-log-tests--with
+    (draw :type 'delta :text "[id]\n\n[id]:\n ")
+    (run-hook-with-args 'pre-redisplay-functions (selected-window))
+    (draw :type 'delta :text "target")
+    (run-hook-with-args 'pre-redisplay-functions (selected-window))
+    (goto-char (point-min))
+    (search-forward "[id]")
+    (should (get-text-property (1+ (match-beginning 0)) 'face))))
 
 (provide 'romacs-agent-log-tests)
 ;;; romacs-agent-log-tests.el ends here

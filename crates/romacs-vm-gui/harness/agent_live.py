@@ -1732,7 +1732,12 @@ def launcher(args, base):
             peer, _ = late.accept()
             peer.recv(4096)
             time.sleep(6)
-            peer.sendall(b'{"refused": "attached", "pid": 1}\n')
+            # As a supervisor does, its refusal goes to an editor that may
+            # have hung up meanwhile (its endpoint replaced): no error.
+            try:
+                peer.sendall(b'{"refused": "attached", "pid": 1}\n')
+            except (BrokenPipeError, ConnectionResetError):
+                pass
             peer.close()
         threading.Thread(target=refuse_late, daemon=True).start()
         (late_dir / 'manifest.json').write_text(json.dumps(
