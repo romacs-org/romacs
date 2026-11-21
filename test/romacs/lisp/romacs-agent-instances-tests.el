@@ -40,6 +40,28 @@ file) and `romacs-agent-providers' PROVIDERS."
   (should (equal (romacs-agent-t3-split "  ") nil))
   (should (equal (romacs-agent-t3-split "\"a\\nb\"") '("a\\nb"))))
 
+(ert-deftest romacs-agent-t3-instances-read-every-kind-of-entry ()
+  ;; Defaults, a blank name, a second account with its paths and arguments,
+  ;; a name taken twice, auth overlays, a driver with no harness.
+  (let* ((json "{\"providerInstances\":{\"claudeAgent\":{\"driver\":\"claudeAgent\",\"displayName\":\"  \",\"enabled\":true},\"claudeAgent_two\":{\"driver\":\"claudeAgent\",\"displayName\":\"Claude Two\",\"config\":{\"homePath\":\" ~/c2 \",\"binaryPath\":\"claude\",\"launchArgs\":\"--a 'b c'\"}},\"dup\":{\"driver\":\"claudeAgent\",\"displayName\":\"claude two\"},\"codex_shadow\":{\"driver\":\"codex\",\"displayName\":\"Shadow\",\"config\":{\"shadowHomePath\":\"/x\"}},\"codex_managed\":{\"driver\":\"codex\",\"config\":{\"setupMode\":\"managed\",\"enabled\":false}},\"odd\":{\"driver\":\"cursor\",\"displayName\":\"Odd\"},\"codex\":{\"driver\":\"codex\",\"displayName\":\"dup\"}}}")
+         (harness-of (lambda (driver) (cdr (assoc driver '(("claudeAgent" . claude) ("codex" . codex))))))
+         (overlay "T3 auth overlay (shadowHomePath / managed setup) not supported"))
+    (should (equal (romacs-agent-t3-instances (json-parse-string json :false-object :false :null-object nil) harness-of)
+                   `((("claude" :harness claude :display "Claude" :source t3 :t3-id "claudeAgent" :enabled t)
+                      ("claude-two" :harness claude :display "Claude Two" :source t3 :t3-id "claudeAgent_two" :enabled t
+                       :config-dir ,(expand-file-name "~/c2") :program "claude" :arguments ("--a" "b c"))
+                      ("dup" :harness claude :display "claude two" :source t3 :t3-id "dup" :enabled t)
+                      ("shadow" :harness codex :display "Shadow" :source t3 :t3-id "codex_shadow" :enabled nil)
+                      ("codex_managed" :harness codex :display "codex_managed" :source t3 :t3-id "codex_managed"
+                       :enabled nil)
+                      ("codex" :harness codex :display "dup" :source t3 :t3-id "codex" :enabled t))
+                     (:source t3 :id "codex_shadow" :reason ,overlay)
+                     (:source t3 :id "codex_managed" :reason ,overlay)
+                     (:source t3 :id "odd" :reason "no Romacs harness for T3 driver cursor"))))
+    (should (equal (romacs-agent-t3-instances (make-hash-table :test #'equal) harness-of)
+                   '((("claude" :harness claude :display "Claude" :source t3 :t3-id "claudeAgent" :enabled t)
+                      ("codex" :harness codex :display "Codex" :source t3 :t3-id "codex" :enabled t)))))))
+
 (ert-deftest romacs-agent-t3-absent-malformed-and-defaults ()
   ;; No file: only the Lisp entries, and why.
   (romacs-agent-instances-test--with nil '(t3 ("claude" . "~/.claude"))
