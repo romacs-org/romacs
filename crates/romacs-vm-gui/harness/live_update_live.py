@@ -20,7 +20,8 @@ is bound in the derived mode's buffer and at the propertized text; the old
 key is gone; the user's key stays; the untouched option has its new
 default and the one the user set keeps its value; the preloaded file's new
 function is there; the ledger names both files at their blobs and the mode
-line shows its mark; the compiled-Lisp store's identity did not change.
+line shows its mark.  A gate build has no compile world (an install's
+compile step makes one), so the compiled-Lisp store is not exercised here.
 
 usage: live_update_live.py --binary BIN --output DIR [--work DIR]
 """
@@ -72,16 +73,25 @@ PROBE_FN = '(defun subr-x-live-journey-probe () "Added by the journey." 42)\n'
 OBSERVE = '''(list
  :mode (with-current-buffer "journey" (list (key-binding (kbd "C-c b")) (key-binding (kbd "C-c a")) (key-binding (kbd "C-c u"))))
  :child (with-current-buffer "journey-child" (list (key-binding (kbd "C-c b")) (key-binding (kbd "q"))))
- :text (with-current-buffer "journey-text" (lookup-key (get-text-property (point) 'keymap) (kbd "C-c b")))
+ :text (with-current-buffer "journey-text" (key-binding (kbd "C-c b")))
  :options (list live-journey-limit live-journey-chosen)
  :probe (and (fboundp 'subr-x-live-journey-probe) (funcall 'subr-x-live-journey-probe))
- :identity (plist-get (romacs-compiled-lisp-stats) :identity))'''
+ :subr-x (and (cl-find-if (lambda (e) (and (stringp (car e)) (string-suffix-p "/emacs-lisp/subr-x.el" (car e)))) load-history) t)
+)'''
+
+
+def git_env():
+    """Git with no ambient repository, index, system or user config: the
+    fixture's own repository only, and no hook of the user's runs."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith('GIT_')}
+    env.update(GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL='/dev/null')
+    return env
 
 
 def git(cwd, *args):
     return subprocess.run(['git', '-c', 'user.name=Romacs journey', '-c', 'user.email=journey@example.invalid',
-                           '-c', 'commit.gpgsign=false', *args], cwd=cwd, check=True, capture_output=True,
-                          text=True).stdout.strip()
+                           '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null', *args], cwd=cwd, check=True,
+                          capture_output=True, text=True, env=git_env()).stdout.strip()
 
 
 def fixture(**kw):
@@ -94,7 +104,8 @@ def build_and_source(root):
     """A clone of this tree with its working Lisp committed and the fixture
     added (the source), and a runtime root of that commit (the build)."""
     source = root / 'source'
-    subprocess.run(['git', 'clone', '-q', '--shared', str(TREE), str(source)], check=True, capture_output=True)
+    subprocess.run(['git', '-c', 'core.hooksPath=/dev/null', 'clone', '-q', '--shared', str(TREE), str(source)],
+                   check=True, capture_output=True, env=git_env())
     for part in ('lisp', 'etc', 'assets'):
         subprocess.run(['rsync', '-a', '--delete', f'{TREE / part}/', f'{source / part}/'], check=True)
     (source / 'lisp/live-journey.el').write_text(fixture())
@@ -119,17 +130,19 @@ def capture(engine, path):
     return path.name if done.returncode == 0 else None
 
 
-def run(args, output):
+def run(args, output, entry):
+    """The journey, filling ENTRY as it goes: what it saw stays when it fails."""
     root, home, env = private_tree('romacs', Path(args.work), args.tools, prefix='live-update-')
-    entry = {'root': str(root)}
+    entry['root'] = str(root)
     source, build, commit = build_and_source(root)
     env.update(ROMACS_RUNTIME_ROOT=str(build), ROMACS_LISP_DIR=str(build / 'lisp'),
                ROMACS_GUI_FONT='Iosevka', ROMACS_GUI_FONT_SIZE='14')
     (home / '.config/romacs').mkdir()
     (home / '.config/romacs/init.el').write_text(INIT.format(probe=lisp_string(str(parity_live.PROBE))))
     entry['world_seconds'] = prepare_world(args.romacs, env, root / 'work')
-    engine = Engine('romacs', [args.romacs, '--loadup'], root, None, env, args.timeout).start(args.tools)
+    engine = Engine('romacs', [args.romacs, '--loadup'], root, None, env, args.timeout)
     try:
+        engine.start(args.tools)
         ready(engine, '(eq (frame-focus-state) t)', 'focus')
         ready(engine, '(get-buffer "journey-text")', 'the init')
         before = plist(engine.ask(OBSERVE))
@@ -161,7 +174,8 @@ def run(args, output):
         ledger = engine.ask('(mapcar (lambda (e) (list (plist-get e :path) (plist-get e :state) (plist-get e :new)))'
                             ' (plist-get romacs-live-ledger :entries))')
         entry['ledger'] = ledger
-        entry['mode_line'] = engine.ask('(substring-no-properties (format-mode-line global-mode-string))')
+        entry['mode_line'] = engine.ask('(let ((w (get-buffer-window "journey"))) (substring-no-properties '
+                                        '(format-mode-line (buffer-local-value (quote mode-line-format) (window-buffer w)) nil w)))')
         blobs = {path: git(source, 'hash-object', path) for path in ('lisp/live-journey.el', 'lisp/emacs-lisp/subr-x.el')}
         # A real key press runs the new command in the mode's buffer.
         engine.ask('(progn (setq live-journey-pressed nil) (switch-to-buffer "journey") t)')
@@ -176,6 +190,7 @@ def run(args, output):
         journey_keymaps = rows.get('lisp/live-journey.el', [None, None, None, []])[3]
         checks = {
             'before: the old key': before['mode'][0] is None and before['mode'][1] == 'live-journey-a',
+            'before: subr-x loaded, no probe': before['subr-x'] in (True, 't') and before['probe'] is None,
             'no refusal, no failure': not report['refusals'] and report['failed'] is None,
             'both files loaded': rows.get('lisp/live-journey.el', [0, None])[1] == 'load'
                                  and rows.get('lisp/emacs-lisp/subr-x.el', [0, None])[1] == 'load',
@@ -190,7 +205,6 @@ def run(args, output):
             'ledger: both files at their blobs': sorted(ledger or []) == sorted(
                 [[p, 'loaded', b] for p, b in blobs.items()]),
             'mode line mark': 'Δ2' in (entry['mode_line'] or ''),
-            'compile store identity unchanged': before['identity'] == after['identity'],
         }
         entry['checks'] = checks
         entry['status'] = 'PASS' if all(checks.values()) else 'FAIL'
@@ -213,9 +227,10 @@ def main():
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     output = Path(args.output)
     output.mkdir(parents=True)
+    args.romacs = str(Path(args.romacs).resolve()) if '/' in args.romacs else args.romacs
     entry = {'workflow': 'worktree'}
     try:
-        entry.update(run(args, output))
+        run(args, output, entry)
     except Exception as error:  # noqa: BLE001 - every failure is the run's result
         entry.update(status='ERROR', error=f'{type(error).__name__}: {error}')
     print(entry['status'], entry.get('error', ''), {k: v for k, v in entry.get('checks', {}).items() if not v},
