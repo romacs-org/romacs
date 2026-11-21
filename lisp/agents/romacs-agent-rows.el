@@ -386,11 +386,16 @@ known."
  "romacs_orchestrator_capabilities"
  :row (lambda (_input) (romacs-agent-rows--romacs "▤ instances"))
  :ended (lambda (_input output)
-          (let ((providers (romacs-agent-rows--providers output)))
+          (let* ((providers (romacs-agent-rows--providers output))
+                 (enabled (cl-count-if (lambda (p) (eq (gethash "enabled" p) t)) providers))
+                 (models (apply #'+ (mapcar (lambda (p) (let ((models (gethash "models" p))) (if (vectorp models) (length models) 0)))
+                                            providers))))
+            ;; How many instances and models; how many are on, when not all.
             (romacs-agent-rows--romacs
-             (concat (format "▤ %d instances" (length providers))
-                     (romacs-agent-rows--dim (format " · %d enabled" (cl-count-if (lambda (p) (eq (gethash "enabled" p) t))
-                                                                                  providers)))))))
+             (concat (format "▤ %s" (romacs-agent-rows--plural (length providers) "instance"))
+                     (romacs-agent-rows--dim
+                      (concat (format " · %s" (romacs-agent-rows--plural models "model"))
+                              (if (= enabled (length providers)) "" (format " · %d enabled" enabled))))))))
  :body (lambda (_input output)
          (romacs-agent-rows--table
           (mapcar (lambda (p)
