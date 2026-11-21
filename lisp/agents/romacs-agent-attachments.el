@@ -32,10 +32,11 @@
   "How long one call may take, its files hashed and its note journaled,
 before it is given up.")
 
-(defun romacs-agent-attachments--job (request)
+(defun romacs-agent-attachments--job (request count)
   "A call's job: what it owns until it is over, for MCP REQUEST (the
-active request, to know a cancellation by)."
-  (list :request request :processes nil :timers nil :waiter nil :over nil))
+active request, to know a cancellation by), with COUNT files to hash.
+Its :outcome is the first it is given, (:done) or (:error WHY)."
+  (list :request request :processes nil :timers nil :waiter nil :over nil :outcome nil :waiting count))
 
 (defun romacs-agent-attachments--retire (job)
   "Let go of all JOB owns: its hashing processes, its timers, its waiter.
@@ -120,76 +121,105 @@ wait."
     (plist-put job :waiter waiter)
     (add-hook 'romacs-agent-event-functions waiter)))
 
-(defun romacs-agent-attachments--tool (arguments)
-  "Attach ARGUMENTS' paths to the calling session's reply: answered once
-every file is hashed and the note is in its journal, its place in the
-turn known."
-  (romacs-mcp--instance arguments)
-  (let* ((caller (or (when-let* ((id (romacs-agent-tools--caller))) (romacs-agent-get id))
-                     (user-error "romacs_attach attaches to an agent session's reply: you are none")))
-         (paths (append (gethash "paths" arguments) nil))
-         (compare (append (gethash "compare" arguments) nil)))
+(defun romacs-agent-attachments--request (arguments)
+  "romacs_attach's ARGUMENTS, checked: (:caller SESSION :paths PATHS
+:compare COMPARE), or a `user-error'."
+  (let ((caller (or (when-let* ((id (romacs-agent-tools--caller))) (romacs-agent-get id))
+                    (user-error "romacs_attach attaches to an agent session's reply: you are none")))
+        (paths (append (gethash "paths" arguments) nil))
+        (compare (append (gethash "compare" arguments) nil)))
     (unless (and paths (cl-every #'stringp paths)) (user-error "paths is a non-empty array of absolute paths"))
     (when (> (length paths) romacs-agent-attachments--limit)
       (user-error "At most %d files at once" romacs-agent-attachments--limit))
     (when compare
       (unless (and (= (length compare) 2) (cl-every (lambda (p) (member p paths)) compare))
         (user-error "compare is [before, after], two of paths")))
-    (let* ((files (mapcar #'romacs-agent-attachments--check paths))
-           (items (cl-mapcar (lambda (path file alt)
-                               (romacs-mcp--object "path" path
-                                                   "kind" (if (string-prefix-p "image/" (plist-get file :mime)) "image" "file")
-                                                   "alt" (or alt :null) "size" (plist-get file :bytes) "sha" :null))
-                             paths files (romacs-agent-attachments--alts (gethash "alt" arguments) (length paths))))
-           (waiting (length items))
-           (id (romacs-agent--uuid))
-           (cell (list nil))
-           (job (romacs-agent-attachments--job romacs-mcp--active))
-           (finish (lambda (outcome)
-                     (unless (car cell) (setcar cell outcome))
-                     (romacs-agent-attachments--retire job))))
-      ;; Its lifetime: given up when its request is, or after a while.
-      (plist-put job :timers
-                 (list (run-at-time romacs-agent-attachments--seconds nil
-                                    (lambda () (funcall finish (list :error "Attaching took too long; try again"))))
-                       (run-at-time 1 1 (lambda () (when (romacs-agent-attachments--gone-p job)
-                                                     (funcall finish (list :error "cancelled")))))))
-      ;; Its session's end, and its note read back, are watched from now:
-      ;; an end while hashing gives it up too.
-      (romacs-agent-attachments--await
-       job caller id
-       (lambda (journaled)
-         (funcall finish (if journaled (list :done)
-                           (list :error "Its harness ended before the attachments were journaled")))))
-      (cl-mapc (lambda (item file)
-                 (romacs-agent-attachments--hash
-                  job (plist-get file :path) (plist-get file :bytes)
-                  (lambda (sha)
-                    (cond
-                     ;; Its request gone (cancelled, its caller away): no further.
-                     ((romacs-agent-attachments--gone-p job) (funcall finish (list :error "cancelled")))
-                     ;; Hashed as it was when checked, or not at all.
-                     ((not (equal (romacs-attach--identity (plist-get file :path)) (plist-get file :identity)))
-                      (funcall finish (list :error (format "%s changed while it was attached: attach it again"
-                                                           (gethash "path" item)))))
-                     (t
-                      (when sha (puthash "sha" sha item))
-                      (when (zerop (cl-decf waiting))
-                        (condition-case err
-                            (progn (when (or (romacs-agent-attachments--gone-p job) (plist-get job :over))
-                                     (error "cancelled"))
-                                   (romacs-agent--note caller (romacs-mcp--object "type" "attachments" "id" id
-                                                                                  "items" (vconcat items)
-                                                                                  "compare" (if compare (vconcat compare) :null))))
-                          (error (funcall finish (list :error (error-message-string err)))))))))))
-               items files)
-      (romacs-mcp-defer
-       (lambda ()
-         (pcase (car cell)
-           ('nil nil)
-           (`(:error ,why) (user-error "%s" why))
-           (_ (list (romacs-mcp--object "attached" (vconcat items)
-                                        "next" "They are shown with your reply; nothing more to do.")))))))))
+    (list :caller caller :paths paths :compare compare)))
+
+(defun romacs-agent-attachments--item (path file alt)
+  "The reply's item for PATH, FILE its `romacs-agent-attachments--check',
+ALT its caption or nil; its sha is put in once hashed."
+  (romacs-mcp--object "path" path
+                      "kind" (if (string-prefix-p "image/" (plist-get file :mime)) "image" "file")
+                      "alt" (or alt :null) "size" (plist-get file :bytes) "sha" :null))
+
+(defun romacs-agent-attachments--finish (job outcome)
+  "Give JOB OUTCOME unless it has one, and let go of what it owns."
+  (unless (plist-get job :outcome) (plist-put job :outcome outcome))
+  (romacs-agent-attachments--retire job))
+
+(defun romacs-agent-attachments--arm (job)
+  "Give JOB its lifetime: given up when its request is, or after
+`romacs-agent-attachments--seconds'."
+  (plist-put job :timers
+             (list (run-at-time romacs-agent-attachments--seconds nil
+                                (lambda () (romacs-agent-attachments--finish
+                                            job (list :error "Attaching took too long; try again"))))
+                   (run-at-time 1 1 (lambda () (when (romacs-agent-attachments--gone-p job)
+                                                 (romacs-agent-attachments--finish job (list :error "cancelled"))))))))
+
+(defun romacs-agent-attachments--journal (job call)
+  "Note CALL's items in its caller's journal, as one `attachments' note,
+unless JOB is over or its request gone."
+  (condition-case err
+      (progn (when (or (romacs-agent-attachments--gone-p job) (plist-get job :over))
+               (error "cancelled"))
+             (romacs-agent--note (plist-get call :caller)
+                                 (romacs-mcp--object "type" "attachments" "id" (plist-get call :id)
+                                                     "items" (vconcat (plist-get call :items))
+                                                     "compare" (let ((compare (plist-get call :compare)))
+                                                                 (if compare (vconcat compare) :null)))))
+    (error (romacs-agent-attachments--finish job (list :error (error-message-string err))))))
+
+(defun romacs-agent-attachments--hashed (job call item file sha)
+  "Take SHA, FILE's sha256 or nil, into ITEM of CALL; once every file of
+JOB is hashed, journal CALL.  A request gone, or a file changed since it
+was checked, ends JOB."
+  (cond
+   ((romacs-agent-attachments--gone-p job) (romacs-agent-attachments--finish job (list :error "cancelled")))
+   ((not (equal (romacs-attach--identity (plist-get file :path)) (plist-get file :identity)))
+    (romacs-agent-attachments--finish
+     job (list :error (format "%s changed while it was attached: attach it again" (gethash "path" item)))))
+   (t
+    (when sha (puthash "sha" sha item))
+    (when (zerop (plist-get (plist-put job :waiting (1- (plist-get job :waiting))) :waiting))
+      (romacs-agent-attachments--journal job call)))))
+
+(defun romacs-agent-attachments--answer (job items)
+  "romacs_attach's answer once JOB has its outcome, ITEMS what it attached;
+nil before."
+  (pcase (plist-get job :outcome)
+    ('nil nil)
+    (`(:error ,why) (user-error "%s" why))
+    (_ (list (romacs-mcp--object "attached" (vconcat items)
+                                 "next" "They are shown with your reply; nothing more to do.")))))
+
+(defun romacs-agent-attachments--tool (arguments)
+  "Attach ARGUMENTS' paths to the calling session's reply: answered once
+every file is hashed and the note is in its journal, its place in the
+turn known."
+  (romacs-mcp--instance arguments)
+  (let* ((request (romacs-agent-attachments--request arguments))
+         (paths (plist-get request :paths))
+         (files (mapcar #'romacs-agent-attachments--check paths))
+         (items (cl-mapcar #'romacs-agent-attachments--item
+                           paths files (romacs-agent-attachments--alts (gethash "alt" arguments) (length paths))))
+         (call (append request (list :id (romacs-agent--uuid) :items items)))
+         (job (romacs-agent-attachments--job romacs-mcp--active (length items))))
+    (romacs-agent-attachments--arm job)
+    ;; Its session's end, and its note read back, are watched from now:
+    ;; an end while hashing gives it up too.
+    (romacs-agent-attachments--await
+     job (plist-get call :caller) (plist-get call :id)
+     (lambda (journaled)
+       (romacs-agent-attachments--finish
+        job (if journaled (list :done) (list :error "Its harness ended before the attachments were journaled")))))
+    (cl-mapc (lambda (item file)
+               (romacs-agent-attachments--hash
+                job (plist-get file :path) (plist-get file :bytes)
+                (lambda (sha) (romacs-agent-attachments--hashed job call item file sha))))
+             items files)
+    (romacs-mcp-defer (lambda () (romacs-agent-attachments--answer job items)))))
 
 (romacs-mcp-register-tool
  "romacs_attach"
