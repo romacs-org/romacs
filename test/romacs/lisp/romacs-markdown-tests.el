@@ -81,6 +81,28 @@ ends faced as the whole would be, and earlier blocks are not rewritten."
         ;; The heading's block was left alone once later blocks arrived.
         (should (> (car starts) 1))))))
 
+(ert-deftest romacs-markdown-from-may-be-a-marker ()
+  ;; FROM as a marker refaces from its block, as its position does.
+  (with-temp-buffer
+    (insert "# One\n\nTwo.\n\nThree.\n")
+    (romacs-markdown-fontify-region (point-min) (point-max))
+    (let ((from (copy-marker (point-max))))
+      (goto-char (point-max))
+      (insert "\nFour *x*.\n")
+      (should (> (romacs-markdown-fontify-region (point-min) (point-max) from) 1)))))
+
+(ert-deftest romacs-markdown-code-without-a-grammar-is-lexed ()
+  ;; Lisp and a diff have no grammar here: coloured by their lexical
+  ;; classes, no major mode run for them.
+  (let ((after-change-major-mode-hook (list (lambda () (error "A major mode ran")))))
+    (romacs-markdown-tests--with "```elisp\n(message \"hi\") ; c\n```\n\n```diff\n-old\n+new\n```\n"
+      (should (memq 'font-lock-string-face (ensure-list (romacs-markdown-tests--face-at "\"hi"))))
+      (should (memq 'font-lock-comment-face (ensure-list (romacs-markdown-tests--face-at "; c"))))
+      (should (memq 'romacs-lexical-head (ensure-list (romacs-markdown-tests--face-at "message"))))
+      (should (memq 'romacs-lexical-added-sign (ensure-list (romacs-markdown-tests--face-at "+new"))))
+      (should (memq 'romacs-lexical-added (ensure-list (romacs-markdown-tests--face-at "new\n```"))))
+      (should (memq 'romacs-lexical-removed (ensure-list (romacs-markdown-tests--face-at "old")))))))
+
 (ert-deftest romacs-markdown-blocks-describe-structure ()
   (with-temp-buffer
     (insert "# T\n\n```py\nx = 1\n```\n\n- a\n  1. b\n\n| h |\n|---|\n")

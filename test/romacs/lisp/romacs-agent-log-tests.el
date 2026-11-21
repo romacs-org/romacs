@@ -80,11 +80,12 @@
       (draw :type 'tool :state 'started :id "t" :name "Bash" :input (romacs-agent-log-tests--input "command" "seq 5"))
       (draw :type 'tool :state 'completed :id "t" :output "1\n2\n3\n4\n5")
       (let ((text (romacs-agent-log-tests--transcript)))
-        (should (string-match-p "⎿ 1\n    2\n    … 3 more lines · RET shows all" text))
+        ;; A command's last lines, as it ran: how many came before them.
+        (should (string-match-p "⎿ … 3 earlier lines · RET shows all\n    4\n    5\n" text))
         (should-not (string-match-p "\n    3\n" text))
         ;; RET shows all of it.
         (goto-char (point-min))
-        (search-forward "more lines")
+        (search-forward "earlier lines")
         (save-window-excursion (romacs-agent-log-open))
         (with-current-buffer "*agent output*"
           (should (string-match-p "seq 5" (buffer-string)))
@@ -103,7 +104,8 @@
       (draw :type 'tool :state 'completed :id "c" :output "one\ntwo\nthree")
       (let ((text (romacs-agent-log-tests--transcript)))
         (should-not (string-match-p "so far" text))
-        (should (string-match-p "make[^\n]*\n  ⎿ one\n    two\n    … 1 more lines · RET shows all\nafter" text))))))
+        ;; Ended: the same last lines it showed as it ran stay.
+        (should (string-match-p "make[^\n]*\n  ⎿ … 1 earlier line · RET shows all\n    two\n    three\nafter" text))))))
 
 (ert-deftest romacs-agent-log-subagent-work-goes-under-its-call ()
   (romacs-agent-log-tests--with
@@ -114,7 +116,8 @@
     (draw :type 'tool :state 'completed :id "r" :parent "a" :output "hello")
     (draw :type 'tool :state 'completed :id "a" :output "2 words")
     (let ((text (romacs-agent-log-tests--transcript)))
-      (should (string-match-p "count[^\n]*\n│ ● [^\n]*n.txt[^\n]*\n│   ⎿ hello\n  ⎿ 2 words\nMain goes on." text)))))
+      ;; A read says how much it read, its text RET away; a report, under its call.
+      (should (string-match-p "count[^\n]*\n│ ● [^\n]*n.txt[^\n]*· 1 line\n  ⎿ 2 words\nMain goes on." text)))))
 
 (ert-deftest romacs-agent-log-an-approval-waits-in-plain-sight ()
   (romacs-agent-log-tests--with
@@ -746,8 +749,11 @@
     (draw :type 'tool :state 'completed :id "b" :input (romacs-agent-log-tests--input "query" "two") :output "B")
     (goto-char (point-min))
     (should (equal (gethash "query" (car (get-text-property (point) 'romacs-agent-log-full))) "one"))
-    (search-forward "⎿ A")
+    ;; Each row says its own query and what came of it.
+    (goto-char (search-forward "◍ one · A"))
+    (goto-char (match-beginning 0))
     (should (equal (gethash "query" (car (get-text-property (point) 'romacs-agent-log-full))) "one"))
+    (should (search-forward "◍ two · B" nil t))
     (goto-char (point-min))
     (romacs-agent-log-next 2)
     (should (equal (gethash "query" (car (get-text-property (point) 'romacs-agent-log-full))) "two"))))
@@ -795,7 +801,7 @@
       (should (string-match-p "⎿ 2 words\n" text))
       (should-not (string-match-p "hand-back\\|agentId\\|usage" text)))
     (romacs-agent-log--separator)
-    (should (string-match-p "working" (buffer-substring-no-properties romacs-agent-log--end romacs-agent-log--input)))))
+    (should (eq (car romacs-agent-log--state) 'working))))
 
 (ert-deftest romacs-agent-log-an-answer-is-noted-with-its-actor ()
   (let ((session (romacs-agent--make :id "N" :harness 'claude :seq 0
@@ -951,6 +957,121 @@
               (kill-buffer local))))
       (kill-buffer buffer))))
 
+;;; A reply's faces as it streams
+
+(ert-deftest romacs-agent-log-a-reply-is-faced-as-it-streams ()
+  ;; Each batch faces what came; the turn's end the rest.
+  (romacs-agent-log-tests--with
+    (draw :type 'delta :text "Some **bold** words.\n\n```elisp\n(message \"hi\")\n")
+    (romacs-agent-log-faces--batch (current-buffer))
+    (goto-char (point-min))
+    (search-forward "bold")
+    (should (memq 'romacs-markdown-strong (ensure-list (get-text-property (match-beginning 0) 'face))))
+    (search-forward "\"hi")
+    (should (memq 'font-lock-string-face (ensure-list (get-text-property (match-beginning 0) 'face))))
+    (draw :type 'delta :text "```\n\nAnd *more*.")
+    (draw :type 'done :time 0)
+    (goto-char (point-min))
+    (search-forward "more")
+    (should (memq 'romacs-markdown-emphasis (ensure-list (get-text-property (match-beginning 0) 'face))))))
+
+(ert-deftest romacs-agent-log-a-reply-whose-faces-fail-says-so ()
+  ;; Its text stays; a line under it says why.
+  (romacs-agent-log-tests--with
+    (cl-letf (((symbol-function 'romacs-markdown-fontify-region) (lambda (&rest _) (error "Parser broke"))))
+      (draw :type 'delta :text "Some text.")
+      (draw :type 'done :time 0))
+    (let ((text (romacs-agent-log-tests--transcript)))
+      (should (string-match-p "Some text\\." text))
+      (should (string-match-p "⚠ shown without its faces: Parser broke" text)))))
+
+;;; What a call came to
+
+(ert-deftest romacs-agent-log-a-call-says-what-it-came-to-not-its-payload ()
+  (romacs-agent-log-tests--with
+    ;; A Romacs tool's JSON answer: its row says it, nothing under it.
+    (draw :type 'tool :state 'started :id "s" :name "mcp__romacs__romacs_task_status"
+          :input (romacs-agent-log-tests--input "taskId" "t1"))
+    (draw :type 'tool :state 'completed :id "s" :output "{\"title\":\"lane x\",\"status\":\"running\",\"result\":\"a long report\"}")
+    ;; A read: how much, its text RET away.
+    (draw :type 'tool :state 'started :id "r" :name "Read" :input (romacs-agent-log-tests--input "file_path" "/a/n.txt"))
+    (draw :type 'tool :state 'completed :id "r" :output "one\ntwo")
+    ;; A failure: its error, as it says it.
+    (draw :type 'tool :state 'started :id "f" :name "Bash" :input (romacs-agent-log-tests--input "command" "make"))
+    (draw :type 'tool :state 'failed :id "f" :output "<tool_use_error>make: no rule</tool_use_error>")
+    ;; A command's tail without the harness's own trailer.
+    (draw :type 'tool :state 'started :id "l" :name "Bash" :input (romacs-agent-log-tests--input "command" "ls"))
+    (draw :type 'tool :state 'completed :id "l" :output "a.txt\nShell cwd was reset to /home/x")
+    (should-not (string-match-p "Shell cwd" (romacs-agent-log-tests--transcript)))
+    (let ((text (romacs-agent-log-tests--transcript)))
+      (should (string-match-p "◷ lane x · running\n" text))
+      (should-not (string-match-p "a long report\\|{" text))
+      (should (string-match-p "◧ n\\.txt  /a · 2 lines\n" text))
+      (should-not (string-match-p "⎿ one" text))
+      (should (string-match-p "\\$ make\n  ⎿ make: no rule\n" text))
+      (goto-char (point-min))
+      (search-forward "make: no rule")
+      (should (memq 'romacs-agent-log-denied (ensure-list (get-text-property (match-beginning 0) 'face))))
+      ;; RET on a row: its details, then the raw answer.
+      (goto-char (point-min))
+      (search-forward "lane x")
+      (save-window-excursion (romacs-agent-log-open))
+      (with-current-buffer "*agent output*"
+        ;; Its renderer's details first, then the raw answer.
+        (should (string-match-p "lane x · running\n\na long report\n\nInput:" (buffer-string)))
+        (should (string-match-p "Output:\n{" (buffer-string)))
+        (kill-buffer)))
+    ;; A title of several lines: the row on one line, under its mark.
+    (draw :type 'tool :state 'started :id "d" :name "mcp__romacs__romacs_delegate_task"
+          :input (romacs-agent-log-tests--input "title" "two\nlines"))
+    (draw :type 'tool :state 'completed :id "d" :output "{\"title\":\"two\\nlines\",\"state\":\"running\"}")
+    (should (string-match-p "⑂ two lines · started\n" (romacs-agent-log-tests--transcript)))
+    ;; A subagent's call: RET on its rewritten row shows its details too.
+    (draw :type 'tool :state 'started :id "a" :name "Agent" :input (romacs-agent-log-tests--input "description" "sub"))
+    (draw :type 'tool :state 'started :id "n" :name "mcp__romacs__romacs_task_status" :parent "a"
+          :input (romacs-agent-log-tests--input "taskId" "t2"))
+    (draw :type 'tool :state 'completed :id "n" :parent "a" :output "{\"title\":\"inner\",\"status\":\"done\",\"result\":\"nested report\"}")
+    (goto-char (point-min))
+    (search-forward "◷ inner")
+    (save-window-excursion (romacs-agent-log-open))
+    (with-current-buffer "*agent output*"
+      (should (string-match-p "nested report\n\nInput:" (buffer-string)))
+      (kill-buffer))
+    (should-not (string-match-p "^lines" (romacs-agent-log-tests--transcript)))))
+
+(ert-deftest romacs-agent-log-a-streamed-reply-keeps-its-link-definitions ()
+  ;; A definition before or after its reference, across batches: faced as
+  ;; the whole reply would be.
+  (dolist (pieces '(("[r]: https://example.org\n\nSee [docs][r].\n\nTail." " more.")
+                    ("See [docs][r].\n\nMid.\n\n" "[r]: https://example.org\n\nTail.")
+                    ;; In a quote, after the reference has gone by.
+                    ("See [docs][r].\n\nOne.\n\nTwo.\n\n" "> [r]: https://example.org\n\nTail.")
+                    ;; Its label across two lines.
+                    ("See [docs][two words].\n\nOne.\n\nTwo.\n\n" "[two\nwords]: https://example.org\n\nTail.")))
+    (romacs-agent-log-tests--with
+      (dolist (piece pieces)
+        (draw :type 'delta :text piece)
+        (romacs-agent-log-faces--batch (current-buffer)))
+      (goto-char (point-min))
+      (search-forward "docs")
+      (should (memq 'romacs-markdown-link (ensure-list (get-text-property (match-beginning 0) 'face))))
+      (draw :type 'done :time 0)
+      (search-backward "docs")
+      (should (memq 'romacs-markdown-link (ensure-list (get-text-property (point) 'face)))))))
+
+(ert-deftest romacs-agent-log-a-definition-in-code-is-no-definition ()
+  ;; A [key]: value line in a code block leaves the cheap restart on.
+  (romacs-agent-log-tests--with
+    (draw :type 'delta :text "```ts\n[key]: value\n```\n\nAn [inline](http://[::1]:8080/) link.\n\nAfter.")
+    (romacs-agent-log-faces--batch (current-buffer))
+    (should-not romacs-agent-log-faces--whole)))
+
+(ert-deftest romacs-agent-log-header-key-takes-any-colour-name ()
+  ;; A theme's named colours, not #rrggbb: the key's face is still made.
+  (cl-letf (((symbol-function 'face-foreground) (lambda (&rest _) "grey90"))
+            ((symbol-function 'face-background) (lambda (&rest _) "white")))
+    (romacs-agent-log--derive)))
+
 (ert-deftest romacs-agent-log-a-hidden-request-is-not-answered-blind ()
   ;; Narrowed away from what waits, C-c C-y says so rather than answer.
   (romacs-agent-log-tests--with
@@ -1055,5 +1176,80 @@ none when dropped.")
       (should (equal (buffer-substring-no-properties romacs-agent-log--input (point-max))
                      "see [image](/pictures/Screenshots/shot.png)")))))
 
+;;; A command's output
+
+(ert-deftest romacs-agent-log-output-lines-are-one-row-each ()
+  ;; A long line is cut to the width with an ellipsis, never wrapped.
+  (let* ((romacs-agent-log-output-width 20)
+         (shown (car (romacs-agent-log--lines (concat (make-string 50 ?x) "\nshort") 5))))
+    (should (equal (split-string shown "\n")
+                   (list (truncate-string-to-width (make-string 50 ?x) 20 nil nil (truncate-string-ellipsis)) "short")))))
+
+(ert-deftest romacs-agent-log-output-faces-a-diagnostic-whole ()
+  ;; All of a diagnostic line, from its first character; a plain line none.
+  (let ((text (romacs-agent-log-faces-output "sed: can't read x.el: No such file or directory\nrg: a: IO error (os error 2)\nplain")))
+    (dolist (at '(0 5 48 52))
+      (should (memq 'error (ensure-list (get-text-property at 'face text)))))
+    (should-not (memq 'error (ensure-list (get-text-property (- (length text) 2) 'face text))))))
+
+;;; A streamed batch's faces, in the cycle that draws it
+
+(ert-deftest romacs-agent-log-faces-come-before-the-redisplay ()
+  ;; A delta's faces wait for the redisplay that draws it, on the chat's
+  ;; own pre-redisplay-functions, never on a timer of their own.
+  (romacs-agent-log-tests--with
+    (let ((timers (length timer-list))
+          (strong (lambda ()
+                    (goto-char (point-min))
+                    (search-forward "bold")
+                    (memq 'romacs-markdown-strong (ensure-list (get-text-property (1- (point)) 'face))))))
+      (draw :type 'delta :text "Some **bold** words.")
+      (should (= (length timer-list) timers))
+      (should (memq #'romacs-agent-log-faces--before-redisplay pre-redisplay-functions))
+      (should-not (funcall strong))
+      (run-hook-with-args 'pre-redisplay-functions (selected-window))
+      (should (funcall strong))
+      (should-not (memq #'romacs-agent-log-faces--before-redisplay pre-redisplay-functions)))))
+
+;; Plain words after plain text: nothing to face, no batch waits.
+(ert-deftest romacs-agent-log-faces-plain-words-need-no-batch ()
+  (romacs-agent-log-tests--with
+    (draw :type 'delta :text "Some **bold** words")
+    (run-hook-with-args 'pre-redisplay-functions (selected-window))
+    (draw :type 'delta :text " and more plain words, as most of a stream is")
+    (should-not (memq #'romacs-agent-log-faces--before-redisplay pre-redisplay-functions))
+    (draw :type 'delta :text " then `code`")
+    (should (memq #'romacs-agent-log-faces--before-redisplay pre-redisplay-functions))
+    (run-hook-with-args 'pre-redisplay-functions (selected-window))
+    (goto-char (point-min))
+    (search-forward "code")
+    (should (get-text-property (match-beginning 0) 'face))))
+
+;; What plain characters may still change: a batch waits for each.
+(ert-deftest romacs-agent-log-faces-plain-words-that-make-a-block-wait ()
+  (dolist (case '(("1" ". item")                  ; an ordered list
+                  ("Intro\n\n    " "echo")       ; indented code
+                  ("[id]\n\n[id]:" " target")   ; a link definition
+                  ("see www" ".example.com")     ; an autolink
+                  ("see " "www.example.com")
+                  ("> hello\n " "world")         ; a quote's lazy line
+                  ("[id]\n\n[id]:\n " "target")))  ; a definition's next line
+    (romacs-agent-log-tests--with
+      (draw :type 'delta :text (car case))
+      (run-hook-with-args 'pre-redisplay-functions (selected-window))
+      (draw :type 'delta :text (cadr case))
+      (should (memq #'romacs-agent-log-faces--before-redisplay pre-redisplay-functions)))))
+
+(ert-deftest romacs-agent-log-faces-a-definition-on-its-next-line-faces-its-reference ()
+  (romacs-agent-log-tests--with
+    (draw :type 'delta :text "[id]\n\n[id]:\n ")
+    (run-hook-with-args 'pre-redisplay-functions (selected-window))
+    (draw :type 'delta :text "target")
+    (run-hook-with-args 'pre-redisplay-functions (selected-window))
+    (goto-char (point-min))
+    (search-forward "[id]")
+    (should (get-text-property (1+ (match-beginning 0)) 'face))))
+
 (provide 'romacs-agent-log-tests)
 ;;; romacs-agent-log-tests.el ends here
+

@@ -376,7 +376,9 @@ def session(args, base):
                   'attached_after_reshow': attached,
                   'chat_has': {**{k: k in chat for k in ('❯ say hello', 'hello from the fake harness',
                                                          '⚠ The agent wants to run Bash', 'touch approved.txt',
-                                                         '✔ allowed by you', '⎿ 42')},
+                                                         '✔ allowed by you',
+                                                         # An eval's answer, on its row.
+                                                         '⇒ 42')},
                                # A Romacs tool's row: its mark, then its name as words.
                                '● ◈ buffer edit': bool(re.search(r'● \S+ buffer edit', chat))}}
         result['ok'] = (edited == '"ALPHA beta\\n"' and evaluated == '42'
@@ -1734,7 +1736,12 @@ def launcher(args, base):
             peer, _ = late.accept()
             peer.recv(4096)
             time.sleep(6)
-            peer.sendall(b'{"refused": "attached", "pid": 1}\n')
+            # As a supervisor does, its refusal goes to an editor that may
+            # have hung up meanwhile (its endpoint replaced): no error.
+            try:
+                peer.sendall(b'{"refused": "attached", "pid": 1}\n')
+            except (BrokenPipeError, ConnectionResetError):
+                pass
             peer.close()
         threading.Thread(target=refuse_late, daemon=True).start()
         (late_dir / 'manifest.json').write_text(json.dumps(

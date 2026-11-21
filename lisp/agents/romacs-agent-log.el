@@ -50,7 +50,10 @@
 ;; before (romacs-agent-ui.el), which read the session from here too.
 (defvar romacs-agent-ui--session)
 (defvar romacs-agent-ui-changed-hook)
-(declare-function romacs-markdown-fontify-region "romacs-markdown" (beg end &optional from))
+(declare-function romacs-agent-log-faces-soon "romacs-agent-log-faces" ())
+(declare-function romacs-agent-log-faces-output "romacs-agent-log-faces" (text))
+(declare-function romacs-agent-log-faces-drop "romacs-agent-log-faces" ())
+(declare-function romacs-agent-log-faces-end "romacs-agent-log-faces" (start at))
 (declare-function romacs-agent-ask-open "romacs-agent-ask" (session id questions &optional place))
 (declare-function romacs-agent-ui--header-text "romacs-agent-ui" (inputs))
 (declare-function romacs-agent-ui--header-inputs "romacs-agent-ui" (session))
@@ -63,9 +66,15 @@
 (declare-function romacs-agent--codex-questions "romacs-agent-codex" (params))
 (declare-function romacs-agent-history-events "romacs-agent-history" (harness imported))
 
-(defcustom romacs-agent-log-output-lines 8
+(defcustom romacs-agent-log-output-lines 5
   "How many lines of a tool's output, or of its input, a chat shows
 under its call; RET on it shows all of it."
+  :type 'natnum :group 'romacs-agent)
+
+(defcustom romacs-agent-log-output-width 96
+  "How many columns of each line of a tool's output a chat shows under
+its call, a longer one cut with an ellipsis: a line a screen row in a
+window of ordinary width.  RET on it shows all of it."
   :type 'natnum :group 'romacs-agent)
 
 (defcustom romacs-agent-log-records 4000
@@ -90,19 +99,32 @@ syntax face's, which a theme may draw as red as an error.")
 (defface romacs-agent-log-output '((t :inherit shadow))
   "A tool's output, and its input's lines.")
 
-(defun romacs-agent-log--derive-output (&rest _)
+(defface romacs-agent-log-header-key '((t :inherit help-key-binding :weight bold))
+  "A key the header names: the theme's key colour, bold, readable on the
+header line.")
+
+(defun romacs-agent-log--derive (&rest _)
   "Make a tool's output the theme's dim colour raised to 4.5:1 on its
-background, as its default spec: read, never hidden.  A theme's or the
-user's own spec still wins."
-  (let ((colour (romacs-working-readable (face-foreground 'shadow nil t))))
-    (face-spec-set 'romacs-agent-log-output (if colour `((t :foreground ,colour)) '((t :inherit shadow)))
+background, read, never hidden; and a key the header names the theme's
+key colour raised to 4.5:1 on the header line: each as its default spec.
+A theme's or the user's own spec still wins."
+  (let ((colour (romacs-color-legible (face-foreground 'shadow nil t))))
+    ;; A tool's output, and every dim word of a chat's rows: read, 4.5:1.
+    (dolist (face '(romacs-agent-log-output romacs-agent-dim romacs-agent-log-note))
+      (when (facep face)
+        (face-spec-set face (if colour `((t :foreground ,colour)) '((t :inherit shadow))) 'face-defface-spec))))
+  (let* ((key (face-foreground 'help-key-binding nil t))
+         (colour (and key (romacs-color-legible key (face-background 'header-line nil t)))))
+    (face-spec-set 'romacs-agent-log-header-key
+                   (if colour `((t :foreground ,colour :weight bold)) '((t :inherit help-key-binding :weight bold)))
                    'face-defface-spec)))
 
-(add-hook 'enable-theme-functions #'romacs-agent-log--derive-output)
-(add-hook 'disable-theme-functions #'romacs-agent-log--derive-output)
-(romacs-agent-log--derive-output)
+(add-hook 'enable-theme-functions #'romacs-agent-log--derive)
+(add-hook 'disable-theme-functions #'romacs-agent-log--derive)
 (defface romacs-agent-log-note '((t :inherit shadow))
   "A status line: what the harness or Romacs says of the session.")
+;; Its faces derived once its dim faces are defined.
+(romacs-agent-log--derive)
 (defface romacs-agent-log-ask '((t :inherit romacs-working-waiting :extend t :weight bold))
   "An approval or a question that waits on the user.")
 (defface romacs-agent-log-allowed '((t :inherit success))
@@ -319,14 +341,14 @@ else (nil . 0), at the end."
   (let ((parent (romacs-agent-log--block (plist-get event :parent))))
     (if parent (cons parent (1+ (plist-get (cdr parent) :depth))) (cons nil 0))))
 
-(defun romacs-agent-log--close-stream ()
-  "End what streams: a message gets its Markdown faces."
+(defun romacs-agent-log--close-stream (&optional discard)
+  "End what streams: a message gets its Markdown faces, unless DISCARD,
+its text about to go."
   (when romacs-agent-log--stream
     (pcase-let ((`(,kind ,start ,at ,_) romacs-agent-log--stream))
       (setq romacs-agent-log--stream nil)
-      (when (and (eq kind 'text) (fboundp 'romacs-markdown-fontify-region))
-        (romacs-agent-log--writing
-          (ignore-errors (romacs-markdown-fontify-region start romacs-agent-log--end))))
+      (if discard (romacs-agent-log-faces-drop)
+        (when (eq kind 'text) (romacs-agent-log-faces-end start at)))
       (set-marker start nil)
       (set-marker at nil))))
 
@@ -388,6 +410,7 @@ parent call."
               (save-excursion
                 (goto-char (nth 2 romacs-agent-log--stream))
                 (insert (romacs-agent-log--sealed chunk))))
+            (when (eq kind 'text) (romacs-agent-log-faces-soon))
             (setcar (nthcdr 3 romacs-agent-log--stream) trail)))))))
 
 (defun romacs-agent-log--under (block kind text depth)
@@ -417,7 +440,8 @@ and its usage after it).  RET still shows all of it."
                    output))))
     ;; Its last usage block, then its id line, at its end only.
     (when (string-suffix-p "</usage>" report)
-      (let ((open nil) (from 0))
+      ;; A usage block is a few lines: looked for in the report's end.
+      (let ((open nil) (from (max 0 (- (length report) 2048))))
         (while (setq from (string-search "<usage>" report from))
           (setq open from from (1+ from)))
         ;; A block, closed by the report's last tag: none quoted inside it.
@@ -427,25 +451,49 @@ and its usage after it).  RET still shows all of it."
       (setq report (substring report 0 (match-beginning 0))))
     (string-trim report)))
 
-(defun romacs-agent-log--lines (text limit)
-  "TEXT's first LIMIT lines and how many it has: (SHOWN . COUNT)."
-  (let* ((lines (split-string (string-trim-right (or text "")) "\n"))
-         (count (length lines)))
-    (cons (string-join (seq-take lines limit) "\n") count)))
+(defun romacs-agent-log--lines (text limit &optional tail)
+  "TEXT's first LIMIT lines, or with TAIL its last, each cut to
+`romacs-agent-log-output-width' columns, and how many it has:
+\(SHOWN . COUNT)."
+  (pcase-let ((`(,lines . ,count)
+               ;; A character is a column at least: read no more of a line
+               ;; than its width needs, and one more for the ellipsis.
+               (romacs-agent-rows-glimpse (or text "") limit tail (1+ romacs-agent-log-output-width) " \t\n\r")))
+    (cons (mapconcat (lambda (line) (truncate-string-to-width line romacs-agent-log-output-width nil nil (truncate-string-ellipsis)))
+                     lines "\n")
+          count)))
 
-(defun romacs-agent-log--output (output face full)
+(defun romacs-agent-log--more (count limit whole &optional earlier)
+  "What a preview of LIMIT lines of WHOLE leaves out, in the note face:
+how many more lines (EARLIER ones, for a preview of its end) of its
+COUNT, or its size when COUNT is nil (past what the chat reads), and
+the key that shows all; nil when nothing is left out."
+  (when (or (not count) (> count limit))
+    (propertize (concat (if count
+                            (let ((n (- count limit)))
+                              (format "… %d %s line%s" n (if earlier "earlier" "more") (if (= n 1) "" "s")))
+                          (format "… %s in all" (romacs-agent-rows-size whole)))
+                        (format " · %s shows all" (romacs-agent-log--key 'romacs-agent-log-open)))
+                'face 'romacs-agent-log-note)))
+
+(defun romacs-agent-log--output (output face full &optional tail)
   "OUTPUT under its call, `⎿' first, its first lines in FACE, then how
-many more there are; FULL, (INPUT . OUTPUT), is what RET on it shows."
-  (pcase-let ((`(,shown . ,count) (romacs-agent-log--lines output romacs-agent-log-output-lines)))
-    (let ((text (concat (propertize "  ⎿ " 'face 'romacs-agent-log-rule)
-                        (propertize (replace-regexp-in-string "\n" "\n    " (if (string-empty-p shown) "(no output)" shown) t t)
-                                    'face face)
-                        (if (> count romacs-agent-log-output-lines)
-                            (propertize (format "\n    … %d more lines · %s shows all" (- count romacs-agent-log-output-lines)
-                                                (romacs-agent-log--key 'romacs-agent-log-open))
-                                        'face 'romacs-agent-log-note)
-                          "")
-                        "\n")))
+many more there are; with TAIL, how many came before, then its last
+lines, as a command's output ran.  FULL, (INPUT . OUTPUT), is what RET
+on it shows."
+  (pcase-let ((`(,shown . ,count) (romacs-agent-log--lines output romacs-agent-log-output-lines tail)))
+    ;; OUTPUT may be part of what the call answered: past what the chat
+    ;; reads, the answer's size, never the part's count.
+    (unless (romacs-agent-rows-readable-p (cdr full)) (setq count nil))
+    (let* ((more (romacs-agent-log--more count romacs-agent-log-output-lines (cdr full) tail))
+           (shown (propertize (replace-regexp-in-string "\n" "\n    " (if (string-empty-p shown) "(no output)" shown) t t)
+                              'face face))
+           (shown (if (eq face 'romacs-agent-log-output) (romacs-agent-log-faces-output shown) shown))
+           (text (concat (propertize "  ⎿ " 'face 'romacs-agent-log-rule)
+                         (if (and more tail) (concat more "\n    ") "")
+                         shown
+                         (if (and more (not tail)) (concat "\n    " more) "")
+                         "\n")))
       (propertize text 'romacs-agent-log-full full))))
 
 (defun romacs-agent-log--json (value)
@@ -457,20 +505,93 @@ many more there are; FULL, (INPUT . OUTPUT), is what RET on it shows."
         (buffer-string))
     (error (format "%S" value))))
 
+(defun romacs-agent-log--call-row (name input)
+  "The row of a call of tool NAME with INPUT, a table, as it starts: its
+renderer's, else its name and the brief of its input."
+  (let* ((renderer (romacs-agent-rows-get name))
+         (row (and renderer
+                   (condition-case err (funcall (plist-get renderer :row) input)
+                     (error (message "The row of %s failed: %s" name (error-message-string err)) nil)))))
+    (or row (concat (propertize name 'face 'romacs-agent-log-tool)
+                    ;; One line of it, its own description when it gives
+                    ;; one: RET shows all of it.
+                    (let* ((described (gethash "description" input))
+                           (brief (truncate-string-to-width
+                                   (car (split-string (if (stringp described) described (romacs-agent-rows--brief input)) "\n"))
+                                   48 nil nil (truncate-string-ellipsis))))
+                      (cond ((string-empty-p brief) "")
+                            ((stringp described) (concat " " brief))
+                            (t (concat "(" brief ")"))))))))
+
+(defconst romacs-agent-log--row-chars 240
+  "The most characters a call's row holds, whatever its renderer says:
+RET shows the rest.")
+
+(defun romacs-agent-log--one-line (text)
+  "TEXT, a row, on one line: its line breaks spaces, cut to
+`romacs-agent-log--row-chars' before anything reads further (RET shows
+it whole)."
+  (and text
+       (let* ((read (min (length text) (* 2 romacs-agent-log--row-chars)))
+              (row (replace-regexp-in-string "[ \t]*[\n\r]+[ \t]*" " " (substring text 0 read) t t))
+              (ellipsis (truncate-string-ellipsis)))
+         (if (or (< read (length text)) (> (length row) romacs-agent-log--row-chars))
+             (concat (substring row 0 (min (length row) (- romacs-agent-log--row-chars (length ellipsis)))) ellipsis)
+           row))))
+
 (defun romacs-agent-log--call (event)
-  "The first line of tool call EVENT: its renderer's row, else its name and
-the brief of its input."
-  (let* ((name (romacs-agent-rows-name (plist-get event :name)))
-         (input (let ((input (plist-get event :input))) (if (hash-table-p input) input (make-hash-table :test #'equal))))
-         (renderer (romacs-agent-rows-get name))
-         (row (and renderer (ignore-errors (funcall (plist-get renderer :row) input)))))
+  "The first line of tool call EVENT, its mark first."
+  (let ((input (plist-get event :input)))
     (concat (propertize "● " 'face 'romacs-agent-log-tool)
-            (or row (concat (propertize name 'face 'romacs-agent-log-tool)
-                            ;; One line of it: RET shows all of it.
-                            (let ((brief (truncate-string-to-width
-                                          (car (split-string (romacs-agent-rows--brief input) "\n"))
-                                          100 nil nil (truncate-string-ellipsis))))
-                              (if (string-empty-p brief) "" (concat "(" brief ")"))))))))
+            (romacs-agent-log--one-line
+             (romacs-agent-log--call-row (romacs-agent-rows-name (plist-get event :name))
+                                         (if (hash-table-p input) input (make-hash-table :test #'equal)))))))
+
+(defun romacs-agent-log--ended-row (block output)
+  "BLOCK's row, its call ended well with OUTPUT, rewritten to say what came
+of it (`romacs-agent-rows-ended'), after its mark."
+  (let* ((props (cdr block))
+         (name (plist-get props :name))
+         (input (let ((input (plist-get props :input))) (if (hash-table-p input) input (make-hash-table :test #'equal))))
+         (start (plist-get props :start))
+         (ended (condition-case err (romacs-agent-log--one-line
+                                     (romacs-agent-rows-ended name input (romacs-agent-log--call-row name input) output))
+                  (error (message "The row of %s failed: %s" name (error-message-string err)) nil))))
+    (when ended
+      (save-excursion
+        (goto-char start)
+        (let ((end (line-end-position)))
+          (when (search-forward "● " end t)
+            ;; The row's own, at its mark: a subagent's row starts with
+            ;; its indentation.
+            (let* ((mark (match-beginning 0))
+                   (properties (list 'romacs-agent-log-seq (get-text-property mark 'romacs-agent-log-seq)
+                                     'romacs-agent-log-full (get-text-property mark 'romacs-agent-log-full)
+                                     'romacs-agent-log-tool (get-text-property mark 'romacs-agent-log-tool))))
+              (romacs-agent-log--writing
+                (delete-region (point) end)
+                (insert (romacs-agent-log--sealed (apply #'propertize ended properties)))))))))))
+
+(defun romacs-agent-log--failure (output)
+  "A failed call's OUTPUT as its error says it: the harness's tags gone."
+  (string-trim (replace-regexp-in-string "</?tool_use_error>" "" (or output ""))))
+
+(defun romacs-agent-log--under-call (name output failed)
+  "What goes under a call of tool NAME that ended with OUTPUT, FAILED or
+not, as (TEXT FACE TAIL), or nil: an error, a subagent's report, or a
+command's last lines (TAIL).  Anything else is RET away."
+  (cond (failed (list (romacs-agent-log--failure (romacs-agent-rows-clip output)) 'romacs-agent-log-denied))
+        ((member name '("Agent" "Task")) (list (romacs-agent-log--report (romacs-agent-rows-clip output)) 'romacs-agent-log-output))
+        ((romacs-agent-rows-tail-p name)
+         ;; The harness's own trailer is no line of the command's.
+         (list (romacs-agent-log--without-trailer (romacs-agent-rows-clip output t)) 'romacs-agent-log-output t))))
+
+(defun romacs-agent-log--without-trailer (output)
+  "A command's OUTPUT without the note its harness puts after it, read at
+its end only."
+  (if (string-match "\n*Shell cwd was reset to [^\n]*\n*\\'" output (max 0 (- (length output) 1024)))
+      (substring output 0 (match-beginning 0))
+    output))
 
 (defun romacs-agent-log--live (block text)
   "BLOCK's output streamed so far grows by TEXT: its last lines show under
@@ -507,7 +628,8 @@ its call, in place of those shown before."
          (if at (romacs-agent-log--flush at) (romacs-agent-log--close-stream))
          (let* ((input (plist-get event :input))
                 (text (propertize (romacs-agent-log--entry (romacs-agent-log--call event) 'tool event)
-                                  'romacs-agent-log-full (list input)))
+                                  'romacs-agent-log-full (list input)
+                                  'romacs-agent-log-tool (romacs-agent-rows-name (plist-get event :name))))
                 (start (copy-marker (if at (plist-get (cdr at) :under) romacs-agent-log--end))))
            (romacs-agent-log--put (romacs-agent-log--indent text depth) at)
            ;; Its row in place: what an earlier call puts after it, at the
@@ -538,19 +660,18 @@ its call, in place of those shown before."
                ;; Its input as it ended: some calls fill theirs in only then.
                (when-let* ((input (plist-get event :input))
                            ((not (equal input (plist-get props :input)))))
-                 (setcdr block (plist-put (cdr block) :input input))
+                 (setcdr block (plist-put (cdr block) :input input)))
+               ;; Its row says what came of it; RET on it shows all.
+               (let ((full (cons (plist-get (cdr block) :input) output)))
                  (romacs-agent-log--writing
                    (put-text-property (plist-get props :start)
                                       (save-excursion (goto-char (plist-get props :start)) (line-end-position))
-                                      'romacs-agent-log-full (list input))))
-               (romacs-agent-log--put (romacs-agent-log--indent
-                                       (romacs-agent-log--output (if (member (plist-get props :name) '("Agent" "Task"))
-                                                                     (romacs-agent-log--report output)
-                                                                   output)
-                                                                 (if failed 'romacs-agent-log-denied 'romacs-agent-log-output)
-                                                                 (cons (plist-get (cdr block) :input) output))
-                                       (plist-get props :depth))
-                                      block)
+                                      'romacs-agent-log-full full))
+                 (unless failed (romacs-agent-log--ended-row block output))
+                 (when-let* ((under (romacs-agent-log--under-call (plist-get props :name) output failed)))
+                   (romacs-agent-log--put (romacs-agent-log--indent (romacs-agent-log--output (nth 0 under) (nth 1 under) full (nth 2 under))
+                                                                    (plist-get props :depth))
+                                          block)))
                ;; A call stays open while work its harness runs under it
                ;; (a subagent, a command in the background) goes on.
                (if (and (or (member (plist-get props :name) '("Agent" "Task")) (plist-get props :task))
@@ -560,12 +681,19 @@ its call, in place of those shown before."
            ;; Its call was never drawn (it ended after the turn, or before
            ;; this chat's first record): said at the end, with its output.
            (romacs-agent-log--close-stream)
-           (romacs-agent-log--put (concat (romacs-agent-log--entry
-                                           (concat (propertize "● " 'face 'romacs-agent-log-tool)
-                                                   (propertize (format "%s ended" (or (plist-get event :name) "a call"))
-                                                               'face 'romacs-agent-log-note))
-                                           'tool event)
-                                          (romacs-agent-log--output output 'romacs-agent-log-output (cons nil output))))))))))
+           (let ((name (romacs-agent-rows-name (plist-get event :name))))
+             (romacs-agent-log--put
+              (propertize
+               (concat (romacs-agent-log--entry
+                        (romacs-agent-log--one-line
+                         (concat (propertize "● " 'face 'romacs-agent-log-tool)
+                                 (propertize (format "%s ended" name) 'face 'romacs-agent-log-note)
+                                 (if failed "" (romacs-agent-rows-outcome output))))
+                        'tool event)
+                       (if-let* ((under (romacs-agent-log--under-call name output failed)))
+                           (romacs-agent-log--output (nth 0 under) (nth 1 under) (cons nil output) (nth 2 under))
+                         ""))
+               'romacs-agent-log-full (cons nil output))))))))))
 
 (defun romacs-agent-log--task-block (event)
   "The call EVENT, a task's, is under: by its tool's id, else its task's."
@@ -649,10 +777,11 @@ Live, in a chat no window shows, the echo area says so too."
                                              (concat "\n    " (string-join options " · ")))))
                                  questions "\n"))
                      (plan nil)
-                     (t (pcase-let ((`(,shown . ,count) (romacs-agent-log--lines (romacs-agent-log--json input) 30)))
-                          (if (> count 30)
-                              (format "%s\n… %d more lines · %s shows all" shown (- count 30) (romacs-agent-log--key 'romacs-agent-log-open))
-                            shown)))))
+                     (t (let ((json (romacs-agent-log--json input)))
+                          (pcase-let ((`(,shown . ,count) (romacs-agent-log--lines json 30)))
+                            (if-let* ((more (romacs-agent-log--more count 30 json)))
+                                (concat shown "\n" more)
+                              shown))))))
          (why (plist-get event :description))
          (keys (cond (questions (romacs-agent-log--keys 'romacs-agent-log-allow "choose" 'romacs-agent-log-deny "decline"))
                      (plan (romacs-agent-log--keys 'romacs-agent-log-allow "proceed" 'romacs-agent-log-deny "keep planning, saying why"))
@@ -905,10 +1034,8 @@ back in the mode it had, and the next message carries it out."
                   (romacs-agent-log--line event 'note
                                           (propertize
                                            (concat "· context compacted\n" (car lines)
-                                                   (if (> (cdr lines) romacs-agent-log-output-lines)
-                                                       (format "\n… %d more lines · %s shows all"
-                                                               (- (cdr lines) romacs-agent-log-output-lines)
-                                                               (romacs-agent-log--key 'romacs-agent-log-open))
+                                                   (if-let* ((more (romacs-agent-log--more (cdr lines) romacs-agent-log-output-lines summary)))
+                                                       (concat "\n" more)
                                                      ""))
                                            'romacs-agent-log-full (cons nil summary))
                                           'romacs-agent-log-note)))
@@ -946,7 +1073,8 @@ back in the mode it had, and the next message carries it out."
 ;;; The separator and header
 
 (defun romacs-agent-log--doing (session)
-  "What SESSION does now, as the separator says it: (STATE . WORDS)."
+  "What SESSION does now, as the separator says it: (STATE . WORDS).
+WORDS is nil when the working thread says it alone: busy or idle."
   (pcase (cond ((romacs-agent-log--pending) 'waiting-approval)
                ;; A plan offered waits on the user as a request does.
                ((and (eq (romacs-agent-state session) 'idle) (not (romacs-agent-failed session))
@@ -963,12 +1091,10 @@ back in the mode it had, and the next message carries it out."
                        (concat "⚠ waits on you: \\<romacs-agent-log-mode-map>\\[romacs-agent-log-allow] "
                                (if question "choose" "allow") " · \\[romacs-agent-log-deny] "
                                (if question "decline" "deny") " · \\[romacs-agent-log-next-ask] goes to it")))))
-    ((or 'starting 'running)
-     (cons 'working (if-let* ((block (romacs-agent-log--block romacs-agent-log--current)))
-                        (format "running %s" (plist-get (cdr block) :name))
-                      "working")))
+    ;; Busy or idle, the thread's motion says; what runs, its row does.
+    ((or 'starting 'running) (cons 'working nil))
     ;; A turn that failed and is not yet seen: said so, until the next.
-    ('idle (if (romacs-agent-failed session) (cons 'failed "failed") (cons 'idle "idle")))
+    ('idle (if (romacs-agent-failed session) (cons 'failed "failed") (cons 'idle nil)))
     (state (cons 'idle (format "%s" state)))))
 
 (defconst romacs-agent-log--thread-cols 8
@@ -987,10 +1113,11 @@ its last width when none shows it."
 
 (defun romacs-agent-log--separator-text (doing width)
   "The separator for DOING, (STATE . WORDS), in WIDTH columns: the working
-thread, what the session does, then the composer's prompt."
+thread, what the session does when it needs words, then the composer's
+prompt."
   (let ((face (pcase (car doing) ('waiting 'romacs-agent-log-ask) ('working 'romacs-working-running)
                 ('failed 'romacs-agent-log-denied) (_ 'romacs-agent-log-rule))))
-    (let* ((label (concat " " (propertize (cdr doing) 'face (list face 'bold)) " "))
+    (let* ((label (if (cdr doing) (concat " " (propertize (cdr doing) 'face (list face 'bold)) " ") " "))
            ;; A dim rule after it fences the composer off the transcript,
            ;; never wrapping; none when that is short.
            (rule (- width 1 romacs-agent-log--thread-cols (string-width label))))
@@ -1072,7 +1199,7 @@ how long the turn has run."
                 (concat " read-only · "
                         (propertize (substitute-command-keys
                                      "\\<romacs-agent-history-text-map>\\[romacs-agent-history-resume-this]")
-                                    'face 'help-key-binding)
+                                    'face 'romacs-agent-log-header-key)
                         " resumes")
               "")
             (if (and start (zerop pending) (memq (romacs-agent-state session) '(starting running)))
@@ -1258,7 +1385,8 @@ where the chat reads and acts on SESSION, this editor by default
 (defun romacs-agent-log--clear ()
   "Empty the current chat's transcript, to draw its session afresh: what it
 drew forgotten, its markers let go, its composer kept."
-  (romacs-agent-log--close-stream)
+  ;; What streams is dropped, not faced: its text goes too.
+  (romacs-agent-log--close-stream 'discard)
   (when romacs-agent-log--blocks
     (mapc #'romacs-agent-log--close-block (hash-table-values romacs-agent-log--blocks)))
   (pcase-dolist (`(,_ ,start . ,end) romacs-agent-log--asks) (set-marker start nil) (set-marker end nil))
@@ -1570,11 +1698,14 @@ REASON when given."
   (cond ((get-text-property (point) 'romacs-agent-log-earlier) (romacs-agent-log-earlier))
         ((get-text-property (point) 'romacs-agent-log-full)
          (let ((full (get-text-property (point) 'romacs-agent-log-full))
+               (tool (get-text-property (point) 'romacs-agent-log-tool))
                (title (string-trim (buffer-substring-no-properties (line-beginning-position) (line-end-position)))))
            (with-current-buffer (get-buffer-create "*agent output*")
              (let ((inhibit-read-only t))
                (erase-buffer)
                (insert title "\n")
+               (when-let* ((details (and tool (romacs-agent-rows-details tool (car full) (cdr full)))))
+                 (insert "\n" details "\n"))
                (when (car full) (insert "\nInput:\n" (romacs-agent-log--json (car full)) "\n"))
                (when (cdr full) (insert "\nOutput:\n" (cdr full) "\n"))
                (goto-char (point-min)))
@@ -1740,4 +1871,6 @@ On the transcript's text:
 (provide 'romacs-agent-log)
 ;; Its turns' place in the transcript, which needs it loaded.
 (require 'romacs-agent-log-turns)
+;; Its replies' faces as they stream.
+(require 'romacs-agent-log-faces)
 ;;; romacs-agent-log.el ends here

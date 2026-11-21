@@ -111,13 +111,13 @@ unfontified, so redisplay asks for them again."
         (should (equal browsed "https://example.org/r"))))))
 
 (ert-deftest romacs-markdown-mode-colours-each-block-afresh ()
-  "A block coloured by its mode's Font Lock in the reused hidden buffer is
-coloured as in a fresh one: no syntax state of the block before."
-  (skip-unless (fboundp 'scheme-mode))
+  "A block with no grammar is lexed from its own start: a string the
+block before left open does not run into it."
   (romacs-markdown-mode-tests--with
-      "```scheme\n(define (long-function-name argument) \"a string\" (list 1 2 3))\n```\n\n```scheme\n#;\n(define ignored 1)\n```\n"
+      "```scheme\n(display \"left open\n```\n\n```scheme\n; a comment\n(define x 1)\n```\n"
     (font-lock-ensure)
-    (should (memq 'font-lock-comment-face (romacs-markdown-mode-tests--faces-at "ignored")))))
+    (should (memq 'font-lock-comment-face (romacs-markdown-mode-tests--faces-at "a comment")))
+    (should-not (memq 'font-lock-string-face (romacs-markdown-mode-tests--faces-at "define")))))
 
 (ert-deftest romacs-markdown-mode-runs-markdown-mode-hook ()
   (require 'markdown-mode)
