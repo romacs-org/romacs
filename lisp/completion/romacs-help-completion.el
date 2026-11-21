@@ -18,10 +18,14 @@
 ;; lists the names its predicate accepts once a prompt, until a function
 ;; is defined or a file loaded, and answers each key from that set; it
 ;; loads no file.  An exact name is asked of the predicate as it is now.
-;; A definition in a library not loaded yet is not offered until the
-;; library loads (ledger/divergences/VM2-HELP-NO-LOAD.md).
+;; A definition in a library not loaded yet comes from the index a worker
+;; makes (romacs-help-index.el), once it has; the library of the name a
+;; help prompt returns loads then, before help describes it
+;; (ledger/divergences/VM2-HELP-NO-LOAD.md).
 
 ;;; Code:
+
+(require 'romacs-help-index)
 
 (declare-function romacs-command-epoch "prims/completion.rs" ())
 (declare-function help--symbol-completion-table-affixation "help-fns" (completions))
@@ -33,18 +37,38 @@ then, NAMES a hash table of their names and FOLDED, once asked for, one
 from each name's downcased form to the names that have it.  Local to the
 minibuffer, so each prompt lists them anew.")
 
+(defun romacs-help--kinds (pred)
+  "The kinds of indexed definition PRED accepts, asked of a function, a
+command, a variable and a face that are nothing else."
+  (if (null pred) '(function command variable face)
+    (append (and (funcall pred 'car) '(function))
+            (and (funcall pred 'ignore) '(command))
+            (and (funcall pred 'load-path) '(variable))
+            (and (funcall pred 'default) '(face)))))
+
+(defun romacs-help--indexed-p (entry kinds)
+  "Whether ENTRY, an index entry, defines a kind of KINDS."
+  (seq-some (lambda (kind) (assq kind entry)) kinds))
+
 (defun romacs-help--names (pred)
-  "A hash table of the names of the symbols PRED accepts."
-  (let ((names (make-hash-table :test 'equal :size 100000)))
+  "A hash table of the names of the symbols PRED accepts, and of the
+indexed definitions of the kinds it accepts.  It asks a worker for the
+index of definitions not loaded yet (`romacs-help-index-request')."
+  (romacs-help-index-request)
+  (let ((names (make-hash-table :test 'equal :size 100000)) (kinds (romacs-help--kinds pred)))
     (mapatoms (lambda (symbol)
                 (when (or (null pred) (funcall pred symbol))
                   (puthash (symbol-name symbol) t names))))
+    (when (and romacs-help-index kinds)
+      (maphash (lambda (name entry)
+                 (when (romacs-help--indexed-p entry kinds) (puthash name t names)))
+               romacs-help-index))
     names))
 
 (defun romacs-help--key (pred)
   "What decides help's candidates for PRED within a prompt, besides the
-files loaded: a function defined meanwhile lists them again."
-  (list pred (romacs-command-epoch)))
+files loaded: a function defined or the index arriving lists them again."
+  (list pred (romacs-command-epoch) romacs-help-index))
 
 (defun romacs-help--list (pred)
   "Help's candidates for PRED, kept in a minibuffer while the prompt lasts
@@ -67,9 +91,12 @@ key, as a hash table: kept with the prompt's candidates, made once."
         folded))))
 
 (defun romacs-help--accepts-p (name pred)
-  "Whether NAME names a symbol PRED accepts now."
-  (let ((symbol (intern-soft name)))
-    (and (or symbol (equal name "nil")) (or (null pred) (funcall pred symbol)))))
+  "Whether NAME names a symbol PRED accepts now, or an indexed definition
+of a kind it accepts."
+  (or (let ((symbol (intern-soft name)))
+        (and (or symbol (equal name "nil")) (or (null pred) (funcall pred symbol))))
+      (let ((entry (and romacs-help-index (gethash name romacs-help-index))))
+        (and entry (romacs-help--indexed-p entry (romacs-help--kinds pred)) t))))
 
 (defun romacs-help--exact-p (string pred)
   "Whether STRING names a symbol PRED accepts now, and matches
@@ -98,6 +125,27 @@ loaded; an exact name is asked of PRED as it is now."
    ((eq action 'lambda) (romacs-help--exact-p string pred))
    ((eq (car-safe action) 'boundaries) nil)
    (t (complete-with-action action (romacs-help--list pred) string nil))))
+
+(defun romacs-help--load-chosen (name pred)
+  "Load the library defining NAME as a kind PRED accepts, when only the
+index knows it so: NAME as a symbol does not satisfy PRED yet."
+  (when-let* ((entry (and romacs-help-index (gethash name romacs-help-index)))
+              (symbol (intern name))
+              ((not (and pred (funcall pred symbol))))
+              (library (seq-some (lambda (kind) (alist-get kind entry)) (romacs-help--kinds pred))))
+    (with-demoted-errors "while loading: %S"
+      (load library 'noerror 'nomessage))))
+
+(defun romacs-help--completing-read (read prompt collection &optional pred &rest args)
+  "READ (`completing-read'), then, when COLLECTION is help's table, load
+what defines the name it returned (`romacs-help--load-chosen'): after a
+help prompt returns, not as it quits."
+  (let ((value (apply read prompt collection pred args)))
+    (when (and (eq collection #'help--symbol-completion-table) (stringp value))
+      (romacs-help--load-chosen value pred))
+    value))
+
+(advice-add 'completing-read :around #'romacs-help--completing-read)
 
 (provide 'romacs-help-completion)
 ;;; romacs-help-completion.el ends here
