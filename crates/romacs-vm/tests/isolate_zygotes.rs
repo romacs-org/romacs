@@ -906,18 +906,20 @@ fn a_refused_zygotes_jobs_run_warmed_and_say_so() {
                                        (mapcar (lambda (f) (car (car (isolate-future-degraded f)))) futures)
                                        (car (nth 1 (car (isolate-future-degraded (car futures)))))
                                        heard
-                                       (let ((isolate-refuse-degraded t))
-                                         (condition-case e (isolate-spawn '+ 1 2 :require '(isolate))
-                                           (isolate-degraded (car (car (cdr e)))))))))");
+                                       ;; Refused before any worker is found or started for it.
+                                       (let ((isolate-refuse-degraded t) (before (length romacs--isolates)))
+                                         (list (condition-case e (isolate-spawn '+ 1 2 :require '(isolate))
+                                                 (isolate-degraded (car (car (cdr e)))))
+                                               (= before (length romacs--isolates)))))))");
     assert_eq!(out, "(refused (t t) (pool pool) (isolate-zygote-refused isolate-zygote-refused) isolate-refused \
-                     ((isolate-zygote-refused isolate-refused)) isolate-zygote-refused)");
+                     ((isolate-zygote-refused isolate-refused)) (isolate-zygote-refused t))");
     // Nothing of the refused zygote runs: only the pooled workers.
     let out = eval(&mut vm, "(let ((end (+ (float-time) 10)) (others t))
                                (while (and others (< (float-time) end))
                                  (romacs--isolate-pump 0.05)
                                  (setq others (delq 'pool (mapcar (lambda (i) (aref i 10)) romacs--isolates))))
-                               (list others (and romacs--isolates t)))");
-    assert_eq!(out, "(nil t)");
+                               others)");
+    assert_eq!(out, "nil");
     // A job as asked says nothing.
     eval(&mut vm, "(isolate-kill-all)");
     assert_eq!(eval(&mut vm, "(let ((f (isolate-spawn '+ 1 2))) (isolate-await f 20) (isolate-future-degraded f))"), "nil");

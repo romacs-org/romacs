@@ -478,6 +478,44 @@ fn a_job_queued_behind_a_feature_change_runs_on_a_worker_without_it() {
 }
 
 #[test]
+fn a_waiting_job_runs_when_the_worker_it_waited_for_is_killed() {
+    // A job waiting for room (the pool's one worker busy) is dispatched by
+    // the wait points' idle pass once that worker is killed, though no
+    // worker is left to wake it.
+    let mut vm = vm();
+    let out = eval(&mut vm, "(let* ((isolate-pool-size 1) (done nil)
+                                    (a (isolate-spawn '(lambda () (while t))))
+                                    (b (isolate-spawn 'list 'b)))
+                               (isolate-on-done b (lambda (f) (setq done (isolate-await f 0))))
+                               (romacs--isolate-wait 0.2)
+                               (isolate-kill (isolate-future-isolate a))
+                               (let ((end (+ (float-time) 20)))
+                                 (while (and (not done) (< (float-time) end)) (romacs--isolate-idle) (romacs--isolate-wait 0.05)))
+                               (list (isolate-future-isolate b) done))");
+    assert!(out.ends_with(" (b))") && !out.starts_with("(nil "), "{out}");
+    eval(&mut vm, "(isolate-kill-all)");
+}
+
+#[test]
+fn a_fresh_worker_whose_job_is_refused_is_not_left_behind() {
+    // A `:fresh` job that cannot be sent (here a full queue, the worker's
+    // preparation taking its one place) leaves its worker spent, to end
+    // once its preparation is done: refusals do not pile up workers.
+    let mut vm = vm();
+    let out = eval(&mut vm, "(let ((refused 0) (fresh (lambda () (let ((n 0)) (dolist (i romacs--isolates n) (when (and (isolate-live-p i) (eq (aref i 10) 'fresh)) (setq n (1+ n))))))))
+                               (let ((isolate-queue-limit 1))
+                                 (dotimes (_ 3) (condition-case nil (isolate-spawn 'list :fresh t) (isolate-queue-full (setq refused (1+ refused))))))
+                               (let ((end (+ (float-time) 20))) (while (and romacs--isolates (< (float-time) end)) (romacs--isolate-pump 0.05)))
+                               (list refused (funcall fresh) (length romacs--isolates)
+                                     ;; Not even its preparation queued: it ends at once.
+                                     (let ((isolate-queue-limit 0)) (condition-case nil (isolate-spawn 'list :fresh t) (isolate-queue-full 'refused)))
+                                     (let ((end (+ (float-time) 20))) (while (and romacs--isolates (< (float-time) end)) (romacs--isolate-pump 0.05))
+                                       (length romacs--isolates))))");
+    assert_eq!(out, "(3 0 0 refused 0)");
+    eval(&mut vm, "(isolate-kill-all)");
+}
+
+#[test]
 fn a_pooled_job_sees_nothing_an_earlier_one_changed() {
     // romacs#396: a worker the pool made runs one job, so a later job of
     // the same feature set never sees a global set, a function defined or

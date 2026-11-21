@@ -140,19 +140,25 @@ fn the_project_commands_give_the_synchronous_results() {
              (preparing (romacs-project--worker pr))
              (sync-files (funcall (eval romacs-project--files-job t) pr (list (project-root pr))))
              (iso-files (thaw (isolate-await (romacs-project--spawn pr worker romacs-project--files-job pr (list (project-root pr))))))
-             (ready (eq (romacs-project--worker pr) worker))
+             ;; The job spent its worker (one job each), and its end warmed
+             ;; another, which the search waits for.
+             (spent (eq (romacs-project--worker pr) worker))
+             (next (let ((end (+ (float-time) 120)))
+                     (while (and (not (romacs-project--worker pr)) (< (float-time) end))
+                       (accept-process-output nil 0.1) (romacs--isolate-pump 0))
+                     (romacs-project--worker pr)))
              (sync-matches (funcall (eval romacs-project--matches-job t) \"defcustom project-\" pr))
-             (iso-matches (thaw (isolate-await (romacs-project--spawn pr worker romacs-project--matches-job \"defcustom project-\" pr))))
+             (iso-matches (thaw (isolate-await (romacs-project--spawn pr next romacs-project--matches-job \"defcustom project-\" pr))))
              (summary (lambda (m) (list (xref-location-group (xref-item-location m)) (xref-location-line (xref-item-location m)) (substring-no-properties (xref-item-summary m))))))
         (prin1 (list 'files (length sync-files) (equal sync-files iso-files)
                      'matches (length sync-matches) (equal (mapcar summary sync-matches) (mapcar summary iso-matches))
-                     'ready (list before preparing ready (romacs-project--warm pr))
+                     'ready (list before preparing spent (and next (not (eq next worker))))
                      'boot (isolate-await (isolate-spawn '(lambda () isolate-boot)))))
         (isolate-kill-all)))", dir = project.display().to_string() + "/", module = root.join("lisp/progmodes/romacs-project.el").display().to_string());
     let (ok, out, err) = batch(&script, &project);
     assert!(ok, "batch failed: {err}");
     let out = out.trim();
-    assert!(out.starts_with("(files ") && out.contains(" t matches ") && out.ends_with(" t ready (nil nil t nil) boot source)"), "{out}\n{err}");
+    assert!(out.starts_with("(files ") && out.contains(" t matches ") && out.ends_with(" t ready (nil nil nil t) boot source)"), "{out}\n{err}");
     let files: usize = out.split_whitespace().nth(1).unwrap().parse().unwrap();
     assert!(files > 1000, "{out}");
     let _ = std::fs::remove_dir_all(&scratch);
