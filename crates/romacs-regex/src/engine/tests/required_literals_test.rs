@@ -91,22 +91,23 @@ fn the_literals_are_derived_by_the_second_short_search() {
     assert!(long.required.get().is_none(), "a long search must not derive");
 }
 
-/// A match ends by the stop: the literal past the stop rejects, a literal
-/// inside it is kept, and a literal past the last candidate but before the
-/// stop is kept (a match may run past the range's start positions).
+/// A match ends by the stop (forward, the range's last candidate; backward,
+/// `start`): a literal past the stop rejects, and one that ends exactly at the
+/// stop is kept.
 #[test]
 fn the_span_is_the_lowest_candidate_to_the_stop() {
     let text = b"ab:cd";
-    // Forward, candidates 0..=1, stop 2: the `:` at 2 is past the stop.
+    // Forward, stop 2: the `:` at 2 lies past it.
     agrees("b:", false, text, 0, 2, 0, true);
-    // Forward, candidate 1 only, stop 5: the match `b:` starts at the last
-    // candidate and ends past it.
-    agrees("b:", false, text, 1, 0, 0, true);
-    agrees("b:", false, text, 1, 4, 0, true);
-    // Backward from 3 to 0: a match must end by 3.
+    // Forward, stop 3: `b:` ends exactly at it.
+    agrees("b:", false, text, 0, 3, 0, true);
+    agrees("b:", false, text, 1, 2, 0, true);
+    // Backward from 3, and from 4: a match must end by `start`.
     agrees("b:", false, text, 3, -3, 0, true);
     agrees(":c", false, text, 3, -3, 0, true);
     agrees(":c", false, text, 4, -4, 0, true);
+    assert!(found(&compile("b:", false), text, 0, 3, 0).is_some());
+    assert!(found(&compile(":c", false), text, 4, -4, 0).is_some());
 }
 
 /// Case folding, `\=`, raw bytes, unibyte and multibyte targets.
