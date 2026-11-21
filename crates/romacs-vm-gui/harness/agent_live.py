@@ -3404,21 +3404,30 @@ def start_picker(args, base):
             a.eval('(progn (switch-to-buffer "*romacs-agents*") (delete-other-windows) (goto-char (point-min)) '
                    f'(re-search-forward {lisp_text("^" + path.name + "  ")}) (beginning-of-line) t)')
 
+        def narrowed(typed):
+            """Wait until the panel's candidates are those of TYPED, all of it
+            in the input: Return then takes the row it finds, whatever the load."""
+            until(lambda: a.eval(
+                '(with-current-buffer (window-buffer (active-minibuffer-window)) '
+                f'(and (equal (minibuffer-contents-no-properties) {lisp_text(typed)}) '
+                '(equal (car-safe romacs-complete--input) (minibuffer-contents-no-properties)) '
+                'romacs-complete--candidates t))') == 't', 15, f'{typed} narrowed')
+
         def pick(project, typed, effort, text):
             """C-u c at PROJECT's section; the row TYPED finds, at EFFORT."""
             on_project(project)
-            a.keys('-M', 'ctrl', '-k', 'u', '-m', 'ctrl')
-            a.keys('c')
+            # One sequence: the prefix cannot be lost between two runs of wtype.
+            a.keys('-M', 'ctrl', '-k', 'u', '-m', 'ctrl', 'c')
             asked('Project directory')
             directory = contents()
             a.keys('-k', 'Return')
             asked('Agent')
             a.keys(typed)
-            time.sleep(.5)
+            narrowed(typed)
             a.keys('-k', 'Return')
             asked('Effort')
             a.keys(effort)
-            time.sleep(.5)
+            narrowed(effort)
             a.keys('-k', 'Return')
             composed(text)
             a.keys('-k', 'Return')
