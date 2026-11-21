@@ -1,4 +1,5 @@
 """Focused harness tests; no Cargo build or ambient compositor required."""
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -46,6 +47,15 @@ class PrivateTreeTests(unittest.TestCase):
             self.assertEqual(runtime.stat().st_mode & 0o777, 0o700)
             for path in (home, root / 'work', root / 'probe', Path(env['TMPDIR'])):
                 self.assertFalse(path.is_relative_to(runtime), path)
+
+    def test_a_socket_path_too_long_is_refused_before_the_compositor(self):
+        with tempfile.TemporaryDirectory() as base:
+            root = Path(base) / ('r' * (parity_live.SOCKET_PATH_MAX - len(os.fsencode(base)) - len('/wayland-0')))
+            root.mkdir()
+            engine = parity_live.Engine('romacs', [], root, None, {}, 1)
+            with self.assertRaisesRegex(RuntimeError, f'socket path {parity_live.SOCKET_PATH_MAX + 1} > '):
+                engine.spawn('/nonexistent')
+            self.assertEqual(engine.processes, [])
 
 
 class StartupFailedTests(unittest.TestCase):

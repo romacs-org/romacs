@@ -1644,7 +1644,7 @@ class Context:
         # Private trees hold compositor sockets, which take 108 bytes at most.
         (cache.parent / 'w').mkdir(exist_ok=True)
         self.work = Path(tempfile.mkdtemp(dir=cache.parent / 'w'))
-        if len(str(self.work)) > 75:  # + /romacs-XXXXXXXX/run/wayland-NN
+        if len(str(self.work)) > 75:  # + /romacs-XXXXXXXX/wayland-NN
             raise SystemExit(f'{self.work}: too long for socket paths; give a shorter --out')
         self.engine_env = {name: self.engine_env[name] for name in self.engines}
         self.skipped = []

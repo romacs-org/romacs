@@ -181,6 +181,10 @@ def alive_at(probe_dir):
 STARTUP_FAILED = b'romacs: evaluator stopped: '
 
 
+# A Unix socket's path, its terminating NUL aside (sun_path is 108 bytes).
+SOCKET_PATH_MAX = 107
+
+
 class Engine:
     """One editor in its own private compositor, home and database copy."""
 
@@ -192,8 +196,7 @@ class Engine:
         # what it found.
         self.editor_log, self.log_read, self.failed = 'engine.log', 0, None
         self.probe_dir = root / 'probe'
-        # A runtime directory for the editor alone; the compositor keeps
-        # the tree's, where its socket's path is short enough to bind.
+        # A runtime directory for the editor other than the tree's.
         self.editor_runtime = None
 
     def start(self, tools):
@@ -219,12 +222,18 @@ class Engine:
         (self.root / 'labwc').mkdir()
         (self.root / 'labwc/rc.xml').write_text(RC_XML)
         log = (self.root / 'compositor.log').open('w')
+        # The compositor's socket goes in the root, whose path is short
+        # enough to bind (108 bytes); its clients name it whole.
+        socket_path = len(os.fsencode(str(self.root / 'wayland-0')))
+        if socket_path > SOCKET_PATH_MAX:
+            raise RuntimeError(f'{self.name} compositor: socket path {socket_path} > {SOCKET_PATH_MAX} bytes '
+                               f'under {self.root}; give a shorter work directory')
         self.processes.append(subprocess.Popen([f'{tools}/labwc', '-C', str(self.root / 'labwc')],
-                                               env=self.env, stdout=log, stderr=log))
-        runtime = Path(self.env['XDG_RUNTIME_DIR'])
-        socket = wait(lambda: next((p for p in runtime.glob('wayland-*') if p.is_socket()), None),
+                                               env=dict(self.env, XDG_RUNTIME_DIR=str(self.root)),
+                                               stdout=log, stderr=log))
+        socket = wait(lambda: next((p for p in self.root.glob('wayland-*') if p.is_socket()), None),
                       15, f'{self.name} compositor', self.processes[0])
-        self.env['WAYLAND_DISPLAY'] = socket.name
+        self.env['WAYLAND_DISPLAY'] = str(socket)
         self.randr(1280, 900)
         self.processes.append(subprocess.Popen([f'{tools}/wtype', '-s', '86400000', '-k', 'Shift_L'],
                                                env=self.env, stdout=log, stderr=log))
@@ -232,7 +241,7 @@ class Engine:
         self.started = time.time()
         output = (self.root / 'engine.log').open('w')
         if self.editor_runtime:
-            self.env.update(XDG_RUNTIME_DIR=str(self.editor_runtime), WAYLAND_DISPLAY=str(socket))
+            self.env['XDG_RUNTIME_DIR'] = str(self.editor_runtime)
         self.process = subprocess.Popen(self.argv, env=self.env, cwd=self.root / 'work', preexec_fn=ptraceable,
                                         stdin=subprocess.DEVNULL, stdout=output, stderr=output)
         self.processes.append(self.process)
@@ -395,10 +404,11 @@ def private_tree(engine, base, tools, prefix=None):
     """A fresh private root for ENGINE: HOME, XDG, TMPDIR, the probe's
     directory and the compositor environment, named PREFIX (default
     ENGINE-) and a random suffix.  Returns (ROOT, HOME, ENV).
-    The runtime directory is ROOT/run, apart from HOME and the work
-    directory as /run/user is on a real system: a file under it is a
+    The editor's runtime directory is ROOT/run, apart from HOME and the
+    work directory as /run/user is on a real system: a file under it is a
     memory-only file to the editor (lisp/session/romacs-ram-files.el), with
-    no backup, no auto-save and no place in a restart's session image."""
+    no backup, no auto-save and no place in a restart's session image.
+    Engine keeps the compositor's socket in ROOT, four bytes shorter."""
     root = Path(tempfile.mkdtemp(prefix=prefix or f'{engine}-', dir=base))
     root.chmod(0o700)
     home = root / 'home'
