@@ -28,16 +28,16 @@ does completing a `romacs-' name, leaves GNU's M-x, C-x b and C-x C-f."
     (should (equal (romacs-workspace-completion-tests--readers) before))
     (should (equal (get 'romacs-complete--candidates 'variable-documentation) doc))))
 
-(ert-deftest romacs-workspace-completion-install-puts-its-readers ()
-  "The workspace regime's install puts the file's readers in place."
-  (require 'romacs-workspace-completion)
+(ert-deftest romacs-workspace-completion-load-installs-without-gnus-minibuffer ()
+  "Where GNU's minibuffer.el is not loaded, the workspace regime, loading
+the file puts its readers in place."
   (cl-letf (((symbol-function 'execute-extended-command) nil)
             ((symbol-function 'read-extended-command) nil)
             ((symbol-function 'read-file-name) nil))
-    (let ((read-buffer-function nil) (read-file-name-function nil))
-      (romacs-workspace-completion-install)
-      (should (equal (romacs-workspace-completion-tests--readers)
+    (let ((read-buffer-function nil) (features (remq 'minibuffer features)) (load-history load-history))
+      (load "romacs-workspace-completion" nil t)
+      (should (equal (butlast (romacs-workspace-completion-tests--readers))
                      (list #'romacs-execute-extended-command #'romacs-read-extended-command
-                           #'romacs-workspace-read-file-name #'romacs-read-buffer #'romacs-read-file-name))))))
+                           #'romacs-workspace-read-file-name #'romacs-read-buffer))))))
 
 ;;; romacs-workspace-completion-tests.el ends here

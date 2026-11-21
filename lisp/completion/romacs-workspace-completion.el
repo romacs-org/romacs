@@ -24,7 +24,7 @@
 
 (defvar extended-command-history nil)
 (defvar buffer-name-history nil)
-(defvar read-file-name-function)
+(defvar read-file-name-function 'romacs-read-file-name)
 
 (defvar romacs-workspace-completion--candidates nil
   "While a reader is active, a function of its input that returns
@@ -223,7 +223,6 @@ place of GNU's: the workspace regime, which has no minibuffer.el."
   (defalias 'read-extended-command #'romacs-read-extended-command)
   (defalias 'execute-extended-command #'romacs-execute-extended-command)
   (defalias 'read-file-name #'romacs-workspace-read-file-name)
-  (setq read-file-name-function #'romacs-read-file-name)
   ;; minibuf.c's `read-buffer' calls `read-buffer-function', a C variable.
   (setq read-buffer-function #'romacs-read-buffer))
 
