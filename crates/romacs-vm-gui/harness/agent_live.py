@@ -95,6 +95,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import sqlite3
 import struct
@@ -3391,7 +3392,13 @@ def start_picker(args, base):
                 '(with-current-buffer (window-buffer (active-minibuffer-window)) (minibuffer-contents-no-properties))'))
 
         def asked(text):
-            until(lambda: text in prompt(), 15, f'{text} asked')
+            """Wait for the prompt TEXT; on its timeout, the prompt and input open then."""
+            try:
+                until(lambda: text in prompt(), 15, f'{text} asked')
+            except RuntimeError as error:
+                open_now = prompt()
+                raise RuntimeError(f'{error}; prompt {open_now!r}, input {contents() if open_now else None!r}, '
+                                   f'echo {a.eval("(current-message)")}') from None
 
         def on_project(path):
             a.eval('(progn (switch-to-buffer "*romacs-agents*") (delete-other-windows) (goto-char (point-min)) '
@@ -3711,7 +3718,7 @@ def select_real(args, base):
 
 def codex_listed(codex, home, env):
     """The models CODEX's own app-server answers `model/list' with, its
-    CODEX_HOME HOME: what Romacs is to show."""
+    CODEX_HOME HOME, each (id, label): what Romacs is to show."""
     lines = [{'id': 'initialize:1', 'method': 'initialize',
               'params': {'clientInfo': {'name': 'agent_live', 'version': '0'}, 'capabilities': {}}},
              {'method': 'initialized'}, {'id': 'model/list:2', 'method': 'model/list', 'params': {}}]
@@ -3723,7 +3730,7 @@ def codex_listed(codex, home, env):
         for line in process.stdout:
             answer = json.loads(line)
             if answer.get('id') == 'model/list:2':
-                return [m['model'] for m in answer['result']['data']]
+                return [(m['model'], m['displayName']) for m in answer['result']['data']]
         raise RuntimeError('codex app-server ended before model/list answered')
     finally:
         process.kill()
@@ -3734,9 +3741,9 @@ def models_real(args, base):
     """The models each real harness (--claude-program, --codex-program) reports,
     in private configuration directories, nothing signed in, no turn taken:
     none known at first; a real Codex session's model menu (C-c o m) shows
-    what is known and asks Codex in the background; opened again it lists
-    what Codex's own app-server answers `model/list', and the capabilities
-    tool says the same.  `romacs-agent-refresh-models' asks Claude Code too.
+    what is known and asks Codex in the background, and the open menu comes
+    to list what Codex's own app-server answers `model/list'; opened again
+    it lists the same, and the capabilities tool says the same.  `romacs-agent-refresh-models' asks Claude Code too.
     Free, but needs the real programs: not a default workflow."""
     a = Agents(args, base, 'mr')
     try:
@@ -3747,44 +3754,55 @@ def models_real(args, base):
         homes = {name: a.home / f'.config/{name}-models' for name in ('claude', 'codex')}
         for home in homes.values():
             home.mkdir(parents=True)
-        a.providers([('claude', homes['claude'], claude, []), ('codex', homes['codex'], codex, [])])
+        # Codex answers late: the menu is surely open, showing nothing it
+        # reports, before its answer comes.
+        late = a.root / 'late-codex'
+        late.write_text(f'#!/bin/sh\nsleep 3\nexec {shlex.quote(codex)} "$@"\n')
+        late.chmod(0o755)
+        a.providers([('claude', homes['claude'], claude, []), ('codex', homes['codex'], late, [])])
         kept = a.home / '.local/state/romacs/agents/models'
 
         def known(name):
             return parity_live.read_sexp(a.eval(
                 f'(mapcar (function car) (romacs-agent--models (romacs-agent--configured {lisp_text(name)})))')) or []
 
-        result = {'before': known('codex'), 'listed': codex_listed(codex, homes['codex'], a.env)}
+        listed = codex_listed(codex, homes['codex'], a.env)
+        result = {'before': known('codex'), 'listed': [m for m, _ in listed]}
+        wanted = ['Codex · default'] + ['Codex · ' + label for _, label in listed]
         sid = a.eval(f'(romacs-agent-id (romacs-agent-start {lisp(a.work)} nil nil "codex"))').strip('"')
         a.idle(sid, 60)
         a.eval(f'(progn (romacs-agent-show {a.s(sid)}) (delete-other-windows) t)')
         a.keyboard_ready()
 
-        def offered():
+        def shown():
+            """The rows the open menu's panel shows: the UI's own, not the table asked anew."""
             return parity_live.read_sexp(a.eval(
                 '(when (active-minibuffer-window) (with-current-buffer (window-buffer (active-minibuffer-window)) '
-                '(all-completions "" minibuffer-completion-table minibuffer-completion-predicate)))')) or []
+                '(mapcar (function substring-no-properties) romacs-complete--candidates)))')) or []
 
         def menu(name):
+            """The model menu by its keys, held open until its panel shows
+            what Codex lists: the menu never opened again."""
             a.keys('-M', 'ctrl', '-k', 'c', '-k', 'o', '-m', 'ctrl')
             until(lambda: a.eval('(buffer-live-p keymap-popup--buffer)') == 't', 15, 'menu open')
             a.keys('m')
-            until(offered, 15, 'models offered')
+            first = until(shown, 15, 'models offered')
+            minibuffer = a.eval('(prin1-to-string (window-buffer (active-minibuffer-window)))')
+            until(lambda: shown() == wanted, 60, 'Codex\'s models shown in the open menu')
             a.eval('(progn (redisplay t) t)')
             time.sleep(.5)
             shot = base / f'models-{name}.png'
             subprocess.run([f'{args.tools}/grim', str(shot)], env=a.env, check=True, timeout=30)
-            rows = offered()
+            same = a.eval('(prin1-to-string (window-buffer (active-minibuffer-window)))') == minibuffer
             a.keys('-M', 'ctrl', '-k', 'g', '-m', 'ctrl')
-            until(lambda: not offered(), 15, 'menu closed')
-            return {'rows': rows, 'screenshot': str(shot)}
+            until(lambda: not shown(), 15, 'menu closed')
+            return {'first': first, 'same_menu': same, 'screenshot': str(shot)}
 
-        result['first'] = menu('first')
-        until((kept / 'codex.json').exists, 60, 'codex models kept')
-        result['second'] = menu('second')
-        result['labels'] = {m: a.eval(f'(plist-get (cdr (assoc {lisp_text(m)} (romacs-agent--models '
-                                      '(romacs-agent--configured "codex")))) :label)').strip('"')
-                            for m in result['listed']}
+        # Opened with nothing kept: its rows are computed before Codex is
+        # asked, so the models it shows came to the open menu.
+        result['cold'] = menu('cold')
+        result['kept'] = known('codex')
+        result['warm'] = menu('warm')
         capabilities = json.loads(parity_live.read_sexp(a.eval(
             '(decode-coding-string (json-serialize (romacs-agent-tools--capabilities (romacs-mcp--object))) (quote utf-8))')))
         result['capabilities'] = {p['providerInstanceId']: [m['id'] for m in p['models']]
@@ -3792,9 +3810,10 @@ def models_real(args, base):
         a.eval('(progn (romacs-agent-refresh-models) t)')
         until((kept / 'claude.json').exists, 60, 'claude models kept')
         result['claude'] = known('claude')
-        shown = ['Codex · ' + result['labels'][m] for m in result['listed']]
-        result['ok'] = (result['before'] == [] and result['first']['rows'] == ['Codex · default']
-                        and bool(result['listed']) and result['second']['rows'] == ['Codex · default'] + shown
+        result['ok'] = (result['before'] == [] and bool(result['listed'])
+                        and result['cold']['first'] == ['Codex · default']
+                        and result['cold']['same_menu'] and result['warm']['same_menu']
+                        and result['kept'] == result['listed']
                         and result['capabilities']['codex'] == result['listed'] and bool(result['claude']))
         return result
     finally:
