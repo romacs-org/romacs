@@ -961,9 +961,9 @@ fn a_signalling_callback_leaves_no_future_of_a_dying_zygote_unsettled() {
                                         (while (and (not (and {a} {b})) (< (float-time) end)) (romacs--isolate-pump 0.02))
                                         ;; The newer child is notified first.
                                         (isolate-on-done b (lambda (_) (setq seen (aref a 3)) (romacs--isolate-pump 0)
-                                                             (isolate-future-cancel a) (error \"A callback fails\")))
+                                                             (isolate-future-cancel a) (signal 'error (list \"A callback fails\"))))
                                         (let ((isolate-error-functions (list (lambda (iso event _) (push (list (aref iso 10) event) heard)))))
-                                          (list (condition-case e (isolate-kill zygote) (error (cadr e)))
+                                          (list (condition-case e (isolate-kill zygote) (error (car (cdr e))))
                                                 seen (aref a 3) (aref b 3) (and (memq zygote romacs--isolates) t)
                                                 (progn (romacs--isolate-pump 0.3) (nreverse heard)))))", a = runs("a"), b = runs("b")));
     assert_eq!(out, "(\"A callback fails\" isolate-died isolate-died isolate-died nil ((job isolate-died) (job isolate-died) (zygote isolate-killed)))");
@@ -980,8 +980,8 @@ fn a_signalling_callback_leaves_no_other_future_of_a_killed_worker_unsettled() {
                                               (isolate-spawn '(lambda () (while t)) :isolate iso)))
                                     (b (isolate-spawn 'list 'queued :isolate iso)))
                                (romacs--isolate-wait 0.2)
-                               (isolate-on-done a (lambda (_) (error \"A callback fails\")))
-                               (list (condition-case e (isolate-kill iso) (error (cadr e))) (aref a 3) (aref b 3)))");
+                               (isolate-on-done a (lambda (_) (signal 'error (list \"A callback fails\"))))
+                               (list (condition-case e (isolate-kill iso) (error (car (cdr e)))) (aref a 3) (aref b 3)))");
     assert_eq!(out, "(\"A callback fails\" isolate-killed isolate-killed)");
     eval(&mut vm, "(isolate-kill-all)");
 }
