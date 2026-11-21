@@ -31,7 +31,7 @@ fn bool_vector(cx; rest values) {
     Ok(cx.bool_vector_from(bits))
 }}
 defsubr! { name = "bool-vector-p", gnu = "data.c:454", effect = Pure,
-fn bool_vector_p(cx, value: Value) { Ok(truth(cx.bool_vector(value).is_ok())) }}
+fn bool_vector_p(cx, value: Value) { Ok(truth(cx.is_bool_vector(value))) }}
 
 fn binary(cx: &mut Leaf<'_>, a: Value, b: Value, dest: Value, op: u8) -> Out {
     let a_bits = cx.bool_vector(a)?;
