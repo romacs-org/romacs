@@ -290,9 +290,19 @@ as safe_call makes it."
         (funcall pre-redisplay-function windows)
       (error (message "Error during redisplay: %S" err)))))
 
-(defun romacs--native-region (_start _end _window _overlay)
-  "`redisplay-highlight-region-function' while Romacs draws the region itself."
-  nil)
+(defun romacs--native-region (_start _end _window overlay)
+  "`redisplay-highlight-region-function' while Romacs draws the region itself.
+Its answer, the symbol `romacs-native-region', which
+`redisplay--update-region-highlight' keeps as the window's
+`internal-region-overlay', asks the display to draw the region there.
+A function wrapping this one draws the region its own way by answering
+otherwise: rect.el's rectangle, whose overlays then show alone.
+OVERLAY, a highlight this function did not make, is first removed
+through `redisplay-unhighlight-region-function', as
+`redisplay--highlight-overlay-function' removes it."
+  (unless (eq overlay 'romacs-native-region)
+    (funcall redisplay-unhighlight-region-function overlay))
+  'romacs-native-region)
 
 (defun insert-buffer-substring (buffer &optional start end)
   "Insert before point a substring of the contents of BUFFER.

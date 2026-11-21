@@ -144,6 +144,13 @@ and its comparison policy in its docstring:
   external `printf`, `C-c C-c` on an external `sleep 5`, `M-p`, `C-c C-u`
   and `exit`, both engines in one small work directory.  `--debug-on-error`
   sets `debug-on-error` in both inits.
+* `rect_parity_live.py`: `C-x SPC` (`rectangle-mark-mode`) over long, short
+  and tabbed lines: motion past a line's end, `C-x C-x` round the corners,
+  `M-w`, `C-w` and `C-y` of the rectangle, `C-x r t`, turning it off with
+  the mark active, and `C-g`.  Besides the compared state, named steps hold
+  what Romacs paints, cell by cell, read from a screenshot: the rectangle's
+  columns alone, padded past short lines, and nothing once it is gone.
+  `--shots` keeps a PNG of each engine after every step.
 
 # Paired-session bench: agents drive GNU and Romacs side by side
 

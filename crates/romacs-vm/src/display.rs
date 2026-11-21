@@ -346,7 +346,7 @@ impl DisplayState {
     #[cfg(test)]
     pub(crate) fn record_laid_for_test(&mut self) {
         let key = ShownKey { collections: 0, overlays: 0, hosted: false, buffer: Value::NIL, shows: 0, selected_id: 0, selected: Value::NIL,
-            modiff: 0, accessible: (0, 0), start: 0, mark: Value::NIL, terminal: None, geometry: (0, 0, 0, 0, 0), min_hscroll: 0,
+            modiff: 0, accessible: (0, 0), start: 0, mark: Value::NIL, native_region: false, terminal: None, geometry: (0, 0, 0, 0, 0), min_hscroll: 0,
             suspended: false, chrome: ([0; 2], [0; 2], false, false), root: (0, 0), metrics: (0, 0), faces: 0, table: 0,
             variables: vec![], header: Value::NIL };
         self.laid.insert(0, (key, Laid { end: 0, visible_end: 0, body_height: 0.0, point: None }));
@@ -517,6 +517,9 @@ struct ShownKey {
     accessible: (usize, usize),
     start: i64,
     mark: Value,
+    /// Whether the native highlight draws the region (`native_region_asked'):
+    /// a highlight function's answer changes it with no edit.
+    native_region: bool,
     /// A terminal's session and output revision: its colors restyle the
     /// buffer's faces with no modification of its own.
     terminal: Option<(u64, Option<u64>)>,
@@ -1474,6 +1477,19 @@ impl Vm {
         let mode = self.buffer_variable(buffer, "auto-hscroll-mode")?;
         Ok(mode == self.intern("current-line"))
     }
+    /// Whether `redisplay-highlight-region-function' leaves WINDOW's region
+    /// to the native highlight: it is `romacs--native-region' itself, which
+    /// runs no Lisp (`pre_redisplay_has_work'), or the window's last answer,
+    /// kept as its `internal-region-overlay', was `romacs--native-region''s,
+    /// or no highlight Lisp has answered for the window (a session that
+    /// runs none). A wrapper that answered otherwise (rect.el's rectangle,
+    /// nil while it shows none) drew the region itself.
+    fn native_region_asked(&mut self, window: Value) -> Result<bool> {
+        let highlight = self.slot("redisplay-highlight-region-function");
+        if self.variable_value(highlight)? == self.display_symbol("romacs--native-region") { return Ok(true); }
+        let (key, token) = (self.display_symbol("internal-region-overlay"), self.display_symbol("romacs-native-region"));
+        Ok(self.window(window)?.parameters.iter().find(|&&(k, _)| k == key).is_none_or(|&(_, v)| v == token))
+    }
     fn snapshot_region(&mut self, window: Value, buffer: Value, point: i64) -> Result<Option<std::ops::Range<usize>>> {
         if window != self.selected_window_value()? { return Ok(None); }
         let saved = self.slots[self.buffer_slot].value;
@@ -1485,7 +1501,7 @@ impl Vm {
             Ok(self.variable_value(mark)? != Value::NIL && self.variable_value(transient)? != Value::NIL)
         })();
         self.slots[self.buffer_slot].value = saved;
-        if !active? { return Ok(None); }
+        if !active? || !self.native_region_asked(window)? { return Ok(None); }
         let Some(marker) = self.buffer_mark_value(buffer) else { return Ok(None); };
         let Some(Object::Marker(mark)) = self.object_if(marker) else { return Ok(None); };
         if mark.buffer != buffer { return Ok(None); }
@@ -2357,6 +2373,7 @@ impl Vm {
             accessible,
             start,
             mark,
+            native_region: self.native_region_asked(window)?,
             terminal,
             geometry: (x, width, height, hscroll, vscroll),
             min_hscroll,
