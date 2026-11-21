@@ -111,11 +111,11 @@ fn install(flight: Option<Flight>) -> Option<Flight> {
 
 /// Start recording to, or replaying from, the log ROMACS_FLIGHT names
 /// (`record:PATH` or `replay:PATH`), on this thread, the evaluator's. The
-/// variable is removed, so no process this one starts records too. A
-/// report of the run is written beside the log when it ends (`finish`).
+/// variable is a launch marker (`host::LAUNCH_MARKERS`), so no process this
+/// one starts records too. A report of the run is written beside the log
+/// when it ends (`finish`).
 pub fn start_from_environment() -> Result<(), String> {
-    let Some(spec) = crate::host::getenv("ROMACS_FLIGHT") else { return Ok(()) };
-    crate::host::unset_env("ROMACS_FLIGHT");
+    let Some(spec) = crate::host::take_marker("ROMACS_FLIGHT") else { return Ok(()) };
     let spec = spec.to_string_lossy().into_owned();
     let (role, path) = spec.split_once(':').ok_or_else(|| format!("ROMACS_FLIGHT={spec}: want record:PATH or replay:PATH"))?;
     let path = PathBuf::from(path);
