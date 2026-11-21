@@ -152,7 +152,7 @@ class Bars(unittest.TestCase):
         self.assertEqual((d.overall([row]), d.overall([]), d.bars_of([row])), ('FAIL', 'FAIL', {}))
 
     def test_a_reported_figure_is_held_to_nothing_and_stays_reported(self):
-        # A collection's whole step is the world's heap: reported, never held.
+        # A collection's whole step moves with the session's history (romacs#403).
         reported = {**self.bars, 'step_instructions': d.REPORTED}
         row = d.verdict(PAINTS, {**self.result, 'readings': readings((10**9, *STEP[1:]), STEP)}, 2, {'typed': reported})
         self.assertEqual((row['status'], row['off']), ('PASS', []))
