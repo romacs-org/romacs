@@ -20,7 +20,15 @@ is bound in the derived mode's buffer and at the propertized text; the old
 key is gone; the user's key stays; the untouched option has its new
 default and the one the user set keeps its value; the preloaded file's new
 function is there; the ledger names both files at their blobs and the mode
-line shows its mark.  Worlds and compiled Lisp stay under the private
+line shows its mark.
+
+Then M-x romacs-restart: the successor puts the ledger's files back from
+its image before the buffers (the same blobs, the new key, the probe, the
+mark).  Then M-x romacs-session-reset onto the build (linked at its top
+as an installer links it): no ledger, the build's code and key, no mark,
+no kill ring, the unsaved file buffer carried and the saved one not.
+
+Worlds and compiled Lisp stay under the private
 root (--world-store).  A gate build has no compile world (only an
 install's whole-tree compile makes one), so the compiled-Lisp store's
 identity is not checked here.
@@ -39,6 +47,7 @@ import time
 
 import parity_live
 from parity_live import C, K, M, T, Engine, lisp_string, plist, private_tree, wait
+from restart_live import restart, successor
 
 TREE = Path(__file__).resolve().parents[3]
 
@@ -67,6 +76,7 @@ INIT = ''';; -*- lexical-binding: t -*-
 (with-current-buffer (get-buffer-create "journey-text")
   (insert (propertize "old chat text" 'keymap live-journey-mode-map)) (goto-char 3))
 (switch-to-buffer "journey")
+(with-temp-file (expand-file-name "pid" parity-probe-dir) (insert (number-to-string (emacs-pid))))
 (with-temp-file (expand-file-name "alive" parity-probe-dir) (insert (number-to-string (float-time))))
 '''
 
@@ -123,6 +133,12 @@ def build_and_source(root, env):
     return source, build, commit
 
 
+def install_binary(build, binary):
+    """BINARY at BUILD's top, as an installer links it: a restart onto the
+    build (a reset's target) runs it with BUILD as its runtime."""
+    (build / 'romacs-vm-gui').symlink_to(binary)
+
+
 def ready(engine, predicate, what, timeout=None):
     wait(lambda: plist(engine.ask(f'(parity-probe-ready (lambda () {predicate}))')).get('ready'),
          timeout or engine.timeout, f'{engine.name} {what}', engine.process, .05)
@@ -138,6 +154,7 @@ def run(args, output, entry):
     root, home, env = private_tree('romacs', Path(args.work), args.tools, prefix='live-update-')
     entry['root'] = str(root)
     source, build, commit = build_and_source(root, env)
+    install_binary(build, args.romacs)
     env.update(ROMACS_RUNTIME_ROOT=str(build), ROMACS_LISP_DIR=str(build / 'lisp'),
                ROMACS_GUI_FONT='Iosevka', ROMACS_GUI_FONT_SIZE='14')
     (home / '.config/romacs').mkdir()
@@ -214,12 +231,84 @@ def run(args, output, entry):
             'mode line mark': 'Δ2' in (entry['mode_line'] or ''),
         }
         entry['checks'] = checks
+        checks.update(restart_and_reset(engine, root, blobs, entry))
         entry['status'] = 'PASS' if all(checks.values()) else 'FAIL'
     finally:
         engine.stop()
     if entry['status'] == 'PASS' and not args.keep:
         shutil.rmtree(root, ignore_errors=True)
     return entry
+
+
+RESTARTED = '''(list
+ :ledger (mapcar (lambda (e) (list (plist-get e :path) (plist-get e :state) (plist-get e :new))) (plist-get (bound-and-true-p romacs-live-ledger) :entries))
+ :report (and (bound-and-true-p romacs-live-last-report) (romacs-live-summary romacs-live-last-report))
+ :problems (format "%S" (plist-get (bound-and-true-p warm-restart-last-report) :problems))
+ :live (featurep 'romacs-live)
+ :mode (with-current-buffer "journey" (list (key-binding (kbd "C-c b")) (key-binding (kbd "C-c a"))))
+ :probe (and (fboundp 'subr-x-live-journey-probe) (funcall 'subr-x-live-journey-probe))
+ :mark (let ((w (get-buffer-window "journey"))) (and w (substring-no-properties (format-mode-line (buffer-local-value (quote mode-line-format) (window-buffer w)) nil w))))
+ :kill (car kill-ring)
+ :note (and (get-buffer "reset-note.txt") (with-current-buffer "reset-note.txt" (buffer-string)))
+ :kept (and (get-buffer "kept.txt") t))'''
+
+
+def successor_up(engine, pressed, replays):
+    """ENGINE on the process that took over, its restore done and, when it
+    REPLAYS a ledger, its replay too."""
+    pid, seconds = successor(engine, pressed)
+    if replays:
+        wait(lambda: engine.ask('(if (and (featurep (quote romacs-live)) romacs-live-last-report'
+                                ' (not romacs-live--running)) 1 0)') == 1,
+             engine.timeout, 'the replay', engine.process, .05)
+    engine.ask('(progn (switch-to-buffer "journey") t)')
+    ready(engine, '(equal (buffer-name) "journey")', 'the journey buffer')
+    return pid, seconds
+
+
+def restart_and_reset(engine, root, blobs, entry):
+    """A restart carries the ledger and the successor puts its files back;
+    a reset then restarts onto the build with neither, carrying only the
+    unsaved buffer.  The checks."""
+    work = root / 'work'
+    old_pid = engine.process.pid
+    status, pressed, _ = restart(engine)
+    new_pid, entry['restart_seconds'] = successor_up(engine, pressed, True)
+    restarted = plist(engine.ask(RESTARTED))
+    entry['restarted'] = restarted
+    # What a reset drops and keeps: a kill, a saved file, an unsaved one.
+    (work / 'kept.txt').write_text('kept on disk\n')
+    (work / 'reset-note.txt').write_text('on disk\n')
+    engine.ask(f'(progn (kill-new "a kill") (find-file-noselect {lisp_string(str(work / "kept.txt"))})'
+               f' (with-current-buffer (find-file-noselect {lisp_string(str(work / "reset-note.txt"))})'
+               ' (goto-char (point-max)) (insert "typed\\n")) t)')
+    (engine.probe_dir / 'alive').unlink()
+    engine.keys(M('x'))
+    ready(engine, '(minibufferp)', 'M-x prompt')
+    engine.keys(T('romacs-session-reset'))
+    ready(engine, '(equal (minibuffer-contents-no-properties) "romacs-session-reset")', 'the reset typed')
+    engine.keys(K('Return'))
+    ready(engine, '(string-match-p "Reset onto" (or (minibuffer-prompt) ""))', 'the reset question')
+    engine.keys(T('yes'), K('Return'))
+    pressed = time.time()
+    wait(lambda: engine.process.poll() is not None, engine.timeout, 'the session to exit for the reset')
+    reset_pid, entry['reset_seconds'] = successor_up(engine, pressed, False)
+    reset = plist(engine.ask(RESTARTED))
+    entry['reset'] = reset
+    return {
+        'restart: a new process': status == 0 and new_pid != old_pid,
+        'restart: the ledger comes back at its blobs': sorted(restarted['ledger'] or []) == sorted(
+            [[p, 'loaded', b] for p, b in blobs.items()]),
+        'restart: the files are put back': restarted['probe'] == 42 and restarted['mode'] == ['live-journey-b', None],
+        'restart: the mark': 'Δ2' in (restarted['mark'] or ''),
+        'reset: a new process': reset_pid != new_pid,
+        'reset: no ledger, the build\'s code': not reset['ledger'] and reset['probe'] is None
+                                               and reset['mode'] == [None, 'live-journey-a'],
+        'reset: no mark': 'Δ' not in (reset['mark'] or ''),
+        'reset: no kill ring': reset['kill'] is None,
+        'reset: the unsaved buffer carried': reset['note'] == 'on disk\ntyped\n',
+        'reset: the saved file buffer not carried': reset['kept'] is None,
+    }
 
 
 def main():
