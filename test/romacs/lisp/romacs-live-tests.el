@@ -27,6 +27,7 @@
 (defvar rlt-mva-twice)
 (defvar rlt-ad-hook)
 (defvar rlt-lk-map)
+(defvar romacs-server-build-watch)
 
 (defun romacs-live-tests--git (dir &rest args)
   "Git ARGS in DIR; its output."
@@ -682,6 +683,108 @@ and a build of that commit: a plist `:top', `:src', `:build', `:commit'."
            (romacs-live-forms-read "(defvar d `(dir ,(file-name-directory load-file-name)))")))
   (should (romacs-live-forms-beside-itself-p
            (romacs-live-forms-read "(defvar d (file-name-directory (file-truename (or load-file-name buffer-file-name))))"))))
+
+(defun romacs-live-tests--restart (ledger)
+  "Replay LEDGER as a restart's successor does, through its image part's
+reader; the report."
+  (let ((done nil))
+    (cl-letf (((symbol-function 'message) #'ignore))
+      (romacs-live-restore-ledger ledger (lambda () (setq done t))))
+    (should done)
+    romacs-live-last-report))
+
+(ert-deftest romacs-live-a-restart-puts-the-ledger-back ()
+  ;; The successor runs the build: the ledger's files load again over it,
+  ;; keymap and all, and keep where they came from.
+  (romacs-live-tests--with fx
+      `(("lisp/rlt-rp.el" . ,(romacs-live-tests--file "rlt-rp" "(defun rlt-rp-f () 1)")))
+    (require 'rlt-rp)
+    (romacs-live-tests--edit fx "lisp/rlt-rp.el" (romacs-live-tests--file "rlt-rp" "(defun rlt-rp-f () 2)"))
+    (romacs-live-tests--update fx)
+    (let ((ledger (copy-tree romacs-live-ledger)))
+      (should (equal (romacs-live--image-part) (cons 'romacs-live-restore-ledger ledger)))
+      ;; As the successor finds it: the build's code, no ledger.
+      (load (expand-file-name "lisp/rlt-rp.el" (plist-get fx :build)) nil t)
+      (setq romacs-live-ledger nil)
+      (should (= (funcall 'rlt-rp-f) 1))
+      (let ((report (romacs-live-tests--restart ledger)))
+        (should (= (funcall 'rlt-rp-f) 2))
+        (should-not (plist-get report :dropped))
+        (should (equal (plist-get (car (plist-get romacs-live-ledger :entries)) :source)
+                       (plist-get (car (plist-get ledger :entries)) :source)))))))
+
+(ert-deftest romacs-live-a-restart-drops-what-the-build-took-or-changed ()
+  (romacs-live-tests--with fx
+      `(("lisp/rlt-ld.el" . ,(romacs-live-tests--file "rlt-ld" "(defun rlt-ld-f () 1)"))
+        ("lisp/rlt-sp.el" . ,(romacs-live-tests--file "rlt-sp" "(defun rlt-sp-f () 1)")))
+    (require 'rlt-ld)
+    (require 'rlt-sp)
+    (let ((landed (romacs-live-tests--file "rlt-ld" "(defun rlt-ld-f () 2)")))
+      (romacs-live-tests--edit fx "lisp/rlt-ld.el" landed)
+      (romacs-live-tests--edit fx "lisp/rlt-sp.el" (romacs-live-tests--file "rlt-sp" "(defun rlt-sp-f () 2)"))
+      (romacs-live-tests--update fx)
+      (let ((ledger (copy-tree romacs-live-ledger)))
+        (setq romacs-live-ledger nil)
+        ;; The new build has the first file as the ledger had it, and the
+        ;; second as neither had it.
+        (romacs-live-tests--write (expand-file-name "lisp/rlt-ld.el" (plist-get fx :build)) landed)
+        (romacs-live-tests--write (expand-file-name "lisp/rlt-sp.el" (plist-get fx :build))
+                                  (romacs-live-tests--file "rlt-sp" "(defun rlt-sp-f () 3)"))
+        (let ((report (romacs-live-tests--restart ledger)))
+          (should (equal (mapcar (lambda (d) (list (plist-get d :path) (plist-get d :why))) (plist-get report :dropped))
+                         '(("lisp/rlt-ld.el" landed) ("lisp/rlt-sp.el" superseded))))
+          (should-not romacs-live-ledger))))))
+
+(ert-deftest romacs-live-a-restart-after-two-updates-puts-the-last-back ()
+  ;; build -> B -> C, then a restart into the same build: C's base is B,
+  ;; but what is compared with the build is the build's own copy.
+  (romacs-live-tests--with fx
+      `(("lisp/rlt-tu.el" . ,(romacs-live-tests--file "rlt-tu" "(defun rlt-tu-f () 1)")))
+    (require 'rlt-tu)
+    (dolist (n '(2 3))
+      (romacs-live-tests--edit fx "lisp/rlt-tu.el" (romacs-live-tests--file "rlt-tu" (format "(defun rlt-tu-f () %d)" n)))
+      (romacs-live-tests--update fx))
+    (let ((ledger (copy-tree romacs-live-ledger)))
+      (load (expand-file-name "lisp/rlt-tu.el" (plist-get fx :build)) nil t)
+      (setq romacs-live-ledger nil)
+      (let ((report (romacs-live-tests--restart ledger)))
+        (should-not (plist-get report :dropped))
+        (should (= (funcall 'rlt-tu-f) 3))))))
+
+(ert-deftest romacs-live-a-session-with-live-files-keeps-them-over-an-image ()
+  (let ((romacs-live-ledger '(:entries ((:path "lisp/x.el")))) (called nil))
+    (should-error (romacs-live-restore-ledger '(:entries nil) (lambda () (setq called t))) :type 'user-error)
+    (should-not called)))
+
+(ert-deftest romacs-live-a-replay-that-puts-nothing-back-says-why ()
+  (should (string-match-p "1 landed"
+                          (romacs-live-summary '(:label "the ledger" :refusals ("x: a layout changes")
+                                                 :dropped ((:path "a" :why landed))))))
+  (should (string-match-p "1 landed, 1 superseded"
+                          (romacs-live-summary '(:label "the ledger" :rows nil
+                                                 :dropped ((:path "a" :why landed) (:path "b" :why superseded)))))))
+
+(ert-deftest romacs-live-a-reset-asks-a-fresh-restart-onto-the-installed-build ()
+  (require 'warm-restart)
+  (let* ((asked nil)
+         (installed (make-temp-file "romacs-live-installed-" t))
+         (romacs-server-build-watch installed))
+    (unwind-protect
+        (cl-letf (((symbol-function 'warm-restart-request) (lambda (&rest args) (setq asked args))))
+          (romacs-session-reset)
+          (should (equal (plist-get asked :fresh) 'unsaved))
+          (should (equal (plist-get asked :target) installed))
+          (romacs-session-reset t)
+          (should (equal (plist-get asked :fresh) 'buffers))
+          ;; No watched build: this executable, with its runtime, even
+          ;; when the runtime root holds another one.
+          (let ((romacs-server-build-watch nil))
+            (cl-letf (((symbol-function 'romacs-live--runtime-root) (lambda () installed)))
+              (with-temp-file (expand-file-name "romacs-vm-gui" installed) (insert "#!/bin/sh\n"))
+              (set-file-modes (expand-file-name "romacs-vm-gui" installed) #o755)
+              (romacs-session-reset)
+              (should (equal (plist-get asked :target) (expand-file-name invocation-name invocation-directory))))))
+      (delete-directory installed t))))
 
 (ert-deftest romacs-live-forms-diff-names-each-definition ()
   (let ((diff (romacs-live-forms-diff
