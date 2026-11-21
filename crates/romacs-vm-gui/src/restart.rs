@@ -137,7 +137,7 @@ fn unit(server: &str) -> String { format!("romacs-server-{server}") }
 
 /// The server unit's state, or None without a user manager.
 fn unit_state(server: &str) -> Option<String> {
-    let out = std::process::Command::new("systemctl").args(["--user", "show", "-p", "ActiveState", "--value", &unit(server)])
+    let out = romacs_vm::host::child("systemctl").args(["--user", "show", "-p", "ActiveState", "--value", &unit(server)])
         .stdin(std::process::Stdio::null()).output().ok()?;
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_owned())
 }
@@ -151,7 +151,7 @@ fn signal(pid: u32, signal: rustix::process::Signal) {
 
 /// SIDE's command for server NAME, with ARGS after its launch flags.
 fn command(side: &Side, server: &str, args: &[&str]) -> std::process::Command {
-    let mut command = std::process::Command::new(&side.exe);
+    let mut command = romacs_vm::host::child(&side.exe);
     command.args(["--server", server]).args(args);
     for name in &side.unset { command.env_remove(name); }
     for (name, value) in &side.set { command.env(name, value); }
@@ -271,7 +271,7 @@ fn tail(text: &str) -> String {
 /// finds no server answering and starts its own.
 fn stop(server: &str, pid: Option<u32>) {
     if unit_state(server).is_some_and(|state| state == "active" || state == "activating") {
-        let _ = std::process::Command::new("systemctl").args(["--user", "stop", &unit(server)]).status();
+        let _ = romacs_vm::host::child("systemctl").args(["--user", "stop", &unit(server)]).status();
     }
     if let Some(pid) = pid.filter(|&pid| alive(pid)) {
         signal(pid, rustix::process::Signal::TERM);
@@ -291,7 +291,7 @@ fn tell(side: &Side, server: &str, record: &Path) {
 }
 
 fn notify(title: &str, body: &str) {
-    let _ = std::process::Command::new("notify-send").env_remove("LD_LIBRARY_PATH")
+    let _ = romacs_vm::host::child("notify-send").env_remove("LD_LIBRARY_PATH")
         .args(["-u", "critical", "-a", "Romacs", title, body]).status();
 }
 

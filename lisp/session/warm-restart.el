@@ -1931,7 +1931,10 @@ outside this process's unit."
     (if (getenv "INVOCATION_ID")
         (unless (zerop (apply #'call-process "systemd-run" nil nil nil
                               (append (list "--user" "--quiet" "--collect"
-                                            (format "--unit=romacs-restart-%s-%d" server (emacs-pid)))
+                                            (format "--unit=romacs-restart-%s-%d" server (emacs-pid))
+                                            ;; Nor the user manager's launch markers.
+                                            (concat "--property=UnsetEnvironment="
+                                                    (string-join (romacs--launch-markers) " ")))
                                       (romacs-restart--environment-arguments)
                                       (list "--" program "--restart-supervise" plan))))
           (error "systemd-run could not start the restart's supervisor"))
