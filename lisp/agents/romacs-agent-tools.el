@@ -1692,9 +1692,11 @@ new work draws on now."
 (defun romacs-agent-tools--capabilities (arguments)
   "Each provider instance (`romacs-agent-instances'): its harness,
 directory, program, models, whether it is enabled and where it comes
-from; and each one Romacs cannot run, with why."
+from; and each one Romacs cannot run, with why.  The models are those
+known: a harness not asked yet in this run is asked in the background."
   (romacs-mcp--instance arguments)
   (pcase-let ((`(,instances . ,constraints) (romacs-agent-instances t)))
+    (romacs-agent--want-models (cl-remove-if-not (lambda (i) (plist-get i :enabled)) instances))
     (romacs-mcp--object
      "default" (or (ignore-errors (romacs-agent--default-provider)) :null)
      "providers"
