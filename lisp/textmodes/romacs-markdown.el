@@ -20,8 +20,8 @@
 ;;   width, for text shown rather than edited (an agent's reply).
 ;;
 ;; A code block is coloured as its language: by the language's tree-sitter
-;; mode (romacs-treesit-code.el), else by the major mode
-;; `romacs-markdown-code-modes' names, through its Font Lock.
+;; mode (romacs-treesit-code.el), else by its lexical classes
+;; (romacs-lexical.el).  No major mode runs for it.
 
 ;;; Code:
 
@@ -31,6 +31,8 @@
 (declare-function romacs-treesit-code-language-p "romacs-treesit-code" (language))
 (declare-function romacs-treesit-fontify-code "romacs-treesit-code" (language block-beg block-end &optional start end replace))
 (declare-function romacs-treesit-fontify-string "romacs-treesit-code" (language string))
+
+(require 'romacs-lexical)
 
 (defgroup romacs-markdown nil
   "Markdown, parsed in Rust."
@@ -125,14 +127,6 @@ A name not here means the language it names."
   :type '(alist :key-type string :value-type symbol)
   :group 'romacs-markdown)
 
-(defcustom romacs-markdown-code-modes
-  '((emacs-lisp . emacs-lisp-mode) (lisp . lisp-mode) (scheme . scheme-mode)
-    (diff . diff-mode) (makefile . makefile-mode))
-  "Languages with no tree-sitter mode, to the major mode that colours them.
-A code block in one of these is coloured by its mode's Font Lock."
-  :type '(alist :key-type symbol :value-type function)
-  :group 'romacs-markdown)
-
 ;;; Code blocks
 
 (defun romacs-markdown--language (name)
@@ -140,30 +134,6 @@ A code block in one of these is coloured by its mode's Font Lock."
   (when (and name (not (string-empty-p name)))
     (let ((key (downcase name)))
       (or (cdr (assoc key romacs-markdown-code-languages)) (intern key)))))
-
-(defvar romacs-markdown--mode-buffers nil
-  "Hidden buffers, by major mode, in which code blocks are coloured.")
-
-(defun romacs-markdown--mode-faces (mode text)
-  "The faces MODE's Font Lock gives TEXT, as (FROM TO FACE), FROM from 0."
-  (let ((buffer (alist-get mode romacs-markdown--mode-buffers)))
-    (unless (buffer-live-p buffer)
-      (setq buffer (generate-new-buffer (format " *romacs-markdown %s*" mode) t))
-      (with-current-buffer buffer (delay-mode-hooks (funcall mode)))
-      (setf (alist-get mode romacs-markdown--mode-buffers) buffer))
-    (with-current-buffer buffer
-      ;; Its change hooks run, so its syntax caches forget the last block.
-      (let ((inhibit-read-only t) (inhibit-modification-hooks nil))
-        (erase-buffer)
-        (insert text)
-        (font-lock-ensure)
-        (let ((at (point-min)) spans)
-          (while (< at (point-max))
-            (let ((next (next-single-property-change at 'face nil (point-max))))
-              (when-let* ((face (get-text-property at 'face)))
-                (push (list (- at (point-min)) (- next (point-min)) face) spans))
-              (setq at next)))
-          (nreverse spans))))))
 
 (defun romacs-markdown--lasting-buffer-p ()
   "Whether the current buffer outlives this command: not a temporary one,
@@ -174,10 +144,7 @@ whose hidden code buffers could not be killed with it."
   "Colour BEG..END of the current buffer, a code block's text, as LANGUAGE.
 Its faces go in front of those already there."
   (require 'romacs-treesit-code)
-  (cond ((not (romacs-treesit-code-language-p language))
-         (when-let* ((mode (alist-get language romacs-markdown-code-modes)) ((fboundp mode)))
-           (pcase-dolist (`(,from ,to ,face) (romacs-markdown--mode-faces mode (buffer-substring-no-properties beg end)))
-             (add-face-text-property (+ beg from) (+ beg to) face))))
+  (cond ((not (romacs-treesit-code-language-p language)) (romacs-lexical-colour language beg end))
         ((romacs-markdown--lasting-buffer-p) (romacs-treesit-fontify-code language beg end))
         (t (let ((coloured (romacs-treesit-fontify-string language (buffer-substring-no-properties beg end)))
                  (at 0))
@@ -198,13 +165,16 @@ buffer, as their languages."
 
 (defun romacs-markdown-fontify-region (beg end &optional from)
   "Face BEG..END of the current buffer as one Markdown document, in place.
-Only `face' changes, and no undo is recorded.  With FROM, the text before
-FROM has not changed since the last call on this region: the blocks from
-the one before FROM's are refaced, the others are left as they are.
-Code blocks are coloured as their language.  Return the position the
-faces were rewritten from."
+Only `face' changes, and no undo is recorded.  With FROM, a position or
+a marker, the text before FROM has not changed since the last call on
+this region: the blocks from the one before FROM's are refaced, the
+others are left as they are.  Code blocks are coloured as their
+language.  Return the position the faces were rewritten from: the start
+of a top-level block, from which the region may be read again as a
+document of its own."
   (with-silent-modifications
-    (pcase-let ((`(,start . ,codes) (romacs-markdown--fontify beg end romacs-markdown-faces from)))
+    (pcase-let ((`(,start . ,codes) (romacs-markdown--fontify beg end romacs-markdown-faces
+                                                            (if (markerp from) (marker-position from) from))))
       (romacs-markdown--colour-codes codes)
       start)))
 

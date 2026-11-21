@@ -302,7 +302,7 @@ impl Vm {
     // this redirect; nor does kill-local-variable.
     pub(super) fn initialize_variable_redirect(&mut self, name: &str, slot: usize) {
         self.variable_redirects.resize(self.variable_redirects.len().max(slot + 1), None);
-        if self.variable_redirects[slot].is_none() && self.names.get(name) == Some(&slot)
+        if self.variable_redirects[slot].is_none() && self.in_initial_obarray(slot)
             && let Some(fwd) = crate::forwarded::Forwarded::lookup(name) {
             self.variable_redirects[slot] = Some(VariableRedirect::Forwarded(fwd));
         }
@@ -349,10 +349,10 @@ impl Vm {
     fn localized_first(&mut self, slot: usize) -> bool {
         // Code images rebuild slots without interning; uninterned slots are
         // never forwarded. Resolve the redirect once.
-        let name = self.symbol_names[slot].clone();
-        if self.names.get(&name) != Some(&slot) {
+        if !self.in_initial_obarray(slot) {
             return self.slots[slot].localness != Localness::Never;
         }
+        let name = self.symbol_names[slot].clone();
         self.initialize_variable_redirect(&name, slot);
         self.localized(slot)
     }
@@ -681,7 +681,7 @@ impl Vm {
     /// `special-variable-p' of SLOT's symbol: declared special now.
     pub(crate) fn slot_is_special(&self, slot: usize) -> bool {
         self.slots[slot].declared_special
-            || (self.names.get(&self.symbol_names[slot]) == Some(&slot) && self.specials.contains(&self.symbol_names[slot]))
+            || (self.in_initial_obarray(slot) && self.specials.contains(&self.symbol_names[slot]))
     }
     /// What `special_cache' answers hold under: a specials change since
     /// moves it (an insertion that matters grows `specials').

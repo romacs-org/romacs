@@ -1702,7 +1702,7 @@ or the `pop-to-buffer' function."
       (setq buffer-read-only t)
       (local-set-key "q" (lambda () (interactive) (kill-buffer nil)))
       (local-set-key "=" (lambda () (interactive) (delete-other-windows)))
-      (local-set-key "\r"
+      (local-set-key (kbd "RET")
 		     (lambda ()
 		       (interactive)
 		       (widget-button-press (point))))

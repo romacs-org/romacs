@@ -139,13 +139,13 @@ When called, the current buffer will be the Scheme process-buffer."
   :version "20.3")
 
 (defun xscheme-evaluation-commands (keymap)
-  (define-key keymap "\e\C-x" 'xscheme-send-definition)
+  (define-key keymap (kbd "ESC C-x") 'xscheme-send-definition)
   (define-key keymap "\C-x\C-e" 'xscheme-send-previous-expression)
   (put 'xscheme-send-previous-expression :advertised-binding "\C-x\C-e")
-  (define-key keymap "\eo" 'xscheme-send-buffer)
-  (define-key keymap "\ez" 'xscheme-send-definition)
-  (define-key keymap "\e\C-m" 'xscheme-send-previous-expression)
-  (define-key keymap "\e\C-z" 'xscheme-send-region))
+  (define-key keymap (kbd "ESC o") 'xscheme-send-buffer)
+  (define-key keymap (kbd "ESC z") 'xscheme-send-definition)
+  (define-key keymap (kbd "ESC RET") 'xscheme-send-previous-expression)
+  (define-key keymap (kbd "ESC C-z") 'xscheme-send-region))
 
 (defun xscheme-interrupt-commands (keymap)
   (define-key keymap "\C-c\C-s" 'xscheme-select-process-buffer)

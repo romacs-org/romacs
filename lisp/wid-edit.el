@@ -1098,8 +1098,8 @@ button end points."
 ;;;###autoload
 (defvar widget-keymap
   (let ((map (make-sparse-keymap)))
-    (define-key map "\t" 'widget-forward)
-    (define-key map "\e\t" 'widget-backward)
+    (define-key map (kbd "TAB") 'widget-forward)
+    (define-key map (kbd "ESC TAB") 'widget-backward)
     (define-key map [(shift tab)] 'widget-backward)
     (put 'widget-backward :advertised-binding [(shift tab)])
     (define-key map [backtab] 'widget-backward)
@@ -1121,7 +1121,7 @@ Note that such modes will need to require wid-edit.")
   (let ((map (copy-keymap widget-keymap)))
     (define-key map "\C-k" #'widget-kill-line)
     (define-key map "\M-\t" #'widget-complete)
-    (define-key map "\C-m" #'widget-field-activate)
+    (define-key map (kbd "RET") #'widget-field-activate)
     ;; Since the widget code uses a `field' property to identify fields,
     ;; ordinary beginning-of-line does the right thing.
     ;;  (define-key map "\C-a" #'widget-beginning-of-line)

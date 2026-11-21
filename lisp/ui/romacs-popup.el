@@ -29,6 +29,7 @@
 (require 'subr-x)
 (require 'romacs-layer)
 (require 'romacs-grid)
+(require 'romacs-theme)
 
 (defgroup romacs-popup nil
   "Romacs's floating menus."
@@ -63,19 +64,6 @@ theme's dim text, made legible on the menu's glass (`romacs-popup-legible').")
 (defconst romacs-popup-key-contrast 4.5
   "The contrast a menu's text keeps on its glass, WCAG AA for text.")
 
-(defun romacs-popup--floor (color &optional contrast)
-  "COLOR moved in lightness until it reads on the menus' glass at
-CONTRAST (`romacs-popup-key-contrast' by default), as #RRGGBB; nil when
-COLOR or the glass cannot be resolved.  A #RRGGBB colour is taken as
-written: only a name needs the display."
-  (let* ((hex (lambda (c) (cond ((not (stringp c)) nil)
-                                 ((string-match-p "\\`#[[:xdigit:]]\\{6\\}\\'" c) c)
-                                 ((color-defined-p c) (romacs-chrome--hex c)))))
-         (fg (funcall hex color))
-         (glass (funcall hex (or (face-background 'romacs-popup nil t) (face-background 'default nil t)))))
-    (and (fboundp 'romacs-color-floor-on) fg glass
-         (romacs-color-floor-on fg (list glass) (or contrast romacs-popup-key-contrast)))))
-
 (defun romacs-popup-legible (color &optional contrast)
   "COLOR moved in lightness until it reads on the menus' glass (the
 `romacs-popup' face's background) at CONTRAST, by default
@@ -83,6 +71,12 @@ written: only a name needs the display."
 is unknown.  For a caller's own colours on a menu: the glass, not the
 editor's background, is what they are drawn over."
   (or (romacs-popup--floor color contrast) color))
+
+(defun romacs-popup--floor (color &optional contrast)
+  "COLOR legible on the menus' glass (`romacs-popup-legible'), or nil when
+it or the glass is no colour the frame knows."
+  (romacs-color-legible color (or (face-background 'romacs-popup nil t) (face-background 'default nil t))
+                        (or contrast romacs-popup-key-contrast)))
 
 (defun romacs-popup--set-spec (face spec)
   "Make SPEC FACE's default spec, unless it is already."

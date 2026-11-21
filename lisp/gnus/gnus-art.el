@@ -4960,7 +4960,7 @@ General format specifiers can also be used.  See Info node
 
 (defvar gnus-mime-button-map
   (let ((map (make-sparse-keymap)))
-    (define-key map "\r"           #'gnus-article-push-button)
+    (define-key map (kbd "RET")           #'gnus-article-push-button)
     (define-key map [mouse-2]      #'gnus-article-push-button)
     (define-key map [down-mouse-3] #'gnus-mime-button-menu)
     (dolist (c gnus-mime-button-commands)
@@ -8841,7 +8841,7 @@ For example:
 
 (defvar gnus-mime-security-button-map
   (let ((map (make-sparse-keymap)))
-    (define-key map "\r"           #'gnus-article-push-button)
+    (define-key map (kbd "RET")           #'gnus-article-push-button)
     (define-key map [mouse-2]      #'gnus-article-push-button)
     (define-key map [down-mouse-3] #'gnus-mime-security-button-menu)
     (dolist (c gnus-mime-security-button-commands)
