@@ -1,7 +1,8 @@
 ;;; romacs-help-completion.el --- Help's completion of symbols, loading no file  -*- lexical-binding: t -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
-;; Copyright (C) 1985-1986, 1993-2026 Free Software Foundation, Inc.
+;; Copyright (C) 1985-1986, 1993-1994, 1998-2026 Free Software
+;; Foundation, Inc.
 ;; Adapted from GNU help-fns.el: `help--symbol-completion-table', kept as
 ;; the GPL requires.
 
