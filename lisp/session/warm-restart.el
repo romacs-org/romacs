@@ -47,7 +47,7 @@
 (require 'desktop)
 
 (declare-function romacs--isolate-pump "isolate" (timeout))
-(declare-function romacs--timer-check "timers.rs" ())
+(declare-function romacs--timer-check "subprocess" ())
 (declare-function romacs--session-image-write "session_image.rs" (file form buffers))
 (declare-function romacs--session-image-read "session_image.rs" (file))
 (declare-function romacs--lead-buffer-list "buffer_names.rs" (buffers))
