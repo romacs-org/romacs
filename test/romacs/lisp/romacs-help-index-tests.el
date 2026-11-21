@@ -67,6 +67,11 @@ from the sources again once one did."
           (should (gethash "rhi-probe-one" (romacs-help-index-build '("rhi-probe") path cache)))
           (let ((key (romacs-help-index--key (romacs-help-index--sources '("rhi-probe") path))))
             (should (romacs-help-index--read-cache cache key)))
+          ;; Another version of the code that reads the sources makes
+          ;; another key: the cache is stale.
+          (let ((romacs-help-index--file file))
+            (should-not (romacs-help-index--read-cache
+                         cache (romacs-help-index--key (romacs-help-index--sources '("rhi-probe") path)))))
           (with-temp-file file (insert "(defun rhi-probe-two () nil)\n"))
           (set-file-times file (time-add nil 5))
           (let ((index (romacs-help-index-build '("rhi-probe") path cache)))

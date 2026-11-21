@@ -25,6 +25,9 @@
 
 ;;;; Reading definitions (in the worker)
 
+(defconst romacs-help-index--file (or load-file-name buffer-file-name)
+  "This file, whose code makes the index: a cache another made is stale.")
+
 (defconst romacs-help-index--definition
   "^(\\(\\(?:cl-\\)?def[^ \t\n]+\\)[ \t\n]+['(]*\\([^' ()\"\n]+\\)[\n \t]"
   "A top-level definition's form and name, as loaddefs-gen.el finds them
@@ -133,7 +136,7 @@ left out."
 
 (defun romacs-help-index--key (sources)
   "What SOURCES' index is made of: each source's name, size and
-modification time, digested."
+modification time, and this file's, which reads them, digested."
   (secure-hash 'sha256
                (prin1-to-string
                 (mapcar (lambda (source)
@@ -141,7 +144,7 @@ modification time, digested."
                             (list (car source) (cdr source)
                                   (file-attribute-size attributes)
                                   (file-attribute-modification-time attributes))))
-                        sources))))
+                        (cons (cons "romacs-help-index" romacs-help-index--file) sources)))))
 
 (defun romacs-help-index--read-cache (file key)
   "The index FILE holds for KEY, or nil."
