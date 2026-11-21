@@ -55,4 +55,11 @@ This mainly sets up debugger-related bindings."
     (insert "\n")))
 
 (provide 'romacs-ert-batch)
+
+;; Only a batch ERT run loads this file: help's completion must not
+;; load it by a prefix of its names into a --loadup session.
+;; Local Variables:
+;; autoload-compute-prefixes: nil
+;; End:
+
 ;;; romacs-ert-batch.el ends here
