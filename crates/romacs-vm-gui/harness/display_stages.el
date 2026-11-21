@@ -400,22 +400,28 @@ host's own, which `gcs-done' counts too.")
 
 (defun display-stages--collection ()
   "The instructions one full collection runs now, counted as one of the
-scenario's own (`display-stages--collected') once it returned."
-  (let ((start (romacs-instructions)))
-    (garbage-collect)
-    (prog1 (- (romacs-instructions) start)
-      (setq display-stages--collected (1+ display-stages--collected)))))
+scenario's own (`display-stages--collected') once it ran; nil when it did
+not (collection inhibited) or nothing counts instructions."
+  (when-let* ((start (romacs-instructions))
+              ((garbage-collect))
+              (end (romacs-instructions)))
+    (setq display-stages--collected (1+ display-stages--collected))
+    (- end start)))
 
 (defun display-stages--measure-baseline ()
   "Set `display-stages--baseline': a collection's median over five, once
-one has collected what came before."
+one has collected what came before; left nil, and nothing counted above
+it, unless all five ran."
   (garbage-collect)
-  (let ((runs (sort (cl-loop repeat 5 collect (display-stages--collection)) #'<)))
-    (setq display-stages--baseline (nth 2 runs) display-stages--above 0)))
+  (let ((runs (delq nil (cl-loop repeat 5 collect (display-stages--collection)))))
+    (when (= (length runs) 5)
+      (setq display-stages--baseline (nth 2 (sort runs #'<)) display-stages--above 0))))
 
 (defun display-stages--collect-above ()
   "Collect, counting what it ran above the session's baseline."
-  (setq display-stages--above (+ display-stages--above (- (display-stages--collection) display-stages--baseline))))
+  (when-let* ((cost (display-stages--collection))
+              ((and display-stages--baseline display-stages--above)))
+    (setq display-stages--above (+ display-stages--above (- cost display-stages--baseline)))))
 
 (defun display-stages--session ()
   "What the session holds that moves a collection: how many symbols are
@@ -457,9 +463,13 @@ measured, in the state the steps run in but for what :setup adds."
 (defun display-stages--when-settled (then)
   "Call THEN once a redisplay ran from now and nothing waits to run
 \(`display-stages--settled-p'), as a step is begun."
-  (romacs--redisplay-since-mark t)
   (let (poll)
     (setq poll (lambda () (if (display-stages--settled-p) (funcall then) (run-with-timer 0.05 nil poll))))
+    ;; Timers counted as the steps' are: one that runs is owed a
+    ;; redisplay, this poll alone being the loop's own.
+    (setq display-stages--poll poll display-stages--owed nil)
+    (advice-add 'timer-event-handler :around #'display-stages--run-timer)
+    (romacs--redisplay-since-mark t)
     (run-with-timer 0.05 nil poll)))
 
 (defun display-stages-start (name out steps)
@@ -484,7 +494,7 @@ stderr, and write the readings to OUT as JSON."
           (run-with-timer
            1.0 nil
            (lambda ()
-          (let ((step nil) (laid-out nil) (i 0))
+          (let ((step nil) (laid-out nil) (i 0) (started nil))
             (setq laid-out (lambda ()
                              (if (display-stages--settled-p) (funcall step) (run-with-timer gap nil laid-out)))
                   display-stages--poll laid-out)
@@ -493,6 +503,11 @@ stderr, and write the readings to OUT as JSON."
             ;; host's idle pass, which falls in this step or the next.
             (setq romacs-gc-idle-delay nil)
             (setq step (lambda ()
+                         ;; The steps' work alone recorded: from the first one.
+                         (unless started
+                           (setq started t)
+                           (scaling--mark (list :stages "start"))
+                           (scaling--perf "enable"))
                          (push (display-stages--reading) readings)
                          (if (< i steps)
                              (progn (set-buffer (window-buffer (selected-window)))
@@ -510,8 +525,6 @@ stderr, and write the readings to OUT as JSON."
                                             :session (display-stages--session)
                                             :waited display-stages--waited))))
                            (kill-emacs 0))))
-            (scaling--mark (list :stages "start"))
-            (scaling--perf "enable")
             ;; A scenario measured against a baseline starts as settled as
             ;; its baseline was measured: through the loop's own poll.
             (if (plist-get plist :baseline)
