@@ -685,12 +685,13 @@ and a build of that commit: a plist `:top', `:src', `:build', `:commit'."
            (romacs-live-forms-read "(defvar d (file-name-directory (file-truename (or load-file-name buffer-file-name))))"))))
 
 (defun romacs-live-tests--restart (ledger)
-  "Replay LEDGER as a restart's successor does; the report."
-  (let ((report :none))
+  "Replay LEDGER as a restart's successor does, through its image part's
+reader; the report."
+  (let ((done nil))
     (cl-letf (((symbol-function 'message) #'ignore))
-      (romacs-live-start (list :kind 'ledger :ledger ledger) (lambda (r) (setq report r))))
-    (should-not (eq report :none))
-    report))
+      (romacs-live-restore-ledger ledger (lambda () (setq done t))))
+    (should done)
+    romacs-live-last-report))
 
 (ert-deftest romacs-live-a-restart-puts-the-ledger-back ()
   ;; The successor runs the build: the ledger's files load again over it,
@@ -734,6 +735,32 @@ and a build of that commit: a plist `:top', `:src', `:build', `:commit'."
                          '(("lisp/rlt-ld.el" landed) ("lisp/rlt-sp.el" superseded))))
           (should-not romacs-live-ledger))))))
 
+(ert-deftest romacs-live-a-restart-after-two-updates-puts-the-last-back ()
+  ;; build -> B -> C, then a restart into the same build: C's base is B,
+  ;; but what is compared with the build is the build's own copy.
+  (romacs-live-tests--with fx
+      `(("lisp/rlt-tu.el" . ,(romacs-live-tests--file "rlt-tu" "(defun rlt-tu-f () 1)")))
+    (require 'rlt-tu)
+    (dolist (n '(2 3))
+      (romacs-live-tests--edit fx "lisp/rlt-tu.el" (romacs-live-tests--file "rlt-tu" (format "(defun rlt-tu-f () %d)" n)))
+      (romacs-live-tests--update fx))
+    (let ((ledger (copy-tree romacs-live-ledger)))
+      (load (expand-file-name "lisp/rlt-tu.el" (plist-get fx :build)) nil t)
+      (setq romacs-live-ledger nil)
+      (let ((report (romacs-live-tests--restart ledger)))
+        (should-not (plist-get report :dropped))
+        (should (= (funcall 'rlt-tu-f) 3))))))
+
+(ert-deftest romacs-live-a-session-with-live-files-keeps-them-over-an-image ()
+  (let ((romacs-live-ledger '(:entries ((:path "lisp/x.el")))) (called nil))
+    (should-error (romacs-live-restore-ledger '(:entries nil) (lambda () (setq called t))) :type 'user-error)
+    (should-not called)))
+
+(ert-deftest romacs-live-a-replay-that-puts-nothing-back-says-why ()
+  (should (string-match-p "1 landed, 1 superseded"
+                          (romacs-live-summary '(:label "the ledger" :rows nil
+                                                 :dropped ((:path "a" :why landed) (:path "b" :why superseded)))))))
+
 (ert-deftest romacs-live-a-reset-asks-a-fresh-restart-onto-the-installed-build ()
   (require 'warm-restart)
   (let* ((asked nil)
@@ -745,7 +772,11 @@ and a build of that commit: a plist `:top', `:src', `:build', `:commit'."
           (should (equal (plist-get asked :fresh) 'unsaved))
           (should (equal (plist-get asked :target) installed))
           (romacs-session-reset t)
-          (should (equal (plist-get asked :fresh) 'buffers)))
+          (should (equal (plist-get asked :fresh) 'buffers))
+          ;; No watched build: this session's own, never another command's.
+          (let ((romacs-server-build-watch nil))
+            (romacs-session-reset)
+            (should (plist-get asked :target))))
       (delete-directory installed t))))
 
 (ert-deftest romacs-live-forms-diff-names-each-definition ()

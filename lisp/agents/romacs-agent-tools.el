@@ -1740,10 +1740,11 @@ editor is between commands; tell the calling session its verdict."
   (romacs-mcp--instance arguments)
   (require 'warm-restart)
   (let* ((id (romacs-agent-tools--caller))
-         (session (and id (romacs-agent-get id))))
+         (session (and id (romacs-agent-get id)))
+         (target (or (gethash "target" arguments)
+                     (and (eq (gethash "fresh" arguments) t) (romacs-session-reset-target)))))
     (warm-restart-request
-     :target (or (gethash "target" arguments)
-                 (and (eq (gethash "fresh" arguments) t) (romacs-session-reset-target)))
+     :target target
      :fresh (and (eq (gethash "fresh" arguments) t)
                  (if (eq (gethash "keepBuffers" arguments) t) 'buffers 'unsaved))
      :delay (gethash "delay" arguments)
@@ -1766,7 +1767,7 @@ editor is between commands; tell the calling session its verdict."
                                                          #'ignore))))
     (romacs-mcp--object
      "status" (symbol-name (plist-get warm-restart-last-result :status))
-     "target" (or (gethash "target" arguments) :null)
+     "target" (or target :null)
      "waitsFor" "this call's reply, then the editor between commands"
      "verdict" "told this session when the new Romacs is judged; romacs_restart_status reads the record")))
 

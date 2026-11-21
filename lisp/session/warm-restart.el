@@ -77,8 +77,10 @@ successor (a queue of writes) is put there, however long it takes.")
 (defvar warm-restart-image-part-functions nil
   "Functions called with no arguments as an image is written, each giving
 a part of it, (READER . DATA) with DATA printable, or nil.  The successor
-calls READER, a function its own build defines, with DATA once it has read
-the image, before any buffer comes back: what a package carries of the
+calls READER, a function its own build defines, with DATA and DONE once it
+has read the image; READER calls DONE, a function of no arguments, when
+it is through, at once or later from a timer or a worker's answer, and no
+buffer comes back before every reader is: what a package carries of the
 session that is no buffer (romacs-live.el's ledger of live files).")
 
 (defvar warm-restart-fresh nil
@@ -714,6 +716,7 @@ a reset refuses as a restart does."
     (plist-put (copy-sequence plan) :buffers
                (cl-remove-if-not (lambda (e)
                                    (or (plist-get e :unsaved)
+                                       (with-current-buffer (plist-get e :buffer) (warm-restart--text-at-risk-p))
                                        (memq (plist-get e :strategy) '(blocked handler))
                                        (and (eq warm-restart-fresh 'buffers)
                                             (memq (plist-get e :strategy) '(file indirect)))))
@@ -731,13 +734,36 @@ a part that is not data is left out."
                         nil))
     (nreverse parts)))
 
-(defun warm-restart--restore-parts (form)
-  "Hand each part of FORM to its reader, before any buffer comes back;
-the problems, one a reader that is undefined or signalled."
-  (cl-loop for (reader . data) in (plist-get form :parts)
-           for problem = (condition-case err (progn (funcall reader data) nil)
-                           (error (list :part reader :reason (error-message-string err))))
-           when problem collect problem))
+(defun warm-restart--restore-parts (form then)
+  "Hand each part of FORM to its reader, one after another, and call THEN
+with the problems once every reader is through: one a reader that is
+undefined or signalled."
+  (let ((parts (plist-get form :parts)) (problems nil))
+    (cl-labels ((next ()
+                  (if (null parts)
+                      (funcall then (nreverse problems))
+                    (pcase-let ((`(,reader . ,data) (pop parts)) (called nil))
+                      (condition-case err
+                          (funcall reader data (lambda () (unless called (setq called t) (next))))
+                        (error (push (list :part reader :reason (error-message-string err)) problems)
+                               (unless called (setq called t) (next))))))))
+      (next))))
+
+(defcustom warm-restart-part-wait 30
+  "Seconds a restore of an image over a running session waits for its
+parts' readers before it restores the buffers regardless."
+  :type 'number)
+
+(defun warm-restart--restore-parts-now (form)
+  "The problems of FORM's parts, waiting for their readers here, at most
+`warm-restart-part-wait' seconds: a restore asked of a running session."
+  (let ((result :pending) (deadline (+ (float-time) warm-restart-part-wait)))
+    (warm-restart--restore-parts form (lambda (problems) (setq result problems)))
+    (while (and (eq result :pending) (< (float-time) deadline))
+      (accept-process-output nil 0.05))
+    (if (eq result :pending)
+        (list (list :part 'warm-restart-part-wait :reason "a part's reader did not finish in time"))
+      result)))
 
 ;;;###autoload
 (defun warm-restart-write (&optional plan file)
@@ -1615,7 +1641,7 @@ globals; its registers wait for every buffer.  The problems."
 Return the restore's state: FORM, the records, the buffers by id, and
 the problems so far."
   (let ((records (warm-restart--prepare form)) (buffers (make-hash-table :test #'equal))
-        (problems (warm-restart--restore-parts form)))
+        (problems (warm-restart--restore-parts-now form)))
     (dolist (record (warm-restart--ordered records))
       (setq problems (nconc (warm-restart--restore-one record blobs buffers) problems)))
     (warm-restart--applied form records buffers problems)))
@@ -1633,9 +1659,15 @@ is the `restore' stage of `romacs-startup-progress'."
                      (records (warm-restart--prepare form)))
           (romacs-startup-progress 'restore (format "Restoring buffers 0/%d" (length records))
                                    (list :status 'running :done 0 :of (length records) :seconds 0))
-          (pcase-let ((`(,shown . ,unseen) (warm-restart--split form records))
-                      (problems (warm-restart--restore-parts form)))
-            (warm-restart--step file start form blobs records shown unseen 0 (make-hash-table :test #'equal) problems)))
+          ;; Every part first: a reader that changes a mode's code does
+          ;; so before a restored buffer takes the mode.
+          (warm-restart--restore-parts
+           form (lambda (problems)
+                  (condition-case err
+                      (pcase-let ((`(,shown . ,unseen) (warm-restart--split form records)))
+                        (warm-restart--step file start form blobs records shown unseen 0 (make-hash-table :test #'equal)
+                                            problems))
+                    ((error quit) (warm-restart--report-later file start (list :error (error-message-string err))))))))
       ((error quit) (warm-restart--report-later file start (list :error (error-message-string err)))))))
 
 (defun warm-restart--step (file start form blobs records pending unseen done buffers problems)

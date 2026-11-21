@@ -1488,8 +1488,11 @@ and wait for it to end."
 
 (defvar warm-restart-tests--part nil "What the test part's reader was handed, and when.")
 
-(defun warm-restart-tests--part-reader (data)
-  (setq warm-restart-tests--part (list data (and (get-buffer "part-ordered.txt") t))))
+(defun warm-restart-tests--part-reader (data done)
+  ;; Through only later, from a timer: no buffer may come back before.
+  (run-at-time 0.2 nil (lambda ()
+                         (setq warm-restart-tests--part (list data (and (get-buffer "part-ordered.txt") t)))
+                         (funcall done))))
 
 (ert-deftest warm-restart-a-part-comes-back-before-the-buffers ()
   ;; A package's part (romacs-live's ledger) is handed to its reader as the
@@ -1541,6 +1544,11 @@ and wait for it to end."
             (should (member "fresh-edited.txt" (funcall names unsaved)))
             (should-not (member "fresh-saved.txt" (funcall names unsaved)))
             (should (member "fresh-saved.txt" (funcall names kept)))
+            ;; A file gone from the disk: its buffer is the only copy.
+            (delete-file saved)
+            (should (member "fresh-saved.txt"
+                            (funcall names (car (warm-restart--read (let ((warm-restart-fresh 'unsaved))
+                                                                     (warm-restart-write)))))))
             (dolist (form (list unsaved kept))
               (should-not (plist-get form :parts))
               (should-not (plist-get form :kill-ring)))
@@ -1550,4 +1558,3 @@ and wait for it to end."
             (should (equal (plist-get whole :kill-ring) '("a kill")))))
       (dolist (b buffers) (with-current-buffer b (set-buffer-modified-p nil)) (kill-buffer b))
       (delete-directory warm-restart-directory t))))
-
