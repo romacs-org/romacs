@@ -27,28 +27,35 @@ const SETUP: &str = r#"(progn
   (setq rr-other (record 'rr-other 1 2 3))
   t)"#;
 
-/// Allocate until a minor collection is recorded: the kinds of collection
-/// seen, in order (`romacs--take-collections').
-const UNTIL_MINOR: &str = r#"(let ((kinds nil) (i 0))
-  (romacs--take-collections)
-  (while (and (< i 400) (not (memq 'minor kinds)))
-    (dotimes (_ 50000) (cons i i))
-    (setq kinds (append kinds (mapcar (lambda (r) (if (consp r) (car r) r)) (cdr (romacs--take-collections)))) i (1+ i)))
-  kinds)"#;
+/// `rr-until-minor': allocate until a minor collection is recorded; the
+/// kinds of collection recorded since the log was last taken, in order
+/// (`romacs--take-collections').
+const UNTIL_MINOR: &str = r#"(defun rr-until-minor ()
+  (let ((kinds nil) (i 0))
+    (while (and (< i 400) (not (memq 'minor kinds)))
+      (dotimes (_ 50000) (cons i i))
+      (setq kinds (append kinds (mapcar (lambda (r) (if (consp r) (car r) r)) (cdr (romacs--take-collections)))) i (1+ i)))
+    kinds))"#;
 
 #[test]
 fn a_reshape_keeps_identity_through_every_holder() {
     let mut vm = vm();
+    vm.set_gc_minor(true);
+    vm.set_gc_stress(0);
     eval(&mut vm, SETUP);
+    eval(&mut vm, UNTIL_MINOR);
     // Old records first, so each new slot is an old entry's store of a young value.
     eval(&mut vm, "(garbage-collect)");
-    // Reorder and grow (a b c) to (c e a b), each new e a fresh cons of its own record.
+    // Reorder and grow (a b c) to (c e a b), each new e a fresh cons of its
+    // own record; the log taken in the same request, so the first
+    // collection it then records is the first after the stores.
     assert_eq!(eval(&mut vm, r#"(let ((rs (romacs-records-tagged '(rr-a))))
+        (romacs--take-collections)
         (list (length rs)
-              (romacs-records-reshape rs 'rr-a [3 nil 1 2] (mapcar (lambda (r) (vector nil (list 'fresh (aref r 1)) nil nil)) rs))))"#),
-        "(50 50)");
-    // The young conses reachable only through their new slot survive a minor collection.
-    let kinds = eval(&mut vm, UNTIL_MINOR);
+              (romacs-records-reshape rs 'rr-a [3 nil 1 2] (mapcar (lambda (r) (vector nil (list 'fresh (aref r 1)) nil nil)) rs))
+              (progn (setq rr-kinds (rr-until-minor)) t)))"#),
+        "(50 50 t)");
+    let kinds = eval(&mut vm, "rr-kinds");
     assert!(kinds.starts_with("(minor"), "the first collection after the reshape is a minor: {kinds}");
     assert_eq!(eval(&mut vm, r#"(let ((bad 0))
         (dolist (r rr-all)
