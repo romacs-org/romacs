@@ -199,12 +199,6 @@ impl Vm {
                 .expect("built-in annotation function publication");
         }
     }
-    pub(super) fn annotation_string(&self, value: Value) -> Result<&str> {
-        self.str_view(value)
-            .ok_or("string required")?
-            .as_str()
-            .ok_or_else(|| "not-unicode-string".into())
-    }
     fn annotation_set_variable(&mut self, name: &str, value: Value) {
         let slot = self.slot(name);
         self.slots[slot].value = value;

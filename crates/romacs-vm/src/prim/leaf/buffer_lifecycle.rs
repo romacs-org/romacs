@@ -240,11 +240,4 @@ impl Leaf<'_> {
     pub fn lifecycle_killable(&self, buffer: Value) -> bool {
         self.lifecycle_live_p(buffer) && self.vm.minibuffer_window_buffer() != Some(buffer)
     }
-    pub fn lifecycle_finish(&mut self, buffer: Value) -> Out {
-        if !self.lifecycle_killable(buffer) {
-            return Ok(Value::NIL);
-        }
-        self.vm.kill_buffer_model(buffer).map_err(Fault::Error)?;
-        Ok(Value::TRUE)
-    }
 }
