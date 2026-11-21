@@ -70,4 +70,16 @@ does now: one bound since is accepted, one unbound since is not."
             (should-not (test-completion gone #'help--symbol-completion-table romacs-help-completion-tests--variable-p)))
         (makunbound (intern late))))))
 
+(ert-deftest romacs-help-completion-accepts-what-it-lists ()
+  "An exact name the prompt lists is accepted: the symbol nil, and a name
+differing in case alone under `completion-ignore-case'."
+  (romacs-help-completion-tests--in-prompt
+    (should (member "nil" (all-completions "ni" #'help--symbol-completion-table
+                                           romacs-help-completion-tests--variable-p)))
+    (should (test-completion "nil" #'help--symbol-completion-table romacs-help-completion-tests--variable-p))
+    (let ((completion-ignore-case t))
+      (should (test-completion "CAR" #'help--symbol-completion-table romacs-help-completion-tests--function-p)))
+    (let ((completion-ignore-case nil))
+      (should-not (test-completion "CAR" #'help--symbol-completion-table romacs-help-completion-tests--function-p)))))
+
 ;;; romacs-help-completion-tests.el ends here
