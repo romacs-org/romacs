@@ -446,5 +446,61 @@ message is sent, `romacs-agent-send' by default.")
         (romacs-agent--raise session (list :type 'exit :status 0 :seq 6))
         (should-not (romacs-agent-interrupted session))))))
 
+;;; romacs#357: a queue's rows are lost to no failure
+
+(ert-deftest romacs-agent-queue-an-unread-store-is-no-empty-one ()
+  ;; A read that fails signals; a restore meeting it touches nothing:
+  ;; the rows, and the session's mark, wait for the next load.
+  (romacs-agent-test-with-store
+    (make-directory (file-name-directory (romacs-agent-store--file)) t)
+    (should (romacs-agent-store--open))
+    (let* ((id "d1d1d1d1-0000-4000-8000-000000000000")
+           (mark (expand-file-name (format "%s.queued" id) (romacs-agent--marks-dir)))
+           (first (romacs-agent-test-attach (romacs-agent--make :id id :harness 'claude :state 'running :title "u") t)))
+      (romacs-agent-send-later first "kept")
+      (should (file-exists-p mark))
+      (let ((again (romacs-agent-test-attach (romacs-agent--make :id id :harness 'claude :state 'idle :title "u") t))
+            (select (symbol-function 'sqlite-select)))
+        (cl-letf (((symbol-function 'sqlite-select) (lambda (&rest _) (error "disk I/O error"))))
+          (should-error (romacs-agent-store-queued id) :type 'romacs-agent-store-unread)
+          (romacs-agent-store--requeue again nil))
+        (ignore select)
+        (should-not (romacs-agent-queue again))
+        (should (equal (mapcar #'car (romacs-agent-store-queued id)) '("kept")))
+        (should (file-exists-p mark))))))
+
+(ert-deftest romacs-agent-queue-a-mark-stays-while-the-store-keeps-rows ()
+  ;; A row left for the next load (its sending unsure) keeps the session's
+  ;; mark when the last message in memory goes.
+  (romacs-agent-test-with-store
+    (make-directory (file-name-directory (romacs-agent-store--file)) t)
+    (should (romacs-agent-store--open))
+    (let* ((id "d2d2d2d2-0000-4000-8000-000000000000")
+           (mark (expand-file-name (format "%s.queued" id) (romacs-agent--marks-dir)))
+           (session (romacs-agent-test-attach (romacs-agent--make :id id :harness 'claude :state 'running :title "m") t))
+           (left (romacs-agent-item "left" :kind 'next :id "left-1" :position 1.0 :kept t)))
+      (romacs-agent-store-queued-put id left)
+      (romacs-agent-send-later session "mine")
+      (romacs-agent--dequeue session (car (romacs-agent-queue session)))
+      (should (equal (mapcar #'car (romacs-agent-store-queued id)) '("left")))
+      (should (file-exists-p mark)))))
+
+(ert-deftest romacs-agent-queue-the-fill-never-restores-a-queue ()
+  ;; The batch that fills turn rows loads sessions without restoring
+  ;; their queues: only the editor writes them.
+  (romacs-agent-test-with-store
+    (let* ((id "d3d3d3d3-0000-4000-8000-000000000000")
+           (dir (expand-file-name id (romacs-agent--state-root)))
+           (restored nil))
+      (make-directory dir t)
+      (with-temp-file (expand-file-name "manifest.json" dir)
+        (insert (json-serialize (romacs-mcp--object "id" id "harness" "claude" "provider" "claude" "title" "f"))))
+      (cl-letf (((symbol-function 'romacs-agent-store--requeue) (lambda (&rest _) (setq restored t)))
+                ((symbol-function 'princ) #'ignore))
+        (let ((command-line-args-left (list id)))
+          (romacs-agent-turns-fill-batch)))
+      (should-not restored)
+      (remhash id romacs-agent--sessions))))
+
 (provide 'romacs-agent-queue-tests)
 ;;; romacs-agent-queue-tests.el ends here
