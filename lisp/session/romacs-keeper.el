@@ -93,7 +93,11 @@ NAME defaults to the server's name, else \"default\"."
                  (file-directory-p "/run/systemd/system")
                  (executable-find "systemd-run")
                  (or (eql 0 (call-process "systemd-run" nil nil nil "--user" "--quiet" "--collect"
-                                          "--unit" unit "--" program "--socket" socket
+                                          "--unit" unit
+                                          ;; The user manager's launch markers reach no keeper.
+                                          (concat "--property=UnsetEnvironment="
+                                                  (string-join (romacs--launch-markers) " "))
+                                          "--" program "--socket" socket
                                           "--foreground" "--idle-ms" idle))
                      ;; Refused because the unit exists: another session
                      ;; is starting this keeper.  Starting a detached one

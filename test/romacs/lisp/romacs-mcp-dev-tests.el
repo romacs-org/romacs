@@ -75,9 +75,11 @@ refuses are left out."
 
 (ert-deftest romacs-mcp-dev-tests-the-unit-is-collected-in-the-build-slice ()
   (should (equal (romacs-mcp-dev--unit-argv "u" "/r.txt" '("/t/tools/dev-check" "--binary" "/b$x") "/t/" '("A=1"))
-                 '("--user" "--quiet" "--collect" "--slice=romacs-build" "--expand-environment=no"
+                 `("--user" "--quiet" "--collect" "--slice=romacs-build" "--expand-environment=no"
                    "--unit=u" "--working-directory=/t/" "--property=StandardOutput=truncate:/r.txt"
-                   "--property=StandardError=inherit" "--setenv=A=1" "--" "/t/tools/dev-check" "--binary" "/b$x"))))
+                   "--property=StandardError=inherit"
+                   ,(concat "--property=UnsetEnvironment=" (string-join (romacs--launch-markers) " "))
+                   "--setenv=A=1" "--" "/t/tools/dev-check" "--binary" "/b$x"))))
 
 (ert-deftest romacs-mcp-dev-tests-a-unit-that-did-not-start-is-said ()
   "systemd-run runs with the unit's arguments; its refusal (a check of

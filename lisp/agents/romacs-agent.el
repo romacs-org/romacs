@@ -226,6 +226,8 @@ is registered anew while its definition is expanded)."
     `(progn (romacs-agent--layout-check ',type ',names (get ',type 'romacs-agent--layout))
             (cl-defstruct ,name ,@doc-and-slots)
             (put ',type 'romacs-agent--layout ',names))))
+;; A live update reads its forms as `cl-defstruct''s (romacs-live-forms.el).
+(put 'romacs-agent--defstruct 'romacs-live-definer 'cl-defstruct)
 
 ;; A romacs-agent.el loaded live over this one is read first: its session
 ;; record, and where it comes from.  One from a branch without this one's
@@ -4062,7 +4064,10 @@ orchestrator's, git's repository pointers, and every harness's own (its configur
 what it sets for the commands it runs): a harness parent's would
 otherwise reach any child, a Claude Code parent's a Codex child too.  A
 session's own configuration variable is given again, by `env'."
-  (delete-dups (append (romacs-agent--editor-variables) romacs-agent-orchestrator-variables romacs-agent-git-variables
+  ;; The launch markers are named whatever the editor's environment holds:
+  ;; it holds none (`romacs--launch-markers'), the user manager's may.
+  (delete-dups (append (romacs-agent--editor-variables) (romacs--launch-markers)
+                       romacs-agent-orchestrator-variables romacs-agent-git-variables
                        (cl-loop for (_ . driver) in romacs-agent--drivers
                                 append (cons (plist-get driver :config-variable) (plist-get driver :scrub))))))
 
