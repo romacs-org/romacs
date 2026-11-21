@@ -406,7 +406,14 @@ the composer's mark in it, is written again, a narrowed chat's too."
   (dolist (buffer (buffer-list))
     (when (markerp (buffer-local-value 'romacs-agent-log--input buffer))
       (with-current-buffer buffer
-        (save-restriction (widen) (romacs-agent-log--separator t))))))
+        (if (not (buffer-narrowed-p))
+            (romacs-agent-log--separator t)
+          ;; The narrowing's end stays before the separator written at it.
+          (let ((beg (point-min-marker)) (end (copy-marker (point-max))))
+            (unwind-protect (progn (widen) (romacs-agent-log--separator t))
+              (narrow-to-region beg end)
+              (set-marker beg nil)
+              (set-marker end nil))))))))
 
 (add-hook 'romacs-agent-glyph-alist-changed-hook #'romacs-agent-log--marks-changed)
 

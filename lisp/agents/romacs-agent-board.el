@@ -354,7 +354,9 @@ thread at work, while the board shows."
 code points kept whole, else cut."
   (let ((text (or text "")))
     (let ((cut (if (<= (string-width text) width) text (romacs-truncate text width))))
-      (concat cut (make-string (max 0 (- width (string-width cut))) ?\s)))))
+      ;; Cut by its characters' widths, a composed mark can still run over.
+      (while (> (string-width cut) width) (setq cut (substring cut 0 -1)))
+      (concat cut (make-string (- width (string-width cut)) ?\s)))))
 
 (defun romacs-agent-board--widths (width head)
   "The columns' widths in a row WIDTH wide after HEAD columns: `fill'

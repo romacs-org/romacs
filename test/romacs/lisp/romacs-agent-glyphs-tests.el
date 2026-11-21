@@ -9,7 +9,8 @@
       (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
   (require 'romacs-agent)
   (require 'romacs-agent-glyphs)
-  (require 'romacs-agent-log))
+  (require 'romacs-agent-log)
+  (require 'romacs-agent-board))
 
 (ert-deftest romacs-agent-glyphs-every-role-has-its-default ()
   (pcase-dolist (`(,role ,default ,doc) romacs-agent-glyphs--roles)
@@ -65,6 +66,30 @@
         (romacs-agent-log-draw session (list :type 'tool :state 'completed :id "r" :output "a\nb"))
         (let ((text (buffer-substring-no-properties (point-min) romacs-agent-log--end)))
           (should (string-match-p "^│  ◧ notes.txt  /x · 2 lines$" text)))))))
+
+(ert-deftest romacs-agent-glyphs-a-narrowed-chat-keeps-its-narrowing ()
+  ;; Narrowed to its transcript's end, a changed mark's separator is
+  ;; written outside the narrowing.
+  (let ((session (romacs-agent--make :id "N" :harness 'claude :state 'running
+                                     :tools (make-hash-table :test #'equal)
+                                     :streamed (make-hash-table :test #'equal))))
+    (with-temp-buffer
+      (romacs-agent-log-mode)
+      (setq romacs-agent-log--session session
+            romacs-agent-log--end (point-min-marker)
+            romacs-agent-log--input (point-min-marker))
+      (set-marker-insertion-type romacs-agent-log--end t)
+      (romacs-agent-log--separator t)
+      (romacs-agent-log-draw session (list :type 'delta :text "Some words."))
+      (romacs-agent-log--separator)
+      (narrow-to-region (point-min) romacs-agent-log--end)
+      (let ((before (buffer-string)))
+        (romacs-agent-log--marks-changed)
+        (should (equal (buffer-string) before))))))
+
+(ert-deftest romacs-agent-glyphs-a-cut-cell-fits-its-column ()
+  (dolist (text '("❤️🤔x" "🤔🤔🤔🤔🤔" "abcdefgh"))
+    (should (= (string-width (romacs-agent-board--cell text 4)) 4))))
 
 (provide 'romacs-agent-glyphs-tests)
 ;;; romacs-agent-glyphs-tests.el ends here
