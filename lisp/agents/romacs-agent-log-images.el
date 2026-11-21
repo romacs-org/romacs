@@ -79,32 +79,33 @@ when STRING is nil: (BEG END FILE) each, in order, FILE expanded."
     (nreverse links)))
 
 (defun romacs-agent-log-images--width ()
-  "The width images are laid out in, in the current chat, in pixels."
-  (let ((window (get-buffer-window nil t)))
-    (if window
-        (max 1 (- (window-body-width window t) (* (1+ (length romacs-agent-log-images--indent))
-                                                  (frame-char-width (window-frame window)))))
-      ;; Not shown yet: as wide as an 80-column window's.
-      (* 80 (frame-char-width)))))
+  "The width images are laid out in, in the current chat, in pixels; nil
+while no window shows it."
+  (when-let* ((window (get-buffer-window nil t)))
+    (max 1 (- (window-body-width window t) (* (1+ (length romacs-agent-log-images--indent))
+                                              (frame-char-width (window-frame window)))))))
 
 (defun romacs-agent-log-images--image (file width lines)
-  "FILE's image within WIDTH pixels by LINES lines, never enlarged:
-\(W . SLICES), W its width and SLICES its rows, a slice a line tall each;
-nil when images cannot be shown or FILE's header gives no size."
+  "FILE's image within WIDTH pixels by LINES lines, never enlarged, in
+whole lines: (W ROWS FILE), W its width in pixels and ROWS its height in
+lines; nil when images cannot be shown or FILE's header gives no size."
   (when-let* (((display-images-p))
               (pixels (romacs-image-header-size file)))
     (let* ((line (default-line-height))
-           (scale (min 1.0 (/ (float width) (car pixels)) (/ (float (* lines line)) (cdr pixels))))
-           ;; Whole lines: a last row shorter than a line would stand
-           ;; apart from the rest.
-           (count (max 1 (floor (* scale (cdr pixels)) line)))
-           (h (* count line))
-           (w (max 1 (min width (round (* (car pixels) (/ (float h) (cdr pixels)))))))
-           ;; Its margin goes above its first row and below its last.
-           (image (create-image file nil nil :width w :height h :ascent 'center
-                                :margin (cons 0 romacs-agent-log-images--margin))))
-      (cons w (mapcar (lambda (row) (propertize " " 'display `((slice 0 ,(* row line) ,w ,line) ,image)))
-                      (number-sequence 0 (1- count)))))))
+           ;; Whole lines, rounded down: a last row shorter than a line
+           ;; would stand apart from the rest.
+           (rows (max 1 (min lines (/ (cdr pixels) line) (/ (* (cdr pixels) width) (* (car pixels) line))))))
+      (list (max 1 (min width (/ (* (car pixels) rows line) (cdr pixels)))) rows file))))
+
+(defun romacs-agent-log-images--slices (image margin)
+  "IMAGE's rows, (W ROWS FILE), as slices a line tall each, MARGIN pixels
+above its first and below its last."
+  (pcase-let* ((`(,w ,rows ,file) image)
+               (line (default-line-height))
+               (spec (create-image file nil nil :width w :height (* rows line) :ascent 'center
+                                   :margin (cons 0 margin))))
+    (mapcar (lambda (row) (propertize " " 'display `((slice 0 ,(* row line) ,w ,line) ,spec)))
+            (number-sequence 0 (1- rows)))))
 
 (defun romacs-agent-log-images--label (file)
   "What an image link to FILE shows in place of its text."
@@ -119,11 +120,12 @@ WIDTH pixels by LINES lines, each with its image: (BEG END FILE IMAGE)."
                     links)))
 
 (defun romacs-agent-log-images--pack (images width)
-  "IMAGES, (W . SLICES) each, in groups side by side within WIDTH."
+  "IMAGES, (W ROWS FILE) each, in groups side by side within WIDTH, nil
+for each its own group."
   (let ((groups nil) (group nil) (used 0))
     (dolist (image images)
       (let ((more (+ (car image) (if group romacs-agent-log-images--gap 0))))
-        (when (and group (> (+ used more) width))
+        (when (and group (> (+ used more) (or width 0)))
           (push (nreverse group) groups)
           (setq group nil used 0 more (car image)))
         (push image group)
@@ -132,21 +134,26 @@ WIDTH pixels by LINES lines, each with its image: (BEG END FILE IMAGE)."
     (nreverse groups)))
 
 (defun romacs-agent-log-images--stack (images width)
-  "IMAGES, (W . SLICES) each, as lines: side by side while they fit in
-WIDTH, a blank line between groups; the last line's newline left to
-what follows."
+  "IMAGES, (W ROWS FILE) each, as lines: side by side while they fit in
+WIDTH (nil: one under another), a blank line between groups; the last
+line's newline left to what follows.  A group's images are set off from
+the text by a margin only when they are of one height: a margin makes
+its row taller, which would cut through a taller image beside it."
   (let ((gap (propertize " " 'display `(space :width (,romacs-agent-log-images--gap)))))
     (mapconcat
      (lambda (group)
-       (mapconcat
-        (lambda (row)
-          (concat romacs-agent-log-images--indent
-                  (mapconcat (lambda (image)
-                               (or (nth row (cdr image))
-                                   (propertize " " 'display `(space :width (,(car image))))))
-                             group gap)))
-        (number-sequence 0 (1- (apply #'max (mapcar (lambda (image) (length (cdr image))) group))))
-        "\n"))
+       (let* ((rows (mapcar #'cadr group))
+              (margin (if (cl-every (lambda (n) (= n (car rows))) rows) romacs-agent-log-images--margin 0))
+              (slices (mapcar (lambda (image) (cons (car image) (romacs-agent-log-images--slices image margin))) group)))
+         (mapconcat
+          (lambda (row)
+            (concat romacs-agent-log-images--indent
+                    (mapconcat (lambda (image)
+                                 (or (nth row (cdr image))
+                                     (propertize " " 'display `(space :width (,(car image))))))
+                               slices gap)))
+          (number-sequence 0 (1- (apply #'max rows)))
+          "\n")))
      (romacs-agent-log-images--pack images width)
      "\n\n")))
 
@@ -159,7 +166,7 @@ draw under it, nil when it links none that can be shown.  The text is
 the message's still, for a copy or a search."
   (let* ((width (romacs-agent-log-images--width))
          (shown (romacs-agent-log-images--shown (romacs-agent-log-images-links text)
-                                                width romacs-agent-log-image-lines)))
+                                                (or width (* 80 (frame-char-width))) romacs-agent-log-image-lines)))
     (if (null shown) (cons text nil)
       (let ((text (copy-sequence text)))
         (pcase-dolist (`(,beg ,end ,file ,_) shown)
@@ -217,7 +224,8 @@ between, their images follow the draft's end."
       (when links
         (let* ((width (romacs-agent-log-images--width))
                (images (mapcar (lambda (link)
-                                 (romacs-agent-log-images--image (nth 2 link) width romacs-agent-log-image-composer-lines))
+                                 (romacs-agent-log-images--image (nth 2 link) (or width (* 80 (frame-char-width)))
+                                                                 romacs-agent-log-image-composer-lines))
                                links))
                (shown (delq nil (copy-sequence images)))
                (block (when shown

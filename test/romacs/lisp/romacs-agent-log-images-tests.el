@@ -62,6 +62,19 @@ reads none)."
     (should (equal (mapcar #'length (romacs-agent-log-images--pack images 1000)) '(3)))
     (should (equal (mapcar #'length (romacs-agent-log-images--pack images 50)) '(1 1 1)))))
 
+(ert-deftest romacs-agent-log-images-a-margin-only-beside-one-height ()
+  ;; Images of one height side by side are set off from the text by a
+  ;; margin; beside a taller one, none, which would cut through it.
+  (romacs-agent-log-images-tests--with
+    (cl-flet ((margins (images)
+                (let ((text (romacs-agent-log-images--stack images 1000)) (found nil))
+                  (dotimes (i (length text))
+                    (when-let* ((spec (cadr (get-text-property i 'display text))))
+                      (when (eq (car-safe spec) 'image) (push (cdr (plist-get (cdr spec) :margin)) found))))
+                  (delete-dups found))))
+      (should (equal (margins (list (list 40 3 shot) (list 30 3 shot))) (list romacs-agent-log-images--margin)))
+      (should (equal (margins (list (list 40 3 shot) (list 30 5 shot))) '(0))))))
+
 (ert-deftest romacs-agent-log-images-the-composer-shows-its-links ()
   ;; The composer's link shows as its file's name and its image under the
   ;; draft, by overlays: its text stays what is sent.  Typing keeps them
