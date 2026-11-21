@@ -287,3 +287,9 @@ SWITCHES, remote names and non-UTF-8 filenames are unsupported."
       (setq target (romacs-buffer-default))
       (when (eq target (current-buffer)) (setq target (get-buffer-create "*scratch*"))))
     (romacs-select-buffer target)))
+
+;; Only the workspace regime loads this file: help's completion must not
+;; load it by a prefix of its names into a --loadup session.
+;; Local Variables:
+;; autoload-compute-prefixes: nil
+;; End:
