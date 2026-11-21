@@ -30,7 +30,7 @@
 (defvar romacs-agents-map
   (let ((map (make-sparse-keymap)))
     (define-key map "n" #'romacs-agent-start)
-    (define-key map "s" #'romacs-agents)
+    (define-key map "s" #'romacs-agent-switch)
     (define-key map "a" #'romacs-agents)
     map)
   "Global prefix map for starting and finding agent sessions.
@@ -45,6 +45,7 @@
 ;;;###autoload (with-eval-after-load 'gud (unless (keymap-parent gud-global-map) (set-keymap-parent gud-global-map romacs-agents-map)))
 
 (declare-function romacs-agents "romacs-agent-board" ())
+(declare-function romacs-agent-switch "romacs-agent-switch" ())
 (declare-function romacs-agent-resume-time "romacs-agent-tools" (session))
 (declare-function romacs-agent-tools--cancel-resume "romacs-agent-tools" (session &optional why))
 

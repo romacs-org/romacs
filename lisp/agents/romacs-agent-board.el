@@ -931,10 +931,5 @@ keys act on the thread at point.
       (unless (eq (window-frame window) (selected-frame)) (select-frame-set-input-focus (window-frame window)))
       (select-window window))))
 
-;;;###autoload
-(defalias 'romacs-agent-switch #'romacs-agents)
-;;;###autoload
-(defalias 'romacs-agent-switch-chat #'romacs-agents)
-
 (provide 'romacs-agent-board)
 ;;; romacs-agent-board.el ends here
