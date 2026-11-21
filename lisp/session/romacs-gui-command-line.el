@@ -22,6 +22,73 @@
   "`face-font-rescale-alist' before the user's init, as `normal-top-level'
 keeps it across `command-line' (startup.el:773).")
 
+(defun romacs-gui-loadup--fill-scratch ()
+  "Make *scratch* for an `initial-buffer-choice' of t, and give an empty
+*scratch* `initial-scratch-message'."
+  (when (eq initial-buffer-choice t)
+    (get-scratch-buffer-create))
+  (and initial-scratch-message
+       (get-buffer "*scratch*")
+       (with-current-buffer "*scratch*"
+         (when (zerop (buffer-size))
+           (insert (substitute-command-keys initial-scratch-message))
+           (set-buffer-modified-p nil)))))
+
+(defun romacs-gui-loadup--initial-choice ()
+  "The live buffer `initial-buffer-choice' names, visited or made, or an error."
+  (let ((buf
+         (cond ((stringp initial-buffer-choice)
+                (find-file-noselect initial-buffer-choice))
+               ((functionp initial-buffer-choice)
+                (funcall initial-buffer-choice))
+               ((eq initial-buffer-choice t)
+                (get-scratch-buffer-create))
+               (t
+                (error "`initial-buffer-choice' must be a string, a function, or t")))))
+    (unless (buffer-live-p buf)
+      (error "Value returned by `initial-buffer-choice' is not a live buffer: %S" buf))
+    buf))
+
+(defun romacs-gui-loadup--show-buffers (buffers count)
+  "Show BUFFERS, COUNT of them, as `command-line-1' does: the first in the
+selected window, the second beside it, the rest visited in that window
+before the second, last first."
+  (when (> count 0)
+    (switch-to-buffer (car buffers)))
+  (cond
+   ((= count 2)
+    (switch-to-buffer-other-window (cadr buffers))
+    (other-window -1))
+   ((> count 2)
+    (let ((bufs (reverse (cdr buffers))))
+      (switch-to-buffer-other-window (pop bufs))
+      (dolist (buf bufs)
+        (switch-to-buffer buf nil t))
+      (other-window -1)))))
+
+(defun romacs-gui-loadup--startup-screen-p ()
+  "Whether this session shows a startup screen: nothing inhibits it."
+  (not (or inhibit-startup-screen
+           initial-buffer-choice
+           noninteractive
+           (daemonp)
+           inhibit-x-resources)))
+
+(defun romacs-gui-loadup--startup-hooks (old-rescale)
+  "Run the startup hooks as a startup screen's session does: the default
+font made again when the hooks changed `face-font-rescale-alist' from
+OLD-RESCALE to an entry for it, the user's frame settings, then
+`window-setup-hook'; later ones are inhibited."
+  (run-hooks 'emacs-startup-hook 'term-setup-hook)
+  (when (and (display-multi-font-p)
+             (not (eq face-font-rescale-alist old-rescale))
+             (assoc (font-xlfd-name (face-attribute 'default :font))
+                    face-font-rescale-alist #'string-match-p))
+    (set-face-attribute 'default nil :font (font-spec)))
+  (romacs-gui-loadup-notice-frame-settings)
+  (run-hooks 'window-setup-hook)
+  (setq inhibit-startup-hooks t))
+
 (defun romacs-gui-loadup-command-line-1 ()
   "The rest of `command-line-1' once the file arguments are visited
 \(startup.el:3008-3125): *scratch* for an `initial-buffer-choice' of t,
@@ -33,64 +100,21 @@ user's frame settings and `window-setup-hook' run, and the value is the
 startup screen to show: `concise' beside the shown buffers, else `full'.
 The GUI shows *Romacs* there with `romacs-gui-loadup-startup-screen'.
 `romacs-gui-loadup-normal-top-level' follows."
-  (when (eq initial-buffer-choice t)
-    (get-scratch-buffer-create))
-  (and initial-scratch-message
-       (get-buffer "*scratch*")
-       (with-current-buffer "*scratch*"
-         (when (zerop (buffer-size))
-           (insert (substitute-command-keys initial-scratch-message))
-           (set-buffer-modified-p nil))))
-  (let ((displayable-buffers romacs-gui-displayable-buffers))
+  (romacs-gui-loadup--fill-scratch)
+  (let ((buffers romacs-gui-displayable-buffers))
     (setq romacs-gui-displayable-buffers nil)
     (when initial-buffer-choice
-      (let ((buf
-             (cond ((stringp initial-buffer-choice)
-                    (find-file-noselect initial-buffer-choice))
-                   ((functionp initial-buffer-choice)
-                    (funcall initial-buffer-choice))
-                   ((eq initial-buffer-choice t)
-                    (get-scratch-buffer-create))
-                   (t
-                    (error "`initial-buffer-choice' must be a string, a function, or t")))))
-        (unless (buffer-live-p buf)
-          (error "Value returned by `initial-buffer-choice' is not a live buffer: %S" buf))
-        (setq displayable-buffers (cons buf (delq buf displayable-buffers)))))
-    (let ((displayable-buffers-len (length displayable-buffers))
-          (old-face-font-rescale-alist face-font-rescale-alist))
-      (when (> displayable-buffers-len 0)
-        (switch-to-buffer (car displayable-buffers)))
-      (cond
-       ((= displayable-buffers-len 2)
-        (switch-to-buffer-other-window (cadr displayable-buffers))
-        (other-window -1))
-       ((> displayable-buffers-len 2)
-        (let ((bufs (reverse (cdr displayable-buffers))))
-          (switch-to-buffer-other-window (pop bufs))
-          (dolist (buf bufs)
-            (switch-to-buffer buf nil t))
-          (other-window -1))))
-      (if (or inhibit-startup-screen
-              initial-buffer-choice
-              noninteractive
-              (daemonp)
-              inhibit-x-resources)
+      (let ((buf (romacs-gui-loadup--initial-choice)))
+        (setq buffers (cons buf (delq buf buffers)))))
+    (let ((count (length buffers)) (old-rescale face-font-rescale-alist))
+      (romacs-gui-loadup--show-buffers buffers count)
+      (if (not (romacs-gui-loadup--startup-screen-p))
           (progn
-            (when (and (> displayable-buffers-len 2)
-                       (not noninteractive)
-                       (not inhibit-startup-buffer-menu))
+            (when (and (> count 2) (not noninteractive) (not inhibit-startup-buffer-menu))
               (list-buffers))
             nil)
-        (run-hooks 'emacs-startup-hook 'term-setup-hook)
-        (when (and (display-multi-font-p)
-                   (not (eq face-font-rescale-alist old-face-font-rescale-alist))
-                   (assoc (font-xlfd-name (face-attribute 'default :font))
-                          face-font-rescale-alist #'string-match-p))
-          (set-face-attribute 'default nil :font (font-spec)))
-        (romacs-gui-loadup-notice-frame-settings)
-        (run-hooks 'window-setup-hook)
-        (setq inhibit-startup-hooks t)
-        (if (> displayable-buffers-len 0) 'concise 'full)))))
+        (romacs-gui-loadup--startup-hooks old-rescale)
+        (if (> count 0) 'concise 'full)))))
 
 (defun romacs-gui-loadup-notice-frame-settings ()
   "`frame-notice-user-settings' for Romacs's one frame.
