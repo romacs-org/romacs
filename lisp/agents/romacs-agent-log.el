@@ -507,6 +507,19 @@ and its usage after it).  RET still shows all of it."
                      lines "\n")
           count)))
 
+(defun romacs-agent-log--more (count limit whole &optional earlier)
+  "What a preview of LIMIT lines of WHOLE leaves out, in the note face:
+how many more lines (EARLIER ones, for a preview of its end) of its
+COUNT, or its size when COUNT is nil (past what the chat reads), and
+the key that shows all; nil when nothing is left out."
+  (when (or (not count) (> count limit))
+    (propertize (concat (if count
+                            (let ((n (- count limit)))
+                              (format "… %d %s line%s" n (if earlier "earlier" "more") (if (= n 1) "" "s")))
+                          (format "… %s in all" (romacs-agent-rows-size whole)))
+                        (format " · %s shows all" (romacs-agent-log--key 'romacs-agent-log-open)))
+                'face 'romacs-agent-log-note)))
+
 (defun romacs-agent-log--output (output face full &optional tail)
   "OUTPUT under its call, `⎿' first, its first lines in FACE, then how
 many more there are; with TAIL, how many came before, then its last
@@ -516,14 +529,7 @@ on it shows."
     ;; OUTPUT may be part of what the call answered: past what the chat
     ;; reads, the answer's size, never the part's count.
     (unless (romacs-agent-rows-readable-p (cdr full)) (setq count nil))
-    (let* ((more (and (or (not count) (> count romacs-agent-log-output-lines))
-                      (propertize (concat
-                                   (if-let* ((n (and count (- count romacs-agent-log-output-lines))))
-                                       (format "… %d %s line%s" n (if tail "earlier" "more") (if (= n 1) "" "s"))
-                                     ;; Past what the chat reads: its size.
-                                     (format "… %s in all" (romacs-agent-rows-size (cdr full))))
-                                   (format " · %s shows all" (romacs-agent-log--key 'romacs-agent-log-open)))
-                                  'face 'romacs-agent-log-note)))
+    (let* ((more (romacs-agent-log--more count romacs-agent-log-output-lines (cdr full) tail))
            (shown (propertize (replace-regexp-in-string "\n" "\n    " (if (string-empty-p shown) "(no output)" shown) t t)
                               'face face))
            (shown (if (eq face 'romacs-agent-log-output) (romacs-agent-log-faces-output shown) shown))
@@ -815,10 +821,11 @@ Live, in a chat no window shows, the echo area says so too."
                                              (concat "\n    " (string-join options " · ")))))
                                  questions "\n"))
                      (plan nil)
-                     (t (pcase-let ((`(,shown . ,count) (romacs-agent-log--lines (romacs-agent-log--json input) 30)))
-                          (if (> count 30)
-                              (format "%s\n… %d more lines · %s shows all" shown (- count 30) (romacs-agent-log--key 'romacs-agent-log-open))
-                            shown)))))
+                     (t (let ((json (romacs-agent-log--json input)))
+                          (pcase-let ((`(,shown . ,count) (romacs-agent-log--lines json 30)))
+                            (if-let* ((more (romacs-agent-log--more count 30 json)))
+                                (concat shown "\n" more)
+                              shown))))))
          (why (plist-get event :description))
          (keys (cond (questions (romacs-agent-log--keys 'romacs-agent-log-allow "choose" 'romacs-agent-log-deny "decline"))
                      (plan (romacs-agent-log--keys 'romacs-agent-log-allow "proceed" 'romacs-agent-log-deny "keep planning, saying why"))
@@ -1089,10 +1096,8 @@ back in the mode it had, and the next message carries it out."
                   (romacs-agent-log--line event 'note
                                           (propertize
                                            (concat "· context compacted\n" (car lines)
-                                                   (if (> (cdr lines) romacs-agent-log-output-lines)
-                                                       (format "\n… %d more lines · %s shows all"
-                                                               (- (cdr lines) romacs-agent-log-output-lines)
-                                                               (romacs-agent-log--key 'romacs-agent-log-open))
+                                                   (if-let* ((more (romacs-agent-log--more (cdr lines) romacs-agent-log-output-lines summary)))
+                                                       (concat "\n" more)
                                                      ""))
                                            'romacs-agent-log-full (cons nil summary))
                                           'romacs-agent-log-note)))

@@ -16,7 +16,8 @@
   (declare (indent 0))
   `(let ((session (romacs-agent--make :id "B" :harness 'claude :state 'running
                                       :tools (make-hash-table :test #'equal)
-                                      :streamed (make-hash-table :test #'equal))))
+                                      :streamed (make-hash-table :test #'equal)))
+         (romacs-agent-approval-policy 'ask))
      (with-temp-buffer
        (romacs-agent-log-mode)
        (setq romacs-agent-log--session session
@@ -123,6 +124,15 @@
       (draw :type 'tool :state 'completed :id "gone" :name "mcp__other__thing" :output output)
       (should (< (buffer-size) 600))
       (should (<= (romacs-agent-big-output-tests--longest) 240)))))
+
+(ert-deftest romacs-agent-big-output-an-approval-past-the-bound-is-drawn ()
+  ;; A Write asked for with more than the chat reads: its card is drawn,
+  ;; saying the input's size.
+  (let ((romacs-agent-rows-read-limit 1000))
+    (romacs-agent-big-output-tests--with
+      (draw :type 'approval :request-id "w" :tool "Write"
+            :input (romacs-agent-big-output-tests--input "file_path" "/tmp/x" "content" (make-string 5000 ?x)))
+      (should (string-match-p "characters in all" (buffer-substring-no-properties (point-min) (point-max)))))))
 
 (provide 'romacs-agent-big-output-tests)
 ;;; romacs-agent-big-output-tests.el ends here
