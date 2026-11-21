@@ -79,7 +79,9 @@ that differs from STRING in case alone answers for it."
          (seq-every-p (lambda (regexp) (string-match-p regexp string)) completion-regexp-list))
        (or (romacs-help--accepts-p string pred)
            (and completion-ignore-case
-                (seq-some (lambda (name) (romacs-help--accepts-p name pred))
+                (seq-some (lambda (name)
+                            (and (eq t (compare-strings name nil nil string nil nil t))
+                                 (romacs-help--accepts-p name pred)))
                           (gethash (downcase string) (romacs-help--folded pred)))))
        t))
 
