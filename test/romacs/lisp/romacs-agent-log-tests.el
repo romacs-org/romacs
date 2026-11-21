@@ -1454,16 +1454,57 @@ none when dropped.")
   ;; A delta's faces wait for the redisplay that draws it, on the chat's
   ;; own pre-redisplay-functions, never on a timer of their own.
   (romacs-agent-log-tests--with
-    (let ((timers (length timer-list)))
+    (let ((timers (length timer-list))
+          (strong (lambda ()
+                    (goto-char (point-min))
+                    (search-forward "bold")
+                    (memq 'romacs-markdown-strong (ensure-list (get-text-property (1- (point)) 'face))))))
       (draw :type 'delta :text "Some **bold** words.")
       (should (= (length timer-list) timers))
       (should (memq #'romacs-agent-log-faces--before-redisplay pre-redisplay-functions))
-      (should-not (memq 'bold (ensure-list (get-text-property (- romacs-agent-log--end 8) 'face))))
+      (should-not (funcall strong))
       (run-hook-with-args 'pre-redisplay-functions (selected-window))
-      (goto-char (point-min))
-      (search-forward "bold")
-      (should (get-text-property (match-beginning 0) 'face))
+      (should (funcall strong))
       (should-not (memq #'romacs-agent-log-faces--before-redisplay pre-redisplay-functions)))))
+
+;; Plain words after plain text: nothing to face, no batch waits.
+(ert-deftest romacs-agent-log-faces-plain-words-need-no-batch ()
+  (romacs-agent-log-tests--with
+    (draw :type 'delta :text "Some **bold** words")
+    (run-hook-with-args 'pre-redisplay-functions (selected-window))
+    (draw :type 'delta :text " and more plain words, as most of a stream is")
+    (should-not (memq #'romacs-agent-log-faces--before-redisplay pre-redisplay-functions))
+    (draw :type 'delta :text " then `code`")
+    (should (memq #'romacs-agent-log-faces--before-redisplay pre-redisplay-functions))
+    (run-hook-with-args 'pre-redisplay-functions (selected-window))
+    (goto-char (point-min))
+    (search-forward "code")
+    (should (get-text-property (match-beginning 0) 'face))))
+
+;; What plain characters may still change: a batch waits for each.
+(ert-deftest romacs-agent-log-faces-plain-words-that-make-a-block-wait ()
+  (dolist (case '(("1" ". item")                  ; an ordered list
+                  ("Intro\n\n    " "echo")       ; indented code
+                  ("[id]\n\n[id]:" " target")   ; a link definition
+                  ("see www" ".example.com")     ; an autolink
+                  ("see " "www.example.com")
+                  ("> hello\n " "world")         ; a quote's lazy line
+                  ("[id]\n\n[id]:\n " "target")))  ; a definition's next line
+    (romacs-agent-log-tests--with
+      (draw :type 'delta :text (car case))
+      (run-hook-with-args 'pre-redisplay-functions (selected-window))
+      (draw :type 'delta :text (cadr case))
+      (should (memq #'romacs-agent-log-faces--before-redisplay pre-redisplay-functions)))))
+
+(ert-deftest romacs-agent-log-faces-a-definition-on-its-next-line-faces-its-reference ()
+  (romacs-agent-log-tests--with
+    (draw :type 'delta :text "[id]\n\n[id]:\n ")
+    (run-hook-with-args 'pre-redisplay-functions (selected-window))
+    (draw :type 'delta :text "target")
+    (run-hook-with-args 'pre-redisplay-functions (selected-window))
+    (goto-char (point-min))
+    (search-forward "[id]")
+    (should (get-text-property (1+ (match-beginning 0)) 'face))))
 
 (provide 'romacs-agent-log-tests)
 ;;; romacs-agent-log-tests.el ends here

@@ -10,7 +10,8 @@
 ;; as a document from a top-level block before where it last ended, and
 ;; the blocks from there written again (`romacs-markdown-fontify-region'
 ;; with FROM): a batch costs what its last blocks hold, however long the
-;; reply.  Its end refaces what is left.  Should faces fail, the reply keeps its text and says so
+;; reply.  Plain words after plain text need no batch.  Its end refaces
+;; what is left.  Should faces fail, the reply keeps its text and says so
 ;; under it; it is not faced again.
 
 ;;; Code:
@@ -87,11 +88,37 @@ one before where it last ended written again; keep why, should it fail."
       (pcase romacs-agent-log--stream
         (`(text ,(and start (pred markerp)) ,at . ,_) (romacs-agent-log-faces--reface start at))))))
 
+(defun romacs-agent-log-faces--plain-p ()
+  "Whether what streamed since the reply was last faced is words that can
+change no face: plain characters (no Markdown opens, closes or escapes
+with them, nor a dot that starts a host name), starting at a word's
+boundary, after text with no face, on a line a paragraph already held
+when last faced (a letter first, under four spaces), outside a reply
+read whole for its link definitions, with code known by its face.  It
+is faced as it is, and the reply's faces end there.  Most of a stream
+is that."
+  (pcase romacs-agent-log--stream
+    (`(text ,_ ,at . ,_)
+     (let ((end romacs-agent-log-faces--end))
+       (and end (< end at) (not romacs-agent-log-faces--whole)
+            (null (get-text-property (1- end) 'face))
+            (let ((new (buffer-substring-no-properties end at)))
+              (and (not (string-match-p "[^[:alnum:] ,.;'?!\"-]" new))
+                   (not (string-match-p "\\.[[:alnum:]]" new))
+                   (or (eq (char-before end) ?\s) (eq (aref new 0) ?\s))))
+            ;; Its line a paragraph's already: its letter faced before.
+            (save-excursion (goto-char end) (forward-line 0)
+                            (and (looking-at " \\{0,3\\}[[:alpha:]]") (<= (match-end 0) end)))
+            ;; Code is known by its face: none, no telling.
+            (alist-get 'code-block romacs-markdown-faces)
+            (progn (set-marker end at) t))))))
+
 (defun romacs-agent-log-faces-soon ()
   "Face the streaming reply's text once the batch it came in is in: just
 before the next redisplay of a window showing it, in the cycle that
-draws the text, never in one of its own."
-  (unless romacs-agent-log-faces--due
+draws the text, never in one of its own; plain words need none
+\(`romacs-agent-log-faces--plain-p')."
+  (unless (or romacs-agent-log-faces--due (romacs-agent-log-faces--plain-p))
     (setq romacs-agent-log-faces--due t)
     (add-hook 'pre-redisplay-functions #'romacs-agent-log-faces--before-redisplay nil t)))
 
