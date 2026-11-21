@@ -196,18 +196,20 @@ impl Vm {
     }
     /// Whether `pre-redisplay-functions', in any shown buffer, holds more
     /// than GNU's region overlay, which `romacs--native-region' leaves to
-    /// the native highlight unless a package wraps it (rect.el).
+    /// the native highlight unless a package wraps it (rect.el). A window
+    /// whose region a wrapper drew keeps its highlight, overlays to remove
+    /// once the mark goes; the native one's answer is no overlay.
     fn pre_redisplay_has_work(&mut self) -> Result<bool> {
         let (hook, mark) = (self.slot("pre-redisplay-functions"), self.slot("mark-active"));
         let (region, global) = (self.display_symbol("redisplay--update-region-highlight"), self.default_value(hook)?);
         let highlight = self.slot("redisplay-highlight-region-function");
         let native = self.variable_value(highlight)? == self.display_symbol("romacs--native-region");
-        let overlay = self.display_symbol("internal-region-overlay");
+        let (overlay, token) = (self.display_symbol("internal-region-overlay"), self.display_symbol("romacs-native-region"));
         let saved = self.slots[self.buffer_slot].value;
         let mut work = false;
         for window in self.displayed_windows() {
             let w = self.window(window)?;
-            let (buffer, shown) = (w.buffer, w.parameters.iter().any(|&(k, v)| k == overlay && v != Value::NIL));
+            let (buffer, shown) = (w.buffer, w.parameters.iter().any(|&(k, v)| k == overlay && v != Value::NIL && v != token));
             self.slots[self.buffer_slot].value = buffer;
             let (value, marked) = (self.variable_value(hook), self.variable_value(mark));
             self.slots[self.buffer_slot].value = saved;

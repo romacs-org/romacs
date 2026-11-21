@@ -166,6 +166,56 @@ fn an_overlay_of_higher_priority_outranks_the_region() {
     assert_eq!((face_at(&w, 5).foreground, face_at(&w, 5).background), ([0, 255, 0], [0x10, 0x20, 0x30]));
 }
 
+/// The region's background, as `rect_session' sets it.
+const REGION: [u8; 3] = [0x10, 0x20, 0x30];
+
+/// A session showing two lines, the mark at column 1 of the first and
+/// point at column 4 of the second.
+fn rect_session() -> Vm {
+    let mut vm = gnu_session();
+    eval(&mut vm, r##"(progn
+      (transient-mark-mode 1)
+      (set-face-attribute 'region nil :background "#102030" :foreground 'unspecified :extend nil)
+      (erase-buffer)
+      (insert "abcdef\nghijkl\n")
+      (goto-char 2) (push-mark 2 t t) (goto-char 12))"##);
+    vm
+}
+
+/// Which of the window's first 14 bytes show the region's background.
+fn painted(vm: &mut Vm) -> Vec<usize> {
+    let w = window(vm);
+    let shows = |byte: usize| w.text.face_runs.iter().find(|run| run.bytes.contains(&byte))
+        .is_some_and(|run| w.faces[run.face.0 as usize].background == REGION);
+    (0..14).filter(|&byte| shows(byte)).collect()
+}
+
+#[test]
+fn a_rectangular_region_paints_its_columns_alone() {
+    let mut vm = rect_session();
+    assert_eq!(painted(&mut vm), (1..11).collect::<Vec<_>>(), "the plain region, mark to point");
+    // rect.el's highlight function makes an overlay a line and leaves the
+    // native region alone: only columns 1 to 4 of each line show it.
+    eval(&mut vm, "(rectangle-mark-mode 1)");
+    assert_eq!(painted(&mut vm), [1, 2, 3, 8, 9, 10]);
+}
+
+#[test]
+fn a_rectangle_turned_off_leaves_the_plain_region_and_no_overlay() {
+    let mut vm = rect_session();
+    eval(&mut vm, "(rectangle-mark-mode 1)");
+    window(&mut vm);
+    // The mark stays active: the region is plain again, and the native
+    // highlight first asks the rectangle's overlays be deleted, as GNU's
+    // overlay function does with an overlay it did not make.
+    eval(&mut vm, "(rectangle-mark-mode -1)");
+    assert_eq!(painted(&mut vm), (1..11).collect::<Vec<_>>());
+    assert_eq!(eval(&mut vm, "(seq-count (lambda (o) (eq (overlay-get o 'face) 'region)) (overlays-in 1 15))"), "0");
+    // C-g's deactivation leaves nothing painted.
+    eval(&mut vm, "(deactivate-mark)");
+    assert_eq!(painted(&mut vm), Vec::<usize>::new());
+}
+
 #[test]
 fn an_underline_s_position_and_the_buffer_s_rules_reach_the_display() {
     let mut vm = gnu_session();
