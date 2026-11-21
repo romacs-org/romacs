@@ -26,7 +26,7 @@ import live_oracle as live
 # The visited file fills the frame, as after a GNU init that inhibits the
 # startup screen; without it GNU, and --loadup, show the screen's concise
 # form beside the file.
-INIT = live.NO_LINE_NUMBERS + '''(setq inhibit-startup-screen t)
+INIT = live.NO_LINE_NUMBERS + live.WRITE_WHOLE + '''(setq inhibit-startup-screen t)
 (dolist (name '(font-lock-ensure font-lock-fontify-buffer))
   (advice-add name :before
               (lambda (&rest _) (write-region (format "%s\\n" name) nil {explicit} t))))
@@ -34,7 +34,7 @@ INIT = live.NO_LINE_NUMBERS + '''(setq inhibit-startup-screen t)
   "Record how much of the visited file redisplay fontified."
   (interactive)
   (with-current-buffer (get-file-buffer {sample})
-    (write-region
+    (live-write-whole
      (prin1-to-string
       (list major-mode (and (memq 'jit-lock-function fontification-functions) t)
             (get-text-property 1 'fontified)
@@ -42,7 +42,7 @@ INIT = live.NO_LINE_NUMBERS + '''(setq inhibit-startup-screen t)
             (point-max)
             (save-excursion (goto-char 1) (search-forward "(defmacro")
                             (get-text-property (- (point) 8) 'face))))
-     nil {state})))
+     {state})))
 '''
 
 LINES = 400

@@ -79,7 +79,8 @@ def check_locale(launch, home, output):
         for name, world in (('restored', {}), ('source', {'ROMACS_WORLD': 'off'})):
             path = output / f'locale-{tag}-{name}.state'
             (home / 'config/romacs/init.el').write_text(f"""(run-with-timer 0.5 nil
-  (lambda () (with-temp-file {json.dumps(str(path))} (prin1 {LOCALE_STATE} (current-buffer)))))
+  (lambda () (with-temp-file {json.dumps(str(path) + '.part')} (prin1 {LOCALE_STATE} (current-buffer)))
+    (rename-file {json.dumps(str(path) + '.part')} {json.dumps(str(path))} t)))
 """)
             entry = launch(f'locale-{tag}-{name}', {**extra, **world}, arguments=(), state=path, drop=drop)
             states[name] = path.read_text()
@@ -150,6 +151,10 @@ def main():
                     it booted and how long that took.  DROP names variables
                     the launch's environment lacks."""
                     log_path = output / f'{name}.stderr'
+                    # Written whole by this launch alone: an earlier run's
+                    # file in a reused output directory satisfies no wait.
+                    if state is not None:
+                        state.unlink(missing_ok=True)
                     with log_path.open('w') as log:
                         started = time.monotonic()
                         process = subprocess.Popen([str(binary), '--loadup', '--trace-scene', *arguments],
@@ -229,12 +234,13 @@ def main():
                 for name, extra in (('screen', {}), ('screen-source', {'ROMACS_WORLD': 'off'})):
                     states[name] = output / f'{name}.state'
                     (home / 'config/romacs/init.el').write_text(f"""(run-with-timer 0.5 nil
-  (lambda () (with-temp-file {json.dumps(str(states[name]))}
+  (lambda () (with-temp-file {json.dumps(str(states[name]) + '.part')}
     (prin1 (list command-line-default-directory
                  (with-current-buffer "*Romacs*" default-directory)
                  (with-current-buffer "visited.txt" default-directory)
                  (mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list)))
-           (current-buffer)))))
+           (current-buffer)))
+    (rename-file {json.dumps(str(states[name]) + '.part')} {json.dumps(str(states[name]))} t)))
 """)
                     entry = launch(name, extra, arguments=('../other/visited.txt',), cwd=launched, state=states[name])
                     entry['state'] = states[name].read_text()

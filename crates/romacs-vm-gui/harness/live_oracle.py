@@ -23,6 +23,20 @@ RANDR = os.environ.get("ROMACS_TEST_WLR_RANDR", "wlr-randr")
 # (VM2-OOB-DEFAULTS), whose digits are ordinary text glyphs, so a harness
 # reading a programming buffer's rows turns the numbers off the way an init
 # does.
+# How a harness's Lisp writes a file the harness waits for and then reads:
+# beside it, then renamed over it, so the file is never seen part-written
+# (write-region makes the file before it writes it).  GNU has the same.
+WRITE_WHOLE = """(defmacro live-with-whole-file (file &rest body)
+  "As `with-temp-file', but FILE is written beside it, then renamed over it."
+  (declare (indent 1))
+  (let ((name (make-symbol "file")))
+    `(let ((,name ,file))
+       (with-temp-file (concat ,name ".part") ,@body)
+       (rename-file (concat ,name ".part") ,name t))))
+(defun live-write-whole (text file)
+  "Write TEXT to FILE whole."
+  (live-with-whole-file file (insert text)))
+"""
 NO_LINE_NUMBERS = """;; The rows this harness reads are the text's alone, no line-number column.
 (add-hook 'prog-mode-hook (lambda () (display-line-numbers-mode -1)) 90)
 """
