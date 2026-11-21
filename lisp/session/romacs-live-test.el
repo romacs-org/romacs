@@ -109,14 +109,14 @@ session's executable."
         (condition-case err
             (romacs-live-test--launch run module tree logs pending)
           (error (romacs-live-test--show (format "%s: the runner did not start: %s" module (error-message-string err)))
-                 (push (list module 'unstarted 0 0) (plist-get run :exits))
+                 (push (list module 'unstarted 0 0 nil) (plist-get run :exits))
                  (romacs-live-test--next run)))))))
 
 (defun romacs-live-test--launch (run module tree logs pending)
   "Start RUN's runner on MODULE from TREE, its logs in LOGS; PENDING is
 the output not yet a whole line.  Its end records the exit and how many
 files it reported, and how many of them did not pass."
-  (let ((seen (length (plist-get (plist-get run :result) :files))))
+  (let ((seen (length (plist-get (plist-get run :result) :files))) (none nil))
     (make-process
      :name (format "romacs-live-test-%s" module) :noquery t :connection-type 'pipe
      :command (romacs-live-test--command tree module logs)
@@ -125,13 +125,16 @@ files it reported, and how many of them did not pass."
                (while (string-match "\n" pending)
                  (let ((line (substring pending 0 (match-beginning 0))))
                    (setq pending (substring pending (match-end 0)))
+                   ;; The runner's own word that the library has no suites.
+                   (when (string-match-p "No suites selected" line) (setq none t))
                    (setf (plist-get run :result) (romacs-live-test--parse line (plist-get run :result)))
                    (romacs-live-test--show line))))
      :sentinel (lambda (process _event)
                  (unless (process-live-p process)
                    (let ((files (nthcdr seen (plist-get (plist-get run :result) :files))))
                      (push (list module (process-exit-status process) (length files)
-                                 (cl-count-if-not (lambda (f) (eq (plist-get f :status) 'pass)) files))
+                                 (cl-count-if-not (lambda (f) (eq (plist-get f :status) 'pass)) files)
+                                 none)
                            (plist-get run :exits)))
                    (romacs-live-test--next run))))))
 
@@ -148,13 +151,13 @@ files it reported, and how many of them did not pass."
 (defun romacs-live-test--broken (result)
   "The modules whose runner failed in RESULT, by its exit and the files it
 reported: one that did not start, exited 0 or 1 at odds with its files
-\(1 with none failing: suites all skipped), exited 2 after running files
-\(2 with none: it has no suites), or exited otherwise."
-  (cl-loop for (module exit files failing) in (plist-get result :exits)
+\(1 with none failing: suites all skipped), exited 2 but for the runner's
+own word that the library has no suites, or exited otherwise."
+  (cl-loop for (module exit files failing none) in (plist-get result :exits)
            unless (pcase exit
                     (0 (zerop failing))
                     (1 (> failing 0))
-                    (2 (zerop files)))
+                    (2 (and none (zerop files))))
            collect module))
 
 (defun romacs-live-test-passed-p (result)
@@ -182,7 +185,7 @@ with the result (`romacs-live-test-last')."
   (unless (romacs-live-test--tree-p tree)
     (user-error "Not a Romacs source tree with its runner: %s" tree))
   (unless modules (user-error "No library to test: update from a source first, or name one"))
-  (unless (cl-every (lambda (m) (and (stringp m) (string-match-p "\\`[[:alnum:]_.+-]+\\'" m))) modules)
+  (unless (cl-every (lambda (m) (and (stringp m) (string-match-p "\\`[[:alnum:]_][[:alnum:]_.+-]*\\'" m))) modules)
     (user-error "Library names are strings like romacs-live: %S" modules))
   (when romacs-live-test--run (user-error "A test run is already going"))
   (with-current-buffer (get-buffer-create "*romacs-live-tests*")

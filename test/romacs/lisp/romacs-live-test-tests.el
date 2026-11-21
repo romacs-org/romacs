@@ -77,6 +77,24 @@ runner, which is run by python3: git keeps it not executable)."
           (should (string-match-p "runner failed for alpha" (romacs-live-test-summary result))))
       (delete-directory tree t))))
 
+(ert-deftest romacs-live-test-a-runner-error-is-no-missing-suite ()
+  ;; Exit 2 is also the runner refusing its arguments: only its own word
+  ;; makes a library one with no suites.
+  (let ((tree (romacs-live-test-tests--tree
+               (concat "if module == 'odd':\n"
+                       "    print('test-ert: error: argument --module: expected one argument', file=sys.stderr)\n"
+                       "    sys.exit(2)\n"
+                       "if module == 'none':\n"
+                       "    print('test-ert: error: No suites selected; make check-list names the modules', file=sys.stderr)\n"
+                       "    sys.exit(2)\n"
+                       "print('PASS       test/romacs/lisp/alpha-tests.el  1/1 skipped=0 0.1s')\n"))))
+    (unwind-protect
+        (progn
+          (should-not (romacs-live-test-passed-p (romacs-live-test-tests--run tree '("odd" "alpha"))))
+          (should (romacs-live-test-passed-p (romacs-live-test-tests--run tree '("none" "alpha"))))
+          (should-error (romacs-live-test-start tree '("-foo") #'ignore) :type 'user-error))
+      (delete-directory tree t))))
+
 (ert-deftest romacs-live-test-the-runner-sees-the-trees-lisp-and-no-selection ()
   (let ((tree (romacs-live-test-tests--tree
                (concat "import os\n"

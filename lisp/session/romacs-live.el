@@ -872,7 +872,8 @@ loads) and `:unbind-gone' (as `romacs-live-apply')."
   (setq romacs-live--running source)
   (let ((finish (lambda (report) (setq romacs-live--running nil romacs-live-last-report report)
                   ;; The tree the ledger came from: where its suites are.
-                  (when (and (plist-get report :rows) (not (plist-get report :plan))
+                  (when (and (cl-some (lambda (r) (not (eq (plist-get r :action) 'deleted))) (plist-get report :rows))
+                             (not (plist-get report :plan))
                              (not (eq (plist-get source :kind) 'ledger)))
                     (setq romacs-live-last-source source))
                   (funcall callback report))))
