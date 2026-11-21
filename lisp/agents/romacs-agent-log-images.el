@@ -22,10 +22,10 @@
 (require 'subr-x)
 (require 'romacs-attach)
 
-(defcustom romacs-agent-log-image-size '(480 . 270)
-  "The largest a sent message's image is shown in an agent chat: (WIDTH
-. HEIGHT) in pixels, never enlarged, and narrower in a narrower window."
-  :type '(cons natnum natnum)
+(defcustom romacs-agent-log-image-lines 8
+  "How many lines tall a sent message's image is shown at most in an
+agent chat; never enlarged, and narrower in a narrower window."
+  :type 'natnum
   :group 'romacs-agent)
 
 (defcustom romacs-agent-log-image-composer-lines 5
@@ -48,6 +48,9 @@ angle brackets, or else in group 2.")
 
 (defconst romacs-agent-log-images--gap 12
   "Pixels between two images side by side.")
+
+(defconst romacs-agent-log-images--margin 6
+  "Pixels above and below a row of images, apart from the text.")
 
 (defun romacs-agent-log-images-link (file)
   "FILE as a message links it: [image](FILE) for an image, else
@@ -81,22 +84,25 @@ when STRING is nil: (BEG END FILE) each, in order, FILE expanded."
     (if window
         (max 1 (- (window-body-width window t) (* (1+ (length romacs-agent-log-images--indent))
                                                   (frame-char-width (window-frame window)))))
-      (car romacs-agent-log-image-size))))
+      ;; Not shown yet: as wide as an 80-column window's.
+      (* 80 (frame-char-width)))))
 
-(defun romacs-agent-log-images--image (file width height)
-  "FILE's image within WIDTH by HEIGHT pixels, never enlarged: (W . SLICES),
-W its width and SLICES its rows, a slice a line tall each; nil when
-images cannot be shown or FILE's header gives no size."
+(defun romacs-agent-log-images--image (file width lines)
+  "FILE's image within WIDTH pixels by LINES lines, never enlarged:
+\(W . SLICES), W its width and SLICES its rows, a slice a line tall each;
+nil when images cannot be shown or FILE's header gives no size."
   (when-let* (((display-images-p))
               (pixels (romacs-image-header-size file)))
-    (let* ((scale (min 1.0 (/ (float width) (car pixels)) (/ (float height) (cdr pixels))))
-           (line (default-line-height))
+    (let* ((line (default-line-height))
+           (scale (min 1.0 (/ (float width) (car pixels)) (/ (float (* lines line)) (cdr pixels))))
            ;; Whole lines: a last row shorter than a line would stand
            ;; apart from the rest.
-           (count (max 1 (round (* scale (cdr pixels)) line)))
+           (count (max 1 (floor (* scale (cdr pixels)) line)))
            (h (* count line))
            (w (max 1 (min width (round (* (car pixels) (/ (float h) (cdr pixels)))))))
-           (image (create-image file nil nil :width w :height h :ascent 'center)))
+           ;; Its margin goes above its first row and below its last.
+           (image (create-image file nil nil :width w :height h :ascent 'center
+                                :margin (cons 0 romacs-agent-log-images--margin))))
       (cons w (mapcar (lambda (row) (propertize " " 'display `((slice 0 ,(* row line) ,w ,line) ,image)))
                       (number-sequence 0 (1- count)))))))
 
@@ -104,11 +110,11 @@ images cannot be shown or FILE's header gives no size."
   "What an image link to FILE shows in place of its text."
   (propertize (concat "▣ " (file-name-nondirectory file)) 'face 'romacs-agent-log-image-link))
 
-(defun romacs-agent-log-images--shown (links width height)
+(defun romacs-agent-log-images--shown (links width lines)
   "Of LINKS, (BEG END FILE) each, those whose file can be shown within
-WIDTH by HEIGHT, each with its image: (BEG END FILE IMAGE)."
+WIDTH pixels by LINES lines, each with its image: (BEG END FILE IMAGE)."
   (delq nil (mapcar (lambda (link)
-                      (when-let* ((image (romacs-agent-log-images--image (nth 2 link) width height)))
+                      (when-let* ((image (romacs-agent-log-images--image (nth 2 link) width lines)))
                         (append link (list image))))
                     links)))
 
@@ -153,8 +159,7 @@ draw under it, nil when it links none that can be shown.  The text is
 the message's still, for a copy or a search."
   (let* ((width (romacs-agent-log-images--width))
          (shown (romacs-agent-log-images--shown (romacs-agent-log-images-links text)
-                                                (min width (car romacs-agent-log-image-size))
-                                                (cdr romacs-agent-log-image-size))))
+                                                width romacs-agent-log-image-lines)))
     (if (null shown) (cons text nil)
       (let ((text (copy-sequence text)))
         (pcase-dolist (`(,beg ,end ,file ,_) shown)
@@ -211,8 +216,9 @@ between, their images follow the draft's end."
       (romacs-agent-log-images--clear)
       (when links
         (let* ((width (romacs-agent-log-images--width))
-               (height (* romacs-agent-log-image-composer-lines (default-line-height)))
-               (images (mapcar (lambda (link) (romacs-agent-log-images--image (nth 2 link) width height)) links))
+               (images (mapcar (lambda (link)
+                                 (romacs-agent-log-images--image (nth 2 link) width romacs-agent-log-image-composer-lines))
+                               links))
                (shown (delq nil (copy-sequence images)))
                (block (when shown
                         ;; Not evaporating: a deleted last character leaves

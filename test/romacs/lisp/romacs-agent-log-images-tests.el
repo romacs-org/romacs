@@ -50,7 +50,7 @@ reads none)."
       (should-not (get-text-property (string-search "[image](/" text 10) 'display (car shown)))
       (let* ((rows (split-string (cdr shown) "\n"))
              (slices (mapcar (lambda (row) (get-text-property 2 'display row)) rows)))
-        (should (= (length rows) (ceiling 48 (default-line-height))))
+        (should (= (length rows) (min romacs-agent-log-image-lines (max 1 (floor 48 (default-line-height))))))
         (should (cl-every (lambda (slice) (eq (car (car slice)) 'slice)) slices))
         (should (equal (plist-get (cdr (cadr (car slices))) :file) shot))))
     (should-not (cdr (romacs-agent-log-images-message "no image here")))))
