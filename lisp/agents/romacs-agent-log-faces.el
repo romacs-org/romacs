@@ -94,8 +94,9 @@ change no face: plain characters (no Markdown opens, closes or escapes
 with them, nor a dot that starts a host name), starting at a word's
 boundary, after text with no face, on a line a paragraph already held
 when last faced (a letter first, under four spaces), outside a reply
-read whole for its link definitions, with code known by its face.  It is faced as it is, and the reply's faces end
-there.  Most of a stream is that."
+read whole for its link definitions, with code known by its face.  It
+is faced as it is, and the reply's faces end there.  Most of a stream
+is that."
   (pcase romacs-agent-log--stream
     (`(text ,_ ,at . ,_)
      (let ((end romacs-agent-log-faces--end))
