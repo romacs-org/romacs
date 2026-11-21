@@ -50,6 +50,20 @@ The survey of the source (git, both versions of each file) runs in a
 worker VM; the main VM only loads, and the report says how long each file
 took.
 
+What the copies cost:
+
+- Their compiled artifacts go into the install's compiled-Lisp store
+  beside its own, one each, and leave its compile world alone: a live
+  update keeps the store's compile identity, and later sessions on the
+  install take its artifacts as before. The store keeps itself within its
+  budget (256 MiB), dropping the least recently used artifacts after a
+  compile publishes, so a live copy's artifact goes once nothing loads it.
+- The content store keeps the source copies, one directory a blob,
+  source-sized (a file's own bytes). Sessions share it, and a restart's
+  image names its copies, so nothing prunes it on its own yet; delete a
+  directory no running session's ledger names (=M-x romacs-live-ledger=)
+  to reclaim it.
+
 * What it does that =load= does not
 
 Reloading a file by hand leaves some definitions wrong. The update reads
