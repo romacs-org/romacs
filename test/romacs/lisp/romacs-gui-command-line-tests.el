@@ -31,7 +31,8 @@ applied, `ran' collects the startup hooks that ran."
             (emacs-startup-hook (list (lambda () (push 'emacs-startup ran))))
             (term-setup-hook (list (lambda () (push 'term-setup ran))))
             (window-setup-hook (list (lambda () (push 'window-setup ran)))))
-       (cl-letf (((symbol-function 'romacs-gui-loadup-notice-frame-settings) (lambda () (cl-incf noticed))))
+       (cl-letf (((symbol-function 'romacs-gui-loadup-notice-frame-settings)
+                  (lambda () (cl-incf noticed) (push 'frame-settings ran))))
          (unwind-protect (progn ,@body)
            (dolist (buffer created) (when (buffer-live-p buffer) (kill-buffer buffer))))))))
 
@@ -59,8 +60,9 @@ applied, `ran' collects the startup hooks that ran."
       (setq romacs-gui-displayable-buffers (list (nth 0 buffers) (nth 1 buffers)))
       (romacs-gui-loadup-command-line-1)
       (should (equal (romacs-gui-command-line-tests--shown) (list (nth 0 buffers) (nth 1 buffers))))
-      ;; Three: the first and the last shown, the middle one buried behind
-      ;; the last, the buffer menu listed in an interactive session.
+      ;; Three: the first and the second shown, the third visited before
+      ;; the second in its window, the buffer menu listed in an interactive
+      ;; session.
       (delete-other-windows)
       (setq romacs-gui-displayable-buffers buffers)
       (let ((noninteractive nil) (listed nil))
@@ -104,7 +106,7 @@ applied, `ran' collects the startup hooks that ran."
     (let ((inhibit-startup-screen nil) (noninteractive nil) (buffers (romacs-gui-command-line-tests--buffers " a")))
       (setq created buffers)
       (should (eq (romacs-gui-loadup-command-line-1) 'full))
-      (should (equal (reverse ran) '(emacs-startup term-setup window-setup)))
+      (should (equal (reverse ran) '(emacs-startup term-setup frame-settings window-setup)))
       (should (= noticed 1))
       (should inhibit-startup-hooks)
       ;; Beside a visited buffer, the concise screen.
@@ -119,12 +121,12 @@ applied, `ran' collects the startup hooks that ran."
 (ert-deftest romacs-gui-command-line-normal-top-level-runs-what-is-left ()
   (romacs-gui-command-line-tests--with
     (romacs-gui-loadup-normal-top-level)
-    (should (equal (reverse ran) '(emacs-startup term-setup window-setup)))
+    (should (equal (reverse ran) '(emacs-startup term-setup frame-settings window-setup)))
     (should (= noticed 1))
     ;; Hooks the startup screen ran do not run again; the frame settings do.
     (setq ran nil)
     (let ((inhibit-startup-hooks t)) (romacs-gui-loadup-normal-top-level))
-    (should (null ran))
+    (should (equal ran '(frame-settings)))
     (should (= noticed 2))))
 
 (ert-deftest romacs-gui-command-line-the-startup-screen-s-buffer-and-window ()

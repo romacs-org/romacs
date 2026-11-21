@@ -49,16 +49,17 @@ keeps it across `command-line' (startup.el:773).")
       (error "Value returned by `initial-buffer-choice' is not a live buffer: %S" buf))
     buf))
 
-(defun romacs-gui-loadup--show-buffers (buffers)
-  "Show BUFFERS as `command-line-1' does: the first selected, the last
-beside it, the ones between buried behind the last."
-  (when buffers
+(defun romacs-gui-loadup--show-buffers (buffers count)
+  "Show BUFFERS, COUNT of them, as `command-line-1' does: the first in the
+selected window, the second beside it, the rest visited in that window
+before the second, last first."
+  (when (> count 0)
     (switch-to-buffer (car buffers)))
   (cond
-   ((= (length buffers) 2)
+   ((= count 2)
     (switch-to-buffer-other-window (cadr buffers))
     (other-window -1))
-   ((> (length buffers) 2)
+   ((> count 2)
     (let ((bufs (reverse (cdr buffers))))
       (switch-to-buffer-other-window (pop bufs))
       (dolist (buf bufs)
@@ -105,15 +106,15 @@ The GUI shows *Romacs* there with `romacs-gui-loadup-startup-screen'.
     (when initial-buffer-choice
       (let ((buf (romacs-gui-loadup--initial-choice)))
         (setq buffers (cons buf (delq buf buffers)))))
-    (let ((old-rescale face-font-rescale-alist))
-      (romacs-gui-loadup--show-buffers buffers)
+    (let ((count (length buffers)) (old-rescale face-font-rescale-alist))
+      (romacs-gui-loadup--show-buffers buffers count)
       (if (not (romacs-gui-loadup--startup-screen-p))
           (progn
-            (when (and (> (length buffers) 2) (not noninteractive) (not inhibit-startup-buffer-menu))
+            (when (and (> count 2) (not noninteractive) (not inhibit-startup-buffer-menu))
               (list-buffers))
             nil)
         (romacs-gui-loadup--startup-hooks old-rescale)
-        (if buffers 'concise 'full)))))
+        (if (> count 0) 'concise 'full)))))
 
 (defun romacs-gui-loadup-notice-frame-settings ()
   "`frame-notice-user-settings' for Romacs's one frame.
