@@ -68,7 +68,7 @@ pub fn disabled() -> bool {
 /// Whether this process is a world's builder: one `launch` makes
 /// `Launch::Build`, before any window.
 pub fn building() -> bool {
-    host::getenv(BUILD_ENV).is_some()
+    host::has_marker(BUILD_ENV)
 }
 
 /// One recipe's world in a store.
@@ -709,8 +709,7 @@ impl World {
     /// say so.
     pub fn launch<T: super::safe::SnapshotSafe + 'static>(&self, builder_args: impl FnOnce() -> Vec<OsString>, wait: bool,
                                                           on_wait: impl FnOnce(&Json)) -> Launch<T> {
-        if building() {
-            host::unset_env(BUILD_ENV);
+        if host::take_marker(BUILD_ENV).is_some() {
             return Launch::Build;
         }
         if disabled() {
@@ -1041,8 +1040,7 @@ impl World {
         // The launcher's lock, handed on; taking it again on the same open
         // file only confirms it.
         use std::os::fd::FromRawFd;
-        let handed = host::getenv(LOCK_ENV).and_then(|fd| fd.to_str()?.parse::<i32>().ok());
-        host::unset_env(LOCK_ENV);
+        let handed = host::take_marker(LOCK_ENV).and_then(|fd| fd.to_str()?.parse::<i32>().ok());
         // Without one, the world's lock is opened and locked under the
         // store's, held until the flock is: `prune` cannot unlink it between.
         let mut store = None;
