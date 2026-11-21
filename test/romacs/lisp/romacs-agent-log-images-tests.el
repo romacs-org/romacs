@@ -55,6 +55,13 @@ reads none)."
         (should (equal (plist-get (cdr (cadr (car slices))) :file) shot))))
     (should-not (cdr (romacs-agent-log-images-message "no image here")))))
 
+(ert-deftest romacs-agent-log-images-go-side-by-side-while-they-fit ()
+  ;; Images go side by side within the width, the next group under them.
+  (let ((images (list (cons 100 '("a")) (cons 100 '("b")) (cons 100 '("c")))))
+    (should (equal (mapcar #'length (romacs-agent-log-images--pack images 220)) '(2 1)))
+    (should (equal (mapcar #'length (romacs-agent-log-images--pack images 1000)) '(3)))
+    (should (equal (mapcar #'length (romacs-agent-log-images--pack images 50)) '(1 1 1)))))
+
 (ert-deftest romacs-agent-log-images-the-composer-shows-its-links ()
   ;; The composer's link shows as its file's name and its image under the
   ;; draft, by overlays: its text stays what is sent.  Typing keeps them
