@@ -144,7 +144,7 @@ modification time, and this file's, which reads them, digested."
                             (list (car source) (cdr source)
                                   (file-attribute-size attributes)
                                   (file-attribute-modification-time attributes))))
-                        (cons (cons "romacs-help-index" romacs-help-index--file) sources)))))
+                        (cons (cons "romacs-help-index" (file-truename romacs-help-index--file)) sources)))))
 
 (defun romacs-help-index--read-cache (file key)
   "The index FILE holds for KEY, or nil."
