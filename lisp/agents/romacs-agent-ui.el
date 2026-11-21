@@ -18,6 +18,7 @@
 (require 'romacs-truncate)
 (require 'cl-lib)
 (require 'romacs-agent)
+(require 'romacs-agent-glyphs)
 (require 'romacs-key-hint)
 (require 'romacs-agent-rows)
 (require 'romacs-agent-ask)
@@ -396,14 +397,15 @@ turn of its session starts, a completion never (its session's turn tells it)."
           (romacs-agent-ui--workers-summary (romacs-agent-children-rows session)))))
 
 (defconst romacs-agent-ui--worker-kinds
-  '((approval "✋" "Needs approval" romacs-agent-approval)
-    (question "❓" "Asks you" romacs-agent-approval)
-    (failed "❗" "Failed" romacs-agent-error)
-    (subagents "🤖" "Working" romacs-agent-running)
-    (threads "🧵" "Threads live" romacs-agent-running))
+  '((approval approval "Needs approval" romacs-agent-approval)
+    (question question "Asks you" romacs-agent-approval)
+    (failed failure "Failed" romacs-agent-error)
+    (subagents working "Working" romacs-agent-running)
+    (threads threads "Threads live" romacs-agent-running))
   "What a session's header counts of its workers, as (KIND GLYPH WORD
-FACE): what wants the user, then its harness's own subagents running,
-then its delegated threads still live.")
+FACE), GLYPH its mark's role (`romacs-agent-glyph-alist'): what wants
+the user, then its harness's own subagents running, then its delegated
+threads still live.")
 
 (defun romacs-agent-ui--worker-kind (row)
   "The kinds worker ROW counts as (`romacs-agent-ui--worker-kinds')."
@@ -484,21 +486,22 @@ failed...) where the frame can draw it: the word shows on hover."
 (defconst romacs-agent-ui--states
   (seq-map-indexed
    (lambda (state rank) (append state (list rank)))
-   '((approval "✋" "Needs approval" romacs-agent-approval)
-     (question "❓" "Asks you" romacs-agent-approval)
-     (failed "❗" "Failed" romacs-agent-error)
-     (working "🤖" "Working" romacs-agent-running)
-     (waiting "⏳" "Waiting on its workers" romacs-agent-running)
-     (completed "✅" "Completed" romacs-agent-done)
+   '((approval approval "Needs approval" romacs-agent-approval)
+     (question question "Asks you" romacs-agent-approval)
+     (failed failure "Failed" romacs-agent-error)
+     (working working "Working" romacs-agent-running)
+     (waiting waiting "Waiting on its workers" romacs-agent-running)
+     (completed completed "Completed" romacs-agent-done)
      ;; Nothing to say: no glyph.
      (idle nil "Idle" romacs-agent-dim)
-     (detached "🔌" "Detached" romacs-agent-dim)
-     (unstarted "❗" "Never started" romacs-agent-error)
-     (ended "⏹" "Ended" romacs-agent-dim)
-     (history "📜" "History" romacs-agent-dim)
+     (detached detached "Detached" romacs-agent-dim)
+     (unstarted failure "Never started" romacs-agent-error)
+     (ended ended "Ended" romacs-agent-dim)
+     (history history "History" romacs-agent-dim)
      (settled nil "Settled" romacs-agent-dim)))
   "Every state a session or its worker is in, as (KEY GLYPH WORD FACE
-RANK), RANK its place here.  The states ranked before `idle' are news.")
+RANK), GLYPH its mark's role (`romacs-agent-glyph-alist'), RANK its
+place here.  The states ranked before `idle' are news.")
 
 (defconst romacs-agent-ui--live-keys '(approval question working waiting)
   "The states something still goes on in.")
@@ -563,11 +566,18 @@ task's row says it, as a state key."
     ((or "idle" "detached") (intern word))
     (_ 'ended)))
 
-(defun romacs-agent-ui--glyph (glyph word face)
-  "GLYPH, or WORD where glyphs are off or GLYPH cannot be drawn, in FACE,
-WORD its help."
-  (propertize (if (and romacs-agent-glyphs (char-displayable-p (aref glyph 0))) glyph word)
-              'face face 'help-echo word))
+(defun romacs-agent-ui--glyph (role word face)
+  "The mark of ROLE, or WORD where glyphs are off or it cannot be drawn,
+in FACE, WORD its help."
+  (let ((glyph (romacs-agent-glyph role)))
+    (propertize (if (and romacs-agent-glyphs (romacs-agent-ui--drawable-p glyph)) glyph word)
+                'face face 'help-echo word)))
+
+(defun romacs-agent-ui--drawable-p (glyph)
+  "Whether the frame can draw GLYPH, a mark of one or more characters:
+each character, but the joiners and variation selectors between them."
+  (and (not (string-empty-p glyph))
+       (seq-every-p (lambda (c) (or (memq c '(#x200D #xFE0E #xFE0F)) (char-displayable-p c))) glyph)))
 
 (defun romacs-agent-ui--label (state)
   "STATE's glyph (`romacs-agent-ui--glyph'), or nil for a state without one."
@@ -581,7 +591,7 @@ its word."
                (shown (romacs-agent-ui--glyph glyph word face))
                (word (downcase word)))
     (propertize (if (equal (substring-no-properties shown) (nth 2 state)) (format "%d %s" count word)
-                  (format "%s%d" glyph count))
+                  (format "%s%d" (romacs-agent-glyph glyph) count))
                 'face face 'help-echo (format "%d %s" count word))))
 
 (defun romacs-agent-ui--rollup (keys)
@@ -611,14 +621,15 @@ order, or nil when none is news."
 (defface romacs-agent-chip-you '((t :inherit (romacs-working-waiting romacs-agent-chip)))
   "A chip of something waiting for the user.")
 (defconst romacs-agent-ui--marks
-  '((you "◆" romacs-agent-approval romacs-agent-chip-you "needs you")
-    (failed "✗" romacs-agent-error romacs-agent-chip-failed "failed")
-    (working "●" romacs-agent-running romacs-agent-chip-working "working")
-    (done "✓" romacs-agent-done romacs-agent-chip-done "done")
-    (idle "·" romacs-agent-dim nil "idle"))
+  '((you chip-you romacs-agent-approval romacs-agent-chip-you "needs you")
+    (failed failed romacs-agent-error romacs-agent-chip-failed "failed")
+    (working chip-working romacs-agent-running romacs-agent-chip-working "working")
+    (done ok romacs-agent-done romacs-agent-chip-done "done")
+    (idle task-idle romacs-agent-dim nil "idle"))
   "Each kind of state (`romacs-agent-ui--chip-kind') as (KIND MARK FACE
-CHIP-FACE WORD), what wants the user first: the one mark every view of
-agents says it by.")
+CHIP-FACE WORD), MARK its glyph's role (`romacs-agent-glyph-alist'),
+what wants the user first: the one mark every view of agents says it
+by.")
 
 (defun romacs-agent-ui--chip-kind (key)
   "The kind of state KEY (`romacs-agent-ui--states'): `you' waits for the
@@ -634,7 +645,7 @@ nothing more."
 (defun romacs-agent-ui--mark (kind)
   "KIND's mark (`romacs-agent-ui--marks') in its face, its word on hover."
   (pcase-let ((`(,_ ,mark ,face ,_ ,word) (assq kind romacs-agent-ui--marks)))
-    (propertize mark 'face face 'help-echo word)))
+    (propertize (romacs-agent-glyph mark) 'face face 'help-echo word)))
 
 (defun romacs-agent-ui--kind-counts (keys)
   "State KEYS as each kind's mark and count, what wants the user first
@@ -663,7 +674,7 @@ while every account has room and none warns."
              (rooms (mapcar (lambda (i) (romacs-agent-room-of (plist-get i :name))) pool)))
         (when (cl-some (lambda (room) (memq (plist-get room :status) '(warning rejected))) rooms)
           (push (propertize
-                 (format "⛽%s %d/%d" (car cell)
+                 (format "%s%s %d/%d" (romacs-agent-glyph 'fuel) (car cell)
                          (cl-count-if (lambda (i) (romacs-agent-room (plist-get i :name))) pool) (length pool))
                  'face (if (cl-some (lambda (i) (romacs-agent-room (plist-get i :name))) pool) 'warning 'romacs-agent-error)
                  'help-echo (mapconcat
@@ -705,8 +716,9 @@ and the pools whose accounts near their limits."
 ;; where the window ends.
 
 (defun romacs-agent-ui--harness-icon (harness)
-  (let ((icon (or (plist-get (cdr (gethash harness romacs-agent--driver-table)) :icon) "●")))
-    (if (char-displayable-p (aref icon 0)) icon (symbol-name harness))))
+  (let* ((icon (or (plist-get (cdr (gethash harness romacs-agent--driver-table)) :icon) 'chip-working))
+         (icon (if (symbolp icon) (romacs-agent-glyph icon) icon)))
+    (if (romacs-agent-ui--drawable-p icon) icon (symbol-name harness))))
 
 (defun romacs-agent-ui--effort (effort)
   "EFFORT for a person, in its level's face: one Romacs does not know in
@@ -752,7 +764,7 @@ display clipping the band where the window ends."
                        ;; The usual modes go unsaid; another in the text's own colour.
                        ((and mode (not (member mode '("default" "bypassPermissions")))) (propertize mode 'face 'romacs-agent-mode)))
                  (and switch (propertize (format "→ %s" switch) 'face 'warning))
-                 (and resume (propertize (format-time-string "⏰%H:%M" resume) 'face 'warning
+                 (and resume (propertize (concat (romacs-agent-glyph 'resume) (format-time-string "%H:%M" resume)) 'face 'warning
                                          'help-echo "Resumes by itself when its limit resets; z in the actions menu cancels"))
                  workers
                  (and share (propertize share 'face 'romacs-agent-context))))
@@ -797,7 +809,8 @@ session is no recorded one."
         (romacs-agent-log--header-show)))))
 
 (defun romacs-agent-ui--glyphs-changed ()
-  "What draws a glyph changed (`romacs-agent-glyphs', the frame's font):
+  "What draws a glyph changed (`romacs-agent-glyphs', a mark of
+`romacs-agent-glyph-alist', the frame's font):
 every session's workers' line, the status bar and every chat's header are
 made again."
   (mapc #'romacs-agent-ui--summarize-children (romacs-agent-sessions))
@@ -805,6 +818,7 @@ made again."
   (romacs-agent-ui--headers-remake))
 
 (add-hook 'after-setting-font-hook #'romacs-agent-ui--glyphs-changed)
+(add-hook 'romacs-agent-glyph-alist-changed-hook #'romacs-agent-ui--glyphs-changed)
 
 ;;; Words rows share
 

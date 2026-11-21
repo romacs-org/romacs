@@ -14,6 +14,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'romacs-agent)
+(require 'romacs-agent-glyphs)
 (require 'keymap-popup)
 (require 'romacs-working)
 (require 'romacs-agent-log)
@@ -54,8 +55,8 @@ it finished since.")
 (defun romacs-agent-menu--worker-state (child)
   "CHILD's state in the menu: the board's mark and a word, in its face."
   (if (eq (romacs-agent-state child) 'waiting-approval)
-      (cons (propertize "◆" 'face 'romacs-working-waiting) (propertize "asks you" 'face '(romacs-working-waiting bold)))
-    (cons (propertize "●" 'face 'romacs-working-running) (propertize "running" 'face '(romacs-working-running bold)))))
+      (cons (propertize (romacs-agent-glyph 'chip-you) 'face 'romacs-working-waiting) (propertize "asks you" 'face '(romacs-working-waiting bold)))
+    (cons (propertize (romacs-agent-glyph 'chip-working) 'face 'romacs-working-running) (propertize "running" 'face '(romacs-working-running bold)))))
 
 (defun romacs-agent-menu--worker-label (index)
   "The menu's row of the worker at INDEX: a mark and a word for what it

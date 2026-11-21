@@ -517,6 +517,35 @@ by counting characters from the start."
   "The line `romacs-agent--message-reply-line' writes after an envelope,
 each of its forms whole, and the space after it.")
 
+(defun romacs-agent--envelope-at (text at)
+  "The whole envelope of TEXT at AT, the line its sender wrote saying how
+to answer it after it (`romacs-agent--message-reply-line'), as (MESSAGE
+. END), MESSAGE a plist of :from, :state and :text; nil if none is
+there.  An envelope without that line is a user's example."
+  (when (eq (string-match "<romacs-message\\( [^>]*\\)?>\n?" text at) at)
+    (let* ((attributes (or (match-string 1 text) ""))
+           (open-end (match-end 0))
+           (attribute (lambda (name)
+                        (and (string-match (format " %s=\"\\([^\"]*\\)\"" name) attributes)
+                             (match-string 1 attributes))))
+           (from (funcall attribute "from"))
+           (kind (funcall attribute "kind"))
+           (close (string-search "</romacs-message>" text open-end))
+           (body (and close (string-trim-right (substring text open-end close) "\n")))
+           (after (and close (+ close (length "</romacs-message>")))))
+      (when (and after (eq (string-match romacs-agent--reply-line-regexp text after) after))
+        (cons (list :from (or from "a session") :state kind :text body) (match-end 0))))))
+
+(defun romacs-agent--envelopes (text)
+  "The messages of TEXT when it is whole envelopes and space alone, in
+order; nil otherwise."
+  (let ((at (progn (string-match "\\`[ \t\n]*" text) (match-end 0))) (found nil) (ok t))
+    (while (and ok (< at (length text)))
+      (if-let* ((envelope (romacs-agent--envelope-at text at)))
+          (setq found (cons (car envelope) found) at (cdr envelope))
+        (setq ok (string-match-p "\\`[ \t\n]*\\'" (substring text at)) at (length text))))
+    (and ok found (nreverse found))))
+
 (defun romacs-agent-incoming-of (text)
   "TEXT, written to an agent as a user's turn, read as what came from
 elsewhere: other sessions' messages (whole <romacs-message> envelopes,
@@ -526,29 +555,7 @@ answer it) or a delegated task's wakes.  A list of plists of :from
 and :text (its body), one per message or wake; nil for anything else,
 the user's own words among them."
   (cond ((not (stringp text)) nil)
-        ((string-match-p "\\`[ \t\n]*<romacs-message[ >]" text)
-         (let ((at (progn (string-match "\\`[ \t\n]*" text) (match-end 0))) (found nil) (ok t))
-           (while (and ok (< at (length text)))
-             (if (not (eq (string-match "<romacs-message\\( [^>]*\\)?>\n?" text at) at))
-                 (setq ok (string-match-p "\\`[ \t\n]*\\'" (substring text at)) at (length text))
-               (let* ((attributes (or (match-string 1 text) ""))
-                      (open-end (match-end 0))
-                      (close (string-search "</romacs-message>" text open-end))
-                      (attribute (lambda (name)
-                                   (and (string-match (format " %s=\"\\([^\"]*\\)\"" name) attributes)
-                                        (match-string 1 attributes)))))
-                 (if (not close) (setq ok nil)
-                   (push (list :from (or (funcall attribute "from") "a session") :state (funcall attribute "kind")
-                               :text (string-trim-right (substring text open-end close) "\n"))
-                         found)
-                   (setq at (+ close (length "</romacs-message>")))
-                   ;; The line its sender wrote saying how to answer it
-                   ;; (`romacs-agent--message-reply-line'), then space: an
-                   ;; envelope without one is a user's example.
-                   (if (eq (string-match romacs-agent--reply-line-regexp text at) at)
-                       (setq at (match-end 0))
-                     (setq ok nil))))))
-           (and ok found (nreverse found))))
+        ((string-match-p "\\`[ \t\n]*<romacs-message[ >]" text) (romacs-agent--envelopes text))
         ((string-prefix-p "Delegated task " text)
          (mapcar (lambda (wake) (list :from (plist-get wake :title) :state (plist-get wake :state)
                                       :text (plist-get wake :result)))
