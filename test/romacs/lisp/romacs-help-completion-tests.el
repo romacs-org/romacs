@@ -2,6 +2,7 @@
 (require 'ert)
 (require 'cl-lib)
 (require 'help-fns)
+(require 'romacs-compile)
 
 (defconst romacs-help-completion-tests--function-p
   (lambda (f) (or (fboundp f) (get f 'function-documentation)))
@@ -21,6 +22,23 @@
   "Loading help-fns.el leaves Romacs's table in place."
   (should (string-match-p "/romacs-help-completion\\.el\\'"
                           (symbol-file 'help--symbol-completion-table 'defun))))
+
+(ert-deftest romacs-help-completion-requires-its-index-as-compiled ()
+  "The compile's walk runs the file's `require' of its index as the tree's
+compile does, no file loading and none visited: it finds the index
+beside the file."
+  (let* ((file (symbol-file 'help--symbol-completion-table 'defun))
+         (form (with-temp-buffer
+                 (insert-file-contents file)
+                 (search-forward "(require 'romacs-help-index")
+                 (goto-char (match-beginning 0))
+                 (read (current-buffer))))
+         (romacs-compile--emitted nil))
+    (with-temp-buffer
+      (let ((load-file-name nil)
+            (byte-compile-current-file file))
+        (romacs-compile--file-form form)))
+    (should (equal romacs-compile--emitted (list (cons form byte-compile-bound-variables))))))
 
 (ert-deftest romacs-help-completion-typing-loads-no-file ()
   "Completing a prefix `definition-prefixes' names loads no file, where
