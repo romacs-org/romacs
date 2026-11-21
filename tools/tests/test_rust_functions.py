@@ -32,7 +32,7 @@ class FunctionsTest(unittest.TestCase):
         found, _ = rf.census([('crates/a/src/lib.rs', '#[cfg(test)]\nmod tests;\n#[cfg(test)]\n#[path = "x_tests.rs"]\nmod x;\n'),
                               ('crates/a/src/tests.rs', 'fn t() {\n}\n'), ('crates/a/src/x_tests.rs', 'fn u() {\n}\n'),
                               ('crates/a/src/kept.rs', 'fn k() {\n}\n')])
-        self.assertEqual(sorted(found), ['crates/a/src/kept.rs k'])
+        self.assertEqual(sorted(found), ['crates/a/src/kept.rs kept::k'])
 
     def test_code_lines_leave_out_blank_and_comment_lines(self):
         src = 'fn a() {\n    // why\n\n    let s = "}{";\n    /* a\n       b */\n    x(\'{\');\n}\n'
@@ -109,6 +109,40 @@ class ReviewCasesTest(unittest.TestCase):
     def test_the_marker_is_above_attributes_however_many_lines(self):
         src = ('// SMELL(long-function): a table\n#[allow(\n    clippy::x,\n)]\npub(crate) async fn a() {\n}\n')
         self.assertTrue(functions(src)['a'][2])
+
+
+class RoundTwoTest(unittest.TestCase):
+    def test_a_test_field_or_statement_owns_only_itself(self):
+        src = ('struct Table {\n    #[cfg(test)]\n    pub(crate) probe: u8,\n    real: u8,\n}\n'
+               'impl Default for Table {\n    fn default() -> Self {\n        x.unwrap()\n    }\n}\n'
+               'fn mark() {\n    #[cfg(test)]\n    if checking {\n        y.unwrap();\n    }\n    z();\n}\n')
+        census, unwraps, _ = rf.file_census(src)
+        self.assertEqual(([f[0] for f in census], unwraps), (['Table as Default::default', 'mark'], 1))
+
+    def test_a_function_moved_from_an_inline_module_to_its_file_keeps_its_name(self):
+        body = '    x();\n' * 60
+        base = rf.summary(rf.census([('crates/a/src/lib.rs', f'mod inner {{\n    fn kept() {{\n{body}    }}\n}}\n')]))
+        tree = rf.summary(rf.census([('crates/a/src/inner.rs', f'fn kept() {{\n{body}}}\n')]))
+        self.assertEqual(rf.rises(base, tree), [])
+
+    def test_nested_generics_name_the_impl_whole(self):
+        src = "impl<'a, T: Into<Vec<u8>>> Scope<'a, T> {\n    fn enter(&self) {\n    }\n}\n"
+        self.assertEqual(list(functions(src)), ["Scope<'a, T>::enter"])
+
+    def test_a_token_macro_holds_no_function(self):
+        self.assertEqual(list(functions('fn real() {\n    let s = stringify!(fn tokens() { x() });\n}\n')), ['real'])
+
+    def test_a_spaced_attribute_still_shows_its_marker(self):
+        self.assertTrue(functions('// SMELL(long-function): x\n# [allow(\n    y,\n)]\nfn a() {\n}\n')['a'][2])
+
+    def test_a_comparison_in_an_array_length_is_no_generic(self):
+        self.assertEqual(list(functions('fn f(_: [u8; (1 < 2) as usize]) {\n    x();\n}\n')), ['f'])
+
+    def test_a_test_module_path_is_normalized_and_found_in_an_inline_module(self):
+        src = '#[cfg(test)]\n#[path = "../helpers.rs"]\nmod helpers;\nmod outer {\n    #[cfg(test)]\n    mod t;\n}\n'
+        code = rf.unsafe_census.lex(src)[0]
+        self.assertEqual(rf.test_modules('crates/a/src/x/lib.rs', src, code),
+                         {'crates/a/src/helpers.rs', 'crates/a/src/x/outer/t.rs', 'crates/a/src/x/outer/t/mod.rs'})
 
 
 class FloorsTest(unittest.TestCase):

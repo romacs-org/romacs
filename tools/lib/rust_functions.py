@@ -28,6 +28,7 @@ usage: rust_functions.py report [--root ROOT] [--over N]
 import argparse
 import bisect
 import functools
+import posixpath
 import re
 import subprocess
 import sys
@@ -50,10 +51,11 @@ CFG = re.compile(r'\s*cfg\s*\((.*)\)\s*', re.DOTALL)
 PATH_ATTR = re.compile(r'#\s*\[\s*path\s*=\s*"([^"]+)"\s*\]')
 MOD_DECL = re.compile(r'\bmod\s+([A-Za-z_][A-Za-z0-9_]*)\s*;')
 CONTAINER = re.compile(r'\b(impl|trait|mod)\b')
-# What may start an item or statement an attribute is on; a parameter's or a
-# field's attribute (`#[cfg(test)] x: T`) is not one.
-ITEM = re.compile(r'\s*(?:pub\b|fn\b|mod\b|impl\b|use\b|const\b|static\b|struct\b|enum\b|type\b|unsafe\b|async\b'
-                  r'|extern\b|trait\b|union\b|let\b|macro_rules!|[A-Za-z_][\w:]*\s*!|\{)')
+# A field's or a parameter's head: what an attribute owns that is no item or
+# statement (`#[cfg(test)] pub(crate) x: T`, `fn f(#[cfg(test)] x: u8)`).
+FIELD = re.compile(r'\s*(?:pub(?:\s*\([^)]*\))?\s+)?(?:mut\s+)?[A-Za-z_][A-Za-z0-9_]*\s*:(?!:)')
+# Macros whose input is tokens, not items: a `fn` in them is no function here.
+TOKEN_MACROS = re.compile(r'\b(?:stringify|concat|quote|quote_spanned)\s*!\s*[(\[{]')
 QUALIFIERS = ('pub', 'async', 'const', 'unsafe', 'extern', 'default')
 UNWRAP = re.compile(r'\.\s*(?:unwrap\s*\(\s*\)|expect\s*\()')
 MARK = re.compile(r'\bSMELL\(long-function\):[ \t]*\S')
@@ -104,9 +106,9 @@ def body_start(code, at):
             depth += 1
         elif c in ')]':
             depth -= 1
-        elif c == '<':
+        elif c == '<' and depth == 0:
             angle += 1
-        elif c == '>' and code[i - 1] not in '-=':
+        elif c == '>' and depth == 0 and code[i - 1] not in '-=':
             angle = max(0, angle - 1)
         elif c == '{':
             if depth == 0 and angle == 0:
@@ -169,14 +171,15 @@ def attributes(code):
 
 def test_spans(code):
     """The (start, end) spans of CODE's items and statements only tests
-    compile: each one a test attribute is on, to its body's close or its `;`."""
+    compile: each one a test attribute is on, to its body's close or its `;`.
+    A field's or a parameter's attribute owns no span of code counted here."""
     spans = []
     for start, end, body in attributes(code):
         if test_attribute(body):
             after = end
             while (more := NEXT_ATTR.match(code, after)):
                 after = matching(code, more.end() - 1)
-            if ITEM.match(code, after):
+            if not FIELD.match(code, after):
                 spans.append((start, item_end(code, after)))
     return spans
 
@@ -192,8 +195,11 @@ def head(code, at):
             back -= 1
         if back and code[back - 1] == ']':
             opening = opener(code, back - 1, '[', ']')
-            if opening > 0 and code[opening - 1] == '#':
-                pos = opening - 1
+            hash_at = opening
+            while hash_at > 0 and code[hash_at - 1].isspace():
+                hash_at -= 1
+            if hash_at > 0 and code[hash_at - 1] == '#':
+                pos = hash_at - 1
                 continue
         word = back
         while word and (code[word - 1].isalnum() or code[word - 1] == '_'):
@@ -233,7 +239,7 @@ def containers(code):
             continue
         header = ' '.join(code[m.end():start].split()).split(' where ')[0]
         if m[1] == 'impl':
-            header = re.sub(r'^<[^{]*?>\s*', '', header) if header.startswith('<') else header
+            header = without_generics(header)
             trait, _, ty = header.rpartition(' for ')
             name = f'{ty} as {trait}' if trait else header
         else:
@@ -242,9 +248,37 @@ def containers(code):
     return found
 
 
-def qualified(name, offset, blocks):
-    """NAME inside the BLOCKS (containers) that enclose OFFSET, outermost first."""
-    return '::'.join([b for start, end, b in blocks if start <= offset < end] + [name])
+def without_generics(header):
+    """An impl HEADER without its leading generic parameters, `<...>` balanced."""
+    if not header.startswith('<'):
+        return header
+    depth = 0
+    for i, c in enumerate(header):
+        depth += c == '<'
+        depth -= c == '>' and header[i - 1] != '-'
+        if depth == 0:
+            return header[i + 1:].strip()
+    return header
+
+
+def module_path(path):
+    """The module PATH's file is, from its crate: `crates/c/src/a/b.rs' is
+    [a, b]; lib.rs, main.rs and mod.rs are their directory's module."""
+    parts = list(PurePosixPath(path).parts[2:])
+    if parts and parts[0] == 'src':
+        parts = parts[1:]
+    if parts and parts[-1] in ('lib.rs', 'main.rs', 'mod.rs'):
+        parts = parts[:-1]
+    elif parts:
+        parts[-1] = parts[-1].removesuffix('.rs')
+    return parts
+
+
+def qualified(name, offset, blocks, module=()):
+    """NAME inside MODULE, its file's module path, and the BLOCKS
+    (containers) that enclose OFFSET, outermost first: a function moved from
+    an inline `mod m { }` to m.rs keeps its name."""
+    return '::'.join([*module, *(b for start, end, b in blocks if start <= offset < end), name])
 
 
 def inside(spans, offset):
@@ -285,18 +319,21 @@ def test_modules(path, src, code):
     p = PurePosixPath(path)
     home = p.parent if p.name in ('mod.rs', 'lib.rs', 'main.rs') else p.parent / p.stem
     marked = {(start, end): body for start, end, body in attributes(code)}
+    inline = [(start, end, name) for start, end, name in containers(code) if code.startswith('mod', start)]
     found = set()
     for m in MOD_DECL.finditer(code):
+        within = home.joinpath(*[name for start, end, name in inline if start <= m.start() < end])
         start = head(code, m.start())
         attrs = [(a, b) for (a, b) in marked if start <= a and b <= m.start()]
         if not any(test_attribute(marked[a]) for a in attrs):
             continue
         named = next((PATH_ATTR.match(src, a[0]) for a in attrs if PATH_ATTR.match(src, a[0])), None)
-        found |= {str(p.parent / named[1])} if named else {str(home / f'{m[1]}.rs'), str(home / m[1] / 'mod.rs')}
+        found |= {posixpath.normpath(str(p.parent / named[1]))} if named \
+            else {str(within / f'{m[1]}.rs'), str(within / m[1] / 'mod.rs')}
     return found
 
 
-def file_census(src, lexed=None):
+def file_census(src, lexed=None, module=()):
     """(functions, unwraps, undocumented) of SRC, LEXED its
     unsafe_census.lex: functions as [(name, line, lines, code, declared)],
     the counts outside test items."""
@@ -305,17 +342,18 @@ def file_census(src, lexed=None):
     starts = [0] + [m.end() for m in re.finditer('\n', code)]
     uncommented = without(src, comments)
     tests = test_spans(code)
+    tokens = [(m.end() - 1, matching(code, m.end() - 1)) for m in TOKEN_MACROS.finditer(code)]
     blocks = containers(code)
     found = []
     for m in FN.finditer(code):
-        if inside(tests, m.start()):
+        if inside(tests, m.start()) or inside(tokens, m.start()):
             continue
         start = body_start(code, m.end())
         if start is None:
             continue
         end = matching(code, start)
         first, last = line_of(m.start()), line_of(end - 1)
-        found.append((qualified(m.group(2), m.start(), blocks), first + 1, last - first + 1,
+        found.append((qualified(m.group(2), m.start(), blocks, module), first + 1, last - first + 1,
                       code_lines(uncommented, starts, start + 1, end - 1),
                       bool(MARK.search(note(head(code, m.start()))))))
     unwraps = sum(1 for m in UNWRAP.finditer(code) if not inside(tests, m.start()))
@@ -338,7 +376,7 @@ def census(sources):
     for path, text, lex in sources:
         if path in tests:
             continue
-        functions, unwraps, undocumented = file_census(text, lex)
+        functions, unwraps, undocumented = file_census(text, lex, module_path(path))
         floors['unwraps'] += unwraps
         floors['unsafe_undocumented'] += undocumented
         for name, line, lines, code, declared in functions:
