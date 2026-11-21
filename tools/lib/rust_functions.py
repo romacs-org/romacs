@@ -27,6 +27,7 @@ usage: rust_functions.py report [--root ROOT] [--over N]
 """
 import argparse
 import bisect
+import functools
 import re
 import subprocess
 import sys
@@ -41,9 +42,19 @@ KIND = 'long_rust_functions'
 SCOPE = 'crates/'
 TEST_DIRS = ('tests', 'benches', 'examples')
 FN = re.compile(r'\bfn\s+(r#)?([A-Za-z_][A-Za-z0-9_]*)')
-TEST_ATTR = re.compile(r'#\s*\[\s*(?:cfg\s*\(\s*test\s*\)|test|tokio::test)\s*\]')
-TEST_MOD = re.compile(r'#\s*\[\s*cfg\s*\(\s*test\s*\)\s*\]\s*((?:#\s*\[[^\]]*\]\s*)*)(?:pub(?:\([^)]*\))?\s+)?mod\s+([A-Za-z_][A-Za-z0-9_]*)\s*;')
+BRACKET = re.compile(r'[{}()\[\]]')
+ATTR = re.compile(r'#\s*\[')
+NEXT_ATTR = re.compile(r'\s*#\s*\[')
+TEST_NAME = re.compile(r'\s*(?:test|tokio::test)\s*')
+CFG = re.compile(r'\s*cfg\s*\((.*)\)\s*', re.DOTALL)
 PATH_ATTR = re.compile(r'#\s*\[\s*path\s*=\s*"([^"]+)"\s*\]')
+MOD_DECL = re.compile(r'\bmod\s+([A-Za-z_][A-Za-z0-9_]*)\s*;')
+CONTAINER = re.compile(r'\b(impl|trait|mod)\b')
+# What may start an item or statement an attribute is on; a parameter's or a
+# field's attribute (`#[cfg(test)] x: T`) is not one.
+ITEM = re.compile(r'\s*(?:pub\b|fn\b|mod\b|impl\b|use\b|const\b|static\b|struct\b|enum\b|type\b|unsafe\b|async\b'
+                  r'|extern\b|trait\b|union\b|let\b|macro_rules!|[A-Za-z_][\w:]*\s*!|\{)')
+QUALIFIERS = ('pub', 'async', 'const', 'unsafe', 'extern', 'default')
 UNWRAP = re.compile(r'\.\s*(?:unwrap\s*\(\s*\)|expect\s*\()')
 MARK = re.compile(r'\bSMELL\(long-function\):[ \t]*\S')
 
@@ -56,53 +67,184 @@ def own(path):
     return not any(part in TEST_DIRS for part in p.parts[2:-1])
 
 
+@functools.lru_cache(maxsize=4)
+def pairs(code):
+    """{offset of an opening bracket: offset just past the one closing it} of
+    CODE, `{` `(` `[` matched in one pass; an unclosed one closes at the end."""
+    closer = {'{': '}', '(': ')', '[': ']'}
+    found, stack = {}, []
+    for m in BRACKET.finditer(code):
+        i, c = m.start(), m.group()
+        if c in closer:
+            stack.append((closer[c], i))
+        elif c in ')]}':
+            while stack and stack[-1][0] != c:
+                found[stack.pop()[1]] = i
+            if stack:
+                found[stack.pop()[1]] = i + 1
+    for _, i in stack:
+        found[i] = len(code)
+    return found
+
+
 def matching(code, open_at):
     """The offset just past the brace or bracket that closes CODE's at OPEN_AT."""
-    pairs = {'{': '}', '(': ')', '[': ']'}
-    stack = [pairs[code[open_at]]]
-    i, n = open_at + 1, len(code)
-    while i < n and stack:
-        c = code[i]
-        if c in pairs:
-            stack.append(pairs[c])
-        elif c in ')]}':
-            if c == stack[-1]:
-                stack.pop()
-        i += 1
-    return i
+    return pairs(code).get(open_at, len(code))
 
 
 def body_start(code, at):
-    """The offset of the `{` opening the body of the fn whose signature
-    starts at AT, or None for one with no body (`;` first)."""
-    depth, i, n = 0, at, len(code)
+    """The offset of the `{` opening the body of the item whose head starts
+    at AT, or None for one with no body (`;` first).  Brackets, parentheses
+    and generic arguments are stepped over, a const argument's braces with
+    them (`-> S<{ N + 1 }>`)."""
+    depth, angle, i, n = 0, 0, at, len(code)
     while i < n:
         c = code[i]
         if c in '([':
             depth += 1
         elif c in ')]':
             depth -= 1
-        elif depth == 0 and c == ';':
+        elif c == '<':
+            angle += 1
+        elif c == '>' and code[i - 1] not in '-=':
+            angle = max(0, angle - 1)
+        elif c == '{':
+            if depth == 0 and angle == 0:
+                return i
+            i = matching(code, i)
+            continue
+        elif c == ';' and depth == 0 and angle == 0:
             return None
-        elif depth == 0 and c == '{':
-            return i
         i += 1
     return None
 
 
+def item_end(code, at):
+    """The end of the item or statement starting at AT: its body's close,
+    or its `;`."""
+    start = body_start(code, at)
+    if start is not None:
+        return matching(code, start)
+    semi = code.find(';', at)
+    return len(code) if semi < 0 else semi + 1
+
+
+def requires_test(predicate):
+    """Whether a cfg PREDICATE holds only under `test`: `test`, or `all(...)`
+    with an argument that does."""
+    text = predicate.strip()
+    if text == 'test':
+        return True
+    m = re.fullmatch(r'all\s*\((.*)\)', text, re.DOTALL)
+    return bool(m) and any(requires_test(arg) for arg in top_level_args(m[1]))
+
+
+def top_level_args(text):
+    """TEXT's comma-separated arguments, nested parentheses kept whole."""
+    args, depth, at = [], 0, 0
+    for i, c in enumerate(text):
+        depth += c == '('
+        depth -= c == ')'
+        if c == ',' and depth == 0:
+            args.append(text[at:i])
+            at = i + 1
+    return args + [text[at:]]
+
+
+def test_attribute(body):
+    """Whether an attribute's BODY, between its brackets, makes its item
+    test-only: `test`, `tokio::test`, or a cfg that requires test."""
+    cfg = CFG.fullmatch(body)
+    return bool(TEST_NAME.fullmatch(body) or (cfg and requires_test(cfg[1])))
+
+
+def attributes(code):
+    """[(start, end, body)] of CODE's attributes, `#[` to its `]`."""
+    found = []
+    for m in ATTR.finditer(code):
+        close = matching(code, m.end() - 1)
+        found.append((m.start(), close, code[m.end():close - 1]))
+    return found
+
+
 def test_spans(code):
-    """The (start, end) spans of CODE's items only tests compile: each
-    `#[cfg(test)]` or `#[test]` item, to its body's close or its `;`."""
+    """The (start, end) spans of CODE's items and statements only tests
+    compile: each one a test attribute is on, to its body's close or its `;`."""
     spans = []
-    for m in TEST_ATTR.finditer(code):
-        i = m.end()
-        start = body_start(code, i)
-        semi = code.find(';', i)
-        if start is None or (0 <= semi < start):
-            spans.append((m.start(), semi + 1 if semi >= 0 else len(code)))
-        else:
-            spans.append((m.start(), matching(code, start)))
+    for start, end, body in attributes(code):
+        if test_attribute(body):
+            after = end
+            while (more := NEXT_ATTR.match(code, after)):
+                after = matching(code, more.end() - 1)
+            if ITEM.match(code, after):
+                spans.append((start, item_end(code, after)))
     return spans
+
+
+def head(code, at):
+    """The offset an item whose keyword is at AT starts at: before its
+    qualifiers (`pub(crate)`, `async`, ...) and its attributes, however many
+    lines each spans."""
+    pos = at
+    while True:
+        back = pos
+        while back and code[back - 1].isspace():
+            back -= 1
+        if back and code[back - 1] == ']':
+            opening = opener(code, back - 1, '[', ']')
+            if opening > 0 and code[opening - 1] == '#':
+                pos = opening - 1
+                continue
+        word = back
+        while word and (code[word - 1].isalnum() or code[word - 1] == '_'):
+            word -= 1
+        if word < back and code[word:back] in QUALIFIERS:
+            pos = word
+            continue
+        if back and code[back - 1] == ')':
+            opening = opener(code, back - 1, '(', ')')
+            keyword = opening
+            while keyword and code[keyword - 1].isspace():
+                keyword -= 1
+            if opening > 0 and code[max(0, keyword - 3):keyword] == 'pub':
+                pos = keyword - 3
+                continue
+        return pos
+
+
+def opener(code, close, left, right):
+    """The offset of the LEFT that the RIGHT at CLOSE closes, or -1."""
+    depth = 0
+    for i in range(close, -1, -1):
+        depth += code[i] == right
+        depth -= code[i] == left
+        if depth == 0:
+            return i
+    return -1
+
+
+def containers(code):
+    """[(start, end, name)] of CODE's impl, trait and inline mod blocks: an
+    impl named by its type (`T`, or `T as Trait`), the others by their name."""
+    found = []
+    for m in CONTAINER.finditer(code):
+        start = body_start(code, m.end())
+        if start is None:
+            continue
+        header = ' '.join(code[m.end():start].split()).split(' where ')[0]
+        if m[1] == 'impl':
+            header = re.sub(r'^<[^{]*?>\s*', '', header) if header.startswith('<') else header
+            trait, _, ty = header.rpartition(' for ')
+            name = f'{ty} as {trait}' if trait else header
+        else:
+            name = header.split('<')[0].split(':')[0].strip()
+        found.append((m.start(), matching(code, start), name))
+    return found
+
+
+def qualified(name, offset, blocks):
+    """NAME inside the BLOCKS (containers) that enclose OFFSET, outermost first."""
+    return '::'.join([b for start, end, b in blocks if start <= offset < end] + [name])
 
 
 def inside(spans, offset):
@@ -135,28 +277,35 @@ def without(src, comments):
     return ''.join(out)
 
 
-def test_modules(path, src):
-    """The files the `#[cfg(test)] mod NAME;' declarations of SRC, at PATH,
-    load: NAME.rs and NAME/mod.rs beside a mod.rs, lib.rs or main.rs, else
-    in the directory named for PATH; or the file a `#[path]' names, beside
-    PATH.  Read from SRC as written: a `#[path]' value is a literal."""
+def test_modules(path, src, code):
+    """The files SRC's (at PATH) test-only `mod NAME;' declarations load:
+    NAME.rs and NAME/mod.rs beside a mod.rs, lib.rs or main.rs, else in the
+    directory named for PATH; or the file a `#[path]' names, beside PATH.
+    Declarations are read from CODE, SRC lexed, a `#[path]' value from SRC."""
     p = PurePosixPath(path)
     home = p.parent if p.name in ('mod.rs', 'lib.rs', 'main.rs') else p.parent / p.stem
+    marked = {(start, end): body for start, end, body in attributes(code)}
     found = set()
-    for m in TEST_MOD.finditer(src):
-        named = PATH_ATTR.search(m[1])
-        found |= {str(p.parent / named[1])} if named else {str(home / f'{m[2]}.rs'), str(home / m[2] / 'mod.rs')}
+    for m in MOD_DECL.finditer(code):
+        start = head(code, m.start())
+        attrs = [(a, b) for (a, b) in marked if start <= a and b <= m.start()]
+        if not any(test_attribute(marked[a]) for a in attrs):
+            continue
+        named = next((PATH_ATTR.match(src, a[0]) for a in attrs if PATH_ATTR.match(src, a[0])), None)
+        found |= {str(p.parent / named[1])} if named else {str(home / f'{m[1]}.rs'), str(home / m[1] / 'mod.rs')}
     return found
 
 
-def file_census(src):
-    """(functions, unwraps, undocumented) of SRC: functions as
-    [(name, line, lines, code, declared)], the counts outside test items."""
-    code, comments, keywords = unsafe_census.lex(src)
+def file_census(src, lexed=None):
+    """(functions, unwraps, undocumented) of SRC, LEXED its
+    unsafe_census.lex: functions as [(name, line, lines, code, declared)],
+    the counts outside test items."""
+    code, comments, keywords = lexed or unsafe_census.lex(src)
     line_of, note = unsafe_census.annotator(src, code, comments)
     starts = [0] + [m.end() for m in re.finditer('\n', code)]
     uncommented = without(src, comments)
     tests = test_spans(code)
+    blocks = containers(code)
     found = []
     for m in FN.finditer(code):
         if inside(tests, m.start()):
@@ -166,9 +315,9 @@ def file_census(src):
             continue
         end = matching(code, start)
         first, last = line_of(m.start()), line_of(end - 1)
-        found.append((m.group(2), first + 1, last - first + 1,
-                      code_lines(uncommented, starts, start, end) - 2 if last > first else 1,
-                      bool(MARK.search(note(m.start())))))
+        found.append((qualified(m.group(2), m.start(), blocks), first + 1, last - first + 1,
+                      code_lines(uncommented, starts, start + 1, end - 1),
+                      bool(MARK.search(note(head(code, m.start()))))))
     unwraps = sum(1 for m in UNWRAP.finditer(code) if not inside(tests, m.start()))
     undocumented = 0
     for offset in keywords:
@@ -184,12 +333,12 @@ def census(sources):
     the own files among SOURCES, (path, text) pairs; keys as
     lisp_functions.census makes them, `PATH NAME' then `#K'."""
     found, floors = {}, {'unwraps': 0, 'unsafe_undocumented': 0}
-    sources = [(path, text) for path, text in sorted(sources) if own(path)]
-    tests = set().union(*(test_modules(path, text) for path, text in sources))
-    for path, text in sources:
+    sources = [(path, text, unsafe_census.lex(text)) for path, text in sorted(sources) if own(path)]
+    tests = set().union(*(test_modules(path, text, lex[0]) for path, text, lex in sources))
+    for path, text, lex in sources:
         if path in tests:
             continue
-        functions, unwraps, undocumented = file_census(text)
+        functions, unwraps, undocumented = file_census(text, lex)
         floors['unwraps'] += unwraps
         floors['unsafe_undocumented'] += undocumented
         for name, line, lines, code, declared in functions:
@@ -241,10 +390,15 @@ def summary(found_floors):
     return {'long': long_functions(found), 'keys': sorted(found), 'floors': dict(floors)}
 
 
+DECLARE = 'declare it with `// SMELL(long-function): reason` in the comment lines above it'
+
+
 def rises(base, tree):
-    """Why TREE adds to BASE, one line each: both summaries."""
+    """Why TREE adds to BASE, one line each: both summaries.  Each new long
+    function is its own finding."""
     return lisp_functions.rises(base['long'], tree['long'], base['keys'], tree['keys'],
-                                LONG_FUNCTION_LINES, KIND) + floor_rises(base['floors'], tree['floors'])
+                                LONG_FUNCTION_LINES, KIND, declare=DECLARE, each_new=True) \
+        + floor_rises(base['floors'], tree['floors'])
 
 
 def main():

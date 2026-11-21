@@ -45,7 +45,7 @@ class FunctionsTest(unittest.TestCase):
 
     def test_a_declaration_without_a_body_is_not_a_function(self):
         src = 'trait T {\n    fn a(&self);\n    fn b(&self) {\n    }\n}\n'
-        self.assertEqual(list(functions(src)), ['b'])
+        self.assertEqual(list(functions(src)), ['T::b'])
 
     def test_a_nested_function_counts_on_its_own_and_in_its_parent(self):
         src = 'fn outer() {\n    fn inner() {\n        x();\n    }\n    inner();\n}\n'
@@ -63,6 +63,52 @@ class FunctionsTest(unittest.TestCase):
         src = '// SMELL(long-function): one table\n#[inline]\npub fn a() {\n}\n// SMELL(long-function):\nfn b() {\n}\n'
         found = functions(src)
         self.assertEqual((found['a'][2], found['b'][2]), (True, False))
+
+
+class ReviewCasesTest(unittest.TestCase):
+    def test_a_cfg_that_requires_test_is_test_only(self):
+        src = ('#[cfg(all(test, feature = "x"))]\nfn t() { a.unwrap(); }\n'
+               '#[cfg(any(test, feature = "x"))]\nfn k() { b.unwrap(); }\n'
+               '#[cfg(not(test))]\nfn n() {\n}\n')
+        census, unwraps, _ = rf.file_census(src)
+        self.assertEqual(([f[0] for f in census], unwraps), (['k', 'n'], 1))
+
+    def test_a_test_item_ends_at_its_own_end(self):
+        census, unwraps, _ = rf.file_census('#[cfg(test)]\nfn t(_: [u8; 1]) {\n    a.unwrap();\n}\nfn k() { b.unwrap(); }\n'
+                                            'fn p(#[cfg(test)] x: u8) {\n    c.unwrap();\n}\n')
+        self.assertEqual(([f[0] for f in census], unwraps), (['k', 'p'], 2))
+
+    def test_test_modules_read_from_code_with_their_path(self):
+        src = ('/* #[cfg(test)] mod support; */\nconst S: &str = "#[cfg(test)] mod other;";\n'
+               '#[path = "x_tests.rs"]\n#[cfg(test)]\nmod x;\n')
+        code = rf.unsafe_census.lex(src)[0]
+        self.assertEqual(rf.test_modules('crates/a/src/lib.rs', src, code), {'crates/a/src/x_tests.rs'})
+
+    def test_a_const_argument_in_the_signature_is_not_the_body(self):
+        body = '    x();\n' * 60
+        found = functions(f'fn f() -> S<{{ 1 + 2 }}> where T: Q<{{ 3 }}> {{\n{body}}}\n')
+        self.assertEqual(found['f'][1], 60)
+
+    def test_a_statement_beside_a_brace_is_a_code_line(self):
+        self.assertEqual(functions('fn f() { a();\n    b();\n    c(); }\n')['f'][1], 3)
+        self.assertEqual(functions('fn f(\n    x: u8,\n) {}\n')['f'][1], 0)
+
+    def test_a_method_is_named_by_its_impl_or_trait(self):
+        src = ('impl<T: Copy> Grid<T> {\n    fn get(&self) {\n    }\n}\nimpl Display for Grid<u8> {\n    fn fmt(&self) {\n    }\n}\n'
+               'trait Draw {\n    fn draw(&self) {\n    }\n}\nmod inner {\n    fn get() {\n    }\n}\n')
+        self.assertEqual(sorted(functions(src)), ['Draw::draw', 'Grid<T>::get', 'Grid<u8> as Display::fmt', 'inner::get'])
+
+    def test_each_new_long_function_is_a_finding_and_names_the_rust_marker(self):
+        body = '    x();\n' * 60
+        base = rf.summary(rf.census([('crates/a/src/lib.rs', f'fn old() {{\n{body}}}\n')]))
+        tree = rf.summary(rf.census([('crates/a/src/lib.rs', f'fn new() {{\n{body}{body}}}\n')]))
+        (new,) = rf.rises(base, tree)
+        self.assertTrue(new.startswith('long_rust_functions: crates/a/src/lib.rs:1: new is new at 120 code lines'), new)
+        self.assertIn('`// SMELL(long-function): reason`', new)
+
+    def test_the_marker_is_above_attributes_however_many_lines(self):
+        src = ('// SMELL(long-function): a table\n#[allow(\n    clippy::x,\n)]\npub(crate) async fn a() {\n}\n')
+        self.assertTrue(functions(src)['a'][2])
 
 
 class FloorsTest(unittest.TestCase):

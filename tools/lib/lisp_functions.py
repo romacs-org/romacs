@@ -346,21 +346,28 @@ def paired(base, tree, base_keys, tree_keys):
     return pairs + [pair for name, entries in sorted(rest.items()) for pair in zip(entries, had.get(name, []))]
 
 
-def rises(base, tree, base_keys=None, tree_keys=None, limit=LONG_FUNCTION_LINES, kind=KIND):
+def rises(base, tree, base_keys=None, tree_keys=None, limit=LONG_FUNCTION_LINES, kind=KIND,
+          declare=None, each_new=False):
     """Why TREE adds to BASE's long functions, one line each, each headed
-    KIND: both long_functions; BASE_KEYS and TREE_KEYS every function's key
-    on each side, default the long ones'."""
+    KIND, saying how to DECLARE one: both long_functions; BASE_KEYS and
+    TREE_KEYS every function's key on each side, default the long ones'.
+    A rise in their number is one finding, or with EACH_NEW each long
+    function the base had not is."""
+    declare = declare or DECLARE
     pairs = paired(base, tree, set(base) if base_keys is None else set(base_keys),
                    set(tree) if tree_keys is None else set(tree_keys))
     grown = [f'{kind}: {place}: {name} grew to {code} code lines from {was[0]}; '
-             f'fix: move a job out of it into a function of its own, or {DECLARE}'
+             f'fix: move a job out of it into a function of its own, or {declare}'
              for (code, place, name), was in pairs if code > was[0]]
+    old = {id(entry) for entry, _ in pairs}
+    new = sorted((entry for entry in tree.values() if id(entry) not in old), key=lambda e: e[1])
+    if each_new:
+        return grown + [f'{kind}: {place}: {name} is new at {code} code lines, over {limit}; '
+                        f'fix: split it into functions of one job, or {declare}' for code, place, name in new]
     if len(tree) > len(base):
-        old = {id(entry) for entry, _ in pairs}
-        new = sorted((entry for entry in tree.values() if id(entry) not in old), key=lambda e: e[1])
         grown.append(f'{kind}: {len(tree)} over {limit} code lines, above the {len(base)} of the '
                      f'merge-base; new: {", ".join(f"{name} ({place})" for _, place, name in new)}; '
-                     f'fix: split each into functions of one job, or {DECLARE}')
+                     f'fix: split each into functions of one job, or {declare}')
     return grown
 
 

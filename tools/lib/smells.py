@@ -473,10 +473,15 @@ def rust_base(root, commit):
     how = hashlib.sha256(b''.join((Path(__file__).resolve().parent / name).read_bytes()
                                   for name in RUST_COUNTING)).hexdigest()
     path = kept(f"rust {git(root, 'rev-parse', f'{commit}^{{tree}}')}", how)
-    if path.exists():
+    try:
         return json.loads(path.read_text())
+    except (OSError, ValueError):
+        pass
     counts = rust_functions.summary(rust_functions.commit_census(root, commit))
-    keep(path, counts)
+    try:
+        keep(path, counts)
+    except OSError:
+        pass   # measured again next time
     return counts
 
 
