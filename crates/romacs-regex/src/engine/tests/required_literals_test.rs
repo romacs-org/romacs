@@ -34,7 +34,8 @@ fn agrees(source: &str, fold: bool, text: &[u8], start: usize, range: isize, poi
 }
 
 /// The file-name handlers' patterns on an ordinary name: tramp, epa and
-/// `\`/:` lack a required byte there; jka-compr's only required byte is `.`.
+/// file-name-non-special lack a required byte there; jka-compr's only
+/// required byte is `.`.
 #[test]
 fn the_handler_patterns_require_their_bytes() {
     let tramp = compile("\\`/\\(?:-\\|[^/:|]\\{2,\\}\\):", false);
