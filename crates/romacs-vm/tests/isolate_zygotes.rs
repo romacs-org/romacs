@@ -729,3 +729,216 @@ fn a_waiting_job_is_judged_by_its_own_zygotes_width() {
     assert_eq!(out, "(t t)");
     eval(&mut vm, "(isolate-kill-all)");
 }
+
+/// The live processes among PIDS and their children, from /proc: what
+/// runs, whatever the spawner's records believe.
+fn live_family(pids: &[i64]) -> Vec<i64> {
+    let mut found: Vec<i64> = pids.iter().copied().filter(|&pid| process_exists(pid)).collect();
+    for entry in std::fs::read_dir("/proc").into_iter().flatten().flatten() {
+        let Ok(pid) = entry.file_name().to_string_lossy().parse::<i64>() else { continue };
+        if found.contains(&pid) || !process_exists(pid) { continue; }
+        if stat_field(pid, 4).and_then(|ppid| ppid.parse::<i64>().ok()).is_some_and(|ppid| pids.contains(&ppid)) {
+            found.push(pid);
+        }
+    }
+    found
+}
+
+/// Lisp: the pids of every isolate the spawner holds, pushed onto `seen`.
+const NOTE_PIDS: &str = "(dolist (i romacs--isolates)
+                           (let ((pid (romacs--isolate-pid (romacs--isolate-id i))))
+                             (when (and pid (not (memq pid seen))) (setq seen (cons pid seen)))))";
+
+#[test]
+fn a_warm_function_that_loads_keeps_one_zygote_over_many_jobs() {
+    // romacs#360: what a zygote's warm function loads is its preparation,
+    // not a job changing its features: the zygote is not retired for it,
+    // so one zygote serves every job, each of which sees the warm state.
+    let mut vm = vm();
+    eval(&mut vm, "(setq isolate-zygote-warm-functions '((isolate . (lambda () (provide 'zygote-warm-loaded)))))");
+    let out = eval(&mut vm, &format!("(let ((seen nil) (zygotes nil) (warm 0) (jobs 0) (peak 0))
+       (dotimes (_ 6)
+         (let ((futures nil))
+           (dotimes (_ 8)
+             (setq futures (cons (isolate-spawn '(lambda () (featurep 'zygote-warm-loaded)) :require '(isolate)) futures))
+             (let ((z (gethash '(isolate) romacs--isolate-zygotes)))
+               (when z (let ((pid (romacs--isolate-pid (romacs--isolate-id (aref z 1)))))
+                         (when (and pid (not (memq pid zygotes))) (setq zygotes (cons pid zygotes))))))
+             {NOTE_PIDS}
+             (setq peak (max peak (length romacs--isolates))))
+           (dolist (f futures)
+             (setq jobs (1+ jobs))
+             (when (isolate-await f 30) (setq warm (1+ warm))))
+           {NOTE_PIDS}))
+       (romacs--isolate-pump 0.3)
+       (list (length zygotes) warm jobs peak (car zygotes) seen))"));
+    let numbers = numbers(&out);
+    let Some(&[zygotes, warm, jobs, peak, zygote]) = numbers.get(..5) else { panic!("{out}") };
+    assert_eq!((zygotes, warm, jobs), (1, 48, 48), "{out}");
+    // The default limit: the pool's 4, two for each of 4 zygotes, 4 more.
+    assert!(peak <= 16, "{out}");
+    // What runs now: the zygote and its spare, nothing it left behind.
+    let seen = &numbers[5..];
+    assert!(settles(|| live_family(seen).len() <= 2), "alive: {:?} of {out}", live_family(seen));
+    assert!(process_exists(zygote));
+    eval(&mut vm, "(isolate-kill-all)");
+    assert!(settles(|| live_family(seen).is_empty()), "alive after kill-all: {:?}", live_family(seen));
+}
+
+#[test]
+fn a_retired_zygote_ends_with_its_spare() {
+    // romacs#360: a zygote retired whatever the path ends its spare too,
+    // which it would otherwise wait for forever.
+    let mut vm = vm();
+    let (zygote, spare) = zygote_and_spare(&mut vm);
+    assert_eq!(eval(&mut vm, "(isolate-retire (aref (gethash nil romacs--isolate-zygotes) 1))"), "t");
+    let out = eval(&mut vm, "(let ((end (+ (float-time) 10)))
+                               (while (and romacs--isolates (< (float-time) end)) (romacs--isolate-pump 0.05))
+                               (length romacs--isolates))");
+    assert_eq!(out, "0");
+    assert!(settles(|| !process_exists(zygote) && !process_exists(spare)), "zygote {zygote} or spare {spare} still runs");
+    // The next job finds it gone and makes another.
+    assert_eq!(eval(&mut vm, "(isolate-await (isolate-spawn '+ 1 2) 20)"), "3");
+    eval(&mut vm, "(isolate-kill-all)");
+}
+
+#[test]
+fn a_retired_worker_that_does_not_end_is_signalled_and_reaped() {
+    let mut vm = vm();
+    eval(&mut vm, "(setq isolate-zygotes nil isolate-kill-timeout 0.3)");
+    // A stopped worker cannot read its bye: SIGTERM waits with it, SIGKILL ends it.
+    let out = eval(&mut vm, "(let* ((iso (isolate-create)) (f (isolate-spawn '+ 1 2 :isolate iso)))
+                               (list (isolate-await f 20) (romacs--isolate-pid (romacs--isolate-id iso))))");
+    let pid = *numbers(&out).last().unwrap_or_else(|| panic!("{out}"));
+    signal_process(pid, "STOP");
+    let out = eval(&mut vm, "(let ((iso (car romacs--isolates)) (end (+ (float-time) 10)))
+                               (isolate-retire iso)
+                               (while (and (memq iso romacs--isolates) (< (float-time) end)) (romacs--isolate-pump 0.05))
+                               (list (memq iso romacs--isolates) (aref iso 13)))");
+    assert!(out.starts_with("(nil (") && out.ends_with(" . 9))"), "{out}");
+    assert!(settles(|| !process_exists(pid)), "retired worker {pid} still runs");
+}
+
+/// Lisp: pump until every worker the spawner held has ended, killed or
+/// retired ones included (they count toward the limit until then).
+const DRAIN: &str = "(let ((end (+ (float-time) 10)))
+                       (while (and romacs--isolates (< (float-time) end)) (romacs--isolate-pump 0.05)))";
+
+/// Lisp: the most worker processes alive at once while 12 jobs of 0.2 s
+/// run, sampled from /proc by the caller; the jobs' results.
+const TWELVE_JOBS: &str = "(let ((futures nil))
+    (dotimes (i 12) (setq futures (cons (isolate-spawn '(lambda (i) (sleep-for 0.2) i) i) futures)))
+    (mapcar (lambda (f) (isolate-await f 30)) (nreverse futures)))";
+
+/// Run SOURCE while a thread counts ZYGOTE and its live children: the
+/// output and the most it saw at once.
+fn with_family_peak(vm: &mut Vm, zygote: i64, source: &str) -> (String, usize) {
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let sampler = {
+        let stop = stop.clone();
+        std::thread::spawn(move || {
+            let mut peak = 0;
+            while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                peak = peak.max(live_family(&[zygote]).len());
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            peak
+        })
+    };
+    let out = eval(vm, source);
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    (out, sampler.join().unwrap())
+}
+
+#[test]
+fn every_worker_process_counts_toward_one_limit() {
+    // romacs#360: zygotes, spares, children running and ending: at most
+    // `isolate-process-limit' at once, jobs past it waiting for room.
+    let mut vm = vm();
+    eval(&mut vm, "(setq isolate-pool-size 4 isolate-process-limit 4)");
+    let zygote = ready_zygote(&mut vm);
+    let (out, peak) = with_family_peak(&mut vm, zygote, TWELVE_JOBS);
+    assert_eq!(out, "(0 1 2 3 4 5 6 7 8 9 10 11)");
+    assert!(peak <= 4, "{peak} processes at once over a limit of 4");
+    eval(&mut vm, "(isolate-kill-all)");
+    // At the limit with nothing ending, an idle zygote of other features
+    // is ended to make room: the job runs, not waits forever.
+    eval(&mut vm, &format!("(progn (setq isolate-process-limit 3) {DRAIN})"));
+    let (old, _) = zygote_and_spare(&mut vm);
+    let out = eval(&mut vm, "(list (isolate-await (isolate-spawn '+ 1 2 :require '(isolate)) 30)
+                                   (gethash nil romacs--isolate-zygotes))");
+    assert_eq!(out, "(3 nil)");
+    assert!(settles(|| !process_exists(old)), "evicted zygote {old} still runs");
+    // With nothing to end, a worker asked for outright is refused.
+    eval(&mut vm, "(isolate-kill-all)");
+    let out = eval(&mut vm, &format!("(let ((isolate-zygotes nil) (made nil))
+                               {DRAIN}
+                               (condition-case e (dotimes (_ 4) (setq made (cons (isolate-create) made)))
+                                 (isolate-process-limit (list (car e) (length made) (cdr e)))))"));
+    assert_eq!(out, "(isolate-process-limit 3 (3 3))");
+    eval(&mut vm, "(isolate-kill-all)");
+    // A limit only its zygote fits: once its spare is used, a job is told
+    // there is no room to make, never left waiting.
+    eval(&mut vm, &format!("(progn (setq isolate-process-limit 2) {DRAIN})"));
+    ready_zygote(&mut vm);
+    let out = eval(&mut vm, "(progn (setq isolate-process-limit 1)
+                               (let (outcomes)
+                                 (dotimes (_ 3)
+                                   (setq outcomes (cons (condition-case nil (isolate-await (isolate-spawn '+ 1 2) 10)
+                                                          (isolate-process-limit 'limit) (isolate-timeout 'hung))
+                                                        outcomes)))
+                                 (nreverse outcomes)))");
+    assert!(out.starts_with("(3 ") && out.ends_with(" limit)") && !out.contains("hung"), "{out}");
+    eval(&mut vm, "(isolate-kill-all)");
+}
+
+#[test]
+fn a_refused_zygotes_jobs_run_warmed_and_say_so() {
+    // romacs#361: a zygote over its memory limit is refused, its spare with
+    // it; its features' jobs run on pooled workers prepared as it was (the
+    // warm functions run there too), each future saying how it is
+    // degraded, the refusal heard, and an error instead on request.
+    let mut vm = vm();
+    let out = eval(&mut vm, "(let ((isolate-zygote-memory-limit 1) (end (+ (float-time) 20)) (heard nil)
+                                   (isolate-zygote-warm-functions '((isolate . (lambda () (setq zygote-warmed t))))))
+                               (push (lambda (_iso event data) (push (list event (car (car data))) heard)) isolate-error-functions)
+                               (isolate-zygote '(isolate))
+                               (isolate-idle-worker '(isolate))
+                               (while (and (eq (nth 1 (isolate-zygote '(isolate))) 'preparing) (< (float-time) end))
+                                 (romacs--isolate-pump 0.02))
+                               (let* ((futures (list (isolate-spawn '(lambda () (boundp 'zygote-warmed)) :require '(isolate))
+                                                     (isolate-spawn '(lambda () (boundp 'zygote-warmed)) :require '(isolate))))
+                                      (results (mapcar (lambda (f) (isolate-await f 20)) futures)))
+                                 (list (nth 1 (isolate-zygote '(isolate))) results
+                                       (mapcar (lambda (f) (aref (isolate-future-isolate f) 10)) futures)
+                                       (mapcar (lambda (f) (car (car (isolate-future-degraded f)))) futures)
+                                       (car (nth 1 (car (isolate-future-degraded (car futures)))))
+                                       heard
+                                       (let ((isolate-refuse-degraded t))
+                                         (condition-case e (isolate-spawn '+ 1 2 :require '(isolate))
+                                           (isolate-degraded (car (car (cdr e)))))))))");
+    assert_eq!(out, "(refused (t t) (pool pool) (isolate-zygote-refused isolate-zygote-refused) memory \
+                     ((isolate-zygote-refused memory)) isolate-zygote-refused)");
+    // Nothing of the refused zygote runs: only the pooled workers.
+    let out = eval(&mut vm, "(let ((end (+ (float-time) 10)) (others t))
+                               (while (and others (< (float-time) end))
+                                 (romacs--isolate-pump 0.05)
+                                 (setq others (delq 'pool (mapcar (lambda (i) (aref i 10)) romacs--isolates))))
+                               (list others (and romacs--isolates t)))");
+    assert_eq!(out, "(nil t)");
+    // A job as asked says nothing.
+    eval(&mut vm, "(isolate-kill-all)");
+    assert_eq!(eval(&mut vm, "(let ((f (isolate-spawn '+ 1 2))) (isolate-await f 20) (isolate-future-degraded f))"), "nil");
+    eval(&mut vm, "(isolate-kill-all)");
+}
+
+#[test]
+fn a_worker_booted_without_the_refused_world_says_so() {
+    // romacs#362: once a worker refused the world, the workers after it
+    // boot from source; a job on one is told.
+    let mut vm = vm();
+    let out = eval(&mut vm, "(let ((isolate-boot 'world) (romacs--isolate-world-refusal '(\"why\" (\"store\" . \"key\"))))
+                               (list (romacs--isolate-degradation (romacs--isolate-make 1 nil nil nil))
+                                     (romacs--isolate-degradation (romacs--isolate-make 1 nil nil nil '(\"store\" . \"key\")))))");
+    assert_eq!(out, "(((isolate-world-unavailable \"why\" (\"store\" . \"key\"))) nil)");
+}
