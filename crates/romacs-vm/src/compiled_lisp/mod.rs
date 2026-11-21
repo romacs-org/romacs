@@ -129,12 +129,9 @@ pub fn configure(config: Config) {
     let chain = host::getenv(CHAIN).map(|c| c.to_string_lossy().into_owned()).unwrap_or_default();
     let trace = host::getenv("ROMACS_COMPILED_LISP_TRACE").is_some();
     let no_prune = host::getenv(NO_PRUNE).is_some();
-    // Taken out of the environment, as PARENT is: compile-time code that
-    // reads `process-environment' sees no path of this one compile.
-    let record = host::getenv(RECORD).map(PathBuf::from);
-    if record.is_some() {
-        host::unset_env(RECORD);
-    }
+    // A launch marker, as PARENT is: compile-time code that reads
+    // `process-environment' sees no path of this one compile.
+    let record = host::take_marker(RECORD).map(PathBuf::from);
     let scratch = scratch_dir(host::getenv("TMPDIR"));
     if host::getenv(BACKGROUND).is_some() {
         host::lower_priority(host::Priority::Idle);
@@ -142,9 +139,7 @@ pub fn configure(config: Config) {
     // A compile process ends with the process that started it, and within
     // a deadline: nothing outlives a session or holds its queue forever.
     // The name is its own, not its children's (a world builder, say).
-    // Read while the process is single threaded, at the start of main.
-    if let Some(parent) = host::getenv(PARENT).and_then(|p| p.to_str()?.parse().ok()) {
-        host::unset_env(PARENT);
+    if let Some(parent) = host::take_marker(PARENT).and_then(|p| p.to_str()?.parse().ok()) {
         host::die_with_parent(parent);
         std::thread::spawn(|| {
             std::thread::sleep(std::time::Duration::from_secs(600));

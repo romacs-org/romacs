@@ -306,17 +306,6 @@ pub(super) fn spawn(argv: &[CString], env: &[CString], dir: &CStr, fds: [RawFd; 
     }
 }
 
-/// Remove NAME from the environment. The caller runs while no other thread
-/// reads or writes the environment.
-pub(super) fn remove_env(name: &str) {
-    // UNSAFE(std's remove_var is unsafe: the environment is the C library's, unguarded against other threads)
-    // SAFETY: rests on the caller's contract, `host::unset_env`'s: no other
-    // thread reads or writes the environment while it changes. A caller
-    // that runs beside another thread (flight's start_from_environment, on
-    // the evaluator thread) breaks it, and is its own to move earlier.
-    unsafe { std::env::remove_var(name) };
-}
-
 /// kill(2): SIGNAL, any number (0 only asks), to PID, a group when
 /// negative. rustix takes only named signals.
 pub(super) fn kill(pid: i32, signal: i32) -> io::Result<()> {

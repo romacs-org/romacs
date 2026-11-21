@@ -57,3 +57,14 @@ fn lookup(cx: &Leaf<'_>, name: &[u8], mut tail: Value) -> std::result::Result<Op
     }
     Ok(None)
 }
+
+// The names of the launch protocol's environment variables, a list of
+// strings (`host::LAUNCH_MARKERS`): this process acts on each once, and
+// neither its environment lists nor its children hold one.  A unit
+// systemd-run starts takes the user manager's environment too, so its
+// starter unsets these there.
+defsubr! { name = "romacs--launch-markers", gnu = "romacs:process", effect = Pure,
+fn launch_markers(cx) {
+    let names: Vec<Value> = crate::host::LAUNCH_MARKERS.iter().map(|name| cx.string(name)).collect();
+    Ok(names.into_iter().rev().fold(Value::NIL, |tail, name| cx.cons(name, tail)))
+}}
