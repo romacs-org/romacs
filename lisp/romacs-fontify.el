@@ -239,12 +239,21 @@ state, or nil.  Nothing for a buffer killed meanwhile."
         (let* ((require (cdr (assq major-mode romacs-fontify-isolate-modes)))
                (worker (isolate-pooled-worker require 'busy)))
           (cond ((eq worker 'busy)
-                 ;; Again while the session stays idle, never while typing.
                  (setq romacs-fontify--timer
-                       (run-with-idle-timer (time-add (or (current-idle-time) 0)
-                                                      romacs-fontify-isolate-delay)
-                                            nil #'romacs-fontify--start (current-buffer))))
+                       (run-at-time romacs-fontify-isolate-delay nil
+                                    #'romacs-fontify--retry (current-buffer))))
                 (worker (romacs-fontify--submit worker require))))))))
+
+(defun romacs-fontify--retry (buffer)
+  "Fontify BUFFER again now that the pool may have room: at once while the
+session is idle, else once it has been idle `romacs-fontify-isolate-delay'
+seconds, so that a retry never runs while the user types."
+  (if (current-idle-time)
+      (romacs-fontify--start buffer)
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (setq romacs-fontify--timer
+              (run-with-idle-timer romacs-fontify-isolate-delay nil #'romacs-fontify--start buffer))))))
 
 (defun romacs-fontify--submit (worker require)
   "Snapshot this buffer and submit its fontification to WORKER with REQUIRE."

@@ -463,16 +463,15 @@ is full or an ending worker can free room, return IF-BUSY.  Otherwise
 return nil when no worker can take the job.
 Unlike `isolate-spawn', never kill a worker of other features to make room."
   (when (> isolate-queue-limit 0)
-    (condition-case nil
-        (let ((worker (or (isolate-idle-worker require)
-                          (condition-case nil (romacs--isolate-zygote-worker require t)
-                            (isolate-process-limit nil))
-                          (and (not (romacs--isolate-zygote-live-p require))
-                               (romacs--isolate-warm-pooled require))
-                          (romacs--isolate-with-features (romacs--isolate-unspent) require))))
-          (cond ((and worker (< (isolate-pending worker) isolate-queue-limit)) worker)
-                ((or worker (romacs--isolate-ending-p)) if-busy)))
-      (error nil))))
+    (let ((worker (or (isolate-idle-worker require)
+                      (condition-case nil (romacs--isolate-zygote-worker require t)
+                        (isolate-process-limit nil))
+                      (and (not (romacs--isolate-zygote-live-p require))
+                           ;; A worker that cannot start, or prepare, is none.
+                           (condition-case nil (romacs--isolate-warm-pooled require) (error nil)))
+                      (romacs--isolate-with-features (romacs--isolate-unspent) require))))
+      (cond ((and worker (< (isolate-pending worker) isolate-queue-limit)) worker)
+            ((or worker (romacs--isolate-ending-p)) if-busy)))))
 
 (defun romacs--isolate-with-features (isolates require)
   "The first of ISOLATES whose features are REQUIRE, or nil."

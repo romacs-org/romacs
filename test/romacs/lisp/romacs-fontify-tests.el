@@ -29,6 +29,7 @@
               (let ((job (isolate-spawn 'list)))
                 (romacs-fontify--start)
                 (should (timerp romacs-fontify--timer))
+                (should (eq (timer--function romacs-fontify--timer) #'romacs-fontify--retry))
                 (should-not romacs-fontify--state)
                 (should-not (isolate-await job 10))))
           (romacs-fontify--drop)
@@ -62,6 +63,25 @@
                   (should (isolate-future-done-p future)))))
           (romacs-fontify--drop)
           (romacs-fontify-tests--stop-workers))))))
+
+(ert-deftest romacs-fontify-retries-a-busy-pool-only-when-idle ()
+  (with-temp-buffer
+    (let ((started 0))
+      (cl-letf (((symbol-function 'romacs-fontify--start) (lambda (_buffer) (cl-incf started))))
+        (unwind-protect
+            (progn
+              ;; The user is typing: nothing runs, an idle timer waits.
+              (cl-letf (((symbol-function 'current-idle-time) #'ignore))
+                (romacs-fontify--retry (current-buffer)))
+              (should (zerop started))
+              (should (timer--idle-delay romacs-fontify--timer))
+              (should (eq (timer--function romacs-fontify--timer) #'romacs-fontify--start))
+              (cancel-timer romacs-fontify--timer)
+              ;; Idle: it tries at once.
+              (cl-letf (((symbol-function 'current-idle-time) (lambda () '(0 3 0 0))))
+                (romacs-fontify--retry (current-buffer)))
+              (should (= started 1)))
+          (when (timerp romacs-fontify--timer) (cancel-timer romacs-fontify--timer)))))))
 
 (provide 'romacs-fontify-tests)
 ;;; romacs-fontify-tests.el ends here
