@@ -2005,6 +2005,8 @@ mod leaf {
     mod invisible;
     mod buffer_locals;
     mod frozen;
+    mod records;
+    pub(crate) use records::Source;
     mod isolate;
     mod keeper;
     mod flight;
