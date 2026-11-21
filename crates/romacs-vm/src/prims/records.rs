@@ -52,7 +52,7 @@ fn romacs_records_reshape(cx, records: Value, tag: Value, map: Value, fill: Valu
     let records = super::widen::list_elements(cx, records)?;
     let map = cx.vector_values(map)?.into_iter().map(|v| {
         if v == Value::NIL { return Ok(Source::Fill) }
-        v.integer_value().and_then(|n| usize::try_from(n).ok()).map(Source::Old).ok_or(Fault::Wrong("natnump", v))
+        v.integer_value().and_then(|n| usize::try_from(n).ok()).map(Source::Old).ok_or_else(|| Fault::Wrong("natnump", v))
     }).collect::<std::result::Result<Vec<_>, Fault>>()?;
     let row = |cx: &Leaf<'_>, v: Value| -> std::result::Result<Vec<Value>, Fault> {
         let row = cx.vector_values(v)?;
