@@ -1,6 +1,7 @@
 ;;; romacs-workspace-completion-tests.el --- The workspace's readers stay its own -*- lexical-binding: t; -*-
 (require 'ert)
 (require 'cl-lib)
+(require 'romacs-workspace-completion)
 
 (defun romacs-workspace-completion-tests--readers ()
   "The readers of command, file and buffer names in place now."
