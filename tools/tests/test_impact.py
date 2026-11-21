@@ -191,6 +191,8 @@ class Select(unittest.TestCase):
         self.assertIn('startup_failed', self.select('crates/romacs-vm-gui/src/loading.rs')['harnesses'])
         self.assertIn('startup_failed', self.select('crates/romacs-vm-gui/harness/exit_live.py')['harnesses'])
         self.assertNotIn('startup_failed', self.select('crates/romacs-vm-gui/src/fonts.rs')['harnesses'])
+        self.assertIn('live_update', self.select('lisp/session/romacs-live.el')['harnesses'])
+        self.assertIn('live_update', self.select('crates/romacs-vm-gui/harness/live_update_live.py')['harnesses'])
 
     def test_documentation_reaches_only_the_structural_rules(self):
         found = self.select('doc/x.org', 'AGENTS.md', 'tools/tests/test_x.py')
