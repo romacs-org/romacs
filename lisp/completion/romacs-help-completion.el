@@ -25,7 +25,9 @@
 
 ;;; Code:
 
-(require 'romacs-help-index)
+;; Beside this file, which romacs-follow.el loads by its name.
+(require 'romacs-help-index
+         (expand-file-name "romacs-help-index" (file-name-directory (or load-file-name buffer-file-name))))
 
 (declare-function romacs-command-epoch "prims/completion.rs" ())
 (declare-function help--symbol-completion-table-affixation "help-fns" (completions))

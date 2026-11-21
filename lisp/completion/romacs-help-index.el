@@ -40,7 +40,7 @@ for prefixes, and also `cl-' definers.")
     ("define-minor-mode" function command variable)
     ("define-globalized-minor-mode" function command variable)
     ("defvar" variable) ("defcustom" variable) ("defconst" variable) ("defvar-local" variable)
-    ("defvaralias" variable) ("defface" face))
+    ("defvaralias" variable) ("defvar-keymap" variable) ("defface" face))
   "What a definer defines its name as.  Other definers are not indexed.")
 
 (defconst romacs-help-index--maybe-command '("defun" "cl-defun")
@@ -64,12 +64,27 @@ shorthand first, as its Local Variables give them."
         (concat (cdr shorthand) (substring name (length (car shorthand))))
       name)))
 
-(defun romacs-help-index--interactive-p ()
-  "Whether the definition whose name was just matched has an interactive
-spec before the next top-level form."
+(defun romacs-help-index--interactive-p (start)
+  "Whether the definition at START has an interactive spec of its own:
+its body's first form after the docstring and declarations.  Walked as
+text, so nothing is interned; only where an interactive form appears
+before the next top-level form."
   (save-excursion
     (let ((end (save-excursion (if (re-search-forward "^(" nil t) (point) (point-max)))))
-      (re-search-forward "(interactive\\_>" end t))))
+      (and (re-search-forward "(interactive\\_>" end t)
+           (with-syntax-table emacs-lisp-mode-syntax-table
+             (ignore-errors
+               (goto-char start)
+               (down-list 1)
+               (forward-sexp 3)              ; The definer, the name, the arguments.
+               (forward-comment (buffer-size))
+               (when (looking-at "\"")
+                 (forward-sexp 1)
+                 (forward-comment (buffer-size)))
+               (while (looking-at "(declare\\_>")
+                 (forward-sexp 1)
+                 (forward-comment (buffer-size)))
+               (looking-at "(interactive\\_>")))))))
 
 (defun romacs-help-index--scan (library file index)
   "Put LIBRARY's definitions into INDEX, reading its source FILE as bytes.
@@ -85,7 +100,7 @@ An entry is ((KIND . LIBRARY) ...), KIND `function', `command',
         (when kinds
           (let* ((name (romacs-help-index--name (match-string-no-properties 2) shorthands))
                  (kinds (if (and (member definer romacs-help-index--maybe-command)
-                                 (romacs-help-index--interactive-p))
+                                 (romacs-help-index--interactive-p (match-beginning 0)))
                             (cons 'command kinds)
                           kinds))
                  (entry (gethash name index)))
@@ -217,7 +232,8 @@ makes none."
     (setq romacs-help-index--future nil)
     (condition-case err
         (setq romacs-help-index (isolate-await future 0))
-      (error (setq romacs-help-index-last-error err)))))
+      ;; A later listing asks again.
+      ((error quit) (setq romacs-help-index-last-error err romacs-help-index--asked nil)))))
 
 (provide 'romacs-help-index)
 ;;; romacs-help-index.el ends here

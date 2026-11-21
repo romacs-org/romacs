@@ -40,11 +40,16 @@ as a worker makes it, kept in a fresh cache file bound to `cache'."
 (ert-deftest romacs-help-index-reads-definitions-by-kind ()
   "The index has each definition by kind, commands apart, and making it
 loads none of the libraries."
-  (romacs-help-index-tests--with-index '("5x5" "mpuz" "icalendar-mode")
+  (romacs-help-index-tests--with-index '("5x5" "mpuz" "icalendar-mode" "imenu" "python")
     (should (equal (gethash "5x5-grid-size" romacs-help-index) '((variable . "5x5"))))
     (should (assq 'command (gethash "5x5" romacs-help-index)))
     (should (assq 'function (gethash "5x5" romacs-help-index)))
     (should-not (assq 'command (gethash "5x5-draw-grid" romacs-help-index)))
+    ;; A lambda in its body is interactive, the function is not.
+    (should (gethash "imenu--create-keymap" romacs-help-index))
+    (should-not (assq 'command (gethash "imenu--create-keymap" romacs-help-index)))
+    (should (equal (gethash "imenu-sort-function" romacs-help-index) '((variable . "imenu"))))
+    (should (assq 'variable (gethash "python-base-mode-map" romacs-help-index)))
     (should (equal (gethash "mpuz-unsolved" romacs-help-index) '((face . "mpuz"))))
     ;; Read as `read-symbol-shorthands' make it.
     (should (gethash "icalendar--format-decode-buffer" romacs-help-index))
