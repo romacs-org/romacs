@@ -85,7 +85,7 @@ executable there running the shell SCRIPT; BINDINGS, of `let*', see them."
     (let ((instance (romacs-agent--configured "codex")))
       (should (equal (car (romacs-agent-models-tests--probed instance)) :models))
       (should-not (process-live-p (gethash "codex" romacs-agent--models-probes)))
-      (should (eq (gethash "codex" romacs-agent--models-probes) 'done))
+      (should (numberp (gethash "codex" romacs-agent--models-probes)))
       (let ((rows (romacs-agent--models instance)))
         ;; What the harness reports goes first and wins over the table.
         (should (equal (mapcar #'car rows) '("gpt-6.2-sol" "gpt-6.2-astra" "gpt-6.1-sol")))
@@ -107,14 +107,19 @@ executable there running the shell SCRIPT; BINDINGS, of `let*', see them."
     (should (eq (car (romacs-agent-models-tests--probed (romacs-agent--configured "codex"))) :error))))
 
 (ert-deftest romacs-agent-models-claude-probe-takes-no-session-s-arguments ()
-  ;; An instance's arguments may name settings and hooks: a probe runs
-  ;; none of them, and none of the user's settings.
+  ;; An instance's arguments may name servers or hooks: a probe takes
+  ;; none of them, and runs none of the user's hooks.
   (let ((argv (plist-get (romacs-agent--claude-models-probe
-                          (list :program "claude" :arguments '("--settings" "hooks.json")))
+                          (list :program "claude" :arguments '("--mcp-config" "servers.json")))
                          :argv)))
-    (should-not (member "--settings" argv))
-    (should (equal (member "--setting-sources" argv) '("--setting-sources" "")))
-    (should (member "--no-session-persistence" argv))))
+    (should-not (member "servers.json" argv))
+    (should (equal (member "--settings" argv) '("--settings" "{\"disableAllHooks\":true}")))
+    (should (member "--no-session-persistence" argv)))
+  ;; Arguments naming settings of their own: their sessions alone report.
+  (dolist (arguments '(("--settings" "s.json") ("--settings=s.json") ("--setting-sources=user")
+                       ("--setting-sources" "user")))
+    (should-not (romacs-agent--claude-models-probe (list :program "claude" :arguments arguments))))
+  (should (romacs-agent--claude-models-probe (list :program "claude" :arguments '("--settingsx")))))
 
 (ert-deftest romacs-agent-models-an-empty-answer-is-kept ()
   ;; A harness that now reports no model: what it offered before goes.
@@ -125,12 +130,80 @@ executable there running the shell SCRIPT; BINDINGS, of `let*', see them."
       (romacs-agent--keep-models instance nil)
       (should-not (romacs-agent--models instance)))))
 
-(ert-deftest romacs-agent-models-asked-once-a-run ()
+(ert-deftest romacs-agent-models-asked-again-once-old ()
   (let ((asked (make-hash-table :test #'equal))
         (instances (list (list :name "codex") (list :name "claude"))))
-    (should (equal (romacs-agent--models-due instances asked) instances))
-    (puthash "codex" 'done asked)
-    (should (equal (romacs-agent--models-due instances asked) (list (list :name "claude"))))))
+    ;; Never asked in this run: due.
+    (should (equal (romacs-agent--models-due instances asked 1000 30) instances))
+    ;; Answered 10 minutes ago: not yet; 30 or more: again.
+    (puthash "codex" (- 1000 600) asked)
+    (should (equal (romacs-agent--models-due instances asked 1000 30) (list (list :name "claude"))))
+    (should (equal (romacs-agent--models-due instances asked (+ 1000 1200) 30) instances))
+    ;; With no interval, once a run.
+    (should (equal (romacs-agent--models-due instances asked (+ 1000 99999) nil) (list (list :name "claude"))))
+    ;; One being asked is not asked twice.
+    (puthash "claude" (make-pipe-process :name "romacs-models-test" :noquery t) asked)
+    (unwind-protect
+        (should (equal (romacs-agent--models-due (cdr instances) asked (+ 1000 99999) 30) nil))
+      (delete-process (gethash "claude" asked)))))
+
+(ert-deftest romacs-agent-models-ticks-ask-once-idle ()
+  ;; Ticks while Romacs is busy ask once; an interval turned off meanwhile
+  ;; asks none.
+  (let ((romacs-agent--models-timer nil) (romacs-agent--models-idle nil)
+        (romacs-agent-models-refresh-interval 5))
+    (unwind-protect
+        (progn
+          (romacs-agent--models-tick)
+          (let ((idle romacs-agent--models-idle))
+            (should (memq idle timer-idle-list))
+            (romacs-agent--models-tick)
+            (should (eq romacs-agent--models-idle idle))
+            (let ((romacs-agent-models-refresh-interval nil))
+              (romacs-agent--models-schedule))
+            (should-not (memq idle timer-idle-list))
+            (should-not romacs-agent--models-idle)))
+      (dolist (timer (list romacs-agent--models-timer romacs-agent--models-idle))
+        (when (timerp timer) (cancel-timer timer))))))
+
+(ert-deftest romacs-agent-models-asked-every-interval ()
+  (let ((romacs-agent--models-timer nil))
+    (unwind-protect
+        (progn
+          (let ((romacs-agent-models-refresh-interval 5))
+            (romacs-agent--models-schedule)
+            (should (timerp romacs-agent--models-timer))
+            (should (= (timer--repeat-delay romacs-agent--models-timer) 300)))
+          (let ((romacs-agent-models-refresh-interval nil) (old romacs-agent--models-timer))
+            (romacs-agent--models-schedule)
+            (should-not romacs-agent--models-timer)
+            (should-not (memq old timer-list))))
+      (when (timerp romacs-agent--models-timer) (cancel-timer romacs-agent--models-timer)))))
+
+(ert-deftest romacs-agent-models-an-open-picker-shows-what-is-reported ()
+  ;; The menu opened before Codex answered: its answer shows in the rows
+  ;; still being asked for, the menu not opened again.
+  (romacs-agent-models-tests--with "exit 0\n"
+      ((romacs-agent-providers `(("codex" :program ,program)))
+       (seen nil))
+    (let ((instance (romacs-agent--configured "codex")))
+      (cl-letf (((symbol-function 'romacs-agent--want-models) #'ignore)
+                ((symbol-function 'completing-read)
+                 (lambda (_prompt table &rest _)
+                   (push (all-completions "" table) seen)
+                   (romacs-agent--keep-models
+                    instance (cadr (romacs-agent--codex-probed-models
+                                    (romacs-agent-models-tests--json romacs-agent-models-tests--listed))))
+                   (push (all-completions "" table) seen)
+                   "Codex · GPT-6.2-Astra")))
+        (should (equal (plist-get (cdr (romacs-agent--pick-row
+                                         (lambda () (romacs-agent--instance-rows instance "Codex" nil))))
+                                  :model)
+                       "gpt-6.2-astra")))
+      (should (equal (cadr seen) '("Codex · default")))
+      (should (member "Codex · GPT-6.2-Sol" (car seen)))
+      ;; Its watch ends with it.
+      (should-not romacs-agent-models-changed-functions))))
 
 (ert-deftest romacs-agent-models-the-menu-offers-the-reported-models ()
   (romacs-agent-models-tests--with "exit 0\n"

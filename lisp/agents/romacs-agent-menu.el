@@ -160,7 +160,9 @@ with a prefix argument, asked for."
           (instance (romacs-agent--instance (romacs-agent-provider session) (romacs-agent-harness session)))
           (_ (romacs-agent--want-models (list instance)))
           (fields (cdr (romacs-agent--pick-row
-                        (romacs-agent--instance-rows instance (romacs-agent--harness-display (romacs-agent-harness session)) nil))))
+                        (lambda ()
+                          (romacs-agent--instance-rows
+                           instance (romacs-agent--harness-display (romacs-agent-harness session)) nil)))))
           (model (plist-get fields :model))
           (efforts (plist-get fields :efforts))
           (now (plist-get (romacs-agent--wanted session) :effort))
@@ -191,7 +193,7 @@ MODEL picked as for a new session.  Under an instance of the same harness
 once a running turn ends.  Under another harness a new session starts on
 a brief of the thread, to do NEXT, and its chat opens."
   (interactive
-   (let* ((fields (cdr (romacs-agent--pick-row (romacs-agent--picker-rows))))
+   (let* ((fields (cdr (romacs-agent--pick-row #'romacs-agent--picker-rows)))
           (provider (plist-get fields :provider)))
      (list provider (plist-get fields :model)
            (unless (romacs-agent-menu--moves-p (romacs-agent-menu--session) provider)

@@ -210,9 +210,9 @@ affixation it saw pushed on the list in cell ASKED."
       (should (equal (romacs-agent--read-selection '(4)) '(claude :model "a" :effort "low")))
       (should (string-match-p "Effort.*high" (car (car (car asked)))))
       (should (equal (nth 3 (car (car asked))) '("low" "high")))
-      ;; No default anywhere: asked without C-u.
-      (setcar answers (list "Claude Code · B" "low"))
-      (should (equal (romacs-agent--read-selection nil) '(claude :model "b" :effort "low")))
+      ;; No default anywhere: not asked, the harness's own.
+      (setcar answers (list "Claude Code · B"))
+      (should (equal (romacs-agent--read-selection nil) '(claude :model "b")))
       ;; A model with no efforts asks none, even with C-u.
       (setcar answers (list "Codex · C"))
       (should (equal (romacs-agent--read-selection '(4)) '(codex :model "c"))))))
