@@ -8,6 +8,9 @@
 ;; beta before that: 1, 4 and 8 MB took 115M, 739M and 206,033M
 ;; instructions, and 16 MB never ended, each slice ending before its first
 ;; line.  The record's handler is stubbed: the probe holds the framing.
+;; Its clock is held still, so a slice never ends on time and the count
+;; is the framing's alone, the same on any host; the slice's own deadline
+;; is the reattach tests' (a slice handles a line however long its search).
 
 (defun scaling--agent-drain-record (mb)
   "One stream-json record of MB megabytes, as a list of 64 KB chunks."
@@ -32,12 +35,19 @@
              ;; first line, is not the framing's work.
              (process-put process 'romacs-agent-kept t)
              (list process (scaling--agent-drain-record n))))
-  :body (let ((process (car it)) (due nil) (handled 0))
-          (cl-letf (((symbol-function 'run-at-time)
+  :body (let ((process (car it)) (due nil) (records nil) (turns 0))
+          (cl-letf (((symbol-function 'float-time) (lambda (&optional _) 0.0))
+                    ((symbol-function 'run-at-time)
                      (lambda (_time _repeat function &rest args)
                        (setq due (append due (list (cons function args)))) 'timer))
-                    ((symbol-function 'romacs-agent--record) (lambda (_session _record) (cl-incf handled)))
+                    ((symbol-function 'romacs-agent--record) (lambda (_session record) (push record records)))
                     ((symbol-function 'romacs-agent--raise) #'ignore))
             (dolist (chunk (cadr it)) (romacs-agent--filter process chunk))
-            (while due (let ((timer (pop due))) (apply (car timer) (cdr timer)))))
-          (unless (= handled 1) (error "agent-drain-record: handled %d records, not 1" handled))))
+            ;; A drain that makes no progress fails here, not on the CPU limit.
+            (while due
+              (when (> (cl-incf turns) 1000) (error "agent-drain-record: no progress after %d turns" turns))
+              (let ((timer (pop due))) (apply (car timer) (cdr timer)))))
+          ;; The whole record, not a line made of its first and last chunks.
+          (unless (and (= (length records) 1) (equal (gethash "seq" (car records)) 1)
+                       (= (length (gethash "text" (car records))) (* n 1048576)))
+            (error "agent-drain-record: %d records, not the one of %d MB" (length records) n))))
