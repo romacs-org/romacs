@@ -257,7 +257,7 @@ impl Barrier {
 #[cold]
 #[inline(never)]
 fn on_store(barrier: &mut Barrier, new: Value) {
-    if barrier.lost || (crate::Vm::image_value(new) && crate::frozen::region_of(new.payload() as usize) == 0) { return; }
+    if barrier.lost || (crate::Vm::image_value(new) && crate::frozen::executable_image(new.payload())) { return; }
     barrier.values.push(new);
     if barrier.values.len() >= LOG_GIVES_UP {
         *barrier = Barrier { lost: true, ..Barrier::default() };

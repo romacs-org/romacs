@@ -74,6 +74,13 @@ pub(crate) fn region_of(payload: usize) -> usize {
     (payload >> REGION_SHIFT) & (MAX_REGIONS - 1)
 }
 
+/// Whether an image value's PAYLOAD is the executable image's (region 0),
+/// not a frozen region's.
+#[inline]
+pub(crate) fn executable_image(payload: u64) -> bool {
+    (payload >> REGION_SHIFT) & ((1 << REGION_BITS) - 1) == 0
+}
+
 /// The encoded bytes a region was made from, kept for forwarding.
 #[derive(Clone)]
 pub(crate) enum Backing {
