@@ -199,13 +199,13 @@ nil before."
 every file is hashed and the note is in its journal, its place in the
 turn known."
   (romacs-mcp--instance arguments)
-  (let* ((call (romacs-agent-attachments--request arguments))
-         (paths (plist-get call :paths))
+  (let* ((request (romacs-agent-attachments--request arguments))
+         (paths (plist-get request :paths))
          (files (mapcar #'romacs-agent-attachments--check paths))
          (items (cl-mapcar #'romacs-agent-attachments--item
                            paths files (romacs-agent-attachments--alts (gethash "alt" arguments) (length paths))))
+         (call (append request (list :id (romacs-agent--uuid) :items items)))
          (job (romacs-agent-attachments--job romacs-mcp--active (length items))))
-    (setq call (append call (list :id (romacs-agent--uuid) :items items)))
     (romacs-agent-attachments--arm job)
     ;; Its session's end, and its note read back, are watched from now:
     ;; an end while hashing gives it up too.
