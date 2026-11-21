@@ -47,7 +47,7 @@
 (require 'desktop)
 
 (declare-function romacs--isolate-pump "isolate" (timeout))
-(declare-function romacs--timer-check "timers.rs" ())
+(declare-function romacs--timer-check "subprocess" ())
 (declare-function romacs--session-image-write "session_image.rs" (file form buffers))
 (declare-function romacs--session-image-read "session_image.rs" (file))
 (declare-function romacs--lead-buffer-list "buffer_names.rs" (buffers))
@@ -765,7 +765,10 @@ comes back, the image kept."
   (let ((result :pending) (deadline (+ (float-time) warm-restart-part-wait)))
     (warm-restart--restore-parts form (lambda (problems) (setq result problems)))
     (while (and (eq result :pending) (< (float-time) deadline))
-      (if (fboundp 'romacs--isolate-pump) (romacs--isolate-pump 0.05) (accept-process-output nil 0.05))
+      ;; Subprocesses, then worker VMs, then timers: a reader may be told
+      ;; it is through by any of them.
+      (accept-process-output nil 0.02)
+      (when (fboundp 'romacs--isolate-pump) (romacs--isolate-pump 0.02))
       (when (fboundp 'romacs--timer-check) (romacs--timer-check)))
     (when (eq result :pending)
       (error "A part of the image was not through in %s s: no buffer restored" warm-restart-part-wait))
@@ -2185,7 +2188,8 @@ layout of that tree restarts as well.  TARGET is taken by its true name:
 a link to a build (an installer's `current') names the build it points
 to now, so the session stays on that build when the link moves, and its
 runtime root is spelled as a launcher that resolves the link spells it,
-whose worlds it then boots from."
+whose worlds it then boots from.  This session's own executable keeps
+this session's runtime (ROMACS_RUNTIME_ROOT, ROMACS_LISP_DIR)."
   (let ((target (file-truename target)))
     (cond ((file-directory-p target)
            (let ((binary (expand-file-name "romacs-vm-gui" target)))
@@ -2196,7 +2200,12 @@ whose worlds it then boots from."
              (list (cons binary (warm-restart--launch-flags (cdr (warm-restart--argv))))
                    (concat "ROMACS_RUNTIME_ROOT=" target))))
           ((file-executable-p target)
-           (list (cons target (warm-restart--launch-flags (cdr (warm-restart--argv))))))
+           (cons (cons target (warm-restart--launch-flags (cdr (warm-restart--argv))))
+                 ;; This session's own executable keeps this session's runtime.
+                 (and (file-equal-p target (expand-file-name invocation-name invocation-directory))
+                      (cl-loop for var in '("ROMACS_RUNTIME_ROOT" "ROMACS_LISP_DIR")
+                               for value = (getenv var)
+                               when value collect (concat var "=" value)))))
           (t (user-error "No build at %s" target)))))
 
 (defvar warm-restart-obstacle-functions nil
