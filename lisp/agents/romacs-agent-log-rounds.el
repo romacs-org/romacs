@@ -7,14 +7,18 @@
 ;; the agent did in answer.  Who each block is reads by shape and colour,
 ;; before any word:
 ;;
-;; - the user's message opens a round: its lines on a tinted surface,
-;;   behind a thick bar in the colour that means the user everywhere
-;;   (`romacs-working-waiting', what waits on them on the board);
+;; - the user's message opens a round: its lines behind a thick bar in
+;;   the colour that means the user everywhere (`romacs-working-waiting',
+;;   what waits on them on the board);
 ;; - a message from elsewhere (another session's, a delegated task's
 ;;   result, a background task's notice) opens one too, but is not the
 ;;   user: quoted behind a bar from its head, ← and whom it is from, to
 ;;   its first lines, dim, a blank line after;
 ;; - the agent's work keeps its rows; its reply is the text as it is.
+;; A round opens after a blank line more than its parts have between
+;; them: air, not a rule.  A rule, a surface or a hairline would each be
+;; another face run on every line they mark, and each run costs every
+;; redraw of the chat (romacs#377).
 ;; When a round ends, the agent's words before its last are dimmed: its
 ;; answer stands out by what recedes, as in T3 Code's timeline (design:
 ;; the chat lane's rounds-design.md).
@@ -24,32 +28,9 @@
 (require 'romacs-agent-log)
 (require 'romacs-markdown)
 
-(defface romacs-agent-log-you '((t :extend t))
-  "The surface of the user's messages: the background moved a little
-toward the text, derived on each theme change.")
-(defface romacs-agent-log-you-top '((t :overline t :extend t))
-  "The hairline over a round's first line, the user's message: where a
-round begins, found at a glance as the chat scrolls.  Its colour is the
-theme's dim text, derived on each theme change.")
 (defface romacs-agent-log-you-bar '((t :inherit romacs-working-waiting))
   "The bar the user's messages stand behind: the colour that means the
 user, what waits on them, on every view of agents.")
-;; The user's message as named faces, each its parts' (romacs#377).
-(defface romacs-agent-log-you-bar-first
-  '((t :inherit (romacs-agent-log-you-top romacs-agent-log-you-bar romacs-agent-log-you)))
-  "The bar before the first line of the user's message.")
-(defface romacs-agent-log-you-bar-line '((t :inherit (romacs-agent-log-you-bar romacs-agent-log-you)))
-  "The bar before another line of the user's message.")
-(defface romacs-agent-log-you-text-first
-  '((t :inherit (romacs-agent-log-you-top romacs-agent-log-prompt romacs-agent-log-you)))
-  "The first line of the user's message, under its round's hairline.")
-(defface romacs-agent-log-you-text '((t :inherit (romacs-agent-log-prompt romacs-agent-log-you)))
-  "Another line of the user's message.")
-(defface romacs-agent-log-you-note-first
-  '((t :inherit (romacs-agent-log-you-top romacs-agent-log-note romacs-agent-log-you)))
-  "A note in the first line of the user's message (how many images).")
-(defface romacs-agent-log-you-note '((t :inherit (romacs-agent-log-note romacs-agent-log-you)))
-  "A note in another line of the user's message.")
 (defface romacs-agent-log-other-mark '((t :inherit romacs-working-running))
   "The mark of what came from elsewhere, and the bar it is quoted behind:
 the theme's colour for work.")
@@ -64,61 +45,40 @@ agent's own.")
   :type 'natnum
   :group 'romacs-agent)
 
-(defun romacs-agent-log-rounds--derive (&rest _)
-  "Make the user's surface the background mixed toward the text until it
-stands apart (`romacs-color-band'), as its default spec: told from the
-transcript on every theme, light, dark or black."
-  (let* ((bg (romacs-color-hex (face-background 'default nil t)))
-         (fg (romacs-color-hex (face-foreground 'default nil t)))
-         (surface (and bg fg (romacs-color-band bg fg 1.3))))
-    (face-spec-set 'romacs-agent-log-you
-                   (if surface `((t :background ,surface :extend t)) '((t :extend t)))
-                   'face-defface-spec)
-    ;; A hairline, never a rule: the dim text's colour, toward the surface.
-    (let ((line (romacs-color-hex (face-foreground 'shadow nil t))))
-      (face-spec-set 'romacs-agent-log-you-top
-                     (if line `((t :overline ,line :extend t)) '((t :overline t :extend t)))
-                     'face-defface-spec))))
 
-(add-hook 'enable-theme-functions #'romacs-agent-log-rounds--derive)
-(add-hook 'disable-theme-functions #'romacs-agent-log-rounds--derive)
-(romacs-agent-log-rounds--derive)
-
-(defun romacs-agent-log-rounds--you-line (line first)
-  "LINE of the user's message, its runs in the named faces of its surface:
-the prompt's (its mark's too) and a note's, the FIRST line's under the
-round's hairline.  Named faces, never lists: the display realizes each
-once (romacs#377), and a line is two runs, its bar and its words."
+(defun romacs-agent-log-rounds--you-line (line)
+  "LINE of the user's message behind its bar, in two runs: its bar, and
+its words in the prompt's face, its mark's too (a note keeps its own).
+Each run is a face realized and a run shaped on every redraw of the
+chat (romacs#377): the fewer, the cheaper."
   (let ((line (copy-sequence line)) (at 0) (end (length line)))
     (while (< at end)
       (let ((next (next-single-property-change at 'face line end)))
-        (put-text-property at next 'face
-                           (if (eq (get-text-property at 'face line) 'romacs-agent-log-note)
-                               (if first 'romacs-agent-log-you-note-first 'romacs-agent-log-you-note)
-                             (if first 'romacs-agent-log-you-text-first 'romacs-agent-log-you-text))
-                           line)
+        (unless (eq (get-text-property at 'face line) 'romacs-agent-log-note)
+          (put-text-property at next 'face 'romacs-agent-log-prompt line))
         (setq at next)))
-    (concat (propertize "▌ " 'face (if first 'romacs-agent-log-you-bar-first 'romacs-agent-log-you-bar-line)
-                        'romacs-agent-decor t)
-            line
-            ;; Its line break on its surface, to the window's edge.
-            (propertize "\n" 'face (if first 'romacs-agent-log-you-text-first 'romacs-agent-log-you-text)))))
+    (concat (propertize "▌ " 'face 'romacs-agent-log-you-bar 'romacs-agent-decor t) line)))
 
 (defun romacs-agent-log-rounds-you (text)
   "TEXT, the user's message as a chat draws it, as its round's opener:
-each of its lines behind its bar on its surface, a block to the
-window's edge, the first under the round's hairline; the blank lines
-before and after it stay the transcript's.  The round before it ends."
+each of its lines behind its bar, a blank line more before it than
+between a round's parts, the air a round begins with.  The round
+before it ends."
   (romacs-agent-log-rounds-end)
-  (let* ((text (if (string-suffix-p "\n" text) (substring text 0 -1) text))
+  (let* ((text (string-trim-right text "\n"))
          (first (or (string-match "[^\n]" text) 0))
-         (n -1)
-         (text (concat (substring text 0 first)
+         (text (concat (romacs-agent-log-rounds--air)
+                       (substring text 0 first)
                        ;; Blank lines between its own too: its bar runs on.
-                       (mapconcat (lambda (line) (romacs-agent-log-rounds--you-line line (zerop (setq n (1+ n)))))
-                                  (split-string (substring text first) "\n") ""))))
+                       (mapconcat #'romacs-agent-log-rounds--you-line (split-string (substring text first) "\n") "\n")
+                       "\n")))
     (put-text-property 0 1 'romacs-agent-log-round t text)
     (concat text "\n")))
+
+(defun romacs-agent-log-rounds--air ()
+  "The blank line more a round opens after, unless the transcript is
+empty: rounds read apart as the chat scrolls, with no rule drawn."
+  (if (<= romacs-agent-log--end (1+ (point-min))) "" "\n"))
 
 (defun romacs-agent-log-rounds--words (text width)
   "TEXT in WIDTH columns, cut at a word's end before an ellipsis, never
@@ -187,14 +147,12 @@ not the user's; its first lines dim, RET shows all."
                        ;; Apart from what the agent says to it; under a
                        ;; call, in its lines.
                        (if parent "\n" "\n\n"))))
-    ;; A top-level arrival opens a round, the one before it ended, under
-    ;; the hairline every round begins with; one under a subagent's call
-    ;; is that call's.
+    ;; A top-level arrival opens a round, the one before it ended, after
+    ;; the air every round begins with; one under a subagent's call is
+    ;; that call's.
     (unless parent
       (romacs-agent-log-rounds-end)
-      (let* ((head (if (string-prefix-p "\n" text) 1 0))
-             (end (min (length text) (1+ (or (string-search "\n" text head) (length text))))))
-        (add-face-text-property head end 'romacs-agent-log-you-top t text)))
+      (setq text (concat (romacs-agent-log-rounds--air) text)))
     (romacs-agent-log--line event 'arrival
                             (let ((text (propertize (romacs-agent-log--shared-faces text)
                                                     'romacs-agent-log-full (cons nil (or (plist-get incoming :full) body)))))

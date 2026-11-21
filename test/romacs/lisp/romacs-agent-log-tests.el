@@ -80,7 +80,7 @@ them inherits."
     (draw :type 'message-end)
     (draw :type 'input :text "next")
     (should (equal (romacs-agent-log-tests--transcript)
-                   "∴ I think.\n\nPara one.\n\nPara two.\n\n▌ ❯ next\n\n"))))
+                   "∴ I think.\n\nPara one.\n\nPara two.\n\n\n▌ ❯ next\n\n"))))
 
 (ert-deftest romacs-agent-log-long-output-says-how-much-more ()
   (romacs-agent-log-tests--with
@@ -232,7 +232,7 @@ them inherits."
     (draw :type 'input :text "two")
     (goto-char (point-min))
     (romacs-agent-log-next-prompt 1)
-    (should (looking-at-p "\n▌ ❯ two"))
+    (should (looking-at-p "\n+▌ ❯ two"))
     ;; Past the last prompt: said, never a hang.
     (should-error (romacs-agent-log-next-prompt 1) :type 'user-error)
     (goto-char (point-min))
@@ -1102,13 +1102,13 @@ them inherits."
       (should-not (string-match-p "❯ Delegated" text)))
     (goto-char (point-min))
     (search-forward "do it")
-    (should (romacs-agent-log-tests--face-p 'romacs-agent-log-you (get-text-property (match-beginning 0) 'face)))
+    (should (romacs-agent-log-tests--face-p 'romacs-agent-log-you-bar (get-text-property (line-beginning-position) 'face)))
     (search-forward "lane x")
     (should (memq 'romacs-agent-log-other-head (ensure-list (get-text-property (match-beginning 0) 'face))))
     ;; Nothing the GUI host does not draw.
     (should-not (text-property-not-all (point-min) (point-max) 'line-prefix nil))
     (should-not (text-property-not-all (point-min) (point-max) 'wrap-prefix nil))
-    (should-not (romacs-agent-log-tests--face-p 'romacs-agent-log-you (get-text-property (match-beginning 0) 'face))))
+    (should-not (romacs-agent-log-tests--face-p 'romacs-agent-log-you-bar (get-text-property (line-beginning-position) 'face))))
   ;; Only whole envelopes, each of a batch; anything else is the user's.
   (should (equal (mapcar (lambda (i) (plist-get i :text))
                          (romacs-agent-incoming-of (concat "<romacs-message id=\"1\" kind=\"child\" from=\"a\">\none\n</romacs-message>\nReply to this message with romacs_task_reply(messageId=\"1\", text=...).\n\n"
@@ -1326,43 +1326,14 @@ none when dropped.")
     (should band)
     (should (>= (romacs-color-contrast band "#090909") 1.2))
     (should (>= (romacs-color-contrast "#696969" band) 3.0)))
-  ;; Derived as a theme is enabled and again as it goes, a block to the
-  ;; window's edge, as the face is realized.
-  (let ((base (make-symbol "romacs-rounds-base")) (theme (make-symbol "romacs-rounds-test")))
-    (dolist (pair `((,base . "#ffffff") (,theme . "#000000")))
-      (custom-declare-theme (car pair) nil)
-      (put (car pair) 'theme-settings nil))
-    (custom-theme-set-faces base '(default ((t :background "#ffffff" :foreground "#202020"))))
-    (custom-theme-set-faces theme '(default ((t :background "#000000" :foreground "#767676"))))
-    (unwind-protect
-        (progn
-          (enable-theme base)
-          (let ((before (face-attribute 'romacs-agent-log-you :background nil t)))
-            (should (>= (romacs-color-contrast before "#ffffff") 1.3))
-            (enable-theme theme)
-            (should (eq (face-attribute 'romacs-agent-log-you :extend nil t) t))
-            (let ((surface (face-attribute 'romacs-agent-log-you :background nil t)))
-              (should (>= (romacs-color-contrast surface "#000000") 1.3))
-              (should (>= (romacs-color-contrast "#767676" surface) 3.0)))
-            (disable-theme theme)
-            (should (equal (face-attribute 'romacs-agent-log-you :background nil t) before))))
-      (disable-theme theme)
-      (disable-theme base)))
-  ;; From its first line through its newline, the blank line before it
-  ;; the transcript's.
+  ;; Each line of the user's message behind its bar, blank ones too.
   (romacs-agent-log-tests--with
     (draw :type 'input :text "first" :request 1)
-    (draw :type 'input :text "second\nthird" :request 2)
+    (draw :type 'input :text "second\n\nthird" :request 2)
     (goto-char (point-min))
     (search-forward "second")
-    (let ((line (line-beginning-position)))
-      (should (romacs-agent-log-tests--face-p 'romacs-agent-log-you (get-text-property line 'face)))
-      ;; Its newlines, between its lines and after its last.
-      (should (romacs-agent-log-tests--face-p 'romacs-agent-log-you (get-text-property (line-end-position) 'face)))
-      (forward-line 1)
-      (should (looking-at "▌ third"))
-      (should (romacs-agent-log-tests--face-p 'romacs-agent-log-you (get-text-property (line-end-position) 'face)))
-      (should-not (romacs-agent-log-tests--face-p 'romacs-agent-log-you (get-text-property (1- line) 'face))))))
+    (forward-line 0)
+    (should (looking-at "▌ ❯ second\n▌ \n▌ third\n"))))
 
 ;;; From elsewhere, quoted
 
@@ -1375,12 +1346,12 @@ none when dropped.")
     (draw :type 'delta :text "On it.")
     (let ((text (romacs-agent-log-tests--transcript)))
       (should (string-match-p "┃ ← lead · parent\n┃ Go on\n┃ and on\n\nOn it." text)))
-    ;; Two in a row: one blank line between them.
+    ;; Two in a row: each a round, the air a round opens after between them.
     (draw :type 'input :text (concat "<romacs-message id=\"m-2\" kind=\"parent\" from=\"lead\">\nAgain\n</romacs-message>\n"
                                      "Reply to this message with romacs_task_reply(messageId=\"m-2\", text=...)."))
     (draw :type 'input :text (concat "<romacs-message id=\"m-3\" kind=\"parent\" from=\"lead\">\nThird\n</romacs-message>\n"
                                      "Reply to this message with romacs_task_reply(messageId=\"m-3\", text=...)."))
-    (should (string-match-p "┃ Again\n\n┃ ← lead · parent\n┃ Third" (romacs-agent-log-tests--transcript)))
+    (should (string-match-p "┃ Again\n\n\n┃ ← lead · parent\n┃ Third" (romacs-agent-log-tests--transcript)))
     ;; A line cut short: RET shows the rest.
     (let ((romacs-agent-log-output-width 20) (truncate-string-ellipsis "…"))
       (draw :type 'input :text (concat "<romacs-message id=\"m-4\" kind=\"parent\" from=\"lead\">\n" (make-string 40 ?x) "\n</romacs-message>\n"
@@ -1411,16 +1382,16 @@ none when dropped.")
 
 (ert-deftest romacs-agent-log-blank-lines-are-one ()
   (romacs-agent-log-tests--with
-    ;; Two prompts: one blank line between.
+    ;; Two prompts, two rounds: the air a round opens after between them.
     (draw :type 'input :text "one" :request 1)
     (draw :type 'input :text "two" :request 2)
-    (should (equal (romacs-agent-log-tests--transcript) "▌ ❯ one\n\n▌ ❯ two\n\n"))
+    (should (equal (romacs-agent-log-tests--transcript) "▌ ❯ one\n\n\n▌ ❯ two\n\n"))
     ;; Thinking of line breaks only, a call, then the reply: no trace of
     ;; the thinking, one blank line before the reply.
     (draw :type 'thinking :text "\n\n")
     (draw :type 'tool :state 'started :id "t1" :name "Bash" :input (romacs-agent-log-tests--input "command" "ls"))
     (draw :type 'delta :text "Done.")
-    (should (string-match-p "\\`▌ ❯ one\n\n▌ ❯ two\n\n● [^\n]*\n\nDone\\.\n\\'" (romacs-agent-log-tests--transcript)))))
+    (should (string-match-p "\\`▌ ❯ one\n\n\n▌ ❯ two\n\n● [^\n]*\n\nDone\\.\n\\'" (romacs-agent-log-tests--transcript)))))
 
 (ert-deftest romacs-agent-log-rounds-arrival-without-its-call-is-top-level ()
   ;; Its parent call never drawn: a round of its own at the top level.
