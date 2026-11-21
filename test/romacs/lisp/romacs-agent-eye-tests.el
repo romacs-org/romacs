@@ -82,5 +82,24 @@
       (should (equal (string-trim (romacs-agent-log--undecorated (buffer-substring (point-min) romacs-agent-log--end)))
                      "❯ first line\nsecond line")))))
 
+(ert-deftest romacs-agent-eye-a-message-from-elsewhere-previews-as-it-reads ()
+  ;; Its first lines that say something, without their Markdown marks.
+  (let ((session (romacs-agent--make :id "E" :harness 'claude :state 'running
+                                     :tools (make-hash-table :test #'equal)
+                                     :streamed (make-hash-table :test #'equal))))
+    (with-temp-buffer
+      (romacs-agent-log-mode)
+      (setq romacs-agent-log--session session
+            romacs-agent-log--end (point-min-marker)
+            romacs-agent-log--input (point-min-marker))
+      (set-marker-insertion-type romacs-agent-log--end t)
+      (romacs-agent-log-draw session (list :type 'input
+                                           :text (concat "<romacs-message id=\"m-1\" kind=\"child\" from=\"lane x\">\n"
+                                                         "**Done:** the `fix` landed.\n\n- next\n</romacs-message>\n"
+                                                         "Reply to this message with romacs_task_reply(messageId=\"m-1\", text=...).")))
+      (let ((text (substring-no-properties (romacs-agent-log--undecorated (buffer-substring (point-min) romacs-agent-log--end)))))
+        (should (string-search "← lane x · child\nDone: the fix landed.\n- next" text))
+        (should-not (string-search "**" text))))))
+
 (provide 'romacs-agent-eye-tests)
 ;;; romacs-agent-eye-tests.el ends here

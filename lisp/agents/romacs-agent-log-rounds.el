@@ -22,6 +22,7 @@
 ;;; Code:
 
 (require 'romacs-agent-log)
+(require 'romacs-markdown)
 
 (defface romacs-agent-log-you '((t :extend t))
   "The surface of the user's messages: the background moved a little
@@ -96,7 +97,8 @@ not the user's; its first lines dim, RET shows all."
          ;; A row's room less its bar and a subagent's indentation.
          (width (- romacs-agent-log-output-width (length bar) (* 2 (cdr (romacs-agent-log--where event)))))
          (body (string-trim (or (plist-get incoming :text) "")))
-         (lines (split-string body "\n"))
+         ;; Its lines that say something, as they read rendered.
+         (lines (mapcar #'romacs-markdown-plain-string (split-string body "\n" t "[ \t]*")))
          (shown (seq-take lines romacs-agent-log-rounds-other-lines))
          (more (- (length lines) (length shown)))
          ;; One blank line before it: an arrival before ends in its own.

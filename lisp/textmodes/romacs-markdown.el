@@ -206,6 +206,21 @@ again.  A buffer hides them while its `buffer-invisibility-spec' has
                    (remove-text-properties at next '(invisible nil))))
             (setq at next)))))))
 
+(defun romacs-markdown-plain-string (text)
+  "TEXT, a line of Markdown, faced and without the marks
+`romacs-markdown-hide-markup' hides: as it reads rendered."
+  (with-temp-buffer
+    (insert text)
+    (romacs-markdown-fontify-region (point-min) (point-max))
+    (romacs-markdown-hide-markup (point-min) (point-max))
+    (let ((at (point-min)) (parts nil))
+      (while (< at (point-max))
+        (let ((next (next-single-property-change at 'invisible nil (point-max))))
+          (unless (eq (get-text-property at 'invisible) 'romacs-markdown-markup)
+            (push (buffer-substring at next) parts))
+          (setq at next)))
+      (apply #'concat (nreverse parts)))))
+
 (defun romacs-markdown-blocks (beg end)
   "The blocks of BEG..END of the current buffer, one Markdown document.
 Each is (KIND START END . PLIST), in document order, a nested block
