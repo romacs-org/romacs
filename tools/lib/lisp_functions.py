@@ -254,7 +254,7 @@ def specializers(args):
 def written(node):
     """NODE as one line of text, its spacing and comments dropped."""
     if node.kind != 'list':
-        return node.prefix + node.text
+        return node.prefix + node.text.replace('\r', '\\r').replace('\n', '\\n')
     return node.prefix + node.text + ' '.join(written(k) for k in node.kids) + CLOSER[node.text]
 
 
@@ -381,7 +381,13 @@ def working_sources(root, layout):
     """(path, text) of the own Lisp git has, or would have, in the working tree at ROOT."""
     names = git(root, 'ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', 'lisp').split('\0')
     files = [(name, Path(root) / name) for name in names if name and own(layout, name)]
-    return [(name, path.read_text(encoding='utf-8', errors='replace')) for name, path in files if path.is_file()]
+    return [(name, read_file(path)) for name, path in files if path.is_file()]
+
+
+def read_file(path):
+    """PATH's text as its git blob decodes, line ends untranslated."""
+    with open(path, encoding='utf-8', errors='replace', newline='') as f:
+        return f.read()
 
 
 def commit_sources(root, commit):

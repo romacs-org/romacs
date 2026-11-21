@@ -181,8 +181,12 @@ class GitTest(unittest.TestCase):
             git('init', '-q')
             git('add', '-A')
             git('commit', '-q', '-m', 'c')
+            (Path(repo) / 'lisp/ui/m.el').write_bytes(b'(cl-defmethod m ((x (eql "a\r\nb")))\r\n  x)\r\n')
+            git('add', '-A')
+            git('commit', '-q', '-m', 'crlf')
             self.assertEqual(lf.commit_census(repo, 'HEAD'), lf.tree_census(repo))
-            self.assertEqual(list(lf.tree_census(repo)[0]), ['lisp/ui/a.el a'])
+            self.assertIn('lisp/ui/m.el m ((eql "a\\r\\nb"))', lf.tree_census(repo)[0])
+            self.assertEqual(sorted(lf.tree_census(repo)[0]), ['lisp/ui/a.el a', 'lisp/ui/m.el m ((eql "a\\r\\nb"))'])
             (Path(repo) / lf.LAYOUT).unlink()
             self.assertEqual(lf.tree_census(repo), ({}, []), 'no layout, no own Lisp')
 
