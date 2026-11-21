@@ -6,7 +6,7 @@
 use crate::engine::dfa;
 use crate::engine::fastmap::recompute_fastmap;
 use crate::engine::linear;
-use crate::engine::required::RequiredBytes;
+use crate::engine::required::RequiredByte;
 use crate::engine::scan::{
     FoldedScan, FoldedScans, SparseAsciiFastmap, TextRepr, build_folded_scan,
     build_literal_prefilter, sparse_ascii_fastmap,
@@ -203,9 +203,9 @@ pub struct CompiledPattern {
     /// searched a buffer.
     pub(crate) prefilter: std::cell::OnceCell<Option<LiteralPrefilter>>,
 
-    /// The ASCII bytes every match consumes, found by the pattern's second
+    /// The rarest ASCII byte every match consumes, found by the pattern's second
     /// short search ([`required::rejects`](crate::engine::required::rejects)).
-    pub(crate) required: RequiredBytes,
+    pub(crate) required: RequiredByte,
 
     /// The zero-width anchor every path from the start meets before it
     /// consumes anything ([`start_anchor`](crate::engine::search::start_anchor)), when that is more than the first

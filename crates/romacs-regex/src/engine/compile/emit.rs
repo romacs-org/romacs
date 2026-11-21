@@ -9,7 +9,7 @@ use crate::engine::dfa;
 use crate::engine::linear;
 use crate::engine::opcode::{RegexOp, store_number, store_number_u16};
 use crate::engine::pattern::{CompiledPattern, RewindView};
-use crate::engine::required::RequiredBytes;
+use crate::engine::required::RequiredByte;
 use crate::engine::scan::FoldedScans;
 use crate::engine::search::StartAnchor;
 use rustc_hash::FxHashMap;
@@ -44,7 +44,7 @@ impl CompiledPattern {
             buffer_sealed: false,
             rewind: RewindView::Buffer,
             prefilter: std::cell::OnceCell::new(),
-            required: RequiredBytes::default(),
+            required: RequiredByte::default(),
             start_anchor: StartAnchor::None,
             dfa: dfa::filter::DfaCell::default(),
         }

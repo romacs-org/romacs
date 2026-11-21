@@ -3,7 +3,7 @@
 
 use crate::engine::compile::regex_compile;
 use crate::engine::pattern::CompiledPattern;
-use crate::engine::required::{RequiredState, derive_required_bytes};
+use crate::engine::required::{RequiredState, derive_required_byte};
 use crate::engine::search::{re_search, with_fastmap_disabled};
 use crate::engine::syntax::DefaultSyntaxLookup;
 
@@ -33,9 +33,9 @@ fn agrees(source: &str, fold: bool, text: &[u8], start: usize, range: isize, poi
     }
 }
 
-/// The file-name handlers' patterns on an ordinary name: tramp, epa and
-/// file-name-non-special lack a required byte there; jka-compr's only
-/// required byte is `.`.
+/// The file-name handlers' patterns: tramp and file-name-non-special test
+/// `:`, epa a letter of `.gpg` (its rarest, `p`), and jka-compr, whose only
+/// required byte is `.`, tests nothing and settles to `Absent`.
 #[test]
 fn the_handler_patterns_require_their_bytes() {
     let tramp = compile("\\`/\\(?:-\\|[^/:|]\\{2,\\}\\):", false);
@@ -45,17 +45,19 @@ fn the_handler_patterns_require_their_bytes() {
         false,
     );
     let non_special = compile("\\`/:", false);
-    assert_eq!(derive_required_bytes(&tramp).as_slice(), b"/:");
-    assert_eq!(derive_required_bytes(&epa).as_slice(), b".gp");
-    assert_eq!(derive_required_bytes(&jka).as_slice(), b".");
-    assert_eq!(derive_required_bytes(&non_special).as_slice(), b"/:");
+    assert_eq!(derive_required_byte(&tramp), Some(b':'));
+    assert_eq!(derive_required_byte(&epa), Some(b'p'));
+    assert_eq!(derive_required_byte(&jka), None);
+    assert_eq!(derive_required_byte(&non_special), Some(b':'));
     let name = b"/home/user/.cache/scratch/ffc-none";
     for pattern in [&tramp, &epa, &jka, &non_special] {
         for _ in 0..3 {
             assert_eq!(found(pattern, name, 0, name.len().cast_signed(), 0), None);
         }
     }
-    assert_eq!(tramp.required.state(), RequiredState::Bytes);
+    assert_eq!(tramp.required.state(), RequiredState::Byte);
+    assert_eq!(epa.required.state(), RequiredState::Byte);
+    assert_eq!(jka.required.state(), RequiredState::Absent);
     for (pattern, name) in [
         (&tramp, &b"/ssh:host:/etc"[..]),
         (&epa, b"/tmp/a.gpg"),
@@ -74,11 +76,15 @@ fn the_handler_patterns_require_their_bytes() {
 #[test]
 fn nothing_is_required_without_proof() {
     for (source, fold) in [("a*", false), ("x?:?", false), ("ab:", true), ("[a-c]+", false)] {
-        let derived = derive_required_bytes(&compile(source, fold));
-        assert!(derived.is_empty(), "{source:?} fold={fold}: {derived:?}");
+        let derived = derive_required_byte(&compile(source, fold));
+        assert!(derived.is_none(), "{source:?} fold={fold}: {derived:?}");
     }
-    assert_eq!(derive_required_bytes(&compile("x\\(?::\\)?y", false)).as_slice(), b"xy");
-    assert_eq!(derive_required_bytes(&compile("\\(?:a:\\|b:\\)c", false)).as_slice(), b":c");
+    // The optional `:` is not required; of `x` and `y`, `x` is the rarer.
+    assert_eq!(derive_required_byte(&compile("x\\(?::\\)?y", false)), Some(b'x'));
+    assert_eq!(derive_required_byte(&compile("\\(?:a:\\|b:\\)c", false)), Some(b':'));
+    // `.` and `/` are never tested.
+    assert_eq!(derive_required_byte(&compile("/a\\.", false)), Some(b'a'));
+    assert_eq!(derive_required_byte(&compile("/\\.", false)), None);
 }
 
 /// A pattern searched once derives nothing; the second short search does, a
@@ -91,7 +97,7 @@ fn the_bytes_are_derived_by_the_second_short_search() {
     assert_eq!(found(&pattern, name, 0, name.len().cast_signed(), 0), None);
     assert_eq!(pattern.required.state(), RequiredState::SeenOnce);
     assert_eq!(found(&pattern, name, 0, name.len().cast_signed(), 0), None);
-    assert_eq!(pattern.required.state(), RequiredState::Bytes);
+    assert_eq!(pattern.required.state(), RequiredState::Byte);
 
     let folded = compile("q:", true);
     assert_eq!(found(&folded, name, 0, name.len().cast_signed(), 0), None);
