@@ -374,7 +374,9 @@ def session(args, base):
                   'attached_after_reshow': attached,
                   'chat_has': {**{k: k in chat for k in ('❯ say hello', 'hello from the fake harness',
                                                          '⚠ The agent wants to run Bash', 'touch approved.txt',
-                                                         '✔ allowed by you', '⎿ 42')},
+                                                         '✔ allowed by you',
+                                                         # An eval's answer, on its row.
+                                                         '⇒ 42')},
                                # A Romacs tool's row: its mark, then its name as words.
                                '● ◈ buffer edit': bool(re.search(r'● \S+ buffer edit', chat))}}
         result['ok'] = (edited == '"ALPHA beta\\n"' and evaluated == '42'
