@@ -969,13 +969,13 @@ of its own refuses: its patches would run unrecorded."
 (defun romacs-session-reset-target ()
   "The installed build a reset goes to: the one the server watches
 \(`romacs-server-build-watch'), else this session's runtime root when it
-is a build (it holds its romacs-vm-gui), else nil: the restart's own
-command, `romacs-restart-command''s or this session's, as `romacs-restart'
-runs it, its runtime kept."
+is a build (it holds its romacs-vm-gui), else this session's executable
+with its runtime: never another build `romacs-restart-command' names."
   (let ((watch (bound-and-true-p romacs-server-build-watch))
         (root (romacs-live--runtime-root)))
     (cond ((and (stringp watch) (file-exists-p watch)) watch)
-          ((and root (file-executable-p (expand-file-name "romacs-vm-gui" root))) root))))
+          ((and root (file-executable-p (expand-file-name "romacs-vm-gui" root))) root)
+          (t (expand-file-name invocation-name invocation-directory)))))
 
 ;;;###autoload
 (defun romacs-session-reset (&optional keep-buffers)
@@ -992,10 +992,7 @@ the file buffers and their windows too.  The same supervised restart as
         (live (length (plist-get romacs-live-ledger :entries))))
     (when (or (not (called-interactively-p 'any))
               (yes-or-no-p (format "Reset onto %s%s, dropping histories and the kill ring%s? "
-                                   (cond (target (abbreviate-file-name target))
-                                         ((or (bound-and-true-p romacs-restart-command) (getenv "ROMACS_RESTART_COMMAND"))
-                                          "the restart command's build")
-                                         (t "this build"))
+                                   (abbreviate-file-name target)
                                    (if (> live 0) (format " without its %d live files" live) "")
                                    (if keep-buffers "" " and every buffer but unsaved ones"))))
       (warm-restart-request :target target :fresh (if keep-buffers 'buffers 'unsaved))

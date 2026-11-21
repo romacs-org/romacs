@@ -781,7 +781,8 @@ reader; the report."
           (let ((romacs-server-build-watch nil))
             (cl-letf (((symbol-function 'romacs-live--runtime-root) (lambda () installed)))
               (romacs-session-reset)
-              (should-not (plist-get asked :target))
+              ;; This executable, whatever restart command is set.
+              (should (equal (plist-get asked :target) (expand-file-name invocation-name invocation-directory)))
               (make-symbolic-link (expand-file-name invocation-name invocation-directory)
                                   (expand-file-name "romacs-vm-gui" installed))
               (romacs-session-reset)

@@ -1578,3 +1578,21 @@ and wait for it to end."
             (should-not (get-file-buffer file))))
       (when-let* ((b (get-file-buffer file))) (kill-buffer b))
       (delete-directory warm-restart-directory t))))
+
+(ert-deftest warm-restart-this-executable-keeps-this-runtime ()
+  ;; A restart onto this session's own executable (a reset's fallback)
+  ;; keeps its runtime, though the plan removes the variables a restart
+  ;; command's own build would choose.
+  (let ((process-environment (cons "ROMACS_RUNTIME_ROOT=/tmp/romacs-runtime-here" process-environment)))
+    (should (member "ROMACS_RUNTIME_ROOT=/tmp/romacs-runtime-here"
+                    (cdr (warm-restart--target (expand-file-name invocation-name invocation-directory)))))))
+
+(ert-deftest warm-restart-a-part-may-finish-from-a-process ()
+  ;; A reader told it is through by a subprocess's sentinel.
+  (let* ((warm-restart-part-wait 10) (problems :none)
+         (form (list :parts (list (cons (lambda (_ done)
+                                          (make-process :name "wr-part" :command '("true") :noquery t
+                                                        :sentinel (lambda (_p _e) (funcall done))))
+                                        nil)))))
+    (setq problems (warm-restart--restore-parts-now form))
+    (should (null problems))))
