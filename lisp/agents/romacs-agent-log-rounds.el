@@ -26,6 +26,7 @@
 ;;; Code:
 
 (require 'romacs-agent-log)
+(require 'romacs-agent-glyphs)
 (require 'romacs-markdown)
 
 (defface romacs-agent-log-you-bar '((t :inherit romacs-working-waiting))
@@ -57,7 +58,7 @@ chat (romacs#377): the fewer, the cheaper."
         (unless (eq (get-text-property at 'face line) 'romacs-agent-log-note)
           (put-text-property at next 'face 'romacs-agent-log-prompt line))
         (setq at next)))
-    (concat (propertize "▌ " 'face 'romacs-agent-log-you-bar 'romacs-agent-decor t) line)))
+    (concat (propertize (concat (romacs-agent-glyph 'you-bar) " ") 'face 'romacs-agent-log-you-bar 'romacs-agent-decor t) line)))
 
 (defun romacs-agent-log-rounds-you (text)
   "TEXT, the user's message as a chat draws it, as its round's opener:
@@ -98,7 +99,7 @@ inside one (unless its first word is longer)."
 (defun romacs-agent-log-rounds--head (incoming)
   "INCOMING's head: a mark, whom it is from, and its state."
   (let ((state (plist-get incoming :state)))
-    (concat (propertize "← " 'face 'romacs-agent-log-other-mark)
+    (concat (propertize (concat (romacs-agent-glyph 'from) " ") 'face 'romacs-agent-log-other-mark)
             ;; Whom it is from, a session's title as long as a name.
             (propertize (romacs-agent-log-rounds--words (or (plist-get incoming :from) "elsewhere") 60)
                         'face 'romacs-agent-log-other-head)
@@ -106,16 +107,16 @@ inside one (unless its first word is longer)."
                 (propertize (concat " · " state) 'face 'romacs-agent-log-other)
               ""))))
 
-(defconst romacs-agent-log-rounds--other-bar
-  (propertize "┃ " 'face 'romacs-agent-log-other-mark 'romacs-agent-decor t)
-  "The bar what came from elsewhere is quoted behind.")
+(defun romacs-agent-log-rounds--other-bar ()
+  "The bar what came from elsewhere is quoted behind."
+  (propertize (concat (romacs-agent-glyph 'other-bar) " ") 'face 'romacs-agent-log-other-mark 'romacs-agent-decor t))
 
 (defun romacs-agent-log-rounds--quote (incoming width)
   "INCOMING's text quoted behind its bar, its lines WIDTH wide: the first
 that say something, as they read rendered, in their Markdown faces
 dimmed over them (not the user's or the agent's own words); whatever it
 leaves out, lines or the ends of lines, RET shows."
-  (let* ((bar romacs-agent-log-rounds--other-bar)
+  (let* ((bar (romacs-agent-log-rounds--other-bar))
          (body (string-trim (or (plist-get incoming :text) "")))
          ;; Read as one document (a span or a fence across its lines),
          ;; its first part only: the preview shows a few lines.
@@ -143,12 +144,12 @@ not the user's; its first lines dim, RET shows all.  Under a subagent's
 call it is that call's, in its lines; else it opens a round, the one
 before it ended, after the air every round begins with."
   (pcase-let* ((`(,parent . ,depth) (romacs-agent-log--where event))
-               (bar romacs-agent-log-rounds--other-bar)
+               (bar (romacs-agent-log-rounds--other-bar))
                ;; One blank line before it: an arrival before ends in its own.
                (text (concat (if (and (not parent) (romacs-agent-log--blank-p)) "" "\n")
                              bar (romacs-agent-log-rounds--head incoming) "\n"
                              ;; A row's room less its bar and a subagent's indentation.
-                             (romacs-agent-log-rounds--quote incoming (- romacs-agent-log-output-width (length bar) (* 2 depth)))
+                             (romacs-agent-log-rounds--quote incoming (- romacs-agent-log-output-width (string-width bar) (* 2 depth)))
                              (if parent "\n" "\n\n"))))
     (unless parent
       (romacs-agent-log-rounds-end)

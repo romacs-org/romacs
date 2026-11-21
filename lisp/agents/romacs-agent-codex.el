@@ -20,6 +20,7 @@
 ;;; Code:
 
 (require 'romacs-agent)
+(require 'romacs-agent-glyphs)
 
 ;;; Writing to it
 
@@ -493,7 +494,7 @@ an approval or questions for the user, anything else refused."
 (defun romacs-agent--codex-plan (params)
   "A plan update, as a status line: each step marked by its state."
   (let ((steps (mapconcat (lambda (step)
-                            (concat (pcase (gethash "status" step) ("completed" "✓ ") ("inProgress" "→ ") (_ "○ "))
+                            (concat (romacs-agent-glyph (pcase (gethash "status" step) ("completed" 'ok) ("inProgress" 'step-doing) (_ 'step-todo))) " "
                                     (gethash "step" step)))
                           (gethash "plan" params) "  ")))
     (concat "Plan: " (if-let* ((why (romacs-agent--value (gethash "explanation" params)))) (concat why "  ") "") steps)))

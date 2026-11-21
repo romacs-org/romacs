@@ -17,6 +17,7 @@
 ;;; Code:
 
 (require 'romacs-agent-log)
+(require 'romacs-agent-glyphs)
 (require 'romacs-markdown)
 
 (defvar-local romacs-agent-log-faces--current nil
@@ -147,7 +148,7 @@ have failed, a line under it that says why."
       (save-excursion
         (goto-char at)
         (insert (romacs-agent-log--sealed
-                 (propertize (concat "\n⚠ shown without its faces: " romacs-agent-log-faces--failed)
+                 (propertize (concat "\n" (romacs-agent-glyph 'warning) " shown without its faces: " romacs-agent-log-faces--failed)
                              'face 'romacs-agent-log-denied))))))
   (romacs-agent-log-faces-drop))
 

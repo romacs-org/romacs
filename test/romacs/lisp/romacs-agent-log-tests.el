@@ -60,7 +60,7 @@ them inherits."
     (draw :type 'done :duration 9 :cost 0.12 :time 0)
     (let ((text (romacs-agent-log-tests--transcript)))
       (should (string-match-p "❯ count the lines" text))
-      (should (string-match-p "∴ I should run wc." text))
+      (should (string-match-p "🤔 I should run wc." text))
       (should (string-match-p "wc -l notes.txt" text))
       ;; The output under its call, before what followed the call.
       (should (string-match-p "\\$ wc -l notes.txt · 2 notes.txt\n\nRunning it now." text))
@@ -80,7 +80,7 @@ them inherits."
     (draw :type 'message-end)
     (draw :type 'input :text "next")
     (should (equal (romacs-agent-log-tests--transcript)
-                   "∴ I think.\n\nPara one.\n\nPara two.\n\n\n▌ ❯ next\n\n"))))
+                   "🤔 I think.\n\nPara one.\n\nPara two.\n\n\n▌ ❯ next\n\n"))))
 
 (ert-deftest romacs-agent-log-long-output-says-how-much-more ()
   (romacs-agent-log-tests--with

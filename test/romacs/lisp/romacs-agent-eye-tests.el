@@ -178,7 +178,7 @@ them inherits."
     (draw :type 'thinking :text "First thought.\n\nSecond")
     (draw :type 'thinking :text " thought.\n\nThird.")
     (should (equal (buffer-substring-no-properties (point-min) romacs-agent-log--end)
-                   "∴ First thought.\n\n∴ Second thought.\n\n∴ Third.\n"))))
+                   "🤔 First thought.\n\n🤔 Second thought.\n\n🤔 Third.\n"))))
 
 (ert-deftest romacs-agent-eye-copy-leaves-the-bar-out ()
   (romacs-agent-eye-tests--chat

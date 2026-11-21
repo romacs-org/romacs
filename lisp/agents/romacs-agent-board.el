@@ -23,6 +23,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'romacs-agent)
+(require 'romacs-agent-glyphs)
 (require 'romacs-agent-store)
 (require 'romacs-agent-ui)
 (require 'hl-line)
@@ -295,8 +296,12 @@ thread at work, while the board shows."
   (romacs-agent-ui--label (romacs-agent-ui--state-of (plist-get row :key))))
 
 (defun romacs-agent-board-state-width ()
-  "The state column's width: a glyph's, or a short word's."
-  (if (equal (substring-no-properties (romacs-agent-ui--label (romacs-agent-ui--state-of 'working))) "🤖") 2 9))
+  "The state column's width: its widest glyph's, or a short word's."
+  (if (equal (substring-no-properties (romacs-agent-ui--label (romacs-agent-ui--state-of 'working)))
+             (romacs-agent-glyph 'working))
+      (apply #'max (delq nil (mapcar (pcase-lambda (`(,_ ,role . ,_)) (and role (string-width (romacs-agent-glyph role))))
+                                     romacs-agent-ui--states)))
+    9))
 
 (defun romacs-agent-board-title (row)
   "ROW's title: dim when settled or only there for context, bold unread."
@@ -401,7 +406,7 @@ however long its chain, and a chain's titles stay in view.")
             (tail (romacs-truncate
                    (concat (if-let* ((rollup (romacs-agent-ui--rollup (plist-get row :keys)))) (concat "  " rollup) "")
                            (if-let* ((count (plist-get row :folded)))
-                               (propertize (format "  ▸ %d thread%s" count (if (= count 1) "" "s")) 'face 'romacs-agent-dim)
+                               (propertize (format "  %s %d thread%s" (romacs-agent-glyph 'board-threads) count (if (= count 1) "" "s")) 'face 'romacs-agent-dim)
                              ""))
                    room)))
        (concat name
@@ -410,14 +415,14 @@ however long its chain, and a chain's titles stay in view.")
                tail)))
     ('thread (romacs-agent-board--thread-line row width))
     ('history (let ((item (plist-get row :item)))
-                (propertize (romacs-truncate (concat "  ◇ " (plist-get item :title) "  " (let ((harness (plist-get item :harness))) (if harness (format "%s" harness) ""))
+                (propertize (romacs-truncate (concat "  " (romacs-agent-glyph 'board-history) " " (plist-get item :title) "  " (let ((harness (plist-get item :harness))) (if harness (format "%s" harness) ""))
                                                      "  " (romacs-agent-ui--ago (plist-get item :mtime)))
                                              width)
                             'face 'romacs-agent-dim)))
-    ('more (romacs-key-hint (format "  ◇ %d more  (\\<romacs-agent-board-mode-map>\\[romacs-agent-board-history] shows all)"
+    ('more (romacs-key-hint (format "  %s %d more  (\\<romacs-agent-board-mode-map>\\[romacs-agent-board-history] shows all)" (romacs-agent-glyph 'board-history)
                                     (plist-get row :count))
                             'romacs-agent-dim))
-    ('reading (propertize (romacs-truncate "  ◇ Reading harness transcripts…" width) 'face 'romacs-agent-dim))))
+    ('reading (propertize (romacs-truncate (concat "  " (romacs-agent-glyph 'board-history) " Reading harness transcripts…") width) 'face 'romacs-agent-dim))))
 
 (defun romacs-agent-board--title-line (width)
   "The board's first line: which section, and the filter."

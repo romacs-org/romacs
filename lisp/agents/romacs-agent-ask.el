@@ -26,6 +26,7 @@
 
 (require 'cl-lib)
 (require 'romacs-popup)
+(require 'romacs-agent-glyphs)
 
 (declare-function romacs-agent-respond "romacs-agent" (session request-id allow &optional message by))
 (declare-function romacs-agent-title "romacs-agent" (session))
@@ -44,7 +45,7 @@ background.")
 
 (defun romacs-agent-ask--glyph (multi picked)
   "An option's mark: a box for a question taking several, else a dot."
-  (if multi (if picked "☑" "☐") (if picked "●" "○")))
+  (romacs-agent-glyph (if multi (if picked 'checked 'unchecked) (if picked 'picked 'unpicked))))
 
 (defun romacs-agent-ask--at-once-p (questions)
   "Whether a pick answers QUESTIONS whole: one question, one choice."
@@ -105,12 +106,12 @@ one pick does not answer it all.  Each choosing row carries
                                      "\n")
                              'romacs-agent-ask (cons index label)))
             (let ((own (cl-set-difference chosen (plist-get props :options) :test #'equal)))
-              (propertize (concat "   ✎ " (if own (propertize (string-join own ", ") 'face 'romacs-agent-ask-picked)
+              (propertize (concat "   " (romacs-agent-glyph 'own) " " (if own (propertize (string-join own ", ") 'face 'romacs-agent-ask-picked)
                                             (propertize "Other…" 'face 'romacs-popup-dim))
                                   "\n")
                           'romacs-agent-ask (cons index 'other)))))
    (if (romacs-agent-ask--at-once-p questions) ""
-     (concat "\n" (propertize (concat (propertize "   ↵ Send" 'face 'romacs-popup-key) "\n")
+     (concat "\n" (propertize (concat (propertize (concat "   " (romacs-agent-glyph 'send) " Send") 'face 'romacs-popup-key) "\n")
                               'romacs-agent-ask (cons nil 'send))))))
 
 ;;; The layer

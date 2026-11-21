@@ -21,6 +21,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'romacs-attach)
+(require 'romacs-agent-glyphs)
 
 (defcustom romacs-agent-log-image-lines 8
   "How many lines tall a sent message's image is shown at most in an
@@ -109,7 +110,7 @@ above its first and below its last."
 
 (defun romacs-agent-log-images--label (file)
   "What an image link to FILE shows in place of its text."
-  (propertize (concat "▣ " (file-name-nondirectory file)) 'face 'romacs-agent-log-image-link))
+  (propertize (concat (romacs-agent-glyph 'image) " " (file-name-nondirectory file)) 'face 'romacs-agent-log-image-link))
 
 (defun romacs-agent-log-images--shown (links width lines)
   "Of LINKS, (BEG END FILE) each, those whose file can be shown within
