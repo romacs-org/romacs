@@ -292,6 +292,73 @@ DIRECTORY."
 sends bytes (not a path reference)."
   (and (plist-get (cdr entry) :kind) (not (memq (plist-get (cdr entry) :kind) '(path file)))))
 
+(defun romacs-attach--prepared-entry (entry reply)
+  "ENTRY of a plan once the helper copied it, REPLY its answer: its item
+gains `:sent-path', `:sha256' and `:sent-mime'."
+  (append (list (append (car entry)
+                        (list :sent-path (plist-get reply :path)
+                              :sha256 (plist-get reply :sha256)
+                              :sent-mime (or (plist-get reply :mime) (plist-get (car entry) :mime)))))
+          (cdr entry)))
+
+(defun romacs-attach--prepare-finish (handle result)
+  "End the preparation HANDLE with RESULT, once: its helpers stopped,
+then its callback called."
+  (unless (plist-get handle :done)
+    (plist-put handle :done t)
+    (romacs-attach-cancel handle)
+    (funcall (plist-get handle :callback) result)))
+
+(defun romacs-attach--helper-reply (output)
+  "The helper's answer in its buffer OUTPUT, a plist, or nil."
+  (with-current-buffer output
+    (ignore-errors
+      (goto-char (point-min))
+      (json-parse-buffer :object-type 'plist :null-object nil))))
+
+(defun romacs-attach--prepare-reply (handle index entry process output)
+  "Take PROCESS's answer, in its buffer OUTPUT: the helper copied ENTRY,
+the INDEXth of HANDLE's plan.  The entry is prepared and the next copy
+started, or HANDLE finishes, with the plan or the first error."
+  (plist-put handle :running (1- (plist-get handle :running)))
+  (let ((reply (romacs-attach--helper-reply output))
+        (status (process-exit-status process)))
+    (kill-buffer output)
+    (cond
+     ((plist-get handle :done))
+     ((or (/= status 0) (null reply) (plist-get reply :error))
+      (romacs-attach--prepare-finish handle (list :error (or (plist-get reply :error)
+                                                             (format "romacs-attach-tool exited %d" status)))))
+     (t
+      (aset (plist-get handle :entries) index (romacs-attach--prepared-entry entry reply))
+      (if (or (plist-get handle :pending) (> (plist-get handle :running) 0))
+          (romacs-attach--prepare-start handle)
+        (romacs-attach--prepare-finish handle (append (plist-get handle :entries) nil)))))))
+
+(defun romacs-attach--prepare-launch (handle index)
+  "Start the helper copying the INDEXth entry of HANDLE's plan."
+  (let ((entry (aref (plist-get handle :entries) index))
+        (output (generate-new-buffer " *romacs-attach-tool*" t)))
+    (plist-put handle :running (1+ (plist-get handle :running)))
+    (push (make-process
+           :name "romacs-attach-tool" :buffer output :noquery t :connection-type 'pipe
+           :command (cons (romacs-attach--program)
+                          (romacs-attach--arguments (car entry) (plist-get (cdr entry) :kind)
+                                                    (plist-get (cdr entry) :prep) (plist-get handle :directory)))
+           :stderr (get-buffer-create " *romacs-attach-tool-errors*")
+           :sentinel (lambda (process _event)
+                       (unless (process-live-p process)
+                         (romacs-attach--prepare-reply handle index entry process output))))
+          (plist-get handle :processes))))
+
+(defun romacs-attach--prepare-start (handle)
+  "Start HANDLE's pending copies, `romacs-attach-jobs' at most running."
+  (while (and (plist-get handle :pending) (< (plist-get handle :running) romacs-attach-jobs)
+              (not (plist-get handle :done)))
+    (let ((index (car (plist-get handle :pending))))
+      (plist-put handle :pending (cdr (plist-get handle :pending)))
+      (romacs-attach--prepare-launch handle index))))
+
 (defun romacs-attach-prepare (plan directory callback)
   "Make the outgoing copies PLAN needs in DIRECTORY with the helper, at
 most `romacs-attach-jobs' at once, then call CALLBACK with the plan, each
@@ -301,54 +368,13 @@ prepared item gaining `:sent-path', `:sha256' and `:sent-mime', or with
   (let* ((entries (vconcat plan))
          (pending (seq-filter (lambda (i) (romacs-attach--prepared-p (aref entries i)))
                               (number-sequence 0 (1- (length entries)))))
-         (handle (list :processes nil :done nil))
-         (running 0))
-    (cl-labels
-        ((finish (result)
-           (unless (plist-get handle :done)
-             (plist-put handle :done t)
-             (romacs-attach-cancel handle)
-             (funcall callback result)))
-         (start ()
-           (while (and pending (< running romacs-attach-jobs) (not (plist-get handle :done)))
-             (let* ((index (pop pending))
-                    (entry (aref entries index))
-                    (output (generate-new-buffer " *romacs-attach-tool*" t)))
-               (setq running (1+ running))
-               (push (make-process
-                      :name "romacs-attach-tool" :buffer output :noquery t :connection-type 'pipe
-                      :command (cons (romacs-attach--program)
-                                     (romacs-attach--arguments (car entry) (plist-get (cdr entry) :kind)
-                                                               (plist-get (cdr entry) :prep) directory))
-                      :stderr (get-buffer-create " *romacs-attach-tool-errors*")
-                      :sentinel
-                      (lambda (process _event)
-                        (unless (process-live-p process)
-                          (setq running (1- running))
-                          (let ((reply (with-current-buffer output
-                                         (ignore-errors
-                                           (goto-char (point-min))
-                                           (json-parse-buffer :object-type 'plist :null-object nil))))
-                                (status (process-exit-status process)))
-                            (kill-buffer output)
-                            (cond
-                             ((plist-get handle :done))
-                             ((or (/= status 0) (null reply) (plist-get reply :error))
-                              (finish (list :error (or (plist-get reply :error)
-                                                       (format "romacs-attach-tool exited %d" status)))))
-                             (t
-                              (aset entries index
-                                    (append (list (append (car entry)
-                                                          (list :sent-path (plist-get reply :path)
-                                                                :sha256 (plist-get reply :sha256)
-                                                                :sent-mime (or (plist-get reply :mime)
-                                                                               (plist-get (car entry) :mime)))))
-                                            (cdr entry)))
-                              (if (or pending (> running 0)) (start) (finish (append entries nil)))))))))
-                     (plist-get handle :processes))))))
-      ;; Nothing to copy: delivered through `finish' too, so a cancel stops it.
-      (if pending (start) (run-at-time 0 nil #'finish plan))
-      handle)))
+         (handle (list :processes nil :done nil :entries entries :pending pending :running 0
+                       :directory directory :callback callback)))
+    ;; Nothing to copy: delivered through the finish too, so a cancel stops it.
+    (if pending
+        (romacs-attach--prepare-start handle)
+      (run-at-time 0 nil #'romacs-attach--prepare-finish handle plan))
+    handle))
 
 (defun romacs-attach-cancel (handle)
   "Stop the preparation HANDLE: its helpers are killed, its callback not
