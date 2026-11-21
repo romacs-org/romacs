@@ -230,4 +230,11 @@ place of GNU's: the workspace regime, which has no minibuffer.el."
   (romacs-workspace-completion-install))
 
 (provide 'romacs-workspace-completion)
+
+;; Only the workspace regime loads this file: help's completion must not
+;; load it by a prefix of its names into a --loadup session.
+;; Local Variables:
+;; autoload-compute-prefixes: nil
+;; End:
+
 ;;; romacs-workspace-completion.el ends here
