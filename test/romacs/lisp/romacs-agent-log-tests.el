@@ -1138,5 +1138,19 @@ none when dropped.")
       (should (get-text-property (match-beginning 0) 'face))
       (should-not (memq #'romacs-agent-log-faces--before-redisplay pre-redisplay-functions)))))
 
+;; Plain words after plain text: nothing to face, no batch waits.
+(ert-deftest romacs-agent-log-faces-plain-words-need-no-batch ()
+  (romacs-agent-log-tests--with
+    (draw :type 'delta :text "Some **bold** words")
+    (run-hook-with-args 'pre-redisplay-functions (selected-window))
+    (draw :type 'delta :text " and more plain words, as most of a stream is")
+    (should-not (memq #'romacs-agent-log-faces--before-redisplay pre-redisplay-functions))
+    (draw :type 'delta :text " then `code`")
+    (should (memq #'romacs-agent-log-faces--before-redisplay pre-redisplay-functions))
+    (run-hook-with-args 'pre-redisplay-functions (selected-window))
+    (goto-char (point-min))
+    (search-forward "code")
+    (should (get-text-property (match-beginning 0) 'face))))
+
 (provide 'romacs-agent-log-tests)
 ;;; romacs-agent-log-tests.el ends here
