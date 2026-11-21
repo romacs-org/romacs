@@ -78,8 +78,10 @@ ZYGOTE's children, of those of any ready zygote, or of this process."
   "Whether pooled jobs run on workers forked from a zygote.
 A zygote is a worker prepared once with a feature set that then only
 forks: each job gets a fresh child of it in milliseconds, which runs that
-one job and exits.  t: always; nil: never (jobs run on spawned, reused
-workers); `world': when this VM restored from a world, as a session does.")
+one job and exits.  t: always; nil: never (each job runs on a worker
+spawned and prepared for it, which ends after it); `world': when this VM
+restored from a world, as a session does.  Either way no pooled job sees
+what another left.")
 
 (defvar isolate-zygote-warm-functions nil
   "Alist of (FEATURE . FUNCTION): a worker prepared with features including
@@ -359,22 +361,20 @@ ends after its one job."
       (isolate-retire isolate))))
 
 (defun romacs--isolate-acquire (require fresh)
-  "A pooled worker for jobs requiring REQUIRE: an idle one with the same
-features, else the least loaded one with them, else a new one while
-`isolate-pool-size' allows, making room by killing an idle worker of other
-features; `isolate-queue-full' when every pooled worker is busy with other
-features.  FRESH asks for a new worker outside the pool's bound."
+  "A worker for a pooled job requiring REQUIRE: a child of their zygote
+when pooled jobs fork (`isolate-zygotes'), else a worker the pool made
+with them that has taken no job yet, else a new one while
+`isolate-pool-size' allows, making room by killing an idle such worker of
+other features; else `queued', to wait for one to end.  A worker the
+pool makes runs one job and ends (`romacs--isolate-submit'), so no
+pooled job sees what another left.  FRESH asks for a new worker outside
+the pool's bound."
   (romacs--isolate-recycle)
-  ;; A retiring worker (tainted, still answering the jobs queued behind
-  ;; the change) is on its way out: it does not count toward the bound.
   (let ((live (romacs--isolate-pooled))
         (forked (and (not fresh) (romacs--isolate-zygote-worker require t)))
-        best idle)
+        (unspent nil) (idle nil))
     (unless (or fresh forked)
-      (dolist (isolate live)
-        (when (and (equal (aref isolate 4) require)
-                   (or (null best) (< (length (aref isolate 5)) (length (aref best 5)))))
-          (setq best isolate))))
+      (setq unspent (romacs--isolate-with-features (romacs--isolate-unspent) require)))
     (cond (forked forked)
           ;; A live zygote with no room: the job waits for it.
           ((and (not fresh) (romacs--isolate-zygote-live-p require)) 'queued)
@@ -384,24 +384,30 @@ features.  FRESH asks for a new worker outside the pool's bound."
                 (not (romacs--isolate-admit-p 'start require)))
            'queued)
           (fresh (romacs--isolate-pool-create require 'create))
-          ((and best (null (aref best 5))) best)
+          ;; Prepared or preparing: the job runs after the preparation.
+          (unspent unspent)
           ((< (length live) (isolate--pool-size))
-           (cond ((romacs--isolate-admit-p 'start require) (romacs--isolate-pool-create require 'start))
-                 (best best)
-                 (t 'queued)))
-          (best best)
-          ((setq idle (let (found) (dolist (i live) (when (null (aref i 5)) (setq found i))) found))
+           (if (romacs--isolate-admit-p 'start require) (romacs--isolate-pool-create require 'start) 'queued))
+          ((setq idle (let (found) (dolist (i (romacs--isolate-unspent)) (when (null (aref i 5)) (setq found i))) found))
            (isolate-kill idle)
            (romacs--isolate-pool-create require 'start))
-          (t (signal 'isolate-queue-full (list require))))))
+          ;; Every pooled worker runs its job: one of them ends soon.
+          (t 'queued))))
 
 (defun isolate-pending (isolate)
   "How many jobs ISOLATE has queued or running."
   (length (aref isolate 5)))
 
 (defun romacs--isolate-pooled ()
-  "The live pooled workers: neither zygotes nor their children, nor retiring."
-  (delq nil (mapcar (lambda (i) (and (isolate-live-p i) (not (aref i 6)) (memq (aref i 10) '(nil pool)) i)) romacs--isolates)))
+  "The live workers the pool made, what `isolate-pool-size' bounds: those
+running their job, or prepared for one; not zygotes nor their children,
+nor a caller's own (`isolate-create')."
+  (delq nil (mapcar (lambda (i) (and (isolate-live-p i) (eq (aref i 10) 'pool) i)) romacs--isolates)))
+
+(defun romacs--isolate-unspent ()
+  "The live workers the pool made that have taken no job: the ones a
+pooled job may go to."
+  (delq nil (mapcar (lambda (i) (and (not (aref i 6)) i)) (romacs--isolate-pooled))))
 
 (defun romacs--isolate-pool-create (require kind)
   "A worker the pool makes for REQUIRE's features, admitted as KIND
@@ -415,7 +421,7 @@ features.  FRESH asks for a new worker outside the pool's bound."
 the spare child of REQUIRE's zygote, else an idle pooled worker."
   (or (condition-case nil (romacs--isolate-zygote-worker require nil) (isolate-process-limit nil))
       (let (found)
-        (dolist (isolate (romacs--isolate-pooled))
+        (dolist (isolate (romacs--isolate-unspent))
           (when (and (aref isolate 9) (null (aref isolate 5)) (equal (aref isolate 4) require))
             (setq found isolate)))
         found)))
@@ -434,30 +440,26 @@ pooled worker, unless one is live (prepared or preparing) or the pool is at
           (t (condition-case nil (romacs--isolate-zygote-worker require t) (isolate-process-limit nil)) nil))))
 
 (defun romacs--isolate-warm-pooled (require)
-  "Start a pooled worker with REQUIRE's features unless one is live or the
-pool is full or no worker may start (`isolate-process-limit'); the isolate
-started, or nil."
+  "Start a pooled worker with REQUIRE's features unless one that has taken
+no job is live, or the pool is full, or no worker may start
+\(`isolate-process-limit'); the isolate started, or nil."
   (romacs--isolate-recycle)
   (let ((live (romacs--isolate-pooled)))
-    (and (not (romacs--isolate-with-features live require))
+    (and (not (romacs--isolate-with-features (romacs--isolate-unspent) require))
          (< (length live) (isolate--pool-size))
          (condition-case nil (romacs--isolate-pool-create require 'start) (isolate-process-limit nil)))))
 
 (defun isolate-pooled-worker (require)
   "A worker for background work with REQUIRE's features: an idle prepared
 one (a zygote's spare child first), else a pooled one started now while the
-pool has room, else the least loaded live pooled one with those features;
-nil when there is none.  Unlike `isolate-spawn', it never kills a worker of
-other features to make room."
+pool has room, else one still preparing for its first job; nil when there
+is none.  Unlike `isolate-spawn', it never kills a worker of other
+features to make room."
   (or (isolate-idle-worker require)
       (condition-case nil (romacs--isolate-zygote-worker require t) (isolate-process-limit nil))
       (and (not (romacs--isolate-zygote-live-p require))
            (condition-case nil (romacs--isolate-warm-pooled require) (error nil)))
-      (let (best)
-        (dolist (isolate (romacs--isolate-pooled) best)
-          (when (and (equal (aref isolate 4) require)
-                     (or (null best) (< (length (aref isolate 5)) (length (aref best 5)))))
-            (setq best isolate))))))
+      (romacs--isolate-with-features (romacs--isolate-unspent) require)))
 
 (defun romacs--isolate-with-features (isolates require)
   "The first of ISOLATES whose features are REQUIRE, or nil."
@@ -478,6 +480,9 @@ other features to make room."
     ;; job names one.
     (when (aref isolate 5) (signal 'isolate-retired (list isolate)))
     (unless directory (setq directory default-directory)))
+  ;; A worker the pool made runs one job: what it leaves is no later job's.
+  (when (and (eq (aref isolate 10) 'pool) (aref isolate 6))
+    (signal 'isolate-retired (list isolate)))
   (setq romacs--isolate-generation (1+ romacs--isolate-generation))
   ;; The job is frozen once, here: what the worker gets, and what a
   ;; resubmission resends, is this snapshot, whatever the caller does to
@@ -491,9 +496,14 @@ other features to make room."
         (romacs--isolate-post (romacs--isolate-id isolate) 'job romacs--isolate-generation job)
       (isolate-died (signal 'isolate-died (list isolate))))
     (aset isolate 5 (append (aref isolate 5) (list (cons romacs--isolate-generation future))))
-    ;; Sent: a spare is taken, and its zygote forks the next.
-    (when (eq (aref isolate 10) 'job) (romacs--isolate-zygote-take isolate))
+    (romacs--isolate-taken isolate)
     future))
+
+(defun romacs--isolate-taken (isolate)
+  "ISOLATE was sent a job: a zygote's spare is taken, and its zygote forks
+the next; a worker the pool made is spent, to end after it."
+  (cond ((eq (aref isolate 10) 'job) (romacs--isolate-zygote-take isolate))
+        ((eq (aref isolate 10) 'pool) (aset isolate 6 t))))
 
 (defun romacs--isolate-resubmit (future)
   "Queue FUTURE's job again, on a worker with the features it was queued
@@ -510,7 +520,7 @@ for: its worker retired before running it."
       (aset future 1 isolate)
       (aset future 2 romacs--isolate-generation)
       (aset isolate 5 (append (aref isolate 5) (list (cons romacs--isolate-generation future))))
-      (when (eq (aref isolate 10) 'job) (romacs--isolate-zygote-take isolate)))))
+      (romacs--isolate-taken isolate))))
 
 (defun romacs--isolate-enqueue (function args bindings require directory)
   "Queue (apply FUNCTION ARGS) for room in the pool: its future, on no
@@ -793,11 +803,12 @@ ever let it in."
 
 (defun romacs--isolate-ending-p ()
   "Whether a worker process will end without being asked: one retired, or
-a forked child running its job."
+one running its only job (a forked child, a spent pool worker)."
   (let ((found nil))
     (dolist (isolate romacs--isolates found)
       (when (or (eq (aref isolate 3) 'retired)
-                (and (eq (aref isolate 10) 'job) (aref isolate 5)))
+                (and (aref isolate 5)
+                     (or (eq (aref isolate 10) 'job) (and (eq (aref isolate 10) 'pool) (aref isolate 6)))))
         (setq found t)))))
 
 (defun romacs--isolate-admit-p (kind &optional require)
@@ -1101,6 +1112,9 @@ still names it, so later workers boot from source
               (when entry
                 (aset isolate 5 (delq entry (aref isolate 5)))
                 (aset isolate 7 nil)
+                ;; A spent pool worker ends with its job's answer.
+                (when (and (eq (aref isolate 10) 'pool) (aref isolate 6) (null (aref isolate 5)))
+                  (isolate-retire isolate))
                 (if (and (eq kind 'error) (eq (car (car value)) 'isolate-retired))
                     ;; Queued behind a job that changed the features: it
                     ;; runs on a worker with the features it was queued for.

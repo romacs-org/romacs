@@ -317,16 +317,7 @@ digest."
           (aset state 2 nil)
           (condition-case err
               (progn (isolate-await future 0) (aset state 5 t))
-            (error (setq romacs-fontify-last-error (cons (buffer-name) err))))))))
-  ;; A worker that fontified a large buffer has collected over its world,
-  ;; whose pages are then its own: hundreds of megabytes it would keep
-  ;; while pooled.  Starting another costs a fraction of a second.
-  (run-at-time 0 nil #'romacs-fontify--retire (isolate-future-isolate future)))
-
-(defun romacs-fontify--retire (worker)
-  "Retire WORKER unless it has been given other work meanwhile."
-  (when (and (isolate-live-p worker) (zerop (isolate-pending worker)))
-    (isolate-retire worker)))
+            (error (setq romacs-fontify-last-error (cons (buffer-name) err)))))))))
 
 ;;;; Receiving and applying
 
