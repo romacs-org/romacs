@@ -1074,7 +1074,7 @@ VERSION is of the format (Major . Minor)"
   (define-key map "\C-c\C-d" 'prolog-debug-on)
   (define-key map "\C-c\C-t" 'prolog-trace-on)
   (define-key map "\C-c\C-z" 'prolog-zip-on)
-  (define-key map "\C-c\r" 'run-prolog))
+  (define-key map (kbd "C-c RET") 'run-prolog))
 
 (defun prolog-mode-keybindings-edit (map)
   "Define keybindings for Prolog mode in MAP."
@@ -1119,7 +1119,7 @@ VERSION is of the format (Major . Minor)"
     (define-key map "\C-c\C-cf" 'prolog-compile-file))
 
   ;; Inherited from the old prolog.el.
-  (define-key map "\e\C-x" 'prolog-consult-region)
+  (define-key map (kbd "ESC C-x") 'prolog-consult-region)
   (define-key map "\C-c\C-l" 'prolog-consult-file)
   (define-key map "\C-c\C-z" 'run-prolog))
 

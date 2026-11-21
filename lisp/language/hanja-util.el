@@ -6446,7 +6446,7 @@ character.  This variable is initialized by `hanja-init-load'.")
 
 (defvar hanja-keymap
   (let ((map (make-sparse-keymap)))
-    (define-key map "\r" 'hanja-list-terminate)
+    (define-key map (kbd "RET") 'hanja-list-terminate)
     (define-key map [return] 'hanja-list-terminate)
     (define-key map [up] 'hanja-list-prev-group)
     (define-key map [down] 'hanja-list-next-group)

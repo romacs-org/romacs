@@ -490,9 +490,9 @@ Use `raw' for raw mode, and any other non-nil value for decoded mode."
 	  (rmail-mime-insert entity)
 	  (restore-buffer-modified-p modified))))))
 
-(define-key rmail-mode-map "\t" #'forward-button)
+(define-key rmail-mode-map (kbd "TAB") #'forward-button)
 (define-key rmail-mode-map [backtab] #'backward-button)
-(define-key rmail-mode-map "\r" #'rmail-mime-toggle-hidden)
+(define-key rmail-mode-map (kbd "RET") #'rmail-mime-toggle-hidden)
 
 ;;; Handlers
 

@@ -55,7 +55,7 @@
   "Keymap for Mule (Multilingual environment) specific commands.")
 
 ;; Keep "C-x C-m ..." for mule specific commands.
-(define-key ctl-x-map "\C-m" mule-keymap)
+(define-key ctl-x-map (kbd "RET") mule-keymap)
 (define-key ctl-x-map "\\" 'activate-transient-input-method)
 
 (defvar describe-language-environment-map
@@ -3301,7 +3301,7 @@ single characters to be treated as standing for themselves."
       (error "Invalid character"))
     char))
 
-(define-key ctl-x-map "8\r" 'insert-char)
+(define-key ctl-x-map (kbd "8 RET") 'insert-char)
 (define-key ctl-x-map "8e"
             (define-keymap
               "e" #'emoji-insert

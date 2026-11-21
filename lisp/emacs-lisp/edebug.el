@@ -3897,7 +3897,7 @@ be installed in `emacs-lisp-mode-map'.")
   (define-key emacs-lisp-mode-map "\C-x\C-a\C-c" #'edebug-go-mode)
   (define-key emacs-lisp-mode-map "\C-x\C-a\C-l" #'edebug-where)
   ;; The following isn't a GUD binding.
-  (define-key emacs-lisp-mode-map "\C-x\C-a\C-m" #'edebug-set-initial-mode))
+  (define-key emacs-lisp-mode-map (kbd "C-x C-a RET") #'edebug-set-initial-mode))
 
 (defvar-keymap edebug-mode-map
   :parent emacs-lisp-mode-map

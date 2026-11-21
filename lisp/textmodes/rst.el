@@ -2979,7 +2979,7 @@ burying it."
   (let ((map (make-sparse-keymap)))
     (define-key map [mouse-1] #'rst-toc-mode-mouse-follow-link-kill)
     (define-key map [mouse-2] #'rst-toc-mouse-follow-link)
-    (define-key map "\C-m" #'rst-toc-mode-follow-link-kill)
+    (define-key map (kbd "RET") #'rst-toc-mode-follow-link-kill)
     (define-key map "f" #'rst-toc-mode-follow-link-kill)
     (define-key map "n" #'next-line)
     (define-key map "p" #'previous-line)

@@ -1072,7 +1072,7 @@ okay.  See `mode-line-format'.")
 (provide 'overlay '(display syntax-table field))
 (provide 'text-properties '(display syntax-table field point-entered))
 
-(define-key esc-map "\t" 'complete-symbol)
+(define-key esc-map (kbd "TAB") 'complete-symbol)
 
 (defun complete-symbol (arg)
   "Perform completion on the text around point.
@@ -1217,14 +1217,14 @@ if `inhibit-field-text-motion' is non-nil."
 (define-key ctl-x-map "n" narrow-map)
 
 ;; Quitting
-(define-key global-map "\e\e\e" 'keyboard-escape-quit)
+(define-key global-map (kbd "ESC ESC ESC") 'keyboard-escape-quit)
 (define-key global-map "\C-g" 'keyboard-quit)
 
 ;; Used to be in termdev.el: when using several terminals, make C-z
 ;; suspend only the relevant terminal.
 (substitute-key-definition 'suspend-emacs 'suspend-frame global-map)
 
-(define-key global-map "\C-m" 'newline)
+(define-key global-map (kbd "RET") 'newline)
 (define-key global-map "\C-o" 'open-line)
 (define-key esc-map "\C-o" 'split-line)
 (define-key global-map "\C-q" 'quoted-insert)
@@ -1240,7 +1240,7 @@ if `inhibit-field-text-motion' is non-nil."
 ;; Define ESC ESC : like ESC : for people who type ESC ESC out of habit.
 (define-key esc-map "\M-:" 'eval-expression)
 ;; Changed from C-x ESC so that function keys work following C-x.
-(define-key ctl-x-map "\e\e" 'repeat-complex-command)
+(define-key ctl-x-map (kbd "ESC ESC") 'repeat-complex-command)
 ;; New binding analogous to M-:.
 (define-key ctl-x-map "\M-:" 'repeat-complex-command)
 (define-key ctl-x-map "u" 'undo)
@@ -1279,20 +1279,20 @@ if `inhibit-field-text-motion' is non-nil."
   "<left>"  #'previous-buffer)
 
 (let ((map minibuffer-local-map))
-  (define-key map "\en"   'next-history-element)
+  (define-key map (kbd "ESC n")   'next-history-element)
   (define-key map [next]  'next-history-element)
   (define-key map [down]  'next-line-or-history-element)
   (define-key map [XF86Forward] 'next-history-element)
-  (define-key map "\ep"   'previous-history-element)
+  (define-key map (kbd "ESC p")   'previous-history-element)
   (define-key map [prior] 'previous-history-element)
   (define-key map [up]    'previous-line-or-history-element)
   (define-key map [XF86Back] 'previous-history-element)
-  (define-key map "\es"   'next-matching-history-element)
-  (define-key map "\er"   'previous-matching-history-element)
+  (define-key map (kbd "ESC s")   'next-matching-history-element)
+  (define-key map (kbd "ESC r")   'previous-matching-history-element)
   ;; Override the global binding (which calls indent-relative via
   ;; indent-for-tab-command).  The alignment that indent-relative tries to
   ;; do doesn't make much sense here since the prompt messes it up.
-  (define-key map "\t"    'self-insert-command)
+  (define-key map (kbd "TAB")    'self-insert-command)
   (define-key map [C-tab] 'file-cache-minibuffer-complete))
 
 (define-key global-map "\C-u" 'universal-argument)

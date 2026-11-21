@@ -1916,7 +1916,7 @@ is t."
   ;;(local-set-key "\C-c\C-c" 'gnus-summary-edit-article-done)
   (local-set-key "\C-c\C-c" 'gnus-uu-post-news-inews)
   (local-set-key "\C-c\C-s" 'gnus-uu-post-news-inews)
-  (local-set-key "\C-c\C-i" 'gnus-uu-post-insert-binary-in-article)
+  (local-set-key (kbd "C-c TAB") 'gnus-uu-post-insert-binary-in-article)
 
   (when gnus-uu-post-include-before-composing
     (save-excursion (setq gnus-uu-post-inserted-file-name
