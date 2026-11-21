@@ -27,6 +27,10 @@
 (defface romacs-agent-log-you '((t :extend t))
   "The surface of the user's messages: the background moved a little
 toward the text, derived on each theme change.")
+(defface romacs-agent-log-you-top '((t :overline t))
+  "The hairline over a round's first line, the user's message: where a
+round begins, found at a glance as the chat scrolls.  Its colour is the
+theme's dim text, derived on each theme change.")
 (defface romacs-agent-log-you-bar '((t :inherit romacs-working-waiting))
   "The bar the user's messages stand behind: the colour that means the
 user, what waits on them, on every view of agents.")
@@ -39,7 +43,7 @@ agent's own.")
 (defface romacs-agent-log-other-head '((t :inherit romacs-working-running :weight bold))
   "Whom a message from elsewhere is from: the theme's colour for work.")
 
-(defcustom romacs-agent-log-rounds-other-lines 3
+(defcustom romacs-agent-log-rounds-other-lines 2
   "How many lines of a message from elsewhere show; RET shows all."
   :type 'natnum
   :group 'romacs-agent)
@@ -53,7 +57,12 @@ transcript on every theme, light, dark or black."
          (surface (and bg fg (romacs-color-band bg fg 1.3))))
     (face-spec-set 'romacs-agent-log-you
                    (if surface `((t :background ,surface :extend t)) '((t :extend t)))
-                   'face-defface-spec)))
+                   'face-defface-spec)
+    ;; A hairline, never a rule: the dim text's colour, toward the surface.
+    (let ((line (romacs-color-hex (face-foreground 'shadow nil t))))
+      (face-spec-set 'romacs-agent-log-you-top
+                     (if line `((t :overline ,line)) '((t :overline t)))
+                     'face-defface-spec))))
 
 (add-hook 'enable-theme-functions #'romacs-agent-log-rounds--derive)
 (add-hook 'disable-theme-functions #'romacs-agent-log-rounds--derive)
@@ -75,14 +84,25 @@ The round before it ends."
                                                  (substring text first) t t))))
     (put-text-property 0 1 'romacs-agent-log-round t text)
     (add-face-text-property first (length text) 'romacs-agent-log-you t text)
+    ;; Its first line under a hairline: where the round begins.
+    (add-face-text-property first (or (string-search "\n" text first) (length text)) 'romacs-agent-log-you-top t text)
     (concat text "\n")))
+
+(defun romacs-agent-log-rounds--words (text width)
+  "TEXT in WIDTH columns, cut at a word's end before an ellipsis, never
+inside one (unless its first word is longer)."
+  (if (<= (string-width text) width) text
+    (let* ((ellipsis (truncate-string-ellipsis))
+           (cut (truncate-string-to-width text (- width (string-width ellipsis))))
+           (word (string-match "[ \t]+[^ \t]*\\'" cut)))
+      (concat (string-trim-right (if (and word (> word 0)) (substring cut 0 word) cut) "[ \t:,;·-]+") ellipsis))))
 
 (defun romacs-agent-log-rounds--head (incoming)
   "INCOMING's head: a mark, whom it is from, and its state."
   (let ((state (plist-get incoming :state)))
     (concat (propertize "← " 'face 'romacs-agent-log-other-mark)
             ;; Whom it is from, a session's title as long as a name.
-            (propertize (truncate-string-to-width (or (plist-get incoming :from) "elsewhere") 40 nil nil (truncate-string-ellipsis))
+            (propertize (romacs-agent-log-rounds--words (or (plist-get incoming :from) "elsewhere") 40)
                         'face 'romacs-agent-log-other-head)
             (if (and state (not (string-empty-p state)))
                 (propertize (concat " · " state) 'face 'romacs-agent-log-other)
@@ -106,9 +126,12 @@ not the user's; its first lines dim, RET shows all."
          (text (concat (if (and (not parent) (romacs-agent-log--blank-p)) "" "\n")
                        bar (romacs-agent-log-rounds--head incoming) "\n"
                        ;; Quoted, each line one row, so its bar runs unbroken.
+                       ;; In its Markdown faces, dimmed over them: not the user's
+                       ;; or the agent's own words.
                        (mapconcat (lambda (line)
-                                    (concat bar (propertize (truncate-string-to-width line width nil nil (truncate-string-ellipsis))
-                                                            'face 'romacs-agent-log-other)))
+                                    (let ((line (truncate-string-to-width line width nil nil (truncate-string-ellipsis))))
+                                      (add-face-text-property 0 (length line) 'romacs-agent-log-other t line)
+                                      (concat bar line)))
                                   shown "\n")
                        ;; Whatever it leaves out, lines or the ends of lines,
                        ;; RET shows.

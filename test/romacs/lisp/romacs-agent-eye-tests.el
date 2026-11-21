@@ -99,7 +99,20 @@
                                                          "Reply to this message with romacs_task_reply(messageId=\"m-1\", text=...).")))
       (let ((text (substring-no-properties (romacs-agent-log--undecorated (buffer-substring (point-min) romacs-agent-log--end)))))
         (should (string-search "← lane x · child\nDone: the fix landed.\n- next" text))
+        ;; Its Markdown faces, dimmed over: bold reads bold.
+        (goto-char (point-min))
+        (search-forward "Done:")
+        (let ((faces (ensure-list (get-text-property (match-beginning 0) 'face))))
+          (should (memq 'romacs-markdown-strong faces))
+          (should (memq 'romacs-agent-log-other faces)))
         (should-not (string-search "**" text))))))
+
+(ert-deftest romacs-agent-eye-a-sender-is-cut-at-a-word ()
+  (should (equal (romacs-agent-log-rounds--words "lane chat (claude3): agents ADE showcase: visible work" 30)
+                 (concat "lane chat (claude3): agents" (truncate-string-ellipsis))))
+  (should (equal (romacs-agent-log-rounds--words "short" 30) "short"))
+  ;; One word longer than the room: cut inside it, as nothing else can.
+  (should (<= (string-width (romacs-agent-log-rounds--words (make-string 50 ?x) 30)) 30)))
 
 (provide 'romacs-agent-eye-tests)
 ;;; romacs-agent-eye-tests.el ends here
