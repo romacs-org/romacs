@@ -261,6 +261,45 @@ fn id_exhaustion_signals_instead_of_corrupting() {
 }
 
 #[test]
+fn a_minor_frees_the_regions_attached_since_that_nothing_reaches() {
+    // romacs#373: a dropped result's region, and its memfd, go at the next
+    // minor; what names a young region (a root, an old entry stored into
+    // since) keeps it; a region that outlived a collection is a full's.
+    let mut vm = vm();
+    vm.set_gc_verify(true);
+    eval(&mut vm, "(setq gc-cons-threshold 1000000000 kept (freeze (list 'kept)) old-vector (make-vector 1 nil)
+                         weak (make-hash-table :weakness 'key) strong (make-hash-table :test 'eq))");
+    vm.collect(&mut []);
+    let ids = "(mapcar #'car (romacs--frozen-regions))";
+    assert_eq!(eval(&mut vm, ids), "(1)");
+    eval(&mut vm, "(progn (setq held (freeze (make-string 10000 ?h)))
+                          (freeze (make-string 10000 ?d))
+                          (aset old-vector 0 (freeze (list 'in-old)))
+                          (puthash (freeze (list 'weak-key)) t weak)
+                          (puthash (freeze (list 'strong-key)) (freeze (list 'strong-value)) strong)
+                          nil)");
+    assert_eq!(eval(&mut vm, ids), "(1 2 3 4 5 6 7)");
+    assert!(vm.collect_minor(&[]));
+    // The dropped string's region (3) and the weak key's (5) went, the weak
+    // entry with it; an old strong table's key and value (6, 7) stay.
+    assert_eq!(eval(&mut vm, ids), "(1 2 4 6 7)");
+    assert_eq!(eval(&mut vm, "(list (car kept) (length held) (car (aref old-vector 0)) (hash-table-count weak)
+                                    (let (kv) (maphash (lambda (k v) (setq kv (list (car k) (car v)))) strong) kv))"),
+               "(kept 10000 in-old 0 (strong-key strong-value))");
+    assert_eq!(vm.regions.totals(), vm.regions.summed());
+    // Old now: dropped, it stays through minors, and a full frees it.
+    eval(&mut vm, "(setq held nil)");
+    assert!(vm.collect_minor(&[]));
+    assert_eq!(eval(&mut vm, ids), "(1 2 4 6 7)");
+    vm.collect(&mut []);
+    assert_eq!(eval(&mut vm, ids), "(1 4 6 7)");
+    // A young region named only by a minor's caller.
+    let young = vm.eval_source_raw("(freeze (list 'rooted))").unwrap();
+    assert!(vm.collect_minor(&[young]));
+    assert_eq!(eval(&mut vm, ids), "(1 2 4 6 7)");
+}
+
+#[test]
 fn a_freeze_and_discard_loop_is_bounded() {
     let mut vm = vm();
     // GNU's threshold, so that the loop's 40 MB collect as they are made (VM2-GC-PACING).

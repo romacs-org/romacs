@@ -26,7 +26,10 @@
 //! region for forwarding (`Region::backing`).
 //!
 //! Liveness is the collector's (`gc.rs`): a region survives a collection iff
-//! a traced value names it; the region's symbols are roots while it lives;
+//! a traced value names it (a minor judges only the regions attached since
+//! the last collection, as it judges only the young entries, so a dropped
+//! result's region and memfd go at the next collection of either kind);
+//! the region's symbols are roots while it lives;
 //! weak-table entries whose frozen endpoint's region died are pruned; dead
 //! regions are dropped and their ids reused. Pressure: region bytes count
 //! toward the collection trigger (`Vm::heap_objects`), and at half the ids
@@ -865,6 +868,7 @@ impl Vm {
         };
         let root = place.value(decoded.root, &symbols);
         self.regions.place(id, Box::new(Region { conses, objects, symbols, root, bytes: length, backing }));
+        self.region_young.push(id);
         // Hash tables hash their keys with this VM's function once their keys
         // are readable, which needs the region in place.
         let tables: Vec<usize> = decoded.objects.iter().enumerate().filter(|(_, o)| matches!(o, DecodedObject::HashTable { .. })).map(|(i, _)| i).collect();
@@ -942,7 +946,22 @@ impl Vm {
                 self.region_free.push(id);
             }
         }
+        self.region_young.clear();
         self.region_collect = false;
+    }
+
+    /// A minor's: the regions attached since the last collection that LIVE
+    /// leaves unmarked are dropped and their ids reused, each with its memfd.
+    /// No older value can name one: a value of it reached an older entry, a
+    /// symbol slot or text only by a store since then, which the minor read.
+    /// The older regions are a full's to judge.
+    pub(crate) fn sweep_young_regions(&mut self, live: &[bool]) {
+        for id in std::mem::take(&mut self.region_young) {
+            if self.regions[id].is_some() && !live.get(id).copied().unwrap_or(false) {
+                self.regions.remove(id);
+                self.region_free.push(id);
+            }
+        }
     }
 
     /// The symbols a live region keeps alive: roots for the collector.
