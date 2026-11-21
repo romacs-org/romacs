@@ -8,11 +8,15 @@ fn string_chars(cx: &Leaf<'_>, value: Value) -> Result<Vec<u32>, Fault> {
     Ok(cx.string_view(value)?.chars().collect())
 }
 
-fn character(value: Value) -> Result<u32, Fault> {
+/// VALUE's code when it is a character; builds no error.
+fn char_code(value: Value) -> Option<u32> {
     value.integer_value()
         .and_then(|n| u32::try_from(n).ok())
         .filter(|&n| n <= MAX_CHAR)
-        .ok_or_else(|| Fault::Wrong("characterp", value))
+}
+
+fn character(value: Value) -> Result<u32, Fault> {
+    char_code(value).ok_or_else(|| Fault::Wrong("characterp", value))
 }
 
 fn encode_chars(chars: impl IntoIterator<Item = u32>, multibyte: bool) -> Vec<u8> {
@@ -45,7 +49,7 @@ fn string_bytes(cx, string: Value) {
 defsubr! { name = "characterp", gnu = "character.c:characterp", effect = Pure,
 fn characterp(_cx, object: Value; optional ignored: Value) {
     let _ = ignored;
-    Ok(if character(object).is_ok() { Value::TRUE } else { Value::NIL })
+    Ok(if char_code(object).is_some() { Value::TRUE } else { Value::NIL })
 }}
 
 defsubr! { name = "max-char", gnu = "character.c:max-char", effect = Pure,

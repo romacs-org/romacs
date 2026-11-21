@@ -422,7 +422,7 @@ impl Vm {
     }
     /// syntax-table-p.
     pub(crate) fn is_syntax_table(&self, value: Value) -> bool {
-        self.regexp_syntax_table(value).is_ok()
+        self.syntax_table_of(value).is_some()
     }
     pub(crate) fn regexp_syntax_entry(&mut self, code: i64, matching: Value) -> Value {
         if matching == Value::NIL && (0..16).contains(&code) {
@@ -442,16 +442,20 @@ impl Vm {
         let value = self.alloc_cons(Value::integer(code).unwrap(), matching);
         value
     }
-    fn regexp_syntax_table(&self, table: Value) -> SearchResult<&CharTable> {
+    /// TABLE when it is a syntax table; builds no error.
+    fn syntax_table_of(&self, table: Value) -> Option<&CharTable> {
         // The purpose symbol: the search slots have it once a search ran.
         let purpose = match &self.regexp_cache.slots {
             Some(slots) => Some(slots.syntax_table),
             None => self.names.get("syntax-table").copied(),
         };
         match self.object_if(table) {
-            Some(Object::CharTable(t)) if purpose.is_some_and(|slot| t.purpose() == Value::reference(slot + 1, 7)) => Ok(t),
-            _ => Err(Fault::Wrong("syntax-table-p", table)),
+            Some(Object::CharTable(t)) if purpose.is_some_and(|slot| t.purpose() == Value::reference(slot + 1, 7)) => Some(t),
+            _ => None,
         }
+    }
+    fn regexp_syntax_table(&self, table: Value) -> SearchResult<&CharTable> {
+        self.syntax_table_of(table).ok_or_else(|| Fault::Wrong("syntax-table-p", table))
     }
     /// The class of ENTRY, a syntax table's value for a character: its
     /// (CODE . MATCH) cons's, whitespace for anything else.
@@ -498,7 +502,7 @@ impl Vm {
         }
     }
     fn regexp_property_class(&self, value: Value, code: u32) -> Option<SyntaxClass> {
-        if self.regexp_syntax_table(value).is_ok() {
+        if self.syntax_table_of(value).is_some() {
             return self.regexp_table_class(value, code);
         }
         let (class, _) = self.cons_pair(value).ok()?;
