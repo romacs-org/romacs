@@ -448,6 +448,23 @@ message is sent, `romacs-agent-send' by default.")
 
 ;;; romacs#357: a queue's rows are lost to no failure
 
+(ert-deftest romacs-agent-queue-a-store-that-will-not-open-is-unread ()
+  ;; There but not opened: unread, never empty, at startup and at unmark.
+  (romacs-agent-test-with-store
+    (make-directory (file-name-directory (romacs-agent-store--file)) t)
+    (should (romacs-agent-store--open))
+    (let* ((id "d4d4d4d4-0000-4000-8000-000000000000")
+           (mark (expand-file-name (format "%s.queued" id) (romacs-agent--marks-dir)))
+           (session (romacs-agent-test-attach (romacs-agent--make :id id :harness 'claude :state 'running :title "o") t)))
+      (romacs-agent-send-later session "one")
+      (romacs-agent-send-later session "two")
+      (cl-letf (((symbol-function 'romacs-agent-store--open) #'ignore))
+        (should-error (romacs-agent-store-queued id) :type 'romacs-agent-store-unread)
+        (should (funcall (cdr (assq 'queued romacs-agent-mark-kinds)) (expand-file-name id (romacs-agent--state-root)) nil))
+        (setf (romacs-agent-item-kept (cadr (romacs-agent-queue session))) nil)
+        (romacs-agent--unkeep-item session (car (romacs-agent-queue session))))
+      (should (file-exists-p mark)))))
+
 (ert-deftest romacs-agent-queue-an-unread-store-is-no-empty-one ()
   ;; A read that fails signals; a restore meeting it touches nothing:
   ;; the rows, and the session's mark, wait for the next load.
@@ -495,10 +512,15 @@ message is sent, `romacs-agent-send' by default.")
       (make-directory dir t)
       (with-temp-file (expand-file-name "manifest.json" dir)
         (insert (json-serialize (romacs-mcp--object "id" id "harness" "claude" "provider" "claude" "title" "f"))))
-      (cl-letf (((symbol-function 'romacs-agent-store--requeue) (lambda (&rest _) (setq restored t)))
-                ((symbol-function 'princ) #'ignore))
-        (let ((command-line-args-left (list id)))
-          (romacs-agent-turns-fill-batch)))
+      (let* ((loaded nil)
+             (romacs-agent-loaded-functions (cons (lambda (session _) (push (romacs-agent-id session) loaded))
+                                                  romacs-agent-loaded-functions)))
+        (cl-letf (((symbol-function 'romacs-agent-store--requeue) (lambda (&rest _) (setq restored t)))
+                  ((symbol-function 'princ) #'ignore))
+          (let ((command-line-args-left (list id)))
+            (romacs-agent-turns-fill-batch)))
+        ;; Loaded, its other hooks run; its queue not restored.
+        (should (member id loaded)))
       (should-not restored)
       (remhash id romacs-agent--sessions))))
 

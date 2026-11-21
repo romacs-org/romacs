@@ -741,12 +741,16 @@ none let it go (ITEM-ID nil: every one of ID's), here.  A failure signals."
   "The messages kept waiting for the session ID names, in order; none when
 there is no store.  A store that cannot be read signals
 `romacs-agent-store-unread': unread rows are never taken for no rows."
-  (when-let* ((db (romacs-agent-store--open)))
-    (condition-case err
-        (mapcar (lambda (row) (apply #'romacs-agent-store--item-of row))
-                (sqlite-select db "select id, position, item from queued where session = ? order by position"
-                               (list id)))
-      (error (signal 'romacs-agent-store-unread (list id (error-message-string err)))))))
+  (let ((db (romacs-agent-store--open)))
+    (cond
+     (db (condition-case err
+             (mapcar (lambda (row) (apply #'romacs-agent-store--item-of row))
+                     (sqlite-select db "select id, position, item from queued where session = ? order by position"
+                                    (list id)))
+           (error (signal 'romacs-agent-store-unread (list id (error-message-string err))))))
+     ;; A store there that will not open is unread, not empty.
+     ((file-exists-p (romacs-agent-store--file))
+      (signal 'romacs-agent-store-unread (list id "the store could not be opened"))))))
 
 (defun romacs-agent-store--requeue (session _manifest)
   "SESSION, loaded: what was kept waiting in its queue waits there again,
@@ -772,6 +776,10 @@ may take it.  A cancelled task's is let go."
       (setq kept (cl-remove-if (lambda (item) (or (member (romacs-agent-item-id item) (car found))
                                                   (member (romacs-agent-item-id item) (cdr found))))
                                kept))
+      ;; Nothing kept, nothing waiting: a mark an earlier removal left (its
+      ;; store read before a pending delete) goes now.
+      (unless (or kept waiting (cdr found))
+        (romacs-agent-mark (romacs-agent-id session) 'queued nil))
       (when kept
         ;; What was sent as it loaded goes after what was kept, but what
         ;; was put first: placed by its order, not by the clock, and its
