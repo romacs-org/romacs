@@ -26,6 +26,7 @@
 ;;; Code:
 
 (require 'romacs-agent-log)
+(require 'romacs-agent-glyphs)
 (require 'romacs-markdown)
 
 (defface romacs-agent-log-you-bar '((t :inherit romacs-working-waiting))
@@ -57,7 +58,7 @@ chat (romacs#377): the fewer, the cheaper."
         (unless (eq (get-text-property at 'face line) 'romacs-agent-log-note)
           (put-text-property at next 'face 'romacs-agent-log-prompt line))
         (setq at next)))
-    (concat (propertize "▌ " 'face 'romacs-agent-log-you-bar 'romacs-agent-decor t) line)))
+    (concat (propertize (concat (romacs-agent-glyph 'you-bar) " ") 'face 'romacs-agent-log-you-bar 'romacs-agent-decor t) line)))
 
 (defun romacs-agent-log-rounds-you (text)
   "TEXT, the user's message as a chat draws it, as its round's opener:
@@ -98,7 +99,7 @@ inside one (unless its first word is longer)."
 (defun romacs-agent-log-rounds--head (incoming)
   "INCOMING's head: a mark, whom it is from, and its state."
   (let ((state (plist-get incoming :state)))
-    (concat (propertize "← " 'face 'romacs-agent-log-other-mark)
+    (concat (propertize (concat (romacs-agent-glyph 'from) " ") 'face 'romacs-agent-log-other-mark)
             ;; Whom it is from, a session's title as long as a name.
             (propertize (romacs-agent-log-rounds--words (or (plist-get incoming :from) "elsewhere") 60)
                         'face 'romacs-agent-log-other-head)
@@ -106,62 +107,61 @@ inside one (unless its first word is longer)."
                 (propertize (concat " · " state) 'face 'romacs-agent-log-other)
               ""))))
 
-(defun romacs-agent-log-rounds-incoming (event incoming)
-  "Draw INCOMING, from EVENT, a message from elsewhere: a round of its own,
-not the user's; its first lines dim, RET shows all."
-  (let* ((bar (propertize "┃ " 'face 'romacs-agent-log-other-mark 'romacs-agent-decor t))
-         ;; Under its call, if that is drawn; else at the top level.
-         (parent (car (romacs-agent-log--where event)))
-         ;; A row's room less its bar and a subagent's indentation.
-         (width (- romacs-agent-log-output-width (length bar) (* 2 (cdr (romacs-agent-log--where event)))))
+(defun romacs-agent-log-rounds--other-bar ()
+  "The bar what came from elsewhere is quoted behind."
+  (propertize (concat (romacs-agent-glyph 'other-bar) " ") 'face 'romacs-agent-log-other-mark 'romacs-agent-decor t))
+
+(defun romacs-agent-log-rounds--quote (incoming width)
+  "INCOMING's text quoted behind its bar, its lines WIDTH wide: the first
+that say something, as they read rendered, in their Markdown faces
+dimmed over them (not the user's or the agent's own words); whatever it
+leaves out, lines or the ends of lines, RET shows."
+  (let* ((bar (romacs-agent-log-rounds--other-bar))
          (body (string-trim (or (plist-get incoming :text) "")))
-         ;; Its lines that say something, as they read rendered.
          ;; Read as one document (a span or a fence across its lines),
          ;; its first part only: the preview shows a few lines.
          (lines (split-string (romacs-markdown-plain-string (substring body 0 (min (length body) 4096))) "\n" t "[ \t]*"))
          (shown (seq-take lines romacs-agent-log-rounds-other-lines))
          ;; How many lines it leaves out, when all of it was read.
-         (more (and (<= (length body) 4096) (- (length lines) (length shown))))
-         ;; One blank line before it: an arrival before ends in its own.
-         ;; Its bar from its head down: the mark of what came in.
-         (text (concat (if (and (not parent) (romacs-agent-log--blank-p)) "" "\n")
-                       bar (romacs-agent-log-rounds--head incoming) "\n"
-                       ;; Quoted, each line one row, so its bar runs unbroken.
-                       ;; In its Markdown faces, dimmed over them: not the user's
-                       ;; or the agent's own words.
-                       (mapconcat (lambda (line)
-                                    (let ((line (truncate-string-to-width line width nil nil (truncate-string-ellipsis))))
-                                      ;; Before its faces: the dim colour wins, they
-                                      ;; keep their weight and slant.
-                                      (add-face-text-property 0 (length line) 'romacs-agent-log-other nil line)
-                                      (concat bar line)))
-                                  shown "\n")
-                       ;; Whatever it leaves out, lines or the ends of lines,
-                       ;; RET shows.
-                       (if (or (not more) (> more 0) (seq-some (lambda (line) (> (string-width line) width)) shown))
-                           (concat "\n" bar
-                                   (propertize (concat (if (and more (> more 0)) (format "… %d more line%s · " more (if (= more 1) "" "s")) "… ")
-                                                       (romacs-agent-log--key 'romacs-agent-log-open) " shows all")
-                                               'face 'romacs-agent-log-note))
-                         "")
-                       ;; Apart from what the agent says to it; under a
-                       ;; call, in its lines.
-                       (if parent "\n" "\n\n"))))
-    ;; A top-level arrival opens a round, the one before it ended, after
-    ;; the air every round begins with; one under a subagent's call is
-    ;; that call's.
+         (more (and (<= (length body) 4096) (- (length lines) (length shown)))))
+    (concat (mapconcat (lambda (line)
+                         (let ((line (truncate-string-to-width line width nil nil (truncate-string-ellipsis))))
+                           ;; Before its faces: the dim colour wins, they
+                           ;; keep their weight and slant.
+                           (add-face-text-property 0 (length line) 'romacs-agent-log-other nil line)
+                           (concat bar line)))
+                       shown "\n")
+            (if (or (not more) (> more 0) (seq-some (lambda (line) (> (string-width line) width)) shown))
+                (concat "\n" bar
+                        (propertize (concat (if (and more (> more 0)) (format "… %d more line%s · " more (if (= more 1) "" "s")) "… ")
+                                            (romacs-agent-log--key 'romacs-agent-log-open) " shows all")
+                                    'face 'romacs-agent-log-note))
+              ""))))
+
+(defun romacs-agent-log-rounds-incoming (event incoming)
+  "Draw INCOMING, from EVENT, a message from elsewhere: a round of its own,
+not the user's; its first lines dim, RET shows all.  Under a subagent's
+call it is that call's, in its lines; else it opens a round, the one
+before it ended, after the air every round begins with."
+  (pcase-let* ((`(,parent . ,depth) (romacs-agent-log--where event))
+               (bar (romacs-agent-log-rounds--other-bar))
+               ;; One blank line before it: an arrival before ends in its own.
+               (text (concat (if (and (not parent) (romacs-agent-log--blank-p)) "" "\n")
+                             bar (romacs-agent-log-rounds--head incoming) "\n"
+                             ;; A row's room less its bar and a subagent's indentation.
+                             (romacs-agent-log-rounds--quote incoming (- romacs-agent-log-output-width (string-width bar) (romacs-agent-log--indent-width depth)))
+                             (if parent "\n" "\n\n"))))
     (unless parent
       (romacs-agent-log-rounds-end)
       (setq text (concat (romacs-agent-log-rounds--air) text)))
-    (romacs-agent-log--line event 'arrival
-                            (let ((text (propertize (romacs-agent-log--shared-faces text)
-                                                    'romacs-agent-log-full (cons nil (or (plist-get incoming :full) body)))))
-                              (unless parent
-                                (put-text-property 0 1 'romacs-agent-log-round t text))
-                              ;; A journaled input's turn: diff and rollback read it.
-                              (if-let* ((request (plist-get event :request)))
-                                  (propertize text 'romacs-agent-log-turn request)
-                                text)))))
+    (let ((text (propertize (romacs-agent-log--shared-faces text)
+                            'romacs-agent-log-full (cons nil (or (plist-get incoming :full)
+                                                                 (string-trim (or (plist-get incoming :text) "")))))))
+      (unless parent (put-text-property 0 1 'romacs-agent-log-round t text))
+      ;; A journaled input's turn: diff and rollback read it.
+      (when-let* ((request (plist-get event :request)))
+        (setq text (propertize text 'romacs-agent-log-turn request)))
+      (romacs-agent-log--line event 'arrival text))))
 
 (defun romacs-agent-log-rounds--start ()
   "Where the round now ending began: its top-level opener, else the start."

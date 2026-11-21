@@ -44,9 +44,9 @@ them inherits."
         (should (string-search "Done\n" shown))
         (should-not (string-search "##" shown))
         (should (string-search "Some bold, em and code." shown))
-        ;; Blocks keep their marks: a fence, a table.
+        ;; A fence keeps its marks and a table has aligned cells.
         (should (string-search "```sh" shown))
-        (should (string-search "| 1 | 2 |" shown)))
+        (should (string-match-p "^| 1 +| 2 +|$" shown)))
       ;; The text itself is whole: copied, it is the Markdown.
       (should (string-search "**bold**" (buffer-substring-no-properties (point-min) romacs-agent-log--end))))))
 
@@ -178,7 +178,7 @@ them inherits."
     (draw :type 'thinking :text "First thought.\n\nSecond")
     (draw :type 'thinking :text " thought.\n\nThird.")
     (should (equal (buffer-substring-no-properties (point-min) romacs-agent-log--end)
-                   "∴ First thought.\n\n∴ Second thought.\n\n∴ Third.\n"))))
+                   "🤔 First thought.\n\n🤔 Second thought.\n\n🤔 Third.\n"))))
 
 (ert-deftest romacs-agent-eye-copy-leaves-the-bar-out ()
   (romacs-agent-eye-tests--chat

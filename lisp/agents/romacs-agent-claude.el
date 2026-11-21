@@ -462,8 +462,7 @@ cache, it reports none) or does not say."
                ;; This run's initialize answered, however: its hooks are on
                ;; when it took them, and messages may go.
                ((and id (equal id (plist-get (romacs-agent-driver-state session) :initialize)))
-                (when (hash-table-p (gethash "response" response))
-                  (romacs-agent--keep-models session (romacs-agent--claude-models (gethash "response" response))))
+                (romacs-agent--claude-keep-models session (gethash "response" response))
                 (cl-return-from romacs-agent--claude-events
                   (list (list :type 'handshake :state (list :initialized t)))))
                ((and id (gethash id (romacs-agent-approvals session)))
@@ -642,6 +641,40 @@ alias is no model."
              ;; No efforts is what it says too: not left to the catalogue.
              collect (cons id (list :label (or (romacs-agent--value (gethash "displayName" model)) id)
                                     :efforts (and (vectorp efforts) (append efforts nil)))))))
+
+(defun romacs-agent--claude-keep-models (session answer)
+  "Keep the models in ANSWER, SESSION's run's `initialize' answer, when it
+names any and SESSION's records are its live ones: one that names none
+leaves those kept before, and a replay (a copy drawn again, the journal
+read in a batch process) is an old answer, under settings of its own."
+  (when-let* (((romacs-agent--live-p session)) ((hash-table-p answer))
+              (rows (romacs-agent--claude-models answer)))
+    (romacs-agent--keep-models (romacs-agent--instance (romacs-agent-provider session) 'claude) rows)))
+
+(defun romacs-agent--claude-models-probe (instance)
+  "How INSTANCE's Claude Code is asked for its models with no session
+\(`:models-probe'): its `initialize' alone, keeping no conversation, under
+the user's settings, so its models are a session's, but running none of
+their hooks, nor the instance's own arguments, which may name more.  Nil
+for an instance whose arguments name settings of their own: its sessions
+alone say what it offers."
+  (unless (seq-some (lambda (word) (string-match-p "\\`--setting\\(?:s\\|-sources\\)\\(?:=\\|\\'\\)" word))
+                    (plist-get instance :arguments))
+    (list :argv (list (plist-get instance :program) "-p" "--output-format" "stream-json"
+                      "--input-format" "stream-json" "--verbose" "--no-session-persistence"
+                      "--strict-mcp-config" "--settings" "{\"disableAllHooks\":true}")
+          :input (concat (json-serialize (romacs-mcp--object "type" "control_request" "request_id" "romacs-models"
+                                                             "request" (romacs-mcp--object "subtype" "initialize")))
+                         "\n")
+          :read #'romacs-agent--claude-probed-models)))
+
+(defun romacs-agent--claude-probed-models (line)
+  "What LINE says to the models probe's `initialize', or nil."
+  (let ((response (and (equal (gethash "type" line) "control_response") (gethash "response" line))))
+    (when (and (hash-table-p response) (equal (gethash "request_id" response) "romacs-models"))
+      (if (and (equal (gethash "subtype" response) "success") (hash-table-p (gethash "response" response)))
+          (list :models (romacs-agent--claude-models (gethash "response" response)))
+        (list :error (format "%s" (or (romacs-agent--value (gethash "error" response)) "refused")))))))
 
 (defun romacs-agent--claude-select (session model effort)
   "The control requests moving SESSION's idle Claude Code to MODEL at
@@ -902,7 +935,7 @@ environment."
                         (list (concat "file-history/" id) (concat "session-env/" id))))))
 
 (romacs-agent-define-harness 'claude
-  :display "Claude Code" :icon "✳" :t3-driver "claudeAgent"
+  :display "Claude Code" :icon 'claude :t3-driver "claudeAgent"
   :config-variable "CLAUDE_CONFIG_DIR" :config-default "~/.claude"
   :program-option 'romacs-agent-claude-program :arguments-option 'romacs-agent-claude-arguments
   ;; What Claude Code sets for the commands it runs (a parent session's).
@@ -922,6 +955,7 @@ environment."
   :plan #'romacs-agent--claude-plan
   :presented-plan-p #'romacs-agent--claude-presented-plan-p
   :select #'romacs-agent--claude-select
+  :models-probe #'romacs-agent--claude-models-probe
   :argv #'romacs-agent--claude-argv
   :input #'romacs-agent--claude-user
   :interrupt #'romacs-agent--claude-interrupt

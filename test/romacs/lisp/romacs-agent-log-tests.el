@@ -60,7 +60,7 @@ them inherits."
     (draw :type 'done :duration 9 :cost 0.12 :time 0)
     (let ((text (romacs-agent-log-tests--transcript)))
       (should (string-match-p "❯ count the lines" text))
-      (should (string-match-p "∴ I should run wc." text))
+      (should (string-match-p "🤔 I should run wc." text))
       (should (string-match-p "wc -l notes.txt" text))
       ;; The output under its call, before what followed the call.
       (should (string-match-p "\\$ wc -l notes.txt · 2 notes.txt\n\nRunning it now." text))
@@ -80,7 +80,7 @@ them inherits."
     (draw :type 'message-end)
     (draw :type 'input :text "next")
     (should (equal (romacs-agent-log-tests--transcript)
-                   "∴ I think.\n\nPara one.\n\nPara two.\n\n\n▌ ❯ next\n\n"))))
+                   "🤔 I think.\n\nPara one.\n\nPara two.\n\n\n▌ ❯ next\n\n"))))
 
 (ert-deftest romacs-agent-log-long-output-says-how-much-more ()
   (romacs-agent-log-tests--with
@@ -522,13 +522,13 @@ them inherits."
     (let ((text (romacs-agent-log-tests--transcript)))
       (should (string-match-p "an answer not delivered" text))
       (should (string-match-p "the turn ended with it unanswered" text)))
-    (should (equal (mapcar #'car romacs-agent-log--asks) '("c")))
+    (should (equal (mapcar #'romacs-agent-log-ask-id romacs-agent-log--asks) '("c")))
     ;; In a replay, what the session waited on then decides, not now.
     (remhash "c" (romacs-agent-approvals session))
     (let ((romacs-agent-log--replaying (romacs-agent--make :id "L" :approvals (make-hash-table :test #'equal))))
       (puthash "c" t (romacs-agent-approvals romacs-agent-log--replaying))
       (romacs-agent-log-draw session '(:type done)))
-    (should (equal (mapcar #'car romacs-agent-log--asks) '("c")))
+    (should (equal (mapcar #'romacs-agent-log-ask-id romacs-agent-log--asks) '("c")))
     (draw :type 'exit :status 1)
     (should (string-match-p "the harness exited with it unanswered" (romacs-agent-log-tests--transcript)))
     (should-not romacs-agent-log--asks)
@@ -543,7 +543,7 @@ them inherits."
       (draw :type 'approval :request-id "f" :tool "Bash")
       (draw :type 'done)
       (draw :type 'answered :request-id "e" :how 'harness))
-    (should (equal (mapcar #'car romacs-agent-log--ended-asks) '("f")))
+    (should (equal (mapcar #'romacs-agent-log-owed-id romacs-agent-log--ended-asks) '("f")))
     (romacs-agent-log--sync-asks session)
     (let ((text (romacs-agent-log-tests--transcript)))
       (should (= 1 (how-many "the turn ended with it unanswered" (point-min) (point-max))))
@@ -594,7 +594,7 @@ them inherits."
     (draw :type 'approval :request-id "d" :tool "Bash")
     (draw :type 'exit :status 1)
     (should-not (string-match-p "exited with it unanswered" (romacs-agent-log-tests--transcript)))
-    (should (equal (mapcar #'car romacs-agent-log--asks) '("d")))
+    (should (equal (mapcar #'romacs-agent-log-ask-id romacs-agent-log--asks) '("d")))
     (remhash "d" (romacs-agent-approvals session))
     (romacs-agent-log--sync-asks session)
     (romacs-agent-log--sync-asks session)
@@ -625,7 +625,7 @@ them inherits."
               ((symbol-function 'romacs-agent-log--replay)
                (lambda (s &rest _) (romacs-agent-log-draw s '(:type approval :request-id "live" :tool "Bash")))))
       (romacs-agent-log-earlier))
-    (let ((live (cadr (assoc "live" romacs-agent-log--asks))))
+    (let ((live (romacs-agent-log-ask-start (romacs-agent-log--ask-of "live"))))
       (should (= (length romacs-agent-log--asks) 1))
       (should-not (text-property-any (point-min) live 'romacs-agent-log-keys t))
       ;; The earlier copy answers nothing itself: the chat's keys there
@@ -660,7 +660,7 @@ them inherits."
     ;; Said who answered, and what; still answerable until the harness has it.
     (should (string-match-p "✔ answered: Blue" (romacs-agent-log-tests--transcript)))
     (should-not (string-match-p "allowed by you" (romacs-agent-log-tests--transcript)))
-    (should (assoc "q" romacs-agent-log--asks))
+    (should (romacs-agent-log--ask-of "q"))
     (remhash "q" (romacs-agent-approvals session))
     (draw :type 'answered :request-id "q" :behavior "allow")
     (should-not romacs-agent-log--asks)
@@ -672,7 +672,7 @@ them inherits."
   (romacs-agent-log-tests--with
     (puthash "b" t (romacs-agent-approvals session))
     (draw :type 'approval :request-id "b" :tool "Bash" :input (romacs-agent-log-tests--input "command" "make"))
-    (goto-char (cadr (assoc "b" romacs-agent-log--asks)))
+    (goto-char (romacs-agent-log-ask-start (romacs-agent-log--ask-of "b")))
     (should (eq (lookup-key (get-text-property (point) 'keymap) (kbd "RET")) #'romacs-agent-log-open))
     (let (answered)
       (cl-letf (((symbol-function 'romacs-agent-respond) (lambda (&rest args) (push args answered))))
@@ -690,8 +690,8 @@ them inherits."
     (draw :type 'approval :request-id "0:1" :tool "Bash")
     (remhash "0:1" (romacs-agent-approvals session))
     (romacs-agent-log--sync-asks session)
-    (should-not (assoc "0:1" romacs-agent-log--asks))
-    (should (assoc "7:1" romacs-agent-log--asks))))
+    (should-not (romacs-agent-log--ask-of "0:1"))
+    (should (romacs-agent-log--ask-of "7:1"))))
 
 (ert-deftest romacs-agent-log-recall-keeps-the-draft ()
   (romacs-agent-log-tests--with
@@ -717,7 +717,7 @@ them inherits."
                request)
       (puthash "q9" request (romacs-agent-approvals session)))
     (romacs-agent-log--sync-asks session)
-    (goto-char (cadr (assoc "q9" romacs-agent-log--asks)))
+    (goto-char (romacs-agent-log-ask-start (romacs-agent-log--ask-of "q9")))
     (should (get-text-property (point) 'romacs-agent-log-questions))
     (let (opened)
       (cl-letf (((symbol-function 'romacs-agent-ask-open) (lambda (_s id questions &rest _) (setq opened (list id questions))))

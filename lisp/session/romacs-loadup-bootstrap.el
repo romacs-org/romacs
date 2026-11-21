@@ -183,6 +183,8 @@ and load nothing when none is."
 ;; M-x completes over the command set the runtime keeps, not the obarray
 ;; (MX-COMMAND-SET); a later load of simple.el gets it again.
 (romacs-follow-gnu-file 'simple "completion/romacs-commands")
+;; Help's completion lists symbols once a prompt and loads no file.
+(romacs-follow-gnu-file 'help-fns "completion/romacs-help-completion")
 (load "frame.el" nil t t)
 (load "startup.el" nil t t)
 (load "term/tty-colors.el" nil t t)
