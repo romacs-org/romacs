@@ -63,6 +63,7 @@ FIXTURE = ''';;; live-journey.el --- A live update's fixture  -*- lexical-bindin
   (let ((map (make-sparse-keymap))) (define-key map (kbd "{key}") #'live-journey-{command}) map))
 (define-derived-mode live-journey-mode special-mode "Journey")
 (define-derived-mode live-journey-child-mode live-journey-mode "Journey child")
+(add-to-list 'auto-mode-alist '("\\\\.journey\\\\'" . live-journey-mode))
 (provide 'live-journey)
 '''
 
@@ -70,6 +71,11 @@ INIT = ''';; -*- lexical-binding: t -*-
 (setq inhibit-startup-screen t initial-scratch-message nil)
 (load {probe} nil t)
 (require 'live-journey)
+;; Each buffer the mode starts in, and whether the live probe was there
+;; then: a restored file buffer's says whether the replay came first.
+(defvar journey-mode-seen nil)
+(add-hook 'live-journey-mode-hook
+          (lambda () (push (cons (buffer-name) (fboundp 'subr-x-live-journey-probe)) journey-mode-seen)))
 (define-key live-journey-mode-map (kbd "C-c u") #'undo)
 (setopt live-journey-chosen 5)
 (with-current-buffer (get-buffer-create "journey") (live-journey-mode))
@@ -255,7 +261,8 @@ def run_tests(engine, entry):
     ready(engine, '(equal (minibuffer-contents-no-properties) "romacs-live-test")', 'the test command typed')
     engine.keys(K('Return'))
     started = time.time()
-    wait(lambda: engine.ask('(if romacs-live-test-last 1 0)') == 1, 300, 'the test run', engine.process, .2)
+    # Longer than the runner's own deadlines, so it ends its batch hosts.
+    wait(lambda: engine.ask('(if romacs-live-test-last 1 0)') == 1, 900, 'the test run', engine.process, .2)
     entry['test_seconds'] = round(time.time() - started, 3)
     tested = plist(engine.ask('(list :summary (romacs-live-test-summary romacs-live-test-last)'
                               ' :passed (and (romacs-live-test-passed-p romacs-live-test-last) t)'
@@ -278,7 +285,8 @@ RESTARTED = '''(list
  :probe (and (fboundp 'subr-x-live-journey-probe) (funcall 'subr-x-live-journey-probe))
  :mark (let ((w (get-buffer-window "journey"))) (and w (substring-no-properties (format-mode-line (buffer-local-value (quote mode-line-format) (window-buffer w)) nil w))))
  :kill (car kill-ring)
- :note (and (get-buffer "reset-note.txt") (with-current-buffer "reset-note.txt" (buffer-string)))
+ :note (and (get-buffer "reset-note.txt") (with-current-buffer "reset-note.txt" (list (buffer-string) (and (buffer-modified-p) t))))
+ :seen (cdr (assoc "seen.journey" journey-mode-seen))
  :kept (and (get-buffer "kept.txt") t))'''
 
 
@@ -301,6 +309,11 @@ def restart_and_reset(engine, root, blobs, entry):
     unsaved buffer.  The checks."""
     work = root / 'work'
     old_pid = engine.process.pid
+    # A file in the fixture's mode, shown as the restart begins: restored
+    # first, its mode set up after the replay.
+    (work / 'seen.journey').write_text('a journey\n')
+    engine.ask(f'(progn (find-file {lisp_string(str(work / "seen.journey"))}) t)')
+    ready(engine, '(eq major-mode (quote live-journey-mode))', 'the journey file shown')
     status, pressed, _ = restart(engine)
     new_pid, entry['restart_seconds'] = successor_up(engine, pressed, True)
     restarted = plist(engine.ask(RESTARTED))
@@ -335,7 +348,9 @@ def restart_and_reset(engine, root, blobs, entry):
                                                and reset['mode'] == [None, 'live-journey-a'],
         'reset: no mark': 'Δ' not in (reset['mark'] or ''),
         'reset: no kill ring': reset['kill'] is None,
-        'reset: the unsaved buffer carried': reset['note'] == 'on disk\ntyped\n',
+        'reset: the unsaved buffer carried, unsaved': reset['note'] in (['on disk\ntyped\n', 't'], ['on disk\ntyped\n', True])
+                                                     and (work / 'reset-note.txt').read_text() == 'on disk\n',
+        'restart: a restored buffer took its mode after the replay': restarted['seen'] in (True, 't'),
         'reset: the saved file buffer not carried': reset['kept'] is None,
     }
 
