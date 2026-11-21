@@ -1583,9 +1583,11 @@ and wait for it to end."
   ;; A restart onto this session's own executable (a reset's fallback)
   ;; keeps its runtime, though the plan removes the variables a restart
   ;; command's own build would choose.
-  (let ((process-environment (cons "ROMACS_RUNTIME_ROOT=/tmp/romacs-runtime-here" process-environment)))
-    (should (member "ROMACS_RUNTIME_ROOT=/tmp/romacs-runtime-here"
-                    (cdr (warm-restart--target (expand-file-name invocation-name invocation-directory)))))))
+  (let ((process-environment (append '("ROMACS_RUNTIME_ROOT=/tmp/romacs-runtime-here" "ROMACS_LISP_DIR=/tmp/romacs-lisp-here")
+                                     process-environment)))
+    (let ((environment (cdr (warm-restart--target (expand-file-name invocation-name invocation-directory)))))
+      (should (member "ROMACS_RUNTIME_ROOT=/tmp/romacs-runtime-here" environment))
+      (should (member "ROMACS_LISP_DIR=/tmp/romacs-lisp-here" environment)))))
 
 (ert-deftest warm-restart-a-part-may-finish-from-a-process ()
   ;; A reader told it is through by a subprocess's sentinel.
