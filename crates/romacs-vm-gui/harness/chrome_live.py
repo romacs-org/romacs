@@ -78,7 +78,7 @@ import live_oracle as live
 # line, so the bar is taller and draws a box; the last does not.
 DEFAULT_THEMES = 'catppuccin-latte,tokyonight-night,omarchy-gruvbox'
 
-INIT = r'''
+INIT = live.WRITE_WHOLE + r'''
 (defvar chrome-live-dir (getenv "CHROME_LIVE_DIR"))
 (defun chrome-live--hex (color)
   (and color (apply #'format "#%02x%02x%02x" (mapcar (lambda (v) (ash v -8)) (color-values color)))))
@@ -90,7 +90,7 @@ effect in the layout, which the bar's height and the windows' edges report."
 (defun chrome-live--note (name)
   "Record the chrome and the windows' edges in NAME, a JSON file."
   (let ((state (romacs-chrome-state)))
-    (with-temp-file (expand-file-name (concat name ".json") chrome-live-dir)
+    (live-with-whole-file (expand-file-name (concat name ".json") chrome-live-dir)
       (insert (format "{\"classic\": %s, \"gap\": %d, \"radius\": %d, \"dim\": %s, \"right_divider\": %d, \"internal_border\": %d, \"focus\": %S, \"background\": %S, \"windows\": [%s], \"status_bar\": %d, \"bar_top\": %d, \"bar_background\": %S, \"native_width\": %d, \"border\": %d, \"pill\": [%S, %S], \"state_pill\": [%S, %S], \"char_width\": %d, \"bar_height\": %d, \"inactive\": %S}"
                       (if (plist-get state :classic) "true" "false") (plist-get state :gap) (plist-get state :pane-radius)
                       (plist-get state :pane-dim) (plist-get state :right-divider) (plist-get state :internal-border)
@@ -137,7 +137,7 @@ SCENES = r'''
 (run-at-time 28 nil (lambda ()
   (dotimes (i 3) (romacs-layer-toast (format "toast %d\n%s" i (string-join (make-list 5 "a toast line") "\n"))))
   (run-at-time 1 nil (lambda ()
-    (with-temp-file (expand-file-name "toasts.json" chrome-live-dir)
+    (live-with-whole-file (expand-file-name "toasts.json" chrome-live-dir)
       (insert (format "{\"bottom\": %d, \"toasts\": [%s]}" (romacs-chrome-bottom)
                       (mapconcat (lambda (toast)
                                    (let ((f (romacs-layer--frame (car toast))))

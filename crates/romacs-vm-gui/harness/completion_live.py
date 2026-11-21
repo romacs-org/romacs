@@ -44,18 +44,18 @@ import fileio_live as fio
 import find_file_live as ff
 import live_oracle as live
 
-INIT = '''(write-region
+INIT = live.WRITE_WHOLE + '''(live-write-whole
  (prin1-to-string
   (list completion-styles completion-auto-select completion-auto-help completions-format
         completions-sort completions-max-height completion-ignore-case
         icomplete-compute-delay icomplete-delay-completions-threshold
         completion-category-overrides fido-vertical-mode romacs-complete-mode
         (lookup-key icomplete-fido-mode-map (kbd "TAB"))))
- nil {defaults})
+ {defaults})
 (defun romacs-live-completion-probe ()
   "Record that M-x ran this command."
   (interactive)
-  (write-region "ran" nil {probe}))
+  (live-write-whole "ran" {probe}))
 '''
 # Appended unless --fido: the root window's height against the frame's
 # less the status bar's (VM2-STATUS-BAR), recorded at init and in each
