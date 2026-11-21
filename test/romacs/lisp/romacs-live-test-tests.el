@@ -66,6 +66,45 @@ runner, which is run by python3: git keeps it not executable)."
           (should (equal (romacs-live-test-summary result) "No suite ran for none")))
       (delete-directory tree t))))
 
+(ert-deftest romacs-live-test-a-failing-runner-is-no-pass ()
+  ;; test-ert prints PASS rows for a suite whose tests were all skipped
+  ;; and still exits 1: the exit decides.
+  (let ((tree (romacs-live-test-tests--tree
+               "print('PASS       test/romacs/lisp/alpha-tests.el  0/0 skipped=3 0.1s')\nsys.exit(1)\n")))
+    (unwind-protect
+        (let ((result (romacs-live-test-tests--run tree '("alpha"))))
+          (should-not (romacs-live-test-passed-p result))
+          (should (string-match-p "runner failed for alpha" (romacs-live-test-summary result))))
+      (delete-directory tree t))))
+
+(ert-deftest romacs-live-test-the-runner-sees-the-trees-lisp-and-no-selection ()
+  (let ((tree (romacs-live-test-tests--tree
+               (concat "import os\n"
+                       "ok = os.environ.get('ROMACS_LISP_DIR', '').endswith('/lisp') and 'TEST_FILES' not in os.environ"
+                       " and 'SELECTOR' not in os.environ\n"
+                       "print(('PASS' if ok else 'FAIL') + '       test/romacs/lisp/alpha-tests.el  1/1 skipped=0 0.1s')\n"
+                       "sys.exit(0 if ok else 1)\n")))
+        (process-environment (append '("TEST_FILES=elsewhere-tests.el" "SELECTOR=t" "ROMACS_LISP_DIR=/base/lisp")
+                                     process-environment)))
+    (unwind-protect
+        (should (romacs-live-test-passed-p (romacs-live-test-tests--run tree '("alpha"))))
+      (delete-directory tree t))))
+
+(ert-deftest romacs-live-test-a-bad-name-reserves-nothing-and-a-busy-run-keeps-its-report ()
+  (let ((tree (romacs-live-test-tests--tree "print('x')\n"))
+        (romacs-live-test--run nil))
+    (unwind-protect
+        (progn
+          (should-error (romacs-live-test-start tree '(42) #'ignore) :type 'user-error)
+          (should-not romacs-live-test--run)
+          (with-current-buffer (get-buffer-create "*romacs-live-tests*")
+            (let ((inhibit-read-only t)) (erase-buffer) (insert "the running report")))
+          (let ((romacs-live-test--run '(:busy t)))
+            (should-error (romacs-live-test-start tree '("alpha") #'ignore) :type 'user-error))
+          (should (equal (with-current-buffer "*romacs-live-tests*" (buffer-string)) "the running report")))
+      (kill-buffer "*romacs-live-tests*")
+      (delete-directory tree t))))
+
 (ert-deftest romacs-live-test-takes-the-ledgers-libraries-and-a-real-tree ()
   (let ((romacs-live-ledger '(:entries ((:path "lisp/agents/romacs-agent-ui.el") (:path "/elsewhere/x.el")
                                         (:path "lisp/session/romacs-live.el")))))

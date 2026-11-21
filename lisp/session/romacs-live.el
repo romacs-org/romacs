@@ -870,8 +870,11 @@ loaded.  OPTIONS: `:plan-only' (CALLBACK gets the plan's summary, nothing
 loads) and `:unbind-gone' (as `romacs-live-apply')."
   (when romacs-live--running (user-error "A live update is already running"))
   (setq romacs-live--running source)
-  (unless (eq (plist-get source :kind) 'ledger) (setq romacs-live-last-source source))
   (let ((finish (lambda (report) (setq romacs-live--running nil romacs-live-last-report report)
+                  ;; The tree the ledger came from: where its suites are.
+                  (when (and (plist-get report :rows) (not (plist-get report :plan))
+                             (not (eq (plist-get source :kind) 'ledger)))
+                    (setq romacs-live-last-source source))
                   (funcall callback report))))
     (condition-case err
         (romacs-live--survey-then

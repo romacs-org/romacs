@@ -41,7 +41,8 @@
 (defvar romacs-live-test-last nil
   "The last run's result, a plist: `:tree', `:modules', `:files' (each
 \(:file FILE :status pass|fail|incomplete :tests TEXT)), `:failed' (test
-names), `:summary' (the runner's last line), `:logs' and `:seconds'.")
+names), `:exits' (each module's runner's exit status), `:logs' and
+`:seconds'.")
 
 (defun romacs-live-test--tree-p (dir)
   "Whether DIR is a Romacs source tree with its runner."
@@ -65,7 +66,6 @@ names), `:summary' (the runner's last line), `:logs' and `:seconds'.")
                                                   ("PASS" 'pass) ("FAIL" 'fail) (_ 'incomplete)))))))
         ((string-match "\\` +FAILED +\\(?:[0-9]+/[0-9]+ +\\)?\\([^ ]+\\)" line)
          (plist-put result :failed (delete-dups (append (plist-get result :failed) (list (match-string 1 line))))))
-        ((string-prefix-p "ERT complete:" line) (plist-put result :summary line))
         (t result)))
 
 (defun romacs-live-test--face (line)
@@ -97,45 +97,81 @@ session's executable."
       (let* ((tree (plist-get run :tree))
              (logs (expand-file-name module (plist-get run :logs)))
              (default-directory (file-name-as-directory tree))
-             ;; The tree's runtime: its Lisp and data with this executable.
-             (process-environment (cons (concat "ROMACS_RUNTIME_ROOT=" (directory-file-name tree))
-                                        (cl-remove-if (lambda (e) (string-prefix-p "ROMACS_LISP_DIR=" e))
-                                                      process-environment)))
+             ;; The tree's runtime and Lisp with this executable, and no
+             ;; selection of the caller's environment (TEST_FILES, SELECTOR
+             ;; would override the module's suites).
+             (process-environment (append (list (concat "ROMACS_RUNTIME_ROOT=" (directory-file-name tree))
+                                                (concat "ROMACS_LISP_DIR=" (expand-file-name "lisp" tree)))
+                                          (cl-remove-if (lambda (e) (string-match-p "\\`\\(?:ROMACS_RUNTIME_ROOT\\|ROMACS_LISP_DIR\\|TEST_FILES\\|SELECTOR\\)=" e))
+                                                        process-environment)))
              (pending ""))
         (romacs-live-test--show (format "── %s" module))
-        (make-process
-         :name (format "romacs-live-test-%s" module) :noquery t :connection-type 'pipe
-         :command (romacs-live-test--command tree module logs)
-         :filter (lambda (_process text)
-                   (setq pending (concat pending text))
-                   (while (string-match "\n" pending)
-                     (let ((line (substring pending 0 (match-beginning 0))))
-                       (setq pending (substring pending (match-end 0)))
-                       (setf (plist-get run :result) (romacs-live-test--parse line (plist-get run :result)))
-                       (romacs-live-test--show line))))
-         :sentinel (lambda (process _event)
-                     (unless (process-live-p process)
-                       (when (and (not (zerop (process-exit-status process)))
-                                  (null (plist-get (plist-get run :result) :files)))
-                         (romacs-live-test--show (format "%s: the runner exited %d before any file ran"
-                                                         module (process-exit-status process))))
-                       (romacs-live-test--next run))))))))
+        (condition-case err
+            (romacs-live-test--launch run module tree logs pending)
+          (error (romacs-live-test--show (format "%s: the runner did not start: %s" module (error-message-string err)))
+                 (push (list module 'unstarted 0 0) (plist-get run :exits))
+                 (romacs-live-test--next run)))))))
+
+(defun romacs-live-test--launch (run module tree logs pending)
+  "Start RUN's runner on MODULE from TREE, its logs in LOGS; PENDING is
+the output not yet a whole line.  Its end records the exit and how many
+files it reported, and how many of them did not pass."
+  (let ((seen (length (plist-get (plist-get run :result) :files))))
+    (make-process
+     :name (format "romacs-live-test-%s" module) :noquery t :connection-type 'pipe
+     :command (romacs-live-test--command tree module logs)
+     :filter (lambda (_process text)
+               (setq pending (concat pending text))
+               (while (string-match "\n" pending)
+                 (let ((line (substring pending 0 (match-beginning 0))))
+                   (setq pending (substring pending (match-end 0)))
+                   (setf (plist-get run :result) (romacs-live-test--parse line (plist-get run :result)))
+                   (romacs-live-test--show line))))
+     :sentinel (lambda (process _event)
+                 (unless (process-live-p process)
+                   (let ((files (nthcdr seen (plist-get (plist-get run :result) :files))))
+                     (push (list module (process-exit-status process) (length files)
+                                 (cl-count-if-not (lambda (f) (eq (plist-get f :status) 'pass)) files))
+                           (plist-get run :exits)))
+                   (romacs-live-test--next run))))))
 
 (defun romacs-live-test--finish (run)
   "End RUN: its result, kept and handed to its callback."
   (let ((result (append (list :tree (plist-get run :tree) :modules (plist-get run :modules)
-                              :logs (plist-get run :logs)
+                              :logs (plist-get run :logs) :exits (reverse (plist-get run :exits))
                               :seconds (round (- (float-time) (plist-get run :start))))
                         (plist-get run :result))))
     (setq romacs-live-test--run nil romacs-live-test-last result)
     (romacs-live-test--show (romacs-live-test-summary result))
     (when-let* ((callback (plist-get run :callback))) (funcall callback result))))
 
+(defun romacs-live-test--broken (result)
+  "The modules whose runner failed in RESULT, by its exit and the files it
+reported: one that did not start, exited 0 or 1 at odds with its files
+\(1 with none failing: suites all skipped), exited 2 after running files
+\(2 with none: it has no suites), or exited otherwise."
+  (cl-loop for (module exit files failing) in (plist-get result :exits)
+           unless (pcase exit
+                    (0 (zerop failing))
+                    (1 (> failing 0))
+                    (2 (zerop files)))
+           collect module))
+
+(defun romacs-live-test-passed-p (result)
+  "Whether RESULT's run passed: suite files ran, each passed, and every
+module's runner ended well."
+  (and (plist-get result :files)
+       (cl-every (lambda (f) (eq (plist-get f :status) 'pass)) (plist-get result :files))
+       (null (romacs-live-test--broken result))))
+
 (defun romacs-live-test-summary (result)
   "One line saying how RESULT's run went."
   (let* ((files (plist-get result :files))
-         (failing (cl-count-if-not (lambda (f) (eq (plist-get f :status) 'pass)) files)))
-    (cond ((null files) (format "No suite ran for %s" (string-join (plist-get result :modules) ", ")))
+         (failing (cl-count-if-not (lambda (f) (eq (plist-get f :status) 'pass)) files))
+         (broken (romacs-live-test--broken result)))
+    (cond (broken (format "The runner failed for %s%s" (string-join broken ", ")
+                          (if (plist-get result :failed) (concat "; failed: " (string-join (plist-get result :failed) ", ")) "")))
+          ((null files) (format "No suite ran for %s" (string-join (plist-get result :modules) ", ")))
           ((zerop failing) (format "%d suite files passed in %d s" (length files) (plist-get result :seconds)))
           (t (format "%d of %d suite files failed in %d s: %s" failing (length files) (plist-get result :seconds)
                      (string-join (plist-get result :failed) ", "))))))
@@ -146,11 +182,16 @@ with the result (`romacs-live-test-last')."
   (unless (romacs-live-test--tree-p tree)
     (user-error "Not a Romacs source tree with its runner: %s" tree))
   (unless modules (user-error "No library to test: update from a source first, or name one"))
+  (unless (cl-every (lambda (m) (and (stringp m) (string-match-p "\\`[[:alnum:]_.+-]+\\'" m))) modules)
+    (user-error "Library names are strings like romacs-live: %S" modules))
   (when romacs-live-test--run (user-error "A test run is already going"))
+  (with-current-buffer (get-buffer-create "*romacs-live-tests*")
+    (romacs-live-test-mode)
+    (let ((inhibit-read-only t)) (erase-buffer)))
   (setq romacs-live-test--run
         (list :tree (expand-file-name tree) :modules modules :pending (copy-sequence modules)
               :logs (make-temp-file "romacs-live-tests-" t) :start (float-time) :callback callback
-              :result nil))
+              :result nil :exits nil))
   (romacs-live-test--next romacs-live-test--run))
 
 (defun romacs-live-test--default-tree ()
@@ -179,11 +220,8 @@ session.  The lines fill *romacs-live-tests* as they come."
                     (split-string (read-string (format-prompt "Libraries" (string-join modules " "))
                                                nil nil (string-join modules " ")))
                   modules))))
-  (with-current-buffer (get-buffer-create "*romacs-live-tests*")
-    (romacs-live-test-mode)
-    (let ((inhibit-read-only t)) (erase-buffer))
-    (display-buffer (current-buffer)))
-  (romacs-live-test-start tree modules (lambda (result) (message "%s" (romacs-live-test-summary result)))))
+  (romacs-live-test-start tree modules (lambda (result) (message "%s" (romacs-live-test-summary result))))
+  (display-buffer "*romacs-live-tests*"))
 
 ;;;###autoload
 (defun romacs-live-test-mcp (arguments)
@@ -198,11 +236,7 @@ session.  The lines fill *romacs-live-tests* as they come."
      (lambda (result)
        (setq done (list (let ((table (make-hash-table :test #'equal)))
                           (puthash "summary" (romacs-live-test-summary result) table)
-                          (puthash "passed" (if (and (plist-get result :files)
-                                                     (cl-every (lambda (f) (eq (plist-get f :status) 'pass))
-                                                               (plist-get result :files)))
-                                                t :false)
-                                   table)
+                          (puthash "passed" (if (romacs-live-test-passed-p result) t :false) table)
                           (puthash "files" (vconcat (mapcar (lambda (f) (let ((row (make-hash-table :test #'equal)))
                                                                          (puthash "file" (plist-get f :file) row)
                                                                          (puthash "status" (symbol-name (plist-get f :status)) row)
