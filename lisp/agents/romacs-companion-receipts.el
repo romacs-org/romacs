@@ -43,6 +43,42 @@ Readback does not need a live claim and never returns payload text."
      (if record (plist-get record :receipt)
        (list :operation-id operation-id :status 'absent)))))
 
+(defun romacs-companion-receipts--check-payload (handle tick start end text)
+  "Refuse an edit's payload, HANDLE TICK START END TEXT, unless each part
+has its type and TEXT and HANDLE their bounded lengths."
+  (unless (and (stringp handle) (<= 1 (length handle) 256)
+               (integerp tick) (integerp start)
+               (integerp end) (stringp text)
+               (<= (length text) romacs-companion-receipts-text-limit))
+    (user-error "Invalid companion operation payload")))
+
+(defun romacs-companion-receipts--run (instance operation-id payload)
+  "Make the edit PAYLOAD describes in INSTANCE's companion, its receipt kept
+under OPERATION-ID: running, then succeeded with the edit's result, or
+failed with its condition, re-signalled; indeterminate after any other
+exit.  The receipt, as `romacs-companion-operation-state' reads it."
+  (let* ((id (substring-no-properties operation-id))
+         (record (list :payload (romacs-companion-receipts--copy payload)
+                       :receipt (list :operation-id id :status 'running)))
+         (settled nil))
+    (puthash id record romacs-companion-receipts--operations)
+    (unwind-protect
+        (condition-case failure
+            (let ((result (apply #'romacs-companion-edit instance payload)))
+              (setf (plist-get record :receipt)
+                    (list :operation-id id :status 'succeeded :result result))
+              (setq settled t)
+              (romacs-companion-operation-state instance id))
+          ((error quit)
+           (setf (plist-get record :receipt)
+                 (list :operation-id id :status 'failed
+                       :condition (car failure)))
+           (setq settled t)
+           (signal (car failure) (cdr failure))))
+      (unless settled
+        (setf (plist-get record :receipt)
+              (list :operation-id id :status 'indeterminate))))))
+
 (defun romacs-companion-edit-once
     (instance operation-id handle tick start end text)
   "Apply one receipt-qualified edit in INSTANCE's companion.
@@ -60,43 +96,17 @@ leave an indeterminate receipt and must not be replayed.  No waits or I/O.
 This covers only the companion edit, not arbitrary owner eval or callbacks."
   (romacs-companion--check-instance instance)
   (romacs-companion-receipts--check-id operation-id)
-  (unless (and (stringp handle) (<= 1 (length handle) 256)
-               (integerp tick) (integerp start)
-               (integerp end) (stringp text)
-               (<= (length text) romacs-companion-receipts-text-limit))
-    (user-error "Invalid companion operation payload"))
+  (romacs-companion-receipts--check-payload handle tick start end text)
   (let* ((payload (list handle tick start end (substring-no-properties text)))
          (existing (gethash operation-id romacs-companion-receipts--operations)))
-    (if existing
-        (progn
-          (unless (equal payload (plist-get existing :payload))
-            (user-error "Companion operation payload conflict"))
-          (romacs-companion-operation-state instance operation-id))
-      (when (>= (hash-table-count romacs-companion-receipts--operations)
-                romacs-companion-receipts-limit)
-        (user-error "Companion receipt capacity reached; no IDs were evicted"))
-      (let* ((id (substring-no-properties operation-id))
-             (record (list :payload (romacs-companion-receipts--copy payload)
-                           :receipt (list :operation-id id :status 'running)))
-             (settled nil))
-        (puthash id record romacs-companion-receipts--operations)
-        (unwind-protect
-            (condition-case failure
-                (let ((result (romacs-companion-edit
-                               instance handle tick start end (nth 4 payload))))
-                  (setf (plist-get record :receipt)
-                        (list :operation-id id :status 'succeeded :result result))
-                  (setq settled t)
-                  (romacs-companion-operation-state instance id))
-              ((error quit)
-               (setf (plist-get record :receipt)
-                     (list :operation-id id :status 'failed
-                           :condition (car failure)))
-               (setq settled t)
-               (signal (car failure) (cdr failure))))
-          (unless settled
-            (setf (plist-get record :receipt)
-                  (list :operation-id id :status 'indeterminate))))))))
+    (cond
+     (existing
+      (unless (equal payload (plist-get existing :payload))
+        (user-error "Companion operation payload conflict"))
+      (romacs-companion-operation-state instance operation-id))
+     ((>= (hash-table-count romacs-companion-receipts--operations) romacs-companion-receipts-limit)
+      (user-error "Companion receipt capacity reached; no IDs were evicted"))
+     (t (romacs-companion-receipts--run instance operation-id payload)))))
 
 (provide 'romacs-companion-receipts)
 ;;; romacs-companion-receipts.el ends here

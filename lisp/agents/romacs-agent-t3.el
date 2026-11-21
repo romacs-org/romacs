@@ -95,6 +95,59 @@ a path (a bare command name is looked up as it is); nil when empty."
           ((string-prefix-p "~" value) (expand-file-name value))
           (t value))))
 
+(defun romacs-agent-t3--rows (configured)
+  "T3's instance rows, (ID . ROW): its defaults CONFIGURED does not
+configure, then CONFIGURED's in order."
+  (append (cl-loop for (id . display) in romacs-agent-t3--default-instances
+                   unless (gethash id configured)
+                   collect (let ((row (make-hash-table :test #'equal)))
+                             (puthash "driver" id row) (puthash "displayName" display row)
+                             (puthash "enabled" t row)
+                             (cons id row)))
+          (let ((pairs nil)) (maphash (lambda (id row) (push (cons id row) pairs)) configured)
+               (nreverse pairs))))
+
+(defun romacs-agent-t3--field (id config key types)
+  "CONFIG's KEY, checked as `romacs-agent-t3--check' checks it, for
+instance ID; nil without a CONFIG."
+  (and config (romacs-agent-t3--check id config key types)))
+
+(defun romacs-agent-t3--fields (id row)
+  "Instance ID's ROW, every field checked: (DRIVER SHOWN CONFIG), or an
+error for a row that is not an object, a mistyped field or no driver."
+  (unless (hash-table-p row) (error "T3 instance %s is not an object" id))
+  (let ((driver (romacs-agent-t3--check id row "driver" '(string)))
+        (shown (romacs-agent-t3--check id row "displayName" '(string)))
+        (config (romacs-agent-t3--check id row "config" '(object))))
+    (romacs-agent-t3--check id row "enabled" '(boolean))
+    (dolist (key '("homePath" "binaryPath" "launchArgs" "setupMode" "shadowHomePath"))
+      (romacs-agent-t3--field id config key '(string)))
+    (romacs-agent-t3--field id config "enabled" '(boolean))
+    (unless driver (error "T3 instance %s has no driver" id))
+    (list driver shown config)))
+
+(defun romacs-agent-t3--instance-name (id display taken ids)
+  "Instance ID's name: DISPLAY's, unless TAKEN holds it or it is another
+instance's T3 id (IDS holds them all); then ID."
+  (let ((candidate (romacs-agent-t3--name display)))
+    (if (or (gethash candidate taken)
+            (and (gethash candidate ids) (not (equal candidate id))))
+        id
+      candidate)))
+
+(defun romacs-agent-t3--instance (name id row config harness display overlay)
+  "Instance ID as `romacs-agent-providers' takes it, named NAME, its
+HARNESS and DISPLAY name given, from its ROW and CONFIG; disabled under
+an auth OVERLAY."
+  (append (list name :harness harness :display display :source 't3 :t3-id id
+                :enabled (and (not overlay) (romacs-agent-t3--enabled row config)))
+          (when-let* ((home (romacs-agent-t3--path (romacs-agent-t3--field id config "homePath" '(string)))))
+            (list :config-dir home))
+          (when-let* ((binary (romacs-agent-t3--path (romacs-agent-t3--field id config "binaryPath" '(string)))))
+            (list :program binary))
+          (when-let* ((args (romacs-agent-t3--field id config "launchArgs" '(string))))
+            (list :arguments (romacs-agent-t3-split args)))))
+
 (defun romacs-agent-t3-instances (settings harness-of)
   "T3 Code's instances in SETTINGS (its parsed settings, a hash table),
 as (INSTANCES . CONSTRAINTS): each instance a plist of
@@ -107,14 +160,7 @@ taken, or is another instance's T3 id; then by its own T3 id.  A field
 of the wrong type signals an error: the file is not taken at all."
   (let* ((configured (or (romacs-agent-t3--check nil settings "providerInstances" '(object))
                          (make-hash-table :test #'equal)))
-         (rows (append (cl-loop for (id . display) in romacs-agent-t3--default-instances
-                                unless (gethash id configured)
-                                collect (let ((row (make-hash-table :test #'equal)))
-                                          (puthash "driver" id row) (puthash "displayName" display row)
-                                          (puthash "enabled" t row)
-                                          (cons id row)))
-                       (let ((pairs nil)) (maphash (lambda (id row) (push (cons id row) pairs)) configured)
-                            (nreverse pairs))))
+         (rows (romacs-agent-t3--rows configured))
          ;; Every T3 id is kept for its own instance, should it need it.
          (ids (let ((table (make-hash-table :test #'equal)))
                 (pcase-dolist (`(,id . ,_) rows) (puthash id t table))
@@ -122,46 +168,22 @@ of the wrong type signals an error: the file is not taken at all."
          (taken (make-hash-table :test #'equal))
          (instances nil) (constraints nil))
     (pcase-dolist (`(,id . ,row) rows)
-      (unless (hash-table-p row) (error "T3 instance %s is not an object" id))
-      (let* ((driver (romacs-agent-t3--check id row "driver" '(string)))
-             (shown (romacs-agent-t3--check id row "displayName" '(string)))
-             (config (romacs-agent-t3--check id row "config" '(object)))
-             (field (lambda (key types) (and config (romacs-agent-t3--check id config key types)))))
-        (romacs-agent-t3--check id row "enabled" '(boolean))
-        (dolist (key '("homePath" "binaryPath" "launchArgs" "setupMode" "shadowHomePath"))
-          (funcall field key '(string)))
-        (funcall field "enabled" '(boolean))
-        (unless driver (error "T3 instance %s has no driver" id))
-        (let* ((harness (funcall harness-of driver))
-               ;; A default instance configured with no name keeps its own.
-               (display (if (and shown (not (string-empty-p (string-trim shown)))) shown
-                          (or (cdr (assoc id romacs-agent-t3--default-instances)) id)))
-               (name (let ((candidate (romacs-agent-t3--name display)))
-                       (if (or (gethash candidate taken)
-                               (and (gethash candidate ids) (not (equal candidate id))))
-                           id
-                         candidate)))
-               (overlay (and (equal driver "codex")
-                             (or (romacs-agent-t3--path (funcall field "shadowHomePath" '(string)))
-                                 (equal (funcall field "setupMode" '(string)) "managed")))))
-          (cond
-           ((not harness)
-            (push (list :source 't3 :id id :reason (format "no Romacs harness for T3 driver %s" driver)) constraints))
-           (t
-            (puthash name t taken)
-            (when overlay
-              (push (list :source 't3 :id id
-                          :reason "T3 auth overlay (shadowHomePath / managed setup) not supported")
-                    constraints))
-            (push (append (list name :harness harness :display display :source 't3 :t3-id id
-                                :enabled (and (not overlay) (romacs-agent-t3--enabled row config)))
-                          (when-let* ((home (romacs-agent-t3--path (funcall field "homePath" '(string)))))
-                            (list :config-dir home))
-                          (when-let* ((binary (romacs-agent-t3--path (funcall field "binaryPath" '(string)))))
-                            (list :program binary))
-                          (when-let* ((args (funcall field "launchArgs" '(string))))
-                            (list :arguments (romacs-agent-t3-split args))))
-                  instances))))))
+      (pcase-let* ((`(,driver ,shown ,config) (romacs-agent-t3--fields id row))
+                   (harness (funcall harness-of driver))
+                   ;; A default instance configured with no name keeps its own.
+                   (display (if (and shown (not (string-empty-p (string-trim shown)))) shown
+                              (or (cdr (assoc id romacs-agent-t3--default-instances)) id)))
+                   (name (romacs-agent-t3--instance-name id display taken ids))
+                   (overlay (and (equal driver "codex")
+                                 (or (romacs-agent-t3--path (romacs-agent-t3--field id config "shadowHomePath" '(string)))
+                                     (equal (romacs-agent-t3--field id config "setupMode" '(string)) "managed")))))
+        (if (not harness)
+            (push (list :source 't3 :id id :reason (format "no Romacs harness for T3 driver %s" driver)) constraints)
+          (puthash name t taken)
+          (when overlay
+            (push (list :source 't3 :id id :reason "T3 auth overlay (shadowHomePath / managed setup) not supported")
+                  constraints))
+          (push (romacs-agent-t3--instance name id row config harness display overlay) instances))))
     (cons (nreverse instances) (nreverse constraints))))
 
 (defvar romacs-agent-t3--read nil
