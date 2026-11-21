@@ -116,7 +116,7 @@
     (draw :type 'tool :state 'completed :id "a" :output "2 words")
     (let ((text (romacs-agent-log-tests--transcript)))
       ;; A read says how much it read, its text RET away; a report, under its call.
-      (should (string-match-p "count[^\n]*\n│ ● [^\n]*n.txt[^\n]*· 1 line\n  ⎿ 2 words\n\nMain goes on." text)))))
+      (should (string-match-p "⑂ count · 2 words\n│ ● [^\n]*n.txt[^\n]*· 1 line\n\nMain goes on." text)))))
 
 (ert-deftest romacs-agent-log-an-approval-waits-in-plain-sight ()
   (romacs-agent-log-tests--with
@@ -239,7 +239,8 @@
     (draw :type 'tool :state 'completed :id "a" :output "done")
     (let ((text (romacs-agent-log-tests--transcript)))
       (should (string-match-p "│ hello world\n│ next\n│ ● " text))
-      (should (string-match-p "⎿ done" text)))
+      ;; Ended well: its row says its report's first line.
+      (should (string-match-p "⑂ d · done\n" text)))
     ;; A background subagent's later word goes under its call still.
     (draw :type 'task :id "a" :state 'completed :summary "counted")
     (draw :type 'delta :text "root text")
@@ -797,7 +798,7 @@
     (draw :type 'tool :state 'completed :id "a"
           :output "[Subagent hand-back] The text below is the final report. The report follows:\n  2 words\nagentId: abc (use SendMessage)\n<usage>tokens: 5\ntool_uses: 1</usage>")
     (let ((text (romacs-agent-log-tests--transcript)))
-      (should (string-match-p "⎿ 2 words\n" text))
+      (should (string-match-p "⑂ count · 2 words\n" text))
       (should-not (string-match-p "hand-back\\|agentId\\|usage" text)))
     (romacs-agent-log--separator)
     (should (string-match-p "working" (buffer-substring-no-properties romacs-agent-log--end romacs-agent-log--input)))))
@@ -848,13 +849,13 @@
     (should-not romacs-agent-log--early)))
 
 (ert-deftest romacs-agent-log-a-report-keeps-its-words ()
-  (should (equal (romacs-agent-log--report "Plain words. The report follows:\nmore <usage>inline</usage> text")
+  (should (equal (romacs-agent-rows-report "Plain words. The report follows:\nmore <usage>inline</usage> text")
                  "Plain words. The report follows:\nmore <usage>inline</usage> text"))
-  (should (equal (romacs-agent-log--report "[Subagent hand-back] frame. The report follows:\nbody\nagentId: a1\n<usage>t: 1</usage>\n")
+  (should (equal (romacs-agent-rows-report "[Subagent hand-back] frame. The report follows:\nbody\nagentId: a1\n<usage>t: 1</usage>\n")
                  "body"))
-  (should (equal (romacs-agent-log--report "[Subagent hand-back] f. The report follows:\nsee <usage>x</usage> here\nagentId: a\n<usage>t</usage>")
+  (should (equal (romacs-agent-rows-report "[Subagent hand-back] f. The report follows:\nsee <usage>x</usage> here\nagentId: a\n<usage>t</usage>")
                  "see <usage>x</usage> here"))
-  (should (equal (romacs-agent-log--report "Example: <usage>x</usage>\nThe closing tag is </usage>")
+  (should (equal (romacs-agent-rows-report "Example: <usage>x</usage>\nThe closing tag is </usage>")
                  "Example: <usage>x</usage>\nThe closing tag is </usage>")))
 
 (ert-deftest romacs-agent-log-output-before-its-call-is-kept ()

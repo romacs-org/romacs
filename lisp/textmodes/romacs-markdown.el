@@ -188,10 +188,12 @@ hides: inline ones and headings."
   "Make invisible, as `romacs-markdown-markup', the marks BEG..END is
 written with around inline elements and before headings (`**', `_',
 `~~', backticks, `#'), as `romacs-markdown-fontify-region' faced them:
-the text reads as it renders.  Marks of blocks (fences, quotes, tables)
-stay, as structure.  A mark hidden before that is a mark no more shows
-again.  A buffer hides them while its `buffer-invisibility-spec' has
-`romacs-markdown-markup'."
+the text reads as it renders.  Only those characters are hidden, never
+a line break or another element's syntax nested in them (a quote's `>',
+a link's brackets); marks of blocks (fences, quotes, tables) stay, as
+structure.  A mark hidden before that is a mark no more shows again;
+text another property makes invisible is left alone.  A buffer hides
+them while its `buffer-invisibility-spec' has `romacs-markdown-markup'."
   (let ((markup (alist-get 'markup romacs-markdown-faces))
         (hidden (romacs-markdown--hidden-faces)))
     (with-silent-modifications
@@ -200,10 +202,15 @@ again.  A buffer hides them while its `buffer-invisibility-spec' has
           (let* ((next (min (next-single-property-change at 'face nil end)
                             (next-single-property-change at 'invisible nil end)))
                  (faces (ensure-list (get-text-property at 'face)))
+                 (invisible (get-text-property at 'invisible))
                  (hide (and markup (eq (car faces) markup) (seq-some (lambda (face) (memq face hidden)) (cdr faces)))))
-            (cond (hide (put-text-property at next 'invisible 'romacs-markdown-markup))
-                  ((eq (get-text-property at 'invisible) 'romacs-markdown-markup)
-                   (remove-text-properties at next '(invisible nil))))
+            (when (eq invisible 'romacs-markdown-markup)
+              (remove-text-properties at next '(invisible nil)))
+            (when (and hide (memq invisible '(nil romacs-markdown-markup)))
+              (save-excursion
+                (goto-char at)
+                (while (re-search-forward "[*_~`#=\t -]+" next t)
+                  (put-text-property (match-beginning 0) (match-end 0) 'invisible 'romacs-markdown-markup))))
             (setq at next)))))))
 
 (defun romacs-markdown-plain-string (text)

@@ -692,6 +692,8 @@ commands applies: \\[romacs-agent-history-resume-this] goes on with it.
   :interactive nil
   (setq-local truncate-lines nil word-wrap t)
   (setq-local header-line-format "")
+  ;; As a chat's: its bars never in what one copies.
+  (add-function :filter-return (local 'filter-buffer-substring-function) #'romacs-agent-log--undecorated)
   (setq romacs-agent-log--text-map romacs-agent-history-text-map))
 
 ;;;###autoload

@@ -96,10 +96,18 @@ state, dim after a dot; a history read later shows the call's moment."
     (if (member state '("running" "starting")) (romacs-agent-rows--dim " · started")
       (romacs-agent-rows--state record))))
 
+(defun romacs-agent-rows--said-state (state)
+  "STATE, a task's, after a dot: dim, but a failure's in the error face
+behind its mark, seen before it is read."
+  (if (member state '("failed" "error" "cancelled" "unstarted"))
+      (concat (romacs-agent-rows--dim " · ") (propertize (concat "✗ " state) 'face 'romacs-agent-error))
+    (romacs-agent-rows--dim (concat " · " state))))
+
 (defun romacs-agent-rows--state (record)
-  "RECORD's state, or its status, dim after a dot, or nothing."
+  "RECORD's state, or its status, after a dot (`romacs-agent-rows--said-state'),
+or nothing."
   (if-let* ((state (or (romacs-agent-rows--field record "state") (romacs-agent-rows--field record "status"))))
-      (romacs-agent-rows--dim (concat " · " state))
+      (romacs-agent-rows--said-state state)
     ""))
 
 (defun romacs-agent-rows-outcome (output)
@@ -269,11 +277,39 @@ known."
  :body (lambda (_input output) (romacs-agent-rows--field (romacs-agent-rows--json output) "result")))
 
 ;; A harness's own subagent: the same card, with no task of ours.
+(defun romacs-agent-rows-report (output)
+  "A subagent's OUTPUT as its report: without the frame Claude Code puts
+around it for its model (the hand-back notice before it, the agent's id
+and its usage after it).  RET still shows all of it."
+  (let ((report (string-trim-right
+                 (if (string-match "\\`\\[Subagent hand-back\\]\\(?:.\\|\n\\)*?The report follows:[ \t]*\n" output)
+                     (substring output (match-end 0))
+                   output))))
+    ;; Its last usage block, then its id line, at its end only.
+    (when (string-suffix-p "</usage>" report)
+      ;; A usage block is a few lines: looked for in the report's end.
+      (let ((open nil) (from (max 0 (- (length report) 2048))))
+        (while (setq from (string-search "<usage>" report from))
+          (setq open from from (1+ from)))
+        ;; A block, closed by the report's last tag: none quoted inside it.
+        (when (and open (= (string-search "</usage>" report open) (- (length report) (length "</usage>"))))
+          (setq report (string-trim-right (substring report 0 open))))))
+    (when (string-match "\n[ \t]*agentId: [^\n]*\\'" report)
+      (setq report (substring report 0 (match-beginning 0))))
+    (string-trim report)))
+
+
 (dolist (name '("Agent" "Task"))
   (romacs-agent-rows-define
    name
    :row (lambda (input) (romacs-agent-rows--delegated (or (romacs-agent-rows--field input "description") "task")
-                                                       (romacs-agent-rows--field input "subagent_type")))))
+                                                       (romacs-agent-rows--field input "subagent_type")))
+   ;; Its report's first line: the whole report is RET away.
+   :ended (lambda (input output)
+            (concat (romacs-agent-rows--delegated (or (romacs-agent-rows--field input "description") "task")
+                                                  (romacs-agent-rows--field input "subagent_type"))
+                    (romacs-agent-rows--dim " · ")
+                    (truncate-string-to-width (romacs-agent-rows--line (romacs-agent-rows-report (or output ""))) 60 nil nil "…")))))
 
 ;;; Tasks: one line each
 
@@ -290,7 +326,7 @@ known."
              (concat "◷ " (or (romacs-agent-rows--field record "title")
                               (romacs-agent-rows--title (romacs-agent-rows--field input "taskId")))
                      (if-let* ((status (romacs-agent-rows--field record "status")))
-                         (romacs-agent-rows--dim (concat " · " status))
+                         (romacs-agent-rows--said-state status)
                        "")))))
  :body (lambda (_input output) (romacs-agent-rows--field (romacs-agent-rows--json output) "result")))
 

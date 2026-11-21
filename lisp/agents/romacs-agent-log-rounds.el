@@ -27,7 +27,7 @@
 (defface romacs-agent-log-you '((t :extend t))
   "The surface of the user's messages: the background moved a little
 toward the text, derived on each theme change.")
-(defface romacs-agent-log-you-top '((t :overline t))
+(defface romacs-agent-log-you-top '((t :overline t :extend t))
   "The hairline over a round's first line, the user's message: where a
 round begins, found at a glance as the chat scrolls.  Its colour is the
 theme's dim text, derived on each theme change.")
@@ -61,7 +61,7 @@ transcript on every theme, light, dark or black."
     ;; A hairline, never a rule: the dim text's colour, toward the surface.
     (let ((line (romacs-color-hex (face-foreground 'shadow nil t))))
       (face-spec-set 'romacs-agent-log-you-top
-                     (if line `((t :overline ,line)) '((t :overline t)))
+                     (if line `((t :overline ,line :extend t)) '((t :overline t :extend t)))
                      'face-defface-spec))))
 
 (add-hook 'enable-theme-functions #'romacs-agent-log-rounds--derive)
@@ -77,15 +77,19 @@ The round before it ends."
   (let* ((text (if (string-suffix-p "\n" text) (copy-sequence text) (concat text "\n")))
          (bar (propertize "▌ " 'face 'romacs-agent-log-you-bar 'romacs-agent-decor t))
          (first (or (string-match "[^\n]" text) 0))
-         ;; Its bar before each of its lines (rows a line wraps to have
-         ;; its surface: the host draws no wrap prefix).
+         ;; Its bar before each of its lines, blank ones between too (rows
+         ;; a line wraps to have its surface: the host draws no wrap
+         ;; prefix); none after its last newline.
+         (body (substring text first (1- (length text))))
          (text (concat (substring text 0 first)
-                       (replace-regexp-in-string "^\\(.\\)" (lambda (line) (concat bar line))
-                                                 (substring text first) t t))))
+                       (mapconcat (lambda (line) (concat bar line)) (split-string body "\n") "\n")
+                       "\n")))
     (put-text-property 0 1 'romacs-agent-log-round t text)
     (add-face-text-property first (length text) 'romacs-agent-log-you t text)
-    ;; Its first line under a hairline: where the round begins.
-    (add-face-text-property first (or (string-search "\n" text first) (length text)) 'romacs-agent-log-you-top t text)
+    ;; Its first line under a hairline to the window's edge, as its
+    ;; surface: where the round begins.
+    (add-face-text-property first (min (length text) (1+ (or (string-search "\n" text first) (length text))))
+                            'romacs-agent-log-you-top t text)
     (concat text "\n")))
 
 (defun romacs-agent-log-rounds--words (text width)
@@ -102,7 +106,7 @@ inside one (unless its first word is longer)."
   (let ((state (plist-get incoming :state)))
     (concat (propertize "← " 'face 'romacs-agent-log-other-mark)
             ;; Whom it is from, a session's title as long as a name.
-            (propertize (romacs-agent-log-rounds--words (or (plist-get incoming :from) "elsewhere") 40)
+            (propertize (romacs-agent-log-rounds--words (or (plist-get incoming :from) "elsewhere") 60)
                         'face 'romacs-agent-log-other-head)
             (if (and state (not (string-empty-p state)))
                 (propertize (concat " · " state) 'face 'romacs-agent-log-other)
@@ -118,7 +122,9 @@ not the user's; its first lines dim, RET shows all."
          (width (- romacs-agent-log-output-width (length bar) (* 2 (cdr (romacs-agent-log--where event)))))
          (body (string-trim (or (plist-get incoming :text) "")))
          ;; Its lines that say something, as they read rendered.
-         (lines (mapcar #'romacs-markdown-plain-string (split-string body "\n" t "[ \t]*")))
+         ;; Read as one document (a span or a fence across its lines),
+         ;; its first part only: the preview shows a few lines.
+         (lines (split-string (romacs-markdown-plain-string (substring body 0 (min (length body) 4096))) "\n" t "[ \t]*"))
          (shown (seq-take lines romacs-agent-log-rounds-other-lines))
          (more (- (length lines) (length shown)))
          ;; One blank line before it: an arrival before ends in its own.

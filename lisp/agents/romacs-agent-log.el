@@ -442,9 +442,16 @@ parent call."
                  (body (replace-regexp-in-string "\n\n\n+" "\n\n" body))
                  ;; Its first text has no line breaks before it: the
                  ;; separator is its one.
-                 (chunk (concat (if first (if (eq kind 'thinking) (propertize "∴ " 'face 'romacs-agent-log-thinking) "")
-                                  (make-string (min held 2) ?\n))
-                                (if (eq kind 'thinking) (propertize body 'face 'romacs-agent-log-thinking) body))))
+                 (mark (propertize "∴ " 'face 'romacs-agent-log-thinking))
+                 ;; Thinking: each of its paragraphs marked as the first
+                 ;; is, so none reads as the answer.
+                 (chunk (if (eq kind 'thinking)
+                            (concat (cond (first mark)
+                                          ((>= held 2) (concat "\n\n" mark))
+                                          (t (make-string (min held 2) ?\n)))
+                                    (propertize (replace-regexp-in-string "\n\n" (concat "\n\n" mark) body t t)
+                                                'face 'romacs-agent-log-thinking))
+                          (concat (if first "" (make-string (min held 2) ?\n)) body))))
             ;; Its first character starts the entry.
             (when first
               (put-text-property 0 1 'romacs-agent-log-entry kind chunk)
@@ -473,27 +480,6 @@ parent call."
     (when (and held (not (string-empty-p held)))
       (setcdr block (plist-put (cdr block) :held ""))
       (romacs-agent-log--under block (plist-get (cdr block) :kind) held (1+ (plist-get (cdr block) :depth))))))
-
-(defun romacs-agent-log--report (output)
-  "A subagent's OUTPUT as its report: without the frame Claude Code puts
-around it for its model (the hand-back notice before it, the agent's id
-and its usage after it).  RET still shows all of it."
-  (let ((report (string-trim-right
-                 (if (string-match "\\`\\[Subagent hand-back\\]\\(?:.\\|\n\\)*?The report follows:[ \t]*\n" output)
-                     (substring output (match-end 0))
-                   output))))
-    ;; Its last usage block, then its id line, at its end only.
-    (when (string-suffix-p "</usage>" report)
-      ;; A usage block is a few lines: looked for in the report's end.
-      (let ((open nil) (from (max 0 (- (length report) 2048))))
-        (while (setq from (string-search "<usage>" report from))
-          (setq open from from (1+ from)))
-        ;; A block, closed by the report's last tag: none quoted inside it.
-        (when (and open (= (string-search "</usage>" report open) (- (length report) (length "</usage>"))))
-          (setq report (string-trim-right (substring report 0 open))))))
-    (when (string-match "\n[ \t]*agentId: [^\n]*\\'" report)
-      (setq report (substring report 0 (match-beginning 0))))
-    (string-trim report)))
 
 (defun romacs-agent-log--lines (text limit)
   "TEXT's first LIMIT lines, each cut to
@@ -619,11 +605,11 @@ of it (`romacs-agent-rows-ended'), after its mark."
 
 (defun romacs-agent-log--under-call (name output failed)
   "What goes under a call of tool NAME that ended with OUTPUT, FAILED or
-not, as (TEXT FACE), or nil: an error, or a subagent's report.  Anything
-else, a command's output too, is RET away: a call that ended well is its
-row (while a command runs, its last lines show)."
-  (cond (failed (list (romacs-agent-log--failure (romacs-agent-rows-clip output)) 'romacs-agent-log-denied))
-        ((member name '("Agent" "Task")) (list (romacs-agent-log--report (romacs-agent-rows-clip output)) 'romacs-agent-log-output))))
+not, as (TEXT FACE), or nil: why it failed.  Anything else, a command's
+output or a subagent's report, is RET away: a call that ended well is
+its row (while a command runs, its last lines show)."
+  (ignore name)
+  (when failed (list (romacs-agent-log--failure (romacs-agent-rows-clip output)) 'romacs-agent-log-denied)))
 
 (defun romacs-agent-log--live (block text)
   "BLOCK's output streamed so far grows by TEXT: its last lines show under
@@ -1772,7 +1758,9 @@ REASON when given."
   (let* ((start (if (get-text-property (point) 'romacs-agent-log-entry) (point)
                   (or (previous-single-property-change (point) 'romacs-agent-log-entry) (point-min))))
          (end (or (next-single-property-change (1+ start) 'romacs-agent-log-entry) romacs-agent-log--end)))
-    (kill-new (string-trim (buffer-substring-no-properties start (min end romacs-agent-log--end))))
+    ;; Its text, its bars and other decoration left out.
+    (kill-new (string-trim (substring-no-properties
+                            (romacs-agent-log--undecorated (buffer-substring start (min end romacs-agent-log--end))))))
     (message "Copied")))
 
 (defun romacs-agent-log-type (n)

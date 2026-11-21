@@ -114,5 +114,61 @@
   ;; One word longer than the room: cut inside it, as nothing else can.
   (should (<= (string-width (romacs-agent-log-rounds--words (make-string 50 ?x) 30)) 30)))
 
+(defun romacs-agent-eye-tests--rendered (text)
+  "TEXT, Markdown, as it shows with its marks hidden."
+  (with-temp-buffer
+    (insert text)
+    (romacs-markdown-fontify-region (point-min) (point-max))
+    (romacs-markdown-hide-markup (point-min) (point-max))
+    (romacs-agent-eye-tests--shown (point-min) (point-max))))
+
+(ert-deftest romacs-agent-eye-hidden-marks-keep-lines-and-nested-syntax ()
+  ;; A heading's line break stays; a quote's and a link's syntax inside
+  ;; bold stays; only the bold's own marks go.
+  (should (equal (romacs-agent-eye-tests--rendered "## Title\nNext") "Title\nNext"))
+  (should (string-search "Title\n" (romacs-agent-eye-tests--rendered "Title\n===\n\nNext")))
+  (should (equal (romacs-agent-eye-tests--rendered "> **first\n> second**") "> first\n> second"))
+  (should (string-search "[word](https://example.com)" (romacs-agent-eye-tests--rendered "**[word](https://example.com)**"))))
+
+(defmacro romacs-agent-eye-tests--chat (&rest body)
+  (declare (indent 0))
+  `(let ((session (romacs-agent--make :id "E" :harness 'claude :state 'running
+                                      :tools (make-hash-table :test #'equal)
+                                      :streamed (make-hash-table :test #'equal))))
+     (with-temp-buffer
+       (romacs-agent-log-mode)
+       (setq romacs-agent-log--session session
+             romacs-agent-log--end (point-min-marker)
+             romacs-agent-log--input (point-min-marker))
+       (set-marker-insertion-type romacs-agent-log--end t)
+       (cl-flet ((draw (&rest event) (romacs-agent-log-draw session event)))
+         ,@body))))
+
+(ert-deftest romacs-agent-eye-a-blank-line-keeps-the-bar ()
+  (romacs-agent-eye-tests--chat
+    (draw :type 'input :text "one\n\ntwo" :request 1)
+    (should (equal (buffer-substring-no-properties (point-min) romacs-agent-log--end) "▌ ❯ one\n▌ \n▌ two\n\n"))))
+
+(ert-deftest romacs-agent-eye-a-failure-is-marked ()
+  (should (string-match-p "✗ failed" (romacs-agent-rows--said-state "failed")))
+  (should (memq 'romacs-agent-error (ensure-list (get-text-property 4 'face (romacs-agent-rows--said-state "failed")))))
+  (should-not (string-search "✗" (romacs-agent-rows--said-state "running"))))
+
+(ert-deftest romacs-agent-eye-every-thinking-paragraph-is-marked ()
+  (romacs-agent-eye-tests--chat
+    (draw :type 'thinking :text "First thought.\n\nSecond")
+    (draw :type 'thinking :text " thought.\n\nThird.")
+    (should (equal (buffer-substring-no-properties (point-min) romacs-agent-log--end)
+                   "∴ First thought.\n\n∴ Second thought.\n\n∴ Third.\n"))))
+
+(ert-deftest romacs-agent-eye-copy-leaves-the-bar-out ()
+  (romacs-agent-eye-tests--chat
+    (draw :type 'input :text "keep **this**" :request 1)
+    (goto-char (point-min))
+    (search-forward "keep")
+    (let ((kill-ring nil))
+      (romacs-agent-log-copy)
+      (should (equal (car kill-ring) "❯ keep **this**")))))
+
 (provide 'romacs-agent-eye-tests)
 ;;; romacs-agent-eye-tests.el ends here
