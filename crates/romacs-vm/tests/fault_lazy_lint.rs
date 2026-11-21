@@ -4,9 +4,9 @@
 //! `.ok_or_else(|| Fault::Wrong(..))`, builds it on failure only.
 //!
 //! This test refuses the eager form anywhere in romacs-vm's sources: a call of
-//! `.ok_or(`, `.unwrap_or(Err(`, `.map_or(Err(` or `.or(Err(` whose argument
-//! starts with a path ending in `Fault::` (`Fault::`, `prim::Fault::`,
-//! `crate::prim::Fault::`, any other). It reads code only: comments and the
+//! `.ok_or(`, `.unwrap_or(` or `.map_or(` (a default) or of `.unwrap_or(Err(`,
+//! `.map_or(Err(` or `.or(Err(` whose argument starts with a path ending in
+//! `Fault::` (`Fault::`, `prim::Fault::`, `crate::prim::Fault::`, any other). It reads code only: comments and the
 //! contents of string and char literals are removed, and whitespace does not
 //! separate a spelling. There is no exemption. Clippy's
 //! `unnecessary_lazy_evaluations` asks for the opposite form; lib.rs declares
@@ -14,17 +14,17 @@
 use std::path::{Path, PathBuf};
 
 /// The calls whose argument is evaluated even when the call returns its receiver.
-const EAGER: &[&str] = &[".ok_or(", ".unwrap_or(Err(", ".map_or(Err(", ".or(Err("];
+const EAGER: &[&str] = &[".ok_or(", ".unwrap_or(", ".map_or(", ".unwrap_or(Err(", ".map_or(Err(", ".or(Err("];
 
 fn ident(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
-/// The number of `#`s of the raw string literal (`r"`, `r#"`, `br"`) starting at
+/// The number of `#`s of the raw string literal (`r"`, `r#"`, `br"`, `cr"`) starting at
 /// S[I], if one does.
 fn raw_string(s: &[u8], i: usize) -> Option<usize> {
     let starts_token = |j: usize| j == 0 || !ident(s[j - 1]);
-    let prefixed = s[i] == b'r' && (starts_token(i) || (s[i - 1] == b'b' && starts_token(i - 1)));
+    let prefixed = s[i] == b'r' && (starts_token(i) || (matches!(s[i - 1], b'b' | b'c') && starts_token(i - 1)));
     let hashes = s[i + 1..].iter().take_while(|&&b| b == b'#').count();
     (prefixed && s.get(i + 1 + hashes) == Some(&b'"')).then_some(hashes)
 }
@@ -140,6 +140,9 @@ fn planted<'a>(x: Option<u8>, r: Option<Result<u8, Fault>>, v: Value, s: &'a str
     r.unwrap_or(Err(Fault::Wrong("p", v)));  // eager
     x.map_or(Err(Fault::EndOfFile), Ok);  // eager
     x.or(Err(Fault::EndOfFile));  // eager
+    b.map_or(Fault::Range(v, v), |b| Fault::Range3(b, v, v));  // eager
+    f.unwrap_or(Fault::EndOfFile);  // eager
+    b.map_or_else(|| Fault::Range(v, v), |b| Fault::Range3(b, v, v));
     let c = '"'; x.ok_or(Fault::Circular(v));  // eager
     let e = 'é'; let q = '\''; x.ok_or(Fault::Circular(v));  // eager
     x.ok_or_else(|| Fault::Wrong("stringp", v));
@@ -148,6 +151,7 @@ fn planted<'a>(x: Option<u8>, r: Option<Result<u8, Fault>>, v: Value, s: &'a str
     /* x.ok_or(Fault::EndOfFile) /* nested */ x.ok_or(Fault::EndOfFile) */
     let s = ".ok_or(Fault::Wrong";
     let t = r#"x.ok_or(Fault::EndOfFile)"#;
+    let u = cr#"quote " .ok_or(Fault::EndOfFile)"#;
     x.ok_or(SlotFault::OutOfRange);
     x.ok_or(Faults::Wrong);
     x.ok_or("invalid index");
@@ -155,6 +159,6 @@ fn planted<'a>(x: Option<u8>, r: Option<Result<u8, Fault>>, v: Value, s: &'a str
 }
 "##;
     let expected: Vec<usize> = PLANTED.lines().enumerate().filter(|(_, l)| l.ends_with("// eager")).map(|(n, _)| n + 1).collect();
-    assert_eq!(expected.len(), 9);
+    assert_eq!(expected.len(), 11);
     assert_eq!(eager_lines(PLANTED), expected);
 }

@@ -86,7 +86,7 @@ impl Leaf<'_> {
         // validate_region's error names the buffer; the coding search's
         // args_out_of_range only the positions.
         let buffer = if swap { Some(self.current_buffer()?) } else { None };
-        let out_of_range = || buffer.map_or(Fault::Range(start, end), |b| Fault::Range3(b, start, end));
+        let out_of_range = || buffer.map_or_else(|| Fault::Range(start, end), |b| Fault::Range3(b, start, end));
         if s > e { return Err(out_of_range()); }
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
         let Object::Buffer(b) = &self.vm.objects[index] else {
