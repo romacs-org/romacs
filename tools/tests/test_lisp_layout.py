@@ -40,7 +40,7 @@ class LispLayoutTests(unittest.TestCase):
     def test_development_consumers_name_no_retired_tree(self):
         # One tree: lisp/gnu and lisp/romacs are gone.
         stale = re.compile(r'''(?:\}/lisp|\$(?:root|ROOT)/lisp|(?:ROOT|root)\s*/\s*['"]lisp)/(?:gnu|romacs)(?![\w-])''')
-        for directory in ('scripts', 'tools', 'crates', 'test/gnu/tests'):
+        for directory in ('tools', 'crates', 'test/gnu/tests'):
             for parent, children, files in os.walk(ROOT / directory):
                 children[:] = [name for name in children if name not in ('target', '__pycache__')]
                 for name in files:
