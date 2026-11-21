@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'lib'))
@@ -123,26 +124,35 @@ class RisesTest(unittest.TestCase):
         base = lf.long_functions(self.found(f=50))
         moved = lf.long_functions(self.found(path='lisp/vm/b.el', f=51))
         (grown,) = lf.rises(base, moved)
-        self.assertTrue(grown.startswith('lisp/vm/b.el:1: f grew to 51 code lines from 50'), grown)
+        self.assertTrue(grown.startswith('long_functions: lisp/vm/b.el:1: f grew to 51 code lines from 50'), grown)
         beside = {**lf.long_functions(self.found(path='lisp/agents/early.el', f=2)), **lf.long_functions(self.found(f=51))}
         (grown,) = lf.rises(base, beside)
-        self.assertTrue(grown.startswith('lisp/ui/a.el:1: f grew to 51'), grown)
+        self.assertTrue(grown.startswith('long_functions: lisp/ui/a.el:1: f grew to 51'), grown)
         two = {**lf.long_functions(self.found(path='lisp/ui/a.el', f=50)), **lf.long_functions(self.found(path='lisp/vm/b.el', f=44))}
         both_moved = {**lf.long_functions(self.found(path='lisp/ui/c.el', f=44)), **lf.long_functions(self.found(path='lisp/vm/d.el', f=51))}
         (grown,) = lf.rises(two, both_moved)
-        self.assertTrue(grown.startswith('lisp/vm/d.el:1: f grew to 51 code lines from 50'), grown)
+        self.assertTrue(grown.startswith('long_functions: lisp/vm/d.el:1: f grew to 51 code lines from 50'), grown)
         (grown,) = lf.rises(two, {**lf.long_functions(self.found(path='lisp/ui/a.el', f=44)),
                                   **lf.long_functions(self.found(path='lisp/vm/b.el', f=49))})
-        self.assertTrue(grown.startswith('lisp/vm/b.el:1: f grew to 49 code lines from 44'), 'one shrinks, one grows')
+        self.assertTrue(grown.startswith('long_functions: lisp/vm/b.el:1: f grew to 49 code lines from 44'), 'one shrinks, one grows')
 
     def test_a_drop_or_a_shrink_passes_a_growth_or_a_new_one_fails(self):
         base = lf.long_functions(self.found(a=50, b=45))
         self.assertEqual(lf.rises(base, lf.long_functions(self.found(a=49))), [])
         (grown,) = lf.rises(base, lf.long_functions(self.found(a=51, b=45)))
-        self.assertTrue(grown.startswith('lisp/ui/a.el:1: a grew to 51 code lines from 50; fix: '), grown)
+        self.assertTrue(grown.startswith('long_functions: lisp/ui/a.el:1: a grew to 51 code lines from 50; fix: '), grown)
         (new,) = lf.rises(base, lf.long_functions(self.found(a=50, b=45, c=41)))
         self.assertIn('long_functions: 3 over 40 code lines, above the 2', new)
         self.assertIn('new: c (lisp/ui/a.el:96)', new)
+
+
+class HeldTest(unittest.TestCase):
+    def test_long_function_findings_warn_until_enforcing(self):
+        found = ['allows: 3, above the 2', 'long_functions: lisp/ui/a.el:1: f grew to 41 code lines from 40']
+        with mock.patch.object(lf, 'ENFORCING', False):
+            self.assertEqual(lf.held(found), (found[:1], found[1:]))
+        with mock.patch.object(lf, 'ENFORCING', True):
+            self.assertEqual(lf.held(found), (found, []))
 
 
 class GitTest(unittest.TestCase):

@@ -266,10 +266,14 @@ def functions(root, trunk):
         found = smells.lisp_held_to_base(root, trunk)
     except (ValueError, subprocess.CalledProcessError) as exc:
         return 'SKIP', 'the Lisp functions were not measured', [f'{exc}; fix: merge the trunk in, or name it with --trunk']
-    limit = smells.lisp_functions.LONG_FUNCTION_LINES
-    if found:
-        return 'FAIL', f'{len(found)} Lisp function finding(s) over {limit} code lines', found
-    return 'ok', f'no Lisp function over {limit} code lines added or grown', []
+    lisp = smells.lisp_functions
+    failing, warned = lisp.held(found)
+    if failing:
+        return 'FAIL', f'{len(failing)} Lisp function finding(s) over {lisp.LONG_FUNCTION_LINES} code lines', failing
+    if warned:
+        return 'ok', (f'{len(warned)} Lisp function finding(s) over {lisp.LONG_FUNCTION_LINES} code lines, '
+                      f'warned until {lisp.ENFORCED_FROM}, then failing'), warned
+    return 'ok', f'no Lisp function over {lisp.LONG_FUNCTION_LINES} code lines added or grown', []
 
 
 # The lint.

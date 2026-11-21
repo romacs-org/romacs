@@ -29,6 +29,12 @@ from collections import namedtuple
 from pathlib import Path, PurePosixPath
 
 LONG_FUNCTION_LINES = 40
+# The ratchet warns before it holds: its findings fail a check only once
+# ENFORCING is true, from ENFORCED_FROM on, so the branches in flight when it
+# came are told, not bounced.
+ENFORCING = False
+ENFORCED_FROM = '2026-11-23 06:00'
+KIND = 'long_functions'
 DEFINERS = frozenset(('defun', 'defmacro', 'defsubst', 'cl-defun', 'cl-defmacro', 'cl-defsubst',
                       'cl-defmethod', 'cl-defgeneric', 'cl-iter-defun', 'iter-defun', 'define-inline',
                       'define-minor-mode', 'define-globalized-minor-mode', 'define-derived-mode'))
@@ -340,16 +346,25 @@ def paired(base, tree):
 def rises(base, tree, limit=LONG_FUNCTION_LINES):
     """Why TREE adds to BASE's long functions, one line each: both long_functions."""
     pairs = paired(base, tree)
-    grown = [f'{place}: {name} grew to {code} code lines from {was[0]}; '
+    grown = [f'{KIND}: {place}: {name} grew to {code} code lines from {was[0]}; '
              f'fix: move a job out of it into a function of its own, or {DECLARE}'
              for (code, place, name), was in pairs if code > was[0]]
     if len(tree) > len(base):
         old = {id(entry) for entry, _ in pairs}
         new = sorted((entry for entry in tree.values() if id(entry) not in old), key=lambda e: e[1])
-        grown.append(f'long_functions: {len(tree)} over {limit} code lines, above the {len(base)} of the '
+        grown.append(f'{KIND}: {len(tree)} over {limit} code lines, above the {len(base)} of the '
                      f'merge-base; new: {", ".join(f"{name} ({place})" for _, place, name in new)}; '
                      f'fix: split each into functions of one job, or {DECLARE}')
     return grown
+
+
+def held(findings):
+    """(failing, warned) of a check's FINDINGS: the long-function ones only
+    warn until ENFORCING."""
+    if ENFORCING:
+        return list(findings), []
+    ours = [f for f in findings if f.startswith(f'{KIND}: ')]
+    return [f for f in findings if f not in ours], ours
 
 
 # Reading a tree: the working tree, or a commit's objects.

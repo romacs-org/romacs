@@ -628,9 +628,12 @@ def main():
     except (ValueError, subprocess.CalledProcessError) as exc:
         print(f'smells: {exc}', file=sys.stderr)
         return 1
-    for problem in found:
+    failing, warned = lisp_functions.held(found)
+    for problem in warned:
+        print(f'smells: warning, enforced from {lisp_functions.ENFORCED_FROM}: {problem}', file=sys.stderr)
+    for problem in failing:
         print(f'smells: {problem}', file=sys.stderr)
-    return 1 if found else 0
+    return 1 if failing else 0
 
 
 if __name__ == '__main__':

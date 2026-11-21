@@ -262,7 +262,7 @@ class RatchetTest(unittest.TestCase):
             'long_functions: 2 over 40 code lines, above the 1 of the merge-base; new: b (lisp/vm/a.el:1); '
             f'fix: split each into functions of one job, or {smells.lisp_functions.DECLARE}'])
         (grown,) = rises(base, now(functions=(('a', 42),)))
-        self.assertTrue(grown.startswith('lisp/vm/a.el:1: a grew to 42 code lines from 41;'), grown)
+        self.assertTrue(grown.startswith('long_functions: lisp/vm/a.el:1: a grew to 42 code lines from 41;'), grown)
         self.assertEqual(rises(base, now(functions=(('a', 40), ('c', 41)))), [], 'one under, one over: no rise')
 
     def test_a_new_generated_file_fails_and_a_gone_one_passes(self):
