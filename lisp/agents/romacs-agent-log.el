@@ -44,6 +44,7 @@
 (require 'romacs-agent-store)
 
 (require 'romacs-working)
+(require 'romacs-agent-log-images)
 
 ;; The actions the chat's menu offers on its session are the chat's of
 ;; before (romacs-agent-ui.el), which read the session from here too.
@@ -767,21 +768,25 @@ unless a note said who gave it, that it was answered."
                                                'face 'romacs-agent-log-note)))))))
 
 (defun romacs-agent-log--prompt (event)
-  "Draw input EVENT: the user's message, or one from another session."
+  "Draw input EVENT: the user's message, or one from another session, the
+images it links under it."
   (let* ((messages (plist-get event :messages))
          (text (or (plist-get event :text) ""))
          (images (plist-get event :images))
          (_ (unless messages (push (string-trim text) romacs-agent-log--prompts)))
+         (shown (romacs-agent-log-images-message
+                 (propertize (string-trim text) 'face (if messages nil 'romacs-agent-log-prompt))))
          (head (cond ((plist-get event :steer) (propertize "↪ " 'face 'romacs-agent-log-prompt))
                      (messages (propertize "✉ " 'face 'romacs-agent-log-note))
                      (t (propertize "❯ " 'face 'romacs-agent-log-prompt)))))
     (romacs-agent-log--line event 'prompt
                             (let ((line (concat (if (and (null messages) (> romacs-agent-log--end (point-min))) "\n" "")
                                                 head
-                                                (propertize (string-trim text) 'face (if messages nil 'romacs-agent-log-prompt))
+                                                (car shown)
                                                 (if images (propertize (format "  [%d image%s]" (length images) (if (cdr images) "s" ""))
                                                                        'face 'romacs-agent-log-note)
-                                                  ""))))
+                                                  "")
+                                                (if (cdr shown) (concat "\n" (cdr shown)) ""))))
                               ;; The turn it starts, by its request, on all of it
                               ;; (where prompt motion lands too): a diff or a
                               ;; rollback of the turn at point reads it.
@@ -1599,6 +1604,11 @@ transcript's comes with it."
   (when (and (markerp romacs-agent-log--input) (< beg end) (>= beg romacs-agent-log--input))
     (let ((inhibit-modification-hooks t) (inhibit-read-only t)) (set-text-properties beg end nil))))
 
+(defun romacs-agent-log--composer-images (_beg end _length)
+  "Show the composer's image links once a change reaches it."
+  (when (and (markerp romacs-agent-log--input) (>= end romacs-agent-log--input))
+    (romacs-agent-log-images-composer romacs-agent-log--input)))
+
 (defun romacs-agent-log-composer ()
   "Go to the composer."
   (interactive nil romacs-agent-log-mode)
@@ -1724,7 +1734,8 @@ On the transcript's text:
   (setq-local desktop-save-buffer #'romacs-agent-log--desktop-save)
   ;; The separator's rule fits the window it is shown in.
   (add-hook 'window-size-change-functions (lambda (_) (when romacs-agent-log--input (romacs-agent-log--separator))) nil t)
-  (add-hook 'after-change-functions #'romacs-agent-log--composer-plain nil t))
+  (add-hook 'after-change-functions #'romacs-agent-log--composer-plain nil t)
+  (add-hook 'after-change-functions #'romacs-agent-log--composer-images nil t))
 
 (provide 'romacs-agent-log)
 ;; Its turns' place in the transcript, which needs it loaded.

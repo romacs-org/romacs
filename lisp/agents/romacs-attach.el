@@ -894,8 +894,8 @@ they are typed: any other key closes it and runs as usual."
 
 (defcustom romacs-attach-save-directory nil
   "Where an image Romacs made (a screenshot, a clipboard image) becomes
-the user's file when attached in mail; nil for the XDG pictures
-directory's Screenshots/, where Omarchy's own screenshots go."
+the user's file when attached, in mail or to an agent; nil for the XDG
+pictures directory's Screenshots/, where Omarchy's own screenshots go."
   :type '(choice (const nil) directory))
 
 (defcustom romacs-attach-snapshot-max (* 1024 1024)
@@ -944,6 +944,107 @@ failure is the copy's."
     (error
      (copy-file from to)
      (delete-file from))))
+
+;;;; The clipboard's image
+
+(defcustom romacs-attach-clipboard-recent 8
+  "How many of the newest files in `romacs-attach-save-directory' a
+clipboard image is looked for among: a screenshot is saved there and
+copied at once, so it is one of them."
+  :type 'natnum)
+
+(defconst romacs-attach--clipboard-seconds 10
+  "How long reading the clipboard, or comparing a file with it, may take
+before it is given up.")
+
+(defun romacs-attach-clipboard-image-type ()
+  "The MIME type to read the clipboard's image as, image/png when it is
+offered (a screenshot's own type), or nil when the clipboard holds none."
+  (when (executable-find "wl-paste")
+    (let ((types (process-lines-ignore-status "wl-paste" "--list-types")))
+      (or (car (member "image/png" types))
+          (seq-find (lambda (type) (string-prefix-p "image/" type)) types)))))
+
+(defun romacs-attach--image-extension (type)
+  "The file name extension of an image of MIME TYPE, with its dot."
+  (pcase (substring type (length "image/"))
+    ("jpeg" ".jpg") ("svg+xml" ".svg") (subtype (concat "." subtype))))
+
+(defun romacs-attach--run (command then)
+  "Run COMMAND, a program and its arguments, off the command loop, and
+call THEN once with whether it exited 0: a run past
+`romacs-attach--clipboard-seconds', or one that cannot start, fails."
+  (let* ((done nil)
+         (timer nil)
+         (settle (lambda (ok)
+                   (unless done
+                     (setq done t)
+                     (when timer (cancel-timer timer))
+                     (funcall then ok))))
+         (process (condition-case nil
+                      (make-process :name "romacs-attach-clipboard" :command command :buffer nil
+                                    :noquery t :connection-type 'pipe
+                                    :sentinel (lambda (process _event)
+                                                (unless (process-live-p process)
+                                                  (funcall settle (eql 0 (process-exit-status process))))))
+                    (error nil))))
+    (if (not process) (funcall settle nil)
+      (setq timer (run-at-time romacs-attach--clipboard-seconds nil
+                               (lambda ()
+                                 (when (process-live-p process) (delete-process process))
+                                 (funcall settle nil)))))))
+
+(defun romacs-attach--recent-of-size (directory size)
+  "The newest `romacs-attach-clipboard-recent' files in DIRECTORY, newest
+first, those of SIZE bytes among them."
+  (let ((files (seq-filter (lambda (entry) (null (file-attribute-type (cdr entry))))
+                           (directory-files-and-attributes directory t "\\`[^.]" t))))
+    (mapcar #'car
+            (seq-filter (lambda (entry) (eql (file-attribute-size (cdr entry)) size))
+                        (seq-take (sort files (lambda (a b)
+                                                (time-less-p (file-attribute-modification-time (cdr b))
+                                                             (file-attribute-modification-time (cdr a)))))
+                                  romacs-attach-clipboard-recent)))))
+
+(defun romacs-attach--same-bytes (file candidates then)
+  "Call THEN with the first of CANDIDATES whose bytes are FILE's, or nil."
+  (if (null candidates) (funcall then nil)
+    (romacs-attach--run (list "cmp" "-s" "--" file (car candidates))
+                        (lambda (same)
+                          (if same (funcall then (car candidates))
+                            (romacs-attach--same-bytes file (cdr candidates) then))))))
+
+(defun romacs-attach-clipboard-file (type then)
+  "Call THEN with the user's file of the clipboard's image, read as MIME
+TYPE, or with nil when it cannot be read.  It is the file the image was
+copied from, when one of the recent ones in `romacs-attach-save-directory'
+has its bytes (a screenshot saved and copied at once): nothing is copied.
+Else the image is saved there once, named by the time.  Off the command
+loop: the clipboard is read into this process's staging directory, and
+compared with `cmp'."
+  (let* ((directory (romacs-attach--save-directory))
+         (extension (romacs-attach--image-extension type))
+         (read (make-temp-file (expand-file-name "clipboard-" (romacs-attach-staging-directory)) nil extension))
+         (finish (lambda (file)
+                   (when (file-exists-p read) (delete-file read))
+                   (funcall then file))))
+    (romacs-attach--run
+     (list "sh" "-c" "exec wl-paste --type \"$1\" > \"$2\"" "sh" type read)
+     (lambda (ok)
+       (let ((size (and ok (file-attribute-size (file-attributes read)))))
+         (if (not (and size (> size 0))) (funcall finish nil)
+           (romacs-attach--same-bytes
+            read (and (file-directory-p directory) (romacs-attach--recent-of-size directory size))
+            (lambda (found)
+              (funcall finish
+                       (or found
+                           (condition-case nil
+                               (let ((file (progn (make-directory directory t)
+                                                  (romacs-attach--free-name
+                                                   directory (format-time-string (concat "clipboard-%Y-%m-%d_%H-%M-%S" extension))))))
+                                 (romacs-attach--move read file)
+                                 file)
+                             (error nil))))))))))))
 
 (defun romacs-attach--mail-insert (item _context)
   "Insert ITEM in a mail draft at point, as GNU's commands do: a text
