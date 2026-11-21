@@ -157,22 +157,36 @@ user's own spec still wins."
 (defvar-local romacs-agent-log--from nil
   "Where the drawn records begin (a place, as `romacs-agent--journal-tail'
 gives it), or nil when they begin at the session's start.")
+(cl-defstruct (romacs-agent-log-call (:constructor romacs-agent-log-call--make) (:copier nil))
+  "A tool call drawn open: what comes under it goes in its place."
+  (id nil :documentation "The call's id.")
+  (name nil :documentation "Its tool, as `romacs-agent-rows-name' says it.")
+  (input nil :documentation "Its input, a table, or nil.")
+  (depth 0 :documentation "How deep under subagents' calls it is.")
+  (parent nil :documentation "The id of the call it is under, or nil.")
+  (start nil :documentation "A marker where its row begins.")
+  (under nil :documentation "A marker where what comes under it goes.")
+  (kind nil :documentation "The kind of a subagent's text it holds.")
+  (held "" :documentation "That text's line under way.")
+  (live nil :documentation "A marker where its output streaming as it runs begins.")
+  (streamed nil :documentation "That output, its last 64K.")
+  (count 0 :documentation "The line breaks of that output.")
+  (task nil :documentation "The id of the work its harness runs under it.")
+  (activity nil :documentation "What that work said it does, last.")
+  (ended nil :documentation "Its output drawn while that work goes on.")
+  (task-ended nil :documentation "That work over before the call ended."))
+
 (defvar-local romacs-agent-log--blocks nil
-  "Open tool calls by id, a table of (ID . PLIST): :under, a marker
-where what comes under the call goes; :start, one where its row begins;
-:depth; :input, its input; :live, a marker where its output streaming
-as it runs begins, and :streamed, that output; :task, the id of the work
-its harness runs under it; :ended, its output drawn while that work
-goes on.")
+  "The calls drawn open, a table of `romacs-agent-log-call' by id.")
 
 (defun romacs-agent-log--block (id)
-  "The open call ID, as (ID . PLIST), or nil."
+  "The open call ID, or nil."
   (and id romacs-agent-log--blocks (gethash id romacs-agent-log--blocks)))
 
 (defun romacs-agent-log--close-block (block)
-  (set-marker (plist-get (cdr block) :under) nil)
-  (set-marker (plist-get (cdr block) :start) nil)
-  (remhash (car block) romacs-agent-log--blocks))
+  (set-marker (romacs-agent-log-call-under block) nil)
+  (set-marker (romacs-agent-log-call-start block) nil)
+  (remhash (romacs-agent-log-call-id block) romacs-agent-log--blocks))
 (defvar-local romacs-agent-log--current nil
   "The id of the call at the transcript's top level that runs now, or nil.")
 (defvar-local romacs-agent-log--early nil
@@ -345,7 +359,7 @@ the calls it is under that ended where it did, while the calls under it
 end before TEXT."
   (romacs-agent-log--writing
     (save-excursion
-      (let ((at (if block (marker-position (plist-get (cdr block) :under)) romacs-agent-log--end)))
+      (let ((at (if block (marker-position (romacs-agent-log-call-under block)) romacs-agent-log--end)))
         (goto-char at)
         ;; What the agent's next words stand apart from: an entry drawn
         ;; at the top level.
@@ -354,9 +368,9 @@ end before TEXT."
             (setq romacs-agent-log--root-kind kind)))
         (insert (romacs-agent-log--sealed text))
         (while block
-          (let ((under (plist-get (cdr block) :under)))
+          (let ((under (romacs-agent-log-call-under block)))
             (when (= under at) (set-marker under (point))))
-          (setq block (romacs-agent-log--block (plist-get (cdr block) :parent))))))))
+          (setq block (romacs-agent-log--block (romacs-agent-log-call-parent block))))))))
 
 (defun romacs-agent-log--indent (text depth)
   "TEXT with every line indented for a subagent DEPTH deep."
@@ -372,7 +386,7 @@ end before TEXT."
   "Where EVENT is drawn: (BLOCK . DEPTH), under its parent's open call,
 else (nil . 0), at the end."
   (let ((parent (romacs-agent-log--block (plist-get event :parent))))
-    (if parent (cons parent (1+ (plist-get (cdr parent) :depth))) (cons nil 0))))
+    (if parent (cons parent (1+ (romacs-agent-log-call-depth parent))) (cons nil 0))))
 
 (defun romacs-agent-log--close-stream (&optional discard)
   "End what streams: a message gets its Markdown faces, unless DISCARD,
@@ -482,11 +496,12 @@ work that the agent's words follow."
 (defun romacs-agent-log--stream-under (block kind text depth)
   "Stream TEXT of KIND under BLOCK's call, DEPTH deep, in whole lines,
 the rest held for what follows."
-  (let ((same (eq (plist-get (cdr block) :kind) kind)))
+  (let ((same (eq (romacs-agent-log-call-kind block) kind)))
     (unless same (romacs-agent-log--flush block))
     (pcase-let ((`(,lines . ,rest) (romacs-agent-log--whole-lines
-                                    (concat (if same (plist-get (cdr block) :held) "") text))))
-      (setcdr block (plist-put (plist-put (cdr block) :kind kind) :held rest))
+                                    (concat (if same (romacs-agent-log-call-held block) "") text))))
+      (setf (romacs-agent-log-call-kind block) kind
+            (romacs-agent-log-call-held block) rest)
       (when lines (romacs-agent-log--under block kind lines depth)))))
 
 (defun romacs-agent-log--stream (event kind text)
@@ -508,10 +523,10 @@ parent call."
 
 (defun romacs-agent-log--flush (block)
   "Put what BLOCK holds of a subagent's text under it."
-  (let ((held (plist-get (cdr block) :held)))
-    (when (and held (not (string-empty-p held)))
-      (setcdr block (plist-put (cdr block) :held ""))
-      (romacs-agent-log--under block (plist-get (cdr block) :kind) held (1+ (plist-get (cdr block) :depth))))))
+  (let ((held (romacs-agent-log-call-held block)))
+    (unless (string-empty-p held)
+      (setf (romacs-agent-log-call-held block) "")
+      (romacs-agent-log--under block (romacs-agent-log-call-kind block) held (1+ (romacs-agent-log-call-depth block))))))
 
 (defun romacs-agent-log--lines (text limit)
   "TEXT's first LIMIT lines, each cut to
@@ -609,10 +624,9 @@ it whole)."
 (defun romacs-agent-log--ended-row (block output)
   "BLOCK's row, its call ended well with OUTPUT, rewritten to say what came
 of it (`romacs-agent-rows-ended'), after its mark."
-  (let* ((props (cdr block))
-         (name (plist-get props :name))
-         (input (let ((input (plist-get props :input))) (if (hash-table-p input) input (make-hash-table :test #'equal))))
-         (start (plist-get props :start))
+  (let* ((name (romacs-agent-log-call-name block))
+         (input (let ((input (romacs-agent-log-call-input block))) (if (hash-table-p input) input (make-hash-table :test #'equal))))
+         (start (romacs-agent-log-call-start block))
          (ended (condition-case err (romacs-agent-log--one-line
                                      (romacs-agent-rows-ended name input (romacs-agent-log--call-row name input) output))
                   (error (message "The row of %s failed: %s" name (error-message-string err)) nil))))
@@ -635,30 +649,30 @@ of it (`romacs-agent-rows-ended'), after its mark."
   "A failed call's OUTPUT as its error says it: the harness's tags gone."
   (string-trim (replace-regexp-in-string "</?tool_use_error>" "" (or output ""))))
 
-(defun romacs-agent-log--under-call (name output failed)
-  "What goes under a call of tool NAME that ended with OUTPUT, FAILED or
-not, as (TEXT FACE), or nil: why it failed.  Anything else, a command's
-output or a subagent's report, is RET away: a call that ended well is
-its row (while a command runs, its last lines show)."
-  (ignore name)
-  (when failed (list (romacs-agent-log--failure (romacs-agent-rows-clip output)) 'romacs-agent-log-denied)))
+(defun romacs-agent-log--failed-text (output full)
+  "What goes under a call that failed with OUTPUT: why, RET showing FULL.
+Anything else, a command's output or a subagent's report, is RET away:
+a call that ended well is its row (while a command runs, its last lines
+show)."
+  (romacs-agent-log--output (romacs-agent-log--failure (romacs-agent-rows-clip output)) 'romacs-agent-log-denied full))
 
 (defun romacs-agent-log--live (block text)
   "BLOCK's output streamed so far grows by TEXT: its last lines show under
 its call, in place of those shown before."
-  (let* ((props (cdr block))
-         (streamed (concat (plist-get props :streamed) text))
+  (let* ((streamed (concat (romacs-agent-log-call-streamed block) text))
          (streamed (substring streamed (max 0 (- (length streamed) 65536))))
-         (count (+ (or (plist-get props :count) 0) (cl-count ?\n text)))
+         (count (+ (romacs-agent-log-call-count block) (cl-count ?\n text)))
          ;; Lines whole and the one under way.
          (total (+ count (if (string-suffix-p "\n" streamed) 0 1)))
          (shown (last (let ((lines (split-string streamed "\n")))
                         ;; The empty piece after a final newline is no line.
                         (if (string-suffix-p "\n" streamed) (butlast lines) lines))
                       romacs-agent-log-output-lines))
-         (under (plist-get props :under))
-         (live (or (plist-get props :live) (copy-marker under))))
-    (setcdr block (plist-put (plist-put (plist-put props :streamed streamed) :live live) :count count))
+         (under (romacs-agent-log-call-under block))
+         (live (or (romacs-agent-log-call-live block) (copy-marker under))))
+    (setf (romacs-agent-log-call-streamed block) streamed
+          (romacs-agent-log-call-live block) live
+          (romacs-agent-log-call-count block) count)
     (romacs-agent-log--writing (delete-region live under))
     (romacs-agent-log--put (romacs-agent-log--indent
                             (concat (propertize (if (> total (length shown))
@@ -666,94 +680,108 @@ its call, in place of those shown before."
                                                   (format "  ⋮ running: %d line%s so far\n" total (if (= total 1) "" "s")))
                                                 'face 'romacs-agent-log-note)
                                     (propertize (concat "    " (string-join shown "\n    ") "\n") 'face 'romacs-agent-log-output))
-                            (plist-get props :depth))
+                            (romacs-agent-log-call-depth block))
                            block)))
 
 (defun romacs-agent-log--tool (event)
   "Draw tool EVENT: its call as it starts, its output under it as it ends."
-  (let ((id (plist-get event :id)))
-    (pcase (plist-get event :state)
-      ('started
-       (pcase-let ((`(,at . ,depth) (romacs-agent-log--where event)))
-         (if at (romacs-agent-log--flush at) (romacs-agent-log--close-stream))
-         (let* ((input (plist-get event :input))
-                (text (propertize (romacs-agent-log--entry (romacs-agent-log--call event) 'tool event)
-                                  'romacs-agent-log-full (list input)
-                                  'romacs-agent-log-tool (romacs-agent-rows-name (plist-get event :name))))
-                (start (copy-marker (if at (plist-get (cdr at) :under) romacs-agent-log--end))))
-           (romacs-agent-log--put (romacs-agent-log--indent text depth) at)
-           ;; Its row in place: what an earlier call puts after it, at the
-           ;; same place, goes before it.
-           (set-marker-insertion-type start t)
-           (unless romacs-agent-log--blocks (setq romacs-agent-log--blocks (make-hash-table :test #'equal)))
-           (when (zerop depth) (setq romacs-agent-log--current id))
-           ;; What comes under it goes here, in order, before what follows it.
-           (puthash id (list id :under (copy-marker (if at (plist-get (cdr at) :under) romacs-agent-log--end))
-                             :start start :depth depth :input input :parent (car at)
-                             :name (romacs-agent-rows-name (plist-get event :name)))
-                    romacs-agent-log--blocks)
-           (when-let* ((early (alist-get id romacs-agent-log--early nil nil #'equal)))
-             (setf (alist-get id romacs-agent-log--early nil t #'equal) nil)
-             (romacs-agent-log--live (romacs-agent-log--block id) early)))))
-      ((or 'completed 'failed)
-       (let* ((block (romacs-agent-log--block id))
-              (output (or (plist-get event :output) ""))
-              (failed (eq (plist-get event :state) 'failed)))
-         (when (equal id romacs-agent-log--current) (setq romacs-agent-log--current nil))
-         (if (and block (not (plist-get (cdr block) :ended)))
-             (let* ((props (cdr block)) (under (plist-get props :under)))
-               (romacs-agent-log--flush block)
-               ;; What streamed as it ran gives way to the whole output.
-               (when-let* ((live (plist-get props :live)))
-                 (romacs-agent-log--writing (delete-region live under))
-                 (set-marker live nil))
-               ;; Its input as it ended: some calls fill theirs in only then.
-               (when-let* ((input (plist-get event :input))
-                           ((not (equal input (plist-get props :input)))))
-                 (setcdr block (plist-put (cdr block) :input input)))
-               ;; Its row says what came of it; RET on it shows all.
-               (let ((full (cons (plist-get (cdr block) :input) output)))
-                 (romacs-agent-log--writing
-                   (put-text-property (plist-get props :start)
-                                      (save-excursion (goto-char (plist-get props :start)) (line-end-position))
-                                      'romacs-agent-log-full full))
-                 (unless failed (romacs-agent-log--ended-row block output))
-                 (when-let* ((under (romacs-agent-log--under-call (plist-get props :name) output failed)))
-                   (romacs-agent-log--put (romacs-agent-log--indent (romacs-agent-log--output (nth 0 under) (nth 1 under) full)
-                                                                    (plist-get props :depth))
-                                          block)))
-               ;; A call stays open while work its harness runs under it
-               ;; (a subagent, a command in the background) goes on.
-               (if (and (or (member (plist-get props :name) '("Agent" "Task")) (plist-get props :task))
-                        (not (plist-get props :task-ended)))
-                   (setcdr block (plist-put (cdr block) :ended t))
-                 (romacs-agent-log--close-block block)))
-           ;; Its call was never drawn (it ended after the turn, or before
-           ;; this chat's first record): said at the end, with its output.
-           (romacs-agent-log--close-stream)
-           (let ((name (romacs-agent-rows-name (plist-get event :name))))
-             (romacs-agent-log--put
-              (propertize
-               (concat (romacs-agent-log--entry
-                        (romacs-agent-log--one-line
-                         (concat (propertize "● " 'face 'romacs-agent-log-tool)
-                                 ;; Its renderer's ended row where it has one
-                                 ;; (a subagent's report's first line).
-                                 (or (and (not failed) (plist-get (romacs-agent-rows-texts name nil output) :ended))
-                                     (concat (propertize (format "%s ended" name) 'face 'romacs-agent-log-note)
-                                             (if failed "" (romacs-agent-rows-outcome output))))))
-                        'tool event)
-                       (if-let* ((under (romacs-agent-log--under-call name output failed)))
-                           (romacs-agent-log--output (nth 0 under) (nth 1 under) (cons nil output))
-                         ""))
-               'romacs-agent-log-full (cons nil output))))))))))
+  (pcase (plist-get event :state)
+    ('started (romacs-agent-log--tool-started event))
+    ((or 'completed 'failed)
+     (let ((block (romacs-agent-log--block (plist-get event :id))))
+       (when (equal (plist-get event :id) romacs-agent-log--current) (setq romacs-agent-log--current nil))
+       (if (and block (not (romacs-agent-log-call-ended block)))
+           (romacs-agent-log--tool-ended block event)
+         (romacs-agent-log--tool-unseen event))))))
+
+(defun romacs-agent-log--tool-started (event)
+  "Draw EVENT's call as it starts, open for what comes under it."
+  (pcase-let ((`(,parent . ,depth) (romacs-agent-log--where event)))
+    (if parent (romacs-agent-log--flush parent) (romacs-agent-log--close-stream))
+    (let* ((id (plist-get event :id))
+           (input (plist-get event :input))
+           (name (romacs-agent-rows-name (plist-get event :name)))
+           (place (lambda () (copy-marker (if parent (romacs-agent-log-call-under parent) romacs-agent-log--end))))
+           (start (funcall place)))
+      (romacs-agent-log--put (romacs-agent-log--indent
+                              (propertize (romacs-agent-log--entry (romacs-agent-log--call event) 'tool event)
+                                          'romacs-agent-log-full (list input) 'romacs-agent-log-tool name)
+                              depth)
+                             parent)
+      ;; Its row in place: what an earlier call puts after it, at the
+      ;; same place, goes before it.
+      (set-marker-insertion-type start t)
+      (when (zerop depth) (setq romacs-agent-log--current id))
+      (unless romacs-agent-log--blocks (setq romacs-agent-log--blocks (make-hash-table :test #'equal)))
+      (puthash id (romacs-agent-log-call--make :id id :name name :input input :depth depth
+                                               :parent (and parent (romacs-agent-log-call-id parent))
+                                               :start start :under (funcall place))
+               romacs-agent-log--blocks)
+      (when-let* ((early (alist-get id romacs-agent-log--early nil nil #'equal)))
+        (setf (alist-get id romacs-agent-log--early nil t #'equal) nil)
+        (romacs-agent-log--live (romacs-agent-log--block id) early)))))
+
+(defun romacs-agent-log--goes-on-p (block)
+  "Whether BLOCK's call stays open as it ends: work its harness runs under
+it (a subagent, a command in the background) goes on."
+  (and (or (member (romacs-agent-log-call-name block) '("Agent" "Task")) (romacs-agent-log-call-task block))
+       (not (romacs-agent-log-call-task-ended block))))
+
+(defun romacs-agent-log--tool-ended (block event)
+  "Draw BLOCK's call ended, as EVENT says: its row says what came of it,
+RET on it shows all."
+  (let ((output (or (plist-get event :output) ""))
+        (failed (eq (plist-get event :state) 'failed))
+        (start (romacs-agent-log-call-start block)))
+    (romacs-agent-log--flush block)
+    ;; What streamed as it ran gives way to the whole output.
+    (when-let* ((live (romacs-agent-log-call-live block)))
+      (romacs-agent-log--writing (delete-region live (romacs-agent-log-call-under block)))
+      (set-marker live nil))
+    ;; Some calls fill their input in only as they end.
+    (when-let* ((input (plist-get event :input))) (setf (romacs-agent-log-call-input block) input))
+    (let ((full (cons (romacs-agent-log-call-input block) output)))
+      (romacs-agent-log--writing
+        (put-text-property start (save-excursion (goto-char start) (line-end-position)) 'romacs-agent-log-full full))
+      (if failed
+          (romacs-agent-log--put (romacs-agent-log--indent (romacs-agent-log--failed-text output full)
+                                                           (romacs-agent-log-call-depth block))
+                                 block)
+        (romacs-agent-log--ended-row block output)))
+    (if (romacs-agent-log--goes-on-p block)
+        (setf (romacs-agent-log-call-ended block) t)
+      (romacs-agent-log--close-block block))))
+
+(defun romacs-agent-log--unseen-row (name output failed)
+  "The row of a call of NAME never drawn, ended with OUTPUT, FAILED or not."
+  (romacs-agent-log--one-line
+   (concat (propertize "● " 'face 'romacs-agent-log-tool)
+           ;; Its renderer's ended row where it has one (a subagent's
+           ;; report's first line).
+           (or (and (not failed) (plist-get (romacs-agent-rows-texts name nil output) :ended))
+               (concat (propertize (format "%s ended" name) 'face 'romacs-agent-log-note)
+                       (if failed "" (romacs-agent-rows-outcome output)))))))
+
+(defun romacs-agent-log--tool-unseen (event)
+  "Draw EVENT's call, ended but never drawn (it ended after the turn, or
+before this chat's first record): at the end, with its output."
+  (romacs-agent-log--close-stream)
+  (let* ((output (or (plist-get event :output) ""))
+         (failed (eq (plist-get event :state) 'failed))
+         (full (cons nil output)))
+    (romacs-agent-log--put
+     (propertize (concat (romacs-agent-log--entry
+                          (romacs-agent-log--unseen-row (romacs-agent-rows-name (plist-get event :name)) output failed)
+                          'tool event)
+                         (if failed (romacs-agent-log--failed-text output full) ""))
+                 'romacs-agent-log-full full))))
 
 (defun romacs-agent-log--task-block (event)
   "The call EVENT, a task's, is under: by its tool's id, else its task's."
   (or (romacs-agent-log--block (plist-get event :id))
       (when-let* ((task (plist-get event :task)) (blocks romacs-agent-log--blocks))
         (catch 'found
-          (maphash (lambda (_ block) (when (equal (plist-get (cdr block) :task) task) (throw 'found block))) blocks)
+          (maphash (lambda (_ block) (when (equal (romacs-agent-log-call-task block) task) (throw 'found block))) blocks)
           nil))))
 
 (defun romacs-agent-log--task (event)
@@ -765,32 +793,32 @@ when that changes, and how it ended; with its call gone, at the end."
          (text (pcase state
                  ('backgrounded "moved to the background")
                  ('progress (let ((activity (plist-get event :activity)))
-                              (and activity (not (and block (equal activity (plist-get (cdr block) :activity))))
-                                   (progn (when block (setcdr block (plist-put (cdr block) :activity activity)))
+                              (and activity (not (and block (equal activity (romacs-agent-log-call-activity block))))
+                                   (progn (when block (setf (romacs-agent-log-call-activity block) activity))
                                           (format "now: %s" activity)))))
                  ;; Its summary, but a subagent's: its call's output, drawn, is its report.
                  ((or 'completed 'failed 'stopped)
                   (concat (symbol-name state)
-                          (if-let* ((summary (and (not (and block (plist-get (cdr block) :ended)
-                                                            (member (plist-get (cdr block) :name) '("Agent" "Task"))))
+                          (if-let* ((summary (and (not (and block (romacs-agent-log-call-ended block)
+                                                            (member (romacs-agent-log-call-name block) '("Agent" "Task"))))
                                                   (plist-get event :summary))))
                               (concat ": " summary)
                             ""))))))
     (when (and block (eq state 'started) (plist-get event :task))
-      (setcdr block (plist-put (cdr block) :task (plist-get event :task))))
+      (setf (romacs-agent-log-call-task block) (plist-get event :task)))
     (when text
       (if (not block)
           (romacs-agent-log--note event (concat "task " text))
         (romacs-agent-log--flush block)
         (romacs-agent-log--put (romacs-agent-log--indent (propertize (concat "· " text "\n") 'face 'romacs-agent-log-note)
-                                                         (1+ (plist-get (cdr block) :depth)))
+                                                         (1+ (romacs-agent-log-call-depth block)))
                                block)))
     ;; Its work over, a call already ended closes; one still running
     ;; closes as it ends.
     (when (and block (memq state '(completed failed stopped)))
-      (if (plist-get (cdr block) :ended)
+      (if (romacs-agent-log-call-ended block)
           (romacs-agent-log--close-block block)
-        (setcdr block (plist-put (cdr block) :task-ended t))))))
+        (setf (romacs-agent-log-call-task-ended block) t)))))
 
 (defun romacs-agent-log--key (command &optional map)
   "COMMAND's key in MAP (the transcript's), as `substitute-command-keys' says it."
