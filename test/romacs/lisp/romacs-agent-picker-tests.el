@@ -25,6 +25,7 @@
   `(let* ((root (make-temp-file "romacs-picker-" t))
           (program (expand-file-name "fake-claude" root))
           (process-environment (cons (concat "XDG_STATE_HOME=" root) process-environment))
+          (romacs-agent--models-probes (make-hash-table :test #'equal))
           ,@bindings)
      (ignore program)
      (with-temp-file program (insert "#!/bin/sh\n"))
@@ -73,19 +74,18 @@
   ;; The models cache not written (its file taken by another writer, a
   ;; full disk): reported, never signalled into the answer it came in.
   (romacs-agent-picker--with
-      ((session (romacs-agent--make :id "s" :harness 'claude :provider "claude"))
-       (romacs-agent-providers `(("claude" :program ,program))))
+      ((romacs-agent-providers `(("claude" :program ,program))))
     (cl-letf (((symbol-function 'romacs-agent--write-json) (lambda (&rest _) (error "Taken"))))
-      (romacs-agent--keep-models session '(("a" :label "A"))))))
+      (romacs-agent--keep-models (romacs-agent--configured "claude") '(("a" :label "A"))))))
 
 (ert-deftest romacs-agent-picker-models-merge ()
   (romacs-agent-picker--with
-      ((session (romacs-agent--make :id "s" :harness 'claude :provider "claude"))
-       (romacs-agent-providers `(("claude" :program ,program)))
+      ((romacs-agent-providers `(("claude" :program ,program)))
        (romacs-agent-models '((claude ("a" :label "Seed A" :efforts ("low" "high") :default-effort "high")
                                       ("b" :label "Seed B" :efforts ("low"))))))
-    (romacs-agent--keep-models session '(("a" :label "Reported A" :efforts ("low")) ("c" :label "Reported C")
-                                         ("b" :label "Reported B" :efforts nil)))
+    (romacs-agent--keep-models (romacs-agent--configured "claude")
+                               '(("a" :label "Reported A" :efforts ("low")) ("c" :label "Reported C")
+                                 ("b" :label "Reported B" :efforts nil)))
     (let ((instance (romacs-agent--configured "claude")))
       ;; What the harness says goes first; the catalogue fills in the rest.
       (let ((rows (romacs-agent--models instance)))
@@ -210,9 +210,9 @@ affixation it saw pushed on the list in cell ASKED."
       (should (equal (romacs-agent--read-selection '(4)) '(claude :model "a" :effort "low")))
       (should (string-match-p "Effort.*high" (car (car (car asked)))))
       (should (equal (nth 3 (car (car asked))) '("low" "high")))
-      ;; No default anywhere: asked without C-u.
-      (setcar answers (list "Claude Code · B" "low"))
-      (should (equal (romacs-agent--read-selection nil) '(claude :model "b" :effort "low")))
+      ;; No default anywhere: not asked, the harness's own.
+      (setcar answers (list "Claude Code · B"))
+      (should (equal (romacs-agent--read-selection nil) '(claude :model "b")))
       ;; A model with no efforts asks none, even with C-u.
       (setcar answers (list "Codex · C"))
       (should (equal (romacs-agent--read-selection '(4)) '(codex :model "c"))))))

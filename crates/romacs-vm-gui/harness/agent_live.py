@@ -3352,10 +3352,11 @@ def board_keys(args, base):
 def start_picker(args, base):
     """Starting a session by real keys through the palette: C-u c on the
     home page, the directory of the project at point, a row found by typing
-    (its instance's group, the harness's reported model among the catalogue's),
+    (its instance's group, a model its harness reported),
     the effort, then the first message in the chat it opens.  The fake
     harnesses record what they were given.
     Each run's initialize answers its models, kept with only their rows;
+    Codex's are asked of it as the palette opens (`model/list');
     with one enabled instance no palette is asked."""
     a = Agents(args, base, 'pk')
     try:
@@ -3428,13 +3429,14 @@ def start_picker(args, base):
             until(lambda: a.eval('(with-current-buffer (window-buffer (selected-window)) (string-suffix-p '
                                  + lisp_text(text) + ' (buffer-substring-no-properties romacs-agent-log--input (point-max))))') == 't', 15, f'{text} typed')
 
-        # The palette, as drawn.
+        # The palette, as drawn: Codex asked for its models as it opened.
+        codex_kept = a.home / '.local/state/romacs/agents/models/codex.json'
         on_project(other)
         a.keys('c')
         asked('Project directory')
         a.keys('-k', 'Return')
         asked('Agent')
-        time.sleep(1)
+        until(codex_kept.exists, 30, 'codex models kept')
         rows = parity_live.read_sexp(a.eval(
             '(mapcar (function car) (romacs-agent--picker-rows))'))
         shot = base / 'start-picker.png'
@@ -3469,7 +3471,7 @@ def start_picker(args, base):
                         and after(claude_argv, '--effort') == 'high'
                         and result['codex_turn'] == ['gpt-6-luna', 'low']
                         and rows[0] == 'Claude Code · default' and 'Claude Code · Fake 1' in rows
-                        and 'Codex · GPT-6.1 Sol' in rows and result['single'] == 'chat')
+                        and 'Codex · GPT-Fake-Sol' in rows and result['single'] == 'chat')
         return result
     finally:
         a.close()
@@ -3707,6 +3709,98 @@ def select_real(args, base):
         a.close()
 
 
+def codex_listed(codex, home, env):
+    """The models CODEX's own app-server answers `model/list' with, its
+    CODEX_HOME HOME: what Romacs is to show."""
+    lines = [{'id': 'initialize:1', 'method': 'initialize',
+              'params': {'clientInfo': {'name': 'agent_live', 'version': '0'}, 'capabilities': {}}},
+             {'method': 'initialized'}, {'id': 'model/list:2', 'method': 'model/list', 'params': {}}]
+    process = subprocess.Popen([codex, 'app-server'], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                               stderr=subprocess.DEVNULL, env={**env, 'CODEX_HOME': str(home)}, text=True)
+    try:
+        process.stdin.write(''.join(json.dumps(line) + '\n' for line in lines))
+        process.stdin.flush()
+        for line in process.stdout:
+            answer = json.loads(line)
+            if answer.get('id') == 'model/list:2':
+                return [m['model'] for m in answer['result']['data']]
+        raise RuntimeError('codex app-server ended before model/list answered')
+    finally:
+        process.kill()
+        process.wait()
+
+
+def models_real(args, base):
+    """The models each real harness (--claude-program, --codex-program) reports,
+    in private configuration directories, nothing signed in, no turn taken:
+    none known at first; a real Codex session's model menu (C-c o m) shows
+    what is known and asks Codex in the background; opened again it lists
+    what Codex's own app-server answers `model/list', and the capabilities
+    tool says the same.  `romacs-agent-refresh-models' asks Claude Code too.
+    Free, but needs the real programs: not a default workflow."""
+    a = Agents(args, base, 'mr')
+    try:
+        a.up()
+        a.work.mkdir(parents=True, exist_ok=True)
+        claude = args.claude_program or real_program('claude')
+        codex = args.codex_program or real_program('codex')
+        homes = {name: a.home / f'.config/{name}-models' for name in ('claude', 'codex')}
+        for home in homes.values():
+            home.mkdir(parents=True)
+        a.providers([('claude', homes['claude'], claude, []), ('codex', homes['codex'], codex, [])])
+        kept = a.home / '.local/state/romacs/agents/models'
+
+        def known(name):
+            return parity_live.read_sexp(a.eval(
+                f'(mapcar (function car) (romacs-agent--models (romacs-agent--configured {lisp_text(name)})))')) or []
+
+        result = {'before': known('codex'), 'listed': codex_listed(codex, homes['codex'], a.env)}
+        sid = a.eval(f'(romacs-agent-id (romacs-agent-start {lisp(a.work)} nil nil "codex"))').strip('"')
+        a.idle(sid, 60)
+        a.eval(f'(progn (romacs-agent-show {a.s(sid)}) (delete-other-windows) t)')
+        a.keyboard_ready()
+
+        def offered():
+            return parity_live.read_sexp(a.eval(
+                '(when (active-minibuffer-window) (with-current-buffer (window-buffer (active-minibuffer-window)) '
+                '(all-completions "" minibuffer-completion-table minibuffer-completion-predicate)))')) or []
+
+        def menu(name):
+            a.keys('-M', 'ctrl', '-k', 'c', '-k', 'o', '-m', 'ctrl')
+            until(lambda: a.eval('(buffer-live-p keymap-popup--buffer)') == 't', 15, 'menu open')
+            a.keys('m')
+            until(offered, 15, 'models offered')
+            a.eval('(progn (redisplay t) t)')
+            time.sleep(.5)
+            shot = base / f'models-{name}.png'
+            subprocess.run([f'{args.tools}/grim', str(shot)], env=a.env, check=True, timeout=30)
+            rows = offered()
+            a.keys('-M', 'ctrl', '-k', 'g', '-m', 'ctrl')
+            until(lambda: not offered(), 15, 'menu closed')
+            return {'rows': rows, 'screenshot': str(shot)}
+
+        result['first'] = menu('first')
+        until((kept / 'codex.json').exists, 60, 'codex models kept')
+        result['second'] = menu('second')
+        result['labels'] = {m: a.eval(f'(plist-get (cdr (assoc {lisp_text(m)} (romacs-agent--models '
+                                      '(romacs-agent--configured "codex")))) :label)').strip('"')
+                            for m in result['listed']}
+        capabilities = json.loads(parity_live.read_sexp(a.eval(
+            '(decode-coding-string (json-serialize (romacs-agent-tools--capabilities (romacs-mcp--object))) (quote utf-8))')))
+        result['capabilities'] = {p['providerInstanceId']: [m['id'] for m in p['models']]
+                                  for p in capabilities['providers']}
+        a.eval('(progn (romacs-agent-refresh-models) t)')
+        until((kept / 'claude.json').exists, 60, 'claude models kept')
+        result['claude'] = known('claude')
+        shown = ['Codex · ' + result['labels'][m] for m in result['listed']]
+        result['ok'] = (result['before'] == [] and result['first']['rows'] == ['Codex · default']
+                        and bool(result['listed']) and result['second']['rows'] == ['Codex · default'] + shown
+                        and result['capabilities']['codex'] == result['listed'] and bool(result['claude']))
+        return result
+    finally:
+        a.close()
+
+
 def history_real(args, base):
     """A real Claude Code conversation (--claude-model) and a real Codex one
     (--codex-model), each made outside Romacs in the real configuration
@@ -3879,7 +3973,7 @@ WORKFLOWS = {'chat_images': chat_images, 'chat_menu': chat_menu, 'history_view':
              'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race, 'restart-rollback': restart_rollback, 'restart-hang': restart_hang, 'renew': renew,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
              'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode,
-             'environment': environment, 'logging': logging, 'board_keys': board_keys, 'start_picker': start_picker, 'chat_log': chat_log, 'ui_review': ui_review, 'select': select, 'select-real': select_real, 'rpc': rpc,
+             'environment': environment, 'logging': logging, 'board_keys': board_keys, 'start_picker': start_picker, 'chat_log': chat_log, 'ui_review': ui_review, 'select': select, 'select-real': select_real, 'models-real': models_real, 'rpc': rpc,
              'instances': instances, 'mcp_tour': mcp_tour}
 
 

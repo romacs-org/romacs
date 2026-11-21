@@ -87,29 +87,27 @@ session records its instance's directory, and resumes there."
 the first of `romacs-agent-providers'."
   :type '(choice (const nil) string) :group 'romacs-agent)
 
-(defcustom romacs-agent-models
-  '((claude ("claude-opus-5-5" :label "Opus 5.5" :efforts ("low" "medium" "high" "xhigh" "max")
-             :default-effort "medium")
-            ("claude-sonnet-5-5" :label "Sonnet 5.5" :efforts ("low" "medium" "high" "xhigh" "max")
-             :default-effort "high")
-            ("claude-fable-5-1" :label "Fable 5.1" :efforts ("low" "medium" "high" "xhigh" "max")
-             :default-effort "medium")
-            ("claude-haiku-5-5" :label "Haiku 5.5" :efforts ("low" "medium" "high" "xhigh" "max")
-             :default-effort "medium"))
-    (codex ("gpt-6.1-sol" :label "GPT-6.1 Sol" :efforts ("low" "medium" "high" "xhigh" "max" "ultra")
-            :default-effort "low")
-           ("gpt-6-astra" :label "GPT-6 Astra" :efforts ("low" "medium" "high" "xhigh" "max" "ultra")
-            :default-effort "medium")
-           ("gpt-6.1-terra" :label "GPT-6.1 Terra" :efforts ("low" "medium" "high" "xhigh" "max" "ultra")
-            :default-effort "low")
-           ("gpt-6-luna" :label "GPT-6 Luna" :efforts ("low" "medium" "high" "xhigh" "max")
-            :default-effort "medium")))
-  "The models each harness offers, as (HARNESS ROW...), a ROW being
-\(ID :label LABEL :efforts EFFORTS :default-effort EFFORT).  What a harness
-reports of itself goes before these, and an instance's own :models before
-that (`romacs-agent--models').  Starting one names its ID to the harness;
-no model named leaves the choice to the harness's configuration."
+(defcustom romacs-agent-models nil
+  "Models to offer beside those each harness reports of itself, as
+\(HARNESS ROW...), a ROW being (ID :label LABEL :efforts EFFORTS
+:default-effort EFFORT).  A row of an id the harness reports fills in what
+the report leaves out: a label, a default effort.  Each harness reports its
+own models (`romacs-agent-refresh-models'), and an instance's own :models go
+before both (`romacs-agent--models').  Starting one names its ID to the
+harness; no model named leaves the choice to the harness's configuration."
   :type '(alist :key-type symbol :value-type (repeat sexp)) :group 'romacs-agent)
+
+(defcustom romacs-agent-models-refresh-interval 30
+  "Minutes between asks of each harness for its models: every enabled
+instance is asked again that often, in the background once Romacs is
+idle, and a picker asks one whose answer is older.  Nil asks each once a
+run, when a picker first wants its models."
+  :type '(choice (const :tag "Once a run" nil) number)
+  :initialize #'custom-initialize-default
+  :set (lambda (symbol value)
+         (set-default symbol value)
+         (when (fboundp 'romacs-agent--models-schedule) (romacs-agent--models-schedule)))
+  :group 'romacs-agent)
 
 (defcustom romacs-agent-select-timeout 10
   "Seconds a harness has to confirm a new model or effort before the
@@ -647,8 +645,13 @@ instances) is derived again when it changes.")
                            `romacs-agent--select-answered'; nil when its
                            next message carries them; else `restart':
                            resumed with the new option words
-  :refresh-models (SESSION) optional: ask a new session's harness for its
-                           models, `romacs-agent--keep-models' taking them
+  :models-probe (INSTANCE) optional: how INSTANCE's program is asked for
+                           its models with no session, or nil when it is
+                           not to be, a plist: :argv its
+                           words, :input what it reads, and :read a
+                           function of each object it writes, nil until
+                           (:models ROWS) or (:error TEXT) answers
+                           (`romacs-agent--probe-models')
   :argv (SESSION RESUME)   its command line, RESUME going on with its
       conversation;
   :input (SESSION TEXT ID)   the object a persistent harness reads as the
@@ -873,13 +876,14 @@ missing: the harness would start empty there, and could not resume."
     (user-error "Agent provider %s: configuration directory %s does not exist"
                 provider (expand-file-name dir))))
 
-(defun romacs-agent--environment-words (session)
-  "The `env' words giving SESSION's harness its configuration directory,
+(defun romacs-agent--env-words (variable dir)
+  "The `env' words setting VARIABLE to DIR, or unsetting it for nil:
 whatever the editor's own environment and the user manager's say."
-  (let ((variable (romacs-agent--harness-get session :config-variable)))
-    (if (romacs-agent-config-dir session)
-        (list "env" (concat variable "=" (romacs-agent-config-dir session)))
-      (list "env" "-u" variable))))
+  (if dir (list "env" (concat variable "=" dir)) (list "env" "-u" variable)))
+
+(defun romacs-agent--environment-words (session)
+  "The `env' words giving SESSION's harness its configuration directory."
+  (romacs-agent--env-words (romacs-agent--harness-get session :config-variable) (romacs-agent-config-dir session)))
 
 (defun romacs-agent--default-provider ()
   (or romacs-agent-default-provider
@@ -909,32 +913,201 @@ that file's time.  Nil when it is not found."
               ((vectorp (gethash "models" kept))))
     (mapcar (lambda (row)
               (cons (gethash "id" row)
-                    (list :label (gethash "label" row) :efforts (append (gethash "efforts" row) nil))))
+                    (append (list :label (gethash "label" row) :efforts (append (gethash "efforts" row) nil))
+                            (when-let* ((default (romacs-agent--value (gethash "defaultEffort" row))))
+                              (list :default-effort default)))))
             (gethash "models" kept))))
 
-(defun romacs-agent--keep-models (session rows)
-  "Keep ROWS, what SESSION's harness reports, for its instance.  A cache:
-one not written is reported, never in the way of the answer it came in."
-  (with-demoted-errors "romacs-agent: keeping models: %S"
-    (let* ((instance (romacs-agent--instance (romacs-agent-provider session) (romacs-agent-harness session)))
-           (file (romacs-agent--models-file (plist-get instance :name))))
-      (when-let* ((rows) (stamp (romacs-agent--models-stamp instance)))
-        (make-directory (file-name-directory file) t)
-        (romacs-agent--write-json
-         file (romacs-mcp--object
-               "stamp" stamp
-               "models" (vconcat (mapcar (lambda (row)
-                                           (romacs-mcp--object "id" (car row) "label" (plist-get (cdr row) :label)
-                                                               "efforts" (vconcat (plist-get (cdr row) :efforts))))
-                                         rows))))))))
+(defvar romacs-agent--models-probes (make-hash-table :test #'equal)
+  "Each instance's models asked for in this run, by its name: the probe's
+process while it runs (`romacs-agent--probe-models'), else the time its
+harness last answered or a session's reported them.")
 
-(defun romacs-agent--refresh-models (session)
-  "Ask SESSION's harness for its models, when its driver can and its
-instance has none kept for this program."
-  (when-let* ((ask (romacs-agent--harness-get session :refresh-models))
-              ((not (romacs-agent--models-kept
-                     (romacs-agent--instance (romacs-agent-provider session) (romacs-agent-harness session))))))
-    (funcall ask session)))
+(defvar romacs-agent-models-changed-functions nil
+  "Functions called with an instance once the models its harness reports
+are kept: a picker open shows them.")
+
+(defun romacs-agent--keep-models (instance rows)
+  "Keep ROWS, what INSTANCE's harness reports, none being an answer too.
+A cache: one not written is reported, never in the way of the answer it
+came in."
+  (with-demoted-errors "romacs-agent: keeping models: %S"
+    (let ((name (plist-get instance :name)))
+      (unless (process-live-p (gethash name romacs-agent--models-probes))
+        (puthash name (float-time) romacs-agent--models-probes))
+      (when-let* ((stamp (romacs-agent--models-stamp instance)))
+        (let ((file (romacs-agent--models-file name)))
+          (make-directory (file-name-directory file) t)
+          (romacs-agent--write-json
+           file (romacs-mcp--object
+                 "stamp" stamp
+                 "models" (vconcat (mapcar (lambda (row)
+                                             (romacs-mcp--object
+                                              "id" (car row) "label" (plist-get (cdr row) :label)
+                                              "efforts" (vconcat (plist-get (cdr row) :efforts))
+                                              "defaultEffort" (or (plist-get (cdr row) :default-effort) :null)))
+                                           rows)))))
+          (run-hook-with-args 'romacs-agent-models-changed-functions instance)))))
+
+(defconst romacs-agent--probe-timeout 30
+  "Seconds a harness has to answer a models probe.")
+
+(defun romacs-agent--probe-lines (pending text)
+  "PENDING, a partial line, and TEXT as (LINES . REST): its whole lines,
+and what follows the last."
+  (let ((parts (split-string (concat pending text) "\n")))
+    (cons (butlast parts) (car (last parts)))))
+
+(defun romacs-agent--probe-read (read line)
+  "What READ, a probe's :read, says of LINE, one it wrote, or nil."
+  (when-let* ((object (ignore-errors (json-parse-string line :object-type 'hash-table
+                                                        :null-object :null :false-object :false)))
+              ((hash-table-p object)))
+    (funcall read object)))
+
+(defun romacs-agent--probe-models (instance &optional done)
+  "Ask INSTANCE's program for its models in the background, keeping what
+it reports (`romacs-agent--keep-models'), then call DONE, when given, with
+\(:models ROWS) or (:error TEXT).  Nothing when its driver cannot be
+asked, or a probe of it runs; the process otherwise."
+  (let* ((name (plist-get instance :name))
+         (program (plist-get instance :program))
+         (probe (plist-get (romacs-agent--driver-of (plist-get instance :harness)) :models-probe)))
+    (when (and probe (stringp program) (executable-find program)
+               (not (process-live-p (gethash name romacs-agent--models-probes))))
+      (condition-case err
+          (when-let* ((asked (funcall probe instance)))
+            (puthash name (romacs-agent--probe-process instance asked done) romacs-agent--models-probes))
+        (error (puthash name (float-time) romacs-agent--models-probes)
+               (when done (funcall done (list :error (error-message-string err))))
+               nil)))))
+
+(defun romacs-agent--probe-said (errors)
+  "The last line ERRORS, a probe's stderr buffer, holds, or nil."
+  (when (buffer-live-p errors)
+    (with-current-buffer errors
+      (let ((line (car (last (split-string (buffer-string) "\n" t "[ \t]+")))))
+        (and line (truncate-string-to-width line 200))))))
+
+(defun romacs-agent--probe-ended (instance outcome errors done)
+  "INSTANCE's probe ended with OUTCOME, ERRORS its stderr pipe: what it
+reported kept, then DONE called with OUTCOME."
+  (puthash (plist-get instance :name) (float-time) romacs-agent--models-probes)
+  (when (eq (car outcome) :models) (romacs-agent--keep-models instance (cadr outcome)))
+  (let ((said (and (eq (car outcome) :error) (romacs-agent--probe-said (process-buffer errors)))))
+    (when (buffer-live-p (process-buffer errors)) (kill-buffer (process-buffer errors)))
+    (delete-process errors)
+    (when done (funcall done (if said (list :error (format "%s: %s" (cadr outcome) said)) outcome)))))
+
+(defun romacs-agent--probe-spawn (errors &rest arguments)
+  "`make-process' of ARGUMENTS; ERRORS, its stderr pipe, gone with its
+buffer should it not start."
+  (condition-case err (apply #'make-process arguments)
+    (error (kill-buffer (process-buffer errors))
+           (delete-process errors)
+           (signal (car err) (cdr err)))))
+
+(defun romacs-agent--probe-process (instance probe done)
+  "Run PROBE, of INSTANCE's driver, as `romacs-agent--probe-models' says."
+  (let* ((process-environment (romacs-agent--harness-environment))
+         (default-directory (expand-file-name "~/"))
+         (variable (plist-get (romacs-agent--driver-of (plist-get instance :harness)) :config-variable))
+         (errors (make-pipe-process :name "romacs-agent-models stderr" :noquery t
+                                    :buffer (generate-new-buffer " *romacs-agent-models*" t)))
+         (pending "") (over nil)
+         (finish (lambda (process outcome)
+                   (unless over
+                     (setq over t)
+                     (delete-process process)
+                     (romacs-agent--probe-ended instance outcome errors done))))
+         (process
+          (romacs-agent--probe-spawn
+           errors
+           :name "romacs-agent-models" :connection-type 'pipe :noquery t :stderr errors
+           :command (append (romacs-agent--env-words variable (romacs-agent--config-dir instance))
+                            (plist-get probe :argv))
+           :filter (lambda (process text)
+                     (pcase-let ((`(,lines . ,rest) (romacs-agent--probe-lines pending text)))
+                       (setq pending rest)
+                       (when-let* ((outcome (cl-some (lambda (line) (romacs-agent--probe-read (plist-get probe :read) line))
+                                                     lines)))
+                         (funcall finish process outcome))))
+           :sentinel (lambda (process _event)
+                       (unless (process-live-p process)
+                         (funcall finish process (list :error "ended unanswered")))))))
+    (run-at-time romacs-agent--probe-timeout nil
+                 (lambda () (when (process-live-p process) (funcall finish process (list :error "no answer")))))
+    (process-send-string process (plist-get probe :input))
+    process))
+
+(defun romacs-agent--enabled-instances ()
+  (cl-remove-if-not (lambda (i) (plist-get i :enabled)) (romacs-agent-instances)))
+
+(defun romacs-agent--models-due (instances asked now minutes)
+  "Those of INSTANCES to ask for their models at NOW: by ASKED
+\(`romacs-agent--models-probes'), never asked in this run, or last
+answered MINUTES or more before (nil: never again)."
+  (cl-remove-if (lambda (instance)
+                  (let ((last (gethash (plist-get instance :name) asked)))
+                    (and last (not (and (numberp last) minutes (>= (- now last) (* 60 minutes)))))))
+                instances))
+
+(defun romacs-agent--want-models (&optional instances)
+  "Ask each of INSTANCES (every enabled one when nil) for its models in
+the background when it is due (`romacs-agent--models-due'): what is kept
+is shown meanwhile, and a picker open shows what it reports."
+  (mapc #'romacs-agent--probe-models
+        (romacs-agent--models-due (or instances (romacs-agent--enabled-instances)) romacs-agent--models-probes
+                                  (float-time) romacs-agent-models-refresh-interval)))
+
+(defun romacs-agent--ask-models-again (&optional say)
+  "Ask every enabled instance's harness for its models again, in the
+background; SAY what each reports."
+  (dolist (instance (romacs-agent--enabled-instances))
+    (let* ((name (plist-get instance :name))
+           (report (lambda (outcome)
+                     (pcase outcome
+                       (`(:models ,rows) (message "Models of %s: %d reported" name (length rows)))
+                       (`(:error ,why) (message "Models of %s: %s" name why))))))
+      (cond ((process-live-p (gethash name romacs-agent--models-probes))
+             (when say (message "Models of %s: being asked" name)))
+            ((romacs-agent--probe-models instance (and say report)))
+            (say (message "Models of %s: not asked (no program found, or its harness reports none)" name))))))
+
+(defun romacs-agent-refresh-models ()
+  "Ask every enabled agent instance's harness for its models again, in
+the background, and say what each reports."
+  (interactive)
+  (romacs-agent--ask-models-again t))
+
+(defvar romacs-agent--models-timer nil
+  "The timer asking harnesses for their models every
+`romacs-agent-models-refresh-interval' minutes, or nil.")
+
+(defvar romacs-agent--models-idle nil
+  "The idle timer a tick left to ask, until it runs, or nil.")
+
+(defun romacs-agent--models-ask-idle ()
+  (setq romacs-agent--models-idle nil)
+  (romacs-agent--ask-models-again))
+
+(defun romacs-agent--models-tick ()
+  "Ask every harness for its models again, once Romacs is idle: one ask
+for the ticks before it is."
+  (unless (memq romacs-agent--models-idle timer-idle-list)
+    (setq romacs-agent--models-idle (run-with-idle-timer 2 nil #'romacs-agent--models-ask-idle))))
+
+(defun romacs-agent--models-schedule ()
+  "Run `romacs-agent--models-tick' every `romacs-agent-models-refresh-interval'
+minutes, or not at all when it is nil."
+  (dolist (timer (list romacs-agent--models-timer romacs-agent--models-idle))
+    (when (timerp timer) (cancel-timer timer)))
+  (setq romacs-agent--models-idle nil)
+  (setq romacs-agent--models-timer
+        (when-let* ((minutes romacs-agent-models-refresh-interval) (seconds (* 60 minutes)))
+          (run-at-time seconds seconds #'romacs-agent--models-tick))))
+
+(unless (timerp romacs-agent--models-timer) (romacs-agent--models-schedule))
 
 (defun romacs-agent--models (instance)
   "The models INSTANCE offers, each (ID . PLIST): its own :models, what
@@ -1042,32 +1215,48 @@ default instance's first."
              append (romacs-agent--instance-rows instance label (equal (plist-get instance :name) default)))))
 
 (defun romacs-agent--ordered-table (candidates &rest metadata)
-  "A completion table of CANDIDATES in their order, with METADATA."
+  "A completion table of CANDIDATES in their order, with METADATA;
+CANDIDATES may be a function returning them, asked each time."
   (lambda (string predicate action)
     (if (eq action 'metadata)
         `(metadata (display-sort-function . identity) (cycle-sort-function . identity) ,@metadata)
-      (complete-with-action action candidates string predicate))))
+      (complete-with-action action (if (functionp candidates) (funcall candidates) candidates)
+                            string predicate))))
 
-(defun romacs-agent--pick-row (rows)
-  "One of ROWS (`romacs-agent--picker-rows'), asked for: grouped by
-instance, the first the default."
-  (let ((by-text (make-hash-table :test #'equal)) (default (caar rows)))
-    (dolist (row rows) (puthash (car row) (cdr row) by-text))
-    (let ((text (completing-read
-                 (format-prompt "Agent" default)
-                 (romacs-agent--ordered-table
-                  rows
-                  (cons 'group-function
-                        (lambda (text transform)
-                          (if transform text (plist-get (gethash text by-text) :group))))
-                  (cons 'affixation-function
-                        (lambda (texts)
-                          (mapcar (lambda (text)
-                                    (list text "" (propertize (concat "  " (plist-get (gethash text by-text) :note))
-                                                              'face 'completions-annotations)))
-                                  texts))))
-                 nil t nil nil default)))
-      (cons text (gethash text by-text)))))
+(defun romacs-agent--rows-table (rows)
+  "A completion table of the rows the function ROWS returns, asked each
+time (`romacs-agent--picker-rows'): grouped by instance, each with its note."
+  (let ((fields (lambda (text) (cdr (assoc text (funcall rows))))))
+    (romacs-agent--ordered-table
+     rows
+     (cons 'group-function
+           (lambda (text transform) (if transform text (plist-get (funcall fields text) :group))))
+     (cons 'affixation-function
+           (lambda (texts)
+             (mapcar (lambda (text)
+                       (list text "" (propertize (concat "  " (plist-get (funcall fields text) :note))
+                                                 'face 'completions-annotations)))
+                     texts))))))
+
+(declare-function romacs-complete-refresh "romacs-complete" (minibuffer))
+
+(defun romacs-agent--pick-row (rows-of)
+  "One of the rows the function ROWS-OF returns (`romacs-agent--picker-rows'),
+asked for, the first the default.  The models are those known: a harness
+due is asked in the background (`romacs-agent--want-models'), and its
+answer shows in the rows while they are asked for."
+  (romacs-agent--want-models)
+  (let* ((rows (funcall rows-of)) (default (caar rows)) (minibuffer nil)
+         (changed (lambda (_instance)
+                    (setq rows (funcall rows-of))
+                    (when (fboundp 'romacs-complete-refresh) (romacs-complete-refresh minibuffer)))))
+    (add-hook 'romacs-agent-models-changed-functions changed)
+    (unwind-protect
+        (let ((text (minibuffer-with-setup-hook (lambda () (setq minibuffer (current-buffer)))
+                      (completing-read (format-prompt "Agent" default) (romacs-agent--rows-table (lambda () rows))
+                                       nil t nil nil default))))
+          (cons text (cdr (assoc text rows))))
+      (remove-hook 'romacs-agent-models-changed-functions changed))))
 
 (defun romacs-agent--read-effort (efforts default)
   "One of EFFORTS, asked for, DEFAULT first; nil for none."
@@ -1078,18 +1267,19 @@ instance, the first the default."
 (defun romacs-agent--read-selection (ask-effort &optional accounts)
   "What a new session runs on, as (PROVIDER . OPTIONS): asked for when
 more than one harness is enabled (with ACCOUNTS, account), or ASK-EFFORT.
-Its effort is asked for with ASK-EFFORT, or when nothing gives the chosen
-model one."
+Its effort is asked for with ASK-EFFORT; else it is the harness's own."
   (let* ((rows (romacs-agent--picker-rows accounts))
          ;; Rows come by instance: its first and last differ with several.
          (several (not (equal (plist-get (cdar rows) :provider) (plist-get (cdar (last rows)) :provider))))
-         (fields (cdr (if (or ask-effort several) (romacs-agent--pick-row rows) (car rows))))
+         (fields (cdr (if (or ask-effort several)
+                          (romacs-agent--pick-row (lambda () (romacs-agent--picker-rows accounts)))
+                        (car rows))))
          (provider (plist-get fields :provider))
          (model (plist-get fields :model))
          (efforts (plist-get fields :efforts))
          (own (plist-get (if (symbolp provider) (car (romacs-agent-pool provider)) (romacs-agent--configured provider))
                          :effort))
-         (effort (when (and efforts (or ask-effort (and model (not own) (not (plist-get fields :default-effort)))))
+         (effort (when (and efforts ask-effort)
                    (romacs-agent--read-effort efforts (if (member own efforts) own (plist-get fields :default-effort))))))
     (cons provider (append (and model (list :model model)) (and effort (list :effort effort))))))
 
@@ -4072,8 +4262,7 @@ Interactively, open the chat without sending an initial prompt."
            (romacs-agent--launch session (romacs-agent--argv session nil))
            (romacs-agent--attach session romacs-agent--launch-tries)
            ;; Its first prompt goes once its harness is ready.
-           (when prompt (romacs-agent-send session prompt))
-           (romacs-agent--when-attached session (lambda () (romacs-agent--refresh-models session)))))))
+           (when prompt (romacs-agent-send session prompt))))))
     (when (called-interactively-p 'any) (romacs-agent-show session))
     session))
 
