@@ -1483,3 +1483,71 @@ and wait for it to end."
           (should-not (warm-restart-tests--image-holds image "hunter20")))
       (when (get-buffer "wr-s-long") (with-current-buffer "wr-s-long" (set-buffer-modified-p nil)) (kill-buffer "wr-s-long"))
       (delete-directory warm-restart-directory t))))
+
+;;;; Image parts and fresh images
+
+(defvar warm-restart-tests--part nil "What the test part's reader was handed, and when.")
+
+(defun warm-restart-tests--part-reader (data)
+  (setq warm-restart-tests--part (list data (and (get-buffer "part-ordered.txt") t))))
+
+(ert-deftest warm-restart-a-part-comes-back-before-the-buffers ()
+  ;; A package's part (romacs-live's ledger) is handed to its reader as the
+  ;; image is read, before any buffer comes back: a reader that changes a
+  ;; mode's code does so before a restored buffer takes the mode.
+  (let* ((warm-restart-directory (make-temp-file "romacs-wr-" t))
+         (file (expand-file-name "part-ordered.txt" warm-restart-directory))
+         (warm-restart-image-part-functions
+          (list (lambda () (cons 'warm-restart-tests--part-reader '(:ledger 1)))
+                (lambda () nil)
+                (lambda () (cons 'warm-restart-tests--undefined-reader 2))))
+         (warm-restart-tests--part nil)
+         image)
+    (unwind-protect
+        (progn
+          (with-temp-file file (insert "text\n"))
+          (with-current-buffer (find-file-noselect file)
+            (setq image (warm-restart-write))
+            (should (equal (plist-get (car (warm-restart--read image)) :parts)
+                           '((warm-restart-tests--part-reader :ledger 1) (warm-restart-tests--undefined-reader . 2))))
+            (kill-buffer))
+          (let ((report (warm-restart-restore-image image)))
+            (should (equal warm-restart-tests--part '((:ledger 1) nil)))
+            (should (cl-some (lambda (p) (eq (plist-get p :part) 'warm-restart-tests--undefined-reader))
+                             (plist-get report :problems)))))
+      (when-let* ((b (get-file-buffer file))) (kill-buffer b))
+      (delete-directory warm-restart-directory t))))
+
+(ert-deftest warm-restart-a-fresh-image-carries-unsaved-text-only ()
+  ;; A reset's image: no part, kill ring, history or window; the unsaved
+  ;; buffer always, the saved file buffer only when buffers are kept.
+  (let* ((warm-restart-directory (make-temp-file "romacs-wr-" t))
+         (saved (expand-file-name "fresh-saved.txt" warm-restart-directory))
+         (edited (expand-file-name "fresh-edited.txt" warm-restart-directory))
+         (warm-restart-image-part-functions (list (lambda () (cons 'ignore 1))))
+         (kill-ring (list "a kill")) (kill-ring-yank-pointer nil)
+         buffers)
+    (unwind-protect
+        (progn
+          (with-temp-file saved (insert "saved\n"))
+          (with-temp-file edited (insert "edited\n"))
+          (push (find-file-noselect saved) buffers)
+          (push (find-file-noselect edited) buffers)
+          (with-current-buffer (car buffers) (goto-char (point-max)) (insert "more\n"))
+          (let* ((names (lambda (form) (mapcar (lambda (r) (plist-get r :name)) (plist-get form :buffers))))
+                 (unsaved (car (warm-restart--read (let ((warm-restart-fresh 'unsaved)) (warm-restart-write)))))
+                 (kept (car (warm-restart--read (let ((warm-restart-fresh 'buffers)) (warm-restart-write)))))
+                 (whole (car (warm-restart--read (warm-restart-write)))))
+            (should (member "fresh-edited.txt" (funcall names unsaved)))
+            (should-not (member "fresh-saved.txt" (funcall names unsaved)))
+            (should (member "fresh-saved.txt" (funcall names kept)))
+            (dolist (form (list unsaved kept))
+              (should-not (plist-get form :parts))
+              (should-not (plist-get form :kill-ring)))
+            (should-not (plist-get unsaved :frames))
+            (should (plist-get kept :frames))
+            (should (plist-get whole :parts))
+            (should (equal (plist-get whole :kill-ring) '("a kill")))))
+      (dolist (b buffers) (with-current-buffer b (set-buffer-modified-p nil)) (kill-buffer b))
+      (delete-directory warm-restart-directory t))))
+

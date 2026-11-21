@@ -1725,6 +1725,7 @@ from; and each one Romacs cannot run, with why."
 
 (defvar warm-restart-last-result)
 (declare-function warm-restart-request "warm-restart")
+(declare-function romacs-session-reset-target "romacs-live" ())
 (declare-function romacs-server--build-label "romacs-server" (true))
 
 (defun romacs-agent-tools--restart-wake-file (session)
@@ -1741,7 +1742,10 @@ editor is between commands; tell the calling session its verdict."
   (let* ((id (romacs-agent-tools--caller))
          (session (and id (romacs-agent-get id))))
     (warm-restart-request
-     :target (gethash "target" arguments)
+     :target (or (gethash "target" arguments)
+                 (and (eq (gethash "fresh" arguments) t) (romacs-session-reset-target)))
+     :fresh (and (eq (gethash "fresh" arguments) t)
+                 (if (eq (gethash "keepBuffers" arguments) t) 'buffers 'unsaved))
      :delay (gethash "delay" arguments)
      :expiry (gethash "expiry" arguments)
      ;; What the image cannot carry ends, or comes back with its package:
@@ -2105,12 +2109,15 @@ checks that failed and the verdict (verified, rolled-back, rollback-failed)."
  "Restart Romacs into a new process once your turn ends, carrying the session (buffers, windows, histories) \
 and its agent sessions: after an install, the new build runs. target is a build directory (one holding \
 romacs-vm-gui and lisp, e.g. the launcher's current) or a binary; omitted, the session's restart \
-command or its own binary. It waits until your turn has ended, nothing is BLOCKED (unsaved work that cannot be \
+command or its own binary. fresh true makes it a reset (romacs-session-reset): onto the installed build \
+when target is omitted, carrying no live Lisp files, kill ring, registers, histories or kept globals, only \
+unsaved text and agent sessions; keepBuffers true carries the file buffers and their windows too. It waits until your turn has ended, nothing is BLOCKED (unsaved work that cannot be \
 carried), no Romacs tool call is in flight and the editor is between commands, for delay seconds (default 2), up \
 to expiry seconds (default 900). The same supervised restart as romacs_restart, whose verdict this session is \
 told."
  (romacs-mcp--schema '(("instance" . "string") ("target" . "string") ("delay" . "number")
-                       ("expiry" . "number") ("force" . "boolean"))
+                       ("expiry" . "number") ("force" . "boolean") ("fresh" . "boolean")
+                       ("keepBuffers" . "boolean"))
                      nil)
  #'romacs-agent-tools--restart)
 

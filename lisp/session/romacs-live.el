@@ -444,7 +444,7 @@ macro or struct of, not among RECORDS: they load again after them."
     ;; order, so a changed file that requires them loads after them.
     (let ((dependents (romacs-live--dependents (cl-remove-if-not (lambda (r) (memq (plist-get r :action) '(load revert))) records)
                                                loaded)))
-      (list :label (plist-get survey :label) :declared romacs-live-forms--declared
+      (list :label (plist-get survey :label) :declared romacs-live-forms--declared :dropped (plist-get survey :dropped)
             :records (romacs-live--order (append records dependents))
             :refusals refusals
             :warnings (append warnings (romacs-live--relocation-warnings records))))))
@@ -820,10 +820,14 @@ and UNBIND-GONE; the report (`romacs-live-apply')."
 survey, or signals' text as (:error TEXT)."
   (let ((answer (lambda (thunk) (funcall callback (condition-case err (funcall thunk)
                                                      (error (list :error (error-message-string err))))))))
-    (if (romacs-live--worker-p)
+    (cond
+     ((eq (plist-get (plist-get request :source) :kind) 'ledger)
+      ;; A replay reads the store and the build's own files: no git.
+      (funcall answer (lambda () (romacs-live--replay-survey (plist-get (plist-get request :source) :ledger)))))
+     ((romacs-live--worker-p)
         (isolate-on-done (isolate-spawn 'romacs-live-survey request :require '(romacs-live))
-                         (lambda (future) (funcall answer (lambda () (isolate-await future 0)))))
-      (funcall answer (lambda () (romacs-live-survey request))))))
+                         (lambda (future) (funcall answer (lambda () (isolate-await future 0))))))
+     (t (funcall answer (lambda () (romacs-live-survey request)))))))
 
 (defun romacs-live--defaults-then (plan callback)
   "PLAN with `:keymap-defaults' (path to its keymaps' library defaults),
@@ -874,7 +878,9 @@ loads) and `:unbind-gone' (as `romacs-live-apply')."
                                                               (plist-get plan :records)))))
                          (t (romacs-live--defaults-then
                              plan (lambda (plan)
-                                    (funcall finish (condition-case err (romacs-live-apply plan (plist-get options :unbind-gone))
+                                    (funcall finish (condition-case err
+                                                        (append (romacs-live-apply plan (plist-get options :unbind-gone))
+                                                                (list :dropped (plist-get survey :dropped)))
                                                       ((error quit) (list :stopped (romacs-live--stopped err)))))))))))
              ((error quit) (funcall finish (list :refusals (list (romacs-live--stopped err))))))))
       ((error quit) (setq romacs-live--running nil) (signal (car err) (cdr err))))))
@@ -900,6 +906,84 @@ file a file, anything else a branch or commit of REPOSITORY."
            (list :kind 'worktree :directory file))
           ((file-regular-p file) (list :kind 'files :files (list file)))
           (t (list :kind 'rev :rev text :repository (or repository (romacs-live--repository)))))))
+
+;;;; Across a restart, and back to the build
+
+(defun romacs-live--image-part ()
+  "The ledger as a session image's part (`warm-restart-image-part-functions'):
+the successor puts its files back (`romacs-live-restore-ledger')."
+  (and (plist-get romacs-live-ledger :entries)
+       (cons 'romacs-live-restore-ledger (copy-tree romacs-live-ledger))))
+
+(add-hook 'warm-restart-image-part-functions #'romacs-live--image-part)
+
+(defun romacs-live--replay-survey (ledger)
+  "A survey (`romacs-live-survey''s value) that puts LEDGER's files back
+over this session's build, each from its store file while its base is
+still the build's copy.  An entry the build now has is `landed', one
+whose base the build no longer has `superseded', a partial one or one
+whose store file is gone `dropped': each left out, and said."
+  (let* ((build (romacs-live-build))
+         (roots (romacs-live--lisp-roots (plist-get build :root)))
+         (loaded (romacs-live--loaded roots))
+         (files nil) (dropped nil))
+    (dolist (entry (plist-get ledger :entries))
+      (let* ((path (plist-get entry :path))
+             (installed (and (plist-get build :commit) (string-prefix-p "lisp/" path) roots
+                             (romacs-live--read-file (expand-file-name (substring path 5) (car roots)))))
+             (store (romacs-live--read-file (plist-get entry :file)))
+             (why (cond ((equal (car installed) (plist-get entry :new)) 'landed)
+                        ((not (equal (car installed) (plist-get entry :base))) 'superseded)
+                        ((eq (plist-get entry :state) 'partial) 'partial)
+                        ((not (equal (car store) (plist-get entry :new))) 'lost))))
+        (if why
+            (push (list :path path :why why) dropped)
+          (push (list :path path :base (plist-get entry :base) :new (plist-get entry :new)
+                      :build-blob (car installed) :bytes (cdr store) :text (romacs-live--text (cdr store))
+                      :old (romacs-live--text (cdr installed)) :source (plist-get entry :source)
+                      :loaded (and (gethash path loaded) t))
+                files))))
+    (list :label "the ledger" :files (nreverse files) :refusals nil :warnings nil :dropped (nreverse dropped))))
+
+;;;###autoload
+(defun romacs-live-restore-ledger (ledger)
+  "Put LEDGER's live files back over this session: a restart's successor
+does, from its image (`romacs-live--image-part').  The files the build
+has since taken, or whose base it no longer has, are left out, and the
+report (`romacs-live-ledger') says so."
+  (setq romacs-live-ledger nil)
+  (romacs-live-start (list :kind 'ledger :ledger ledger)
+                     (lambda (report)
+                       (message "%s" (romacs-live-summary report))
+                       (romacs-live--refresh-mode-line))))
+
+;;;###autoload
+(defun romacs-session-reset-target ()
+  "The installed build a reset goes to: the one the server watches
+\(`romacs-server-build-watch'), else nil for this session's own."
+  (let ((watch (bound-and-true-p romacs-server-build-watch)))
+    (and (stringp watch) (file-exists-p watch) watch)))
+
+;;;###autoload
+(defun romacs-session-reset (&optional keep-buffers)
+  "Restart onto the installed build with a fresh session: its image and
+init only, no live files (`romacs-live-ledger'), kill ring, registers,
+histories or kept globals.  Unsaved text is carried, as every restart
+carries it, and so are agent sessions and the keeper's terminals, the
+user's work outside the session.  With a prefix argument, KEEP-BUFFERS:
+the file buffers and their windows too.  The same supervised restart as
+`romacs-restart', once the editor is idle (`warm-restart-request')."
+  (interactive (list current-prefix-arg))
+  (require 'warm-restart)
+  (let ((target (romacs-session-reset-target))
+        (live (length (plist-get romacs-live-ledger :entries))))
+    (when (or (not (called-interactively-p 'any))
+              (yes-or-no-p (format "Reset onto %s%s, dropping histories and the kill ring%s? "
+                                   (if target (abbreviate-file-name target) "this build")
+                                   (if (> live 0) (format " without its %d live files" live) "")
+                                   (if keep-buffers "" " and every buffer but unsaved ones"))))
+      (warm-restart-request :target target :fresh (if keep-buffers 'buffers 'unsaved))
+      (message "Resetting once the editor is idle"))))
 
 ;;;; The report and the ledger, shown
 
@@ -1057,6 +1141,17 @@ a file."
          (insert "  Forms before the error ran, so some of its changes took effect; the rows list the file's changes.\n"))
        (dolist (row (plist-get report :rows)) (romacs-live--insert-row row))
        (dolist (w (plist-get report :warnings)) (insert "  " (propertize (concat "! " w) 'face 'romacs-live-warning) "\n"))
+       (dolist (d (plist-get report :dropped))
+         (insert "  " (propertize (string-pad (format "%s" (plist-get d :why)) romacs-live--state-width) 'face
+                                  (if (eq (plist-get d :why) 'landed) 'romacs-live-ok 'romacs-live-partial))
+                 " " (propertize (plist-get d :path) 'face 'romacs-live-path)
+                 (propertize (pcase (plist-get d :why)
+                               ('landed "  the build has it now")
+                               ('superseded "  the build changed it since: not put back")
+                               ('partial "  it failed to load before: not put back")
+                               (_ "  its copy is gone from the store"))
+                             'face 'romacs-live-dim)
+                 "\n"))
        (when-let* ((gone (plist-get report :gone)))
          (insert "  " (propertize "gone " 'face 'romacs-live-dim) (mapconcat #'symbol-name gone ", ")
                  (propertize (if (plist-get report :unbound) "  unbound"
