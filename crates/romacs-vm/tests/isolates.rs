@@ -516,12 +516,13 @@ fn a_retired_worker_ends_without_a_wait_or_a_death_report() {
     assert!(settles(|| !process_exists(pid)), "retired worker {pid} survived");
 }
 
-/// Every condition isolate.el settles a dead worker's jobs with, or signals
-/// itself, is an `isolate-error`, so an awaiter's handler for it catches
-/// each: one used and never defined reaches the awaiter as a peculiar error.
+/// Every condition the isolates' Lisp (isolate.el, isolate-worker.el)
+/// settles a dead worker's jobs with, or signals itself, is an
+/// `isolate-error`, so an awaiter's handler for it catches each: one used
+/// and never defined reaches the awaiter as a peculiar error.
 #[test]
 fn every_condition_isolate_el_raises_is_an_isolate_error() {
-    let source = tree_lisp::text("vm/isolate.el");
+    let source = tree_lisp::text("vm/isolate.el") + &tree_lisp::text("vm/isolate-worker.el");
     // `(romacs--isolate-dead ISOLATE 'NAME ...)` and `(signal 'NAME ...)`.
     let quoted = |text: &str| text.strip_prefix('\'').map(|text| {
         text.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '-').collect::<String>()
