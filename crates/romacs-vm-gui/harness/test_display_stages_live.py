@@ -151,6 +151,21 @@ class Bars(unittest.TestCase):
         self.assertNotIn('figures', row)
         self.assertEqual((d.overall([row]), d.overall([]), d.bars_of([row])), ('FAIL', 'FAIL', {}))
 
+    def test_a_reported_figure_is_held_to_nothing_and_stays_reported(self):
+        # A collection's whole step is the world's heap: reported, never held.
+        reported = {**self.bars, 'step_instructions': d.REPORTED}
+        row = d.verdict(PAINTS, {**self.result, 'readings': readings((10**9, *STEP[1:]), STEP)}, 2, {'typed': reported})
+        self.assertEqual((row['status'], row['off']), ('PASS', []))
+        self.assertEqual(d.rebarred({'typed': reported}, {'typed': self.bars})['typed']['step_instructions'], d.REPORTED)
+
+    def test_a_collection_above_its_baseline_is_a_figure_with_its_session(self):
+        above = [dict(r, **{'above-instructions': 30 * i}) for i, r in enumerate(readings(STEP, STEP, STEP))]
+        session = {'symbols': 73116, 'files': 578, 'loaded': ['subr']}
+        row = d.verdict({'name': 'chat-collected', 'paints': False},
+                        {'readings': [dict(r, **{'frames-submitted': 0}) for r in above], 'session': session}, 3, {})
+        self.assertEqual((row['figures']['above_instructions'], row['session']), (30, session))
+        self.assertIn('0.00M above its baseline · 73116 symbols, 578 files', d.table([row]))
+
     def test_the_table_shows_figures_or_the_reason(self):
         text = d.table([d.verdict(PAINTS, self.result, 2, {'typed': self.bars}), d.verdict(IDLE, {'readings': []}, 2, {})])
         self.assertIn('| typed | 0.00M | 0.00M | 0.00M | 7 | 1 | 2 | 0 | 1 | 1 | 1 | PASS |', text)
