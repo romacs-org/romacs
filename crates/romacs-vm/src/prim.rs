@@ -621,28 +621,45 @@ mod leaf {
         /// GNU string-lessp's order, compared in place: a symbol orders by
         /// its name, a string by its characters.
         pub(crate) fn string_order(&self, a: Value, b: Value) -> std::result::Result<std::cmp::Ordering, Fault> {
-            self.with_name_chars(a, |a| self.with_name_chars(b, |b| a.cmp(b)))?
-        }
-        fn with_name_chars<R>(&self, v: Value, f: impl FnOnce(&mut dyn Iterator<Item = u32>) -> R)
-            -> std::result::Result<R, Fault> {
-            if let Some(name) = self.symbol_text(v) { return Ok(f(&mut name.chars().map(u32::from))); }
-            let view = self.vm.str_view(v).ok_or_else(|| Fault::Wrong("stringp", v))?;
-            Ok(f(&mut view.chars()))
+            self.with_text(a, |a| self.with_text(b, |b| a.chars().cmp(b.chars())))?
         }
         /// GNU string-equal's test (fns.c:339) on V and W as text, a symbol by
         /// its name: the same character count, byte count and bytes, read in
-        /// place, with nothing copied.
+        /// place, with nothing copied but an escaped symbol name's decoding.
         pub(crate) fn string_equal(&self, v: Value, w: Value) -> std::result::Result<bool, Fault> {
-            let text = |v| match self.symbol_text(v) {
-                Some(name) => Ok((name.chars().count(), name.as_bytes())),
-                None => self.vm.str_view(v).map(|s| (s.chars, s.bytes)).ok_or_else(|| Fault::Wrong("stringp", v)),
-            };
-            Ok(text(v)? == text(w)?)
+            self.with_text(v, |a| self.with_text(w, |b| (a.chars, a.bytes) == (b.chars, b.bytes)))?
         }
-        /// V's name when it is a symbol (`nil' and `t' too), borrowed.
-        fn symbol_text(&self, v: Value) -> Option<&str> {
+        /// F of V's text, read where it lies: a symbol's name as `symbol-name'
+        /// gives it (`read_symbol_name'), or a string's.
+        pub(crate) fn with_text<R>(&self, v: Value, f: impl FnOnce(crate::lstring::StrView<'_>) -> R) -> std::result::Result<R, Fault> {
+            match self.symbol_key(v) {
+                Some(key) => Ok(self.read_symbol_name(v, key, f)),
+                None => self.vm.str_view(v).map(f).ok_or(Fault::Wrong("stringp", v)),
+            }
+        }
+        /// V's key when it is a symbol (`nil' and `t' too): its name, escaped
+        /// where it is not Unicode text (`symkey'), so read through
+        /// `read_symbol_name' wherever it is compared as text.
+        pub(crate) fn symbol_key(&self, v: Value) -> Option<&str> {
             if v == Value::NIL { Some("nil") } else if v == Value::TRUE { Some("t") }
                 else { self.symbol_index(v).map(|slot| self.vm.symbol_names[slot].as_str()) }
+        }
+        /// F of symbol V's name, KEY its key, as `symbol-name' gives it: an
+        /// ASCII key as itself; else the string a private obarray keeps for a
+        /// symbol it interned (a unibyte name stays unibyte there), else the
+        /// name KEY stands for (`symkey::with_name').  The one place a symbol's
+        /// name is read as text to compare it: string=, string-lessp,
+        /// string-version-lessp and string-collate-equalp reach it through
+        /// `with_text', assoc-string and Fcompare_strings' other callers
+        /// through `with_compared', and value< directly.
+        pub(crate) fn read_symbol_name<R>(&self, v: Value, key: &str, f: impl FnOnce(crate::lstring::StrView<'_>) -> R) -> R {
+            if key.is_ascii() {
+                return f(crate::lstring::StrView { bytes: key.as_bytes(), chars: key.len(), multibyte: true });
+            }
+            if let Ok(slot) = self.symbol_slot(v)
+                && let Some(&name) = self.vm.obarray_symbol_names.get(&slot)
+                && let Some(view) = self.vm.str_view(name) { return f(view); }
+            crate::symkey::with_name(key, f)
         }
         /// Whether the current buffer's text is multibyte (a unibyte buffer
         /// is a byte buffer), as `enable-multibyte-characters' says.

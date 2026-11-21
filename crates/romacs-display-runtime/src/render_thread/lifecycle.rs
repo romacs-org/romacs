@@ -208,7 +208,7 @@ impl RenderApp {
                         .primary_window()
                         .unwrap()
                         .replay_pending_native_state(window.as_ref());
-                    self.window_icon.apply(window.as_ref());
+                    self.window_icon.apply(window.as_ref(), &event_loop.owned_display_handle());
                 }
                 Err(e) => {
                     tracing::error!("Failed to create window: {:?}", e);

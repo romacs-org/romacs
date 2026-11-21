@@ -54,6 +54,13 @@ fn kill_buffer(cx; optional arg: Value) -> Step {
     let buffer = if arg == Value::NIL { cx.decode_buffer(arg)? }
         else { cx.lifecycle_buffer(arg, false, false)?.0 };
     if !cx.lifecycle_killable(buffer) { return Ok(Step::Done(Value::NIL)); }
+    // A plain kill (`plain_kill') does what the Lisp half would: the next
+    // buffer is made current, then the finish.
+    if let Some(next) = cx.plain_kill(buffer)? {
+        cx.make_current(next);
+        cx.kill_buffer(buffer)?;
+        return Ok(Step::Done(Value::TRUE));
+    }
     let inhibit = if cx.buffer_state(buffer).unwrap().inhibit_buffer_hooks { Value::TRUE } else { Value::NIL };
     lifecycle_lisp(cx, "romacs--kill-buffer", vec![buffer, inhibit])
 }}
@@ -75,14 +82,10 @@ fn other_buffer(cx; optional buffer: Value, visible_ok: Value, frame: Value) -> 
         let order = cx.lifecycle_list();
         return other_buffer_ask(cx, [buffer, visible_ok, pred, Value::NIL, order]);
     }
-    let visible = if visible_ok == Value::NIL { cx.windows().visible_buffers()? } else { Vec::new() };
-    let mut notsogood = None;
-    for b in cx.buffer_order() {
-        if !cx.other_buffer_candidate(b, buffer) { continue; }
-        if !visible.contains(&b) { return Ok(Step::Done(b)); }
-        notsogood.get_or_insert(b);
+    match cx.other_buffer_unpredicated(buffer, visible_ok != Value::NIL)? {
+        Some(b) => Ok(Step::Done(b)),
+        None => other_buffer_fallback(cx),
     }
-    match notsogood { Some(b) => Ok(Step::Done(b)), None => other_buffer_fallback(cx) }
 }}
 /// `other-buffer''s scan under a frame predicate, SCAN being BUFFER,
 /// VISIBLE-OK, the predicate, the first accepted buffer a visible window

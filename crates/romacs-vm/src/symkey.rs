@@ -72,6 +72,23 @@ pub(crate) fn to_internal(key: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// F of the name KEY stands for, as internal multibyte text: KEY itself,
+/// where it lies, when it holds no escape (any ASCII key, one character a
+/// byte, and nearly every other), else the name decoded into a copy.
+pub(crate) fn with_name<R>(key: &str, f: impl FnOnce(crate::lstring::StrView<'_>) -> R) -> R {
+    use crate::lstring::StrView;
+    if key.is_ascii() {
+        return f(StrView { bytes: key.as_bytes(), chars: key.len(), multibyte: true });
+    }
+    match to_internal(key) {
+        None => f(StrView { bytes: key.as_bytes(), chars: key.chars().count(), multibyte: true }),
+        Some(bytes) => {
+            let view = StrView { bytes: &bytes, chars: 0, multibyte: true };
+            f(StrView { chars: view.chars().count(), ..view })
+        }
+    }
+}
+
 impl crate::Vm {
     /// Printer output TEXT as a Lisp string: the characters escaped symbol
     /// names carried decoded, otherwise the text as the printer's callers
