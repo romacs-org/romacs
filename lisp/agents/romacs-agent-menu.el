@@ -17,6 +17,7 @@
 (require 'keymap-popup)
 (require 'romacs-working)
 (require 'romacs-agent-log)
+(require 'romacs-attach)
 
 (declare-function romacs-agents "romacs-agent-board" ())
 (declare-function romacs-agent-resume-time "romacs-agent-tools" (session))
@@ -316,41 +317,30 @@ argument ALL, what every turn of the session did."
   (interactive nil romacs-agent-log-mode)
   (romacs-agent-tools--cancel-resume (romacs-agent-menu--session) "cancelled by hand"))
 
-(defun romacs-agent-menu--clipboard-image-type ()
-  "The MIME type of the clipboard's image, or nil when it holds none."
-  (and (executable-find "wl-paste")
-       (seq-find (lambda (type) (string-prefix-p "image/" type))
-                 (process-lines-ignore-status "wl-paste" "--list-types"))))
-
-(defun romacs-agent-menu--save-clipboard-image (session type)
-  "Save the clipboard's image, of MIME TYPE, with SESSION; return its file."
-  (let* ((dir (expand-file-name "attachments" (romacs-agent-dir session)))
-         (file (progn (make-directory dir t)
-                      (make-temp-file (expand-file-name "clipboard-" dir) nil
-                                      (concat "." (substring type (length "image/"))))))
-         (saved nil))
-    (unwind-protect
-        (progn
-          (unless (eql 0 (call-process "wl-paste" nil (list :file file) nil "--type" type))
-            (user-error "Could not read the clipboard's image"))
-          (setq saved t)
-          file)
-      (unless saved (delete-file file)))))
-
-(defun romacs-agent-chat-attach (file)
-  "Put FILE's path in the composer: the agent reads it where it is, no
-copy is made.  Interactively the clipboard's image, saved with the
-session; with a prefix argument, when the clipboard holds none, or in a
-chat whose session takes no commands from here, a file asked for."
-  (interactive
-   (list (if-let* ((type (and (not current-prefix-arg) (romacs-agent-log--commands-p)
-                              (romacs-agent-menu--clipboard-image-type))))
-             (romacs-agent-menu--save-clipboard-image (romacs-agent-menu--session) type)
-           (read-file-name "Attach: " nil nil t)))
-   romacs-agent-log-mode)
+(defun romacs-agent-menu--link (file)
+  "Put a link to FILE at the composer's end, the chat's current."
   (goto-char (point-max))
   (unless (or (= (point) romacs-agent-log--input) (memq (char-before) '(?\s ?\n))) (insert " "))
-  (insert (expand-file-name file)))
+  (insert (romacs-agent-log-images-link file)))
+
+(defun romacs-agent-chat-attach (&optional ask)
+  "Link a file in the composer, [image](PATH) for an image: the agent
+reads it where it is, and the chat shows it.  Interactively the
+clipboard's image: the file it was copied from (a screenshot), else the
+image saved once in `romacs-attach-save-directory'.  With a prefix
+argument ASK, when the clipboard holds no image, or in a chat whose
+session takes no commands from here, a file asked for."
+  (interactive "P" romacs-agent-log-mode)
+  (if-let* ((type (and (not ask) (romacs-agent-log--commands-p) (romacs-attach-clipboard-image-type))))
+      (let ((chat (current-buffer)))
+        (message "Attaching the clipboard's image…")
+        (romacs-attach-clipboard-file
+         type (lambda (file)
+                (cond ((not file) (message "Could not read the clipboard's image"))
+                      ((buffer-live-p chat)
+                       (with-current-buffer chat (romacs-agent-menu--link file))
+                       (message "Attached %s" (abbreviate-file-name file)))))))
+    (romacs-agent-menu--link (read-file-name "Attach: " nil nil t))))
 
 (keymap-popup-define romacs-agent-menu-map
   "Actions of an agent chat: what waits on you, the turn, what it runs on,
@@ -367,7 +357,7 @@ the session, the view."
   "i" ("Interrupt" romacs-agent-log-interrupt :inapt-if (lambda () (not (romacs-agent-log--running-p))))
   "k" ("Interrupt, then send" romacs-agent-log-interrupt-and-send)
   "q" ("Send when the turn ends" romacs-agent-log-queue)
-  "A" ("Attach a file's path" romacs-agent-chat-attach)
+  "A" ("Attach clipboard image (C-u: file)" romacs-agent-chat-attach)
   "u" ("Roll back this turn (C-u: last)" romacs-agent-chat-rollback
        :inapt-if (lambda () (not (romacs-agent--harness-free-p romacs-agent-log--session))))
   "D" ("Diff this turn (C-u: session)" romacs-agent-chat-diff)

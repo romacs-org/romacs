@@ -393,9 +393,10 @@ fn an_idle_worker_ends_on_sigterm_without_waiting_for_sigkill() {
 /// Its job settles with `isolate-world-unavailable` naming both carries and
 /// the world, `isolate-error-functions` hears the same, the world is
 /// forgotten, and the job's retry and the next worker boot from source and
-/// answer; with zygotes, the zygote refuses and its waiting job runs from
-/// source. The store is a linked copy of the installation's, so the worker
-/// takes the path of any store (`world::adopt`), not the installation's.
+/// answer, their futures saying they run without it; with zygotes, the
+/// zygote refuses and its waiting job runs from source. The store is a
+/// linked copy of the installation's, so the worker takes the path of any
+/// store (`world::adopt`), not the installation's.
 #[test]
 fn a_worker_handed_the_batch_world_refuses_it_and_the_next_boots_from_source() {
     let exe = Path::new(installed::romacs());
@@ -429,14 +430,18 @@ fn a_worker_handed_the_batch_world_refuses_it_and_the_next_boots_from_source() {
                            (isolate-error (list (car e) (equal (nth 2 e) (list {want:?} world)))))
                          isolate-world
                          (progn (romacs--isolate-pump 0.5) (equal heard (list (list {want:?} world))))
-                         (isolate-await (isolate-spawn '+ 1 2) 120)))
+                         (let ((next (isolate-spawn '+ 1 2)))
+                           (list (isolate-await next 120)
+                                 (equal (isolate-future-degraded next)
+                                        (list (list 'isolate-world-unavailable {want:?} world)))))))
             (isolate-kill-all)))", store = store.display().to_string());
         let (ok, out, err) = batch(&script, Path::new("/"));
         assert!(ok, "batch failed (zygotes {zygotes}): {err}");
         // Without zygotes the job's own worker refused; with them the zygote
         // did, and the job waiting on its fork ran from source.
         let first = if zygotes == "nil" { "(isolate-world-unavailable t)" } else { "3" };
-        assert_eq!(out.trim(), format!("({first} nil t 3)"), "zygotes {zygotes}: {err}");
+        // The next job runs from source, and its future says so (romacs#362).
+        assert_eq!(out.trim(), format!("({first} nil t (3 t))"), "zygotes {zygotes}: {err}");
     }
     let _ = std::fs::remove_dir_all(&scratch);
 }

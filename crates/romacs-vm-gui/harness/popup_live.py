@@ -49,7 +49,7 @@ HERE = Path(__file__).resolve().parent
 import live_oracle as live
 
 # keymap_popup_fixture.el's menu, shown by C-c p.
-SHOW = '''(load {fixture} nil t)
+SHOW = live.WRITE_WHOLE + '''(load {fixture} nil t)
 (global-set-key (kbd "C-c p") (lambda () (interactive) (keymap-popup keymap-popup-fixture-map)))
 '''
 
@@ -66,7 +66,7 @@ INIT = SHOW + '''(setq keymap-popup-backend #'keymap-popup-backend-side-window)
          (window (get-buffer-window buffer))
          (main (window-main-window)))
     (with-current-buffer buffer
-      (write-region
+      (live-write-whole
        (prin1-to-string
         (list :outcome outcome :height-before old
               :lines (count-lines (point-min) (point-max))
@@ -101,7 +101,7 @@ INIT = SHOW + '''(setq keymap-popup-backend #'keymap-popup-backend-side-window)
                                      (forward-line 1))
                                    (nreverse out)))
                              (error (error-message-string error)))))
-       nil {state}))
+       {state}))
     (if (eq outcome 'fitted) outcome (error "%s" (cadr outcome)))))
 (with-eval-after-load 'keymap-popup
   (advice-add 'keymap-popup--fit-side-window :around #'popup-live--record))
@@ -116,7 +116,7 @@ CHILD_INIT = SHOW + '''(setq keymap-popup-backend #'keymap-popup-backend-child-f
   (let* ((frame (keymap-popup--session-get buffer :frame))
          (window (frame-root-window frame)))
     (with-current-buffer buffer
-      (write-region
+      (live-write-whole
        (prin1-to-string
         (list :position (list (car (frame-position frame)) (cdr (frame-position frame)))
               :native (list (frame-native-width frame) (frame-native-height frame))
@@ -136,7 +136,7 @@ CHILD_INIT = SHOW + '''(setq keymap-popup-backend #'keymap-popup-backend-child-f
                          (nreverse out)))
               :root-windows (popup-live--root-windows)
               :frames (length (frame-list))))
-       nil {state} nil (quote quiet)))))
+       {state}))))
 (with-eval-after-load 'keymap-popup
   (advice-add 'keymap-popup--show-child-frame :after #'popup-live--record))
 '''
@@ -150,7 +150,7 @@ LAYER_INIT = SHOW + '''(setq keymap-popup-backend #'keymap-popup-backend-layer)
   (let* ((frame (keymap-popup--session-get buffer :frame))
          (window (frame-root-window frame)))
     (with-current-buffer buffer
-      (write-region
+      (live-write-whole
        (prin1-to-string
         (list :position (list (car (frame-position frame)) (cdr (frame-position frame)))
               :native (list (frame-native-width frame) (frame-native-height frame))
@@ -176,7 +176,7 @@ LAYER_INIT = SHOW + '''(setq keymap-popup-backend #'keymap-popup-backend-layer)
               :kind (frame-parameter frame 'romacs-popup-kind)
               :margin (romacs-layer-float-gap (frame-parent frame))
               :description (keymap-popup--active-get buffer :resolved-docstring)))
-       nil {state} nil (quote quiet)))))
+       {state}))))
 (with-eval-after-load 'keymap-popup
   (advice-add 'keymap-popup--fit-layer :after
             ;; Its first fit runs as the popup renders, before :show made the panel.
@@ -187,38 +187,38 @@ LAYER_INIT = SHOW + '''(setq keymap-popup-backend #'keymap-popup-backend-layer)
   (let* ((buffer (keymap-popup--popup-buffer)) (frame (keymap-popup--session-get buffer :frame))
          (window (frame-root-window frame)))
     (redisplay t)
-    (write-region
+    (live-write-whole
      (prin1-to-string
       (list :runs (keymap-popup-fixture-placed-runs buffer)
             :position (list (car (frame-position frame)) (cdr (frame-position frame)))
             :text-left (car (window-inside-pixel-edges window)) :text-top (cadr (window-inside-pixel-edges window))
             :column (frame-char-width frame) :line (frame-char-height frame)))
-     nil {faces} nil 'quiet)))
+     {faces})))
 (global-set-key (kbd "C-c k") #'popup-live--fixture))
 '''
 
 
-REPEAT_INIT = '''(repeat-mode 1)
+REPEAT_INIT = live.WRITE_WHOLE + '''(repeat-mode 1)
 (split-window-right)
 (defun popup-live--state ()
-  (write-region (prin1-to-string (list :command (and (symbolp this-command) (symbol-name this-command))
+  (live-write-whole (prin1-to-string (list :command (and (symbolp this-command) (symbol-name this-command))
                                        :window (format "%S" (selected-window))
                                        :repeat (and repeat-in-progress (symbol-name repeat-in-progress))
                                        :hints (and (bound-and-true-p romacs-popup--hints-shown) t)
                                        :bar-repeat (bound-and-true-p romacs-mode-line-repeat)
                                        :hint-window (and (bound-and-true-p romacs-popup--hints-place)
                                                          (format "%S" (car romacs-popup--hints-place)))))
-                nil {state} nil 'quiet))
+                {state}))
 (add-hook 'post-command-hook #'popup-live--state 90)
 (advice-add 'romacs-popup--hints-show :after (lambda (&rest _) (popup-live--state)))
 '''
 
 
-PROMPTS_INIT = '''(load {scenes} nil t)
+PROMPTS_INIT = live.WRITE_WHOLE + '''(load {scenes} nil t)
 (defun popup-live--prompt ()
   (interactive)
   (let* ((root (romacs-layer--root-frame)) (host (romacs--minibuffer-host)) (window (active-minibuffer-window)))
-    (write-region
+    (live-write-whole
      (prin1-to-string
       (with-current-buffer (window-buffer window)
         (let ((lines (split-string (buffer-substring-no-properties (point-min) (point-max)) "\\n")))
@@ -230,7 +230,7 @@ PROMPTS_INIT = '''(load {scenes} nil t)
                 :text-pixels (romacs-complete--measure-prompt (current-buffer) (frame-char-width root) 100000)
                 :layer-text (and host (frame-text-width host))
                 :depth (minibuffer-depth)))))
-     nil {state} nil 'quiet)))
+     {state})))
 (add-hook 'minibuffer-setup-hook (lambda () (run-at-time 0.6 nil #'popup-live--prompt)))
 (global-set-key (kbd "<f12>") #'popup-live--prompt)
 (define-key minibuffer-local-map (kbd "<f12>") #'popup-live--prompt)
@@ -239,17 +239,17 @@ PROMPTS_INIT = '''(load {scenes} nil t)
 (global-set-key (kbd "<f3>") (lambda () (interactive) (romacs-complete-mode 1)))
 (define-key minibuffer-local-map (kbd "<f2>")
   (lambda () (interactive)
-    (write-region (prin1-to-string (list :layer (and (frame-live-p romacs-complete--layer) (frame-visible-p romacs-complete--layer) t)
+    (live-write-whole (prin1-to-string (list :layer (and (frame-live-p romacs-complete--layer) (frame-visible-p romacs-complete--layer) t)
                                          :host (and (romacs--minibuffer-host) t)
                                          :root (eq (window-frame (minibuffer-window)) (romacs-layer--root-frame))
                                          :text (substring-no-properties (minibuffer-contents))))
-                  nil {state} nil 'quiet)))
+                  {state})))
 '''
 
 
-TOASTS_INIT = '''(split-window-right)
+TOASTS_INIT = live.WRITE_WHOLE + '''(split-window-right)
 (defun popup-live--toasts ()
-  (write-region
+  (live-write-whole
    (prin1-to-string
     (list :toasts (mapcar (lambda (toast)
                             (let ((f (romacs-layer--frame (car toast))))
@@ -262,7 +262,7 @@ TOASTS_INIT = '''(split-window-right)
                        (list (car (frame-position host)) (cdr (frame-position host)) (frame-pixel-width host) (frame-pixel-height host))))
           :pane (window-edges (frame-selected-window (romacs-layer--root-frame)) t nil t)
           :command (and (symbolp last-command) (symbol-name last-command))))
-   nil {state} nil 'quiet))
+   {state}))
 (defun popup-live-path () (interactive)
   (message "Wrote %s" (expand-file-name "Projects/rust/romacs/lisp/session/romacs-defaults.el" "~")))
 (global-set-key (kbd "<f5>") #'popup-live-path)
@@ -273,7 +273,7 @@ TOASTS_INIT = '''(split-window-right)
 '''
 
 
-INDICATORS_INIT = '''(run-at-time 1 nil (lambda ()
+INDICATORS_INIT = live.WRITE_WHOLE + '''(run-at-time 1 nil (lambda ()
   (switch-to-buffer (get-buffer-create "w.el"))
   (emacs-lisp-mode)
   (insert "(defun alpha ()\n  (list 1\n        2))\n\n(defun beta () 3)\n")
@@ -288,13 +288,13 @@ INDICATORS_INIT = '''(run-at-time 1 nil (lambda ()
   (global-set-key [f9] (lambda () (interactive)
                          (rename-buffer "a-buffer-name-long-enough-that-the-status-bar-cuts-it-in-its-middle.el")))
   (run-at-time 1 nil (lambda ()
-    (write-region (prin1-to-string (list :time (substring-no-properties (string-trim display-time-string)) :selected (buffer-name (window-buffer))
+    (live-write-whole (prin1-to-string (list :time (substring-no-properties (string-trim display-time-string)) :selected (buffer-name (window-buffer))
                                          :width (frame-pixel-width) :border (frame-internal-border-width)))
-                  nil {state} nil 'quiet)))))
+                  {state})))))
 '''
 
 
-WHICH_KEY_INIT = '''(require 'which-key)
+WHICH_KEY_INIT = live.WRITE_WHOLE + '''(require 'which-key)
 (setq which-key-popup-type 'custom
       which-key-custom-show-popup-function #'romacs-popup-which-key-show
       which-key-custom-hide-popup-function #'romacs-popup-which-key-hide
@@ -306,7 +306,7 @@ WHICH_KEY_INIT = '''(require 'which-key)
 (defun popup-live--record (&rest _)
   (let* ((frame (and (buffer-live-p which-key--buffer) (romacs-layer--frame-of which-key--buffer)))
          (window (romacs-layer--toast-window)))
-    (write-region
+    (live-write-whole
      (prin1-to-string
       (list :shown (and frame (frame-visible-p frame) t)
             :kind (and frame (frame-parameter frame 'romacs-popup-kind))
@@ -321,7 +321,7 @@ WHICH_KEY_INIT = '''(require 'which-key)
             :chrome-bottom (romacs-chrome-bottom (romacs-layer--root-frame))
             :command (and (symbolp last-command) (symbol-name last-command))
             :hides popup-live--hides))
-     nil {state} nil (quote quiet))))
+     {state})))
 ;; How many times a shown card was hidden: the next card may follow
 ;; within which-key's secondary delay, too soon for a scene to show none.
 (defvar popup-live--hides 0)

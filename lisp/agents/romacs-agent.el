@@ -2341,9 +2341,13 @@ chunks.  Output that comes while records are handled (a handler waiting
 on a process) waits for them, so records are handled once each, in the
 order they were sent; `romacs-agent--drain' handles them, a turn's
 slice at a time: with one taken, the next is its timer's."
-  (process-put process 'pending (cons chunk (process-get process 'pending)))
-  (when (string-search "\n" chunk) (process-put process 'ready t))
-  (unless (process-get process 'drain-timer) (romacs-agent--drain process)))
+  (let ((ends (romacs-agent--ends process)))
+    (process-put process 'pending (cons chunk (process-get process 'pending)))
+    ;; A chunk with no line's end completes no record: the drain, or its
+    ;; timer, already has every whole line there was.
+    (when (string-search "\n" chunk)
+      (process-put process 'ends (1+ ends))
+      (unless (process-get process 'drain-timer) (romacs-agent--drain process)))))
 
 (defconst romacs-agent--drain-turn 0.025
   "Seconds of a supervisor's records the editor handles at a time: the
@@ -2361,7 +2365,7 @@ inside itself.  Its end, once seen, waits for them
     (process-put process 'text nil)
     (process-put process 'queue nil)
     (process-put process 'pending nil)
-    (process-put process 'ready nil))
+    (process-put process 'ends 0))
   (unless (process-get process 'draining)
     (process-put process 'draining t)
     (let ((until (+ (float-time) romacs-agent--drain-turn)))
@@ -2379,44 +2383,57 @@ inside itself.  Its end, once seen, waits for them
 (defun romacs-agent--line-waits-p (process)
   "Whether a whole line of PROCESS's output waits to be handled: in the
 text its lines are read from (its `text', from `start'), or else in the
-chunks come since, which then become that text (`romacs-agent--join')."
-  (let ((found nil))
-    (while (and (not (setq found (let ((text (process-get process 'text)))
-                                   (and text (string-search "\n" text (process-get process 'start))))))
-                (process-get process 'ready))
-      (romacs-agent--join process))
-    found))
+chunks come since, which then become that text (`romacs-agent--join'):
+a join with a line's end waiting always ends with one."
+  (or (let ((text (process-get process 'text)))
+        (and text (string-search "\n" text (process-get process 'start)) t))
+      (and (romacs-agent--ends-wait-p process)
+           (progn (romacs-agent--join process) t))))
+
+(defun romacs-agent--ends (process)
+  "How many chunks of PROCESS's output waiting to be joined hold a line's
+end, counted as chunks come and as they are joined.  An attachment from
+before the count (code loaded into a running editor) is counted once."
+  (or (process-get process 'ends)
+      (let ((ends (cl-count-if (lambda (chunk) (string-search "\n" chunk))
+                               (append (process-get process 'queue) (process-get process 'pending)))))
+        (process-put process 'ends ends)
+        ends)))
+
+(defun romacs-agent--ends-wait-p (process)
+  "Whether a chunk of PROCESS's output waiting to be joined holds a line's
+end (`romacs-agent--ends')."
+  (> (romacs-agent--ends process) 0))
 
 (defun romacs-agent--output-waits-p (process)
   "Whether a line of PROCESS's output may wait to be handled: one in its
 text, or chunks come since with a line's end.  Nothing is joined."
-  (or (process-get process 'ready)
+  (or (romacs-agent--ends-wait-p process)
       (let ((text (process-get process 'text)))
         (and text (string-search "\n" text (process-get process 'start)) t))))
 
-(defconst romacs-agent--join-bytes 1048576
-  "How much of a supervisor's output waiting is joined into the text its
-lines are read from at a time (`romacs-agent--join').")
-
 (defun romacs-agent--join (process)
-  "PROCESS's text from now: the rest of its text, then its oldest chunks
-waiting, `romacs-agent--join-bytes' of them (one at least).  A replay of
-hundreds of megabytes, read faster than it is handled, is copied a part
-at a time, each once.  The chunks come oldest first from its `queue',
-made of its `pending' ones (newest first) once it is empty, so each is
-turned once.  What is left may hold a line's end: `ready'."
-  (let ((queue (or (process-get process 'queue)
-                   (prog1 (nreverse (process-get process 'pending)) (process-put process 'pending nil))))
-        (taken nil) (size 0))
-    (while (and queue (or (null taken) (< size romacs-agent--join-bytes)))
-      (setq size (+ size (length (car queue))))
-      (push (pop queue) taken))
+  "PROCESS's text from now: the rest of its text, then its chunks waiting,
+oldest first, up to the first that holds a line's end.  Each byte is
+copied once whatever the line's length: a line in many chunks is joined
+when its end has come, never a part at a time, and a replay read faster
+than it is handled is joined a line's chunks at a time.  The chunks come
+from its `queue', made of its `pending' ones (newest first) when it is
+empty, so each is turned once."
+  (let ((queue (process-get process 'queue)) (taken nil) (end nil))
+    (while (and (not end) (or queue (process-get process 'pending)))
+      (unless queue
+        (setq queue (nreverse (process-get process 'pending)))
+        (process-put process 'pending nil))
+      (let ((chunk (pop queue)))
+        (push chunk taken)
+        (setq end (string-search "\n" chunk))))
     (let ((text (process-get process 'text)))
       (process-put process 'text (apply #'concat (if text (substring text (process-get process 'start)) "")
                                         (nreverse taken))))
     (process-put process 'start 0)
     (process-put process 'queue queue)
-    (process-put process 'ready (and (or queue (process-get process 'pending)) t))))
+    (when end (process-put process 'ends (1- (romacs-agent--ends process))))))
 
 (defun romacs-agent--let-go-p (process)
   "Whether PROCESS is an attachment this editor let go: ended, and another
@@ -2448,13 +2465,17 @@ answer not handled leaves its session starting)."
 
 (defun romacs-agent--filter-lines (process until)
   "Handle the whole lines of PROCESS's output text from its `start' until
-time UNTIL, each on its own: one whose handling signals is reported and
-the next handled, so no error loses the records after it.  A line is
-passed over as it is taken: a handler that exits nonlocally (a quit)
-leaves the lines after it waiting."
+time UNTIL, one at least, each on its own: one whose handling signals
+is reported and the next handled, so no error loses the records after
+it.  A line is passed over as it is taken: a handler that exits
+nonlocally (a quit) leaves the lines after it waiting."
   (let ((session (process-get process 'romacs-agent))
-        (text (process-get process 'text)))
-    (while (and (< (float-time) until) (string-match "\n" text (process-get process 'start)))
+        (text (process-get process 'text))
+        ;; One line at least, whatever finding it cost: a line whose search
+        ;; outlasts the turn's budget is still handled, never put off.
+        (first t))
+    (while (and (or first (< (float-time) until)) (string-match "\n" text (process-get process 'start)))
+      (setq first nil)
       (let ((line (substring text (process-get process 'start) (match-beginning 0))))
         (process-put process 'start (match-end 0))
         (let ((record (ignore-errors

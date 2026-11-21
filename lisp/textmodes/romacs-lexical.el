@@ -97,7 +97,7 @@ special forms and the commonest macros, as a regexp a head matches whole."
 (defcustom romacs-lexical-languages
   '((emacs-lisp . lisp) (lisp . lisp) (common-lisp . lisp) (scheme . lisp) (clojure . lisp)
     (racket . lisp) (fennel . lisp)
-    (diff . diff) (patch . diff)
+    (diff . diff) (patch . diff) (shell . hash) (console . hash)
     (makefile . hash) (make . hash) (conf . hash) (ini . hash) (dockerfile . hash) (nix . hash)
     (perl . hash) (r . hash) (fish . hash) (nim . hash) (elixir . hash) (julia . hash)
     (zig . slash) (kotlin . slash) (swift . slash) (scala . slash) (dart . slash) (groovy . slash)

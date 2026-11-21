@@ -565,7 +565,10 @@ impl Leaf<'_> {
         if self.ts_registry_mut(base).early.as_mut().is_some_and(crate::treesit::Early::pending) {
             return Ok(Value::TRUE);
         }
-        Ok(flag(self.ts_registry(base).parsers.iter().any(|(_, core)| core.borrow_mut().ahead.as_mut().is_some_and(|ahead| !ahead.ready()))))
+        Ok(flag(self.ts_registry(base).parsers.iter().any(|(_, core)| {
+            let mut c = core.borrow_mut();
+            (c.tree.is_none() && c.waiting_slot) || c.ahead.as_mut().is_some_and(|ahead| !ahead.ready())
+        })))
     }
     /// The tree of the early parse of PARSER's buffer, which only a first
     /// parse uses: a parser that sees what that parse saw waits for it, and
@@ -587,6 +590,44 @@ impl Leaf<'_> {
         (region == visible && !(edited && core.linecols.is_some())).then_some((tree, edited))
     }
 
+    /// Wait for the thread parses PARSER's next tree comes from (its own
+    /// reparse on a thread, and its buffer's early parse when it has no tree
+    /// yet), in slices a C-g ends as it ends a process wait: the quit goes
+    /// through the asker, and the parses run on for the next ask.
+    fn ts_wait_threads(&mut self, parser: Value) -> R<()> {
+        let p = self.ts_parser(parser)?;
+        let (core, base, native) = (p.core.clone(), self.ts_base(p.buffer), p.native.clone());
+        let slice = crate::quit::QUIT_SLICE;
+        loop {
+            let (first, length) = { let c = core.borrow(); (c.tree.is_none(), c.visible.1 - c.visible.0) };
+            let ahead = core.borrow_mut().ahead.as_mut().is_none_or(|ahead| ahead.wait(slice));
+            // Only an early parse this parser can take is worth its wait.
+            let early = !first || {
+                let native = native.borrow();
+                let (language, sees_all) = (native.language(), native.sees_all(u32::try_from(length).unwrap_or(u32::MAX)));
+                !self.ts_registry_mut(base).early.as_mut().is_some_and(|early| early.pending_for(language.as_ref(), sees_all) && !early.wait(slice))
+            };
+            // A press during the slice that got the tree quits too.
+            if self.vm.quit_input_pending() {
+                match self.vm.maybe_quit() {
+                    None => {}
+                    Some(crate::threaded::Escape::Signal(condition, data)) => return Err(Fault::Signal(condition, data)),
+                    Some(escape) => {
+                        self.vm.propagated_escape = Some(escape);
+                        return Err(Fault::Escape);
+                    }
+                }
+            }
+            // A worker's interrupt or termination, as its process waits take
+            // it, the slice that got the tree included.
+            if let Some(quit) = self.vm.worker_quit() {
+                return Err(quit);
+            }
+            if ahead && early {
+                return Ok(());
+            }
+        }
+    }
     /// treesit_ensure_parsed up to its notifiers: the changed ranges when it
     /// parsed, None when no parse was due. A parse leaves the parser
     /// `within_reparse' for its notifiers (`ts_reparse_done').
@@ -603,6 +644,10 @@ impl Leaf<'_> {
         if !core.borrow().need_reparse {
             self.ts_parser_mut(parser).within_reparse = false;
             return Ok(None);
+        }
+        if let Err(quit) = self.ts_wait_threads(parser) {
+            self.ts_parser_mut(parser).within_reparse = false;
+            return Err(quit);
         }
         let (old, visible) = { let c = core.borrow(); (c.tree.clone(), c.visible) };
         // A reparse a frame started on a thread: its tree, waited for, is
@@ -638,6 +683,7 @@ impl Leaf<'_> {
             let mut c = core.borrow_mut();
             c.tree = Some(new);
             c.need_reparse = false;
+            c.waiting_slot = false;
             c.fresh = old.is_none() && behind.is_none();
         }
         self.ts_parser_mut(parser).timestamp += 1;
