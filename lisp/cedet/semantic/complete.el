@@ -172,8 +172,8 @@ Value should be a ... what?")
 (defvar semantic-complete-key-map
   (let ((km (make-sparse-keymap)))
     (define-key km " " #'semantic-complete-complete-space)
-    (define-key km "\t" #'semantic-complete-complete-tab)
-    (define-key km "\C-m" #'semantic-complete-done)
+    (define-key km (kbd "TAB") #'semantic-complete-complete-tab)
+    (define-key km (kbd "RET") #'semantic-complete-done)
     (define-key km "\C-g" #'abort-recursive-edit)
     (define-key km "\M-n" #'next-history-element)
     (define-key km "\M-p" #'previous-history-element)
@@ -582,10 +582,10 @@ if INLINE, then completion is happening inline in a buffer."
 ;; push ourselves out of this mode on alternate keypresses.
 (defvar semantic-complete-inline-map
   (let ((km (make-sparse-keymap)))
-    (define-key km "\C-i" #'semantic-complete-inline-TAB)
+    (define-key km (kbd "TAB") #'semantic-complete-inline-TAB)
     (define-key km "\M-p" #'semantic-complete-inline-up)
     (define-key km "\M-n" #'semantic-complete-inline-down)
-    (define-key km "\C-m" #'semantic-complete-inline-done)
+    (define-key km (kbd "RET") #'semantic-complete-inline-done)
     (define-key km "\C-\M-c" #'semantic-complete-inline-exit)
     (define-key km "\C-g" #'semantic-complete-inline-quit)
     (define-key km "?"

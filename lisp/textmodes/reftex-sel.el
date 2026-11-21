@@ -42,7 +42,7 @@
     (define-key map "p" #'reftex-select-previous)
     (define-key map [(up)] #'reftex-select-previous)
     (define-key map "f" #'reftex-select-toggle-follow)
-    (define-key map "\C-m" #'reftex-select-accept)
+    (define-key map (kbd "RET") #'reftex-select-accept)
     (define-key map [(return)] #'reftex-select-accept)
     (define-key map "q" #'reftex-select-quit)
     (define-key map "." #'reftex-select-show-insertion-point)
@@ -74,7 +74,7 @@
     (define-key map "-" #'reftex-select-mark-to)
     (define-key map "+" #'reftex-select-mark-and)
     (define-key map [(tab)] #'reftex-select-read-label)
-    (define-key map "\C-i" #'reftex-select-read-label)
+    (define-key map (kbd "TAB") #'reftex-select-read-label)
     (define-key map "\C-c\C-n" #'reftex-select-next-heading)
     (define-key map "\C-c\C-p" #'reftex-select-previous-heading)
 
@@ -118,7 +118,7 @@ During a selection process, these are the local bindings.
                 (interactive) (throw 'myexit key))))
           "grRaAeE")
 
-    (define-key map "\C-i" #'reftex-select-read-cite)
+    (define-key map (kbd "TAB") #'reftex-select-read-cite)
     (define-key map [(tab)] #'reftex-select-read-cite)
     (define-key map "m" #'reftex-select-mark)
     (define-key map "u" #'reftex-select-unmark)

@@ -384,10 +384,10 @@ With prefix argument, don't jump to global mark when canceling it."
     #'cua-insert-newline-at-global-mark)
   (define-key cua--global-mark-keymap [remap newline-and-indent]
     #'cua-insert-newline-at-global-mark)
-  (define-key cua--global-mark-keymap "\r"
+  (define-key cua--global-mark-keymap (kbd "RET")
     #'cua-insert-newline-at-global-mark)
 
-  (define-key cua--global-mark-keymap "\t"
+  (define-key cua--global-mark-keymap (kbd "TAB")
     #'cua-indent-to-global-mark-column)
 
   (setq cua--global-mark-initialized t))

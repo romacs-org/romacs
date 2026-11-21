@@ -920,7 +920,7 @@ START is the position of the \\ and DELIM is the delimiter char."
     (define-key map "\C-c\C-b" #'tex-buffer)
     (define-key map "\C-c\C-f" #'tex-file)
     (define-key map "\C-c\C-c" #'tex-compile)
-    (define-key map "\C-c\C-i" #'tex-bibtex-file)
+    (define-key map (kbd "C-c TAB") #'tex-bibtex-file)
     (define-key map "\C-c\C-o" #'latex-insert-block)
 
     ;; Redundant keybindings, for consistency with SGML mode.
@@ -930,7 +930,7 @@ START is the position of the \\ and DELIM is the delimiter char."
 
     (define-key map "\C-c\C-e" #'latex-close-block)
     (define-key map "\C-c\C-u" #'tex-goto-last-unclosed-latex-block)
-    (define-key map "\C-c\C-m" #'tex-feed-input)
+    (define-key map (kbd "C-c RET") #'tex-feed-input)
     (define-key map [(control return)] #'tex-feed-input)
     (define-key map [menu-bar tex tex-bibtex-file]
       '("BibTeX File" . tex-bibtex-file))

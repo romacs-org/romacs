@@ -103,7 +103,7 @@
   (let ((map (speedbar-make-specialized-keymap)))
 
     ;; General viewing things
-    (define-key map "\C-m" 'speedbar-edit-line)
+    (define-key map (kbd "RET") 'speedbar-edit-line)
     (define-key map "+" 'speedbar-expand-line)
     (define-key map "=" 'speedbar-expand-line)
     (define-key map "-" 'speedbar-contract-line)

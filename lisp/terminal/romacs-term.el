@@ -198,6 +198,8 @@ typing puts the window back on the cursor and sends the key.")
     f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12)
   "The function keys a terminal has bytes for.")
 
+(declare-function romacs-gui-control-key-events "romacs-editing" ())
+
 (defconst romacs-term--modifier-prefixes
   '("" "S-" "C-" "M-" "C-S-" "M-S-" "C-M-" "C-M-S-")
   "The modifier combinations bound for each function key.")
@@ -205,6 +207,14 @@ typing puts the window back on the cursor and sends the key.")
 (defun romacs-term--descriptions (keys)
   "KEYS, `kbd' strings, as `key-description' gives them."
   (mapcar (lambda (key) (key-description (kbd key))) keys))
+
+(defun romacs-term--excepted-p (key skip)
+  "Whether KEY, a vector, is one of SKIP's descriptions: by its own, or by
+the key the function key map makes it where it is unbound (Tab is TAB,
+`C-m' RET), as the command loop would look it up."
+  (let ((as (lookup-key (if (boundp 'local-function-key-map) local-function-key-map function-key-map) key)))
+    (or (member (key-description key) skip)
+        (and (arrayp as) (member (key-description as) skip)))))
 
 (defun romacs-term--passthrough-keymap (exceptions)
   "A keymap that sends every key to the terminal except EXCEPTIONS: ASCII
@@ -237,10 +247,22 @@ through the remapping."
         (let ((prefixes romacs-term--modifier-prefixes))
           (while prefixes
             (let ((key (vector (intern (concat (car prefixes) (symbol-name (car names)))))))
-              (unless (member (key-description key) skip)
+              (unless (romacs-term--excepted-p key skip)
                 (define-key map key 'romacs-term-send-key)))
             (setq prefixes (cdr prefixes))))
         (setq names (cdr names))))
+    ;; The GUI's keys a terminal has only as control characters: `C-m' and
+    ;; the rest (romacs-editing.el), and C-SPC and C-? (NUL and DEL), with
+    ;; Meta.  Each stays with Emacs when it or the character it was is an
+    ;; exception, and one with Super, Hyper or Alt, which a terminal has no
+    ;; bytes for, is left.
+    (dolist (pair (append (romacs-gui-control-key-events)
+                          (list (cons (logior ?\s #x4000000) 0) (cons (logior ?\s #xc000000) #x8000000)
+                                (cons (logior ?? #x4000000) 127) (cons (logior ?? #xc000000) #x800007f))))
+      (unless (or (/= 0 (logand (cdr pair) #x1c00000))
+                  (romacs-term--excepted-p (vector (car pair)) skip)
+                  (member (key-description (vector (cdr pair))) skip))
+        (define-key map (vector (car pair)) 'romacs-term-send-key)))
     ;; Last, so the front of the list: every lookup of a remapping finds it
     ;; first.
     (define-key map [remap self-insert-command] 'romacs-term-send-key)

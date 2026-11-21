@@ -118,7 +118,7 @@ to invocation.")
   (suppress-keymap ediff-mode-map)
 
   (define-key ediff-mode-map [mouse-2] #'ediff-help-for-quick-help)
-  (define-key ediff-mode-map "\C-m"  #'ediff-help-for-quick-help)
+  (define-key ediff-mode-map (kbd "RET")  #'ediff-help-for-quick-help)
 
   (define-key ediff-mode-map "p" #'ediff-previous-difference)
   (define-key ediff-mode-map "\C-?" #'ediff-previous-difference)

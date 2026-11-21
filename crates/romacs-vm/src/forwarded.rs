@@ -1262,8 +1262,8 @@ impl Vm {
     #[inline(always)]
     fn resolve_redirect(&mut self, slot: usize) {
         if self.variable_redirects.get(slot).copied().flatten().is_none()
+            && self.in_initial_obarray(slot)
             && let Some(name) = self.symbol_names.get(slot)
-            && self.names.get(name) == Some(&slot)
         {
             let name = name.clone();
             self.initialize_variable_redirect(&name, slot);
