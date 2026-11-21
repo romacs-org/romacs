@@ -177,12 +177,22 @@ goes on.")
   "The id of the call at the transcript's top level that runs now, or nil.")
 (defvar-local romacs-agent-log--early nil
   "Output that came before its call, an alist of ID to TEXT.")
+(cl-defstruct (romacs-agent-log-stream (:constructor romacs-agent-log-stream--make) (:copier nil))
+  "What streams at the transcript's end."
+  (kind nil :documentation "`text' or `thinking'.")
+  (start nil :documentation "A marker where its text began, nil until its first text.")
+  (at nil :documentation "A marker where its next text goes, before its line's newline.")
+  (held 0 :documentation "The line breaks it ended in so far, held until text follows:
+a message ends with no trail of blank lines."))
+
 (defvar-local romacs-agent-log--stream nil
-  "What streams at the transcript's end: (KIND START AT NEWLINES SHOWN),
-KIND `text' or `thinking', START a marker where its text began, AT one
-where the next text goes, before the newline that ends its line so far,
-NEWLINES the line breaks it ended in so far, held until text follows,
-and SHOWN whether any of its text is in, its entry marked.")
+  "The `romacs-agent-log-stream' at the transcript's end, or nil.")
+
+(defun romacs-agent-log--reply-stream ()
+  "The stream of the agent's words at the end, once it shows text, or nil."
+  (let ((stream romacs-agent-log--stream))
+    (and stream (eq (romacs-agent-log-stream-kind stream) 'text) (romacs-agent-log-stream-start stream)
+         stream)))
 
 (defvar-local romacs-agent-log--root-kind nil
   "The kind of the last entry drawn at the transcript's top level, not
@@ -367,15 +377,14 @@ else (nil . 0), at the end."
 (defun romacs-agent-log--close-stream (&optional discard)
   "End what streams: a message gets its Markdown faces, unless DISCARD,
 its text about to go."
-  (when romacs-agent-log--stream
-    (pcase-let ((`(,kind ,start ,at . ,_) romacs-agent-log--stream))
-      (setq romacs-agent-log--stream nil)
-      ;; One that never showed text took no place.
-      (when start
-        (if discard (romacs-agent-log-faces-drop)
-          (when (eq kind 'text) (romacs-agent-log-faces-end start at)))
-        (set-marker start nil)
-        (set-marker at nil)))))
+  (when-let* ((stream romacs-agent-log--stream))
+    (setq romacs-agent-log--stream nil)
+    (when-let* ((start (romacs-agent-log-stream-start stream))
+                (at (romacs-agent-log-stream-at stream)))
+      (if discard (romacs-agent-log-faces-drop)
+        (when (eq (romacs-agent-log-stream-kind stream) 'text) (romacs-agent-log-faces-end start at)))
+      (set-marker start nil)
+      (set-marker at nil))))
 
 (defun romacs-agent-log--blank-p ()
   "Whether the transcript ends in a blank line, or is empty: a blank line
@@ -400,70 +409,92 @@ known to n and p."
                             depth)
                            at)))
 
+(defun romacs-agent-log--stream-split (text)
+  "TEXT as (LEAD BODY TRAIL): the count of line breaks before its body,
+its body, and the count after."
+  (let* ((lead (or (string-match-p "[^\n]" text) (length text)))
+         (end (if (= lead (length text)) lead (string-match-p "\n*\\'" text lead))))
+    (list lead (substring text lead end) (- (length text) end))))
+
+(defun romacs-agent-log--whole-lines (text)
+  "TEXT as (LINES . REST): its whole lines without their last newline, nil
+if none ended, and the start of a line after them."
+  (if-let* ((cut (string-match-p "\n[^\n]*\\'" text)))
+      (cons (substring text 0 cut) (substring text (1+ cut)))
+    (cons nil text)))
+
+(defun romacs-agent-log--thinking-marks (body opens)
+  "BODY, thinking, in its face, each paragraph after its first opened with
+the mark, its first too if it OPENS one: none reads as the answer."
+  (propertize (concat (if opens "∴ " "") (replace-regexp-in-string "\n\n" "\n\n∴ " body t t))
+              'face 'romacs-agent-log-thinking))
+
+(defun romacs-agent-log--stream-chunk (kind first held body)
+  "What BODY, a stream's text of KIND, puts at its end after HELD line
+breaks: at most one blank line parts paragraphs, and its FIRST text,
+the entry's start, has none before it."
+  (let ((parted (if first "" (make-string (min held 2) ?\n)))
+        (body (replace-regexp-in-string "\n\n\n+" "\n\n" body)))
+    (let ((chunk (concat parted (if (eq kind 'thinking)
+                                    (romacs-agent-log--thinking-marks body (or first (>= held 2)))
+                                  body))))
+      (when first (put-text-property 0 1 'romacs-agent-log-entry kind chunk))
+      chunk)))
+
+(defun romacs-agent-log--stream-of (kind)
+  "The stream of KIND at the end: the one there, or a new one, the other
+kind's closed."
+  (let ((stream romacs-agent-log--stream))
+    (if (and stream (eq (romacs-agent-log-stream-kind stream) kind)) stream
+      (romacs-agent-log--close-stream)
+      (setq romacs-agent-log--stream (romacs-agent-log-stream--make :kind kind)))))
+
+(defun romacs-agent-log--stream-open (stream)
+  "Give STREAM its line at the end, a blank line apart from thinking or
+work that the agent's words follow."
+  (when (and (eq (romacs-agent-log-stream-kind stream) 'text)
+             (memq romacs-agent-log--root-kind '(thinking tool))
+             (not (romacs-agent-log--blank-p)))
+    (romacs-agent-log--put "\n"))
+  ;; Its text goes before its line's newline: the separator is never on it.
+  (let ((start (copy-marker romacs-agent-log--end)))
+    (romacs-agent-log--put "\n")
+    (setf (romacs-agent-log-stream-start stream) start
+          (romacs-agent-log-stream-at stream) (copy-marker start t)))
+  (setq romacs-agent-log--root-kind (romacs-agent-log-stream-kind stream)))
+
+(defun romacs-agent-log--stream-root (kind text)
+  "Stream TEXT of KIND at the transcript's end."
+  (pcase-let* ((`(,lead ,body ,trail) (romacs-agent-log--stream-split text))
+               (stream (romacs-agent-log--stream-of kind))
+               (held (+ (romacs-agent-log-stream-held stream) lead)))
+    (if (string-empty-p body)
+        (setf (romacs-agent-log-stream-held stream) held)
+      (let* ((first (not (romacs-agent-log-stream-start stream)))
+             (chunk (romacs-agent-log--stream-chunk kind first held body)))
+        (when first (romacs-agent-log--stream-open stream))
+        (romacs-agent-log--writing
+          (save-excursion (goto-char (romacs-agent-log-stream-at stream))
+                          (insert (romacs-agent-log--sealed chunk))))
+        (when (eq kind 'text) (romacs-agent-log-faces-soon))
+        (setf (romacs-agent-log-stream-held stream) trail)))))
+
+(defun romacs-agent-log--stream-under (block kind text depth)
+  "Stream TEXT of KIND under BLOCK's call, DEPTH deep, in whole lines,
+the rest held for what follows."
+  (let ((same (eq (plist-get (cdr block) :kind) kind)))
+    (unless same (romacs-agent-log--flush block))
+    (pcase-let ((`(,lines . ,rest) (romacs-agent-log--whole-lines
+                                    (concat (if same (plist-get (cdr block) :held) "") text))))
+      (setcdr block (plist-put (plist-put (cdr block) :kind kind) :held rest))
+      (when lines (romacs-agent-log--under block kind lines depth)))))
+
 (defun romacs-agent-log--stream (event kind text)
   "Stream TEXT, KIND `text' or `thinking', at the end, or under EVENT's
 parent call."
-  (pcase-let ((`(,at . ,depth) (romacs-agent-log--where event)))
-    (if at
-        ;; Under a call: its text goes in whole lines, the rest held.
-        (let* ((props (cdr at))
-               (held (if (eq (plist-get props :kind) kind) (plist-get props :held) "")))
-          (unless (eq (plist-get props :kind) kind) (romacs-agent-log--flush at))
-          (setcdr at (plist-put (plist-put (cdr at) :kind kind) :held (concat held text)))
-          (let ((whole (plist-get (cdr at) :held)))
-            (when-let* ((cut (string-match "\n[^\n]*\\'" whole)))
-              (setcdr at (plist-put (cdr at) :held (substring whole (1+ cut))))
-              (romacs-agent-log--under at kind (substring whole 0 cut) depth))))
-      (let* ((new (not (and romacs-agent-log--stream (eq (car romacs-agent-log--stream) kind))))
-             ;; Line breaks around its text wait for text after them: a
-             ;; message ends without a trail of blank lines, and at most
-             ;; one blank line parts its paragraphs.
-             (body (string-trim text "\n+" "\n+"))
-             (lead (if (string-empty-p body) (length text) (string-match-p "[^\n]" text)))
-             (held (+ (if new 0 (nth 3 romacs-agent-log--stream)) lead)))
-        (when new
-          (romacs-agent-log--close-stream)
-          ;; Opened, its place taken with its first text.
-          (setq romacs-agent-log--stream (list kind nil nil 0 nil)))
-        (if (string-empty-p body)
-            (setcar (nthcdr 3 romacs-agent-log--stream) held)
-          (unless (nth 1 romacs-agent-log--stream)
-            ;; The agent's words after its thinking or its work stand a
-            ;; blank line apart, not run on from them.
-            (when (and (eq kind 'text) (memq romacs-agent-log--root-kind '(thinking tool)) (not (romacs-agent-log--blank-p)))
-              (romacs-agent-log--put "\n"))
-            ;; Its line ended at once, its text put before that newline:
-            ;; the separator is never on its line.
-            (let ((start (copy-marker romacs-agent-log--end)))
-              (romacs-agent-log--put "\n")
-              (setcar (cdr romacs-agent-log--stream) start)
-              (setcar (nthcdr 2 romacs-agent-log--stream) (copy-marker start t))))
-          (let* ((first (not (nth 4 romacs-agent-log--stream)))
-                 (trail (- (length text) lead (length body)))
-                 (body (replace-regexp-in-string "\n\n\n+" "\n\n" body))
-                 ;; Its first text has no line breaks before it: the
-                 ;; separator is its one.
-                 (mark (propertize "∴ " 'face 'romacs-agent-log-thinking))
-                 ;; Thinking: each of its paragraphs marked as the first
-                 ;; is, so none reads as the answer.
-                 (chunk (if (eq kind 'thinking)
-                            (concat (cond (first mark)
-                                          ((>= held 2) (concat "\n\n" mark))
-                                          (t (make-string (min held 2) ?\n)))
-                                    (propertize (replace-regexp-in-string "\n\n" (concat "\n\n" mark) body t t)
-                                                'face 'romacs-agent-log-thinking))
-                          (concat (if first "" (make-string (min held 2) ?\n)) body))))
-            ;; Its first character starts the entry.
-            (when first
-              (put-text-property 0 1 'romacs-agent-log-entry kind chunk)
-              (setcar (nthcdr 4 romacs-agent-log--stream) t)
-              (setq romacs-agent-log--root-kind kind))
-            (romacs-agent-log--writing
-              (save-excursion
-                (goto-char (nth 2 romacs-agent-log--stream))
-                (insert (romacs-agent-log--sealed chunk))))
-            (when (eq kind 'text) (romacs-agent-log-faces-soon))
-            (setcar (nthcdr 3 romacs-agent-log--stream) trail)))))))
+  (pcase-let ((`(,block . ,depth) (romacs-agent-log--where event)))
+    (if block (romacs-agent-log--stream-under block kind text depth)
+      (romacs-agent-log--stream-root kind text))))
 
 (defun romacs-agent-log--under (block kind text depth)
   "Put TEXT, whole lines of KIND, under BLOCK, DEPTH deep."
