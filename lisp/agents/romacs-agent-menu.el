@@ -142,6 +142,8 @@ the session stays."
 kept; nil leaves it to the harness."
   (interactive
    (let* ((session (romacs-agent-menu--session))
+          (_ (romacs-agent--want-models
+              (list (romacs-agent--instance (romacs-agent-provider session) (romacs-agent-harness session)))))
           (efforts (or (romacs-agent--efforts session) (user-error "This model offers no effort"))))
      (list (romacs-agent--read-effort efforts (plist-get (romacs-agent--wanted session) :effort))))
    romacs-agent-log-mode)
@@ -156,6 +158,7 @@ with a prefix argument, asked for."
   (interactive
    (let* ((session (romacs-agent-menu--session))
           (instance (romacs-agent--instance (romacs-agent-provider session) (romacs-agent-harness session)))
+          (_ (romacs-agent--want-models (list instance)))
           (fields (cdr (romacs-agent--pick-row
                         (romacs-agent--instance-rows instance (romacs-agent--harness-display (romacs-agent-harness session)) nil))))
           (model (plist-get fields :model))
