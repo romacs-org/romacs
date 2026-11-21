@@ -204,12 +204,10 @@
                   (romacs-agent-rows-tests--draw "Bash" :ended (romacs-agent-rows-tests--table "command" "forge submit feat/x")
                                                  "20261120T182628-feat-x-6c8da7d2\n"))
                  "$ forge submit feat/x · ⇡ queued 20261120T182628-feat-x-6c8da7d2"))
-  (should (romacs-agent-rows-tail-p "Bash"))
   ;; A command longer than a row holds says its description; RET, itself.
   (should (equal (romacs-agent-rows-tests--draw "Bash" :row (romacs-agent-rows-tests--table
                                                             "command" (make-string 80 ?x) "description" "List the worktrees"))
                  "$ List the worktrees"))
-  (should-not (romacs-agent-rows-tail-p "Read"))
   ;; Details RET shows: a Romacs tool's answer as words, never JSON.
   (should (equal (romacs-agent-rows-details "romacs_buffer_read" nil
                                             "{\"name\":\"notes\",\"size\":12,\"lines\":[\"a\",\"b\"],\"rows\":[{\"x\":1}]}")

@@ -57,7 +57,7 @@
       (should (string-match-p "∴ I should run wc." text))
       (should (string-match-p "wc -l notes.txt" text))
       ;; The output under its call, before what followed the call.
-      (should (string-match-p "wc -l notes.txt[^\n]*\n  ⎿ 2 notes.txt\n\nRunning it now." text))
+      (should (string-match-p "\\$ wc -l notes.txt · 2 notes.txt\n\nRunning it now." text))
       (should (string-match-p "✻ 9s · \\$0.12" text)))))
 
 (ert-deftest romacs-agent-log-streams-without-blank-trails ()
@@ -80,12 +80,11 @@
       (draw :type 'tool :state 'started :id "t" :name "Bash" :input (romacs-agent-log-tests--input "command" "seq 5"))
       (draw :type 'tool :state 'completed :id "t" :output "1\n2\n3\n4\n5")
       (let ((text (romacs-agent-log-tests--transcript)))
-        ;; A command's last lines, as it ran: how many came before them.
-        (should (string-match-p "⎿ … 3 earlier lines · RET shows all\n    4\n    5\n" text))
-        (should-not (string-match-p "\n    3\n" text))
-        ;; RET shows all of it.
+        ;; A command that ended well is its row: how many lines it gave.
+        (should (equal text "● $ seq 5 · 5 lines\n"))
+        ;; RET on it shows all of it.
         (goto-char (point-min))
-        (search-forward "earlier lines")
+        (search-forward "seq 5")
         (save-window-excursion (romacs-agent-log-open))
         (with-current-buffer "*agent output*"
           (should (string-match-p "seq 5" (buffer-string)))
@@ -104,8 +103,8 @@
       (draw :type 'tool :state 'completed :id "c" :output "one\ntwo\nthree")
       (let ((text (romacs-agent-log-tests--transcript)))
         (should-not (string-match-p "so far" text))
-        ;; Ended: the same last lines it showed as it ran stay.
-        (should (string-match-p "make[^\n]*\n  ⎿ … 1 earlier line · RET shows all\n    two\n    three\n\nafter" text))))))
+        ;; Ended well: its row alone, what it gave RET away.
+        (should (string-match-p "make · 3 lines\n\nafter" text))))))
 
 (ert-deftest romacs-agent-log-subagent-work-goes-under-its-call ()
   (romacs-agent-log-tests--with
@@ -728,7 +727,7 @@
     ;; Known by its task alone, then ended: under its call still.
     (draw :type 'task :task "t1" :state 'backgrounded)
     (draw :type 'task :id "b" :state 'completed :summary "slept")
-    (should (string-match-p "  ⎿ Running in the background\n│ · moved to the background\n│ · completed: slept\n\nroot goes on"
+    (should (string-match-p "\\$ sleep 60 · Running in the background\n│ · moved to the background\n│ · completed: slept\n\nroot goes on"
                             (romacs-agent-log-tests--transcript)))
     (should-not (romacs-agent-log--block "b"))))
 

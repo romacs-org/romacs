@@ -1,0 +1,62 @@
+;;; romacs-agent-eye-tests.el --- A reply reads as it renders -*- lexical-binding: t; -*-
+;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
+(require 'ert)
+(require 'cl-lib)
+(require 'romacs-mcp)
+
+(let ((romacs-mcp-call-function romacs-mcp-call-function)
+      (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
+  (require 'romacs-agent)
+  (require 'romacs-agent-log)
+  (require 'romacs-agent-ui))
+
+(defun romacs-agent-eye-tests--shown (beg end)
+  "BEG..END as the window shows it: invisible text left out."
+  (let ((shown ""))
+    (while (< beg end)
+      (let ((next (next-single-property-change beg 'invisible nil end)))
+        (unless (invisible-p beg) (setq shown (concat shown (buffer-substring-no-properties beg next))))
+        (setq beg next)))
+    shown))
+
+(ert-deftest romacs-agent-eye-a-reply-hides-its-inline-marks ()
+  (let ((session (romacs-agent--make :id "E" :harness 'claude :state 'running
+                                     :tools (make-hash-table :test #'equal)
+                                     :streamed (make-hash-table :test #'equal))))
+    (with-temp-buffer
+      (romacs-agent-log-mode)
+      (setq romacs-agent-log--session session
+            romacs-agent-log--end (point-min-marker)
+            romacs-agent-log--input (point-min-marker))
+      (set-marker-insertion-type romacs-agent-log--end t)
+      (romacs-agent-log-draw session '(:type delta :text "## Done\n\nSome **bold**, _em_ and `code`.\n\n```sh\nmake\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |"))
+      (romacs-agent-log-draw session '(:type message-end))
+      (let ((shown (romacs-agent-eye-tests--shown (point-min) romacs-agent-log--end)))
+        ;; Inline marks and the heading's are gone; its words keep their faces.
+        (should (string-search "Done\n" shown))
+        (should-not (string-search "##" shown))
+        (should (string-search "Some bold, em and code." shown))
+        ;; Blocks keep their marks: a fence, a table.
+        (should (string-search "```sh" shown))
+        (should (string-search "| 1 | 2 |" shown)))
+      ;; The text itself is whole: copied, it is the Markdown.
+      (should (string-search "**bold**" (buffer-substring-no-properties (point-min) romacs-agent-log--end))))))
+
+(ert-deftest romacs-agent-eye-a-mark-no-more-shows-again ()
+  (with-temp-buffer
+    (insert "a **b**")
+    (romacs-markdown-fontify-region (point-min) (point-max))
+    (romacs-markdown-hide-markup (point-min) (point-max))
+    (should (eq (get-text-property 3 'invisible) 'romacs-markdown-markup))
+    ;; Faced again as no mark (its delimiter now text): shown.
+    (with-silent-modifications (remove-text-properties (point-min) (point-max) '(face nil)))
+    (romacs-markdown-hide-markup (point-min) (point-max))
+    (should-not (get-text-property 3 'invisible))
+    ;; Another property's invisibility is not ours to take.
+    (with-silent-modifications (put-text-property 1 2 'invisible 'fold))
+    (romacs-markdown-hide-markup (point-min) (point-max))
+    (should (eq (get-text-property 1 'invisible) 'fold))))
+
+(provide 'romacs-agent-eye-tests)
+;;; romacs-agent-eye-tests.el ends here

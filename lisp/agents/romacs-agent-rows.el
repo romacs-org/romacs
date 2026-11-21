@@ -19,8 +19,8 @@
 ;;                 nil for the row and the generic outcome.
 ;;   :body FN      (INPUT OUTPUT): the details RET on the row shows above
 ;;                 the raw answer (a table, a list), or nil.
-;;   :tail         the output's last lines show under the row (a
-;;                 command's); any other output is one key away.
+;; A call that ended well is its row alone: what it answered is one key
+;; away.
 ;; INPUT is the call's arguments, a hash table; OUTPUT its result's text.
 ;; The functions are pure: they read the session table at most, and the
 ;; chat draws what they return.
@@ -37,7 +37,7 @@
 
 (defun romacs-agent-rows-define (name &rest renderer)
   "Draw tool NAME's calls by RENDERER, a plist of :row :ended :body
-:tail (this file's Commentary)."
+\(this file's Commentary)."
   (puthash name renderer romacs-agent-rows))
 
 (defun romacs-agent-rows-name (name)
@@ -153,10 +153,6 @@ renderer's :body for INPUT and OUTPUT, or nil."
               (body (plist-get renderer :body)))
     (let ((details (funcall body (if (hash-table-p input) input (make-hash-table :test #'equal)) output)))
       (and (stringp details) (not (string-empty-p details)) details))))
-
-(defun romacs-agent-rows-tail-p (name)
-  "Whether tool NAME's output shows its last lines under its row."
-  (plist-get (romacs-agent-rows-get (romacs-agent-rows-name name)) :tail))
 
 ;;; Pieces
 
@@ -515,12 +511,10 @@ call costs the same however much it answered.  RET shows all of it.")
 \(`romacs-agent-rows-read-limit')."
   (or (not (stringp text)) (<= (length text) romacs-agent-rows-read-limit)))
 
-(defun romacs-agent-rows-clip (text &optional tail)
-  "TEXT as far as the chat reads it: whole, or its first (with TAIL, its
-last) `romacs-agent-rows-read-limit' characters."
-  (cond ((romacs-agent-rows-readable-p text) text)
-        (tail (substring text (- (length text) romacs-agent-rows-read-limit)))
-        (t (substring text 0 romacs-agent-rows-read-limit))))
+(defun romacs-agent-rows-clip (text)
+  "TEXT as far as the chat reads it: whole, or its first
+`romacs-agent-rows-read-limit' characters."
+  (if (romacs-agent-rows-readable-p text) text (substring text 0 romacs-agent-rows-read-limit)))
 
 (defun romacs-agent-rows-size (text)
   "How long TEXT is, as a row says it: \"9.7M characters\"."
@@ -533,25 +527,23 @@ last) `romacs-agent-rows-read-limit' characters."
       (romacs-agent-rows--plural (romacs-agent-rows--lines text) "line")
     (romacs-agent-rows-size text)))
 
-(defun romacs-agent-rows-glimpse (text limit &optional tail width blanks)
-  "TEXT's first LIMIT lines, or with TAIL its last, and how many lines it
+(defun romacs-agent-rows-glimpse (text limit &optional width blanks)
+  "TEXT's first LIMIT lines, and how many lines it
 spans without its trailing BLANKS (characters, line breaks unless
 given): (LINES . COUNT).  WIDTH, when given, cuts each line to as many
 characters, read no further.  TEXT is read as `romacs-agent-rows-clip'
 has it, walked by the buffer's own motion, never split whole in Lisp;
 past the bound COUNT is nil."
   (with-temp-buffer
-    (insert (romacs-agent-rows-clip text tail))
+    (insert (romacs-agent-rows-clip text))
     (skip-chars-backward (or blanks "\n"))
     (delete-region (point) (point-max))
     (let ((count (if (bobp) 0 (count-lines (point-min) (point-max))))
           (cut (lambda (start end) (buffer-substring start (if width (min end (+ start width)) end)))))
-      (goto-char (if tail (point-max) (point-min)))
+      (goto-char (point-min))
       (cons (cl-loop repeat (min limit count)
                      collect (prog1 (funcall cut (line-beginning-position) (line-end-position))
-                               (forward-line (if tail -1 1)))
-                     into lines
-                     finally return (if tail (nreverse lines) lines))
+                               (forward-line 1)))
             (and (romacs-agent-rows-readable-p text) count)))))
 
 (defun romacs-agent-rows--plural (n word)
@@ -604,8 +596,7 @@ matches, FORMAT given OUTPUT's groups.  The first that matches says it."
  :row #'romacs-agent-rows--shell
  :ended (lambda (input output)
           (when-let* ((said (romacs-agent-rows--command-outcome (romacs-agent-rows--command (romacs-agent-rows--get input "command")) output)))
-            (concat (romacs-agent-rows--shell input) (romacs-agent-rows--dim " · ") said)))
- :tail t)
+            (concat (romacs-agent-rows--shell input) (romacs-agent-rows--dim " · ") said))))
 
 (defun romacs-agent-rows--read-span (input)
   "Which of a file's lines a Read call took, as words, or nil for all."

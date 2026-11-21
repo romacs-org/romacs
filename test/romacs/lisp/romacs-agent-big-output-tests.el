@@ -43,19 +43,17 @@
       longest)))
 
 (ert-deftest romacs-agent-big-output-glimpse-reads-ends ()
-  (should (equal (romacs-agent-rows-glimpse "a\nb\nc\n\n  \n" 2 nil nil " \n") '(("a" "b") . 3)))
+  (should (equal (romacs-agent-rows-glimpse "a\nb\nc\n\n  \n" 2 nil " \n") '(("a" "b") . 3)))
   ;; A count trims line breaks only: a blank line still counts.
   (should (= (romacs-agent-rows--lines "a\n \n") 2))
   (should (= (romacs-agent-rows--lines "a\n\n") 2))
   (should (= (romacs-agent-rows--lines "\n") 1))
   (should (= (romacs-agent-rows--lines "a\nb") 2))
-  (should (equal (romacs-agent-rows-glimpse "a\nb\nc\n" 2 t) '(("b" "c") . 3)))
-  (should (equal (romacs-agent-rows-glimpse "abcdef\ngh" 5 nil 3) '(("abc" "gh") . 2)))
+  (should (equal (romacs-agent-rows-glimpse "abcdef\ngh" 5 3) '(("abc" "gh") . 2)))
   (should (equal (romacs-agent-rows-glimpse "" 5) '(nil . 0)))
-  (should (equal (romacs-agent-rows-glimpse " \n\n" 5 nil nil " \n") '(nil . 0)))
+  (should (equal (romacs-agent-rows-glimpse " \n\n" 5 nil " \n") '(nil . 0)))
   ;; Past the bound: its ends only, and no count.
   (let ((romacs-agent-rows-read-limit 10))
-    (should (equal (romacs-agent-rows-glimpse "1\n2\n3\n4\n5\n6\n7\n8\n9\n" 2 t) '(("8" "9"))))
     (should (equal (romacs-agent-rows-glimpse "1\n2\n3\n4\n5\n6\n7\n8\n9\n" 2) '(("1" "2"))))
     (should (string-match-p "characters" (romacs-agent-rows-extent "1\n2\n3\n4\n5\n6\n7\n8\n9\n"))))
   (should (= (romacs-agent-rows--lines "one") 1))
@@ -87,23 +85,18 @@
                                             'romacs-agent-log-full))
                     output))))))
 
-(ert-deftest romacs-agent-big-output-a-long-command-shows-its-tail ()
-  ;; Its last lines and how many came before; past what the chat reads
-  ;; (millions of characters), its size instead of a count.
+(ert-deftest romacs-agent-big-output-a-long-command-is-its-row ()
+  ;; A command that ended well is its row: how many lines it gave, or past
+  ;; what the chat reads (millions of characters) its size; RET shows it.
   (dolist (lines '(20000 200000))
     (romacs-agent-big-output-tests--with
       (let ((output (concat (mapconcat (lambda (i) (format "line %d" i)) (number-sequence 1 lines) "\n")
                             "\n\nShell cwd was reset to /x\n")))
         (draw :type 'tool :state 'started :id "a" :name "Bash" :input (romacs-agent-big-output-tests--input "command" "make"))
         (draw :type 'tool :state 'completed :id "a" :output output)
-        (let ((text (buffer-substring-no-properties (point-min) (point-max))))
-          (should (string-match-p (if (romacs-agent-rows-readable-p output)
-                                      (format "%d earlier lines" (- lines romacs-agent-log-output-lines))
-                                    "characters in all")
-                                  text))
-          (should (string-match-p (format "line %d\n" lines) text))
-          (should-not (string-match-p (format "line %d\n\\|Shell cwd" (- lines 10)) text))
-          (should (< (length text) 1000)))))))
+        (let ((text (string-trim (buffer-substring-no-properties (point-min) (point-max)))))
+          (should-not (string-search "\n" text))
+          (should (string-match-p (if (romacs-agent-rows-readable-p output) "· [0-9]+ lines\\'" "characters\\'") text)))))))
 
 (ert-deftest romacs-agent-big-output-a-failure-past-the-bound-says-its-size ()
   (let ((romacs-agent-rows-read-limit 1000)
