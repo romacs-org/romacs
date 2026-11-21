@@ -26,10 +26,28 @@ fn progress_period() -> c_int {
 }
 
 /// What the progress handler asks: STOP, while STATEMENT runs (null: none
-/// does, as while a batch prepares its next).
+/// does, as while a batch prepares its next); and whether it said to stop.
 struct Watch<'a> {
     stop: &'a crate::quit::NativeStop,
+    // CELL(Plain): the statement the handler watches, set as a batch steps each.
     statement: std::cell::Cell<*mut ffi::sqlite3_stmt>,
+    // CELL(Plain): set by the handler when it asks SQLite to stop.
+    stopped: std::cell::Cell<bool>,
+}
+
+impl<'a> Watch<'a> {
+    fn new(stop: &'a crate::quit::NativeStop, statement: *mut ffi::sqlite3_stmt) -> Self {
+        Self { stop, statement: std::cell::Cell::new(statement), stopped: std::cell::Cell::new(false) }
+    }
+    /// STEP as the watch saw it: an interrupt the handler asked for is
+    /// `Stopped`; any other result, an interrupt from elsewhere (an SQL
+    /// function's result code, say) included, stays as the library gave it.
+    fn seen(&self, step: Step) -> Step {
+        match step {
+            Step::Error(code) if self.stopped.get() && interrupted(code) => Step::Stopped,
+            step => step,
+        }
+    }
 }
 
 /// A database's mutex, held until dropped, as `sqlite3_exec` holds it for a
@@ -82,7 +100,9 @@ fn watching<T>(db: *mut ffi::sqlite3, watch: &Watch, body: impl FnOnce() -> T) -
         // SAFETY: a watched statement is live: its watch is cleared before it
         // is finalized; sqlite3_stmt_busy only reads it.
         let running = !statement.is_null() && unsafe { ffi::sqlite3_stmt_busy(statement) } != 0;
-        c_int::from(running && watch.stop.due())
+        let stop = running && watch.stop.due();
+        if stop { watch.stopped.set(true); }
+        c_int::from(stop)
     }
     if !watch.stop.armed() { return body(); }
     // UNSAFE(this module is libsqlite3-sys's one boundary: rusqlite's safe handler needs its own Connection)
@@ -146,6 +166,9 @@ pub(crate) enum Column {
 pub(crate) enum Step {
     Row,
     Done,
+    /// The progress handler asked to stop, and the library interrupted the
+    /// statement, rolling it back: the quit's, and only this is.
+    Stopped,
     /// Any other result code.
     Error(c_int),
 }
@@ -164,9 +187,11 @@ fn text(pointer: *const std::ffi::c_char) -> Option<String> {
 }
 
 pub(crate) const BUSY: c_int = ffi::SQLITE_BUSY;
-/// Whether result CODE is `SQLITE_INTERRUPT`: the progress handler's own
-/// stop (`Statement::step`), the only error a quit may stand for.
-pub(crate) fn interrupted(code: c_int) -> bool {
+/// `SQLITE_INTERRUPT`, as a stop the caller did not quit for is signaled.
+pub(crate) const INTERRUPT: c_int = ffi::SQLITE_INTERRUPT;
+/// Whether result CODE is `SQLITE_INTERRUPT`, which only the progress
+/// handler's own stop makes a quit (`Watch::seen`).
+fn interrupted(code: c_int) -> bool {
     code & 0xff == ffi::SQLITE_INTERRUPT
 }
 /// The most memory the library has had in use since the last ask, which resets it
@@ -217,21 +242,27 @@ impl Connection {
     }
     /// The statements of SQL up to its first NUL in turn, each stepped to
     /// its end with STOP asked as it runs (`Statement::step`), as
-    /// `sqlite3_exec` runs them without a callback; the result code of the
-    /// first that failed. The batch is one buffer ended by a NUL, each
-    /// statement prepared from where the last one ended, so the library
-    /// copies none of it (a prepare given a length with no NUL copies the rest).
-    pub(crate) fn exec(self: &Arc<Self>, sql: &[u8], stop: &crate::quit::NativeStop) -> Result<(), c_int> {
+    /// `sqlite3_exec` runs them without a callback: `Done`, or how the first
+    /// that failed ended. The batch is one buffer ended by a NUL, each
+    /// statement prepared from where the last one ended past the blanks
+    /// `sqlite3_exec` skips, so the library copies none of it (a prepare
+    /// given a length with no NUL copies the rest). Each statement commits
+    /// as it ends, as in `sqlite3_exec`: a later one's failure or stop
+    /// leaves the earlier ones done.
+    pub(crate) fn exec(self: &Arc<Self>, sql: &[u8], stop: &crate::quit::NativeStop) -> Step {
         let mut batch = sql.split(|&b| b == 0).next().unwrap_or_default().to_vec();
         batch.push(0);
         let _held = Held::enter(self.db);
         // One handler for the whole batch, watching each statement in turn.
-        let watch = Watch { stop, statement: std::cell::Cell::new(std::ptr::null_mut()) };
+        let watch = Watch::new(stop, std::ptr::null_mut());
         watching(self.db, &watch, || {
             let mut rest = &batch[..];
             // Up to the NUL, which stays at the end of REST.
             while rest.len() > 1 {
-                let (mut statement, used) = self.prepare_next(rest, -1).map_err(|e| c_int::try_from(e.code).unwrap_or(ffi::SQLITE_ERROR))?;
+                let (mut statement, used) = match self.prepare_next(rest, -1) {
+                    Ok(prepared) => prepared,
+                    Err(e) => return Step::Error(c_int::try_from(e.code).unwrap_or(ffi::SQLITE_ERROR)),
+                };
                 let used = used.min(rest.len() - 1);
                 // A prepare that consumed nothing leaves nothing it could run.
                 if used == 0 { break; }
@@ -242,17 +273,36 @@ impl Connection {
                 let outcome = loop {
                     match statement.step_unwatched() {
                         Step::Row => {}
-                        Step::Done => break Ok(()),
-                        Step::Error(code) => break Err(code),
+                        outcome => break outcome,
                     }
                 };
                 // Unwatched before it is finalized.
                 watch.statement.set(std::ptr::null_mut());
                 drop(statement);
-                outcome?;
+                if !matches!(outcome, Step::Done) { return watch.seen(outcome); }
+                // sqlite3_exec's sqlite3Isspace, vertical tab included.
+                let blanks = rest.iter().take_while(|b| b" \t\n\x0b\x0c\r".contains(b)).count();
+                rest = &rest[blanks..];
             }
-            Ok(())
+            Step::Done
         })
+    }
+    /// Defines the SQL function `interrupt_itself()`, which fails with
+    /// `SQLITE_INTERRUPT` as a loaded function may, though no handler asked.
+    #[cfg(test)]
+    pub(crate) fn define_interrupt_itself(&self) {
+        extern "C" fn interrupt_itself(context: *mut ffi::sqlite3_context, _: c_int, _: *mut *mut ffi::sqlite3_value) {
+            // UNSAFE(this module is libsqlite3-sys's one boundary: a test's SQL function)
+            // SAFETY: SQLite passes the live context of this call.
+            unsafe { ffi::sqlite3_result_error_code(context, ffi::SQLITE_INTERRUPT) };
+        }
+        // UNSAFE(this module is libsqlite3-sys's one boundary: a test's SQL function)
+        // SAFETY: `db` is open; the name is NUL-terminated; no user data.
+        let code = unsafe {
+            ffi::sqlite3_create_function_v2(self.db, c"interrupt_itself".as_ptr(), 0, ffi::SQLITE_UTF8, std::ptr::null_mut(),
+                                            Some(interrupt_itself), None, None, None)
+        };
+        assert_eq!(code, ffi::SQLITE_OK);
     }
     /// `sqlite3_prepare_v2` of the first statement in SQL.
     pub(crate) fn prepare(self: &Arc<Self>, sql: &[u8]) -> Result<Statement, PrepareError> {
@@ -326,9 +376,10 @@ impl Statement {
     }
     /// `sqlite3_step`, with STOP asked as the statement runs (`watching`).
     pub(crate) fn step(&mut self, stop: &crate::quit::NativeStop) -> Step {
-        let watch = Watch { stop, statement: std::cell::Cell::new(self.stmt) };
+        let watch = Watch::new(stop, self.stmt);
         let db = self.connection.db;
-        watching(db, &watch, || self.step_unwatched())
+        let outcome = watching(db, &watch, || self.step_unwatched());
+        watch.seen(outcome)
     }
     /// The statement's virtual machine instructions so far
     /// (`SQLITE_STMTSTATUS_VM_STEP`).

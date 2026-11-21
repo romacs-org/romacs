@@ -107,6 +107,11 @@ impl Leaf<'_> {
             None => Ok(()),
         }
     }
+    /// DB's connection, for a test that reaches below the primitives.
+    #[cfg(test)]
+    pub(crate) fn sqlite_connection_of(&mut self, db: Value) -> Result<Arc<Connection>> {
+        self.sqlite_connection(db)
+    }
     fn sqlite_connection(&mut self, db: Value) -> Result<Arc<Connection>> {
         self.sqlite_check(db, false)?;
         match &self.sqlite_handle(db).expect("checked").state {
@@ -265,12 +270,17 @@ impl Leaf<'_> {
     /// STATEMENT's next step, which a C-g interrupts while it runs: the
     /// statement is rolled back and the quit raised (`Statement::step`).
     fn sqlite_step(&mut self, statement: &mut Statement, probe: &crate::quit::NativeStop) -> std::result::Result<Step, Fault> {
-        let step = statement.step(probe);
         // Only the handler's own stop is the quit: any other error (a
-        // constraint, say, whose statement may have committed rows) is
-        // signaled as itself, and a press waits for the next poll.
-        if matches!(step, Step::Error(code) if crate::sqlite::interrupted(code)) { self.native_poll()?; }
-        Ok(step)
+        // constraint, say, whose statement may have committed rows, or an
+        // interrupt an SQL function returned) is signaled as itself, and a
+        // press waits for the next poll.
+        match statement.step(probe) {
+            Step::Stopped => {
+                self.native_poll()?;
+                Ok(Step::Error(crate::sqlite::INTERRUPT))
+            }
+            step => Ok(step),
+        }
     }
 
     pub(crate) fn sqlite_execute(&mut self, db: Value, query: Value, values: Value) -> Out {
@@ -289,6 +299,7 @@ impl Leaf<'_> {
                 Ok(self.sqlite_list(rows))
             }
             Step::Done => Value::integer(statement.connection().changes()).map_err(Fault::Error),
+            Step::Stopped => unreachable!("sqlite_step answers a stop with its quit"),
             Step::Error(code) => {
                 let message = statement.connection().errmsg();
                 let message = self.sqlite_string(&message);
@@ -329,8 +340,8 @@ impl Leaf<'_> {
         let stop = self.native_stop();
         let done = connection.exec(sql, &stop);
         // As `sqlite_step`: only the handler's own stop is the quit.
-        if matches!(done, Err(code) if crate::sqlite::interrupted(code)) { self.native_poll()?; }
-        Ok(if done.is_ok() { Value::TRUE } else { Value::NIL })
+        if matches!(done, Step::Stopped) { self.native_poll()?; }
+        Ok(if matches!(done, Step::Done) { Value::TRUE } else { Value::NIL })
     }
     pub(crate) fn sqlite_execute_batch(&mut self, db: Value, statements: Value) -> Out {
         self.sqlite_check(db, false)?;
@@ -387,7 +398,7 @@ impl Leaf<'_> {
         let result = match step {
             Step::Done => Ok(Value::NIL),
             Step::Row => self.sqlite_row(&statement),
-            Step::Error(_) => {
+            Step::Error(_) | Step::Stopped => {
                 let message = statement.connection().errmsg();
                 Err(self.sqlite_message(&message))
             }

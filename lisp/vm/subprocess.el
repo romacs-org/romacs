@@ -1251,35 +1251,40 @@ what `find-operation-coding-system' sees after the operation."
                            (t t)))
              (result (romacs--call-process-run argv (romacs--environment-block current-dir)
                                                (romacs--encode-file current-dir) infile
-                                               output stderr (not (integerp buffer)))))
-        (if (integerp buffer)
-            nil
-          (save-current-buffer
-            (if (bufferp buffer) (set-buffer buffer))
-            (if (eq output 'pipe)
-                (let ((val (cond (coding-system-for-read coding-system-for-read)
-                                 (t (if (eq coding-systems t)
-                                        (setq coding-systems
-                                              (apply #'find-operation-coding-system 'call-process all-args)))
-                                    (cond ((consp coding-systems) (car coding-systems))
-                                          ((consp default-process-coding-system)
-                                           (car default-process-coding-system)))))))
-                  (check-coding-system val)
-                  (if (and (not enable-multibyte-characters) val)
-                      (setq val (coding-system-change-text-conversion val 'raw-text)))
-                  (romacs--call-process-insert (cdr result) val)
-                  (if inherit-process-coding-system
-                      (funcall 'after-insert-file-set-buffer-file-coding-system
-                               (string-bytes (cdr result)))))))
-          ;; A quit with output read before it: inserted above, all of it
-          ;; (GNU's call_process can drop a partly filled block:
-          ;; VM2-CALLPROC-QUIT-OUTPUT), then the quit, raised again as C-g's
-          ;; with the wait's own token: ((quit . TOKEN) . BYTES).
-          (if (eq (car-safe (car result)) 'quit) (romacs--call-process-quit (cdr (car result))))
-          (let ((status (romacs--wait-status (car result))))
-            (if (eq (car status) 'signal)
-                (romacs--signal-text (cdr status))
-              (cdr status))))))))
+                                               output stderr (not (integerp buffer))))
+             ;; A quit's token, ((quit . TOKEN) . BYTES): retired however
+             ;; the call ends, so none outlives it.
+             (token (and (eq (car-safe (car-safe result)) 'quit) (cdr (car result)))))
+        (unwind-protect
+          (if (integerp buffer)
+              nil
+            (save-current-buffer
+              (if (bufferp buffer) (set-buffer buffer))
+              (if (eq output 'pipe)
+                  (let ((val (cond (coding-system-for-read coding-system-for-read)
+                                   (t (if (eq coding-systems t)
+                                          (setq coding-systems
+                                                (apply #'find-operation-coding-system 'call-process all-args)))
+                                      (cond ((consp coding-systems) (car coding-systems))
+                                            ((consp default-process-coding-system)
+                                             (car default-process-coding-system)))))))
+                    (check-coding-system val)
+                    (if (and (not enable-multibyte-characters) val)
+                        (setq val (coding-system-change-text-conversion val 'raw-text)))
+                    (romacs--call-process-insert (cdr result) val)
+                    (if inherit-process-coding-system
+                        (funcall 'after-insert-file-set-buffer-file-coding-system
+                                 (string-bytes (cdr result)))))))
+            ;; A quit with output read before it: inserted above, all of it
+            ;; (GNU's call_process can drop a partly filled block:
+            ;; VM2-CALLPROC-QUIT-OUTPUT), then the quit, raised again as C-g's
+            ;; with the wait's own token: ((quit . TOKEN) . BYTES).
+            (if token (romacs--call-process-quit token))
+            (let ((status (romacs--wait-status (car result))))
+              (if (eq (car status) 'signal)
+                  (romacs--signal-text (cdr status))
+                (cdr status))))
+          (if token (romacs--call-process-retire token)))))))
 
 (defun romacs--call-process-insert (bytes coding)
   "call_process's decoding insertion of BYTES before point with CODING."

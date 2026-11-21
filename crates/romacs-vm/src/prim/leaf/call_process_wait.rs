@@ -7,6 +7,11 @@ use super::{Fault, Leaf, Value};
 use crate::subprocess as sp;
 use std::os::fd::{AsFd, AsRawFd, OwnedFd};
 
+/// The tokens of the quits call-process's waits took and returned with the
+/// output read before them, ((quit . TOKEN) . BYTES), not yet raised again
+/// nor retired: a list in a hidden variable, which the collector traces.
+const REQUITS: &str = "#:vm2-call-process-quits";
+
 type Result<T> = std::result::Result<T, Fault>;
 
 /// What became of call-process's child when its quit's stop ended: reaped
@@ -72,9 +77,34 @@ impl Leaf<'_> {
     /// token already raised) signals a plain quit, which an expansion treats
     /// as any error.
     pub(crate) fn call_process_requit(&mut self, token: Value) -> Fault {
-        let token = token.integer_value().and_then(|t| u64::try_from(t).ok());
-        if token.is_some_and(|t| self.vm.subprocesses.take_requit(t)) { self.vm.quit_unwinding = true; }
+        if self.take_requit(token) { self.vm.quit_unwinding = true; }
         Fault::Signal(self.sym("quit"), Value::NIL)
+    }
+
+    /// A new token for a quit a call-process wait took and returns with the
+    /// output read before it: a fresh cons, known by `eq` alone, so no
+    /// number or other value stands for it. It is outstanding (in
+    /// [`REQUITS`]) until raised again or retired.
+    pub(crate) fn issue_requit(&mut self) -> Value {
+        let token = self.cons(Value::NIL, Value::NIL);
+        let outstanding = self.hidden_value(REQUITS);
+        let outstanding = self.cons(token, outstanding);
+        self.set_hidden_value(REQUITS, outstanding);
+        token
+    }
+
+    /// Whether TOKEN is outstanding, which it then is not.
+    pub(crate) fn take_requit(&mut self, token: Value) -> bool {
+        let (mut kept, mut found, mut tail) = (Vec::new(), false, self.hidden_value(REQUITS));
+        while let Some((car, cdr)) = self.pair(tail) {
+            if car == token { found = true } else { kept.push(car) }
+            tail = cdr;
+        }
+        if found {
+            let rest = kept.into_iter().rev().fold(Value::NIL, |list, t| self.cons(t, list));
+            self.set_hidden_value(REQUITS, rest);
+        }
+        found
     }
 
     /// QUIT, raised while `call_process` waits for child PID, once the child

@@ -1258,7 +1258,7 @@ impl Leaf<'_> {
             return match quit {
                 Fault::Signal(condition, _) if condition == quit_symbol && !bytes.is_empty() => {
                     self.vm.quit_unwinding = false;
-                    let token = fixnum(i64::try_from(self.vm.subprocesses.issue_requit()).expect("a token is a fixnum"));
+                    let token = self.issue_requit();
                     let quit = self.cons(quit_symbol, token);
                     let text = self.make_string(bytes, false);
                     Ok(self.cons(quit, text))

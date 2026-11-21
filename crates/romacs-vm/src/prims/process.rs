@@ -544,6 +544,15 @@ fn call_process_quit(cx; optional token: Value) {
     Err(cx.call_process_requit(token))
 }}
 
+// call-process's TOKEN retired however the call ends, raised or not, so no
+// token outlives its call (`romacs--call-process-quit').
+defsubr! { name = "romacs--call-process-retire", gnu = "callproc.c:351", effect = Global,
+fn call_process_retire(cx, token: Value) {
+    if !matches!(cx.kind(token), Kind::Cons) { return Err(Fault::Wrong("consp", token)); }
+    cx.take_requit(token);
+    Ok(Value::NIL)
+}}
+
 defsubr! { name = "romacs--wait-status", gnu = "romacs:process", effect = Pure,
 fn wait_status(_cx, status: Integer) {
     // (signal . N) or (exit . N), from a wait status.

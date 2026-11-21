@@ -208,7 +208,7 @@ fn sqlite_interrupts_a_long_statement() {
 #[test]
 fn sqlite_select_tells_a_read_from_a_write() {
     let db = crate::sqlite::Connection::open(b":memory:", false, false, true).expect("an in-memory database");
-    assert!(db.exec(b"CREATE TABLE t (x)", &crate::quit::NativeStop::never()).is_ok());
+    assert!(matches!(db.exec(b"CREATE TABLE t (x)", &crate::quit::NativeStop::never()), crate::sqlite::Step::Done));
     let readonly = |sql: &[u8]| db.prepare(sql).unwrap_or_else(|_| panic!("{} prepares", String::from_utf8_lossy(sql))).readonly();
     assert!(readonly(b"SELECT x FROM t"), "a select writes nothing");
     assert!(!readonly(b"INSERT INTO t VALUES (1) RETURNING x"), "an insert returning rows writes");
@@ -233,7 +233,7 @@ fn sqlite_never_quits_with_its_write_kept() {
     // Each statement's instructions, unwatched, on the same tables.
     let never = NativeStop::never();
     let db = Connection::open(b":memory:", false, false, true).expect("an in-memory database");
-    assert!(db.exec(make.as_bytes(), &never).is_ok());
+    assert!(matches!(db.exec(make.as_bytes(), &never), Step::Done));
     let instructions = |sql: &str| {
         let mut statement = db.prepare(sql.as_bytes()).unwrap_or_else(|_| panic!("{sql} prepares"));
         while matches!(statement.step(&never), Step::Row) {}
@@ -872,22 +872,30 @@ fn nreverse_is_one_walk_across_its_hand_off() {
 }
 
 /// `romacs--call-process-quit` raises C-g's quit only for its wait's own
-/// token, not yet raised, which it takes. Called with none, as from a macro,
-/// or with another quit's, it signals a plain quit, which an expansion
-/// treats as any error: the form in the branch not taken is never reached.
+/// token, outstanding, which it takes: a fresh cons known by `eq`, so no
+/// number or look-alike cons stands for it. Called with none, as from a
+/// macro, or with any other value, it signals a plain quit, which an
+/// expansion treats as any error: the form in the branch not taken is never
+/// reached. `romacs--call-process-retire` ends a token not raised.
 #[test]
 fn call_process_quit_is_c_g_s_only_for_its_wait_s_token() {
     let (mut vm, _signal) = busy_vm();
-    let (mine, other) = (vm.subprocesses.issue_requit(), vm.subprocesses.issue_requit());
-    let stranger = other + 1;
-    for call in ["(romacs--call-process-quit)".to_string(), format!("(romacs--call-process-quit {stranger})")] {
+    let (mine, other) = { let mut cx = Leaf::new(&mut vm); (cx.issue_requit(), cx.issue_requit()) };
+    let (slot_mine, slot_other) = (vm.slot("quit-test-mine"), vm.slot("quit-test-other"));
+    vm.slots[slot_mine].value = mine;
+    vm.slots[slot_other].value = other;
+    for call in ["(romacs--call-process-quit)", "(romacs--call-process-quit 1)", "(romacs--call-process-quit 2)",
+                 "(romacs--call-process-quit (cons nil nil))", "(romacs--call-process-quit (cons (car quit-test-mine) (cdr quit-test-mine)))"] {
         eval(&mut vm, &format!("(defmacro m () {call})"));
         assert_eq!(vm.eval_source("(eval '(if nil (m) 'else) t)").unwrap().display().unwrap(), "else", "{call}");
     }
-    assert_eq!(vm.eval_source(&format!("(condition-case nil (romacs--call-process-quit {mine}) (quit 'quit))")).unwrap().display().unwrap(), "quit");
+    let outstanding = "(length (symbol-value (intern \"#:vm2-call-process-quits\")))";
+    assert_eq!(vm.eval_source(outstanding).unwrap().display().unwrap(), "2", "no forged call took a token");
+    assert_eq!(vm.eval_source("(condition-case nil (romacs--call-process-quit quit-test-mine) (quit 'quit))").unwrap().display().unwrap(), "quit");
     vm.quit_unwinding = false;
-    assert!(!vm.subprocesses.take_requit(mine), "the quit took its own token");
-    assert!(vm.subprocesses.take_requit(other), "and only its own");
+    assert_eq!(vm.eval_source(outstanding).unwrap().display().unwrap(), "1", "the quit took its own token, and only it");
+    eval(&mut vm, "(romacs--call-process-retire quit-test-other)");
+    assert_eq!(vm.eval_source(outstanding).unwrap().display().unwrap(), "0", "a retired token is gone");
 }
 
 /// A step that fails for its own reason with a press waiting is that error,
@@ -904,7 +912,7 @@ fn a_sqlite_error_with_a_press_waiting_is_itself() {
     let (make, insert) = ("CREATE TABLE t (x UNIQUE)", "INSERT OR FAIL INTO t VALUES (1), (1)");
     let never = NativeStop::never();
     let db = Connection::open(b":memory:", false, false, true).expect("an in-memory database");
-    assert!(db.exec(make.as_bytes(), &never).is_ok());
+    assert!(matches!(db.exec(make.as_bytes(), &never), Step::Done));
     let mut statement = db.prepare(insert.as_bytes()).unwrap_or_else(|_| panic!("{insert} prepares"));
     assert!(matches!(statement.step(&never), Step::Error(_)), "the second row conflicts");
     let whole = i32::try_from(statement.instructions()).expect("a short statement");
@@ -943,8 +951,49 @@ fn a_sqlite_batch_is_not_copied_per_statement() {
     let batch = "SELECT 1;".repeat(20_000);
     memory_highwater();
     let before = memory_highwater();
-    assert!(db.exec(batch.as_bytes(), &crate::quit::NativeStop::never()).is_ok());
+    assert!(matches!(db.exec(batch.as_bytes(), &crate::quit::NativeStop::never()), crate::sqlite::Step::Done));
     let peak = memory_highwater() - before;
     let bound = i64::try_from(batch.len() / 4).expect("a short batch");
     assert!(peak < bound, "SQLite's memory rose {peak} bytes over a batch of {}", batch.len());
+}
+
+/// An `SQLITE_INTERRUPT` the progress handler did not ask for (an SQL
+/// function's own result code) is the statement's error, not the quit, with
+/// a press waiting: sqlite-execute signals it and a batch returns nil, and
+/// the next form takes the press.
+#[test]
+fn a_sqlite_interrupt_not_the_handler_s_is_an_error() {
+    for (name, args, ends) in [("sqlite-execute", "(list db \"SELECT interrupt_itself()\")", None),
+                               ("sqlite-execute-batch", "(list db \"SELECT 1; SELECT interrupt_itself();\")", Some("nil"))] {
+        let (mut vm, signal) = busy_vm();
+        let db = eval(&mut vm, "(setq db (sqlite-open))");
+        Leaf::new(&mut vm).sqlite_connection_of(db).unwrap_or_else(|_| panic!("a database")).define_interrupt_itself();
+        let call = prepare(&mut vm, name, args);
+        assert!(signal.interrupt(), "a busy evaluator takes the press");
+        let outcome = invoke(&mut vm, call);
+        assert!(!quit_signalled(&mut vm, &outcome), "{name}: the function's interrupt, not a quit");
+        match ends {
+            Some(value) => assert_eq!(outcome.as_ref().map(|v| vm.display(*v).unwrap_or_default()).ok().as_deref(), Some(value), "{name}"),
+            None => assert!(matches!(outcome, Err(Fault::Signal(..))), "{name}: the error is signaled"),
+        }
+        assert!(signal.due(), "{name}: the press waits for the next poll");
+        assert!(vm.eval_source_raw("(sqlite-select db \"SELECT 1\")").is_err(), "{name}: the form after the call quits");
+        vm.quit_unwinding = false;
+        vm.propagated_escape = None;
+    }
+}
+
+/// A batch steps past the blanks `sqlite3_exec` skips after a statement,
+/// a vertical tab among them, before it prepares the next: both statements
+/// run, through sqlite-execute-batch and sqlite-pragma.
+#[test]
+fn a_sqlite_batch_skips_the_blanks_sqlite3_exec_skips() {
+    let (mut vm, _signal) = busy_vm();
+    let form = "(let ((db (sqlite-open)) (vt (string 11)))
+                  (list (sqlite-execute-batch db (concat \"SELECT 1;\" vt \"SELECT 2;\"))
+                        (sqlite-pragma db (concat \"user_version = 7;\" vt \"SELECT 2;\"))
+                        (sqlite-execute-batch db (concat \"CREATE TABLE a (x);\" vt \"CREATE TABLE b (x);\" vt))
+                        (sqlite-select db \"SELECT count(*) FROM sqlite_master\")
+                        (sqlite-select db \"PRAGMA user_version\")))";
+    assert_eq!(vm.eval_source(form).unwrap().display().unwrap(), "(t t t ((2)) ((7)))");
 }
