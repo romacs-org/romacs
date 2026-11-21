@@ -8,6 +8,8 @@
 use romacs_vm::Vm;
 #[path = "support/gnu_lisp.rs"]
 mod gnu_lisp;
+#[path = "support/own_test.rs"]
+mod own_test;
 use gnu_lisp::gnu_lisp;
 
 /// One expression per line, on the system C grammar both editors find by
@@ -620,4 +622,498 @@ fn subtree_exceeds_agrees_with_subtree_stat() {
           out))");
     let value = vm.eval_source(&source).and_then(romacs_vm::Local::display);
     assert_eq!(value.as_deref(), Ok("nil"));
+}
+
+/// A VM with a C buffer of LINES functions named NAME, shown in the selected
+/// window when SHOWN, with a parser created by Lisp (as a mode's body does)
+/// and no early parse, and a background wake so frames start threads.
+fn first_parse_vm(name: &str, lines: usize, shown: bool) -> Vm {
+    let mut vm = gnu_lisp(&[]);
+    vm.set_gc_stress(0);
+    vm.eval_source("(require 'treesit)").unwrap();
+    let show = if shown { format!("(set-window-buffer nil (get-buffer \"{name}\"))") } else { String::new() };
+    vm.eval_source(&format!("(progn {SYSTEM_SETUP} \
+        (with-current-buffer (get-buffer-create \"{name}\") \
+          (dotimes (i {lines}) (insert (format \"int f%d (int a) {{ return a + %d; }}\\n\" i i))) \
+          (setq treesit-test-parser (treesit-parser-create 'c))) \
+        {show})")).unwrap();
+    vm.set_background_wake(std::sync::Arc::new(|| {}));
+    vm
+}
+
+/// One frame as the session's loop builds it, the parse deferred.
+fn deferred_frame(vm: &mut Vm) -> bool {
+    vm.defer_parse().unwrap();
+    vm.frame_snapshot(800, 600).unwrap();
+    vm.deferred_parse_done()
+}
+
+/// Wait for the current buffer's thread parse to land, then land it.
+fn wait_landed(vm: &mut Vm, buffer: &str) {
+    for _ in 0..40_000 {
+        let parsing = vm.eval_source(&format!("(with-current-buffer \"{buffer}\" (romacs--treesit-parsing-p))")).unwrap().display().unwrap();
+        if parsing == "nil" {
+            vm.land_treesit();
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_micros(500));
+    }
+    panic!("the first parse never landed");
+}
+
+/// Whether the parser's tree is the one a parse of the buffer's text gives,
+/// parsed in a buffer of its own, where no tree of this one is shared.
+fn tree_is_a_parse(vm: &mut Vm, buffer: &str) -> String {
+    vm.eval_source(&format!("(with-current-buffer \"{buffer}\" \
+        (equal (treesit-node-string (treesit-parser-root-node treesit-test-parser)) \
+               (let ((text (buffer-string))) \
+                 (with-temp-buffer (insert text) (treesit-node-string (treesit-parser-root-node (treesit-parser-create 'c)))))))"))
+        .and_then(romacs_vm::Local::display).unwrap()
+}
+
+/// A shown buffer whose parser has no tree and whose visit started no early
+/// parse (a buffer restored unseen, a mode Lisp set) takes its first parse
+/// on a thread at the frame that shows it: the window waits in stopgap
+/// faces, the evaluator parses nothing, and the tree that lands is a
+/// parse's own.
+#[test]
+fn a_shown_buffer_without_a_tree_takes_its_first_parse_off_the_evaluator() {
+    let mut vm = first_parse_vm("ts-first", 4000, true);
+    let before = romacs_vm::treesit_parses_on_this_thread();
+    deferred_frame(&mut vm);
+    wait_landed(&mut vm, "ts-first");
+    while deferred_frame(&mut vm) {}
+    assert_eq!(tree_is_a_parse(&mut vm, "ts-first"), "t");
+    assert_eq!(romacs_vm::treesit_parses_on_this_thread(), before + 1,
+        "the evaluator parsed only the check's own buffer, not the first parse");
+}
+
+/// A parser made while its buffer was widened, then narrowed before the
+/// buffer is shown (as warm-restart's wake leaves a restored buffer), parses
+/// the accessible text on its thread: the tree that lands is the one the
+/// query wants, and the evaluator parses nothing.
+#[test]
+fn a_first_parse_on_a_thread_reads_the_accessible_text() {
+    let mut vm = first_parse_vm("ts-narrow", 4000, false);
+    vm.eval_source("(with-current-buffer \"ts-narrow\" (goto-char (point-min)) (forward-line 100) \
+        (narrow-to-region (point) (progn (forward-line 2000) (point))))").unwrap();
+    vm.eval_source("(set-window-buffer nil (get-buffer \"ts-narrow\"))").unwrap();
+    let before = romacs_vm::treesit_parses_on_this_thread();
+    deferred_frame(&mut vm);
+    wait_landed(&mut vm, "ts-narrow");
+    while deferred_frame(&mut vm) {}
+    assert_eq!(tree_is_a_parse(&mut vm, "ts-narrow"), "t");
+    assert_eq!(romacs_vm::treesit_parses_on_this_thread(), before + 1,
+        "the evaluator parsed only the check's own buffer, not the narrowed text again");
+}
+
+/// A first parse that finds every parse thread busy waits for one: the
+/// window shows the text, Lisp sees a parse pending, and the frame after a
+/// thread ends starts it on its thread. The evaluator never parses it.
+#[test]
+fn a_first_parse_waits_for_a_free_thread() {
+    // The threads are the process's: hold them in a process of its own.
+    const CHILD: &str = "ROMACS_TREESIT_SLOTS_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let own = own_test::name(module_path!(), "a_first_parse_waits_for_a_free_thread");
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &own, "--nocapture", "--test-threads", "1"]).env(CHILD, "1").output().unwrap();
+        assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains("1 passed"),
+            "child: {}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        return;
+    }
+    let mut vm = first_parse_vm("ts-wait", 400, false);
+    // Four early parses of large texts hold every thread.
+    vm.eval_source("(let ((text (apply #'concat (make-list 64000 \"int g (int a) { return a - 1; }\\n\")))) \
+        (dotimes (n 4) (with-current-buffer (get-buffer-create (format \"ts-hold-%d\" n)) (insert text))) \
+        (dotimes (n 4) (with-current-buffer (format \"ts-hold-%d\" n) (romacs--treesit-parse-early 'c))))").unwrap();
+    let held = vm.eval_source("(let ((n 0)) (dotimes (i 4) (with-current-buffer (format \"ts-hold-%d\" i) \
+        (when (romacs--treesit-parsing-p) (setq n (1+ n))))) n)").unwrap().display().unwrap();
+    assert_eq!(held, "4", "every parse thread is busy");
+    vm.eval_source("(set-window-buffer nil (get-buffer \"ts-wait\"))").unwrap();
+    let before = romacs_vm::treesit_parses_on_this_thread();
+    deferred_frame(&mut vm);
+    let waiting = vm.eval_source("(with-current-buffer \"ts-wait\" (romacs--treesit-parsing-p))").unwrap().display().unwrap();
+    assert_eq!(waiting, "t", "the buffer waits for a thread");
+    for _ in 0..40_000 {
+        if vm.eval_source("(with-current-buffer \"ts-hold-3\" (romacs--treesit-parsing-p))").unwrap().display().unwrap() == "nil" { break; }
+        std::thread::sleep(std::time::Duration::from_micros(500));
+    }
+    // A thread's end wakes the frame, which starts the waiting parse. The
+    // landing is recorded just after the result is sent: wait for it.
+    let mut woke = false;
+    for _ in 0..40_000 {
+        if vm.land_treesit() { woke = true; break; }
+        std::thread::sleep(std::time::Duration::from_micros(500));
+    }
+    assert!(woke, "the ended threads wake the waiting window");
+    deferred_frame(&mut vm);
+    wait_landed(&mut vm, "ts-wait");
+    while deferred_frame(&mut vm) {}
+    assert_eq!(tree_is_a_parse(&mut vm, "ts-wait"), "t");
+    assert_eq!(romacs_vm::treesit_parses_on_this_thread(), before + 1, "the evaluator parsed only the check's own buffer");
+}
+
+/// A buffer no frame shows is not parsed at all: frames of other buffers
+/// start no parse of it, on any thread, and the frame that first shows it
+/// starts exactly one, off the evaluator. The parses are counted in a
+/// process of its own, as other tests parse alongside.
+#[test]
+fn a_buffer_no_frame_shows_is_never_parsed() {
+    const CHILD: &str = "ROMACS_TREESIT_UNSHOWN_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let own = own_test::name(module_path!(), "a_buffer_no_frame_shows_is_never_parsed");
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &own, "--nocapture", "--test-threads", "1"]).env(CHILD, "1").output().unwrap();
+        assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains("1 passed"),
+            "child: {}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        return;
+    }
+    let mut vm = first_parse_vm("ts-unseen", 400, false);
+    let (before, evaluator) = (romacs_vm::treesit_parses_in_process(), romacs_vm::treesit_parses_on_this_thread());
+    for _ in 0..5 {
+        deferred_frame(&mut vm);
+    }
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    assert_eq!(romacs_vm::treesit_parses_in_process(), before, "frames of other buffers parsed the unseen one");
+    vm.eval_source("(set-window-buffer nil (get-buffer \"ts-unseen\"))").unwrap();
+    deferred_frame(&mut vm);
+    wait_landed(&mut vm, "ts-unseen");
+    while deferred_frame(&mut vm) {}
+    assert_eq!(romacs_vm::treesit_parses_in_process(), before + 1, "showing it parsed it once");
+    assert_eq!(romacs_vm::treesit_parses_on_this_thread(), evaluator, "and not on the evaluator");
+}
+
+/// Edits that keep the text's length, so the region a thread's tree covers
+/// still matches: each turns a parameter into a pointer, a different tree.
+const SAME_LENGTH_EDITS: &str = "(dolist (at (list (point-min) (/ (point-max) 2) (- (point-max) 40))) \
+    (goto-char at) (forward-line 0) (search-forward \"(int \") (delete-char -1) (insert \"*\"))";
+
+/// Edits that change the text's length at its start, middle and end.
+const RESIZING_EDITS: &str = "(goto-char (point-min)) (insert \"struct s { int x; };\\n\") \
+    (goto-char (/ (point-max) 2)) (forward-line 0) (delete-region (point) (progn (forward-line 3) (point))) \
+    (insert \"static int g (void) { return 0; }\\n\") \
+    (goto-char (point-max)) (insert \"int last (int b) { return b; }\\n\")";
+
+/// A VM whose shown buffer NAME, of about xdisp.c's size, has its first
+/// parse on a thread, then takes EDITS while that parse runs: edits the
+/// thread's tree never saw.
+fn edited_during_first_parse(name: &str, edits: &str) -> Vm {
+    let mut vm = first_parse_vm(name, 32_000, true);
+    deferred_frame(&mut vm);
+    vm.eval_source(&format!("(with-current-buffer \"{name}\" \
+        (unless (romacs--treesit-parsing-p) (error \"the first parse is not on its thread\")) \
+        {edits} \
+        (unless (romacs--treesit-parsing-p) (error \"the parse ended before the edits\")))")).unwrap();
+    vm
+}
+
+/// The frames after EDITS made during NAME's first parse land a tree that
+/// is the edited text's own, with no parse on the evaluator.
+fn frames_land_the_edited_tree(name: &str, edits: &str) {
+    let mut vm = edited_during_first_parse(name, edits);
+    let before = romacs_vm::treesit_parses_on_this_thread();
+    for _ in 0..8 {
+        wait_landed(&mut vm, name);
+        while deferred_frame(&mut vm) {}
+        let parsing = vm.eval_source(&format!("(with-current-buffer \"{name}\" (romacs--treesit-parsing-p))"))
+            .unwrap().display().unwrap();
+        if parsing == "nil" { break; }
+    }
+    assert_eq!(tree_is_a_parse(&mut vm, name), "t", "the frames' tree is the edited text's");
+    assert_eq!(romacs_vm::treesit_parses_on_this_thread(), before + 1,
+        "the evaluator parsed only the check's own buffer");
+}
+
+/// Edits made while a first parse runs on its thread reach the tree the
+/// frames then use: the landed tree, behind the text, takes the edits and
+/// parses again on a thread from there.
+#[test]
+fn edits_during_a_first_parse_reach_the_tree_the_frames_land() {
+    frames_land_the_edited_tree("ts-edit-frame", SAME_LENGTH_EDITS);
+}
+
+/// Edits that move the text's end during a first parse on its thread also
+/// reach the tree the frames land.
+#[test]
+fn resizing_edits_during_a_first_parse_reach_the_tree_the_frames_land() {
+    frames_land_the_edited_tree("ts-edit-resize", RESIZING_EDITS);
+}
+
+/// Edits made while a first parse runs on its thread reach the tree a query
+/// then asks for: the query waits for the thread and parses the edits from
+/// the tree it gives.
+#[test]
+fn edits_during_a_first_parse_reach_the_tree_a_query_gets() {
+    let mut vm = edited_during_first_parse("ts-edit-query", SAME_LENGTH_EDITS);
+    assert_eq!(tree_is_a_parse(&mut vm, "ts-edit-query"), "t", "the query's tree is the edited text's");
+}
+
+/// A visit's early parse feeds every parser of the text: the parser that
+/// takes its tree first has it, and its twin, asked after a frame, copies
+/// it. No frame starts a second first parse for the twin. The parses are
+/// counted in a process of its own.
+#[test]
+fn a_twin_of_the_early_parses_parser_copies_its_tree() {
+    const CHILD: &str = "ROMACS_TREESIT_EARLY_TWIN_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let own = own_test::name(module_path!(), "a_twin_of_the_early_parses_parser_copies_its_tree");
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &own, "--nocapture", "--test-threads", "1"]).env(CHILD, "1").output().unwrap();
+        assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains("1 passed"),
+            "child: {}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        return;
+    }
+    let mut vm = gnu_lisp(&[]);
+    vm.set_gc_stress(0);
+    vm.eval_source("(require 'treesit)").unwrap();
+    let before = romacs_vm::treesit_parses_in_process();
+    vm.eval_source(&format!("(progn {SYSTEM_SETUP} \
+        (with-current-buffer (get-buffer-create \"ts-early-twin\") \
+          (dotimes (i 4000) (insert (format \"int f%d (int a) {{ return a + %d; }}\\n\" i i))) \
+          (romacs--treesit-parse-early 'c) \
+          (setq treesit-test-parser (treesit-parser-create 'c) treesit-test-twin (treesit-parser-create 'c nil t 'twin))) \
+        (set-window-buffer nil (get-buffer \"ts-early-twin\")))")).unwrap();
+    vm.set_background_wake(std::sync::Arc::new(|| {}));
+    deferred_frame(&mut vm);
+    vm.eval_source("(with-current-buffer \"ts-early-twin\" (treesit-parser-root-node treesit-test-parser))").unwrap();
+    while deferred_frame(&mut vm) {}
+    deferred_frame(&mut vm);
+    vm.eval_source("(with-current-buffer \"ts-early-twin\" (treesit-parser-root-node treesit-test-twin))").unwrap();
+    while deferred_frame(&mut vm) {}
+    assert_eq!(romacs_vm::treesit_parses_in_process(), before + 1, "the early parse was the text's only parse");
+    assert_eq!(tree_is_a_parse(&mut vm, "ts-early-twin"), "t");
+}
+
+/// A text whose only tree is an included-range parser's still gives a
+/// whole-text parser its first parse on a thread: that tree is no twin it
+/// could copy. The evaluator parses nothing for it.
+#[test]
+fn a_tree_of_part_of_the_text_leaves_a_whole_parsers_first_parse_on_a_thread() {
+    let mut vm = first_parse_vm("ts-part", 4000, false);
+    vm.eval_source("(with-current-buffer \"ts-part\" \
+        (let ((part (treesit-parser-create 'c nil t 'part))) \
+          (treesit-parser-set-included-ranges part '((1 . 200))) \
+          (treesit-parser-root-node part)) \
+        (setq treesit-test-parser (treesit-parser-create 'c nil t 'whole)))").unwrap();
+    // The parser first_parse_vm made sees the whole text too: drop it.
+    vm.eval_source("(with-current-buffer \"ts-part\" (dolist (p (treesit-parser-list nil nil t)) \
+        (unless (memq (treesit-parser-tag p) '(part whole)) (treesit-parser-delete p))))").unwrap();
+    vm.eval_source("(set-window-buffer nil (get-buffer \"ts-part\"))").unwrap();
+    let before = romacs_vm::treesit_parses_on_this_thread();
+    deferred_frame(&mut vm);
+    wait_landed(&mut vm, "ts-part");
+    while deferred_frame(&mut vm) {}
+    assert_eq!(tree_is_a_parse(&mut vm, "ts-part"), "t");
+    assert_eq!(romacs_vm::treesit_parses_on_this_thread(), before + 1,
+        "the evaluator parsed only the check's own buffer, not the whole parser's first parse");
+}
+
+/// A visited text's early parse feeds the whole-text parser, and an
+/// included-range parser beside it, shown, parses its part on a thread:
+/// one whole-text parse in all, the early one, and none on the evaluator.
+/// The parses are counted in a process of its own.
+#[test]
+fn a_fresh_visit_with_a_part_parser_parses_the_whole_text_once() {
+    const CHILD: &str = "ROMACS_TREESIT_FRESH_PART_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let own = own_test::name(module_path!(), "a_fresh_visit_with_a_part_parser_parses_the_whole_text_once");
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &own, "--nocapture", "--test-threads", "1"]).env(CHILD, "1").output().unwrap();
+        assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains("1 passed"),
+            "child: {}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        return;
+    }
+    let mut vm = gnu_lisp(&[]);
+    vm.set_gc_stress(0);
+    vm.eval_source("(require 'treesit)").unwrap();
+    let (before, evaluator) = (romacs_vm::treesit_parses_in_process(), romacs_vm::treesit_parses_on_this_thread());
+    vm.eval_source(&format!("(progn {SYSTEM_SETUP} \
+        (with-current-buffer (get-buffer-create \"ts-fresh-part\") \
+          (dotimes (i 4000) (insert (format \"int f%d (int a) {{ return a + %d; }}\\n\" i i))) \
+          (romacs--treesit-parse-early 'c) \
+          (setq treesit-test-parser (treesit-parser-create 'c)) \
+          (setq treesit-test-part (treesit-parser-create 'c nil t 'part)) \
+          (treesit-parser-set-included-ranges treesit-test-part '((1 . 200)))) \
+        (set-window-buffer nil (get-buffer \"ts-fresh-part\")))")).unwrap();
+    vm.set_background_wake(std::sync::Arc::new(|| {}));
+    deferred_frame(&mut vm);
+    vm.eval_source("(with-current-buffer \"ts-fresh-part\" (treesit-parser-root-node treesit-test-parser))").unwrap();
+    while deferred_frame(&mut vm) {}
+    deferred_frame(&mut vm);
+    wait_landed(&mut vm, "ts-fresh-part");
+    while deferred_frame(&mut vm) {}
+    vm.eval_source("(with-current-buffer \"ts-fresh-part\" (treesit-parser-root-node treesit-test-part))").unwrap();
+    assert_eq!(romacs_vm::treesit_parses_on_this_thread(), evaluator, "the evaluator parsed nothing");
+    assert_eq!(romacs_vm::treesit_parses_in_process(), before + 2, "the early parse of the whole text, and the part's");
+    assert_eq!(tree_is_a_parse(&mut vm, "ts-fresh-part"), "t");
+}
+
+/// A VM showing buffer NAME of LINES functions whose visit's early parse fed
+/// `treesit-test-parser', its twin `treesit-test-twin' never asked.
+fn fresh_twins_vm(name: &str, lines: usize) -> Vm {
+    let mut vm = gnu_lisp(&[]);
+    vm.set_gc_stress(0);
+    vm.eval_source("(require 'treesit)").unwrap();
+    vm.eval_source(&format!("(progn {SYSTEM_SETUP} \
+        (with-current-buffer (get-buffer-create \"{name}\") \
+          (dotimes (i {lines}) (insert (format \"int f%d (int a) {{ return a + %d; }}\\n\" i i))) \
+          (romacs--treesit-parse-early 'c) \
+          (setq treesit-test-parser (treesit-parser-create 'c) treesit-test-twin (treesit-parser-create 'c nil t 'twin))) \
+        (set-window-buffer nil (get-buffer \"{name}\")))")).unwrap();
+    vm.set_background_wake(std::sync::Arc::new(|| {}));
+    deferred_frame(&mut vm);
+    vm.eval_source(&format!("(with-current-buffer \"{name}\" (treesit-parser-root-node treesit-test-parser))")).unwrap();
+    while deferred_frame(&mut vm) {}
+    vm
+}
+
+/// An edit after a fresh visit reparses the parser that was asked, and
+/// starts no first parse for its twin nothing has asked, though the asked
+/// parser's tree is behind the text until then: that twin parses when
+/// asked, as before. The parses are counted in a process of its own.
+#[test]
+fn a_small_edit_starts_no_first_parse_for_a_twin_never_asked() {
+    const CHILD: &str = "ROMACS_TREESIT_EDIT_TWIN_CHILD";
+    const NAME: &str = "a_small_edit_starts_no_first_parse_for_a_twin_never_asked";
+    if std::env::var_os(CHILD).is_none() {
+        let own = own_test::name(module_path!(), NAME);
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &own, "--nocapture", "--test-threads", "1"]).env(CHILD, "1").output().unwrap();
+        assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains("1 passed"),
+            "child: {}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        return;
+    }
+    let before = romacs_vm::treesit_parses_in_process();
+    let mut vm = fresh_twins_vm("ts-edit-twin", 4000);
+    assert_eq!(romacs_vm::treesit_parses_in_process(), before + 1, "the early parse fed the asked parser");
+    // A small edit: its frame starts the reparse on a thread (`start').
+    vm.eval_source("(progn (defvar romacs-treesit-show-before-parse 8) (setq romacs-treesit-show-before-parse 8) \
+        (with-current-buffer \"ts-edit-twin\" (goto-char 9) (insert \"x\")))").unwrap();
+    let small = vm.eval_source("(with-current-buffer \"ts-edit-twin\" (romacs--treesit-parsing-p))").unwrap().display().unwrap();
+    deferred_frame(&mut vm);
+    let started = vm.eval_source("(with-current-buffer \"ts-edit-twin\" (romacs--treesit-parsing-p))").unwrap().display().unwrap();
+    assert_eq!((small.as_str(), started.as_str()), ("nil", "t"), "the edit's frame started its reparse on a thread");
+    for _ in 0..3 {
+        deferred_frame(&mut vm);
+        wait_landed(&mut vm, "ts-edit-twin");
+    }
+    vm.eval_source("(with-current-buffer \"ts-edit-twin\" (treesit-parser-root-node treesit-test-parser))").unwrap();
+    assert_eq!(romacs_vm::treesit_parses_in_process(), before + 2, "the early parse, and the asked parser's reparse alone");
+}
+
+/// A twin asked after its buffer was narrowed is judged against the region
+/// its query parses: the twin's whole-text tree is no copy for it, so the
+/// frame gives it a first parse on a thread, and the evaluator parses
+/// nothing for it.
+#[test]
+fn a_twin_narrowed_after_it_was_made_takes_its_first_parse_on_a_thread() {
+    let mut vm = fresh_twins_vm("ts-narrow-twin", 4000);
+    vm.eval_source("(with-current-buffer \"ts-narrow-twin\" (goto-char (point-min)) (forward-line 100) \
+        (narrow-to-region (point) (progn (forward-line 2000) (point))))").unwrap();
+    let before = romacs_vm::treesit_parses_on_this_thread();
+    deferred_frame(&mut vm);
+    wait_landed(&mut vm, "ts-narrow-twin");
+    while deferred_frame(&mut vm) {}
+    vm.eval_source("(with-current-buffer \"ts-narrow-twin\" (treesit-parser-root-node treesit-test-twin))").unwrap();
+    assert_eq!(romacs_vm::treesit_parses_on_this_thread(), before, "the twin's first parse was on a thread");
+}
+
+/// A parser of an indirect buffer shares its base's text, but a frame that
+/// shows the base starts no first parse for it: it parses when its own
+/// buffer is shown, on a thread. The parses are counted in a process of
+/// its own.
+#[test]
+fn a_frame_of_the_base_buffer_starts_no_first_parse_for_an_indirect_one() {
+    const CHILD: &str = "ROMACS_TREESIT_INDIRECT_CHILD";
+    const NAME: &str = "a_frame_of_the_base_buffer_starts_no_first_parse_for_an_indirect_one";
+    if std::env::var_os(CHILD).is_none() {
+        let own = own_test::name(module_path!(), NAME);
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &own, "--nocapture", "--test-threads", "1"]).env(CHILD, "1").output().unwrap();
+        assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains("1 passed"),
+            "child: {}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        return;
+    }
+    let mut vm = first_parse_vm("ts-base", 4000, true);
+    deferred_frame(&mut vm);
+    wait_landed(&mut vm, "ts-base");
+    while deferred_frame(&mut vm) {}
+    vm.eval_source("(with-current-buffer (make-indirect-buffer \"ts-base\" \"ts-indirect\") \
+        (setq treesit-test-parser (treesit-parser-create 'c)))").unwrap();
+    let (before, evaluator) = (romacs_vm::treesit_parses_in_process(), romacs_vm::treesit_parses_on_this_thread());
+    for _ in 0..5 {
+        deferred_frame(&mut vm);
+    }
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    assert_eq!(romacs_vm::treesit_parses_in_process(), before, "frames of the base parsed the indirect buffer's parser");
+    vm.eval_source("(set-window-buffer nil (get-buffer \"ts-indirect\"))").unwrap();
+    deferred_frame(&mut vm);
+    wait_landed(&mut vm, "ts-indirect");
+    while deferred_frame(&mut vm) {}
+    vm.eval_source("(with-current-buffer \"ts-indirect\" (treesit-parser-root-node treesit-test-parser))").unwrap();
+    assert_eq!(romacs_vm::treesit_parses_in_process(), before + 1, "showing it parsed it once");
+    assert_eq!(romacs_vm::treesit_parses_on_this_thread(), evaluator, "and not on the evaluator");
+}
+
+/// A twin waiting for a free thread stops waiting once the parser that got
+/// one has its tree: the twin copies it when asked, so the text is no
+/// longer parsing though every thread is still busy.
+#[test]
+fn a_twin_waiting_for_a_thread_stops_when_it_can_copy() {
+    const CHILD: &str = "ROMACS_TREESIT_TWIN_WAIT_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let own = own_test::name(module_path!(), "a_twin_waiting_for_a_thread_stops_when_it_can_copy");
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &own, "--nocapture", "--test-threads", "1"]).env(CHILD, "1").output().unwrap();
+        assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains("1 passed"),
+            "child: {}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        return;
+    }
+    let mut vm = first_parse_vm("ts-twin-wait", 400, false);
+    vm.eval_source("(with-current-buffer \"ts-twin-wait\" (setq treesit-test-twin (treesit-parser-create 'c nil t 'twin)))").unwrap();
+    // Three early parses of large texts hold three of the four threads.
+    vm.eval_source("(let ((text (apply #'concat (make-list 64000 \"int g (int a) { return a - 1; }\\n\")))) \
+        (dotimes (n 3) (with-current-buffer (get-buffer-create (format \"ts-hold-%d\" n)) (insert text))) \
+        (dotimes (n 3) (with-current-buffer (format \"ts-hold-%d\" n) (romacs--treesit-parse-early 'c))))").unwrap();
+    let holding = "(let ((n 0)) (dotimes (i 3) (with-current-buffer (format \"ts-hold-%d\" i) \
+        (when (romacs--treesit-parsing-p) (setq n (1+ n))))) n)";
+    assert_eq!(vm.eval_source(holding).unwrap().display().unwrap(), "3", "three threads are busy");
+    vm.eval_source("(set-window-buffer nil (get-buffer \"ts-twin-wait\"))").unwrap();
+    deferred_frame(&mut vm);
+    // The parser made last comes first in the text's list and took the last
+    // thread; ask it, which waits for its tree.
+    vm.eval_source("(with-current-buffer \"ts-twin-wait\" (treesit-parser-root-node treesit-test-twin))").unwrap();
+    deferred_frame(&mut vm);
+    assert_eq!(vm.eval_source(holding).unwrap().display().unwrap(), "3", "the threads are still busy");
+    let parsing = vm.eval_source("(with-current-buffer \"ts-twin-wait\" (romacs--treesit-parsing-p))").unwrap().display().unwrap();
+    assert_eq!(parsing, "nil", "the twin waits for no thread once it can copy");
+    let before = romacs_vm::treesit_parses_on_this_thread();
+    vm.eval_source("(with-current-buffer \"ts-twin-wait\" (treesit-parser-root-node treesit-test-parser))").unwrap();
+    assert_eq!(romacs_vm::treesit_parses_on_this_thread(), before, "the waiting parser copied its twin's tree");
+}
+
+/// Lisp that asks for a tree while its first parse runs on a thread waits
+/// for it, and a C-g ends the wait as it ends any wait: the query quits,
+/// the parse runs on, and the next query gets its tree.
+#[test]
+fn a_query_waiting_on_a_thread_parse_quits_on_c_g() {
+    // About xdisp.c's size: 1.3 MB of C.
+    let mut vm = first_parse_vm("ts-quit", 32_000, true);
+    vm.defer_parse().unwrap();
+    vm.frame_snapshot(800, 600).unwrap();
+    let parsing = vm.eval_source("(with-current-buffer \"ts-quit\" (romacs--treesit-parsing-p))").unwrap().display().unwrap();
+    assert_eq!(parsing, "t", "the first parse is on its thread");
+    let signal = vm.quit_signal();
+    let presser = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        signal.interrupt()
+    });
+    let asked = vm.eval_source("(with-current-buffer \"ts-quit\" \
+        (condition-case nil (progn (treesit-parser-root-node treesit-test-parser) 'answered) (quit 'quit)))")
+        .and_then(romacs_vm::Local::display).unwrap();
+    assert!(presser.join().unwrap(), "the press was taken");
+    assert_eq!(asked, "quit");
+    wait_landed(&mut vm, "ts-quit");
+    assert_eq!(tree_is_a_parse(&mut vm, "ts-quit"), "t", "the parse ran on, and the next query has the tree");
 }
