@@ -112,6 +112,25 @@ or nothing."
          (said (if (member status '("failed" "error" "cancelled" "unstarted")) status (or state status))))
     (if said (romacs-agent-rows--said-state said) "")))
 
+(defun romacs-agent-rows--record-said (record)
+  "What RECORD, a JSON object a call answered, came to: its status or
+state and its title, name or id, else how many fields it has."
+  (let ((state (or (romacs-agent-rows--field record "status") (romacs-agent-rows--field record "state")))
+        (what (seq-some (lambda (key) (romacs-agent-rows--field record key)) '("title" "name" "id"))))
+    (if (or state what)
+        (string-join (delq nil (list state (and what (truncate-string-to-width (romacs-agent-rows--line what) 48 nil nil "…"))))
+                     " · ")
+      (romacs-agent-rows--plural (hash-table-count record) "field"))))
+
+(defun romacs-agent-rows--text-said (output)
+  "What OUTPUT, a text, came to: its one line's first clause, without the
+tool's own name the row says already; else how many lines."
+  (let ((count (romacs-agent-rows--lines output)))
+    (if (/= count 1) (romacs-agent-rows--plural count "line")
+      (let ((line (romacs-agent-rows--line output)))
+        (truncate-string-to-width (string-trim (car (split-string (substring line 0 (min (length line) 200)) " *[(;]")))
+                                  48 nil nil "…")))))
+
 (defun romacs-agent-rows-outcome (output)
   "What OUTPUT, a call's answer, came to as a row says it after the call,
 after a dim dot: a JSON object's error, in the error face; else its
@@ -120,30 +139,17 @@ a list's length; a text's one line, else how many lines; nothing for no
 output."
   (if (not (romacs-agent-rows-readable-p output))
       (romacs-agent-rows--dim (concat " · " (romacs-agent-rows-size output)))
-  (let* ((value (and (stringp output) (string-match-p "\\`[ \t\n]*[[{]" output)
-                     (ignore-errors (json-parse-string output :null-object nil :false-object nil))))
-         (error (and (hash-table-p value) (romacs-agent-rows--field value "error")))
-         (said
-          (cond (error nil)
-                ((hash-table-p value)
-                 (let ((state (or (romacs-agent-rows--field value "status") (romacs-agent-rows--field value "state")))
-                       (what (seq-some (lambda (key) (romacs-agent-rows--field value key)) '("title" "name" "id"))))
-                   (if (or state what)
-                       (string-join (delq nil (list state (and what (truncate-string-to-width (romacs-agent-rows--line what) 48 nil nil "…"))))
-                                    " · ")
-                     (romacs-agent-rows--plural (hash-table-count value) "field"))))
-                ((vectorp value) (romacs-agent-rows--plural (length value) "item"))
-                ((or (not (stringp output)) (not (string-match-p "[^ \t\n\r]" output))) nil)
-                ;; One line: its first clause, without the tool's own
-                ;; name the row says already.
-                (t (let ((count (romacs-agent-rows--lines output)))
-                     (if (/= count 1) (romacs-agent-rows--plural count "line")
-                       (let ((line (romacs-agent-rows--line output)))
-                         (truncate-string-to-width (string-trim (car (split-string (substring line 0 (min (length line) 200)) " *[(;]")))
-                                                   48 nil nil "…"))))))))
-    (cond (error (concat (romacs-agent-rows--dim " · ") (propertize (romacs-agent-rows--line error) 'face 'romacs-agent-error)))
-          ((or (null said) (string-empty-p said)) "")
-          (t (romacs-agent-rows--dim (concat " · " said)))))))
+    (let* ((value (and (stringp output) (string-match-p "\\`[ \t\n]*[[{]" output)
+                       (ignore-errors (json-parse-string output :null-object nil :false-object nil))))
+           (error (and (hash-table-p value) (romacs-agent-rows--field value "error")))
+           (said (cond (error nil)
+                       ((hash-table-p value) (romacs-agent-rows--record-said value))
+                       ((vectorp value) (romacs-agent-rows--plural (length value) "item"))
+                       ((or (not (stringp output)) (not (string-match-p "[^ \t\n\r]" output))) nil)
+                       (t (romacs-agent-rows--text-said output)))))
+      (cond (error (concat (romacs-agent-rows--dim " · ") (propertize (romacs-agent-rows--line error) 'face 'romacs-agent-error)))
+            ((or (null said) (string-empty-p said)) "")
+            (t (romacs-agent-rows--dim (concat " · " said)))))))
 
 (defun romacs-agent-rows-ended (name input row output)
   "The row of tool NAME's call with INPUT, first drawn as ROW, once it

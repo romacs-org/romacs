@@ -966,6 +966,25 @@ recorded answer settles its block."
                       :at (copy-marker romacs-agent-log--end))
                      romacs-agent-log--ended-asks)))))))
 
+(defun romacs-agent-log--answers-text (by answers)
+  "What BY answered to questions, ANSWERS a table of question to answer:
+one question, its answer; more, each question with its own."
+  (concat (pcase by ("user" "answered: ") ("policy" "answered by Romacs: ")
+                 ("harness" "answered by the harness: ") (_ "answered: "))
+          (let ((one (= (hash-table-count answers) 1)))
+            (mapconcat (lambda (question)
+                         (if one (format "%s" (gethash question answers))
+                           (format "%s → %s" question (gethash question answers))))
+                       (hash-table-keys answers) " · "))))
+
+(defun romacs-agent-log--decision-text (by allowed)
+  "Who decided, BY, and whether ALLOWED."
+  (pcase by
+    ("user" (if allowed "allowed by you" "denied by you"))
+    ("policy" (if allowed "allowed by Romacs (romacs-agent-approval-policy)" "denied by Romacs"))
+    ("harness" (if allowed "allowed by the harness" "denied by the harness"))
+    (_ (if allowed "allowed" "denied"))))
+
 (defun romacs-agent-log--answer-text (actor decision scope reason &optional answers)
   "Who answered, and how: ACTOR a plist of :kind (\"user\", \"policy\",
 \"harness\" or \"unknown\"), :login and :client; DECISION allow or deny;
@@ -977,22 +996,9 @@ from a client other than this editor says which."
          (via (if (and client (not (equal client "editor"))) (format " (via %s)" client) ""))
          (allowed (equal decision "allow")))
     (if (and (hash-table-p answers) allowed)
-        (concat (propertize "✔ " 'face 'romacs-agent-log-allowed)
-                (pcase by ("user" "answered: ") ("policy" "answered by Romacs: ")
-                       ("harness" "answered by the harness: ") (_ "answered: "))
-                ;; One question: its answer; more: each question with its own.
-                (let ((one (= (hash-table-count answers) 1)))
-                  (mapconcat (lambda (question)
-                               (if one (format "%s" (gethash question answers))
-                                 (format "%s → %s" question (gethash question answers))))
-                             (hash-table-keys answers) " · "))
-                via)
+        (concat (propertize "✔ " 'face 'romacs-agent-log-allowed) (romacs-agent-log--answers-text by answers) via)
       (concat (propertize (if allowed "✔ " "✘ ") 'face (if allowed 'romacs-agent-log-allowed 'romacs-agent-log-denied))
-              (pcase by
-                ("user" (if allowed "allowed by you" "denied by you"))
-                ("policy" (if allowed "allowed by Romacs (romacs-agent-approval-policy)" "denied by Romacs"))
-                ("harness" (if allowed "allowed by the harness" "denied by the harness"))
-                (_ (if allowed "allowed" "denied")))
+              (romacs-agent-log--decision-text by allowed)
               via
               (if (equal scope "session") " for this session" "")
               (if (and reason (not (string-empty-p reason))) (concat ": " reason) "")))))
