@@ -355,6 +355,27 @@ pub fn re_search(
     let use_fastmap = pattern.fastmap_accurate && !pattern.can_be_null && !fastmap_force_disabled();
     let translate = pattern.translate.as_ref();
 
+    // A short search whose text, from its lowest candidate to the stop every
+    // match ends by (the range's end forward, `start` backward), lacks what
+    // every match contains fails here, before the scan, the DFA and the
+    // matcher (`required`): every file-name handler and `auto-mode-alist`
+    // entry on an ordinary name.  Only below the prefilter's build span, so a
+    // long span is never read twice.
+    let (lowest, stop) = if range < 0 {
+        (start.saturating_sub(range.unsigned_abs()), start)
+    } else {
+        (start, start.saturating_add(range.unsigned_abs()))
+    };
+    let stop = stop.min(text_len);
+    if lowest < stop
+        && stop - lowest < PREFILTER_MIN_BUILD_SPAN
+        && !fastmap_force_disabled()
+        && pattern.rejects_short(&text[lowest..stop])
+    {
+        clear_matcher_overflow();
+        return None;
+    }
+
     // `^`-anchored pattern: a forward candidate can only match at position 0
     // or right after a newline, so reject others with one byte compare
     // instead of a full matcher entry (scratch borrow, register reset,

@@ -42,6 +42,8 @@ impl CompiledPattern {
             buffer_sealed: false,
             rewind: RewindView::Buffer,
             prefilter: std::cell::OnceCell::new(),
+            required: std::cell::OnceCell::new(),
+            searched_short: std::cell::Cell::new(false),
             start_anchor: StartAnchor::None,
             dfa: dfa::filter::DfaCell::default(),
         }
