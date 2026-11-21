@@ -193,21 +193,27 @@ MODEL picked as for a new session.  Under an instance of the same harness
 once a running turn ends.  Under another harness a new session starts on
 a brief of the thread, to do NEXT, and its chat opens."
   (interactive
-   (let* ((fields (cdr (romacs-agent--pick-row #'romacs-agent--picker-rows)))
+   (let* ((fields (cdr (romacs-agent--pick-row #'romacs-agent--account-rows)))
           (provider (plist-get fields :provider)))
      (list provider (plist-get fields :model)
            (unless (romacs-agent-menu--moves-p (romacs-agent-menu--session) provider)
              (read-string "Go on with: " nil nil "Go on from where this thread left off."))))
    romacs-agent-log-mode)
   (let ((session (romacs-agent-menu--session)))
-    (if (and (symbolp provider) (romacs-agent-menu--moves-p session provider))
-        (romacs-agent-chat-next-account)
-      (if (romacs-agent-menu--moves-p session provider)
-        (let ((wanted (romacs-agent--wanted session)))
-          (romacs-agent-select session (or model (plist-get wanted :model)) (plist-get wanted :effort) provider)
-          (message "%s goes on under %s, its conversation as is%s" (romacs-agent-title session) provider
-                   (if (memq (romacs-agent-state session) '(starting running waiting-approval)) ", once this turn ends" "")))
-      (romacs-agent-menu--hand-off session provider model next)))))
+    (cond
+     ((not (romacs-agent-menu--moves-p session provider))
+      (romacs-agent-menu--hand-off session provider model next))
+     ((and (symbolp provider) (null model))
+      (romacs-agent-chat-next-account))
+     (t
+      (let* ((wanted (romacs-agent--wanted session))
+             (target (if (symbolp provider) (plist-get wanted :provider) provider))
+             (model (or model (plist-get wanted :model)))
+             (effort (plist-get wanted :effort))
+             (instance (romacs-agent--instance target (romacs-agent-harness session))))
+        (romacs-agent-select session model
+                             (and effort (romacs-agent--effort-fits-p instance model effort) effort)
+                             target))))))
 
 (defun romacs-agent-chat-next-account ()
   "Go on under the next account of this session's harness with room, its
@@ -371,7 +377,7 @@ the session, the view."
   "m" (#'romacs-agent-menu--model-label romacs-agent-chat-model)
   "E" (#'romacs-agent-menu--effort-label romacs-agent-chat-effort)
   "P" (#'romacs-agent-menu--plan-label romacs-agent-chat-plan)
-  "H" ("Go on under another instance" romacs-agent-chat-handoff)
+  "H" ("Switch harness or model" romacs-agent-chat-handoff)
   "N" ("Next account with room" romacs-agent-chat-next-account)
   "z" ("Cancel the resume at its limit's reset" romacs-agent-chat-cancel-resume
        :if (lambda () (and romacs-agent-log--session (romacs-agent-resume-time romacs-agent-log--session))))

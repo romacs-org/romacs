@@ -1150,6 +1150,7 @@ each (TEXT :provider NAME :model ID :efforts EFFORTS :default-effort EFFORT
   (let* ((models (romacs-agent--models instance))
          (model (plist-get instance :model)) (effort (plist-get instance :effort))
          (own (cdr (assoc model models)))
+         (default-effort (or effort (plist-get own :default-effort)))
          (dir (or (plist-get instance :config-dir)
                   (plist-get (romacs-agent--driver-of (plist-get instance :harness)) :config-default)))
          (missing (and (plist-get instance :config-dir) (not (file-directory-p (expand-file-name dir)))
@@ -1159,9 +1160,9 @@ each (TEXT :provider NAME :model ID :efforts EFFORTS :default-effort EFFORT
     (cons (append (list (format "%s · default" label)
                         :efforts (romacs-agent--efforts-of instance nil)
                         :default-effort (plist-get own :default-effort)
-                        :note (or missing (if (or model effort)
-                                              (mapconcat #'identity (delq nil (list model effort)) " · ")
-                                            "harness's own")))
+                        :note (or missing
+                                  (format "%s · effort %s" (or model "configured model")
+                                          (or default-effort "unreported"))))
                   common)
           (mapcar (lambda (row)
                     (let ((efforts (plist-get (cdr row) :efforts)))
@@ -1186,14 +1187,14 @@ lists the accounts once."
 
 (defun romacs-agent--picker-rows (&optional accounts)
   "The picker's rows: each harness's (`romacs-agent--instance-rows' of its
-pool's first account, its pool their provider), the default's first; with
+pool's selected account, its pool their provider), the default's first; with
 ACCOUNTS or `romacs-agent-pick-accounts', each enabled instance's."
   (if (or accounts romacs-agent-pick-accounts) (romacs-agent--account-rows)
     (let* ((default (plist-get (romacs-agent--configured (romacs-agent--default-provider)) :harness))
            (harnesses (delete-dups (cl-loop for i in (romacs-agent-instances)
                                             when (plist-get i :enabled) collect (plist-get i :harness)))))
       (cl-loop for harness in (cons default (remq default harnesses))
-               for instance = (car (romacs-agent-pool harness))
+               for instance = (romacs-agent-pool-pick harness)
                for label = (romacs-agent--harness-display harness)
                for group = (format "%s%s" label (if (eq harness default) "  default" ""))
                when instance
@@ -1278,7 +1279,7 @@ Its effort is asked for with ASK-EFFORT; else it is the harness's own."
          (provider (plist-get fields :provider))
          (model (plist-get fields :model))
          (efforts (plist-get fields :efforts))
-         (own (plist-get (if (symbolp provider) (car (romacs-agent-pool provider)) (romacs-agent--configured provider))
+         (own (plist-get (if (symbolp provider) (romacs-agent-pool-pick provider) (romacs-agent--configured provider))
                          :effort))
          (effort (when (and efforts ask-effort)
                    (romacs-agent--read-effort efforts (if (member own efforts) own (plist-get fields :default-effort))))))

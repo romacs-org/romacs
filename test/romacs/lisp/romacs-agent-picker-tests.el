@@ -12,7 +12,8 @@
   (require 'romacs-agent)
   (require 'romacs-agent-tools)
   (require 'romacs-agent-ui)
-  (require 'romacs-agent-board))
+  (require 'romacs-agent-board)
+  (require 'romacs-agent-menu))
 
 ;; These tests start no supervisor or harness: the build's own (beside the
 ;; binary) are not needed to make a session.
@@ -177,27 +178,40 @@
         `(("claude" :display "Claude" :config-dir ,claude :program ,program :model "a" :effort "high")
           ("claude2" :display "Claude" :config-dir ,(expand-file-name "gone" root) :program ,program)
           ("claude3" :config-dir ,claude :program ,program :enabled nil)
-          ("codex" :display "Codex" :config-dir ,claude :program ,program)))
+          ("codex" :display "Codex" :config-dir ,claude :program ,program :model "b")))
        (romacs-agent-default-provider "codex")
        (romacs-agent-models '((claude ("a" :label "Model A" :efforts ("low" "high")))
-                              (codex ("b" :label "Model B")))))
+                              (codex ("b" :label "Model B" :efforts ("medium") :default-effort "medium")))))
     (make-directory claude)
     ;; Each harness once, its pool its provider, the default's first.
     (let* ((rows (romacs-agent--picker-rows)) (texts (mapcar #'car rows)))
       (should (equal texts '("Codex · default" "Codex · Model B" "Claude Code · default" "Claude Code · Model A")))
       (should (equal (delete-dups (mapcar (lambda (row) (plist-get (cdr row) :provider)) rows)) '(codex claude)))
-      (should (equal (plist-get (cdr (assoc "Claude Code · default" rows)) :note) "a · high")))
+      (should (equal (plist-get (cdr (assoc "Claude Code · default" rows)) :note) "a · effort high")))
     ;; Accounts, asked for: the default instance first, the disabled not at all, alike ones apart.
     (let* ((rows (romacs-agent--picker-rows t)) (texts (mapcar #'car rows)))
       (should (equal texts '("Codex · default" "Codex · Model B" "Claude · default" "Claude · Model A"
                              "Claude (claude2) · default" "Claude (claude2) · Model A")))
-      (should (equal (plist-get (cdr (assoc "Codex · default" rows)) :note) "harness's own"))
+      (should (equal (plist-get (cdr (assoc "Codex · default" rows)) :note) "b · effort medium"))
       (should (string-suffix-p "default" (plist-get (cdr (car rows)) :group)))
-      (should (equal (plist-get (cdr (assoc "Claude · default" rows)) :note) "a · high"))
+      (should (equal (plist-get (cdr (assoc "Claude · default" rows)) :note) "a · effort high"))
       (should (equal (plist-get (cdr (assoc "Claude · Model A" rows)) :note) "effort low...high"))
       (should (equal (plist-get (cdr (assoc "Claude (claude2) · default" rows)) :note) "dir missing"))
       (should (equal (plist-get (cdr (assoc "Claude · Model A" rows)) :model) "a"))
       (should-not (plist-get (cdr (assoc "Claude · default" rows)) :model)))))
+
+(ert-deftest romacs-agent-picker-handoff-selects-model-within-current-pool ()
+  (let ((session (romacs-agent--make :harness 'claude :provider "claude2"
+                                     :options '(:effort "max")))
+        selected)
+    (cl-letf (((symbol-function 'romacs-agent-menu--session) (lambda () session))
+              ((symbol-function 'romacs-agent--instance)
+               (lambda (name harness)
+                 (list :name name :harness harness :models '(("opus" :efforts ("high"))))))
+              ((symbol-function 'romacs-agent-select)
+               (lambda (&rest arguments) (setq selected arguments))))
+      (romacs-agent-chat-handoff 'claude "opus" nil)
+      (should (equal selected (list session "opus" nil "claude2"))))))
 
 (defun romacs-agent-picker--reader (answers asked)
   "A `completing-read' giving ANSWERS in turn, each prompt, group and
