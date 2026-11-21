@@ -188,8 +188,9 @@ impl Vm {
         let mut state = State::None;
         for (parser, core) in cores.iter().cloned() {
             let treeless = core.borrow().tree.is_none() && core.borrow().ahead.is_none();
-            // A treeless parser whose twin has a tree copies it when asked:
-            // no thread parses for it, and none waits for a slot. A parser
+            // A treeless parser whose twin has a tree copies it, or parses
+            // after it, when asked: no thread parses for it, and none waits
+            // for a slot. A parser
             // of another buffer sharing the text (an indirect one) waits for
             // a frame of its own.
             let (owned, ready) = if treeless { self.treesit_first_state(buffer, parser, &cores)? } else { (false, false) };
@@ -226,9 +227,11 @@ impl Vm {
         Ok(state)
     }
     /// For a treeless PARSER of BUFFER's text: whether PARSER is BUFFER's own,
-    /// and whether a twin among CORES has a tree that PARSER's first query
-    /// copies, by `ts_twin_tree`'s rules for a first parse against the region
-    /// that query parses, its buffer's accessible region now.
+    /// and whether a twin among CORES has a tree, by `ts_twin_tree`'s match
+    /// against the region PARSER's query parses, its buffer's accessible
+    /// region now. PARSER's query copies a fresh one, or parses as it always
+    /// has after an edit left it behind: neither is worth a thread before
+    /// that query.
     fn treesit_first_state(&mut self, buffer: Value, parser: Value,
                            cores: &[(Value, Rc<std::cell::RefCell<Core>>)]) -> crate::Result<(bool, bool)> {
         let (native, own, linecols) = match self.object(parser)? {
@@ -247,11 +250,11 @@ impl Vm {
         let language = { let n = native.borrow(); n.sees_all(length).then(|| n.language()).flatten() };
         let Some(language) = language else { return Ok((owned, false)) };
         for (other, other_core) in cores {
-            let fresh = *other != parser && {
+            let twin = *other != parser && {
                 let c = other_core.borrow();
-                c.tree.is_some() && c.fresh && !c.need_reparse && c.visible == visible && c.linecols.is_some() == linecols
+                c.tree.is_some() && c.visible == visible && c.linecols.is_some() == linecols
             };
-            if !fresh {
+            if !twin {
                 continue;
             }
             if let data::Object::Treesit(object) = self.object(*other)? {

@@ -968,9 +968,10 @@ fn fresh_twins_vm(name: &str, lines: usize) -> Vm {
     vm
 }
 
-/// A small edit after a fresh visit reparses the parsers that have a tree,
-/// and starts no first parse for a twin nothing has asked: that twin parses
-/// when asked, as before. The parses are counted in a process of its own.
+/// An edit after a fresh visit reparses the parser that was asked, and
+/// starts no first parse for its twin nothing has asked, though the asked
+/// parser's tree is behind the text until then: that twin parses when
+/// asked, as before. The parses are counted in a process of its own.
 #[test]
 fn a_small_edit_starts_no_first_parse_for_a_twin_never_asked() {
     const CHILD: &str = "ROMACS_TREESIT_EDIT_TWIN_CHILD";
@@ -987,10 +988,12 @@ fn a_small_edit_starts_no_first_parse_for_a_twin_never_asked() {
     let mut vm = fresh_twins_vm("ts-edit-twin", 4000);
     assert_eq!(romacs_vm::treesit_parses_in_process(), before + 1, "the early parse fed the asked parser");
     vm.eval_source("(with-current-buffer \"ts-edit-twin\" (goto-char (point-min)) (insert \"x\"))").unwrap();
-    deferred_frame(&mut vm);
-    wait_landed(&mut vm, "ts-edit-twin");
-    while deferred_frame(&mut vm) {}
-    assert_eq!(romacs_vm::treesit_parses_in_process(), before + 2, "the edit reparsed the asked parser alone");
+    for _ in 0..3 {
+        deferred_frame(&mut vm);
+        wait_landed(&mut vm, "ts-edit-twin");
+    }
+    vm.eval_source("(with-current-buffer \"ts-edit-twin\" (treesit-parser-root-node treesit-test-parser))").unwrap();
+    assert_eq!(romacs_vm::treesit_parses_in_process(), before + 2, "the early parse, and the asked parser's reparse alone");
 }
 
 /// A twin asked after its buffer was narrowed is judged against the region
