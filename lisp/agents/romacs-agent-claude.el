@@ -650,17 +650,20 @@ names any: one that names none leaves those kept before."
 
 (defun romacs-agent--claude-models-probe (instance)
   "How INSTANCE's Claude Code is asked for its models with no session
-\(`:models-probe'): its `initialize' alone, keeping no conversation, and
-neither the user's settings nor their hooks, nor the instance's own
-arguments, which may name more: a session's own `initialize' reports
-the models as its settings make them."
-  (list :argv (list (plist-get instance :program) "-p" "--output-format" "stream-json"
-                    "--input-format" "stream-json" "--verbose" "--no-session-persistence"
-                    "--strict-mcp-config" "--setting-sources" "")
-        :input (concat (json-serialize (romacs-mcp--object "type" "control_request" "request_id" "romacs-models"
-                                                           "request" (romacs-mcp--object "subtype" "initialize")))
-                       "\n")
-        :read #'romacs-agent--claude-probed-models))
+\(`:models-probe'): its `initialize' alone, keeping no conversation, under
+the user's settings, so its models are a session's, but running none of
+their hooks, nor the instance's own arguments, which may name more.  Nil
+for an instance whose arguments name settings of their own: its sessions
+alone say what it offers."
+  (unless (seq-some (lambda (word) (string-match-p "\\`--setting\\(?:s\\|-sources\\)\\(?:=\\|\\'\\)" word))
+                    (plist-get instance :arguments))
+    (list :argv (list (plist-get instance :program) "-p" "--output-format" "stream-json"
+                      "--input-format" "stream-json" "--verbose" "--no-session-persistence"
+                      "--strict-mcp-config" "--settings" "{\"disableAllHooks\":true}")
+          :input (concat (json-serialize (romacs-mcp--object "type" "control_request" "request_id" "romacs-models"
+                                                             "request" (romacs-mcp--object "subtype" "initialize")))
+                         "\n")
+          :read #'romacs-agent--claude-probed-models)))
 
 (defun romacs-agent--claude-probed-models (line)
   "What LINE says to the models probe's `initialize', or nil."
