@@ -771,7 +771,9 @@ reader; the report."
          (installed (make-temp-file "romacs-live-installed-" t))
          (romacs-server-build-watch installed))
     (unwind-protect
-        (cl-letf (((symbol-function 'warm-restart-request) (lambda (&rest args) (setq asked args))))
+        (cl-letf (((symbol-function 'warm-restart-request) (lambda (&rest args) (setq asked args)))
+                  ;; The store's pruning has a test of its own, on a store of its own.
+                  ((symbol-function 'romacs-live-prune-store) #'ignore))
           (romacs-session-reset)
           (should (equal (plist-get asked :fresh) 'unsaved))
           (should (equal (plist-get asked :target) installed))
@@ -809,6 +811,11 @@ reader; the report."
           (write-region (format "(:parts ((romacs-live-restore-ledger :entries ((:file %S)))))"
                                 (expand-file-name (concat (funcall blob ?b) "/x.el") romacs-live-directory))
                         nil (expand-file-name "pending.image" warm-restart-directory) nil 'silent)
+          ;; An image that cannot be read: nothing is known safe to go.
+          (make-directory (expand-file-name "unreadable.image" warm-restart-directory))
+          (should-not (romacs-live-prune-store))
+          (should (file-directory-p (expand-file-name (funcall blob ?a) romacs-live-directory)))
+          (delete-directory (expand-file-name "unreadable.image" warm-restart-directory))
           (let ((removed (romacs-live-prune-store)))
             (should (equal (mapcar #'file-name-nondirectory removed) (list (funcall blob ?a))))
             (should (file-directory-p (expand-file-name (funcall blob ?b) romacs-live-directory)))

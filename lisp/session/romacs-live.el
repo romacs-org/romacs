@@ -187,6 +187,8 @@ relative to its `load-path' directory); return its file."
             (coding-system-for-write 'no-conversion))
         (write-region bytes nil temporary nil 'silent)
         (rename-file temporary file t)))
+    ;; Used now: a reset elsewhere keeps it from here.
+    (ignore-errors (set-file-times (file-name-directory file)))
     file))
 
 ;;;; Pruning the store
@@ -214,32 +216,39 @@ relative to its `load-path' directory); return its file."
 
 (defun romacs-live--imaged-blobs ()
   "The store blobs the session images on disk name: a restart's pending
-image, a kept one, a rollback's."
+image, a kept one, a rollback's; `unreadable' when an image could not be
+read, whose blobs are then unknown."
   (require 'warm-restart)
   (let ((pattern (concat (regexp-quote (romacs-live--store)) "\\([0-9a-f]\\{40,64\\}\\)/"))
         (blobs nil))
-    (dolist (dir (list (warm-restart--directory) (romacs-restart--directory)))
-      (when (file-directory-p dir)
-        (dolist (image (directory-files dir t "\\.image\\'"))
-          (with-temp-buffer
-            (set-buffer-multibyte nil)
-            (ignore-errors (insert-file-contents-literally image))
-            (goto-char (point-min))
-            (while (re-search-forward pattern nil t)
-              (push (match-string 1) blobs))))))
-    (delete-dups blobs)))
+    (catch 'unreadable
+      (dolist (dir (list (warm-restart--directory) (romacs-restart--directory)))
+        (when (file-directory-p dir)
+          (dolist (image (directory-files dir t "\\.image\\'"))
+            (with-temp-buffer
+              (set-buffer-multibyte nil)
+              ;; Gone since the listing (a restore renamed it) or unread:
+              ;; nothing is known safe to delete.
+              (unless (ignore-errors (insert-file-contents-literally image) t)
+                (throw 'unreadable 'unreadable))
+              (goto-char (point-min))
+              (while (re-search-forward pattern nil t)
+                (push (match-string 1) blobs))))))
+      (delete-dups blobs))))
 
 (defun romacs-live-prune-store (&optional days)
   "Delete the content store's blob directories nothing needs: none a
 session image names, none the ledger names, none used in the last DAYS
-\(default `romacs-live-store-keep-days').  The deleted directories."
+\(default `romacs-live-store-keep-days', at least one).  Nothing goes
+when a session image cannot be read.  The deleted directories."
   (let* ((store (romacs-live--store))
-         (days (or days romacs-live-store-keep-days))
-         (named (append (romacs-live--imaged-blobs)
+         (days (max 1 (or days romacs-live-store-keep-days)))
+         (imaged (romacs-live--imaged-blobs))
+         (named (append (and (listp imaged) imaged)
                         (mapcar (lambda (e) (plist-get e :new)) (plist-get romacs-live-ledger :entries))))
          (old (time-subtract nil (days-to-time days)))
          (removed nil))
-    (when (file-directory-p store)
+    (when (and (file-directory-p store) (listp imaged))
       (dolist (dir (directory-files store t "\\`[0-9a-f]\\{40,64\\}\\'"))
         (unless (or (member (file-name-nondirectory dir) named)
                     (time-less-p old (file-attribute-modification-time (file-attributes dir))))
