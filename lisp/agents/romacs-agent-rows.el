@@ -121,12 +121,14 @@ output."
                                     " · ")
                      (romacs-agent-rows--plural (hash-table-count value) "field"))))
                 ((vectorp value) (romacs-agent-rows--plural (length value) "item"))
-                ((or (not (stringp output)) (string-empty-p (string-trim output))) nil)
+                ((or (not (stringp output)) (not (string-match-p "[^ \t\n\r]" output))) nil)
                 ;; One line: its first clause, without the tool's own
                 ;; name the row says already.
-                ((= (romacs-agent-rows--lines output) 1)
-                 (truncate-string-to-width (string-trim (car (split-string (string-trim output) " *[(;]"))) 48 nil nil "…"))
-                (t (romacs-agent-rows--plural (romacs-agent-rows--lines output) "line")))))
+                (t (let ((count (romacs-agent-rows--lines output)))
+                     (if (/= count 1) (romacs-agent-rows--plural count "line")
+                       (let ((line (romacs-agent-rows--line output)))
+                         (truncate-string-to-width (string-trim (car (split-string (substring line 0 (min (length line) 200)) " *[(;]")))
+                                                   48 nil nil "…"))))))))
     (cond (error (concat (romacs-agent-rows--dim " · ") (propertize (romacs-agent-rows--line error) 'face 'romacs-agent-error)))
           ((or (null said) (string-empty-p said)) "")
           (t (romacs-agent-rows--dim (concat " · " said))))))
@@ -176,8 +178,11 @@ harness's: it keeps its colour as the row settles and dims.")
     (and (hash-table-p value) value)))
 
 (defun romacs-agent-rows--line (text)
-  "TEXT's first line, trimmed."
-  (car (split-string (string-trim (or text "")) "\n")))
+  "TEXT's first line that says something, trimmed: read from its start,
+never through the whole of a long TEXT."
+  (let* ((text (or text ""))
+         (from (if (string-match "\\`[ \t\n\r]*" text) (match-end 0) 0)))
+    (string-trim (substring text from (string-search "\n" text from)))))
 
 (defun romacs-agent-rows--dim (text)
   (propertize text 'face 'romacs-agent-dim))
@@ -476,11 +481,31 @@ known."
   "How many lines TEXT has that say something: none when it says it
 found none."
   (if (or (not (stringp text)) (string-match-p "\\`[ \t\n]*No \\(?:matches\\|files\\) found" text)) 0
-    (cl-count-if (lambda (line) (string-match-p "[^ \t]" line)) (split-string text "\n"))))
+    (with-temp-buffer (insert text) (how-many "^[ \t]*[^ \t\n]" (point-min) (point-max)))))
 
 (defun romacs-agent-rows--lines (text)
   "How many lines TEXT spans, a string's, 0 for none."
-  (if (or (not (stringp text)) (string-empty-p text)) 0 (1+ (cl-count ?\n (string-trim-right text "\n")))))
+  (if (stringp text) (cdr (romacs-agent-rows-glimpse text 0)) 0))
+
+(defun romacs-agent-rows-glimpse (text limit &optional tail width)
+  "TEXT's first LIMIT lines, or with TAIL its last, and how many lines it
+spans without its trailing blanks: (LINES . COUNT).  WIDTH, when
+given, cuts each line to as many characters, read no further.  The text
+is walked by the buffer's own motion, never split whole in Lisp: a
+command's output of millions of lines costs a copy and a count."
+  (with-temp-buffer
+    (insert text)
+    (skip-chars-backward " \t\n\r")
+    (delete-region (point) (point-max))
+    (let ((count (if (bobp) 0 (count-lines (point-min) (point-max))))
+          (cut (lambda (start end) (buffer-substring start (if width (min end (+ start width)) end)))))
+      (goto-char (if tail (point-max) (point-min)))
+      (cons (cl-loop repeat (min limit count)
+                     collect (prog1 (funcall cut (line-beginning-position) (line-end-position))
+                               (forward-line (if tail -1 1)))
+                     into lines
+                     finally return (if tail (nreverse lines) lines))
+            count))))
 
 (defun romacs-agent-rows--plural (n word)
   (format "%d %s%s" n word (if (= n 1) "" "s")))

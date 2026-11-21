@@ -453,10 +453,12 @@ and its usage after it).  RET still shows all of it."
   "TEXT's first LIMIT lines, or with TAIL its last, each cut to
 `romacs-agent-log-output-width' columns, and how many it has:
 \(SHOWN . COUNT)."
-  (let* ((lines (split-string (string-trim-right (or text "")) "\n"))
-         (count (length lines)))
+  (pcase-let ((`(,lines . ,count)
+               ;; A character is a column at least: read no more of a line
+               ;; than its width needs, and one more for the ellipsis.
+               (romacs-agent-rows-glimpse (or text "") limit tail (1+ romacs-agent-log-output-width))))
     (cons (mapconcat (lambda (line) (truncate-string-to-width line romacs-agent-log-output-width nil nil (truncate-string-ellipsis)))
-                     (if tail (last lines limit) (seq-take lines limit)) "\n")
+                     lines "\n")
           count)))
 
 (defun romacs-agent-log--output (output face full &optional tail)
@@ -507,9 +509,20 @@ renderer's, else its name and the brief of its input."
                             ((stringp described) (concat " " brief))
                             (t (concat "(" brief ")"))))))))
 
+(defconst romacs-agent-log--row-chars 240
+  "The most characters a call's row holds, whatever its renderer says:
+RET shows the rest.")
+
 (defun romacs-agent-log--one-line (text)
-  "TEXT, a row, on one line: its line breaks spaces (RET shows it whole)."
-  (and text (replace-regexp-in-string "[ \t]*[\n\r]+[ \t]*" " " text t t)))
+  "TEXT, a row, on one line: its line breaks spaces, cut to
+`romacs-agent-log--row-chars' before anything reads further (RET shows
+it whole)."
+  (and text
+       (let ((row (replace-regexp-in-string "[ \t]*[\n\r]+[ \t]*" " "
+                                            (substring text 0 (min (length text) (* 2 romacs-agent-log--row-chars))) t t)))
+         (if (> (length row) romacs-agent-log--row-chars)
+             (concat (substring row 0 (1- romacs-agent-log--row-chars)) (truncate-string-ellipsis))
+           row))))
 
 (defun romacs-agent-log--call (event)
   "The first line of tool call EVENT, its mark first."
@@ -556,7 +569,14 @@ command's last lines (TAIL).  Anything else is RET away."
         ((member name '("Agent" "Task")) (list (romacs-agent-log--report output) 'romacs-agent-log-output))
         ((romacs-agent-rows-tail-p name)
          ;; The harness's own trailer is no line of the command's.
-         (list (replace-regexp-in-string "\n*Shell cwd was reset to [^\n]*\n*\\'" "" output) 'romacs-agent-log-output t))))
+         (list (romacs-agent-log--without-trailer output) 'romacs-agent-log-output t))))
+
+(defun romacs-agent-log--without-trailer (output)
+  "A command's OUTPUT without the note its harness puts after it, read at
+its end only."
+  (if (string-match "\n*Shell cwd was reset to [^\n]*\n*\\'" output (max 0 (- (length output) 1024)))
+      (substring output 0 (match-beginning 0))
+    output))
 
 (defun romacs-agent-log--live (block text)
   "BLOCK's output streamed so far grows by TEXT: its last lines show under
