@@ -226,6 +226,14 @@ impl Vm {
         }
         Ok(state)
     }
+    /// BUFFER's accessible region now, as a parser's view: 1-based bytes.
+    fn treesit_view(&mut self, buffer: Value) -> crate::Result<Option<(i64, i64)>> {
+        let byte = |offset: usize| i64::try_from(offset).unwrap_or(i64::MAX).saturating_add(1);
+        Ok(match self.object(buffer)? {
+            data::Object::Buffer(b) => { let r = b.accessible(); Some((byte(r.start.0), byte(r.end.0))) }
+            _ => None,
+        })
+    }
     /// For a treeless PARSER of BUFFER's text: whether PARSER is BUFFER's own,
     /// and whether a twin among CORES has a tree, by `ts_twin_tree`'s match
     /// against the region PARSER's query parses, its buffer's accessible
@@ -241,10 +249,7 @@ impl Vm {
             },
             _ => return Ok((false, false)),
         };
-        let visible = match self.object(own)? {
-            data::Object::Buffer(b) => { let r = b.accessible(); (r.start.0 as i64 + 1, r.end.0 as i64 + 1) }
-            _ => return Ok((false, false)),
-        };
+        let Some(visible) = self.treesit_view(own)? else { return Ok((false, false)) };
         let owned = own == buffer;
         let length = u32::try_from(visible.1 - visible.0).unwrap_or(u32::MAX);
         let language = { let n = native.borrow(); n.sees_all(length).then(|| n.language()).flatten() };
@@ -288,10 +293,7 @@ impl Vm {
         };
         // A parser without a tree follows no edit: its view is its buffer's
         // accessible region now (treesit_sync_visible_region).
-        let region = match self.object(own)? {
-            data::Object::Buffer(b) => b.accessible(),
-            _ => return Ok(false),
-        };
+        let Some(region) = self.treesit_view(own)? else { return Ok(false) };
         let Some(text) = self.treesit_text_of(buffer)? else { return Ok(false) };
         let behind = core.borrow_mut().ahead.take();
         let mut c = core.borrow_mut();
@@ -299,7 +301,7 @@ impl Vm {
             return Ok(false);
         }
         if c.tree.is_none() {
-            c.visible = (region.start.0 as i64 + 1, region.end.0 as i64 + 1);
+            c.visible = region;
         }
         let old = match behind.and_then(|ahead| ahead.finish(text)) {
             Some((tree, region, ..)) if region == c.visible => Some(tree.loose()),
