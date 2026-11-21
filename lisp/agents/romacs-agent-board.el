@@ -23,6 +23,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'romacs-agent)
+(require 'romacs-agent-glyphs)
 (require 'romacs-agent-store)
 (require 'romacs-agent-ui)
 (require 'hl-line)
@@ -295,8 +296,9 @@ thread at work, while the board shows."
   (romacs-agent-ui--label (romacs-agent-ui--state-of (plist-get row :key))))
 
 (defun romacs-agent-board-state-width ()
-  "The state column's width: a glyph's, or a short word's."
-  (if (equal (substring-no-properties (romacs-agent-ui--label (romacs-agent-ui--state-of 'working))) "🤖") 2 9))
+  "The state column's width: its widest label's, a word cut to nine."
+  (min 9 (apply #'max 1 (mapcar (lambda (state) (string-width (or (romacs-agent-ui--label state) "")))
+                                romacs-agent-ui--states))))
 
 (defun romacs-agent-board-title (row)
   "ROW's title: dim when settled or only there for context, bold unread."
@@ -348,8 +350,13 @@ thread at work, while the board shows."
 ;;; Lines
 
 (defun romacs-agent-board--cell (text width)
-  "TEXT in exactly WIDTH columns."
-  (romacs-truncate (or text "") width ?\s))
+  "TEXT in exactly WIDTH columns: padded when it fits, a mark of several
+code points kept whole, else cut."
+  (let ((text (or text "")))
+    (let ((cut (if (<= (string-width text) width) text (romacs-truncate text width))))
+      ;; Cut by its characters' widths, a composed mark can still run over.
+      (while (> (string-width cut) width) (setq cut (substring cut 0 -1)))
+      (concat cut (make-string (- width (string-width cut)) ?\s)))))
 
 (defun romacs-agent-board--widths (width head)
   "The columns' widths in a row WIDTH wide after HEAD columns: `fill'
@@ -372,11 +379,19 @@ takes what the others and the gaps between them leave."
 columns): deeper ones line up with it, so a row's indent costs the same
 however long its chain, and a chain's titles stay in view.")
 
+(defun romacs-agent-board--fold-mark (row)
+  "ROW's fold mark, open or folded, or blank when it has no threads: as
+wide as the wider mark, so rows line up whichever they show."
+  (let ((blank (make-string (string-width (romacs-agent-glyph-padded 'board-open 'board-closed)) ?\s)))
+    (cond ((null (plist-get row :children)) blank)
+          ((plist-get row :open) (romacs-agent-glyph-padded 'board-open 'board-closed))
+          (t (romacs-agent-glyph-padded 'board-closed 'board-open)))))
+
 (defun romacs-agent-board--thread-line (row width)
   "Thread ROW in a line WIDTH columns wide: its fold, then its columns
 \(`romacs-agent-board-columns')."
   (let* ((head (concat (make-string (* 2 (min (plist-get row :depth) romacs-agent-board--max-indent-depth)) ?\s)
-                       (cond ((null (plist-get row :children)) "  ") ((plist-get row :open) "˅ ") (t "› "))))
+                       (romacs-agent-board--fold-mark row) " "))
          (widths (romacs-agent-board--widths width (string-width head))))
     (cl-flet ((line (live)
                 (concat head (mapconcat #'identity
@@ -401,7 +416,7 @@ however long its chain, and a chain's titles stay in view.")
             (tail (romacs-truncate
                    (concat (if-let* ((rollup (romacs-agent-ui--rollup (plist-get row :keys)))) (concat "  " rollup) "")
                            (if-let* ((count (plist-get row :folded)))
-                               (propertize (format "  ▸ %d thread%s" count (if (= count 1) "" "s")) 'face 'romacs-agent-dim)
+                               (propertize (format "  %s %d thread%s" (romacs-agent-glyph 'board-threads) count (if (= count 1) "" "s")) 'face 'romacs-agent-dim)
                              ""))
                    room)))
        (concat name
@@ -410,14 +425,14 @@ however long its chain, and a chain's titles stay in view.")
                tail)))
     ('thread (romacs-agent-board--thread-line row width))
     ('history (let ((item (plist-get row :item)))
-                (propertize (romacs-truncate (concat "  ◇ " (plist-get item :title) "  " (let ((harness (plist-get item :harness))) (if harness (format "%s" harness) ""))
+                (propertize (romacs-truncate (concat "  " (romacs-agent-glyph 'board-history) " " (plist-get item :title) "  " (let ((harness (plist-get item :harness))) (if harness (format "%s" harness) ""))
                                                      "  " (romacs-agent-ui--ago (plist-get item :mtime)))
                                              width)
                             'face 'romacs-agent-dim)))
-    ('more (romacs-key-hint (format "  ◇ %d more  (\\<romacs-agent-board-mode-map>\\[romacs-agent-board-history] shows all)"
+    ('more (romacs-key-hint (format "  %s %d more  (\\<romacs-agent-board-mode-map>\\[romacs-agent-board-history] shows all)" (romacs-agent-glyph 'board-history)
                                     (plist-get row :count))
                             'romacs-agent-dim))
-    ('reading (propertize (romacs-truncate "  ◇ Reading harness transcripts…" width) 'face 'romacs-agent-dim))))
+    ('reading (propertize (romacs-truncate (concat "  " (romacs-agent-glyph 'board-history) " Reading harness transcripts…") width) 'face 'romacs-agent-dim))))
 
 (defun romacs-agent-board--title-line (width)
   "The board's first line: which section, and the filter."
@@ -930,11 +945,6 @@ keys act on the thread at point.
                 ((not (frame-parameter (window-frame window) 'no-accept-focus))))
       (unless (eq (window-frame window) (selected-frame)) (select-frame-set-input-focus (window-frame window)))
       (select-window window))))
-
-;;;###autoload
-(defalias 'romacs-agent-switch #'romacs-agents)
-;;;###autoload
-(defalias 'romacs-agent-switch-chat #'romacs-agents)
 
 (provide 'romacs-agent-board)
 ;;; romacs-agent-board.el ends here

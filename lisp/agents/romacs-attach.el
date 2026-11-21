@@ -28,6 +28,7 @@
 (require 'romacs-truncate)
 (require 'seq)
 (require 'subr-x)
+(require 'romacs-agent-glyphs)
 (require 'romacs-popup)
 (require 'romacs-icons)
 (require 'romacs-key-hint)
@@ -495,7 +496,7 @@ off the evaluator at chip size; else its type's icon."
       (propertize " " 'display (create-image (plist-get item :path) nil nil
                                              :max-height '(2 . em) :max-width '(4 . em)
                                              :ascent 'center :margin 2))
-    (or (romacs-icon (romacs-attach--icon-name (plist-get item :mime)) 'romacs-attach-chip) "▫")))
+    (or (romacs-icon (romacs-attach--icon-name (plist-get item :mime)) 'romacs-attach-chip) (romacs-agent-glyph 'attachment))))
 
 (defun romacs-attach--chip (entry selected)
   "Plan ENTRY's chip, SELECTED or not."
@@ -504,7 +505,7 @@ off the evaluator at chip size; else its type's icon."
          (size (concat (and pixels (format "%d×%d · " (car pixels) (cdr pixels)))
                        (romacs-attach--size (or (plist-get item :bytes) 0))))
          (refused (plist-get (cdr entry) :refused))
-         (badge (cond (refused (propertize (concat " ⚠ " refused) 'face 'romacs-attach-refused))
+         (badge (cond (refused (propertize (concat " " (romacs-agent-glyph 'warning) " " refused) 'face 'romacs-attach-refused))
                       ((romacs-attach-changed-p item) (propertize " changed" 'face 'romacs-attach-badge))
                       ((plist-get (cdr entry) :badge)
                        (propertize (concat " " (plist-get (cdr entry) :badge)) 'face 'romacs-attach-badge))))

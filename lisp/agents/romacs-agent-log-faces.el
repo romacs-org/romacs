@@ -17,6 +17,7 @@
 ;;; Code:
 
 (require 'romacs-agent-log)
+(require 'romacs-agent-glyphs)
 (require 'romacs-markdown)
 
 (defvar-local romacs-agent-log-faces--current nil
@@ -87,8 +88,8 @@ one before where it last ended written again; keep why, should it fail."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
       (romacs-agent-log-faces--settle)
-      (pcase romacs-agent-log--stream
-        (`(text ,(and start (pred markerp)) ,at . ,_) (romacs-agent-log-faces--reface start at))))))
+      (when-let* ((stream (romacs-agent-log--reply-stream)))
+        (romacs-agent-log-faces--reface (romacs-agent-log-stream-start stream) (romacs-agent-log-stream-at stream))))))
 
 (defun romacs-agent-log-faces--plain-p ()
   "Whether what streamed since the reply was last faced is words that can
@@ -99,21 +100,21 @@ when last faced (a letter first, under four spaces), outside a reply
 read whole for its link definitions, with code known by its face.  It
 is faced as it is, and the reply's faces end there.  Most of a stream
 is that."
-  (pcase romacs-agent-log--stream
-    (`(text ,_ ,at . ,_)
-     (let ((end romacs-agent-log-faces--end))
-       (and end (< end at) (not romacs-agent-log-faces--whole)
-            (null (get-text-property (1- end) 'face))
-            (let ((new (buffer-substring-no-properties end at)))
-              (and (not (string-match-p "[^[:alnum:] ,.;'?!\"-]" new))
-                   (not (string-match-p "\\.[[:alnum:]]" new))
-                   (or (eq (char-before end) ?\s) (eq (aref new 0) ?\s))))
-            ;; Its line a paragraph's already: its letter faced before.
-            (save-excursion (goto-char end) (forward-line 0)
-                            (and (looking-at " \\{0,3\\}[[:alpha:]]") (<= (match-end 0) end)))
-            ;; Code is known by its face: none, no telling.
-            (alist-get 'code-block romacs-markdown-faces)
-            (progn (set-marker end at) t))))))
+  (when-let* ((stream (romacs-agent-log--reply-stream)))
+    (let ((at (romacs-agent-log-stream-at stream))
+          (end romacs-agent-log-faces--end))
+      (and end (< end at) (not romacs-agent-log-faces--whole)
+           (null (get-text-property (1- end) 'face))
+           (let ((new (buffer-substring-no-properties end at)))
+             (and (not (string-match-p "[^[:alnum:] ,.;'?!\"-]" new))
+                  (not (string-match-p "\\.[[:alnum:]]" new))
+                  (or (eq (char-before end) ?\s) (eq (aref new 0) ?\s))))
+           ;; Its line a paragraph's already: its letter faced before.
+           (save-excursion (goto-char end) (forward-line 0)
+                           (and (looking-at " \\{0,3\\}[[:alpha:]]") (<= (match-end 0) end)))
+           ;; Code is known by its face: none, no telling.
+           (alist-get 'code-block romacs-markdown-faces)
+           (progn (set-marker end at) t)))))
 
 (defun romacs-agent-log-faces-soon ()
   "Face the streaming reply's text once the batch it came in is in: just
@@ -147,7 +148,7 @@ have failed, a line under it that says why."
       (save-excursion
         (goto-char at)
         (insert (romacs-agent-log--sealed
-                 (propertize (concat "\n⚠ shown without its faces: " romacs-agent-log-faces--failed)
+                 (propertize (concat "\n" (romacs-agent-glyph 'warning) " shown without its faces: " romacs-agent-log-faces--failed)
                              'face 'romacs-agent-log-denied))))))
   (romacs-agent-log-faces-drop))
 

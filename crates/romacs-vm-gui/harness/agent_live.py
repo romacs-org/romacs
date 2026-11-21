@@ -1041,6 +1041,9 @@ def tour(work, delegate_target):
         ('romacs_orchestrator_capabilities', {}, lambda t: '"codex"' in t and '"providers"' in t),
         ('romacs_limits', {}, lambda t: '"harnesses"' in t),
         ('romacs_dev_guide', {'query': 'car'}, lambda t: 'car' in t),
+        # A plan of loading one Lisp file: what it would do, nothing loaded.
+        ('romacs_live_update', {'files': [str(work / 'tour-live.el')], 'plan': True},
+         lambda t: '"plan":true' in t and 'tour-live.el' in t),
         ('romacs_option_search', {'query': 'kill-ring'}, lambda t: 'kill-ring-max' in t),
         ('romacs_option_describe', {'name': 'kill-ring-max'}, lambda t: 'kill-ring-max' in t),
         ('romacs_option_set', {'name': 'kill-ring-max', 'value': '61'}, lambda t: '61' in t),
@@ -1095,9 +1098,13 @@ def offered(a):
         return mcp.tools()
 
 
+TOUR_LIVE = ';;; tour-live.el --- a live update tour file  -*- lexical-binding: t -*-\n(defun tour-live-f () 1)\n'
+
+
 def tour_setup(a):
     a.eval('(with-current-buffer (get-buffer-create "notes") (erase-buffer) (insert "alpha beta\\n") t)')
     (a.work / 'tour.txt').write_text('before\n')
+    (a.work / 'tour-live.el').write_text(TOUR_LIVE)
 
 
 def tools(args, base):
@@ -1973,6 +1980,7 @@ def mcp_tour(args, base):
                                                               'maxChars': 10})[1]).get('tick')
             note = a.work / 'note.txt'
             note.write_text('one\n')
+            (a.work / 'tour-live.el').write_text(TOUR_LIVE)
             plan = {
                 'romacs_identity': {}, 'romacs_help': {}, 'romacs_observe': {},
                 'romacs_eval': {'code': '(+ 1 2)'},
@@ -1990,6 +1998,7 @@ def mcp_tour(args, base):
                 'romacs_orchestrator_capabilities': {},
                 'romacs_delegate_task': {'task': 'say toured', 'cwd': str(a.work)},
                 'romacs_task_list': {},
+                'romacs_live_update': {'files': [str(a.work / 'tour-live.el')], 'plan': True},
             }
             answered, errors, protocol, silent = {}, {}, {}, []
 

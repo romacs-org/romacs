@@ -20,6 +20,7 @@
 ;;; Code:
 
 (require 'romacs-agent)
+(require 'romacs-agent-glyphs)
 
 ;;; Writing to it
 
@@ -530,7 +531,7 @@ an approval or questions for the user, anything else refused."
 (defun romacs-agent--codex-plan (params)
   "A plan update, as a status line: each step marked by its state."
   (let ((steps (mapconcat (lambda (step)
-                            (concat (pcase (gethash "status" step) ("completed" "✓ ") ("inProgress" "→ ") (_ "○ "))
+                            (concat (romacs-agent-glyph (pcase (gethash "status" step) ("completed" 'ok) ("inProgress" 'step-doing) (_ 'step-todo))) " "
                                     (gethash "step" step)))
                           (gethash "plan" params) "  ")))
     (concat "Plan: " (if-let* ((why (romacs-agent--value (gethash "explanation" params)))) (concat why "  ") "") steps)))
@@ -698,7 +699,7 @@ thread: its rollout, wherever its day put it."
             (file-expand-wildcards (expand-file-name (format "sessions/*/*/*/rollout-*-%s.jsonl" thread) home)))))
 
 (romacs-agent-define-harness 'codex
-  :display "Codex" :icon "◎" :t3-driver "codex"
+  :display "Codex" :icon 'codex :t3-driver "codex"
   :config-variable "CODEX_HOME" :config-default "~/.codex"
   :program-option 'romacs-agent-codex-program :arguments-option 'romacs-agent-codex-arguments
   ;; What Codex sets for the commands it runs (codex-cli 0.164, read from
