@@ -232,6 +232,41 @@ cleared in a live thread: `restart' then."
     (when (or (and (plist-get now :model) (not model)) (and (plist-get now :effort) (not effort)))
       'restart)))
 
+;;; The models it offers
+
+(defun romacs-agent--codex-models (result)
+  "The model rows of RESULT, `model/list''s: each by the model a turn
+names, its label, efforts and default effort."
+  (cl-loop for model across (or (romacs-agent--value (gethash "data" result)) [])
+           for id = (gethash "model" model)
+           for efforts = (romacs-agent--value (gethash "supportedReasoningEfforts" model))
+           when (stringp id)
+           collect (cons id (list :label (or (romacs-agent--value (gethash "displayName" model)) id)
+                                  :efforts (cl-loop for option across (or efforts [])
+                                                    collect (gethash "reasoningEffort" option))
+                                  :default-effort (romacs-agent--value (gethash "defaultReasoningEffort" model))))))
+
+(defun romacs-agent--codex-probed-models (line)
+  "What LINE says to the models probe, or nil: its `model/list''s rows,
+or why it, or the `initialize' before it, failed."
+  (let ((error (romacs-agent--codex-error line)))
+    (pcase (gethash "id" line)
+      ("initialize:1" (and error (list :error error)))
+      ("model/list:2" (if error (list :error error)
+                        (list :models (romacs-agent--codex-models (gethash "result" line))))))))
+
+(defun romacs-agent--codex-models-probe (instance)
+  "How INSTANCE's Codex is asked for its models with no session
+\(`:models-probe'): an `app-server' of its own, `initialize', then
+`model/list' of the models its picker shows."
+  (list :argv (append (list (plist-get instance :program) "app-server") (plist-get instance :arguments))
+        :input (mapconcat (lambda (object) (concat (json-serialize object) "\n"))
+                          (list (romacs-agent--codex-initialize 1)
+                                (romacs-mcp--object "method" "initialized")
+                                (romacs-agent--codex-request "model/list" 2 (romacs-mcp--object)))
+                          "")
+        :read #'romacs-agent--codex-probed-models))
+
 ;;; Its startup, and what it is owed
 
 (defun romacs-agent--codex-owed-line (session owed)
@@ -267,6 +302,14 @@ steers): each (TEXT IMAGES), oldest first."
   (cl-loop for owed in (plist-get (romacs-agent-driver-state session) :owed)
            when (eq (car owed) :turn) collect (list (nth 2 owed) (nth 3 owed))))
 
+(defun romacs-agent--codex-initialize (number)
+  "Romacs's `initialize', its id NUMBER."
+  (romacs-agent--codex-request
+   "initialize" number
+   (romacs-mcp--object "clientInfo" (romacs-mcp--object "name" "romacs" "title" "Romacs" "version" emacs-version)
+                       "capabilities" (romacs-mcp--object "experimentalApi" t "requestAttestation" :false
+                                                          "optOutNotificationMethods" ["turn/diff/updated"]))))
+
 (defun romacs-agent--codex-next (session)
   "SESSION's next line from this run's state: what it owes, else its
 startup's next step."
@@ -275,13 +318,7 @@ startup's next step."
     (cond ((when-let* ((owed (romacs-agent--codex-owed-now session)))
              (romacs-agent--codex-owed-line session owed)))
           ((plist-get state :thread) :ready)
-          ((null sent)
-           (romacs-agent--codex-request
-            "initialize" (romacs-agent-request-id session)
-            (romacs-mcp--object "clientInfo" (romacs-mcp--object "name" "romacs" "title" "Romacs"
-                                                                 "version" emacs-version)
-                                "capabilities" (romacs-mcp--object "experimentalApi" t "requestAttestation" :false
-                                                                   "optOutNotificationMethods" ["turn/diff/updated"]))))
+          ((null sent) (romacs-agent--codex-initialize (romacs-agent-request-id session)))
           ((and (equal sent "initialize") (plist-get state :initialized))
            (romacs-mcp--object "method" "initialized"))
           ((equal sent "initialized") (romacs-agent--codex-thread session (romacs-agent-request-id session))))))
@@ -677,6 +714,7 @@ thread: its rollout, wherever its day put it."
   ;; (`romacs-agent--codex-thread').
   :renew #'ignore
   :select #'romacs-agent--codex-select
+  :models-probe #'romacs-agent--codex-models-probe
   :argv #'romacs-agent--codex-argv
   :next #'romacs-agent--codex-next
   :input #'romacs-agent--codex-input

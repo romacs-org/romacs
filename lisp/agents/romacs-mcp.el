@@ -44,7 +44,8 @@ Replies echo the ID, so bounding it keeps every error reply bounded.")
 (defconst romacs-mcp--scan-limit 8)
 (defconst romacs-mcp--modern "2026-07-28")
 (defconst romacs-mcp--legacy "2025-11-25")
-(defconst romacs-mcp--full-access-tools '("romacs_eval" "romacs_option_set" "romacs_option_save" "romacs_live_update")
+(defconst romacs-mcp--full-access-tools '("romacs_eval" "romacs_option_set" "romacs_option_save" "romacs_live_update"
+                                           "romacs_live_test")
   "Tools available only while `romacs-mcp-full-access' is non-nil.
 Setting an option is evaluation by another name: a hook or function
 option runs what it is given.  So is loading the Lisp of a source.")
@@ -318,7 +319,7 @@ romacs_eval (Emacs Lisp in the editor). Others: buffers and files \
 romacs_option_set/save); agents (romacs_delegate_task, \
 romacs_task_status/send/list/watch/switch/cancel, romacs_orchestrator_capabilities); restart \
 (romacs_restart, romacs_restart_status, romacs_call_outcome); development (romacs_dev_guide, \
-romacs_dev_check, romacs_live_update); gnosis_* (spaced-repetition practice and review). romacs_help \
+romacs_dev_check, romacs_live_update, romacs_live_test); gnosis_* (spaced-repetition practice and review). romacs_help \
 lists them all, one line each."
   "What an MCP client is told at initialization: the entry points and the
 tools' groups, short, since every session pays for it.")
@@ -332,7 +333,7 @@ tools' groups, short, since every session pays for it.")
     ("agents" "romacs_delegate_task" "romacs_task_status" "romacs_task_send" "romacs_task_list"
      "romacs_task_watch" "romacs_task_switch" "romacs_task_cancel" "romacs_orchestrator_capabilities")
     ("restart" "romacs_restart" "romacs_restart_status" "romacs_restart_request" "romacs_call_outcome")
-    ("development" "romacs_dev_check" "romacs_dev_guide" "romacs_live_update")
+    ("development" "romacs_dev_check" "romacs_dev_guide" "romacs_live_update" "romacs_live_test")
     ("gnosis" . "gnosis_"))
   "The tools' groups for `romacs_help': names, or a prefix; the rest are other.")
 
