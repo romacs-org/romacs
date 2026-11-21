@@ -455,17 +455,24 @@ no job is live, or the pool is full, or no worker may start
          (< (length live) (isolate--pool-size))
          (condition-case nil (romacs--isolate-pool-create require 'start) (isolate-process-limit nil)))))
 
-(defun isolate-pooled-worker (require)
+(defun isolate-pooled-worker (require &optional if-busy)
   "A worker for background work with REQUIRE's features: an idle prepared
 one (a zygote's spare child first), else a pooled one started now while the
-pool has room, else one still preparing for its first job; nil when there
-is none.  Unlike `isolate-spawn', it never kills a worker of other
-features to make room."
-  (or (isolate-idle-worker require)
-      (condition-case nil (romacs--isolate-zygote-worker require t) (isolate-process-limit nil))
-      (and (not (romacs--isolate-zygote-live-p require))
-           (condition-case nil (romacs--isolate-warm-pooled require) (error nil)))
-      (romacs--isolate-with-features (romacs--isolate-unspent) require)))
+pool has room, else one still preparing for its first job.  If its queue
+is full or an ending worker can free room, return IF-BUSY.  Otherwise
+return nil when no worker can take the job.
+Unlike `isolate-spawn', never kill a worker of other features to make room."
+  (when (> isolate-queue-limit 0)
+    (condition-case nil
+        (let ((worker (or (isolate-idle-worker require)
+                          (condition-case nil (romacs--isolate-zygote-worker require t)
+                            (isolate-process-limit nil))
+                          (and (not (romacs--isolate-zygote-live-p require))
+                               (romacs--isolate-warm-pooled require))
+                          (romacs--isolate-with-features (romacs--isolate-unspent) require))))
+          (cond ((and worker (< (isolate-pending worker) isolate-queue-limit)) worker)
+                ((or worker (romacs--isolate-ending-p)) if-busy)))
+      (error nil))))
 
 (defun romacs--isolate-with-features (isolates require)
   "The first of ISOLATES whose features are REQUIRE, or nil."
