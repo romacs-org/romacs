@@ -32,7 +32,7 @@
 (defvar semantic-ia-sb-key-map
   (let ((map (speedbar-make-specialized-keymap)))
     ;; Basic features.
-    (define-key map "\C-m" #'speedbar-edit-line)
+    (define-key map (kbd "RET") #'speedbar-edit-line)
     (define-key map "I"    #'semantic-ia-sb-show-tag-info)
     map)
   "Keymap used when in semantic analysis display mode.")

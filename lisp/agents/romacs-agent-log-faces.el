@@ -4,8 +4,9 @@
 
 ;;; Commentary:
 ;; A reply streaming into a chat (romacs-agent-log.el) gets its Markdown
-;; faces as it comes, not at its end: once a batch of its text is in (a
-;; timer at no delay, which every delta of one read shares), it is read
+;; faces as it comes, not at its end: once a batch of its text is in
+;; (just before the redisplay that draws it, `pre-redisplay-functions',
+;; so the text and its faces are laid out in one cycle), it is read
 ;; as a document from a top-level block before where it last ended, and
 ;; the blocks from there written again (`romacs-markdown-fontify-region'
 ;; with FROM): a batch costs what its last blocks hold, however long the
@@ -51,8 +52,9 @@ none in code or inline; with no URL face, one outside code."
 (defvar-local romacs-agent-log-faces--failed nil
   "Why the streaming reply's faces failed, or nil.")
 
-(defvar-local romacs-agent-log-faces--timer nil
-  "The timer that faces the reply's next batch, while one waits.")
+(defvar-local romacs-agent-log-faces--due nil
+  "Non-nil while text streamed into the reply waits for its faces, given
+just before the next redisplay of a window showing it.")
 
 (defun romacs-agent-log-faces--reface (start end)
   "Face START..END, the streaming reply, from where its faces may change:
@@ -81,22 +83,33 @@ one before where it last ended written again; keep why, should it fail."
   "Face what streamed into BUFFER's reply since its last batch."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
-      ;; Called before its timer ran: that one is not needed.
-      (when (timerp romacs-agent-log-faces--timer) (cancel-timer romacs-agent-log-faces--timer))
-      (setq romacs-agent-log-faces--timer nil)
+      (romacs-agent-log-faces--settle)
       (pcase romacs-agent-log--stream
         (`(text ,start ,at . ,_) (romacs-agent-log-faces--reface start at))))))
 
 (defun romacs-agent-log-faces-soon ()
-  "Face the streaming reply's text once the batch it came in is in."
-  (unless romacs-agent-log-faces--timer
-    (setq romacs-agent-log-faces--timer (run-at-time 0 nil #'romacs-agent-log-faces--batch (current-buffer)))))
+  "Face the streaming reply's text once the batch it came in is in: just
+before the next redisplay of a window showing it, in the cycle that
+draws the text, never in one of its own."
+  (unless romacs-agent-log-faces--due
+    (setq romacs-agent-log-faces--due t)
+    (add-hook 'pre-redisplay-functions #'romacs-agent-log-faces--before-redisplay nil t)))
+
+(defun romacs-agent-log-faces--before-redisplay (_window)
+  "Face what streamed since the last batch, as a window showing it is
+about to be drawn."
+  (when romacs-agent-log-faces--due
+    (romacs-agent-log-faces--batch (current-buffer))))
+
+(defun romacs-agent-log-faces--settle ()
+  "No batch waits for its faces any more."
+  (setq romacs-agent-log-faces--due nil)
+  (remove-hook 'pre-redisplay-functions #'romacs-agent-log-faces--before-redisplay t))
 
 (defun romacs-agent-log-faces-end (start at)
   "The reply START..AT ends: its faces for what is left, or, should they
 have failed, a line under it that says why."
-  (when (timerp romacs-agent-log-faces--timer) (cancel-timer romacs-agent-log-faces--timer))
-  (setq romacs-agent-log-faces--timer nil)
+  (romacs-agent-log-faces--settle)
   ;; Faced as far as it went already: nothing is left.
   (unless (and romacs-agent-log-faces--end (= romacs-agent-log-faces--end at))
     (romacs-agent-log-faces--reface start at))
@@ -110,11 +123,11 @@ have failed, a line under it that says why."
   (romacs-agent-log-faces-drop))
 
 (defun romacs-agent-log-faces-drop ()
-  "Forget the streaming reply's faces: its timer, markers and state."
-  (when (timerp romacs-agent-log-faces--timer) (cancel-timer romacs-agent-log-faces--timer))
+  "Forget the streaming reply's faces: what waits, its markers and state."
+  (romacs-agent-log-faces--settle)
   (when romacs-agent-log-faces--current (set-marker romacs-agent-log-faces--current nil))
   (when romacs-agent-log-faces--end (set-marker romacs-agent-log-faces--end nil))
-  (setq romacs-agent-log-faces--timer nil romacs-agent-log-faces--current nil romacs-agent-log-faces--end nil
+  (setq romacs-agent-log-faces--current nil romacs-agent-log-faces--end nil
         romacs-agent-log-faces--failed nil romacs-agent-log-faces--whole nil))
 
 ;;; A command's output

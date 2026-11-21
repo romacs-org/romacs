@@ -1245,7 +1245,7 @@ Commands:                        Equivalent keys in read-only mode:
 
   ;; `forms-mode-map' is always accessible via \C-c prefix.
   (setq forms-mode-map (make-keymap))
-  (define-key forms-mode-map "\t" #'forms-next-field)
+  (define-key forms-mode-map (kbd "TAB") #'forms-next-field)
   (define-key forms-mode-map "\C-k" #'forms-delete-record)
   (define-key forms-mode-map "\C-q" #'forms-toggle-read-only)
   (define-key forms-mode-map "\C-o" #'forms-insert-record)
@@ -1379,7 +1379,7 @@ Commands:                        Equivalent keys in read-only mode:
 
 (defun forms--mode-commands1 (map)
   "Helper routine to define keys."
-  (define-key map "\t" #'forms-next-field)
+  (define-key map (kbd "TAB") #'forms-next-field)
   (define-key map [S-tab] #'forms-prev-field)
   (define-key map [next] #'forms-next-record)
   (define-key map [prior] #'forms-prev-record)

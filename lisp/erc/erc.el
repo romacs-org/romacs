@@ -1488,7 +1488,7 @@ which the local user typed."
 
 (defvar erc-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map "\C-m" #'erc-send-current-line)
+    (define-key map (kbd "RET") #'erc-send-current-line)
     (define-key map "\C-a" #'erc-bol)
     (define-key map [home] #'erc-bol)
     (define-key map "\C-c\C-a" #'erc-bol)
@@ -1496,7 +1496,7 @@ which the local user typed."
     (define-key map "\C-c\C-d" #'erc-input-action)
     (define-key map "\C-c\C-e" #'erc-toggle-ctcp-autoresponse)
     (define-key map "\C-c\C-f" #'erc-toggle-flood-control)
-    (define-key map "\C-c\C-i" #'erc-invite-only-mode)
+    (define-key map (kbd "C-c TAB") #'erc-invite-only-mode)
     (define-key map "\C-c\C-j" #'erc-join-channel)
     (define-key map "\C-c\C-n" #'erc-channel-names)
     (define-key map "\C-c\C-o" #'erc-get-channel-mode-from-keypress)
@@ -1507,7 +1507,7 @@ which the local user typed."
     (define-key map "\C-c\C-u" #'erc-kill-input)
     (define-key map "\C-c\C-x" #'erc-quit-server)
     (define-key map "\M-\t" #'ispell-complete-word)
-    (define-key map "\t" #'erc-tab)
+    (define-key map (kbd "TAB") #'erc-tab)
 
     ;; Suppress `font-lock-fontify-block' key binding since it
     ;; destroys face properties.

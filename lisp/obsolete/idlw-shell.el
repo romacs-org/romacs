@@ -3958,7 +3958,7 @@ Otherwise, just expand the file name."
     ;;(define-key map "\t" 'comint-dynamic-complete)
 
     (define-key map "\C-w"     #'comint-kill-region)
-    (define-key map "\t"       #'idlwave-shell-complete)
+    (define-key map (kbd "TAB")       #'idlwave-shell-complete)
     (define-key map "\M-\t"    #'idlwave-shell-complete)
     (define-key map "\C-c\C-s" #'idlwave-shell)
     (define-key map "\C-c?"    #'idlwave-routine-info)
@@ -3966,7 +3966,7 @@ Otherwise, just expand the file name."
     (define-key map "\M-?"     #'idlwave-context-help)
     (define-key map [(control meta ?\?)]
       #'idlwave-help-assistant-help-with-topic)
-    (define-key map "\C-c\C-i" #'idlwave-update-routine-info)
+    (define-key map (kbd "C-c TAB") #'idlwave-update-routine-info)
     (define-key map "\C-c\C-y" #'idlwave-shell-char-mode-loop)
     (define-key map "\C-c\C-x" #'idlwave-shell-send-char)
     (define-key map "\C-c="    #'idlwave-resolve)

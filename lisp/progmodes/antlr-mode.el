@@ -907,9 +907,9 @@ imenu.  For sorted menu entries, customize variable
 
 (defvar antlr-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map "\t" #'antlr-indent-command)
-    (define-key map "\e\C-a" #'antlr-beginning-of-rule)
-    (define-key map "\e\C-e" #'antlr-end-of-rule)
+    (define-key map (kbd "TAB") #'antlr-indent-command)
+    (define-key map (kbd "ESC C-a") #'antlr-beginning-of-rule)
+    (define-key map (kbd "ESC C-e") #'antlr-end-of-rule)
     (define-key map "\C-c\C-a" #'antlr-beginning-of-body)
     (define-key map "\C-c\C-e" #'antlr-end-of-body)
     (define-key map "\C-c\C-f" 'subword-forward)
@@ -920,8 +920,8 @@ imenu.  For sorted menu entries, customize variable
     (define-key map "\C-c\C-r" #'antlr-run-tool)
     (define-key map "\C-c\C-o" #'antlr-insert-option)
     ;; I'm too lazy to define my own:
-    (define-key map "\ea" #'c-beginning-of-statement)
-    (define-key map "\ee" #'c-end-of-statement)
+    (define-key map (kbd "ESC a") #'c-beginning-of-statement)
+    (define-key map (kbd "ESC e") #'c-end-of-statement)
     ;; electric keys:
     (define-key map ":" #'antlr-electric-character)
     (define-key map ";" #'antlr-electric-character)

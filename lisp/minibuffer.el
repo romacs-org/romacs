@@ -3412,7 +3412,7 @@ The completion method is determined by `completion-at-point-functions'."
   ;; Put RET last so that it is shown in doc strings in preference to
   ;; C-j, when using the \\[exit-minibuffer] notation.
   (define-key map "\n" 'exit-minibuffer)
-  (define-key map "\r" 'exit-minibuffer))
+  (define-key map (kbd "RET") 'exit-minibuffer))
 
 (defun minibuffer-completion-exit (&optional no-exit)
   "Call `exit-minibuffer', inserting the selected completion first if any.

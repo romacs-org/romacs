@@ -230,7 +230,7 @@ Subexpression 1 is what goes into the corresponding `@end' statement.")
   (define-key keymap "\C-c\C-t\C-q"    #'tex-show-print-queue)
   (define-key keymap "\C-c\C-t\C-p"    #'texinfo-tex-print)
   (define-key keymap "\C-c\C-t\C-v"    #'texinfo-tex-view)
-  (define-key keymap "\C-c\C-t\C-i"    #'texinfo-texindex)
+  (define-key keymap (kbd "C-c C-t TAB")    #'texinfo-texindex)
 
   (define-key keymap "\C-c\C-t\C-r"    #'texinfo-tex-region)
   (define-key keymap "\C-c\C-t\C-b"    #'texinfo-tex-buffer))
@@ -244,24 +244,24 @@ Subexpression 1 is what goes into the corresponding `@end' statement.")
     (define-key map "\"" #'texinfo-insert-quote)
 
     ;; bindings for `makeinfo.el'
-    (define-key map "\C-c\C-m\C-k" #'kill-compilation)
-    (define-key map "\C-c\C-m\C-l"
+    (define-key map (kbd "C-c RET C-k") #'kill-compilation)
+    (define-key map (kbd "C-c RET C-l")
       #'makeinfo-recenter-compilation-buffer)
-    (define-key map "\C-c\C-m\C-r" #'makeinfo-region)
-    (define-key map "\C-c\C-m\C-b" #'makeinfo-buffer)
+    (define-key map (kbd "C-c RET C-r") #'makeinfo-region)
+    (define-key map (kbd "C-c RET C-b") #'makeinfo-buffer)
 
     ;; bindings for `texinfmt.el'
     (define-key map "\C-c\C-e\C-r"    #'texinfo-format-region)
     (define-key map "\C-c\C-e\C-b"    #'texinfo-format-buffer)
 
     ;; AUCTeX-like bindings
-    (define-key map "\e\r"		#'texinfo-insert-@item)
+    (define-key map (kbd "ESC RET")		#'texinfo-insert-@item)
 
     ;; bindings for updating nodes and menus
 
     (define-key map "\C-c\C-um"   #'texinfo-master-menu)
 
-    (define-key map "\C-c\C-u\C-m"   #'texinfo-make-menu)
+    (define-key map (kbd "C-c C-u RET")   #'texinfo-make-menu)
     (define-key map "\C-c\C-u\C-n"   #'texinfo-update-node)
     (define-key map "\C-c\C-u\C-e"   #'texinfo-every-node-update)
     (define-key map "\C-c\C-u\C-a"   #'texinfo-all-menus-update)
