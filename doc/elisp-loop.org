@@ -60,9 +60,12 @@ What the copies cost:
   compile publishes, so a live copy's artifact goes once nothing loads it.
 - The content store keeps the source copies, one directory a blob,
   source-sized (a file's own bytes). Sessions share it, and a restart's
-  image names its copies, so nothing prunes it on its own yet; delete a
-  directory no running session's ledger names (=M-x romacs-live-ledger=)
-  to reclaim it.
+  image names its copies. =romacs-session-reset= prunes it: a directory
+  goes when no session image on disk names it, the resetting session's
+  ledger does not, and nobody used it for =romacs-live-store-keep-days=
+  (7). A session with live files marks its own directories used when it
+  updates and every hour, so a reset of another session keeps them; when
+  an image cannot be read, nothing goes.
 
 * What it does that =load= does not
 
