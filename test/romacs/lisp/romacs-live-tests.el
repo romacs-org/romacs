@@ -776,17 +776,14 @@ reader; the report."
           (should (equal (plist-get asked :target) installed))
           (romacs-session-reset t)
           (should (equal (plist-get asked :fresh) 'buffers))
-          ;; No watched build: the runtime root when it is a build, else
-          ;; the restart's own command (no target), its runtime kept.
+          ;; No watched build: this executable, with its runtime, even
+          ;; when the runtime root holds another one.
           (let ((romacs-server-build-watch nil))
             (cl-letf (((symbol-function 'romacs-live--runtime-root) (lambda () installed)))
+              (with-temp-file (expand-file-name "romacs-vm-gui" installed) (insert "#!/bin/sh\n"))
+              (set-file-modes (expand-file-name "romacs-vm-gui" installed) #o755)
               (romacs-session-reset)
-              ;; This executable, whatever restart command is set.
-              (should (equal (plist-get asked :target) (expand-file-name invocation-name invocation-directory)))
-              (make-symbolic-link (expand-file-name invocation-name invocation-directory)
-                                  (expand-file-name "romacs-vm-gui" installed))
-              (romacs-session-reset)
-              (should (equal (plist-get asked :target) installed)))))
+              (should (equal (plist-get asked :target) (expand-file-name invocation-name invocation-directory))))))
       (delete-directory installed t))))
 
 (ert-deftest romacs-live-forms-diff-names-each-definition ()

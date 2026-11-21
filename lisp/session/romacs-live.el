@@ -968,14 +968,13 @@ of its own refuses: its patches would run unrecorded."
 ;;;###autoload
 (defun romacs-session-reset-target ()
   "The installed build a reset goes to: the one the server watches
-\(`romacs-server-build-watch'), else this session's runtime root when it
-is a build (it holds its romacs-vm-gui), else this session's executable
-with its runtime: never another build `romacs-restart-command' names."
-  (let ((watch (bound-and-true-p romacs-server-build-watch))
-        (root (romacs-live--runtime-root)))
-    (cond ((and (stringp watch) (file-exists-p watch)) watch)
-          ((and root (file-executable-p (expand-file-name "romacs-vm-gui" root))) root)
-          (t (expand-file-name invocation-name invocation-directory)))))
+\(`romacs-server-build-watch'), else this session's own executable with
+its runtime (`warm-restart--target'): never another build, one a restart
+command names or one beside the runtime."
+  (let ((watch (bound-and-true-p romacs-server-build-watch)))
+    (if (and (stringp watch) (file-exists-p watch))
+        watch
+      (expand-file-name invocation-name invocation-directory))))
 
 ;;;###autoload
 (defun romacs-session-reset (&optional keep-buffers)
