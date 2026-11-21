@@ -844,7 +844,7 @@ This basically creates a sparse keymap, and makes its parent be
 
     ;; Basic tree features.
     (define-key map "e" 'speedbar-edit-line)
-    (define-key map "\C-m" 'speedbar-edit-line)
+    (define-key map (kbd "RET") 'speedbar-edit-line)
     (define-key map "+" 'speedbar-expand-line)
     (define-key map "=" 'speedbar-expand-line)
     (define-key map "-" 'speedbar-contract-line)
@@ -3932,7 +3932,7 @@ Only finds data which is relevant."
   (let ((map (speedbar-make-specialized-keymap)))
     ;; Basic tree features
     (define-key map "e" #'speedbar-edit-line)
-    (define-key map "\C-m" #'speedbar-edit-line)
+    (define-key map (kbd "RET") #'speedbar-edit-line)
     (define-key map "+" #'speedbar-expand-line)
     (define-key map "=" #'speedbar-expand-line)
     (define-key map "-" #'speedbar-contract-line)

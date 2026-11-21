@@ -68,7 +68,7 @@ innermost-loop checks, which need recursive minibuffers)."
 (unless (lookup-key minibuffer-local-map "\n")
   (define-key minibuffer-local-map "\n" 'exit-minibuffer))
 (unless (lookup-key minibuffer-local-map "\r")
-  (define-key minibuffer-local-map "\r" 'exit-minibuffer))
+  (define-key minibuffer-local-map (kbd "RET") 'exit-minibuffer))
 
 (defun romacs--read-minibuf (prompt keymap initial pos histvar default inherit)
   "minibuf.c read_minibuf (minibuf.c:573) after its argument checks.

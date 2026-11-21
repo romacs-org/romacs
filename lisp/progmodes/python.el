@@ -3818,7 +3818,7 @@ variable.
               '(comint-c-a-p-replace-by-expanded-history))
   (add-hook 'completion-at-point-functions
             #'python-shell-completion-at-point nil 'local)
-  (define-key inferior-python-mode-map "\t"
+  (define-key inferior-python-mode-map (kbd "TAB")
     #'python-shell-completion-complete-or-indent)
   (make-local-variable 'python-shell-internal-last-output)
   (when python-shell-font-lock-enable

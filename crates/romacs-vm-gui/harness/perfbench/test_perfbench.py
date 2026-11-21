@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import perfbench as pb
@@ -555,6 +556,67 @@ class Markdown(unittest.TestCase):
         lines = [line for line in readme.LEAD.read_text().splitlines() if line]
         self.assertEqual(lines[0], '# Romacs')
         self.assertIn('romacs.webp', lines[1])
+
+
+def installation(prefix, commit='c' * 40):
+    """PREFIX laid out as forge installs a build: bin/ and share/romacs,
+    and links to both at its root, as `current' names them."""
+    share = prefix / 'share/romacs'
+    for tree in ('lisp', 'etc', 'assets/fonts'):
+        (share / tree).mkdir(parents=True)
+    (share / 'lisp/bundled.json').write_text('{}')
+    (share / 'etc/romacs-runtime-epoch').write_text('4\n')
+    (share / 'assets/fonts/a.ttf').write_text('font')
+    (prefix / 'bin').mkdir()
+    # Refuses as the binary does when a tree is not where it runs.
+    binary = prefix / 'bin/romacs-vm-gui'
+    binary.write_text('#!/bin/sh\n'
+                      'for tree in lisp etc; do\n'
+                      '  [ -d "$ROMACS_RUNTIME_ROOT/$tree" ] || '
+                      '{ echo "romacs: no usable runtime tree: no $tree" >&2; exit 2; }\n'
+                      'done\n'
+                      'echo \'{"files": 1, "source_only": [], "errors": [], "store_bytes": 7}\'\n')
+    binary.chmod(0o755)
+    for name in ('lisp', 'etc', 'assets'):
+        (prefix / name).symlink_to('share/romacs/' + name)
+    (prefix / 'romacs-vm-gui').symlink_to('bin/romacs-vm-gui')
+    (prefix / 'build.json').write_text(json.dumps({'commit': commit}))
+    return prefix / 'romacs-vm-gui'
+
+
+class Installation(unittest.TestCase):
+    def args(self, romacs, runtime=None):
+        return type('Args', (), {'romacs': str(romacs), 'runtime': runtime, 'commit': None})
+
+    def test_an_installed_binary_named_through_its_link_finds_its_tree_and_commit(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.dict(os.environ):
+            os.environ.pop('ROMACS_RUNTIME_ROOT', None)
+            current = installation(Path(directory) / 'build')
+            args = self.args(current)
+            self.assertEqual(pb.runtime_of(args), (Path(directory) / 'build/share/romacs').resolve())
+            self.assertEqual(pb.commit_of(args), 'c' * 40)
+
+    def test_a_staged_installation_holds_each_tree_not_a_link_to_one(self):
+        with tempfile.TemporaryDirectory() as directory:
+            prefix = Path(directory) / 'build'
+            binary = installation(prefix).resolve()
+            cache = Path(directory) / 'cache'
+            cache.mkdir()
+            with contextlib.redirect_stdout(io.StringIO()):  # --runtime naming the root of links
+                staged, made = pb.stage_install(cache, binary, prefix)
+            for tree in pb.INSTALL_TREES:
+                self.assertTrue((staged.parent / tree).is_dir() and not (staged.parent / tree).is_symlink(), tree)
+            self.assertTrue((staged.parent / 'assets/fonts/a.ttf').is_file())
+            self.assertEqual(made['files'], 1)
+
+    def test_a_compile_with_no_report_fails_with_what_it_said(self):
+        with self.assertRaisesRegex(SystemExit, r'\(2\), with no report:\nromacs: no usable runtime tree'):
+            pb.compile_report(2, '', 'romacs: no usable runtime tree: x')
+        with self.assertRaisesRegex(SystemExit, r'\(1\)'):
+            pb.compile_report(1, '{"files": 1}', 'boom')
+        with self.assertRaisesRegex(SystemExit, 'not json'):
+            pb.compile_report(0, 'not json', 'not json')
+        self.assertEqual(pb.compile_report(2, 'compiling\n{"files": 3}\n', ''), {'files': 3})
 
 
 class Ratio(unittest.TestCase):

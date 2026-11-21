@@ -6042,7 +6042,7 @@ This stores EXP (without evaluating it) as the saved spec for SYMBOL."
 (defvar custom-dirlocals-field-map
   (let ((map (copy-keymap custom-field-keymap)))
     (define-key map "\C-x\C-s" #'Custom-dirlocals-save)
-    (define-key map "\C-m" #'widget-field-activate)
+    (define-key map (kbd "RET") #'widget-field-activate)
     map)
   "Keymap for the editable fields in the \"*Customize Dirlocals*\" buffer .")
 

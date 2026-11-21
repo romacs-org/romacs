@@ -276,7 +276,7 @@ Try to use this to provide useful completion when available.")
 
 (defvar srecode-field-keymap
   (let ((km (make-sparse-keymap)))
-    (define-key km "\C-i" #'srecode-field-next)
+    (define-key km (kbd "TAB") #'srecode-field-next)
     (define-key km "\M-\C-i" #'srecode-field-prev)
     (define-key km "\C-e" #'srecode-field-end)
     (define-key km "\C-a" #'srecode-field-start)

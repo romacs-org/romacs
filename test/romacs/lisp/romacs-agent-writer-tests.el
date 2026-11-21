@@ -626,7 +626,7 @@ connection of its own, as the writer's process has."
     (unwind-protect
         (cl-letf (((symbol-function 'delete-process) (lambda (p) (push p deleted)))
                   ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (push (cons f args) again))))
-          (romacs-agent--filter-lines process (concat (json-serialize (romacs-mcp--object "attached" 1 "notesOnly" t)) "\n"))
+          (romacs-agent--filter process (concat (json-serialize (romacs-mcp--object "attached" 1 "notesOnly" t)) "\n"))
           (should-not (romacs-agent-connection session))
           (should (equal deleted (list process)))
           (should (eq (caar again) #'romacs-agent--attach))
@@ -665,7 +665,7 @@ connection of its own, as the writer's process has."
         (cl-letf (((symbol-function 'process-send-string) (lambda (_p text) (push text sent)))
                   ((symbol-function 'romacs-agent--supervisor-listens-p) (lambda (_) t))
                   ((symbol-function 'romacs-agent--resume-now) (lambda (_) (setq resumed t))))
-          (romacs-agent--filter-lines host (concat (json-serialize (romacs-mcp--object "attached" 1 "notesOnly" t)) "\n"))
+          (romacs-agent--filter host (concat (json-serialize (romacs-mcp--object "attached" 1 "notesOnly" t)) "\n"))
           (should (string-search "\"plan\"" (car sent)))
           (should-not (romacs-agent-connection session))
           (should (eq (romacs-agent-state session) 'detached))
@@ -675,7 +675,7 @@ connection of its own, as the writer's process has."
           (romacs-agent-resume session)
           (should resumed)
           ;; Its records come back: let go.
-          (romacs-agent--filter-lines host (concat (json-serialize (romacs-mcp--object "seq" 3 "note" (car (gethash "n" romacs-agent--held-notes)))) "\n"))
+          (romacs-agent--filter host (concat (json-serialize (romacs-mcp--object "seq" 3 "note" (car (gethash "n" romacs-agent--held-notes)))) "\n"))
           (should (= (romacs-agent-held-notes-count) 1)))
       (delete-process host))))
 

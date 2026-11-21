@@ -230,8 +230,8 @@ impl Vm {
         }
         let mut vm = Self::new();
         let mut names = vec![String::new(); vm.names.len()];
-        for (name, &i) in &vm.names {
-            names[i] = name.clone();
+        for i in vm.names.slots() {
+            names[i] = vm.symbol_names[i].clone();
         }
         vm.names.clear();
         vm.initial_obarray.clear();
@@ -257,7 +257,7 @@ impl Vm {
                 let id = expand::generated_id();
                 vm.generated_symbols.insert(id, i);
                 vm.generated_slots.insert(i, id);
-            } else if vm.names.insert(name.into(), i).is_some() {
+            } else if vm.names.insert(name, i).is_some() {
                 return Err("duplicate image symbol".into());
             } else {
                 vm.set_initial_obarray(i, true);

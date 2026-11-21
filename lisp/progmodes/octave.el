@@ -691,7 +691,7 @@ mode, include \"-q\" and \"--traditional\"."
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map comint-mode-map)
     (define-key map "\M-." 'octave-find-definition)
-    (define-key map "\t" 'completion-at-point)
+    (define-key map (kbd "TAB") 'completion-at-point)
     (define-key map "\C-hd" 'octave-help)
     (define-key map "\C-ha" 'octave-lookfor)
     ;; Same as in `shell-mode'.

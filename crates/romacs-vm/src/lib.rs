@@ -25,6 +25,7 @@ mod where_is;
 mod map_keymap_tests;
 mod charset;
 mod obarray;
+mod names;
 mod command_set;
 mod command;
 mod interpreted_closure;
@@ -1696,7 +1697,8 @@ pub struct Vm {
     gc_stress: gc::Stress,
     /// What the funnels have handed out (gc.rs).
     allocation: gc::Allocation,
-    names: NameMap<String, usize>,
+    /// The initial obarray's names, by their bytes (names.rs).
+    names: names::Names,
     /// By slot, whether `names' maps the slot's name to it: membership of
     /// the initial obarray, answered without hashing the name.
     initial_obarray: Vec<bool>,
@@ -1973,7 +1975,7 @@ impl Vm {
             deferred_writes: Vec::new(),
             gc_stress: gc::Stress::from_env(),
             allocation: Default::default(),
-            names: NameMap::default(),
+            names: names::Names::default(),
             initial_obarray: Vec::new(),
             symbol_names: vec![],
             obarray_symbol_names: HashMap::default(),
@@ -2200,16 +2202,22 @@ impl Vm {
             self.command_set.changed(slot);
         }
     }
-    /// Whether SLOT's symbol is interned in the initial obarray.
+    /// Whether SLOT's symbol is interned in the initial obarray: whether
+    /// SLOT's own name names it (`names`), found without hashing the name.
     fn in_initial_obarray(&self, slot: usize) -> bool {
         self.initial_obarray.get(slot).copied().unwrap_or(false)
     }
     fn slot(&mut self, name: &str) -> usize {
-        if let Some(&i) = self.names.get(name) {
-            return i;
+        match self.names.get(name) {
+            Some(&i) => i,
+            None => self.new_slot(name, names::text_key(name)),
         }
+    }
+    /// The slot of a new symbol interned in the initial obarray, named NAME
+    /// (key text) whose key (names.rs) is KEY: no name names it yet.
+    fn new_slot(&mut self, name: &str, key: Box<[u8]>) -> usize {
         let i = self.slots.len();
-        self.names.insert(name.to_owned(), i);
+        self.names.insert_key(key, i);
         // A reused slot names another symbol now (Vm::special_cache).
         self.special_changes += 1;
         self.set_initial_obarray(i, true);
@@ -3582,10 +3590,10 @@ impl Vm {
         use std::fmt::Write;
         self.require_live_function(entry)?;
         let mut out = format!("entry f{entry}\n");
-        let mut symbols: Vec<_> = self.names.iter().collect();
-        symbols.sort_by_key(|(_, slot)| **slot);
-        for (name, slot) in symbols {
-            writeln!(&mut out, "symbol s{slot} = {name}").unwrap();
+        let mut symbols: Vec<usize> = self.names.slots().collect();
+        symbols.sort_unstable();
+        for slot in symbols {
+            writeln!(&mut out, "symbol s{slot} = {}", self.symbol_names[slot]).unwrap();
         }
         for (id, f) in self.functions.iter().enumerate() {
             let decoded;

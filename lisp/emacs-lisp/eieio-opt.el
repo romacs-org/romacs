@@ -272,7 +272,7 @@ are not abstract."
   (setq eieio-class-speedbar-key-map (speedbar-make-specialized-keymap))
 
   ;; General viewing stuff
-  (define-key eieio-class-speedbar-key-map "\C-m" 'speedbar-edit-line)
+  (define-key eieio-class-speedbar-key-map (kbd "RET") 'speedbar-edit-line)
   (define-key eieio-class-speedbar-key-map "+" 'speedbar-expand-line)
   (define-key eieio-class-speedbar-key-map "-" 'speedbar-contract-line)
   )

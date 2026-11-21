@@ -1448,5 +1448,22 @@ none when dropped.")
     (should (string-prefix-p "│ " (buffer-substring-no-properties (line-beginning-position) (line-end-position))))
     (should (get-text-property (line-beginning-position) 'romacs-agent-log-full))))
 
+;;; A streamed batch's faces, in the cycle that draws it
+
+(ert-deftest romacs-agent-log-faces-come-before-the-redisplay ()
+  ;; A delta's faces wait for the redisplay that draws it, on the chat's
+  ;; own pre-redisplay-functions, never on a timer of their own.
+  (romacs-agent-log-tests--with
+    (let ((timers (length timer-list)))
+      (draw :type 'delta :text "Some **bold** words.")
+      (should (= (length timer-list) timers))
+      (should (memq #'romacs-agent-log-faces--before-redisplay pre-redisplay-functions))
+      (should-not (memq 'bold (ensure-list (get-text-property (- romacs-agent-log--end 8) 'face))))
+      (run-hook-with-args 'pre-redisplay-functions (selected-window))
+      (goto-char (point-min))
+      (search-forward "bold")
+      (should (get-text-property (match-beginning 0) 'face))
+      (should-not (memq #'romacs-agent-log-faces--before-redisplay pre-redisplay-functions)))))
+
 (provide 'romacs-agent-log-tests)
 ;;; romacs-agent-log-tests.el ends here

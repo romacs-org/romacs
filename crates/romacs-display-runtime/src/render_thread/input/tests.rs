@@ -2051,18 +2051,26 @@ fn translate_committed_text_skips_command_modified_input() {
     );
 }
 
+/// A control-text press is the layout's character, so Ctrl+m is not the
+/// RET its byte says; a logical key that is no printable character keeps
+/// the byte.
 #[test]
-fn translate_control_text_preserves_single_control_bytes() {
-    assert_eq!(RenderApp::translate_control_text("\u{0e}"), Some(0x0e)); // C-n
-    assert_eq!(RenderApp::translate_control_text("\u{10}"), Some(0x10)); // C-p
-    assert_eq!(RenderApp::translate_control_text("\r"), Some(0x0d));
+fn translate_control_text_is_the_layout_character() {
+    let key = |text: &str| Key::Character(text.into());
+    assert_eq!(RenderApp::translate_control_text("\u{0e}", &key("n")), Some(FrontendKey::Character('n'))); // C-n
+    assert_eq!(RenderApp::translate_control_text("\r", &key("m")), Some(FrontendKey::Character('m')));
+    assert_eq!(RenderApp::translate_control_text("\r", &key("M")), Some(FrontendKey::Character('M')));
+    assert_eq!(RenderApp::translate_control_text("\u{1b}", &key("[")), Some(FrontendKey::Character('[')));
+    assert_eq!(RenderApp::translate_control_text("\r", &key("\r")), Some(FrontendKey::Keysym(0x0d)));
+    assert_eq!(RenderApp::translate_control_text("\u{10}", &Key::Named(NamedKey::Enter)), Some(FrontendKey::Keysym(0x10)));
 }
 
 #[test]
 fn translate_control_text_ignores_printable_and_multi_char_text() {
-    assert_eq!(RenderApp::translate_control_text("n"), None);
-    assert_eq!(RenderApp::translate_control_text("np"), None);
-    assert_eq!(RenderApp::translate_control_text(""), None);
+    let key = Key::Character("n".into());
+    assert_eq!(RenderApp::translate_control_text("n", &key), None);
+    assert_eq!(RenderApp::translate_control_text("np", &key), None);
+    assert_eq!(RenderApp::translate_control_text("", &key), None);
 }
 
 // ===================================================================
