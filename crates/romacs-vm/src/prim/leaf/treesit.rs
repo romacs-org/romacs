@@ -565,8 +565,14 @@ impl Leaf<'_> {
         if self.ts_registry_mut(base).early.as_mut().is_some_and(crate::treesit::Early::pending) {
             return Ok(Value::TRUE);
         }
+        // A buffer sharing its text with an indirect relative defers no
+        // first parse (`Vm::treesit_shared`): only reparses of trees count.
+        let shared = self.vm.treesit_shared(buffer).unwrap_or(false);
         Ok(flag(self.ts_registry(base).parsers.iter().any(|(_, core)| {
             let mut c = core.borrow_mut();
+            if shared && c.tree.is_none() {
+                return false;
+            }
             (c.tree.is_none() && c.waiting_slot) || c.ahead.as_mut().is_some_and(|ahead| !ahead.ready())
         })))
     }
