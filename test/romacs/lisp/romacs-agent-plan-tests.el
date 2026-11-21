@@ -254,7 +254,7 @@
         (call-interactively (keymap-lookup romacs-agent-log-mode-map "C-c C-y"))
         (should-not (romacs-agent-log--proceed-offered))
         (should-not (plist-get (romacs-agent-options session) :plan))
-        (should (equal (cdr (romacs-agent-log--doing session)) "idle"))
+        (should (equal (romacs-agent-log--doing session) '(idle)))
         ;; A rollback takes an offered plan back; narrowed, the chat still
         ;; reads what it offers.
         (romacs-agent-set-plan session t)
@@ -278,9 +278,9 @@
           (narrow-to-region (point-min) (1+ (point-min)))
           (call-interactively (keymap-lookup romacs-agent-log-mode-map "C-c C-y")))
         (should-not (romacs-agent-log--proceed-offered))
-        (should (string-match-p "idle" (buffer-substring-no-properties romacs-agent-log--end romacs-agent-log--input)))
+        (should-not (string-match-p "plan ready" (buffer-substring-no-properties romacs-agent-log--end romacs-agent-log--input)))
         (should-not (romacs-agent-log--proceed-offered))
-        (should (equal (cdr (romacs-agent-log--doing session)) "idle"))
+        (should (equal (romacs-agent-log--doing session) '(idle)))
         (romacs-agent-set-plan session nil)))
     (should (equal (gethash "mode" (gethash "collaborationMode" (gethash "params" (romacs-agent--codex-turn session 1 []))))
                    "default"))))

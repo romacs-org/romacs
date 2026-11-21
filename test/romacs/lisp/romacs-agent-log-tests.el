@@ -795,7 +795,7 @@
       (should (string-match-p "⎿ 2 words\n" text))
       (should-not (string-match-p "hand-back\\|agentId\\|usage" text)))
     (romacs-agent-log--separator)
-    (should (string-match-p "working" (buffer-substring-no-properties romacs-agent-log--end romacs-agent-log--input)))))
+    (should (eq (car romacs-agent-log--state) 'working))))
 
 (ert-deftest romacs-agent-log-an-answer-is-noted-with-its-actor ()
   (let ((session (romacs-agent--make :id "N" :harness 'claude :seq 0
@@ -1181,3 +1181,4 @@ none when dropped.")
 
 (provide 'romacs-agent-log-tests)
 ;;; romacs-agent-log-tests.el ends here
+
