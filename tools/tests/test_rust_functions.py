@@ -160,6 +160,9 @@ class RoundThreeTest(unittest.TestCase):
         src = 'mod outer {\n    #[cfg(test)]\n    #[path = "./helper.rs"]\n    mod t;\n}\n'
         code = rf.unsafe_census.lex(src)[0]
         self.assertEqual(rf.test_modules('crates/a/src/lib.rs', src, code), {'crates/a/src/outer/helper.rs'})
+        src = '#[path = "."]\nmod outer {\n    #[cfg(test)]\n    #[path = "helper.rs"]\n    mod t;\n}\n'
+        code = rf.unsafe_census.lex(src)[0]
+        self.assertEqual(rf.test_modules('crates/a/src/lib.rs', src, code), {'crates/a/src/helper.rs'})
 
 
 class FloorsTest(unittest.TestCase):

@@ -319,21 +319,34 @@ def without(src, comments):
 def test_modules(path, src, code):
     """The files SRC's (at PATH) test-only `mod NAME;' declarations load:
     NAME.rs and NAME/mod.rs beside a mod.rs, lib.rs or main.rs, else in the
-    directory named for PATH; or the file a `#[path]' names, beside PATH.
-    Declarations are read from CODE, SRC lexed, a `#[path]' value from SRC."""
+    directory named for PATH, or under the inline modules around it (each
+    one's own `#[path]' naming its directory); or the file a `#[path]'
+    names, beside PATH or under those modules.  Declarations are read from
+    CODE, SRC lexed, a `#[path]' value from SRC."""
     p = PurePosixPath(path)
     home = p.parent if p.name in ('mod.rs', 'lib.rs', 'main.rs') else p.parent / p.stem
     marked = {(start, end): body for start, end, body in attributes(code)}
     inline = [(start, end, name) for start, end, name in containers(code) if code.startswith('mod', start)]
+    def path_of(at):
+        """The `#[path]' value among the attributes of the item at AT, or None."""
+        start = head(code, at)
+        named = next((PATH_ATTR.match(src, a) for a, b in marked if start <= a and b <= at and PATH_ATTR.match(src, a)),
+                     None)
+        return named and named[1]
+
     found = set()
     for m in MOD_DECL.finditer(code):
-        within = home.joinpath(*[name for start, end, name in inline if start <= m.start() < end])
+        enclosing = [(start, name) for start, end, name in inline if start <= m.start() < end]
+        within = home
+        for start, name in sorted(enclosing):
+            own_path = path_of(start)
+            within = PurePosixPath(posixpath.normpath(str(within / own_path))) if own_path else within / name
         start = head(code, m.start())
         attrs = [(a, b) for (a, b) in marked if start <= a and b <= m.start()]
         if not any(test_attribute(marked[a]) for a in attrs):
             continue
-        named = next((PATH_ATTR.match(src, a[0]) for a in attrs if PATH_ATTR.match(src, a[0])), None)
-        found |= {posixpath.normpath(str((within if within != home else p.parent) / named[1]))} if named \
+        named = path_of(m.start())
+        found |= {posixpath.normpath(str((within if enclosing else p.parent) / named))} if named \
             else {str(within / f'{m[1]}.rs'), str(within / m[1] / 'mod.rs')}
     return found
 
