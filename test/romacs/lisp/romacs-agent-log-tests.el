@@ -1160,12 +1160,24 @@ none when dropped.")
                   ("Intro\n\n    " "echo")       ; indented code
                   ("[id]\n\n[id]:" " target")   ; a link definition
                   ("see www" ".example.com")     ; an autolink
-                  ("see " "www.example.com")))
+                  ("see " "www.example.com")
+                  ("> hello\n " "world")         ; a quote's lazy line
+                  ("[id]\n\n[id]:\n " "target")))  ; a definition's next line
     (romacs-agent-log-tests--with
       (draw :type 'delta :text (car case))
       (run-hook-with-args 'pre-redisplay-functions (selected-window))
       (draw :type 'delta :text (cadr case))
       (should (memq #'romacs-agent-log-faces--before-redisplay pre-redisplay-functions)))))
+
+(ert-deftest romacs-agent-log-faces-a-definition-on-its-next-line-faces-its-reference ()
+  (romacs-agent-log-tests--with
+    (draw :type 'delta :text "[id]\n\n[id]:\n ")
+    (run-hook-with-args 'pre-redisplay-functions (selected-window))
+    (draw :type 'delta :text "target")
+    (run-hook-with-args 'pre-redisplay-functions (selected-window))
+    (goto-char (point-min))
+    (search-forward "[id]")
+    (should (get-text-property (1+ (match-beginning 0)) 'face))))
 
 (provide 'romacs-agent-log-tests)
 ;;; romacs-agent-log-tests.el ends here
