@@ -1195,7 +1195,16 @@ impl Vm {
         for (table, settled) in [("conses", self.conses.settled()), ("closures", self.closures.settled()), ("cells", self.cells.settled()), ("objects", self.objects.settled())] {
             assert!(settled, "a collection left {table} with a young or dirty entry, or a log");
         }
+        self.check_cell_pairs();
         self.check_caches();
+    }
+    /// Under verify: the lexical pairs' two maps agree, and name only cells
+    /// in use and live conses.
+    pub(super) fn check_cell_pairs(&self) {
+        self.cell_pairs.check(
+            |i| !self.cells.is_free(i),
+            |pair| self.cons_pair(pair).is_ok() && pair.index_if(3).is_none_or(|i| i >= self.conses.len() || !self.conses.is_free(i)),
+        );
     }
     /// Reset the slots of the obarray symbols LIVE leaves out and free them.
     fn reclaim_obarray_symbols(&mut self, live: &HashSet<usize>) {
@@ -1449,13 +1458,14 @@ impl Vm {
             }
             rewrite(&mut c.document);
         });
-        self.cell_pairs = std::mem::take(&mut self.cell_pairs).into_iter().filter_map(|(i, mut pair)| {
-            if !self.cells.marked(i) { return None; }
+        let cells = &self.cells;
+        self.cell_pairs.rewrite(|i, mut pair| {
+            if !cells.marked(i) { return None; }
             let mut cell = Value::reference(i, 5);
             rewrite(&mut cell);
             rewrite(&mut pair);
             Some((cell.payload() as usize, pair))
-        }).collect();
+        });
         self.cells.collector_compact(&maps[2], |v| rewrite(v));
         // The traced register slots (`register_roots`); above the tops is NIL.
         let tops = self.register_tops();
@@ -1596,8 +1606,8 @@ impl Vm {
     }
     /// A lexical pair's cell takes its value, which marking only read.
     fn settle_cell_pairs(&mut self) {
-        let pairs: Vec<(usize, Value)> = self.cell_pairs.iter().filter(|&(&i, _)| self.cells.marked(i))
-            .map(|(&i, &pair)| (i, self.cons_pair(pair).expect("live lexical pair").1)).collect();
+        let pairs: Vec<(usize, Value)> = self.cell_pairs.iter().filter(|&(i, _)| self.cells.marked(i))
+            .map(|(i, pair)| (i, self.cons_pair(pair).expect("live lexical pair").1)).collect();
         for (i, value) in pairs {
             self.cells.collector_entries_mut()[i] = value;
             // An edge into the image no store recorded.
@@ -1713,7 +1723,7 @@ impl Vm {
     /// and clean, and the logs empty.
     fn sweep_in_place(&mut self, marking: &gc_mark::Marking, mut own: gc_mark::Worker) {
         let cells = &self.cells;
-        self.cell_pairs.retain(|&i, _| cells.marked(i));
+        self.cell_pairs.retain(|i| cells.marked(i));
         let verify = self.gc_stress.verify;
         let gc_mark::Swept { tables: swept, dead } = marking.sweep(self, &mut own);
         // The dead with side effects, still where they were, end here, on
@@ -1819,7 +1829,7 @@ impl Vm {
         // kept until a full finds the cell dead; a dead young cell's pair
         // is kept by this minor, which drops its mapping, and goes at the
         // next full.)
-        again.extend(self.cell_pairs.values().copied());
+        again.extend(self.cell_pairs.pairs());
         // No symbol is reclaimed: those of obarrays of their own are roots
         // like the rest, their names made since among the roots
         // (`names_added`), their slots by the slots' cards, and what was put
@@ -2737,7 +2747,7 @@ mod tests {
         vm.cell_pairs.insert(cell, pair);
         assert!(vm.collect_minor(&roots));
         assert!(vm.conses.old(usize::try_from(pair.payload()).unwrap()), "the pair survived, and is old");
-        assert_eq!(vm.cell_pairs.get(&cell), Some(&pair));
+        assert_eq!(vm.cell_pairs.get(cell), Some(pair));
     }
 
     /// After a promote-all nothing is young and every record is empty: a
@@ -3175,9 +3185,9 @@ mod tests {
         let last = vm.alloc_cell(Value::TRUE);
         let mut roots = [Value::reference(first, 5), Value::reference(last, 5)];
         vm.collect(&mut roots);
-        assert!(!vm.cell_pairs.contains_key(&dead), "the dead cell's pair is pruned");
+        assert!(vm.cell_pairs.get(dead).is_none(), "the dead cell's pair is pruned");
         assert_eq!(vm.alloc_cell(Value::NIL), dead);
-        assert!(!vm.cell_pairs.contains_key(&dead));
+        assert!(vm.cell_pairs.get(dead).is_none());
     }
 
     /// A compaction after sweeps moves every live entry down and leaves no
