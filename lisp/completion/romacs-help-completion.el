@@ -27,10 +27,11 @@
 (declare-function help--symbol-completion-table-affixation "help-fns" (completions))
 
 (defvar-local romacs-help--candidates nil
-  "Help's candidates in this minibuffer, as (KEY HISTORY NAMES), KEY as
-`romacs-help--key' makes it, HISTORY the head of `load-history' then and
-NAMES a hash table of their names.  Local to the minibuffer, so each
-prompt lists them anew.")
+  "Help's candidates in this minibuffer, as (KEY HISTORY NAMES FOLDED),
+KEY as `romacs-help--key' makes it, HISTORY the head of `load-history'
+then, NAMES a hash table of their names and FOLDED, once asked for, one
+from each name's downcased form to the names that have it.  Local to the
+minibuffer, so each prompt lists them anew.")
 
 (defun romacs-help--names (pred)
   "A hash table of the names of the symbols PRED accepts."
@@ -51,8 +52,19 @@ and no function is defined or file loaded (`romacs-help--candidates')."
   (if (not (minibufferp)) (romacs-help--names pred)
     (let ((key (romacs-help--key pred)) (kept romacs-help--candidates))
       (unless (and (equal key (car kept)) (eq (car load-history) (nth 1 kept)))
-        (setq romacs-help--candidates (list key (car load-history) (romacs-help--names pred))))
+        (setq romacs-help--candidates (list key (car load-history) (romacs-help--names pred) nil)))
       (nth 2 romacs-help--candidates))))
+
+(defun romacs-help--folded (pred)
+  "The names of help's candidates for PRED whose downcased form is a
+key, as a hash table: kept with the prompt's candidates, made once."
+  (let ((names (romacs-help--list pred)))
+    (if (and (minibufferp) (nth 3 romacs-help--candidates))
+        (nth 3 romacs-help--candidates)
+      (let ((folded (make-hash-table :test 'equal :size (hash-table-count names))))
+        (maphash (lambda (name _) (push name (gethash (downcase name) folded))) names)
+        (when (minibufferp) (setcar (nthcdr 3 romacs-help--candidates) folded))
+        folded))))
 
 (defun romacs-help--accepts-p (name pred)
   "Whether NAME names a symbol PRED accepts now."
@@ -67,10 +79,8 @@ that differs from STRING in case alone answers for it."
          (seq-every-p (lambda (regexp) (string-match-p regexp string)) completion-regexp-list))
        (or (romacs-help--accepts-p string pred)
            (and completion-ignore-case
-                (seq-some (lambda (name)
-                            (and (= (length name) (length string))
-                                 (romacs-help--accepts-p name pred)))
-                          (all-completions string (romacs-help--list pred)))))
+                (seq-some (lambda (name) (romacs-help--accepts-p name pred))
+                          (gethash (downcase string) (romacs-help--folded pred)))))
        t))
 
 (defun help--symbol-completion-table (string pred action)
