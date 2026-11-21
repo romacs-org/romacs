@@ -136,7 +136,7 @@
   (romacs-agent-rows-tests--plain
    (let ((providers "{\"providers\":[{\"providerInstanceId\":\"claude\",\"harness\":\"claude\",\"enabled\":true,\"models\":[1,2]},{\"providerInstanceId\":\"codex-second\",\"harness\":\"codex\",\"enabled\":false,\"models\":[]}]}"))
      (should (equal (romacs-agent-rows-tests--draw "romacs_orchestrator_capabilities" :ended (romacs-agent-rows-tests--table) providers)
-                    "◈ ▤ 2 instances · 1 enabled"))
+                    "◈ ▤ 2 instances · 2 models · 1 enabled"))
      (should (equal (romacs-agent-rows-tests--draw "romacs_orchestrator_capabilities" :body (romacs-agent-rows-tests--table) providers)
                     "✓  claude        claude  2 models\n·  codex-second  codex   0 models")))
    (let ((limits "{\"harnesses\":[{\"harness\":\"claude\",\"suggestion\":\"New work goes to claude2.\",\"accounts\":[{\"account\":\"claude2\",\"pick\":true,\"sessions\":3,\"windows\":[{\"window\":\"5h\",\"used\":58},{\"window\":\"week\",\"used\":27}]}]}]}"))
