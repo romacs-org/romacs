@@ -8,11 +8,15 @@ fn string_chars(cx: &Leaf<'_>, value: Value) -> Result<Vec<u32>, Fault> {
     Ok(cx.string_view(value)?.chars().collect())
 }
 
-fn character(value: Value) -> Result<u32, Fault> {
+/// VALUE's code when it is a character; builds no error.
+fn char_code(value: Value) -> Option<u32> {
     value.integer_value()
         .and_then(|n| u32::try_from(n).ok())
         .filter(|&n| n <= MAX_CHAR)
-        .ok_or(Fault::Wrong("characterp", value))
+}
+
+fn character(value: Value) -> Result<u32, Fault> {
+    char_code(value).ok_or_else(|| Fault::Wrong("characterp", value))
 }
 
 fn encode_chars(chars: impl IntoIterator<Item = u32>, multibyte: bool) -> Vec<u8> {
@@ -45,7 +49,7 @@ fn string_bytes(cx, string: Value) {
 defsubr! { name = "characterp", gnu = "character.c:characterp", effect = Pure,
 fn characterp(_cx, object: Value; optional ignored: Value) {
     let _ = ignored;
-    Ok(if character(object).is_ok() { Value::TRUE } else { Value::NIL })
+    Ok(if char_code(object).is_some() { Value::TRUE } else { Value::NIL })
 }}
 
 defsubr! { name = "max-char", gnu = "character.c:max-char", effect = Pure,
@@ -107,7 +111,7 @@ fn string(cx; rest args) {
 defsubr! { name = "make-string", gnu = "alloc.c:make-string", effect = Pure,
 fn make_string(cx, length: Value, initial: Value; optional multibyte: Value) {
     let count = length.integer_value().and_then(|n| usize::try_from(n).ok())
-        .ok_or(Fault::Wrong("wholenump", length))?;
+        .ok_or_else(|| Fault::Wrong("wholenump", length))?;
     let code = character(initial)?;
     let multibyte = multibyte != Value::NIL || code >= 128;
     let unit = encode_chars([code], multibyte);
@@ -140,7 +144,7 @@ fn substring_no_properties(cx, string: Value; optional from: Value, to: Value) {
     let size = len as i64;
     let index = |value: Value, default| -> Result<i64, Fault> {
         if value == Value::NIL { return Ok(default); }
-        let n = value.integer_value().ok_or(Fault::Wrong("integerp", value))?;
+        let n = value.integer_value().ok_or_else(|| Fault::Wrong("integerp", value))?;
         Ok(if n < 0 { n + size } else { n })
     };
     let start = index(from, 0)?;
@@ -204,7 +208,7 @@ fn sequence_length(cx: &Leaf<'_>, value: Value) -> Result<i64, Fault> {
 
 defsubr! { name = "length<", gnu = "fns.c:196", effect = Pure,
 fn length_less(cx, sequence: Value, length: Value) {
-    let len = length.integer_value().ok_or(Fault::Wrong("fixnump", length))?;
+    let len = length.integer_value().ok_or_else(|| Fault::Wrong("fixnump", length))?;
     let result = if cx.pair(sequence).is_some() { length_internal(cx, sequence, len)? != -1 }
         else { sequence_length(cx, sequence)? < len };
     Ok(if result { Value::TRUE } else { Value::NIL })
@@ -212,7 +216,7 @@ fn length_less(cx, sequence: Value, length: Value) {
 
 defsubr! { name = "length>", gnu = "fns.c:211", effect = Pure,
 fn length_greater(cx, sequence: Value, length: Value) {
-    let len = length.integer_value().ok_or(Fault::Wrong("fixnump", length))?;
+    let len = length.integer_value().ok_or_else(|| Fault::Wrong("fixnump", length))?;
     let result = if cx.pair(sequence).is_some() { length_internal(cx, sequence, len + 1)? == -1 }
         else { sequence_length(cx, sequence)? > len };
     Ok(if result { Value::TRUE } else { Value::NIL })
@@ -220,7 +224,7 @@ fn length_greater(cx, sequence: Value, length: Value) {
 
 defsubr! { name = "length=", gnu = "fns.c:226", effect = Pure,
 fn length_equal(cx, sequence: Value, length: Value) {
-    let len = length.integer_value().ok_or(Fault::Wrong("fixnump", length))?;
+    let len = length.integer_value().ok_or_else(|| Fault::Wrong("fixnump", length))?;
     if len < 0 { return Ok(Value::NIL); }
     let result = if cx.pair(sequence).is_some() { length_internal(cx, sequence, len + 1)? == 1 }
         else { sequence_length(cx, sequence)? == len };
@@ -369,7 +373,7 @@ fn clear_string(cx, string: Value) { cx.clear_string(string) }}
 
 defsubr! { name = "byte-to-string", gnu = "editfns.c:164", effect = Pure,
 fn byte_to_string(cx, byte: Value) {
-    let b = byte.integer_value().ok_or(Fault::Wrong("fixnump", byte))?;
+    let b = byte.integer_value().ok_or_else(|| Fault::Wrong("fixnump", byte))?;
     let b = u8::try_from(b).map_err(|_| Fault::Error("Invalid byte".into()))?;
     Ok(cx.make_string(vec![b], false))
 }}
@@ -396,7 +400,7 @@ fn get_byte(cx; optional position: Value, string: Value) -> Step {
     if string != Value::NIL {
         let (len, multibyte) = cx.string_shape(string)?;
         let index = if position == Value::NIL { 0 } else {
-            let n = position.integer_value().filter(|n| *n >= 0).ok_or(Fault::Wrong("wholenump", position))?;
+            let n = position.integer_value().filter(|n| *n >= 0).ok_or_else(|| Fault::Wrong("wholenump", position))?;
             if n as usize >= len { return Err(args_out_of_range(cx, &[string, position])); }
             n as usize
         };

@@ -12,9 +12,9 @@ fn record(cx, tag: Value; rest slots) {
 defsubr! { name = "make-record", gnu = "alloc.c:3499", effect = Pure,
 fn make_record(cx, tag: Value, slots: Value, init: Value) {
     let n = slots.integer_value().and_then(|n| usize::try_from(n).ok())
-        .ok_or(Fault::Wrong("wholenump", slots))?;
+        .ok_or_else(|| Fault::Wrong("wholenump", slots))?;
     // PSEUDOVECTOR_SIZE_BITS is 12 in the pinned GNU lisp.h.
-    let count = n.checked_add(1).ok_or(Fault::Wrong("wholenump", slots))?;
+    let count = n.checked_add(1).ok_or_else(|| Fault::Wrong("wholenump", slots))?;
     if count > 4095 {
         return Err(Fault::Error(format!("Attempt to allocate a record of {count} slots; max is 4095")));
     }
@@ -52,7 +52,7 @@ fn romacs_records_reshape(cx, records: Value, tag: Value, map: Value, fill: Valu
     let records = super::widen::list_elements(cx, records)?;
     let map = cx.vector_values(map)?.into_iter().map(|v| {
         if v == Value::NIL { return Ok(Source::Fill) }
-        v.integer_value().and_then(|n| usize::try_from(n).ok()).map(Source::Old).ok_or(Fault::Wrong("natnump", v))
+        v.integer_value().and_then(|n| usize::try_from(n).ok()).map(Source::Old).ok_or_else(|| Fault::Wrong("natnump", v))
     }).collect::<std::result::Result<Vec<_>, Fault>>()?;
     let row = |cx: &Leaf<'_>, v: Value| -> std::result::Result<Vec<Value>, Fault> {
         let row = cx.vector_values(v)?;

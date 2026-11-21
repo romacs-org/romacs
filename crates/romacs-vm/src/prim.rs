@@ -483,7 +483,7 @@ mod leaf {
         }
         pub(crate) fn lifecycle_buffer(&mut self, arg: Value, create: bool, inhibit: bool) -> std::result::Result<(Value, bool), Fault> {
             if matches!(self.kind(arg), Kind::Buffer | Kind::ByteBuffer) { return Ok((arg, false)); }
-            let name = self.vm.buffer_name_text(arg).ok_or(Fault::Wrong("stringp", arg))?;
+            let name = self.vm.buffer_name_text(arg).ok_or_else(|| Fault::Wrong("stringp", arg))?;
             if let Some(buffer) = self.vm.named_buffer(&name) { return Ok((buffer, false)); }
             if !create { return Err(Fault::Error(format!("No buffer named {name}"))); }
             let buffer = self.vm.create_named_buffer(&name, false).map_err(|error| {
@@ -548,11 +548,11 @@ mod leaf {
         }
         /// ENCODE_FILE: the host bytes of the file name VALUE.
         pub fn file_name_bytes(&self, value: Value) -> std::result::Result<Vec<u8>, Fault> {
-            self.vm.file_name_bytes(value).ok_or(Fault::Wrong("stringp", value))
+            self.vm.file_name_bytes(value).ok_or_else(|| Fault::Wrong("stringp", value))
         }
         /// The model's name for the buffer name string VALUE.
         pub fn buffer_name_text(&self, value: Value) -> std::result::Result<String, Fault> {
-            self.vm.buffer_name_text(value).ok_or(Fault::Wrong("stringp", value))
+            self.vm.buffer_name_text(value).ok_or_else(|| Fault::Wrong("stringp", value))
         }
         /// The Lisp string of the model's buffer name NAME.
         pub fn buffer_name_value(&mut self, name: &str) -> Value {
@@ -593,6 +593,13 @@ mod leaf {
         pub(crate) fn keymap_generation(&self) -> u64 {
             self.vm.keymap_generation()
         }
+        /// Whether `string_view`, `string_bytes` and the other text readers
+        /// accept V, with nothing copied and no error built: `is_string`, and
+        /// for an executable-image string, its pages readable and its text
+        /// valid.
+        pub fn is_readable_string(&self, v: Value) -> bool {
+            self.vm.str_view(v).is_some()
+        }
         pub fn string_view(
             &self,
             v: Value,
@@ -600,23 +607,23 @@ mod leaf {
             self.vm
                 .str_view(v)
                 .map(|view| view.to_owned())
-                .ok_or(Fault::Wrong("stringp", v))
+                .ok_or_else(|| Fault::Wrong("stringp", v))
         }
         /// String V's text from character FROM on, through its own cursor
         /// (`Vm::str_view_from`), borrowed.
         pub(crate) fn string_view_from(&self, v: Value, from: usize) -> std::result::Result<crate::lstring::StrView<'_>, Fault> {
-            self.vm.str_view_from(v, from).ok_or(Fault::Wrong("stringp", v))
+            self.vm.str_view_from(v, from).ok_or_else(|| Fault::Wrong("stringp", v))
         }
         /// String V's length in characters and whether it is multibyte, with
         /// nothing copied.
         pub(crate) fn string_shape(&self, v: Value) -> std::result::Result<(usize, bool), Fault> {
-            self.vm.str_view(v).map(|view| (view.chars, view.multibyte)).ok_or(Fault::Wrong("stringp", v))
+            self.vm.str_view(v).map(|view| (view.chars, view.multibyte)).ok_or_else(|| Fault::Wrong("stringp", v))
         }
         /// The character at index N of string V, read through the string's
         /// own cursor (`Vm::str_view_from`), with nothing copied; None past
         /// the end.
         pub(crate) fn string_char(&self, v: Value, n: usize) -> std::result::Result<Option<u32>, Fault> {
-            Ok(self.vm.str_view_from(v, n).ok_or(Fault::Wrong("stringp", v))?.chars().next())
+            Ok(self.vm.str_view_from(v, n).ok_or_else(|| Fault::Wrong("stringp", v))?.chars().next())
         }
         /// GNU string-lessp's order, compared in place: a symbol orders by
         /// its name, a string by its characters.
@@ -634,7 +641,7 @@ mod leaf {
         pub(crate) fn with_text<R>(&self, v: Value, f: impl FnOnce(crate::lstring::StrView<'_>) -> R) -> std::result::Result<R, Fault> {
             match self.symbol_key(v) {
                 Some(key) => Ok(self.read_symbol_name(v, key, f)),
-                None => self.vm.str_view(v).map(f).ok_or(Fault::Wrong("stringp", v)),
+                None => self.vm.str_view(v).map(f).ok_or_else(|| Fault::Wrong("stringp", v)),
             }
         }
         /// V's key when it is a symbol (`nil' and `t' too): its name, escaped
@@ -642,7 +649,7 @@ mod leaf {
         /// `read_symbol_name' wherever it is compared as text.
         pub(crate) fn symbol_key(&self, v: Value) -> Option<&str> {
             if v == Value::NIL { Some("nil") } else if v == Value::TRUE { Some("t") }
-                else { self.symbol_slot(v).ok().map(|slot| self.vm.symbol_names[slot].as_str()) }
+                else { self.symbol_index(v).map(|slot| self.vm.symbol_names[slot].as_str()) }
         }
         /// F of symbol V's name, KEY its key, as `symbol-name' gives it: an
         /// ASCII key as itself; else the string a private obarray keeps for a
@@ -726,17 +733,17 @@ mod leaf {
         pub fn string_text(&self, v: Value) -> std::result::Result<String, Fault> {
             self.vm
                 .str_view(v)
-                .ok_or(Fault::Wrong("stringp", v))?
+                .ok_or_else(|| Fault::Wrong("stringp", v))?
                 .as_str()
                 .map(str::to_owned)
-                .ok_or(Fault::NotUnicode(v))
+                .ok_or_else(|| Fault::NotUnicode(v))
         }
         /// Owned storage bytes (UTF-8 for multibyte strings, raw for unibyte).
         pub fn string_bytes(&self, v: Value) -> std::result::Result<Vec<u8>, Fault> {
             self.vm
                 .str_view(v)
                 .map(|view| view.bytes().to_vec())
-                .ok_or(Fault::Wrong("stringp", v))
+                .ok_or_else(|| Fault::Wrong("stringp", v))
         }
         /// GNU `fetch_string_char_advance` at byte offset AT of the string V
         /// as it is NOW, without copying it: the raw byte on unibyte storage,
@@ -949,6 +956,11 @@ mod leaf {
                 _ => Err(Fault::Wrong("vectorp", v)),
             }
         }
+        /// `vectorp`: where `vector_len` and `vector_values` answer, with
+        /// nothing copied and no error built.
+        pub fn is_vector(&self, v: Value) -> bool {
+            matches!(self.vm.object_if(v), Some(data::Object::Vector(_)))
+        }
         pub fn vector_len(&self, v: Value) -> std::result::Result<usize, Fault> {
             match self.vm.object_if(v) {
                 Some(data::Object::Vector(a)) => Ok(a.len()),
@@ -958,12 +970,12 @@ mod leaf {
         pub fn vector_get(&self, v: Value, index: Value) -> std::result::Result<Value, Fault> {
             let n = index
                 .integer_value()
-                .ok_or(Fault::Wrong("integerp", index))?;
+                .ok_or_else(|| Fault::Wrong("integerp", index))?;
             match self.vm.object_if(v) {
                 Some(data::Object::Vector(a)) => usize::try_from(n)
                     .ok()
                     .and_then(|i| a.get(i).copied())
-                    .ok_or(Fault::Range(v, index)),
+                    .ok_or_else(|| Fault::Range(v, index)),
                 _ => Err(Fault::Wrong("vectorp", v)),
             }
         }
@@ -975,7 +987,7 @@ mod leaf {
         ) -> std::result::Result<Value, Fault> {
             let n = index
                 .integer_value()
-                .ok_or(Fault::Wrong("integerp", index))?;
+                .ok_or_else(|| Fault::Wrong("integerp", index))?;
             if !matches!(self.vm.object_if(v), Some(data::Object::Vector(_))) {
                 return Err(Fault::Wrong("vectorp", v));
             }
@@ -1003,7 +1015,7 @@ mod leaf {
             let i = v
                 .index_if(3)
                 .filter(|&i| i < self.vm.conses.len())
-                .ok_or(Fault::Wrong("consp", v))?;
+                .ok_or_else(|| Fault::Wrong("consp", v))?;
             if car {
                 self.vm.conses.set_car(i, value);
             } else {
@@ -1013,7 +1025,7 @@ mod leaf {
         }
         /// `read-from-string`'s START and END over STRING, as character indexes.
         pub(crate) fn read_range(&mut self, string: Value, start: Value, end: Value) -> std::result::Result<(usize, usize), Fault> {
-            let len = self.vm.str_view(string).ok_or(Fault::Wrong("stringp", string))?.len() as i64;
+            let len = self.vm.str_view(string).ok_or_else(|| Fault::Wrong("stringp", string))?.len() as i64;
             let index = |v: Value, default| {
                 if v == Value::NIL { Ok(default) }
                 else { v.as_integer().map_err(|_| Fault::Wrong("integerp", v)) }
@@ -1034,7 +1046,7 @@ mod leaf {
                 if let Some((condition, data)) = signal { Fault::Signal(condition, data) }
                 else if message.starts_with("end-of-file") { Fault::EndOfFile }
                 else { Fault::ReadSyntax(message) }
-            })?.map(|(value, _, end)| (value, end)).ok_or(Fault::EndOfFile)?;
+            })?.map(|(value, _, end)| (value, end)).ok_or_else(|| Fault::EndOfFile)?;
             let position = Value::integer((start + end) as i64).map_err(Fault::Error)?;
             Ok(self.cons(value, position))
         }
@@ -1110,6 +1122,10 @@ mod leaf {
             }
             Some(self.vm.marker_position_value(v).ok().and_then(|p| p.integer_value()))
         }
+        /// `floatp`: where `float_value` answers, with no error built.
+        pub fn is_float(&self, v: Value) -> bool {
+            matches!(self.vm.object_if(v), Some(data::Object::Float(_)))
+        }
         pub fn float_value(&self, v: Value) -> std::result::Result<f64, Fault> {
             match self.vm.object_if(v) {
                 Some(data::Object::Float(n)) => Ok(*n),
@@ -1133,12 +1149,16 @@ mod leaf {
         pub fn equal_including_properties(&self, a: Value, b: Value) -> std::result::Result<bool, hash::HashFault> {
             self.vm.equal_including_properties(a, b)
         }
+        /// V's slot when it is a symbol other than nil and t; builds no error.
         #[inline]
-        fn symbol_slot(&self, v: Value) -> std::result::Result<usize, Fault> {
+        fn symbol_index(&self, v: Value) -> Option<usize> {
             v.index_if(7)
                 .and_then(|i| i.checked_sub(1))
                 .filter(|&i| i < self.vm.slots.len())
-                .ok_or(Fault::Wrong("symbolp", v))
+        }
+        #[inline]
+        fn symbol_slot(&self, v: Value) -> std::result::Result<usize, Fault> {
+            self.symbol_index(v).ok_or_else(|| Fault::Wrong("symbolp", v))
         }
         pub fn symbol_name(&self, v: Value) -> std::result::Result<String, Fault> {
             if v == Value::NIL {
@@ -1405,7 +1425,7 @@ mod leaf {
             let mut seen = std::collections::HashSet::new();
             while tail != Value::NIL {
                 if !seen.insert(tail.0) { return Err(Fault::Circular(tail)); }
-                let (item, next) = self.pair(tail).ok_or(Fault::Wrong("listp", tail))?;
+                let (item, next) = self.pair(tail).ok_or_else(|| Fault::Wrong("listp", tail))?;
                 if self.equal(item, load).map_err(|e| match e {
                     hash::HashFault::Wrong(p, v) => Fault::Wrong(p, v),
                     hash::HashFault::Error("circular-list", Some(v)) => Fault::Circular(v),
@@ -1525,7 +1545,7 @@ mod leaf {
         }
         pub fn make_obarray(&mut self, size: Value) -> super::Out {
             let bits = if size == Value::NIL { obarray::DEFAULT_BITS } else {
-                let n = size.integer_value().filter(|&n| n >= 0).ok_or(Fault::Wrong("wholenump", size))? as u64;
+                let n = size.integer_value().filter(|&n| n >= 0).ok_or_else(|| Fault::Wrong("wholenump", size))? as u64;
                 let bits = 64 - n.leading_zeros();
                 if bits > 31 { return Err(Fault::Range1(size)); }
                 bits
@@ -1625,7 +1645,7 @@ mod leaf {
         }
         pub fn use_global_map(&mut self, map: Value) -> std::result::Result<Value, Fault> {
             self.vm.ensure_keymaps();
-            let map = self.vm.resolve_keymap(map).ok_or(Fault::Wrong("keymapp", map))?;
+            let map = self.vm.resolve_keymap(map).ok_or_else(|| Fault::Wrong("keymapp", map))?;
             let slot = self.vm.names["#:vm2-global-keymap"];
             self.vm.slots[slot].value = map;
             Ok(Value::NIL)
@@ -1657,7 +1677,7 @@ mod leaf {
         /// `symbolp`: exactly where `kind` answers Symbol, without the
         /// object classification `kind` runs first.
         pub fn is_symbol(&self, v: Value) -> bool {
-            v == Value::NIL || v == Value::TRUE || self.symbol_slot(v).is_ok()
+            v == Value::NIL || v == Value::TRUE || self.symbol_index(v).is_some()
         }
         /// `stringp`: exactly where `kind` answers String or Bytes (a unibyte
         /// string with octets above 127 is `Bytes`), by `kind`'s own arms.
@@ -1681,7 +1701,7 @@ mod leaf {
                 4 if (v.payload() as usize) < self.vm.closures.len() => Kind::Closure,
                 5 if (v.payload() as usize) < self.vm.cells.len() => Kind::Cell,
                 6 if super::descriptor(v.payload() as usize).is_some() => Kind::Subr,
-                7 if self.symbol_slot(v).is_ok() => Kind::Symbol,
+                7 if self.symbol_index(v).is_some() => Kind::Symbol,
                 // A private object first: an executable-image string is past
                 // the private table, so `object_if' answers None for it.
                 0 => match self.vm.object_if(v) {
@@ -1854,7 +1874,7 @@ mod leaf {
             }
             let n = if count == Value::NIL { 0 } else {
                 count.as_integer().ok().filter(|&n| n >= 0)
-                    .ok_or(Fault::Wrong("wholenump", count))? as usize
+                    .ok_or_else(|| Fault::Wrong("wholenump", count))? as usize
             };
             let mut table = char_table::CharTable::new(purpose);
             table.initialize(n, init).map_err(Fault::Error)?;
@@ -1911,7 +1931,7 @@ mod leaf {
                 Some((c as usize, c as usize))
             } else if let Some((from, to)) = self.pair(range) {
                 let character = |v: Value| v.integer_value().filter(|&n| n >= 0 && n < char_table::CharTable::LEN as i64)
-                    .map(|n| n as usize).ok_or(Fault::Wrong("characterp", v));
+                    .map(|n| n as usize).ok_or_else(|| Fault::Wrong("characterp", v));
                 Some((character(from)?, character(to)?))
             } else { return Err(Fault::Error("Invalid RANGE argument to ‘set-char-table-range’".into())); };
             let slot = self.vm.literal_table_slot(value);
@@ -1932,7 +1952,7 @@ mod leaf {
         /// (GNU fns.c Fsubstring: make_specified_string + copy_text_properties).
         /// The caller has validated the range against the character length.
         pub fn string_slice(&mut self, string: Value, from: usize, to: usize) -> std::result::Result<Value, Fault> {
-            let view = self.vm.str_view(string).ok_or(Fault::Wrong("arrayp", string))?;
+            let view = self.vm.str_view(string).ok_or_else(|| Fault::Wrong("arrayp", string))?;
             let multibyte = view.is_multibyte();
             let lisp = match self.vm.object_if(string) {
                 Some(data::Object::String(s) | data::Object::RawString(s)) => Some(s),
@@ -2164,7 +2184,7 @@ impl Arg for Integer {
     fn check(_: &Leaf<'_>, v: Value) -> std::result::Result<Self, Fault> {
         v.integer_value()
             .map(Integer)
-            .ok_or(Fault::Wrong("integerp", v))
+            .ok_or_else(|| Fault::Wrong("integerp", v))
     }
 }
 /// CHECK_LIST: nil or a cons.

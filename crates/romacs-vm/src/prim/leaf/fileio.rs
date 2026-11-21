@@ -39,7 +39,7 @@ impl Leaf<'_> {
         let target = if buffer == Value::NIL { current } else { buffer };
         let index = target.index(0).ok().and_then(|i| i.checked_sub(1))
             .filter(|&i| matches!(self.vm.objects.get(i), Some(data::Object::Buffer(_) | data::Object::ByteBuffer(_))))
-            .ok_or(Fault::Wrong("bufferp", target))?;
+            .ok_or_else(|| Fault::Wrong("bufferp", target))?;
         let state = match &self.vm.objects[index] {
             data::Object::Buffer(b) => b.per_buffer.1,
             data::Object::ByteBuffer(b) => b.per_buffer.1,

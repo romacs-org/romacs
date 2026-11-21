@@ -39,7 +39,7 @@ impl Leaf<'_> {
             self.vm.drop_deferred_escapes();
             return Ok(Value::NIL);
         }
-        let id = id.integer_value().ok_or(crate::prim::Fault::Wrong("integerp", id))?;
+        let id = id.integer_value().ok_or_else(|| crate::prim::Fault::Wrong("integerp", id))?;
         match self.vm.take_deferred_escape(id) {
             None => Ok(Value::NIL),
             Some((false, condition, data)) => Err(crate::prim::Fault::Signal(condition, data)),
@@ -59,9 +59,9 @@ impl Leaf<'_> {
             return Ok(Value::NIL);
         }
         let generation = generation.integer_value().filter(|&g| g > 0)
-            .ok_or(crate::prim::Fault::Wrong("natnump", generation))?;
+            .ok_or_else(|| crate::prim::Fault::Wrong("natnump", generation))?;
         let milliseconds = milliseconds.integer_value().filter(|&m| m >= 0)
-            .ok_or(crate::prim::Fault::Wrong("natnump", milliseconds))?;
+            .ok_or_else(|| crate::prim::Fault::Wrong("natnump", milliseconds))?;
         crate::host::call_deadline::arm(self.vm.quit.clone(), generation as u64,
                                    std::time::Duration::from_millis(milliseconds as u64));
         Ok(Value::TRUE)

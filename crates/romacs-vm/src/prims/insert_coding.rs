@@ -407,8 +407,8 @@ fn empty_decided(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
 /// in the current buffer: take its bytes back, restore its multibyteness
 /// and undo list, and leave the bytes in DATA's car.
 fn undecide_now(cx: &mut Leaf<'_>, data: Value) -> std::result::Result<(), Fault> {
-    let (multibyte, rest) = cx.pair(data).ok_or(Fault::Wrong("consp", data))?;
-    let (undo, _) = cx.pair(rest).ok_or(Fault::Wrong("consp", rest))?;
+    let (multibyte, rest) = cx.pair(data).ok_or_else(|| Fault::Wrong("consp", data))?;
+    let (undo, _) = cx.pair(rest).ok_or_else(|| Fault::Wrong("consp", rest))?;
     let bytes = cx.fileio_take_raw()?;
     let unibyte = cx.buffer_shape()?.unibyte;
     // Text Lisp left multibyte goes back as its internal bytes.

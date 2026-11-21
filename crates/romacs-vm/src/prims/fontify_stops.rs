@@ -11,7 +11,7 @@ use super::{Fault, Value};
 // `fontified' a call left nil. Redisplay's walk, `romacs--redisplay-fontify'.
 defsubr! { name = "romacs--fontify-next", gnu = "romacs:display", effect = Reads,
 fn fontify_next(cx, window: Value, pos: Value, end: Value; optional past: Value) {
-    let number = |v: Value| v.integer_value().ok_or(Fault::Wrong("fixnump", v));
+    let number = |v: Value| v.integer_value().ok_or_else(|| Fault::Wrong("fixnump", v));
     let found = cx.fontify_next(window, number(pos)?, number(end)?, past != Value::NIL)?;
     found.map_or(Ok(Value::NIL), |at| Value::integer(at).map_err(Fault::Error))
 }}

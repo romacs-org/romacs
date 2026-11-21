@@ -54,7 +54,7 @@ fn prepare(cx: &mut Leaf<'_>, args: [Value; 7], minibuffer: bool) -> Next {
         let condition = cx.intern("inhibited-interaction");
         return Err(Fault::Signal(condition, Value::NIL));
     }
-    if cx.string_view(prompt).is_err() {
+    if !cx.is_readable_string(prompt) {
         return Err(Fault::Wrong("stringp", prompt));
     }
     // get_keymap (keymap, 1, 0); nil means the current `minibuffer-local-map'.
@@ -62,7 +62,7 @@ fn prepare(cx: &mut Leaf<'_>, args: [Value; 7], minibuffer: bool) -> Next {
         let local = cx.intern("minibuffer-local-map");
         cx.variable_value(local)?.unwrap_or(Value::NIL)
     } else {
-        cx.keymap(keymap).ok_or(Fault::Wrong("keymapp", keymap))?
+        cx.keymap(keymap).ok_or_else(|| Fault::Wrong("keymapp", keymap))?
     };
     // HIST: a symbol, or (HISTVAR . HISTPOS) through car-safe; nil means
     // `minibuffer-history'. HISTPOS feeds only the history commands, which
@@ -139,9 +139,9 @@ fn string_done(cx: &mut Leaf<'_>, val: Value, saved: &[Value]) -> Next {
 /// call: an activation GNU's C call lacks, seen in a backtrace and in eval depth.
 fn string_to_object(cx: &mut Leaf<'_>, mut val: Value, default: Value) -> Next {
     if cx.string_view(val).is_ok_and(|s| s.chars == 0) {
-        if cx.string_view(default).is_ok() {
+        if cx.is_readable_string(default) {
             val = default;
-        } else if let Some((car, _)) = cx.pair(default).filter(|&(car, _)| cx.string_view(car).is_ok()) {
+        } else if let Some((car, _)) = cx.pair(default).filter(|&(car, _)| cx.is_readable_string(car)) {
             val = car;
         }
     }
@@ -170,7 +170,7 @@ fn object_read(cx: &mut Leaf<'_>, read: Value, saved: &[Value]) -> Next {
 }
 
 fn fixnum(v: Value) -> std::result::Result<i64, Fault> {
-    v.integer_value().ok_or(Fault::Wrong("fixnump", v))
+    v.integer_value().ok_or_else(|| Fault::Wrong("fixnump", v))
 }
 
 use super::keyboard::{enter, DONE};

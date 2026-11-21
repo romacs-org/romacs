@@ -34,7 +34,7 @@ impl Leaf<'_> {
             _ => None,
         };
         let scalar = if position == Value::NIL || marker_byte.is_some() { None } else {
-            let n = self.bigint_value(position).ok_or(Fault::Wrong("integer-or-marker-p", position))?;
+            let n = self.bigint_value(position).ok_or_else(|| Fault::Wrong("integer-or-marker-p", position))?;
             Some(i64::try_from(&n).unwrap_or(if n.sign() == num_bigint::Sign::Minus { i64::MIN } else { i64::MAX }))
         };
         let result = match &self.vm.objects[index] {
@@ -124,7 +124,7 @@ impl Leaf<'_> {
             Some(None) => return Err(Fault::Error("Marker does not point anywhere".into())),
             None if position == Value::NIL => self.point()?,
             None => {
-                let pos = position.integer_value().ok_or(Fault::Wrong("fixnump", position))?;
+                let pos = position.integer_value().ok_or_else(|| Fault::Wrong("fixnump", position))?;
                 if pos < 1 || pos > size + 1 {
                     return Err(Fault::Range3(position, Value::integer(1).unwrap(), Value::integer(size + 1).map_err(Fault::Error)?));
                 }

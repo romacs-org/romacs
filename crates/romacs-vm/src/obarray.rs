@@ -159,12 +159,12 @@ impl Vm {
         } else { table.lookup(bytes, chars) }
     }
     pub(super) fn obarray_intern(&mut self, table: Value, name: Value) -> std::result::Result<Value, prim::Fault> {
-        let view = self.str_view(name).ok_or(prim::Fault::Wrong("stringp", name))?;
+        let view = self.str_view(name).ok_or_else(|| prim::Fault::Wrong("stringp", name))?;
         // Looked up in place: the name is copied only for a new symbol.
         if let Some(found) = self.obarray_lookup_value(table, view.bytes, view.chars) { return Ok(found); }
         let (bytes, chars) = (view.bytes.to_vec(), view.chars);
         let initial = matches!(self.object_if(table), Some(Object::Obarray(t)) if t.initial);
-        let text = symbol_key(&bytes, chars).ok_or(prim::Fault::NotUnicode(name))?;
+        let text = symbol_key(&bytes, chars).ok_or_else(|| prim::Fault::NotUnicode(name))?;
         // The initial obarray's names are the VM's own (`Vm::names`); its
         // Obarray object holds none of them. The lookup above missed (and
         // answers nil and t), so the new symbol takes the key it used.

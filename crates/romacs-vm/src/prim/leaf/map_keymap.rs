@@ -48,7 +48,7 @@ impl Leaf<'_> {
         };
         let index = value
             .integer_value()
-            .ok_or(Fault::Wrong("integerp", value))?;
+            .ok_or_else(|| Fault::Wrong("integerp", value))?;
         Ok(usize::try_from(index)
             .ok()
             .and_then(|index| values.get(index))

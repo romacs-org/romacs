@@ -114,7 +114,7 @@ impl Leaf<'_> {
     /// The top-level block of the current buffer, a Markdown document,
     /// holding POS, as (START . END).
     pub(crate) fn markdown_block_at(&mut self, pos: Value) -> R<Value> {
-        let pos = pos.integer_value().ok_or(Fault::Wrong("integer-or-marker-p", pos))?;
+        let pos = pos.integer_value().ok_or_else(|| Fault::Wrong("integer-or-marker-p", pos))?;
         let buffer = self.current_buffer()?;
         let offset = usize::try_from(pos - 1).unwrap_or(0);
         let (blocks, _) = self.markdown_synced(buffer, |index, _| index.blocks(offset, offset))?;
@@ -268,7 +268,7 @@ impl Leaf<'_> {
     pub(crate) fn markdown_table_grid(&mut self, source: Value, width: Value, faces: Value) -> R<Value> {
         let view = self.string_view(source).map_err(|_| Fault::Wrong("stringp", source))?;
         let text: String = view.chars().filter_map(char::from_u32).collect();
-        let width = width.integer_value().ok_or(Fault::Wrong("fixnump", width))?;
+        let width = width.integer_value().ok_or_else(|| Fault::Wrong("fixnump", width))?;
         let rule = self.vm.width_rule().map_err(Fault::Error)?;
         let columns = |c: char| rule.width(u32::from(c));
         let Some(grid) = markdown::grid(&text, usize::try_from(width).unwrap_or(0), &columns) else {

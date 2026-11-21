@@ -44,7 +44,7 @@ fn returned(_: &mut Leaf<'_>, value: Value, _: &[Value]) -> Next { Ok(Step::Done
 // `romacs--decompress-change'.
 defsubr! { name = "romacs--decompress-prepare", gnu = "decompress.c:263", effect = Global,
 fn decompress_prepare(cx, from: Value, to: Value) -> Step {
-    let position = |v: Value| v.integer_value().ok_or(Fault::Wrong("fixnump", v));
+    let position = |v: Value| v.integer_value().ok_or_else(|| Fault::Wrong("fixnump", v));
     let (start, end) = (position(from)?, position(to)?);
     let prepared = cx.prepare_change(start, end)?;
     let saved = vec![from, to, if prepared.inhibited { Value::TRUE } else { Value::NIL }];
@@ -70,7 +70,7 @@ fn modified(cx: &mut Leaf<'_>, before: Value, saved: &[Value]) -> Next {
 // `romacs--decompress-prepare''s value.
 defsubr! { name = "romacs--decompress-change", gnu = "decompress.c:263", effect = Global,
 fn decompress_change(cx, from: Value, to: Value, text: Value, prepared: Value) -> Step {
-    let position = |v: Value| v.integer_value().ok_or(Fault::Wrong("fixnump", v));
+    let position = |v: Value| v.integer_value().ok_or_else(|| Fault::Wrong("fixnump", v));
     let (from, to) = (position(from)?, position(to)?);
     let overlays = cx.pair(prepared).map_or(Value::NIL, |(_, overlays)| overlays);
     cx.goto_char_position(to)?;
