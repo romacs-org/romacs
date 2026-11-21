@@ -568,18 +568,16 @@ pub(super) fn recalc(cx: &mut Leaf<'_>, face: Value, frame: Value) -> Out {
 }
 
 /// `defface' without faces.el (`#:vm2-defface'): the spec recorded and
-/// applied by the same replay, then kept as the default for new frames.
+/// applied by the same replay.  As GNU's `defface', it sets no default for
+/// new frames: those are `set-face-attribute''s, and every recomputation of
+/// all faces (`face-set-after-frame-default', which `disable-theme' runs)
+/// puts them over the themes' and the user's specs.
 pub(crate) fn declare(cx: &mut Leaf<'_>, face: Value, spec: Value) -> std::result::Result<(), Fault> {
     let keys = cx.face_keys();
     let frame = cx.face_frame(Value::NIL, true)?;
     cx.face_put(face, keys.defface_spec, spec)?;
     if cx.face_lookup(face, Value::NIL)? == Value::NIL { make_lisp_face(cx, face, Value::NIL)?; }
     recalc(cx, face, frame)?;
-    let (local, global) = (cx.face_lookup(face, frame)?, cx.face_lookup(face, Value::NIL)?);
-    for index in 1..LFACE_VECTOR_SIZE {
-        let value = cx.vector_get(local, slot_value(index))?;
-        cx.vector_set(global, slot_value(index), value)?;
-    }
     Ok(())
 }
 

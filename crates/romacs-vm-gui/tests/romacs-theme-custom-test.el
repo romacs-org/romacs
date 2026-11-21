@@ -184,8 +184,8 @@
       (romacs-should (>= (romacs-color-contrast (funcall fg 'romacs-complete-match) bg) 4.5)))
     (dolist (face '(romacs-mode-line-error romacs-mode-line-warning romacs-mode-line-ok romacs-mode-line-state))
       (romacs-should (>= (romacs-color-contrast (funcall fg face) (funcall slot 'bg-mode-line)) 4.5)))
-    ;; Headings are recorded with Rum's heights.
-    (romacs-should (equal (plist-get (cdr (car (car (cdr (assq 'org-level-1 faces))))) :height) 1.35))
+    ;; Headings are recorded without a size: the typography gives it.
+    (romacs-should (null (plist-get (cdr (car (car (cdr (assq 'org-level-1 faces))))) :height)))
     (romacs-should (assq 'default (get 'org-level-1 'theme-face)))))
 
 (romacs-deftest romacs-theme-reports-the-active-palette ()
@@ -528,6 +528,65 @@ bright_cyan = \"#179299\"\nbright_blue = \"#1e66f5\"\nbright_magenta = \"#ea76cb
             (romacs-should (not (equal (cdr (assq 'bg-region resolved)) "#3e4451")))
             (dolist (on (list (cdr (assq 'glass resolved)) (cdr (assq 'selection resolved))))
               (romacs-should (>= (romacs-color-contrast match on) 4.5)))))
+      (delete-file file))))
+
+;; Typography is the user's: no theme changes text size or family.
+
+(defconst romacs-theme-test--toml
+  "mode = \"dark\"\naccent = \"#7aa2f7\"\nbackground = \"#101418\"\nforeground = \"#d8dee9\"
+red = \"#e06c75\"\ngreen = \"#98c379\"\nyellow = \"#e5c07b\"\nblue = \"#61afef\"\nmagenta = \"#c678dd\"
+cyan = \"#56b6c2\"\n"
+  "A colors.toml, for `system' and a theme `omarchy-mode' makes.")
+
+(defun romacs-theme-test--font ()
+  "The default face's font as the frame shows it, and the frame's cell."
+  (list (face-attribute 'default :family) (face-attribute 'default :height)
+        (and (fboundp 'face-font) (face-font 'default)) (frame-char-width) (frame-char-height)))
+
+(defun romacs-theme-test--typography ()
+  "Every face's family and height, the inherited ones resolved, as the
+frame shows them."
+  (mapcar (lambda (face) (list face (face-attribute face :family nil 'default) (face-attribute face :height nil 'default)))
+          (sort (face-list) (lambda (a b) (string< (symbol-name a) (symbol-name b))))))
+
+(romacs-deftest romacs-theme-no-theme-changes-the-font ()
+  ;; The user's font, set through Custom unlike the launch font, holds
+  ;; with no theme and under every theme Romacs ships, `system' and one
+  ;; `omarchy-mode' makes, each loaded by hand over the one before, as a
+  ;; switch is (which disables the one before and recomputes every face):
+  ;; the default face's font and the frame's cell are the user's, and
+  ;; every face's family and size are the same under every theme.
+  (require 'romacs-omarchy)
+  (let ((themes custom-enabled-themes)
+        (file (make-temp-file "romacs-theme-test-" nil ".toml" romacs-theme-test--toml))
+        (romacs-theme-system-file nil)
+        (font nil) (typography nil) (differing nil))
+    (unwind-protect
+        (progn
+          (setq romacs-theme-system-file file)
+          (custom-set-faces '(default ((t (:family "Iosevka" :height 190)))))
+          (dolist (theme (copy-sequence custom-enabled-themes)) (disable-theme theme))
+          (setq font (romacs-theme-test--font))
+          (romacs-should (equal (seq-take font 2) '("Iosevka" 190)))
+          (omarchy--define 'omarchy-romacs-test "romacs-test" (romacs-theme-read-palette file))
+          (dolist (theme (append (mapcar #'car romacs-theme-bundled) '(system omarchy-romacs-test default)))
+            ;; A theme file is read again, as `load-theme' reads it: `system' reads FILE.
+            (if (eq theme 'omarchy-romacs-test) (enable-theme theme) (load-theme theme t))
+            (unless (equal (romacs-theme-test--font) font)
+              (push (cons theme (romacs-theme-test--font)) differing))
+            (let ((shown (romacs-theme-test--typography)))
+              (if (null typography)
+                  (setq typography shown)
+                (let ((other (seq-difference shown typography)))
+                  (when other (push (list theme (length other) (seq-take other 3)) differing))))))
+          (romacs-should (equal (nreverse differing) nil)))
+      (put 'default 'theme-face (assq-delete-all 'user (get 'default 'theme-face)))
+      (put 'user 'theme-settings (seq-remove (lambda (setting) (and (eq (car setting) 'theme-face) (eq (nth 1 setting) 'default)))
+                                             (get 'user 'theme-settings)))
+      (put 'default 'saved-face nil)
+      (custom-theme-recalc-face 'default)
+      (dolist (theme (copy-sequence custom-enabled-themes)) (disable-theme theme))
+      (mapc #'enable-theme (reverse themes))
       (delete-file file))))
 
 ;; romacs-theme-modus.el adapts etc/modus/modus-themes.el as it loads.  A

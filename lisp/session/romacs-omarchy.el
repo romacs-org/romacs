@@ -113,7 +113,8 @@ palette read while Omarchy switched again is left to that switch."
              (theme (omarchy-romacs-theme name))
              (shipped (assq theme romacs-theme-bundled))
              (palette (unless shipped (omarchy--palette))))
-        (when palette (romacs-theme-resolve palette))
+        ;; The theme's every face, as `omarchy--define' makes them.
+        (when palette (require 'romacs-theme-roles) (romacs-theme-roles-rows palette nil nil))
         (when (equal current (omarchy-current))
           (when (and shipped (not (custom-theme-p theme))) (load-theme theme t t))
           (omarchy--disable-schemes)

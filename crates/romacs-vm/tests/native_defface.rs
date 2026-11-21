@@ -35,13 +35,17 @@ fn a_function_height_after_a_number_runs_on_every_recalculation() {
 }
 
 #[test]
-fn native_defface_registers_separate_global_and_frame_attributes() {
+fn native_defface_sets_the_frame_and_no_new_frame_default() {
+    // As GNU's `defface': the spec reaches the frame, and the face's
+    // defaults for new frames stay unspecified (`set-face-attribute''s to
+    // set), so a full recomputation cannot put the spec over a theme's or
+    // the user's.  The two vectors stay apart.
     let mut vm = Vm::new();
     vm.set_collection_floor(1);
     answer(&mut vm, "(defface native-query-face '((t (:foreground \"red\" :weight bold :inherit (parent-a parent-b)))) \"Queryable face\")");
-    assert_eq!(answer(&mut vm, "(list (internal-get-lisp-face-attribute 'native-query-face :foreground) (internal-get-lisp-face-attribute 'native-query-face :weight t) (internal-get-lisp-face-attribute 'native-query-face :inherit t) (eq (internal-lisp-face-p 'native-query-face) (internal-lisp-face-p 'native-query-face (selected-frame))))"), "(\"red\" bold (parent-a parent-b) nil)");
+    assert_eq!(answer(&mut vm, "(list (internal-get-lisp-face-attribute 'native-query-face :foreground) (internal-get-lisp-face-attribute 'native-query-face :inherit) (internal-get-lisp-face-attribute 'native-query-face :weight t) (internal-get-lisp-face-attribute 'native-query-face :inherit t) (eq (internal-lisp-face-p 'native-query-face) (internal-lisp-face-p 'native-query-face (selected-frame))))"), "(\"red\" (parent-a parent-b) unspecified unspecified nil)");
     answer(&mut vm, "(aset (internal-lisp-face-p 'native-query-face (selected-frame)) 5 'light) (garbage-collect)");
-    assert_eq!(answer(&mut vm, "(list (internal-get-lisp-face-attribute 'native-query-face :weight) (internal-get-lisp-face-attribute 'native-query-face :weight t))"), "(light bold)");
+    assert_eq!(answer(&mut vm, "(list (internal-get-lisp-face-attribute 'native-query-face :weight) (internal-get-lisp-face-attribute 'native-query-face :weight t))"), "(light unspecified)");
 }
 
 #[test]
