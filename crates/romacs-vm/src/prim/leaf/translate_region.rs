@@ -7,7 +7,7 @@ use crate::coordinates::{ByteOffset, CharOffset};
 /// Fconcat's and Fmake_string's check on a replacement character.
 fn character(v: Value) -> std::result::Result<u32, Fault> {
     v.integer_value().filter(|&n| (0..=crate::lstring::MAX_CHAR as i64).contains(&n))
-        .map(|n| n as u32).ok_or(Fault::Wrong("characterp", v))
+        .map(|n| n as u32).ok_or_else(|| Fault::Wrong("characterp", v))
 }
 
 /// What a table says to put in place of one character.
@@ -57,7 +57,7 @@ impl Leaf<'_> {
             match leaf.marker_position(v) {
                 Some(Some(n)) => Ok(n),
                 Some(None) => Err(Fault::Error("Marker does not point anywhere".into())),
-                None => v.integer_value().ok_or(Fault::Wrong("integer-or-marker-p", v)),
+                None => v.integer_value().ok_or_else(|| Fault::Wrong("integer-or-marker-p", v)),
             }
         };
         let (mut lo, mut hi) = (position(self, start)?, position(self, end)?);

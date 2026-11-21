@@ -19,7 +19,7 @@ fn slot_value(index: usize) -> Value { Value::integer(index as i64).unwrap() }
 /// `car' and `cdr' at once: nil of nil, GNU's error on anything but a list.
 fn uncons(cx: &Leaf<'_>, value: Value) -> std::result::Result<(Value, Value), Fault> {
     if value == Value::NIL { return Ok((Value::NIL, Value::NIL)); }
-    cx.pair(value).ok_or(Fault::Wrong("listp", value))
+    cx.pair(value).ok_or_else(|| Fault::Wrong("listp", value))
 }
 
 fn memq(cx: &Leaf<'_>, item: Value, mut list: Value) -> bool {
@@ -568,18 +568,16 @@ pub(super) fn recalc(cx: &mut Leaf<'_>, face: Value, frame: Value) -> Out {
 }
 
 /// `defface' without faces.el (`#:vm2-defface'): the spec recorded and
-/// applied by the same replay, then kept as the default for new frames.
+/// applied by the same replay.  As GNU's `defface', it sets no default for
+/// new frames: those are `set-face-attribute''s, and every recomputation of
+/// all faces (`face-set-after-frame-default', which `disable-theme' runs)
+/// puts them over the themes' and the user's specs.
 pub(crate) fn declare(cx: &mut Leaf<'_>, face: Value, spec: Value) -> std::result::Result<(), Fault> {
     let keys = cx.face_keys();
     let frame = cx.face_frame(Value::NIL, true)?;
     cx.face_put(face, keys.defface_spec, spec)?;
     if cx.face_lookup(face, Value::NIL)? == Value::NIL { make_lisp_face(cx, face, Value::NIL)?; }
     recalc(cx, face, frame)?;
-    let (local, global) = (cx.face_lookup(face, frame)?, cx.face_lookup(face, Value::NIL)?);
-    for index in 1..LFACE_VECTOR_SIZE {
-        let value = cx.vector_get(local, slot_value(index))?;
-        cx.vector_set(global, slot_value(index), value)?;
-    }
     Ok(())
 }
 
@@ -698,7 +696,7 @@ fn romacs_face_restore(cx, face: Value, frame: Value, saved: Value) {
     // as the vector SAVED holds it, each slot that differs written as a
     // replay writes it, so what a slot carries follows.
     let keys = cx.face_keys();
-    let held = cx.vector_slots(saved).ok_or(Fault::Wrong("vectorp", saved))?.to_vec();
+    let held = cx.vector_slots(saved).ok_or_else(|| Fault::Wrong("vectorp", saved))?.to_vec();
     let lface = if frame == Value::NIL { cx.face_lookup(face, Value::NIL)? }
         else { cx.owned_lface(face, frame)?.unwrap_or(Value::NIL) };
     if lface == Value::NIL { return Ok(Value::NIL); }

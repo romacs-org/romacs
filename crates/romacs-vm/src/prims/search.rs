@@ -3,7 +3,7 @@ use super::*;
 
 defsubr! { name = "match-data--translate", gnu = "search.c:3062", effect = Global,
 fn match_data_translate(cx, n: Value) {
-    let delta = n.integer_value().ok_or(Fault::Wrong("fixnump", n))?;
+    let delta = n.integer_value().ok_or_else(|| Fault::Wrong("fixnump", n))?;
     cx.translate_match_data(delta);
     Ok(Value::NIL)
 }}
@@ -56,7 +56,7 @@ fn string_search(cx, needle: Value, haystack: Value; optional start_pos: Value) 
     let needle = cx.string_view(needle)?;
     let (len, multibyte) = cx.string_shape(haystack)?;
     let start = if start_pos == Value::NIL { 0 } else {
-        start_pos.integer_value().ok_or(Fault::Wrong("fixnump", start_pos))?
+        start_pos.integer_value().ok_or_else(|| Fault::Wrong("fixnump", start_pos))?
     };
     if start < 0 || start as usize > len {
         return Err(Fault::Range1(start_pos));

@@ -31,7 +31,9 @@
 (require 'romacs-mcp)
 (require 'romacs-dev-guide)
 
-(declare-function romacs-live-mcp-update "romacs-live" (arguments))
+;; Registering the tool must not load romacs-live, and a batch session has
+;; no bundled autoloads to make its handler a function.
+(autoload 'romacs-live-mcp-update "romacs-live")
 
 (defconst romacs-mcp-dev--step 0.008
   "How many seconds of a guide search one poll of its request takes: what
@@ -102,7 +104,9 @@ entries systemd accepts."
 UNIT in the romacs-build slice, with ENVIRONMENT, its output in REPORT."
   (append (list "--user" "--quiet" "--collect" "--slice=romacs-build" "--expand-environment=no"
                 (concat "--unit=" unit) (concat "--working-directory=" directory)
-                (concat "--property=StandardOutput=truncate:" report) "--property=StandardError=inherit")
+                (concat "--property=StandardOutput=truncate:" report) "--property=StandardError=inherit"
+                ;; The user manager's launch markers reach no checked binary.
+                (concat "--property=UnsetEnvironment=" (string-join (romacs--launch-markers) " ")))
           (mapcar (lambda (entry) (concat "--setenv=" entry)) environment)
           (cons "--" command)))
 

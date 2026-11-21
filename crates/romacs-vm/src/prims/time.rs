@@ -716,14 +716,14 @@ fn stamp_float(s: Stamp) -> f64 {
 
 defsubr! { name = "float-time", gnu = "timefns.c:1307", effect = Global,
 fn float_time(cx; optional time: Value) {
-    if cx.float_value(time).is_ok() {return Ok(time);}
+    if cx.is_float(time) {return Ok(time);}
     let s=stamp(cx,time,false)?;
     Ok(cx.float(stamp_float(s)))
 }}
 
 /// check_tm_member: a fixnum, less OFFSET, as a C int.
 fn tm_member(value: Value, offset: i64) -> std::result::Result<i64, Fault> {
-    let n = value.integer_value().ok_or(Fault::Wrong("fixnump", value))?;
+    let n = value.integer_value().ok_or_else(|| Fault::Wrong("fixnump", value))?;
     let member = n.checked_sub(offset).ok_or_else(time_overflow)?;
     i32::try_from(member).map(i64::from).map_err(|_| time_overflow())
 }
@@ -781,14 +781,14 @@ fn encode_time(cx, time: Value; rest args) {
         let mut fields = [Value::NIL; 6];
         let mut tail = time;
         for field in &mut fields {
-            let (car, cdr) = cx.pair(tail).ok_or(Fault::Wrong("consp", tail))?;
+            let (car, cdr) = cx.pair(tail).ok_or_else(|| Fault::Wrong("consp", tail))?;
             *field = car;
             tail = cdr;
         }
         if tail != Value::NIL {
-            let (_, rest) = cx.pair(tail).ok_or(Fault::Wrong("consp", tail))?;
-            let (dst, rest2) = cx.pair(rest).ok_or(Fault::Wrong("consp", rest))?;
-            let (z, _) = cx.pair(rest2).ok_or(Fault::Wrong("consp", rest2))?;
+            let (_, rest) = cx.pair(tail).ok_or_else(|| Fault::Wrong("consp", tail))?;
+            let (dst, rest2) = cx.pair(rest).ok_or_else(|| Fault::Wrong("consp", rest))?;
+            let (z, _) = cx.pair(rest2).ok_or_else(|| Fault::Wrong("consp", rest2))?;
             zone = z;
             if cx.kind(dst) == Kind::Symbol && z.integer_value().is_none() && cx.pair(z).is_none() {
                 isdst = i64::from(dst != Value::NIL);

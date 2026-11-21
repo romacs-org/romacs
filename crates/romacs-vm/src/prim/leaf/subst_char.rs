@@ -12,13 +12,13 @@ impl Leaf<'_> {
             match leaf.marker_position(v) {
                 Some(Some(n)) => Ok(n),
                 Some(None) => Err(Fault::Error("Marker does not point anywhere".into())),
-                None => v.integer_value().ok_or(Fault::Wrong("integer-or-marker-p", v)),
+                None => v.integer_value().ok_or_else(|| Fault::Wrong("integer-or-marker-p", v)),
             }
         };
         let (mut lo, mut hi) = (position(self, start)?, position(self, end)?);
         if lo > hi { std::mem::swap(&mut lo, &mut hi); }
         let character = |v: Value| v.integer_value().filter(|&c| (0..=crate::lstring::MAX_CHAR as i64).contains(&c))
-            .map(|c| c as u32).ok_or(Fault::Wrong("characterp", v));
+            .map(|c| c as u32).ok_or_else(|| Fault::Wrong("characterp", v));
         let (from_c, to_c) = (character(from)?, character(to)?);
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
         let multibyte = matches!(self.vm.objects[index], data::Object::Buffer(_));

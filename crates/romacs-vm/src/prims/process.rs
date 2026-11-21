@@ -204,7 +204,7 @@ defsubr! { name = "set-process-window-size", gnu = "process.c:1543", effect = Gl
 fn set_process_window_size(cx, process: Value, height: Value, width: Value) {
     check_process(cx, process)?;
     let dim = |v: Value| v.integer_value().filter(|n| (0..=i64::from(u16::MAX)).contains(n)).map(|n| n as u16)
-        .ok_or(Fault::Wrong("natnump", v));
+        .ok_or_else(|| Fault::Wrong("natnump", v));
     let (h, w) = (dim(height)?, dim(width)?);
     cx.process_window_size(process, h, w)
 }}
@@ -440,7 +440,7 @@ fn proc_deactivate(cx, process: Value) {
 
 defsubr! { name = "romacs--proc-select", gnu = "process.c:5358", effect = Global,
 fn proc_select(cx, wait_proc: Value, just_this_one: Value, seconds: Value; optional read_kbd: Value) {
-    let seconds = if seconds == Value::NIL { None } else { Some(cx.float_value(seconds).or_else(|_| seconds.integer_value().map(|n| n as f64).ok_or(Fault::Wrong("numberp", seconds)))?) };
+    let seconds = if seconds == Value::NIL { None } else { Some(cx.float_value(seconds).or_else(|_| seconds.integer_value().map(|n| n as f64).ok_or_else(|| Fault::Wrong("numberp", seconds)))?) };
     cx.process_select(wait_proc, just_this_one != Value::NIL, seconds, read_kbd != Value::NIL)
 }}
 

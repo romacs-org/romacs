@@ -20,8 +20,8 @@ impl Leaf<'_> {
 
     pub(crate) fn isolate_post(&mut self, id: u64, kind: Value, generation: Value, value: Value) -> std::result::Result<(), Fault> {
         let name = self.symbol_name(kind)?;
-        let kind = crate::isolate::Kind::parse(&name).ok_or(Fault::Wrong("isolate-frame-kind", kind))?;
-        let generation = generation.integer_value().and_then(|n| u64::try_from(n).ok()).ok_or(Fault::Wrong("natnump", generation))?;
+        let kind = crate::isolate::Kind::parse(&name).ok_or_else(|| Fault::Wrong("isolate-frame-kind", kind))?;
+        let generation = generation.integer_value().and_then(|n| u64::try_from(n).ok()).ok_or_else(|| Fault::Wrong("natnump", generation))?;
         self.vm.isolate_post(id, kind, generation, value).map_err(|e| self.freeze_error(e))
     }
 

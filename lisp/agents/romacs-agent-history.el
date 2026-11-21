@@ -22,6 +22,8 @@
 
 (require 'cl-lib)
 (require 'romacs-agent)
+(declare-function romacs-agent--claude-incoming "romacs-agent-claude" (text))
+(declare-function romacs-agent-incoming-of "romacs-agent-tools" (text))
 (require 'romacs-agent-ui)
 
 (defcustom romacs-agent-history-limit 50
@@ -159,7 +161,17 @@ project it was run, or nil."
             ("user"
              (let* ((content (gethash "content" (gethash "message" line)))
                     (prompt (romacs-agent-history--prompt content)))
-               (cond (prompt
+               (cond ((and (not (and (vectorp content)
+                                     (cl-some (lambda (b) (and (hash-table-p b) (equal (gethash "type" b) "tool_result"))) content)))
+                           (romacs-agent--claude-incoming (romacs-agent--text-of content)))
+                      ;; From elsewhere (a task's result, a message, a
+                      ;; notification): said as such, never as the user,
+                      ;; and a round of its own.
+                      (close)
+                      (setq turn (gethash "timestamp" line))
+                      (dolist (incoming (romacs-agent--claude-incoming (romacs-agent--text-of content)))
+                        (push (append (list :type 'arrival) incoming) events)))
+                     (prompt
                       (close)
                       (setq turn (gethash "timestamp" line))
                       (push (list :type 'meta :permission-mode (gethash "permissionMode" line)) events)
@@ -283,11 +295,17 @@ project it was run, or nil."
                                :context-window (romacs-agent--value (gethash "model_context_window" info)))
                          events))))
               (`("event_msg" ,_)
-               (when-let* ((prompt (romacs-agent-history--codex-prompt payload))
-                           ((romacs-agent-history--title prompt)))
-                 (close)
-                 (setq turn (gethash "timestamp" line))
-                 (push (list :type 'input :text prompt) events)))
+               (when-let* ((prompt (romacs-agent-history--codex-prompt payload)))
+                 (cond ((romacs-agent-incoming-of prompt)
+                        ;; From elsewhere: a round of its own, never the user's.
+                        (close)
+                        (setq turn (gethash "timestamp" line))
+                        (dolist (incoming (romacs-agent-incoming-of prompt))
+                          (push (append (list :type 'arrival) incoming) events)))
+                       ((romacs-agent-history--title prompt)
+                        (close)
+                        (setq turn (gethash "timestamp" line))
+                        (push (list :type 'input :text prompt) events)))))
               (`("response_item" "message")
                (when (equal (gethash "role" payload) "assistant")
                  (let ((id (format "history:%d" (cl-incf messages)))
@@ -628,7 +646,7 @@ the file is gone."
                              (romacs-agent-history--read path beg end (romacs-agent-history--get harness :keep)))))
         ;; Cut: from the first prompt on.
         (when (> beg 0)
-          (while (and events (not (eq (plist-get (car events) :type) 'input))) (pop events)))
+          (while (and events (not (memq (plist-get (car events) :type) '(input arrival)))) (pop events)))
         ;; A result whose call the cut left out shows nothing.
         (let ((started (make-hash-table :test #'equal)))
           (setq events (seq-filter (lambda (event)
@@ -674,6 +692,8 @@ commands applies: \\[romacs-agent-history-resume-this] goes on with it.
   :interactive nil
   (setq-local truncate-lines nil word-wrap t)
   (setq-local header-line-format "")
+  ;; As a chat's: its bars never in what one copies.
+  (add-function :filter-return (local 'filter-buffer-substring-function) #'romacs-agent-log--undecorated)
   (setq romacs-agent-log--text-map romacs-agent-history-text-map))
 
 ;;;###autoload

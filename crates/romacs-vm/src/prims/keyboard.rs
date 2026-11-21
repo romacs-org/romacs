@@ -549,6 +549,6 @@ fn call_deadline(cx, generation: Value; optional milliseconds: Value) { cx.call_
 
 defsubr! { name = "char-resolve-modifiers", gnu = "character.c:883", effect = Pure,
 fn char_resolve_modifiers(_cx, character: Value) {
-    let c = character.integer_value().ok_or(Fault::Wrong("fixnump", character))?;
+    let c = character.integer_value().ok_or_else(|| Fault::Wrong("fixnump", character))?;
     Ok(Value::integer(resolve_modifier_mask(c)).unwrap())
 }}

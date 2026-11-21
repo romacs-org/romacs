@@ -26,7 +26,7 @@ fn number(cx: &Leaf<'_>, v: Value) -> Result<Num, Fault> {
         return Ok(Num::Int(n));
     }
     if cx.kind(v) == crate::prim::leaf::Kind::Bignum {
-        return cx.bigint_value(v).map(Num::Big).ok_or(Fault::Wrong("numberp", v));
+        return cx.bigint_value(v).map(Num::Big).ok_or_else(|| Fault::Wrong("numberp", v));
     }
     cx.float_value(v).map(Num::Float).map_err(|_| Fault::Wrong("numberp", v))
 }

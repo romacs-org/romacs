@@ -245,7 +245,7 @@ pub(super) struct MarkView<'a> {
     variable_redirects: &'a [Option<VariableRedirect>],
     functions: &'a [Arc<Function>],
     generated_symbols: &'a HashMap<GeneratedName, usize>,
-    cell_pairs: &'a HashMap<usize, Value>,
+    cell_pairs: &'a crate::cell_pairs::CellPairs,
     execution: &'a threaded::Program,
     spare_programs: &'a [threaded::Program],
     /// The running engine's register stack, then the suspended ones'.
@@ -874,7 +874,7 @@ impl Marking {
                     }
                     // SAFETY: as for an object. A cell of a lexical pair reads
                     // the pair, and takes its value after the mark.
-                    w.stack.push(view.cell_pairs.get(&i).copied().unwrap_or(*unsafe { self.cells.get(i) }));
+                    w.stack.push(view.cell_pairs.get(i).unwrap_or(*unsafe { self.cells.get(i) }));
                 }
                 _ => {}
             }

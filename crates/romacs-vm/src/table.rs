@@ -250,13 +250,14 @@ impl Barrier {
     }
 }
 
-/// NEW, which names an entry, was stored in an old one. Only a reference
-/// into the private heap can name a young entry: frozen and image values are
-/// never collected by parts.
+/// NEW, which names an entry, was stored in an old one. A reference into the
+/// private heap may name a young entry, and a frozen value a young region,
+/// which a minor frees unreached (`Vm::sweep_young_regions`); the executable
+/// image's values are never collected.
 #[cold]
 #[inline(never)]
 fn on_store(barrier: &mut Barrier, new: Value) {
-    if barrier.lost || crate::Vm::image_value(new) { return; }
+    if barrier.lost || (crate::Vm::image_value(new) && crate::frozen::executable_image(new.payload())) { return; }
     barrier.values.push(new);
     if barrier.values.len() >= LOG_GIVES_UP {
         *barrier = Barrier { lost: true, ..Barrier::default() };

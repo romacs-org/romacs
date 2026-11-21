@@ -343,7 +343,7 @@ impl Vm {
     pub(crate) fn string_matcher_groups(&mut self, matcher: &mut StringMatcher, i: usize, string: Value)
         -> std::result::Result<Option<Vec<Option<(usize, usize)>>>, prim::Fault> {
         let Some(registers) = self.string_matcher_search(matcher, i, string)? else { return Ok(None) };
-        let view = self.str_view(string).ok_or(prim::Fault::Wrong("stringp", string))?;
+        let view = self.str_view(string).ok_or_else(|| prim::Fault::Wrong("stringp", string))?;
         let input = Input::new(view.bytes(), view.chars, view.is_multibyte());
         let groups = register_spans(&registers, |byte| Ok(input.character(byte)));
         Ok(Some(groups.map_err(|fault| self.regexp_fault(fault))?))
@@ -360,7 +360,7 @@ impl Vm {
         let pattern = matcher.patterns[i].clone().unwrap();
         let mut pattern = pattern.borrow_mut();
         let found = {
-            let view = self.str_view(string).ok_or(prim::Fault::Wrong("stringp", string))?;
+            let view = self.str_view(string).ok_or_else(|| prim::Fault::Wrong("stringp", string))?;
             let (bytes, multibyte) = (view.bytes(), view.is_multibyte());
             let syntax = syntax::VmSyntax::new(self, matcher.syntax.clone());
             pattern.set_target_multibyte(multibyte);
@@ -663,12 +663,12 @@ impl Vm {
     fn regexp_input(&self, v: Value) -> SearchResult<Input<'static>> {
         #[cfg(test)]
         note(&COPIED, 1);
-        let view = self.str_view(v).ok_or(Fault::Wrong("stringp", v))?;
+        let view = self.str_view(v).ok_or_else(|| Fault::Wrong("stringp", v))?;
         Ok(Input::new(view.bytes().to_vec(), view.chars, view.is_multibyte()))
     }
     /// The string V's text where it lies, for a search that borrows the VM.
     fn regexp_subject(&self, v: Value) -> SearchResult<Input<'_>> {
-        let view = self.str_view(v).ok_or(Fault::Wrong("stringp", v))?;
+        let view = self.str_view(v).ok_or_else(|| Fault::Wrong("stringp", v))?;
         Ok(Input::new(view.bytes(), view.chars, view.is_multibyte()))
     }
     /// The current buffer, as a search needs it before it reads any text:
@@ -914,7 +914,7 @@ impl Vm {
         -> SearchResult<std::rc::Rc<std::cell::RefCell<regex::CompiledPattern>>> {
         let mut quoted = std::mem::take(&mut self.regexp_cache.quoted);
         quoted.clear();
-        let view = self.str_view(string).ok_or(Fault::Wrong("stringp", string))?;
+        let view = self.str_view(string).ok_or_else(|| Fault::Wrong("stringp", string))?;
         for &byte in view.bytes() {
             if b"[*.\\?+^$".contains(&byte) {
                 quoted.push(b'\\');
@@ -1175,7 +1175,7 @@ impl Vm {
             return Err(Fault::Wrong("stringp", pattern));
         }
         let (chars, multibyte) = {
-            let view = self.str_view(string).ok_or(Fault::Wrong("stringp", string))?;
+            let view = self.str_view(string).ok_or_else(|| Fault::Wrong("stringp", string))?;
             (view.chars, view.is_multibyte())
         };
         let from = if start == Value::NIL { 0 } else { self.regexp_int(start)? };

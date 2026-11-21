@@ -10,7 +10,7 @@ type Out = std::result::Result<Value, Fault>;
 fn failed(message: String) -> Fault { Fault::Error(message) }
 
 fn natural(value: Value) -> std::result::Result<u64, Fault> {
-    value.integer_value().and_then(|n| u64::try_from(n).ok()).ok_or(Fault::Wrong("natnump", value))
+    value.integer_value().and_then(|n| u64::try_from(n).ok()).ok_or_else(|| Fault::Wrong("natnump", value))
 }
 
 /// A natural number that fits T: a slot, a signal, a size.
@@ -19,7 +19,7 @@ fn small<T: TryFrom<u64>>(value: Value) -> std::result::Result<T, Fault> {
 }
 
 fn handle(value: Value) -> std::result::Result<Handle, Fault> {
-    Handle::from_raw(natural(value)?).ok_or(Fault::Wrong("romacs-keeper-handle-p", value))
+    Handle::from_raw(natural(value)?).ok_or_else(|| Fault::Wrong("romacs-keeper-handle-p", value))
 }
 
 fn integer(value: impl TryInto<i64>) -> Value {
@@ -86,7 +86,7 @@ impl Leaf<'_> {
         let [argv, env, directory, umask, sigmask, setsid, fds] = given else { return Err(failed("romacs--keeper-call spawn: wrong arguments".into())) };
         let mut slots = Vec::new();
         for slot in self.vm.list_values(*fds).map_err(Fault::Error)? {
-            let (number, end) = self.pair(slot).ok_or(Fault::Wrong("consp", slot))?;
+            let (number, end) = self.pair(slot).ok_or_else(|| Fault::Wrong("consp", slot))?;
             let end = match self.symbol_name(end)?.as_str() {
                 "null" => End::Null, "reads" => End::Reads, "writes" => End::Writes, "socket" => End::Socket, "pty" => End::Pty,
                 _ => return Err(Fault::Wrong("romacs-keeper-end-p", end)),
@@ -238,6 +238,6 @@ impl Leaf<'_> {
     pub(crate) fn keeper_call(&mut self, op: Value, args: &[Value]) -> Out {
         let name = self.symbol_name(op)?;
         self.keeper_session_op(&name, args).or_else(|| self.keeper_handle_op(&name, args))
-            .unwrap_or(Err(Fault::Wrong("romacs-keeper-operation-p", op)))
+            .unwrap_or_else(|| Err(Fault::Wrong("romacs-keeper-operation-p", op)))
     }
 }

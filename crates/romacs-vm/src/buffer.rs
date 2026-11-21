@@ -2472,7 +2472,7 @@ impl Vm {
         // CHECK_STRING_OR_BUFFER comes before the positions.
         let text = self.object_if(object);
         let string = if matches!(text, Some(Object::Buffer(_) | Object::ByteBuffer(_))) { None } else {
-            Some(self.str_view(object).ok_or(Fault::Wrong("buffer-or-string-p", object))?)
+            Some(self.str_view(object).ok_or_else(|| Fault::Wrong("buffer-or-string-p", object))?)
         };
         let (a, z) = (
             self.text_property_position(start)?,

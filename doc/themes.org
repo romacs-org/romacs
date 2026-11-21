@@ -56,6 +56,11 @@ These work in Oklab, so a blend keeps its perceived lightness.
 
 The optional list after the palette overrides faces.  Attributes merge over
 what the palette gives the face, and a colour attribute may name a slot.
+A theme sets colours and styles, never the font: =:family=, =:foundry=,
+=:height=, =:width=, =:font= and =:fontset=, and inheriting =fixed-pitch= or
+=variable-pitch=, are dropped (=romacs-theme-typography-attributes=).  Text
+size and family are the user's, and every theme sizes headings alike, by
+=romacs-theme-headings=.
 
 #+begin_src emacs-lisp
 (def-romacs-theme harbour-keel "A warmer keyword, a boxed string."

@@ -190,7 +190,8 @@ class GeneratedTest(unittest.TestCase):
 
 
 def now(allows=2, todos=1, long_files=1, lint=3, root=('crates', 'tools'), outside=(), legacy=5,
-        strays=2, generated=('fixture.txt',), sites=4, undocumented=1, declared=0, crate='a', replacements=0):
+        strays=2, generated=('fixture.txt',), sites=4, undocumented=1, declared=0, crate='a', replacements=0,
+        functions=()):
     """A measure of a tree, its smells in CRATE."""
     return {'crates': {crate: Counter(allows=allows, todos=todos, long_files=long_files)},
             'unsafe': {crate: Counter(sites=sites, undocumented=undocumented, declared=declared)},
@@ -198,7 +199,9 @@ def now(allows=2, todos=1, long_files=1, lint=3, root=('crates', 'tools'), outsi
             'layout': {'root': list(root), 'members_outside_crates': list(outside), 'legacy_primitives': legacy,
                        'primitives_outside_prims': strays, 'generated': list(generated),
                        'vm_replacements': replacements},
-            'strays': {}, 'long': [], 'lints_by_crate': {}}
+            'strays': {}, 'long': [], 'lints_by_crate': {}, 'unread': [],
+            'functions': {name: ('lisp/vm/a.el', smells.lisp_functions.Function(name, 'defun', 1, code, code, 0, False))
+                          for name, code in functions}}
 
 
 def rises(base, tree):
@@ -216,7 +219,7 @@ class RatchetTest(unittest.TestCase):
             'totals': {'allows': 3, 'todos': 1, 'long_files': 1, 'unsafe_sites': 4, 'unsafe_undocumented': 1,
                        'legacy_primitives': 5, 'primitives_outside_prims': 2, 'vm_replacements': 0,
                        'lint clippy::doc_markdown': 3},
-            'generated': ['fixture.txt']})
+            'generated': ['fixture.txt'], 'long_functions': {}, 'lisp_keys': []})
 
     def test_at_the_merge_base(self):
         self.assertEqual(rises(now(), now()), [])
@@ -252,6 +255,15 @@ class RatchetTest(unittest.TestCase):
 
     def test_moving_a_smell_between_crates_is_no_rise(self):
         self.assertEqual(rises(now(), now(crate='b')), [])
+
+    def test_a_lisp_function_over_the_limit_is_held_to_its_merge_base(self):
+        base = now(functions=(('a', 41), ('b', 10)))
+        self.assertEqual(rises(base, now(functions=(('a', 41), ('b', 41)))), [
+            'long_functions: 2 over 40 code lines, above the 1 of the merge-base; new: b (lisp/vm/a.el:1); '
+            f'fix: split each into functions of one job, or {smells.lisp_functions.DECLARE}'])
+        (grown,) = rises(base, now(functions=(('a', 42),)))
+        self.assertTrue(grown.startswith('long_functions: lisp/vm/a.el:1: a grew to 42 code lines from 41;'), grown)
+        self.assertEqual(rises(base, now(functions=(('a', 40), ('c', 41)))), [], 'one under, one over: no rise')
 
     def test_a_new_generated_file_fails_and_a_gone_one_passes(self):
         self.assertEqual(rises(now(), now(generated=('fixture.txt', 'tools/new_index.json'))),

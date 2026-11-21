@@ -1,6 +1,9 @@
 //! A deliberately small Rust register compiler and strand-private VM.
 //! There is no dependency on the old evaluator, reader, or byte compiler.
 #![deny(private_interfaces, private_bounds)]
+// A Fault has drop glue (`Error(String)`), so an eager `ok_or(Fault::..)` builds one and calls its destructor on
+// every success. The lazy form builds it on failure only; tests/fault_lazy_lint.rs refuses the eager one.
+#![expect(clippy::unnecessary_lazy_evaluations, reason = "Fault has drop glue: an eager Fault costs a destructor call on every success")]
 #[cfg(test)]
 mod callint_tests;
 #[cfg(test)]
@@ -29,6 +32,7 @@ mod names;
 mod command_set;
 mod command;
 mod interpreted_closure;
+mod cell_pairs;
 mod oclosure;
 mod host_input;
 mod quit;
@@ -1605,6 +1609,10 @@ pub struct Vm {
     regions: frozen::Regions,
     #[snapshot(at_rest)]
     region_free: Vec<usize>,
+    /// The regions attached since the last collection, which a minor frees
+    /// when it does not reach them (`Vm::sweep_young_regions`).
+    #[snapshot(at_rest)]
+    region_young: Vec<usize>,
     /// Three quarters of the region ids are live: collect at the next entry.
     #[snapshot(at_rest)]
     region_collect: bool,
@@ -1740,7 +1748,7 @@ pub struct Vm {
     reader_trampolines: Vec<Option<usize>>,
     closures: table::Table<Closure>,
     cells: table::Table<Value>,
-    cell_pairs: HashMap<usize, Value>,
+    cell_pairs: cell_pairs::CellPairs,
     /// fns.c `random's generator, seeded from entropy as at GNU startup.
     random: random::Random,
     /// A world build's P tracking (`world`); None outside build mode.
@@ -1941,6 +1949,7 @@ impl Vm {
             image: None,
             regions: frozen::Regions::default(),
             region_free: Vec::new(),
+            region_young: Vec::new(),
             region_collect: false,
             isolates: isolate::Isolates::default(),
             keeper: None,
@@ -1996,7 +2005,7 @@ impl Vm {
             reader_trampolines: Vec::new(),
             closures: Default::default(),
             cells: Default::default(),
-            cell_pairs: HashMap::default(),
+            cell_pairs: cell_pairs::CellPairs::default(),
             random: random::Random::from_entropy(),
             tracking: None,
             mktime_offset: 0,

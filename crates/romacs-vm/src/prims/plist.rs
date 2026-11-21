@@ -38,14 +38,14 @@ fn scan(cx: &mut Leaf<'_>, state: &[Value]) -> Next {
     let pair = cx.cons(val, Value::NIL);
     let pair = cx.cons(prop, pair);
     if prev == Value::NIL { return Ok(Step::Done(pair)); }
-    let rest = cx.pair(prev).ok_or(Fault::Wrong("listp", prev))?.1;
+    let rest = cx.pair(prev).ok_or_else(|| Fault::Wrong("listp", prev))?.1;
     cx.setcdr(rest, pair)?;
     Ok(Step::Done(plist))
 }
 
 fn tested(cx: &mut Leaf<'_>, matched: Value, saved: &[Value]) -> Next {
     let mut state = <[Value; 8]>::try_from(saved).expect("plist-put saves eight registers");
-    let rest = cx.pair(state[4]).ok_or(Fault::Wrong("listp", state[4]))?.1;
+    let rest = cx.pair(state[4]).ok_or_else(|| Fault::Wrong("listp", state[4]))?.1;
     if matched != Value::NIL {
         cx.setcar(rest, state[2])?;
         return Ok(Step::Done(state[0]));
@@ -97,8 +97,8 @@ fn get_tested(cx: &mut Leaf<'_>, matched: Value, saved: &[Value]) -> Next {
     let mut state = <[Value; 5]>::try_from(saved).expect("plist-get saves five registers");
     // GNU reads XCDR (tail) again after the call; a predicate that broke
     // that pair leaves a malformed list, refused rather than read.
-    let rest = cx.pair(state[2]).ok_or(Fault::Wrong("plistp", state[2]))?.1;
-    let (value, _) = cx.pair(rest).ok_or(Fault::Wrong("plistp", rest))?;
+    let rest = cx.pair(state[2]).ok_or_else(|| Fault::Wrong("plistp", state[2]))?.1;
+    let (value, _) = cx.pair(rest).ok_or_else(|| Fault::Wrong("plistp", rest))?;
     if matched != Value::NIL { return Ok(Step::Done(value)); }
     let Some((tail, tortoise, steps)) = get_step(cx, rest, state[3], state[4].integer_value().expect("saved walk count")) else {
         return Ok(Step::Done(Value::NIL));

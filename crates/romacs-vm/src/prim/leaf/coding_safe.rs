@@ -86,7 +86,7 @@ impl Leaf<'_> {
         // validate_region's error names the buffer; the coding search's
         // args_out_of_range only the positions.
         let buffer = if swap { Some(self.current_buffer()?) } else { None };
-        let out_of_range = || buffer.map_or(Fault::Range(start, end), |b| Fault::Range3(b, start, end));
+        let out_of_range = || buffer.map_or_else(|| Fault::Range(start, end), |b| Fault::Range3(b, start, end));
         if s > e { return Err(out_of_range()); }
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
         let Object::Buffer(b) = &self.vm.objects[index] else {
@@ -169,7 +169,7 @@ impl Leaf<'_> {
             let size = size as i64;
             let index = |v: Value, default: i64| -> std::result::Result<i64, Fault> {
                 if v == Value::NIL { return Ok(default); }
-                let n = v.integer_value().ok_or(Fault::Wrong("integerp", v))?;
+                let n = v.integer_value().ok_or_else(|| Fault::Wrong("integerp", v))?;
                 Ok(if n < 0 { n + size } else { n })
             };
             let (f, t) = (index(start, 0)?, index(end, size)?);
@@ -180,7 +180,7 @@ impl Leaf<'_> {
             (codes, f)
         };
         let mut wanted = if count == Value::NIL { 1 } else {
-            count.integer_value().filter(|&n| n >= 0).ok_or(Fault::Wrong("wholenump", count))?
+            count.integer_value().filter(|&n| n >= 0).ok_or_else(|| Fault::Wrong("wholenump", count))?
         };
         let mut positions = Vec::new();
         for (i, &c) in codes.iter().enumerate() {

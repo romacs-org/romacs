@@ -240,7 +240,7 @@ impl Leaf<'_> {
     /// one is left alone, so a finalizer after an explicit destroy is safe.
     /// ID must be a fixnum.
     pub(crate) fn surface_destroy(&mut self, id: Value) -> Out {
-        let n = id.integer_value().ok_or(Fault::Wrong("fixnump", id))?;
+        let n = id.integer_value().ok_or_else(|| Fault::Wrong("fixnump", id))?;
         let Ok(id) = u32::try_from(n) else { return Ok(Value::NIL) };
         if let Some(display) = self.vm.display.as_mut() && display.surfaces.remove(id) {
             display.host.free_surface(id);

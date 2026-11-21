@@ -227,7 +227,7 @@ fn combine_after_change_execute(cx) -> Step {
 // del_range from point, or kill-forward-chars with KILLFLAG.
 defsubr! { name = "delete-char", gnu = "cmds.c:221", effect = Global,
 fn delete_char(cx, n: Value; optional killflag: Value) -> Step {
-    let count = n.integer_value().ok_or(Fault::Wrong("fixnump", n))?;
+    let count = n.integer_value().ok_or_else(|| Fault::Wrong("fixnump", n))?;
     let amalgamate = cx.intern("undo-auto-amalgamate");
     if count.abs() < 2 && cx.symbol_function(amalgamate)? != Value::NIL {
         return Ok(Step::Call { f: amalgamate, args: vec![], then: delete_chars, saved: vec![n, killflag] });
@@ -252,7 +252,7 @@ fn delete_chars(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
 // replaces this one when it loads.
 defsubr! { name = "delete-backward-char", gnu = "simple.el:1478", effect = Global,
 fn delete_backward_char(cx, n: Value; optional killflag: Value) -> Step {
-    let count = n.integer_value().ok_or(Fault::Wrong("fixnump", n))?;
+    let count = n.integer_value().ok_or_else(|| Fault::Wrong("fixnump", n))?;
     let n = Value::integer(-count).map_err(Fault::Error)?;
     Ok(Step::Call { f: cx.intern("delete-char"), args: vec![n, killflag], then: done, saved: vec![] })
 }}
@@ -261,7 +261,7 @@ fn delete_backward_char(cx, n: Value; optional killflag: Value) -> Step {
 // `romacs--self-insert', since internal_self_insert calls Lisp throughout.
 defsubr! { name = "self-insert-command", gnu = "cmds.c:263", effect = Global,
 fn self_insert_command(cx, n: Value; optional c: Value) -> Step {
-    let count = n.integer_value().ok_or(Fault::Wrong("fixnump", n))?;
+    let count = n.integer_value().ok_or_else(|| Fault::Wrong("fixnump", n))?;
     let event = cx.intern("last-command-event");
     let c = if c == Value::NIL { cx.variable_value(event)?.unwrap_or(Value::NIL) } else { cx.store_variable(event, c)?; c };
     if count < 0 { return Err(Fault::Error(format!("Negative repetition argument {count}"))); }
@@ -277,8 +277,8 @@ fn self_insert(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
 // runs it after the hooks before it, as signal_before_change does.
 defsubr! { name = "romacs--overlay-change-hooks", gnu = "buffer.c:4164", effect = Reads,
 fn overlay_change_hooks(cx, beg: Value, end: Value) {
-    let beg = beg.integer_value().ok_or(Fault::Wrong("fixnump", beg))?;
-    let end = end.integer_value().ok_or(Fault::Wrong("fixnump", end))?;
+    let beg = beg.integer_value().ok_or_else(|| Fault::Wrong("fixnump", beg))?;
+    let end = end.integer_value().ok_or_else(|| Fault::Wrong("fixnump", end))?;
     let hooks = cx.overlay_change_hooks(beg, end)?;
     let pairs: Vec<Value> = hooks.iter().map(|&(prop, overlay)| cx.cons(prop, overlay)).collect();
     Ok(list(cx, &pairs))
@@ -318,8 +318,8 @@ fn validate_region_pair(cx, beg: Value, end: Value) {
 // (PRESERVE . OVERLAYS), whose overlays signal_after_change runs again.
 defsubr! { name = "romacs--prepare-change", gnu = "insdel.c:2196", effect = Global,
 fn prepare_change(cx, beg: Value, end: Value) -> Step {
-    let from = beg.integer_value().ok_or(Fault::Wrong("fixnump", beg))?;
-    let to = end.integer_value().ok_or(Fault::Wrong("fixnump", end))?;
+    let from = beg.integer_value().ok_or_else(|| Fault::Wrong("fixnump", beg))?;
+    let to = end.integer_value().ok_or_else(|| Fault::Wrong("fixnump", end))?;
     let prepared = cx.prepare_change(from, to)?;
     if !prepared.before {
         cx.change_deactivates_mark(prepared.inhibited)?;
@@ -351,8 +351,8 @@ const REPLACE_WIDTH: usize = 7;
 // replace_range (insdel.c:1463) with its hooks, inheriting no properties.
 defsubr! { name = "romacs--replace-range", gnu = "insdel.c:1463", effect = Global,
 fn replace_range(cx, from: Value, to: Value, source: Value, adjust: Value) -> Step {
-    let start = from.integer_value().ok_or(Fault::Wrong("fixnump", from))?;
-    let end = to.integer_value().ok_or(Fault::Wrong("fixnump", to))?;
+    let start = from.integer_value().ok_or_else(|| Fault::Wrong("fixnump", from))?;
+    let end = to.integer_value().ok_or_else(|| Fault::Wrong("fixnump", to))?;
     let prepared = cx.prepare_change(start, end)?;
     let insert_hooks = prepared.behind != Value::NIL || prepared.in_front != Value::NIL;
     if (prepared.before || cx.after_change_runs(false, insert_hooks)?) && half_missing(cx)? {
@@ -381,7 +381,7 @@ fn replacement_text(cx: &mut Leaf<'_>, source: Value) -> std::result::Result<Val
     if cx.string_chars(source).is_some() { return Ok(source); }
     let field = |i: i64| cx.vector_get(source, fixnum(i));
     let (buffer, beg, end) = (field(0)?, field(1)?, field(2)?);
-    let position = |v: Value| v.integer_value().ok_or(Fault::Wrong("fixnump", v));
+    let position = |v: Value| v.integer_value().ok_or_else(|| Fault::Wrong("fixnump", v));
     cx.buffer_region_text(buffer, position(beg)?, position(end)?)
 }
 
@@ -418,7 +418,7 @@ fn char_codes(cx: &Leaf<'_>, text: Value) -> std::result::Result<Vec<u32>, Fault
 // memory than there is.
 defsubr! { name = "romacs--replace-runs", gnu = "editfns.c:2148", effect = Reads,
 fn replace_runs(cx, beg: Value, end: Value, source: Value, too_expensive: Value, max_secs: Value) {
-    let position = |v: Value| v.integer_value().ok_or(Fault::Wrong("fixnump", v));
+    let position = |v: Value| v.integer_value().ok_or_else(|| Fault::Wrong("fixnump", v));
     let (min_a, end_a) = (position(beg)?, position(end)?);
     let text = cx.region_text(min_a, end_a)?;
     let a = char_codes(cx, text)?;

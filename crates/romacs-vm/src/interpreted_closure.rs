@@ -86,6 +86,44 @@ mod tests {
         vm.collect(&mut []);
         check(&mut vm, "(funcall gc-closure)", "(new)");
     }
+    /// A closure made from another's environment shares its cells, found by
+    /// pair (romacs#367): through a compacting full that moves both after
+    /// garbage, a minor, a sweep in place, the image a restore makes, and a
+    /// dead pair's entry reused by a fresh one.
+    #[test]
+    fn a_closure_made_from_an_environment_shares_its_cells_through_collections() {
+        let mut vm = Vm::new();
+        vm.set_gc_verify(true);
+        // COUNTER counts in X; (twin F) is a closure over F's environment, as
+        // nadvice makes one: both interpreted, the ordinary kind being opaque.
+        check(&mut vm, "(progn (defalias 'twin (lambda (f) (make-interpreted-closure '() '((setq x (1+ x))) (aref f 2) nil nil))) \
+            (setq garbage (make-list 500 'g)) (setq counter (make-interpreted-closure '() '((setq x (1+ x))) (list (cons 'x 0) t) nil nil)) (setq garbage nil) t)", "t");
+        let shared = "(let ((g (twin counter))) (list (funcall counter) (funcall g) (funcall counter) (eq (car (aref g 2)) (car (aref counter 2)))))";
+        check(&mut vm, shared, "(1 2 3 t)");
+        vm.allocation.compact = true;
+        vm.collect(&mut []);
+        check(&mut vm, shared, "(4 5 6 t)");
+        assert!(vm.collect_minor(&[]));
+        check(&mut vm, shared, "(7 8 9 t)");
+        vm.collect(&mut []);
+        check(&mut vm, shared, "(10 11 12 t)");
+        // The image a restore makes: dense, then permanent.
+        vm.allocation.compact = true;
+        vm.collect(&mut []);
+        vm.make_image_permanent();
+        vm.check_cell_pairs();
+        check(&mut vm, shared, "(13 14 15 t)");
+        vm.collect(&mut []);
+        check(&mut vm, shared, "(16 17 18 t)");
+        // A closure dead with its cell: its pair goes, and the cons that takes
+        // the pair's entry is a new pair, with a cell of its own.
+        for _ in 0..3 {
+            check(&mut vm, "(progn (setq dying (make-interpreted-closure '() '(y) (list (cons 'y 1) t) nil nil)) (setq dying-env (car (aref dying 2))) (setq dying nil dying-env nil) t)", "t");
+            vm.collect(&mut []);
+            check(&mut vm, "(let* ((f (make-interpreted-closure '() '(y) (list (cons 'y 40) t) nil nil)) (g (make-interpreted-closure '() '((setq y (1+ y))) (aref f 2) nil nil))) (list (funcall g) (funcall f)))", "(41 41)");
+            vm.check_cell_pairs();
+        }
+    }
     #[test]
     fn interpreted_interactive_and_image_metadata() {
         let mut vm = Vm::new();
@@ -230,21 +268,21 @@ use super::*;
 impl Vm {
     pub(super) fn read_capture_cell(&self, index: usize) -> Value {
         self.cell_pairs
-            .get(&index)
-            .map_or(self.cells[index], |&pair| {
+            .get(index)
+            .map_or(self.cells[index], |pair| {
                 self.cons_pair(pair).expect("live lexical pair").1
             })
     }
     pub(super) fn write_capture_cell(&mut self, index: usize, value: Value) {
         self.cells.set(index, value);
-        if let Some(&pair) = self.cell_pairs.get(&index) {
+        if let Some(pair) = self.cell_pairs.get(index) {
             self.conses.set_cdr(pair.index(3).expect("private lexical pair"), value);
         }
     }
     fn lexical_pair(&mut self, name: Value, capture: Value) -> Value {
         if capture.tag() == 5 {
             let index = capture.payload() as usize;
-            if let Some(&pair) = self.cell_pairs.get(&index) {
+            if let Some(pair) = self.cell_pairs.get(index) {
                 return pair;
             }
             let pair = self.keymap_cons(name, self.cells[index]);
@@ -368,11 +406,7 @@ impl Vm {
                     if outer.contains_key(&name) {
                         continue;
                     }
-                    let cell = if let Some((&index, _)) = self
-                        .cell_pairs
-                        .iter()
-                        .find(|(_, existing)| **existing == pair)
-                    {
+                    let cell = if let Some(index) = self.cell_pairs.cell_of(pair) {
                         index
                     } else {
                         let index = self.alloc_cell(value);

@@ -21,6 +21,7 @@
 (defconst romacs-agent-wire-events
   '((input text (images list) steer own (messages list) request)
     (incoming text prompt (messages list))
+    (arrival from state text full parent)
     (delta message text parent)
     (thinking text parent)
     (message-end message parent)

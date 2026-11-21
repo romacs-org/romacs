@@ -111,7 +111,7 @@ fn delete_eq(cx: &mut Leaf<'_>, elt: Value, mut list: Value) -> Out {
 }
 
 fn truncate(cx: &mut Leaf<'_>, n: Value, list: Value) -> Out {
-    let n = n.integer_value().ok_or(Fault::Wrong("integerp", n))?;
+    let n = n.integer_value().ok_or_else(|| Fault::Wrong("integerp", n))?;
     if n <= 0 { return Ok(Value::NIL); }
     if list != Value::NIL && cx.pair(list).is_none() {
         return Err(Fault::Wrong("listp", list));

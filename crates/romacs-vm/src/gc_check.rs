@@ -62,8 +62,12 @@ impl Vm {
     /// sweep would free under something that still names it. The panic names
     /// the entry and one holder, an old one if there is one: the entry whose
     /// store the minor did not learn of.
-    pub(super) fn check_minor(&mut self, roots: &[Value]) {
+    pub(super) fn check_minor(&mut self, roots: &[Value], regions: &[bool]) {
         let reached = self.reference_walk(roots);
+        // A young region the minor did not reach is freed: none may be reachable.
+        if let Some(&id) = self.region_young.iter().find(|&&id| reached.regions[id] && !regions[id]) {
+            panic!("the minor missed young region {id}, which the reference walk reached");
+        }
         let missed = [self.conses.young_unmarked().collect::<Vec<_>>(), self.closures.young_unmarked().collect(), self.cells.young_unmarked().collect(), self.objects.young_unmarked().collect()];
         for (t, (reached_here, missed)) in reached.tables.iter().zip(&missed).enumerate() {
             if let Some(i) = reached_here.iter().zip(missed).position(|(&r, &m)| r && m) {
@@ -205,7 +209,7 @@ impl Vm {
             }
             5 => {
                 let i = v.payload() as usize;
-                if first(&mut r.tables[2], i) { values.push(self.cell_pairs.get(&i).copied().unwrap_or(self.cells[i])); }
+                if first(&mut r.tables[2], i) { values.push(self.cell_pairs.get(i).unwrap_or(self.cells[i])); }
             }
             7 if v.payload() >= 1 => {
                 let slot = v.payload() as usize - 1;
@@ -301,7 +305,7 @@ mod tests {
         let (mut vm, young) = stored();
         assert!(!vm.conses.old(young), "the cons stored is young");
         mark_all_but(&mut vm, None);
-        vm.check_minor(&[]);
+        vm.check_minor(&[], &vec![true; vm.regions.len()]);
         vm.clear_marks();
     }
 
@@ -310,7 +314,7 @@ mod tests {
     fn the_oracle_names_a_young_entry_the_mark_missed_and_its_old_holder() {
         let (mut vm, young) = stored();
         mark_all_but(&mut vm, Some(young));
-        vm.check_minor(&[]);
+        vm.check_minor(&[], &vec![true; vm.regions.len()]);
     }
 
     #[test]
@@ -318,6 +322,6 @@ mod tests {
         let (mut vm, young) = stored();
         vm.settle_generations();
         assert!(vm.conses.old(young));
-        vm.check_minor(&[]);
+        vm.check_minor(&[], &vec![true; vm.regions.len()]);
     }
 }

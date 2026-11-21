@@ -8,6 +8,9 @@
               one in twenty makes it a hot file.
   generated   no tracked file a tool of ours makes (tools/lib/generated_files.py).
   agents      every AGENTS.md names only what exists (tools/lib/agents_md.py).
+  functions   no function of Romacs's own Lisp over the long-function limit
+              is added or grows, beside the merge-base's (tools/lib/smells.py
+              check-lisp; tools/lib/lisp_functions.py measures).
   lint        tools/romacs-lint on the runtime Lisp files the change touches:
               what it adds since the merge-base, as the queue's Lisp tier holds
               it. It runs a Romacs: --binary, else what tools/romacs-lint finds.
@@ -59,6 +62,7 @@ import agents_md  # noqa: E402
 import lisp_layout  # noqa: E402
 import generated_files  # noqa: E402
 import impact  # noqa: E402
+import smells  # noqa: E402
 import test_modules  # noqa: E402
 
 LANDINGS = 150
@@ -252,6 +256,25 @@ def agents(root):
     if found:
         return 'FAIL', f'{len(found)} stale line(s) in the AGENTS.md files', found
     return 'ok', f'{count} AGENTS.md file(s) name nothing missing', []
+
+
+# The Lisp functions' length.
+
+def functions(root, trunk):
+    """(STATUS, SUMMARY, FINDINGS): no own Lisp function over the limit is added or grows."""
+    try:
+        found = smells.lisp_held_to_base(root, trunk)
+    except (ValueError, subprocess.CalledProcessError) as exc:
+        return 'SKIP', 'the Lisp functions were not measured', [f'{exc}; fix: merge the trunk in, or name it with --trunk']
+    lisp = smells.lisp_functions
+    failing, warned = lisp.held(found)
+    warnings = [f'warning until {lisp.ENFORCED_FROM}: {finding}' for finding in warned]
+    if failing:
+        return 'FAIL', f'{len(failing)} failing Lisp function finding(s), {len(warned)} warning(s)', failing + warnings
+    if warned:
+        return 'ok', (f'{len(warned)} Lisp function finding(s) over {lisp.LONG_FUNCTION_LINES} code lines, '
+                      f'warned until {lisp.ENFORCED_FROM}, then failing'), warned
+    return 'ok', f'no Lisp function over {lisp.LONG_FUNCTION_LINES} code lines added or grown', []
 
 
 # The lint.
@@ -505,8 +528,8 @@ def main():
     trunk = gate.trunk(ROOT, args.trunk)
     names = gate.changed_names(ROOT, trunk)
     stages = [('forecast', *forecast(ROOT, trunk)), ('generated', *generated(ROOT)), ('agents', *agents(ROOT)),
-              ('epoch', *epoch(names, *epoch_history(ROOT, trunk))), ('lint', *lint(ROOT, names, trunk, args.binary)),
-              ('loaddefs', *loaddefs(ROOT, names))]
+              ('functions', *functions(ROOT, trunk)), ('epoch', *epoch(names, *epoch_history(ROOT, trunk))),
+              ('lint', *lint(ROOT, names, trunk, args.binary)), ('loaddefs', *loaddefs(ROOT, names))]
     if not args.no_tests:
         stages.append(('tests', *tests(ROOT, names, args.threads)))
     lines, status = report(stages)

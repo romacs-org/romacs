@@ -110,7 +110,9 @@ when the chat does not show it."
     (save-excursion
       (goto-char at)
       (skip-chars-forward "\n")
-      (string-trim (buffer-substring-no-properties (point) (line-end-position))))))
+      ;; Its words, not the bar it is drawn behind.
+      (string-trim (substring-no-properties
+                    (romacs-agent-log--undecorated (buffer-substring (point) (line-end-position))))))))
 
 (provide 'romacs-agent-log-turns)
 ;;; romacs-agent-log-turns.el ends here
