@@ -42,6 +42,12 @@
     (cl-loop for (k v) on pairs by #'cddr do (puthash k v table))
     table))
 
+(defun romacs-agent-log-tests--face-p (face faces)
+  "Whether FACE is one of FACES, a face property's value, or what one of
+them inherits."
+  (seq-some (lambda (f) (or (eq f face) (and (symbolp f) (facep f) (memq face (ensure-list (face-attribute f :inherit))))))
+            (ensure-list faces)))
+
 (ert-deftest romacs-agent-log-shows-every-step-in-order ()
   (romacs-agent-log-tests--with
     (draw :type 'input :text "count the lines")
@@ -58,7 +64,9 @@
       (should (string-match-p "wc -l notes.txt" text))
       ;; The output under its call, before what followed the call.
       (should (string-match-p "\\$ wc -l notes.txt · 2 notes.txt\n\nRunning it now." text))
-      (should (string-match-p "✻ 9s · \\$0.12" text)))))
+      ;; Its rule says how long and when; what it cost is RET away.
+      (should (string-match-p "✻ 9s · [0-9][0-9]:[0-9][0-9]" text))
+      (should-not (string-search "0.12" text)))))
 
 (ert-deftest romacs-agent-log-streams-without-blank-trails ()
   (romacs-agent-log-tests--with
@@ -1094,13 +1102,13 @@
       (should-not (string-match-p "❯ Delegated" text)))
     (goto-char (point-min))
     (search-forward "do it")
-    (should (memq 'romacs-agent-log-you (ensure-list (get-text-property (match-beginning 0) 'face))))
+    (should (romacs-agent-log-tests--face-p 'romacs-agent-log-you (get-text-property (match-beginning 0) 'face)))
     (search-forward "lane x")
     (should (memq 'romacs-agent-log-other-head (ensure-list (get-text-property (match-beginning 0) 'face))))
     ;; Nothing the GUI host does not draw.
     (should-not (text-property-not-all (point-min) (point-max) 'line-prefix nil))
     (should-not (text-property-not-all (point-min) (point-max) 'wrap-prefix nil))
-    (should-not (memq 'romacs-agent-log-you (ensure-list (get-text-property (match-beginning 0) 'face)))))
+    (should-not (romacs-agent-log-tests--face-p 'romacs-agent-log-you (get-text-property (match-beginning 0) 'face))))
   ;; Only whole envelopes, each of a batch; anything else is the user's.
   (should (equal (mapcar (lambda (i) (plist-get i :text))
                          (romacs-agent-incoming-of (concat "<romacs-message id=\"1\" kind=\"child\" from=\"a\">\none\n</romacs-message>\nReply to this message with romacs_task_reply(messageId=\"1\", text=...).\n\n"
@@ -1353,13 +1361,13 @@ none when dropped.")
     (goto-char (point-min))
     (search-forward "second")
     (let ((line (line-beginning-position)))
-      (should (memq 'romacs-agent-log-you (ensure-list (get-text-property line 'face))))
+      (should (romacs-agent-log-tests--face-p 'romacs-agent-log-you (get-text-property line 'face)))
       ;; Its newlines, between its lines and after its last.
-      (should (memq 'romacs-agent-log-you (ensure-list (get-text-property (line-end-position) 'face))))
+      (should (romacs-agent-log-tests--face-p 'romacs-agent-log-you (get-text-property (line-end-position) 'face)))
       (forward-line 1)
       (should (looking-at "▌ third"))
-      (should (memq 'romacs-agent-log-you (ensure-list (get-text-property (line-end-position) 'face))))
-      (should-not (memq 'romacs-agent-log-you (ensure-list (get-text-property (1- line) 'face)))))))
+      (should (romacs-agent-log-tests--face-p 'romacs-agent-log-you (get-text-property (line-end-position) 'face)))
+      (should-not (romacs-agent-log-tests--face-p 'romacs-agent-log-you (get-text-property (1- line) 'face))))))
 
 ;;; From elsewhere, quoted
 

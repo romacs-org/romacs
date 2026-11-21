@@ -488,6 +488,8 @@ cache, it reports none) or does not say."
       ;; A running tool's heartbeat (its seconds so far): its task notices
       ;; say what it does.
       ("tool_progress" nil)
+      ;; A queued command's start and end: its input and its turn say it.
+      ("command_lifecycle" nil)
       (_ (list (list :type 'unknown :raw line))))))
 
 ;;; An account's usage, asked without a turn

@@ -9,6 +9,7 @@
       (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
   (require 'romacs-agent)
   (require 'romacs-agent-log)
+  (require 'romacs-agent-claude)
   (require 'romacs-agent-ui))
 
 (defun romacs-agent-eye-tests--shown (beg end)
@@ -19,6 +20,12 @@
         (unless (invisible-p beg) (setq shown (concat shown (buffer-substring-no-properties beg next))))
         (setq beg next)))
     shown))
+
+(defun romacs-agent-eye-tests--face-p (face faces)
+  "Whether FACE is one of FACES, a face property's value, or what one of
+them inherits."
+  (seq-some (lambda (f) (or (eq f face) (and (symbolp f) (facep f) (memq face (ensure-list (face-attribute f :inherit))))))
+            (ensure-list faces)))
 
 (ert-deftest romacs-agent-eye-a-reply-hides-its-inline-marks ()
   (let ((session (romacs-agent--make :id "E" :harness 'claude :state 'running
@@ -78,7 +85,7 @@
         (let ((bol (line-beginning-position)))
           (should (eq (char-after bol) ?▌))
           (should (get-text-property bol 'romacs-agent-decor))
-          (should (memq 'romacs-agent-log-you-bar (ensure-list (get-text-property bol 'face))))))
+          (should (romacs-agent-eye-tests--face-p 'romacs-agent-log-you-bar (get-text-property bol 'face)))))
       (should (equal (string-trim (romacs-agent-log--undecorated (buffer-substring (point-min) romacs-agent-log--end)))
                      "❯ first line\nsecond line")))))
 
@@ -197,6 +204,20 @@
   (let ((line (romacs-markdown-plain-string "see `code`")))
     (add-face-text-property 0 (length line) 'romacs-agent-log-other nil line)
     (should (eq (car (ensure-list (get-text-property 5 'face line))) 'romacs-agent-log-other))))
+
+(ert-deftest romacs-agent-eye-claude-command-lifecycle-is-no-line ()
+  (let ((session (romacs-agent--make :harness 'claude)))
+    (should-not (romacs-agent--claude-events
+                 session (json-parse-string "{\"type\":\"command_lifecycle\",\"state\":\"completed\",\"command_uuid\":\"c\"}")))))
+
+(ert-deftest romacs-agent-eye-a-turn-s-cost-is-ret-away ()
+  (romacs-agent-eye-tests--chat
+    (draw :type 'done :duration 9 :cost 339.42 :time 0)
+    (let ((text (buffer-substring-no-properties (point-min) romacs-agent-log--end)))
+      (should-not (string-search "339" text)))
+    (goto-char (point-min))
+    (search-forward "✻")
+    (should (string-search "339.42" (cdr (get-text-property (1- (point)) 'romacs-agent-log-full))))))
 
 (provide 'romacs-agent-eye-tests)
 ;;; romacs-agent-eye-tests.el ends here

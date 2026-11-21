@@ -960,19 +960,21 @@ from elsewhere, opening one of its own."
                                   line))))))
 
 (defun romacs-agent-log--done (event)
-  "Draw turn end EVENT: a rule with its time, cost and why it failed."
+  "Draw turn end EVENT: a rule with how long it took, when it ended and
+why it failed; what it cost RET on it shows, never the rule."
   (romacs-agent-log--line
    event 'turn
-   (concat (when-let* ((reason (or (plist-get event :reason) (and (plist-get event :error) (plist-get event :text)))))
-             (concat (propertize (format "✘ %s" reason) 'face 'romacs-agent-log-denied) "\n"))
-           (propertize (concat "✻ " (string-join (delq nil (list
-                                                    (and (plist-get event :interrupted) "interrupted")
-                                                    (when-let* ((s (plist-get event :duration))) (format "%ds" (round s)))
-                                                    (when-let* ((c (plist-get event :cost))) (format "$%.2f" c))
-                                                    ;; A transcript's turns may not say when they ended.
-                                                    (when-let* ((time (plist-get event :time))) (format-time-string "%H:%M" time))))
-                                    " · "))
-                       'face 'romacs-agent-log-rule))))
+   (let ((cost (plist-get event :cost)))
+     (concat (when-let* ((reason (or (plist-get event :reason) (and (plist-get event :error) (plist-get event :text)))))
+               (concat (propertize (format "✘ %s" reason) 'face 'romacs-agent-log-denied) "\n"))
+             (propertize (concat "✻ " (string-join (delq nil (list
+                                                      (and (plist-get event :interrupted) "interrupted")
+                                                      (when-let* ((s (plist-get event :duration))) (format "%ds" (round s)))
+                                                      ;; A transcript's turns may not say when they ended.
+                                                      (when-let* ((time (plist-get event :time))) (format-time-string "%H:%M" time))))
+                                      " · "))
+                         'face 'romacs-agent-log-rule
+                         'romacs-agent-log-full (and cost (cons nil (format "This turn cost $%.2f." cost))))))))
 
 (defun romacs-agent-log--note (event text)
   (romacs-agent-log--line event 'note (concat "· " text) 'romacs-agent-log-note))
@@ -1895,6 +1897,26 @@ under C-c as well."
   "M-p" #'romacs-agent-log-history-previous
   "M-n" #'romacs-agent-log-history-next)
 
+
+(defvar romacs-agent-log--face-lists (make-hash-table :test #'equal)
+  "One object for each distinct face list the chat's decoration uses: the
+display realizes a face list by its identity, so equal lists made anew
+for each message cost a realization each redraw (romacs#377).")
+
+(defun romacs-agent-log--shared-faces (text)
+  "TEXT, its face lists each replaced by the one object of its kind in
+`romacs-agent-log--face-lists'; TEXT itself, changed in place."
+  (let ((at 0) (end (length text)))
+    (while (< at end)
+      (let ((next (next-single-property-change at 'face text end))
+            (face (get-text-property at 'face text)))
+        (when (consp face)
+          (put-text-property at next 'face
+                             (or (gethash face romacs-agent-log--face-lists)
+                                 (let ((kept (copy-sequence face))) (puthash kept kept romacs-agent-log--face-lists)))
+                             text))
+        (setq at next))))
+  text)
 
 (defun romacs-agent-log--undecorated (text)
   "TEXT without its decoration, the runs marked `romacs-agent-decor'."
