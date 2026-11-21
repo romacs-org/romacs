@@ -42,6 +42,7 @@
 (declare-function isolate-live-p "isolate")
 (declare-function isolate-main-p "isolate")
 (declare-function isolate-future-isolate "isolate")
+(declare-function isolate-retire "isolate")
 (declare-function isolate-future-done-p "isolate")
 
 (defvar romacs-agent-writer-queued 'auto
@@ -97,6 +98,8 @@ them as for its own writes.")
   (apply #'+ (mapcar #'funcall romacs-agent-writer-held-functions)))
 
 (defvar romacs-agent-writer--job nil "The writer's future while it runs.")
+(defvar romacs-agent-writer--failed-last nil
+  "Non-nil when the last writer failed and none has answered since.")
 (defvar romacs-agent-writer--next 0 "The id of the next write.")
 (defvar romacs-agent-writer--draining nil
   "Non-nil while the writer is drained: its end sends nothing again.")
@@ -186,8 +189,12 @@ queued to be: its value when it ran here."
 (defun romacs-agent-writer--flush ()
   "Send the unsent writes, in order, a batch at a time, while fewer than
 `romacs-agent-writer--window' batches are unanswered; none while the
-editor makes them itself (`romacs-agent-writer--here')."
-  (let ((isolate (not romacs-agent-writer--here-running)))
+editor makes them itself (`romacs-agent-writer--here'), nor, but in a
+drain, while no writer runs and one is to be tried again
+\(`romacs-agent-writer--unavailable')."
+  (let ((isolate (and (not romacs-agent-writer--here-running)
+                      (or romacs-agent-writer--job romacs-agent-writer--draining
+                          (not (timerp romacs-agent-writer--retry-timer))))))
     (while (and isolate romacs-agent-writer--unsent (< romacs-agent-writer--in-flight romacs-agent-writer--window))
       (setq isolate (condition-case err (romacs-agent-writer--isolate)
                       ;; None to be had: the rest stays unsent, tried later.
@@ -277,22 +284,42 @@ How many were made."
     (mapc #'romacs-agent-writer--queue (sort entries (lambda (a b) (< (car a) (car b)))))))
 
 (defun romacs-agent-writer--ended (future)
-  "The writer's job ended (FUTURE): asked to, or it died.  What it did
-not answer is sent again to a new one, in order: a write is an upsert,
-or a record whose second copy a fold skips."
+  "The writer's job ended (FUTURE): asked to, or it died.  Its worker, its
+own, is let go.  What it did not answer is sent again to a new one, in
+order: a write is an upsert, or a record whose second copy a fold skips.
+A writer that failed is started again at once, but one that fails again
+before it answered anything is tried only after `romacs-agent-writer--retry'
+seconds (`romacs-agent-writer--unavailable'): one that cannot start must
+not be started again at once, each time with a worker of its own."
   (when (eq future romacs-agent-writer--job)
     (setq romacs-agent-writer--job nil)
+    (when-let* ((worker (ignore-errors (isolate-future-isolate future))))
+      (ignore-errors (isolate-retire worker)))
     (romacs-agent-writer--unsend)
     (when (and (> (romacs-agent-writer-pending-count) 0) (not romacs-agent-writer--draining))
-      (message "romacs-agent-writer: the writer ended, %d writes sent again" (romacs-agent-writer-pending-count))
-      (romacs-agent-writer--flush))))
+      (let ((failure (romacs-agent-writer--failure future)))
+        (if (and failure romacs-agent-writer--failed-last)
+            (romacs-agent-writer--unavailable failure)
+          (setq romacs-agent-writer--failed-last (and failure t))
+          (message "romacs-agent-writer: the writer ended, %d writes sent again" (romacs-agent-writer-pending-count))
+          ;; Once its end is through: its worker still counts toward
+          ;; `isolate-process-limit' here.
+          (run-at-time 0 nil #'romacs-agent-writer--flush))))))
+
+(defun romacs-agent-writer--failure (future)
+  "Why the writer's ended FUTURE failed, an error object (its error, or
+its worker's death); nil when it ended as asked."
+  (condition-case err (progn (isolate-await future 0) nil)
+    (error err)
+    (quit '(error "The writer was cancelled"))))
 
 (defun romacs-agent-writer--receive (_sender message)
   "The writer's answers to a batch, MESSAGE: what waited on each is told,
 and the writes waiting for room are sent."
   (pcase message
     (`(romacs-agent-written-batch ,answers)
-     (setq romacs-agent-writer--in-flight (max 0 (1- romacs-agent-writer--in-flight)))
+     (setq romacs-agent-writer--in-flight (max 0 (1- romacs-agent-writer--in-flight))
+           romacs-agent-writer--failed-last nil)
      (pcase-dolist (`(,id ,answer) answers)
        (when-let* ((entry (gethash id romacs-agent-writer--pending)))
          (remhash id romacs-agent-writer--pending)
