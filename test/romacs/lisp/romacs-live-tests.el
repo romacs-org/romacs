@@ -28,6 +28,7 @@
 (defvar rlt-ad-hook)
 (defvar rlt-lk-map)
 (defvar romacs-server-build-watch)
+(defvar warm-restart-directory)
 
 (defun romacs-live-tests--git (dir &rest args)
   "Git ARGS in DIR; its output."
@@ -785,6 +786,35 @@ reader; the report."
               (romacs-session-reset)
               (should (equal (plist-get asked :target) (expand-file-name invocation-name invocation-directory))))))
       (delete-directory installed t))))
+
+(ert-deftest romacs-live-a-prune-keeps-what-a-session-or-image-needs ()
+  ;; Four blobs, three of them unused for ten days: the one a restart's
+  ;; image names stays, the ledger's stays, the recent one stays, the
+  ;; other goes.
+  (let* ((top (file-name-as-directory (make-temp-file "romacs-live-prune-" t)))
+         (romacs-live-directory (expand-file-name "store/" top))
+         (warm-restart-directory (expand-file-name "images/" top))
+         (process-environment (cons (concat "XDG_STATE_HOME=" (expand-file-name "state" top)) process-environment))
+         (blob (lambda (c) (make-string 40 c)))
+         (old (time-subtract nil (days-to-time 10)))
+         (romacs-live-ledger (list :entries (list (list :path "lisp/l.el" :new (funcall blob ?d))))))
+    (unwind-protect
+        (progn
+          (dolist (c '(?a ?b ?c ?d))
+            (let ((dir (expand-file-name (funcall blob c) romacs-live-directory)))
+              (make-directory dir t)
+              (write-region "x" nil (expand-file-name "x.el" dir) nil 'silent)
+              (unless (eq c ?c) (set-file-times dir old))))
+          (make-directory warm-restart-directory t)
+          (write-region (format "(:parts ((romacs-live-restore-ledger :entries ((:file %S)))))"
+                                (expand-file-name (concat (funcall blob ?b) "/x.el") romacs-live-directory))
+                        nil (expand-file-name "pending.image" warm-restart-directory) nil 'silent)
+          (let ((removed (romacs-live-prune-store)))
+            (should (equal (mapcar #'file-name-nondirectory removed) (list (funcall blob ?a))))
+            (should (file-directory-p (expand-file-name (funcall blob ?b) romacs-live-directory)))
+            (should (file-directory-p (expand-file-name (funcall blob ?c) romacs-live-directory)))
+            (should (file-directory-p (expand-file-name (funcall blob ?d) romacs-live-directory)))))
+      (delete-directory top t))))
 
 (ert-deftest romacs-live-forms-diff-names-each-definition ()
   (let ((diff (romacs-live-forms-diff

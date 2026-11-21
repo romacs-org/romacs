@@ -58,6 +58,12 @@ nil means the repository of the current buffer's directory, when it is a
 Romacs source tree."
   :type '(choice (const nil) directory))
 
+(defcustom romacs-live-store-keep-days 7
+  "Days a content store directory no session image names is kept after
+it was last used: a session with live files marks its own as used when it
+updates and once a day, so a reset of another one keeps them."
+  :type 'natnum)
+
 (defcustom romacs-live-directory nil
   "The content store of live-loaded files; nil means romacs/live-lisp/
 under the XDG state directory."
@@ -182,6 +188,64 @@ relative to its `load-path' directory); return its file."
         (write-region bytes nil temporary nil 'silent)
         (rename-file temporary file t)))
     file))
+
+;;;; Pruning the store
+
+(declare-function warm-restart--directory "warm-restart" ())
+(declare-function romacs-restart--directory "warm-restart" ())
+
+(defvar romacs-live--touch-timer nil
+  "The daily timer marking the ledger's store directories used.")
+
+(defun romacs-live--touch-ledger ()
+  "Mark the store directories the ledger names used now."
+  (dolist (entry (plist-get romacs-live-ledger :entries))
+    (when-let* ((dir (plist-get entry :dir)) ((file-directory-p dir)))
+      (ignore-errors (set-file-times dir)))))
+
+(defun romacs-live--keep-touching ()
+  "Mark the ledger's directories used now, and daily while it has entries."
+  (romacs-live--touch-ledger)
+  (cond ((and (plist-get romacs-live-ledger :entries) (not romacs-live--touch-timer))
+         (setq romacs-live--touch-timer (run-at-time 86400 86400 #'romacs-live--touch-ledger)))
+        ((and (not (plist-get romacs-live-ledger :entries)) romacs-live--touch-timer)
+         (cancel-timer romacs-live--touch-timer)
+         (setq romacs-live--touch-timer nil))))
+
+(defun romacs-live--imaged-blobs ()
+  "The store blobs the session images on disk name: a restart's pending
+image, a kept one, a rollback's."
+  (require 'warm-restart)
+  (let ((pattern (concat (regexp-quote (romacs-live--store)) "\\([0-9a-f]\\{40,64\\}\\)/"))
+        (blobs nil))
+    (dolist (dir (list (warm-restart--directory) (romacs-restart--directory)))
+      (when (file-directory-p dir)
+        (dolist (image (directory-files dir t "\\.image\\'"))
+          (with-temp-buffer
+            (set-buffer-multibyte nil)
+            (ignore-errors (insert-file-contents-literally image))
+            (goto-char (point-min))
+            (while (re-search-forward pattern nil t)
+              (push (match-string 1) blobs))))))
+    (delete-dups blobs)))
+
+(defun romacs-live-prune-store (&optional days)
+  "Delete the content store's blob directories nothing needs: none a
+session image names, none the ledger names, none used in the last DAYS
+\(default `romacs-live-store-keep-days').  The deleted directories."
+  (let* ((store (romacs-live--store))
+         (days (or days romacs-live-store-keep-days))
+         (named (append (romacs-live--imaged-blobs)
+                        (mapcar (lambda (e) (plist-get e :new)) (plist-get romacs-live-ledger :entries))))
+         (old (time-subtract nil (days-to-time days)))
+         (removed nil))
+    (when (file-directory-p store)
+      (dolist (dir (directory-files store t "\\`[0-9a-f]\\{40,64\\}\\'"))
+        (unless (or (member (file-name-nondirectory dir) named)
+                    (time-less-p old (file-attribute-modification-time (file-attributes dir))))
+          (when (ignore-errors (delete-directory dir t) t)
+            (push dir removed)))))
+    removed))
 
 ;;;; The survey: data, run in a worker
 
@@ -986,7 +1050,8 @@ command names or one beside the runtime."
 (defun romacs-session-reset (&optional keep-buffers)
   "Restart onto the installed build with a fresh session: its image and
 init only, no live files (`romacs-live-ledger'), kill ring, registers,
-histories or kept globals.  Unsaved text is carried, as every restart
+histories or kept globals; the content store loses what no session needs
+\(`romacs-live-prune-store').  Unsaved text is carried, as every restart
 carries it, and so are agent sessions and the keeper's terminals, the
 user's work outside the session.  With a prefix argument, KEEP-BUFFERS:
 the file buffers and their windows too.  The same supervised restart as
@@ -1001,6 +1066,8 @@ the file buffers and their windows too.  The same supervised restart as
                                    (if (> live 0) (format " without its %d live files" live) "")
                                    (if keep-buffers "" " and every buffer but unsaved ones"))))
       (warm-restart-request :target target :fresh (if keep-buffers 'buffers 'unsaved))
+      ;; What no session needs goes from the store with the reset.
+      (romacs-live-prune-store)
       (message "Resetting once the editor is idle"))))
 
 ;;;; The report and the ledger, shown
@@ -1222,7 +1289,9 @@ a file."
     (pop-to-buffer (current-buffer))))
 
 (defun romacs-live--refresh-mode-line ()
-  "Show the ledger's mark in the mode line while it has entries."
+  "Show the ledger's mark in the mode line while it has entries, its
+store directories marked used."
+  (romacs-live--keep-touching)
   (let ((entries (plist-get romacs-live-ledger :entries)))
     (setq romacs-live-mode-line
           (and entries
