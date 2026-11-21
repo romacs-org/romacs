@@ -109,10 +109,6 @@ it, as after a crash.")
 `isolate-job-memory-headroom' reserved for each running job.
 A job that would pass it waits for room.")
 
-(defvar isolate-zygote-memory-limit (* 256 1024 1024)
-  "Bytes of proportional memory a zygote may hold once prepared; past it,
-its features run on pooled workers.")
-
 (defvar isolate-zygote-limit 4
   "How many zygotes may live at once; the least recently used one goes first.")
 
@@ -685,8 +681,9 @@ rest of the session, ended with its spare, its jobs running on pooled
 workers and told so (`isolate-future-degraded'), the refusal heard by
 `isolate-error-functions' as `isolate-zygote-refused' with (REASON)."
   (when (eq (gethash (aref zygote 2) romacs--isolate-zygotes) zygote)
-    (if (and (eq (aref future 3) 'done)
-             (<= (romacs--isolate-zygote-pss zygote) isolate-zygote-memory-limit))
+    ;; However large: what it holds its children share, where workers of
+    ;; their own would each hold a copy (romacs#396).
+    (if (eq (aref future 3) 'done)
         (let ((value (aref future 4)))
           (aset zygote 6 (car value))
           (aset zygote 7 (nth 1 value))
@@ -702,18 +699,12 @@ workers and told so (`isolate-future-degraded'), the refusal heard by
           (unless (aref zygote 4)
             (condition-case nil (aset zygote 4 (romacs--isolate-zygote-fork zygote)) (error nil))))
       (let* ((value (aref future 4))
-             (reason (cond ((eq (aref future 3) 'done)
-                            (list 'memory (romacs--isolate-zygote-pss zygote) isolate-zygote-memory-limit))
-                           ((eq (aref future 3) 'error) (list (car value) (nth 1 value)))
-                           (t (list (aref future 3))))))
+             (reason (if (eq (aref future 3) 'error) (list (car value) (nth 1 value))
+                       (list (aref future 3)))))
         (aset zygote 3 'refused)
         (aset zygote 6 reason)
         (romacs--isolate-end (aref zygote 1))
         (run-hook-with-args 'isolate-error-functions (aref zygote 1) 'isolate-zygote-refused (list reason nil))))))
-
-(defun romacs--isolate-zygote-pss (zygote)
-  "ZYGOTE's proportional memory in bytes."
-  (* 1024 (romacs--isolate-pss (romacs--isolate-id (aref zygote 1)))))
 
 (defun romacs--isolate-zygote-current-p (zygote)
   "Whether nothing ZYGOTE's preparation read has changed since, the

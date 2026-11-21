@@ -627,7 +627,7 @@ fn jobs_past_the_pools_width_wait_and_run_in_order_of_room() {
 }
 
 #[test]
-fn the_pools_memory_limit_holds_jobs_back_and_a_large_zygote_is_refused() {
+fn the_pools_memory_limit_holds_jobs_back() {
     let mut vm = vm();
     eval(&mut vm, "(setq isolate-pool-size 8 isolate-job-memory-headroom (* 64 1024 1024))");
     ready_zygote(&mut vm);
@@ -652,16 +652,6 @@ fn the_pools_memory_limit_holds_jobs_back_and_a_large_zygote_is_refused() {
                                (setq isolate-job-memory-headroom (* 1024 1024))
                                (prog1 (/ (romacs--isolate-reserved) (* 1024 1024)) (isolate-await f 10)))");
     assert_eq!(out, "8");
-    eval(&mut vm, "(isolate-kill-all)");
-    // A zygote over its limit: its features go to pooled workers.
-    let out = eval(&mut vm, "(let ((isolate-zygote-memory-limit 1) (end (+ (float-time) 20)))
-                               (setq isolate-pool-memory-limit (* 1024 1024 1024))
-                               (isolate-zygote '(isolate))
-                               (while (and (eq (nth 1 (isolate-zygote '(isolate))) 'preparing) (< (float-time) end))
-                                 (romacs--isolate-pump 0.02))
-                               (let ((f (isolate-spawn '+ 1 2 :require '(isolate))))
-                                 (list (nth 1 (isolate-zygote '(isolate))) (aref (isolate-future-isolate f) 10) (isolate-await f 10))))");
-    assert_eq!(out, "(refused pool 3)");
     eval(&mut vm, "(isolate-kill-all)");
 }
 
@@ -894,13 +884,15 @@ fn every_worker_process_counts_toward_one_limit() {
 
 #[test]
 fn a_refused_zygotes_jobs_run_warmed_and_say_so() {
-    // romacs#361: a zygote over its memory limit is refused, its spare with
-    // it; its features' jobs run on pooled workers prepared as it was (the
-    // warm functions run there too), each future saying how it is
-    // degraded, the refusal heard, and an error instead on request.
+    // romacs#361: a zygote that cannot fork (its preparation left a timer)
+    // is refused, its spare with it; its features' jobs run on pooled
+    // workers prepared as it was (the warm functions run there too), each
+    // future saying how it is degraded, the refusal heard, and an error
+    // instead on request.
     let mut vm = vm();
-    let out = eval(&mut vm, "(let ((isolate-zygote-memory-limit 1) (end (+ (float-time) 20)) (heard nil)
-                                   (isolate-zygote-warm-functions '((isolate . (lambda () (setq zygote-warmed t))))))
+    let out = eval(&mut vm, "(let ((end (+ (float-time) 20)) (heard nil)
+                                   (isolate-zygote-warm-functions
+                                    '((isolate . (lambda () (setq zygote-warmed t timer-list (cons 'zygote-test-timer timer-list)))))))
                                (push (lambda (_iso event data) (push (list event (car (car data))) heard)) isolate-error-functions)
                                (isolate-zygote '(isolate))
                                (isolate-idle-worker '(isolate))
@@ -917,8 +909,8 @@ fn a_refused_zygotes_jobs_run_warmed_and_say_so() {
                                        (let ((isolate-refuse-degraded t))
                                          (condition-case e (isolate-spawn '+ 1 2 :require '(isolate))
                                            (isolate-degraded (car (car (cdr e)))))))))");
-    assert_eq!(out, "(refused (t t) (pool pool) (isolate-zygote-refused isolate-zygote-refused) memory \
-                     ((isolate-zygote-refused memory)) isolate-zygote-refused)");
+    assert_eq!(out, "(refused (t t) (pool pool) (isolate-zygote-refused isolate-zygote-refused) isolate-refused \
+                     ((isolate-zygote-refused isolate-refused)) isolate-zygote-refused)");
     // Nothing of the refused zygote runs: only the pooled workers.
     let out = eval(&mut vm, "(let ((end (+ (float-time) 10)) (others t))
                                (while (and others (< (float-time) end))
