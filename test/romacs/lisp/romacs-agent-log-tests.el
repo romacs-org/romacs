@@ -363,8 +363,8 @@ them inherits."
         (search-backward "reply one")
         (romacs-agent-chat-rollback))
       (should (equal asked 4)))
-    (romacs-agent-chat-attach "/tmp/shot one.png")
-    (should (equal (buffer-substring-no-properties romacs-agent-log--input (point-max)) "/tmp/shot one.png"))))
+    (romacs-agent-menu--link "/tmp/shot one.png")
+    (should (equal (buffer-substring-no-properties romacs-agent-log--input (point-max)) "[image](</tmp/shot one.png>)"))))
 
 (ert-deftest romacs-agent-log-prompt-motion-lands-on-its-turn ()
   ;; Prompt motion lands on a prompt's first character, its leading blank
@@ -809,7 +809,7 @@ them inherits."
       (should (string-match-p "⑂ count · 2 words\n" text))
       (should-not (string-match-p "hand-back\\|agentId\\|usage" text)))
     (romacs-agent-log--separator)
-    (should (string-match-p "working" (buffer-substring-no-properties romacs-agent-log--end romacs-agent-log--input)))))
+    (should (eq (car romacs-agent-log--state) 'working))))
 
 (ert-deftest romacs-agent-log-an-answer-is-noted-with-its-actor ()
   (let ((session (romacs-agent--make :id "N" :harness 'claude :seq 0
@@ -1254,7 +1254,7 @@ none when dropped.")
     (draw :type 'delta :text "reply")
     (goto-char (point-min))
     (let (sent)
-      (cl-letf (((symbol-function 'romacs-agent-menu--clipboard-image-type) #'ignore)
+      (cl-letf (((symbol-function 'romacs-attach-clipboard-image-type) #'ignore)
                 ((symbol-function 'read-file-name) (lambda (&rest _) "/tmp/notes.org"))
                 ((symbol-function 'read-string) (lambda (&rest _) "named"))
                 ((symbol-function 'romacs-agent--update-manifest) #'ignore)
@@ -1263,35 +1263,30 @@ none when dropped.")
                 ((symbol-function 'romacs-agent-log--loaded) #'identity)
                 ((symbol-function 'romacs-agent-send) (lambda (_s text &rest _) (setq sent text))))
         (call-interactively (keymap-lookup romacs-agent-log-mode-map "C-c C-a"))
-        (should (equal (buffer-substring-no-properties romacs-agent-log--input (point-max)) "/tmp/notes.org"))
+        (should (equal (buffer-substring-no-properties romacs-agent-log--input (point-max)) "[file](/tmp/notes.org)"))
         (goto-char (point-min))
         (call-interactively (keymap-lookup romacs-agent-log-mode-map "C-c C-s"))
-        (should (equal sent "/tmp/notes.org"))
+        (should (equal sent "[file](/tmp/notes.org)"))
         (should (= romacs-agent-log--input (point-max)))
         (call-interactively (keymap-lookup romacs-agent-log-mode-map "C-c C-r"))
         (should (equal (romacs-agent-title session) "named"))))))
 
-(ert-deftest romacs-agent-log-attach-takes-the-clipboard-s-image ()
-  ;; C-c C-a with an image in the clipboard saves it with the session and
-  ;; puts its path in the composer.
+(ert-deftest romacs-agent-log-attach-links-the-clipboard-s-image ()
+  ;; C-c C-a with an image in the clipboard links the file it is, where
+  ;; it is, at the composer's end.
   (romacs-agent-log-tests--with
     (ignore #'draw)
-    (let ((dir (make-temp-file "romacs-attach" t)))
-      (unwind-protect
-          (cl-letf (((symbol-function 'romacs-agent-menu--clipboard-image-type) (lambda () "image/png"))
-                    ((symbol-function 'romacs-agent-log--loaded) #'identity)
-                    ((symbol-function 'romacs-agent-dir) (lambda (_) dir))
-                    ((symbol-function 'call-process)
-                     (lambda (program _in out &rest _)
-                       (should (equal program "wl-paste"))
-                       (with-temp-file (cadr out) (insert "PNG"))
-                       0)))
-            (call-interactively (keymap-lookup romacs-agent-log-mode-map "C-c C-a"))
-            (let ((path (buffer-substring-no-properties romacs-agent-log--input (point-max))))
-              (should (string-prefix-p (expand-file-name "attachments/clipboard-" dir) path))
-              (should (string-suffix-p ".png" path))
-              (should (file-exists-p path))))
-        (delete-directory dir t)))))
+    (goto-char (point-max))
+    (insert "see")
+    (cl-letf (((symbol-function 'romacs-attach-clipboard-image-type) (lambda () "image/png"))
+              ((symbol-function 'romacs-agent-log--loaded) #'identity)
+              ((symbol-function 'romacs-attach-clipboard-file)
+               (lambda (type then)
+                 (should (equal type "image/png"))
+                 (funcall then "/pictures/Screenshots/shot.png"))))
+      (call-interactively (keymap-lookup romacs-agent-log-mode-map "C-c C-a"))
+      (should (equal (buffer-substring-no-properties romacs-agent-log--input (point-max))
+                     "see [image](/pictures/Screenshots/shot.png)")))))
 
 ;;; A command's output
 
@@ -1516,3 +1511,4 @@ none when dropped.")
 
 (provide 'romacs-agent-log-tests)
 ;;; romacs-agent-log-tests.el ends here
+

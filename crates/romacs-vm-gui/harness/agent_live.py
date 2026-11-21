@@ -97,10 +97,12 @@ from pathlib import Path
 import re
 import shutil
 import sqlite3
+import struct
 import signal
 import subprocess
 import sys
 import time
+import zlib
 
 import parity_live
 from romacs_mcp_client import RomacsMcp
@@ -3749,7 +3751,122 @@ def history_real(args, base):
         a.close()
 
 
-WORKFLOWS = {'chat_menu': chat_menu, 'history_view': history_view, 'host': host, 'sockets': sockets, 'reap': reap, 'deadline': deadline, 'providers': providers, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe,
+def png(path, width, height, hue):
+    """A PNG of WIDTH by HEIGHT at PATH, like a screenshot: a backdrop
+    shaded by HUE (0-255) top to bottom, a light window with a title bar."""
+    def chunk(kind, data):
+        return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data) & 0xffffffff)
+    left, top, right, bottom = width // 8, height // 6, width * 5 // 8, height * 3 // 5
+    rows = []
+    for y in range(height):
+        shade = bytes((40 + y * 60 // height, hue // 2, hue))
+        window = bytes((236, 239, 244)) if y > top + height // 20 else bytes((94, 129, 172))
+        inside = top <= y < bottom
+        rows.append(b'\0' + shade * left + (window if inside else shade) * (right - left) + shade * (width - right))
+    path.write_bytes(b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0))
+                     + chunk(b'IDAT', zlib.compress(b''.join(rows), 6)) + chunk(b'IEND', b''))
+
+
+def chat_images(args, base):
+    """Images in the chat as links to their files (lisp/agents/romacs-agent-log-images.el),
+    by real keys: C-c C-a with a screenshot in the clipboard links the saved
+    file, copying nothing; with an image of no file, saves it once in the
+    screenshots directory; a link pasted in shows its image too.  The
+    composer and the sent message show each image under the text, the
+    harness gets the links as typed.  Shots across UI_THEMES."""
+    a = Agents(args, base, 'ci')
+    try:
+        a.up()
+        a.work.mkdir(parents=True, exist_ok=True)
+        shots_dir = a.home / 'Pictures/Screenshots'
+        shots_dir.mkdir(parents=True)
+        shot = shots_dir / 'screenshot-2026-11-21_05-53-33-romacs.png'
+        png(shot, 1280, 800, 200)
+        loose = a.work / 'copied-from-a-browser.png'
+        png(loose, 900, 600, 90)
+        typed = a.work / 'typed.png'
+        png(typed, 600, 900, 140)
+        sid = a.start('say ready')
+        a.idle(sid)
+        a.eval(f'(progn (romacs-agent-show {a.s(sid)}) (delete-other-windows) t)')
+        a.keyboard_ready()
+        chat = '(window-buffer (selected-window))'
+
+        def composer():
+            return parity_live.read_sexp(a.eval(
+                f'(with-current-buffer {chat} (buffer-substring-no-properties romacs-agent-log--input (point-max)))'))
+
+        def drawn():
+            """The composer's drawn links' files, and whether images show under it."""
+            files, block = parity_live.read_sexp(a.eval(
+                f'(with-current-buffer {chat} (list (cons 0 (mapcar (lambda (o) (overlay-get o (quote romacs-agent-log-image))) '
+                '(car romacs-agent-log-images--composer))) (if (cdr romacs-agent-log-images--composer) 1 0)))'))
+            return [files[1:], block == 1]
+
+        def copy(path):
+            with path.open('rb') as image:
+                subprocess.run(['wl-copy', '--type', 'image/png'], stdin=image, env=a.env, check=True, timeout=15)
+
+        def attach():
+            a.keys('-M', 'ctrl', '-k', 'c', '-k', 'a', '-m', 'ctrl')
+
+        def picture(name):
+            a.eval('(progn (redisplay t) t)')
+            time.sleep(.5)
+            path = base / f'{name}.png'
+            subprocess.run([f'{args.tools}/grim', str(path)], env=a.env, check=True, timeout=30)
+            return str(path)
+
+        result, shots = {}, []
+        state = a.home / '.local/state/romacs/agents'
+        a.keys('say look at ')
+        copy(shot)
+        attach()
+        until(lambda: str(shot) in composer(), 20, 'the screenshot linked')
+        a.keys(' what is wrong')
+        until(lambda: composer().endswith('wrong'), 10, 'typed after the link')
+        result['screenshot'] = composer()
+        result['screenshot_drawn'] = drawn()
+        result['screenshots_after'] = sorted(p.name for p in shots_dir.iterdir())
+        shots.append(picture('composer-screenshot'))
+        a.keys('-M', 'ctrl', '-k', 'c', '-k', 's', '-m', 'ctrl')
+        a.idle(sid)
+        transcript = lambda: parity_live.read_sexp(a.eval(
+            f'(with-current-buffer {chat} (buffer-substring-no-properties (point-min) romacs-agent-log--end))'))
+        until(lambda: transcript().count(f'[image]({shot})') == 2, 20, 'the reply echoes the link')
+        result['echoed'] = transcript().count(f'[image]({shot}) what is wrong') == 2
+        shots.append(picture('sent-screenshot'))
+        copy(loose)
+        attach()
+        until(lambda: 'Screenshots/clipboard-' in composer(), 20, 'the loose image saved and linked')
+        saved = [p for p in shots_dir.iterdir() if p.name.startswith('clipboard-')]
+        result['loose'] = composer()
+        result['loose_saved'] = len(saved) == 1 and saved[0].read_bytes() == loose.read_bytes()
+        a.keys(' and ')
+        subprocess.run(['wl-copy', f'[image]({typed})'], env=a.env, check=True, timeout=15)
+        a.keys('-M', 'ctrl', '-k', 'y', '-m', 'ctrl')
+        try:
+            until(lambda: len(drawn()[0]) == 2, 10, 'the pasted link drawn')
+        except RuntimeError as error:
+            raise RuntimeError(f'{error}: {composer()!r} {drawn()!r}') from None
+        result['typed_drawn'] = drawn()
+        result['session_copies'] = sorted(str(p) for p in state.glob('*/attachments/*')) if state.exists() else []
+        for theme in UI_THEMES:
+            a.eval(f'(progn (mapc (function disable-theme) custom-enabled-themes) (load-theme (quote {theme}) t) t)')
+            shots.append(picture(f'{theme}-composer'))
+        result['shots'] = shots
+        result['ok'] = (result['screenshot'] == f'say look at [image]({shot}) what is wrong'
+                        and result['screenshot_drawn'] == [[str(shot)], True]
+                        and result['screenshots_after'] == [shot.name]
+                        and result['echoed'] and result['loose_saved']
+                        and result['typed_drawn'] == [[str(saved[0]), str(typed)], True]
+                        and not result['session_copies'])
+        return result
+    finally:
+        a.close()
+
+
+WORKFLOWS = {'chat_images': chat_images, 'chat_menu': chat_menu, 'history_view': history_view, 'host': host, 'sockets': sockets, 'reap': reap, 'deadline': deadline, 'providers': providers, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe,
              'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race, 'restart-rollback': restart_rollback, 'restart-hang': restart_hang, 'renew': renew,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
              'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode,

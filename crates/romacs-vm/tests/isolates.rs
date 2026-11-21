@@ -161,6 +161,37 @@ fn an_interrupt_ends_a_workers_wait_for_process_output() {
     eval(&mut vm, "(isolate-kill-all)");
 }
 
+/// A worker whose tree-sitter query waits for a long early parse takes an
+/// interrupt as a quit within the bound, not when the parse ends: the
+/// query's wait asks about the worker's quit between its slices. The list's
+/// last element is the interrupt's milliseconds to quit.
+#[test]
+fn an_interrupt_ends_a_workers_wait_for_a_tree_sitter_parse() {
+    let mut vm = vm();
+    let hs = Handshake::new("treesit");
+    // About 8.6 MB of C: a parse of a second or more.
+    let job = format!("'(lambda () \
+       (unless (treesit-language-available-p 'c) (error \"no C grammar\")) \
+       (with-temp-buffer \
+         (let ((text \"int f (int a) {{ return a + 1; }}\\n\")) (dotimes (_ 18) (setq text (concat text text))) (insert text)) \
+         (unless (romacs--treesit-parse-early 'c) (error \"no early parse\")) \
+         (let ((parser (treesit-parser-create 'c))) \
+           {} \
+           (treesit-parser-root-node parser)) \
+         'parsed))", hs.ready());
+    let out = eval(&mut vm, &format!("(let* ((iso (isolate-create)) \
+        (f (progn (isolate-await (isolate-spawn 'list :isolate iso)) (isolate-spawn {job} :isolate iso)))) \
+        {} (romacs--isolate-wait 0.1) \
+        (let* ((start (float-time)) \
+               (result (progn (isolate-interrupt iso) (condition-case e (isolate-await f 30) (quit 'interrupted) (error (list 'error e))))) \
+               (ms (round (* 1000 (- (float-time) start))))) \
+          (list result (< ms 300) (isolate-await (isolate-spawn '+ 1 1 :isolate iso)) ms)))", hs.await_ready()));
+    let (head, ms) = out.rsplit_once(' ').unwrap_or((&out, ""));
+    eprintln!("interrupt to quit: {ms} ms");
+    assert_eq!(head, "(interrupted t 2", "{out}");
+    eval(&mut vm, "(isolate-kill-all)");
+}
+
 /// Under `inhibit-quit' the interrupt is held: the wait runs its full
 /// 0.5 s without spinning on the drained wake pipe. Once `inhibit-quit'
 /// ends, the next wait quits before it blocks, though no wake is left for

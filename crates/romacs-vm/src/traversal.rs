@@ -176,17 +176,21 @@ impl Vm {
 }
 
 // Keep error formatting and image-authentication stack addresses out of the
-// tail-threaded handler. Even a cold address escape can inhibit LLVM tail calls.
+// tail-threaded handler. Even a cold address escape can inhibit LLVM tail
+// calls, so the pair comes back in two registers, not through a pointer to
+// the handler's frame an Option would need: UNBOUND twice for no pair,
+// which no cons holds (`threaded_dispatch_tests.rs`).
 #[inline(never)]
-fn mapped_pair(vm: &Vm, value: Value) -> Option<(Value, Value)> {
-    vm.cons_pair(value).ok()
+fn mapped_pair(vm: &Vm, value: Value) -> (Value, Value) {
+    vm.cons_pair(value).unwrap_or((Value::UNBOUND, Value::UNBOUND))
 }
 #[inline(always)]
 pub(super) fn pair(vm: &Vm, value: Value) -> Option<(Value, Value)> {
     // A cons's index is its payload, so the image test is the index's bit.
     let index = value.index_if(3)?;
     if index & crate::image::IMAGE != 0 {
-        return mapped_pair(vm, value);
+        let pair = mapped_pair(vm, value);
+        return (pair != (Value::UNBOUND, Value::UNBOUND)).then_some(pair);
     }
     vm.conses.get(index).copied()
 }

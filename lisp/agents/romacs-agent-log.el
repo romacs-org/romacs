@@ -44,6 +44,7 @@
 (require 'romacs-agent-store)
 
 (require 'romacs-working)
+(require 'romacs-agent-log-images)
 
 ;; The actions the chat's menu offers on its session are the chat's of
 ;; before (romacs-agent-ui.el), which read the session from here too.
@@ -938,19 +939,21 @@ from elsewhere, opening one of its own."
     (romacs-agent-log--prompt-own event)))
 
 (defun romacs-agent-log--prompt-own (event)
-  "Draw input EVENT, the user's own message."
+  "Draw input EVENT, the user's own message, the images it links under it."
   (let* ((text (or (plist-get event :text) ""))
          (images (plist-get event :images))
          (_ (push (string-trim text) romacs-agent-log--prompts))
+         (shown (romacs-agent-log-images-message (propertize (string-trim text) 'face 'romacs-agent-log-prompt)))
          (head (cond ((plist-get event :steer) (propertize "↪ " 'face 'romacs-agent-log-prompt))
                      (t (propertize "❯ " 'face 'romacs-agent-log-prompt-mark)))))
     (romacs-agent-log--line event 'prompt
                             (let ((line (concat (if (romacs-agent-log--blank-p) "" "\n")
                                                 head
-                                                (propertize (string-trim text) 'face 'romacs-agent-log-prompt)
+                                                (car shown)
                                                 (if images (propertize (format "  [%d image%s]" (length images) (if (cdr images) "s" ""))
                                                                        'face 'romacs-agent-log-note)
-                                                  ""))))
+                                                  "")
+                                                (if (cdr shown) (concat "\n" (cdr shown)) ""))))
                               ;; The turn it starts, by its request, on all of it
                               ;; (where prompt motion lands too): a diff or a
                               ;; rollback of the turn at point reads it.
@@ -1117,7 +1120,8 @@ back in the mode it had, and the next message carries it out."
 ;;; The separator and header
 
 (defun romacs-agent-log--doing (session)
-  "What SESSION does now, as the separator says it: (STATE . WORDS)."
+  "What SESSION does now, as the separator says it: (STATE . WORDS).
+WORDS is nil when the working thread says it alone: busy or idle."
   (pcase (cond ((romacs-agent-log--pending) 'waiting-approval)
                ;; A plan offered waits on the user as a request does.
                ((and (eq (romacs-agent-state session) 'idle) (not (romacs-agent-failed session))
@@ -1134,12 +1138,10 @@ back in the mode it had, and the next message carries it out."
                        (concat "⚠ waits on you: \\<romacs-agent-log-mode-map>\\[romacs-agent-log-allow] "
                                (if question "choose" "allow") " · \\[romacs-agent-log-deny] "
                                (if question "decline" "deny") " · \\[romacs-agent-log-next-ask] goes to it")))))
-    ((or 'starting 'running)
-     (cons 'working (if-let* ((block (romacs-agent-log--block romacs-agent-log--current)))
-                        (format "running %s" (plist-get (cdr block) :name))
-                      "working")))
+    ;; Busy or idle, the thread's motion says; what runs, its row does.
+    ((or 'starting 'running) (cons 'working nil))
     ;; A turn that failed and is not yet seen: said so, until the next.
-    ('idle (if (romacs-agent-failed session) (cons 'failed "failed") (cons 'idle "idle")))
+    ('idle (if (romacs-agent-failed session) (cons 'failed "failed") (cons 'idle nil)))
     (state (cons 'idle (format "%s" state)))))
 
 (defconst romacs-agent-log--thread-cols 8
@@ -1158,10 +1160,11 @@ its last width when none shows it."
 
 (defun romacs-agent-log--separator-text (doing width)
   "The separator for DOING, (STATE . WORDS), in WIDTH columns: the working
-thread, what the session does, then the composer's prompt."
+thread, what the session does when it needs words, then the composer's
+prompt."
   (let ((face (pcase (car doing) ('waiting 'romacs-agent-log-ask) ('working 'romacs-working-running)
                 ('failed 'romacs-agent-log-denied) (_ 'romacs-agent-log-rule))))
-    (let* ((label (concat " " (propertize (cdr doing) 'face (list face 'bold)) " "))
+    (let* ((label (if (cdr doing) (concat " " (propertize (cdr doing) 'face (list face 'bold)) " ") " "))
            ;; A dim rule after it fences the composer off the transcript,
            ;; never wrapping; none when that is short.
            (rule (- width 1 romacs-agent-log--thread-cols (string-width label))))
@@ -1785,6 +1788,11 @@ transcript's comes with it."
   (when (and (markerp romacs-agent-log--input) (< beg end) (>= beg romacs-agent-log--input))
     (let ((inhibit-modification-hooks t) (inhibit-read-only t)) (set-text-properties beg end nil))))
 
+(defun romacs-agent-log--composer-images (_beg end _length)
+  "Show the composer's image links once a change reaches it."
+  (when (and (markerp romacs-agent-log--input) (>= end romacs-agent-log--input))
+    (romacs-agent-log-images-composer romacs-agent-log--input)))
+
 (defun romacs-agent-log-composer ()
   "Go to the composer."
   (interactive nil romacs-agent-log-mode)
@@ -1945,7 +1953,8 @@ On the transcript's text:
   (add-function :filter-return (local 'filter-buffer-substring-function) #'romacs-agent-log--undecorated)
   ;; The separator's rule fits the window it is shown in.
   (add-hook 'window-size-change-functions (lambda (_) (when romacs-agent-log--input (romacs-agent-log--separator))) nil t)
-  (add-hook 'after-change-functions #'romacs-agent-log--composer-plain nil t))
+  (add-hook 'after-change-functions #'romacs-agent-log--composer-plain nil t)
+  (add-hook 'after-change-functions #'romacs-agent-log--composer-images nil t))
 
 (provide 'romacs-agent-log)
 ;; Its turns' place in the transcript, which needs it loaded.

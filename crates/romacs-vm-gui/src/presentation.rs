@@ -227,6 +227,27 @@ mod tests {
         assert_eq!(vm.eval_source("(buffer-string)").unwrap().display().unwrap(), "\"a\"");
     }
 
+    /// The close question and its answer are the echo area's message, which
+    /// the idle pass's sync (`romacs--echo-sync', timers.rs) keeps: the
+    /// message current before the question (C-g's "Quit") must not have
+    /// the answer erased once the next key's read cleared it.
+    #[test]
+    fn a_close_question_and_its_answer_keep_the_echo_area() {
+        let mut vm = workspace();
+        vm.set_echo_area_host(true);
+        vm.set_host_input(Some(Box::new(PromptKeys([110].into()))));
+        let mut presentation = Presentation::new();
+        vm.eval_source("(setq buffer-file-name \"/nonexistent/close-question\") (insert \"unsaved\") (message \"Quit\")").unwrap();
+        crate::echo::show_current_message(&mut vm).unwrap();
+        assert!(!presentation.window_close(&mut vm).unwrap(), "a modified file asks first");
+        crate::echo::sync_current_message(&mut vm).unwrap();
+        assert!(crate::echo::text(&mut vm).unwrap().starts_with("Modified file buffers exist;"), "THE_QUESTION_SHOWS");
+        presentation.host_command(&mut vm, Some(&key(110))).unwrap();
+        assert_eq!(vm.eval_source("romacs-gui-pending").unwrap().display().unwrap(), "nil", "N_ANSWERS");
+        crate::echo::sync_current_message(&mut vm).unwrap();
+        assert_eq!(crate::echo::text(&mut vm).unwrap(), "Cancelled", "THE_ANSWER_STAYS_AFTER_THE_IDLE_SYNC");
+    }
+
     fn native_key(code: i64) -> InputEvent {
         use romacs_display_runtime::host_types::FrontendKey;
         InputEvent::Key {

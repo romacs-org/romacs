@@ -655,9 +655,9 @@ pub const RUNTIME_RECORD: &str = "romacs-runtime-root";
 /// running session moves nothing and ends nothing. A build that records what
 /// it reads has the session's tree in its record, read again as it is now:
 /// the tree a session finds by its true name, however it was found or
-/// spelled (`ROMACS_RUNTIME_ROOT` naming the tree through a symlink, or the
-/// tree the executable's place gives, is the same tree), and its
-/// generation. A tree that has stopped being this executable's is noted,
+/// spelled (`ROMACS_RUNTIME_ROOT` naming the tree through a symlink or a
+/// directory linking its lisp/ and etc/, or the tree the executable's place
+/// gives, is the same tree), and its generation. A tree that has stopped being this executable's is noted,
 /// and that build is not published; the session goes on.
 pub fn runtime_root() -> PathBuf {
     found_runtime().unwrap_or_else(|why| {
@@ -680,20 +680,36 @@ pub fn runtime_lisp(path: &str) -> Result<PathBuf, String> {
 }
 
 /// [`runtime_root`], or why there is none, for a lookup that has a
-/// fallback: a process with no runtime tree goes on.  Found once.
+/// fallback: a process with no runtime tree goes on.  Found once, by its
+/// true name ([`true_tree`]): every file of the tree is then named one way
+/// in every session, as what is keyed by the names of the files a build
+/// read (a compile identity, `world::store::lisp_digest`) needs.
 fn found_runtime() -> Result<PathBuf, String> {
-    static FOUND: std::sync::OnceLock<Result<(PathBuf, PathBuf), String>> = std::sync::OnceLock::new();
-    let (root, truename) = FOUND.get_or_init(|| located_runtime().map(|root| {
-        let truename = canonicalize(&root).unwrap_or_else(|_| root.clone());
-        (root, truename)
-    })).as_ref().map_err(String::clone)?;
+    static FOUND: std::sync::OnceLock<Result<PathBuf, String>> = std::sync::OnceLock::new();
+    let root = FOUND.get_or_init(|| located_runtime().map(|root| true_tree(&root))).as_ref().map_err(String::clone)?;
     if building() {
-        host_fact("runtime-root", path_json(truename));
+        host_fact("runtime-root", path_json(root));
         if let Err(why) = runtime_tree(root) {
             note_uncaptured("runtime-tree", json!({"path": path_json(root), "why": why}));
         }
     }
     Ok(root.clone())
+}
+
+/// The tree ROOT names, by its true name: the directory its lisp/ and etc/
+/// truly lie in, when that is one directory, else ROOT resolved. A
+/// directory linking both into another tree is that tree, as a link to it
+/// is: an installation's top directory whose lisp/ and etc/ link its
+/// share/romacs/ names the tree its executable finds beside its bin/.
+fn true_tree(root: &Path) -> PathBuf {
+    // The directory holding NAME as its own NAME, not under another name.
+    let holder = |name: &str| canonicalize(root.join(name)).ok()
+        .filter(|path| path.file_name().is_some_and(|n| n == name))
+        .and_then(|path| path.parent().map(Path::to_path_buf));
+    match (holder("lisp"), holder("etc")) {
+        (Some(lisp), Some(etc)) if lisp == etc => lisp,
+        _ => canonicalize(root).unwrap_or_else(|_| root.to_path_buf()),
+    }
 }
 
 /// [`runtime_root`], or why there is none.
@@ -3197,6 +3213,37 @@ mod tests {
         std::fs::write(dir.join("gate").join(BUILD_TREES), format!("/another/checkout\n{}\n", tree.display())).unwrap();
         assert!(places.iter().all(|place| in_build_target(&dir.join(place), &tree)));
         assert!(!in_build_target(&dir.join("gate/elsewhere/romacs-vm-gui"), &tree));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+    /// A tree has one name however it is named: itself, a link to it, and
+    /// an installation's top directory linking its lisp/ and etc/ are the
+    /// tree; a directory linking them into two trees is itself.
+    #[test]
+    fn a_runtime_tree_is_named_by_where_its_lisp_and_etc_lie() {
+        let dir = std::env::temp_dir().join(format!("romacs-true-tree-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let tree = dir.join("install/share/romacs");
+        for sub in ["lisp", "etc"] {
+            std::fs::create_dir_all(tree.join(sub)).unwrap();
+            std::os::unix::fs::symlink(Path::new("share/romacs").join(sub), dir.join("install").join(sub)).unwrap();
+        }
+        std::os::unix::fs::symlink(&tree, dir.join("link")).unwrap();
+        std::os::unix::fs::symlink(dir.join("install"), dir.join("current")).unwrap();
+        let tree = std::fs::canonicalize(&tree).unwrap();
+        for name in ["install/share/romacs", "link", "install", "current"] {
+            assert_eq!(true_tree(&dir.join(name)), tree, "{name}");
+        }
+        std::fs::create_dir_all(dir.join("other/etc")).unwrap();
+        std::fs::create_dir(dir.join("mixed")).unwrap();
+        std::os::unix::fs::symlink(tree.join("lisp"), dir.join("mixed/lisp")).unwrap();
+        std::os::unix::fs::symlink(dir.join("other/etc"), dir.join("mixed/etc")).unwrap();
+        assert_eq!(true_tree(&dir.join("mixed")), std::fs::canonicalize(dir.join("mixed")).unwrap());
+        std::fs::create_dir_all(dir.join("renamed/custom-lisp")).unwrap();
+        std::fs::create_dir(dir.join("renamed/etc")).unwrap();
+        std::fs::create_dir(dir.join("aliased")).unwrap();
+        std::os::unix::fs::symlink(dir.join("renamed/custom-lisp"), dir.join("aliased/lisp")).unwrap();
+        std::os::unix::fs::symlink(dir.join("renamed/etc"), dir.join("aliased/etc")).unwrap();
+        assert_eq!(true_tree(&dir.join("aliased")), std::fs::canonicalize(dir.join("aliased")).unwrap(), "lisp/ under another name");
         std::fs::remove_dir_all(&dir).unwrap();
     }
     /// A tree is the executable's own only with its generation: a directory
