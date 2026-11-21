@@ -331,7 +331,11 @@ fn linear_search_rest(
 /// # Returns
 /// * `Some((match_start, registers))` if found
 /// * `None` if no match
-#[inline]
+#[expect(
+    clippy::inline_always,
+    reason = "a plain #[inline] wrapper stayed out of line in romacs-vm's caller and cost every search 19 instructions (callgrind, 2026-11-21)"
+)]
+#[inline(always)]
 pub fn re_search(
     pattern: &CompiledPattern,
     text: &[u8],
