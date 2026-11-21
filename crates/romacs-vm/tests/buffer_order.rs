@@ -122,11 +122,18 @@ fn buffer_order_holds_a_buffer_whose_name_slot_lisp_cleared() {
     vm.set_gc_moving(true);
     vm.set_gc_stress(50);
     vm.set_gc_verify(true);
-    let source = format!(r##"(let* ((names {NAMES}) (z (get-buffer-create "bo-z")))
+    // No variable keeps bo-z: once its name slot is cleared, only the order
+    // can, so the mark of the order is all that saves it.
+    let source = format!(r##"(let ((names {NAMES}))
+      (get-buffer-create "bo-z")
       (get-buffer-create "bo-y")
       (set (intern-soft "#:vm2-buffer:bo-z") nil)
       (dotimes (_ 300) (make-string 10 ?x))
       (garbage-collect)
-      (list (funcall names) (buffer-live-p z) (buffer-name z) (eq (car (memq z (buffer-list))) z)))"##);
-    assert_eq!(printed(vm, &source), r#"(("bo-z" "bo-y") t "bo-z" t)"#);
+      (dotimes (_ 300) (make-string 10 ?x))
+      (garbage-collect)
+      (let ((tail (buffer-list)) z)
+        (while tail (if (equal (buffer-name (car tail)) "bo-z") (setq z (car tail))) (setq tail (cdr tail)))
+        (list (funcall names) (buffer-live-p z) (buffer-name z))))"##);
+    assert_eq!(printed(vm, &source), r#"(("bo-z" "bo-y") t "bo-z")"#);
 }
