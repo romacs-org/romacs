@@ -338,9 +338,12 @@ def test_modules(path, src, code):
     for m in MOD_DECL.finditer(code):
         enclosing = [(start, name) for start, end, name in inline if start <= m.start() < end]
         within = home
-        for start, name in sorted(enclosing):
+        for n, (start, name) in enumerate(sorted(enclosing)):
             own_path = path_of(start)
-            within = PurePosixPath(posixpath.normpath(str(within / own_path))) if own_path else within / name
+            # The outermost one's own #[path] is beside the file, as rustc
+            # resolves it before the file's directory is appended.
+            base = p.parent if n == 0 and own_path else within
+            within = PurePosixPath(posixpath.normpath(str(base / own_path))) if own_path else within / name
         start = head(code, m.start())
         attrs = [(a, b) for (a, b) in marked if start <= a and b <= m.start()]
         if not any(test_attribute(marked[a]) for a in attrs):
