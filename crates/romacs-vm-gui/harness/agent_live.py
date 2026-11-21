@@ -3397,31 +3397,56 @@ def start_picker(args, base):
                 until(lambda: text in prompt(), 15, f'{text} asked')
             except RuntimeError as error:
                 open_now = prompt()
-                raise RuntimeError(f'{error}; prompt {open_now!r}, input {contents() if open_now else None!r}, '
-                                   f'echo {a.eval("(current-message)")}') from None
+                raise RuntimeError(f'{error}; prompt {open_now!r}, echo {a.eval("(current-message)")}; '
+                                   f'{where()}') from None
 
         def on_project(path):
             a.eval('(progn (switch-to-buffer "*romacs-agents*") (delete-other-windows) (goto-char (point-min)) '
                    f'(re-search-forward {lisp_text("^" + path.name + "  ")}) (beginning-of-line) t)')
 
+        def where():
+            """The selected window's buffer and mode, and the minibuffer's input
+            and panel: what a wait that timed out found."""
+            return a.eval(
+                '(prin1-to-string (list (buffer-name (window-buffer (selected-window))) '
+                '(with-current-buffer (window-buffer (selected-window)) major-mode) (minibuffer-depth) '
+                '(and (active-minibuffer-window) (with-current-buffer (window-buffer (active-minibuffer-window)) '
+                '(list (minibuffer-contents-no-properties) romacs-complete--input '
+                '(length romacs-complete--candidates)))) last-command))')
+
+        def narrowed(typed):
+            """Wait until the panel's candidates are those of TYPED, all of it
+            in the input: Return then takes the row it finds, whatever the load."""
+            try:
+                until(lambda: a.eval(
+                    '(with-current-buffer (window-buffer (active-minibuffer-window)) '
+                    f'(and (equal (minibuffer-contents-no-properties) {lisp_text(typed)}) '
+                    '(equal (car-safe romacs-complete--input) (minibuffer-contents-no-properties)) '
+                    'romacs-complete--candidates t))') == 't', 15, f'{typed} narrowed')
+            except RuntimeError as error:
+                raise RuntimeError(f'{error}; {where()}') from None
+
         def pick(project, typed, effort, text):
             """C-u c at PROJECT's section; the row TYPED finds, at EFFORT."""
             on_project(project)
-            a.keys('-M', 'ctrl', '-k', 'u', '-m', 'ctrl')
-            a.keys('c')
+            # One sequence: the prefix cannot be lost between two runs of wtype.
+            a.keys('-M', 'ctrl', '-k', 'u', '-m', 'ctrl', 'c')
             asked('Project directory')
             directory = contents()
             a.keys('-k', 'Return')
             asked('Agent')
             a.keys(typed)
-            time.sleep(.5)
+            narrowed(typed)
             a.keys('-k', 'Return')
             asked('Effort')
             a.keys(effort)
-            time.sleep(.5)
+            narrowed(effort)
             a.keys('-k', 'Return')
             composed(text)
             a.keys('-k', 'Return')
+            # Keys and evaluations come by separate ways: until the Return is
+            # taken, an evaluation switching buffers could take it elsewhere.
+            until(lambda: not holds(text), 15, f'{text} sent')
             return directory
 
         def chat_shown():
@@ -3429,12 +3454,16 @@ def start_picker(args, base):
             return a.eval('(with-current-buffer (window-buffer (selected-window)) '
                           '(and (derived-mode-p (quote romacs-agent-log-mode)) romacs-agent-log--input (not (active-minibuffer-window)) t))') == 't'
 
+        def holds(text):
+            """Whether the selected chat's composer ends with TEXT."""
+            return a.eval('(with-current-buffer (window-buffer (selected-window)) (and romacs-agent-log--input (string-suffix-p '
+                          + lisp_text(text) + ' (buffer-substring-no-properties romacs-agent-log--input (point-max)))))') == 't'
+
         def composed(text):
             """TEXT typed in the chat a start opened: its first message."""
             until(chat_shown, 15, 'chat opened')
             a.keys(text)
-            until(lambda: a.eval('(with-current-buffer (window-buffer (selected-window)) (string-suffix-p '
-                                 + lisp_text(text) + ' (buffer-substring-no-properties romacs-agent-log--input (point-max))))') == 't', 15, f'{text} typed')
+            until(lambda: holds(text), 15, f'{text} typed')
 
         # The palette, as drawn: Codex asked for its models as it opened.
         codex_kept = a.home / '.local/state/romacs/agents/models/codex.json'
