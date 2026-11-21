@@ -253,12 +253,20 @@ an instance of its harness."
 (defun romacs-agent-menu--hand-off (session provider model next effort)
   "Start a session under PROVIDER on MODEL at EFFORT, briefed on SESSION.
 Tell it to do NEXT."
-  (message "Gathering %s's thread..." (romacs-agent-title session))
-    ;; Replayed between keystrokes: a long thread never holds the editor.
+  (let ((window (selected-window))
+        (source (current-buffer)))
+    (message "Gathering %s's thread..." (romacs-agent-title session))
     (romacs-agent-events-async
-     session (lambda (events)
-               (romacs-agent-show (romacs-agent-handoff session (romacs-agent-handoff-thread session events)
-                                                        provider model next (and effort (list :effort effort)))))))
+     session
+     (lambda (events)
+       (let ((target (romacs-agent-handoff session (romacs-agent-handoff-thread session events)
+                                          provider model next (and effort (list :effort effort)))))
+         (if (and (eq (selected-window) window) (eq (window-buffer window) source)
+                  (not (window-dedicated-p window)))
+             (let ((display-buffer-overriding-action
+                    '((display-buffer-same-window) (inhibit-same-window . nil))))
+               (romacs-agent-show target))
+           (message "Handoff ready in %s" (buffer-name (romacs-agent-log-chat target)))))))))
 
 (defun romacs-agent-chat-plan ()
   "Put this session in its harness's plan mode, or take it out: what plan

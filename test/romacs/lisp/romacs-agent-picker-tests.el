@@ -247,6 +247,32 @@ affixation it saw pushed on the list in cell ASKED."
       (should (equal (nth 3 (cadr (car asked))) '("Codex · C")))
       (should (string-match-p "Effort.*high" (caar (car asked)))))))
 
+(ert-deftest romacs-agent-picker-handoff-opens-in-originating-window ()
+  (let ((session (romacs-agent--make :title "Source"))
+        (target (generate-new-buffer " *handoff target*"))
+        callback options)
+    (unwind-protect
+        (save-window-excursion
+          (with-temp-buffer
+            (switch-to-buffer (current-buffer))
+            (let ((window (selected-window))
+                  (display-buffer-alist '(("handoff target" (display-buffer-no-window)
+                                          (allow-no-window . t)))))
+              (cl-letf (((symbol-function 'romacs-agent-events-async)
+                         (lambda (_ then) (setq callback then)))
+                        ((symbol-function 'romacs-agent-handoff)
+                         (lambda (_ _events _provider _model _next opts)
+                           (setq options opts)
+                           target))
+                        ((symbol-function 'romacs-agent-log-chat) (lambda (&rest _) target))
+                        ((symbol-function 'romacs-agent-log-source-seen) #'ignore))
+                (romacs-agent-menu--hand-off session "codex" "astra" "Continue" "high")
+                (funcall callback nil)
+                (should (equal options '(:effort "high")))
+                (should (eq (selected-window) window))
+                (should (eq (window-buffer window) target))))))
+      (kill-buffer target))))
+
 (ert-deftest romacs-agent-picker-reads-compatible-legacy-model-cache ()
   (romacs-agent-picker--with
       ((instance (list :name "claude" :program program))
