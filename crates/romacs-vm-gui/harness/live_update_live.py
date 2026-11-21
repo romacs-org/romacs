@@ -7,7 +7,7 @@ The session runs an install-shaped build in its own private headless labwc,
 HOME, XDG and TMPDIR (parity_live.py): a runtime root holding this tree's
 lisp/, etc/ and assets/ and a build.json naming the commit they are, made
 in a clone of the tree, the source.  Its init loads a fixture library,
-lisp/live-journey.el, opens buffers in its mode and in a mode derived from
+lisp/session/live-journey.el, opens buffers in its mode and in a mode derived from
 it, puts its map on text in a third buffer as a `keymap' property, binds
 a key of its own in the map and sets one of its options.  The harness then
 edits the clone (the fixture's map and options, and a function added to
@@ -22,7 +22,8 @@ default and the one the user set keeps its value; the preloaded file's new
 function is there; the ledger names both files at their blobs and the mode
 line shows its mark.
 
-Then M-x romacs-restart: the successor puts the ledger's files back from
+Then M-x romacs-live-test runs the fixture's suite from the source and
+it passes.  Then M-x romacs-restart: the successor puts the ledger's files back from
 its image before the buffers (the same blobs, the new key, the probe, the
 mark).  Then M-x romacs-session-reset onto this build (its executable,
 its runtime kept): no ledger, the build's code and key, no mark,
@@ -80,6 +81,14 @@ INIT = ''';; -*- lexical-binding: t -*-
 (with-temp-file (expand-file-name "alive" parity-probe-dir) (insert (number-to-string (float-time))))
 '''
 
+# The fixture's suite, run from the source by romacs-live-test: it holds
+# the updated fixture to its new default.
+FIXTURE_TESTS = ''';;; live-journey-tests.el --- The fixture's suite  -*- lexical-binding: t -*-
+(require 'ert)
+(require 'live-journey)
+(ert-deftest live-journey-limit-is-twenty () (should (= (default-value 'live-journey-limit) 20)))
+'''
+
 PROBE_FN = '(defun subr-x-live-journey-probe () "Added by the journey." 42)\n'
 
 OBSERVE = '''(list
@@ -121,7 +130,8 @@ def build_and_source(root, env):
                    check=True, capture_output=True, env=git_env(env))
     for part in ('lisp', 'etc', 'assets'):
         subprocess.run(['rsync', '-a', '--delete', f'{TREE / part}/', f'{source / part}/'], check=True)
-    (source / 'lisp/live-journey.el').write_text(fixture())
+    (source / 'lisp/session/live-journey.el').write_text(fixture())
+    (source / 'test/romacs/lisp/live-journey-tests.el').write_text(FIXTURE_TESTS)
     git(source, env, 'add', '-A', 'lisp', 'etc', 'assets')
     git(source, env, 'commit', '-q', '--allow-empty', '-m', 'journey base')
     commit = git(source, env, 'rev-parse', 'HEAD')
@@ -165,7 +175,7 @@ def run(args, output, entry):
         ready(engine, '(get-buffer "journey-text")', 'the init')
         before = plist(engine.ask(OBSERVE))
         entry['before'] = before
-        (source / 'lisp/live-journey.el').write_text(fixture(limit=20, chosen=2, key='C-c b', command='b'))
+        (source / 'lisp/session/live-journey.el').write_text(fixture(limit=20, chosen=2, key='C-c b', command='b'))
         with (source / 'lisp/emacs-lisp/subr-x.el').open('a') as subr:
             subr.write(PROBE_FN)
         engine.keys(M('x'))
@@ -194,7 +204,7 @@ def run(args, output, entry):
         entry['ledger'] = ledger
         entry['mode_line'] = engine.ask('(let ((w (get-buffer-window "journey"))) (substring-no-properties '
                                         '(format-mode-line (buffer-local-value (quote mode-line-format) (window-buffer w)) nil w)))')
-        blobs = {path: git(source, env, 'hash-object', path) for path in ('lisp/live-journey.el', 'lisp/emacs-lisp/subr-x.el')}
+        blobs = {path: git(source, env, 'hash-object', path) for path in ('lisp/session/live-journey.el', 'lisp/emacs-lisp/subr-x.el')}
         # A real key press runs the new command in the mode's buffer.
         engine.ask('(progn (setq live-journey-pressed nil) (switch-to-buffer "journey") t)')
         ready(engine, '(equal (buffer-name) "journey")', 'the journey buffer')
@@ -205,12 +215,12 @@ def run(args, output, entry):
         time.sleep(.5)
         entry['capture'] = capture(engine, output / 'ledger.png')
         rows = {row[0]: row for row in report['rows'] or []}
-        journey_keymaps = rows.get('lisp/live-journey.el', [None, None, None, []])[3]
+        journey_keymaps = rows.get('lisp/session/live-journey.el', [None, None, None, []])[3]
         checks = {
             'before: the old key': before['mode'][0] is None and before['mode'][1] == 'live-journey-a',
             'before: subr-x loaded, no probe': before['subr-x'] in (True, 't') and before['probe'] is None,
             'no refusal, no failure': not report['refusals'] and report['failed'] is None,
-            'both files loaded': rows.get('lisp/live-journey.el', [0, None])[1] == 'load'
+            'both files loaded': rows.get('lisp/session/live-journey.el', [0, None])[1] == 'load'
                                  and rows.get('lisp/emacs-lisp/subr-x.el', [0, None])[1] == 'load',
             'mode buffer: new key bound, old gone': after['mode'][0] == 'live-journey-b' and after['mode'][1] is None,
             "user's key kept": after['mode'][2] == 'undo',
@@ -225,6 +235,7 @@ def run(args, output, entry):
             'mode line mark': 'Δ2' in (entry['mode_line'] or ''),
         }
         entry['checks'] = checks
+        checks.update(run_tests(engine, entry))
         checks.update(restart_and_reset(engine, root, blobs, entry))
         entry['status'] = 'PASS' if all(checks.values()) else 'FAIL'
     finally:
@@ -232,6 +243,30 @@ def run(args, output, entry):
     if entry['status'] == 'PASS' and not args.keep:
         shutil.rmtree(root, ignore_errors=True)
     return entry
+
+
+def run_tests(engine, entry):
+    """M-x romacs-live-test runs the live files' suites from the source;
+    the fixture's passes against its updated default.  The checks."""
+    engine.ask('(progn (setq romacs-live-test-last nil) t)')
+    engine.keys(M('x'))
+    ready(engine, '(minibufferp)', 'M-x prompt')
+    engine.keys(T('romacs-live-test'))
+    ready(engine, '(equal (minibuffer-contents-no-properties) "romacs-live-test")', 'the test command typed')
+    engine.keys(K('Return'))
+    started = time.time()
+    wait(lambda: engine.ask('(if romacs-live-test-last 1 0)') == 1, 300, 'the test run', engine.process, .2)
+    entry['test_seconds'] = round(time.time() - started, 3)
+    tested = plist(engine.ask('(list :summary (romacs-live-test-summary romacs-live-test-last)'
+                              ' :passed (and (romacs-live-test-passed-p romacs-live-test-last) t)'
+                              ' :files (mapcar (lambda (f) (plist-get f :file)) (plist-get romacs-live-test-last :files))'
+                              ' :shown (with-current-buffer "*romacs-live-tests*" (buffer-substring-no-properties (point-min) (point-max))))'))
+    entry['tested'] = tested
+    return {
+        'tests: the fixture\'s suite ran from the source and passed':
+            tested['passed'] in (True, 't') and tested['files'] == ['test/romacs/lisp/live-journey-tests.el'],
+        'tests: the runner\'s lines shown': 'PASS' in (tested['shown'] or ''),
+    }
 
 
 RESTARTED = '''(list
