@@ -30,7 +30,7 @@ fn alphabet(url: bool) -> &'static [u8; 64] {
 /// Input octets encoded between two polls: whole lines of 57 octets, so a
 /// slice's text, a line break before each slice but the first, concatenates
 /// into exactly the whole input's.
-const SLICE: usize = 57 * 216;
+const SLICE: usize = LINE_GROUPS * 3 * 216;
 
 /// OCTETS encoded: a slice or less whole and unpolled, in the caller's
 /// body; a longer input by `encoded_sliced`.
@@ -49,22 +49,33 @@ fn encoded(cx: &mut Leaf<'_>, octets: &[u8], line_break: bool, pad: bool, url: b
 #[inline(never)]
 fn encoded_sliced(cx: &mut Leaf<'_>, octets: &[u8], line_break: bool, pad: bool, url: bool) -> std::result::Result<Vec<u8>, Fault> {
     cx.quittable(|cx| {
-        let mut out = Vec::with_capacity(octets.len() / 3 * 4 + octets.len() / 57 + 4);
+        let mut out = encode_buffer(octets.len(), line_break);
         for (n, part) in octets.chunks(SLICE).enumerate() {
             if n > 0 {
                 cx.native_poll()?;
                 if line_break { out.push(b'\n'); }
             }
-            out.extend_from_slice(&encode(part, line_break, pad, url));
+            encode_into(&mut out, part, line_break, pad, url);
         }
         Ok(out)
     })
 }
 
-/// fns.c base64_encode_1 over octets.
 fn encode(octets: &[u8], line_break: bool, pad: bool, url: bool) -> Vec<u8> {
+    let mut out = encode_buffer(octets.len(), line_break);
+    encode_into(&mut out, octets, line_break, pad, url);
+    out
+}
+
+/// Reserve for padded groups and, when wrapping, one newline for each line after the first.
+fn encode_buffer(len: usize, line_break: bool) -> Vec<u8> {
+    let breaks = if line_break { len.saturating_sub(1) / (LINE_GROUPS * 3) } else { 0 };
+    Vec::with_capacity(len.div_ceil(3) * 4 + breaks)
+}
+
+/// fns.c base64_encode_1 over OCTETS, appended to OUT.
+fn encode_into(out: &mut Vec<u8>, octets: &[u8], line_break: bool, pad: bool, url: bool) {
     let table = alphabet(url);
-    let mut out = Vec::with_capacity(octets.len() / 3 * 4 + 4);
     for (group, chunk) in octets.chunks(3).enumerate() {
         if line_break && group > 0 && group % LINE_GROUPS == 0 { out.push(b'\n'); }
         let value = chunk.iter().enumerate().fold(0u32, |v, (i, &b)| v | u32::from(b) << (16 - 8 * i));
@@ -74,7 +85,6 @@ fn encode(octets: &[u8], line_break: bool, pad: bool, url: bool) -> Vec<u8> {
             else if pad { out.push(b'='); }
         }
     }
-    out
 }
 
 /// The input a chunk at a time: when a chunk's bytes run out, the quit

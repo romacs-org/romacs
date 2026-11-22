@@ -536,9 +536,10 @@ fn command_remapping_and_keymap_lists_match_gnu() {
 /// slices exactly as GNU's one pass writes it.
 #[test]
 fn base64_coding_across_slices_matches_gnu() {
-    let expressions: Vec<String> = [12311, 12312, 12313, 24623, 24624, 24625, 30001].iter().map(|n| format!(
+    let expressions: Vec<String> = [12311, 12312, 12313, 12314, 24623, 24624, 24625, 30001].iter().map(|n| format!(
         "(let ((s (substring (apply #'concat (make-list 4000 \"abcdefg\\377\")) 0 {n}))) \
-           (list (base64-encode-string s) (base64-encode-string s t) (base64url-encode-string s t) \
+           (list (base64-encode-string s) (base64-encode-string s t) \
+                 (base64url-encode-string s) (base64url-encode-string s t) \
                  (equal (base64-decode-string (base64-encode-string s)) s)))")).collect();
     compare(&expressions.iter().map(String::as_str).collect::<Vec<_>>());
 }
