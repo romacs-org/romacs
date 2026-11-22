@@ -24,6 +24,14 @@
               "\n"))
     (expand-file-name (concat id ".jsonl") project)))
 
+(ert-deftest romacs-agent-history-claude-assistant-contains-only-chat-events ()
+  (let ((message (romacs-mcp--object "id" "m" "content"
+                                     (vector (romacs-mcp--object "type" "text" "text" "Hello")))))
+    (should (equal (romacs-agent-claude-history--events
+                    (list (romacs-mcp--object "type" "assistant" "uuid" "cursor" "message" message)))
+                   '((:type delta :text "Hello" :parent nil :message "m")
+                     (:type message-end :message "m" :parent nil))))))
+
 (ert-deftest romacs-agent-history-listed-from-rows-the-scan-aside ()
   ;; The scan writes a row a transcript; a listing reads the rows, as the
   ;; scan listed them, and starts the next scan aside; a transcript gone

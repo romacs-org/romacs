@@ -402,17 +402,12 @@ cache, it reports none) or does not say."
                  ("text_delta" (list (list :type 'delta :text (gethash "text" delta) :parent parent :message id)))
                  ("thinking_delta" (list (list :type 'thinking :text (gethash "thinking" delta) :parent parent))))))))))
 
-(defun romacs-agent--claude-assistant-events (session line parent)
-  "Decode a Claude Code assistant LINE and its PARENT for SESSION."
-  (let* ((message (gethash "message" line))
-         (id (gethash "id" message))
-         (streamed (gethash id (romacs-agent-streamed session)))
-         (usage (gethash "usage" message))
-         (uuid (gethash "uuid" line))
-         (text nil))
+(defun romacs-agent--claude-message-events (message parent streamed)
+  "Decode a Claude assistant MESSAGE from PARENT, already STREAMED when non-nil."
+  (let ((id (gethash "id" message))
+        (usage (gethash "usage" message))
+        (text nil))
     (append
-     (when (and (not parent) (stringp uuid))
-       (list (list :type 'record-state :state (list :resume-at uuid))))
      ;; The prompt this call sent: the context it fills.
      (when (and (hash-table-p usage) (not parent))
        (list (list :type 'usage :context-used (+ (or (gethash "input_tokens" usage) 0)
@@ -431,6 +426,14 @@ cache, it reports none) or does not say."
                             :parent parent))
      ;; The message's text is whole: its view may render it once.
      (when text (list (list :type 'message-end :message id :parent parent))))))
+
+(defun romacs-agent--claude-assistant-events (line parent streamed)
+  "Decode a live Claude assistant LINE from PARENT with STREAMED message ids."
+  (let ((uuid (gethash "uuid" line))
+        (message (gethash "message" line)))
+    (append (when (and (not parent) (stringp uuid))
+              (list (list :type 'record-state :state (list :resume-at uuid))))
+            (romacs-agent--claude-message-events message parent (gethash (gethash "id" message) streamed)))))
 
 (defun romacs-agent--claude-user-events (line parent compacting)
   "Decode a Claude Code user LINE from PARENT, with its prior COMPACTING state."
@@ -506,7 +509,7 @@ cache, it reports none) or does not say."
             (pcase type
               ("system" (romacs-agent--claude-system-events line))
               ("stream_event" (romacs-agent--claude-stream-events line parent (romacs-agent-message session)))
-              ("assistant" (romacs-agent--claude-assistant-events session line parent))
+              ("assistant" (romacs-agent--claude-assistant-events line parent (romacs-agent-streamed session)))
               ("user" (romacs-agent--claude-user-events line parent compacting))
               ("result" (romacs-agent--claude-result-events line))
               ("control_request"

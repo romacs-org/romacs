@@ -6,11 +6,11 @@
 
 (require 'cl-lib)
 (require 'romacs-agent-transcript)
-(declare-function romacs-agent--make "romacs-agent")
+(require 'romacs-agent-record)
 (declare-function romacs-agent--text-of "romacs-agent" (content))
-(declare-function romacs-agent--value "romacs-agent" (value))
 (declare-function romacs-agent--claude-incoming "romacs-agent-claude" (text))
-(declare-function romacs-agent--claude-events "romacs-agent-claude" (session line))
+(declare-function romacs-agent--claude-user-events "romacs-agent-claude" (line parent compacting))
+(declare-function romacs-agent--claude-message-events "romacs-agent-claude" (message parent streamed))
 
 (defun romacs-agent-claude-history--tool-result-p (content)
   "Whether CONTENT contains a tool result."
@@ -74,7 +74,7 @@ project it was run, or nil."
 
 (defun romacs-agent-claude-history--events (objects)
   "A Claude Code transcript's OBJECTS as chat events."
-  (let ((scratch (romacs-agent--make :harness 'claude)) (events nil) (turn nil) (last nil) (model nil))
+  (let ((events nil) (turn nil) (last nil) (model nil))
     (cl-flet ((close ()
                 (when turn
                   (push (list :type 'done :duration (romacs-agent-transcript-duration turn last))
@@ -94,14 +94,17 @@ project it was run, or nil."
                       (setq turn (gethash "timestamp" line))
                       (dolist (event begun) (push event events)))
                      ((vectorp content)
-                      (dolist (event (romacs-agent--claude-events scratch line))
+                      (dolist (event (romacs-agent--claude-user-events line (romacs-agent--value (gethash "parent_tool_use_id" line)) nil))
                         (when (eq (plist-get event :type) 'tool) (push event events)))))))
             ("assistant"
-             (let ((name (gethash "model" (gethash "message" line))))
+             (let* ((message (gethash "message" line))
+                    (name (gethash "model" message))
+                    (parent (romacs-agent--value (gethash "parent_tool_use_id" line))))
                (when (and (stringp name) (not (equal name model)) (not (string-prefix-p "<" name)))
                  (setq model name)
-                 (push (list :type 'meta :model name) events)))
-             (dolist (event (romacs-agent--claude-events scratch line)) (push event events))))
+                 (push (list :type 'meta :model name) events))
+               (dolist (event (romacs-agent--claude-message-events message parent nil))
+                 (push event events)))))
           (setq last (or (gethash "timestamp" line) last))))
       (close))
     (nreverse events)))

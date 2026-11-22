@@ -173,6 +173,27 @@ line's `env' sets only its own configuration variable."
           (should (romacs-agent--ready-p session))
           (should (equal (romacs-agent-harness-session session) "rpc-x"))))))))
 
+(ert-deftest romacs-agent-per-turn-prompt-recovery-is-applied-at-the-journal ()
+  (let* ((incoming (list :text "original" :prompt (secure-hash 'sha1 "wrapped")
+                         :messages '((:id "from-parent" :kind "parent"))))
+         (session (romacs-agent--make :id "per-turn" :harness 'claude :incoming incoming))
+         (input (romacs-mcp--object "prompt" "wrapped"))
+         (seen nil)
+         (romacs-agent-event-functions
+          (list (lambda (state event)
+                  (should-not (romacs-agent-incoming state))
+                  (push event seen)))))
+    (romacs-agent--record-input-events session input)
+    (should (eq (romacs-agent-incoming session) incoming))
+    (romacs-agent-driver-test--feed session 1 "in" input)
+    (should (= (length seen) 1))
+    (let ((event (car seen)))
+      (should (eq (plist-get event :type) 'input))
+      (should (equal (plist-get event :text) "original"))
+      (should (equal (plist-get event :messages) (plist-get incoming :messages)))
+      (should (plist-get event :last)))
+    (should (equal (romacs-agent-answering session) "from-parent"))))
+
 (ert-deftest romacs-agent-a-message-sent-is-a-turn-under-way ()
   ;; A message written to an idle harness's session: running at once, not
   ;; idle until its record comes back (a caller waiting for the turn's end

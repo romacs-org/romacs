@@ -6,10 +6,10 @@
 
 (require 'cl-lib)
 (require 'romacs-agent-transcript)
+(require 'romacs-agent-record)
 (require 'romacs-mcp)
 (declare-function romacs-agent--text-of "romacs-agent" (content))
 (declare-function romacs-agent--uuid-p "romacs-agent" (id))
-(declare-function romacs-agent--value "romacs-agent" (value))
 (declare-function romacs-agent-incoming-of "romacs-agent-tools" (text))
 
 (defun romacs-agent-codex-history--field (object &rest keys)
