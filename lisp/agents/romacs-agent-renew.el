@@ -23,7 +23,8 @@
 ;; summary when one came since its last turn, else one more turn asking
 ;; the session for a note (`romacs-agent-renew-summary'), a turn of
 ;; Romacs's own that answers no one.  A session renews by itself at a
-;; turn's end once its context passes `romacs-agent-renew-at'.
+;; turn's end once its context passes `romacs-agent-renew-at'.  If no
+;; other message is waiting, it gets a prompt to continue its work.
 
 ;;; Code:
 
@@ -55,6 +56,10 @@ the work (files, branches, commits, what is done and what is not); the checks ru
 results; open questions; the next step. Facts and paths, no pleasantries, at most about 600 \
 words. Reply with the note alone; do nothing else this turn."
   "What a renewal asks of the session for its note.")
+
+(defconst romacs-agent-renew--continue-prompt
+  "Continue the user's unfinished work from the handoff. Take the next actionable step now. If the work is complete or you need the user's input, say so."
+  "The next request after an automatic renewal with no waiting message.")
 
 (defconst romacs-agent-renew--note-head
   "Handoff note, written by this session for its next conversation:\n\n"
@@ -163,15 +168,16 @@ none, its whole thread, an imported transcript's part with it."
                             (funcall then))))))
     (add-hook 'romacs-agent-event-functions waiter)))
 
-(defun romacs-agent-renew (session &optional why then)
+(defun romacs-agent-renew (session &optional why then continuation)
   "Go on with SESSION in a new conversation of its harness, its first
 message carrying a brief of this one; WHY says what for (journaled).
+CONTINUATION, when given, is the next prompt if no message is waiting.
 Call THEN, when given, with the outcome: (:done NATIVE), NATIVE the new
 conversation's id or nil until its harness names it, or (:error MESSAGE).
 Refused at once (`user-error') while SESSION is busy, held, or its
 harness cannot renew this conversation."
   (romacs-agent-renew--check session)
-  (let* ((token (list why))
+  (let* ((token (cons why continuation))
          (then (or then #'ignore))
          (fail (lambda (message)
                  (romacs-agent-renew--release session token)
@@ -217,6 +223,7 @@ Call THEN with the outcome while TOKEN still owns the handoff."
            (error (funcall then (list :error (error-message-string err)))))))
       (romacs-agent--note session (romacs-mcp--object "type" "renew" "from" from "to" (or native :null)
                                                       "why" (or (car token) :null) "brief" brief "summary" source
+                                                      "continue" (or (cdr token) :null)
                                                       "context" (or (romacs-agent-context-used session) :null))))))
 
 (defun romacs-agent-renew--read (session then fail)
@@ -555,10 +562,13 @@ context is full."
       ;; itself comes after (`romacs-agent-renew').
       (when (condition-case nil (progn (romacs-agent-renew--check session) t) (user-error nil))
         ;; By itself: once a conversation.
-        (unless (gethash session romacs-agent-renew--wanted)
-          (puthash session (romacs-agent--native-id session) romacs-agent-renew--automatic))
-        (remhash session romacs-agent-renew--wanted)
-        (romacs-agent-renew session why)))))
+        (let ((automatic (not (gethash session romacs-agent-renew--wanted))))
+          (when automatic
+            (puthash session (romacs-agent--native-id session) romacs-agent-renew--automatic))
+          (remhash session romacs-agent-renew--wanted)
+          (romacs-agent-renew session why nil
+                              (when (and automatic (not (plist-get event :error)))
+                                romacs-agent-renew--continue-prompt)))))))
 
 (add-hook 'romacs-agent-event-functions #'romacs-agent-renew--at-end)
 

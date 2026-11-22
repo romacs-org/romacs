@@ -1562,6 +1562,9 @@ its parent's last, as its end goes to its parent; else the first."
                  (car messages))
              :id))
 
+(defconst romacs-agent--renew-continuation "renew-continue"
+  "The romacsOwn value of a turn that continues work after renewal.")
+
 (defun romacs-agent--input (session text &optional images messages own queued)
   "Write TEXT to SESSION's persistent harness as the user's message, with
 the attached IMAGES; MESSAGES, when given, say it comes from other
@@ -1569,7 +1572,8 @@ sessions (`romacs-agent-make-message'): the harness reads it as
 `romacs-agent--messages-text' says, and the journal keeps them as
 romacsMessages beside TEXT.  OWN, when given, names what Romacs asks of
 it itself \(a string kept as the record's romacsOwn): no one's message,
-and its turn's end no one's answer (`romacs-agent-own-turn').  QUEUED,
+and its turn's end no one's answer (`romacs-agent-own-turn'), except
+when it continues work after handoff.  QUEUED,
 the id of the kept message it is (`romacs-agent--keep-item'), is kept as
 the record's romacsQueued: a restore sends it no second time.  The
 journal keeps the message as it would be without them, and their files:
@@ -1583,7 +1587,7 @@ one request id: the journal's is the one written."
          (messages (romacs-agent--stamped messages text))
          ;; A renewal's brief goes with the message; the journal has it in
          ;; the renewal's note, and the message as the user wrote it.
-         (brief (and (not own) (romacs-agent-brief session)))
+         (brief (and (or (not own) (equal own romacs-agent--renew-continuation)) (romacs-agent-brief session)))
          ;; Known before the write: nothing after it may fail.
          (answered (romacs-agent--answered messages)))
     ;; The journal's alone: the id names the message's turn.
@@ -2009,10 +2013,13 @@ Return nil when the thread is gone."
       t)))
 
 (defun romacs-agent--note-end (session)
-  "Keep SESSION's turn end for its parent, when it has one, unless the turn
-was Romacs's own (`romacs-agent-own-turn'): (SEQ RESULT FAILED ANSWERS),
-ANSWERS the id of the message the turn began with."
-  (when (and (plist-get (romacs-agent-options session) :parent) (not (romacs-agent-own-turn session)))
+  "Keep SESSION's turn end for its parent, when it has one.
+Exclude Romacs's maintenance turns, but report work after a handoff.
+Each end is (SEQ RESULT FAILED ANSWERS), ANSWERS the id of the message
+the turn began with."
+  (when (and (plist-get (romacs-agent-options session) :parent)
+             (or (not (romacs-agent-own-turn session))
+                 (equal (romacs-agent-own-turn session) romacs-agent--renew-continuation)))
     (push (list (romacs-agent-done-seq session) (romacs-agent-reply session) (romacs-agent-failed session)
                 (romacs-agent-answering session))
           (romacs-agent-ends session))))
@@ -2036,10 +2043,11 @@ before while `romacs-agent--received-limit' lasts."
 
 (defun romacs-agent--driver-anew (session &rest state)
   "SESSION's driver state for a new run: STATE, and what its conversation
-keeps across runs (`:rolled-back', `:resume-at', and `:renew-block')."
+keeps across runs (`:rolled-back', `:resume-at', `:renew-block', and
+`:renew-continuation')."
   (let ((old (romacs-agent-driver-state session)))
     (append state
-            (cl-loop for key in '(:rolled-back :resume-at :renew-block)
+            (cl-loop for key in '(:rolled-back :resume-at :renew-block :renew-continuation)
                      when (plist-member old key) append (list key (plist-get old key))))))
 
 (defun romacs-agent--record-cursor (record)
@@ -2047,12 +2055,19 @@ keeps across runs (`:rolled-back', `:resume-at', and `:renew-block')."
   (cond ((romacs-agent--rollback-note-p record)
          (let ((at (gethash "at" (gethash "note" record) 'unknown)))
            (list :rolled-back t :resume-at (unless (eq at :null) at))))
-        ((romacs-agent--note-p record "renew") '(:rolled-back t :resume-at nil))
-        ((romacs-agent--record-request record) '(:rolled-back nil))))
+        ((romacs-agent--note-p record "renew")
+         (let ((prompt (gethash "continue" (gethash "note" record))))
+           (list :rolled-back t :resume-at nil :renew-continuation (and (stringp prompt) prompt))))
+        ((romacs-agent--record-request record)
+         (if (eq (gethash "romacsBrief" (gethash "in" record)) t)
+             '(:rolled-back nil :renew-continuation nil)
+           '(:rolled-back nil)))))
 
 (defun romacs-agent--record-echo (session input)
   "Remember that the supervisor journaled INPUT for SESSION."
   (cl-incf (romacs-agent-inputs session))
+  (when (and (hash-table-p input) (eq (gethash "romacsBrief" input) t))
+    (setf (romacs-agent-brief session) nil))
   ;; An interrupt written before a startup line is echoed does not clear it.
   (let ((pending (romacs-agent-startup-pending session)))
     (when (or (eq pending t) (equal pending (romacs-agent--step-id input)))
@@ -4045,20 +4060,38 @@ which its harness can steer."
   (and (eql (romacs-agent-item-turn item) (romacs-agent-turns session))
        (romacs-agent--steerable-p session)))
 
+(defun romacs-agent--pending-renewal-input (session)
+  "The pending continuation of SESSION's automatic renewal, if any."
+  (when (and (romacs-agent-brief session) (romacs-agent--live-p session)
+             (not (romacs-agent-settled-p session)))
+    (plist-get (romacs-agent-driver-state session) :renew-continuation)))
+
+(defun romacs-agent--renewal-item (session)
+  "The fallback message of SESSION's automatic renewal, when it may go."
+  (when-let* ((prompt (romacs-agent--pending-renewal-input session))
+              (item (romacs-agent-item
+                     prompt :kind 'next :own romacs-agent--renew-continuation
+                     :valid (lambda ()
+                              (and (not (romacs-agent-queue session))
+                                   (equal prompt (romacs-agent--pending-renewal-input session))))))
+              ((romacs-agent--may-write-p session item)))
+    item))
+
 (defun romacs-agent--next-item (session)
-  "The first of SESSION's waiting messages that may go now
-\(`romacs-agent--may-write-p'), or nil: the gate asked once, a steer
-passing those waiting for a new turn.  A hold's own prompt waits first."
-  (when-let* ((head (car (romacs-agent-queue session)))
-              ((romacs-agent--open-p session (romacs-agent-item-token head))))
-    (cond ((romacs-agent-item-held head) nil)
-          ((romacs-agent--goes-p session head) head)
-          ;; A steer passes what waits for a new turn, never what its
-          ;; user holds: that and what waits behind it wait.
-          (t (cl-loop for item in (cdr (romacs-agent-queue session))
-                      until (romacs-agent-item-held item)
-                      when (and (romacs-agent-item-turn item) (romacs-agent--steer-p session item))
-                      return item)))))
+  "The first message SESSION may send now, or nil.
+A steer may pass a message waiting for a new turn.  A hold's own prompt
+waits first.  An automatic renewal supplies a message to an empty queue."
+  (if-let* ((head (car (romacs-agent-queue session))))
+      (when (romacs-agent--open-p session (romacs-agent-item-token head))
+        (cond ((romacs-agent-item-held head) nil)
+              ((romacs-agent--goes-p session head) head)
+              ;; A steer passes what waits for a new turn, never what its
+              ;; user holds: that and what waits behind it wait.
+              (t (cl-loop for item in (cdr (romacs-agent-queue session))
+                          until (romacs-agent-item-held item)
+                          when (and (romacs-agent-item-turn item) (romacs-agent--steer-p session item))
+                          return item))))
+    (romacs-agent--renewal-item session)))
 
 (defvar romacs-agent--queue-quiet)  ; below, with the queue
 
@@ -4175,7 +4208,8 @@ messages, each with its own text (results' text is the delivery's)."
   "Dispatch SESSION's waiting messages once the editor is idle: after the
 record being handled and the hooks it runs (a renewal taking its hold
 first).  One timer for however many records come meanwhile."
-  (when (and (romacs-agent-queue session) (not (memq session romacs-agent--dispatching)))
+  (when (and (or (romacs-agent-queue session) (romacs-agent--pending-renewal-input session))
+             (not (memq session romacs-agent--dispatching)))
     (push session romacs-agent--dispatching)
     (run-at-time 0 nil (lambda ()
                          (setq romacs-agent--dispatching (delq session romacs-agent--dispatching))
