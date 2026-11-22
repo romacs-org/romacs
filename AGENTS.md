@@ -307,8 +307,9 @@ The other commands:
   `python3 tools/gate full` for final acceptance. Inspect `--help` and select
   resource bounds for the current machine. Defaults keep outer VM and display
   execution serial, with a 34G heavy-job cap. Supply the pinned GNU executable
-  with `--oracle` when the gate's isolated environment needs it. Slot tools come
-  from this repository and are frozen alongside the gate for each invocation.
+  with `--oracle` when the gate's isolated environment needs it. It runs as one
+  heavy `forge run` job, one gate of a lane group at a time (`ROMACS_FORGE`
+  names forge when it is not on PATH).
   Add `--staged` to verify the index snapshot while preserving unrelated
   unstaged and untracked work. The gate binds evidence to its frozen Git tree;
   a temporary commit or a clean checkout is not needed.
