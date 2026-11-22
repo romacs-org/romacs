@@ -248,7 +248,7 @@ PNG files in a fresh directory, and `composer' its draft's text."
 (ert-deftest romacs-agent-log-attach-code-is-no-attachment ()
   ;; A link in code is text: no chip, and no chip edit touches it.
   (romacs-agent-log-attach-tests--with
-    (insert "printf '`" (link a) "`' and\n```\n" (link b) "\n```\n" (link c))
+    (insert "printf '`" (link a) "`' and ``x " (link b) " y`` and\n```\n" (link b) "\n```\n" (link c))
     (romacs-agent-log-attach-sync)
     (should (equal (files) (list c)))))
 
@@ -276,6 +276,56 @@ PNG files in a fresh directory, and `composer' its draft's text."
         (should (equal (composer) ""))
         (funcall (car thens) b)
         (should (equal (composer) (link b)))))))
+
+(ert-deftest romacs-agent-log-attach-undo-keeps-the-order ()
+  ;; Two neighbours removed, then brought back: each in its place.
+  (romacs-agent-log-attach-tests--with
+    (insert (link a) " " (link b) " " (link c))
+    (romacs-agent-log-attach-sync)
+    (let ((ids (mapcar (lambda (item) (plist-get item :id)) romacs-attach-items)))
+      (setq romacs-attach--selected (nth 1 ids))
+      (romacs-attach-edit-remove)
+      (setq romacs-attach--selected (nth 0 ids))
+      (romacs-attach-edit-remove)
+      (should (equal (composer) (link c)))
+      (romacs-attach-edit-undo)
+      (romacs-attach-edit-undo)
+      (should (equal (composer) (concat (link a) " " (link b) " " (link c)))))))
+
+(ert-deftest romacs-agent-log-attach-a-redraw-keeps-typed-text ()
+  ;; A link deleted by hand, the chips not yet read again: a redraw (a
+  ;; selection) neither brings it back nor relabels a label typed anew.
+  (romacs-agent-log-attach-tests--with
+    (insert (link a) " " (link b))
+    (romacs-agent-log-attach-sync)
+    (delete-region (- (point-max) (length (link b)) 1) (point-max))
+    (goto-char (1+ romacs-agent-log--input))
+    (delete-char 5)
+    (insert "mine")
+    (romacs-attach-set-items romacs-attach-items)
+    (should (equal (composer) (concat "[mine" (substring (link a) 6))))))
+
+(ert-deftest romacs-agent-log-attach-a-word-keeps-its-space ()
+  ;; A link pasted against a word: removing it leaves the words' space.
+  (romacs-agent-log-attach-tests--with
+    (insert "foo" (link a) " bar")
+    (romacs-agent-log-attach-sync)
+    (romacs-attach-set-items nil)
+    (should (equal (composer) "foo bar"))))
+
+(ert-deftest romacs-agent-log-attach-a-failing-paste-lets-go ()
+  ;; A paste whose link cannot go in lets the next one start; the menu's
+  ;; paste, at the composer's end, is spaced from the text.
+  (romacs-agent-log-attach-tests--with
+    (let ((then nil))
+      (cl-letf (((symbol-function 'romacs-attach-clipboard-file) (lambda (_type fn) (setq then fn))))
+        (insert "see")
+        (should (romacs-agent-log-attach-paste "image/png" (point-max) t))
+        (let ((buffer-read-only t)) (should-error (funcall then a)))
+        (should-not romacs-agent-log-attach--paste)
+        (should (romacs-agent-log-attach-paste "image/png" (point-max) t))
+        (funcall then a)
+        (should (equal (composer) (concat "see " (link a))))))))
 
 (provide 'romacs-agent-log-attach-tests)
 ;;; romacs-agent-log-attach-tests.el ends here

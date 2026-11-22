@@ -109,11 +109,13 @@ shows images."
     (let ((image (ignore-errors (create-image file nil nil :max-width width :max-height height :margin '(0 . 1)))))
       (when image (insert-image image " ")))))
 
-(defun romacs-agent-images--row-text (name age columns)
+(defun romacs-agent-images--row-text (name age columns &optional selected)
   "A row's text in COLUMNS: NAME, its middle elided to leave room for AGE
-\(a screenshot's time is at its end), and AGE."
-  (concat "  " (romacs-truncate-middle name (- columns 4 (string-width age)))
-          (propertize (concat "  " age) 'face 'shadow)))
+\(a screenshot's time is at its end), and AGE; SELECTED, the name bold
+and the age at full contrast on the selection's band."
+  (concat "  " (let ((shown (romacs-truncate-middle name (- columns 4 (string-width age)))))
+                 (if selected (propertize shown 'face 'bold) shown))
+          (if selected (concat "  " age) (propertize (concat "  " age) 'face 'shadow))))
 
 (defun romacs-agent-images--insert-row (file selected)
   "Insert the row of FILE, SELECTED or not: one line, always."
@@ -125,7 +127,8 @@ shows images."
              (file-name-nondirectory file) (romacs-agent-images--age file)
              ;; Four columns spare: the bar's, and an image takes a little
              ;; more than its width.
-             (- romacs-agent-images--list-columns 4 (ceiling width (frame-char-width))))
+             (- romacs-agent-images--list-columns 4 (ceiling width (frame-char-width)))
+             selected)
             "\n")
     (when selected (add-face-text-property start (point) 'romacs-layer-selection))))
 

@@ -26,6 +26,7 @@
 (declare-function romacs-agent-ui--batch "romacs-agent-ui" ())
 (declare-function romacs-agent-ui--selection-label "romacs-agent-ui" (selection))
 (declare-function romacs-agent-ui--instance "romacs-agent-ui" (provider harness model default))
+(declare-function romacs-agent-log-attach-paste "romacs-agent-log-attach" (type at &optional spaced))
 
 (defun romacs-agent-menu--title ()
   "The actions menu's title: whose chat it is, its name first to read."
@@ -374,14 +375,9 @@ session takes no commands from here, an image picked by sight
 \(`romacs-agent-images-read'; TAB there names any file)."
   (interactive "P" romacs-agent-log-mode)
   (if-let* ((type (and (not ask) (romacs-agent-log--commands-p) (romacs-attach-clipboard-image-type))))
-      (let ((chat (current-buffer)))
-        (message "Attaching the clipboard's image…")
-        (romacs-attach-clipboard-file
-         type (lambda (file)
-                (cond ((not file) (message "Could not read the clipboard's image"))
-                      ((buffer-live-p chat)
-                       (with-current-buffer chat (romacs-agent-menu--link file))
-                       (message "Attached %s" (abbreviate-file-name file)))))))
+      ;; At the composer's end, unless the draft is sent meanwhile.
+      (when (romacs-agent-log-attach-paste type (point-max) t)
+        (message "Attaching the clipboard's image…"))
     (require 'romacs-agent-images)
     (romacs-agent-menu--link (romacs-agent-images-read))))
 

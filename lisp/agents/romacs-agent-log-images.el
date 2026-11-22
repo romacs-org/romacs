@@ -20,6 +20,7 @@
 
 (require 'cl-lib)
 (require 'subr-x)
+(require 'seq)
 (require 'romacs-attach)
 (require 'romacs-agent-glyphs)
 
@@ -66,23 +67,53 @@ angle brackets, or else in group 2.  Its label is as
             (if (string-match-p "\\.\\(?:png\\|jpe?g\\|webp\\|gif\\)\\'" (downcase file)) "image" "file")
             (if (string-match-p "[ \t()<>]" file) (concat "<" file ">") file))))
 
+(defun romacs-agent-log-images--code (start end)
+  "The code in the current buffer from START to END: (BEG . END) of each
+code span, a backtick run closed by a run as long on its line, and each
+fenced block, a fence left open running to END."
+  (save-excursion
+    (goto-char start)
+    (let ((ranges nil) (fence nil))
+      (while (< (point) end)
+        (let ((eol (save-excursion (if (search-forward "\n" end 'move) (1- (point)) (point)))))
+          (cond ((looking-at "[ \t]*```")
+                 (if fence (progn (push (cons fence eol) ranges) (setq fence nil)) (setq fence (point))))
+                ((not fence)
+                 (while (re-search-forward "`+" eol t)
+                   (let ((open (match-beginning 0)) (n (- (match-end 0) (match-beginning 0))) (close nil))
+                     (while (and (not close) (re-search-forward "`+" eol t))
+                       (when (= (- (match-end 0) (match-beginning 0)) n) (setq close (match-end 0))))
+                     (if close (push (cons open close) ranges)
+                       ;; Never closed: its backticks are text.
+                       (goto-char (+ open n)))))))
+          (goto-char (min end (1+ eol)))))
+      (when fence (push (cons fence end) ranges))
+      ranges)))
+
 (defun romacs-agent-log-images-links (string &optional start end)
   "The image links in STRING, or in the current buffer from START to END
-when STRING is nil: (BEG END FILE) each, in order, FILE expanded."
-  (let ((case-fold-search nil) (links nil))
+when STRING is nil: (BEG END FILE) each, in order, FILE expanded.  A
+link in code (`romacs-agent-log-images--code') is text, not a link."
+  (let ((case-fold-search nil) (links nil) (code nil))
     (if string
         (let ((at 0))
+          (setq code (with-temp-buffer
+                       (insert string)
+                       (mapcar (lambda (range) (cons (1- (car range)) (1- (cdr range))))
+                               (romacs-agent-log-images--code (point-min) (point-max)))))
           (while (string-match romacs-agent-log-images-regexp string at)
             (push (list (match-beginning 0) (match-end 0)
                         (expand-file-name (or (match-string 1 string) (match-string 2 string))))
                   links)
             (setq at (match-end 0))))
+      (setq code (romacs-agent-log-images--code start end))
       (save-excursion
         (goto-char start)
         (while (re-search-forward romacs-agent-log-images-regexp end t)
           (push (list (match-beginning 0) (match-end 0) (expand-file-name (or (match-string 1) (match-string 2))))
                 links))))
-    (nreverse links)))
+    (seq-remove (lambda (link) (seq-some (lambda (range) (and (>= (car link) (car range)) (< (car link) (cdr range)))) code))
+                (nreverse links))))
 
 (defun romacs-agent-log-images--width ()
   "The width images are laid out in, in the current chat, in pixels; nil
