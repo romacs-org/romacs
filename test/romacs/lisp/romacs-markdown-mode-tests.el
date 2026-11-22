@@ -40,6 +40,17 @@
       (should (memq 'romacs-markdown-emphasis (romacs-markdown-mode-tests--faces-at "100*")))
       (should-not (romacs-markdown-mode-tests--faces-at "1*.")))))
 
+(ert-deftest romacs-markdown-mode-heading-edit-keeps-preceding-block-fontified ()
+  (romacs-markdown-mode-tests--with "Plain *word*.\n\n## Heading\n\nLast.\n"
+    (font-lock-ensure)
+    (put-text-property (point-min) (point-max) 'fontified t)
+    (search-forward "Heading")
+    (insert "s")
+    (romacs-markdown--font-lock-region (1- (point)) (point))
+    (should (get-text-property (point-min) 'fontified))
+    (should (memq 'romacs-markdown-emphasis (romacs-markdown-mode-tests--faces-at "word")))
+    (should (memq 'romacs-markdown-heading-2 (romacs-markdown-mode-tests--faces-at "Headings")))))
+
 (ert-deftest romacs-markdown-mode-refaces-what-an-edit-reshapes ()
   "An edit that reshapes blocks outside the region asked for leaves them
 unfontified, so redisplay asks for them again."
@@ -54,6 +65,18 @@ unfontified, so redisplay asks for them again."
     (should-not (get-text-property (save-excursion (goto-char (point-min)) (search-forward "two") (point)) 'fontified))
     (font-lock-ensure)
     (should (memq 'romacs-markdown-heading-1 (romacs-markdown-mode-tests--faces-at "Para two")))))
+
+(ert-deftest romacs-markdown-mode-rechecks-the-previous-block-when-a-list-joins ()
+  (romacs-markdown-mode-tests--with "1. one\n\n2\n\nLast.\n"
+    (font-lock-ensure)
+    (put-text-property (point-min) (point-max) 'fontified t)
+    (search-forward "2")
+    (insert ". two")
+    (let ((last (save-excursion (search-forward "Last") (match-beginning 0))))
+      (romacs-markdown--font-lock-region last (1+ last)))
+    (should-not (get-text-property (point-min) 'fontified))
+    (font-lock-ensure)
+    (should (memq 'romacs-markdown-list-marker (romacs-markdown-mode-tests--faces-at "2. two")))))
 
 (ert-deftest romacs-markdown-mode-opened-fence-makes-code ()
   (romacs-markdown-mode-tests--with "Intro.\n\n# Below\n\nMore *text*.\n"
