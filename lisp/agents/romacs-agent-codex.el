@@ -482,6 +482,13 @@ an approval or questions for the user, anything else refused."
     ("dynamicToolCall" (list (gethash "tool" item) (gethash "arguments" item)))
     ("fileChange" (list "Edit" (romacs-mcp--object "changes" (gethash "changes" item))))
     ("webSearch" (list "WebSearch" (romacs-mcp--object "query" (gethash "query" item))))
+    ("collabAgentToolCall"
+     (list (pcase (gethash "tool" item)
+             ("spawnAgent" "Start subagent") ("sendInput" "Message subagent")
+             ("resumeAgent" "Resume subagent") ("wait" "Wait for subagents")
+             ("closeAgent" "Close subagent") (_ "Subagent action"))
+           (romacs-mcp--object "prompt" (gethash "prompt" item :null)
+                               "receivers" (gethash "receiverThreadIds" item []))))
     (type (list type nil))))
 
 (defun romacs-agent--codex-output (item)
@@ -512,6 +519,41 @@ an approval or questions for the user, anything else refused."
                           :input (cadr (romacs-agent--codex-tool item))
                           :output (romacs-agent--codex-output item)))))))
 
+(defun romacs-agent--codex-agent-event (id state &optional title activity)
+  "A worker with ID in STATE, with TITLE and ACTIVITY when supplied."
+  (when (and (stringp id) state)
+    (list :type 'task :id id :task id :state state :subagent t :background t
+          :title title :activity activity)))
+
+(defun romacs-agent--codex-collab-events (item)
+  "Worker state snapshots from a completed collaboration ITEM."
+  (let ((states (gethash "agentsStates" item))
+        (tool (gethash "tool" item))
+        (title (and (equal (gethash "tool" item) "spawnAgent")
+                    (romacs-agent--value (gethash "prompt" item)))))
+    (when (hash-table-p states)
+      (cl-loop for id in (sort (hash-table-keys states) #'string<)
+               for snapshot = (gethash id states)
+               for state = (and (hash-table-p snapshot)
+                                (pcase (gethash "status" snapshot)
+                                  ((or "pendingInit" "running")
+                                   (when (member tool '("spawnAgent" "resumeAgent" "sendInput")) 'started))
+                                  ("completed" 'completed)
+                                  ((or "errored" "notFound") 'failed)
+                                  ((or "interrupted" "shutdown") 'stopped)))
+               for event = (romacs-agent--codex-agent-event id state title)
+               when event collect event))))
+
+(defun romacs-agent--codex-activity-event (item)
+  "The worker lifecycle event of an app-server activity ITEM, if known."
+  (let* ((kind (gethash "kind" item))
+         (title (romacs-agent--value (gethash "agentPath" item)))
+         (state (pcase kind ("started" 'started) ("interacted" 'progress)
+                            ("interrupted" 'stopped) ("completed" 'completed)))
+         (event (romacs-agent--codex-agent-event (gethash "agentThreadId" item) state title
+                                                 (and (eq state 'progress) "Message sent"))))
+    (if (and event (memq state '(completed stopped))) (plist-put event :summary title) event)))
+
 (defun romacs-agent--codex-item (session item completed &optional id)
   "The events of ITEM, started or COMPLETED; ID, when given, names it."
   (let ((id (or id (gethash "id" item)))
@@ -536,6 +578,11 @@ an approval or questions for the user, anything else refused."
       ;; request; proceeding with it is leaving plan mode (:proceed).
       ("plan" (when (and completed (stringp (gethash "text" item)))
                 (list (list :type 'plan :text (gethash "text" item) :proceed t))))
+      ("subAgentActivity"
+       (when-let* ((completed) (event (romacs-agent--codex-activity-event item))) (list event)))
+      ("collabAgentToolCall"
+       (append (romacs-agent--codex-tool-events session id item completed)
+               (and completed (romacs-agent--codex-collab-events item))))
       ((or "userMessage" "hookPrompt" "todo_list" "error") nil)
       (_ (romacs-agent--codex-tool-events session id item completed)))))
 

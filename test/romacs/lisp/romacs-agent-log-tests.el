@@ -145,6 +145,69 @@ them inherits."
     (should-not (string-match-p "not recorded" (romacs-agent-log-tests--transcript)))
     (should-not romacs-agent-log--asks)))
 
+(ert-deftest romacs-agent-log-live-subagents-stay-with-the-composer ()
+  (romacs-agent-log-tests--with
+    (let ((romacs-agent-ui--children-changed (make-hash-table :test #'eq))
+          (romacs-agent-ui--children-timer 'coalesced)
+          (romacs-agent-ui-changed-hook '(romacs-agent-log--headers-refresh))
+          (romacs-agent-log-separator-rows-function (lambda () "A queued message\n")))
+      (save-window-excursion
+        (switch-to-buffer (current-buffer))
+        (cl-flet ((deliver (event)
+                    (romacs-agent-ui-track-workers session event)
+                    (apply #'draw event)
+                    (romacs-agent-ui--children-flush)
+                    (setq romacs-agent-ui--children-timer 'coalesced))
+                  (chrome () (buffer-substring-no-properties romacs-agent-log--end romacs-agent-log--input)))
+          (goto-char (point-max))
+          (insert "draft")
+          (backward-char 2)
+          (deliver (list :type 'tool :state 'started :id "a" :name "Agent"
+                         :input (romacs-agent-log-tests--input "description" "Read the docs")))
+          (deliver '(:type task :id "a" :task "worker" :state started :background t :subagent t))
+          (deliver '(:type tool :id "r" :parent "a" :state started :name "Read"))
+          (deliver '(:type task :id "a" :state progress :activity "Reading guide.org"))
+          (should (string-match-p "Read the docs · Reading guide.org\nA queued message" (chrome)))
+          (save-excursion
+            (goto-char (1+ (car (romacs-agent-log-activity-bounds))))
+            (should-error (insert "x") :type 'text-read-only))
+          (should-not (string-match-p "Reading guide.org" (romacs-agent-log-tests--transcript)))
+          (deliver '(:type tool :id "a" :state completed :output "Worker started"))
+          (draw :type 'delta :text "Parent output")
+          (setf (romacs-agent-state session) 'idle)
+          (deliver '(:type done :duration 1))
+          (should (string-match-p "Read the docs · Reading guide.org" (chrome)))
+          (should (string-match-p "Parent output" (romacs-agent-log-tests--transcript)))
+          (let ((romacs-agent-log-separator-rows-function (lambda () "A different queue\n")))
+            (romacs-agent-log--separator t)
+            (deliver '(:type task :id "a" :state progress :activity "Checking the result"))
+            (should (string-match-p "Read the docs · Checking the result\nA different queue" (chrome))))
+          (deliver '(:type task :id "a" :state completed :summary "Finished reading"))
+          (should-not (romacs-agent-log-activity-bounds))
+          (deliver '(:type task :id "a" :state progress :activity "Stale update"))
+          (should-not (string-match-p "Stale update\\|Read the docs" (chrome)))
+          (should (equal (buffer-substring-no-properties romacs-agent-log--input (point-max)) "draft"))
+          (should (= (- (point) romacs-agent-log--input) 3)))))))
+
+(ert-deftest romacs-agent-log-remote-history-leaves-live-workers-alone ()
+  (require 'romacs-agent-remote)
+  (romacs-agent-log-tests--with
+    (ignore #'draw)
+    (let ((romacs-agent-ui--children-changed (make-hash-table :test #'eq))
+          (romacs-agent-ui--children-timer 'coalesced))
+      (cl-flet ((unit (state seq)
+                  (romacs-mcp--object "seq" seq "events"
+                                      (vector (romacs-agent-wire-event
+                                               (list :type 'task :id "a" :task "a" :state state
+                                                     :subagent t :title "Audit" :seq seq))))))
+        (romacs-agent-remote--drawn session (list (unit 'started 5)) 5)
+        (romacs-agent-log--draw-above
+         session nil (lambda () (romacs-agent-remote--draw-unit session (unit 'completed 4))))
+        (should (equal (plist-get (gethash "a" (romacs-agent-subagents session)) :state) "running"))
+        (romacs-agent-remote--draw-unit session (unit 'completed 6) 'live)
+        (romacs-agent-remote--draw-unit session (unit 'started 5) 'live)
+        (should (equal (plist-get (gethash "a" (romacs-agent-subagents session)) :state) "completed"))))))
+
 (ert-deftest romacs-agent-log-an-answer-says-who-gave-it ()
   (romacs-agent-log-tests--with
     (draw :type 'attributed :request-id "x" :actor '(:kind "policy") :decision "allow" :scope "once")

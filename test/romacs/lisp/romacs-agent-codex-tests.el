@@ -14,6 +14,24 @@
 (defvar romacs-agent-codex-tests--written nil
   "What the session wrote, newest first: (OBJECT . JOURNAL).")
 
+(ert-deftest romacs-agent-codex-collaboration-reports-worker-lifecycle ()
+  (let ((session (romacs-agent--make :harness 'codex))
+        (romacs-agent-ui--children-timer 'coalesced))
+    (cl-flet ((item (json)
+                (let* ((notification (json-parse-string json))
+                       (events (romacs-agent--codex-events session notification)))
+                  (dolist (event events) (romacs-agent-ui-track-workers session event))
+                  events)))
+      (item "{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"collabAgentToolCall\",\"id\":\"spawn\",\"tool\":\"spawnAgent\",\"prompt\":\"Audit changes\",\"agentsStates\":{\"child\":{\"status\":\"running\"}}}}}")
+      (item "{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"subAgentActivity\",\"id\":\"started\",\"kind\":\"started\",\"agentThreadId\":\"child\",\"agentPath\":\"/root/audit\"}}}")
+      (romacs-agent-ui-track-workers session '(:type done))
+      (let ((row (gethash "child" (romacs-agent-subagents session))))
+        (should (= (hash-table-count (romacs-agent-subagents session)) 1))
+        (should (equal (plist-get row :state) "running"))
+        (should (equal (plist-get row :title) "Audit changes")))
+      (item "{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"subAgentActivity\",\"id\":\"finished\",\"kind\":\"completed\",\"agentThreadId\":\"child\",\"agentPath\":\"/root/audit\"}}}")
+      (should (equal (plist-get (gethash "child" (romacs-agent-subagents session)) :state) "completed")))))
+
 (defun romacs-agent-codex-tests--json (object)
   "OBJECT as the journal gives it back: parsed from its JSON."
   (json-parse-string (romacs-agent--json object) :object-type 'hash-table :null-object :null :false-object :false))

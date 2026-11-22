@@ -649,7 +649,7 @@ Served: =send=, =answer=, =interrupt=, =start=, =projects.list=,
 | =message-end= | =message parent= (the message's deltas are all of it) |
 | =tool= | =id name state input output parent= (=state=: =started=, =completed=, =failed=) |
 | =tool-output= | =id text= (streamed command output, live only) |
-| =task= | =id task state background activity summary title= |
+| =task= | =id task state background activity summary title subagent= (=subagent= is true for work delegated by the harness) |
 | =status=, =error= | =text parent= |
 | =done= | =text error limit interrupted duration cost reason= |
 | =exit= | =status= |

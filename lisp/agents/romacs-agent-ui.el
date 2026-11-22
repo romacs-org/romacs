@@ -238,26 +238,28 @@ follow, and the parent of one whose state that changed, in the next batch."
                 ((eq buffer (plist-get (keymap-popup--session-state keymap-popup--buffer) :source))))
       (keymap-popup--refresh keymap-popup--buffer))))
 
+(defun romacs-agent-ui-worker (session id)
+  "SESSION's harness worker with ID, if known."
+  (when-let* ((id) (workers (romacs-agent-subagents session)))
+    (gethash id workers)))
+
 (defun romacs-agent-ui--track-subagent (session event)
   "Keep what tool EVENT says of SESSION's harness's own subagents."
-  (let ((id (plist-get event :id)) (table (romacs-agent-subagents session)))
-    (if (eq (plist-get event :state) 'started)
-        (when (and (member (plist-get event :name) romacs-agent-ui--subagent-tools)
-                   (not (plist-get event :parent)))
-          (unless table (setq table (setf (romacs-agent-subagents session) (make-hash-table :test #'equal))))
-          (puthash id (list :tool id :subagent t :state "running" :time (plist-get event :time)
-                            :title (car (romacs-agent-ui--delegation (plist-get event :name) (plist-get event :input))))
-                   table)
-          (romacs-agent-ui--children-changed session))
-      ;; A task the harness runs on, in the background, ends by its own
-      ;; notice, not by its tool call returning.
-      (when-let* ((row (and table (gethash id table)))
-                  ((not (plist-get row :task))))
-        (let ((failed (eq (plist-get event :state) 'failed)))
-          (puthash id (plist-put (plist-put (plist-put row :state (if failed "failed" "completed")) :unseen failed)
-                                 :time (or (plist-get event :time) (plist-get row :time)))
-                   table))
-        (romacs-agent-ui--children-changed session)))))
+  (let* ((id (plist-get event :id)) (row (romacs-agent-ui-worker session id))
+         (parent (plist-get event :parent))
+         (name (plist-get event :name)) (time (plist-get event :time)))
+    (pcase (plist-get event :state)
+      ('started
+       (cond ((plist-get (romacs-agent-ui-worker session parent) :subagent)
+              (romacs-agent-ui--track-task session (list :id parent :state 'progress :activity name :time time)))
+             ((and (stringp id) (not row) (not parent) (member name romacs-agent-ui--subagent-tools))
+              (romacs-agent-ui--track-task
+               session (list :id id :state 'started :subagent t :time time
+                             :title (car (romacs-agent-ui--delegation name (plist-get event :input))))))))
+      ;; A background task ends by its own notice.
+      ((or 'completed 'failed)
+       (when (and row (plist-get row :subagent) (not (plist-get row :task)))
+         (romacs-agent-ui--track-task session event))))))
 
 (defun romacs-agent-ui--task-state (state)
   "A harness task's end STATE in a card's words."
@@ -270,39 +272,68 @@ whose row runs it.  A task's event finds its row by it, not by a scan.")
 (defun romacs-agent-ui--task-tools (session)
   "SESSION's table of running harness tasks (`romacs-agent-ui--task-tools')."
   (or (gethash session romacs-agent-ui--task-tools)
-      (puthash session (make-hash-table :test #'equal) romacs-agent-ui--task-tools)))
+      (let ((tasks (make-hash-table :test #'equal)))
+        (when-let* ((rows (romacs-agent-subagents session)))
+          (maphash (lambda (id row)
+                     (when-let* ((task (plist-get row :task))) (puthash task id tasks)))
+                   rows))
+        (puthash session tasks romacs-agent-ui--task-tools))))
 
 (defun romacs-agent-ui--forget-task (session row)
   "ROW no longer runs its task: SESSION's index forgets it."
   (when-let* ((task (plist-get row :task)))
     (remhash task (romacs-agent-ui--task-tools session))))
 
+(defun romacs-agent-ui--task-row (row event)
+  "Return worker ROW with the lifecycle change described by EVENT."
+  (let ((row (copy-sequence row))
+        (state (plist-get event :state)))
+    (pcase state
+      ('started
+       (when (plist-get event :subagent)
+         (setq row (plist-put (plist-put row :subagent t) :hidden nil)))
+       (unless (equal (plist-get row :state) "running")
+         (setq row (plist-put (plist-put row :activity nil) :started (plist-get event :time))))
+       (when (and (not (plist-get row :title)) (plist-get event :title))
+         (setq row (plist-put row :title (plist-get event :title))))
+       (setq row (plist-put row :state "running"))
+       (setq row (plist-put row :unseen nil))
+       (plist-put row :task (plist-get event :task)))
+      ('backgrounded (plist-put row :hidden nil))
+      ('progress
+       (if (equal (plist-get row :state) "running")
+           (plist-put (plist-put row :activity (plist-get event :activity))
+                      :time (or (plist-get event :time) (plist-get row :time)))
+         row))
+      ((or 'completed 'failed 'stopped)
+       (plist-put (plist-put (plist-put (plist-put row :task nil) :state (romacs-agent-ui--task-state state))
+                            :unseen (eq state 'failed))
+                  :time (or (plist-get event :time) (plist-get row :time))))
+      (_ row))))
+
 (defun romacs-agent-ui--track-task (session event)
   "Keep what task EVENT says of the work SESSION's harness runs under a tool
 call: its subagents, and commands.  The task's row is its tool's, made
 here for a tool that is not a subagent's: hidden while it runs in the
 foreground, as the tool's own card shows it."
-  (let* ((table (or (romacs-agent-subagents session)
-                    (setf (romacs-agent-subagents session) (make-hash-table :test #'equal))))
-         (id (or (plist-get event :id) (gethash (plist-get event :task) (romacs-agent-ui--task-tools session))))
-         (row (and id (or (gethash id table)
-                          (list :tool id :state "running" :time (plist-get event :time) :title (plist-get event :title)
-                                :hidden (not (plist-get event :background)))))))
-    (when row
-     (puthash id
-             (pcase (plist-get event :state)
-               ('started (puthash (plist-get event :task) id (romacs-agent-ui--task-tools session))
-                         (plist-put row :task (plist-get event :task)))
-               ('backgrounded (plist-put row :hidden nil))
-               ('progress (plist-put (plist-put row :activity (plist-get event :activity))
-                                     :time (or (plist-get event :time) (plist-get row :time))))
-               (end (let ((failed (eq end 'failed)))
-                      (romacs-agent-ui--forget-task session row)
-                      (plist-put (plist-put (plist-put (plist-put row :task nil) :state (romacs-agent-ui--task-state end))
-                                            :unseen failed)
-                                 :time (or (plist-get event :time) (plist-get row :time))))))
-             table)
-     (romacs-agent-ui--children-changed session))))
+  (let* ((table (romacs-agent-subagents session))
+         (task (plist-get event :task))
+         (id (or (plist-get event :id) (and task (gethash task (romacs-agent-ui--task-tools session)))))
+         (old (and id table (gethash id table)))
+         (state (plist-get event :state)))
+    (when (and id (or old (memq state '(started completed failed stopped))))
+      (let ((row (romacs-agent-ui--task-row
+                  (or old (list :tool id :state "running" :time (plist-get event :time) :started (plist-get event :time)
+                                :title (plist-get event :title) :subagent (plist-get event :subagent)
+                                :hidden (not (plist-get event :background))))
+                  event)))
+        (unless (equal old row)
+          (unless table (setq table (setf (romacs-agent-subagents session) (make-hash-table :test #'equal))))
+          (when (and old (not (equal (plist-get old :task) (plist-get row :task))))
+            (romacs-agent-ui--forget-task session old))
+          (when (and (eq state 'started) task) (puthash task id (romacs-agent-ui--task-tools session)))
+          (puthash id row table)
+          (romacs-agent-ui--children-changed session))))))
 
 (defun romacs-agent-ui--end-subagents (session next gone time)
   "SESSION's turn ended at TIME: a subagent still running was cut, unless
@@ -311,12 +342,10 @@ new turn starts, and last turn's failures have been seen."
   (when-let* ((table (romacs-agent-subagents session)))
     (dolist (id (hash-table-keys table))
       (let ((row (gethash id table)))
-        (cond (next (puthash id (plist-put row :unseen nil) table))
+        (cond (next (when (plist-get row :unseen) (puthash id (plist-put (copy-sequence row) :unseen nil) table)))
               ((and (equal (plist-get row :state) "running") (or gone (not (plist-get row :task))))
                (romacs-agent-ui--forget-task session row)
-               (puthash id (plist-put (plist-put (plist-put row :state "cancelled") :task nil)
-                                      :time (or time (plist-get row :time)))
-                        table)))))
+               (puthash id (romacs-agent-ui--task-row row (list :state 'stopped :time time)) table)))))
     (romacs-agent-ui--children-changed session)))
 
 (defconst romacs-agent-ui--state-statuses
@@ -348,17 +377,33 @@ an option or a selection that leaves it as it was redraws no row."
     (and (romacs-agent-ui--state-event-p event)
          (progn (romacs-agent-ui--announce session) t))))
 
-(defun romacs-agent-ui--track-children (session event)
-  "Note what EVENT changes of what runs under SESSION, or above it.
-Return whether SESSION's state may have moved (`romacs-agent-ui--state-moved-p'),
-decided once per event."
-  (let ((type (plist-get event :type))
-        (moved (romacs-agent-ui--state-moved-p session event)))
+(defun romacs-agent-ui-track-workers (session event)
+  "Update SESSION's harness workers from EVENT, for local or remote views."
+  (let ((type (plist-get event :type)))
     (pcase type
       ('tool (romacs-agent-ui--track-subagent session event))
       ('task (romacs-agent-ui--track-task session event))
       ('input (romacs-agent-ui--end-subagents session t nil nil))
-      ((or 'done 'exit) (romacs-agent-ui--end-subagents session nil (eq type 'exit) (plist-get event :time))))
+      ((or 'done 'exit) (romacs-agent-ui--end-subagents session nil (eq type 'exit) (plist-get event :time))))))
+
+(defun romacs-agent-ui-reset-workers (session)
+  "Forget SESSION's worker state before replaying it from a fresh snapshot."
+  (remhash session romacs-agent-ui--task-tools)
+  (setf (romacs-agent-subagents session) nil)
+  (romacs-agent-ui--children-changed session))
+
+(defun romacs-agent-ui--restore-workers (session _manifest)
+  "Refresh the worker rows of SESSION, now that its saved state is loaded."
+  (when (romacs-agent-subagents session) (romacs-agent-ui--children-changed session)))
+
+(add-hook 'romacs-agent-loaded-functions #'romacs-agent-ui--restore-workers)
+
+(defun romacs-agent-ui--track-children (session event)
+  "Note what EVENT changes of what runs under SESSION, or above it.
+Return whether SESSION's state may have moved (`romacs-agent-ui--state-moved-p'),
+decided once per event."
+  (let ((moved (romacs-agent-ui--state-moved-p session event)))
+    (romacs-agent-ui-track-workers session event)
     (when moved
       (when-let* ((parent (plist-get (romacs-agent-options session) :parent))
                   (known (romacs-agent-loaded parent)))
