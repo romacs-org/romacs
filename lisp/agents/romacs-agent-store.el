@@ -672,7 +672,8 @@ MOST newest, by the writer."
    (romacs-mcp--object "text" (romacs-agent-item-text item)
                        "images" (vconcat (romacs-agent-item-images item))
                        "messages" (vconcat (mapcar #'romacs-agent--message-json (romacs-agent-item-messages item)))
-                       "own" (or (romacs-agent-item-own item) :null))))
+                       "own" (or (romacs-agent-item-own item) :null)
+                       "user" (if (romacs-agent-item-user item) t :false))))
 
 (defun romacs-agent-store--item-of (id position json)
   "The queued message a row keeps: ID, POSITION and its JSON.  A steer
@@ -682,6 +683,7 @@ comes back as a turn of its own: the turn it steered is no next run's."
                        :images (append (gethash "images" object) nil)
                        :messages (mapcar #'romacs-agent--message-of (gethash "messages" object))
                        :kind 'next :own (romacs-agent--value (gethash "own" object))
+                       :user (eq (gethash "user" object) t)
                        :id id :position position :kept t)))
 
 (defun romacs-agent-store-queued-put (id item)
@@ -763,8 +765,11 @@ may take it.  A cancelled task's is let go."
         ;; What was sent as it loaded goes after what was kept, but what
         ;; was put first: placed by its order, not by the clock, and its
         ;; place kept for a restart after.
-        (let ((order (append (cl-remove-if-not #'romacs-agent-item-front waiting) kept
-                             (cl-remove-if #'romacs-agent-item-front waiting))))
+        (let ((order (let ((cut (1+ (or (cl-position-if #'romacs-agent-item-front waiting :from-end t) -1))))
+                       ;; Kept ones after the last put first, the order
+                       ;; of those waiting as it stands (a user may have
+                       ;; moved one past another).
+                       (append (seq-take waiting cut) kept (seq-drop waiting cut)))))
           (setf (romacs-agent-queue session) nil (romacs-agent-queue-tail session) nil
                 (romacs-agent-queue-length session) 0)
           (when waiting
@@ -773,7 +778,10 @@ may take it.  A cancelled task's is let go."
                 (setf (romacs-agent-item-position item) (setq place (+ place 1e-3))))
               ;; In one transaction: an end part way never leaves two out of order.
               (romacs-agent-store-queued-reorder (romacs-agent-id session) (cl-remove-if-not #'romacs-agent-item-kept order))))
-          (dolist (item order) (romacs-agent--enqueue session item)))
+          ;; Its views told once, the queue whole.
+          (let ((romacs-agent--queue-quiet t))
+            (dolist (item order) (romacs-agent--enqueue session item)))
+          (romacs-agent--changed session))
         (romacs-agent--dispatch session)))))
 
 (add-hook 'romacs-agent-loaded-functions #'romacs-agent-store--requeue)
