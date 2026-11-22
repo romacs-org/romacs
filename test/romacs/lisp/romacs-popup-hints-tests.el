@@ -3,6 +3,7 @@
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 (require 'ert)
 (require 'romacs-popup)
+(require 'cl-lib)
 
 (defun romacs-popup-hints-tests--next () (interactive))
 (defun romacs-popup-hints-tests--previous () (interactive))
@@ -55,12 +56,44 @@
         (map-keymap (lambda (event binding) (push (cons event binding) visited)) map)
         (should (equal walked visited))))))
 
+(ert-deftest romacs-popup-hints-walk-takes-what-map-keymap-takes ()
+  ;; An autoloaded keymap embedded by name, a run of bindings after an
+  ;; embedded map, and an old dense map's vector.
+  (let* ((dir (make-temp-file "romacs-hints-" t))
+         (file (expand-file-name "romacs-popup-hints-auto.el" dir)))
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert "(fset 'romacs-popup-hints-tests--auto (define-keymap \"z\" #'ignore))\n"))
+          (fmakunbound 'romacs-popup-hints-tests--auto)
+          (autoload 'romacs-popup-hints-tests--auto file nil nil 'keymap)
+          (let ((dense (let ((v (make-vector 128 nil))) (aset v ?a #'ignore) (aset v ?c #'forward-char) (list 'keymap v))))
+            (dolist (map (list (list 'keymap 'romacs-popup-hints-tests--auto)
+                               (list 'keymap (define-keymap "a" #'ignore) '(?b . backward-char))
+                               dense))
+              (let (walked visited)
+                (map-keymap (lambda (event binding) (push (cons event binding) visited)) map)
+                (romacs-popup--walk-keymap map (lambda (event binding _level _full) (push (cons event binding) walked)))
+                (should visited)
+                (should (equal walked visited))))))
+      (fmakunbound 'romacs-popup-hints-tests--auto)
+      (delete-directory dir t))))
+
 (ert-deftest romacs-popup-hints-a-full-map-s-characters-ascend ()
+  ;; By code, whether in its char-table, its alist (a modified character)
+  ;; or an old dense map's vector.
   (romacs-popup-hints-tests--with
     (let ((map (make-keymap)))
       (define-key map "z" #'romacs-popup-hints-tests--quit)
       (define-key map "a" #'romacs-popup-hints-tests--next)
-      (should (equal (romacs-popup--hint-entries map) '(("a" . "next") ("z" . "quit")))))))
+      (should (equal (romacs-popup--hint-entries map) '(("a" . "next") ("z" . "quit")))))
+    (let ((map (make-keymap)))
+      (define-key map (kbd "H-a") #'romacs-popup-hints-tests--next)
+      (define-key map (kbd "H-b") #'romacs-popup-hints-tests--quit)
+      (should (equal (romacs-popup--hint-entries map) '(("H-a" . "next") ("H-b" . "quit")))))
+    (let ((v (make-vector 128 nil)))
+      (aset v ?a #'romacs-popup-hints-tests--next) (aset v ?c #'romacs-popup-hints-tests--quit)
+      (should (equal (romacs-popup--hint-entries (list 'keymap v)) '(("a" . "next") ("c" . "quit")))))))
 
 (ert-deftest romacs-popup-hints-meta-keys-read-as-meta ()
   ;; A map's meta keys live in its ESC map: they show as M- keys, not as
@@ -85,7 +118,10 @@
     (should (equal (romacs-popup--hint-lines '("a 1" "b 2" "c 3") 9 1 #'string-width)
                    '("a 1   b …")))
     (should (equal (romacs-popup--hint-lines '("a long one") 5 2 #'string-width) '("a lo…")))
-    (should (equal (romacs-popup--hint-lines nil 9 2 #'string-width) '("")))))
+    (should (equal (romacs-popup--hint-lines nil 9 2 #'string-width) '("")))
+    ;; Cut by the width as painted, the dots included: here a wide `w'.
+    (let ((wide (lambda (s) (+ (string-width s) (* 2 (cl-count ?w s))))))
+      (should (equal (romacs-popup--hint-lines '("ww 1" "b 2") 6 1 wide) '("w…"))))))
 
 (provide 'romacs-popup-hints-tests)
 ;;; romacs-popup-hints-tests.el ends here

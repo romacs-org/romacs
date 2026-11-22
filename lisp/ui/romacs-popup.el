@@ -297,27 +297,36 @@ intervals in O(N log N), whatever ranges and singletons mix."
     (nreverse fragments)))
 
 (defun romacs-popup--keymap-value (map)
-  "MAP, a keymap or a symbol whose function is one, as the list; else nil
-or MAP itself when it is no symbol."
-  (if (and map (symbolp map)) (and (keymapp map) (indirect-function map)) map))
+  "MAP, a keymap or a symbol whose function is one (autoloaded first, as
+`map-keymap' does), as the list; else nil or MAP itself when it is no
+symbol."
+  (if (and map (symbolp map))
+      (and (keymapp map)
+           (let ((value (indirect-function map)))
+             (when (autoloadp value) (setq value (autoload-do-load value map)))
+             (and (keymapp value) (indirect-function value))))
+    map))
 
 (defun romacs-popup--walk-keymap (map function)
   "Call FUNCTION with (EVENT BINDING LEVEL CHAR-TABLE) for MAP's bindings,
 its parents' and embedded maps' too, in `map-keymap''s order.  LEVEL
 counts the runs of one map's own bindings; CHAR-TABLE is non-nil when
-that run's map is a full one, its characters in a char-table."
+that run's map is a full one, its characters in a char-table or vector."
   (let ((level 0))
     (named-let walk ((map (romacs-popup--keymap-value map)))
       (while (consp map)
         (if (keymapp (car map))
             (progn (walk (romacs-popup--keymap-value (car map)))
                    (setq map (cdr map)))
-          (let ((full (let ((tail (cdr map)) found)
-                        (while (and (consp tail) (not found) (not (eq (car tail) 'keymap)))
-                          (setq found (char-table-p (car tail)) tail (cdr tail)))
-                        found))
-                (this (setq level (1+ level))))
-            (setq map (map-keymap-internal (lambda (event binding) (funcall function event binding this full)) map))))
+          ;; A run of bindings after an embedded map has no head of its
+          ;; own: `map-keymap-internal' takes it with one.
+          (let* ((run (if (eq (car map) 'keymap) map (cons 'keymap map)))
+                 (full (let ((tail (cdr run)) found)
+                         (while (and (consp tail) (not found) (not (eq (car tail) 'keymap)) (not (keymapp (car tail))))
+                           (setq found (or (char-table-p (car tail)) (vectorp (car tail))) tail (cdr tail)))
+                         found))
+                 (this (setq level (1+ level))))
+            (setq map (map-keymap-internal (lambda (event binding) (funcall function event binding this full)) run))))
         (setq map (romacs-popup--keymap-value map))))))
 
 (defun romacs-popup--order< (a b)
@@ -335,14 +344,17 @@ for function keys, the first of each.  INDEX is the traversal's, which
 decides the effective binding; ORDER, (LEVEL CLASS VALUE), the order
 the map was written in: its own bindings before its parents', a sparse
 map's newest last (it stores them newest first), a full map's
-characters ascending.  Remaps, defaults, menu-bar and mouse events are
+characters by code.  Remaps, defaults, menu-bar and mouse events are
 left out."
   (let ((seen (make-hash-table :test 'eq)) (orders (make-hash-table :test 'eql)) (n 0) characters others)
     (romacs-popup--walk-keymap
      map
      (lambda (event binding level full)
        (setq n (1+ n))
-       (puthash n (if (and full (or (integerp event) (consp event))) (list level 0 n) (list level 1 (- n))) orders)
+       (puthash n (if (and full (or (integerp event) (consp event)))
+                      (list level 0 (if (consp event) (car event) event))
+                    (list level 1 (- n)))
+                orders)
        (cond
         ((consp event) (push (list n (car event) (cdr event) binding) characters))
         ((integerp event) (push (list n event event binding) characters))
@@ -412,7 +424,8 @@ minibuffer) and its edges."
     (list window (window-edges window t nil t))))
 
 (defcustom romacs-popup-hints-max-lines 2
-  "Most lines a transient map's hints take; the last one's overflow is elided."
+  "Most lines a transient map's hints take, `romacs-layer-max-lines' at
+most; the last one's overflow is elided."
   :type 'natnum)
 
 (defun romacs-popup--hint-lines (entries columns max width)
@@ -432,8 +445,13 @@ with an ellipsis when entries are left over."
            (rest (nthcdr (length kept) lines))
            (last (car (last kept)))
            (dots (truncate-string-ellipsis))
-           (fit (lambda (s) (if (<= (funcall width s) columns) s
-                              (concat (truncate-string-to-width s (- columns (funcall width dots))) dots)))))
+           (fit (lambda (s)
+                  (if (<= (funcall width s) columns) s
+                    ;; The longest start that fits as painted, the dots too.
+                    (let ((cut (truncate-string-to-width s (max 0 (- columns (funcall width dots))))))
+                      (while (and (> (length cut) 0) (> (funcall width (concat cut dots)) columns))
+                        (setq cut (substring cut 0 -1)))
+                      (concat cut dots))))))
       (mapcar fit (append (butlast kept) (list (if rest (concat last sep (car rest)) last)))))))
 
 (defun romacs-popup--hints-show (map)
@@ -445,7 +463,7 @@ its MESSAGE (shown once, here, while the hints show)."
                  (mapcar (lambda (e) (concat (propertize (car e) 'face 'romacs-popup-key) " "
                                              (propertize (cdr e) 'face 'romacs-popup-description)))
                          (romacs-popup--hint-entries map))
-                 (max 10 (- (window-body-width window) 4)) romacs-popup-hints-max-lines #'romacs-layer--toast-width))
+                 (max 10 (- (window-body-width window) 4)) (min romacs-popup-hints-max-lines romacs-layer-max-lines) #'romacs-layer--toast-width))
          (buffer (romacs-popup--hints-buffer))
          (message (gethash map romacs-popup--hint-maps)))
     (with-current-buffer buffer
