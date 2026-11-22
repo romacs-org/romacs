@@ -18,20 +18,6 @@ impl Leaf<'_> {
         }
     }
 
-    pub fn beginning_of_line(&mut self) -> std::result::Result<bool, Fault> {
-        let index = self.vm.buffer_index().map_err(Fault::Error)?;
-        match &self.vm.objects[index] {
-            data::Object::Buffer(text) => {
-                let point = text.point.0;
-                Ok(point == text.accessible().start.0 || text.bytes().get(point.wrapping_sub(1)) == Some(&b'\n'))
-            }
-            data::Object::ByteBuffer(text) => {
-                let point = text.point.0;
-                Ok(point == text.restriction.start.0 || text.bytes.get(point.wrapping_sub(1)) == Some(&b'\n'))
-            }
-            _ => Err(Fault::Error("buffer required".into())),
-        }
-    }
 
     /// Freplace_match's checks before either replacement: NEWTEXT and
     /// STRING are strings, a search succeeded and SUBEXP names one of its

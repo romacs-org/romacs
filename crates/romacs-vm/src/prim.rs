@@ -29,7 +29,6 @@
 use super::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code)]
 pub(crate) enum Effect {
     /// Result depends only on arguments; no observable writes. Stageable.
     Pure,

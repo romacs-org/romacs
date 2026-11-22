@@ -91,7 +91,6 @@ impl Vm {
     /// GNU eval.c:266-276. The returned integer is the unwind token: callers
     /// must restore it on every exit, in LIFO order. No Lisp call site exists
     /// yet for debugger/handler-bind; signal-hook-function borrows twenty.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(super) fn max_ensure_room(&mut self, room: i64) -> Option<i64> {
         let depth = i64::try_from(self.eval_depth).unwrap_or(i64::MAX);
         let sum = depth.checked_add(room).unwrap_or(i64::MAX);
@@ -111,7 +110,6 @@ impl Vm {
 
     /// GNU eval.c:255-260: return CURRENT max minus saved max to CURRENT
     /// reserve; do not restore a saved pair (Lisp may have changed either).
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(super) fn restore_stack_limits(&mut self, old_depth: i64) {
         let current = self.eval_limit();
         let reserve = self.forwarded.integer(RESERVE);
