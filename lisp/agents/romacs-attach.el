@@ -43,11 +43,12 @@
   "Most helper processes preparing outgoing copies at once."
   :type 'natnum)
 
-(defface romacs-attach-chip '((t :inherit romacs-layer-glass))
-  "An attachment chip in a tray.")
+(defface romacs-attach-chip '((t :inherit romacs-layer-glass :weight normal))
+  "An attachment chip in a tray: plain weight, whatever line it shows on.")
 
-(defface romacs-attach-selected '((t :inherit romacs-layer-selection))
-  "The chip edit mode selected.")
+(defface romacs-attach-selected '((t :inherit romacs-layer-selection :weight bold))
+  "The chip edit mode selected: bold on the selection's band, legible
+whatever the theme's accent.")
 
 (defface romacs-attach-badge '((t :inherit romacs-popup-dim))
   "A chip's badge: what the plan does with it.")
@@ -396,7 +397,8 @@ cached `:plan', `:string' and `:overlay'.")
   "The id of the chip edit mode selected, or nil.")
 
 (defvar-local romacs-attach--removed nil
-  "Removals edit mode can undo, newest first: (ITEMS-BEFORE . ITEM).
+  "Removals edit mode can undo, newest first: (INDEX . ITEM), INDEX the
+place ITEM had.
 Their owned files are deleted when the mode ends.")
 
 (defvar romacs-attach--swept nil
@@ -488,24 +490,6 @@ cached until its items or plan change; nil without items."
   "Columns a chip's file name takes at most; a longer one loses its middle."
   :type 'natnum)
 
-(defun romacs-attach--elide (name width)
-  "NAME in at most WIDTH columns, its middle elided and its extension kept."
-  (if (<= (string-width name) width) name
-    (let* ((extension (file-name-extension name t))
-           (stem (file-name-sans-extension name))
-           (dots (truncate-string-ellipsis))
-           (room (- width (string-width extension) (string-width dots))))
-      (if (< room 2) (romacs-truncate name width)
-        (concat (truncate-string-to-width stem (ceiling room 2)) dots
-                (romacs-attach--tail stem (/ room 2)) extension)))))
-
-(defun romacs-attach--tail (string width)
-  "The end of STRING in at most WIDTH columns."
-  (let ((start (length string)))
-    (while (and (> start 0) (<= (string-width string (1- start)) width))
-      (setq start (1- start)))
-    (substring string start)))
-
 (defun romacs-attach--icon-name (mime)
   "The `romacs-icon' for a file of MIME type."
   (cond ((string-prefix-p "image/" mime) 'image)
@@ -517,12 +501,25 @@ cached until its items or plan change; nil without items."
 
 (defun romacs-attach--thumbnail (item)
   "A thumbnail of ITEM: a `:file' image the header probe sized, decoded
-off the evaluator at chip size; else its type's icon."
+off the evaluator at chip size; else its type's icon.  The image is over
+a no-break space: word wrap never parts it from its name."
   (if (plist-get item :pixels)
-      (propertize " " 'display (create-image (plist-get item :path) nil nil
+      (propertize " " 'display (create-image (plist-get item :path) nil nil
                                              :max-height '(2 . em) :max-width '(4 . em)
                                              :ascent 'center :margin 2))
     (or (romacs-icon (romacs-attach--icon-name (plist-get item :mime)) 'romacs-attach-chip) (romacs-agent-glyph 'attachment))))
+
+(defun romacs-attach--glued (string)
+  "STRING with each plain space a no-break space drawn as a plain one: a
+chip is one word.  Word wrap classes an element by the text under it,
+so a tray's line breaks between chips, never inside one."
+  (let ((at 0))
+    (while (< at (length string))
+      (when (and (eq (aref string at) ?\s) (not (get-text-property at 'display string)))
+        (aset string at ?\u00a0)
+        (put-text-property at (1+ at) 'display '(space :width 1) string))
+      (setq at (1+ at)))
+    string))
 
 (defun romacs-attach--chip (entry selected)
   "Plan ENTRY's chip, SELECTED or not."
@@ -535,14 +532,19 @@ off the evaluator at chip size; else its type's icon."
                       ((romacs-attach-changed-p item) (propertize " changed" 'face 'romacs-attach-badge))
                       ((plist-get (cdr entry) :badge)
                        (propertize (concat " " (plist-get (cdr entry) :badge)) 'face 'romacs-attach-badge))))
-         (caption (and (plist-get item :caption) (concat " “" (plist-get item :caption) "”"))))
-    (propertize
-     (concat (romacs-attach--thumbnail item) " "
-             (romacs-attach--elide (or (plist-get item :name) "") romacs-attach-label-width)
-             caption " " (propertize size 'face 'romacs-attach-badge) badge " ")
-     'face (if selected 'romacs-attach-selected 'romacs-attach-chip)
-     'romacs-attach-id (plist-get item :id)
-     'help-echo (format "%s\n%s" (plist-get item :path) (plist-get item :mime)))))
+         (caption (and (plist-get item :caption) (concat " “" (plist-get item :caption) "”")))
+         (chip (propertize
+                (romacs-attach--glued
+                 (concat (romacs-attach--thumbnail item) " "
+                         (romacs-truncate-middle (or (plist-get item :name) "") romacs-attach-label-width)
+                         caption " "
+                         ;; Selected, it reads at the band's full contrast.
+                         (if selected size (propertize size 'face 'romacs-attach-badge)) badge " "))
+                'romacs-attach-id (plist-get item :id)
+                'help-echo (format "%s\n%s" (plist-get item :path) (plist-get item :mime)))))
+    ;; Under the size's and badge's own faces, not over them.
+    (add-face-text-property 0 (length chip) (if selected 'romacs-attach-selected 'romacs-attach-chip) t chip)
+    chip))
 
 (defcustom romacs-attach-tray-max-chips 24
   "Most chips a tray shows: the rest are counted in a last chip, and edit
@@ -661,17 +663,19 @@ calls COMMIT and leaves the tray as it was."
   (interactive)
   (when-let* ((index (romacs-attach--index)))
     (let ((item (nth index romacs-attach-items)))
-      (push (cons romacs-attach-items item) romacs-attach--removed)
+      (push (cons index item) romacs-attach--removed)
       (let ((items (romacs-attach-remove romacs-attach-items (plist-get item :id))))
         (setq romacs-attach--selected (plist-get (nth (min index (1- (length items))) items) :id))
         (romacs-attach-set-items items)))))
 
 (defun romacs-attach-edit-undo ()
-  "Bring back the last removed chip."
+  "Bring back the last removed chip, at its place among the chips there
+are now: what changed since stays."
   (interactive)
   (when-let* ((removal (pop romacs-attach--removed)))
     (setq romacs-attach--selected (plist-get (cdr removal) :id))
-    (romacs-attach-set-items (car removal))))
+    (romacs-attach-set-items (append (seq-take romacs-attach-items (car removal)) (list (cdr removal))
+                                     (seq-drop romacs-attach-items (car removal))))))
 
 (defun romacs-attach-edit-caption (caption)
   "Caption the selected chip CAPTION (empty for none)."

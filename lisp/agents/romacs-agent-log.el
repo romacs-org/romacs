@@ -51,6 +51,7 @@
 ;; before (romacs-agent-ui.el), which read the session from here too.
 (defvar romacs-agent-ui--session)
 (defvar romacs-agent-ui-changed-hook)
+(declare-function romacs-agent-log-attach-place "romacs-agent-log-attach" ())
 (declare-function romacs-agent-log-faces-soon "romacs-agent-log-faces" ())
 (declare-function romacs-agent-log-rounds-you "romacs-agent-log-rounds" (text))
 (declare-function romacs-agent-log-rounds-incoming "romacs-agent-log-rounds" (event incoming))
@@ -1383,7 +1384,8 @@ windows showing it leave, changed."
                                   'field 'romacs-agent-log-separator))
               (delete-region (point) (+ (point) old))
               (set-marker romacs-agent-log--input (point))
-              (set-marker romacs-agent-log--end start))))
+              (set-marker romacs-agent-log--end start)))
+          (romacs-agent-log-attach-place))
       ;; Point on a queued row stays on it while it waits.
       (when-let* ((on) (at (text-property-any romacs-agent-log--end romacs-agent-log--input 'romacs-agent-log-queued on)))
         (goto-char at)))
@@ -1782,6 +1784,10 @@ shows it; its session loaded only then, as its records are read."
   "Call FUNCTION, a source's generic, with the chat's source, its session and ARGS."
   (apply function romacs-agent-log--source romacs-agent-log--session args))
 
+(defvar romacs-agent-log-draft-replaced-hook nil
+  "Run in a chat whose composer was emptied, sent or replaced by a
+recalled prompt: what was pending on its draft lands nowhere.")
+
 (defun romacs-agent-log--draft ()
   (string-trim (buffer-substring-no-properties romacs-agent-log--input (point-max))))
 
@@ -1797,6 +1803,7 @@ place instead (`romacs-agent-log-queue-put-back'), sent by no one."
       (funcall send text)
       (setq romacs-agent-log--recalled nil)
       (delete-region romacs-agent-log--input (point-max))
+      (run-hooks 'romacs-agent-log-draft-replaced-hook)
       ;; Sent: nothing typed is left.
       (set-buffer-modified-p nil)))))
 
@@ -2013,6 +2020,7 @@ transcript's comes with it."
     (setq romacs-agent-log--draft-kept (buffer-substring-no-properties romacs-agent-log--input (point-max))))
   (setq romacs-agent-log--recalled cells)
   (delete-region romacs-agent-log--input (point-max))
+  (run-hooks 'romacs-agent-log-draft-replaced-hook)
   (goto-char (point-max))
   (insert (if cells (car (car cells)) (or romacs-agent-log--draft-kept ""))))
 
@@ -2088,6 +2096,8 @@ A character typed on it goes to the composer."
 The session's commands are the menu's (romacs-agent-menu.el), here
 under C-c as well."
   "RET" #'romacs-agent-log-send
+  "DEL" #'romacs-agent-log-attach-delete-backward
+  "<remap> <yank>" #'romacs-agent-log-attach-yank
   "C-j" #'newline
   "S-<return>" #'newline
   ;; The turn.
@@ -2163,6 +2173,7 @@ On the transcript's text:
   ;; The separator's rule fits the window it is shown in.
   (add-hook 'window-size-change-functions (lambda (_) (when romacs-agent-log--input (romacs-agent-log--separator))) nil t)
   (add-hook 'window-size-change-functions #'romacs-agent-log-tables-refit nil t)
+  (romacs-agent-log-attach-setup)
   (add-hook 'after-change-functions #'romacs-agent-log--composer-plain nil t)
   (add-hook 'after-change-functions #'romacs-agent-log--composer-images nil t))
 
@@ -2172,6 +2183,7 @@ On the transcript's text:
 ;; Its replies' faces as they stream.
 (require 'romacs-agent-log-faces)
 (require 'romacs-agent-log-tables)
+(require 'romacs-agent-log-attach)
 ;; Its rounds, told at a glance.
 (require 'romacs-agent-log-rounds)
 (require 'romacs-agent-log-queue)

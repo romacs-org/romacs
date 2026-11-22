@@ -20,6 +20,7 @@
 
 (require 'cl-lib)
 (require 'subr-x)
+(require 'seq)
 (require 'romacs-attach)
 (require 'romacs-agent-glyphs)
 
@@ -38,11 +39,16 @@ agent chat; never enlarged, and narrower in a narrower window."
   "An image link in an agent chat, shown as its file's name: an
 attachment's chip.")
 
+(defconst romacs-agent-log-images-label-regexp "\\[\\(\\(?:\\\\.\\|[^][\\\n]\\)*\\)\\]"
+  "A Markdown link's label, its text in group 1: a bracket or backslash
+in it escaped by a backslash, so `a[0 [image](x.png)' links `image' only.")
+
 (defconst romacs-agent-log-images-regexp
   (let ((type "\\.\\(?:[pP][nN][gG]\\|[jJ][pP][eE]?[gG]\\|[wW][eE][bB][pP]\\|[gG][iI][fF]\\)"))
-    (concat "\\[[^]\n]*\\](\\(?:<\\([^<>\n]+" type "\\)>\\|\\([^ \t\n()<>]+" type "\\)\\))"))
+    (concat "\\[\\(?:\\\\.\\|[^][\\\n]\\)*\\](\\(?:<\\([^<>\n]+" type "\\)>\\|\\([^ \t\n()<>]+" type "\\)\\))"))
   "A Markdown link to an image file: its target in group 1, written in
-angle brackets, or else in group 2.")
+angle brackets, or else in group 2.  Its label is as
+`romacs-agent-log-images-label-regexp' reads it.")
 
 (defconst romacs-agent-log-images--indent "  "
   "What an image's rows start with: under the text after the prompt's mark.")
@@ -61,22 +67,52 @@ angle brackets, or else in group 2.")
             (if (string-match-p "\\.\\(?:png\\|jpe?g\\|webp\\|gif\\)\\'" (downcase file)) "image" "file")
             (if (string-match-p "[ \t()<>]" file) (concat "<" file ">") file))))
 
+(declare-function romacs-markdown--fontify "markdown.rs" (beg end faces &optional from))
+
+(defun romacs-agent-log-images--code (text)
+  "Where TEXT holds code, as Romacs's Markdown parses it (CommonMark):
+\(BEG . END) offsets of each code span's and code block's text."
+  (with-temp-buffer
+    (insert text)
+    (with-silent-modifications
+      (romacs-markdown--fontify (point-min) (point-max)
+                                '((code . romacs-agent-log-images--code) (code-block . romacs-agent-log-images--code))))
+    (let ((ranges nil) (at (point-min)))
+      (while (< at (point-max))
+        (let ((next (next-single-property-change at 'face nil (point-max))))
+          (when (memq 'romacs-agent-log-images--code (ensure-list (get-text-property at 'face)))
+            (push (cons (1- at) (1- next)) ranges))
+          (setq at next)))
+      ranges)))
+
+(defun romacs-agent-log-images--escaped-p (text at)
+  "Whether the character at AT in TEXT is escaped: an odd run of
+backslashes before it."
+  (let ((n 0))
+    (while (and (> (- at n) 0) (eq (aref text (- at n 1)) ?\\)) (setq n (1+ n)))
+    (cl-oddp n)))
+
 (defun romacs-agent-log-images-links (string &optional start end)
   "The image links in STRING, or in the current buffer from START to END
-when STRING is nil: (BEG END FILE) each, in order, FILE expanded."
-  (let ((case-fold-search nil) (links nil))
-    (if string
-        (let ((at 0))
-          (while (string-match romacs-agent-log-images-regexp string at)
-            (push (list (match-beginning 0) (match-end 0)
-                        (expand-file-name (or (match-string 1 string) (match-string 2 string))))
-                  links)
-            (setq at (match-end 0))))
-      (save-excursion
-        (goto-char start)
-        (while (re-search-forward romacs-agent-log-images-regexp end t)
-          (push (list (match-beginning 0) (match-end 0) (expand-file-name (or (match-string 1) (match-string 2))))
-                links))))
+when STRING is nil: (BEG END FILE) each, in order, FILE expanded.  A
+link in code (`romacs-agent-log-images--code') or after an escaping
+backslash is text, not a link."
+  (let* ((case-fold-search nil) (links nil)
+         (text (or string (buffer-substring-no-properties start end)))
+         (offset (if string 0 start))
+         ;; Parsed only when a link may be there: most text has none.
+         (code (and (string-search "](" text) (romacs-agent-log-images--code text)))
+         (at 0))
+    (while (string-match romacs-agent-log-images-regexp text at)
+      (let ((beg (match-beginning 0)) (end (match-end 0)))
+        ;; An escaped bracket opens no link; a link with any of it in
+        ;; code is none.
+        (unless (or (romacs-agent-log-images--escaped-p text beg)
+                    (seq-some (lambda (range) (and (< beg (cdr range)) (> end (car range)))) code))
+          (push (list (+ offset beg) (+ offset end)
+                      (expand-file-name (or (match-string 1 text) (match-string 2 text))))
+                links)))
+      (setq at (match-end 0)))
     (nreverse links)))
 
 (defun romacs-agent-log-images--width ()
@@ -211,6 +247,10 @@ IMAGE, its file's, is non-nil."
       (overlay-put overlay 'help-echo (nth 2 link)))
     overlay))
 
+(defvar-local romacs-agent-log-images-under-draft t
+  "Whether the composer's images show under its draft: nil where a tray
+of chips shows them instead (romacs-agent-log-attach.el).")
+
 (defun romacs-agent-log-images-composer (start)
   "Show the image links of the composer, from START to the buffer's end:
 each as its file's name, their images under the draft.  Drawn again only
@@ -228,7 +268,7 @@ between, their images follow the draft's end."
                                  (romacs-agent-log-images--image (nth 2 link) (or width (* 80 (frame-char-width)))
                                                                  romacs-agent-log-image-composer-lines))
                                links))
-               (shown (delq nil (copy-sequence images)))
+               (shown (and romacs-agent-log-images-under-draft (delq nil (copy-sequence images))))
                (block (when shown
                         ;; Not evaporating: a deleted last character leaves
                         ;; it to follow the draft's new end.

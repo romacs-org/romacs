@@ -95,11 +95,11 @@ total limits, the conversion badge."
     (romacs-should-not (plist-get (nth 1 items) :caption))))
 
 (romacs-deftest romacs-attach-a-long-name-loses-its-middle ()
-  (let ((name (romacs-attach--elide "a-very-long-screenshot-name-from-the-desktop.png" 28)))
+  (let ((name (romacs-truncate-middle "a-very-long-screenshot-name-from-the-desktop.png" 28)))
     (romacs-should (<= (string-width name) 28))
     (romacs-should (string-suffix-p ".png" name))
     (romacs-should (string-prefix-p "a-very" name))
-    (romacs-should (equal (romacs-attach--elide "short.png" 28) "short.png"))))
+    (romacs-should (equal (romacs-truncate-middle "short.png" 28) "short.png"))))
 
 (romacs-deftest romacs-attach-the-tray-string-is-cached-and-batches-plan-once ()
   "nil without items; one plan for a batch of 20; the same string between
@@ -119,7 +119,7 @@ changes; a change makes a new one."
       (let ((string (romacs-attach-tray-string)))
         (romacs-should (string-suffix-p "\n" string))
         (romacs-should (string-match-p "plain\\.png" string))
-        (romacs-should (string-match-p "at most 3 attachments" string))
+        (romacs-should (string-match-p "at most 3 attachments" (string-replace "\u00a0" " " string)))
         (romacs-should (eq string (romacs-attach-tray-string)))
         (romacs-should (equal (get-text-property 0 'romacs-attach-id string) (plist-get (car romacs-attach-items) :id)))
         (romacs-should (eq (overlay-get (plist-get romacs-attach--tray :overlay) 'before-string) string))
@@ -155,7 +155,7 @@ selection is always shown."
         (romacs-should (equal (funcall names) '("owned.txt" "plain.png" "star.svg")))
         (romacs-attach-edit-caption "the log")
         (romacs-should (equal (plist-get (car romacs-attach-items) :caption) "the log"))
-        (romacs-should (string-match-p "“the log”" (romacs-attach-tray-string)))
+        (romacs-should (string-match-p "“the log”" (string-replace "\u00a0" " " (romacs-attach-tray-string))))
         (romacs-attach-edit-remove)
         (romacs-should (equal (funcall names) '("plain.png" "star.svg")))
         (romacs-should (file-exists-p owned))
@@ -248,7 +248,7 @@ refused at take."
         (romacs-should (plist-get (cdr (car (car (romacs-attach-take)))) :refused))))))
 
 (romacs-deftest romacs-attach-a-wide-name-fits-its-columns ()
-  (let ((name (romacs-attach--elide (concat (make-string 30 ?界) ".png") 28)))
+  (let ((name (romacs-truncate-middle (concat (make-string 30 ?界) ".png") 28)))
     (romacs-should (<= (string-width name) 28))
     (romacs-should (string-suffix-p ".png" name))))
 
