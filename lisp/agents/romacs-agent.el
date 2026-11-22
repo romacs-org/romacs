@@ -1580,7 +1580,10 @@ one request id: the journal's is the one written."
             (romacs-agent-answering session) (plist-get (car messages) :id)
             (romacs-agent-own-turn session) own)
       (romacs-agent--changed session))
-    (run-hook-with-args 'romacs-agent-input-functions session id)))
+    ;; Written: what follows the write cannot unsend it, so a failing
+    ;; hook is said, never taken for a failed write sent again.
+    (with-demoted-errors "romacs-agent-input-functions: %S"
+      (run-hook-with-args 'romacs-agent-input-functions session id))))
 
 (defun romacs-agent--uuid-p (id)
   "Whether ID is a UUID, as Claude Code's and Codex's conversations are named."
@@ -3962,8 +3965,13 @@ queue.  Called wherever what the predicate reads may have changed."
                     (error (romacs-agent--keep-item session next)
                            (signal (car err) (cdr err))))
                   (dolist (part parts) (romacs-agent--dequeue session part))
-                  (dolist (part parts)
-                    (when (romacs-agent-item-delivered part) (funcall (romacs-agent-item-delivered part)))))
+                  ;; Each written is told, whatever an earlier one's telling did.
+                  (let ((failed nil))
+                    (dolist (part parts)
+                      (when (romacs-agent-item-delivered part)
+                        (condition-case err (funcall (romacs-agent-item-delivered part))
+                          (error (setq failed (or failed err))))))
+                    (when failed (signal (car failed) (cdr failed)))))
                 (setq more t)))
             (when (eq (romacs-agent-dispatch session) 'again) (setq more t))
             (setf (romacs-agent-dispatch session) 'busy)))

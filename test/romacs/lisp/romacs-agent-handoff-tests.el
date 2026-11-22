@@ -89,6 +89,16 @@
     ;; The last request is the user's, not the wake.
     (should (string-match-p "User: do it" (romacs-agent-handoff-brief items "x" "Go." 40)))))
 
+(ert-deftest romacs-agent-handoff-messages-in-one-turn-keep-their-senders ()
+  ;; romacs#405: a turn may take several sessions' messages; each is its
+  ;; sender's in the brief, saying its own text.
+  (let ((items (romacs-agent-handoff-items
+                (list (list :type 'input :text "a\n\nb"
+                            :messages (list (list :kind "parent" :from '(:name "lead") :text "a")
+                                            (list :kind "sibling" :from '(:name "peer") :text "b")))))))
+    (should (equal (mapcar (lambda (i) (plist-get i :text)) items)
+                   '("Message from lead (parent): a" "Message from peer (sibling): b")))))
+
 (ert-deftest romacs-agent-handoff-the-thread-starts-with-what-was-imported ()
   (require 'romacs-agent)
   (require 'romacs-agent-history)

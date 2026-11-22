@@ -75,8 +75,16 @@
                                                                             (list :wake (list :state "done" :chars 1))))))
     (romacs-agent-send-later session "the user's")
     (setf (romacs-agent-state session) 'idle)
-    (romacs-agent-queue-tests--writing sent
-      (romacs-agent--dispatch session))
+    (let ((records nil))
+      (cl-letf (((symbol-function 'romacs-agent--line)
+                 (lambda (_ object &optional journal) (push object sent) (push journal records)))
+                ((symbol-function 'romacs-agent--fold-now) #'ignore))
+        (romacs-agent--dispatch session))
+      ;; The journal keeps each message with its own text: a replay, the
+      ;; chat and a brief read them one by one.
+      (should (equal (mapcar (lambda (m) (list (gethash "id" m) (gethash "text" m)))
+                             (gethash "romacsMessages" (car records)))
+                     '(("m-1" "text m-1") ("m-3" "text m-3")))))
     (should (= (length sent) 1))
     (let ((content (gethash "content" (gethash "message" (car sent)))))
       (should (string-match-p "m-1[^z-a]*text m-1[^z-a]*m-3[^z-a]*text m-3" content))
@@ -84,6 +92,26 @@
     (should (equal delivered '("m-3" "m-1")))
     (should (equal (mapcar #'car (romacs-agent-queue session)) '("results" "the user's")))
     (should (= (romacs-agent-queue-length session) 2))))
+
+(ert-deftest romacs-agent-messages-in-one-turn-are-each-told ()
+  ;; One message's delivery failing leaves the others' told: each was
+  ;; written, none waits to go again.
+  (let ((session (romacs-agent-test-attach
+                  (romacs-agent--make :id "78787878-8888-4999-8aaa-bbbbbbbbbbbb" :harness 'claude :state 'running)
+                  t))
+        (told nil) (sent nil))
+    (dolist (id '("m-1" "m-2"))
+      (romacs-agent--admit session (romacs-agent-item id :kind 'next :valid #'always
+                                                      :messages (list (romacs-agent-make-message id "parent" '(:session "p")))
+                                                      :delivered (lambda () (push id told)
+                                                                   (when (equal id "m-1") (error "Bookkeeping"))))))
+    (setf (romacs-agent-state session) 'idle)
+    (romacs-agent-queue-tests--writing sent
+      (should-error (romacs-agent--dispatch session)))
+    (should (= (length sent) 1))
+    (should (equal told '("m-2" "m-1")))
+    (should (null (romacs-agent-queue session)))
+    (should (= (romacs-agent-queue-length session) 0))))
 
 (ert-deftest romacs-agent-queue-dispatch-is-one-at-a-time ()
   ;; A per-turn harness's run that ends before it is attached ends the turn
