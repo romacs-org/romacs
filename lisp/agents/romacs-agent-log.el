@@ -14,8 +14,8 @@
 ;; The buffer is the comint model:
 ;;
 ;;   transcript   read-only text, appended to
+;;   activity     the subagents still working
 ;;   divider      one line: what the session does now
-;;   activity     the subagents still working, above the queued messages
 ;;   composer     editable, RET sends
 ;;
 ;; Every character is text: no field, no intangible or invisible text,
@@ -152,7 +152,9 @@ user's own spec still wins."
 
 (defvar-local romacs-agent-log--session nil "The session this chat shows.")
 (defvar-local romacs-agent-log--end nil
-  "Marker: the transcript's end, where events are drawn; the separator follows it.")
+  "Marker: the transcript's end, where the next event goes.")
+(defvar-local romacs-agent-log--divider nil
+  "Marker where the divider begins, after any live activity.")
 (defvar-local romacs-agent-log--text-map nil
   "The keys of this buffer's transcript text, when not a chat's
 \(`romacs-agent-log-transcript-map'): a view with no composer has its own.")
@@ -1366,39 +1368,36 @@ to be sent: romacs-agent-log-queue.el), or nil for none.")
   "TEXT as read-only chrome, including its boundary with the composer."
   (propertize (romacs-agent-log--sealed text) 'field 'romacs-agent-log-separator))
 
-(defun romacs-agent-log--replace-field (start end text)
-  "Replace START through END with TEXT, returning the end of the new field."
-  (let ((old (- end start)))
-    (goto-char start)
-    (insert (romacs-agent-log--separator-field text))
-    (delete-region (point) (+ (point) old))
-    (point)))
+(defun romacs-agent-log--divider-marker ()
+  "The divider's marker, also in a chat predating the activity view."
+  (or romacs-agent-log--divider
+      (setq romacs-agent-log--divider (copy-marker romacs-agent-log--end t))))
 
 (defun romacs-agent-log--write-separator (divider rows)
-  "Write DIVIDER and ROWS around the live activity, preserving the composer."
-  (let ((start (marker-position romacs-agent-log--end))
+  "Write DIVIDER and ROWS below the live activity, preserving the composer."
+  (let* ((marker (romacs-agent-log--divider-marker))
+        (start (marker-position marker))
+        (end (marker-position romacs-agent-log--end))
+        (old (- romacs-agent-log--input start))
         (prompt (concat rows (propertize (concat (romacs-agent-glyph 'composer) " ") 'face 'romacs-agent-log-prompt))))
-    (pcase (romacs-agent-log-activity-bounds)
-      (`(,first . ,last)
-       (let ((at (marker-position last)))
-         (set-marker romacs-agent-log--input (romacs-agent-log--replace-field at romacs-agent-log--input prompt))
-         (set-marker last at))
-       ;; Keep the newline before the EWOC even while the divider changes.
-       (romacs-agent-log--replace-field start (1- first) divider))
-      (_ (set-marker romacs-agent-log--input
-                     (romacs-agent-log--replace-field start romacs-agent-log--input (concat divider "\n" prompt)))))
-    (set-marker romacs-agent-log--end start)))
+    (goto-char start)
+    (insert (romacs-agent-log--separator-field (concat divider "\n" prompt)))
+    (delete-region (point) (+ (point) old))
+    (set-marker romacs-agent-log--input (point))
+    (set-marker marker start)
+    (when-let* ((bounds (romacs-agent-log-activity-bounds))) (set-marker (cdr bounds) start))
+    (set-marker romacs-agent-log--end end)))
 
 (defun romacs-agent-log--activity-refresh ()
-  "Show the current session's running harness subagents by the composer."
+  "Show the current session's running harness subagents above the divider."
   (when (and romacs-agent-log--input romacs-agent-log--width)
     (save-restriction
       (widen)
       (let ((text (romacs-agent-log-activity-lines
-                   (romacs-agent-children-rows romacs-agent-log--session) romacs-agent-log--width)))
-        (romacs-agent-log-activity-set
-         (romacs-agent-log--separator-field text)
-         (save-excursion (goto-char romacs-agent-log--end) (line-beginning-position 2)))))))
+                   (romacs-agent-children-rows romacs-agent-log--session) romacs-agent-log--width))
+            (end (marker-position romacs-agent-log--end)))
+        (romacs-agent-log-activity-set (romacs-agent-log--separator-field text) end)
+        (set-marker romacs-agent-log--end end)))))
 
 (defun romacs-agent-log--separator (&optional force)
   "Write the separator again when what the session does, or the room the
@@ -1650,7 +1649,7 @@ where the chat reads and acts on SESSION, this editor by default
               romacs-agent-log--input (point-min-marker))
         (set-marker-insertion-type romacs-agent-log--end t)
         (romacs-agent-log--separator t)
-        (romacs-working-show buffer buffer romacs-agent-log--end romacs-agent-log--thread-cols
+        (romacs-working-show buffer buffer (romacs-agent-log--divider-marker) romacs-agent-log--thread-cols
                              (romacs-agent-log--work romacs-agent-log--state))
         (puthash (romacs-agent-id session) buffer chats)
         (add-hook 'window-buffer-change-functions #'romacs-agent-log--shown nil t)))

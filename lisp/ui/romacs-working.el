@@ -145,8 +145,8 @@ user's own spec still wins."
 
 (defvar romacs-working--threads (make-hash-table :test #'equal)
   "Each thread shown, by id: a plist of :buffer, :start (a marker), :own
-\(whether the thread made the marker), :cols, :work, :beats and
-:animated (whether the display draws its motion).")
+\(whether the thread made the marker), :cols, :work, :beats, :kill (its
+cleanup hook) and :animated (whether the display draws its motion).")
 
 (defun romacs-working--face (work)
   (intern (format "romacs-working-%s" work)))
@@ -216,12 +216,12 @@ default).  A thread ID shown already moves there."
   (romacs-working-stop id)
   (let ((thread (list :buffer buffer
                       :start (if (markerp start) start (with-current-buffer buffer (copy-marker start)))
-                      :own (not (markerp start)) :cols cols :work (or work 'idle) :beats 0)))
+                      :own (not (markerp start)) :cols cols :work (or work 'idle) :beats 0 :kill nil)))
     (puthash id thread romacs-working--threads)
     (with-current-buffer buffer
-      (add-hook 'kill-buffer-hook
-                (lambda () (when (eq (gethash id romacs-working--threads) thread) (romacs-working-stop id)))
-                nil t))
+      (let ((kill (lambda () (when (eq (gethash id romacs-working--threads) thread) (romacs-working-stop id)))))
+        (plist-put thread :kill kill)
+        (add-hook 'kill-buffer-hook kill nil t)))
     (romacs-working--paint thread)
     (romacs-working--animate id thread))
   id)
@@ -247,6 +247,9 @@ steps on as many cells."
   "Show thread ID no more."
   (when-let* ((thread (gethash id romacs-working--threads)))
     (when (plist-get thread :own) (set-marker (plist-get thread :start) nil))
+    (when-let* ((kill (plist-get thread :kill)) ((buffer-live-p (plist-get thread :buffer))))
+      (with-current-buffer (plist-get thread :buffer)
+        (remove-hook 'kill-buffer-hook kill t)))
     (remhash id romacs-working--threads)
     (romacs-animate-stop id)))
 

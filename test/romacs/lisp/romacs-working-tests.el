@@ -78,6 +78,15 @@
     (should-not (gethash 'killed romacs-working--threads))
     (should-not (romacs-animate--get 'killed))))
 
+(ert-deftest romacs-working-forgets-finished-registrations ()
+  (with-temp-buffer
+    (insert (romacs-working-still 4 'idle) "\n")
+    (let ((before kill-buffer-hook))
+      (dotimes (i 5)
+        (romacs-working-show i (current-buffer) (point-min) 4 'running)
+        (romacs-working-stop i))
+      (should (equal kill-buffer-hook before)))))
+
 (ert-deftest romacs-working-still-frames-are-as-wide-as-asked ()
   (dolist (work '(idle running waiting failed))
     (dolist (cols '(1 2 3 9))

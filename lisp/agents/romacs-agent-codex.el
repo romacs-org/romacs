@@ -550,9 +550,25 @@ an approval or questions for the user, anything else refused."
          (title (romacs-agent--value (gethash "agentPath" item)))
          (state (pcase kind ("started" 'started) ("interacted" 'progress)
                             ("interrupted" 'stopped) ("completed" 'completed)))
-         (event (romacs-agent--codex-agent-event (gethash "agentThreadId" item) state title
+         (event (romacs-agent--codex-agent-event (gethash "agentThreadId" item) state
+                                                 (and (stringp title) (file-name-nondirectory title))
                                                  (and (eq state 'progress) "Message sent"))))
     (if (and event (memq state '(completed stopped))) (plist-put event :summary title) event)))
+
+(defun romacs-agent--codex-child-progress (thread method params)
+  "A progress event for worker THREAD's app-server METHOD and PARAMS."
+  (when-let* (((equal method "item/started"))
+              (item (gethash "item" params))
+              ((hash-table-p item))
+              (activity (pcase (gethash "type" item)
+                          ("commandExecution"
+                           (let ((command (romacs-agent--value (gethash "command" item))))
+                             (if (and (stringp command) (not (string-empty-p command))) command "Running a command")))
+                          ("reasoning" "Thinking")
+                          ("agentMessage" "Writing a reply")
+                          ((or "fileChange" "webSearch" "mcpToolCall" "dynamicToolCall")
+                           (car (romacs-agent--codex-tool item))))))
+    (list (romacs-agent--codex-agent-event thread 'progress nil activity))))
 
 (defun romacs-agent--codex-item (session item completed &optional id)
   "The events of ITEM, started or COMPLETED; ID, when given, names it."
@@ -579,7 +595,9 @@ an approval or questions for the user, anything else refused."
       ("plan" (when (and completed (stringp (gethash "text" item)))
                 (list (list :type 'plan :text (gethash "text" item) :proceed t))))
       ("subAgentActivity"
-       (when-let* ((completed) (event (romacs-agent--codex-activity-event item))) (list event)))
+       (when-let* (((or completed (equal (gethash "kind" item) "started")))
+                   (event (romacs-agent--codex-activity-event item)))
+         (list event)))
       ("collabAgentToolCall"
        (append (romacs-agent--codex-tool-events session id item completed)
                (and completed (romacs-agent--codex-collab-events item))))
@@ -731,10 +749,15 @@ an approval or questions for the user, anything else refused."
 (defun romacs-agent--codex-events (session line)
   "The events of LINE, a JSON-RPC message from `codex app-server' (or a
 line an earlier `codex exec' run journaled)."
-  (let ((method (gethash "method" line)) (id (gethash "id" line)))
+  (let* ((method (gethash "method" line)) (id (gethash "id" line))
+         (params (gethash "params" line))
+         (thread (and (hash-table-p params) (gethash "threadId" params)))
+         (own (romacs-agent-harness-session session)))
     (cond ((gethash "type" line) (romacs-agent--codex-exec-events session line))
-          ((and method id) (romacs-agent--codex-asked session id method (gethash "params" line)))
-          (method (romacs-agent--codex-notified session method (gethash "params" line)))
+          ((and method id) (romacs-agent--codex-asked session id method params))
+          ((and method own (stringp thread) (not (equal own thread)))
+           (romacs-agent--codex-child-progress thread method params))
+          (method (romacs-agent--codex-notified session method params))
           (t (romacs-agent--codex-answer session id line)))))
 
 (defconst romacs-agent--codex-output-delta
