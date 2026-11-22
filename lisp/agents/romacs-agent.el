@@ -3194,6 +3194,13 @@ writer's, taken over."
         (unwind-protect (funcall function) (ignore-errors (delete-directory lock)))
       (run-at-time 0.2 nil #'romacs-agent--with-lock file function))))
 
+(defun romacs-agent--room-summary (windows time fallback)
+  "Summarize WINDOWS at TIME, using FALLBACK when no window binds."
+  (append (or (romacs-agent--room-binding windows time)
+              (list :status (plist-get fallback :status) :used (plist-get fallback :used)
+                    :resets (plist-get fallback :resets) :window (plist-get fallback :window)))
+          (list :time time :windows windows)))
+
 (defun romacs-agent--room-merged (mine theirs)
   "An account's report MINE (this server's) and THEIRS (another's, read
 from disk) as one: each window its newer report, the account bound as
@@ -3208,11 +3215,9 @@ those say (`romacs-agent--room-binding'); with no windows, the newer."
         (let ((own (cdr (assoc window windows))))
           (when (or (null own) (> (or (plist-get report :time) 0) (or (plist-get own :time) 0)))
             (setf (alist-get window windows nil nil #'equal) report))))
-      (let ((newer (if (> (or (plist-get theirs :time) 0) (or (plist-get mine :time) 0)) theirs mine)))
-        (append (or (romacs-agent--room-binding windows time)
-                    (list :status (plist-get newer :status) :used (plist-get newer :used)
-                          :resets (plist-get newer :resets) :window (plist-get newer :window)))
-                (list :time time :windows windows)))))))
+      (romacs-agent--room-summary
+       windows time (if (> (or (plist-get theirs :time) 0) (or (plist-get mine :time) 0))
+                        theirs mine))))))
 
 (defun romacs-agent--keep-room ()
   "Write `romacs-agent--room' to its file, merged with what another server
@@ -3238,6 +3243,27 @@ again, after it was at its limit: what waits for its reset goes on.")
 instance's (`romacs-agent-note-room')."
   (romacs-agent-note-room (romacs-agent-provider session) event))
 
+(defun romacs-agent--room-report (known event time)
+  "Compute the next usage report from KNOWN and EVENT at TIME, or nil."
+  (unless (or (and known (> (plist-get known :time) time))
+              (and (eq (plist-get event :status) 'rejected)
+                   (string-match-p "overage" (format "%s" (plist-get event :window)))))
+    (let* ((reported (or (plist-get event :windows)
+                         (and (plist-get event :window)
+                              (list (list :name (romacs-agent--room-window-name (plist-get event :window))
+                                          :status (plist-get event :status) :used (plist-get event :used)
+                                          :resets (plist-get event :resets))))))
+           (windows (romacs-agent--room-windows (romacs-agent--room-kept-windows known) reported time)))
+      (romacs-agent--room-summary windows time event))))
+
+(defun romacs-agent--room-durable-change-p (known room)
+  "Whether ROOM changes any part of KNOWN that a restart needs."
+  (or (not known)
+      (cl-some (lambda (key) (not (equal (plist-get known key) (plist-get room key))))
+               '(:status :resets :window))
+      (not (equal (romacs-agent--room-gist (plist-get known :windows))
+                  (romacs-agent--room-gist (plist-get room :windows))))))
+
 (defun romacs-agent-note-room (provider event)
   "Keep EVENT, a `rate-limit' report of instance PROVIDER's usage, as its
 own, unless an older one: a replay reports the past too.  Its overage
@@ -3248,31 +3274,14 @@ are refused, and the others run.  An instance it gives room again runs
          (known (gethash provider table))
          (spent (not (romacs-agent-room provider)))
          (time (or (plist-get event :time) (float-time))))
-    (unless (or (and known (> (plist-get known :time) time))
-                (and (eq (plist-get event :status) 'rejected)
-                     (string-match-p "overage" (format "%s" (plist-get event :window)))))
-      (let* ((reported (or (plist-get event :windows)
-                           ;; One that names no windows reports its own.
-                           (and (plist-get event :window)
-                                (list (list :name (romacs-agent--room-window-name (plist-get event :window))
-                                            :status (plist-get event :status) :used (plist-get event :used)
-                                            :resets (plist-get event :resets))))))
-             (windows (romacs-agent--room-windows
-                       (romacs-agent--room-kept-windows known) reported time))
-             (room (append (or (romacs-agent--room-binding windows time)
-                               (list :status (plist-get event :status) :used (plist-get event :used)
-                                     :resets (plist-get event :resets) :window (plist-get event :window)))
-                           (list :time time :windows windows))))
-        (puthash provider room table)
-        ;; On disk what a restart needs: not each request's use, but each
-        ;; window's state, and its use once it is worth a word (every 5%).
-        (unless (and known (cl-every (lambda (key) (equal (plist-get known key) (plist-get room key)))
-                                     '(:status :resets :window))
-                     (equal (romacs-agent--room-gist (plist-get known :windows)) (romacs-agent--room-gist windows)))
-          (romacs-agent--keep-room))
-        (unless (eq spent (not (romacs-agent-room provider)))
-          (romacs-agent--room-watch)
-          (when spent (run-hook-with-args 'romacs-agent-room-functions provider)))))))
+    (when-let* ((room (romacs-agent--room-report known event time)))
+      (puthash provider room table)
+      (when (romacs-agent--room-durable-change-p known room)
+        (romacs-agent--keep-room))
+      ;; Keeping can merge a newer report from disk before we wake waiters.
+      (unless (eq spent (not (romacs-agent-room provider)))
+        (romacs-agent--room-watch)
+        (when spent (run-hook-with-args 'romacs-agent-room-functions provider))))))
 
 ;;; Asking spent accounts again
 
