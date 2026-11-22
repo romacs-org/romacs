@@ -3956,16 +3956,64 @@ queue.  Called wherever what the predicate reads may have changed."
                 ;; Its kept record goes first; a restore after an end
                 ;; between the two finds it sent by its id in the journal
                 ;; (`romacs-agent--sent-queued') and sends it no second time.
-                (romacs-agent--unkeep-item session next)
-                (condition-case err (romacs-agent--write session next)
-                  (error (romacs-agent--keep-item session next)
-                         (signal (car err) (cdr err))))
-                (romacs-agent--dequeue session next)
-                (when (romacs-agent-item-delivered next) (funcall (romacs-agent-item-delivered next)))
+                (let ((parts (romacs-agent--together session next)))
+                  (romacs-agent--unkeep-item session next)
+                  (condition-case err (romacs-agent--write session (romacs-agent--joined parts))
+                    (error (romacs-agent--keep-item session next)
+                           (signal (car err) (cdr err))))
+                  (dolist (part parts) (romacs-agent--dequeue session part))
+                  (dolist (part parts)
+                    (when (romacs-agent-item-delivered part) (funcall (romacs-agent-item-delivered part)))))
                 (setq more t)))
             (when (eq (romacs-agent-dispatch session) 'again) (setq more t))
             (setf (romacs-agent-dispatch session) 'busy)))
       (setf (romacs-agent-dispatch session) nil))))
+
+;; Messages from other sessions that wait for a new turn go in one turn
+;; (romacs#405): a turn each, a lane with a backlog would read its
+;; parent's answers several turns late, each turn as long as its work.
+
+(defun romacs-agent--joinable-p (item)
+  "Whether ITEM may go in one turn with others like it: messages from
+other sessions waiting for a new turn, nothing else riding on its write
+\(no images, no hold's prompt, none kept across a restart, whose record
+names the one item it was), and not sent first (an interrupt's, which
+goes alone)."
+  (and (eq (romacs-agent-item-kind item) 'next) (romacs-agent-item-messages item)
+       (not (or (romacs-agent-item-images item) (romacs-agent-item-own item) (romacs-agent-item-token item)
+                (romacs-agent-item-front item) (romacs-agent--keepable-p item)))))
+
+(defun romacs-agent--results-p (item)
+  "Whether ITEM delivers delegated tasks' results: its text is theirs."
+  (cl-some (lambda (m) (plist-get m :wake)) (romacs-agent-item-messages item)))
+
+(defun romacs-agent--together (session head)
+  "HEAD and the messages waiting behind it in SESSION's queue that go in
+its turn (`romacs-agent--joinable-p', results with results), in order;
+those no longer wanted (VALID says) are dropped on the way.  HEAD alone
+when it is not the queue's head (a steer passing what waits)."
+  (if (not (and (eq head (car (romacs-agent-queue session))) (romacs-agent--joinable-p head)))
+      (list head)
+    (let ((parts (list head)) (results (romacs-agent--results-p head)))
+      (cl-loop for item in (cdr (romacs-agent-queue session))
+               while (and (romacs-agent--joinable-p item) (eq (romacs-agent--results-p item) results))
+               do (if (and (romacs-agent-item-valid item) (not (funcall (romacs-agent-item-valid item))))
+                      (romacs-agent--dequeue session item)
+                    (push item parts)))
+      (nreverse parts))))
+
+(defun romacs-agent--joined (parts)
+  "PARTS, waiting messages (`romacs-agent--together'), as the one item
+written: the only one as it is; else their texts in order, and their
+messages, each with its own text (results' text is the delivery's)."
+  (if (null (cdr parts)) (car parts)
+    (romacs-agent-item
+     (mapconcat #'romacs-agent-item-text parts "\n\n")
+     :kind 'next
+     :messages (cl-loop for part in parts
+                        append (mapcar (lambda (m) (if (plist-get m :text) m
+                                                     (plist-put (copy-sequence m) :text (romacs-agent-item-text part))))
+                                       (romacs-agent-item-messages part))))))
 
 (defvar romacs-agent--dispatching nil
   "Sessions whose dispatch is due (`romacs-agent--dispatch-soon').")

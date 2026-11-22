@@ -55,6 +55,36 @@
       (should (equal (mapcar #'car (romacs-agent-queue session)) '("second")))
       (should (= (romacs-agent-queue-length session) 1)))))
 
+(ert-deftest romacs-agent-queued-messages-go-in-one-turn ()
+  ;; romacs#405: messages from other sessions waiting for a turn's end go
+  ;; in the next turn together, in order, each delivered; one no longer
+  ;; wanted is dropped; a message of another kind (the user's, a task's
+  ;; results) waits for a turn of its own.
+  (let ((session (romacs-agent-test-attach
+                  (romacs-agent--make :id "77777777-8888-4999-8aaa-bbbbbbbbbbbb" :harness 'claude :state 'running)
+                  t))
+        (message (lambda (id) (romacs-agent-make-message id "parent" (list :session "p" :name "lead"))))
+        (delivered nil) (sent nil))
+    (dolist (id '("m-1" "m-2" "m-3"))
+      (romacs-agent--admit session (romacs-agent-item (concat "text " id) :kind 'next
+                                                      :messages (list (funcall message id))
+                                                      :valid (lambda () (not (equal id "m-2")))
+                                                      :delivered (lambda () (push id delivered)))))
+    (romacs-agent--admit session (romacs-agent-item "results" :kind 'next :valid #'always
+                                                    :messages (list (append (funcall message "m-4")
+                                                                            (list :wake (list :state "done" :chars 1))))))
+    (romacs-agent-send-later session "the user's")
+    (setf (romacs-agent-state session) 'idle)
+    (romacs-agent-queue-tests--writing sent
+      (romacs-agent--dispatch session))
+    (should (= (length sent) 1))
+    (let ((content (gethash "content" (gethash "message" (car sent)))))
+      (should (string-match-p "m-1[^z-a]*text m-1[^z-a]*m-3[^z-a]*text m-3" content))
+      (should-not (string-match-p "m-2\\|m-4\\|the user's" content)))
+    (should (equal delivered '("m-3" "m-1")))
+    (should (equal (mapcar #'car (romacs-agent-queue session)) '("results" "the user's")))
+    (should (= (romacs-agent-queue-length session) 2))))
+
 (ert-deftest romacs-agent-queue-dispatch-is-one-at-a-time ()
   ;; A per-turn harness's run that ends before it is attached ends the turn
   ;; while its message is being sent: the next is sent after, once each.
