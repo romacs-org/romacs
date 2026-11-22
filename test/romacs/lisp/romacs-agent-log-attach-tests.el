@@ -111,5 +111,15 @@ PNG files in a fresh directory, and `composer' its draft's text."
         (should-not edited)
         (should (= (length (composer)) (1- (length (link a)))))))))
 
+(ert-deftest romacs-agent-log-attach-a-tray-breaks-between-chips ()
+  ;; Word wrap breaks at a space: the tray's only spaces are between its
+  ;; chips, so a narrow window wraps whole chips.
+  (romacs-agent-log-attach-tests--with
+    (insert (link a) " " (link b) " " (link c))
+    (romacs-agent-log-attach-sync)
+    (let ((tray (overlay-get romacs-agent-log-attach--overlay 'before-string)))
+      (should (= (length (split-string tray "  " t "\n")) 3))
+      (should (= (cl-count ?\s tray) 4)))))
+
 (provide 'romacs-agent-log-attach-tests)
 ;;; romacs-agent-log-attach-tests.el ends here

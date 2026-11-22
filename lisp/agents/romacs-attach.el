@@ -517,12 +517,18 @@ cached until its items or plan change; nil without items."
 
 (defun romacs-attach--thumbnail (item)
   "A thumbnail of ITEM: a `:file' image the header probe sized, decoded
-off the evaluator at chip size; else its type's icon."
+off the evaluator at chip size; else its type's icon.  The image is over
+a no-break space: word wrap never parts it from its name."
   (if (plist-get item :pixels)
-      (propertize " " 'display (create-image (plist-get item :path) nil nil
+      (propertize " " 'display (create-image (plist-get item :path) nil nil
                                              :max-height '(2 . em) :max-width '(4 . em)
                                              :ascent 'center :margin 2))
     (or (romacs-icon (romacs-attach--icon-name (plist-get item :mime)) 'romacs-attach-chip) (romacs-agent-glyph 'attachment))))
+
+(defconst romacs-attach--glue (propertize " " 'display '(space :width 1))
+  "A space inside a chip: a no-break space drawn as a plain one.  Word
+wrap classes an element by the text under it, so a tray's line breaks
+between chips, never inside one.")
 
 (defun romacs-attach--chip (entry selected)
   "Plan ENTRY's chip, SELECTED or not."
@@ -537,9 +543,11 @@ off the evaluator at chip size; else its type's icon."
                        (propertize (concat " " (plist-get (cdr entry) :badge)) 'face 'romacs-attach-badge))))
          (caption (and (plist-get item :caption) (concat " “" (plist-get item :caption) "”"))))
     (propertize
-     (concat (romacs-attach--thumbnail item) " "
+     (concat (romacs-attach--thumbnail item) romacs-attach--glue
              (romacs-attach--elide (or (plist-get item :name) "") romacs-attach-label-width)
-             caption " " (propertize size 'face 'romacs-attach-badge) badge " ")
+             caption romacs-attach--glue
+             (propertize (string-join (split-string size " ") romacs-attach--glue) 'face 'romacs-attach-badge)
+             badge romacs-attach--glue)
      'face (if selected 'romacs-attach-selected 'romacs-attach-chip)
      'romacs-attach-id (plist-get item :id)
      'help-echo (format "%s\n%s" (plist-get item :path) (plist-get item :mime)))))
