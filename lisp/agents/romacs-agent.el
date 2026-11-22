@@ -1569,7 +1569,9 @@ one request id: the journal's is the one written."
          (messages (romacs-agent--stamped messages text))
          ;; A renewal's brief goes with the message; the journal has it in
          ;; the renewal's note, and the message as the user wrote it.
-         (brief (and (not own) (romacs-agent-brief session))))
+         (brief (and (not own) (romacs-agent-brief session)))
+         ;; Known before the write: nothing after it may fail.
+         (answered (romacs-agent--answered messages)))
     ;; The journal's alone: the id names the message's turn.
     (puthash "romacsRequest" id record)
     (when own (puthash "romacsOwn" own record))
@@ -1590,7 +1592,7 @@ one request id: the journal's is the one written."
     ;; turn, not the one before.  A steer's turn is the one under way.
     (unless (romacs-agent--turn-under-way-p session)
       (setf (romacs-agent-state session) 'running
-            (romacs-agent-answering session) (romacs-agent--answered messages)
+            (romacs-agent-answering session) answered
             (romacs-agent-own-turn session) own)
       (romacs-agent--after-write "romacs-agent--changed" (lambda () (romacs-agent--changed session))))
     (romacs-agent--after-write "romacs-agent-input-functions"
@@ -3982,13 +3984,15 @@ queue.  Called wherever what the predicate reads may have changed."
                 ;; (`romacs-agent--sent-queued') and sends it no second time.
                 (pcase-let ((`(,parts . ,stale) (romacs-agent--together session next)))
                   (romacs-agent--unkeep-item session next)
-                  ;; Its user can no longer change it: it is being written.
-                  (dolist (part parts) (setf (romacs-agent-item-held part) 'sending))
                   ;; A write cut short, by an error or by a quit while it
                   ;; waits on the harness, gives it back: kept again, its
                   ;; user's again; a restore finds it sent by its id if it
                   ;; went (`romacs-agent--sent-queued').
-                  (condition-case err (romacs-agent--write session (romacs-agent--joined parts))
+                  (condition-case err
+                      (progn
+                        ;; Its user can no longer change it: it is being written.
+                        (dolist (part parts) (setf (romacs-agent-item-held part) 'sending))
+                        (romacs-agent--write session (romacs-agent--joined parts)))
                     ((error quit) (dolist (part parts) (setf (romacs-agent-item-held part) nil))
                      (romacs-agent--keep-item session next)
                      (signal (car err) (cdr err))))
