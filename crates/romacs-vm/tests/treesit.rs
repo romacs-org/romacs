@@ -1021,8 +1021,9 @@ fn a_twin_narrowed_after_it_was_made_takes_its_first_parse_on_a_thread() {
 
 /// A parser of an indirect buffer shares its base's text, but a frame that
 /// shows the base starts no first parse for it: it parses when its own
-/// buffer is shown, on a thread. The parses are counted in a process of
-/// its own.
+/// buffer is shown and asks, on the evaluator, as a buffer with an indirect
+/// relative takes no first parse on a thread (romacs#392). The parses are
+/// counted in a process of its own.
 #[test]
 fn a_frame_of_the_base_buffer_starts_no_first_parse_for_an_indirect_one() {
     const CHILD: &str = "ROMACS_TREESIT_INDIRECT_CHILD";
@@ -1053,7 +1054,7 @@ fn a_frame_of_the_base_buffer_starts_no_first_parse_for_an_indirect_one() {
     while deferred_frame(&mut vm) {}
     vm.eval_source("(with-current-buffer \"ts-indirect\" (treesit-parser-root-node treesit-test-parser))").unwrap();
     assert_eq!(romacs_vm::treesit_parses_in_process(), before + 1, "showing it parsed it once");
-    assert_eq!(romacs_vm::treesit_parses_on_this_thread(), evaluator, "and not on the evaluator");
+    assert_eq!(romacs_vm::treesit_parses_on_this_thread(), evaluator + 1, "on the evaluator, its text being shared");
 }
 
 /// A twin waiting for a free thread stops waiting once the parser that got
@@ -1217,4 +1218,203 @@ fn a_killed_indirect_parser_waits_for_nothing_of_a_unibyte_base() {
         .unwrap().display().unwrap();
     assert_eq!(answer, "answered", "the query answered");
     assert_eq!(romacs_vm::treesit_parses_on_this_thread(), before + 1, "it parsed once on the evaluator, as a killed buffer's does");
+}
+
+/// A base buffer and its indirect buffer NAME-ind over LINES functions, the
+/// indirect buffer with a C parser; the base fontified by a plain fontifier
+/// that counts its runs and puts `bold' on what it fontifies, the indirect
+/// buffer by one that asks its parser for the tree. With HOLD, four early
+/// parses of large texts hold every thread.
+fn relatives_vm(name: &str, lines: usize, hold: bool) -> Vm {
+    let mut vm = gnu_lisp(&[]);
+    vm.set_gc_stress(0);
+    vm.eval_source("(require 'treesit)").unwrap();
+    vm.eval_source(&format!("(progn {SYSTEM_SETUP} \
+        (with-current-buffer (get-buffer-create \"{name}\") \
+          (dotimes (i {lines}) (insert (format \"int f%d (int a) {{ return a + %d; }}\\n\" i i))) \
+          (setq-local ts-fontified 0) \
+          (setq-local fontification-functions (list (lambda (pos) (setq ts-fontified (1+ ts-fontified)) \
+            (let ((end (min (point-max) (+ pos 2000)))) \
+              (put-text-property pos end 'face 'bold) (put-text-property pos end 'fontified t)))))) \
+        (with-current-buffer (make-indirect-buffer \"{name}\" \"{name}-ind\") \
+          (setq treesit-test-parser (treesit-parser-create 'c)) \
+          (setq-local fontification-functions (list (lambda (pos) (treesit-parser-root-node treesit-test-parser) \
+            (let ((end (min (point-max) (+ pos 2000)))) \
+              (put-text-property pos end 'face 'italic) (put-text-property pos end 'fontified t)))))))")).unwrap();
+    vm.set_background_wake(std::sync::Arc::new(|| {}));
+    if hold {
+        vm.eval_source("(let ((text (apply #'concat (make-list 64000 \"int g (int a) { return a - 1; }\\n\")))) \
+            (dotimes (n 4) (with-current-buffer (get-buffer-create (format \"ts-hold-%d\" n)) (insert text))) \
+            (dotimes (n 4) (with-current-buffer (format \"ts-hold-%d\" n) (romacs--treesit-parse-early 'c))))").unwrap();
+    }
+    vm
+}
+
+/// The face at the start of BUFFER, and whether it reads as parsing.
+fn face_and_parsing(vm: &mut Vm, buffer: &str) -> String {
+    vm.eval_source(&format!("(with-current-buffer \"{buffer}\" (list (get-text-property (point-min) 'face) (romacs--treesit-parsing-p)))"))
+        .unwrap().display().unwrap()
+}
+
+/// With every thread busy, a shown indirect buffer takes no first parse on a
+/// thread and waits for none: its fontifier's query parses it, its window
+/// takes its faces, and its base, shown after, fontifies with its own (S25,
+/// the waiting case).
+#[test]
+fn a_shown_indirect_buffer_parses_when_asked_and_leaves_its_base_alone() {
+    const CHILD: &str = "ROMACS_TREESIT_A_SHOWN_INDIRECT_BUFFER_PARSES_WHEN_ASKE";
+    const NAME: &str = "a_shown_indirect_buffer_parses_when_asked_and_leaves_its_base_alone";
+    if std::env::var_os(CHILD).is_none() {
+        let own = own_test::name(module_path!(), NAME);
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &own, "--nocapture", "--test-threads", "1"]).env(CHILD, "1").output().unwrap();
+        assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains("1 passed"),
+            "child: {}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        return;
+    }
+    let mut vm = relatives_vm("ts-rel-wait", 400, true);
+    vm.eval_source("(set-window-buffer nil (get-buffer \"ts-rel-wait-ind\"))").unwrap();
+    deferred_frame(&mut vm);
+    assert_eq!(face_and_parsing(&mut vm, "ts-rel-wait-ind"), "(italic nil)", "the indirect window took its faces");
+    vm.eval_source("(progn (with-current-buffer \"ts-rel-wait\" (put-text-property (point-min) (point-max) 'fontified nil)) \
+        (set-window-buffer nil (get-buffer \"ts-rel-wait\")))").unwrap();
+    deferred_frame(&mut vm);
+    assert_eq!(face_and_parsing(&mut vm, "ts-rel-wait"), "(bold nil)", "the base took its own faces");
+    assert_eq!(tree_is_a_parse(&mut vm, "ts-rel-wait-ind"), "t");
+}
+
+/// A buffer whose first parse is on its thread when an indirect buffer of it
+/// is cloned (`clone-indirect-buffer') stops deferring: its next frame runs its hooks and fontifies, its
+/// query taking the thread's tree, so nothing parses on the evaluator (S25,
+/// the running case).
+#[test]
+fn a_first_parse_running_when_its_buffer_gains_a_relative_defers_nothing() {
+    const CHILD: &str = "ROMACS_TREESIT_A_FIRST_PARSE_RUNNING_WHEN_ITS_BUFFER_GA";
+    const NAME: &str = "a_first_parse_running_when_its_buffer_gains_a_relative_defers_nothing";
+    if std::env::var_os(CHILD).is_none() {
+        let own = own_test::name(module_path!(), NAME);
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &own, "--nocapture", "--test-threads", "1"]).env(CHILD, "1").output().unwrap();
+        assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains("1 passed"),
+            "child: {}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        return;
+    }
+    let mut vm = first_parse_vm("ts-rel-run", 64000, true);
+    vm.eval_source("(with-current-buffer \"ts-rel-run\" (setq-local ts-fontified 0) \
+        (setq-local fontification-functions (list (lambda (pos) (setq ts-fontified (1+ ts-fontified)) \
+          (treesit-parser-root-node treesit-test-parser) (put-text-property pos (min (point-max) (+ pos 2000)) 'fontified t)))))").unwrap();
+    deferred_frame(&mut vm);
+    let started = vm.eval_source("(with-current-buffer \"ts-rel-run\" (romacs--treesit-parsing-p))").unwrap().display().unwrap();
+    assert_eq!(started, "t", "the first parse runs on its thread");
+    vm.eval_source("(progn (with-current-buffer \"ts-rel-run\" (clone-indirect-buffer \"ts-rel-run-ind\" nil)) (setq ts-hooked 0) \
+        (add-hook 'pre-redisplay-functions (lambda (_) (setq ts-hooked (1+ ts-hooked)))))").unwrap();
+    vm.eval_source("(with-current-buffer \"ts-rel-run\" (put-text-property (point-min) (point-max) 'fontified nil))").unwrap();
+    let before = romacs_vm::treesit_parses_on_this_thread();
+    deferred_frame(&mut vm);
+    let got = vm.eval_source("(list (with-current-buffer \"ts-rel-run\" (> ts-fontified 0)) (> ts-hooked 0) \
+        (with-current-buffer \"ts-rel-run\" (romacs--treesit-parsing-p)))").unwrap().display().unwrap();
+    assert_eq!(got, "(t t nil)", "the frame fontified, ran its hooks, and nothing reads as parsing");
+    assert_eq!(romacs_vm::treesit_parses_on_this_thread(), before, "the query took the thread's tree");
+    assert_eq!(tree_is_a_parse(&mut vm, "ts-rel-run"), "t");
+}
+
+/// With every thread busy, a `pre-redisplay-functions' hook that turns the
+/// window from the base to its indirect buffer in the same frame leaves no
+/// stopgap: the indirect window takes its faces in that frame, with or
+/// without a tree of the text (S33, and S36 with the base's tree).
+#[test]
+fn an_indirect_buffer_a_hook_shows_takes_its_faces_in_that_frame() {
+    const CHILD: &str = "ROMACS_TREESIT_AN_INDIRECT_BUFFER_A_HOOK_SHOWS_TAKES_IT";
+    const NAME: &str = "an_indirect_buffer_a_hook_shows_takes_its_faces_in_that_frame";
+    if std::env::var_os(CHILD).is_none() {
+        let own = own_test::name(module_path!(), NAME);
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &own, "--nocapture", "--test-threads", "1"]).env(CHILD, "1").output().unwrap();
+        assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains("1 passed"),
+            "child: {}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        return;
+    }
+    for treed in [false, true] {
+        let name = if treed { "ts-rel-hook-treed" } else { "ts-rel-hook" };
+        let mut vm = relatives_vm(name, 400, true);
+        if treed {
+            vm.eval_source(&format!("(with-current-buffer \"{name}\" (treesit-parser-root-node (treesit-parser-create 'c)))")).unwrap();
+        }
+        vm.eval_source(&format!("(progn (set-window-buffer nil (get-buffer \"{name}\")) \
+            (with-current-buffer \"{name}\" (put-text-property (point-min) (point-max) 'fontified nil)) \
+            (setq ts-turned 0) \
+            (add-hook 'pre-redisplay-functions (lambda (_) (when (= ts-turned 0) (setq ts-turned 1) \
+              (set-window-buffer nil (get-buffer \"{name}-ind\"))))))")).unwrap();
+        deferred_frame(&mut vm);
+        assert_eq!(vm.eval_source("ts-turned").unwrap().display().unwrap(), "1", "the hook turned the window");
+        assert_eq!(face_and_parsing(&mut vm, &format!("{name}-ind")), "(italic nil)", "the indirect window took its faces ({name})");
+    }
+}
+
+/// With every thread busy, a base laid out beside its indirect buffer keeps
+/// the faces its fontifier gave the shared text: the indirect pane takes no
+/// stopgap over them, and once that pane is gone the base still shows them,
+/// nothing reading as parsing (S37).
+#[test]
+fn a_base_beside_its_indirect_keeps_its_faces_once_the_indirect_pane_goes() {
+    const CHILD: &str = "ROMACS_TREESIT_A_BASE_BESIDE_ITS_INDIRECT_KEEPS_ITS_FAC";
+    const NAME: &str = "a_base_beside_its_indirect_keeps_its_faces_once_the_indirect_pane_goes";
+    if std::env::var_os(CHILD).is_none() {
+        let own = own_test::name(module_path!(), NAME);
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &own, "--nocapture", "--test-threads", "1"]).env(CHILD, "1").output().unwrap();
+        assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains("1 passed"),
+            "child: {}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        return;
+    }
+    let mut vm = relatives_vm("ts-rel-split", 400, true);
+    vm.eval_source("(progn (delete-other-windows) (set-window-buffer nil (get-buffer \"ts-rel-split\")) \
+        (set-window-buffer (split-window-right) (get-buffer \"ts-rel-split-ind\")))").unwrap();
+    deferred_frame(&mut vm);
+    vm.eval_source("(delete-other-windows (get-buffer-window \"ts-rel-split\"))").unwrap();
+    deferred_frame(&mut vm);
+    let face = vm.eval_source("(with-current-buffer \"ts-rel-split\" (list (memq (get-text-property (point-min) 'face) '(bold italic)) (get-text-property (point-min) 'fontified)))")
+        .unwrap().display().unwrap();
+    assert!(face.starts_with("((") && face.ends_with(" t)"), "the shared text keeps a fontifier's face and is fontified: {face}");
+    assert_eq!(vm.eval_source("(with-current-buffer \"ts-rel-split\" (romacs--treesit-parsing-p))").unwrap().display().unwrap(), "nil");
+}
+
+#[test]
+fn a_visit_starts_no_early_parse_for_shared_text() {
+    const CHILD: &str = "ROMACS_TREESIT_EARLY_SHARED_CHILD";
+    const NAME: &str = "a_visit_starts_no_early_parse_for_shared_text";
+    if std::env::var_os(CHILD).is_none() {
+        let own = own_test::name(module_path!(), NAME);
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &own, "--nocapture", "--test-threads", "1"]).env(CHILD, "1").output().unwrap();
+        assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains("1 passed"),
+            "child: {}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        return;
+    }
+    let mut vm = gnu_lisp(&[]);
+    vm.eval_source("(require 'treesit)").unwrap();
+    vm.set_background_wake(std::sync::Arc::new(|| {}));
+    let started = vm.eval_source(&format!("(progn {SYSTEM_SETUP}
+        (with-current-buffer (get-buffer-create \"ts-early-shared\")
+          (insert \"int x;\")
+          (make-indirect-buffer (current-buffer) \"ts-early-shared-ind\")
+          (let ((shared (romacs--treesit-parse-early 'c)))
+            (romacs--treesit-parse-early nil)
+            (kill-buffer \"ts-early-shared-ind\")
+            (list shared (romacs--treesit-parse-early 'c)))))"))
+        .unwrap().display().unwrap();
+    assert_eq!(started, "(nil t)", "only the unshared buffer starts an early parse");
+}
+
+#[test]
+fn a_small_edit_does_not_defer_the_first_parse_of_shared_text() {
+    let mut vm = relatives_vm("ts-rel-edit", 40, false);
+    vm.eval_source("(progn
+        (setq romacs-treesit-show-before-parse 8)
+        (with-current-buffer \"ts-rel-edit-ind\"
+          (goto-char (point-max))
+          (insert \" \"))
+        (set-window-buffer nil (get-buffer \"ts-rel-edit-ind\")))").unwrap();
+    assert!(!deferred_frame(&mut vm), "a first parse of shared text leaves no deferred frame");
+    assert_eq!(face_and_parsing(&mut vm, "ts-rel-edit-ind"), "(italic nil)");
 }

@@ -149,12 +149,38 @@ impl Vm {
         Ok(self.treesit_text_of(buffer)?.map_or_else(Vec::new, |text| text.treesit.parsers.clone()))
     }
     /// Whether a reparse of BUFFER's text is still on its thread, or a
-    /// first parse waits for one.
+    /// first parse waits for one. A buffer that shares its text
+    /// (`treesit_shared`) defers no first parse: only reparses of trees count.
     pub(crate) fn treesit_ahead_running(&mut self, buffer: Value) -> crate::Result<bool> {
-        Ok(self.treesit_cores(buffer)?.iter().any(|(_, core)| {
+        let shared = self.treesit_shared(buffer)?;
+        let Some(text) = self.treesit_text_of(buffer)? else { return Ok(false) };
+        Ok(text.treesit.parsers.iter().any(|(_, core)| {
             let mut c = core.borrow_mut();
+            if !c.can_parse_ahead(shared) {
+                return false;
+            }
             (c.tree.is_none() && c.waiting_slot) || c.ahead.as_mut().is_some_and(|ahead| !ahead.ready())
         }))
+    }
+    /// Whether BUFFER shares its text with an indirect relative: it has a
+    /// base buffer, or a live buffer has it as its base. Such a buffer takes
+    /// no first parse on a thread, and none defers its frames: its first
+    /// parse runs when asked, on the evaluator, as before first parses
+    /// moved to threads (romacs#392 brings deferral back for it).
+    pub(crate) fn treesit_shared(&mut self, buffer: Value) -> crate::Result<bool> {
+        Ok(match self.object(buffer)? {
+            data::Object::Buffer(b) => b.base != Value::NIL || !b.indirect.is_empty(),
+            _ => false,
+        })
+    }
+    /// Whether an early parse may hold the first frame.
+    pub(crate) fn treesit_early_pending(&mut self, buffer: Value) -> crate::Result<bool> {
+        if self.treesit_shared(buffer)? {
+            return Ok(false);
+        }
+        Ok(self.treesit_text_of(buffer)?
+            .and_then(|text| text.treesit.early.as_mut())
+            .is_some_and(super::Early::pending))
     }
     /// Whether a parser of BUFFER's text has a tree.
     pub(crate) fn treesit_has_tree(&mut self, buffer: Value) -> crate::Result<bool> {
@@ -165,7 +191,7 @@ impl Vm {
     /// meanwhile. A text with a tree keeps the faces it has while a parser
     /// added since parses.
     pub(crate) fn treesit_first_running(&mut self, buffer: Value) -> crate::Result<bool> {
-        if self.treesit_has_tree(buffer)? {
+        if self.treesit_shared(buffer)? || self.treesit_has_tree(buffer)? {
             return Ok(false);
         }
         Ok(self.treesit_cores(buffer)?.iter().any(|(_, core)| {
@@ -185,8 +211,17 @@ impl Vm {
         let Some(wake) = self.process_jobs.wake() else { return Ok(State::None) };
         let no_early = self.treesit_text_of(buffer)?.is_some_and(|text| text.treesit.early.is_none());
         let cores = self.treesit_cores(buffer)?;
+        let shared = self.treesit_shared(buffer)?;
         let mut state = State::None;
         for (parser, core) in cores.iter().cloned() {
+            // A shared text's treeless parser parses when asked: no thread
+            // starts its first parse, it waits for none, and a first parse
+            // already on one (started before the text was shared) defers
+            // nothing.
+            if !core.borrow().can_parse_ahead(shared) {
+                core.borrow_mut().waiting_slot = false;
+                continue;
+            }
             let treeless = core.borrow().tree.is_none() && core.borrow().ahead.is_none();
             // A treeless parser whose twin has a tree copies it, or parses
             // after it, when asked: no thread parses for it, and none waits
