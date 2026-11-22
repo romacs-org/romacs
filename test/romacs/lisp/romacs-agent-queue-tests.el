@@ -55,6 +55,15 @@
       (should (equal (mapcar #'car (romacs-agent-queue session)) '("second")))
       (should (= (romacs-agent-queue-length session) 1)))))
 
+(ert-deftest romacs-agent-queue-grouping-does-not-call-validity ()
+  (let* ((message '(:id "message"))
+         (valid (lambda () (ert-fail "Validity belongs to dispatch")))
+         (item (romacs-agent-item "message" :kind 'next :messages (list message) :valid valid))
+         (barrier (romacs-agent-item "user input" :kind 'next)))
+    (should (romacs-agent--queue-group-follower-p item nil))
+    (should-not (romacs-agent--queue-group-follower-p item t))
+    (should-not (romacs-agent--queue-group-follower-p barrier nil))))
+
 (ert-deftest romacs-agent-queued-messages-go-in-one-turn ()
   ;; romacs#405: messages from other sessions waiting for a turn's end go
   ;; in the next turn together, in order, each delivered; one no longer
@@ -94,6 +103,26 @@
     (should (equal (romacs-agent-answering session) "m-3"))
     (should (equal (mapcar #'car (romacs-agent-queue session)) '("results" "the user's")))
     (should (= (romacs-agent-queue-length session) 2))))
+
+(ert-deftest romacs-agent-queue-grouping-honors-a-reorder-during-validation ()
+  (let* ((session (romacs-agent-test-attach
+                   (romacs-agent--make :id "79797979-8888-4999-8aaa-bbbbbbbbbbbb" :harness 'claude :state 'running)
+                   t))
+         (message (list (romacs-agent-make-message "m-1" "parent" '(:session "p"))))
+         (user-item nil)
+         (sent nil))
+    (romacs-agent-send-later session "head" nil nil #'always message)
+    (romacs-agent-send-later session "follower" nil nil
+                             (lambda () (romacs-agent-queue-move session user-item -1)) message)
+    (romacs-agent-send-later session "later" nil nil #'always message)
+    (romacs-agent-send-later session "user input" nil nil nil nil t)
+    (setq user-item (car (last (romacs-agent-queue session))))
+    (setf (romacs-agent-state session) 'idle)
+    (romacs-agent-queue-tests--writing sent
+      (romacs-agent--dispatch session))
+    (should (= (length sent) 1))
+    (should (equal (mapcar #'romacs-agent-item-text (romacs-agent-queue session))
+                   '("user input" "later")))))
 
 (ert-deftest romacs-agent-results-waiting-go-in-one-turn ()
   ;; Two deliveries of tasks' results waiting go in one turn, their texts
@@ -336,6 +365,32 @@ message is sent, `romacs-agent-send' by default.")
                     (should (= (romacs-agent-queue-length session) 0))))))
           (delete-process (romacs-agent-connection session))
           (delete-directory dir t))))))
+
+(ert-deftest romacs-agent-dispatch-releases-a-failed-write-for-retry ()
+  (let* ((session (romacs-agent-test-attach
+                   (romacs-agent--make :id "write-retry" :harness 'claude :state 'idle) t))
+         (romacs-agent-event-functions nil)
+         (delivered 0)
+         (attempts 0)
+         (item (romacs-agent-item "retry" :delivered (lambda () (cl-incf delivered)))))
+    (unwind-protect
+        (cl-letf (((symbol-function 'romacs-agent--write)
+                   (lambda (state next)
+                     (should (eq next item))
+                     (should (eq (romacs-agent-item-held item) 'sending))
+                     (romacs-agent--dispatch state)
+                     (when (= (cl-incf attempts) 1) (error "write interrupted")))))
+          (romacs-agent--enqueue session item)
+          (should-error (romacs-agent--dispatch session))
+          (should (eq (car (romacs-agent-queue session)) item))
+          (should-not (romacs-agent-item-held item))
+          (should-not (romacs-agent-dispatch session))
+          (should (zerop delivered))
+          (romacs-agent--dispatch session)
+          (should (= attempts 2))
+          (should (= delivered 1))
+          (should-not (romacs-agent-queue session)))
+      (delete-process (romacs-agent-connection session)))))
 
 (ert-deftest romacs-agent-a-refused-send-keeps-nothing ()
   ;; Its harness ended, or its write failing: the sender is told and keeps

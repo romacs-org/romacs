@@ -10,6 +10,7 @@
 (let ((romacs-mcp-call-function romacs-mcp-call-function)
       (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
   (require 'romacs-agent))
+(require 'romacs-agent-test-attached)
 
 (defmacro romacs-agent-driver-test--registry (&rest body)
   "BODY with the driver registry its own: what it defines goes with it."
@@ -37,6 +38,28 @@
       (should-not (romacs-agent--per-turn-p session)))
     (should-error (romacs-agent--driver-of 'nosuch) :type 'user-error)))
 
+(ert-deftest romacs-agent-driver-decodes-records-with-explicit-context ()
+  (romacs-agent-driver-test--registry
+    (let* ((session (romacs-agent--make :id "decoded" :harness 'read-only-fixture))
+           (input (romacs-mcp--object "body" "question"))
+           (output (romacs-mcp--object "body" "answer"))
+           (seen nil)
+           (romacs-agent-event-functions (list (lambda (_ event) (push event seen)))))
+      (romacs-agent-define-harness
+       'read-only-fixture
+       :decode-context (lambda (state direction _object)
+                         (list (romacs-agent-inputs state) direction))
+       :decode (lambda (direction object context)
+                 (should (equal context (list 1 direction)))
+                 (list (list :type (if (eq direction 'in) 'input 'done)
+                             :text (gethash "body" object)))))
+      (romacs-agent--record session (romacs-mcp--object "seq" 1 "in" input))
+      (romacs-agent--record session (romacs-mcp--object "seq" 2 "out" output))
+      (should (equal (mapcar (lambda (event) (plist-get event :text)) seen) '("answer" "question")))
+      (should (equal (romacs-agent-reply session) "answer"))
+      (should (romacs-agent--turn-free-records-p session (romacs-agent--scratch session)
+                                                (list (romacs-mcp--object "out" output)) nil)))))
+
 (ert-deftest romacs-agent-import-ids-are-conversation-identities ()
   ;; The same conversation id in two configuration directories is two
   ;; conversations; a default spelled out is the default.
@@ -45,6 +68,14 @@
     (should-not (equal a b))
     (should (string-match-p "\\`[0-9a-f]\\{8\\}-[0-9a-f]\\{4\\}-[0-9a-f]\\{4\\}-[0-9a-f]\\{4\\}-[0-9a-f]\\{12\\}\\'" a))
     (should (equal (romacs-agent--import-id 'codex nil "t") (romacs-agent--import-id 'codex "~/.codex" "t")))))
+
+(ert-deftest romacs-agent-driver-advertises-its-effort-option ()
+  (romacs-agent-driver-test--registry
+    (let ((romacs-agent--driver-generation romacs-agent--driver-generation))
+      (romacs-agent-define-harness 'testdrv :effort-option "reasoningEffort")
+      (let* ((model (romacs-agent-tools--model '(:harness testdrv) '("model" :efforts ("high"))))
+             (option (aref (gethash "options" model) 0)))
+        (should (equal (gethash "id" option) "reasoningEffort"))))))
 
 (defmacro romacs-agent-driver-test--launched (systemd &rest body)
   "BODY with `call-process' recording each call as (PROGRAM ARGS
@@ -120,6 +151,42 @@ line's `env' sets only its own configuration variable."
     (puthash key (json-parse-string (json-serialize object) :object-type 'hash-table) record)
     (romacs-agent--record session record)))
 
+(ert-deftest romacs-agent-record-delivers-all-events-before-stepping ()
+  (let* ((session (romacs-agent--make :id "journal-test" :harness 'claude))
+         (seen nil)
+         (romacs-agent-event-functions (list (lambda (_session event) (push event seen))))
+         (note (romacs-mcp--object "type" "plan" "on" t)))
+    (cl-letf (((symbol-function 'romacs-agent--step) (lambda (_) (push 'step seen))))
+      (romacs-agent-driver-test--feed session 1 "note" note)
+      (romacs-agent-driver-test--feed session 1 "note" note)
+      (should (equal (mapcar (lambda (e) (plist-get e :type)) (reverse seen))
+                     '(plan-switch status)))
+      (should (equal (mapcar (lambda (e) (plist-get e :last)) (reverse seen)) '(nil t)))
+      (setq seen nil)
+      (setf (romacs-agent-caught-up session) t)
+      (romacs-agent-driver-test--feed session 2 "note" note)
+      (should (eq (pop seen) 'step))
+      (should (equal (mapcar (lambda (e) (plist-get e :seq)) seen) '(2 2))))))
+
+(ert-deftest romacs-agent-startup-step-directly-enforces-catch-up ()
+  (let* ((romacs-agent--sessions (make-hash-table :test #'equal))
+         (session (romacs-agent-test-attach
+                   (romacs-agent--make :id "startup-replay" :harness 'claude)))
+         (written nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'romacs-agent--line)
+                   (lambda (_ object &optional _) (push object written))))
+          (puthash (romacs-agent-id session) session romacs-agent--sessions)
+          (setf (romacs-agent-caught-up session) nil)
+          (romacs-agent--step session)
+          (should-not written)
+          (should (zerop (romacs-agent-requests session)))
+          (setf (romacs-agent-caught-up session) t)
+          (romacs-agent--step session)
+          (should (= (length written) 1))
+          (should (equal (gethash "request_id" (car written)) (romacs-agent-startup-pending session))))
+      (delete-process (romacs-agent-connection session)))))
+
 (ert-deftest romacs-agent-startup-step-waits-for-its-own-echo ()
   ;; An interrupt written while a startup step is out (its echo first)
   ;; does not count as that step's: one session/new, not two.
@@ -147,6 +214,46 @@ line's `env' sets only its own configuration variable."
           (should (= (cl-count "session/new" written :key (lambda (o) (gethash "method" o)) :test #'equal) 1))
           (should (romacs-agent--ready-p session))
           (should (equal (romacs-agent-harness-session session) "rpc-x"))))))))
+
+(ert-deftest romacs-agent-per-turn-prompt-recovery-is-applied-at-the-journal ()
+  (let* ((incoming (list :text "original" :prompt (secure-hash 'sha1 "wrapped")
+                         :messages '((:id "from-parent" :kind "parent"))))
+         (session (romacs-agent--make :id "per-turn" :harness 'claude :incoming incoming))
+         (input (romacs-mcp--object "prompt" "wrapped"))
+         (seen nil)
+         (romacs-agent-event-functions
+          (list (lambda (state event)
+                  (should-not (romacs-agent-incoming state))
+                  (push event seen)))))
+    (romacs-agent--record-input-events session input)
+    (should (eq (romacs-agent-incoming session) incoming))
+    (romacs-agent-driver-test--feed session 1 "in" input)
+    (should (= (length seen) 1))
+    (let ((event (car seen)))
+      (should (eq (plist-get event :type) 'input))
+      (should (equal (plist-get event :text) "original"))
+      (should (equal (plist-get event :messages) (plist-get incoming :messages)))
+      (should (plist-get event :last)))
+    (should (equal (romacs-agent-answering session) "from-parent"))))
+
+(ert-deftest romacs-agent-input-commits-before-notifying-the-sender ()
+  (let* ((session (romacs-agent--make :id "sent" :harness 'claude :state 'idle :brief "Handoff\n"))
+         (written nil)
+         (observed nil)
+         (romacs-agent-event-functions nil)
+         (romacs-agent-input-functions
+          (list (lambda (state id)
+                  (push (list id (romacs-agent-state state) (romacs-agent-brief state)) observed)
+                  (error "Observer failed")))))
+    (cl-letf (((symbol-function 'romacs-agent--line)
+               (lambda (_ wire record) (push (cons wire record) written))))
+      (romacs-agent--input session "go" nil nil nil "queued"))
+    (should (= (length written) 1))
+    (let ((wire (caar written)) (record (cdar written)))
+      (should (equal (gethash "content" (gethash "message" wire)) "Handoff\ngo"))
+      (should (equal (gethash "content" (gethash "message" record)) "go"))
+      (should (equal (gethash "romacsQueued" record) "queued"))
+      (should (equal observed (list (list (gethash "romacsRequest" record) 'running nil)))))))
 
 (ert-deftest romacs-agent-a-message-sent-is-a-turn-under-way ()
   ;; A message written to an idle harness's session: running at once, not

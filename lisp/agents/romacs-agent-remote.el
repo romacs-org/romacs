@@ -212,7 +212,7 @@ its mirror's approvals, each the approval event that asks it."
                requests)
       (setf (romacs-agent-approvals session) approvals))))
 
-(cl-defmethod romacs-agent-log-source-request-event ((_source romacs-agent-remote) _id request)
+(cl-defmethod romacs-agent-log-source-request-event ((_source romacs-agent-remote) _session _id request)
   "REQUEST, of a mirror's approvals, is its approval event."
   request)
 

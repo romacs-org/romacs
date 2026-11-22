@@ -333,7 +333,7 @@ An empty TEXT is not sent.")
 (cl-defgeneric romacs-agent-log-source-seen (source session)
   "SESSION's chat has been shown to its end, through SOURCE.")
 
-(cl-defgeneric romacs-agent-log-source-request-event (source id request)
+(cl-defgeneric romacs-agent-log-source-request-event (source session id request)
   "The approval event that asks REQUEST, ID, of what SOURCE's session
 waits on (`romacs-agent-log-source-approvals').")
 
@@ -1521,9 +1521,7 @@ or ended, a line of its output, a message ended."
 (defun romacs-agent-log--replay (session from end)
   "Draw SESSION's records from place FROM to place END at the transcript's
 end, replayed into a copy so the session is not touched."
-  (let ((scratch (romacs-agent-replay-copy session from)) (buffer (current-buffer))
-        ;; A replay writes nothing of the session (its manifest).
-        (romacs-agent--manifest-frozen t))
+  (let ((scratch (romacs-agent-replay-copy session from)) (buffer (current-buffer)))
     (let ((romacs-agent-event-functions
            (list (lambda (_ event)
                    (with-current-buffer buffer
@@ -1579,7 +1577,7 @@ records drew: a block no longer waited on settled, one waited on drawn."
             (save-excursion (goto-char (cdr ended)) (insert (romacs-agent-log--sealed (car ended))))))))
     (maphash (lambda (id request)
                (unless (romacs-agent-log--ask-of id)
-                 (romacs-agent-log--ask-block (romacs-agent-log-source-request-event romacs-agent-log--source id request))))
+                 (romacs-agent-log--ask-block (romacs-agent-log-source-request-event romacs-agent-log--source session id request))))
              approvals)))
 
 (defun romacs-agent-log-earlier ()
@@ -1797,8 +1795,8 @@ shows it; its session loaded only then, as its records are read."
 (cl-defmethod romacs-agent-log-source-seen ((_source romacs-agent-log-local-source) session)
   (romacs-agent-mark-seen session))
 
-(cl-defmethod romacs-agent-log-source-request-event ((_source romacs-agent-log-local-source) id request)
-  (romacs-agent-request-event id request))
+(cl-defmethod romacs-agent-log-source-request-event ((_source romacs-agent-log-local-source) session id request)
+  (romacs-agent-request-event session id request))
 
 (cl-defmethod romacs-agent-log-source-chats ((_source romacs-agent-log-local-source))
   romacs-agent-log--chats)
