@@ -47,5 +47,32 @@
         (should-not (romacs-agent-log-rounds-turns-tests--receded-p "The first answer"))
         (should-not (romacs-agent-log-rounds-turns-tests--receded-p "The second answer"))))))
 
+(ert-deftest romacs-agent-log-rounds-an-arrival-under-a-call-splits-no-turn ()
+  ;; Something arrives for a subagent's call, under it: the turn goes on,
+  ;; and its words before still recede at its end, a prompt queued or not.
+  (let ((session (romacs-agent--make :id "R" :harness 'claude :state 'running
+                                     :tools (make-hash-table :test #'equal)
+                                     :streamed (make-hash-table :test #'equal))))
+    (with-temp-buffer
+      (romacs-agent-log-mode)
+      (setq romacs-agent-log--session session
+            romacs-agent-log--end (point-min-marker)
+            romacs-agent-log--input (point-min-marker))
+      (set-marker-insertion-type romacs-agent-log--end t)
+      (cl-flet ((draw (&rest event) (romacs-agent-log-draw session event)))
+        (draw :type 'input :text "go" :request 1)
+        (draw :type 'delta :text "Looking into it.")
+        (draw :type 'message-end)
+        (draw :type 'tool :state 'started :id "a" :name "Agent"
+              :input (let ((h (make-hash-table :test #'equal))) (puthash "description" "dig" h) h))
+        (draw :type 'arrival :parent "a" :from "a sibling" :state "message" :text "found it")
+        (draw :type 'input :text "and also this" :steer t :request 2)
+        (draw :type 'tool :state 'completed :id "a" :output "done")
+        (draw :type 'delta :text "The answer.")
+        (draw :type 'message-end)
+        (draw :type 'done :time 0)
+        (should (romacs-agent-log-rounds-turns-tests--receded-p "Looking into it"))
+        (should-not (romacs-agent-log-rounds-turns-tests--receded-p "The answer"))))))
+
 (provide 'romacs-agent-log-rounds-turns-tests)
 ;;; romacs-agent-log-rounds-turns-tests.el ends here

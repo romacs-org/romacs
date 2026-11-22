@@ -171,6 +171,13 @@ before it ended, after the air every round begins with."
       (when (get-text-property at 'romacs-agent-log-round) (setq found at)))
     (or found (and (get-text-property (point-min) 'romacs-agent-log-round) (point-min)) (point-min))))
 
+(defun romacs-agent-log-rounds--ends-turn-p (at)
+  "Whether the entry at AT ends a turn's words: a turn rule, or an arrival
+that opened a round (one under a subagent's call is that call's)."
+  (pcase (get-text-property at 'romacs-agent-log-entry)
+    ('turn t)
+    ('arrival (and (get-text-property at 'romacs-agent-log-round) t))))
+
 (defun romacs-agent-log-rounds--turn-start (round)
   "Where the turn that ROUND's start falls in began: after the last turn
 rule or arrival before ROUND, else at the transcript's start.  A prompt
@@ -179,7 +186,7 @@ the prompt are the turn's too."
   (let ((at round) (found nil))
     (while (and (not found) (> at (point-min))
                 (setq at (previous-single-property-change at 'romacs-agent-log-entry nil (point-min))))
-      (when (memq (get-text-property at 'romacs-agent-log-entry) '(turn arrival))
+      (when (romacs-agent-log-rounds--ends-turn-p at)
         (setq found (next-single-property-change at 'romacs-agent-log-entry nil romacs-agent-log--end))))
     (if found (min found round) (point-min))))
 
@@ -190,9 +197,8 @@ list, oldest first, of each turn's entry starts.  A turn ends at its rule
 `arrival'): the agent's words after it answer that."
   (let ((turns nil) (texts nil) (at start))
     (while (setq at (text-property-not-all at romacs-agent-log--end 'romacs-agent-log-entry nil))
-      (pcase (get-text-property at 'romacs-agent-log-entry)
-        ('text (push at texts))
-        ((or 'turn 'arrival) (when texts (push (nreverse texts) turns)) (setq texts nil)))
+      (cond ((eq (get-text-property at 'romacs-agent-log-entry) 'text) (push at texts))
+            ((romacs-agent-log-rounds--ends-turn-p at) (when texts (push (nreverse texts) turns)) (setq texts nil)))
       (setq at (1+ at)))
     (nreverse (if texts (cons (nreverse texts) turns) turns))))
 
