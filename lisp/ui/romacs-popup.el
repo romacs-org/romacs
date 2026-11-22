@@ -425,7 +425,7 @@ its binding ESC."
                               (and binding (not (numberp binding))
                                    (list (key-description (vector ?\e key)) binding))))
                           (sort (nreverse events) (lambda (a b) (romacs-popup--order< (car a) (car b)))))))
-    (error (list (list "ESC" esc)))))
+    (error (list (list (key-description [?\e]) esc)))))
 
 (defcustom romacs-popup-hints-keys-per-command 2
   "Most keys a hint shows for one command: its shortest."
