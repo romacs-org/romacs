@@ -2,6 +2,9 @@
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
+;;; Commentary:
+;; Discover Codex rollouts and decode their recorded conversations.
+
 ;;; Code:
 
 (require 'cl-lib)

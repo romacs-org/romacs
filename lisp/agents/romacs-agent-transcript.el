@@ -2,6 +2,9 @@
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
+;;; Commentary:
+;; Read bounded JSONL records and normalize shared transcript fields.
+
 ;;; Code:
 
 (require 'subr-x)
