@@ -34,7 +34,9 @@ impl Index {
         let new_end = start + inserted;
         let shift = |p: usize| if p >= end { p - end + new_end } else if p > start { new_end } else { p };
         self.starts.retain(|&s| s <= start || s > end);
-        for s in &mut self.starts {
+        // A block at the edit may still start where the inserted text begins.
+        let after_start = self.starts.partition_point(|&s| s <= start);
+        for s in &mut self.starts[after_start..] {
             *s = shift(*s);
         }
         for (at, _) in &mut self.defs {
@@ -93,7 +95,7 @@ impl Index {
                 // edited block still starts where it did, the preceding
                 // block ends there as before and its text has not changed.
                 let damage_from = self.starts[..held].last().copied()
-                    .filter(|start| *start < dirty.start && found.contains(start))
+                    .filter(|start| found.contains(start))
                     .unwrap_or(from);
                 let mut starts = self.starts[..keep].to_vec();
                 starts.extend(found.into_iter().filter(|&s| s < cut_at));

@@ -51,6 +51,18 @@
     (should (memq 'romacs-markdown-emphasis (romacs-markdown-mode-tests--faces-at "word")))
     (should (memq 'romacs-markdown-heading-2 (romacs-markdown-mode-tests--faces-at "Headings")))))
 
+(ert-deftest romacs-markdown-mode-heading-demotion-keeps-preceding-block-fontified ()
+  (romacs-markdown-mode-tests--with "Plain *word*.\n\n## Heading\n\nLast.\n"
+    (font-lock-ensure)
+    (put-text-property (point-min) (point-max) 'fontified t)
+    (search-forward "##")
+    (beginning-of-line)
+    (insert "x")
+    (romacs-markdown--font-lock-region (1- (point)) (point))
+    (should-not (romacs-markdown-mode-tests--faces-at "Heading"))
+    (should (get-text-property (point-min) 'fontified))
+    (should (memq 'romacs-markdown-emphasis (romacs-markdown-mode-tests--faces-at "word")))))
+
 (ert-deftest romacs-markdown-mode-refaces-what-an-edit-reshapes ()
   "An edit that reshapes blocks outside the region asked for leaves them
 unfontified, so redisplay asks for them again."
