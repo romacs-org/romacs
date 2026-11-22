@@ -2149,10 +2149,26 @@ keeps across runs (`:rolled-back', `:resume-at', `:renew-block', and
                 (:resume-at (setf (romacs-agent-driver-state session)
                                   (plist-put (romacs-agent-driver-state session) :resume-at value))))))
 
+(defun romacs-agent--format-record-status (event)
+  "Render a journal status EVENT in the editor's local time."
+  (pcase (plist-get event :kind)
+    ('handoff
+     (let ((from (plist-get event :from)) (to (plist-get event :to))
+           (resets (plist-get event :resets)))
+       (format "%s: %s%s"
+               (if (stringp to) (format "moved from %s to %s" from to) (format "stays on %s" from))
+               (plist-get event :why)
+               (if (numberp resets) (format-time-string " (resets %a %H:%M)" resets) ""))))
+    ('resume-scheduled
+     (format-time-string "resumes by itself at %a %H:%M, once its limit resets" (plist-get event :at)))
+    ('resume-fired (format "resumed on %s: its limit reset" (plist-get event :on)))
+    ('resume-cancelled (format "will not resume by itself: %s" (plist-get event :why)))))
+
 (defun romacs-agent--apply-record-event (session event)
   "Apply EVENT's bookkeeping to SESSION and return its public event, if any."
   (pcase (plist-get event :type)
     ('record-state (romacs-agent--apply-record-state session (plist-get event :state)) nil)
+    ('record-status (list :type 'status :text (romacs-agent--format-record-status event)))
     ('selection-ack
      (romacs-agent--select-answered session (plist-get event :request-id) (plist-get event :ok))
      nil)
@@ -4109,6 +4125,18 @@ waits first.  An automatic renewal supplies a message to an empty queue."
   (let ((valid (romacs-agent-item-valid item)))
     (or (null valid) (funcall valid))))
 
+(defun romacs-agent--validate-queue-group (queue head)
+  "Return (PARTS . STALE) for HEAD's turn, calling followers' validators.
+A steer passing the queue's head goes alone."
+  (let ((parts (list head)) (stale nil))
+    (when (and (eq head (car queue)) (romacs-agent--joinable-p head))
+      (let ((results (romacs-agent--results-p head)))
+        ;; A validator can reorder items farther down the queue.
+        (cl-loop for item in (cdr queue)
+                 while (romacs-agent--queue-group-follower-p item results)
+                 do (if (romacs-agent--wanted-item-p item) (push item parts) (push item stale)))))
+    (cons (nreverse parts) stale)))
+
 (defun romacs-agent--write-queue-group (session next parts)
   "Write PARTS as one turn, restoring NEXT's queue record on failure."
   (romacs-agent--unkeep-item session next)
@@ -4132,7 +4160,7 @@ waits first.  An automatic renewal supplies a message to an empty queue."
 
 (defun romacs-agent--send-queue-group (session next)
   "Write NEXT with its group and retire the accepted and stale entries."
-  (pcase-let ((`(,parts . ,stale) (romacs-agent--together (romacs-agent-queue session) next)))
+  (pcase-let ((`(,parts . ,stale) (romacs-agent--validate-queue-group (romacs-agent-queue session) next)))
     ;; A kept row restored after the write is skipped by its journaled id.
     (romacs-agent--write-queue-group session next parts)
     ;; Get every accepted entry off the queue before a view or a quit can run.
@@ -4180,25 +4208,12 @@ alone), and not held (its user edits it: what waits behind it waits)."
   "Whether ITEM delivers delegated tasks' results: its text is theirs."
   (and (cl-some (lambda (m) (plist-get m :wake)) (romacs-agent-item-messages item)) t))
 
-(defun romacs-agent--together (queue head)
-  "(PARTS . STALE): HEAD and the messages waiting behind it in QUEUE
-that go in its turn (`romacs-agent--joinable-p', results with
-results), in order, and those among them no longer wanted (VALID says),
-to be dropped as they go.  HEAD alone when it is not the queue's head (a
-steer passing what waits).  Nothing changes here: its views are told
-once the turn's write has decided."
-  (if (not (and (eq head (car queue)) (romacs-agent--joinable-p head)))
-      (list (list head))
-    (let ((parts (list head)) (stale nil) (results (romacs-agent--results-p head)))
-      (cl-loop for item in (cdr queue)
-               while (and (romacs-agent--joinable-p item) (eq (romacs-agent--results-p item) results))
-               do (if (romacs-agent--wanted-item-p item)
-                      (push item parts)
-                    (push item stale)))
-      (cons (nreverse parts) stale))))
+(defun romacs-agent--queue-group-follower-p (item results)
+  "Whether ITEM can follow a queue head whose result flag is RESULTS."
+  (and (romacs-agent--joinable-p item) (eq (romacs-agent--results-p item) results)))
 
 (defun romacs-agent--joined (parts)
-  "PARTS, waiting messages (`romacs-agent--together'), as the one item
+  "PARTS, the wanted messages of a queue group, as the one item
 written: the only one as it is; else their texts in order, and their
 messages, each with its own text (results' text is the delivery's)."
   (if (null (cdr parts)) (car parts)

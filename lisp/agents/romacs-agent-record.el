@@ -117,21 +117,12 @@ STEER is non-nil when the journal already records a turn under way."
           :reason (romacs-agent--value (gethash "reason" note))
           :answers (and (hash-table-p answers) (> (hash-table-count answers) 0) answers))))
 
-(defun romacs-agent--record-handoff-status (note)
-  "Status text for the provider handoff in NOTE."
-  (let ((from (gethash "from" note)) (to (gethash "to" note))
-        (resets (gethash "resets" note)))
-    (format "%s: %s%s"
-            (if (stringp to) (format "moved from %s to %s" from to) (format "stays on %s" from))
-            (gethash "why" note)
-            (if (numberp resets) (format-time-string " (resets %a %H:%M)" resets) ""))))
-
-(defun romacs-agent--record-resume-status (note)
-  "Status text for the scheduled resume in NOTE."
+(defun romacs-agent--record-resume-event (note)
+  "Decode the automatic resume status in NOTE."
   (pcase (gethash "state" note)
-    ("scheduled" (format-time-string "resumes by itself at %a %H:%M, once its limit resets" (gethash "at" note)))
-    ("fired" (format "resumed on %s: its limit reset" (gethash "on" note)))
-    (_ (format "will not resume by itself: %s" (gethash "why" note)))))
+    ("scheduled" (list :type 'record-status :kind 'resume-scheduled :at (gethash "at" note)))
+    ("fired" (list :type 'record-status :kind 'resume-fired :on (gethash "on" note)))
+    (_ (list :type 'record-status :kind 'resume-cancelled :why (gethash "why" note)))))
 
 (defun romacs-agent--record-note-event (note)
   "Translate NOTE into its event when it names one."
@@ -151,8 +142,9 @@ STEER is non-nil when the journal already records a turn under way."
     ("attachments" (list :type 'attachments :id (gethash "id" note)
                          :attachments (romacs-agent--attachments-of (gethash "items" note))
                          :compare (append (romacs-agent--value (gethash "compare" note)) nil)))
-    ("handoff" (list :type 'status :text (romacs-agent--record-handoff-status note)))
-    ("resume" (list :type 'status :text (romacs-agent--record-resume-status note)))
+    ("handoff" (list :type 'record-status :kind 'handoff :from (gethash "from" note)
+                     :to (gethash "to" note) :why (gethash "why" note) :resets (gethash "resets" note)))
+    ("resume" (romacs-agent--record-resume-event note))
     ("fork" (list :type 'forked :from (gethash "from" note) :title (gethash "title" note)
                   :seq-from (gethash "seq" note) :turns (gethash "turns" note) :after (gethash "after" note)))
     ("rollback" (list :type 'rolled-back :to (gethash "to" note) :turns (gethash "turns" note)

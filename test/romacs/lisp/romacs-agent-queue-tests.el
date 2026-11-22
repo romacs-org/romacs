@@ -55,6 +55,15 @@
       (should (equal (mapcar #'car (romacs-agent-queue session)) '("second")))
       (should (= (romacs-agent-queue-length session) 1)))))
 
+(ert-deftest romacs-agent-queue-grouping-does-not-call-validity ()
+  (let* ((message '(:id "message"))
+         (valid (lambda () (ert-fail "Validity belongs to dispatch")))
+         (item (romacs-agent-item "message" :kind 'next :messages (list message) :valid valid))
+         (barrier (romacs-agent-item "user input" :kind 'next)))
+    (should (romacs-agent--queue-group-follower-p item nil))
+    (should-not (romacs-agent--queue-group-follower-p item t))
+    (should-not (romacs-agent--queue-group-follower-p barrier nil))))
+
 (ert-deftest romacs-agent-queued-messages-go-in-one-turn ()
   ;; romacs#405: messages from other sessions waiting for a turn's end go
   ;; in the next turn together, in order, each delivered; one no longer
@@ -94,6 +103,26 @@
     (should (equal (romacs-agent-answering session) "m-3"))
     (should (equal (mapcar #'car (romacs-agent-queue session)) '("results" "the user's")))
     (should (= (romacs-agent-queue-length session) 2))))
+
+(ert-deftest romacs-agent-queue-grouping-honors-a-reorder-during-validation ()
+  (let* ((session (romacs-agent-test-attach
+                   (romacs-agent--make :id "79797979-8888-4999-8aaa-bbbbbbbbbbbb" :harness 'claude :state 'running)
+                   t))
+         (message (list (romacs-agent-make-message "m-1" "parent" '(:session "p"))))
+         (user-item nil)
+         (sent nil))
+    (romacs-agent-send-later session "head" nil nil #'always message)
+    (romacs-agent-send-later session "follower" nil nil
+                             (lambda () (romacs-agent-queue-move session user-item -1)) message)
+    (romacs-agent-send-later session "later" nil nil #'always message)
+    (romacs-agent-send-later session "user input" nil nil nil nil t)
+    (setq user-item (car (last (romacs-agent-queue session))))
+    (setf (romacs-agent-state session) 'idle)
+    (romacs-agent-queue-tests--writing sent
+      (romacs-agent--dispatch session))
+    (should (= (length sent) 1))
+    (should (equal (mapcar #'romacs-agent-item-text (romacs-agent-queue session))
+                   '("user input" "later")))))
 
 (ert-deftest romacs-agent-results-waiting-go-in-one-turn ()
   ;; Two deliveries of tasks' results waiting go in one turn, their texts
