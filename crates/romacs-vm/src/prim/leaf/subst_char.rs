@@ -36,31 +36,34 @@ impl Leaf<'_> {
         if multibyte && crate::lstring::char_string(from_c, &mut [0; 5]) != crate::lstring::char_string(to_c, &mut [0; 5]) {
             return Err(Fault::Error("Characters in \u{2018}subst-char-in-region\u{2019} have different byte-lengths".into()));
         }
-        // Character positions holding FROM.
-        // Polled between chunks: nothing is changed yet.
-        // Validated above to lie in the accessible region, so at least 1.
         let position = |at: i64| usize::try_from(at - 1).map_err(|_| Fault::Error("Args out of range".into()));
         let span = position(lo)?..position(hi)?;
         let chunk = if multibyte { super::quit_poll::POLL_STEPS as usize } else { 1 << 16 };
+        Ok((self.find_subst_hits(index, span, from_c, chunk)?, hi))
+    }
+
+    /// A quit during this scan leaves the buffer untouched.
+    fn find_subst_hits(&mut self, index: usize, span: std::ops::Range<usize>, from: u32, chunk: usize)
+                       -> std::result::Result<Vec<i64>, Fault> {
         let mut hits = Vec::new();
         for start in span.clone().step_by(chunk) {
             let part = start..span.end.min(start + chunk);
             match &self.vm.objects[index] {
                 data::Object::Buffer(b) => {
                     for at in part {
-                        if b.character_of_char(CharOffset(at)).map_err(Fault::Error)? == Some(from_c) {
+                        if b.character_of_char(CharOffset(at)).map_err(Fault::Error)? == Some(from) {
                             hits.push(at as i64 + 1);
                         }
                     }
                 }
                 data::Object::ByteBuffer(b) => {
-                    hits.extend(part.filter(|&at| u32::from(b.bytes[at]) == from_c).map(|at| at as i64 + 1));
+                    hits.extend(part.filter(|&at| u32::from(b.bytes[at]) == from).map(|at| at as i64 + 1));
                 }
                 _ => unreachable!("buffer checked above"),
             }
             self.native_poll()?;
         }
-        Ok((hits, hi))
+        Ok(hits)
     }
 
     /// modify_text's tail for a change of POS..END once its hooks ran: the

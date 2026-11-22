@@ -46,7 +46,7 @@ const LONG: &[(&str, &str)] = &[
     ("prim/leaf/coding.rs", "fn coding_convert(&mut self"),
     ("prim/leaf/casing.rs", "pub(crate) fn case_mappings("),
     ("prim/leaf/casing.rs", "pub(crate) fn casify_region_edit("),
-    ("prim/leaf/subst_char.rs", "pub fn subst_char_hits("),
+    ("prim/leaf/subst_char.rs", "fn find_subst_hits("),
     ("prim/leaf/subst_char.rs", "pub fn subst_char_write("),
     ("prim/leaf/width.rs", "pub(crate) fn string_width("),
     ("prim/leaf/skip_chars.rs", "pub fn skip_characters("),

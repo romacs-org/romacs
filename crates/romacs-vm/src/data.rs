@@ -862,20 +862,7 @@ impl Vm {
             Car | Cdr => ("listp", x),
             Memq | Assq | Member => ("listp", y),
             Nth if self.bigint_value(x).is_none() => ("integerp", x),
-            Nth => {
-                // nthcdr errors blame the original list; a final car error
-                // blames the reached atom. Rewalk only on this cold path.
-                let mut tail = y;
-                let mut remaining = x.integer_value().map_or(usize::MAX, |n| n.max(0) as usize);
-                while remaining != 0 {
-                    let Ok((_, next)) = self.cons_pair(tail) else {
-                        break;
-                    };
-                    tail = next;
-                    remaining -= 1;
-                }
-                ("listp", if remaining == 0 { tail } else { y })
-            }
+            Nth => ("listp", self.nth_list_error_argument(x, y)),
             Setcar | Setcdr => ("consp", x),
             Length | Nreverse | CopySequence => ("sequencep", x),
             Aref | Aset
@@ -907,6 +894,17 @@ impl Vm {
             }
             _ => ("listp", x),
         }
+    }
+    /// On an nthcdr error, blame the original list; when the final car
+    /// fails, blame the atom reached. Only the error path repeats the walk.
+    fn nth_list_error_argument(&self, index: Value, list: Value) -> Value {
+        let count = index.integer_value().map_or(usize::MAX, |n| n.max(0) as usize);
+        let mut tail = list;
+        for _ in 0..count {
+            let Ok((_, next)) = self.cons_pair(tail) else { return list };
+            tail = next;
+        }
+        tail
     }
     /// `copy-sequence` of the list X: a new list, the caller's only once it
     /// returns. Past a chunk, polled per chunk of the walk and of the build
