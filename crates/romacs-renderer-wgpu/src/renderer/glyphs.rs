@@ -1028,6 +1028,15 @@ fn log_face_debug_summary(call_id: u64, frame_glyphs: &FrameGlyphBuffer, faces: 
     }
 }
 
+fn assert_frame_mapping(
+    mapping: romacs_display_protocol::PresentMapping,
+    frame_glyphs: &FrameGlyphBuffer,
+) {
+    debug_assert_eq!(mapping.presentation(), frame_glyphs.presentation_id);
+    debug_assert_eq!(mapping.content_logical_size().width(), frame_glyphs.width);
+    debug_assert_eq!(mapping.content_logical_size().height(), frame_glyphs.height);
+}
+
 impl WgpuRenderer {
     fn presented_cursor_paint(
         &self,
@@ -1548,9 +1557,7 @@ impl WgpuRenderer {
         load_existing: bool,
         scissor: Option<(u32, u32, u32, u32)>,
     ) {
-        debug_assert_eq!(mapping.presentation(), frame_glyphs.presentation_id);
-        debug_assert_eq!(mapping.content_logical_size().width(), frame_glyphs.width);
-        debug_assert_eq!(mapping.content_logical_size().height(), frame_glyphs.height);
+        assert_frame_mapping(mapping, frame_glyphs);
         let surface = mapping.surface();
         let surface_width = surface.device_width().get();
         let surface_height = surface.device_height().get();
@@ -1854,9 +1861,7 @@ impl WgpuRenderer {
         animated_cursor: Option<AnimatedCursor>,
         hovered_scroll_bar: Option<ScrollBarIdentity>,
     ) {
-        debug_assert_eq!(mapping.presentation(), frame_glyphs.presentation_id);
-        debug_assert_eq!(mapping.content_logical_size().width(), frame_glyphs.width);
-        debug_assert_eq!(mapping.content_logical_size().height(), frame_glyphs.height);
+        assert_frame_mapping(mapping, frame_glyphs);
         let (logical_w, logical_h, draw) = self.prepare_frame_uniforms(mapping);
         let params = FrameParams {
             frame_glyphs,
