@@ -1246,29 +1246,33 @@ impl Leaf<'_> {
         }
         let (bytes, quit) = self.call_process_wait(pid, reader)?;
         if let Some(quit) = quit {
-            // What the child wrote before the quit is the caller's to insert,
-            // all of it, where GNU's call_process can drop a partly filled
-            // block (VM2-CALLPROC-QUIT-OUTPUT): ((quit . TOKEN) . BYTES), after
-            // which the caller raises the quit again with its TOKEN
-            // (`romacs--call-process-quit`). Until then it is no quit
-            // unwinding: the Lisp that inserts the output runs as any other,
-            // a catch in it takes nothing, and a call-process it runs has
-            // tokens of its own.
-            let quit_symbol = self.sym("quit");
-            return match quit {
-                Fault::Signal(condition, _) if condition == quit_symbol && !bytes.is_empty() => {
-                    self.vm.quit_unwinding = false;
-                    self.issue_requit(token);
-                    let quit = self.cons(quit_symbol, token);
-                    let text = self.make_string(bytes, false);
-                    Ok(self.cons(quit, text))
-                }
-                quit => Err(quit),
-            };
+            return self.call_process_quit_result(bytes, quit, token);
         }
         let status = sp::wait_blocking(pid).map_err(|e| self.file_errno("Waiting for process", &e))?;
         let text = self.make_string(bytes, false);
         Ok(self.cons(fixnum(status.into()), text))
+    }
+
+    fn call_process_quit_result(&mut self, bytes: Vec<u8>, quit: Fault, token: Value) -> Out {
+        // What the child wrote before the quit is the caller's to insert,
+        // all of it, where GNU's call_process can drop a partly filled
+        // block (VM2-CALLPROC-QUIT-OUTPUT): ((quit . TOKEN) . BYTES), after
+        // which the caller raises the quit again with its TOKEN
+        // (`romacs--call-process-quit`). Until then it is no quit
+        // unwinding: the Lisp that inserts the output runs as any other,
+        // a catch in it takes nothing, and a call-process it runs has
+        // tokens of its own.
+        let quit_symbol = self.sym("quit");
+        match quit {
+            Fault::Signal(condition, _) if condition == quit_symbol && !bytes.is_empty() => {
+                self.vm.quit_unwinding = false;
+                self.issue_requit(token);
+                let quit = self.cons(quit_symbol, token);
+                let text = self.make_string(bytes, false);
+                Ok(self.cons(quit, text))
+            }
+            quit => Err(quit),
+        }
     }
 }
 

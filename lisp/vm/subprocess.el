@@ -1264,16 +1264,7 @@ what `find-operation-coding-system' sees after the operation."
                 (save-current-buffer
                   (if (bufferp buffer) (set-buffer buffer))
                   (if (eq output 'pipe)
-                      (let ((val (cond (coding-system-for-read coding-system-for-read)
-                                       (t (if (eq coding-systems t)
-                                              (setq coding-systems
-                                                    (apply #'find-operation-coding-system 'call-process all-args)))
-                                          (cond ((consp coding-systems) (car coding-systems))
-                                                ((consp default-process-coding-system)
-                                                 (car default-process-coding-system)))))))
-                        (check-coding-system val)
-                        (if (and (not enable-multibyte-characters) val)
-                            (setq val (coding-system-change-text-conversion val 'raw-text)))
+                      (let ((val (romacs--call-process-read-coding coding-systems all-args)))
                         (romacs--call-process-insert (cdr result) val)
                         (if inherit-process-coding-system
                             (funcall 'after-insert-file-set-buffer-file-coding-system
@@ -1288,6 +1279,22 @@ what `find-operation-coding-system' sees after the operation."
                       (romacs--signal-text (cdr status))
                     (cdr status)))))
           (romacs--call-process-retire token))))))
+
+(defun romacs--call-process-read-coding (coding-systems all-args)
+  "Choose the coding system for call-process output in the current buffer.
+CODING-SYSTEMS is the lookup for ALL-ARGS, or t if still needed."
+  (let ((coding
+         (or coding-system-for-read
+             (let ((systems (if (eq coding-systems t)
+                                (apply #'find-operation-coding-system 'call-process all-args)
+                              coding-systems)))
+               (cond ((consp systems) (car systems))
+                     ((consp default-process-coding-system)
+                      (car default-process-coding-system)))))))
+    (check-coding-system coding)
+    (if (and (not enable-multibyte-characters) coding)
+        (coding-system-change-text-conversion coding 'raw-text)
+      coding)))
 
 (defun romacs--call-process-insert (bytes coding)
   "call_process's decoding insertion of BYTES before point with CODING."

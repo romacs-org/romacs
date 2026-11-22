@@ -125,7 +125,7 @@ impl Vm {
         self.print_render_as(value, quoted, overrides, buffer_output, unreadable).map(|(text, _)| text)
     }
 
-    fn print_render_as(&mut self, value: Value, quoted: bool, overrides: Value, buffer_output: bool, unreadable: Unreadable) -> Result<(String, Unreadable)> {
+    fn print_options(&mut self, unreadable: Unreadable) -> Result<PrintOptions> {
         // `print-symbols-bare' only changes how a positioned symbol prints,
         // and Romacs makes none (ledger/divergences VM2-SYMPOS1).
         for name in ["float-output-format", "print-integers-as-characters", "print-charset-text-property"] {
@@ -144,6 +144,11 @@ impl Vm {
             let v = self.variable_value(slot)?;
             if v != Value::UNBOUND { options.set(key, v); }
         }
+        Ok(options)
+    }
+
+    fn print_render_as(&mut self, value: Value, quoted: bool, overrides: Value, buffer_output: bool, unreadable: Unreadable) -> Result<(String, Unreadable)> {
+        let mut options = self.print_options(unreadable)?;
         let continuous = self.slot("print-continuous-numbering");
         let mut continuous = !matches!(self.variable_value(continuous)?, Value::NIL | Value::UNBOUND);
         // An overriding number table is bound for this call only, as
@@ -286,24 +291,30 @@ impl Vm {
             }
             graph.marks.insert(key, CircleMark::Once);
             graph.inserted.push(v);
-            // The stack pops children left to right, as print.c's does.
-            if v.tag() == 3 { let (a, d) = self.cons_pair(v)?; pending.extend([CharTableSlot::Value(d), CharTableSlot::Value(a)]); }
-            else if let Some(data::Object::Vector(v) | data::Object::Record(v)) = self.object_if(v) { pending.extend(v.iter().rev().copied().map(CharTableSlot::Value)); }
-            else if let Some(data::Object::CharTable(t)) = self.object_if(v) {
-                pending.extend(t.print_slots().into_iter().rev());
-            }
-            else if let Some(data::Object::HashTable(t)) = self.object_if(v) {
-                let entries: Vec<Value> = t.entries().flat_map(|(_, k, v)| [k, v]).collect();
-                pending.extend(entries.into_iter().rev().map(CharTableSlot::Value));
-            }
-            else if quoted {
-                for (_, _, properties) in self.print_string_properties(v).into_iter().rev() {
-                    pending.extend(properties.into_iter().rev().map(|(_, value)| CharTableSlot::Value(value)));
-                }
-            }
+            self.push_print_children(v, quoted, &mut pending)?;
         }
         // Objects seen once never take a label.
         graph.marks.retain(|_, mark| *mark != CircleMark::Once);
+        Ok(())
+    }
+
+    fn push_print_children(&self, v: Value, quoted: bool, pending: &mut Vec<char_table::CharTableSlot>) -> Result<()> {
+        use char_table::CharTableSlot;
+        // The stack pops children left to right, as print.c's does.
+        if v.tag() == 3 { let (a, d) = self.cons_pair(v)?; pending.extend([CharTableSlot::Value(d), CharTableSlot::Value(a)]); }
+        else if let Some(data::Object::Vector(v) | data::Object::Record(v)) = self.object_if(v) { pending.extend(v.iter().rev().copied().map(CharTableSlot::Value)); }
+        else if let Some(data::Object::CharTable(t)) = self.object_if(v) {
+            pending.extend(t.print_slots().into_iter().rev());
+        }
+        else if let Some(data::Object::HashTable(t)) = self.object_if(v) {
+            let entries: Vec<Value> = t.entries().flat_map(|(_, k, v)| [k, v]).collect();
+            pending.extend(entries.into_iter().rev().map(CharTableSlot::Value));
+        }
+        else if quoted {
+            for (_, _, properties) in self.print_string_properties(v).into_iter().rev() {
+                pending.extend(properties.into_iter().rev().map(|(_, value)| CharTableSlot::Value(value)));
+            }
+        }
         Ok(())
     }
 
@@ -455,48 +466,54 @@ impl Vm {
         body.map(|body| prefix + &body)
     }
 
+    fn print_string_text(&self, view: lstring::StrView<'_>, quoted: bool, options: &PrintOptions) -> Result<String> {
+        use std::fmt::Write;
+        let mut out = if quoted { String::from("\"") } else { String::new() };
+        let mut codes = view.chars().peekable();
+        let mut hex = false;
+        // Only an octal escape needs the next code, even across a poll.
+        for start in (0..view.len()).step_by(KERNEL_CHUNK) {
+            if start != 0 && self.native_stop_due() { return Err(PRINT_STOPPED.into()); }
+            for _ in 0..KERNEL_CHUNK {
+                let Some(code) = codes.next() else { break };
+                // princ into a buffer escapes a unibyte string's raw bytes too.
+                if code > lstring::MAX_5_BYTE_CHAR || (!view.is_multibyte() && code >= 128 && (quoted || options.buffer)) {
+                    if !view.is_multibyte() && code >= 128 && !options.nonascii {
+                        return Err("printing raw-byte strings to callbacks is not supported".into());
+                    }
+                    let byte = if code > lstring::MAX_5_BYTE_CHAR { code - lstring::BYTE8_OFFSET } else { code };
+                    write!(out, "\\{byte:03o}").unwrap();
+                    hex = false;
+                } else if quoted && options.multibyte && code >= 128 {
+                    write!(out, "\\x{code:04x}").unwrap(); hex = true;
+                } else if let Some(c) = char::from_u32(code) {
+                    if hex && c.is_ascii_hexdigit() { out.push_str("\\ "); }
+                    hex = false;
+                    match c {
+                        '\"' | '\\' if quoted => { out.push('\\'); out.push(c); }
+                        '\n' if quoted && options.newlines => out.push_str("\\n"),
+                        '\u{c}' if quoted && options.newlines => out.push_str("\\f"),
+                        _ if quoted && options.controls && (code < 32 || code == 127) => {
+                            let width = if code > 63 || codes.peek().is_some_and(|c| (48..=55).contains(c)) { 3 } else if code > 7 { 2 } else { 1 };
+                            write!(out, "\\{code:0width$o}").unwrap();
+                        }
+                        // Printed text is decoded as a symbol key (symkey.rs).
+                        crate::symkey::ESC => { out.push(c); out.push(c); }
+                        _ => out.push(c),
+                    }
+                } else { return Err("not-unicode-string: printer extended character".into()); }
+            }
+        }
+        if quoted { out.push('\"'); }
+        Ok(out)
+    }
+
     fn print_body(&self, value: Value, quoted: bool, options: &PrintOptions, depth: usize) -> Result<String> {
         use std::fmt::Write;
         if depth > 100 { return Err("print nesting limit exceeded".into()); }
         if let Some(view) = self.str_view(value) {
             let properties = if quoted { self.print_string_properties(value) } else { Vec::new() };
-            let mut out = if quoted { String::from("\"") } else { String::new() };
-            let mut codes = view.chars().peekable();
-            let mut hex = false;
-            // Only an octal escape needs the next code, even across a poll.
-            for start in (0..view.len()).step_by(KERNEL_CHUNK) {
-                if start != 0 && self.native_stop_due() { return Err(PRINT_STOPPED.into()); }
-                for _ in 0..KERNEL_CHUNK {
-                    let Some(code) = codes.next() else { break };
-                    // princ into a buffer escapes a unibyte string's raw bytes too.
-                    if code > lstring::MAX_5_BYTE_CHAR || (!view.is_multibyte() && code >= 128 && (quoted || options.buffer)) {
-                        if !view.is_multibyte() && code >= 128 && !options.nonascii {
-                            return Err("printing raw-byte strings to callbacks is not supported".into());
-                        }
-                        let byte = if code > lstring::MAX_5_BYTE_CHAR { code - lstring::BYTE8_OFFSET } else { code };
-                        write!(out, "\\{byte:03o}").unwrap();
-                        hex = false;
-                    } else if quoted && options.multibyte && code >= 128 {
-                        write!(out, "\\x{code:04x}").unwrap(); hex = true;
-                    } else if let Some(c) = char::from_u32(code) {
-                        if hex && c.is_ascii_hexdigit() { out.push_str("\\ "); }
-                        hex = false;
-                        match c {
-                            '\"' | '\\' if quoted => { out.push('\\'); out.push(c); }
-                            '\n' if quoted && options.newlines => out.push_str("\\n"),
-                            '\u{c}' if quoted && options.newlines => out.push_str("\\f"),
-                            _ if quoted && options.controls && (code < 32 || code == 127) => {
-                                let width = if code > 63 || codes.peek().is_some_and(|c| (48..=55).contains(c)) { 3 } else if code > 7 { 2 } else { 1 };
-                                write!(out, "\\{code:0width$o}").unwrap();
-                            }
-                            // Printed text is decoded as a symbol key (symkey.rs).
-                            crate::symkey::ESC => { out.push(c); out.push(c); }
-                            _ => out.push(c),
-                        }
-                    } else { return Err("not-unicode-string: printer extended character".into()); }
-                }
-            }
-            if quoted { out.push('\"'); }
+            let mut out = self.print_string_text(view, quoted, options)?;
             if !properties.is_empty() {
                 out.insert_str(0, "#(");
                 for (start, end, plist) in properties {
