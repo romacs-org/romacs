@@ -207,7 +207,7 @@ walk over the registered ones."
   "Variables whose keymaps never show as hints."
   :type '(repeat symbol))
 
-(defcustom romacs-popup-hints-strip '("windmove-" "text-scale-")
+(defcustom romacs-popup-hints-strip '("windmove-" "text-scale-" "romacs-attach-edit-")
   "Prefixes dropped from a command's name in a hint."
   :type '(repeat string))
 

@@ -254,8 +254,10 @@ as the composer says it; an empty composer leaves it as it was."
     (if (string-empty-p text)
         (romacs-agent-log-queue--change 'hold item nil)
       (romacs-agent-log-queue--change 'edit item text)
-      ;; As a send empties it: the composer's hooks clear its images.
-      (delete-region romacs-agent-log--input (point-max)))
+      ;; As a send empties it: the composer's hooks clear its images, and
+      ;; what was pending on the draft lands nowhere.
+      (delete-region romacs-agent-log--input (point-max))
+      (run-hooks 'romacs-agent-log-draft-replaced-hook))
     (setq romacs-agent-log-queue--editing nil)
     (romacs-agent-log--separator t)
     (romacs-agent-log-queue--goto item)))
