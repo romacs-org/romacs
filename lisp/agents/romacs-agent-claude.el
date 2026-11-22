@@ -281,6 +281,7 @@ runs is that subagent's: no event."
                   (pcase (gethash "subtype" line)
                     ("task_started" (list :state 'started :task (gethash "task_id" line)
                                           :title (romacs-agent--value (gethash "description" line))
+                                          :subagent (equal (gethash "task_type" line) "local_agent")
                                           :background (or (eq (gethash "is_backgrounded" line) t)
                                                           (equal (gethash "task_type" line) "local_agent"))))
                     ("task_progress" (list :state 'progress
