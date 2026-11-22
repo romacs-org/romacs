@@ -641,6 +641,38 @@ contents, so two equal states print the same."
   (funcall (nth 3 future) future)
   (romacs-agent-kept-tests--drain))
 
+(ert-deftest romacs-agent-kept-a-worker-loads-the-journals-driver ()
+  (romacs-agent-kept-tests--with
+    (let* ((file (expand-file-name "kept-driver.el" root))
+           (worker-drivers (copy-sequence romacs-agent--drivers))
+           (worker-table (copy-hash-table romacs-agent--driver-table))
+           (romacs-agent--drivers (copy-sequence romacs-agent--drivers))
+           (romacs-agent--driver-table (copy-hash-table romacs-agent--driver-table))
+           (romacs-agent--driver-generation romacs-agent--driver-generation)
+           (manifest-file (expand-file-name "manifest.json" dir))
+           (manifest (romacs-agent--read-json manifest-file)))
+      (with-temp-file file
+        (prin1 '(romacs-agent-define-harness 'kept-fixture :lifetime 'persistent
+                  :events (lambda (_session line)
+                            (list (list :type 'record-state :state (list :reply (gethash "message" line))))))
+               (current-buffer)))
+      (load file nil t)
+      (puthash "harness" "kept-fixture" manifest)
+      (romacs-agent--write-json manifest-file manifest)
+      (romacs-agent-kept-tests--write
+       dir (list (romacs-agent-kept-tests--record 1 "out" (romacs-mcp--object "message" "decoded by fixture"))))
+      (romacs-agent-kept-tests--with-workers
+        (let* ((session (romacs-agent--load dir))
+               (future (car jobs))
+               (bindings (plist-get (nth 5 future) :bindings)))
+          (let ((romacs-agent--drivers worker-drivers) (romacs-agent--driver-table worker-table)
+                (romacs-agent--driver-generation 0))
+            (cl-progv (mapcar #'car bindings) (mapcar #'cdr bindings)
+              (setf (nth 4 future) (funcall (nth 1 future) (nth 2 future)))))
+          (funcall (nth 3 future) future)
+          (romacs-agent-kept-tests--drain)
+          (should (equal (romacs-agent-reply session) "decoded by fixture")))))))
+
 (ert-deftest romacs-agent-kept-a-long-journal-folds-aside ()
   ;; No kept state, a journal too long to fold in the editor: a worker
   ;; folds it and keeps its state.  The session is known meanwhile, and

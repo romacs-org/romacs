@@ -217,6 +217,51 @@ state root that has said two things, its writes to its harness in
       (should (equal (gethash "from" (car (romacs-agent-renew-tests--notes session))) "thread-old"))
       (should (equal (gethash "method" (romacs-agent--codex-thread session 3)) "thread/start")))))
 
+(defun romacs-agent-renew-tests--codex-goal (session thread status)
+  "Feed a Codex goal update for THREAD to SESSION, or a clear when STATUS is nil."
+  (let ((params (romacs-mcp--object "threadId" thread)))
+    (when status
+      (puthash "goal" (romacs-mcp--object "threadId" thread "status" status) params))
+    (romacs-agent--record
+     session
+     (romacs-mcp--object "seq" (1+ (romacs-agent-seq session)) "out"
+                         (romacs-mcp--object "method" (if status "thread/goal/updated" "thread/goal/cleared")
+                                             "params" params)))))
+
+(ert-deftest romacs-agent-renew-codex-keeps-an-unfinished-goal ()
+  (romacs-agent-renew-tests--with 'codex
+    (setf (romacs-agent-harness-session session) "thread-old")
+    (romacs-agent-renew-tests--codex-goal session "thread-old" "active")
+    (romacs-agent-renew-tests--codex-goal session "child" nil)
+    (should (romacs-agent-renew--obstacle session))
+    (should-error (romacs-agent-renew session) :type 'user-error)
+    (should-error (romacs-agent-renew-soon session) :type 'user-error)
+    (romacs-agent--record session (romacs-mcp--object "seq" (1+ (romacs-agent-seq session)) "exit" 0))
+    (romacs-agent-renew-tests--ran session)
+    (should (romacs-agent-renew--obstacle session))
+    (romacs-agent-renew-tests--codex-goal session "thread-old" "complete")
+    (should-not (romacs-agent-renew--obstacle session))
+    (romacs-agent-renew-tests--codex-goal session "thread-old" "paused")
+    (should (romacs-agent-renew--obstacle session))
+    (romacs-agent-renew-tests--codex-goal session "thread-old" nil)
+    (should-not (romacs-agent-renew--obstacle session))))
+
+(ert-deftest romacs-agent-renew-codex-goal-can-arrive-during-the-handoff ()
+  (romacs-agent-renew-tests--with 'codex
+    (setf (romacs-agent-harness-session session) "thread-old")
+    (let ((ready nil) (outcome nil) (end (+ (float-time) 30)))
+      (cl-letf (((symbol-function 'romacs-agent-renew--with-note)
+                 (lambda (_session _token _summary then) (setq ready then))))
+        (romacs-agent-renew session nil (lambda (result) (setq outcome result)))
+        (while (and (not ready) (< (float-time) end)) (accept-process-output nil 0.05))
+        (should ready)
+        (romacs-agent-renew-tests--codex-goal session "thread-old" "active")
+        (funcall ready nil nil))
+      (should (equal outcome '(:error "Codex keeps the unfinished goal on this thread")))
+      (should-not (romacs-agent-renew-tests--notes session))
+      (should-not (romacs-agent--held-p session))
+      (should (zerop relaunched)))))
+
 (ert-deftest romacs-agent-renew-refusals ()
   (romacs-agent-renew-tests--with 'claude
     (setf (romacs-agent-state session) 'running)
@@ -433,6 +478,90 @@ there (`live') and ready; `outcome' the renewal's outcome cell."
         (setf (romacs-agent-harness-session session) (romacs-agent--uuid))
         (run-hook-with-args 'romacs-agent-event-functions session '(:type done))
         (should (= (length relaunched) 1))))))
+
+(defun romacs-agent-renew-tests--automatic (session)
+  "Trigger a successful turn end above the renewal threshold for SESSION."
+  (let ((romacs-agent-renew-at 0.8) (romacs-agent-renew-summary 'selection))
+    (setf (romacs-agent-context-window session) 200000
+          (romacs-agent-context-used session) 170000)
+    (romacs-agent-renew--at-end session '(:type done))))
+
+(ert-deftest romacs-agent-renew-codex-keeps-native-compaction ()
+  (romacs-agent-renew-tests--with 'codex
+    (setf (romacs-agent-caught-up session) t
+          (romacs-agent-harness-session session) "original")
+    (romacs-agent-renew-tests--automatic session)
+    (should-not (romacs-agent-renew-threshold session))
+    (should-not (romacs-agent--held-p session))
+    (should (equal (romacs-agent-harness-session session) "original"))
+    (should-not (romacs-agent-renew-tests--notes session))))
+
+(ert-deftest romacs-agent-renew-automatic-handoff-dispatches-without-user-input ()
+  (romacs-agent-renew-tests--with 'claude
+    (setf (romacs-agent-caught-up session) t)
+    (unwind-protect
+        (progn
+          (romacs-agent-renew-tests--automatic session)
+          (let ((end (+ (float-time) 5)))
+            (while (and (zerop relaunched) (< (float-time) end)) (accept-process-output nil 0.05)))
+          (should (= relaunched 1))
+          (let ((brief (romacs-agent-brief session)))
+            (should (string-search "build the parser" brief))
+            (romacs-agent-renew-tests--ran session)
+            (romacs-agent-test-attach session t)
+            (setf (romacs-agent-caught-up session) nil)
+            (romacs-agent--dispatch session)
+            (should-not written)
+            (setf (romacs-agent-caught-up session) t)
+            (romacs-agent--dispatch session)
+            (should (= (length written) 1))
+            (let* ((line (caar written)) (record (cdar written))
+                   (wire (romacs-agent--text-of (gethash "content" (gethash "message" line))))
+                   (prompt (romacs-agent--text-of (gethash "content" (gethash "message" record)))))
+              (should (string-search "Continue" prompt))
+              (should (equal wire (concat brief prompt)))
+              (should (eq (gethash "romacsBrief" record) t))
+              (should (equal (gethash "romacsOwn" record) "renew-continue")))
+            (romacs-agent--dispatch session)
+            (should (= (length written) 1))))
+      (when-let* ((process (romacs-agent-connection session))) (delete-process process)))))
+
+(ert-deftest romacs-agent-renew-automatic-handoff-prefers-a-queued-message ()
+  (romacs-agent-renew-tests--with 'claude
+    (setf (romacs-agent-caught-up session) t)
+    (unwind-protect
+        (progn
+          (romacs-agent-renew-tests--automatic session)
+          (romacs-agent-send session "my next request")
+          (let ((end (+ (float-time) 5)))
+            (while (and (zerop relaunched) (< (float-time) end)) (accept-process-output nil 0.05)))
+          (should (= relaunched 1))
+          (let ((brief (romacs-agent-brief session)))
+            (romacs-agent-renew-tests--ran session)
+            (romacs-agent-test-attach session t)
+            (romacs-agent--dispatch session)
+            (should (= (length written) 1))
+            (should (equal (romacs-agent--text-of (gethash "content" (gethash "message" (caar written))))
+                           (concat brief "my next request")))
+            (should-not (romacs-agent-brief session))))
+      (when-let* ((process (romacs-agent-connection session))) (delete-process process)))))
+
+(ert-deftest romacs-agent-renew-replay-consumes-a-brief-used-by-continuation ()
+  (let ((session (romacs-agent--make :id "id" :harness 'claude :options '(:parent "parent"))))
+    (romacs-agent--record
+     session (romacs-mcp--object "seq" 1 "note"
+                                 (romacs-mcp--object "type" "renew" "brief" "Brief" "continue" "Continue")))
+    (romacs-agent--record session (romacs-mcp--object "seq" 2 "note" (romacs-mcp--object "type" "run")))
+    (should (equal (romacs-agent-brief session) "Brief"))
+    (romacs-agent--record
+     session (romacs-mcp--object "seq" 3 "in"
+                                 (romacs-mcp--object "type" "user" "romacsRequest" 1 "romacsBrief" t
+                                                     "romacsOwn" "renew-continue"
+                                                     "message" (romacs-mcp--object "content" "Continue"))))
+    (should-not (romacs-agent-brief session))
+    (romacs-agent--record
+     session (romacs-mcp--object "seq" 4 "out" (romacs-mcp--object "type" "result" "result" "Finished")))
+    (should (equal (cadar (romacs-agent-ends session)) "Finished"))))
 
 (ert-deftest romacs-agent-renew-a-journal-that-cannot-be-read-lets-go ()
   ;; Its journal unreadable, in its first read or a later batch: the

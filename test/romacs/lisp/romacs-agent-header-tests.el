@@ -204,6 +204,7 @@ string, an overlay."
               (should (shows "  Working"))
               ;; Its startup over with no turn to take up: idle.
               (setq live t)
+              (setf (romacs-agent-caught-up session) t)
               (cl-letf (((symbol-function 'romacs-agent--harness-get)
                          (lambda (_session key) (and (eq key :next) (lambda (_) :ready)))))
                 (romacs-agent--step session))

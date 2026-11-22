@@ -381,7 +381,29 @@ journals what its harness writes."
     (should (plist-get (romacs-agent-driver-state session) :owed))))
 
 (defun romacs-agent-codex-tests--events (session line)
-  (romacs-agent--codex-events session (romacs-agent-codex-tests--json line)))
+  "Fold LINE and return the public events seen by SESSION's observers."
+  (let* ((events nil)
+         (romacs-agent-event-functions
+          (list (lambda (_ event) (push (romacs-agent--without event '(:seq :last :time)) events)))))
+    (romacs-agent--record session (romacs-mcp--object "seq" (1+ (romacs-agent-seq session))
+                                                     "out" (romacs-agent-codex-tests--json line)))
+    (nreverse events)))
+
+(ert-deftest romacs-agent-codex-decoding-leaves-reply-and-stream-state-to-the-journal ()
+  (let* ((session (romacs-agent--make :id "c" :harness 'codex :reply "earlier"))
+         (delta (romacs-mcp--object "method" "item/agentMessage/delta"
+                                   "params" (romacs-mcp--object "itemId" "m" "delta" "new")))
+         (completed (romacs-mcp--object "method" "item/completed"
+                                       "params" (romacs-mcp--object
+                                                 "item" (romacs-mcp--object "id" "m" "type" "agentMessage" "text" "new")))))
+    (romacs-agent--codex-events session delta)
+    (romacs-agent--codex-events session completed)
+    (should-not (gethash "m" (romacs-agent-streamed session)))
+    (should (equal (romacs-agent-reply session) "earlier"))
+    (romacs-agent--record session (romacs-mcp--object "seq" 1 "out" delta))
+    (romacs-agent--record session (romacs-mcp--object "seq" 2 "out" completed))
+    (should (gethash "m" (romacs-agent-streamed session)))
+    (should (equal (romacs-agent-reply session) "new"))))
 
 (ert-deftest romacs-agent-codex-notifications ()
   (let ((session (romacs-agent--make :id "c" :harness 'codex :driver-state (list :turn "t1"))))

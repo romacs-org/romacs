@@ -1142,7 +1142,7 @@ with its time), and its wire request (Pending requests)."
                                     session (list (or (cl-find-if (lambda (event) (and (eq (plist-get event :type) 'approval)
                                                                                        (equal (plist-get event :request-id) id)))
                                                                   events)
-                                                      (romacs-agent-request-event id request)))))))
+                                                      (romacs-agent-request-event session id request)))))))
                    (puthash id (cons event (romacs-agent-service--bounded-request (romacs-agent-wire-request event))) requests)))
                approvals))
     requests))
