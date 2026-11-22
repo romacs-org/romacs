@@ -2968,6 +2968,16 @@ a restart must do."
   "Write SESSION's waiting selection to its manifest: it survives a restart."
   (romacs-agent--manifest-put session "switch" (romacs-agent--switch-object session)))
 
+(defun romacs-agent--retarget-switch (current switch target)
+  "Compute waiting selection for TARGET from CURRENT and SWITCH."
+  (pcase (plist-get switch :state)
+    ((and 'armed (guard (equal target current))) nil)
+    ('restarting
+     (let ((next (copy-sequence switch)))
+       (dolist (key '(:model :effort :provider) next)
+         (setq next (plist-put next key (plist-get target key))))))
+    (_ (cons :state (cons 'armed target)))))
+
 (defun romacs-agent-select (session model effort &optional provider)
   "Run SESSION on MODEL at EFFORT from its next turn on, under instance
 PROVIDER when given (one of its harness: the same conversation goes on
@@ -2986,12 +2996,7 @@ holds SESSION: its harness is run anew by those."
     (unless (equal target (romacs-agent--wanted session))
       (romacs-agent--cancel-select session)
       (setf (romacs-agent-pending-selection session)
-            (cond
-             ;; Back to what runs, before anything was sent.
-             ((and (eq state 'armed) (equal target (romacs-agent--selection session))) nil)
-             ;; A restart under way goes on, to this selection.
-             ((eq state 'restarting) (plist-put (plist-put (plist-put switch :model model) :effort effort) :provider provider))
-             (t (append (list :state 'armed) target))))
+            (romacs-agent--retarget-switch (romacs-agent--selection session) switch target))
       (romacs-agent--keep-switch session)
       (romacs-agent--raise session (list :type 'status :text "selection armed"))
       ;; Requests already sent leave the harness between the two: only a
@@ -3040,32 +3045,47 @@ next message goes."
                  (romacs-agent--changed session)
                  (romacs-agent--dispatch session)))))
 
+(defun romacs-agent--selection-attachment (session)
+  "Read SESSION's supervisor state for deciding how to apply a selection."
+  (cond ((romacs-agent--harness-unseen-p session)
+         (if (romacs-agent-unit session) 'unseen-managed 'unseen-unmanaged))
+        ((romacs-agent--harness-live-p session) 'attached)
+        (t 'offline)))
+
+(defun romacs-agent--switch-route (attachment same-provider select)
+  "Choose a selection's route from ATTACHMENT, SAME-PROVIDER and SELECT.
+Return nil to commit it, or `wait', `restart' or `driver'."
+  (pcase attachment
+    ;; Only an unseen supervisor under a unit can be stopped surely.
+    ('unseen-unmanaged 'wait)
+    ('unseen-managed 'restart)
+    ('offline nil)
+    ('attached (if (and same-provider select) 'driver 'restart))))
+
+(defun romacs-agent--write-switch (session switch requests)
+  "Arm confirmation of SWITCH, then write its REQUESTS to SESSION."
+  (setf (romacs-agent-pending-selection session)
+        (append (list :state 'applying :waiting (mapcar #'car requests)
+                      :timer (run-at-time romacs-agent-select-timeout nil #'romacs-agent--restart session))
+                (romacs-agent--without switch '(:state))))
+  (romacs-agent--changed session)
+  (dolist (request requests) (romacs-agent--line session (cdr request))))
+
 (defun romacs-agent--apply-switch (session)
   "Put SESSION's armed selection in effect."
   (let* ((switch (romacs-agent-pending-selection session))
          (select (romacs-agent--harness-get session :select))
-         (how (cond ;; Only a supervisor under a unit can be stopped surely: one
-                    ;; started without keeps the selection armed until it is
-                    ;; attached again (`romacs-agent--settle' then).
-                    ((romacs-agent--harness-unseen-p session) (if (romacs-agent-unit session) 'restart 'wait))
-                    ((not (romacs-agent--harness-live-p session)) nil)
-                    ;; Another instance's directory: only a new harness has it.
-                    ((not (equal (or (plist-get switch :provider) (romacs-agent-provider session))
-                                 (romacs-agent-provider session)))
-                     'restart)
-                    (select (funcall select session (plist-get switch :model) (plist-get switch :effort)))
-                    (t 'restart))))
-    (cond ((eq how 'wait))
-          ((null how) (romacs-agent--commit-switch session))
-          ((eq how 'restart) (romacs-agent--restart session))
-          (t (setf (romacs-agent-pending-selection session)
-                   (append (list :state 'applying :waiting (mapcar #'car how)
-                                 :timer (run-at-time romacs-agent-select-timeout nil
-                                                     #'romacs-agent--restart session))
-                           (cl-loop for (key value) on switch by #'cddr
-                                    unless (eq key :state) append (list key value))))
-             (romacs-agent--changed session)
-             (dolist (entry how) (romacs-agent--line session (cdr entry)))))))
+         (provider (romacs-agent-provider session))
+         (route (romacs-agent--switch-route (romacs-agent--selection-attachment session)
+                                            (equal (or (plist-get switch :provider) provider) provider) select))
+         (how (if (eq route 'driver)
+                  (funcall select session (plist-get switch :model) (plist-get switch :effort))
+                route)))
+    (pcase how
+      ('wait t)
+      ('nil (romacs-agent--commit-switch session))
+      ('restart (romacs-agent--restart session))
+      (_ (romacs-agent--write-switch session switch how)))))
 
 (defun romacs-agent--select-answered (session id ok)
   "The harness answered ID of SESSION's selection, confirming it when OK;
