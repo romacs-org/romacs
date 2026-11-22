@@ -104,14 +104,19 @@ rows says how it goes back."
                                                        '(romacs-agent-log-queue-sooner romacs-agent-log-queue-later) "order")
                          "\n")
                  'romacs-agent-log-queue-label t)
-     (let ((place 0))
+     (let* ((place 0)
+            ;; Marks of one width, a customised one too: numbers line up.
+            (held-mark (romacs-agent-glyph-padded 'queue-held 'queue-other))
+            (other-mark (romacs-agent-glyph-padded 'queue-other 'queue-held))
+            (own-mark (make-string (string-width held-mark) ?\s)))
        (mapconcat
         (lambda (item)
           (let* ((own (romacs-agent-queue-own-p item))
                  (held (eq item editing))
                  ;; Its place, two columns, a held one's marked: glyphs
                  ;; of the text's own font, every row one height.
-                 (mark (format "%s%-2d" (cond (held (romacs-agent-glyph 'queue-held)) (own " ") (t (romacs-agent-glyph 'queue-other))) (setq place (1+ place))))
+                 (mark (format "%s%-2d" (cond (held held-mark) (own own-mark) (t other-mark))
+                               (setq place (1+ place))))
                  (line (car (split-string (string-trim (or (romacs-agent-item-text item) "")) "\n")))
                  (room (max 8 (- width 3 (string-width mark)))))
             (propertize (concat "  " (propertize mark 'face (if held '(romacs-agent-log-queued-held bold) 'romacs-agent-log-queued-mark))
@@ -249,7 +254,8 @@ as the composer says it; an empty composer leaves it as it was."
     (if (string-empty-p text)
         (romacs-agent-log-queue--change 'hold item nil)
       (romacs-agent-log-queue--change 'edit item text)
-      (romacs-agent-log--writing (delete-region romacs-agent-log--input (point-max))))
+      ;; As a send empties it: the composer's hooks clear its images.
+      (delete-region romacs-agent-log--input (point-max)))
     (setq romacs-agent-log-queue--editing nil)
     (romacs-agent-log--separator t)
     (romacs-agent-log-queue--goto item)))
