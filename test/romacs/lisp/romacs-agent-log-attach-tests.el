@@ -201,5 +201,81 @@ PNG files in a fresh directory, and `composer' its draft's text."
       (should (seq-some (lambda (i) (equal (get-text-property i 'face tray) '(romacs-attach-badge romacs-attach-chip)))
                         (number-sequence 0 (1- (length tray))))))))
 
+(ert-deftest romacs-agent-log-attach-undo-brings-back-the-link-alone ()
+  ;; A removal undone puts its link back as written, where it was; a link
+  ;; added meanwhile stays.
+  (romacs-agent-log-attach-tests--with
+    (insert "first " (link a) " then " (link b) " end")
+    (romacs-agent-log-attach-sync)
+    (setq romacs-attach--selected (plist-get (nth 1 romacs-attach-items) :id))
+    (romacs-attach-edit-remove)
+    (should (equal (composer) (concat "first " (link a) " then end")))
+    (insert " " (link c))
+    (romacs-agent-log-attach-sync)
+    (romacs-attach-edit-undo)
+    (should (equal (composer) (concat "first " (link a) " then " (link b) " end " (link c))))
+    (should (equal (files) (list a b c)))))
+
+(ert-deftest romacs-agent-log-attach-a-new-link-is-a-new-chip ()
+  ;; The same file linked again, before the chips read it: removing the
+  ;; first chip removes the first link, not the new one.
+  (romacs-agent-log-attach-tests--with
+    (let ((default-directory dir))
+      (insert "[image](a.png)")
+      (romacs-agent-log-attach-sync)
+      (let ((id (plist-get (car romacs-attach-items) :id)))
+        (goto-char romacs-agent-log--input)
+        (insert (link a) " ")
+        (romacs-attach-set-items (romacs-attach-remove romacs-attach-items id))
+        (should (equal (composer) (link a)))))))
+
+(ert-deftest romacs-agent-log-attach-redrawing-writes-nothing ()
+  ;; A redraw (a selection) changes no text: a link keeps its spelling;
+  ;; a caption of `image' is none; a move trades links as written.
+  (romacs-agent-log-attach-tests--with
+    (let ((written (concat "[file](" a ") [image](" b ")")))
+      (insert written)
+      (romacs-agent-log-attach-sync)
+      (romacs-attach-set-items romacs-attach-items)
+      (should (equal (composer) written))
+      (romacs-attach-set-items (romacs-attach-caption romacs-attach-items (plist-get (car romacs-attach-items) :id) "image"))
+      (romacs-attach-set-items romacs-attach-items)
+      (should (equal (composer) written))
+      (should (equal (files) (list a b)))
+      (romacs-attach-set-items (romacs-attach-move romacs-attach-items (plist-get (car romacs-attach-items) :id) 1))
+      (should (equal (composer) (concat "[image](" b ") [file](" a ")"))))))
+
+(ert-deftest romacs-agent-log-attach-code-is-no-attachment ()
+  ;; A link in code is text: no chip, and no chip edit touches it.
+  (romacs-agent-log-attach-tests--with
+    (insert "printf '`" (link a) "`' and\n```\n" (link b) "\n```\n" (link c))
+    (romacs-agent-log-attach-sync)
+    (should (equal (files) (list c)))))
+
+(ert-deftest romacs-agent-log-attach-a-plain-file-links-once ()
+  ;; A file that is no image, attached through the tray, is linked once
+  ;; and stays a plain link.
+  (romacs-agent-log-attach-tests--with
+    (let ((notes (expand-file-name "notes.txt" dir)))
+      (write-region "x" nil notes nil 'silent)
+      (romacs-attach-set-items (list (romacs-attach-item notes)))
+      (romacs-attach-set-items romacs-attach-items)
+      (should (equal (composer) (link notes)))
+      (should-not romacs-attach-items))))
+
+(ert-deftest romacs-agent-log-attach-a-stale-paste-leaves-the-next ()
+  ;; A paste sent away, then another: the first's end leaves the second's.
+  (romacs-agent-log-attach-tests--with
+    (let ((thens nil))
+      (cl-letf (((symbol-function 'romacs-attach-clipboard-image-type) (lambda () "image/png"))
+                ((symbol-function 'romacs-attach-clipboard-file) (lambda (_type then) (push then thens))))
+        (romacs-agent-log-attach-yank)
+        (run-hooks 'romacs-agent-log-draft-replaced-hook)
+        (romacs-agent-log-attach-yank)
+        (funcall (cadr thens) a)
+        (should (equal (composer) ""))
+        (funcall (car thens) b)
+        (should (equal (composer) (link b)))))))
+
 (provide 'romacs-agent-log-attach-tests)
 ;;; romacs-agent-log-attach-tests.el ends here

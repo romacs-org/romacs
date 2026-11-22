@@ -9,14 +9,21 @@
 ;; nothing is copied.  The links are the data.  romacs-attach.el's tray
 ;; shows them as chips above the composer and edits them.
 ;;
-;; Reading the draft never writes it: a change to the composer rescans
-;; its links and binds each chip to one link (a link to a file that is
-;; gone has none).  A chip edit writes back only what it changed, link by
-;; link: a chip removed deletes its own link, a move trades two links'
-;; text as written, a caption relabels its link alone.  DEL at the
-;; composer's start enters the chips (n/p, d, M-f/M-b, c, RET, q).  C-y
-;; with an image on the clipboard saves it once and links it where C-y
-;; was typed.
+;; A link's text carries its chip's id as a text property, so the two
+;; stay one while the text around them changes; a link new to the draft
+;; (typed, yanked, undone back: the composer makes what comes in plain)
+;; has none and gets a chip of its own.  Reading the
+;; draft never writes it: a change to the composer reads its links once
+;; the command or timer is done.  A chip edit writes back only what it
+;; changed: a chip removed deletes its own link (undone, the link comes
+;; back as written, where it was), a caption relabels its link's label
+;; alone, a move trades links as written.  Then the draft is read again,
+;; so the chips are always what its links say.  Links in code (`...`,
+;; fenced blocks) are text, not attachments.
+;;
+;; DEL at the composer's start enters the chips (n/p, d, M-f/M-b, c,
+;; RET, q).  C-y with an image on the clipboard saves it once and links
+;; it where C-y was typed.
 
 ;;; Code:
 
@@ -34,22 +41,26 @@
 (defvar-local romacs-agent-log-attach--overlay nil
   "The overlay that shows the tray at the composer's start.")
 
-(defvar-local romacs-agent-log-attach--slots nil
-  "The composer's links as last read, in order: (KEY . ID) each, KEY
-what the link says (`romacs-agent-log-attach--key'), ID its chip's item
-id, nil for a link without a chip.")
+(defvar-local romacs-agent-log-attach--shown nil
+  "The ids of the tray's items as last read from the draft, in order:
+what a chip edit is measured against.")
 
 (defvar-local romacs-agent-log-attach--unlinked nil
-  "Item id -> the link text a chip removed had: undone, it comes back as written.")
+  "Links chip removals took, newest first: (ID MARKER TEXT SPACE), MARKER
+where the link was, TEXT the link as written, SPACE the side, `before' or
+`after', of the space that went with it.")
 
 (defvar-local romacs-agent-log-attach--dirty nil
-  "The composer changed since its links were read; a sync is scheduled.")
+  "The composer changed since its links were read; a read is scheduled.")
 
 (defvar-local romacs-agent-log-attach--paste nil
   "The clipboard paste under way: the marker where C-y was typed.")
 
 (defvar romacs-agent-log-attach--reading nil
-  "Non-nil while the tray takes the composer's links: nothing to write back.")
+  "Non-nil while the tray takes the draft's links: nothing to write back.")
+
+(defconst romacs-agent-log-attach--id 'romacs-agent-log-attach
+  "The text property a link carries: its chip's item id.")
 
 ;;;; Links
 
@@ -61,75 +72,78 @@ id, nil for a link without a chip.")
   "CAPTION as a link's label: its brackets and backslashes escaped."
   (replace-regexp-in-string "[][\\]" "\\\\\\&" caption t))
 
-(defun romacs-agent-log-attach--default-label (file)
-  "The label a link to FILE has without a caption: `image' or `file'."
-  (let ((link (romacs-agent-log-images-link file)))
-    (substring link 1 (string-search "]" link))))
-
 (defun romacs-agent-log-attach--caption (label)
   "The caption a link's LABEL says: none for the plain `image' or `file'."
   (and label (not (member label '("" "image" "file"))) label))
 
+(defun romacs-agent-log-attach--label (file caption)
+  "The label of a link to FILE captioned CAPTION: its default without one."
+  (if-let* ((caption (romacs-agent-log-attach--caption caption)))
+      (romacs-agent-log-attach--escape caption)
+    (let ((link (romacs-agent-log-images-link file)))
+      (substring link 1 (string-search "]" link)))))
+
+(defun romacs-agent-log-attach--code (start end)
+  "The code from START to END: (BEG . END) of each `...' span and fenced
+block, a fence left open running to END."
+  (save-excursion
+    (goto-char start)
+    (let ((ranges nil) (fence nil))
+      (while (< (point) end)
+        (let ((eol (save-excursion (if (search-forward "\n" end 'move) (1- (point)) (point)))))
+          (cond ((looking-at "[ \t]*```")
+                 (if fence (progn (push (cons fence eol) ranges) (setq fence nil)) (setq fence (point))))
+                ((not fence)
+                 (while (re-search-forward "`[^`\n]*`" eol t)
+                   (push (cons (match-beginning 0) (match-end 0)) ranges))))
+          (goto-char (min end (1+ eol)))))
+      (when fence (push (cons fence end) ranges))
+      ranges)))
+
 (defun romacs-agent-log-attach--links ()
-  "The composer's image links, in order: (BEG END FILE CAPTION LABEL-END) each."
-  (mapcar (pcase-lambda (`(,beg ,end ,file))
-            (save-excursion
-              (goto-char beg)
-              (looking-at romacs-agent-log-images-label-regexp)
-              (list beg end file
-                    (romacs-agent-log-attach--caption
-                     (romacs-agent-log-attach--unescape (match-string-no-properties 1)))
-                    (match-end 0))))
-          (romacs-agent-log-images-links nil (marker-position romacs-agent-log--input) (point-max))))
-
-(defun romacs-agent-log-attach--key (file caption)
-  "What a link and its chip agree on: its FILE and CAPTION."
-  (cons file caption))
-
-(defun romacs-agent-log-attach--link-key (link)
-  (romacs-agent-log-attach--key (nth 2 link) (nth 3 link)))
-
-(defun romacs-agent-log-attach--item-key (item)
-  (romacs-agent-log-attach--key (plist-get item :path) (plist-get item :caption)))
-
-(defun romacs-agent-log-attach--relabel (text file caption)
-  "TEXT, a link to FILE as written, labelled CAPTION (its default
-label without one), its destination as written."
-  (concat "[" (romacs-agent-log-attach--escape
-               (or (romacs-agent-log-attach--caption caption) (romacs-agent-log-attach--default-label file)))
-          (substring text (progn (string-match romacs-agent-log-images-label-regexp text) (1- (match-end 0))))))
+  "The composer's image links out of code, in order:
+\(BEG END FILE CAPTION LABEL-BEG LABEL-END ID) each, ID the chip id its
+text carries."
+  (let* ((start (marker-position romacs-agent-log--input))
+         (code (romacs-agent-log-attach--code start (point-max))))
+    (delq nil
+          (mapcar (pcase-lambda (`(,beg ,end ,file))
+                    (unless (seq-some (lambda (range) (and (>= beg (car range)) (< beg (cdr range)))) code)
+                      (save-excursion
+                        (goto-char beg)
+                        (looking-at romacs-agent-log-images-label-regexp)
+                        (list beg end file
+                              (romacs-agent-log-attach--caption
+                               (romacs-agent-log-attach--unescape (match-string-no-properties 1)))
+                              (match-beginning 1) (match-end 1)
+                              (get-text-property beg romacs-agent-log-attach--id)))))
+                  (romacs-agent-log-images-links nil start (point-max))))))
 
 ;;;; Reading: the draft's links as chips
 
-(defun romacs-agent-log-attach--bind (links items make)
-  "LINKS bound to ITEMS: (SLOTS . ITEMS), SLOTS one (KEY . ID) per link,
-ITEMS those bound in link order.  A link takes the first item left with
-its key, else one MAKE makes of it (nil for none)."
-  (let ((free (copy-sequence items)) (slots nil) (bound nil))
-    (dolist (link links)
-      (let* ((key (romacs-agent-log-attach--link-key link))
-             (item (or (seq-find (lambda (item) (equal (romacs-agent-log-attach--item-key item) key)) free)
-                       (funcall make link))))
-        (setq free (delq item free))
-        (when item (push item bound))
-        (push (cons key (plist-get item :id)) slots)))
-    (cons (nreverse slots) (nreverse bound))))
-
-(defun romacs-agent-log-attach--make (link)
-  "A chip's item for LINK, or nil when its file cannot be one."
-  (ignore-errors (romacs-attach-item (nth 2 link) :caption (nth 3 link) :source 'link)))
-
 (defun romacs-agent-log-attach-sync ()
-  "Show the composer's links as the tray's chips, when they changed.
-Reading only: the draft is never written here."
+  "Show the composer's links as the tray's chips.  The draft's text is
+never changed here; a link without a chip id gets its chip's."
   (setq romacs-agent-log-attach--dirty nil)
   (when (markerp romacs-agent-log--input)
-    (let ((links (romacs-agent-log-attach--links)))
-      (unless (equal (mapcar #'romacs-agent-log-attach--link-key links) (mapcar #'car romacs-agent-log-attach--slots))
-        (pcase-let ((`(,slots . ,items) (romacs-agent-log-attach--bind links romacs-attach-items #'romacs-agent-log-attach--make)))
-          (setq romacs-agent-log-attach--slots slots)
-          (let ((romacs-agent-log-attach--reading t))
-            (romacs-attach-set-items items)))))))
+    (let ((old (mapcar (lambda (item) (cons (plist-get item :id) item)) romacs-attach-items))
+          (seen nil) (items nil))
+      (pcase-dolist (`(,beg ,end ,file ,caption ,_ ,_ ,id) (romacs-agent-log-attach--links))
+        (let* ((kept (and id (not (member id seen)) (cdr (assoc id old))))
+               (item (if (and kept (equal (plist-get kept :path) file))
+                         (if (equal (plist-get kept :caption) caption) kept
+                           (plist-put (copy-sequence kept) :caption caption))
+                       (ignore-errors (romacs-attach-item file :caption caption :source 'link)))))
+          (when item
+            (push (plist-get item :id) seen)
+            (push item items)
+            (unless (equal id (plist-get item :id))
+              (romacs-agent-log-attach--mark beg end (plist-get item :id))))))
+      (setq items (nreverse items)
+            romacs-agent-log-attach--shown (mapcar (lambda (item) (plist-get item :id)) items))
+      (unless (equal items romacs-attach-items)
+        (let ((romacs-agent-log-attach--reading t))
+          (romacs-attach-set-items items))))))
 
 (defun romacs-agent-log-attach--changed (beg _end _length)
   "After a change from BEG: in the composer, its links read again once
@@ -145,65 +159,83 @@ the current command or timer is done."
 
 ;;;; Writing: a chip edit to its links
 
-(defun romacs-agent-log-attach--edits (slots items)
-  "What turns links bound as SLOTS into ITEMS: a list of (INDEX . WHAT)
-by link, WHAT `delete' or (SOURCE . ITEM), the link at SOURCE's text
-relabelled for ITEM; and the ITEMS no link has, to append."
-  (let* ((ids (mapcar #'cdr slots))
-         (wanted (mapcar (lambda (item) (plist-get item :id)) items))
-         (staying (seq-filter (lambda (id) (and id (member id wanted))) ids))
-         (order (seq-filter (lambda (item) (member (plist-get item :id) staying)) items))
-         (k -1) edits)
-    (cl-loop for id in ids for i from 0
-             when id
-             do (push (cons i (if (not (member id wanted)) 'delete
-                                (let ((item (nth (setq k (1+ k)) order)))
-                                  (cons (seq-position ids (plist-get item :id)) item))))
-                      edits))
-    (cons (nreverse edits)
-          (seq-remove (lambda (item) (member (plist-get item :id) ids)) items))))
+(defun romacs-agent-log-attach--mark (beg end id)
+  "Give the link from BEG to END the chip ID: the composer makes what is
+inserted into it plain (`romacs-agent-log--composer-plain')."
+  (with-silent-modifications (put-text-property beg end romacs-agent-log-attach--id id)))
+
+(defun romacs-agent-log-attach--replace (beg end text &optional id)
+  "Make BEG..END TEXT, the link of chip ID when given: inserted before,
+then the old deleted, so a marker at END stays at the end."
+  (goto-char beg)
+  (insert text)
+  (delete-region (point) (+ (point) (- end beg)))
+  (when id (romacs-agent-log-attach--mark beg (point) id)))
 
 (defun romacs-agent-log-attach--delete-link (beg end)
-  "Delete the link from BEG to END and one space beside it."
+  "Delete the link from BEG to END and one space beside it; which side's,
+`before' or `after', or nil."
   (goto-char beg)
   (delete-region beg end)
   ;; Not the prompt's own space, before the composer.
   (cond ((and (> (point) romacs-agent-log--input) (eq (char-before) ?\s) (memq (char-after) '(?\s ?\n nil)))
-         (delete-char -1))
-        ((eq (char-after) ?\s) (delete-char 1))))
+         (delete-char -1) 'before)
+        ((eq (char-after) ?\s) (delete-char 1) 'after)))
+
+(defun romacs-agent-log-attach--relink (item)
+  "Put ITEM's link back: as written and where it was when a removal took
+it, else new at the composer's end."
+  (let* ((id (plist-get item :id))
+         (gone (assoc id romacs-agent-log-attach--unlinked))
+         (at (and gone (marker-position (nth 1 gone)) (>= (nth 1 gone) romacs-agent-log--input) (nth 1 gone))))
+    (setq romacs-agent-log-attach--unlinked (delq gone romacs-agent-log-attach--unlinked))
+    (if at
+        (progn (goto-char at)
+               (when (eq (nth 3 gone) 'before) (insert " "))
+               (let ((beg (point)))
+                 (insert (nth 2 gone))
+                 (romacs-agent-log-attach--mark beg (point) id))
+               (when (eq (nth 3 gone) 'after) (insert " ")))
+      (goto-char (point-max))
+      (unless (or (= (point) romacs-agent-log--input) (memq (char-before) '(?\s ?\n))) (insert " "))
+      (let ((link (romacs-agent-log-images-link (plist-get item :path))) (beg (point)))
+        (insert "[" (romacs-agent-log-attach--label (plist-get item :path) (plist-get item :caption))
+                (substring link (string-search "]" link)))
+        (romacs-agent-log-attach--mark beg (point) id)))
+    (when gone (set-marker (nth 1 gone) nil))))
 
 (defun romacs-agent-log-attach--write ()
-  "Write the tray's last edit to the composer's links, each touched link
-alone; when the draft no longer has the links last read, read it instead."
-  (let ((links (romacs-agent-log-attach--links)))
-    (if (not (equal (mapcar #'romacs-agent-log-attach--link-key links) (mapcar #'car romacs-agent-log-attach--slots)))
-        (romacs-agent-log-attach-sync)
-      (pcase-let* ((`(,edits . ,extra) (romacs-agent-log-attach--edits romacs-agent-log-attach--slots romacs-attach-items))
-                   (texts (mapcar (lambda (link) (buffer-substring-no-properties (nth 0 link) (nth 1 link))) links)))
-        (save-excursion
-          (dolist (item extra)
-            (goto-char (point-max))
-            (unless (or (= (point) romacs-agent-log--input) (memq (char-before) '(?\s ?\n))) (insert " "))
-            (insert (let ((text (cdr (assoc (plist-get item :id) romacs-agent-log-attach--unlinked))))
-                      (if text (romacs-agent-log-attach--relabel text (plist-get item :path) (plist-get item :caption))
-                        (romacs-agent-log-attach--relabel (romacs-agent-log-images-link (plist-get item :path))
-                                                          (plist-get item :path) (plist-get item :caption))))))
-          ;; From the last link, so the places of those before stay.
-          (pcase-dolist (`(,i . ,what) (reverse edits))
-            (pcase-let ((`(,beg ,end . ,_) (nth i links)))
-              (if (eq what 'delete)
-                  (progn (push (cons (cdr (nth i romacs-agent-log-attach--slots)) (nth i texts))
-                               romacs-agent-log-attach--unlinked)
-                         (romacs-agent-log-attach--delete-link beg end))
-                (let ((text (romacs-agent-log-attach--relabel (nth (car what) texts) (plist-get (cdr what) :path)
-                                                              (plist-get (cdr what) :caption))))
-                  (unless (equal text (nth i texts))
-                    (goto-char beg)
-                    (delete-region beg end)
-                    (insert text)))))))
-        (setq romacs-agent-log-attach--slots
-              (car (romacs-agent-log-attach--bind (romacs-agent-log-attach--links) romacs-attach-items #'ignore))
-              romacs-agent-log-attach--dirty nil)))))
+  "Write the tray's edit to the composer's links, each touched link
+alone, and read the draft again."
+  (let* ((ids (mapcar (lambda (item) (plist-get item :id)) romacs-attach-items))
+         (seen nil)
+         (linked (seq-filter (lambda (link)
+                               (let ((id (nth 6 link)))
+                                 (and (member id romacs-agent-log-attach--shown) (not (member id seen))
+                                      (push id seen))))
+                             (romacs-agent-log-attach--links)))
+         (staying (seq-filter (lambda (link) (member (nth 6 link) ids)) linked))
+         (order (seq-filter (lambda (id) (assoc id (mapcar (lambda (link) (cons (nth 6 link) link)) staying))) ids))
+         (texts (mapcar (lambda (link) (cons (nth 6 link) (buffer-substring (nth 0 link) (nth 1 link)))) staying)))
+    (save-excursion
+      ;; From the last link, so the places of those before stay.
+      (dolist (link (reverse linked))
+       (pcase-let ((`(,beg ,end ,file ,caption ,label-beg ,label-end ,id) link))
+        (if (not (member id ids))
+            (let ((text (buffer-substring beg end)) (space (romacs-agent-log-attach--delete-link beg end)))
+              (push (list id (copy-marker (point)) text space) romacs-agent-log-attach--unlinked))
+          (let* ((want (nth (seq-position staying link) order))
+                 (item (seq-find (lambda (item) (equal (plist-get item :id) want)) romacs-attach-items))
+                 (wanted (romacs-agent-log-attach--caption (plist-get item :caption))))
+            (cond ((not (equal want id))
+                   (romacs-agent-log-attach--replace beg end (cdr (assoc want texts)) want))
+                  ((not (equal wanted caption))
+                   (romacs-agent-log-attach--replace label-beg label-end
+                                                     (romacs-agent-log-attach--label file wanted))))))))
+      (dolist (item romacs-attach-items)
+        (unless (member (plist-get item :id) seen)
+          (romacs-agent-log-attach--relink item))))
+    (romacs-agent-log-attach-sync)))
 
 ;;;; The tray
 
@@ -224,13 +256,19 @@ the separator, written again, takes that line's start with it."
     (let ((line (save-excursion (goto-char romacs-agent-log--input) (forward-line 0) (point))))
       (move-overlay romacs-agent-log-attach--overlay line line))))
 
+(defun romacs-agent-log-attach--draft-replaced ()
+  "The draft was sent or replaced: what was pending on it lands nowhere."
+  (romacs-agent-log-attach--forget-paste romacs-agent-log-attach--paste)
+  (dolist (gone romacs-agent-log-attach--unlinked) (set-marker (nth 1 gone) nil))
+  (setq romacs-agent-log-attach--unlinked nil))
+
 (defun romacs-agent-log-attach-setup ()
   "Make the current chat a tray host whose chips are its composer's links."
   (romacs-attach-tray-setup :consumer 'agent-chat :redisplay #'romacs-agent-log-attach--redisplay)
   ;; The chips show the composer's images: not again under the draft.
   (setq romacs-agent-log-images-under-draft nil)
   (add-hook 'after-change-functions #'romacs-agent-log-attach--changed nil t)
-  (add-hook 'romacs-agent-log-draft-replaced-hook #'romacs-agent-log-attach--forget-paste nil t))
+  (add-hook 'romacs-agent-log-draft-replaced-hook #'romacs-agent-log-attach--draft-replaced nil t))
 
 ;;;; Keys
 
@@ -242,28 +280,25 @@ character back, as ever."
       (romacs-attach-edit)
     (call-interactively #'delete-backward-char)))
 
-(defun romacs-agent-log-attach--forget-paste ()
-  "The draft was sent or replaced: a paste under way lands nowhere."
-  (when romacs-agent-log-attach--paste
-    (set-marker romacs-agent-log-attach--paste nil)
+(defun romacs-agent-log-attach--forget-paste (paste)
+  "Let PASTE go when it is the paste under way."
+  (when (and paste (eq paste romacs-agent-log-attach--paste))
+    (set-marker paste nil)
     (setq romacs-agent-log-attach--paste nil)))
 
 (defun romacs-agent-log-attach--pasted (chat paste file)
   "The clipboard's image saved as FILE (nil when it could not be) for
 PASTE, CHAT's paste: linked at its marker while it is CHAT's paste still."
-  (cond ((not (buffer-live-p chat)))
-        ((not file)
-         (with-current-buffer chat (romacs-agent-log-attach--forget-paste))
-         (message "Could not read the clipboard's image"))
-        (t (with-current-buffer chat
-             (when (and (eq paste romacs-agent-log-attach--paste) (marker-position paste)
-                        (>= paste romacs-agent-log--input))
-               ;; Still where C-y was typed: after the link, as a yank leaves it.
-               (if (= (point) paste) (insert (romacs-agent-log-images-link file))
-                 (save-excursion
-                   (goto-char paste)
-                   (insert (romacs-agent-log-images-link file)))))
-             (romacs-agent-log-attach--forget-paste)))))
+  (when (buffer-live-p chat)
+    (with-current-buffer chat
+      (when (eq paste romacs-agent-log-attach--paste)
+        (if (not file) (message "Could not read the clipboard's image")
+          (when (>= paste romacs-agent-log--input)
+            (let ((link (romacs-agent-log-images-link file)))
+              ;; Still where C-y was typed: after the link, as a yank leaves it.
+              (if (= (point) paste) (insert link)
+                (save-excursion (goto-char paste) (insert link))))))
+        (romacs-agent-log-attach--forget-paste paste)))))
 
 (defun romacs-agent-log-attach-yank (&optional arg)
   "C-y: with an image on the clipboard and point in the composer, the
@@ -278,8 +313,11 @@ as ever (ARG).  One paste at a time."
         (let ((chat (current-buffer))
               (paste (copy-marker (point))))
           (setq romacs-agent-log-attach--paste paste)
-          (romacs-attach-clipboard-file
-           type (lambda (file) (romacs-agent-log-attach--pasted chat paste file)))))
+          (condition-case err
+              (romacs-attach-clipboard-file
+               type (lambda (file) (romacs-agent-log-attach--pasted chat paste file)))
+            (error (romacs-agent-log-attach--forget-paste paste)
+                   (signal (car err) (cdr err))))))
     (yank arg)))
 
 (provide 'romacs-agent-log-attach)

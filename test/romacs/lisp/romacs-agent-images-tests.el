@@ -75,12 +75,12 @@
     ;; The preview starts past the list, and the pair is centred.
     (should (> (plist-get layout :preview-x) list-end))
     (should (<= (abs (- (plist-get layout :list-x) (- 2000 end))) 1))
-    (should (= (plist-get layout :height) 480))
-    (should (= (plist-get layout :lines) 24))
+    (should (= (plist-get layout :height) 440))
+    (should (= (plist-get layout :lines) 22))
     (should (= (plist-get layout :preview-width) (* 10 (plist-get layout :preview-columns))))
     (should (> (plist-get layout :y) 30)))
-  ;; It fits as it is drawn, in whole cells: 17 lines of 30 are 510 pixels.
-  (should-not (romacs-agent-images--layout 0 0 2000 510 15 30))
+  ;; It fits as it is drawn, in whole cells: 15 lines of 30 are 450 pixels.
+  (should-not (romacs-agent-images--layout 0 0 2000 450 15 30))
   (let* ((layout (romacs-agent-images--layout 0 0 2000 560 15 30))
          (padding (* 2 (plist-get (alist-get 'card romacs-popup-look) :padding))))
     (should (<= (+ (plist-get layout :y) (* 30 (plist-get layout :lines)) padding) 560)))
@@ -148,7 +148,7 @@ size hook firing as `read-key' waits: the result and the layouts shown."
   (should (= 0 (romacs-agent-images--first-row 0 100)))
   (should (= 0 (romacs-agent-images--first-row 2 100)))
   (should (= 6 (romacs-agent-images--first-row 10 100)))
-  (should (= 91 (romacs-agent-images--first-row 99 100)))
+  (should (= 92 (romacs-agent-images--first-row 99 100)))
   (should (= 0 (romacs-agent-images--first-row 1 3))))
 
 (ert-deftest romacs-agent-images-draws-only-the-rows-in-view ()
@@ -162,7 +162,7 @@ size hook firing as `read-key' waits: the result and the layouts shown."
                  (lambda (file &rest _) (push file shown))))
         (romacs-agent-images--draw (plist-put state :selected 10)))
       (should (= (length shown) romacs-agent-images--rows))
-      (should (string-match-p "Attach image:   50/50" (buffer-string)))
+      (should (string-match-p "Attach image:   50 images" (buffer-string)))
       (should (string-match-p "10.png  1d" (buffer-string)))
       (should-not (string-match-p "20.png" (buffer-string))))))
 

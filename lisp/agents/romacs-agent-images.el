@@ -31,7 +31,7 @@
   :type 'directory
   :group 'romacs-agent)
 
-(defconst romacs-agent-images--rows 9 "Rows shown at once.")
+(defconst romacs-agent-images--rows 8 "Rows shown at once.")
 (defconst romacs-agent-images--list-columns 52 "The list's width, in columns.")
 (defconst romacs-agent-images--thumbnail-height 48 "A thumbnail's height, in pixels.")
 (defconst romacs-agent-images--preview-min-width 240 "The narrowest useful preview, in pixels.")
@@ -106,7 +106,7 @@
   "Insert FILE within WIDTH by HEIGHT pixels, when it loads and the display
 shows images."
   (when (display-images-p)
-    (let ((image (ignore-errors (create-image file nil nil :max-width width :max-height height))))
+    (let ((image (ignore-errors (create-image file nil nil :max-width width :max-height height :margin '(0 . 1)))))
       (when image (insert-image image " ")))))
 
 (defun romacs-agent-images--row-text (name age columns)
@@ -137,7 +137,10 @@ shows images."
          (first (romacs-agent-images--first-row selected (length matches))))
     (erase-buffer)
     (insert (propertize "Attach image: " 'face 'minibuffer-prompt) (plist-get state :query)
-            (propertize (format "  %d/%d" (length matches) (length (plist-get state :files))) 'face 'shadow)
+            (propertize (if (string-empty-p (plist-get state :query))
+                            (format "  %d images" (length matches))
+                          (format "  %d of %d" (length matches) (length (plist-get state :files))))
+                        'face 'shadow)
             "\n")
     (if (zerop (length matches))
         (insert "No match\n")
