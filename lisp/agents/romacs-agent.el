@@ -751,7 +751,9 @@ instances) is derived again when it changes.")
       lose (a missed steer's): a renewal sends them to the new one;
   :renew (SESSION)   present when SESSION can go on in a new conversation
       (romacs-agent-renew.el): the id its next run begins it under, or
-      nil when the harness names it as it starts;
+      nil when the harness names it as it starts.  A driver may fold
+      :renew-block (NATIVE . REASON) into its state to keep an unfinished
+      conversation on its own native id, or nil to clear the block;
   :conversation-files (HOME SESSION)   the files, relative to its
       configuration directory HOME, that hold SESSION's conversation:
       what moves with it to another instance of the harness;
@@ -2034,10 +2036,10 @@ before while `romacs-agent--received-limit' lasts."
 
 (defun romacs-agent--driver-anew (session &rest state)
   "SESSION's driver state for a new run: STATE, and what its conversation
-keeps across runs (`:rolled-back' and `:resume-at', each when known)."
+keeps across runs (`:rolled-back', `:resume-at', and `:renew-block')."
   (let ((old (romacs-agent-driver-state session)))
     (append state
-            (cl-loop for key in '(:rolled-back :resume-at)
+            (cl-loop for key in '(:rolled-back :resume-at :renew-block)
                      when (plist-member old key) append (list key (plist-get old key))))))
 
 (defun romacs-agent--record-cursor (record)

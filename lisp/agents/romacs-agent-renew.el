@@ -117,10 +117,22 @@ its turn is on its way."
 (add-hook 'romacs-agent-input-functions #'romacs-agent-renew--wrote)
 (add-hook 'romacs-agent-event-functions #'romacs-agent-renew--read-back)
 
+(defun romacs-agent-renew--obstacle (session)
+  "Return why SESSION's native conversation must stay in place, or nil."
+  (let ((block (plist-get (romacs-agent-driver-state session) :renew-block)))
+    (when (and block (equal (car block) (romacs-agent--native-id session)))
+      (cdr block))))
+
+(defun romacs-agent-renew--check-obstacle (session)
+  "Refuse to renew SESSION when its conversation must stay in place."
+  (when-let* ((reason (romacs-agent-renew--obstacle session)))
+    (user-error "%s" reason)))
+
 (defun romacs-agent-renew--check (session)
   "Refuse (`user-error') to renew SESSION now."
   (unless (romacs-agent--harness-get session :renew)
     (user-error "%s cannot renew a conversation" (romacs-agent--harness-get session :display)))
+  (romacs-agent-renew--check-obstacle session)
   (unless (and (romacs-agent--harness-free-p session) (not (romacs-agent-interrupted session))
                (not (romacs-agent-pending-selection session))
                (not (romacs-agent-renew--unechoed-p session)))
@@ -156,8 +168,8 @@ none, its whole thread, an imported transcript's part with it."
 message carrying a brief of this one; WHY says what for (journaled).
 Call THEN, when given, with the outcome: (:done NATIVE), NATIVE the new
 conversation's id or nil until its harness names it, or (:error MESSAGE).
-Refused at once (`user-error') while SESSION is busy, held, or its harness
-cannot renew."
+Refused at once (`user-error') while SESSION is busy, held, or its
+harness cannot renew this conversation."
   (romacs-agent-renew--check session)
   (let* ((token (list why))
          (then (or then #'ignore))
@@ -178,28 +190,34 @@ cannot renew."
          (romacs-agent-renew--with-note
           session token summary
           (lambda (note source)
-         (condition-case err
-             (let* ((from (romacs-agent--native-id session))
-                    (brief (romacs-agent-handoff-brief
-                            (if note (cons (list :role 'context :text (concat romacs-agent-renew--note-head note)) items)
-                              items)
-                            from "" nil romacs-agent-renew--head))
-                    (native (funcall (romacs-agent--harness-get session :renew) session)))
-               (romacs-agent-renew--await
-                session token
-                (lambda ()
-                  ;; Journaled: the renewal holds the session until its new
-                  ;; run starts, whatever becomes of this callback.
-                  (romacs-agent-renew--release session token)
-                  (condition-case err
-                      (progn (romacs-agent-renew--finish session native)
-                             (funcall then (list :done native)))
-                    (error (funcall then (list :error (error-message-string err)))))))
-               (romacs-agent--note session (romacs-mcp--object "type" "renew" "from" from "to" (or native :null)
-                                                               "why" (or why :null) "brief" brief "summary" source
-                                                               "context" (or (romacs-agent-context-used session) :null))))
-           (error (funcall fail (error-message-string err))))))))
+            (condition-case err
+                (romacs-agent-renew--journal session token then items note source)
+              (error (funcall fail (error-message-string err))))))))
      fail)))
+
+(defun romacs-agent-renew--journal (session token then items note source)
+  "Journal SESSION's renewal from ITEMS and NOTE, whose origin is SOURCE.
+Call THEN with the outcome while TOKEN still owns the handoff."
+  (when (eq (romacs-agent-renew--holder session) token)
+    (romacs-agent-renew--check-obstacle session)
+    (let* ((from (romacs-agent--native-id session))
+           (brief (romacs-agent-handoff-brief
+                   (if note (cons (list :role 'context :text (concat romacs-agent-renew--note-head note)) items)
+                     items)
+                   from "" nil romacs-agent-renew--head))
+           (native (funcall (romacs-agent--harness-get session :renew) session)))
+      (romacs-agent-renew--await
+       session token
+       (lambda ()
+         ;; The journaled renewal holds the session until its new run starts.
+         (romacs-agent-renew--release session token)
+         (condition-case err
+             (progn (romacs-agent-renew--finish session native)
+                    (funcall then (list :done native)))
+           (error (funcall then (list :error (error-message-string err)))))))
+      (romacs-agent--note session (romacs-mcp--object "type" "renew" "from" from "to" (or native :null)
+                                                      "why" (or (car token) :null) "brief" brief "summary" source
+                                                      "context" (or (romacs-agent-context-used session) :null))))))
 
 (defun romacs-agent-renew--read (session then fail)
   "Call THEN with what SESSION's renewal takes of its conversation: its
@@ -479,6 +497,7 @@ names it), and it is no fork now: its next run begins the new one."
 Return `now' or `soon'."
   (unless (romacs-agent--harness-get session :renew)
     (user-error "%s cannot renew a conversation" (romacs-agent--harness-get session :display)))
+  (romacs-agent-renew--check-obstacle session)
   (if (condition-case nil (progn (romacs-agent-renew--check session) t) (user-error nil))
       (progn (romacs-agent-renew session why) 'now)
     (puthash session (or why "asked") romacs-agent-renew--wanted)
@@ -507,9 +526,10 @@ no subagent of its harness running."
 (defun romacs-agent-renew-threshold (session)
   "The share of its model's context window at which SESSION renews by
 itself at a turn's end (`romacs-agent-renew-at'), for a view to show; nil
-when it will not: renewing off, its harness unable to renew, or renewed
-by itself from this conversation already."
+when auto-renewal is off, barred for this conversation, or already
+done from it."
   (and romacs-agent-renew-at (romacs-agent--harness-get session :renew)
+       (not (romacs-agent-renew--obstacle session))
        (not (equal (gethash session romacs-agent-renew--automatic) (romacs-agent--native-id session)))
        romacs-agent-renew-at))
 
@@ -518,9 +538,8 @@ by itself from this conversation already."
 full (`romacs-agent-renew--full'), once a conversation; else nil."
   (or (gethash session romacs-agent-renew--wanted)
       (when-let* (((not (romacs-agent-own-turn session)))
-                  ((romacs-agent--harness-get session :renew))
+                  ((romacs-agent-renew-threshold session))
                   (full (romacs-agent-renew--full session))
-                  ((not (equal (gethash session romacs-agent-renew--automatic) (romacs-agent--native-id session))))
                   ((romacs-agent-renew--settled-p session)))
         (format "context %d%%" (round (* 100 full))))))
 

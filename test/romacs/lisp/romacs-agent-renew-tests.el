@@ -217,6 +217,55 @@ state root that has said two things, its writes to its harness in
       (should (equal (gethash "from" (car (romacs-agent-renew-tests--notes session))) "thread-old"))
       (should (equal (gethash "method" (romacs-agent--codex-thread session 3)) "thread/start")))))
 
+(defun romacs-agent-renew-tests--codex-goal (session thread status)
+  "Feed a Codex goal update for THREAD to SESSION, or a clear when STATUS is nil."
+  (let ((params (romacs-mcp--object "threadId" thread)))
+    (when status
+      (puthash "goal" (romacs-mcp--object "threadId" thread "status" status) params))
+    (romacs-agent--record
+     session
+     (romacs-mcp--object "seq" (1+ (romacs-agent-seq session)) "out"
+                         (romacs-mcp--object "method" (if status "thread/goal/updated" "thread/goal/cleared")
+                                             "params" params)))))
+
+(ert-deftest romacs-agent-renew-codex-keeps-an-unfinished-goal ()
+  (romacs-agent-renew-tests--with 'codex
+    (let ((romacs-agent-renew-at 0.8))
+      (setf (romacs-agent-harness-session session) "thread-old"
+            (romacs-agent-context-window session) 200000
+            (romacs-agent-context-used session) 170000)
+      (romacs-agent-renew-tests--codex-goal session "thread-old" "active")
+      (romacs-agent-renew-tests--codex-goal session "child" nil)
+      (should-not (romacs-agent-renew-threshold session))
+      (should-not (romacs-agent-renew--why-now session))
+      (should-error (romacs-agent-renew session) :type 'user-error)
+      (should-error (romacs-agent-renew-soon session) :type 'user-error)
+      (romacs-agent--record session (romacs-mcp--object "seq" (1+ (romacs-agent-seq session)) "exit" 0))
+      (romacs-agent-renew-tests--ran session)
+      (should-not (romacs-agent-renew-threshold session))
+      (romacs-agent-renew-tests--codex-goal session "thread-old" "complete")
+      (should (equal (romacs-agent-renew-threshold session) 0.8))
+      (romacs-agent-renew-tests--codex-goal session "thread-old" "paused")
+      (should-not (romacs-agent-renew-threshold session))
+      (romacs-agent-renew-tests--codex-goal session "thread-old" nil)
+      (should (equal (romacs-agent-renew-threshold session) 0.8)))))
+
+(ert-deftest romacs-agent-renew-codex-goal-can-arrive-during-the-handoff ()
+  (romacs-agent-renew-tests--with 'codex
+    (setf (romacs-agent-harness-session session) "thread-old")
+    (let ((ready nil) (outcome nil) (end (+ (float-time) 30)))
+      (cl-letf (((symbol-function 'romacs-agent-renew--with-note)
+                 (lambda (_session _token _summary then) (setq ready then))))
+        (romacs-agent-renew session nil (lambda (result) (setq outcome result)))
+        (while (and (not ready) (< (float-time) end)) (accept-process-output nil 0.05))
+        (should ready)
+        (romacs-agent-renew-tests--codex-goal session "thread-old" "active")
+        (funcall ready nil nil))
+      (should (equal outcome '(:error "Codex keeps the unfinished goal on this thread")))
+      (should-not (romacs-agent-renew-tests--notes session))
+      (should-not (romacs-agent--held-p session))
+      (should (zerop relaunched)))))
+
 (ert-deftest romacs-agent-renew-refusals ()
   (romacs-agent-renew-tests--with 'claude
     (setf (romacs-agent-state session) 'running)

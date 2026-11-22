@@ -747,6 +747,17 @@ an approval or questions for the user, anything else refused."
       ("error" (list (list :type 'error :text (gethash "message" line))))
       (_ (list (list :type 'unknown :raw line))))))
 
+(defun romacs-agent--codex-goal-events (method params)
+  "Decode Codex's goal notification METHOD with PARAMS."
+  (let* ((thread (gethash "threadId" params))
+         (goal (gethash "goal" params))
+         (status (and (hash-table-p goal) (gethash "status" goal))))
+    (when (and (stringp thread) (or (stringp status) (equal method "thread/goal/cleared")))
+      (list (list :type 'handshake
+                  :state (list :renew-block
+                               (when (and status (not (equal status "complete")))
+                                 (cons thread "Codex keeps the unfinished goal on this thread"))))))))
+
 (defun romacs-agent--codex-events (session line)
   "The events of LINE, a JSON-RPC message from `codex app-server' (or a
 line an earlier `codex exec' run journaled)."
@@ -758,6 +769,8 @@ line an earlier `codex exec' run journaled)."
           ((and method id) (romacs-agent--codex-asked session id method params))
           ((and method own (stringp thread) (not (equal own thread)))
            (romacs-agent--codex-child-progress thread method params))
+          ((and (hash-table-p params) (member method '("thread/goal/updated" "thread/goal/cleared")))
+           (romacs-agent--codex-goal-events method params))
           (method (romacs-agent--codex-notified session method params))
           (t (romacs-agent--codex-answer session id line)))))
 
