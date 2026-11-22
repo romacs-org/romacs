@@ -55,6 +55,115 @@
       (should (equal (mapcar #'car (romacs-agent-queue session)) '("second")))
       (should (= (romacs-agent-queue-length session) 1)))))
 
+(ert-deftest romacs-agent-queued-messages-go-in-one-turn ()
+  ;; romacs#405: messages from other sessions waiting for a turn's end go
+  ;; in the next turn together, in order, each delivered; one no longer
+  ;; wanted is dropped; a message of another kind (the user's, a task's
+  ;; results) waits for a turn of its own.
+  (let ((session (romacs-agent-test-attach
+                  (romacs-agent--make :id "77777777-8888-4999-8aaa-bbbbbbbbbbbb" :harness 'claude :state 'running)
+                  t))
+        (message (lambda (id) (romacs-agent-make-message id "parent" (list :session "p" :name "lead"))))
+        (delivered nil) (sent nil))
+    (dolist (id '("m-1" "m-2" "m-3"))
+      (romacs-agent--admit session (romacs-agent-item (concat "text " id) :kind 'next
+                                                      :messages (list (funcall message id))
+                                                      :valid (lambda () (not (equal id "m-2")))
+                                                      :delivered (lambda () (push id delivered)))))
+    (romacs-agent--admit session (romacs-agent-item "results" :kind 'next :valid #'always
+                                                    :messages (list (append (funcall message "m-4")
+                                                                            (list :wake (list :state "done" :chars 1))))))
+    (romacs-agent-send-later session "the user's")
+    (setf (romacs-agent-state session) 'idle)
+    (let ((records nil))
+      (cl-letf (((symbol-function 'romacs-agent--line)
+                 (lambda (_ object &optional journal) (push object sent) (push journal records)))
+                ((symbol-function 'romacs-agent--fold-now) #'ignore))
+        (romacs-agent--dispatch session))
+      ;; The journal keeps each message with its own text: a replay, the
+      ;; chat and a brief read them one by one.
+      (should (equal (mapcar (lambda (m) (list (gethash "id" m) (gethash "text" m)))
+                             (gethash "romacsMessages" (car records)))
+                     '(("m-1" "text m-1") ("m-3" "text m-3")))))
+    (should (= (length sent) 1))
+    (let ((content (gethash "content" (gethash "message" (car sent)))))
+      (should (string-match-p "m-1[^z-a]*text m-1[^z-a]*m-3[^z-a]*text m-3" content))
+      (should-not (string-match-p "m-2\\|m-4\\|the user's" content)))
+    (should (equal delivered '("m-3" "m-1")))
+    ;; Its end answers its parent's last.
+    (should (equal (romacs-agent-answering session) "m-3"))
+    (should (equal (mapcar #'car (romacs-agent-queue session)) '("results" "the user's")))
+    (should (= (romacs-agent-queue-length session) 2))))
+
+(ert-deftest romacs-agent-results-waiting-go-in-one-turn ()
+  ;; Two deliveries of tasks' results waiting go in one turn, their texts
+  ;; in order; a message of another kind waits behind them.
+  (let ((session (romacs-agent-test-attach
+                  (romacs-agent--make :id "79797979-8888-4999-8aaa-bbbbbbbbbbbb" :harness 'claude :state 'running)
+                  t))
+        (sent nil))
+    (dolist (id '("m-1" "m-2"))
+      (romacs-agent--admit session (romacs-agent-item (concat "result " id) :kind 'next :valid #'always
+                                                      :messages (list (append (romacs-agent-make-message id "child" '(:session "c"))
+                                                                              (list :wake (list :state "completed" :chars 1)))))))
+    (romacs-agent--admit session (romacs-agent-item "hi" :kind 'next :valid #'always
+                                                    :messages (list (romacs-agent-make-message "m-3" "parent" '(:session "p")))))
+    (setf (romacs-agent-state session) 'idle)
+    (romacs-agent-queue-tests--writing sent
+      (romacs-agent--dispatch session))
+    (should (= (length sent) 1))
+    (should (string-match-p "\\`result m-1\n\nresult m-2\n\n" (gethash "content" (gethash "message" (car sent)))))
+    (should (equal (mapcar #'car (romacs-agent-queue session)) '("hi")))))
+
+(ert-deftest romacs-agent-a-listener-s-error-is-no-failed-write ()
+  ;; Written, a message is off the queue whatever a listener of its turn's
+  ;; start does, an error or a quit: never sent a second time.
+  (dolist (failure '(error quit))
+    (ert-info ((symbol-name failure) :prefix "listener: ")
+      (let ((session (romacs-agent-test-attach
+                      (romacs-agent--make :id "7a7a7a7a-8888-4999-8aaa-bbbbbbbbbbbb" :harness 'claude :state 'idle)
+                      t))
+            ;; Failing once the turn its write began is under way.
+            (romacs-agent-event-functions (list (lambda (s _event) (when (eq (romacs-agent-state s) 'running)
+                                                                     (signal failure (list "Listener"))))))
+            (sent nil))
+        (romacs-agent-queue-tests--writing sent
+          (romacs-agent-send-later session "one" nil nil #'always
+                                   (list (romacs-agent-make-message "m-1" "parent" '(:session "p")))))
+        (should (= (length sent) 1))
+        (should (null (romacs-agent-queue session)))))))
+
+(ert-deftest romacs-agent-a-turn-answers-its-parent-s-message ()
+  ;; A turn taking a sibling's message and then its parent's answers the
+  ;; parent's: its end goes to its parent.
+  (let ((message (lambda (id kind) (romacs-agent-make-message id kind '(:session "x")))))
+    (should (equal (romacs-agent--answered (list (funcall message "s" "sibling") (funcall message "p1" "parent")
+                                                 (funcall message "p2" "parent") (funcall message "c" "child")))
+                   "p2"))
+    (should (equal (romacs-agent--answered (list (funcall message "s" "sibling") (funcall message "c" "child"))) "s"))
+    (should-not (romacs-agent--answered nil))))
+
+(ert-deftest romacs-agent-messages-in-one-turn-are-each-told ()
+  ;; One message's delivery failing, or quit, leaves the others' told:
+  ;; each was written, none waits to go again.
+  (let ((session (romacs-agent-test-attach
+                  (romacs-agent--make :id "78787878-8888-4999-8aaa-bbbbbbbbbbbb" :harness 'claude :state 'running)
+                  t))
+        (told nil) (sent nil))
+    (dolist (id '("m-1" "m-2"))
+      (romacs-agent--admit session (romacs-agent-item id :kind 'next :valid #'always
+                                                      :messages (list (romacs-agent-make-message id "parent" '(:session "p")))
+                                                      :delivered (lambda () (push id told)
+                                                                   (when (equal id "m-1") (signal 'quit nil))))))
+    (setf (romacs-agent-state session) 'idle)
+    (romacs-agent-queue-tests--writing sent
+      ;; The quit goes on once the others are told.
+      (should (eq (condition-case nil (progn (romacs-agent--dispatch session) 'none) (quit 'quit)) 'quit)))
+    (should (= (length sent) 1))
+    (should (equal told '("m-2" "m-1")))
+    (should (null (romacs-agent-queue session)))
+    (should (= (romacs-agent-queue-length session) 0))))
+
 (ert-deftest romacs-agent-queue-dispatch-is-one-at-a-time ()
   ;; A per-turn harness's run that ends before it is attached ends the turn
   ;; while its message is being sent: the next is sent after, once each.

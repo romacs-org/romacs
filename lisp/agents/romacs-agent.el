@@ -1535,6 +1535,19 @@ another session in its envelope; a delegated task's results (each with
     (mapcar (lambda (m) (plist-put (plist-put (copy-sequence m) :text (or (plist-get m :text) text)) :time now))
             messages)))
 
+(defun romacs-agent--after-write (what function)
+  "Call FUNCTION, a step after a message was written: its error or quit
+is said as WHAT's, never taken for a failed write that sends it again."
+  (condition-case err (funcall function)
+    ((error quit) (message "%s: %s" what (error-message-string err)))))
+
+(defun romacs-agent--answered (messages)
+  "The id of the message among MESSAGES, one input's, its turn answers:
+its parent's last, as its end goes to its parent; else the first."
+  (plist-get (or (car (last (cl-remove-if-not (lambda (m) (equal (plist-get m :kind) "parent")) messages)))
+                 (car messages))
+             :id))
+
 (defun romacs-agent--input (session text &optional images messages own queued)
   "Write TEXT to SESSION's persistent harness as the user's message, with
 the attached IMAGES; MESSAGES, when given, say it comes from other
@@ -1556,7 +1569,9 @@ one request id: the journal's is the one written."
          (messages (romacs-agent--stamped messages text))
          ;; A renewal's brief goes with the message; the journal has it in
          ;; the renewal's note, and the message as the user wrote it.
-         (brief (and (not own) (romacs-agent-brief session))))
+         (brief (and (not own) (romacs-agent-brief session)))
+         ;; Known before the write: nothing after it may fail.
+         (answered (romacs-agent--answered messages)))
     ;; The journal's alone: the id names the message's turn.
     (puthash "romacsRequest" id record)
     (when own (puthash "romacsOwn" own record))
@@ -1577,10 +1592,11 @@ one request id: the journal's is the one written."
     ;; turn, not the one before.  A steer's turn is the one under way.
     (unless (romacs-agent--turn-under-way-p session)
       (setf (romacs-agent-state session) 'running
-            (romacs-agent-answering session) (plist-get (car messages) :id)
+            (romacs-agent-answering session) answered
             (romacs-agent-own-turn session) own)
-      (romacs-agent--changed session))
-    (run-hook-with-args 'romacs-agent-input-functions session id)))
+      (romacs-agent--after-write "romacs-agent--changed" (lambda () (romacs-agent--changed session))))
+    (romacs-agent--after-write "romacs-agent-input-functions"
+                               (lambda () (run-hook-with-args 'romacs-agent-input-functions session id)))))
 
 (defun romacs-agent--uuid-p (id)
   "Whether ID is a UUID, as Claude Code's and Codex's conversations are named."
@@ -1729,7 +1745,7 @@ on whatever becomes of this server."
               ;; A turn begun by an earlier prompt and not ended yet: a
               ;; steer.  An exit mid-turn ends it too (its done-seq).
               (unless (> (or (romacs-agent-input-seq session) 0) (romacs-agent-done-seq session))
-                (setf (romacs-agent-answering session) (plist-get (car messages) :id)
+                (setf (romacs-agent-answering session) (romacs-agent--answered messages)
                       (romacs-agent-own-turn session) (plist-get event :own))))
             (setf (romacs-agent-state session) 'running
                   (romacs-agent-activity session) nil
@@ -3938,6 +3954,8 @@ passing those waiting for a new turn.  A hold's own prompt waits first."
                       when (and (romacs-agent-item-turn item) (romacs-agent--steer-p session item))
                       return item)))))
 
+(defvar romacs-agent--queue-quiet)  ; below, with the queue
+
 (defun romacs-agent--dispatch (session)
   "Write the first of SESSION's waiting messages that may go
 \(`romacs-agent--may-write-p'): a steer passes messages waiting for a new
@@ -3964,23 +3982,85 @@ queue.  Called wherever what the predicate reads may have changed."
                 ;; Its kept record goes first; a restore after an end
                 ;; between the two finds it sent by its id in the journal
                 ;; (`romacs-agent--sent-queued') and sends it no second time.
-                (romacs-agent--unkeep-item session next)
-                ;; Its user can no longer change it: it is being written.
-                (setf (romacs-agent-item-held next) 'sending)
-                ;; A write cut short, by an error or by a quit while it
-                ;; waits on the harness, gives it back: kept again, its
-                ;; user's again; a restore finds it sent by its id if it
-                ;; went (`romacs-agent--sent-queued').
-                (condition-case err (romacs-agent--write session next)
-                  ((error quit) (setf (romacs-agent-item-held next) nil)
-                   (romacs-agent--keep-item session next)
-                   (signal (car err) (cdr err))))
-                (romacs-agent--dequeue session next)
-                (when (romacs-agent-item-delivered next) (funcall (romacs-agent-item-delivered next)))
+                (pcase-let ((`(,parts . ,stale) (romacs-agent--together session next)))
+                  (romacs-agent--unkeep-item session next)
+                  ;; A write cut short, by an error or by a quit while it
+                  ;; waits on the harness, gives it back: kept again, its
+                  ;; user's again; a restore finds it sent by its id if it
+                  ;; went (`romacs-agent--sent-queued').
+                  (condition-case err
+                      (progn
+                        ;; Its user can no longer change it: it is being written.
+                        (dolist (part parts) (setf (romacs-agent-item-held part) 'sending))
+                        (romacs-agent--write session (romacs-agent--joined parts)))
+                    ((error quit) (dolist (part parts) (setf (romacs-agent-item-held part) nil))
+                     (romacs-agent--keep-item session next)
+                     (signal (car err) (cdr err))))
+                  ;; Off the queue at once, with those no longer wanted
+                  ;; among them, its views told once after: neither a quit
+                  ;; nor a view's error leaves one to go again.
+                  (let ((inhibit-quit t) (romacs-agent--queue-quiet t))
+                    (dolist (part (append parts stale)) (romacs-agent--dequeue session part)))
+                  (romacs-agent--after-write "romacs-agent--changed" (lambda () (romacs-agent--changed session)))
+                  ;; Each written is told, whatever an earlier one's telling did.
+                  (let ((failed nil))
+                    (dolist (part parts)
+                      (when (romacs-agent-item-delivered part)
+                        (condition-case err (funcall (romacs-agent-item-delivered part))
+                          ((error quit) (setq failed (or failed err))))))
+                    (when failed (signal (car failed) (cdr failed)))))
                 (setq more t)))
             (when (eq (romacs-agent-dispatch session) 'again) (setq more t))
             (setf (romacs-agent-dispatch session) 'busy)))
       (setf (romacs-agent-dispatch session) nil))))
+
+;; Messages from other sessions that wait for a new turn go in one turn
+;; (romacs#405): a turn each, a lane with a backlog would read its
+;; parent's answers several turns late, each turn as long as its work.
+
+(defun romacs-agent--joinable-p (item)
+  "Whether ITEM may go in one turn with others like it: messages from
+other sessions waiting for a new turn, nothing else riding on its write
+\(no images, no hold's prompt, none kept across a restart, whose record
+names the one item it was), not sent first (an interrupt's, which goes
+alone), and not held (its user edits it: what waits behind it waits)."
+  (and (eq (romacs-agent-item-kind item) 'next) (romacs-agent-item-messages item)
+       (not (or (romacs-agent-item-images item) (romacs-agent-item-own item) (romacs-agent-item-token item)
+                (romacs-agent-item-front item) (romacs-agent-item-held item) (romacs-agent--keepable-p item)))))
+
+(defun romacs-agent--results-p (item)
+  "Whether ITEM delivers delegated tasks' results: its text is theirs."
+  (and (cl-some (lambda (m) (plist-get m :wake)) (romacs-agent-item-messages item)) t))
+
+(defun romacs-agent--together (session head)
+  "(PARTS . STALE): HEAD and the messages waiting behind it in SESSION's
+queue that go in its turn (`romacs-agent--joinable-p', results with
+results), in order, and those among them no longer wanted (VALID says),
+to be dropped as they go.  HEAD alone when it is not the queue's head (a
+steer passing what waits).  Nothing changes here: its views are told
+once the turn's write has decided."
+  (if (not (and (eq head (car (romacs-agent-queue session))) (romacs-agent--joinable-p head)))
+      (list (list head))
+    (let ((parts (list head)) (stale nil) (results (romacs-agent--results-p head)))
+      (cl-loop for item in (cdr (romacs-agent-queue session))
+               while (and (romacs-agent--joinable-p item) (eq (romacs-agent--results-p item) results))
+               do (if (and (romacs-agent-item-valid item) (not (funcall (romacs-agent-item-valid item))))
+                      (push item stale)
+                    (push item parts)))
+      (cons (nreverse parts) stale))))
+
+(defun romacs-agent--joined (parts)
+  "PARTS, waiting messages (`romacs-agent--together'), as the one item
+written: the only one as it is; else their texts in order, and their
+messages, each with its own text (results' text is the delivery's)."
+  (if (null (cdr parts)) (car parts)
+    (romacs-agent-item
+     (mapconcat #'romacs-agent-item-text parts "\n\n")
+     :kind 'next
+     :messages (cl-loop for part in parts
+                        append (mapcar (lambda (m) (if (plist-get m :text) m
+                                                     (plist-put (copy-sequence m) :text (romacs-agent-item-text part))))
+                                       (romacs-agent-item-messages part))))))
 
 (defvar romacs-agent--dispatching nil
   "Sessions whose dispatch is due (`romacs-agent--dispatch-soon').")
