@@ -116,7 +116,7 @@ impl Leaf<'_> {
     pub fn other_buffer_unpredicated(&mut self, buffer: Value, visible_ok: bool) -> std::result::Result<Option<Value>, Fault> {
         let visible = if visible_ok { Vec::new() } else { self.windows().visible_buffers()? };
         let mut notsogood = None;
-        for b in self.buffer_order() {
+        for b in self.vm.buffer_order.iter() {
             if !self.other_buffer_candidate(b, buffer) { continue; }
             if !visible.contains(&b) { return Ok(Some(b)); }
             notsogood.get_or_insert(b);
@@ -160,11 +160,6 @@ impl Leaf<'_> {
     pub fn make_current(&mut self, buffer: Value) {
         self.vm.slots[self.vm.buffer_slot].value = buffer;
     }
-    /// The buffer list's order as it stands, dead buffers not yet dropped
-    /// included.
-    pub fn buffer_order(&self) -> Vec<Value> {
-        self.vm.buffer_order_snapshot()
-    }
     /// buffer-list: the live buffers in the buffer list's order.
     pub fn lifecycle_list(&mut self) -> Value {
         let order: Vec<Value> = self.vm.buffer_order().into_iter()
@@ -178,12 +173,7 @@ impl Leaf<'_> {
     /// The buffer list with LEAD first, in that order, then every other
     /// buffer in its present order: a whole order in one rebuild.
     pub(crate) fn lead_buffer_order(&mut self, lead: &[Value]) {
-        let order = self.vm.buffer_order();
-        let present: std::collections::HashSet<u64> = order.iter().map(|b| b.0).collect();
-        let mut led = std::collections::HashSet::new();
-        let mut out: Vec<Value> = lead.iter().copied().filter(|b| present.contains(&b.0) && led.insert(b.0)).collect();
-        out.extend(order.into_iter().filter(|b| !led.contains(&b.0)));
-        self.vm.set_buffer_order(&out);
+        self.vm.lead_buffer_order(lead);
     }
     /// Whether a use of the random state is not captured in this world build.
     pub(crate) fn random_tracked(&self) -> bool {

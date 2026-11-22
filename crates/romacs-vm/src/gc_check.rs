@@ -37,6 +37,7 @@ impl Vm {
     /// ROOTS: every entry is marked, and every function, region and obarray
     /// symbol is in CODE, REGIONS and SYMBOLS, the mark's own.
     pub(super) fn check_reachable(&mut self, roots: &[Value], code: &[bool], regions: &[bool], symbols: &HashSet<usize>) {
+        self.check_order_live();
         let reached = self.reference_walk(roots);
         let marked = [self.conses.marks().collect::<Vec<_>>(), self.closures.marks().collect(), self.cells.marks().collect(), self.objects.marks().collect()];
         for (t, (reached, marked)) in reached.tables.iter().zip(&marked).enumerate() {
@@ -52,6 +53,15 @@ impl Vm {
         }
         if let Some(slot) = reached.symbols.iter().find(|slot| !symbols.contains(slot)) {
             panic!("the reference marker reached obarray symbol {slot}, which the mark did not");
+        }
+    }
+
+    /// Each linked buffer is live and knows its node. A kill takes its
+    /// buffer out of the order before it dies.
+    fn check_order_live(&self) {
+        for (node, buffer) in self.buffer_order.linked() {
+            assert!(self.buffer_state(buffer).is_ok_and(|s| s.live), "the buffer order holds {buffer:?}, which is not a live buffer");
+            assert_eq!(self.order_node(buffer), Some(node), "buffer {buffer:?} does not know its node in the order");
         }
     }
 
@@ -134,11 +144,7 @@ impl Vm {
         values.extend_from_slice(&self.external_roots);
         values.extend(self.doomed_finalizers.iter().copied());
         values.extend(self.permanent_symbol_names.values().copied());
-        for binding in &self.terminal_bindings {
-            values.push(binding.buffer);
-            values.extend_from_slice(&binding.away);
-            values.extend_from_slice(&binding.unremapped_maps);
-        }
+        self.reference_buffer_roots(&mut values);
         if let Some(escape) = &mut self.propagated_escape { escape.visit_values(&mut |v| values.push(*v)); }
         for handler in &mut self.signal_handlers { handler.visit_values(&mut |v| values.push(*v)); }
         self.backtrace.visit_values(&mut |v| values.push(*v));
@@ -180,6 +186,15 @@ impl Vm {
                 return r;
             }
         }
+    }
+
+    fn reference_buffer_roots(&self, values: &mut Vec<Value>) {
+        for binding in &self.terminal_bindings {
+            values.push(binding.buffer);
+            values.extend_from_slice(&binding.away);
+            values.extend_from_slice(&binding.unremapped_maps);
+        }
+        values.extend(self.buffer_order.iter());
     }
 
     /// V's children onto VALUES and CODE, the first time the walk meets it.
