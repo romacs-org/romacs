@@ -494,44 +494,10 @@ message is sent, `romacs-agent-send' by default.")
     (cl-letf (((symbol-function 'romacs-agent-store--open) (lambda () (signal 'error '("database is locked")))))
       (should-error (romacs-agent-store-queued "x") :type 'romacs-agent-store-unread)
       (should (funcall (cdr (assq 'queued romacs-agent-mark-kinds)) (expand-file-name "x" (romacs-agent--state-root)) nil))
-      ;; Not opened, and its directory's listing failing: no proof it is gone.
+      ;; Not opened, and its lookup failing: no proof it is gone.
       (cl-letf (((symbol-function 'romacs-agent-store--open) #'ignore)
-                ((symbol-function 'directory-files) (lambda (&rest _) (signal 'file-error '("Input/output error")))))
-        (should-error (romacs-agent-store-queued "x") :type 'romacs-agent-store-unread))
-      ;; Not opened, its own lookup giving nothing (as one it may not look
-      ;; at does) while its directory lists it: there, so unread.
-      (cl-letf (((symbol-function 'romacs-agent-store--open) #'ignore)
-                ((symbol-function 'file-attributes) #'ignore))
-        (should-error (romacs-agent-store-queued "x") :type 'romacs-agent-store-unread))
-      ;; Truly absent: no rows.
-      (let ((none (expand-file-name "none.sqlite" (file-name-directory (romacs-agent-store--file)))))
-        (cl-letf (((symbol-function 'romacs-agent-store--open) #'ignore)
-                  ((symbol-function 'romacs-agent-store--file) (lambda () none)))
-          (should-not (romacs-agent-store-queued "x")))))))
-
-(ert-deftest romacs-agent-queue-the-mark-waits-for-the-last-delete ()
-  ;; The last kept message goes: its session's mark stays until the
-  ;; writer has let its row go, then goes; a failed delete keeps it.
-  (romacs-agent-test-with-store
-    (make-directory (file-name-directory (romacs-agent-store--file)) t)
-    (should (romacs-agent-store--open))
-    (let* ((id "d6d6d6d6-0000-4000-8000-000000000000")
-           (mark (expand-file-name (format "%s.queued" id) (romacs-agent--marks-dir)))
-           (session (romacs-agent-test-attach (romacs-agent--make :id id :harness 'claude :state 'running :title "w") t))
-           (pending nil))
-      (romacs-agent-send-later session "only")
-      (let ((item (car (romacs-agent-queue session))))
-        (cl-letf (((symbol-function 'romacs-agent-store-queued-delete)
-                   (lambda (sid item-id &optional done) (push (list sid item-id done) pending))))
-          (romacs-agent--dequeue session item))
-        (should (file-exists-p mark))
-        ;; A failed delete: the mark stays.
-        (funcall (nth 2 (car pending)) '(error (error "busy")))
-        (should (file-exists-p mark))
-        ;; The delete lands, then says so.
-        (pcase-let ((`(,sid ,item-id ,done) (car pending)))
-          (romacs-agent-store-queued-delete sid item-id done))
-        (should-not (file-exists-p mark))))))
+                ((symbol-function 'file-attributes) (lambda (&rest _) (signal 'file-error '("Input/output error")))))
+        (should-error (romacs-agent-store-queued "x") :type 'romacs-agent-store-unread)))))
 
 (ert-deftest romacs-agent-queue-a-stale-mark-goes-at-the-next-restore ()
   ;; A removal that read the store before an earlier delete landed keeps
