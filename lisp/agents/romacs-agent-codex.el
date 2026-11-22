@@ -512,7 +512,6 @@ an approval or questions for the user, anything else refused."
 (defun romacs-agent--codex-tool-events (session id item completed)
   "The tool block of ITEM, by ID: started once, and its end when COMPLETED."
   (let ((started (unless (gethash id (romacs-agent-tools session))
-                   (puthash id t (romacs-agent-tools session))
                    (pcase-let ((`(,name ,input) (romacs-agent--codex-tool item)))
                      (list (list :type 'tool :state 'started :id id :name name :input input)))))
         (failed (or (member (gethash "status" item) '("failed" "declined"))
@@ -584,10 +583,10 @@ an approval or questions for the user, anything else refused."
     (pcase (gethash "type" item)
       ("agentMessage"
        (when completed
-         (setf (romacs-agent-reply session) (gethash "text" item))
-         (list (list :type 'delta :text (if (gethash id streamed) "\n" (concat (gethash "text" item) "\n"))
-                     :message id)
-               (list :type 'message-end :message id))))
+         (let ((text (gethash "text" item)))
+           (list (list :type 'record-state :state (list :reply text))
+                 (list :type 'delta :text (if (gethash id streamed) "\n" (concat text "\n")) :message id)
+                 (list :type 'message-end :message id)))))
       ("reasoning"
        (when (and completed (not (gethash id streamed)))
          (let ((text (mapconcat #'identity (append (or (romacs-agent--value (gethash "summary" item))
@@ -631,11 +630,12 @@ an approval or questions for the user, anything else refused."
                    (and (hash-table-p error) (equal (gethash "codexErrorInfo" error) "usageLimitExceeded")))
           :context-window (plist-get (romacs-agent-driver-state session) :window))))
 
-(defun romacs-agent--codex-turn-started-events (session state params)
-  "Decode the start of a Codex turn for SESSION with driver STATE from PARAMS."
-  (setf (romacs-agent-reply session) nil)
-  (unless (member (gethash "id" (gethash "turn" params)) (plist-get state :ended))
-    (list (list :type 'handshake :state (list :turn (gethash "id" (gethash "turn" params)))))))
+(defun romacs-agent--codex-turn-started-events (state params)
+  "Decode the start of a Codex turn from driver STATE and PARAMS."
+  (let ((turn (gethash "id" (gethash "turn" params))))
+    (cons '(:type record-state :state (:reply nil))
+          (unless (member turn (plist-get state :ended))
+            (list (list :type 'handshake :state (list :turn turn)))))))
 
 (defun romacs-agent--codex-turn-completed-events (session state params)
   "Decode completed turn PARAMS for SESSION with driver STATE."
@@ -682,16 +682,17 @@ an approval or questions for the user, anything else refused."
   "The events of notification METHOD with PARAMS."
   (let ((state (romacs-agent-driver-state session)))
     (pcase method
-      ("turn/started" (romacs-agent--codex-turn-started-events session state params))
+      ("turn/started" (romacs-agent--codex-turn-started-events state params))
       ("turn/completed" (romacs-agent--codex-turn-completed-events session state params))
       ("item/started" (romacs-agent--codex-item session (gethash "item" params) nil))
       ("item/completed" (romacs-agent--codex-item session (gethash "item" params) t))
       ("item/agentMessage/delta"
-       (puthash (gethash "itemId" params) t (romacs-agent-streamed session))
-       (list (list :type 'delta :text (gethash "delta" params) :message (gethash "itemId" params))))
+       (let ((id (gethash "itemId" params)))
+         (list (list :type 'record-state :state (list :streamed id))
+               (list :type 'delta :text (gethash "delta" params) :message id))))
       ("item/reasoning/summaryTextDelta"
-       (puthash (gethash "itemId" params) t (romacs-agent-streamed session))
-       (list (list :type 'thinking :text (gethash "delta" params))))
+       (list (list :type 'record-state :state (list :streamed (gethash "itemId" params)))
+             (list :type 'thinking :text (gethash "delta" params))))
       ;; A command's output as it runs, and an MCP call's progress: shown
       ;; under their call while it runs.
       ("item/commandExecution/outputDelta"
@@ -755,7 +756,7 @@ an approval or questions for the user, anything else refused."
     (pcase (gethash "type" line)
       ("thread.started" (list (list :type 'session :harness-session (gethash "thread_id" line)
                                     :model (plist-get (romacs-agent-options session) :model))))
-      ("turn.started" (setf (romacs-agent-reply session) nil) nil)
+      ("turn.started" '((:type record-state :state (:reply nil))))
       ("item.started" (item nil))
       ("item.updated" nil)
       ("item.completed" (item t))

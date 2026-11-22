@@ -670,8 +670,8 @@ instances) is derived again when it changes.")
       (one run per turn, its prompt on stdin);
   :select (SESSION MODEL EFFORT) optional, for a persistent harness: how an
                            idle one takes a new model and effort: (ID .
-                           LINE) pairs to write, each answered through
-                           `romacs-agent--select-answered'; nil when its
+                           LINE) pairs to write, each acknowledged with
+                           a `selection-ack' event; nil when its
                            next message carries them; else `restart':
                            resumed with the new option words
   :models-probe (INSTANCE) optional: how INSTANCE's program is asked for
@@ -697,6 +697,11 @@ instances) is derived again when it changes.")
   :events (SESSION OBJECT), :input-events (SESSION OBJECT)
       the events of an object it wrote, and of one written to it;
       `handshake' events (:state PLIST) fold into its startup state.
+      `record-state' applies private bookkeeping (:state PLIST of
+      :reply, :message, :streamed, :compacting or :resume-at).  A tool
+      event with :state started marks its :id as seen.
+      `selection-ack' carries :request-id and :ok.  `model-inventory'
+      carries :models, cached only for a live session;
       `approval' carries :approval-wire, the pending request to keep
       before delivery.  `answered' removes it; `approval-withdrawn'
       removes it silently.  Both identify it with :request-id;
@@ -2187,18 +2192,54 @@ STEER is non-nil when the journal already records a turn under way."
           ((not (eq exit :absent)) (list (list :type 'exit :status exit)))
           ((hash-table-p note) (romacs-agent--record-note-events note)))))
 
-(defun romacs-agent--record-approvals (session events)
-  "Apply approval changes from EVENTS before notifying SESSION's observers.
-Return public events in their original order."
-  (cl-loop with approvals = (romacs-agent-approvals session)
-           for event in events
-           for type = (plist-get event :type)
-           for id = (plist-get event :request-id)
-           for wire = (and (eq type 'approval) (plist-get event :approval-wire))
-           when wire do (puthash id wire approvals)
-           when (memq type '(answered approval-withdrawn)) do (remhash id approvals)
-           unless (eq type 'approval-withdrawn)
-           collect (if wire (romacs-agent--without event '(:approval-wire)) event)))
+(defun romacs-agent--apply-record-state (session state)
+  "Apply decoded STATE to SESSION's record bookkeeping."
+  (cl-loop for (key value) on state by #'cddr
+           do (pcase key
+                (:reply (setf (romacs-agent-reply session) value))
+                (:message (setf (romacs-agent-message session) value))
+                (:streamed (puthash value t (romacs-agent-streamed session)))
+                (:compacting (setf (romacs-agent-compacting session) value))
+                (:resume-at (setf (romacs-agent-driver-state session)
+                                  (plist-put (romacs-agent-driver-state session) :resume-at value))))))
+
+(defun romacs-agent--apply-record-event (session event)
+  "Apply EVENT's bookkeeping to SESSION and return its public event, if any."
+  (pcase (plist-get event :type)
+    ('record-state (romacs-agent--apply-record-state session (plist-get event :state)) nil)
+    ('selection-ack
+     (romacs-agent--select-answered session (plist-get event :request-id) (plist-get event :ok))
+     nil)
+    ('model-inventory
+     (when (romacs-agent--live-p session)
+       (romacs-agent--keep-models (romacs-agent--instance (romacs-agent-provider session)
+                                                         (romacs-agent-harness session))
+                                  (plist-get event :models)))
+     nil)
+    ('approval
+     (if-let* ((wire (plist-get event :approval-wire)))
+         (progn
+           (puthash (plist-get event :request-id) wire (romacs-agent-approvals session))
+           (romacs-agent--without event '(:approval-wire)))
+       event))
+    ('approval-withdrawn
+     (remhash (plist-get event :request-id) (romacs-agent-approvals session))
+     nil)
+    ('answered
+     (remhash (plist-get event :request-id) (romacs-agent-approvals session))
+     event)
+    ('tool
+     (when (eq (plist-get event :state) 'started)
+       (puthash (plist-get event :id) (or (plist-get event :parent) t) (romacs-agent-tools session)))
+     event)
+    (_ event)))
+
+(defun romacs-agent--apply-record-events (session events)
+  "Apply EVENTS' bookkeeping before notifying SESSION's observers.
+Return the public events in their original order."
+  (cl-loop for event in events
+           for public = (romacs-agent--apply-record-event session event)
+           when public collect public))
 
 (defun romacs-agent--after-record (session seq ends)
   "Advance a caught-up SESSION after journal record SEQ.
@@ -2225,7 +2266,7 @@ ENDS says a turn or run ended in that record."
       (let ((input (gethash "in" record :absent)))
         (unless (eq input :absent)
           (romacs-agent--record-echo session input))
-        (let* ((events (romacs-agent--record-approvals session (romacs-agent--record-events session record input)))
+        (let* ((events (romacs-agent--apply-record-events session (romacs-agent--record-events session record input)))
                (time (gethash "t" record))
                (ends (cl-some (lambda (event) (memq (plist-get event :type) '(done exit))) events)))
           (while events

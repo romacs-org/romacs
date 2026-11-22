@@ -112,8 +112,10 @@ is sent."
                    (romacs-mcp--object "type" "stream_event" "parent_tool_use_id" (or parent :null)
                                        "event" (romacs-mcp--object "type" "message_start"
                                                                    "message" (romacs-mcp--object "id" "m" "usage" (funcall usage 5 0)))))))
-      (should (equal (romacs-agent--claude-events session (funcall start nil)) '((:type cache :ttl 3600))))
-      (should-not (romacs-agent--claude-events session (funcall start "t1"))))))
+      (should (equal (romacs-agent--apply-record-events session (romacs-agent--claude-events session (funcall start nil)))
+                     '((:type cache :ttl 3600))))
+      (should-not (romacs-agent--apply-record-events session
+                                                     (romacs-agent--claude-events session (funcall start "t1")))))))
 
 (provide 'romacs-agent-idle-tests)
 ;;; romacs-agent-idle-tests.el ends here

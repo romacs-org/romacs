@@ -22,7 +22,13 @@
          "{\"type\":\"user\",\"isReplay\":true,\"parent_tool_use_id\":null,\"message\":{\"role\":\"user\",\"content\":\"<local-command-stdout>Compacted </local-command-stdout>\"}}")))
 
 (defun romacs-agent-compact-tests--events (session lines)
-  (mapcan (lambda (line) (romacs-agent--claude-events session line)) lines))
+  "Fold LINES and return the public events seen by SESSION's observers."
+  (let* ((events nil)
+         (romacs-agent-event-functions
+          (list (lambda (_ event) (push (romacs-agent--without event '(:seq :last :time)) events)))))
+    (dolist (line lines)
+      (romacs-agent--record session (romacs-mcp--object "seq" (1+ (romacs-agent-seq session)) "out" line)))
+    (nreverse events)))
 
 (defmacro romacs-agent-compact-tests--with-chat (var &rest body)
   (declare (indent 1))
@@ -57,20 +63,22 @@
 
 (ert-deftest romacs-agent-automatic-compaction-summary-is-blocks ()
   (let ((session (romacs-agent--make :harness 'claude)))
-    (romacs-agent--claude-events session (nth 2 (romacs-agent-compact-tests--lines)))
-    (should (equal (romacs-agent--claude-events
-                    session
-                    (json-parse-string
-                     "{\"type\":\"user\",\"isSynthetic\":true,\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Kept.\"}]}}"))
+    (should (equal (romacs-agent-compact-tests--events
+                    session (list (nth 2 (romacs-agent-compact-tests--lines))
+                                  (json-parse-string
+                                   "{\"type\":\"user\",\"isSynthetic\":true,\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Kept.\"}]}}")))
                    '((:type compacted :text "Kept."))))))
 
 (ert-deftest romacs-agent-cut-short-compaction-claims-no-later-line ()
   (let ((session (romacs-agent--make :harness 'claude))
         (lines (romacs-agent-compact-tests--lines)))
     (romacs-agent--claude-events session (nth 2 lines))
+    (should-not (romacs-agent-compacting session))
+    (romacs-agent-compact-tests--events session (list (nth 2 lines)))
     (should (romacs-agent-compacting session))
-    (romacs-agent--claude-events session (json-parse-string "{\"type\":\"system\",\"subtype\":\"hook\"}"))
-    (should-not (cl-find 'compacted (romacs-agent--claude-events session (nth 3 lines))
+    (should-not (cl-find 'compacted
+                         (romacs-agent-compact-tests--events
+                          session (list (json-parse-string "{\"type\":\"system\",\"subtype\":\"hook\"}") (nth 3 lines)))
                          :key (lambda (event) (plist-get event :type))))))
 
 (ert-deftest romacs-agent-sweep-keeps-a-route-that-answers ()
