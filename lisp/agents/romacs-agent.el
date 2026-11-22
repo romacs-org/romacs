@@ -123,6 +123,38 @@ Code gives its own tools: a delegated task waited on, or a long
 evaluation, finishes.  A harness's relay takes it at its launch."
   :type 'number :group 'romacs-agent)
 
+(defcustom romacs-agent-extra-mcp-servers nil
+  "MCP servers every agent session gets beside Romacs's own, each a list
+\(NAME :command PROGRAM :args ARGS :env ENV): NAME a string of letters,
+digits, `-' and `_', PROGRAM the server's executable, ARGS a list of
+strings, ENV an alist of (VARIABLE . VALUE) strings, each VARIABLE an
+environment variable's name.  Each harness takes
+them at a session's launch, in the config Romacs gives it: Claude Code's
+mcp.json, Codex's mcp_servers settings.  An entry named romacs, or one
+not of that shape, is left out: Romacs's own server is never replaced."
+  :type '(repeat (cons :tag "Server" (string :tag "Name")
+                       (plist :tag "How it starts" :options ((:command string) (:args (repeat string))
+                                                             (:env (alist :key-type string :value-type string))))))
+  :group 'romacs-agent)
+
+(defun romacs-agent--extra-mcp-servers ()
+  "`romacs-agent-extra-mcp-servers' as (NAME COMMAND ARGS ENV), each part
+checked: the ones not of its shape, and one named romacs, left out."
+  (let (servers)
+    (dolist (entry romacs-agent-extra-mcp-servers (nreverse servers))
+      (let* ((name (car-safe entry)) (spec (cdr-safe entry))
+             (command (and (proper-list-p spec) (plist-get spec :command)))
+             (args (and (proper-list-p spec) (plist-get spec :args)))
+             (env (and (proper-list-p spec) (plist-get spec :env))))
+        (when (and (stringp name) (string-match-p "\\`[A-Za-z0-9_-]+\\'" name) (not (equal name "romacs"))
+                   (stringp command) (proper-list-p args) (cl-every #'stringp args)
+                   (proper-list-p env)
+                   (cl-every (lambda (pair)
+                               (and (consp pair) (stringp (car pair)) (stringp (cdr pair))
+                                    (string-match-p "\\`[A-Za-z_][A-Za-z0-9_]*\\'" (car pair))))
+                             env))
+          (push (list name command args env) servers))))))
+
 (defcustom romacs-agent-unit-properties '("MemoryMax=8G")
   "systemd properties of each session's unit."
   :type '(repeat string) :group 'romacs-agent)
