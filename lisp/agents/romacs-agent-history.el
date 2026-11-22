@@ -196,25 +196,6 @@ its providers, T3's settings file and the listing's size."
           ;; T3's, when set here: unset, the process keeps its own default.
           (if (boundp 'romacs-agent-t3-settings) (format " romacs-agent-t3-settings %S" romacs-agent-t3-settings) "")))
 
-(defun romacs-agent-history--driver-files ()
-  "The files defining this editor's registered harnesses, each once."
-  (seq-uniq (delq nil (mapcar (lambda (entry) (plist-get (cdr entry) :file))
-                            romacs-agent--drivers))))
-
-(defun romacs-agent-history--load-drivers (files)
-  "Load driver FILES the scanner's build has not already registered."
-  (let ((loaded (mapcar #'file-name-sans-extension (romacs-agent-history--driver-files))))
-    (dolist (file files)
-      (unless (member (file-name-sans-extension file) loaded)
-        (with-demoted-errors "romacs-agent-history: %S" (load file nil t))))))
-
-(defun romacs-agent-history--drivers-form ()
-  "The form giving a scanner this editor's extra drivers and load path."
-  (prin1-to-string
-   `(progn
-      (setq load-path (delete-dups (append ',load-path load-path)))
-      (romacs-agent-history--load-drivers ',(romacs-agent-history--driver-files)))))
-
 (defun romacs-agent-history-index-soon ()
   "Write the transcripts' rows anew in a batch process of this build, off
 the editor, when none runs; `romacs-agent-history-indexed-hook' runs once
@@ -226,7 +207,7 @@ it ends."
            :buffer (generate-new-buffer " *romacs-agent-history-index*" t)
            :command (list (expand-file-name invocation-name invocation-directory) "--batch"
                           "-l" "romacs-agent-history"
-                          "--eval" (romacs-agent-history--drivers-form)
+                          "--eval" (romacs-agent--driver-batch-form)
                           "--eval" (romacs-agent-history--settings)
                           "-f" "romacs-agent-history-index-batch")
            :sentinel (lambda (process _event)

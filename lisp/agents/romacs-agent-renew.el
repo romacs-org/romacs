@@ -242,7 +242,7 @@ however long its journal, the editor reads none of them."
                                    :fresh t
                                    :require '(romacs-agent romacs-agent-claude romacs-agent-codex romacs-agent-events
                                                            romacs-agent-turns romacs-agent-renew)
-                                   :bindings (romacs-agent--fold-bindings))
+                                   :bindings (romacs-agent--fold-bindings (list (romacs-agent-harness session))))
                   (error (funcall fail (error-message-string err)) nil))))
     (when future
       (isolate-on-done
@@ -267,8 +267,10 @@ since its last renewal come from their rows (romacs-agent-turns), as many
 as a brief keeps, and only what came after the newest of them from its
 records; with no rows, from its records since that renewal."
   (require 'romacs-agent-turns)
-  (let* ((romacs-agent-store-patience romacs-agent-store-patient)
+  (let* ((load-path load-path)
+         (romacs-agent-store-patience romacs-agent-store-patient)
          (romacs-agent--sessions (make-hash-table :test #'equal))
+         (_ (romacs-agent--load-driver-sources romacs-agent--fold-drivers))
          (session (romacs-agent--of-manifest dir (romacs-agent--read-json (expand-file-name "manifest.json" dir))))
          (note (romacs-agent-renew--last-note session))
          (from (if note (gethash "seq" note) 0))

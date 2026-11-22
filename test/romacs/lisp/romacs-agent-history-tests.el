@@ -202,7 +202,7 @@
         (progn
           (load file nil t)
           (should (equal (plist-get (romacs-agent--driver-of 'romacs-history-test-driver) :file) file))
-          (should (member file (romacs-agent-history--driver-files))))
+          (should (member file (romacs-agent--driver-files))))
       (delete-file file))))
 
 (ert-deftest romacs-agent-history-reads-a-registered-format ()
@@ -245,7 +245,7 @@
           (with-temp-buffer
             (call-process (expand-file-name invocation-name invocation-directory) nil t nil "--batch"
                           "-l" "romacs-agent-history"
-                          "--eval" (romacs-agent-history--drivers-form)
+                          "--eval" (romacs-agent--driver-batch-form)
                           "--eval" "(princ (list (featurep 'romacs-history-test-helper) (featurep 'romacs-history-test-good)))")
             (should (string-search "(t t)" (buffer-string)))))
       (delete-directory root t))))

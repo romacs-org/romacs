@@ -771,8 +771,7 @@ instances) is derived again when it changes.")
       :events (OBJECTS) returns chat events in order.  The reader owns
       the format; `romacs-agent-history' owns indexing and display.
 
-The file defining it is kept (:file): a process of this build that reads
-every harness's transcripts (`romacs-agent-history-index-soon') loads it.
+The file defining it is kept (:file) so background readers can load its driver.
 Defining it again replaces it."
   (when-let* ((file (and (not (plist-member driver :file)) (or load-file-name buffer-file-name))))
     (setq driver (append driver (list :file file))))
@@ -784,6 +783,31 @@ Defining it again replaces it."
       (puthash harness cell romacs-agent--driver-table)))
   (cl-incf romacs-agent--driver-generation)
   harness)
+
+(defun romacs-agent--driver-files (&optional harnesses)
+  "Return driver files for HARNESSES, or for all registered drivers when nil."
+  (seq-uniq (cl-loop for (harness . driver) in romacs-agent--drivers
+                     for file = (plist-get driver :file)
+                     when (and file (or (null harnesses) (memq harness harnesses)))
+                     collect file)))
+
+(defun romacs-agent--driver-sources (&optional harnesses)
+  "Capture the driver files and search path a reader of HARNESSES needs."
+  (when-let* ((files (romacs-agent--driver-files harnesses)))
+    (list :files files :load-path load-path)))
+
+(defun romacs-agent--load-driver-sources (sources)
+  "Load the drivers in SOURCES and retain their search path in this reader."
+  (when sources
+    (setq load-path (seq-uniq (append (plist-get sources :load-path) load-path)))
+    (let ((loaded (mapcar #'file-name-sans-extension (romacs-agent--driver-files))))
+      (dolist (file (plist-get sources :files))
+        (unless (member (file-name-sans-extension file) loaded)
+          (with-demoted-errors "romacs-agent: loading driver: %S" (load file nil t)))))))
+
+(defun romacs-agent--driver-batch-form ()
+  "Return a batch reader's form for loading this editor's drivers."
+  (prin1-to-string `(romacs-agent--load-driver-sources ',(romacs-agent--driver-sources))))
 
 (defun romacs-agent--driver-of (harness)
   (or (cdr (gethash harness romacs-agent--driver-table))
@@ -5804,25 +5828,36 @@ run."
                                        ;; All a fold loads: a worker that loads more is
                                        ;; ended after its job, which waits for its exit.
                                        :name "romacs-agent fold" :require '(romacs-agent cl-extra help-mode)
-                                       :bindings (romacs-agent--fold-bindings))
+                                       :bindings (romacs-agent--fold-bindings
+                                                  (mapcar (lambda (entry) (romacs-agent-harness (car entry))) batch)))
                       (error (list 'error err)))))
         (if (eq (car-safe future) 'error)
             (romacs-agent--folded batch future)
           (isolate-on-done future (lambda (done) (romacs-agent--folded batch done))))))))
 
-(defun romacs-agent--fold-bindings ()
+(defvar romacs-agent--fold-drivers nil
+  "The driver sources the editor gives a background journal reader.")
+
+(defun romacs-agent--fold-bindings (&optional harnesses)
   "This editor's values of the agents' options, which a worker's fold reads
 as the editor's own would (an approval policy, its preambles); one no
-worker can be given, a function made here, is left out."
-  (cl-loop for (symbol kind) in (get 'romacs-agent 'custom-group)
-           when (and (eq kind 'custom-variable) (boundp symbol)
-                     (let ((value (symbol-value symbol))) (not (and (functionp value) (not (symbolp value))))))
-           collect (cons symbol (symbol-value symbol))))
+worker can be given, a function made here, is left out.  HARNESSES names
+the drivers the worker will use to decode records, when it reads any."
+  (let ((options
+         (cl-loop for (symbol kind) in (get 'romacs-agent 'custom-group)
+                  when (and (eq kind 'custom-variable) (boundp symbol)
+                            (let ((value (symbol-value symbol))) (not (and (functionp value) (not (symbolp value))))))
+                  collect (cons symbol (symbol-value symbol)))))
+    (if harnesses
+        (cons (cons 'romacs-agent--fold-drivers (romacs-agent--driver-sources harnesses)) options)
+      options)))
 
 (defun romacs-agent--fold-job (dirs)
   "In a worker VM: fold the journals of the sessions recorded in DIRS and
 write their kept states.  The seqs they are kept at, each or nil."
-  (mapcar #'romacs-agent--fold-one dirs))
+  (let ((load-path load-path))
+    (romacs-agent--load-driver-sources romacs-agent--fold-drivers)
+    (mapcar #'romacs-agent--fold-one dirs)))
 
 (defun romacs-agent--fold-one (dir)
   "Fold the journal of the session recorded in DIR and write its kept
