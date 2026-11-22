@@ -200,6 +200,7 @@ def now(allows=2, todos=1, long_files=1, lint=3, root=('crates', 'tools'), outsi
                        'primitives_outside_prims': strays, 'generated': list(generated),
                        'vm_replacements': replacements},
             'strays': {}, 'long': [], 'lints_by_crate': {}, 'unread': [],
+            'rust': ({}, {'unwraps': 0, 'unsafe_undocumented': 0}),
             'functions': {name: ('lisp/vm/a.el', smells.lisp_functions.Function(name, 'defun', 1, code, code, 0, False))
                           for name, code in functions}}
 
@@ -219,7 +220,8 @@ class RatchetTest(unittest.TestCase):
             'totals': {'allows': 3, 'todos': 1, 'long_files': 1, 'unsafe_sites': 4, 'unsafe_undocumented': 1,
                        'legacy_primitives': 5, 'primitives_outside_prims': 2, 'vm_replacements': 0,
                        'lint clippy::doc_markdown': 3},
-            'generated': ['fixture.txt'], 'long_functions': {}, 'lisp_keys': []})
+            'generated': ['fixture.txt'], 'long_functions': {}, 'lisp_keys': [],
+            'rust': {'long': {}, 'keys': [], 'floors': {'unwraps': 0, 'unsafe_undocumented': 0}}})
 
     def test_at_the_merge_base(self):
         self.assertEqual(rises(now(), now()), [])
