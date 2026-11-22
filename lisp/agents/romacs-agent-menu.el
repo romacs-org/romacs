@@ -196,6 +196,18 @@ with a prefix argument, asked for."
   (seq-filter (lambda (row) (plist-get (cdr row) :model))
               (romacs-agent--account-rows)))
 
+(defun romacs-agent-menu--handoff-default-effort (session fields same)
+  "The default effort for FIELDS, retaining SESSION when SAME."
+  (let ((provider (plist-get fields :provider)) (model (plist-get fields :model)))
+    (or (if same
+            (let ((running (romacs-agent--selection session)))
+              (when (and (equal provider (plist-get running :provider))
+                         (equal model (or (romacs-agent-model session) (plist-get running :model))))
+                (romacs-agent-ui--default-effort session running)))
+          (plist-get (romacs-agent--instance-options (romacs-agent--configured provider) (list :model model))
+                     :effort))
+        (plist-get fields :default-effort))))
+
 (defun romacs-agent-menu--handoff-arguments ()
   "Read the target model, reasoning effort and next task for handoff."
   (let* ((fields (cdr (romacs-agent--pick-row #'romacs-agent-menu--handoff-rows "Harness and model")))
@@ -208,8 +220,7 @@ with a prefix argument, asked for."
          (current (and (equal provider (plist-get wanted :provider))
                        (equal model (plist-get wanted :model))
                        (plist-get wanted :effort)))
-         (configured (plist-get (romacs-agent--configured provider) :effort))
-         (default (if (member configured efforts) configured (plist-get fields :default-effort)))
+         (default (romacs-agent-menu--handoff-default-effort session fields same))
          (effort (when efforts
                    (romacs-agent--read-effort efforts (if (member current efforts) current default) default))))
     (list provider model
@@ -253,12 +264,19 @@ an instance of its harness."
   (eq (if (symbolp provider) provider (plist-get (romacs-agent--configured provider) :harness))
       (romacs-agent-harness session)))
 
+(defun romacs-agent-menu--handoff-position (session)
+  "SESSION's journal and turn position while its handoff brief is read."
+  (list (romacs-agent--journal-end session) (romacs-agent-seq session)
+        (romacs-agent-state session) (romacs-agent-input-seq session)
+        (romacs-agent-completed-seq session)))
+
 (defun romacs-agent-menu--hand-off (session provider model next effort)
   "Start a session under PROVIDER on MODEL at EFFORT, briefed on SESSION.
 Tell it to do NEXT."
   (when romacs-agent-log-queue--editing
     (user-error "Finish editing the queued message before switching harnesses"))
-  (let ((source (current-buffer)))
+  (let ((source (current-buffer))
+        (position (romacs-agent-menu--handoff-position session)))
     (message "Gathering %s's thread..." (romacs-agent-title session))
     (romacs-agent-events-async
      session
@@ -266,9 +284,11 @@ Tell it to do NEXT."
        (when (buffer-live-p source)
          (with-current-buffer source
            (when (and (eq romacs-agent-log--session session) (not romacs-agent-log-queue--editing))
-             (romacs-agent-log-continue
-              (romacs-agent-handoff session (romacs-agent-handoff-thread session events)
-                                    provider model next (and effort (list :effort effort)))))))))))
+             (let ((thread (romacs-agent-handoff-thread session events)))
+               (if (equal position (romacs-agent-menu--handoff-position session))
+                   (romacs-agent-log-continue
+                    (romacs-agent-handoff session thread provider model next (and effort (list :effort effort))))
+                 (message "Handoff cancelled because the conversation changed. Switch harnesses again to include it."))))))))))
 
 (defun romacs-agent-chat-plan ()
   "Put this session in its harness's plan mode, or take it out: what plan

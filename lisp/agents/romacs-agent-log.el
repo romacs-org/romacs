@@ -1677,6 +1677,8 @@ the board.  TARGET owns the composer and all subsequent live events."
     (unless (eq (gethash (romacs-agent-id source) chats) buffer)
       (error "The source no longer owns this chat"))
     (save-excursion
+      (when romacs-agent-log--recalled
+        (romacs-agent-log--recall nil))
       (romacs-agent-log--archive-handoff target)
       (remhash (romacs-agent-id source) chats)
       (puthash (romacs-agent-id target) buffer chats)
