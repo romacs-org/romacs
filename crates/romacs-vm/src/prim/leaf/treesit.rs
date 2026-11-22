@@ -666,12 +666,16 @@ impl Leaf<'_> {
             Some((tree, _, edited, changed)) => (Some((tree, edited)), changed),
             None => (None, None),
         };
-        let twin = if live { self.ts_twin_tree(parser, old.is_none()) } else { None };
-        let early = if live && old.is_none() && twin.is_none() { self.ts_early_tree(parser) } else { None };
+        let twin = if live && !matches!(ahead, Some((_, false))) {
+            self.ts_twin_tree(parser, old.is_none())
+        } else { None };
+        let early = if live && old.is_none() && ahead.is_none() && twin.is_none() {
+            self.ts_early_tree(parser)
+        } else { None };
         let (done, behind) = match ahead.or(early) {
             Some((tree, false)) => (Some(tree), None),
-            Some((tree, true)) => (None, Some(tree)),
-            None => (twin, None),
+            Some((tree, true)) if twin.is_none() => (None, Some(tree)),
+            _ => (twin, None),
         };
         let new = done.or_else(|| {
             let text = self.ts_buffer_text(buffer).filter(|_| self.ts_live(buffer)).map(|t| &**t);
