@@ -40,6 +40,14 @@ pub struct QuitSignal {
 /// How long a quittable wait blocks between looks at the press count.
 pub(crate) const QUIT_SLICE: std::time::Duration = std::time::Duration::from_millis(40);
 
+/// Which events the caller can act on when its kernel wait wakes.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WaitFor {
+    Input,
+    Child,
+    ChildStop,
+}
+
 const BUSY: u32 = 1 << 31;
 /// A call's deadline passed (`arm_deadline'): taken, like a press, at the
 /// evaluator's next safepoint while it is busy, and only for that call.
@@ -131,6 +139,12 @@ impl QuitSignal {
     /// one no longer counts.
     pub(crate) fn set_deadline(&self, passed: bool) {
         if passed { self.word.fetch_or(DEADLINE, Ordering::AcqRel); } else { self.word.fetch_and(!DEADLINE, Ordering::AcqRel); }
+    }
+
+    /// A synchronous child uses one press to interrupt and the next to kill.
+    pub(crate) fn take_one(&self) -> u32 {
+        u32::from(self.word.fetch_update(Ordering::AcqRel, Ordering::Acquire, |word|
+            (word & PRESSES != 0).then(|| word - 1)).is_ok())
     }
 
     /// Take the presses counted so far.
@@ -273,13 +287,32 @@ impl Vm {
     /// fault, a `throw-on-input` throw left in `propagated_escape`.
     pub(crate) fn quit_fault(&mut self) -> std::result::Result<(), crate::prim::Fault> {
         match self.maybe_quit() {
+            Some(escape) => Err(self.quit_as_fault(escape)),
             None => Ok(()),
-            Some(Escape::Signal(condition, data)) => Err(crate::prim::Fault::Signal(condition, data)),
-            Some(escape) => {
-                self.propagated_escape = Some(escape);
-                Err(crate::prim::Fault::Escape)
+        }
+    }
+
+    fn quit_as_fault(&mut self, escape: Escape) -> crate::prim::Fault {
+        match escape {
+            Escape::Signal(condition, data) => crate::prim::Fault::Signal(condition, data),
+            other => {
+                self.propagated_escape = Some(other);
+                crate::prim::Fault::Escape
             }
         }
+    }
+
+    /// At a child's wait, take one physical press. A second still belongs
+    /// to the stop. Report a spent call budget so its owner bounds cleanup.
+    pub(crate) fn native_poll_child(&mut self) -> (Option<crate::prim::Fault>, bool) {
+        if crate::host::inspect_pending() { self.with_site_leaf(|vm| vm.inspect_capture()); }
+        if !self.native_quit || !self.native_quit_reached() { return (None, false); }
+        crate::gap_probe::safepoint(Some(self));
+        if !self.quit_poll_due() && !crate::host::user_signal_waiting(self.debug_event_mask()) {
+            return (None, false);
+        }
+        let (escape, expired) = self.maybe_quit_taking(QuitSignal::take_one);
+        (escape.map(|e| self.quit_as_fault(e)), expired)
     }
 
     /// [`NativeStop::due`] for a loop that holds the VM borrowed: the same
@@ -326,33 +359,39 @@ impl Vm {
     /// GNU's would, inside the handlers around the form's reach or around
     /// the load, and its escape propagates to them.
     pub(crate) fn maybe_quit(&mut self) -> Option<Escape> {
+        self.maybe_quit_taking(QuitSignal::take).0
+    }
+
+    fn maybe_quit_taking(&mut self, take: fn(&QuitSignal) -> u32) -> (Option<Escape>, bool) {
         if !self.quit.busy() {
-            return None;
+            return (None, false);
         }
         self.take_debug_event();
-        for _ in 0..self.quit.take() {
+        for _ in 0..take(&self.quit) {
             self.handle_interrupt();
         }
         // A call's budget spent is its C-g (`romacs--call-deadline').
-        if self.quit.take_deadline() {
+        let expired = self.quit.take_deadline();
+        if expired {
             self.set_quit_variable("quit-flag", Value::TRUE);
         }
         let [flag, inhibit, throw_on_input] = self.quit_variables();
         if flag == Value::NIL && throw_on_input != Value::NIL && self.host_input_pending() {
             self.set_quit_variable("quit-flag", throw_on_input);
-            return self.maybe_quit();
+            let (escape, next_expired) = self.maybe_quit_taking(take);
+            return (escape, expired || next_expired);
         }
         if flag == Value::NIL || inhibit != Value::NIL {
-            return None;
+            return (None, expired);
         }
         // process_quit_flag.
         self.set_quit_variable("quit-flag", Value::NIL);
         self.quit_unwinding = true;
         if flag == throw_on_input {
-            return Some(Escape::Throw(flag, Value::TRUE));
+            return (Some(Escape::Throw(flag, Value::TRUE)), expired);
         }
         let quit = self.intern("quit");
-        Some(Escape::Signal(quit, Value::NIL))
+        (Some(Escape::Signal(quit, Value::NIL)), expired)
     }
 
     /// `maybe_quit' for Rust that runs between Lisp evaluations (the
@@ -535,6 +574,19 @@ impl Vm {
     /// press or debug event returns no events, for the next safepoint.
     pub(crate) fn poll_quittable(&self, fds: &[(std::os::fd::RawFd, i16)], timeout: Option<std::time::Duration>)
                                  -> std::io::Result<Vec<i16>> {
+        self.poll_for(fds, timeout, WaitFor::Input)
+    }
+
+    /// Wait on FDS and the worker wake pipe. A running child can quit on
+    /// a debugger event; a child being stopped leaves that event for Lisp.
+    pub(crate) fn poll_for(&self, fds: &[(std::os::fd::RawFd, i16)], timeout: Option<Duration>,
+                           events: WaitFor) -> std::io::Result<Vec<i16>> {
+        let active = events != WaitFor::Child || (self.native_quit && self.native_quit_reached());
+        let debug = if active && events != WaitFor::ChildStop { self.debug_event_mask() } else { 0 };
+        let pending = || active && match events {
+            WaitFor::Input => self.quit.pressed(),
+            WaitFor::Child | WaitFor::ChildStop => self.quit.due(),
+        };
         let wake = self.worker_wake_fd();
         let set: Vec<_> = fds.iter().copied().chain(wake.map(|fd| (fd, libc::POLLIN))).collect();
         // FDS's events and whether the wake pipe woke it (drained, so an
@@ -547,14 +599,14 @@ impl Vm {
         };
         // A debug event ends it too, without a host (handle_user_signal
         // interrupts GNU's select).
-        let debug = self.debug_event_mask();
-        if std::sync::Arc::strong_count(&self.quit) == 1 && debug == 0 {
+        let shared = active && std::sync::Arc::strong_count(&self.quit) > 1;
+        if !shared && debug == 0 && (events == WaitFor::Input || !pending()) {
             return Ok(poll(timeout)?.0);
         }
         let deadline = timeout.map(|timeout| crate::host::monotonic() + timeout);
         loop {
             crate::gap_probe::safepoint(Some(self));
-            if self.quit.pressed() || crate::host::user_signal_waiting(debug) {
+            if pending() || crate::host::user_signal_waiting(debug) {
                 return Ok(vec![0; fds.len()]);
             }
             let left = deadline.map(|end| end.saturating_duration_since(crate::host::monotonic()));

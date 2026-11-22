@@ -1,10 +1,10 @@
 //! callproc.c's wait for a synchronous child (`call-process`): its output
 //! read until the pipe closes, then its end, each wait quittable; a quit's
-//! stop of the child (SIGINT to its group, a second C-g's SIGKILL, a
-//! worker's grace) and its reaping; and the quit raised again once the
+//! stop of the child (SIGINT to its group, a second C-g's SIGKILL, an
+//! unattended caller's grace) and its reaping; and the quit raised again once the
 //! output read before it is inserted. `process.rs` spawns the child.
 use super::{Fault, Leaf, Value};
-use crate::subprocess as sp;
+use crate::{quit::WaitFor, subprocess as sp};
 use std::os::fd::{AsFd, AsRawFd, OwnedFd};
 
 /// The tokens of the quits call-process's waits took and returned with the
@@ -26,22 +26,27 @@ pub(crate) enum ChildEnd {
 
 impl Leaf<'_> {
     /// `call_process`'s wait for child PID: what it wrote to READER until the
-    /// pipe closed, then its end, each a quittable wait (`Vm::poll_quittable`).
+    /// pipe closed, then its end, each a quittable wait.
     /// A C-g ends the child as `call_process_cleanup` does
     /// (`call_process_stop`) and ends the wait with the quit beside what was
-    /// read before it; under `inhibit-quit` the wait goes on without looking
-    /// at the press again.
-    pub(super) fn call_process_wait(&mut self, pid: i32, mut reader: Option<OwnedFd>) -> Result<(Vec<u8>, Option<Fault>)> {
+    /// read before it. An inhibited press stays in `quit-flag`.
+    pub(in crate::prim) fn call_process_wait(&mut self, pid: i32, mut reader: Option<OwnedFd>) -> Result<(Vec<u8>, Option<Fault>)> {
         let pidfd = crate::host::pidfd_open(pid);
         let mut bytes = Vec::new();
         let mut buf = vec![0; 64 * 1024];
-        let mut held = false;
+        let mut budget_expired = false;
         loop {
             // A worker's interrupt or termination stops the child as a C-g
             // does, asked before each wait: one an `inhibit-quit' since
             // unbound held, or one whose wake ended the last wait.
             if let Some(quit) = self.vm.worker_quit() {
-                return Ok((bytes, Some(self.call_process_quit(pid, pidfd.as_ref(), quit, Some(Self::WORKER_GRACE)))));
+                return Ok((bytes, Some(self.call_process_quit(pid, pidfd.as_ref(), quit, Some(Self::CANCEL_GRACE)))));
+            }
+            let (quit, expired) = self.vm.native_poll_child();
+            budget_expired |= expired;
+            if let Some(quit) = quit {
+                let grace = budget_expired.then_some(Self::CANCEL_GRACE);
+                return Ok((bytes, Some(self.call_process_quit(pid, pidfd.as_ref(), quit, grace))));
             }
             let (fds, tick) = match (&reader, &pidfd) {
                 (Some(read), _) => (vec![(read.as_raw_fd(), libc::POLLIN)], None),
@@ -51,15 +56,9 @@ impl Leaf<'_> {
                 (None, None) if sp::exited(pid) => break,
                 (None, None) => (Vec::new(), Some(Self::CHILD_TICK)),
             };
-            let revents = if held { sp::poll(&fds, tick) } else { self.vm.poll_quittable(&fds, tick) }
+            let revents = self.vm.poll_for(&fds, tick, WaitFor::Child)
                 .map_err(|e| self.file_errno("Waiting for process", &e))?;
-            if revents.first().is_none_or(|&r| r == 0) {
-                if let Err(quit) = self.native_poll() {
-                    return Ok((bytes, Some(self.call_process_quit(pid, pidfd.as_ref(), quit, None))));
-                }
-                held = self.vm.quit.pressed();
-                continue;
-            }
+            if revents.first().is_none_or(|&r| r == 0) { continue; }
             let Some(read) = &reader else { break };
             match sp::read(read.as_fd(), &mut buf) {
                 Ok(0) | Err(_) => reader = None,
@@ -124,8 +123,8 @@ impl Leaf<'_> {
     /// deleted children (`reap_children`, the host's reaper once the VM
     /// goes), with no status made up for it: the quit returns either way.
     /// Without a pidfd (PIDFD None) the child's end is asked every
-    /// `CHILD_TICK`, so the wait still hears the stop. A worker's quit, which
-    /// no second C-g follows, gives GRACE ([`Self::WORKER_GRACE`]) for the
+    /// `CHILD_TICK`, so the wait still hears the stop. A worker's quit or an
+    /// expired call budget gives GRACE ([`Self::CANCEL_GRACE`]) for the
     /// SIGINT before it sends SIGKILL by itself, as the second C-g would;
     /// the main VM's quit gives None and waits for that C-g. What became of
     /// the child is the answer (`ChildEnd`).
@@ -134,34 +133,28 @@ impl Leaf<'_> {
         kill(libc::SIGINT);
         let fds: Vec<_> = pidfd.map(|fd| (fd.as_raw_fd(), libc::POLLIN)).into_iter().collect();
         let tick = pidfd.is_none().then_some(Self::CHILD_TICK);
-        let deadline = grace.map(|grace| crate::host::monotonic() + grace);
+        let mut deadline = grace.map(|grace| crate::host::monotonic() + grace);
         while !sp::exited(pid) {
+            if self.vm.quit.take_deadline() || self.vm.worker_quit().is_some() {
+                deadline.get_or_insert_with(|| crate::host::monotonic() + Self::CANCEL_GRACE);
+            }
             let left = deadline.map(|end| end.saturating_duration_since(crate::host::monotonic()));
-            if left.is_some_and(|left| left.is_zero()) {
+            if self.vm.quit.take_one() != 0 || left.is_some_and(|left| left.is_zero()) {
                 kill(libc::SIGKILL);
                 break;
             }
             let timeout = match (tick, left) { (Some(tick), Some(left)) => Some(tick.min(left)), (tick, left) => tick.or(left) };
-            match self.vm.poll_quittable(&fds, timeout) {
-                Ok(_) if self.call_process_stop_requested() => {
-                    kill(libc::SIGKILL);
-                    break;
-                }
-                Ok(_) => {}
-                // A wait that cannot go on: a stop with a grace leaves no
-                // child unkilled.
-                Err(_) => {
-                    if grace.is_some() { kill(libc::SIGKILL); }
-                    break;
-                }
+            if self.vm.poll_for(&fds, timeout, WaitFor::ChildStop).is_err() {
+                if deadline.is_some() { kill(libc::SIGKILL); }
+                break;
             }
         }
-        // A worker's stop ends the whole group, not its leader alone: a
+        // An unattended stop ends the whole group: a
         // helper the leader left behind (a shell starts its `&' jobs with
         // SIGINT ignored) would outlive the cancel. The leader is not reaped
         // yet (`sp::exited' waits with WNOWAIT), so its group id cannot have
         // been reused, and this SIGKILL reaches only the child's own group.
-        if grace.is_some() { kill(libc::SIGKILL); }
+        if deadline.is_some() { kill(libc::SIGKILL); }
         self.call_process_reap(pid, &fds, Self::KILL_GRACE)
     }
 
@@ -189,20 +182,10 @@ impl Leaf<'_> {
     /// the child to the reaper and returns.
     const KILL_GRACE: std::time::Duration = std::time::Duration::from_millis(100);
 
-    /// How long a worker's quit gives its child's SIGINT before SIGKILL: well
+    /// How long an unattended cancellation gives its child's SIGINT: well
     /// inside `isolate-interrupt-timeout`, the spawner's own escalation.
-    const WORKER_GRACE: std::time::Duration = std::time::Duration::from_millis(200);
+    const CANCEL_GRACE: std::time::Duration = std::time::Duration::from_millis(200);
 
     /// How often a wait without a pidfd asks whether the child has ended.
     const CHILD_TICK: std::time::Duration = std::time::Duration::from_millis(10);
-
-    /// Whether the wait after the quit's SIGINT should kill the child now
-    /// (SIGKILL, reap, return), the request taken: today a second C-g, taken
-    /// here as GNU's kill takes it. The one question the wait asks, so a
-    /// later stop (an abort) extends this and not the loop.
-    fn call_process_stop_requested(&mut self) -> bool {
-        let pressed = self.vm.quit.pressed();
-        if pressed { self.vm.quit.take(); }
-        pressed
-    }
 }
