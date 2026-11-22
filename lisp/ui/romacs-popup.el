@@ -320,49 +320,19 @@ events are left out."
 \(`romacs-popup--map-items'): what a key is bound to first (a map's own
 before its parents') is its effective binding, a nil one included, for a
 character range as for a single key, so a range shows split around the
-keys bound before it.  One entry per binding
-\(`romacs-popup--hint-groups'), in traversal order."
-  (delq nil (mapcar (pcase-lambda (`(,keys . ,binding))
-                      (when-let* ((label (romacs-popup--hint-label binding))) (cons keys label)))
-                    (romacs-popup--hint-groups (romacs-popup--hint-keys map nil)))))
-
-(defun romacs-popup--hint-keys (map prefix)
-  "MAP's bindings as (KEY BINDING) in traversal order, each KEY after the
-events PREFIX.  The meta keys, ESC's map, read as M- keys at ESC's place."
+keys bound before it.  In traversal order."
   (pcase-let ((`(,characters . ,others) (romacs-popup--map-items map)))
-    (let ((name (lambda (event) (key-description (vconcat prefix (vector event))))))
+    (let ((keys (nconc (mapcar (pcase-lambda (`(,i ,lo ,hi ,binding))
+                                 (list i (if (= lo hi) (key-description (vector lo))
+                                           (format "%s..%s" (key-description (vector lo)) (key-description (vector hi))))
+                                       binding))
+                               characters)
+                       (mapcar (pcase-lambda (`(,i ,event ,binding)) (list i (key-description (vector event)) binding))
+                               others))))
       ;; `sort' is stable: a range's parts stay in ascending order.
-      (mapcan (pcase-lambda (`(,_ ,key ,binding))
-                (if (and (not prefix) (equal key [?\e]) (keymapp binding))
-                    (romacs-popup--hint-keys binding [?\e])
-                  (list (list (if (vectorp key) (funcall name (aref key 0)) key) binding))))
-              (sort (nconc (mapcar (pcase-lambda (`(,i ,lo ,hi ,binding))
-                                     (list i (if (= lo hi) (vector lo)
-                                               (format "%s..%s" (funcall name lo) (funcall name hi)))
-                                           binding))
-                                   characters)
-                           (mapcar (pcase-lambda (`(,i ,event ,binding)) (list i (vector event) binding)) others))
-                    (lambda (a b) (< (car a) (car b))))))))
-
-(defcustom romacs-popup-hints-keys-per-command 2
-  "Most keys a hint shows for one command: its shortest."
-  :type 'natnum)
-
-(defun romacs-popup--hint-groups (keys)
-  "KEYS, (KEY BINDING) in order, as one (KEYS . BINDING) per binding at
-its first key's place, KEYS its `romacs-popup-hints-keys-per-command'
-shortest joined by \"/\": aliases such as `n' and `C-f' share a hint."
-  (let ((groups nil))
-    (pcase-dolist (`(,key ,binding) keys)
-      (if-let* ((group (and binding (assq binding groups))))
-          (setcdr group (cons key (cdr group)))
-        (push (list binding key) groups)))
-    (mapcar (pcase-lambda (`(,binding . ,keys))
-              (cons (string-join (seq-take (seq-sort-by #'string-width #'< (nreverse keys))
-                                           (max 1 romacs-popup-hints-keys-per-command))
-                                 "/")
-                    binding))
-            (nreverse groups))))
+      (delq nil (mapcar (pcase-lambda (`(,_ ,key ,binding))
+                          (when-let* ((label (romacs-popup--hint-label binding))) (cons key label)))
+                        (sort keys (lambda (a b) (< (car a) (car b)))))))))
 
 (defun romacs-popup--hints-place ()
   "Where hints show now: the selected window (of the root frame, not the
@@ -370,47 +340,23 @@ minibuffer) and its edges."
   (let ((window (romacs-layer--toast-window)))
     (list window (window-edges window t nil t))))
 
-(defcustom romacs-popup-hints-max-lines 2
-  "Most lines a transient map's hints take; the last one's overflow is elided."
-  :type 'natnum)
-
-(defun romacs-popup--hint-lines (entries columns max width)
-  "ENTRIES, strings, packed in order into lines of at most COLUMNS as
-measured by WIDTH, three spaces apart: at most MAX lines, the last cut
-with an ellipsis when entries are left over."
-  (let ((lines nil) (line nil) (sep "   "))
-    (dolist (entry entries)
-      (let ((joined (if line (concat line sep entry) entry)))
-        (if (or (null line) (<= (funcall width joined) columns))
-            (setq line joined)
-          (push line lines)
-          (setq line entry))))
-    (when line (push line lines))
-    (setq lines (or (nreverse lines) '("")))
-    (let* ((kept (seq-take lines (max 1 max)))
-           (rest (nthcdr (length kept) lines))
-           (last (car (last kept)))
-           (dots (truncate-string-ellipsis))
-           (fit (lambda (s) (if (<= (funcall width s) columns) s
-                              (concat (truncate-string-to-width s (- columns (funcall width dots))) dots)))))
-      (mapcar fit (append (butlast kept) (list (if rest (concat last sep (car rest)) last)))))))
-
 (defun romacs-popup--hints-show (map)
   "Show MAP's keys as hints in the selected window, retiring the toast of
 its MESSAGE (shown once, here, while the hints show)."
   (setq romacs-popup--hints-shown map romacs-popup--hints-place (romacs-popup--hints-place))
   (let* ((window (car romacs-popup--hints-place))
-         (lines (romacs-popup--hint-lines
-                 (mapcar (lambda (e) (concat (propertize (car e) 'face 'romacs-popup-key) " "
-                                             (propertize (cdr e) 'face 'romacs-popup-description)))
-                         (romacs-popup--hint-entries map))
-                 (max 10 (- (window-body-width window) 4)) romacs-popup-hints-max-lines #'romacs-layer--toast-width))
+         (text (mapconcat (lambda (e) (concat (propertize (car e) 'face 'romacs-popup-key) " "
+                                              (propertize (cdr e) 'face 'romacs-popup-description)))
+                          (romacs-popup--hint-entries map) "   "))
+         (columns (max 10 (- (window-body-width window) 4)))
+         (dots (truncate-string-ellipsis))
+         (text (if (> (romacs-layer--toast-width text) columns)
+                   (concat (truncate-string-to-width text (- columns (romacs-layer--toast-width dots))) dots)
+                 text))
          (buffer (romacs-popup--hints-buffer))
          (message (gethash map romacs-popup--hint-maps)))
-    (with-current-buffer buffer
-      (let ((inhibit-read-only t)) (erase-buffer) (insert (string-join lines "\n")) (goto-char (point-min))))
-    (romacs-popup-show 'hints buffer :anchor window :lines (length lines)
-                       :columns (1+ (apply #'max (mapcar #'romacs-layer--toast-width lines))))
+    (with-current-buffer buffer (let ((inhibit-read-only t)) (erase-buffer) (insert text) (goto-char (point-min))))
+    (romacs-popup-show 'hints buffer :anchor window :columns (1+ (romacs-layer--toast-width text)) :lines 1)
     (romacs-popup--hints-follow-hooks t)
     (when (stringp message)
       (dolist (toast (seq-filter (lambda (toast) (equal (nth 3 toast) message)) romacs-layer--toasts))
