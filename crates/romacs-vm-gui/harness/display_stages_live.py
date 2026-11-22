@@ -168,9 +168,14 @@ def off(measured, bars):
     """The figures of MEASURED off their bar or without one: (figure,
     value, bar or None).  Instructions and conses are off over their bar,
     any other count when it differs."""
-    return [(figure, value, bars.get(figure)) for figure, value in measured.items()
+    over = [(figure, value, bars.get(figure)) for figure, value in measured.items()
             if bars.get(figure) != REPORTED
             and (bars.get(figure) is None or value > bars[figure] or (value < bars[figure] and not margined(figure)))]
+    # A figure barred but not measured fails too: a row cannot pass by
+    # leaving out what its bars hold.
+    missing = [(figure, None, bar) for figure, bar in bars.items()
+               if isinstance(bar, (int, float)) and not isinstance(bar, bool) and figure not in measured]
+    return over + missing
 
 
 def verdict(scenario, result, wanted, bars):
@@ -187,7 +192,8 @@ def verdict(scenario, result, wanted, bars):
         return {**row, 'status': 'FAIL', 'reason': 'no bars for this scenario'}
     row['off'] = off(row['figures'], bars[scenario['name']])
     if row['off']:
-        reason = '; '.join(f'{figure} {value}, ' + ('no bar' if bar is None else f"{'over' if value > bar else 'under'} {bar}")
+        reason = '; '.join(f'{figure} not measured, its bar {bar}' if value is None else
+                           f'{figure} {value}, ' + ('no bar' if bar is None else f"{'over' if value > bar else 'under'} {bar}")
                            for figure, value, bar in row['off'])
         return {**row, 'status': 'FAIL', 'reason': reason}
     return {**row, 'status': 'PASS'}

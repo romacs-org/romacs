@@ -181,6 +181,12 @@ class Bars(unittest.TestCase):
         above = [dict(r, **{'above-instructions': 0}) for r in collected]
         self.assertIsNone(d.refusal(based, {'readings': above}, 2))
 
+    def test_a_barred_figure_left_unmeasured_fails(self):
+        # A row whose baseline was never declared measures no above figure:
+        # its bar still holds one, and it fails.
+        row = d.verdict(PAINTS, self.result, 2, {'typed': {**self.bars, 'above_instructions': 100}})
+        self.assertEqual((row['status'], row['reason']), ('FAIL', 'above_instructions not measured, its bar 100'))
+
     def test_a_refused_row_keeps_its_session(self):
         session = {'symbols': 1, 'files': 2, 'loaded': ['subr']}
         row = d.verdict(PAINTS, {'readings': readings(STEP, QUIET), 'session': session}, 2, {})

@@ -505,7 +505,9 @@ stderr, and write the readings to OUT as JSON."
             (setq step (lambda ()
                          ;; The steps' work alone recorded: from the first one.
                          (unless started
-                           (setq started t)
+                           ;; What timers did while the baseline settled is
+                           ;; no step's: the steps' accounting starts here.
+                           (setq started t display-stages--waited nil)
                            (scaling--mark (list :stages "start"))
                            (scaling--perf "enable"))
                          (push (display-stages--reading) readings)
