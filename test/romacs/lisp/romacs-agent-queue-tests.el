@@ -337,6 +337,32 @@ message is sent, `romacs-agent-send' by default.")
           (delete-process (romacs-agent-connection session))
           (delete-directory dir t))))))
 
+(ert-deftest romacs-agent-dispatch-releases-a-failed-write-for-retry ()
+  (let* ((session (romacs-agent-test-attach
+                   (romacs-agent--make :id "write-retry" :harness 'claude :state 'idle) t))
+         (romacs-agent-event-functions nil)
+         (delivered 0)
+         (attempts 0)
+         (item (romacs-agent-item "retry" :delivered (lambda () (cl-incf delivered)))))
+    (unwind-protect
+        (cl-letf (((symbol-function 'romacs-agent--write)
+                   (lambda (state next)
+                     (should (eq next item))
+                     (should (eq (romacs-agent-item-held item) 'sending))
+                     (romacs-agent--dispatch state)
+                     (when (= (cl-incf attempts) 1) (error "write interrupted")))))
+          (romacs-agent--enqueue session item)
+          (should-error (romacs-agent--dispatch session))
+          (should (eq (car (romacs-agent-queue session)) item))
+          (should-not (romacs-agent-item-held item))
+          (should-not (romacs-agent-dispatch session))
+          (should (zerop delivered))
+          (romacs-agent--dispatch session)
+          (should (= attempts 2))
+          (should (= delivered 1))
+          (should-not (romacs-agent-queue session)))
+      (delete-process (romacs-agent-connection session)))))
+
 (ert-deftest romacs-agent-a-refused-send-keeps-nothing ()
   ;; Its harness ended, or its write failing: the sender is told and keeps
   ;; its message; the queue keeps no copy to send again.

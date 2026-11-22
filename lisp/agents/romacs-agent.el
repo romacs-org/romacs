@@ -4017,61 +4017,61 @@ waits first.  An automatic renewal supplies a message to an empty queue."
 
 (defvar romacs-agent--queue-quiet)  ; below, with the queue
 
+(defun romacs-agent--wanted-item-p (item)
+  "Whether ITEM is still wanted at dispatch time."
+  (let ((valid (romacs-agent-item-valid item)))
+    (or (null valid) (funcall valid))))
+
+(defun romacs-agent--write-queue-group (session next parts)
+  "Write PARTS as one turn, restoring NEXT's queue record on failure."
+  (romacs-agent--unkeep-item session next)
+  (condition-case err
+      (progn
+        (dolist (part parts) (setf (romacs-agent-item-held part) 'sending))
+        (romacs-agent--write session (romacs-agent--joined parts)))
+    ((error quit)
+     (dolist (part parts) (setf (romacs-agent-item-held part) nil))
+     (romacs-agent--keep-item session next)
+     (signal (car err) (cdr err)))))
+
+(defun romacs-agent--notify-delivered (parts)
+  "Call each of PARTS' delivery callbacks and propagate the first failure."
+  (let ((failed nil))
+    (dolist (part parts)
+      (when-let* ((delivered (romacs-agent-item-delivered part)))
+        (condition-case err (funcall delivered)
+          ((error quit) (setq failed (or failed err))))))
+    (when failed (signal (car failed) (cdr failed)))))
+
+(defun romacs-agent--send-queue-group (session next)
+  "Write NEXT with its group and retire the accepted and stale entries."
+  (pcase-let ((`(,parts . ,stale) (romacs-agent--together (romacs-agent-queue session) next)))
+    ;; A kept row restored after the write is skipped by its journaled id.
+    (romacs-agent--write-queue-group session next parts)
+    ;; Get every accepted entry off the queue before a view or a quit can run.
+    (let ((inhibit-quit t) (romacs-agent--queue-quiet t))
+      (dolist (part (append parts stale)) (romacs-agent--dequeue session part)))
+    (romacs-agent--after-write "romacs-agent--changed" (lambda () (romacs-agent--changed session)))
+    (romacs-agent--notify-delivered parts)))
+
+(defun romacs-agent--dispatch-one (session)
+  "Send or discard the next eligible item.  Return non-nil on progress."
+  (when-let* ((next (romacs-agent--next-item session)))
+    (if (romacs-agent--wanted-item-p next)
+        (romacs-agent--send-queue-group session next)
+      (romacs-agent--dequeue session next))
+    t))
+
 (defun romacs-agent--dispatch (session)
-  "Write the first of SESSION's waiting messages that may go
-\(`romacs-agent--may-write-p'): a steer passes messages waiting for a new
-turn.  Each written goes off the queue, then its DELIVERED is called; the
-next is asked for at once.  One dispatch at a time: one asked for while
-a message is written (its write ending a run) runs once it is off the
-queue.  Called wherever what the predicate reads may have changed."
+  "Drain SESSION's eligible messages, deferring reentrant dispatch requests."
   (if (romacs-agent-dispatch session)
       (setf (romacs-agent-dispatch session) 'again)
     (setf (romacs-agent-dispatch session) 'busy)
     (unwind-protect
         (let ((more t))
           (while more
-            (setq more nil)
-            ;; Dropped as they would go: those no longer wanted.
-            (let ((next (romacs-agent--next-item session)))
-              (when (and next (romacs-agent-item-valid next)
-                         (not (funcall (romacs-agent-item-valid next))))
-                (romacs-agent--dequeue session next)
-                (setq more t next nil))
-              (when next
-                ;; Off the queue once written: a write that fails (the
-                ;; harness gone meanwhile) keeps it for the next chance.
-                ;; Its kept record goes first; a restore after an end
-                ;; between the two finds it sent by its id in the journal
-                ;; (`romacs-agent--sent-queued') and sends it no second time.
-                (pcase-let ((`(,parts . ,stale) (romacs-agent--together session next)))
-                  (romacs-agent--unkeep-item session next)
-                  ;; A write cut short, by an error or by a quit while it
-                  ;; waits on the harness, gives it back: kept again, its
-                  ;; user's again; a restore finds it sent by its id if it
-                  ;; went (`romacs-agent--sent-queued').
-                  (condition-case err
-                      (progn
-                        ;; Its user can no longer change it: it is being written.
-                        (dolist (part parts) (setf (romacs-agent-item-held part) 'sending))
-                        (romacs-agent--write session (romacs-agent--joined parts)))
-                    ((error quit) (dolist (part parts) (setf (romacs-agent-item-held part) nil))
-                     (romacs-agent--keep-item session next)
-                     (signal (car err) (cdr err))))
-                  ;; Off the queue at once, with those no longer wanted
-                  ;; among them, its views told once after: neither a quit
-                  ;; nor a view's error leaves one to go again.
-                  (let ((inhibit-quit t) (romacs-agent--queue-quiet t))
-                    (dolist (part (append parts stale)) (romacs-agent--dequeue session part)))
-                  (romacs-agent--after-write "romacs-agent--changed" (lambda () (romacs-agent--changed session)))
-                  ;; Each written is told, whatever an earlier one's telling did.
-                  (let ((failed nil))
-                    (dolist (part parts)
-                      (when (romacs-agent-item-delivered part)
-                        (condition-case err (funcall (romacs-agent-item-delivered part))
-                          ((error quit) (setq failed (or failed err))))))
-                    (when failed (signal (car failed) (cdr failed)))))
-                (setq more t)))
-            (when (eq (romacs-agent-dispatch session) 'again) (setq more t))
+            (setq more (or (romacs-agent--dispatch-one session)
+                           (eq (romacs-agent-dispatch session) 'again)))
             (setf (romacs-agent-dispatch session) 'busy)))
       (setf (romacs-agent-dispatch session) nil))))
 
@@ -4093,21 +4093,21 @@ alone), and not held (its user edits it: what waits behind it waits)."
   "Whether ITEM delivers delegated tasks' results: its text is theirs."
   (and (cl-some (lambda (m) (plist-get m :wake)) (romacs-agent-item-messages item)) t))
 
-(defun romacs-agent--together (session head)
-  "(PARTS . STALE): HEAD and the messages waiting behind it in SESSION's
-queue that go in its turn (`romacs-agent--joinable-p', results with
+(defun romacs-agent--together (queue head)
+  "(PARTS . STALE): HEAD and the messages waiting behind it in QUEUE
+that go in its turn (`romacs-agent--joinable-p', results with
 results), in order, and those among them no longer wanted (VALID says),
 to be dropped as they go.  HEAD alone when it is not the queue's head (a
 steer passing what waits).  Nothing changes here: its views are told
 once the turn's write has decided."
-  (if (not (and (eq head (car (romacs-agent-queue session))) (romacs-agent--joinable-p head)))
+  (if (not (and (eq head (car queue)) (romacs-agent--joinable-p head)))
       (list (list head))
     (let ((parts (list head)) (stale nil) (results (romacs-agent--results-p head)))
-      (cl-loop for item in (cdr (romacs-agent-queue session))
+      (cl-loop for item in (cdr queue)
                while (and (romacs-agent--joinable-p item) (eq (romacs-agent--results-p item) results))
-               do (if (and (romacs-agent-item-valid item) (not (funcall (romacs-agent-item-valid item))))
-                      (push item stale)
-                    (push item parts)))
+               do (if (romacs-agent--wanted-item-p item)
+                      (push item parts)
+                    (push item stale)))
       (cons (nreverse parts) stale))))
 
 (defun romacs-agent--joined (parts)
