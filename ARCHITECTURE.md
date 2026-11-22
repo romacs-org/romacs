@@ -74,8 +74,7 @@ Each top-level entry, and what it holds:
 - `Cargo.toml` and `Cargo.lock`: the workspace; `.cargo/`: Cargo and
   cargo-deny configuration; `.config/`: nextest; `rust-toolchain.toml`.
 - `flake.nix` and `flake.lock`: the toolchain and packages.
-- `Makefile`: the gates and Lisp checks; `scripts/`: forwarding stubs for
-  moved commands; `.github/`: CI.
+- `Makefile`: the gates and Lisp checks; `.github/`: CI.
 - `.gitattributes`, `.gitignore`, `README.md`, `AGENTS.md`,
   `ARCHITECTURE.md`, `COPYING`.
 
