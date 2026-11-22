@@ -33,7 +33,12 @@
                  "stopped"))
   (should (equal (romacs-agent-watch--status "x.service: Main process exited, code=exited, status=2/INVALIDARGUMENT\nx.service: Failed with result 'exit-code'.\nx.service: Consumed 1s CPU time over 2s wall clock time.\n")
                  "exited, status=2/INVALIDARGUMENT (failed: exit-code)"))
-  (should (string-prefix-p "unknown" (romacs-agent-watch--status ""))))
+  ;; A quick clean exit logs nothing after the watch began, or its start
+  ;; alone, as a death by SIGTERM does: no exit is claimed.
+  (should (equal (romacs-agent-watch--status "") "no exit status in the journal"))
+  (should (equal (romacs-agent-watch--status "Started forge watch r1.\n") "no exit status in the journal"))
+  (should (equal (romacs-agent-watch--status "x.service: Main process exited, code=killed, status=9/KILL\n")
+                 "killed, status=9/KILL")))
 
 (defmacro romacs-agent-watch-tests--with (&rest body)
   "BODY with the lead `lead' calling and its idle task `child', in a
@@ -50,6 +55,7 @@ private directory `root'.  `told' collects (TASK . TEXT) a task is told,
                                      :dir (expand-file-name "child" root) :options '(:parent "lead")))
           (caller "lead") (state "active")
           (journal "check.service: Main process exited, code=exited, status=0/SUCCESS\n")
+          (journal-exit 0) (issues nil)
           (told nil))
      (make-directory (romacs-agent-dir child))
      (dolist (s (list lead child)) (puthash (romacs-agent-id s) s romacs-agent--sessions))
@@ -60,8 +66,10 @@ private directory `root'.  `told' collects (TASK . TEXT) a task is told,
                 (lambda (program args then)
                   (funcall then (if (equal program "journalctl") journal
                                   (mapconcat (lambda (unit) (format "Id=%s\nActiveState=%s\n" unit state))
-                                             (cdr (member "--" args)) "\n")))
+                                             (cdr (member "--" args)) "\n"))
+                           (if (equal program "journalctl") journal-exit 0))
                   nil))
+               ((symbol-function 'romacs-agent-issues-record) (lambda (kind &rest _) (push kind issues)))
                ((symbol-function 'romacs-agent-tools--tell) (lambda (task text &rest _) (push (cons task text) told) task))
                ((symbol-function 'run-at-time) (lambda (&rest _) (timer-create))))
        (unwind-protect (progn ,@body) (delete-directory root t)))))
@@ -106,6 +114,24 @@ private directory `root'.  `told' collects (TASK . TEXT) a task is told,
     (should-not (gethash "child" romacs-agent-watch--watches))
     (should-not romacs-agent-watch--timer)
     (should-not (file-exists-p (romacs-agent-watch--file child)))))
+
+(ert-deftest romacs-agent-watch-says-no-exit-it-did-not-read ()
+  ;; A short clean exit leaves no line after the watch began: the task is
+  ;; told no exit is recorded, and it is no issue.  A journal that could
+  ;; not be read is the watch's failure, whatever its output says.
+  (romacs-agent-watch-tests--with
+    (romacs-agent-watch-tests--watch "taskId" "child" "unit" "check")
+    (setq state "inactive" journal "")
+    (romacs-agent-watch--tick)
+    (should (string-match-p "Unit check.service ended: no exit status in the journal" (cdr (car told))))
+    (should-not issues)
+    (setq state "active" told nil)
+    (romacs-agent-watch-tests--watch "taskId" "child" "unit" "check")
+    (setq state "inactive" journal-exit 1
+          journal "check.service: Main process exited, code=exited, status=0/SUCCESS\n")
+    (romacs-agent-watch--tick)
+    (should (string-match-p "Unit check.service ended: unknown: journalctl exited 1" (cdr (car told))))
+    (should (equal issues '(watch-unknown)))))
 
 (ert-deftest romacs-agent-watch-refusals ()
   (romacs-agent-watch-tests--with

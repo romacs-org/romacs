@@ -118,7 +118,10 @@ longer running (a collected unit is inactive); one it does not name
                     watches))
 
 (defun romacs-agent-watch--status (journal)
-  "The exit a unit's JOURNAL lines (`journalctl -o cat') last record."
+  "The exit a unit's JOURNAL lines (`journalctl -o cat') last record.
+Lines that record no end say no exit: a clean exit that used little
+logs nothing, nor does a death by SIGTERM; the job's own output says
+how it went."
   (let ((status nil))
     (dolist (line (split-string journal "\n" t))
       (cond ((string-match "Main process exited, code=\\([a-z]+\\), status=\\([^ ]+\\)" line)
@@ -132,7 +135,7 @@ longer running (a collected unit is inactive); one it does not name
              (setq status (or status "exited, status=0/SUCCESS")))
             ((string-match "Failed with result '\\([^']+\\)'" line)
              (setq status (format "%s (failed: %s)" (or status "no exit recorded") (match-string 1 line))))))
-    (or status "unknown: the journal recorded no end")))
+    (or status "no exit status in the journal")))
 
 (defun romacs-agent-watch--tail (file)
   "FILE's last `romacs-agent-watch--lines' lines, or why there are none."
@@ -218,14 +221,16 @@ looked, and remember what is there now (an entry gone and back is new)."
     (romacs-agent-watch--schedule)))
 
 (defun romacs-agent-watch--output (program args then)
-  "Run PROGRAM with ARGS off the command loop; call THEN with its output."
+  "Run PROGRAM with ARGS off the command loop; call THEN with its output
+and its exit status."
   (let ((buffer (generate-new-buffer " *romacs-agent-watch*")))
     (make-process :name "romacs-agent-watch" :buffer buffer :command (cons program args)
                   :connection-type 'pipe :noquery t :stderr null-device
                   :sentinel (lambda (process _event)
                               (unless (process-live-p process)
                                 (unwind-protect
-                                    (funcall then (with-current-buffer buffer (buffer-string)))
+                                    (funcall then (with-current-buffer buffer (buffer-string))
+                                             (process-exit-status process))
                                   (kill-buffer buffer)))))))
 
 (defun romacs-agent-watch--report (id watch)
@@ -235,12 +240,15 @@ looked, and remember what is there now (an entry gone and back is new)."
                       ;; To the microsecond: a unit started again at once
                       ;; (one check of a tree after another) ends after this.
                       "--since" (format "@%.6f" (plist-get watch :since)))
-   (lambda (journal)
+   (lambda (journal exit)
      (when-let* ((task (romacs-agent-get id))
                  ((memq watch (gethash id romacs-agent-watch--watches))))
        (romacs-agent-watch--forget id watch)
        (unless (romacs-agent-cancelled task)
-         (let ((status (romacs-agent-watch--status journal)))
+         ;; Lines read recording no end are a short job's way; a
+         ;; journal that could not be read is the watch's own failure.
+         (let ((status (if (eql exit 0) (romacs-agent-watch--status journal)
+                         (format "unknown: journalctl exited %s" exit))))
            (when (string-prefix-p "unknown" status)
              (romacs-agent-issues-record 'watch-unknown task :unit (plist-get watch :unit) :status status))
            (romacs-agent-tools--tell task (romacs-agent-watch--message watch status))))))))
@@ -263,7 +271,7 @@ at once; report what changed."
                                  (delete-dups (mapcar (lambda (pair) (romacs-agent-watch--unit-name
                                                                       (plist-get (cdr pair) :unit)))
                                                       watches)))
-             (lambda (text)
+             (lambda (text _exit)
                (pcase-dolist (`(,id . ,watch) (romacs-agent-watch--ended watches (romacs-agent-watch--states text)))
                  (romacs-agent-watch--report id watch))))))))
 
