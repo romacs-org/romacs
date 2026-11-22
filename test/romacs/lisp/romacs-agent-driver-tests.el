@@ -128,6 +128,23 @@ line's `env' sets only its own configuration variable."
     (puthash key (json-parse-string (json-serialize object) :object-type 'hash-table) record)
     (romacs-agent--record session record)))
 
+(ert-deftest romacs-agent-record-delivers-all-events-before-stepping ()
+  (let* ((session (romacs-agent--make :id "journal-test" :harness 'claude))
+         (seen nil)
+         (romacs-agent-event-functions (list (lambda (_session event) (push event seen))))
+         (note (romacs-mcp--object "type" "plan" "on" t)))
+    (cl-letf (((symbol-function 'romacs-agent--step) (lambda (_) (push 'step seen))))
+      (romacs-agent-driver-test--feed session 1 "note" note)
+      (romacs-agent-driver-test--feed session 1 "note" note)
+      (should (equal (mapcar (lambda (e) (plist-get e :type)) (reverse seen))
+                     '(plan-switch status)))
+      (should (equal (mapcar (lambda (e) (plist-get e :last)) (reverse seen)) '(nil t)))
+      (setq seen nil)
+      (setf (romacs-agent-caught-up session) t)
+      (romacs-agent-driver-test--feed session 2 "note" note)
+      (should (eq (pop seen) 'step))
+      (should (equal (mapcar (lambda (e) (plist-get e :seq)) seen) '(2 2))))))
+
 (ert-deftest romacs-agent-startup-step-waits-for-its-own-echo ()
   ;; An interrupt written while a startup step is out (its echo first)
   ;; does not count as that step's: one session/new, not two.

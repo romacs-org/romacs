@@ -2019,150 +2019,170 @@ keeps across runs (`:rolled-back' and `:resume-at', each when known)."
             (cl-loop for key in '(:rolled-back :resume-at)
                      when (plist-member old key) append (list key (plist-get old key))))))
 
+(defun romacs-agent--record-cursor (record)
+  "Driver state fields that RECORD changes about the conversation cursor."
+  (cond ((romacs-agent--rollback-note-p record)
+         (let ((at (gethash "at" (gethash "note" record) 'unknown)))
+           (list :rolled-back t :resume-at (unless (eq at :null) at))))
+        ((romacs-agent--note-p record "renew") '(:rolled-back t :resume-at nil))
+        ((romacs-agent--record-request record) '(:rolled-back nil))))
+
+(defun romacs-agent--record-echo (session input)
+  "Remember that the supervisor journaled INPUT for SESSION."
+  (cl-incf (romacs-agent-inputs session))
+  ;; An interrupt written before a startup line is echoed does not clear it.
+  (let ((pending (romacs-agent-startup-pending session)))
+    (when (or (eq pending t) (equal pending (romacs-agent--step-id input)))
+      (setf (romacs-agent-startup-pending session) nil))))
+
+(defun romacs-agent--record-prompt (input kept)
+  "Input event for a per-turn INPUT, recovering KEPT text for its prompt."
+  (let* ((prompt (gethash "prompt" input))
+         (incoming (and kept (equal (plist-get kept :prompt) (secure-hash 'sha1 prompt)) kept)))
+    (append (list :type 'input :text (if incoming (plist-get incoming :text) prompt)
+                  :images (append (gethash "images" input) nil))
+            (and incoming (list :messages (plist-get incoming :messages))))))
+
+(defun romacs-agent--record-input-context (input steer)
+  "The decoded context for INPUT's request or messages, when present.
+STEER is non-nil when the journal already records a turn under way."
+  (let ((request (gethash "romacsRequest" input))
+        (messages (romacs-agent--messages-of (gethash "romacsMessages" input)))
+        (own (romacs-agent--value (gethash "romacsOwn" input))))
+    (when (or request messages)
+      (append (and request (list :request request))
+              (and messages (list :messages messages))
+              (and own (list :own own))
+              (and steer (list :steer t))))))
+
+(defun romacs-agent--annotate-input-events (events context)
+  "Add journal CONTEXT to each input event in EVENTS."
+  (if context
+      (mapcar (lambda (event)
+                (if (eq (plist-get event :type) 'input) (append event context) event))
+              events)
+    events))
+
+(defun romacs-agent--record-input-events (session input)
+  "Decode SESSION's journaled INPUT."
+  (cond ((and (hash-table-p input) (stringp (gethash "prompt" input)))
+         (let ((kept (romacs-agent-incoming session)))
+           ;; Also discard a kept prompt that a failed launch left behind.
+           (setf (romacs-agent-incoming session) nil)
+           (list (romacs-agent--record-prompt input kept))))
+        ((hash-table-p input)
+         (let* ((steer (> (or (romacs-agent-input-seq session) 0) (romacs-agent-completed-seq session)))
+                (context (romacs-agent--record-input-context input steer)))
+           (romacs-agent--annotate-input-events
+            (funcall (or (romacs-agent--harness-get session :input-events) #'ignore) session input)
+            context)))
+        (t (list (list :type 'input :text (if (stringp input) input (romacs-agent--json input)))))))
+
+(defun romacs-agent--record-answer (note)
+  "Attribution event for the approval answer in NOTE."
+  (let ((by (or (romacs-agent--value (gethash "by" note)) "unknown"))
+        (answers (gethash "answers" note)))
+    ;; Protocol 1.0 clients may read only :by.
+    (list :type 'attributed :request-id (gethash "request" note) :by by
+          :actor (list :kind by :login (romacs-agent--value (gethash "login" note))
+                       :client (romacs-agent--value (gethash "client" note)))
+          :decision (gethash "decision" note) :scope (gethash "scope" note)
+          :reason (romacs-agent--value (gethash "reason" note))
+          :answers (and (hash-table-p answers) (> (hash-table-count answers) 0) answers))))
+
+(defun romacs-agent--record-handoff-status (note)
+  "Status text for the provider handoff in NOTE."
+  (let ((from (gethash "from" note)) (to (gethash "to" note))
+        (resets (gethash "resets" note)))
+    (format "%s: %s%s"
+            (if (stringp to) (format "moved from %s to %s" from to) (format "stays on %s" from))
+            (gethash "why" note)
+            (if (numberp resets) (format-time-string " (resets %a %H:%M)" resets) ""))))
+
+(defun romacs-agent--record-resume-status (note)
+  "Status text for the scheduled resume in NOTE."
+  (pcase (gethash "state" note)
+    ("scheduled" (format-time-string "resumes by itself at %a %H:%M, once its limit resets" (gethash "at" note)))
+    ("fired" (format "resumed on %s: its limit reset" (gethash "on" note)))
+    (_ (format "will not resume by itself: %s" (gethash "why" note)))))
+
+(defun romacs-agent--record-note-event (note)
+  "Translate NOTE into its event when it names one."
+  (pcase (gethash "type" note)
+    ("run" (list :type 'run))
+    ("answer" (romacs-agent--record-answer note))
+    ("selection" (list :type 'selection
+                       :from (romacs-agent--selection-of (gethash "from" note))
+                       :to (romacs-agent--selection-of (gethash "to" note))))
+    ("replied" (list :type 'replied :message (gethash "message" note)
+                     :reply (gethash "reply" note) :by-user (eq (gethash "byUser" note) t)))
+    ("messages" (list :type 'incoming :text (gethash "text" note) :prompt (gethash "prompt" note)
+                      :messages (romacs-agent--messages-of (gethash "messages" note))))
+    ("renew" (list :type 'renewed :why (romacs-agent--value (gethash "why" note))
+                   :from (romacs-agent--value (gethash "from" note))
+                   :to (romacs-agent--value (gethash "to" note)) :brief (gethash "brief" note)))
+    ("attachments" (list :type 'attachments :id (gethash "id" note)
+                         :attachments (romacs-agent--attachments-of (gethash "items" note))
+                         :compare (append (romacs-agent--value (gethash "compare" note)) nil)))
+    ("handoff" (list :type 'status :text (romacs-agent--record-handoff-status note)))
+    ("resume" (list :type 'status :text (romacs-agent--record-resume-status note)))
+    ("fork" (list :type 'forked :from (gethash "from" note) :title (gethash "title" note)
+                  :seq-from (gethash "seq" note) :turns (gethash "turns" note) :after (gethash "after" note)))
+    ("rollback" (list :type 'rolled-back :to (gethash "to" note) :turns (gethash "turns" note)
+                      :prompt (gethash "prompt" note) :files (eq (gethash "files" note) t)))))
+
+(defun romacs-agent--record-note-events (note)
+  "Translate the journal NOTE to events in order."
+  (if (equal (gethash "type" note) "plan")
+      (let ((on (eq (gethash "on" note) t)))
+        (list (list :type 'plan-switch :on on)
+              (list :type 'status :text (if on "plan mode" "plan mode off"))))
+    (when-let* ((event (romacs-agent--record-note-event note)))
+      (list event))))
+
+(defun romacs-agent--record-events (session record input)
+  "Decode SESSION's RECORD, with INPUT from it or `:absent'."
+  (let ((out (gethash "out" record :absent))
+        (exit (gethash "exit" record :absent))
+        (note (gethash "note" record :absent)))
+    (cond ((hash-table-p out) (funcall (romacs-agent--harness-get session :events) session out))
+          ((stringp out) (list (list :type 'unknown :raw out)))
+          ((not (eq input :absent)) (romacs-agent--record-input-events session input))
+          ((not (eq exit :absent)) (list (list :type 'exit :status exit)))
+          ((hash-table-p note) (romacs-agent--record-note-events note)))))
+
+(defun romacs-agent--after-record (session seq ends)
+  "Advance a caught-up SESSION after journal record SEQ.
+ENDS says a turn or run ended in that record."
+  (when (romacs-agent-caught-up session)
+    (when (or ends (assq session romacs-agent--keeping)
+              (>= (- seq (gethash session romacs-agent--kept 0)) romacs-agent--keep-every))
+      (romacs-agent--keep-soon session))
+    (romacs-agent--step session)
+    (when (eq (romacs-agent-loaded (romacs-agent-id session)) session)
+      (romacs-agent--dispatch-soon session))))
+
 (defun romacs-agent--record (session record)
-  "Handle one journal RECORD of SESSION.  A held note it is the record of
-is let go, however it is read (live, a replay, a journal read here)."
+  "Apply one journal RECORD of SESSION, acknowledging held notes even on replay."
   (romacs-agent--held-echoed session record)
   (let ((seq (gethash "seq" record)))
     (when (and (integerp seq) (> seq (romacs-agent-seq session)))
       (setf (romacs-agent-seq session) seq)
-      ;; Whether it was rolled back or renewed with nothing said since, and
-      ;; where its conversation then resumes, kept as its records come: a
-      ;; resume reads none of them.  The place its driver keeps from its
-      ;; harness's output (`:resume-at'); a renewal's conversation begins
-      ;; anew, and a rollback's note says where it went back to, `unknown'
-      ;; when an earlier build's note does not.
-      (cond ((romacs-agent--rollback-note-p record)
-             (let ((at (gethash "at" (gethash "note" record) 'unknown)))
-               (setf (romacs-agent-driver-state session)
-                     (plist-put (plist-put (romacs-agent-driver-state session) :rolled-back t)
-                                :resume-at (if (eq at :null) nil at)))))
-            ((romacs-agent--note-p record "renew")
-             (setf (romacs-agent-driver-state session)
-                   (plist-put (plist-put (romacs-agent-driver-state session) :rolled-back t) :resume-at nil)))
-            ((romacs-agent--record-request record)
-             (setf (romacs-agent-driver-state session) (plist-put (romacs-agent-driver-state session) :rolled-back nil))))
-      (let ((out (gethash "out" record :absent))
-            (in (gethash "in" record :absent))
-            (exit (gethash "exit" record :absent))
-            (note (gethash "note" record :absent)))
-        (unless (eq in :absent)
-          (cl-incf (romacs-agent-inputs session))
-          ;; The startup line written is journaled back: the next may go.
-          ;; Another line written before it (an interrupt) is not it.
-          (let ((pending (romacs-agent-startup-pending session)))
-            (when (or (eq pending t) (equal pending (romacs-agent--step-id in)))
-              (setf (romacs-agent-startup-pending session) nil))))
-        (let ((events (cond ((hash-table-p out) (funcall (romacs-agent--harness-get session :events) session out))
-                            ((stringp out) (list (list :type 'unknown :raw out)))
-                            ;; A per-turn prompt: the supervisor's own record.
-                            ((and (hash-table-p in) (stringp (gethash "prompt" in)))
-                             (let ((incoming (let ((kept (romacs-agent-incoming session)))
-                                               ;; Its own prompt's only.
-                                               (and kept (equal (plist-get kept :prompt)
-                                                                (secure-hash 'sha1 (gethash "prompt" in)))
-                                                    kept))))
-                               ;; Taken, or left by a launch that failed: done with.
-                               (setf (romacs-agent-incoming session) nil)
-                               (list (append (list :type 'input
-                                                   ;; Its own text, as the note kept it.
-                                                   :text (if incoming (plist-get incoming :text) (gethash "prompt" in))
-                                                   :images (append (gethash "images" in) nil))
-                                             (and incoming (list :messages (plist-get incoming :messages)))))))
-                            ((hash-table-p in)
-                             (let ((request (gethash "romacsRequest" in))
-                                   (messages (romacs-agent--messages-of (gethash "romacsMessages" in)))
-                                   (own (romacs-agent--value (gethash "romacsOwn" in)))
-                                   ;; Written into a turn under way: a steer.
-                                   (steer (> (or (romacs-agent-input-seq session) 0) (romacs-agent-completed-seq session))))
-                               (mapcar (lambda (event)
-                                         (if (and (or request messages) (eq (plist-get event :type) 'input))
-                                             (append event (and request (list :request request))
-                                                     (and messages (list :messages messages))
-                                                     (and own (list :own own))
-                                                     (and steer (list :steer t)))
-                                           event))
-                                       (funcall (or (romacs-agent--harness-get session :input-events) #'ignore)
-                                                session in))))
-                            ;; A per-turn harness's prompt, written as text.
-                            ((not (eq in :absent))
-                             (list (list :type 'input :text (if (stringp in) in (romacs-agent--json in)))))
-                            ((not (eq exit :absent)) (list (list :type 'exit :status exit)))
-                            ((hash-table-p note)
-                             (pcase (gethash "type" note)
-                               ("run" (list (list :type 'run)))
-                               ;; Romacs's own switch of plan mode: an event of its
-                               ;; own (what a view does on it), and said.
-                               ("plan" (list (list :type 'plan-switch :on (eq (gethash "on" note) t))
-                                             (list :type 'status :text (if (eq (gethash "on" note) t) "plan mode" "plan mode off"))))
-                               ;; Who answered an approval, and how (`romacs-agent-respond').
-                               ("answer" (list (list :type 'attributed :request-id (gethash "request" note)
-                                                     ;; Who alone too: a client of protocol 1.0
-                                                     ;; older than :actor reads it.
-                                                     :by (or (romacs-agent--value (gethash "by" note)) "unknown")
-                                                     ;; Older notes name only who.
-                                                     :actor (list :kind (or (romacs-agent--value (gethash "by" note)) "unknown")
-                                                                  :login (romacs-agent--value (gethash "login" note))
-                                                                  :client (romacs-agent--value (gethash "client" note)))
-                                                     :decision (gethash "decision" note)
-                                                     :scope (gethash "scope" note)
-                                                     :reason (romacs-agent--value (gethash "reason" note))
-                                                     :answers (let ((answers (gethash "answers" note)))
-                                                                (and (hash-table-p answers) (> (hash-table-count answers) 0) answers)))))
-                               ("selection" (list (list :type 'selection
-                                                        :from (romacs-agent--selection-of (gethash "from" note))
-                                                        :to (romacs-agent--selection-of (gethash "to" note)))))
-                               ;; Its user answered a message from another session.
-                               ("replied" (list (list :type 'replied :message (gethash "message" note)
-                                                      :reply (gethash "reply" note) :by-user (eq (gethash "byUser" note) t))))
-                               ("messages" (list (list :type 'incoming :text (gethash "text" note) :prompt (gethash "prompt" note)
-                                                       :messages (romacs-agent--messages-of (gethash "messages" note)))))
-                               ("renew" (list (list :type 'renewed :why (romacs-agent--value (gethash "why" note))
-                                                    :from (romacs-agent--value (gethash "from" note))
-                                                    :to (romacs-agent--value (gethash "to" note))
-                                                    :brief (gethash "brief" note))))
-                               ("attachments" (list (list :type 'attachments :id (gethash "id" note)
-                                                          :attachments (romacs-agent--attachments-of (gethash "items" note))
-                                                          :compare (append (romacs-agent--value (gethash "compare" note)) nil))))
-                               ("handoff" (list (list :type 'status
-                                                      :text (format "%s: %s%s"
-                                                                    (if (stringp (gethash "to" note))
-                                                                        (format "moved from %s to %s" (gethash "from" note) (gethash "to" note))
-                                                                      (format "stays on %s" (gethash "from" note)))
-                                                                    (gethash "why" note)
-                                                                    (let ((resets (gethash "resets" note)))
-                                                                      (if (numberp resets)
-                                                                          (format-time-string " (resets %a %H:%M)" resets)
-                                                                        ""))))))
-                               ("resume" (list (list :type 'status
-                                                     :text (pcase (gethash "state" note)
-                                                             ("scheduled" (format-time-string "resumes by itself at %a %H:%M, once its limit resets"
-                                                                                              (gethash "at" note)))
-                                                             ("fired" (format "resumed on %s: its limit reset" (gethash "on" note)))
-                                                             (_ (format "will not resume by itself: %s" (gethash "why" note)))))))
-                               ("fork" (list (list :type 'forked :from (gethash "from" note) :title (gethash "title" note)
-                                                   :seq-from (gethash "seq" note) :turns (gethash "turns" note) :after (gethash "after" note))))
-                               ("rollback" (list (list :type 'rolled-back :to (gethash "to" note) :turns (gethash "turns" note)
-                                                       :prompt (gethash "prompt" note) :files (eq (gethash "files" note) t)))))))))
-          ;; :last marks a record's last event: a view that has shown it has
-          ;; shown the whole record.
-          (let ((ends (cl-some (lambda (event) (memq (plist-get event :type) '(done exit))) events)))
-            (while events
-              (romacs-agent--raise session (append (car events) (list :seq seq :last (null (cdr events))
-                                                                      :time (gethash "t" record))))
-              (setq events (cdr events)))
-            (when (romacs-agent-caught-up session)
-              ;; A turn or a run ended, or a long turn's records went on
-              ;; past `romacs-agent--keep-every': its state is kept, as of
-              ;; the last record handled before the editor is idle.
-              (when (or ends (assq session romacs-agent--keeping)
-                        (>= (- seq (gethash session romacs-agent--kept 0)) romacs-agent--keep-every))
-                (romacs-agent--keep-soon session))
-              (romacs-agent--step session)
-              ;; What it says may let a message go (a turn's end, a turn
-              ;; to steer): asked once its hooks have run.
-              (when (eq (romacs-agent-loaded (romacs-agent-id session)) session)
-                (romacs-agent--dispatch-soon session)))))))))
+      (when-let* ((cursor (romacs-agent--record-cursor record)))
+        (let ((state (romacs-agent-driver-state session)))
+          (cl-loop for (key value) on cursor by #'cddr
+                   do (setq state (plist-put state key value)))
+          (setf (romacs-agent-driver-state session) state)))
+      (let ((input (gethash "in" record :absent)))
+        (unless (eq input :absent)
+          (romacs-agent--record-echo session input))
+        (let* ((events (romacs-agent--record-events session record input))
+               (time (gethash "t" record))
+               (ends (cl-some (lambda (event) (memq (plist-get event :type) '(done exit))) events)))
+          (while events
+            (let ((event (pop events)))
+              (romacs-agent--raise session (append event (list :seq seq :last (null events) :time time)))))
+          (romacs-agent--after-record session seq ends))))))
 
 (defun romacs-agent--step-id (object)
   "What names a driver line written, to know its echo by: its request id
