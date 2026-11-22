@@ -54,6 +54,7 @@
 (declare-function romacs-agent-log-faces-soon "romacs-agent-log-faces" ())
 (declare-function romacs-agent-log-rounds-you "romacs-agent-log-rounds" (text))
 (declare-function romacs-agent-log-rounds-incoming "romacs-agent-log-rounds" (event incoming))
+(declare-function romacs-agent-log-source-queue "romacs-agent-log-queue" (source session))
 (declare-function romacs-agent-log-rounds-end "romacs-agent-log-rounds" ())
 (declare-function romacs-agent-incoming-of "romacs-agent-tools" (text))
 (declare-function romacs-agent-log-faces-output "romacs-agent-log-faces" (text))
@@ -1695,9 +1696,13 @@ session, this editor's by default."
 ;; composer's unsent text; its transcript is drawn from the records.
 (defun romacs-agent-log--desktop-save (_dirname)
   ;; A queued message in the composer to edit is no draft: it waits
-  ;; where it was, as it was, for the next session.
+  ;; where it was, as it was, for the next session.  Gone from the queue
+  ;; meanwhile, the composer's text is all there is of it: a draft.
   (list :session (romacs-agent-id romacs-agent-log--session)
-        :draft (if romacs-agent-log-queue--editing ""
+        :draft (if (and romacs-agent-log-queue--editing
+                        (memq romacs-agent-log-queue--editing
+                              (romacs-agent-log-source-queue romacs-agent-log--source romacs-agent-log--session)))
+                   ""
                  (buffer-substring-no-properties romacs-agent-log--input (point-max)))))
 
 (defun romacs-agent-log-desktop-restore (_file _name misc)
