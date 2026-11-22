@@ -3,7 +3,7 @@
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
-;; A large idle Claude Code thread is compacted just before its prompt
+;; A large idle thread whose harness supports it is compacted before its prompt
 ;; cache expires, as T3 Code does (IdleCompaction.ts): the compaction reads
 ;; the context at the cached price, and the next prompt starts from the
 ;; summary instead of paying a cold read of the whole context.  Only a
@@ -16,7 +16,7 @@
 (require 'romacs-agent)
 
 (defcustom romacs-agent-idle-compaction t
-  "Whether a large idle Claude Code thread is compacted just before its
+  "Whether a large idle thread is compacted just before its
 prompt cache expires: its last request's time and the cache's life that
 request reported (an hour, or five minutes)."
   :type 'boolean :group 'romacs-agent)
@@ -45,7 +45,7 @@ commands, or a task it delegated."
   "Whether SESSION's thread is to be compacted at NOW (`float-time')."
   (let ((expires (plist-get (romacs-agent-driver-state session) :cache-expires)))
     (and romacs-agent-idle-compaction
-         (eq (romacs-agent-harness session) 'claude)
+         (romacs-agent--idle-compact-prompt session)
          (not (plist-get (romacs-agent-options session) :parent))
          (eq (romacs-agent-loaded (romacs-agent-id session)) session)
          (romacs-agent-caught-up session)
@@ -63,8 +63,8 @@ commands, or a task it delegated."
          (not (romacs-agent-idle--busy-p session)))))
 
 (defun romacs-agent-idle--compact (session)
-  "Compact SESSION's thread: Claude Code's own /compact, as a message."
-  (romacs-agent-send session "/compact"))
+  "Send SESSION's harness the prompt that compacts its thread."
+  (romacs-agent-send session (romacs-agent--idle-compact-prompt session)))
 
 (defun romacs-agent-idle--tick ()
   "Compact every thread due now."

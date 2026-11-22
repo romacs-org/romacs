@@ -202,4 +202,24 @@ root, their reports in a fresh table; `kept' counts writes to disk."
       (should (= (length (gethash "harnesses" answer)) 1)))
     (should-error (romacs-agent-limits--tool (romacs-mcp--object "harness" "nope")) :type 'user-error)))
 
+(ert-deftest romacs-agent-limits-resumes-after-merging-a-report ()
+  (romacs-agent-limits-tests--with
+    (let* ((reset (+ (float-time) 600))
+           (spent (list :status 'rejected :used 1.0 :resets reset :window "five_hour"))
+           (file (romacs-agent--room-file))
+           (resumed nil)
+           (romacs-agent-room-functions (list (lambda (provider) (push provider resumed)))))
+      (puthash "claude" (cons :time (cons 1.0 spent)) romacs-agent--room)
+      (make-directory (file-name-directory file) t)
+      (with-temp-file file
+        (prin1 (list (cons "claude" (cons :time (cons 3.0 spent)))) (current-buffer)))
+      (cl-letf (((symbol-function 'romacs-agent--keep-room) #'romacs-agent--merge-room)
+                ((symbol-function 'romacs-agent--room-watch) #'ignore))
+        (romacs-agent-limits-tests--report "claude" 2.0 `("five_hour" allowed 0.3 ,reset))
+        (should-not (romacs-agent-room "claude"))
+        (should-not resumed)
+        (romacs-agent-limits-tests--report "claude" 4.0 `("five_hour" allowed 0.3 ,reset))
+        (should (romacs-agent-room "claude"))
+        (should (equal resumed '("claude")))))))
+
 ;;; romacs-agent-limits-tests.el ends here

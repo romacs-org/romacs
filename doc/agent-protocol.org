@@ -62,27 +62,30 @@ session not yet imported.
 The host knows no harness format.  The editor attached to a session gives
 its lines their meaning, in Lisp.
 
-- *Drivers.* =romacs-agent-claude.el= (799 lines) and
-  =romacs-agent-codex.el= (684):
-  - =:events= and =:input-events= turn records into normalized events:
+- *Drivers.* Claude and Codex register with =romacs-agent-define-harness=.
+  Other harnesses use the same registration.
+  - =:decode-context= reads the values needed from the session before
+    =:decode= turns journaled objects into normalized events:
     =session=, =input=, =delta=, =message-end=, =thinking=, =tool=,
     =approval=, =answered=, =plan=, =status=, =error=, =compacted=,
     =usage=, =rate-limit=, =done=, =exit=, ...;
+    Older drivers can still use =:events= and =:input-events=.
   - =:input=, =:respond=, =:interrupt= and =:select= compose the lines
     written back.
-- *The fold.* =romacs-agent--record= and =romacs-agent--raise=
-  (=romacs-agent.el=, 6,022 lines) fold those events into a session
-  struct: state, approvals, asks, questions, model, effort, context, cost,
-  queue, turns.
-- *Automation.* The attached editor also:
-  - dispatches the queue;
-  - writes notes (selection, rename, renew, rollback, fork, resume
-    schedule);
-  - runs startup steps and keeps the folded state;
-  - answers requests nobody was asked about (=romacs-agent--answer-unasked=):
-    under =romacs-agent-approval-policy= =allow= it allows tool calls.  It
-    once denied tool calls in plan mode and presented plans; the chat
-    rebuild removed that, and plan mode is now the harness's own.
+  - Background journal and transcript readers load the registered driver
+    files with the editor's =load-path= so they decode the same formats.
+- *The fold.* =romacs-agent--record= decodes one journal record, applies
+  its bookkeeping, and delivers the public events in order.
+  =romacs-agent--raise= applies each event to the session before notifying
+  observers.  History readers fold into a session copy.  The original
+  session owns manifest updates and acknowledgements of held notes.
+- *Automation.* The attached editor keeps the folded state and writes
+  notes for selections, renames, renewals, rollbacks, forks and scheduled
+  resumes.  After journal catch-up it runs startup steps, dispatches the
+  queue, and answers unasked requests (=romacs-agent--answer-unasked=).
+  When =romacs-agent-approval-policy= is =allow=, it allows tool calls.
+  It once denied tool calls in plan mode and presented plans.  The chat
+  rebuild removed that, and plan mode is now the harness's own.
 
   None of those answers was drawn.  That path plausibly explains approvals
   reported rejected that the user never saw; the affected records would

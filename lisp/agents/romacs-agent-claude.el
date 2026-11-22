@@ -11,6 +11,7 @@
 ;;; Code:
 
 (require 'romacs-agent)
+(require 'romacs-agent-claude-history)
 (require 'romacs-agent-gate)
 (require 'parse-time)
 
@@ -290,18 +291,16 @@ runs is that subagent's: no event."
                                       ("completed" 'completed) ("failed" 'failed) (_ 'stopped))
                              :summary (romacs-agent--value (gethash "summary" line)))))))))))
 
-(defun romacs-agent--claude-mode-refused (session id response)
-  "The events of Claude Code refusing mode switch ID, RESPONSE: said; a
-switch into plan mode leaves the session out of it, and one out of plan
-mode is tried again to the default."
-  (let ((asked (plist-get (romacs-agent-driver-state session) :mode-asked)))
+(defun romacs-agent--claude-mode-refused (state id response)
+  "Decode Claude Code's mode refusal RESPONSE for ID and prior driver STATE."
+  (let ((asked (plist-get state :mode-asked)))
     (cons (list :type 'error :text (format "Claude Code would not switch to %s mode: %s"
                                            (or asked "that") (or (romacs-agent--value (gethash "error" response)) "")))
-          (if (equal asked "plan") (list (list :type 'plan-refused))
-            (unless (member asked '(nil "default"))
-            (list (list :type 'handshake
-                        :state (list :owed (append (plist-get (romacs-agent-driver-state session) :owed)
-                                                   (list (list :line (format "romacs-mode-default-%s" id) "default")))))))))))
+          (cond ((equal asked "plan") (list (list :type 'plan-refused)))
+                ((not (member asked '(nil "default")))
+                 (list (list :type 'handshake
+                             :state (list :owed (append (plist-get state :owed)
+                                                        (list (list :line (format "romacs-mode-default-%s" id) "default")))))))))))
 
 (defun romacs-agent--claude-plan (session on from)
   "The line putting SESSION's Claude Code in plan mode when ON, else back
@@ -328,179 +327,233 @@ cache, it reports none) or does not say."
         (cond ((wrote "ephemeral_1h_input_tokens") 3600)
               ((wrote "ephemeral_5m_input_tokens") 300))))))
 
-(cl-defun romacs-agent--claude-events (session line)
-  "The events of LINE, one of Claude Code's stream-json objects."
-  (let ((type (gethash "type" line))
-        (parent (romacs-agent--value (gethash "parent_tool_use_id" line)))
-        (compacting (romacs-agent-compacting session)))
+(defun romacs-agent--claude-request-event (id request)
+  "The approval event for REQUEST ID from Claude Code."
+  (when (hash-table-p request)
+    (let ((tool (gethash "tool_name" request))
+          (input (gethash "input" request)))
+      (list :type 'approval :request-id id :tool tool :input input
+            :description (gethash "description" request) :plan (equal tool "ExitPlanMode")
+            :questions (and (equal tool "AskUserQuestion") (romacs-agent--claude-questions input))))))
+
+(defun romacs-agent--claude-control-request (owed id request)
+  "Decode Claude Code's control REQUEST with ID and the currently OWED lines."
+  (pcase (gethash "subtype" request)
+    ("hook_callback"
+     (list (list :type 'handshake
+                 :state (list :owed (append owed (list (list :hook id request)))))))
+    ("can_use_tool"
+     (let* ((event (romacs-agent--claude-request-event id request))
+            (input (plist-get event :input))
+            (plan (and (plist-get event :plan) (hash-table-p input)
+                       (romacs-agent--value (gethash "plan" input)))))
+       (append
+        (and (stringp plan) (not (string-empty-p (string-trim plan))) (list (list :type 'plan :text plan)))
+        (list (append event
+                      (list :user (and (member (plist-get event :tool) '("AskUserQuestion" "ExitPlanMode")) t)
+                            :approval-wire request))))))))
+
+(defun romacs-agent--claude-control-response (response state selection approval)
+  "Decode RESPONSE with driver STATE and its known SELECTION or APPROVAL."
+  (let ((id (gethash "request_id" response))
+        (subtype (gethash "subtype" response)))
+    (when id
+      (cond
+       (selection
+        (list (list :type 'selection-ack :request-id id :ok (equal subtype "success"))))
+       ((equal id (plist-get state :initialize))
+        (let* ((answer (gethash "response" response))
+               (models (and (hash-table-p answer) (romacs-agent--claude-models answer))))
+          (append (when models (list (list :type 'model-inventory :models models)))
+                  '((:type handshake :state (:initialized t))))))
+       (approval
+        (list (list :type 'approval-withdrawn :request-id id)))
+       ((and (string-prefix-p "romacs-mode-" id) (equal subtype "error"))
+        (romacs-agent--claude-mode-refused state id response))))))
+
+(defun romacs-agent--claude-system-events (line)
+  "Decode a Claude Code system LINE."
+  (pcase (gethash "subtype" line)
+    ("init" (list (list :type 'session :model (gethash "model" line)
+                        :harness-session (gethash "session_id" line)
+                        :permission-mode (gethash "permissionMode" line)
+                        :mcp (gethash "mcp_servers" line))))
+    ("status" (append (and (stringp (gethash "permissionMode" line))
+                           (list (list :type 'mode :permission-mode (gethash "permissionMode" line))))
+                      (romacs-agent--claude-status line)))
+    ((or "task_started" "task_progress" "task_notification" "task_updated") (romacs-agent--claude-task line))
+    (_ nil)))
+
+(defun romacs-agent--claude-stream-events (line parent id)
+  "Decode streamed Claude Code LINE from PARENT with prior message ID."
+  (let ((event (gethash "event" line)))
+    (pcase (and event (gethash "type" event))
+      ("message_start"
+       (let ((message (gethash "message" event)))
+         (cons (list :type 'record-state :state (list :message (gethash "id" message)))
+               (unless parent
+                 (list (list :type 'cache :ttl (romacs-agent--claude-cache-ttl (gethash "usage" message))))))))
+      ("content_block_delta"
+       (let ((delta (gethash "delta" event)))
+         (cons (list :type 'record-state :state (list :streamed id))
+               (pcase (gethash "type" delta)
+                 ("text_delta" (list (list :type 'delta :text (gethash "text" delta) :parent parent :message id)))
+                 ("thinking_delta" (list (list :type 'thinking :text (gethash "thinking" delta) :parent parent))))))))))
+
+(defun romacs-agent--claude-message-events (message parent streamed)
+  "Decode a Claude assistant MESSAGE from PARENT, already STREAMED when non-nil."
+  (let ((id (gethash "id" message))
+        (usage (gethash "usage" message))
+        (text nil))
+    (append
+     ;; The prompt this call sent: the context it fills.
+     (when (and (hash-table-p usage) (not parent))
+       (list (list :type 'usage :context-used (+ (or (gethash "input_tokens" usage) 0)
+                                                 (or (gethash "cache_read_input_tokens" usage) 0)
+                                                 (or (gethash "cache_creation_input_tokens" usage) 0)))))
+     (cl-loop for block across (gethash "content" message)
+              for btype = (gethash "type" block)
+              when (equal btype "text") do (setq text t)
+              when (and (equal btype "thinking") (not streamed))
+              collect (list :type 'thinking :text (gethash "thinking" block) :parent parent)
+              when (and (equal btype "text") (not streamed))
+              collect (list :type 'delta :text (gethash "text" block) :parent parent :message id)
+              when (equal btype "tool_use")
+              collect (list :type 'tool :state 'started :id (gethash "id" block)
+                            :name (gethash "name" block) :input (gethash "input" block)
+                            :parent parent))
+     ;; The message's text is whole: its view may render it once.
+     (when text (list (list :type 'message-end :message id :parent parent))))))
+
+(defun romacs-agent--claude-assistant-events (line parent streamed)
+  "Decode a live Claude assistant LINE from PARENT, already STREAMED when non-nil."
+  (let ((uuid (gethash "uuid" line))
+        (message (gethash "message" line)))
+    (append (when (and (not parent) (stringp uuid))
+              (list (list :type 'record-state :state (list :resume-at uuid))))
+            (romacs-agent--claude-message-events message parent streamed))))
+
+(defun romacs-agent--claude-user-events (line parent compacting)
+  "Decode a Claude Code user LINE from PARENT, with its prior COMPACTING state."
+  (let ((content (gethash "content" (gethash "message" line))))
+    (cond
+     ;; The synthetic line right after a boundary is its summary: a
+     ;; string from /compact, text blocks from an automatic compaction.
+     ((and compacting (eq (gethash "isSynthetic" line) t))
+      (list (list :type 'compacted :text (romacs-agent--text-of content))))
+     ;; Another Claude Code session's message, to this session's own
+     ;; conversation: an input, said to be theirs.
+     ((and (not parent)
+           ;; Text, never a tool's result: those are most of these lines.
+           (or (stringp content)
+               (and (> (length content) 0) (equal (gethash "type" (aref content 0)) "text")))
+           (romacs-agent--claude-peer line (romacs-agent--text-of content))))
+     ((stringp content) (romacs-agent--claude-injected content parent))
+     ;; Text blocks of what came from elsewhere (no tool's result).
+     ((and (not (cl-some (lambda (b) (and (hash-table-p b) (equal (gethash "type" b) "tool_result"))) content))
+           (romacs-agent--claude-incoming (romacs-agent--text-of content)))
+      (romacs-agent--claude-injected (romacs-agent--text-of content) parent))
+     (t
+      (cl-loop for block across content
+               for btype = (gethash "type" block)
+               when (equal btype "tool_result")
+               collect (list :type 'tool :state (if (eq (gethash "is_error" block) t) 'failed 'completed)
+                             :id (gethash "tool_use_id" block)
+                             :output (romacs-agent--text-of (gethash "content" block))
+                             :parent parent)
+               when (equal btype "text")
+               collect (list :type 'status :text (gethash "text" block) :parent parent))))))
+
+(defun romacs-agent--claude-result-events (line)
+  "Decode a Claude Code result LINE."
+  (list (list :type 'done :cost (gethash "total_cost_usd" line)
+              :error (eq (gethash "is_error" line) t) :text (gethash "result" line)
+              ;; Refused at a usage limit: its instance's, or its model's
+              ;; alone (one that needs usage credits the account has spent;
+              ;; its other models still run).
+              :limit (pcase (gethash "api_error" line)
+                       ("usage_limit_reached" t) ("model_requires_usage_credits" 'model))
+              :reason (romacs-agent--claude-reason line)
+              :duration (let ((ms (gethash "duration_ms" line))) (and (numberp ms) (/ ms 1000.0)))
+              :context-window (let ((usage (gethash "modelUsage" line)) (window nil))
+                                (when (hash-table-p usage)
+                                  (maphash (lambda (_ model)
+                                             (let ((size (and (hash-table-p model) (gethash "contextWindow" model))))
+                                               (when (numberp size) (setq window (max size (or window 0))))))
+                                           usage))
+                                window))))
+
+(defun romacs-agent--claude-rate-limit-event (line)
+  "Decode the usage window reported in Claude Code LINE."
+  (let ((info (gethash "rate_limit_info" line)))
+    (when (hash-table-p info)
+      (list (list :type 'rate-limit
+                  :status (romacs-agent--claude-limit-status (gethash "status" info))
+                  :used (romacs-agent--value (gethash "utilization" info))
+                  :resets (romacs-agent--value (gethash "resetsAt" info))
+                  :window (romacs-agent--value (gethash "rateLimitType" info))
+                  :windows (romacs-agent--claude-windows info))))))
+
+(defun romacs-agent--claude-events (session line)
+  "Decode a Claude Code output LINE using SESSION's context."
+  (romacs-agent--claude-decode 'out line (romacs-agent--claude-decode-context session 'out line)))
+
+(defun romacs-agent--claude-decode-context (session direction line)
+  "Read the values needed to decode Claude's LINE in DIRECTION."
+  (if (eq direction 'in)
+      (list :owed (plist-get (romacs-agent-driver-state session) :owed))
+    (append
+     (list :compacting (romacs-agent-compacting session))
+     (pcase (gethash "type" line)
+       ("stream_event" (list :message (romacs-agent-message session)))
+       ("assistant"
+        (list :streamed (gethash (gethash "id" (gethash "message" line)) (romacs-agent-streamed session))))
+       ("control_request" (list :owed (plist-get (romacs-agent-driver-state session) :owed)))
+       ("control_response"
+        (let ((id (gethash "request_id" (gethash "response" line))))
+          (list :state (romacs-agent-driver-state session)
+                :selection (and id (member id (plist-get (romacs-agent-pending-selection session) :waiting)) t)
+                :approval (and id (gethash id (romacs-agent-approvals session)) t))))))))
+
+(defun romacs-agent--claude-decode (direction line context)
+  "Decode Claude's LINE in DIRECTION using CONTEXT."
+  (if (eq direction 'in)
+      (romacs-agent--claude-decode-input line (plist-get context :owed))
+    (romacs-agent--claude-decode-output line context)))
+
+(defun romacs-agent--claude-decode-output (line context)
+  "Decode Claude Code's output LINE using the previous CONTEXT."
+  (let* ((type (gethash "type" line))
+         (parent (romacs-agent--value (gethash "parent_tool_use_id" line)))
+         (compacting (plist-get context :compacting))
+         (boundary (and (equal type "system") (equal (gethash "subtype" line) "compact_boundary"))))
     ;; Only the next line can be the summary: a compaction cut short leaves
     ;; no mark for a later run's line to match.
-    (setf (romacs-agent-compacting session) nil)
-    (pcase type
-      ("system"
-       (pcase (gethash "subtype" line)
-         ("init" (list (list :type 'session :model (gethash "model" line)
-                             :harness-session (gethash "session_id" line)
-                             :permission-mode (gethash "permissionMode" line)
-                             :mcp (gethash "mcp_servers" line))))
-         ("status" (append (and (stringp (gethash "permissionMode" line))
-                                (list (list :type 'mode :permission-mode (gethash "permissionMode" line))))
-                           (romacs-agent--claude-status line)))
-         ("compact_boundary" (setf (romacs-agent-compacting session) t) nil)
-         ((or "task_started" "task_progress" "task_notification" "task_updated") (romacs-agent--claude-task line))
-         (_ nil)))
-      ("stream_event"
-       (let* ((event (gethash "event" line))
-              (kind (and event (gethash "type" event))))
-         (pcase kind
-           ("message_start"
-            (setf (romacs-agent-message session) (gethash "id" (gethash "message" event)))
-            ;; A top-level request: how long the prompt cache it wrote lives.
-            (unless parent
-              (list (list :type 'cache :ttl (romacs-agent--claude-cache-ttl (gethash "usage" (gethash "message" event)))))))
-           ("content_block_delta"
-            (let* ((delta (gethash "delta" event)) (dtype (gethash "type" delta)))
-              (puthash (romacs-agent-message session) t (romacs-agent-streamed session))
-              (pcase dtype
-                ("text_delta" (list (list :type 'delta :text (gethash "text" delta) :parent parent
-                                          :message (romacs-agent-message session))))
-                ("thinking_delta" (list (list :type 'thinking :text (gethash "thinking" delta) :parent parent))))))
-           (_ nil))))
-      ("assistant"
-       ;; The conversation's last message: where a resume after a rollback
-       ;; or renewal with nothing said since goes on (`romacs-agent--claude-head').
-       (when (and (not parent) (stringp (gethash "uuid" line)))
-         (setf (romacs-agent-driver-state session)
-               (plist-put (romacs-agent-driver-state session) :resume-at (gethash "uuid" line))))
-       (let* ((message (gethash "message" line))
-              (id (gethash "id" message))
-              (streamed (gethash id (romacs-agent-streamed session)))
-              (usage (gethash "usage" message))
-              (text nil))
-         (append
-          ;; The prompt this call sent: the context it fills.
-          (when (and (hash-table-p usage) (not parent))
-            (list (list :type 'usage :context-used (+ (or (gethash "input_tokens" usage) 0)
-                                                      (or (gethash "cache_read_input_tokens" usage) 0)
-                                                      (or (gethash "cache_creation_input_tokens" usage) 0)))))
-          (cl-loop for block across (gethash "content" message)
-                   for btype = (gethash "type" block)
-                   when (equal btype "text") do (setq text t)
-                   when (and (equal btype "thinking") (not streamed))
-                   collect (list :type 'thinking :text (gethash "thinking" block) :parent parent)
-                   when (and (equal btype "text") (not streamed))
-                   collect (list :type 'delta :text (gethash "text" block) :parent parent :message id)
-                   when (equal btype "tool_use")
-                   collect (progn
-                             (puthash (gethash "id" block) (or parent t) (romacs-agent-tools session))
-                             (list :type 'tool :state 'started :id (gethash "id" block)
-                                   :name (gethash "name" block) :input (gethash "input" block)
-                                   :parent parent)))
-          ;; The message's text is whole: its view may render it once.
-          (when text (list (list :type 'message-end :message id :parent parent))))))
-      ("user"
-       (let ((content (gethash "content" (gethash "message" line))))
-         (cond
-          ;; The synthetic line right after a boundary is its summary: a
-          ;; string from /compact, text blocks from an automatic compaction.
-          ((and compacting (eq (gethash "isSynthetic" line) t))
-           (list (list :type 'compacted :text (romacs-agent--text-of content))))
-          ;; Another Claude Code session's message, to this session's own
-          ;; conversation: an input, said to be theirs.
-          ((and (not parent)
-                ;; Text, never a tool's result: those are most of these lines.
-                (or (stringp content)
-                    (and (> (length content) 0) (equal (gethash "type" (aref content 0)) "text")))
-                (romacs-agent--claude-peer line (romacs-agent--text-of content))))
-          ((stringp content) (romacs-agent--claude-injected content parent))
-          ;; Text blocks of what came from elsewhere (no tool's result).
-          ((and (not (cl-some (lambda (b) (and (hash-table-p b) (equal (gethash "type" b) "tool_result"))) content))
-                (romacs-agent--claude-incoming (romacs-agent--text-of content)))
-           (romacs-agent--claude-injected (romacs-agent--text-of content) parent))
-          (t
-           (cl-loop for block across content
-                    for btype = (gethash "type" block)
-                    when (equal btype "tool_result")
-                    collect (list :type 'tool :state (if (eq (gethash "is_error" block) t) 'failed 'completed)
-                                  :id (gethash "tool_use_id" block)
-                                  :output (romacs-agent--text-of (gethash "content" block))
-                                  :parent parent)
-                    when (equal btype "text")
-                    collect (list :type 'status :text (gethash "text" block) :parent parent))))))
-      ("result"
-       (list (list :type 'done :cost (gethash "total_cost_usd" line)
-                   :error (eq (gethash "is_error" line) t) :text (gethash "result" line)
-                   ;; Refused at a usage limit: its instance's, or its model's
-                   ;; alone (one that needs usage credits the account has spent;
-                   ;; its other models still run).
-                   :limit (pcase (gethash "api_error" line)
-                            ("usage_limit_reached" t) ("model_requires_usage_credits" 'model))
-                   :reason (romacs-agent--claude-reason line)
-                   :duration (let ((ms (gethash "duration_ms" line))) (and (numberp ms) (/ ms 1000.0)))
-                   :context-window (let ((usage (gethash "modelUsage" line)) (window nil))
-                                     (when (hash-table-p usage)
-                                       (maphash (lambda (_ model)
-                                                  (let ((size (and (hash-table-p model) (gethash "contextWindow" model))))
-                                                    (when (numberp size) (setq window (max size (or window 0))))))
-                                                usage))
-                                     window))))
-      ("control_request"
-       (let ((request (gethash "request" line)))
-         (when (equal (gethash "subtype" request) "hook_callback")
-           ;; Answered when written, live: a replay judges nothing.
-           (cl-return-from romacs-agent--claude-events
-             (list (list :type 'handshake
-                         :state (list :owed (append (plist-get (romacs-agent-driver-state session) :owed)
-                                                    (list (list :hook (gethash "request_id" line) request))))))))
-         (when (equal (gethash "subtype" request) "can_use_tool")
-           (puthash (gethash "request_id" line) request (romacs-agent-approvals session))
-           (append
-            ;; A plan presented: shown, and asked of the user.
-            (let ((plan (and (equal (gethash "tool_name" request) "ExitPlanMode") (hash-table-p (gethash "input" request))
-                             (romacs-agent--value (gethash "plan" (gethash "input" request))))))
-              (and (stringp plan) (not (string-empty-p (string-trim plan))) (list (list :type 'plan :text plan))))
-            (list (list :type 'approval :request-id (gethash "request_id" line)
-                       :plan (equal (gethash "tool_name" request) "ExitPlanMode")
-                       :tool (gethash "tool_name" request) :input (gethash "input" request)
-                       ;; A question, or a plan to approve, is the user's alone.
-                       :user (and (member (gethash "tool_name" request) '("AskUserQuestion" "ExitPlanMode")) t)
-                       :questions (and (equal (gethash "tool_name" request) "AskUserQuestion")
-                                       (romacs-agent--claude-questions (gethash "input" request)))
-                       :description (gethash "description" request)))))))
-      ("control_response"
-       (let* ((response (gethash "response" line)) (id (gethash "request_id" response)))
-         (cond ((and id (romacs-agent--select-answered session id (equal (gethash "subtype" response) "success"))))
-               ;; This run's initialize answered, however: its hooks are on
-               ;; when it took them, and messages may go.
-               ((and id (equal id (plist-get (romacs-agent-driver-state session) :initialize)))
-                (romacs-agent--claude-keep-models session (gethash "response" response))
-                (cl-return-from romacs-agent--claude-events
-                  (list (list :type 'handshake :state (list :initialized t)))))
-               ((and id (gethash id (romacs-agent-approvals session)))
-                (remhash id (romacs-agent-approvals session)))
-               ;; A mode it would not take: out of plan mode, back to the
-               ;; default rather than stay (T3 Code's fallback).
-               ((and id (string-prefix-p "romacs-mode-" id) (equal (gethash "subtype" response) "error"))
-                (cl-return-from romacs-agent--claude-events (romacs-agent--claude-mode-refused session id response))))
-         nil))
-      ;; Asked for no more; an older run's records may hold one.
-      ("prompt_suggestion" nil)
-      ;; Its instance's usage, after each request.
-      ("rate_limit_event"
-       (let ((info (gethash "rate_limit_info" line)))
-         (when (hash-table-p info)
-           (list (list :type 'rate-limit
-                       :status (romacs-agent--claude-limit-status (gethash "status" info))
-                       :used (romacs-agent--value (gethash "utilization" info))
-                       :resets (romacs-agent--value (gethash "resetsAt" info))
-                       :window (romacs-agent--value (gethash "rateLimitType" info))
-                       :windows (romacs-agent--claude-windows info))))))
-      ;; A running tool's heartbeat (its seconds so far): its task notices
-      ;; say what it does.
-      ("tool_progress" nil)
-      ;; A queued command's start and end: its input and its turn say it.
-      ("command_lifecycle" nil)
-      (_ (list (list :type 'unknown :raw line))))))
+    (append (unless (eq compacting boundary)
+              (list (list :type 'record-state :state (list :compacting boundary))))
+            (pcase type
+              ("system" (romacs-agent--claude-system-events line))
+              ("stream_event" (romacs-agent--claude-stream-events line parent (plist-get context :message)))
+              ("assistant"
+               (romacs-agent--claude-assistant-events line parent (plist-get context :streamed)))
+              ("user" (romacs-agent--claude-user-events line parent compacting))
+              ("result" (romacs-agent--claude-result-events line))
+              ("control_request"
+               (romacs-agent--claude-control-request (plist-get context :owed)
+                                                   (gethash "request_id" line) (gethash "request" line)))
+              ("control_response"
+               (romacs-agent--claude-control-response (gethash "response" line) (plist-get context :state)
+                                                      (plist-get context :selection) (plist-get context :approval)))
+              ;; Asked for no more; an older run's records may hold one.
+              ("prompt_suggestion" nil)
+              ;; Its instance's usage, after each request.
+              ("rate_limit_event" (romacs-agent--claude-rate-limit-event line))
+              ;; A running tool's heartbeat (its seconds so far): its task notices
+              ;; say what it does.
+              ("tool_progress" nil)
+              ;; A queued command's start and end: its input and its turn say it.
+              ("command_lifecycle" nil)
+              (_ (list (list :type 'unknown :raw line)))))))
 
 ;;; An account's usage, asked without a turn
 
@@ -646,21 +699,13 @@ else of the answer, which also describes the account.  The \"default\"
 alias is no model."
   (let ((models (gethash "models" answer)))
     (cl-loop for model across (if (vectorp models) models [])
-             for id = (or (romacs-agent--value (gethash "resolvedModel" model)) (gethash "value" model))
-             for efforts = (romacs-agent--value (gethash "supportedEffortLevels" model))
+             for id = (and (hash-table-p model)
+                           (or (romacs-agent--value (gethash "resolvedModel" model)) (gethash "value" model)))
+             for efforts = (and id (romacs-agent--value (gethash "supportedEffortLevels" model)))
              when (and (stringp id) (not (equal (gethash "value" model) "default")))
              ;; No efforts is what it says too: not left to the catalogue.
              collect (cons id (list :label (or (romacs-agent--value (gethash "displayName" model)) id)
                                     :efforts (and (vectorp efforts) (append efforts nil)))))))
-
-(defun romacs-agent--claude-keep-models (session answer)
-  "Keep the models in ANSWER, SESSION's run's `initialize' answer, when it
-names any and SESSION's records are its live ones: one that names none
-leaves those kept before, and a replay (a copy drawn again, the journal
-read in a batch process) is an old answer, under settings of its own."
-  (when-let* (((romacs-agent--live-p session)) ((hash-table-p answer))
-              (rows (romacs-agent--claude-models answer)))
-    (romacs-agent--keep-models (romacs-agent--instance (romacs-agent-provider session) 'claude) rows)))
 
 (defun romacs-agent--claude-models-probe (instance)
   "How INSTANCE's Claude Code is asked for its models with no session
@@ -707,24 +752,25 @@ EFFORT.  Neither can be cleared in a live harness: `restart' then."
 ;; is this user's private state, whoever can rewrite it can read those files
 ;; anyway, and a recalled image shows in the tray before anything is sent.
 (defun romacs-agent--claude-input-events (session line)
-  "The events of LINE, written to SESSION's harness: a user's prompt, or
-an approval answered."
+  "Decode LINE as written to SESSION's harness."
+  (romacs-agent--claude-decode 'in line (romacs-agent--claude-decode-context session 'in line)))
+
+(defun romacs-agent--claude-decode-input (line owed)
+  "Decode outbound LINE with the currently OWED requests."
   (pcase (gethash "type" line)
     ("user" (list (list :type 'input :text (romacs-agent--text-of (gethash "content" (gethash "message" line)))
                         :images (append (gethash "images" line) nil))
                   ;; Spoken to before any initialize: a run of before, ready as it is.
                   (list :type 'handshake :state (list :spoken t))))
     ("control_request"
-     (let ((owed (plist-get (romacs-agent-driver-state session) :owed)))
-       (pcase (gethash "subtype" (gethash "request" line))
-         ("initialize" (list (list :type 'handshake :state (list :initialize (gethash "request_id" line)))))
-         ("set_permission_mode"
-          (list (list :type 'handshake
-                      :state (list :mode-asked (gethash "mode" (gethash "request" line))
-                                   :owed (cl-remove (gethash "request_id" line) owed :key #'cadr :test #'equal))))))))
+     (pcase (gethash "subtype" (gethash "request" line))
+       ("initialize" (list (list :type 'handshake :state (list :initialize (gethash "request_id" line)))))
+       ("set_permission_mode"
+        (list (list :type 'handshake
+                    :state (list :mode-asked (gethash "mode" (gethash "request" line))
+                                 :owed (cl-remove (gethash "request_id" line) owed :key #'cadr :test #'equal)))))))
     ("control_response"
      (let* ((id (gethash "request_id" (gethash "response" line)))
-            (owed (plist-get (romacs-agent-driver-state session) :owed))
             (why (let ((out (gethash "response" (gethash "response" line))))
                    (and (hash-table-p out) (hash-table-p (gethash "hookSpecificOutput" out))
                         (gethash "additionalContext" (gethash "hookSpecificOutput" out))))))
@@ -732,7 +778,6 @@ an approval answered."
            ;; A reply it owed, written: owed no more; what it told is shown.
            (append (and (stringp why) (list (list :type 'status :text why)))
                    (list (list :type 'handshake :state (list :owed (cl-remove id owed :key #'cadr :test #'equal)))))
-         (remhash id (romacs-agent-approvals session))
          (let ((out (gethash "response" (gethash "response" line))))
            (list (list :type 'answered :request-id id
                        :behavior (and (hash-table-p out) (gethash "behavior" out))
@@ -749,23 +794,28 @@ an approval answered."
   "The hooks Romacs takes on each run: Claude Code tells it of every
 edit before writing it (`romacs-agent-gate-check').")
 
+(defun romacs-agent--claude-startup-action (state plan mode)
+  "Return Claude's next action from STATE, the requested PLAN and current MODE."
+  (cond ((plist-get state :owed) :reply)
+        ((and (plist-get state :initialized) plan (not (equal mode "plan"))
+              (not (equal (plist-get state :mode-asked) "plan")))
+         :plan)
+        ((or (plist-get state :initialized) (plist-get state :spoken)) :ready)
+        ((not (plist-get state :initialize)) :initialize)))
+
 (defun romacs-agent--claude-next (session)
-  "SESSION's next driver line: a reply it owes Claude Code, else this
-run's initialize, with Romacs's hooks; ready once that is answered."
+  "Return SESSION's next line owed to Claude Code, or its startup step."
   (let ((state (romacs-agent-driver-state session)))
-    (cond ((plist-get state :owed) (romacs-agent--claude-reply session (car (plist-get state :owed))))
-          ;; In plan mode, the harness not: put it there, once, whatever
-          ;; started it (a launch, a resume, a detached session attached).
-          ((and (plist-get state :initialized) (plist-get (romacs-agent-options session) :plan)
-                (not (equal (romacs-agent-permission-mode session) "plan"))
-                (not (equal (plist-get state :mode-asked) "plan")))
-           (romacs-agent--claude-plan session t nil))
-          ((or (plist-get state :initialized) (plist-get state :spoken)) :ready)
-          ((plist-get state :initialize) nil)
-          (t (romacs-mcp--object
-              "type" "control_request"
-              "request_id" (format "romacs-init-%d" (romacs-agent-request-id session))
-              "request" (romacs-mcp--object "subtype" "initialize" "hooks" romacs-agent--claude-hooks))))))
+    (pcase (romacs-agent--claude-startup-action state (plist-get (romacs-agent-options session) :plan)
+                                                (romacs-agent-permission-mode session))
+      (:reply (romacs-agent--claude-reply session (car (plist-get state :owed))))
+      (:plan (romacs-agent--claude-plan session t nil))
+      (:ready :ready)
+      (:initialize
+       (romacs-mcp--object
+        "type" "control_request"
+        "request_id" (format "romacs-init-%d" (romacs-agent-request-id session))
+        "request" (romacs-mcp--object "subtype" "initialize" "hooks" romacs-agent--claude-hooks))))))
 
 (defun romacs-agent--claude-hook (request)
   "The answer to hook REQUEST: what the gate tells the model of an edit,
@@ -949,6 +999,7 @@ environment."
   :display "Claude Code" :icon 'claude :t3-driver "claudeAgent"
   :config-variable "CLAUDE_CONFIG_DIR" :config-default "~/.claude"
   :program-option 'romacs-agent-claude-program :arguments-option 'romacs-agent-claude-arguments
+  :idle-compact-prompt "/compact"
   ;; What Claude Code sets for the commands it runs (a parent session's).
   :scrub '("CLAUDECODE" "CLAUDE_AGENT_SDK_VERSION" "CLAUDE_CODE_CHILD_SESSION" "CLAUDE_CODE_ENTRYPOINT"
            "CLAUDE_CODE_EXECPATH" "CLAUDE_CODE_MESSAGING_SOCKET" "CLAUDE_CODE_MESSAGING_TOKEN"
@@ -971,15 +1022,16 @@ environment."
   :input #'romacs-agent--claude-user
   :interrupt #'romacs-agent--claude-interrupt
   :respond #'romacs-agent--claude-respond
-  :events #'romacs-agent--claude-events
+  :request-event #'romacs-agent--claude-request-event
+  :decode #'romacs-agent--claude-decode
+  :decode-context #'romacs-agent--claude-decode-context
   :usage #'romacs-agent--claude-usage
-  :input-events #'romacs-agent--claude-input-events
   ;; A turn the harness's end cut short goes on (Claude Code's own switch).
   :resume-environment '("CLAUDE_CODE_RESUME_INTERRUPTED_TURN=1")
   :native-id-p #'romacs-agent--uuid-p
-  :history '(:files romacs-agent-history--claude-files :find romacs-agent-history--claude-find
-             :keep romacs-agent-history--claude-keep
-             :describe romacs-agent-history--claude-describe :events romacs-agent-history--claude-events))
+  :history '(:files romacs-agent-claude-history--files :find romacs-agent-claude-history--find
+             :keep romacs-agent-claude-history--keep
+             :describe romacs-agent-claude-history--describe :events romacs-agent-claude-history--events))
 
 (provide 'romacs-agent-claude)
 ;;; romacs-agent-claude.el ends here
