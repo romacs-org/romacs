@@ -1340,8 +1340,6 @@ fn an_indirect_buffer_a_hook_shows_takes_its_faces_in_that_frame() {
         if treed {
             vm.eval_source(&format!("(with-current-buffer \"{name}\" (treesit-parser-root-node (treesit-parser-create 'c)))")).unwrap();
         }
-        vm.eval_source(&format!("(progn (set-window-buffer nil (get-buffer \"{name}-ind\")))")).unwrap();
-        deferred_frame(&mut vm);
         vm.eval_source(&format!("(progn (set-window-buffer nil (get-buffer \"{name}\")) \
             (with-current-buffer \"{name}\" (put-text-property (point-min) (point-max) 'fontified nil)) \
             (setq ts-turned 0) \
@@ -1379,4 +1377,44 @@ fn a_base_beside_its_indirect_keeps_its_faces_once_the_indirect_pane_goes() {
         .unwrap().display().unwrap();
     assert!(face.starts_with("((") && face.ends_with(" t)"), "the shared text keeps a fontifier's face and is fontified: {face}");
     assert_eq!(vm.eval_source("(with-current-buffer \"ts-rel-split\" (romacs--treesit-parsing-p))").unwrap().display().unwrap(), "nil");
+}
+
+#[test]
+fn a_visit_starts_no_early_parse_for_shared_text() {
+    const CHILD: &str = "ROMACS_TREESIT_EARLY_SHARED_CHILD";
+    const NAME: &str = "a_visit_starts_no_early_parse_for_shared_text";
+    if std::env::var_os(CHILD).is_none() {
+        let own = own_test::name(module_path!(), NAME);
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &own, "--nocapture", "--test-threads", "1"]).env(CHILD, "1").output().unwrap();
+        assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains("1 passed"),
+            "child: {}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        return;
+    }
+    let mut vm = gnu_lisp(&[]);
+    vm.eval_source("(require 'treesit)").unwrap();
+    vm.set_background_wake(std::sync::Arc::new(|| {}));
+    let started = vm.eval_source(&format!("(progn {SYSTEM_SETUP}
+        (with-current-buffer (get-buffer-create \"ts-early-shared\")
+          (insert \"int x;\")
+          (make-indirect-buffer (current-buffer) \"ts-early-shared-ind\")
+          (let ((shared (romacs--treesit-parse-early 'c)))
+            (romacs--treesit-parse-early nil)
+            (kill-buffer \"ts-early-shared-ind\")
+            (list shared (romacs--treesit-parse-early 'c)))))"))
+        .unwrap().display().unwrap();
+    assert_eq!(started, "(nil t)", "only the unshared buffer starts an early parse");
+}
+
+#[test]
+fn a_small_edit_does_not_defer_the_first_parse_of_shared_text() {
+    let mut vm = relatives_vm("ts-rel-edit", 40, false);
+    vm.eval_source("(progn
+        (setq romacs-treesit-show-before-parse 8)
+        (with-current-buffer \"ts-rel-edit-ind\"
+          (goto-char (point-max))
+          (insert \" \"))
+        (set-window-buffer nil (get-buffer \"ts-rel-edit-ind\")))").unwrap();
+    assert!(!deferred_frame(&mut vm), "a first parse of shared text leaves no deferred frame");
+    assert_eq!(face_and_parsing(&mut vm, "ts-rel-edit-ind"), "(italic nil)");
 }

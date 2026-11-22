@@ -153,9 +153,10 @@ impl Vm {
     /// (`treesit_shared`) defers no first parse: only reparses of trees count.
     pub(crate) fn treesit_ahead_running(&mut self, buffer: Value) -> crate::Result<bool> {
         let shared = self.treesit_shared(buffer)?;
-        Ok(self.treesit_cores(buffer)?.iter().any(|(_, core)| {
+        let Some(text) = self.treesit_text_of(buffer)? else { return Ok(false) };
+        Ok(text.treesit.parsers.iter().any(|(_, core)| {
             let mut c = core.borrow_mut();
-            if shared && c.tree.is_none() {
+            if !c.can_parse_ahead(shared) {
                 return false;
             }
             (c.tree.is_none() && c.waiting_slot) || c.ahead.as_mut().is_some_and(|ahead| !ahead.ready())
@@ -171,6 +172,15 @@ impl Vm {
             data::Object::Buffer(b) => b.base != Value::NIL || !b.indirect.is_empty(),
             _ => false,
         })
+    }
+    /// Whether an early parse may hold the first frame.
+    pub(crate) fn treesit_early_pending(&mut self, buffer: Value) -> crate::Result<bool> {
+        if self.treesit_shared(buffer)? {
+            return Ok(false);
+        }
+        Ok(self.treesit_text_of(buffer)?
+            .and_then(|text| text.treesit.early.as_mut())
+            .is_some_and(super::Early::pending))
     }
     /// Whether a parser of BUFFER's text has a tree.
     pub(crate) fn treesit_has_tree(&mut self, buffer: Value) -> crate::Result<bool> {
@@ -208,7 +218,7 @@ impl Vm {
             // starts its first parse, it waits for none, and a first parse
             // already on one (started before the text was shared) defers
             // nothing.
-            if shared && core.borrow().tree.is_none() {
+            if !core.borrow().can_parse_ahead(shared) {
                 core.borrow_mut().waiting_slot = false;
                 continue;
             }
