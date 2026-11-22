@@ -996,23 +996,29 @@ fn a_sqlite_batch_skips_the_blanks_sqlite3_exec_skips() {
     assert_eq!(vm.eval_source(form).unwrap().display().unwrap(), "(t t t ((2)) ((7)))");
 }
 
-/// A batch's stop is each step's own: a nested query a function ran and
-/// recovered from, stopped by the handler within the first statement,
-/// leaves no stop behind, so the second statement's own `SQLITE_INTERRUPT`
-/// (an SQL function's result code) is its error: the batch returns nil, and
-/// the press waits for the next form.
+/// A stop in a nested query recovered by the first step cannot turn a
+/// later step's own SQLITE_INTERRUPT into a quit. The batch reports failure;
+/// callers materializing a SELECT retain the row already delivered.
 #[test]
 fn a_sqlite_batch_s_stop_is_each_step_s_own() {
-    let (mut vm, signal) = busy_vm();
-    let db = eval(&mut vm, "(setq db (sqlite-open))");
-    let connection = Leaf::new(&mut vm).sqlite_connection_of(db).unwrap_or_else(|_| panic!("a database"));
-    connection.define_recover_nested();
-    connection.define_interrupt_itself();
-    let call = prepare(&mut vm, "sqlite-execute-batch", "(list db \"SELECT recover_nested(); SELECT interrupt_itself();\")");
-    assert!(signal.interrupt(), "a busy evaluator takes the press");
-    let outcome = invoke(&mut vm, call);
-    assert!(!quit_signalled(&mut vm, &outcome), "the second statement's own interrupt, not a quit");
-    assert_eq!(outcome.as_ref().map(|v| vm.display(*v).unwrap_or_default()).ok().as_deref(), Some("nil"));
-    assert!(signal.due(), "the press waits for the next poll");
-    vm.quit_unwinding = false;
+    let rows = "SELECT recover_nested() UNION ALL SELECT interrupt_itself()";
+    let recovered = format!("(({}))", crate::sqlite::INTERRUPT);
+    for (name, sql, expected) in [
+        ("sqlite-execute-batch", "SELECT recover_nested(); SELECT interrupt_itself();", "nil"),
+        ("sqlite-execute", rows, recovered.as_str()),
+        ("sqlite-select", rows, recovered.as_str()),
+    ] {
+        let (mut vm, signal) = busy_vm();
+        let db = eval(&mut vm, "(setq db (sqlite-open))");
+        let connection = Leaf::new(&mut vm).sqlite_connection_of(db).unwrap_or_else(|_| panic!("a database"));
+        connection.define_recover_nested();
+        connection.define_interrupt_itself();
+        let call = prepare(&mut vm, name, &format!(r#"(list db "{sql}")"#));
+        assert!(signal.interrupt(), "a busy evaluator takes the press");
+        let outcome = invoke(&mut vm, call);
+        assert!(!quit_signalled(&mut vm, &outcome), "{name}: the later step's own interrupt");
+        assert_eq!(outcome.as_ref().map(|v| vm.display(*v).unwrap_or_default()).ok().as_deref(), Some(expected), "{name}");
+        assert!(signal.due(), "{name}: the press waits for the next form");
+        vm.quit_unwinding = false;
+    }
 }
