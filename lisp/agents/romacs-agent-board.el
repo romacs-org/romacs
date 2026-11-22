@@ -245,48 +245,60 @@ then a row saying how many more, unless VIEW shows them all."
                  (list (list :kind 'more :id (cons 'more cwd)
                              :count (- (length items) (length shown))))))))
 
+(defun romacs-agent-board--settled-count (session keys)
+  "Count settled threads in SESSION's tree according to KEYS."
+  (+ (if (eq (gethash session keys) 'settled) 1 0)
+     (cl-loop for child in (romacs-agent-board--children session)
+              sum (romacs-agent-board--settled-count child keys))))
+
+(defun romacs-agent-board--project-rows (cwd threads transcripts keys marks view settled-count)
+  "Rows for project CWD and its THREADS and TRANSCRIPTS in VIEW."
+  (let* ((rows (append (mapcan (lambda (session) (romacs-agent-board--thread session 0 keys marks view)) threads)
+                       (romacs-agent-board--history-rows cwd transcripts view)))
+         (project (list :kind 'project :id cwd :cwd cwd :settled-count settled-count)))
+    (when rows
+      (if (and (plist-get view :projects) (gethash cwd (plist-get view :projects)) (not (plist-get view :words)))
+          (let ((all (mapcan (lambda (session) (romacs-agent-board--tree-keys session keys marks)) threads)))
+            (list (append project (list :keys all :folded (length all) :first (car rows)))))
+        (cons (plist-put project :keys (cl-loop for row in rows when (eql (plist-get row :depth) 0)
+                                               collect (plist-get row :key)))
+              rows)))))
+
 (defun romacs-agent-board-rows (sessions history view)
   "The board's rows for SESSIONS and HISTORY (transcript items, newest
 first), as VIEW (`romacs-agent-board--view') shows them: per project with
 anything to show, its row, its threads (those wanting the user first,
 then the newest, with what each delegated) and, off the Settled section,
 its transcripts.  A thread shows in the section it is in, a thread above
-it dim for context.  A project VIEW folds (its :projects) shows its row
+it dim for context.  Project rows count settled threads off that section.
+A project VIEW folds (its :projects) shows its row
 alone, saying how many threads it has and what they are at, unless a
 filter is on; its :first is the row it would show first.  Each row is a
 plist of :kind (`project', `thread', `history', `more' or `reading', the
 transcripts' first scan under way) and :id, which names it across
 redraws."
   (let ((keys (make-hash-table :test #'eq)) (order nil)
-        (roots (make-hash-table :test #'equal)) (items (make-hash-table :test #'equal)))
+        (roots (make-hash-table :test #'equal)) (items (make-hash-table :test #'equal))
+        (settled (unless (plist-get view :settled) (make-hash-table :test #'equal))))
     (dolist (session sessions) (puthash session (romacs-agent-board--key session) keys))
     (let ((marks (romacs-agent-board--marks sessions keys view)))
       (dolist (session (romacs-agent-board--sorted sessions keys))
-        (when (and (null (romacs-agent-board--parent session)) (gethash session marks))
+        (when (null (romacs-agent-board--parent session))
           (let ((cwd (romacs-agent-board--project (romacs-agent-cwd session))))
-            (unless (gethash cwd roots) (push cwd order))
-            (push session (gethash cwd roots)))))
-      (unless (plist-get view :settled)
+            (when settled
+              (cl-incf (gethash cwd settled 0) (romacs-agent-board--settled-count session keys)))
+            (when (gethash session marks)
+              (unless (gethash cwd roots) (push cwd order))
+              (push session (gethash cwd roots))))))
+      (when settled
         (dolist (item history)
           (let ((cwd (romacs-agent-board--project (plist-get item :cwd))))
             (unless (or (gethash cwd roots) (gethash cwd items)) (push cwd order))
             (push item (gethash cwd items)))))
       (append
        (mapcan (lambda (cwd)
-                (let* ((threads (nreverse (gethash cwd roots)))
-                       (rows (append (mapcan (lambda (session) (romacs-agent-board--thread session 0 keys marks view))
-                                             threads)
-                                     (romacs-agent-board--history-rows cwd (nreverse (gethash cwd items)) view))))
-                  (cond ((null rows) nil)
-                        ((and (plist-get view :projects) (gethash cwd (plist-get view :projects)) (not (plist-get view :words)))
-                         (let ((all (mapcan (lambda (session) (romacs-agent-board--tree-keys session keys marks))
-                                            threads)))
-                           (list (list :kind 'project :id cwd :cwd cwd :keys all :folded (length all)
-                                       :first (car rows)))))
-                        (t (cons (list :kind 'project :id cwd :cwd cwd
-                                       :keys (cl-loop for row in rows when (eql (plist-get row :depth) 0)
-                                                      collect (plist-get row :key)))
-                                 rows)))))
+                 (romacs-agent-board--project-rows cwd (nreverse (gethash cwd roots)) (nreverse (gethash cwd items))
+                                                   keys marks view (and settled (gethash cwd settled))))
               (nreverse order))
        (and (not (plist-get view :settled)) (null history) (plist-get view :reading)
             (list (list :kind 'reading :id 'reading)))))))
@@ -434,6 +446,9 @@ wide as the wider mark, so rows line up whichever they show."
             (room (- width (string-width name)))
             (tail (romacs-truncate
                    (concat (if-let* ((rollup (romacs-agent-ui--rollup (plist-get row :keys)))) (concat "  " rollup) "")
+                           (if-let* ((count (plist-get row :settled-count)) ((> count 0)))
+                               (propertize (format "  %d settled" count) 'face 'romacs-agent-dim)
+                             "")
                            (if-let* ((count (plist-get row :folded)))
                                (propertize (format "  %s %d thread%s" (romacs-agent-glyph 'board-threads) count (if (= count 1) "" "s")) 'face 'romacs-agent-dim)
                              ""))
@@ -885,12 +900,19 @@ every word typed, the board following as they are typed."
         (quit (filter (string-join before " ")))))))
 
 (defun romacs-agent-board-toggle-settled ()
-  "Show the Settled section, or the board again."
+  "Show the Settled section, or the board again, at the current project."
   (interactive nil romacs-agent-board-mode)
-  (setq romacs-agent-board--settled (not romacs-agent-board--settled))
-  (romacs-agent-board--redraw)
-  (goto-char (point-min))
-  (romacs-agent-board-next 2))
+  (let ((project (plist-get (romacs-agent-board--project-row) :id))
+        (heading (eq (plist-get (romacs-agent-board--row) :kind) 'project)))
+    (setq romacs-agent-board--settled (not romacs-agent-board--settled))
+    (romacs-agent-board--redraw)
+    (if-let* ((at (romacs-agent-board--find project)))
+        (progn
+          (goto-char at)
+          (unless (or heading (plist-get (romacs-agent-board--row) :folded))
+            (romacs-agent-board-next 1)))
+      (goto-char (point-min))
+      (romacs-agent-board-next 2))))
 
 (defun romacs-agent-board-history ()
   "Show every project's transcripts, or its newest few."

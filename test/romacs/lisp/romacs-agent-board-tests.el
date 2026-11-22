@@ -56,8 +56,16 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
   (romacs-agent-board-tests--with
     (mk "a" "a" 'idle 10 :done-seq 3 :settled-seq 3)
     (mk "b" "b" 'idle 20 :done-seq 3)
-    (should (equal (romacs-agent-board-tests--ids (rows)) '("/p/one" "b")))
-    (should (equal (romacs-agent-board-tests--ids (rows :settled t)) '("/p/one" "a")))))
+    (mk "child" "child" 'idle 30 :cwd "/p/worktree/" :options '(:parent "a")
+        :settled-seq romacs-agent--inactive-settlement)
+    (let* ((active (rows)) (project (car active)))
+      (should (equal (romacs-agent-board-tests--ids active) '("/p/one" "b")))
+      (should (equal (plist-get project :settled-count) 2))
+      (should (string-match-p "2 settled" (romacs-agent-board--line project 80))))
+    (should (equal (plist-get (car (rows :words '("b"))) :settled-count) 2))
+    (let ((folds (make-hash-table :test #'equal)))
+      (puthash "a" 'open folds)
+      (should (equal (romacs-agent-board-tests--ids (rows :settled t :folds folds)) '("/p/one" "a" "child"))))))
 
 (ert-deftest romacs-agent-board-hides-an-inactive-parent-without-losing-its-child ()
   (romacs-agent-board-tests--with

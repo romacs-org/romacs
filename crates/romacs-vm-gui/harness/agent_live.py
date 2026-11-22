@@ -3346,6 +3346,8 @@ def board_keys(args, base):
         steps['after_gone'] = settled(showing, sids[0])
         open_board()
         thread = lisp_text(sids[0])
+        project_row = ('(romacs-agent-board--find (romacs-agent-board--project '
+                       f'(romacs-agent-cwd (romacs-agent-get {thread}))))')
 
         def thread_row():
             return a.eval(f'(with-selected-window {board} (and (romacs-agent-board--find {thread}) t))')
@@ -3356,8 +3358,12 @@ def board_keys(args, base):
             return settled(thread_row, want)
 
         steps['hidden_after_settle'] = settle_thread('nil')
+        steps['shows_settled_count'] = a.eval(f'(with-selected-window {board} (goto-char {project_row}) '
+                                             '(and (string-search "1 settled" (buffer-substring-no-properties '
+                                             '(line-beginning-position) (line-end-position))) t))')
         a.keys('-M', 'alt', '-k', 'Return', '-m', 'alt')
         steps['visible_in_settled'] = settled(thread_row, 't')
+        steps['keeps_project_on_toggle'] = a.eval(f'(with-selected-window {board} (eql (point) {project_row}))')
         steps['gone_from_settled_after_undo'] = settle_thread('nil')
         result = {'steps': steps, 'sessions': sids, 'codex_file': str(codex_file)}
         result['ok'] = (steps['project_without_session'] == ['t', str(codex_file), 'nil']
@@ -3366,7 +3372,9 @@ def board_keys(args, base):
                         and steps['gone'][0] == 't' and 'gone' in (steps['gone'][1] or '')
                         and steps['after_gone'] == sids[0]
                         and steps['hidden_after_settle'] == 'nil'
+                        and steps['shows_settled_count'] == 't'
                         and steps['visible_in_settled'] == 't'
+                        and steps['keeps_project_on_toggle'] == 't'
                         and steps['gone_from_settled_after_undo'] == 'nil')
         return result
     finally:
