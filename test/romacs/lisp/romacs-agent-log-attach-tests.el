@@ -8,7 +8,8 @@
 (let ((romacs-mcp-call-function romacs-mcp-call-function)
       (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
   (require 'romacs-agent)
-  (require 'romacs-agent-log))
+  (require 'romacs-agent-log)
+  (require 'romacs-agent-menu))
 
 (defconst romacs-agent-log-attach-tests--png
   (base64-decode-string "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
@@ -41,6 +42,20 @@ PNG files in a fresh directory, and `composer' its draft's text."
                (ignore #'composer #'link #'files)
                ,@body)))
        (delete-directory dir t))))
+
+(ert-deftest romacs-agent-log-attach-uses-file-completion-in-the-session-directory ()
+  (romacs-agent-log-attach-tests--with
+    (setf (romacs-agent-cwd romacs-agent-log--session) dir)
+    (cl-letf (((symbol-function 'read-file-name)
+               (lambda (_prompt directory _default mustmatch &rest _)
+                 (should (equal directory dir))
+                 (should romacs-complete-file-preview)
+                 (should mustmatch)
+                 (file-name-nondirectory a))))
+      (romacs-agent-chat-attach t))
+    (romacs-agent-log-attach-sync)
+    (should (equal (composer) (link a)))
+    (should (equal (files) (list a)))))
 
 (ert-deftest romacs-agent-log-attach-links-are-the-chips ()
   (romacs-agent-log-attach-tests--with

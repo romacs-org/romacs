@@ -55,6 +55,7 @@
   (require 'subr-x))
 (require 'romacs-faces)
 (require 'romacs-layer)
+(require 'romacs-popup)
 
 (defgroup romacs-complete nil
   "Vertical minibuffer completion in a layer over the frame."
@@ -127,6 +128,12 @@ downward as candidates come and go."
 (defcustom romacs-complete-center-width 0.42
   "Width of the centred panel, as a fraction of the frame's width."
   :type 'number)
+
+(defcustom romacs-complete-file-preview nil
+  "Show an image beside file completion when the current candidate is an image.
+File readers can bind this while they read a name.  The preview needs
+room beside the completion panel and only reads local images."
+  :type 'boolean)
 
 (defgroup romacs-complete-faces nil
   "Faces used by `romacs-complete-mode'."
@@ -229,6 +236,9 @@ the name keeps the default face.")
 
 (defvar-local romacs-complete--lines nil
   "The candidate rows last shown.")
+
+(defvar-local romacs-complete--file-preview nil
+  "Whether this minibuffer's reader asked for image previews.")
 
 (defun romacs-complete--affixate (cands)
   "Annotate CANDS with annotation function."
@@ -581,7 +591,8 @@ The stack trace of an error is shown in the *Messages* buffer."
        ;; input as it wraps at the panel's width.
        (romacs--resize-mini-window)
        (let ((romacs-complete-count (romacs-complete--rows)))
-         (romacs-complete--display-candidates (romacs-complete--arrange-candidates)))))))
+         (romacs-complete--display-candidates (romacs-complete--arrange-candidates)))
+       (romacs-complete--preview)))))
 
 (defun romacs-complete-refresh (minibuffer)
   "Compute MINIBUFFER's candidates anew and show them, when this UI shows
@@ -702,6 +713,7 @@ them: for a table whose candidates change while it is open."
     (dolist (var romacs-complete--locals)
       (set (make-local-variable (car var)) (cdr var)))
     (setq-local romacs-complete--input t
+                romacs-complete--file-preview romacs-complete-file-preview
                 romacs-complete--count-ov (make-overlay (point-min) (point-min) nil t t))
     ;; Romacs: the prompt's label recedes; the input is what the panel shows.
     (let ((inhibit-read-only t))
@@ -1177,9 +1189,79 @@ SELECTION the row of the current one, if any."
     (set-window-start window (with-current-buffer buffer (point-min)))
     (unless (frame-visible-p frame) (make-frame-visible frame))))
 
+(defvar romacs-complete--preview-state nil
+  "The selection last considered for preview, and where it would fit.")
+
+(defconst romacs-complete--preview-buffer " *romacs-complete-preview*")
+
+(defun romacs-complete--preview-placement (panel)
+  "The image card's (ANCHOR COLUMNS LINES) beside PANEL, if it fits."
+  (let* ((root (frame-parent panel))
+         (cw (frame-char-width root))
+         (ch (frame-char-height root))
+         (position (frame-position panel))
+         (left (+ (car position) (frame-pixel-width panel) 12))
+         (top (cdr position))
+         (padding (* 2 (alist-get 'child-frame-border-width
+                                 (romacs-layer-glass-parameters romacs-layer-glass nil
+                                    (plist-get (alist-get 'card romacs-popup-look) :padding)))))
+         (right (- (frame-native-width root) (frame-internal-border-width root)))
+         (columns (min 40 (/ (- right left padding) cw)))
+         (lines (min 14 (/ (- (romacs-chrome-bottom root panel) top padding) ch))))
+    (when (and (>= columns 16) (>= lines 4))
+      (list (cons left top) columns lines))))
+
+(defun romacs-complete--preview-image (file root columns lines)
+  "Make a preview of local FILE within COLUMNS and LINES of ROOT."
+  (ignore-error file-error
+    (when-let* ((type (image-supported-file-p file))
+                ((file-regular-p file))
+                ((file-readable-p file)))
+      (create-image file type nil :scale 1
+                    :max-width (* (1- columns) (frame-char-width root))
+                    :max-height (* lines (frame-char-height root))))))
+
+(defun romacs-complete--preview-draw (image placement)
+  "Show IMAGE at PLACEMENT, or clear the card when IMAGE is nil."
+  (when-let* ((buffer (if image (get-buffer-create romacs-complete--preview-buffer)
+                       (get-buffer romacs-complete--preview-buffer))))
+    (with-current-buffer buffer
+      (setq-local truncate-lines t mode-line-format nil cursor-type nil)
+      (erase-buffer)
+      (when image (insert-image image " ") (goto-char (point-min))))
+    (if image
+        (pcase-let ((`(,anchor ,columns ,lines) placement))
+          (romacs-popup-show 'card buffer :anchor anchor :columns columns :lines lines))
+      (romacs-layer-hide buffer))))
+
+(defun romacs-complete--preview-clear ()
+  "Clear the preview as its minibuffer is left or suspended."
+  (when romacs-complete--preview-state
+    (setq romacs-complete--preview-state nil)
+    (romacs-complete--preview-draw nil nil)))
+
+(defun romacs-complete--preview ()
+  "Show the current file candidate beside the panel, if it is an image."
+  (if-let* ((romacs-complete--file-preview)
+            ((memq (romacs-complete--metadata-get 'category) '(file project-file)))
+            (panel romacs-complete--layer)
+            (root (frame-parent panel))
+            (name (romacs-complete--candidate))
+            ((not (or (file-remote-p default-directory) (file-remote-p name))))
+            (placement (romacs-complete--preview-placement panel)))
+      (let* ((file (expand-file-name name))
+             (state (list root file placement)))
+        (unless (equal state romacs-complete--preview-state)
+          (romacs-complete--preview-draw
+           (romacs-complete--preview-image file root (nth 1 placement) (nth 2 placement))
+           placement)
+          (setq romacs-complete--preview-state state)))
+    (romacs-complete--preview-clear)))
+
 (defun romacs-complete--minibuffer-setup ()
   "Show the minibuffer's layer for a minibuffer without candidates, as
 wide as its prompt asks; a completion one records no prompt width."
+  (romacs-complete--preview-clear)
   (if (local-variable-p 'romacs-complete--input)
       (setq romacs-complete--prompt-width nil)
     (let ((frame (romacs-complete--frame)))
@@ -1194,21 +1276,25 @@ wide as its prompt asks; a completion one records no prompt width."
 (defun romacs-complete--minibuffer-exit ()
   "Hide the minibuffer's layer as the outermost minibuffer exits; else
 show the enclosing minibuffer's candidates again."
+  (romacs-complete--preview-clear)
   (when (frame-live-p romacs-complete--layer)
     (if (<= (minibuffer-depth) 1)
         (progn (setq romacs-complete--prompt-width nil)
                (make-frame-invisible romacs-complete--layer))
-      (let ((outer (get-buffer (format " *romacs-complete-%d*" (1- (minibuffer-depth))))))
+      (let* ((depth (1- (minibuffer-depth)))
+             (outer (get-buffer (format " *romacs-complete-%d*" depth)))
+             (outer-minibuffer (get-buffer (format " *Minibuf-%d*" depth))))
         ;; This hook runs before the outer minibuffer is current again:
         ;; measure the outer one's own buffer, not this one.
-        (let ((outer-minibuffer (get-buffer (format " *Minibuf-%d*" (1- (minibuffer-depth))))))
-          (setq romacs-complete--prompt-width
-                (and (romacs-complete--prompt-only-p outer-minibuffer)
-                     (romacs-complete--measure-prompt outer-minibuffer (frame-char-width (frame-parent romacs-complete--layer))
-                                                      (romacs-complete--prompt-room romacs-complete--layer)))))
+        (setq romacs-complete--prompt-width
+              (and (romacs-complete--prompt-only-p outer-minibuffer)
+                   (romacs-complete--measure-prompt outer-minibuffer (frame-char-width (frame-parent romacs-complete--layer))
+                                                    (romacs-complete--prompt-room romacs-complete--layer))))
         (when outer
           (romacs-complete--show outer (with-current-buffer outer
-                                         (if (= (buffer-size) 0) 0 (count-lines (point-min) (point-max))))))))))
+                                         (if (= (buffer-size) 0) 0 (count-lines (point-min) (point-max)))))
+          (when outer-minibuffer
+            (with-current-buffer outer-minibuffer (romacs-complete--preview))))))))
 
 ;;;; Messages (Romacs): toasts (romacs-layer.el)
 
@@ -1273,6 +1359,7 @@ frame's top-right corner (`romacs-layer-toast').  Turning it on turns `fido-mode
     (advice-remove 'undefined #'romacs-layer--note-undefined)
     (remove-hook 'rfn-eshadow-update-overlay-hook #'romacs-complete-directory-tidy)
     (romacs-complete--hide-message)
+    (romacs-complete--preview-clear)
     (romacs-complete--prompt-hooks-off)
     (romacs--host-minibuffer nil)
     (when (frame-live-p romacs-complete--layer) (delete-frame romacs-complete--layer))

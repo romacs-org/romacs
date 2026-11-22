@@ -20,6 +20,8 @@
 (require 'romacs-agent-log)
 (require 'romacs-attach)
 
+(defvar romacs-complete-file-preview)
+
 (declare-function romacs-agents "romacs-agent-board" ())
 (declare-function romacs-agent-resume-time "romacs-agent-tools" (session))
 (declare-function romacs-agent-tools--cancel-resume "romacs-agent-tools" (session &optional why))
@@ -371,15 +373,16 @@ reads it where it is, and the chat shows it.  Interactively the
 clipboard's image: the file it was copied from (a screenshot), else the
 image saved once in `romacs-attach-save-directory'.  With a prefix
 argument ASK, when the clipboard holds no image, or in a chat whose
-session takes no commands from here, an image picked by sight
-\(`romacs-agent-images-read'; TAB there names any file)."
+session takes no commands from here, read a file name with image previews."
   (interactive "P" romacs-agent-log-mode)
   (if-let* ((type (and (not ask) (romacs-agent-log--commands-p) (romacs-attach-clipboard-image-type))))
       ;; At the composer's end, unless the draft is sent meanwhile.
       (when (romacs-agent-log-attach-paste type (point-max) t)
         (message "Attaching the clipboard's image…"))
-    (require 'romacs-agent-images)
-    (romacs-agent-menu--link (romacs-agent-images-read))))
+    (let* ((romacs-complete-file-preview t)
+           (cwd (and (romacs-agent-log--commands-p) (romacs-agent-cwd romacs-agent-log--session)))
+           (dir (if (and cwd (not (file-remote-p cwd)) (file-directory-p cwd)) cwd default-directory)))
+      (romacs-agent-menu--link (expand-file-name (read-file-name "Attach file: " dir nil t) dir)))))
 
 (keymap-popup-define romacs-agent-menu-map
   "Actions of an agent chat: what waits on you, the turn, what it runs on,
