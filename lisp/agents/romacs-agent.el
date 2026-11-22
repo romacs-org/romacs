@@ -2594,6 +2594,66 @@ answer not handled leaves its session starting)."
     (with-demoted-errors "romacs-agent: reporting a record's failure: %S"
       (romacs-agent--raise session (list :type 'error :text text)))))
 
+(defun romacs-agent--attachment-record-kind (record notes-only)
+  "Classify RECORD received by an attachment.
+NOTES-ONLY is non-nil when the connection was opened for a notes host."
+  (cond ((not (hash-table-p record)) nil)
+        ((gethash "refused" record) (if notes-only 'notes-refused 'refused))
+        ((not (gethash "attached" record)) 'journal)
+        (notes-only 'notes-attached)
+        ((eq (gethash "notesOnly" record) t) 'unexpected-notes-host)
+        (t 'attached)))
+
+(defun romacs-agent--attached-state (approvals-p input-seq completed-seq)
+  "Derive a detached session's state from APPROVALS-P and its turn cursors.
+INPUT-SEQ and COMPLETED-SEQ say whether the last turn is still underway."
+  (cond (approvals-p 'waiting-approval)
+        ((> (or input-seq 0) completed-seq) 'running)
+        (t 'idle)))
+
+(defun romacs-agent--supervisor-attached (session process)
+  "Finish SESSION's replay from PROCESS and let its live work go."
+  (romacs-agent--kept session process)
+  (romacs-agent--send-held session process)
+  (remhash session romacs-agent--reattaching)
+  (when (eq (romacs-agent-state session) 'detached)
+    (setf (romacs-agent-state session)
+          (romacs-agent--attached-state (> (hash-table-count (romacs-agent-approvals session)) 0)
+                                        (romacs-agent-input-seq session)
+                                        (romacs-agent-completed-seq session)))
+    (romacs-agent--raise session (list :type 'status :text "attached")))
+  (setf (romacs-agent-caught-up session) t)
+  (run-hook-with-args 'romacs-agent-caught-up-functions session)
+  (romacs-agent--keep-soon session)
+  (romacs-agent--seen-caught-up session)
+  (romacs-agent--allow-tool-calls session)
+  (romacs-agent--step session)
+  (romacs-agent--dispatch session)
+  (when (romacs-agent-pending-selection session)
+    (romacs-agent--settle session)))
+
+(defun romacs-agent--apply-attachment-record (session process record)
+  "Handle RECORD from PROCESS, one of SESSION's attachment connections."
+  (let ((notes-only (process-get process 'notes-only)))
+    (pcase (romacs-agent--attachment-record-kind record notes-only)
+      ('journal
+       (unless notes-only (romacs-agent--kept session process))
+       (romacs-agent--record session record))
+      ('notes-refused (delete-process process))
+      ('notes-attached
+       (process-put process 'attached t)
+       (romacs-agent--send-held session process)
+       (romacs-agent--notes-written session))
+      ('refused
+       (romacs-agent--raise session (list :type 'error :text "another server is attached")))
+      ('unexpected-notes-host
+       ;; End the notes host so it releases the lock for the supervisor.
+       (when (eq (romacs-agent-connection session) process)
+         (setf (romacs-agent-connection session) nil))
+       (delete-process process)
+       (run-at-time 0.1 nil #'romacs-agent--attach session romacs-agent--launch-tries))
+      ('attached (romacs-agent--supervisor-attached session process)))))
+
 (defun romacs-agent--filter-lines (process until)
   "Handle the whole lines of PROCESS's output text from its `start' until
 time UNTIL, one at least, each on its own: one whose handling signals
@@ -2615,55 +2675,7 @@ nonlocally (a quit) leaves the lines after it waiting."
                         (json-parse-string (decode-coding-string line 'utf-8)
                                            :object-type 'hash-table :null-object :null :false-object :false))))
           (condition-case err
-              (cond ((not (hash-table-p record)))
-                    ;; The connection to its notes-only host: it takes the held
-                    ;; notes and nothing else; their records let them go.
-                    ((process-get process 'notes-only)
-                     (cond ((gethash "refused" record) (delete-process process))
-                           ((gethash "attached" record)
-                            (process-put process 'attached t)
-                            (romacs-agent--send-held session process)
-                            (romacs-agent--notes-written session))
-                           (t (romacs-agent--record session record))))
-                    ((gethash "refused" record)
-                     (romacs-agent--raise session (list :type 'error :text "another server is attached")))
-                    ((and (gethash "attached" record) (eq (gethash "notesOnly" record) t))
-                     ;; A notes-only host met where a supervisor was looked for:
-                     ;; let go, so it ends and frees the lock, and looked for
-                     ;; again.
-                     (when (eq (romacs-agent-connection session) process)
-                       (setf (romacs-agent-connection session) nil))
-                     (delete-process process)
-                     (run-at-time 0.1 nil #'romacs-agent--attach session romacs-agent--launch-tries))
-                    ((gethash "attached" record)
-                     (romacs-agent--kept session process)
-                     ;; The notes held for it, numbered by it, now it is ours.
-                     (romacs-agent--send-held session process)
-                     (remhash session romacs-agent--reattaching)
-                     ;; Attached again: what it does is what its records say, a
-                     ;; turn under way or none; a replay from the last record
-                     ;; seen says nothing new.
-                     (when (eq (romacs-agent-state session) 'detached)
-                       (setf (romacs-agent-state session)
-                             (cond ((> (hash-table-count (romacs-agent-approvals session)) 0) 'waiting-approval)
-                                   ((> (or (romacs-agent-input-seq session) 0) (romacs-agent-completed-seq session))
-                                    'running)
-                                   (t 'idle)))
-                       ;; Its views, and its parent's rows, read it anew.
-                       (romacs-agent--raise session (list :type 'status :text "attached")))
-                     ;; The replay is over: what comes now is live.
-                     (setf (romacs-agent-caught-up session) t)
-                     (run-hook-with-args 'romacs-agent-caught-up-functions session)
-                     (romacs-agent--keep-soon session)
-                     (romacs-agent--seen-caught-up session)
-                     (romacs-agent--allow-tool-calls session)
-                     (romacs-agent--step session)
-                     ;; What waited for the attachment's records goes.
-                     (romacs-agent--dispatch session)
-                     ;; A selection a restart found armed, with no turn to end.
-                     (when (romacs-agent-pending-selection session) (romacs-agent--settle session)))
-                    (t (romacs-agent--kept session process)
-                       (romacs-agent--record session record)))
+              (romacs-agent--apply-attachment-record session process record)
             (error (romacs-agent--record-failed session err))))))))
 
 (defun romacs-agent--sentinel (process _event)

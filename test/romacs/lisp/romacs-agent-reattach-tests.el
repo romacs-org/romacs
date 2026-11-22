@@ -47,7 +47,12 @@ attach."
 
 (ert-deftest romacs-agent-reattach-is-no-longer-detached ()
   (romacs-agent-reattach-tests--with
-    (let ((process (make-process :name "romacs-reattach-fixture" :command '("cat") :noquery t)))
+    (let* ((process (make-process :name "romacs-reattach-fixture" :command '("cat") :noquery t))
+           (caught-up nil)
+           (romacs-agent-caught-up-functions
+            (list (lambda (s)
+                    (when (and (eq s session) (romacs-agent-caught-up s))
+                      (push (romacs-agent-state s) caught-up))))))
       (unwind-protect
           (progn
             (process-put process 'romacs-agent session)
@@ -71,7 +76,8 @@ attach."
                   (romacs-agent--filter process "{\"attached\":4}\n"))
                 (should (eq (romacs-agent-state session) 'waiting-approval))
                 ;; Its views and its parent's rows are told.
-                (should (member "attached" events)))))
+                (should (member "attached" events))
+                (should (equal caught-up '(waiting-approval running idle))))))
         (delete-process process)))))
 
 (ert-deftest romacs-agent-reattach-backs-off-and-stops ()
