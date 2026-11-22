@@ -178,6 +178,19 @@
     (romacs-agent-settle session t)
     (should (eq (romacs-agent-ui--state-key session) 'idle))))
 
+(ert-deftest romacs-agent-state-completion-computes-the-turn-from-its-inputs ()
+  (let* ((before '(:turns 2 :provider "account" :model "model" :context-window 64000 :cost 0.5))
+         (event '(:type done :seq 7 :limit model :error t :reason "out of room"))
+         (room '(:window "daily" :resets 100))
+         (done (romacs-agent--completed-turn before event room)))
+    (should (equal done
+                   '(:seq 7 :turns 3 :reply nil :failed t
+                     :limited (:provider "account" :model "model" :text "out of room" :window "daily" :resets 100)
+                     :context-window 64000 :cost 0.5)))
+    (should (equal before '(:turns 2 :provider "account" :model "model" :context-window 64000 :cost 0.5)))
+    (should (equal (romacs-agent--completed-turn before '(:type done :text "ok" :context-window 32000 :cost 0.75) nil)
+                   '(:seq 0 :turns 3 :reply "ok" :failed nil :limited nil :context-window 32000 :cost 0.75)))))
+
 (ert-deftest romacs-agent-state-questions-and-plans-from-events ()
   (romacs-agent-state-tests--recorded (:state 'running :input-seq 4)
     (let ((romacs-agent-approval-policy 'allow))

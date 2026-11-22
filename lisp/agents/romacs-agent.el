@@ -1700,6 +1700,56 @@ A steer into an existing compaction keeps it marked."
                             (romacs-agent--compaction-input-p prompt text))))
         (setf (romacs-agent-driver-state session) (plist-put state :compact-turn compacting))))))
 
+(defun romacs-agent--completed-turn (before event room)
+  "Return the completed turn's state from BEFORE, EVENT, and account ROOM.
+BEFORE has the session's count, provider, model, context window and cost."
+  (let ((limit (plist-get event :limit))
+        (reply (plist-get event :text))
+        (cost (plist-get event :cost)))
+    (list :seq (or (plist-get event :seq) 0)
+          :turns (1+ (plist-get before :turns))
+          :reply reply :failed (plist-get event :error)
+          :limited (when limit
+                     (list :provider (plist-get before :provider)
+                           :model (and (eq limit 'model) (plist-get before :model))
+                           :text (or reply (plist-get event :reason))
+                           :window (plist-get room :window) :resets (plist-get room :resets)))
+          :context-window (or (plist-get event :context-window) (plist-get before :context-window))
+          :cost (if (numberp cost) cost (plist-get before :cost)))))
+
+(defun romacs-agent--apply-completed-turn (session completed)
+  "Apply COMPLETED to SESSION and keep its outcome for its parent."
+  (let ((seq (plist-get completed :seq)))
+    (romacs-agent--set-asks session nil)
+    (romacs-agent--set-questions session nil)
+    (setf (romacs-agent-state session) 'idle
+          (romacs-agent-activity session) nil
+          (romacs-agent-reply session) (plist-get completed :reply)
+          (romacs-agent-failed session) (plist-get completed :failed)
+          (romacs-agent-limited session) (plist-get completed :limited)
+          (romacs-agent-turns session) (plist-get completed :turns)
+          (romacs-agent-done-seq session) seq
+          (romacs-agent-completed-seq session) seq
+          (romacs-agent-interrupted session) nil
+          (romacs-agent-context-window session) (plist-get completed :context-window)
+          (romacs-agent-cost session) (plist-get completed :cost))
+    (romacs-agent--note-end session)))
+
+(defun romacs-agent--complete-turn (session event)
+  "Finish SESSION's turn from EVENT, then schedule any waiting work."
+  (let* ((provider (romacs-agent-provider session))
+         (room (and (plist-get event :limit) (romacs-agent-room-of provider)))
+         (before (list :turns (romacs-agent-turns session) :provider provider
+                       :model (romacs-agent-model session)
+                       :context-window (romacs-agent-context-window session)
+                       :cost (romacs-agent-cost session))))
+    (romacs-agent--apply-completed-turn session (romacs-agent--completed-turn before event room)))
+  ;; In a persistent harness the selection applies before the queued message.
+  (when (and (or (romacs-agent-queue session) (romacs-agent-pending-selection session))
+             (not (romacs-agent--per-turn-p session))
+             (process-live-p (romacs-agent-connection session)))
+    (run-at-time 0 nil #'romacs-agent--settle session)))
+
 (defun romacs-agent--raise (session event)
   "Apply EVENT to SESSION's state and give it to the event functions."
   (when (plist-get event :time) (setf (romacs-agent-last-time session) (plist-get event :time)))
@@ -1799,36 +1849,7 @@ A steer into an existing compaction keeps it marked."
     ;; A turn's end: what it asked the user is moot.
     ;; A live report only: one replayed may be another instance's, before a move.
     ('rate-limit (when (romacs-agent-caught-up session) (romacs-agent--note-room session event)))
-    ('done (romacs-agent--set-asks session nil)
-           (romacs-agent--set-questions session nil)
-           (setf (romacs-agent-state session) 'idle
-                 (romacs-agent-activity session) nil
-                 (romacs-agent-reply session) (plist-get event :text)
-                 (romacs-agent-failed session) (plist-get event :error)
-                 (romacs-agent-limited session)
-                 (and (plist-get event :limit)
-                      (let ((room (romacs-agent-room-of (romacs-agent-provider session))))
-                        (list :provider (romacs-agent-provider session)
-                              :model (and (eq (plist-get event :limit) 'model) (romacs-agent-model session))
-                              :text (or (plist-get event :text) (plist-get event :reason))
-                              :window (plist-get room :window) :resets (plist-get room :resets)))))
-           (cl-incf (romacs-agent-turns session))
-           (setf (romacs-agent-done-seq session) (or (plist-get event :seq) 0)
-                 (romacs-agent-completed-seq session) (or (plist-get event :seq) 0)
-                 (romacs-agent-interrupted session) nil)
-           (romacs-agent--note-end session)
-           (when (plist-get event :context-window)
-             (setf (romacs-agent-context-window session) (plist-get event :context-window)))
-           ;; Claude's cost is the session's so far, for queries; no view shows it.
-           (when (numberp (plist-get event :cost))
-             (setf (romacs-agent-cost session) (plist-get event :cost)))
-           ;; A long-lived harness's turn ended: a new selection applies,
-           ;; then the first message queued for it is next (a per-turn
-           ;; one's run ends with it).
-           (when (and (or (romacs-agent-queue session) (romacs-agent-pending-selection session))
-                      (not (romacs-agent--per-turn-p session))
-                      (process-live-p (romacs-agent-connection session)))
-             (run-at-time 0 nil #'romacs-agent--settle session)))
+    ('done (romacs-agent--complete-turn session event))
     ;; Its supervisor never came up: an end, failed, with no record of
     ;; its own (the journal is the supervisor's).
     ('unstarted
