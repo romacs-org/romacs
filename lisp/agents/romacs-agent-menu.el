@@ -370,7 +370,8 @@ reads it where it is, and the chat shows it.  Interactively the
 clipboard's image: the file it was copied from (a screenshot), else the
 image saved once in `romacs-attach-save-directory'.  With a prefix
 argument ASK, when the clipboard holds no image, or in a chat whose
-session takes no commands from here, a file asked for."
+session takes no commands from here, an image picked by sight
+\(`romacs-agent-images-read'; TAB there names any file)."
   (interactive "P" romacs-agent-log-mode)
   (if-let* ((type (and (not ask) (romacs-agent-log--commands-p) (romacs-attach-clipboard-image-type))))
       (let ((chat (current-buffer)))
@@ -381,7 +382,8 @@ session takes no commands from here, a file asked for."
                       ((buffer-live-p chat)
                        (with-current-buffer chat (romacs-agent-menu--link file))
                        (message "Attached %s" (abbreviate-file-name file)))))))
-    (romacs-agent-menu--link (read-file-name "Attach: " nil nil t))))
+    (require 'romacs-agent-images)
+    (romacs-agent-menu--link (romacs-agent-images-read))))
 
 (keymap-popup-define romacs-agent-menu-map
   "Actions of an agent chat: what waits on you, the turn, what it runs on,

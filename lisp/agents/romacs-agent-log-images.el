@@ -211,6 +211,10 @@ IMAGE, its file's, is non-nil."
       (overlay-put overlay 'help-echo (nth 2 link)))
     overlay))
 
+(defvar-local romacs-agent-log-images-under-draft t
+  "Whether the composer's images show under its draft: nil where a tray
+of chips shows them instead (romacs-agent-log-attach.el).")
+
 (defun romacs-agent-log-images-composer (start)
   "Show the image links of the composer, from START to the buffer's end:
 each as its file's name, their images under the draft.  Drawn again only
@@ -228,7 +232,7 @@ between, their images follow the draft's end."
                                  (romacs-agent-log-images--image (nth 2 link) (or width (* 80 (frame-char-width)))
                                                                  romacs-agent-log-image-composer-lines))
                                links))
-               (shown (delq nil (copy-sequence images)))
+               (shown (and romacs-agent-log-images-under-draft (delq nil (copy-sequence images))))
                (block (when shown
                         ;; Not evaporating: a deleted last character leaves
                         ;; it to follow the draft's new end.

@@ -2059,6 +2059,8 @@ A character typed on it goes to the composer."
 The session's commands are the menu's (romacs-agent-menu.el), here
 under C-c as well."
   "RET" #'romacs-agent-log-send
+  "DEL" #'romacs-agent-log-attach-delete-backward
+  "<remap> <yank>" #'romacs-agent-log-attach-yank
   "C-j" #'newline
   "S-<return>" #'newline
   ;; The turn.
@@ -2134,6 +2136,7 @@ On the transcript's text:
   ;; The separator's rule fits the window it is shown in.
   (add-hook 'window-size-change-functions (lambda (_) (when romacs-agent-log--input (romacs-agent-log--separator))) nil t)
   (add-hook 'window-size-change-functions #'romacs-agent-log-tables-refit nil t)
+  (romacs-agent-log-attach-setup)
   (add-hook 'after-change-functions #'romacs-agent-log--composer-plain nil t)
   (add-hook 'after-change-functions #'romacs-agent-log--composer-images nil t))
 
@@ -2143,6 +2146,7 @@ On the transcript's text:
 ;; Its replies' faces as they stream.
 (require 'romacs-agent-log-faces)
 (require 'romacs-agent-log-tables)
+(require 'romacs-agent-log-attach)
 ;; Its rounds, told at a glance.
 (require 'romacs-agent-log-rounds)
 ;;; romacs-agent-log.el ends here
