@@ -1700,16 +1700,40 @@ on whatever becomes of this server."
                                (or text ""))
          t)))
 
-(defun romacs-agent--record-compaction-input (session text)
-  "Record whether SESSION's input TEXT starts a compaction turn.
-A steer into an existing compaction keeps it marked."
-  (let ((state (romacs-agent-driver-state session))
-        (prompt (romacs-agent--idle-compact-prompt session)))
-    (when (or prompt (plist-member state :compact-turn))
-      (let ((compacting (or (and (> (or (romacs-agent-input-seq session) 0) (romacs-agent-done-seq session))
-                                 (plist-get state :compact-turn))
-                            (romacs-agent--compaction-input-p prompt text))))
-        (setf (romacs-agent-driver-state session) (plist-put state :compact-turn compacting))))))
+(defun romacs-agent--input-transition (event input-seq done-seq driver-state compact-prompt)
+  "Compute input EVENT's changes from the previous turn and driver state."
+  (let ((steer (> (or input-seq 0) done-seq)))
+    (list :begins (not steer)
+          :answering (unless steer (romacs-agent--answered (plist-get event :messages)))
+          :seq (or (plist-get event :seq) input-seq)
+          :compact-turn (if (or compact-prompt (plist-member driver-state :compact-turn))
+                            (or (and steer (plist-get driver-state :compact-turn))
+                                (romacs-agent--compaction-input-p compact-prompt (plist-get event :text)))
+                          :absent))))
+
+(defun romacs-agent--apply-input-event (session event)
+  "Apply input EVENT to SESSION before telling its observers."
+  (let* ((state (romacs-agent-driver-state session))
+         (transition (romacs-agent--input-transition event (romacs-agent-input-seq session)
+                                                    (romacs-agent-done-seq session) state
+                                                    (romacs-agent--idle-compact-prompt session)))
+         (compacting (plist-get transition :compact-turn))
+         (own (plist-get event :own)))
+    (unless (eq compacting :absent)
+      (setf (romacs-agent-driver-state session) (plist-put state :compact-turn compacting)))
+    (when-let* ((messages (plist-get event :messages)))
+      (romacs-agent--received session messages))
+    (when (plist-get transition :begins)
+      (setf (romacs-agent-answering session) (plist-get transition :answering)
+            (romacs-agent-own-turn session) own))
+    (setf (romacs-agent-state session) 'running
+          (romacs-agent-activity session) nil
+          (romacs-agent-turn-start session) (plist-get event :time)
+          (romacs-agent-input-seq session) (plist-get transition :seq))
+    (unless own
+      (setf (romacs-agent-brief session) nil)
+      (when (romacs-agent-title-auto session)
+        (romacs-agent--title-from session (plist-get event :text))))))
 
 (defun romacs-agent--completed-turn (before event room)
   "Return the completed turn's state from BEFORE, EVENT, and account ROOM.
@@ -1761,131 +1785,132 @@ BEFORE has the session's count, provider, model, context window and cost."
              (process-live-p (romacs-agent-connection session)))
     (run-at-time 0 nil #'romacs-agent--settle session)))
 
-(defun romacs-agent--raise (session event)
-  "Apply EVENT to SESSION's state and give it to the event functions."
-  (when (plist-get event :time) (setf (romacs-agent-last-time session) (plist-get event :time)))
+(defun romacs-agent--apply-session-event (session event)
+  "Apply the harness identity and permission mode in EVENT to SESSION."
+  (let ((native (plist-get event :harness-session)))
+    (when (and native (not (equal native (romacs-agent-harness-session session))))
+      (romacs-agent--manifest-put session "harnessSession" native))
+    (setf (romacs-agent-model session) (or (plist-get event :model) (romacs-agent-model session))
+          (romacs-agent-harness-session session) native
+          (romacs-agent-state session) 'running))
+  (when-let* ((mode (plist-get event :permission-mode)))
+    (romacs-agent--mode-seen session mode)))
+
+(defun romacs-agent--apply-selection-event (session event)
+  "Apply the selection in EVENT and notify SESSION's move handlers."
+  (let* ((before (plist-get event :from))
+         (after (plist-get event :to))
+         (model (plist-get after :model)))
+    (unless (equal model (plist-get before :model))
+      (setf (romacs-agent-context-window session) nil))
+    (unless (equal (plist-get after :provider) (plist-get before :provider))
+      (setf (romacs-agent-limited session) nil))
+    (when model (setf (romacs-agent-model session) model))
+    (romacs-agent--moved session event)))
+
+(defun romacs-agent--apply-run-event (session event)
+  "Start SESSION's run from EVENT on the currently defined driver."
+  (setf (romacs-agent-driver session) nil
+        (romacs-agent-renewing session) nil
+        (romacs-agent-driver-state session) (romacs-agent--driver-anew session :run (plist-get event :seq))
+        (romacs-agent-permission-mode session) nil
+        (romacs-agent-startup-pending session) nil))
+
+(defun romacs-agent--apply-driver-state (session updates)
+  "Fold driver UPDATES into SESSION."
+  (let ((state (romacs-agent-driver-state session)))
+    (cl-loop for (key value) on updates by #'cddr do (setq state (plist-put state key value)))
+    (setf (romacs-agent-driver-state session) state)))
+
+(defun romacs-agent--apply-approval-event (session event)
+  "Register what the user must answer in EVENT or arrange the policy reply."
+  (let ((id (plist-get event :request-id)))
+    (if (romacs-agent--auto-answer-p session event)
+        (when (romacs-agent--live-p session)
+          (run-at-time 0 nil #'romacs-agent--answer-unasked session id))
+      (romacs-agent--set-asks session (cons id (romacs-agent-asks session)))
+      (when (plist-get event :questions)
+        (romacs-agent--set-questions session (cons id (romacs-agent-questions session))))
+      (setf (romacs-agent-state session) 'waiting-approval))))
+
+(defun romacs-agent--apply-answered-event (session id)
+  "Remove request ID from SESSION's pending user answers."
+  (let ((remaining (remove id (romacs-agent-asks session))))
+    (romacs-agent--set-asks session remaining)
+    (romacs-agent--set-questions session (remove id (romacs-agent-questions session)))
+    (setf (romacs-agent-state session) (if remaining 'waiting-approval 'running))))
+
+(defun romacs-agent--apply-unstarted-event (session event)
+  "Record the failure to launch SESSION from EVENT."
+  (setf (romacs-agent-state session) 'unstarted (romacs-agent-failed session) t
+        (romacs-agent-reply session) (plist-get event :text)
+        (romacs-agent-done-seq session) (plist-get event :seq))
+  (romacs-agent--note-end session))
+
+(defun romacs-agent--exit-transition (event state input-seq completed-seq per-turn)
+  "Compute an exit EVENT's effect on the turn from its prior state."
+  (list :interrupted (and (not per-turn) (> (or input-seq 0) completed-seq))
+        :failure (unless (eq state 'idle)
+                   (format "the harness exited (%s) before its turn ended" (plist-get event :status)))
+        :seq (or (plist-get event :seq) 0)))
+
+(defun romacs-agent--apply-exit-event (session event)
+  "End SESSION's run from EVENT and keep any failed turn for its parent."
+  (setf (romacs-agent-driver-state session) (romacs-agent--driver-anew session)
+        (romacs-agent-startup-pending session) nil)
+  (clrhash (romacs-agent-approvals session))
+  (let ((transition (romacs-agent--exit-transition event (romacs-agent-state session)
+                                                   (romacs-agent-input-seq session)
+                                                   (romacs-agent-completed-seq session)
+                                                   (romacs-agent--per-turn-p session))))
+    (setf (romacs-agent-interrupted session) (plist-get transition :interrupted))
+    (when-let* ((failure (plist-get transition :failure)))
+      (setf (romacs-agent-failed session) t
+            (romacs-agent-reply session) failure
+            (romacs-agent-done-seq session) (plist-get transition :seq))
+      (romacs-agent--note-end session)))
+  (setf (romacs-agent-state session) (romacs-agent--ended-state session)))
+
+(defun romacs-agent--apply-event (session event)
+  "Apply a public EVENT to SESSION."
   (pcase (plist-get event :type)
-    ('session (let ((native (plist-get event :harness-session)))
-                ;; A harness naming its conversation after launch (ACP's
-                ;; session/new): its manifest knows it for a resume.
-                (when (and native (not (equal native (romacs-agent-harness-session session))))
-                  (romacs-agent--manifest-put session "harnessSession" native)))
-              (setf (romacs-agent-model session) (or (plist-get event :model) (romacs-agent-model session))
-                    (romacs-agent-harness-session session) (plist-get event :harness-session)
-                    (romacs-agent-state session) 'running)
-              (when (plist-get event :permission-mode)
-                (romacs-agent--mode-seen session (plist-get event :permission-mode))))
+    ('session (romacs-agent--apply-session-event session event))
     ('usage (setf (romacs-agent-context-used session) (plist-get event :context-used)))
-    ;; The message a per-turn harness's next prompt is.
-    ('incoming (setf (romacs-agent-incoming session) (list :text (plist-get event :text) :prompt (plist-get event :prompt)
-                                                           :messages (plist-get event :messages))))
-    ;; A request: when the prompt cache it wrote expires, or unknown.
-    ('cache (setf (romacs-agent-driver-state session)
-                  (plist-put (romacs-agent-driver-state session) :cache-expires
-                             (and (plist-get event :ttl) (plist-get event :time)
-                                  (+ (plist-get event :time) (plist-get event :ttl))))))
-    ;; Renewed: a new conversation, named by its harness when nil, its
-    ;; brief to go with its next message.
+    ('incoming (setf (romacs-agent-incoming session)
+                     (list :text (plist-get event :text) :prompt (plist-get event :prompt)
+                           :messages (plist-get event :messages))))
+    ('cache (romacs-agent--apply-driver-state
+             session (list :cache-expires
+                           (and (plist-get event :ttl) (plist-get event :time)
+                                (+ (plist-get event :time) (plist-get event :ttl))))))
     ('renewed (setf (romacs-agent-harness-session session) (plist-get event :to)
                     (romacs-agent-brief session) (plist-get event :brief)
                     (romacs-agent-renewing session) (or (plist-get event :seq) t)))
-    ;; What a fork was last forked from, folded from its journal.
     ('forked (setf (romacs-agent-options session)
                    (plist-put (copy-sequence (romacs-agent-options session))
                               :forked (list (plist-get event :from) (plist-get event :seq-from)))))
-    ('selection (let ((model (plist-get (plist-get event :to) :model)))
-                  (unless (equal model (plist-get (plist-get event :from) :model))
-                    ;; The context held stays; its window was the last model's.
-                    (setf (romacs-agent-context-window session) nil))
-                  ;; Moved: the last instance's limit is not its own now.
-                  (unless (equal (plist-get (plist-get event :to) :provider) (plist-get (plist-get event :from) :provider))
-                    (setf (romacs-agent-limited session) nil))
-                  (when model (setf (romacs-agent-model session) model))
-                  (romacs-agent--moved session event)))
-    ;; A run starts (the supervisor's first record): its startup is its own,
-    ;; and the record's seq names the run.
-    ;; A run starts on its driver as defined now: one loaded since speaks
-    ;; to the next run, never to the one going on.
-    ('run (setf (romacs-agent-driver session) nil
-                ;; A renewal's new conversation runs now.
-                (romacs-agent-renewing session) nil
-                (romacs-agent-driver-state session) (romacs-agent--driver-anew session :run (plist-get event :seq))
-                ;; The mode is the run's: unknown till its harness says.
-                (romacs-agent-permission-mode session) nil
-                (romacs-agent-startup-pending session) nil))
-    ('handshake (let ((state (romacs-agent-driver-state session)))
-                  (cl-loop for (key value) on (plist-get event :state) by #'cddr
-                           do (setq state (plist-put state key value)))
-                  (setf (romacs-agent-driver-state session) state)))
-    ('input (romacs-agent--record-compaction-input session (plist-get event :text))
-            ;; From another session: kept to be answered; a turn it begins
-            ;; answers it (a steer into a running turn does not), and is
-            ;; Romacs's own, or not.
-            (let ((messages (plist-get event :messages)))
-              (when messages (romacs-agent--received session messages))
-              ;; A turn begun by an earlier prompt and not ended yet: a
-              ;; steer.  An exit mid-turn ends it too (its done-seq).
-              (unless (> (or (romacs-agent-input-seq session) 0) (romacs-agent-done-seq session))
-                (setf (romacs-agent-answering session) (romacs-agent--answered messages)
-                      (romacs-agent-own-turn session) (plist-get event :own))))
-            (setf (romacs-agent-state session) 'running
-                  (romacs-agent-activity session) nil
-                  (romacs-agent-turn-start session) (plist-get event :time)
-                  (romacs-agent-input-seq session) (or (plist-get event :seq) (romacs-agent-input-seq session)))
-            (unless (plist-get event :own)
-              (setf (romacs-agent-brief session) nil)
-              (when (romacs-agent-title-auto session) (romacs-agent--title-from session (plist-get event :text)))))
-    ;; A plan presented or a question is the user's to answer.  A tool
-    ;; call the policy answers waits on no one: its answer goes now, or on
-    ;; catching up.
-    ('approval (cond
-                ((romacs-agent--auto-answer-p session event)
-                 (when (romacs-agent--live-p session)
-                   (run-at-time 0 nil #'romacs-agent--answer-unasked session (plist-get event :request-id))))
-                (t (romacs-agent--set-asks session (cons (plist-get event :request-id) (romacs-agent-asks session)))
-                   (when (plist-get event :questions)
-                     (romacs-agent--set-questions session (cons (plist-get event :request-id)
-                                                               (romacs-agent-questions session))))
-                   (setf (romacs-agent-state session) 'waiting-approval))))
+    ('selection (romacs-agent--apply-selection-event session event))
+    ('run (romacs-agent--apply-run-event session event))
+    ('handshake (romacs-agent--apply-driver-state session (plist-get event :state)))
+    ('input (romacs-agent--apply-input-event session event))
+    ('approval (romacs-agent--apply-approval-event session event))
     ('mode (romacs-agent--mode-seen session (plist-get event :permission-mode)))
     ('tool (when (and (eq (plist-get event :state) 'started) (not (plist-get event :parent)))
              (setf (romacs-agent-activity session) (plist-get event :name))))
-    ;; Its harness would not go into plan mode: the session is not in it.
     ('plan-refused (when (romacs-agent--live-p session)
-                     (romacs-agent--set-options session (romacs-agent--without (romacs-agent-options session) '(:plan :plan-from)))))
-    ('answered (romacs-agent--set-asks session (remove (plist-get event :request-id) (romacs-agent-asks session)))
-               (romacs-agent--set-questions session (remove (plist-get event :request-id) (romacs-agent-questions session)))
-               ;; Still waiting on the user while one of theirs waits.
-               (setf (romacs-agent-state session) (if (romacs-agent-asks session) 'waiting-approval 'running)))
-    ;; A turn's end: what it asked the user is moot.
-    ;; A live report only: one replayed may be another instance's, before a move.
+                     (romacs-agent--set-options session (romacs-agent--without (romacs-agent-options session)
+                                                                              '(:plan :plan-from)))))
+    ('answered (romacs-agent--apply-answered-event session (plist-get event :request-id)))
     ('rate-limit (when (romacs-agent-caught-up session) (romacs-agent--note-room session event)))
     ('done (romacs-agent--complete-turn session event))
-    ;; Its supervisor never came up: an end, failed, with no record of
-    ;; its own (the journal is the supervisor's).
-    ('unstarted
-     (setf (romacs-agent-state session) 'unstarted (romacs-agent-failed session) t
-           (romacs-agent-reply session) (plist-get event :text)
-           (romacs-agent-done-seq session) (plist-get event :seq))
-     (romacs-agent--note-end session))
-    ('exit
-     ;; A run's startup is its own: the next run starts over.  What its
-     ;; harness asked is no longer anyone's to answer.
-     (setf (romacs-agent-driver-state session) (romacs-agent--driver-anew session)
-           (romacs-agent-startup-pending session) nil)
-     (clrhash (romacs-agent-approvals session))
-     ;; Ended with its last prompt's turn never done: cut, however many
-     ;; runs (a resumed one journals no prompt) it took.
-     (setf (romacs-agent-interrupted session)
-           (and (not (romacs-agent--per-turn-p session))
-                (> (or (romacs-agent-input-seq session) 0) (romacs-agent-completed-seq session))))
-     (unless (eq (romacs-agent-state session) 'idle)
-       ;; It ended mid-turn: that turn failed.
-       (setf (romacs-agent-failed session) t
-             (romacs-agent-reply session) (format "the harness exited (%s) before its turn ended" (plist-get event :status))
-             (romacs-agent-done-seq session) (or (plist-get event :seq) 0))
-       (romacs-agent--note-end session))
-     (setf (romacs-agent-state session) (romacs-agent--ended-state session))))
+    ('unstarted (romacs-agent--apply-unstarted-event session event))
+    ('exit (romacs-agent--apply-exit-event session event))))
+
+(defun romacs-agent--raise (session event)
+  "Apply EVENT to SESSION's state and give it to the event functions."
+  (when-let* ((time (plist-get event :time)))
+    (setf (romacs-agent-last-time session) time))
+  (romacs-agent--apply-event session event)
   (run-hook-with-args 'romacs-agent-event-functions session event))
 
 (defcustom romacs-agent-preambles
@@ -2261,10 +2286,7 @@ ENDS says a turn or run ended in that record."
     (when (and (integerp seq) (> seq (romacs-agent-seq session)))
       (setf (romacs-agent-seq session) seq)
       (when-let* ((cursor (romacs-agent--record-cursor record)))
-        (let ((state (romacs-agent-driver-state session)))
-          (cl-loop for (key value) on cursor by #'cddr
-                   do (setq state (plist-put state key value)))
-          (setf (romacs-agent-driver-state session) state)))
+        (romacs-agent--apply-driver-state session cursor))
       (let ((input (gethash "in" record :absent)))
         (unless (eq input :absent)
           (romacs-agent--record-echo session input))

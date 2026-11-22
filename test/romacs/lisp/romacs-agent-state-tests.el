@@ -178,6 +178,27 @@
     (romacs-agent-settle session t)
     (should (eq (romacs-agent-ui--state-key session) 'idle))))
 
+(ert-deftest romacs-agent-state-steer-and-exit-are-folded-before-observers ()
+  (romacs-agent-state-tests--recorded (:state 'idle :options '(:parent "p"))
+    (let* ((seen nil)
+           (romacs-agent-event-functions
+            (list (lambda (state event)
+                    (push (list (plist-get event :type) (romacs-agent-state state)
+                                (romacs-agent-answering state) (romacs-agent-interrupted state)
+                                (plist-get (romacs-agent-driver-state state) :compact-turn)
+                                (romacs-agent-ends state))
+                          seen)))))
+      (romacs-agent--raise session '(:type input :seq 1 :text "/compact" :messages ((:kind "parent" :id "first"))))
+      (romacs-agent--raise session '(:type input :seq 2 :text "Steer" :messages ((:kind "parent" :id "later"))))
+      (romacs-agent--raise session '(:type exit :seq 3 :status 1))
+      (should (equal (nreverse seen)
+                     '((input running "first" nil t nil)
+                       (input running "first" nil t nil)
+                       (exit ended "first" t nil
+                             ((3 "the harness exited (1) before its turn ended" t "first"))))))
+      (should (equal (mapcar (lambda (message) (plist-get message :id)) (romacs-agent-received session))
+                     '("later" "first"))))))
+
 (ert-deftest romacs-agent-state-completion-computes-the-turn-from-its-inputs ()
   (let* ((before '(:turns 2 :provider "account" :model "model" :context-window 64000 :cost 0.5))
          (event '(:type done :seq 7 :limit model :error t :reason "out of room"))
