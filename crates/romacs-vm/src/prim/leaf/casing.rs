@@ -223,17 +223,7 @@ impl Leaf<'_> {
         let mut pairs = codes.into_iter().zip(mappings);
         while pairs.len() > 0 {
             for (code, mapped) in pairs.by_ref().take(chunk) {
-                for &c in &mapped {
-                    if source.multibyte {
-                        let mut buf = [0; 5];
-                        let len = crate::lstring::char_string(c, &mut buf);
-                        bytes.extend_from_slice(&buf[..len]);
-                    } else {
-                        // A byte string cannot silently become Unicode or truncate
-                        // an unrepresentable override. Fall back to its byte default.
-                        bytes.push(Self::byte_case_result(c, code, down));
-                    }
-                }
+                append_case_mapping(&mut bytes, &mapped, code, source.multibyte, down);
             }
             if pairs.len() > 0 { self.native_poll()?; }
         }
@@ -252,6 +242,19 @@ impl Leaf<'_> {
         } else {
             data::Object::RawString(Box::new(result))
         }))
+    }
+}
+
+fn append_case_mapping(bytes: &mut Vec<u8>, mapped: &[u32], original: u32, multibyte: bool, down: bool) {
+    for &code in mapped {
+        if multibyte {
+            let mut buf = [0; 5];
+            let len = crate::lstring::char_string(code, &mut buf);
+            bytes.extend_from_slice(&buf[..len]);
+        } else {
+            // An unrepresentable override leaves the string in its byte domain.
+            bytes.push(Leaf::byte_case_result(code, original, down));
+        }
     }
 }
 

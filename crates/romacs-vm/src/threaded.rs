@@ -1746,6 +1746,29 @@ pub(super) fn execute_args(vm: &mut Vm, function: usize, args: &[Value]) -> Resu
         result
     })
 }
+/// Obtain the register file and lowered code for this entry. A failed
+/// lowering returns the program to the VM for its next entry.
+fn lower_entry_program(vm: &mut Vm, function: usize) -> Result<Program> {
+    let mut program = std::mem::take(&mut vm.execution);
+    if program.registers.is_empty() && let Some(spare) = vm.spare_programs.pop() {
+        program = spare;
+    }
+    program.code.resize_with(vm.functions.len(), Code::none);
+    if let Err(error) = lower_function(
+        vm,
+        &mut program.code,
+        &mut program.entries,
+        &mut program.inline_bodies,
+        &mut program.free_entries,
+        function,
+    ) {
+        vm.execution_fatal = true;
+        vm.execution = program;
+        return Err(error);
+    }
+    Ok(program)
+}
+
 fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Value> {
     // SAFETY: an unconverted caller's entry: its file's census rows say what
     // it keeps across the run.
@@ -1764,23 +1787,7 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         vm.execution_fatal = true;
         return Err(error);
     }
-    let mut program = std::mem::take(&mut vm.execution);
-    if program.registers.is_empty() && let Some(spare) = vm.spare_programs.pop() {
-        program = spare;
-    }
-    program.code.resize_with(vm.functions.len(), Code::none);
-    if let Err(error) = lower_function(
-        vm,
-        &mut program.code,
-        &mut program.entries,
-        &mut program.inline_bodies,
-        &mut program.free_entries,
-        function,
-    ) {
-        vm.execution_fatal = true;
-        vm.execution = program;
-        return Err(error);
-    }
+    let mut program = lower_entry_program(vm, function)?;
     let width = vm.functions[function].regs;
     debug_assert!(args.len() <= width.max(1), "an entry passes at most its function's registers");
     let size = width.max(args.len()).checked_add(WINDOW).ok_or("register storage overflow")?.next_power_of_two();
@@ -4144,10 +4151,7 @@ unsafe fn t2_dispatch(
             }
             _ => {
                 enter_native(&mut e, r, pc, target, start, argc);
-                crate::gap_probe::enter(e.vm, move || crate::legacy_primitive_name(p));
-                let value = primitive_value(&mut e, p, base + start, argc, primitive_target(p));
-                crate::gap_probe::exit(e.vm);
-                let Some(value) = value else {
+                let Some(value) = measured_primitive_value(&mut e, p, base + start, argc, None) else {
                     return Value::UNBOUND;
                 };
                 leave_native(&mut e);
@@ -4327,7 +4331,6 @@ pub(crate) fn primitive_target(p: Primitive) -> PrimitiveCall {
         ForwardChar | BackwardChar | BeginningOfLine | EndOfLine => {
             Vm::command_primitive
         }
-        TempBuffer => Vm::eval_buffer_primitive,
         // Their own entry, which raises a poll's escape (`primitive_value`).
         DeepEqual => |vm, p, start, n| vm.inside_quit_scope(|vm| vm.eval_data_primitive(p, start, n)),
         // Granting their quit scope at their first chunk boundary
@@ -4335,7 +4338,7 @@ pub(crate) fn primitive_target(p: Primitive) -> PrimitiveCall {
         Append => |vm, _, start, n| vm.append_values::<true>(start, n),
         Min => |vm, _, start, n| vm.min_max::<true>(start, n, std::cmp::Ordering::Less),
         Max => |vm, _, start, n| vm.min_max::<true>(start, n, std::cmp::Ordering::Greater),
-        GetBuffer | ForwardLine | SwitchToBuffer | EmacsLispMode | MenuBarMode
+        TempBuffer | GetBuffer | ForwardLine | SwitchToBuffer | EmacsLispMode | MenuBarMode
         | ForceModeLineUpdate | LocateLibrary | Daemonp | DaemonInitialized => {
             Vm::eval_buffer_primitive
         }
@@ -4369,10 +4372,7 @@ pub(crate) fn primitive_target(p: Primitive) -> PrimitiveCall {
         Message => Vm::primitive,
         // The other loader primitives never come here: the engine lends them
         // (`loader_body`). These two run no Lisp.
-        Provide | Featurep => |vm, p, start, n| {
-            let args = vm.stack[start..start + n].to_vec();
-            vm.feature_primitive(p, &args)
-        },
+        Provide | Featurep => feature_call,
         Load | Require | Eval | Macroexpand | AutoloadDoLoad | ReadHostEvent | FormatModeLine => |_, _, _, _| {
             Err("a loader primitive is lent from its engine (`loader_body`), never called here".into())
         },
@@ -4384,6 +4384,22 @@ pub(crate) fn primitive_target(p: Primitive) -> PrimitiveCall {
         _ => Vm::primitive,
     }
 }
+fn feature_call(vm: &mut Vm, p: Primitive, start: usize, argc: usize) -> Result<Value> {
+    let args = vm.stack[start..start + argc].to_vec();
+    vm.feature_primitive(p, &args)
+}
+
+/// Attribute the whole legacy primitive call on both dispatch paths,
+/// including an error return.
+#[inline]
+fn measured_primitive_value(e: &mut Engine<'_>, p: Primitive, start: usize, argc: usize, cached: Option<PrimitiveCall>) -> Option<Value> {
+    crate::gap_probe::enter(e.vm, move || crate::legacy_primitive_name(p));
+    let target = cached.unwrap_or_else(|| primitive_target(p));
+    let value = primitive_value(e, p, start, argc, target);
+    crate::gap_probe::exit(e.vm);
+    value
+}
+
 // The Result out-pointer and diagnostic allocations stay in this non-threaded
 // helper, so no escaped native stack address prevents the next tail dispatch.
 #[inline(never)]
@@ -4588,11 +4604,7 @@ unsafe fn cached_primitive(
         enter_native(&mut e, r, pc, target, start, argc);
         let base = r.offset_from(e.vm.stack.as_ptr()) as usize;
         let p = prim::legacy(target).expect("legacy primitive");
-        // Charged to P in the gap probe, as the uncached path charges it.
-        crate::gap_probe::enter(e.vm, move || crate::legacy_primitive_name(p));
-        let value = primitive_value(&mut e, p, base + start, argc, call);
-        crate::gap_probe::exit(e.vm);
-        let Some(value) = value else {
+        let Some(value) = measured_primitive_value(&mut e, p, base + start, argc, Some(call)) else {
             return Value::UNBOUND;
         };
         leave_native(&mut e);

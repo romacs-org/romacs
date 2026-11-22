@@ -850,30 +850,7 @@ impl Reader<'_, '_, '_, '_, '_> {
                 }
                 _ => Err("unsupported # reader syntax".into()),
             },
-            63 => {
-                if matches!(self.peek(), Some(9 | 32)) {
-                    let c = self.next()?;
-                    return self.m.leaf(i64::from(c), build::integer);
-                }
-                let n = if self.peek() == Some(92) {
-                    self.next()?;
-                    self.escape()?
-                } else {
-                    self.next()? as i64
-                };
-                let following = self.peek();
-                self.unread_lookahead()?;
-                if following.is_some_and(|c| !Self::char_literal_follows(c)) {
-                    return Err("invalid character literal".into());
-                }
-                let base = n & !0x0fc00000;
-                let n = if (0x3fff80..=0x3fffff).contains(&base) {
-                    (n & 0x0fc00000) | (base - 0x3fff00)
-                } else {
-                    n
-                };
-                self.m.leaf(n, build::integer)
-            }
+            63 => self.character_literal(),
             34 => {
                 let mut s: Vec<u32> = Vec::new();
 
@@ -947,6 +924,46 @@ impl Reader<'_, '_, '_, '_, '_> {
             }
         }
     }
+
+    fn character_literal(&mut self) -> Result<usize> {
+        if matches!(self.peek(), Some(9 | 32)) {
+            let c = self.next()?;
+            return self.m.leaf(i64::from(c), build::integer);
+        }
+        let n = if self.peek() == Some(92) {
+            self.next()?;
+            self.escape()?
+        } else {
+            self.next()? as i64
+        };
+        let following = self.peek();
+        self.unread_lookahead()?;
+        if following.is_some_and(|c| !Self::char_literal_follows(c)) {
+            return Err("invalid character literal".into());
+        }
+        let base = n & !0x0fc00000;
+        let n = if (0x3fff80..=0x3fffff).contains(&base) {
+            (n & 0x0fc00000) | (base - 0x3fff00)
+        } else {
+            n
+        };
+        self.m.leaf(n, build::integer)
+    }
+
+    fn locate_error(&mut self, initial_byte: usize, message: String) -> String {
+        let bytes = match self.input {
+            Input::Host { .. } => Some(self.at),
+            Input::String { byte, root, .. } => {
+                let pending = match self.lookahead {
+                    Some(code) => self.m.leaf((root, code), build::string_width).unwrap_or(1),
+                    None => 0,
+                };
+                Some(byte - initial_byte - pending)
+            }
+            _ => None,
+        };
+        if let Some(bytes) = bytes { format!("{message} at byte {bytes}") } else { message }
+    }
 }
 
 /// One read of INPUT, under GC when it may call Lisp: THEN gets what it read
@@ -982,23 +999,7 @@ pub(super) fn read_input<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Opt
         reader.finish()?;
         Ok(r)
     });
-    let result = match result {
-        Ok(found) => Ok(found),
-        Err(message) => {
-            let bytes = match reader.input {
-                Input::Host { .. } => Some(reader.at),
-                Input::String { byte, root, .. } => {
-                    let pending = match reader.lookahead {
-                        Some(code) => reader.m.leaf((root, code), build::string_width).unwrap_or(1),
-                        None => 0,
-                    };
-                    Some(byte - initial_byte - pending)
-                }
-                _ => None,
-            };
-            Err(if let Some(bytes) = bytes { format!("{message} at byte {bytes}") } else { message })
-        }
-    };
+    let result = result.map_err(|message| reader.locate_error(initial_byte, message));
     // A buffer stream is left where the read reached, whatever its outcome.
     let result = match (reader.commit(), result) {
         (Err(e), Ok(_)) => Err(e),

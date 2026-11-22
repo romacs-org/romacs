@@ -840,58 +840,7 @@ impl Vm {
         } else if error.contains("index out of range") {
             ("args-out-of-range", vec![x, y])
         } else if error.contains("required") || error.contains("value type") {
-            use Primitive::*;
-            let (predicate, value) = match p {
-                Load => ("stringp", x),
-                Require | Provide | Featurep => ("symbolp", x),
-                Car | Cdr => ("listp", x),
-                Memq | Assq | Member => ("listp", y),
-                Nth if self.bigint_value(x).is_none() => ("integerp", x),
-                Nth => {
-                    // nthcdr errors blame the original list; a final car error
-                    // blames the reached atom. Rewalk only on this cold path.
-                    let mut tail = y;
-                    let mut remaining = x.integer_value().map_or(usize::MAX, |n| n.max(0) as usize);
-                    while remaining != 0 {
-                        let Ok((_, next)) = self.cons_pair(tail) else {
-                            break;
-                        };
-                        tail = next;
-                        remaining -= 1;
-                    }
-                    ("listp", if remaining == 0 { tail } else { y })
-                }
-                Setcar | Setcdr => ("consp", x),
-                Length | Nreverse | CopySequence => ("sequencep", x),
-                Aref | Aset
-                    if !Self::image_string(x) && self.object_if(x).is_none() =>
-                {
-                    ("arrayp", x)
-                }
-                Aref | Aset if error == "character index required" => ("characterp", y),
-                Aref | Aset => ("fixnump", y),
-                CharAfter | OverlaysAt | NextOverlayChange => ("integer-or-marker-p", x),
-                OverlaysIn => ("integer-or-marker-p", if self.scalar_position(x).is_ok() { y } else { x }),
-                BufferSize => ("bufferp", x),
-                Add | Sub | Mul | Div | Abs | Less | Equal | Inc | Dec | Min | Max => {
-                    let value = self.stack[start..start + argc]
-                        .iter()
-                        .copied()
-                        .find(|v| {
-                            self.coerce_number(*v, p != Abs).is_err()
-                        })
-                        .unwrap_or(x);
-                    (
-                        if p == Abs {
-                            "numberp"
-                        } else {
-                            "number-or-marker-p"
-                        },
-                        value,
-                    )
-                }
-                _ => ("listp", x),
-            };
+            let (predicate, value) = self.required_argument(p, start, argc, x, y, error);
             let slot = self.slot(predicate);
             (
                 "wrong-type-argument",
@@ -903,6 +852,61 @@ impl Vm {
         let slot = self.slot(condition);
         let data = self.list_value(&values);
         Some((Value::reference(slot + 1, 7), data))
+    }
+    /// The predicate and offending argument for a primitive's type error.
+    fn required_argument(&self, p: Primitive, start: usize, argc: usize, x: Value, y: Value, error: &str) -> (&'static str, Value) {
+        use Primitive::*;
+        match p {
+            Load => ("stringp", x),
+            Require | Provide | Featurep => ("symbolp", x),
+            Car | Cdr => ("listp", x),
+            Memq | Assq | Member => ("listp", y),
+            Nth if self.bigint_value(x).is_none() => ("integerp", x),
+            Nth => {
+                // nthcdr errors blame the original list; a final car error
+                // blames the reached atom. Rewalk only on this cold path.
+                let mut tail = y;
+                let mut remaining = x.integer_value().map_or(usize::MAX, |n| n.max(0) as usize);
+                while remaining != 0 {
+                    let Ok((_, next)) = self.cons_pair(tail) else {
+                        break;
+                    };
+                    tail = next;
+                    remaining -= 1;
+                }
+                ("listp", if remaining == 0 { tail } else { y })
+            }
+            Setcar | Setcdr => ("consp", x),
+            Length | Nreverse | CopySequence => ("sequencep", x),
+            Aref | Aset
+                if !Self::image_string(x) && self.object_if(x).is_none() =>
+            {
+                ("arrayp", x)
+            }
+            Aref | Aset if error == "character index required" => ("characterp", y),
+            Aref | Aset => ("fixnump", y),
+            CharAfter | OverlaysAt | NextOverlayChange => ("integer-or-marker-p", x),
+            OverlaysIn => ("integer-or-marker-p", if self.scalar_position(x).is_ok() { y } else { x }),
+            BufferSize => ("bufferp", x),
+            Add | Sub | Mul | Div | Abs | Less | Equal | Inc | Dec | Min | Max => {
+                let value = self.stack[start..start + argc]
+                    .iter()
+                    .copied()
+                    .find(|v| {
+                        self.coerce_number(*v, p != Abs).is_err()
+                    })
+                    .unwrap_or(x);
+                (
+                    if p == Abs {
+                        "numberp"
+                    } else {
+                        "number-or-marker-p"
+                    },
+                    value,
+                )
+            }
+            _ => ("listp", x),
+        }
     }
     /// `copy-sequence` of the list X: a new list, the caller's only once it
     /// returns. Past a chunk, polled per chunk of the walk and of the build

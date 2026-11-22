@@ -8,14 +8,12 @@ impl Leaf<'_> {
     /// validate_region and the characters' checks, then the character
     /// positions of START..END holding FROM, and END.
     pub fn subst_char_hits(&mut self, start: Value, end: Value, from: Value, to: Value) -> std::result::Result<(Vec<i64>, i64), Fault> {
-        let position = |leaf: &Self, v: Value| -> std::result::Result<i64, Fault> {
-            match leaf.marker_position(v) {
-                Some(Some(n)) => Ok(n),
-                Some(None) => Err(Fault::Error("Marker does not point anywhere".into())),
-                None => v.integer_value().ok_or_else(|| Fault::Wrong("integer-or-marker-p", v)),
-            }
+        let position = |v: Value| match self.marker_position(v) {
+            Some(Some(n)) => Ok(n),
+            Some(None) => Err(Fault::Error("Marker does not point anywhere".into())),
+            None => v.integer_value().ok_or_else(|| Fault::Wrong("integer-or-marker-p", v)),
         };
-        let (mut lo, mut hi) = (position(self, start)?, position(self, end)?);
+        let (mut lo, mut hi) = (position(start)?, position(end)?);
         if lo > hi { std::mem::swap(&mut lo, &mut hi); }
         let character = |v: Value| v.integer_value().filter(|&c| (0..=crate::lstring::MAX_CHAR as i64).contains(&c))
             .map(|c| c as u32).ok_or_else(|| Fault::Wrong("characterp", v));
@@ -43,31 +41,26 @@ impl Leaf<'_> {
         // Validated above to lie in the accessible region, so at least 1.
         let position = |at: i64| usize::try_from(at - 1).map_err(|_| Fault::Error("Args out of range".into()));
         let span = position(lo)?..position(hi)?;
-        let hits: Vec<usize> = match &self.vm.objects[index] {
-            data::Object::Buffer(_) => {
-                let mut hits = Vec::new();
-                for chunk in span.clone().step_by(super::quit_poll::POLL_STEPS as usize) {
-                    let data::Object::Buffer(b) = &self.vm.objects[index] else { unreachable!("checked above") };
-                    for at in chunk..span.end.min(chunk + super::quit_poll::POLL_STEPS as usize) {
-                        if b.character_of_char(CharOffset(at)).map_err(Fault::Error)? == Some(from_c) { hits.push(at); }
+        let chunk = if multibyte { super::quit_poll::POLL_STEPS as usize } else { 1 << 16 };
+        let mut hits = Vec::new();
+        for start in span.clone().step_by(chunk) {
+            let part = start..span.end.min(start + chunk);
+            match &self.vm.objects[index] {
+                data::Object::Buffer(b) => {
+                    for at in part {
+                        if b.character_of_char(CharOffset(at)).map_err(Fault::Error)? == Some(from_c) {
+                            hits.push(at as i64 + 1);
+                        }
                     }
-                    self.native_poll()?;
                 }
-                hits
-            }
-            data::Object::ByteBuffer(_) => {
-                const PART: usize = 1 << 16;
-                let mut hits = Vec::new();
-                for chunk in span.clone().step_by(PART) {
-                    let data::Object::ByteBuffer(b) = &self.vm.objects[index] else { unreachable!("checked above") };
-                    hits.extend((chunk..span.end.min(chunk + PART)).filter(|&at| u32::from(b.bytes[at]) == from_c));
-                    self.native_poll()?;
+                data::Object::ByteBuffer(b) => {
+                    hits.extend(part.filter(|&at| u32::from(b.bytes[at]) == from_c).map(|at| at as i64 + 1));
                 }
-                hits
+                _ => unreachable!("buffer checked above"),
             }
-            _ => unreachable!(),
-        };
-        Ok((hits.into_iter().map(|at| at as i64 + 1).collect(), hi))
+            self.native_poll()?;
+        }
+        Ok((hits, hi))
     }
 
     /// modify_text's tail for a change of POS..END once its hooks ran: the

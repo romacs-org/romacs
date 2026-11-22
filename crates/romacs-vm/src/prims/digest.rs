@@ -72,7 +72,8 @@ fn hashed(cx: &mut Leaf<'_>, hash: impl Fn(&Leaf<'_>, &dyn Fn() -> bool) -> std:
         Some(Ok(digest)) => Ok(Some(digest)),
         Some(Err(crate::quit::Stopped)) => {
             cx.native_poll()?;
-            Ok(hash(cx, &|| false)?.map(|digest| digest.expect("never stopped")))
+            hash(cx, &|| false)?.transpose()
+                .map_err(|_| Fault::Error("Hash stopped without a quit probe".into()))
         }
     }
 }

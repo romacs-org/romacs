@@ -112,7 +112,8 @@ impl Leaf<'_> {
     fn characters(&mut self, string: Value, from: usize, count: usize) -> std::result::Result<Vec<(u32, usize)>, Fault> {
         if let Some(out) = self.characters_until(string, from, count, true) { return Ok(out); }
         self.native_poll()?;
-        Ok(self.characters_until(string, from, count, false).expect("never stopped"))
+        self.characters_until(string, from, count, false)
+            .ok_or_else(|| Fault::Error("String scan stopped without a quit probe".into()))
     }
     fn characters_until(&self, string: Value, from: usize, count: usize, stop: bool) -> Option<Vec<(u32, usize)>> {
         let total = self.vm.str_view(string).expect("string-width takes a string").bytes.len();

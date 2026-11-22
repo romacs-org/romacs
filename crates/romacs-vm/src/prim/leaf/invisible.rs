@@ -110,7 +110,8 @@ impl Leaf<'_> {
             // Stopped for the probe: the poll quits, or, nothing to quit
             // for after all, the line is counted again unpolled.
             self.native_poll()?;
-            self.line_column(&rule, &crate::quit::NativeStop::never())?.expect("never stops")
+            self.line_column(&rule, &crate::quit::NativeStop::never())?
+                .ok_or_else(|| Fault::Error("Column scan stopped without a quit probe".into()))?
         };
         Value::integer(column as i64).map_err(Fault::Error)
     }
