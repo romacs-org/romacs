@@ -44,6 +44,7 @@ const LONG: &[(&str, &str)] = &[
     ("prim/leaf/call_process_wait.rs", "fn call_process_wait("),
     // Measured by the probe (a3/GAPS.md).
     ("prim/leaf/coding.rs", "fn coding_convert(&mut self"),
+    ("prim/leaf/coding.rs", "fn coding_encode_tokens(&mut self"),
     ("prim/leaf/casing.rs", "pub(crate) fn case_mappings("),
     ("prim/leaf/casing.rs", "pub(crate) fn casify_region_edit("),
     ("prim/leaf/subst_char.rs", "pub fn subst_char_hits("),
