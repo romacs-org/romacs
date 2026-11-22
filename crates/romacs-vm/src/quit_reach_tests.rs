@@ -121,23 +121,40 @@ fn a_native_sort_quits_and_leaves_its_list() {
     reaches("sort", strings, "(list v #'string-lessp)", "(equal v copy)");
 }
 
-/// The polled sort's merges poll too: a press that comes once its runs are
-/// sorted, at the merge's first compare across two runs, quits at the
-/// merge's poll. Each run of 4 holds values of one `value / 4`.
+/// Comparing 5 and 4 occurs only when the two runs merge.
 #[test]
 fn a_native_sort_quits_in_its_merge() {
     let (mut vm, signal) = busy_vm();
     // The scope the sort's own entry grants.
     vm.native_quit = true;
     let run = 4;
-    let mut order: Vec<usize> = (0..64).rev().collect();
+    let mut order = [4, 6, 8, 10, 5, 7, 9, 11];
     let mut pressed = false;
     let outcome = crate::prim::prims::leaf_sequences::sort_polled(&mut Leaf::new(&mut vm), &mut order, run, |_, a, b| {
-        if a / run != b / run && !pressed { pressed = signal.interrupt(); }
+        if (*a, *b) == (5, 4) { pressed = signal.interrupt(); }
         a.cmp(b)
     }).map(|()| Value::NIL);
     assert!(pressed, "the merge compared across runs");
     assert!(quit_signalled(&mut vm, &outcome), "the merge did not quit at its poll");
+    vm.quit_unwinding = false;
+}
+
+#[test]
+fn a_native_sort_quits_while_copying_a_merge_tail() {
+    let (mut vm, signal) = busy_vm();
+    vm.native_quit = true;
+    let mut order = [4, 5, 6, 7, 8, 9, 10, 11, 2, 3, 12, 13, 0];
+    let original = order;
+    let mut pressed = false;
+    let outcome = crate::prim::prims::leaf_sequences::sort_polled(&mut Leaf::new(&mut vm), &mut order, 4, |_, a, b| {
+        // Only the last merge compares 0 with 2. Its right run then ends.
+        if (*a, *b) == (0, 2) { pressed = signal.interrupt(); }
+        a.cmp(b)
+    }).map(|()| Value::NIL);
+    assert!(pressed, "the last merge compared its first pair");
+    assert!(quit_signalled(&mut vm, &outcome), "the merge tail did not poll");
+    assert_eq!(&order[..5], &[0, 2, 3, 4, 5]);
+    assert_eq!(&order[5..], &original[5..], "the merge copied past its first poll");
     vm.quit_unwinding = false;
 }
 
