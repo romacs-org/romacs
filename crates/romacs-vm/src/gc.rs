@@ -589,8 +589,7 @@ impl Vm {
         self.eval_depth = mark.eval_depth;
         // Outside any engine, these are all at rest.
         self.suspended.clear();
-        self.suspended_stacks.clear();
-        self.stack = Vec::new();
+        self.stack.reset();
         self.running_engines = 0;
         self.unwinding = 0;
         self.aftermath_runs = 0;
@@ -652,31 +651,21 @@ impl Vm {
         self.gc_holds == 0 && self.deferred_writes.is_empty()
             && self.running_engines.saturating_sub(self.suspended.len()) == own
     }
-    /// Set the register stack aside, still traced, its allocation unmoved for
-    /// the frames' raw pointers: an engine's for a nested run, or for a
-    /// storage kernel's.
+    /// Set the register stack aside (`Registers::suspend`).
     pub(crate) fn suspend_stack(&mut self) {
-        let stack = std::mem::take(&mut self.stack);
-        self.suspended_stacks.push(stack);
+        self.stack.suspend();
     }
     pub(crate) fn resume_stack(&mut self) {
-        debug_assert!(self.stack.is_empty(), "a nested run returned its registers");
-        self.stack = self.suspended_stacks.pop().expect("a suspended register stack");
+        self.stack.resume();
     }
     /// RUN on ARGS in the reused kernel file, the current one set aside beneath
     /// it, still traced, its allocation unmoved: the one way a native borrows
     /// register slots (a storage kernel, a property query) without touching a
     /// running engine's. RUN gets the arguments' count; they start at 0.
     pub(crate) fn with_kernel_stack<T>(&mut self, args: &[Value], run: impl FnOnce(&mut Self, usize) -> T) -> T {
-        self.suspend_stack();
-        self.stack = std::mem::take(&mut self.kernel_stack);
-        self.stack.clear();
-        self.stack.extend_from_slice(args);
+        self.stack.enter_kernel(args);
         let out = run(self, args.len());
-        // Untraced between calls: nothing it held may stay in it.
-        self.stack.clear();
-        self.kernel_stack = std::mem::take(&mut self.stack);
-        self.resume_stack();
+        self.stack.leave_kernel();
         out
     }
     /// SLOTS as a dense membership table over every symbol slot.
@@ -771,7 +760,7 @@ impl Vm {
     pub(crate) fn minor_chosen(&self) -> bool {
         // Owed where it can be paid: only a collection at a request's
         // boundary retires request code and starts the count again.
-        let code = self.stack.is_empty() && self.suspended_stacks.is_empty()
+        let code = self.stack.at_rest()
             && self.request_code.since_collection >= self.code_collection_threshold();
         !self.full_due() && !code && (self.minor_due() || (self.gc_stress.shift && self.minor_allowed()))
     }
@@ -1206,7 +1195,16 @@ impl Vm {
         for (table, settled) in [("conses", self.conses.settled()), ("closures", self.closures.settled()), ("cells", self.cells.settled()), ("objects", self.objects.settled())] {
             assert!(settled, "a collection left {table} with a young or dirty entry, or a log");
         }
+        self.check_cell_pairs();
         self.check_caches();
+    }
+    /// Under verify: the lexical pairs' two maps agree, and name only cells
+    /// in use and live conses.
+    pub(super) fn check_cell_pairs(&self) {
+        self.cell_pairs.check(
+            |i| !self.cells.is_free(i),
+            |pair| self.cons_pair(pair).is_ok() && pair.index_if(3).is_none_or(|i| i >= self.conses.len() || !self.conses.is_free(i)),
+        );
     }
     /// Reset the slots of the obarray symbols LIVE leaves out and free them.
     fn reclaim_obarray_symbols(&mut self, live: &HashSet<usize>) {
@@ -1385,7 +1383,7 @@ impl Vm {
             + self.suspended.iter().map(threaded::Suspended::code_len).sum::<usize>();
         // Only a collection with no request running retires live request
         // code; one inside an engine must not postpone the next of those.
-        if self.stack.is_empty() && self.suspended_stacks.is_empty() {
+        if self.stack.at_rest() {
             self.reset_code_count();
         }
         // Unmarked regions go now: no surviving value names one, and no weak
@@ -1463,17 +1461,18 @@ impl Vm {
             }
             rewrite(&mut c.document);
         });
-        self.cell_pairs = std::mem::take(&mut self.cell_pairs).into_iter().filter_map(|(i, mut pair)| {
-            if !self.cells.marked(i) { return None; }
+        let cells = &self.cells;
+        self.cell_pairs.rewrite(|i, mut pair| {
+            if !cells.marked(i) { return None; }
             let mut cell = Value::reference(i, 5);
             rewrite(&mut cell);
             rewrite(&mut pair);
             Some((cell.payload() as usize, pair))
-        }).collect();
+        });
         self.cells.collector_compact(&maps[2], |v| rewrite(v));
         // The traced register slots (`register_roots`); above the tops is NIL.
         let tops = self.register_tops();
-        let registers = self.suspended_stacks.iter_mut().chain(std::iter::once(&mut self.stack)).zip(tops);
+        let registers = self.stack.files_mut().zip(tops);
         for v in roots
             .iter_mut()
             .chain(registers.flat_map(|(file, top)| file[..top].iter_mut()))
@@ -1610,8 +1609,8 @@ impl Vm {
     }
     /// A lexical pair's cell takes its value, which marking only read.
     fn settle_cell_pairs(&mut self) {
-        let pairs: Vec<(usize, Value)> = self.cell_pairs.iter().filter(|&(&i, _)| self.cells.marked(i))
-            .map(|(&i, &pair)| (i, self.cons_pair(pair).expect("live lexical pair").1)).collect();
+        let pairs: Vec<(usize, Value)> = self.cell_pairs.iter().filter(|&(i, _)| self.cells.marked(i))
+            .map(|(i, pair)| (i, self.cons_pair(pair).expect("live lexical pair").1)).collect();
         for (i, value) in pairs {
             self.cells.collector_entries_mut()[i] = value;
             // An edge into the image no store recorded.
@@ -1727,7 +1726,7 @@ impl Vm {
     /// and clean, and the logs empty.
     fn sweep_in_place(&mut self, marking: &gc_mark::Marking, mut own: gc_mark::Worker) {
         let cells = &self.cells;
-        self.cell_pairs.retain(|&i, _| cells.marked(i));
+        self.cell_pairs.retain(|i| cells.marked(i));
         let verify = self.gc_stress.verify;
         let gc_mark::Swept { tables: swept, dead } = marking.sweep(self, &mut own);
         // The dead with side effects, still where they were, end here, on
@@ -1758,8 +1757,8 @@ impl Vm {
     /// (`crate::epoch`); the symbol slots written since (`Slots`), those of
     /// obarrays of their own included; the functions changed since
     /// (`Functions`); every lexical pair; and every other root. Nothing a full reclaims beside
-    /// table entries goes: no code is retired, no region, obarray symbol or
-    /// local binding freed, and nothing moves (a table's dead tail is cut,
+    /// table entries and the regions attached since goes: no code is retired, no older
+    /// region, obarray symbol or local binding freed, and nothing moves (a table's dead tail is cut,
     /// as any sweep cuts it). Like a full it has spare programs forget their
     /// lowered code first. With a log or the functions' record lost, it
     /// promotes everything instead.
@@ -1836,7 +1835,7 @@ impl Vm {
         // kept until a full finds the cell dead; a dead young cell's pair
         // is kept by this minor, which drops its mapping, and goes at the
         // next full.)
-        again.extend(self.cell_pairs.values().copied());
+        again.extend(self.cell_pairs.pairs());
         // No symbol is reclaimed: those of obarrays of their own are roots
         // like the rest, their names made since among the roots
         // (`names_added`), their slots by the slots' cards, and what was put
@@ -1851,7 +1850,7 @@ impl Vm {
         let Some(marked) = self.mark_heap(&again, &none, MarkFor::Minor, clean.into_iter().map(|i| u32::try_from(i).expect("an object index")).collect(), 1, &mut lap) else { unreachable!("no key ends a minor") };
         lap.lap(&mut self.gc_times, Phase::Mark);
         if self.gc_stress.verify {
-            self.check_minor(roots);
+            self.check_minor(roots, &marked.state.region_marks);
         }
         let Marked { marking, own, doomed, payload: marked_payload, state, .. } = marked;
         let MarkState { weak_tables, untraced_lists, obarray_symbols_live: symbols, region_marks: regions, mut shared_seen, .. } = state;
@@ -1859,6 +1858,8 @@ impl Vm {
         self.doom(&doomed);
         self.drop_weak(&weak_tables, untraced_lists, &symbols, &regions);
         self.empty_dead_caches(&symbols, &regions, true);
+        // No weak entry or cache into one is left (above).
+        self.sweep_young_regions(&regions);
         lap.lap(&mut self.gc_times, Phase::Weak);
         self.gc_times.entries = [self.conses.len(), self.closures.len(), self.cells.len(), self.objects.len()];
         self.sweep_in_place(&marking, own);
@@ -1893,6 +1894,8 @@ impl Vm {
     fn settle_minor(&mut self) {
         // A forced collection is over (a full's takes its fillers with it).
         self.gc_stress.shift = false;
+        // What a minor did not free, or a promote-all kept, is old now.
+        self.region_young.clear();
         self.payload_settled = self.gc_payload_bytes;
         self.names_added.clear();
         self.conditions.settle();
@@ -1968,7 +1971,7 @@ impl Vm {
             pending.extend([old, self.slots[slot].value, buffer, Value::reference(slot + 1, 7)]);
         }
         let mut code_marks: Vec<std::sync::atomic::AtomicBool> = self.functions.iter().map(|_| false.into()).collect();
-        let active = !self.stack.is_empty() || !self.suspended_stacks.is_empty();
+        let active = !self.stack.at_rest();
         let minor_changed = matches!(r#for, MarkFor::Minor).then(|| self.minor_code(&mut code_marks));
         // A minor reads the functions changed since the last collection, and
         // no other code root.
@@ -2119,7 +2122,10 @@ impl Vm {
     /// it reads the nodes written since the last collection.
     fn minor_keeps(&self, state: &mut MarkState) {
         state.reading.whole = false;
+        // The regions attached since the last collection are the young ones,
+        // marked as reached (`Vm::sweep_young_regions`); the rest are old.
         state.region_marks.fill(true);
+        for &id in &self.region_young { state.region_marks[id] = false; }
         state.obarray_symbols_live = KeptSymbols::all();
     }
     /// The lowered code a mark starts from: suspended engines', whole. A
@@ -2754,7 +2760,7 @@ mod tests {
         vm.cell_pairs.insert(cell, pair);
         assert!(vm.collect_minor(&roots));
         assert!(vm.conses.old(usize::try_from(pair.payload()).unwrap()), "the pair survived, and is old");
-        assert_eq!(vm.cell_pairs.get(&cell), Some(&pair));
+        assert_eq!(vm.cell_pairs.get(cell), Some(pair));
     }
 
     /// After a promote-all nothing is young and every record is empty: a
@@ -3192,9 +3198,9 @@ mod tests {
         let last = vm.alloc_cell(Value::TRUE);
         let mut roots = [Value::reference(first, 5), Value::reference(last, 5)];
         vm.collect(&mut roots);
-        assert!(!vm.cell_pairs.contains_key(&dead), "the dead cell's pair is pruned");
+        assert!(vm.cell_pairs.get(dead).is_none(), "the dead cell's pair is pruned");
         assert_eq!(vm.alloc_cell(Value::NIL), dead);
-        assert!(!vm.cell_pairs.contains_key(&dead));
+        assert!(vm.cell_pairs.get(dead).is_none());
     }
 
     /// A compaction after sweeps moves every live entry down and leaves no

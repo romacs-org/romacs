@@ -48,21 +48,29 @@ fn recenter(cx; optional arg: Value, redisplay: Value) -> Step {
 defsubr! { name = "romacs--recenter-start", gnu = "romacs:display", effect = Reads,
 fn recenter_start(cx, arg: Value, margin: Value, height: Value) {
     let window = cx.vm_selected_window()?;
-    let lines = |v: Value| v.integer_value().ok_or(Fault::Wrong("fixnump", v));
+    let lines = |v: Value| v.integer_value().ok_or_else(|| Fault::Wrong("fixnump", v));
     cx.window_recenter_start(window, arg.integer_value(), (lines(margin)?, lines(height)?))
 }}
 
+// The new window start for scrolling the selected window a whole screen from position
+// START, toward the end of the buffer when FORWARD is non-nil, else toward its start, by
+// the screen's whole lines less CONTEXT, at least one, in the frame's line height, over the
+// rows a host lays out, as `scroll-up' and `scroll-down' do.  nil without a layout,
+// while the window is scrolled vertically, or in a unibyte buffer.
 defsubr! { name = "romacs--scroll-start", gnu = "romacs:display", effect = Reads,
 fn scroll_start(cx, start: Value, forward: Value, context: Value) {
     let window = cx.vm_selected_window()?;
-    let number = |v: Value| v.integer_value().ok_or(Fault::Wrong("fixnump", v));
+    let number = |v: Value| v.integer_value().ok_or_else(|| Fault::Wrong("fixnump", v));
     cx.window_scroll_start(window, number(start)?, forward != Value::NIL, number(context)?)
 }}
 
+// How many whole rows the selected window's text area shows from position START; nil
+// without a layout, or in a unibyte buffer.  A START that is no fixnum signals
+// `wrong-type-argument'.
 defsubr! { name = "romacs--rows-shown-from", gnu = "romacs:display", effect = Reads,
 fn rows_shown_from(cx, start: Value) {
     let window = cx.vm_selected_window()?;
-    cx.window_rows_shown_from(window, start.integer_value().ok_or(Fault::Wrong("fixnump", start))?)
+    cx.window_rows_shown_from(window, start.integer_value().ok_or_else(|| Fault::Wrong("fixnump", start))?)
 }}
 
 defsubr! { name = "scroll-up", gnu = "window.c:7026", effect = Global,

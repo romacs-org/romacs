@@ -46,9 +46,8 @@
     ((:state ended :done-seq 5 :seen-seq 5) ended)
     ((:state ended :done-seq 5) completed)
     ((:state history) history)
-    ((:state idle :options (:plan t) :input-seq 4 :planned-seq 4 :done-seq 5 :seen-seq 5) plan)
-    ;; The plan was an earlier turn's.
-    ((:state idle :options (:plan t) :input-seq 6 :planned-seq 4 :done-seq 7 :seen-seq 7) idle)
+    ;; Plan mode is the harness's own: no state of Romacs's.
+    ((:state idle :options (:plan t) :input-seq 4 :done-seq 5 :seen-seq 5) idle)
     ((:state idle :children-rows ((:key working))) waiting)
     ((:state idle :children-rows ((:key question))) waiting)
     ((:state idle :children-rows ((:key idle) (:key failed))) idle)
@@ -67,8 +66,8 @@
   (dolist (state romacs-agent-ui--states)
     (should (assq (romacs-agent-ui--chip-kind (car state)) romacs-agent-ui--marks)))
   (should (equal (mapcar (lambda (key) (romacs-agent-ui--chip-kind key))
-                         '(approval question plan failed unstarted working waiting completed idle ended settled))
-                 '(you you you failed failed working working done idle idle idle)))
+                         '(approval question failed unstarted working waiting completed idle ended settled))
+                 '(you you failed failed working working done idle idle idle)))
   (should (equal (substring-no-properties (romacs-agent-ui--kind-counts '(completed working approval idle working failed)))
                  "◆1 ✗1 ●2 ✓1"))
   (should (eq (get-text-property 0 'face (romacs-agent-ui--mark 'you)) 'romacs-agent-approval))
@@ -79,13 +78,13 @@
     (dolist (state romacs-agent-ui--states)
       (pcase-let ((`(,key ,glyph ,word ,face ,state-rank) state))
         (should (symbolp key))
-        (should (or (null glyph) (stringp glyph)))
+        (should (or (null glyph) (stringp (romacs-agent-glyph glyph))))
         (should (stringp word))
         (should (facep face))
         (should (= state-rank (cl-incf rank))))))
   ;; What wants the user outranks what runs, which outranks what finished.
   (should (equal (seq-filter #'romacs-agent-ui--news-p (mapcar #'car romacs-agent-ui--states))
-                 '(approval question failed working waiting plan completed)))
+                 '(approval question failed working waiting completed)))
   (should-not (nth 1 (romacs-agent-ui--state-of 'settled))))
 
 (ert-deftest romacs-agent-state-task-words ()
@@ -137,26 +136,6 @@
       (should (= writes 1)))
     (let ((romacs-agent--sessions (make-hash-table :test #'equal)))
       (should (= (romacs-agent-seen-seq (romacs-agent--load dir)) 5)))))
-
-(ert-deftest romacs-agent-state-never-started-is-seen-in-its-chat ()
-  ;; Its chat shows why, and showing it is seeing it: no news left behind.
-  (romacs-agent-state-tests--recorded (:state 'detached :seen-seq 0)
-    (let ((buffer (generate-new-buffer " *romacs-agent-state-chat*"))
-          (window (selected-window)))
-      (unwind-protect
-          (progn
-            (with-current-buffer buffer
-              (romacs-agent-chat-mode)
-              (setq romacs-agent-ui--session session romacs-agent-ui--end (point-marker)))
-            (setf (romacs-agent-buffer session) buffer)
-            (set-window-buffer window buffer)
-            (let ((romacs-agent-event-functions (list #'romacs-agent-ui--render)))
-              (romacs-agent--raise session '(:type unstarted :seq 1 :text "its supervisor never started")))
-            (should (string-match-p "^! its supervisor never started$"
-                                    (with-current-buffer buffer (buffer-string))))
-            (should-not (romacs-agent-unseen-p session))
-            (should (eq (romacs-agent-ui--state-key session) 'unstarted)))
-        (kill-buffer buffer)))))
 
 (defun romacs-agent-state-tests--journal (dir)
   "A journal in DIR of one turn, its end at seq 2."
@@ -213,17 +192,12 @@
       (should-not (romacs-agent-questions session))
       (should (eq (romacs-agent-ui--state-key session) 'working))
       ;; A plan presented in plan mode, as Codex presents one (a plan
-      ;; item): ready once its turn ends.
+      ;; item): the turn's text, no state of Romacs's.
       (romacs-agent--set-options session '(:plan t))
       (dolist (event (romacs-agent--codex-item
                       session (romacs-mcp--object "type" "plan" "id" "p1" "text" "1. do it") t))
         (romacs-agent--raise session event))
-      (should (= (romacs-agent-planned-seq session) 4))
       (romacs-agent--raise session '(:type done :seq 5))
-      (should (eq (romacs-agent-ui--state-key session) 'plan))
-      ;; The next prompt's turn has not presented it.
-      (romacs-agent--raise session '(:type input :seq 6))
-      (romacs-agent--raise session '(:type done :seq 7))
       (should (eq (romacs-agent-ui--state-key session) 'completed)))))
 
 (ert-deftest romacs-agent-state-settling-tells-the-views ()
@@ -233,7 +207,10 @@
       (romacs-agent-settle session)
       (should (equal heard '((:type settled))))
       (should (romacs-agent-ui--state-event-p (car heard))))
-    (should (romacs-agent-ui--state-event-p '(:type status :text "plan mode off")))))
+    (should (romacs-agent-ui--state-event-p '(:type status :text "detached")))
+    ;; Plan mode is the harness's: its text and its switch move no state.
+    (should-not (romacs-agent-ui--state-event-p '(:type status :text "plan mode off")))
+    (should-not (romacs-agent-ui--state-event-p '(:type plan :text "1. do it")))))
 
 (ert-deftest romacs-agent-state-a-grandchild-reaches-the-top ()
   ;; lead -> worker -> its own worker: the last ending makes the worker

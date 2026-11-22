@@ -54,14 +54,87 @@ fn kill_buffer(cx; optional arg: Value) -> Step {
     let buffer = if arg == Value::NIL { cx.decode_buffer(arg)? }
         else { cx.lifecycle_buffer(arg, false, false)?.0 };
     if !cx.lifecycle_killable(buffer) { return Ok(Step::Done(Value::NIL)); }
+    // A plain kill (`plain_kill') does what the Lisp half would: the next
+    // buffer is made current, then the finish.
+    if let Some(next) = cx.plain_kill(buffer)? {
+        cx.make_current(next);
+        cx.kill_buffer(buffer)?;
+        return Ok(Step::Done(Value::TRUE));
+    }
     let inhibit = if cx.buffer_state(buffer).unwrap().inhibit_buffer_hooks { Value::TRUE } else { Value::NIL };
     lifecycle_lisp(cx, "romacs--kill-buffer", vec![buffer, inhibit])
 }}
 
+// The first candidate (`other_buffer_candidate') in the buffer list that
+// FRAME's `buffer-predicate' accepts, preferring one no visible window shows
+// unless VISIBLE-OK; else `get-scratch-buffer-create''s, nil if it signals.
+// VM2 keeps no frame buffer list (VM2-FRAME1), so the buffer list alone is
+// scanned, read once at entry. With no predicate no Lisp runs during the
+// scan, so one walk of the windows finds the visible buffers; with one, each
+// candidate is put to it in order and its windows are asked after it
+// answers, as GNU's loop does.
 defsubr! { name = "other-buffer", gnu = "buffer.c:1758", effect = Global,
 fn other_buffer(cx; optional buffer: Value, visible_ok: Value, frame: Value) -> Step {
     let frame = cx.windows().decode_live_frame(frame)?;
-    lifecycle_lisp(cx, "romacs--other-buffer", vec![buffer, visible_ok, frame])
+    let key = cx.intern("buffer-predicate");
+    let pred = cx.windows().stored_frame_parameter(frame, key)?;
+    if pred != Value::NIL {
+        let order = cx.lifecycle_list();
+        return other_buffer_ask(cx, [buffer, visible_ok, pred, Value::NIL, order]);
+    }
+    match cx.other_buffer_unpredicated(buffer, visible_ok != Value::NIL)? {
+        Some(b) => Ok(Step::Done(b)),
+        None => other_buffer_fallback(cx),
+    }
+}}
+/// `other-buffer''s scan under a frame predicate, SCAN being BUFFER,
+/// VISIBLE-OK, the predicate, the first accepted buffer a visible window
+/// shows (nil for none) and the buffers not yet scanned: the next candidate
+/// is put to the predicate.
+fn other_buffer_ask(cx: &mut Leaf<'_>, scan: [Value; 5]) -> Next {
+    let [buffer, visible_ok, pred, notsogood, mut tail] = scan;
+    while let Some((b, rest)) = cx.pair(tail) {
+        if cx.other_buffer_candidate(b, buffer) {
+            let saved = vec![buffer, visible_ok, pred, notsogood, tail];
+            return Ok(Step::Call { f: pred, args: vec![b], then: other_buffer_answered, saved });
+        }
+        tail = rest;
+    }
+    if notsogood == Value::NIL { other_buffer_fallback(cx) } else { Ok(Step::Done(notsogood)) }
+}
+/// The predicate's ANSWER for the buffer at the head of the scan's tail.
+fn other_buffer_answered(cx: &mut Leaf<'_>, answer: Value, saved: &[Value]) -> Next {
+    let (buffer, visible_ok, pred, mut notsogood, tail) = (saved[0], saved[1], saved[2], saved[3], saved[4]);
+    let (b, rest) = cx.pair(tail).ok_or_else(|| Fault::Wrong("consp", tail))?;
+    if answer != Value::NIL {
+        let visible = cx.intern("visible");
+        if visible_ok != Value::NIL || cx.windows().get_buffer_window(b, visible)? == Value::NIL {
+            return Ok(Step::Done(b));
+        }
+        if notsogood == Value::NIL { notsogood = b; }
+    }
+    other_buffer_ask(cx, [buffer, visible_ok, pred, notsogood, rest])
+}
+/// buffer.c safe_calln (Qget_scratch_buffer_create), in the lifecycle
+/// half: nil when it signals; a throw reaches the caller, as in GNU.
+fn other_buffer_fallback(cx: &mut Leaf<'_>) -> Next {
+    lifecycle_lisp(cx, "romacs--scratch-safely", vec![])
+}
+
+// The kill's question before `replace-buffer-in-windows` (buffer.c:2044):
+// t when it must call it for BUFFER (`windows_may_name').
+defsubr! { name = "romacs--windows-may-name-p", gnu = "buffer.c:2044", effect = Reads,
+fn windows_may_name_p(cx, buffer: Value) {
+    Ok(if cx.windows_may_name(buffer) { Value::TRUE } else { Value::NIL })
+}}
+// window.el, right after defining `replace-buffer-in-windows', which
+// window.c's replace_buffer_in_windows calls by name: DEFINITION, the one it
+// made, unwrapped from any advice a reload kept around it, is what a kill
+// may skip for a buffer no window names.
+defsubr! { name = "romacs--window-replacer-defined", gnu = "window.c:3722", effect = Global,
+fn window_replacer_defined(cx, definition: Value) {
+    cx.note_window_replacer(definition);
+    Ok(Value::NIL)
 }}
 
 defsubr! { name = "make-indirect-buffer", gnu = "buffer.c:807", effect = Global,

@@ -227,7 +227,7 @@ fn face_font(cx, face: Value; optional frame: Value, character: Value) {
         return Ok(if graphic_record(cx)? { cx.string("tty") } else { Value::NIL });
     }
     let ch = if character == Value::NIL { ' ' } else {
-        let code = character.integer_value().filter(|c| (0..=0x3fffff).contains(c)).ok_or(Fault::Wrong("characterp", character))?;
+        let code = character.integer_value().filter(|c| (0..=0x3fffff).contains(c)).ok_or_else(|| Fault::Wrong("characterp", character))?;
         char::from_u32(code as u32).unwrap_or(char::REPLACEMENT_CHARACTER)
     };
     let name = cx.symbol_name(resolved)?;
@@ -827,6 +827,10 @@ fn frame_face_hash_table(cx; optional frame: Value) {
     cx.face_table(owner, true)
 }}
 
+// Whether FRAME (nil for the selected frame) shows another frame's faces: a child
+// frame that no face was ever set on alone, whose faces are those of its nearest ancestor
+// with faces of its own.  `face-spec-recalc' has nothing to recompute on such a frame.
+// Signals unless FRAME is nil or a live frame.
 defsubr! { name = "romacs--frame-shares-faces-p", gnu = "romacs:faces", effect = Reads,
 fn romacs_frame_shares_faces_p(cx; optional frame: Value) {
     // FRAME shows another frame's faces: a child frame nothing set a face

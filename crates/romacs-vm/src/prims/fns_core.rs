@@ -18,7 +18,7 @@ fn substring(cx, string: Value; optional from: Value, to: Value) {
         if v == Value::NIL {
             return Ok(default);
         }
-        let n = v.integer_value().ok_or(Fault::Wrong("integerp", v))?;
+        let n = v.integer_value().ok_or_else(|| Fault::Wrong("integerp", v))?;
         Ok(if n < 0 { n + size } else { n })
     };
     let f = bound(from, 0)?;

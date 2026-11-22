@@ -13,7 +13,7 @@ fn char_syntax(cx, character: Value) { cx.char_syntax(character) }}
 
 defsubr! { name = "syntax-class-to-char", gnu = "syntax.c:1124", effect = Pure,
 fn syntax_class_to_char(cx, syntax: Value) {
-    let class = syntax.integer_value().ok_or(Fault::Wrong("fixnump", syntax))?;
+    let class = syntax.integer_value().ok_or_else(|| Fault::Wrong("fixnump", syntax))?;
     let spec = crate::syntax_scan::SYNTAX_CODE_SPEC;
     match usize::try_from(class).ok().and_then(|class| spec.get(class)) {
         Some(&c) => Ok(Value::integer(i64::from(c)).expect("character")),
@@ -52,6 +52,11 @@ fn parse_partial_sexp(cx, from: Value, to: Value; optional targetdepth: Value, s
     start(cx, Op::ParsePartialSexp, &[from, to, targetdepth, stopbefore, oldstate, commentstop])
 }}
 
+// Counters of the current buffer's syntax summaries, the index a syntax scan carries
+// its state across, as a plist: `:served', `:declined' (an alist of the reasons a scan was
+// not served, with counts), `:leaves', `:leaf-scans', `:plain-leaves', `:composed',
+// `:context-switches', `:log-overflows' and `:bytes'; and `:char-table-writes', the writes
+// to any char table in this process so far.  nil in a unibyte buffer.
 defsubr! { name = "romacs-syntax-summaries-stats", gnu = "romacs:syntax-summaries", effect = Reads,
 fn romacs_syntax_summaries_stats(cx) { cx.syntax_summaries_stats() }}
 

@@ -176,15 +176,27 @@ def alive_at(probe_dir):
         return None
 
 
+# The line Romacs's startup stops with: its screen then stays up until the
+# window is closed, so the process lives on (main.rs hold_failed_startup).
+STARTUP_FAILED = b'romacs: evaluator stopped: '
+
+
+# A Unix socket's path, its terminating NUL aside (sun_path is 108 bytes).
+SOCKET_PATH_MAX = 107
+
+
 class Engine:
     """One editor in its own private compositor, home and database copy."""
 
     def __init__(self, name, argv, root, lisp, env, timeout):
         self.name, self.argv, self.root, self.lisp, self.timeout = name, argv, root, lisp, timeout
         self.env, self.serial, self.processes = env, 0, []
+        # The editor's stderr under the root (a pattern: a launcher may keep
+        # it in a directory it makes), how far startup_failed read it, and
+        # what it found.
+        self.editor_log, self.log_read, self.failed = 'engine.log', 0, None
         self.probe_dir = root / 'probe'
-        # A runtime directory for the editor alone; the compositor keeps
-        # the root, where its socket's path is short enough to bind.
+        # A runtime directory for the editor other than the tree's.
         self.editor_runtime = None
 
     def start(self, tools):
@@ -196,29 +208,56 @@ class Engine:
             raise
 
     def launch(self, tools):
+        self.spawn(tools)
+        wait(lambda: alive_at(self.probe_dir) is not None or self.startup_failed(), self.timeout * 4, f'{self.name} init',
+             self.process, .02)
+        if alive_at(self.probe_dir) is None:
+            raise RuntimeError(f'{self.name} init: {self.failed}')
+        self.startup_seconds = alive_at(self.probe_dir) - self.started
+        return self
+
+    def spawn(self, tools):
+        """The compositor and the editor, started; nothing waits for its init."""
         self.tools = tools
         (self.root / 'labwc').mkdir()
         (self.root / 'labwc/rc.xml').write_text(RC_XML)
         log = (self.root / 'compositor.log').open('w')
+        # The compositor's socket goes in the root, whose path is short
+        # enough to bind (108 bytes); its clients name it whole.
+        socket_path = len(os.fsencode(str(self.root / 'wayland-0')))
+        if socket_path > SOCKET_PATH_MAX:
+            raise RuntimeError(f'{self.name} compositor: socket path {socket_path} > {SOCKET_PATH_MAX} bytes '
+                               f'under {self.root}; give a shorter work directory')
         self.processes.append(subprocess.Popen([f'{tools}/labwc', '-C', str(self.root / 'labwc')],
-                                               env=self.env, stdout=log, stderr=log))
+                                               env=dict(self.env, XDG_RUNTIME_DIR=str(self.root)),
+                                               stdout=log, stderr=log))
         socket = wait(lambda: next((p for p in self.root.glob('wayland-*') if p.is_socket()), None),
                       15, f'{self.name} compositor', self.processes[0])
-        self.env['WAYLAND_DISPLAY'] = socket.name
+        self.env['WAYLAND_DISPLAY'] = str(socket)
         self.randr(1280, 900)
         self.processes.append(subprocess.Popen([f'{tools}/wtype', '-s', '86400000', '-k', 'Shift_L'],
                                                env=self.env, stdout=log, stderr=log))
         time.sleep(.3)
-        started = time.time()
+        self.started = time.time()
         output = (self.root / 'engine.log').open('w')
         if self.editor_runtime:
-            self.env.update(XDG_RUNTIME_DIR=str(self.editor_runtime), WAYLAND_DISPLAY=str(socket))
+            self.env['XDG_RUNTIME_DIR'] = str(self.editor_runtime)
         self.process = subprocess.Popen(self.argv, env=self.env, cwd=self.root / 'work', preexec_fn=ptraceable,
                                         stdin=subprocess.DEVNULL, stdout=output, stderr=output)
         self.processes.append(self.process)
-        wait(lambda: alive_at(self.probe_dir) is not None, self.timeout * 4, f'{self.name} init', self.process, .02)
-        self.startup_seconds = alive_at(self.probe_dir) - started
         return self
+
+    def startup_failed(self):
+        """The line the editor's startup stopped with, once its log has it:
+        read on from where the last look left off, whole lines only."""
+        path = self.failed is None and next(self.root.glob(self.editor_log), None)
+        if path:
+            with path.open('rb') as log:
+                log.seek(self.log_read)
+                whole, newline, _ = log.read().rpartition(b'\n')
+            self.log_read += len(whole) + len(newline)
+            self.failed = next((line.decode(errors='replace') for line in whole.split(b'\n') if line.startswith(STARTUP_FAILED)), None)
+        return self.failed
 
     def randr(self, width, height):
         # PARITY_OUTPUT_SCALE: a HiDPI output (2 is a scale-2 display) for
@@ -364,15 +403,21 @@ def perf_result(process):
 def private_tree(engine, base, tools, prefix=None):
     """A fresh private root for ENGINE: HOME, XDG, TMPDIR, the probe's
     directory and the compositor environment, named PREFIX (default
-    ENGINE-) and a random suffix.  Returns (ROOT, HOME, ENV)."""
+    ENGINE-) and a random suffix.  Returns (ROOT, HOME, ENV).
+    The editor's runtime directory is ROOT/run, apart from HOME and the
+    work directory as /run/user is on a real system: a file under it is a
+    memory-only file to the editor (lisp/session/romacs-ram-files.el), with
+    no backup, no auto-save and no place in a restart's session image.
+    Engine keeps the compositor's socket in ROOT, four bytes shorter."""
     root = Path(tempfile.mkdtemp(prefix=prefix or f'{engine}-', dir=base))
     root.chmod(0o700)
     home = root / 'home'
-    for directory in ('home', 'work', 'probe', 'tmp', 'home/.config', 'home/.cache', 'home/.local/share',
+    for directory in ('home', 'work', 'probe', 'tmp', 'run', 'home/.config', 'home/.cache', 'home/.local/share',
                       'home/.local/state'):
         (root / directory).mkdir(parents=True)
+    (root / 'run').chmod(0o700)
     env = {'PATH': f'{tools}:{os.environ["PATH"]}', 'HOME': str(home), 'LANG': 'C.UTF-8', 'ROMACS_DIAGNOSTICS': '1',
-           'XDG_RUNTIME_DIR': str(root), 'XDG_CONFIG_HOME': str(home / '.config'),
+           'XDG_RUNTIME_DIR': str(root / 'run'), 'XDG_CONFIG_HOME': str(home / '.config'),
            'XDG_CACHE_HOME': str(home / '.cache'), 'XDG_DATA_HOME': str(home / '.local/share'),
            'XDG_STATE_HOME': str(home / '.local/state'), 'TMPDIR': str(root / 'tmp'),
            'WLR_BACKENDS': 'headless', 'WLR_RENDERER': 'pixman', 'WLR_HEADLESS_OUTPUTS': '1',

@@ -26,7 +26,7 @@ fn safepoint(_cx) -> Step {
 
 defsubr! { name = "garbage-collect-maybe", gnu = "alloc.c:6110", effect = Global,
 fn garbage_collect_maybe(cx, factor: Value) -> Step {
-    let factor = factor.integer_value().filter(|n| *n >= 0).ok_or(Fault::Wrong("wholenump", factor))?;
+    let factor = factor.integer_value().filter(|n| *n >= 0).ok_or_else(|| Fault::Wrong("wholenump", factor))?;
     let (allocated, budget) = cx.collection_budget();
     if factor >= 1 && allocated > budget / factor as f64 {
         // The collector itself, as GNU calls it: no advice or redefinition.

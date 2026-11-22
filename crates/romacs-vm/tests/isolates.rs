@@ -37,12 +37,14 @@ fn a_job_runs_in_a_worker_and_answers_frozen() {
     assert_eq!(eval(&mut vm, "(isolate-await (isolate-spawn '+ 1 2))"), "3");
     assert_eq!(eval(&mut vm, "(let ((v (isolate-await (isolate-spawn 'list 1 \"two\" 'three (vector 4))))) (list (frozen-p v) v))"), "(t (1 \"two\" three [4]))");
     assert_eq!(eval(&mut vm, "(isolate-await (isolate-spawn '(lambda (x) (* x y)) 4 :bindings '((y . 5))))"), "20");
-    // Two jobs on one pooled worker, in order; a fresh worker when asked.
+    // Two pooled jobs, in order, each on a worker of its own (one pooled
+    // worker at a time: the second waits for the first's to end); a fresh
+    // worker when asked.
     eval(&mut vm, "(progn (isolate-kill-all) (setq isolate-pool-size 1))");
-    assert_eq!(eval(&mut vm, "(let ((a (isolate-spawn 'list 'a)) (b (isolate-spawn 'list 'b))) (list (isolate-await a) (isolate-await b) (eq (isolate-future-isolate a) (isolate-future-isolate b))))"), "((a) (b) t)");
-    assert_eq!(eval(&mut vm, "(let ((a (isolate-spawn 'list 'a)) (b (isolate-spawn 'list 'b :fresh t))) (list (isolate-await a) (isolate-await b) (eq (isolate-future-isolate a) (isolate-future-isolate b)) (length (isolate-list))))"), "((a) (b) nil 2)");
-    // A worker keeps its own state between jobs of the same feature set.
-    assert_eq!(eval(&mut vm, "(let ((iso (isolate-future-isolate (isolate-spawn 'list)))) (isolate-await (isolate-spawn '(lambda () (setq worker-state 42)) :isolate iso)) (isolate-await (isolate-spawn '(lambda () worker-state) :isolate iso)))"), "42");
+    assert_eq!(eval(&mut vm, "(let ((a (isolate-spawn 'list 'a)) (b (isolate-spawn 'list 'b))) (list (isolate-future-isolate b) (isolate-await a) (isolate-await b) (eq (isolate-future-isolate a) (isolate-future-isolate b))))"), "(nil (a) (b) nil)");
+    assert_eq!(eval(&mut vm, "(let ((a (isolate-spawn 'list 'a)) (b (isolate-spawn 'list 'b :fresh t))) (list (isolate-await a) (isolate-await b) (eq (isolate-future-isolate a) (isolate-future-isolate b))))"), "((a) (b) nil)");
+    // A caller's own worker keeps its state between its jobs.
+    assert_eq!(eval(&mut vm, "(let ((iso (isolate-create))) (isolate-await (isolate-spawn '(lambda () (setq worker-state 42)) :isolate iso)) (isolate-await (isolate-spawn '(lambda () worker-state) :isolate iso)))"), "42");
     assert_eq!(eval(&mut vm, "(condition-case e (isolate-spawn (lambda () 1)) (error (car (cdr e))))"), "\"Cannot send closure\"");
     assert_eq!(eval(&mut vm, "(progn (isolate-kill-all) (isolate-list))"), "nil");
 }
@@ -155,6 +157,37 @@ fn an_interrupt_ends_a_workers_wait_for_process_output() {
                (result (progn (isolate-interrupt iso) (condition-case e (isolate-await f 10) (quit 'interrupted) (error (car e))))) \
                (ms (round (* 1000 (- (float-time) start))))) \
           (list result (< ms 500) (condition-case e (isolate-await (isolate-spawn '+ 1 1 :isolate iso)) (error (car e))) ms)))", hs.await_ready()));
+    let (head, ms) = out.rsplit_once(' ').unwrap_or((&out, ""));
+    eprintln!("interrupt to quit: {ms} ms");
+    assert_eq!(head, "(interrupted t 2", "{out}");
+    eval(&mut vm, "(isolate-kill-all)");
+}
+
+/// A worker whose tree-sitter query waits for a long early parse takes an
+/// interrupt as a quit within the bound, not when the parse ends: the
+/// query's wait asks about the worker's quit between its slices. The list's
+/// last element is the interrupt's milliseconds to quit.
+#[test]
+fn an_interrupt_ends_a_workers_wait_for_a_tree_sitter_parse() {
+    let mut vm = vm();
+    let hs = Handshake::new("treesit");
+    // About 8.6 MB of C: a parse of a second or more.
+    let job = format!("'(lambda () \
+       (unless (treesit-language-available-p 'c) (error \"no C grammar\")) \
+       (with-temp-buffer \
+         (let ((text \"int f (int a) {{ return a + 1; }}\\n\")) (dotimes (_ 18) (setq text (concat text text))) (insert text)) \
+         (unless (romacs--treesit-parse-early 'c) (error \"no early parse\")) \
+         (let ((parser (treesit-parser-create 'c))) \
+           {} \
+           (treesit-parser-root-node parser)) \
+         'parsed))", hs.ready());
+    let out = eval(&mut vm, &format!("(let* ((iso (isolate-create)) \
+        (f (progn (isolate-await (isolate-spawn 'list :isolate iso)) (isolate-spawn {job} :isolate iso)))) \
+        {} (romacs--isolate-wait 0.1) \
+        (let* ((start (float-time)) \
+               (result (progn (isolate-interrupt iso) (condition-case e (isolate-await f 30) (quit 'interrupted) (error (list 'error e))))) \
+               (ms (round (* 1000 (- (float-time) start))))) \
+          (list result (< ms 300) (isolate-await (isolate-spawn '+ 1 1 :isolate iso)) ms)))", hs.await_ready()));
     let (head, ms) = out.rsplit_once(' ').unwrap_or((&out, ""));
     eprintln!("interrupt to quit: {ms} ms");
     assert_eq!(head, "(interrupted t 2", "{out}");
@@ -453,15 +486,19 @@ fn a_cancelled_queued_job_never_runs() {
 }
 
 #[test]
-fn identical_jobs_share_one_pooled_worker_and_the_pool_is_bounded() {
-    // Sol r1 S5: the preparation's requires are the worker's baseline, not a
-    // taint; the pool bound holds, with isolate-queue-full past it.
+fn pooled_jobs_run_on_a_worker_each_and_the_pool_is_bounded() {
+    // Sol r1 S5: the preparation's requires are the worker's baseline, not
+    // a taint. romacs#396: a worker the pool made runs one job and ends, so
+    // the next gets another; the pool's bound holds, a job past it waiting
+    // (on no isolate) for a running one to end.
     let mut vm = vm();
-    assert_eq!(eval(&mut vm, "(let ((isolate-pool-size 1)) (isolate-await (isolate-spawn 'list 'a)) (isolate-await (isolate-spawn 'list 'b)) (length (isolate-list)))"), "1");
-    assert_eq!(eval(&mut vm, "(let ((isolate-pool-size 1)) (let ((f (isolate-spawn '(lambda () (while t))))) (romacs--isolate-wait 0.2) (list (condition-case e (isolate-spawn 'list 'other :require '(other-feature)) (isolate-queue-full 'full)) (length (isolate-list)))))"), "(full 1)");
+    let live = "(let ((n 0)) (dolist (i (isolate-list) n) (when (isolate-live-p i) (setq n (1+ n)))))";
+    assert_eq!(eval(&mut vm, &format!("(let ((isolate-pool-size 1)) (let* ((a (isolate-spawn 'list 'a)) (wa (progn (isolate-await a) (isolate-future-isolate a))) (b (isolate-spawn 'list 'b))) (isolate-await b) (list (eq wa (isolate-future-isolate b)) (aref wa 3) {live})))")), "(nil retired 0)");
+    assert_eq!(eval(&mut vm, &format!("(let ((isolate-pool-size 1)) (let ((f (isolate-spawn '(lambda () (while t))))) (romacs--isolate-wait 0.2) (list (isolate-future-isolate (isolate-spawn 'list 'other :require '(other-feature))) {live})))")), "(nil 1)");
     eval(&mut vm, "(isolate-kill-all)");
-    // A job that loads a feature retires its worker: the next job gets a
-    // fresh one at once, the old one ending by itself, unwaited.
+    // A pooled worker ends after its job (here one that loaded a feature):
+    // the next job gets a fresh one at once, the old one ending by itself,
+    // unwaited.
     let out = eval(&mut vm, "(let ((isolate-pool-size 1)) (let* ((iso (isolate-future-isolate (isolate-spawn '(lambda () (provide 'journey-feature))))) (first (isolate-spawn 'list)) (pid (romacs--isolate-pid (romacs--isolate-id iso)))) (isolate-await first) (let* ((t0 (float-time)) (next (isolate-spawn 'list)) (quick (< (- (float-time) t0) 0.1))) (list pid (aref iso 6) (eq iso (isolate-future-isolate next)) quick (aref iso 3) (let ((n 0)) (dolist (i (isolate-list) n) (when (isolate-live-p i) (setq n (1+ n)))))))))");
     let pid: i64 = out.trim_start_matches('(').split_whitespace().next().and_then(|p| p.parse().ok()).unwrap_or_else(|| panic!("{out}"));
     // Retired, not killed: nothing waited for its exit.
@@ -498,10 +535,74 @@ fn a_cancel_behind_cpu_bound_work_still_cancels_the_queued_job() {
 #[test]
 fn a_job_queued_behind_a_feature_change_runs_on_a_worker_without_it() {
     // Sol r2 S5: the retired worker hands its queued jobs back; they run on
-    // a worker with the features they were queued for.
+    // a worker with the features they were queued for. A caller's own
+    // worker: a pooled one takes no second job.
     let mut vm = vm();
-    let out = eval(&mut vm, "(let ((isolate-pool-size 1)) (let* ((a (isolate-spawn '(lambda () (provide 'journey-feature) 'provided))) (first (isolate-future-isolate a)) (b (isolate-spawn '(lambda () (featurep 'journey-feature))))) (list (isolate-await a) (isolate-await b 10) (eq (isolate-future-isolate b) first) (aref first 6))))");
+    let out = eval(&mut vm, "(let ((isolate-pool-size 1) (first (isolate-create))) (let* ((a (isolate-spawn '(lambda () (provide 'journey-feature) 'provided) :isolate first)) (b (isolate-spawn '(lambda () (featurep 'journey-feature)) :isolate first))) (list (isolate-await a) (isolate-await b 10) (eq (isolate-future-isolate b) first) (aref first 6))))");
     assert_eq!(out, "(provided nil nil t)");
+    eval(&mut vm, "(isolate-kill-all)");
+}
+
+#[test]
+fn a_waiting_job_runs_when_the_worker_it_waited_for_is_killed() {
+    // A job waiting for room (the pool's one worker busy) is dispatched by
+    // the wait points' idle pass once that worker is killed, though no
+    // worker is left to wake it.
+    let mut vm = vm();
+    let out = eval(&mut vm, "(let* ((isolate-pool-size 1) (done nil)
+                                    (a (isolate-spawn '(lambda () (while t))))
+                                    (b (isolate-spawn 'list 'b)))
+                               (isolate-on-done b (lambda (f) (setq done (isolate-await f 0))))
+                               (romacs--isolate-wait 0.2)
+                               (isolate-kill (isolate-future-isolate a))
+                               (let ((end (+ (float-time) 20)))
+                                 (while (and (not done) (< (float-time) end)) (romacs--isolate-idle) (romacs--isolate-wait 0.05)))
+                               (list (isolate-future-isolate b) done))");
+    assert!(out.ends_with(" (b))") && !out.starts_with("(nil "), "{out}");
+    eval(&mut vm, "(isolate-kill-all)");
+}
+
+#[test]
+fn a_fresh_worker_whose_job_is_refused_is_not_left_behind() {
+    // A `:fresh` job that cannot be sent (here a full queue, the worker's
+    // preparation taking its one place) leaves its worker spent, to end
+    // once its preparation is done: refusals do not pile up workers.
+    let mut vm = vm();
+    let out = eval(&mut vm, "(let ((refused 0) (fresh (lambda () (let ((n 0)) (dolist (i romacs--isolates n) (when (and (isolate-live-p i) (eq (aref i 10) 'fresh)) (setq n (1+ n))))))))
+                               (let ((isolate-queue-limit 1))
+                                 (dotimes (_ 3) (condition-case nil (isolate-spawn 'list :fresh t) (isolate-queue-full (setq refused (1+ refused))))))
+                               (let ((end (+ (float-time) 20))) (while (and romacs--isolates (< (float-time) end)) (romacs--isolate-pump 0.05)))
+                               (list refused (funcall fresh) (length romacs--isolates)
+                                     ;; Not even its preparation queued: it ends at once.
+                                     (let ((isolate-queue-limit 0)) (condition-case nil (isolate-spawn 'list :fresh t) (isolate-queue-full 'refused)))
+                                     (let ((end (+ (float-time) 20))) (while (and romacs--isolates (< (float-time) end)) (romacs--isolate-pump 0.05))
+                                       (length romacs--isolates))))");
+    assert_eq!(out, "(3 0 0 refused 0)");
+    eval(&mut vm, "(isolate-kill-all)");
+}
+
+#[test]
+fn a_pooled_job_sees_nothing_an_earlier_one_changed() {
+    // romacs#396: a worker the pool made runs one job, so a later job of
+    // the same feature set never sees a global set, a function defined or
+    // redefined (as advice redefines one), or a property put, by an
+    // earlier one; a second job sent to that worker by name is refused.
+    let mut vm = vm();
+    for (change, check) in [
+        ("(setq iso-396-global 'changed)", "(boundp 'iso-396-global)"),
+        ("(defalias 'iso-396-function (lambda () 'changed))", "(fboundp 'iso-396-function)"),
+        ("(fset 'isolate-p (lambda (_) 'advised))", "(isolate-p nil)"),
+        ("(put 'car 'iso-396-mark t)", "(get 'car 'iso-396-mark)"),
+    ] {
+        let out = eval(&mut vm, &format!("(list (isolate-await (isolate-spawn '(lambda () {change} t)) 20)
+                                                (isolate-await (isolate-spawn '(lambda () {check})) 20))"));
+        assert_eq!(out, "(t nil)", "{change}");
+    }
+    let out = eval(&mut vm, "(let* ((f (isolate-spawn '(lambda () (sleep-for 0.3) 'first))) (iso (isolate-future-isolate f)))
+                               (list (condition-case nil (isolate-spawn 'list :isolate iso) (isolate-error 'refused))
+                                     (isolate-await f 20)
+                                     (condition-case nil (isolate-spawn 'list :isolate iso) (isolate-error 'refused))))");
+    assert_eq!(out, "(refused first refused)");
     eval(&mut vm, "(isolate-kill-all)");
 }
 
@@ -523,7 +624,8 @@ fn resubmitted_jobs_keep_their_snapshot_and_fit_the_pool() {
     eval(&mut vm, "(isolate-kill-all)");
     // Sol r3 S5: two jobs queued behind the change both run again, with pool size 1.
     let out = eval(&mut vm, "(let ((isolate-pool-size 1)) (let* ((a (isolate-spawn '(lambda () (provide 'journey-feature-3) 'provided))) (b (isolate-spawn '(lambda () (featurep 'journey-feature-3)))) (c (isolate-spawn 'list 'third))) (list (isolate-await a) (isolate-await b 10) (isolate-await c 10) (let ((n 0)) (dolist (i (isolate-list) n) (when (isolate-live-p i) (setq n (1+ n))))))))");
-    assert_eq!(out, "(provided nil (third) 1)");
+    // Each on a worker of its own, every one ended after its job.
+    assert_eq!(out, "(provided nil (third) 0)");
     eval(&mut vm, "(isolate-kill-all)");
     // Sol r3 S4 / r5 S15: cancelling a job the cancel's own pump queues
     // again reaches its new worker. Bare waits read frames without
@@ -531,7 +633,9 @@ fn resubmitted_jobs_keep_their_snapshot_and_fit_the_pool() {
     // the retiring job's result, b's retirement) are held undelivered: b
     // is still on its first worker and generation when the cancel starts;
     // the cancel's pump then resubmits b, and the cancel must follow it.
-    let out = eval(&mut vm, "(let ((isolate-pool-size 1)) (let* ((a (isolate-spawn '(lambda () (provide 'journey-feature-4) 'provided))) (b (isolate-spawn '(lambda () (while t)))) (first (isolate-future-isolate b)) (generation (aref b 2))) (let ((end (+ (float-time) 10))) (while (and (< (romacs--isolate-frames (romacs--isolate-id first)) 4) (< (float-time) end)) (romacs--isolate-wait 0.2))) (list (list (eq (isolate-future-isolate b) first) (= (aref b 2) generation) (aref b 3) (romacs--isolate-frames (romacs--isolate-id first))) (progn (isolate-future-cancel b) (list (not (eq (isolate-future-isolate b) first)) (> (aref b 2) generation))) (isolate-await a) (condition-case e (isolate-await b 10) (quit 'cancelled)) (isolate-await (isolate-spawn 'list 'after) 10))))");
+    // Queued behind another job on a caller's own worker (a pooled one
+    // takes one job).
+    let out = eval(&mut vm, "(let ((isolate-pool-size 1) (iso (isolate-create))) (let* ((a (isolate-spawn '(lambda () (provide 'journey-feature-4) 'provided) :isolate iso)) (b (isolate-spawn '(lambda () (while t)) :isolate iso)) (first (isolate-future-isolate b)) (generation (aref b 2))) (let ((end (+ (float-time) 10))) (while (and (< (romacs--isolate-frames (romacs--isolate-id first)) 4) (< (float-time) end)) (romacs--isolate-wait 0.2))) (list (list (eq (isolate-future-isolate b) first) (= (aref b 2) generation) (aref b 3) (romacs--isolate-frames (romacs--isolate-id first))) (progn (isolate-future-cancel b) (list (not (eq (isolate-future-isolate b) first)) (> (aref b 2) generation))) (isolate-await a) (condition-case e (isolate-await b 10) (quit 'cancelled)) (isolate-await (isolate-spawn 'list 'after) 10))))");
     assert_eq!(out, "((t t pending 4) (t t) provided cancelled (after))");
     eval(&mut vm, "(isolate-kill-all)");
 }
@@ -551,12 +655,13 @@ fn a_retired_worker_ends_without_a_wait_or_a_death_report() {
     assert!(settles(|| !process_exists(pid)), "retired worker {pid} survived");
 }
 
-/// Every condition isolate.el settles a dead worker's jobs with, or signals
-/// itself, is an `isolate-error`, so an awaiter's handler for it catches
-/// each: one used and never defined reaches the awaiter as a peculiar error.
+/// Every condition the isolates' Lisp (isolate.el, isolate-worker.el)
+/// settles a dead worker's jobs with, or signals itself, is an
+/// `isolate-error`, so an awaiter's handler for it catches each: one used
+/// and never defined reaches the awaiter as a peculiar error.
 #[test]
 fn every_condition_isolate_el_raises_is_an_isolate_error() {
-    let source = tree_lisp::text("vm/isolate.el");
+    let source = tree_lisp::text("vm/isolate.el") + &tree_lisp::text("vm/isolate-worker.el");
     // `(romacs--isolate-dead ISOLATE 'NAME ...)` and `(signal 'NAME ...)`.
     let quoted = |text: &str| text.strip_prefix('\'').map(|text| {
         text.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '-').collect::<String>()

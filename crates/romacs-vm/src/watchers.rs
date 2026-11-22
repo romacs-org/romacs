@@ -99,7 +99,7 @@ impl Vm {
         match self.perform_queued(frame, i) {
             Err(Fault::Error(error)) if self.propagated_escape.is_none() && self.queued_kind(frame, i) == WriteKind::Set => {
                 let value = self.rooted(frame, 4 * i + 1);
-                Err(self.forwarded_condition(&error, value).map_or(Fault::Error(error), |(condition, data)| Fault::Signal(condition, data)))
+                Err(self.forwarded_condition(&error, value).map_or_else(|| Fault::Error(error), |(condition, data)| Fault::Signal(condition, data)))
             }
             outcome => outcome,
         }

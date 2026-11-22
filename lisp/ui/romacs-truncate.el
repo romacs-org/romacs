@@ -19,5 +19,24 @@ shorter STRING to WIDTH."
   (truncate-string-to-width string (max 0 width) nil padding
                             (> width (string-width (truncate-string-ellipsis)))))
 
+;;;###autoload
+(defun romacs-truncate-middle (name width)
+  "NAME in at most WIDTH columns, its middle elided and its extension kept."
+  (if (<= (string-width name) width) name
+    (let* ((extension (file-name-extension name t))
+           (stem (file-name-sans-extension name))
+           (dots (truncate-string-ellipsis))
+           (room (- width (string-width extension) (string-width dots))))
+      (if (< room 2) (romacs-truncate name width)
+        (concat (truncate-string-to-width stem (ceiling room 2)) dots
+                (romacs-truncate--tail stem (/ room 2)) extension)))))
+
+(defun romacs-truncate--tail (string width)
+  "The end of STRING in at most WIDTH columns."
+  (let ((start (length string)))
+    (while (and (> start 0) (<= (string-width string (1- start)) width))
+      (setq start (1- start)))
+    (substring string start)))
+
 (provide 'romacs-truncate)
 ;;; romacs-truncate.el ends here

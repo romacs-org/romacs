@@ -6,8 +6,9 @@
 ;; Romacs's menus are layers (romacs-layer.el) of four kinds, each a
 ;; placement and a look from one table, `romacs-popup-look':
 ;;
-;; `panel'    a key menu across the frame's bottom, above the status bar
-;;            (which-key, keymap-popup);
+;; `panel'    a key menu floating over the frame, centred above the status
+;;            bar, sized to its text (which-key, keymap-popup); its room,
+;;            `romacs-popup-room', is the frame's;
 ;; `cursor'   a chip or short menu after a buffer position (eval results);
 ;; `palette'  a centred prompt and list (romacs-complete's panel);
 ;; `hints'    the keys of an active transient map;
@@ -18,8 +19,8 @@
 ;; deactivating a map is its caller's.  A menu whose buffer has keys of
 ;; its own takes them while it shows (`romacs-popup-take-keys').  The Lisp APIs
 ;; packages call stay GNU's; only where and how a menu shows is Romacs's
-;; (ledger/divergences VM2-MENU-LAYERS).  `romacs-popup-key-grid' lays out
-;; groups of keys for a panel.
+;; (ledger/divergences VM2-MENU-LAYERS).  Their keys are laid out by
+;; romacs-grid.el.
 
 ;;; Code:
 
@@ -27,6 +28,8 @@
 (require 'seq)
 (require 'subr-x)
 (require 'romacs-layer)
+(require 'romacs-grid)
+(require 'romacs-theme)
 
 (defgroup romacs-popup nil
   "Romacs's floating menus."
@@ -35,17 +38,74 @@
 (defface romacs-popup '((t :inherit romacs-layer-glass))
   "A menu's text and background.")
 
-(defface romacs-popup-key '((t :inherit romacs-layer-glow))
-  "A key in a menu.")
+(defface romacs-popup-key '((t :inherit romacs-layer-glow :weight bold))
+  "A key in a menu, bold: the theme's accent, made legible on the menu's glass
+\(`romacs-popup--key-spec').")
 
 (defface romacs-popup-title '((t :inherit bold))
-  "A menu's title and its groups' titles.")
+  "A menu's title.")
+
+(defface romacs-popup-group-title '((t :inherit bold))
+  "A group's title in a menu: the text's own colour, bold, above its
+keys' labels in plain weight; dim is for what cannot be used.")
 
 (defface romacs-popup-description '((t))
   "What a key in a menu does.")
 
 (defface romacs-popup-dim '((t :inherit shadow))
   "A menu's secondary text.")
+
+(declare-function romacs-color-floor-on "romacs-theme" (fg backgrounds minimum))
+
+(defface romacs-popup-also '((t :inherit romacs-popup-dim))
+  "The other keys a command in a key-hint card has, after its label: the
+theme's dim text, made legible on the menu's glass (`romacs-popup-legible').")
+
+(defconst romacs-popup-key-contrast 4.5
+  "The contrast a menu's text keeps on its glass, WCAG AA for text.")
+
+(defun romacs-popup-legible (color &optional contrast)
+  "COLOR moved in lightness until it reads on the menus' glass (the
+`romacs-popup' face's background) at CONTRAST, by default
+`romacs-popup-key-contrast', as #RRGGBB; COLOR itself when either colour
+is unknown.  For a caller's own colours on a menu: the glass, not the
+editor's background, is what they are drawn over."
+  (or (romacs-popup--floor color contrast) color))
+
+(defun romacs-popup--floor (color &optional contrast)
+  "COLOR legible on the menus' glass (`romacs-popup-legible'), or nil when
+it or the glass is no colour the frame knows."
+  (romacs-color-legible color (or (face-background 'romacs-popup nil t) (face-background 'default nil t))
+                        (or contrast romacs-popup-key-contrast)))
+
+(defun romacs-popup--set-spec (face spec)
+  "Make SPEC FACE's default spec, unless it is already."
+  (unless (equal spec (get face 'face-defface-spec))
+    (face-spec-set face spec 'face-defface-spec)))
+
+(defun romacs-popup--key-spec (&rest _)
+  "Make `romacs-popup-key' the theme's accent (`romacs-layer-glow') and
+`romacs-popup-also' its dim text, each legible on the menu's glass
+\(`romacs-popup-legible'); a theme whose accent is a grey (a monochrome
+one) gives its keys its link colour, else the text's.  Run from
+`romacs-chrome-faces-functions', once the glow and glass are set."
+  (let* ((accent (face-foreground 'romacs-layer-glow nil t))
+         ;; A grey accent (a monochrome theme's) has no hue to set keys
+         ;; apart from labels.
+         (accent (or (romacs-chrome--chromatic accent)
+                     ;; A grey accent: the theme's link colour, what it gives
+                     ;; what can be acted on; else the text's own.
+                     (romacs-chrome--chromatic (face-foreground 'link nil t))
+                     (face-foreground 'default nil t)))
+         ;; Only a colour the floor computed: an unknown one leaves the
+         ;; face its inherited colour.
+         (key (romacs-popup--floor accent))
+         (also (romacs-popup--floor (face-foreground 'romacs-popup-dim nil t))))
+    (romacs-popup--set-spec 'romacs-popup-key `((t :inherit romacs-layer-glow :weight bold ,@(and key (list :foreground key)))))
+    (romacs-popup--set-spec 'romacs-popup-also `((t :inherit romacs-popup-dim ,@(and also (list :foreground also)))))))
+
+;; Whenever the chrome has derived the glow and the glass.
+(add-hook 'romacs-chrome-faces-functions #'romacs-popup--key-spec)
 
 (defconst romacs-popup-look
   '((panel :radius 8 :padding 10 :motion slide :edge bottom)
@@ -87,7 +147,7 @@ MAX-LINES lines (by default the kind's); FACE paints its background."
     (set-window-hscroll (frame-root-window frame) 0)
     (prog1 (romacs-layer-show buffer
                               :position (pcase kind
-                                          ('panel 'bottom)
+                                          ('panel 'float)
                                           ('palette (if anchor `(pixel ,(car anchor) ,(cdr anchor)) 'center))
                                           ('viewer 'center)
                                           ('cursor `(at ,(car anchor) ,(cdr anchor)))
@@ -100,6 +160,7 @@ MAX-LINES lines (by default the kind's); FACE paints its background."
                               ;; a card is laid out to fit already.
                               :max-lines (cond (max-lines)
                                                ((memq kind '(card viewer)) lines)
+                                               ((and lines (eq kind 'panel)) lines)
                                                ((eq kind 'panel)
                                                 (max romacs-layer-max-lines
                                                      (- (frame-text-lines (romacs-layer--root-frame)) 4)))))
@@ -136,49 +197,6 @@ walk over the registered ones."
   (let ((frame (romacs-layer--frame-of buffer)))
     (and frame (frame-visible-p frame) (eq (frame-parameter frame 'romacs-popup-kind) 'panel))))
 
-;;;; Key grids
-
-(defun romacs-popup--block (group)
-  "GROUP, (TITLE . ((KEY . DESCRIPTION) ...)), as lines in the menu faces.
-TITLE nil has no title line."
-  (let* ((entries (cdr group))
-         (key-width (seq-reduce (lambda (w e) (max w (string-width (car e)))) entries 0)))
-    (append (and (car group) (list (propertize (car group) 'face 'romacs-popup-title)))
-            (mapcar (lambda (entry)
-                      (concat (propertize (car entry) 'face 'romacs-popup-key)
-                              (make-string (- (+ 2 key-width) (string-width (car entry))) ?\s)
-                              (propertize (cdr entry) 'face 'romacs-popup-description)))
-                    entries))))
-
-(defun romacs-popup-key-grid (groups width &optional gap)
-  "GROUPS laid out side by side in bands at most WIDTH columns wide, as a
-string: each group, (TITLE . ((KEY . DESCRIPTION) ...)), a block of its
-title and its keys aligned on its widest key, GAP columns (default 3)
-apart; a block that would pass WIDTH starts the next band.  Linear in
-the entries."
-  (let ((gap (or gap 3)) bands band (used 0))
-    (dolist (lines (mapcar #'romacs-popup--block groups))
-      (let ((w (seq-reduce (lambda (w line) (max w (string-width line))) lines 1)))
-        (when (and band (> (+ used gap w) width))
-          (push (nreverse band) bands)
-          (setq band nil used 0))
-        (setq used (if band (+ used gap w) w))
-        ;; Each block's lines as a vector, so a row is one `aref'.
-        (push (cons w (vconcat lines)) band)))
-    (when band (push (nreverse band) bands))
-    (mapconcat
-     (lambda (band)
-       (let ((height (seq-reduce (lambda (h b) (max h (length (cdr b)))) band 0)) rows)
-         (dotimes (i height)
-           (push (string-trim-right
-                  (mapconcat (lambda (b)
-                               (let ((line (if (< i (length (cdr b))) (aref (cdr b) i) "")))
-                                 (concat line (make-string (- (car b) (string-width line)) ?\s))))
-                             band (make-string gap ?\s)))
-                 rows))
-         (string-join (nreverse rows) "\n")))
-     (nreverse bands) "\n\n")))
-
 ;;;; Hints: the keys of an active transient map
 
 (defcustom romacs-popup-hints-delay 0.4
@@ -189,7 +207,7 @@ the entries."
   "Variables whose keymaps never show as hints."
   :type '(repeat symbol))
 
-(defcustom romacs-popup-hints-strip '("windmove-" "text-scale-")
+(defcustom romacs-popup-hints-strip '("windmove-" "text-scale-" "romacs-attach-edit-")
   "Prefixes dropped from a command's name in a hint."
   :type '(repeat string))
 
@@ -278,43 +296,157 @@ intervals in O(N log N), whatever ranges and singletons mix."
           (setq k (1+ k)))))
     (nreverse fragments)))
 
+(defun romacs-popup--keymap-value (map)
+  "MAP, a keymap or a symbol whose function is one (autoloaded first, as
+`map-keymap' does), as the list; else nil or MAP itself when it is no
+symbol."
+  (if (and map (symbolp map))
+      (and (keymapp map)
+           (let ((value (indirect-function map)))
+             (when (autoloadp value) (setq value (autoload-do-load value map)))
+             (and (keymapp value) (indirect-function value))))
+    map))
+
+(defun romacs-popup--walk-keymap (map function)
+  "Call FUNCTION with (EVENT BINDING LEVEL CHAR-TABLE) for MAP's bindings,
+its parents' and embedded maps' too, in `map-keymap''s order.  LEVEL
+counts the runs of one map's own bindings; CHAR-TABLE is non-nil when
+that run's map is a full one, its characters in a char-table or vector."
+  (let ((level 0))
+    (named-let walk ((map (romacs-popup--keymap-value map)))
+      (while (consp map)
+        (if (keymapp (car map))
+            (progn (walk (romacs-popup--keymap-value (car map)))
+                   (setq map (cdr map)))
+          ;; A run of bindings after an embedded map has no head of its
+          ;; own: `map-keymap-internal' takes it with one.
+          (let* ((run (if (eq (car map) 'keymap) map (cons 'keymap map)))
+                 (full (let ((tail (cdr run)) found)
+                         (while (and (consp tail) (not found) (not (eq (car tail) 'keymap)) (not (keymapp (car tail))))
+                           (setq found (or (char-table-p (car tail)) (vectorp (car tail))) tail (cdr tail)))
+                         found))
+                 (this (setq level (1+ level))))
+            (setq map (map-keymap-internal (lambda (event binding) (funcall function event binding this full)) run))))
+        (setq map (romacs-popup--keymap-value map))))))
+
+(defun romacs-popup--order< (a b)
+  "A before B, each (LEVEL CLASS VALUE), in that order of significance."
+  (or (< (car a) (car b))
+      (and (= (car a) (car b))
+           (or (< (nth 1 a) (nth 1 b))
+               (and (= (nth 1 a) (nth 1 b)) (< (nth 2 a) (nth 2 b)))))))
+
 (defun romacs-popup--map-items (map)
   "MAP's effective bindings with its parents, nil ones kept, in one
-traversal: (CHARACTERS . OTHERS), CHARACTERS (INDEX LO HI BINDING)
-fragments no earlier binding covers, OTHERS (INDEX EVENT BINDING) for
-function keys, the first of each.  Remaps, defaults, menu-bar and mouse
-events are left out."
-  (let ((seen (make-hash-table :test 'eq)) (n 0) characters others)
-    (map-keymap
-     (lambda (event binding)
+traversal: (CHARACTERS . OTHERS), CHARACTERS (INDEX LO HI BINDING ORDER)
+fragments no earlier binding covers, OTHERS (INDEX EVENT BINDING ORDER)
+for function keys, the first of each.  INDEX is the traversal's, which
+decides the effective binding; ORDER, (LEVEL CLASS VALUE), the order
+the map was written in: its own bindings before its parents', a sparse
+map's newest last (it stores them newest first), a full map's
+characters by code.  Remaps, defaults, menu-bar and mouse events are
+left out."
+  (let ((seen (make-hash-table :test 'eq)) (orders (make-hash-table :test 'eql)) (n 0) characters others)
+    (romacs-popup--walk-keymap
+     map
+     (lambda (event binding level full)
        (setq n (1+ n))
+       (puthash n (cons level (and full (or (integerp event) (consp event)))) orders)
        (cond
         ((consp event) (push (list n (car event) (cdr event) binding) characters))
         ((integerp event) (push (list n event event binding) characters))
         ((or (memq event '(remap t menu-bar tool-bar)) (string-match-p "mouse" (symbol-name event))))
         ((gethash event seen))
-        (t (puthash event t seen) (push (list n event binding) others))))
-     map)
-    (cons (romacs-popup--hint-fragments (nreverse characters)) (nreverse others))))
+        (t (puthash event t seen) (push (list n event binding) others)))))
+    ;; A full map's character, or a fragment of its range, goes by its own
+    ;; code; anything else by its place, newest stored first.
+    (let ((order (lambda (item lo)
+                   (pcase-let ((`(,level . ,by-code) (gethash (car item) orders)))
+                     (append item (list (if (and by-code lo) (list level 0 lo) (list level 1 (- (car item))))))))))
+      (cons (mapcar (lambda (fragment) (funcall order fragment (nth 1 fragment)))
+                    (romacs-popup--hint-fragments (nreverse characters)))
+            (mapcar (lambda (item) (funcall order item nil)) (nreverse others))))))
 
 (defun romacs-popup--hint-entries (map)
   "MAP's bindings as (KEY . LABEL), in one traversal
 \(`romacs-popup--map-items'): what a key is bound to first (a map's own
 before its parents') is its effective binding, a nil one included, for a
 character range as for a single key, so a range shows split around the
-keys bound before it.  In traversal order."
+keys bound before it.  One entry per binding
+\(`romacs-popup--hint-groups'), in the order MAP was written in."
+  (delq nil (mapcar (pcase-lambda (`(,keys . ,binding))
+                      (when-let* ((label (romacs-popup--hint-label binding))) (cons keys label)))
+                    (romacs-popup--hint-groups (romacs-popup--hint-keys map)))))
+
+(defun romacs-popup--hint-keys (map)
+  "MAP's bindings as (KEY BINDING) in the order MAP was written in
+\(`romacs-popup--map-items').  The meta keys, ESC's, read as M- keys at
+ESC's place (`romacs-popup--hint-meta-keys')."
   (pcase-let ((`(,characters . ,others) (romacs-popup--map-items map)))
-    (let ((keys (nconc (mapcar (pcase-lambda (`(,i ,lo ,hi ,binding))
-                                 (list i (if (= lo hi) (key-description (vector lo))
-                                           (format "%s..%s" (key-description (vector lo)) (key-description (vector hi))))
-                                       binding))
-                               characters)
-                       (mapcar (pcase-lambda (`(,i ,event ,binding)) (list i (key-description (vector event)) binding))
-                               others))))
-      ;; `sort' is stable: a range's parts stay in ascending order.
-      (delq nil (mapcar (pcase-lambda (`(,_ ,key ,binding))
-                          (when-let* ((label (romacs-popup--hint-label binding))) (cons key label)))
-                        (sort keys (lambda (a b) (< (car a) (car b)))))))))
+    ;; `sort' is stable: a range's parts stay in ascending order.
+    (mapcan (pcase-lambda (`(,_ ,key ,binding))
+              (if (and (equal key [?\e]) (keymapp binding))
+                  (romacs-popup--hint-meta-keys map binding)
+                (list (list (if (vectorp key) (key-description key) key) binding))))
+            (sort (nconc (mapcar (pcase-lambda (`(,_ ,lo ,hi ,binding ,order))
+                                   (list order (if (= lo hi) (vector lo)
+                                                 (format "%s..%s" (key-description (vector lo)) (key-description (vector hi))))
+                                         binding))
+                                 characters)
+                         (mapcar (pcase-lambda (`(,_ ,event ,binding ,order)) (list order (vector event) binding)) others))
+                  (lambda (a b) (romacs-popup--order< (car a) (car b)))))))
+
+(defconst romacs-popup--hint-meta-range 256
+  "A meta range is read key by key up to this many keys; a longer one,
+rare in an ESC map, is left out.")
+
+(defun romacs-popup--hint-meta-keys (map esc)
+  "MAP's meta keys as (KEY BINDING), at ESC's place: every event any of
+its ESC maps names (a range's keys one by one), in the order written,
+bound to what `lookup-key' finds for it in MAP, the unbound left out; so
+the card agrees with a key's lookup, however its maps compose.  When
+they cannot be read (a prefix library that fails to load), ESC itself,
+its binding ESC."
+  (condition-case nil
+      (let ((seen (make-hash-table :test 'eql)) (n 0) (events nil))
+        (romacs-popup--walk-keymap
+         (lookup-key map [?\e])
+         (lambda (event _binding level full)
+           (setq n (1+ n))
+           (dolist (key (cond ((not (consp event)) (list event))
+                              ((< (- (cdr event) (car event)) romacs-popup--hint-meta-range)
+                               (number-sequence (car event) (cdr event)))))
+             (unless (or (gethash key seen)
+                         (and (symbolp key) (or (memq key '(remap t menu-bar tool-bar)) (string-match-p "mouse" (symbol-name key)))))
+               (puthash key t seen)
+               (push (list (if (and full (integerp key)) (list level 0 key) (list level 1 (- n))) key) events)))))
+        (delq nil (mapcar (pcase-lambda (`(,_ ,key))
+                            (let ((binding (lookup-key map (vector ?\e key))))
+                              (and binding (not (numberp binding))
+                                   (list (key-description (vector ?\e key)) binding))))
+                          (sort (nreverse events) (lambda (a b) (romacs-popup--order< (car a) (car b)))))))
+    (error (list (list (key-description [?\e]) esc)))))
+
+(defcustom romacs-popup-hints-keys-per-command 2
+  "Most keys a hint shows for one command: its shortest."
+  :type 'natnum)
+
+(defun romacs-popup--hint-groups (keys)
+  "KEYS, (KEY BINDING) in order, as one (KEYS . BINDING) per binding at
+its first key's place, KEYS its `romacs-popup-hints-keys-per-command'
+shortest joined by \"/\": aliases such as `n' and `C-f' share a hint."
+  (let ((groups nil) (by-binding (make-hash-table :test 'eq)))
+    (pcase-dolist (`(,key ,binding) keys)
+      (if-let* ((group (and binding (gethash binding by-binding))))
+          (setcdr group (cons key (cdr group)))
+        (push (list binding key) groups)
+        (when binding (puthash binding (car groups) by-binding))))
+    (mapcar (pcase-lambda (`(,binding . ,keys))
+              (cons (string-join (seq-take (seq-sort-by #'string-width #'< (nreverse keys))
+                                           (max 1 romacs-popup-hints-keys-per-command))
+                                 "/")
+                    binding))
+            (nreverse groups))))
 
 (defun romacs-popup--hints-place ()
   "Where hints show now: the selected window (of the root frame, not the
@@ -322,23 +454,56 @@ minibuffer) and its edges."
   (let ((window (romacs-layer--toast-window)))
     (list window (window-edges window t nil t))))
 
+(defcustom romacs-popup-hints-max-lines 2
+  "Most lines a transient map's hints take, `romacs-layer-max-lines' at
+most; the last one's overflow is elided."
+  :type 'natnum)
+
+(defun romacs-popup--hint-lines (entries columns max width)
+  "ENTRIES, strings, packed in order into lines of at most COLUMNS as
+measured by WIDTH, three spaces apart: at most MAX lines, the last cut
+with an ellipsis when entries are left over."
+  (let ((lines nil) (line nil) (sep "   "))
+    (dolist (entry entries)
+      (let ((joined (if line (concat line sep entry) entry)))
+        (if (or (null line) (<= (funcall width joined) columns))
+            (setq line joined)
+          (push line lines)
+          (setq line entry))))
+    (when line (push line lines))
+    (setq lines (or (nreverse lines) '("")))
+    (let* ((kept (seq-take lines (max 1 max)))
+           (rest (nthcdr (length kept) lines))
+           (last (car (last kept)))
+           (dots (if (<= (funcall width (truncate-string-ellipsis)) columns) (truncate-string-ellipsis) ""))
+           (fit (lambda (s)
+                  (if (<= (funcall width s) columns) s
+                    ;; The longest start that fits as painted, the dots too.
+                    (let ((cut (truncate-string-to-width s (max 0 (- columns (funcall width dots))))))
+                      (while (and (> (length cut) 0) (> (funcall width (concat cut dots)) columns))
+                        (setq cut (substring cut 0 -1)))
+                      (concat cut dots))))))
+      (mapcar fit (append (butlast kept) (list (if rest (concat last sep (car rest)) last)))))))
+
 (defun romacs-popup--hints-show (map)
   "Show MAP's keys as hints in the selected window, retiring the toast of
 its MESSAGE (shown once, here, while the hints show)."
-  (setq romacs-popup--hints-shown map romacs-popup--hints-place (romacs-popup--hints-place))
-  (let* ((window (car romacs-popup--hints-place))
-         (text (mapconcat (lambda (e) (concat (propertize (car e) 'face 'romacs-popup-key) " "
-                                              (propertize (cdr e) 'face 'romacs-popup-description)))
-                          (romacs-popup--hint-entries map) "   "))
-         (columns (max 10 (- (window-body-width window) 4)))
-         (dots (truncate-string-ellipsis))
-         (text (if (> (romacs-layer--toast-width text) columns)
-                   (concat (truncate-string-to-width text (- columns (romacs-layer--toast-width dots))) dots)
-                 text))
+  (let* ((place (romacs-popup--hints-place))
+         (window (car place))
+         (lines (romacs-popup--hint-lines
+                 (mapcar (lambda (e) (concat (propertize (car e) 'face 'romacs-popup-key) " "
+                                             (propertize (cdr e) 'face 'romacs-popup-description)))
+                         (romacs-popup--hint-entries map))
+                 (max 10 (- (window-body-width window) 4)) (min romacs-popup-hints-max-lines romacs-layer-max-lines) #'romacs-layer--toast-width))
          (buffer (romacs-popup--hints-buffer))
          (message (gethash map romacs-popup--hint-maps)))
-    (with-current-buffer buffer (let ((inhibit-read-only t)) (erase-buffer) (insert text) (goto-char (point-min))))
-    (romacs-popup-show 'hints buffer :anchor window :columns (1+ (romacs-layer--toast-width text)) :lines 1)
+    (with-current-buffer buffer
+      (let ((inhibit-read-only t)) (erase-buffer) (insert (string-join lines "\n")) (goto-char (point-min))))
+    (romacs-popup-show 'hints buffer :anchor window :lines (length lines)
+                       :columns (1+ (apply #'max (mapcar #'romacs-layer--toast-width lines))))
+    ;; Shown once it shows: a failure before leaves the next reconcile to
+    ;; try again.
+    (setq romacs-popup--hints-shown map romacs-popup--hints-place place)
     (romacs-popup--hints-follow-hooks t)
     (when (stringp message)
       (dolist (toast (seq-filter (lambda (toast) (equal (nth 3 toast) message)) romacs-layer--toasts))
@@ -495,7 +660,7 @@ as hints at the bottom of the selected window, after a pause."
 ;; and the like) keep its pages in the `panel'.  Design: popup-layers.md
 ;; §19.2.
 
-(defface romacs-popup-group '((t :inherit font-lock-keyword-face))
+(defface romacs-popup-group '((t :inherit romacs-popup-group-title))
   "A prefix's name in a key-hint card: `+name'.")
 
 (defcustom romacs-popup-prefix-names
@@ -515,6 +680,7 @@ replacement names it; a key bound to anything else never is."
 (defvar which-key-mode)
 (declare-function make-which-key--pages "which-key")
 (declare-function which-key--maybe-replace "which-key" (key-binding))
+(declare-function which-key--compute-binding "which-key" (binding))
 (declare-function which-key--popup-showing-p "which-key" ())
 
 (defvar romacs-popup--card nil
@@ -564,9 +730,12 @@ precedence order."
     (replace-regexp-in-string "\\(?:-\\(?:prefix\\|command\\|map\\)\\)+\\'" "" name)))
 
 (defun romacs-popup--card-entry (prefix winner)
-  "WINNER of PREFIX as the card shows it: (KEY LABEL PREFIX-P SOURCE ORDER),
-or nil to leave it out (`ignore', `undefined', a which-key replacement
-to nil)."
+  "WINNER of PREFIX as the card shows it: (KEY LABEL PREFIX-P SOURCE ORDER
+BINDING ALSO SORT), ALSO nil (`romacs-popup--card-merge' fills it),
+SORT the binding as which-key's own sort sees it, (FULL-KEY . NAME): the
+whole sequence's description, carrying its event (a range's first) as
+`romacs-popup-event', and the command's name; or nil to leave it out
+\(`ignore', `undefined', a which-key replacement to nil)."
   (pcase-let* ((`(,key ,binding ,source ,order) winner)
                (item (and (eq (car-safe binding) 'menu-item) binding))
                (binding (if item (nth 2 item) binding))
@@ -579,10 +748,20 @@ to nil)."
                (name (cond ((and binding (symbolp binding)) (symbol-name binding))
                            (prefix-p "prefix")
                            (t (or (romacs-popup--hint-label binding) "function"))))
-               (map (and prefix-p (if (symbolp binding) (indirect-function binding) binding))))
+               (map (and prefix-p (if (symbolp binding) (indirect-function binding) binding)))
+               ;; As which-key's own collection makes it: the whole sequence
+               ;; described at once (a range as its cons event), and a
+               ;; command's name after `which-key-compute-remaps'.
+               (sort-key (cons (propertize (key-description (vconcat prefix (if (= (length key) 2)
+                                                                                (vector (cons (aref key 0) (aref key 1)))
+                                                                              key)))
+                                           'romacs-popup-event (aref key 0))
+                               (if (and binding (symbolp binding) (fboundp 'which-key--compute-binding))
+                                   (which-key--compute-binding binding)
+                                 name))))
     (unless (memq binding '(ignore undefined))
       (cond
-       ((and item (stringp (nth 1 item))) (list key-desc (nth 1 item) prefix-p source order))
+       ((and item (stringp (nth 1 item))) (list key-desc (nth 1 item) prefix-p source order binding nil sort-key))
        (t
         (let* ((full (string-trim (concat (key-description prefix) " " key-desc)))
                (replaced (if (fboundp 'which-key--maybe-replace) (which-key--maybe-replace (cons full name)) (cons full name))))
@@ -597,7 +776,7 @@ to nil)."
                     (cond ((not (equal (cdr replaced) name)) (cdr replaced))
                           (prefix-p (romacs-popup--prefix-name binding map key full))
                           (t (romacs-popup--humanise name)))
-                    prefix-p source order)))))))))
+                    prefix-p source order binding nil sort-key)))))))))
 
 (defcustom romacs-popup-prefix-keys '(("C-x 8" . "char"))
   "Names of GNU's own anonymous prefix maps in a key-hint card, (KEY .
@@ -644,100 +823,212 @@ command's name; `romacs-popup-prefix-keys' for an anonymous one; else
         (cdr (assoc full romacs-popup-prefix-keys))
         "prefix")))
 
+(defun romacs-popup--event-rank (event)
+  "EVENT's place among a card's keys, a list for `romacs-popup--rank<':
+unmodified keys, then C-, M-, C-M- and other modifiers; within each,
+letters (lower case before upper), digits, punctuation, then named keys
+\(SPC, TAB, RET, ESC, DEL, <left>, <f1>...).  SPC, TAB, RET, ESC and
+DEL are named keys whatever their modifiers (M-RET is M-, not C-M-); C-@
+ranks just after C-SPC, the key that types it."
+  (let* ((char (and (integerp event) (logand event #x3fffff)))
+         (named-char (memq char '(?\t ?\r ?\e ?\d ?\s)))
+         ;; A character's modifiers are its bits, Control too for C-a
+         ;; (whose bit is its code); a symbol's are its name's.
+         (mods (if char
+                   (append (event-modifiers (logior (- event char) ?a))
+                           (and (< char ?\s) (not named-char) '(control)))
+                 (event-modifiers event)))
+         ;; C-@ is NUL, the key C-SPC types: SPC, just after C-SPC.
+         (nul (eql char 0))
+         (base (cond (named-char (single-key-description char))
+                     (nul "SPC")
+                     (char (if (< char ?\s) (event-basic-type char) char))
+                     (t (symbol-name (event-basic-type event)))))
+         ;; One order whatever the event's representation.
+         (mods (seq-filter (lambda (m) (memq m mods)) '(control meta super hyper alt shift))))
+    (list (pcase mods ('nil 0) ('(control) 1) ('(meta) 2) ('(control meta) 3) (_ 4))
+          (mapconcat #'symbol-name mods "-")
+          (cond ((stringp base) 3)
+                ((<= ?0 base ?9) 1)
+                ((string-match-p "[[:alpha:]]" (string base)) 0)
+                (t 2))
+          (if (stringp base) base (downcase base))
+          (if (or nul (and (integerp base) (/= base (downcase base)))) 1 0))))
+
+(defun romacs-popup--rank< (a b)
+  "Whether rank A, a list of numbers and strings, sorts before rank B:
+element by element, numbers by `<', strings by `string-version-lessp'
+\(<f2> before <f10>)."
+  (let (result)
+    (while (and a (null result))
+      (let ((x (pop a)) (y (pop b)))
+        (unless (equal x y)
+          (setq result (list (if (numberp x) (< x y) (string-version-lessp x y)))))))
+    (car result)))
+
+(defun romacs-popup--key-event (key)
+  "The event KEY, a key sequence's description as which-key sorts it
+\(`C-x a', a range `C-x a .. z'), ends with (a range's first): its
+`romacs-popup-event' property, else read; nil when it names none."
+  (or (and (> (length key) 0) (get-text-property 0 'romacs-popup-event key))
+      (let ((keys (ignore-errors (key-parse (replace-regexp-in-string "\\(?: \\.\\. \\|\\.\\.\\)\\S-+\\'" "" key)))))
+        (and (> (length keys) 0) (aref keys (1- (length keys)))))))
+
+(defun romacs-popup-key-order (a b)
+  "Whether which-key binding A, (KEY . DESCRIPTION), sorts before B: by
+key, unmodified keys first, then C-, M-, C-M- and the rest; within each,
+letters (lower case before upper), digits, punctuation, then named keys
+\(`romacs-popup--event-rank').  A value for `which-key-sort-order', and
+Romacs's: the option orders a key-hint card's rows."
+  (let ((ea (romacs-popup--key-event (car a))) (eb (romacs-popup--key-event (car b))))
+    (cond ((and ea eb) (romacs-popup--rank< (romacs-popup--event-rank ea) (romacs-popup--event-rank eb)))
+          ((or ea eb) (and ea t))
+          (t (string< (car a) (car b))))))
+
+(defconst romacs-popup--merged-key-width 18
+  "The widest a command's keys in one row grow, its first key and the
+others after its label with their separators: four two-cell modified
+keys.  A key past it starts the command's next row.")
+
+(defun romacs-popup--card-merge (entries)
+  "ENTRIES with the keys of one command in one row, at its first key's
+place, the others its seventh element (ALSO), drawn after its label
+\(`romacs-popup--card-text'), while the row's keys stay within
+`romacs-popup--merged-key-width': one command is one binding (`eq') with
+one label, prefix-ness and source, so two keys a replacement labels
+apart, or two anonymous functions, stay apart.  Linear in ENTRIES."
+  (let ((rows (make-hash-table :test 'eq)) out)
+    (dolist (e entries (nreverse out))
+      ;; By binding, then by what the row shows: the command's newest row.
+      (let* ((labels (or (gethash (nth 5 e) rows) (puthash (nth 5 e) (make-hash-table :test 'equal) rows)))
+             (id (list (nth 1 e) (nth 2 e) (nth 3 e)))
+             (row (gethash id labels)))
+        (if (and row (<= (+ (string-width (car row)) (string-width (car e))
+                            (seq-reduce (lambda (w k) (+ w 2 (string-width k))) (nth 6 row) 2))
+                         romacs-popup--merged-key-width))
+            (setcar (nthcdr 6 row) (append (nth 6 row) (list (car e))))
+          (push (puthash id (copy-sequence e) labels) out))))))
+
 (defun romacs-popup--card-entries (prefix)
-  "The entries PREFIX's card shows, in its order: prefixes first, then
-commands; within each a mode's before global ones, then key order."
+  "The entries PREFIX's card shows, in its order: as
+`which-key-sort-order' sorts which-key's bindings (Romacs's
+`romacs-popup-key-order'; nil keeps the maps' order: a mode's before
+global ones), one command's keys in one row (`romacs-popup--card-merge')."
   (romacs-popup--map-names-refresh)
-  (let ((entries (delq nil (mapcar (lambda (w) (romacs-popup--card-entry prefix w)) (romacs-popup--card-winners prefix)))))
-    (sort entries (lambda (a b)
-                    (let ((ka (list (if (nth 2 a) 0 1) (if (eq (nth 3 a) 'mode) 0 1)))
-                          (kb (list (if (nth 2 b) 0 1) (if (eq (nth 3 b) 'mode) 0 1))))
-                      (if (equal ka kb) (< (nth 4 a) (nth 4 b)) (version-list-< ka kb)))))))
+  (let ((entries (sort (delq nil (mapcar (lambda (w) (romacs-popup--card-entry prefix w)) (romacs-popup--card-winners prefix)))
+                       (lambda (a b) (< (nth 4 a) (nth 4 b)))))
+        (order (bound-and-true-p which-key-sort-order)))
+    (romacs-popup--card-merge
+     ;; Stable: what the order leaves tied keeps the maps' order.
+     (if order (sort entries (lambda (a b) (funcall order (nth 7 a) (nth 7 b)))) entries))))
 
 ;;; Layout
 
+(defun romacs-popup--card-text (entry &optional bare)
+  "ENTRY's text after its key as the card draws it: its label (a prefix's
+after `+') and, unless BARE, the command's other keys
+\(`romacs-popup--card-merge') after it."
+  (concat (propertize (if (nth 2 entry) (concat "+" (nth 1 entry)) (nth 1 entry))
+                      'face (if (nth 2 entry) 'romacs-popup-group 'romacs-popup-description))
+          (and (nth 6 entry) (not bare)
+               ;; Dim: what else runs it, not another key column.
+               (propertize (concat "  " (string-join (nth 6 entry) "  ")) 'face 'romacs-popup-also))))
+
 (defun romacs-popup--card-column (entries width)
-  "ENTRIES as one card column of lines: keys right-aligned in one key
-column, two spaces, the label, cut with `…' past WIDTH columns."
-  (let ((key-width (seq-reduce (lambda (w e) (max w (string-width (car e)))) entries 0)))
+  "ENTRIES as one card column of lines at most WIDTH columns wide: keys
+right-aligned in one key column, two spaces, the text
+\(`romacs-popup--card-text'): where it does not fit, without the
+command's other keys, then cut at a word (the key never is)."
+  (let* ((key-width (seq-reduce (lambda (w e) (max w (string-width (car e)))) entries 0))
+         (room (max 1 (- width key-width 2))))
     (mapcar (lambda (e)
-              (let* ((label (if (nth 2 e) (concat "+" (nth 1 e)) (nth 1 e)))
-                     (room (- width key-width 2))
-                     (label (if (> (string-width label) room) (truncate-string-to-width label (max 1 room) nil nil t) label)))
+              (let* ((text (romacs-popup--card-text e))
+                     ;; Other keys only where they fit, in cells and as painted.
+                     (text (if (and (<= (string-width text) room)
+                                    (or (null (nth 6 e)) (<= (romacs-layer--toast-width text) room)))
+                               text
+                             (romacs-popup--card-text e t))))
                 (concat (make-string (- key-width (string-width (car e))) ?\s)
-                        (propertize (car e) 'face 'romacs-popup-key) "  "
-                        (propertize label 'face (if (nth 2 e) 'romacs-popup-group 'romacs-popup-description)))))
+                        (propertize (car e) 'face 'romacs-popup-key)
+                        ;; The gap to the label a stretch, so a bold key
+                        ;; painted wider than its cells cannot move it.
+                        (propertize "  " 'romacs-grid-align (+ key-width 2))
+                        (romacs-grid-cut text room))))
             entries)))
 
-(defun romacs-popup--card-natural (entries)
-  "The columns ENTRIES take uncut as one card column."
-  (let ((key-width (seq-reduce (lambda (w e) (max w (string-width (car e)))) entries 0)))
-    (+ key-width 2 (seq-reduce (lambda (w e) (max w (+ (string-width (nth 1 e)) (if (nth 2 e) 1 0)))) entries 0))))
+(defun romacs-popup--card-blocks (entries rows width)
+  "ENTRIES as the card's columns of at most ROWS lines, each drawn with
+its own key column: broken by `romacs-grid-chunks', each entry measured
+as `romacs-popup--card-column' draws it beside its column's widest key,
+so the breaks are scored as the columns will be."
+  (mapcar (lambda (chunk) (romacs-popup--card-column chunk width))
+          (romacs-grid-chunks entries rows
+                                (lambda (e) (string-width (car e)))
+                                ;; An entry drawn beside a key column K wide,
+                                ;; as `romacs-popup--card-column' draws it.
+                                (lambda (e k)
+                                  (let ((full (+ k 2 (string-width (romacs-popup--card-text e)))))
+                                    ;; Only a label cut to the room, or one with other
+                                    ;; keys (measured as painted), needs drawing.
+                                    (if (and (<= full width) (null (nth 6 e))) full
+                                      (string-width (car (romacs-popup--card-column
+                                                          (list (cons (make-string k ?x) (cdr e))) width)))))))))
 
-(defun romacs-popup--card-fits (pages rows width)
-  "Whether every page of PAGES is at most ROWS rows and every row at most
-WIDTH columns, as rendered."
-  (seq-every-p (lambda (page) (let ((lines (split-string page "\n")))
-                                (and (<= (length lines) rows)
-                                     (seq-every-p (lambda (line) (<= (romacs-layer--toast-width line) width)) lines))))
+(defun romacs-popup--card-may-fit (entries rows width)
+  "Whether ENTRIES could fit one page of ROWS rows and WIDTH columns: as
+many columns of ROWS as the narrowest a column can be (its shortest key,
+the gap, a cell of a cut label) leave room for hold them all.  When not,
+the card pages without trying."
+  (let ((narrowest (+ 3 (seq-reduce (lambda (w e) (min w (string-width (car e)))) entries most-positive-fixnum))))
+    (<= (length entries) (* rows (max 1 (/ (+ width romacs-grid-gap) (+ narrowest romacs-grid-gap)))))))
+
+(defun romacs-popup--card-painted-fits (pages rows width)
+  "Whether every page of PAGES, its footer too, is at most ROWS rows and,
+as painted, WIDTH columns."
+  (seq-every-p (lambda (page) (let ((rows-of (split-string page "\n")))
+                                (and (<= (length rows-of) rows)
+                                     (seq-every-p (lambda (row) (<= (romacs-layer--toast-width row) width)) rows-of))))
                pages))
 
-(defun romacs-popup--card-paged (entries body columns column-width gap)
-  "ENTRIES in pages of COLUMNS columns of BODY rows, at most COLUMN-WIDTH
-each, GAP apart, each page but the last ending in `… N more · C-h'."
-  (let ((n (length entries)) (shown 0) result)
-    (dolist (page (seq-partition entries (* body columns)) (nreverse result))
-      (setq shown (+ shown (length page)))
-      (let* ((groups (seq-partition page body))
-             (widths (mapcar (lambda (g) (min column-width (romacs-popup--card-natural g))) groups))
-             (text (romacs-popup--card-join groups widths gap)))
-        (push (if (< shown n)
-                  (concat text "\n" (propertize (format "... %d more · %s" (- n shown) (key-description (vector help-char)))
-                                                'face 'romacs-popup-dim))
-                text)
-              result)))))
+(defun romacs-popup--card-paged (entries rows width)
+  "ENTRIES in pages of ROWS rows: the body, a blank row, and `N/M · C-h
+next' (`first' on the last), every page padded to the tallest so the
+footer stays put; one page, when the shorter columns fit everything,
+has no footer.  Nil when ROWS leaves no body."
+  (when (>= rows 3)
+    (let* ((text (lambda (page) (string-join page "\n")))
+           (pages (romacs-grid-pages (romacs-popup--card-blocks entries (- rows 2) width)
+                                     (- rows 2) width nil (- rows 2)))
+           (count (length pages)) (i 0)
+           (tallest (seq-reduce (lambda (n page) (max n (length page))) pages 0)))
+      (if (= count 1)
+          ;; Shorter columns fit it all: one page, no footer.
+          (list (funcall text (car pages)))
+      (mapcar (lambda (page)
+                (setq i (1+ i))
+                (concat (funcall text (append page (make-list (- tallest (length page)) ""))) "\n\n"
+                        (format "%d/%d · " i count)
+                        (propertize (key-description (vector help-char)) 'face 'romacs-popup-key)
+                        (if (< i count) " next" " first")))
+              pages)))))
 
 (defun romacs-popup--card-pages (entries rows width)
-  "ENTRIES in pages of at most ROWS rows by 1-3 balanced columns, WIDTH
-columns wide in all, 3 apart: one page when they fit, else pages whose
-last row (inside ROWS) is `… N more · C-h', with the most columns whose
-labels all fit uncut (one column with its labels cut where none do).
-Nil when no layout fits: a key wider than the room, or no row to spare."
-  (let ((gap 3) (n (length entries)))
-    (or
-     ;; One page: the fewest columns that hold every entry within WIDTH.
-     (cl-loop for columns from 1 to 3
-              for per = (ceiling n (float columns))
-              for groups = (seq-partition entries (max 1 per))
-              for widths = (mapcar #'romacs-popup--card-natural groups)
-              for page = (and (<= per rows) (<= (+ (apply #'+ widths) (* gap (1- (length groups)))) width)
-                              (list (romacs-popup--card-join groups widths gap)))
-              when (and page (romacs-popup--card-fits page rows width))
-              return page)
-     ;; Pages: a row of each kept for the footer.
-     (cl-loop with natural = (romacs-popup--card-natural entries)
-              with body = (1- rows)
-              for columns from 3 downto 1
-              for column-width = (/ (- width (* gap (1- columns))) columns)
-              for pages = (and (>= body 1) (or (>= column-width natural) (= columns 1))
-                               (romacs-popup--card-paged entries body columns column-width gap))
-              when (and pages (romacs-popup--card-fits pages rows width))
-              return pages))))
-
-(defun romacs-popup--card-join (groups widths gap)
-  "GROUPS of entries as columns of WIDTHS side by side, GAP apart."
-  (let* ((columns (seq-mapn #'romacs-popup--card-column groups widths))
-         (height (seq-reduce (lambda (h c) (max h (length c))) columns 0))
-         rows)
-    (dotimes (i height)
-      (push (string-trim-right
-             (string-join (seq-mapn (lambda (column width)
-                                       (let ((line (or (nth i column) "")))
-                                         (concat line (make-string (max 0 (- width (string-width line))) ?\s))))
-                                     columns widths)
-                          (make-string gap ?\s)))
-            rows))
-    (string-join (nreverse rows) "\n")))
+  "ENTRIES in pages of at most ROWS rows and WIDTH columns, laid out by
+`romacs-grid-pages' (`romacs-popup--card-blocks'): one page in the
+fewest columns that hold it, else pages whose last row (inside ROWS),
+below a blank one, is `N/M · C-h next' (`first' on the last), a label
+cut at a word where one column is too narrow for it; each as painted
+within the room.  Nil when no layout fits: a key wider than the room,
+or no rows to spare."
+  (let ((key-width (seq-reduce (lambda (w e) (max w (string-width (car e)))) entries 0)))
+    (when (and entries (>= rows 1) (< (+ key-width 2) width))
+      (let* ((one (and (romacs-popup--card-may-fit entries rows width)
+                       (romacs-grid-pages (romacs-popup--card-blocks entries rows width) rows width nil rows)))
+             (one (and one (= (length one) 1) (list (string-join (car one) "\n")))))
+        ;; One page where it fits as painted; else pages, as painted.
+        (if (and one (romacs-popup--card-painted-fits one rows width)) one
+          (let ((pages (romacs-popup--card-paged entries rows width)))
+            (and pages (romacs-popup--card-painted-fits pages rows width) pages)))))))
 
 ;;; Placement
 
@@ -786,20 +1077,28 @@ in WINDOW nor a shown minibuffer layer; bottom right when all are."
 
 (defun romacs-popup--card-layout (prefix)
   "PREFIX's card: (PAGES WINDOW BOUNDS), or nil when no card fits: the
-selected pane's bounds, else the frame's above the status bar."
+selected pane's bounds, at most half its lines and 70% of its columns,
+else the frame's above the status bar."
   (let* ((root (romacs-layer--root-frame))
          (window (romacs-layer--toast-window))
          (cw (frame-char-width root)) (ch (frame-char-height root))
          (padding (plist-get (alist-get 'card romacs-popup-look) :padding))
          (entries (romacs-popup--card-entries prefix))
-         (fit (lambda (bounds lines)
+         (fit (cl-function (lambda (bounds lines &optional (columns most-positive-fixnum))
                 (pcase-let ((`(,left ,top ,right ,bottom) bounds))
-                  (let ((rows (min (- (floor (- bottom top (* 2 padding)) ch) 1) lines))
-                        (width (- (floor (- right left (* 2 padding)) cw) 1)))
+                  ;; The title and the blank row under it take two rows and
+                  ;; the window's last column the continuation glyph, all
+                  ;; inside the caps.
+                  (let ((rows (- (min (floor (- bottom top (* 2 padding)) ch) lines) 2))
+                        (width (- (min (floor (- right left (* 2 padding)) cw) columns) 1)))
                     (and entries (>= rows 1) (> width 0)
-                         (romacs-popup--card-pages entries rows width)))))))
+                         (<= (string-width (key-description prefix)) width)
+                         (romacs-popup--card-pages entries rows width))))))))
+    ;; In its pane, a card keeps to half the pane's lines and 70% of its
+    ;; columns: it shows the keys, not hides the text they act on.
     (let* ((pane (romacs-popup--card-bounds window))
-           (pages (funcall fit pane (max 1 (floor (* 0.6 (window-body-height window)))))))
+           (pages (funcall fit pane (max 1 (floor (* 0.5 (window-body-height window))))
+                           (max 1 (floor (* 0.7 (window-body-width window)))))))
       (if pages (list pages window pane)
         (let* ((frame-bounds (list 12 (+ (romacs-chrome-top root) 12)
                                    (- (frame-native-width root) 12) (- (romacs-chrome-bottom root) 12)))
@@ -812,15 +1111,19 @@ no card fits.  Records the card's state and which-key's prefix."
   (when-let* ((layout (romacs-popup--card-layout prefix)))
     (pcase-let* ((`(,pages ,window ,bounds) layout)
                  (page (mod page (length pages)))
-                 (text (concat (propertize (key-description prefix) 'face 'romacs-popup-dim) "\n" (nth page pages)))
+                 ;; The title is the prefix's keys, in the key face.
+                 (title (propertize (key-description prefix) 'face 'romacs-popup-key))
+                 (text (concat title "\n\n" (nth page pages)))
+                 ;; Every page in the card the largest needs, so paging
+                 ;; moves nothing.
+                 (all (cons title (mapcan (lambda (p) (split-string p "\n")) (copy-sequence pages))))
                  (root (romacs-layer--root-frame))
                  (cw (frame-char-width root)) (ch (frame-char-height root))
                  (padding (plist-get (alist-get 'card romacs-popup-look) :padding))
-                 (lines (length (split-string text "\n")))
-                 ;; One column more than the widest row as painted (the
-                 ;; footer's `…' is two cells in Iosevka): a window's last
-                 ;; holds its truncation glyph.
-                 (columns (1+ (seq-reduce (lambda (w l) (max w (romacs-layer--toast-width l))) (split-string text "\n") 1)))
+                 (lines (+ 2 (seq-reduce (lambda (n p) (max n (length (split-string p "\n")))) pages 1)))
+                 ;; One column more than the widest row of any page as
+                 ;; painted: a window's last holds its truncation glyph.
+                 (columns (1+ (seq-reduce (lambda (w l) (max w (romacs-layer--toast-width l))) all 1)))
                  (`(,x . ,y) (romacs-popup--card-place window bounds (+ (* columns cw) (* 2 padding)) (+ (* lines ch) (* 2 padding))))
                  ;; which-key's buffer, made as its own display would make it,
                  ;; so `which-key--popup-showing-p' sees the card.
@@ -913,8 +1216,11 @@ macro plays, or one of which-key's explicit panels shows."
 
 
 (defun romacs-popup-which-key-show (dimensions)
-  "Show which-key's buffer as a `panel' menu; DIMENSIONS is (LINES . COLUMNS)."
-  (romacs-popup-show 'panel which-key--buffer :lines (car dimensions)))
+  "Show which-key's buffer as a `panel' menu as wide as its text, with
+the column a fringe-less window keeps for its continuation glyph;
+DIMENSIONS is (LINES . COLUMNS)."
+  (romacs-popup-show 'panel which-key--buffer :lines (car dimensions)
+                     :columns (1+ (car (romacs-layer--text-size which-key--buffer)))))
 
 (defun romacs-popup-which-key-hide ()
   "Hide which-key's panel or card: which-key is done with the prefix."
@@ -923,15 +1229,26 @@ macro plays, or one of which-key's explicit panels shows."
   (when (buffer-live-p which-key--buffer)
     (romacs-popup-hide which-key--buffer)))
 
-(defun romacs-popup-panel-columns ()
-  "The columns a `panel' menu's text can fill: the root frame's text
-width less the panel's padding both sides, in its columns, less the one
-a fringe-less window keeps for its continuation glyph."
+(defun romacs-popup-room (kind)
+  "The room a KIND menu floating over the root frame has for its text,
+\(COLUMNS . ROWS): the frame's text area below its top chrome and above
+`romacs-chrome-bottom', less the kind's padding each side and
+`romacs-layer-margin' (above it `romacs-layer-float-gap'), in the
+frame's columns and lines."
   (let* ((root (romacs-layer--root-frame))
          (padding (if romacs-layer-glass
-                      (plist-get (alist-get 'panel romacs-popup-look) :padding)
-                    (alist-get 'child-frame-border-width romacs-layer-frame-parameters))))
-    (max 1 (1- (/ (- (frame-text-width root) (* 2 padding)) (frame-char-width root))))))
+                      (plist-get (alist-get kind romacs-popup-look) :padding)
+                    (alist-get 'child-frame-border-width romacs-layer-frame-parameters)))
+         (inset (* 2 (+ padding romacs-layer-margin))))
+    (cons (max 1 (/ (- (frame-text-width root) inset) (frame-char-width root)))
+          (max 1 (/ (- (romacs-chrome-bottom root) (romacs-chrome-top root)
+                       (* 2 padding) romacs-layer-margin (romacs-layer-float-gap root))
+                    (frame-char-height root))))))
+
+(defun romacs-popup-panel-columns ()
+  "The columns a `panel' menu's text can fill (`romacs-popup-room'),
+less the one a fringe-less window keeps for its continuation glyph."
+  (max 1 (1- (car (romacs-popup-room 'panel)))))
 
 (defun romacs-popup-which-key-max-dimensions (_selected-window-width)
   "The most which-key's panel shows, as (LINES . COLUMNS)."

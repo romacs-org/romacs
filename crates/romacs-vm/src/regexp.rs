@@ -10,9 +10,14 @@ pub(crate) use syntax::{parse_syntax_descriptor, VmSyntax};
 #[cfg(test)]
 #[path = "regexp_entry_tests.rs"]
 mod entry_tests;
+#[path = "regexp_plain.rs"]
+mod plain;
 #[cfg(test)]
 #[path = "regexp_cache_tests.rs"]
 mod cache_tests;
+#[cfg(test)]
+#[path = "regexp_plain_tests.rs"]
+mod plain_tests;
 
 #[cfg(test)]
 thread_local! {
@@ -20,6 +25,8 @@ thread_local! {
     /// and characters, and the strings they copied to read.
     static CONVERTED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static COPIED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// The syntax this thread's searches prepared (`regexp_syntax`).
+    static PREPARED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 #[cfg(test)]
 fn note(counter: &'static std::thread::LocalKey<std::cell::Cell<usize>>, n: usize) {
@@ -336,7 +343,7 @@ impl Vm {
     pub(crate) fn string_matcher_groups(&mut self, matcher: &mut StringMatcher, i: usize, string: Value)
         -> std::result::Result<Option<Vec<Option<(usize, usize)>>>, prim::Fault> {
         let Some(registers) = self.string_matcher_search(matcher, i, string)? else { return Ok(None) };
-        let view = self.str_view(string).ok_or(prim::Fault::Wrong("stringp", string))?;
+        let view = self.str_view(string).ok_or_else(|| prim::Fault::Wrong("stringp", string))?;
         let input = Input::new(view.bytes(), view.chars, view.is_multibyte());
         let groups = register_spans(&registers, |byte| Ok(input.character(byte)));
         Ok(Some(groups.map_err(|fault| self.regexp_fault(fault))?))
@@ -353,7 +360,7 @@ impl Vm {
         let pattern = matcher.patterns[i].clone().unwrap();
         let mut pattern = pattern.borrow_mut();
         let found = {
-            let view = self.str_view(string).ok_or(prim::Fault::Wrong("stringp", string))?;
+            let view = self.str_view(string).ok_or_else(|| prim::Fault::Wrong("stringp", string))?;
             let (bytes, multibyte) = (view.bytes(), view.is_multibyte());
             let syntax = syntax::VmSyntax::new(self, matcher.syntax.clone());
             pattern.set_target_multibyte(multibyte);
@@ -488,13 +495,6 @@ impl Vm {
     /// GNU fast_string_match: case-sensitive, current syntax, no match-data writes.
     pub(crate) fn file_name_match(&mut self, pattern: Value, string: Value) -> std::result::Result<Option<usize>, prim::Fault> {
         self.string_match_no_data(pattern, string, Translation::None, None)
-    }
-
-    /// PATTERN against STRING with the translation KEY names (built as
-    /// TRANSLATION), without touching the match data.
-    pub(crate) fn string_match_no_data(&mut self, pattern: Value, string: Value, key: Translation,
-                                       translation: Option<regex::CaseTranslation>) -> std::result::Result<Option<usize>, prim::Fault> {
-        Ok(self.string_search(pattern, string, key, translation)?.map(|(_, at, _)| at))
     }
 
     /// [`Self::string_match_no_data`]'s match, as its groups in character positions.
@@ -663,12 +663,12 @@ impl Vm {
     fn regexp_input(&self, v: Value) -> SearchResult<Input<'static>> {
         #[cfg(test)]
         note(&COPIED, 1);
-        let view = self.str_view(v).ok_or(Fault::Wrong("stringp", v))?;
+        let view = self.str_view(v).ok_or_else(|| Fault::Wrong("stringp", v))?;
         Ok(Input::new(view.bytes().to_vec(), view.chars, view.is_multibyte()))
     }
     /// The string V's text where it lies, for a search that borrows the VM.
     fn regexp_subject(&self, v: Value) -> SearchResult<Input<'_>> {
-        let view = self.str_view(v).ok_or(Fault::Wrong("stringp", v))?;
+        let view = self.str_view(v).ok_or_else(|| Fault::Wrong("stringp", v))?;
         Ok(Input::new(view.bytes(), view.chars, view.is_multibyte()))
     }
     /// The current buffer, as a search needs it before it reads any text:
@@ -914,7 +914,7 @@ impl Vm {
         -> SearchResult<std::rc::Rc<std::cell::RefCell<regex::CompiledPattern>>> {
         let mut quoted = std::mem::take(&mut self.regexp_cache.quoted);
         quoted.clear();
-        let view = self.str_view(string).ok_or(Fault::Wrong("stringp", string))?;
+        let view = self.str_view(string).ok_or_else(|| Fault::Wrong("stringp", string))?;
         for &byte in view.bytes() {
             if b"[*.\\?+^$".contains(&byte) {
                 quoted.push(b'\\');
@@ -1175,7 +1175,7 @@ impl Vm {
             return Err(Fault::Wrong("stringp", pattern));
         }
         let (chars, multibyte) = {
-            let view = self.str_view(string).ok_or(Fault::Wrong("stringp", string))?;
+            let view = self.str_view(string).ok_or_else(|| Fault::Wrong("stringp", string))?;
             (view.chars, view.is_multibyte())
         };
         let from = if start == Value::NIL { 0 } else { self.regexp_int(start)? };
@@ -1184,8 +1184,14 @@ impl Vm {
             return Err(Fault::Signal("args-out-of-range", vec![string, start]));
         };
         let folded = self.regexp_case_fold()?;
-        let source = self.regexp_syntax(Some(string))?;
-        let compiled = self.regexp_compiled_string(pattern, multibyte, posix, folded, &source)?;
+        let key = if folded { Translation::Standard } else { Translation::None };
+        let (compiled, source) = if let Some(compiled) = self.regexp_plain_hit(pattern, posix, key) {
+            compiled.borrow_mut().set_target_multibyte(multibyte);
+            (compiled, None)
+        } else {
+            let source = self.regexp_syntax(Some(string))?;
+            (self.regexp_compiled_string(pattern, multibyte, posix, folded, &source)?, Some(source))
+        };
         let save = inhibit == Value::NIL && !self.regexp_preserve();
         let armed = self.arm_regexp_quit();
         // The string is read where it lies: nothing moves or changes it
@@ -1200,11 +1206,15 @@ impl Vm {
                 input.remember(all - rest, from);
             }
             let compiled = compiled.borrow();
-            let syntax = syntax::VmSyntax::new(self, source);
             let byte = input.byte(from);
             // GNU at_dot compares the text pointer with buffer point; a
             // standalone string cannot contain that buffer address.
-            let found = regex::re_search(&compiled, &input.bytes, byte, (input.bytes.len() - byte).cast_signed(), &syntax, usize::MAX);
+            let range = (input.bytes.len() - byte).cast_signed();
+            let found = if let Some(source) = source {
+                regex::re_search(&compiled, &input.bytes, byte, range, &syntax::VmSyntax::new(self, source), usize::MAX)
+            } else {
+                regex::re_search(&compiled, &input.bytes, byte, range, &regex::DefaultSyntaxLookup, usize::MAX)
+            };
             match found {
                 Some((at, mut registers)) => {
                     // The match data's positions are characters of the string.

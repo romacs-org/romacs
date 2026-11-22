@@ -6,6 +6,7 @@
 use crate::engine::dfa;
 use crate::engine::fastmap::recompute_fastmap;
 use crate::engine::linear;
+use crate::engine::required::RequiredByte;
 use crate::engine::scan::{
     FoldedScan, FoldedScans, SparseAsciiFastmap, TextRepr, build_folded_scan,
     build_literal_prefilter, sparse_ascii_fastmap,
@@ -88,6 +89,16 @@ pub struct CompiledPattern {
     /// !bufp->can_be_null)`), and syntax-dependent *leading* atoms
     /// (`\w`, `\sC`) set `can_be_null` via `analyze_first` instead.
     pub(crate) uses_syntax: bool,
+
+    /// True if the pattern tests a character's categories (`\cC`, `\CC`),
+    /// which the matcher reads through its `SyntaxLookup`.
+    pub(crate) uses_categories: bool,
+
+    /// True if matching reads the syntax table: a syntax class, a word or
+    /// symbol boundary, or a bracket class that reads it (`[:space:]`,
+    /// `[:word:]`, `[:punct:]`). Unlike `uses_syntax`, which every bracket
+    /// class sets, this is exact.
+    pub(crate) reads_table: bool,
 
     /// True if the compiled artifacts hardcode syntax-table CONTENT, so
     /// the pattern is only valid for the syntax table it was compiled
@@ -191,6 +202,10 @@ pub struct CompiledPattern {
     /// compiler 6M instructions per file for 100 patterns that never
     /// searched a buffer.
     pub(crate) prefilter: std::cell::OnceCell<Option<LiteralPrefilter>>,
+
+    /// The rarest ASCII byte every match consumes, found by the pattern's second
+    /// short search ([`required::rejects`](crate::engine::required::rejects)).
+    pub(crate) required: RequiredByte,
 
     /// The zero-width anchor every path from the start meets before it
     /// consumes anything ([`start_anchor`](crate::engine::search::start_anchor)), when that is more than the first
@@ -337,6 +352,17 @@ impl CompiledPattern {
     #[inline]
     pub fn uses_syntax(&self) -> bool {
         self.uses_syntax
+    }
+
+    /// Whether matching may consult the `SyntaxLookup` it is given: for a
+    /// syntax class, a word or symbol boundary, a bracket class that reads
+    /// the table, or a category. A pattern that does not reads the same
+    /// under any table, so a host may pass `DefaultSyntaxLookup` in place of
+    /// the one it would otherwise prepare. Conservative: a construct the
+    /// compiler then removes (`\w\{0\}`) still counts.
+    #[inline]
+    pub fn reads_lookup(&self) -> bool {
+        self.reads_table || self.uses_categories
     }
 
     /// GNU `used_syntax` (regex-emacs.c): the compiled artifact itself baked

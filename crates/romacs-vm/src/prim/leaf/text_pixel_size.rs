@@ -166,7 +166,7 @@ impl Leaf<'_> {
             return Ok(v);
         }
         let name = self.string_text(v).map_err(|_| Fault::Wrong("stringp", v))?;
-        self.vm.named_buffer(&name).ok_or(Fault::Wrong("bufferp", Value::NIL))
+        self.vm.named_buffer(&name).ok_or_else(|| Fault::Wrong("bufferp", Value::NIL))
     }
 
     fn text_pixel_size(&mut self, area: &TextArea, buffer: Value, args: &TextSizeArgs) -> super::super::Out {
@@ -345,13 +345,13 @@ impl Leaf<'_> {
             v.integer_value().map(|n| n as f64).or_else(|| match leaf.vm.object_if(v) {
                 Some(Object::Float(f)) => Some(*f),
                 _ => None,
-            }).ok_or(Fault::Wrong("numberp", v))
+            }).ok_or_else(|| Fault::Wrong("numberp", v))
         };
         let (cols, lines) = match self.pair(lines) {
             Some((cols, lines)) => (Some((number(self, cols)?, cols)), lines),
             None => (None, lines),
         };
-        let lines = lines.integer_value().ok_or(Fault::Wrong("fixnump", lines))?;
+        let lines = lines.integer_value().ok_or_else(|| Fault::Wrong("fixnump", lines))?;
         let area = self.windows().text_area(window, "vertical-motion")?;
         // Batch runs vmotion, which moves by lines only and reads no
         // CUR-COL (indent.c:2283).
@@ -769,7 +769,7 @@ impl Leaf<'_> {
         }
         if let Some((position, offset)) = self.pair(from) {
             let start = self.fix_position(position)?.clamp(begv, zv);
-            let offset = offset.integer_value().ok_or(Fault::Wrong("fixnump", offset))?;
+            let offset = offset.integer_value().ok_or_else(|| Fault::Wrong("fixnump", offset))?;
             return Ok((start, offset));
         }
         Ok((self.fix_position(from)?.clamp(begv, zv), 0))

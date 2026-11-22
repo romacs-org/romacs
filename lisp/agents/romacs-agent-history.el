@@ -22,6 +22,8 @@
 
 (require 'cl-lib)
 (require 'romacs-agent)
+(declare-function romacs-agent--claude-incoming "romacs-agent-claude" (text))
+(declare-function romacs-agent-incoming-of "romacs-agent-tools" (text))
 (require 'romacs-agent-ui)
 
 (defcustom romacs-agent-history-limit 50
@@ -51,9 +53,10 @@ one with nothing to resume.")
 
 (defun romacs-agent-history--read (file beg end keep)
   "The JSON objects of FILE's complete lines between bytes BEG and END, in
-order, that KEEP accepts: it is called with a line's first \"type\" and
-the line's end, point after that type, so it may look further.  A line
-BEG or END cuts is left out."
+order, that KEEP (a function of a parsed object) accepts.  Each line is
+parsed whole, however its writer spaced or ordered it.  A line BEG or
+END cuts is left out; the file's last line counts whole without its
+newline when END is the file's end."
   (with-temp-buffer
     (set-buffer-multibyte nil)
     ;; From the byte before BEG: a line starting at BEG is whole.
@@ -61,23 +64,25 @@ BEG or END cuts is left out."
     (goto-char (point-min))
     ;; Cut at the start: a line's tail, or the newline before BEG.
     (when (> beg 0) (forward-line 1))
-    (let ((objects nil))
-      (while (search-forward "\n" nil t)
-        (let ((line-end (1- (point))) (line-start (line-beginning-position 0)))
-          (goto-char line-start)
-          (when (and (re-search-forward "\"type\":\"\\([^\"]*\\)\"" line-end t)
-                     (funcall keep (match-string 1) line-end))
+    (let ((objects nil)
+          (whole-end (>= end (or (file-attribute-size (file-attributes file)) end))))
+      (while (< (point) (point-max))
+        (let* ((line-start (point))
+               (newline (search-forward "\n" nil t))
+               (line-end (if newline (1- newline) (point-max))))
+          (when (or newline whole-end)
             (let ((object (ignore-errors
                             (json-parse-string (decode-coding-string (buffer-substring-no-properties line-start line-end)
                                                                      'utf-8)
                                                :object-type 'hash-table :null-object :null :false-object :false))))
-              (when (hash-table-p object) (push object objects))))
-          (goto-char (1+ line-end))))
+              (when (and (hash-table-p object) (funcall keep object)) (push object objects))))
+          (goto-char (if newline newline (point-max)))))
       (nreverse objects))))
 
-(defun romacs-agent-history--payload-type (line-end)
-  "The next \"type\" on the line, before LINE-END: a Codex payload's."
-  (and (re-search-forward "\"type\":\"\\([^\"]*\\)\"" line-end t) (match-string 1)))
+(defun romacs-agent-history--field (object &rest keys)
+  "OBJECT's value at KEYS, each a key of the object the last one gave."
+  (while (and keys (hash-table-p object)) (setq object (gethash (pop keys) object)))
+  (and (null keys) object))
 
 (defun romacs-agent-history--title (text)
   "TEXT's first line, as a title (`romacs-agent--task-line'); nil for
@@ -102,9 +107,9 @@ result, an injected context)."
 
 ;;; Claude Code
 
-(defun romacs-agent-history--claude-keep (type _line-end)
-  ;; An assistant line's first type is its message's.
-  (member type '("user" "message" "assistant")))
+(defun romacs-agent-history--claude-keep (object)
+  "Whether Claude Code's transcript line OBJECT is a message's."
+  (member (gethash "type" object) '("user" "message" "assistant")))
 
 (defun romacs-agent-history--claude-files (dir _limit)
   "Claude Code's transcripts under DIR: (PATH SIZE MTIME)."
@@ -156,7 +161,17 @@ project it was run, or nil."
             ("user"
              (let* ((content (gethash "content" (gethash "message" line)))
                     (prompt (romacs-agent-history--prompt content)))
-               (cond (prompt
+               (cond ((and (not (and (vectorp content)
+                                     (cl-some (lambda (b) (and (hash-table-p b) (equal (gethash "type" b) "tool_result"))) content)))
+                           (romacs-agent--claude-incoming (romacs-agent--text-of content)))
+                      ;; From elsewhere (a task's result, a message, a
+                      ;; notification): said as such, never as the user,
+                      ;; and a round of its own.
+                      (close)
+                      (setq turn (gethash "timestamp" line))
+                      (dolist (incoming (romacs-agent--claude-incoming (romacs-agent--text-of content)))
+                        (push (append (list :type 'arrival) incoming) events)))
+                     (prompt
                       (close)
                       (setq turn (gethash "timestamp" line))
                       (push (list :type 'meta :permission-mode (gethash "permissionMode" line)) events)
@@ -176,17 +191,18 @@ project it was run, or nil."
 
 ;;; Codex
 
-(defun romacs-agent-history--codex-keep (type line-end)
-  (pcase type
+(defun romacs-agent-history--codex-keep (object)
+  "Whether Codex's rollout line OBJECT is one its history reads."
+  (pcase (gethash "type" object)
     ((or "session_meta" "turn_context") t)
     ("response_item"
-     (member (romacs-agent-history--payload-type line-end)
+     (member (romacs-agent-history--field object "payload" "type")
              '("message" "function_call" "function_call_output" "custom_tool_call" "custom_tool_call_output"
                "local_shell_call" "web_search_call")))
     ("event_msg"
-     (pcase (romacs-agent-history--payload-type line-end)
+     (pcase (romacs-agent-history--field object "payload" "type")
        ((or "user_message" "task_complete" "token_count") t)
-       ("item_completed" (save-excursion (re-search-forward "\"item\":{\"type\":\"UserMessage\"" line-end t)))))))
+       ("item_completed" (equal (romacs-agent-history--field object "payload" "item" "type") "UserMessage"))))))
 
 (defun romacs-agent-history--codex-files (dir limit)
   "Codex's rollouts under DIR, newest days first, until LIMIT are found:
@@ -279,11 +295,17 @@ project it was run, or nil."
                                :context-window (romacs-agent--value (gethash "model_context_window" info)))
                          events))))
               (`("event_msg" ,_)
-               (when-let* ((prompt (romacs-agent-history--codex-prompt payload))
-                           ((romacs-agent-history--title prompt)))
-                 (close)
-                 (setq turn (gethash "timestamp" line))
-                 (push (list :type 'input :text prompt) events)))
+               (when-let* ((prompt (romacs-agent-history--codex-prompt payload)))
+                 (cond ((romacs-agent-incoming-of prompt)
+                        ;; From elsewhere: a round of its own, never the user's.
+                        (close)
+                        (setq turn (gethash "timestamp" line))
+                        (dolist (incoming (romacs-agent-incoming-of prompt))
+                          (push (append (list :type 'arrival) incoming) events)))
+                       ((romacs-agent-history--title prompt)
+                        (close)
+                        (setq turn (gethash "timestamp" line))
+                        (push (list :type 'input :text prompt) events)))))
               (`("response_item" "message")
                (when (equal (gethash "role" payload) "assistant")
                  (let ((id (format "history:%d" (cl-incf messages)))
@@ -624,53 +646,55 @@ the file is gone."
                              (romacs-agent-history--read path beg end (romacs-agent-history--get harness :keep)))))
         ;; Cut: from the first prompt on.
         (when (> beg 0)
-          (while (and events (not (eq (plist-get (car events) :type) 'input))) (pop events)))
+          (while (and events (not (memq (plist-get (car events) :type) '(input arrival)))) (pop events)))
+        ;; A result whose call the cut left out shows nothing.
+        (let ((started (make-hash-table :test #'equal)))
+          (setq events (seq-filter (lambda (event)
+                                     (or (not (eq (plist-get event :type) 'tool))
+                                         (if (eq (plist-get event :state) 'started) (puthash (plist-get event :id) t started)
+                                           (gethash (plist-get event :id) started))))
+                                   events)))
         (cons events (> beg 0))))))
 
 (defun romacs-agent-history-draw (session imported)
   "Draw the transcript IMPORTED names (:path, and :size, how much of it
-was the harness's before Romacs went on with it) into the current chat
-buffer, for SESSION: its end, from a prompt on."
-  (let* ((path (plist-get imported :path))
-         (read (romacs-agent-history-events (romacs-agent-harness session) imported))
-         (events (car read))
-         (started (make-hash-table :test #'equal))
-         (facts nil))
-    (when (cdr read)
-      (romacs-agent-ui--insert (format "· earlier turns are in %s\n" (abbreviate-file-name path)) 'face 'romacs-agent-dim))
-    (unless (file-readable-p path)
-      (romacs-agent-ui--insert (format "! %s is gone\n" (abbreviate-file-name path)) 'face 'romacs-agent-error))
-    (dolist (event events)
+was the harness's before Romacs went on with it) into the current view,
+for SESSION: its end, from a prompt on."
+  (let ((facts nil))
+    (dolist (event (romacs-agent-log-draw-imported session imported))
       (pcase-dolist (`(,key . ,_) romacs-agent-history--facts)
-        (when (plist-get event key) (setq facts (plist-put facts key (plist-get event key)))))
-      (when (eq (plist-get event :type) 'tool)
-        (if (eq (plist-get event :state) 'started) (puthash (plist-get event :id) t started)
-          ;; A result whose call the cut left out shows nothing.
-          (unless (gethash (plist-get event :id) started) (setq event nil))))
-      (when event (romacs-agent-ui--draw session event (current-buffer))))
-    ;; A transcript is whole: its last steps are done.
-    (romacs-agent-ui--run-settle)
+        (when (plist-get event key) (setq facts (plist-put facts key (plist-get event key))))))
     (romacs-agent-history--keep-facts session facts)))
 
 (defvar-local romacs-agent-history--item nil "The transcript this view shows.")
 
-(defvar romacs-agent-history-mode-map
-  (let ((map (make-sparse-keymap)))
-    (set-keymap-parent map special-mode-map)
-    (define-key map (kbd "RET") #'romacs-agent-chat-toggle)
-    (define-key map (kbd "TAB") #'romacs-agent-chat-toggle)
-    (define-key map "r" #'romacs-agent-history-resume-this)
-    (define-key map "n" #'romacs-agent-chat-next-turn)
-    (define-key map "p" #'romacs-agent-chat-previous-turn)
-    map)
-  "Keys of a harness transcript's view.")
+(defvar-keymap romacs-agent-history-text-map
+  :doc "Keys of a harness transcript's text: a chat's, but read-only."
+  :parent romacs-agent-log-transcript-map
+  "<remap> <self-insert-command>" #'undefined
+  "?" #'describe-mode
+  "g" #'undefined
+  "e" #'undefined
+  "u" #'undefined
+  "D" #'undefined
+  "q" #'quit-window
+  "r" #'romacs-agent-history-resume-this)
 
-(define-derived-mode romacs-agent-history-mode romacs-agent-chat-mode "Agent history"
-  "A harness's own transcript, read-only: \\[romacs-agent-history-resume-this] goes on with it.
-\\{romacs-agent-history-mode-map}"
+(defvar-keymap romacs-agent-history-mode-map
+  :doc "Keys of a harness transcript's view: its text's, wherever point is."
+  :parent romacs-agent-history-text-map)
+
+(define-derived-mode romacs-agent-history-mode special-mode "Agent history"
+  "A harness's own transcript, read-only, drawn as a chat's transcript
+\(romacs-agent-log.el) with no composer, so none of a chat's composing
+commands applies: \\[romacs-agent-history-resume-this] goes on with it.
+\\{romacs-agent-history-text-map}"
   :interactive nil
-  (setq-local desktop-save-buffer nil)
-  (setq buffer-read-only t))
+  (setq-local truncate-lines nil word-wrap t)
+  (setq-local header-line-format "")
+  ;; As a chat's: its bars never in what one copies.
+  (add-function :filter-return (local 'filter-buffer-substring-function) #'romacs-agent-log--undecorated)
+  (setq romacs-agent-log--text-map romacs-agent-history-text-map))
 
 ;;;###autoload
 (defun romacs-agent-history-open (item &optional action)
@@ -684,19 +708,24 @@ as `pop-to-buffer' does with ACTION."
       (with-current-buffer buffer
         (romacs-agent-history-mode)
         (setq romacs-agent-history--item item
-              romacs-agent-ui--session (romacs-agent--make
-                                        :id (plist-get item :id) :harness (plist-get item :harness)
-                                        :provider (plist-get item :provider) :config-dir (plist-get item :config-dir)
-                                        :cwd (plist-get item :cwd) :title (plist-get item :title) :state 'history)
-              romacs-agent-ui--messages (make-hash-table :test #'equal)
-              romacs-agent-ui--end (point-marker)))
+              romacs-agent-log--session (romacs-agent--make
+                                         :id (plist-get item :id) :harness (plist-get item :harness)
+                                         :provider (plist-get item :provider) :config-dir (plist-get item :config-dir)
+                                         :cwd (plist-get item :cwd) :title (plist-get item :title) :state 'history
+                                         :tools (make-hash-table :test #'equal) :streamed (make-hash-table :test #'equal))
+              romacs-agent-ui--session romacs-agent-log--session
+              ;; No composer: the transcript is the whole buffer.
+              romacs-agent-log--end (point-max-marker))
+        (set-marker-insertion-type romacs-agent-log--end t))
       ;; Shown first: its rules fit its window.
       (pop-to-buffer buffer action)
       (with-current-buffer buffer
-        (romacs-agent-history-draw romacs-agent-ui--session (list :path (plist-get item :path)))
-        (romacs-agent-ui--header-show)))
+        (romacs-agent-history-draw romacs-agent-log--session (list :path (plist-get item :path)))
+        (romacs-agent-log--header-show)))
     (pop-to-buffer buffer action)
+    ;; On its last entry, its end in view: nothing here is typed at.
     (goto-char (point-max))
+    (romacs-agent-log-previous 1)
     (recenter -1)
     buffer))
 

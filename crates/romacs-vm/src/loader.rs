@@ -291,20 +291,7 @@ impl Vm {
         } else {
             self.load_path_roots()?.into_iter().map(PathBuf::from).collect()
         };
-        for root in roots {
-            let base = root.join(path);
-            let candidates = if nosuffix {
-                vec![base]
-            } else {
-                vec![PathBuf::from(format!("{}.el", base.display())), base]
-            };
-            for (i, p) in candidates.into_iter().enumerate() {
-                if crate::host::probe(crate::host::Probe::IsFile, &p) {
-                    return Ok(Some((p, !nosuffix && i == 0)));
-                }
-            }
-        }
-        Ok(None)
+        Ok(find_source(&roots, path, nosuffix))
     }
     /// `featurep`, and the bootstrap's `#:vm2-provide`: data only, so no Lisp
     /// runs (the `provide` Lisp calls runs `after-load-alist` as a continuation,
@@ -536,14 +523,32 @@ impl Vm {
         }
         Ok((named, path))
     }
-    /// The compiled form of PATH to load, recorded in a compile process.
-    fn compiled_for_load(&mut self, path: &Path) -> Result<Option<crate::compiled_lisp::Compiled>> {
-        let compiled = self.compiled_load(path)?;
+    /// The compiled form of PATH to load, recorded in a compile process,
+    /// with the route the load takes (`compiled_lisp::Route`).
+    fn compiled_for_load(&mut self, path: &Path) -> Result<(crate::compiled_lisp::Route, Option<crate::compiled_lisp::Compiled>)> {
+        let (route, compiled) = self.compiled_load(path)?;
         if let Some(compiled) = &compiled && crate::host::mode() == crate::host::Mode::Record {
             self.note_loaded(path);
             compiled.inherit_inputs();
         }
-        Ok(compiled)
+        Ok((route, compiled))
+    }
+    /// What a load of PATH runs: its compiled form, when COMPILED lets it
+    /// have one and there is one, else its source text. A load that could
+    /// run compiled Lisp is counted by its route once its input is in hand
+    /// (`compiled_lisp::note_load`): an artifact chosen, or its source read.
+    fn load_input(&mut self, (path, compiled): (&Path, bool)) -> Result<(Option<crate::compiled_lisp::Compiled>, Vec<u8>)> {
+        let (route, artifact) = if compiled {
+            let (route, artifact) = self.compiled_for_load(path)?;
+            (Some(route), artifact)
+        } else {
+            (None, None)
+        };
+        let source = if artifact.is_some() { vec![] } else { self.source_for_load(path)? };
+        if let Some(route) = route {
+            crate::compiled_lisp::note_load(path, route);
+        }
+        Ok((artifact, source))
     }
     /// PATH's text as GNU internal multibyte bytes.
     fn source_for_load(&mut self, path: &Path) -> Result<Vec<u8>> {
@@ -760,8 +765,7 @@ pub(crate) fn load_discarding<'b>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, path: 
 /// (`Vm::gnu_interprets`).
 fn load_file<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, path: &Path, compiled: bool, explicit: bool, out: Out<'_>) -> Result<()> {
     let (named, path) = m.leaf(path, Vm::admitted_load)?;
-    let artifact = if compiled { m.leaf(path.as_path(), Vm::compiled_for_load)? } else { None };
-    let source = if artifact.is_some() { vec![] } else { m.leaf(path.as_path(), Vm::source_for_load)? };
+    let (artifact, source) = m.leaf((path.as_path(), compiled), Vm::load_input)?;
     let values = m.leaf(named.as_str(), Vm::load_values)?;
     let result = match &artifact {
         Some(artifact) => load_compiled(m, gc.by_ref(), &named, &path, artifact, &values, out),
@@ -1088,6 +1092,25 @@ pub(crate) fn leave_bindings<'b, T>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, mark
             Err(error)
         }
     }
+}
+/// The library PATH (absolute, or relative to each of ROOTS in turn) as a
+/// load finds it (lread.c openp): `PATH.el', then PATH unless NOSUFFIX,
+/// and whether the suffix was added.
+pub(crate) fn find_source(roots: &[PathBuf], path: &Path, nosuffix: bool) -> Option<(PathBuf, bool)> {
+    for root in roots {
+        let base = root.join(path);
+        let candidates = if nosuffix {
+            vec![base]
+        } else {
+            vec![PathBuf::from(format!("{}.el", base.display())), base]
+        };
+        for (i, p) in candidates.into_iter().enumerate() {
+            if crate::host::probe(crate::host::Probe::IsFile, &p) {
+                return Some((p, !nosuffix && i == 0));
+            }
+        }
+    }
+    None
 }
 /// An absolute file name with `.' and `..' resolved lexically, as
 /// expand-file-name would leave openp's result.

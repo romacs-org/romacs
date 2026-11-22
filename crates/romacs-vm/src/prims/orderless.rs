@@ -116,7 +116,7 @@ fn pass(cx: &mut Leaf<'_>, components: Value, ignore_case: Value) -> std::result
         specs.push(match cx.pair(component) {
             None => OrderlessSpec { regexp: component, native: None },
             Some((style, more)) => {
-                let (text, regexp) = cx.pair(more).ok_or(Fault::Wrong("consp", more))?;
+                let (text, regexp) = cx.pair(more).ok_or_else(|| Fault::Wrong("consp", more))?;
                 OrderlessSpec { regexp, native: native(cx, style, text)? }
             }
         });

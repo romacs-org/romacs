@@ -100,6 +100,23 @@ conversation anew under a new id."
 its command line gives (`romacs-agent--claude-head')."
   (romacs-agent--uuid))
 
+(defun romacs-agent--claude-mcp-servers (session)
+  "The mcpServers object of SESSION's mcp.json: Romacs's relay, then the
+`romacs-agent-extra-mcp-servers'."
+  (let ((servers (romacs-mcp--object
+                  "romacs" (romacs-mcp--object
+                            "command" (romacs-agent--program "romacs-mcp")
+                            "args" (vconcat (romacs-agent--relay-args session))
+                            ;; Claude Code's own limit on a call, in ms: past
+                            ;; the relay's, so the relay's answer is the one.
+                            "timeout" (* 1000 (+ (truncate romacs-agent-reply-timeout) 15))))))
+    (pcase-dolist (`(,name ,command ,args ,env) (romacs-agent--extra-mcp-servers) servers)
+      (puthash name (apply #'romacs-mcp--object "command" command "args" (vconcat args)
+                           (and env (list "env" (let ((object (make-hash-table :test #'equal)))
+                                                  (pcase-dolist (`(,variable . ,value) env object)
+                                                    (puthash variable value object))))))
+               servers))))
+
 (defun romacs-agent--claude-argv (session resume)
   "Claude Code's command line for SESSION, resuming its conversation when
 RESUME is non-nil."
@@ -107,14 +124,7 @@ RESUME is non-nil."
         (instance (romacs-agent--instance (romacs-agent-provider session) (romacs-agent-harness session))))
     (romacs-agent--keep-json
      (expand-file-name "mcp.json" dir)
-     (romacs-mcp--object
-      "mcpServers" (romacs-mcp--object
-                    "romacs" (romacs-mcp--object
-                              "command" (romacs-agent--program "romacs-mcp")
-                              "args" (vconcat (romacs-agent--relay-args session))
-                              ;; Claude Code's own limit on a call, in ms: past
-                              ;; the relay's, so the relay's answer is the one.
-                              "timeout" (* 1000 (+ (truncate romacs-agent-reply-timeout) 15))))))
+     (romacs-mcp--object "mcpServers" (romacs-agent--claude-mcp-servers session)))
     (append (romacs-agent--environment-words session)
             (list (format "MCP_TOOL_TIMEOUT=%d" (* 1000 (+ (truncate romacs-agent-reply-timeout) 15))))
             (list (plist-get instance :program) "-p" "--output-format" "stream-json"
@@ -135,7 +145,6 @@ RESUME is non-nil."
                     (resume (list "--resume" (romacs-agent--native-id session)))
                     (t (list "--session-id" (romacs-agent--native-id session)))))
             (romacs-agent--option-words session "--model" "--effort")
-            (romacs-agent--suggestion-words session)
             (plist-get instance :arguments))))
 
 (defun romacs-agent--claude-image (file)
@@ -222,12 +231,34 @@ every replay."
   (when-let* ((stamp (romacs-agent--value (gethash "timestamp" line))))
     (ignore-errors (float-time (date-to-time stamp)))))
 
+(defun romacs-agent--claude-notification (text)
+  "TEXT, a user's turn Claude Code wrote itself, read as its notification
+of a background task (<task-notification>): (:from :state :text), or nil."
+  (when (and (stringp text) (string-match-p "\\`[ \t\n]*<task-notification>" text))
+    (let ((tag (lambda (name) (and (string-match (format "<%s>\\(\\(?:.\\|\n\\)*?\\)</%s>" name name) text)
+                                   (string-trim (match-string 1 text))))))
+      (list :from "background task" :state (funcall tag "status")
+            :text (or (funcall tag "summary") (funcall tag "result") "")
+            ;; RET shows all of it, its result too.
+            :full text))))
+
+(defun romacs-agent--claude-incoming (text)
+  "TEXT, a user's turn nobody typed, as what came from elsewhere: Claude
+Code's notification, another session's message or a task's wakes
+\(`romacs-agent-incoming-of'), each a plist; nil for none."
+  (if-let* ((notification (romacs-agent--claude-notification text)))
+      (list notification)
+    (romacs-agent-incoming-of text)))
+
 (defun romacs-agent--claude-injected (text parent)
-  "The events of TEXT, a local command's output nobody typed.  The compaction's
-own \"Compacted\" is already said by its row."
-  (let ((output (string-trim (replace-regexp-in-string "</?local-command-\\(?:stdout\\|stderr\\)>" "" text))))
-    (unless (member output '("" "Compacted"))
-      (list (list :type 'status :text output :parent parent)))))
+  "The events of TEXT, a turn nobody typed: what came from elsewhere, as
+`arrival' events, else a local command's output.  The compaction's own
+\"Compacted\" is already said by its row."
+  (or (mapcar (lambda (incoming) (append (list :type 'arrival :parent parent) incoming))
+              (romacs-agent--claude-incoming text))
+      (let ((output (string-trim (replace-regexp-in-string "</?local-command-\\(?:stdout\\|stderr\\)>" "" text))))
+        (unless (member output '("" "Compacted"))
+          (list (list :type 'status :text output :parent parent))))))
 
 (defun romacs-agent--claude-task (line)
   "LINE, a notice of work the harness runs under a tool call (a subagent,
@@ -278,6 +309,13 @@ in mode FROM (the default when it had none)."
                       "request_id" (format "romacs-mode-%d" (romacs-agent-request-id session))
                       "request" (romacs-mcp--object "subtype" "set_permission_mode"
                                                     "mode" (if on "plan" (or from "default")))))
+
+(defun romacs-agent--claude-presented-plan-p (session id)
+  "Whether SESSION's request ID is the plan Claude Code presents: its
+ExitPlanMode call, whose allowing its own client follows by setting the
+mode it had before plan mode."
+  (let ((request (gethash id (romacs-agent-approvals session))))
+    (and (hash-table-p request) (equal (gethash "tool_name" request) "ExitPlanMode"))))
 
 (defun romacs-agent--claude-cache-ttl (usage)
   "Seconds the prompt cache a request with USAGE wrote lives: an hour or
@@ -374,6 +412,10 @@ cache, it reports none) or does not say."
                     (and (> (length content) 0) (equal (gethash "type" (aref content 0)) "text")))
                 (romacs-agent--claude-peer line (romacs-agent--text-of content))))
           ((stringp content) (romacs-agent--claude-injected content parent))
+          ;; Text blocks of what came from elsewhere (no tool's result).
+          ((and (not (cl-some (lambda (b) (and (hash-table-p b) (equal (gethash "type" b) "tool_result"))) content))
+                (romacs-agent--claude-incoming (romacs-agent--text-of content)))
+           (romacs-agent--claude-injected (romacs-agent--text-of content) parent))
           (t
            (cl-loop for block across content
                     for btype = (gethash "type" block)
@@ -430,8 +472,7 @@ cache, it reports none) or does not say."
                ;; This run's initialize answered, however: its hooks are on
                ;; when it took them, and messages may go.
                ((and id (equal id (plist-get (romacs-agent-driver-state session) :initialize)))
-                (when (hash-table-p (gethash "response" response))
-                  (romacs-agent--keep-models session (romacs-agent--claude-models (gethash "response" response))))
+                (romacs-agent--claude-keep-models session (gethash "response" response))
                 (cl-return-from romacs-agent--claude-events
                   (list (list :type 'handshake :state (list :initialized t)))))
                ((and id (gethash id (romacs-agent-approvals session)))
@@ -441,10 +482,8 @@ cache, it reports none) or does not say."
                ((and id (string-prefix-p "romacs-mode-" id) (equal (gethash "subtype" response) "error"))
                 (cl-return-from romacs-agent--claude-events (romacs-agent--claude-mode-refused session id response))))
          nil))
-      ("prompt_suggestion"
-       (let ((text (romacs-agent--value (gethash "suggestion" line))))
-         (and (stringp text) (not (string-empty-p (setq text (string-trim text))))
-              (list (list :type 'suggestion :text text)))))
+      ;; Asked for no more; an older run's records may hold one.
+      ("prompt_suggestion" nil)
       ;; Its instance's usage, after each request.
       ("rate_limit_event"
        (let ((info (gethash "rate_limit_info" line)))
@@ -455,6 +494,11 @@ cache, it reports none) or does not say."
                        :resets (romacs-agent--value (gethash "resetsAt" info))
                        :window (romacs-agent--value (gethash "rateLimitType" info))
                        :windows (romacs-agent--claude-windows info))))))
+      ;; A running tool's heartbeat (its seconds so far): its task notices
+      ;; say what it does.
+      ("tool_progress" nil)
+      ;; A queued command's start and end: its input and its turn say it.
+      ("command_lifecycle" nil)
       (_ (list (list :type 'unknown :raw line))))))
 
 ;;; An account's usage, asked without a turn
@@ -607,6 +651,40 @@ alias is no model."
              ;; No efforts is what it says too: not left to the catalogue.
              collect (cons id (list :label (or (romacs-agent--value (gethash "displayName" model)) id)
                                     :efforts (and (vectorp efforts) (append efforts nil)))))))
+
+(defun romacs-agent--claude-keep-models (session answer)
+  "Keep the models in ANSWER, SESSION's run's `initialize' answer, when it
+names any and SESSION's records are its live ones: one that names none
+leaves those kept before, and a replay (a copy drawn again, the journal
+read in a batch process) is an old answer, under settings of its own."
+  (when-let* (((romacs-agent--live-p session)) ((hash-table-p answer))
+              (rows (romacs-agent--claude-models answer)))
+    (romacs-agent--keep-models (romacs-agent--instance (romacs-agent-provider session) 'claude) rows)))
+
+(defun romacs-agent--claude-models-probe (instance)
+  "How INSTANCE's Claude Code is asked for its models with no session
+\(`:models-probe'): its `initialize' alone, keeping no conversation, under
+the user's settings, so its models are a session's, but running none of
+their hooks, nor the instance's own arguments, which may name more.  Nil
+for an instance whose arguments name settings of their own: its sessions
+alone say what it offers."
+  (unless (seq-some (lambda (word) (string-match-p "\\`--setting\\(?:s\\|-sources\\)\\(?:=\\|\\'\\)" word))
+                    (plist-get instance :arguments))
+    (list :argv (list (plist-get instance :program) "-p" "--output-format" "stream-json"
+                      "--input-format" "stream-json" "--verbose" "--no-session-persistence"
+                      "--strict-mcp-config" "--settings" "{\"disableAllHooks\":true}")
+          :input (concat (json-serialize (romacs-mcp--object "type" "control_request" "request_id" "romacs-models"
+                                                             "request" (romacs-mcp--object "subtype" "initialize")))
+                         "\n")
+          :read #'romacs-agent--claude-probed-models)))
+
+(defun romacs-agent--claude-probed-models (line)
+  "What LINE says to the models probe's `initialize', or nil."
+  (let ((response (and (equal (gethash "type" line) "control_response") (gethash "response" line))))
+    (when (and (hash-table-p response) (equal (gethash "request_id" response) "romacs-models"))
+      (if (and (equal (gethash "subtype" response) "success") (hash-table-p (gethash "response" response)))
+          (list :models (romacs-agent--claude-models (gethash "response" response)))
+        (list :error (format "%s" (or (romacs-agent--value (gethash "error" response)) "refused")))))))
 
 (defun romacs-agent--claude-select (session model effort)
   "The control requests moving SESSION's idle Claude Code to MODEL at
@@ -867,7 +945,7 @@ environment."
                         (list (concat "file-history/" id) (concat "session-env/" id))))))
 
 (romacs-agent-define-harness 'claude
-  :display "Claude Code" :icon "✳" :t3-driver "claudeAgent"
+  :display "Claude Code" :icon 'claude :t3-driver "claudeAgent"
   :config-variable "CLAUDE_CONFIG_DIR" :config-default "~/.claude"
   :program-option 'romacs-agent-claude-program :arguments-option 'romacs-agent-claude-arguments
   ;; What Claude Code sets for the commands it runs (a parent session's).
@@ -885,7 +963,9 @@ environment."
   :renew #'romacs-agent--claude-renew
   :next #'romacs-agent--claude-next
   :plan #'romacs-agent--claude-plan
+  :presented-plan-p #'romacs-agent--claude-presented-plan-p
   :select #'romacs-agent--claude-select
+  :models-probe #'romacs-agent--claude-models-probe
   :argv #'romacs-agent--claude-argv
   :input #'romacs-agent--claude-user
   :interrupt #'romacs-agent--claude-interrupt
@@ -895,8 +975,6 @@ environment."
   :input-events #'romacs-agent--claude-input-events
   ;; A turn the harness's end cut short goes on (Claude Code's own switch).
   :resume-environment '("CLAUDE_CODE_RESUME_INTERRUPTED_TURN=1")
-  ;; After a turn's end, at times, a prompt_suggestion line.
-  :suggestions '("--prompt-suggestions")
   :native-id-p #'romacs-agent--uuid-p
   :history '(:files romacs-agent-history--claude-files :find romacs-agent-history--claude-find
              :keep romacs-agent-history--claude-keep

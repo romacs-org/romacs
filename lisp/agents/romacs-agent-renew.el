@@ -295,11 +295,12 @@ and, when earlier ones are left out, the first of them and a gap's mark
 
 (defun romacs-agent-renew--input (text messages)
   "An input event of TEXT, with MESSAGES (a row's: who said what in it, as
-tables) as its event carries them."
+tables, each with its text, kept bounded) as its event carries them."
   (let ((messages (mapcar (lambda (message)
                             (let ((from (gethash "from" message)))
                               (list :kind (gethash "kind" message)
-                                    :from (list :name (and (hash-table-p from) (gethash "name" from))))))
+                                    :from (list :name (and (hash-table-p from) (gethash "name" from)))
+                                    :text (gethash "text" message))))
                           (append messages nil))))
     (append (list :type 'input :text text) (and messages (list :messages messages)))))
 
@@ -452,7 +453,7 @@ for the next resume, which finishes it, and SESSION's view says so."
      (when (romacs-agent-renewing session)
        (romacs-agent--raise session (list :type 'error
                                           :text (substitute-command-keys
-                                                 "Renewal not finished: resume the session \\<romacs-agent-chat-mode-map>\\[romacs-agent-chat-resume] to finish it")))))))
+                                                 "Renewal not finished: resume the session (\\<romacs-agent-menu-map>\\[romacs-agent-chat-resume] in its actions menu) to finish it")))))))
 
 (add-hook 'romacs-agent-restored-hook #'romacs-agent-renew--restored)
 (add-hook 'romacs-agent-caught-up-functions #'romacs-agent-renew--unfinished)

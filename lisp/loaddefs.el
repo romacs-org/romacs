@@ -6366,18 +6366,6 @@ If VARIABLE has a `custom-type' property, it must be a widget and the
 If given a prefix (or a COMMENT argument), also prompt for a comment.
 
 (fn VARIABLE VALUE &optional COMMENT)" t)
-(autoload 'setopt "cus-edit"
-"Set VARIABLE/VALUE pairs, and return the final VALUE.
-This is like `setq', but is meant for user options instead of
-plain variables.  This means that `setopt' will execute any
-`custom-set' form associated with VARIABLE.
-
-Note that `setopt' will emit a warning if the type of a VALUE
-does not match the type of the corresponding VARIABLE as
-declared by `defcustom'.  (VARIABLE will be assigned the value
-even if it doesn't match the type.)
-
-(fn [VARIABLE VALUE]...)" nil t)
 (autoload 'setopt--set "cus-edit"
 "
 
@@ -34222,16 +34210,14 @@ The returned string has no composition information.
 (fn BEG END)" t)
 (autoload 'tibetan-decompose-region "tibet-util"
 "Decompose Tibetan text in the region FROM and TO.
-This is different from `decompose-region' because precomposed
-Tibetan characters are decomposed into normal Tibetan character
-sequences.
+Romacs keeps Tibetan text in Unicode, with no precomposed glyphs, so
+this removes the compositions `decompose-region' removes.
 
 (fn FROM TO)" t)
 (autoload 'tibetan-decompose-string "tibet-util"
 "Decompose Tibetan string STR.
-This is different from `decompose-string' because precomposed
-Tibetan characters are decomposed into normal Tibetan character
-sequences.
+Romacs keeps Tibetan text in Unicode, with no precomposed glyphs, so
+this is STR's characters without their compositions.
 
 (fn STR)")
 (autoload 'tibetan-decompose-buffer "tibet-util"
@@ -39980,7 +39966,7 @@ The optional ARGS are additional keyword arguments.
 "Call `insert' with ARGS even if surrounding text is read only.
 
 (fn &rest ARGS)")
-(defvar widget-keymap (let ((map (make-sparse-keymap))) (define-key map "\11" 'widget-forward) (define-key map "\33\11" 'widget-backward) (define-key map [(shift tab)] 'widget-backward) (put 'widget-backward :advertised-binding [(shift tab)]) (define-key map [backtab] 'widget-backward) (define-key map [down-mouse-2] 'widget-button-click) (define-key map [down-mouse-1] 'widget-button-click) (define-key map [touchscreen-begin] 'widget-button-click) (define-key map [(control 109)] 'widget-button-press) map)
+(defvar widget-keymap (let ((map (make-sparse-keymap))) (define-key map (kbd "TAB") 'widget-forward) (define-key map (kbd "ESC TAB") 'widget-backward) (define-key map [(shift tab)] 'widget-backward) (put 'widget-backward :advertised-binding [(shift tab)]) (define-key map [backtab] 'widget-backward) (define-key map [down-mouse-2] 'widget-button-click) (define-key map [down-mouse-1] 'widget-button-click) (define-key map [touchscreen-begin] 'widget-button-click) (define-key map [(control 109)] 'widget-button-press) map)
 "Keymap containing useful binding for buffers containing widgets.
 Recommended as a parent keymap for modes using widgets.
 Note that such modes will need to require wid-edit.")

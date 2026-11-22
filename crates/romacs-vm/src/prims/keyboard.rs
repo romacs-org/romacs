@@ -540,11 +540,15 @@ fn event_convert_list(cx, event_desc: Value) {
 defsubr! { name = "romacs--take-deferred-escape", gnu = "romacs:keyboard", effect = Global,
 fn take_deferred_escape(cx, id: Value) { cx.take_deferred_escape(id) }}
 
+// Arm the deadline of call GENERATION, a positive fixnum, to fall MILLISECONDS, a
+// non-negative fixnum, from now, and return t; or with GENERATION nil disarm the current one
+// and return nil.  A deadline that falls while its call still runs sets `quit-flag' at the
+// next safepoint, as C-g does: it quits when `inhibit-quit' lets it.
 defsubr! { name = "romacs--call-deadline", gnu = "romacs:keyboard", effect = Global,
 fn call_deadline(cx, generation: Value; optional milliseconds: Value) { cx.call_deadline(generation, milliseconds) }}
 
 defsubr! { name = "char-resolve-modifiers", gnu = "character.c:883", effect = Pure,
 fn char_resolve_modifiers(_cx, character: Value) {
-    let c = character.integer_value().ok_or(Fault::Wrong("fixnump", character))?;
+    let c = character.integer_value().ok_or_else(|| Fault::Wrong("fixnump", character))?;
     Ok(Value::integer(resolve_modifier_mask(c)).unwrap())
 }}

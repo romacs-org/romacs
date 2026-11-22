@@ -46,6 +46,7 @@ pub(crate) mod matcher;
 pub(crate) mod opcode;
 pub(crate) mod optimize;
 pub(crate) mod pattern;
+pub(crate) mod required;
 pub(crate) mod scan;
 pub(crate) mod search;
 pub(crate) mod syntax;
@@ -81,6 +82,10 @@ mod fail_stack_parity_tests;
 mod start_anchor_tests;
 
 #[cfg(test)]
+#[path = "tests/reads_lookup_test.rs"]
+mod reads_lookup_tests;
+
+#[cfg(test)]
 #[path = "tests/syntax_lead_test.rs"]
 mod syntax_lead_tests;
 
@@ -90,3 +95,7 @@ mod host_boundary_tests;
 #[cfg(test)]
 #[path = "tests/linear_test.rs"]
 mod linear_tests;
+
+#[cfg(test)]
+#[path = "tests/required_literals_test.rs"]
+mod required_literals_tests;

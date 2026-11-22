@@ -18,20 +18,6 @@ impl Leaf<'_> {
         }
     }
 
-    pub fn beginning_of_line(&mut self) -> std::result::Result<bool, Fault> {
-        let index = self.vm.buffer_index().map_err(Fault::Error)?;
-        match &self.vm.objects[index] {
-            data::Object::Buffer(text) => {
-                let point = text.point.0;
-                Ok(point == text.accessible().start.0 || text.bytes().get(point.wrapping_sub(1)) == Some(&b'\n'))
-            }
-            data::Object::ByteBuffer(text) => {
-                let point = text.point.0;
-                Ok(point == text.restriction.start.0 || text.bytes.get(point.wrapping_sub(1)) == Some(&b'\n'))
-            }
-            _ => Err(Fault::Error("buffer required".into())),
-        }
-    }
 
     /// Freplace_match's checks before either replacement: NEWTEXT and
     /// STRING are strings, a search succeeded and SUBEXP names one of its
@@ -45,9 +31,10 @@ impl Leaf<'_> {
             return Err(self.formatted_error("`replace-match' called before any match found"));
         }
         let sub = if subexp == Value::NIL { 0 } else {
-            let n = self.bigint_value(subexp).ok_or(Fault::Wrong("integerp", subexp))?;
+            let n = self.bigint_value(subexp).ok_or_else(|| Fault::Wrong("integerp", subexp))?;
+            let last = Value::integer(register_count as i64 - 1).map_err(Fault::Error)?;
             usize::try_from(n).ok().filter(|&n| n < register_count)
-                .ok_or(Fault::Range3(subexp, Value::integer(0).unwrap(), Value::integer(register_count as i64 - 1).map_err(Fault::Error)?))?
+                .ok_or_else(|| Fault::Range3(subexp, Value::integer(0).unwrap(), last))?
         };
         match self.vm.regexp.groups.get(sub).copied().flatten() {
             Some((start, end)) => Ok((sub, start, end)),

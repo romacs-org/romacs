@@ -65,7 +65,7 @@ defsubr! { name = "make-vector", gnu = "alloc.c:3530", effect = Pure,
 fn make_vector(cx, length: Value, init: Value) {
     // CHECK_TYPE (FIXNATP (length) && XFIXNAT (length) <= PTRDIFF_MAX, Qwholenump, length)
     let n = length.integer_value().and_then(|n| usize::try_from(n).ok())
-        .ok_or(Fault::Wrong("wholenump", length))?;
+        .ok_or_else(|| Fault::Wrong("wholenump", length))?;
     // allocate_vectorlike: beyond VECTOR_ELTS_MAX, or a failed malloc, is
     // memory_full (alloc.c:4130), which signals `memory-signal-data`.
     let mut values = Vec::new();
@@ -97,7 +97,7 @@ fn vconcat_values(cx: &mut Leaf<'_>, sequences: &[Value]) -> Result<Vec<Value>, 
                 if start > 0 { cx.native_poll()?; }
                 values.extend((start..(start + crate::quit::KERNEL_CHUNK).min(len)).map(|i| if bits.get(i).unwrap() { Value::TRUE } else { Value::NIL }));
             }
-        } else if cx.string_view(arg).is_ok() {
+        } else if cx.is_readable_string(arg) {
             values.extend(string_codes(cx, arg)?);
         } else {
             // GNU also accepts closures; VM2 closures have no GNU slots.

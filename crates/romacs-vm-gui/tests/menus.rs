@@ -43,14 +43,8 @@ fn menus_share_one_look_and_motion() {
         vm.set_layout_host(Some(Box::new(measure::Host { engine: engine.clone() })));
         vm.set_echo_area_host(true);
         let mut report = vec![];
-        // A key grid: blocks aligned on their widest key, side by side while
-        // they fit, the next band below; faces on keys, titles, descriptions.
-        report.push(printed(&mut vm, "(let ((g (romacs-popup-key-grid
-                  '((\"Navigate\" (\"n\" . \"Next\") (\"RET\" . \"Open\")) (\"Chats\" (\"c\" . \"New chat\")) (\"Tools\" (\"b\" . \"Browse\")))
-                  24)))
-            (list (string-to-multibyte (substring-no-properties g)) (get-text-property 0 'face g)
-                  (get-text-property (string-search \"RET\" g) 'face g) (get-text-property (string-search \"Open\" g) 'face g)))"));
-        // which-key's custom popup is a `panel': glass, slide, the bottom.
+        // which-key's custom popup is a `panel': glass, slide, floating a
+        // margin above the bottom.
         report.push(printed(&mut vm, "(progn (setq which-key--buffer (get-buffer-create \" *which-key*\"))
             (with-current-buffer which-key--buffer (insert \"C-x f  find-file\"))
             (romacs-popup-which-key-show '(1 . 40))
@@ -59,7 +53,7 @@ fn menus_share_one_look_and_motion() {
                            (frame-parameter f 'romacs-popup-kind) (frame-parameter f 'romacs-layer-radius)
                            (frame-parameter f 'child-frame-border-width) (frame-parameter f 'romacs-layer-motion)
                            (frame-parameter f 'romacs-layer-edge)
-                           (= (+ (cdr (frame-position f)) (frame-pixel-height f)) (romacs-chrome-bottom)))
+                           (= (+ (cdr (frame-position f)) (frame-pixel-height f)) (- (romacs-chrome-bottom) (romacs-layer-float-gap (frame-parent f)))))
                 (romacs-popup-which-key-hide))))"));
         report.push(printed(&mut vm, "(romacs-popup-panel-p which-key--buffer)"));
         // A which-key page as wide as it is told it may be fits its panel's
@@ -156,47 +150,62 @@ fn menus_share_one_look_and_motion() {
             (mapcar (lambda (toast) (nth 1 toast)) romacs-layer--toasts))"));
         keys(&mut vm, &engine, &[7]);
         report.push(printed(&mut vm, "(list (frame-visible-p (romacs-layer--frame (romacs-eval-chip--buffer))) (romacs-eval-chip--live-claim))"));
-        // keymap-popup's menus are `panel's by default here: one taller than
-        // the panel pages with C-M-v, keeps its viewport when it refreshes,
-        // and leaves no layer behind once its buffer dies, a mode change first.
+        // keymap-popup's menus are `panel's by default here: a card floating
+        // inside the frame's usable rect; one too big for its room pages with
+        // C-v and M-v (C-M-v and C-M-S-v too), keeps its page when it
+        // refreshes, and leaves no layer behind once its buffer dies, a mode
+        // change first.
         vm.eval_source("(progn (delete-other-windows) (switch-to-buffer \"menu.el\")
             (keymap-popup-define chip-small-map \"Small\" :group \"Few\" \"a\" (\"One\" ignore) \"b\" (\"Two\" ignore))
             (eval `(keymap-popup-define chip-big-map \"Big\" :group \"All\"
                      \"0\" (\"Submenu\" :keymap chip-small-map)
-                     \"C-M-v\" (\"Shadowed by paging\" ignore)
-                     ,@(apply #'append (mapcar (lambda (c) (list (string c) (list (format \"Entry %c\" c) 'ignore)))
-                                               (string-to-list \"abcdefgijklmnoprstuvwxyzABCDEFGIJKLMNOPRSTUVWXYZ\"))))
+                     \"C-v\" (\"Shadowed by paging\" ignore)
+                     ,@(apply #'append
+                              (mapcan (lambda (prefix)
+                                        (mapcar (lambda (c) (list (format \"%c %c\" prefix c)
+                                                                  (list (format \"Entry %c%c, a description of some forty columns\" prefix c) 'ignore)))
+                                                (string-to-list \"abcdefgijklmnoprstuvwxyz\")))
+                                      (string-to-list \"wxyz\"))))
                   t)
             (defvar chip-layers (hash-table-count romacs-layer--frames))
             (local-set-key (kbd \"C-c k\") (lambda () (interactive) (keymap-popup chip-big-map))))").unwrap();
         keys(&mut vm, &engine, &[3, 'k' as i64]);
+        // Shown, its kind, its page and whether there are more, and whether
+        // its card lies inside the frame's text area, below the top chrome
+        // and above the status bar.
         let popup = "(let* ((buf (keymap-popup--popup-buffer)) (f (and buf (romacs-layer--frame-of buf))))
             (list (and f (frame-visible-p f) t) (and f (frame-parameter f 'romacs-popup-kind))
-                  (and buf (with-current-buffer buf (line-number-at-pos (window-start (frame-root-window f)))))
-                  (and f (< (frame-text-lines f) (with-current-buffer buf (count-lines (point-min) (point-max)))))))";
+                  (and buf (keymap-popup--session-get buf :page))
+                  (and buf (> (keymap-popup--session-get buf :pages) 1))
+                  (and f (let ((root (frame-parent f)) (p (frame-position f)))
+                           (and (>= (car p) 0) (<= (+ (car p) (frame-pixel-width f)) (frame-native-width root))
+                                (>= (cdr p) (romacs-chrome-top root))
+                                (<= (+ (cdr p) (frame-pixel-height f)) (romacs-chrome-bottom root)))))))";
         report.push(printed(&mut vm, "(eq keymap-popup-backend 'keymap-popup-backend-layer)"));
         report.push(printed(&mut vm, popup));
-        keys(&mut vm, &engine, &[META | 22]);
+        keys(&mut vm, &engine, &[22]);
         report.push(printed(&mut vm, popup));
         report.push(printed(&mut vm, &format!("(progn (keymap-popup--refresh (keymap-popup--popup-buffer)) {popup})")));
-        keys(&mut vm, &engine, &[META | ('V' as i64 & 31) | (1 << 25)]);
+        keys(&mut vm, &engine, &[META | 'v' as i64]);
         report.push(printed(&mut vm, popup));
         // A source action under a paging control is not advertised.
         report.push(printed(&mut vm, "(with-current-buffer (keymap-popup--popup-buffer) (and (string-search \"Shadowed\" (buffer-string)) t))"));
-        // Paging stops at the last full page and at the top.
-        let page_bounds = "(let* ((buf (keymap-popup--popup-buffer)) (w (frame-root-window (romacs-layer--frame-of buf))))
-            (with-current-buffer buf (list (line-number-at-pos (window-start w))
-                                           (= (line-number-at-pos (window-start w)) (max 1 (- (count-lines (point-min) (point-max)) (window-body-height w) -1))))))";
+        // Paging stops at the last page and at the first; the footer says
+        // which page shows.
+        let page_bounds = "(let ((buf (keymap-popup--popup-buffer)))
+            (list (keymap-popup--session-get buf :page)
+                  (= (keymap-popup--session-get buf :page) (1- (keymap-popup--session-get buf :pages)))
+                  (with-current-buffer buf (and (string-search (format \"%d/%d\" (1+ (keymap-popup--session-get buf :page)) (keymap-popup--session-get buf :pages)) (buffer-string)) t))))";
         keys(&mut vm, &engine, &[META | 22, META | 22, META | 22, META | 22, META | 22]);
         report.push(printed(&mut vm, page_bounds));
         keys(&mut vm, &engine, &[META | ('V' as i64 & 31) | (1 << 25); 5]);
         report.push(printed(&mut vm, page_bounds));
-        // A submenu opened from a paged menu starts at its top, and so does
-        // its parent again on Back; paging a menu that fits does nothing.
-        keys(&mut vm, &engine, &[META | 22, '0' as i64]);
+        // A submenu opened from a paged menu starts at its first page, and so
+        // does its parent again on Back; paging a menu that fits does nothing.
+        keys(&mut vm, &engine, &[22, '0' as i64]);
         report.push(printed(&mut vm, popup));
-        keys(&mut vm, &engine, &[META | 22]);
-        report.push(printed(&mut vm, page_bounds));
+        keys(&mut vm, &engine, &[22]);
+        report.push(printed(&mut vm, popup));
         keys(&mut vm, &engine, &['q' as i64]);
         report.push(printed(&mut vm, popup));
         keys(&mut vm, &engine, &['q' as i64]);
@@ -219,8 +228,9 @@ fn menus_share_one_look_and_motion() {
             (push (eq (romacs-popup--hint-target) outer) r)
             (funcall exit-outer) (push (romacs-popup--hint-target) r)
             (nreverse r))"));
-        // Labels: one traversal; a closure by its doc's first line, a prefix as
-        // +..., a range split around the keys a child rebinds, remaps left out.
+        // Labels: one traversal, in the order written; a closure by its doc's
+        // first line, a prefix as +..., a range split around the keys a child
+        // rebinds (its parts one hint), remaps left out.
         report.push(printed(&mut vm, "(let* ((parent (make-keymap)) (child (make-sparse-keymap)))
             (define-key parent [remap undo] #'ignore)
             (set-char-table-range (nth 1 parent) '(?a . ?e) #'self-insert-command)
@@ -245,18 +255,20 @@ fn menus_share_one_look_and_motion() {
                 (funcall exit) (romacs-popup--hints-reconcile)
                 (push (frame-visible-p f) chip-hint-hidden))))"));
         report.push(printed(&mut vm, "chip-hint-hidden"));
-        // A hint too long for the window is cut where the font paints the
-        // `...', and its frame holds the painted row plus the reserved column.
+        // Hints too many for the window fill `romacs-popup-hints-max-lines'
+        // lines, the last cut where the font paints the `...', and the frame
+        // holds the widest painted row plus the reserved column.
         report.push(printed(&mut vm, "(let* ((map (make-sparse-keymap)))
-            (dotimes (i 40) (define-key map (string (+ ?a i)) #'indent-rigidly-right))
+            (dotimes (i 40) (define-key map (string (+ ?a i)) (intern (format \"chip-hint-%d\" i))))
             (romacs-popup--hints-show map)
             (let* ((buf (romacs-popup--hints-buffer)) (f (romacs-layer--frame-of buf))
                    (text (with-current-buffer buf (buffer-string)))
-                   (painted (romacs-layer--toast-width text)))
+                   (lines (split-string text \"\\n\"))
+                   (painted (apply #'max (mapcar #'romacs-layer--toast-width lines))))
               (prog1 (list (string-suffix-p \"...\" text)
                            (<= painted (- (window-body-width (selected-window)) 4))
                            (>= (window-body-width (frame-root-window f)) (1+ painted))
-                           (romacs-layer--toast-width \"...\"))
+                           (length lines) (romacs-layer--toast-width \"...\"))
                 (romacs-popup--hints-hide))))"));
         report.push(printed(&mut vm, "(let ((map (define-keymap \"o\" #'other-window \"O\" #'ignore)) r)
             (let ((romacs-popup-hints-mode nil)) (romacs-popup-repeat-echo map)
@@ -265,7 +277,8 @@ fn menus_share_one_look_and_motion() {
             (nreverse r))"));
         // A range binds what the first map in the traversal binds it to:
         // a child's range over its parent's key, overlapping inherited
-        // ranges once, and single keys amid function keys.
+        // ranges once, and single keys amid function keys, one hint per
+        // command in the order written.
         report.push(printed(&mut vm, "(let* ((parent (define-keymap \"c\" #'forward-char)) (child (make-keymap))
                  (grand (make-keymap)) (mixed (make-sparse-keymap)) (base (make-keymap)))
             (set-char-table-range (nth 1 child) '(?a . ?e) #'backward-char)
@@ -330,7 +343,6 @@ fn menus_share_one_look_and_motion() {
     }).unwrap().join().unwrap();
     for line in &report { println!("{line}"); }
     assert_eq!(report, [
-        "(\"Navigate    Chats\\nn    Next   c  New chat\\nRET  Open\\n\\nTools\\nb  Browse\" romacs-popup-title romacs-popup-key romacs-popup-description)",
         "(t t panel 8 10 slide bottom t)",
         "nil",
         "(t t)",
@@ -350,26 +362,26 @@ fn menus_share_one_look_and_motion() {
         "(nil (\"error in process filter: Filter boom\"))",
         "(nil nil)",
         "t",
-        "(t panel 1 t)",
-        "(t panel 20 t)",
-        "(t panel 20 t)",
-        "(t panel 1 t)",
+        "(t panel 0 t t)",
+        "(t panel 1 t t)",
+        "(t panel 1 t t)",
+        "(t panel 0 t t)",
         "nil",
-        "(20 t)",
-        "(1 nil)",
-        "(t panel 1 nil)",
-        "(1 t)",
-        "(t panel 1 t)",
+        "(1 t t)",
+        "(0 nil t)",
+        "(t panel 0 nil t)",
+        "(t panel 0 nil t)",
+        "(t panel 0 t t)",
         "(nil t)",
         "t",
         "(t t t t nil t nil)",
-        "((\"w\" . \"left\") (\"p\" . \"+...\") (\"x\" . \"Do the thing.\") (\"a..b\" . \"self-insert-command\") (\"d..e\" . \"self-insert-command\"))",
-        "(hints t \"<right> indent-rigidly-right   <left> indent-rigidly-left\" t t nil t)",
+        "((\"x\" . \"Do the thing.\") (\"p\" . \"+...\") (\"w\" . \"left\") (\"a..b/d..e\" . \"self-insert-command\"))",
+        "(hints t \"<left> indent-rigidly-left   <right> indent-rigidly-right\" t t nil t)",
         "(nil)",
-        "(t t t 3)",
+        "(t t t 2 3)",
         // The status bar's repeat segment: the keys without hints, nothing with them.
         "(\"\" nil)",
-        "(((\"a..e\" . \"backward-char\") (\"f..h\" . \"ignore\")) ((\"<f2>\" . \"ignore\") (\"b\" . \"backward-char\") (\"<f1>\" . \"ignore\") (\"d\" . \"forward-char\") (\"a\" . \"undo\") (\"c\" . \"undo\") (\"e\" . \"undo\")))",
+        "(((\"a..e\" . \"backward-char\") (\"f..h\" . \"ignore\")) ((\"d\" . \"forward-char\") (\"<f1>/<f2>\" . \"ignore\") (\"b\" . \"backward-char\") (\"a/c\" . \"undo\")))",
         "(t (nil nil nil nil) t t nil t (t nil) (t t t) (nil nil))",
         "(t nil)",
         "(t nil nil nil)",
@@ -411,7 +423,7 @@ fn key_hint_cards() {
         let mut report = vec![];
         // Precedence: within the local map a child's nil hides its parent's
         // binding, which falls through to the global one; `ignore' wins and
-        // hides; prefixes first, then a mode's commands, then global ones.
+        // hides; in `which-key-sort-order''s order (here which-key's own).
         report.push(printed(&mut vm, "(let ((global (make-sparse-keymap)) (parent (make-sparse-keymap)) (local (make-sparse-keymap))
                   (sub (make-sparse-keymap)) (old (current-global-map)))
             (define-key global [f12 ?a] #'forward-char) (define-key global [f12 ?b] #'backward-char)
@@ -437,8 +449,8 @@ fn key_hint_cards() {
                   (use-local-map map)
                   (mapcar (lambda (e) (cons (string-to-multibyte (car e)) (string-to-multibyte (substring-no-properties (nth 1 e))))) (romacs-popup--card-entries [f11])))
               (use-global-map old)))"));
-        // Pages: one when they fit; else pages whose last row says how many
-        // more and the help key; none when a page holds no entry.
+        // Pages: one when they fit; else pages whose last row says which
+        // page it is and the help key; none when a page holds no entry.
         report.push(printed(&mut vm, "(let ((entries (mapcar (lambda (i) (list (format \"%c\" (+ ?a i)) (format \"command-%d\" i) nil 'global i)) (number-sequence 0 29))))
             (list (length (romacs-popup--card-pages (seq-take entries 4) 5 40))
                   (let ((pages (romacs-popup--card-pages entries 5 40)))
@@ -547,23 +559,30 @@ fn key_hint_cards() {
         named(&mut vm, vec![CommandEvent::Character(24), CommandEvent::Character(8 | (1 << 25))]);
         report.push(printed(&mut vm, "(list card-help-keys card-took
             (let ((unread-command-events (list 24 (+ 8 (ash 1 25))))) (read-key-sequence nil)))"));
-        // Geometry: a page's footer is inside its rows; a key wider than the
-        // room gives no layout (the frame's corner, then no card).
+        // Geometry: what fits a row shares it; a page's footer, below a
+        // blank row, is inside its rows; a key wider than the room gives no layout (the frame's
+        // corner, then no card).
         report.push(printed(&mut vm, "(let ((entries (mapcar (lambda (i) (list (format \"%c\" (+ ?a i)) \"cmd\" nil 'global i)) (number-sequence 0 9))))
             (list (romacs-popup--card-pages (seq-take entries 4) 1 70)
-                  (seq-max (mapcar (lambda (p) (length (split-string p \"\\n\"))) (romacs-popup--card-pages entries 2 70)))
+                  (let ((pages (romacs-popup--card-pages entries 3 20)))
+                    (list (length pages) (seq-max (mapcar (lambda (p) (length (split-string p \"\\n\"))) pages))
+                          (car (last (split-string (car pages) \"\\n\")))))
                   (romacs-popup--card-pages (list (list \"<XF86AudioLowerVolume>\" \"lower\" nil 'global 0) (list \"a\" \"b\" nil 'global 1)) 1 10)))"));
         report
     }).unwrap().join().unwrap();
     for line in &report { println!("{line}"); }
     assert_eq!(report, [
-        "((\"p\" \"prefix\" t global) (\"d\" \"undo\" nil mode) (\"a\" \"forward-char\" nil global) (\"b\" \"backward-char\" nil global))",
+        "((\"a\" \"forward-char\" nil global) (\"b\" \"backward-char\" nil global) (\"d\" \"undo\" nil mode) (\"p\" \"prefix\" t global))",
         "((\"4\" . \"other-window\") (\"m\" . \"Do the menu thing\") (\"r\" . \"copy\") (\"w\" . \"card-thing\"))",
-        "(1 (4 \"... 22 more · C-h\") nil)",
+        // Pages of near-even columns, each saying where it is and where
+        // the help key goes.
+        "(1 (5 \"1/5 · C-h next\") nil)",
         "((\"ESC\" . \"meta\") (\"8\" . \"char\") (\"v\" . \"vc\") (\"4\" . \"other-window\") (\"r\" . \"register\"))",
         "(t nil)",
         "(card t \"C-x\" t t t t t t)",
         "(nil [24] nil)",
+        // C-x's card in three pages within half the pane's lines and 70% of
+        // its columns.
         "((1 2 0 1) t)",
         "(nil nil)",
         "(t t t)",
@@ -580,6 +599,7 @@ fn key_hint_cards() {
         // GNU 32 (a keyboard macro, then `read-key-sequence'): the
         // command's keys [24 8], its event and the sequence shifted.
         "(([24 8] 33554440) nil [24 33554440])",
-        "(nil 2 nil)",
+        // Four short keys fit one row of a one-row room: one page.
+        "((\"a  cmd   b  cmd   c  cmd   d  cmd\") (5 3 \"1/5 · C-h next\") nil)",
     ]);
 }

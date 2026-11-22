@@ -158,37 +158,6 @@ recorded in a private directory; `delivered' collects what wakes it."
                      ("22222222-0000-4000-8000-000000000000" "failed" "second"))))
     (should-not (romacs-agent-tools--wakes-parse "hello\n\nDelegated task"))))
 
-(ert-deftest romacs-agent-delegate-a-chat-s-wakes-load-no-child ()
-  ;; A chat drawing a wake knows its task by the task's row: it loads no
-  ;; other session.
-  (require 'romacs-agent-ui)
-  (let* ((parent (romacs-agent--make :id "44444444-0000-4000-8000-000000000000" :title "lead"))
-         (child (romacs-agent--make :id "55555555-0000-4000-8000-000000000000" :title "lane"
-                                    :options (list :parent "44444444-0000-4000-8000-000000000000")))
-         (text (romacs-agent-tools--wake-text child '(1 "done" nil)))
-         (romacs-agent--sessions (make-hash-table :test #'equal)))
-    (cl-letf (((symbol-function 'romacs-agent-get) (lambda (&rest _) (error "A child loaded")))
-              ((symbol-function 'romacs-agent-load-session) (lambda (&rest _) (error "A child loaded")))
-              ((symbol-function 'romacs-agent-store-row-session)
-               (lambda (id) (and (equal id (romacs-agent-id child)) child))))
-      (should (romacs-agent-ui--wakes parent text))
-      ;; Another's task: not a wake of this chat's.
-      (should-not (romacs-agent-ui--wakes (romacs-agent--make :id "66666666-0000-4000-8000-000000000000") text)))
-    ;; No row yet (an install draws turns before it fills rows): its
-    ;; manifest says whose it is, still loading no session.
-    (let ((root (make-temp-file "romacs-wakes-" t)))
-      (unwind-protect
-          (cl-letf (((symbol-function 'romacs-agent-get) (lambda (&rest _) (error "A child loaded")))
-                    ((symbol-function 'romacs-agent-load-session) (lambda (&rest _) (error "A child loaded")))
-                    ((symbol-function 'romacs-agent-store-row-session) #'ignore)
-                    ((symbol-function 'romacs-agent--state-root) (lambda () root)))
-            (make-directory (expand-file-name (romacs-agent-id child) root))
-            (romacs-agent--write-json (expand-file-name "manifest.json" (expand-file-name (romacs-agent-id child) root))
-                                      (romacs-mcp--object "id" (romacs-agent-id child)
-                                                          "options" (romacs-mcp--object "parent" (romacs-agent-id parent))))
-            (should (romacs-agent-ui--wakes parent text)))
-        (delete-directory root t)))))
-
 ;; What the reviews of the wakes found.
 
 (ert-deftest romacs-agent-delegate-a-result-holds-anything ()
@@ -429,6 +398,20 @@ message's record for TEXT, `interrupted' each interrupted."
                               (cadr (should-error (romacs-agent-tools--reply
                                                    (romacs-mcp--object "messageId" (plist-get outside :id) "text" "x"))
                                                   :type 'user-error)))))))
+
+(ert-deftest romacs-agent-delegate-a-reply-answers-no-result ()
+  ;; The sender's record, with its last result's length alone.
+  (romacs-agent-delegate-tests--sending a
+    (setf (romacs-agent-state parent) 'idle (romacs-agent-driver-state parent) (list :ready t)
+          (romacs-agent-reply parent) (make-string 50000 ?p))
+    (let ((asked (romacs-agent-tools--message "parent" parent)))
+      (romacs-agent-delegate-tests--receive a asked "which branch?")
+      (let ((record (romacs-agent-tools--reply (romacs-mcp--object "messageId" (plist-get asked :id) "text" "main"))))
+        (should (string-prefix-p "m-" (gethash "messageId" record)))
+        (should (equal (gethash "taskId" record) (romacs-agent-id parent)))
+        (should-not (gethash "result" record))
+        (should (= (gethash "resultChars" record) 50000))
+        (should (< (length (json-serialize record)) 2000))))))
 
 (ert-deftest romacs-agent-delegate-a-turn-answering-a-message-names-it ()
   ;; The turn a parent's message began answers it: its wake says so.  A

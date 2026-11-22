@@ -95,7 +95,7 @@ appears to others by coordinating with the option
 
     ;; Basic tree features
     (define-key erc-speedbar-key-map "e" #'speedbar-edit-line)
-    (define-key erc-speedbar-key-map "\C-m" #'speedbar-edit-line)
+    (define-key erc-speedbar-key-map (kbd "RET") #'speedbar-edit-line)
     (define-key erc-speedbar-key-map "+" #'speedbar-expand-line)
     (define-key erc-speedbar-key-map "=" #'speedbar-expand-line)
     (define-key erc-speedbar-key-map "-" #'speedbar-contract-line))

@@ -26,7 +26,6 @@ tracing.workspace = true
 thiserror.workspace = true
 bytemuck.workspace = true
 pollster.workspace = true
-ash.workspace = true
 image.workspace = true
 png.workspace = true
 zune-jpeg.workspace = true
@@ -54,6 +53,7 @@ romacs-test-fonts.workspace = true
 tracing-test.workspace = true
 jpeg-encoder.workspace = true
 image-extras.workspace = true
+rustix.workspace = true
 
 [lints]
 workspace = true

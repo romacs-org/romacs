@@ -51,11 +51,11 @@ fn get(cx: &Leaf<'_>, symbol: Value, property: Value) -> std::result::Result<Val
 /// GNU `Fcar`/`Fcdr`: nil gives nil, a non-list signals `listp`.
 fn car(cx: &Leaf<'_>, v: Value) -> std::result::Result<Value, Fault> {
     if v == Value::NIL { return Ok(v) }
-    cx.pair(v).map(|p| p.0).ok_or(Fault::Wrong("listp", v))
+    cx.pair(v).map(|p| p.0).ok_or_else(|| Fault::Wrong("listp", v))
 }
 fn cdr(cx: &Leaf<'_>, v: Value) -> std::result::Result<Value, Fault> {
     if v == Value::NIL { return Ok(v) }
-    cx.pair(v).map(|p| p.1).ok_or(Fault::Wrong("listp", v))
+    cx.pair(v).map(|p| p.1).ok_or_else(|| Fault::Wrong("listp", v))
 }
 
 /// The elements of a proper list, as `Fapply` spreads them (eval.c
@@ -403,7 +403,7 @@ fn keep_all_history(cx: &mut Leaf<'_>, var: Value, item: Value) -> std::result::
     if maxelt == Value::NIL {
         maxelt = cx.variable_value(key)?.unwrap_or(Value::NIL);
     }
-    let history = cx.variable_value(var)?.ok_or(Fault::VoidVariable(var))?;
+    let history = cx.variable_value(var)?.ok_or_else(|| Fault::VoidVariable(var))?;
     if history != Value::NIL && cx.pair(history).is_none() {
         return Ok(());
     }

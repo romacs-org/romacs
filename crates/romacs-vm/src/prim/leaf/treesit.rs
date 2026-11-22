@@ -183,7 +183,7 @@ impl Leaf<'_> {
     fn ts_position(&mut self, pos: Value, buffer: Value) -> R<i64> {
         let n = match self.kind(pos) {
             Kind::Integer => pos.integer_value().unwrap_or(0),
-            Kind::Marker => self.marker_position(pos).flatten().ok_or(Fault::Error("Marker does not point anywhere".into()))?,
+            Kind::Marker => self.marker_position(pos).flatten().ok_or_else(|| Fault::Error("Marker does not point anywhere".into()))?,
             _ => return Err(Fault::Wrong("integer-or-marker-p", pos)),
         };
         let region = self.ts_region(buffer);
@@ -565,7 +565,10 @@ impl Leaf<'_> {
         if self.ts_registry_mut(base).early.as_mut().is_some_and(crate::treesit::Early::pending) {
             return Ok(Value::TRUE);
         }
-        Ok(flag(self.ts_registry(base).parsers.iter().any(|(_, core)| core.borrow_mut().ahead.as_mut().is_some_and(|ahead| !ahead.ready()))))
+        Ok(flag(self.ts_registry(base).parsers.iter().any(|(_, core)| {
+            let mut c = core.borrow_mut();
+            (c.tree.is_none() && c.waiting_slot) || c.ahead.as_mut().is_some_and(|ahead| !ahead.ready())
+        })))
     }
     /// The tree of the early parse of PARSER's buffer, which only a first
     /// parse uses: a parser that sees what that parse saw waits for it, and
@@ -587,6 +590,53 @@ impl Leaf<'_> {
         (region == visible && !(edited && core.linecols.is_some())).then_some((tree, edited))
     }
 
+    /// Wait for the thread parses PARSER's next tree comes from (its own
+    /// reparse on a thread, and its buffer's early parse when it has no tree
+    /// yet), in slices a C-g ends as it ends a process wait: the quit goes
+    /// through the asker, and the parses run on for the next ask.
+    fn ts_wait_threads(&mut self, parser: Value) -> R<()> {
+        let p = self.ts_parser(parser)?;
+        // A killed buffer's parser uses no thread's tree: nothing to wait for.
+        if !self.ts_live(p.buffer) {
+            return Ok(());
+        }
+        let (core, base, native) = (p.core.clone(), self.ts_base(p.buffer), p.native.clone());
+        // With no parse thread to wait for, the native parser owns the
+        // input poll. It keeps an inhibited press pending at its source.
+        if core.borrow().ahead.is_none() && (core.borrow().tree.is_some() || self.ts_registry(base).early.is_none()) {
+            return self.vm.worker_quit().map_or(Ok(()), Err);
+        }
+        let slice = crate::quit::QUIT_SLICE;
+        loop {
+            let (first, length) = { let c = core.borrow(); (c.tree.is_none(), c.visible.1 - c.visible.0) };
+            let ahead = core.borrow_mut().ahead.as_mut().is_none_or(|ahead| ahead.wait(slice));
+            // Only an early parse this parser can take is worth its wait.
+            let early = !first || {
+                let native = native.borrow();
+                let (language, sees_all) = (native.language(), native.sees_all(u32::try_from(length).unwrap_or(u32::MAX)));
+                !self.ts_registry_mut(base).early.as_mut().is_some_and(|early| early.pending_for(language.as_ref(), sees_all) && !early.wait(slice))
+            };
+            // A press during the slice that got the tree quits too.
+            if self.vm.quit_input_pending() {
+                match self.vm.maybe_quit() {
+                    None => {}
+                    Some(crate::threaded::Escape::Signal(condition, data)) => return Err(Fault::Signal(condition, data)),
+                    Some(escape) => {
+                        self.vm.propagated_escape = Some(escape);
+                        return Err(Fault::Escape);
+                    }
+                }
+            }
+            // A worker's interrupt or termination, as its process waits take
+            // it, the slice that got the tree included.
+            if let Some(quit) = self.vm.worker_quit() {
+                return Err(quit);
+            }
+            if ahead && early {
+                return Ok(());
+            }
+        }
+    }
     /// treesit_ensure_parsed up to its notifiers: the changed ranges when it
     /// parsed, None when no parse was due. A parse leaves the parser
     /// `within_reparse' for its notifiers (`ts_reparse_done').
@@ -604,19 +654,27 @@ impl Leaf<'_> {
             self.ts_parser_mut(parser).within_reparse = false;
             return Ok(None);
         }
+        if let Err(quit) = self.ts_wait_threads(parser) {
+            self.ts_parser_mut(parser).within_reparse = false;
+            return Err(quit);
+        }
         let (old, visible) = { let c = core.borrow(); (c.tree.clone(), c.visible) };
         // A reparse a frame started on a thread: its tree, waited for, is
         // this parse's if the text has not changed since it began, and the
         // nearest old tree if it has.
         let ahead = core.borrow_mut().ahead.take();
+        // A killed buffer's parser parses as it always has: no thread's,
+        // twin's or early tree, all of the text the buffer had, is used.
+        let live = self.ts_live(buffer);
+        let ahead = ahead.filter(|_| live);
         let ahead = ahead.and_then(|ahead| ahead.finish(self.ts_buffer_text(self.ts_base(buffer))?))
             .filter(|(_, region, ..)| *region == visible);
         let (ahead, ahead_changed) = match ahead {
             Some((tree, _, edited, changed)) => (Some((tree, edited)), changed),
             None => (None, None),
         };
-        let twin = self.ts_twin_tree(parser, old.is_none());
-        let early = if old.is_none() && twin.is_none() { self.ts_early_tree(parser) } else { None };
+        let twin = if live { self.ts_twin_tree(parser, old.is_none()) } else { None };
+        let early = if live && old.is_none() && twin.is_none() { self.ts_early_tree(parser) } else { None };
         let (done, behind) = match ahead.or(early) {
             Some((tree, false)) => (Some(tree), None),
             Some((tree, true)) => (None, Some(tree)),
@@ -650,6 +708,7 @@ impl Leaf<'_> {
             let mut c = core.borrow_mut();
             c.tree = Some(new);
             c.need_reparse = false;
+            c.waiting_slot = false;
             c.fresh = old.is_none() && behind.is_none();
         }
         self.ts_parser_mut(parser).timestamp += 1;
@@ -718,8 +777,8 @@ impl Leaf<'_> {
         while tail != Value::NIL {
             let Some((range, next)) = self.pair(tail) else { return Err(Fault::Wrong("listp", ranges)) };
             let Some((b, e)) = self.pair(range) else { return Err(Fault::Wrong("consp", range)) };
-            let b = b.integer_value().filter(|_| self.kind(b) == Kind::Integer).ok_or(Fault::Wrong("fixnump", b))?;
-            let e = e.integer_value().filter(|_| self.kind(e) == Kind::Integer).ok_or(Fault::Wrong("fixnump", e))?;
+            let b = b.integer_value().filter(|_| self.kind(b) == Kind::Integer).ok_or_else(|| Fault::Wrong("fixnump", b))?;
+            let e = e.integer_value().filter(|_| self.kind(e) == Kind::Integer).ok_or_else(|| Fault::Wrong("fixnump", e))?;
             if !(last <= b && b <= e && e <= zv) {
                 return Err(self.ts_message("treesit-range-invalid", "RANGE is either overlapping, out-of-order or out-of-range", &[ranges]));
             }
@@ -1239,7 +1298,7 @@ impl Leaf<'_> {
     pub(crate) fn ts_fontify(&mut self, node: Value, query: Value, beg: Value, end: Value, region: (i64, i64), spans: Value) -> R<Next> {
         let settings = self.vector_values(spans)?.into_iter()
             .map(|span| self.pair(span).and_then(|(first, _)| first.integer_value()).and_then(|first| u32::try_from(first).ok()))
-            .collect::<Option<Vec<u32>>>().ok_or(Fault::Wrong("vectorp", spans))?;
+            .collect::<Option<Vec<u32>>>().ok_or_else(|| Fault::Wrong("vectorp", spans))?;
         let fontify = ts::Fontify { start: region.0, end: region.1, settings, batch: 0, next: (0, 0) };
         self.ts_capture_with(node, query, beg, end, 0, Some((fontify, spans)))
     }
@@ -2152,7 +2211,7 @@ impl Leaf<'_> {
             *field = v.integer_value().unwrap_or(0);
         }
         let buffer = self.current_buffer()?;
-        let text = self.ts_buffer_text_mut(buffer).ok_or(Fault::Error("Tree-sitter needs a multibyte buffer".into()))?;
+        let text = self.ts_buffer_text_mut(buffer).ok_or_else(|| Fault::Error("Tree-sitter needs a multibyte buffer".into()))?;
         text.ts_linecols[1] = Linecol { line: fields[0], col: fields[1], bytepos: fields[2] };
         Ok(Value::NIL)
     }

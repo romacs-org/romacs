@@ -38,7 +38,7 @@ pub struct QuitSignal {
 }
 
 /// How long a quittable wait blocks between looks at the press count.
-const QUIT_SLICE: std::time::Duration = std::time::Duration::from_millis(40);
+pub(crate) const QUIT_SLICE: std::time::Duration = std::time::Duration::from_millis(40);
 
 const BUSY: u32 = 1 << 31;
 /// A call's deadline passed (`arm_deadline'): taken, like a press, at the

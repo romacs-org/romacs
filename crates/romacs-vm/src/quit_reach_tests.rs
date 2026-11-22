@@ -480,11 +480,9 @@ fn a_quit_scope_ends_at_lisp_entry() {
 fn kernels_the_engine_runs_quit_per_chunk() {
     use crate::Primitive::{Append, DeepEqual, Format, Max, Min};
     fn call(vm: &mut Vm, p: crate::Primitive, args: &[Value], scoped: bool) -> crate::Result<Value> {
-        let start = vm.stack.len();
-        vm.stack.extend_from_slice(args);
-        let outcome = if scoped { vm.inside_quit_scope(|vm| vm.primitive(p, start, args.len())) } else { vm.primitive(p, start, args.len()) };
-        vm.stack.truncate(start);
-        outcome
+        vm.with_kernel_stack(args, |vm, n| {
+            if scoped { vm.inside_quit_scope(|vm| vm.primitive(p, 0, n)) } else { vm.primitive(p, 0, n) }
+        })
     }
     for (p, args) in [(Append, "(list (make-list 50000 1) nil)"), (Append, "(list (make-string 50000 ?a) nil)"),
                       (Min, "(make-list 50000 1)"), (Max, "(make-list 50000 1)"), (Format, "(list \"%S\" (make-list 50000 'a))"),
@@ -556,11 +554,7 @@ fn a_native_poll_quits_for_a_latched_quit_flag() {
     let list = eval(&mut vm, "(make-list 50000 1)");
     let (flag, inhibit) = (vm.slot("quit-flag"), vm.slot("inhibit-quit"));
     let append = |vm: &mut Vm| {
-        let start = vm.stack.len();
-        vm.stack.extend_from_slice(&[list, Value::NIL]);
-        let outcome = vm.inside_quit_scope(|vm| vm.primitive(Append, start, 2));
-        vm.stack.truncate(start);
-        outcome
+        vm.with_kernel_stack(&[list, Value::NIL], |vm, n| vm.inside_quit_scope(|vm| vm.primitive(Append, 0, n)))
     };
     vm.slots[flag].value = Value::TRUE;
     assert!(!signal.due(), "no press, only the flag");
@@ -686,19 +680,13 @@ fn equal_polls_for_itself_and_never_inside_a_hash_lookup() {
     let mut tail = keys;
     let mut entries = 0;
     while let Some((key, rest)) = Leaf::new(&mut vm).pair(tail) {
-        let start = vm.stack.len();
-        vm.stack.extend_from_slice(&[key, Value::TRUE, table]);
-        let put = vm.inside_quit_scope(|vm| vm.primitive(Puthash, start, 3));
-        vm.stack.truncate(start);
+        let put = vm.with_kernel_stack(&[key, Value::TRUE, table], |vm, n| vm.inside_quit_scope(|vm| vm.primitive(Puthash, 0, n)));
         assert!(put.is_ok(), "an insert inside a quit scope ran to its end");
         entries += 1;
         tail = rest;
     }
     assert!(signal.due(), "the hash lookups left the press pending");
-    let start = vm.stack.len();
-    vm.stack.push(table);
-    let count = vm.primitive(crate::Primitive::HashTableCount, start, 1);
-    vm.stack.truncate(start);
+    let count = vm.with_kernel_stack(&[table], |vm, n| vm.primitive(crate::Primitive::HashTableCount, 0, n));
     assert_eq!(count.ok().and_then(Value::integer_value), Some(entries), "every key went in");
 }
 
@@ -716,10 +704,7 @@ fn list_walks_quit_inside_their_own_scope() {
         let (mut vm, signal) = busy_vm();
         let list = eval(&mut vm, "(setq l (make-list 50000 1))");
         assert!(signal.interrupt(), "a busy evaluator takes the press");
-        let start = vm.stack.len();
-        vm.stack.push(list);
-        let outcome = vm.inside_quit_scope(|vm| vm.primitive(p, start, 1));
-        vm.stack.truncate(start);
+        let outcome = vm.with_kernel_stack(&[list], |vm, n| vm.inside_quit_scope(|vm| vm.primitive(p, 0, n)));
         assert_eq!(outcome.err().as_deref(), Some(crate::quit::ESCAPED), "{p:?}: no quit at its poll");
         vm.propagated_escape = None;
         vm.quit_unwinding = false;
@@ -727,10 +712,7 @@ fn list_walks_quit_inside_their_own_scope() {
         // Under inhibit-quit it runs to its end and the press waits.
         eval(&mut vm, "(setq inhibit-quit t)");
         assert!(signal.interrupt());
-        let start = vm.stack.len();
-        vm.stack.push(list);
-        let outcome = vm.inside_quit_scope(|vm| vm.primitive(p, start, 1));
-        vm.stack.truncate(start);
+        let outcome = vm.with_kernel_stack(&[list], |vm, n| vm.inside_quit_scope(|vm| vm.primitive(p, 0, n)));
         assert!(outcome.is_ok(), "{p:?}: under inhibit-quit the call ends with a value");
         assert!(signal.due(), "{p:?}: inhibit-quit holds the press");
     }
@@ -772,11 +754,9 @@ fn values_of(vm: &mut Vm, form: &str) -> Vec<Value> {
 /// else through `Vm::primitive`, which grants no scope, as the source
 /// cache's direct tier calls it.
 fn call_kernel(vm: &mut Vm, p: crate::Primitive, args: &[Value], engine: bool) -> crate::Result<Value> {
-    let start = vm.stack.len();
-    vm.stack.extend_from_slice(args);
-    let outcome = if engine { crate::threaded::primitive_target(p)(vm, p, start, args.len()) } else { vm.primitive(p, start, args.len()) };
-    vm.stack.truncate(start);
-    outcome
+    vm.with_kernel_stack(args, |vm, n| {
+        if engine { crate::threaded::primitive_target(p)(vm, p, 0, n) } else { vm.primitive(p, 0, n) }
+    })
 }
 
 /// The kernels gated at their first chunk (`Vm::kernel_poll`), each with

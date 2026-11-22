@@ -885,7 +885,7 @@ If PARENT is non-nil, it is somehow related as a parent to thing."
     (suppress-keymap km)
     (define-key km [mouse-2] #'data-debug-expand-or-contract-mouse)
     (define-key km " " #'data-debug-expand-or-contract)
-    (define-key km "\C-m" #'data-debug-expand-or-contract)
+    (define-key km (kbd "RET") #'data-debug-expand-or-contract)
     (define-key km "n" #'data-debug-next)
     (define-key km "p" #'data-debug-prev)
     (define-key km "N" #'data-debug-next-expando)

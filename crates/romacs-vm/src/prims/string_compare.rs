@@ -20,7 +20,7 @@ fn compare_strings(cx, first: Value, from: Value, to: Value, second: Value,
 
 /// STRING's length in characters.
 pub(super) fn chars(cx: &Leaf<'_>, string: Value) -> std::result::Result<usize, Fault> {
-    cx.string_chars(string).ok_or(Fault::Wrong("stringp", string))
+    cx.string_chars(string).ok_or_else(|| Fault::Wrong("stringp", string))
 }
 
 fn bounds(
@@ -36,7 +36,7 @@ fn bounds(
         }
         let n = value
             .integer_value()
-            .ok_or(Fault::Wrong("integerp", value))?;
+            .ok_or_else(|| Fault::Wrong("integerp", value))?;
         Ok(if n < 0 { n + size } else { n })
     };
     let end = if to.integer_value().is_some_and(|n| n > size) {
@@ -98,12 +98,7 @@ fn string_collate_equalp(cx, first: Value, second: Value; optional locale: Value
 /// sysdep.c str_collate over two strings or symbols' names, in LOCALE (a
 /// string) or the environment's; a unibyte string's characters are its bytes.
 fn collate(cx: &mut Leaf<'_>, first: Value, second: Value, locale: Value, ignore_case: Value) -> std::result::Result<Ordering, Fault> {
-    let codes = |cx: &mut Leaf<'_>, value: Value| -> std::result::Result<Vec<u32>, Fault> {
-        match cx.symbol_name(value) {
-            Ok(name) => Ok(name.chars().map(u32::from).collect()),
-            Err(_) => Ok(cx.string_view(value)?.chars().collect()),
-        }
-    };
+    let codes = |cx: &mut Leaf<'_>, value: Value| cx.with_text(value, |text| text.chars().collect::<Vec<u32>>());
     let (a, b) = (codes(cx, first)?, codes(cx, second)?);
     let locale = if locale == Value::NIL { None } else {
         let bytes = cx.string_view(locale)?.bytes;

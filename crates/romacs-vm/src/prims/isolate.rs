@@ -5,7 +5,7 @@ use super::*;
 
 fn id(cx: &Leaf<'_>, isolate: Value) -> std::result::Result<u64, Fault> {
     let _ = cx;
-    isolate.integer_value().and_then(|n| u64::try_from(n).ok()).ok_or(Fault::Wrong("natnump", isolate))
+    isolate.integer_value().and_then(|n| u64::try_from(n).ok()).ok_or_else(|| Fault::Wrong("natnump", isolate))
 }
 
 // (romacs--isolate-start PROGRAM ARGS): a worker process running PROGRAM
@@ -28,7 +28,7 @@ fn isolate_post(cx, isolate: Value, kind: Value, generation: Value, value: Value
 defsubr! { name = "romacs--isolate-wait", gnu = "romacs:isolate", effect = Global,
 fn isolate_wait(cx, timeout: Value) {
     let timeout = if timeout == Value::NIL { None } else {
-        Some(cx.float_value(timeout).or_else(|_| timeout.integer_value().map(|n| n as f64).ok_or(Fault::Wrong("numberp", timeout)))?)
+        Some(cx.float_value(timeout).or_else(|_| timeout.integer_value().map(|n| n as f64).ok_or_else(|| Fault::Wrong("numberp", timeout)))?)
     };
     cx.isolate_wait(timeout.map(|s| std::time::Duration::from_secs_f64(s.max(0.0))))
 }}
@@ -100,7 +100,7 @@ fn isolate_parent_p(cx) {
 // goes (`Vm::isolate_claim_job'). Jobs do not nest.
 defsubr! { name = "romacs--isolate-claim", gnu = "romacs:isolate", effect = Global,
 fn isolate_claim(cx, generation: Value) {
-    let generation = generation.integer_value().and_then(|n| u64::try_from(n).ok()).ok_or(Fault::Wrong("natnump", generation))?;
+    let generation = generation.integer_value().and_then(|n| u64::try_from(n).ok()).ok_or_else(|| Fault::Wrong("natnump", generation))?;
     cx.isolate_claim_job(generation).map_err(Fault::Error)?;
     Ok(Value::NIL)
 }}

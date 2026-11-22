@@ -704,36 +704,6 @@ impl Vm {
         Ok(Ok((target, at, values.len())))
     }
     #[inline(never)]
-    pub(super) fn primitive_call(
-        &mut self,
-        p: Primitive,
-        start: usize,
-        argc: usize,
-        error_out: &mut Option<String>,
-        signal_out: &mut Option<(Value, Value)>,
-    ) -> Option<Value> {
-        if matches!(
-            p,
-            Primitive::DefineError | Primitive::ErrorMessage | Primitive::Get | Primitive::Put
-        ) {
-            return self.condition_call(p, start, argc, error_out, signal_out);
-        }
-        if regexp::is_regexp_primitive(p) {
-            return self.regexp_call(p, start, argc, error_out, signal_out);
-        }
-        if hash::is_hash_primitive(p) {
-            return self.hash_call(p, start, argc, error_out, signal_out);
-        }
-        match self.primitive(p, start, argc) {
-            Ok(value) => Some(value),
-            Err(error) => {
-                *signal_out = self.primitive_condition(p, start, argc, &error);
-                *error_out = Some(error);
-                None
-            }
-        }
-    }
-    #[inline(never)]
     pub(super) fn primitive_condition(
         &mut self,
         p: Primitive,

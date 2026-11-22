@@ -27,7 +27,7 @@ fn number(cx: &Leaf<'_>, v: Value) -> std::result::Result<Num, Fault> {
         return Ok(Num::Int(n));
     }
     if let Some(position) = cx.marker_position(v) {
-        return position.map(|n| Num::Int(n.into())).ok_or(Fault::Error("Marker does not point anywhere".into()));
+        return position.map(|n| Num::Int(n.into())).ok_or_else(|| Fault::Error("Marker does not point anywhere".into()));
     }
     cx.float_value(v).map(Num::Float).map_err(|_| Fault::Wrong("number-or-marker-p", v))
 }
@@ -100,7 +100,7 @@ fn driver(cx: &Leaf<'_>, first: Value, rest: &[Value], mask: u8) -> Out {
 defsubr! { name = "car-less-than-car", gnu = "fileio.c:5870", effect = Reads,
 fn car_less_than_car(cx, a: Value, b: Value) {
     let car = |v| if v == Value::NIL { Ok(Value::NIL) }
-        else { cx.pair(v).map(|p| p.0).ok_or(Fault::Wrong("listp", v)) };
+        else { cx.pair(v).map(|p| p.0).ok_or_else(|| Fault::Wrong("listp", v)) };
     Ok(if arithcompare(cx, car(a)?, car(b)?)? & LT != 0 { Value::TRUE } else { Value::NIL })
 }}
 

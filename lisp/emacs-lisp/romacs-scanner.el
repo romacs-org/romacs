@@ -176,6 +176,34 @@ COUNT is how many characters the step function marked."
   (romacs-scanner--run scanner start end state t))
 
 ;;;###autoload
+(defun romacs-scanner-marking (step)
+  "STEP, a step function that returns only the state after a character,
+as one that marks every character changing the state: a scanner made of
+it can give its runs (`romacs-scanner-runs')."
+  (lambda (state char)
+    (let ((next (funcall step state char)))
+      (cons next (not (equal next state))))))
+
+;;;###autoload
+(defun romacs-scanner-runs (scanner &optional start end state)
+  "Run SCANNER as `romacs-scanner-scan' does; return its runs of states,
+\((POSITION . STATE) ...) in order: each character that changes the state
+and the state after it.  SCANNER must mark every character that changes
+its state, as one made with `romacs-scanner-marking' does; each run's
+state is then read from its table at its mark, no step function called."
+  (let* ((scan (romacs-scanner-scan scanner start end state))
+         (table (aref scanner 1))
+         (states (aref scanner 2))
+         (number (romacs-scanner--number scanner state))
+         (runs nil))
+    (dolist (position (cdr scan))
+      (let ((char (char-after position)))
+        (setq number (logand 127 (aref table (+ (* number romacs-scanner--symbols)
+                                               (if (< char 128) char romacs-scanner-other)))))
+        (push (cons position (aref states number)) runs)))
+    (nreverse runs)))
+
+;;;###autoload
 (defmacro define-scanner (name step initial &optional docstring)
   "Define NAME as the scanner with step function STEP and first state INITIAL.
 STEP is a pure function of a state and a character that returns

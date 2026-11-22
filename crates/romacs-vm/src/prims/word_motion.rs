@@ -7,7 +7,7 @@ fn forward_word(cx; optional count: Value) -> Step {
     // takes lisp/vm/prelude.el's scan: `subword-mode', mostly.
     if cx.word_boundary_functions()? {
         let count = if count == Value::NIL { Value::integer(1).map_err(Fault::Error)? } else { count };
-        count.integer_value().ok_or(Fault::Wrong("fixnump", count))?;
+        count.integer_value().ok_or_else(|| Fault::Wrong("fixnump", count))?;
         return Ok(Step::Call { f: cx.intern("romacs--forward-word"), args: vec![count], then: word_moved, saved: vec![] });
     }
     cx.move_words(count).map(Step::Done)

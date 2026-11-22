@@ -112,8 +112,11 @@ fn unit(name: &str) -> String { format!("romacs-server-{name}") }
 fn start(request: &Request) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| format!("own executable: {e}"))?;
     let home = std::env::var_os("HOME").unwrap_or_else(|| "/".into());
-    let mut command = std::process::Command::new("systemd-run");
+    let mut command = romacs_vm::host::child("systemd-run");
     command.args(["--user", "--quiet", "--collect", "-p", "OOMPolicy=continue"])
+        // The user manager's environment is the unit's too: no launch
+        // marker of it reaches the server.
+        .args(["-p", &format!("UnsetEnvironment={}", romacs_vm::host::LAUNCH_MARKERS.join(" "))])
         // An abnormal end shows a desktop notification (`--server-exited').
         // The editor ends a SIGTERM (a stop, a logout) with status 15, as
         // GNU's does: a success here.
@@ -129,7 +132,7 @@ fn start(request: &Request) -> Result<(), String> {
     }
     // By name: systemd-run takes each value from its own environment, so
     // none (an API key, say) shows on a command line other users can read.
-    for (key, _) in std::env::vars_os() {
+    for (key, _) in romacs_vm::host::inherited_env() {
         let key_text = key.to_string_lossy();
         if LOCAL_ENV.contains(&key_text.as_ref()) || key_text.starts_with("LISTEN_") || key_text.contains('=') { continue; }
         let mut setting = std::ffi::OsString::from("--setenv=");
@@ -150,7 +153,7 @@ fn start(request: &Request) -> Result<(), String> {
         .unwrap_or_else(|| Path::new(&home).join(".local/state")).join("romacs");
     std::fs::create_dir_all(&state).map_err(|e| format!("{}: {e}", state.display()))?;
     let log = std::fs::File::create(state.join(format!("server-{}.log", request.name))).map_err(|e| e.to_string())?;
-    std::process::Command::new("setsid").arg("--fork").arg(&exe).args(["--serve", &request.name]).args(&launch)
+    romacs_vm::host::child("setsid").arg("--fork").arg(&exe).args(["--serve", &request.name]).args(&launch)
         .current_dir(&home).stdin(std::process::Stdio::null())
         .stdout(log.try_clone().map_err(|e| e.to_string())?).stderr(log)
         .status().map_err(|e| format!("setsid: {e}"))
@@ -176,7 +179,7 @@ pub fn exited(argv: &[String]) -> i32 {
     if let Some((title, mut body)) = crash_notice(name, &result, &code, &status) {
         if let Some(directory) = &session { body.push_str(&format!("\nSession: {}", directory.display())); }
         eprintln!("romacs: {title}; {body}");
-        let _ = std::process::Command::new("notify-send").env_remove("LD_LIBRARY_PATH")
+        let _ = romacs_vm::host::child("notify-send").env_remove("LD_LIBRARY_PATH")
             .args(["-u", "critical", "-a", "Romacs", &title, &body]).status();
     }
     0
@@ -236,7 +239,7 @@ fn server_launch(launch: &[String]) -> Vec<String> {
 
 /// The unit's last journal lines, for a server that did not start.
 fn unit_log(name: &str) -> String {
-    std::process::Command::new("journalctl")
+    romacs_vm::host::child("journalctl")
         .args(["--user", "--no-pager", "-n", "20", "-o", "cat", "-u", &unit(name)])
         .output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default()
 }

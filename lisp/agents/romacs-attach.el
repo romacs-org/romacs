@@ -28,6 +28,7 @@
 (require 'romacs-truncate)
 (require 'seq)
 (require 'subr-x)
+(require 'romacs-agent-glyphs)
 (require 'romacs-popup)
 (require 'romacs-icons)
 (require 'romacs-key-hint)
@@ -42,11 +43,12 @@
   "Most helper processes preparing outgoing copies at once."
   :type 'natnum)
 
-(defface romacs-attach-chip '((t :inherit romacs-layer-glass))
-  "An attachment chip in a tray.")
+(defface romacs-attach-chip '((t :inherit romacs-layer-glass :weight normal))
+  "An attachment chip in a tray: plain weight, whatever line it shows on.")
 
-(defface romacs-attach-selected '((t :inherit romacs-layer-selection))
-  "The chip edit mode selected.")
+(defface romacs-attach-selected '((t :inherit romacs-layer-selection :weight bold))
+  "The chip edit mode selected: bold on the selection's band, legible
+whatever the theme's accent.")
 
 (defface romacs-attach-badge '((t :inherit romacs-popup-dim))
   "A chip's badge: what the plan does with it.")
@@ -291,6 +293,73 @@ DIRECTORY."
 sends bytes (not a path reference)."
   (and (plist-get (cdr entry) :kind) (not (memq (plist-get (cdr entry) :kind) '(path file)))))
 
+(defun romacs-attach--prepared-entry (entry reply)
+  "ENTRY of a plan once the helper copied it, REPLY its answer: its item
+gains `:sent-path', `:sha256' and `:sent-mime'."
+  (append (list (append (car entry)
+                        (list :sent-path (plist-get reply :path)
+                              :sha256 (plist-get reply :sha256)
+                              :sent-mime (or (plist-get reply :mime) (plist-get (car entry) :mime)))))
+          (cdr entry)))
+
+(defun romacs-attach--prepare-finish (handle result)
+  "End the preparation HANDLE with RESULT, once: its helpers stopped,
+then its callback called."
+  (unless (plist-get handle :done)
+    (plist-put handle :done t)
+    (romacs-attach-cancel handle)
+    (funcall (plist-get handle :callback) result)))
+
+(defun romacs-attach--helper-reply (output)
+  "The helper's answer in its buffer OUTPUT, a plist, or nil."
+  (with-current-buffer output
+    (ignore-errors
+      (goto-char (point-min))
+      (json-parse-buffer :object-type 'plist :null-object nil))))
+
+(defun romacs-attach--prepare-reply (handle index entry process output)
+  "Take PROCESS's answer, in its buffer OUTPUT: the helper copied ENTRY,
+the INDEXth of HANDLE's plan.  The entry is prepared and the next copy
+started, or HANDLE finishes, with the plan or the first error."
+  (plist-put handle :running (1- (plist-get handle :running)))
+  (let ((reply (romacs-attach--helper-reply output))
+        (status (process-exit-status process)))
+    (kill-buffer output)
+    (cond
+     ((plist-get handle :done))
+     ((or (/= status 0) (null reply) (plist-get reply :error))
+      (romacs-attach--prepare-finish handle (list :error (or (plist-get reply :error)
+                                                             (format "romacs-attach-tool exited %d" status)))))
+     (t
+      (aset (plist-get handle :entries) index (romacs-attach--prepared-entry entry reply))
+      (if (or (plist-get handle :pending) (> (plist-get handle :running) 0))
+          (romacs-attach--prepare-start handle)
+        (romacs-attach--prepare-finish handle (append (plist-get handle :entries) nil)))))))
+
+(defun romacs-attach--prepare-launch (handle index)
+  "Start the helper copying the INDEXth entry of HANDLE's plan."
+  (let ((entry (aref (plist-get handle :entries) index))
+        (output (generate-new-buffer " *romacs-attach-tool*" t)))
+    (plist-put handle :running (1+ (plist-get handle :running)))
+    (push (make-process
+           :name "romacs-attach-tool" :buffer output :noquery t :connection-type 'pipe
+           :command (cons (romacs-attach--program)
+                          (romacs-attach--arguments (car entry) (plist-get (cdr entry) :kind)
+                                                    (plist-get (cdr entry) :prep) (plist-get handle :directory)))
+           :stderr (get-buffer-create " *romacs-attach-tool-errors*")
+           :sentinel (lambda (process _event)
+                       (unless (process-live-p process)
+                         (romacs-attach--prepare-reply handle index entry process output))))
+          (plist-get handle :processes))))
+
+(defun romacs-attach--prepare-start (handle)
+  "Start HANDLE's pending copies, `romacs-attach-jobs' at most running."
+  (while (and (plist-get handle :pending) (< (plist-get handle :running) romacs-attach-jobs)
+              (not (plist-get handle :done)))
+    (let ((index (car (plist-get handle :pending))))
+      (plist-put handle :pending (cdr (plist-get handle :pending)))
+      (romacs-attach--prepare-launch handle index))))
+
 (defun romacs-attach-prepare (plan directory callback)
   "Make the outgoing copies PLAN needs in DIRECTORY with the helper, at
 most `romacs-attach-jobs' at once, then call CALLBACK with the plan, each
@@ -300,54 +369,13 @@ prepared item gaining `:sent-path', `:sha256' and `:sent-mime', or with
   (let* ((entries (vconcat plan))
          (pending (seq-filter (lambda (i) (romacs-attach--prepared-p (aref entries i)))
                               (number-sequence 0 (1- (length entries)))))
-         (handle (list :processes nil :done nil))
-         (running 0))
-    (cl-labels
-        ((finish (result)
-           (unless (plist-get handle :done)
-             (plist-put handle :done t)
-             (romacs-attach-cancel handle)
-             (funcall callback result)))
-         (start ()
-           (while (and pending (< running romacs-attach-jobs) (not (plist-get handle :done)))
-             (let* ((index (pop pending))
-                    (entry (aref entries index))
-                    (output (generate-new-buffer " *romacs-attach-tool*" t)))
-               (setq running (1+ running))
-               (push (make-process
-                      :name "romacs-attach-tool" :buffer output :noquery t :connection-type 'pipe
-                      :command (cons (romacs-attach--program)
-                                     (romacs-attach--arguments (car entry) (plist-get (cdr entry) :kind)
-                                                               (plist-get (cdr entry) :prep) directory))
-                      :stderr (get-buffer-create " *romacs-attach-tool-errors*")
-                      :sentinel
-                      (lambda (process _event)
-                        (unless (process-live-p process)
-                          (setq running (1- running))
-                          (let ((reply (with-current-buffer output
-                                         (ignore-errors
-                                           (goto-char (point-min))
-                                           (json-parse-buffer :object-type 'plist :null-object nil))))
-                                (status (process-exit-status process)))
-                            (kill-buffer output)
-                            (cond
-                             ((plist-get handle :done))
-                             ((or (/= status 0) (null reply) (plist-get reply :error))
-                              (finish (list :error (or (plist-get reply :error)
-                                                       (format "romacs-attach-tool exited %d" status)))))
-                             (t
-                              (aset entries index
-                                    (append (list (append (car entry)
-                                                          (list :sent-path (plist-get reply :path)
-                                                                :sha256 (plist-get reply :sha256)
-                                                                :sent-mime (or (plist-get reply :mime)
-                                                                               (plist-get (car entry) :mime)))))
-                                            (cdr entry)))
-                              (if (or pending (> running 0)) (start) (finish (append entries nil)))))))))
-                     (plist-get handle :processes))))))
-      ;; Nothing to copy: delivered through `finish' too, so a cancel stops it.
-      (if pending (start) (run-at-time 0 nil #'finish plan))
-      handle)))
+         (handle (list :processes nil :done nil :entries entries :pending pending :running 0
+                       :directory directory :callback callback)))
+    ;; Nothing to copy: delivered through the finish too, so a cancel stops it.
+    (if pending
+        (romacs-attach--prepare-start handle)
+      (run-at-time 0 nil #'romacs-attach--prepare-finish handle plan))
+    handle))
 
 (defun romacs-attach-cancel (handle)
   "Stop the preparation HANDLE: its helpers are killed, its callback not
@@ -369,7 +397,8 @@ cached `:plan', `:string' and `:overlay'.")
   "The id of the chip edit mode selected, or nil.")
 
 (defvar-local romacs-attach--removed nil
-  "Removals edit mode can undo, newest first: (ITEMS-BEFORE . ITEM).
+  "Removals edit mode can undo, newest first: (INDEX . ITEM), INDEX the
+place ITEM had.
 Their owned files are deleted when the mode ends.")
 
 (defvar romacs-attach--swept nil
@@ -461,24 +490,6 @@ cached until its items or plan change; nil without items."
   "Columns a chip's file name takes at most; a longer one loses its middle."
   :type 'natnum)
 
-(defun romacs-attach--elide (name width)
-  "NAME in at most WIDTH columns, its middle elided and its extension kept."
-  (if (<= (string-width name) width) name
-    (let* ((extension (file-name-extension name t))
-           (stem (file-name-sans-extension name))
-           (dots (truncate-string-ellipsis))
-           (room (- width (string-width extension) (string-width dots))))
-      (if (< room 2) (romacs-truncate name width)
-        (concat (truncate-string-to-width stem (ceiling room 2)) dots
-                (romacs-attach--tail stem (/ room 2)) extension)))))
-
-(defun romacs-attach--tail (string width)
-  "The end of STRING in at most WIDTH columns."
-  (let ((start (length string)))
-    (while (and (> start 0) (<= (string-width string (1- start)) width))
-      (setq start (1- start)))
-    (substring string start)))
-
 (defun romacs-attach--icon-name (mime)
   "The `romacs-icon' for a file of MIME type."
   (cond ((string-prefix-p "image/" mime) 'image)
@@ -490,12 +501,25 @@ cached until its items or plan change; nil without items."
 
 (defun romacs-attach--thumbnail (item)
   "A thumbnail of ITEM: a `:file' image the header probe sized, decoded
-off the evaluator at chip size; else its type's icon."
+off the evaluator at chip size; else its type's icon.  The image is over
+a no-break space: word wrap never parts it from its name."
   (if (plist-get item :pixels)
-      (propertize " " 'display (create-image (plist-get item :path) nil nil
+      (propertize " " 'display (create-image (plist-get item :path) nil nil
                                              :max-height '(2 . em) :max-width '(4 . em)
                                              :ascent 'center :margin 2))
-    (or (romacs-icon (romacs-attach--icon-name (plist-get item :mime)) 'romacs-attach-chip) "▫")))
+    (or (romacs-icon (romacs-attach--icon-name (plist-get item :mime)) 'romacs-attach-chip) (romacs-agent-glyph 'attachment))))
+
+(defun romacs-attach--glued (string)
+  "STRING with each plain space a no-break space drawn as a plain one: a
+chip is one word.  Word wrap classes an element by the text under it,
+so a tray's line breaks between chips, never inside one."
+  (let ((at 0))
+    (while (< at (length string))
+      (when (and (eq (aref string at) ?\s) (not (get-text-property at 'display string)))
+        (aset string at ?\u00a0)
+        (put-text-property at (1+ at) 'display '(space :width 1) string))
+      (setq at (1+ at)))
+    string))
 
 (defun romacs-attach--chip (entry selected)
   "Plan ENTRY's chip, SELECTED or not."
@@ -504,18 +528,23 @@ off the evaluator at chip size; else its type's icon."
          (size (concat (and pixels (format "%d×%d · " (car pixels) (cdr pixels)))
                        (romacs-attach--size (or (plist-get item :bytes) 0))))
          (refused (plist-get (cdr entry) :refused))
-         (badge (cond (refused (propertize (concat " ⚠ " refused) 'face 'romacs-attach-refused))
+         (badge (cond (refused (propertize (concat " " (romacs-agent-glyph 'warning) " " refused) 'face 'romacs-attach-refused))
                       ((romacs-attach-changed-p item) (propertize " changed" 'face 'romacs-attach-badge))
                       ((plist-get (cdr entry) :badge)
                        (propertize (concat " " (plist-get (cdr entry) :badge)) 'face 'romacs-attach-badge))))
-         (caption (and (plist-get item :caption) (concat " “" (plist-get item :caption) "”"))))
-    (propertize
-     (concat (romacs-attach--thumbnail item) " "
-             (romacs-attach--elide (or (plist-get item :name) "") romacs-attach-label-width)
-             caption " " (propertize size 'face 'romacs-attach-badge) badge " ")
-     'face (if selected 'romacs-attach-selected 'romacs-attach-chip)
-     'romacs-attach-id (plist-get item :id)
-     'help-echo (format "%s\n%s" (plist-get item :path) (plist-get item :mime)))))
+         (caption (and (plist-get item :caption) (concat " “" (plist-get item :caption) "”")))
+         (chip (propertize
+                (romacs-attach--glued
+                 (concat (romacs-attach--thumbnail item) " "
+                         (romacs-truncate-middle (or (plist-get item :name) "") romacs-attach-label-width)
+                         caption " "
+                         ;; Selected, it reads at the band's full contrast.
+                         (if selected size (propertize size 'face 'romacs-attach-badge)) badge " "))
+                'romacs-attach-id (plist-get item :id)
+                'help-echo (format "%s\n%s" (plist-get item :path) (plist-get item :mime)))))
+    ;; Under the size's and badge's own faces, not over them.
+    (add-face-text-property 0 (length chip) (if selected 'romacs-attach-selected 'romacs-attach-chip) t chip)
+    chip))
 
 (defcustom romacs-attach-tray-max-chips 24
   "Most chips a tray shows: the rest are counted in a last chip, and edit
@@ -634,17 +663,19 @@ calls COMMIT and leaves the tray as it was."
   (interactive)
   (when-let* ((index (romacs-attach--index)))
     (let ((item (nth index romacs-attach-items)))
-      (push (cons romacs-attach-items item) romacs-attach--removed)
+      (push (cons index item) romacs-attach--removed)
       (let ((items (romacs-attach-remove romacs-attach-items (plist-get item :id))))
         (setq romacs-attach--selected (plist-get (nth (min index (1- (length items))) items) :id))
         (romacs-attach-set-items items)))))
 
 (defun romacs-attach-edit-undo ()
-  "Bring back the last removed chip."
+  "Bring back the last removed chip, at its place among the chips there
+are now: what changed since stays."
   (interactive)
   (when-let* ((removal (pop romacs-attach--removed)))
     (setq romacs-attach--selected (plist-get (cdr removal) :id))
-    (romacs-attach-set-items (car removal))))
+    (romacs-attach-set-items (append (seq-take romacs-attach-items (car removal)) (list (cdr removal))
+                                     (seq-drop romacs-attach-items (car removal))))))
 
 (defun romacs-attach-edit-caption (caption)
   "Caption the selected chip CAPTION (empty for none)."
@@ -894,8 +925,8 @@ they are typed: any other key closes it and runs as usual."
 
 (defcustom romacs-attach-save-directory nil
   "Where an image Romacs made (a screenshot, a clipboard image) becomes
-the user's file when attached in mail; nil for the XDG pictures
-directory's Screenshots/, where Omarchy's own screenshots go."
+the user's file when attached, in mail or to an agent; nil for the XDG
+pictures directory's Screenshots/, where Omarchy's own screenshots go."
   :type '(choice (const nil) directory))
 
 (defcustom romacs-attach-snapshot-max (* 1024 1024)
@@ -944,6 +975,109 @@ failure is the copy's."
     (error
      (copy-file from to)
      (delete-file from))))
+
+;;;; The clipboard's image
+
+(defcustom romacs-attach-clipboard-recent 8
+  "How many of the newest files in `romacs-attach-save-directory' a
+clipboard image is looked for among: a screenshot is saved there and
+copied at once, so it is one of them."
+  :type 'natnum)
+
+(defconst romacs-attach--clipboard-seconds 10
+  "How long reading the clipboard, or comparing a file with it, may take
+before it is given up.")
+
+(defun romacs-attach-clipboard-image-type ()
+  "The MIME type to read the clipboard's image as, image/png when it is
+offered (a screenshot's own type), or nil when the clipboard holds none."
+  (when (executable-find "wl-paste")
+    ;; The offer's types come from the compositor, not the clipboard's
+    ;; owner; bounded all the same, as the command waits on them.
+    (let ((types (process-lines-ignore-status "timeout" "1" "wl-paste" "--list-types")))
+      (or (car (member "image/png" types))
+          (seq-find (lambda (type) (string-prefix-p "image/" type)) types)))))
+
+(defun romacs-attach--image-extension (type)
+  "The file name extension of an image of MIME TYPE, with its dot."
+  (pcase (substring type (length "image/"))
+    ("jpeg" ".jpg") ("svg+xml" ".svg") (subtype (concat "." subtype))))
+
+(defun romacs-attach--run (command then)
+  "Run COMMAND, a program and its arguments, off the command loop, and
+call THEN once with whether it exited 0: a run past
+`romacs-attach--clipboard-seconds', or one that cannot start, fails."
+  (let* ((done nil)
+         (timer nil)
+         (settle (lambda (ok)
+                   (unless done
+                     (setq done t)
+                     (when timer (cancel-timer timer))
+                     (funcall then ok))))
+         (process (condition-case nil
+                      (make-process :name "romacs-attach-clipboard" :command command :buffer nil
+                                    :noquery t :connection-type 'pipe
+                                    :sentinel (lambda (process _event)
+                                                (unless (process-live-p process)
+                                                  (funcall settle (eql 0 (process-exit-status process))))))
+                    (error nil))))
+    (if (not process) (funcall settle nil)
+      (setq timer (run-at-time romacs-attach--clipboard-seconds nil
+                               (lambda ()
+                                 (when (process-live-p process) (delete-process process))
+                                 (funcall settle nil)))))))
+
+(defun romacs-attach--recent-of-size (directory size)
+  "The newest `romacs-attach-clipboard-recent' files in DIRECTORY, newest
+first, those of SIZE bytes among them."
+  (let ((files (seq-filter (lambda (entry) (null (file-attribute-type (cdr entry))))
+                           (directory-files-and-attributes directory t "\\`[^.]" t))))
+    (mapcar #'car
+            (seq-filter (lambda (entry) (eql (file-attribute-size (cdr entry)) size))
+                        (seq-take (sort files (lambda (a b)
+                                                (time-less-p (file-attribute-modification-time (cdr b))
+                                                             (file-attribute-modification-time (cdr a)))))
+                                  romacs-attach-clipboard-recent)))))
+
+(defun romacs-attach--same-bytes (file candidates then)
+  "Call THEN with the first of CANDIDATES whose bytes are FILE's, or nil."
+  (if (null candidates) (funcall then nil)
+    (romacs-attach--run (list "cmp" "-s" "--" file (car candidates))
+                        (lambda (same)
+                          (if same (funcall then (car candidates))
+                            (romacs-attach--same-bytes file (cdr candidates) then))))))
+
+(defun romacs-attach-clipboard-file (type then)
+  "Call THEN with the user's file of the clipboard's image, read as MIME
+TYPE, or with nil when it cannot be read.  It is the file the image was
+copied from, when one of the recent ones in `romacs-attach-save-directory'
+has its bytes (a screenshot saved and copied at once): nothing is copied.
+Else the image is saved there once, named by the time.  Off the command
+loop: the clipboard is read into this process's staging directory, and
+compared with `cmp'."
+  (let* ((directory (romacs-attach--save-directory))
+         (extension (romacs-attach--image-extension type))
+         (read (make-temp-file (expand-file-name "clipboard-" (romacs-attach-staging-directory)) nil extension))
+         (finish (lambda (file)
+                   (when (file-exists-p read) (delete-file read))
+                   (funcall then file))))
+    (romacs-attach--run
+     (list "sh" "-c" "exec wl-paste --type \"$1\" > \"$2\"" "sh" type read)
+     (lambda (ok)
+       (let ((size (and ok (file-attribute-size (file-attributes read)))))
+         (if (not (and size (> size 0))) (funcall finish nil)
+           (romacs-attach--same-bytes
+            read (and (file-directory-p directory) (romacs-attach--recent-of-size directory size))
+            (lambda (found)
+              (funcall finish
+                       (or found
+                           (condition-case nil
+                               (let ((file (progn (make-directory directory t)
+                                                  (romacs-attach--free-name
+                                                   directory (format-time-string (concat "clipboard-%Y-%m-%d_%H-%M-%S" extension))))))
+                                 (romacs-attach--move read file)
+                                 file)
+                             (error nil))))))))))))
 
 (defun romacs-attach--mail-insert (item _context)
   "Insert ITEM in a mail draft at point, as GNU's commands do: a text

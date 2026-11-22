@@ -90,7 +90,7 @@ fn scroll_right(cx; optional arg: Value, set_minimum: Value) { scroll_horizontal
 fn scroll_horizontally(cx: &mut Leaf<'_>, arg: Value, set_minimum: Value, left: bool) -> std::result::Result<Value, Fault> {
     let columns = match arg {
         Value::NIL => None,
-        _ => { let n = super::callint::prefix_numeric(cx, arg); Some(n.integer_value().ok_or(Fault::Wrong("fixnump", n))?) }
+        _ => { let n = super::callint::prefix_numeric(cx, arg); Some(n.integer_value().ok_or_else(|| Fault::Wrong("fixnump", n))?) }
     };
     cx.windows().scroll_horizontally(columns, set_minimum, left)
 }
@@ -309,7 +309,7 @@ fn unspecified_colour(cx: &Leaf<'_>, value: Value) -> bool {
 
 /// check_int_nonnegative (bignum.c:506): an integer, 0 when negative.
 fn natnum(value: Value) -> std::result::Result<u32, Fault> {
-    let n = value.integer_value().ok_or(Fault::Wrong("integerp", value))?;
+    let n = value.integer_value().ok_or_else(|| Fault::Wrong("integerp", value))?;
     u32::try_from(n.max(0)).ok().filter(|&n| n <= i32::MAX as u32)
         .ok_or_else(|| Fault::Range(Value::integer(0).unwrap(), Value::integer(i64::from(i32::MAX)).unwrap()))
 }
@@ -536,22 +536,38 @@ defsubr! { name = "romacs--host-minibuffer", gnu = "romacs:frame", effect = Glob
 fn romacs_host_minibuffer(cx, frame: Value) {
     cx.windows().host_minibuffer(frame)
 }}
+// The window the selected frame's status bar shows: the selected window, or while it
+// is the minibuffer window of an active minibuffer the window that minibuffer was entered
+// from, while that is one of the top-level frame's ordinary windows; else that frame's own
+// selected window, or, when that is its minibuffer window, the ordinary window selected
+// last.
 defsubr! { name = "romacs-status-bar-window", gnu = "romacs:frame", effect = Reads,
 fn romacs_status_bar_window(cx) {
     cx.windows().status_bar_window()
 }}
+// The height in pixels the selected frame's top-level frame's last layout left for its
+// status bar, 0 while it shows none.
 defsubr! { name = "romacs-status-bar-height", gnu = "romacs:frame", effect = Reads,
 fn romacs_status_bar_height(cx) {
     Ok(Value::integer(i64::from(cx.windows().status_bar_height())).unwrap())
 }}
+// For the character COLUMN, counted from 0, of the status bar as last expanded,
+// (WINDOW STRING COLUMN): the window whose line it is, and that text, a string with the
+// properties a click reads.  nil past the end of that line, before any expansion, or when
+// its window is gone.
 defsubr! { name = "romacs--status-bar-target", gnu = "romacs:frame", effect = Reads,
 fn romacs_status_bar_target(cx, column: Value) {
     cx.windows().status_bar_target(column)
 }}
+// The text the status bar shows, placed as the painter places it, with the widths the
+// host measures (with no host, as many columns as each character's width); nil while it shows
+// none.  Expands the bar's mode line now, unless the last expansion is still current.
 defsubr! { name = "romacs--status-bar-text", gnu = "romacs:frame", effect = Reads,
 fn romacs_status_bar_text(cx) {
     cx.windows().status_bar_text()
 }}
+// The live child frame of the selected frame's top-level frame that hosts its
+// minibuffer window, or nil when the minibuffer is not hosted in one.
 defsubr! { name = "romacs--minibuffer-host", gnu = "romacs:frame", effect = Reads,
 fn romacs_minibuffer_host(cx) {
     cx.windows().minibuffer_host()
@@ -640,7 +656,7 @@ fn frame_position(cx; optional frame: Value) {
 defsubr! { name = "set-frame-position", gnu = "frame.c:4662", effect = Global,
 fn set_frame_position(cx, frame: Value, x: Value, y: Value) {
     let frame = cx.windows().decode_live_frame(frame)?;
-    let (x, y) = (x.integer_value().ok_or(Fault::Wrong("fixnump", x))?, y.integer_value().ok_or(Fault::Wrong("fixnump", y))?);
+    let (x, y) = (x.integer_value().ok_or_else(|| Fault::Wrong("fixnump", x))?, y.integer_value().ok_or_else(|| Fault::Wrong("fixnump", y))?);
     if let Some(mut geometry) = cx.windows().child_geometry(frame)? {
         let parent = cx.windows().frame_parent(frame)?;
         let outer = |extent: u32| i64::from(extent + 2 * geometry.border);
@@ -658,7 +674,7 @@ fn set_frame_position(cx, frame: Value, x: Value, y: Value) {
 fn resize_frame(cx: &mut Leaf<'_>, frame: Value, width: Option<Value>, height: Option<Value>, pixelwise: bool) -> std::result::Result<(), Fault> {
     let frame = cx.windows().decode_live_frame(frame)?;
     let size = |cx: &mut Leaf<'_>, v: Value, horizontal: bool| -> std::result::Result<u32, Fault> {
-        let n = v.integer_value().ok_or(Fault::Wrong("fixnump", v))?;
+        let n = v.integer_value().ok_or_else(|| Fault::Wrong("fixnump", v))?;
         let unit = if pixelwise { 1 } else { char_size(cx, horizontal)? };
         Ok(u32::try_from(n.max(0)).unwrap_or(0) * unit)
     };
@@ -802,7 +818,7 @@ fn frame_or_buffer_changed_p(cx; optional variable: Value) {
         }
     } else {
         if cx.kind(variable) != leaf::Kind::Symbol { return Err(Fault::Wrong("symbolp", variable)); }
-        cx.variable_value(variable)?.ok_or(Fault::Signal(cx.intern("void-variable"), cx.cons(variable, Value::NIL)))?
+        cx.variable_value(variable)?.ok_or_else(|| Fault::Signal(cx.intern("void-variable"), cx.cons(variable, Value::NIL)))?
     };
     let (entries, buffers) = frame_buffer_entries(cx)?;
     let old = if cx.kind(state) == leaf::Kind::Vector { Some(cx.vector_values(state)?) } else { None };

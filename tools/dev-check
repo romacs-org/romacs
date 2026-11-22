@@ -8,13 +8,25 @@
               one in twenty makes it a hot file.
   generated   no tracked file a tool of ours makes (tools/lib/generated_files.py).
   agents      every AGENTS.md names only what exists (tools/lib/agents_md.py).
+  functions   no function of Romacs's own Lisp over the long-function limit
+              is added or grows, beside the merge-base's (tools/lib/smells.py
+              check-functions: tools/lib/lisp_functions.py measures), nor one of
+              the workspace's non-test Rust over 50 (tools/lib/rust_functions.py),
+              and unwrap()/expect( calls and undocumented unsafe sites in that
+              Rust do not rise.
   lint        tools/romacs-lint on the runtime Lisp files the change touches:
               what it adds since the merge-base, as the queue's Lisp tier holds
               it. It runs a Romacs: --binary, else what tools/romacs-lint finds.
-  epoch       a change of lisp/vm/ beside romacs-vm's Rust may be one contract
-              between them: unless it raises etc/romacs-runtime-epoch, it is
-              named, to raise the epoch if the Lisp needs the Rust
-              (lisp/vm/AGENTS.md). It cannot tell, so it fails nothing.
+  epoch       etc/romacs-runtime-epoch holds one whole number, spelled with no
+              leading zero and at most one newline, and a change with a raise of
+              its own (a commit or its tree above every parent's; a revert
+              clears none) ends above the trunk tip's: two changes raised to one
+              number would merge without a conflict and ship two contracts as
+              one generation. A change of lisp/vm/ beside
+              romacs-vm's Rust may be one contract between them: unless it
+              raises the epoch, it is named, to raise it if the Lisp needs the
+              Rust (lisp/vm/AGENTS.md). Which it is the stage cannot tell, so
+              that finding fails nothing.
   loaddefs    lisp/'s loaddefs files are what tools/lisp-loaddefs makes of the tree,
               when the change touches a .el under lisp/ or etc/themes. It runs the
               pinned GNU binary; without one the stage cannot run.
@@ -29,6 +41,11 @@
 One line a stage and one a finding, each with its fix. Exit 1 when a stage
 fails, 2 when one could not run.
 
+A run on a worktree with no uncommitted change leaves a receipt for HEAD's
+tree, $XDG_CACHE_HOME/romacs/dev-check/receipts/TREE.json: the exit, each
+stage's status, whether the tests ran. The merge queue's submit reads it to
+know this exact tree was checked, and never reruns the check.
+
 cargo and cargo-nextest are looked for on PATH, then in the host's pins
 ROMACS_TOOLCHAIN_BIN and ROMACS_NEXTEST_BIN, which an agent's shell has even
 where its PATH lacks the toolchain. Found there, they are put on PATH for what
@@ -38,6 +55,7 @@ import argparse
 from collections import Counter
 import importlib.machinery
 import importlib.util
+import json
 import os
 from pathlib import Path
 import re
@@ -53,6 +71,7 @@ import agents_md  # noqa: E402
 import lisp_layout  # noqa: E402
 import generated_files  # noqa: E402
 import impact  # noqa: E402
+import smells  # noqa: E402
 import test_modules  # noqa: E402
 
 LANDINGS = 150
@@ -161,17 +180,78 @@ def generated(root):
 # The runtime tree's generation.
 
 EPOCH = 'etc/romacs-runtime-epoch'
+# The one spelling of a generation: the runtime compares the file's trimmed text, so
+# 3 and 03 would be two generations of one number.
+SPELLING = r'(0|[1-9][0-9]*)\n?'
+TREE = 'the uncommitted tree'
 
 
-def epoch(names):
-    """(STATUS, SUMMARY, FINDINGS): NAMES, the change's paths, changing lisp/vm/ and
-    romacs-vm's Rust together, which may be one contract, raise the epoch or are named."""
+def generation(text):
+    """The whole number TEXT, an epoch file's contents, holds however it is spelled, or None."""
+    return int(text) if text is not None and re.fullmatch(r'\s*[0-9]+\s*', text) else None
+
+
+def rank(found):
+    """A generation FOUND, to compare: none is below every one."""
+    return -1 if found is None else found
+
+
+def own_raises(lines, value):
+    """The branch's own raises of the generation: the commits of LINES, `git rev-list
+    --parents` lines split, whose generation in VALUE is above every parent's (a merge
+    that takes a side's number raises nothing). Each counts for good: a later lowering
+    clears none, since the number cannot show which change it takes back, and a spare
+    number costs nothing where a missed one ships two contracts as one generation."""
+    return [commit for commit, *parents in lines if all(rank(value[commit]) > rank(value[parent]) for parent in parents)]
+
+
+def epoch_history(root, trunk):
+    """(RAISES, OURS, TIP): ROOT's own raises of the epoch since TRUNK, its uncommitted
+    tree counted as a commit on its HEAD, and the epoch file's text in ROOT's tree and at
+    TRUNK's tip (None where there is none; a commit whose path is no file holds none). On a merged tree the changed paths cannot
+    show a raise: the trunk's equal one hides it."""
+    head = git(root, 'rev-parse', 'HEAD').stdout.strip()
+    lines = [line.split() for line in git(root, 'rev-list', '--parents', f'{trunk}..HEAD').stdout.splitlines()]
+    commits = sorted({head} | {commit for line in lines for commit in line})
+    asked = subprocess.run(['git', '-C', str(root), 'cat-file', '--batch-check=%(objectname) %(objecttype)'],
+                           capture_output=True, text=True, check=True,
+                           input=''.join(f'{commit}:{EPOCH}\n' for commit in commits))
+    blob = {commit: found.split()[0] if found.endswith(' blob') else None
+            for commit, found in zip(commits, asked.stdout.splitlines())}
+    text = {found: git(root, 'cat-file', 'blob', found).stdout for found in set(blob.values()) if found}
+    value = {commit: generation(text.get(found)) for commit, found in blob.items()}
+    file = root / EPOCH
+    # Its bytes as they are: read_text would turn a CR LF into the one spelling.
+    ours = file.read_bytes().decode('utf-8', 'replace') if file.is_file() else None
+    lines, value = [[TREE, head], *lines], {**value, TREE: generation(ours)}
+    tip = git(root, 'show', f'{trunk}:{EPOCH}', check=False)
+    return (sorted(raised if raised == TREE else raised[:12] for raised in own_raises(lines, value)), ours,
+            tip.stdout if tip.returncode == 0 else None)
+
+
+def epoch(names, raised, ours, tip):
+    """(STATUS, SUMMARY, FINDINGS) of the runtime tree's generation. NAMES are the
+    change's paths; RAISED, the commits that raise the epoch; OURS and TIP, the epoch
+    file's text in its tree and at the trunk's tip, None where there is none. The tree
+    has the file, holding one whole number in its one spelling, and a change with a
+    raise ends above TIP's. A change of lisp/vm/ beside romacs-vm's Rust that leaves the epoch alone may
+    be one contract, and is named."""
+    if ours is None:
+        return 'FAIL', f'{EPOCH} is missing', [f'{EPOCH}: the build includes it (crates/romacs-vm/src/host.rs); fix: restore it']
+    if not re.fullmatch(SPELLING, ours):
+        return 'FAIL', f'{EPOCH} does not hold one whole number in its one spelling', [
+            f'{EPOCH}: {ours!r}; fix: write the generation as digits with no leading zero, then at most one newline']
+    here, top = generation(ours), generation(tip)
+    if raised and top is not None and rank(here) <= top:
+        return 'FAIL', f"{EPOCH} is raised to {here}, not above the trunk's {top}", [
+            f'{EPOCH}: raised by {", ".join(raised)}, and the trunk holds generation {top} already: a merge of two '
+            f'equal raises shows no conflict; fix: merge the trunk in and raise it to {top + 1}']
+    if raised:
+        return 'ok', f"{EPOCH} is raised to {here}" + (f", above the trunk's {top}" if top is not None else ''), []
     lisp = sorted(n for n in names if n.startswith('lisp/vm/') and n.endswith('.el'))
     rust = [n for n in names if n.startswith('crates/romacs-vm/src/') and n.endswith('.rs')]
     if not (lisp and rust):
         return 'ok', "no lisp/vm/ change beside romacs-vm's Rust", []
-    if EPOCH in names:
-        return 'ok', f'lisp/vm/ and romacs-vm change together, and {EPOCH} is raised', []
     return 'ok', f"lisp/vm/ and romacs-vm change together, {EPOCH} unchanged", [
         f'{", ".join(lisp)}: if it needs the Rust beside it, raise {EPOCH} (lisp/vm/AGENTS.md)']
 
@@ -185,6 +265,25 @@ def agents(root):
     if found:
         return 'FAIL', f'{len(found)} stale line(s) in the AGENTS.md files', found
     return 'ok', f'{count} AGENTS.md file(s) name nothing missing', []
+
+
+# The Lisp functions' length.
+
+def functions(root, trunk):
+    """(STATUS, SUMMARY, FINDINGS): no long Lisp or Rust function is added or
+    grows, and the Rust floors do not rise."""
+    try:
+        found = smells.functions_held_to_base(root, trunk)
+    except (ValueError, subprocess.CalledProcessError) as exc:
+        return 'SKIP', 'the functions were not measured', [f'{exc}; fix: merge the trunk in, or name it with --trunk']
+    lisp = smells.lisp_functions
+    failing, warned = lisp.held(found)
+    warnings = [f'warning until {lisp.ENFORCED_FROM}: {finding}' for finding in warned]
+    if failing:
+        return 'FAIL', f'{len(failing)} failing function finding(s), {len(warned)} warning(s)', failing + warnings
+    if warned:
+        return 'ok', (f'{len(warned)} function finding(s), warned until {lisp.ENFORCED_FROM}, then failing'), warnings
+    return 'ok', 'no long Lisp or Rust function added or grown, no Rust floor risen', []
 
 
 # The lint.
@@ -206,8 +305,13 @@ def moved_unchanged(root, base):
 
 def lint_stage(status, output, errors):
     """(STATUS, SUMMARY, FINDINGS) of a tools/romacs-lint run that exited with STATUS:
-    its closing line is the summary, the lines before it the findings."""
+    its closing line is the summary, the lines before it the findings. Exit 2
+    with a closing line judged some files and left others unjudged: the stage
+    is incomplete, with what it found and the files it could not judge."""
     lines = output.splitlines()
+    if status == 2 and lines and lines[-1].startswith('romacs-lint: '):
+        unjudged = [line for line in errors.splitlines() if line.startswith('romacs-lint: ')]
+        return 'SKIP', lines[-1].removeprefix('romacs-lint: '), lines[:-1] + unjudged
     if status not in (0, 1) or not lines:
         why = (errors.strip().splitlines() or ['no output'])[-1]
         return 'SKIP', 'tools/romacs-lint gave no result', [f'{why}; fix: pass --binary HOST, or build one (cargo build --profile gate -p romacs-vm-gui)']
@@ -422,6 +526,33 @@ def report(stages):
     return lines + [f'dev-check: {verdict}'], 1 if failed else 2 if skipped else 0
 
 
+def receipt_path(tree):
+    cache = Path(os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache')
+    return cache / 'romacs/dev-check/receipts' / f'{tree}.json'
+
+
+def receipt(tree, head, trunk, stages, status, tests_ran):
+    """The receipt of a run over STAGES (NAME, STATUS, ...) that ended with STATUS, for TREE."""
+    return {'schema': 1, 'tree': tree, 'head': head, 'trunk': trunk, 'exit': status, 'tests': tests_ran,
+            'stages': [{'name': name, 'status': stage_status} for name, stage_status, *_ in stages],
+            'time': time.strftime('%Y-%m-%dT%H:%M:%S%z')}
+
+
+def write_receipt(root, trunk, stages, status, tests_ran):
+    """Leave this run's receipt for HEAD's tree, when the worktree holds no uncommitted change
+    (then what was checked is that tree): its path, or None."""
+    if git(root, 'status', '--porcelain', '--untracked-files=no', check=False).stdout.strip():
+        return None
+    tree = git(root, 'rev-parse', 'HEAD^{tree}').stdout.strip()
+    head = git(root, 'rev-parse', 'HEAD').stdout.strip()
+    path = receipt_path(tree)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    draft = path.with_name(f'.{path.name}.{os.getpid()}')
+    draft.write_text(json.dumps(receipt(tree, head, trunk, stages, status, tests_ran), indent=1) + '\n')
+    draft.replace(path)
+    return path
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--trunk', default=os.environ.get('ROMACS_BASE', 'beta'), help='the branch this one lands on (default beta)')
@@ -433,12 +564,17 @@ def main():
     trunk = gate.trunk(ROOT, args.trunk)
     names = gate.changed_names(ROOT, trunk)
     stages = [('forecast', *forecast(ROOT, trunk)), ('generated', *generated(ROOT)), ('agents', *agents(ROOT)),
-              ('epoch', *epoch(names)), ('lint', *lint(ROOT, names, trunk, args.binary)),
-              ('loaddefs', *loaddefs(ROOT, names))]
+              ('functions', *functions(ROOT, trunk)), ('epoch', *epoch(names, *epoch_history(ROOT, trunk))),
+              ('lint', *lint(ROOT, names, trunk, args.binary)), ('loaddefs', *loaddefs(ROOT, names))]
     if not args.no_tests:
         stages.append(('tests', *tests(ROOT, names, args.threads)))
     lines, status = report(stages)
     print('\n'.join(lines))
+    try:
+        if write_receipt(ROOT, trunk, stages, status, not args.no_tests) is None:
+            print('dev-check: no receipt: the worktree has uncommitted changes, so no commit\'s tree was checked')
+    except (OSError, RuntimeError) as exc:
+        print(f'dev-check: no receipt: {exc}')
     return status
 
 

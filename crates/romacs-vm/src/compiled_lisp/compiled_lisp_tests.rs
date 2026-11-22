@@ -56,6 +56,47 @@ fn units_round_trip() {
     }
 }
 
+/// A char-table constant round-trips: its subtype, default, parent, extra
+/// slots and own values, the default not baked into them, so
+/// `map-char-table' sees what the original holds.
+#[test]
+fn char_tables_round_trip() {
+    let mut vm = Vm::new();
+    vm.eval_source("(put 'unit-test-ct 'char-table-extra-slots 2)").unwrap();
+    vm.eval_source("(setq unit-test-parent (make-char-table 'unit-test-ct 'from-parent))").unwrap();
+    vm.eval_source("(setq unit-test-table (let ((c (make-char-table 'unit-test-ct)))
+      (set-char-table-range c '(?a . ?z) 'low) (aset c ?é \"e\") (aset c #x1F600 '(face . 1))
+      (set-char-table-range c nil 'dflt) (set-char-table-extra-slot c 1 'extra)
+      (set-char-table-parent c unit-test-parent) c))").unwrap();
+    let probe = "(list (aref c ?b) (aref c ?é) (aref c #x1F600) (aref c ?A) (char-table-subtype c)
+                       (char-table-extra-slot c 0) (char-table-extra-slot c 1) (char-table-range c nil)
+                       (aref (char-table-parent c) ?A)
+                       (let ((n 0)) (map-char-table (lambda (_k _v) (setq n (1+ n))) c) n))";
+    let expected = vm.eval_source_raw(&format!("(let ((c unit-test-table)) {probe})")).unwrap();
+    let expected = vm.display(expected).unwrap();
+    assert_eq!(through_unit(&mut vm, &format!("`(let ((c ',unit-test-table)) {probe})")), expected);
+    assert!(expected.starts_with("(low \"e\" (face . 1) dflt unit-test-ct nil extra dflt from-parent "), "{expected}");
+}
+
+/// Char-tables are mutable: two equal ones stay two through a unit, one
+/// stays one. A table runs cannot keep is not stored: a literal whose
+/// ASCII slot is not its root's, and one whose parent is no char-table.
+#[test]
+fn char_tables_keep_identity_and_refuse_what_runs_cannot_keep() {
+    let mut vm = Vm::new();
+    vm.eval_source("(setq unit-test-a (make-char-table 'unit-test-ct) unit-test-b (make-char-table 'unit-test-ct))").unwrap();
+    assert_eq!(through_unit(&mut vm, "`(let ((x ',unit-test-a) (y ',unit-test-b) (z ',unit-test-a)) (list (equal x y) (eq x y) (eq x z)))"),
+               "(t nil t)");
+    let slots = " nil".repeat(64);
+    for (literal, why) in [(format!("#^[nil nil test 7{slots}]"), "ASCII slot"), (format!("#^[nil 5 test nil{slots}]"), "parent")] {
+        let datum = vm.eval_source_raw(&format!("(list 'quote (car (read-from-string {:?})))", literal)).unwrap();
+        let form = vm.expansion_form(datum, 0).unwrap();
+        let mut names = unit::Names::default();
+        let refused = vm.compile_unit(&form, NameSet::default(), &mut names).expect_err(why);
+        assert!(refused.to_string().contains("cannot be serialised") && refused.to_string().contains(why), "{refused}");
+    }
+}
+
 /// A closure constant materialized from a unit is charged its captures,
 /// which are filled in after the funnel made it empty: a constant closing
 /// over nine variables costs eight Values more than one closing over one.
@@ -328,4 +369,95 @@ fn tree_workers_overlap() {
     });
     assert_eq!(done.len(), 4);
     assert_eq!(most.load(Ordering::SeqCst), 4, "the workers ran one at a time");
+}
+
+/// A tree's compile decides a file whose artifact holds without a compile
+/// process, on the `load-path' a compile process searches, and leaves to a
+/// process what does not hold or what it cannot tell.
+#[test]
+fn a_tree_decides_held_artifacts_itself() {
+    let store = test_store("held");
+    let lib = store.join("lib");
+    std::fs::create_dir_all(&lib).unwrap();
+    let source = lib.join("a.el");
+    std::fs::write(&source, "(require 'b)\n").unwrap();
+    std::fs::write(lib.join("b.el"), "(provide 'b)\n").unwrap();
+    let configured = Configured {
+        config: Config { compiler: vec![], environment: vec![], inherited: &[], defer_misses: false, store: store.clone(),
+                         identity: Box::new(|| Some("env".into())), runtime: vec![], root: None },
+        chain: String::new(), trace: false, no_prune: false, record: None, scratch: store.join("tmp"),
+        identity: std::sync::OnceLock::new(),
+    };
+    // A's artifact, published as its compile would, having resolved NAME.
+    let publish = |name: &str| {
+        let digest = store::source_digest(&store, &source).unwrap();
+        let key = store::key("env", None, &source, &digest);
+        let record = json!({"kind": "resolved", "name": name, "nosuffix": false, "path": lib.join("b.el").to_string_lossy()});
+        let (bytes, inputs) = store::encode(&store::Status::Compiled, &source.to_string_lossy(), &[record], &[], &[]);
+        store::publish(&store, &key, &inputs, &bytes).unwrap()
+    };
+    let load_path = [lib.to_string_lossy().into_owned()];
+    let held = |load_path: &[String]| match tree::held(&configured, &source, load_path) {
+        Some(tree::Outcome::Published { artifact, held: true, status: store::Status::Compiled }) => Some(artifact),
+        _ => None,
+    };
+    let published = publish("b");
+    assert_eq!(held(&load_path), Some(published.clone()), "held on the load-path it was compiled on");
+    assert_eq!(held(&[store.join("elsewhere").to_string_lossy().into_owned()]), None, "B resolves nowhere");
+    // A second b.el in a directory searched first shadows the one A was
+    // compiled against: the tree's process leaves A to a compile process.
+    let first = store.join("first");
+    std::fs::create_dir_all(&first).unwrap();
+    std::fs::write(first.join("b.el"), "(provide 'b)\n").unwrap();
+    assert_eq!(held(&[first.to_string_lossy().into_owned(), load_path[0].clone()]), None, "B is shadowed");
+    assert_eq!(held(&load_path), Some(published.clone()), "and holds again where it was resolved");
+    std::fs::remove_file(&published).unwrap();
+    publish("~/b");
+    assert_eq!(held(&load_path), None, "a name under ~ is the compile process's to resolve");
+    publish("b");
+    std::fs::write(&source, "(require 'b) ; changed\n").unwrap();
+    assert_eq!(held(&load_path), None, "a changed source compiles again");
+    std::fs::remove_dir_all(&store).unwrap();
+}
+
+/// A compile process's record names its artifact in the store both
+/// processes share, says whether it held already, and keeps the
+/// `load-path' searched; a file outside the store has none.
+#[test]
+fn a_compile_record_round_trips_through_its_text() {
+    use std::os::unix::ffi::OsStrExt;
+    let store = Path::new(std::ffi::OsStr::from_bytes(b"/home/u\xff/store"));
+    let record = Record { artifact: store.join("0123456789abcdef/ab12/cd34.rlc"), held: true,
+                          load_path: vec!["/a/lisp".into(), "/b/site-lisp".into()] };
+    let text = record.text(store).unwrap();
+    assert_eq!(Record::read(text.as_bytes(), store), Some(record));
+    let outside = Record { artifact: PathBuf::from("/elsewhere/a.rlc"), held: false, load_path: vec![] };
+    assert_eq!(outside.text(store), None);
+    assert_eq!(Record::read(b"romacs-compiled: /s/a.rlc", store), None);
+}
+
+/// A compile process that cannot start leaves no record file behind.
+#[test]
+fn a_compile_that_does_not_start_leaves_no_record() {
+    let store = test_store("no-start");
+    let scratch = store.join("scratch");
+    std::fs::create_dir_all(&scratch).unwrap();
+    let configured = Configured {
+        config: Config { compiler: vec![], environment: vec![], inherited: &[], defer_misses: false, store: store.clone(),
+                         identity: Box::new(|| None), runtime: vec![], root: None },
+        chain: String::new(), trace: false, no_prune: false, record: None, scratch: scratch.clone(),
+        identity: std::sync::OnceLock::new(),
+    };
+    assert_eq!(run_compile(&configured, store.join("no-such-program").into(), vec![], vec![]), None);
+    assert_eq!(std::fs::read_dir(&scratch).unwrap().count(), 0, "a record file was left in {}", scratch.display());
+}
+
+/// The temporary directory a compile's record is made in is absolute, as
+/// the compile process works in another directory; /tmp without one.
+#[test]
+fn the_scratch_directory_is_absolute() {
+    let relative = scratch_dir(Some("tmp".into()));
+    assert!(relative.is_absolute() && relative.ends_with("tmp"), "{}", relative.display());
+    assert_eq!(scratch_dir(None), Path::new("/tmp"));
+    assert_eq!(scratch_dir(Some("".into())), Path::new("/tmp"));
 }

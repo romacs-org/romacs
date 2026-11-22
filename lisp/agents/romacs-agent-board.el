@@ -23,6 +23,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'romacs-agent)
+(require 'romacs-agent-glyphs)
 (require 'romacs-agent-store)
 (require 'romacs-agent-ui)
 (require 'hl-line)
@@ -70,21 +71,52 @@ the store keeps them (`romacs-agent-store-folded').")
 \(`romacs-agent-store-unloaded'), by id, and their children: (BY-ID
 . CHILDREN), CHILDREN a table from a parent's id to them.")
 
+(defun romacs-agent-board--own-p ()
+  "Whether the board shows this editor's own sessions, which its session
+commands act on and its registry knows (`romacs-agent-board-source')."
+  (romacs-agent-log-source-commands-p romacs-agent-board-source))
+
 (defun romacs-agent-board--parent (session)
   "The known session SESSION was delegated by, or nil."
   (let ((parent (plist-get (romacs-agent-options session) :parent)))
-    (or (romacs-agent-loaded parent)
+    (or (and (romacs-agent-board--own-p) (romacs-agent-loaded parent))
         (and romacs-agent-board--unloaded (gethash parent (car romacs-agent-board--unloaded))))))
 
 (defun romacs-agent-board--children (session)
   "The sessions SESSION delegated, loaded or not."
-  (append (romacs-agent-children session)
+  (append (and (romacs-agent-board--own-p) (romacs-agent-children session))
           (and romacs-agent-board--unloaded
                (gethash (romacs-agent-id session) (cdr romacs-agent-board--unloaded)))))
 
+(defvar romacs-agent-board-source romacs-agent-log-local
+  "Whose sessions the board shows and opens: a chat's source
+\(`romacs-agent-log--source'), this editor's own or another machine's,
+one at a time.")
+
+(cl-defgeneric romacs-agent-board-source-sessions (source)
+  "Every session of SOURCE's to show, those not loaded known to
+`romacs-agent-board--unloaded'.")
+
+(cl-defgeneric romacs-agent-board-source-key (source session)
+  "SOURCE's SESSION's state key on the board.")
+
+(cl-defgeneric romacs-agent-board-source-live (source session)
+  "SOURCE's SESSION to open, as it is now, or nil when it is gone.")
+
+(cl-defgeneric romacs-agent-board-source-history (_source)
+  "The harness transcripts the board lists with SOURCE's sessions, newest
+first: none, as of a source here."
+  nil)
+
+(cl-defmethod romacs-agent-board-source-history ((_source romacs-agent-log-local-source))
+  (romacs-agent-history-items))
+
 (defun romacs-agent-board--sessions ()
-  "Every session to show: the loaded ones, then those shown from their rows
-alone, which `romacs-agent-board--unloaded' is set to know."
+  "Every session the board shows (`romacs-agent-board-source')."
+  (romacs-agent-board-source-sessions romacs-agent-board-source))
+
+(cl-defmethod romacs-agent-board-source-sessions ((_source romacs-agent-log-local-source))
+  "The loaded sessions, then those shown from their rows alone."
   (let ((unloaded (romacs-agent-store-unloaded))
         (by-id (make-hash-table :test #'equal)) (children (make-hash-table :test #'equal)))
     (dolist (session unloaded)
@@ -95,8 +127,12 @@ alone, which `romacs-agent-board--unloaded' is set to know."
     (append (hash-table-values romacs-agent--sessions) unloaded)))
 
 (defun romacs-agent-board--key (session)
-  "SESSION's state key on the board: its own, except that a delegated task
-whose turn ended well is done here, where its parent's user reads it."
+  "SESSION's state key on the board (`romacs-agent-board-source')."
+  (romacs-agent-board-source-key romacs-agent-board-source session))
+
+(cl-defmethod romacs-agent-board-source-key ((_source romacs-agent-log-local-source) session)
+  "SESSION's own key, except that a delegated task whose turn ended well
+is done here, where its parent's user reads it."
   (let ((key (romacs-agent-ui--state-key session)))
     (if (and (eq key 'idle) (romacs-agent-board--parent session)
              (> (romacs-agent-done-seq session) 0) (not (romacs-agent-failed session)))
@@ -260,8 +296,9 @@ thread at work, while the board shows."
   (romacs-agent-ui--label (romacs-agent-ui--state-of (plist-get row :key))))
 
 (defun romacs-agent-board-state-width ()
-  "The state column's width: a glyph's, or a short word's."
-  (if (equal (substring-no-properties (romacs-agent-ui--label (romacs-agent-ui--state-of 'working))) "🤖") 2 9))
+  "The state column's width: its widest label's, a word cut to nine."
+  (min 9 (apply #'max 1 (mapcar (lambda (state) (string-width (or (romacs-agent-ui--label state) "")))
+                                romacs-agent-ui--states))))
 
 (defun romacs-agent-board-title (row)
   "ROW's title: dim when settled or only there for context, bold unread."
@@ -313,8 +350,13 @@ thread at work, while the board shows."
 ;;; Lines
 
 (defun romacs-agent-board--cell (text width)
-  "TEXT in exactly WIDTH columns."
-  (romacs-truncate (or text "") width ?\s))
+  "TEXT in exactly WIDTH columns: padded when it fits, a mark of several
+code points kept whole, else cut."
+  (let ((text (or text "")))
+    (let ((cut (if (<= (string-width text) width) text (romacs-truncate text width))))
+      ;; Cut by its characters' widths, a composed mark can still run over.
+      (while (> (string-width cut) width) (setq cut (substring cut 0 -1)))
+      (concat cut (make-string (- width (string-width cut)) ?\s)))))
 
 (defun romacs-agent-board--widths (width head)
   "The columns' widths in a row WIDTH wide after HEAD columns: `fill'
@@ -332,11 +374,24 @@ takes what the others and the gaps between them leave."
         (propertize cell 'romacs-agent-board-live (list function width))
       cell)))
 
+(defconst romacs-agent-board--max-indent-depth 6
+  "The deepest a delegated thread's row indents, two columns a level (12
+columns): deeper ones line up with it, so a row's indent costs the same
+however long its chain, and a chain's titles stay in view.")
+
+(defun romacs-agent-board--fold-mark (row)
+  "ROW's fold mark, open or folded, or blank when it has no threads: as
+wide as the wider mark, so rows line up whichever they show."
+  (let ((blank (make-string (string-width (romacs-agent-glyph-padded 'board-open 'board-closed)) ?\s)))
+    (cond ((null (plist-get row :children)) blank)
+          ((plist-get row :open) (romacs-agent-glyph-padded 'board-open 'board-closed))
+          (t (romacs-agent-glyph-padded 'board-closed 'board-open)))))
+
 (defun romacs-agent-board--thread-line (row width)
   "Thread ROW in a line WIDTH columns wide: its fold, then its columns
 \(`romacs-agent-board-columns')."
-  (let* ((head (concat (make-string (* 2 (plist-get row :depth)) ?\s)
-                       (cond ((null (plist-get row :children)) "  ") ((plist-get row :open) "˅ ") (t "› "))))
+  (let* ((head (concat (make-string (* 2 (min (plist-get row :depth) romacs-agent-board--max-indent-depth)) ?\s)
+                       (romacs-agent-board--fold-mark row) " "))
          (widths (romacs-agent-board--widths width (string-width head))))
     (cl-flet ((line (live)
                 (concat head (mapconcat #'identity
@@ -361,7 +416,7 @@ takes what the others and the gaps between them leave."
             (tail (romacs-truncate
                    (concat (if-let* ((rollup (romacs-agent-ui--rollup (plist-get row :keys)))) (concat "  " rollup) "")
                            (if-let* ((count (plist-get row :folded)))
-                               (propertize (format "  ▸ %d thread%s" count (if (= count 1) "" "s")) 'face 'romacs-agent-dim)
+                               (propertize (format "  %s %d thread%s" (romacs-agent-glyph 'board-threads) count (if (= count 1) "" "s")) 'face 'romacs-agent-dim)
                              ""))
                    room)))
        (concat name
@@ -370,14 +425,14 @@ takes what the others and the gaps between them leave."
                tail)))
     ('thread (romacs-agent-board--thread-line row width))
     ('history (let ((item (plist-get row :item)))
-                (propertize (romacs-truncate (concat "  ◇ " (plist-get item :title) "  " (let ((harness (plist-get item :harness))) (if harness (format "%s" harness) ""))
+                (propertize (romacs-truncate (concat "  " (romacs-agent-glyph 'board-history) " " (plist-get item :title) "  " (let ((harness (plist-get item :harness))) (if harness (format "%s" harness) ""))
                                                      "  " (romacs-agent-ui--ago (plist-get item :mtime)))
                                              width)
                             'face 'romacs-agent-dim)))
-    ('more (romacs-key-hint (format "  ◇ %d more  (\\<romacs-agent-board-mode-map>\\[romacs-agent-board-history] shows all)"
+    ('more (romacs-key-hint (format "  %s %d more  (\\<romacs-agent-board-mode-map>\\[romacs-agent-board-history] shows all)" (romacs-agent-glyph 'board-history)
                                     (plist-get row :count))
                             'romacs-agent-dim))
-    ('reading (propertize (romacs-truncate "  ◇ Reading harness transcripts…" width) 'face 'romacs-agent-dim))))
+    ('reading (propertize (romacs-truncate (concat "  " (romacs-agent-glyph 'board-history) " Reading harness transcripts…") width) 'face 'romacs-agent-dim))))
 
 (defun romacs-agent-board--title-line (width)
   "The board's first line: which section, and the filter."
@@ -476,11 +531,17 @@ each window showing it keeps the row at its point and at its start."
                             (list window (romacs-agent-board--spot (window-point window))
                                   (romacs-agent-board--spot (window-start window))))
                           windows)))
-      (romacs-agent-board--draw
-       (romacs-agent-board-rows (romacs-agent-board--sessions)
-                                (and (not romacs-agent-board--settled) (romacs-agent-history-items))
-                                (romacs-agent-board--view))
-       (or columns (romacs-agent-board--columns buffer)))
+      (let ((source romacs-agent-board-source))
+        ;; Its rows are no one's while they are drawn: a draw cut short
+        ;; leaves them so.
+        (setq romacs-agent-board--drawn-source 'drawing)
+        (romacs-agent-board--draw
+         (romacs-agent-board-rows (romacs-agent-board--sessions)
+                                  (and (not romacs-agent-board--settled) (romacs-agent-board-source-history source))
+                                  (romacs-agent-board--view))
+         (or columns (romacs-agent-board--columns buffer)))
+        ;; Its rows are SOURCE's once drawn: only then are they acted on as such.
+        (setq romacs-agent-board--drawn-source source))
       (pcase-dolist (`(,window ,at ,start) spots)
         (set-window-point window (romacs-agent-board--back at))
         (set-window-start window (save-excursion (goto-char (romacs-agent-board--back start)) (line-beginning-position))
@@ -556,7 +617,21 @@ another buffer now runs the board's window hooks too."
 
 ;;; Commands
 
+(defvar-local romacs-agent-board--drawn-source nil
+  "The source whose sessions the board shows, drawn whole
+\(`romacs-agent-board-source'); `drawing' while it is drawn, nil when it
+never was.")
+
+(defun romacs-agent-board--acting ()
+  "Refuse, unless this editor acts on the sessions the board shows, drawn
+whole: none while it is drawn."
+  (unless (and (not (eq romacs-agent-board--drawn-source 'drawing))
+               (romacs-agent-log-source-commands-p (or romacs-agent-board--drawn-source romacs-agent-board-source)))
+    (user-error "These sessions are another machine's: shown, not acted on from here")))
+
 (defun romacs-agent-board--session ()
+  "The session on this line, to act on."
+  (romacs-agent-board--acting)
   (romacs-agent-board--live (or (plist-get (romacs-agent-board--row) :session) (user-error "No thread on this line"))))
 
 (defun romacs-agent-board-next (&optional n)
@@ -580,7 +655,7 @@ another buffer now runs the board's window hooks too."
 
 (defun romacs-agent-board--show-chat (session)
   "Show SESSION's chat in the board's window."
-  (romacs-agent-show session romacs-agent-board--here))
+  (romacs-agent-show session romacs-agent-board--here romacs-agent-board-source))
 
 (defun romacs-agent-board-open ()
   "Open the thread on this line, the transcript read-only, or a project's
@@ -603,14 +678,17 @@ newest thread; on \"more\", list every transcript."
       ('more (romacs-agent-board-history)))))
 
 (defun romacs-agent-board--live (session)
-  "SESSION, loaded first when it was shown from its row alone, unless no
-longer known: then the board is drawn again."
+  "SESSION as it is now, unless no longer known: then the board is drawn again."
+  (or (romacs-agent-board-source-live romacs-agent-board-source session)
+      (progn (romacs-agent-board--redraw)
+             (user-error "That thread is gone: the board is drawn again"))))
+
+(cl-defmethod romacs-agent-board-source-live ((_source romacs-agent-log-local-source) session)
+  "SESSION, loaded first when it was shown from its row alone."
   (or (and (eq (romacs-agent-loaded (romacs-agent-id session)) session) session)
       (and romacs-agent-board--unloaded
            (eq (gethash (romacs-agent-id session) (car romacs-agent-board--unloaded)) session)
-           (romacs-agent-get (romacs-agent-id session)))
-      (progn (romacs-agent-board--redraw)
-             (user-error "That thread is gone: the board is drawn again"))))
+           (romacs-agent-get (romacs-agent-id session)))))
 
 (defun romacs-agent-board--fold-project (project folded)
   "Fold PROJECT, a directory, to its heading when FOLDED, else show its
@@ -705,6 +783,7 @@ where it is answered."
 (defun romacs-agent-board-resume ()
   "Resume this thread, or go on with this transcript as a thread."
   (interactive nil romacs-agent-board-mode)
+  (romacs-agent-board--acting)
   (let ((row (romacs-agent-board--row)))
     (if (eq (plist-get row :kind) 'history)
         (romacs-agent-history-resume (plist-get row :item) romacs-agent-board--here)
@@ -738,6 +817,7 @@ its next activity.  A settled one, bring back."
 (defun romacs-agent-board-settle-finished ()
   "Settle every thread shown with nothing going on."
   (interactive nil romacs-agent-board-mode)
+  (romacs-agent-board--acting)
   (let ((finished (romacs-agent-board--finished (romacs-agent-board--shown-rows))))
     (unless finished (user-error "No finished threads"))
     (when (y-or-n-p (format "Settle %d finished thread%s? " (length finished) (if (cdr finished) "s" "")))
@@ -749,14 +829,24 @@ its next activity.  A settled one, bring back."
       (romacs-agent-board--redraw))))
 
 (defun romacs-agent-board-new ()
-  "Start a new thread, in this row's project."
+  "Start a new thread, in this row's project, where the board's sessions
+run (`romacs-agent-board-source')."
   (interactive nil romacs-agent-board-mode)
+  ;; Its row's directory is the drawn rows' source's: started there only.
+  (unless (eq (or romacs-agent-board--drawn-source romacs-agent-board-source) romacs-agent-board-source)
+    (user-error "The board shows another source's sessions: draw it again (g)"))
   (let* ((row (romacs-agent-board--row))
          (cwd (cond ((plist-get row :session) (romacs-agent-cwd (plist-get row :session)))
                     ((plist-get row :cwd))
                     ((plist-get row :item) (plist-get (plist-get row :item) :cwd)))))
-    (apply #'funcall-interactively #'romacs-agent-start
-           (romacs-agent--start-arguments (if cwd (file-name-as-directory cwd) (romacs-agent--project-default))))))
+    (romacs-agent-board-source-new romacs-agent-board-source cwd)))
+
+(cl-defgeneric romacs-agent-board-source-new (source cwd)
+  "Start a session where SOURCE's sessions run, in directory CWD offered.")
+
+(cl-defmethod romacs-agent-board-source-new ((_source romacs-agent-log-local-source) cwd)
+  (apply #'funcall-interactively #'romacs-agent-start
+         (romacs-agent--start-arguments (if cwd (file-name-as-directory cwd) (romacs-agent--project-default)))))
 
 (defun romacs-agent-board-filter ()
   "Show only the threads whose title, project, provider or model have
@@ -855,11 +945,6 @@ keys act on the thread at point.
                 ((not (frame-parameter (window-frame window) 'no-accept-focus))))
       (unless (eq (window-frame window) (selected-frame)) (select-frame-set-input-focus (window-frame window)))
       (select-window window))))
-
-;;;###autoload
-(defalias 'romacs-agent-switch #'romacs-agents)
-;;;###autoload
-(defalias 'romacs-agent-switch-chat #'romacs-agents)
 
 (provide 'romacs-agent-board)
 ;;; romacs-agent-board.el ends here

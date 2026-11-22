@@ -304,15 +304,14 @@ contents, so two equal states print the same."
       (should (= (romacs-agent--journal-after session 1) (length first))))))
 
 (ert-deftest romacs-agent-kept-is-read-only-as-written ()
-  ;; Another session record's layout, a seq its journal lacks, or a form
-  ;; that does not read: the whole journal is read instead.
+  ;; A seq its journal lacks, or a form that does not read: the whole
+  ;; journal is read instead.
   (romacs-agent-kept-tests--with
     (let ((records (romacs-agent-kept-tests--claude)))
       (romacs-agent-kept-tests--write dir records)
       (let* ((session (romacs-agent-kept-tests--load dir))
              (good (romacs-agent--kept-get session)))
-        (dolist (bad (list (replace-regexp-in-string ":layout (id " ":layout (old id " good t t)
-                           (replace-regexp-in-string ":seq [0-9]+" ":seq 999" good)
+        (dolist (bad (list (replace-regexp-in-string ":seq [0-9]+" ":seq 999" good)
                            (substring good 0 (/ (length good) 2))))
           (romacs-agent--kept-put session bad)
           (let* ((read 0)
@@ -344,6 +343,49 @@ contents, so two equal states print the same."
                         (romacs-agent-kept-tests--load dir))))
           (should (= read 0))
           (should (equal (romacs-agent-reply again) "bye"))))))))
+
+;; 2026-11-21: a build that removed a field refused every kept state, and
+;; each busy session's whole history was replayed into the editor.
+(ert-deftest romacs-agent-kept-survives-a-removed-field ()
+  ;; Kept by a build with a field this one removed: read back, the field
+  ;; dropped, no record read again.
+  (romacs-agent-kept-tests--with
+    (let ((dir (expand-file-name romacs-agent-kept-tests--id (romacs-agent--state-root))))
+    (let ((records (romacs-agent-kept-tests--claude)))
+      (romacs-agent-kept-tests--write dir records)
+      (let* ((session (romacs-agent-kept-tests--load dir))
+             (kept (car (read-from-string (romacs-agent--kept-get session)))))
+        (romacs-agent--kept-put
+         session (let ((print-circle t) (print-length nil) (print-level nil))
+                   (prin1-to-string (plist-put (plist-put (copy-sequence kept) :layout (cons 'gone (plist-get kept :layout)))
+                                               :fields (cons '(gone . 7) (plist-get kept :fields))))))
+        (let* ((read 0)
+               (again (cl-letf* ((real (symbol-function 'romacs-agent--record))
+                                 ((symbol-function 'romacs-agent--record)
+                                  (lambda (session record) (cl-incf read) (funcall real session record))))
+                        (romacs-agent-kept-tests--load dir))))
+          (should (= read 0))
+          (should (= (romacs-agent-seq again) (length records)))
+          (should (equal (romacs-agent-reply again) "bye"))))))))
+
+(ert-deftest romacs-agent-kept-a-long-turn-is-kept-as-it-goes ()
+  ;; A turn's records past `romacs-agent--keep-every' since its state was
+  ;; kept: kept again within the turn, once the editor is idle, so a
+  ;; restart replays about that many.  Fewer wait for its end.
+  (romacs-agent-kept-tests--with
+    (let ((dir (expand-file-name romacs-agent-kept-tests--id (romacs-agent--state-root))))
+    (let* ((records (romacs-agent-kept-tests--claude))
+           (session (progn (romacs-agent-kept-tests--write dir (cl-subseq records 0 12))
+                           (romacs-agent-kept-tests--load dir)))
+           (pad (lambda (seq) (romacs-agent-kept-tests--record seq "note" (romacs-mcp--object "type" "pad")))))
+      (should (= (plist-get (romacs-agent--read-kept session) :seq) 12))
+      (setf (romacs-agent-caught-up session) t)
+      (cl-letf (((symbol-function 'run-with-idle-timer) #'ignore))
+        (romacs-agent--record session (funcall pad (+ 12 (1- romacs-agent--keep-every))))
+        (should-not romacs-agent--keeping)
+        (romacs-agent--record session (funcall pad (+ 12 romacs-agent--keep-every)))
+        (should (equal (caar romacs-agent--keeping) session)))))))
+
 (ert-deftest romacs-agent-kept-only-what-reads-back ()
   ;; A field holding what cannot be read back: nothing is kept.
   (romacs-agent-kept-tests--with
@@ -726,9 +768,9 @@ contents, so two equal states print the same."
                      (length (romacs-agent-kept-tests--claude)))))))))
 
 (ert-deftest romacs-agent-kept-a-folding-session-acted-on-folds-here ()
-  ;; Attached (or resumed, launched) while a worker folds it: folded here
-  ;; first, and the worker's late answer is let go.  The worker is given
-  ;; the editor's options.
+  ;; Acted on at once (a line written, a launch) while a worker folds it:
+  ;; folded here first, and the worker's late answer is let go.  The
+  ;; worker is given the editor's options.
   (romacs-agent-kept-tests--with
     (let ((records (romacs-agent-kept-tests--claude)) (romacs-agent-approval-policy 'ask))
       (romacs-agent-kept-tests--write dir records)
@@ -737,7 +779,7 @@ contents, so two equal states print the same."
         (let ((session (romacs-agent--load dir)))
           (should (eq (alist-get 'romacs-agent-approval-policy (plist-get (nth 5 (car jobs)) :bindings)) 'ask))
           (cl-letf (((symbol-function 'romacs-agent--connect) #'ignore))
-            (romacs-agent--attach session 0))
+            (romacs-agent--fold-now session))
           (should (= (romacs-agent-seq session) (length records)))
           (should-not (gethash romacs-agent-kept-tests--id romacs-agent--folding))
           (let ((read nil) (future (car jobs)))
@@ -751,6 +793,38 @@ contents, so two equal states print the same."
               (romacs-agent-kept-tests--drain))
             (should-not read))
           (should (= romacs-agent--fold-running 0)))))))
+
+(ert-deftest romacs-agent-kept-an-attach-to-a-folding-session-waits-for-its-fold ()
+  ;; 2026-11-21: relays saying hello after a restart attached sessions a
+  ;; worker still folded, so each was folded in the editor and its whole
+  ;; tail replayed there.  An attachment waits for the fold instead, and
+  ;; asks its supervisor only from the record the fold reached.
+  (romacs-agent-kept-tests--with
+    (let ((dir (expand-file-name romacs-agent-kept-tests--id (romacs-agent--state-root))))
+    (let ((records (romacs-agent-kept-tests--claude)) (asked nil) (read 0))
+      (romacs-agent-kept-tests--write dir records)
+      (romacs-agent-kept-tests--with-workers
+        (clrhash romacs-agent--sessions)
+        (let ((session (romacs-agent--load dir)))
+          (make-directory (file-name-directory (romacs-agent-host-socket session)) t)
+          (write-region "" nil (romacs-agent-host-socket session) nil 'silent)
+          (cl-letf* ((real (symbol-function 'romacs-agent--record))
+                     ((symbol-function 'romacs-agent--record)
+                      (lambda (target record) (when (eq target session) (cl-incf read)) (funcall real target record)))
+                     ((symbol-function 'romacs-agent--supervisor-listens-p) (lambda (_) t))
+                     ((symbol-function 'romacs-agent--connect)
+                      (lambda (s &rest _)
+                        (push (romacs-agent-seq s) asked)
+                        (setf (romacs-agent-connection s) (make-pipe-process :name "romacs-kept-attach" :noquery t)))))
+            (should-not (romacs-agent--attach session 0))
+            (should (gethash romacs-agent-kept-tests--id romacs-agent--folding))
+            (should-not asked)
+            (should (= read 0))
+            (romacs-agent-kept-tests--work (car jobs))
+            (should (= read 0))
+            (should-not (gethash romacs-agent-kept-tests--id romacs-agent--folding))
+            (should (equal asked (list (length records))))
+            (delete-process (romacs-agent-connection session)))))))))
 
 (ert-deftest romacs-agent-kept-a-message-to-a-folding-session-waits-for-its-fold ()
   ;; romacs#279: a message sent while a worker folds the session waits in

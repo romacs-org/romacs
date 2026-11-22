@@ -495,8 +495,10 @@ class Session:
                 ' (push (list this-command gcs-done gc-elapsed (window-start) (window-end) (point)'
                 ' (window-body-height nil t) (window-pixel-height)) perkey--states)'
                 ' (when (memq this-command (quote (save-buffer romacs-gui-save-buffer)))'
-                f' (with-temp-file "{path}"'
-                ' (dolist (s (reverse perkey--states)) (prin1 s (current-buffer)) (terpri (current-buffer))))))))')
+                # Written beside it, then renamed: never read part-written.
+                f' (with-temp-file "{path}.part"'
+                ' (dolist (s (reverse perkey--states)) (prin1 s (current-buffer)) (terpri (current-buffer))))'
+                f' (rename-file "{path}.part" "{path}" t)))))')
 
     def host_calls_form(self):
         """--host-calls' hook: the counts after each command, written out at C-x C-s."""
@@ -505,9 +507,10 @@ class Session:
                 ' (push (list this-command (cond ((minibufferp) (quote minibuffer)) ((bound-and-true-p isearch-mode) (quote isearch)) (t (quote top)))'
                 ' (window-start) (romacs--host-calls)) perkey--calls)'
                 ' (when (memq this-command (quote (save-buffer romacs-gui-save-buffer)))'
-                f' (let ((mode major-mode)) (with-temp-file "{path}"'
+                f' (let ((mode major-mode)) (with-temp-file "{path}.part"'
                 ' (prin1 mode (current-buffer)) (terpri (current-buffer))'
-                ' (dolist (s (reverse perkey--calls)) (prin1 s (current-buffer)) (terpri (current-buffer)))))))))')
+                ' (dolist (s (reverse perkey--calls)) (prin1 s (current-buffer)) (terpri (current-buffer))))'
+                f' (rename-file "{path}.part" "{path}" t))))))')
 
     def no_idle_auto_save(self):
         """M-: (setq auto-save-timeout nil).  read_char's idle auto-save of the
@@ -728,6 +731,19 @@ def session(args, index, latency):
     return result
 
 
+def net_per_key(phase, rate, keys):
+    """PHASE's instructions per key, less the idle RATE over its seconds."""
+    return (phase['instructions'] - rate * phase['seconds']) / keys
+
+
+def session_per_key(result, keys):
+    """Per phase of one valid session, its idle-subtracted instructions per
+    key, or None for a phase it refused."""
+    rate = idle_rate(result['idle'])
+    return {name: None if phase['problems'] else net_per_key(phase, rate, keys)
+            for name, phase in result['phases'].items()}
+
+
 def per_key(sessions, keys):
     """Per phase, idle-subtracted instructions per key: of the phases that
     delivered (`valid'), and of those that did not (`refused', with why);
@@ -738,8 +754,7 @@ def per_key(sessions, keys):
         for name in result['phases']:
             phase = result['phases'][name]
             entry = found.setdefault(name, {'valid': [], 'refused': [], 'why': [], 'paints': []})
-            entry['refused' if phase['problems'] else 'valid'].append(
-                (phase['instructions'] - rate * phase['seconds']) / keys)
+            entry['refused' if phase['problems'] else 'valid'].append(net_per_key(phase, rate, keys))
             entry['paints'].append(phase['paints'] / keys)
             entry['why'] += [p for p in phase['problems'][:1] if p not in entry['why']]
     return {name: {'valid': spread(e['valid']) if e['valid'] else None, 'paints_per_key': spread(e['paints']),

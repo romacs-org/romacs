@@ -453,6 +453,7 @@ Read-only text is copied before deletion signals its ordinary read-only error."
   (global-set-key [134217790] 'end-of-buffer)
   (global-set-key [27 62] 'end-of-buffer)
   (global-set-key [0] 'set-mark-command)
+  (global-set-key [?\C-\s] 'set-mark-command)
   (global-set-key [24 24] 'exchange-point-and-mark)
   (global-set-key [7] 'keyboard-quit))
 ;; The host delivers Return as the function key `return', as GNU's X and
@@ -463,10 +464,50 @@ Read-only text is copied before deletion signals its ordinary read-only error."
 (unless (lookup-key function-key-map [return])
   (put 'return 'ascii-character ?\C-m)
   (define-key function-key-map [return] [?\C-m]))
-;; Escape too is a function key, `escape', made ESC the same way.
+;; Escape and Tab too are function keys, `escape' and `tab', made ESC and
+;; TAB the same way.
 (unless (lookup-key function-key-map [escape])
   (put 'escape 'ascii-character ?\e)
   (define-key function-key-map [escape] [?\e]))
+(unless (lookup-key function-key-map [tab])
+  (put 'tab 'ascii-character ?\t)
+  (define-key function-key-map [tab] [?\t])
+  ;; common-win.el's alternative, which a window-system frame installs
+  ;; under GNU's Lisp: Meta+Tab is M-TAB.
+  (define-key function-key-map [M-tab] [?\M-\t]))
+
+;; Ctrl+i, Ctrl+m and Ctrl+[ are keys of their own on the GUI, the symbol
+;; events `C-i', `C-m' and `C-[' (native.rs), where a terminal could send
+;; only TAB, RET and ESC (ledger/divergences/VM2-GUI-KEYS).  Bound, each is
+;; its own key: (keymap-set map "C-<m>" ...).  Unbound, `function-key-map'
+;; makes it, with its other modifiers, the character a terminal sent, as it
+;; makes `return' RET, so a binding of RET, TAB or ESC still answers it.
+(defconst romacs-gui-control-keys '(?i ?m ?\[)
+  "The characters whose Ctrl chord the GUI delivers as a symbol event.")
+
+(defun romacs-gui-control-key-events ()
+  "Each GUI control key with any other modifiers, as (EVENT . LEGACY):
+EVENT the symbol the GUI delivers, LEGACY the character a terminal sent."
+  (let ((labels '((alt . "A-") (control . "C-") (hyper . "H-")
+                  (meta . "M-") (shift . "S-") (super . "s-")))
+        (sets '(nil))
+        (events nil))
+    (dolist (modifier '(alt hyper meta shift super))
+      (setq sets (append sets (mapcar (lambda (set) (cons modifier set)) sets))))
+    (dolist (char romacs-gui-control-keys)
+      (dolist (set sets)
+        (let ((prefix (mapconcat (lambda (label)
+                                   (if (memq (car label) (cons 'control set)) (cdr label) ""))
+                                 labels "")))
+          (push (cons (intern (concat prefix (string char)))
+                      (event-convert-list (append set (list 'control char))))
+                events))))
+    (nreverse events)))
+
+;; `read-char' reads each as its character (`ascii-character').
+(dolist (pair (romacs-gui-control-key-events))
+  (put (car pair) 'ascii-character (cdr pair))
+  (define-key function-key-map (vector (car pair)) (vector (cdr pair))))
 (defun romacs-newline (n)
   "Insert N newlines: RET in a workspace without simple.el's `newline'."
   (interactive "*p")

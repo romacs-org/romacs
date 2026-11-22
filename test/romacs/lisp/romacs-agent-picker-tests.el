@@ -12,7 +12,8 @@
   (require 'romacs-agent)
   (require 'romacs-agent-tools)
   (require 'romacs-agent-ui)
-  (require 'romacs-agent-board))
+  (require 'romacs-agent-board)
+  (require 'romacs-agent-menu))
 
 ;; These tests start no supervisor or harness: the build's own (beside the
 ;; binary) are not needed to make a session.
@@ -25,6 +26,7 @@
   `(let* ((root (make-temp-file "romacs-picker-" t))
           (program (expand-file-name "fake-claude" root))
           (process-environment (cons (concat "XDG_STATE_HOME=" root) process-environment))
+          (romacs-agent--models-probes (make-hash-table :test #'equal))
           ,@bindings)
      (ignore program)
      (with-temp-file program (insert "#!/bin/sh\n"))
@@ -73,19 +75,18 @@
   ;; The models cache not written (its file taken by another writer, a
   ;; full disk): reported, never signalled into the answer it came in.
   (romacs-agent-picker--with
-      ((session (romacs-agent--make :id "s" :harness 'claude :provider "claude"))
-       (romacs-agent-providers `(("claude" :program ,program))))
+      ((romacs-agent-providers `(("claude" :program ,program))))
     (cl-letf (((symbol-function 'romacs-agent--write-json) (lambda (&rest _) (error "Taken"))))
-      (romacs-agent--keep-models session '(("a" :label "A"))))))
+      (romacs-agent--keep-models (romacs-agent--configured "claude") '(("a" :label "A"))))))
 
 (ert-deftest romacs-agent-picker-models-merge ()
   (romacs-agent-picker--with
-      ((session (romacs-agent--make :id "s" :harness 'claude :provider "claude"))
-       (romacs-agent-providers `(("claude" :program ,program)))
+      ((romacs-agent-providers `(("claude" :program ,program)))
        (romacs-agent-models '((claude ("a" :label "Seed A" :efforts ("low" "high") :default-effort "high")
                                       ("b" :label "Seed B" :efforts ("low"))))))
-    (romacs-agent--keep-models session '(("a" :label "Reported A" :efforts ("low")) ("c" :label "Reported C")
-                                         ("b" :label "Reported B" :efforts nil)))
+    (romacs-agent--keep-models (romacs-agent--configured "claude")
+                               '(("a" :label "Reported A" :efforts ("low")) ("c" :label "Reported C")
+                                 ("b" :label "Reported B" :efforts nil)))
     (let ((instance (romacs-agent--configured "claude")))
       ;; What the harness says goes first; the catalogue fills in the rest.
       (let ((rows (romacs-agent--models instance)))
@@ -106,14 +107,21 @@
       (should-not (string-search "account" (with-temp-buffer
                                              (insert-file-contents (romacs-agent--models-file "claude"))
                                              (buffer-string))))
-      ;; Another program, or the same file changed: what was kept no longer holds.
+      ;; The same program, its file's time changed (a version manager's
+      ;; shim never changes it; a new build may): still its own.
       (set-file-times program (time-add (current-time) 100))
-      (should (equal (mapcar #'car (romacs-agent--models instance)) '("a" "b"))))))
+      (should (equal (mapcar #'car (romacs-agent--models instance)) '("a" "c" "b")))
+      ;; Another program: what was kept no longer holds.
+      (let ((other (expand-file-name "other-claude" root)))
+        (copy-file program other)
+        (should (equal (mapcar #'car (romacs-agent--models (plist-put (copy-sequence instance) :program other)))
+                       '("a" "b")))))))
 
 (ert-deftest romacs-agent-picker-the-run-s-initialize-brings-the-models ()
   (romacs-agent-picker--with
-      ((session (romacs-agent--make :id "s" :harness 'claude :provider "claude"
+      ((session (romacs-agent--make :id "s" :harness 'claude :provider "claude" :caught-up t
                                     :driver-state (list :initialize "romacs-init-1")))
+       (romacs-agent--sessions (let ((table (make-hash-table :test #'equal))) (puthash "s" session table) table))
        (romacs-agent-providers `(("claude" :program ,program))))
     (let* ((response (lambda (request-id body)
                        (romacs-mcp--object "type" "control_response"
@@ -128,10 +136,33 @@
                      '((:type handshake :state (:initialized t)))))
       (should (assoc "model-x" (romacs-agent--models (romacs-agent--configured "claude")))))))
 
+(ert-deftest romacs-agent-picker-a-replayed-initialize-keeps-nothing ()
+  ;; The cache written while another program was configured: a journal
+  ;; replayed in a copy (a batch process filling turns, a chat drawn
+  ;; again) brings an old initialize, under that process's settings.
+  ;; Kept, its stamp named the default program, and the configured one's
+  ;; rows were gone from every picker.  Only the live session keeps.
+  (romacs-agent-picker--with
+      ((live (romacs-agent--make :id "s" :harness 'claude :provider "claude" :caught-up t))
+       (copy (romacs-agent--make :id "s" :harness 'claude :provider "claude" :caught-up t
+                                 :driver-state (list :initialize "romacs-init-1")))
+       (romacs-agent--sessions (let ((table (make-hash-table :test #'equal))) (puthash "s" live table) table))
+       (romacs-agent-providers `(("claude" :program ,program))))
+    (romacs-agent--keep-models (romacs-agent--configured "claude") '(("kept" :label "Kept")))
+    (let ((answer (romacs-agent-picker--answer (romacs-agent-picker--model "x" "model-x" "X" '("low")))))
+      (should (equal (romacs-agent--claude-events
+                      copy (romacs-mcp--object "type" "control_response"
+                                               "response" (romacs-mcp--object "subtype" "success"
+                                                                              "request_id" "romacs-init-1"
+                                                                              "response" answer)))
+                     '((:type handshake :state (:initialized t)))))
+      (should (equal (mapcar #'car (romacs-agent--models (romacs-agent--configured "claude"))) '("kept"))))))
+
 (ert-deftest romacs-agent-picker-refused-answer-keeps-nothing ()
   (romacs-agent-picker--with
-      ((session (romacs-agent--make :id "s" :harness 'claude :provider "claude"
+      ((session (romacs-agent--make :id "s" :harness 'claude :provider "claude" :caught-up t
                                     :driver-state (list :initialize "r")))
+       (romacs-agent--sessions (let ((table (make-hash-table :test #'equal))) (puthash "s" session table) table))
        (romacs-agent-providers `(("claude" :program ,program))))
     ;; Refused, it keeps nothing, yet the run goes on: messages are not held.
     (should (equal (romacs-agent--claude-events
@@ -147,27 +178,40 @@
         `(("claude" :display "Claude" :config-dir ,claude :program ,program :model "a" :effort "high")
           ("claude2" :display "Claude" :config-dir ,(expand-file-name "gone" root) :program ,program)
           ("claude3" :config-dir ,claude :program ,program :enabled nil)
-          ("codex" :display "Codex" :config-dir ,claude :program ,program)))
+          ("codex" :display "Codex" :config-dir ,claude :program ,program :model "b")))
        (romacs-agent-default-provider "codex")
        (romacs-agent-models '((claude ("a" :label "Model A" :efforts ("low" "high")))
-                              (codex ("b" :label "Model B")))))
+                              (codex ("b" :label "Model B" :efforts ("medium") :default-effort "medium")))))
     (make-directory claude)
     ;; Each harness once, its pool its provider, the default's first.
     (let* ((rows (romacs-agent--picker-rows)) (texts (mapcar #'car rows)))
       (should (equal texts '("Codex · default" "Codex · Model B" "Claude Code · default" "Claude Code · Model A")))
       (should (equal (delete-dups (mapcar (lambda (row) (plist-get (cdr row) :provider)) rows)) '(codex claude)))
-      (should (equal (plist-get (cdr (assoc "Claude Code · default" rows)) :note) "a · high")))
+      (should (equal (plist-get (cdr (assoc "Claude Code · default" rows)) :note) "a · effort high")))
     ;; Accounts, asked for: the default instance first, the disabled not at all, alike ones apart.
     (let* ((rows (romacs-agent--picker-rows t)) (texts (mapcar #'car rows)))
       (should (equal texts '("Codex · default" "Codex · Model B" "Claude · default" "Claude · Model A"
                              "Claude (claude2) · default" "Claude (claude2) · Model A")))
-      (should (equal (plist-get (cdr (assoc "Codex · default" rows)) :note) "harness's own"))
+      (should (equal (plist-get (cdr (assoc "Codex · default" rows)) :note) "b · effort medium"))
       (should (string-suffix-p "default" (plist-get (cdr (car rows)) :group)))
-      (should (equal (plist-get (cdr (assoc "Claude · default" rows)) :note) "a · high"))
+      (should (equal (plist-get (cdr (assoc "Claude · default" rows)) :note) "a · effort high"))
       (should (equal (plist-get (cdr (assoc "Claude · Model A" rows)) :note) "effort low...high"))
       (should (equal (plist-get (cdr (assoc "Claude (claude2) · default" rows)) :note) "dir missing"))
       (should (equal (plist-get (cdr (assoc "Claude · Model A" rows)) :model) "a"))
       (should-not (plist-get (cdr (assoc "Claude · default" rows)) :model)))))
+
+(ert-deftest romacs-agent-picker-handoff-selects-model-within-current-pool ()
+  (let ((session (romacs-agent--make :harness 'claude :provider "claude2"
+                                     :options '(:effort "max")))
+        selected)
+    (cl-letf (((symbol-function 'romacs-agent-menu--session) (lambda () session))
+              ((symbol-function 'romacs-agent--instance)
+               (lambda (name harness)
+                 (list :name name :harness harness :models '(("opus" :efforts ("high"))))))
+              ((symbol-function 'romacs-agent-select)
+               (lambda (&rest arguments) (setq selected arguments))))
+      (romacs-agent-chat-handoff 'claude "opus" nil)
+      (should (equal selected (list session "opus" nil "claude2"))))))
 
 (defun romacs-agent-picker--reader (answers asked)
   "A `completing-read' giving ANSWERS in turn, each prompt, group and
@@ -183,6 +227,66 @@ affixation it saw pushed on the list in cell ASKED."
                   (all-completions "" table))
             (car asked))
       answer)))
+
+(ert-deftest romacs-agent-picker-handoff-asks-for-named-model-and-effort ()
+  (romacs-agent-picker--with
+      ((romacs-agent-providers `(("claude" :config-dir ,root :program ,program)
+                                 ("codex" :config-dir ,root :program ,program)))
+       (romacs-agent-models '((codex ("c" :label "C" :efforts ("low" "high") :default-effort "high"))))
+       (session (romacs-agent--make :harness 'claude :provider "claude"))
+       (answers (list (list "Codex · C" "low"))) (asked (list nil))
+       selected)
+    (cl-letf (((symbol-function 'romacs-agent--want-models) #'ignore)
+              ((symbol-function 'romacs-agent-menu--session) (lambda () session))
+              ((symbol-function 'completing-read) (romacs-agent-picker--reader answers asked))
+              ((symbol-function 'read-string) (lambda (&rest _) "Continue"))
+              ((symbol-function 'romacs-agent-menu--hand-off)
+               (lambda (&rest args) (setq selected args))))
+      (call-interactively #'romacs-agent-chat-handoff)
+      (should (equal selected (list session "codex" "c" "Continue" "low")))
+      (should (equal (nth 3 (cadr (car asked))) '("Codex · C")))
+      (should (string-match-p "Effort.*high" (caar (car asked)))))))
+
+(ert-deftest romacs-agent-picker-handoff-opens-in-originating-window ()
+  (let ((session (romacs-agent--make :title "Source"))
+        (target (generate-new-buffer " *handoff target*"))
+        callback options)
+    (unwind-protect
+        (save-window-excursion
+          (with-temp-buffer
+            (switch-to-buffer (current-buffer))
+            (let ((window (selected-window))
+                  (display-buffer-alist '(("handoff target" (display-buffer-no-window)
+                                          (allow-no-window . t)))))
+              (cl-letf (((symbol-function 'romacs-agent-events-async)
+                         (lambda (_ then) (setq callback then)))
+                        ((symbol-function 'romacs-agent-handoff)
+                         (lambda (_ _events _provider _model _next opts)
+                           (setq options opts)
+                           target))
+                        ((symbol-function 'romacs-agent-log-chat) (lambda (&rest _) target))
+                        ((symbol-function 'romacs-agent-log-source-seen) #'ignore))
+                (romacs-agent-menu--hand-off session "codex" "astra" "Continue" "high")
+                (funcall callback nil)
+                (should (equal options '(:effort "high")))
+                (should (eq (selected-window) window))
+                (should (eq (window-buffer window) target))))))
+      (kill-buffer target))))
+
+(ert-deftest romacs-agent-picker-reads-compatible-legacy-model-cache ()
+  (romacs-agent-picker--with
+      ((instance (list :name "claude" :program program))
+       (cache (romacs-agent--models-file "claude")))
+    (make-directory (file-name-directory cache) t)
+    (let* ((path (file-truename program))
+           (time (file-attribute-modification-time (file-attributes path)))
+           (legacy (concat path " " (format-time-string "%s.%N" time)))
+           (object (romacs-mcp--object "stamp" legacy "models" (vector (romacs-mcp--object "id" "opus")))))
+      (romacs-agent--write-json cache object)
+      (should (equal (caar (romacs-agent--models-kept instance)) "opus"))
+      (puthash "stamp" (concat path " 0.000000000") object)
+      (romacs-agent--write-json cache object)
+      (should-not (romacs-agent--models-kept instance)))))
 
 (ert-deftest romacs-agent-picker-selection ()
   (romacs-agent-picker--with
@@ -210,9 +314,9 @@ affixation it saw pushed on the list in cell ASKED."
       (should (equal (romacs-agent--read-selection '(4)) '(claude :model "a" :effort "low")))
       (should (string-match-p "Effort.*high" (car (car (car asked)))))
       (should (equal (nth 3 (car (car asked))) '("low" "high")))
-      ;; No default anywhere: asked without C-u.
-      (setcar answers (list "Claude Code · B" "low"))
-      (should (equal (romacs-agent--read-selection nil) '(claude :model "b" :effort "low")))
+      ;; No default anywhere: not asked, the harness's own.
+      (setcar answers (list "Claude Code · B"))
+      (should (equal (romacs-agent--read-selection nil) '(claude :model "b")))
       ;; A model with no efforts asks none, even with C-u.
       (setcar answers (list "Codex · C"))
       (should (equal (romacs-agent--read-selection '(4)) '(codex :model "c"))))))
@@ -274,7 +378,7 @@ affixation it saw pushed on the list in cell ASKED."
         (goto-char (point-max))
         (romacs-agent-board-new)
         (should (equal offered (expand-file-name "repository/" root))))
-      (let ((romacs-agent-ui--session (romacs-agent--make :id "s" :cwd (directory-file-name sub))))
+      (let ((romacs-agent-log--session (romacs-agent--make :id "s" :cwd (directory-file-name sub))))
         (setq offered nil)
         (romacs-agent-chat-new)
         (should (equal offered sub))))))

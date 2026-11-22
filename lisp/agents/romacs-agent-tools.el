@@ -328,6 +328,26 @@ call stays running until its answer is ready."
      "limit" (romacs-agent-tools--limit-object session)
      "next" (if (equal status "running") (romacs-agent-tools--running-next session) :null))))
 
+(defconst romacs-agent-tools--ack-keys
+  '("taskId" "status" "state" "title" "provider" "harness" "model" "worktree" "branch" "limit" "next")
+  "The fields of a task's record (`romacs-agent-tools--task') an action on
+it answers with: what its caller acts on next.")
+
+(defun romacs-agent-tools--ack (session &optional result)
+  "SESSION's task record as an action on it answers (a message, a reply,
+a delegation, a switch, a renewal, a cancel): `romacs-agent-tools--ack-keys'
+and resultChars, its last result's length, never that result again (it
+would repeat into the caller's context each time).  RESULT, a result
+the caller has not had yet, goes with it when given.  The whole record
+is romacs_task_status's."
+  (let ((task (romacs-agent-tools--task session)) (ack (romacs-mcp--object)))
+    (dolist (key romacs-agent-tools--ack-keys) (puthash key (gethash key task) ack))
+    ;; A limit's text is the turn's reply: its result again.
+    (when (hash-table-p (gethash "limit" ack)) (remhash "text" (gethash "limit" ack)))
+    (puthash "resultChars" (length (or (romacs-agent-reply session) "")) ack)
+    (when result (puthash "result" result ack))
+    ack))
+
 (defun romacs-agent-tools--known (arguments)
   (or (romacs-agent-get (gethash "taskId" arguments)) (user-error "No task %s" (gethash "taskId" arguments))))
 
@@ -487,6 +507,59 @@ by counting characters from the start."
           (goto-char (point-max)))
          (t (setq ok nil))))
       (and ok (nreverse wakes)))))
+
+(defconst romacs-agent--reply-line-regexp
+  (concat "\n\\(?:"
+          "Reply to this message with SendMessage(to=\"[^\"\n]*\", message=\\.\\.\\.)\\."
+          "\\|Reply to this \\(?:message\\|result\\) with romacs_task_reply(messageId=\"[^\"\n]*\", text=\\.\\.\\.)\\."
+          "\\|Its sender is outside Romacs and has no reply route: it reads only your turn's reply\\."
+          "\\)[ \t]*\\(?:\n[ \t\n]*\\|\\'\\)")
+  "The line `romacs-agent--message-reply-line' writes after an envelope,
+each of its forms whole, and the space after it.")
+
+(defun romacs-agent--envelope-at (text at)
+  "The whole envelope of TEXT at AT, the line its sender wrote saying how
+to answer it after it (`romacs-agent--message-reply-line'), as (MESSAGE
+. END), MESSAGE a plist of :from, :state and :text; nil if none is
+there.  An envelope without that line is a user's example."
+  (when (eq (string-match "<romacs-message\\( [^>]*\\)?>\n?" text at) at)
+    (let* ((attributes (or (match-string 1 text) ""))
+           (open-end (match-end 0))
+           (attribute (lambda (name)
+                        (and (string-match (format " %s=\"\\([^\"]*\\)\"" name) attributes)
+                             (match-string 1 attributes))))
+           (from (funcall attribute "from"))
+           (kind (funcall attribute "kind"))
+           (close (string-search "</romacs-message>" text open-end))
+           (body (and close (string-trim-right (substring text open-end close) "\n")))
+           (after (and close (+ close (length "</romacs-message>")))))
+      (when (and after (eq (string-match romacs-agent--reply-line-regexp text after) after))
+        (cons (list :from (or from "a session") :state kind :text body) (match-end 0))))))
+
+(defun romacs-agent--envelopes (text)
+  "The messages of TEXT when it is whole envelopes and space alone, in
+order; nil otherwise."
+  (let ((at (progn (string-match "\\`[ \t\n]*" text) (match-end 0))) (found nil) (ok t))
+    (while (and ok (< at (length text)))
+      (if-let* ((envelope (romacs-agent--envelope-at text at)))
+          (setq found (cons (car envelope) found) at (cdr envelope))
+        (setq ok (string-match-p "\\`[ \t\n]*\\'" (substring text at)) at (length text))))
+    (and ok found (nreverse found))))
+
+(defun romacs-agent-incoming-of (text)
+  "TEXT, written to an agent as a user's turn, read as what came from
+elsewhere: other sessions' messages (whole <romacs-message> envelopes,
+`romacs-agent--message-envelope', each with the line saying how to
+answer it) or a delegated task's wakes.  A list of plists of :from
+\(whom it came from), :state (the message's kind, or the task's state)
+and :text (its body), one per message or wake; nil for anything else,
+the user's own words among them."
+  (cond ((not (stringp text)) nil)
+        ((string-match-p "\\`[ \t\n]*<romacs-message[ >]" text) (romacs-agent--envelopes text))
+        ((string-prefix-p "Delegated task " text)
+         (mapcar (lambda (wake) (list :from (plist-get wake :title) :state (plist-get wake :state)
+                                      :text (plist-get wake :result)))
+                 (romacs-agent-tools--wakes-parse text)))))
 
 (defun romacs-agent-tools--wake-parse (text)
   "TEXT read back as one wake (`romacs-agent-tools--wakes-parse'), or nil."
@@ -857,22 +930,27 @@ again then."
 (add-hook 'romacs-agent-restored-hook #'romacs-agent-tools--reap-restored)
 
 (defun romacs-agent-tools--wait (child timeout-ms arrived)
-  "A deferred answer: CHILD's task record once its turn ends, asks for an
-approval, or TIMEOUT-MS passes (the child goes on; its end then wakes
-the parent).  The wait ends within the session relay's reply timeout,
-counted from the request's ARRIVED time, which would otherwise withdraw
-the call (and retire this wait) and drop its answer."
+  "A deferred answer: CHILD's task record (`romacs-agent-tools--ack') once
+its turn ends, asks for an approval, or TIMEOUT-MS passes (the child goes
+on; its end then wakes the parent).  An end its parent has not had yet
+is this answer's to give, in place of its wake: its result goes with
+the record, cut as a wake's.  The wait ends within the session relay's
+reply timeout, counted from the request's ARRIVED time, which would
+otherwise withdraw the call (and retire this wait) and drop its answer."
   (let ((deadline (min (+ (float-time) (/ (or timeout-ms 600000) 1000.0))
                        (+ arrived (max 1 (- romacs-agent-reply-timeout 5))))))
     (romacs-mcp-defer
      (lambda ()
-       (let ((status (romacs-agent-tools--status child)))
-         (cond ((member status '("completed" "failed" "cancelled" "waiting"))
-                (when (member status '("completed" "failed"))
-                  (romacs-agent-tools--answer child (romacs-agent-done-seq child)))
-                (list (romacs-agent-tools--task child)))
+       (let ((status (romacs-agent-tools--status child)) (seq (romacs-agent-done-seq child)))
+         (cond ((member status '("completed" "failed"))
+                (let ((new (romacs-agent-tools--wanted-p child seq)))
+                  (when new (romacs-agent-tools--answer child seq))
+                  (list (romacs-agent-tools--ack
+                         child (and new (romacs-agent-tools--wake-result
+                                         (romacs-agent-id child) (or (romacs-agent-reply child) "")))))))
+               ((member status '("cancelled" "waiting")) (list (romacs-agent-tools--ack child)))
                ((> (float-time) deadline)
-                (let ((task (romacs-agent-tools--task child))) (puthash "waitTimedOut" t task) (list task))))))
+                (let ((ack (romacs-agent-tools--ack child))) (puthash "waitTimedOut" t ack) (list ack))))))
      deadline)))
 
 (defun romacs-agent-tools--wake-waits (_session _event)
@@ -924,7 +1002,7 @@ with resume it goes on with that conversation of the instance's
                     child (lambda ()
                             (if (equal (gethash "mode" arguments) "wait")
                                 (romacs-agent-tools--wait child (gethash "timeoutMs" arguments) arrived)
-                              (romacs-agent-tools--task child)))
+                              (romacs-agent-tools--ack child)))
                     prompted)))
          (known (and request (romacs-agent-requested parent request)))
          ;; A brief is sent: its answer waits for the task to have it.
@@ -1048,7 +1126,8 @@ child, sibling, or external."
   "Send TEXT from SENDER (a session, or nil) to TARGET as a message by MODE
 \(`romacs-agent-tools--send-modes'), answering IN-REPLY-TO when given;
 BY-USER, SENDER's user wrote it.  A sibling's parent gets a copy with
-its next wake.  Answer TARGET's task record and the message's id."
+its next wake.  Answer TARGET's task record (`romacs-agent-tools--ack')
+and the message's id."
   (when (string-empty-p (string-trim (or text ""))) (user-error "message is empty"))
   (unless (member mode (cons "steer" romacs-agent-tools--send-modes))
     (user-error "mode must be one of %s" (string-join romacs-agent-tools--send-modes ", ")))
@@ -1066,7 +1145,7 @@ its next wake.  Answer TARGET's task record and the message's id."
       (let ((parent (plist-get (romacs-agent-options target) :parent)))
         (puthash parent (append (gethash parent romacs-agent-tools--copies) (list (list sender target mode text)))
                  romacs-agent-tools--copies)))
-    (let ((record (romacs-agent-tools--task target)))
+    (let ((record (romacs-agent-tools--ack target)))
       (puthash "messageId" (plist-get message :id) record)
       record)))
 
@@ -1470,7 +1549,7 @@ its parent and wake rule)."
                 ;; Its own next step: its own words.
                 (romacs-agent-tools--tell task next)
               (romacs-agent-tools--message-to (romacs-agent-get caller) task next "queue")))
-          (let ((record (romacs-agent-tools--task task)))
+          (let ((record (romacs-agent-tools--ack task)))
             (puthash "next" (if (equal id caller)
                                 (format "You %s once this turn ends, the same conversation: end your turn now." verb)
                               (format "It %ss once its running turn ends, the same conversation; its next end wakes you as before."
@@ -1502,7 +1581,7 @@ role and worktree."
        (let ((made (car cell)))
          (cond ((null made) nil)
                ((plist-get made :error) (user-error "%s" (plist-get made :error)))
-               (t (let ((record (romacs-agent-tools--task (plist-get made :child))))
+               (t (let ((record (romacs-agent-tools--ack (plist-get made :child))))
                     (puthash "handedOffFrom" (romacs-agent-id task) record)
                     (list record)))))))))
 
@@ -1555,7 +1634,7 @@ once its running turn ends (`romacs-agent-renew-soon')."
          (own (equal id caller)))
     (unless own (romacs-agent-tools--own task caller "renew it"))
     (let ((when (romacs-agent-renew-soon task (or (gethash "why" arguments) (if own "its own" "its parent's"))))
-          (record (romacs-agent-tools--task task)))
+          (record (romacs-agent-tools--ack task)))
       (puthash "next" (cond (own "You renew once this turn ends: end your turn now. Your next message carries a brief.")
                             ((eq when 'now) "It renews now; your next message to it carries a brief of its conversation.")
                             (t "It renews once its running turn ends; its next end wakes you as before."))
@@ -1572,7 +1651,7 @@ once its running turn ends (`romacs-agent-renew-soon')."
     ;; An idle one has no end of a run to tell its views.
     (romacs-agent--raise child (list :type 'status :text "cancelled"))
     (romacs-agent-stop child)
-    (romacs-agent-tools--task child)))
+    (romacs-agent-tools--ack child)))
 
 (defun romacs-agent-tools--effort-option (instance)
   "The name INSTANCE's harness's effort goes by in a target's options."
@@ -1620,9 +1699,11 @@ new work draws on now."
 (defun romacs-agent-tools--capabilities (arguments)
   "Each provider instance (`romacs-agent-instances'): its harness,
 directory, program, models, whether it is enabled and where it comes
-from; and each one Romacs cannot run, with why."
+from; and each one Romacs cannot run, with why.  The models are those
+known: a harness not asked yet in this run is asked in the background."
   (romacs-mcp--instance arguments)
   (pcase-let ((`(,instances . ,constraints) (romacs-agent-instances t)))
+    (romacs-agent--want-models (cl-remove-if-not (lambda (i) (plist-get i :enabled)) instances))
     (romacs-mcp--object
      "default" (or (ignore-errors (romacs-agent--default-provider)) :null)
      "providers"
@@ -1653,6 +1734,7 @@ from; and each one Romacs cannot run, with why."
 
 (defvar warm-restart-last-result)
 (declare-function warm-restart-request "warm-restart")
+(declare-function romacs-session-reset-target "romacs-live" ())
 (declare-function romacs-server--build-label "romacs-server" (true))
 
 (defun romacs-agent-tools--restart-wake-file (session)
@@ -1667,9 +1749,13 @@ editor is between commands; tell the calling session its verdict."
   (romacs-mcp--instance arguments)
   (require 'warm-restart)
   (let* ((id (romacs-agent-tools--caller))
-         (session (and id (romacs-agent-get id))))
+         (session (and id (romacs-agent-get id)))
+         (target (or (gethash "target" arguments)
+                     (and (eq (gethash "fresh" arguments) t) (romacs-session-reset-target)))))
     (warm-restart-request
-     :target (gethash "target" arguments)
+     :target target
+     :fresh (and (eq (gethash "fresh" arguments) t)
+                 (if (eq (gethash "keepBuffers" arguments) t) 'buffers 'unsaved))
      :delay (gethash "delay" arguments)
      :expiry (gethash "expiry" arguments)
      ;; What the image cannot carry ends, or comes back with its package:
@@ -1690,7 +1776,7 @@ editor is between commands; tell the calling session its verdict."
                                                          #'ignore))))
     (romacs-mcp--object
      "status" (symbol-name (plist-get warm-restart-last-result :status))
-     "target" (or (gethash "target" arguments) :null)
+     "target" (or target :null)
      "waitsFor" "this call's reply, then the editor between commands"
      "verdict" "told this session when the new Romacs is judged; romacs_restart_status reads the record")))
 
@@ -1889,8 +1975,10 @@ HEAD: it commits there, and you merge the branch and remove the worktree (the ta
 never removes one. Use it for children that edit files at the same time. resume takes over an existing conversation \
 of the provider (a Claude Code session id or a Codex thread id) as your task: cwd is required, the directory it was \
 held in; task is sent to it as is, as its next message (empty: none). Taking over one you already own returns its \
-task and sends nothing; one another session owns is refused. Talk to a running task with romacs_task_send; \
-romacs_task_list finds your tasks again."))
+task and sends nothing; one another session owns is refused. Answers the task's short record: taskId, status, \
+title, provider, model, worktree and branch, next, and resultChars, its last result's length; a wait's carries the \
+result it waited for (cut as a wake's), never one you had. romacs_task_status reads a task's whole record and \
+result. Talk to a running task with romacs_task_send; romacs_task_list finds your tasks again."))
 
 (romacs-mcp-register-tool
  "romacs_delegate_task"
@@ -1923,7 +2011,7 @@ romacs_task_list finds your tasks again."))
 (romacs-mcp-register-tool
  "romacs_task_status"
  "A delegated task's status (running, waiting, completed, failed, cancelled), provider, model, turns, cost and its \
-last result."
+last result, whole: the tools that act on a task answer only its length (resultChars)."
  (romacs-mcp--schema '(("instance" . "string") ("taskId" . "string")) '("taskId"))
  (lambda (arguments) (romacs-mcp--instance arguments) (romacs-agent-tools--task (romacs-agent-tools--known arguments)))
  (romacs-mcp--object "readOnlyHint" t))
@@ -1937,7 +2025,8 @@ answers with romacs_task_reply or its turn's reply; inReplyTo links this one to 
 it at once; one whose harness ended is resumed for it. mode queue (default); replace: in place of your messages still \
 waiting for it; interrupt: its turn cut short, then this first. A task's next turn end wakes its parent with its reply \
 by its wake rule: end your turn then, do \
-not poll. Answers its task record."
+not poll. Answers the messageId and the task's short record (taskId, status, title, provider, model, next, \
+resultChars), never its last result: romacs_task_status reads that."
  (romacs-mcp--object
   "type" "object"
   "properties" (romacs-mcp--object
@@ -1956,7 +2045,7 @@ not poll. Answers its task record."
  "Answer a message another session sent you (a <romacs-message>, by its id): routed back to its sender, whatever \
 it is to you (parent, child, sibling), linked to the message it answers. A message from your parent is answered \
 by your turn's reply too: use this to answer before your turn ends, or anyone else. mode as romacs_task_send's. \
-Answers the sender's task record and the reply's messageId."
+Answers the reply's messageId and the sender's short record, as romacs_task_send's."
  (romacs-mcp--object
   "type" "object"
   "properties" (romacs-mcp--object
@@ -2030,12 +2119,15 @@ checks that failed and the verdict (verified, rolled-back, rollback-failed)."
  "Restart Romacs into a new process once your turn ends, carrying the session (buffers, windows, histories) \
 and its agent sessions: after an install, the new build runs. target is a build directory (one holding \
 romacs-vm-gui and lisp, e.g. the launcher's current) or a binary; omitted, the session's restart \
-command or its own binary. It waits until your turn has ended, nothing is BLOCKED (unsaved work that cannot be \
+command or its own binary. fresh true makes it a reset (romacs-session-reset): onto the installed build \
+when target is omitted, carrying no live Lisp files, kill ring, registers, histories or kept globals, only \
+unsaved text and agent sessions; keepBuffers true carries the file buffers and their windows too. It waits until your turn has ended, nothing is BLOCKED (unsaved work that cannot be \
 carried), no Romacs tool call is in flight and the editor is between commands, for delay seconds (default 2), up \
 to expiry seconds (default 900). The same supervised restart as romacs_restart, whose verdict this session is \
 told."
  (romacs-mcp--schema '(("instance" . "string") ("target" . "string") ("delay" . "number")
-                       ("expiry" . "number") ("force" . "boolean"))
+                       ("expiry" . "number") ("force" . "boolean") ("fresh" . "boolean")
+                       ("keepBuffers" . "boolean"))
                      nil)
  #'romacs-agent-tools--restart)
 

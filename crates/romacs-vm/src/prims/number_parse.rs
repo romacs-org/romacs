@@ -18,7 +18,7 @@ defsubr! { name = "string-to-number", gnu = "data.c:3092", effect = Pure,
         // CHECK_STRING precedes CHECK_FIXNUM and the radix range check in GNU.
         let bytes = cx.string_bytes(string)?;
         let radix = if base == Value::NIL { 10 } else {
-            let n = base.integer_value().ok_or(Fault::Wrong("fixnump", base))?;
+            let n = base.integer_value().ok_or_else(|| Fault::Wrong("fixnump", base))?;
             if !(2..=16).contains(&n) { return Err(Fault::Range1(base)); }
             n as u32
         };

@@ -446,7 +446,7 @@ impl Leaf<'_> {
         Ok(if function == Value::UNBOUND { Value::NIL } else { function })
     }
     fn fixnum(&self, v: Value) -> std::result::Result<i64, Fault> {
-        v.integer_value().ok_or(Fault::Wrong("fixnump", v))
+        v.integer_value().ok_or_else(|| Fault::Wrong("fixnump", v))
     }
     /// buffer.c fix_position.
     pub(super) fn fix_position(&self, v: Value) -> std::result::Result<i64, Fault> {
@@ -465,7 +465,7 @@ impl Leaf<'_> {
     /// Fcar and Fcdr together.
     fn syntax_car_cdr(&self, v: Value) -> std::result::Result<(Value, Value), Fault> {
         if v == Value::NIL { return Ok((Value::NIL, Value::NIL)); }
-        self.pair(v).ok_or(Fault::Wrong("listp", v))
+        self.pair(v).ok_or_else(|| Fault::Wrong("listp", v))
     }
     /// internalize_parse_state.
     fn internalize_parse_state(&self, external: Value) -> std::result::Result<ParseState, Fault> {
@@ -934,7 +934,7 @@ impl Leaf<'_> {
     }
     fn syntax_character(&self, v: Value) -> std::result::Result<u32, Fault> {
         v.integer_value().filter(|c| (0..=i64::from(crate::lstring::MAX_CHAR)).contains(c))
-            .map(|c| c as u32).ok_or(Fault::Wrong("characterp", v))
+            .map(|c| c as u32).ok_or_else(|| Fault::Wrong("characterp", v))
     }
 }
 

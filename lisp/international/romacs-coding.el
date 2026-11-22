@@ -37,3 +37,9 @@
   "Refuse the write `select-safe-coding-system' would ask about.
 Signal `romacs-unsafe-coding' with UNSAFE and the safe CODINGS."
   (signal 'romacs-unsafe-coding (list unsafe codings)))
+
+;; Only the workspace regime loads this file: help's completion must not
+;; load it by a prefix of its names into a --loadup session.
+;; Local Variables:
+;; autoload-compute-prefixes: nil
+;; End:

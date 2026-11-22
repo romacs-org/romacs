@@ -2893,7 +2893,7 @@ and NEW-NAME will be prompted for."
      (lambda (form)
        (gnus-group-edit-group-done part group form)))
     (local-set-key
-     "\C-c\C-i"
+     (kbd "C-c TAB")
      (gnus-create-info-command
       (cond
        ((eq part 'method)

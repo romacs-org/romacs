@@ -24,17 +24,17 @@ import fileio_live as fio
 import find_file_live as ff
 import live_oracle as live
 
-INIT = '''(write-region
+INIT = live.WRITE_WHOLE + '''(live-write-whole
  (prin1-to-string
   (mapcar (lambda (name)
             (list name (autoloadp (symbol-function name)) (commandp name) (featurep name)))
           '(gnosis-dashboard)))
- nil {state})
-(write-region
+ {state})
+(live-write-whole
  (prin1-to-string
   (list global-font-lock-mode (expand-file-name abbrev-file-name)
         auto-save-list-file-prefix user-emacs-directory))
- nil {session})
+ {session})
 (defun romacs-live-elisp-state ()
   "Record the visited Lisp file's buffer, then fontify it explicitly."
   (interactive)
@@ -47,12 +47,12 @@ INIT = '''(write-region
                      (nreverse seen)))))
       (let ((visited (funcall faces)))
         (font-lock-ensure)
-        (write-region
+        (live-write-whole
          (prin1-to-string
           (list major-mode font-lock-mode
                 (and (memq 'jit-lock-function fontification-functions) t)
                 visited (funcall faces)))
-         nil {elisp})))))
+         {elisp})))))
 '''
 
 
@@ -133,13 +133,13 @@ def main():
             echo = scene_rows(log_path.read_text(errors='replace'), 'Text')[-1:]
             report['checks'].append({'command': command, 'shown': buffer, 'echo': echo})
 
-        fio.wait(lambda: state.exists() and state.read_text(), args.timeout, 'init.el after --loadup', process)
+        fio.wait(state.exists, args.timeout, 'init.el after --loadup', process)
         at_init = state.read_text()
         report['checks'].append({'init_state': at_init})
         expected = '((gnosis-dashboard t t nil))'
         if at_init != expected:
             raise AssertionError(f'at init: {at_init}, expected {expected}')
-        fio.wait(lambda: session.exists() and session.read_text(), args.timeout, 'session state after init', process)
+        fio.wait(session.exists, args.timeout, 'session state after init', process)
         at_init = session.read_text()
         report['checks'].append({'session_state': at_init})
         config_dir = f'{home}/config/romacs/'

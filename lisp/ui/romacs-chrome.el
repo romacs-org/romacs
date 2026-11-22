@@ -118,11 +118,43 @@ style's name or a property list; a theme that declares none is `modern'."
         (setq merged (plist-put merged (car style) (car (cdr style)))
               style (cdr (cdr style)))))))
 
+(defun romacs-style--round (x)
+  "X to two decimals, so equal faces give equal tokens."
+  (/ (round (* 100 x)) 100.0))
+
+(defun romacs-style-lighting (background glow)
+  "The lighting of a layer over BACKGROUND that glows in GLOW, two
+#RRGGBB colours, as style tokens: :shadow-layer (REACH DROP OPACITY) and
+:glow-layer (REACH OPACITY).  Every theme gets the same lift.  A shadow
+darkens what lies under it, so its weight follows the background's
+luminance: broad and dense on a dark one, which black barely darkens,
+tight and faint on a light one, where a dense one reads as a smudge.  A
+glow is fainter the more the accent stands off the background, so a
+bright accent on near-black does not outshine the frame's own edge."
+  (let* ((lum (romacs-color-luminance background))
+         (accent (romacs-color-luminance glow))
+         (contrast (/ (+ (max lum accent) 0.05) (+ (min lum accent) 0.05))))
+    (list :shadow-layer (list (round (- 18 (* 8 lum))) (round (- 6 (* 2 lum)))
+                              (romacs-style--round (min 0.55 (/ 0.14 (max lum 0.01)))))
+          ;; A rim close to the edge, not a halo across the frame.
+          :glow-layer (list 10 (romacs-style--round (max 0.18 (min 0.35 (/ 1.4 (max 1.0 (- contrast 1))))))))))
+
+(defun romacs-style--theme-lighting ()
+  "`romacs-style-lighting' of the enabled theme's faces: the default
+background and `romacs-layer-glow'; nil while no theme is enabled or
+either is not a colour."
+  (when-let* ((custom-enabled-themes)
+              (background (romacs-chrome--hex (face-background 'default nil t)))
+              (glow (romacs-chrome--hex (face-foreground 'romacs-layer-glow nil t))))
+    (romacs-style-lighting background glow)))
+
 (defun romacs-style-resolve ()
-  "The style in force: `romacs-style-flat', under the enabled colour
-scheme's own, under `romacs-style-overrides'."
+  "The style in force: `romacs-style-flat', under the lighting the
+enabled theme's faces give (`romacs-style-lighting'), under the enabled
+colour scheme's own style, under `romacs-style-overrides'."
   (let ((scheme (romacs-style--scheme)))
     (romacs-style--over romacs-style-flat
+                        (romacs-style--theme-lighting)
                         (romacs-style--tokens (and scheme (get scheme 'romacs-style)))
                         romacs-style-overrides)))
 
@@ -143,9 +175,12 @@ scheme's own, under `romacs-style-overrides'."
     frame))
 
 (defun romacs-chrome--hex (color)
-  "COLOR, a colour name, as #RRGGBB, or nil when it is unknown."
-  (when-let* ((values (and color (color-values color))))
-    (apply #'format "#%02x%02x%02x" (mapcar (lambda (v) (ash v -8)) values))))
+  "COLOR, a colour name, as #RRGGBB, or nil when it is unknown; a
+#RRGGBB as written (`--batch' has no display to read a colour's values)."
+  (if (and (stringp color) (string-match-p "\\`#[[:xdigit:]]\\{6\\}\\'" color))
+      (downcase color)
+    (when-let* ((values (and color (color-values color))))
+      (apply #'format "#%02x%02x%02x" (mapcar (lambda (v) (ash v -8)) values)))))
 
 ;; Chrome colours and themes.  Every chrome colour is a face: the focus
 ;; edge (`romacs-pane-focus', by default `romacs-layer-glow'), the
@@ -221,14 +256,24 @@ else the bar's foreground."
         romacs-chrome-mark-red
       (face-foreground 'mode-line-active nil t))))
 
+(defvar romacs-chrome-faces-functions nil
+  "Functions called with no argument once the chrome's derived faces are
+set (`romacs-chrome--set-faces'): faces derived from them in turn (a
+menu's keys from the glow and the glass) follow.")
+
 (defun romacs-chrome--set-faces (&rest _)
-  "Make `romacs-chrome-derived-faces' the faces' default specs.  A
-theme's spec for a face still wins (faces.el `face-spec-recalc').
-Run from `enable-theme-functions' and `disable-theme-functions'."
+  "Make `romacs-chrome-derived-faces' the faces' default specs, run
+`romacs-chrome-faces-functions', then publish the style, whose lighting
+follows the faces (`romacs-chrome--style-sync').  A theme's spec for a
+face still wins \(faces.el `face-spec-recalc').  Run from
+`enable-theme-functions' and `disable-theme-functions', at startup and
+after the init."
   (pcase-dolist (`(,face . ,attributes) (romacs-chrome-derived-faces))
     (let ((spec `((t ,@attributes))))
       (when (and (facep face) (not (equal spec (get face 'face-defface-spec))))
-        (face-spec-set face spec 'face-defface-spec)))))
+        (face-spec-set face spec 'face-defface-spec))))
+  (run-hooks 'romacs-chrome-faces-functions)
+  (romacs-chrome--style-sync))
 
 (defun romacs-chrome--parameters (classic)
   "The root frame's chrome parameters, GNU's look when CLASSIC, which no
@@ -260,8 +305,8 @@ window system only."
           (romacs-layer--toast-stack))))))
 
 (defun romacs-chrome--style-sync (&rest _)
-  "Publish the style in force, if it changed: from
-`enable-theme-functions' and `disable-theme-functions'."
+  "Publish the style in force, if it changed: once a theme's faces are
+set (`romacs-chrome--set-faces')."
   (unless (equal (romacs-style-resolve) romacs-style--resolved)
     (romacs-chrome-apply)))
 
@@ -357,8 +402,6 @@ the window whose line it is, at that column of the bar's text
 
 (add-hook 'enable-theme-functions #'romacs-chrome--set-faces)
 (add-hook 'disable-theme-functions #'romacs-chrome--set-faces)
-(add-hook 'enable-theme-functions #'romacs-chrome--style-sync)
-(add-hook 'disable-theme-functions #'romacs-chrome--style-sync)
 (add-hook 'after-init-hook #'romacs-chrome-refresh)
 
 (provide 'romacs-chrome)

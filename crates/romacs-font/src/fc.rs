@@ -1,8 +1,18 @@
 //! Owned and borrowed handles over the Fontconfig C API, so the catalog
 //! (`fontconfig_catalog`) is safe code. Each foreign call is made here,
-//! once. Every function reads or changes Fontconfig's current
-//! configuration (a null `FcConfig`), so callers hold
+//! once. Every font question names the configuration it asks (a [`Config`] the
+//! catalog prepared), never Fontconfig's current one, whose listing would
+//! run Fontconfig's refresh and could reload it mid-question; callers hold
 //! `fontconfig_catalog::serialize()` while they use these handles.
+//!
+//! The `fontconfig` crate (0.11) cannot carry this: it asks only
+//! Fontconfig's current configuration, has no handle for a held one
+//! (`FcConfigReference`, `FcInitBringUptoDate`), and cannot add a language
+//! set to a pattern, read a boolean, ask a pattern's charset for a
+//! character, or reach the application font set or the configuration's
+//! file lists. Handing its patterns to those calls would go through its
+//! raw pointers all the same, so the catalog's whole chain stays here, one
+//! owner per handle, each call beside why it is sound.
 
 use fontconfig_sys as sys;
 use std::ffi::{CStr, c_int};
@@ -27,6 +37,7 @@ impl<T> Owned<T> {
 
 impl<T> Drop for Owned<T> {
     fn drop(&mut self) {
+        // UNSAFE(fontconfig 0.11 asks only the current configuration: module doc)
         // SAFETY: `ptr` came from the allocator `destroy` pairs with, and
         // this owner, which nothing copies, releases it once.
         unsafe { (self.destroy)(self.ptr.as_ptr()) }
@@ -38,35 +49,40 @@ pub(crate) struct Pattern(Owned<sys::FcPattern>);
 
 impl Pattern {
     pub fn new() -> Option<Self> {
+        // UNSAFE(fontconfig 0.11 asks only the current configuration: module doc)
         // SAFETY: FcPatternCreate takes nothing; a null result is refused.
         Owned::new(unsafe { sys::FcPatternCreate() }, sys::FcPatternDestroy).map(Self)
     }
 
     /// Add VALUE under KEY; false when Fontconfig refuses.
     pub fn add_string(&mut self, key: &CStr, value: &CStr) -> bool {
+        // UNSAFE(fontconfig 0.11 asks only the current configuration: module doc)
         // SAFETY: the pattern is live; KEY and VALUE are NUL-terminated,
         // and Fontconfig copies VALUE.
         unsafe { sys::FcPatternAddString(self.0.get(), key.as_ptr(), value.as_ptr().cast()) != 0 }
     }
 
     pub fn add_charset(&mut self, key: &CStr, charset: &CharSet) -> bool {
+        // UNSAFE(fontconfig 0.11 asks only the current configuration: module doc)
         // SAFETY: both are live and KEY is NUL-terminated; Fontconfig takes
         // its own reference to the charset.
         unsafe { sys::FcPatternAddCharSet(self.0.get(), key.as_ptr(), charset.0.get()) != 0 }
     }
 
     pub fn add_langset(&mut self, key: &CStr, langs: &LangSet) -> bool {
+        // UNSAFE(fontconfig 0.11 asks only the current configuration: module doc)
         // SAFETY: both are live and KEY is NUL-terminated; Fontconfig copies
         // the language set.
         unsafe { sys::FcPatternAddLangSet(self.0.get(), key.as_ptr(), langs.0.get()) != 0 }
     }
 
-    /// Apply the configuration's match rules, then the defaults, as a
-    /// pattern is prepared for matching or sorting.
-    pub fn substitute(&mut self) {
-        // SAFETY: the pattern is live; a null config names the current one.
+    /// Apply CONFIG's match rules, then the defaults, as a pattern is
+    /// prepared for matching or sorting.
+    pub fn substitute(&mut self, config: &Config) {
+        // UNSAFE(fontconfig 0.11 asks only the current configuration: module doc)
+        // SAFETY: the pattern and the configuration are live.
         unsafe {
-            sys::FcConfigSubstitute(null_mut(), self.0.get(), sys::FcMatchPattern);
+            sys::FcConfigSubstitute(config.0.get(), self.0.get(), sys::FcMatchPattern);
             sys::FcDefaultSubstitute(self.0.get());
         }
     }
@@ -76,11 +92,13 @@ pub(crate) struct CharSet(Owned<sys::FcCharSet>);
 
 impl CharSet {
     pub fn new() -> Option<Self> {
+        // UNSAFE(fontconfig 0.11 asks only the current configuration: module doc)
         // SAFETY: FcCharSetCreate takes nothing; a null result is refused.
         Owned::new(unsafe { sys::FcCharSetCreate() }, sys::FcCharSetDestroy).map(Self)
     }
 
     pub fn add(&mut self, ch: u32) -> bool {
+        // UNSAFE(fontconfig 0.11 asks only the current configuration: module doc)
         // SAFETY: the charset is live.
         unsafe { sys::FcCharSetAddChar(self.0.get(), ch) != 0 }
     }
@@ -90,11 +108,13 @@ pub(crate) struct LangSet(Owned<sys::FcLangSet>);
 
 impl LangSet {
     pub fn new() -> Option<Self> {
+        // UNSAFE(fontconfig 0.11 asks only the current configuration: module doc)
         // SAFETY: FcLangSetCreate takes nothing; a null result is refused.
         Owned::new(unsafe { sys::FcLangSetCreate() }, sys::FcLangSetDestroy).map(Self)
     }
 
     pub fn add(&mut self, lang: &CStr) -> bool {
+        // UNSAFE(fontconfig 0.11 asks only the current configuration: module doc)
         // SAFETY: the set is live and LANG NUL-terminated; Fontconfig copies it.
         unsafe { sys::FcLangSetAdd(self.0.get(), lang.as_ptr().cast()) != 0 }
     }
@@ -105,11 +125,13 @@ pub(crate) struct ObjectSet(Owned<sys::FcObjectSet>);
 
 impl ObjectSet {
     pub fn of(keys: &[&CStr]) -> Option<Self> {
+        // UNSAFE(fontconfig 0.11 asks only the current configuration: module doc)
         // SAFETY: FcObjectSetCreate takes nothing; a null result is refused.
         let set = Owned::new(unsafe { sys::FcObjectSetCreate() }, sys::FcObjectSetDestroy)?;
         for key in keys {
-            // SAFETY: the set is live; KEY is NUL-terminated and, being a
-            // Fontconfig object name, static.
+            // UNSAFE(fontconfig 0.11 asks only the current configuration: module doc)
+            // SAFETY: the set is live and KEY NUL-terminated; Fontconfig
+            // copies the name.
             if unsafe { sys::FcObjectSetAdd(set.get(), key.as_ptr()) } == 0 {
                 return None;
             }
@@ -122,21 +144,22 @@ impl ObjectSet {
 pub(crate) struct FontSet(Owned<sys::FcFontSet>);
 
 impl FontSet {
-    /// `FcFontList`: the faces matching PATTERN, carrying OBJECTS.
-    pub fn list(pattern: &Pattern, objects: &ObjectSet) -> Option<Self> {
-        // SAFETY: both are live; a null config names the current one.
-        let set = unsafe { sys::FcFontList(null_mut(), pattern.0.get(), objects.0.get()) };
+    /// `FcFontList`: CONFIG's faces matching PATTERN, carrying OBJECTS.
+    pub fn list(config: &Config, pattern: &Pattern, objects: &ObjectSet) -> Option<Self> {
+        // UNSAFE(fontconfig 0.11 asks only the current configuration: module doc)
+        // SAFETY: all three are live.
+        let set = unsafe { sys::FcFontList(config.0.get(), pattern.0.get(), objects.0.get()) };
         Owned::new(set, sys::FcFontSetDestroy).map(Self)
     }
 
-    /// `FcFontSort` without trimming: every face, in the configuration's
+    /// `FcFontSort` without trimming: every face of CONFIG, in its
     /// preference order for PATTERN.
-    pub fn sort(pattern: &Pattern) -> Option<Self> {
+    pub fn sort(config: &Config, pattern: &Pattern) -> Option<Self> {
         let mut result = sys::FcResultNoMatch;
-        // SAFETY: the pattern is live, `result` a live local, and the null
-        // config and charset pointer ask for the current configuration and
-        // no coverage union.
-        let set = unsafe { sys::FcFontSort(null_mut(), pattern.0.get(), 0, null_mut(), &mut result) };
+        // UNSAFE(fontconfig 0.11 asks only the current configuration: module doc)
+        // SAFETY: the configuration and pattern are live, `result` a live
+        // local, and the null charset pointer asks for no coverage union.
+        let set = unsafe { sys::FcFontSort(config.0.get(), pattern.0.get(), 0, null_mut(), &mut result) };
         Owned::new(set, sys::FcFontSetDestroy).map(Self)
     }
 
@@ -151,6 +174,7 @@ impl FontSet {
 
 /// The patterns of SET, borrowed for as long as the caller keeps SET.
 fn pattern_slice<'a>(set: *mut sys::FcFontSet) -> &'a [*mut sys::FcPattern] {
+    // UNSAFE(fontconfig 0.11 asks only the current configuration: module doc)
     // SAFETY: SET is a live font set; Fontconfig keeps `nfont` pattern
     // pointers at `fonts`, unchanged until the set is destroyed or, for the
     // configuration's own sets, the configuration changes, which the
@@ -165,11 +189,12 @@ fn pattern_slice<'a>(set: *mut sys::FcFontSet) -> &'a [*mut sys::FcPattern] {
     }
 }
 
-/// The files of the application font set: the fonts this process added
+/// The files of CONFIG's application font set: the fonts this process added
 /// (`add_app_font_file`).
-pub(crate) fn application_files() -> Vec<String> {
-    // SAFETY: a null config names the current one, which owns the set.
-    let set = unsafe { sys::FcConfigGetFonts(null_mut(), sys::FcSetApplication) };
+pub(crate) fn application_files(config: &Config) -> Vec<String> {
+    // UNSAFE(fontconfig 0.11 asks only the current configuration: module doc)
+    // SAFETY: the configuration is live and owns the set.
+    let set = unsafe { sys::FcConfigGetFonts(config.0.get(), sys::FcSetApplication) };
     if set.is_null() {
         return Vec::new();
     }
@@ -194,6 +219,7 @@ impl PatternRef<'_> {
     /// KEY's Nth string, trimmed; None when absent, empty or not UTF-8.
     pub fn string_at(self, key: &CStr, n: c_int) -> Option<String> {
         let mut value: *mut sys::FcChar8 = null_mut();
+        // UNSAFE(fontconfig 0.11 asks only the current configuration: module doc)
         // SAFETY: the pattern is live while its set is; Fontconfig points
         // VALUE into the pattern's own storage, which is copied out at once.
         let text = unsafe {
@@ -219,6 +245,7 @@ impl PatternRef<'_> {
 
     pub fn int(self, key: &CStr) -> Option<i32> {
         let mut value = 0;
+        // UNSAFE(fontconfig 0.11 asks only the current configuration: module doc)
         // SAFETY: the pattern is live; `value` is a live local.
         let found = unsafe { sys::FcPatternGetInteger(self.ptr.as_ptr(), key.as_ptr(), 0, &mut value) };
         (found == sys::FcResultMatch).then_some(value)
@@ -226,6 +253,7 @@ impl PatternRef<'_> {
 
     pub fn bool(self, key: &CStr) -> Option<bool> {
         let mut value = 0;
+        // UNSAFE(fontconfig 0.11 asks only the current configuration: module doc)
         // SAFETY: the pattern is live; `value` is a live local.
         let found = unsafe { sys::FcPatternGetBool(self.ptr.as_ptr(), key.as_ptr(), 0, &mut value) };
         (found == sys::FcResultMatch).then_some(value != 0)
@@ -234,6 +262,7 @@ impl PatternRef<'_> {
     /// Whether the pattern's charset has CH; false without a charset.
     pub fn has_char(self, ch: char) -> bool {
         let mut charset: *mut sys::FcCharSet = null_mut();
+        // UNSAFE(fontconfig 0.11 asks only the current configuration: module doc)
         // SAFETY: the pattern is live; the charset it yields is the
         // pattern's own and is only read while the pattern lives.
         unsafe {
@@ -245,16 +274,55 @@ impl PatternRef<'_> {
     }
 }
 
-/// Add FILE's faces to the application font set.
-pub(crate) fn add_app_font_file(file: &CStr) -> bool {
-    // SAFETY: a null config names the current one; FILE is NUL-terminated.
-    unsafe { sys::FcConfigAppFontAddFile(null_mut(), file.as_ptr().cast()) != 0 }
+/// A Fontconfig configuration, held: while this lives its address names it
+/// alone, so a configuration Fontconfig reloads compares unequal.
+pub(crate) struct Config(Owned<sys::FcConfig>);
+
+// UNSAFE(the catalog keeps the configuration it prepared in its static lock, which needs Send)
+// SAFETY: Fontconfig counts a configuration's references atomically and
+// frees it on the last release from whichever thread; the catalog uses a
+// held configuration only under its lock.
+unsafe impl Send for Config {}
+
+impl Config {
+    /// The current configuration once Fontconfig has brought it up to date,
+    /// as `FcFontList` on the current one does: at most once per rescan
+    /// interval it checks its configuration files and font directories, and
+    /// reloads the configuration when one changed. A reload that fails
+    /// leaves the current configuration as it was.
+    pub fn current() -> Option<Self> {
+        // UNSAFE(Fontconfig's refresh and its reference counts are only reachable through its C API)
+        // SAFETY: FcInitBringUptoDate takes nothing; FcConfigReference on a
+        // null config references the current one, which this owner releases
+        // once.
+        let config = unsafe {
+            sys::FcInitBringUptoDate();
+            sys::FcConfigReference(null_mut())
+        };
+        Owned::new(config, sys::FcConfigDestroy).map(Self)
+    }
+}
+
+impl PartialEq for Config {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.get() == other.0.get()
+    }
+}
+
+impl Eq for Config {}
+
+/// Add FILE's faces to CONFIG's application font set.
+pub(crate) fn add_app_font_file(config: &Config, file: &CStr) -> bool {
+    // UNSAFE(fontconfig 0.11 asks only the current configuration: module doc)
+    // SAFETY: the configuration is live; FILE is NUL-terminated.
+    unsafe { sys::FcConfigAppFontAddFile(config.0.get(), file.as_ptr().cast()) != 0 }
 }
 
 /// The configuration's files, its configuration directories and its font
 /// directories, as it names them.
 pub(crate) fn configuration_inputs() -> Vec<String> {
     let mut inputs = vec![];
+    // UNSAFE(fontconfig 0.11 asks only the current configuration: module doc)
     // SAFETY: a null config names the current one. Each list is walked to
     // its end and then released; each string is copied before the next.
     unsafe {

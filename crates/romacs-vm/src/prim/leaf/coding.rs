@@ -1065,7 +1065,7 @@ impl Leaf<'_> {
             if !seen.insert(aliases.0) {
                 return Err(Fault::Circular(aliases));
             }
-            let (_, next) = self.pair(aliases).ok_or(Fault::Wrong("listp", aliases))?;
+            let (_, next) = self.pair(aliases).ok_or_else(|| Fault::Wrong("listp", aliases))?;
             if next == Value::NIL {
                 break;
             }
@@ -1232,7 +1232,7 @@ impl Leaf<'_> {
         self.vm
             .charsets
             .lookup(name)
-            .ok_or(Fault::Wrong("charsetp", name))
+            .ok_or_else(|| Fault::Wrong("charsetp", name))
     }
     fn coding_short(&mut self, args: &[Value], min: usize) -> std::result::Result<(), Fault> {
         if args.len() < min {
@@ -1390,7 +1390,7 @@ impl Leaf<'_> {
                 }
                 let bom = args[13];
                 if bom != Value::NIL && bom != Value::TRUE {
-                    let (a, b) = self.pair(bom).ok_or(Fault::Wrong("consp", bom))?;
+                    let (a, b) = self.pair(bom).ok_or_else(|| Fault::Wrong("consp", bom))?;
                     for name in [a, b] {
                         self.coding_check(name)?;
                         if name == Value::NIL && self.coding_spec(name)? == Value::NIL {
@@ -1477,7 +1477,7 @@ impl Leaf<'_> {
                 for i in 0..4 {
                     let v = *initial
                         .get(i)
-                        .ok_or(Fault::Range(args[13], num(i as i64)))?;
+                        .ok_or_else(|| Fault::Range(args[13], num(i as i64)))?;
                     initial[i] = if v == Value::NIL {
                         num(-1)
                     } else {
@@ -1489,7 +1489,7 @@ impl Leaf<'_> {
                         r.attrs[0]
                     };
                 }
-                let (a, b) = self.pair(args[14]).ok_or(Fault::Wrong("consp", args[14]))?;
+                let (a, b) = self.pair(args[14]).ok_or_else(|| Fault::Wrong("consp", args[14]))?;
                 for value in [a, b] {
                     if value.integer_value().is_none() {
                         return Err(Fault::Wrong("fixnump", value));
@@ -1503,7 +1503,7 @@ impl Leaf<'_> {
                     Vec::new()
                 };
                 for &entry in &requests {
-                    let (name, reg) = self.pair(entry).ok_or(Fault::Wrong("consp", entry))?;
+                    let (name, reg) = self.pair(entry).ok_or_else(|| Fault::Wrong("consp", entry))?;
                     let record = self.coding_charset(name)?;
                     if !reg.integer_value().is_some_and(|n| (0..=3).contains(&n)) {
                         return Err(if reg.integer_value().is_none() {
@@ -1517,7 +1517,7 @@ impl Leaf<'_> {
                 let flags = args[16]
                     .integer_value()
                     .filter(|n| *n >= 0)
-                    .ok_or(Fault::Wrong("wholenump", args[16]))?
+                    .ok_or_else(|| Fault::Wrong("wholenump", args[16]))?
                     & 0x7fffffff;
                 let full = special && args[3] == self.intern("iso-2022");
                 let flags = flags | if full { 0x100000 } else { 0 };
@@ -1596,12 +1596,12 @@ impl Leaf<'_> {
                         }
                         (n, n)
                     } else {
-                        let (a, b) = self.pair(v).ok_or(Fault::Wrong("consp", v))?;
-                        let a_num = a.integer_value().ok_or(Fault::Wrong("integerp", a))?;
+                        let (a, b) = self.pair(v).ok_or_else(|| Fault::Wrong("consp", v))?;
+                        let a_num = a.integer_value().ok_or_else(|| Fault::Wrong("integerp", a))?;
                         if !(0..=255).contains(&a_num) {
                             return Err(Fault::Range3(a, num(0), num(255)));
                         }
-                        let b_num = b.integer_value().ok_or(Fault::Wrong("integerp", b))?;
+                        let b_num = b.integer_value().ok_or_else(|| Fault::Wrong("integerp", b))?;
                         if !(a_num..=255).contains(&b_num) {
                             return Err(Fault::Range3(b, num(a_num), num(255)));
                         }
@@ -1702,7 +1702,7 @@ impl Leaf<'_> {
         for &category in categories {
             let name = self.symbol_name(category)?;
             let index = name.strip_prefix("coding-category-").and_then(|short| CATEGORIES.iter().position(|c| *c == short))
-                .ok_or(Fault::Wrong("coding-category-p", category))?;
+                .ok_or_else(|| Fault::Wrong("coding-category-p", category))?;
             if !order.contains(&index) { order.push(index); }
         }
         for i in 0..CATEGORIES.len() {

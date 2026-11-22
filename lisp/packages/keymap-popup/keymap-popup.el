@@ -39,6 +39,7 @@
 (require 'cl-lib)
 (require 'seq)
 (require 'subr-x)
+(require 'romacs-grid)
 
 (defgroup keymap-popup nil
   "Described keymaps with popup help."
@@ -156,21 +157,25 @@ no explicit :exit-key, for both `keymap-popup-define' and
 ;;; Faces
 
 (defface keymap-popup-key
-  '((t :inherit help-key-binding))
-  "Face for key bindings in the popup.")
+  '((t :inherit romacs-popup-key :weight bold))
+  "Face for key bindings in the popup: the theme's accent, bold.")
+
+(defface keymap-popup-title
+  '((t :inherit romacs-popup-title))
+  "Face for the popup's title, its menu's description.")
 
 
 (defface keymap-popup-group-header
-  '((t :weight bold))
+  '((t :inherit romacs-popup-group-title))
   "Face for group headers in the popup.")
 
 (defface keymap-popup-value
-  '((t :inherit font-lock-string-face :weight bold))
-  "Face for switch values in the popup.")
+  '((t :inherit success))
+  "Face for a switch that is on in the popup.")
 
 (defface keymap-popup-submenu
-  '((t :inherit font-lock-type-face))
-  "Face for sub-menu entries in the popup.")
+  '((t))
+  "Face for sub-menu entries in the popup, which end in `›'.")
 
 (defface keymap-popup-inapt
   '((t :inherit shadow))
@@ -1099,41 +1104,74 @@ whose key spelling denotes the same native events as KEY."
 
 ;;; Renderer
 
-(defconst keymap-popup--max-description-width 40
+(defconst keymap-popup--max-description-width 48
   "Maximum visible width of a resolved description, in columns.
-Resolved descriptions longer than this are truncated with an
+Resolved descriptions longer than this are cut at a word, with an
 ellipsis.  Authors should keep descriptions short by convention;
 this bound exists so dynamic descriptions can't blow out the
 column layout.")
 
+(defvar keymap-popup--draw nil
+  "While a popup draws ROWS, (MODE LABELS ENTRIES ROWS).  With MODE
+`record', each group and row drawn goes into the `eq' table LABELS, its
+plist to the list of its label, and each row's entry as drawn into
+ENTRIES, by its normalized key.  With MODE `replay', a repaint draws just
+what LABELS holds, with its labels: it runs no description and shows no
+other row.")
+
+(defun keymap-popup--key-name (key)
+  "KEY, a key description, normalized: \"C-m\" as \"RET\"."
+  (key-description (key-parse key)))
+
+(defun keymap-popup--drawn-label (plist resolve)
+  "PLIST's label, a group's or an entry's, in a list, or nil when it is
+not drawn: with `keymap-popup--draw' replaying, as recorded; else from
+RESOLVE, a function returning its label or nil when hidden, recorded
+when a draw records."
+  (pcase keymap-popup--draw
+    (`(replay ,labels . ,_) (gethash plist labels))
+    (`(record ,labels . ,_)
+     (let ((drawn (funcall resolve)))
+       (when drawn (puthash plist drawn labels))))
+    (_ (funcall resolve))))
+
+(defun keymap-popup--note-drawn (entry label)
+  "Record ENTRY's row as drawn with LABEL, while a draw records."
+  (pcase keymap-popup--draw
+    (`(record ,_ ,entries . ,_)
+     (puthash (keymap-popup--key-name (plist-get entry :key))
+              (keymap-popup--plist-with entry :description label) entries))))
+
 (defun keymap-popup--resolve-description (desc)
   "Resolve DESC to a display string.
 If DESC is a function, call it.  Return nil for nil and stringify
-other non-string values.  Collapse runs of whitespace and truncate to
-`keymap-popup--max-description-width'."
+other non-string values.  Collapse runs of whitespace and cut at a
+word past `keymap-popup--max-description-width' (`romacs-grid-cut');
+the label's text properties are kept."
   (let* ((raw (if (functionp desc) (funcall desc) desc))
          (text (and raw (if (stringp raw) raw (format "%s" raw))))
          (collapsed (and text (string-clean-whitespace text))))
     (and collapsed
-         (truncate-string-to-width
-          collapsed keymap-popup--max-description-width nil nil t))))
-
-(defun keymap-popup--pad-width (string width)
-  "Pad STRING with spaces to display WIDTH, preserving text properties."
-  (concat string (make-string (max 0 (- width (string-width string))) ?\s)))
+         (romacs-grid-cut collapsed keymap-popup--max-description-width))))
 
 (defun keymap-popup--render-entry (entry &optional prefix-mode key-width)
   "Render ENTRY into a formatted line, or nil if :if hides it.
 When PREFIX-MODE is non-nil, entries with :c-u are highlighted and
 their :c-u description is shown; other entries are dimmed.
 KEY-WIDTH pads the key column for alignment."
-  (and (keymap-popup--if-allows-p entry)
-       (and-let* ((raw-desc (keymap-popup--resolve-description
-                             (plist-get entry :description))))
+  (and-let* ((drawn (keymap-popup--drawn-label
+                      entry (lambda ()
+                              (and (keymap-popup--if-allows-p entry)
+                                   (and-let* ((desc (keymap-popup--resolve-description
+                                                     (plist-get entry :description))))
+                                     (list desc))))))
+             (raw-desc (car drawn)))
          (let* ((inapt (keymap-popup--inapt-active-p entry))
               (type (plist-get entry :type))
               (desc (if (eq type 'keymap)
-			(propertize raw-desc 'face 'keymap-popup-submenu)
+                        (let ((desc (concat raw-desc " ›")))
+                          (add-face-text-property 0 (length desc) 'keymap-popup-submenu t desc)
+                          desc)
                       raw-desc))
               (c-u-desc (plist-get entry :c-u))
               (raw-key (plist-get entry :key))
@@ -1141,28 +1179,30 @@ KEY-WIDTH pads the key column for alignment."
                              (list 'keymap-popup--entry entry
                                    'mouse-face 'highlight)))
               (click-key (apply #'propertize raw-key mouse-props))
-              (padded-key (if key-width
-                              (keymap-popup--pad-width click-key key-width)
-                            click-key))
-              (key-str (propertize padded-key 'face 'keymap-popup-key))
-              (value-str (if (eq type 'switch)
-                             (propertize
-                              (if (symbol-value (plist-get entry :variable))
-				  " [on]" " [off]")
-                              'face 'keymap-popup-value)
-			   ""))
+              ;; The key, then the padding to its label as one stretch
+              ;; (`romacs-grid-align'), so a key painted wider than its
+              ;; width cannot move the label.
+              (pad (make-string (+ 2 (max 0 (- (or key-width 0) (string-width raw-key)))) ?\s))
+              (key-str (concat (propertize click-key 'face 'keymap-popup-key)
+                               (propertize pad 'romacs-grid-align
+                                           (+ 2 (string-width raw-key) (length pad)))))
+              (value-str (cond ((not (eq type 'switch)) "")
+                               ((symbol-value (plist-get entry :variable))
+                                (propertize " [on]" 'face 'keymap-popup-value))
+                               (t (propertize " [off]" 'face 'keymap-popup-inapt))))
               (c-u-str (and c-u-desc
                             (propertize (format " (%s)" c-u-desc)
                                         'face (if prefix-mode 'warning 'shadow))))
-              (line (concat "  " key-str "  "
+              (line (concat "  " key-str
                             (apply #'propertize
                                    (concat desc value-str (or c-u-str ""))
                                    mouse-props))))
+           (keymap-popup--note-drawn entry raw-desc)
 	 (cond
 	  (inapt (propertize line 'face 'keymap-popup-inapt))
 	  ((and prefix-mode (not c-u-desc))
            (propertize line 'face 'shadow))
-	  (t line))))))
+	  (t line)))))
 
 (defun keymap-popup--render-group-lines (group &optional prefix-mode)
   "Render GROUP into a list of lines (strings).
@@ -1170,13 +1210,16 @@ When PREFIX-MODE is non-nil, pass it to entry rendering.
 Returns nil if the group is hidden by :if or has no visible entries.
 When the group has :inapt-if that returns non-nil, all entries are
 rendered with the inapt face."
-  (and (keymap-popup--if-allows-p group)
+  (and-let* ((drawn (keymap-popup--drawn-label
+                     group (lambda ()
+                             (and (keymap-popup--if-allows-p group)
+                                  (list (and-let* ((raw-name (plist-get group :name)))
+                                          (keymap-popup--resolve-description raw-name))))))))
        (let* ((group-inapt (keymap-popup--inapt-active-p group))
               (entries (plist-get group :entries))
               (key-width (cl-loop for entry in entries
 				  maximize (string-width (plist-get entry :key))))
-              (header (and-let* ((raw-name (plist-get group :name))
-				 (name (keymap-popup--resolve-description raw-name)))
+              (header (and-let* ((name (car drawn)))
 			(propertize name 'face (if group-inapt
                                                    'keymap-popup-inapt
 						 'keymap-popup-group-header))))
@@ -1193,30 +1236,8 @@ rendered with the inapt face."
 			    result)
                   result))))))
 
-(defun keymap-popup--column-width (col)
-  "Return the max visible width of lines in COL."
-  (cl-loop for line in col
-           maximize (string-width line)))
-
-(defun keymap-popup--join-columns (columns separator col-widths)
-  "Join COLUMNS side by side with SEPARATOR between them.
-COL-WIDTHS is a list of minimum widths per column position.
-Shorter columns are padded with blank lines."
-  (let* ((max-height (cl-loop for col in columns maximize (length col)))
-         (padded-cols (cl-mapcar
-                       (lambda (col width)
-                         (let ((padded (mapcar (lambda (line)
-                                                 (keymap-popup--pad-width line width))
-                                               col))
-                               (blanks (make-list (- max-height (length col))
-                                                  (make-string width ?\s))))
-                           (append padded blanks)))
-                       columns col-widths)))
-    (cl-loop for row from 0 below max-height
-             collect (string-trim-right
-                      (mapconcat (lambda (col) (nth row col))
-                                 padded-cols
-                                 separator)))))
+;; Layout is romacs-grid.el's: blocks of lines in columns and pages that
+;; fit the room, the author's rows kept while they fit.
 
 (defun keymap-popup--rows-to-columns (rows &optional prefix-mode)
   "Render each row of ROWS into its list of column line-lists.
@@ -1228,85 +1249,23 @@ Returns a list of ((col-lines ...) ...) per row, filtering empty groups."
                       row))
           rows))
 
-(defun keymap-popup--global-col-widths (rendered-rows)
-  "Compute max column width per position across all RENDERED-ROWS."
-  (let ((max-cols (or (cl-loop for cols in rendered-rows
-                               maximize (length cols))
-                      0)))
-    (cl-loop for i from 0 below max-cols
-             collect (cl-loop for cols in rendered-rows
-                              when (nth i cols)
-                              maximize (keymap-popup--column-width (nth i cols))))))
-
-(defconst keymap-popup--column-separator "   "
-  "Horizontal separator between popup columns.")
-
-(defun keymap-popup--wrap-column-row (columns widths max-width)
-  "Split COLUMNS and WIDTHS into rows fitting MAX-WIDTH.
-Each result is a plist with :columns and :widths.  A single column
-wider than MAX-WIDTH remains intact for final line truncation."
-  (named-let wrap ((cols columns) (rest-widths widths)
-                   (row-cols nil) (row-widths nil) (row-width 0)
-                   (result nil))
-    (if (null cols)
-        (append result
-                (and row-cols
-                     (list (list :columns row-cols :widths row-widths))))
-      (let* ((width (car rest-widths))
-             (next-width (+ row-width width
-                            (if row-cols
-                                (string-width keymap-popup--column-separator)
-                              0))))
-        (if (and row-cols max-width (> next-width max-width))
-            (wrap cols rest-widths nil nil 0
-                  (append result
-                          (list (list :columns row-cols :widths row-widths))))
-          (wrap (cdr cols) (cdr rest-widths)
-                (append row-cols (list (car cols)))
-                (append row-widths (list width))
-                next-width result))))))
-
-(defun keymap-popup--layout-column-rows (rendered-rows widths max-width)
-  "Return RENDERED-ROWS laid out within MAX-WIDTH using WIDTHS."
-  (apply #'append
-         (mapcar
-          (lambda (columns)
-            (keymap-popup--wrap-column-row
-             columns (seq-take widths (length columns)) max-width))
-          rendered-rows)))
-
-(defun keymap-popup--fit-line (line max-width)
-  "Return LINE truncated to MAX-WIDTH when necessary."
-  (if (and max-width (> (string-width line) max-width))
-      (truncate-string-to-width line max-width nil nil t)
-    line))
+(defun keymap-popup--pages (rendered-rows rows columns)
+  "RENDERED-ROWS laid out in pages of at most ROWS lines (nil for one
+page) and COLUMNS columns (nil for no limit): a list of pages, each a
+list of lines (`romacs-grid-pages')."
+  (romacs-grid-pages (apply #'append rendered-rows) rows (or columns most-positive-fixnum)
+                     (mapcar #'length rendered-rows)))
 
 (defun keymap-popup--render-columns (rendered-rows &optional max-width)
-  "Render RENDERED-ROWS within MAX-WIDTH as a popup string."
-  (let* ((max-width (and max-width (max 1 max-width)))
-         (col-widths (keymap-popup--global-col-widths rendered-rows))
-         (layout (keymap-popup--layout-column-rows
-                  rendered-rows col-widths max-width))
-         (sections
-          (mapcar
-           (lambda (row)
-             (string-join
-              (mapcar (lambda (line)
-                        (keymap-popup--fit-line line max-width))
-                      (keymap-popup--join-columns
-                       (plist-get row :columns)
-                       keymap-popup--column-separator
-                       (plist-get row :widths)))
-              "\n"))
-           layout)))
-    (concat (string-join sections "\n") "\n")))
+  "RENDERED-ROWS within MAX-WIDTH columns as one popup string."
+  (concat (string-join (car (keymap-popup--pages rendered-rows nil max-width)) "\n") "\n"))
 
 (defun keymap-popup--render (rows &optional prefix-mode max-width)
   "Render ROWS into a complete popup string.
 ROWS is a list of rows, each row a list of groups.  When PREFIX-MODE
-is non-nil, highlight :c-u entries and dim others.  Align column
-widths across declared rows.  When MAX-WIDTH is non-nil, flow groups
-onto additional display rows and truncate any lone over-wide column."
+is non-nil, highlight :c-u entries and dim others.  The rows stay as
+declared while they fit MAX-WIDTH (no limit when nil); otherwise the
+groups flow into balanced columns (`romacs-grid-pages')."
   (keymap-popup--render-columns
    (keymap-popup--rows-to-columns rows prefix-mode) max-width))
 
@@ -1477,7 +1436,7 @@ target.  Inapt-key handling is folded into the keep-pred via
                          (let ((control (keymap-popup--key-events key)))
                            (and control
                                 (equal control (seq-take events (length control))))))
-                       (list (plist-get active :exit-key) "C-u" "C-M-v" "C-M-S-v"))))
+                       (cl-list* (plist-get active :exit-key) "C-u" (keymap-popup--paging-keys (plist-get active :exit-key) t)))))
          (plist-get group :entries)))))))
 
 (defun keymap-popup--inapt-key-p (buf key-str)
@@ -1493,49 +1452,133 @@ Returns nil when BUF is dead (the popup already closed)."
               (or (keymap-popup--inapt-active-p entry)
                   (keymap-popup--inapt-active-p group))))))
 
+(defun keymap-popup--room (buf window)
+  "The room BUF's popup has, (COLUMNS . ROWS): its backend's `:room'
+when it has one, else WINDOW's columns (none known without WINDOW) and
+no limit on rows.  A window without fringes keeps its last column for
+the continuation glyph (`window-max-chars-per-line')."
+  (if-let* ((room (plist-get (keymap-popup--session-get buf :backend) :room)))
+      (funcall room)
+    (cons (and window (max 1 (window-max-chars-per-line window))) nil)))
+
+(defun keymap-popup--exit-key (buf)
+  "BUF's exit key as a string, or nil: none, or one C-u's prefix override
+shadows."
+  (let ((exit (keymap-popup--active-get buf :exit-key)))
+    (and exit (not (eq (car (keymap-popup--key-events exit)) ?\C-u))
+         (substring-no-properties exit))))
+
+(defun keymap-popup--exit-hint (buf)
+  "BUF's exit key and what it does, `KEY  Dismiss menu' (`Back' in a
+submenu), or nil when it has none."
+  (when-let* ((exit (keymap-popup--exit-key buf)))
+    (concat (propertize exit 'face 'keymap-popup-key) "  "
+            (if (keymap-popup--session-get buf :stack) "Back" "Dismiss menu"))))
+
+(defun keymap-popup--footer (buf page pages columns &optional exit-shown)
+  "BUF's footer line: its exit key and what it does, unless EXIT-SHOWN
+\(the title row shows it), its label where an entry's label starts (the
+key right-aligned in the column one-key entries leave it), then, when
+there is more than one page, PAGE of PAGES and the key to each page
+there is (next, previous); nil when there is nothing to say.  Past
+COLUMNS (nil for no limit) the words go first, the keys and the page
+count last.  It describes navigation, not a source binding, so it
+carries no mouse properties."
+  (let* ((exit (and (not exit-shown) (keymap-popup--exit-key buf)))
+         (key (lambda (k) (propertize k 'face 'keymap-popup-key)))
+         (hint (keymap-popup--paging-hint (keymap-popup--exit-key buf)))
+         (next (and (< (1+ page) pages) (car hint)))
+         (previous (and (> page 0) (cadr hint)))
+         (count (and (> pages 1) (format "%d/%d" (1+ page) pages)))
+         (full (delq nil (list (and exit (concat (make-string (max 0 (- 3 (string-width exit))) ?\s)
+                                                 (keymap-popup--exit-hint buf)))
+                               ;; The page and the ways off it, one group.
+                               (and count (concat count " · "
+                                                  (string-join (delq nil (list (and next (concat (funcall key next) " next"))
+                                                                               (and previous (concat (funcall key previous) " previous"))))
+                                                               "  "))))))
+         ;; Narrower forms: the exit's words go, then the directions'.
+         (medium (delq nil (list (and exit (funcall key exit)) (and count (concat count " ·"))
+                                 (and next (concat (funcall key next) " next"))
+                                 (and previous (concat (funcall key previous) " previous")))))
+         (short (delq nil (list (and exit (funcall key exit)) (and count (concat count " ·"))
+                                (and next (funcall key next)) (and previous (funcall key previous)))))
+         (line (lambda (parts) (and parts (concat (if exit "" "  ") (string-join parts "     "))))))
+    (cond ((or (null columns) (<= (string-width (or (funcall line full) "")) columns)) (funcall line full))
+          ((<= (string-width (string-join medium " ")) columns) (string-join medium " "))
+          (t (romacs-grid-cut (string-join short " ") columns)))))
+
 (defun keymap-popup--write-rendered (buf rendered-rows)
-  "Write RENDERED-ROWS and BUF's navigation hint, then refit its backend."
+  "Write BUF's title, the shown page of RENDERED-ROWS laid out in its
+room (`keymap-popup--room'), and its footer, then refit its backend.
+Every group shows on some page: a popup taller than its room pages
+\(`keymap-popup-next-page').  Records the page count and the widest
+page's size, (COLUMNS . LINES), as the session's `:pages' and `:size'."
   (unless (keymap-popup--session-state buf)
     (error "Popup session is no longer active"))
   (let* ((window (if (plist-member (keymap-popup--session-state buf) :window)
                      (keymap-popup--display-window buf)
                    (get-buffer-window buf t)))
-         ;; The columns a line can fill: a window without fringes keeps its
-         ;; last for the continuation glyph (`window-max-chars-per-line').
-         (width (and window (max 1 (window-max-chars-per-line window))))
-         (content (keymap-popup--render-columns rendered-rows width))
-         ;; The first line shown, kept across the rewrite of the same menu (a
-         ;; scrolled popup refreshing); another menu starts at its top.
+         (room (keymap-popup--room buf window))
+         (columns (car room))
+         (title (and (or (plist-get (keymap-popup--session-get buf :backend) :title)
+                         (and window (zerop (window-mode-line-height window))))
+                     (keymap-popup--title buf)))
+         ;; With a title, the exit hint goes right-aligned in its row
+         ;; where the row holds both (the title at least 10 columns, or
+         ;; whole), and the footer is only for paging.
+         (hint (and title (keymap-popup--exit-hint buf)))
+         (hint (and hint (or (null columns)
+                             (>= (- columns 3 (string-width hint)) (min (string-width title) 10)))
+                    hint))
+         (title (and title (romacs-grid-cut title (if columns (- columns (if hint (+ 3 (string-width hint)) 0))
+                                                     most-positive-fixnum))))
+         ;; The chrome a page shares its rows with: the title and a blank
+         ;; line, a blank line and the footer.
+         (chrome (+ (if title 2 0) 2))
+         (rows (and (cdr room) (max 1 (- (cdr room) chrome))))
+         (pages (keymap-popup--pages rendered-rows rows columns))
+         ;; The page shown, kept across a refresh of the same menu; another
+         ;; menu starts at its first.
          (menu (plist-get (keymap-popup--session-get buf :active) :keymap))
-         (first (and window (eq menu (keymap-popup--session-get buf :viewport-menu))
-                     (with-current-buffer buf (line-number-at-pos (window-start window))))))
-    (keymap-popup--set-session buf :viewport-menu menu)
+         (page (if (eq menu (keymap-popup--session-get buf :page-menu))
+                   (min (or (keymap-popup--session-get buf :page) 0) (1- (length pages)))
+                 0))
+         (footer (keymap-popup--footer buf page (length pages) columns hint))
+         ;; The widest footer any page has, so turning a page never
+         ;; resizes the card.
+         (width (apply #'max (romacs-grid-width pages)
+                       (if title (+ (string-width title) (if hint (+ 3 (string-width hint)) 0)) 0)
+                       (mapcar (lambda (p) (string-width (or (keymap-popup--footer buf p (length pages) columns hint) "")))
+                               (number-sequence 0 (1- (length pages)))))))
+    (keymap-popup--set-session buf :page-menu menu :page page :pages (length pages)
+                               :size (cons width
+                                           (+ (apply #'max (mapcar #'length pages))
+                                              (if title 2 0) (if footer 2 0))))
     (with-current-buffer buf
       (let ((inhibit-read-only t))
         (erase-buffer)
-        (when-let* (((or (plist-get (keymap-popup--session-get buf :backend) :title)
-                         (and window (zerop (window-mode-line-height window)))))
-                    (title (keymap-popup--title buf)))
-          (insert (keymap-popup--fit-line title width) "\n\n"))
-        (insert content)
-        ;; This describes navigation, not the swallowed source binding.
-        ;; Keep it outside the action columns and without mouse properties.
-        ;; C-u's prefix override also shadows any exit below that prefix.
-        (when-let* ((exit (keymap-popup--active-get buf :exit-key))
-                    ((not (eq (car (keymap-popup--key-events exit)) ?\C-u))))
-          (insert "\n"
-                  (keymap-popup--fit-line
-                   (concat "  " (propertize (substring-no-properties exit)
-                                            'face 'keymap-popup-key)
-                           "  " (if (keymap-popup--session-get buf :stack)
-                                    "Back" "Dismiss menu"))
-                   width)
-                  "\n"))
+        (when title
+          (insert title)
+          ;; The hint at the text's right edge, short of the column a
+          ;; fringe-less window keeps for its continuation glyph: wherever
+          ;; the backend's window ends, however wide the card grew for a
+          ;; row painted wider than its cells; two spaces first, so a title
+          ;; painted wide still leaves a gap.
+          (when hint
+            (insert "  " (propertize (make-string (max 1 (- width (string-width title) (string-width hint) 2)) ?\s)
+                                     'display `(space :align-to (- right ,(1+ (string-width hint)))))
+                    hint))
+          (insert "\n\n"))
+        ;; Every page as tall as the tallest, so the footer stays put.
+        (insert (string-join (nth page pages) "\n") "\n"
+                (make-string (- (apply #'max (mapcar #'length pages)) (length (nth page pages))) ?\n))
+        (when footer (insert "\n" footer "\n"))
         (goto-char (point-min))
-        (when (and first (> first 1))
-          ;; At most the last full page of what is there now.
-          (let ((last (max 1 (- (count-lines (point-min) (point-max)) (window-body-height window) -1))))
-            (set-window-start window (save-excursion (forward-line (1- (min first last))) (point)))))))
+        (when window (set-window-start window (point-min)))))
+    ;; A draw's record, once its rows are written: what a key acts on.
+    (when (eq (car keymap-popup--draw) 'record)
+      (keymap-popup--set-active buf :drawn keymap-popup--draw))
     (when-let* ((fit (plist-get (keymap-popup--session-get buf :backend) :fit)))
       (funcall fit buf))
     rendered-rows))
@@ -1552,20 +1595,35 @@ the rendered columns so an initial display can reflow them unchanged."
   "Re-render popup BUF from its buffer-local state.
 Renders in the source buffer's context so `symbol-value' for
 switch variables sees the user's buffer-local values.
-Resolves the docstring for mode-line display."
+Resolves the docstring for mode-line display.  Records what it drew
+\=(`keymap-popup--draw'): a key acts on its row as drawn."
   (when (buffer-live-p buf)
     (let* ((session (keymap-popup--session-state buf))
            (active (plist-get session :active))
            (source (plist-get session :source))
            (descriptions (keymap-popup--active-descriptions buf))
            (docstring (plist-get active :docstring))
-           (prefix (plist-get session :prefix-mode)))
+           (prefix (plist-get session :prefix-mode))
+           (keymap-popup--draw (list 'record (make-hash-table :test 'eq) (make-hash-table :test 'equal)
+                                     descriptions)))
       (keymap-popup--set-active buf :descriptions descriptions)
       (with-current-buffer (if (buffer-live-p source) source buf)
         (let ((resolved (and docstring
                              (keymap-popup--resolve-description docstring))))
           (keymap-popup--set-active buf :resolved-docstring resolved))
         (keymap-popup--refresh-buffer buf descriptions prefix)))))
+
+(defun keymap-popup--repaint (buf)
+  "Paint popup BUF again as it last drew, under its present prefix mode:
+its labels replayed, no description run (`keymap-popup--draw'); drawn
+afresh when it has not drawn yet."
+  (when (buffer-live-p buf)
+    (if-let* ((drawn (keymap-popup--active-get buf :drawn)))
+        (let ((source (keymap-popup--session-get buf :source))
+              (keymap-popup--draw (cons 'replay (cdr drawn))))
+          (with-current-buffer (if (buffer-live-p source) source buf)
+            (keymap-popup--refresh-buffer buf (nth 3 drawn) (keymap-popup--session-get buf :prefix-mode))))
+      (keymap-popup--refresh buf))))
 
 (defun keymap-popup--resolve-key (entry keymap)
   "Return ENTRY with :key reflecting KEYMAP's current bindings.
@@ -1722,49 +1780,98 @@ Frame parameters are taken from `keymap-popup-child-frame-parameters'."
         :fit #'keymap-popup--fit-child-frame
         :hide #'keymap-popup--hide-child-frame))
 
-;; Romacs's `panel' menu (lisp/ui/romacs-popup.el): a layer across the
-;; frame's bottom above the status bar, in Romacs's menu look.  The popup's
-;; mode-line text becomes its first row; the layer's window has no mode line.
+;; Romacs's `panel' menu (lisp/ui/romacs-popup.el): a card floating over
+;; the frame, centred above the status bar, sized to the page it shows, in
+;; Romacs's menu look.  Its room is the frame's, so a menu pages rather
+;; than clips; the layer's window has no mode line, so the title is its
+;; first row.
 
 (declare-function romacs-popup-show "romacs-popup" (kind buffer &rest args))
+(declare-function romacs-popup-room "romacs-popup" (kind))
 (defvar romacs-popup-hints-inhibit)
 (declare-function romacs-popup-hide "romacs-popup" (buffer))
 
+(defun keymap-popup--margins (buf)
+  "The columns BUF's margins take beside its text, and the one a
+fringe-less window keeps for its continuation glyph."
+  (with-current-buffer buf (+ (or left-margin-width 0) (or right-margin-width 0) 1)))
+
+(defconst keymap-popup--overrun 2
+  "Columns a panel's layout leaves for glyphs painted wider than their
+`string-width' (emoji), so a row laid out to fit still paints inside.")
+
+(defun keymap-popup--layer-room ()
+  "The room a `panel' leaves the popup's text: the panel's, less the
+popup buffer's margins and `keymap-popup--overrun'."
+  (pcase-let ((`(,columns . ,rows) (romacs-popup-room 'panel)))
+    (cons (max 1 (- columns (keymap-popup--margins (keymap-popup--popup-buffer)) keymap-popup--overrun)) rows)))
+
+(defun keymap-popup--place-layer (buf)
+  "Show BUF's panel sized to the widest and tallest of its pages, so
+turning a page moves nothing, and return its frame.  Its width is the
+text's as painted, the widest any shown page has painted: a glyph drawn
+wider than its `string-width' (an emoji) widens the card rather than
+spilling past it."
+  (pcase-let* ((`(,columns . ,lines) (or (keymap-popup--session-get buf :size) (cons 1 1)))
+               (columns (max columns (or (keymap-popup--session-get buf :painted) 0)))
+               (margins (keymap-popup--margins buf))
+               (frame (romacs-popup-show 'panel buf :columns (+ columns margins) :lines lines))
+               (window (and frame (frame-root-window frame)))
+               (painted (and window (ceiling (car (window-text-pixel-size window nil nil most-positive-fixnum))
+                                             (frame-char-width frame)))))
+    (if (and painted (> painted columns))
+        (progn (keymap-popup--set-session buf :painted painted)
+               (romacs-popup-show 'panel buf :columns (+ painted margins) :lines lines))
+      frame)))
+
+(defun keymap-popup--layer-follow (frame)
+  "Lay the shown popup out again when its root FRAME's windows change
+size (a resized frame): its room is the frame's."
+  (when-let* (((null (frame-parent frame)))
+              (buf (keymap-popup--popup-buffer))
+              (layer (keymap-popup--session-get buf :frame))
+              ((eq (frame-parent layer) frame)))
+    (keymap-popup--refresh buf)))
+
 (defun keymap-popup--show-layer (buf)
-  "Show BUF in a `panel' layer and own its window."
-  (with-current-buffer buf (setq-local mode-line-format nil))
-  (let ((frame (romacs-popup-show 'panel buf)))
+  "Show BUF in a `panel' layer and own its window.  Its lines never
+wrap: a page is laid out to fit, so a row is a line."
+  (with-current-buffer buf (setq-local mode-line-format nil truncate-lines t))
+  (let ((frame (keymap-popup--place-layer buf)))
     (keymap-popup--set-session buf :frame frame)
-    (keymap-popup--set-session buf :window (frame-root-window frame))))
+    (keymap-popup--set-session buf :window (frame-root-window frame))
+    (add-hook 'window-size-change-functions #'keymap-popup--layer-follow)))
 
 (defun keymap-popup--fit-layer (buf)
-  "Size BUF's panel to its text as its window shows it."
+  "Refit BUF's panel to its pages once it shows (its first render runs
+before it does)."
   (when-let* ((frame (keymap-popup--session-get buf :frame))
-              ((frame-live-p frame))
-              (window (keymap-popup--display-window buf)))
-    (romacs-popup-show 'panel buf
-                       :lines (max 1 (ceiling (cdr (window-text-pixel-size window nil nil nil nil nil))
-                                              (frame-char-height frame))))))
+              ((frame-live-p frame)))
+    (keymap-popup--place-layer buf)))
 
 (defun keymap-popup--hide-layer (buf)
   "Hide BUF's panel, which fades; killing BUF deletes it."
+  (remove-hook 'window-size-change-functions #'keymap-popup--layer-follow)
   (when (keymap-popup--session-get buf :frame)
     (romacs-popup-hide buf)))
 
 (defun keymap-popup-backend-layer ()
-  "Return a backend showing the popup in Romacs's bottom `panel' menu."
+  "Return a backend showing the popup in Romacs's floating `panel' menu."
   (list :show #'keymap-popup--show-layer
         :fit #'keymap-popup--fit-layer
         :hide #'keymap-popup--hide-layer
+        :room #'keymap-popup--layer-room
         :title t))
 
 (defun keymap-popup--title (buf)
-  "BUF's title row: the text its mode line would show, in that text's
-own faces, or nil."
-  (when-let* ((format (alist-get 'mode-line-format keymap-popup-buffer-parameters))
-              (title (string-trim (format-mode-line format nil nil buf)))
+  "BUF's title row: its active menu's description in
+`keymap-popup-title' under the description's own faces, or nil when it
+has none."
+  (when-let* ((title (keymap-popup--active-get buf :resolved-docstring))
               ((not (string-empty-p title))))
-    title))
+    (let ((title (copy-sequence title)))
+      (add-face-text-property 0 (length title) 'keymap-popup-title t title)
+      title)))
 
 (defun keymap-popup--prepare-buffer ()
   "Allocate and configure a new popup buffer without claiming a name."
@@ -2066,6 +2173,43 @@ the failing callback may already have opened a successor popup."
     (put command 'keymap-popup--failure condition)
     command))
 
+(defvar keymap-popup--pressed nil
+  "(DEPTH . ENTRY): ENTRY, as drawn, the popup row whose key runs the
+command at `recursion-depth' DEPTH, or nil (`keymap-popup-entry').")
+
+(defun keymap-popup--forget-press ()
+  "Forget the pressed row once its command has run, not when a command
+it runs in a recursive edit (a minibuffer) does."
+  (unless (and keymap-popup--pressed (> (recursion-depth) (car keymap-popup--pressed)))
+    (setq keymap-popup--pressed nil)
+    (remove-hook 'post-command-hook #'keymap-popup--forget-press)))
+
+(defun keymap-popup--note-press (session key-str)
+  "Note KEY-STR's row as SESSION's popup last drew it, for the command
+it runs, before any teardown or repaint; nothing while a minibuffer has
+the popup suspended."
+  (unless (plist-get session :suspended-depth)
+    (keymap-popup--note-row (plist-get session :active) key-str)))
+
+(defun keymap-popup--note-row (active key-str)
+  "Note KEY-STR's row as ACTIVE's popup last drew it, at this depth."
+  (setq keymap-popup--pressed (and-let* ((drawn (plist-get active :drawn))
+                                         (entry (gethash (keymap-popup--key-name key-str) (nth 2 drawn))))
+                                (cons (recursion-depth) entry)))
+  (when keymap-popup--pressed
+    (add-hook 'post-command-hook #'keymap-popup--forget-press)))
+
+(defun keymap-popup-entry ()
+  "The popup row whose key runs the current command, as its popup drew
+it: its entry, `:description' the label shown with the label's text
+properties, so a row's label may carry what the row stood for.  Nil
+when the command was not run from a popup's row.  The row is noted as
+the key is read and forgotten once the command has run, so a press acts
+on what was drawn, whatever the popup draws since; a command of a
+recursive edit it opens (a minibuffer) sees none."
+  (and keymap-popup--pressed (= (car keymap-popup--pressed) (recursion-depth))
+       (cdr keymap-popup--pressed)))
+
 (defun keymap-popup--make-keep-pred (buf)
   "Return a keep-pred for `set-transient-map'.
 Read state from BUF and consume its reentering flag on read.
@@ -2077,6 +2221,7 @@ remove the native exit hook while leaving its transient map installed."
              (let* ((session (keymap-popup--session-state buf))
                     (active (plist-get session :active))
                     (key-str (key-description (this-command-keys-vector))))
+               (keymap-popup--note-press session key-str)
                (cond
                 ((and (symbolp this-command)
                       (get this-command 'keymap-popup--failure)) t)
@@ -2098,7 +2243,7 @@ remove the native exit hook while leaving its transient map installed."
                        '(universal-argument universal-argument-more
                          digit-argument negative-argument
                          keymap-popup--prefix-argument
-                         keymap-popup-scroll-up keymap-popup-scroll-down
+                         keymap-popup-next-page keymap-popup-previous-page
                          describe-key describe-key-briefly)))
                 ((keymap-popup--same-key-p key-str (plist-get active :exit-key)) nil)
                 ((eq this-command 'keyboard-quit) nil)
@@ -2213,42 +2358,54 @@ subsequent digit and `negative-argument' keys refine the prefix."
       (when enabled
         (universal-argument--mode)))))
 
+(defun keymap-popup--paging-keys (exit-key &optional all)
+  "The keys that turn a popup's pages, those of C-v and M-v (with ALL,
+C-M-v and C-M-S-v too) that neither begin EXIT-KEY nor begin with it
+\(M-v is ESC v): the exit key wins."
+  (let ((exit (and exit-key (keymap-popup--key-events exit-key)))
+        (prefix-p (lambda (a b) (equal a (seq-take b (length a))))))
+    (seq-remove (lambda (key)
+                  (let ((events (keymap-popup--key-events key)))
+                    (and exit (or (funcall prefix-p events exit) (funcall prefix-p exit events)))))
+                (if all '("C-v" "M-v" "C-M-v" "C-M-S-v") '("C-v" "M-v")))))
+
+(defun keymap-popup--paging-hint (exit-key)
+  "The paging keys a footer names: the first left for each direction."
+  (let ((keys (keymap-popup--paging-keys exit-key t)))
+    (delq nil (list (seq-find (lambda (k) (member k '("C-v" "C-M-v"))) keys)
+                    (seq-find (lambda (k) (member k '("M-v" "C-M-S-v"))) keys)))))
+
 (defun keymap-popup--core-overrides (exit-key)
   "Return alist of core overrides for EXIT-KEY and prefix toggle.
 The exit key is bound to `ignore'; the keep-pred exits on the key
 itself, so the binding only needs to exist and do nothing."
-  (list (cons exit-key #'ignore)
-        (cons "C-u" #'keymap-popup--prefix-argument)
-        (cons "C-M-v" #'keymap-popup-scroll-up)
-        (cons "C-M-S-v" #'keymap-popup-scroll-down)))
+  (cl-list* (cons exit-key #'ignore)
+            (cons "C-u" #'keymap-popup--prefix-argument)
+            (mapcar (lambda (key)
+                      (cons key (if (member key '("C-v" "C-M-v")) #'keymap-popup-next-page
+                                  #'keymap-popup-previous-page)))
+                    (keymap-popup--paging-keys exit-key t))))
 
-(defun keymap-popup--scroll (direction)
-  "Scroll the active popup's window a page in DIRECTION, 1 or -1, from
-its first line to its last full page; a popup that fits stays.  The
-window is not selected: its start moves, so the source keeps focus."
+(defun keymap-popup--turn-page (step)
+  "Show the active popup's page STEP pages on, 1 or -1, from its first to
+its last; a popup of one page stays.  The source keeps focus."
   (when-let* ((buf (keymap-popup--popup-buffer))
-              (window (keymap-popup--display-window buf)))
-    (with-current-buffer buf
-      (let* ((page (max 1 (1- (window-body-height window))))
-             (lines (count-lines (point-min) (point-max)))
-             (last (max 1 (- lines (window-body-height window) -1)))
-             (first (line-number-at-pos (window-start window)))
-             (target (max 1 (min last (+ first (* direction page))))))
-        (unless (= target first)
-          (save-excursion
-            (goto-char (point-min))
-            (forward-line (1- target))
-            (set-window-start window (point))))))))
+              (pages (keymap-popup--session-get buf :pages))
+              (page (keymap-popup--session-get buf :page))
+              (target (max 0 (min (1- pages) (+ page step))))
+              ((/= target page)))
+    (keymap-popup--set-session buf :page target)
+    (keymap-popup--refresh buf)))
 
-(defun keymap-popup-scroll-up ()
-  "Show the next page of a popup taller than its window."
+(defun keymap-popup-next-page ()
+  "Show the next page of a popup too big for its room."
   (interactive)
-  (keymap-popup--scroll 1))
+  (keymap-popup--turn-page 1))
 
-(defun keymap-popup-scroll-down ()
-  "Show the previous page of a popup taller than its window."
+(defun keymap-popup-previous-page ()
+  "Show the previous page of a popup too big for its room."
   (interactive)
-  (keymap-popup--scroll -1))
+  (keymap-popup--turn-page -1))
 
 (defun keymap-popup--refuse-inapt (buf)
   "Refuse an inapt key press for the popup in BUF.
@@ -2281,11 +2438,12 @@ Return the binding, which may be nil."
 (defun keymap-popup--consume-prefix (buf)
   "Clear prefix presentation owned by popup BUF before command dispatch.
 Leave native prefix arguments to the command loop, including any new
-prefix established by the command.  Refresh before dispatch so errors
-and quits cannot leave consumed prefix highlighting behind."
+prefix established by the command.  Repaint before dispatch so errors
+and quits cannot leave consumed prefix highlighting behind; a repaint
+runs no description, so the key acts on its row as drawn."
   (when (keymap-popup--session-get buf :prefix-mode)
     (keymap-popup--set-session buf :prefix-mode nil)
-    (keymap-popup--refresh buf)))
+    (keymap-popup--repaint buf)))
 
 (defun keymap-popup--dispatch-entry (keymap entry buf)
   "Dispatch KEYMAP's popup ENTRY for BUF.
@@ -2501,8 +2659,8 @@ Activates KEYMAP as a transient map.  Switch keys execute and re-render
 without closing.  Inapt keys are refused with \"Command unavailable\"
 and keep the popup open; outside a popup, `:inapt-if' does not block
 dispatch.  Sub-menu keys push a navigation stack.
-The exit key, \\[universal-argument], and C-M-v and C-M-S-v (a popup taller
-than its window pages, its source keeping focus) are popup controls; source actions
+The exit key, \\[universal-argument], and C-v and M-v (and C-M-v and C-M-S-v:
+a popup too big for its room pages, its source keeping focus) are popup controls; source actions
 shadowed by those controls are omitted from the displayed entries.
 \\[universal-argument] toggles prefix mode."
   (let ((active (keymap-popup--state-for-keymap keymap)))

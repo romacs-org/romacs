@@ -281,7 +281,7 @@ installed together with Emacs.")))
     (define-key map [left] 'quail-prev-translation)
     (define-key map [down] 'quail-next-translation-block)
     (define-key map [up] 'quail-prev-translation-block)
-    (define-key map "\C-i" 'quail-completion)
+    (define-key map (kbd "TAB") 'quail-completion)
     (define-key map "\C-@" 'quail-select-current)
     ;; Following simple.el, Enter key on numeric keypad selects the
     ;; current translation just like `C-SPC', and `mouse-2' chooses

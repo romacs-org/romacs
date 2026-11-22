@@ -8,10 +8,10 @@ use super::*;
 #[derive(romacs_snapshot::Snapshot)]
 pub(super) enum Arguments {
     /// The caller's argument registers: OFFSET..OFFSET+COUNT of the register
-    /// stack at suspension depth STACK (`Vm::suspended_stacks` index; the live
-    /// stack is at `suspended_stacks.len()`). Nothing writes them while the
-    /// callee runs; widening keeps offsets; collection forwards them as
-    /// registers; a nested run sets the whole stack aside unmoved.
+    /// file STACK (`Registers::file`; the live one is at `Registers::depth`).
+    /// Nothing writes them while the callee runs; widening keeps offsets;
+    /// collection forwards them as registers; a nested run sets the whole
+    /// stack aside unmoved.
     Registers { stack: usize, offset: usize, count: usize },
     /// Copied into `Backtrace::arguments`: a call through `apply`, whose
     /// spread window a nested `apply` reuses while the callee runs.
@@ -116,10 +116,6 @@ impl Backtrace {
         only.sort_unstable();
         self.observe();
         self.only = only;
-    }
-    /// Whether the observation so far recorded a call.
-    pub fn observed_any(&self) -> bool {
-        self.observed.as_ref().is_some_and(|(_, calls)| !calls.is_empty())
     }
     /// Record the functions every call names, from now until `observed`.
     pub fn observe(&mut self) {
@@ -246,8 +242,7 @@ impl Vm {
         match &self.backtrace.frames[index].args {
             Arguments::Copied(range) => &self.backtrace.arguments[range.clone()],
             &Arguments::Registers { stack, offset, count } => {
-                let stack = self.suspended_stacks.get(stack).unwrap_or(&self.stack);
-                &stack[offset..offset + count]
+                &self.stack.file(stack)[offset..offset + count]
             }
         }
     }
@@ -256,7 +251,7 @@ impl Vm {
         match &self.backtrace.frames.get(index)?.args {
             Arguments::Copied(range) => self.backtrace.arguments.get(range.clone()),
             &Arguments::Registers { stack, offset, count } => {
-                self.suspended_stacks.get(stack).unwrap_or(&self.stack).get(offset..offset.checked_add(count)?)
+                self.stack.file(stack).get(offset..offset.checked_add(count)?)
             }
         }
     }
@@ -416,7 +411,7 @@ impl Vm {
         let level = n
             .integer_value()
             .filter(|n| *n >= 0)
-            .ok_or(prim::Fault::Wrong("wholenump", n))? as usize;
+            .ok_or_else(|| prim::Fault::Wrong("wholenump", n))? as usize;
         if level == 0 {
             return Err(prim::Fault::Wrong("wholenump", Value::integer(-1).unwrap()));
         }
@@ -430,7 +425,7 @@ impl Vm {
     /// GNU get_backtrace_frame: the stack index of the activation NFRAMES
     /// out from BASE's (the innermost when BASE is nil), if there is one.
     pub(super) fn backtrace_frame_index(&self, nframes: Value, base: Value) -> std::result::Result<Option<usize>, prim::Fault> {
-        let count = nframes.integer_value().filter(|&n| n >= 0).ok_or(prim::Fault::Wrong("wholenump", nframes))?;
+        let count = nframes.integer_value().filter(|&n| n >= 0).ok_or_else(|| prim::Fault::Wrong("wholenump", nframes))?;
         Ok(self.backtrace_start(base)?.and_then(|i| i.checked_sub(usize::try_from(count).ok()?)))
     }
     /// An activation's FLAGS as `mapbacktrace` passes them.

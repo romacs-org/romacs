@@ -941,6 +941,36 @@ impl Default for Forwarded {
     }
 }
 
+/// The per-buffer built-ins GNU gives no `local_flags` bit (`PER_BUFFER_IDX`
+/// -1): local in every buffer, so `PER_BUFFER_VALUE_P` holds for them always.
+const ALWAYS_LOCAL_NAMES: &[&str] = &["buffer-invisibility-spec", "default-directory", "buffer-file-name",
+    "buffer-file-truename", "buffer-read-only", "buffer-file-format", "local-minor-modes", "major-mode", "mode-name",
+    "mark-active", "buffer-undo-list", "buffer-auto-save-file-name", "buffer-backed-up", "buffer-saved-size",
+    "point-before-scroll", "buffer-auto-save-file-format", "buffer-display-count", "buffer-display-time"];
+
+/// Whether the per-buffer built-in at each forwarded index is always local:
+/// a function of `C_VARIABLES` alone, in `Forwarded::buffer_vars`' order.
+static ALWAYS_LOCAL: std::sync::LazyLock<Vec<bool>> = std::sync::LazyLock::new(|| {
+    C_VARIABLES.iter().filter(|var| matches!(var.kind, Kind::PerBuffer { .. }))
+        .map(|var| ALWAYS_LOCAL_NAMES.contains(&var.name)).collect()
+});
+
+/// The forwarded indices of the per-buffer built-ins local in every buffer.
+pub(crate) fn always_local_indices() -> impl Iterator<Item = usize> {
+    ALWAYS_LOCAL.iter().enumerate().filter_map(|(i, &always)| always.then_some(i))
+}
+
+/// The places of `major-mode' and `mode-name', which every
+/// `kill-all-local-variables' resets.
+static MODE_PLACES: std::sync::LazyLock<[u16; 2]> = std::sync::LazyLock::new(|| {
+    ["major-mode", "mode-name"].map(|name| match Forwarded::lookup(name) { Some(Fwd::Buffer(i)) => i, _ => unreachable!("per-buffer") })
+});
+
+/// The names of the per-buffer built-ins local in every buffer.
+pub(crate) fn always_local_names() -> &'static [&'static str] {
+    ALWAYS_LOCAL_NAMES
+}
+
 /// Where each forwarded variable's storage is, by name: its kind's
 /// storage, numbered in table order. A function of `C_VARIABLES` alone, so
 /// each process builds it for itself and no world image holds it.
@@ -1096,6 +1126,12 @@ impl PerBuffer {
     pub(crate) fn get(&self, i: u16) -> Option<Value> {
         self.0.get(i as usize).copied().flatten()
     }
+    /// The forwarded indices it holds a value for. The scan covers every
+    /// slot allocated so far, which reach the highest index ever stored in
+    /// this buffer: at most the 58 per-buffer built-ins, whatever it holds now.
+    pub(crate) fn set_indices(&self) -> impl Iterator<Item = usize> + '_ {
+        self.0.iter().enumerate().filter_map(|(i, value)| value.is_some().then_some(i))
+    }
     fn set(&mut self, i: u16, value: Value) {
         let i = i as usize;
         if self.0.len() <= i {
@@ -1190,15 +1226,16 @@ impl Vm {
             self.forwarded.objects[i as usize] = Value::UNBOUND;
         }
     }
+    /// The interned slot of the per-buffer built-in (DEFVAR_PER_BUFFER) at
+    /// forwarded index I, the place a `Fwd::Buffer' names, once its symbol
+    /// exists.
+    pub(crate) fn per_buffer_slot(&self, i: usize) -> Option<usize> {
+        self.names.get(C_VARIABLES[self.forwarded.buffer_vars[i]].name).copied()
+    }
     /// GNU `SYMBOL_FORWARDED`: the forwarding of interned SLOT, if it names a
     /// built-in variable. Initialises and caches SLOT's lazy redirect.
     /// A tracked built-in variable is the forwarding the tracking keeps; a
     /// tracked plain one is `Fwd::Tracked`.
-    /// The interned slots of the per-buffer built-ins (DEFVAR_PER_BUFFER),
-    /// the only ones a `Fwd::Buffer' forwards.
-    pub(crate) fn per_buffer_slots(&self) -> Vec<usize> {
-        self.forwarded.buffer_vars.iter().filter_map(|&v| self.names.get(C_VARIABLES[v].name).copied()).collect()
-    }
     pub(super) fn forwarding(&mut self, slot: usize) -> Option<Fwd> {
         self.resolve_redirect(slot);
         match self.variable_redirects.get(slot).copied().flatten() {
@@ -1225,8 +1262,8 @@ impl Vm {
     #[inline(always)]
     fn resolve_redirect(&mut self, slot: usize) {
         if self.variable_redirects.get(slot).copied().flatten().is_none()
+            && self.in_initial_obarray(slot)
             && let Some(name) = self.symbol_names.get(slot)
-            && self.names.get(name) == Some(&slot)
         {
             let name = name.clone();
             self.initialize_variable_redirect(&name, slot);
@@ -1433,9 +1470,7 @@ impl Vm {
     }
     /// GNU `PER_BUFFER_VALUE_P (buf, idx)`.
     pub(super) fn per_buffer_always_local(&self, i: u16) -> bool {
-        matches!(C_VARIABLES[self.forwarded.buffer_vars[i as usize]].name,
-            "buffer-invisibility-spec" | "default-directory" | "buffer-file-name" | "buffer-file-truename" | "buffer-read-only" | "buffer-file-format" | "local-minor-modes" | "major-mode" | "mode-name" | "mark-active" | "buffer-undo-list" | "buffer-auto-save-file-name"
-            | "buffer-backed-up" | "buffer-saved-size" | "point-before-scroll" | "buffer-auto-save-file-format" | "buffer-display-count" | "buffer-display-time")
+        ALWAYS_LOCAL[i as usize]
     }
     pub(super) fn clear_forwarded_local(&mut self, buffer: usize, i: u16) {
         if !self.per_buffer_always_local(i) {
@@ -1452,8 +1487,7 @@ impl Vm {
         } else { self.per_buffer_default(i) }
     }
     pub(super) fn reset_forwarded_modes(&mut self, buffer: usize) {
-        for name in ["major-mode", "mode-name"] {
-            let Some(Fwd::Buffer(i)) = Forwarded::lookup(name) else { unreachable!() };
+        for &i in MODE_PLACES.iter() {
             self.per_buffer_mut(buffer).expect("buffer").clear_local(i);
             self.forwarded_buffer_value(buffer, i);
         }
@@ -1562,6 +1596,14 @@ impl Vm {
         }).collect()
     }
 
+    /// Whether BUFFER has a `buffer-file-name' or `buffer-file-truename' of
+    /// its own: its kill then asks to save and unlocks the file.
+    pub(crate) fn buffer_names_a_file(&self, buffer: Value) -> bool {
+        let Some(locals) = buffer.index(0).ok().and_then(|i| i.checked_sub(1)).and_then(|i| self.per_buffer(i)) else { return false };
+        ["buffer-file-name", "buffer-file-truename"].into_iter().any(|name| {
+            matches!(Forwarded::lookup(name), Some(Fwd::Buffer(i)) if locals.get(i).is_some_and(|v| v != Value::NIL))
+        })
+    }
     /// The saved truename of BUFFER's visit, when BUFFER visits a file:
     /// one buffer's record, without walking the others (lock-buffer).
     pub(crate) fn visit_truename(&self, buffer: Value) -> Option<Vec<u8>> {
@@ -1644,7 +1686,7 @@ impl Vm {
             Fwd::Int(i) => {
                 // CHECK_INTEGER; VM2 has no bignums, so every integer fits
                 // and GNU's overflow-error arm is unreachable.
-                let n = value.integer_value().ok_or(Fault::Wrong("integerp", value))?;
+                let n = value.integer_value().ok_or_else(|| Fault::Wrong("integerp", value))?;
                 self.forwarded.ints[i as usize] = n;
             }
             Fwd::Buffer(i) => {

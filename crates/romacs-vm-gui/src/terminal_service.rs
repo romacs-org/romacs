@@ -374,12 +374,12 @@ impl Service {
 fn reap(child: spawn::Child) {
     std::thread::spawn(move || {
         for _ in 0..40 {
-            if spawn::wait(spawn::Whom::Child(&child.pidfd)).is_some_and(|(_, status)| status.ended()) { return; }
+            if spawn::wait(&child.pidfd).is_some_and(spawn::Status::ended) { return; }
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
         let _ = spawn::signal(&child.pidfd, None, libc::SIGKILL);
         std::thread::sleep(std::time::Duration::from_millis(50));
-        let _ = spawn::wait(spawn::Whom::Child(&child.pidfd));
+        let _ = spawn::wait(&child.pidfd);
     });
 }
 
@@ -389,7 +389,7 @@ impl TerminalHost for Service {
     fn create(&mut self, shell: &str, directory: &str, columns: u16, rows: u16) -> Result<u64, String> {
         use std::os::unix::ffi::{OsStrExt, OsStringExt};
         if columns < 2 || rows == 0 { return Err("Terminal dimensions require at least two columns and one row".into()); }
-        let env = std::env::vars_os().map(|(name, value)| [name.into_vec(), b"=".to_vec(), value.into_vec()].concat()).collect();
+        let env = romacs_vm::host::inherited_env().into_iter().map(|(name, value)| [name.into_vec(), b"=".to_vec(), value.into_vec()].concat()).collect();
         let spec = Spec { argv: vec![self.program.as_os_str().as_bytes().to_vec(), b"--terminal-helper".to_vec(), shell.as_bytes().to_vec()],
                           env, cwd: directory.as_bytes().to_vec(), umask: umask(), setsid: true,
                           fds: vec![(0, End::Null), (1, End::Null), (2, End::Null), (3, End::Socket)], ..Spec::default() };

@@ -57,9 +57,10 @@ TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
              first row (a transcript where it has no thread), "more" shows
              every transcript, a thread gone since the board was drawn is
              said so and the board drawn again.
-  chat_view  a chat keeps its transcript in view as turns come in.
-  children   what runs under a session, in its header and C-c C-o menu,
-             by real keys.
+  chat_menu  the chat's actions menu by its key, its workers at work,
+             across the UI review's themes.
+  history_view  a harness transcript's read-only view, as a chat's
+             transcript, across the UI review's themes.
   select     a new model or effort in a running session: live between
              turns, armed during one, restarted when refused, carried by
              Codex's next turn, across a server restart.
@@ -94,12 +95,15 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import sqlite3
+import struct
 import signal
 import subprocess
 import sys
 import time
+import zlib
 
 import parity_live
 from romacs_mcp_client import RomacsMcp
@@ -138,6 +142,7 @@ def until(predicate, seconds, what):
             outlasted(what, time.time() - started, seconds)
 
 HARNESS = Path(__file__).resolve().parent / 'fake_harness.py'
+TREE = Path(__file__).resolve().parents[3]
 CODEX = Path(__file__).resolve().parent / 'fake_codex.py'
 RPC = Path(__file__).resolve().parent / 'fake_rpc.py'
 RPC_DRIVER = Path(__file__).resolve().parent / 'fakerpc.el'
@@ -373,7 +378,9 @@ def session(args, base):
                   'attached_after_reshow': attached,
                   'chat_has': {**{k: k in chat for k in ('❯ say hello', 'hello from the fake harness',
                                                          '⚠ The agent wants to run Bash', 'touch approved.txt',
-                                                         '✔ allowed by you', '⎿ 42')},
+                                                         '✔ allowed by you',
+                                                         # An eval's answer, on its row.
+                                                         '⇒ 42')},
                                # A Romacs tool's row: its mark, then its name as words.
                                '● ◈ buffer edit': bool(re.search(r'● \S+ buffer edit', chat))}}
         result['ok'] = (edited == '"ALPHA beta\\n"' and evaluated == '42'
@@ -1036,6 +1043,12 @@ def tour(work, delegate_target):
         ('romacs_orchestrator_capabilities', {}, lambda t: '"codex"' in t and '"providers"' in t),
         ('romacs_limits', {}, lambda t: '"harnesses"' in t),
         ('romacs_dev_guide', {'query': 'car'}, lambda t: 'car' in t),
+        # A plan of loading one Lisp file: what it would do, nothing loaded.
+        ('romacs_live_update', {'files': [str(work / 'tour-live.el')], 'plan': True},
+         lambda t: '"plan":true' in t and 'tour-live.el' in t),
+        # This tree's runner on a library with no suites: it runs, and says so.
+        ('romacs_live_test', {'worktree': str(TREE), 'modules': ['romacs-live-tour-none']},
+         lambda t: 'No suite ran for romacs-live-tour-none' in t and '"passed":false' in t),
         ('romacs_option_search', {'query': 'kill-ring'}, lambda t: 'kill-ring-max' in t),
         ('romacs_option_describe', {'name': 'kill-ring-max'}, lambda t: 'kill-ring-max' in t),
         ('romacs_option_set', {'name': 'kill-ring-max', 'value': '61'}, lambda t: '61' in t),
@@ -1090,9 +1103,13 @@ def offered(a):
         return mcp.tools()
 
 
+TOUR_LIVE = ';;; tour-live.el --- a live update tour file  -*- lexical-binding: t -*-\n(defun tour-live-f () 1)\n'
+
+
 def tour_setup(a):
     a.eval('(with-current-buffer (get-buffer-create "notes") (erase-buffer) (insert "alpha beta\\n") t)')
     (a.work / 'tour.txt').write_text('before\n')
+    (a.work / 'tour-live.el').write_text(TOUR_LIVE)
 
 
 def tools(args, base):
@@ -1731,7 +1748,12 @@ def launcher(args, base):
             peer, _ = late.accept()
             peer.recv(4096)
             time.sleep(6)
-            peer.sendall(b'{"refused": "attached", "pid": 1}\n')
+            # As a supervisor does, its refusal goes to an editor that may
+            # have hung up meanwhile (its endpoint replaced): no error.
+            try:
+                peer.sendall(b'{"refused": "attached", "pid": 1}\n')
+            except (BrokenPipeError, ConnectionResetError):
+                pass
             peer.close()
         threading.Thread(target=refuse_late, daemon=True).start()
         (late_dir / 'manifest.json').write_text(json.dumps(
@@ -1867,7 +1889,7 @@ def unicode(args, base):
                         and started_in == str(odd)
                         and UNICODE in chat_after.split('romacs_eval', 1)[1]
                         and UNICODE in codex_reply and UNICODE in title_again
-                        and any(UNICODE in t for t in listed) and f'> {UNICODE}' in (view or ''))
+                        and any(UNICODE in t for t in listed) and f'❯ {UNICODE}' in (view or ''))
         return result
     finally:
         a.close()
@@ -1963,6 +1985,7 @@ def mcp_tour(args, base):
                                                               'maxChars': 10})[1]).get('tick')
             note = a.work / 'note.txt'
             note.write_text('one\n')
+            (a.work / 'tour-live.el').write_text(TOUR_LIVE)
             plan = {
                 'romacs_identity': {}, 'romacs_help': {}, 'romacs_observe': {},
                 'romacs_eval': {'code': '(+ 1 2)'},
@@ -1980,6 +2003,8 @@ def mcp_tour(args, base):
                 'romacs_orchestrator_capabilities': {},
                 'romacs_delegate_task': {'task': 'say toured', 'cwd': str(a.work)},
                 'romacs_task_list': {},
+                'romacs_live_update': {'files': [str(a.work / 'tour-live.el')], 'plan': True},
+                'romacs_live_test': {'worktree': str(TREE), 'modules': ['romacs-live-tour-none']},
             }
             answered, errors, protocol, silent = {}, {}, {}, []
 
@@ -2781,8 +2806,8 @@ def history(args, base):
             and home.index(a.work.name) < home.index('◇')
             and all(v.split('|')[1] == 't' for v in views.values())
             and views[cid].startswith('*history: list the files here*')
-            and order(views[cid], '> list the files here', 'Two files') and '✓ $ ls' in views[cid]
-            and order(views[tid], '> count the lines of a.txt', 'a.txt has 3 lines') and '✓ $ wc -l a.txt' in views[tid]
+            and order(views[cid], '❯ list the files here', 'Two files') and '● $ ls' in views[cid]
+            and order(views[tid], '❯ count the lines of a.txt', 'a.txt has 3 lines') and '● $ wc -l a.txt' in views[tid]
             and claude_run and claude_run[-1]['argv'][claude_run[-1]['argv'].index('--resume') + 1] == cid
             and claude_run[-1].get('config_dir') == str(claude_dir)
             and codex_run and codex_run[-1]['resumed'] and codex_run[-1]['codex'] == tid
@@ -2931,16 +2956,28 @@ def chat_log(args, base):
         # A plan, in plan mode: asked of the user, who proceeds by a key.
         a.eval(f'(progn (romacs-agent-set-plan {a.s(sid)} t) t)')
         a.eval(f'(progn (romacs-agent-send {a.s(sid)} {lisp_text(PLAN_PROMPT)}) t)')
-        a.until(sid, lambda: pending(sid) > 0, 300, 'a plan asked')
+        # The presented plan itself (its ExitPlanMode request), not any
+        # request waiting.
+        def plan_request():
+            found = a.eval(f'(let ((s {a.s(sid)})) (seq-find (lambda (id) (let ((request (gethash id (romacs-agent-approvals s)))) '
+                           '(and (hash-table-p request) (equal (gethash "tool_name" request) "ExitPlanMode")))) '
+                           '(hash-table-keys (romacs-agent-approvals s))))')
+            return None if found == 'nil' else found
+        a.until(sid, lambda: plan_request() is not None, 300, 'a plan asked')
+        plan_id = plan_request()
         at_end()
         shot('plan')
-        result['plan_asked'] = pending(sid) > 0
+        result['plan_asked'] = plan_id is not None
         if result['plan_asked']:
             a.keys(*(ctrl('c') + ctrl('y')))
-            a.until(sid, lambda: pending(sid) == 0, 60, 'the plan answered')
+            a.until(sid, lambda: a.eval(f'(gethash {plan_id} (romacs-agent-approvals {a.s(sid)}))') == 'nil', 60, 'the plan answered')
             time.sleep(2)
             at_end()
             shot('plan-answered')
+            # Its answer is the user's, said under the plan.
+            chat_now = a.chat(sid)
+            after = chat_now.split('presents its plan', 1)[1] if 'presents its plan' in chat_now else ''
+            result['plan_answered_by_user'] = '✔ allowed by you' in after
         a.idle(sid, 300)
         text = a.chat(sid)
 
@@ -2972,18 +3009,216 @@ def chat_log(args, base):
             a.idle(codex, 300)
             at_end()
             shot('codex-done')
-            result['codex'] = re.search(r'⎿ line 1\n\s+line 2', command_block()) is not None
+            # Ended well: its row alone, how many lines it gave (RET shows them).
+            result['codex'] = (re.search(r'· 40 lines', command_block()) is not None
+                               and '⎿' not in command_block())
         except RuntimeError as error:
             result['codex'] = repr(error)[:300]
         result.update({'shots': shots, 'denied_by_romacs': 'denied by Romacs' in text,
                        'shows': {word: word in text for word in ('seq 1', 'notes.txt', '∴', '⎿', 'allowed by you', '✻')}})
-        result['ok'] = (result['moved_up'] and result['question_asked'] and result['plan_asked'] and result['codex'] is True
+        result['ok'] = (result['moved_up'] and result['question_asked'] and result['plan_asked'] and result.get('plan_answered_by_user') and result['codex'] is True
                         and not result['denied_by_romacs'] and all(result['shows'].values()))
         return result
     finally:
         a.close()
 
 
+UI_THEMES = ('omarchy-matte-black', 'catppuccin-latte', 'flatwhite', 'nord', 'leet', 'rum')
+
+
+def ui_review(args, base):
+    """Shots for a blind UI review of the chat (romacs-ui-review): a real
+    Claude Code (--claude-model) session, the chat in each of UI_THEMES
+    while a turn runs, while it waits on the user (a question), and at
+    rest, plus a strip of frames of the working thread while it runs.
+    Costs money: not a default workflow."""
+    # The software rasterizer draws no animation unless asked to, as a GPU does.
+    a = Agents(args, base, 'ur', env_extra={'ROMACS_LAYER_ANIMATION': '1'})
+    try:
+        a.up()
+        a.providers([('claude', args.claude_config, args.claude_program or real_program('claude'), ['--model', args.claude_model])])
+        a.work.mkdir(parents=True, exist_ok=True)
+        (a.work / 'notes.txt').write_text('hello\nworld\n')
+        shots = []
+
+        def shot(name):
+            a.eval('(progn (redisplay t) t)')
+            time.sleep(.4)
+            path = base / f'{name}.png'
+            subprocess.run([f'{args.tools}/grim', str(path)], env=a.env, check=True, timeout=30)
+            shots.append(str(path))
+            return path
+
+        def themed(state):
+            for theme in UI_THEMES:
+                a.eval(f'(progn (mapc (function disable-theme) custom-enabled-themes) (load-theme (quote {theme}) t) '
+                       '(with-selected-window (selected-window) (set-buffer (window-buffer)) (goto-char (point-max)) (recenter -1)) t)')
+                shot(f'{theme}-{state}')
+
+        def pending(sid):
+            return int(a.eval(f'(hash-table-count (romacs-agent-approvals {a.s(sid)}))'))
+
+        sid = a.eval(f'(let ((session (romacs-agent-start {lisp(a.work)}))) (romacs-agent-show session) '
+                     '(delete-other-windows) (romacs-agent-id session))').strip('"')
+        a.keyboard_ready()
+        a.eval(f'(progn (romacs-agent-send {a.s(sid)} {lisp_text(TURN_PROMPT)}) t)')
+        a.idle(sid, 600)
+        # Running: a command long enough for every theme's shot.
+        a.eval(f'(progn (romacs-agent-send {a.s(sid)} {lisp_text(UI_RUN_PROMPT)}) t)')
+        a.until(sid, lambda: a.eval(f'(with-current-buffer (romacs-agent-log-chat {a.s(sid)}) '
+                                    '(and romacs-agent-log--current t))') == 't',
+                300, 'a running command')
+        for i in range(10):
+            path = base / f'motion-{i:02d}.png'
+            subprocess.run([f'{args.tools}/grim', str(path)], env=a.env, check=True, timeout=30)
+            time.sleep(.12)
+        themed('running')
+        a.idle(sid, 300)
+        # Waiting on the user.
+        a.eval(f'(progn (romacs-agent-send {a.s(sid)} {lisp_text(ASK_PROMPT)}) t)')
+        a.until(sid, lambda: pending(sid) > 0, 300, 'a question asked')
+        # The question asked, with its Blue: anything else fails the capture.
+        # Its id is kept, and that request alone is answered.
+        asked = a.eval(f'(let* ((s {a.s(sid)}) (id (car (hash-table-keys (romacs-agent-approvals s)))) '
+                       '(request (gethash id (romacs-agent-approvals s)))) '
+                       '(and (equal (gethash "tool_name" request) "AskUserQuestion") '
+                       '(member "Blue" (plist-get (cdr (car (romacs-agent--claude-questions (gethash "input" request)))) :options)) id))')
+        if not asked.startswith('"'):
+            raise RuntimeError(f'the agent asked something other than the colour question: {asked}')
+        themed('waiting')
+        answered = a.eval(f'(let* ((s {a.s(sid)}) (request (gethash {asked} (romacs-agent-approvals s)))) '
+                          f'(when request (romacs-agent-respond s {asked} (list :answers (list (cons (car (car '
+                          '(romacs-agent--claude-questions (gethash "input" request)))) "Blue"))) nil (quote user)) t))')
+        if answered != 't':
+            raise RuntimeError(f'the colour question {asked} was no longer pending')
+        a.idle(sid, 300)
+        themed('idle')
+        return {'ok': True, 'shots': shots}
+    finally:
+        a.close()
+
+
+def chat_menu(args, base):
+    """The chat's actions menu by its real key, across UI_THEMES: titled
+    by its session, its Workers the delegated sessions at work only (one
+    waiting on the user first, one running; a failed and a finished one
+    left to the board), its model and effort said."""
+    a = Agents(args, base, 'cm')
+    try:
+        a.up()
+        a.work.mkdir(parents=True, exist_ok=True)
+        a.codex_instance()
+        a.eval("(setq romacs-agent-approval-policy 'ask)")
+        parent = a.start('say ready')
+        a.idle(parent)
+
+        def delegate(task, title, provider):
+            a.send(parent, 'call romacs_delegate_task ' + json.dumps(
+                {'task': task, 'title': title, 'target': {'provider': provider}, 'clientRequestId': title}))
+            a.idle(parent, 60)
+            return json.loads(a.called('romacs_delegate_task')['text'])['taskId']
+
+        delegate('slow 300', 'long build', 'codex')
+        # A title past what a menu row leaves: the popup cuts its end, the
+        # state before it stays whole.
+        delegate('slow 300', LONG_WORKER, 'codex')
+        waiting = delegate('ask true', 'needs approval', 'claude')
+        failed = delegate('fail', 'broken task', 'codex')
+        a.until(failed, lambda: a.state(failed) == 'idle', 20, 'failed child ended')
+        done = delegate('say fine', 'finished task', 'codex')
+        a.until(done, lambda: a.state(done) == 'idle', 20, 'done child ended')
+        a.idle(parent, 60)
+        until(lambda: a.state(waiting) == 'waiting-approval', 20, 'child waiting')
+        a.eval(f'(progn (romacs-agent-show {a.s(parent)}) (delete-other-windows) t)')
+        a.keyboard_ready()
+
+        def menu():
+            return parity_live.read_sexp(a.eval(
+                '(and (buffer-live-p keymap-popup--buffer) (with-current-buffer keymap-popup--buffer '
+                '(buffer-substring-no-properties (point-min) (point-max))))')) or ''
+
+        def well_formed(text):
+            rows = text.splitlines()
+            first = lambda word: next((i for i, row in enumerate(rows) if word in row), None)
+            waiting, running = first('asks you · needs approval'), first('running · long build')
+            return ('Agent · say ready' in text and 'Model: fake-model' in text and 'Effort: default' in text
+                    and 'Plan mode: off' in text and 'broken task' not in text and 'finished task' not in text
+                    and waiting is not None and running is not None and waiting < running
+                    and 'running · ' + LONG_WORKER[:20] in text)
+
+        shots, result = [], {'menus': {}}
+        for theme in UI_THEMES:
+            a.eval(f'(progn (mapc (function disable-theme) custom-enabled-themes) (load-theme (quote {theme}) t) t)')
+            a.keys('-M', 'ctrl', '-k', 'c', '-k', 'o', '-m', 'ctrl')
+            until(lambda: 'Workers' in menu(), 15, 'menu open')
+            a.eval('(progn (redisplay t) t)')
+            time.sleep(.5)
+            result['menus'][theme] = menu()
+            path = base / f'{theme}-menu.png'
+            subprocess.run([f'{args.tools}/grim', str(path)], env=a.env, check=True, timeout=30)
+            shots.append(str(path))
+            a.keys('-M', 'ctrl', '-k', 'g', '-m', 'ctrl')
+            until(lambda: not menu(), 15, 'menu closed')
+        result['menu'] = result['menus'][UI_THEMES[0]]
+        result['ok'] = all(well_formed(text) for text in result['menus'].values())
+        result['shots'] = shots
+        return result
+    finally:
+        a.close()
+
+
+def history_view(args, base):
+    """A harness transcript's read-only view (the agent board's history),
+drawn as a chat's transcript, across UI_THEMES."""
+    a = Agents(args, base, 'hv')
+    try:
+        a.up()
+        a.work.mkdir(parents=True, exist_ok=True)
+        lines = [
+            {'type': 'user', 'message': {'role': 'user', 'content': 'list the files here, then say how many'}},
+            {'type': 'assistant', 'message': {'id': 'm1', 'content': [
+                {'type': 'text', 'text': 'Listing them.'},
+                {'type': 'tool_use', 'id': 't1', 'name': 'Bash', 'input': {'command': 'ls', 'description': 'List files'}}]}},
+            {'type': 'user', 'message': {'content': [{'type': 'tool_result', 'tool_use_id': 't1', 'content': 'a.txt\nb.txt\nnotes.md'}]}},
+            {'type': 'assistant', 'message': {'id': 'm2', 'content': [
+                {'type': 'text', 'text': 'There are **three** files: `a.txt`, `b.txt` and `notes.md`.'}]}},
+        ]
+        path = a.work / 'transcript.jsonl'
+        # Spaced, as another writer leaves a transcript: read all the same.
+        path.write_text(''.join(json.dumps(line) + '\n' for line in lines))
+        a.eval(f'(progn (romacs-agent-history-open (list :path {lisp(path)} :title "list the files" :harness (quote claude) '
+               f':provider "claude" :id "h1" :cwd {lisp(a.work)})) (delete-other-windows) t)')
+        a.keyboard_ready()
+        shots, texts = [], {}
+        for theme in UI_THEMES:
+            a.eval(f'(progn (mapc (function disable-theme) custom-enabled-themes) (load-theme (quote {theme}) t) t)')
+            # Its frame drawn in this theme, the view the window shows.
+            until(lambda: a.eval(f'(progn (redisplay t) (and (memq (quote {theme}) custom-enabled-themes) '
+                                 '(derived-mode-p (quote romacs-agent-history-mode)) t))') == 't', 15, f'{theme} shown')
+            texts[theme] = parity_live.read_sexp(a.eval('(with-current-buffer (window-buffer (selected-window)) '
+                                                        '(buffer-substring-no-properties (point-min) (point-max)))'))
+            # Painted: two shots alike, and unlike the theme before's.
+            path_png = base / f'{theme}-history.png'
+            last = None
+            for _ in range(20):
+                subprocess.run([f'{args.tools}/grim', str(path_png)], env=a.env, check=True, timeout=30)
+                now = path_png.read_bytes()
+                if now == last and (not shots or now != Path(shots[-1]).read_bytes()):
+                    break
+                last = now
+                time.sleep(.3)
+            else:
+                raise RuntimeError(f'{theme}: the frame never settled in its theme')
+            shots.append(str(path_png))
+        text = texts[UI_THEMES[0]]
+        return {'ok': all('list the files here' in t and 'three' in t and 'a.txt' in t for t in texts.values()),
+                'text': text[:800], 'shots': shots}
+    finally:
+        a.close()
+
+
+LONG_WORKER = 'review every caller of the display protocol and report what each one reads'
+UI_RUN_PROMPT = 'Run this shell command and wait for it: for i in $(seq 1 60); do echo step $i; sleep 0.5; done. Then say done.'
 CODEX_PROMPT = ('Think briefly, then run this shell command and wait for it: '
                 'for i in $(seq 1 40); do echo line $i; sleep 0.25; done. Then say how many lines it printed.')
 ASK_PROMPT = 'Use the AskUserQuestion tool to ask me "Which colour do you prefer?" with the options Red and Blue. Then say what I chose.'
@@ -3123,10 +3358,11 @@ def board_keys(args, base):
 def start_picker(args, base):
     """Starting a session by real keys through the palette: C-u c on the
     home page, the directory of the project at point, a row found by typing
-    (its instance's group, the harness's reported model among the catalogue's),
+    (its instance's group, a model its harness reported),
     the effort, then the first message in the chat it opens.  The fake
     harnesses record what they were given.
     Each run's initialize answers its models, kept with only their rows;
+    Codex's are asked of it as the palette opens (`model/list');
     with one enabled instance no palette is asked."""
     a = Agents(args, base, 'pk')
     try:
@@ -3161,51 +3397,87 @@ def start_picker(args, base):
                 '(with-current-buffer (window-buffer (active-minibuffer-window)) (minibuffer-contents-no-properties))'))
 
         def asked(text):
-            until(lambda: text in prompt(), 15, f'{text} asked')
+            """Wait for the prompt TEXT; on its timeout, the prompt and input open then."""
+            try:
+                until(lambda: text in prompt(), 15, f'{text} asked')
+            except RuntimeError as error:
+                open_now = prompt()
+                raise RuntimeError(f'{error}; prompt {open_now!r}, echo {a.eval("(current-message)")}; '
+                                   f'{where()}') from None
 
         def on_project(path):
             a.eval('(progn (switch-to-buffer "*romacs-agents*") (delete-other-windows) (goto-char (point-min)) '
                    f'(re-search-forward {lisp_text("^" + path.name + "  ")}) (beginning-of-line) t)')
 
+        def where():
+            """The selected window's buffer and mode, and the minibuffer's input
+            and panel: what a wait that timed out found."""
+            return a.eval(
+                '(prin1-to-string (list (buffer-name (window-buffer (selected-window))) '
+                '(with-current-buffer (window-buffer (selected-window)) major-mode) (minibuffer-depth) '
+                '(and (active-minibuffer-window) (with-current-buffer (window-buffer (active-minibuffer-window)) '
+                '(list (minibuffer-contents-no-properties) romacs-complete--input '
+                '(length romacs-complete--candidates)))) last-command))')
+
+        def narrowed(typed):
+            """Wait until the panel's candidates are those of TYPED, all of it
+            in the input: Return then takes the row it finds, whatever the load."""
+            try:
+                until(lambda: a.eval(
+                    '(with-current-buffer (window-buffer (active-minibuffer-window)) '
+                    f'(and (equal (minibuffer-contents-no-properties) {lisp_text(typed)}) '
+                    '(equal (car-safe romacs-complete--input) (minibuffer-contents-no-properties)) '
+                    'romacs-complete--candidates t))') == 't', 15, f'{typed} narrowed')
+            except RuntimeError as error:
+                raise RuntimeError(f'{error}; {where()}') from None
+
         def pick(project, typed, effort, text):
             """C-u c at PROJECT's section; the row TYPED finds, at EFFORT."""
             on_project(project)
-            a.keys('-M', 'ctrl', '-k', 'u', '-m', 'ctrl')
-            a.keys('c')
+            # One sequence: the prefix cannot be lost between two runs of wtype.
+            a.keys('-M', 'ctrl', '-k', 'u', '-m', 'ctrl', 'c')
             asked('Project directory')
             directory = contents()
             a.keys('-k', 'Return')
             asked('Agent')
             a.keys(typed)
-            time.sleep(.5)
+            narrowed(typed)
             a.keys('-k', 'Return')
             asked('Effort')
             a.keys(effort)
-            time.sleep(.5)
+            narrowed(effort)
             a.keys('-k', 'Return')
             composed(text)
             a.keys('-k', 'Return')
+            # Keys and evaluations come by separate ways: until the Return is
+            # taken, an evaluation switching buffers could take it elsewhere.
+            until(lambda: not holds(text), 15, f'{text} sent')
             return directory
 
         def chat_shown():
             """Whether the selected window shows a chat, its composer the place to type."""
             return a.eval('(with-current-buffer (window-buffer (selected-window)) '
-                          '(and (bound-and-true-p romacs-agent-ui--session) (not (active-minibuffer-window)) t))') == 't'
+                          '(and (derived-mode-p (quote romacs-agent-log-mode)) romacs-agent-log--input (not (active-minibuffer-window)) t))') == 't'
+
+        def holds(text):
+            """Whether the selected chat's composer ends with TEXT."""
+            return a.eval('(with-current-buffer (window-buffer (selected-window)) (and romacs-agent-log--input (string-suffix-p '
+                          + lisp_text(text) + ' (buffer-substring-no-properties romacs-agent-log--input (point-max)))))') == 't'
 
         def composed(text):
             """TEXT typed in the chat a start opened: its first message."""
             until(chat_shown, 15, 'chat opened')
             a.keys(text)
-            until(lambda: a.eval('(with-current-buffer (window-buffer (selected-window)) (string-suffix-p '
-                                 + lisp_text(text) + ' (romacs-agent-ui--composer-text)))') == 't', 15, f'{text} typed')
+            until(lambda: holds(text), 15, f'{text} typed')
 
-        # The palette, as drawn.
+        # The palette, as drawn: Codex asked for its models as it opened.
+        codex_kept = a.home / '.local/state/romacs/agents/models/codex.json'
         on_project(other)
         a.keys('c')
         asked('Project directory')
         a.keys('-k', 'Return')
         asked('Agent')
-        time.sleep(1)
+        until(codex_kept.exists, 30, 'codex models kept')
         rows = parity_live.read_sexp(a.eval(
             '(mapcar (function car) (romacs-agent--picker-rows))'))
         shot = base / 'start-picker.png'
@@ -3240,231 +3512,7 @@ def start_picker(args, base):
                         and after(claude_argv, '--effort') == 'high'
                         and result['codex_turn'] == ['gpt-6-luna', 'low']
                         and rows[0] == 'Claude Code · default' and 'Claude Code · Fake 1' in rows
-                        and 'Codex · GPT-6.1 Sol' in rows and result['single'] == 'chat')
-        return result
-    finally:
-        a.close()
-
-
-def chat_view(args, base):
-    """A chat never hides its own transcript, by real keys: the first prompt
-    of a chat started with none, and a later turn in a window whose start
-    is the composer's line, alone and split beside a delegated child."""
-    a = Agents(args, base, 'cv')
-    try:
-        a.up()
-        a.work.mkdir(parents=True, exist_ok=True)
-        a.codex_instance()
-        result = {}
-
-        def shot(name):
-            path = base / f'chat-view-{name}.png'
-            subprocess.run([f'{args.tools}/grim', str(path)], env=a.env, check=True, timeout=30)
-            return str(path)
-
-        def view(sid, text):
-            """Where SID's window starts, and whether it shows TEXT."""
-            return parity_live.read_sexp(a.eval(
-                f'(let* ((buffer (romacs-agent-buffer {a.s(sid)})) (window (get-buffer-window buffer))) '
-                '(with-current-buffer buffer (redisplay t) '
-                '(list (window-start window) (marker-position romacs-agent-ui--end) (point-max) '
-                f'(save-excursion (goto-char (point-min)) (and (search-forward {lisp_text(text)} nil t) '
-                '(pos-visible-in-window-p (match-beginning 0) window) t)))))'))
-
-        def typed_turn(sid, text, count):
-            a.keys(text)
-            until(lambda: a.eval(f'(with-current-buffer (romacs-agent-buffer {a.s(sid)}) '
-                                 '(string-suffix-p ' + lisp_text(text) + ' (romacs-agent-ui--composer-text)))') == 't',
-                  15, f'{text} typed')
-            a.keys('-k', 'Return')
-            until(lambda: len(a.results(sid) or []) >= count, 30, f'{text} answered')
-            a.idle(sid)
-            time.sleep(.5)
-
-        # The first prompt of a chat started with none, its window alone.
-        sid = a.eval(f'(let ((session (romacs-agent-start {lisp(a.work)}))) (romacs-agent-ui--show-chat session) '
-                     '(romacs-agent-id session))').strip('"')
-        a.eval('(progn (delete-other-windows) t)')
-        a.keyboard_ready()
-        typed_turn(sid, 'say hi', 1)
-        result['first'] = view(sid, 'say hi')
-        result['shot_first'] = shot('first')
-
-        # A later turn with the window's start at the composer.
-        a.keys('-M', 'ctrl', '-k', 'u', '-m', 'ctrl')
-        a.keys('0')
-        a.keys('-M', 'ctrl', '-k', 'l', '-m', 'ctrl')
-        time.sleep(.5)
-        result['before_later'] = view(sid, 'say hi')
-        typed_turn(sid, 'say later', 2)
-        result['later'] = view(sid, 'say later')
-        result['shot_later'] = shot('later')
-
-        # The same, split beside a delegated child.
-        a.send(sid, 'call romacs_delegate_task ' + json.dumps(
-            {'task': 'say child', 'title': 'a child', 'target': {'provider': 'codex'}, 'clientRequestId': 'view'}))
-        a.idle(sid, 60)
-        child = json.loads(a.called('romacs_delegate_task')['text'])['taskId']
-        until(lambda: a.state(child) == 'idle', 20, 'child done')
-        a.idle(sid, 30)
-        a.eval(f'(progn (romacs-agent-ui--show-chat {a.s(sid)}) (delete-other-windows) (split-window-right) '
-               f'(other-window 1) (switch-to-buffer (save-window-excursion (romacs-agent-ui--show-chat {a.s(child)}) (current-buffer))) '
-               f'(other-window 1) (goto-char (point-max)) t)')
-        a.keyboard_ready()
-        a.keys('-M', 'ctrl', '-k', 'u', '-m', 'ctrl')
-        a.keys('0')
-        a.keys('-M', 'ctrl', '-k', 'l', '-m', 'ctrl')
-        time.sleep(.5)
-        count = len(a.results(sid))
-        typed_turn(sid, 'say split', count + 1)
-        result['split'] = view(sid, 'say split')
-        result['shot_split'] = shot('split')
-
-        result['ok'] = all(result[k][3] == 't' or result[k][3] is True for k in ('first', 'later', 'split'))
-        return result
-    finally:
-        a.close()
-
-
-def children(args, base):
-    """What runs under a session, by real keys: the header counts and the
-    `C-c C-o' menu's rows of a parent's delegated tasks (running, waiting,
-    failed) and of its harness's own subagent, following their state with
-    the menu open; a digit opens a child's chat or a subagent's card, and
-    RET one chosen from the list of them; opening a failure takes it out
-    of the count."""
-    a = Agents(args, base, 'ch')
-    def old_chat(sid):
-        """The old chat's text, read with no view selected."""
-        return parity_live.read_sexp(a.eval(f'(with-current-buffer (save-window-excursion (romacs-agent-ui--show-chat {a.s(sid)})) '
-                                            '(buffer-substring-no-properties (point-min) (point-max)))'))
-    try:
-        a.up()
-        a.work.mkdir(parents=True, exist_ok=True)
-        a.codex_instance()
-        # A child waits for its approval only when the user is asked: every
-        # tool call is allowed by default.  Counts said in words, as read
-        # below (a glyph says them by default).
-        a.eval("(setq romacs-agent-approval-policy 'ask romacs-agent-glyphs nil)")
-        parent = a.start('say ready')
-        a.idle(parent)
-
-        def delegate(task, title, provider):
-            a.send(parent, 'call romacs_delegate_task ' + json.dumps(
-                {'task': task, 'title': title, 'target': {'provider': provider}, 'clientRequestId': title}))
-            a.idle(parent, 60)
-            record = json.loads(a.called('romacs_delegate_task')['text'])
-            return record['taskId']
-
-        running = delegate('slow 300', 'long build', 'codex')
-        waiting = delegate('ask true', 'needs approval', 'claude')
-        failed = delegate('fail', 'broken task', 'codex')
-        a.until(failed, lambda: a.state(failed) == 'idle', 20, 'failed child ended')
-        done = delegate('say fine', 'finished task', 'codex')
-        a.until(done, lambda: a.state(done) == 'idle', 20, 'done child ended')
-        a.idle(parent, 60)
-        until(lambda: a.state(waiting) == 'waiting-approval', 20, 'child waiting')
-
-        a.eval(f'(progn (romacs-agent-ui--show-chat {a.s(parent)}) (delete-other-windows) t)')
-        a.keyboard_ready()
-
-        def header():
-            return parity_live.read_sexp(a.eval(
-                f'(with-current-buffer (romacs-agent-buffer {a.s(parent)}) '
-                '(substring-no-properties (format-mode-line header-line-format)))'))
-
-        def menu():
-            return parity_live.read_sexp(a.eval(
-                '(and (buffer-live-p keymap-popup--buffer) (with-current-buffer keymap-popup--buffer '
-                '(buffer-substring-no-properties (point-min) (point-max))))')) or ''
-
-        def shot(name):
-            path = base / f'children-{name}.png'
-            subprocess.run([f'{args.tools}/grim', str(path)], env=a.env, check=True, timeout=30)
-            return str(path)
-
-        def shown():
-            return parity_live.read_sexp(a.eval('(buffer-name (window-buffer (selected-window)))'))
-
-        def open_menu():
-            a.keys('-M', 'ctrl', '-k', 'c', '-k', 'o', '-m', 'ctrl')
-            until(lambda: 'Workers' in menu(), 15, 'menu open')
-
-        until(lambda: '1 needs approval' in header(), 15, 'counts in the header')
-        result = {'header': header()}
-        # The failure is counted while it is news: until a turn of the parent
-        # passes with it in view (the parent's own wake may be that turn).
-        unseen = lambda: a.eval(f'(romacs-agent-unseen-p {a.s(failed)})') != 'nil'
-        result['failure_counted'] = '1 failed' in result['header'] or not unseen()
-        result['shot_header'] = shot('header')
-        open_menu()
-        time.sleep(.5)
-        result['menu'] = menu()
-        result['shot_menu'] = shot('menu')
-
-        # With the menu open, the approval answered: its row and the title follow.
-        a.eval(f'(romacs-agent-respond {a.s(waiting)} (car (hash-table-keys (romacs-agent-approvals {a.s(waiting)}))) t)')
-        until(lambda: 'Needs approval' not in menu(), 15, 'menu follows the child')
-        result['menu_after'] = menu()
-        result['header_after'] = header()
-        result['shot_menu_after'] = shot('menu-after')
-
-        # A row's digit opens its worker: the failed one's.  (A failure is
-        # news until a turn of its parent passes, as one has here: its row
-        # is ranked among the finished, not first.)
-        rows = [line for line in result['menu_after'].splitlines() if 'broken task' in line]
-        a.keys(rows[0].split('broken task')[0].split()[-1] if rows else '1')
-        until(lambda: 'broken task' in (shown() or ''), 15, 'failed child opened')
-        result['opened'] = shown()
-        a.eval(f'(progn (romacs-agent-ui--show-chat {a.s(parent)}) (delete-other-windows) t)')
-        until(lambda: 'failed' not in header(), 15, 'seen failure out of the count')
-        result['header_seen'] = header()
-
-        # The list of them, RET on the one typed for.
-        open_menu()
-        a.keys('o')
-        until(lambda: 'Worker' in (parity_live.read_sexp(a.eval(
-            '(if (active-minibuffer-window) (with-current-buffer (window-buffer (active-minibuffer-window)) '
-            '(substring-no-properties (minibuffer-prompt))) "")')) or ''), 15, 'palette open')
-        time.sleep(.5)
-        result['shot_palette'] = shot('palette')
-        a.keys('finished')
-        time.sleep(.5)
-        a.keys('-k', 'Return')
-        until(lambda: 'finished task' in (shown() or ''), 15, 'chosen child opened')
-        result['chosen'] = shown()
-        a.eval(f'(progn (romacs-agent-ui--show-chat {a.s(parent)}) (delete-other-windows) t)')
-
-        # The harness's own subagent: counted while it runs; its row goes to its card.
-        a.send(parent, 'agent 6 read the code')
-        until(lambda: 'read the code' in old_chat(parent), 15, 'subagent card')
-        # The harness's own subagent counts apart from the delegated threads.
-        until(lambda: '1 working' in header(), 15, 'subagent counted')
-        result['header_subagent'] = header()
-        open_menu()
-        time.sleep(.3)
-        result['menu_subagent'] = menu()
-        result['shot_subagent'] = shot('subagent')
-        lines = [line for line in result['menu_subagent'].splitlines() if 'read the code' in line]
-        key = lines[0].split('read the code')[0].split()[-1] if lines else '1'
-        a.keys(key)
-        until(lambda: not menu(), 15, 'menu closed')
-        result['card_line'] = parity_live.read_sexp(a.eval(
-            f'(with-current-buffer (romacs-agent-buffer {a.s(parent)}) '
-            '(buffer-substring-no-properties (line-beginning-position) (line-end-position)))'))
-        a.idle(parent, 30)
-
-        running_stopped = a.eval(f'(romacs-agent-stop {a.s(running)})')
-        result['header_end'] = header()
-        # The header counts in words (glyphs off): what wants the user, then
-        # the threads still live; the menu's group is the parent's workers.
-        result['ok'] = (all(w in result['header'] for w in ('1 needs approval', 'threads live')) and result['failure_counted']
-                        and all(w in result['menu'] for w in ('Workers', 'long build', 'Needs approval', 'broken task', 'finished task'))
-                        and 'threads live' in result['header_after'] and 'needs approval' not in result['header_after']
-                        and 'Needs approval' not in result['menu_after']
-                        and 'finished task' in result['chosen']
-                        and 'broken task' in result['opened'] and 'failed' not in result['header_seen']
-                        and 'read the code' in result['menu_subagent'] and 'read the code' in result['card_line'])
+                        and 'Codex · GPT-Fake-Sol' in rows and result['single'] == 'chat')
         return result
     finally:
         a.close()
@@ -3702,6 +3750,110 @@ def select_real(args, base):
         a.close()
 
 
+def codex_listed(codex, home, env):
+    """The models CODEX's own app-server answers `model/list' with, its
+    CODEX_HOME HOME, each (id, label): what Romacs is to show."""
+    lines = [{'id': 'initialize:1', 'method': 'initialize',
+              'params': {'clientInfo': {'name': 'agent_live', 'version': '0'}, 'capabilities': {}}},
+             {'method': 'initialized'}, {'id': 'model/list:2', 'method': 'model/list', 'params': {}}]
+    process = subprocess.Popen([codex, 'app-server'], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                               stderr=subprocess.DEVNULL, env={**env, 'CODEX_HOME': str(home)}, text=True)
+    try:
+        process.stdin.write(''.join(json.dumps(line) + '\n' for line in lines))
+        process.stdin.flush()
+        for line in process.stdout:
+            answer = json.loads(line)
+            if answer.get('id') == 'model/list:2':
+                return [(m['model'], m['displayName']) for m in answer['result']['data']]
+        raise RuntimeError('codex app-server ended before model/list answered')
+    finally:
+        process.kill()
+        process.wait()
+
+
+def models_real(args, base):
+    """The models each real harness (--claude-program, --codex-program) reports,
+    in private configuration directories, nothing signed in, no turn taken:
+    none known at first; a real Codex session's model menu (C-c o m) shows
+    what is known and asks Codex in the background, and the open menu comes
+    to list what Codex's own app-server answers `model/list'; opened again
+    it lists the same, and the capabilities tool says the same.  `romacs-agent-refresh-models' asks Claude Code too.
+    Free, but needs the real programs: not a default workflow."""
+    a = Agents(args, base, 'mr')
+    try:
+        a.up()
+        a.work.mkdir(parents=True, exist_ok=True)
+        claude = args.claude_program or real_program('claude')
+        codex = args.codex_program or real_program('codex')
+        homes = {name: a.home / f'.config/{name}-models' for name in ('claude', 'codex')}
+        for home in homes.values():
+            home.mkdir(parents=True)
+        # Codex answers late: the menu is surely open, showing nothing it
+        # reports, before its answer comes.
+        late = a.root / 'late-codex'
+        late.write_text(f'#!/bin/sh\nsleep 3\nexec {shlex.quote(codex)} "$@"\n')
+        late.chmod(0o755)
+        a.providers([('claude', homes['claude'], claude, []), ('codex', homes['codex'], late, [])])
+        kept = a.home / '.local/state/romacs/agents/models'
+
+        def known(name):
+            return parity_live.read_sexp(a.eval(
+                f'(mapcar (function car) (romacs-agent--models (romacs-agent--configured {lisp_text(name)})))')) or []
+
+        listed = codex_listed(codex, homes['codex'], a.env)
+        result = {'before': known('codex'), 'listed': [m for m, _ in listed]}
+        wanted = ['Codex · default'] + ['Codex · ' + label for _, label in listed]
+        sid = a.eval(f'(romacs-agent-id (romacs-agent-start {lisp(a.work)} nil nil "codex"))').strip('"')
+        a.idle(sid, 60)
+        a.eval(f'(progn (romacs-agent-show {a.s(sid)}) (delete-other-windows) t)')
+        a.keyboard_ready()
+
+        def shown():
+            """The rows the open menu's panel shows: the UI's own, not the table asked anew."""
+            return parity_live.read_sexp(a.eval(
+                '(when (active-minibuffer-window) (with-current-buffer (window-buffer (active-minibuffer-window)) '
+                '(mapcar (function substring-no-properties) romacs-complete--candidates)))')) or []
+
+        def menu(name):
+            """The model menu by its keys, held open until its panel shows
+            what Codex lists: the menu never opened again."""
+            a.keys('-M', 'ctrl', '-k', 'c', '-k', 'o', '-m', 'ctrl')
+            until(lambda: a.eval('(buffer-live-p keymap-popup--buffer)') == 't', 15, 'menu open')
+            a.keys('m')
+            first = until(shown, 15, 'models offered')
+            minibuffer = a.eval('(prin1-to-string (window-buffer (active-minibuffer-window)))')
+            until(lambda: shown() == wanted, 60, 'Codex\'s models shown in the open menu')
+            a.eval('(progn (redisplay t) t)')
+            time.sleep(.5)
+            shot = base / f'models-{name}.png'
+            subprocess.run([f'{args.tools}/grim', str(shot)], env=a.env, check=True, timeout=30)
+            same = a.eval('(prin1-to-string (window-buffer (active-minibuffer-window)))') == minibuffer
+            a.keys('-M', 'ctrl', '-k', 'g', '-m', 'ctrl')
+            until(lambda: not shown(), 15, 'menu closed')
+            return {'first': first, 'same_menu': same, 'screenshot': str(shot)}
+
+        # Opened with nothing kept: its rows are computed before Codex is
+        # asked, so the models it shows came to the open menu.
+        result['cold'] = menu('cold')
+        result['kept'] = known('codex')
+        result['warm'] = menu('warm')
+        capabilities = json.loads(parity_live.read_sexp(a.eval(
+            '(decode-coding-string (json-serialize (romacs-agent-tools--capabilities (romacs-mcp--object))) (quote utf-8))')))
+        result['capabilities'] = {p['providerInstanceId']: [m['id'] for m in p['models']]
+                                  for p in capabilities['providers']}
+        a.eval('(progn (romacs-agent-refresh-models) t)')
+        until((kept / 'claude.json').exists, 60, 'claude models kept')
+        result['claude'] = known('claude')
+        result['ok'] = (result['before'] == [] and bool(result['listed'])
+                        and result['cold']['first'] == ['Codex · default']
+                        and result['cold']['same_menu'] and result['warm']['same_menu']
+                        and result['kept'] == result['listed']
+                        and result['capabilities']['codex'] == result['listed'] and bool(result['claude']))
+        return result
+    finally:
+        a.close()
+
+
 def history_real(args, base):
     """A real Claude Code conversation (--claude-model) and a real Codex one
     (--codex-model), each made outside Romacs in the real configuration
@@ -3755,67 +3907,126 @@ def history_real(args, base):
         a.close()
 
 
-def live_rows(args, base):
-    """What a lead's delegates do now, above its composer: a row for each
-    one that works, its title, its turn's clock and what it does (the call
-    it started, or that it needs approval), with the lead idle; the clocks
-    move with no event from anyone; frames a second apart are kept."""
-    a = Agents(args, base, 'lr')
+def png(path, width, height, hue):
+    """A PNG of WIDTH by HEIGHT at PATH, like a screenshot: a backdrop
+    shaded by HUE (0-255) top to bottom, a light window with a title bar."""
+    def chunk(kind, data):
+        return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data) & 0xffffffff)
+    left, top, right, bottom = width // 8, height // 6, width * 5 // 8, height * 3 // 5
+    rows = []
+    for y in range(height):
+        shade = bytes((40 + y * 60 // height, hue // 2, hue))
+        window = bytes((236, 239, 244)) if y > top + height // 20 else bytes((94, 129, 172))
+        inside = top <= y < bottom
+        rows.append(b'\0' + shade * left + (window if inside else shade) * (right - left) + shade * (width - right))
+    path.write_bytes(b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0))
+                     + chunk(b'IDAT', zlib.compress(b''.join(rows), 6)) + chunk(b'IEND', b''))
+
+
+def chat_images(args, base):
+    """Images in the chat as links to their files (lisp/agents/romacs-agent-log-images.el),
+    by real keys: C-c C-a with a screenshot in the clipboard links the saved
+    file, copying nothing; with an image of no file, saves it once in the
+    screenshots directory; a link pasted in shows its image too.  The
+    composer and the sent message show each image under the text, the
+    harness gets the links as typed.  Shots across UI_THEMES."""
+    a = Agents(args, base, 'ci')
     try:
         a.up()
         a.work.mkdir(parents=True, exist_ok=True)
-        a.eval("(setq romacs-agent-approval-policy 'ask romacs-agent-glyphs nil)")
-        parent = a.start('say ready')
-        a.idle(parent)
-
-        def delegate(task, title):
-            a.send(parent, 'call romacs_delegate_task ' + json.dumps(
-                {'task': task, 'title': title, 'target': {'provider': 'claude'}, 'clientRequestId': title}))
-            a.idle(parent, 60)
-            record = next(json.loads(e['text']) for e in reversed(a.logged()) if e.get('tool') == 'romacs_delegate_task')
-            return record['taskId']
-
-        # One runs a long call (its harness's own subagent), one asks.
-        held = delegate('agent 300 read the code', 'held call')
-        asking = delegate('ask true', 'asks approval')
-        until(lambda: a.state(asking) == 'waiting-approval', 30, 'child waiting')
-        until(lambda: a.state(held) == 'running', 30, 'child running')
-        a.idle(parent, 60)
-
-        a.eval(f'(progn (romacs-agent-ui--show-chat {a.s(parent)}) (delete-other-windows) t)')
+        shots_dir = a.home / 'Pictures/Screenshots'
+        shots_dir.mkdir(parents=True)
+        shot = shots_dir / 'screenshot-2026-11-21_05-53-33-romacs.png'
+        png(shot, 1280, 800, 200)
+        loose = a.work / 'copied-from-a-browser.png'
+        png(loose, 900, 600, 90)
+        typed = a.work / 'typed.png'
+        png(typed, 600, 900, 140)
+        sid = a.start('say ready')
+        a.idle(sid)
+        a.eval(f'(progn (romacs-agent-show {a.s(sid)}) (delete-other-windows) t)')
         a.keyboard_ready()
+        chat = '(window-buffer (selected-window))'
 
-        def rows():
+        def composer():
             return parity_live.read_sexp(a.eval(
-                f'(with-current-buffer (romacs-agent-buffer {a.s(parent)}) '
-                '(substring-no-properties (or (overlay-get romacs-agent-ui--composer (quote before-string)) "")))')) or ''
+                f'(with-current-buffer {chat} (buffer-substring-no-properties romacs-agent-log--input (point-max)))'))
 
-        until(lambda: 'held call' in rows() and 'asks approval' in rows(), 20, 'rows above the composer')
-        result = {'rows': rows(), 'frames': []}
-        for i in range(4):
-            path = base / f'live-rows-{i}.png'
+        def drawn():
+            """The composer's drawn links' files, and whether images show under it."""
+            files, block = parity_live.read_sexp(a.eval(
+                f'(with-current-buffer {chat} (list (cons 0 (mapcar (lambda (o) (overlay-get o (quote romacs-agent-log-image))) '
+                '(car romacs-agent-log-images--composer))) (if (cdr romacs-agent-log-images--composer) 1 0)))'))
+            return [files[1:], block == 1]
+
+        def copy(path):
+            with path.open('rb') as image:
+                subprocess.run(['wl-copy', '--type', 'image/png'], stdin=image, env=a.env, check=True, timeout=15)
+
+        def attach():
+            a.keys('-M', 'ctrl', '-k', 'c', '-k', 'a', '-m', 'ctrl')
+
+        def picture(name):
+            a.eval('(progn (redisplay t) t)')
+            time.sleep(.5)
+            path = base / f'{name}.png'
             subprocess.run([f'{args.tools}/grim', str(path)], env=a.env, check=True, timeout=30)
-            result['frames'].append(str(path))
-            time.sleep(1)
-        result['rows_later'] = rows()
-        held_row = lambda text: next((line for line in text.splitlines() if 'held call' in line), '')
-        clock = lambda text: (lambda m: int(m.group(1)) if m else None)(re.search(r'held call  (\d+)s · ', held_row(text)))
-        result['clocks'] = [clock(result['rows']), clock(result['rows_later'])]
-        result['lead_state'] = a.state(parent)
-        result['ok'] = (None not in result['clocks'] and result['clocks'][1] > result['clocks'][0]
-                        and result['lead_state'] == 'idle' and 'thinking' not in held_row(result['rows'])
-                        and '◆ asks approval' in result['rows'] and 'needs approval' in result['rows']
-                        )
+            return str(path)
+
+        result, shots = {}, []
+        state = a.home / '.local/state/romacs/agents'
+        a.keys('say look at ')
+        copy(shot)
+        attach()
+        until(lambda: str(shot) in composer(), 20, 'the screenshot linked')
+        a.keys(' what is wrong')
+        until(lambda: composer().endswith('wrong'), 10, 'typed after the link')
+        result['screenshot'] = composer()
+        result['screenshot_drawn'] = drawn()
+        result['screenshots_after'] = sorted(p.name for p in shots_dir.iterdir())
+        shots.append(picture('composer-screenshot'))
+        a.keys('-M', 'ctrl', '-k', 'c', '-k', 's', '-m', 'ctrl')
+        a.idle(sid)
+        transcript = lambda: parity_live.read_sexp(a.eval(
+            f'(with-current-buffer {chat} (buffer-substring-no-properties (point-min) romacs-agent-log--end))'))
+        until(lambda: transcript().count(f'[image]({shot})') == 2, 20, 'the reply echoes the link')
+        result['echoed'] = transcript().count(f'[image]({shot}) what is wrong') == 2
+        shots.append(picture('sent-screenshot'))
+        copy(loose)
+        attach()
+        until(lambda: 'Screenshots/clipboard-' in composer(), 20, 'the loose image saved and linked')
+        saved = [p for p in shots_dir.iterdir() if p.name.startswith('clipboard-')]
+        result['loose'] = composer()
+        result['loose_saved'] = len(saved) == 1 and saved[0].read_bytes() == loose.read_bytes()
+        a.keys(' and ')
+        subprocess.run(['wl-copy', f'[image]({typed})'], env=a.env, check=True, timeout=15)
+        a.keys('-M', 'ctrl', '-k', 'y', '-m', 'ctrl')
+        try:
+            until(lambda: len(drawn()[0]) == 2, 10, 'the pasted link drawn')
+        except RuntimeError as error:
+            raise RuntimeError(f'{error}: {composer()!r} {drawn()!r}') from None
+        result['typed_drawn'] = drawn()
+        result['session_copies'] = sorted(str(p) for p in state.glob('*/attachments/*')) if state.exists() else []
+        for theme in UI_THEMES:
+            a.eval(f'(progn (mapc (function disable-theme) custom-enabled-themes) (load-theme (quote {theme}) t) t)')
+            shots.append(picture(f'{theme}-composer'))
+        result['shots'] = shots
+        result['ok'] = (result['screenshot'] == f'say look at [image]({shot}) what is wrong'
+                        and result['screenshot_drawn'] == [[str(shot)], True]
+                        and result['screenshots_after'] == [shot.name]
+                        and result['echoed'] and result['loose_saved']
+                        and result['typed_drawn'] == [[str(saved[0]), str(typed)], True]
+                        and not result['session_copies'])
         return result
     finally:
         a.close()
 
 
-WORKFLOWS = {'host': host, 'sockets': sockets, 'reap': reap, 'deadline': deadline, 'providers': providers, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe,
+WORKFLOWS = {'chat_images': chat_images, 'chat_menu': chat_menu, 'history_view': history_view, 'host': host, 'sockets': sockets, 'reap': reap, 'deadline': deadline, 'providers': providers, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe,
              'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race, 'restart-rollback': restart_rollback, 'restart-hang': restart_hang, 'renew': renew,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
              'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode,
-             'environment': environment, 'logging': logging, 'board_keys': board_keys, 'start_picker': start_picker, 'children': children, 'live_rows': live_rows, 'chat_view': chat_view, 'chat_log': chat_log, 'select': select, 'select-real': select_real, 'rpc': rpc,
+             'environment': environment, 'logging': logging, 'board_keys': board_keys, 'start_picker': start_picker, 'chat_log': chat_log, 'ui_review': ui_review, 'select': select, 'select-real': select_real, 'models-real': models_real, 'rpc': rpc,
              'instances': instances, 'mcp_tour': mcp_tour}
 
 

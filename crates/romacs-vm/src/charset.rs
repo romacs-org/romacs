@@ -118,7 +118,6 @@ pub(super) struct Registry {
     pub unify_ranges: Vec<(i64, i64, usize)>,
 }
 
-#[allow(dead_code)] // Native definition metadata is retained even before encoders exist.
 #[derive(romacs_snapshot::Snapshot)]
 pub(super) struct Record {
     pub attrs: [Value; 10],

@@ -346,7 +346,7 @@ impl DisplayState {
     #[cfg(test)]
     pub(crate) fn record_laid_for_test(&mut self) {
         let key = ShownKey { collections: 0, overlays: 0, hosted: false, buffer: Value::NIL, shows: 0, selected_id: 0, selected: Value::NIL,
-            modiff: 0, accessible: (0, 0), start: 0, mark: Value::NIL, terminal: None, geometry: (0, 0, 0, 0, 0), min_hscroll: 0,
+            modiff: 0, accessible: (0, 0), start: 0, mark: Value::NIL, native_region: false, terminal: None, geometry: (0, 0, 0, 0, 0), min_hscroll: 0,
             suspended: false, chrome: ([0; 2], [0; 2], false, false), root: (0, 0), metrics: (0, 0), faces: 0, table: 0,
             variables: vec![], header: Value::NIL };
         self.laid.insert(0, (key, Laid { end: 0, visible_end: 0, body_height: 0.0, point: None }));
@@ -378,6 +378,17 @@ impl DisplayState {
     /// The buffer byte window ID's last publication starts at.
     pub(super) fn base(&self, id: u64) -> usize {
         self.bases.get(&id).copied().unwrap_or(0)
+    }
+    /// The byte window ID's last published text shows buffer byte BYTE at,
+    /// or None where that text does not show it.
+    pub(super) fn published_byte(&self, id: u64, byte: usize) -> Option<usize> {
+        match self.segments(id) {
+            None => byte.checked_sub(self.base(id)),
+            // Half open, as the echo area maps its text: a byte at a
+            // string's position is the text after the string.
+            Some(segments) => segments.iter().find(|s| !s.string && s.buffer <= byte && byte < s.buffer + s.len)
+                .map(|s| s.display + (byte - s.buffer)),
+        }
     }
     /// Window END.id's last publication was painted as END reports, ending
     /// at buffer byte BYTE.
@@ -506,6 +517,9 @@ struct ShownKey {
     accessible: (usize, usize),
     start: i64,
     mark: Value,
+    /// Whether the native highlight draws the region (`native_region_asked'):
+    /// a highlight function's answer changes it with no edit.
+    native_region: bool,
     /// A terminal's session and output revision: its colors restyle the
     /// buffer's faces with no modification of its own.
     terminal: Option<(u64, Option<u64>)>,
@@ -676,7 +690,7 @@ impl Vm {
     /// BUFFER, keyed by KEY and WINDOW.  START is the buffer position (or
     /// marker) where the block's first row begins.  MOVING is t, nil (held
     /// where it is) or `still' (motion is off: its still frame).  KIND is
-    /// (logo CELL-ASPECT EPOCH).
+    /// (logo CELL-ASPECT EPOCH) or (working WORK EPOCH FACE BEATS).
     /// They travel with the frame, so each frame the display shows says
     /// which animations it has: none once the buffer is no longer shown.
     /// The block's row in WINDOW is counted here, from the window start
@@ -690,6 +704,7 @@ impl Vm {
         if list == Value::NIL || list == Value::UNBOUND { return Ok(vec![]); }
         let natural = |v: Value| v.integer_value().and_then(|n| u64::try_from(n).ok()).ok_or("natural number required");
         let logo = self.intern("logo");
+        let working = self.intern("working");
         let still = self.intern("still");
         let mut animations = vec![];
         for entry in self.list_values(list)? {
@@ -701,9 +716,14 @@ impl Vm {
             };
             if !shown { continue; }
             let rows = natural(rows)? as u32;
+            // A marker of the caller's, read as this frame freezes: one
+            // detached or in another buffer places nothing.
             let start = match start.integer_value() {
                 Some(n) => n,
-                None => self.marker_position_value(start)?.integer_value().ok_or("text animation start")?,
+                None => {
+                    if self.marker(start)?.buffer != buffer { continue; }
+                    match self.marker_position_value(start)?.integer_value() { Some(n) => n, None => continue }
+                }
             };
             let (top, in_view) = self.text_animation_row(window, start, rows)?;
             let kind = match self.list_values(kind)?[..] {
@@ -720,14 +740,42 @@ impl Vm {
                     };
                     TextAnimationKind::Logo { cell_aspect, epoch: natural(epoch)?, colours }
                 }
+                // (working WORK EPOCH FACE BEATS): lisp/ui/romacs-working.el's
+                // thread, in FACE's foreground.
+                [head, work, epoch, face, beats] if head == working => {
+                    use romacs_logo::working::Work;
+                    let work = match self.symbol_name_of(work).as_deref() {
+                        Some("running") => Work::Running,
+                        Some("waiting") => Work::Waiting,
+                        Some("failed") => Work::Failed,
+                        _ => Work::Idle,
+                    };
+                    let face = self.symbol_name_of(face).ok_or("face symbol required")?;
+                    TextAnimationKind::Working { work, beats: natural(beats)?, epoch: natural(epoch)?,
+                                                 colour: self.display_face(&face)?.foreground,
+                                                 bead: self.display_face("default")?.foreground }
+                }
                 _ => return Err("bad text animation kind".into()),
             };
             // Keyed by animation and window: each window showing one has its
             // own motion.
             let window = self.window(window)?.id;
+            // A working thread is placed by the host on the row its layout
+            // lays START on: START as a byte of the text it published.
+            let anchor = match kind {
+                TextAnimationKind::Working { .. } => {
+                    let byte = self.shown_text(buffer).ok().and_then(|b| {
+                        let pos = (start.max(1) as usize - 1).min(b.len_chars());
+                        b.byte_of_char(coordinates::CharOffset(pos)).ok().map(|o| o.0)
+                    });
+                    match byte.and_then(|byte| self.display_state.published_byte(window, byte)) { Some(a) => Some(a), None => continue }
+                }
+                _ => None,
+            };
             animations.push(((natural(key)? << 32) | (window & 0xffff_ffff), TextAnimation {
-                window, top, cols: natural(cols)? as u32, rows,
-                fps: natural(fps)? as u32, moving: in_view && moving != Value::NIL && moving != still, still: moving == still, kind,
+                window, top, cols: natural(cols)? as u32, rows, anchor, rise: None,
+                fps: natural(fps)? as u32, moving: (anchor.is_some() || in_view) && moving != Value::NIL && moving != still,
+                still: moving == still, kind,
             }));
         }
         Ok(animations)
@@ -1429,6 +1477,19 @@ impl Vm {
         let mode = self.buffer_variable(buffer, "auto-hscroll-mode")?;
         Ok(mode == self.intern("current-line"))
     }
+    /// Whether `redisplay-highlight-region-function' leaves WINDOW's region
+    /// to the native highlight: it is `romacs--native-region' itself, which
+    /// runs no Lisp (`pre_redisplay_has_work'), or the window's last answer,
+    /// kept as its `internal-region-overlay', was `romacs--native-region''s,
+    /// or no highlight Lisp has answered for the window (a session that
+    /// runs none). A wrapper that answered otherwise (rect.el's rectangle,
+    /// nil while it shows none) drew the region itself.
+    fn native_region_asked(&mut self, window: Value) -> Result<bool> {
+        let highlight = self.slot("redisplay-highlight-region-function");
+        if self.variable_value(highlight)? == self.display_symbol("romacs--native-region") { return Ok(true); }
+        let (key, token) = (self.display_symbol("internal-region-overlay"), self.display_symbol("romacs-native-region"));
+        Ok(self.window(window)?.parameters.iter().find(|&&(k, _)| k == key).is_none_or(|&(_, v)| v == token))
+    }
     fn snapshot_region(&mut self, window: Value, buffer: Value, point: i64) -> Result<Option<std::ops::Range<usize>>> {
         if window != self.selected_window_value()? { return Ok(None); }
         let saved = self.slots[self.buffer_slot].value;
@@ -1440,7 +1501,7 @@ impl Vm {
             Ok(self.variable_value(mark)? != Value::NIL && self.variable_value(transient)? != Value::NIL)
         })();
         self.slots[self.buffer_slot].value = saved;
-        if !active? { return Ok(None); }
+        if !active? || !self.native_region_asked(window)? { return Ok(None); }
         let Some(marker) = self.buffer_mark_value(buffer) else { return Ok(None); };
         let Some(Object::Marker(mark)) = self.object_if(marker) else { return Ok(None); };
         if mark.buffer != buffer { return Ok(None); }
@@ -2312,6 +2373,7 @@ impl Vm {
             accessible,
             start,
             mark,
+            native_region: self.native_region_asked(window)?,
             terminal,
             geometry: (x, width, height, hscroll, vscroll),
             min_hscroll,
@@ -2777,6 +2839,14 @@ impl Vm {
         let id = self.window(self.slots[root].value)?.id;
         let buffer = self.slots[buffer_slot].value;
         let limit = if self.treesit_deferred.is_some() { self.treesit_show_limit() } else { 0 };
+        // A first parse on its thread: the window takes stopgap faces until
+        // it lands, as for a visit's early parse.
+        if self.treesit_first_running(buffer)? {
+            if !self.treesit_plain.contains(&id) {
+                self.treesit_plain.push(id);
+            }
+            return Ok(Plain::First);
+        }
         // A reparse on its thread: the window keeps the faces it has, and
         // the landing wakes the frame that fontifies it (`land_treesit').
         if self.treesit_deferred.is_some() && self.treesit_ahead_running(buffer)? {
@@ -2840,8 +2910,18 @@ impl Vm {
         for window in self.displayed_windows() {
             let buffer = self.window(window)?.buffer;
             let due = self.treesit_text_of(buffer)?.is_some_and(|text| text.treesit.small_edit_due(limit));
+            let treeless = !self.treesit_has_tree(buffer)?;
             match self.treesit_run_ahead(buffer, due)? {
-                State::Running => running = true,
+                State::Running => {
+                    running = true;
+                    // Its landing wakes the frame that runs the hooks this one defers.
+                    if treeless {
+                        let id = self.window(window)?.id;
+                        if !self.treesit_plain.contains(&id) {
+                            self.treesit_plain.push(id);
+                        }
+                    }
+                }
                 // The trees are there: this frame's parsers take them.
                 State::Landed => {}
                 State::None => small |= due,
@@ -3615,10 +3695,6 @@ impl Vm {
     /// The host advance of C in the default face, and that face's row height.
     pub(crate) fn host_default_advance(&mut self, c: char) -> Result<(u32, u32)> {
         self.host_face_advance_in(None, "default", c)
-    }
-    /// The host advance of C in the face NAME, and that face's row height.
-    pub(crate) fn host_face_advance(&mut self, name: &str, c: char) -> Result<(u32, u32)> {
-        self.host_face_advance_in(None, name, c)
     }
     /// The host advance of C in the face NAME as the current buffer shows it
     /// in WINDOW (else the selected window), remapped, and its row height.

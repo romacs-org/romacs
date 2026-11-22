@@ -6,7 +6,7 @@ impl Leaf<'_> {
     pub(crate) fn copy_keymap(&mut self, keymap: Value, depth: usize) -> super::super::Out {
         if depth > 100 { return Err(Fault::Error("Possible infinite recursion when copying keymap".into())); }
         // get_keymap (keymap, 1, 0): a symbol's function cell, no autoloading.
-        let keymap = self.vm.resolve_keymap(keymap).ok_or(Fault::Wrong("keymapp", keymap))?;
+        let keymap = self.vm.resolve_keymap(keymap).ok_or_else(|| Fault::Wrong("keymapp", keymap))?;
         let head = self.intern("keymap");
         let mut items = Vec::new();
         let mut tail = self.pair(keymap).map_or(Value::NIL, |(_, rest)| rest);

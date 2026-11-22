@@ -1360,6 +1360,7 @@ impl TextBody {
             Cow::Owned(b) => Cow::Owned(String::from_utf8(b).map_err(|e| e.to_string())?),
         })
     }
+    #[cfg(test)]
     pub(crate) fn find_character(
         &self,
         ch: u32,

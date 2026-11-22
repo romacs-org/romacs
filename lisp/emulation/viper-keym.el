@@ -232,14 +232,14 @@ In insert mode, this key also functions as Meta."
 ;; Insert mode keymap
 
 ;; for novice users, pretend you are the real vi.
-(define-key viper-insert-diehard-map "\t"   'viper-insert-tab)
+(define-key viper-insert-diehard-map (kbd "TAB")   'viper-insert-tab)
 (define-key viper-insert-diehard-map "\C-a" 'self-insert-command)
 (define-key viper-insert-diehard-map "\C-b" 'self-insert-command)
 (define-key viper-insert-diehard-map "\C-c" 'viper-change-state-to-vi)
 (define-key viper-insert-diehard-map "\C-e" 'self-insert-command)
 (define-key viper-insert-diehard-map "\C-f" 'self-insert-command)
 (define-key viper-insert-diehard-map "\C-g" 'self-insert-command)
-(define-key viper-insert-diehard-map "\C-i" 'self-insert-command)
+(define-key viper-insert-diehard-map (kbd "TAB") 'self-insert-command)
 (define-key viper-insert-diehard-map "\C-k" 'self-insert-command)
 (define-key viper-insert-diehard-map "\C-l" 'self-insert-command)
 (define-key viper-insert-diehard-map "\C-n" 'self-insert-command)
@@ -278,7 +278,7 @@ In insert mode, this key also functions as Meta."
 ;; Replace keymap
 (define-key viper-replace-map "\C-t" 'viper-forward-indent)
 (define-key viper-replace-map "\C-j" 'viper-replace-state-carriage-return)
-(define-key viper-replace-map "\C-m" 'viper-replace-state-carriage-return)
+(define-key viper-replace-map (kbd "RET") 'viper-replace-state-carriage-return)
 (define-key viper-replace-map "\C-?" 'viper-del-backward-char-in-replace)
 (define-key viper-replace-map [backspace] 'viper-del-backward-char-in-replace)
 
@@ -292,7 +292,7 @@ In insert mode, this key also functions as Meta."
 (define-key viper-vi-basic-map "\C-d" 'viper-scroll-up)
 (define-key viper-vi-basic-map "\C-e" 'viper-scroll-up-one)
 (define-key viper-vi-basic-map "\C-f" 'viper-scroll-screen)
-(define-key viper-vi-basic-map "\C-m" 'viper-next-line-at-bol)
+(define-key viper-vi-basic-map (kbd "RET") 'viper-next-line-at-bol)
 (define-key viper-vi-basic-map "\C-u" 'viper-scroll-down)
 (define-key viper-vi-basic-map "\C-y" 'viper-scroll-down-one)
 ;;(define-key viper-vi-basic-map "\C-s" 'viper-isearch-forward)
@@ -405,7 +405,7 @@ In insert mode, this key also functions as Meta."
 (define-key viper-vi-basic-map "zH" 'viper-line-to-top)
 (define-key viper-vi-basic-map "zM" 'viper-line-to-middle)
 (define-key viper-vi-basic-map "zL" 'viper-line-to-bottom)
-(define-key viper-vi-basic-map "z\C-m" 'viper-line-to-top)
+(define-key viper-vi-basic-map (kbd "z RET") 'viper-line-to-top)
 (define-key viper-vi-basic-map "z." 'viper-line-to-middle)
 (define-key viper-vi-basic-map "z-" 'viper-line-to-bottom)
 
@@ -421,7 +421,7 @@ In insert mode, this key also functions as Meta."
 (define-key viper-vi-diehard-map "\C-a" 'viper-nil)
 (define-key viper-vi-diehard-map "\C-c" 'viper-nil)
 (define-key viper-vi-diehard-map "\C-g" 'viper-info-on-file)
-(define-key viper-vi-diehard-map "\C-i" 'viper-nil)
+(define-key viper-vi-diehard-map (kbd "TAB") 'viper-nil)
 (define-key viper-vi-diehard-map "\C-k" 'viper-nil)
 (define-key viper-vi-diehard-map "\C-l" 'redraw-display)
 (define-key viper-vi-diehard-map "\C-n" 'viper-next-line)
@@ -447,13 +447,13 @@ In insert mode, this key also functions as Meta."
 (defvar-keymap viper-minibuffer-map
   :doc "Keymap used to modify keys when Minibuffer is in Insert state.")
 
-(define-key viper-minibuffer-map "\C-m" 'viper-exit-minibuffer)
+(define-key viper-minibuffer-map (kbd "RET") 'viper-exit-minibuffer)
 (define-key viper-minibuffer-map "\C-j" 'viper-exit-minibuffer)
 
 ;; Map used to read Ex-style commands.
 (defvar-keymap viper-ex-cmd-map)
 (define-key viper-ex-cmd-map " "  'ex-cmd-read-exit)
-(define-key viper-ex-cmd-map "\t" 'ex-cmd-complete)
+(define-key viper-ex-cmd-map (kbd "TAB") 'ex-cmd-complete)
 
 ;; Keymap for reading file names in Ex-style commands.
 (defvar-keymap ex-read-filename-map)
@@ -469,7 +469,7 @@ Useful in some modes, such as Gnus, MH, etc.")
 
 (defvar-keymap viper-comint-mode-modifier-map
   :doc "This map modifies comint mode.")
-(define-key viper-comint-mode-modifier-map "\C-m" 'viper-exec-key-in-emacs)
+(define-key viper-comint-mode-modifier-map (kbd "RET") 'viper-exec-key-in-emacs)
 (define-key viper-comint-mode-modifier-map "\C-d" 'viper-exec-key-in-emacs)
 
 (defvar-keymap viper-dired-modifier-map

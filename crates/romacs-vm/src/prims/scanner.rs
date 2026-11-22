@@ -61,6 +61,14 @@ fn characters(bytes: &[u8], multibyte: bool) -> usize {
     bytes.len() - trailing - rest.iter().filter(|&&byte| byte & 0xC0 == 0x80).count()
 }
 
+// Run the scanner TABLE over the current buffer's text from START up to END, from
+// STATE.  TABLE is a vector of 129 entries for each of its 1 to 128 states, numbered from 0
+// in order: entry C of a state, for an ASCII character C, and its entry 128, for any other
+// character, is the number of the next state, plus 128 when that transition is marked.
+// Returns (STATE . MARKED): the state at END, and the positions of the marked characters,
+// or how many there are when COUNT is non-nil.  A TABLE or STATE not of that shape, or a
+// START or END that is no fixnum, signals `wrong-type-argument'; START and END not in order
+// within the accessible text, `args-out-of-range'.
 defsubr! { name = "romacs--scanner-run", gnu = "romacs:scanner", effect = Reads,
     fn romacs_scanner_run(cx, table: Value, state: Value, start: Value, end: Value, count: Value) {
         // TABLE: a vector of 129 entries a state, each the next state plus
@@ -73,12 +81,12 @@ defsubr! { name = "romacs--scanner-run", gnu = "romacs:scanner", effect = Reads,
         let mut packed = Vec::with_capacity(entries.len());
         for entry in &entries {
             let byte = entry.integer_value().and_then(|n| u8::try_from(n).ok()).filter(|&n| usize::from(n & 127) < states);
-            packed.push(byte.ok_or(Fault::Wrong("romacs-scanner-table-p", table))?);
+            packed.push(byte.ok_or_else(|| Fault::Wrong("romacs-scanner-table-p", table))?);
         }
         let from = state.integer_value().and_then(|n| usize::try_from(n).ok()).filter(|&n| n < states)
-            .ok_or(Fault::Wrong("romacs-scanner-state-p", state))?;
-        let first = start.integer_value().ok_or(Fault::Wrong("fixnump", start))?;
-        let last = end.integer_value().ok_or(Fault::Wrong("fixnump", end))?;
+            .ok_or_else(|| Fault::Wrong("romacs-scanner-state-p", state))?;
+        let first = start.integer_value().ok_or_else(|| Fault::Wrong("fixnump", start))?;
+        let last = end.integer_value().ok_or_else(|| Fault::Wrong("fixnump", end))?;
         let only_count = count != Value::NIL;
         let scanned = cx.scan_region(first, last, |bytes, multibyte| {
             let table = by_byte(&packed, multibyte);

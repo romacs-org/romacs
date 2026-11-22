@@ -144,6 +144,13 @@ and its comparison policy in its docstring:
   external `printf`, `C-c C-c` on an external `sleep 5`, `M-p`, `C-c C-u`
   and `exit`, both engines in one small work directory.  `--debug-on-error`
   sets `debug-on-error` in both inits.
+* `rect_parity_live.py`: `C-x SPC` (`rectangle-mark-mode`) over long, short
+  and tabbed lines: motion past a line's end, `C-x C-x` round the corners,
+  `M-w`, `C-w` and `C-y` of the rectangle, `C-x r t`, turning it off with
+  the mark active, and `C-g`.  Besides the compared state, named steps hold
+  what Romacs paints, cell by cell, read from a screenshot: the rectangle's
+  columns alone, padded past short lines, and nothing once it is gone.
+  `--shots` keeps a PNG of each engine after every step.
 
 # Paired-session bench: agents drive GNU and Romacs side by side
 
@@ -582,7 +589,13 @@ collection is off), the windows rebuilt, the
 bands expanded, the layouts asked of the layout host and the frames
 submitted. `display_stages_bars.json` holds each scenario's figures:
 instructions and conses under a ceiling, the counts exactly, so a step
-that no longer does its change fails too. So does a scenario more than a
+that no longer does its change fails too; a figure whose bar is `"report"`
+is reported and holds nothing (a collection's whole step, which moves with
+what the session ran before: romacs#403).  A scenario with a `:baseline`
+measures a collection in its session before its `:setup`, and holds
+`above_instructions`, what its steps' collections ran above that; each
+row of a collection also reports the session's interned symbols and the
+files it loaded, by name in report.json. So does a scenario more than a
 tenth of whose steps run more or fewer redisplays than the others, or
 paint when they change nothing, or do not when they do, and one whose
 step waits inside its change, running a timer or a redisplay there,

@@ -420,7 +420,7 @@ be added."
     (define-key map "\C-d" 'archive-flag-deleted)
     (define-key map "e" 'archive-extract)
     (define-key map "f" 'archive-extract)
-    (define-key map "\C-m" 'archive-extract)
+    (define-key map (kbd "RET") 'archive-extract)
     (define-key map "C" 'archive-copy-file)
     (define-key map "m" 'archive-mark)
     (define-key map "n" 'archive-next-line)

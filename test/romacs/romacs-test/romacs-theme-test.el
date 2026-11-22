@@ -1,5 +1,6 @@
 ;;; romacs-theme-test.el --- Palettes, derived slots and faces -*- lexical-binding: t -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; romacs-test: editor (needs the romacs-theme library on the editor's load-path)
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;; lisp/ui/romacs-theme.el's colours, palettes and faces, in the machine's own
@@ -120,17 +121,35 @@
                       romacs-mode-line-dim romacs-mode-line-bright))
         (romacs-should (>= (romacs-color-contrast (romacs-theme-test--fg faces face) (funcall slot 'bg-mode-line)) 4.5))))))
 
-(romacs-deftest romacs-theme-headings-have-rum-s-heights-and-weights ()
+(romacs-deftest romacs-theme-face-table-values-read-the-palette ()
+  (let ((palette '((bg . "#000000") (fg . "#101010") (glass . "#ffffff") (error . "#ff0000"))))
+    (romacs-should (equal (romacs-theme--row-colour 'error palette) "#ff0000"))
+    (romacs-should (eq (romacs-theme--row-colour t palette) t))
+    (romacs-should (equal (romacs-theme--row-colour '(text fg) palette)
+                          (romacs-color-floor-on "#101010" '("#000000") 4.5)))
+    (romacs-should (equal (romacs-theme--row-colour '(text fg bg glass) palette)
+                          (romacs-color-floor-on "#101010" '("#000000" "#ffffff") 4.5)))
+    (romacs-should (equal (romacs-theme--row-colour '(dim fg glass) palette)
+                          (romacs-color-floor "#101010" "#ffffff" 3.0)))
+    (romacs-should (equal (romacs-theme--row-colour '(wave error) palette) '(:style wave :color "#ff0000")))
+    (romacs-should (equal (romacs-theme--row-colour '(dim fg missing) palette)
+                          (romacs-color-floor "#101010" "#000000" 3.0)))
+    ;; Only a colour attribute reads the palette.
+    (romacs-should (equal (romacs-theme--row-face '(link :foreground error :inherit error :underline t) palette)
+                          '(link ((t :foreground "#ff0000" :inherit error :underline t)))))))
+
+(romacs-deftest romacs-theme-headings-have-rum-s-weights-and-no-size ()
+  ;; A theme sets colours and styles; sizes are the typography's.
   (let ((faces (romacs-theme-faces (romacs-theme-resolve romacs-theme-test-dark))))
-    (romacs-should (equal (romacs-theme-test--attribute faces 'org-level-1 :height) 1.35))
-    (romacs-should (equal (romacs-theme-test--attribute faces 'org-level-2 :height) 1.2))
-    (romacs-should (equal (romacs-theme-test--attribute faces 'org-level-8 :height) 1.15))
-    (dolist (row '((1 ultrabold 1.35) (2 semibold 1.2) (3 bold 1.15) (8 bold 1.15)))
+    (dolist (row '((1 ultrabold) (2 semibold) (3 bold) (8 bold)))
       (dolist (prefix '("outline-" "org-level-"))
         (let ((face (intern (format "%s%d" prefix (car row)))))
           (romacs-should (eq (romacs-theme-test--attribute faces face :weight) (nth 1 row)))
-          (romacs-should (equal (romacs-theme-test--attribute faces face :height) (nth 2 row))))))
-    (romacs-should (romacs-theme-test--fg faces 'outline-4))))
+          (romacs-should (null (romacs-theme-test--attribute faces face :height))))))
+    (romacs-should (romacs-theme-test--fg faces 'outline-4))
+    (dolist (row faces)
+      (dolist (key romacs-theme-typography-attributes)
+        (romacs-should (null (romacs-theme-test--attribute faces (car row) key)))))))
 
 (romacs-deftest romacs-theme-every-slot-resolves-for-a-dark-and-a-light-palette ()
   (dolist (palette (list romacs-theme-test-dark romacs-theme-test-light))

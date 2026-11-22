@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and test the surviving VM2 workspace inside one neomacs-slot admission.
+"""Build and test the surviving VM2 workspace as one heavy forge job.
 
     python3 tools/gate --lane nocore full
     tools/gate focused 'EXPR'
@@ -13,17 +13,20 @@ All workspace suites, including VM2 oracle tests, remain included.
 A gate-owned nextest config avoids retired editor filters and setup scripts.
 VM2 and support tests run beside a disjoint display suite. No editor binary,
 compiled Lisp runtime, bootstrap image or bytecode overlay is provisioned.
-Frozen tracked and untracked inputs are mirrored into a persistent slot source
-without touching the worktree or index. Tests use private HOME/XDG/TMPDIR and
+Frozen tracked and untracked inputs are mirrored into a persistent source of
+the lane group's, without touching the worktree or index. The job runs
+through `forge run` (admission, memory cap, its unit and log), holding the
+group's lock, so one gate of a group runs at a time; its output is followed
+here. Tests use private HOME/XDG/TMPDIR and
 no inherited display or session bus. Receipts bind verdict, tree, gate, runner,
 oracle, effective environments and exact nextest test outcomes. Reuse requires
 a complete green receipt, an identical clean tree and identical environment.
 Build-only receipts and stress runs cannot substitute for full acceptance.
 """
-import argparse, fcntl, hashlib, json, os, pathlib, re, shlex, shutil, subprocess, sys, tempfile, time, tomllib
+import argparse, fcntl, hashlib, json, os, pathlib, re, shlex, shutil, signal, subprocess, sys, tempfile, time, tomllib
 
-SLOT = os.environ.get('ROMACS_SLOT', str(pathlib.Path(__file__).resolve().with_name('gate-slot')))
-RUNNER = os.environ.get('ROMACS_SLOT_RUNNER', str(pathlib.Path(__file__).resolve().with_name('gate-slot-runner')))
+# forge, which admits every heavy job on the host (docs: forge's how-we-work).
+FORGE = os.environ.get('ROMACS_FORGE') or shutil.which('forge') or str(pathlib.Path.home() / 'Projects/python/forge/bin/forge')
 
 
 def _pinned_oracle(repo):
@@ -68,8 +71,16 @@ EDITOR_LAUNCH = ('DISPLAY', 'WAYLAND_DISPLAY', 'DBUS_SESSION_BUS_ADDRESS',
                  'ROMACS_RUNTIME_ROOT', 'ROMACS_LISP_DIR', 'ROMACS_SOURCE_DIRECTORY', 'ROMACS_USAGE_LOG',
                  'ROMACS_GUI_FONT', 'ROMACS_GUI_FONT_SIZE')
 HOME = pathlib.Path.home()
-CACHE = pathlib.Path(os.environ.get('ROMACS_GATE_CACHE', HOME / '.cache/emax-gate'))
-SHORT = pathlib.Path(os.environ.get('ROMACS_GATE_SCRATCH', HOME / '.cache/ng'))
+# A lane group names one directory of CACHE/lanes: its mirror, target and locks.
+GROUP = re.compile(r'[A-Za-z0-9_][A-Za-z0-9_.-]*')
+# What a gate's job may take, from admission (the deleted slot runner's bound).
+DEADLINE_MINUTES = 240
+# The forge job's one argument: its file holds the caller's environment and the
+# inner gate's arguments, so neither passes through systemd (which keeps part of
+# an environment and expands $ in arguments).
+JOB_FLAG = '--forge-job'
+CACHE = pathlib.Path(os.environ.get('ROMACS_GATE_CACHE', HOME / '.cache/emax-gate')).absolute()
+SHORT = pathlib.Path(os.environ.get('ROMACS_GATE_SCRATCH', HOME / '.cache/ng')).absolute()
 DISPLAY_PACKAGES = {
     'romacs-display-runtime', 'romacs-renderer-wgpu',
     'romacs-font', 'romacs-face', 'romacs-gui-oracle', 'romacs-display-protocol',
@@ -182,11 +193,6 @@ def env(src=None, names=None):
     # profile. Unset it (sccache refuses =1): workspace crates then build
     # incrementally while sccache keeps caching dependencies.
     e.pop('CARGO_INCREMENTAL', None)
-    if 'NEOMACS_SLOT_INDEX' not in names:
-        e.pop('NEOMACS_SLOT_INDEX', None)  # scheduler location, not a build input
-    for selector in ('ROMACS_SLOT', 'ROMACS_SLOT_RUNNER'):
-        if selector not in names:
-            e.pop(selector, None)
     for k in list(e):
         if k.startswith('CARGO_PROFILE_'):
             e.pop(k)
@@ -366,12 +372,22 @@ def freeze(wt, staged=False):
 
 
 def mirror(group):
-    index = os.environ.get('NEOMACS_SLOT_INDEX')
-    if index is None:
-        return CACHE / 'lanes' / group / 'src'
-    if not re.fullmatch(r'0|[1-9][0-9]*', index):
-        raise ValueError('invalid slot index')
-    return HOME / '.cache/neomacs-slots' / index / 'src'
+    return CACHE / 'lanes' / group / 'src'
+
+
+def group_lease(group):
+    """The open lease on GROUP's mirror and target, held until this process
+    ends, or None when another gate holds it: forge's lock serializes the
+    queue, but only this one is held by the job itself."""
+    path = CACHE / 'lanes' / group / 'lease'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    stream = open(path, 'a')
+    try:
+        fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        stream.close()
+        return None
+    return stream
 
 
 def cargo_flags(src):
@@ -524,7 +540,15 @@ def build_and_run(src, run_dir, expr, threads, run, t0, suites, repeat=1):
                           'slow-timeout = { period = "1200s", terminate-after = 1, grace-period = "0s" }\n'
                           '[[profile.default.overrides]]\n'
                           "filter = 'test(=batch_probes_scale_within_their_budgets)'\n"
-                          'slow-timeout = { period = "3600s", terminate-after = 1, grace-period = "0s" }\n')
+                          'slow-timeout = { period = "3600s", terminate-after = 1, grace-period = "0s" }\n'
+                          # The Lisp tree's compile and an installer's, four compile
+                          # processes, cold for each new build (.config/nextest.toml
+                          # says more).
+                          '[[profile.default.overrides]]\n'
+                          "filter = 'test(/(^|::)(every_file_of_the_lisp_tree_compiles_but_the_known_failures"
+                          "|an_installers_tree_compile_keys_by_the_world_its_first_compile_built)$/)'\n"
+                          'slow-timeout = { period = "1800s", terminate-after = 1, grace-period = "0s" }\n'
+                          'threads-required = 4\n')
         nextest = ['cargo', 'nextest']
         config_flags = ['--config-file', str(config), '--user-config-file', 'none']
         flags = cargo_flags(src)
@@ -732,8 +756,6 @@ def reuse(wt, args, group):
             reason = 'tree'
         elif receipt['gate_sha'] != digest(wt / 'tools/gate'):
             reason = 'gate implementation'
-        elif receipt['runner_sha'] != digest(RUNNER):
-            reason = 'slot runner'
         elif receipt.get('oracle_source') != ('override' if args.oracle else 'pin'):
             reason = 'oracle selection source'
         elif receipt['oracle_sha'] != digest(ORACLE):
@@ -773,6 +795,17 @@ def provision_fixtures(src):
         raise MissingTool('pinned test fixtures (tools/fetch-test-fixtures failed)')
 
 
+def reexec(path):
+    """Start again as the inner gate the job file PATH describes, in the
+    caller's environment it keeps (forge's unit keeps only part of it, and
+    adds the manager's): every setting this file reads at its start, the
+    build and the receipt then see what the caller's shell had, as a reuse
+    there does."""
+    job = json.loads(pathlib.Path(path).read_text())
+    pathlib.Path(path).unlink()
+    os.execve(sys.executable, [sys.executable, sys.argv[0], *job['argv']], job['environment'])
+
+
 def inner(args):
     global ORACLE
     wt, run_dir = pathlib.Path(args.worktree), pathlib.Path(args.run_dir)
@@ -787,6 +820,11 @@ def inner(args):
     os.environ['ROMACS_VACUITY_GIT_ROOT'] = str(wt)
     os.environ['ROMACS_VACUITY_GIT_TREE'] = args.tree
     run_dir.mkdir(parents=True, exist_ok=True)
+    lease = group_lease(args.group)
+    if lease is None:
+        print(f'gate: RED (incomplete: another gate of group {args.group} holds its mirror; '
+              'wait for it, or give this one its own --group)', flush=True)
+        return 1
     t0 = time.monotonic()
     src = mirror(args.group)
     fingerprint, env_hashes, tool_hashes = None, {}, {}
@@ -836,7 +874,7 @@ def inner(args):
         reason = 'required tests did not pass'
     green = complete and not failed and not reason and (build_only or nonempty)
     receipt = dict(schema=2, verdict='GREEN' if green else 'RED', complete=complete,
-                   tree=args.tree, gate_sha=digest(__file__), runner_sha=digest(RUNNER),
+                   tree=args.tree, gate_sha=digest(__file__),
                    oracle_sha=digest(ORACLE), oracle_source='override' if args.oracle else 'pin',
                    env_fp=fingerprint, env_hashes=env_hashes,
                    tool_hashes=tool_hashes, suites=suites,
@@ -878,11 +916,16 @@ def gate_main():
     ap.add_argument('--expr', default='all()', help=argparse.SUPPRESS)
     ap.add_argument('mode', choices=['full', 'focused', 'changed', 'build', 'reuse'])
     ap.add_argument('rest', nargs='*')
+    if sys.argv[1:2] == [JOB_FLAG]:
+        reexec(sys.argv[2])
     args = ap.parse_intermixed_args()
     if args.repeat < 1 or (args.repeat != 1 and args.mode != 'focused'):
         ap.error('--repeat requires a positive count and focused mode')
     if args.threads < 1 or args.display_threads < 1 or (args.jobs is not None and args.jobs < 1):
         ap.error('jobs and test threads must be positive')
+    for name in (args.group, args.lane):
+        if name is not None and not GROUP.fullmatch(name):
+            ap.error(f'--lane and --group are names ({GROUP.pattern}), not paths: {name!r}')
     ORACLE = _override_oracle(args.oracle) if args.oracle else None
     if args.inner:
         return inner(args)
@@ -894,7 +937,7 @@ def gate_main():
         ap.error('unexpected mode arguments')
     wt = pathlib.Path(out('git', 'rev-parse', '--show-toplevel').decode().strip())
     lane = args.lane or re.sub(r'[^A-Za-z0-9_.-]', '-', out(
-        'git', 'branch', '--show-current', cwd=wt).decode().strip() or 'detached')
+        'git', 'branch', '--show-current', cwd=wt).decode().strip()).lstrip('.-') or 'detached'
     group = args.group or lane
     if args.mode == 'reuse':
         ORACLE = _override_oracle(args.oracle) if args.oracle else _pinned_oracle(wt)
@@ -903,23 +946,150 @@ def gate_main():
     expr = args.rest[0] if args.mode == 'focused' else changed_filter(wt, *args.rest[:1]) or 'all()' if args.mode == 'changed' else 'all()'
     (CACHE / 'runs').mkdir(parents=True, exist_ok=True)
     run_dir = pathlib.Path(tempfile.mkdtemp(prefix=f'{lane}-{time.strftime("%Y%m%d-%H%M%S")}-', dir=CACHE / 'runs'))
-    (run_dir / 'gate').write_bytes(out('git', 'show', f'{tree}:tools/gate', cwd=wt))
-    for source, name in ((SLOT, 'gate-slot'), (RUNNER, 'gate-slot-runner')):
-        target = run_dir / name
-        target.write_bytes(pathlib.Path(source).read_bytes())
-        target.chmod(0o755)
-    admission_env = dict(os.environ, ROMACS_SLOT=str(run_dir / 'gate-slot'),
-                         ROMACS_SLOT_RUNNER=str(run_dir / 'gate-slot-runner'))
-    jobs = ['--jobs', str(args.jobs)] if args.jobs is not None else []
+    frozen = out('git', 'show', f'{tree}:tools/gate', cwd=wt)
+    if JOB_FLAG.encode() not in frozen:
+        raise SystemExit('gate: the tools/gate in the submitted tree predates its forge job; '
+                         'stage tools/gate, or drop --staged')
+    (run_dir / 'gate').write_bytes(frozen)
     required = [x for name in args.require for x in ('--require', name)]
     oracle = ['--oracle', ORACLE] if args.oracle else []
-    return subprocess.call([str(run_dir / 'gate-slot'), lane, '--group', group, *jobs, '--test-threads',
-                            str(args.threads + args.display_threads), '--mem', args.mem, '--',
-                            sys.executable, str(run_dir / 'gate'), '--inner', '--worktree', str(wt),
-                            '--run-dir', str(run_dir), '--tree', tree, '--group', group,
-                            '--expr', expr, '--threads', str(args.threads),
-                            '--display-threads', str(args.display_threads), '--repeat', str(args.repeat),
-                            *required, *oracle, args.mode], env=admission_env)
+    return launch(run_dir, group, args, ['--inner', '--worktree', str(wt), '--run-dir', str(run_dir),
+                                         '--tree', tree, '--group', group, '--expr', expr,
+                                         '--threads', str(args.threads), '--display-threads', str(args.display_threads),
+                                         '--repeat', str(args.repeat), *required, *oracle, args.mode])
+
+
+def gibibytes(value):
+    """A --mem value (bytes, or a K/M/G/T count) in whole GiB, rounded up."""
+    match = re.fullmatch(r'([1-9][0-9]*)([KMGT]?)', value)
+    if not match:
+        raise SystemExit(f'gate: --mem {value!r}: a positive count of bytes or K/M/G/T')
+    size = int(match[1]) * 1024 ** ' KMGT'.index(match[2] or ' ')
+    return -(-size // 1024 ** 3)
+
+
+def forge_command(run_dir, group, mem, payload):
+    """forge's heavy job running PAYLOAD for GROUP, on the group's lock.
+    forge's --mem is what the job needs free to start, and half its MemoryMax:
+    the cap is --mem as before."""
+    if not os.access(FORGE, os.X_OK):
+        raise SystemExit(f'gate: forge not found at {FORGE}; set ROMACS_FORGE to its bin/forge')
+    lock = CACHE / 'lanes' / group / 'forge.lock'
+    if any('$' in str(word) for word in (lock, *payload)):
+        raise SystemExit(f'gate: {CACHE} has a $, which systemd would expand in the job\'s command; '
+                         'give ROMACS_GATE_CACHE a path without one')
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    # A bounded name: the group's head, and the run's time and token (mkdtemp's).
+    return [FORGE, 'run', '--class', 'heavy', '--name', f'gate-{group[:48]}-{run_dir.name[-24:]}',
+            '--mem', str(max(1, -(-gibibytes(mem) // 2))), '--wait', '--lock', str(lock), '--', *payload]
+
+
+def job_environment(group, args):
+    """The caller's environment for the inner gate, with the group's target and
+    the job's parallelism."""
+    threads = args.threads + args.display_threads
+    return dict(os.environ, CARGO_TARGET_DIR=str(CACHE / 'lanes' / group / 'target'),
+                CARGO_BUILD_JOBS=str(args.jobs or max(1, (os.cpu_count() or 4) // 4)),
+                NEXTEST_TEST_THREADS=str(threads), RUST_TEST_THREADS=str(threads))
+
+
+def save_job(environment, argv):
+    """A new job file (reexec) only the caller can read, in its runtime
+    directory: never under the cache or TMPDIR, which a worktree may hold,
+    and so a snapshot (git add -A) another gate takes."""
+    runtime = next((d for d in (os.environ.get('XDG_RUNTIME_DIR'), f'/run/user/{os.getuid()}')
+                    if d and os.path.isdir(d)), None)
+    if runtime is None:
+        raise SystemExit('gate: no runtime directory (XDG_RUNTIME_DIR) for the job file')
+    descriptor, path = tempfile.mkstemp(prefix='romacs-gate-', suffix='.json', dir=runtime)
+    with os.fdopen(descriptor, 'w') as stream:
+        json.dump({'environment': environment, 'argv': argv}, stream)
+    return pathlib.Path(path)
+
+
+def start_sccache():
+    """The shared compiler cache's server, started here, outside the gate's
+    unit: one a unit started would end with that unit, under another build
+    still using it.  A server already running is left as it is."""
+    environment = dict(os.environ, SCCACHE_CLIENT_SIDE='1', SCCACHE_DIR=str(HOME / '.cache/sccache'),
+                       SCCACHE_CACHE_SIZE='20G', SCCACHE_CONF='/dev/null')
+    environment.pop('SCCACHE_LOG', None)
+    environment.pop('SCCACHE_ERROR_LOG', None)
+    try:
+        subprocess.run([SCCACHE, '--start-server'], env=environment, stdin=subprocess.DEVNULL,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        pass  # the job's own client starts one then
+
+
+CANCEL = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+
+
+def spawn(command):
+    """forge's COMMAND, started in a session of its own, its output read here."""
+    return subprocess.Popen(command, stdout=subprocess.PIPE, text=True, start_new_session=True)
+
+
+def launch(run_dir, group, args, inner_argv):
+    """Run the inner gate INNER_ARGV as forge's job, printing its log as it
+    grows; its exit.  forge runs in a session of its own, told of every
+    interrupt here (one before it starts: it never starts), so a stop
+    reaches the job once, whoever sent it; the job file goes in any case."""
+    job, forge, pending = None, [], []
+
+    def forward(number, _frame):
+        number = signal.SIGTERM if number == signal.SIGHUP else number
+        if forge:
+            forge[0].send_signal(number)
+        else:
+            pending.append(number)
+    previous = {number: signal.signal(number, forward) for number in CANCEL}
+    try:
+        job = save_job(job_environment(group, args), inner_argv)
+        command = forge_command(run_dir, group, args.mem, ['timeout', '--kill-after=60', f'{DEADLINE_MINUTES}m',
+                                                           sys.executable, str(run_dir / 'gate'), JOB_FLAG, str(job)])
+        start_sccache()
+        if pending:
+            return 128 + pending[0]
+        forge.append(spawn(command))
+        for number in pending:
+            forge[0].send_signal(number)
+        return followed(forge[0])
+    finally:
+        if forge:
+            if forge[0].poll() is None:  # this side went wrong (its output closed): the job goes too
+                forge[0].terminate()
+            forge[0].wait()
+        for number, handler in previous.items():
+            signal.signal(number, handler)
+        if job:
+            job.unlink(missing_ok=True)  # a job that never started
+
+
+def followed(process):
+    """Print the log forge's PROCESS announces (UNIT LOG, once the job runs)
+    as it grows, until forge ends; its exit."""
+    unit, _, path = process.stdout.readline().rstrip('\n').partition(' ')
+    log = pathlib.Path(path) if path else None
+    if unit and not path:
+        print(f'gate: forge said {unit!r}, not its job\'s unit and log', flush=True)
+    if log:
+        start_sccache()  # one the queue's wait let lapse
+    shown = 0
+    while True:
+        done = process.poll() is not None
+        if log and log.exists():
+            with log.open('rb') as stream:
+                stream.seek(shown)
+                chunk = stream.read()
+            shown += len(chunk)
+            sys.stdout.write(chunk.decode(errors='replace'))
+            sys.stdout.flush()
+        if done:
+            sys.stdout.write(process.stdout.read())
+            # forge killed by a signal before it could say so itself
+            return process.returncode if process.returncode >= 0 else 128 - process.returncode
+        time.sleep(1)
 
 
 def main():
@@ -933,22 +1103,5 @@ def main():
         return 1
 
 
-def entry_main():
-    """Normalize only the outer launcher, before freezing/building anything."""
-    try:
-        if not any(arg in ('--inner', '-h', '--help') for arg in sys.argv[1:]):
-            if not pathlib.Path(RUNNER).is_file() or not shutil.which(SLOT):
-                raise SystemExit('gate: missing slot tools; restore tools/gate-slot and tools/gate-slot-runner')
-            sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / 'lib'))
-            from gate_limits import run
-            result = run([sys.executable, *sys.orig_argv[1:]])
-            if result is not None:
-                return result
-        return main()
-    except (OSError, ValueError, subprocess.SubprocessError) as error:
-        print(f'gate: RED (resource normalization failed: {error})', flush=True)
-        return 1
-
-
 if __name__ == '__main__':
-    sys.exit(entry_main())
+    sys.exit(main())
