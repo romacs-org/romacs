@@ -134,21 +134,8 @@ impl<T: Text> Scanner<'_, T> {
                         comnested |= nested(other);
                     }
                     if code == SCOMMENT_FENCE {
-                        let ini = from;
-                        let mut fence_found = false;
-                        if from.char > stop {
-                            loop {
-                                self.poll()?;
-                                from = self.text.dec(from);
-                                if self.text.syntax(from) & 0xff == SCOMMENT_FENCE && !self.char_quoted(from)? {
-                                    fence_found = true;
-                                    break;
-                                } else if from.char == stop {
-                                    break;
-                                }
-                            }
-                        }
-                        if !fence_found { return Ok((self.text.inc(ini), false)); }
+                        let Some(start) = self.backward_comment_fence(from, stop)? else { return Ok((self.text.inc(from), false)) };
+                        from = start;
                         break;
                     } else if code != SENDCOMMENT {
                         if code != SWHITESPACE || quoted { return Ok((self.text.inc(from), false)); }
@@ -177,6 +164,17 @@ impl<T: Text> Scanner<'_, T> {
             count += 1;
         }
         Ok((from, true))
+    }
+
+    fn backward_comment_fence(&self, mut from: Pos, stop: i64) -> R<Option<Pos>> {
+        while from.char > stop {
+            self.poll()?;
+            from = self.text.dec(from);
+            if self.text.syntax(from) & 0xff == SCOMMENT_FENCE && !self.char_quoted(from)? {
+                return Ok(Some(from));
+            }
+        }
+        Ok(None)
     }
 
     /// Fbackward_prefix_chars: the new point. It stops at its start only.
@@ -464,27 +462,17 @@ impl<T: Text> Scanner<'_, T> {
                         if !self.options.ignore_comments { continue; }
                         commented!(self.back_comment(from, stop, comnested, comstyle), comnested, comstyle);
                     }
-                    SCOMMENT_FENCE | SSTRING_FENCE => {
+                    SCOMMENT_FENCE | SSTRING_FENCE | SSTRING => {
                         loop {
                             self.poll()?;
                             if from.char == stop { return Err(lose(last_good, from).into()); }
                             from = self.text.dec(from);
-                            if !self.char_quoted(from)? && self.class(from, symbol) == code { break; }
-                        }
-                        if code == SSTRING_FENCE && depth == 0 && sexpflag { break 'scan true; }
-                    }
-                    SSTRING => {
-                        let stringterm = self.text.char_at(from);
-                        loop {
-                            self.poll()?;
-                            if from.char == stop { return Err(lose(last_good, from).into()); }
-                            from = self.text.dec(from);
-                            if !self.char_quoted(from)? && self.text.char_at(from) == stringterm
-                                && self.class(from, symbol) == SSTRING {
+                            if !self.char_quoted(from)? && (code != SSTRING || self.text.char_at(from) == c)
+                                && self.class(from, symbol) == code {
                                 break;
                             }
                         }
-                        if depth == 0 && sexpflag { break 'scan true; }
+                        if code != SCOMMENT_FENCE && depth == 0 && sexpflag { break 'scan true; }
                     }
                     _ => {}
                 }

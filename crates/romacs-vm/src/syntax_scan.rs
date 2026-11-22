@@ -194,6 +194,18 @@ pub(crate) struct ParseState {
     /// started from a state that carries it continues exactly.
     pub continuation: Option<Continuation>,
 }
+impl ParseState {
+    fn finish_levels(&mut self, levels: &[Level], in_symbol: bool, symbol_prev: i64, spent: bool) {
+        let (top, parents) = levels.split_last().expect("a current level");
+        self.thislevelstart = top.prev;
+        self.prevlevelstart = parents.last().map_or(-1, |level| level.last);
+        self.levelstarts = parents.iter().map(|level| Some(level.last)).collect();
+
+        let top_prev = if in_symbol { symbol_prev } else { top.prev };
+        self.continuation = Some(Continuation { in_symbol, top_last: top.last, top_prev, spent });
+    }
+}
+
 impl Default for ParseState {
     /// internalize_parse_state (Qnil, ...).
     fn default() -> Self {
@@ -522,10 +534,9 @@ impl<T: Text> Scanner<'_, T> {
         Ok((true, from, nesting, SMAX))
     }
 
-    /// back_comment: whether a comment ends at FROM, and where it starts.
-    fn back_comment(&mut self, from: Pos, stop: i64, comnested: bool, comstyle: i32) -> R<(bool, Pos)> {
-        let comment_end = from;
-        let mut from = from;
+    /// back_comment: whether a comment ends at COMMENT_END, and where it starts.
+    fn back_comment(&mut self, comment_end: Pos, stop: i64, comnested: bool, comstyle: i32) -> R<(bool, Pos)> {
+        let mut from = comment_end;
         let mut string_style = -1;
         let mut string_lossage = false;
         let mut comment_lossage = false;
@@ -611,12 +622,10 @@ impl<T: Text> Scanner<'_, T> {
                 _ => {}
             }
         }
-        if !lossage {
-            from = comstart_pos.unwrap_or(comment_end);
-            self.update_forward(if comstart_pos.is_some() { from.char - 1 } else { from.char })?;
-            return Ok((from.char != comment_end.char, from));
-        }
-        self.back_decode(comment_end, comnested, comstyle, defun_start)
+        if lossage { return self.back_decode(comment_end, comnested, comstyle, defun_start); }
+        let start = comstart_pos.unwrap_or(comment_end);
+        self.update_forward(if comstart_pos.is_some() { start.char - 1 } else { start.char })?;
+        Ok((start.char != comment_end.char, start))
     }
 
     /// `back_comment`'s lossage: whether a comment ends at `comment_end`
@@ -1095,15 +1104,10 @@ impl<T: Text> Scanner<'_, T> {
         }
         state.depth = depth;
         state.mindepth = mindepth;
-        state.thislevelstart = levels.last().expect("a current level").prev;
-        state.prevlevelstart = if levels.len() == 1 { -1 } else { levels[levels.len() - 2].last };
         state.location = from.char;
-        state.levelstarts = levels[..levels.len() - 1].iter().map(|l| Some(l.last)).collect();
         state.prev_syntax = if comstartend_first(prev_from_syntax) || state.quoted { prev_from_syntax } else { SMAX };
         state.maxdepth = maxdepth;
-        let top = levels.last().expect("a current level");
-        let top_prev = if in_symbol { symbol_prev } else { top.prev };
-        state.continuation = Some(Continuation { in_symbol, top_last: top.last, top_prev, spent });
+        state.finish_levels(&levels, in_symbol, symbol_prev, spent);
         Ok(())
     }
 }

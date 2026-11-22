@@ -760,6 +760,10 @@ impl Leaf<'_> {
             let epoch = self.vm.defun_start_epoch;
             self.buffer_state_mut(index).defun_start = Some((epoch, cache));
         }
+        self.finish_syntax_scan(index, result)
+    }
+
+    fn finish_syntax_scan(&mut self, index: usize, result: Result_) -> std::result::Result<Outcome, Fault> {
         let set_point = |leaf: &mut Self, at: Pos| match leaf.vm.objects.entry_mut(index) {
             data::Object::Buffer(b) => b.point = ByteOffset(at.byte),
             data::Object::ByteBuffer(b) => b.point = ByteOffset(at.byte),

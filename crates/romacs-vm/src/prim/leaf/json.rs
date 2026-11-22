@@ -327,6 +327,19 @@ impl Parser<'_, '_> {
             }),
         })
     }
+    fn scalar(&mut self, first: u8) -> Parsed<Value> {
+        match first {
+            b'"' => {
+                let bytes = self.string()?;
+                Ok(self.cx.make_string(bytes, true))
+            }
+            b'0'..=b'9' | b'-' => self.number(first),
+            b't' => self.literal(b"rue", Value::TRUE).ok_or_else(|| self.fail("json-parse-error")),
+            b'f' => self.literal(b"alse", self.conf.false_).ok_or_else(|| self.fail("json-parse-error")),
+            b'n' => self.literal(b"ull", self.conf.null).ok_or_else(|| self.fail("json-parse-error")),
+            _ => Err(self.fail("json-parse-error")),
+        }
+    }
     /// json_parse: one value from the next non-whitespace character.
     fn parse(&mut self) -> Parsed<Value> {
         let mut open: Vec<Open> = Vec::new();
@@ -359,15 +372,7 @@ impl Parser<'_, '_> {
                         None
                     }
                 }
-                b'"' => {
-                    let bytes = self.string()?;
-                    Some(self.cx.make_string(bytes, true))
-                }
-                b'0'..=b'9' | b'-' => Some(self.number(c)?),
-                b't' => Some(self.literal(b"rue", Value::TRUE).ok_or_else(|| self.fail("json-parse-error"))?),
-                b'f' => { let v = self.conf.false_; Some(self.literal(b"alse", v).ok_or_else(|| self.fail("json-parse-error"))?) }
-                b'n' => { let v = self.conf.null; Some(self.literal(b"ull", v).ok_or_else(|| self.fail("json-parse-error"))?) }
-                _ => return Err(self.fail("json-parse-error")),
+                first => Some(self.scalar(first)?),
             };
             let Some(mut value) = value else { continue };
             // Hand the value to its container; close every container it ends.
