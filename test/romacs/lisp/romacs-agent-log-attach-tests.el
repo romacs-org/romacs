@@ -27,8 +27,14 @@ PNG files in a fresh directory, and `composer' its draft's text."
                (write-region romacs-agent-log-attach-tests--png nil file nil 'silent)))
            (with-temp-buffer
              (romacs-agent-log-mode)
-             (setq romacs-agent-log--end (point-min-marker)
+             (setq romacs-agent-log--session (romacs-agent--make :id "A" :harness 'claude :state 'running
+                                                                 :tools (make-hash-table :test #'equal)
+                                                                 :streamed (make-hash-table :test #'equal))
+                   romacs-agent-log--end (point-min-marker)
                    romacs-agent-log--input (point-min-marker))
+             (set-marker-insertion-type romacs-agent-log--end t)
+             (romacs-agent-log--separator t)
+             (goto-char (point-max))
              (cl-flet ((composer () (buffer-substring-no-properties romacs-agent-log--input (point-max)))
                        (link (file) (romacs-agent-log-images-link file))
                        (files () (mapcar (lambda (item) (plist-get item :path)) romacs-attach-items)))
@@ -42,8 +48,15 @@ PNG files in a fresh directory, and `composer' its draft's text."
     (romacs-agent-log-attach-sync)
     (should (equal (files) (list a b)))
     (should (equal (mapcar (lambda (item) (plist-get item :caption)) romacs-attach-items) '(nil "the second")))
-    ;; The chips show above the draft, the images not again under it.
+    ;; The chips show above the draft's line, its prompt mark included,
+    ;; the images not again under it.
     (should (overlay-get romacs-agent-log-attach--overlay 'before-string))
+    (should (= (overlay-start romacs-agent-log-attach--overlay)
+               (save-excursion (goto-char romacs-agent-log--input) (forward-line 0) (point))))
+    (should (< (overlay-start romacs-agent-log-attach--overlay) romacs-agent-log--input))
+    ;; The separator written again: the chips stay above its prompt line.
+    (romacs-agent-log--separator t)
+    (should (< (overlay-start romacs-agent-log-attach--overlay) romacs-agent-log--input))
     (should-not romacs-agent-log-images-under-draft)
     ;; No links, no chips.
     (delete-region romacs-agent-log--input (point-max))

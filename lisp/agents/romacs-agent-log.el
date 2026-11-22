@@ -51,6 +51,7 @@
 ;; before (romacs-agent-ui.el), which read the session from here too.
 (defvar romacs-agent-ui--session)
 (defvar romacs-agent-ui-changed-hook)
+(declare-function romacs-agent-log-attach-place "romacs-agent-log-attach" ())
 (declare-function romacs-agent-log-faces-soon "romacs-agent-log-faces" ())
 (declare-function romacs-agent-log-rounds-you "romacs-agent-log-rounds" (text))
 (declare-function romacs-agent-log-rounds-incoming "romacs-agent-log-rounds" (event incoming))
@@ -1370,7 +1371,8 @@ windows showing it leave, changed."
                                 'field 'romacs-agent-log-separator))
             (delete-region (point) (+ (point) old))
             (set-marker romacs-agent-log--input (point))
-            (set-marker romacs-agent-log--end start))))
+            (set-marker romacs-agent-log--end start)))
+        (romacs-agent-log-attach-place))
       ;; The thread moves as the session does, drawn by the display.
       (romacs-working-set (current-buffer) (romacs-agent-log--work doing)))))
 

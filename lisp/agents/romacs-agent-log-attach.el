@@ -117,11 +117,18 @@ has is linked at the composer's end."
   "The tray changed: its links written to the composer, its chips shown
 at the composer's start."
   (romacs-agent-log-attach--write)
-  (let ((string (romacs-attach-tray-string)))
-    (unless (and romacs-agent-log-attach--overlay (overlay-buffer romacs-agent-log-attach--overlay))
-      (setq romacs-agent-log-attach--overlay (make-overlay romacs-agent-log--input romacs-agent-log--input nil nil nil)))
-    (move-overlay romacs-agent-log-attach--overlay romacs-agent-log--input romacs-agent-log--input)
-    (overlay-put romacs-agent-log-attach--overlay 'before-string string)))
+  (unless (and romacs-agent-log-attach--overlay (overlay-buffer romacs-agent-log-attach--overlay))
+    (setq romacs-agent-log-attach--overlay (make-overlay 1 1 nil nil nil)))
+  (overlay-put romacs-agent-log-attach--overlay 'before-string (romacs-attach-tray-string))
+  (romacs-agent-log-attach-place))
+
+(defun romacs-agent-log-attach-place ()
+  "Keep the chips above the composer's line, its prompt mark included:
+the separator, written again, takes that line's start with it."
+  (when (and romacs-agent-log-attach--overlay (overlay-buffer romacs-agent-log-attach--overlay))
+    ;; Not `line-beginning-position': the separator is a field of its own.
+    (let ((line (save-excursion (goto-char romacs-agent-log--input) (forward-line 0) (point))))
+      (move-overlay romacs-agent-log-attach--overlay line line))))
 
 (defun romacs-agent-log-attach-setup ()
   "Make the current chat a tray host whose chips are its composer's links."
