@@ -99,6 +99,8 @@ LAYER_INIT = '''(defun romacs-live-root-height (where)
 (add-hook 'minibuffer-setup-hook
           (lambda () (add-hook 'post-command-hook #'romacs-live-record-file-preview 90 t)))
 (add-hook 'minibuffer-exit-hook #'romacs-live-record-file-preview 90)
+(add-hook 'window-size-change-functions
+          (lambda (_frame) (when (active-minibuffer-window) (romacs-live-record-file-preview))) 90)
 '''
 
 EXPECTED_DEFAULTS = ('((fzf basic partial-completion emacs22) t visible one-column historical 20 t 0.15 400 '
@@ -177,30 +179,38 @@ def every_prompt_exited(heights):
     return starts.count('(prompt') > 0 and starts.count('(exit') == starts.count('(prompt')
 
 
-def file_preview(keys, layer, work, timeout, process, output, env, report):
+def file_preview(keys, layer, work, timeout, process, output, env, report, size):
     """The regular file prompt previews an image in the visited file's directory."""
     record = work / 'preview-state'
-    image = work / 'sub' / 'preview.svg'
+    image = work / 'sub' / 'preview$.svg'
 
     def shown():
         return record.read_text() if record.exists() else ''
 
     keys('-M', 'ctrl', 'x', '-m', 'ctrl', '-M', 'ctrl', 'f', '-m', 'ctrl')
     fio.wait(lambda: 'Find file: ' in layer()[0], timeout, 'file preview prompt', process)
-    keys('preview.s')
+    keys('preview$$.s')
     fio.wait(lambda: shown() == str(image), timeout, 'selected image preview', process)
     fio.shot(output / 'file-preview.png', env, report)
+    def resize(mode):
+        subprocess.run([live.RANDR, '--output', 'HEADLESS-1', '--custom-mode', mode],
+                       env=env, check=True, timeout=20)
+
+    resize(f"720x{size.split('x')[1]}")
+    fio.wait(lambda: shown() == 'hidden', timeout, 'preview hidden on resize without input', process)
+    resize(size)
+    fio.wait(lambda: shown() == str(image), timeout, 'preview restored on resize without input', process)
     keys('-k', 'Tab', '-k', 'BackSpace', '-k', 'BackSpace', '-k', 'BackSpace', 'txt')
-    fio.wait(lambda: layer()[0].endswith('preview.txt') and shown() == 'hidden',
+    fio.wait(lambda: layer()[0].endswith('preview$$.txt') and shown() == 'hidden',
              timeout, 'preview hidden on a text file', process)
     keys('-k', 'BackSpace', '-k', 'BackSpace', '-k', 'BackSpace', 'svg')
     fio.wait(lambda: shown() == str(image), timeout, 'image preview restored', process)
     keys('-M', 'ctrl', 'g', '-m', 'ctrl')
     fio.wait(lambda: shown() == 'hidden', timeout, 'image preview hidden after quit', process)
-    report['checks'].append({'file_preview': 'image shown, text and quit clear it'})
+    report['checks'].append({'file_preview': 'escaped name, resize without input, text selection and quit'})
 
 
-def romacs_complete(report, keys, layer, selected, probe, heights, work, timeout, process, output, env, position):
+def romacs_complete(report, keys, layer, selected, probe, heights, work, timeout, process, output, env, position, size):
     """M-x, C-x C-f and C-x b through `romacs-complete-mode'."""
     def shown(name, what, test):
         fio.wait(lambda: test(*layer()), timeout, what, process)
@@ -230,7 +240,7 @@ def romacs_complete(report, keys, layer, selected, probe, heights, work, timeout
     shown('ff-tab', 'find-file candidate inserted', lambda m, rows: m.endswith(f'Find file: {work}/sub/notes.txt'))
     keys('-k', 'Return')
     selected('ff-visited', 'notes.txt')
-    file_preview(keys, layer, work, timeout, process, output, env, report)
+    file_preview(keys, layer, work, timeout, process, output, env, report, size)
 
     keys('-M', 'ctrl', 'x', '-m', 'ctrl', 'b')
     fio.wait(lambda: 'Switch to buffer (default ' in layer()[0], timeout, 'switch prompt', process)
@@ -283,8 +293,8 @@ def main():
     def prepare(s):
         (s.work / 'sub').mkdir(parents=True)
         (s.work / 'sub' / 'notes.txt').write_text('Notes reached by partial completion.\n')
-        (s.work / 'sub' / 'preview.txt').write_text('A file without an image preview.\n')
-        (s.work / 'sub' / 'preview.svg').write_text(
+        (s.work / 'sub' / 'preview$.txt').write_text('A file without an image preview.\n')
+        (s.work / 'sub' / 'preview$.svg').write_text(
             '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="150">'
             '<rect width="200" height="150" fill="#186a95"/>'
             '<circle cx="100" cy="75" r="45" fill="#ffe498"/></svg>\n')
@@ -356,7 +366,7 @@ def main():
         time.sleep(1)
         if not args.fido:
             romacs_complete(report, keys, layer, selected, probe, heights, work, args.timeout, process, output, env,
-                            args.position)
+                            args.position, args.size)
         else:
             default_ui(report, keys, minibuffer, shown, selected, probe, work, args.timeout, process)
         report['status'] = 'PASS'

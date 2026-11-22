@@ -1240,23 +1240,42 @@ SELECTION the row of the current one, if any."
     (setq romacs-complete--preview-state nil)
     (romacs-complete--preview-draw nil nil)))
 
+(defun romacs-complete--preview-file (category)
+  "Resolve the current local candidate for CATEGORY, or nil."
+  (when (and (memq category '(file project-file)) (not (file-remote-p default-directory)))
+    (let* ((candidate (romacs-complete--candidate))
+           (name (if (eq category 'file)
+                     (ignore-errors (substitute-in-file-name candidate))
+                   candidate)))
+      (when (and name (not (file-remote-p name))) (expand-file-name name)))))
+
 (defun romacs-complete--preview ()
   "Show the current file candidate beside the panel, if it is an image."
   (if-let* ((romacs-complete--file-preview)
-            ((memq (romacs-complete--metadata-get 'category) '(file project-file)))
             (panel romacs-complete--layer)
             (root (frame-parent panel))
-            (name (romacs-complete--candidate))
-            ((not (or (file-remote-p default-directory) (file-remote-p name))))
+            (file (romacs-complete--preview-file (romacs-complete--metadata-get 'category)))
             (placement (romacs-complete--preview-placement panel)))
-      (let* ((file (expand-file-name name))
-             (state (list root file placement)))
+      (let ((state (list root file placement)))
         (unless (equal state romacs-complete--preview-state)
           (romacs-complete--preview-draw
            (romacs-complete--preview-image file root (nth 1 placement) (nth 2 placement))
            placement)
           (setq romacs-complete--preview-state state)))
     (romacs-complete--preview-clear)))
+
+(defun romacs-complete--preview-resize (frame)
+  "Refit the active file prompt and its preview when FRAME resizes."
+  (when-let* ((panel romacs-complete--layer)
+              ((frame-live-p panel))
+              ((eq frame (frame-parent panel)))
+              (mini (active-minibuffer-window)))
+    (with-current-buffer (window-buffer mini)
+      (when romacs-complete--file-preview
+        (let ((rows (length romacs-complete--lines)))
+          (romacs-complete--place panel rows)
+          (when (romacs--resize-mini-window) (romacs-complete--place panel rows)))
+        (romacs-complete--preview)))))
 
 (defun romacs-complete--minibuffer-setup ()
   "Show the minibuffer's layer for a minibuffer without candidates, as
@@ -1346,6 +1365,7 @@ frame's top-right corner (`romacs-layer-toast').  Turning it on turns `fido-mode
         (message "romacs-complete-mode turned %s off" mode)))
     (add-hook 'minibuffer-setup-hook #'romacs-complete--minibuffer-setup)
     (add-hook 'minibuffer-exit-hook #'romacs-complete--minibuffer-exit)
+    (add-hook 'window-size-change-functions #'romacs-complete--preview-resize)
     (add-hook 'romacs-echo-area-functions #'romacs-complete--message)
     (advice-add 'romacs--cmd-error :before #'romacs-layer--note-command-error)
     (advice-add 'undefined :before #'romacs-layer--note-undefined)
@@ -1354,6 +1374,7 @@ frame's top-right corner (`romacs-layer-toast').  Turning it on turns `fido-mode
    (t
     (remove-hook 'minibuffer-setup-hook #'romacs-complete--minibuffer-setup)
     (remove-hook 'minibuffer-exit-hook #'romacs-complete--minibuffer-exit)
+    (remove-hook 'window-size-change-functions #'romacs-complete--preview-resize)
     (remove-hook 'romacs-echo-area-functions #'romacs-complete--message)
     (advice-remove 'romacs--cmd-error #'romacs-layer--note-command-error)
     (advice-remove 'undefined #'romacs-layer--note-undefined)

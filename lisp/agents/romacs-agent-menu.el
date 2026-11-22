@@ -381,7 +381,8 @@ session takes no commands from here, read a file name with image previews."
         (message "Attaching the clipboard's image…"))
     (let* ((romacs-complete-file-preview t)
            (cwd (and (romacs-agent-log--commands-p) (romacs-agent-cwd romacs-agent-log--session)))
-           (dir (if (and cwd (not (file-remote-p cwd)) (file-directory-p cwd)) cwd default-directory)))
+           (dir (file-name-as-directory
+                 (if (and cwd (not (file-remote-p cwd)) (file-directory-p cwd)) cwd default-directory))))
       (romacs-agent-menu--link (expand-file-name (read-file-name "Attach file: " dir nil t) dir)))))
 
 (keymap-popup-define romacs-agent-menu-map
