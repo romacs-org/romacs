@@ -54,6 +54,18 @@
             (should-not (buffer-modified-p)))
         (romacs-working-stop 'paint)))))
 
+(ert-deftest romacs-working-overrides-only-the-running-face ()
+  (with-temp-buffer
+    (insert (romacs-working-still 4 'running 'font-lock-keyword-face) "\n")
+    (should (eq (get-text-property 1 'face) 'font-lock-keyword-face))
+    (romacs-working-show 'colored (current-buffer) 1 4 'running 'font-lock-keyword-face)
+    (romacs-working-set 'colored 'waiting)
+    (should (eq (get-text-property 1 'face) 'romacs-working-waiting))
+    (romacs-working-set 'colored 'running)
+    (should (eq (get-text-property 1 'face) 'font-lock-keyword-face))
+    (should (eq (nth 3 (plist-get (romacs-working--element 'colored) :kind))
+                'font-lock-keyword-face))))
+
 (ert-deftest romacs-working-follows-its-callers-marker ()
   (with-temp-buffer
     (insert "before\n")

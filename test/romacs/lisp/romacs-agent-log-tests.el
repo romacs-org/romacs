@@ -171,6 +171,14 @@ them inherits."
           (should (equal (cdr (romacs-agent-log-activity-bounds)) romacs-agent-log--divider))
           (should (< (car (romacs-agent-log-activity-bounds)) romacs-agent-log--divider))
           (should (= (length romacs-agent-log-activity--threads) 1))
+          (pcase-let ((`(,id . ,mark) (car romacs-agent-log-activity--threads)))
+            (should (eq (get-text-property mark 'face) 'romacs-agent-log-subagent))
+            (should (eq (nth 3 (plist-get (romacs-working--element id) :kind))
+                        'romacs-agent-log-subagent))
+            (save-excursion
+              (goto-char mark)
+              (search-forward "Read the docs" (line-end-position))
+              (should (eq (get-text-property (1- (point)) 'face) 'romacs-agent-log-subagent))))
           (should (string-suffix-p "A queued message\n❯ " (chrome)))
           (save-excursion
             (goto-char (1+ (car (romacs-agent-log-activity-bounds))))

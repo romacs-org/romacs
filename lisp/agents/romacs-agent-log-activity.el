@@ -15,6 +15,9 @@
 (require 'ewoc)
 (require 'romacs-working)
 
+(defface romacs-agent-log-subagent '((t :inherit font-lock-keyword-face :weight bold))
+  "The name and animation of a running subagent in chat.")
+
 (defvar-local romacs-agent-log-activity--view nil
   "The live chat's (EWOC START . END), or nil.")
 
@@ -40,12 +43,13 @@
          (activity (or (plist-get row :activity) "Working"))
          ;; The display overlays working cells at the start of their line.
          (prefix (when (> width (+ romacs-agent-log-activity--cols 8))
-                   (concat (propertize (romacs-working-still romacs-agent-log-activity--cols 'running)
+                   (concat (propertize (romacs-working-still romacs-agent-log-activity--cols 'running
+                                                             'romacs-agent-log-subagent)
                                        'romacs-agent-worker (plist-get row :tool)) "  ")))
          (room (max 1 (- width (length prefix) 1)))
          (name (romacs-agent-log-activity--clip title (if (> room 14) (min 40 (/ room 2)) room)))
          (action (- room (string-width name) 5)))
-    (concat (propertize (concat prefix (propertize name 'face 'bold)
+    (concat (propertize (concat prefix (propertize name 'face 'romacs-agent-log-subagent)
                                  (when (> action 2)
                                    (propertize (concat "  ·  " (romacs-agent-log-activity--clip activity action))
                                                'face 'romacs-agent-log-note)))
@@ -79,7 +83,8 @@
              (entry (assoc id old))
              (marker (or (cdr entry) (copy-marker at))))
         (if entry (set-marker marker at)
-          (romacs-working-show id (current-buffer) marker romacs-agent-log-activity--cols 'running))
+          (romacs-working-show id (current-buffer) marker romacs-agent-log-activity--cols
+                               'running 'romacs-agent-log-subagent))
         (push (cons id marker) next)
         (setq at (next-single-property-change at 'romacs-agent-worker nil end))))
     (dolist (entry old)
