@@ -10,7 +10,7 @@ include!(concat!(env!("OUT_DIR"), "/prims_mods.rs"));
 
 /// The VM's own Lisp, which `Vm::install_lisp_prelude` evaluates from the
 /// runtime tree's lisp/, in this order:
-pub(crate) const PRELUDES: [&str; 6] = [
+pub(crate) const PRELUDES: [&str; 8] = [
     // `safe_run_hooks`, for the prelude and the keyboard half alike.
     "vm/hooks.el",
     // T3 tier: Lisp loops that call Lisp per element, over leaf cursors.
@@ -19,8 +19,12 @@ pub(crate) const PRELUDES: [&str; 6] = [
     "vm/subprocess.el",
     // T3 tier: inotify.c's watch list and event dispatch over prims/inotify.rs.
     "vm/inotify.el",
-    // T3 tier: isolates' spawning, futures, delivery and the worker's loop over prims/isolate.rs.
+    // T3 tier: isolates' spawning, futures and delivery over prims/isolate.rs.
     "vm/isolate.el",
+    // T3 tier: a worker isolate's loop, and a zygote's forking.
+    "vm/isolate-worker.el",
+    // Buffer snapshots, the frozen buffers worker isolates compute from.
+    "vm/buffer-snapshot.el",
     // T3 tier: window.c's change functions and its old-state accessors
     // (`run-window-configuration-change-hook`, `window-old-buffer`, ...),
     // which redisplay runs (host_input.rs) and any session may call.

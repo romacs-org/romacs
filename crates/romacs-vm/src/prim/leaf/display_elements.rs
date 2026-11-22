@@ -498,7 +498,7 @@ impl<'l, 'a> Source<'l, 'a> {
 
     /// setup_for_ellipsis: the display table's ellipsis vector, else `...'.
     fn ellipsis(&mut self, origin: Origin, buffer: bool) -> R<()> {
-        let codes = match self.look.display_table.map(|t| self.extra(t, 4)).filter(|v| self.leaf.vector_values(*v).is_ok()) {
+        let codes = match self.look.display_table.map(|t| self.extra(t, 4)).filter(|v| self.leaf.is_vector(*v)) {
             Some(vector) => self.leaf.vector_values(vector).unwrap_or_default(),
             None => vec![Value::integer(0x2e).map_err(Fault::Error)?; 3],
         };

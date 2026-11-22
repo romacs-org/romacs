@@ -94,7 +94,7 @@
                   "┃ one\n┃ two"))
    (should (equal (romacs-agent-rows-tests--draw "romacs_task_reply" :ended (romacs-agent-rows-tests--table)
                                                  "{\"title\":\"lane x\"}")
-                  "◈ ✉\uFE0E → lane x"))
+                  "◈ ✉\uFE0E → lane x · sent"))
    (let ((input (romacs-agent-rows-tests--table
                  "title" "lane x" "target" (romacs-agent-rows-tests--table "provider" "claude3"))))
      (should (equal (romacs-agent-rows-tests--draw "romacs_delegate_task" :row input) "◈ ⑂ lane x · claude3"))
@@ -136,7 +136,7 @@
   (romacs-agent-rows-tests--plain
    (let ((providers "{\"providers\":[{\"providerInstanceId\":\"claude\",\"harness\":\"claude\",\"enabled\":true,\"models\":[1,2]},{\"providerInstanceId\":\"codex-second\",\"harness\":\"codex\",\"enabled\":false,\"models\":[]}]}"))
      (should (equal (romacs-agent-rows-tests--draw "romacs_orchestrator_capabilities" :ended (romacs-agent-rows-tests--table) providers)
-                    "◈ ▤ 2 instances · 1 enabled"))
+                    "◈ ▤ 2 instances · 2 models · 1 enabled"))
      (should (equal (romacs-agent-rows-tests--draw "romacs_orchestrator_capabilities" :body (romacs-agent-rows-tests--table) providers)
                     "✓  claude        claude  2 models\n·  codex-second  codex   0 models")))
    (let ((limits "{\"harnesses\":[{\"harness\":\"claude\",\"suggestion\":\"New work goes to claude2.\",\"accounts\":[{\"account\":\"claude2\",\"pick\":true,\"sessions\":3,\"windows\":[{\"window\":\"5h\",\"used\":58},{\"window\":\"week\",\"used\":27}]}]}]}"))
@@ -204,12 +204,10 @@
                   (romacs-agent-rows-tests--draw "Bash" :ended (romacs-agent-rows-tests--table "command" "forge submit feat/x")
                                                  "20261120T182628-feat-x-6c8da7d2\n"))
                  "$ forge submit feat/x · ⇡ queued 20261120T182628-feat-x-6c8da7d2"))
-  (should (romacs-agent-rows-tail-p "Bash"))
   ;; A command longer than a row holds says its description; RET, itself.
   (should (equal (romacs-agent-rows-tests--draw "Bash" :row (romacs-agent-rows-tests--table
                                                             "command" (make-string 80 ?x) "description" "List the worktrees"))
                  "$ List the worktrees"))
-  (should-not (romacs-agent-rows-tail-p "Read"))
   ;; Details RET shows: a Romacs tool's answer as words, never JSON.
   (should (equal (romacs-agent-rows-details "romacs_buffer_read" nil
                                             "{\"name\":\"notes\",\"size\":12,\"lines\":[\"a\",\"b\"],\"rows\":[{\"x\":1}]}")

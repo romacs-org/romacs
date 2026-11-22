@@ -46,6 +46,7 @@ pub(crate) mod matcher;
 pub(crate) mod opcode;
 pub(crate) mod optimize;
 pub(crate) mod pattern;
+pub(crate) mod required;
 pub(crate) mod scan;
 pub(crate) mod search;
 pub(crate) mod syntax;
@@ -94,3 +95,7 @@ mod host_boundary_tests;
 #[cfg(test)]
 #[path = "tests/linear_test.rs"]
 mod linear_tests;
+
+#[cfg(test)]
+#[path = "tests/required_literals_test.rs"]
+mod required_literals_tests;

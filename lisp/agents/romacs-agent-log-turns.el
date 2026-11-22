@@ -13,6 +13,7 @@
 ;;; Code:
 
 (require 'romacs-agent-log)
+(require 'romacs-agent-glyphs)
 
 (defvar-local romacs-agent-log-turns--rollbacks nil
   "Rollbacks whose prompt is among the turns not drawn: (TO . NOTE), TO
@@ -24,7 +25,7 @@ back, and to before which prompt; the turns it took back are dimmed
 \(`romacs-agent-log-turns--dim-rollback')."
   (let ((turns (or (plist-get event :turns) 0)))
     (romacs-agent-log--line event 'note
-                            (propertize (format "· ↶ rolled back %d turn%s%s to before: %s" turns (if (= turns 1) "" "s")
+                            (propertize (format "· %s rolled back %d turn%s%s to before: %s" (romacs-agent-glyph 'rolled-back) turns (if (= turns 1) "" "s")
                                                 (if (plist-get event :files) " and their files" "")
                                                 (truncate-string-to-width (car (split-string (or (plist-get event :prompt) "") "\n"))
                                                                           60 nil nil t))
@@ -110,7 +111,9 @@ when the chat does not show it."
     (save-excursion
       (goto-char at)
       (skip-chars-forward "\n")
-      (string-trim (buffer-substring-no-properties (point) (line-end-position))))))
+      ;; Its words, not the bar it is drawn behind.
+      (string-trim (substring-no-properties
+                    (romacs-agent-log--undecorated (buffer-substring (point) (line-end-position))))))))
 
 (provide 'romacs-agent-log-turns)
 ;;; romacs-agent-log-turns.el ends here

@@ -76,7 +76,7 @@ fn auto_save_done(cx) {
 // one is given.
 defsubr! { name = "romacs--auto-save-failure-time", gnu = "fileio.c:6489", effect = Global,
 fn auto_save_failure_time(cx; optional time: Value) {
-    let set = match time { Value::NIL => None, t => Some(t.integer_value().ok_or(Fault::Wrong("fixnump", t))?) };
+    let set = match time { Value::NIL => None, t => Some(t.integer_value().ok_or_else(|| Fault::Wrong("fixnump", t))?) };
     let failure = cx.update_modification(|m| { if let Some(t) = set { m.auto_save_failure = t; } m.auto_save_failure })?;
     Value::integer(failure).map_err(Fault::Error)
 }}

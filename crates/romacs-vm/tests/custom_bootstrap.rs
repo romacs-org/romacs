@@ -6,7 +6,7 @@ fn custom_loads_and_files_frontier_is_pinned() {
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
     vm.set_load_path(&[root.join("lisp"), root.join("lisp/emacs-lisp")]).unwrap();
-    for (relative, expected) in [("lisp/emacs-lisp/byte-run.el", 56), ("lisp/subr.el", 522), ("lisp/emacs-lisp/macroexp.el", 50), ("lisp/emacs-lisp/pcase.el", 53), ("lisp/custom.el", 91), ("lisp/files.el", 49)] {
+    for (relative, expected) in [("lisp/emacs-lisp/byte-run.el", 56), ("lisp/subr.el", 522), ("lisp/emacs-lisp/macroexp.el", 50), ("lisp/emacs-lisp/pcase.el", 53), ("lisp/custom.el", 92), ("lisp/files.el", 49)] {
         let path = root.join(relative);
         let result = vm.load_file(&path).map(drop);
         let canonical = path.canonicalize().unwrap().to_string_lossy().into_owned();

@@ -105,6 +105,10 @@ follows; `romacs-gui-loadup-after-init' ends initialization."
         ;; spec for a colour or graphic display (region's :extend, a
         ;; button's :box) never matches.
         (when initial-window-system
+          ;; The keys' alternative meanings on a window system (common-win.el):
+          ;; M-tab is M-TAB, M-return M-RET, as the Tab and Return keys are
+          ;; function keys here.
+          (x-setup-function-keys (selected-frame))
           (frame-set-background-mode (selected-frame) t)
           (face-set-after-frame-default (selected-frame))
           ;; x-win.el and pgtk-win.el's window-system initialization, and
@@ -169,156 +173,9 @@ arguments next with `romacs-gui-visit-file-noselect', then calls
   (romacs--after-init)
   (display-startup-echo-area-message))
 
-(defvar romacs-gui-loadup--old-face-font-rescale-alist face-font-rescale-alist
-  "`face-font-rescale-alist' before the user's init, as `normal-top-level'
-keeps it across `command-line' (startup.el:773).")
-
-(defun romacs-gui-loadup-command-line-1 ()
-  "The rest of `command-line-1' once the file arguments are visited
-\(startup.el:3008-3125): *scratch* for an `initial-buffer-choice' of t,
-the initial scratch message, the choice's buffer ahead of
-`romacs-gui-displayable-buffers', and the first two of those shown.
-Unless `inhibit-startup-screen', the choice, `noninteractive',
-`daemonp' or `inhibit-x-resources' prevents it, the startup hooks, the
-user's frame settings and `window-setup-hook' run, and the value is the
-startup screen to show: `concise' beside the shown buffers, else `full'.
-The GUI shows *Romacs* there with `romacs-gui-loadup-startup-screen'.
-`romacs-gui-loadup-normal-top-level' follows."
-  (when (eq initial-buffer-choice t)
-    (get-scratch-buffer-create))
-  (and initial-scratch-message
-       (get-buffer "*scratch*")
-       (with-current-buffer "*scratch*"
-         (when (zerop (buffer-size))
-           (insert (substitute-command-keys initial-scratch-message))
-           (set-buffer-modified-p nil))))
-  (let ((displayable-buffers romacs-gui-displayable-buffers))
-    (setq romacs-gui-displayable-buffers nil)
-    (when initial-buffer-choice
-      (let ((buf
-             (cond ((stringp initial-buffer-choice)
-                    (find-file-noselect initial-buffer-choice))
-                   ((functionp initial-buffer-choice)
-                    (funcall initial-buffer-choice))
-                   ((eq initial-buffer-choice t)
-                    (get-scratch-buffer-create))
-                   (t
-                    (error "`initial-buffer-choice' must be a string, a function, or t")))))
-        (unless (buffer-live-p buf)
-          (error "Value returned by `initial-buffer-choice' is not a live buffer: %S" buf))
-        (setq displayable-buffers (cons buf (delq buf displayable-buffers)))))
-    (let ((displayable-buffers-len (length displayable-buffers))
-          (old-face-font-rescale-alist face-font-rescale-alist))
-      (when (> displayable-buffers-len 0)
-        (switch-to-buffer (car displayable-buffers)))
-      (cond
-       ((= displayable-buffers-len 2)
-        (switch-to-buffer-other-window (cadr displayable-buffers))
-        (other-window -1))
-       ((> displayable-buffers-len 2)
-        (let ((bufs (reverse (cdr displayable-buffers))))
-          (switch-to-buffer-other-window (pop bufs))
-          (dolist (buf bufs)
-            (switch-to-buffer buf nil t))
-          (other-window -1))))
-      (if (or inhibit-startup-screen
-              initial-buffer-choice
-              noninteractive
-              (daemonp)
-              inhibit-x-resources)
-          (progn
-            (when (and (> displayable-buffers-len 2)
-                       (not noninteractive)
-                       (not inhibit-startup-buffer-menu))
-              (list-buffers))
-            nil)
-        (run-hooks 'emacs-startup-hook 'term-setup-hook)
-        (when (and (display-multi-font-p)
-                   (not (eq face-font-rescale-alist old-face-font-rescale-alist))
-                   (assoc (font-xlfd-name (face-attribute 'default :font))
-                          face-font-rescale-alist #'string-match-p))
-          (set-face-attribute 'default nil :font (font-spec)))
-        (romacs-gui-loadup-notice-frame-settings)
-        (run-hooks 'window-setup-hook)
-        (setq inhibit-startup-hooks t)
-        (if (> displayable-buffers-len 0) 'concise 'full)))))
-
-(defun romacs-gui-loadup-notice-frame-settings ()
-  "`frame-notice-user-settings' for Romacs's one frame.
-On a window system GNU's `frame-initialize' (frame.el) makes the initial
-frame from `initial-frame-alist' and `default-frame-alist' before the
-init runs, and `frame-notice-user-settings' applies what the init
-changed.  The host made Romacs's frame with no `frame-initial-frame', so
-it first gets the alists as the init left them, the earlier alist
-winning, as `frame-notice-user-settings' gives a frame without a window
-system; then GNU's function runs."
-  (when (fboundp 'frame-notice-user-settings)
-    (when (and frame-notice-user-settings initial-window-system (null frame-initial-frame))
-      (modify-frame-parameters
-       nil (append initial-frame-alist
-                   (cdr (assq initial-window-system
-                              window-system-default-frame-alist))
-                   default-frame-alist nil)))
-    (frame-notice-user-settings)))
-
-(defun romacs-gui-loadup-startup-buffer (name)
-  "The startup screen, the buffer NAME, built if it is not live.
-As `fancy-startup-screen' sets up *GNU Emacs* (startup.el:2269), it
-starts in `command-line-default-directory' and takes GNU's
-`splash-screen-keymap': typing does nothing, SPC and DEL scroll, and q
-\(`exit-splash-screen') kills it.  It is the animated logo
-\(lisp/ui/romacs-landing.el), whose keys (SPC, Home) come first, and
-nothing else; without the logo, one title line."
-  (or (get-buffer name)
-      (with-current-buffer (get-buffer-create name)
-        (setq default-directory command-line-default-directory)
-        (use-local-map splash-screen-keymap)
-        (if (fboundp 'romacs-landing)
-            (progn (setq buffer-read-only t) (set-buffer-modified-p nil) (romacs-landing))
-          (insert "Romacs\n")
-          (setq buffer-read-only t)
-          (set-buffer-modified-p nil))
-        (goto-char (point-min))
-        (current-buffer))))
-
-(defun romacs-gui-loadup-startup-screen (buffer concise)
-  "Show BUFFER, the filled *Romacs* startup screen, as startup.el
-`fancy-startup-screen' shows *GNU Emacs* (startup.el:2269): if
-CONCISE, in another window, fitted when that window is a split; else
-in the selected one."
-  (if concise
-      (progn
-        (display-buffer buffer)
-        (let ((window (get-buffer-window buffer t)))
-          (or (null window)
-              (eq window (selected-window))
-              (eq window (next-window window))
-              (fit-window-to-buffer window))))
-    (switch-to-buffer buffer)))
-
-(defun romacs-gui-loadup-normal-top-level ()
-  "What `normal-top-level' does after `command-line' (startup.el:808-849):
-the startup hooks unless the startup screen ran them, the user's frame
-settings on a frame that already exists, and `window-setup-hook' unless
-an earlier hook inhibited it.  Romacs's one frame is the hosted window,
-which always exists, so the frame settings always apply, where GNU
-skips them when it failed to make a window-system initial frame."
-  (unless inhibit-startup-hooks
-    (run-hooks 'emacs-startup-hook 'term-setup-hook))
-  (when (and (display-multi-font-p)
-             (not (eq face-font-rescale-alist
-                      romacs-gui-loadup--old-face-font-rescale-alist))
-             (assoc (face-attribute 'default :font)
-                    face-font-rescale-alist
-                    #'startup--rescale-elt-match-p))
-    (set-face-attribute 'default nil :font (font-spec)))
-  (romacs-gui-loadup-notice-frame-settings)
-  (if (fboundp 'frame-set-background-mode)
-      (frame-set-background-mode (selected-frame)))
-  (if (fboundp 'font-menu-add-default)
-      (font-menu-add-default))
-  (unless inhibit-startup-hooks
-    (run-hooks 'window-setup-hook)))
+;; The command line's rest after the init (startup.el `command-line-1',
+;; `normal-top-level'), which the GUI calls.
+(require 'romacs-gui-command-line)
 
 (provide 'romacs-gui-loadup)
 ;;; romacs-gui-loadup.el ends here

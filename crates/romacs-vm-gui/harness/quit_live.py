@@ -28,18 +28,19 @@ import sys
 import time
 
 from parity_live import C, K, gnu_engine, lisp_string, plist, private_tree, romacs_engine, wait
+import live_oracle as live
 import parity_live
 
 INIT = ''';; -*- lexical-binding: t -*-
-(setq inhibit-startup-screen t initial-scratch-message nil)
+''' + live.WRITE_WHOLE + '''(setq inhibit-startup-screen t initial-scratch-message nil)
 (defvar quit-live-keyboard-quits 0)
 (add-hook 'pre-command-hook
           (lambda () (when (eq this-command 'keyboard-quit)
                        (setq quit-live-keyboard-quits (1+ quit-live-keyboard-quits)))))
 (defvar quit-live-forms 0)
 (defun quit-live-record (outcome)
-  (write-region (prin1-to-string (list outcome (float-time) quit-live-forms)) nil
-                (expand-file-name "end.eld" parity-probe-dir) nil 'silent))
+  (live-write-whole (prin1-to-string (list outcome (float-time) quit-live-forms))
+                    (expand-file-name "end.eld" parity-probe-dir)))
 (defun quit-live-spin ()
   (interactive)
   (let ((end (+ (float-time) 10)) (outcome 'quit))

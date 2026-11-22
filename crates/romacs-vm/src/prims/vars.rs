@@ -122,7 +122,7 @@ fn default_boundp(cx, symbol: Value) {
 // GNU data.c:2019: SYMBOL's default value, signalling void-variable if void.
 defsubr! { name = "default-value", gnu = "data.c:2019", effect = Global,
 fn default_value_subr(cx, symbol: Value) {
-    default_value(cx, symbol)?.ok_or(Fault::VoidVariable(symbol))
+    default_value(cx, symbol)?.ok_or_else(|| Fault::VoidVariable(symbol))
 }}
 
 // GNU eval.c:3087 over FUNCTIONP (eval.c:3103): a non-nil fbound symbol is
@@ -207,7 +207,7 @@ fn default_toplevel_value(cx, symbol: Value) {
     let symbol = self::symbol(cx, symbol)?;
     match cx.saved_default_cell(symbol)? {
         Some(value) => Ok(value),
-        None => default_value(cx, symbol)?.ok_or(Fault::VoidVariable(symbol)),
+        None => default_value(cx, symbol)?.ok_or_else(|| Fault::VoidVariable(symbol)),
     }
 }}
 

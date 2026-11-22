@@ -273,3 +273,27 @@ fn a_held_representation_keeps_no_copy_of_the_locals() {
     let after = vm.eval_source_raw("(list enable-multibyte-characters (local-variable-p 'hb-dropped) hb-kept)").unwrap();
     assert_eq!(vm.display(after).unwrap(), "(t nil kept)");
 }
+
+/// An executable-image string whose page fails its hash is still `stringp`,
+/// but no text reader accepts it: `is_readable_string` answers as
+/// `string_bytes` does, where `is_string` answers as `stringp`.
+#[test]
+fn an_unreadable_image_string_is_a_string_no_reader_accepts() {
+    use std::os::unix::fs::{FileExt, PermissionsExt};
+    let store = std::env::temp_dir().join(format!("vm2-unreadable-text-{}", std::process::id()));
+    let mut b = crate::image::ImageBuilder::default();
+    b.string_raw(&"x".repeat(4096 * 3));
+    let key = b.publish(&store, [0; 32]).unwrap();
+    let path = store.join(&key);
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    std::fs::OpenOptions::new().write(true).open(&path).unwrap().write_all_at(&[255], 4096 * 2).unwrap();
+    let image = crate::image::ImageRegion::open(&store, &key).unwrap();
+    let text = image.string_reference_raw(0).unwrap();
+    let mut vm = Vm::new();
+    vm.attach_image(image).unwrap();
+    let cx = Leaf::new(&mut vm);
+    assert!(cx.is_string(text));
+    assert!(cx.string_bytes(text).is_err());
+    assert!(!cx.is_readable_string(text));
+    std::fs::remove_dir_all(store).unwrap();
+}

@@ -201,4 +201,159 @@ attach."
         (mapc #'delete-process fixtures)))))
 
 (provide 'romacs-agent-reattach-tests)
+;; 2026-11-21: a restart's replays, hundreds of megabytes, were handled
+;; in one go each, inside whatever read their output: 81 s without a key.
+(ert-deftest romacs-agent-reattach-a-replay-is-handled-a-turn-at-a-time ()
+  ;; A supervisor's records are handled `romacs-agent--drain-turn' seconds
+  ;; at a time, the rest from a timer, in the order sent, chunks come in
+  ;; between after them, joined a line's chunks at a time; the
+  ;; attachment's end waits for them all.
+  (let* ((clock 0.0) (handled nil) (due nil)
+         (romacs-agent--sessions (make-hash-table :test #'equal))
+         (session (romacs-agent--make :id "bbbbbbbb-0000-4000-8000-000000000000" :harness 'claude
+                                      :state 'running :dir "/nonexistent/b" :host-socket "/nonexistent/b.sock"))
+         (process (make-pipe-process :name "romacs-drain-fixture" :noquery t))
+         (lines (lambda (from to) (mapconcat (lambda (seq) (format "{\"seq\":%d}\n" seq)) (number-sequence from to) ""))))
+    (process-put process 'romacs-agent session)
+    (setf (romacs-agent-connection session) process)
+    (unwind-protect
+        (cl-letf (((symbol-function 'float-time) (lambda (&optional _) clock))
+                  ((symbol-function 'run-at-time)
+                   (lambda (_time _repeat function &rest args) (setq due (append due (list (cons function args)))) 'timer))
+                  ((symbol-function 'romacs-agent--record)
+                   (lambda (_session record)
+                     ;; Each record costs a hundredth of a second.
+                     (setq clock (+ clock 0.01))
+                     (push (cons (gethash "seq" record) (romacs-agent-state session)) handled)))
+                  ((symbol-function 'romacs-agent--raise) #'ignore)
+                  ((symbol-function 'romacs-agent--drop-relays) #'ignore))
+          (romacs-agent--filter process (funcall lines 1 10))
+          (should (= (length handled) 3))
+          (should (= (length due) 1))
+          ;; Its turn's slice taken: what comes waits for the timer.
+          (romacs-agent--filter process (funcall lines 11 12))
+          (should (= (length handled) 3))
+          (should (= (length due) 1))
+          (delete-process process)
+          (romacs-agent--sentinel process "deleted\n")
+          (should (eq (romacs-agent-connection session) process))
+          (while due (let ((timer (pop due))) (apply (car timer) (cdr timer))))
+          (should (equal (mapcar #'car (reverse handled)) (number-sequence 1 12)))
+          (should-not (memq 'detached (mapcar #'cdr handled)))
+          (should-not (romacs-agent-connection session))
+          (should (eq (romacs-agent-state session) 'detached)))
+      (delete-process process))))
+
+;; 2026-11-21: a 16 MB record's line end was found in 57 ms, past the
+;; turn's 25 ms: each slice ended before its first line, and the drain set
+;; itself again, for ever.
+(ert-deftest romacs-agent-reattach-a-slice-handles-a-line-however-long-its-search ()
+  ;; Finding a line costs more than a turn's slice; the slice still handles
+  ;; one, so the replay goes on.
+  (let* ((clock 0.0) (handled nil) (due nil) (turns 0)
+         (romacs-agent--sessions (make-hash-table :test #'equal))
+         (session (romacs-agent--make :id "cccccccc-0000-4000-8000-000000000000" :harness 'claude
+                                      :state 'running :dir "/nonexistent/c" :host-socket "/nonexistent/c.sock"))
+         (process (make-pipe-process :name "romacs-drain-slow-search" :noquery t))
+         (search (lambda (found) (setq clock (+ clock (* 2 romacs-agent--drain-turn))) found)))
+    (process-put process 'romacs-agent session)
+    (process-put process 'romacs-agent-kept t)
+    (setf (romacs-agent-connection session) process)
+    (unwind-protect
+        (cl-letf (((symbol-function 'float-time) (lambda (&optional _) clock))
+                  ((symbol-function 'run-at-time)
+                   (lambda (_time _repeat function &rest args) (setq due (append due (list (cons function args)))) 'timer))
+                  ((symbol-function 'romacs-agent--record)
+                   (lambda (_session record) (push (gethash "seq" record) handled)))
+                  ((symbol-function 'romacs-agent--raise) #'ignore))
+          (advice-add 'romacs-agent--line-waits-p :filter-return search)
+          (romacs-agent--filter process "{\"seq\":1}\n{\"seq\":2}\n")
+          (while (and due (< (cl-incf turns) 10))
+            (let ((timer (pop due))) (apply (car timer) (cdr timer))))
+          (should (equal (reverse handled) '(1 2))))
+      (advice-remove 'romacs-agent--line-waits-p search)
+      (delete-process process))))
+
+;; A line in many chunks is joined once its end has come, each byte copied
+;; once: joining it a megabyte at a time copied the line so far again each
+;; time, quadratic in a long record.
+(ert-deftest romacs-agent-reattach-a-long-line-is-joined-once ()
+  (let* ((handled nil) (joins 0) (drains 0)
+         (romacs-agent--sessions (make-hash-table :test #'equal))
+         (session (romacs-agent--make :id "eeeeeeee-0000-4000-8000-000000000000" :harness 'claude
+                                      :state 'running :dir "/nonexistent/e" :host-socket "/nonexistent/e.sock"))
+         (process (make-pipe-process :name "romacs-drain-long-line" :noquery t))
+         (line (concat "{\"seq\":1,\"text\":\"" (make-string (* 3 1048576) ?x) "\"}\n"))
+         (count (lambda (&rest _) (cl-incf joins)))
+         (drain (lambda (&rest _) (cl-incf drains))))
+    (process-put process 'romacs-agent session)
+    (process-put process 'romacs-agent-kept t)
+    (setf (romacs-agent-connection session) process)
+    (unwind-protect
+        (cl-letf (((symbol-function 'float-time) (lambda (&optional _) 0.0))
+                  ((symbol-function 'run-at-time) (lambda (&rest _) 'timer))
+                  ((symbol-function 'romacs-agent--record)
+                   (lambda (_session record) (push (gethash "seq" record) handled)))
+                  ((symbol-function 'romacs-agent--raise) #'ignore))
+          (advice-add 'romacs-agent--join :before count)
+          (advice-add 'romacs-agent--drain :before drain)
+          (let ((start 0))
+            (while (< start (length line))
+              (romacs-agent--filter process (substring line start (min (length line) (+ start 65536))))
+              (setq start (+ start 65536))))
+          (should (equal handled '(1)))
+          (should (= joins 1))
+          ;; Chunks with no line's end start no drain.
+          (should (= drains 1)))
+      (advice-remove 'romacs-agent--join count)
+      (advice-remove 'romacs-agent--drain drain)
+      (delete-process process))))
+
+(ert-deftest romacs-agent-reattach-chunks-from-before-the-count-are-counted ()
+  ;; An attachment whose chunks came under code from before the count
+  ;; (loaded into a running editor) has its waiting line ends counted once.
+  (let* ((handled nil)
+         (romacs-agent--sessions (make-hash-table :test #'equal))
+         (session (romacs-agent--make :id "ffffffff-0000-4000-8000-000000000000" :harness 'claude
+                                      :state 'running :dir "/nonexistent/f" :host-socket "/nonexistent/f.sock"))
+         (process (make-pipe-process :name "romacs-drain-legacy" :noquery t)))
+    (process-put process 'romacs-agent session)
+    (process-put process 'romacs-agent-kept t)
+    (setf (romacs-agent-connection session) process)
+    (process-put process 'pending (list "{\"seq\":2}\n" "{\"seq\":1}\n"))
+    (process-put process 'ready t)
+    (unwind-protect
+        (cl-letf (((symbol-function 'float-time) (lambda (&optional _) 0.0))
+                  ((symbol-function 'run-at-time) (lambda (&rest _) 'timer))
+                  ((symbol-function 'romacs-agent--record)
+                   (lambda (_session record) (push (gethash "seq" record) handled)))
+                  ((symbol-function 'romacs-agent--raise) #'ignore))
+          (romacs-agent--drain process)
+          (should (equal (reverse handled) '(1 2))))
+      (delete-process process))))
+
+(ert-deftest romacs-agent-reattach-a-quit-in-a-record-leaves-the-rest-going ()
+  ;; A handler that exits nonlocally (a quit) ends its slice: the records
+  ;; after it go on from the timer, in order.
+  (let* ((handled nil) (due nil) (quit t)
+         (romacs-agent--sessions (make-hash-table :test #'equal))
+         (session (romacs-agent--make :id "cccccccc-0000-4000-8000-000000000000" :harness 'claude
+                                      :state 'running :dir "/nonexistent/c" :host-socket "/nonexistent/c.sock"))
+         (process (make-pipe-process :name "romacs-drain-quit" :noquery t)))
+    (process-put process 'romacs-agent session)
+    (setf (romacs-agent-connection session) process)
+    (unwind-protect
+        (cl-letf (((symbol-function 'run-at-time)
+                   (lambda (_time _repeat function &rest args) (setq due (append due (list (cons function args)))) 'timer))
+                  ((symbol-function 'romacs-agent--record)
+                   (lambda (_session record)
+                     (push (gethash "seq" record) handled)
+                     (when (and quit (= (gethash "seq" record) 2)) (setq quit nil) (throw 'quit nil)))))
+          (catch 'quit (romacs-agent--filter process "{\"seq\":1}\n{\"seq\":2}\n{\"seq\":3}\n"))
+          (should (equal handled '(2 1)))
+          (should (= (length due) 1))
+          (while due (let ((timer (pop due))) (apply (car timer) (cdr timer))))
+          (should (equal (reverse handled) '(1 2 3))))
+      (delete-process process))))
+
 ;;; romacs-agent-reattach-tests.el ends here

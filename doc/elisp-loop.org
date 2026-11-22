@@ -1,0 +1,146 @@
+#+title: The Elisp loop: edit, load live, test, submit
+
+Lisp is the fast way to add a feature to Romacs and try it. A change to a
+library reaches the running session in seconds, keeps the session's
+buffers, windows and agents, and is tested and landed without a rebuild.
+This file is that loop, step by step, and what each step does underneath.
+
+* The loop
+
+1. Edit the Lisp in a worktree of your branch (=lisp/=, and its suites
+   under =test/romacs/lisp/=).
+2. =M-x romacs-live-update=, naming the worktree (or a branch, =beta=, or
+   a file). The session loads what the worktree has that it lacks.
+3. Use the feature. Edit again and update again as often as you like.
+4. =M-x romacs-live-test= runs the suites of the libraries you loaded,
+   from the worktree, as the merge queue runs them.
+5. Commit, then =forge submit= the branch. A change of runtime Lisp,
+   its suites and documents only lands on the light track, in minutes.
+6. =M-x romacs-session-reset= when you want the installed build back with
+   none of it.
+
+Agents run the same loop with the MCP tools =romacs_live_update= and
+=romacs_live_test=, and a reset with =romacs_restart_request= and =fresh=.
+
+* What a live update loads
+
+The session is its build plus the live files of its ledger,
+=romacs-live-ledger=: each file at a git blob, with the source it came
+from. What the session loaded of a file is the ledger's blob, else its
+build's own copy (the runtime root's =build.json= names the commit an
+install was made from, and an install never changes). So an update loads
+exactly the files whose content differs from what the session has, all of
+them, in the order their =require= forms give:
+
+- a file the session has loaded loads again, its definitions replaced;
+- a file it never loaded is staged: its copy goes first on =load-path=, so
+  the next =require= of it gets the new one;
+- a file the source has back as the build had it goes back to the
+  build's copy;
+- the files that use a changed macro load again after it.
+
+Each file loads by its library name from a content store under
+=$XDG_STATE_HOME/romacs/live-lisp/=, one directory a blob, so the
+compiled-Lisp store compiles it once, off the main VM, and every later
+process reuses it. A session without =build.json= (one running a
+worktree's own tree) cannot tell what it loaded from its files: it takes
+named files only.
+
+The survey of the source (git, both versions of each file) runs in a
+worker VM; the main VM only loads, and the report says how long each file
+took.
+
+What the copies cost:
+
+- Their compiled artifacts go into the install's compiled-Lisp store
+  beside its own, one each, and leave its compile world alone: a live
+  update keeps the store's compile identity, and later sessions on the
+  install take its artifacts as before. The store keeps itself within its
+  budget (256 MiB), dropping the least recently used artifacts after a
+  compile publishes, so a live copy's artifact goes once nothing loads it.
+- The content store keeps the source copies, one directory a blob,
+  source-sized (a file's own bytes). Sessions share it, and a restart's
+  image names its copies. =romacs-session-reset= prunes it: a directory
+  goes when no session image on disk names it, the resetting session's
+  ledger does not, and nobody used it for =romacs-live-store-keep-days=
+  (7). A session with live files marks its own directories used when it
+  updates and every hour, so a reset of another session keeps them; when
+  an image cannot be read, nothing goes.
+
+* What it does that =load= does not
+
+Reloading a file by hand leaves some definitions wrong. The update reads
+the old and new texts definition by definition and handles them:
+
+- A keymap the file defines keeps its object, and that object takes the
+  new map's contents. Every buffer using the map, every map deriving from
+  it and every text with it as a =keymap= property sees the new keys at
+  once. Keys the user bound in the map stay, found by comparing the map
+  with the one the library alone makes (computed in a worker VM). A map
+  whose parent its mode set when it first ran keeps that parent.
+- An option the user never set takes its new default; one the user set
+  keeps its value.
+- A =defvar= keeps its value, as =load= keeps it, but a literal default
+  nobody changed takes the new literal.
+- A face nobody customized takes its new spec.
+- Advice and the user's hook functions stay.
+- Functions the files no longer define are listed as gone; with a prefix
+  argument the update offers to unbind them.
+
+Some changes cannot be made to a running session, and the whole update
+refuses them before it loads anything, saying why:
+
+- a struct or class whose layout changes (its records alive in the
+  session would break);
+- a different runtime epoch, or a change to =lisp/vm/=: the VM itself
+  reads those, and they need an install;
+- a file that finds files beside itself in the installation through
+  =load-file-name=: its copy runs from the content store.
+
+A file that signals as it loads stops the update there, its ledger entry
+marked partial; the next update loads it again.
+
+* The ledger, the mode line, the report
+
+=M-x romacs-live-ledger= shows the session's build, each live file (its
+state, blobs, source and time) and the last update's report: what each
+file loaded, the definitions added, changed and removed, the keymaps
+replaced, the options given new defaults and what was kept. While the
+session runs live files the mode line shows =Δ= and their count, and
+=Δn!= when one is partial.
+
+* Across a restart, and back to the build
+
+=romacs-restart= carries the ledger: the new process puts the live files
+back from the content store before it restores any buffer, so restored
+buffers come up with the patched modes. A file the new build already has
+is dropped as landed, and one whose base the new build changed is dropped
+as superseded; the report says which.
+
+=romacs-session-reset= restarts onto the installed build with a fresh
+session: no live files, kill ring, registers, histories or kept globals.
+Unsaved text is carried, as every restart carries it, and so are agent
+sessions and the keeper's terminals, which are your work outside the
+session. With a prefix argument the file buffers and their windows are
+carried too.
+
+* Tests, in seconds
+
+=romacs-live-test= runs the ERT suites of the libraries the ledger holds,
+from the tree the last update came from, with that tree's own runner,
+=tools/test-ert --module=: a library's =NAME-tests.el= and
+=NAME-*-tests.el=, or its package's suites. Each suite file runs in a
+process of its own with a private HOME, in parallel, from a batch world
+the runner prepares once and keeps. The runner's lines fill
+=*romacs-live-tests*= as they come. Nothing runs in the session, and a
+pass here is a pass of the merge queue's Lisp check, which runs the same
+runner on the same suites.
+
+* Landing
+
+A branch whose every change is runtime Lisp, Lisp suites or documents
+lands on forge's light track: lint, the suites the change reaches and the
+live harnesses, with no Rust build, in minutes. Keep a Lisp change in a
+branch of its own to keep it there. A change that also adds an MCP tool
+goes with its entry in the agent harness's tool tour, in one request on
+the full track: a tool the tour does not call fails the harness.

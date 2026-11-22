@@ -111,7 +111,7 @@ rows says how it goes back."
                  (held (eq item editing))
                  ;; Its place, two columns, a held one's marked: glyphs
                  ;; of the text's own font, every row one height.
-                 (mark (format "%s%-2d" (cond (held "»") (own " ") (t "<")) (setq place (1+ place))))
+                 (mark (format "%s%-2d" (cond (held (romacs-agent-glyph 'queue-held)) (own " ") (t (romacs-agent-glyph 'queue-other))) (setq place (1+ place))))
                  (line (car (split-string (string-trim (or (romacs-agent-item-text item) "")) "\n")))
                  (room (max 8 (- width 3 (string-width mark)))))
             (propertize (concat "  " (propertize mark 'face (if held '(romacs-agent-log-queued-held bold) 'romacs-agent-log-queued-mark))
@@ -121,7 +121,7 @@ rows says how it goes back."
                         'romacs-agent-log-queued item 'keymap romacs-agent-log-queue-map)))
         items ""))
      (if editing
-         (propertize (concat "  " (propertize (format "» editing %d" (1+ (or (cl-position editing items) 0)))
+         (propertize (concat "  " (propertize (format "%s editing %d" (romacs-agent-glyph 'queue-held) (1+ (or (cl-position editing items) 0)))
                                               'face 'romacs-agent-log-queued-held)
                              (propertize (let ((key (romacs-agent-log-queue--send-key)))
                                            (format " · %s saves it in its place · an empty %s keeps it as it was" key key))

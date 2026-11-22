@@ -399,6 +399,10 @@ fn a_style_reaches_the_snapshot() {
     let mut vm = themed_session();
     let style = |vm: &mut Vm| vm.frame_snapshot(1216, 876).unwrap().chrome.style;
     let flat = romacs_layout_input::Style::default();
+    // The theme's lighting, as Lisp published it (`romacs-style-lighting').
+    let glow = style(&mut vm).glow;
+    assert_eq!(format!("({} {})", glow[0], glow[1]), eval(&mut vm, "(plist-get romacs-style--resolved :glow-layer)"));
+    eval(&mut vm, "(set-frame-parameter nil 'romacs-style nil)");
     assert_eq!(style(&mut vm), flat);
     eval(&mut vm, "(set-frame-parameter nil 'romacs-style [12 6 24 10 0.45 16 0.25])");
     assert_eq!(style(&mut vm), romacs_layout_input::Style { layer_radius: 12.0, band_radius: 6.0, shadow: [24.0, 10.0, 0.45], glow: [16.0, 0.25] });

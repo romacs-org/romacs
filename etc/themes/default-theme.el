@@ -48,7 +48,7 @@
     (mode-line-active :overline "#2e2922")
     ;; A pair: under another theme's bar, the pill still reads.
     (romacs-mode-line-pill :background "#50269a" :foreground "#d4c5a0")
-    (org-document-title :height 1.4 :weight bold)
+    (org-document-title :weight bold)
     (org-table-header :weight bold)
     (dired-header :weight bold)
     (notmuch-search-date :foreground fg-dim)

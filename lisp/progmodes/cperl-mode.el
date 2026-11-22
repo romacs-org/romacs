@@ -1003,12 +1003,12 @@ Unless KEEP, removes the old indentation."
     (define-key map "\C-c\C-ha" 'cperl-toggle-autohelp)
     (define-key map "\C-c\C-hp" 'cperl-perldoc)
     (define-key map "\C-c\C-hP" 'cperl-perldoc-at-point)
-    (define-key map "\e\C-q" 'cperl-indent-exp) ; Usually not bound
+    (define-key map (kbd "ESC C-q") 'cperl-indent-exp) ; Usually not bound
     (define-key map [(control meta ?|)] 'cperl-lineup)
     ;;(define-key map "\M-q" 'cperl-fill-paragraph)
     ;;(define-key map "\e;" 'cperl-indent-for-comment)
     (define-key map "\177" 'cperl-electric-backspace)
-    (define-key map "\t" 'cperl-indent-command)
+    (define-key map (kbd "TAB") 'cperl-indent-command)
     ;; don't clobber the backspace binding:
     (define-key map [(control ?c) (control ?h) ?F] 'cperl-perldoc)
     (if (cperl-val 'cperl-clobber-lisp-bindings)

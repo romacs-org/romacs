@@ -1483,3 +1483,118 @@ and wait for it to end."
           (should-not (warm-restart-tests--image-holds image "hunter20")))
       (when (get-buffer "wr-s-long") (with-current-buffer "wr-s-long" (set-buffer-modified-p nil)) (kill-buffer "wr-s-long"))
       (delete-directory warm-restart-directory t))))
+
+;;;; Image parts and fresh images
+
+(defvar warm-restart-tests--part nil "What the test part's reader was handed, and when.")
+
+(defun warm-restart-tests--part-reader (data done)
+  ;; Through only later, from a timer: no buffer may come back before.
+  (run-at-time 0.2 nil (lambda ()
+                         (setq warm-restart-tests--part (list data (and (get-buffer "part-ordered.txt") t)))
+                         (funcall done))))
+
+(ert-deftest warm-restart-a-part-comes-back-before-the-buffers ()
+  ;; A package's part (romacs-live's ledger) is handed to its reader as the
+  ;; image is read, before any buffer comes back: a reader that changes a
+  ;; mode's code does so before a restored buffer takes the mode.
+  (let* ((warm-restart-directory (make-temp-file "romacs-wr-" t))
+         (file (expand-file-name "part-ordered.txt" warm-restart-directory))
+         (warm-restart-image-part-functions
+          (list (lambda () (cons 'warm-restart-tests--part-reader '(:ledger 1)))
+                (lambda () nil)
+                (lambda () (cons 'warm-restart-tests--undefined-reader 2))))
+         (warm-restart-tests--part nil)
+         image)
+    (unwind-protect
+        (progn
+          (with-temp-file file (insert "text\n"))
+          (with-current-buffer (find-file-noselect file)
+            (setq image (warm-restart-write))
+            (should (equal (plist-get (car (warm-restart--read image)) :parts)
+                           '((warm-restart-tests--part-reader :ledger 1) (warm-restart-tests--undefined-reader . 2))))
+            (kill-buffer))
+          (let ((report (warm-restart-restore-image image)))
+            (should (equal warm-restart-tests--part '((:ledger 1) nil)))
+            (should (cl-some (lambda (p) (eq (plist-get p :part) 'warm-restart-tests--undefined-reader))
+                             (plist-get report :problems)))))
+      (when-let* ((b (get-file-buffer file))) (kill-buffer b))
+      (delete-directory warm-restart-directory t))))
+
+(ert-deftest warm-restart-a-fresh-image-carries-unsaved-text-only ()
+  ;; A reset's image: no part, kill ring, history or window; the unsaved
+  ;; buffer always, the saved file buffer only when buffers are kept.
+  (let* ((warm-restart-directory (make-temp-file "romacs-wr-" t))
+         (saved (expand-file-name "fresh-saved.txt" warm-restart-directory))
+         (edited (expand-file-name "fresh-edited.txt" warm-restart-directory))
+         (warm-restart-image-part-functions (list (lambda () (cons 'ignore 1))))
+         (kill-ring (list "a kill")) (kill-ring-yank-pointer nil)
+         buffers)
+    (unwind-protect
+        (progn
+          (with-temp-file saved (insert "saved\n"))
+          (with-temp-file edited (insert "edited\n"))
+          (push (find-file-noselect saved) buffers)
+          (push (find-file-noselect edited) buffers)
+          (with-current-buffer (car buffers) (goto-char (point-max)) (insert "more\n"))
+          (let* ((names (lambda (form) (mapcar (lambda (r) (plist-get r :name)) (plist-get form :buffers))))
+                 (unsaved (car (warm-restart--read (let ((warm-restart-fresh 'unsaved)) (warm-restart-write)))))
+                 (kept (car (warm-restart--read (let ((warm-restart-fresh 'buffers)) (warm-restart-write)))))
+                 (whole (car (warm-restart--read (warm-restart-write)))))
+            (should (member "fresh-edited.txt" (funcall names unsaved)))
+            (should-not (member "fresh-saved.txt" (funcall names unsaved)))
+            (should (member "fresh-saved.txt" (funcall names kept)))
+            ;; A file gone from the disk: its buffer is the only copy.
+            (delete-file saved)
+            (should (member "fresh-saved.txt"
+                            (funcall names (car (warm-restart--read (let ((warm-restart-fresh 'unsaved))
+                                                                     (warm-restart-write)))))))
+            (dolist (form (list unsaved kept))
+              (should-not (plist-get form :parts))
+              (should-not (plist-get form :kill-ring)))
+            (should-not (plist-get unsaved :frames))
+            (should (plist-get kept :frames))
+            (should (plist-get whole :parts))
+            (should (equal (plist-get whole :kill-ring) '("a kill")))))
+      (dolist (b buffers) (with-current-buffer b (set-buffer-modified-p nil)) (kill-buffer b))
+      (delete-directory warm-restart-directory t))))
+
+(ert-deftest warm-restart-a-part-that-never-finishes-restores-no-buffer ()
+  ;; Past `warm-restart-part-wait' the restore stops before any buffer:
+  ;; none comes back under code its part did not finish changing.
+  (let* ((warm-restart-directory (make-temp-file "romacs-wr-" t))
+         (file (expand-file-name "part-stuck.txt" warm-restart-directory))
+         (warm-restart-image-part-functions (list (lambda () (cons 'ignore 1))))
+         (warm-restart-part-wait 0.3)
+         image)
+    (unwind-protect
+        (progn
+          (with-temp-file file (insert "text\n"))
+          (with-current-buffer (find-file-noselect file)
+            (setq image (warm-restart-write))
+            (kill-buffer))
+          (let ((report (warm-restart-restore-image image)))
+            (should (string-match-p "not through" (or (plist-get report :error) "")))
+            (should-not (get-file-buffer file))))
+      (when-let* ((b (get-file-buffer file))) (kill-buffer b))
+      (delete-directory warm-restart-directory t))))
+
+(ert-deftest warm-restart-this-executable-keeps-this-runtime ()
+  ;; A restart onto this session's own executable (a reset's fallback)
+  ;; keeps its runtime, though the plan removes the variables a restart
+  ;; command's own build would choose.
+  (let ((process-environment (append '("ROMACS_RUNTIME_ROOT=/tmp/romacs-runtime-here" "ROMACS_LISP_DIR=/tmp/romacs-lisp-here")
+                                     process-environment)))
+    (let ((environment (cdr (warm-restart--target (expand-file-name invocation-name invocation-directory)))))
+      (should (member "ROMACS_RUNTIME_ROOT=/tmp/romacs-runtime-here" environment))
+      (should (member "ROMACS_LISP_DIR=/tmp/romacs-lisp-here" environment)))))
+
+(ert-deftest warm-restart-a-part-may-finish-from-a-process ()
+  ;; A reader told it is through by a subprocess's sentinel.
+  (let* ((warm-restart-part-wait 10) (problems :none)
+         (form (list :parts (list (cons (lambda (_ done)
+                                          (make-process :name "wr-part" :command '("true") :noquery t
+                                                        :sentinel (lambda (_p _e) (funcall done))))
+                                        nil)))))
+    (setq problems (warm-restart--restore-parts-now form))
+    (should (null problems))))

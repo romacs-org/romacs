@@ -99,14 +99,14 @@ If nil, TAB always indents current line."
     (define-key map "\M-\C-e"  'vera-forward-same-indent)
     (define-key map "\M-\C-a"  'vera-backward-same-indent)
     ;; Mode specific key bindings.
-    (define-key map "\C-c\t"   'indent-according-to-mode)
+    (define-key map (kbd "C-c TAB")   'indent-according-to-mode)
     (define-key map "\M-\C-\\" 'vera-indent-region)
     (define-key map "\C-c\C-c" 'vera-comment-uncomment-region)
     (define-key map "\C-c\C-v" 'vera-version)
     (define-key map "\M-\t"    'tab-to-tab-stop)
     ;; Electric key bindings.
-    (define-key map "\t"       'vera-electric-tab)
-    (define-key map "\r"       'vera-electric-return)
+    (define-key map (kbd "TAB")       'vera-electric-tab)
+    (define-key map (kbd "RET")       'vera-electric-return)
     (define-key map " "        'vera-electric-space)
     (define-key map "{"        'vera-electric-opening-brace)
     (define-key map "}"        'vera-electric-closing-brace)

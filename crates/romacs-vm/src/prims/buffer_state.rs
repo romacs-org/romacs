@@ -51,7 +51,7 @@ pub(crate) fn barf_if_read_only(cx: &mut crate::prim::leaf::Leaf<'_>, position: 
     let position = if position == Value::NIL {
         cx.point()?
     } else {
-        position.integer_value().ok_or(Fault::Wrong("fixnump", position))?
+        position.integer_value().ok_or_else(|| Fault::Wrong("fixnump", position))?
     };
     let read_only = super::fileio::var(cx, "buffer-read-only")?;
     if read_only != Value::NIL

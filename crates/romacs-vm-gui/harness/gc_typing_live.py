@@ -65,8 +65,10 @@ STREAM = ('(progn (defvar gc-typing--n 0)'
           ' (insert s) (list :type (quote delta) :text s :n (vector gc-typing--n))))'
           ' (when (> (buffer-size) 200000) (erase-buffer))))'
           ' (setq gc-typing--timer (run-with-timer {tick} {tick} (function gc-typing--stream))))')
-DUMP = ('(progn (cancel-timer gc-typing--timer) (with-temp-file "{path}"'
-        ' (dolist (r (reverse gc-typing--records)) (prin1 r (current-buffer)) (terpri (current-buffer)))))')
+# Written beside it, then renamed: never read part-written.
+DUMP = ('(progn (cancel-timer gc-typing--timer) (with-temp-file "{path}.part"'
+        ' (dolist (r (reverse gc-typing--records)) (prin1 r (current-buffer)) (terpri (current-buffer))))'
+        ' (rename-file "{path}.part" "{path}" t))')
 
 
 def schedule(keys, seed):

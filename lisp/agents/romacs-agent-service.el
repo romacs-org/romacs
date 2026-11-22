@@ -1113,7 +1113,8 @@ time one did, the newest first."
 
 (defun romacs-agent-service--providers-list (_rpc _params)
   "`agents/providers.list': the instances sessions start under, enabled,
-each with its harness and the models it offers."
+each with its harness and the models it offers (`romacs-agent--want-models')."
+  (romacs-agent--want-models)
   (romacs-agent-rpc-object
    "providers"
    (vconcat (cl-loop for instance in (romacs-agent-instances)

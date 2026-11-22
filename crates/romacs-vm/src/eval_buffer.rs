@@ -24,13 +24,6 @@ fn line_motion(text: &(impl Newlines + ?Sized), r: std::ops::Range<usize>, point
 }
 
 impl Vm {
-    pub(super) fn eval_buffer_name(&self, value: Value) -> Result<Option<String>> {
-        match self.str_view(value) {
-            Some(view) => view.as_str().map(|s| Some(s.to_owned()))
-                .ok_or_else(|| "not-unicode-string".into()),
-            None => Ok(None),
-        }
-    }
     pub(super) fn eval_buffer_primitive(
         &mut self,
         p: Primitive,

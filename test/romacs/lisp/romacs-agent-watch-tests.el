@@ -69,6 +69,14 @@ private directory `root'.  `told' collects (TASK . TEXT) a task is told,
 (defun romacs-agent-watch-tests--watch (&rest pairs)
   (romacs-agent-watch--watch (apply #'romacs-mcp--object pairs)))
 
+(ert-deftest romacs-agent-watch-answers-no-result ()
+  ;; What it watches, never the task's last result.
+  (romacs-agent-watch-tests--with
+    (setf (romacs-agent-reply child) (make-string 50000 ?r))
+    (let ((answer (romacs-agent-watch-tests--watch "taskId" "child" "unit" "check")))
+      (should-not (gethash "result" answer))
+      (should (< (length (json-serialize answer)) 2000)))))
+
 (ert-deftest romacs-agent-watch-tells-the-task-not-the-lead ()
   (romacs-agent-watch-tests--with
     (with-temp-file (expand-file-name "check.log" root)

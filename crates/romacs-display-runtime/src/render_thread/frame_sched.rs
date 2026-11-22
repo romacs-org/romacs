@@ -126,7 +126,6 @@ pub(crate) enum Cadence {
 /// most one scheduled deadline per window.
 // Interface variants/fields defined by the scheduling plan; consumed as
 // later stages migrate effects onto the coordinator.
-#[allow(dead_code)]
 #[derive(
     Debug,
     Clone,
@@ -262,7 +261,6 @@ pub(crate) struct FrameTick {
 
 // Interface defined by the temporal-presentation plan; consumed when the
 // renderer boundary is widened from a bare Instant to a FrameSample.
-#[allow(dead_code)]
 impl FrameTick {
     /// The portable view of this tick, for code outside the scheduler.
     ///
@@ -320,7 +318,6 @@ impl RenderWork {
 /// Pure decision for one tick of one window.
 // Interface variants/fields defined by the scheduling plan; consumed as
 // later stages migrate effects onto the coordinator.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct FramePlan {
     pub tick: FrameTick,
@@ -359,7 +356,7 @@ impl FutureDeadline {
     /// The deadline as an [`EventTime`].
     // Used by scheduler tests today; production callers move off the raw
     // `instant()` accessor as the loop's wait path is converted.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn event_time(self) -> EventTime {
         self.0
     }
@@ -916,7 +913,7 @@ impl FrameCoordinator {
     /// retained demand issues exactly one recovery request.
     // Full-replace form kept for initialization/tests; the runtime drives
     // per-field transitions through set_occluded/set_focused/set_visible.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn update_window_state(
         &mut self,
         id: NativeWindowId,
@@ -936,7 +933,7 @@ impl FrameCoordinator {
     // Wired when a minimize/hide event source lands (plan Stage 7 policy);
     // Occluded already covers the Wayland/macOS not-showing case. Covered by
     // the scheduler tests.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn set_visible(&mut self, id: NativeWindowId, visible: bool) -> PacingAction {
         self.mutate_presentation(id, |p| p.visible = visible)
     }

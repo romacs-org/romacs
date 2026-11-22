@@ -140,19 +140,25 @@ fn the_project_commands_give_the_synchronous_results() {
              (preparing (romacs-project--worker pr))
              (sync-files (funcall (eval romacs-project--files-job t) pr (list (project-root pr))))
              (iso-files (thaw (isolate-await (romacs-project--spawn pr worker romacs-project--files-job pr (list (project-root pr))))))
-             (ready (eq (romacs-project--worker pr) worker))
+             ;; The job spent its worker (one job each), and its end warmed
+             ;; another, which the search waits for.
+             (spent (eq (romacs-project--worker pr) worker))
+             (next (let ((end (+ (float-time) 120)))
+                     (while (and (not (romacs-project--worker pr)) (< (float-time) end))
+                       (accept-process-output nil 0.1) (romacs--isolate-pump 0))
+                     (romacs-project--worker pr)))
              (sync-matches (funcall (eval romacs-project--matches-job t) \"defcustom project-\" pr))
-             (iso-matches (thaw (isolate-await (romacs-project--spawn pr worker romacs-project--matches-job \"defcustom project-\" pr))))
+             (iso-matches (thaw (isolate-await (romacs-project--spawn pr next romacs-project--matches-job \"defcustom project-\" pr))))
              (summary (lambda (m) (list (xref-location-group (xref-item-location m)) (xref-location-line (xref-item-location m)) (substring-no-properties (xref-item-summary m))))))
         (prin1 (list 'files (length sync-files) (equal sync-files iso-files)
                      'matches (length sync-matches) (equal (mapcar summary sync-matches) (mapcar summary iso-matches))
-                     'ready (list before preparing ready (romacs-project--warm pr))
+                     'ready (list before preparing spent (and next (not (eq next worker))))
                      'boot (isolate-await (isolate-spawn '(lambda () isolate-boot)))))
         (isolate-kill-all)))", dir = project.display().to_string() + "/", module = root.join("lisp/progmodes/romacs-project.el").display().to_string());
     let (ok, out, err) = batch(&script, &project);
     assert!(ok, "batch failed: {err}");
     let out = out.trim();
-    assert!(out.starts_with("(files ") && out.contains(" t matches ") && out.ends_with(" t ready (nil nil t nil) boot source)"), "{out}\n{err}");
+    assert!(out.starts_with("(files ") && out.contains(" t matches ") && out.ends_with(" t ready (nil nil nil t) boot source)"), "{out}\n{err}");
     let files: usize = out.split_whitespace().nth(1).unwrap().parse().unwrap();
     assert!(files > 1000, "{out}");
     let _ = std::fs::remove_dir_all(&scratch);
@@ -174,7 +180,8 @@ fn a_ready_worker_that_will_not_take_the_job_gives_way_to_the_original() {
              (id (romacs--isolate-id worker))
              (original-file (lambda (&optional all) (list 'original-file all)))
              (original-regexp (lambda (regexp) (list 'original-regexp regexp))))
-        (isolate-await (isolate-spawn '(lambda () t) :isolate worker))
+        ;; Ready, without a job: a job would spend the worker (one job each).
+        (let ((end (+ (float-time) 120))) (while (and (not (romacs-project--worker pr)) (< (float-time) end)) (romacs--isolate-pump 0.1)))
         (prin1 (list 'ready (eq (romacs-project--worker pr) worker)
                      'full (let ((isolate-queue-limit 0))
                              (list (romacs-project-find-file original-file) (romacs-project-find-regexp original-regexp \"x\")))
@@ -235,7 +242,8 @@ fn a_worker_search_leaves_its_xref_window_selected_as_gnus_does() {
              (worker (romacs-project--warm pr))
              (origin (find-file-noselect (expand-file-name \"subr.el\" {dir:?})))
              (tries 600))
-        (isolate-await (isolate-spawn '(lambda () t) :isolate worker))
+        ;; Ready, without a job: a job would spend the worker (one job each).
+        (let ((end (+ (float-time) 120))) (while (and (not (romacs-project--worker pr)) (< (float-time) end)) (romacs--isolate-pump 0.1)))
         (switch-to-buffer origin)
         (let ((window (selected-window)))
           (prin1 (list 'returned (romacs-project-find-regexp (lambda (_) 'original) \"defcustom project-\")))
@@ -373,6 +381,19 @@ fn a_workers_fontification_is_the_sessions() {
 }
 
 #[test]
+fn a_pooled_job_sees_no_advice_an_earlier_one_added() {
+    // romacs#396: a worker the pool made runs one job, so advice one job
+    // puts on a function is gone for the next of the same feature set.
+    let script = format!("(progn {PREAMBLE}
+      (prin1 (list (isolate-await (isolate-spawn '(lambda () (advice-add 'buffer-name :override (lambda (&rest _) \"advised\")) t)) 300)
+                   (isolate-await (isolate-spawn '(lambda () (equal (buffer-name (current-buffer)) \"advised\"))) 300)))
+      (isolate-kill-all))");
+    let (ok, out, err) = batch(&script, Path::new("/"));
+    assert!(ok, "batch failed: {err}");
+    assert_eq!(out.trim(), "(t nil)", "{err}");
+}
+
+#[test]
 fn an_idle_worker_ends_on_sigterm_without_waiting_for_sigkill() {
     // The GUI's worker waits on its evaluator thread while the main thread
     // joins it; SIGTERM may land on either, so the handler wakes the wait.
@@ -393,9 +414,10 @@ fn an_idle_worker_ends_on_sigterm_without_waiting_for_sigkill() {
 /// Its job settles with `isolate-world-unavailable` naming both carries and
 /// the world, `isolate-error-functions` hears the same, the world is
 /// forgotten, and the job's retry and the next worker boot from source and
-/// answer; with zygotes, the zygote refuses and its waiting job runs from
-/// source. The store is a linked copy of the installation's, so the worker
-/// takes the path of any store (`world::adopt`), not the installation's.
+/// answer, their futures saying they run without it; with zygotes, the
+/// zygote refuses and its waiting job runs from source. The store is a
+/// linked copy of the installation's, so the worker takes the path of any
+/// store (`world::adopt`), not the installation's.
 #[test]
 fn a_worker_handed_the_batch_world_refuses_it_and_the_next_boots_from_source() {
     let exe = Path::new(installed::romacs());
@@ -429,14 +451,18 @@ fn a_worker_handed_the_batch_world_refuses_it_and_the_next_boots_from_source() {
                            (isolate-error (list (car e) (equal (nth 2 e) (list {want:?} world)))))
                          isolate-world
                          (progn (romacs--isolate-pump 0.5) (equal heard (list (list {want:?} world))))
-                         (isolate-await (isolate-spawn '+ 1 2) 120)))
+                         (let ((next (isolate-spawn '+ 1 2)))
+                           (list (isolate-await next 120)
+                                 (equal (isolate-future-degraded next)
+                                        (list (list 'isolate-world-unavailable {want:?} world)))))))
             (isolate-kill-all)))", store = store.display().to_string());
         let (ok, out, err) = batch(&script, Path::new("/"));
         assert!(ok, "batch failed (zygotes {zygotes}): {err}");
         // Without zygotes the job's own worker refused; with them the zygote
         // did, and the job waiting on its fork ran from source.
         let first = if zygotes == "nil" { "(isolate-world-unavailable t)" } else { "3" };
-        assert_eq!(out.trim(), format!("({first} nil t 3)"), "zygotes {zygotes}: {err}");
+        // The next job runs from source, and its future says so (romacs#362).
+        assert_eq!(out.trim(), format!("({first} nil t (3 t))"), "zygotes {zygotes}: {err}");
     }
     let _ = std::fs::remove_dir_all(&scratch);
 }

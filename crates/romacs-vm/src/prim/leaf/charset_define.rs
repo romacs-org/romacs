@@ -2,7 +2,7 @@ fn int(n: i64) -> Value { Value::integer(n).unwrap() }
 impl Leaf<'_> {
     fn charset_pair(&self, value: Value) -> std::result::Result<(Value, Value), Fault> {
         if value == Value::NIL { return Ok((Value::NIL, Value::NIL)); }
-        self.pair(value).ok_or(Fault::Wrong("listp", value))
+        self.pair(value).ok_or_else(|| Fault::Wrong("listp", value))
     }
     /// The directory a relative charset map name expands against:
     /// `default-directory', else the working directory.
@@ -66,10 +66,10 @@ impl Leaf<'_> {
         for i in (0..len).step_by(2) {
             let code = self.charset_aref(map, i)?;
             let (from, to) = self.pair(code).unwrap_or((code, code));
-            let from = from.integer_value().filter(|n| *n >= 0).ok_or(Fault::Wrong("wholenump", from))? as u32;
-            let to = to.integer_value().filter(|n| *n >= 0).ok_or(Fault::Wrong("wholenump", to))? as u32;
+            let from = from.integer_value().filter(|n| *n >= 0).ok_or_else(|| Fault::Wrong("wholenump", from))? as u32;
+            let to = to.integer_value().filter(|n| *n >= 0).ok_or_else(|| Fault::Wrong("wholenump", to))? as u32;
             let character = self.charset_aref(map, i+1)?;
-            let c = character.integer_value().filter(|n| *n >= 0).ok_or(Fault::Wrong("wholenump", character))?;
+            let c = character.integer_value().filter(|n| *n >= 0).ok_or_else(|| Fault::Wrong("wholenump", character))?;
             if from >= min && to <= max && from <= to && c <= 0x3fffff {
                 entries.push(crate::charset::map::Entry { from, to, character: c as u32 });
             }
@@ -79,7 +79,7 @@ impl Leaf<'_> {
     fn charset_range(&self, v: Value, lo: i64, hi: i64) -> std::result::Result<i64, Fault> {
         if self.kind(v) != Kind::Integer && self.kind(v) != Kind::Bignum { return Err(Fault::Wrong("integerp", v)); }
         let n = v.integer_value().filter(|n| *n >= lo && *n <= hi)
-            .ok_or(Fault::Range3(v, int(lo), int(hi)))?;
+            .ok_or_else(|| Fault::Range3(v, int(lo), int(hi)))?;
         Ok(n)
     }
     fn charset_unsigned(&self, v: Value) -> std::result::Result<u32, Fault> {
@@ -96,16 +96,16 @@ impl Leaf<'_> {
         else if let Some(data::Object::Float(n)) = self.vm.object_if(v) {
             if *n >= 0.0 && *n <= u32::MAX as f64 && n.fract() == 0.0 { Some(*n as u64) } else { None }
         } else { None };
-        value.and_then(|n| u32::try_from(n).ok()).ok_or(Fault::Error("Not an in-range integer, integral float, or cons of integers".into()))
+        value.and_then(|n| u32::try_from(n).ok()).ok_or_else(|| Fault::Error("Not an in-range integer, integral float, or cons of integers".into()))
     }
     fn charset_aref(&mut self, v: Value, i: usize) -> super::super::Out {
         match self.kind(v) {
             Kind::Vector | Kind::Record => match self.vm.object_if(v) {
-                Some(data::Object::Vector(values) | data::Object::Record(values)) => values.get(i).copied().ok_or(Fault::Range(v, int(i as i64))),
+                Some(data::Object::Vector(values) | data::Object::Record(values)) => values.get(i).copied().ok_or_else(|| Fault::Range(v, int(i as i64))),
                 _ => unreachable!(),
             },
             Kind::CharTable => self.char_table_element(v, i),
-            Kind::String | Kind::Bytes => self.string_char(v, i)?.map(|c| int(c as i64)).ok_or(Fault::Range(v, int(i as i64))),
+            Kind::String | Kind::Bytes => self.string_char(v, i)?.map(|c| int(c as i64)).ok_or_else(|| Fault::Range(v, int(i as i64))),
             _ => Err(Fault::Wrong("arrayp", v)),
         }
     }
@@ -149,17 +149,17 @@ impl Leaf<'_> {
             if code < min || code > max { return Err(Fault::Range3(int(min as i64), int(max as i64), a[4])); }
             max = code;
         }
-        let invalid = if a[10] != Value::NIL { self.charset_unsigned(a[10])? } else if min > 0 { 0 } else { max.checked_add(1).ok_or(Fault::Error("Attribute :invalid-code must be specified".into()))? };
+        let invalid = if a[10] != Value::NIL { self.charset_unsigned(a[10])? } else if min > 0 { 0 } else { max.checked_add(1).ok_or_else(|| Fault::Error("Attribute :invalid-code must be specified".into()))? };
         let iso_final = if a[5] == Value::NIL { -1 } else {
-            let n = a[5].integer_value().ok_or(Fault::Wrong("fixnump", a[5]))?;
+            let n = a[5].integer_value().ok_or_else(|| Fault::Wrong("fixnump", a[5]))?;
             if !(48..=127).contains(&n) { return Err(Fault::Error(format!("Invalid iso-final-char: {n}"))); } n
         };
         let iso_revision = if a[6] == Value::NIL { -1 } else { self.charset_range(a[6], -1, 63)? };
         let mule_id = if a[7] == Value::NIL { -1 } else {
-            let n = a[7].integer_value().filter(|n| *n >= 0).ok_or(Fault::Wrong("wholenump", a[7]))?;
+            let n = a[7].integer_value().filter(|n| *n >= 0).ok_or_else(|| Fault::Wrong("wholenump", a[7]))?;
             if (n > 0 && n <= 128) || n >= 256 { return Err(Fault::Error(format!("Invalid emacs-mule-id: {n}"))); } n
         };
-        let offset = if a[11] != Value::NIL { Some(a[11].integer_value().filter(|n| (0..=0x3fffff).contains(n)).ok_or(Fault::Wrong("characterp", a[11]))?) } else { None };
+        let offset = if a[11] != Value::NIL { Some(a[11].integer_value().filter(|n| (0..=0x3fffff).contains(n)).ok_or_else(|| Fault::Wrong("characterp", a[11]))?) } else { None };
         let mut subset = Value::NIL;
         let parent_metadata = if offset.is_none() && a[12] == Value::NIL && a[13] != Value::NIL {
             let parent = self.charset_pair(a[13])?.0;

@@ -42,7 +42,7 @@ fn compose_string_internal(cx, string: Value, start: Value, end: Value; optional
     let size = cx.string_shape(string)?.0 as i64;
     let bound = |v: Value, default: i64| -> std::result::Result<i64, Fault> {
         if v == Value::NIL { return Ok(default); }
-        let n = v.integer_value().ok_or(Fault::Wrong("integerp", v))?;
+        let n = v.integer_value().ok_or_else(|| Fault::Wrong("integerp", v))?;
         Ok(if n < 0 { n + size } else { n })
     };
     let (from, to) = (bound(start, 0)?, bound(end, size)?);

@@ -146,8 +146,12 @@ nil when WORKER will not take the job after all (its queue is full, its
 process is gone since it was found ready); the command then runs GNU's
 definition."
   (condition-case nil
-      (apply #'isolate-spawn function
-             (append args (list :isolate worker :require (romacs-project--features project))))
+      (let ((future (apply #'isolate-spawn function
+                           (append args (list :isolate worker :require (romacs-project--features project))))))
+        ;; A worker takes one job: once this one is done (its worker gone),
+        ;; the next command's is warmed.
+        (isolate-on-done future (lambda (_) (run-at-time 0 nil #'romacs-project--warm project)))
+        future)
     (isolate-error nil)))
 
 (defun romacs-project--note (format &rest args)

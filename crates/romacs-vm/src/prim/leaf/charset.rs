@@ -6,18 +6,19 @@ include!("charset_define.rs");
 pub(crate) struct Run { pub start: i64, pub end: i64, pub walk: Option<usize> }
 
 impl Leaf<'_> {
-    fn charset_record(&mut self, name: Value) -> std::result::Result<usize, Fault> {
+    /// NAME's charset record, when NAME names one; builds no error.
+    fn charset_index(&mut self, name: Value) -> Option<usize> {
         self.vm.ensure_charsets();
         if self.kind(name) != Kind::Symbol {
-            return Err(Fault::Wrong("charsetp", name));
+            return None;
         }
-        self.vm
-            .charsets
-            .lookup(name)
-            .ok_or(Fault::Wrong("charsetp", name))
+        self.vm.charsets.lookup(name)
+    }
+    fn charset_record(&mut self, name: Value) -> std::result::Result<usize, Fault> {
+        self.charset_index(name).ok_or_else(|| Fault::Wrong("charsetp", name))
     }
     pub fn is_charset(&mut self, object: Value) -> bool {
-        self.charset_record(object).is_ok()
+        self.charset_index(object).is_some()
     }
     pub fn charset_plist(&mut self, name: Value) -> super::super::Out {
         let i = self.charset_record(name)?;
@@ -73,7 +74,7 @@ impl Leaf<'_> {
     /// charset.c Fencode_char.
     pub fn encode_char(&mut self, ch: Value, name: Value) -> super::super::Out {
         let i = self.charset_record(name)?;
-        let c = ch.integer_value().filter(|&c| (0..=crate::lstring::MAX_CHAR as i64).contains(&c)).ok_or(Fault::Wrong("characterp", ch))?;
+        let c = ch.integer_value().filter(|&c| (0..=crate::lstring::MAX_CHAR as i64).contains(&c)).ok_or_else(|| Fault::Wrong("characterp", ch))?;
         Ok(self.charset_encode(i, c as u32)?.map_or(Value::NIL, |code| Value::integer(code.into()).unwrap()))
     }
     pub(super) fn named_charset_id(&mut self, name: &str) -> std::result::Result<usize, Fault> {
@@ -100,7 +101,7 @@ impl Leaf<'_> {
     /// ENCODE_CHAR's code as one byte per dimension, most significant first.
     pub fn split_char(&mut self, ch: Value) -> super::super::Out {
         let c = ch.integer_value().filter(|&c| (0..=crate::lstring::MAX_CHAR as i64).contains(&c))
-            .ok_or(Fault::Wrong("characterp", ch))? as u32;
+            .ok_or_else(|| Fault::Wrong("characterp", ch))? as u32;
         let id = self.char_charset_id(c)?;
         let i = self.vm.charsets.ids[id];
         let mut code = self.charset_encode(i, c)?.ok_or_else(|| Fault::Error("split-char: CH has no code in its charset".into()))?;
@@ -118,7 +119,7 @@ impl Leaf<'_> {
     /// charset.c Fchar_charset.
     pub fn char_charset(&mut self, ch: Value, restriction: Value) -> super::super::Out {
         let c = ch.integer_value().filter(|&c| (0..=crate::lstring::MAX_CHAR as i64).contains(&c))
-            .ok_or(Fault::Wrong("characterp", ch))? as u32;
+            .ok_or_else(|| Fault::Wrong("characterp", ch))? as u32;
         if restriction == Value::NIL {
             let id = self.char_charset_id(c)?;
             return Ok(self.charset_id_name(id));
@@ -167,7 +168,7 @@ impl Leaf<'_> {
         let (min, max) = (self.vm.charsets.records[i].min, self.vm.charsets.records[i].max);
         let code = |v: Value, default: u32| -> std::result::Result<u32, Fault> {
             if v == Value::NIL { return Ok(default); }
-            v.integer_value().filter(|&n| (0..=i64::from(u32::MAX)).contains(&n)).map(|n| n as u32).ok_or(Fault::Wrong("wholenump", v))
+            v.integer_value().filter(|&n| (0..=i64::from(u32::MAX)).contains(&n)).map(|n| n as u32).ok_or_else(|| Fault::Wrong("wholenump", v))
         };
         let (from, to) = (code(from, min)?.max(min), code(to, max)?.min(max));
         let mut calls = Vec::new();
@@ -297,7 +298,7 @@ impl Leaf<'_> {
     }
     fn charset_by_id(&self, id: Value) -> std::result::Result<usize, Fault> {
         let id = id.integer_value().unwrap() as usize;
-        self.vm.charsets.ids.get(id).copied().ok_or(Fault::Error(format!("Invalid charset id: {id}")))
+        self.vm.charsets.ids.get(id).copied().ok_or_else(|| Fault::Error(format!("Invalid charset id: {id}")))
     }
     /// charset.c Fset_charset_priority: move CHARSETS, in order, to the
     /// front of Vcharset_ordered_list and refilter the ISO/emacs-mule lists.
@@ -390,7 +391,7 @@ impl Leaf<'_> {
         let record = &self.vm.charsets.records[i];
         let (dimension, space, iso, ascii) = (record.dimension as usize, record.space, record.iso_final >= 0, record.ascii_compatible);
         let position = |cx: &mut Self, v: Value| -> std::result::Result<u32, Fault> {
-            let n = v.integer_value().filter(|&n| n >= 0).ok_or(Fault::Wrong("wholenump", v))?;
+            let n = v.integer_value().filter(|&n| n >= 0).ok_or_else(|| Fault::Wrong("wholenump", v))?;
             if n >= 0x100 {
                 let data = cx.cons(v, Value::NIL);
                 let data = cx.cons(Value::integer(0xFF).unwrap(), data);

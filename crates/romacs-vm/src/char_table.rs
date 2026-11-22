@@ -1071,6 +1071,7 @@ impl CharTable {
     }
     /// Raw fields for the uniform-table printer. A retained child is not uniform
     /// structurally, even if all of its leaves contain the same value.
+    #[cfg(test)]
     pub fn uniform_print_fields(&self) -> Option<Vec<Value>> {
         let root = self.root.lock().unwrap();
         let CharTableSlot::Value(content) = root.slots[0] else { return None; };

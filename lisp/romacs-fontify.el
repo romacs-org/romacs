@@ -231,31 +231,47 @@ place): compared before results are used, so a change made since
 
 (defun romacs-fontify--start (&optional buffer)
   "Fontify BUFFER in a worker, if it is one that wants it; the job's
-state, or nil."
-  (with-current-buffer (or buffer (current-buffer))
-    (setq romacs-fontify--timer nil)
-    (when (romacs-fontify--wanted-p)
-      (let* ((require (cdr (assq major-mode romacs-fontify-isolate-modes)))
-             (worker (isolate-pooled-worker require))
-             (window (get-buffer-window (current-buffer) t))
-             ;; Redisplay has fontified what the window shows: the walk
-             ;; begins where it ends.
-             (start (if window (window-end window) (point)))
-             (token (setq romacs-fontify--tokens (1+ romacs-fontify--tokens)))
-             (snapshot (and worker (save-restriction (widen) (buffer-snapshot))))
-             (future (and worker
-                          (condition-case nil
-                              (isolate-spawn romacs-fontify--job snapshot token romacs-fontify--block start
-                                             :isolate worker :require require
-                                             :bindings (romacs-fontify--bindings))
-                            (isolate-error nil)))))
-        (when future
-          (puthash token (current-buffer) romacs-fontify--jobs)
-          (add-hook 'after-change-functions #'romacs-fontify--changed nil t)
-          (add-hook 'kill-buffer-hook #'romacs-fontify--drop nil t)
-          (let ((buffer (current-buffer)))
-            (isolate-on-done future (lambda (future) (romacs-fontify--done buffer token future))))
-          (setq romacs-fontify--state (romacs-fontify--new-state token snapshot future)))))))
+state, or nil.  Nothing for a buffer killed meanwhile."
+  (when (buffer-live-p (or buffer (current-buffer)))
+    (with-current-buffer (or buffer (current-buffer))
+      (setq romacs-fontify--timer nil)
+      (when (romacs-fontify--wanted-p)
+        (let* ((require (cdr (assq major-mode romacs-fontify-isolate-modes)))
+               (worker (isolate-pooled-worker require 'busy)))
+          (cond ((eq worker 'busy)
+                 (setq romacs-fontify--timer
+                       (run-at-time romacs-fontify-isolate-delay nil
+                                    #'romacs-fontify--retry (current-buffer))))
+                (worker (romacs-fontify--submit worker require))))))))
+
+(defun romacs-fontify--retry (buffer)
+  "Fontify BUFFER again now that the pool may have room, once the session
+has been idle `romacs-fontify-isolate-delay' seconds: at once if it already
+has, never in a pause between keys."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (setq romacs-fontify--timer
+            (run-with-idle-timer romacs-fontify-isolate-delay nil #'romacs-fontify--start buffer)))))
+
+(defun romacs-fontify--submit (worker require)
+  "Snapshot this buffer and submit its fontification to WORKER with REQUIRE."
+  (let* ((buffer (current-buffer))
+         (window (get-buffer-window buffer t))
+         ;; Redisplay has fontified what the window shows: the walk begins where it ends.
+         (start (if window (window-end window) (point)))
+         (token (setq romacs-fontify--tokens (1+ romacs-fontify--tokens)))
+         (snapshot (save-restriction (widen) (buffer-snapshot)))
+         (future (condition-case nil
+                     (isolate-spawn romacs-fontify--job snapshot token romacs-fontify--block start
+                                    :isolate worker :require require
+                                    :bindings (romacs-fontify--bindings))
+                   (isolate-error nil))))
+    (when future
+      (puthash token buffer romacs-fontify--jobs)
+      (add-hook 'after-change-functions #'romacs-fontify--changed nil t)
+      (add-hook 'kill-buffer-hook #'romacs-fontify--drop nil t)
+      (isolate-on-done future (lambda (future) (romacs-fontify--done buffer token future)))
+      (setq romacs-fontify--state (romacs-fontify--new-state token snapshot future)))))
 
 (defun romacs-fontify--new-state (token snapshot future)
   "The current buffer's state for job TOKEN of SNAPSHOT, FUTURE: no blocks yet."
@@ -317,16 +333,7 @@ digest."
           (aset state 2 nil)
           (condition-case err
               (progn (isolate-await future 0) (aset state 5 t))
-            (error (setq romacs-fontify-last-error (cons (buffer-name) err))))))))
-  ;; A worker that fontified a large buffer has collected over its world,
-  ;; whose pages are then its own: hundreds of megabytes it would keep
-  ;; while pooled.  Starting another costs a fraction of a second.
-  (run-at-time 0 nil #'romacs-fontify--retire (isolate-future-isolate future)))
-
-(defun romacs-fontify--retire (worker)
-  "Retire WORKER unless it has been given other work meanwhile."
-  (when (and (isolate-live-p worker) (zerop (isolate-pending worker)))
-    (isolate-retire worker)))
+            (error (setq romacs-fontify-last-error (cons (buffer-name) err)))))))))
 
 ;;;; Receiving and applying
 

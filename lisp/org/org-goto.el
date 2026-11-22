@@ -134,8 +134,8 @@ When nil, you can use these keybindings to navigate the buffer:
 	  (org-defkey map "\C-c\C-u" 'outline-up-heading)
 	  map)))
 
-(define-key org-goto-local-auto-isearch-map "\C-i" nil)
-(define-key org-goto-local-auto-isearch-map "\C-m" nil)
+(define-key org-goto-local-auto-isearch-map (kbd "TAB") nil)
+(define-key org-goto-local-auto-isearch-map (kbd "RET") nil)
 (define-key org-goto-local-auto-isearch-map [return] nil)
 
 (defun org-goto--local-search-headings (string bound noerror)
