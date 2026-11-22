@@ -14,7 +14,8 @@
 ;; The buffer is the comint model:
 ;;
 ;;   transcript   read-only text, appended to
-;;   separator    one line: what the session does now
+;;   activity     live delegated threads and harness subagents
+;;   divider      one line: what the session does now
 ;;   composer     editable, RET sends
 ;;
 ;; Every character is text: no field, no intangible or invisible text,
@@ -46,6 +47,7 @@
 
 (require 'romacs-working)
 (require 'romacs-agent-log-images)
+(require 'romacs-agent-log-activity)
 
 ;; The actions the chat's menu offers on its session are the chat's of
 ;; before (romacs-agent-ui.el), which read the session from here too.
@@ -150,7 +152,9 @@ user's own spec still wins."
 
 (defvar-local romacs-agent-log--session nil "The session this chat shows.")
 (defvar-local romacs-agent-log--end nil
-  "Marker: the transcript's end, where events are drawn; the separator follows it.")
+  "Marker: the transcript's end, where the next event goes.")
+(defvar-local romacs-agent-log--divider nil
+  "Marker where the divider begins, after any live activity.")
 (defvar-local romacs-agent-log--text-map nil
   "The keys of this buffer's transcript text, when not a chat's
 \(`romacs-agent-log-transcript-map'): a view with no composer has its own.")
@@ -855,36 +859,39 @@ before this chat's first record): at the end, with its output."
           (maphash (lambda (_ block) (when (equal (romacs-agent-log-call-task block) task) (throw 'found block))) blocks)
           nil))))
 
-(defun romacs-agent-log--task-text (event block)
-  "What task EVENT says under BLOCK, its call, or nil there, or nil: its
-start in the background, what it does when that changes, how it ended."
+(defun romacs-agent-log--task-text (event block subagent)
+  "What task EVENT says in the transcript under BLOCK, its call, if any.
+SUBAGENT progress belongs to the live view."
   (let ((state (plist-get event :state)))
     (pcase state
       ('backgrounded "moved to the background")
       ('progress (let ((activity (plist-get event :activity)))
-                   (and activity (not (and block (equal activity (romacs-agent-log-call-activity block))))
+                   (and activity (not subagent)
+                        (not (and block (equal activity (romacs-agent-log-call-activity block))))
                         (format "now: %s" activity))))
       ;; Its summary, but a subagent's: its call's output, drawn, is its report.
       ((or 'completed 'failed 'stopped)
-       (concat (symbol-name state)
-               (if-let* ((summary (and (not (and block (romacs-agent-log-call-ended block)
-                                                 (member (romacs-agent-log-call-name block) '("Agent" "Task"))))
-                                       (plist-get event :summary))))
-                   (concat ": " summary)
-                 ""))))))
+       (unless (and subagent (not block) (not (plist-get event :summary)))
+         (concat (symbol-name state)
+                 (when-let* ((summary (and (not (and subagent block (romacs-agent-log-call-ended block)))
+                                           (plist-get event :summary))))
+                   (concat ": " summary))))))))
 
-(defun romacs-agent-log--task (event)
-  "Draw task EVENT, what work under a call (a subagent, a command) says
+(defun romacs-agent-log--task (session event)
+  "Draw SESSION's task EVENT, what work under a call says
 of itself, under that call; with its call gone, at the end.  Its work
 over, a call already ended closes; one still running closes as it ends."
   (let* ((block (romacs-agent-log--task-block event))
          (state (plist-get event :state))
-         (text (romacs-agent-log--task-text event block)))
+         (subagent (or (plist-get event :subagent)
+                       (and block (member (romacs-agent-log-call-name block) '("Agent" "Task")))
+                       (plist-get (romacs-agent-ui-worker session (plist-get event :id)) :subagent)))
+         (text (romacs-agent-log--task-text event block subagent)))
     (when block
       (when (and text (eq state 'progress)) (setf (romacs-agent-log-call-activity block) (plist-get event :activity)))
       (when (and (eq state 'started) (plist-get event :task)) (setf (romacs-agent-log-call-task block) (plist-get event :task))))
     (cond ((not text))
-          ((not block) (romacs-agent-log--note event (concat "task " text)))
+          ((not block) (romacs-agent-log--note event (concat (if subagent "subagent " "task ") text)))
           (t (romacs-agent-log--flush block)
              (romacs-agent-log--put (romacs-agent-log--indent (propertize (concat "· " text "\n") 'face 'romacs-agent-log-note)
                                                               (1+ (romacs-agent-log-call-depth block)))
@@ -1264,7 +1271,7 @@ on RET."
                       (romacs-agent-log--flush block)
                     (romacs-agent-log--close-stream)))
     ('tool (romacs-agent-log--tool event))
-    ('task (romacs-agent-log--task event))
+    ('task (romacs-agent-log--task session event))
     ('tool-output (romacs-agent-log--tool-output event))
     ('approval (romacs-agent-log--ask session event))
     ;; Who answered: said, the block settled once its answer is written.
@@ -1345,10 +1352,8 @@ its last width when none shows it."
 its rule and the composer's prompt, each ending in a newline (what waits
 to be sent: romacs-agent-log-queue.el), or nil for none.")
 
-(defun romacs-agent-log--separator-text (doing width &optional rows)
-  "The separator for DOING, (STATE . WORDS), in WIDTH columns: the working
-thread, what the session does when it needs words, ROWS, then the
-composer's prompt."
+(defun romacs-agent-log--divider-text (doing width)
+  "The divider for DOING, (STATE . WORDS), in WIDTH columns."
   (let ((face (pcase (car doing) ('waiting 'romacs-agent-log-ask) ('working 'romacs-working-running)
                 ('failed 'romacs-agent-log-denied) (_ 'romacs-agent-log-rule))))
     (let* ((label (if (cdr doing) (concat " " (propertize (cdr doing) 'face (list face 'bold)) " ") " "))
@@ -1357,16 +1362,51 @@ composer's prompt."
            (rule (- width 1 romacs-agent-log--thread-cols (string-width label))))
       (concat (romacs-working-still romacs-agent-log--thread-cols (romacs-agent-log--work doing))
               label
-              (if (>= rule 8) (propertize (make-string rule ?─) 'face 'romacs-agent-log-rule) "")
-              "\n" (or rows "") (propertize (concat (romacs-agent-glyph 'composer) " ") 'face 'romacs-agent-log-prompt)))))
+              (if (>= rule 8) (propertize (make-string rule ?─) 'face 'romacs-agent-log-rule) "")))))
+
+(defun romacs-agent-log--separator-field (text)
+  "TEXT as read-only chrome, including its boundary with the composer."
+  (propertize (romacs-agent-log--sealed text) 'field 'romacs-agent-log-separator))
+
+(defun romacs-agent-log--divider-marker ()
+  "The divider's marker, also in a chat predating the activity view."
+  (or romacs-agent-log--divider
+      (setq romacs-agent-log--divider (copy-marker romacs-agent-log--end t))))
+
+(defun romacs-agent-log--write-separator (divider rows)
+  "Write DIVIDER and ROWS below the live activity, preserving the composer."
+  (let* ((marker (romacs-agent-log--divider-marker))
+        (start (marker-position marker))
+        (end (marker-position romacs-agent-log--end))
+        (old (- romacs-agent-log--input start))
+        (prompt (concat rows (propertize (concat (romacs-agent-glyph 'composer) " ") 'face 'romacs-agent-log-prompt))))
+    (goto-char start)
+    (insert (romacs-agent-log--separator-field (concat divider "\n" prompt)))
+    (delete-region (point) (+ (point) old))
+    (set-marker romacs-agent-log--input (point))
+    (set-marker marker start)
+    (when-let* ((bounds (romacs-agent-log-activity-bounds))) (set-marker (cdr bounds) start))
+    (set-marker romacs-agent-log--end end)))
+
+(defun romacs-agent-log--activity-refresh ()
+  "Show the current session's active workers above the divider."
+  (when (and romacs-agent-log--input romacs-agent-log--width)
+    (save-restriction
+      (widen)
+      (let ((text (romacs-agent-log-activity-lines
+                   (romacs-agent-children-rows romacs-agent-log--session) romacs-agent-log--width))
+            (end (marker-position romacs-agent-log--end)))
+        (romacs-agent-log-activity-set (romacs-agent-log--separator-field text) end)
+        (set-marker romacs-agent-log--end end)))))
 
 (defun romacs-agent-log--separator (&optional force)
   "Write the separator again when what the session does, or the room the
 windows showing it leave, changed."
-  (let ((doing (romacs-agent-log--doing romacs-agent-log--session))
-        (width (romacs-agent-log--rule-width))
-        (rows (and romacs-agent-log-separator-rows-function (funcall romacs-agent-log-separator-rows-function))))
-    (when (or force (not (equal doing romacs-agent-log--state)) (not (eql width romacs-agent-log--width))
+  (let* ((doing (romacs-agent-log--doing romacs-agent-log--session))
+         (width (romacs-agent-log--rule-width))
+         (rows (and romacs-agent-log-separator-rows-function (funcall romacs-agent-log-separator-rows-function)))
+         (refit (not (eql width romacs-agent-log--width))))
+    (when (or force (not (equal doing romacs-agent-log--state)) refit
               (not (equal-including-properties rows romacs-agent-log--rows)))
       (setq romacs-agent-log--state doing romacs-agent-log--width width romacs-agent-log--rows rows)
       (let ((on (get-text-property (point) 'romacs-agent-log-queued)))
@@ -1374,23 +1414,14 @@ windows showing it leave, changed."
           (save-excursion
             ;; The new one put before the old one goes: a point in the
             ;; composer stays there, one at the transcript's end stays there.
-            (let ((start (marker-position romacs-agent-log--end))
-                  (old (- romacs-agent-log--input romacs-agent-log--end)))
-              (goto-char start)
-              ;; A field of its own: word motion and kills in the composer
-              ;; stop at its start, as in a comint buffer; line motion
-              ;; crosses it (a field binds it only within a line).
-              (insert (propertize (romacs-agent-log--sealed (romacs-agent-log--separator-text doing width rows))
-                                  'field 'romacs-agent-log-separator))
-              (delete-region (point) (+ (point) old))
-              (set-marker romacs-agent-log--input (point))
-              (set-marker romacs-agent-log--end start)))
+            (romacs-agent-log--write-separator (romacs-agent-log--divider-text doing width) rows))
           (romacs-agent-log-attach-place))
       ;; Point on a queued row stays on it while it waits.
       (when-let* ((on) (at (text-property-any romacs-agent-log--end romacs-agent-log--input 'romacs-agent-log-queued on)))
         (goto-char at)))
       ;; The thread moves as the session does, drawn by the display.
-      (romacs-working-set (current-buffer) (romacs-agent-log--work doing)))))
+      (romacs-working-set (current-buffer) (romacs-agent-log--work doing)))
+    (when refit (romacs-agent-log--activity-refresh))))
 
 (defvar-local romacs-agent-log--title nil "The title the chat's name was made from.")
 (defvar-local romacs-agent-log--header-made nil
@@ -1618,7 +1649,7 @@ where the chat reads and acts on SESSION, this editor by default
               romacs-agent-log--input (point-min-marker))
         (set-marker-insertion-type romacs-agent-log--end t)
         (romacs-agent-log--separator t)
-        (romacs-working-show buffer buffer romacs-agent-log--end romacs-agent-log--thread-cols
+        (romacs-working-show buffer buffer (romacs-agent-log--divider-marker) romacs-agent-log--thread-cols
                              (romacs-agent-log--work romacs-agent-log--state))
         (puthash (romacs-agent-id session) buffer chats)
         (add-hook 'window-buffer-change-functions #'romacs-agent-log--shown nil t)))
@@ -1630,6 +1661,7 @@ where the chat reads and acts on SESSION, this editor by default
 drew forgotten, its markers let go, its composer kept."
   ;; What streams is dropped, not faced: its text goes too.
   (romacs-agent-log--close-stream 'discard)
+  (romacs-agent-log-activity-set "")
   (when romacs-agent-log--blocks
     (mapc #'romacs-agent-log--close-block (hash-table-values romacs-agent-log--blocks)))
   (dolist (ask romacs-agent-log--asks)
@@ -1647,6 +1679,7 @@ drew forgotten, its markers let go, its composer kept."
     (setq romacs-agent-log--filled t)
     (romacs-agent-log-source-fill romacs-agent-log--source romacs-agent-log--session)
     (romacs-agent-log--separator t)
+    (romacs-agent-log--activity-refresh)
     (romacs-agent-log--header-show)))
 
 (defun romacs-agent-log--refit (_frame)
@@ -1665,6 +1698,7 @@ showing it.  One shown nowhere is fitted when it shows again."
   "A window shows this chat: drawn now, when it was not, its header made
 again, and its clock going while its turn runs."
   (romacs-agent-log--ensure-filled)
+  (romacs-agent-log--activity-refresh)
   (romacs-agent-log--header-show)
   (when (memq (romacs-agent-state romacs-agent-log--session) '(starting running waiting-approval))
     (romacs-agent-log--tick-start)))
@@ -1674,7 +1708,9 @@ again, and its clock going while its turn runs."
 after a batch of events remade sessions' states (their workers')."
   (dolist (window (window-list-1 nil 'nomini 'visible))
     (with-current-buffer (window-buffer window)
-      (when (derived-mode-p 'romacs-agent-log-mode) (romacs-agent-log--header-show)))))
+      (when (derived-mode-p 'romacs-agent-log-mode)
+        (romacs-agent-log--activity-refresh)
+        (romacs-agent-log--header-show)))))
 
 (add-hook 'romacs-agent-ui-changed-hook #'romacs-agent-log--headers-refresh)
 
@@ -1955,10 +1991,18 @@ REASON when given."
   (interactive "p" romacs-agent-log-mode)
   (romacs-agent-log--move-kind 'prompt (- n)))
 
+(defun romacs-agent-log--open-delegated-thread (id)
+  "Open the delegated thread with ID in this window."
+  (if-let* ((child (romacs-agent-get id)))
+      (romacs-agent-show child '(display-buffer-same-window))
+    (user-error "That delegated thread is no longer available")))
+
 (defun romacs-agent-log-open ()
-  "Open what is at point: earlier turns, or a call's whole input and output."
+  "Open the delegated thread, earlier turns, or full tool call at point."
   (interactive nil romacs-agent-log-mode)
-  (cond ((get-text-property (point) 'romacs-agent-log-earlier) (romacs-agent-log-earlier))
+  (cond ((get-text-property (point) 'romacs-agent-log-delegated-thread)
+         (romacs-agent-log--open-delegated-thread (get-text-property (point) 'romacs-agent-log-delegated-thread)))
+        ((get-text-property (point) 'romacs-agent-log-earlier) (romacs-agent-log-earlier))
         ((get-text-property (point) 'romacs-agent-log-full)
          (let ((full (get-text-property (point) 'romacs-agent-log-full))
                (tool (get-text-property (point) 'romacs-agent-log-tool))

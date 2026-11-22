@@ -257,7 +257,7 @@ journal one turn long."
   ;; or still in a journal.
   (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
   (romacs-agent-store-tests--with
-    (let* ((n 0) (ids (cl-loop for name in '(quiet ending busy wanting behind journal)
+    (let* ((n 0) (ids (cl-loop for name in '(quiet ending busy wanting behind journal settled)
                                collect (cons name (format "aaaaaaaa-0000-4000-8000-0000000001%02d" (cl-incf n)))))
            (romacs-agent--quiet (make-hash-table :test #'equal)) (romacs-agent--quiet-timer nil)
            (romacs-agent-events--made nil) (romacs-agent-events--imported (make-hash-table :test #'equal))
@@ -277,6 +277,8 @@ journal one turn long."
                             (list (if (eq name 'busy) "running" "idle") (if (eq name 'wanting) 1 0) id))))
         ;; Written while no editor was there: past its kept state.
         (append 'behind 3)
+        (append 'settled 3)
+        (should (romacs-agent-settle-recorded (id 'settled)))
         (pcase-dolist (`(,_ . ,id) ids) (romacs-agent-store-tests--live id))
         (unwind-protect
             (cl-letf (((symbol-function 'romacs-agent--attach) (lambda (session &rest _) (push (romacs-agent-id session) attached)))
@@ -286,6 +288,8 @@ journal one turn long."
               (romacs-agent-restore)
               (should-not (romacs-agent-loaded (id 'quiet)))
               (should-not (romacs-agent-loaded (id 'ending)))
+              (should-not (romacs-agent-loaded (id 'settled)))
+              (should-not (gethash (id 'settled) romacs-agent--quiet))
               (dolist (name '(busy wanting behind journal)) (should (romacs-agent-loaded (id name))))
               ;; Nothing written: still rows.
               (romacs-agent--quiet-tick)
@@ -524,7 +528,7 @@ writes: the sessions table made again in its form, the rest left.")
 
 (ert-deftest romacs-agent-store-unloaded-keep-what-the-board-reads ()
   ;; Shown from its row alone, a settled session is still settled; its
-  ;; parent's task list has it; settling the finished acts on it loaded.
+  ;; parent's task list has it.
   (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
   (require 'romacs-agent-board)
   (require 'romacs-agent-tools)
@@ -542,18 +546,7 @@ writes: the sessions table made again in its form, the rest left.")
       (cl-letf (((symbol-function 'romacs-agent-tools--caller) (lambda () parent)))
         (should (equal (mapcar (lambda (task) (gethash "taskId" task))
                                (gethash "tasks" (romacs-agent-tools--list (romacs-mcp--object))))
-                       (list child))))
-      (let ((settled nil))
-        (cl-letf (((symbol-function 'romacs-agent-board--finished)
-                   (lambda (_rows) (list (gethash child (car romacs-agent-board--unloaded)))))
-                  ((symbol-function 'romacs-agent-board--shown-rows) #'ignore)
-                  ((symbol-function 'romacs-agent-board--redraw) #'ignore)
-                  ((symbol-function 'y-or-n-p) (lambda (&rest _) t))
-                  ((symbol-function 'romacs-agent-settle) (lambda (s) (push s settled))))
-          (romacs-agent-board--sessions)
-          (romacs-agent-board-settle-finished))
-        (should (equal (mapcar #'romacs-agent-id settled) (list child)))
-        (should (eq (car settled) (romacs-agent-get child)))))))
+                       (list child)))))))
 
 (ert-deftest romacs-agent-store-settled-before-later-activity ()
   ;; Unloaded with no kept state: settled only when settled since its last
@@ -571,27 +564,32 @@ writes: the sessions table made again in its form, the rest left.")
         (should-not (romacs-agent-settled-p (cl-find early shown :key #'romacs-agent-id :test #'equal)))
         (should (romacs-agent-settled-p (cl-find late shown :key #'romacs-agent-id :test #'equal)))))))
 
-(ert-deftest romacs-agent-store-settle-finished-past-a-gone-one ()
-  ;; Settling the finished: one gone meanwhile is skipped, the rest are
-  ;; settled, each as loaded.
+(ert-deftest romacs-agent-store-settle-finished-leaves-records-unloaded ()
   (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
   (require 'romacs-agent-board)
   (romacs-agent-store-tests--with
-    (let ((gone "aaaaaaaa-0000-4000-8000-000000000010") (kept "aaaaaaaa-0000-4000-8000-000000000011") (settled nil))
+    (let ((gone "aaaaaaaa-0000-4000-8000-000000000010") (kept "aaaaaaaa-0000-4000-8000-000000000011"))
       (record gone "gone") (record kept "kept")
       (romacs-agent-store-fill)
-      (romacs-agent-board--sessions)
-      (let ((finished (list (gethash gone (car romacs-agent-board--unloaded))
-                            (gethash kept (car romacs-agent-board--unloaded)))))
+      (let ((finished (romacs-agent-store-unloaded)))
         (delete-directory (expand-file-name gone root) t)
         (cl-letf (((symbol-function 'romacs-agent-board--finished) (lambda (_rows) finished))
                   ((symbol-function 'romacs-agent-board--shown-rows) #'ignore)
                   ((symbol-function 'romacs-agent-board--redraw) #'ignore)
-                  ((symbol-function 'y-or-n-p) (lambda (&rest _) t))
-                  ((symbol-function 'romacs-agent-settle) (lambda (s) (push s settled))))
+                  ((symbol-function 'y-or-n-p) (lambda (&rest _) t)))
           (romacs-agent-board-settle-finished)))
-      (should (equal (mapcar #'romacs-agent-id settled) (list kept)))
-      (should (eq (car settled) (romacs-agent-get kept))))))
+      (should-not (romacs-agent-loaded kept))
+      (let ((row (romacs-agent-store-row-session kept)))
+        (should (romacs-agent-settled-p row))
+        (should-not (romacs-agent-store--settlement-pending-p (romacs-agent-dir row)))
+        (should (romacs-agent--unloaded-p (romacs-agent-dir row)))
+        (with-temp-buffer
+          (romacs-agent-board-mode)
+          (cl-letf (((symbol-function 'romacs-agent-board--row) (lambda () (list :session row)))
+                    ((symbol-function 'romacs-agent-board--redraw) #'ignore))
+            (call-interactively (keymap-lookup romacs-agent-board-mode-map "s")))))
+      (should-not (romacs-agent-settled-p (romacs-agent-store-row-session kept)))
+      (should-not (romacs-agent-loaded kept)))))
 
 (ert-deftest romacs-agent-store-keeps-the-board-s-folds ()
   ;; Folded projects are kept, and kept past the sessions' table made
