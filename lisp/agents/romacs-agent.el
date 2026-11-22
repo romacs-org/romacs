@@ -2191,35 +2191,37 @@ has startup steps."
   (or (not (romacs-agent--harness-get session :next))
       (plist-get (romacs-agent-driver-state session) :ready)))
 
+(defun romacs-agent--ready-state (state input-seq completed-seq)
+  "Derive the ready state from STATE and the last input and completion."
+  (if (and (memq state '(starting running)) (<= (or input-seq 0) completed-seq))
+      'idle
+    state))
+
+(defun romacs-agent--mark-ready (session)
+  "Mark SESSION's driver ready and dispatch what was waiting for startup."
+  (unless (plist-get (romacs-agent-driver-state session) :ready)
+    (romacs-agent--apply-driver-state session '(:ready t))
+    (let* ((before (romacs-agent-state session))
+           (after (romacs-agent--ready-state before (romacs-agent-input-seq session)
+                                             (romacs-agent-completed-seq session)))
+           (became-idle (and (eq after 'idle) (not (eq before after)))))
+      (when became-idle (setf (romacs-agent-state session) 'idle))
+      (unwind-protect (romacs-agent--dispatch session)
+        ;; The reply to startup and the first queued send share one view update.
+        (when (and became-idle (eq (romacs-agent-state session) 'idle))
+          (romacs-agent--changed session))))))
+
 (defun romacs-agent--step (session)
-  "Write SESSION's harness's next driver line (a startup step, or a line it
-owes), once its records are the live ones and the last one written is
-journaled back (a replay never sends one again); once ready, what waited
-goes."
-  (when-let* ((next (romacs-agent--harness-get session :next))
-              ;; The live session only: a copy replaying the journal
-              ;; (a chat drawn again) writes nothing.
-              ((eq (romacs-agent-loaded (romacs-agent-id session)) session))
+  "Advance SESSION's driver after catch-up and the last line's journal echo."
+  (when-let* (((romacs-agent--live-p session))
+              (next (romacs-agent--harness-get session :next))
               ((not (romacs-agent-startup-pending session)))
               ((process-live-p (romacs-agent-connection session)))
               (step (funcall next session)))
-    (cond
-     ((not (eq step :ready))
+    (if (eq step :ready)
+        (romacs-agent--mark-ready session)
       (setf (romacs-agent-startup-pending session) (romacs-agent--step-id step))
-      (romacs-agent--line session step))
-     ((plist-get (romacs-agent-driver-state session) :ready))
-     (t
-      (setf (romacs-agent-driver-state session) (plist-put (romacs-agent-driver-state session) :ready t))
-      ;; Ready between turns (its records have none under way): idle, and
-      ;; the first message waiting goes, told to the views once: one
-      ;; written makes it running, never idle with a prompt in hand.  One
-      ;; held (a selection to confirm) waits idle, sent as the hold ends.
-      (let ((idle (and (memq (romacs-agent-state session) '(starting running))
-                       (<= (or (romacs-agent-input-seq session) 0) (romacs-agent-completed-seq session)))))
-        (when idle (setf (romacs-agent-state session) 'idle))
-        (unwind-protect (romacs-agent--dispatch session)
-          ;; Nothing written (or its write failed): idle, said once.
-          (when (and idle (eq (romacs-agent-state session) 'idle)) (romacs-agent--changed session))))))))
+      (romacs-agent--line session step))))
 
 (defvar romacs-agent--copies (make-hash-table :test #'eq :weakness 'key)
   "The copies of sessions replays fold into (`romacs-agent--scratch'): what

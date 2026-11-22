@@ -774,23 +774,28 @@ EFFORT.  Neither can be cleared in a live harness: `restart' then."
   "The hooks Romacs takes on each run: Claude Code tells it of every
 edit before writing it (`romacs-agent-gate-check').")
 
+(defun romacs-agent--claude-startup-action (state plan mode)
+  "Return Claude's next action from STATE, the requested PLAN and current MODE."
+  (cond ((plist-get state :owed) :reply)
+        ((and (plist-get state :initialized) plan (not (equal mode "plan"))
+              (not (equal (plist-get state :mode-asked) "plan")))
+         :plan)
+        ((or (plist-get state :initialized) (plist-get state :spoken)) :ready)
+        ((not (plist-get state :initialize)) :initialize)))
+
 (defun romacs-agent--claude-next (session)
-  "SESSION's next driver line: a reply it owes Claude Code, else this
-run's initialize, with Romacs's hooks; ready once that is answered."
+  "Return SESSION's next line owed to Claude Code, or its startup step."
   (let ((state (romacs-agent-driver-state session)))
-    (cond ((plist-get state :owed) (romacs-agent--claude-reply session (car (plist-get state :owed))))
-          ;; In plan mode, the harness not: put it there, once, whatever
-          ;; started it (a launch, a resume, a detached session attached).
-          ((and (plist-get state :initialized) (plist-get (romacs-agent-options session) :plan)
-                (not (equal (romacs-agent-permission-mode session) "plan"))
-                (not (equal (plist-get state :mode-asked) "plan")))
-           (romacs-agent--claude-plan session t nil))
-          ((or (plist-get state :initialized) (plist-get state :spoken)) :ready)
-          ((plist-get state :initialize) nil)
-          (t (romacs-mcp--object
-              "type" "control_request"
-              "request_id" (format "romacs-init-%d" (romacs-agent-request-id session))
-              "request" (romacs-mcp--object "subtype" "initialize" "hooks" romacs-agent--claude-hooks))))))
+    (pcase (romacs-agent--claude-startup-action state (plist-get (romacs-agent-options session) :plan)
+                                                (romacs-agent-permission-mode session))
+      (:reply (romacs-agent--claude-reply session (car (plist-get state :owed))))
+      (:plan (romacs-agent--claude-plan session t nil))
+      (:ready :ready)
+      (:initialize
+       (romacs-mcp--object
+        "type" "control_request"
+        "request_id" (format "romacs-init-%d" (romacs-agent-request-id session))
+        "request" (romacs-mcp--object "subtype" "initialize" "hooks" romacs-agent--claude-hooks))))))
 
 (defun romacs-agent--claude-hook (request)
   "The answer to hook REQUEST: what the gate tells the model of an edit,

@@ -322,18 +322,24 @@ steers): each (TEXT IMAGES), oldest first."
                        "capabilities" (romacs-mcp--object "experimentalApi" t "requestAttestation" :false
                                                           "optOutNotificationMethods" ["turn/diff/updated"]))))
 
+(defun romacs-agent--codex-startup-action (state)
+  "Return the next Codex startup action from the echoed driver STATE."
+  (let ((sent (plist-get state :sent)))
+    (cond ((plist-get state :thread) :ready)
+          ((null sent) :initialize)
+          ((and (equal sent "initialize") (plist-get state :initialized)) :initialized)
+          ((equal sent "initialized") :thread))))
+
 (defun romacs-agent--codex-next (session)
-  "SESSION's next line from this run's state: what it owes, else its
-startup's next step."
-  (let* ((state (romacs-agent-driver-state session))
-         (sent (plist-get state :sent)))
-    (cond ((when-let* ((owed (romacs-agent--codex-owed-now session)))
-             (romacs-agent--codex-owed-line session owed)))
-          ((plist-get state :thread) :ready)
-          ((null sent) (romacs-agent--codex-initialize (romacs-agent-request-id session)))
-          ((and (equal sent "initialize") (plist-get state :initialized))
-           (romacs-mcp--object "method" "initialized"))
-          ((equal sent "initialized") (romacs-agent--codex-thread session (romacs-agent-request-id session))))))
+  "Return the next line owed to Codex, or SESSION's next startup step."
+  (let ((state (romacs-agent-driver-state session)))
+    (or (when-let* ((owed (romacs-agent--codex-owed-now session)))
+          (romacs-agent--codex-owed-line session owed))
+        (pcase (romacs-agent--codex-startup-action state)
+          (:ready :ready)
+          (:initialize (romacs-agent--codex-initialize (romacs-agent-request-id session)))
+          (:initialized (romacs-mcp--object "method" "initialized"))
+          (:thread (romacs-agent--codex-thread session (romacs-agent-request-id session)))))))
 
 (defun romacs-agent--codex-paid (owed test)
   "The handshake event dropping the first of OWED that TEST accepts."

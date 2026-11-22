@@ -10,6 +10,7 @@
 (let ((romacs-mcp-call-function romacs-mcp-call-function)
       (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
   (require 'romacs-agent))
+(require 'romacs-agent-test-attached)
 
 (defmacro romacs-agent-driver-test--registry (&rest body)
   "BODY with the driver registry its own: what it defines goes with it."
@@ -144,6 +145,25 @@ line's `env' sets only its own configuration variable."
       (romacs-agent-driver-test--feed session 2 "note" note)
       (should (eq (pop seen) 'step))
       (should (equal (mapcar (lambda (e) (plist-get e :seq)) seen) '(2 2))))))
+
+(ert-deftest romacs-agent-startup-step-directly-enforces-catch-up ()
+  (let* ((romacs-agent--sessions (make-hash-table :test #'equal))
+         (session (romacs-agent-test-attach
+                   (romacs-agent--make :id "startup-replay" :harness 'claude)))
+         (written nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'romacs-agent--line)
+                   (lambda (_ object &optional _) (push object written))))
+          (puthash (romacs-agent-id session) session romacs-agent--sessions)
+          (setf (romacs-agent-caught-up session) nil)
+          (romacs-agent--step session)
+          (should-not written)
+          (should (zerop (romacs-agent-requests session)))
+          (setf (romacs-agent-caught-up session) t)
+          (romacs-agent--step session)
+          (should (= (length written) 1))
+          (should (equal (gethash "request_id" (car written)) (romacs-agent-startup-pending session))))
+      (delete-process (romacs-agent-connection session)))))
 
 (ert-deftest romacs-agent-startup-step-waits-for-its-own-echo ()
   ;; An interrupt written while a startup step is out (its echo first)
