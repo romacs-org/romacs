@@ -371,14 +371,6 @@ cache, it reports none) or does not say."
        ((and (string-prefix-p "romacs-mode-" id) (equal subtype "error"))
         (romacs-agent--claude-mode-refused state id response))))))
 
-(defun romacs-agent--claude-response-events (session response)
-  "Read SESSION's pending control state for Claude Code's RESPONSE."
-  (let ((id (gethash "request_id" response)))
-    (romacs-agent--claude-control-response
-     response (romacs-agent-driver-state session)
-     (and id (member id (plist-get (romacs-agent-pending-selection session) :waiting)) t)
-     (and id (gethash id (romacs-agent-approvals session)) t))))
-
 (defun romacs-agent--claude-system-events (line)
   "Decode a Claude Code system LINE."
   (pcase (gethash "subtype" line)
@@ -503,10 +495,37 @@ cache, it reports none) or does not say."
                   :windows (romacs-agent--claude-windows info))))))
 
 (defun romacs-agent--claude-events (session line)
-  "The events of LINE, one of Claude Code's stream-json objects."
+  "Decode a Claude Code output LINE using SESSION's context."
+  (romacs-agent--claude-decode 'out line (romacs-agent--claude-decode-context session 'out line)))
+
+(defun romacs-agent--claude-decode-context (session direction line)
+  "Read the values needed to decode Claude's LINE in DIRECTION."
+  (if (eq direction 'in)
+      (list :owed (plist-get (romacs-agent-driver-state session) :owed))
+    (append
+     (list :compacting (romacs-agent-compacting session))
+     (pcase (gethash "type" line)
+       ("stream_event" (list :message (romacs-agent-message session)))
+       ("assistant"
+        (list :streamed (gethash (gethash "id" (gethash "message" line)) (romacs-agent-streamed session))))
+       ("control_request" (list :owed (plist-get (romacs-agent-driver-state session) :owed)))
+       ("control_response"
+        (let ((id (gethash "request_id" (gethash "response" line))))
+          (list :state (romacs-agent-driver-state session)
+                :selection (and id (member id (plist-get (romacs-agent-pending-selection session) :waiting)) t)
+                :approval (and id (gethash id (romacs-agent-approvals session)) t))))))))
+
+(defun romacs-agent--claude-decode (direction line context)
+  "Decode Claude's LINE in DIRECTION using CONTEXT."
+  (if (eq direction 'in)
+      (romacs-agent--claude-decode-input line (plist-get context :owed))
+    (romacs-agent--claude-decode-output line context)))
+
+(defun romacs-agent--claude-decode-output (line context)
+  "Decode Claude Code's output LINE using the previous CONTEXT."
   (let* ((type (gethash "type" line))
          (parent (romacs-agent--value (gethash "parent_tool_use_id" line)))
-         (compacting (romacs-agent-compacting session))
+         (compacting (plist-get context :compacting))
          (boundary (and (equal type "system") (equal (gethash "subtype" line) "compact_boundary"))))
     ;; Only the next line can be the summary: a compaction cut short leaves
     ;; no mark for a later run's line to match.
@@ -514,16 +533,17 @@ cache, it reports none) or does not say."
               (list (list :type 'record-state :state (list :compacting boundary))))
             (pcase type
               ("system" (romacs-agent--claude-system-events line))
-              ("stream_event" (romacs-agent--claude-stream-events line parent (romacs-agent-message session)))
+              ("stream_event" (romacs-agent--claude-stream-events line parent (plist-get context :message)))
               ("assistant"
-               (romacs-agent--claude-assistant-events
-                line parent (gethash (gethash "id" (gethash "message" line)) (romacs-agent-streamed session))))
+               (romacs-agent--claude-assistant-events line parent (plist-get context :streamed)))
               ("user" (romacs-agent--claude-user-events line parent compacting))
               ("result" (romacs-agent--claude-result-events line))
               ("control_request"
-               (romacs-agent--claude-control-request (plist-get (romacs-agent-driver-state session) :owed)
+               (romacs-agent--claude-control-request (plist-get context :owed)
                                                    (gethash "request_id" line) (gethash "request" line)))
-              ("control_response" (romacs-agent--claude-response-events session (gethash "response" line)))
+              ("control_response"
+               (romacs-agent--claude-control-response (gethash "response" line) (plist-get context :state)
+                                                      (plist-get context :selection) (plist-get context :approval)))
               ;; Asked for no more; an older run's records may hold one.
               ("prompt_suggestion" nil)
               ;; Its instance's usage, after each request.
@@ -733,7 +753,7 @@ EFFORT.  Neither can be cleared in a live harness: `restart' then."
 ;; anyway, and a recalled image shows in the tray before anything is sent.
 (defun romacs-agent--claude-input-events (session line)
   "Decode LINE as written to SESSION's harness."
-  (romacs-agent--claude-decode-input line (plist-get (romacs-agent-driver-state session) :owed)))
+  (romacs-agent--claude-decode 'in line (romacs-agent--claude-decode-context session 'in line)))
 
 (defun romacs-agent--claude-decode-input (line owed)
   "Decode outbound LINE with the currently OWED requests."
@@ -1003,9 +1023,9 @@ environment."
   :interrupt #'romacs-agent--claude-interrupt
   :respond #'romacs-agent--claude-respond
   :request-event #'romacs-agent--claude-request-event
-  :events #'romacs-agent--claude-events
+  :decode #'romacs-agent--claude-decode
+  :decode-context #'romacs-agent--claude-decode-context
   :usage #'romacs-agent--claude-usage
-  :input-events #'romacs-agent--claude-input-events
   ;; A turn the harness's end cut short goes on (Claude Code's own switch).
   :resume-environment '("CLAUDE_CODE_RESUME_INTERRUPTED_TURN=1")
   :native-id-p #'romacs-agent--uuid-p

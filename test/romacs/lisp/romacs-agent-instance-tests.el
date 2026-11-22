@@ -178,29 +178,27 @@ conversation is in `one'; `told' collects what a task is told."
 (ert-deftest romacs-agent-instance-codex-limits ()
   (romacs-agent-instance-tests--with
     (let ((codex (romacs-agent--make :id "c" :harness 'codex :provider "codex")))
-      ;; The fuller window binds: a spent weekly one under a light primary.
-      (let ((event (car (romacs-agent--codex-notified
-                         codex "account/rateLimits/updated"
-                         (romacs-mcp--object "rateLimits"
-                                             (romacs-mcp--object "primary" (romacs-mcp--object "usedPercent" 20 "resetsAt" 100)
-                                                                 "secondary" (romacs-mcp--object "usedPercent" 100 "resetsAt" 200
-                                                                                                 "windowDurationMins" 10080)))))))
-        (should (eq (plist-get event :status) 'rejected))
-        (should (= (plist-get event :resets) 200)))
-      ;; Both spent: no room until the later of them resets.
-      (let ((event (car (romacs-agent--codex-notified
-                         codex "account/rateLimits/updated"
-                         (romacs-mcp--object "rateLimits"
-                                             (romacs-mcp--object "primary" (romacs-mcp--object "usedPercent" 100 "resetsAt" 1000)
-                                                                 "secondary" (romacs-mcp--object "usedPercent" 100 "resetsAt" 3000)))))))
-        (should (= (plist-get event :resets) 3000)))
-      ;; A turn refused at the limit, in Codex's own words.
-      (should (plist-get (romacs-agent--codex-done
-                          (romacs-mcp--object "status" "failed"
-                                              "error" (romacs-mcp--object "message" "You've hit your usage limit"
-                                                                          "codexErrorInfo" "usageLimitExceeded"))
-                          nil nil)
-                         :limit)))))
+      (cl-flet ((event (limits)
+                  (car (romacs-agent--decode-driver-record
+                        codex 'out (romacs-mcp--object "method" "account/rateLimits/updated"
+                                                      "params" (romacs-mcp--object "rateLimits" limits))))))
+        ;; The fuller window binds: a spent weekly one under a light primary.
+        (let ((event (event (romacs-mcp--object "primary" (romacs-mcp--object "usedPercent" 20 "resetsAt" 100)
+                                               "secondary" (romacs-mcp--object "usedPercent" 100 "resetsAt" 200
+                                                                               "windowDurationMins" 10080)))))
+          (should (eq (plist-get event :status) 'rejected))
+          (should (= (plist-get event :resets) 200)))
+        ;; Both spent: no room until the later of them resets.
+        (let ((event (event (romacs-mcp--object "primary" (romacs-mcp--object "usedPercent" 100 "resetsAt" 1000)
+                                               "secondary" (romacs-mcp--object "usedPercent" 100 "resetsAt" 3000)))))
+          (should (= (plist-get event :resets) 3000)))
+        ;; A turn refused at the limit, in Codex's own words.
+        (should (plist-get (romacs-agent--codex-done
+                            (romacs-mcp--object "status" "failed"
+                                                "error" (romacs-mcp--object "message" "You've hit your usage limit"
+                                                                            "codexErrorInfo" "usageLimitExceeded"))
+                            nil nil)
+                           :limit))))))
 
 (ert-deftest romacs-agent-instance-on-limit-moves-a-lane ()
   (romacs-agent-instance-tests--with

@@ -38,6 +38,28 @@
       (should-not (romacs-agent--per-turn-p session)))
     (should-error (romacs-agent--driver-of 'nosuch) :type 'user-error)))
 
+(ert-deftest romacs-agent-driver-decodes-records-with-explicit-context ()
+  (romacs-agent-driver-test--registry
+    (let* ((session (romacs-agent--make :id "decoded" :harness 'read-only-fixture))
+           (input (romacs-mcp--object "body" "question"))
+           (output (romacs-mcp--object "body" "answer"))
+           (seen nil)
+           (romacs-agent-event-functions (list (lambda (_ event) (push event seen)))))
+      (romacs-agent-define-harness
+       'read-only-fixture
+       :decode-context (lambda (state direction _object)
+                         (list (romacs-agent-inputs state) direction))
+       :decode (lambda (direction object context)
+                 (should (equal context (list 1 direction)))
+                 (list (list :type (if (eq direction 'in) 'input 'done)
+                             :text (gethash "body" object)))))
+      (romacs-agent--record session (romacs-mcp--object "seq" 1 "in" input))
+      (romacs-agent--record session (romacs-mcp--object "seq" 2 "out" output))
+      (should (equal (mapcar (lambda (event) (plist-get event :text)) seen) '("answer" "question")))
+      (should (equal (romacs-agent-reply session) "answer"))
+      (should (romacs-agent--turn-free-records-p session (romacs-agent--scratch session)
+                                                (list (romacs-mcp--object "out" output)) nil)))))
+
 (ert-deftest romacs-agent-import-ids-are-conversation-identities ()
   ;; The same conversation id in two configuration directories is two
   ;; conversations; a default spelled out is the default.

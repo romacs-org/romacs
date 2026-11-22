@@ -380,10 +380,14 @@ message again: its text and record (another session's) the steer's."
                             "allow" "deny"))))
 
 (defun romacs-agent--codex-input-events (session object)
-  "The events of OBJECT, written to SESSION's harness."
+  "Decode OBJECT written to Codex using SESSION's context."
+  (romacs-agent--codex-decode 'in object (romacs-agent--codex-decode-context session 'in object)))
+
+(defun romacs-agent--codex-decode-input (object context)
+  "Decode OBJECT written to Codex, using the prior CONTEXT."
   (let ((method (gethash "method" object))
         (id (gethash "id" object))
-        (state (romacs-agent-driver-state session)))
+        (state (plist-get context :state)))
     (cond
      ((member method '("turn/start" "turn/steer")) (romacs-agent--codex-message state object))
      ((member method '("initialize" "initialized" "thread/start" "thread/resume" "thread/fork"))
@@ -394,7 +398,7 @@ message again: its text and record (another session's) the steer's."
                                       (list :experimental t))))))
      ((null method)
       (let* ((approval (romacs-agent--codex-approval-id (plist-get state :run) id))
-             (request (gethash approval (romacs-agent-approvals session))))
+             (request (plist-get context :request)))
         (if request
             (romacs-agent--codex-answered approval (nth 2 request) (gethash "result" object))
           (romacs-agent--codex-paid (plist-get state :owed)
@@ -591,12 +595,15 @@ owed lines."
 
 (defun romacs-agent--codex-item (session item completed &optional id)
   "The events of ITEM, started or COMPLETED; ID, when given, names it."
-  (let* ((id (or id (gethash "id" item)))
-         (type (gethash "type" item))
-         (shown (gethash id (if (member type '("agentMessage" "reasoning"))
-                                (romacs-agent-streamed session)
-                              (romacs-agent-tools session)))))
-    (romacs-agent--codex-decode-item type id item completed shown)))
+  (let ((id (or id (gethash "id" item))) (type (gethash "type" item)))
+    (romacs-agent--codex-decode-item type id item completed
+                                    (romacs-agent--codex-item-shown-p session type id))))
+
+(defun romacs-agent--codex-item-shown-p (session type id)
+  "Whether SESSION has already shown an item of TYPE under ID."
+  (gethash id (if (member type '("agentMessage" "reasoning"))
+                  (romacs-agent-streamed session)
+                (romacs-agent-tools session))))
 
 (defun romacs-agent--codex-decode-item (type id item completed shown)
   "Decode ITEM of TYPE by ID, with its COMPLETED and SHOWN flags."
@@ -630,10 +637,11 @@ owed lines."
     ((or "userMessage" "hookPrompt" "todo_list" "error") nil)
     (_ (romacs-agent--codex-tool-events id item completed shown))))
 
-(defun romacs-agent--codex-plan (params)
-  "A plan update, as a status line: each step marked by its state."
+(defun romacs-agent--codex-plan (params marks)
+  "Format a plan update from PARAMS, using MARKS by step status."
   (let ((steps (mapconcat (lambda (step)
-                            (concat (romacs-agent-glyph (pcase (gethash "status" step) ("completed" 'ok) ("inProgress" 'step-doing) (_ 'step-todo))) " "
+                            (concat (or (alist-get (gethash "status" step) marks nil nil #'equal)
+                                        (alist-get 'default marks)) " "
                                     (gethash "step" step)))
                           (gethash "plan" params) "  ")))
     (concat "Plan: " (if-let* ((why (romacs-agent--value (gethash "explanation" params)))) (concat why "  ") "") steps)))
@@ -698,14 +706,16 @@ owed lines."
             (when (and window (not (eql window (plist-get state :window))))
               (list (list :type 'handshake :state (list :window window)))))))
 
-(defun romacs-agent--codex-notified (session method params)
-  "The events of notification METHOD with PARAMS."
-  (let ((state (romacs-agent-driver-state session)))
+(defun romacs-agent--codex-notified (context method params)
+  "Decode notification METHOD with PARAMS and prior CONTEXT."
+  (let ((state (plist-get context :state)))
     (pcase method
       ("turn/started" (romacs-agent--codex-turn-started-events state params))
-      ("turn/completed" (romacs-agent--codex-turn-completed-events state (romacs-agent-reply session) params))
-      ("item/started" (romacs-agent--codex-item session (gethash "item" params) nil))
-      ("item/completed" (romacs-agent--codex-item session (gethash "item" params) t))
+      ("turn/completed" (romacs-agent--codex-turn-completed-events state (plist-get context :reply) params))
+      ((or "item/started" "item/completed")
+       (let ((item (gethash "item" params)))
+         (romacs-agent--codex-decode-item (gethash "type" item) (gethash "id" item) item
+                                         (equal method "item/completed") (plist-get context :shown))))
       ("item/agentMessage/delta"
        (let ((id (gethash "itemId" params)))
          (list (list :type 'record-state :state (list :streamed id))
@@ -722,7 +732,7 @@ owed lines."
          (list (list :type 'tool-output :id (gethash "itemId" params) :text (concat message "\n")))))
       ("item/reasoning/summaryPartAdded"
        (when (> (gethash "summaryIndex" params 0) 0) (list (list :type 'thinking :text "\n\n"))))
-      ("turn/plan/updated" (list (list :type 'status :text (romacs-agent--codex-plan params))))
+      ("turn/plan/updated" (list (list :type 'status :text (romacs-agent--codex-plan params (plist-get context :marks)))))
       ;; Its account's usage: the fuller of its windows, which binds first.
       ("account/rateLimits/updated" (romacs-agent--codex-rate-limits-events params))
       ("thread/tokenUsage/updated" (romacs-agent--codex-token-usage-events state params))
@@ -734,9 +744,8 @@ owed lines."
       ("serverRequest/resolved"
        ;; Settled by the harness before any answer (its turn ended, it
        ;; was cancelled): no longer the user's to answer.
-       (let ((id (romacs-agent--codex-approval-id (plist-get state :run) (gethash "requestId" params))))
-         (when (gethash id (romacs-agent-approvals session))
-           (list (list :type 'answered :request-id id :how 'harness)))))
+       (when-let* ((id (plist-get context :resolved)))
+         (list (list :type 'answered :request-id id :how 'harness))))
       ("model/rerouted"
        (list (list :type 'status :text (format "Model rerouted to %s" (gethash "toModel" params)))))
       ((or "warning" "configWarning" "deprecationNotice")
@@ -754,33 +763,35 @@ owed lines."
 
 ;;; `codex exec --json''s lines, as earlier sessions journaled them
 
+(defun romacs-agent--codex-exec-item-type (item)
+  "Return an exec ITEM's type in app-server's words."
+  (pcase (gethash "type" item)
+    ("agent_message" "agentMessage") ("command_execution" "commandExecution")
+    ("mcp_tool_call" "mcpToolCall") ("file_change" "fileChange") ("web_search" "webSearch")
+    (type type)))
+
 (defun romacs-agent--codex-exec-item (item)
   "An exec run's ITEM in the app-server's words."
   (let ((item (copy-hash-table item)))
     (pcase-dolist (`(,old . ,new) '(("aggregated_output" . "aggregatedOutput") ("exit_code" . "exitCode")))
       (when-let* ((value (gethash old item))) (puthash new value item)))
-    (puthash "type" (pcase (gethash "type" item)
-                      ("agent_message" "agentMessage") ("command_execution" "commandExecution")
-                      ("mcp_tool_call" "mcpToolCall") ("file_change" "fileChange") ("web_search" "webSearch")
-                      (type type))
-             item)
+    (puthash "type" (romacs-agent--codex-exec-item-type item) item)
     item))
 
-(defun romacs-agent--codex-exec-events (session line)
-  "The events of LINE, one of `codex exec --json''s objects."
+(defun romacs-agent--codex-exec-events (context line)
+  "Decode a journaled `codex exec --json' LINE with prior CONTEXT."
   (cl-flet ((item (completed)
-              ;; Its ids count from item_0 every run.
-              (let ((item (gethash "item" line)))
-                (romacs-agent--codex-item session (romacs-agent--codex-exec-item item) completed
-                                          (format "%d:%s" (romacs-agent-turns session) (gethash "id" item))))))
+              (let ((item (romacs-agent--codex-exec-item (gethash "item" line))))
+                (romacs-agent--codex-decode-item (gethash "type" item) (plist-get context :id) item
+                                                completed (plist-get context :shown)))))
     (pcase (gethash "type" line)
       ("thread.started" (list (list :type 'session :harness-session (gethash "thread_id" line)
-                                    :model (plist-get (romacs-agent-options session) :model))))
+                                    :model (plist-get context :model))))
       ("turn.started" '((:type record-state :state (:reply nil))))
       ("item.started" (item nil))
       ("item.updated" nil)
       ("item.completed" (item t))
-      ("turn.completed" (list (list :type 'done :text (romacs-agent-reply session))))
+      ("turn.completed" (list (list :type 'done :text (plist-get context :reply))))
       ("turn.failed" (list (list :type 'done :error t :text (or (romacs-agent--codex-error line) "turn failed"))))
       ("error" (list (list :type 'error :text (gethash "message" line))))
       (_ (list (list :type 'unknown :raw line))))))
@@ -797,23 +808,82 @@ owed lines."
                                  (cons thread "Codex keeps the unfinished goal on this thread"))))))))
 
 (defun romacs-agent--codex-events (session line)
-  "The events of LINE, a JSON-RPC message from `codex app-server' (or a
-line an earlier `codex exec' run journaled)."
+  "Decode a Codex output LINE using SESSION's context."
+  (romacs-agent--codex-decode 'out line (romacs-agent--codex-decode-context session 'out line)))
+
+(defun romacs-agent--codex-other-thread-p (own params)
+  "Whether PARAMS identifies a thread other than the session's OWN."
+  (let ((thread (and (hash-table-p params) (gethash "threadId" params))))
+    (and own (stringp thread) (not (equal own thread)))))
+
+(defun romacs-agent--codex-notification-context (session method params)
+  "Read the values needed for Codex notification METHOD with PARAMS."
+  (pcase method
+    ((or "turn/started" "thread/tokenUsage/updated") (list :state (romacs-agent-driver-state session)))
+    ("turn/completed" (list :state (romacs-agent-driver-state session) :reply (romacs-agent-reply session)))
+    ((or "item/started" "item/completed")
+     (let ((item (gethash "item" params)))
+       (list :shown (romacs-agent--codex-item-shown-p session (gethash "type" item) (gethash "id" item)))))
+    ("serverRequest/resolved"
+     (let ((id (romacs-agent--codex-approval-id (plist-get (romacs-agent-driver-state session) :run)
+                                              (gethash "requestId" params))))
+       (list :resolved (and (gethash id (romacs-agent-approvals session)) id))))
+    ("turn/plan/updated"
+     (list :marks (list (cons "completed" (romacs-agent-glyph 'ok))
+                        (cons "inProgress" (romacs-agent-glyph 'step-doing))
+                        (cons 'default (romacs-agent-glyph 'step-todo)))))))
+
+(defun romacs-agent--codex-exec-context (session line)
+  "Read the values needed for an older Codex exec LINE."
+  (pcase (gethash "type" line)
+    ("thread.started" (list :model (plist-get (romacs-agent-options session) :model)))
+    ("turn.completed" (list :reply (romacs-agent-reply session)))
+    ((or "item.started" "item.completed")
+     ;; Its ids count from item_0 every run.
+     (let* ((item (gethash "item" line))
+            (id (format "%d:%s" (romacs-agent-turns session) (gethash "id" item))))
+       (list :id id :shown (romacs-agent--codex-item-shown-p session
+                                                           (romacs-agent--codex-exec-item-type item) id))))))
+
+(defun romacs-agent--codex-decode-context (session direction line)
+  "Read the values needed to decode Codex LINE in DIRECTION."
+  (let ((state (romacs-agent-driver-state session))
+        (method (gethash "method" line))
+        (id (gethash "id" line)))
+    (cond ((eq direction 'in)
+           (list :state state :request (unless method
+                                          (gethash (romacs-agent--codex-approval-id (plist-get state :run) id)
+                                                   (romacs-agent-approvals session)))))
+          ((gethash "type" line) (romacs-agent--codex-exec-context session line))
+          ((and method id) (list :state state))
+          ((not method)
+           (list :state state :model (plist-get (romacs-agent-options session) :model)
+                 :interrupted (romacs-agent-interrupted session)))
+          (t (let ((own (romacs-agent-harness-session session)) (params (gethash "params" line)))
+               (nconc (list :thread own)
+                      (unless (romacs-agent--codex-other-thread-p own params)
+                        (romacs-agent--codex-notification-context session method params))))))))
+
+(defun romacs-agent--codex-decode (direction line context)
+  "Decode Codex LINE in DIRECTION using CONTEXT."
+  (if (eq direction 'in)
+      (romacs-agent--codex-decode-input line context)
+    (romacs-agent--codex-decode-output line context)))
+
+(defun romacs-agent--codex-decode-output (line context)
+  "Decode a Codex app-server or older exec output LINE with CONTEXT."
   (let* ((method (gethash "method" line)) (id (gethash "id" line))
          (params (gethash "params" line))
-         (thread (and (hash-table-p params) (gethash "threadId" params)))
-         (own (romacs-agent-harness-session session)))
-    (cond ((gethash "type" line) (romacs-agent--codex-exec-events session line))
-          ((and method id) (romacs-agent--codex-asked (romacs-agent-driver-state session) id method params))
-          ((and method own (stringp thread) (not (equal own thread)))
-           (romacs-agent--codex-child-progress thread method params))
+         (state (plist-get context :state)))
+    (cond ((gethash "type" line) (romacs-agent--codex-exec-events context line))
+          ((and method id) (romacs-agent--codex-asked state id method params))
+          ((and method (romacs-agent--codex-other-thread-p (plist-get context :thread) params))
+           (romacs-agent--codex-child-progress (gethash "threadId" params) method params))
           ((and (hash-table-p params) (member method '("thread/goal/updated" "thread/goal/cleared")))
            (romacs-agent--codex-goal-events method params))
-          (method (romacs-agent--codex-notified session method params))
-          (t (romacs-agent--codex-answer
-              (romacs-agent-driver-state session)
-              (plist-get (romacs-agent-options session) :model)
-              (romacs-agent-interrupted session) id line)))))
+          (method (romacs-agent--codex-notified context method params))
+          (t (romacs-agent--codex-answer state (plist-get context :model)
+                                        (plist-get context :interrupted) id line)))))
 
 (defconst romacs-agent--codex-output-delta
   "{\"out\":{\\(?:\"emittedAtMs\":[0-9]+,\\)?\"method\":\"item/\\(?:commandExecution\\|fileChange\\)/outputDelta\",\"params\":{\"delta\":"
@@ -861,9 +931,9 @@ thread: its rollout, wherever its day put it."
   :interrupt #'romacs-agent--codex-interrupt
   :respond #'romacs-agent--codex-respond
   :request-event #'romacs-agent--codex-request-event
-  :events #'romacs-agent--codex-events
+  :decode #'romacs-agent--codex-decode
+  :decode-context #'romacs-agent--codex-decode-context
   :streamed-skip #'romacs-agent--codex-streamed-skip
-  :input-events #'romacs-agent--codex-input-events
   :native-id-p #'romacs-agent--uuid-p
   :history '(:files romacs-agent-codex-history--files :find romacs-agent-codex-history--find
              :keep romacs-agent-codex-history--keep

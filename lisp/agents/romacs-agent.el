@@ -695,8 +695,14 @@ instances) is derived again when it changes.")
       :always for the rest of the session;
   :request-event (ID REQUEST)   optional: recover the approval event
       shown for a pending REQUEST in a new view;
+  :decode (DIRECTION OBJECT CONTEXT)   decode a journaled object in
+      direction `in' (written to the harness) or `out' (written by it);
+  :decode-context (SESSION DIRECTION OBJECT)   optional: read the values
+      the decoder needs before calling it.  The decoder treats those
+      values and the object as read-only and returns a list of events.
   :events (SESSION OBJECT), :input-events (SESSION OBJECT)
-      the events of an object it wrote, and of one written to it;
+      callbacks for older drivers without :decode, for out and in;
+  Decoder events include:
       `handshake' events (:state PLIST) fold into its startup state.
       `record-state' applies private bookkeeping (:state PLIST of
       :reply, :message, :streamed, :compacting, :incoming or :resume-at).
@@ -821,6 +827,18 @@ Defining it again replaces it."
 
 (defun romacs-agent--harness-get (session key)
   (plist-get (romacs-agent--driver session) key))
+
+(defun romacs-agent--decode-driver-record (session direction object &optional driver)
+  "Decode OBJECT in DIRECTION with SESSION's context.
+DRIVER, when given, is the driver whose records a probe of SESSION reads."
+  (let ((driver (or driver (romacs-agent--driver session))))
+    (if-let* ((decode (plist-get driver :decode)))
+        (funcall decode direction object
+                 (when-let* ((context (plist-get driver :decode-context)))
+                   (funcall context session direction object)))
+      (funcall (if (eq direction 'in) (or (plist-get driver :input-events) #'ignore)
+                 (plist-get driver :events))
+               session object))))
 
 (defun romacs-agent--idle-compact-prompt (session)
   "SESSION's harness prompt for idle compaction, if it has one."
@@ -2100,7 +2118,7 @@ keeps across runs (`:rolled-back', `:resume-at', `:renew-block', and
          (let* ((steer (> (or (romacs-agent-input-seq session) 0) (romacs-agent-completed-seq session)))
                 (context (romacs-agent--record-input-context input steer)))
            (romacs-agent--annotate-input-events
-            (funcall (or (romacs-agent--harness-get session :input-events) #'ignore) session input)
+            (romacs-agent--decode-driver-record session 'in input)
             context)))
         (t (list (list :type 'input :text (if (stringp input) input (romacs-agent--json input)))))))
 
@@ -2109,7 +2127,7 @@ keeps across runs (`:rolled-back', `:resume-at', `:renew-block', and
   (let ((out (gethash "out" record :absent))
         (exit (gethash "exit" record :absent))
         (note (gethash "note" record :absent)))
-    (cond ((hash-table-p out) (funcall (romacs-agent--harness-get session :events) session out))
+    (cond ((hash-table-p out) (romacs-agent--decode-driver-record session 'out out))
           ((stringp out) (list (list :type 'unknown :raw out)))
           ((not (eq input :absent)) (romacs-agent--record-input-events session input))
           ((not (eq exit :absent)) (list (list :type 'exit :status exit)))
@@ -5418,7 +5436,7 @@ first, leave no turn under way: the last one telling either ends a turn
 or its harness, or none tells and ALL says they are all there are.
 PROBE, a scratch copy of SESSION (`romacs-agent--scratch'), is what the
 harness parses them in."
-  (let ((verdict nil) (events (romacs-agent--harness-get session :events)))
+  (let ((verdict nil) (driver (romacs-agent--driver session)))
     (while (and (not verdict) records)
       (let* ((record (pop records)) (out (and (hash-table-p record) (gethash "out" record)))
              (in (and (hash-table-p record) (gethash "in" record))))
@@ -5428,7 +5446,7 @@ harness parses them in."
                 ((and (hash-table-p in) (gethash "romacsRequest" in)) (setq verdict 'busy))
                 ((hash-table-p out)
                  (let ((types (mapcar (lambda (event) (plist-get event :type))
-                                      (ignore-errors (funcall events probe out)))))
+                                      (ignore-errors (romacs-agent--decode-driver-record probe 'out out driver)))))
                    (cond ((memq 'done types) (setq verdict 'free))
                          ((seq-intersection types '(delta thinking tool message-end approval))
                           (setq verdict 'busy)))))))))

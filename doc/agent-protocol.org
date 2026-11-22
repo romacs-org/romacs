@@ -64,10 +64,12 @@ its lines their meaning, in Lisp.
 
 - *Drivers.* Claude and Codex register with =romacs-agent-define-harness=.
   Other harnesses use the same registration.
-  - =:events= and =:input-events= turn records into normalized events:
+  - =:decode-context= reads the values needed from the session before
+    =:decode= turns journaled objects into normalized events:
     =session=, =input=, =delta=, =message-end=, =thinking=, =tool=,
     =approval=, =answered=, =plan=, =status=, =error=, =compacted=,
     =usage=, =rate-limit=, =done=, =exit=, ...;
+    Older drivers can still use =:events= and =:input-events=.
   - =:input=, =:respond=, =:interrupt= and =:select= compose the lines
     written back.
   - Background journal and transcript readers load the registered driver
