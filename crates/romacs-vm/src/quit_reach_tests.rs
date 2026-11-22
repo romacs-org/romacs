@@ -463,12 +463,13 @@ fn a_native_sort_in_runs_is_stable_and_ordered() {
         (2, 'm'),
     ];
     let (mut merged_middle, mut merged_tail) = (false, false);
-    crate::prim::prims::leaf_sequences::sort_polled(&mut Leaf::new(&mut vm), &mut order, 4, |_, a, b| {
+    let result = crate::prim::prims::leaf_sequences::sort_polled(&mut Leaf::new(&mut vm), &mut order, 4, |_, a, b| {
         // These pairs occur in the merge levels, beyond the boundary checks.
         merged_middle |= (a.1, b.1) == ('i', 'a');
         merged_tail |= (a.1, b.1) == ('m', 'a');
         a.0.cmp(&b.0)
-    }).unwrap();
+    });
+    assert!(result.is_ok(), "the sort completed without a quit");
     assert!(merged_middle, "merged the coalesced and middle runs");
     assert!(merged_tail, "merged the odd tail in the next level");
     assert_eq!(order, [
