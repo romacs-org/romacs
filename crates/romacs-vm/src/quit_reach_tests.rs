@@ -296,7 +296,7 @@ fn tree_sitter_parse_and_query_quit() {
 #[test]
 fn call_process_s_wait_quits_and_interrupts_the_child() {
     let (mut vm, signal) = busy_vm();
-    let call = prepare(&mut vm, "romacs--call-process-run", "(list '(\"sleep\" \"30\") nil \"/\" \"/dev/null\" nil nil t)");
+    let call = prepare(&mut vm, "romacs--call-process-run", "(list '(\"sleep\" \"30\") nil \"/\" \"/dev/null\" nil nil t (cons nil nil))");
     assert!(signal.interrupt());
     let started = std::time::Instant::now();
     let outcome = invoke(&mut vm, call);
@@ -305,7 +305,7 @@ fn call_process_s_wait_quits_and_interrupts_the_child() {
     // Under inhibit-quit the wait goes on, the press held, without spinning.
     vm.quit_unwinding = false;
     eval(&mut vm, "(setq inhibit-quit t)");
-    let call = prepare(&mut vm, "romacs--call-process-run", "(list '(\"sleep\" \"0.3\") nil \"/\" \"/dev/null\" nil nil t)");
+    let call = prepare(&mut vm, "romacs--call-process-run", "(list '(\"sleep\" \"0.3\") nil \"/\" \"/dev/null\" nil nil t (cons nil nil))");
     assert!(signal.interrupt());
     let outcome = invoke(&mut vm, call);
     assert!(outcome.is_ok(), "the wait ended with the child");
@@ -367,7 +367,7 @@ fn a_quit_in_call_process_leaves_no_child_running() {
         let file = dir.join(name);
         let script = script.replace("{F}", &file.display().to_string());
         let (mut vm, signal) = busy_vm();
-        let call = prepare(&mut vm, "romacs--call-process-run", &format!("(list '(\"sh\" \"-c\" {script:?}) nil \"/\" \"/dev/null\" nil nil t)"));
+        let call = prepare(&mut vm, "romacs--call-process-run", &format!("(list '(\"sh\" \"-c\" {script:?}) nil \"/\" \"/dev/null\" nil nil t (cons nil nil))"));
         let presser = {
             let (signal, file) = (signal.clone(), file.clone());
             std::thread::spawn(move || {
@@ -408,7 +408,7 @@ fn a_quit_in_call_process_signals_only_the_child_s_group() {
     // The child's pid and its process group (field 5 of its stat; sh's name has no space).
     let script = format!("read -r _ _ _ _ group _ < /proc/$$/stat; echo $$ $group > {}; exec sleep 30", file.display());
     let (mut vm, signal) = busy_vm();
-    let call = prepare(&mut vm, "romacs--call-process-run", &format!("(list '(\"sh\" \"-c\" {script:?}) nil \"/\" \"/dev/null\" nil nil t)"));
+    let call = prepare(&mut vm, "romacs--call-process-run", &format!("(list '(\"sh\" \"-c\" {script:?}) nil \"/\" \"/dev/null\" nil nil t (cons nil nil))"));
     let presser = {
         let (signal, file) = (signal.clone(), file.clone());
         std::thread::spawn(move || {
@@ -880,10 +880,10 @@ fn nreverse_is_one_walk_across_its_hand_off() {
 #[test]
 fn call_process_quit_is_c_g_s_only_for_its_wait_s_token() {
     let (mut vm, _signal) = busy_vm();
-    let (mine, other) = { let mut cx = Leaf::new(&mut vm); (cx.issue_requit(), cx.issue_requit()) };
+    eval(&mut vm, "(setq quit-test-mine (cons nil nil) quit-test-other (cons nil nil))");
     let (slot_mine, slot_other) = (vm.slot("quit-test-mine"), vm.slot("quit-test-other"));
-    vm.slots[slot_mine].value = mine;
-    vm.slots[slot_other].value = other;
+    let (mine, other) = (vm.slots[slot_mine].value, vm.slots[slot_other].value);
+    { let mut cx = Leaf::new(&mut vm); cx.issue_requit(mine); cx.issue_requit(other); }
     for call in ["(romacs--call-process-quit)", "(romacs--call-process-quit 1)", "(romacs--call-process-quit 2)",
                  "(romacs--call-process-quit (cons nil nil))", "(romacs--call-process-quit (cons (car quit-test-mine) (cdr quit-test-mine)))"] {
         eval(&mut vm, &format!("(defmacro m () {call})"));
@@ -996,4 +996,25 @@ fn a_sqlite_batch_skips_the_blanks_sqlite3_exec_skips() {
                         (sqlite-select db \"SELECT count(*) FROM sqlite_master\")
                         (sqlite-select db \"PRAGMA user_version\")))";
     assert_eq!(vm.eval_source(form).unwrap().display().unwrap(), "(t t t ((2)) ((7)))");
+}
+
+/// A batch's stop is each step's own: a nested query a function ran and
+/// recovered from, stopped by the handler within the first statement,
+/// leaves no stop behind, so the second statement's own `SQLITE_INTERRUPT`
+/// (an SQL function's result code) is its error: the batch returns nil, and
+/// the press waits for the next form.
+#[test]
+fn a_sqlite_batch_s_stop_is_each_step_s_own() {
+    let (mut vm, signal) = busy_vm();
+    let db = eval(&mut vm, "(setq db (sqlite-open))");
+    let connection = Leaf::new(&mut vm).sqlite_connection_of(db).unwrap_or_else(|_| panic!("a database"));
+    connection.define_recover_nested();
+    connection.define_interrupt_itself();
+    let call = prepare(&mut vm, "sqlite-execute-batch", "(list db \"SELECT recover_nested(); SELECT interrupt_itself();\")");
+    assert!(signal.interrupt(), "a busy evaluator takes the press");
+    let outcome = invoke(&mut vm, call);
+    assert!(!quit_signalled(&mut vm, &outcome), "the second statement's own interrupt, not a quit");
+    assert_eq!(outcome.as_ref().map(|v| vm.display(*v).unwrap_or_default()).ok().as_deref(), Some("nil"));
+    assert!(signal.due(), "the press waits for the next poll");
+    vm.quit_unwinding = false;
 }

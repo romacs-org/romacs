@@ -348,6 +348,34 @@ fn a_quit_whose_output_is_not_inserted_leaves_no_c_g_quit_behind() {
     assert_eq!(value.as_deref(), Ok("else"), "the unraised quit was taken by another caller");
 }
 
+/// A quit's token is the call's own before the wait can register it: an
+/// advice on `romacs--call-process-run` that throws out of a quit's result,
+/// past the rest of call-process, leaves no token behind, call after call.
+#[test]
+fn a_throw_out_of_call_process_s_run_leaves_no_token_behind() {
+    let (mut vm, signal, base) = busy_gnu_vm("thrown");
+    vm.eval_source("(progn (defun quit-test-throw (result)
+                             (if (eq (car-safe (car-safe result)) 'quit) (throw 'quit-test-out 'thrown) result))
+                           (advice-add 'romacs--call-process-run :filter-return #'quit-test-throw))").unwrap();
+    let script = "echo $$ > \"$2\"; head -c 4096 /dev/zero | tr '\\000' a; : > \"$1\"; exec sleep 30";
+    for round in 0..20 {
+        let dir = base.join(round.to_string());
+        std::fs::create_dir_all(&dir).unwrap();
+        let (marker, pidfile) = (dir.join("written"), dir.join("pid"));
+        let presser = press_once_drained(&signal, &marker, &pidfile);
+        let value = vm.eval_source(&format!(r#"(progn (setq default-directory "/")
+            (with-temp-buffer (let ((coding-system-for-read 'no-conversion))
+              (catch 'quit-test-out (call-process "sh" nil t nil "-c" {script:?} "sh" {:?} {:?})))))"#,
+            marker.display().to_string(), pidfile.display().to_string())).and_then(romacs_vm::Local::display);
+        presser.join().unwrap();
+        assert_eq!(value.as_deref(), Ok("thrown"), "round {round}: the advice threw out of the quit's result");
+    }
+    std::fs::remove_dir_all(&base).unwrap();
+    vm.eval_source("(advice-remove 'romacs--call-process-run #'quit-test-throw)").unwrap();
+    let left = vm.eval_source("(length (symbol-value (intern \"#:vm2-call-process-quits\")))").and_then(romacs_vm::Local::display);
+    assert_eq!(left.as_deref(), Ok("0"), "a token outlived its call");
+}
+
 // A host outlives its VM: children the VM leaves, running or deleted, are
 // still reaped once they exit, not left as zombies.
 #[test]

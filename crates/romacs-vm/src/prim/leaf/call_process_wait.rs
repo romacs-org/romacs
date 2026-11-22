@@ -81,16 +81,14 @@ impl Leaf<'_> {
         Fault::Signal(self.sym("quit"), Value::NIL)
     }
 
-    /// A new token for a quit a call-process wait took and returns with the
-    /// output read before it: a fresh cons, known by `eq` alone, so no
-    /// number or other value stands for it. It is outstanding (in
-    /// [`REQUITS`]) until raised again or retired.
-    pub(crate) fn issue_requit(&mut self) -> Value {
-        let token = self.cons(Value::NIL, Value::NIL);
+    /// TOKEN, outstanding (in [`REQUITS`]) until raised again or retired,
+    /// as the token of a quit a call-process wait took and returns with the
+    /// output read before it. TOKEN is the caller's fresh cons, known by
+    /// `eq` alone, so no number or other value stands for it.
+    pub(crate) fn issue_requit(&mut self, token: Value) {
         let outstanding = self.hidden_value(REQUITS);
         let outstanding = self.cons(token, outstanding);
         self.set_hidden_value(REQUITS, outstanding);
-        token
     }
 
     /// Whether TOKEN is outstanding, which it then is not.

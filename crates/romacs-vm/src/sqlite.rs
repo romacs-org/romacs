@@ -271,6 +271,9 @@ impl Connection {
                 if statement.stmt.is_null() { continue; }
                 watch.statement.set(statement.stmt);
                 let outcome = loop {
+                    // Each step's own: a stop asked within an earlier one
+                    // (a nested query a function recovered from) is not this.
+                    watch.stopped.set(false);
                     match statement.step_unwatched() {
                         Step::Row => {}
                         outcome => break outcome,
@@ -301,6 +304,34 @@ impl Connection {
         let code = unsafe {
             ffi::sqlite3_create_function_v2(self.db, c"interrupt_itself".as_ptr(), 0, ffi::SQLITE_UTF8, std::ptr::null_mut(),
                                             Some(interrupt_itself), None, None, None)
+        };
+        assert_eq!(code, ffi::SQLITE_OK);
+    }
+    /// Defines the SQL function `recover_nested()`, which runs a long query
+    /// on its own connection and recovers from whatever ends it, as a loaded
+    /// function may: a stop the progress handler asks for there ends only the
+    /// nested query, and the function returns its result code.
+    #[cfg(test)]
+    pub(crate) fn define_recover_nested(&self) {
+        extern "C" fn recover_nested(context: *mut ffi::sqlite3_context, _: c_int, _: *mut *mut ffi::sqlite3_value) {
+            let sql = c"WITH RECURSIVE c(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM c WHERE i<200000) SELECT count(*) FROM c";
+            // UNSAFE(this module is libsqlite3-sys's one boundary: a test's SQL function)
+            // SAFETY: SQLite passes the live context of this call; the nested
+            // statement is prepared, stepped and finalized on its connection.
+            unsafe {
+                let db = ffi::sqlite3_context_db_handle(context);
+                let mut nested = std::ptr::null_mut();
+                ffi::sqlite3_prepare_v2(db, sql.as_ptr(), -1, std::ptr::from_mut(&mut nested), std::ptr::null_mut());
+                let code = ffi::sqlite3_step(nested);
+                ffi::sqlite3_finalize(nested);
+                ffi::sqlite3_result_int(context, code);
+            }
+        }
+        // UNSAFE(this module is libsqlite3-sys's one boundary: a test's SQL function)
+        // SAFETY: `db` is open; the name is NUL-terminated; no user data.
+        let code = unsafe {
+            ffi::sqlite3_create_function_v2(self.db, c"recover_nested".as_ptr(), 0, ffi::SQLITE_UTF8, std::ptr::null_mut(),
+                                            Some(recover_nested), None, None, None)
         };
         assert_eq!(code, ffi::SQLITE_OK);
     }

@@ -282,7 +282,7 @@ fn cancel_call_process(name: &str, script: &str, helper: bool) -> String {
     let argv = [String::from("sh"), "-c".into(), script.into(), "sh".into(), pidfile.display().to_string(),
                 hs.0.join("ready").display().to_string(), helperfile.display().to_string()];
     let argv: Vec<String> = argv.iter().map(|a| serde_json::to_string(a).unwrap()).collect();
-    let job = format!("'(lambda () (romacs--call-process-run '({}) nil \"/\" \"/dev/null\" nil nil t) 'waited)", argv.join(" "));
+    let job = format!("'(lambda () (romacs--call-process-run '({}) nil \"/\" \"/dev/null\" nil nil t (cons nil nil)) 'waited)", argv.join(" "));
     let out = eval(&mut vm, &format!("(let* ((iso (isolate-create)) \
         (f (progn (isolate-await (isolate-spawn 'list :isolate iso)) (isolate-spawn {job} :isolate iso)))) \
         (condition-case nil {} \

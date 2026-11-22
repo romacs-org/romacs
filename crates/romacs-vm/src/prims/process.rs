@@ -519,9 +519,12 @@ fn call_output(cx: &Leaf<'_>, spec: Value) -> std::result::Result<CallOutput, Fa
 }
 
 // OUTPUT: `pipe', nil (discard) or a file name; ERROR: t (with output), nil
-// or a file name.
+// or a file name; TOKEN: the caller's fresh cons, registered as its quit's
+// token if the wait quits with output read, so the caller owns it before
+// the wait can publish it (`romacs--call-process-retire').
 defsubr! { name = "romacs--call-process-run", gnu = "callproc.c:351", effect = Global,
-fn call_process_run(cx, argv: Value, env: Value, dir: Value, infile: Value, output: Value, error: Value, wait: Value) {
+fn call_process_run(cx, argv: Value, env: Value, dir: Value, infile: Value, output: Value, error: Value, wait: Value, token: Value) {
+    if !matches!(cx.kind(token), Kind::Cons) { return Err(Fault::Wrong("consp", token)); }
     let argv = byte_list(cx, argv)?;
     let env = byte_list(cx, env)?;
     let dir = cx.string_view(dir)?.bytes().to_vec();
@@ -529,7 +532,7 @@ fn call_process_run(cx, argv: Value, env: Value, dir: Value, infile: Value, outp
     let output = if output == Value::TRUE { CallOutput::Pipe } else { call_output(cx, output)? };
     let error = call_output(cx, error)?;
     // Its wait quits: the child is interrupted and reaped later.
-    cx.quittable(|cx| cx.call_process_run(&argv, &env, &dir, &infile, output, error, wait != Value::NIL))
+    cx.quittable(|cx| cx.call_process_run(&argv, &env, &dir, &infile, output, error, wait != Value::NIL, token))
 }}
 
 // The quit `romacs--call-process-run' took in its wait, raised again once

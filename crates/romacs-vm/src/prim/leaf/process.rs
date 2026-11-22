@@ -1203,9 +1203,9 @@ impl Leaf<'_> {
     /// output), nil (discard) or a file. With WAIT nil, record the child
     /// for reaping and return nil; else (STATUS . BYTES), STATUS a wait
     /// status, or ((quit . TOKEN) . BYTES) for a quit in the wait with
-    /// BYTES read before it.
+    /// BYTES read before it, TOKEN, the caller's, then outstanding.
     pub(crate) fn call_process_run(&mut self, argv: &[Vec<u8>], env: &[Vec<u8>], dir: &[u8], infile: &[u8],
-                                   output: CallOutput, error: CallOutput, wait: bool) -> Out {
+                                   output: CallOutput, error: CallOutput, wait: bool, token: Value) -> Out {
         use std::os::unix::ffi::OsStrExt;
         let path = |b: &[u8]| std::path::PathBuf::from(std::ffi::OsStr::from_bytes(b));
         let input = crate::host::open_child_input(path(infile)).map_err(|e| {
@@ -1258,7 +1258,7 @@ impl Leaf<'_> {
             return match quit {
                 Fault::Signal(condition, _) if condition == quit_symbol && !bytes.is_empty() => {
                     self.vm.quit_unwinding = false;
-                    let token = self.issue_requit();
+                    self.issue_requit(token);
                     let quit = self.cons(quit_symbol, token);
                     let text = self.make_string(bytes, false);
                     Ok(self.cons(quit, text))
