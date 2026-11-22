@@ -1,5 +1,6 @@
 //! GNU fns.c sequence callbacks. All state crossing Lisp calls is traced.
 use super::*;
+use std::cmp::Ordering;
 
 fn number(n: usize) -> Value {
     Value::integer(n as i64).expect("sequence index")
@@ -98,44 +99,129 @@ fn sort_keyed(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
     sort_key(cx, state)
 }
 /// A stable sort of ORDER by COMPARE that polls as it goes: runs of RUN
-/// elements sorted alone, then merged pairwise a level at a time, a poll
-/// every RUN merged elements. Nothing outside ORDER is written.
+/// elements sorted alone, then coalesced or merged pairwise. Nothing
+/// outside ORDER is written.
 pub(crate) fn sort_polled<T: Copy>(cx: &mut Leaf<'_>, order: &mut [T], run: usize,
-                        mut compare: impl FnMut(&mut Leaf<'_>, &T, &T) -> std::cmp::Ordering) -> std::result::Result<(), Fault> {
-    use std::cmp::Ordering::Less;
-    for chunk in order.chunks_mut(run) {
-        chunk.sort_by(|a, b| compare(cx, a, b));
-        cx.native_poll()?;
+                        mut compare: impl FnMut(&mut Leaf<'_>, &T, &T) -> Ordering) -> std::result::Result<(), Fault> {
+    if order.len() <= run {
+        if let Some(chunk) = order.chunks_mut(run).next() {
+            return sort_run(cx, chunk, &mut compare);
+        }
+        return Ok(());
+    }
+    if sort_monotone_run(cx, order, run, &mut compare)? {
+        return Ok(());
+    }
+    let mut ends = sort_run_ends(cx, order, run, &mut compare)?;
+    if ends.is_empty() {
+        return Ok(());
     }
     // Each level merges from one buffer into the other, so no level copies
     // back; the last result is copied into ORDER if it ended in the other.
-    let mut other: Vec<T> = order.to_vec();
-    let (mut from_order, mut width) = (true, run);
-    while width < order.len() {
+    let mut other = Vec::with_capacity(order.len());
+    for chunk in order.chunks(run) {
+        other.extend_from_slice(chunk);
+        cx.native_poll()?;
+    }
+    let mut from_order = true;
+    while ends.len() > 1 {
         let (source, target): (&[T], &mut [T]) = if from_order { (&*order, &mut other[..]) } else { (&other[..], &mut *order) };
-        for start in (0..source.len()).step_by(2 * width) {
-            let (mid, end) = ((start + width).min(source.len()), (start + 2 * width).min(source.len()));
-            let (mut left, mut right, mut out) = (start, mid, start);
-            while left < mid && right < end {
-                // Stable: the right element goes first only when strictly less.
-                if compare(cx, &source[right], &source[left]) == Less {
-                    target[out] = source[right];
-                    right += 1;
-                } else {
-                    target[out] = source[left];
-                    left += 1;
-                }
-                out += 1;
-                if (out - start).is_multiple_of(run) { cx.native_poll()?; }
-            }
-            target[out..out + mid - left].copy_from_slice(&source[left..mid]);
-            out += mid - left;
-            target[out..end].copy_from_slice(&source[right..end]);
+        let mut start = 0;
+        for pair in (0..ends.len()).step_by(2) {
+            let mid = ends[pair];
+            let end = ends.get(pair + 1).copied().unwrap_or(mid);
+            merge_sort_runs(cx, &source[start..end], &mut target[start..end], mid - start, run, &mut compare)?;
+            ends[pair / 2] = end;
+            start = end;
         }
         from_order = !from_order;
-        width *= 2;
+        ends.truncate(ends.len().div_ceil(2));
     }
-    if !from_order { order.copy_from_slice(&other); }
+    if !from_order {
+        copy_sort_run(cx, order, &other, run)?;
+    }
+    Ok(())
+}
+
+fn sort_run<T>(cx: &mut Leaf<'_>, run: &mut [T],
+               compare: &mut impl FnMut(&mut Leaf<'_>, &T, &T) -> Ordering) -> std::result::Result<(), Fault> {
+    run.sort_by(|a, b| compare(cx, a, b));
+    cx.native_poll()
+}
+
+fn sort_monotone_run<T>(cx: &mut Leaf<'_>, order: &mut [T], run: usize,
+                        compare: &mut impl FnMut(&mut Leaf<'_>, &T, &T) -> Ordering) -> std::result::Result<bool, Fault> {
+    // Reversing a run with equal keys would reverse their stable order.
+    let descending = compare(cx, &order[1], &order[0]) == Ordering::Less;
+    for (i, pair) in order.windows(2).enumerate().skip(1) {
+        if (compare(cx, &pair[1], &pair[0]) == Ordering::Less) != descending {
+            return Ok(false);
+        }
+        if (i + 1).is_multiple_of(run) {
+            cx.native_poll()?;
+        }
+    }
+    cx.native_poll()?;
+    if !descending {
+        return Ok(true);
+    }
+    let (left, right) = order.split_at_mut(order.len() / 2);
+    for (front, back) in left.chunks_mut(run).zip(right.rchunks_mut(run)) {
+        for (a, b) in front.iter_mut().zip(back.iter_mut().rev()) {
+            std::mem::swap(a, b);
+        }
+        cx.native_poll()?;
+    }
+    Ok(true)
+}
+
+/// Only a disordered boundary needs a run endpoint.
+fn sort_run_ends<T: Copy>(cx: &mut Leaf<'_>, order: &mut [T], run: usize,
+                         compare: &mut impl FnMut(&mut Leaf<'_>, &T, &T) -> Ordering) -> std::result::Result<Vec<usize>, Fault> {
+    let mut ends = Vec::new();
+    let mut last = None;
+    for (i, chunk) in order.chunks_mut(run).enumerate() {
+        sort_run(cx, chunk, compare)?;
+        if let Some(last) = last
+            && compare(cx, &chunk[0], &last) == Ordering::Less
+        {
+            ends.push(i * run);
+        }
+        last = chunk.last().copied();
+    }
+    if !ends.is_empty() {
+        ends.push(order.len());
+    }
+    Ok(ends)
+}
+
+fn merge_sort_runs<T: Copy>(cx: &mut Leaf<'_>, source: &[T], target: &mut [T], mid: usize, run: usize,
+                            compare: &mut impl FnMut(&mut Leaf<'_>, &T, &T) -> Ordering) -> std::result::Result<(), Fault> {
+    let (mut left, mut right, mut out) = (0, mid, 0);
+    while left < mid && right < source.len() {
+        // Stable: the right element goes first only when strictly less.
+        if compare(cx, &source[right], &source[left]) == Ordering::Less {
+            target[out] = source[right];
+            right += 1;
+        } else {
+            target[out] = source[left];
+            left += 1;
+        }
+        out += 1;
+        if out.is_multiple_of(run) {
+            cx.native_poll()?;
+        }
+    }
+    let rest = if left < mid { &source[left..mid] } else { &source[right..] };
+    copy_sort_run(cx, &mut target[out..], rest, run)
+}
+
+fn copy_sort_run<T: Copy>(cx: &mut Leaf<'_>, target: &mut [T], source: &[T], run: usize) -> std::result::Result<(), Fault> {
+    debug_assert_eq!(target.len(), source.len());
+    for (out, input) in target.chunks_mut(run).zip(source.chunks(run)) {
+        out.copy_from_slice(input);
+        cx.native_poll()?;
+    }
     Ok(())
 }
 
