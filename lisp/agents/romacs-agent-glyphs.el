@@ -71,7 +71,7 @@
     (approval "✋" "A session that needs an approval")
     (question "❓" "A session that asks the user")
     (failure "❗" "A session failed, or never started")
-    (working "🤖" "A session working")
+    (working "🛠️" "A session working")
     (threads "🧵" "Threads live under a session")
     (waiting "⏳" "A session waiting on its workers")
     (completed "✅" "A session that completed")

@@ -259,7 +259,7 @@ string, an overlay."
                 ((symbol-function 'romacs-agent-sessions) (lambda () (list session))))
         (unwind-protect
             (progn (customize-set-variable 'romacs-agent-glyphs t)
-                   (should (string-suffix-p "  🤖  opus-5-5 high  🧵1  44%%" (romacs-agent-header-tests--header))))
+                   (should (string-suffix-p "  🛠️  opus-5-5 high  🧵1  44%%" (romacs-agent-header-tests--header))))
           (customize-set-variable 'romacs-agent-glyphs nil))
         (should (string-suffix-p "  Working  opus-5-5 high  1 threads live  44%%" (romacs-agent-header-tests--header))))
       ;; A font set that cannot draw the harness's icon: its name.

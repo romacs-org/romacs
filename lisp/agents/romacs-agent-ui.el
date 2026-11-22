@@ -472,7 +472,7 @@ and the views a changed state moves (the chat draws it itself)."
 ;; threads' (Sidebar.logic.ts), what wants the user first.
 
 (defcustom romacs-agent-glyphs t
-  "Whether chats say a state by a glyph (🤖 working, ✋ waiting for you, ❗
+  "Whether chats say a state by a glyph (🛠️ working, ✋ waiting for you, ❗
 failed...) where the frame can draw it: the word shows on hover."
   :type 'boolean :group 'romacs-agent
   ;; Sessions' worker summaries, the status bar and chats' headers are
@@ -596,7 +596,7 @@ its word."
                 'face face 'help-echo (format "%d %s" count word))))
 
 (defun romacs-agent-ui--rollup (keys)
-  "State KEYS as a line of each news state's count (🤖2 ✋1), in rank
+  "State KEYS as a line of each news state's count (🛠️2 ✋1), in rank
 order, or nil when none is news."
   (let ((parts (delq nil (mapcar (lambda (state)
                                    (let ((count (cl-count (car state) keys)))

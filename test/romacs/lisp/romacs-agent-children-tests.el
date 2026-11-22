@@ -228,7 +228,7 @@
         ;; Hovering lists them, what wants the user first.
         (should (equal (get-text-property 0 'help-echo (romacs-agent-children-summary parent))
                        "task 2: needs approval\ntask 1: working"))
-        (should (equal (substring-no-properties (romacs-agent-ui--label (romacs-agent-ui--state parent))) "🤖")))
+        (should (equal (substring-no-properties (romacs-agent-ui--label (romacs-agent-ui--state parent))) "🛠️")))
       ;; Turned off, a summary made before says words at once.
       (cl-letf (((symbol-function 'char-displayable-p) (lambda (_) t))
                 ((symbol-function 'romacs-agent-sessions) (lambda () (list parent))))
