@@ -296,24 +296,62 @@ intervals in O(N log N), whatever ranges and singletons mix."
           (setq k (1+ k)))))
     (nreverse fragments)))
 
+(defun romacs-popup--keymap-value (map)
+  "MAP, a keymap or a symbol whose function is one, as the list; else nil
+or MAP itself when it is no symbol."
+  (if (and map (symbolp map)) (and (keymapp map) (indirect-function map)) map))
+
+(defun romacs-popup--walk-keymap (map function)
+  "Call FUNCTION with (EVENT BINDING LEVEL CHAR-TABLE) for MAP's bindings,
+its parents' and embedded maps' too, in `map-keymap''s order.  LEVEL
+counts the runs of one map's own bindings; CHAR-TABLE is non-nil when
+that run's map is a full one, its characters in a char-table."
+  (let ((level 0))
+    (named-let walk ((map (romacs-popup--keymap-value map)))
+      (while (consp map)
+        (if (keymapp (car map))
+            (progn (walk (romacs-popup--keymap-value (car map)))
+                   (setq map (cdr map)))
+          (let ((full (let ((tail (cdr map)) found)
+                        (while (and (consp tail) (not found) (not (eq (car tail) 'keymap)))
+                          (setq found (char-table-p (car tail)) tail (cdr tail)))
+                        found))
+                (this (setq level (1+ level))))
+            (setq map (map-keymap-internal (lambda (event binding) (funcall function event binding this full)) map))))
+        (setq map (romacs-popup--keymap-value map))))))
+
+(defun romacs-popup--order< (a b)
+  "A before B, each (LEVEL CLASS VALUE), in that order of significance."
+  (or (< (car a) (car b))
+      (and (= (car a) (car b))
+           (or (< (nth 1 a) (nth 1 b))
+               (and (= (nth 1 a) (nth 1 b)) (< (nth 2 a) (nth 2 b)))))))
+
 (defun romacs-popup--map-items (map)
   "MAP's effective bindings with its parents, nil ones kept, in one
-traversal: (CHARACTERS . OTHERS), CHARACTERS (INDEX LO HI BINDING)
-fragments no earlier binding covers, OTHERS (INDEX EVENT BINDING) for
-function keys, the first of each.  Remaps, defaults, menu-bar and mouse
-events are left out."
-  (let ((seen (make-hash-table :test 'eq)) (n 0) characters others)
-    (map-keymap
-     (lambda (event binding)
+traversal: (CHARACTERS . OTHERS), CHARACTERS (INDEX LO HI BINDING ORDER)
+fragments no earlier binding covers, OTHERS (INDEX EVENT BINDING ORDER)
+for function keys, the first of each.  INDEX is the traversal's, which
+decides the effective binding; ORDER, (LEVEL CLASS VALUE), the order
+the map was written in: its own bindings before its parents', a sparse
+map's newest last (it stores them newest first), a full map's
+characters ascending.  Remaps, defaults, menu-bar and mouse events are
+left out."
+  (let ((seen (make-hash-table :test 'eq)) (orders (make-hash-table :test 'eql)) (n 0) characters others)
+    (romacs-popup--walk-keymap
+     map
+     (lambda (event binding level full)
        (setq n (1+ n))
+       (puthash n (if (and full (or (integerp event) (consp event))) (list level 0 n) (list level 1 (- n))) orders)
        (cond
         ((consp event) (push (list n (car event) (cdr event) binding) characters))
         ((integerp event) (push (list n event event binding) characters))
         ((or (memq event '(remap t menu-bar tool-bar)) (string-match-p "mouse" (symbol-name event))))
         ((gethash event seen))
-        (t (puthash event t seen) (push (list n event binding) others))))
-     map)
-    (cons (romacs-popup--hint-fragments (nreverse characters)) (nreverse others))))
+        (t (puthash event t seen) (push (list n event binding) others)))))
+    (let ((order (lambda (item) (append item (list (gethash (car item) orders))))))
+      (cons (mapcar order (romacs-popup--hint-fragments (nreverse characters)))
+            (mapcar order (nreverse others))))))
 
 (defun romacs-popup--hint-entries (map)
   "MAP's bindings as (KEY . LABEL), in one traversal
@@ -321,28 +359,30 @@ events are left out."
 before its parents') is its effective binding, a nil one included, for a
 character range as for a single key, so a range shows split around the
 keys bound before it.  One entry per binding
-\(`romacs-popup--hint-groups'), in traversal order."
+\(`romacs-popup--hint-groups'), in the order MAP was written in."
   (delq nil (mapcar (pcase-lambda (`(,keys . ,binding))
                       (when-let* ((label (romacs-popup--hint-label binding))) (cons keys label)))
                     (romacs-popup--hint-groups (romacs-popup--hint-keys map nil)))))
 
 (defun romacs-popup--hint-keys (map prefix)
-  "MAP's bindings as (KEY BINDING) in traversal order, each KEY after the
-events PREFIX.  The meta keys, ESC's map, read as M- keys at ESC's place."
+  "MAP's bindings as (KEY BINDING) in the order MAP was written in
+\(`romacs-popup--map-items'), each KEY after the events PREFIX.  The meta
+keys, the effective ESC map (its parents' composed in), read as M- keys
+at ESC's place."
   (pcase-let ((`(,characters . ,others) (romacs-popup--map-items map)))
     (let ((name (lambda (event) (key-description (vconcat prefix (vector event))))))
       ;; `sort' is stable: a range's parts stay in ascending order.
       (mapcan (pcase-lambda (`(,_ ,key ,binding))
                 (if (and (not prefix) (equal key [?\e]) (keymapp binding))
-                    (romacs-popup--hint-keys binding [?\e])
+                    (romacs-popup--hint-keys (lookup-key map [?\e]) [?\e])
                   (list (list (if (vectorp key) (funcall name (aref key 0)) key) binding))))
-              (sort (nconc (mapcar (pcase-lambda (`(,i ,lo ,hi ,binding))
-                                     (list i (if (= lo hi) (vector lo)
-                                               (format "%s..%s" (funcall name lo) (funcall name hi)))
+              (sort (nconc (mapcar (pcase-lambda (`(,_ ,lo ,hi ,binding ,order))
+                                     (list order (if (= lo hi) (vector lo)
+                                                   (format "%s..%s" (funcall name lo) (funcall name hi)))
                                            binding))
                                    characters)
-                           (mapcar (pcase-lambda (`(,i ,event ,binding)) (list i (vector event) binding)) others))
-                    (lambda (a b) (< (car a) (car b))))))))
+                           (mapcar (pcase-lambda (`(,_ ,event ,binding ,order)) (list order (vector event) binding)) others))
+                    (lambda (a b) (romacs-popup--order< (car a) (car b))))))))
 
 (defcustom romacs-popup-hints-keys-per-command 2
   "Most keys a hint shows for one command: its shortest."
@@ -352,11 +392,12 @@ events PREFIX.  The meta keys, ESC's map, read as M- keys at ESC's place."
   "KEYS, (KEY BINDING) in order, as one (KEYS . BINDING) per binding at
 its first key's place, KEYS its `romacs-popup-hints-keys-per-command'
 shortest joined by \"/\": aliases such as `n' and `C-f' share a hint."
-  (let ((groups nil))
+  (let ((groups nil) (by-binding (make-hash-table :test 'eq)))
     (pcase-dolist (`(,key ,binding) keys)
-      (if-let* ((group (and binding (assq binding groups))))
+      (if-let* ((group (and binding (gethash binding by-binding))))
           (setcdr group (cons key (cdr group)))
-        (push (list binding key) groups)))
+        (push (list binding key) groups)
+        (when binding (puthash binding (car groups) by-binding))))
     (mapcar (pcase-lambda (`(,binding . ,keys))
               (cons (string-join (seq-take (seq-sort-by #'string-width #'< (nreverse keys))
                                            (max 1 romacs-popup-hints-keys-per-command))
