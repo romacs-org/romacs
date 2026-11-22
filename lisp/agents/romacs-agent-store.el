@@ -716,10 +716,12 @@ cleared) stays gone.  A failure signals, none of them moved."
              (signal (car err) (cdr err))))
     t))
 
-(defun romacs-agent-store-queued-delete (id item-id)
-  "Let go of the kept message ITEM-ID of the session ID names, by the writer."
+(defun romacs-agent-store-queued-delete (id item-id &optional done)
+  "Let go of the kept message ITEM-ID of the session ID names, by the
+writer; DONE, when given, called with its answer once it ran
+\(`romacs-agent-write')."
   (romacs-agent-write 'romacs-agent-store--queued-row (list id item-id nil nil)
-                      nil (list 'queued id item-id)))
+                      done (list 'queued id item-id)))
 
 (defun romacs-agent-store-queued-clear (id)
   "Let go of every message kept for the session ID names, by the writer."
@@ -752,9 +754,13 @@ there is no store.  A store that cannot be read signals
                                     (list id)))
            (error (signal 'romacs-agent-store-unread (list id (error-message-string err))))))
      ;; A store there that will not open is unread, not empty: there
-     ;; unless known absent (a link to one out of reach is there; a
-     ;; lookup that fails is no proof of absence).
-     ((condition-case err (file-attributes file)
+     ;; unless known absent.  Its directory's listing says so: a lookup
+     ;; of the file itself gives nothing both when it is missing and when
+     ;; it cannot be looked at, and a listing that fails is no proof.
+     ((condition-case err
+          (let ((dir (file-name-directory file)))
+            (and (file-directory-p dir)
+                 (member (file-name-nondirectory file) (directory-files dir nil nil t))))
         (error (signal 'romacs-agent-store-unread (list id (error-message-string err)))))
       (signal 'romacs-agent-store-unread (list id "the store could not be opened"))))))
 
@@ -778,14 +784,16 @@ may take it.  A cancelled task's is let go."
            ;; Sent already (an editor that ended before its row went): let
            ;; go.  Its lookup failed: kept for the next load, not sent now.
            (found (and kept (romacs-agent--sent-queued session (mapcar #'romacs-agent-item-id kept)))))
-      (dolist (id (car found)) (romacs-agent-store-queued-delete (romacs-agent-id session) id))
+      ;; Their mark settles once the writer has let them go.
+      (dolist (id (car found))
+        (romacs-agent-store-queued-delete (romacs-agent-id session) id (romacs-agent--queued-mark-settler session)))
       (setq kept (cl-remove-if (lambda (item) (or (member (romacs-agent-item-id item) (car found))
                                                   (member (romacs-agent-item-id item) (cdr found))))
                                kept))
-      ;; Nothing kept, nothing waiting: a mark an earlier removal left (its
-      ;; store read before a pending delete) goes now.
-      (unless (or kept waiting (cdr found))
-        (romacs-agent-mark (romacs-agent-id session) 'queued nil))
+      ;; Nothing kept, nothing waiting, nothing being let go: a mark an
+      ;; earlier removal left (its delete failed) goes now.
+      (unless (or kept waiting (cdr found) (car found))
+        (romacs-agent--queued-mark-settle session))
       (when kept
         ;; What was sent as it loaded goes after what was kept, but what
         ;; was put first: placed by its order, not by the clock, and its

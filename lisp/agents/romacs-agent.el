@@ -4671,20 +4671,29 @@ session marked first, so a start loads it (`romacs-agent-mark')."
     (romacs-agent-mark (romacs-agent-id session) 'queued t)
     (romacs-agent-store-queued-put (romacs-agent-id session) item)))
 
+(defun romacs-agent--queued-mark-settle (session)
+  "Take SESSION's queued mark away when nothing of its queue is kept:
+none kept in memory, no row in the store (rows whose sending was unsure
+stay for the next load); a store unread keeps it."
+  (unless (or (cl-some #'romacs-agent-item-kept (romacs-agent-queue session))
+              (condition-case nil (romacs-agent-store-queued (romacs-agent-id session))
+                (romacs-agent-store-unread t)))
+    (romacs-agent-mark (romacs-agent-id session) 'queued nil)))
+
+(defun romacs-agent--queued-mark-settler (session)
+  "A writer's DONE for a queued row let go of SESSION's: once it went,
+the mark settles (`romacs-agent--queued-mark-settle'); a failed one
+keeps it."
+  (lambda (answer)
+    (when (eq (car answer) 'ok) (romacs-agent--queued-mark-settle session))))
+
 (defun romacs-agent--unkeep-item (session item)
   "ITEM is out of SESSION's queue: so is its record; the session's mark
-goes with its last."
+goes with its last, once the writer has let that go."
   (when (romacs-agent-item-kept item)
     (setf (romacs-agent-item-kept item) nil)
-    (romacs-agent-store-queued-delete (romacs-agent-id session) (romacs-agent-item-id item))
-    ;; Its mark goes with the last row the store keeps, not the last in
-    ;; this queue: rows whose sending was unsure stay for the next load.
-    (unless (or (cl-some #'romacs-agent-item-kept (romacs-agent-queue session))
-                (condition-case nil
-                    (cl-some (lambda (row) (not (equal (romacs-agent-item-id row) (romacs-agent-item-id item))))
-                             (romacs-agent-store-queued (romacs-agent-id session)))
-                  (romacs-agent-store-unread t)))
-      (romacs-agent-mark (romacs-agent-id session) 'queued nil))))
+    (romacs-agent-store-queued-delete (romacs-agent-id session) (romacs-agent-item-id item)
+                                      (romacs-agent--queued-mark-settler session))))
 
 (defun romacs-agent-interrupt (session)
   "Interrupt SESSION's turn; queued messages stay.  A per-turn harness's
