@@ -33,13 +33,24 @@
   (and (stringp id) (string-match "\\`\\([^:]+\\):[0-9]+\\'" id) (match-string 1 id)))
 
 (defun romacs-agent--codex-mcp-words (session)
-  (list "-c" (format "mcp_servers.romacs.command=%S" (romacs-agent--program "romacs-mcp"))
-        "-c" (format "mcp_servers.romacs.args=[%s]"
-                     (mapconcat (lambda (word) (format "%S" word))
-                                (romacs-agent--relay-args session)
-                                ","))
-        ;; Codex's own limit on a call.
-        "-c" (format "mcp_servers.romacs.tool_timeout_sec=%d" (+ (truncate romacs-agent-reply-timeout) 15))))
+  "Codex's -c words for SESSION's MCP servers: Romacs's relay, then the
+`romacs-agent-extra-mcp-servers'."
+  (append
+   (list "-c" (format "mcp_servers.romacs.command=%S" (romacs-agent--program "romacs-mcp"))
+         "-c" (format "mcp_servers.romacs.args=[%s]"
+                      (mapconcat (lambda (word) (format "%S" word))
+                                 (romacs-agent--relay-args session)
+                                 ","))
+         ;; Codex's own limit on a call.
+         "-c" (format "mcp_servers.romacs.tool_timeout_sec=%d" (+ (truncate romacs-agent-reply-timeout) 15)))
+   (mapcan (pcase-lambda (`(,name ,command ,args ,env))
+             (append (list "-c" (format "mcp_servers.%s.command=%S" name command)
+                           "-c" (format "mcp_servers.%s.args=[%s]" name
+                                        (mapconcat (lambda (word) (format "%S" word)) args ",")))
+                     (mapcan (pcase-lambda (`(,variable . ,value))
+                               (list "-c" (format "mcp_servers.%s.env.%s=%S" name variable value)))
+                             env)))
+           (romacs-agent--extra-mcp-servers))))
 
 (defun romacs-agent--codex-argv (session _resume)
   "`codex app-server''s command line for SESSION: whether it goes on with
