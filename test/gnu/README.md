@@ -32,6 +32,53 @@ pinned native GNU binary: `run --harness-fidelity FILE`. Set
 `ROMACS_GNU_ORACLE` to the pinned executable; no PATH oracle is accepted by
 these paths. Every real row identifies both `harness: gnu-ert` and its engine.
 
+## Measured real ERT parity (2026-11-22)
+
+Romacs `cadb43660f766be762b37741a5175cb99efd7ca3` matched **8,104
+actual passes** on GNU Emacs `45b0f7699df36b3849edc3bdef37d4cb9e75b9ea`.
+The run used GNU's ordinary `make check` selector, which excludes tests
+tagged `:expensive-test` or `:unstable`.
+
+| Reference results | Matching passes |
+| --- | ---: |
+| All observed GNU passes | 8,104 / 8,783 (92.3%) |
+| GNU passes in files completed by both runners | 8,104 / 8,619 (94.0%) |
+
+Of 564 eligible files under `test/lisp`, `test/src`, `test/misc` and
+`test/lib-src`, 63 yielded no valid GNU test selection and three produced
+incomplete GNU reports. Romacs timed out or aborted on seven of the 498
+files GNU completed. The scoreboard counts identical expected pass results
+by file and test name. GNU skipped one test Romacs passed. The run with all
+test tags hit the memory limit during an unstable native GNU test.
+
+To reproduce, check out the measured Romacs commit, set
+`ROMACS_GNU_ORACLE` and `ROMACS_GNU_SOURCE` to the pinned GNU executable
+and source mirror, and set `CARGO_TARGET_DIR` and `OUTPUT` to private paths.
+The command uses an explicit file list because real ERT's `--all` selects
+only `test/lisp`.
+
+```bash
+ulimit -s 65536
+cargo build --locked --offline --profile gate -p romacs-gnu-tests --bin romacs-gnu-ert
+python3 -B test/gnu/run.py verify-pin --gnu "$ROMACS_GNU_SOURCE"
+mapfile -t files < <(python3 -B - <<'PY'
+from pathlib import Path
+
+root = Path('test/gnu/test')
+for path in sorted(root.rglob('*.el')):
+    relative = path.relative_to(root)
+    if not any(part in ('manual', 'data', 'infra') or part.endswith('resources')
+               for part in relative.parts[:-1]):
+        print(relative)
+PY
+)
+python3 -B test/gnu/run.py run --harness real --bootstrap ert \
+    --ert-adapter romacs-batch --bin "$CARGO_TARGET_DIR/gate/romacs-gnu-ert" \
+    --jobs 8 --setup-timeout 120 \
+    --selector "'(not (or (tag :expensive-test) (tag :unstable)))" \
+    --out "$OUTPUT" "${files[@]}"
+```
+
 ## How a default mini-harness verdict is reached
 
 1. GNU's reader splits the file into top-level forms (`tools/extract-forms.el`).
@@ -46,8 +93,7 @@ these paths. Every real row identifies both `harness: gnu-ert` and its engine.
 
 ## The harness is REDUCED, and says so
 
-Real `ert.el` cannot load on romacs yet: it requires cl-lib, debug, backtrace,
-ewoc, find-func, pp, map and help-mode, and cl-lib is still being unblocked.
+The default run and the parity ratchet use the reduced harness.
 `harness/romacs-mini-ert.el` is a small stand-in for the part of ERT a test
 file touches (`ert-deftest`, `should`, `should-not`, `should-error`,
 `skip-unless`, `skip-when`, `ert-skip`, `ert-fail`, `ert-info`). Every summary
@@ -56,8 +102,7 @@ says `"is_gnu_ert": false`. It is never a Lisp feature for users.
 To stop the harness from manufacturing passes, the baseline also runs **the
 reduced harness inside GNU** (`tools/gnu-run.el mini`). A romacs verdict counts
 only where that matches real ERT's outcome for the same test; elsewhere the test
-is `not-yet-runnable` with `missing = "harness: ..."`. When cl-lib lands, the
-target is to load GNU's real ert.el.
+is `not-yet-runnable` with `missing = "harness: ..."`.
 
 ## Verdicts and categories
 
