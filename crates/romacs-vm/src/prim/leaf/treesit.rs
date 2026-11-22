@@ -599,6 +599,11 @@ impl Leaf<'_> {
             return Ok(());
         }
         let (core, base, native) = (p.core.clone(), self.ts_base(p.buffer), p.native.clone());
+        // With no parse thread to wait for, the native parser owns the
+        // input poll. It keeps an inhibited press pending at its source.
+        if core.borrow().ahead.is_none() && (core.borrow().tree.is_some() || self.ts_registry(base).early.is_none()) {
+            return self.vm.worker_quit().map_or(Ok(()), Err);
+        }
         let slice = crate::quit::QUIT_SLICE;
         loop {
             let (first, length) = { let c = core.borrow(); (c.tree.is_none(), c.visible.1 - c.visible.0) };
@@ -665,8 +670,7 @@ impl Leaf<'_> {
         let buffer = self.ts_parser(parser)?.buffer;
         self.ts_check_size(self.ts_base(buffer))?;
         self.ts_sync_visible(parser)?;
-        let p = self.ts_parser(parser)?;
-        let (core, native) = (p.core.clone(), p.native.clone());
+        let core = self.ts_parser(parser)?.core.clone();
         if !core.borrow().need_reparse {
             self.ts_parser_mut(parser).within_reparse = false;
             return Ok(None);
@@ -695,15 +699,11 @@ impl Leaf<'_> {
         } else {
             (None, None)
         };
-        let new = done.or_else(|| {
-            let text = self.ts_buffer_text(buffer).filter(|_| self.ts_live(buffer)).map(|t| &**t);
-            let reader = ts::Reader::new(text, ((visible.0 - 1) as usize, (visible.1 - 1) as usize));
+        let new = match done {
+            Some(tree) => Some(tree),
             // A thread's tree that fell behind the text is newer than the old one.
-            native.borrow_mut().parse(behind.as_ref().or(old.as_deref()), &reader)
-        });
-        let Some(new) = new else {
-            return Err(self.ts_signal("treesit-parse-error", &[buffer]));
-        };
+            None => self.ts_parse_visible(parser, visible, behind.as_ref().or(old.as_deref()))?,
+        }.ok_or_else(|| self.ts_signal("treesit-parse-error", &[buffer]))?;
         let new = Rc::new(new);
         // The thread compared the same two trees, when it parsed this one.
         let changed = old.as_ref().map(|old| ahead_changed.unwrap_or_else(|| new.changed_since(old)));
@@ -715,10 +715,33 @@ impl Leaf<'_> {
             c.fresh = old.is_none() && behind.is_none();
         }
         self.ts_parser_mut(parser).timestamp += 1;
-        let ranges = match changed {
+        Ok(Some(self.ts_reparse_ranges(buffer, visible.0, changed)))
+    }
+
+    fn ts_parse_visible(&mut self, parser: Value, visible: (i64, i64), old: Option<&native::Tree>) -> R<Option<native::Tree>> {
+        let p = self.ts_parser(parser)?;
+        let (buffer, native) = (p.buffer, p.native.clone());
+        let parse = |leaf: &Self, stop: &crate::quit::NativeStop| {
+            let text = leaf.ts_buffer_text(buffer).filter(|_| leaf.ts_live(buffer)).map(|t| &**t);
+            let reader = ts::Reader::new(text, ((visible.0 - 1) as usize, (visible.1 - 1) as usize));
+            native.borrow_mut().parse_until(old, &reader, stop)
+        };
+        if let Ok(tree) = parse(self, &self.native_stop()) {
+            return Ok(tree);
+        }
+        // parse_until reset the native parser. Leave the Lisp parser ready for
+        // the next caller if the poll quits, or retry after an inspection.
+        self.ts_parser_mut(parser).within_reparse = false;
+        self.native_poll()?;
+        self.ts_parser_mut(parser).within_reparse = true;
+        Ok(parse(self, &crate::quit::NativeStop::never()).expect("never stopped"))
+    }
+
+    fn ts_reparse_ranges(&mut self, buffer: Value, visible_beg: i64, changed: Option<Vec<(u32, u32)>>) -> Value {
+        match changed {
             Some(changed) => {
                 let pairs: Vec<Value> = changed.into_iter().map(|(b, e)| {
-                    let (b, e) = (self.ts_char(buffer, visible.0 + i64::from(b)), self.ts_char(buffer, visible.0 + i64::from(e)));
+                    let (b, e) = (self.ts_char(buffer, visible_beg + i64::from(b)), self.ts_char(buffer, visible_beg + i64::from(e)));
                     self.cons(fixnum(b), fixnum(e))
                 }).collect();
                 self.ts_list(&pairs)
@@ -728,8 +751,7 @@ impl Leaf<'_> {
                 let whole = self.cons(fixnum(self.ts_char(buffer, region.begv_byte)), fixnum(self.ts_char(buffer, region.zv_byte)));
                 self.cons(whole, Value::NIL)
             }
-        };
-        Ok(Some(ranges))
+        }
     }
     pub(crate) fn ts_reparse_done(&mut self, parser: Value) {
         if self.ts_parser(parser).is_ok() {
@@ -1399,12 +1421,26 @@ impl Leaf<'_> {
             }
             _ => (0, u32::MAX),
         };
-        let found = compiled.query.matches(n.node, range);
+        // A query stops consistently between matches: nothing is written
+        // before it ends.
+        let found = self.quittable(|cx| {
+            if let Some(found) = compiled.query.matches(n.node, range, &cx.native_stop()) { return Ok(found); }
+            cx.native_poll()?;
+            Ok(compiled.query.matches(n.node, range, &crate::quit::NativeStop::never()).expect("never stopped"))
+        })?;
+        self.ts_capture_matches(n, compiled, found, flags, fontify)
+    }
+
+    fn ts_capture_matches(&mut self, n: ts::Node, compiled: Rc<ts::Compiled>, found: Vec<native::Match>,
+                          flags: i64, fontify: Option<(ts::Fontify, Value)>) -> R<Next> {
         let mut names: Vec<Option<Value>> = Vec::new();
         let (fontify, overriding) = fontify.map_or((None, Value::NIL), |(f, o)| (Some(f), o));
         let mut values = vec![n.parser, Value::NIL, overriding, fixnum(flags)];
         let mut matches = Vec::with_capacity(found.len());
+        // The captures as Lisp: a query's, which writes nothing, stops anywhere.
+        let mut steps = crate::quit::Steps::default();
         for m in found {
+            if fontify.is_none() && steps.tick() { self.quittable(Leaf::native_poll)?; }
             let start = values.len();
             for &(node, index) in &m.captures {
                 let index = index as usize;

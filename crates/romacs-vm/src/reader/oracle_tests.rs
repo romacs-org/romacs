@@ -1016,6 +1016,7 @@ fn reader_callback_partials_and_source_survive_compaction() {
             eof: false,
             labels: BTreeMap::new(),
             signal: None,
+            steps: crate::quit::Steps::default(),
             collect_subforms: true,
             chunk: Chunk::default(),
         };

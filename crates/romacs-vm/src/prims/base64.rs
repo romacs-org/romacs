@@ -7,6 +7,7 @@ const LINE_GROUPS: usize = 76 / 4;
 
 /// fns.c base64_char_to_value: -1 ignorable whitespace, 0 invalid, else
 /// one more than the digit's value.
+#[inline]
 fn digit(c: u8, url: bool) -> i32 {
     match c {
         b'\t' | b'\n' | 0x0c | b'\r' | b' ' => -1,
@@ -26,10 +27,55 @@ fn alphabet(url: bool) -> &'static [u8; 64] {
     else { b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/" }
 }
 
-/// fns.c base64_encode_1 over octets.
+/// Input octets encoded between two polls: whole lines of 57 octets, so a
+/// slice's text, a line break before each slice but the first, concatenates
+/// into exactly the whole input's.
+const SLICE: usize = LINE_GROUPS * 3 * 216;
+
+/// OCTETS encoded: a slice or less whole and unpolled, in the caller's
+/// body; a longer input by `encoded_sliced`.
+#[expect(clippy::inline_always, reason = "base64-encode-string's short call runs it: out of line it took 22 instructions:u a call (perf record against the unsliced encoder)")]
+#[inline(always)]
+fn encoded(cx: &mut Leaf<'_>, octets: &[u8], line_break: bool, pad: bool, url: bool) -> std::result::Result<Vec<u8>, Fault> {
+    if octets.len() <= SLICE {
+        return Ok(encode(octets, line_break, pad, url));
+    }
+    encoded_sliced(cx, octets, line_break, pad, url)
+}
+
+/// OCTETS encoded, inside the caller's own scope, a slice at a time,
+/// polled between slices. Nothing is made before it ends.
+#[cold]
+#[inline(never)]
+fn encoded_sliced(cx: &mut Leaf<'_>, octets: &[u8], line_break: bool, pad: bool, url: bool) -> std::result::Result<Vec<u8>, Fault> {
+    cx.quittable(|cx| {
+        let mut out = encode_buffer(octets.len(), line_break);
+        for (n, part) in octets.chunks(SLICE).enumerate() {
+            if n > 0 {
+                cx.native_poll()?;
+                if line_break { out.push(b'\n'); }
+            }
+            encode_into(&mut out, part, line_break, pad, url);
+        }
+        Ok(out)
+    })
+}
+
 fn encode(octets: &[u8], line_break: bool, pad: bool, url: bool) -> Vec<u8> {
+    let mut out = encode_buffer(octets.len(), line_break);
+    encode_into(&mut out, octets, line_break, pad, url);
+    out
+}
+
+/// Reserve for padded groups and, when wrapping, one newline for each line after the first.
+fn encode_buffer(len: usize, line_break: bool) -> Vec<u8> {
+    let breaks = if line_break { len.saturating_sub(1) / (LINE_GROUPS * 3) } else { 0 };
+    Vec::with_capacity(len.div_ceil(3) * 4 + breaks)
+}
+
+/// fns.c base64_encode_1 over OCTETS, appended to OUT.
+fn encode_into(out: &mut Vec<u8>, octets: &[u8], line_break: bool, pad: bool, url: bool) {
     let table = alphabet(url);
-    let mut out = Vec::with_capacity(octets.len() / 3 * 4 + 4);
     for (group, chunk) in octets.chunks(3).enumerate() {
         if line_break && group > 0 && group % LINE_GROUPS == 0 { out.push(b'\n'); }
         let value = chunk.iter().enumerate().fold(0u32, |v, (i, &b)| v | u32::from(b) << (16 - 8 * i));
@@ -39,30 +85,77 @@ fn encode(octets: &[u8], line_break: bool, pad: bool, url: bool) -> Vec<u8> {
             else if pad { out.push(b'='); }
         }
     }
-    out
 }
 
-/// fns.c base64_decode_1 (unibyte result), None for invalid data.
-fn decode(input: &[u8], url: bool, ignore_invalid: bool) -> Option<Vec<u8>> {
-    let mut bytes = input.iter().copied();
+/// The input a chunk at a time: when a chunk's bytes run out, the quit
+/// probe is asked (out of line), then the next chunk follows. The decoder's
+/// hot path is the slice iterator's own end test.
+struct Input<'a> {
+    all: &'a [u8],
+    end: usize,
+    bytes: std::iter::Copied<std::slice::Iter<'a, u8>>,
+    stop: &'a crate::quit::NativeStop,
+    stopped: bool,
+}
+
+impl Iterator for Input<'_> {
+    type Item = u8;
+
+    #[inline]
+    fn next(&mut self) -> Option<u8> {
+        match self.bytes.next() {
+            Some(c) => Some(c),
+            None => self.refill(),
+        }
+    }
+}
+
+impl<'a> Input<'a> {
+    fn new(all: &'a [u8], stop: &'a crate::quit::NativeStop) -> Self {
+        let end = CHECK.min(all.len());
+        Self { all, end, bytes: all[..end].iter().copied(), stop, stopped: false }
+    }
+    #[cold]
+    #[inline(never)]
+    fn refill(&mut self) -> Option<u8> {
+        if self.end == self.all.len() || self.stopped { return None; }
+        if self.stop.due() { self.stopped = true; return None; }
+        let from = self.end;
+        self.end = (from + CHECK).min(self.all.len());
+        self.bytes = self.all[from..self.end].iter().copied();
+        self.bytes.next()
+    }
+}
+
+/// fns.c `base64_decode_1` (unibyte result), None for invalid data, or for
+/// a stop: STOP is asked once each 16 KB read, and a stop sets STOPPED.
+fn decode(input: &[u8], url: bool, ignore_invalid: bool, stop: &crate::quit::NativeStop, stopped: &mut bool) -> Option<Vec<u8>> {
+    let mut bytes = Input::new(input, stop);
+    let decoded = decode_from(&mut bytes, input.len(), url, ignore_invalid);
+    *stopped = bytes.stopped;
+    decoded
+}
+
+/// fns.c `base64_decode_1` over BYTES, LENGTH of them.
+fn decode_from<B: Iterator<Item = u8>>(bytes: &mut B, length: usize, url: bool, ignore_invalid: bool) -> Option<Vec<u8>> {
     // The next significant byte: whitespace, and with IGNORE-INVALID any
     // invalid byte, is skipped.
-    let mut next = |bytes: &mut std::iter::Copied<std::slice::Iter<'_, u8>>| loop {
+    let next = |bytes: &mut B| loop {
         let c = bytes.next()?;
         let v = digit(c, url);
         if !(v < 0 || (v == 0 && ignore_invalid)) { return Some((c, v)); }
     };
-    let mut out = Vec::with_capacity(input.len() / 4 * 3 + 3);
+    let mut out = Vec::with_capacity(length / 4 * 3 + 3);
     let short = |out: Vec<u8>| if url || ignore_invalid { Some(out) } else { None };
     loop {
-        let Some((_, v)) = next(&mut bytes) else { return Some(out) };
+        let Some((_, v)) = next(bytes) else { return Some(out) };
         if v == 0 { return None; }
         let mut value = ((v - 1) as u32) << 18;
-        let (_, v) = next(&mut bytes)?;
+        let (_, v) = next(bytes)?;
         if v == 0 { return None; }
         value += ((v - 1) as u32) << 12;
         out.push((value >> 16) as u8);
-        let Some((c, v)) = next(&mut bytes) else { return short(out) };
+        let Some((c, v)) = next(bytes) else { return short(out) };
         if c == b'=' {
             // "==": the second pad must follow, past whitespace only.
             loop {
@@ -74,7 +167,7 @@ fn decode(input: &[u8], url: bool, ignore_invalid: bool) -> Option<Vec<u8>> {
         if v == 0 { return None; }
         value += ((v - 1) as u32) << 6;
         out.push((value >> 8) as u8);
-        let Some((c, v)) = next(&mut bytes) else { return short(out) };
+        let Some((c, v)) = next(bytes) else { return short(out) };
         if c == b'=' { continue; }
         if v == 0 { return None; }
         value += (v - 1) as u32;
@@ -82,11 +175,42 @@ fn decode(input: &[u8], url: bool, ignore_invalid: bool) -> Option<Vec<u8>> {
     }
 }
 
+/// Input bytes read between two asks of the quit probe.
+const CHECK: usize = 1 << 14;
+
+/// BYTES decoded: one check's worth or less whole, asking no quit probe,
+/// in the caller's body; a longer input by `decoded_probed`.
+#[inline]
+fn decoded(cx: &mut Leaf<'_>, bytes: &[u8], url: bool, ignore_invalid: bool) -> std::result::Result<Vec<u8>, Fault> {
+    if bytes.len() <= CHECK {
+        return decode_from(&mut bytes.iter().copied(), bytes.len(), url, ignore_invalid)
+            .ok_or_else(|| Fault::Error("Invalid base64 data".into()));
+    }
+    decoded_probed(cx, bytes, url, ignore_invalid)
+}
+
+/// BYTES decoded, inside the caller's own scope: the decode stops for the
+/// quit probe, and the poll quits or, nothing to quit for after all, the
+/// bytes are decoded again unpolled. Nothing is made before it ends.
+#[cold]
+#[inline(never)]
+fn decoded_probed(cx: &mut Leaf<'_>, bytes: &[u8], url: bool, ignore_invalid: bool) -> std::result::Result<Vec<u8>, Fault> {
+    cx.quittable(|cx| {
+        let (stop, mut stopped) = (cx.native_stop(), false);
+        let mut result = decode(bytes, url, ignore_invalid, &stop, &mut stopped);
+        if stopped {
+            cx.native_poll()?;
+            result = decode_from(&mut bytes.iter().copied(), bytes.len(), url, ignore_invalid);
+        }
+        result.ok_or_else(|| Fault::Error("Invalid base64 data".into()))
+    })
+}
+
 /// The octets of STRING: raw bytes as themselves, a multibyte non-ASCII
 /// character refused.
 fn octets(cx: &mut Leaf<'_>, string: Value) -> std::result::Result<Vec<u8>, Fault> {
     let view = cx.string_view(string)?;
-    if !view.is_multibyte() { return Ok(view.bytes().to_vec()); }
+    if !view.is_multibyte() { return Ok(view.bytes); }
     view.chars().map(|c| {
         if c >= crate::lstring::BYTE8_OFFSET + 128 { Ok((c - crate::lstring::BYTE8_OFFSET) as u8) }
         else if c < 128 { Ok(c as u8) }
@@ -97,20 +221,21 @@ fn octets(cx: &mut Leaf<'_>, string: Value) -> std::result::Result<Vec<u8>, Faul
 defsubr! { name = "base64-encode-string", gnu = "fns.c:4168", effect = Pure,
 fn base64_encode_string(cx, string: Value; optional no_line_break: Value) {
     let octets = octets(cx, string)?;
-    Ok(cx.make_string(encode(&octets, no_line_break == Value::NIL, true, false), false))
+    let text = encoded(cx, &octets, no_line_break == Value::NIL, true, false)?;
+    Ok(cx.make_string(text, false))
 }}
 
 defsubr! { name = "base64url-encode-string", gnu = "fns.c:4179", effect = Pure,
 fn base64url_encode_string(cx, string: Value; optional no_pad: Value) {
     let octets = octets(cx, string)?;
-    Ok(cx.make_string(encode(&octets, false, no_pad == Value::NIL, true), false))
+    let text = encoded(cx, &octets, false, no_pad == Value::NIL, true)?;
+    Ok(cx.make_string(text, false))
 }}
 
 defsubr! { name = "base64-decode-string", gnu = "fns.c:4409", effect = Pure,
 fn base64_decode_string(cx, string: Value; optional base64url: Value, ignore_invalid: Value) {
-    let bytes = cx.string_view(string)?.bytes().to_vec();
-    let decoded = decode(&bytes, base64url != Value::NIL, ignore_invalid != Value::NIL)
-        .ok_or_else(|| Fault::Error("Invalid base64 data".into()))?;
+    let bytes = cx.string_bytes(string)?;
+    let decoded = decoded(cx, &bytes, base64url != Value::NIL, ignore_invalid != Value::NIL)?;
     Ok(cx.make_string(decoded, false))
 }}
 
@@ -159,7 +284,9 @@ fn deleted(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
 fn encode_region(cx: &mut Leaf<'_>, beg: Value, end: Value, line_break: bool, pad: bool, url: bool) -> Next {
     let (from, to) = cx.validate_region(beg, end)?;
     let text = cx.region_text(from, to)?;
-    let encoded = encode(&octets(cx, text)?, line_break, pad, url);
+    // Encoded before the region changes.
+    let octets = octets(cx, text)?;
+    let encoded = encoded(cx, &octets, line_break, pad, url)?;
     let length = encoded.len() as i64;
     let text = cx.make_string(encoded, false);
     replace_region(cx, from, to, text, length, false)
@@ -181,9 +308,9 @@ defsubr! { name = "base64-decode-region", gnu = "fns.c:4334", effect = Global,
 fn base64_decode_region(cx, beg: Value, end: Value; optional base64url: Value, ignore_invalid: Value) -> Step {
     let (from, to) = cx.validate_region(beg, end)?;
     let text = cx.region_text(from, to)?;
-    let bytes = cx.string_view(text)?.bytes().to_vec();
-    let decoded = decode(&bytes, base64url != Value::NIL, ignore_invalid != Value::NIL)
-        .ok_or_else(|| Fault::Error("Invalid base64 data".into()))?;
+    let bytes = cx.string_bytes(text)?;
+    // Decoded before the region changes.
+    let decoded = decoded(cx, &bytes, base64url != Value::NIL, ignore_invalid != Value::NIL)?;
     let length = decoded.len() as i64;
     let text = cx.make_string(decoded, false);
     replace_region(cx, from, to, text, length, true)

@@ -59,7 +59,12 @@ impl Leaf<'_> {
     /// taking the next of ANSWERS (see `Vm::print_render_answered').
     pub(crate) fn print_text(&mut self, object: Value, quoted: bool, overrides: Value, stream: Value, answers: Value) -> std::result::Result<Value, Fault> {
         let answers = self.vm.list_values(answers).map_err(Fault::Error)?;
-        let text = self.printing(overrides, stream, |vm, overrides, buffer| vm.print_render_answered(object, quoted, overrides, buffer, answers))?;
+        // The text is made before any of it is output: a print stops anywhere.
+        let render = |cx: &mut Self| cx.printing(overrides, stream, |vm, overrides, buffer| vm.print_render_answered(object, quoted, overrides, buffer, answers.clone()));
+        let text = self.quittable(|cx| match render(cx) {
+            Err(Fault::Error(stopped)) if stopped == crate::eval_data::PRINT_STOPPED => { cx.native_poll()?; render(cx) }
+            text => text,
+        })?;
         Ok(self.vm.printed_value(&text))
     }
 
@@ -72,7 +77,11 @@ impl Leaf<'_> {
     /// ` prin1' buffer is, each unreadable object taking the next of ANSWERS.
     pub(crate) fn print_string(&mut self, object: Value, quoted: bool, overrides: Value, answers: Value) -> std::result::Result<Value, Fault> {
         let answers = self.vm.list_values(answers).map_err(Fault::Error)?;
-        let text = self.vm.print_render_answered(object, quoted, overrides, true, answers).map_err(Fault::Error)?;
+        let render = |cx: &mut Self| cx.vm.print_render_answered(object, quoted, overrides, true, answers.clone()).map_err(Fault::Error);
+        let text = self.quittable(|cx| match render(cx) {
+            Err(Fault::Error(stopped)) if stopped == crate::eval_data::PRINT_STOPPED => { cx.native_poll()?; render(cx) }
+            text => text,
+        })?;
         Ok(self.vm.printed_value(&text))
     }
 

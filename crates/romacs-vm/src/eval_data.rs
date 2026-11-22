@@ -16,46 +16,81 @@ impl Vm {
                 if n != 2 {
                     return Err("wrong primitive arity".into());
                 }
-                Ok(if self.equal_text(self.stack[start], self.stack[start + 1])? { Value::TRUE } else { Value::NIL })
+                // Polled only inside its own call target's scope.
+                let (a, b) = (self.stack[start], self.stack[start + 1]);
+                let equal = if self.native_quit { self.equal_primitive(a, b)? } else { self.equal_text(a, b)? };
+                Ok(if equal { Value::TRUE } else { Value::NIL })
             }
-            Min => {
-                if n == 0 {
-                    return Err("wrong primitive arity".into());
-                }
-                let args = self.stack[start..start + n].to_vec();
-                self.minmax(&args, std::cmp::Ordering::Less)
-            }
-            Append => {
-                if n == 0 {
-                    return Ok(Value::NIL);
-                }
-                let mut prefix = Vec::new();
-                for i in 0..n - 1 {
-                    let v = self.stack[start + i];
-                    if let Some(text) = self.str_view(v) {
-                        prefix.extend(
-                            text.chars()
-                                .map(|c| Value::integer(c as i64))
-                                .collect::<Result<Vec<_>>>()?,
-                        );
-                    } else {
-                        match self.object_if(v) {
-                            Some(data::Object::Vector(values)) => prefix.extend_from_slice(values),
-                            Some(data::Object::BoolVector(bits)) => prefix.extend(
-                                (0..bits.len).map(|i| if bits.get(i) == Some(true) { Value::TRUE } else { Value::NIL }),
-                            ),
-                            _ => prefix.extend(self.list_values(v)?),
-                        }
-                    }
-                }
-                let mut tail = self.stack[start + n - 1];
-                for value in prefix.into_iter().rev() {
-                    tail = self.alloc_cons(value, tail);
-                }
-                Ok(tail)
-            }
+            Min => self.min_max::<false>(start, n, std::cmp::Ordering::Less),
+            Append => self.append_values::<false>(start, n),
             _ => unreachable!("eval data dispatch"),
         }
+    }
+
+    /// `append` of the N arguments at START. Past a chunk, polled per chunk
+    /// of each argument's walk and of the build (`Vm::kernel_poll`, SCOPED
+    /// from its engine target).
+    pub(super) fn append_values<const SCOPED: bool>(&mut self, start: usize, n: usize) -> Result<Value> {
+        if n == 0 {
+            return Ok(Value::NIL);
+        }
+        let mut prefix = Vec::new();
+        for i in 0..n - 1 {
+            let v = self.stack[start + i];
+            if self.str_view(v).is_some() {
+                self.append_string_codes::<SCOPED>(v, &mut prefix)?;
+            } else {
+                match self.object_if(v) {
+                    Some(data::Object::Vector(values)) => prefix.extend_from_slice(values),
+                    Some(data::Object::BoolVector(bits)) => {
+                        // Its bits a chunk at a time, polled between:
+                        // nothing is made from them yet.
+                        let len = bits.len;
+                        for start in (0..len).step_by(KERNEL_CHUNK) {
+                            if start > 0 { self.kernel_poll::<SCOPED>()?; }
+                            let Some(data::Object::BoolVector(bits)) = self.object_if(v) else { unreachable!("a bool-vector stays one") };
+                            prefix.extend((start..(start + KERNEL_CHUNK).min(len))
+                                .map(|i| if bits.get(i) == Some(true) { Value::TRUE } else { Value::NIL }));
+                        }
+                    }
+                    _ => prefix.extend(self.list_values_polled::<SCOPED>(v)?),
+                }
+            }
+        }
+        // The new list is the caller's only once it returns: a quit
+        // between chunks drops it. One chunk polls not at all.
+        let mut tail = self.stack[start + n - 1];
+        for (i, chunk) in prefix.rchunks(KERNEL_CHUNK).enumerate() {
+            if i > 0 { self.kernel_poll::<SCOPED>()?; }
+            for &value in chunk.iter().rev() {
+                tail = self.alloc_cons(value, tail);
+            }
+        }
+        Ok(tail)
+    }
+
+    /// STRING's characters as fixnums, pushed onto PREFIX a part at a time,
+    /// the quit probe asked between parts. Stopped, the poll quits, or, with
+    /// nothing to quit for after all, the string's codes are taken again
+    /// unpolled: nothing is made from them yet.
+    fn append_string_codes<const SCOPED: bool>(&mut self, string: Value, prefix: &mut Vec<Value>) -> Result<()> {
+        let before = prefix.len();
+        let stopped = {
+            let text = self.str_view(string).ok_or("string required")?;
+            let mut stopped = false;
+            for (n, part) in text.char_parts(KERNEL_CHUNK).enumerate() {
+                if n > 0 && self.kernel_stop_due::<SCOPED>() { stopped = true; break; }
+                for c in part { prefix.push(Value::integer(i64::from(c))?); }
+            }
+            stopped
+        };
+        if stopped {
+            self.kernel_poll::<SCOPED>()?;
+            prefix.truncate(before);
+            let text = self.str_view(string).ok_or("string required")?;
+            for c in text.chars() { prefix.push(Value::integer(i64::from(c))?); }
+        }
+        Ok(())
     }
 
     /// VALUE printed for a caller that cannot call Lisp: an unreadable
@@ -90,7 +125,7 @@ impl Vm {
         self.print_render_as(value, quoted, overrides, buffer_output, unreadable).map(|(text, _)| text)
     }
 
-    fn print_render_as(&mut self, value: Value, quoted: bool, overrides: Value, buffer_output: bool, unreadable: Unreadable) -> Result<(String, Unreadable)> {
+    fn print_options(&mut self, unreadable: Unreadable) -> Result<PrintOptions> {
         // `print-symbols-bare' only changes how a positioned symbol prints,
         // and Romacs makes none (ledger/divergences VM2-SYMPOS1).
         for name in ["float-output-format", "print-integers-as-characters", "print-charset-text-property"] {
@@ -109,6 +144,11 @@ impl Vm {
             let v = self.variable_value(slot)?;
             if v != Value::UNBOUND { options.set(key, v); }
         }
+        Ok(options)
+    }
+
+    fn print_render_as(&mut self, value: Value, quoted: bool, overrides: Value, buffer_output: bool, unreadable: Unreadable) -> Result<(String, Unreadable)> {
+        let mut options = self.print_options(unreadable)?;
         let continuous = self.slot("print-continuous-numbering");
         let mut continuous = !matches!(self.variable_value(continuous)?, Value::NIL | Value::UNBOUND);
         // An overriding number table is bound for this call only, as
@@ -143,8 +183,16 @@ impl Vm {
             if bound_table.is_none() { self.set_print_number_table(table_slot, table)?; }
         }
         if !options.circle { return Ok((self.print_object(value, quoted, &options, 0)?, options.unreadable)); }
+        let index = self.print_number_index;
         self.print_preprocess(value, quoted, &mut options, continuous, table)?;
         let printed = self.print_object(value, quoted, &options, 0);
+        // A render stopped for a quit poll returned no text, so it publishes
+        // none of its labels: the numbering is as it was, for the render that
+        // follows or for none.
+        if printed.as_ref().is_err_and(|error| error == PRINT_STOPPED) {
+            self.print_number_index = index;
+            return Err(PRINT_STOPPED.into());
+        }
         // Listing the unreadable objects is not the print itself.
         if !matches!(options.unreadable, Unreadable::Met(_)) {
             let slot = if bound_table.is_none() { Some(table_slot) } else { None };
@@ -197,7 +245,15 @@ impl Vm {
             }
         }
         let mut pending = vec![CharTableSlot::Value(value)];
+        // Polled as the print is (`PRINT_STOPPED`, its caller polling and
+        // printing again), the numbering it advanced given back.
+        let (index, mut objects) = (self.print_number_index, 0u32);
         while let Some(slot) = pending.pop() {
+            objects = objects.wrapping_add(1);
+            if objects.is_multiple_of(PRINT_POLL) && self.native_stop_due() {
+                self.print_number_index = index;
+                return Err(PRINT_STOPPED.into());
+            }
             let v = match slot {
                 CharTableSlot::Node(node) => {
                     let key = (1, char_table::char_table_node_id(&node) as u64);
@@ -235,24 +291,30 @@ impl Vm {
             }
             graph.marks.insert(key, CircleMark::Once);
             graph.inserted.push(v);
-            // The stack pops children left to right, as print.c's does.
-            if v.tag() == 3 { let (a, d) = self.cons_pair(v)?; pending.extend([CharTableSlot::Value(d), CharTableSlot::Value(a)]); }
-            else if let Some(data::Object::Vector(v) | data::Object::Record(v)) = self.object_if(v) { pending.extend(v.iter().rev().copied().map(CharTableSlot::Value)); }
-            else if let Some(data::Object::CharTable(t)) = self.object_if(v) {
-                pending.extend(t.print_slots().into_iter().rev());
-            }
-            else if let Some(data::Object::HashTable(t)) = self.object_if(v) {
-                let entries: Vec<Value> = t.entries().flat_map(|(_, k, v)| [k, v]).collect();
-                pending.extend(entries.into_iter().rev().map(CharTableSlot::Value));
-            }
-            else if quoted {
-                for (_, _, properties) in self.print_string_properties(v).into_iter().rev() {
-                    pending.extend(properties.into_iter().rev().map(|(_, value)| CharTableSlot::Value(value)));
-                }
-            }
+            self.push_print_children(v, quoted, &mut pending)?;
         }
         // Objects seen once never take a label.
         graph.marks.retain(|_, mark| *mark != CircleMark::Once);
+        Ok(())
+    }
+
+    fn push_print_children(&self, v: Value, quoted: bool, pending: &mut Vec<char_table::CharTableSlot>) -> Result<()> {
+        use char_table::CharTableSlot;
+        // The stack pops children left to right, as print.c's does.
+        if v.tag() == 3 { let (a, d) = self.cons_pair(v)?; pending.extend([CharTableSlot::Value(d), CharTableSlot::Value(a)]); }
+        else if let Some(data::Object::Vector(v) | data::Object::Record(v)) = self.object_if(v) { pending.extend(v.iter().rev().copied().map(CharTableSlot::Value)); }
+        else if let Some(data::Object::CharTable(t)) = self.object_if(v) {
+            pending.extend(t.print_slots().into_iter().rev());
+        }
+        else if let Some(data::Object::HashTable(t)) = self.object_if(v) {
+            let entries: Vec<Value> = t.entries().flat_map(|(_, k, v)| [k, v]).collect();
+            pending.extend(entries.into_iter().rev().map(CharTableSlot::Value));
+        }
+        else if quoted {
+            for (_, _, properties) in self.print_string_properties(v).into_iter().rev() {
+                pending.extend(properties.into_iter().rev().map(|(_, value)| CharTableSlot::Value(value)));
+            }
+        }
         Ok(())
     }
 
@@ -364,6 +426,9 @@ impl Vm {
     }
 
     fn print_object(&self, value: Value, quoted: bool, options: &PrintOptions, depth: usize) -> Result<String> {
+        let objects = options.objects.get().wrapping_add(1);
+        options.objects.set(objects);
+        if objects.is_multiple_of(PRINT_POLL) && self.native_stop_due() { return Err(PRINT_STOPPED.into()); }
         let key = match self.object_if(value) {
             Some(data::Object::SubCharTable(node)) => (1, char_table::char_table_node_id(node) as u64),
             _ => (0, value.0),
@@ -401,22 +466,23 @@ impl Vm {
         body.map(|body| prefix + &body)
     }
 
-    fn print_body(&self, value: Value, quoted: bool, options: &PrintOptions, depth: usize) -> Result<String> {
-        if depth > 100 { return Err("print nesting limit exceeded".into()); }
-        if let Some(view) = self.str_view(value) {
-            let properties = if quoted { self.print_string_properties(value) } else { Vec::new() };
-            let mut out = if quoted { String::from("\"") } else { String::new() };
-            let codes: Vec<_> = view.chars().collect();
-            let mut hex = false;
-            for (i, &code) in codes.iter().enumerate() {
-                use std::fmt::Write;
+    fn print_string_text(&self, view: lstring::StrView<'_>, quoted: bool, options: &PrintOptions) -> Result<String> {
+        use std::fmt::Write;
+        let mut out = if quoted { String::from("\"") } else { String::new() };
+        let mut codes = view.chars().peekable();
+        let mut hex = false;
+        // Only an octal escape needs the next code, even across a poll.
+        for start in (0..view.len()).step_by(KERNEL_CHUNK) {
+            if start != 0 && self.native_stop_due() { return Err(PRINT_STOPPED.into()); }
+            for _ in 0..KERNEL_CHUNK {
+                let Some(code) = codes.next() else { break };
                 // princ into a buffer escapes a unibyte string's raw bytes too.
                 if code > lstring::MAX_5_BYTE_CHAR || (!view.is_multibyte() && code >= 128 && (quoted || options.buffer)) {
                     if !view.is_multibyte() && code >= 128 && !options.nonascii {
                         return Err("printing raw-byte strings to callbacks is not supported".into());
                     }
                     let byte = if code > lstring::MAX_5_BYTE_CHAR { code - lstring::BYTE8_OFFSET } else { code };
-                    write!(out, "\\{:03o}", byte).unwrap();
+                    write!(out, "\\{byte:03o}").unwrap();
                     hex = false;
                 } else if quoted && options.multibyte && code >= 128 {
                     write!(out, "\\x{code:04x}").unwrap(); hex = true;
@@ -428,7 +494,7 @@ impl Vm {
                         '\n' if quoted && options.newlines => out.push_str("\\n"),
                         '\u{c}' if quoted && options.newlines => out.push_str("\\f"),
                         _ if quoted && options.controls && (code < 32 || code == 127) => {
-                            let width = if code > 63 || codes.get(i+1).is_some_and(|c| (48..=55).contains(c)) { 3 } else if code > 7 { 2 } else { 1 };
+                            let width = if code > 63 || codes.peek().is_some_and(|c| (48..=55).contains(c)) { 3 } else if code > 7 { 2 } else { 1 };
                             write!(out, "\\{code:0width$o}").unwrap();
                         }
                         // Printed text is decoded as a symbol key (symkey.rs).
@@ -437,7 +503,17 @@ impl Vm {
                     }
                 } else { return Err("not-unicode-string: printer extended character".into()); }
             }
-            if quoted { out.push('\"'); }
+        }
+        if quoted { out.push('\"'); }
+        Ok(out)
+    }
+
+    fn print_body(&self, value: Value, quoted: bool, options: &PrintOptions, depth: usize) -> Result<String> {
+        use std::fmt::Write;
+        if depth > 100 { return Err("print nesting limit exceeded".into()); }
+        if let Some(view) = self.str_view(value) {
+            let properties = if quoted { self.print_string_properties(value) } else { Vec::new() };
+            let mut out = self.print_string_text(view, quoted, options)?;
             if !properties.is_empty() {
                 out.insert_str(0, "#(");
                 for (start, end, plist) in properties {
@@ -456,7 +532,6 @@ impl Vm {
                         if limit < count { parts.push("...".into()); }
                         format!("({})", parts.join(" "))
                     };
-                    use std::fmt::Write;
                     write!(out, " {start} {end} {printed}").unwrap();
                 }
                 out.push(')');
@@ -700,10 +775,22 @@ struct PrintOptions {
     nonascii: bool, multibyte: bool, controls: bool, circle: bool, gensym: bool,
     /// Output goes to a multibyte buffer, as print_string's does.
     buffer: bool,
+    /// Objects printed, for the quit probe (`print_object`).
+    // CELL(Plain)
+    objects: std::cell::Cell<u32>,
 }
 impl Default for PrintOptions {
-    fn default() -> Self { Self { graph: std::cell::RefCell::default(), unreadable: Unreadable::Ignored, length: None, level: None, quoted: true, newlines: false, nonascii: false, multibyte: false, controls: false, circle: false, gensym: false, buffer: false } }
+    fn default() -> Self { Self { graph: std::cell::RefCell::default(), unreadable: Unreadable::Ignored, length: None, level: None, quoted: true, newlines: false, nonascii: false, multibyte: false, controls: false, circle: false, gensym: false, buffer: false, objects: std::cell::Cell::new(0) } }
 }
+
+use crate::quit::KERNEL_CHUNK;
+
+/// A print a quit probe stopped (`print_object`): its caller polls.
+pub(crate) const PRINT_STOPPED: &str = "print stopped for a quit poll";
+
+/// Objects printed between two looks at the quit probe; GNU's
+/// `print_object` looks at each (`maybe_quit` at `print_obj`).
+const PRINT_POLL: u32 = 4096;
 impl PrintOptions {
     fn set(&mut self, key: &str, value: Value) -> bool {
         let on = value != Value::NIL;
@@ -733,17 +820,50 @@ impl Vm {
     /// data.c minmax_driver: markers become their positions, a later
     /// argument wins only when strictly better (ties keep the first, with
     /// its own type), and a NaN that does not win is returned at once.
-    pub(super) fn minmax(&mut self, args: &[Value], better: std::cmp::Ordering) -> Result<Value> {
-        let mut accum = self.coerce_number(args[0], true)?;
-        for &arg in &args[1..] {
+    /// Past a chunk of arguments, polled between chunks (`Vm::kernel_poll`,
+    /// SCOPED from their engine targets); a quit returns nothing.
+    pub(super) fn minmax<const SCOPED: bool>(&mut self, args: &[Value], better: std::cmp::Ordering) -> Result<Value> {
+        let accum = self.coerce_number(args[0], true)?;
+        if args.len() > KERNEL_CHUNK + 1 {
+            return self.minmax_polled::<SCOPED>(accum, &args[1..], better);
+        }
+        Ok(match self.minmax_fold(accum, &args[1..], better)? {
+            std::ops::ControlFlow::Continue(accum) | std::ops::ControlFlow::Break(accum) => accum,
+        })
+    }
+    /// `minmax` over more than a chunk of ARGS, ACCUM their first's value.
+    #[cold]
+    #[inline(never)]
+    fn minmax_polled<const SCOPED: bool>(&mut self, mut accum: Value, args: &[Value], better: std::cmp::Ordering) -> Result<Value> {
+        for (i, chunk) in args.chunks(KERNEL_CHUNK).enumerate() {
+            if i > 0 { self.kernel_poll::<SCOPED>()?; }
+            match self.minmax_fold(accum, chunk, better)? {
+                std::ops::ControlFlow::Continue(next) => accum = next,
+                std::ops::ControlFlow::Break(nan) => return Ok(nan),
+            }
+        }
+        Ok(accum)
+    }
+    /// ACCUM folded over ARGS; Break with a NaN that did not win.
+    #[inline]
+    fn minmax_fold(&mut self, mut accum: Value, args: &[Value], better: std::cmp::Ordering) -> Result<std::ops::ControlFlow<Value, Value>> {
+        for &arg in args {
             let value = self.coerce_number(arg, true)?;
             if self.numeric_cmp(value, accum)? == Some(better) {
                 accum = value;
             } else if self.number(value)?.is_nan() {
-                return Ok(value);
+                return Ok(std::ops::ControlFlow::Break(value));
             }
         }
-        Ok(accum)
+        Ok(std::ops::ControlFlow::Continue(accum))
+    }
+    /// `min` (LESS) or `max` of the N arguments at START.
+    pub(super) fn min_max<const SCOPED: bool>(&mut self, start: usize, n: usize, better: std::cmp::Ordering) -> Result<Value> {
+        if n == 0 {
+            return Err("wrong primitive arity".into());
+        }
+        let args = self.stack[start..start + n].to_vec();
+        self.minmax::<SCOPED>(&args, better)
     }
 }
 

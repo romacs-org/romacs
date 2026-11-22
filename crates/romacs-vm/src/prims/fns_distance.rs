@@ -11,7 +11,14 @@ fn string_distance(cx, string1: Value, string2: Value; optional bytecompare: Val
     let b: Vec<u32> = if bytes { s2.bytes.iter().map(|&b| u32::from(b)).collect() }
         else { s2.chars().collect() };
     let mut column: Vec<usize> = (0..=a.len()).collect();
+    // A pure computation: polled about every million cells.
+    let mut cells = 0usize;
     for (x, &c2) in b.iter().enumerate() {
+        cells += a.len();
+        if cells >= 1 << 20 {
+            cells = 0;
+            cx.quittable(Leaf::native_poll)?;
+        }
         column[0] = x + 1;
         let mut lastdiag = x;
         for (y, &c1) in a.iter().enumerate() {

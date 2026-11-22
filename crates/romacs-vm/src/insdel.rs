@@ -512,7 +512,7 @@ impl Vm {
         let inherit = inherit && !(unibyte && !self.buffer_has_intervals(buffer));
         match (inherit, before_markers) {
             (false, false) => self.edit_kernel(&[arg], |vm, n| vm.buffer_primitive(Primitive::Insert, 0, n))?,
-            (false, true) => self.edit_kernel(&[arg], |vm, n| vm.primitive(Primitive::InsertBeforeMarkers, 0, n))?,
+            (false, true) => self.edit_kernel(&[arg], |vm, n| vm.outside_quit_scope(|vm| vm.primitive(Primitive::InsertBeforeMarkers, 0, n)))?,
             (true, before) => self.edit_kernel(&[arg], |vm, n| vm.annotation_insert_inherit(0, n, before))?,
         };
         let after = self.point_char()?;
@@ -601,7 +601,7 @@ impl Vm {
         self.set_change_point(buffer, to)?;
         if inserted > 0 {
             if from < to {
-                self.edit_kernel(&[text], |vm, n| vm.primitive(Primitive::InsertBeforeMarkers, 0, n))?;
+                self.edit_kernel(&[text], |vm, n| vm.outside_quit_scope(|vm| vm.primitive(Primitive::InsertBeforeMarkers, 0, n)))?;
             } else {
                 self.edit_kernel(&[text], |vm, n| vm.buffer_primitive(Primitive::Insert, 0, n))?;
             }

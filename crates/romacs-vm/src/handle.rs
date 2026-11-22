@@ -407,7 +407,7 @@ impl Vm {
     /// freed (`twin.rs'): forked from the state the collection starts from.
     fn collect_twinned(&mut self, roots: &mut [Value], until_key: bool) -> bool {
         let twin = crate::twin::fork_marks(self, roots);
-        let collected = self.collect_marked(roots, until_key);
+        let collected = self.collect_at_wait(roots, until_key);
         if let Some(twin) = twin && collected {
             crate::twin::check(self, twin);
         }

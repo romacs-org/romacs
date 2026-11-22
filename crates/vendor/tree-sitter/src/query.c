@@ -4047,20 +4047,20 @@ static inline bool ts_query_cursor__advance(
       self->operation_count = 0;
     }
 
-    if (self->query_options && self->query_options->progress_callback) {
-      self->query_state.current_byte_offset = ts_node_start_byte(ts_tree_cursor_current_node(&self->cursor));
-    }
-    if (
-      did_match ||
-      self->halted ||
-      (
-        self->operation_count == 0 &&
-        (
-          (self->query_options && self->query_options->progress_callback && self->query_options->progress_callback(&self->query_state))
-        )
-      )
-    ) {
+    if (did_match || self->halted) {
       return did_match;
+    }
+    // The offset is the callback's alone, so it is found only when the
+    // callback runs: at every step it cost a query 3%.
+    if (
+      self->operation_count == 0 &&
+      self->query_options &&
+      self->query_options->progress_callback
+    ) {
+      self->query_state.current_byte_offset = ts_node_start_byte(ts_tree_cursor_current_node(&self->cursor));
+      if (self->query_options->progress_callback(&self->query_state)) {
+        return did_match;
+      }
     }
 
     // Exit the current node.

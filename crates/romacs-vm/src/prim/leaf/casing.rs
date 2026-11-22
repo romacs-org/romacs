@@ -167,21 +167,26 @@ impl Leaf<'_> {
             let prefixes = if in_buffer { self.casing_prefix_flags(codes)? } else { vec![false; codes.len()] };
             (crate::prim::prims::capitalize::word_flags(self, codes)?, prefixes)
         } else { (Vec::new(), Vec::new()) };
-        let table = table.reader(self.vm);
         let mut inword = false;
         let mut mappings = Vec::with_capacity(codes.len());
-        for (i, &code) in codes.iter().enumerate() {
-            let was_inword = inword;
-            inword = words.get(i).is_some_and(|&word| word && (was_inword || !prefixes[i]));
-            // No ASCII character cases to several (SpecialCasing has none).
-            if let Some(special) = (multibyte && code >= 128).then(|| special(code, down)).flatten() {
-                mappings.push(special);
-                continue;
+        // Nothing is changed yet: polled between chunks.
+        let chunk = super::quit_poll::POLL_STEPS as usize * 16;
+        for start in (0..codes.len()).step_by(chunk) {
+            if start > 0 { self.native_poll()?; }
+            let table = table.reader(self.vm);
+            for (i, &code) in codes.iter().enumerate().skip(start).take(chunk) {
+                let was_inword = inword;
+                inword = words.get(i).is_some_and(|&word| word && (was_inword || !prefixes[i]));
+                // No ASCII character cases to several (SpecialCasing has none).
+                if let Some(special) = (multibyte && code >= 128).then(|| special(code, down)).flatten() {
+                    mappings.push(special);
+                    continue;
+                }
+                let default = if multibyte || code < 128 { simple(code, down) } else { code };
+                let cased = table.mapped(byte_code(code, !multibyte))?.unwrap_or(default);
+                let last = !words.get(i + 1).copied().unwrap_or(false);
+                mappings.push(vec![if was_inword && code == SIGMA && cased != code && last { 0x3c2 } else { cased }]);
             }
-            let default = if multibyte || code < 128 { simple(code, down) } else { code };
-            let cased = table.mapped(byte_code(code, !multibyte))?.unwrap_or(default);
-            let last = !words.get(i + 1).copied().unwrap_or(false);
-            mappings.push(vec![if was_inword && code == SIGMA && cased != code && last { 0x3c2 } else { cased }]);
         }
         Ok(mappings)
     }
@@ -203,21 +208,24 @@ impl Leaf<'_> {
         if source.chars == 0 {
             return Ok(value);
         }
-        let codes: Vec<_> = source.chars().collect();
+        // A new string: polled anywhere.
+        let chunk = super::quit_poll::POLL_STEPS as usize * 16;
+        let mut codes = Vec::with_capacity(source.chars);
+        let mut chars = source.chars();
+        loop {
+            let before = codes.len();
+            codes.extend(chars.by_ref().take(chunk));
+            if codes.len() - before < chunk { break; }
+            self.native_poll()?;
+        }
         let mappings = self.case_mappings(&codes, source.multibyte, down, false)?;
         let mut bytes = Vec::with_capacity(source.bytes.len());
-        for (code, mapped) in codes.into_iter().zip(mappings) {
-            for &c in &mapped {
-                if source.multibyte {
-                    let mut buf = [0; 5];
-                    let len = crate::lstring::char_string(c, &mut buf);
-                    bytes.extend_from_slice(&buf[..len]);
-                } else {
-                    // A byte string cannot silently become Unicode or truncate
-                    // an unrepresentable override. Fall back to its byte default.
-                    bytes.push(Self::byte_case_result(c, code, down));
-                }
+        let mut pairs = codes.into_iter().zip(mappings);
+        while pairs.len() > 0 {
+            for (code, mapped) in pairs.by_ref().take(chunk) {
+                append_case_mapping(&mut bytes, &mapped, code, source.multibyte, down);
             }
+            if pairs.len() > 0 { self.native_poll()?; }
         }
         let mut result = data::LispString::from_bytes(bytes, source.multibyte);
         // GNU's multibyte case path constructs fresh unpropertied text; its
@@ -234,6 +242,19 @@ impl Leaf<'_> {
         } else {
             data::Object::RawString(Box::new(result))
         }))
+    }
+}
+
+fn append_case_mapping(bytes: &mut Vec<u8>, mapped: &[u32], original: u32, multibyte: bool, down: bool) {
+    for &code in mapped {
+        if multibyte {
+            let mut buf = [0; 5];
+            let len = crate::lstring::char_string(code, &mut buf);
+            bytes.extend_from_slice(&buf[..len]);
+        } else {
+            // An unrepresentable override leaves the string in its byte domain.
+            bytes.push(Leaf::byte_case_result(code, original, down));
+        }
     }
 }
 
@@ -359,6 +380,8 @@ impl Leaf<'_> {
             return Ok(edited);
         }
         let (mut first, mut last, mut added) = (None, 0, 0);
+        // NOPOLL: the region's characters; inside modify_text's bracket and
+        // between its two undo records, which a quit would leave unpaired.
         for (i, (&code, out)) in codes.iter().zip(&cased).enumerate() {
             let at = start - 1 + i as i64 + added;
             match self.vm.objects.entry_mut(index) {

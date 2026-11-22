@@ -991,9 +991,15 @@ fn a_small_edit_starts_no_first_parse_for_a_twin_never_asked() {
     vm.eval_source("(progn (defvar romacs-treesit-show-before-parse 8) (setq romacs-treesit-show-before-parse 8) \
         (with-current-buffer \"ts-edit-twin\" (goto-char 9) (insert \"x\")))").unwrap();
     let small = vm.eval_source("(with-current-buffer \"ts-edit-twin\" (romacs--treesit-parsing-p))").unwrap().display().unwrap();
+    assert_eq!(small, "nil", "the edit starts no parse before its frame");
+    assert_eq!(romacs_vm::treesit_parses_in_process(), before + 1);
+    let evaluator = romacs_vm::treesit_parses_on_this_thread();
     deferred_frame(&mut vm);
     let started = vm.eval_source("(with-current-buffer \"ts-edit-twin\" (romacs--treesit-parsing-p))").unwrap().display().unwrap();
-    assert_eq!((small.as_str(), started.as_str()), ("nil", "t"), "the edit's frame started its reparse on a thread");
+    // A quick reparse may finish before Lisp asks whether it is pending.
+    assert!(started == "t" || romacs_vm::treesit_parses_in_process() == before + 2,
+            "the edit's frame started its reparse on a thread");
+    assert_eq!(romacs_vm::treesit_parses_on_this_thread(), evaluator, "the evaluator did not parse");
     for _ in 0..3 {
         deferred_frame(&mut vm);
         wait_landed(&mut vm, "ts-edit-twin");

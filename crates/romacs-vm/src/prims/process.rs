@@ -525,7 +525,8 @@ fn check_directory(cx, dir: Value, curdir: Value) {
 defsubr! { name = "romacs--decode-output", gnu = "callproc.c:812", effect = Global,
 fn decode_output(cx, bytes: Value, coding: Value) {
     let bytes = cx.string_view(bytes)?.bytes().to_vec();
-    cx.decode_output(bytes, coding)
+    // It makes a new string, nothing yet inserted: its decode quits per pass.
+    cx.quittable(|cx| cx.decode_output(bytes, coding))
 }}
 
 defsubr! { name = "romacs--signal-description", gnu = "callproc.c:933", effect = Pure,
@@ -544,16 +545,41 @@ fn call_output(cx: &Leaf<'_>, spec: Value) -> std::result::Result<CallOutput, Fa
 }
 
 // OUTPUT: `pipe', nil (discard) or a file name; ERROR: t (with output), nil
-// or a file name.
+// or a file name; TOKEN: the caller's fresh cons, registered as its quit's
+// token if the wait quits with output read, so the caller owns it before
+// the wait can publish it (`romacs--call-process-retire').
 defsubr! { name = "romacs--call-process-run", gnu = "callproc.c:351", effect = Global,
-fn call_process_run(cx, argv: Value, env: Value, dir: Value, infile: Value, output: Value, error: Value, wait: Value) {
+fn call_process_run(cx, argv: Value, env: Value, dir: Value, infile: Value, output: Value, error: Value, wait: Value, token: Value) {
+    if !matches!(cx.kind(token), Kind::Cons) { return Err(Fault::Wrong("consp", token)); }
     let argv = byte_list(cx, argv)?;
     let env = byte_list(cx, env)?;
     let dir = cx.string_view(dir)?.bytes().to_vec();
     let infile = cx.string_view(infile)?.bytes().to_vec();
     let output = if output == Value::TRUE { CallOutput::Pipe } else { call_output(cx, output)? };
     let error = call_output(cx, error)?;
-    cx.call_process_run(&argv, &env, &dir, &infile, output, error, wait != Value::NIL)
+    // Its wait quits: the child is interrupted and reaped later.
+    cx.quittable(|cx| cx.call_process_run(&argv, &env, &dir, &infile, output, error, wait != Value::NIL, token))
+}}
+
+// The quit `romacs--call-process-run' took in its wait, raised again once
+// call-process has inserted the output read before it: as C-g's quit
+// (`quit_unwinding' set), here, with no Lisp between it and the unwind, so
+// a macro expansion it leaves defers it to the form's reach instead of
+// expanding the macro, and running its child, again. C-g's only for TOKEN,
+// the token the wait returned and not yet raised, which it takes; any other
+// call signals a plain quit.
+defsubr! { name = "romacs--call-process-quit", gnu = "callproc.c:351", effect = Global,
+fn call_process_quit(cx; optional token: Value) {
+    Err(cx.call_process_requit(token))
+}}
+
+// call-process's TOKEN retired however the call ends, raised or not, so no
+// token outlives its call (`romacs--call-process-quit').
+defsubr! { name = "romacs--call-process-retire", gnu = "callproc.c:351", effect = Global,
+fn call_process_retire(cx, token: Value) {
+    if !matches!(cx.kind(token), Kind::Cons) { return Err(Fault::Wrong("consp", token)); }
+    cx.take_requit(token);
+    Ok(Value::NIL)
 }}
 
 // The wait status STATUS, an integer from `waitpid', as (exit . CODE) for a process

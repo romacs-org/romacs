@@ -94,6 +94,16 @@ pub(crate) trait Text {
     fn pass(&self, at: Pos, _limit: i64, _plain: impl Fn(u8, i32) -> bool) -> Passed {
         Passed { to: at, last: None, before: None }
     }
+    /// Whether the scan should stop for a quit poll (`Halt::Poll`): asked
+    /// once a step; a text whose scans no quit reaches never says so.
+    fn stop_due(&self) -> bool {
+        false
+    }
+    /// Whether the scan should stop for a quit poll now, uncounted: for a
+    /// loop that counts its own steps (`Scanner::poll_counted`).
+    fn stop_uncounted(&self) -> bool {
+        false
+    }
 }
 
 /// What `Text::pass` passed: where it ended, and the syntax of the last
@@ -135,6 +145,9 @@ pub(crate) enum Halt {
     Propertize(i64, i64),
     /// Call `syntax-ppss' at this position.
     Ppss(i64),
+    /// Poll quit (`Vm::native_poll`), then go on: a stop where the scan
+    /// has changed nothing.
+    Poll,
 }
 pub(crate) type R<T> = Result<T, Halt>;
 
@@ -181,6 +194,18 @@ pub(crate) struct ParseState {
     /// started from a state that carries it continues exactly.
     pub continuation: Option<Continuation>,
 }
+impl ParseState {
+    fn finish_levels(&mut self, levels: &[Level], in_symbol: bool, symbol_prev: i64, spent: bool) {
+        let (top, parents) = levels.split_last().expect("a current level");
+        self.thislevelstart = top.prev;
+        self.prevlevelstart = parents.last().map_or(-1, |level| level.last);
+        self.levelstarts = parents.iter().map(|level| Some(level.last)).collect();
+
+        let top_prev = if in_symbol { symbol_prev } else { top.prev };
+        self.continuation = Some(Continuation { in_symbol, top_last: top.last, top_prev, spent });
+    }
+}
+
 impl Default for ParseState {
     /// internalize_parse_state (Qnil, ...).
     fn default() -> Self {
@@ -348,6 +373,18 @@ impl<T: Text> Scanner<'_, T> {
             _ => stop,
         }
     }
+    /// A step's quit poll: `Halt::Poll` when the text asks to stop.
+    #[inline]
+    fn poll(&self) -> R<()> {
+        if self.text.stop_due() { Err(Halt::Poll) } else { Ok(()) }
+    }
+    /// A quit poll for a loop that counts its steps in STEPS, a local the
+    /// compiler keeps in a register: the text is asked once in 1024 steps.
+    #[inline]
+    fn poll_counted(&self, steps: &mut u32) -> R<()> {
+        *steps = steps.wrapping_add(1);
+        if steps.is_multiple_of(1024) && self.text.stop_uncounted() { Err(Halt::Poll) } else { Ok(()) }
+    }
     fn update_forward(&self, charpos: i64) -> R<()> {
         // UPDATE_SYNTAX_TABLE_FORWARD's just-in-time parse_sexp_propertize.
         match self.options.propertize_done {
@@ -406,7 +443,7 @@ impl<T: Text> Scanner<'_, T> {
         let Forw { mut at, mut from, mut nesting, mut syntax, mut code, mut prev_syntax } = forw;
         macro_rules! update {
             ($next:expr) => {
-                if let Err(halt) = self.update_forward(from.char) {
+                if let Err(halt) = self.update_forward(from.char).and_then(|()| self.poll()) {
                     return Err(CommentHalt { halt, forw: Forw { at: $next, from, nesting, syntax, code, prev_syntax } });
                 }
             };
@@ -497,10 +534,9 @@ impl<T: Text> Scanner<'_, T> {
         Ok((true, from, nesting, SMAX))
     }
 
-    /// back_comment: whether a comment ends at FROM, and where it starts.
-    fn back_comment(&mut self, from: Pos, stop: i64, comnested: bool, comstyle: i32) -> R<(bool, Pos)> {
-        let comment_end = from;
-        let mut from = from;
+    /// back_comment: whether a comment ends at COMMENT_END, and where it starts.
+    fn back_comment(&mut self, comment_end: Pos, stop: i64, comnested: bool, comstyle: i32) -> R<(bool, Pos)> {
+        let mut from = comment_end;
         let mut string_style = -1;
         let mut string_lossage = false;
         let mut comment_lossage = false;
@@ -509,7 +545,10 @@ impl<T: Text> Scanner<'_, T> {
         let mut nesting = 1;
         let mut syntax = 0;
         let mut lossage = false;
+        let mut steps = 0u32;
         while from.char != stop {
+            // A poll stops where the scan starts again.
+            self.poll_counted(&mut steps)?;
             from = self.text.dec(from);
             let prev_syntax = syntax;
             let mut c = self.text.char_at(from) as i32;
@@ -583,12 +622,10 @@ impl<T: Text> Scanner<'_, T> {
                 _ => {}
             }
         }
-        if !lossage {
-            from = comstart_pos.unwrap_or(comment_end);
-            self.update_forward(if comstart_pos.is_some() { from.char - 1 } else { from.char })?;
-            return Ok((from.char != comment_end.char, from));
-        }
-        self.back_decode(comment_end, comnested, comstyle, defun_start)
+        if lossage { return self.back_decode(comment_end, comnested, comstyle, defun_start); }
+        let start = comstart_pos.unwrap_or(comment_end);
+        self.update_forward(if comstart_pos.is_some() { start.char - 1 } else { start.char })?;
+        Ok((start.char != comment_end.char, start))
     }
 
     /// `back_comment`'s lossage: whether a comment ends at `comment_end`
@@ -656,6 +693,7 @@ impl<T: Text> Scanner<'_, T> {
             // property syntax.
             let mut point = self.line_start(pos, 1);
             while point.char > self.begv.char {
+                self.poll()?;
                 if self.text.table_syntax(self.text.char_at(point)) & 0xff == SOPEN {
                     self.setup(point.char + 1, -1)?;
                     if self.text.syntax(point) & 0xff == SOPEN { break; }
@@ -799,6 +837,7 @@ impl<T: Text> Scanner<'_, T> {
                         return Err(suspend!(halt, $next, None));
                     }
                 }
+                if let Err(halt) = self.poll() { return Err(suspend!(halt, $next, None)); }
             }};
         }
         macro_rules! cur {
@@ -1065,15 +1104,10 @@ impl<T: Text> Scanner<'_, T> {
         }
         state.depth = depth;
         state.mindepth = mindepth;
-        state.thislevelstart = levels.last().expect("a current level").prev;
-        state.prevlevelstart = if levels.len() == 1 { -1 } else { levels[levels.len() - 2].last };
         state.location = from.char;
-        state.levelstarts = levels[..levels.len() - 1].iter().map(|l| Some(l.last)).collect();
         state.prev_syntax = if comstartend_first(prev_from_syntax) || state.quoted { prev_from_syntax } else { SMAX };
         state.maxdepth = maxdepth;
-        let top = levels.last().expect("a current level");
-        let top_prev = if in_symbol { symbol_prev } else { top.prev };
-        state.continuation = Some(Continuation { in_symbol, top_last: top.last, top_prev, spent });
+        state.finish_levels(&levels, in_symbol, symbol_prev, spent);
         Ok(())
     }
 }

@@ -299,6 +299,72 @@ fn a_termination_supersedes_a_pending_interrupt() {
     assert_eq!(out, "t", "{out}");
 }
 
+/// A worker cancelled during a long `call-process` whose child runs the
+/// shell SCRIPT with its paths as arguments: $1 for its pid, $2 for the
+/// ready file, written once it waits, and $3 for the pid of the helper it
+/// starts when HELPER. The milliseconds from the cancel to the quit, once
+/// the call quit, the worker served its next job, and, while the worker
+/// lives, the child was reaped (its /proc entry gone) and the helper is not
+/// live (gone, or a zombie its new parent has yet to reap).
+fn cancel_call_process(name: &str, script: &str, helper: bool) -> String {
+    let mut vm = vm();
+    let hs = Handshake::new(name);
+    let (pidfile, helperfile) = (hs.0.join("pid"), hs.0.join("helper"));
+    // call-process's own primitive, whose wait this is: the bare VM's Lisp
+    // call-process needs GNU's coding systems.
+    let argv = [String::from("sh"), "-c".into(), script.into(), "sh".into(), pidfile.display().to_string(),
+                hs.0.join("ready").display().to_string(), helperfile.display().to_string()];
+    let argv: Vec<String> = argv.iter().map(|a| serde_json::to_string(a).unwrap()).collect();
+    let job = format!("'(lambda () (romacs--call-process-run '({}) nil \"/\" \"/dev/null\" nil nil t (cons nil nil)) 'waited)", argv.join(" "));
+    let out = eval(&mut vm, &format!("(let* ((iso (isolate-create)) \
+        (f (progn (isolate-await (isolate-spawn 'list :isolate iso)) (isolate-spawn {job} :isolate iso)))) \
+        (condition-case nil {} \
+          (error (error \"the child never started: %S\" (condition-case e (isolate-await f 2) (error e))))) \
+        (let* ((start (float-time)) \
+               (result (progn (isolate-interrupt iso) (condition-case e (isolate-await f 10) (quit 'interrupted) (error (car e))))) \
+               (ms (round (* 1000 (- (float-time) start))))) \
+          (list result (condition-case e (isolate-await (isolate-spawn '+ 1 1 :isolate iso)) (error (car e))) ms)))", hs.await_ready()));
+    let (head, ms) = out.rsplit_once(' ').unwrap_or((&out, ""));
+    assert_eq!(head, "(interrupted 2", "{out}");
+    let pid_in = |file: &std::path::Path| -> i64 { std::fs::read_to_string(file).unwrap_or_else(|e| panic!("{}: {e}", file.display())).trim().parse().unwrap() };
+    let child = pid_in(&pidfile);
+    assert!(settles(|| !std::path::Path::new(&format!("/proc/{child}")).exists()), "child {child} was not reaped, the worker still live");
+    if helper {
+        let helper = pid_in(&helperfile);
+        assert!(settles(|| !process_exists(helper)), "helper {helper} outlived the cancel, the worker still live");
+    }
+    eval(&mut vm, "(isolate-kill-all)");
+    ms.trim_end_matches(')').to_string()
+}
+
+/// A worker's cancel during a long `call-process` stops the child, as a
+/// C-g's quit does (SIGINT to its group), and quits within the bound.
+#[test]
+fn an_interrupt_stops_a_workers_call_process() {
+    let ms = cancel_call_process("call-process", "echo $$ > \"$1\"; : > \"$2\"; exec sleep 30", false);
+    eprintln!("call-process interrupt to quit: {ms} ms");
+    assert!(ms.parse::<u64>().unwrap() < 500, "{ms} ms");
+}
+
+/// A child that ignores SIGINT gets no second C-g from a worker: the stop
+/// sends SIGKILL itself after its grace, and the cancel still returns
+/// within the grace and a margin.
+#[test]
+fn an_interrupt_kills_a_workers_child_that_ignores_sigint() {
+    let ms = cancel_call_process("call-process-trap", "trap '' INT HUP; echo $$ > \"$1\"; : > \"$2\"; exec sleep 30", false);
+    eprintln!("call-process interrupt to quit, SIGINT ignored: {ms} ms");
+    assert!(ms.parse::<u64>().unwrap() < 1000, "{ms} ms");
+}
+
+/// A shell's `&` job starts with SIGINT ignored, so the shell ends on the
+/// SIGINT and leaves it running: the worker's stop kills the whole group.
+#[test]
+fn an_interrupt_kills_a_workers_call_process_helper() {
+    let ms = cancel_call_process("call-process-helper", "sleep 30 & echo $! > \"$3\"; echo $$ > \"$1\"; : > \"$2\"; wait", true);
+    eprintln!("call-process interrupt to quit, with a helper: {ms} ms");
+    assert!(ms.parse::<u64>().unwrap() < 1000, "{ms} ms");
+}
+
 #[test]
 fn kill_leaves_no_zombie_and_settles_futures() {
     let mut vm = vm();

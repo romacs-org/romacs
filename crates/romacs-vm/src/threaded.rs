@@ -1740,12 +1740,35 @@ pub(super) fn execute_args(vm: &mut Vm, function: usize, args: &[Value]) -> Resu
             vm.propagated_eval_depth = Some(vm.eval_depth);
             Err("Lisp nesting exceeds `max-lisp-eval-depth'".into())
         } else {
-            execute_args_inner(vm, function, args)
+            vm.outside_quit_scope(|vm| execute_args_inner(vm, function, args))
         };
         vm.eval_depth = saved;
         result
     })
 }
+/// Obtain the register file and lowered code for this entry. A failed
+/// lowering returns the program to the VM for its next entry.
+fn lower_entry_program(vm: &mut Vm, function: usize) -> Result<Program> {
+    let mut program = std::mem::take(&mut vm.execution);
+    if program.registers.is_empty() && let Some(spare) = vm.spare_programs.pop() {
+        program = spare;
+    }
+    program.code.resize_with(vm.functions.len(), Code::none);
+    if let Err(error) = lower_function(
+        vm,
+        &mut program.code,
+        &mut program.entries,
+        &mut program.inline_bodies,
+        &mut program.free_entries,
+        function,
+    ) {
+        vm.execution_fatal = true;
+        vm.execution = program;
+        return Err(error);
+    }
+    Ok(program)
+}
+
 fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Value> {
     // SAFETY: an unconverted caller's entry: its file's census rows say what
     // it keeps across the run.
@@ -1764,23 +1787,7 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         vm.execution_fatal = true;
         return Err(error);
     }
-    let mut program = std::mem::take(&mut vm.execution);
-    if program.registers.is_empty() && let Some(spare) = vm.spare_programs.pop() {
-        program = spare;
-    }
-    program.code.resize_with(vm.functions.len(), Code::none);
-    if let Err(error) = lower_function(
-        vm,
-        &mut program.code,
-        &mut program.entries,
-        &mut program.inline_bodies,
-        &mut program.free_entries,
-        function,
-    ) {
-        vm.execution_fatal = true;
-        vm.execution = program;
-        return Err(error);
-    }
+    let mut program = lower_entry_program(vm, function)?;
     let width = vm.functions[function].regs;
     debug_assert!(args.len() <= width.max(1), "an entry passes at most its function's registers");
     let size = width.max(args.len()).checked_add(WINDOW).ok_or("register storage overflow")?.next_power_of_two();
@@ -1848,6 +1855,7 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     }
     // GNU's eval_sub and funcall run maybe_quit before the body: a quit
     // already due ends the entry before its first instruction.
+    crate::gap_probe::safepoint(Some(engine.vm));
     let quit = if crate::host::safepoint_pending() || engine.vm.quit_due() {
         engine.budget = 0;
         interrupt_quit(&mut engine)
@@ -2401,7 +2409,10 @@ fn polled<'x, 'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, (pc, collect)
     // GNU's maybe_quit: a host's C-g (quit.rs), a debug event, or an
     // isolate's interrupt (SIGUSR1, `isolate.rs`) is `quit` at this
     // safepoint unless `inhibit-quit' is bound.
-    let quit = m.leaf((), |e, ()| (crate::host::safepoint_pending() || e.vm.quit_poll_due()) && interrupt_quit(e).is_some());
+    let quit = m.leaf((), |e, ()| {
+        crate::gap_probe::safepoint(Some(e.vm));
+        (crate::host::safepoint_pending() || e.vm.quit_poll_due()) && interrupt_quit(e).is_some()
+    });
     if quit { Continue::Stop } else { Continue::At(pc) }
 }
 /// GNU maybe_quit at a safepoint: an isolate's pending interrupt as a
@@ -4140,8 +4151,7 @@ unsafe fn t2_dispatch(
             }
             _ => {
                 enter_native(&mut e, r, pc, target, start, argc);
-                let Some(value) = primitive_value(&mut e, p, base + start, argc, primitive_target(p))
-                else {
+                let Some(value) = measured_primitive_value(&mut e, p, base + start, argc, None) else {
                     return Value::UNBOUND;
                 };
                 leave_native(&mut e);
@@ -4217,6 +4227,13 @@ unsafe fn t2_prepare_apply(
                 r = rebased;
             }
             Err(error) => {
+                // A poll's escape behind the spread's text, raised as
+                // `primitive_value` raises it.
+                if error == crate::quit::ESCAPED && let Some(escape) = e.vm.propagated_escape.take() {
+                    e.escape = Some(escape);
+                    e.escape_hooked = std::mem::take(&mut e.vm.propagated_escape_hooked);
+                    e.failed_eval_depth = e.vm.propagated_eval_depth.take();
+                }
                 e.error = Some(error);
                 return (std::ptr::null_mut(), 0);
             }
@@ -4307,16 +4324,21 @@ unsafe fn t2_enter_closure(
 }
 // Resolve the ordinary primitive family once per call site. Each cached call
 // enters its Rust kernel directly instead of walking Vm::primitive's chain.
-fn primitive_target(p: Primitive) -> PrimitiveCall {
+pub(crate) fn primitive_target(p: Primitive) -> PrimitiveCall {
     use Primitive::*;
     match p {
         ClosureMetadata | ClosureDocument | MakeInterpretedClosure => Vm::interpreted_closure_primitive,
         ForwardChar | BackwardChar | BeginningOfLine | EndOfLine => {
             Vm::command_primitive
         }
-        TempBuffer => Vm::eval_buffer_primitive,
-        DeepEqual | Min | Append => Vm::eval_data_primitive,
-        GetBuffer | ForwardLine | SwitchToBuffer | EmacsLispMode | MenuBarMode
+        // Their own entry, which raises a poll's escape (`primitive_value`).
+        DeepEqual => |vm, p, start, n| vm.inside_quit_scope(|vm| vm.eval_data_primitive(p, start, n)),
+        // Granting their quit scope at their first chunk boundary
+        // (`Vm::kernel_poll`), as Nreverse below.
+        Append => |vm, _, start, n| vm.append_values::<true>(start, n),
+        Min => |vm, _, start, n| vm.min_max::<true>(start, n, std::cmp::Ordering::Less),
+        Max => |vm, _, start, n| vm.min_max::<true>(start, n, std::cmp::Ordering::Greater),
+        TempBuffer | GetBuffer | ForwardLine | SwitchToBuffer | EmacsLispMode | MenuBarMode
         | ForceModeLineUpdate | LocateLibrary | Daemonp | DaemonInitialized => {
             Vm::eval_buffer_primitive
         }
@@ -4333,10 +4355,16 @@ fn primitive_target(p: Primitive) -> PrimitiveCall {
         p if (p as usize) >= DisplayDefineFace as usize => Vm::display_primitive,
         Add => Vm::add_primitive,
         Sub | Mul | Div | Abs | Less | Equal | Inc | Dec => Vm::numeric_primitive,
-        Vector | Aref | Aset | CopySequence => Vm::data_primitive,
+        Vector | Aref | Aset => Vm::data_primitive,
+        // A list's copy grants its quit scope at its first chunk boundary
+        // (`Vm::kernel_poll`), as Nreverse below; nothing else here polls.
+        CopySequence => |vm, p, start, n| if n == 1 && vm.stack[start].tag() == 3 { vm.copy_list::<true>(vm.stack[start]) } else { vm.data_primitive(p, start, n) },
+        // Its own entry, granting its quit scope at its first chunk
+        // boundary (`Vm::kernel_poll`): a shorter call never enters one.
+        Nreverse => |vm, _, start, n| if n == 1 { vm.core_nreverse::<true>(vm.stack[start]) } else { Err("wrong primitive arity".into()) },
         CacheStats | CacheClear | CacheEntries => |vm, p, _, n| vm.cache_primitive(p, n),
         ProcessLines => |vm, _, start, n| vm.process_lines(start, n),
-        Format => |vm, _, start, n| vm.format_string(start, n),
+        Format => |vm, _, start, n| vm.inside_quit_scope(|vm| vm.format_polled(start, n)),
         // Traversal and Message retain their ordinary arity/error adapter.
         Car | Cdr | Null | Eq | Memq | Assq | Nth | Setcar | Setcdr => {
             Vm::traversal_primitive
@@ -4344,10 +4372,7 @@ fn primitive_target(p: Primitive) -> PrimitiveCall {
         Message => Vm::primitive,
         // The other loader primitives never come here: the engine lends them
         // (`loader_body`). These two run no Lisp.
-        Provide | Featurep => |vm, p, start, n| {
-            let args = vm.stack[start..start + n].to_vec();
-            vm.feature_primitive(p, &args)
-        },
+        Provide | Featurep => feature_call,
         Load | Require | Eval | Macroexpand | AutoloadDoLoad | ReadHostEvent | FormatModeLine => |_, _, _, _| {
             Err("a loader primitive is lent from its engine (`loader_body`), never called here".into())
         },
@@ -4359,6 +4384,22 @@ fn primitive_target(p: Primitive) -> PrimitiveCall {
         _ => Vm::primitive,
     }
 }
+fn feature_call(vm: &mut Vm, p: Primitive, start: usize, argc: usize) -> Result<Value> {
+    let args = vm.stack[start..start + argc].to_vec();
+    vm.feature_primitive(p, &args)
+}
+
+/// Attribute the whole legacy primitive call on both dispatch paths,
+/// including an error return.
+#[inline]
+fn measured_primitive_value(e: &mut Engine<'_>, p: Primitive, start: usize, argc: usize, cached: Option<PrimitiveCall>) -> Option<Value> {
+    crate::gap_probe::enter(e.vm, move || crate::legacy_primitive_name(p));
+    let target = cached.unwrap_or_else(|| primitive_target(p));
+    let value = primitive_value(e, p, start, argc, target);
+    crate::gap_probe::exit(e.vm);
+    value
+}
+
 // The Result out-pointer and diagnostic allocations stay in this non-threaded
 // helper, so no escaped native stack address prevents the next tail dispatch.
 #[inline(never)]
@@ -4445,7 +4486,7 @@ fn primitive_value(
             // `defalias-fset-function` escape comes through the queue's drain
             // instead: this engine runs, so those writes wait for its
             // completion (`Vm::write_from_native`).
-            if (p == Primitive::DefvarSetDefault || error == crate::frozen::READ_ONLY)
+            if (p == Primitive::DefvarSetDefault || error == crate::frozen::READ_ONLY || error == crate::quit::ESCAPED)
                 && let Some(escape) = e.vm.propagated_escape.take() {
                 e.escape = Some(escape);
                 e.escape_hooked = std::mem::take(&mut e.vm.propagated_escape_hooked);
@@ -4486,7 +4527,9 @@ unsafe fn leaf_call(
         }
         let leaf: prim::LeafBody = std::mem::transmute(en.entries.get_unchecked((*pc).site).function);
         en.vm.site_leaf = (pc as usize, r as usize);
+        crate::gap_probe::enter(en.vm, move || prim::generated(target).map_or("(site leaf)", |d| d.name));
         let value = en.vm.leaf_value(leaf, r.add(start), argc, &mut en.leaf_fault);
+        crate::gap_probe::exit(en.vm);
         en.vm.site_leaf = (0, 0);
         if value == Value::UNBOUND && en.leaf_fault.is_some() {
             return leaf_failed(e, r, pc, target, start, argc);
@@ -4561,7 +4604,7 @@ unsafe fn cached_primitive(
         enter_native(&mut e, r, pc, target, start, argc);
         let base = r.offset_from(e.vm.stack.as_ptr()) as usize;
         let p = prim::legacy(target).expect("legacy primitive");
-        let Some(value) = primitive_value(&mut e, p, base + start, argc, call) else {
+        let Some(value) = measured_primitive_value(&mut e, p, base + start, argc, Some(call)) else {
             return Value::UNBOUND;
         };
         leave_native(&mut e);
@@ -5194,7 +5237,7 @@ macro_rules! through {
         }
     };
 }
-through!(deep_equal, |vm, x, y| vm.equal_kernel(x, y));
+through!(deep_equal, |vm, x, y| vm.equal_site_kernel(x, y));
 through!(member, |vm, x, y| vm.member_kernel(x, y));
 through!(get, |vm, x, y| vm.get_kernel(x, y));
 through!(nthcdr, |vm, x, y| vm.nthcdr_kernel(x, y));

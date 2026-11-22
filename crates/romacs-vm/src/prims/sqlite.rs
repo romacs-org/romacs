@@ -19,17 +19,20 @@ fn sqlite_close(cx, db: Value) {
 
 defsubr! { name = "sqlite-execute", gnu = "sqlite.c:493", effect = Global,
 fn sqlite_execute(cx, db: Value, query: Value; optional values: Value) {
-    cx.sqlite_execute(db, query, values)
+    // A C-g interrupts the statement, which SQLite rolls back.
+    cx.quittable(|cx| cx.sqlite_execute(db, query, values))
 }}
 
 defsubr! { name = "sqlite-select", gnu = "sqlite.c:579", effect = Global,
 fn sqlite_select(cx, db: Value, query: Value; optional values: Value, return_type: Value) {
-    cx.sqlite_select(db, query, values, return_type)
+    // A C-g interrupts the statement, which SQLite rolls back.
+    cx.quittable(|cx| cx.sqlite_select(db, query, values, return_type))
 }}
 
 defsubr! { name = "sqlite-execute-batch", gnu = "sqlite.c:664", effect = Global,
 fn sqlite_execute_batch(cx, db: Value, statements: Value) {
-    cx.sqlite_execute_batch(db, statements)
+    // A C-g interrupts the statement, which SQLite rolls back.
+    cx.quittable(|cx| cx.sqlite_execute_batch(db, statements))
 }}
 
 defsubr! { name = "sqlite-transaction", gnu = "sqlite.c:675", effect = Global,
@@ -49,7 +52,8 @@ fn sqlite_rollback(cx, db: Value) {
 
 defsubr! { name = "sqlite-pragma", gnu = "sqlite.c:699", effect = Global,
 fn sqlite_pragma(cx, db: Value, pragma: Value) {
-    cx.sqlite_pragma(db, pragma)
+    // A C-g interrupts the statement, which SQLite rolls back.
+    cx.quittable(|cx| cx.sqlite_pragma(db, pragma))
 }}
 
 defsubr! { name = "sqlite-load-extension", gnu = "sqlite.c:711", effect = Global,
@@ -69,7 +73,8 @@ fn extension_expanded(cx: &mut Leaf<'_>, module: Value, saved: &[Value]) -> Next
 
 defsubr! { name = "sqlite-next", gnu = "sqlite.c:792", effect = Global,
 fn sqlite_next(cx, set: Value) {
-    cx.sqlite_next(set)
+    // A C-g interrupts the statement, which SQLite rolls back.
+    cx.quittable(|cx| cx.sqlite_next(set))
 }}
 
 defsubr! { name = "sqlite-columns", gnu = "sqlite.c:815", effect = Reads,

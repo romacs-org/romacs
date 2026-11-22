@@ -72,6 +72,20 @@ fn quit_after_marker(vm: &mut Vm, signal: &Arc<QuitSignal>, source: &str, marker
     value
 }
 
+/// `nreverse` of a long list, called at the engine's own call site, again
+/// and again: C-g ends it within 100 ms, wherever it lands.
+#[test]
+fn a_long_nreverse_quits() {
+    let (mut vm, signal) = busy_vm();
+    let marker = std::env::temp_dir().join(format!("quit-async-nreverse-{}.ran", std::process::id()));
+    let _cleanup = Cleanup([marker.clone()]);
+    eval(&mut vm, "(defvar quit-async-l (make-list 3000000 1))");
+    let quit = quit_after_marker(&mut vm, &signal, &format!(
+        "(condition-case nil (progn (write-region \"\" nil {:?}) (dotimes (_ 60) (setq quit-async-l (nreverse quit-async-l))) 'done) (quit 'quit))",
+        marker.display().to_string()), &marker);
+    assert_eq!(quit, "quit");
+}
+
 #[test]
 fn a_tight_loop_and_a_calling_loop_quit() {
     let (mut vm, signal) = busy_vm();

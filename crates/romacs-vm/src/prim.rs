@@ -2066,8 +2066,11 @@ mod leaf {
     pub(crate) mod treesit;
     pub(crate) mod inotify;
     mod process;
+    mod call_process_wait;
     mod gnutls;
     pub(crate) use process::{CallOutput, Target, strerror};
+    #[cfg(test)]
+    pub(crate) use call_process_wait::ChildEnd;
     mod random;
     mod labeled_restrictions;
     mod hash_walk;
@@ -2080,6 +2083,7 @@ mod leaf {
     mod display_hosted;
     pub(crate) use display_hosted::{FaceKey, Shown, ShownKind};
     mod text_pixel_size;
+    mod quit_poll;
     mod bidi;
     pub(crate) use text_pixel_size::{TextSizeArgs, LineLabels};
     mod session;
@@ -2164,6 +2168,9 @@ pub(crate) fn initialize_coding_slot(vm: &mut Vm, name: &str) {
 #[cfg(test)]
 #[path = "leaf_tests.rs"]
 mod leaf_tests;
+#[cfg(test)]
+#[path = "quit_reach_tests.rs"]
+mod quit_reach_tests;
 
 /// GNU's CHECK_* macros as types: the parameter type IS the check, so arity,
 /// coercion and the signalled predicate are declared, never re-implemented.
@@ -2364,7 +2371,7 @@ pub(crate) fn call_native_watcher(vm: &mut Vm, watcher: Value, args: &[Value]) -
         let n = Value::integer(args.len() as i64).unwrap();
         vm.condition("wrong-number-of-arguments", &[watcher, n])
     } else {
-        match no_collection(vm, |vm| f(&mut Leaf::new(vm), args)) {
+        match vm.outside_quit_scope(|vm| no_collection(vm, |vm| f(&mut Leaf::new(vm), args))) {
             Ok(_) => return Ok(()),
             Err(Fault::Escape) => return Err(format!("variable watcher {} signalled", d.name)),
             Err(fault) => vm.fault(fault),
@@ -2511,6 +2518,7 @@ impl Vm {
         argc: usize,
     ) -> std::result::Result<Step, Option<(Value, Value)>> {
         let d = generated(target).expect("generated primitive");
+        debug_assert!(!self.native_quit, "{} entered inside a caller's quit scope", d.name);
         self.arity_check(d, target, argc)?;
         // Copied off the register stack, which the body may widen; on the
         // native stack for the common argument counts.
@@ -2523,14 +2531,14 @@ impl Vm {
             heap = self.stack[start..start + argc].to_vec();
             &heap
         };
-        let step = no_collection(self, |vm| {
+        let step = crate::gap_probe::within(self, move || d.name, |vm| no_collection(vm, |vm| {
             let mut cx = Leaf::new(vm);
             match d.body {
                 Body::Leaf(f) => f(&mut cx, args).map(Step::Done),
                 Body::Call(f) => f(&mut cx, args),
                 Body::Reader(_) => unreachable!("a reading primitive is lent from its engine (`read_body`)"),
             }
-        });
+        }));
         step.map_err(|fault| self.step_fault(fault))
     }
     /// The arity error D, the generated primitive TARGET, raises for ARGC
@@ -2558,6 +2566,7 @@ impl Vm {
     /// ARGS must point at ARGC live values.
     #[inline(never)]
     pub(crate) unsafe fn leaf_value(&mut self, f: LeafBody, args: *const Value, argc: usize, fault: &mut Option<Fault>) -> Value {
+        debug_assert!(!self.native_quit, "a site leaf entered inside a caller's quit scope");
         let mut small = [Value::NIL; LEAF_ARGUMENTS];
         unsafe { std::ptr::copy_nonoverlapping(args, small.as_mut_ptr(), argc) };
         match no_collection(self, |vm| f(&mut Leaf::new(vm), &small[..argc])) {
@@ -2579,7 +2588,7 @@ impl Vm {
         result: Value,
         saved: &[Value],
     ) -> std::result::Result<Step, Option<(Value, Value)>> {
-        no_collection(self, |vm| then(&mut Leaf::new(vm), result, saved))
+        crate::gap_probe::within(self, move || "(continuation)", |vm| no_collection(vm, |vm| then(&mut Leaf::new(vm), result, saved)))
             .map_err(|fault| self.step_fault(fault))
     }
     fn step_fault(&mut self, fault: Fault) -> Option<(Value, Value)> {

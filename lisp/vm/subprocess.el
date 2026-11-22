@@ -1249,32 +1249,52 @@ what `find-operation-coding-system' sees after the operation."
              (stderr (cond ((stringp error-file) error-file)
                            ((and (null error-file) (not discard)) nil)
                            (t t)))
-             (result (romacs--call-process-run argv (romacs--environment-block current-dir)
-                                               (romacs--encode-file current-dir) infile
-                                               output stderr (not (integerp buffer)))))
-        (if (integerp buffer)
-            nil
-          (save-current-buffer
-            (if (bufferp buffer) (set-buffer buffer))
-            (if (eq output 'pipe)
-                (let ((val (cond (coding-system-for-read coding-system-for-read)
-                                 (t (if (eq coding-systems t)
-                                        (setq coding-systems
-                                              (apply #'find-operation-coding-system 'call-process all-args)))
-                                    (cond ((consp coding-systems) (car coding-systems))
-                                          ((consp default-process-coding-system)
-                                           (car default-process-coding-system)))))))
-                  (check-coding-system val)
-                  (if (and (not enable-multibyte-characters) val)
-                      (setq val (coding-system-change-text-conversion val 'raw-text)))
-                  (romacs--call-process-insert (cdr result) val)
-                  (if inherit-process-coding-system
-                      (funcall 'after-insert-file-set-buffer-file-coding-system
-                               (string-bytes (cdr result)))))))
-          (let ((status (romacs--wait-status (car result))))
-            (if (eq (car status) 'signal)
-                (romacs--signal-text (cdr status))
-              (cdr status))))))))
+             ;; This call's quit token, made before the wait can register it
+             ;; (((quit . TOKEN) . BYTES)) and retired however the call ends,
+             ;; a throw out of the run's own return included: none outlives it.
+             (token (cons nil nil))
+             (result nil))
+        (unwind-protect
+            (progn
+              (setq result (romacs--call-process-run argv (romacs--environment-block current-dir)
+                                                     (romacs--encode-file current-dir) infile
+                                                     output stderr (not (integerp buffer)) token))
+              (if (integerp buffer)
+                  nil
+                (save-current-buffer
+                  (if (bufferp buffer) (set-buffer buffer))
+                  (if (eq output 'pipe)
+                      (let ((val (romacs--call-process-read-coding coding-systems all-args)))
+                        (romacs--call-process-insert (cdr result) val)
+                        (if inherit-process-coding-system
+                            (funcall 'after-insert-file-set-buffer-file-coding-system
+                                     (string-bytes (cdr result)))))))
+                ;; A quit with output read before it: inserted above, all of it
+                ;; (GNU's call_process can drop a partly filled block:
+                ;; VM2-CALLPROC-QUIT-OUTPUT), then the quit, raised again as C-g's
+                ;; with the wait's own token: ((quit . TOKEN) . BYTES).
+                (if (eq (car-safe (car-safe result)) 'quit) (romacs--call-process-quit token))
+                (let ((status (romacs--wait-status (car result))))
+                  (if (eq (car status) 'signal)
+                      (romacs--signal-text (cdr status))
+                    (cdr status)))))
+          (romacs--call-process-retire token))))))
+
+(defun romacs--call-process-read-coding (coding-systems all-args)
+  "Choose the coding system for call-process output in the current buffer.
+CODING-SYSTEMS is the lookup for ALL-ARGS, or t if still needed."
+  (let ((coding
+         (or coding-system-for-read
+             (let ((systems (if (eq coding-systems t)
+                                (apply #'find-operation-coding-system 'call-process all-args)
+                              coding-systems)))
+               (cond ((consp systems) (car systems))
+                     ((consp default-process-coding-system)
+                      (car default-process-coding-system)))))))
+    (check-coding-system coding)
+    (if (and (not enable-multibyte-characters) coding)
+        (coding-system-change-text-conversion coding 'raw-text)
+      coding)))
 
 (defun romacs--call-process-insert (bytes coding)
   "call_process's decoding insertion of BYTES before point with CODING."
