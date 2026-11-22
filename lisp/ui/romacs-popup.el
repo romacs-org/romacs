@@ -351,19 +351,21 @@ left out."
      map
      (lambda (event binding level full)
        (setq n (1+ n))
-       (puthash n (if (and full (or (integerp event) (consp event)))
-                      (list level 0 (if (consp event) (car event) event))
-                    (list level 1 (- n)))
-                orders)
+       (puthash n (cons level (and full (or (integerp event) (consp event)))) orders)
        (cond
         ((consp event) (push (list n (car event) (cdr event) binding) characters))
         ((integerp event) (push (list n event event binding) characters))
         ((or (memq event '(remap t menu-bar tool-bar)) (string-match-p "mouse" (symbol-name event))))
         ((gethash event seen))
         (t (puthash event t seen) (push (list n event binding) others)))))
-    (let ((order (lambda (item) (append item (list (gethash (car item) orders))))))
-      (cons (mapcar order (romacs-popup--hint-fragments (nreverse characters)))
-            (mapcar order (nreverse others))))))
+    ;; A full map's character, or a fragment of its range, goes by its own
+    ;; code; anything else by its place, newest stored first.
+    (let ((order (lambda (item lo)
+                   (pcase-let ((`(,level . ,by-code) (gethash (car item) orders)))
+                     (append item (list (if (and by-code lo) (list level 0 lo) (list level 1 (- (car item))))))))))
+      (cons (mapcar (lambda (fragment) (funcall order fragment (nth 1 fragment)))
+                    (romacs-popup--hint-fragments (nreverse characters)))
+            (mapcar (lambda (item) (funcall order item nil)) (nreverse others))))))
 
 (defun romacs-popup--hint-entries (map)
   "MAP's bindings as (KEY . LABEL), in one traversal
@@ -386,7 +388,7 @@ at ESC's place."
       ;; `sort' is stable: a range's parts stay in ascending order.
       (mapcan (pcase-lambda (`(,_ ,key ,binding))
                 (if (and (not prefix) (equal key [?\e]) (keymapp binding))
-                    (romacs-popup--hint-keys (lookup-key map [?\e]) [?\e])
+                    (romacs-popup--hint-meta-keys map binding)
                   (list (list (if (vectorp key) (funcall name (aref key 0)) key) binding))))
               (sort (nconc (mapcar (pcase-lambda (`(,_ ,lo ,hi ,binding ,order))
                                      (list order (if (= lo hi) (vector lo)
@@ -395,6 +397,20 @@ at ESC's place."
                                    characters)
                            (mapcar (pcase-lambda (`(,_ ,event ,binding ,order)) (list order (vector event) binding)) others))
                     (lambda (a b) (romacs-popup--order< (car a) (car b))))))))
+
+(defun romacs-popup--hint-meta-keys (map esc)
+  "MAP's meta keys, its effective ESC map's, as (KEY BINDING) at ESC's
+place; a key unbound in the first map that has it is resolved by
+`lookup-key', as composed maps resolve it.  When they cannot be read (a
+prefix library that fails to load), ESC itself, its binding ESC."
+  (condition-case nil
+      (mapcar (pcase-lambda (`(,key ,binding))
+                (list key (or binding
+                              (and (string-prefix-p "M-" key) (not (string-search ".." key))
+                                   (let ((found (lookup-key map (kbd key))))
+                                     (and (not (numberp found)) found))))))
+              (romacs-popup--hint-keys (lookup-key map [?\e]) [?\e]))
+    (error (list (list "ESC" esc)))))
 
 (defcustom romacs-popup-hints-keys-per-command 2
   "Most keys a hint shows for one command: its shortest."
@@ -444,7 +460,7 @@ with an ellipsis when entries are left over."
     (let* ((kept (seq-take lines (max 1 max)))
            (rest (nthcdr (length kept) lines))
            (last (car (last kept)))
-           (dots (truncate-string-ellipsis))
+           (dots (if (<= (funcall width (truncate-string-ellipsis)) columns) (truncate-string-ellipsis) ""))
            (fit (lambda (s)
                   (if (<= (funcall width s) columns) s
                     ;; The longest start that fits as painted, the dots too.
@@ -457,8 +473,8 @@ with an ellipsis when entries are left over."
 (defun romacs-popup--hints-show (map)
   "Show MAP's keys as hints in the selected window, retiring the toast of
 its MESSAGE (shown once, here, while the hints show)."
-  (setq romacs-popup--hints-shown map romacs-popup--hints-place (romacs-popup--hints-place))
-  (let* ((window (car romacs-popup--hints-place))
+  (let* ((place (romacs-popup--hints-place))
+         (window (car place))
          (lines (romacs-popup--hint-lines
                  (mapcar (lambda (e) (concat (propertize (car e) 'face 'romacs-popup-key) " "
                                              (propertize (cdr e) 'face 'romacs-popup-description)))
@@ -470,6 +486,9 @@ its MESSAGE (shown once, here, while the hints show)."
       (let ((inhibit-read-only t)) (erase-buffer) (insert (string-join lines "\n")) (goto-char (point-min))))
     (romacs-popup-show 'hints buffer :anchor window :lines (length lines)
                        :columns (1+ (apply #'max (mapcar #'romacs-layer--toast-width lines))))
+    ;; Shown once it shows: a failure before leaves the next reconcile to
+    ;; try again.
+    (setq romacs-popup--hints-shown map romacs-popup--hints-place place)
     (romacs-popup--hints-follow-hooks t)
     (when (stringp message)
       (dolist (toast (seq-filter (lambda (toast) (equal (nth 3 toast) message)) romacs-layer--toasts))

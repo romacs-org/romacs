@@ -67,6 +67,12 @@
             (insert "(fset 'romacs-popup-hints-tests--auto (define-keymap \"z\" #'ignore))\n"))
           (fmakunbound 'romacs-popup-hints-tests--auto)
           (autoload 'romacs-popup-hints-tests--auto file nil nil 'keymap)
+          ;; The walk itself loads the autoloaded map, before `map-keymap'.
+          (let ((walked nil))
+            (romacs-popup--walk-keymap (list 'keymap 'romacs-popup-hints-tests--auto)
+                                       (lambda (event _binding _level _full) (push event walked)))
+            (should (equal walked '(?z)))
+            (should-not (autoloadp (symbol-function 'romacs-popup-hints-tests--auto))))
           (let ((dense (let ((v (make-vector 128 nil))) (aset v ?a #'ignore) (aset v ?c #'forward-char) (list 'keymap v))))
             (dolist (map (list (list 'keymap 'romacs-popup-hints-tests--auto)
                                (list 'keymap (define-keymap "a" #'ignore) '(?b . backward-char))
@@ -109,6 +115,42 @@
       (should (equal (romacs-popup--hint-entries child)
                      '(("M-f" . "next") ("M-b" . "previous")))))))
 
+(ert-deftest romacs-popup-hints-meta-keys-agree-with-lookup ()
+  ;; A meta key the first map unbinds shows when `lookup-key' finds it
+  ;; in a later one (a composed sibling), and not when it does not (a
+  ;; parent shadowed).
+  (romacs-popup-hints-tests--with
+    (let* ((first (define-keymap "M-x" nil "q" #'romacs-popup-hints-tests--quit))
+           (second (define-keymap "M-x" #'romacs-popup-hints-tests--next))
+           (composed (make-composed-keymap (list first second)))
+           (parent (define-keymap "M-x" #'romacs-popup-hints-tests--next))
+           (child (define-keymap :parent parent "M-x" nil "q" #'romacs-popup-hints-tests--quit)))
+      (dolist (map (list composed child))
+        (should (equal (and (assoc "M-x" (romacs-popup--hint-entries map)) t)
+                       (and (lookup-key map (kbd "M-x")) t)))))))
+
+(ert-deftest romacs-popup-hints-meta-keys-that-cannot-load-show-as-esc ()
+  ;; An ESC map from a library that fails to load: ESC as a prefix, as
+  ;; before meta keys were read.
+  (romacs-popup-hints-tests--with
+    (fmakunbound 'romacs-popup-hints-tests--missing)
+    (autoload 'romacs-popup-hints-tests--missing "romacs-popup-hints-no-such-library" nil nil 'keymap)
+    (unwind-protect
+        (let ((map (define-keymap "q" #'romacs-popup-hints-tests--quit)))
+          (define-key map [?\e] 'romacs-popup-hints-tests--missing)
+          (should (equal (romacs-popup--hint-entries map) '(("q" . "quit") ("ESC" . "+...")))))
+      (fmakunbound 'romacs-popup-hints-tests--missing))))
+
+(ert-deftest romacs-popup-hints-a-range-s-part-goes-by-its-own-code ()
+  ;; Single keys ahead of a range over them: the range's part left over
+  ;; sorts by where it starts, after them.
+  (romacs-popup-hints-tests--with
+    (let ((table (make-char-table 'keymap)))
+      (set-char-table-range table '(?a . ?c) #'romacs-popup-hints-tests--quit)
+      (should (equal (romacs-popup--hint-entries
+                      (list 'keymap '(?a . romacs-popup-hints-tests--next) '(?b . romacs-popup-hints-tests--previous) table))
+                     '(("a" . "next") ("b" . "previous") ("c" . "quit")))))))
+
 (ert-deftest romacs-popup-hints-pack-into-lines ()
   ;; Entries fill a line, then the next; past the last line allowed, it
   ;; ends in an ellipsis.
@@ -121,7 +163,10 @@
     (should (equal (romacs-popup--hint-lines nil 9 2 #'string-width) '("")))
     ;; Cut by the width as painted, the dots included: here a wide `w'.
     (let ((wide (lambda (s) (+ (string-width s) (* 2 (cl-count ?w s))))))
-      (should (equal (romacs-popup--hint-lines '("ww 1" "b 2") 6 1 wide) '("w…"))))))
+      (should (equal (romacs-popup--hint-lines '("ww 1" "b 2") 6 1 wide) '("w…"))))
+    ;; Dots wider than the room: cut without them.
+    (let ((truncate-string-ellipsis "..."))
+      (should (equal (romacs-popup--hint-lines '("abc") 2 1 #'string-width) '("ab"))))))
 
 (provide 'romacs-popup-hints-tests)
 ;;; romacs-popup-hints-tests.el ends here
