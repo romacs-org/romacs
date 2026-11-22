@@ -158,6 +158,40 @@ class Bars(unittest.TestCase):
         self.assertEqual((row['status'], row['off']), ('PASS', []))
         self.assertEqual(d.rebarred({'typed': reported}, {'typed': self.bars})['typed']['step_instructions'], d.REPORTED)
 
+    def test_a_collection_above_its_baseline_is_a_figure_with_its_session(self):
+        above = [dict(r, **{'above-instructions': 30 * i}) for i, r in enumerate(readings(STEP, STEP, STEP))]
+        session = {'symbols': 73116, 'files': 578, 'loaded': ['subr']}
+        row = d.verdict({'name': 'chat-collected', 'paints': False},
+                        {'readings': [dict(r, **{'frames-submitted': 0}) for r in above], 'session': session}, 3, {})
+        self.assertEqual((row['figures']['above_instructions'], row['session']), (30, session))
+        self.assertIn('0.00M above its baseline · 73116 symbols, 578 files', d.table([row]))
+
+    def test_a_collection_row_without_its_collections_or_baseline_is_refused(self):
+        quiet = [dict(r, **{'frames-submitted': 0}) for r in readings(STEP, STEP)]
+        collects = {'name': 'plain-collected', 'paints': False, 'collects': True}
+        self.assertEqual(d.refusal(collects, {'readings': quiet}, 2), 'a step ran no full collection of its own')
+        # The host's own collections count for nothing: the step's must run.
+        host = [dict(r, collections=i) for i, r in enumerate(quiet)]
+        self.assertEqual(d.refusal(collects, {'readings': host}, 2), 'a step ran no full collection of its own')
+        collected = [dict(r, collected=i) for i, r in enumerate(quiet)]
+        self.assertIsNone(d.refusal(collects, {'readings': collected}, 2))
+        based = {**collects, 'name': 'chat-collected', 'baseline': True}
+        self.assertEqual(d.refusal(based, {'readings': collected}, 2), 'no baseline was measured: no collection above it is counted')
+        # A collection that costs the baseline's exactly adds nothing, and passes.
+        above = [dict(r, **{'above-instructions': 0}) for r in collected]
+        self.assertIsNone(d.refusal(based, {'readings': above}, 2))
+
+    def test_a_barred_figure_left_unmeasured_fails(self):
+        # A row whose baseline was never declared measures no above figure:
+        # its bar still holds one, and it fails.
+        row = d.verdict(PAINTS, self.result, 2, {'typed': {**self.bars, 'above_instructions': 100}})
+        self.assertEqual((row['status'], row['reason']), ('FAIL', 'above_instructions not measured, its bar 100'))
+
+    def test_a_refused_row_keeps_its_session(self):
+        session = {'symbols': 1, 'files': 2, 'loaded': ['subr']}
+        row = d.verdict(PAINTS, {'readings': readings(STEP, QUIET), 'session': session}, 2, {})
+        self.assertEqual((row['status'], row['session']), ('FAIL', session))
+
     def test_the_table_shows_figures_or_the_reason(self):
         text = d.table([d.verdict(PAINTS, self.result, 2, {'typed': self.bars}), d.verdict(IDLE, {'readings': []}, 2, {})])
         self.assertIn('| typed | 0.00M | 0.00M | 0.00M | 7 | 1 | 2 | 0 | 1 | 1 | 1 | PASS |', text)

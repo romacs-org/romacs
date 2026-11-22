@@ -591,7 +591,11 @@ submitted. `display_stages_bars.json` holds each scenario's figures:
 instructions and conses under a ceiling, the counts exactly, so a step
 that no longer does its change fails too; a figure whose bar is `"report"`
 is reported and holds nothing (a collection's whole step, which moves with
-what the session ran before: romacs#403). So does a scenario more than a
+what the session ran before: romacs#403).  A scenario with a `:baseline`
+measures a collection in its session before its `:setup`, and holds
+`above_instructions`, what its steps' collections ran above that; each
+row of a collection also reports the session's interned symbols and the
+files it loaded, by name in report.json. So does a scenario more than a
 tenth of whose steps run more or fewer redisplays than the others, or
 paint when they change nothing, or do not when they do, and one whose
 step waits inside its change, running a timer or a redisplay there,
