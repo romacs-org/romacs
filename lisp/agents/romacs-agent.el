@@ -269,6 +269,13 @@ the id as :request.")
 (defvar romacs-agent--sessions (make-hash-table :test #'equal)
   "Session id to session.")
 
+(defvar romacs-agent--copies (make-hash-table :test #'eq :weakness 'key)
+  "Sessions created by `romacs-agent--scratch' for read-only replay.")
+
+(defun romacs-agent--replay-copy-p (session)
+  "Whether SESSION is a copy for replaying a recorded conversation."
+  (gethash session romacs-agent--copies))
+
 (defun romacs-agent--set-options (session options)
   "Make OPTIONS SESSION's, in its manifest too."
   (setf (romacs-agent-options session) options)
@@ -1957,14 +1964,10 @@ other; empty for none."
             (romacs-agent-title-auto session) nil)
       (romacs-agent--update-manifest session))))
 
-(defvar romacs-agent--manifest-frozen nil
-  "Non-nil while a session's records are read into a copy for a view of
-them alone (a chat's preview): its manifest is written nothing then.")
-
 (defun romacs-agent--manifest-put (session &rest fields)
-  "Write FIELDS (NAME VALUE ...) into SESSION's manifest, when it differs;
-nothing while `romacs-agent--manifest-frozen'."
-  (unless romacs-agent--manifest-frozen
+  "Write changed FIELDS (NAME VALUE ...) into SESSION's own manifest.
+Replay copies share a path with the recorded session and leave it alone."
+  (unless (romacs-agent--replay-copy-p session)
     (let* ((file (expand-file-name "manifest.json" (romacs-agent-dir session)))
            ;; Read with null and false kept: they are written back.
            (manifest (and (file-readable-p file)
@@ -1984,7 +1987,7 @@ nothing while `romacs-agent--manifest-frozen'."
 state rewrites no row for a rename.  THEN, when given, is called once
 the row is written (`romacs-agent-store-title')."
   (romacs-agent--manifest-put session "title" (romacs-agent-title session) "titleAuto" :false)
-  (unless (or romacs-agent--manifest-frozen (not (file-exists-p (romacs-agent-store--file))))
+  (unless (or (romacs-agent--replay-copy-p session) (not (file-exists-p (romacs-agent-store--file))))
     (romacs-agent-store-title (romacs-agent-id session) (romacs-agent-title session) then)))
 
 (defun romacs-agent-activity-seq (session)
@@ -2021,14 +2024,15 @@ caught up with counts as seen, not news."
 (defun romacs-agent--keep-settlement (session undo)
   "Keep SESSION's settlement in its manifest and record, also for a row."
   (let ((seen (romacs-agent-done-seq session))
-        (settled (unless undo romacs-agent--inactive-settlement)))
-    (when (and (not romacs-agent--manifest-frozen) (file-exists-p (romacs-agent-store--file)))
+        (settled (unless undo romacs-agent--inactive-settlement))
+        (copy (romacs-agent--replay-copy-p session)))
+    (when (and (not copy) (file-exists-p (romacs-agent-store--file)))
       (romacs-agent-mark (romacs-agent-id session) 'settlement t))
     (apply #'romacs-agent--manifest-put session "seenSeq" seen "settledSeq" (or settled :null)
            (when settled (list "resumeAt" :null "switch" :null)))
     (setf (romacs-agent-seen-seq session) seen
           (romacs-agent-settled-seq session) settled)
-    (when settled (romacs-agent-mark (romacs-agent-id session) 'resume nil))))
+    (when (and settled (not copy)) (romacs-agent-mark (romacs-agent-id session) 'resume nil))))
 
 (declare-function romacs-agent-store-project-settlement "romacs-agent-store" (session &optional then))
 (defvar romacs-agent--quiet)
@@ -2041,7 +2045,7 @@ caught up with counts as seen, not news."
     (romacs-agent--cancel-select session)
     (setf (romacs-agent-pending-selection session) nil)
     (remhash session romacs-agent--moving-on))
-  (when (and (not romacs-agent--manifest-frozen) (file-exists-p (romacs-agent-store--file)))
+  (when (and (not (romacs-agent--replay-copy-p session)) (file-exists-p (romacs-agent-store--file)))
     (romacs-agent-store-project-settlement session))
   ;; Its views follow, as they follow its events.
   (romacs-agent--raise session (list :type 'settled)))
@@ -2200,7 +2204,8 @@ ENDS says a turn or run ended in that record."
       (romacs-agent--dispatch-soon session))))
 
 (defun romacs-agent--record (session record)
-  "Apply one journal RECORD of SESSION, acknowledging held notes even on replay."
+  "Apply one journal RECORD of SESSION.
+The original session acknowledges held notes during catch-up."
   (romacs-agent--held-echoed session record)
   (let ((seq (gethash "seq" record)))
     (when (and (integerp seq) (> seq (romacs-agent-seq session)))
@@ -2265,10 +2270,6 @@ has startup steps."
       (setf (romacs-agent-startup-pending session) (romacs-agent--step-id step))
       (romacs-agent--line session step))))
 
-(defvar romacs-agent--copies (make-hash-table :test #'eq :weakness 'key)
-  "The copies of sessions replays fold into (`romacs-agent--scratch'): what
-is folded there acts on nothing of the live session's.")
-
 (defun romacs-agent--scratch (session)
   "A copy of SESSION to replay its journal into: it parses as SESSION does,
 and changes nothing of SESSION's, writes nothing to its harness, and sends
@@ -2312,8 +2313,9 @@ session's.  Every reader of a session's history replays into one."
   "Fold RECORD into COPY (`romacs-agent-replay-copy'), as a view's replay
 does: nothing of the live session's is written (its manifest), nor, as
 for any copy, let go (`romacs-agent--held-echoed')."
-  (let ((romacs-agent--manifest-frozen t))
-    (romacs-agent--record copy record)))
+  (unless (romacs-agent--replay-copy-p copy)
+    (error "Replay requires a copy of the session"))
+  (romacs-agent--record copy record))
 
 (defconst romacs-agent--events-page 2000
   "The seqs of SQLite's records `romacs-agent-events' reads at a time: each
@@ -3744,7 +3746,7 @@ attachment, and let go once its record of the note comes back
   "RECORD, SESSION's, is a held note come back from its supervisor: let
 it go.  Never for a replay's copy (`romacs-agent--copies'): it shares
 the session's id, and an old note there may share a held one's."
-  (when-let* (((not (gethash session romacs-agent--copies)))
+  (when-let* (((not (romacs-agent--replay-copy-p session)))
               (note (gethash "note" record))
               ((hash-table-p note))
               (id (gethash "romacsNote" note))

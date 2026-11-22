@@ -1521,9 +1521,7 @@ or ended, a line of its output, a message ended."
 (defun romacs-agent-log--replay (session from end)
   "Draw SESSION's records from place FROM to place END at the transcript's
 end, replayed into a copy so the session is not touched."
-  (let ((scratch (romacs-agent-replay-copy session from)) (buffer (current-buffer))
-        ;; A replay writes nothing of the session (its manifest).
-        (romacs-agent--manifest-frozen t))
+  (let ((scratch (romacs-agent-replay-copy session from)) (buffer (current-buffer)))
     (let ((romacs-agent-event-functions
            (list (lambda (_ event)
                    (with-current-buffer buffer

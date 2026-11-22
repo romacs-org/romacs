@@ -77,7 +77,8 @@ its lines their meaning, in Lisp.
 - *The fold.* =romacs-agent--record= decodes one journal record, applies
   its bookkeeping, and delivers the public events in order.
   =romacs-agent--raise= applies each event to the session before notifying
-  observers.
+  observers.  History readers fold into a session copy.  The original
+  session owns manifest updates and acknowledgements of held notes.
 - *Automation.* The attached editor keeps the folded state and writes
   notes for selections, renames, renewals, rollbacks, forks and scheduled
   resumes.  After journal catch-up it runs startup steps, dispatches the
