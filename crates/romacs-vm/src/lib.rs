@@ -2160,9 +2160,7 @@ impl Vm {
         for name in ["print-length", "print-level", "print-escape-nonascii", "print-escape-multibyte", "print-escape-control-characters", "print-circle", "print-escape-newlines", "menu-bar-mode", "truncate-lines"] {
             vm.declare_special_raw(name, Value::NIL);
         }
-        for name in ["kill-buffer-hook", "kill-buffer-query-functions", "buffer-list-update-hook"] {
-            vm.declare_special_raw(name, Value::NIL);
-        }
+        vm.declare_special_raw("buffer-list-update-hook", Value::NIL);
         vm.declare_special_raw("macroexp--dynvars", Value::NIL);
         vm.truncate_lines_slot = vm.slot("truncate-lines");
         vm.permanent_local_slot = vm.slot("permanent-local");

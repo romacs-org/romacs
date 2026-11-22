@@ -45,7 +45,8 @@ impl Links {
         };
         let node = &order.nodes[at as usize];
         assert_eq!(node.prev, self.prev, "broken back link at buffer order node {at}");
-        self.remaining = self.remaining.checked_sub(1).expect("buffer order exceeds its live count");
+        assert!(self.remaining > 0, "buffer order exceeds its live count");
+        self.remaining -= 1;
         self.prev = Some(at);
         self.next = node.next;
         Some(at)
@@ -90,7 +91,8 @@ impl BufferOrder {
         self.link_after_tail(node);
     }
     fn links(&self) -> Links {
-        let remaining = self.nodes.len().checked_sub(self.free.len()).expect("too many free buffer order nodes");
+        assert!(self.free.len() <= self.nodes.len(), "too many free buffer order nodes");
+        let remaining = self.nodes.len() - self.free.len();
         Links { next: self.head, prev: None, remaining }
     }
     /// The buffers, front to back.

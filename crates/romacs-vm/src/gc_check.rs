@@ -144,12 +144,7 @@ impl Vm {
         values.extend_from_slice(&self.external_roots);
         values.extend(self.doomed_finalizers.iter().copied());
         values.extend(self.permanent_symbol_names.values().copied());
-        for binding in &self.terminal_bindings {
-            values.push(binding.buffer);
-            values.extend_from_slice(&binding.away);
-            values.extend_from_slice(&binding.unremapped_maps);
-        }
-        self.buffer_order.visit_values(&mut |v| values.push(*v));
+        self.reference_buffer_roots(&mut values);
         if let Some(escape) = &mut self.propagated_escape { escape.visit_values(&mut |v| values.push(*v)); }
         for handler in &mut self.signal_handlers { handler.visit_values(&mut |v| values.push(*v)); }
         self.backtrace.visit_values(&mut |v| values.push(*v));
@@ -191,6 +186,15 @@ impl Vm {
                 return r;
             }
         }
+    }
+
+    fn reference_buffer_roots(&self, values: &mut Vec<Value>) {
+        for binding in &self.terminal_bindings {
+            values.push(binding.buffer);
+            values.extend_from_slice(&binding.away);
+            values.extend_from_slice(&binding.unremapped_maps);
+        }
+        values.extend(self.buffer_order.iter());
     }
 
     /// V's children onto VALUES and CODE, the first time the walk meets it.
