@@ -438,6 +438,7 @@ fn a_quit_in_call_process_signals_only_the_child_s_group() {
 /// each, before any text is made; `delq` polls as GNU's `FOR_EACH_TAIL` does.
 #[test]
 fn the_printer_and_delq_quit_in_their_walks() {
+    reaches("prin1-to-string", "(setq s (make-string 50000 ?é))", "(list s)", "t");
     reaches("prin1-to-string", "(setq l (make-list 20000 'a))", "(list l)", "t");
     // A render the quit stopped publishes none of its labels: the vector's
     // pending label 7 is still pending, so no later print writes a bare #7#.

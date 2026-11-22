@@ -72,3 +72,12 @@ fn prin1_quotes_and_returns_input() {
  let got=vm.eval_source("(let ((out nil)) (let ((x (list \"λ\\n\"))) (list (eq x (prin1 x (lambda (c) (setq out (cons c out))))) (nreverse out))))").map(|v|v.display().unwrap());
  assert_eq!(got,Ok("(t (40 34 955 10 34 41))".into()),"prin1 quotes strings, emits characters, and returns original object");
 }
+
+#[test]
+fn an_octal_escape_sees_the_digit_after_a_poll_boundary() {
+    check(r#"(let* ((print-escape-control-characters t)
+                    (prefix (make-string 16383 ?x))
+                    (text (concat prefix (string 1 ?7 1 ?8 1))))
+               (equal (prin1-to-string text)
+                      (concat "\"" prefix "\\0017\\18\\1\"")))"#, "t");
+}

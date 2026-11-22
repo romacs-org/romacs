@@ -182,3 +182,23 @@ fn searches_and_scans_allocate_nothing_per_call() {
         assert!(allocations <= 8, "{body}: {allocations} allocations for 1000 calls");
     }
 }
+
+/// The first character cannot be printed. A longer unread suffix must not
+/// allocate a larger decoded copy before the writer reports that error.
+#[test]
+fn printing_an_unrepresentable_character_does_not_copy_its_suffix() {
+    let mut vm = Vm::new();
+    vm.set_collection_floor(usize::MAX / 4);
+    let print = vm.compile_source("(prin1-to-string print-input)").unwrap();
+    let mut counts = Vec::new();
+    for size in [16, 1 << 20] {
+        vm.eval_source(&format!("(setq print-input (concat (string #x110000) (make-string {size} ?a)))")).unwrap();
+        for _ in 0..2 {
+            assert!(vm.execute(print).is_err());
+        }
+        let (error, allocations, _, _) = measure(|| vm.execute(print));
+        assert!(error.err().unwrap().contains("printer extended character"));
+        counts.push(allocations);
+    }
+    assert_eq!(counts[1], counts[0], "printing copied the unread suffix: {counts:?}");
+}

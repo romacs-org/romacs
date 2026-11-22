@@ -457,21 +457,17 @@ impl Vm {
 
     fn print_body(&self, value: Value, quoted: bool, options: &PrintOptions, depth: usize) -> Result<String> {
         use std::fmt::Write;
-        // A string's codes printed between two asks of the quit probe.
-        const PART: usize = 1 << 14;
         if depth > 100 { return Err("print nesting limit exceeded".into()); }
         if let Some(view) = self.str_view(value) {
             let properties = if quoted { self.print_string_properties(value) } else { Vec::new() };
             let mut out = if quoted { String::from("\"") } else { String::new() };
-            let codes: Vec<_> = view.chars().collect();
+            let mut codes = view.chars().peekable();
             let mut hex = false;
-            // A part at a time, the quit probe asked between parts, as the
-            // print's other walks ask it (`PRINT_STOPPED`): nothing is
-            // returned before the whole text is.
-            for (n, part) in codes.chunks(PART).enumerate() {
-                if n > 0 && self.native_stop_due() { return Err(PRINT_STOPPED.into()); }
-                for (j, &code) in part.iter().enumerate() {
-                    let i = n * PART + j;
+            // Only an octal escape needs the next code, even across a poll.
+            for start in (0..view.len()).step_by(KERNEL_CHUNK) {
+                if start != 0 && self.native_stop_due() { return Err(PRINT_STOPPED.into()); }
+                for _ in 0..KERNEL_CHUNK {
+                    let Some(code) = codes.next() else { break };
                     // princ into a buffer escapes a unibyte string's raw bytes too.
                     if code > lstring::MAX_5_BYTE_CHAR || (!view.is_multibyte() && code >= 128 && (quoted || options.buffer)) {
                         if !view.is_multibyte() && code >= 128 && !options.nonascii {
@@ -490,7 +486,7 @@ impl Vm {
                             '\n' if quoted && options.newlines => out.push_str("\\n"),
                             '\u{c}' if quoted && options.newlines => out.push_str("\\f"),
                             _ if quoted && options.controls && (code < 32 || code == 127) => {
-                                let width = if code > 63 || codes.get(i+1).is_some_and(|c| (48..=55).contains(c)) { 3 } else if code > 7 { 2 } else { 1 };
+                                let width = if code > 63 || codes.peek().is_some_and(|c| (48..=55).contains(c)) { 3 } else if code > 7 { 2 } else { 1 };
                                 write!(out, "\\{code:0width$o}").unwrap();
                             }
                             // Printed text is decoded as a symbol key (symkey.rs).
