@@ -6,7 +6,9 @@
 mod gnu_lisp;
 #[path = "support/gnu_batch.rs"]
 mod gnu_batch;
-use gnu_lisp::{gnu_lisp, gnu_world_with};
+use gnu_lisp::gnu_lisp;
+use romacs_vm::world::store::World;
+use std::path::Path;
 
 /// The names of the `bo-` buffers in `buffer-list`'s order: only those, as
 /// each engine starts with buffers of its own (GNU batch has `*Messages*`,
@@ -97,8 +99,14 @@ fn buffer_order_survives_a_world_image() {
 
     let actual = in_thread(|| {
         let (mut vm, freed) = if env!("CARGO_CRATE_NAME") == "gnu" {
-            gnu_world_with("buffer order with a released node", prepare)
-                .expect("GNU target must restore the test world; run it with nextest")
+            let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+            let store = Path::new(env!("CARGO_TARGET_TMPDIR")).join("buffer-order-worlds");
+            World::for_test(store, &[format!("buffer order in {}", root.display())], || {
+                romacs_vm::host::end_at_dump_point();
+                let mut vm = gnu_lisp::booted(&root, true);
+                let freed = prepare(&mut vm)?;
+                Ok((vm, freed))
+            }).expect("GNU target must restore the test world; run it with nextest")
         } else {
             // The standalone test target boots from source.
             let mut vm = gnu_lisp(&[]);
