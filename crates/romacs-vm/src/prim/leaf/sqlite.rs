@@ -267,14 +267,13 @@ impl Leaf<'_> {
         self.sqlite_list(names)
     }
 
-    /// STATEMENT's next step, which a C-g interrupts while it runs: the
-    /// statement is rolled back and the quit raised (`Statement::step`).
-    fn sqlite_step(&mut self, statement: &mut Statement, probe: &crate::quit::NativeStop) -> std::result::Result<Step, Fault> {
+    /// Deliver a stop the progress handler requested after SQLite rolled back.
+    fn sqlite_outcome(&mut self, step: Step) -> Result<Step> {
         // Only the handler's own stop is the quit: any other error (a
         // constraint, say, whose statement may have committed rows, or an
         // interrupt an SQL function returned) is signaled as itself, and a
         // press waits for the next poll.
-        match statement.step(probe) {
+        match step {
             Step::Stopped => {
                 self.native_poll()?;
                 Ok(Step::Error(crate::sqlite::INTERRUPT))
@@ -286,20 +285,18 @@ impl Leaf<'_> {
     pub(crate) fn sqlite_execute(&mut self, db: Value, query: Value, values: Value) -> Out {
         let mut statement = self.sqlite_prepare(db, query, values, false, true)?;
         let probe = self.native_stop();
-        match self.sqlite_step(&mut statement, &probe)? {
-            Step::Row => {
-                // No poll between rows: a statement that writes (INSERT ...
-                // RETURNING) dropped here would commit its write as it is
-                // finalized. Its quit comes only through its steps, which
-                // SQLite interrupts and rolls back (`sqlite_step`).
-                let mut rows = vec![self.sqlite_row(&statement)?];
-                while matches!(self.sqlite_step(&mut statement, &probe)?, Step::Row) {
-                    rows.push(self.sqlite_row(&statement)?);
-                }
-                Ok(self.sqlite_list(rows))
-            }
+        let mut rows = vec![];
+        // A writing statement (INSERT ... RETURNING) must quit in its step,
+        // where SQLite rolls it back. Finalizing it between rows would commit.
+        let end = statement.visit_rows(&probe, |statement| {
+            rows.push(self.sqlite_row(statement)?);
+            Ok(())
+        })?;
+        let end = self.sqlite_outcome(end)?;
+        if !rows.is_empty() { return Ok(self.sqlite_list(rows)); }
+        match end {
             Step::Done => Value::integer(statement.connection().changes()).map_err(Fault::Error),
-            Step::Stopped => unreachable!("sqlite_step answers a stop with its quit"),
+            Step::Row | Step::Stopped => unreachable!("all rows visited and stop delivered"),
             Step::Error(code) => {
                 let message = statement.connection().errmsg();
                 let message = self.sqlite_string(&message);
@@ -322,10 +319,12 @@ impl Leaf<'_> {
         // through its steps, as `sqlite_execute`'s does.
         let polled = statement.readonly();
         let mut steps = super::quit_poll::Steps::default();
-        while matches!(self.sqlite_step(&mut statement, &probe)?, Step::Row) {
+        let end = statement.visit_rows(&probe, |statement| {
             if polled && steps.tick() { self.native_poll()?; }
-            rows.push(self.sqlite_row(&statement)?);
-        }
+            rows.push(self.sqlite_row(statement)?);
+            Ok(())
+        })?;
+        self.sqlite_outcome(end)?;
         let rows = self.sqlite_list(rows);
         if return_type == self.intern("full") {
             let columns = self.sqlite_column_names(&statement);
@@ -339,7 +338,7 @@ impl Leaf<'_> {
         let connection = self.sqlite_connection(db)?;
         let stop = self.native_stop();
         let done = connection.exec(sql, &stop);
-        // As `sqlite_step`: only the handler's own stop is the quit.
+        // As in `sqlite_outcome`: only the handler's own stop is the quit.
         if matches!(done, Step::Stopped) { self.native_poll()?; }
         Ok(if matches!(done, Step::Done) { Value::TRUE } else { Value::NIL })
     }
@@ -382,7 +381,7 @@ impl Leaf<'_> {
         if *eof { return Ok(Value::NIL); }
         let mut statement = statement.take().expect("checked");
         let probe = self.native_stop();
-        let step = self.sqlite_step(&mut statement, &probe);
+        let step = self.sqlite_outcome(statement.step(&probe));
         let State::Set { statement: slot, eof } = &mut self.sqlite_handle_mut(set).state else { unreachable!("checked") };
         let step = match step {
             Ok(step) => step,
