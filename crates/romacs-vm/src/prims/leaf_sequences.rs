@@ -103,11 +103,11 @@ fn sort_keyed(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
 /// outside ORDER is written.
 pub(crate) fn sort_polled<T: Copy>(cx: &mut Leaf<'_>, order: &mut [T], run: usize,
                         mut compare: impl FnMut(&mut Leaf<'_>, &T, &T) -> Ordering) -> std::result::Result<(), Fault> {
-    if order.len() <= run {
-        if let Some(chunk) = order.chunks_mut(run).next() {
-            return sort_run(cx, chunk, &mut compare);
-        }
+    if order.is_empty() {
         return Ok(());
+    }
+    if order.len() <= run {
+        return sort_run(cx, order, &mut compare);
     }
     if sort_monotone_run(cx, order, run, &mut compare)? {
         return Ok(());
