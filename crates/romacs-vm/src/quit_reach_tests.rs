@@ -325,7 +325,122 @@ fn call_process_s_wait_quits_and_interrupts_the_child() {
     assert!(signal.interrupt());
     let outcome = invoke(&mut vm, call);
     assert!(outcome.is_ok(), "the wait ended with the child");
-    assert!(signal.due(), "inhibit-quit holds the press");
+    assert_ne!(vm.quit_variables()[0], Value::NIL, "inhibit-quit holds the press in quit-flag");
+    vm.inside_quit_scope(|vm| assert_wait_reads_ready_fd(vm, crate::quit::WaitFor::Child));
+}
+
+/// A ready fd distinguishes an actual kernel poll from an immediate, empty
+/// wake for a quit or debugger event that the wait cannot take.
+fn assert_wait_reads_ready_fd(vm: &Vm, wait: crate::quit::WaitFor) {
+    use std::io::Write;
+    use std::os::fd::AsRawFd;
+    let (read, mut write) = std::os::unix::net::UnixStream::pair().unwrap();
+    write.write_all(b"x").unwrap();
+    let fds = [(read.as_raw_fd(), libc::POLLIN)];
+    assert_ne!(vm.poll_for(&fds, Some(std::time::Duration::ZERO), wait).unwrap()[0], 0);
+}
+
+/// The child acknowledges SIGINT and keeps waiting. On failure a watchdog
+/// closes its stdin, so it exits without a third key or a surviving helper.
+fn with_call_process_child(run: impl FnOnce(i32, &mut std::io::BufReader<std::process::ChildStdout>)) {
+    use std::io::{BufRead, BufReader};
+    use std::os::unix::process::CommandExt;
+    use std::process::{Command, Stdio};
+    let script = "trap 'echo INT' INT; echo ready; while read -r line || test $? -gt 128; do :; done";
+    let mut child = Command::new("sh").args(["-c", script]).process_group(0)
+        .stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
+    let pid = i32::try_from(child.id()).unwrap();
+    let mut output = BufReader::new(child.stdout.take().unwrap());
+    let mut ready = String::new();
+    output.read_line(&mut ready).unwrap();
+    assert_eq!(ready, "ready\n");
+    let input = child.stdin.take().unwrap();
+    let (finished, wait) = std::sync::mpsc::channel();
+    let guard = std::thread::spawn(move || {
+        let completed = wait.recv_timeout(std::time::Duration::from_secs(3)).is_ok();
+        drop(input);
+        completed
+    });
+    run(pid, &mut output);
+    let _ = finished.send(());
+    assert!(guard.join().unwrap(), "the child needed the watchdog to end its wait");
+}
+
+fn assert_child_quits(vm: &mut Vm, pid: i32) {
+    let Ok((_, fault)) = Leaf::new(vm).quittable(|cx| cx.call_process_wait(pid, None)) else { panic!("wait failed") };
+    assert!(quit_signalled(vm, &Err(fault.expect("the wait quit"))));
+    assert!(vm.subprocesses.deleted.is_empty());
+}
+
+#[test]
+fn call_process_counts_a_second_press_already_in_the_wait() {
+    for (held, presses) in [(false, 2), (true, 4)] {
+        let (mut vm, signal) = busy_vm();
+        if held { eval(&mut vm, "(setq inhibit-quit t)"); }
+        with_call_process_child(|pid, _| {
+            for _ in 0..presses { assert!(signal.interrupt()); }
+            assert_child_quits(&mut vm, pid);
+        });
+        assert!(!signal.pressed());
+        assert_eq!(vm.quit_variables()[1], Value::NIL);
+    }
+}
+
+/// Pending signals and the deadline generation belong to the process.
+#[test]
+fn call_process_deadlines_and_debug_events_wake_their_own_waits() {
+    const CHILD: &str = "ROMACS_TEST_CALL_PROCESS_EVENTS";
+    if std::env::var_os(CHILD).is_none() {
+        let result = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", std::thread::current().name().unwrap(), "--nocapture"])
+            .env(CHILD, "1").output().unwrap();
+        assert!(result.status.success() && String::from_utf8_lossy(&result.stdout).contains("1 passed;"), "{result:?}");
+        return;
+    }
+    use crate::host::call_deadline;
+    use std::time::Duration;
+    crate::host::catch_user_signals().unwrap();
+    let (mut vm, signal) = busy_vm();
+    eval(&mut vm, "(setq debug-on-event nil)");
+    with_call_process_child(|pid, _| {
+        call_deadline::arm(signal.clone(), 1, Duration::from_millis(50));
+        assert_child_quits(&mut vm, pid);
+        call_deadline::disarm(&signal);
+    });
+
+    // One held C-g, a debugger event while the child is silent, then a
+    // second debugger event and the call budget during SIGINT cleanup.
+    vm.quit_unwinding = false;
+    eval(&mut vm, "(setq inhibit-quit t debug-on-event 'sigusr1)");
+    with_call_process_child(|pid, output| {
+        use std::io::BufRead;
+        assert!(signal.interrupt());
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                let end = std::time::Instant::now() + Duration::from_secs(3);
+                while signal.pressed() {
+                    assert!(std::time::Instant::now() < end, "the inhibited press was never latched");
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                let this = i32::try_from(std::process::id()).unwrap();
+                crate::host::kill(this, libc::SIGUSR1).unwrap();
+                let mut interrupted = String::new();
+                output.read_line(&mut interrupted).unwrap();
+                assert_eq!(interrupted, "INT\n");
+                crate::host::kill(this, libc::SIGUSR1).unwrap();
+                call_deadline::arm(signal.clone(), 2, Duration::from_millis(50));
+            });
+            assert_child_quits(&mut vm, pid);
+        });
+        call_deadline::disarm(&signal);
+    });
+
+    // With the second debug event pending, the stop still asks the kernel
+    // for ready FDs. An unconditional wake would have returned zero here.
+    assert_wait_reads_ready_fd(&vm, crate::quit::WaitFor::ChildStop);
+    assert_eq!(vm.quit_variables()[1], Value::NIL, "the first debugger event cleared inhibition");
+    assert!(vm.take_debug_event(), "the second debugger event is pending for Lisp");
+    assert!(!vm.take_debug_event(), "each debugger event was delivered once");
 }
 
 /// The native sort, in runs merged a level at a time, orders as the sort
