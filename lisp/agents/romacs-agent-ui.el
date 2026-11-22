@@ -680,6 +680,31 @@ nothing more."
         (propertize effort 'face (if (facep face) face 'romacs-agent-effort)))
     (propertize "default" 'face 'romacs-agent-effort-default)))
 
+(defun romacs-agent-ui--default-effort (session selection)
+  "The model default for SELECTION, using SESSION's running model when known."
+  (let* ((current (equal selection (romacs-agent--selection session)))
+         (model (and current (romacs-agent-model session)))
+         (reported (and current (plist-get (romacs-agent-driver-state session) :reported-effort))))
+    (or (and reported (equal model (car reported)) (cdr reported))
+        (romacs-agent--model-default-effort
+         session (if model (plist-put (copy-sequence selection) :model model) selection)))))
+
+(defvar-local romacs-agent-ui--header-default-effort nil
+  "The chat's running model and catalogue state, with its default effort.")
+
+(defun romacs-agent-ui--current-effort (session)
+  "The effort to display for SESSION, without reading a catalogue per event."
+  (or (plist-get (romacs-agent-options session) :effort)
+      (let* ((selection (romacs-agent--selection session))
+             (key (list selection (romacs-agent-model session) (romacs-agent-harness session)
+                        (plist-get (romacs-agent-driver-state session) :reported-effort)
+                        (gethash (romacs-agent-provider session) romacs-agent--models-probes)
+                        romacs-agent-models romacs-agent-providers)))
+        (unless (equal key (car romacs-agent-ui--header-default-effort))
+          (setq romacs-agent-ui--header-default-effort
+                (cons key (romacs-agent-ui--default-effort session selection))))
+        (cdr romacs-agent-ui--header-default-effort))))
+
 (defun romacs-agent-ui--header-inputs (session)
   "All that SESSION's header reads of it, a plist, with whether glyphs
 are on: the header is made from it (`romacs-agent-ui--header-text'), and
@@ -687,7 +712,7 @@ made again when it differs."
   (let ((options (romacs-agent-options session)) (switch (romacs-agent-pending-selection session)))
     (list :harness (romacs-agent-harness session) :provider (romacs-agent-provider session)
           :mode (if (plist-get options :plan) 'plan (romacs-agent-permission-mode session))
-          :model (romacs-agent-model session) :effort (plist-get options :effort)
+          :model (romacs-agent-model session) :effort (romacs-agent-ui--current-effort session)
           :switch (and switch (romacs-agent-ui--selection-label switch))
           :workers (romacs-agent-children-summary session)
           :share (romacs-agent-ui--context-share session)
@@ -759,6 +784,18 @@ session is no recorded one."
       (with-current-buffer buffer
         (setq romacs-agent-log--header-made nil)
         (romacs-agent-log--header-show)))))
+
+(defun romacs-agent-ui--models-reported (instance)
+  "Refresh the default effort in chats of INSTANCE."
+  (let ((provider (plist-get instance :name)))
+    (dolist (buffer (buffer-list))
+      (when-let* ((session (buffer-local-value 'romacs-agent-log--session buffer))
+                  ((equal (romacs-agent-provider session) provider)))
+        (with-current-buffer buffer
+          (setq romacs-agent-ui--header-default-effort nil)
+          (romacs-agent-log--header-show))))))
+
+(add-hook 'romacs-agent-models-changed-functions #'romacs-agent-ui--models-reported)
 
 (defun romacs-agent-ui--glyphs-changed ()
   "What draws a glyph changed (`romacs-agent-glyphs', a mark of

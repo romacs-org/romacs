@@ -161,6 +161,8 @@ user's own spec still wins."
 (defvar-local romacs-agent-log--input nil
   "Marker: the composer's start, after the separator.")
 (defvar-local romacs-agent-log--seq 0 "The seq of the last record drawn.")
+(defvar-local romacs-agent-log--active-start nil
+  "Start of the current session's transcript, after earlier handoffs.")
 (defvar-local romacs-agent-log--from nil
   "Where the drawn records begin (a place, as `romacs-agent--journal-tail'
 gives it), or nil when they begin at the session's start.")
@@ -1528,7 +1530,11 @@ at the transcript's end: its end, from a prompt on
   "Draw SESSION's last `romacs-agent-log-turns' turns from its records."
   (let* ((from (romacs-agent-tail-start session romacs-agent-log-turns romacs-agent-log-records)))
     (setq romacs-agent-log--from from)
-    (when from (romacs-agent-log--writing (save-excursion (goto-char (point-min)) (insert (romacs-agent-log--earlier-line from)))))
+    (when from
+      (romacs-agent-log--writing
+        (save-excursion
+          (goto-char (or romacs-agent-log--active-start (point-min)))
+          (insert (romacs-agent-log--earlier-line from)))))
     ;; From its start: an imported session's harness transcript first.
     (when-let* (((null from)) (imported (romacs-agent-imported session)))
       (romacs-agent-log-draw-imported session imported))
@@ -1580,14 +1586,16 @@ FROM, nil at the session's start."
                 ;; the chat's end (`romacs-agent-log--sync-asks').
                 (dolist (id (mapcar #'romacs-agent-log-ask-id romacs-agent-log--asks)) (romacs-agent-log--settle-ask id))
                 (buffer-substring (point-min) romacs-agent-log--end))))
-    (romacs-agent-log--writing
-      (save-excursion
-        (goto-char (point-min))
-        (let ((line-end (line-beginning-position 2)))
-          (when (get-text-property (point) 'romacs-agent-log-earlier) (delete-region (point) line-end)))
-        (insert (if from (romacs-agent-log--earlier-line from) "") text)
-        ;; A rollback either side of the new page's start reaches over it.
-        (romacs-agent-log-turns--dim-above (point))))
+    (save-restriction
+      (narrow-to-region (or romacs-agent-log--active-start (point-min)) (point-max))
+      (romacs-agent-log--writing
+        (save-excursion
+          (goto-char (point-min))
+          (let ((line-end (line-beginning-position 2)))
+            (when (get-text-property (point) 'romacs-agent-log-earlier) (delete-region (point) line-end)))
+          (insert (if from (romacs-agent-log--earlier-line from) "") text)
+          ;; A rollback either side of the new page's start reaches over it.
+          (romacs-agent-log-turns--dim-above (point)))))
     ;; Its tables were drawn at no window's width.
     (romacs-agent-log-tables-refit))
   (setq romacs-agent-log--from from))
@@ -1636,11 +1644,50 @@ drew forgotten, its markers let go, its composer kept."
     (set-marker (romacs-agent-log-ask-start ask) nil)
     (set-marker (romacs-agent-log-ask-end ask) nil))
   (dolist (owed romacs-agent-log--ended-asks) (set-marker (romacs-agent-log-owed-at owed) nil))
-  (romacs-agent-log--writing (delete-region (point-min) romacs-agent-log--end))
+  (romacs-agent-log--writing
+    (delete-region (or romacs-agent-log--active-start (point-min)) romacs-agent-log--end))
   (setq romacs-agent-log--current nil romacs-agent-log--early nil romacs-agent-log--asks nil
         romacs-agent-log--attributed nil romacs-agent-log--ended-asks nil
         romacs-agent-log--prompts nil romacs-agent-log--seq 0
         romacs-agent-log--from nil romacs-agent-log--root-kind nil))
+
+(defun romacs-agent-log--archive-handoff (target)
+  "Set aside the current session's visible transcript before TARGET."
+  (romacs-agent-log--close-stream)
+  (let* ((start (save-excursion
+                  (goto-char (or romacs-agent-log--active-start (point-min)))
+                  (when (get-text-property (point) 'romacs-agent-log-earlier) (forward-line 1))
+                  (point)))
+         (history (buffer-substring-no-properties start romacs-agent-log--end)))
+    (romacs-agent-log--clear)
+    (romacs-agent-log--writing
+      (save-excursion
+        (goto-char romacs-agent-log--end)
+        (insert (romacs-agent-log--sealed history))))
+    (romacs-agent-log--note nil (format "Continued with %s" (romacs-agent-provider target)))
+    (setq romacs-agent-log--active-start (copy-marker romacs-agent-log--end))))
+
+(defun romacs-agent-log-continue (target)
+  "Continue this buffer with TARGET, preserving the draft and earlier text.
+Earlier turns' commands belong to their original session, available from
+the board.  TARGET owns the composer and all subsequent live events."
+  (let* ((source romacs-agent-log--session)
+         (chats (romacs-agent-log-source-chats romacs-agent-log--source))
+         (buffer (current-buffer)))
+    (unless (eq (gethash (romacs-agent-id source) chats) buffer)
+      (error "The source no longer owns this chat"))
+    (save-excursion
+      (romacs-agent-log--archive-handoff target)
+      (remhash (romacs-agent-id source) chats)
+      (puthash (romacs-agent-id target) buffer chats)
+      (setq romacs-agent-log--filled nil
+            romacs-agent-log--recalled nil
+            romacs-agent-log--draft-kept nil
+            romacs-agent-log-turns--rollbacks nil)
+      (romacs-agent-log--set-session target)
+      (romacs-agent-log--ensure-filled)
+      (when (get-buffer-window buffer t)
+        (romacs-agent-log-source-seen romacs-agent-log--source target)))))
 
 (defun romacs-agent-log--ensure-filled ()
   (unless romacs-agent-log--filled

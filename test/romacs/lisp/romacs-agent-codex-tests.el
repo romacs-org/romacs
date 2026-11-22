@@ -419,6 +419,15 @@ journals what its harness writes."
       (should (equal (types (events "error" "willRetry" :false "error" (romacs-mcp--object "message" "r"))) '(error)))
       (should-not (events "mcpServer/startupStatus/updated" "name" "x")))))
 
+(ert-deftest romacs-agent-codex-reports-the-configured-thread-effort ()
+  (let* ((session (romacs-agent--make :id "c" :harness 'codex))
+         (result (romacs-mcp--object "thread" (romacs-mcp--object "id" "t")
+                                    "model" "m" "reasoningEffort" "xhigh"))
+         (events (romacs-agent--codex-answer session "thread/start:1"
+                                            (romacs-mcp--object "result" result))))
+    (should (equal (plist-get (plist-get (car events) :state) :reported-effort) '("m" . "xhigh")))
+    (should (equal (plist-get (cadr events) :model) "m"))))
+
 (ert-deftest romacs-agent-codex-reads-exec-journals ()
   ;; A session an earlier Romacs ran by `codex exec' replays as it did.
   (let ((session (romacs-agent--make :id "c" :harness 'codex :options '(:model "m"))))

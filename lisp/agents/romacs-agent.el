@@ -958,6 +958,7 @@ on the run's first look and each `romacs-agent-models-refresh-interval'."
     (mapcar (lambda (row)
               (cons (gethash "id" row)
                     (append (list :label (gethash "label" row) :efforts (append (gethash "efforts" row) nil))
+                            (when (eq (gethash "defaultModel" row) t) (list :default-model t))
                             (when-let* ((default (romacs-agent--value (gethash "defaultEffort" row))))
                               (list :default-effort default)))))
             (gethash "models" kept))))
@@ -989,6 +990,7 @@ came in."
                                              (romacs-mcp--object
                                               "id" (car row) "label" (plist-get (cdr row) :label)
                                               "efforts" (vconcat (plist-get (cdr row) :efforts))
+                                              "defaultModel" (if (plist-get (cdr row) :default-model) t :false)
                                               "defaultEffort" (or (plist-get (cdr row) :default-effort) :null)))
                                            rows)))))
           (run-hook-with-args 'romacs-agent-models-changed-functions instance)))))
@@ -1178,11 +1180,25 @@ does not know, or of none named."
 
 ;;; Choosing what a session runs on
 
+(defun romacs-agent--model-row (models model)
+  "Find MODEL in MODELS, or the reported default when MODEL is nil."
+  (if model (assoc model models)
+    (seq-find (lambda (row) (plist-get (cdr row) :default-model)) models)))
+
+(defun romacs-agent--model-default-effort (session selection)
+  "The reported default effort for SELECTION's model in SESSION."
+  (when-let* ((provider (plist-get selection :provider))
+              (harness (romacs-agent-harness session))
+              ((gethash harness romacs-agent--driver-table))
+              (instance (romacs-agent--instance provider harness)))
+    (let ((model (or (plist-get selection :model) (plist-get instance :model))))
+      (plist-get (cdr (romacs-agent--model-row (romacs-agent--models instance) model)) :default-effort))))
+
 (defun romacs-agent--efforts-of (instance model)
   "The efforts INSTANCE offers MODEL, its own model when nil; those of
 every model it knows when it knows neither."
   (let* ((models (romacs-agent--models instance))
-         (row (assoc (or model (plist-get instance :model)) models)))
+         (row (romacs-agent--model-row models (or model (plist-get instance :model)))))
     (if row (plist-get (cdr row) :efforts)
       (delete-dups (cl-loop for row in models append (copy-sequence (plist-get (cdr row) :efforts)))))))
 
@@ -1192,7 +1208,8 @@ each (TEXT :provider NAME :model ID :efforts EFFORTS :default-effort EFFORT
 :group HEADING :note NOTE).  The first takes the instance's own defaults."
   (let* ((models (romacs-agent--models instance))
          (model (plist-get instance :model)) (effort (plist-get instance :effort))
-         (own (cdr (assoc model models)))
+         (own-row (romacs-agent--model-row models model))
+         (own (cdr own-row))
          (default-effort (or effort (plist-get own :default-effort)))
          (dir (or (plist-get instance :config-dir)
                   (plist-get (romacs-agent--driver-of (plist-get instance :harness)) :config-default)))
@@ -1204,7 +1221,7 @@ each (TEXT :provider NAME :model ID :efforts EFFORTS :default-effort EFFORT
                         :efforts (romacs-agent--efforts-of instance nil)
                         :default-effort (plist-get own :default-effort)
                         :note (or missing
-                                  (format "%s · effort %s" (or model "configured model")
+                                  (format "%s · effort %s" (or model (car own-row) "configured model")
                                           (or default-effort "unreported"))))
                   common)
           (mapcar (lambda (row)
@@ -1304,11 +1321,15 @@ answer shows in the rows while they are asked for."
           (cons text (cdr (assoc text rows))))
       (remove-hook 'romacs-agent-models-changed-functions changed))))
 
-(defun romacs-agent--read-effort (efforts default)
-  "One of EFFORTS, asked for, DEFAULT first; nil for none."
-  (let ((answer (completing-read (format-prompt "Effort" default) (romacs-agent--ordered-table efforts)
-                                 nil t nil nil default)))
-    (and (not (string-empty-p answer)) answer)))
+(cl-defun romacs-agent--read-effort (efforts default &optional (inherited nil offer-default))
+  "Read an effort from EFFORTS, starting at DEFAULT.
+When OFFER-DEFAULT, offer nil as Default with the INHERITED level."
+  (let* ((label (and offer-default (if inherited (format "Default (%s)" inherited) "Default")))
+         (choices (if label (cons label efforts) efforts))
+         (default (or default label))
+         (answer (completing-read (format-prompt "Effort" default) (romacs-agent--ordered-table choices)
+                                  nil t nil nil default)))
+    (unless (or (equal label answer) (string-empty-p answer)) answer)))
 
 (defun romacs-agent--read-selection (ask-effort &optional accounts)
   "What a new session runs on, as (PROVIDER . OPTIONS): asked for when
@@ -2859,8 +2880,10 @@ waiting message starts a turn."
 
 (defun romacs-agent--efforts (session)
   "The efforts SESSION's instance offers the model it is to run."
-  (romacs-agent--efforts-of (romacs-agent--instance (romacs-agent-provider session) (romacs-agent-harness session))
-                            (plist-get (romacs-agent--wanted session) :model)))
+  (let ((wanted (romacs-agent--wanted session)))
+    (romacs-agent--efforts-of (romacs-agent--instance (plist-get wanted :provider) (romacs-agent-harness session))
+                              (or (plist-get wanted :model)
+                                  (and (equal wanted (romacs-agent--selection session)) (romacs-agent-model session))))))
 
 (defun romacs-agent--switch-object (session)
   "SESSION's waiting selection for its manifest, or null.  One that took
