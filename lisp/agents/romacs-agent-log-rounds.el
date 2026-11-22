@@ -171,24 +171,38 @@ before it ended, after the air every round begins with."
       (when (get-text-property at 'romacs-agent-log-round) (setq found at)))
     (or found (and (get-text-property (point-min) 'romacs-agent-log-round) (point-min)) (point-min))))
 
+(defun romacs-agent-log-rounds--turn-start (round)
+  "Where the turn that ROUND's start falls in began: after the last turn
+rule or arrival before ROUND, else at the transcript's start.  A prompt
+sent while a turn runs opens a round inside that turn: its words before
+the prompt are the turn's too."
+  (let ((at round) (found nil))
+    (while (and (not found) (> at (point-min))
+                (setq at (previous-single-property-change at 'romacs-agent-log-entry nil (point-min))))
+      (when (memq (get-text-property at 'romacs-agent-log-entry) '(turn arrival))
+        (setq found (next-single-property-change at 'romacs-agent-log-entry nil romacs-agent-log--end))))
+    (if found (min found round) (point-min))))
+
 (defun romacs-agent-log-rounds--turns (start)
   "The text entries from START to the transcript's end, grouped by turn: a
-list, oldest first, of each turn's entry starts, a turn ended by its rule
-\(the `turn' entry).  A prompt sent while a turn ran opens a round before
-that turn's answer: the answer is the turn's, not the round's."
+list, oldest first, of each turn's entry starts.  A turn ends at its rule
+\(the `turn' entry) or where something from elsewhere arrived (an
+`arrival'): the agent's words after it answer that."
   (let ((turns nil) (texts nil) (at start))
     (while (setq at (text-property-not-all at romacs-agent-log--end 'romacs-agent-log-entry nil))
       (pcase (get-text-property at 'romacs-agent-log-entry)
         ('text (push at texts))
-        ('turn (when texts (push (nreverse texts) turns)) (setq texts nil)))
+        ((or 'turn 'arrival) (when texts (push (nreverse texts) turns)) (setq texts nil)))
       (setq at (1+ at)))
     (nreverse (if texts (cons (nreverse texts) turns) turns))))
 
 (defun romacs-agent-log-rounds-end ()
-  "The round ending: in each of its turns, the agent's words before its
-last recede, so each answer stands out.  Faces only: no text moves."
+  "The round ending: in each of its turns, from the start of the turn it
+opened in, the agent's words before its last recede, so each answer
+stands out.  Faces only: no text moves."
   (romacs-agent-log--writing
-    (dolist (turn (romacs-agent-log-rounds--turns (romacs-agent-log-rounds--start)))
+    (dolist (turn (romacs-agent-log-rounds--turns
+                   (romacs-agent-log-rounds--turn-start (romacs-agent-log-rounds--start))))
       (dolist (start (butlast turn))
         ;; An entry is marked at its first character: it runs to the next's.
         ;; Receded once: a round ends at its turn's end and again as the
