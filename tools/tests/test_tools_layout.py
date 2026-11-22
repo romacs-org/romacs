@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """tools/ is the one place for scripts: commands at its top without .py,
-Python modules in tools/lib/, tests in tools/tests/; scripts/ holds only
-the forwarding stub kept for one release."""
+Python modules in tools/lib/, tests in tools/tests/; no scripts/ beside it."""
 from pathlib import Path
 import subprocess
 import unittest
@@ -14,8 +13,8 @@ def tracked(*paths):
 
 
 class ToolsLayout(unittest.TestCase):
-    def test_scripts_holds_only_the_forwarding_stub(self):
-        self.assertEqual(tracked('scripts'), ['scripts/check-derived'])
+    def test_no_scripts_directory(self):
+        self.assertEqual(tracked('scripts'), [])
 
     def test_commands_at_the_top_carry_no_py_suffix(self):
         top = [p for p in tracked('tools') if p.count('/') == 1]

@@ -71,7 +71,7 @@ impl Leaf<'_> {
         -> std::result::Result<R, Fault> {
         match self.symbol_key(value) {
             Some(key) => Ok(self.read_symbol_name(value, key, |name| f(name, from))),
-            None => Ok(f(self.vm.str_view_from(value, from).ok_or(Fault::Wrong("stringp", value))?, 0)),
+            None => Ok(f(self.vm.str_view_from(value, from).ok_or_else(|| Fault::Wrong("stringp", value))?, 0)),
         }
     }
 

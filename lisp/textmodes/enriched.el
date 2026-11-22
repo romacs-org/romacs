@@ -183,12 +183,12 @@ The value is a list of \(VAR VALUE VAR VALUE...).")
   (let ((map (make-sparse-keymap)))
     ;; FIXME: These newline/reindent bindings might be redundant now
     ;; that we have `electric-indent-mode' enabled by default.
-    (define-key map "\C-m" #'reindent-then-newline-and-indent)
+    (define-key map (kbd "RET") #'reindent-then-newline-and-indent)
     (define-key map
       [remap newline-and-indent] #'reindent-then-newline-and-indent)
     (define-key map "\M-j" 'facemenu-justification-menu)
     (define-key map "\M-S" #'set-justification-center)
-    (define-key map "\C-x\t" #'increase-left-margin)
+    (define-key map (kbd "C-x TAB") #'increase-left-margin)
     (define-key map "\C-c[" #'set-left-margin)
     (define-key map "\C-c]" #'set-right-margin)
     (define-key map "\M-o" #'facemenu-keymap)

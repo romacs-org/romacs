@@ -111,7 +111,7 @@ fn gnu_completion_reads_commands_files_and_buffers_through_icomplete() {
         let mut report = vec![];
         // Romacs's defaults are standard values, set through their :set.
         report.push(printed(&mut vm, "(list completion-styles completion-ignore-case completions-format completions-sort
-            completion-category-overrides icomplete-compute-delay
+            completion-category-overrides completion-category-defaults icomplete-compute-delay
             (equal (eval (car (get 'completions-sort 'standard-value)) t) completions-sort)
             fido-vertical-mode fido-mode icomplete-mode (eval (car (get 'fido-vertical-mode 'standard-value)) t)
             (lookup-key icomplete-fido-mode-map (kbd \"TAB\")) resize-mini-windows)"));
@@ -138,15 +138,15 @@ fn gnu_completion_reads_commands_files_and_buffers_through_icomplete() {
         report.push(texts.iter().any(|t| t.contains("M-x gc-probe \ngc-probe-command")).to_string());
         report.push(texts.iter().any(|t| t.contains("M-x gc-probe-command \n")).to_string());
 
-        // C-x C-f: partial completion of s/n to sub/notes.txt, then visit.
+        // C-x C-f: completion of sub/n to sub/notes.txt, then visit.
         vm.eval_source(&format!("(setq default-directory {})", quoted(&work))).unwrap();
-        let frames = attach(&mut vm, "s/n\t\n");
+        let frames = attach(&mut vm, "sub/n\t\n");
         let outcome = keys(&mut vm, &[24, 6]);
         let (tallest, texts) = shown(&frames);
         report.push(format!("{:?}", outcome.and_then(|o| o.signal).map(|s| s.condition)));
         report.push(printed(&mut vm, &format!("(list (file-relative-name buffer-file-name {}) (buffer-string))", quoted(&work))));
         report.push(format!("{} {}", tallest > LINE, mini_height(&mut vm) == LINE));
-        report.push(texts.iter().any(|t| t.contains(&format!("Find file: {work}s/n \nsub/notes.txt"))).to_string());
+        report.push(texts.iter().any(|t| t.contains(&format!("Find file: {work}sub/n \nnotes.txt"))).to_string());
         // GNU's files.el visits: uniquify names, a visited file is found
         // again, and closing the window asks before losing an edit to it,
         // a literal visit's too.
@@ -180,13 +180,13 @@ fn gnu_completion_reads_commands_files_and_buffers_through_icomplete() {
     }).unwrap().join().unwrap();
     let _ = std::fs::remove_dir_all(&root);
     assert_eq!(report, [
-        "((fzf basic partial-completion emacs22) t one-column historical ((file (styles fzf partial-completion)) (project-file (styles fzf substring))) 0.15 t t t t t icomplete-force-complete grow-only)",
-        "(fzf basic partial-completion emacs22)",
-        "None", r#""(zqab-x ((fzf basic partial-completion emacs22) (\"zqab-x\" \"zq-alpha-beta\" \"xzqab\")))""#,
+        "((fzf) t one-column historical nil nil 0.15 t t t t t icomplete-force-complete grow-only)",
+        "(fzf)",
+        "None", r#""(zqab-x ((fzf) (\"zqab-x\" \"zq-alpha-beta\" \"xzqab\")))""#,
         "None", "(ran \"gc-probe-command\")", "true true", "true", "true",
         "None", r#"("sub/notes.txt" "notes\n")"#, "true true", "true",
         r#"("notes.org<a>" "notes.org<b>" t ((nil quit) (nil quit)))"#,
-        "None", "(\"zqab.txt\" (fzf partial-completion basic emacs22))",
+        "None", "(\"zqab.txt\" (fzf))",
         "None", "(\"alpha-kt-buffer\" \"alpha-kt-buffer\")", "true",
     ]);
 }
@@ -488,7 +488,7 @@ fn chrome_colours_follow_the_theme() {
     // Themes, default bg, selected row, match; painted edge, hairline, glow, glass.
     assert_eq!(report, [
         // The stock theme, `default': Rum's look, its own chrome colours.
-        r##"(default) "#000000" "#3a2914" "#d48a20" "#d48a20" "#201e18" "#d48a20" "#11100d""##,
+        r##"(default) "#000000" "#362816" "#d48a20" "#d48a20" "#201e18" "#d48a20" "#11100d""##,
         // A colour scheme replaces the stock theme. Light: the cursor is
         // black, so the accent is the link colour; the hairline 15%, glass 8%
         // and selection 20% toward black.
@@ -499,12 +499,13 @@ fn chrome_colours_follow_the_theme() {
         r##"(tc-focus tc-dark) "#2e3436" "#54595a" "#fce94f" "#ff0000" "#4b5051" "#fce94f" "#3d4345""##,
         // No theme: GNU's stock faces, and the built-in accent.
         r##"nil "#ffffff" "#cccccc" "#d48a20" "#d48a20" "#d9d9d9" "#d48a20" "#ebebeb""##,
-        r##"(default) "#000000" "#3a2914" "#d48a20" "#d48a20" "#201e18" "#d48a20" "#11100d""##,
-        // Ported schemes: their own accent on the edge, the match text at
-        // its floor on the selected row.
-        r##"(catppuccin-latte) "#eff1f5" "#bcc0cc" "#6b10c6" "#8839ef" "#d5d7df" "#8839ef" "#e1e3e9""##,
-        r##"(tokyonight-night) "#1a1b26" "#283457" "#7aa2f7" "#7aa2f7" "#2f3141" "#7aa2f7" "#252734""##,
-        r##"(default) "#000000" "#3a2914" "#d48a20" "#d48a20" "#201e18" "#d48a20" "#11100d""##,
+        r##"(default) "#000000" "#362816" "#d48a20" "#d48a20" "#201e18" "#d48a20" "#11100d""##,
+        // Ported schemes: their own accent on the edge, the selected row
+        // their glass tinted toward it, the match text at its floor there,
+        // the glass their background lifted.
+        r##"(catppuccin-latte) "#eff1f5" "#c8bfe9" "#6f04cf" "#8839ef" "#d5d7df" "#8839ef" "#dddfe3""##,
+        r##"(tokyonight-night) "#1a1b26" "#38415a" "#8aaffd" "#7aa2f7" "#2f3141" "#7aa2f7" "#272834""##,
+        r##"(default) "#000000" "#362816" "#d48a20" "#d48a20" "#201e18" "#d48a20" "#11100d""##,
         // Rum's error colour, then the third party's.
         r##""#c97054" "#c97054" "#c97054 t t (t nil)""##,
         r##""#a60000" "#a60000" "#a60000 t t (t nil)""##]);

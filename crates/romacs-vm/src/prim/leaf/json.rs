@@ -439,8 +439,8 @@ impl Leaf<'_> {
     }
 
     fn json_out_string(&self, out: &mut Vec<u8>, string: Value, skip: usize) -> std::result::Result<(), Fault> {
-        let view = self.vm.str_view(string).ok_or(Fault::Wrong("stringp", string))?;
-        out_string(out, view.bytes(), view.is_multibyte(), skip).ok_or(Fault::Wrong("json-value-p", string))
+        let view = self.vm.str_view(string).ok_or_else(|| Fault::Wrong("stringp", string))?;
+        out_string(out, view.bytes(), view.is_multibyte(), skip).ok_or_else(|| Fault::Wrong("json-value-p", string))
     }
 
     /// json_out_something.
@@ -505,10 +505,10 @@ impl Leaf<'_> {
         let mut tail = object;
         while let Some((car, cdr)) = self.pair(tail) {
             let (key, value, next) = if alist {
-                let (key, value) = self.pair(car).ok_or(Fault::Wrong("consp", car))?;
+                let (key, value) = self.pair(car).ok_or_else(|| Fault::Wrong("consp", car))?;
                 (key, value, cdr)
             } else {
-                let (value, next) = self.pair(cdr).ok_or(Fault::Wrong("consp", cdr))?;
+                let (value, next) = self.pair(cdr).ok_or_else(|| Fault::Wrong("consp", cdr))?;
                 (car, value, next)
             };
             if self.kind(key) != Kind::Symbol { return Err(Fault::Wrong("symbolp", key)); }
@@ -517,7 +517,7 @@ impl Leaf<'_> {
                 let name = self.symbol_name(key)?;
                 // A plist key's leading colon is elided.
                 let skip = usize::from(!alist && name.len() > 1 && name.starts_with(':'));
-                out_string(out, name.as_bytes(), true, skip).ok_or(Fault::Wrong("json-value-p", key))?;
+                out_string(out, name.as_bytes(), true, skip).ok_or_else(|| Fault::Wrong("json-value-p", key))?;
                 out.push(b':');
                 self.json_out(out, depth, conf, value)?;
             }
@@ -550,7 +550,7 @@ impl Leaf<'_> {
     }
 
     pub fn json_parse_string(&mut self, string: Value, args: &[Value]) -> super::super::Out {
-        let view = self.vm.str_view(string).ok_or(Fault::Wrong("stringp", string))?;
+        let view = self.vm.str_view(string).ok_or_else(|| Fault::Wrong("stringp", string))?;
         let (input, multibyte) = (view.bytes().to_vec(), view.is_multibyte());
         Ok(self.json_parse(input, multibyte, args, true)?.0)
     }

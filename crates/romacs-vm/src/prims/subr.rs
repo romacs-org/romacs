@@ -2,7 +2,7 @@ use super::*;
 
 defsubr! { name = "subr-arity", gnu = "data.c:1038", effect = Pure,
 fn subr_arity(cx, subr: Value) {
-    let (minimum, maximum) = crate::prim::arity(subr).ok_or(Fault::Wrong("subrp", subr))?;
+    let (minimum, maximum) = crate::prim::arity(subr).ok_or_else(|| Fault::Wrong("subrp", subr))?;
     // A special form's arity is (MIN . unevalled).
     let special = crate::prim::name(subr).and_then(super::special_forms::special_form_min);
     let minimum = Value::integer(special.unwrap_or(minimum) as i64).unwrap();
@@ -16,7 +16,7 @@ fn subr_arity(cx, subr: Value) {
 
 defsubr! { name = "subr-name", gnu = "data.c:1056", effect = Pure,
 fn subr_name(cx, subr: Value) {
-    let name = crate::prim::name(subr).ok_or(Fault::Wrong("subrp", subr))?;
+    let name = crate::prim::name(subr).ok_or_else(|| Fault::Wrong("subrp", subr))?;
     Ok(cx.byte_string(name.as_bytes()))
 }}
 
@@ -32,7 +32,7 @@ fn gap_size(cx) { let _ = cx; Ok(Value::integer(0).unwrap()) }}
 defsubr! { name = "subr-type", gnu = "data.c:1089", effect = Pure,
 fn subr_type(cx, subr: Value) {
     let _ = cx;
-    crate::prim::arity(subr).ok_or(Fault::Wrong("subrp", subr))?;
+    crate::prim::arity(subr).ok_or_else(|| Fault::Wrong("subrp", subr))?;
     Ok(Value::NIL)
 }}
 
@@ -40,7 +40,7 @@ fn subr_type(cx, subr: Value) {
 defsubr! { name = "subr-native-lambda-list", gnu = "data.c:1074", effect = Pure,
 fn subr_native_lambda_list(cx, subr: Value) {
     let _ = cx;
-    crate::prim::arity(subr).ok_or(Fault::Wrong("subrp", subr))?;
+    crate::prim::arity(subr).ok_or_else(|| Fault::Wrong("subrp", subr))?;
     Ok(Value::TRUE)
 }}
 
@@ -50,7 +50,7 @@ fn subr_native_lambda_list(cx, subr: Value) {
 // primitive reaches no state of the machine.
 defsubr! { name = "romacs--subr-effect", gnu = "romacs:lint", effect = Pure,
 fn romacs_subr_effect(cx, subr: Value) {
-    crate::prim::arity(subr).ok_or(Fault::Wrong("subrp", subr))?;
+    crate::prim::arity(subr).ok_or_else(|| Fault::Wrong("subrp", subr))?;
     Ok(match crate::prim::generated(subr).map(|d| &d.effect) {
         Some(Effect::Pure) => cx.intern("pure"),
         Some(Effect::Reads) => cx.intern("reads"),

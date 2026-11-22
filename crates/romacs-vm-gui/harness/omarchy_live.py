@@ -166,7 +166,9 @@ def main():
             done = root / 'prompt.el'
             session.type(['-M', 'alt', ':', '-m', 'alt'])
             time.sleep(.2)
-            session.type([f'(progn (read-string "p: ") (with-temp-file "{done}" (prin1 custom-enabled-themes (current-buffer))))'])
+            # Written beside it, then renamed: never read part-written.
+            session.type([f'(progn (read-string "p: ") (with-temp-file "{done}.part" (prin1 custom-enabled-themes (current-buffer)))'
+                          f' (rename-file "{done}.part" "{done}" t))'])
             session.type(['-k', 'Return'])
             time.sleep(.6)
             switch(state, 'g3d', 'tokyo-night', PALETTE)

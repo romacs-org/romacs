@@ -21,7 +21,11 @@ frozen snapshots.
 | Looking for | Look in |
 |---|---|
 | The binary: GUI, `--batch`, the paint loop | `crates/romacs-vm-gui/src/main.rs` |
+| The process that holds a session's descriptors and parents its children | `crates/romacs-keeper` |
+| Records between Romacs's processes | `crates/romacs-record` |
+| The allocator (jemalloc) | `crates/romacs-allocator` |
 | Startup, loadup and the world image | `crates/romacs-vm-gui/src/startup.rs`, `loadup.rs`, `world.rs` |
+| What a world image may hold | `crates/romacs-snapshot`, its derive in `crates/romacs-snapshot-derive` |
 | One Lisp machine (`romacs_vm::Vm`) | `crates/romacs-vm/src/lib.rs` |
 | The reader | `crates/romacs-vm/src/reader/` |
 | The interpreter and its dispatch | `crates/romacs-vm/src/threaded.rs` |
@@ -40,7 +44,8 @@ frozen snapshots.
 | Faces, themes, fonts | `crates/romacs-face`, `crates/romacs-font`, `crates/romacs-font-materializer` |
 | Drawing | `crates/romacs-display-runtime` (the render thread), `romacs-renderer-wgpu`, `romacs-scene` |
 | Images | `crates/romacs-imaging` |
-| Agents (MCP relay, sessions) | `crates/romacs-mcp`, `lisp/agents/` |
+| The mode line's icon font, the logo | `crates/romacs-icon-font`, `crates/romacs-logo` |
+| Agents (MCP relay, sessions) | `crates/romacs-mcp`, `lisp/agents/`; over a tailnet `crates/romacs-relay`; attachments' outgoing copies `crates/romacs-attach` |
 | The Lisp | `lisp/` by subsystem, ours (GNU's files at GNU's paths; GNU's later changes: `tools/lisp-upstream`); Romacs's own directories and `lisp/packages/` in `lisp/bundled.json` |
 | What a session loads, in order | `lisp/session/romacs-loadup-bootstrap.el` |
 | Runtime data Lisp reads (`data-directory`) | `etc/` |
@@ -50,6 +55,7 @@ frozen snapshots.
 | Bundled packages' test suites | `test/packages/<name>/` (`make check`) |
 | Benchmark inputs | `test/bench/` |
 | Scripts and tools, with their tests | `tools/` (commands), `tools/lib/` (modules), `tools/tests/` |
+| Test harness crates | `crates/romacs-infra` (isolated display sessions), `crates/romacs-gui-tests` (GUI scenarios), `crates/romacs-gui-oracle` (scene checks over captures), `crates/romacs-test-fonts` (pinned font fixtures), `crates/romacs-vm-test-build` and `crates/romacs-vm-gui-test-build` (test module lists made at build) |
 | Decisions checks enforce | `ledger/`: pins, censuses, the parity ratchet, `divergences/` |
 | Where Romacs differs from GNU, and why | `ledger/divergences/<ID>.md` |
 | Packaging | `nix/`, `flake.nix`, `tools/package-release` |
@@ -68,8 +74,7 @@ Each top-level entry, and what it holds:
 - `Cargo.toml` and `Cargo.lock`: the workspace; `.cargo/`: Cargo and
   cargo-deny configuration; `.config/`: nextest; `rust-toolchain.toml`.
 - `flake.nix` and `flake.lock`: the toolchain and packages.
-- `Makefile`: the gates and Lisp checks; `scripts/`: forwarding stubs for
-  moved commands; `.github/`: CI.
+- `Makefile`: the gates and Lisp checks; `.github/`: CI.
 - `.gitattributes`, `.gitignore`, `README.md`, `AGENTS.md`,
   `ARCHITECTURE.md`, `COPYING`.
 

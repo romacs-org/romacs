@@ -153,8 +153,8 @@ fn lookup_image(cx, spec: Value) -> Step {
 defsubr! { name = "lookup-image-map", gnu = "xdisp.c:36552", effect = Reads,
 fn lookup_image_map(cx, map: Value, x: Value, y: Value) {
     if map == Value::NIL { return Ok(Value::NIL) }
-    let x = x.integer_value().ok_or(Fault::Wrong("fixnump", x))?.clamp(i64::from(i32::MIN), i64::from(i32::MAX));
-    let y = y.integer_value().ok_or(Fault::Wrong("fixnump", y))?.clamp(i64::from(i32::MIN), i64::from(i32::MAX));
+    let x = x.integer_value().ok_or_else(|| Fault::Wrong("fixnump", x))?.clamp(i64::from(i32::MIN), i64::from(i32::MAX));
+    let y = y.integer_value().ok_or_else(|| Fault::Wrong("fixnump", y))?.clamp(i64::from(i32::MIN), i64::from(i32::MAX));
     // find_hot_spot: the first element whose AREA holds X, Y.
     let mut tail = map;
     for _ in 0..cx.list_limit() {

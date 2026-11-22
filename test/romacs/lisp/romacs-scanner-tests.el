@@ -134,5 +134,19 @@
   ;; An answer that is not (STATE . MARK).
   (should-error (romacs-scanner-make (lambda (_state _char) 'code) 'code)))
 
+;; Runs: each state change and the state after it, read from the table.
+(ert-deftest romacs-scanner-runs-give-each-state-change ()
+  (let ((scanner (romacs-scanner-make
+                  (romacs-scanner-marking (lambda (state char)
+                                            (pcase state
+                                              ('code (if (eq char ?\") 'string 'code))
+                                              ('string (if (eq char ?\") 'code 'string)))))
+                  'code)))
+    (with-temp-buffer
+      (insert "a \"bc\" d")
+      (should (equal (romacs-scanner-runs scanner) '((3 . string) (6 . code))))
+      ;; From a state given, as a scan is.
+      (should (equal (romacs-scanner-runs scanner 5 nil 'string) '((6 . code)))))))
+
 (provide 'romacs-scanner-tests)
 ;;; romacs-scanner-tests.el ends here

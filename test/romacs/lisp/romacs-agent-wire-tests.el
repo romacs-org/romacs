@@ -182,6 +182,8 @@ raised: each sent field as it held it, the last of them marked :last."
         (list :type 'incoming :text "two" :prompt "ab12" :messages (list (romacs-agent-make-message "m-2" "sibling" '(:name "sib") "m-1" "hi")))
         (list :type 'tool :id "t1" :name "Bash" :state 'started :input (json-parse-string "{\"command\":\"ls\",\"x\":[1,null,false]}"
                                                                                            :null-object :null :false-object :false))
+        (list :type 'arrival :from "background task" :state "completed" :text "Build done"
+              :full "<task-notification>done</task-notification>" :parent nil)
         (list :type 'tool-output :id "t1" :text "a\n")
         (list :type 'tool :id "t1" :state 'failed :output "no")
         (list :type 'task :id "k" :task "k1" :state 'progress :background t :activity "reading" :summary "s" :title "T")

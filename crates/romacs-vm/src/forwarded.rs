@@ -1262,8 +1262,8 @@ impl Vm {
     #[inline(always)]
     fn resolve_redirect(&mut self, slot: usize) {
         if self.variable_redirects.get(slot).copied().flatten().is_none()
+            && self.in_initial_obarray(slot)
             && let Some(name) = self.symbol_names.get(slot)
-            && self.names.get(name) == Some(&slot)
         {
             let name = name.clone();
             self.initialize_variable_redirect(&name, slot);
@@ -1686,7 +1686,7 @@ impl Vm {
             Fwd::Int(i) => {
                 // CHECK_INTEGER; VM2 has no bignums, so every integer fits
                 // and GNU's overflow-error arm is unreachable.
-                let n = value.integer_value().ok_or(Fault::Wrong("integerp", value))?;
+                let n = value.integer_value().ok_or_else(|| Fault::Wrong("integerp", value))?;
                 self.forwarded.ints[i as usize] = n;
             }
             Fwd::Buffer(i) => {

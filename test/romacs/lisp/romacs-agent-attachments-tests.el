@@ -64,6 +64,17 @@ its journal's records raise."
       (let ((note (gethash "note" (car (last (romacs-agent--journal-records session))))))
         (should (equal (gethash "type" note) "attachments"))))))
 
+(ert-deftest romacs-agent-attachments-a-job-keeps-its-first-outcome ()
+  ;; The first outcome wins, and the answer reads it: none yet, then the error.
+  (let ((job (romacs-agent-attachments--job nil 1))
+        (items (list (romacs-agent-attachments--item "/a.png" '(:mime "image/png" :bytes 3) "a"))))
+    (should (null (romacs-agent-attachments--answer job items)))
+    (romacs-agent-attachments--finish job (list :error "late"))
+    (romacs-agent-attachments--finish job (list :done))
+    (should (equal (plist-get job :outcome) '(:error "late")))
+    (should (plist-get job :over))
+    (should-error (romacs-agent-attachments--answer job items) :type 'user-error)))
+
 (ert-deftest romacs-agent-attachments-refusals ()
   (romacs-agent-attachments-tests--with
     (should-error (romacs-agent-attachments-tests--attach "paths" (vector "relative.png")) :type 'user-error)

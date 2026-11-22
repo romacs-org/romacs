@@ -383,7 +383,9 @@ which is
                               ;; Don't accept Meta'd characters as keys.
                               (or (multibyte-string-p key)
                                   (not (<= 127 (aref key 0) 255))))
-                         (and (string-match-p "\\`<[-_A-Za-z0-9]+>\\'" key)
+                         ;; A one-character name in brackets is a GUI key
+                         ;; such as C-<[> (ledger/divergences/VM2-GUI-KEYS).
+                         (and (string-match-p "\\`<\\(?:[-_A-Za-z0-9]+\\|[!-;=?-~]\\)>\\'" key)
                               ;; Don't allow <M-C-down>.
                               (= (progn
                                    (string-match

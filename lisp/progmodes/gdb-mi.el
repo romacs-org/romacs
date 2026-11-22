@@ -1066,7 +1066,7 @@ detailed description of this mode.
 
   (add-hook 'completion-at-point-functions #'gud-gdb-completion-at-point
             nil 'local)
-  (local-set-key "\C-i" 'completion-at-point)
+  (local-set-key (kbd "TAB") 'completion-at-point)
 
   (local-set-key [remap comint-delchar-or-maybe-eof] 'gdb-delchar-or-quit)
 
@@ -3445,8 +3445,8 @@ If not in a source or disassembly buffer just set point."
     (define-key map "D" 'gdb-delete-breakpoint)
     ;; Don't bind "q" to kill-this-buffer as we need it for breakpoint icons.
     (define-key map "q" 'gdb-delete-frame-or-window)
-    (define-key map "\r" 'gdb-goto-breakpoint)
-    (define-key map "\t" (lambda ()
+    (define-key map (kbd "RET") 'gdb-goto-breakpoint)
+    (define-key map (kbd "TAB") (lambda ()
                            (interactive)
                            (gdb-set-window-buffer
                             (gdb-get-buffer-create 'gdb-threads-buffer) t)))
@@ -3522,7 +3522,7 @@ corresponding to the mode line clicked."
 
 (defvar gdb-threads-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map "\r" 'gdb-select-thread)
+    (define-key map (kbd "RET") 'gdb-select-thread)
     (define-key map "f" 'gdb-display-stack-for-thread)
     (define-key map "F" 'gdb-frame-stack-for-thread)
     (define-key map "l" 'gdb-display-locals-for-thread)
@@ -3534,7 +3534,7 @@ corresponding to the mode line clicked."
     (define-key map "i" 'gdb-interrupt-thread)
     (define-key map "c" 'gdb-continue-thread)
     (define-key map "s" 'gdb-step-thread)
-    (define-key map "\t"
+    (define-key map (kbd "TAB")
       (lambda ()
         (interactive)
         (gdb-set-window-buffer
@@ -4407,7 +4407,7 @@ member."
   (let ((map (make-sparse-keymap)))
     (suppress-keymap map)
     (define-key map "q" 'kill-current-buffer)
-    (define-key map "\r" 'gdb-select-frame)
+    (define-key map (kbd "RET") 'gdb-select-frame)
     (define-key map [mouse-2] 'gdb-select-frame)
     (define-key map [follow-link] 'mouse-face)
     map))
@@ -4518,7 +4518,7 @@ left-to-right display order of the properties."
 (defvar gdb-locals-watch-map
   (let ((map (make-sparse-keymap)))
     (suppress-keymap map)
-    (define-key map "\r" 'gud-watch)
+    (define-key map (kbd "RET") 'gud-watch)
     (define-key map [mouse-2] 'gud-watch)
     map)
   "Keymap to create watch expression of a complex data type local variable.")
@@ -4526,7 +4526,7 @@ left-to-right display order of the properties."
 (defvar gdb-edit-locals-map-1
   (let ((map (make-sparse-keymap)))
     (suppress-keymap map)
-    (define-key map "\r" 'gdb-edit-locals-value)
+    (define-key map (kbd "RET") 'gdb-edit-locals-value)
     (define-key map [mouse-2] 'gdb-edit-locals-value)
     map)
   "Keymap to edit value of a simple data type local variable.")
@@ -4621,7 +4621,7 @@ left-to-right display order of the properties."
   (let ((map (make-sparse-keymap)))
     (suppress-keymap map)
     (define-key map "q" 'kill-current-buffer)
-    (define-key map "\t" (lambda ()
+    (define-key map (kbd "TAB") (lambda ()
                            (interactive)
                            (gdb-set-window-buffer
                             (gdb-get-buffer-create
@@ -4739,10 +4739,10 @@ executes FUNCTION."
 (defvar gdb-registers-mode-map
   (let ((map (make-sparse-keymap)))
     (suppress-keymap map)
-    (define-key map "\r" 'gdb-edit-register-value)
+    (define-key map (kbd "RET") 'gdb-edit-register-value)
     (define-key map [mouse-2] 'gdb-edit-register-value)
     (define-key map "q" 'kill-current-buffer)
-    (define-key map "\t" (lambda ()
+    (define-key map (kbd "TAB") (lambda ()
                            (interactive)
                            (gdb-set-window-buffer
                             (gdb-get-buffer-create

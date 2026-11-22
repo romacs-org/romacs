@@ -1154,7 +1154,7 @@ the unprocessed output.")
 (defvar erc-dcc-chat-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "RET") #'erc-send-current-line)
-    (define-key map "\t" #'completion-at-point)
+    (define-key map (kbd "TAB") #'completion-at-point)
     map)
   "Keymap for `erc-dcc-mode'.")
 

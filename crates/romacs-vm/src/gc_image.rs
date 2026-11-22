@@ -68,7 +68,7 @@ impl Vm {
         pending.extend(closures.into_iter().map(|i| Value::reference(i, 4)));
         pending.extend(cells.into_iter().map(|i| Value::reference(i, 5)));
         pending.extend(objects.into_iter().map(|i| Value::reference(i + 1, 0)));
-        pending.extend(self.cell_pairs.iter().filter(|&(&i, _)| self.cells.permanent(i)).map(|(_, &pair)| pair));
+        pending.extend(self.cell_pairs.iter().filter(|&(i, _)| self.cells.permanent(i)).map(|(_, pair)| pair));
         let symbols = &self.obarray_symbol_names;
         pending.extend(self.world_image.obarray_symbols.iter().filter(|slot| symbols.contains_key(slot)).map(|&slot| Value::reference(slot + 1, 7)));
         for id in self.functions.image_untouched() {

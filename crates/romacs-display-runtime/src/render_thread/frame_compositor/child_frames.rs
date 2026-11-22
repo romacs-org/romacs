@@ -122,7 +122,7 @@ impl GuiFrameRenderState {
         presentations
     }
 
-    #[allow(dead_code)] // direct single-child lookup remains covered by frame_windows tests
+    #[cfg(test)]
     pub(in crate::render_thread) fn child_presentation(&self, frame_id: u64) -> Option<u64> {
         self.compositor
             .child_frames

@@ -1514,7 +1514,7 @@ impl Vm {
             Object::Buffer(b) => {
                 let r = b.accessible();
                 let byte = usize::try_from(position - 1).ok().and_then(|c| b.byte_of_char(CharOffset(c)).ok());
-                let byte = byte.filter(|byte| r.start <= *byte && *byte <= r.end).ok_or(Fault::Range1(at))?;
+                let byte = byte.filter(|byte| r.start <= *byte && *byte <= r.end).ok_or_else(|| Fault::Range1(at))?;
                 return self.char_property_at_byte(object, byte.0, property, None).map(|hit| hit.0).map_err(Fault::Error);
             }
             Object::ByteBuffer(b) => {

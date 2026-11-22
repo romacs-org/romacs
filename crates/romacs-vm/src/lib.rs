@@ -1,6 +1,9 @@
 //! A deliberately small Rust register compiler and strand-private VM.
 //! There is no dependency on the old evaluator, reader, or byte compiler.
 #![deny(private_interfaces, private_bounds)]
+// A Fault has drop glue (`Error(String)`), so an eager `ok_or(Fault::..)` builds one and calls its destructor on
+// every success. The lazy form builds it on failure only; tests/fault_lazy_lint.rs refuses the eager one.
+#![expect(clippy::unnecessary_lazy_evaluations, reason = "Fault has drop glue: an eager Fault costs a destructor call on every success")]
 #[cfg(test)]
 mod callint_tests;
 #[cfg(test)]
@@ -25,9 +28,11 @@ mod where_is;
 mod map_keymap_tests;
 mod charset;
 mod obarray;
+mod names;
 mod command_set;
 mod command;
 mod interpreted_closure;
+mod cell_pairs;
 mod oclosure;
 mod host_input;
 mod quit;
@@ -113,6 +118,7 @@ mod code_image;
 mod sqlite;
 mod treesit;
 pub use treesit::native::parses_on_this_thread as treesit_parses_on_this_thread;
+pub use treesit::native::parses_in_process as treesit_parses_in_process;
 pub use treesit::{BundledGrammar, register_bundled_grammars};
 mod random;
 mod digest;
@@ -1606,6 +1612,10 @@ pub struct Vm {
     regions: frozen::Regions,
     #[snapshot(at_rest)]
     region_free: Vec<usize>,
+    /// The regions attached since the last collection, which a minor frees
+    /// when it does not reach them (`Vm::sweep_young_regions`).
+    #[snapshot(at_rest)]
+    region_young: Vec<usize>,
     /// Three quarters of the region ids are live: collect at the next entry.
     #[snapshot(at_rest)]
     region_collect: bool,
@@ -1699,7 +1709,8 @@ pub struct Vm {
     gc_stress: gc::Stress,
     /// What the funnels have handed out (gc.rs).
     allocation: gc::Allocation,
-    names: NameMap<String, usize>,
+    /// The initial obarray's names, by their bytes (names.rs).
+    names: names::Names,
     /// By slot, whether `names' maps the slot's name to it: membership of
     /// the initial obarray, answered without hashing the name.
     initial_obarray: Vec<bool>,
@@ -1740,7 +1751,7 @@ pub struct Vm {
     reader_trampolines: Vec<Option<usize>>,
     closures: table::Table<Closure>,
     cells: table::Table<Value>,
-    cell_pairs: HashMap<usize, Value>,
+    cell_pairs: cell_pairs::CellPairs,
     /// fns.c `random's generator, seeded from entropy as at GNU startup.
     random: random::Random,
     /// A world build's P tracking (`world`); None outside build mode.
@@ -1942,6 +1953,7 @@ impl Vm {
             image: None,
             regions: frozen::Regions::default(),
             region_free: Vec::new(),
+            region_young: Vec::new(),
             region_collect: false,
             isolates: isolate::Isolates::default(),
             keeper: None,
@@ -1977,7 +1989,7 @@ impl Vm {
             deferred_writes: Vec::new(),
             gc_stress: gc::Stress::from_env(),
             allocation: Default::default(),
-            names: NameMap::default(),
+            names: names::Names::default(),
             initial_obarray: Vec::new(),
             symbol_names: vec![],
             obarray_symbol_names: HashMap::default(),
@@ -1997,7 +2009,7 @@ impl Vm {
             reader_trampolines: Vec::new(),
             closures: Default::default(),
             cells: Default::default(),
-            cell_pairs: HashMap::default(),
+            cell_pairs: cell_pairs::CellPairs::default(),
             random: random::Random::from_entropy(),
             tracking: None,
             mktime_offset: 0,
@@ -2204,16 +2216,22 @@ impl Vm {
             self.command_set.changed(slot);
         }
     }
-    /// Whether SLOT's symbol is interned in the initial obarray.
+    /// Whether SLOT's symbol is interned in the initial obarray: whether
+    /// SLOT's own name names it (`names`), found without hashing the name.
     fn in_initial_obarray(&self, slot: usize) -> bool {
         self.initial_obarray.get(slot).copied().unwrap_or(false)
     }
     fn slot(&mut self, name: &str) -> usize {
-        if let Some(&i) = self.names.get(name) {
-            return i;
+        match self.names.get(name) {
+            Some(&i) => i,
+            None => self.new_slot(name, names::text_key(name)),
         }
+    }
+    /// The slot of a new symbol interned in the initial obarray, named NAME
+    /// (key text) whose key (names.rs) is KEY: no name names it yet.
+    fn new_slot(&mut self, name: &str, key: Box<[u8]>) -> usize {
         let i = self.slots.len();
-        self.names.insert(name.to_owned(), i);
+        self.names.insert_key(key, i);
         // A reused slot names another symbol now (Vm::special_cache).
         self.special_changes += 1;
         self.set_initial_obarray(i, true);
@@ -3586,10 +3604,10 @@ impl Vm {
         use std::fmt::Write;
         self.require_live_function(entry)?;
         let mut out = format!("entry f{entry}\n");
-        let mut symbols: Vec<_> = self.names.iter().collect();
-        symbols.sort_by_key(|(_, slot)| **slot);
-        for (name, slot) in symbols {
-            writeln!(&mut out, "symbol s{slot} = {name}").unwrap();
+        let mut symbols: Vec<usize> = self.names.slots().collect();
+        symbols.sort_unstable();
+        for slot in symbols {
+            writeln!(&mut out, "symbol s{slot} = {}", self.symbol_names[slot]).unwrap();
         }
         for (id, f) in self.functions.iter().enumerate() {
             let decoded;

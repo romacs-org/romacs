@@ -1,4 +1,4 @@
-"""Census assertions; run with unittest discovery from scripts/."""
+"""Census assertions; `python3 tools/check-derived` runs them."""
 import tempfile as _portable_tempfile
 from pathlib import Path as _PortablePath
 import importlib.machinery

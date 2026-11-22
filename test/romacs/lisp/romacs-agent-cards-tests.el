@@ -67,7 +67,7 @@
           (with-current-buffer buffer
             ;; Drawn as a chat draws it: the delegation's line, its call's mark.
             (should (eq major-mode 'romacs-agent-history-mode))
-            (should (string-match-p "⇢ Review it\n" (buffer-string)))))
+            (should (string-match-p "⑂ Review it · started\n" (buffer-string)))))
       (when (buffer-live-p buffer) (kill-buffer buffer))
       (delete-file file))))
 

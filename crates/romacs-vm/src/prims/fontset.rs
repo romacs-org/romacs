@@ -185,7 +185,7 @@ fn listed(cx: &Leaf<'_>, mut list: Value, item: Value) -> bool {
 
 fn character(cx: &Leaf<'_>, value: Value) -> std::result::Result<u32, Fault> {
     let _ = cx;
-    value.integer_value().filter(|&c| (0..=crate::lstring::MAX_CHAR as i64).contains(&c)).map(|c| c as u32).ok_or(Fault::Wrong("characterp", value))
+    value.integer_value().filter(|&c| (0..=crate::lstring::MAX_CHAR as i64).contains(&c)).map(|c| c as u32).ok_or_else(|| Fault::Wrong("characterp", value))
 }
 
 /// TARGETS with overlapping ranges joined, as set_fontset_font folds a

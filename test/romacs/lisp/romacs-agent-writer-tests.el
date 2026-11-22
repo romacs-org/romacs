@@ -15,13 +15,18 @@
 (defmacro romacs-agent-writer-tests--with (&rest body)
   "BODY as the editor, its writes queued to a writer that runs here: what
 it is sent waits until `serve' runs the writer's loop over it, with a
-connection of its own, as the writer's process has."
+connection of its own, as the writer's process has.  The timers it
+makes are listed in `timers', and cancelled after it."
   (declare (indent 0))
   `(let ((sent nil) (romacs-agent-writer-queued t) (romacs-agent-writer--job nil)
          (romacs-agent-writer--pending (make-hash-table)) (romacs-agent-writer--unsent nil)
          (romacs-agent-writer--unsent-tail nil) (romacs-agent-writer--next 0) (romacs-agent-writer--in-flight 0)
-         (romacs-agent-writer--failed (make-hash-table)))
+         (romacs-agent-writer--failed (make-hash-table)) (romacs-agent-writer--failed-last nil)
+         (romacs-agent-writer--retry-timer nil) (timers nil))
      (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) (vector 'future)))
+               ((symbol-function 'run-at-time)
+                (let ((real (symbol-function 'run-at-time)))
+                  (lambda (&rest args) (car (push (apply real args) timers)))))
                ((symbol-function 'isolate-on-done) #'ignore)
                ((symbol-function 'isolate-future-done-p) #'ignore)
                ((symbol-function 'isolate-future-isolate) (lambda (_) 'writer))
@@ -42,7 +47,16 @@ connection of its own, as the writer's process has."
                    (serve-only)))
          ;; Not every test runs the writer.
          (ignore #'serve #'serve-only)
-         ,@body))))
+         (unwind-protect (progn ,@body)
+           (mapc #'cancel-timer timers))))))
+
+(defun romacs-agent-writer-tests--run-restart (timers)
+  "Run the restart a writer's end scheduled, the newest of TIMERS: a flush
+due at once."
+  (let ((timer (car timers)))
+    (should (eq (timer--function timer) #'romacs-agent-writer--flush))
+    (should-not (timer--repeat-delay timer))
+    (funcall (timer--function timer))))
 
 (ert-deftest romacs-agent-writer-writes-in-order-and-answers ()
   ;; Queued, a write answers later, in the order written, its value or
@@ -69,9 +83,38 @@ connection of its own, as the writer's process has."
       (romacs-agent-write 'list '(2) (lambda (answer) (push answer answers)))
       (setq sent nil)
       (romacs-agent-writer--ended romacs-agent-writer--job)
+      ;; Started again once that end is through, by its timer.
+      (should-not sent)
+      (romacs-agent-writer-tests--run-restart timers)
       (should (equal (mapcar #'car (cadr (car sent))) '(1 2)))
       (serve)
       (should (equal (nreverse answers) '((ok (1)) (ok (2))))))))
+
+(ert-deftest romacs-agent-writer-a-writer-that-fails-again-waits-for-its-timer ()
+  ;; A writer that failed is started again at once; one that fails again
+  ;; before answering anything is tried only by the retry timer, however
+  ;; many writes come meanwhile.  An answer ends the wait.
+  (let ((romacs-agent-writer-start-functions nil) (spawns 0))
+    (romacs-agent-writer-tests--with
+      (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) (cl-incf spawns) (vector 'future)))
+                ((symbol-function 'isolate-await) (lambda (&rest _) (error "Writer failed")))
+                ((symbol-function 'message) #'ignore))
+        (romacs-agent-write 'list '(1))
+        (should (= spawns 1))
+        (romacs-agent-writer--ended romacs-agent-writer--job)
+        (should-not (timerp romacs-agent-writer--retry-timer))
+        (romacs-agent-writer-tests--run-restart timers)
+        (should (= spawns 2))
+        (romacs-agent-writer--ended romacs-agent-writer--job)
+        (should (timerp romacs-agent-writer--retry-timer))
+        (romacs-agent-write 'list '(2))
+        (romacs-agent-writer--flush)
+        (should (= spawns 2))
+        (funcall (timer--function romacs-agent-writer--retry-timer))
+        (should (= spawns 3))
+        (serve)
+        (should-not romacs-agent-writer--failed-last)
+        (should (zerop (romacs-agent-writer-pending-count)))))))
 
 (defvar romacs-agent-writer-tests--made nil "What the writer made, in order.")
 (defun romacs-agent-writer-tests--make (x) (push x romacs-agent-writer-tests--made) x)
@@ -626,7 +669,7 @@ connection of its own, as the writer's process has."
     (unwind-protect
         (cl-letf (((symbol-function 'delete-process) (lambda (p) (push p deleted)))
                   ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (push (cons f args) again))))
-          (romacs-agent--filter-lines process (concat (json-serialize (romacs-mcp--object "attached" 1 "notesOnly" t)) "\n"))
+          (romacs-agent--filter process (concat (json-serialize (romacs-mcp--object "attached" 1 "notesOnly" t)) "\n"))
           (should-not (romacs-agent-connection session))
           (should (equal deleted (list process)))
           (should (eq (caar again) #'romacs-agent--attach))
@@ -665,7 +708,7 @@ connection of its own, as the writer's process has."
         (cl-letf (((symbol-function 'process-send-string) (lambda (_p text) (push text sent)))
                   ((symbol-function 'romacs-agent--supervisor-listens-p) (lambda (_) t))
                   ((symbol-function 'romacs-agent--resume-now) (lambda (_) (setq resumed t))))
-          (romacs-agent--filter-lines host (concat (json-serialize (romacs-mcp--object "attached" 1 "notesOnly" t)) "\n"))
+          (romacs-agent--filter host (concat (json-serialize (romacs-mcp--object "attached" 1 "notesOnly" t)) "\n"))
           (should (string-search "\"plan\"" (car sent)))
           (should-not (romacs-agent-connection session))
           (should (eq (romacs-agent-state session) 'detached))
@@ -675,7 +718,7 @@ connection of its own, as the writer's process has."
           (romacs-agent-resume session)
           (should resumed)
           ;; Its records come back: let go.
-          (romacs-agent--filter-lines host (concat (json-serialize (romacs-mcp--object "seq" 3 "note" (car (gethash "n" romacs-agent--held-notes)))) "\n"))
+          (romacs-agent--filter host (concat (json-serialize (romacs-mcp--object "seq" 3 "note" (car (gethash "n" romacs-agent--held-notes)))) "\n"))
           (should (= (romacs-agent-held-notes-count) 1)))
       (delete-process host))))
 

@@ -17,7 +17,7 @@ fn ordered_real_ert_dependency_frontier() {
         ("emacs-lisp/pcase", 53),
         ("emacs-lisp/gv", 176),
         ("emacs-lisp/inline", 22),
-        ("custom", 91),
+        ("custom", 92),
         ("emacs-lisp/easy-mmode", 18),
     ] {
         let file = root.join(format!("{name}.el"));

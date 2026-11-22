@@ -5,6 +5,7 @@
 
 use crate::engine::dfa;
 use crate::engine::linear;
+use crate::engine::required;
 use crate::engine::matcher::fail::{
     MATCHER_OVERFLOWED, MatchScratch, clear_matcher_overflow, fail_stack_overflow_free_span,
     fail_stack_push_sites, matcher_interrupt, matcher_overflow_pending,
@@ -330,12 +331,41 @@ fn linear_search_rest(
 /// # Returns
 /// * `Some((match_start, registers))` if found
 /// * `None` if no match
+#[expect(
+    clippy::inline_always,
+    reason = "a plain #[inline] wrapper stayed out of line in romacs-vm's caller and cost every search 19 instructions (callgrind, 2026-11-21)"
+)]
+#[inline(always)]
+pub fn re_search(
+    pattern: &CompiledPattern,
+    text: &[u8],
+    start: usize,
+    range: isize,
+    syntax: &dyn SyntaxLookup,
+    point: usize,
+) -> Option<(usize, MatchRegisters)> {
+    // A short search whose text lacks a byte every match consumes fails here,
+    // before the scan, the DFA and the matcher (`required`): TRAMP's handler
+    // on an ordinary file name.  A pattern with nothing to test pays one load,
+    // and the search itself (`search_unchecked`) is compiled as on its own.
+    if pattern.required.may_reject()
+        && !fastmap_force_disabled()
+        && required::rejects(pattern, text, start, range)
+    {
+        clear_matcher_overflow();
+        return None;
+    }
+    search_unchecked(pattern, text, start, range, syntax, point)
+}
+
+/// [`re_search`] without the required-byte check.
 // `try_candidate!`'s cold-path arm reassigns `dfa_first_step` and
 // `dfa_cold_pending` for the NEXT candidate; the `\``-anchored arm expands it
 // once and leaves, so rustc sees those stores as dead there.  The same
 // warning fired while this lived in romacs-core (which builds with warnings).
 #[allow(unused_assignments)]
-pub fn re_search(
+#[inline(never)]
+fn search_unchecked(
     pattern: &CompiledPattern,
     text: &[u8],
     start: usize,

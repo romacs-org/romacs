@@ -1909,12 +1909,12 @@ impl<'a> Windows<'a> {
     /// window.c:4667: `CHECK_FIXNUM (size)`; ADD sums with the old value.
     pub(crate) fn set_window_new_total(&mut self, window: Value, size: Value, add: Value) -> Out {
         let w = self.valid(window)?;
-        let n = size.integer_value().ok_or(Fault::Wrong("fixnump", size))?;
+        let n = size.integer_value().ok_or_else(|| Fault::Wrong("fixnump", size))?;
         let total = if add == Value::NIL {
             size
         } else {
             let old = self.get(w)?.new_total.integer_value().unwrap_or(0);
-            Self::int(old.checked_add(n).ok_or(Fault::Wrong("fixnump", size))?)?
+            Self::int(old.checked_add(n).ok_or_else(|| Fault::Wrong("fixnump", size))?)?
         };
         self.get_mut(w)?.new_total = total;
         Ok(total)
@@ -2491,7 +2491,7 @@ impl<'a> Windows<'a> {
     /// decode_live_terminal, then the (terminal, keyboard) coding names.
     pub(crate) fn terminal_codings(&mut self, object: Value) -> std::result::Result<(Value, Value, Value), Fault> {
         self.vm.ensure_windows().map_err(internal)?;
-        let terminal = self.terminal(object).ok_or(Fault::Wrong("terminal-live-p", object))?;
+        let terminal = self.terminal(object).ok_or_else(|| Fault::Wrong("terminal-live-p", object))?;
         match self.vm.object_if(terminal) {
             Some(Object::Terminal(t)) => Ok((terminal, t.terminal_coding, t.keyboard_coding)),
             _ => Err(Fault::Wrong("terminal-live-p", object)),
@@ -2500,7 +2500,7 @@ impl<'a> Windows<'a> {
     /// decode_live_terminal, then its parameter alist.
     pub(crate) fn terminal_params(&mut self, object: Value) -> std::result::Result<(Value, Value), Fault> {
         self.vm.ensure_windows().map_err(internal)?;
-        let terminal = self.terminal(object).ok_or(Fault::Wrong("terminal-live-p", object))?;
+        let terminal = self.terminal(object).ok_or_else(|| Fault::Wrong("terminal-live-p", object))?;
         match self.vm.object_if(terminal) {
             Some(Object::Terminal(t)) => Ok((terminal, t.params)),
             _ => Err(Fault::Wrong("terminal-live-p", object)),
@@ -2554,7 +2554,7 @@ impl<'a> Windows<'a> {
     /// value is whether the terminal is still GNU's output_initial kind.
     pub(crate) fn terminal_name(&mut self, object: Value) -> std::result::Result<(String, bool), Fault> {
         self.vm.ensure_windows().map_err(internal)?;
-        self.terminal(object).ok_or(Fault::Wrong("terminal-live-p", object))?;
+        self.terminal(object).ok_or_else(|| Fault::Wrong("terminal-live-p", object))?;
         Ok(match self.vm.window_system_host() {
             Some(host) => (host.display_name(), false),
             None => ("initial_terminal".into(), true),
@@ -2569,7 +2569,7 @@ impl<'a> Windows<'a> {
         Ok(self.vm.list_value(&[terminal]))
     }
     pub(crate) fn tty_top_frame(&mut self, terminal: Value) -> Out {
-        self.terminal(terminal).ok_or(Fault::Wrong("terminal-live-p", terminal))?;
+        self.terminal(terminal).ok_or_else(|| Fault::Wrong("terminal-live-p", terminal))?;
         // GNU returns nil for output_initial. There is no TTY backend here.
         Ok(Value::NIL)
     }
@@ -2581,7 +2581,7 @@ impl<'a> Windows<'a> {
         let buffer = if matches!(self.vm.object_if(buffer_or_name), Some(Object::Buffer(_) | Object::ByteBuffer(_))) {
             buffer_or_name
         } else {
-            let name = self.vm.buffer_name_text(buffer_or_name).ok_or(Fault::Wrong("stringp", buffer_or_name))?;
+            let name = self.vm.buffer_name_text(buffer_or_name).ok_or_else(|| Fault::Wrong("stringp", buffer_or_name))?;
             self.vm.named_buffer(&name).unwrap_or(Value::NIL)
         };
         if buffer == Value::NIL {
@@ -2709,7 +2709,7 @@ impl<'a> Windows<'a> {
         }
         else if matches!(self.vm.object_if(buffer), Some(Object::Buffer(_) | Object::ByteBuffer(_))) { buffer }
         else {
-            let name = self.vm.buffer_name_text(buffer).ok_or(Fault::Wrong("stringp", buffer))?;
+            let name = self.vm.buffer_name_text(buffer).ok_or_else(|| Fault::Wrong("stringp", buffer))?;
             let Some(buffer) = self.vm.named_buffer(&name) else { return Ok(Value::NIL); };
             buffer
         };
@@ -2777,7 +2777,7 @@ impl<'a> Windows<'a> {
     }
     /// GNU window.c:1313.
     pub(crate) fn set_window_hscroll(&mut self, window: Value, ncol: Value) -> Out {
-        let n = ncol.integer_value().ok_or(Fault::Wrong("fixnump", ncol))?;
+        let n = ncol.integer_value().ok_or_else(|| Fault::Wrong("fixnump", ncol))?;
         let window = self.live(window)?;
         self.scroll_to(window, n)
     }

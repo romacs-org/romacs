@@ -35,16 +35,17 @@ import signal
 import sys
 import time
 
+import live_oracle as live
 import parity_live
 from parity_live import K, M, gnu_engine, lisp_string, private_tree, read_sexp, romacs_engine, wait
 
 INIT = ''';; -*- lexical-binding: t -*-
-(setq inhibit-startup-screen t initial-scratch-message nil)
+''' + live.WRITE_WHOLE + '''(setq inhibit-startup-screen t initial-scratch-message nil)
 (setq debug-on-event 'sigusr2)
 (defun debug-event-live-debugger (&rest args)
-  (write-region (prin1-to-string (list (float-time) args
-                                       (list quit-flag inhibit-quit debug-on-quit debug-on-next-call)))
-                nil {entered} nil 'silent)
+  (live-write-whole (prin1-to-string (list (float-time) args
+                                           (list quit-flag inhibit-quit debug-on-quit debug-on-next-call)))
+                    {entered})
   (setq debug-on-quit nil)
   (top-level))
 (setq debugger #'debug-event-live-debugger)
@@ -57,8 +58,8 @@ INIT = ''';; -*- lexical-binding: t -*-
   (run-at-time 1 nil
                (lambda ()
                  (mapc #'cancel-timer (append timer-list timer-idle-list))
-                 (write-region (number-to-string (length (append timer-list timer-idle-list)))
-                               nil {quiet} nil 'silent))))
+                 (live-write-whole (number-to-string (length (append timer-list timer-idle-list)))
+                                   {quiet}))))
 (add-hook 'minibuffer-setup-hook #'debug-event-live-quiet)
 (add-hook 'window-setup-hook
           (lambda ()

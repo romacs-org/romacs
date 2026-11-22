@@ -55,155 +55,146 @@ Blinking is GNU's `blink-cursor-mode'."
   :group 'romacs
   :prefix "romacs-")
 
-(defmacro romacs-effects--defslot (slot summary occasion &rest defaults)
-  "Define the ten options of window-animation SLOT.
+(eval-and-compile
+  ;; `romacs-effects--defslot' reads them as it expands, so they must exist
+  ;; when this file is compiled.
+  (defconst romacs-effects--slot-options
+    '((:property enabled :key :enabled :default t :type boolean
+       :doc "Whether %1$s is animated.
+When nil, %2$s happens immediately.
 
-SUMMARY names what the slot animates and OCCASION when it happens; both are
-woven into each option's docstring.  DEFAULTS is a plist of the properties
-whose default differs from the shared one.
+%4$s")
+      (:property kind :key :kind :default 'spring
+       :type (choice (const :tag "Fixed-duration curve" easing)
+                     (const :tag "Second-order spring" spring))
+       :doc "Which family of curve animates %1$s.
 
-A macro rather than forty written-out options because the four slots really are
-parallel — they take the same ten properties, meaning the same things — and
-forty hand-copied docstrings would drift apart at the first edit.
-
-DEFAULTS also accepts three keys that shape the options rather than the slot:
-`:group' overrides the customization group (default `romacs-window-animation');
-`:master' names the master off-switch option the `enabled' docstring points at
-(default `romacs-window-animations-off'); `:enabled-doc' replaces the
-paragraph that paragraph family keeps about the offscreen composition ring,
-which only applies to slots whose animation reads the previous frame;
-`:slide' non-nil adds the slot's extra `slide-pixels' option, which the
-;; schema publishes for slots that displace; `:scale' non-nil adds the
-;; slot's `scale-from' option the same way. Both are optional because the
-;; window-animation slots publish neither.
-schema publishes for slots that displace while they fade."
-  (let* ((name (symbol-name slot))
-         (sym (lambda (property) (intern (format "romacs-%s-%s" name property))))
-         ;; A quoted value in the caller's plist arrives here as
-         ;; `(quote SYM)'; unwrap it so the defgroup symbol itself is
-         ;; spliced back quoted.
-         (unquote (lambda (value)
-                    (if (and (consp value) (eq (car value) 'quote))
-                        (cadr value)
-                      value)))
-         (group (or (funcall unquote (plist-get defaults :group))
-                    'romacs-window-animation))
-         (master (or (funcall unquote (plist-get defaults :master))
-                     'romacs-window-animations-off))
-         (get (lambda (property fallback)
-                (if (plist-member defaults property)
-                    (plist-get defaults property)
-                  fallback))))
-    `(progn
-       (defcustom ,(funcall sym "enabled") ,(funcall get :enabled t)
-          ,(format "Whether %s is animated.
-When nil, %s happens immediately.
-
-%s" summary occasion
-        (or (plist-get defaults :enabled-doc)
-            (format "Turning every window-animation slot off also stops the compositor from keeping
-the previous frame in a texture, which it must do to animate from it — see
-`%s' for the cheaper way to say that." master)))
-          :type 'boolean
-          :group ',group)
-
-       (defcustom ,(funcall sym "kind") ,(funcall get :kind ''spring)
-          ,(format "Which family of curve animates %s.
-
-`easing' is a fixed-duration curve: it takes `romacs-%s-duration' seconds and
-follows `romacs-%s-easing'.  `spring' is a second-order spring with no
+`easing' is a fixed-duration curve: it takes `romacs-%3$s-duration' seconds and
+follows `romacs-%3$s-easing'.  `spring' is a second-order spring with no
 duration at all — it is described by its stiffness and damping ratio, and
-settles when it arrives." summary name name)
-          :type '(choice (const :tag "Fixed-duration curve" easing)
-                         (const :tag "Second-order spring" spring))
-          :group ',group)
+settles when it arrives.")
+      (:property duration :key :duration :default 0.15 :type number
+       :doc "Seconds %1$s takes, when `romacs-%3$s-kind' is `easing'.
+Zero disables this slot, exactly as setting `romacs-%3$s-enabled' to nil does.
+Ignored for a spring, which has no duration.")
+      (:property easing :key :easing :default 'ease-out-quad
+       :type (choice (const linear)
+                     (const ease-out-quad)
+                     (const ease-out-cubic)
+                     (const ease-out-expo)
+                     (const ease-in-out-cubic)
+                     (const :tag "Spring-shaped curve" spring)
+                     (const :tag "Custom cubic Bezier" cubic-bezier))
+       :doc "Curve shape for %1$s, when `romacs-%3$s-kind' is `easing'.
 
-       (defcustom ,(funcall sym "duration") ,(funcall get :duration 0.15)
-          ,(format "Seconds %s takes, when `romacs-%s-kind' is `easing'.
-Zero disables this slot, exactly as setting `romacs-%s-enabled' to nil does.
-Ignored for a spring, which has no duration." summary name name)
-          :type 'number
-          :group ',group)
-
-       (defcustom ,(funcall sym "easing") ,(funcall get :easing ''ease-out-quad)
-          ,(format "Curve shape for %s, when `romacs-%s-kind' is `easing'.
-
-`cubic-bezier' takes its control points from the four `romacs-%s-bezier-*'
+`cubic-bezier' takes its control points from the four `romacs-%3$s-bezier-*'
 options, which lets a curve be transcribed directly from a niri configuration.
 Note that `spring' here is a fixed curve *shaped* like a spring, and is not the
-same thing as setting `romacs-%s-kind' to `spring'." summary name name name)
-          :type '(choice (const linear)
-                         (const ease-out-quad)
-                         (const ease-out-cubic)
-                         (const ease-out-expo)
-                         (const ease-in-out-cubic)
-                         (const :tag "Spring-shaped curve" spring)
-                         (const :tag "Custom cubic Bezier" cubic-bezier))
-          :group ',group)
-
-       ,@(let ((axes '(("bezier-x1" :bezier-x1 0.0 "first control point's time")
-                       ("bezier-y1" :bezier-y1 0.0 "first control point's value")
-                       ("bezier-x2" :bezier-x2 1.0 "second control point's time")
-                       ("bezier-y2" :bezier-y2 1.0 "second control point's value"))))
-           (mapcar
-            (lambda (axis)
-              (let ((property (nth 0 axis)) (keyword (nth 1 axis))
-                    (default (nth 2 axis)) (what (nth 3 axis)))
-                `(defcustom ,(funcall sym property) ,default
-                   ,(format "The %s of the Bezier curve for %s.
-Used only when `romacs-%s-easing' is `cubic-bezier'.  These are the same four
-numbers a niri configuration writes as `cubic-bezier(x1, y1, x2, y2)'.
-
-Time is clamped to 0.0-1.0 so the curve stays solvable; value is deliberately
-not, because overshooting past 1.0 is the point of a curve like
-`cubic-bezier(0.34, 1.56, 0.64, 1.0)'." what summary name)
-                   :type 'number
-                   :group ',group)))
-            axes))
-
-       (defcustom ,(funcall sym "damping-ratio") ,(funcall get :damping-ratio 1.0)
-          ,(format "How %s settles, when `romacs-%s-kind' is `spring'.
+same thing as setting `romacs-%3$s-kind' to `spring'.")
+      (:property bezier-x1 :default 0.0 :type number :doc "first control point's time")
+      (:property bezier-y1 :default 0.0 :type number :doc "first control point's value")
+      (:property bezier-x2 :default 1.0 :type number :doc "second control point's time")
+      (:property bezier-y2 :default 1.0 :type number :doc "second control point's value")
+      (:property damping-ratio :key :damping-ratio :default 1.0 :type number
+       :doc "How %1$s settles, when `romacs-%3$s-kind' is `spring'.
 
 1.0 is critically damped: the fastest approach that never overshoots.  Below
 1.0 the motion bounces past its destination before returning, and above 1.0 it
-creeps in more slowly than it needs to.  Clamped to 0.1-10.0." summary name)
-          :type 'number
-          :group ',group)
-
-       (defcustom ,(funcall sym "stiffness") ,(funcall get :stiffness 800)
-          ,(format "How hard the spring pulls %s toward its destination.
+creeps in more slowly than it needs to.  Clamped to 0.1-10.0.")
+      (:property stiffness :key :stiffness :default 800 :type integer
+       :doc "How hard the spring pulls %1$s toward its destination.
 
 Higher is faster.  With the default damping ratio, 800 settles in about a third
 of a second.  This is the same number a niri configuration gives as
-`stiffness', and it means the same thing." summary)
-          :type 'integer
-          :group ',group)
-
-       ,@(append
-          (when (plist-get defaults :slide)
-            `((defcustom ,(funcall sym "slide-pixels")
-                  ,(funcall get :slide 0.0)
-                ,(format "How far %s displaces vertically while it animates.
+`stiffness', and it means the same thing.")
+      (:property slide-pixels :key :slide :type number :only-with :slide
+       :doc "How far %1$s displaces vertically while it animates.
 
 An arriving frame starts this many logical pixels below its placement and
 rises onto it; a departing frame falls this far while it fades.  Zero
-reduces %s to a pure fade.  The displacement shares the slot's own curve,
-so a spring-shaped slot overshoots through its placement and settles back."
-                 summary name)
-                :type 'number
-                :group ',group)))
-          (when (plist-get defaults :scale)
-            `((defcustom ,(funcall sym "scale-from")
-                  ,(funcall get :scale 1.0)
-                ,(format "The scale %s starts from, as a fraction of its settled size.
+reduces %3$s to a pure fade.  The displacement shares the slot's own curve,
+so a spring-shaped slot overshoots through its placement and settles back.")
+      (:property scale-from :key :scale :type number :only-with :scale
+       :doc "The scale %1$s starts from, as a fraction of its settled size.
 
 1.0 scales nothing.  Below 1.0, an arriving frame grows from this fraction of
 its size and a departing frame shrinks toward it, anchored at the frame's own
 top-left so the picture grows outward from the point that anchored it.  The
 scale shares the slot's own curve, unclamped like the slide: a spring's
-overshoot past the settled size is the point." summary)
-                :type 'number
-                :group ',group)))))))
+overshoot past the settled size is the point."))
+    "The options of a window-animation slot, in order, each a plist:
+:property names the option `romacs-SLOT-PROPERTY'; :key is the keyword of
+`romacs-effects--defslot''s DEFAULTS that overrides :default (none for the
+Bezier points); :type is its Custom type; :doc its docstring, a `format'
+string of the slot's summary (%1$s), occasion (%2$s), name (%3$s) and its
+`enabled' paragraph (%4$s), or for a Bezier point what the point is;
+:only-with names the DEFAULTS key without which the option is left out.")
+
+  (defconst romacs-effects--bezier-doc
+    "The %s of the Bezier curve for %s.
+Used only when `romacs-%s-easing' is `cubic-bezier'.  These are the same four
+numbers a niri configuration writes as `cubic-bezier(x1, y1, x2, y2)'.
+
+Time is clamped to 0.0-1.0 so the curve stays solvable; value is deliberately
+not, because overshooting past 1.0 is the point of a curve like
+`cubic-bezier(0.34, 1.56, 0.64, 1.0)'."
+    "The docstring of a Bezier point's option: what the point is, the slot's
+summary and its name.")
+
+  (defun romacs-effects--slot-doc (option words)
+    "OPTION's docstring (`romacs-effects--slot-options') for a slot of WORDS,
+\(SUMMARY OCCASION NAME ENABLED-PARAGRAPH)."
+    (if (plist-get option :key)
+        (apply #'format (plist-get option :doc) words)
+      (format romacs-effects--bezier-doc (plist-get option :doc) (nth 0 words) (nth 2 words))))
+
+  (defun romacs-effects--slot-option (option words group defaults)
+    "The `defcustom' OPTION of `romacs-effects--slot-options' makes for a slot
+of WORDS (`romacs-effects--slot-doc') in GROUP, with DEFAULTS, or nil when
+OPTION is :only-with a key DEFAULTS leaves out."
+    (let ((key (plist-get option :key)))
+      (unless (and (plist-get option :only-with) (not (plist-get defaults (plist-get option :only-with))))
+        `(defcustom ,(intern (format "romacs-%s-%s" (nth 2 words) (plist-get option :property)))
+           ,(if (and key (plist-member defaults key)) (plist-get defaults key) (plist-get option :default))
+           ,(romacs-effects--slot-doc option words)
+           :type ',(plist-get option :type)
+           :group ',group))))
+
+  (defun romacs-effects--unquote (value)
+    "VALUE, or the symbol it quotes: a quoted value in a macro's plist
+arrives as `(quote SYM)'."
+    (if (and (consp value) (eq (car value) 'quote)) (car (cdr value)) value)))
+
+(defmacro romacs-effects--defslot (slot summary occasion &rest defaults)
+  "Define the options of window-animation SLOT, one for each of
+`romacs-effects--slot-options'.
+
+SUMMARY names what the slot animates and OCCASION when it happens; both are
+woven into each option's docstring.  DEFAULTS is a plist of the properties
+whose default differs from the shared one.
+
+A macro rather than forty written-out options because the slots really are
+parallel — they take the same properties, meaning the same things — and
+forty hand-copied docstrings would drift apart at the first edit.
+
+DEFAULTS also accepts keys that shape the options rather than the slot:
+`:group' overrides the customization group (default `romacs-window-animation');
+`:master' names the master off-switch option the `enabled' docstring points at
+\(default `romacs-window-animations-off'); `:enabled-doc' replaces the
+paragraph that docstring keeps about the offscreen composition ring, which
+only applies to slots whose animation reads the previous frame; `:slide'
+non-nil adds the slot's `slide-pixels' option, which the schema publishes
+for slots that displace while they fade, and `:scale' non-nil its
+`scale-from' option the same way."
+  (let* ((group (or (romacs-effects--unquote (plist-get defaults :group)) 'romacs-window-animation))
+         (master (or (romacs-effects--unquote (plist-get defaults :master)) 'romacs-window-animations-off))
+         (words (list summary occasion (symbol-name slot)
+                      (or (plist-get defaults :enabled-doc)
+                          (format "Turning every window-animation slot off also stops the compositor from keeping
+the previous frame in a texture, which it must do to animate from it — see
+`%s' for the cheaper way to say that." master)))))
+    `(progn ,@(delq nil (mapcar (lambda (option) (romacs-effects--slot-option option words group defaults))
+                                romacs-effects--slot-options)))))
 
 (romacs-effects--defslot window-open
   "a window appearing"
@@ -618,9 +609,9 @@ The user's choice is `romacs-motion-follow-desktop' nil, or
               (get 'romacs-motion-reduced 'saved-value)
               (get 'romacs-motion-reduced 'customized-value))
     (when (romacs-motion--desktop-reduced-p)
-      ;; Not `setopt': its macro autoloads cus-edit, which loads cus-start
-      ;; again where the session's world is being built.  The watcher
-      ;; reaches the renderer either way.
+      ;; Not `setopt': running it loads cus-edit (through `setopt--set'),
+      ;; which loads cus-start again where the session's world is being
+      ;; built.  The watcher reaches the renderer either way.
       (set-default 'romacs-motion-reduced t))))
 
 ;;;; Reaching the renderer

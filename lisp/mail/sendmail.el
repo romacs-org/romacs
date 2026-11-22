@@ -291,7 +291,7 @@ like `foo_bar>' plus any leading whitespace."
     (define-key map "\C-c\C-w" 'mail-signature)
     (define-key map "\C-c\C-c" 'mail-send-and-exit)
     (define-key map "\C-c\C-s" 'mail-send)
-    (define-key map "\C-c\C-i" 'mail-insert-file)
+    (define-key map (kbd "C-c TAB") 'mail-insert-file)
     ;; FIXME add this? "b" = bury buffer.  It's in the menu-bar.
 ;;;    (define-key map "\C-c\C-b" 'mail-dont-send)
 

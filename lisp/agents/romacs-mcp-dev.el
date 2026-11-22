@@ -14,6 +14,10 @@
 ;; the calling task when the unit ends (`romacs-mcp-dev-watch-function');
 ;; a caller never told reads the report, whose last line is the verdict.
 ;;
+;; romacs_live_update loads into this Romacs the Lisp a source has that
+;; it lacks (romacs-live.el); romacs_live_test runs that Lisp's suites
+;; (romacs-live-test.el).
+;;
 ;; romacs_dev_guide answers from this Romacs what it offers for writing
 ;; Lisp for it (romacs-dev-guide.el), and for a worktree what the module
 ;; AGENTS.md files over its branch's paths say (tools/lib/agents_md.py).
@@ -27,6 +31,11 @@
 (require 'cl-lib)
 (require 'romacs-mcp)
 (require 'romacs-dev-guide)
+
+;; Registering the tool must not load romacs-live, and a batch session has
+;; no bundled autoloads to make its handler a function.
+(autoload 'romacs-live-mcp-update "romacs-live")
+(autoload 'romacs-live-test-mcp "romacs-live-test")
 
 (defconst romacs-mcp-dev--step 0.008
   "How many seconds of a guide search one poll of its request takes: what
@@ -97,7 +106,9 @@ entries systemd accepts."
 UNIT in the romacs-build slice, with ENVIRONMENT, its output in REPORT."
   (append (list "--user" "--quiet" "--collect" "--slice=romacs-build" "--expand-environment=no"
                 (concat "--unit=" unit) (concat "--working-directory=" directory)
-                (concat "--property=StandardOutput=truncate:" report) "--property=StandardError=inherit")
+                (concat "--property=StandardOutput=truncate:" report) "--property=StandardError=inherit"
+                ;; The user manager's launch markers reach no checked binary.
+                (concat "--property=UnsetEnvironment=" (string-join (romacs--launch-markers) " ")))
           (mapcar (lambda (entry) (concat "--setenv=" entry)) environment)
           (cons "--" command)))
 
@@ -188,7 +199,19 @@ name and the empty query are answered at once."
    (romacs-mcp--schema '(("instance" . "string") ("query" . "string") ("limit" . "integer")
                          ("worktree" . "string") ("trunk" . "string"))
                        nil)
-   #'romacs-mcp-dev--guide (romacs-mcp--object "readOnlyHint" t)))
+   #'romacs-mcp-dev--guide (romacs-mcp--object "readOnlyHint" t))
+  (romacs-mcp-register-tool
+   "romacs_live_update"
+   "Load into this Romacs the Lisp a source has that it lacks, without a restart. source is beta, a branch or a commit (of repository, default romacs-live-repository), or a worktree directory; files instead names Lisp files. The session is its build plus a ledger of live files (romacs-live-ledger): every file whose content differs from what the session loaded loads, in require order; a file it never loaded is staged first on load-path. A changed keymap is replaced in place (buffers, derived maps and text properties see it; your keys stay), an option you left alone takes its new default, defvars keep their values, advice stays. Refused whole, before anything loads, for a struct layout change, a runtime epoch or a lisp/vm/ file. plan true: say what would load, load nothing. unbindGone true: unbind the functions the files no longer define. Answers with the report: summary, rows (a file each: action, ms, the definitions added, changed and removed, keymaps, options, warnings, error), gone, refusals."
+   (romacs-mcp--schema '(("instance" . "string") ("source" . "string") ("files" . "array") ("repository" . "string")
+                         ("plan" . "boolean") ("unbindGone" . "boolean"))
+                       nil)
+   #'romacs-live-mcp-update)
+  (romacs-mcp-register-tool
+   "romacs_live_test"
+   "Run the ERT suites of the Lisp this Romacs runs live (romacs_live_update's ledger), from the source tree it came from, with the tree's own runner (tools/test-ert): each suite file in its own process with a private HOME, files in parallel, as the merge queue's Lisp check runs them; nothing runs in this session. worktree: the source tree (default: the last update's worktree); modules: library names (default: the ledger's), each running NAME-tests.el and NAME-*-tests.el or its package's suites. Answers when done: summary, passed, files (file, status, tests), failed (test names), logs (each file's output)."
+   (romacs-mcp--schema '(("instance" . "string") ("worktree" . "string") ("modules" . "array")) nil)
+   #'romacs-live-test-mcp))
 
 (provide 'romacs-mcp-dev)
 ;;; romacs-mcp-dev.el ends here

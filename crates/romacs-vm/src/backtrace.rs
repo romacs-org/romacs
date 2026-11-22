@@ -117,10 +117,6 @@ impl Backtrace {
         self.observe();
         self.only = only;
     }
-    /// Whether the observation so far recorded a call.
-    pub fn observed_any(&self) -> bool {
-        self.observed.as_ref().is_some_and(|(_, calls)| !calls.is_empty())
-    }
     /// Record the functions every call names, from now until `observed`.
     pub fn observe(&mut self) {
         self.only.clear();
@@ -415,7 +411,7 @@ impl Vm {
         let level = n
             .integer_value()
             .filter(|n| *n >= 0)
-            .ok_or(prim::Fault::Wrong("wholenump", n))? as usize;
+            .ok_or_else(|| prim::Fault::Wrong("wholenump", n))? as usize;
         if level == 0 {
             return Err(prim::Fault::Wrong("wholenump", Value::integer(-1).unwrap()));
         }
@@ -429,7 +425,7 @@ impl Vm {
     /// GNU get_backtrace_frame: the stack index of the activation NFRAMES
     /// out from BASE's (the innermost when BASE is nil), if there is one.
     pub(super) fn backtrace_frame_index(&self, nframes: Value, base: Value) -> std::result::Result<Option<usize>, prim::Fault> {
-        let count = nframes.integer_value().filter(|&n| n >= 0).ok_or(prim::Fault::Wrong("wholenump", nframes))?;
+        let count = nframes.integer_value().filter(|&n| n >= 0).ok_or_else(|| prim::Fault::Wrong("wholenump", nframes))?;
         Ok(self.backtrace_start(base)?.and_then(|i| i.checked_sub(usize::try_from(count).ok()?)))
     }
     /// An activation's FLAGS as `mapbacktrace` passes them.

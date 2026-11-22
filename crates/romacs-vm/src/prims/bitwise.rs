@@ -11,7 +11,7 @@ fn integer_marker(cx: &Leaf<'_>, value: Value, first: bool) -> Result<num_bigint
             .map(Into::into)
             .ok_or_else(|| Fault::Error("Marker does not point anywhere".into()));
     }
-    let predicate = if first || cx.float_value(value).is_ok() {
+    let predicate = if first || cx.is_float(value) {
         "integer-or-marker-p"
     } else {
         "number-or-marker-p"
@@ -70,7 +70,7 @@ defsubr! { name = "logxor", gnu = "data.c:3518", effect = Reads,
 defsubr! { name = "lognot", gnu = "data.c:3684", effect = Reads,
     fn lognot(cx, number: Value) {
         if let Some(value) = number.integer_value().and_then(|n| Value::fixnum(!n)) { return Ok(value); }
-        let n = cx.bigint_value(number).ok_or(Fault::Wrong("integerp", number))?;
+        let n = cx.bigint_value(number).ok_or_else(|| Fault::Wrong("integerp", number))?;
         Ok(cx.bigint(!n))
     }
 }
@@ -81,7 +81,7 @@ defsubr! { name = "logcount", gnu = "data.c:3530", effect = Pure,
             let ones = if n < 0 { !n } else { n }.count_ones();
             return Ok(Value::fixnum(i64::from(ones)).expect("a count of bits is a fixnum"));
         }
-        let n = cx.bigint_value(value).ok_or(Fault::Wrong("integerp", value))?;
+        let n = cx.bigint_value(value).ok_or_else(|| Fault::Wrong("integerp", value))?;
         // A negative VALUE counts its zero bits: the ones of its complement.
         let nonnegative = if n.sign() == num_bigint::Sign::Minus { !n } else { n };
         let ones = nonnegative.magnitude().count_ones();
@@ -101,8 +101,8 @@ defsubr! { name = "ash", gnu = "data.c:3555", effect = Reads,
                 else if c < 64 { i64::try_from(i128::from(n) << c).ok() } else { None };
             if let Some(value) = shifted.and_then(Value::fixnum) { return Ok(value); }
         }
-        let n = cx.bigint_value(value).ok_or(Fault::Wrong("integerp", value))?;
-        let c = cx.bigint_value(count).ok_or(Fault::Wrong("integerp", count))?;
+        let n = cx.bigint_value(value).ok_or_else(|| Fault::Wrong("integerp", value))?;
+        let c = cx.bigint_value(count).ok_or_else(|| Fault::Wrong("integerp", count))?;
         let symbol = cx.intern("overflow-error");
         let overflow = || Fault::Signal(symbol, Value::NIL);
         let zero = num_bigint::BigInt::from(0);

@@ -93,7 +93,7 @@
     ;;a better key than this?
     (define-key map "R" 'electric-help-retain)
     (define-key map "r" 'electric-help-retain)
-    (define-key map "\ex" 'electric-help-execute-extended)
+    (define-key map (kbd "ESC x") 'electric-help-execute-extended)
     (define-key map "\C-x" 'electric-help-ctrl-x-prefix)
     map)
   "Keymap defining commands available in `electric-help-mode'.")

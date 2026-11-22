@@ -17,7 +17,9 @@ fn key(key: FrontendKey, modifiers: u32) -> InputEvent {
 /// each under the modifier combinations a user can type.
 fn keys() -> Vec<InputEvent> {
     let mut keys = Vec::new();
-    let characters = ['a', 'z', 'A', 'Z', '0', ' ', '@', '?', '[', '\\', ']', '^', '_', '`', '~', '%', '/', 'λ', 'é', '中'];
+    // `m', `i' and `[' with Ctrl are the GUI's own keys (VM2-GUI-KEYS),
+    // which must still send the control characters the router sent.
+    let characters = ['a', 'z', 'A', 'Z', 'm', 'M', 'i', 'I', '0', ' ', '@', '?', '[', '\\', ']', '^', '_', '`', '~', '%', '/', 'λ', 'é', '中'];
     let modifiers = [0, ROMACS_CTRL_MASK, ROMACS_META_MASK, ROMACS_CTRL_MASK | ROMACS_META_MASK,
                      ROMACS_SHIFT_MASK, ROMACS_CTRL_MASK | ROMACS_SHIFT_MASK];
     for &c in &characters {
@@ -41,7 +43,8 @@ fn keys() -> Vec<InputEvent> {
 fn lisp(event: &CommandEvent) -> String {
     match event {
         CommandEvent::Character(code) => code.to_string(),
-        CommandEvent::Named(name) => format!("'{name}"),
+        // By name: `C-[' does not read as a symbol.
+        CommandEvent::Named(name) => format!("(intern {name:?})"),
     }
 }
 

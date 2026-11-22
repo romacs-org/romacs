@@ -36,6 +36,10 @@ anything, so a step's figures are differences of two readings:
   rows_wrapped          rows the layout engine wrapped
   chars_fontified       characters `jit-lock' asked its functions for, in
                         a scenario that counts them (fontification's)
+  above_instructions    what a step's collection ran above the one the
+                        session measured before the scenario's setup (its
+                        baseline), in a scenario that has one: what the
+                        setup added to a full collection
 
 A scenario's figure is the median over its steps (the upper of two middle
 ones); redisplay's instructions have their 90th percentile as well
@@ -58,7 +62,8 @@ conses are held under theirs, a ceiling; the redisplays, the windows
 rebuilt, the bands, the layouts and the frames are held to theirs exactly, so a scenario whose
 step no longer does its change fails as one that costs more does, and work
 that removes cost lowers its bars in the same change.  A scenario or figure
-without a bar fails.  --write-bars FILE writes the bars this run would
+without a bar fails; a figure whose bar is "report" is reported, held to
+nothing (a collection's whole step: the world's heap, not the scenario's).  --write-bars FILE writes the bars this run would
 pass: the counts as counted, instructions and conses a tenth higher.
 
 --record profiles each scenario's steps with `perf record', enabled by the
@@ -93,7 +98,9 @@ COUNTS = {'step_instructions': 'step-instructions', 'cycles': 'cycles', 'display
           'windows_rebuilt': 'windows-rebuilt', 'band_expansions': 'band-expansions', 'layouts': 'layouts',
           'frames_submitted': 'frames-submitted', 'lines_laid': 'lines-laid', 'rows_wrapped': 'rows-wrapped'}
 # Figures only the scenarios that count them have.
-OPTIONAL = {'chars_fontified': 'fontified-chars'}
+OPTIONAL = {'chars_fontified': 'fontified-chars', 'above_instructions': 'above-instructions'}
+# A bar that holds nothing: the figure is reported beside the others.
+REPORTED = 'report'
 # The figures whose 90th percentile is held too (a redisplay's: the
 # streamed deltas that add a row), the figures held under a
 # ceiling and the margin --write-bars gives them, and the share of steps
@@ -146,6 +153,10 @@ def refusal(scenario, result, wanted):
         return f'{len(readings)} readings for {wanted} steps'
     if any(r.get('step-instructions') is None or r.get('instructions') is None for r in readings):
         return 'no instruction counter (romacs-instructions is nil)'
+    if scenario.get('baseline') and any('above-instructions' not in r for r in readings):
+        return 'no baseline was measured: no collection above it is counted'
+    if scenario.get('collects') and any(d.get('collected', 0) < 1 for d in steps(readings)):
+        return 'a step ran no full collection of its own'
     odd = odd_steps(scenario, steps(readings))
     if len(odd) > ODD * wanted:
         return (f"steps {odd} did not run as many redisplays as the others, with "
@@ -157,13 +168,19 @@ def off(measured, bars):
     """The figures of MEASURED off their bar or without one: (figure,
     value, bar or None).  Instructions and conses are off over their bar,
     any other count when it differs."""
-    return [(figure, value, bars.get(figure)) for figure, value in measured.items()
-            if bars.get(figure) is None or value > bars[figure] or (value < bars[figure] and not margined(figure))]
+    over = [(figure, value, bars.get(figure)) for figure, value in measured.items()
+            if bars.get(figure) != REPORTED
+            and (bars.get(figure) is None or value > bars[figure] or (value < bars[figure] and not margined(figure)))]
+    # A figure barred but not measured fails too: a row cannot pass by
+    # leaving out what its bars hold.
+    missing = [(figure, None, bar) for figure, bar in bars.items()
+               if isinstance(bar, (int, float)) and not isinstance(bar, bool) and figure not in measured]
+    return over + missing
 
 
 def verdict(scenario, result, wanted, bars):
     """SCENARIO's row from its session's RESULT: PASS, or FAIL with a reason."""
-    row = {'name': scenario['name'], 'paints': scenario['paints']}
+    row = {'name': scenario['name'], 'paints': scenario['paints'], 'session': result.get('session')}
     problem = refusal(scenario, result, wanted)
     if problem:
         return {**row, 'status': 'FAIL', 'reason': problem}
@@ -175,7 +192,8 @@ def verdict(scenario, result, wanted, bars):
         return {**row, 'status': 'FAIL', 'reason': 'no bars for this scenario'}
     row['off'] = off(row['figures'], bars[scenario['name']])
     if row['off']:
-        reason = '; '.join(f'{figure} {value}, ' + ('no bar' if bar is None else f"{'over' if value > bar else 'under'} {bar}")
+        reason = '; '.join(f'{figure} not measured, its bar {bar}' if value is None else
+                           f'{figure} {value}, ' + ('no bar' if bar is None else f"{'over' if value > bar else 'under'} {bar}")
                            for figure, value, bar in row['off'])
         return {**row, 'status': 'FAIL', 'reason': reason}
     return {**row, 'status': 'PASS'}
@@ -184,7 +202,7 @@ def verdict(scenario, result, wanted, bars):
 def rebarred(bars, new):
     """BARS with each scenario's figures from NEW, its notes (FIGURE_note)
     kept: why a bar is what it is outlives a recording."""
-    kept = lambda name: {k: v for k, v in bars.get(name, {}).items() if k.endswith('_note')}
+    kept = lambda name: {k: v for k, v in bars.get(name, {}).items() if k.endswith('_note') or v == REPORTED}
     return {**bars, **{name: {**figures, **kept(name)} for name, figures in new.items()}}
 
 
@@ -227,6 +245,10 @@ def table(rows):
                   f['lines_laid'], f['rows_wrapped']]
                  if f else ['-'] * 10)
         note = f" — {row['reason']}" if row.get('reason') else (f" — odd steps {row['odd']}" if row.get('odd') else '')
+        if f and 'above_instructions' in f:
+            note += f" · {millions('above_instructions')} above its baseline"
+        if row.get('session') and row['name'].endswith('-collected'):
+            note += f" · {row['session']['symbols']} symbols, {row['session']['files']} files"
         lines.append(f"| {row['name']} | {' | '.join(map(str, cells))} | {row['status']}{note} |")
     return '\n'.join(lines) + '\n'
 
@@ -236,7 +258,8 @@ def table(rows):
 def scenarios(binary, home, timeout):
     """The scenarios display_stages.el defines."""
     listed = scaling.batch(binary, home, '(display-stages-list)', timeout, loads=(SCENARIOS,))
-    return [{'name': raw['name'], 'paints': raw.get('paints') is True} for raw in listed]
+    return [{'name': raw['name'], 'paints': raw.get('paints') is True,
+             'collects': raw.get('collects') is True, 'baseline': raw.get('baseline') is True} for raw in listed]
 
 
 def recording(output, home, name):

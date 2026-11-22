@@ -371,7 +371,7 @@
     (define-key map "\C-F" #'set-visited-file-name)	; ^F
     (define-key map "\C-g" #'keyboard-quit)		; safety first
     (define-key map "\C-h" #'delete-other-windows)	; BS
-    (define-key map "\C-i" #'other-window)		; TAB
+    (define-key map (kbd "TAB") #'other-window)		; TAB
     ;; (define-key map "\C-J" nil)			; ^J
     (define-key map "\C-K" #'tpu-define-macro-key)	; ^K
     (define-key map "\C-l" #'downcase-region)		; ^L

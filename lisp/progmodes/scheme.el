@@ -232,7 +232,7 @@ All commands in `lisp-mode-shared-map' are inherited by this map."
 (defun scheme-mode-commands (map)
   ;;(define-key map "\t" 'indent-for-tab-command) ; default
   (define-key map "\177" 'backward-delete-char-untabify)
-  (define-key map "\e\C-q" 'indent-sexp))
+  (define-key map (kbd "ESC C-q") 'indent-sexp))
 
 ;;;###autoload
 (define-derived-mode scheme-mode prog-mode "Scheme"

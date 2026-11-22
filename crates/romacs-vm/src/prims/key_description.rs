@@ -116,11 +116,16 @@ fn describe(cx: &Leaf<'_>, mut key: Value, no_angles: bool) -> std::result::Resu
     Err(Fault::Error("KEY must be an integer, cons, symbol, or string".into()))
 }
 
+/// NAME, a symbol event, in angle brackets with its modifier prefix outside
+/// them. GNU keeps a prefix inside when one character follows it (`<C-m>',
+/// `C-<M-m>'), which `key-valid-p' refuses; here every prefix is outside
+/// (`C-<m>', `C-M-<m>'), so a GUI key's description is what `keymap-set'
+/// takes (ledger/divergences/VM2-GUI-KEYS).
 fn symbol_description(name: &str, no_angles: bool) -> Vec<u8> {
     if no_angles { return name.as_bytes().to_vec(); }
     let bytes = name.as_bytes();
     let mut i = 0;
-    while i + 3 < bytes.len() && bytes[i + 1] == b'-' && b"CMSsHA".contains(&bytes[i]) { i += 2; }
+    while i + 2 < bytes.len() && bytes[i + 1] == b'-' && b"CMSsHA".contains(&bytes[i]) { i += 2; }
     let mut out = bytes[..i].to_vec();
     out.push(b'<'); out.extend_from_slice(&bytes[i..]); out.push(b'>'); out
 }
@@ -190,5 +195,16 @@ mod tests {
             let check = format!("(equal {form} '{expected})");
             assert_eq!(vm.eval_source_raw(&check).unwrap(), Value::TRUE, "{form}: {expected}");
         }
+    }
+
+    /// A symbol event with one character after its modifiers keeps them
+    /// outside the brackets, where GNU writes `<C-m>' and `C-<M-m>'.
+    #[test]
+    fn gui_key_descriptions_keep_modifiers_outside() {
+        let mut vm = Vm::new();
+        vm.eval_source("(defvar meta-prefix-char 27)").unwrap();
+        let described = vm.eval_source("(list (key-description [C-m C-M-m C-\\[ C-S-i]) (single-key-description 'C-M-f1) (single-key-description 'C-m t) (single-key-description 'x))")
+            .unwrap().display().unwrap();
+        assert_eq!(described, "(\"C-<m> C-M-<m> C-<[> C-S-<i>\" \"C-M-<f1>\" \"C-m\" \"<x>\")");
     }
 }
