@@ -532,7 +532,8 @@ its workers' as their rows were last made.  What goes on comes first,
 then a settled session says nothing more.  A delegated session's
 completion went to its parent: not news to the user."
   (let ((state (romacs-agent-state session)))
-    (cond ((eq state 'waiting-approval)
+    (cond ((eql (romacs-agent-settled-seq session) romacs-agent--inactive-settlement) 'settled)
+          ((eq state 'waiting-approval)
            (let ((questions (romacs-agent-questions session)))
              (if (and questions (not (seq-difference (romacs-agent-asks session) questions))) 'question 'approval)))
           ;; Cancelled, its failure is the user's own doing.

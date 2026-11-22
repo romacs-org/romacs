@@ -192,26 +192,44 @@ while filtering or while one of them wants the user or works."
            (cl-some (lambda (child) (memq (gethash child keys) '(approval question failed working waiting)))
                     children)))))
 
+(defun romacs-agent-board--hidden-context-p (session marks)
+  "Whether SESSION is settled and only needed to reach visible children."
+  (and (eq (gethash session marks) 'context)
+       (eql (romacs-agent-settled-seq session) romacs-agent--inactive-settlement)))
+
+(defun romacs-agent-board--shown-children (session marks)
+  "SESSION's marked children, with hidden parents skipped."
+  (mapcan (lambda (child)
+            (when (gethash child marks)
+              (if (romacs-agent-board--hidden-context-p child marks)
+                  (romacs-agent-board--shown-children child marks)
+                (list child))))
+          (romacs-agent-board--children session)))
+
 (defun romacs-agent-board--thread (session depth keys marks view)
   "SESSION's row, DEPTH deep, then those of the threads it delegated when
 they show under it (always, when it shows only for them), as VIEW shows
 them; KEYS has every session's key, MARKS whether it shows."
-  (let* ((children (romacs-agent-board--sorted
-                    (seq-filter (lambda (child) (gethash child marks)) (romacs-agent-board--children session))
-                    keys))
+  (let* ((children (romacs-agent-board--sorted (romacs-agent-board--shown-children session marks) keys))
          (context (eq (gethash session marks) 'context))
-         (open (and children (or context (romacs-agent-board--open-p session children keys view)))))
-    (cons (list :kind 'thread :id (romacs-agent-id session) :session session :key (gethash session keys)
-                :depth depth :open open :context context
-                :children (mapcar (lambda (child) (gethash child keys)) children))
-          (and open (mapcan (lambda (child) (romacs-agent-board--thread child (1+ depth) keys marks view))
-                            children)))))
+         (hidden (romacs-agent-board--hidden-context-p session marks))
+         (open (and children (or context (romacs-agent-board--open-p session children keys view))))
+         (rows (and open (mapcan (lambda (child)
+                                  (romacs-agent-board--thread child (if hidden depth (1+ depth)) keys marks view))
+                                children))))
+    (if hidden rows
+      (cons (list :kind 'thread :id (romacs-agent-id session) :session session :key (gethash session keys)
+                  :depth depth :open open :context context
+                  :children (mapcar (lambda (child) (gethash child keys)) children))
+            rows))))
 
 (defun romacs-agent-board--tree-keys (session keys marks)
   "The keys of SESSION and of every thread under it that shows."
-  (cons (gethash session keys)
-        (mapcan (lambda (child) (and (gethash child marks) (romacs-agent-board--tree-keys child keys marks)))
-                (romacs-agent-board--children session))))
+  (let ((under (mapcan (lambda (child) (romacs-agent-board--tree-keys child keys marks))
+                       (romacs-agent-board--shown-children session marks))))
+    (if (romacs-agent-board--hidden-context-p session marks)
+        under
+      (cons (gethash session keys) under))))
 
 (defun romacs-agent-board--history-rows (cwd items view)
   "Project CWD's transcript ITEMS (newest first) as rows: its newest few,
@@ -266,7 +284,8 @@ redraws."
                            (list (list :kind 'project :id cwd :cwd cwd :keys all :folded (length all)
                                        :first (car rows)))))
                         (t (cons (list :kind 'project :id cwd :cwd cwd
-                                       :keys (mapcar (lambda (s) (gethash s keys)) threads))
+                                       :keys (cl-loop for row in rows when (eql (plist-get row :depth) 0)
+                                                      collect (plist-get row :key)))
                                  rows)))))
               (nreverse order))
        (and (not (plist-get view :settled)) (null history) (plist-get view :reading)
@@ -591,6 +610,7 @@ the same width, while the board shows one; else stop."
 (add-hook 'romacs-agent-ui-changed-hook #'romacs-agent-board--refresh)
 ;; The sessions' rows made: those left unloaded show.
 (add-hook 'romacs-agent-store-filled-hook #'romacs-agent-board--refresh)
+(add-hook 'romacs-agent-store-settlement-hook #'romacs-agent-ui--batch)
 ;; The transcripts listed anew, aside: the board shows them.
 (add-hook 'romacs-agent-history-indexed-hook #'romacs-agent-board--refresh)
 
@@ -790,11 +810,12 @@ where it is answered."
       (romacs-agent-resume (romacs-agent-board--session)))))
 
 (defun romacs-agent-board-settle ()
-  "Settle this thread: it leaves the board for the Settled section until
-its next activity.  A settled one, bring back."
+  "Hide this thread in Settled until explicitly brought back with this key."
   (interactive nil romacs-agent-board-mode)
-  (let ((session (romacs-agent-board--session)))
-    (romacs-agent-settle session (romacs-agent-settled-p session))
+  (romacs-agent-board--acting)
+  (let ((session (or (plist-get (romacs-agent-board--row) :session) (user-error "No thread on this line"))))
+    (unless (romacs-agent-settle-recorded (romacs-agent-id session) t)
+      (user-error "That thread is gone"))
     (romacs-agent-board--redraw)))
 
 (defun romacs-agent-board--shown-rows ()
@@ -821,11 +842,8 @@ its next activity.  A settled one, bring back."
   (let ((finished (romacs-agent-board--finished (romacs-agent-board--shown-rows))))
     (unless finished (user-error "No finished threads"))
     (when (y-or-n-p (format "Settle %d finished thread%s? " (length finished) (if (cdr finished) "s" "")))
-      ;; Each by its id, loaded first when shown from its row alone; one
-      ;; gone is skipped, and the board drawn once, after.
       (dolist (session finished)
-        (when-let* ((live (romacs-agent-get (romacs-agent-id session))))
-          (romacs-agent-settle live)))
+        (romacs-agent-settle-recorded (romacs-agent-id session)))
       (romacs-agent-board--redraw))))
 
 (defun romacs-agent-board-new ()

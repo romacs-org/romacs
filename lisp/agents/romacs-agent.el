@@ -1900,11 +1900,15 @@ the row is written (`romacs-agent-store-title')."
   (let ((seen (romacs-agent-seen-seq session)))
     (and seen (> (romacs-agent-done-seq session) seen))))
 
+(defconst romacs-agent--inactive-settlement -1
+  "A settledSeq that stays settled until explicitly undone.
+Nonnegative values in older records acknowledge activity through that seq.")
+
 (defun romacs-agent-settled-p (session)
-  "Whether the user settled SESSION since its last turn activity: new
-activity, a prompt from anyone or a turn's end, unsettles it."
+  "Whether SESSION is inactive or its last activity was acknowledged."
   (let ((settled (romacs-agent-settled-seq session)))
-    (and settled (>= settled (romacs-agent-activity-seq session)))))
+    (and settled (or (eql settled romacs-agent--inactive-settlement)
+                     (>= settled (romacs-agent-activity-seq session))))))
 
 (defun romacs-agent-mark-seen (session)
   "SESSION's last turn end has been shown, in its manifest too."
@@ -1918,15 +1922,48 @@ activity, a prompt from anyone or a turn's end, unsettles it."
 caught up with counts as seen, not news."
   (unless (romacs-agent-seen-seq session) (romacs-agent-mark-seen session)))
 
+(defun romacs-agent--keep-settlement (session undo)
+  "Keep SESSION's settlement in its manifest and record, also for a row."
+  (let ((seen (romacs-agent-done-seq session))
+        (settled (unless undo romacs-agent--inactive-settlement)))
+    (when (and (not romacs-agent--manifest-frozen) (file-exists-p (romacs-agent-store--file)))
+      (romacs-agent-mark (romacs-agent-id session) 'settlement t))
+    (apply #'romacs-agent--manifest-put session "seenSeq" seen "settledSeq" (or settled :null)
+           (when settled (list "resumeAt" :null "switch" :null)))
+    (setf (romacs-agent-seen-seq session) seen
+          (romacs-agent-settled-seq session) settled)
+    (when settled (romacs-agent-mark (romacs-agent-id session) 'resume nil))))
+
+(declare-function romacs-agent-store-project-settlement "romacs-agent-store" (session &optional then))
+(defvar romacs-agent--quiet)
+(defvar romacs-agent--moving-on)
+
 (defun romacs-agent-settle (session &optional undo)
-  "Acknowledge SESSION: its last turn is seen and it is settled until its
-next activity, in its manifest too.  UNDO: it is no longer settled."
-  (setf (romacs-agent-seen-seq session) (romacs-agent-done-seq session)
-        (romacs-agent-settled-seq session) (and (not undo) (romacs-agent-activity-seq session)))
-  (romacs-agent--manifest-put session "seenSeq" (romacs-agent-seen-seq session)
-                              "settledSeq" (or (romacs-agent-settled-seq session) :null))
+  "Settle SESSION until explicitly brought back, or bring it back with UNDO."
+  (romacs-agent--keep-settlement session undo)
+  (when (and (not undo) (not (eq (plist-get (romacs-agent-pending-selection session) :state) 'resuming)))
+    (romacs-agent--cancel-select session)
+    (setf (romacs-agent-pending-selection session) nil)
+    (remhash session romacs-agent--moving-on))
+  (when (and (not romacs-agent--manifest-frozen) (file-exists-p (romacs-agent-store--file)))
+    (romacs-agent-store-project-settlement session))
   ;; Its views follow, as they follow its events.
   (romacs-agent--raise session (list :type 'settled)))
+
+(defun romacs-agent-settle-recorded (id &optional toggle)
+  "Settle the thread ID without loading it, or bring it back with TOGGLE.
+Return nil when the thread is gone."
+  (let* ((live (gethash id romacs-agent--sessions))
+         (session (or live (romacs-agent-store-row-session id))))
+    (when (and session (or live (file-readable-p (expand-file-name "manifest.json" (romacs-agent-dir session)))))
+      (let ((undo (and toggle (romacs-agent-settled-p session))))
+        (if live (romacs-agent-settle live undo)
+          (romacs-agent--keep-settlement session undo)
+          (unless undo (remhash id romacs-agent--quiet))
+          (romacs-agent-store-project-settlement
+           session (when undo (lambda () (unless (gethash id romacs-agent--sessions)
+                                        (romacs-agent--unloaded-p (romacs-agent-dir session))))))))
+      t)))
 
 (defun romacs-agent--note-end (session)
   "Keep SESSION's turn end for its parent, when it has one, unless the turn
@@ -3412,9 +3449,11 @@ effect or did not; when it did, a turn stopped at its limit goes on."
               (moving (gethash session romacs-agent--moving-on)))
     (remhash session romacs-agent--moving-on)
     (let ((to (plist-get (plist-get event :to) :provider)))
-      (when (and (cadr moving) (not (equal to (car moving))))
+      (when (and (cadr moving) (not (equal to (car moving))) (not (romacs-agent-settled-p session)))
         ;; Its harness is still to come back: the message waits for it.
-        (romacs-agent--enqueue session (romacs-agent-item (format romacs-agent--moved-on (car moving) to))))
+        (romacs-agent--enqueue session
+                               (romacs-agent-item (format romacs-agent--moved-on (car moving) to)
+                                                  :valid (lambda () (not (romacs-agent-settled-p session))))))
       (run-hook-with-args 'romacs-agent-moved-functions session (car moving) to))))
 
 (defun romacs-agent--check-note (session)
@@ -3687,15 +3726,19 @@ attached, or to start once its session is moved."
 (defun romacs-agent--restart (session)
   "Stop SESSION's harness to go on with its selection in a new one."
   (romacs-agent--cancel-select session)
-  (setf (romacs-agent-pending-selection session)
-        (plist-put (plist-put (romacs-agent-pending-selection session) :state 'restarting) :waiting nil))
-  (romacs-agent--changed session)
-  (romacs-agent--stop-then session
-                           (lambda ()
-                             (setf (romacs-agent-pending-selection session)
-                                   (plist-put (romacs-agent-pending-selection session) :stopped t))
-                             (romacs-agent--changed session)
-                             (romacs-agent--restarted session))))
+  (let ((restart (list 'restart)))
+    (setf (romacs-agent-pending-selection session)
+          (plist-put (plist-put (plist-put (romacs-agent-pending-selection session) :state 'restarting)
+                                :waiting nil)
+                     :restart restart))
+    (romacs-agent--changed session)
+    (romacs-agent--stop-then
+     session (lambda ()
+               (let ((switch (romacs-agent-pending-selection session)))
+                 (when (eq (plist-get switch :restart) restart)
+                   (setf (romacs-agent-pending-selection session) (plist-put switch :stopped t))
+                   (romacs-agent--changed session)
+                   (romacs-agent--restarted session)))))))
 
 (defcustom romacs-agent-start-deadline 120
   "Seconds a session launching may stay `starting' before it is ended
@@ -6109,15 +6152,16 @@ id whose short form one is named by, never every session's."
   "Called with a session's directory: when its row says it wants nothing
 now (idle, nothing asked of the user, no error, nothing owed to its
 parent) and nothing came since its state was kept, the place its records
-were found to end at; else nil.  Nil: none is.")
+were found to end at, or `settled' when explicitly settled; else nil.
+Nil: none is.")
 
 (defun romacs-agent--unloaded-p (dir &optional listed marked live)
   "Whether the session recorded in DIR is left unloaded at a start: listed,
 nothing waiting on it (`romacs-agent-mark-kinds'), and either no
-supervisor's socket or its row quiet (`romacs-agent-quiet-p'): a quiet
-session whose supervisor runs attaches when it is first asked for, or
-when its supervisor writes more (`romacs-agent--quiet-watch').  Its kept
-state, if any, is read when it is loaded: a start reads rows only.
+supervisor's socket or its row quiet (`romacs-agent-quiet-p').  A quiet
+session whose supervisor runs attaches when first asked for or when its
+supervisor writes more (`romacs-agent--quiet-watch').  An explicitly
+settled session is left until asked for unless it has work marked.
 LISTED, MARKED and LIVE, tables of ids, answer for every session at once
 \(`romacs-agent--to-load'); without them DIR's own files are asked."
   (let* ((id (file-name-nondirectory dir))
@@ -6125,9 +6169,12 @@ LISTED, MARKED and LIVE, tables of ids, answer for every session at once
          (quiet nil))
     (and romacs-agent-listed-p
          (or (and listed (gethash id listed)) (funcall romacs-agent-listed-p dir))
-         (or (not live) (and romacs-agent-quiet-p (setq quiet (funcall romacs-agent-quiet-p dir))))
          (not (if marked (gethash id marked) (romacs-agent--waiting-p dir)))
-         (progn (when live (romacs-agent--quiet-watch dir quiet)) t))))
+         (or (not live)
+             (when (and romacs-agent-quiet-p (setq quiet (funcall romacs-agent-quiet-p dir)))
+               (unless (eq quiet 'settled)
+                 (romacs-agent--quiet-watch dir quiet))
+               t)))))
 
 (defun romacs-agent--to-load (dirs &optional few)
   "Those of the session directories DIRS a start loads: not left unloaded

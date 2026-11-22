@@ -59,6 +59,14 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
     (should (equal (romacs-agent-board-tests--ids (rows)) '("/p/one" "b")))
     (should (equal (romacs-agent-board-tests--ids (rows :settled t)) '("/p/one" "a")))))
 
+(ert-deftest romacs-agent-board-hides-an-inactive-parent-without-losing-its-child ()
+  (romacs-agent-board-tests--with
+    (mk "lead" "lead" 'running 10 :settled-seq romacs-agent--inactive-settlement)
+    (mk "worker" "worker" 'running 5 :options '(:parent "lead"))
+    (should (equal (romacs-agent-board-tests--ids (rows)) '("/p/one" "worker")))
+    (should (equal (plist-get (car (rows)) :keys) '(working)))
+    (should (equal (romacs-agent-board-tests--ids (rows :settled t)) '("/p/one" "lead")))))
+
 (ert-deftest romacs-agent-board-children-fold-under-their-parent ()
   (romacs-agent-board-tests--with
     (mk "lead" "lead" 'idle 10)
