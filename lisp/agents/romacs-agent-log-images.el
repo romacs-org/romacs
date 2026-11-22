@@ -100,14 +100,16 @@ backslash is text, not a link."
   (let* ((case-fold-search nil) (links nil)
          (text (or string (buffer-substring-no-properties start end)))
          (offset (if string 0 start))
-         (code (romacs-agent-log-images--code text))
+         ;; Parsed only when a link may be there: most text has none.
+         (code (and (string-search "](" text) (romacs-agent-log-images--code text)))
          (at 0))
     (while (string-match romacs-agent-log-images-regexp text at)
-      (let ((beg (match-beginning 0)))
-        ;; An escaped bracket opens no link; code holds none.
+      (let ((beg (match-beginning 0)) (end (match-end 0)))
+        ;; An escaped bracket opens no link; a link with any of it in
+        ;; code is none.
         (unless (or (romacs-agent-log-images--escaped-p text beg)
-                    (seq-some (lambda (range) (and (>= beg (car range)) (< beg (cdr range)))) code))
-          (push (list (+ offset beg) (+ offset (match-end 0))
+                    (seq-some (lambda (range) (and (< beg (cdr range)) (> end (car range)))) code))
+          (push (list (+ offset beg) (+ offset end)
                       (expand-file-name (or (match-string 1 text) (match-string 2 text))))
                 links)))
       (setq at (match-end 0)))

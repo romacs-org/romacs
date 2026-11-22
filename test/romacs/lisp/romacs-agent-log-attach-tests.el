@@ -359,5 +359,22 @@ PNG files in a fresh directory, and `composer' its draft's text."
     (should (equal (composer) (concat "[two lines](" a ")")))
     (should (equal (files) (list a)))))
 
+(ert-deftest romacs-agent-log-attach-a-link-half-in-code-is-none ()
+  ;; A link whose end is in a code span is text: no chip to remove it.
+  (romacs-agent-log-attach-tests--with
+    (insert "[example `x](" a ")` and " (link b))
+    (romacs-agent-log-attach-sync)
+    (should (equal (files) (list b)))))
+
+(ert-deftest romacs-agent-log-attach-a-remote-chat-yanks-as-ever ()
+  ;; An agent running elsewhere cannot read a local path: C-y yanks.
+  (romacs-agent-log-attach-tests--with
+    (cl-letf (((symbol-function 'romacs-agent-log--commands-p) #'ignore)
+              ((symbol-function 'romacs-attach-clipboard-image-type) (lambda () "image/png"))
+              ((symbol-function 'romacs-attach-clipboard-file) (lambda (&rest _) (error "Not here"))))
+      (kill-new "words")
+      (romacs-agent-log-attach-yank)
+      (should (equal (composer) "words")))))
+
 (provide 'romacs-agent-log-attach-tests)
 ;;; romacs-agent-log-attach-tests.el ends here

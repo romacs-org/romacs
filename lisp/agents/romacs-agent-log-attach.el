@@ -34,6 +34,7 @@
 
 (defvar romacs-agent-log--input)
 (defvar romacs-agent-log-draft-replaced-hook)
+(declare-function romacs-agent-log--commands-p "romacs-agent-log" ())
 
 (romacs-attach-define-consumer 'agent-chat
   :display "The chat" :rules '(("\\`image/" image) ("" path)))
@@ -334,6 +335,8 @@ as ever (ARG).  One paste at a time."
   (interactive "*P" romacs-agent-log-mode)
   (if-let* (((not arg))
             ((>= (point) romacs-agent-log--input))
+            ;; A chat whose agent runs elsewhere would get a path it cannot read.
+            ((romacs-agent-log--commands-p))
             (type (romacs-attach-clipboard-image-type)))
       (romacs-agent-log-attach-paste type (point))
     (yank arg)))
