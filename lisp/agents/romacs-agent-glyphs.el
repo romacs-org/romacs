@@ -4,8 +4,8 @@
 
 ;;; Commentary:
 
-;; Every mark a view of agents draws (the chat, its rows, the board, the
-;; mode line, the menus) by the role it plays, in one table a user may
+;; Every mark a view of agents draws (the chat, its rows, the board and
+;; the menus) by the role it plays, in one table a user may
 ;; change: `romacs-agent-glyph-alist' (`romacs-agent-glyphs' says whether
 ;; a state is said by its glyph or its word).  The views read a mark as they draw,
 ;; so a change shows in what is drawn next, no reload.  A row hung
@@ -78,7 +78,6 @@
     (detached "🔌" "A session detached")
     (ended "⏹" "A session ended")
     (history "📜" "A session from history")
-    (fuel "⛽" "Before a model's limit")
     (resume "⏰" "Before when a session resumes")
     (chip-you "◆" "A chip: needs the user")
     (chip-working "●" "A chip: working")
@@ -98,8 +97,7 @@
   "Each mark's role, its default and what it marks: (ROLE DEFAULT DOC).")
 
 (defvar romacs-agent-glyph-alist-changed-hook nil
-  "Run once `romacs-agent-glyph-alist' is set: views that draw ahead (a
-chat's header, the status bar) draw again.")
+  "Run after `romacs-agent-glyph-alist' is set to refresh the agent views.")
 
 (defcustom romacs-agent-glyph-alist
   (mapcar (pcase-lambda (`(,role ,default ,_)) (cons role default)) romacs-agent-glyphs--roles)

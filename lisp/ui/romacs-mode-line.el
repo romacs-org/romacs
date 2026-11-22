@@ -55,8 +55,7 @@
   "The buffer's name in the mode line.")
 
 (defface romacs-mode-line-state '((t :inherit bold))
-  "A state the mode line announces: a macro recording, overwrite, an
-agent, in the accent (`romacs-mode-line-pill-faces').")
+  "The accent for states such as macro recording and overwrite mode.")
 
 (defface romacs-mode-line-state-pill '((t))
   "The status bar's state pill: the accent, with the frame's background
@@ -353,11 +352,6 @@ else nil."
   (when-let* ((icon (and (fboundp 'romacs-icon) (romacs-icon name face))))
     (concat icon " ")))
 
-(defvar romacs-mode-line-agent nil
-  "What agents have to say, a string to show, or nil: by default, every
-agent session's news (the agent UI sets it).")
-(put 'romacs-mode-line-agent 'risky-local-variable t)
-
 (defcustom romacs-mode-line-minor-modes nil
   "Whether the mode line lists the minor modes."
   :type 'boolean)
@@ -367,7 +361,6 @@ agent session's news (the agent UI sets it).")
 (defvar romacs-mode-line--glyphs
   '((romacs-mode-line--g-record record romacs-mode-line-state)
     (romacs-mode-line--g-overwrite overwrite romacs-mode-line-state)
-    (romacs-mode-line--g-agent agent romacs-mode-line-state)
     (romacs-mode-line--g-narrow narrow romacs-mode-line-dim)
     (romacs-mode-line--g-region region romacs-mode-line-dim)
     (romacs-mode-line--g-search search romacs-mode-line-dim)
@@ -390,13 +383,12 @@ agent session's news (the agent UI sets it).")
 ;; segment table.
 
 (romacs-mode-line-define-segment state
-  "A keyboard macro recording, overwrite mode, recursive edits, an agent."
+  "A keyboard macro recording, overwrite mode, and recursive edits."
   :face romacs-mode-line-state
   :pill romacs-mode-line-state-pill
   :pill-text romacs-mode-line-state-pill
   :format ("" (defining-kbd-macro ("" " " romacs-mode-line--g-record " "))
-           (overwrite-mode ("" " " romacs-mode-line--g-overwrite " ")) "%[%]"
-           (romacs-mode-line-agent ("" " " romacs-mode-line--g-agent " " romacs-mode-line-agent " "))))
+           (overwrite-mode ("" " " romacs-mode-line--g-overwrite " ")) "%[%]"))
 
 (romacs-mode-line-define-segment buffer-name
   "The buffer's name in `romacs-mode-line-buffer-style'."

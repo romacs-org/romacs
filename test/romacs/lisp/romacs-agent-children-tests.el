@@ -288,7 +288,6 @@
   (let ((romacs-agent-ui--children-changed (make-hash-table :test #'eq))
         (romacs-agent-ui--children-timer nil) (told 0) (rows 0))
     (cl-letf (((symbol-function 'romacs-agent-ui--flush-rows) (lambda (sessions) (cl-incf rows (length sessions))))
-              ((symbol-function 'romacs-agent-ui--status-bar) #'ignore)
               ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args))))
       (let ((romacs-agent-ui-changed-hook (list (lambda () (cl-incf told)))))
         (let ((romacs-agent--restoring t))

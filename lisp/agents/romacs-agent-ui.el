@@ -194,14 +194,12 @@ one, else nil: the workers' rows name it."
 (defvar romacs-agent-ui--children-timer nil)
 
 (defvar romacs-agent-ui-changed-hook nil
-  "Run once per batch of events that may change sessions' states, after
-their rows and the status bar: views of every session (the agent board)
-follow.")
+  "Run once per batch of events that may change sessions' states.
+The agent board and chat headers follow.")
 
 (defun romacs-agent-ui--batch ()
-  "Bring what sessions' events change up to date at the end of this batch
-of them: rows of `romacs-agent-ui--children-changed', the status bar,
-then `romacs-agent-ui-changed-hook'."
+  "At the end of a batch, refresh changed rows and run
+`romacs-agent-ui-changed-hook'."
   (unless romacs-agent-ui--children-timer
     (setq romacs-agent-ui--children-timer (run-at-time 0 nil #'romacs-agent-ui--children-flush))))
 
@@ -215,7 +213,6 @@ then `romacs-agent-ui-changed-hook'."
   (let ((sessions (hash-table-keys romacs-agent-ui--children-changed)))
     (clrhash romacs-agent-ui--children-changed)
     (romacs-agent-ui--flush-rows sessions)
-    (romacs-agent-ui--status-bar)
     ;; While a start restores, its views are told once, by the batch its
     ;; end runs (`romacs-agent-restored-hook'): not a turn of its loading
     ;; at a time, each redrawing every row.
@@ -455,10 +452,6 @@ whole turn, and is seen now, as opening the task's chat sees it."
   "Follow SESSION's EVENT in what runs under it and above it, its header,
 and the views a changed state moves (the chat draws it itself)."
   (romacs-agent-ui--see-failed-children session event)
-  ;; A report comes with each request: the views follow only what it changes.
-  (when (and (eq (plist-get event :type) 'rate-limit)
-             (not (equal (romacs-agent-ui--pools-line) romacs-agent-ui--pools-shown)))
-    (romacs-agent-ui--batch))
   (let ((moved (romacs-agent-ui--track-children session event)))
     (romacs-agent-ui--header-refresh session)
     (when moved (romacs-agent-ui--batch))))
@@ -467,15 +460,15 @@ and the views a changed state moves (the chat draws it itself)."
 
 ;;; A session's state
 ;;
-;; One vocabulary for every view: a chat's header, its workers' rows and
-;; summary, and the status bar.  The states rank as T3 Code ranks its
+;; One vocabulary for a chat's header, its workers' rows and summary.
+;; The states rank as T3 Code ranks its
 ;; threads' (Sidebar.logic.ts), what wants the user first.
 
 (defcustom romacs-agent-glyphs t
   "Whether chats say a state by a glyph (🤖 working, ✋ waiting for you, ❗
 failed...) where the frame can draw it: the word shows on hover."
   :type 'boolean :group 'romacs-agent
-  ;; Sessions' worker summaries, the status bar and chats' headers are
+  ;; Sessions' worker summaries and chats' headers are
   ;; made ahead: made again when it is set, never by loading this file
   ;; (which remakes the headers once its definitions are in, at its end).
   :initialize #'custom-initialize-default
@@ -659,49 +652,8 @@ nothing more."
                                         romacs-agent-ui--marks))))
       (string-join parts " "))))
 
-(defvar romacs-mode-line-agent)
-
-;; Sessions a new server restored raised no events: their news shows.
+;; Restored sessions raised no events for the board.
 (add-hook 'romacs-agent-restored-hook #'romacs-agent-ui--batch)
-
-(defun romacs-agent-ui--pools-line ()
-  "The pools with an account at or near its limit, each as ⛽ its harness
-and how many of its accounts have room, its accounts in the hover: nil
-while every account has room and none warns."
-  (let ((parts nil))
-    (dolist (cell romacs-agent--drivers)
-      (let* ((pool (romacs-agent-pool (car cell)))
-             (rooms (mapcar (lambda (i) (romacs-agent-room-of (plist-get i :name))) pool)))
-        (when (cl-some (lambda (room) (memq (plist-get room :status) '(warning rejected))) rooms)
-          (push (propertize
-                 (format "%s%s %d/%d" (romacs-agent-glyph 'fuel) (car cell)
-                         (cl-count-if (lambda (i) (romacs-agent-room (plist-get i :name))) pool) (length pool))
-                 'face (if (cl-some (lambda (i) (romacs-agent-room (plist-get i :name))) pool) 'warning 'romacs-agent-error)
-                 'help-echo (mapconcat
-                             (lambda (i)
-                               (let ((room (romacs-agent-room-of (plist-get i :name))))
-                                 (format "%s: %s%s%s" (plist-get i :name)
-                                         (if room (plist-get room :status) "no report")
-                                         (if (numberp (plist-get room :used)) (format ", %d%% used" (round (* 100 (plist-get room :used)))) "")
-                                         (if (numberp (plist-get room :resets))
-                                             (format-time-string ", resets %a %H:%M" (plist-get room :resets)) ""))))
-                             pool "\n"))
-                parts))))
-    (and parts (mapconcat #'identity (nreverse parts) " "))))
-
-(defvar romacs-agent-ui--pools-shown nil "The pools line the status bar shows.")
-
-(defun romacs-agent-ui--status-bar ()
-  "Show every session's news in the status bar (`romacs-mode-line-agent'),
-and the pools whose accounts near their limits."
-  (setq romacs-agent-ui--pools-shown (romacs-agent-ui--pools-line))
-  (let ((keys nil))
-    (maphash (lambda (_ session) (push (romacs-agent-ui--state-key session) keys)) romacs-agent--sessions)
-    (let ((rollup (let ((parts (delq nil (list (romacs-agent-ui--rollup keys) romacs-agent-ui--pools-shown))))
-                    (and parts (mapconcat #'identity parts " ")))))
-      (unless (equal rollup (and (boundp 'romacs-mode-line-agent) (default-value 'romacs-mode-line-agent)))
-        (setq-default romacs-mode-line-agent rollup)
-        (force-mode-line-update t)))))
 
 ;;; The header
 ;;
@@ -811,10 +763,8 @@ session is no recorded one."
 (defun romacs-agent-ui--glyphs-changed ()
   "What draws a glyph changed (`romacs-agent-glyphs', a mark of
 `romacs-agent-glyph-alist', the frame's font):
-every session's workers' line, the status bar and every chat's header are
-made again."
+every session's workers' line and every chat's header are made again."
   (mapc #'romacs-agent-ui--summarize-children (romacs-agent-sessions))
-  (romacs-agent-ui--status-bar)
   (romacs-agent-ui--headers-remake))
 
 (add-hook 'after-setting-font-hook #'romacs-agent-ui--glyphs-changed)
