@@ -14,7 +14,7 @@
 ;; The buffer is the comint model:
 ;;
 ;;   transcript   read-only text, appended to
-;;   activity     the subagents still working
+;;   activity     live delegated threads and harness subagents
 ;;   divider      one line: what the session does now
 ;;   composer     editable, RET sends
 ;;
@@ -1389,7 +1389,7 @@ to be sent: romacs-agent-log-queue.el), or nil for none.")
     (set-marker romacs-agent-log--end end)))
 
 (defun romacs-agent-log--activity-refresh ()
-  "Show the current session's running harness subagents above the divider."
+  "Show the current session's active workers above the divider."
   (when (and romacs-agent-log--input romacs-agent-log--width)
     (save-restriction
       (widen)
@@ -1991,10 +1991,18 @@ REASON when given."
   (interactive "p" romacs-agent-log-mode)
   (romacs-agent-log--move-kind 'prompt (- n)))
 
+(defun romacs-agent-log--open-delegated-thread (id)
+  "Open the delegated thread with ID in this window."
+  (if-let* ((child (romacs-agent-get id)))
+      (romacs-agent-show child '(display-buffer-same-window))
+    (user-error "That delegated thread is no longer available")))
+
 (defun romacs-agent-log-open ()
-  "Open what is at point: earlier turns, or a call's whole input and output."
+  "Open the delegated thread, earlier turns, or full tool call at point."
   (interactive nil romacs-agent-log-mode)
-  (cond ((get-text-property (point) 'romacs-agent-log-earlier) (romacs-agent-log-earlier))
+  (cond ((get-text-property (point) 'romacs-agent-log-delegated-thread)
+         (romacs-agent-log--open-delegated-thread (get-text-property (point) 'romacs-agent-log-delegated-thread)))
+        ((get-text-property (point) 'romacs-agent-log-earlier) (romacs-agent-log-earlier))
         ((get-text-property (point) 'romacs-agent-log-full)
          (let ((full (get-text-property (point) 'romacs-agent-log-full))
                (tool (get-text-property (point) 'romacs-agent-log-tool))

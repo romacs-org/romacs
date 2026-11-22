@@ -1,4 +1,4 @@
-;;; romacs-agent-log-activity.el --- Active subagents beside the composer -*- lexical-binding: t; -*-
+;;; romacs-agent-log-activity.el --- Active workers beside the composer -*- lexical-binding: t; -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
@@ -13,6 +13,9 @@
 (require 'subr-x)
 (require 'seq)
 (require 'ewoc)
+(require 'romacs-agent)
+(require 'romacs-agent-glyphs)
+(require 'romacs-icons)
 (require 'romacs-working)
 
 (defface romacs-agent-log-subagent '((t :inherit font-lock-keyword-face :weight bold))
@@ -25,7 +28,12 @@
   "The working threads in the live activity, from id to their marker.")
 
 (defconst romacs-agent-log-activity--cols 4
-  "How many cells a subagent's animation fills.")
+  "How many cells a worker's animation fills.")
+
+(defconst romacs-agent-log-activity--delegated-states
+  '((working . "Working") (approval . "Needs approval") (question . "Asks you")
+    (waiting . "Waiting on workers"))
+  "The activity to show for each visible delegated-thread state.")
 
 (defun romacs-agent-log-activity--running-p (row)
   "Whether session worker ROW belongs in the live subagent view."
@@ -37,16 +45,18 @@
         (y (or (plist-get b :started) 0)))
     (if (= x y) (string< (plist-get a :tool) (plist-get b :tool)) (< x y))))
 
-(defun romacs-agent-log-activity--line (row width)
-  "Draw worker ROW on one line, within WIDTH columns."
-  (let* ((title (or (plist-get row :title) "Subagent"))
-         (activity (or (plist-get row :activity) "Working"))
-         ;; The display overlays working cells at the start of their line.
-         (prefix (when (> width (+ romacs-agent-log-activity--cols 8))
-                   (concat (propertize (romacs-working-still romacs-agent-log-activity--cols 'running
-                                                             'romacs-agent-log-subagent)
-                                       'romacs-agent-worker (plist-get row :tool)) "  ")))
-         (room (max 1 (- width (length prefix) 1)))
+(defun romacs-agent-log-activity--animation (id width)
+  "The animation for worker ID when WIDTH has room for it."
+  ;; The display overlays working cells at the start of their line.
+  (when (> width (+ romacs-agent-log-activity--cols 8))
+    (concat (propertize (romacs-working-still romacs-agent-log-activity--cols 'running
+                                              'romacs-agent-log-subagent)
+                        'romacs-agent-worker id)
+            "  ")))
+
+(defun romacs-agent-log-activity--line (title activity prefix width)
+  "Draw TITLE and ACTIVITY after PREFIX, within WIDTH columns."
+  (let* ((room (max 1 (- width (string-width (or prefix "")) 1)))
          (name (romacs-agent-log-activity--clip title (if (> room 14) (min 40 (/ room 2)) room)))
          (action (- room (string-width name) 5)))
     (concat (propertize (concat prefix (propertize name 'face 'romacs-agent-log-subagent)
@@ -56,20 +66,52 @@
                         'help-echo (concat title " · " activity))
             "\n")))
 
+(defun romacs-agent-log-activity--subagent-line (row width)
+  "Draw the native subagent ROW within WIDTH columns."
+  (romacs-agent-log-activity--line (or (plist-get row :title) "Subagent")
+                                  (or (plist-get row :activity) "Working")
+                                  (romacs-agent-log-activity--animation (plist-get row :tool) width)
+                                  width))
+
+(defun romacs-agent-log-activity--delegated-line (row width)
+  "Draw the Romacs-delegated thread ROW within WIDTH columns."
+  (let* ((id (romacs-agent-id (plist-get row :session)))
+         (state (plist-get row :key))
+         (mark (or (romacs-icon 'romacs) (romacs-agent-glyph 'romacs)))
+         (prefix (concat (when (eq state 'working)
+                           (romacs-agent-log-activity--animation (cons 'session id)
+                                                                 (- width (string-width mark) 1)))
+                         (when (> width (+ 2 (string-width mark))) (concat mark " ")))))
+    (propertize (romacs-agent-log-activity--line
+                 (or (plist-get row :title) "Delegated thread")
+                 (alist-get state romacs-agent-log-activity--delegated-states) prefix width)
+                'romacs-agent-log-delegated-thread id)))
+
 (defun romacs-agent-log-activity--clip (text width)
   "A single line of TEXT that fits WIDTH."
   (truncate-string-to-width (replace-regexp-in-string "[[:space:]]+" " " text)
                             width nil nil (truncate-string-ellipsis)))
 
 (defun romacs-agent-log-activity-lines (rows width)
-  "Render the running subagents in worker ROWS, within WIDTH."
-  (if-let* ((active (seq-filter #'romacs-agent-log-activity--running-p rows)))
-      (concat (propertize (truncate-string-to-width (format "Subagents (%d)" (length active)) (max 1 (1- width)))
+  "Render the active workers in ROWS, within WIDTH."
+  (let* ((native (seq-filter #'romacs-agent-log-activity--running-p rows))
+         (delegated (seq-filter (lambda (row)
+                                  (and (plist-get row :session)
+                                       (assq (plist-get row :key) romacs-agent-log-activity--delegated-states)))
+                                rows))
+         (count (+ (length native) (length delegated))))
+    (if (zerop count) ""
+      (concat (propertize (truncate-string-to-width
+                           (format "%s (%d)" (cond ((null delegated) "Subagents")
+                                                   ((null native) "Delegated threads")
+                                                   (t "Workers"))
+                                   count)
+                           (max 1 (1- width)))
                           'face 'romacs-agent-log-note)
               "\n"
-              (mapconcat (lambda (row) (romacs-agent-log-activity--line row width))
-                         (sort active #'romacs-agent-log-activity--before-p) ""))
-    ""))
+              (mapconcat (lambda (row) (romacs-agent-log-activity--delegated-line row width)) delegated "")
+              (mapconcat (lambda (row) (romacs-agent-log-activity--subagent-line row width))
+                         (sort native #'romacs-agent-log-activity--before-p) "")))))
 
 (defun romacs-agent-log-activity-bounds ()
   "The active view's (START . END) markers, or nil."
