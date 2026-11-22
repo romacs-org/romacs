@@ -4744,6 +4744,7 @@ loaded or not."
 ;; worth having after a restart.
 
 (declare-function romacs-agent-store-queued-put "romacs-agent-store" (id item))
+(declare-function romacs-agent-store-queued "romacs-agent-store" (id))
 (declare-function romacs-agent-store-queued-reorder "romacs-agent-store" (id items))
 (declare-function romacs-agent-store-queued-delete "romacs-agent-store" (id item-id))
 (declare-function romacs-agent-store--file "romacs-agent-store" ())
@@ -4771,7 +4772,13 @@ goes with its last."
   (when (romacs-agent-item-kept item)
     (setf (romacs-agent-item-kept item) nil)
     (romacs-agent-store-queued-delete (romacs-agent-id session) (romacs-agent-item-id item))
-    (unless (cl-some #'romacs-agent-item-kept (romacs-agent-queue session))
+    ;; Its mark goes with the last row the store keeps, not the last in
+    ;; this queue: rows whose sending was unsure stay for the next load.
+    (unless (or (cl-some #'romacs-agent-item-kept (romacs-agent-queue session))
+                (condition-case nil
+                    (cl-some (lambda (row) (not (equal (romacs-agent-item-id row) (romacs-agent-item-id item))))
+                             (romacs-agent-store-queued (romacs-agent-id session)))
+                  (romacs-agent-store-unread t)))
       (romacs-agent-mark (romacs-agent-id session) 'queued nil))))
 
 (defun romacs-agent-interrupt (session)
