@@ -692,7 +692,10 @@ and a build of that commit: a plist `:top', `:src', `:build', `:commit'."
   (should (romacs-live-forms-beside-itself-p
            (romacs-live-forms-read "(defvar d `(dir ,(file-name-directory load-file-name)))")))
   (should (romacs-live-forms-beside-itself-p
-           (romacs-live-forms-read "(defvar d (file-name-directory (file-truename (or load-file-name buffer-file-name))))"))))
+           (romacs-live-forms-read "(defvar d (file-name-directory (file-truename (or load-file-name buffer-file-name))))")))
+  ;; The name a compile walk knows too.
+  (should (romacs-live-forms-beside-itself-p
+           (romacs-live-forms-read "(require 'x (expand-file-name \"x\" (file-name-directory (or (macroexp-file-name) buffer-file-name))))"))))
 
 (defun romacs-live-tests--restart (ledger)
   "Replay LEDGER as a restart's successor does, through its image part's

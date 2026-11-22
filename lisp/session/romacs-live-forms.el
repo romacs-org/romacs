@@ -226,10 +226,10 @@ names (a lambda, a menu item with one)."
 
 (defun romacs-live-forms-beside-itself-p (forms)
   "Whether FORMS find a file beside their own: a call of
-`file-name-directory' on an expression naming `load-file-name' or
-`load-true-file-name'.  Quoted data (a form written out for another file
-to run) is no call."
-  (cl-labels ((names-p (x) (cond ((memq x '(load-file-name load-true-file-name)) t)
+`file-name-directory' on an expression naming `load-file-name',
+`load-true-file-name' or `macroexp-file-name'.  Quoted data (a form
+written out for another file to run) is no call."
+  (cl-labels ((names-p (x) (cond ((memq x '(load-file-name load-true-file-name macroexp-file-name)) t)
                                  ((memq (car-safe x) '(quote function \`)) nil)
                                  ((consp x) (or (names-p (car x)) (names-p (cdr x))))))
               (unquoted (x) (cond ((not (consp x)) nil)
