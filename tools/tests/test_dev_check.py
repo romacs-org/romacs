@@ -1,6 +1,7 @@
 """tools/dev-check: how a conflict is classed, what the structural run is, and the report."""
 import importlib.machinery
 import importlib.util
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -550,3 +551,38 @@ class EpochHistory(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class Receipt(unittest.TestCase):
+    """A run on a clean worktree leaves a receipt for HEAD's tree; on a dirty one, none."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name) / 'wt'
+        self.root.mkdir()
+        env = {'GIT_AUTHOR_NAME': 't', 'GIT_AUTHOR_EMAIL': 't@t', 'GIT_COMMITTER_NAME': 't',
+               'GIT_COMMITTER_EMAIL': 't@t', 'XDG_CACHE_HOME': str(Path(tmp.name) / 'cache')}
+        self.old = {k: os.environ.get(k) for k in env}
+        os.environ.update(env)
+        self.addCleanup(lambda: [os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+                                 for k, v in self.old.items()])
+        for args in (['init', '-q'], ['config', 'commit.gpgsign', 'false']):
+            subprocess.run(['git', '-C', str(self.root), *args], check=True)
+        (self.root / 'a').write_text('a\n')
+        subprocess.run(['git', '-C', str(self.root), 'add', 'a'], check=True)
+        subprocess.run(['git', '-C', str(self.root), 'commit', '-qm', 'a'], check=True)
+        self.stages = [('forecast', 'ok', '', []), ('lint', 'FAIL', 'x', ['y'])]
+
+    def test_a_clean_worktree_gets_a_receipt_for_its_tree(self):
+        path = check.write_receipt(self.root, 'beta', self.stages, 1, True)
+        tree = check.git(self.root, 'rev-parse', 'HEAD^{tree}').stdout.strip()
+        self.assertEqual(path, check.receipt_path(tree))
+        got = json.loads(path.read_text())
+        self.assertEqual((got['tree'], got['exit'], got['tests'], got['stages'][1]),
+                         (tree, 1, True, {'name': 'lint', 'status': 'FAIL'}))
+
+    def test_a_worktree_with_uncommitted_changes_gets_none(self):
+        (self.root / 'a').write_text('changed\n')
+        self.assertIsNone(check.write_receipt(self.root, 'beta', self.stages, 0, True))
+
