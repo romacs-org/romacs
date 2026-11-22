@@ -101,11 +101,6 @@ format of FROM (default a handoff's)."
   "Whether TEXT is the wake of a delegated task: context, not a request."
   (and (fboundp 'romacs-agent-tools--wakes-parse) (romacs-agent-tools--wakes-parse text)))
 
-(defun romacs-agent-handoff--message-item (message text)
-  "A brief's item for MESSAGE, another session's, saying TEXT."
-  (list :role 'tool :text (format "Message from %s (%s): %s" (plist-get (plist-get message :from) :name)
-                                  (plist-get message :kind) text)))
-
 (defun romacs-agent-handoff-items (events)
   "A thread's EVENTS (`romacs-agent-events') as a brief's items: each
 request (a delegated task's wake as context), each tool call started at
@@ -121,22 +116,20 @@ streamed (an imported transcript has no turn ends, only messages)."
           ('gap (close-turn) (push (list :role 'note :text (plist-get event :text)) items))
           ('input (close-turn)
                   (when-let* ((text (plist-get event :text)))
-                    (let ((messages (plist-get event :messages)))
-                      (cond
-                       ;; Results: the text is the delivery's, once.
-                       ((cl-some (lambda (m) (plist-get m :wake)) messages)
-                        (push (romacs-agent-handoff--message-item (car messages) text) items))
-                       ;; Another session's, not the user's request.
-                       ((and messages (null (cdr messages)))
-                        (push (romacs-agent-handoff--message-item (car messages) text) items))
-                       ;; Several, as one turn may take (romacs#405): each
-                       ;; its own, saying its own text.
-                       (messages
-                        (dolist (message messages)
-                          (push (romacs-agent-handoff--message-item message (or (plist-get message :text) text))
-                                items)))
-                       (t (push (list :role (if (romacs-agent-handoff--wake-p text) 'tool 'user) :text text)
-                                items))))))
+                    (push (if-let* ((messages (plist-get event :messages)))
+                              ;; Other sessions', not the user's request: one
+                              ;; turn may take several's (romacs#405), each named.
+                              (list :role 'tool
+                                    :text (format "Message from %s: %s"
+                                                  (string-join
+                                                   (delete-dups
+                                                    (mapcar (lambda (m) (format "%s (%s)" (plist-get (plist-get m :from) :name)
+                                                                                (plist-get m :kind)))
+                                                            messages))
+                                                   ", ")
+                                                  text))
+                            (list :role (if (romacs-agent-handoff--wake-p text) 'tool 'user) :text text))
+                          items)))
           ('delta (unless (plist-get event :parent) (push (plist-get event :text) streamed)))
           ('message-end (unless (plist-get event :parent)
                           (when streamed (setq reply (apply #'concat (reverse streamed)) streamed nil))))

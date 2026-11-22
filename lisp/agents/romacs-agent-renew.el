@@ -295,12 +295,11 @@ and, when earlier ones are left out, the first of them and a gap's mark
 
 (defun romacs-agent-renew--input (text messages)
   "An input event of TEXT, with MESSAGES (a row's: who said what in it, as
-tables, each with its text) as its event carries them."
+tables) as its event carries them."
   (let ((messages (mapcar (lambda (message)
                             (let ((from (gethash "from" message)))
                               (list :kind (gethash "kind" message)
-                                    :from (list :name (and (hash-table-p from) (gethash "name" from)))
-                                    :text (gethash "text" message) :wake (gethash "wake" message))))
+                                    :from (list :name (and (hash-table-p from) (gethash "name" from))))))
                           (append messages nil))))
     (append (list :type 'input :text text) (and messages (list :messages messages)))))
 

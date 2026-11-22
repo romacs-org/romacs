@@ -93,6 +93,40 @@
     (should (equal (mapcar #'car (romacs-agent-queue session)) '("results" "the user's")))
     (should (= (romacs-agent-queue-length session) 2))))
 
+(ert-deftest romacs-agent-results-waiting-go-in-one-turn ()
+  ;; Two deliveries of tasks' results waiting go in one turn, their texts
+  ;; in order; a message of another kind waits behind them.
+  (let ((session (romacs-agent-test-attach
+                  (romacs-agent--make :id "79797979-8888-4999-8aaa-bbbbbbbbbbbb" :harness 'claude :state 'running)
+                  t))
+        (sent nil))
+    (dolist (id '("m-1" "m-2"))
+      (romacs-agent--admit session (romacs-agent-item (concat "result " id) :kind 'next :valid #'always
+                                                      :messages (list (append (romacs-agent-make-message id "child" '(:session "c"))
+                                                                              (list :wake (list :state "completed" :chars 1)))))))
+    (romacs-agent--admit session (romacs-agent-item "hi" :kind 'next :valid #'always
+                                                    :messages (list (romacs-agent-make-message "m-3" "parent" '(:session "p")))))
+    (setf (romacs-agent-state session) 'idle)
+    (romacs-agent-queue-tests--writing sent
+      (romacs-agent--dispatch session))
+    (should (= (length sent) 1))
+    (should (string-match-p "\\`result m-1\n\nresult m-2\n\n" (gethash "content" (gethash "message" (car sent)))))
+    (should (equal (mapcar #'car (romacs-agent-queue session)) '("hi")))))
+
+(ert-deftest romacs-agent-a-listener-s-error-is-no-failed-write ()
+  ;; Written, a message is off the queue whatever a listener of its turn's
+  ;; start does: never sent a second time.
+  (let ((session (romacs-agent-test-attach
+                  (romacs-agent--make :id "7a7a7a7a-8888-4999-8aaa-bbbbbbbbbbbb" :harness 'claude :state 'idle)
+                  t))
+        (romacs-agent-event-functions (list (lambda (&rest _) (error "Listener"))))
+        (sent nil))
+    (romacs-agent-queue-tests--writing sent
+      (romacs-agent-send-later session "one" nil nil #'always
+                               (list (romacs-agent-make-message "m-1" "parent" '(:session "p")))))
+    (should (= (length sent) 1))
+    (should (null (romacs-agent-queue session)))))
+
 (ert-deftest romacs-agent-messages-in-one-turn-are-each-told ()
   ;; One message's delivery failing leaves the others' told: each was
   ;; written, none waits to go again.

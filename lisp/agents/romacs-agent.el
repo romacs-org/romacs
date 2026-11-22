@@ -1579,7 +1579,8 @@ one request id: the journal's is the one written."
       (setf (romacs-agent-state session) 'running
             (romacs-agent-answering session) (plist-get (car messages) :id)
             (romacs-agent-own-turn session) own)
-      (romacs-agent--changed session))
+      ;; Its listeners' errors said, never taken for a failed write.
+      (with-demoted-errors "romacs-agent--changed: %S" (romacs-agent--changed session)))
     ;; Written: what follows the write cannot unsend it, so a failing
     ;; hook is said, never taken for a failed write sent again.
     (with-demoted-errors "romacs-agent-input-functions: %S"
@@ -3993,7 +3994,7 @@ goes alone)."
 
 (defun romacs-agent--results-p (item)
   "Whether ITEM delivers delegated tasks' results: its text is theirs."
-  (cl-some (lambda (m) (plist-get m :wake)) (romacs-agent-item-messages item)))
+  (and (cl-some (lambda (m) (plist-get m :wake)) (romacs-agent-item-messages item)) t))
 
 (defun romacs-agent--together (session head)
   "HEAD and the messages waiting behind it in SESSION's queue that go in

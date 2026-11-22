@@ -90,14 +90,15 @@
     (should (string-match-p "User: do it" (romacs-agent-handoff-brief items "x" "Go." 40)))))
 
 (ert-deftest romacs-agent-handoff-messages-in-one-turn-keep-their-senders ()
-  ;; romacs#405: a turn may take several sessions' messages; each is its
-  ;; sender's in the brief, saying its own text.
+  ;; romacs#405: a turn may take several sessions' messages; the brief
+  ;; names every sender, once, never the first alone.
   (let ((items (romacs-agent-handoff-items
-                (list (list :type 'input :text "a\n\nb"
+                (list (list :type 'input :text "a\n\nb\n\nc"
                             :messages (list (list :kind "parent" :from '(:name "lead") :text "a")
-                                            (list :kind "sibling" :from '(:name "peer") :text "b")))))))
+                                            (list :kind "sibling" :from '(:name "peer") :text "b")
+                                            (list :kind "parent" :from '(:name "lead") :text "c")))))))
     (should (equal (mapcar (lambda (i) (plist-get i :text)) items)
-                   '("Message from lead (parent): a" "Message from peer (sibling): b")))))
+                   '("Message from lead (parent), peer (sibling): a\n\nb\n\nc")))))
 
 (ert-deftest romacs-agent-handoff-the-thread-starts-with-what-was-imported ()
   (require 'romacs-agent)
