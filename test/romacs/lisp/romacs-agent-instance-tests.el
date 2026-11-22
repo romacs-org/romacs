@@ -196,9 +196,10 @@ conversation is in `one'; `told' collects what a task is told."
         (should (= (plist-get event :resets) 3000)))
       ;; A turn refused at the limit, in Codex's own words.
       (should (plist-get (romacs-agent--codex-done
-                          codex (romacs-mcp--object "status" "failed"
-                                                    "error" (romacs-mcp--object "message" "You've hit your usage limit"
-                                                                                "codexErrorInfo" "usageLimitExceeded")))
+                          (romacs-mcp--object "status" "failed"
+                                              "error" (romacs-mcp--object "message" "You've hit your usage limit"
+                                                                          "codexErrorInfo" "usageLimitExceeded"))
+                          nil nil)
                          :limit)))))
 
 (ert-deftest romacs-agent-instance-on-limit-moves-a-lane ()

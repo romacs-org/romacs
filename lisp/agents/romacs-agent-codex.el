@@ -172,10 +172,10 @@ summarized in detail."
                                  (romacs-mcp--object "threadId" (romacs-agent-harness-session session)
                                                      "turnId" turn))))
 
-(defun romacs-agent--codex-approval-id (session wire)
-  "The approval id of request WIRE in SESSION's run: Codex numbers its
+(defun romacs-agent--codex-approval-id (run wire)
+  "The approval id of request WIRE in RUN.  Codex numbers its
 requests from 0 every run, so an earlier run's row names no later request."
-  (format "%s:%s" (or (plist-get (romacs-agent-driver-state session) :run) 0) wire))
+  (format "%s:%s" (or run 0) wire))
 
 (defun romacs-agent--codex-questions (params)
   "`item/tool/requestUserInput''s PARAMS as an `approval' event's
@@ -335,20 +335,19 @@ startup's next step."
            (romacs-mcp--object "method" "initialized"))
           ((equal sent "initialized") (romacs-agent--codex-thread session (romacs-agent-request-id session))))))
 
-(defun romacs-agent--codex-paid (session test)
-  "The handshake event dropping SESSION's first owed line TEST accepts."
-  (let ((owed (plist-get (romacs-agent-driver-state session) :owed)))
-    (when-let* ((done (cl-find-if test owed)))
-      (list (list :type 'handshake :state (list :owed (remove done owed)))))))
+(defun romacs-agent--codex-paid (owed test)
+  "The handshake event dropping the first of OWED that TEST accepts."
+  (when-let* ((done (cl-find-if test owed)))
+    (list (list :type 'handshake :state (list :owed (remove done owed))))))
 
-(defun romacs-agent--codex-message (session object)
-  "The events of OBJECT, a message written: its input, and for a steer
+(defun romacs-agent--codex-message (state object)
+  "The events of message OBJECT from the prior driver STATE: for a steer
 what to do should it miss its turn.  A missed steer's turn is its
 message again: its text and record (another session's) the steer's."
   (let* ((params (gethash "params" object))
          (steer (romacs-agent--value (gethash "clientUserMessageId" params)))
          (owed (and steer (cl-find-if (lambda (owed) (and (eq (car owed) :turn) (equal (cadr owed) steer)))
-                                      (plist-get (romacs-agent-driver-state session) :owed))))
+                                      (plist-get state :owed))))
          (text (if owed (nth 2 owed) (romacs-agent--text-of (gethash "input" params))))
          (messages (if owed (nth 4 owed) (romacs-agent--messages-of (gethash "romacsMessages" object))))
          (images (append (or (gethash "images" object)
@@ -359,34 +358,41 @@ message again: its text and record (another session's) the steer's."
             (if (equal (gethash "method" object) "turn/steer")
                 (list (list :type 'handshake
                             :state (list :steers (cons (list (gethash "id" object) text images messages)
-                                                       (plist-get (romacs-agent-driver-state session) :steers)))))
+                                                       (plist-get state :steers)))))
               (and steer (romacs-agent--codex-paid
-                          session (lambda (owed) (and (eq (car owed) :turn) (equal (cadr owed) steer)))))))))
+                          (plist-get state :owed) (lambda (owed) (and (eq (car owed) :turn) (equal (cadr owed) steer)))))))))
+
+(defun romacs-agent--codex-answered (id asked result)
+  "Decode reply RESULT to approval ID with the ASKED input."
+  (list (list :type 'answered :request-id id
+              :answers (romacs-agent--codex-given-answers asked result)
+              :behavior (if (or (member (gethash "decision" result) '("accept" "acceptForSession"))
+                                (cl-some (lambda (key)
+                                           (let ((given (gethash key result)))
+                                             (and (hash-table-p given) (> (hash-table-count given) 0))))
+                                         '("permissions" "answers")))
+                            "allow" "deny"))))
 
 (defun romacs-agent--codex-input-events (session object)
   "The events of OBJECT, written to SESSION's harness."
-  (let ((method (gethash "method" object)) (id (gethash "id" object)))
+  (let ((method (gethash "method" object))
+        (id (gethash "id" object))
+        (state (romacs-agent-driver-state session)))
     (cond
-     ((member method '("turn/start" "turn/steer")) (romacs-agent--codex-message session object))
+     ((member method '("turn/start" "turn/steer")) (romacs-agent--codex-message state object))
      ((member method '("initialize" "initialized" "thread/start" "thread/resume" "thread/fork"))
       (list (list :type 'handshake
                   :state (append (list :sent (if (string-prefix-p "thread/" method) "thread" method))
                                  (and (equal method "initialize")
                                       (eq (gethash "experimentalApi" (gethash "capabilities" (gethash "params" object))) t)
                                       (list :experimental t))))))
-     (method nil)
-     ((gethash (romacs-agent--codex-approval-id session id) (romacs-agent-approvals session))
-      (let ((result (gethash "result" object))
-            (asked (nth 2 (gethash (romacs-agent--codex-approval-id session id) (romacs-agent-approvals session)))))
-        (list (list :type 'answered :request-id (romacs-agent--codex-approval-id session id)
-                    :answers (romacs-agent--codex-given-answers asked result)
-                    :behavior (if (or (member (gethash "decision" result) '("accept" "acceptForSession"))
-                                      (cl-some (lambda (key)
-                                                 (let ((given (gethash key result)))
-                                                   (and (hash-table-p given) (> (hash-table-count given) 0))))
-                                               '("permissions" "answers")))
-                                  "allow" "deny")))))
-     (t (romacs-agent--codex-paid session (lambda (owed) (and (eq (car owed) :reply) (equal (cadr owed) id))))))))
+     ((null method)
+      (let* ((approval (romacs-agent--codex-approval-id (plist-get state :run) id))
+             (request (gethash approval (romacs-agent-approvals session))))
+        (if request
+            (romacs-agent--codex-answered approval (nth 2 request) (gethash "result" object))
+          (romacs-agent--codex-paid (plist-get state :owed)
+                                   (lambda (owed) (and (eq (car owed) :reply) (equal (cadr owed) id))))))))))
 
 ;;; What it writes
 
@@ -396,8 +402,9 @@ message again: its text and record (another session's) the steer's."
     (cond ((hash-table-p error) (or (romacs-agent--value (gethash "message" error)) "error"))
           ((stringp error) error))))
 
-(defun romacs-agent--codex-answer (session id object)
-  "The events of OBJECT, the answer to our request ID."
+(defun romacs-agent--codex-answer (state model interrupted id object)
+  "Decode the answer OBJECT for request ID, with driver STATE.
+MODEL is the configured fallback.  INTERRUPTED says a prior turn was cut."
   (let ((result (romacs-agent--value (gethash "result" object)))
         (error (romacs-agent--codex-error object))
         (method (romacs-agent--codex-method id)))
@@ -410,17 +417,17 @@ message again: its text and record (another session's) the steer's."
          (append (list (list :type 'handshake :state (list :thread thread))
                        (list :type 'session :harness-session thread
                              :model (or (romacs-agent--value (gethash "model" result))
-                                        (plist-get (romacs-agent-options session) :model))))
+                                        model)))
                  ;; Codex takes up no turn its last run was cut in: it is over.
-                 (when (romacs-agent-interrupted session)
+                 (when interrupted
                    (list (list :type 'done :error t :interrupted t :reason "Cut short when Codex stopped"))))))
       ("turn/start"
        (cond (error (list (list :type 'done :error t :text error :reason error)))
              ;; Acknowledged after its end: it stays over.
-             ((member (gethash "id" (gethash "turn" result)) (plist-get (romacs-agent-driver-state session) :ended))
+             ((member (gethash "id" (gethash "turn" result)) (plist-get state :ended))
               nil)
              (t (list (list :type 'handshake :state (list :turn (gethash "id" (gethash "turn" result))))))))
-      ("turn/steer" (romacs-agent--codex-steered session id error))
+      ("turn/steer" (romacs-agent--codex-steered state id error))
       ;; An interrupt that found the turn over has nothing to say.
       ("turn/interrupt" nil)
       ("thread/revert" (if error
@@ -429,11 +436,10 @@ message again: its text and record (another session's) the steer's."
                          (list (list :type 'reverted))))
       (_ (and error (list (list :type 'error :text error)))))))
 
-(defun romacs-agent--codex-steered (session id error)
+(defun romacs-agent--codex-steered (state id error)
   "Steer ID answered: done with, or, failed with ERROR (its turn ended
 first), owed as a turn of its own."
-  (let* ((state (romacs-agent-driver-state session))
-         (steer (assoc id (plist-get state :steers)))
+  (let* ((steer (assoc id (plist-get state :steers)))
          (steers (remove steer (plist-get state :steers))))
     (if (not (and error steer))
         (list (list :type 'handshake :state (list :steers steers)))
@@ -449,11 +455,12 @@ first), owed as a turn of its own."
           :questions (and (equal method "item/tool/requestUserInput")
                           (romacs-agent--codex-questions params)))))
 
-(defun romacs-agent--codex-asked (session id method params)
+(defun romacs-agent--codex-asked (state id method params)
   "The events of request ID, METHOD with PARAMS, Codex asks of Romacs:
-an approval or questions for the user, anything else refused."
+An approval or questions go to the user.  STATE holds the run and its
+owed lines."
   (cl-flet ((approval (tool input &optional questions)
-              (let ((approval (romacs-agent--codex-approval-id session id)))
+              (let ((approval (romacs-agent--codex-approval-id (plist-get state :run) id)))
                 ;; A question is the user's alone to answer.
                 (list (list :type 'approval :request-id approval :tool tool :input input :questions questions
                             :approval-wire (list id method params)
@@ -462,7 +469,7 @@ an approval or questions for the user, anything else refused."
             (refused (&optional why)
               (append (and why (list (list :type 'status :text why)))
                       (list (list :type 'handshake
-                                  :state (list :owed (append (plist-get (romacs-agent-driver-state session) :owed)
+                                  :state (list :owed (append (plist-get state :owed)
                                                              (list (list :reply id method)))))))))
     (pcase method
       ("item/commandExecution/requestApproval"
@@ -509,9 +516,9 @@ an approval or questions for the user, anything else refused."
           ((and (hash-table-p output) (gethash "message" output)) (gethash "message" output))
           (t (romacs-agent--json output)))))
 
-(defun romacs-agent--codex-tool-events (session id item completed)
-  "The tool block of ITEM, by ID: started once, and its end when COMPLETED."
-  (let ((started (unless (gethash id (romacs-agent-tools session))
+(defun romacs-agent--codex-tool-events (id item completed shown)
+  "Decode tool ITEM by ID, whose start is already SHOWN and whose end is COMPLETED."
+  (let ((started (unless shown
                    (pcase-let ((`(,name ,input) (romacs-agent--codex-tool item)))
                      (list (list :type 'tool :state 'started :id id :name name :input input)))))
         (failed (or (member (gethash "status" item) '("failed" "declined"))
@@ -578,37 +585,44 @@ an approval or questions for the user, anything else refused."
 
 (defun romacs-agent--codex-item (session item completed &optional id)
   "The events of ITEM, started or COMPLETED; ID, when given, names it."
-  (let ((id (or id (gethash "id" item)))
-        (streamed (romacs-agent-streamed session)))
-    (pcase (gethash "type" item)
-      ("agentMessage"
-       (when completed
-         (let ((text (gethash "text" item)))
-           (list (list :type 'record-state :state (list :reply text))
-                 (list :type 'delta :text (if (gethash id streamed) "\n" (concat text "\n")) :message id)
-                 (list :type 'message-end :message id)))))
-      ("reasoning"
-       (when (and completed (not (gethash id streamed)))
-         (let ((text (mapconcat #'identity (append (or (romacs-agent--value (gethash "summary" item))
-                                                       (romacs-agent--value (gethash "content" item))
-                                                       (and (stringp (gethash "text" item)) (list (gethash "text" item))))
-                                                   nil)
-                                "\n\n")))
-           (unless (string-empty-p text) (list (list :type 'thinking :text text))))))
-      ("contextCompaction" (when completed (list (list :type 'status :text "Context compacted"))))
-      ;; A plan proposed (plan mode): the completed item is the plan, no
-      ;; request; proceeding with it is leaving plan mode (:proceed).
-      ("plan" (when (and completed (stringp (gethash "text" item)))
-                (list (list :type 'plan :text (gethash "text" item) :proceed t))))
-      ("subAgentActivity"
-       (when-let* (((or completed (equal (gethash "kind" item) "started")))
-                   (event (romacs-agent--codex-activity-event item)))
-         (list event)))
-      ("collabAgentToolCall"
-       (append (romacs-agent--codex-tool-events session id item completed)
-               (and completed (romacs-agent--codex-collab-events item))))
-      ((or "userMessage" "hookPrompt" "todo_list" "error") nil)
-      (_ (romacs-agent--codex-tool-events session id item completed)))))
+  (let* ((id (or id (gethash "id" item)))
+         (type (gethash "type" item))
+         (shown (gethash id (if (member type '("agentMessage" "reasoning"))
+                                (romacs-agent-streamed session)
+                              (romacs-agent-tools session)))))
+    (romacs-agent--codex-decode-item type id item completed shown)))
+
+(defun romacs-agent--codex-decode-item (type id item completed shown)
+  "Decode ITEM of TYPE by ID, with its COMPLETED and SHOWN flags."
+  (pcase type
+    ("agentMessage"
+     (when completed
+       (let ((text (gethash "text" item)))
+         (list (list :type 'record-state :state (list :reply text))
+               (list :type 'delta :text (if shown "\n" (concat text "\n")) :message id)
+               (list :type 'message-end :message id)))))
+    ("reasoning"
+     (when (and completed (not shown))
+       (let ((text (mapconcat #'identity (append (or (romacs-agent--value (gethash "summary" item))
+                                                     (romacs-agent--value (gethash "content" item))
+                                                     (and (stringp (gethash "text" item)) (list (gethash "text" item))))
+                                                 nil)
+                              "\n\n")))
+         (unless (string-empty-p text) (list (list :type 'thinking :text text))))))
+    ("contextCompaction" (when completed (list (list :type 'status :text "Context compacted"))))
+    ;; A plan proposed (plan mode): the completed item is the plan, no
+    ;; request; proceeding with it is leaving plan mode (:proceed).
+    ("plan" (when (and completed (stringp (gethash "text" item)))
+              (list (list :type 'plan :text (gethash "text" item) :proceed t))))
+    ("subAgentActivity"
+     (when-let* (((or completed (equal (gethash "kind" item) "started")))
+                 (event (romacs-agent--codex-activity-event item)))
+       (list event)))
+    ("collabAgentToolCall"
+     (append (romacs-agent--codex-tool-events id item completed shown)
+             (and completed (romacs-agent--codex-collab-events item))))
+    ((or "userMessage" "hookPrompt" "todo_list" "error") nil)
+    (_ (romacs-agent--codex-tool-events id item completed shown))))
 
 (defun romacs-agent--codex-plan (params)
   "A plan update, as a status line: each step marked by its state."
@@ -618,17 +632,17 @@ an approval or questions for the user, anything else refused."
                           (gethash "plan" params) "  ")))
     (concat "Plan: " (if-let* ((why (romacs-agent--value (gethash "explanation" params)))) (concat why "  ") "") steps)))
 
-(defun romacs-agent--codex-done (session turn)
-  "The end of TURN, as `turn/completed' gives it."
+(defun romacs-agent--codex-done (turn reply window)
+  "Decode the end of TURN using the prior REPLY and context WINDOW."
   (let* ((status (gethash "status" turn))
          (reason (or (romacs-agent--codex-error turn) (and (equal status "interrupted") "Interrupted")))
          (ms (gethash "durationMs" turn)))
-    (list :type 'done :text (romacs-agent-reply session) :error (not (equal status "completed"))
+    (list :type 'done :text reply :error (not (equal status "completed"))
           :interrupted (equal status "interrupted") :reason reason :duration (and (numberp ms) (/ ms 1000.0))
           ;; Refused at its account's usage limit.
           :limit (let ((error (gethash "error" turn)))
                    (and (hash-table-p error) (equal (gethash "codexErrorInfo" error) "usageLimitExceeded")))
-          :context-window (plist-get (romacs-agent-driver-state session) :window))))
+          :context-window window)))
 
 (defun romacs-agent--codex-turn-started-events (state params)
   "Decode the start of a Codex turn from driver STATE and PARAMS."
@@ -637,14 +651,14 @@ an approval or questions for the user, anything else refused."
           (unless (member turn (plist-get state :ended))
             (list (list :type 'handshake :state (list :turn turn)))))))
 
-(defun romacs-agent--codex-turn-completed-events (session state params)
-  "Decode completed turn PARAMS for SESSION with driver STATE."
+(defun romacs-agent--codex-turn-completed-events (state reply params)
+  "Decode completed turn PARAMS with driver STATE and last REPLY."
   (let* ((turn (gethash "turn" params)) (id (gethash "id" turn)))
     ;; The last few ended: an acknowledgement may come after its end.
     (list (list :type 'handshake
                 :state (list :turn (unless (equal id (plist-get state :turn)) (plist-get state :turn))
                              :ended (seq-take (cons id (plist-get state :ended)) 8)))
-          (romacs-agent--codex-done session turn))))
+          (romacs-agent--codex-done turn reply (plist-get state :window)))))
 
 (defun romacs-agent--codex-rate-limits-events (params)
   "Decode Codex account usage PARAMS into a rate-limit event."
@@ -683,7 +697,7 @@ an approval or questions for the user, anything else refused."
   (let ((state (romacs-agent-driver-state session)))
     (pcase method
       ("turn/started" (romacs-agent--codex-turn-started-events state params))
-      ("turn/completed" (romacs-agent--codex-turn-completed-events session state params))
+      ("turn/completed" (romacs-agent--codex-turn-completed-events state (romacs-agent-reply session) params))
       ("item/started" (romacs-agent--codex-item session (gethash "item" params) nil))
       ("item/completed" (romacs-agent--codex-item session (gethash "item" params) t))
       ("item/agentMessage/delta"
@@ -714,7 +728,7 @@ an approval or questions for the user, anything else refused."
       ("serverRequest/resolved"
        ;; Settled by the harness before any answer (its turn ended, it
        ;; was cancelled): no longer the user's to answer.
-       (let ((id (romacs-agent--codex-approval-id session (gethash "requestId" params))))
+       (let ((id (romacs-agent--codex-approval-id (plist-get state :run) (gethash "requestId" params))))
          (when (gethash id (romacs-agent-approvals session))
            (list (list :type 'answered :request-id id :how 'harness)))))
       ("model/rerouted"
@@ -784,13 +798,16 @@ line an earlier `codex exec' run journaled)."
          (thread (and (hash-table-p params) (gethash "threadId" params)))
          (own (romacs-agent-harness-session session)))
     (cond ((gethash "type" line) (romacs-agent--codex-exec-events session line))
-          ((and method id) (romacs-agent--codex-asked session id method params))
+          ((and method id) (romacs-agent--codex-asked (romacs-agent-driver-state session) id method params))
           ((and method own (stringp thread) (not (equal own thread)))
            (romacs-agent--codex-child-progress thread method params))
           ((and (hash-table-p params) (member method '("thread/goal/updated" "thread/goal/cleared")))
            (romacs-agent--codex-goal-events method params))
           (method (romacs-agent--codex-notified session method params))
-          (t (romacs-agent--codex-answer session id line)))))
+          (t (romacs-agent--codex-answer
+              (romacs-agent-driver-state session)
+              (plist-get (romacs-agent-options session) :model)
+              (romacs-agent-interrupted session) id line)))))
 
 (defconst romacs-agent--codex-output-delta
   "{\"out\":{\\(?:\"emittedAtMs\":[0-9]+,\\)?\"method\":\"item/\\(?:commandExecution\\|fileChange\\)/outputDelta\",\"params\":{\"delta\":"

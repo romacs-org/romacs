@@ -522,16 +522,16 @@ message's record for TEXT, `interrupted' each interrupted."
          (steer (romacs-mcp--object "id" "turn/steer:4" "method" "turn/steer"
                                     "romacsMessages" (vector (romacs-agent--message-json message))
                                     "params" (romacs-mcp--object "input" (vector (romacs-agent--codex-text "late"))))))
-    (dolist (event (romacs-agent--codex-message session steer))
+    (dolist (event (romacs-agent--codex-message (romacs-agent-driver-state session) steer))
       (when (eq (plist-get event :type) 'handshake) (romacs-agent--raise session event)))
-    (dolist (event (romacs-agent--codex-steered session "turn/steer:4" "no active turn"))
+    (dolist (event (romacs-agent--codex-steered (romacs-agent-driver-state session) "turn/steer:4" "no active turn"))
       (when (eq (plist-get event :type) 'handshake) (romacs-agent--raise session event)))
     (let* ((owed (car (plist-get (romacs-agent-driver-state session) :owed)))
            (line (romacs-agent--codex-owed-line session owed))
            (sent (romacs-agent--text-of (gethash "input" (gethash "params" line)))))
       (should (string-prefix-p "<romacs-message " sent))
       ;; Its echo: the message, as written, from the other session.
-      (let ((input (car (romacs-agent--codex-message session line))))
+      (let ((input (car (romacs-agent--codex-message (romacs-agent-driver-state session) line))))
         (should (equal (plist-get input :text) "late"))
         (should (equal (plist-get (car (plist-get input :messages)) :id) (plist-get message :id)))))))
 
