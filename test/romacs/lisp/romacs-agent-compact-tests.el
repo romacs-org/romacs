@@ -94,7 +94,7 @@
       (delete-directory root t))))
 
 (ert-deftest romacs-agent-history-keeps-the-compaction ()
-  (let ((events (romacs-agent-history--claude-events
+  (let ((events (funcall (romacs-agent-history--get 'claude :events)
                  (list (json-parse-string
                         (format "{\"type\":\"user\",\"isCompactSummary\":true,\"message\":{\"content\":\"%s\"}}"
                                 romacs-agent-compact-tests--summary))))))

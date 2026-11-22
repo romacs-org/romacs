@@ -11,6 +11,7 @@
 ;;; Code:
 
 (require 'romacs-agent)
+(require 'romacs-agent-claude-history)
 (require 'romacs-agent-gate)
 (require 'parse-time)
 
@@ -948,6 +949,7 @@ environment."
   :display "Claude Code" :icon 'claude :t3-driver "claudeAgent"
   :config-variable "CLAUDE_CONFIG_DIR" :config-default "~/.claude"
   :program-option 'romacs-agent-claude-program :arguments-option 'romacs-agent-claude-arguments
+  :idle-compact-prompt "/compact"
   ;; What Claude Code sets for the commands it runs (a parent session's).
   :scrub '("CLAUDECODE" "CLAUDE_AGENT_SDK_VERSION" "CLAUDE_CODE_CHILD_SESSION" "CLAUDE_CODE_ENTRYPOINT"
            "CLAUDE_CODE_EXECPATH" "CLAUDE_CODE_MESSAGING_SOCKET" "CLAUDE_CODE_MESSAGING_TOKEN"
@@ -976,9 +978,9 @@ environment."
   ;; A turn the harness's end cut short goes on (Claude Code's own switch).
   :resume-environment '("CLAUDE_CODE_RESUME_INTERRUPTED_TURN=1")
   :native-id-p #'romacs-agent--uuid-p
-  :history '(:files romacs-agent-history--claude-files :find romacs-agent-history--claude-find
-             :keep romacs-agent-history--claude-keep
-             :describe romacs-agent-history--claude-describe :events romacs-agent-history--claude-events))
+  :history '(:files romacs-agent-claude-history--files :find romacs-agent-claude-history--find
+             :keep romacs-agent-claude-history--keep
+             :describe romacs-agent-claude-history--describe :events romacs-agent-claude-history--events))
 
 (provide 'romacs-agent-claude)
 ;;; romacs-agent-claude.el ends here

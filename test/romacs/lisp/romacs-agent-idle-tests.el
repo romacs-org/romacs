@@ -56,6 +56,18 @@ is sent."
     (romacs-agent--raise session '(:type done :seq 11))
     (should (romacs-agent-idle-due-p session (+ 1100 3600 -60)))))
 
+(ert-deftest romacs-agent-idle-uses-the-drivers-compaction-prompt ()
+  (let ((romacs-agent--drivers romacs-agent--drivers)
+        (romacs-agent--driver-table (copy-hash-table romacs-agent--driver-table))
+        (romacs-agent--driver-generation romacs-agent--driver-generation))
+    (romacs-agent-define-harness 'idle-test :idle-compact-prompt "/shrink")
+    (romacs-agent-idle-tests--with (:harness 'idle-test)
+      (should (romacs-agent-idle-due-p session 4550))
+      (romacs-agent-idle--compact session)
+      (should (equal sent '("/shrink")))
+      (romacs-agent--raise session '(:type input :text " /SHRINK preserve tasks" :seq 8))
+      (should (plist-get (romacs-agent-driver-state session) :compact-turn)))))
+
 (ert-deftest romacs-agent-idle-an-unknown-expiry-is-not-guessed ()
   (romacs-agent-idle-tests--with ()
     ;; A request served wholly from the cache reports no life.

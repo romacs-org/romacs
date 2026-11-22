@@ -5,12 +5,9 @@
 
 ;;; Commentary:
 
-;; Claude Code and Codex keep every conversation they run in their
-;; configuration directories: Claude Code a transcript per session under
-;; projects/, Codex a rollout per thread under sessions/.  This lists
-;; them per provider instance (and each harness's default directory),
-;; renders one read-only in the chat's own look, and resumes one as a
-;; Romacs session through the harness's own resume.
+;; Each harness driver supplies how to find, describe and read its own
+;; transcripts.  This library lists them by provider instance, shows one
+;; read-only, and resumes it as a Romacs session.
 ;;
 ;; Harness files are only ever read.  Listing is directory metadata; the
 ;; newest `romacs-agent-history-limit' transcripts of a directory are
@@ -22,8 +19,7 @@
 
 (require 'cl-lib)
 (require 'romacs-agent)
-(declare-function romacs-agent--claude-incoming "romacs-agent-claude" (text))
-(declare-function romacs-agent-incoming-of "romacs-agent-tools" (text))
+(require 'romacs-agent-transcript)
 (require 'romacs-agent-ui)
 
 (defcustom romacs-agent-history-limit 50
@@ -48,288 +44,6 @@ one with nothing to resume.")
 
 (defvar romacs-agent-history--listing nil
   "The transcripts the last listing described, newest first per directory.")
-
-;;; Reading
-
-(defun romacs-agent-history--read (file beg end keep)
-  "The JSON objects of FILE's complete lines between bytes BEG and END, in
-order, that KEEP (a function of a parsed object) accepts.  Each line is
-parsed whole, however its writer spaced or ordered it.  A line BEG or
-END cuts is left out; the file's last line counts whole without its
-newline when END is the file's end."
-  (with-temp-buffer
-    (set-buffer-multibyte nil)
-    ;; From the byte before BEG: a line starting at BEG is whole.
-    (insert-file-contents-literally file nil (max 0 (1- beg)) end)
-    (goto-char (point-min))
-    ;; Cut at the start: a line's tail, or the newline before BEG.
-    (when (> beg 0) (forward-line 1))
-    (let ((objects nil)
-          (whole-end (>= end (or (file-attribute-size (file-attributes file)) end))))
-      (while (< (point) (point-max))
-        (let* ((line-start (point))
-               (newline (search-forward "\n" nil t))
-               (line-end (if newline (1- newline) (point-max))))
-          (when (or newline whole-end)
-            (let ((object (ignore-errors
-                            (json-parse-string (decode-coding-string (buffer-substring-no-properties line-start line-end)
-                                                                     'utf-8)
-                                               :object-type 'hash-table :null-object :null :false-object :false))))
-              (when (and (hash-table-p object) (funcall keep object)) (push object objects))))
-          (goto-char (if newline newline (point-max)))))
-      (nreverse objects))))
-
-(defun romacs-agent-history--field (object &rest keys)
-  "OBJECT's value at KEYS, each a key of the object the last one gave."
-  (while (and keys (hash-table-p object)) (setq object (gethash (pop keys) object)))
-  (and (null keys) object))
-
-(defun romacs-agent-history--title (text)
-  "TEXT's first line, as a title (`romacs-agent--task-line'); nil for
-none, or for a harness's own injected context (a <tag>, AGENTS.md's
-instructions)."
-  (let ((text (and (stringp text) (string-trim text))))
-    (unless (or (null text) (string-empty-p text) (string-prefix-p "<" text)
-                (string-prefix-p "# AGENTS.md instructions" text))
-      (truncate-string-to-width (romacs-agent--task-line text) 60 nil nil t))))
-
-(defun romacs-agent-history--prompt (content)
-  "The user's typed text in a Claude Code message CONTENT, or nil (a tool
-result, an injected context)."
-  (cond ((stringp content) (and (romacs-agent-history--title content) content))
-        ((vectorp content)
-         (unless (cl-some (lambda (block) (and (hash-table-p block) (equal (gethash "type" block) "tool_result"))) content)
-           (let ((text (romacs-agent--text-of content)))
-             (and (romacs-agent-history--title text) text))))))
-
-(defun romacs-agent-history--time (stamp)
-  (and (stringp stamp) (ignore-errors (float-time (date-to-time stamp)))))
-
-;;; Claude Code
-
-(defun romacs-agent-history--claude-keep (object)
-  "Whether Claude Code's transcript line OBJECT is a message's."
-  (member (gethash "type" object) '("user" "message" "assistant")))
-
-(defun romacs-agent-history--claude-files (dir _limit)
-  "Claude Code's transcripts under DIR: (PATH SIZE MTIME)."
-  (let ((projects (expand-file-name "projects" dir)) (files nil))
-    (when (file-directory-p projects)
-      (dolist (project (directory-files projects t "\\`[^.]"))
-        (when (file-directory-p project)
-          (dolist (entry (directory-files-and-attributes project t "\\`[0-9a-f-]\\{36\\}\\.jsonl\\'" t))
-            (push (list (car entry) (file-attribute-size (cdr entry))
-                        (float-time (file-attribute-modification-time (cdr entry))))
-                  files)))))
-    files))
-
-(defun romacs-agent-history--claude-find (dir id)
-  "Claude Code's transcript of session ID under DIR, in whichever
-project it was run, or nil."
-  (car (file-expand-wildcards (expand-file-name (format "projects/*/%s.jsonl" id) dir))))
-
-(defun romacs-agent-history--claude-describe (objects path)
-  "A Claude Code transcript's description from its head's OBJECTS, its
-:title nil while they name no prompt; nil while they name no directory."
-  (let ((cwd nil) (title nil))
-    (cl-loop for line in objects
-             when (and (equal (gethash "type" line) "user") (not (eq (gethash "isSidechain" line) t))) do
-             (setq cwd (or cwd (romacs-agent--value (gethash "cwd" line))))
-             (unless (or title (eq (gethash "isMeta" line) t))
-               (setq title (romacs-agent-history--title
-                            (romacs-agent-history--prompt (gethash "content" (gethash "message" line))))))
-             until title)
-    (when cwd
-      (list :harness 'claude :id (file-name-base path) :cwd cwd :title title))))
-
-(defun romacs-agent-history--claude-events (objects)
-  "A Claude Code transcript's OBJECTS as chat events."
-  (let ((scratch (romacs-agent--make :harness 'claude)) (events nil) (turn nil) (last nil) (model nil))
-    (cl-flet ((close ()
-                (when turn
-                  (push (list :type 'done :duration (let ((end (romacs-agent-history--time last))
-                                                          (start (romacs-agent-history--time turn)))
-                                                      (and end start (max 0 (- end start)))))
-                        events)
-                  (setq turn nil))))
-      (dolist (line objects)
-        (unless (or (eq (gethash "isSidechain" line) t) (eq (gethash "isMeta" line) t))
-          (pcase (gethash "type" line)
-            ((and "user" (guard (eq (gethash "isCompactSummary" line) t)))
-             (push (list :type 'compacted :text (romacs-agent--text-of (gethash "content" (gethash "message" line))))
-                   events))
-            ("user"
-             (let* ((content (gethash "content" (gethash "message" line)))
-                    (prompt (romacs-agent-history--prompt content)))
-               (cond ((and (not (and (vectorp content)
-                                     (cl-some (lambda (b) (and (hash-table-p b) (equal (gethash "type" b) "tool_result"))) content)))
-                           (romacs-agent--claude-incoming (romacs-agent--text-of content)))
-                      ;; From elsewhere (a task's result, a message, a
-                      ;; notification): said as such, never as the user,
-                      ;; and a round of its own.
-                      (close)
-                      (setq turn (gethash "timestamp" line))
-                      (dolist (incoming (romacs-agent--claude-incoming (romacs-agent--text-of content)))
-                        (push (append (list :type 'arrival) incoming) events)))
-                     (prompt
-                      (close)
-                      (setq turn (gethash "timestamp" line))
-                      (push (list :type 'meta :permission-mode (gethash "permissionMode" line)) events)
-                      (push (list :type 'input :text prompt) events))
-                     ((vectorp content)
-                      (dolist (event (romacs-agent--claude-events scratch line))
-                        (when (eq (plist-get event :type) 'tool) (push event events)))))))
-            ("assistant"
-             (let ((name (gethash "model" (gethash "message" line))))
-               (when (and (stringp name) (not (equal name model)) (not (string-prefix-p "<" name)))
-                 (setq model name)
-                 (push (list :type 'meta :model name) events)))
-             (dolist (event (romacs-agent--claude-events scratch line)) (push event events))))
-          (setq last (or (gethash "timestamp" line) last))))
-      (close))
-    (nreverse events)))
-
-;;; Codex
-
-(defun romacs-agent-history--codex-keep (object)
-  "Whether Codex's rollout line OBJECT is one its history reads."
-  (pcase (gethash "type" object)
-    ((or "session_meta" "turn_context") t)
-    ("response_item"
-     (member (romacs-agent-history--field object "payload" "type")
-             '("message" "function_call" "function_call_output" "custom_tool_call" "custom_tool_call_output"
-               "local_shell_call" "web_search_call")))
-    ("event_msg"
-     (pcase (romacs-agent-history--field object "payload" "type")
-       ((or "user_message" "task_complete" "token_count") t)
-       ("item_completed" (equal (romacs-agent-history--field object "payload" "item" "type") "UserMessage"))))))
-
-(defun romacs-agent-history--codex-files (dir limit)
-  "Codex's rollouts under DIR, newest days first, until LIMIT are found:
-\(PATH SIZE MTIME)."
-  (let ((files nil) (count 0))
-    (cl-flet ((under (parent) (and (file-directory-p parent) (reverse (directory-files parent t "\\`[0-9]+\\'")))))
-      (catch 'enough
-        (dolist (year (under (expand-file-name "sessions" dir)))
-          (dolist (month (under year))
-            (dolist (day (under month))
-              (dolist (entry (directory-files-and-attributes day t "\\`rollout-.*\\.jsonl\\'" t))
-                (cl-incf count)
-                (push (list (car entry) (file-attribute-size (cdr entry))
-                            (float-time (file-attribute-modification-time (cdr entry))))
-                      files))
-              (when (>= count limit) (throw 'enough nil)))))))
-    files))
-
-(defun romacs-agent-history--codex-find (dir id)
-  "Codex's rollout of thread ID under DIR, whatever day it began, or nil."
-  (car (file-expand-wildcards (expand-file-name (format "sessions/*/*/*/rollout-*-%s.jsonl" id) dir))))
-
-(defun romacs-agent-history--codex-prompt (payload)
-  "The user's typed text in a Codex event PAYLOAD, or nil."
-  (pcase (gethash "type" payload)
-    ("user_message" (romacs-agent--value (gethash "message" payload)))
-    ("item_completed" (romacs-agent--text-of (gethash "content" (gethash "item" payload))))))
-
-(defun romacs-agent-history--codex-describe (objects path)
-  "As `romacs-agent-history--claude-describe', for a Codex rollout."
-  (let ((thread nil) (cwd nil) (title nil))
-    (cl-loop for line in objects
-             for payload = (gethash "payload" line)
-             when (hash-table-p payload) do
-             (pcase (gethash "type" line)
-               ("session_meta" (setq thread (romacs-agent--value (gethash "id" payload))
-                                     cwd (romacs-agent--value (gethash "cwd" payload))))
-               ("event_msg" (setq title (or title (romacs-agent-history--title (romacs-agent-history--codex-prompt payload))))))
-             until title)
-    (setq thread (or thread (and (string-match "\\([0-9a-f]\\{8\\}-[0-9a-f-]\\{27\\}\\)\\.jsonl\\'" path)
-                                 (match-string 1 path))))
-    (when (and (romacs-agent--uuid-p thread) cwd)
-      (list :harness 'codex :id thread :cwd cwd :title title))))
-
-(defun romacs-agent-history--codex-input (payload)
-  (let ((arguments (gethash "arguments" payload)) (input (gethash "input" payload)))
-    (cond ((stringp arguments)
-           (let ((object (ignore-errors (json-parse-string arguments :object-type 'hash-table
-                                                           :null-object :null :false-object :false))))
-             (if (hash-table-p object)
-                 (progn (when (and (gethash "cmd" object) (not (gethash "command" object)))
-                          (puthash "command" (gethash "cmd" object) object))
-                        object)
-               (romacs-mcp--object "code" arguments))))
-          ((stringp input) (romacs-mcp--object "code" input))
-          (t nil))))
-
-(defun romacs-agent-history--codex-output (output)
-  (cond ((stringp output) output)
-        ((vectorp output) (romacs-agent--text-of output))
-        ((hash-table-p output) (or (gethash "output" output) (romacs-agent--text-of (or (gethash "content" output) ""))))
-        (t "")))
-
-(defun romacs-agent-history--codex-events (objects)
-  "A Codex rollout's OBJECTS as chat events."
-  (let ((events nil) (turn nil) (last nil) (model nil) (messages 0))
-    (cl-flet ((close ()
-                (when turn
-                  (push (list :type 'done :duration (let ((end (romacs-agent-history--time last))
-                                                          (start (romacs-agent-history--time turn)))
-                                                      (and end start (max 0 (- end start)))))
-                        events)
-                  (setq turn nil))))
-      (dolist (line objects)
-        (let ((payload (gethash "payload" line)))
-          (when (hash-table-p payload)
-            (setq last (or (gethash "timestamp" line) last))
-            (pcase (list (gethash "type" line) (gethash "type" payload))
-              (`("turn_context" ,_)
-               (let ((name (romacs-agent--value (gethash "model" payload))))
-                 (when (and (stringp name) (not (equal name model)))
-                   (setq model name)
-                   (push (list :type 'meta :model name) events))))
-              (`("event_msg" "task_complete") (close))
-              (`("event_msg" "token_count")
-               (let* ((info (gethash "info" payload))
-                      (usage (and (hash-table-p info) (gethash "last_token_usage" info))))
-                 (when (hash-table-p usage)
-                   (push (list :type 'meta :context-used (gethash "input_tokens" usage)
-                               :context-window (romacs-agent--value (gethash "model_context_window" info)))
-                         events))))
-              (`("event_msg" ,_)
-               (when-let* ((prompt (romacs-agent-history--codex-prompt payload)))
-                 (cond ((romacs-agent-incoming-of prompt)
-                        ;; From elsewhere: a round of its own, never the user's.
-                        (close)
-                        (setq turn (gethash "timestamp" line))
-                        (dolist (incoming (romacs-agent-incoming-of prompt))
-                          (push (append (list :type 'arrival) incoming) events)))
-                       ((romacs-agent-history--title prompt)
-                        (close)
-                        (setq turn (gethash "timestamp" line))
-                        (push (list :type 'input :text prompt) events)))))
-              (`("response_item" "message")
-               (when (equal (gethash "role" payload) "assistant")
-                 (let ((id (format "history:%d" (cl-incf messages)))
-                       (text (romacs-agent--text-of (gethash "content" payload))))
-                   (unless (string-empty-p text)
-                     (push (list :type 'delta :text (concat text "\n") :message id) events)
-                     (push (list :type 'message-end :message id) events)))))
-              (`("response_item" ,(or "function_call" "custom_tool_call"))
-               (push (list :type 'tool :state 'started :id (gethash "call_id" payload)
-                           ;; A shell command by the name `codex exec' gives it.
-                           :name (if (member (gethash "name" payload) '("exec_command" "shell")) "Bash"
-                                   (gethash "name" payload))
-                           :input (romacs-agent-history--codex-input payload))
-                     events))
-              (`("response_item" ,(or "function_call_output" "custom_tool_call_output"))
-               (push (list :type 'tool :state 'completed :id (gethash "call_id" payload)
-                           :output (romacs-agent-history--codex-output (gethash "output" payload)))
-                     events))
-              (`("response_item" ,type)
-               (let ((id (or (romacs-agent--value (gethash "call_id" payload)) (romacs-agent--value (gethash "id" payload)))))
-                 (push (list :type 'tool :state 'started :id id :name type :input nil) events)
-                 (push (list :type 'tool :state 'completed :id id :output "") events)))))))
-      (close))
-    (nreverse events)))
 
 ;;; Listing
 
@@ -362,7 +76,7 @@ a longer head while it names no title."
       (let ((description nil) (heads romacs-agent-history--heads))
         (while heads
           (setq description (funcall (romacs-agent-history--get harness :describe)
-                                     (romacs-agent-history--read path 0 (min size (car heads))
+                                     (romacs-agent-transcript-read path 0 (min size (car heads))
                                                                  (romacs-agent-history--get harness :keep))
                                      path))
           (setq heads (and (not (plist-get description :title)) (> size (car heads)) (cdr heads))))
@@ -483,20 +197,23 @@ its providers, T3's settings file and the listing's size."
           (if (boundp 'romacs-agent-t3-settings) (format " romacs-agent-t3-settings %S" romacs-agent-t3-settings) "")))
 
 (defun romacs-agent-history--driver-files ()
-  "The files defining this editor's harnesses but for those of Romacs's
-own two, each once."
-  (let ((own (delq nil (mapcar (lambda (feature) (locate-library (symbol-name feature)))
-                               '(romacs-agent-claude romacs-agent-codex)))))
-    (seq-uniq (seq-remove (lambda (file) (member (file-name-sans-extension file)
-                                                  (mapcar #'file-name-sans-extension own)))
-                          (delq nil (mapcar (lambda (cell) (plist-get (cdr cell) :file)) romacs-agent--drivers))))))
+  "The files defining this editor's registered harnesses, each once."
+  (seq-uniq (delq nil (mapcar (lambda (entry) (plist-get (cdr entry) :file))
+                            romacs-agent--drivers))))
+
+(defun romacs-agent-history--load-drivers (files)
+  "Load driver FILES the scanner's build has not already registered."
+  (let ((loaded (mapcar #'file-name-sans-extension (romacs-agent-history--driver-files))))
+    (dolist (file files)
+      (unless (member (file-name-sans-extension file) loaded)
+        (with-demoted-errors "romacs-agent-history: %S" (load file nil t))))))
 
 (defun romacs-agent-history--drivers-form ()
-  "The form loading this editor's harnesses' own files in a batch
-process: with this editor's `load-path', so what they require is found;
-each alone, so one failing to load leaves the others listed."
-  (format "(progn (setq load-path (delete-dups (append '%S load-path))) (dolist (file '%S) (with-demoted-errors \"romacs-agent-history: %%S\" (load file nil t))))"
-          load-path (romacs-agent-history--driver-files)))
+  "The form giving a scanner this editor's extra drivers and load path."
+  (prin1-to-string
+   `(progn
+      (setq load-path (delete-dups (append ',load-path load-path)))
+      (romacs-agent-history--load-drivers ',(romacs-agent-history--driver-files)))))
 
 (defun romacs-agent-history-index-soon ()
   "Write the transcripts' rows anew in a batch process of this build, off
@@ -507,15 +224,11 @@ it ends."
           (make-process
            :name "romacs-agent-history-index" :noquery t :connection-type 'pipe
            :buffer (generate-new-buffer " *romacs-agent-history-index*" t)
-           :command (append (list (expand-file-name invocation-name invocation-directory) "--batch"
-                                  "-l" "romacs-agent-claude" "-l" "romacs-agent-codex")
-                            ;; Every harness defined here, from its own file
-                            ;; (an init's, a package's): its transcripts too.
-                            (and (romacs-agent-history--driver-files)
-                                 (list "--eval" (romacs-agent-history--drivers-form)))
-                            (list "-l" "romacs-agent-history"
-                                  "--eval" (romacs-agent-history--settings)
-                                  "-f" "romacs-agent-history-index-batch"))
+           :command (list (expand-file-name invocation-name invocation-directory) "--batch"
+                          "-l" "romacs-agent-history"
+                          "--eval" (romacs-agent-history--drivers-form)
+                          "--eval" (romacs-agent-history--settings)
+                          "-f" "romacs-agent-history-index-batch")
            :sentinel (lambda (process _event)
                        (unless (process-live-p process)
                          (let ((buffer (process-buffer process)))
@@ -629,7 +342,7 @@ by HARNESS's history, or nil."
     (when (file-readable-p path)
       (let ((end (min (or (plist-get imported :size) (file-attribute-size (file-attributes path)) 0) (* 512 1024))))
         (cl-find 'input (funcall (romacs-agent-history--get harness :events)
-                                 (romacs-agent-history--read path 0 end (romacs-agent-history--get harness :keep)))
+                                 (romacs-agent-transcript-read path 0 end (romacs-agent-history--get harness :keep)))
                  :key (lambda (event) (plist-get event :type)))))))
 
 (defun romacs-agent-history-events (harness imported)
@@ -643,7 +356,7 @@ the file is gone."
          (beg (max 0 (- end romacs-agent-history-view-bytes))))
     (when (file-readable-p path)
       (let ((events (funcall (romacs-agent-history--get harness :events)
-                             (romacs-agent-history--read path beg end (romacs-agent-history--get harness :keep)))))
+                             (romacs-agent-transcript-read path beg end (romacs-agent-history--get harness :keep)))))
         ;; Cut: from the first prompt on.
         (when (> beg 0)
           (while (and events (not (memq (plist-get (car events) :type) '(input arrival)))) (pop events)))

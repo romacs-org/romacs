@@ -667,6 +667,10 @@ instances) is derived again when it changes.")
       directory it uses while that is unset;
   :program-option, :arguments-option
       the options holding its program and its extra arguments;
+  :effort-option NAME   the MCP model option for effort, reasoningEffort
+      or effort (default); targets accept both spellings;
+  :idle-compact-prompt TEXT   optional: a prompt that compacts the
+      harness's conversation while its prompt cache is warm;
   :scrub NAMES   variables it sets for the commands it runs (its own
       session's): no harness Romacs runs inherits them;
   :lifetime   `persistent' (one process reading lines) or `per-turn'
@@ -751,10 +755,12 @@ instances) is derived again when it changes.")
   :conversation-files (HOME SESSION)   the files, relative to its
       configuration directory HOME, that hold SESSION's conversation:
       what moves with it to another instance of the harness;
-  :history PLIST   reading its transcripts: :files (DIRECTORY LIMIT),
-      :find (DIRECTORY ID), the transcript of conversation ID or nil,
-      :keep (OBJECT), whether a transcript line, parsed, is read,
-      :describe and :events (`romacs-agent-history').
+  :history PLIST   optional transcript reader.  :files (DIRECTORY LIMIT)
+      returns (PATH SIZE MTIME) rows; :find (DIRECTORY ID) returns a path
+      or nil.  :keep (OBJECT) selects parsed JSON lines.  :describe
+      (OBJECTS PATH) returns the description of a bounded head, or nil;
+      :events (OBJECTS) returns chat events in order.  The reader owns
+      the format; `romacs-agent-history' owns indexing and display.
 
 The file defining it is kept (:file): a process of this build that reads
 every harness's transcripts (`romacs-agent-history-index-soon') loads it.
@@ -782,6 +788,12 @@ Defining it again replaces it."
 
 (defun romacs-agent--harness-get (session key)
   (plist-get (romacs-agent--driver session) key))
+
+(defun romacs-agent--idle-compact-prompt (session)
+  "SESSION's harness prompt for idle compaction, if it has one."
+  (plist-get (or (romacs-agent-driver session)
+                 (cdr (gethash (romacs-agent-harness session) romacs-agent--driver-table)))
+             :idle-compact-prompt))
 
 (defun romacs-agent-request-id (session)
   "A new request id for SESSION's harness, above every line it was given."
@@ -1669,6 +1681,25 @@ on whatever becomes of this server."
 
 ;;; Journal records
 
+(defun romacs-agent--compaction-input-p (prompt text)
+  "Whether TEXT starts with the compaction PROMPT as a whole command."
+  (let ((case-fold-search t))
+    (and prompt (string-match-p (concat "\\`[ \t\n]*" (regexp-quote prompt)
+                                       "\\(?:[ \t\n]\\|\\'\\)")
+                               (or text ""))
+         t)))
+
+(defun romacs-agent--record-compaction-input (session text)
+  "Record whether SESSION's input TEXT starts a compaction turn.
+A steer into an existing compaction keeps it marked."
+  (let ((state (romacs-agent-driver-state session))
+        (prompt (romacs-agent--idle-compact-prompt session)))
+    (when (or prompt (plist-member state :compact-turn))
+      (let ((compacting (or (and (> (or (romacs-agent-input-seq session) 0) (romacs-agent-done-seq session))
+                                 (plist-get state :compact-turn))
+                            (romacs-agent--compaction-input-p prompt text))))
+        (setf (romacs-agent-driver-state session) (plist-put state :compact-turn compacting))))))
+
 (defun romacs-agent--raise (session event)
   "Apply EVENT to SESSION's state and give it to the event functions."
   (when (plist-get event :time) (setf (romacs-agent-last-time session) (plist-get event :time)))
@@ -1725,18 +1756,7 @@ on whatever becomes of this server."
                   (cl-loop for (key value) on (plist-get event :state) by #'cddr
                            do (setq state (plist-put state key value)))
                   (setf (romacs-agent-driver-state session) state)))
-    ;; Whether the turn is a compaction (/compact, or /compact INSTRUCTIONS);
-    ;; a steer into a running one leaves it so.
-    ('input (setf (romacs-agent-driver-state session)
-                  (plist-put (romacs-agent-driver-state session) :compact-turn
-                             ;; A steer: a turn its records began, not ended
-                                 ;; (running from a prompt's write is no such turn).
-                             (or (and (> (or (romacs-agent-input-seq session) 0) (romacs-agent-done-seq session))
-                                      (plist-get (romacs-agent-driver-state session) :compact-turn))
-                                 (let ((case-fold-search t))
-                                   (and (string-match-p "\\`[ \t\n]*/compact\\(?:[ \t\n]\\|\\'\\)"
-                                                        (or (plist-get event :text) ""))
-                                        t)))))
+    ('input (romacs-agent--record-compaction-input session (plist-get event :text))
             ;; From another session: kept to be answered; a turn it begins
             ;; answers it (a steer into a running turn does not), and is
             ;; Romacs's own, or not.

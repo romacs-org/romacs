@@ -20,6 +20,7 @@
 ;;; Code:
 
 (require 'romacs-agent)
+(require 'romacs-agent-codex-history)
 (require 'romacs-agent-glyphs)
 
 ;;; Writing to it
@@ -713,6 +714,7 @@ thread: its rollout, wherever its day put it."
   :display "Codex" :icon 'codex :t3-driver "codex"
   :config-variable "CODEX_HOME" :config-default "~/.codex"
   :program-option 'romacs-agent-codex-program :arguments-option 'romacs-agent-codex-arguments
+  :effort-option "reasoningEffort"
   ;; What Codex sets for the commands it runs (codex-cli 0.164, read from
   ;; a child's environment).
   :scrub '("CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS" "CODEX_CI" "CODEX_SANDBOX_NETWORK_DISABLED"
@@ -737,9 +739,9 @@ thread: its rollout, wherever its day put it."
   :streamed-skip #'romacs-agent--codex-streamed-skip
   :input-events #'romacs-agent--codex-input-events
   :native-id-p #'romacs-agent--uuid-p
-  :history '(:files romacs-agent-history--codex-files :find romacs-agent-history--codex-find
-             :keep romacs-agent-history--codex-keep
-             :describe romacs-agent-history--codex-describe :events romacs-agent-history--codex-events))
+  :history '(:files romacs-agent-codex-history--files :find romacs-agent-codex-history--find
+             :keep romacs-agent-codex-history--keep
+             :describe romacs-agent-codex-history--describe :events romacs-agent-codex-history--events))
 
 (provide 'romacs-agent-codex)
 ;;; romacs-agent-codex.el ends here

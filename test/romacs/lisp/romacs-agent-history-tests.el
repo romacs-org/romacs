@@ -143,23 +143,23 @@
             (insert "{\"type\": \"response_item\", \"payload\": {\"type\": \"message\", \"role\": \"user\"}}\n"
                     "{\"type\": \"event_msg\", \"payload\": {\"type\": \"item_completed\", \"item\": {\"type\": \"UserMessage\"}}}\n"
                     "{\"type\": \"event_msg\", \"payload\": {\"type\": \"agent_reasoning\"}}\n"))
-          (should (= (length (romacs-agent-history--read file 0 (file-attribute-size (file-attributes file))
-                                                         #'romacs-agent-history--codex-keep))
+          (should (= (length (romacs-agent-transcript-read file 0 (file-attribute-size (file-attributes file))
+                                                         (romacs-agent-history--get 'codex :keep)))
                      2))
           ;; Its keys in any order, and the last line without its newline.
           (with-temp-file file
             (insert "{\"payload\": {\"item\": {\"content\": [], \"type\": \"UserMessage\"}, \"type\": \"item_completed\"}, \"type\": \"event_msg\"}\n"
                     "{\"payload\": {\"type\": \"message\"}, \"type\": \"response_item\"}"))
-          (should (= (length (romacs-agent-history--read file 0 (file-attribute-size (file-attributes file))
-                                                         #'romacs-agent-history--codex-keep))
+          (should (= (length (romacs-agent-transcript-read file 0 (file-attribute-size (file-attributes file))
+                                                         (romacs-agent-history--get 'codex :keep)))
                      2))
           ;; A read ending after a whole object, before its newline and the
           ;; file's end, leaves it out: the line may go on.
           (with-temp-file file
             (insert "{\"payload\": {\"type\": \"message\"}, \"type\": \"response_item\"}\n"
                     "{\"payload\": {\"type\": \"message\"}, \"type\": \"response_item\"}\n"))
-          (should (= (length (romacs-agent-history--read file 0 (1- (file-attribute-size (file-attributes file)))
-                                                         #'romacs-agent-history--codex-keep))
+          (should (= (length (romacs-agent-transcript-read file 0 (1- (file-attribute-size (file-attributes file)))
+                                                         (romacs-agent-history--get 'codex :keep)))
                      1)))
       (when (buffer-live-p buffer) (kill-buffer buffer))
       (delete-file file))))
@@ -197,6 +197,27 @@
           (should (member file (romacs-agent-history--driver-files))))
       (delete-file file))))
 
+(ert-deftest romacs-agent-history-reads-a-registered-format ()
+  (let ((file (make-temp-file "romacs-history-" nil ".jsonl"
+                             "{\"message\":\"custom prompt\"}\n{\"skip\":true}\n"))
+        (romacs-agent--drivers romacs-agent--drivers)
+        (romacs-agent--driver-table (copy-hash-table romacs-agent--driver-table))
+        (romacs-agent--driver-generation romacs-agent--driver-generation)
+        (romacs-agent-history--descriptions (make-hash-table :test #'equal)))
+    (unwind-protect
+        (let ((find-file (lambda (_dir id) (and (equal id "custom") file)))
+              (read-events (lambda (rows)
+                             (mapcar (lambda (row) (list :type 'input :text (gethash "message" row))) rows))))
+          (romacs-agent-define-harness 'history-test :config-default "/tmp"
+                                       :history (list :find find-file :keep (lambda (row) (gethash "message" row))
+                                                      :describe (lambda (rows _path) (list :title (gethash "message" (car rows))))
+                                                      :events read-events))
+          (let ((item (romacs-agent-history-find 'history-test nil "custom")))
+            (should (equal (plist-get item :title) "custom prompt"))
+            (should (equal (romacs-agent-history-events 'history-test item)
+                           '(((:type input :text "custom prompt")))))))
+      (delete-file file))))
+
 (ert-deftest romacs-agent-history-a-scan-loads-harnesses-with-what-they-require ()
   ;; The scan's process loads each harness's file with this editor's
   ;; `load-path', so a library it requires from elsewhere is found; one
@@ -215,6 +236,7 @@
           (write-region "(error \"Broken driver\")\n" nil bad)
           (with-temp-buffer
             (call-process (expand-file-name invocation-name invocation-directory) nil t nil "--batch"
+                          "-l" "romacs-agent-history"
                           "--eval" (romacs-agent-history--drivers-form)
                           "--eval" "(princ (list (featurep 'romacs-history-test-helper) (featurep 'romacs-history-test-good)))")
             (should (string-search "(t t)" (buffer-string)))))

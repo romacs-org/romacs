@@ -1655,7 +1655,7 @@ once its running turn ends (`romacs-agent-renew-soon')."
 
 (defun romacs-agent-tools--effort-option (instance)
   "The name INSTANCE's harness's effort goes by in a target's options."
-  (if (eq (plist-get instance :harness) 'codex) "reasoningEffort" "effort"))
+  (or (plist-get (romacs-agent--driver-of (plist-get instance :harness)) :effort-option) "effort"))
 
 (defun romacs-agent-tools--model (instance row)
   "ROW of `romacs-agent--models' as T3 Code lists a model."

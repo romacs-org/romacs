@@ -46,6 +46,14 @@
     (should (string-match-p "\\`[0-9a-f]\\{8\\}-[0-9a-f]\\{4\\}-[0-9a-f]\\{4\\}-[0-9a-f]\\{4\\}-[0-9a-f]\\{12\\}\\'" a))
     (should (equal (romacs-agent--import-id 'codex nil "t") (romacs-agent--import-id 'codex "~/.codex" "t")))))
 
+(ert-deftest romacs-agent-driver-advertises-its-effort-option ()
+  (romacs-agent-driver-test--registry
+    (let ((romacs-agent--driver-generation romacs-agent--driver-generation))
+      (romacs-agent-define-harness 'testdrv :effort-option "reasoningEffort")
+      (let* ((model (romacs-agent-tools--model '(:harness testdrv) '("model" :efforts ("high"))))
+             (option (aref (gethash "options" model) 0)))
+        (should (equal (gethash "id" option) "reasoningEffort"))))))
+
 (defmacro romacs-agent-driver-test--launched (systemd &rest body)
   "BODY with `call-process' recording each call as (PROGRAM ARGS
 ENVIRONMENT) in `calls'; SYSTEMD nil makes systemd-run fail (the

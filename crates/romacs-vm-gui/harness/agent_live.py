@@ -2788,7 +2788,7 @@ def history(args, base):
         rows = ['{"type":"a"}\n', '{"type":"b","t":"é"}\n', '{"type":"c"}\n']
         ranges.write_bytes(''.join(rows).encode())
         b0, b1 = len(rows[0].encode()), len(rows[0].encode()) + len(rows[1].encode())
-        read = lambda beg, end: text(f'(mapcar (lambda (o) (gethash "type" o)) (romacs-agent-history--read '
+        read = lambda beg, end: text(f'(mapcar (lambda (o) (gethash "type" o)) (romacs-agent-transcript-read '
                                      f'{lisp_text(str(ranges))} {beg} {end} (lambda (&rest _) t)))') or []
         cuts = {'aligned': read(b0, b1 + len(rows[2])), 'in-char': read(b0 + 18, b1 + len(rows[2])),
                 'partial-end': read(0, b1 + 3), 'whole': read(0, b1 + len(rows[2]))}
