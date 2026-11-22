@@ -23,9 +23,9 @@
 (ert-deftest romacs-truncate-a-chip-s-name-fits-its-width ()
   (let ((truncate-string-ellipsis "..."))
     (dotimes (width 24)
-      (should (<= (string-width (romacs-attach--elide "abcdef.txt" width)) width))
-      (should (<= (string-width (romacs-attach--elide romacs-truncate-tests--long width)) width)))
-    (should (equal (romacs-attach--elide romacs-truncate-tests--long 14) "abcd...nop.txt"))))
+      (should (<= (string-width (romacs-truncate-middle "abcdef.txt" width)) width))
+      (should (<= (string-width (romacs-truncate-middle romacs-truncate-tests--long width)) width)))
+    (should (equal (romacs-truncate-middle romacs-truncate-tests--long 14) "abcd...nop.txt"))))
 
 (ert-deftest romacs-truncate-a-toast-stays-within-its-columns ()
   (let ((truncate-string-ellipsis "...") (romacs-layer-toast-lines 1))

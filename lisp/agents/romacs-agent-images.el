@@ -110,20 +110,24 @@ shows images."
       (when image (insert-image image " ")))))
 
 (defun romacs-agent-images--row-text (name age columns)
-  "A row's text in COLUMNS: NAME, shortened to leave room for AGE, and AGE."
-  (concat "  " (romacs-truncate name (- columns 4 (string-width age)))
+  "A row's text in COLUMNS: NAME, its middle elided to leave room for AGE
+\(a screenshot's time is at its end), and AGE."
+  (concat "  " (romacs-truncate-middle name (- columns 4 (string-width age)))
           (propertize (concat "  " age) 'face 'shadow)))
 
 (defun romacs-agent-images--insert-row (file selected)
   "Insert the row of FILE, SELECTED or not: one line, always."
   (let ((start (point)) (width (* 2 romacs-agent-images--thumbnail-height)))
+    ;; The accent's bar marks the row: an image takes no face's background.
+    (insert (if selected (propertize "▎" 'face 'romacs-layer-glow) " "))
     (romacs-agent-images--insert-image file width romacs-agent-images--thumbnail-height)
     (insert (romacs-agent-images--row-text
              (file-name-nondirectory file) (romacs-agent-images--age file)
-             ;; Three columns spare: an image takes a little more than its width.
-             (- romacs-agent-images--list-columns 3 (ceiling width (frame-char-width))))
+             ;; Four columns spare: the bar's, and an image takes a little
+             ;; more than its width.
+             (- romacs-agent-images--list-columns 4 (ceiling width (frame-char-width))))
             "\n")
-    (when selected (add-face-text-property start (point) 'highlight))))
+    (when selected (add-face-text-property start (point) 'romacs-layer-selection))))
 
 (defun romacs-agent-images--draw (state)
   "Fill the current buffer, the list, from STATE."
@@ -139,7 +143,15 @@ shows images."
         (insert "No match\n")
       (dotimes (row (min romacs-agent-images--rows (- (length matches) first)))
         (romacs-agent-images--insert-row (aref matches (+ first row)) (= (+ first row) selected))))
+    (insert (romacs-agent-images--keys))
     (goto-char (point-min))))
+
+(defun romacs-agent-images--keys ()
+  "The picker's keys, a line under its rows."
+  (mapconcat (pcase-lambda (`(,key . ,what))
+               (concat (propertize key 'face 'romacs-popup-key) " " (propertize what 'face 'romacs-popup-description)))
+             '(("RET" . "attach") ("C-n/C-p" . "move") ("TAB" . "browse") ("C-g" . "cancel"))
+             "   "))
 
 (defun romacs-agent-images--draw-preview (file layout)
   "Fill the current buffer, the preview, with FILE, or nothing when nil."
@@ -160,7 +172,8 @@ do not fit.  Heights and widths are of the text; a card's padding goes round
 it."
   (let* ((padding (* 2 (plist-get (alist-get 'card romacs-popup-look) :padding)))
          (gap romacs-agent-images--gap)
-         (lines (ceiling (+ ch (* romacs-agent-images--rows romacs-agent-images--thumbnail-height)) ch))
+         ;; The query's line, the rows, the keys' line.
+         (lines (ceiling (+ (* 2 ch) (* romacs-agent-images--rows romacs-agent-images--thumbnail-height)) ch))
          (height (* lines ch))
          (columns romacs-agent-images--list-columns)
          (list-width (* columns cw))

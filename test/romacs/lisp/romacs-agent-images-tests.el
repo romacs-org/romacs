@@ -75,11 +75,11 @@
     ;; The preview starts past the list, and the pair is centred.
     (should (> (plist-get layout :preview-x) list-end))
     (should (<= (abs (- (plist-get layout :list-x) (- 2000 end))) 1))
-    (should (= (plist-get layout :height) 460))
-    (should (= (plist-get layout :lines) 23))
+    (should (= (plist-get layout :height) 480))
+    (should (= (plist-get layout :lines) 24))
     (should (= (plist-get layout :preview-width) (* 10 (plist-get layout :preview-columns))))
     (should (> (plist-get layout :y) 30)))
-  ;; It fits as it is drawn, in whole cells: 16 lines of 30 are 480 pixels.
+  ;; It fits as it is drawn, in whole cells: 17 lines of 30 are 510 pixels.
   (should-not (romacs-agent-images--layout 0 0 2000 510 15 30))
   (let* ((layout (romacs-agent-images--layout 0 0 2000 560 15 30))
          (padding (* 2 (plist-get (alist-get 'card romacs-popup-look) :padding))))
@@ -96,7 +96,8 @@
   (let* ((name "screenshot-2026-11-06_09-41-20-agent-with-a-very-long-name.png")
          (row (romacs-agent-images--row-text name "12d" 30)))
     (should (<= (string-width row) 30))
-    (should (string-match-p "…  12d\\'" row))
+    ;; Its middle goes: a screenshot's time, at its end, stays.
+    (should (string-match-p "….*long-name\\.png  12d\\'" row))
     ;; What fits stays whole.
     (should (equal (romacs-agent-images--row-text "a.png" "1h" 30) "  a.png  1h"))))
 

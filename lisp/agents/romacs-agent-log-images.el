@@ -38,11 +38,16 @@ agent chat; never enlarged, and narrower in a narrower window."
   "An image link in an agent chat, shown as its file's name: an
 attachment's chip.")
 
+(defconst romacs-agent-log-images-label-regexp "\\[\\(\\(?:\\\\.\\|[^][\\\n]\\)*\\)\\]"
+  "A Markdown link's label, its text in group 1: a bracket or backslash
+in it escaped by a backslash, so `a[0 [image](x.png)' links `image' only.")
+
 (defconst romacs-agent-log-images-regexp
   (let ((type "\\.\\(?:[pP][nN][gG]\\|[jJ][pP][eE]?[gG]\\|[wW][eE][bB][pP]\\|[gG][iI][fF]\\)"))
-    (concat "\\[[^]\n]*\\](\\(?:<\\([^<>\n]+" type "\\)>\\|\\([^ \t\n()<>]+" type "\\)\\))"))
+    (concat "\\[\\(?:\\\\.\\|[^][\\\n]\\)*\\](\\(?:<\\([^<>\n]+" type "\\)>\\|\\([^ \t\n()<>]+" type "\\)\\))"))
   "A Markdown link to an image file: its target in group 1, written in
-angle brackets, or else in group 2.")
+angle brackets, or else in group 2.  Its label is as
+`romacs-agent-log-images-label-regexp' reads it.")
 
 (defconst romacs-agent-log-images--indent "  "
   "What an image's rows start with: under the text after the prompt's mark.")

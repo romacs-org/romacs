@@ -89,6 +89,9 @@ PNG files in a fresh directory, and `composer' its draft's text."
       (insert "look: ")
       (romacs-agent-log-attach-yank)
       (should (equal (composer) (concat "look: " (link a))))
+      ;; The change read once the command is done.
+      (should romacs-agent-log-attach--dirty)
+      (romacs-agent-log-attach-sync)
       (should (equal (files) (list a))))
     ;; No image on the clipboard: a yank, as ever.
     (cl-letf (((symbol-function 'romacs-attach-clipboard-image-type) (lambda () nil)))
@@ -111,15 +114,92 @@ PNG files in a fresh directory, and `composer' its draft's text."
         (should-not edited)
         (should (= (length (composer)) (1- (length (link a)))))))))
 
+(ert-deftest romacs-agent-log-attach-reading-never-writes ()
+  ;; A link to a file that is gone has no chip, and stays: neither a read
+  ;; nor another chip's removal touches it.
+  (romacs-agent-log-attach-tests--with
+    (let ((gone "[image](/nonexistent/gone.png)"))
+      (insert (link a) " " gone " " (link b))
+      (romacs-agent-log-attach-sync)
+      (should (equal (files) (list a b)))
+      (romacs-agent-log-attach-sync)
+      (should (equal (composer) (concat (link a) " " gone " " (link b))))
+      (romacs-attach-set-items (romacs-attach-remove romacs-attach-items (plist-get (car romacs-attach-items) :id)))
+      (should (equal (composer) (concat gone " " (link b))))
+      ;; Linked files are the user's: no chip owns one.
+      (should-not (seq-some (lambda (item) (plist-get item :owned)) romacs-attach-items)))))
+
+(ert-deftest romacs-agent-log-attach-a-chip-is-its-own-link ()
+  ;; Two links to one file: removing the first chip removes the first
+  ;; link, the second keeps its words.
+  (romacs-agent-log-attach-tests--with
+    (insert "[before](" a ") versus [after](" a ")")
+    (romacs-agent-log-attach-sync)
+    (romacs-attach-set-items (romacs-attach-remove romacs-attach-items (plist-get (car romacs-attach-items) :id)))
+    (should (equal (composer) (concat "versus [after](" a ")")))))
+
+(ert-deftest romacs-agent-log-attach-an-edit-touches-its-link-alone ()
+  ;; Captioning one chip leaves another link as written, relative path
+  ;; and all; a caption with brackets reads back as written.
+  (romacs-agent-log-attach-tests--with
+    (let ((default-directory dir))
+      (insert "[image](a.png) and " (link b))
+      (romacs-agent-log-attach-sync)
+      (should (equal (files) (list a b)))
+      (romacs-attach-set-items (romacs-attach-caption romacs-attach-items (plist-get (nth 1 romacs-attach-items) :id) "step [2]"))
+      (should (equal (composer) (concat "[image](a.png) and [step \\[2\\]](" b ")")))
+      (let ((items romacs-attach-items))
+        (romacs-agent-log-attach-sync)
+        (should (eq items romacs-attach-items))
+        (should (equal (plist-get (nth 1 items) :caption) "step [2]"))))))
+
+(ert-deftest romacs-agent-log-attach-a-bracket-before-a-link-stays ()
+  ;; An unescaped bracket is no label's: removing the chip leaves it.
+  (romacs-agent-log-attach-tests--with
+    (insert "array[0 " (link a))
+    (romacs-agent-log-attach-sync)
+    (romacs-attach-set-items nil)
+    (should (equal (composer) "array[0"))))
+
+(ert-deftest romacs-agent-log-attach-one-paste-at-a-time ()
+  ;; A paste lands where C-y was typed, one at a time, and nowhere once
+  ;; the draft was sent.
+  (romacs-agent-log-attach-tests--with
+    (let ((pending nil) (asked 0))
+      (cl-letf (((symbol-function 'romacs-attach-clipboard-image-type) (lambda () "image/png"))
+                ((symbol-function 'romacs-attach-clipboard-file)
+                 (lambda (_type then) (setq asked (1+ asked) pending then))))
+        (insert "see  now")
+        (goto-char (- (point-max) 4))
+        (romacs-agent-log-attach-yank)
+        (romacs-agent-log-attach-yank)
+        (should (= asked 1))
+        (goto-char (point-max))
+        (insert "!")
+        (funcall pending a)
+        (should (equal (composer) (concat "see " (link a) " now!")))
+        ;; Sent before the image is saved: it lands nowhere.
+        (romacs-agent-log-attach-yank)
+        (delete-region romacs-agent-log--input (point-max))
+        (run-hooks 'romacs-agent-log-draft-replaced-hook)
+        (funcall pending b)
+        (should (equal (composer) ""))
+        (should (= asked 2))))))
+
 (ert-deftest romacs-agent-log-attach-a-tray-breaks-between-chips ()
   ;; Word wrap breaks at a space: the tray's only spaces are between its
-  ;; chips, so a narrow window wraps whole chips.
+  ;; chips, so a narrow window wraps whole chips, a name with a space too.
   (romacs-agent-log-attach-tests--with
-    (insert (link a) " " (link b) " " (link c))
+    (let ((spaced (expand-file-name "shot 1.png" dir)))
+      (copy-file a spaced)
+      (insert (link a) " " (link b) " " (link spaced)))
     (romacs-agent-log-attach-sync)
     (let ((tray (overlay-get romacs-agent-log-attach--overlay 'before-string)))
       (should (= (length (split-string tray "  " t "\n")) 3))
-      (should (= (cl-count ?\s tray) 4)))))
+      (should (= (cl-count ?\s tray) 4))
+      ;; A chip's size keeps its own face over the chip's.
+      (should (seq-some (lambda (i) (equal (get-text-property i 'face tray) '(romacs-attach-badge romacs-attach-chip)))
+                        (number-sequence 0 (1- (length tray))))))))
 
 (provide 'romacs-agent-log-attach-tests)
 ;;; romacs-agent-log-attach-tests.el ends here
