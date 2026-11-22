@@ -68,7 +68,9 @@ fn expressions() -> Vec<String> {
         r#"(list (encode-coding-string 1 'wrong) (decode-coding-string 1 nil))"#,
         r#"(encode-coding-string "a" 'coding-string-missing)"#,
         r#"(encode-coding-string "a" 15)"#,
-        r#"(decode-coding-string "a" 'coding-string-utf8 nil 'wrong)"#,
+        r#"(mapcar (lambda (coding) (let ((last-coding-system-used 'keep))
+              (list (condition-case e (decode-coding-string "a" coding nil 'wrong) (error (car e)))
+                    last-coding-system-used))) '(nil coding-string-utf8))"#,
         r#"(let* ((source "é") (result (decode-coding-string source nil t t))) (list (eq result source) (multibyte-string-p result) (vconcat result) last-coding-system-used))"#,
     ].into_iter().map(str::to_owned));
     cases
