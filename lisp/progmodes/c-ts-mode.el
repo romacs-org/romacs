@@ -727,9 +727,13 @@ MODE is either `c' or `cpp'."
                   "thread_local"))
       (append '("auto") c-keywords))))
 
-(defvar c-ts-mode--for-each-tail-regexp
-  (rx "FOR_EACH_" (or "TAIL" "TAIL_SAFE" "ALIST_VALUE"
-                      "LIVE_BUFFER" "FRAME"))
+(defconst c-ts-mode--for-each-tail-prefix "FOR_EACH_")
+
+(defconst c-ts-mode--for-each-tail-default-regexp
+  (concat (regexp-quote c-ts-mode--for-each-tail-prefix)
+          (rx (or "TAIL" "TAIL_SAFE" "ALIST_VALUE" "LIVE_BUFFER" "FRAME"))))
+
+(defvar c-ts-mode--for-each-tail-regexp c-ts-mode--for-each-tail-default-regexp
   "A regexp matching all the variants of the FOR_EACH_* macro.")
 
 (defvar c-ts-mode--doxygen-comment-regex
@@ -1321,19 +1325,58 @@ For BOL see `treesit-simple-indent-rules'."
       (skip-chars-forward " \t")
       (looking-at c-ts-mode--for-each-tail-regexp))))
 
+(defvar c-ts-mode--emacs-c-range-prefix-query nil
+  "The compiled range query that requires `c-ts-mode--for-each-tail-prefix'.")
+
 (defvar c-ts-mode--emacs-c-range-query
   (when (treesit-available-p)
-    (treesit-query-compile
-     'c `(((declaration
-            type: (macro_type_specifier
-                   name: (identifier) @_name)
-            @for-each-tail)
-           (:match ,c-ts-mode--for-each-tail-regexp
-                   @_name)))))
+    (let ((query (treesit-query-compile
+                  'c `(((declaration
+                         type: (macro_type_specifier
+                                name: (identifier) @_name)
+                         @for-each-tail)
+                        (:match ,c-ts-mode--for-each-tail-regexp
+                                @_name))))))
+      (when (equal c-ts-mode--for-each-tail-regexp
+                   c-ts-mode--for-each-tail-default-regexp)
+        (setq c-ts-mode--emacs-c-range-prefix-query query))
+      query))
   "Query that finds a FOR_EACH_* macro with an unbracketed body.")
 
 (defvar-local c-ts-mode--for-each-tail-ranges nil
   "Ranges covering all the FOR_EACH_* macros in the buffer.")
+
+(defun c-ts-mode--for-each-tail-query-bounds (root beg end)
+  "Extend BEG..END in ROOT over declarations crossing its edges.
+A declaration overlapping the request can name a macro outside it."
+  (let ((left (treesit-node-descendant-for-range root beg (1+ beg) t))
+        (right (treesit-node-descendant-for-range root (1- end) end t)))
+    (when (and left right)
+      (dolist (node (list left right))
+        (while node
+          (when (equal (treesit-node-type node) "declaration")
+            (setq beg (min beg (treesit-node-start node))
+                  end (max end (treesit-node-end node))))
+          (setq node (treesit-node-parent node))))
+      (cons beg end))))
+
+(defun c-ts-mode--for-each-tail-absent-p (root beg end)
+  "Whether the stock macro query can find no match in ROOT over BEG..END."
+  (and c-ts-mode--emacs-c-range-prefix-query
+       (eq c-ts-mode--emacs-c-range-prefix-query c-ts-mode--emacs-c-range-query)
+       (integerp beg) (integerp end)
+       (>= (- end beg) 16384)
+       (not (buffer-narrowed-p))
+       (not (buffer-base-buffer))
+       (eq (treesit-node-buffer root) (current-buffer))
+       (<= (point-min) beg end (point-max))
+       (when-let* ((bounds (c-ts-mode--for-each-tail-query-bounds root beg end)))
+         (save-match-data
+           (save-excursion
+             (goto-char (car bounds))
+             (let ((case-fold-search nil))
+               (not (search-forward c-ts-mode--for-each-tail-prefix
+                                    (cdr bounds) t))))))))
 
 (defun c-ts-mode--reverse-ranges (ranges beg end)
   "Reverse RANGES and return the new ranges between BEG and END.
@@ -1361,9 +1404,10 @@ BEG and END are described in `treesit-range-rules'."
   (let* ((c-parser (treesit-parser-create 'c))
          (for-each-parser (treesit-parser-create 'c nil nil 'for-each))
          (old-ranges c-ts-mode--for-each-tail-ranges)
-         (new-ranges (treesit-query-range
-                      (treesit-parser-root-node for-each-parser)
-                      c-ts-mode--emacs-c-range-query beg end))
+         (root (treesit-parser-root-node for-each-parser))
+         (new-ranges (unless (c-ts-mode--for-each-tail-absent-p root beg end)
+                       (treesit-query-range
+                        root c-ts-mode--emacs-c-range-query beg end)))
          (set-ranges (treesit--clip-ranges
                       (treesit--merge-ranges
                        old-ranges new-ranges beg end)

@@ -90,7 +90,7 @@ impl Leaf<'_> {
     }
 
     /// F over BUFFER's Markdown index, synced to the text, and a reader of
-    /// its text by character offsets; with the span the sync read again,
+    /// its text by character offsets; with the span whose faces may have changed,
     /// when the index was already built.
     fn markdown_synced<T>(&mut self, buffer: Value, f: impl FnOnce(&markdown::Index, &dyn Fn(std::ops::Range<usize>) -> String) -> T)
         -> R<(T, Option<std::ops::Range<usize>>)> {

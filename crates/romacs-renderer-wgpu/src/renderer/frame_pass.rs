@@ -54,6 +54,7 @@ pub(super) struct FrameParams<'a> {
     pub(super) logical_h: f32,
     /// Native pixels per logical pixel for device-defined decoration widths.
     pub(super) device_scale: DeviceScale,
+    pub(super) glyph_cull_bounds: Option<Rect>,
     pub(super) face_debug_call_id: u64,
     /// Whether line/scroll-spacing animations are active this frame
     /// (glyph Y positions then go through `line_y_offset`).

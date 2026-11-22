@@ -1,3 +1,4 @@
+use romacs_display_protocol::{DeviceScale, types::Rect};
 use std::num::NonZeroU32;
 
 /// A non-empty physical-pixel scissor contained by its render target.
@@ -27,6 +28,19 @@ impl SurfaceScissor {
             width: NonZeroU32::new(right.saturating_sub(x))?,
             height: NonZeroU32::new(bottom.saturating_sub(y))?,
         })
+    }
+
+    /// Logical bounds for culling geometry. Keep a device pixel at each
+    /// edge for rounding through the vertex shader's projection.
+    #[expect(clippy::cast_precision_loss, reason = "scissor edges lie within the GPU texture size limit")]
+    pub(super) fn cull_bounds(self, scale: DeviceScale) -> Rect {
+        let scale = scale.get();
+        Rect::new(
+            (self.x as f32 - 1.0) / scale,
+            (self.y as f32 - 1.0) / scale,
+            (self.width.get() as f32 + 2.0) / scale,
+            (self.height.get() as f32 + 2.0) / scale,
+        )
     }
 
     pub(super) fn apply(self, pass: &mut wgpu::RenderPass<'_>) {

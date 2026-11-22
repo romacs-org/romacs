@@ -630,6 +630,30 @@ impl Leaf<'_> {
             }
         }
     }
+    /// Select a current tree, or the nearest old tree to reparse.
+    fn ts_reparse_source(
+        &mut self,
+        parser: Value,
+        first: bool,
+        ahead: Option<(native::Tree, bool)>,
+    ) -> (Option<native::Tree>, Option<native::Tree>) {
+        if let Some((tree, false)) = ahead {
+            return (Some(tree), None);
+        }
+        if let Some(twin) = self.ts_twin_tree(parser, first) {
+            return (Some(twin), None);
+        }
+        let source = match ahead {
+            None if first => self.ts_early_tree(parser),
+            other => other,
+        };
+        match source {
+            Some((tree, false)) => (Some(tree), None),
+            Some((tree, true)) => (None, Some(tree)),
+            None => (None, None),
+        }
+    }
+
     /// treesit_ensure_parsed up to its notifiers: the changed ranges when it
     /// parsed, None when no parse was due. A parse leaves the parser
     /// `within_reparse' for its notifiers (`ts_reparse_done').
@@ -666,12 +690,10 @@ impl Leaf<'_> {
             Some((tree, _, edited, changed)) => (Some((tree, edited)), changed),
             None => (None, None),
         };
-        let twin = if live { self.ts_twin_tree(parser, old.is_none()) } else { None };
-        let early = if live && old.is_none() && twin.is_none() { self.ts_early_tree(parser) } else { None };
-        let (done, behind) = match ahead.or(early) {
-            Some((tree, false)) => (Some(tree), None),
-            Some((tree, true)) => (None, Some(tree)),
-            None => (twin, None),
+        let (done, behind) = if live {
+            self.ts_reparse_source(parser, old.is_none(), ahead)
+        } else {
+            (None, None)
         };
         let new = done.or_else(|| {
             let text = self.ts_buffer_text(buffer).filter(|_| self.ts_live(buffer)).map(|t| &**t);
