@@ -1069,30 +1069,6 @@ If given a prefix (or a COMMENT argument), also prompt for a comment."
  	 (put variable 'customized-variable-comment comment)))
   value)
 
-;;;###autoload
-(defmacro setopt (&rest pairs)
-  "Set VARIABLE/VALUE pairs, and return the final VALUE.
-This is like `setq', but is meant for user options instead of
-plain variables.  This means that `setopt' will execute any
-`custom-set' form associated with VARIABLE.
-
-Note that `setopt' will emit a warning if the type of a VALUE
-does not match the type of the corresponding VARIABLE as
-declared by `defcustom'.  (VARIABLE will be assigned the value
-even if it doesn't match the type.)
-
-\(fn [VARIABLE VALUE]...)"
-  (declare (debug setq))
-  (unless (evenp (length pairs))
-    (signal 'wrong-number-of-arguments (list 'setopt (length pairs))))
-  (let ((expr nil))
-    (while pairs
-      (unless (symbolp (car pairs))
-        (error "Attempting to set a non-symbol: %s" (car pairs)))
-      (push `(setopt--set ',(car pairs) ,(cadr pairs))
-            expr)
-      (setq pairs (cddr pairs)))
-    (macroexp-progn (nreverse expr))))
 
 ;;;###autoload
 (defun setopt--set (variable value)

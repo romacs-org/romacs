@@ -6366,18 +6366,6 @@ If VARIABLE has a `custom-type' property, it must be a widget and the
 If given a prefix (or a COMMENT argument), also prompt for a comment.
 
 (fn VARIABLE VALUE &optional COMMENT)" t)
-(autoload 'setopt "cus-edit"
-"Set VARIABLE/VALUE pairs, and return the final VALUE.
-This is like `setq', but is meant for user options instead of
-plain variables.  This means that `setopt' will execute any
-`custom-set' form associated with VARIABLE.
-
-Note that `setopt' will emit a warning if the type of a VALUE
-does not match the type of the corresponding VARIABLE as
-declared by `defcustom'.  (VARIABLE will be assigned the value
-even if it doesn't match the type.)
-
-(fn [VARIABLE VALUE]...)" nil t)
 (autoload 'setopt--set "cus-edit"
 "
 

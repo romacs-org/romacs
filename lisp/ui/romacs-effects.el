@@ -609,9 +609,9 @@ The user's choice is `romacs-motion-follow-desktop' nil, or
               (get 'romacs-motion-reduced 'saved-value)
               (get 'romacs-motion-reduced 'customized-value))
     (when (romacs-motion--desktop-reduced-p)
-      ;; Not `setopt': its macro autoloads cus-edit, which loads cus-start
-      ;; again where the session's world is being built.  The watcher
-      ;; reaches the renderer either way.
+      ;; Not `setopt': running it loads cus-edit (through `setopt--set'),
+      ;; which loads cus-start again where the session's world is being
+      ;; built.  The watcher reaches the renderer either way.
       (set-default 'romacs-motion-reduced t))))
 
 ;;;; Reaching the renderer
