@@ -3,7 +3,7 @@
 
     python3 tools/tests/gate_test.py
 """
-import io, contextlib, importlib.machinery, importlib.util, json, multiprocessing, os, pathlib, shutil, subprocess, sys, tempfile, time, unittest
+import argparse, io, contextlib, importlib.machinery, importlib.util, json, multiprocessing, os, pathlib, shutil, subprocess, sys, tempfile, time, unittest
 from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'lib'))
@@ -24,6 +24,24 @@ def pinned_fixture(test, repo):
     (repo / 'ledger/parity-reference.toml').write_text(f'mirror_commit = "{FIXTURE_PIN}"\n')
     test.enterContext(mock.patch.dict(os.environ, {'GNU_ORACLE_ROOT': str(root)}))
     return binary
+
+
+def forge_job(cmd):
+    """(the frozen gate, the inner gate's arguments, its environment) of forge
+    COMMAND, its job under the deadline; the job file is read while it exists."""
+    payload = cmd[cmd.index('--') + 1:]
+    assert payload[:3] == ['timeout', '--kill-after=60', f'{gate.DEADLINE_MINUTES}m'], payload[:3]
+    assert payload[3] == gate.sys.executable and payload[5] == gate.JOB_FLAG, payload
+    path = pathlib.Path(payload[6])
+    assert path.stat().st_mode & 0o777 == 0o600
+    job = json.loads(path.read_text())
+    return payload[4], job['argv'], job['environment']
+
+
+def finished(code):
+    """A forge process that ended with CODE before announcing a job."""
+    return mock.Mock(stdout=io.StringIO(''), poll=mock.Mock(return_value=code), returncode=code,
+                     wait=mock.Mock(return_value=code))
 
 
 FIXTURE_SUITES = {'vm2': ['romacs-vm'], 'display': ['romacs-layout']}
@@ -100,17 +118,14 @@ class FixtureProvisioning(unittest.TestCase):
 
 
 class PortableToolTrust(unittest.TestCase):
-    def test_slot_defaults_are_adjacent_even_with_legacy_tools_on_path(self):
-        environment = {k: v for k, v in os.environ.items()
-                       if k not in ('ROMACS_SLOT', 'ROMACS_SLOT_RUNNER')}
-        with mock.patch.dict(os.environ, environment, clear=True), \
-             mock.patch.object(shutil, 'which', return_value='/retired/bin/tool'):
+    def test_romacs_forge_names_forge_before_the_path(self):
+        with mock.patch.dict(os.environ, {'ROMACS_FORGE': '/chosen/bin/forge', 'ROMACS_GATE_CACHE': 'relative'}), \
+             mock.patch.object(shutil, 'which', return_value='/on/path/forge'):
             local_loader = importlib.machinery.SourceFileLoader('local_gate', gate.__file__)
             module = importlib.util.module_from_spec(importlib.util.spec_from_loader('local_gate', local_loader))
             local_loader.exec_module(module)
-        root = pathlib.Path(gate.__file__).resolve().parent
-        self.assertEqual(pathlib.Path(module.SLOT), root / 'gate-slot')
-        self.assertEqual(pathlib.Path(module.RUNNER), root / 'gate-slot-runner')
+        self.assertEqual(module.FORGE, '/chosen/bin/forge')
+        self.assertEqual(module.CACHE, pathlib.Path.cwd() / 'relative')  # one root, wherever the job runs
 
     def test_mutable_usr_directory_is_not_an_immutable_tool_closure(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -540,12 +555,11 @@ class GateArguments(unittest.TestCase):
         self.oracle = pinned_fixture(self, self.root)
         (self.root / 'tools').mkdir()
         (self.root / 'tools/gate').write_bytes(pathlib.Path(gate.__file__).read_bytes())
-        for source, name in ((gate.SLOT, 'gate-slot'), (gate.RUNNER, 'gate-slot-runner')):
-            target = self.root / 'tools' / name
-            target.write_bytes(pathlib.Path(source).read_bytes())
-            target.chmod(0o755)
-        self.enterContext(mock.patch.multiple(gate, SLOT=str(self.root / 'tools/gate-slot'),
-                                             RUNNER=str(self.root / 'tools/gate-slot-runner')))
+        self.enterContext(mock.patch.object(gate, 'FORGE', '/bin/true'))
+        self.enterContext(mock.patch.object(gate, 'start_sccache'))
+        self.runtime = self.root / 'run-user'
+        self.runtime.mkdir(mode=0o700)
+        self.enterContext(mock.patch.dict(os.environ, XDG_RUNTIME_DIR=str(self.runtime)))
         subprocess.run(['git', 'init', '-b', 'master', str(self.root)], check=True, stdout=subprocess.DEVNULL)
         for key, value in [('user.name', 'Fixture'), ('user.email', 'fixture@example.invalid'), ('commit.gpgsign', 'false')]:
             subprocess.run(['git', 'config', key, value], cwd=self.root, check=True)
@@ -558,7 +572,7 @@ class GateArguments(unittest.TestCase):
     def test_oracle_and_required_test_are_forwarded_to_frozen_admission(self):
         with mock.patch.object(gate, 'ORACLE', gate.ORACLE):
             cmd = self.slot_command(['--oracle', str(self.oracle), '--require', 'pkg::bin$probe'])
-        payload = cmd[cmd.index('--') + 1:]
+        payload = self.payload
         self.assertEqual(payload[payload.index('--oracle') + 1], str(self.oracle))
         self.assertEqual(payload[payload.index('--require') + 1], 'pkg::bin$probe')
         self.assertEqual(payload[-1], 'focused')
@@ -587,7 +601,7 @@ class GateArguments(unittest.TestCase):
 
     def test_repeat_count_is_forwarded_and_invalid_counts_are_rejected(self):
         cmd = self.slot_command(['--repeat', '60'])
-        payload = cmd[cmd.index('--') + 1:]
+        payload = self.payload
         self.assertEqual(payload[payload.index('--repeat') + 1], '60')
         for count in ('0', '-1'):
             with mock.patch.object(gate.sys, 'argv', ['gate', '--repeat', count, 'focused', 'all()']), \
@@ -597,27 +611,33 @@ class GateArguments(unittest.TestCase):
 
 
     def slot_command(self, options):
+        """The forge command the gate runs, its job's environment kept in
+        self.environment (the file is gone once the gate returns)."""
+        def admitted(cmd):
+            self.frozen, self.payload, self.environment = forge_job(cmd)
+            return finished(23)
         with mock.patch.object(gate.sys, 'argv', ['gate', '--lane', 'velocity-N4', *options,
                                                 'focused', 'test(n4_selected)']), \
-             mock.patch.object(gate.subprocess, 'call', return_value=23) as call:
+             mock.patch.object(gate, 'spawn', side_effect=admitted) as call:
             self.assertEqual(gate.main(), 23)
         call.assert_called_once()
         cmd = call.call_args.args[0]
-        run_dir = pathlib.Path(cmd[0]).parent
-        self.assertEqual(cmd[:2], [str(run_dir / 'gate-slot'), 'velocity-N4'])
-        self.assertEqual((run_dir / 'gate-slot').read_bytes(), pathlib.Path(gate.SLOT).read_bytes())
-        self.assertEqual((run_dir / 'gate-slot-runner').read_bytes(), pathlib.Path(gate.RUNNER).read_bytes())
-        environment = call.call_args.kwargs['env']
-        self.assertEqual(environment['ROMACS_SLOT_RUNNER'], str(run_dir / 'gate-slot-runner'))
-        self.assertEqual(environment['ROMACS_SLOT'], cmd[0])
+        forge = cmd[:cmd.index('--')]
+        self.assertEqual(forge[:4], ['/bin/true', 'run', '--class', 'heavy'])
+        self.assertIn('--wait', forge)
+        run_dir = pathlib.Path(self.payload[self.payload.index('--run-dir') + 1])
+        job = pathlib.Path(cmd[-1])
+        self.assertEqual(job.parent, self.runtime, 'the caller environment stays out of the cache and any worktree')
+        self.assertEqual(list(self.runtime.iterdir()), [], 'the caller environment is not left behind')
+        self.assertEqual(self.environment['CARGO_TARGET_DIR'], str(gate.CACHE / 'lanes/velocity-N4/target'))
+        self.assertEqual(forge[forge.index('--lock') + 1], str(gate.CACHE / 'lanes/velocity-N4/forge.lock'))
         return cmd
 
     def assert_nextest_threads(self, cmd, core, display):
-        slot = cmd[:cmd.index('--')]
-        self.assertEqual(slot[slot.index('--test-threads') + 1], str(core + display))
-        payload = cmd[cmd.index('--') + 1:]
+        self.assertEqual(self.environment['NEXTEST_TEST_THREADS'], str(core + display))
+        payload = self.payload
         run_dir = pathlib.Path(payload[payload.index('--run-dir') + 1])
-        self.assertEqual(payload[:2], [gate.sys.executable, str(run_dir / 'gate')])
+        self.assertEqual(self.frozen, str(run_dir / 'gate'))
         runs = []
 
         def popen(argv, **kw):
@@ -634,7 +654,7 @@ class GateArguments(unittest.TestCase):
             else:
                 metadata_command(*args, **kwargs)
         archive = gate.out('git', 'archive', payload[payload.index('--tree') + 1], cwd=self.root)
-        with mock.patch.object(gate.sys, 'argv', payload[1:]), \
+        with mock.patch.object(gate.sys, 'argv', [self.frozen, *payload]), \
              mock.patch.object(gate, 'sync'), mock.patch.object(gate, 'sh', side_effect=command), \
              mock.patch.object(gate, 'environment_identity', return_value=('fixture', {}, {})), \
              mock.patch.object(gate, 'out', side_effect=lambda *a, **k: b'' if 'tools/lib/test_modules.py' in a else archive), \
@@ -685,32 +705,157 @@ class GateArguments(unittest.TestCase):
             'reuse ran with ORACLE unset; digest(None) would refuse it as malformed')
         self.assertEqual(captured['oracle'], str(self.oracle))
 
-    def test_default_jobs_is_omitted_from_slot_argv(self):
-        cmd = self.slot_command([])
-        self.assertNotIn('--jobs', cmd[:cmd.index('--')])
+    def test_default_jobs_are_a_quarter_of_the_cpus(self):
+        self.slot_command([])
+        self.assertEqual(self.environment['CARGO_BUILD_JOBS'], str(max(1, (os.cpu_count() or 4) // 4)))
 
     def test_default_threads_reach_inner_nextest(self):
         self.assert_nextest_threads(self.slot_command([]), 1, 1)
 
-    def test_admission_keeps_the_frozen_runner_after_source_edits(self):
-        cmd = self.slot_command([])
-        pathlib.Path(gate.RUNNER).write_text('raise RuntimeError("edited after freeze")\n')
-        result = subprocess.run([cmd[0], 'fixture', '--help', '--', 'true'],
-                                capture_output=True, text=True)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('MemoryMax', result.stdout)
-
     def test_default_memory_limit_reaches_admission(self):
+        # forge's --mem is half the job's MemoryMax: 34G stays the cap.
         cmd = self.slot_command([])
-        self.assertEqual(cmd[cmd.index('--mem') + 1], '34G')
+        self.assertEqual(cmd[cmd.index('--mem') + 1], '17')
+        self.assertEqual(self.slot_command(['--mem', '9G'])[cmd.index('--mem') + 1], '5')
+        with self.assertRaises(SystemExit):
+            self.slot_command(['--mem', 'lots'])
+
+    def test_a_missing_forge_is_named_before_any_job(self):
+        with mock.patch.object(gate, 'FORGE', str(self.root / 'no-forge')), \
+             mock.patch.object(gate.sys, 'argv', ['gate', 'focused', 'all()']), \
+             mock.patch.object(gate.subprocess, 'Popen', wraps=gate.subprocess.Popen) as popen, \
+             self.assertRaisesRegex(SystemExit, 'ROMACS_FORGE'):
+            gate.gate_main()
+        self.assertFalse([c for c in popen.call_args_list if c.args[0][:1] == [str(self.root / 'no-forge')]])
+
+    def follow(self, script):
+        process = subprocess.Popen([gate.sys.executable, '-c', script], stdout=subprocess.PIPE, text=True)
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            code = gate.followed(process)
+        return code, output.getvalue()
+
+    def test_the_job_s_log_is_followed_until_forge_ends(self):
+        log = self.root / 'job.log'
+        script = (f'import pathlib, sys, time\nprint("forge-heavy-gate-x {log}", flush=True)\n'
+                  f'pathlib.Path({str(log)!r}).write_text("gate: GREEN\\n")\ntime.sleep(1.5)\nsys.exit(7)\n')
+        self.assertEqual(self.follow(script), (7, 'gate: GREEN\n'))
+
+    def test_a_log_path_with_spaces_is_followed(self):
+        log = self.root / 'with space' / 'job.log'
+        log.parent.mkdir()
+        log.write_text('gate: RED\n')
+        self.assertEqual(self.follow(f'print("forge-heavy-gate-x {log}", flush=True)'), (0, 'gate: RED\n'))
+
+    def launch_args(self):
+        return argparse.Namespace(threads=1, display_threads=1, jobs=None, mem='34G')
+
+    def test_an_interrupt_reaches_forge_once_and_its_exit_is_the_gate_s(self):
+        ready = self.root / 'ready'
+        script = ('import pathlib, signal, sys, time\n'
+                  'signal.signal(signal.SIGTERM, lambda *a: sys.exit(143))\n'
+                  f'pathlib.Path({str(ready)!r}).touch()\n'
+                  'print("forge-heavy-gate-x /nonexistent/job.log", flush=True)\n'
+                  'time.sleep(30)\nsys.exit(0)\n')
+        def interrupt():
+            while not ready.exists():
+                time.sleep(0.05)
+            os.kill(os.getpid(), gate.signal.SIGTERM)
+        threading = __import__('threading')
+        threading.Thread(target=interrupt, daemon=True).start()
+        run_dir = self.root / 'run'
+        run_dir.mkdir()
+        started = time.monotonic()
+        with mock.patch.object(gate, 'spawn', lambda command: subprocess.Popen(
+                 [gate.sys.executable, '-c', script], stdout=subprocess.PIPE, text=True, start_new_session=True)), \
+             contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(gate.launch(run_dir, 'g', self.launch_args(), ['--inner', 'build']), 143)
+        self.assertLess(time.monotonic() - started, 20)
+        self.assertIs(gate.signal.getsignal(gate.signal.SIGTERM), gate.signal.SIG_DFL)
+        self.assertEqual(list(self.runtime.iterdir()), [])
+
+    def test_an_interrupt_before_forge_starts_means_it_never_starts(self):
+        run_dir = self.root / 'run'
+        run_dir.mkdir()
+        with mock.patch.object(gate, 'start_sccache', lambda: os.kill(os.getpid(), gate.signal.SIGHUP)), \
+             mock.patch.object(gate, 'spawn') as spawn:
+            self.assertEqual(gate.launch(run_dir, 'g', self.launch_args(), ['--inner', 'build']), 143)
+        spawn.assert_not_called()
+        self.assertEqual(list(self.runtime.iterdir()), [])
+
+    def test_forge_killed_by_a_signal_is_128_plus_it(self):
+        self.assertEqual(self.follow('import os, signal; os.kill(os.getpid(), signal.SIGTERM)'), (143, ''))
+
+    def test_a_cache_with_a_dollar_is_refused_before_systemd_expands_it(self):
+        with mock.patch.object(gate, 'CACHE', self.root / 'gate-${USER}'), \
+             self.assertRaisesRegex(SystemExit, 'without one'):
+            gate.forge_command(self.root / 'run', 'g', '34G', ['true'])
+
+    def test_the_job_file_never_goes_to_tmpdir_or_the_cache(self):
+        inside = self.root / 'tmp-in-worktree'
+        inside.mkdir()
+        with mock.patch.dict(os.environ, TMPDIR=str(inside)):
+            path = gate.save_job({'SECRET': 'x'}, ['build'])
+        self.addCleanup(path.unlink)
+        self.assertEqual(path.parent, self.runtime)
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        with mock.patch.dict(os.environ, XDG_RUNTIME_DIR=str(self.root / 'absent')), \
+             mock.patch.object(gate.os.path, 'isdir', lambda d: d == str(inside)), \
+             self.assertRaisesRegex(SystemExit, 'no runtime directory'):
+            gate.save_job({}, [])
+
+    def test_a_long_lane_gets_a_bounded_unique_job_name(self):
+        lane = 'l' * 220
+        run_dir = self.root / f'{lane}-20261122-083517-kzgfdkdx'
+        cmd = gate.forge_command(run_dir, lane, '34G', ['true'])
+        name = cmd[cmd.index('--name') + 1]
+        self.assertLessEqual(len(name), 80)
+        self.assertTrue(name.endswith('-20261122-083517-kzgfdkdx'), name)
+
+    def test_a_group_is_a_name_never_a_path(self):
+        for group in ('../escape', '/abs', 'shared/', '.hidden', ''):
+            with self.subTest(group=group), \
+                 mock.patch.object(gate.sys, 'argv', ['gate', '--group', group, 'focused', 'all()']), \
+                 mock.patch.object(gate, 'spawn') as spawn, self.assertRaises(SystemExit) as error:
+                gate.gate_main()
+            self.assertEqual(error.exception.code, 2)
+            spawn.assert_not_called()
+
+    def test_groups_named_like_another_group_s_locks_run_side_by_side(self):
+        for group in ('shared', 'shared.lock', 'shared.lease', 'forge.lock'):
+            with self.subTest(group=group):
+                lease = gate.group_lease(group)
+                self.assertIsNotNone(lease)
+                self.addCleanup(lease.close)
+                gate.forge_command(self.root / 'run-x', group, '34G', ['true'])
+
+    def test_the_inner_gate_starts_again_as_its_job_file_says(self):
+        path = self.root / 'job.json'
+        environment = {'ROMACS_GATE_CACHE': '/caller/cache', 'PATH': '/caller/bin'}
+        path.write_text(json.dumps({'environment': environment,
+                                    'argv': ['--inner', '--expr', 'test(${HOME})', '--group', 'g', 'build']}))
+        with mock.patch.object(gate.sys, 'argv', ['frozen-gate', gate.JOB_FLAG, str(path)]), \
+             mock.patch.object(gate.os, 'execve', side_effect=SystemExit(0)) as execve, \
+             self.assertRaises(SystemExit):
+            gate.gate_main()
+        program, args, given = execve.call_args.args
+        self.assertEqual(args, [program, 'frozen-gate', '--inner', '--expr', 'test(${HOME})', '--group', 'g', 'build'])
+        self.assertEqual(given, environment)
+        self.assertFalse(path.exists(), 'the caller environment is read once, then gone')
+
+    def test_a_submitted_gate_without_the_forge_job_is_named(self):
+        path = self.root / 'tools/gate'
+        path.write_text('# a gate from before forge admitted it\n')
+        subprocess.run(['git', 'add', 'tools/gate'], cwd=self.root, check=True)
+        with mock.patch.object(gate.sys, 'argv', ['gate', '--staged', 'focused', 'all()']), \
+             mock.patch.object(gate, 'spawn') as spawn, self.assertRaisesRegex(SystemExit, 'predates its forge job'):
+            gate.gate_main()
+        spawn.assert_not_called()
 
     def test_explicit_jobs_is_forwarded_unchanged(self):
         for jobs in (3, 8):
             with self.subTest(jobs=jobs):
-                cmd = self.slot_command(['--jobs', str(jobs)])
-                slot = cmd[:cmd.index('--')]
-                self.assertEqual(slot.count('--jobs'), 1)
-                self.assertEqual(slot[slot.index('--jobs') + 1], str(jobs))
+                self.slot_command(['--jobs', str(jobs)])
+                self.assertEqual(self.environment['CARGO_BUILD_JOBS'], str(jobs))
 
     def test_explicit_threads_reach_inner_nextest_unchanged(self):
         for options, core, display in ((['--threads', '2'], 2, 1),
@@ -741,10 +886,10 @@ class Receipts(unittest.TestCase):
         self.git('commit', '-m', 'fixture')
         self.enterContext(mock.patch.multiple(gate, HOME=self.root, CACHE=self.root / 'cache',
                                              SHORT=self.root / 'ng'))
-        self.enterContext(mock.patch.dict(os.environ, {'CARGO_HOME': str(self.root / 'cargo')}, clear=False))
-        self.runner = self.root / 'runner'
-        self.runner.write_text('runner')
-        self.enterContext(mock.patch.multiple(gate, ORACLE=str(self.oracle), SLOT=str(self.runner), RUNNER=str(self.runner)))
+        (self.root / 'run-user').mkdir(mode=0o700)
+        self.enterContext(mock.patch.dict(os.environ, {'CARGO_HOME': str(self.root / 'cargo'),
+                                                       'XDG_RUNTIME_DIR': str(self.root / 'run-user')}, clear=False))
+        self.enterContext(mock.patch.multiple(gate, ORACLE=str(self.oracle), FORGE='/bin/true', start_sccache=mock.DEFAULT))
         original = gate.out
         self.rustc = self.enterContext(mock.patch.object(gate, 'out', wraps=gate.out))
         self.rustc.side_effect = lambda *a, **k: b'rustc fixture' if a[:2] == ('rustc', '-vV') else original(*a, **k)
@@ -766,19 +911,17 @@ class Receipts(unittest.TestCase):
             os.chdir(previous)
 
     def submit(self, mode='full', *options):
-        def slot(cmd, env):
+        def slot(cmd):
             self.after_submission()
-            payload = cmd[cmd.index('--') + 1:]
+            frozen, payload, environment = forge_job(cmd)
             self.run_dir = pathlib.Path(payload[payload.index('--run-dir') + 1])
-            self.assertEqual(pathlib.Path(payload[1]).read_bytes(), (self.wt / 'tools/gate').read_bytes())
+            self.assertEqual(pathlib.Path(frozen).read_bytes(), (self.wt / 'tools/gate').read_bytes())
             def admitted():
-                with mock.patch.object(gate.sys, 'argv', payload[1:]), \
-                     mock.patch.dict(os.environ, dict(env, **self.slot_env)), \
-                     mock.patch.multiple(gate, SLOT=env['ROMACS_SLOT'], RUNNER=env['ROMACS_SLOT_RUNNER']):
+                # The job runs in the caller's environment (reexec), not its unit's.
+                with mock.patch.object(gate.sys, 'argv', [frozen, *payload]), \
+                     mock.patch.dict(os.environ, environment, clear=True):
                     return gate.main()
             if self.slot_env:
-
-
                 child = multiprocessing.get_context('fork').Process(target=lambda: os._exit(admitted()))
                 child.start()
                 child.join(10)
@@ -786,8 +929,8 @@ class Receipts(unittest.TestCase):
                     child.kill()
                     child.join()
                     self.fail('admitted fixture did not finish')
-                return child.exitcode
-            return admitted()
+                return finished(child.exitcode)
+            return finished(admitted())
 
         def build(src, run_dir, expr, threads, run, t0, suites, repeat=1):
             self.assertEqual(repeat, getattr(self, "repeat", 1))
@@ -803,7 +946,7 @@ class Receipts(unittest.TestCase):
                     failed.extend('selected' for event in events if event in ('failed', 'timeout'))
             return failed
 
-        with mock.patch.object(gate.subprocess, 'call', side_effect=slot), \
+        with mock.patch.object(gate, 'spawn', side_effect=slot), \
              mock.patch.object(gate, 'build_and_run', side_effect=build):
             rest = [options[0]] if mode == 'focused' else []
             flags = options[1:] if mode == 'focused' else options
@@ -969,7 +1112,7 @@ import json, pathlib, runpy, sys
 ns = runpy.run_path(sys.argv[1], run_name='copied_gate')
 g = ns['gate_main'].__globals__
 root = pathlib.Path(sys.argv[2])
-g.update(HOME=root, CACHE=root / 'cache', RUNNER=sys.argv[1])
+g.update(HOME=root, CACHE=root / 'cache')
 g['environment_identity'] = lambda *a: ('fixture', {}, {})
 def build(src, run_dir, expr, threads, run, t0, suites, repeat=1):
     assert not (src / '.git').exists(), 'test must execute a git-less mirror'
@@ -1031,15 +1174,6 @@ sys.exit(g['main']())
         self.assertEqual(self.reuse(), 1)
 
 
-    def test_slot_mirror_and_cross_slot_reuse(self):
-        with mock.patch.dict(os.environ, {'NEOMACS_SLOT_INDEX': '0'}):
-            self.assertEqual(self.submit(), 0)
-        self.assertTrue((self.root / '.cache/neomacs-slots/0/src/f.rs').is_file())
-        self.assertFalse((gate.CACHE / 'lanes/shared/src').exists())
-        with mock.patch.dict(os.environ, {'NEOMACS_SLOT_INDEX': '2'}):
-            self.assertEqual(self.reuse(), 0)
-        self.assertEqual(self.reuse(), 0)
-
     def test_deleted_directory_symlink_does_not_survive_lane_switch(self):
         external = self.root / 'external'
         external.mkdir()
@@ -1051,29 +1185,39 @@ sys.exit(g['main']())
         (old / 'data').write_text('old')
         self.git('add', '.')
         self.git('commit', '-m', 'lane A paths')
-        with mock.patch.dict(os.environ, {'NEOMACS_SLOT_INDEX': '0'}):
-            self.assertEqual(self.submit(), 0)
-            dest = gate.mirror('shared')
-            consumer = ['sh', '-c', 'test ! -e previous-lane/proof.txt && test ! -d old-directory']
-            self.assertNotEqual(subprocess.run(consumer, cwd=dest).returncode, 0)
-            (dest / 'untracked-leftover').write_text('not submitted')
-            link.unlink()
-            (old / 'data').unlink()
-            old.rmdir()
-            self.git('add', '-A')
-            self.git('commit', '-m', 'lane B removes lane A paths')
-            self.assertEqual(self.submit(), 0)
-            cold = self.root / 'cold'
-            archive = self.root / 'archive'
-            archive.mkdir()
-            gate.sh('tar', '-x', '-C', str(archive), input=self.git('archive', 'HEAD'))
-            gate.sync(archive, cold)
-            self.assertFalse(os.path.lexists(dest / 'previous-lane'))
-            self.assertFalse((dest / 'old-directory').exists())
-            self.assertFalse((dest / 'untracked-leftover').exists())
-            self.assertEqual(subprocess.run(consumer, cwd=dest).returncode, 0)
-            self.assertEqual(gate.mirror_files(dest), gate.mirror_files(cold))
-            self.assertEqual((external / 'proof.txt').read_text(), 'lane A data')
+        self.assertEqual(self.submit(), 0)
+        dest = gate.mirror('shared')
+        consumer = ['sh', '-c', 'test ! -e previous-lane/proof.txt && test ! -d old-directory']
+        self.assertNotEqual(subprocess.run(consumer, cwd=dest).returncode, 0)
+        (dest / 'untracked-leftover').write_text('not submitted')
+        link.unlink()
+        (old / 'data').unlink()
+        old.rmdir()
+        self.git('add', '-A')
+        self.git('commit', '-m', 'lane B removes lane A paths')
+        self.assertEqual(self.submit(), 0)
+        cold = self.root / 'cold'
+        archive = self.root / 'archive'
+        archive.mkdir()
+        gate.sh('tar', '-x', '-C', str(archive), input=self.git('archive', 'HEAD'))
+        gate.sync(archive, cold)
+        self.assertFalse(os.path.lexists(dest / 'previous-lane'))
+        self.assertFalse((dest / 'old-directory').exists())
+        self.assertFalse((dest / 'untracked-leftover').exists())
+        self.assertEqual(subprocess.run(consumer, cwd=dest).returncode, 0)
+        self.assertEqual(gate.mirror_files(dest), gate.mirror_files(cold))
+        self.assertEqual((external / 'proof.txt').read_text(), 'lane A data')
+
+    def test_a_gate_whose_group_is_held_by_another_job_is_red_before_sync(self):
+        held = gate.group_lease('shared')
+        self.addCleanup(held.close)
+        with mock.patch.object(gate, 'sync') as sync, contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(self.submit(), 1)
+        sync.assert_not_called()
+        self.assertEqual(self.captured, [])
+        self.assertIn('another gate of group shared', output.getvalue())
+        held.close()
+        self.assertEqual(self.submit(), 0)
 
     def test_mirror_file_list_mismatch_is_red_before_build(self):
         original = gate.sh
@@ -1086,38 +1230,9 @@ sys.exit(g['main']())
             self.assertEqual(self.submit(), 1)
         self.assertEqual(self.captured, [], 'must not build with a mismatched file list')
 
-    def test_slot_index_is_not_an_ambient_build_control(self):
-        with mock.patch.dict(os.environ, {'NEOMACS_SLOT_INDEX': '2'}):
-            self.assertNotIn('NEOMACS_SLOT_INDEX', gate.env(names=set()))
-            self.assertEqual(gate.env(names={'NEOMACS_SLOT_INDEX'})['NEOMACS_SLOT_INDEX'], '2')
-
-    def test_scheduler_tool_paths_do_not_change_build_inputs(self):
-        selectors = {'ROMACS_SLOT': '/run/one/slot', 'ROMACS_SLOT_RUNNER': '/run/one/runner'}
-        with mock.patch.dict(os.environ, selectors):
-            effective = gate.env(names=set())
-            declared = gate.env(names=set(selectors))
-        for key, value in selectors.items():
-            self.assertNotIn(key, effective)
-            self.assertEqual(declared[key], value)
-
-    def test_source_declared_slot_index_still_refuses_cross_slot_reuse(self):
-        (self.wt / 'f.rs').write_text('const INDEX: &str = env!("NEOMACS_SLOT_INDEX");')
-        self.git('add', '.')
-        self.git('commit', '-m', 'declare slot input')
-        with mock.patch.dict(os.environ, {'NEOMACS_SLOT_INDEX': '0'}):
-            self.assertEqual(self.submit(), 0)
-            self.assertEqual(self.reuse(), 0)
-        with mock.patch.dict(os.environ, {'NEOMACS_SLOT_INDEX': '2'}):
-            self.assertEqual(self.reuse(), 1)
-
-    def test_invalid_slot_index_refuses_before_sync(self):
-        for index in ('../escape', '-1', '', '01'):
-            with self.subTest(index=index), mock.patch.dict(os.environ, {'NEOMACS_SLOT_INDEX': index}):
-                self.assertEqual(self.submit(), 1)
-
     def test_seed_is_refused_before_admission(self):
         for options in (('--seed', 'master'), ('--seed=master',), ('--seed',)):
-            with self.subTest(options=options), mock.patch.object(gate.subprocess, 'call') as slot:
+            with self.subTest(options=options), mock.patch.object(gate, 'spawn') as slot:
                 with self.assertRaises(SystemExit) as error:
                     self.invoke(*options, 'full')
                 self.assertEqual(error.exception.code, 2)
@@ -1592,7 +1707,7 @@ fn main() { tool("CUSTOM_TOOL"); }
         path = self.run_dir / 'receipt.json'
         original = json.loads(path.read_text())
         for field, value in [('tree', 'different'), ('complete', False), ('verdict', 'RED'), ('mode', 'build'),
-                             ('gate_sha', 'different'), ('runner_sha', 'different'),
+                             ('gate_sha', 'different'),
                              ('oracle_sha', 'different'), ('schema', 0)]:
             with self.subTest(field=field):
                 path.write_text(json.dumps(dict(original, **{field: value})))
@@ -1601,35 +1716,6 @@ fn main() { tool("CUSTOM_TOOL"); }
         self.assertEqual(self.reuse('--require', 'missing'), 1)
         (self.wt / 'f.rs').write_text('dirty')
         self.assertEqual(self.reuse(), 1)
-
-
-class ResourceEntry(unittest.TestCase):
-    def test_outer_preserves_interpreter_flags_and_propagates_status(self):
-        import gate_limits
-        with mock.patch.object(gate.sys, 'argv', ['gate', 'full']), \
-                mock.patch.object(gate.sys, 'orig_argv', ['python', '-B', 'gate', 'full']), \
-                mock.patch.object(gate_limits, 'run', return_value=73) as run, \
-                mock.patch.object(gate, 'main') as main:
-            self.assertEqual(gate.entry_main(), 73)
-            run.assert_called_once_with([gate.sys.executable, '-B', 'gate', 'full'])
-            main.assert_not_called()
-
-    def test_inner_does_not_relaunch(self):
-        import gate_limits
-        with mock.patch.object(gate.sys, 'argv', ['gate', '--inner', 'full']), \
-                mock.patch.object(gate_limits, 'run') as run, \
-                mock.patch.object(gate, 'main', return_value=23):
-            self.assertEqual(gate.entry_main(), 23)
-            run.assert_not_called()
-
-    def test_unavailable_normalization_fails_closed(self):
-        import gate_limits
-        with mock.patch.object(gate.sys, 'argv', ['gate', 'full']), \
-                mock.patch.object(gate_limits, 'run', side_effect=FileNotFoundError('manager')), \
-                mock.patch.object(gate, 'main') as main, contextlib.redirect_stdout(io.StringIO()) as output:
-            self.assertEqual(gate.entry_main(), 1)
-            main.assert_not_called()
-        self.assertIn('resource normalization failed', output.getvalue())
 
 
 if __name__ == '__main__':
