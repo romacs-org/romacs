@@ -447,7 +447,7 @@ wide as the wider mark, so rows line up whichever they show."
             (tail (romacs-truncate
                    (concat (if-let* ((rollup (romacs-agent-ui--rollup (plist-get row :keys)))) (concat "  " rollup) "")
                            (if-let* ((count (plist-get row :settled-count)) ((> count 0)))
-                               (propertize (format "  %d settled" count) 'face 'romacs-agent-dim)
+                               (propertize (format "  %s %d" (romacs-agent-glyph 'board-settled) count) 'face 'romacs-agent-dim)
                              "")
                            (if-let* ((count (plist-get row :folded)))
                                (propertize (format "  %s %d thread%s" (romacs-agent-glyph 'board-threads) count (if (= count 1) "" "s")) 'face 'romacs-agent-dim)

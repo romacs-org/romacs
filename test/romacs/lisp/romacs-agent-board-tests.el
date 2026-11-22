@@ -61,7 +61,7 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
     (let* ((active (rows)) (project (car active)))
       (should (equal (romacs-agent-board-tests--ids active) '("/p/one" "b")))
       (should (equal (plist-get project :settled-count) 2))
-      (should (string-match-p "2 settled" (romacs-agent-board--line project 80))))
+      (should (string-match-p "✔️ 2" (romacs-agent-board--line project 80))))
     (should (equal (plist-get (car (rows :words '("b"))) :settled-count) 2))
     (let ((folds (make-hash-table :test #'equal)))
       (puthash "a" 'open folds)

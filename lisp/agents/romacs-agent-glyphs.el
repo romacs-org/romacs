@@ -84,6 +84,7 @@
     (chip-working "●" "A chip: working")
     ;; The board and the answering layer
     (board-threads "▸" "Before a session's thread count on the board")
+    (board-settled "✔️" "Before the project's settled thread count on the board")
     (board-history "◇" "Before a session from history on the board")
     (board-open "˅" "A board row whose threads show")
     (board-closed "›" "A board row whose threads are folded")

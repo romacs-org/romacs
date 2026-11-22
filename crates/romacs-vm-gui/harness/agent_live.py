@@ -3359,7 +3359,7 @@ def board_keys(args, base):
 
         steps['hidden_after_settle'] = settle_thread('nil')
         steps['shows_settled_count'] = a.eval(f'(with-selected-window {board} (goto-char {project_row}) '
-                                             '(and (string-search "1 settled" (buffer-substring-no-properties '
+                                             '(and (string-search "✔️ 1" (buffer-substring-no-properties '
                                              '(line-beginning-position) (line-end-position))) t))')
         a.keys('-M', 'alt', '-k', 'Return', '-m', 'alt')
         steps['visible_in_settled'] = settled(thread_row, 't')
