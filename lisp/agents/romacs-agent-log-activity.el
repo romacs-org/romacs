@@ -19,7 +19,14 @@
 (require 'romacs-working)
 
 (defface romacs-agent-log-subagent '((t :inherit font-lock-keyword-face :weight bold))
-  "The name and animation of a running subagent in chat.")
+  "The name and animation of a running harness subagent in chat.")
+
+(defface romacs-agent-log-delegated-work '((t :inherit font-lock-type-face))
+  "The animation of a thread delegated by Romacs.")
+
+(defface romacs-agent-log-delegated-title
+  '((t :inherit romacs-agent-log-delegated-work :weight bold :underline t))
+  "The title that opens a thread delegated by Romacs.")
 
 (defvar-local romacs-agent-log-activity--view nil
   "The live chat's (EWOC START . END), or nil.")
@@ -45,21 +52,20 @@
         (y (or (plist-get b :started) 0)))
     (if (= x y) (string< (plist-get a :tool) (plist-get b :tool)) (< x y))))
 
-(defun romacs-agent-log-activity--animation (id width)
-  "The animation for worker ID when WIDTH has room for it."
+(defun romacs-agent-log-activity--animation (id width face)
+  "The animation in FACE for worker ID when WIDTH has room for it."
   ;; The display overlays working cells at the start of their line.
   (when (> width (+ romacs-agent-log-activity--cols 8))
-    (concat (propertize (romacs-working-still romacs-agent-log-activity--cols 'running
-                                              'romacs-agent-log-subagent)
+    (concat (propertize (romacs-working-still romacs-agent-log-activity--cols 'running face)
                         'romacs-agent-worker id)
             "  ")))
 
-(defun romacs-agent-log-activity--line (title activity prefix width)
-  "Draw TITLE and ACTIVITY after PREFIX, within WIDTH columns."
+(defun romacs-agent-log-activity--line (title activity prefix width face)
+  "Draw TITLE in FACE and ACTIVITY after PREFIX, within WIDTH columns."
   (let* ((room (max 1 (- width (string-width (or prefix "")) 1)))
          (name (romacs-agent-log-activity--clip title (if (> room 14) (min 40 (/ room 2)) room)))
          (action (- room (string-width name) 5)))
-    (concat (propertize (concat prefix (propertize name 'face 'romacs-agent-log-subagent)
+    (concat (propertize (concat prefix (propertize name 'face face)
                                  (when (> action 2)
                                    (propertize (concat "  ·  " (romacs-agent-log-activity--clip activity action))
                                                'face 'romacs-agent-log-note)))
@@ -70,8 +76,9 @@
   "Draw the native subagent ROW within WIDTH columns."
   (romacs-agent-log-activity--line (or (plist-get row :title) "Subagent")
                                   (or (plist-get row :activity) "Working")
-                                  (romacs-agent-log-activity--animation (plist-get row :tool) width)
-                                  width))
+                                  (romacs-agent-log-activity--animation (plist-get row :tool) width
+                                                                        'romacs-agent-log-subagent)
+                                  width 'romacs-agent-log-subagent))
 
 (defun romacs-agent-log-activity--delegated-line (row width)
   "Draw the Romacs-delegated thread ROW within WIDTH columns."
@@ -80,11 +87,13 @@
          (mark (or (romacs-icon 'romacs) (romacs-agent-glyph 'romacs)))
          (prefix (concat (when (eq state 'working)
                            (romacs-agent-log-activity--animation (cons 'session id)
-                                                                 (- width (string-width mark) 1)))
+                                                                 (- width (string-width mark) 1)
+                                                                 'romacs-agent-log-delegated-work))
                          (when (> width (+ 2 (string-width mark))) (concat mark " ")))))
     (propertize (romacs-agent-log-activity--line
                  (or (plist-get row :title) "Delegated thread")
-                 (alist-get state romacs-agent-log-activity--delegated-states) prefix width)
+                 (alist-get state romacs-agent-log-activity--delegated-states)
+                 prefix width 'romacs-agent-log-delegated-title)
                 'romacs-agent-log-delegated-thread id)))
 
 (defun romacs-agent-log-activity--clip (text width)
@@ -126,7 +135,7 @@
              (marker (or (cdr entry) (copy-marker at))))
         (if entry (set-marker marker at)
           (romacs-working-show id (current-buffer) marker romacs-agent-log-activity--cols
-                               'running 'romacs-agent-log-subagent))
+                               'running (get-text-property at 'face)))
         (push (cons id marker) next)
         (setq at (next-single-property-change at 'romacs-agent-worker nil end))))
     (dolist (entry old)
