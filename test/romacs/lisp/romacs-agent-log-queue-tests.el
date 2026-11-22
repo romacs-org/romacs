@@ -259,7 +259,11 @@
       (romacs-agent-log-queue-tests--queue "gone soon")
       (romacs-agent-log-queue-tests--row 1)
       (romacs-agent-log-queue-tests--key romacs-agent-log-queue-map "e")
+      ;; Saved while held: a desktop keeps it as the queue does.
+      (should (equal (plist-get (romacs-agent-log--desktop-save nil) :draft) ""))
       (romacs-agent--dequeue session (car (romacs-agent-queue session)))
+      ;; Gone, then saved before RET: the composer's text is the draft.
+      (should (equal (plist-get (romacs-agent-log--desktop-save nil) :draft) "gone soon"))
       (should-error (romacs-agent-log-queue-tests--key romacs-agent-log-mode-map "RET") :type 'user-error)
       (should-not romacs-agent-log-queue--editing)
       (should (equal (buffer-substring-no-properties romacs-agent-log--input (point-max)) "gone soon")))))
