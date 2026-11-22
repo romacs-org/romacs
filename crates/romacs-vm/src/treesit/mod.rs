@@ -250,9 +250,12 @@ impl Registry {
         }
     }
     /// Whether a parse is due for an edit of LIMIT bytes at most.
-    pub(crate) fn small_edit_due(&self, limit: i64) -> bool {
+    pub(crate) fn small_edit_due(&self, limit: i64, shared: bool) -> bool {
         (1..=limit).contains(&self.edited.get())
-            && self.parsers.iter().any(|(_, core)| core.borrow().need_reparse)
+            && self.parsers.iter().any(|(_, core)| {
+                let core = core.borrow();
+                core.need_reparse && core.can_parse_ahead(shared)
+            })
     }
     /// treesit_record_change_1 for every parser of TEXT, edited already,
     /// the change's CHARGE bytes added to `edited`.
@@ -279,6 +282,10 @@ fn edit(start: i64, old_end: i64, new_end: i64, points: [TSPoint; 3]) -> TSInput
 }
 
 impl Core {
+    pub(crate) fn can_parse_ahead(&self, shared: bool) -> bool {
+        !shared || self.tree.is_some()
+    }
+
     pub(crate) fn new(visible: (i64, i64), linecols: Option<(Linecol, Linecol)>) -> Self {
         Self { tree: None, need_reparse: true, fresh: false, visible, linecols, ahead: None, waiting_slot: false }
     }
