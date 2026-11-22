@@ -1482,4 +1482,3 @@ none when dropped.")
 
 (provide 'romacs-agent-log-tests)
 ;;; romacs-agent-log-tests.el ends here
-

@@ -102,7 +102,11 @@
           (should (equal (buffer-substring-no-properties romacs-agent-log--input (point-max)) "second"))
           (should (romacs-agent-item-held (cadr (romacs-agent-queue session))))
           (should (text-property-search-backward 'romacs-agent-log-queued nil nil))
-          (should (string-match-p "»2 +second" (buffer-substring-no-properties romacs-agent-log--end romacs-agent-log--input)))
+          ;; The held mark is the glyph table's, a customised one too.
+          (let ((romacs-agent-glyph-alist (cons '(queue-held . "H>") romacs-agent-glyph-alist)))
+            (romacs-agent-log--separator t)
+            (should (string-match-p "H>2 +second" (buffer-substring-no-properties romacs-agent-log--end romacs-agent-log--input))))
+          (romacs-agent-log--separator t)
           (romacs-agent-log-queue-tests--compose "second, edited")
           ;; RET: back in its place, said anew, nothing sent.
           (romacs-agent-log-queue-tests--key romacs-agent-log-mode-map "RET")
@@ -147,6 +151,23 @@
         (romacs-agent--dispatch session)
         (should (equal sent '("one")))))))
 
+(ert-deftest romacs-agent-log-queue-put-back-clears-the-composer-images ()
+  ;; An edit holding an image link, put back: the composer empties as a
+  ;; send empties it, its image overlays gone with the text.
+  (let ((session (romacs-agent-test-attach
+                  (romacs-agent--make :id "c2c2c2c2-0000-4000-8000-000000000000" :harness 'claude :state 'running)
+                  t)))
+    (romacs-agent-log-queue-tests--chat session
+      (romacs-agent-log-queue-tests--queue "one")
+      (romacs-agent-log-queue-tests--row 1)
+      (romacs-agent-log-queue-tests--key romacs-agent-log-queue-map "e")
+      (romacs-agent-log-queue-tests--compose "see [image](/tmp/romacs-queue-test.png)")
+      (romacs-agent-log--composer-images romacs-agent-log--input (point-max) 0)
+      (should romacs-agent-log-images--composer)
+      (romacs-agent-log-queue-tests--key romacs-agent-log-mode-map "RET")
+      (should (string-empty-p (buffer-substring-no-properties romacs-agent-log--input (point-max))))
+      (should-not romacs-agent-log-images--composer))))
+
 (ert-deftest romacs-agent-log-queue-a-steer-never-passes-a-hold ()
   ;; A steer passes what waits for a new turn, not what its user holds.
   (let ((session (romacs-agent-test-attach
@@ -178,6 +199,14 @@
       (romacs-agent-log-queue-tests--row 1)
       (romacs-agent-log-queue-tests--key romacs-agent-log-queue-map "M-n")
       (should (equal (romacs-agent-log-queue-tests--rows) '("theirs" "mine" "Romacs's own" "last")))
+      ;; Another's mark is the table's; marks of one width keep the
+      ;; numbers in a column.
+      (let ((romacs-agent-glyph-alist (append '((queue-held . "H>") (queue-other . "O<")) romacs-agent-glyph-alist)))
+        (romacs-agent-log--separator t)
+        (let ((shown (buffer-substring-no-properties romacs-agent-log--end romacs-agent-log--input)))
+          (should (string-match-p "  O<1 +theirs" shown))
+          (should (string-match-p "    2 +mine" shown))))
+      (romacs-agent-log--separator t)
       (should (equal (romacs-agent-item-text (romacs-agent-log-queue--item-at)) "mine"))
       ;; Put first goes with the place.
       (should (romacs-agent-item-front (car (romacs-agent-queue session))))
