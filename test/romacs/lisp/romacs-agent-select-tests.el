@@ -262,7 +262,8 @@
     (let ((romacs-agent-providers '(("claude")))
           (romacs-agent-models '((claude ("a" :efforts ("low" "high")) ("b" :efforts ("max")))))
           (asked nil))
-      (cl-letf (((symbol-function 'romacs-agent--models-kept) #'ignore))
+      (cl-letf (((symbol-function 'romacs-agent--models-kept) #'ignore)
+                ((symbol-function 'romacs-agent--want-models) #'ignore))
        (with-temp-buffer
         (setq romacs-agent-ui--session session romacs-agent-log--session session)
         (should (equal (romacs-agent-menu--effort-label) "Effort: low"))

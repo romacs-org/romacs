@@ -228,8 +228,9 @@ fn menus_share_one_look_and_motion() {
             (push (eq (romacs-popup--hint-target) outer) r)
             (funcall exit-outer) (push (romacs-popup--hint-target) r)
             (nreverse r))"));
-        // Labels: one traversal; a closure by its doc's first line, a prefix as
-        // +..., a range split around the keys a child rebinds, remaps left out.
+        // Labels: one traversal, in the order written; a closure by its doc's
+        // first line, a prefix as +..., a range split around the keys a child
+        // rebinds (its parts one hint), remaps left out.
         report.push(printed(&mut vm, "(let* ((parent (make-keymap)) (child (make-sparse-keymap)))
             (define-key parent [remap undo] #'ignore)
             (set-char-table-range (nth 1 parent) '(?a . ?e) #'self-insert-command)
@@ -254,18 +255,20 @@ fn menus_share_one_look_and_motion() {
                 (funcall exit) (romacs-popup--hints-reconcile)
                 (push (frame-visible-p f) chip-hint-hidden))))"));
         report.push(printed(&mut vm, "chip-hint-hidden"));
-        // A hint too long for the window is cut where the font paints the
-        // `...', and its frame holds the painted row plus the reserved column.
+        // Hints too many for the window fill `romacs-popup-hints-max-lines'
+        // lines, the last cut where the font paints the `...', and the frame
+        // holds the widest painted row plus the reserved column.
         report.push(printed(&mut vm, "(let* ((map (make-sparse-keymap)))
-            (dotimes (i 40) (define-key map (string (+ ?a i)) #'indent-rigidly-right))
+            (dotimes (i 40) (define-key map (string (+ ?a i)) (intern (format \"chip-hint-%d\" i))))
             (romacs-popup--hints-show map)
             (let* ((buf (romacs-popup--hints-buffer)) (f (romacs-layer--frame-of buf))
                    (text (with-current-buffer buf (buffer-string)))
-                   (painted (romacs-layer--toast-width text)))
+                   (lines (split-string text \"\\n\"))
+                   (painted (apply #'max (mapcar #'romacs-layer--toast-width lines))))
               (prog1 (list (string-suffix-p \"...\" text)
                            (<= painted (- (window-body-width (selected-window)) 4))
                            (>= (window-body-width (frame-root-window f)) (1+ painted))
-                           (romacs-layer--toast-width \"...\"))
+                           (length lines) (romacs-layer--toast-width \"...\"))
                 (romacs-popup--hints-hide))))"));
         report.push(printed(&mut vm, "(let ((map (define-keymap \"o\" #'other-window \"O\" #'ignore)) r)
             (let ((romacs-popup-hints-mode nil)) (romacs-popup-repeat-echo map)
@@ -274,7 +277,8 @@ fn menus_share_one_look_and_motion() {
             (nreverse r))"));
         // A range binds what the first map in the traversal binds it to:
         // a child's range over its parent's key, overlapping inherited
-        // ranges once, and single keys amid function keys.
+        // ranges once, and single keys amid function keys, one hint per
+        // command in the order written.
         report.push(printed(&mut vm, "(let* ((parent (define-keymap \"c\" #'forward-char)) (child (make-keymap))
                  (grand (make-keymap)) (mixed (make-sparse-keymap)) (base (make-keymap)))
             (set-char-table-range (nth 1 child) '(?a . ?e) #'backward-char)
@@ -371,13 +375,13 @@ fn menus_share_one_look_and_motion() {
         "(nil t)",
         "t",
         "(t t t t nil t nil)",
-        "((\"w\" . \"left\") (\"p\" . \"+...\") (\"x\" . \"Do the thing.\") (\"a..b\" . \"self-insert-command\") (\"d..e\" . \"self-insert-command\"))",
-        "(hints t \"<right> indent-rigidly-right   <left> indent-rigidly-left\" t t nil t)",
+        "((\"x\" . \"Do the thing.\") (\"p\" . \"+...\") (\"w\" . \"left\") (\"a..b/d..e\" . \"self-insert-command\"))",
+        "(hints t \"<left> indent-rigidly-left   <right> indent-rigidly-right\" t t nil t)",
         "(nil)",
-        "(t t t 3)",
+        "(t t t 2 3)",
         // The status bar's repeat segment: the keys without hints, nothing with them.
         "(\"\" nil)",
-        "(((\"a..e\" . \"backward-char\") (\"f..h\" . \"ignore\")) ((\"<f2>\" . \"ignore\") (\"b\" . \"backward-char\") (\"<f1>\" . \"ignore\") (\"d\" . \"forward-char\") (\"a\" . \"undo\") (\"c\" . \"undo\") (\"e\" . \"undo\")))",
+        "(((\"a..e\" . \"backward-char\") (\"f..h\" . \"ignore\")) ((\"d\" . \"forward-char\") (\"<f1>/<f2>\" . \"ignore\") (\"b\" . \"backward-char\") (\"a/c\" . \"undo\")))",
         "(t (nil nil nil nil) t t nil t (t nil) (t t t) (nil nil))",
         "(t nil)",
         "(t nil nil nil)",

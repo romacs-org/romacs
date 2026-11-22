@@ -55,6 +55,115 @@
       (should (equal (mapcar #'car (romacs-agent-queue session)) '("second")))
       (should (= (romacs-agent-queue-length session) 1)))))
 
+(ert-deftest romacs-agent-queued-messages-go-in-one-turn ()
+  ;; romacs#405: messages from other sessions waiting for a turn's end go
+  ;; in the next turn together, in order, each delivered; one no longer
+  ;; wanted is dropped; a message of another kind (the user's, a task's
+  ;; results) waits for a turn of its own.
+  (let ((session (romacs-agent-test-attach
+                  (romacs-agent--make :id "77777777-8888-4999-8aaa-bbbbbbbbbbbb" :harness 'claude :state 'running)
+                  t))
+        (message (lambda (id) (romacs-agent-make-message id "parent" (list :session "p" :name "lead"))))
+        (delivered nil) (sent nil))
+    (dolist (id '("m-1" "m-2" "m-3"))
+      (romacs-agent--admit session (romacs-agent-item (concat "text " id) :kind 'next
+                                                      :messages (list (funcall message id))
+                                                      :valid (lambda () (not (equal id "m-2")))
+                                                      :delivered (lambda () (push id delivered)))))
+    (romacs-agent--admit session (romacs-agent-item "results" :kind 'next :valid #'always
+                                                    :messages (list (append (funcall message "m-4")
+                                                                            (list :wake (list :state "done" :chars 1))))))
+    (romacs-agent-send-later session "the user's")
+    (setf (romacs-agent-state session) 'idle)
+    (let ((records nil))
+      (cl-letf (((symbol-function 'romacs-agent--line)
+                 (lambda (_ object &optional journal) (push object sent) (push journal records)))
+                ((symbol-function 'romacs-agent--fold-now) #'ignore))
+        (romacs-agent--dispatch session))
+      ;; The journal keeps each message with its own text: a replay, the
+      ;; chat and a brief read them one by one.
+      (should (equal (mapcar (lambda (m) (list (gethash "id" m) (gethash "text" m)))
+                             (gethash "romacsMessages" (car records)))
+                     '(("m-1" "text m-1") ("m-3" "text m-3")))))
+    (should (= (length sent) 1))
+    (let ((content (gethash "content" (gethash "message" (car sent)))))
+      (should (string-match-p "m-1[^z-a]*text m-1[^z-a]*m-3[^z-a]*text m-3" content))
+      (should-not (string-match-p "m-2\\|m-4\\|the user's" content)))
+    (should (equal delivered '("m-3" "m-1")))
+    ;; Its end answers its parent's last.
+    (should (equal (romacs-agent-answering session) "m-3"))
+    (should (equal (mapcar #'car (romacs-agent-queue session)) '("results" "the user's")))
+    (should (= (romacs-agent-queue-length session) 2))))
+
+(ert-deftest romacs-agent-results-waiting-go-in-one-turn ()
+  ;; Two deliveries of tasks' results waiting go in one turn, their texts
+  ;; in order; a message of another kind waits behind them.
+  (let ((session (romacs-agent-test-attach
+                  (romacs-agent--make :id "79797979-8888-4999-8aaa-bbbbbbbbbbbb" :harness 'claude :state 'running)
+                  t))
+        (sent nil))
+    (dolist (id '("m-1" "m-2"))
+      (romacs-agent--admit session (romacs-agent-item (concat "result " id) :kind 'next :valid #'always
+                                                      :messages (list (append (romacs-agent-make-message id "child" '(:session "c"))
+                                                                              (list :wake (list :state "completed" :chars 1)))))))
+    (romacs-agent--admit session (romacs-agent-item "hi" :kind 'next :valid #'always
+                                                    :messages (list (romacs-agent-make-message "m-3" "parent" '(:session "p")))))
+    (setf (romacs-agent-state session) 'idle)
+    (romacs-agent-queue-tests--writing sent
+      (romacs-agent--dispatch session))
+    (should (= (length sent) 1))
+    (should (string-match-p "\\`result m-1\n\nresult m-2\n\n" (gethash "content" (gethash "message" (car sent)))))
+    (should (equal (mapcar #'car (romacs-agent-queue session)) '("hi")))))
+
+(ert-deftest romacs-agent-a-listener-s-error-is-no-failed-write ()
+  ;; Written, a message is off the queue whatever a listener of its turn's
+  ;; start does, an error or a quit: never sent a second time.
+  (dolist (failure '(error quit))
+    (ert-info ((symbol-name failure) :prefix "listener: ")
+      (let ((session (romacs-agent-test-attach
+                      (romacs-agent--make :id "7a7a7a7a-8888-4999-8aaa-bbbbbbbbbbbb" :harness 'claude :state 'idle)
+                      t))
+            ;; Failing once the turn its write began is under way.
+            (romacs-agent-event-functions (list (lambda (s _event) (when (eq (romacs-agent-state s) 'running)
+                                                                     (signal failure (list "Listener"))))))
+            (sent nil))
+        (romacs-agent-queue-tests--writing sent
+          (romacs-agent-send-later session "one" nil nil #'always
+                                   (list (romacs-agent-make-message "m-1" "parent" '(:session "p")))))
+        (should (= (length sent) 1))
+        (should (null (romacs-agent-queue session)))))))
+
+(ert-deftest romacs-agent-a-turn-answers-its-parent-s-message ()
+  ;; A turn taking a sibling's message and then its parent's answers the
+  ;; parent's: its end goes to its parent.
+  (let ((message (lambda (id kind) (romacs-agent-make-message id kind '(:session "x")))))
+    (should (equal (romacs-agent--answered (list (funcall message "s" "sibling") (funcall message "p1" "parent")
+                                                 (funcall message "p2" "parent") (funcall message "c" "child")))
+                   "p2"))
+    (should (equal (romacs-agent--answered (list (funcall message "s" "sibling") (funcall message "c" "child"))) "s"))
+    (should-not (romacs-agent--answered nil))))
+
+(ert-deftest romacs-agent-messages-in-one-turn-are-each-told ()
+  ;; One message's delivery failing, or quit, leaves the others' told:
+  ;; each was written, none waits to go again.
+  (let ((session (romacs-agent-test-attach
+                  (romacs-agent--make :id "78787878-8888-4999-8aaa-bbbbbbbbbbbb" :harness 'claude :state 'running)
+                  t))
+        (told nil) (sent nil))
+    (dolist (id '("m-1" "m-2"))
+      (romacs-agent--admit session (romacs-agent-item id :kind 'next :valid #'always
+                                                      :messages (list (romacs-agent-make-message id "parent" '(:session "p")))
+                                                      :delivered (lambda () (push id told)
+                                                                   (when (equal id "m-1") (signal 'quit nil))))))
+    (setf (romacs-agent-state session) 'idle)
+    (romacs-agent-queue-tests--writing sent
+      ;; The quit goes on once the others are told.
+      (should (eq (condition-case nil (progn (romacs-agent--dispatch session) 'none) (quit 'quit)) 'quit)))
+    (should (= (length sent) 1))
+    (should (equal told '("m-2" "m-1")))
+    (should (null (romacs-agent-queue session)))
+    (should (= (romacs-agent-queue-length session) 0))))
+
 (ert-deftest romacs-agent-queue-dispatch-is-one-at-a-time ()
   ;; A per-turn harness's run that ends before it is attached ends the turn
   ;; while its message is being sent: the next is sent after, once each.
@@ -445,6 +554,121 @@ message is sent, `romacs-agent-send' by default.")
         (romacs-agent--raise session (list :type 'done :text "at last" :seq 5))
         (romacs-agent--raise session (list :type 'exit :status 0 :seq 6))
         (should-not (romacs-agent-interrupted session))))))
+
+;;; romacs#357: a queue's rows are lost to no failure
+
+(ert-deftest romacs-agent-queue-a-store-that-will-not-open-is-unread ()
+  ;; There but not opened: unread, never empty, at startup and at unmark.
+  (romacs-agent-test-with-store
+    (make-directory (file-name-directory (romacs-agent-store--file)) t)
+    (should (romacs-agent-store--open))
+    (let* ((id "d4d4d4d4-0000-4000-8000-000000000000")
+           (mark (expand-file-name (format "%s.queued" id) (romacs-agent--marks-dir)))
+           (session (romacs-agent-test-attach (romacs-agent--make :id id :harness 'claude :state 'running :title "o") t)))
+      (romacs-agent-send-later session "one")
+      (romacs-agent-send-later session "two")
+      (cl-letf (((symbol-function 'romacs-agent-store--open) #'ignore))
+        (should-error (romacs-agent-store-queued id) :type 'romacs-agent-store-unread)
+        (should (funcall (cdr (assq 'queued romacs-agent-mark-kinds)) (expand-file-name id (romacs-agent--state-root)) nil))
+        (setf (romacs-agent-item-kept (cadr (romacs-agent-queue session))) nil)
+        (romacs-agent--unkeep-item session (car (romacs-agent-queue session))))
+      (should (file-exists-p mark)))))
+
+(ert-deftest romacs-agent-queue-an-unread-store-is-no-empty-one ()
+  ;; A read that fails signals; a restore meeting it touches nothing:
+  ;; the rows, and the session's mark, wait for the next load.
+  (romacs-agent-test-with-store
+    (make-directory (file-name-directory (romacs-agent-store--file)) t)
+    (should (romacs-agent-store--open))
+    (let* ((id "d1d1d1d1-0000-4000-8000-000000000000")
+           (mark (expand-file-name (format "%s.queued" id) (romacs-agent--marks-dir)))
+           (first (romacs-agent-test-attach (romacs-agent--make :id id :harness 'claude :state 'running :title "u") t)))
+      (romacs-agent-send-later first "kept")
+      (should (file-exists-p mark))
+      (let ((again (romacs-agent-test-attach (romacs-agent--make :id id :harness 'claude :state 'idle :title "u") t))
+            (select (symbol-function 'sqlite-select)))
+        (cl-letf (((symbol-function 'sqlite-select) (lambda (&rest _) (error "disk I/O error"))))
+          (should-error (romacs-agent-store-queued id) :type 'romacs-agent-store-unread)
+          (romacs-agent-store--requeue again nil))
+        (ignore select)
+        (should-not (romacs-agent-queue again))
+        (should (equal (mapcar #'car (romacs-agent-store-queued id)) '("kept")))
+        (should (file-exists-p mark))))))
+
+(ert-deftest romacs-agent-queue-a-failed-open-is-unread ()
+  ;; An open that signals (a lock timed out) is unread, at startup too.
+  (romacs-agent-test-with-store
+    (make-directory (file-name-directory (romacs-agent-store--file)) t)
+    (should (romacs-agent-store--open))
+    (cl-letf (((symbol-function 'romacs-agent-store--open) (lambda () (signal 'error '("database is locked")))))
+      (should-error (romacs-agent-store-queued "x") :type 'romacs-agent-store-unread)
+      (should (funcall (cdr (assq 'queued romacs-agent-mark-kinds)) (expand-file-name "x" (romacs-agent--state-root)) nil))
+      ;; Not opened, and its lookup failing: no proof it is gone.
+      (cl-letf (((symbol-function 'romacs-agent-store--open) #'ignore)
+                ((symbol-function 'file-attributes) (lambda (&rest _) (signal 'file-error '("Input/output error")))))
+        (should-error (romacs-agent-store-queued "x") :type 'romacs-agent-store-unread)))))
+
+(ert-deftest romacs-agent-queue-a-stale-mark-goes-at-the-next-restore ()
+  ;; A removal that read the store before an earlier delete landed keeps
+  ;; the mark; the next restore, finding nothing, takes it away.
+  (romacs-agent-test-with-store
+    (make-directory (file-name-directory (romacs-agent-store--file)) t)
+    (should (romacs-agent-store--open))
+    (let* ((id "d5d5d5d5-0000-4000-8000-000000000000")
+           (mark (expand-file-name (format "%s.queued" id) (romacs-agent--marks-dir)))
+           (session (romacs-agent-test-attach (romacs-agent--make :id id :harness 'claude :state 'running :title "s") t)))
+      (romacs-agent-send-later session "a")
+      (romacs-agent-send-later session "b")
+      (let ((a (car (romacs-agent-queue session))) (b (cadr (romacs-agent-queue session))))
+        ;; A's delete deferred: B goes while A's row is still there.
+        (cl-letf (((symbol-function 'romacs-agent-store-queued-delete) #'ignore))
+          (romacs-agent--dequeue session a))
+        (romacs-agent--dequeue session b)
+        (should (file-exists-p mark))
+        ;; A's delete lands.
+        (romacs-agent-store-queued-delete id (romacs-agent-item-id a)))
+      (should-not (romacs-agent-store-queued id))
+      (let ((again (romacs-agent-test-attach (romacs-agent--make :id id :harness 'claude :state 'idle :title "s") t)))
+        (romacs-agent-store--requeue again nil))
+      (should-not (file-exists-p mark)))))
+
+(ert-deftest romacs-agent-queue-a-mark-stays-while-the-store-keeps-rows ()
+  ;; A row left for the next load (its sending unsure) keeps the session's
+  ;; mark when the last message in memory goes.
+  (romacs-agent-test-with-store
+    (make-directory (file-name-directory (romacs-agent-store--file)) t)
+    (should (romacs-agent-store--open))
+    (let* ((id "d2d2d2d2-0000-4000-8000-000000000000")
+           (mark (expand-file-name (format "%s.queued" id) (romacs-agent--marks-dir)))
+           (session (romacs-agent-test-attach (romacs-agent--make :id id :harness 'claude :state 'running :title "m") t))
+           (left (romacs-agent-item "left" :kind 'next :id "left-1" :position 1.0 :kept t)))
+      (romacs-agent-store-queued-put id left)
+      (romacs-agent-send-later session "mine")
+      (romacs-agent--dequeue session (car (romacs-agent-queue session)))
+      (should (equal (mapcar #'car (romacs-agent-store-queued id)) '("left")))
+      (should (file-exists-p mark)))))
+
+(ert-deftest romacs-agent-queue-the-fill-never-restores-a-queue ()
+  ;; The batch that fills turn rows loads sessions without restoring
+  ;; their queues: only the editor writes them.
+  (romacs-agent-test-with-store
+    (let* ((id "d3d3d3d3-0000-4000-8000-000000000000")
+           (dir (expand-file-name id (romacs-agent--state-root)))
+           (restored nil))
+      (make-directory dir t)
+      (with-temp-file (expand-file-name "manifest.json" dir)
+        (insert (json-serialize (romacs-mcp--object "id" id "harness" "claude" "provider" "claude" "title" "f"))))
+      (let* ((loaded nil)
+             (romacs-agent-loaded-functions (cons (lambda (session _) (push (romacs-agent-id session) loaded))
+                                                  romacs-agent-loaded-functions)))
+        (cl-letf (((symbol-function 'romacs-agent-store--requeue) (lambda (&rest _) (setq restored t)))
+                  ((symbol-function 'princ) #'ignore))
+          (let ((command-line-args-left (list id)))
+            (romacs-agent-turns-fill-batch)))
+        ;; Loaded, its other hooks run; its queue not restored.
+        (should (member id loaded)))
+      (should-not restored)
+      (remhash id romacs-agent--sessions))))
 
 (provide 'romacs-agent-queue-tests)
 ;;; romacs-agent-queue-tests.el ends here

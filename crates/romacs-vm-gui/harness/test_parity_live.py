@@ -50,10 +50,15 @@ class PrivateTreeTests(unittest.TestCase):
 
     def test_a_socket_path_too_long_is_refused_before_the_compositor(self):
         with tempfile.TemporaryDirectory() as base:
-            root = Path(base) / ('r' * (parity_live.SOCKET_PATH_MAX - len(os.fsencode(base)) - len('/wayland-0')))
+            # One byte over the limit when TMPDIR leaves room for it, more
+            # when TMPDIR is long already (a test runner's private one).
+            pad = max(1, parity_live.SOCKET_PATH_MAX - len(os.fsencode(base)) - len('/wayland-0'))
+            root = Path(base) / ('r' * pad)
             root.mkdir()
+            size = len(os.fsencode(str(root / 'wayland-0')))
+            self.assertGreater(size, parity_live.SOCKET_PATH_MAX)
             engine = parity_live.Engine('romacs', [], root, None, {}, 1)
-            with self.assertRaisesRegex(RuntimeError, f'socket path {parity_live.SOCKET_PATH_MAX + 1} > '):
+            with self.assertRaisesRegex(RuntimeError, f'socket path {size} > '):
                 engine.spawn('/nonexistent')
             self.assertEqual(engine.processes, [])
 

@@ -896,9 +896,10 @@ a state root of its own, and a service of its own on `socket'."
             (should (equal (gethash "kind" (gethash "data" (cadr (funcall ask "agents/start" params)))) "not-live"))))
         (should (seq-some (lambda (p) (equal (gethash "cwd" p) root))
                           (gethash "projects" (car (funcall ask "agents/projects.list" (romacs-agent-rpc-object))))))
-        (should (equal (mapcar (lambda (p) (gethash "name" p))
-                               (gethash "providers" (car (funcall ask "agents/providers.list" (romacs-agent-rpc-object)))))
-                       '("claude")))))))
+        (cl-letf (((symbol-function 'romacs-agent--want-models) #'ignore))
+          (should (equal (mapcar (lambda (p) (gethash "name" p))
+                                 (gethash "providers" (car (funcall ask "agents/providers.list" (romacs-agent-rpc-object)))))
+                         '("claude"))))))))
 
 (ert-deftest romacs-agent-service-history-stops-at-its-bound ()
   ;; Past its bytes' bound a reply stops, its cursor where; the client asks

@@ -117,10 +117,6 @@ impl Backtrace {
         self.observe();
         self.only = only;
     }
-    /// Whether the observation so far recorded a call.
-    pub fn observed_any(&self) -> bool {
-        self.observed.as_ref().is_some_and(|(_, calls)| !calls.is_empty())
-    }
     /// Record the functions every call names, from now until `observed`.
     pub fn observe(&mut self) {
         self.only.clear();

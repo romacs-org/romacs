@@ -517,6 +517,35 @@ by counting characters from the start."
   "The line `romacs-agent--message-reply-line' writes after an envelope,
 each of its forms whole, and the space after it.")
 
+(defun romacs-agent--envelope-at (text at)
+  "The whole envelope of TEXT at AT, the line its sender wrote saying how
+to answer it after it (`romacs-agent--message-reply-line'), as (MESSAGE
+. END), MESSAGE a plist of :from, :state and :text; nil if none is
+there.  An envelope without that line is a user's example."
+  (when (eq (string-match "<romacs-message\\( [^>]*\\)?>\n?" text at) at)
+    (let* ((attributes (or (match-string 1 text) ""))
+           (open-end (match-end 0))
+           (attribute (lambda (name)
+                        (and (string-match (format " %s=\"\\([^\"]*\\)\"" name) attributes)
+                             (match-string 1 attributes))))
+           (from (funcall attribute "from"))
+           (kind (funcall attribute "kind"))
+           (close (string-search "</romacs-message>" text open-end))
+           (body (and close (string-trim-right (substring text open-end close) "\n")))
+           (after (and close (+ close (length "</romacs-message>")))))
+      (when (and after (eq (string-match romacs-agent--reply-line-regexp text after) after))
+        (cons (list :from (or from "a session") :state kind :text body) (match-end 0))))))
+
+(defun romacs-agent--envelopes (text)
+  "The messages of TEXT when it is whole envelopes and space alone, in
+order; nil otherwise."
+  (let ((at (progn (string-match "\\`[ \t\n]*" text) (match-end 0))) (found nil) (ok t))
+    (while (and ok (< at (length text)))
+      (if-let* ((envelope (romacs-agent--envelope-at text at)))
+          (setq found (cons (car envelope) found) at (cdr envelope))
+        (setq ok (string-match-p "\\`[ \t\n]*\\'" (substring text at)) at (length text))))
+    (and ok found (nreverse found))))
+
 (defun romacs-agent-incoming-of (text)
   "TEXT, written to an agent as a user's turn, read as what came from
 elsewhere: other sessions' messages (whole <romacs-message> envelopes,
@@ -526,29 +555,7 @@ answer it) or a delegated task's wakes.  A list of plists of :from
 and :text (its body), one per message or wake; nil for anything else,
 the user's own words among them."
   (cond ((not (stringp text)) nil)
-        ((string-match-p "\\`[ \t\n]*<romacs-message[ >]" text)
-         (let ((at (progn (string-match "\\`[ \t\n]*" text) (match-end 0))) (found nil) (ok t))
-           (while (and ok (< at (length text)))
-             (if (not (eq (string-match "<romacs-message\\( [^>]*\\)?>\n?" text at) at))
-                 (setq ok (string-match-p "\\`[ \t\n]*\\'" (substring text at)) at (length text))
-               (let* ((attributes (or (match-string 1 text) ""))
-                      (open-end (match-end 0))
-                      (close (string-search "</romacs-message>" text open-end))
-                      (attribute (lambda (name)
-                                   (and (string-match (format " %s=\"\\([^\"]*\\)\"" name) attributes)
-                                        (match-string 1 attributes)))))
-                 (if (not close) (setq ok nil)
-                   (push (list :from (or (funcall attribute "from") "a session") :state (funcall attribute "kind")
-                               :text (string-trim-right (substring text open-end close) "\n"))
-                         found)
-                   (setq at (+ close (length "</romacs-message>")))
-                   ;; The line its sender wrote saying how to answer it
-                   ;; (`romacs-agent--message-reply-line'), then space: an
-                   ;; envelope without one is a user's example.
-                   (if (eq (string-match romacs-agent--reply-line-regexp text at) at)
-                       (setq at (match-end 0))
-                     (setq ok nil))))))
-           (and ok found (nreverse found))))
+        ((string-match-p "\\`[ \t\n]*<romacs-message[ >]" text) (romacs-agent--envelopes text))
         ((string-prefix-p "Delegated task " text)
          (mapcar (lambda (wake) (list :from (plist-get wake :title) :state (plist-get wake :state)
                                       :text (plist-get wake :result)))
@@ -1692,9 +1699,11 @@ new work draws on now."
 (defun romacs-agent-tools--capabilities (arguments)
   "Each provider instance (`romacs-agent-instances'): its harness,
 directory, program, models, whether it is enabled and where it comes
-from; and each one Romacs cannot run, with why."
+from; and each one Romacs cannot run, with why.  The models are those
+known: a harness not asked yet in this run is asked in the background."
   (romacs-mcp--instance arguments)
   (pcase-let ((`(,instances . ,constraints) (romacs-agent-instances t)))
+    (romacs-agent--want-models (cl-remove-if-not (lambda (i) (plist-get i :enabled)) instances))
     (romacs-mcp--object
      "default" (or (ignore-errors (romacs-agent--default-provider)) :null)
      "providers"
@@ -1725,6 +1734,7 @@ from; and each one Romacs cannot run, with why."
 
 (defvar warm-restart-last-result)
 (declare-function warm-restart-request "warm-restart")
+(declare-function romacs-session-reset-target "romacs-live" ())
 (declare-function romacs-server--build-label "romacs-server" (true))
 
 (defun romacs-agent-tools--restart-wake-file (session)
@@ -1739,9 +1749,13 @@ editor is between commands; tell the calling session its verdict."
   (romacs-mcp--instance arguments)
   (require 'warm-restart)
   (let* ((id (romacs-agent-tools--caller))
-         (session (and id (romacs-agent-get id))))
+         (session (and id (romacs-agent-get id)))
+         (target (or (gethash "target" arguments)
+                     (and (eq (gethash "fresh" arguments) t) (romacs-session-reset-target)))))
     (warm-restart-request
-     :target (gethash "target" arguments)
+     :target target
+     :fresh (and (eq (gethash "fresh" arguments) t)
+                 (if (eq (gethash "keepBuffers" arguments) t) 'buffers 'unsaved))
      :delay (gethash "delay" arguments)
      :expiry (gethash "expiry" arguments)
      ;; What the image cannot carry ends, or comes back with its package:
@@ -1762,7 +1776,7 @@ editor is between commands; tell the calling session its verdict."
                                                          #'ignore))))
     (romacs-mcp--object
      "status" (symbol-name (plist-get warm-restart-last-result :status))
-     "target" (or (gethash "target" arguments) :null)
+     "target" (or target :null)
      "waitsFor" "this call's reply, then the editor between commands"
      "verdict" "told this session when the new Romacs is judged; romacs_restart_status reads the record")))
 
@@ -2105,12 +2119,15 @@ checks that failed and the verdict (verified, rolled-back, rollback-failed)."
  "Restart Romacs into a new process once your turn ends, carrying the session (buffers, windows, histories) \
 and its agent sessions: after an install, the new build runs. target is a build directory (one holding \
 romacs-vm-gui and lisp, e.g. the launcher's current) or a binary; omitted, the session's restart \
-command or its own binary. It waits until your turn has ended, nothing is BLOCKED (unsaved work that cannot be \
+command or its own binary. fresh true makes it a reset (romacs-session-reset): onto the installed build \
+when target is omitted, carrying no live Lisp files, kill ring, registers, histories or kept globals, only \
+unsaved text and agent sessions; keepBuffers true carries the file buffers and their windows too. It waits until your turn has ended, nothing is BLOCKED (unsaved work that cannot be \
 carried), no Romacs tool call is in flight and the editor is between commands, for delay seconds (default 2), up \
 to expiry seconds (default 900). The same supervised restart as romacs_restart, whose verdict this session is \
 told."
  (romacs-mcp--schema '(("instance" . "string") ("target" . "string") ("delay" . "number")
-                       ("expiry" . "number") ("force" . "boolean"))
+                       ("expiry" . "number") ("force" . "boolean") ("fresh" . "boolean")
+                       ("keepBuffers" . "boolean"))
                      nil)
  #'romacs-agent-tools--restart)
 

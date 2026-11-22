@@ -99,7 +99,8 @@ possible; say so where you do.
   behavior; implement missing runtime substrate in its existing Rust module.
 - A function does one job, in about 30 lines, as the functional-programming
   guide says: pure helpers decide, effects stay at the edge, data is explicit.
-  The smells ratchet holds Romacs's own Lisp to it (`tools/lib/lisp_functions.py`).
+  The smells ratchet holds Romacs's own Lisp and the workspace's non-test Rust to it
+  (`tools/lib/lisp_functions.py`, `tools/lib/rust_functions.py`).
 - Reach for a safe API before `unsafe`. A new unsafe site needs a stated
   reason, in its comment or its module's doc, that no crate in `Cargo.lock`
   covers the call safely: rustix for system calls, memmap2 for mappings,
@@ -137,8 +138,10 @@ possible; say so where you do.
   smells: `allow(dead_code|unused*)`, TODO/FIXME, files over 1,500 lines,
   unsafe sites, every rustc and Clippy pedantic warning by lint, tracked files
   that say a tool wrote them, primitives declared outside `crates/romacs-vm/src/prims/` or
-  through lib.rs's own enum, and Romacs's own Lisp functions over 40 code lines, none
-  of which may grow (`tools/dev-check` runs that part). It holds the workspace's totals to the merge-base
+  through lib.rs's own enum, Romacs's own Lisp functions over 40 code lines and the
+  workspace's non-test Rust functions over 50, none of which may grow, and that
+  Rust's `unwrap()`/`expect(` calls and undocumented unsafe sites (`tools/dev-check`
+  runs that part). It holds the workspace's totals to the merge-base
   with the trunk (`ROMACS_BASE`, default `beta`), both counted from the trees:
   a total above the merge-base's fails, a drop needs no record, and nothing
   is stored. A deliberate new instance is declared where it occurs, and is
@@ -304,8 +307,9 @@ The other commands:
   `python3 tools/gate full` for final acceptance. Inspect `--help` and select
   resource bounds for the current machine. Defaults keep outer VM and display
   execution serial, with a 34G heavy-job cap. Supply the pinned GNU executable
-  with `--oracle` when the gate's isolated environment needs it. Slot tools come
-  from this repository and are frozen alongside the gate for each invocation.
+  with `--oracle` when the gate's isolated environment needs it. It runs as one
+  heavy `forge run` job, one gate of a lane group at a time (`ROMACS_FORGE`
+  names forge when it is not on PATH).
   Add `--staged` to verify the index snapshot while preserving unrelated
   unstaged and untracked work. The gate binds evidence to its frozen Git tree;
   a temporary commit or a clean checkout is not needed.

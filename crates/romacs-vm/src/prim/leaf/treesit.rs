@@ -602,6 +602,10 @@ impl Leaf<'_> {
     /// through the asker, and the parses run on for the next ask.
     fn ts_wait_threads(&mut self, parser: Value) -> R<()> {
         let p = self.ts_parser(parser)?;
+        // A killed buffer's parser uses no thread's tree: nothing to wait for.
+        if !self.ts_live(p.buffer) {
+            return Ok(());
+        }
         let (core, base, native) = (p.core.clone(), self.ts_base(p.buffer), p.native.clone());
         let slice = crate::quit::QUIT_SLICE;
         loop {
@@ -660,14 +664,18 @@ impl Leaf<'_> {
         // this parse's if the text has not changed since it began, and the
         // nearest old tree if it has.
         let ahead = core.borrow_mut().ahead.take();
+        // A killed buffer's parser parses as it always has: no thread's,
+        // twin's or early tree, all of the text the buffer had, is used.
+        let live = self.ts_live(buffer);
+        let ahead = ahead.filter(|_| live);
         let ahead = ahead.and_then(|ahead| ahead.finish(self.ts_buffer_text(self.ts_base(buffer))?))
             .filter(|(_, region, ..)| *region == visible);
         let (ahead, ahead_changed) = match ahead {
             Some((tree, _, edited, changed)) => (Some((tree, edited)), changed),
             None => (None, None),
         };
-        let twin = self.ts_twin_tree(parser, old.is_none());
-        let early = if old.is_none() && twin.is_none() { self.ts_early_tree(parser) } else { None };
+        let twin = if live { self.ts_twin_tree(parser, old.is_none()) } else { None };
+        let early = if live && old.is_none() && twin.is_none() { self.ts_early_tree(parser) } else { None };
         let (done, behind) = match ahead.or(early) {
             Some((tree, false)) => (Some(tree), None),
             Some((tree, true)) => (None, Some(tree)),

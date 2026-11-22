@@ -75,7 +75,6 @@ pub(crate) struct ChildFrameEntry {
     pub clip_in_root: PresentedClip,
     pub z_path: Vec<i32>,
     /// Frame counter when this entry was last updated
-    #[allow(dead_code)] // read by the test-exercised prune_stale
     pub last_updated: u64,
     /// Unique per-install stamp; the face aggregation signature uses it to
     /// detect that this entry's frame payload was replaced.
@@ -715,7 +714,7 @@ impl ChildFrameManager {
     }
 
     /// Remove child frames not updated in the last `max_age` poll cycles.
-    #[allow(dead_code)] // child-frame staleness API, exercised by the child_frames tests
+    #[cfg(test)]
     pub(crate) fn prune_stale(&mut self, max_age: u64) {
         let threshold = self.frame_counter.saturating_sub(max_age);
         let before = self.frames.len();
@@ -794,7 +793,7 @@ impl ChildFrameManager {
     }
 
     /// Whether there are any child frames.
-    #[allow(dead_code)] // exercised by the child_frames tests
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.frames.is_empty()
     }

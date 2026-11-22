@@ -10,7 +10,10 @@
   agents      every AGENTS.md names only what exists (tools/lib/agents_md.py).
   functions   no function of Romacs's own Lisp over the long-function limit
               is added or grows, beside the merge-base's (tools/lib/smells.py
-              check-lisp; tools/lib/lisp_functions.py measures).
+              check-functions: tools/lib/lisp_functions.py measures), nor one of
+              the workspace's non-test Rust over 50 (tools/lib/rust_functions.py),
+              and unwrap()/expect( calls and undocumented unsafe sites in that
+              Rust do not rise.
   lint        tools/romacs-lint on the runtime Lisp files the change touches:
               what it adds since the merge-base, as the queue's Lisp tier holds
               it. It runs a Romacs: --binary, else what tools/romacs-lint finds.
@@ -38,6 +41,11 @@
 One line a stage and one a finding, each with its fix. Exit 1 when a stage
 fails, 2 when one could not run.
 
+A run on a worktree with no uncommitted change leaves a receipt for HEAD's
+tree, $XDG_CACHE_HOME/romacs/dev-check/receipts/TREE.json: the exit, each
+stage's status, whether the tests ran. The merge queue's submit reads it to
+know this exact tree was checked, and never reruns the check.
+
 cargo and cargo-nextest are looked for on PATH, then in the host's pins
 ROMACS_TOOLCHAIN_BIN and ROMACS_NEXTEST_BIN, which an agent's shell has even
 where its PATH lacks the toolchain. Found there, they are put on PATH for what
@@ -47,6 +55,7 @@ import argparse
 from collections import Counter
 import importlib.machinery
 import importlib.util
+import json
 import os
 from pathlib import Path
 import re
@@ -261,20 +270,20 @@ def agents(root):
 # The Lisp functions' length.
 
 def functions(root, trunk):
-    """(STATUS, SUMMARY, FINDINGS): no own Lisp function over the limit is added or grows."""
+    """(STATUS, SUMMARY, FINDINGS): no long Lisp or Rust function is added or
+    grows, and the Rust floors do not rise."""
     try:
-        found = smells.lisp_held_to_base(root, trunk)
+        found = smells.functions_held_to_base(root, trunk)
     except (ValueError, subprocess.CalledProcessError) as exc:
-        return 'SKIP', 'the Lisp functions were not measured', [f'{exc}; fix: merge the trunk in, or name it with --trunk']
+        return 'SKIP', 'the functions were not measured', [f'{exc}; fix: merge the trunk in, or name it with --trunk']
     lisp = smells.lisp_functions
     failing, warned = lisp.held(found)
     warnings = [f'warning until {lisp.ENFORCED_FROM}: {finding}' for finding in warned]
     if failing:
-        return 'FAIL', f'{len(failing)} failing Lisp function finding(s), {len(warned)} warning(s)', failing + warnings
+        return 'FAIL', f'{len(failing)} failing function finding(s), {len(warned)} warning(s)', failing + warnings
     if warned:
-        return 'ok', (f'{len(warned)} Lisp function finding(s) over {lisp.LONG_FUNCTION_LINES} code lines, '
-                      f'warned until {lisp.ENFORCED_FROM}, then failing'), warned
-    return 'ok', f'no Lisp function over {lisp.LONG_FUNCTION_LINES} code lines added or grown', []
+        return 'ok', (f'{len(warned)} function finding(s), warned until {lisp.ENFORCED_FROM}, then failing'), warnings
+    return 'ok', 'no long Lisp or Rust function added or grown, no Rust floor risen', []
 
 
 # The lint.
@@ -517,6 +526,33 @@ def report(stages):
     return lines + [f'dev-check: {verdict}'], 1 if failed else 2 if skipped else 0
 
 
+def receipt_path(tree):
+    cache = Path(os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache')
+    return cache / 'romacs/dev-check/receipts' / f'{tree}.json'
+
+
+def receipt(tree, head, trunk, stages, status, tests_ran):
+    """The receipt of a run over STAGES (NAME, STATUS, ...) that ended with STATUS, for TREE."""
+    return {'schema': 1, 'tree': tree, 'head': head, 'trunk': trunk, 'exit': status, 'tests': tests_ran,
+            'stages': [{'name': name, 'status': stage_status} for name, stage_status, *_ in stages],
+            'time': time.strftime('%Y-%m-%dT%H:%M:%S%z')}
+
+
+def write_receipt(root, trunk, stages, status, tests_ran):
+    """Leave this run's receipt for HEAD's tree, when the worktree holds no uncommitted change
+    (then what was checked is that tree): its path, or None."""
+    if git(root, 'status', '--porcelain', '--untracked-files=no', check=False).stdout.strip():
+        return None
+    tree = git(root, 'rev-parse', 'HEAD^{tree}').stdout.strip()
+    head = git(root, 'rev-parse', 'HEAD').stdout.strip()
+    path = receipt_path(tree)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    draft = path.with_name(f'.{path.name}.{os.getpid()}')
+    draft.write_text(json.dumps(receipt(tree, head, trunk, stages, status, tests_ran), indent=1) + '\n')
+    draft.replace(path)
+    return path
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--trunk', default=os.environ.get('ROMACS_BASE', 'beta'), help='the branch this one lands on (default beta)')
@@ -534,6 +570,11 @@ def main():
         stages.append(('tests', *tests(ROOT, names, args.threads)))
     lines, status = report(stages)
     print('\n'.join(lines))
+    try:
+        if write_receipt(ROOT, trunk, stages, status, not args.no_tests) is None:
+            print('dev-check: no receipt: the worktree has uncommitted changes, so no commit\'s tree was checked')
+    except (OSError, RuntimeError) as exc:
+        print(f'dev-check: no receipt: {exc}')
     return status
 
 

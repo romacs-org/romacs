@@ -672,7 +672,8 @@ MOST newest, by the writer."
    (romacs-mcp--object "text" (romacs-agent-item-text item)
                        "images" (vconcat (romacs-agent-item-images item))
                        "messages" (vconcat (mapcar #'romacs-agent--message-json (romacs-agent-item-messages item)))
-                       "own" (or (romacs-agent-item-own item) :null))))
+                       "own" (or (romacs-agent-item-own item) :null)
+                       "user" (if (romacs-agent-item-user item) t :false))))
 
 (defun romacs-agent-store--item-of (id position json)
   "The queued message a row keeps: ID, POSITION and its JSON.  A steer
@@ -682,6 +683,7 @@ comes back as a turn of its own: the turn it steered is no next run's."
                        :images (append (gethash "images" object) nil)
                        :messages (mapcar #'romacs-agent--message-of (gethash "messages" object))
                        :kind 'next :own (romacs-agent--value (gethash "own" object))
+                       :user (eq (gethash "user" object) t)
                        :id id :position position :kept t)))
 
 (defun romacs-agent-store-queued-put (id item)
@@ -733,25 +735,46 @@ none let it go (ITEM-ID nil: every one of ID's), here.  A failure signals."
           (t (sqlite-execute db "delete from queued where session = ?" (list id))))
     t))
 
+(define-error 'romacs-agent-store-unread "The agents' store could not be read")
+
 (defun romacs-agent-store-queued (id)
-  "The messages kept waiting for the session ID names, in order."
-  (when-let* ((db (romacs-agent-store--open)))
-    (condition-case err
-        (mapcar (lambda (row) (apply #'romacs-agent-store--item-of row))
-                (sqlite-select db "select id, position, item from queued where session = ? order by position"
-                               (list id)))
-      (error (message "romacs-agent-store: %s" (error-message-string err)) nil))))
+  "The messages kept waiting for the session ID names, in order; none when
+there is no store.  A store that cannot be read signals
+`romacs-agent-store-unread': unread rows are never taken for no rows."
+  (let* ((file (romacs-agent-store--file))
+         ;; An open that fails, a lock timed out say, is unread too.
+         (db (condition-case err (romacs-agent-store--open)
+               (error (signal 'romacs-agent-store-unread (list id (error-message-string err)))))))
+    (cond
+     (db (condition-case err
+             (mapcar (lambda (row) (apply #'romacs-agent-store--item-of row))
+                     (sqlite-select db "select id, position, item from queued where session = ? order by position"
+                                    (list id)))
+           (error (signal 'romacs-agent-store-unread (list id (error-message-string err))))))
+     ;; A store there that will not open is unread, not empty: there
+     ;; unless known absent (a link to one out of reach is there; a
+     ;; lookup that fails is no proof of absence).
+     ((condition-case err (file-attributes file)
+        (error (signal 'romacs-agent-store-unread (list id (error-message-string err)))))
+      (signal 'romacs-agent-store-unread (list id "the store could not be opened"))))))
 
 (defun romacs-agent-store--requeue (session _manifest)
   "SESSION, loaded: what was kept waiting in its queue waits there again,
 in order with what was sent to it while it loaded, sent once its harness
 may take it.  A cancelled task's is let go."
+  (catch 'romacs-agent-store--unread
   (if (romacs-agent-cancelled session)
       (romacs-agent--clear-queue session)
     (let* ((waiting (romacs-agent-queue session))
            (ids (delq nil (mapcar #'romacs-agent-item-id waiting)))
            (kept (cl-remove-if (lambda (item) (member (romacs-agent-item-id item) ids))
-                               (romacs-agent-store-queued (romacs-agent-id session))))
+                               (condition-case err (romacs-agent-store-queued (romacs-agent-id session))
+                                 ;; Unread: nothing is touched, its mark kept;
+                                 ;; the next load reads them again.
+                                 (romacs-agent-store-unread
+                                  (message "Romacs: %s's queued messages could not be read: %s"
+                                           (romacs-agent-id session) (nth 2 err))
+                                  (throw 'romacs-agent-store--unread nil)))))
            ;; Sent already (an editor that ended before its row went): let
            ;; go.  Its lookup failed: kept for the next load, not sent now.
            (found (and kept (romacs-agent--sent-queued session (mapcar #'romacs-agent-item-id kept)))))
@@ -759,12 +782,19 @@ may take it.  A cancelled task's is let go."
       (setq kept (cl-remove-if (lambda (item) (or (member (romacs-agent-item-id item) (car found))
                                                   (member (romacs-agent-item-id item) (cdr found))))
                                kept))
+      ;; Nothing kept, nothing waiting: a mark an earlier removal left (its
+      ;; store read before a pending delete) goes now.
+      (unless (or kept waiting (cdr found))
+        (romacs-agent-mark (romacs-agent-id session) 'queued nil))
       (when kept
         ;; What was sent as it loaded goes after what was kept, but what
         ;; was put first: placed by its order, not by the clock, and its
         ;; place kept for a restart after.
-        (let ((order (append (cl-remove-if-not #'romacs-agent-item-front waiting) kept
-                             (cl-remove-if #'romacs-agent-item-front waiting))))
+        (let ((order (let ((cut (1+ (or (cl-position-if #'romacs-agent-item-front waiting :from-end t) -1))))
+                       ;; Kept ones after the last put first, the order
+                       ;; of those waiting as it stands (a user may have
+                       ;; moved one past another).
+                       (append (seq-take waiting cut) kept (seq-drop waiting cut)))))
           (setf (romacs-agent-queue session) nil (romacs-agent-queue-tail session) nil
                 (romacs-agent-queue-length session) 0)
           (when waiting
@@ -773,14 +803,20 @@ may take it.  A cancelled task's is let go."
                 (setf (romacs-agent-item-position item) (setq place (+ place 1e-3))))
               ;; In one transaction: an end part way never leaves two out of order.
               (romacs-agent-store-queued-reorder (romacs-agent-id session) (cl-remove-if-not #'romacs-agent-item-kept order))))
-          (dolist (item order) (romacs-agent--enqueue session item)))
-        (romacs-agent--dispatch session)))))
+          ;; Its views told once, the queue whole.
+          (let ((romacs-agent--queue-quiet t))
+            (dolist (item order) (romacs-agent--enqueue session item)))
+          (romacs-agent--changed session))
+        (romacs-agent--dispatch session))))))
 
 (add-hook 'romacs-agent-loaded-functions #'romacs-agent-store--requeue)
 ;; A session with messages kept waiting is loaded as a restore runs.
 (add-to-list 'romacs-agent-mark-kinds
              (cons 'queued (lambda (dir _manifest)
-                             (and (romacs-agent-store-queued (file-name-nondirectory (directory-file-name dir))) t))))
+                             ;; Unread: loaded, so its queue is read again then.
+                             (condition-case nil
+                                 (and (romacs-agent-store-queued (file-name-nondirectory (directory-file-name dir))) t)
+                               (romacs-agent-store-unread t)))))
 
 ;;; The board's folds
 

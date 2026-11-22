@@ -608,14 +608,13 @@ impl GuiFrameRenderState {
 
     // Retained for focused render-state tests; production callers inspect the
     // retained frame through narrower accessors.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(super) fn current_frame_clone(&self) -> Option<FrameGlyphBuffer> {
         self.compositor.current_frame.as_deref().cloned()
     }
 
     /// Whether the retained frame carries a theme-transition effect hint —
-    /// `None` when there is no retained frame at all, so a caller can use `?`
-    /// exactly as it would with [`Self::current_frame_clone`].
+    /// `None` when there is no retained frame at all, so a caller can use `?`.
     ///
     /// The offscreen-compositing decision needs this single bit, and cloning a
     /// whole `FrameGlyphBuffer` (glyph vector, window info, cursors, hints,
@@ -1818,7 +1817,7 @@ impl GuiFrameWindowManager {
         self.sync_primary_mapping();
     }
 
-    #[allow(dead_code)] // used by the frame-window manager tests
+    #[cfg(test)]
     pub(crate) fn primary_frame_id(&self) -> Option<u64> {
         self.primary_emacs_frame_id
     }

@@ -3696,10 +3696,6 @@ impl Vm {
     pub(crate) fn host_default_advance(&mut self, c: char) -> Result<(u32, u32)> {
         self.host_face_advance_in(None, "default", c)
     }
-    /// The host advance of C in the face NAME, and that face's row height.
-    pub(crate) fn host_face_advance(&mut self, name: &str, c: char) -> Result<(u32, u32)> {
-        self.host_face_advance_in(None, name, c)
-    }
     /// The host advance of C in the face NAME as the current buffer shows it
     /// in WINDOW (else the selected window), remapped, and its row height.
     pub(crate) fn host_face_advance_in(&mut self, window: Option<Value>, name: &str, c: char) -> Result<(u32, u32)> {

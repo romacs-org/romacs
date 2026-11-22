@@ -9,6 +9,11 @@ already runs is listed in ELSEWHERE with that runner, which must name it.
 Every other one runs here, so a new test file cannot go unrun. A file
 passes only when at least one test body ran (not skipped) and all passed.
 
+Exit 0 when every file passed, 1 when one failed (or the ELSEWHERE list
+disagrees with the tree), 2 when this runner could not do its own part
+(git, a private directory, starting a test process): that proves nothing
+about the tests.
+
 usage: python_tests.py [--root DIR] [--jobs N] [FILE ...]
 """
 import argparse
@@ -45,7 +50,8 @@ SKIPPED = re.compile(r'^(?:OK|FAILED) \(.*?\bskipped=(\d+)', re.M)
 
 def test_files(root):
     """The tracked unittest files under ROOT, as root-relative paths."""
-    listed = subprocess.check_output(['git', '-C', str(root), 'ls-files', '-z'], text=True).split('\0')
+    listed = [os.fsdecode(name) for name in
+              subprocess.check_output(['git', '-C', str(root), 'ls-files', '-z']).split(b'\0')]
     return sorted(path for path in listed
                   if NAME.search(path) and not path.startswith(OUTSIDE)
                   and 'unittest' in (root / path).read_text(errors='replace'))
@@ -81,23 +87,51 @@ HANG = 1800
 
 
 def run(root, path, timeout=HANG):
-    """(PATH, ok, seconds, output tail) for one test file."""
+    """(PATH, ok, seconds, output tail) for one test file; ok is None when
+    the file could not be run at all (the runner's failure, not the test's)."""
     started = time.monotonic()
-    with tempfile.TemporaryDirectory(prefix='pytest-') as private:
-        home, tmp = Path(private, 'home'), Path(private, 'tmp')
-        home.mkdir(), tmp.mkdir()
-        env = {**os.environ, 'GNU_ORACLE_ROOT': oracle_root(), 'HOME': str(home), 'TMPDIR': str(tmp),
-               'PYTHONDONTWRITEBYTECODE': '1'}
-        try:
-            done = subprocess.run(command(path), cwd=(root / path).parent, env=env, stdin=subprocess.DEVNULL,
-                                  capture_output=True, text=True, timeout=timeout)
-            output, code = done.stdout + done.stderr, done.returncode
-        except subprocess.TimeoutExpired:
-            output, code = f'timed out after {timeout}s', -1
-        finally:
-            subprocess.run(['chmod', '-R', 'u+w', private], check=False)
+    output = code = None
+    try:
+        with tempfile.TemporaryDirectory(prefix='pytest-') as private:
+            home, tmp = Path(private, 'home'), Path(private, 'tmp')
+            home.mkdir(), tmp.mkdir()
+            env = {**os.environ, 'GNU_ORACLE_ROOT': oracle_root(), 'HOME': str(home), 'TMPDIR': str(tmp),
+                   'PYTHONDONTWRITEBYTECODE': '1'}
+            try:
+                done = subprocess.run(command(path), cwd=(root / path).parent, env=env, stdin=subprocess.DEVNULL,
+                                      capture_output=True, text=True, errors='replace', timeout=timeout)
+                output, code = done.stdout + done.stderr, done.returncode
+            except subprocess.TimeoutExpired:
+                output, code = f'timed out after {timeout}s', -1
+            finally:
+                subprocess.run(['chmod', '-R', 'u+w', private], check=False)
+    except OSError as error:
+        if code is None:  # the file never ran; a failure to clean up after it changes nothing
+            return path, None, time.monotonic() - started, f'could not run it: {error}'
     executed = sum(int(n) for n in RAN.findall(output)) - sum(int(n) for n in SKIPPED.findall(output))
     return path, code == 0 and executed > 0, time.monotonic() - started, '\n'.join(output.splitlines()[-15:])
+
+
+def run_all(root, files, jobs):
+    """run() of each of FILES, JOBS at a time; one no worker ran (the host
+    gave no thread) is not run (ok None), every other one's verdict kept."""
+    done = {}
+
+    def one(path):
+        done[path] = run(root, path)
+    try:
+        with concurrent.futures.ThreadPoolExecutor(jobs) as pool:
+            for path in files:
+                pool.submit(one, path)
+    except RuntimeError:
+        pass  # no thread for the rest; what the started ones take is waited for
+    return [done.get(path) or (path, None, 0.0, 'could not run it: no worker thread') for path in files]
+
+
+def verdict(results):
+    """The exit for RESULTS: a failed file outweighs one that could not run."""
+    oks = [ok for _, ok, _, _ in results]
+    return 1 if False in oks else 2 if None in oks else 0
 
 
 def main():
@@ -112,17 +146,20 @@ def main():
     except ValueError as error:
         print(f'python-tests: {error}', file=sys.stderr)
         return 1
+    except (OSError, subprocess.CalledProcessError) as error:
+        print(f'python-tests: could not list the test files: {error}', file=sys.stderr)
+        return 2
     started = time.monotonic()
-    with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
-        results = list(pool.map(lambda path: run(root, path), selected))
+    results = run_all(root, selected, args.jobs)
     failed = [r for r in results if not r[1]]
-    for path, _, seconds, tail in failed:
-        print(f'python-tests: FAIL {path} ({seconds:.1f}s)\n{tail}', file=sys.stderr)
+    for path, ok, seconds, tail in failed:
+        print(f'python-tests: {"FAIL" if ok is False else "NOT RUN"} {path} ({seconds:.1f}s)\n{tail}',
+              file=sys.stderr)
     slowest = max(results, key=lambda r: r[2], default=None)
     print(f'python-tests: {len(results) - len(failed)}/{len(results)} files passed in '
           f'{time.monotonic() - started:.1f}s'
           + (f' (slowest {slowest[0]} {slowest[2]:.1f}s)' if slowest else ''))
-    return 1 if failed else 0
+    return verdict(results)
 
 
 if __name__ == '__main__':

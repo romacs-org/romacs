@@ -78,7 +78,7 @@
     (dolist (state romacs-agent-ui--states)
       (pcase-let ((`(,key ,glyph ,word ,face ,state-rank) state))
         (should (symbolp key))
-        (should (or (null glyph) (stringp glyph)))
+        (should (or (null glyph) (stringp (romacs-agent-glyph glyph))))
         (should (stringp word))
         (should (facep face))
         (should (= state-rank (cl-incf rank))))))

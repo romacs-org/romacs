@@ -35,6 +35,8 @@ LONG_FUNCTION_LINES = 40
 ENFORCING = False
 ENFORCED_FROM = '2026-11-23 06:00'
 KIND = 'long_functions'
+# The findings the switch holds: these Lisp ones, and tools/lib/rust_functions.py's.
+WARNED = (f'{KIND}: ', 'long_rust_functions: ')
 DEFINERS = frozenset(('defun', 'defmacro', 'defsubst', 'cl-defun', 'cl-defmacro', 'cl-defsubst',
                       'cl-defmethod', 'cl-defgeneric', 'cl-iter-defun', 'iter-defun', 'define-inline',
                       'define-minor-mode', 'define-globalized-minor-mode', 'define-derived-mode'))
@@ -344,21 +346,28 @@ def paired(base, tree, base_keys, tree_keys):
     return pairs + [pair for name, entries in sorted(rest.items()) for pair in zip(entries, had.get(name, []))]
 
 
-def rises(base, tree, base_keys=None, tree_keys=None, limit=LONG_FUNCTION_LINES):
-    """Why TREE adds to BASE's long functions, one line each: both
-    long_functions; BASE_KEYS and TREE_KEYS every function's key on each
-    side, default the long ones'."""
+def rises(base, tree, base_keys=None, tree_keys=None, limit=LONG_FUNCTION_LINES, kind=KIND,
+          declare=None, each_new=False):
+    """Why TREE adds to BASE's long functions, one line each, each headed
+    KIND, saying how to DECLARE one: both long_functions; BASE_KEYS and
+    TREE_KEYS every function's key on each side, default the long ones'.
+    A rise in their number is one finding, or with EACH_NEW each long
+    function the base had not is."""
+    declare = declare or DECLARE
     pairs = paired(base, tree, set(base) if base_keys is None else set(base_keys),
                    set(tree) if tree_keys is None else set(tree_keys))
-    grown = [f'{KIND}: {place}: {name} grew to {code} code lines from {was[0]}; '
-             f'fix: move a job out of it into a function of its own, or {DECLARE}'
+    grown = [f'{kind}: {place}: {name} grew to {code} code lines from {was[0]}; '
+             f'fix: move a job out of it into a function of its own, or {declare}'
              for (code, place, name), was in pairs if code > was[0]]
+    old = {id(entry) for entry, _ in pairs}
+    new = sorted((entry for entry in tree.values() if id(entry) not in old), key=lambda e: e[1])
+    if each_new:
+        return grown + [f'{kind}: {place}: {name} is new at {code} code lines, over {limit}; '
+                        f'fix: split it into functions of one job, or {declare}' for code, place, name in new]
     if len(tree) > len(base):
-        old = {id(entry) for entry, _ in pairs}
-        new = sorted((entry for entry in tree.values() if id(entry) not in old), key=lambda e: e[1])
-        grown.append(f'{KIND}: {len(tree)} over {limit} code lines, above the {len(base)} of the '
+        grown.append(f'{kind}: {len(tree)} over {limit} code lines, above the {len(base)} of the '
                      f'merge-base; new: {", ".join(f"{name} ({place})" for _, place, name in new)}; '
-                     f'fix: split each into functions of one job, or {DECLARE}')
+                     f'fix: split each into functions of one job, or {declare}')
     return grown
 
 
@@ -367,7 +376,7 @@ def held(findings):
     warn until ENFORCING."""
     if ENFORCING:
         return list(findings), []
-    ours = [f for f in findings if f.startswith(f'{KIND}: ')]
+    ours = [f for f in findings if f.startswith(WARNED)]
     return [f for f in findings if f not in ours], ours
 
 
@@ -398,18 +407,24 @@ def commit_sources(root, commit):
     if shown.returncode:
         return None, []
     layout = json.loads(shown.stdout)
-    listed = git(root, 'ls-tree', '-r', '-z', commit, '--', 'lisp').split('\0')
-    blobs = [(entry.split('\t', 1)[1], entry.split()[2]) for entry in listed
-             if entry and entry.split()[1] == 'blob' and own(layout, entry.split('\t', 1)[1])]
+    return layout, blobs(root, commit, 'lisp', lambda path: own(layout, path))
+
+
+def blobs(root, commit, scope, keep):
+    """[(path, text)] of COMMIT's files under SCOPE that KEEP, a predicate
+    of the path, keeps; read from git's objects in one batch."""
+    listed = git(root, 'ls-tree', '-r', '-z', commit, '--', scope).split('\0')
+    wanted = [(entry.split('\t', 1)[1], entry.split()[2]) for entry in listed
+              if entry and entry.split()[1] == 'blob' and keep(entry.split('\t', 1)[1])]
     batch = subprocess.run(['git', '-C', str(root), 'cat-file', '--batch'], check=True, stdout=subprocess.PIPE,
-                           input=''.join(f'{sha}\n' for _, sha in blobs).encode()).stdout
+                           input=''.join(f'{sha}\n' for _, sha in wanted).encode()).stdout
     out, at = [], 0
-    for path, _ in blobs:
+    for path, _ in wanted:
         header_end = batch.index(b'\n', at)
         size = int(batch[at:header_end].split()[2])
         out.append((path, batch[header_end + 1:header_end + 1 + size].decode('utf-8', 'replace')))
         at = header_end + 1 + size + 1
-    return layout, out
+    return out
 
 
 def tree_census(root):
