@@ -1002,6 +1002,80 @@ fn a_small_edit_starts_no_first_parse_for_a_twin_never_asked() {
     assert_eq!(romacs_vm::treesit_parses_in_process(), before + 2, "the early parse, and the asked parser's reparse alone");
 }
 
+#[test]
+fn twins_take_one_background_reparse_and_each_notify() {
+    const CHILD: &str = "ROMACS_TREESIT_REPARSE_TWINS_CHILD";
+    const NAME: &str = "twins_take_one_background_reparse_and_each_notify";
+    if std::env::var_os(CHILD).is_none() {
+        let own = own_test::name(module_path!(), NAME);
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &own, "--nocapture", "--test-threads", "1"]).env(CHILD, "1").output().unwrap();
+        assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains("1 passed"),
+            "child: {}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        return;
+    }
+    let mut vm = fresh_twins_vm("ts-reparse-twins", 4000);
+    vm.eval_source("(with-current-buffer \"ts-reparse-twins\" \
+        (treesit-parser-root-node treesit-test-twin) \
+        (setq treesit-test-notifications nil romacs-treesit-show-before-parse 8) \
+        (defalias 'treesit-test-notify (lambda (ranges parser) \
+          (push (cons (treesit-parser-tag parser) ranges) treesit-test-notifications))) \
+        (treesit-parser-add-notifier treesit-test-parser 'treesit-test-notify) \
+        (treesit-parser-add-notifier treesit-test-twin 'treesit-test-notify))").unwrap();
+    let before = romacs_vm::treesit_parses_in_process();
+    let evaluator = romacs_vm::treesit_parses_on_this_thread();
+    vm.eval_source("(with-current-buffer \"ts-reparse-twins\" (goto-char (point-min)) (insert \"static \"))").unwrap();
+    deferred_frame(&mut vm);
+    wait_landed(&mut vm, "ts-reparse-twins");
+    let notified = vm.eval_source("(with-current-buffer \"ts-reparse-twins\" \
+        (let ((first (treesit-parser-root-node treesit-test-parser)) \
+              (second (treesit-parser-root-node treesit-test-twin))) \
+          (and (equal (treesit-node-string first) (treesit-node-string second)) \
+               (reverse treesit-test-notifications))))").unwrap().display().unwrap();
+    assert_eq!(notified, "((nil (1 . 8)) (twin (1 . 8)))");
+    assert_eq!(romacs_vm::treesit_parses_in_process(), before + 1, "both trees came from one native parse");
+    assert_eq!(romacs_vm::treesit_parses_on_this_thread(), evaluator);
+    deferred_frame(&mut vm);
+
+    let before = romacs_vm::treesit_parses_in_process();
+    vm.eval_source("(with-current-buffer \"ts-reparse-twins\" \
+        (setq romacs-treesit-show-before-parse 32) (goto-char (point-min)) (delete-char 7))").unwrap();
+    deferred_frame(&mut vm);
+    // No frame restarted the now-behind worker before Lisp asked both parsers.
+    let caught_up = vm.eval_source("(with-current-buffer \"ts-reparse-twins\" \
+        (goto-char (point-min)) (insert \"extern \") \
+        (let ((first (treesit-parser-root-node treesit-test-parser)) \
+              (second (treesit-parser-root-node treesit-test-twin))) \
+          (and (equal (treesit-node-string first) (treesit-node-string second)) \
+               (string-prefix-p \"extern \" (treesit-node-text first)))))").unwrap().display().unwrap();
+    assert_eq!(caught_up, "t");
+    assert_eq!(romacs_vm::treesit_parses_in_process(), before + 2, "one worker and one catch-up parse");
+    assert_eq!(romacs_vm::treesit_parses_on_this_thread(), evaluator + 1);
+    check_background_twin_notifier_histories(&mut vm);
+}
+
+fn check_background_twin_notifier_histories(vm: &mut Vm) {
+    vm.eval_source("(with-current-buffer \"ts-reparse-twins\" \
+        (goto-char (point-min)) \
+        (setq treesit-test-cut (line-end-position)) \
+        (treesit-parser-set-included-ranges treesit-test-parser (list (cons (point) treesit-test-cut))) \
+        (treesit-parser-root-node treesit-test-parser) \
+        (treesit-parser-set-included-ranges treesit-test-parser nil) \
+        (setq treesit-test-notifications nil))").unwrap();
+    let before = romacs_vm::treesit_parses_in_process();
+    vm.eval_source("(with-current-buffer \"ts-reparse-twins\" (insert \"/*x*/\"))").unwrap();
+    deferred_frame(vm);
+    let notified = vm.eval_source("(with-current-buffer \"ts-reparse-twins\" \
+        (treesit-parser-root-node treesit-test-twin) \
+        (treesit-parser-root-node treesit-test-parser) \
+        (let ((part (cdr (assq nil treesit-test-notifications))) \
+              (whole (cdr (assq 'twin treesit-test-notifications)))) \
+          (list (length treesit-test-notifications) \
+                (> (cdar (last part)) treesit-test-cut) whole)))").unwrap().display().unwrap();
+    assert_eq!(notified, "(2 t ((1 . 6)))");
+    assert_eq!(romacs_vm::treesit_parses_in_process(), before + 1, "both parsers now see the whole text");
+}
+
 /// A twin asked after its buffer was narrowed is judged against the region
 /// its query parses: the twin's whole-text tree is no copy for it, so the
 /// frame gives it a first parse on a thread, and the evaluator parses
