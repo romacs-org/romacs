@@ -189,12 +189,7 @@ struct TextTessellator<'r, 'p> {
 impl TextTessellator<'_, '_> {
     fn tessellate(&mut self, out: &mut TextStreams) {
         let frame_glyphs = self.params.frame_glyphs;
-        let faces = self.params.faces;
-        let face_debug_call_id = self.params.face_debug_call_id;
-        let cursor_visible = self.params.cursor_visible;
-        let has_line_anims = self.params.has_line_anims;
         let want_overlay = self.want_overlay;
-        let enable_subpixel = self.enable_subpixel;
 
         for (glyph_index, glyph) in frame_glyphs.glyphs.iter().enumerate() {
             if let FrameGlyph::Char {
@@ -241,7 +236,7 @@ impl TextTessellator<'_, '_> {
                     let font_size = rf.font_size;
                     let overstrike = rf.overstrike;
 
-                    let face = faces.get(&face_id);
+                    let face = self.params.faces.get(&face_id);
 
                     // Snap glyph origins to whole physical pixels via the SAME
                     // shared helper the child-frame path uses (see
@@ -251,7 +246,7 @@ impl TextTessellator<'_, '_> {
                     // local `SubpixelBin::new`) is what makes content.rs's
                     // "full parity with the main frame" claim structurally true.
                     let sf = self.renderer.scale_factor;
-                    let y_offset = if has_line_anims {
+                    let y_offset = if self.params.has_line_anims {
                         self.renderer.line_y_offset(*x, *y)
                     } else {
                         0.0
@@ -262,7 +257,7 @@ impl TextTessellator<'_, '_> {
                     let (x_int, y_int, x_bin, y_bin) =
                         super::content::snap_glyph_origin(phys_x, phys_y);
 
-                    let subpixel_request = if enable_subpixel {
+                    let subpixel_request = if self.enable_subpixel {
                         SubpixelRequest::Enabled
                     } else {
                         SubpixelRequest::Disabled
@@ -311,7 +306,7 @@ impl TextTessellator<'_, '_> {
                         if trace_face_debug_enabled() && !want_overlay && !color_is_grayscale(*fg) {
                             tracing::info!(
                                 "face-debug call={} milestone=before_get_or_create char={:?} face={} pos=({:.1},{:.1}) fg=({:.3},{:.3},{:.3},{:.3})",
-                                face_debug_call_id,
+                                self.params.face_debug_call_id,
                                 char,
                                 face_id,
                                 x,
@@ -466,7 +461,7 @@ impl TextTessellator<'_, '_> {
                         let mut effective_bg =
                             WgpuRenderer::sample_face_paint_background(face, bg, paint)
                                 .unwrap_or(Color::rgb(1.0, 1.0, 1.0));
-                        if cursor_visible
+                        if self.params.cursor_visible
                             && let Some(inverse) = self.params.cursor_inverse_video
                             && glyph.slot_id().is_some_and(|slot| slot == inverse.slot_id)
                         {
