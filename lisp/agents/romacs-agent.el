@@ -4003,7 +4003,7 @@ queue.  Called wherever what the predicate reads may have changed."
                     (dolist (part parts)
                       (when (romacs-agent-item-delivered part)
                         (condition-case err (funcall (romacs-agent-item-delivered part))
-                          (error (setq failed (or failed err))))))
+                          ((error quit) (setq failed (or failed err))))))
                     (when failed (signal (car failed) (cdr failed)))))
                 (setq more t)))
             (when (eq (romacs-agent-dispatch session) 'again) (setq more t))

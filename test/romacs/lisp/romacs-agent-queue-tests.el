@@ -144,8 +144,8 @@
     (should-not (romacs-agent--answered nil))))
 
 (ert-deftest romacs-agent-messages-in-one-turn-are-each-told ()
-  ;; One message's delivery failing leaves the others' told: each was
-  ;; written, none waits to go again.
+  ;; One message's delivery failing, or quit, leaves the others' told:
+  ;; each was written, none waits to go again.
   (let ((session (romacs-agent-test-attach
                   (romacs-agent--make :id "78787878-8888-4999-8aaa-bbbbbbbbbbbb" :harness 'claude :state 'running)
                   t))
@@ -154,10 +154,11 @@
       (romacs-agent--admit session (romacs-agent-item id :kind 'next :valid #'always
                                                       :messages (list (romacs-agent-make-message id "parent" '(:session "p")))
                                                       :delivered (lambda () (push id told)
-                                                                   (when (equal id "m-1") (error "Bookkeeping"))))))
+                                                                   (when (equal id "m-1") (signal 'quit nil))))))
     (setf (romacs-agent-state session) 'idle)
     (romacs-agent-queue-tests--writing sent
-      (should-error (romacs-agent--dispatch session)))
+      ;; The quit goes on once the others are told.
+      (should (eq (condition-case nil (progn (romacs-agent--dispatch session) 'none) (quit 'quit)) 'quit)))
     (should (= (length sent) 1))
     (should (equal told '("m-2" "m-1")))
     (should (null (romacs-agent-queue session)))
