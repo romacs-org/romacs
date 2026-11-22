@@ -69,8 +69,9 @@ where the link was, TEXT the link as written, SPACE the side, `before' or
   (replace-regexp-in-string "\\\\\\(.\\)" "\\1" label t))
 
 (defun romacs-agent-log-attach--escape (caption)
-  "CAPTION as a link's label: its brackets and backslashes escaped."
-  (replace-regexp-in-string "[][\\]" "\\\\\\&" caption t))
+  "CAPTION as a link's label: on one line, its brackets and backslashes
+escaped."
+  (replace-regexp-in-string "[][\\]" "\\\\\\&" (replace-regexp-in-string "[\n\r]+" " " caption) t))
 
 (defun romacs-agent-log-attach--caption (label)
   "The caption a link's LABEL says: none for the plain `image' or `file'."
@@ -170,7 +171,8 @@ stood apart, spaces or the draft's edge on both sides; which side's,
   (let* ((ids (mapcar (lambda (item) (plist-get item :id)) romacs-attach-items))
          (i (seq-position ids id))
          (links (romacs-agent-log-attach--links))
-         (at (lambda (id) (seq-find (lambda (link) (equal (nth 6 link) id)) links)))
+         ;; A link without a chip (nil id) is no neighbour.
+         (at (lambda (id) (and id (seq-find (lambda (link) (equal (nth 6 link) id)) links))))
          (prev (and i (> i 0) (funcall at (nth (1- i) ids))))
          (next (and i (funcall at (nth (1+ i) ids)))))
     (cons (nth 1 prev) (nth 0 next))))

@@ -327,5 +327,37 @@ PNG files in a fresh directory, and `composer' its draft's text."
         (funcall then a)
         (should (equal (composer) (concat "see " (link a))))))))
 
+(ert-deftest romacs-agent-log-attach-a-chipless-link-is-no-neighbour ()
+  ;; The last chip removed and brought back returns after its neighbour,
+  ;; whatever chipless link comes before.
+  (romacs-agent-log-attach-tests--with
+    (let ((gone "[image](/nonexistent/gone.png)"))
+      (insert gone " " (link a) " " (link b))
+      (romacs-agent-log-attach-sync)
+      (setq romacs-attach--selected (plist-get (nth 1 romacs-attach-items) :id))
+      (romacs-attach-edit-remove)
+      (romacs-attach-edit-undo)
+      (should (equal (composer) (concat gone " " (link a) " " (link b)))))))
+
+(ert-deftest romacs-agent-log-attach-markdown-says-what-is-code ()
+  ;; Code as CommonMark reads it: a fence of four holding three, an
+  ;; inline span of three; and an escaped bracket opens no link.  The
+  ;; same for a sent message's text.
+  (romacs-agent-log-attach-tests--with
+    (let ((text (concat "````\n```\n" (link a) "\n````\nsee ```x``` here\n" (link b)
+                        " and \\" (link c))))
+      (insert text)
+      (romacs-agent-log-attach-sync)
+      (should (equal (files) (list b)))
+      (should (equal (mapcar #'caddr (romacs-agent-log-images-links text)) (list b))))))
+
+(ert-deftest romacs-agent-log-attach-a-caption-is-one-line ()
+  (romacs-agent-log-attach-tests--with
+    (insert (link a))
+    (romacs-agent-log-attach-sync)
+    (romacs-attach-set-items (romacs-attach-caption romacs-attach-items (plist-get (car romacs-attach-items) :id) "two\nlines"))
+    (should (equal (composer) (concat "[two lines](" a ")")))
+    (should (equal (files) (list a)))))
+
 (provide 'romacs-agent-log-attach-tests)
 ;;; romacs-agent-log-attach-tests.el ends here
