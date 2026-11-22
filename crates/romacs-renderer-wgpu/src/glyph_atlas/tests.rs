@@ -164,7 +164,6 @@ fn default_metrics_ignore_nondefault_face_zero_font_size() {
         charcode: 'F' as u32,
         face_id: FaceId::new(0),
         font_size_bits: 27.0_f32.to_bits(),
-        font_identity: 0,
         x_bin: SubpixelBin::Zero,
         y_bin: SubpixelBin::Zero,
     };
@@ -178,7 +177,6 @@ fn default_metrics_accept_unspecified_default_font_size() {
         charcode: 'F' as u32,
         face_id: FaceId::new(0),
         font_size_bits: 0.0_f32.to_bits(),
-        font_identity: 0,
         x_bin: SubpixelBin::Zero,
         y_bin: SubpixelBin::Zero,
     };
@@ -192,7 +190,6 @@ fn default_metrics_accept_explicit_default_font_size() {
         charcode: 'F' as u32,
         face_id: FaceId::new(0),
         font_size_bits: 13.05_f32.to_bits(),
-        font_identity: 0,
         x_bin: SubpixelBin::Zero,
         y_bin: SubpixelBin::Zero,
     };
@@ -1219,7 +1216,6 @@ fn color_rasters_are_not_shared_across_foregrounds() {
         charcode: '\u{1F347}' as u32,
         face_id: FaceId::new(11),
         font_size_bits: 16.0f32.to_bits(),
-        font_identity: 0,
         x_bin: SubpixelBin::Zero,
         y_bin: SubpixelBin::Zero,
     };
@@ -1340,7 +1336,6 @@ fn faceless_text_draws_in_the_frames_default_face() {
         charcode: ch as u32,
         face_id: FaceId::new(0),
         font_size_bits: 0.0f32.to_bits(),
-        font_identity: glyph_font_identity(None),
         x_bin: SubpixelBin::Zero,
         y_bin: SubpixelBin::Zero,
     };

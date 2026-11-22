@@ -1659,6 +1659,7 @@ impl WgpuRenderer {
             logical_w,
             logical_h,
             device_scale: surface.device_scale(),
+            glyph_cull_bounds: scissor.map(|clip| clip.cull_bounds(surface.device_scale())),
             face_debug_call_id,
             has_line_anims: !self.fx.line_anim.active.is_empty()
                 || !self.fx.scroll_spacing.active.is_empty(),
@@ -1872,6 +1873,7 @@ impl WgpuRenderer {
             logical_w,
             logical_h,
             device_scale: mapping.surface().device_scale(),
+            glyph_cull_bounds: None,
             face_debug_call_id: 0,
             has_line_anims: false,
         };

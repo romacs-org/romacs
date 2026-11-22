@@ -261,7 +261,6 @@ impl TextTessellator<'_, '_> {
                     let phys_y = baseline_y * sf;
                     let (x_int, y_int, x_bin, y_bin) =
                         super::content::snap_glyph_origin(phys_x, phys_y);
-                    let font_identity = self.atlas.glyph_font_identity_for_char(face, *char);
 
                     let subpixel_request = if enable_subpixel {
                         SubpixelRequest::Enabled
@@ -280,7 +279,7 @@ impl TextTessellator<'_, '_> {
                             text: text.clone(),
                             face_id,
                             font_size_bits: font_size.to_bits(),
-                            font_identity,
+                            font_identity: self.atlas.glyph_font_identity_for_char(face, *char),
                             glyph_stream_identity: self
                                 .atlas
                                 .glyph_stream_identity_for_composed(face, text),
@@ -305,7 +304,6 @@ impl TextTessellator<'_, '_> {
                             charcode: *char as u32,
                             face_id,
                             font_size_bits: font_size.to_bits(),
-                            font_identity,
                             x_bin,
                             y_bin,
                         };
@@ -358,11 +356,17 @@ impl TextTessellator<'_, '_> {
                         let raster_bounds = Rect::new(glyph_x, glyph_y, glyph_w, glyph_h);
                         // An overstruck glyph is drawn a device pixel right again.
                         let struck = if overstrike { 1.0 / sf } else { 0.0 };
+                        let ink = Rect::new(glyph_x, glyph_y, glyph_w + struck, glyph_h);
                         super::root_picture::reach::note(
                             slot_id.window_id.get(),
                             Rect::new(*x, *y, *width, *height),
-                            Rect::new(glyph_x, glyph_y, glyph_w + struck, glyph_h),
+                            ink,
                         );
+                        if !self.geometry_diagnostics
+                            && self.params.glyph_cull_bounds.is_some_and(|clip| !clip.intersects(&ink))
+                        {
+                            continue;
+                        }
 
                         let tex_u_min = uv.min()[0];
                         let tex_u_max = uv.max()[0];

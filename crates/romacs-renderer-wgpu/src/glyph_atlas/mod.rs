@@ -48,13 +48,6 @@ pub(crate) struct GlyphKey {
     /// Font size in pixels (for text-scale-increase support)
     /// Using u32 bits of f32 for hashing
     pub font_size_bits: u32,
-    /// Realized font identity -- the stable discriminator the atlas keys on.
-    ///
-    /// Renderer glyph caches live across redisplay frames, while frame face IDs
-    /// can be reused for different realized fonts after face remapping changes.
-    /// GNU's redisplay keeps realized face metrics and drawing font coupled; this
-    /// key keeps Romacs' persistent atlas coupled to the same font identity.
-    pub font_identity: u64,
     /// Subpixel X bin (fractional physical-pixel offset baked into rasterization)
     pub x_bin: SubpixelBin,
     /// Subpixel Y bin (fractional physical-pixel offset baked into rasterization)
@@ -89,7 +82,7 @@ pub(crate) struct GlyphIdentity {
 
 impl GlyphKey {
     /// The atlas cache identity for this request (drops `face_id`).
-    pub fn identity(&self) -> GlyphIdentity {
+    pub fn identity(&self, font_identity: u64) -> GlyphIdentity {
         // Exhaustive destructure (no `..`): adding a field to GlyphKey fails to
         // compile HERE until the author classifies it as identity (move it into
         // GlyphIdentity below) or request-only (bind it to `_`, like face_id).
@@ -100,14 +93,13 @@ impl GlyphKey {
             charcode,
             face_id: _,
             font_size_bits,
-            font_identity,
             x_bin,
             y_bin,
         } = self;
         GlyphIdentity {
             charcode: *charcode,
             font_size_bits: *font_size_bits,
-            font_identity: *font_identity,
+            font_identity,
             x_bin: *x_bin,
             y_bin: *y_bin,
         }
@@ -126,7 +118,7 @@ pub(crate) struct ComposedGlyphKey {
     pub face_id: FaceId,
     /// Font size in pixels (using u32 bits of f32 for hashing)
     pub font_size_bits: u32,
-    /// Realized font identity; see [`GlyphKey::font_identity`].
+    /// Realized font identity; see [`GlyphIdentity::font_identity`].
     pub font_identity: u64,
     /// Exact layout-published font/glyph/position stream, when available.
     pub glyph_stream_identity: Option<ResolvedGlyphStreamIdentity>,
@@ -2720,10 +2712,9 @@ impl WgpuGlyphAtlas {
     ) -> Result<GlyphAtlasHandle, GlyphAtlasError> {
         let c =
             char::from_u32(key.charcode).ok_or(GlyphAtlasError::InvalidCharCode(key.charcode))?;
-        let mut glyph_identity = key.identity();
-        glyph_identity.font_identity = self.glyph_font_identity_for_char(face, c);
+        let font_identity = self.glyph_font_identity_for_char(face, c);
         let cache_key = CachedGlyphKey {
-            glyph: glyph_identity,
+            glyph: key.identity(font_identity),
             mode: self.render_mode_from_request(subpixel),
         };
 
@@ -2791,7 +2782,7 @@ impl WgpuGlyphAtlas {
             charcode = key.charcode,
             ch = %c,
             font_size_bits = key.font_size_bits,
-            font_identity = key.font_identity,
+            font_identity,
             x_bin = ?key.x_bin,
             y_bin = ?key.y_bin,
             mode = ?cache_key.mode,
