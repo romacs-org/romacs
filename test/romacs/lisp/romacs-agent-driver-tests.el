@@ -194,6 +194,25 @@ line's `env' sets only its own configuration variable."
       (should (plist-get event :last)))
     (should (equal (romacs-agent-answering session) "from-parent"))))
 
+(ert-deftest romacs-agent-input-commits-before-notifying-the-sender ()
+  (let* ((session (romacs-agent--make :id "sent" :harness 'claude :state 'idle :brief "Handoff\n"))
+         (written nil)
+         (observed nil)
+         (romacs-agent-event-functions nil)
+         (romacs-agent-input-functions
+          (list (lambda (state id)
+                  (push (list id (romacs-agent-state state) (romacs-agent-brief state)) observed)
+                  (error "Observer failed")))))
+    (cl-letf (((symbol-function 'romacs-agent--line)
+               (lambda (_ wire record) (push (cons wire record) written))))
+      (romacs-agent--input session "go" nil nil nil "queued"))
+    (should (= (length written) 1))
+    (let ((wire (caar written)) (record (cdar written)))
+      (should (equal (gethash "content" (gethash "message" wire)) "Handoff\ngo"))
+      (should (equal (gethash "content" (gethash "message" record)) "go"))
+      (should (equal (gethash "romacsQueued" record) "queued"))
+      (should (equal observed (list (list (gethash "romacsRequest" record) 'running nil)))))))
+
 (ert-deftest romacs-agent-a-message-sent-is-a-turn-under-way ()
   ;; A message written to an idle harness's session: running at once, not
   ;; idle until its record comes back (a caller waiting for the turn's end

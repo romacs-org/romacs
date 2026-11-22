@@ -1525,11 +1525,13 @@ another session in its envelope; a delegated task's results (each with
       (concat text "\n\n" (mapconcat #'romacs-agent--message-reply-line messages "\n"))
     (mapconcat (lambda (m) (romacs-agent--message-envelope m (or (plist-get m :text) text))) messages "\n\n")))
 
-(defun romacs-agent--stamped (messages text)
-  "MESSAGES with their text (TEXT when one has none) and the time now."
-  (let ((now (float-time)))
-    (mapcar (lambda (m) (plist-put (plist-put (copy-sequence m) :text (or (plist-get m :text) text)) :time now))
-            messages)))
+(defun romacs-agent--prepare-prompt (text messages time)
+  "Return (PROMPT . MESSAGES) for TEXT and MESSAGES stamped with TIME."
+  (let ((stamped (mapcar (lambda (m) (plist-put (plist-put (copy-sequence m)
+                                                          :text (or (plist-get m :text) text))
+                                               :time time))
+                        messages)))
+    (cons (if stamped (romacs-agent--messages-text stamped text) text) stamped)))
 
 (defun romacs-agent--after-write (what function)
   "Call FUNCTION, a step after a message was written: its error or quit
@@ -1547,56 +1549,55 @@ its parent's last, as its end goes to its parent; else the first."
 (defconst romacs-agent--renew-continuation "renew-continue"
   "The romacsOwn value of a turn that continues work after renewal.")
 
+(defun romacs-agent--decorate-input-record (record request)
+  "Attach REQUEST's journal metadata to the newly encoded RECORD."
+  (puthash "romacsRequest" (plist-get request :id) record)
+  (cl-loop for (key . field) in '((:own . "romacsOwn") (:queued . "romacsQueued"))
+           for value = (plist-get request key)
+           when value do (puthash field value record))
+  (when-let* ((images (plist-get request :images)))
+    (puthash "images" (vconcat images) record))
+  (when-let* ((messages (plist-get request :messages)))
+    (puthash "romacsMessages" (vconcat (mapcar #'romacs-agent--message-json messages)) record))
+  (when (plist-get request :brief) (puthash "romacsBrief" t record)))
+
+(defun romacs-agent--input-sent (session request answering)
+  "Commit a written REQUEST to SESSION, with its ANSWERING message id."
+  (when (plist-get request :brief)
+    (setf (romacs-agent-brief session) nil))
+  ;; The write can return before its echo.  A steer keeps its turn's owner.
+  (unless (romacs-agent--turn-under-way-p session)
+    (setf (romacs-agent-state session) 'running
+          (romacs-agent-answering session) answering
+          (romacs-agent-own-turn session) (plist-get request :own))
+    (romacs-agent--after-write "romacs-agent--changed" (lambda () (romacs-agent--changed session))))
+  (romacs-agent--after-write "romacs-agent-input-functions"
+                            (lambda () (run-hook-with-args 'romacs-agent-input-functions
+                                                          session (plist-get request :id)))))
+
 (defun romacs-agent--input (session text &optional images messages own queued)
-  "Write TEXT to SESSION's persistent harness as the user's message, with
-the attached IMAGES; MESSAGES, when given, say it comes from other
-sessions (`romacs-agent-make-message'): the harness reads it as
-`romacs-agent--messages-text' says, and the journal keeps them as
-romacsMessages beside TEXT.  OWN, when given, names what Romacs asks of
-it itself \(a string kept as the record's romacsOwn): no one's message,
-and its turn's end no one's answer (`romacs-agent-own-turn'), except
-when it continues work after handoff.  QUEUED,
-the id of the kept message it is (`romacs-agent--keep-item'), is kept as
-the record's romacsQueued: a restore sends it no second time.  The
-journal keeps the message as it would be without them, and their files:
-a replay reads every record, and no image's bytes.  Both are made with
-one request id: the journal's is the one written."
+  "Write TEXT to SESSION's persistent harness, with the attached IMAGES.
+MESSAGES, when given, are deliveries from other sessions.  OWN names a
+prompt Romacs supplies.  QUEUED names the persisted queue entry.
+The harness reads the delivery envelopes and any renewal brief.  The
+journal keeps the original text, file paths, and metadata for replay.
+Both encodings use the same request id."
   (romacs-agent--fold-now session)
-  (let* ((input (romacs-agent--harness-get session :input))
+  (let* ((encode (romacs-agent--harness-get session :input))
          (images (romacs-agent--sendable-images images))
          (id (romacs-agent-request-id session))
-         (record (funcall input session text id))
-         (messages (romacs-agent--stamped messages text))
-         ;; A renewal's brief goes with the message; the journal has it in
-         ;; the renewal's note, and the message as the user wrote it.
-         (brief (and (or (not own) (equal own romacs-agent--renew-continuation)) (romacs-agent-brief session)))
-         ;; Known before the write: nothing after it may fail.
-         (answered (romacs-agent--answered messages)))
-    ;; The journal's alone: the id names the message's turn.
-    (puthash "romacsRequest" id record)
-    (when own (puthash "romacsOwn" own record))
-    (when queued (puthash "romacsQueued" queued record))
-    (when images (puthash "images" (vconcat images) record))
-    (when messages (puthash "romacsMessages" (vconcat (mapcar #'romacs-agent--message-json messages)) record))
-    (when brief (puthash "romacsBrief" t record))
-    (romacs-agent--line session
-                        (let ((romacs-agent--message-images images)
-                              (said (if messages (romacs-agent--messages-text messages text) text)))
-                          (funcall input session (if brief (concat brief said) said) id))
-                        record)
-    ;; Written: the next message carries no brief (a failed write keeps it).
-    (when brief (setf (romacs-agent-brief session) nil))
-    ;; A turn under way from the write: never idle with a message in hand
-    ;; while its record comes back, which says the same.  Its turn answers
-    ;; what the message does, so an exit before its record comes ends that
-    ;; turn, not the one before.  A steer's turn is the one under way.
-    (unless (romacs-agent--turn-under-way-p session)
-      (setf (romacs-agent-state session) 'running
-            (romacs-agent-answering session) answered
-            (romacs-agent-own-turn session) own)
-      (romacs-agent--after-write "romacs-agent--changed" (lambda () (romacs-agent--changed session))))
-    (romacs-agent--after-write "romacs-agent-input-functions"
-                               (lambda () (run-hook-with-args 'romacs-agent-input-functions session id)))))
+         (record (funcall encode session text id))
+         (prompt (romacs-agent--prepare-prompt text messages (float-time)))
+         (brief (and (or (not own) (equal own romacs-agent--renew-continuation))
+                     (romacs-agent-brief session)))
+         (request (list :id id :own own :queued queued :images images :messages (cdr prompt) :brief brief))
+         ;; Resolve the parent before handing the request to the transport.
+         (answering (romacs-agent--answered (cdr prompt))))
+    (romacs-agent--decorate-input-record record request)
+    (let ((wire (let ((romacs-agent--message-images images))
+                  (funcall encode session (if brief (concat brief (car prompt)) (car prompt)) id))))
+      (romacs-agent--line session wire record))
+    (romacs-agent--input-sent session request answering)))
 
 (defun romacs-agent--uuid-p (id)
   "Whether ID is a UUID, as Claude Code's and Codex's conversations are named."
@@ -1643,8 +1644,7 @@ on whatever becomes of this server."
     ;; it, read with it (`romacs-agent--record').
     ;; Named by its prompt: only that prompt takes them (a launch that
     ;; failed leaves them to no later one).
-    (let* ((messages (romacs-agent--stamped messages text))
-           (prompt (romacs-agent--messages-text messages text)))
+    (pcase-let ((`(,prompt . ,messages) (romacs-agent--prepare-prompt text messages (float-time))))
       (romacs-agent--note session (romacs-mcp--object "type" "messages" "text" text
                                                       "prompt" (secure-hash 'sha1 prompt)
                                                       "messages" (vconcat (mapcar #'romacs-agent--message-json messages))))
