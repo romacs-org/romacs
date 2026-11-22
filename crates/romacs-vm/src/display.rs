@@ -2855,8 +2855,9 @@ impl Vm {
             }
             return Ok(Plain::Kept);
         }
+        let shared = self.treesit_shared(buffer)?;
         let Some(text) = self.treesit_text_of(buffer)? else { return Ok(Plain::No) };
-        if text.treesit.small_edit_due(limit) {
+        if text.treesit.small_edit_due(limit, shared) {
             self.treesit_deferred.as_mut().expect("a deferred frame").push(id);
             return Ok(Plain::Kept);
         }
@@ -2865,8 +2866,7 @@ impl Vm {
         if self.process_jobs.wake().is_none() {
             return Ok(Plain::No);
         }
-        let Some(text) = self.treesit_text_of(buffer)? else { return Ok(Plain::No) };
-        let pending = text.treesit.early.as_mut().is_some_and(|early| early.pending());
+        let pending = self.treesit_early_pending(buffer)?;
         if pending && !self.treesit_plain.contains(&id) {
             self.treesit_plain.push(id);
         }
@@ -2909,7 +2909,9 @@ impl Vm {
         let (mut running, mut small) = (false, false);
         for window in self.displayed_windows() {
             let buffer = self.window(window)?.buffer;
-            let due = self.treesit_text_of(buffer)?.is_some_and(|text| text.treesit.small_edit_due(limit));
+            let shared = self.treesit_shared(buffer)?;
+            let due = self.treesit_text_of(buffer)?
+                .is_some_and(|text| text.treesit.small_edit_due(limit, shared));
             let treeless = !self.treesit_has_tree(buffer)?;
             match self.treesit_run_ahead(buffer, due)? {
                 State::Running => {

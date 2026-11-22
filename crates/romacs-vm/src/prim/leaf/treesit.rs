@@ -541,6 +541,9 @@ impl Leaf<'_> {
         }
         self.ts_symbol(language)?;
         self.ts_check_size(base)?;
+        if self.vm.treesit_shared(buffer).map_err(Fault::Error)? {
+            return Ok(Value::NIL);
+        }
         let registry = self.ts_registry(base);
         if !registry.parsers.is_empty() || registry.early.is_some() {
             return Ok(Value::NIL);
@@ -561,14 +564,9 @@ impl Leaf<'_> {
     pub(crate) fn ts_parsing_p(&mut self) -> Out {
         let buffer = self.current_buffer()?;
         let Some(data::Object::Buffer(_)) = self.vm.object_if(buffer) else { return Ok(Value::NIL) };
-        let base = self.ts_base(buffer);
-        if self.ts_registry_mut(base).early.as_mut().is_some_and(crate::treesit::Early::pending) {
-            return Ok(Value::TRUE);
-        }
-        Ok(flag(self.ts_registry(base).parsers.iter().any(|(_, core)| {
-            let mut c = core.borrow_mut();
-            (c.tree.is_none() && c.waiting_slot) || c.ahead.as_mut().is_some_and(|ahead| !ahead.ready())
-        })))
+        let pending = self.vm.treesit_early_pending(buffer).map_err(Fault::Error)?
+            || self.vm.treesit_ahead_running(buffer).map_err(Fault::Error)?;
+        Ok(flag(pending))
     }
     /// The tree of the early parse of PARSER's buffer, which only a first
     /// parse uses: a parser that sees what that parse saw waits for it, and
