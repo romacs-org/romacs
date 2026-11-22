@@ -1535,6 +1535,19 @@ another session in its envelope; a delegated task's results (each with
     (mapcar (lambda (m) (plist-put (plist-put (copy-sequence m) :text (or (plist-get m :text) text)) :time now))
             messages)))
 
+(defun romacs-agent--after-write (what function)
+  "Call FUNCTION, a step after a message was written: its error or quit
+is said as WHAT's, never taken for a failed write that sends it again."
+  (condition-case err (funcall function)
+    ((error quit) (message "%s: %s" what (error-message-string err)))))
+
+(defun romacs-agent--answered (messages)
+  "The id of the message among MESSAGES, one input's, its turn answers:
+its parent's last, as its end goes to its parent; else the first."
+  (plist-get (or (car (last (cl-remove-if-not (lambda (m) (equal (plist-get m :kind) "parent")) messages)))
+                 (car messages))
+             :id))
+
 (defun romacs-agent--input (session text &optional images messages own queued)
   "Write TEXT to SESSION's persistent harness as the user's message, with
 the attached IMAGES; MESSAGES, when given, say it comes from other
@@ -1577,14 +1590,11 @@ one request id: the journal's is the one written."
     ;; turn, not the one before.  A steer's turn is the one under way.
     (unless (romacs-agent--turn-under-way-p session)
       (setf (romacs-agent-state session) 'running
-            (romacs-agent-answering session) (plist-get (car messages) :id)
+            (romacs-agent-answering session) (romacs-agent--answered messages)
             (romacs-agent-own-turn session) own)
-      ;; Its listeners' errors said, never taken for a failed write.
-      (with-demoted-errors "romacs-agent--changed: %S" (romacs-agent--changed session)))
-    ;; Written: what follows the write cannot unsend it, so a failing
-    ;; hook is said, never taken for a failed write sent again.
-    (with-demoted-errors "romacs-agent-input-functions: %S"
-      (run-hook-with-args 'romacs-agent-input-functions session id))))
+      (romacs-agent--after-write "romacs-agent--changed" (lambda () (romacs-agent--changed session))))
+    (romacs-agent--after-write "romacs-agent-input-functions"
+                               (lambda () (run-hook-with-args 'romacs-agent-input-functions session id)))))
 
 (defun romacs-agent--uuid-p (id)
   "Whether ID is a UUID, as Claude Code's and Codex's conversations are named."
@@ -1733,7 +1743,7 @@ on whatever becomes of this server."
               ;; A turn begun by an earlier prompt and not ended yet: a
               ;; steer.  An exit mid-turn ends it too (its done-seq).
               (unless (> (or (romacs-agent-input-seq session) 0) (romacs-agent-done-seq session))
-                (setf (romacs-agent-answering session) (plist-get (car messages) :id)
+                (setf (romacs-agent-answering session) (romacs-agent--answered messages)
                       (romacs-agent-own-turn session) (plist-get event :own))))
             (setf (romacs-agent-state session) 'running
                   (romacs-agent-activity session) nil
@@ -3970,7 +3980,7 @@ queue.  Called wherever what the predicate reads may have changed."
                 ;; Its kept record goes first; a restore after an end
                 ;; between the two finds it sent by its id in the journal
                 ;; (`romacs-agent--sent-queued') and sends it no second time.
-                (let ((parts (romacs-agent--together session next)))
+                (pcase-let ((`(,parts . ,stale) (romacs-agent--together session next)))
                   (romacs-agent--unkeep-item session next)
                   ;; Its user can no longer change it: it is being written.
                   (dolist (part parts) (setf (romacs-agent-item-held part) 'sending))
@@ -3982,11 +3992,12 @@ queue.  Called wherever what the predicate reads may have changed."
                     ((error quit) (dolist (part parts) (setf (romacs-agent-item-held part) nil))
                      (romacs-agent--keep-item session next)
                      (signal (car err) (cdr err))))
-                  ;; Off the queue together, its views told once after:
-                  ;; a view's error leaves none of them to go again.
-                  (let ((romacs-agent--queue-quiet t))
-                    (dolist (part parts) (romacs-agent--dequeue session part)))
-                  (with-demoted-errors "romacs-agent--changed: %S" (romacs-agent--changed session))
+                  ;; Off the queue at once, with those no longer wanted
+                  ;; among them, its views told once after: neither a quit
+                  ;; nor a view's error leaves one to go again.
+                  (let ((inhibit-quit t) (romacs-agent--queue-quiet t))
+                    (dolist (part (append parts stale)) (romacs-agent--dequeue session part)))
+                  (romacs-agent--after-write "romacs-agent--changed" (lambda () (romacs-agent--changed session)))
                   ;; Each written is told, whatever an earlier one's telling did.
                   (let ((failed nil))
                     (dolist (part parts)
@@ -4018,19 +4029,21 @@ alone), and not held (its user edits it: what waits behind it waits)."
   (and (cl-some (lambda (m) (plist-get m :wake)) (romacs-agent-item-messages item)) t))
 
 (defun romacs-agent--together (session head)
-  "HEAD and the messages waiting behind it in SESSION's queue that go in
-its turn (`romacs-agent--joinable-p', results with results), in order;
-those no longer wanted (VALID says) are dropped on the way.  HEAD alone
-when it is not the queue's head (a steer passing what waits)."
+  "(PARTS . STALE): HEAD and the messages waiting behind it in SESSION's
+queue that go in its turn (`romacs-agent--joinable-p', results with
+results), in order, and those among them no longer wanted (VALID says),
+to be dropped as they go.  HEAD alone when it is not the queue's head (a
+steer passing what waits).  Nothing changes here: its views are told
+once the turn's write has decided."
   (if (not (and (eq head (car (romacs-agent-queue session))) (romacs-agent--joinable-p head)))
-      (list head)
-    (let ((parts (list head)) (results (romacs-agent--results-p head)))
+      (list (list head))
+    (let ((parts (list head)) (stale nil) (results (romacs-agent--results-p head)))
       (cl-loop for item in (cdr (romacs-agent-queue session))
                while (and (romacs-agent--joinable-p item) (eq (romacs-agent--results-p item) results))
                do (if (and (romacs-agent-item-valid item) (not (funcall (romacs-agent-item-valid item))))
-                      (romacs-agent--dequeue session item)
+                      (push item stale)
                     (push item parts)))
-      (nreverse parts))))
+      (cons (nreverse parts) stale))))
 
 (defun romacs-agent--joined (parts)
   "PARTS, waiting messages (`romacs-agent--together'), as the one item

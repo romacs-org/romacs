@@ -90,6 +90,8 @@
       (should (string-match-p "m-1[^z-a]*text m-1[^z-a]*m-3[^z-a]*text m-3" content))
       (should-not (string-match-p "m-2\\|m-4\\|the user's" content)))
     (should (equal delivered '("m-3" "m-1")))
+    ;; Its end answers its parent's last.
+    (should (equal (romacs-agent-answering session) "m-3"))
     (should (equal (mapcar #'car (romacs-agent-queue session)) '("results" "the user's")))
     (should (= (romacs-agent-queue-length session) 2))))
 
@@ -115,19 +117,31 @@
 
 (ert-deftest romacs-agent-a-listener-s-error-is-no-failed-write ()
   ;; Written, a message is off the queue whatever a listener of its turn's
-  ;; start does: never sent a second time.
-  (let ((session (romacs-agent-test-attach
-                  (romacs-agent--make :id "7a7a7a7a-8888-4999-8aaa-bbbbbbbbbbbb" :harness 'claude :state 'idle)
-                  t))
-        ;; Failing once the turn its write began is under way.
-        (romacs-agent-event-functions (list (lambda (s _event) (when (eq (romacs-agent-state s) 'running)
-                                                                 (error "Listener")))))
-        (sent nil))
-    (romacs-agent-queue-tests--writing sent
-      (romacs-agent-send-later session "one" nil nil #'always
-                               (list (romacs-agent-make-message "m-1" "parent" '(:session "p")))))
-    (should (= (length sent) 1))
-    (should (null (romacs-agent-queue session)))))
+  ;; start does, an error or a quit: never sent a second time.
+  (dolist (failure '(error quit))
+    (ert-info ((symbol-name failure) :prefix "listener: ")
+      (let ((session (romacs-agent-test-attach
+                      (romacs-agent--make :id "7a7a7a7a-8888-4999-8aaa-bbbbbbbbbbbb" :harness 'claude :state 'idle)
+                      t))
+            ;; Failing once the turn its write began is under way.
+            (romacs-agent-event-functions (list (lambda (s _event) (when (eq (romacs-agent-state s) 'running)
+                                                                     (signal failure (list "Listener"))))))
+            (sent nil))
+        (romacs-agent-queue-tests--writing sent
+          (romacs-agent-send-later session "one" nil nil #'always
+                                   (list (romacs-agent-make-message "m-1" "parent" '(:session "p")))))
+        (should (= (length sent) 1))
+        (should (null (romacs-agent-queue session)))))))
+
+(ert-deftest romacs-agent-a-turn-answers-its-parent-s-message ()
+  ;; A turn taking a sibling's message and then its parent's answers the
+  ;; parent's: its end goes to its parent.
+  (let ((message (lambda (id kind) (romacs-agent-make-message id kind '(:session "x")))))
+    (should (equal (romacs-agent--answered (list (funcall message "s" "sibling") (funcall message "p1" "parent")
+                                                 (funcall message "p2" "parent") (funcall message "c" "child")))
+                   "p2"))
+    (should (equal (romacs-agent--answered (list (funcall message "s" "sibling") (funcall message "c" "child"))) "s"))
+    (should-not (romacs-agent--answered nil))))
 
 (ert-deftest romacs-agent-messages-in-one-turn-are-each-told ()
   ;; One message's delivery failing leaves the others' told: each was
