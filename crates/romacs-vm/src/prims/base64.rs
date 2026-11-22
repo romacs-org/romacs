@@ -98,22 +98,11 @@ struct Input<'a> {
     stopped: bool,
 }
 
-/// The decoder's input, a byte at a time: None at its end, or at a stop.
-trait Bytes {
-    fn byte(&mut self) -> Option<u8>;
-}
+impl Iterator for Input<'_> {
+    type Item = u8;
 
-/// A short input, read whole with no probe.
-impl Bytes for std::iter::Copied<std::slice::Iter<'_, u8>> {
     #[inline]
-    fn byte(&mut self) -> Option<u8> {
-        self.next()
-    }
-}
-
-impl Bytes for Input<'_> {
-    #[inline]
-    fn byte(&mut self) -> Option<u8> {
+    fn next(&mut self) -> Option<u8> {
         match self.bytes.next() {
             Some(c) => Some(c),
             None => self.refill(),
@@ -148,11 +137,11 @@ fn decode(input: &[u8], url: bool, ignore_invalid: bool, stop: &crate::quit::Nat
 }
 
 /// fns.c `base64_decode_1` over BYTES, LENGTH of them.
-fn decode_from<B: Bytes>(bytes: &mut B, length: usize, url: bool, ignore_invalid: bool) -> Option<Vec<u8>> {
+fn decode_from<B: Iterator<Item = u8>>(bytes: &mut B, length: usize, url: bool, ignore_invalid: bool) -> Option<Vec<u8>> {
     // The next significant byte: whitespace, and with IGNORE-INVALID any
     // invalid byte, is skipped.
     let next = |bytes: &mut B| loop {
-        let c = bytes.byte()?;
+        let c = bytes.next()?;
         let v = digit(c, url);
         if !(v < 0 || (v == 0 && ignore_invalid)) { return Some((c, v)); }
     };
@@ -170,7 +159,7 @@ fn decode_from<B: Bytes>(bytes: &mut B, length: usize, url: bool, ignore_invalid
         if c == b'=' {
             // "==": the second pad must follow, past whitespace only.
             loop {
-                let c = bytes.byte()?;
+                let c = bytes.next()?;
                 if digit(c, url) >= 0 { if c != b'=' { return None; } break; }
             }
             continue;
