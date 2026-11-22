@@ -20,6 +20,8 @@
     (prompt "❯" "Before the user's message")
     (steer "↪" "Before a message sent while the agent works")
     (composer "❯" "Before the composer's line")
+    (queue-held "»" "Before a queued message being edited")
+    (queue-other "<" "Before a queued message from elsewhere")
     (tool "●" "Before a tool call's row")
     (output "⎿" "Before what a call put out")
     (running "⋮" "Before a running call's last lines")

@@ -119,7 +119,9 @@
   (let ((session (romacs-agent-test-attach
                   (romacs-agent--make :id "7a7a7a7a-8888-4999-8aaa-bbbbbbbbbbbb" :harness 'claude :state 'idle)
                   t))
-        (romacs-agent-event-functions (list (lambda (&rest _) (error "Listener"))))
+        ;; Failing once the turn its write began is under way.
+        (romacs-agent-event-functions (list (lambda (s _event) (when (eq (romacs-agent-state s) 'running)
+                                                                 (error "Listener")))))
         (sent nil))
     (romacs-agent-queue-tests--writing sent
       (romacs-agent-send-later session "one" nil nil #'always
