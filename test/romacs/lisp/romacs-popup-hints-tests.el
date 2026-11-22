@@ -116,18 +116,23 @@
                      '(("M-f" . "next") ("M-b" . "previous")))))))
 
 (ert-deftest romacs-popup-hints-meta-keys-agree-with-lookup ()
-  ;; A meta key the first map unbinds shows when `lookup-key' finds it
-  ;; in a later one (a composed sibling), and not when it does not (a
-  ;; parent shadowed).
-  (romacs-popup-hints-tests--with
-    (let* ((first (define-keymap "M-x" nil "q" #'romacs-popup-hints-tests--quit))
-           (second (define-keymap "M-x" #'romacs-popup-hints-tests--next))
+  ;; Each meta key shows exactly when `lookup-key' binds it: a key the
+  ;; first map unbinds (alone, as C-M-, or inside a nil range) shows from
+  ;; a composed sibling, and not from a shadowed parent.
+  (let ((romacs-popup-hints-keys-per-command 10))
+    (let* ((first (define-keymap "M-x" nil "C-M-x" nil "q" #'romacs-popup-hints-tests--quit))
+           (second (define-keymap "M-x" #'romacs-popup-hints-tests--next "C-M-x" #'romacs-popup-hints-tests--previous
+                     "M-c" #'romacs-popup-hints-tests--quit))
+           (nil-range (list 'keymap (cons ?\e (list 'keymap (cons (cons ?a ?e) nil)))))
            (composed (make-composed-keymap (list first second)))
-           (parent (define-keymap "M-x" #'romacs-popup-hints-tests--next))
-           (child (define-keymap :parent parent "M-x" nil "q" #'romacs-popup-hints-tests--quit)))
-      (dolist (map (list composed child))
-        (should (equal (and (assoc "M-x" (romacs-popup--hint-entries map)) t)
-                       (and (lookup-key map (kbd "M-x")) t)))))))
+           (ranged (make-composed-keymap (list nil-range second)))
+           (parent (define-keymap "M-x" #'romacs-popup-hints-tests--next "C-M-x" #'romacs-popup-hints-tests--previous))
+           (child (define-keymap :parent parent "M-x" nil "C-M-x" nil "q" #'romacs-popup-hints-tests--quit)))
+      (dolist (map (list composed ranged child))
+        (let ((shown (mapcan (lambda (entry) (split-string (car entry) "/")) (romacs-popup--hint-entries map))))
+          (dolist (key '("M-x" "C-M-x" "M-c"))
+            (should (equal (and (member key shown) t)
+                           (let ((found (lookup-key map (kbd key)))) (and found (not (numberp found)) t))))))))))
 
 (ert-deftest romacs-popup-hints-meta-keys-that-cannot-load-show-as-esc ()
   ;; An ESC map from a library that fails to load: ESC as a prefix, as

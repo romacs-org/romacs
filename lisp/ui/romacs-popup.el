@@ -376,40 +376,55 @@ keys bound before it.  One entry per binding
 \(`romacs-popup--hint-groups'), in the order MAP was written in."
   (delq nil (mapcar (pcase-lambda (`(,keys . ,binding))
                       (when-let* ((label (romacs-popup--hint-label binding))) (cons keys label)))
-                    (romacs-popup--hint-groups (romacs-popup--hint-keys map nil)))))
+                    (romacs-popup--hint-groups (romacs-popup--hint-keys map)))))
 
-(defun romacs-popup--hint-keys (map prefix)
+(defun romacs-popup--hint-keys (map)
   "MAP's bindings as (KEY BINDING) in the order MAP was written in
-\(`romacs-popup--map-items'), each KEY after the events PREFIX.  The meta
-keys, the effective ESC map (its parents' composed in), read as M- keys
-at ESC's place."
+\(`romacs-popup--map-items').  The meta keys, ESC's, read as M- keys at
+ESC's place (`romacs-popup--hint-meta-keys')."
   (pcase-let ((`(,characters . ,others) (romacs-popup--map-items map)))
-    (let ((name (lambda (event) (key-description (vconcat prefix (vector event))))))
-      ;; `sort' is stable: a range's parts stay in ascending order.
-      (mapcan (pcase-lambda (`(,_ ,key ,binding))
-                (if (and (not prefix) (equal key [?\e]) (keymapp binding))
-                    (romacs-popup--hint-meta-keys map binding)
-                  (list (list (if (vectorp key) (funcall name (aref key 0)) key) binding))))
-              (sort (nconc (mapcar (pcase-lambda (`(,_ ,lo ,hi ,binding ,order))
-                                     (list order (if (= lo hi) (vector lo)
-                                                   (format "%s..%s" (funcall name lo) (funcall name hi)))
-                                           binding))
-                                   characters)
-                           (mapcar (pcase-lambda (`(,_ ,event ,binding ,order)) (list order (vector event) binding)) others))
-                    (lambda (a b) (romacs-popup--order< (car a) (car b))))))))
+    ;; `sort' is stable: a range's parts stay in ascending order.
+    (mapcan (pcase-lambda (`(,_ ,key ,binding))
+              (if (and (equal key [?\e]) (keymapp binding))
+                  (romacs-popup--hint-meta-keys map binding)
+                (list (list (if (vectorp key) (key-description key) key) binding))))
+            (sort (nconc (mapcar (pcase-lambda (`(,_ ,lo ,hi ,binding ,order))
+                                   (list order (if (= lo hi) (vector lo)
+                                                 (format "%s..%s" (key-description (vector lo)) (key-description (vector hi))))
+                                         binding))
+                                 characters)
+                         (mapcar (pcase-lambda (`(,_ ,event ,binding ,order)) (list order (vector event) binding)) others))
+                  (lambda (a b) (romacs-popup--order< (car a) (car b)))))))
+
+(defconst romacs-popup--hint-meta-range 256
+  "A meta range is read key by key up to this many keys; a longer one,
+rare in an ESC map, is left out.")
 
 (defun romacs-popup--hint-meta-keys (map esc)
-  "MAP's meta keys, its effective ESC map's, as (KEY BINDING) at ESC's
-place; a key unbound in the first map that has it is resolved by
-`lookup-key', as composed maps resolve it.  When they cannot be read (a
-prefix library that fails to load), ESC itself, its binding ESC."
+  "MAP's meta keys as (KEY BINDING), at ESC's place: every event any of
+its ESC maps names (a range's keys one by one), in the order written,
+bound to what `lookup-key' finds for it in MAP, the unbound left out; so
+the card agrees with a key's lookup, however its maps compose.  When
+they cannot be read (a prefix library that fails to load), ESC itself,
+its binding ESC."
   (condition-case nil
-      (mapcar (pcase-lambda (`(,key ,binding))
-                (list key (or binding
-                              (and (string-prefix-p "M-" key) (not (string-search ".." key))
-                                   (let ((found (lookup-key map (kbd key))))
-                                     (and (not (numberp found)) found))))))
-              (romacs-popup--hint-keys (lookup-key map [?\e]) [?\e]))
+      (let ((seen (make-hash-table :test 'eql)) (n 0) (events nil))
+        (romacs-popup--walk-keymap
+         (lookup-key map [?\e])
+         (lambda (event _binding level full)
+           (setq n (1+ n))
+           (dolist (key (cond ((not (consp event)) (list event))
+                              ((< (- (cdr event) (car event)) romacs-popup--hint-meta-range)
+                               (number-sequence (car event) (cdr event)))))
+             (unless (or (gethash key seen)
+                         (and (symbolp key) (or (memq key '(remap t menu-bar tool-bar)) (string-match-p "mouse" (symbol-name key)))))
+               (puthash key t seen)
+               (push (list (if (and full (integerp key)) (list level 0 key) (list level 1 (- n))) key) events)))))
+        (delq nil (mapcar (pcase-lambda (`(,_ ,key))
+                            (let ((binding (lookup-key map (vector ?\e key))))
+                              (and binding (not (numberp binding))
+                                   (list (key-description (vector ?\e key)) binding))))
+                          (sort (nreverse events) (lambda (a b) (romacs-popup--order< (car a) (car b)))))))
     (error (list (list "ESC" esc)))))
 
 (defcustom romacs-popup-hints-keys-per-command 2
