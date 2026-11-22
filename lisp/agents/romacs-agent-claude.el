@@ -100,6 +100,23 @@ conversation anew under a new id."
 its command line gives (`romacs-agent--claude-head')."
   (romacs-agent--uuid))
 
+(defun romacs-agent--claude-mcp-servers (session)
+  "The mcpServers object of SESSION's mcp.json: Romacs's relay, then the
+`romacs-agent-extra-mcp-servers'."
+  (let ((servers (romacs-mcp--object
+                  "romacs" (romacs-mcp--object
+                            "command" (romacs-agent--program "romacs-mcp")
+                            "args" (vconcat (romacs-agent--relay-args session))
+                            ;; Claude Code's own limit on a call, in ms: past
+                            ;; the relay's, so the relay's answer is the one.
+                            "timeout" (* 1000 (+ (truncate romacs-agent-reply-timeout) 15))))))
+    (pcase-dolist (`(,name ,command ,args ,env) (romacs-agent--extra-mcp-servers) servers)
+      (puthash name (apply #'romacs-mcp--object "command" command "args" (vconcat args)
+                           (and env (list "env" (let ((object (make-hash-table :test #'equal)))
+                                                  (pcase-dolist (`(,variable . ,value) env object)
+                                                    (puthash variable value object))))))
+               servers))))
+
 (defun romacs-agent--claude-argv (session resume)
   "Claude Code's command line for SESSION, resuming its conversation when
 RESUME is non-nil."
@@ -107,14 +124,7 @@ RESUME is non-nil."
         (instance (romacs-agent--instance (romacs-agent-provider session) (romacs-agent-harness session))))
     (romacs-agent--keep-json
      (expand-file-name "mcp.json" dir)
-     (romacs-mcp--object
-      "mcpServers" (romacs-mcp--object
-                    "romacs" (romacs-mcp--object
-                              "command" (romacs-agent--program "romacs-mcp")
-                              "args" (vconcat (romacs-agent--relay-args session))
-                              ;; Claude Code's own limit on a call, in ms: past
-                              ;; the relay's, so the relay's answer is the one.
-                              "timeout" (* 1000 (+ (truncate romacs-agent-reply-timeout) 15))))))
+     (romacs-mcp--object "mcpServers" (romacs-agent--claude-mcp-servers session)))
     (append (romacs-agent--environment-words session)
             (list (format "MCP_TOOL_TIMEOUT=%d" (* 1000 (+ (truncate romacs-agent-reply-timeout) 15))))
             (list (plist-get instance :program) "-p" "--output-format" "stream-json"

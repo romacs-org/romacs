@@ -882,7 +882,7 @@ them inherits."
       (cl-letf (((symbol-function 'romacs-agent-loaded) (lambda (_) nil))
                 ((symbol-function 'romacs-agent-get) (lambda (_) live))
                 ((symbol-function 'romacs-agent-interrupt) (lambda (s) (push (list 'interrupt s) calls)))
-                ((symbol-function 'romacs-agent-send-later) (lambda (s text &optional first) (push (list 'later s text first) calls)))
+                ((symbol-function 'romacs-agent-send-later) (lambda (s text &optional first &rest _) (push (list 'later s text first) calls)))
                 ((symbol-function 'romacs-agent-send) (lambda (s text &rest _) (push (list 'send s text) calls))))
         (goto-char (point-max))
         (insert "stop that")
@@ -1482,4 +1482,3 @@ none when dropped.")
 
 (provide 'romacs-agent-log-tests)
 ;;; romacs-agent-log-tests.el ends here
-

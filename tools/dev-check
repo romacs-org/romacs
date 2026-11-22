@@ -41,6 +41,11 @@
 One line a stage and one a finding, each with its fix. Exit 1 when a stage
 fails, 2 when one could not run.
 
+A run on a worktree with no uncommitted change leaves a receipt for HEAD's
+tree, $XDG_CACHE_HOME/romacs/dev-check/receipts/TREE.json: the exit, each
+stage's status, whether the tests ran. The merge queue's submit reads it to
+know this exact tree was checked, and never reruns the check.
+
 cargo and cargo-nextest are looked for on PATH, then in the host's pins
 ROMACS_TOOLCHAIN_BIN and ROMACS_NEXTEST_BIN, which an agent's shell has even
 where its PATH lacks the toolchain. Found there, they are put on PATH for what
@@ -50,6 +55,7 @@ import argparse
 from collections import Counter
 import importlib.machinery
 import importlib.util
+import json
 import os
 from pathlib import Path
 import re
@@ -520,6 +526,33 @@ def report(stages):
     return lines + [f'dev-check: {verdict}'], 1 if failed else 2 if skipped else 0
 
 
+def receipt_path(tree):
+    cache = Path(os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache')
+    return cache / 'romacs/dev-check/receipts' / f'{tree}.json'
+
+
+def receipt(tree, head, trunk, stages, status, tests_ran):
+    """The receipt of a run over STAGES (NAME, STATUS, ...) that ended with STATUS, for TREE."""
+    return {'schema': 1, 'tree': tree, 'head': head, 'trunk': trunk, 'exit': status, 'tests': tests_ran,
+            'stages': [{'name': name, 'status': stage_status} for name, stage_status, *_ in stages],
+            'time': time.strftime('%Y-%m-%dT%H:%M:%S%z')}
+
+
+def write_receipt(root, trunk, stages, status, tests_ran):
+    """Leave this run's receipt for HEAD's tree, when the worktree holds no uncommitted change
+    (then what was checked is that tree): its path, or None."""
+    if git(root, 'status', '--porcelain', '--untracked-files=no', check=False).stdout.strip():
+        return None
+    tree = git(root, 'rev-parse', 'HEAD^{tree}').stdout.strip()
+    head = git(root, 'rev-parse', 'HEAD').stdout.strip()
+    path = receipt_path(tree)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    draft = path.with_name(f'.{path.name}.{os.getpid()}')
+    draft.write_text(json.dumps(receipt(tree, head, trunk, stages, status, tests_ran), indent=1) + '\n')
+    draft.replace(path)
+    return path
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--trunk', default=os.environ.get('ROMACS_BASE', 'beta'), help='the branch this one lands on (default beta)')
@@ -537,6 +570,11 @@ def main():
         stages.append(('tests', *tests(ROOT, names, args.threads)))
     lines, status = report(stages)
     print('\n'.join(lines))
+    try:
+        if write_receipt(ROOT, trunk, stages, status, not args.no_tests) is None:
+            print('dev-check: no receipt: the worktree has uncommitted changes, so no commit\'s tree was checked')
+    except (OSError, RuntimeError) as exc:
+        print(f'dev-check: no receipt: {exc}')
     return status
 
 

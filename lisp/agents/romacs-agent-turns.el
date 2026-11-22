@@ -428,8 +428,11 @@ records to SQLite: the editor alone does."
     (dolist (dir (if ids (mapcar (lambda (id) (expand-file-name id (romacs-agent--state-root))) ids)
                    (directory-files (romacs-agent--state-root) t "\\`[0-9a-f]\\{8\\}-")))
       (when (file-exists-p (expand-file-name "manifest.json" dir))
+        ;; Its queue is the editor's to restore and write, never this
+        ;; process's: a snapshot written here could land over a newer one.
         (cl-letf (((symbol-function 'romacs-agent--attach) #'ignore))
-          (romacs-agent--load dir))
+          (let ((romacs-agent-loaded-functions (remq 'romacs-agent-store--requeue romacs-agent-loaded-functions)))
+            (romacs-agent--load dir)))
         (when-let* ((session (romacs-agent-loaded (file-name-nondirectory dir))))
           ;; Whether records came since its rows is the records' to say: a
           ;; session loaded beside its running supervisor has an older seq.
