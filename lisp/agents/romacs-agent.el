@@ -342,18 +342,11 @@ the user, not a tool call to approve."
 (defun romacs-agent--set-questions (session questions)
   (setf (romacs-agent-driver-state session) (plist-put (romacs-agent-driver-state session) :questions questions)))
 
-(defun romacs-agent-request-event (id request)
-  "An approval event for request ID, REQUEST as its harness asked it: a
-table (Claude Code's), else (WIRE METHOD PARAMS) (Codex's); its questions
-read as its harness's events read them."
-  (if (hash-table-p request)
-      (let ((tool (gethash "tool_name" request)) (input (gethash "input" request)))
-        (list :type 'approval :request-id id :tool tool :input input
-              :description (gethash "description" request) :plan (equal tool "ExitPlanMode")
-              :questions (and (equal tool "AskUserQuestion") (romacs-agent--claude-questions input))))
-    (pcase-let ((`(,_ ,method ,params) request))
-      (list :type 'approval :request-id id :tool method :input params
-            :questions (and (equal method "item/tool/requestUserInput") (romacs-agent--codex-questions params))))))
+(defun romacs-agent-request-event (session id request)
+  "Recover SESSION's approval event for its pending REQUEST with ID."
+  (or (when-let* ((decode (romacs-agent--harness-get session :request-event)))
+        (funcall decode id request))
+      (list :type 'approval :request-id id)))
 
 (defun romacs-agent--auto-answer-p (_session event)
   "Whether Romacs answers a session's approval EVENT itself: a tool call,
@@ -699,9 +692,14 @@ instances) is derived again when it changes.")
       asked, a plist allows with :answers ((QUESTION . ANSWER) ...) to
       the questions its `approval' event's :questions asked, or with
       :always for the rest of the session;
+  :request-event (ID REQUEST)   optional: recover the approval event
+      shown for a pending REQUEST in a new view;
   :events (SESSION OBJECT), :input-events (SESSION OBJECT)
       the events of an object it wrote, and of one written to it;
-      `handshake' events (:state PLIST) fold into its startup state;
+      `handshake' events (:state PLIST) fold into its startup state.
+      `approval' carries :approval-wire, the pending request to keep
+      before delivery.  `answered' removes it; `approval-withdrawn'
+      removes it silently.  Both identify it with :request-id;
   :next (SESSION)   its next object to write (from
       `romacs-agent-driver-state'): a startup step, or once ready a line
       it owes (an answer to its harness's request); :ready once started
@@ -2189,6 +2187,19 @@ STEER is non-nil when the journal already records a turn under way."
           ((not (eq exit :absent)) (list (list :type 'exit :status exit)))
           ((hash-table-p note) (romacs-agent--record-note-events note)))))
 
+(defun romacs-agent--record-approvals (session events)
+  "Apply approval changes from EVENTS before notifying SESSION's observers.
+Return public events in their original order."
+  (cl-loop with approvals = (romacs-agent-approvals session)
+           for event in events
+           for type = (plist-get event :type)
+           for id = (plist-get event :request-id)
+           for wire = (and (eq type 'approval) (plist-get event :approval-wire))
+           when wire do (puthash id wire approvals)
+           when (memq type '(answered approval-withdrawn)) do (remhash id approvals)
+           unless (eq type 'approval-withdrawn)
+           collect (if wire (romacs-agent--without event '(:approval-wire)) event)))
+
 (defun romacs-agent--after-record (session seq ends)
   "Advance a caught-up SESSION after journal record SEQ.
 ENDS says a turn or run ended in that record."
@@ -2214,7 +2225,7 @@ ENDS says a turn or run ended in that record."
       (let ((input (gethash "in" record :absent)))
         (unless (eq input :absent)
           (romacs-agent--record-echo session input))
-        (let* ((events (romacs-agent--record-events session record input))
+        (let* ((events (romacs-agent--record-approvals session (romacs-agent--record-events session record input)))
                (time (gethash "t" record))
                (ends (cl-some (lambda (event) (memq (plist-get event :type) '(done exit))) events)))
           (while events

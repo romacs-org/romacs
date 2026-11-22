@@ -378,7 +378,6 @@ message again: its text and record (another session's) the steer's."
      ((gethash (romacs-agent--codex-approval-id session id) (romacs-agent-approvals session))
       (let ((result (gethash "result" object))
             (asked (nth 2 (gethash (romacs-agent--codex-approval-id session id) (romacs-agent-approvals session)))))
-        (remhash (romacs-agent--codex-approval-id session id) (romacs-agent-approvals session))
         (list (list :type 'answered :request-id (romacs-agent--codex-approval-id session id)
                     :answers (romacs-agent--codex-given-answers asked result)
                     :behavior (if (or (member (gethash "decision" result) '("accept" "acceptForSession"))
@@ -443,14 +442,21 @@ first), owed as a turn of its own."
                   :state (list :steers steers
                                :owed (append (plist-get state :owed) (list (cons :turn steer)))))))))
 
+(defun romacs-agent--codex-request-event (id request)
+  "The approval event for a pending Codex REQUEST with ID."
+  (pcase-let ((`(,_ ,method ,params) request))
+    (list :type 'approval :request-id id :tool method :input params
+          :questions (and (equal method "item/tool/requestUserInput")
+                          (romacs-agent--codex-questions params)))))
+
 (defun romacs-agent--codex-asked (session id method params)
   "The events of request ID, METHOD with PARAMS, Codex asks of Romacs:
 an approval or questions for the user, anything else refused."
   (cl-flet ((approval (tool input &optional questions)
               (let ((approval (romacs-agent--codex-approval-id session id)))
-                (puthash approval (list id method params) (romacs-agent-approvals session))
                 ;; A question is the user's alone to answer.
                 (list (list :type 'approval :request-id approval :tool tool :input input :questions questions
+                            :approval-wire (list id method params)
                             :user (equal method "item/tool/requestUserInput")
                             :description (romacs-agent--value (gethash "reason" params))))))
             (refused (&optional why)
@@ -625,21 +631,59 @@ an approval or questions for the user, anything else refused."
                    (and (hash-table-p error) (equal (gethash "codexErrorInfo" error) "usageLimitExceeded")))
           :context-window (plist-get (romacs-agent-driver-state session) :window))))
 
+(defun romacs-agent--codex-turn-started-events (session state params)
+  "Decode the start of a Codex turn for SESSION with driver STATE from PARAMS."
+  (setf (romacs-agent-reply session) nil)
+  (unless (member (gethash "id" (gethash "turn" params)) (plist-get state :ended))
+    (list (list :type 'handshake :state (list :turn (gethash "id" (gethash "turn" params)))))))
+
+(defun romacs-agent--codex-turn-completed-events (session state params)
+  "Decode completed turn PARAMS for SESSION with driver STATE."
+  (let* ((turn (gethash "turn" params)) (id (gethash "id" turn)))
+    ;; The last few ended: an acknowledgement may come after its end.
+    (list (list :type 'handshake
+                :state (list :turn (unless (equal id (plist-get state :turn)) (plist-get state :turn))
+                             :ended (seq-take (cons id (plist-get state :ended)) 8)))
+          (romacs-agent--codex-done session turn))))
+
+(defun romacs-agent--codex-rate-limits-events (params)
+  "Decode Codex account usage PARAMS into a rate-limit event."
+  (let* ((limits (gethash "rateLimits" params))
+         (windows (and (hash-table-p limits)
+                       (cl-remove-if-not (lambda (w) (and (hash-table-p w) (numberp (gethash "usedPercent" w))))
+                                         (list (gethash "primary" limits) (gethash "secondary" limits)))))
+         ;; Spent windows bind until the last of them resets; else the fullest tells.
+         (spent (cl-remove-if-not (lambda (w) (>= (gethash "usedPercent" w) 100)) windows))
+         (fullest (car (sort (or spent windows)
+                             (if spent
+                                 (lambda (a b) (> (or (romacs-agent--value (gethash "resetsAt" a)) 0)
+                                                  (or (romacs-agent--value (gethash "resetsAt" b)) 0)))
+                               (lambda (a b) (> (gethash "usedPercent" a) (gethash "usedPercent" b))))))))
+    (when fullest
+      (let ((used (gethash "usedPercent" fullest)))
+        (list (list :type 'rate-limit
+                    :status (if (>= used 100) 'rejected 'allowed)
+                    :used (/ used 100.0)
+                    :resets (romacs-agent--value (gethash "resetsAt" fullest))
+                    :window (let ((mins (romacs-agent--value (gethash "windowDurationMins" fullest))))
+                              (and (numberp mins) (format "%d minutes" mins)))
+                    :windows (delq nil (list (romacs-agent--codex-window (gethash "primary" limits) "primary")
+                                             (romacs-agent--codex-window (gethash "secondary" limits) "secondary")))))))))
+
+(defun romacs-agent--codex-token-usage-events (state params)
+  "Decode context usage PARAMS with the previous window in STATE."
+  (let* ((usage (gethash "tokenUsage" params))
+         (window (romacs-agent--value (gethash "modelContextWindow" usage))))
+    (append (list (list :type 'usage :context-used (gethash "totalTokens" (gethash "last" usage))))
+            (when (and window (not (eql window (plist-get state :window))))
+              (list (list :type 'handshake :state (list :window window)))))))
+
 (defun romacs-agent--codex-notified (session method params)
   "The events of notification METHOD with PARAMS."
   (let ((state (romacs-agent-driver-state session)))
     (pcase method
-      ("turn/started"
-       (setf (romacs-agent-reply session) nil)
-       (unless (member (gethash "id" (gethash "turn" params)) (plist-get state :ended))
-         (list (list :type 'handshake :state (list :turn (gethash "id" (gethash "turn" params)))))))
-      ("turn/completed"
-       (let* ((turn (gethash "turn" params)) (id (gethash "id" turn)))
-         ;; The last few ended: an acknowledgement may come after its end.
-         (list (list :type 'handshake
-                     :state (list :turn (unless (equal id (plist-get state :turn)) (plist-get state :turn))
-                                  :ended (seq-take (cons id (plist-get state :ended)) 8)))
-               (romacs-agent--codex-done session turn))))
+      ("turn/started" (romacs-agent--codex-turn-started-events session state params))
+      ("turn/completed" (romacs-agent--codex-turn-completed-events session state params))
       ("item/started" (romacs-agent--codex-item session (gethash "item" params) nil))
       ("item/completed" (romacs-agent--codex-item session (gethash "item" params) t))
       ("item/agentMessage/delta"
@@ -659,34 +703,8 @@ an approval or questions for the user, anything else refused."
        (when (> (gethash "summaryIndex" params 0) 0) (list (list :type 'thinking :text "\n\n"))))
       ("turn/plan/updated" (list (list :type 'status :text (romacs-agent--codex-plan params))))
       ;; Its account's usage: the fuller of its windows, which binds first.
-      ("account/rateLimits/updated"
-       (let* ((limits (gethash "rateLimits" params))
-              (windows (and (hash-table-p limits)
-                            (cl-remove-if-not (lambda (w) (and (hash-table-p w) (numberp (gethash "usedPercent" w))))
-                                              (list (gethash "primary" limits) (gethash "secondary" limits)))))
-              ;; Spent windows bind until the last of them resets; else the fullest tells.
-              (spent (cl-remove-if-not (lambda (w) (>= (gethash "usedPercent" w) 100)) windows))
-              (fullest (car (sort (or spent windows)
-                                  (if spent
-                                      (lambda (a b) (> (or (romacs-agent--value (gethash "resetsAt" a)) 0)
-                                                       (or (romacs-agent--value (gethash "resetsAt" b)) 0)))
-                                    (lambda (a b) (> (gethash "usedPercent" a) (gethash "usedPercent" b))))))))
-         (when fullest
-           (let ((used (gethash "usedPercent" fullest)))
-             (list (list :type 'rate-limit
-                         :status (if (>= used 100) 'rejected 'allowed)
-                         :used (/ used 100.0)
-                         :resets (romacs-agent--value (gethash "resetsAt" fullest))
-                         :window (let ((mins (romacs-agent--value (gethash "windowDurationMins" fullest))))
-                                   (and (numberp mins) (format "%d minutes" mins)))
-                         :windows (delq nil (list (romacs-agent--codex-window (gethash "primary" limits) "primary")
-                                                  (romacs-agent--codex-window (gethash "secondary" limits) "secondary")))))))))
-      ("thread/tokenUsage/updated"
-       (let* ((usage (gethash "tokenUsage" params))
-              (window (romacs-agent--value (gethash "modelContextWindow" usage))))
-         (append (list (list :type 'usage :context-used (gethash "totalTokens" (gethash "last" usage))))
-                 (when (and window (not (eql window (plist-get state :window))))
-                   (list (list :type 'handshake :state (list :window window)))))))
+      ("account/rateLimits/updated" (romacs-agent--codex-rate-limits-events params))
+      ("thread/tokenUsage/updated" (romacs-agent--codex-token-usage-events state params))
       ("error"
        (let ((text (romacs-agent--codex-error params)))
          (if (eq (gethash "willRetry" params) t)
@@ -697,7 +715,6 @@ an approval or questions for the user, anything else refused."
        ;; was cancelled): no longer the user's to answer.
        (let ((id (romacs-agent--codex-approval-id session (gethash "requestId" params))))
          (when (gethash id (romacs-agent-approvals session))
-           (remhash id (romacs-agent-approvals session))
            (list (list :type 'answered :request-id id :how 'harness)))))
       ("model/rerouted"
        (list (list :type 'status :text (format "Model rerouted to %s" (gethash "toModel" params)))))
@@ -818,6 +835,7 @@ thread: its rollout, wherever its day put it."
   :steerable (lambda (session) (plist-get (romacs-agent-driver-state session) :turn))
   :interrupt #'romacs-agent--codex-interrupt
   :respond #'romacs-agent--codex-respond
+  :request-event #'romacs-agent--codex-request-event
   :events #'romacs-agent--codex-events
   :streamed-skip #'romacs-agent--codex-streamed-skip
   :input-events #'romacs-agent--codex-input-events
