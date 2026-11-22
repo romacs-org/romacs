@@ -42,6 +42,7 @@ ROMACS_DEFAULTS_OFF = "(when (fboundp 'romacs-defaults-mode) (romacs-defaults-mo
 # switch, so both engines edit with GNU's values; Romacs shows GNU's mode
 # line in each window (VM2-MODE-LINE).
 GNU_COMPLETION = ("(setq completion-styles '(basic partial-completion emacs22)\n"
+                  "      completion-category-defaults nil\n"
                   "      completion-category-overrides '((file (styles partial-completion))))\n"
                   ";; GNU sees romacs-complete-mode through the bundled autoloads, but\n"
                   ";; only Romacs can host a minibuffer in a layer.\n"

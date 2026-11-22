@@ -103,33 +103,22 @@ def profile_init(config):
     return Path(config['init']).read_text()
 
 
+GNU_COMPLETION_STYLES = '''(setq completion-styles '(basic partial-completion emacs22)
+      completion-category-defaults nil)
+'''
+
+
 def gnu_settings():
     """The settings Romacs's --loadup makes before the user's init, for
     GNU's init, as the parity harnesses' GNU takes them."""
     return ('(menu-bar-mode -1) (tool-bar-mode -1) (scroll-bar-mode -1)\n'
             '(setq scroll-conservatively 101)\n'
-            f'(load {lisp_string(str(ROOT / "lisp/completion/romacs-completion-defaults.el"))} nil t)\n')
+            f'(load {lisp_string(str(ROOT / "lisp/completion/romacs-completion-defaults.el"))} nil t)\n'
+            + GNU_COMPLETION_STYLES)
 
 
-# GNU's completion as it loads lisp/completion/romacs-completion-defaults.el, for
-# Romacs in a comparison: Romacs's window-system display is its own layer
-# (romacs-complete-mode, ledger/divergences VM2-MINI-COMPLETION-LAYER), which
-# takes the root window's last line, and its styles begin with fzf
-# (VM2-FZF-DEFAULT), which fido then completes with instead of flex; GNU
-# gets `fido-vertical-mode' and the same styles without fzf, and no
-# project-file override, which the defaults add only with fzf.  Romacs
-# shows GNU's mode line in each window (VM2-MODE-LINE), so the windows'
-# mode lines and global modes compare with GNU's.
-GNU_COMPLETION_UI = '''(romacs-complete-mode -1)
+GNU_COMPLETION_UI = GNU_COMPLETION_STYLES + '''(romacs-complete-mode -1)
 (when (fboundp 'romacs-mode-line-mode) (romacs-mode-line-mode -1))
-(setq completion-styles (remq 'fzf completion-styles)
-      completion-category-overrides
-      (mapcar (lambda (entry)
-                (cons (car entry)
-                      (mapcar (lambda (prop)
-                                (if (eq (car-safe prop) 'styles) (cons 'styles (remq 'fzf (cdr prop))) prop))
-                              (cdr entry))))
-              (assq-delete-all 'project-file (copy-sequence completion-category-overrides))))
 (fido-vertical-mode 1)
 '''
 
