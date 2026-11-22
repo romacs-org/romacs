@@ -1196,7 +1196,7 @@ END is the limit of the search."
     (define-key km ")" #'semantic-grammar-electric-punctuation)
     (define-key km ":" #'semantic-grammar-electric-punctuation)
 
-    (define-key km "\t"       #'semantic-grammar-indent)
+    (define-key km (kbd "TAB")       #'semantic-grammar-indent)
     (define-key km "\M-\t"    #'semantic-grammar-complete)
     (define-key km "\C-c\C-c" #'semantic-grammar-create-package)
     (define-key km "\C-cm"    #'semantic-grammar-find-macro-expander)

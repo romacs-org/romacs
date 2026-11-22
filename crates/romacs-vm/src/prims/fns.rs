@@ -125,7 +125,7 @@ fn nth_count(cx: &Leaf<'_>, n: Value, list: Value) -> std::result::Result<i64, F
     if let Some(n) = n.integer_value() {
         return Ok(n);
     }
-    let big = cx.bigint_value(n).ok_or(Fault::Wrong("integerp", n))?;
+    let big = cx.bigint_value(n).ok_or_else(|| Fault::Wrong("integerp", n))?;
     Ok(big_nth_count(&big, list, |tail| cx.pair(tail).map(|(_, cdr)| cdr)) as i64)
 }
 

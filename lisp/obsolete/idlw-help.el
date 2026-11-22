@@ -201,7 +201,7 @@ support."
   (let ((map (make-sparse-keymap)))
     (define-key map "q" #'idlwave-help-quit)
     (define-key map "w" #'widen)
-    (define-key map "\C-m" (lambda (arg)
+    (define-key map (kbd "RET") (lambda (arg)
                              (interactive "p")
                              (scroll-up arg)))
     (define-key map " " #'scroll-up-command)

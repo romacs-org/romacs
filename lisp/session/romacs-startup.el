@@ -33,11 +33,11 @@
 (defun romacs-gui-dirty-p ()
   (and buffer-file-name (buffer-modified-p)))
 (defun romacs-gui-echo (text)
-  (let ((old (current-buffer)) (old-point (point)) (inhibit-read-only t))
-    (unwind-protect
-        (progn (set-buffer (window-buffer (minibuffer-window)))
-               (erase-buffer) (insert text))
-      (set-buffer old) (goto-char old-point))))
+  "Show TEXT in the echo area, unlogged.
+It is the echo area's message, which the host shows and keeps until the
+next command (crates/romacs-vm-gui/src/echo.rs): text put in the
+minibuffer's buffer behind its back is erased by the next idle pass."
+  (let ((message-log-max nil)) (message "%s" text)))
 (defun romacs-gui-confirm (action)
   (when romacs-gui-pending (romacs-gui-answer-no))
   (setq romacs-gui-pending (list action (current-buffer) (if (fboundp 'current-local-map) (current-local-map) nil)))

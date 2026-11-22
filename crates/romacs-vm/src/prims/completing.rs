@@ -8,7 +8,7 @@ fn completing_read(cx, prompt: Value, collection: Value; optional predicate: Val
                    require_match: Value, initial_input: Value, hist: Value,
                    def: Value, inherit_input_method: Value) -> Step {
     let variable = cx.intern("completing-read-function");
-    let function = cx.variable_value(variable)?.ok_or(Fault::VoidVariable(variable))?;
+    let function = cx.variable_value(variable)?.ok_or_else(|| Fault::VoidVariable(variable))?;
     Ok(Step::Call {
         f: function,
         args: vec![prompt, collection, predicate, require_match, initial_input,

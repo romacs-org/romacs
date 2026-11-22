@@ -42,7 +42,7 @@ fn accessible_step(cx: &mut Leaf<'_>, saved: &[Value]) -> Next {
     let (keymap, prefix) = (saved[0], saved[1]);
     let prefix_length = sequence_length(cx, prefix)?;
     let start = if prefix == Value::NIL {
-        let map = crate::where_is::keymap_noload(cx, keymap).filter(|map| cx.pair(*map).is_some()).ok_or(Fault::Wrong("keymapp", keymap))?;
+        let map = crate::where_is::keymap_noload(cx, keymap).filter(|map| cx.pair(*map).is_some()).ok_or_else(|| Fault::Wrong("keymapp", keymap))?;
         Some(Reached { keys: Vec::new(), map })
     } else {
         let binding = match super::keymap::walk(cx, saved, 0, accessible_filtered)? {

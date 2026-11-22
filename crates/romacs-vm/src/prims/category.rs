@@ -5,11 +5,11 @@ use crate::prim::leaf::Kind;
 /// CHECK_CATEGORY: a character from ` ' to `~'.
 fn category(cx: &Leaf<'_>, value: Value) -> std::result::Result<usize, Fault> {
     let _ = cx;
-    value.integer_value().filter(|c| (32..=126).contains(c)).map(|c| c as usize).ok_or(Fault::Wrong("categoryp", value))
+    value.integer_value().filter(|c| (32..=126).contains(c)).map(|c| c as usize).ok_or_else(|| Fault::Wrong("categoryp", value))
 }
 
 fn character(value: Value) -> std::result::Result<usize, Fault> {
-    value.integer_value().filter(|c| (0..=0x3fffff).contains(c)).map(|c| c as usize).ok_or(Fault::Wrong("characterp", value))
+    value.integer_value().filter(|c| (0..=0x3fffff).contains(c)).map(|c| c as usize).ok_or_else(|| Fault::Wrong("characterp", value))
 }
 
 defsubr! { name = "make-category-set", gnu = "category.c:72", effect = Pure,
@@ -89,7 +89,7 @@ fn char_category_set(cx, ch: Value) {
 
 defsubr! { name = "category-set-mnemonics", gnu = "category.c:292", effect = Pure,
 fn category_set_mnemonics(cx, set: Value) {
-    let bits = cx.bool_vector(set).ok().filter(|b| b.len == 128).ok_or(Fault::Wrong("categorysetp", set))?;
+    let bits = cx.bool_vector(set).ok().filter(|b| b.len == 128).ok_or_else(|| Fault::Wrong("categorysetp", set))?;
     let text: String = (32..127).filter(|&i| bits.get(i) == Some(true)).map(|i| i as u8 as char).collect();
     Ok(cx.string(&text))
 }}
@@ -97,7 +97,7 @@ fn category_set_mnemonics(cx, set: Value) {
 defsubr! { name = "modify-category-entry", gnu = "category.c:314", effect = Global,
 fn modify_category_entry(cx, ch: Value, cat: Value; optional table: Value, reset: Value) {
     let (start, end) = if ch.integer_value().is_some() { let c = character(ch)?; (c, c) } else {
-        let (from, to) = cx.pair(ch).ok_or(Fault::Wrong("consp", ch))?;
+        let (from, to) = cx.pair(ch).ok_or_else(|| Fault::Wrong("consp", ch))?;
         (character(from)?, character(to)?)
     };
     let c = category(cx, cat)?;

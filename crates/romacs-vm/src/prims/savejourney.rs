@@ -210,7 +210,7 @@ fn file_name_as_directory(cx, file: Value) -> Step {
 }}
 
 fn directory_file_returned(cx: &mut Leaf<'_>, value: Value, _: &[Value]) -> Next {
-    if cx.string_bytes(value).is_ok() { Ok(Step::Done(value)) }
+    if cx.is_readable_string(value) { Ok(Step::Done(value)) }
     else { Err(Fault::Error("Invalid handler in ‘file-name-handler-alist’".into())) }
 }
 
@@ -231,7 +231,7 @@ fn directory_file_name(cx, directory: Value) -> Step {
 }}
 
 fn directory_returned(cx: &mut Leaf<'_>, value: Value, _: &[Value]) -> Next {
-    Ok(Step::Done(if cx.string_bytes(value).is_ok() { value } else { Value::NIL }))
+    Ok(Step::Done(if cx.is_readable_string(value) { value } else { Value::NIL }))
 }
 
 defsubr! { name = "file-name-directory", gnu = "fileio.c:509", effect = Global,

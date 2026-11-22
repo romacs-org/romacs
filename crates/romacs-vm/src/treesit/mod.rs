@@ -68,6 +68,10 @@ pub(crate) struct Core {
     pub linecols: Option<(Linecol, Linecol)>,
     /// The reparse an edit's frame started on a thread (`ahead`).
     pub ahead: Option<ahead::Ahead>,
+    /// A first parse a frame wanted on a thread when none was free: the
+    /// frame shows the text, and the next frame, which a thread's end
+    /// wakes, tries again.
+    pub waiting_slot: bool,
 }
 
 /// One text change, GNU's `treesit_record_change` arguments: 1-based bytes
@@ -173,13 +177,15 @@ impl Early {
         let (sender, result) = mpsc::channel();
         let grammar = language.clone();
         std::thread::Builder::new().name("treesit-parse".into()).spawn(move || {
-            // The slot outlives the text.
-            let _slot = slot;
             let text = text;
             let mut parser = native::Parser::new();
             parser.set_language(&grammar);
-            let reader = Reader::new(Some(&text), ((visible.0 - 1) as usize, (visible.1 - 1) as usize));
-            let _ = sender.send(parser.parse(None, &reader).map(Tree::loose));
+            let tree = parser.parse(None, &Reader::new(Some(&text), ((visible.0 - 1) as usize, (visible.1 - 1) as usize)));
+            // The slot outlives the text, and is free before the wake, so
+            // the frame it wakes finds it for a parse waiting on one.
+            drop(text);
+            drop(slot);
+            let _ = sender.send(tree.map(Tree::loose));
             note_early_landed();
             if let Some(wake) = wake { wake(); }
         }).ok()?;
@@ -187,10 +193,24 @@ impl Early {
     }
     /// Whether the thread has sent its result.
     pub(crate) fn ready(&mut self) -> bool {
+        self.wait(std::time::Duration::ZERO)
+    }
+    /// Whether the thread has sent its result (or ended without one),
+    /// waiting at most SLICE for it.
+    pub(crate) fn wait(&mut self, slice: std::time::Duration) -> bool {
         if self.landed.is_none() {
-            self.landed = self.result.try_recv().ok();
+            self.landed = match self.result.recv_timeout(slice) {
+                Ok(landed) => Some(landed),
+                Err(mpsc::RecvTimeoutError::Disconnected) => Some(None),
+                Err(mpsc::RecvTimeoutError::Timeout) => None,
+            };
         }
         self.landed.is_some()
+    }
+    /// Whether a parser of LANGUAGE that sees LENGTH bytes whole can use
+    /// this parse's tree (`ts_early_tree'), and the thread is still on it.
+    pub(crate) fn pending_for(&mut self, language: Option<&native::Language>, sees_all: bool) -> bool {
+        sees_all && language == Some(&self.language) && self.pending()
     }
     /// Whether a parser asking now would wait for a tree it can use.
     pub(crate) fn pending(&mut self) -> bool {
@@ -260,7 +280,7 @@ fn edit(start: i64, old_end: i64, new_end: i64, points: [TSPoint; 3]) -> TSInput
 
 impl Core {
     pub(crate) fn new(visible: (i64, i64), linecols: Option<(Linecol, Linecol)>) -> Self {
-        Self { tree: None, need_reparse: true, fresh: false, visible, linecols, ahead: None }
+        Self { tree: None, need_reparse: true, fresh: false, visible, linecols, ahead: None, waiting_slot: false }
     }
     /// treesit_record_change_1 for this parser: the change clipped to the
     /// visible region, the region moved, and the tree edited.

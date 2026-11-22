@@ -28,7 +28,7 @@ impl Leaf<'_> {
             return self.string_view(name);
         }
         // No name made yet: the one its key stands for, not the key.
-        let key = self.symbol_key(value).ok_or(Fault::Wrong("symbolp", value))?;
+        let key = self.symbol_key(value).ok_or_else(|| Fault::Wrong("symbolp", value))?;
         Ok(self.read_symbol_name(value, key, |name| name.to_owned()))
     }
 }

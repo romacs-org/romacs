@@ -84,7 +84,7 @@ fn casified(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
 // text's edge where that comes first, which is where the scan stops;
 // cased as the region commands case.
 fn casify_word(cx: &mut Leaf<'_>, case: Value, count: Value) -> Next {
-    let n = count.integer_value().ok_or(Fault::Wrong("fixnump", count))?;
+    let n = count.integer_value().ok_or_else(|| Fault::Wrong("fixnump", count))?;
     // scan_words calls the table's functions: as `forward-word' (word_motion.rs).
     if cx.word_boundary_functions()? {
         let args = vec![fixnum(cx.point()?), count];

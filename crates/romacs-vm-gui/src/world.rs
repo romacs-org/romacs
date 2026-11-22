@@ -83,10 +83,13 @@ impl LaunchFont {
     /// The font set in a restored session, where GNU's Lisp declared the
     /// default face, before the init runs: its spec becomes the launch
     /// font's, as the declaration leaves it, and the face takes the font on
-    /// every frame, whatever theme the world enabled.
+    /// every frame, whatever theme the world enabled.  It is no default for
+    /// new frames, which every recomputation of all faces puts over the
+    /// user's own font (GNU's `--font' is a frame's, too).
     pub fn restored(&self) -> String {
         let (spec, frame) = self.parts();
-        format!("(progn (put 'default 'face-defface-spec '{spec}) (set-face-attribute 'default nil :family {} :height {}) {frame})",
+        format!("(progn (put 'default 'face-defface-spec '{spec}) \
+                 (dolist (frame (frame-list)) (set-face-attribute 'default frame :family {} :height {})) {frame})",
                 lisp_string(&self.family), self.points * 10)
     }
 }

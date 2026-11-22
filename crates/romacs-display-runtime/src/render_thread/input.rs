@@ -320,23 +320,28 @@ impl RenderApp {
         matches!(logical_key, Key::Character(_))
     }
 
-    /// Extract a single control-character keysym from committed text.
+    /// The key of a press whose committed text is one control character.
     ///
     /// Some backends report `Ctrl+n` / `Ctrl+p` style input as a control-text
     /// payload even when modifier-state delivery is delayed relative to the key
-    /// event. Preserve that byte so the keyboard layer can recover the GNU
-    /// control event instead of silently degrading it into plain text.
-    pub(super) fn translate_control_text(text: &str) -> Option<u32> {
+    /// event. The key is the layout's character (`LOGICAL`) with Ctrl, which
+    /// the caller adds: Ctrl+m stays Ctrl+m rather than the RET its byte says
+    /// (ledger/divergences/VM2-GUI-KEYS). A backend whose logical key is no
+    /// printable character keeps the byte, which is its control character.
+    pub(super) fn translate_control_text(text: &str, logical: &Key) -> Option<FrontendKey> {
         let mut chars = text.chars();
         let ch = chars.next()?;
-        if chars.next().is_some() {
+        if chars.next().is_some() || !ch.is_control() {
             return None;
         }
-        if ch.is_control() {
-            Some(ch as u32)
-        } else {
-            None
-        }
+        let printable = match logical {
+            Key::Character(key) => {
+                let mut chars = key.chars();
+                chars.next().filter(|c| !c.is_control() && chars.next().is_none())
+            }
+            _ => None,
+        };
+        Some(printable.map_or(FrontendKey::Keysym(ch as u32), FrontendKey::Character))
     }
 
     /// Hit-test toolbar items. Returns the index of the item under (x, y), or None.

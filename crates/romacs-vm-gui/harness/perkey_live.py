@@ -495,8 +495,10 @@ class Session:
                 ' (push (list this-command gcs-done gc-elapsed (window-start) (window-end) (point)'
                 ' (window-body-height nil t) (window-pixel-height)) perkey--states)'
                 ' (when (memq this-command (quote (save-buffer romacs-gui-save-buffer)))'
-                f' (with-temp-file "{path}"'
-                ' (dolist (s (reverse perkey--states)) (prin1 s (current-buffer)) (terpri (current-buffer))))))))')
+                # Written beside it, then renamed: never read part-written.
+                f' (with-temp-file "{path}.part"'
+                ' (dolist (s (reverse perkey--states)) (prin1 s (current-buffer)) (terpri (current-buffer))))'
+                f' (rename-file "{path}.part" "{path}" t)))))')
 
     def host_calls_form(self):
         """--host-calls' hook: the counts after each command, written out at C-x C-s."""
@@ -505,9 +507,10 @@ class Session:
                 ' (push (list this-command (cond ((minibufferp) (quote minibuffer)) ((bound-and-true-p isearch-mode) (quote isearch)) (t (quote top)))'
                 ' (window-start) (romacs--host-calls)) perkey--calls)'
                 ' (when (memq this-command (quote (save-buffer romacs-gui-save-buffer)))'
-                f' (let ((mode major-mode)) (with-temp-file "{path}"'
+                f' (let ((mode major-mode)) (with-temp-file "{path}.part"'
                 ' (prin1 mode (current-buffer)) (terpri (current-buffer))'
-                ' (dolist (s (reverse perkey--calls)) (prin1 s (current-buffer)) (terpri (current-buffer)))))))))')
+                ' (dolist (s (reverse perkey--calls)) (prin1 s (current-buffer)) (terpri (current-buffer))))'
+                f' (rename-file "{path}.part" "{path}" t))))))')
 
     def no_idle_auto_save(self):
         """M-: (setq auto-save-timeout nil).  read_char's idle auto-save of the

@@ -3,7 +3,7 @@ use super::modifier_sides::{TrackedModifier, TrackedSide};
 use super::state::effective_window_scale_factor;
 use crate::thread_comm::InputEvent;
 use crate::host_types::FrontendKey;
-use romacs_display_protocol::{ModifierEventKind, TransportModifierBits};
+use romacs_display_protocol::{ModifierEventKind, TransportModifierBit, TransportModifierBits};
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::PhysicalKey;
@@ -519,19 +519,20 @@ impl RenderApp {
                         // (`src/nsterm.m:7318-7339`).
                         let ordinary_modifiers =
                             self.cook_modifiers(ModifierEventKind::Ordinary).bits();
-                        if let Some(control_keysym) = Self::translate_control_text(s) {
+                        if let Some(control_key) = Self::translate_control_text(s, &logical_key) {
+                            let modifiers = ordinary_modifiers | TransportModifierBit::Ctrl.mask();
                             tracing::debug!(
-                                "KeyboardInput control text path: text={:?} keysym=0x{:04x} mods=0x{:x}",
+                                "KeyboardInput control text path: text={:?} key={:?} mods=0x{:x}",
                                 s,
-                                control_keysym,
-                                ordinary_modifiers
+                                control_key,
+                                modifiers
                             );
                             self.send_native_key(
                                 window_id,
                                 physical_key,
                                 InputEvent::Key {
-                                    key: FrontendKey::Keysym(control_keysym),
-                                    modifiers: ordinary_modifiers,
+                                    key: control_key,
+                                    modifiers,
                                     pressed: true,
                                     emacs_frame_id: self.emacs_frame_for_window_event(window_id),
                                 },

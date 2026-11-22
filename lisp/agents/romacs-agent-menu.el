@@ -14,9 +14,11 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'romacs-agent)
+(require 'romacs-agent-glyphs)
 (require 'keymap-popup)
 (require 'romacs-working)
 (require 'romacs-agent-log)
+(require 'romacs-attach)
 
 (declare-function romacs-agents "romacs-agent-board" ())
 (declare-function romacs-agent-resume-time "romacs-agent-tools" (session))
@@ -53,8 +55,8 @@ it finished since.")
 (defun romacs-agent-menu--worker-state (child)
   "CHILD's state in the menu: the board's mark and a word, in its face."
   (if (eq (romacs-agent-state child) 'waiting-approval)
-      (cons (propertize "◆" 'face 'romacs-working-waiting) (propertize "asks you" 'face '(romacs-working-waiting bold)))
-    (cons (propertize "●" 'face 'romacs-working-running) (propertize "running" 'face '(romacs-working-running bold)))))
+      (cons (propertize (romacs-agent-glyph 'chip-you) 'face 'romacs-working-waiting) (propertize "asks you" 'face '(romacs-working-waiting bold)))
+    (cons (propertize (romacs-agent-glyph 'chip-working) 'face 'romacs-working-running) (propertize "running" 'face '(romacs-working-running bold)))))
 
 (defun romacs-agent-menu--worker-label (index)
   "The menu's row of the worker at INDEX: a mark and a word for what it
@@ -140,6 +142,8 @@ the session stays."
 kept; nil leaves it to the harness."
   (interactive
    (let* ((session (romacs-agent-menu--session))
+          (_ (romacs-agent--want-models
+              (list (romacs-agent--instance (romacs-agent-provider session) (romacs-agent-harness session)))))
           (efforts (or (romacs-agent--efforts session) (user-error "This model offers no effort"))))
      (list (romacs-agent--read-effort efforts (plist-get (romacs-agent--wanted session) :effort))))
    romacs-agent-log-mode)
@@ -154,8 +158,11 @@ with a prefix argument, asked for."
   (interactive
    (let* ((session (romacs-agent-menu--session))
           (instance (romacs-agent--instance (romacs-agent-provider session) (romacs-agent-harness session)))
+          (_ (romacs-agent--want-models (list instance)))
           (fields (cdr (romacs-agent--pick-row
-                        (romacs-agent--instance-rows instance (romacs-agent--harness-display (romacs-agent-harness session)) nil))))
+                        (lambda ()
+                          (romacs-agent--instance-rows
+                           instance (romacs-agent--harness-display (romacs-agent-harness session)) nil)))))
           (model (plist-get fields :model))
           (efforts (plist-get fields :efforts))
           (now (plist-get (romacs-agent--wanted session) :effort))
@@ -179,28 +186,55 @@ with a prefix argument, asked for."
             (if (or (null (romacs-agent-pending-selection session)) (equal now next)) ""
               (concat " → " (funcall shown next))))))
 
-(defun romacs-agent-chat-handoff (provider model next)
-  "Go on with this thread under another instance or model: PROVIDER and
-MODEL picked as for a new session.  Under an instance of the same harness
-\(claude to claude2) this session goes on, its conversation moved as is,
-once a running turn ends.  Under another harness a new session starts on
-a brief of the thread, to do NEXT, and its chat opens."
-  (interactive
-   (let* ((fields (cdr (romacs-agent--pick-row (romacs-agent--picker-rows))))
-          (provider (plist-get fields :provider)))
-     (list provider (plist-get fields :model)
-           (unless (romacs-agent-menu--moves-p (romacs-agent-menu--session) provider)
-             (read-string "Go on with: " nil nil "Go on from where this thread left off."))))
-   romacs-agent-log-mode)
+(defun romacs-agent-menu--handoff-rows ()
+  "The named models available for handoff, grouped by account."
+  (seq-filter (lambda (row) (plist-get (cdr row) :model))
+              (romacs-agent--account-rows)))
+
+(defun romacs-agent-menu--handoff-arguments ()
+  "Read the target model, reasoning effort and next task for handoff."
+  (let* ((fields (cdr (romacs-agent--pick-row #'romacs-agent-menu--handoff-rows "Harness and model")))
+         (provider (plist-get fields :provider))
+         (model (or (plist-get fields :model) (user-error "Choose a harness and model")))
+         (session (romacs-agent-menu--session))
+         (same (romacs-agent-menu--moves-p session provider))
+         (wanted (romacs-agent--wanted session))
+         (efforts (plist-get fields :efforts))
+         (current (and (equal provider (plist-get wanted :provider))
+                       (equal model (plist-get wanted :model))
+                       (plist-get wanted :effort)))
+         (configured (plist-get (romacs-agent--configured provider) :effort))
+         (default (cond ((member current efforts) current)
+                        ((member configured efforts) configured)
+                        (t (plist-get fields :default-effort))))
+         (effort (when efforts
+                   (or (romacs-agent--read-effort efforts default)
+                       (user-error "Choose a reasoning effort")))))
+    (list provider model
+          (unless same (read-string "Go on with: " nil nil "Go on from where this thread left off."))
+          effort)))
+
+(defun romacs-agent-chat-handoff (provider model next &optional effort)
+  "Continue this thread on PROVIDER and MODEL at EFFORT.
+Within a harness, change this session after its running turn ends.
+Across harnesses, open a new chat with a brief of this thread and task
+NEXT.  Interactively, choose a named model and its reasoning effort."
+  (interactive (romacs-agent-menu--handoff-arguments) romacs-agent-log-mode)
   (let ((session (romacs-agent-menu--session)))
-    (if (and (symbolp provider) (romacs-agent-menu--moves-p session provider))
-        (romacs-agent-chat-next-account)
-      (if (romacs-agent-menu--moves-p session provider)
-        (let ((wanted (romacs-agent--wanted session)))
-          (romacs-agent-select session (or model (plist-get wanted :model)) (plist-get wanted :effort) provider)
-          (message "%s goes on under %s, its conversation as is%s" (romacs-agent-title session) provider
-                   (if (memq (romacs-agent-state session) '(starting running waiting-approval)) ", once this turn ends" "")))
-      (romacs-agent-menu--hand-off session provider model next)))))
+    (cond
+     ((not (romacs-agent-menu--moves-p session provider))
+      (romacs-agent-menu--hand-off session provider model next effort))
+     ((and (symbolp provider) (null model))
+      (romacs-agent-chat-next-account))
+     (t
+      (let* ((wanted (romacs-agent--wanted session))
+             (target (if (symbolp provider) (plist-get wanted :provider) provider))
+             (model (or model (plist-get wanted :model)))
+             (previous (plist-get wanted :effort))
+             (instance (romacs-agent--instance target (romacs-agent-harness session))))
+        (romacs-agent-select session model
+                             (or effort (and previous (romacs-agent--effort-fits-p instance model previous) previous))
+                             target))))))
 
 (defun romacs-agent-chat-next-account ()
   "Go on under the next account of this session's harness with room, its
@@ -216,15 +250,23 @@ an instance of its harness."
   (eq (if (symbolp provider) provider (plist-get (romacs-agent--configured provider) :harness))
       (romacs-agent-harness session)))
 
-(defun romacs-agent-menu--hand-off (session provider model next)
-  "Start a session under PROVIDER on MODEL on a brief of SESSION's thread,
-to do NEXT."
-  (message "Gathering %s's thread..." (romacs-agent-title session))
-    ;; Replayed between keystrokes: a long thread never holds the editor.
+(defun romacs-agent-menu--hand-off (session provider model next effort)
+  "Start a session under PROVIDER on MODEL at EFFORT, briefed on SESSION.
+Tell it to do NEXT."
+  (let ((window (selected-window))
+        (source (current-buffer)))
+    (message "Gathering %s's thread..." (romacs-agent-title session))
     (romacs-agent-events-async
-     session (lambda (events)
-               (romacs-agent-show (romacs-agent-handoff session (romacs-agent-handoff-thread session events)
-                                                        provider model next)))))
+     session
+     (lambda (events)
+       (let ((target (romacs-agent-handoff session (romacs-agent-handoff-thread session events)
+                                          provider model next (and effort (list :effort effort)))))
+         (if (and (eq (selected-window) window) (eq (window-buffer window) source)
+                  (not (window-dedicated-p window)))
+             (let ((display-buffer-overriding-action
+                    '((display-buffer-same-window) (inhibit-same-window . nil))))
+               (romacs-agent-show target))
+           (message "Handoff ready in %s" (buffer-name (romacs-agent-log-chat target)))))))))
 
 (defun romacs-agent-chat-plan ()
   "Put this session in its harness's plan mode, or take it out: what plan
@@ -316,41 +358,30 @@ argument ALL, what every turn of the session did."
   (interactive nil romacs-agent-log-mode)
   (romacs-agent-tools--cancel-resume (romacs-agent-menu--session) "cancelled by hand"))
 
-(defun romacs-agent-menu--clipboard-image-type ()
-  "The MIME type of the clipboard's image, or nil when it holds none."
-  (and (executable-find "wl-paste")
-       (seq-find (lambda (type) (string-prefix-p "image/" type))
-                 (process-lines-ignore-status "wl-paste" "--list-types"))))
-
-(defun romacs-agent-menu--save-clipboard-image (session type)
-  "Save the clipboard's image, of MIME TYPE, with SESSION; return its file."
-  (let* ((dir (expand-file-name "attachments" (romacs-agent-dir session)))
-         (file (progn (make-directory dir t)
-                      (make-temp-file (expand-file-name "clipboard-" dir) nil
-                                      (concat "." (substring type (length "image/"))))))
-         (saved nil))
-    (unwind-protect
-        (progn
-          (unless (eql 0 (call-process "wl-paste" nil (list :file file) nil "--type" type))
-            (user-error "Could not read the clipboard's image"))
-          (setq saved t)
-          file)
-      (unless saved (delete-file file)))))
-
-(defun romacs-agent-chat-attach (file)
-  "Put FILE's path in the composer: the agent reads it where it is, no
-copy is made.  Interactively the clipboard's image, saved with the
-session; with a prefix argument, when the clipboard holds none, or in a
-chat whose session takes no commands from here, a file asked for."
-  (interactive
-   (list (if-let* ((type (and (not current-prefix-arg) (romacs-agent-log--commands-p)
-                              (romacs-agent-menu--clipboard-image-type))))
-             (romacs-agent-menu--save-clipboard-image (romacs-agent-menu--session) type)
-           (read-file-name "Attach: " nil nil t)))
-   romacs-agent-log-mode)
+(defun romacs-agent-menu--link (file)
+  "Put a link to FILE at the composer's end, the chat's current."
   (goto-char (point-max))
   (unless (or (= (point) romacs-agent-log--input) (memq (char-before) '(?\s ?\n))) (insert " "))
-  (insert (expand-file-name file)))
+  (insert (romacs-agent-log-images-link file)))
+
+(defun romacs-agent-chat-attach (&optional ask)
+  "Link a file in the composer, [image](PATH) for an image: the agent
+reads it where it is, and the chat shows it.  Interactively the
+clipboard's image: the file it was copied from (a screenshot), else the
+image saved once in `romacs-attach-save-directory'.  With a prefix
+argument ASK, when the clipboard holds no image, or in a chat whose
+session takes no commands from here, a file asked for."
+  (interactive "P" romacs-agent-log-mode)
+  (if-let* ((type (and (not ask) (romacs-agent-log--commands-p) (romacs-attach-clipboard-image-type))))
+      (let ((chat (current-buffer)))
+        (message "Attaching the clipboard's image…")
+        (romacs-attach-clipboard-file
+         type (lambda (file)
+                (cond ((not file) (message "Could not read the clipboard's image"))
+                      ((buffer-live-p chat)
+                       (with-current-buffer chat (romacs-agent-menu--link file))
+                       (message "Attached %s" (abbreviate-file-name file)))))))
+    (romacs-agent-menu--link (read-file-name "Attach: " nil nil t))))
 
 (keymap-popup-define romacs-agent-menu-map
   "Actions of an agent chat: what waits on you, the turn, what it runs on,
@@ -367,7 +398,7 @@ the session, the view."
   "i" ("Interrupt" romacs-agent-log-interrupt :inapt-if (lambda () (not (romacs-agent-log--running-p))))
   "k" ("Interrupt, then send" romacs-agent-log-interrupt-and-send)
   "q" ("Send when the turn ends" romacs-agent-log-queue)
-  "A" ("Attach a file's path" romacs-agent-chat-attach)
+  "A" ("Attach clipboard image (C-u: file)" romacs-agent-chat-attach)
   "u" ("Roll back this turn (C-u: last)" romacs-agent-chat-rollback
        :inapt-if (lambda () (not (romacs-agent--harness-free-p romacs-agent-log--session))))
   "D" ("Diff this turn (C-u: session)" romacs-agent-chat-diff)
@@ -381,7 +412,7 @@ the session, the view."
   "m" (#'romacs-agent-menu--model-label romacs-agent-chat-model)
   "E" (#'romacs-agent-menu--effort-label romacs-agent-chat-effort)
   "P" (#'romacs-agent-menu--plan-label romacs-agent-chat-plan)
-  "H" ("Go on under another instance" romacs-agent-chat-handoff)
+  "H" ("Switch harness or model" romacs-agent-chat-handoff)
   "N" ("Next account with room" romacs-agent-chat-next-account)
   "z" ("Cancel the resume at its limit's reset" romacs-agent-chat-cancel-resume
        :if (lambda () (and romacs-agent-log--session (romacs-agent-resume-time romacs-agent-log--session))))

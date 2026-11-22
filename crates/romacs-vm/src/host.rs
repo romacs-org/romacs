@@ -581,7 +581,7 @@ fn stat_json(meta: &io::Result<Metadata>) -> Json {
 // Environment.
 
 pub fn getenv(name: &str) -> Option<OsString> {
-    let value = crate::flight::checked("getenv", || name.to_owned(), || std::env::var_os(name), |v| v.as_ref().map_or(u64::MAX, |v| crate::flight::digest(v.as_bytes())));
+    let value = crate::flight::checked("getenv", || name.to_owned(), || env_var(OsStr::new(name)), |v| v.as_ref().map_or(u64::MAX, |v| crate::flight::digest(v.as_bytes())));
     if building() {
         env_read("host", name.as_bytes(), value.as_ref());
     }
@@ -655,9 +655,9 @@ pub const RUNTIME_RECORD: &str = "romacs-runtime-root";
 /// running session moves nothing and ends nothing. A build that records what
 /// it reads has the session's tree in its record, read again as it is now:
 /// the tree a session finds by its true name, however it was found or
-/// spelled (`ROMACS_RUNTIME_ROOT` naming the tree through a symlink, or the
-/// tree the executable's place gives, is the same tree), and its
-/// generation. A tree that has stopped being this executable's is noted,
+/// spelled (`ROMACS_RUNTIME_ROOT` naming the tree through a symlink or a
+/// directory linking its lisp/ and etc/, or the tree the executable's place
+/// gives, is the same tree), and its generation. A tree that has stopped being this executable's is noted,
 /// and that build is not published; the session goes on.
 pub fn runtime_root() -> PathBuf {
     found_runtime().unwrap_or_else(|why| {
@@ -680,20 +680,36 @@ pub fn runtime_lisp(path: &str) -> Result<PathBuf, String> {
 }
 
 /// [`runtime_root`], or why there is none, for a lookup that has a
-/// fallback: a process with no runtime tree goes on.  Found once.
+/// fallback: a process with no runtime tree goes on.  Found once, by its
+/// true name ([`true_tree`]): every file of the tree is then named one way
+/// in every session, as what is keyed by the names of the files a build
+/// read (a compile identity, `world::store::lisp_digest`) needs.
 fn found_runtime() -> Result<PathBuf, String> {
-    static FOUND: std::sync::OnceLock<Result<(PathBuf, PathBuf), String>> = std::sync::OnceLock::new();
-    let (root, truename) = FOUND.get_or_init(|| located_runtime().map(|root| {
-        let truename = canonicalize(&root).unwrap_or_else(|_| root.clone());
-        (root, truename)
-    })).as_ref().map_err(String::clone)?;
+    static FOUND: std::sync::OnceLock<Result<PathBuf, String>> = std::sync::OnceLock::new();
+    let root = FOUND.get_or_init(|| located_runtime().map(|root| true_tree(&root))).as_ref().map_err(String::clone)?;
     if building() {
-        host_fact("runtime-root", path_json(truename));
+        host_fact("runtime-root", path_json(root));
         if let Err(why) = runtime_tree(root) {
             note_uncaptured("runtime-tree", json!({"path": path_json(root), "why": why}));
         }
     }
     Ok(root.clone())
+}
+
+/// The tree ROOT names, by its true name: the directory its lisp/ and etc/
+/// truly lie in, when that is one directory, else ROOT resolved. A
+/// directory linking both into another tree is that tree, as a link to it
+/// is: an installation's top directory whose lisp/ and etc/ link its
+/// share/romacs/ names the tree its executable finds beside its bin/.
+fn true_tree(root: &Path) -> PathBuf {
+    // The directory holding NAME as its own NAME, not under another name.
+    let holder = |name: &str| canonicalize(root.join(name)).ok()
+        .filter(|path| path.file_name().is_some_and(|n| n == name))
+        .and_then(|path| path.parent().map(Path::to_path_buf));
+    match (holder("lisp"), holder("etc")) {
+        (Some(lisp), Some(etc)) if lisp == etc => lisp,
+        _ => canonicalize(root).unwrap_or_else(|_| root.to_path_buf()),
+    }
 }
 
 /// [`runtime_root`], or why there is none.
@@ -840,12 +856,66 @@ fn env_read(form: &str, name: &[u8], value: Option<&OsString>) {
     }
 }
 
-/// The process environment, in the host's order.
+/// The launch protocol's variables: each tells this process what to be (a
+/// world builder, and the lock it is handed; a compile's parent, and where it
+/// records; a flight to record or replay). They are this process's alone:
+/// it acts on each once (`take_marker`), its Lisp's environment lists leave
+/// them out (`env_snapshot`), and no child inherits them (`command`,
+/// `inherited_env`); a child that is to have one is given it. The
+/// environment itself is never changed to hide them: a change while another
+/// thread reads it is undefined behaviour in the C library.
+pub const LAUNCH_MARKERS: [&str; 5] =
+    ["ROMACS_FLIGHT", "ROMACS_WORLD_BUILD", "ROMACS_WORLD_LOCK_FD", "ROMACS_COMPILE_RECORD", "ROMACS_COMPILE_PARENT"];
+
+fn is_marker(name: &OsStr) -> bool {
+    LAUNCH_MARKERS.iter().any(|marker| name == *marker)
+}
+
+/// Variable NAME of the environment as this process's own lookups and its
+/// world's facts see it: a launch marker is not there (`take_marker` reads
+/// one), so a world a builder made records none and matches a launch's.
+fn env_var(name: &OsStr) -> Option<OsString> {
+    if is_marker(name) { None } else { std::env::var_os(name) }
+}
+
+/// The launch markers this process has not acted on yet, read from the
+/// environment on first use.
+static MARKERS: std::sync::Mutex<Option<Vec<(&str, OsString)>>> = std::sync::Mutex::new(None);
+
+fn with_markers<R>(f: impl FnOnce(&mut Vec<(&'static str, OsString)>) -> R) -> R {
+    let mut markers = MARKERS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    f(markers.get_or_insert_with(|| LAUNCH_MARKERS.iter().filter_map(|m| Some((*m, std::env::var_os(m)?))).collect()))
+}
+
+/// Launch marker NAME's value, the first time it is asked for: a process
+/// acts on its marker once (a lock descriptor has one owner, a parent one
+/// watch), so a second take finds none, as a removed variable did.
+pub fn take_marker(name: &str) -> Option<OsString> {
+    debug_assert!(LAUNCH_MARKERS.contains(&name), "{name} is not a launch marker");
+    with_markers(|markers| markers.iter().position(|(m, _)| *m == name).map(|at| markers.remove(at).1))
+}
+
+/// Whether launch marker NAME is there to take.
+pub fn has_marker(name: &str) -> bool {
+    debug_assert!(LAUNCH_MARKERS.contains(&name), "{name} is not a launch marker");
+    with_markers(|markers| markers.iter().any(|(m, _)| *m == name))
+}
+
+/// This process's environment as a child it starts inherits it: without
+/// the launch markers. For a child another process starts for this one
+/// (the terminal's shell, by the keeper); `command`'s children have it
+/// already.
+pub fn inherited_env() -> Vec<(OsString, OsString)> {
+    std::env::vars_os().filter(|(name, _)| !is_marker(name)).collect()
+}
+
+/// The process environment, in the host's order, without the launch
+/// markers: what `process-environment` starts as.
 pub fn env_snapshot() -> Vec<(OsString, OsString)> {
     if building() {
         p_read(Fact::Environment, "environment".into());
     }
-    crate::flight::checked("environment", String::new, || std::env::vars_os().collect(), |vars: &Vec<(OsString, OsString)>| {
+    crate::flight::checked("environment", String::new, inherited_env, |vars: &Vec<(OsString, OsString)>| {
         vars.iter().fold(0, |h, (k, v)| h.rotate_left(7) ^ crate::flight::digest(k.as_bytes()) ^ crate::flight::digest(v.as_bytes()).rotate_left(1))
     })
 }
@@ -867,7 +937,7 @@ pub enum EnvList {
 pub fn lisp_env(list: EnvList, name: &[u8]) {
     if building() {
         let form = match list { EnvList::Process => "process", EnvList::Initial => "initial", EnvList::Explicit => "explicit" };
-        env_read(form, name, std::env::var_os(OsStr::from_bytes(name)).as_ref());
+        env_read(form, name, env_var(OsStr::from_bytes(name)).as_ref());
     }
 }
 
@@ -2130,10 +2200,23 @@ pub fn temp_file(template: &Path) -> io::Result<(PathBuf, File)> {
 // calls elsewhere (read, write, poll, fcntl, ioctl, the termios calls, fsync,
 // close, waitpid, shutdown, accept) act only on what these returned.
 
-/// Every child process starts from a Command made here.
+/// Every child process the VM starts comes from a Command made here: a
+/// world build refuses it, as an effect it cannot capture (`child`).
 pub fn command(program: impl AsRef<OsStr>) -> io::Result<Command> {
     effect(|| format!("run {}", String::from_utf8_lossy(program.as_ref().as_bytes())))?;
-    Ok(Command::new(program))
+    Ok(child(program))
+}
+
+/// A Command for PROGRAM that inherits none of this process's launch
+/// markers (`LAUNCH_MARKERS`): every child of this program starts from one,
+/// through `command` when the VM starts it. A child that is to have a marker
+/// sets it.
+pub fn child(program: impl AsRef<OsStr>) -> Command {
+    let mut command = Command::new(program);
+    for marker in LAUNCH_MARKERS {
+        command.env_remove(marker);
+    }
+    command
 }
 
 /// A child process, as GNU's emacs_spawn starts one (callproc.c): ARGV[0],
@@ -2350,14 +2433,6 @@ pub fn read_store_file(path: impl AsRef<Path>) -> io::Result<String> {
 pub fn write_store_file(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> io::Result<()> {
     use std::io::Write;
     open_store_file(path, StoreOpen::Write { create: true, truncate: true })?.write_all(bytes.as_ref())
-}
-
-/// Remove NAME from this process's environment, before any other thread
-/// starts: world processes take their own markers out of it.
-pub fn unset_env(name: &str) {
-    // The world markers are read and removed while the process is single
-    // threaded, at the start of main.
-    sys::remove_env(name);
 }
 
 /// kill(2): SIGNAL to PID, a process group when negative. Signal 0 asks
@@ -3197,6 +3272,37 @@ mod tests {
         std::fs::write(dir.join("gate").join(BUILD_TREES), format!("/another/checkout\n{}\n", tree.display())).unwrap();
         assert!(places.iter().all(|place| in_build_target(&dir.join(place), &tree)));
         assert!(!in_build_target(&dir.join("gate/elsewhere/romacs-vm-gui"), &tree));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+    /// A tree has one name however it is named: itself, a link to it, and
+    /// an installation's top directory linking its lisp/ and etc/ are the
+    /// tree; a directory linking them into two trees is itself.
+    #[test]
+    fn a_runtime_tree_is_named_by_where_its_lisp_and_etc_lie() {
+        let dir = std::env::temp_dir().join(format!("romacs-true-tree-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let tree = dir.join("install/share/romacs");
+        for sub in ["lisp", "etc"] {
+            std::fs::create_dir_all(tree.join(sub)).unwrap();
+            std::os::unix::fs::symlink(Path::new("share/romacs").join(sub), dir.join("install").join(sub)).unwrap();
+        }
+        std::os::unix::fs::symlink(&tree, dir.join("link")).unwrap();
+        std::os::unix::fs::symlink(dir.join("install"), dir.join("current")).unwrap();
+        let tree = std::fs::canonicalize(&tree).unwrap();
+        for name in ["install/share/romacs", "link", "install", "current"] {
+            assert_eq!(true_tree(&dir.join(name)), tree, "{name}");
+        }
+        std::fs::create_dir_all(dir.join("other/etc")).unwrap();
+        std::fs::create_dir(dir.join("mixed")).unwrap();
+        std::os::unix::fs::symlink(tree.join("lisp"), dir.join("mixed/lisp")).unwrap();
+        std::os::unix::fs::symlink(dir.join("other/etc"), dir.join("mixed/etc")).unwrap();
+        assert_eq!(true_tree(&dir.join("mixed")), std::fs::canonicalize(dir.join("mixed")).unwrap());
+        std::fs::create_dir_all(dir.join("renamed/custom-lisp")).unwrap();
+        std::fs::create_dir(dir.join("renamed/etc")).unwrap();
+        std::fs::create_dir(dir.join("aliased")).unwrap();
+        std::os::unix::fs::symlink(dir.join("renamed/custom-lisp"), dir.join("aliased/lisp")).unwrap();
+        std::os::unix::fs::symlink(dir.join("renamed/etc"), dir.join("aliased/etc")).unwrap();
+        assert_eq!(true_tree(&dir.join("aliased")), std::fs::canonicalize(dir.join("aliased")).unwrap(), "lisp/ under another name");
         std::fs::remove_dir_all(&dir).unwrap();
     }
     /// A tree is the executable's own only with its generation: a directory

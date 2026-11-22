@@ -63,6 +63,10 @@ a `user-error' when it went meanwhile, sent or dropped."
 
 ;;; Its rows
 
+(defun romacs-agent-log-queue--send-key ()
+  "The key that sends from the composer, which puts an edited message back."
+  (romacs-agent-log--key 'romacs-agent-log-send 'romacs-agent-log-mode-map))
+
 (defvar-keymap romacs-agent-log-queue-map
   :doc "Keys on a queued message's row."
   "n" #'romacs-agent-log-queue-next
@@ -107,7 +111,7 @@ rows says how it goes back."
                  (held (eq item editing))
                  ;; Its place, two columns, a held one's marked: glyphs
                  ;; of the text's own font, every row one height.
-                 (mark (format "%s%-2d" (cond (held "»") (own " ") (t "<")) (setq place (1+ place))))
+                 (mark (format "%s%-2d" (cond (held (romacs-agent-glyph 'queue-held)) (own " ") (t (romacs-agent-glyph 'queue-other))) (setq place (1+ place))))
                  (line (car (split-string (string-trim (or (romacs-agent-item-text item) "")) "\n")))
                  (room (max 8 (- width 3 (string-width mark)))))
             (propertize (concat "  " (propertize mark 'face (if held '(romacs-agent-log-queued-held bold) 'romacs-agent-log-queued-mark))
@@ -117,9 +121,11 @@ rows says how it goes back."
                         'romacs-agent-log-queued item 'keymap romacs-agent-log-queue-map)))
         items ""))
      (if editing
-         (propertize (concat "  " (propertize (format "» editing %d" (1+ (or (cl-position editing items) 0)))
+         (propertize (concat "  " (propertize (format "%s editing %d" (romacs-agent-glyph 'queue-held) (1+ (or (cl-position editing items) 0)))
                                               'face 'romacs-agent-log-queued-held)
-                             (propertize " · RET saves it in its place · an empty RET keeps it as it was" 'face 'romacs-agent-log-queued)
+                             (propertize (let ((key (romacs-agent-log-queue--send-key)))
+                                           (format " · %s saves it in its place · an empty %s keeps it as it was" key key))
+                                         'face 'romacs-agent-log-queued)
                              "\n")
                      'romacs-agent-log-queue-label t)
        ""))))
@@ -215,7 +221,7 @@ where it waits meanwhile; RET there puts it back in its place."
   (interactive nil romacs-agent-log-mode)
   (let ((item (romacs-agent-log-queue--own (romacs-agent-log-queue--target))))
     (when romacs-agent-log-queue--editing
-      (user-error "The composer holds a queued message already: RET puts it back"))
+      (user-error "The composer holds a queued message already: %s puts it back" (romacs-agent-log-queue--send-key)))
     (unless (string-blank-p (buffer-substring-no-properties romacs-agent-log--input (point-max)))
       (user-error "The composer holds a draft: send or clear it first"))
     (romacs-agent-log-queue--change 'hold item t)
@@ -255,7 +261,7 @@ as the composer says it; an empty composer leaves it as it was."
          (items (romacs-agent-log-source-queue romacs-agent-log--source romacs-agent-log--session))
          (next (or (cadr (memq item items)) (car (last (remq item items))))))
     (when (eq item romacs-agent-log-queue--editing)
-      (user-error "It is in the composer: RET puts it back first"))
+      (user-error "It is in the composer: %s puts it back first" (romacs-agent-log-queue--send-key)))
     (romacs-agent-log-queue--change 'drop item)
     (romacs-agent-log--separator t)
     (when next (romacs-agent-log-queue--goto next))))

@@ -276,7 +276,7 @@ impl Leaf<'_> {
     /// Decode STRING into PASS's buffers; whether it is ASCII, and whether
     /// it is unibyte with raw bytes, which only the regexps read right.
     fn orderless_text(&mut self, pass: &mut OrderlessPass, string: Value) -> std::result::Result<(bool, bool), Fault> {
-        let view = self.vm.str_view(string).ok_or(Fault::Wrong("stringp", string))?;
+        let view = self.vm.str_view(string).ok_or_else(|| Fault::Wrong("stringp", string))?;
         let (ascii, multibyte) = (view.bytes().is_ascii(), view.is_multibyte());
         pass.original.clear();
         pass.original.extend(view.chars());
@@ -333,7 +333,7 @@ impl Leaf<'_> {
     pub(crate) fn fzf_decode(&mut self, corpus: &mut crate::fzf::Corpus, fold: &mut Option<CaseFold>, string: Value)
         -> std::result::Result<(), Fault> {
         let start = corpus.original.len();
-        let view = self.vm.str_view(string).ok_or(Fault::Wrong("stringp", string))?;
+        let view = self.vm.str_view(string).ok_or_else(|| Fault::Wrong("stringp", string))?;
         if view.bytes().is_ascii() {
             corpus.original.extend(view.bytes().iter().map(|&b| b as u32));
         } else {
@@ -352,7 +352,7 @@ impl Leaf<'_> {
     /// A completion walk's INPUT, read once for the walk: what each
     /// candidate's prefix is compared with.
     pub(crate) fn completion_input(&self, input: Value, compares: bool) -> std::result::Result<CompletionInput, Fault> {
-        let view = self.vm.str_view(input).ok_or(Fault::Wrong("stringp", input))?;
+        let view = self.vm.str_view(input).ok_or_else(|| Fault::Wrong("stringp", input))?;
         let single = view.bytes.len() == view.chars;
         // Only what the walk's comparison reads: the bytes of a one-byte-a-
         // character input, else its codes; nothing when case folds.

@@ -32,7 +32,7 @@ fn sleep_for(cx, seconds: Value; optional milliseconds: Value) -> Step {
         else if let Some(n) = cx.bigint_value(seconds) { if n.sign() == num_bigint::Sign::Minus { f64::NEG_INFINITY } else { f64::INFINITY } }
         else { cx.float_value(seconds).map_err(|_| Fault::Wrong("numberp", seconds))? };
     if milliseconds != Value::NIL {
-        duration += milliseconds.integer_value().ok_or(Fault::Wrong("fixnump", milliseconds))? as f64 / 1000.0;
+        duration += milliseconds.integer_value().ok_or_else(|| Fault::Wrong("fixnump", milliseconds))? as f64 / 1000.0;
     }
     if duration > 0.0 {
         let wait = cx.intern("romacs--wait-reading-process-output");

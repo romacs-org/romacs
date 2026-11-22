@@ -38,7 +38,7 @@ fn romacs_pass_parse(cx, text: Value) {
 // cannot give one signals an error saying why.
 defsubr! { name = "romacs-pass--otp", gnu = "romacs:pass", effect = Pure,
 fn romacs_pass_otp(cx, text: Value, unix_seconds: Value) {
-    let now = unix_seconds.integer_value().and_then(|n| u64::try_from(n).ok()).ok_or(Fault::Wrong("natnump", unix_seconds))?;
+    let now = unix_seconds.integer_value().and_then(|n| u64::try_from(n).ok()).ok_or_else(|| Fault::Wrong("natnump", unix_seconds))?;
     let text = Zeroizing::new(cx.string_text(text)?);
     let Some(uri) = crate::pass::entry::otp_uri(&text) else { return Ok(Value::NIL) };
     let totp = crate::pass::otp::parse(uri).map_err(|why| Fault::Error(format!("Bad otpauth URI: {why}")))?;
@@ -53,7 +53,7 @@ fn romacs_pass_otp(cx, text: Value, unix_seconds: Value) {
 defsubr! { name = "romacs-pass--generate", gnu = "romacs:pass", effect = Global,
 fn romacs_pass_generate(cx, length: Value, alphabet: Value) {
     let count = length.integer_value().and_then(|n| usize::try_from(n).ok()).filter(|&n| n <= 4096)
-        .ok_or(Fault::Wrong("natnump", length))?;
+        .ok_or_else(|| Fault::Wrong("natnump", length))?;
     let characters: Vec<char> = cx.string_text(alphabet)?.chars().collect();
     let password = crate::pass::generate::password(count, &characters)
         .map_err(|e| Fault::Error(format!("Cannot generate a password: {e}")))?;

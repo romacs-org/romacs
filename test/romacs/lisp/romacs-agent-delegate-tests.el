@@ -399,6 +399,20 @@ message's record for TEXT, `interrupted' each interrupted."
                                                    (romacs-mcp--object "messageId" (plist-get outside :id) "text" "x"))
                                                   :type 'user-error)))))))
 
+(ert-deftest romacs-agent-delegate-a-reply-answers-no-result ()
+  ;; The sender's record, with its last result's length alone.
+  (romacs-agent-delegate-tests--sending a
+    (setf (romacs-agent-state parent) 'idle (romacs-agent-driver-state parent) (list :ready t)
+          (romacs-agent-reply parent) (make-string 50000 ?p))
+    (let ((asked (romacs-agent-tools--message "parent" parent)))
+      (romacs-agent-delegate-tests--receive a asked "which branch?")
+      (let ((record (romacs-agent-tools--reply (romacs-mcp--object "messageId" (plist-get asked :id) "text" "main"))))
+        (should (string-prefix-p "m-" (gethash "messageId" record)))
+        (should (equal (gethash "taskId" record) (romacs-agent-id parent)))
+        (should-not (gethash "result" record))
+        (should (= (gethash "resultChars" record) 50000))
+        (should (< (length (json-serialize record)) 2000))))))
+
 (ert-deftest romacs-agent-delegate-a-turn-answering-a-message-names-it ()
   ;; The turn a parent's message began answers it: its wake says so.  A
   ;; steer into it does not change what it answers.

@@ -59,7 +59,8 @@ import test_modules  # noqa: E402
 STRUCTURAL = ('romacs-vm::reentry_sites', 'romacs-vm::compile_boundaries', 'romacs-vm::rooting_brand_rules',
               'romacs-vm::no_remote_references', 'romacs-vm::heap_boundary', 'romacs-vm::oclosure_boundary',
               'romacs-vm::gc_threads_forbidden', 'romacs-vm::primitive_registry', 'romacs-vm::production_registry',
-              'romacs-vm::host_boundary_lint', 'romacs-vm::primitive_gc_boundary', 'romacs-gui-tests::harness_contract')
+              'romacs-vm::host_boundary_lint', 'romacs-vm::fault_lazy_lint', 'romacs-vm::primitive_gc_boundary',
+              'romacs-gui-tests::harness_contract')
 
 # The structural rules whose compile-fail fixtures run the compiler: minutes
 # when their inputs changed, where the rest take seconds once the test target
@@ -90,12 +91,20 @@ CRATE_RULES = {'romacs-display-runtime': 'package(romacs-display-runtime) & test
 # (Vm::compile, build_function and the rest) and the reader (reader/, which
 # the compile walk reads each form through), both shared by every load and
 # read by every other test; and the compile pipeline outside these paths
-# (world/, batch.rs).
+# (world/, batch.rs). An installer's tree compile, in a fresh store beside
+# an installation and a user's environment, then a session over it
+# (compiled_lisp_install), runs for the compiled-Lisp store and the compile
+# world's identity: compiled_lisp/, the world store and batch.rs, which
+# configures both, and main.rs, which dispatches --compile-lisp-tree and its
+# --compile-lisp children; the rest of world/ is left to the full gate.
 PATH_GATED = {
     'romacs-vm-gui::lisp_tree_compiles': re.compile(
         r'^(?:crates/romacs-vm/src/compiled_lisp/'
         r'|crates/romacs-vm/src/(?:request_code|expand|variable_definitions|capture|sealed|closure_key)\.rs$'
         r'|lisp/emacs-lisp/(?:romacs-compile|macroexp|byte-run|bytecomp|cconv)\.el$)'),
+    'romacs-vm-gui::compiled_lisp_install': re.compile(
+        r'^(?:crates/romacs-vm/src/compiled_lisp/|crates/romacs-vm/src/world/store\.rs$'
+        r'|crates/romacs-vm-gui/src/(?:batch|main)\.rs$)'),
 }
 
 # The live harnesses a check runs for any change that reaches the editor
@@ -110,11 +119,20 @@ HARNESS_RULES = (
     # A startup that fails holds its screen until the window is closed: the evaluator's end
     # (main.rs, exit.rs), the screen (loading.rs) and the Lisp errors it shows (startup.rs).
     (re.compile(r'^crates/romacs-vm-gui/src/(?:main|exit|loading|startup)\.rs$'), 'startup_failed'),
+    # The host's keys as Lisp reads them (VM2-GUI-KEYS): the native translation,
+    # the display's key events, the GUI keys' fallbacks and terminal bytes.
+    (re.compile(r'^(?:crates/romacs-vm-gui/src/native\.rs'
+                r'|crates/romacs-display-runtime/src/render_thread/(?:input|window_events)\.rs'
+                r'|crates/romacs-vm/src/terminal_keys\.rs|lisp/romacs-editing\.el'
+                r'|crates/romacs-vm-gui/harness/gui_keys_live\.py)'), 'gui_keys'),
     # The working thread: drawn by the render thread while the main VM is busy.
     (re.compile(r'^(?:lisp/ui/romacs-(?:working|animate)\.el|crates/romacs-logo/src/working\.rs'
                 r'|crates/romacs-display-protocol/src/text_animation\.rs'
                 r'|crates/romacs-display-runtime/src/render_thread/text_animations(?:\.rs|/)'
                 r'|crates/romacs-vm-gui/harness/working_live\.py)'), 'working'),
+    # Lisp changed in a worktree loaded into a running session (romacs-live-update).
+    (re.compile(r'^(?:lisp/session/romacs-live[^/]*\.el|crates/romacs-vm-gui/harness/live_update_live\.py)'),
+     'live_update'),
 )
 EDITOR = 'romacs-vm-gui'
 HARNESS_DIR = 'crates/romacs-vm-gui/harness/'

@@ -84,7 +84,7 @@ fn list_directory(cx: &mut Leaf<'_>, directory: Value, file: Value, saved: &[Val
     let path = if path.is_multibyte() { path.bytes().to_vec() } else { crate::text::octets_as_multibyte(path.bytes()).0 };
     let directory_file = super::fileio::file_name_path(cx, file)?;
     let count = if count == Value::NIL { usize::MAX } else {
-        let n = count.integer_value().filter(|n| *n >= 0).ok_or(Fault::Wrong("wholenump", count))?;
+        let n = count.integer_value().filter(|n| *n >= 0).ok_or_else(|| Fault::Wrong("wholenump", count))?;
         usize::try_from(n).unwrap_or(usize::MAX)
     };
     if pattern != Value::NIL { cx.string_bytes(pattern)?; }
@@ -184,7 +184,7 @@ fn completion_expanded(cx: &mut Leaf<'_>, directory: Value, saved: &[Value]) -> 
     let mut ignored = vec![];
     let mut tail = super::fileio::var(cx, "completion-ignored-extensions")?;
     while let Some((element, rest)) = cx.pair(tail) {
-        if cx.string_view(element).is_ok() { ignored.push(element); }
+        if cx.is_readable_string(element) { ignored.push(element); }
         tail = rest;
     }
     let file_bytes = cx.string_bytes(file)?.len();

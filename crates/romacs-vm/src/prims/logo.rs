@@ -11,7 +11,7 @@ use super::*;
 // aspect in (0, 2].
 defsubr! { name = "romacs--logo-frame", gnu = "romacs:logo", effect = Reads,
 fn romacs_logo_frame(cx, cols: Value, rows: Value, cell_aspect: Value; optional time: Value) {
-    let count = |v: Value| v.integer_value().map(|n| usize::try_from(n).unwrap_or(0)).ok_or(Fault::Wrong("integerp", v));
+    let count = |v: Value| v.integer_value().map(|n| usize::try_from(n).unwrap_or(0)).ok_or_else(|| Fault::Wrong("integerp", v));
     let view = romacs_logo::View { cols: count(cols)?, rows: count(rows)?, cell_aspect: number(cx, cell_aspect)? };
     if !view.valid() { return Err(Fault::Range(cols, rows)); }
     let time = if time == Value::NIL { 0.0 } else { number(cx, time)? };

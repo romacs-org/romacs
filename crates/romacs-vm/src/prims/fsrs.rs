@@ -81,7 +81,7 @@ fn romacs_fsrs_compute_parameters(cx, reviews: Value) {
     for entry in elements(cx, reviews)? {
         let fields = elements(cx, entry)?;
         let [card, rating, elapsed] = fields[..] else { return Err(Fault::Wrong("listp", entry)) };
-        let card = card.integer_value().ok_or(Fault::Wrong("integerp", card))?;
+        let card = card.integer_value().ok_or_else(|| Fault::Wrong("integerp", card))?;
         let rating = match whole(rating, 4)? { 0 => return Err(Fault::Wrong("natnump", rating)), r => r };
         let delta_t = whole(elapsed, u32::MAX)?;
         let history = histories.entry(card).or_default();
@@ -93,7 +93,7 @@ fn romacs_fsrs_compute_parameters(cx, reviews: Value) {
         }
     }
     let count = Value::fixnum(i64::try_from(train_set.len()).unwrap_or(i64::MAX))
-        .ok_or(Fault::Wrong("fixnump", reviews))?;
+        .ok_or_else(|| Fault::Wrong("fixnump", reviews))?;
     let input = ComputeParametersInput { train_set, card_ids: Some(card_ids), ..Default::default() };
     let fitted = ::fsrs::compute_parameters(input).map_err(|e| failed(&e))?;
     let fitted: Vec<Value> = fitted.into_iter().map(|w| cx.float(f64::from(w))).collect();
@@ -116,7 +116,7 @@ fn weights(cx: &mut Leaf<'_>, parameters: Value) -> Result<Vec<f32>> {
 /// PARAMETERS' numbers as given, empty for nil (the crate's defaults).
 fn given_weights(cx: &mut Leaf<'_>, parameters: Value) -> Result<Vec<f32>> {
     let values = if parameters == Value::NIL { vec![] }
-        else if cx.vector_len(parameters).is_ok() { cx.vector_values(parameters)? }
+        else if cx.is_vector(parameters) { cx.vector_values(parameters)? }
         else { elements(cx, parameters)? };
     values.into_iter().map(|w| {
         let x = number(cx, w)?;
@@ -127,7 +127,7 @@ fn given_weights(cx: &mut Leaf<'_>, parameters: Value) -> Result<Vec<f32>> {
 /// MEMORY, nil or (STABILITY . DIFFICULTY).
 fn memory_state(cx: &mut Leaf<'_>, memory: Value) -> Result<Option<MemoryState>> {
     if memory == Value::NIL { return Ok(None); }
-    let (stability, difficulty) = cx.pair(memory).ok_or(Fault::Wrong("consp", memory))?;
+    let (stability, difficulty) = cx.pair(memory).ok_or_else(|| Fault::Wrong("consp", memory))?;
     let stability = positive(cx, stability)?;
     let d = number(cx, difficulty)?;
     if !(1.0..=10.0).contains(&d) { return Err(Fault::Range(difficulty, Value::integer(10).unwrap())); }
@@ -154,7 +154,7 @@ fn whole(value: Value, max: u32) -> Result<u32> {
     value.integer_value()
         .and_then(|n| u32::try_from(n).ok())
         .filter(|&n| n <= max)
-        .ok_or(Fault::Wrong("natnump", value))
+        .ok_or_else(|| Fault::Wrong("natnump", value))
 }
 
 /// KEYS and their single-precision VALUES as a plist of floats.

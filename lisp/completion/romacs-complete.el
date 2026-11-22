@@ -583,6 +583,16 @@ The stack trace of an error is shown in the *Messages* buffer."
        (let ((romacs-complete-count (romacs-complete--rows)))
          (romacs-complete--display-candidates (romacs-complete--arrange-candidates)))))))
 
+(defun romacs-complete-refresh (minibuffer)
+  "Compute MINIBUFFER's candidates anew and show them, when this UI shows
+them: for a table whose candidates change while it is open."
+  (when-let* (((buffer-live-p minibuffer))
+              ((buffer-local-value 'romacs-complete--count-ov minibuffer))
+              (window (get-buffer-window minibuffer t)))
+    (with-selected-window window
+      (setq romacs-complete--input t)
+      (romacs-complete--exhibit))))
+
 (defun romacs-complete--goto (index)
   "Go to candidate with INDEX."
   (setq romacs-complete--index
