@@ -57,7 +57,7 @@ pub fn gnu_lisp_with(source: &str) -> Vm {
 }
 
 /// The boot from source, recording for a world when WORLD.
-fn booted(root: &Path, world: bool) -> Vm {
+pub(super) fn booted(root: &Path, world: bool) -> Vm {
     let mut vm = Vm::new();
     if world {
         vm.world_begin();
