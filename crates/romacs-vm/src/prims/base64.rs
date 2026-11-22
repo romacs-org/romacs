@@ -210,7 +210,7 @@ fn decoded_probed(cx: &mut Leaf<'_>, bytes: &[u8], url: bool, ignore_invalid: bo
 /// character refused.
 fn octets(cx: &mut Leaf<'_>, string: Value) -> std::result::Result<Vec<u8>, Fault> {
     let view = cx.string_view(string)?;
-    if !view.is_multibyte() { return Ok(view.bytes().to_vec()); }
+    if !view.is_multibyte() { return Ok(view.bytes); }
     view.chars().map(|c| {
         if c >= crate::lstring::BYTE8_OFFSET + 128 { Ok((c - crate::lstring::BYTE8_OFFSET) as u8) }
         else if c < 128 { Ok(c as u8) }
@@ -234,7 +234,7 @@ fn base64url_encode_string(cx, string: Value; optional no_pad: Value) {
 
 defsubr! { name = "base64-decode-string", gnu = "fns.c:4409", effect = Pure,
 fn base64_decode_string(cx, string: Value; optional base64url: Value, ignore_invalid: Value) {
-    let bytes = cx.string_view(string)?.bytes().to_vec();
+    let bytes = cx.string_bytes(string)?;
     let decoded = decoded(cx, &bytes, base64url != Value::NIL, ignore_invalid != Value::NIL)?;
     Ok(cx.make_string(decoded, false))
 }}
@@ -308,7 +308,7 @@ defsubr! { name = "base64-decode-region", gnu = "fns.c:4334", effect = Global,
 fn base64_decode_region(cx, beg: Value, end: Value; optional base64url: Value, ignore_invalid: Value) -> Step {
     let (from, to) = cx.validate_region(beg, end)?;
     let text = cx.region_text(from, to)?;
-    let bytes = cx.string_view(text)?.bytes().to_vec();
+    let bytes = cx.string_bytes(text)?;
     // Decoded before the region changes.
     let decoded = decoded(cx, &bytes, base64url != Value::NIL, ignore_invalid != Value::NIL)?;
     let length = decoded.len() as i64;
