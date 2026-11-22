@@ -316,8 +316,9 @@ mod tests {
     /// the collector's explicit roots keep it.
     fn unlist(vm: &mut Vm, name: &str) {
         let slot = vm.slot(&format!("#:vm2-buffer:{name}"));
+        let buffer = vm.slots[slot].value;
         vm.slots[slot].value = Value::UNBOUND;
-        vm.set_buffer_order(&[]);
+        vm.unlist_buffer(buffer);
     }
 
     #[test]

@@ -1316,6 +1316,23 @@ impl Vm {
     fn host_key_pending(&mut self) -> bool {
         self.host_input.as_mut().is_some_and(|host| host.key_pending())
     }
+    /// Forward the caller's roots and the evaluator and buffer roots at
+    /// the collection boundary. A terminal binding retains its saved maps.
+    fn rewrite_root_slots(&mut self, roots: &mut [Value], rewrite: &mut impl FnMut(&mut Value)) {
+        // The traced register slots (`register_roots`); above the tops is NIL.
+        let tops = self.register_tops();
+        let registers = self.stack.files_mut().zip(tops);
+        for v in roots
+            .iter_mut()
+            .chain(registers.flat_map(|(file, top)| file[..top].iter_mut()))
+            .chain(self.external_roots.iter_mut())
+            .chain(self.terminal_bindings.iter_mut().flat_map(|binding| std::iter::once(&mut binding.buffer).chain(binding.away.iter_mut()).chain(binding.unremapped_maps.iter_mut())))
+        {
+            rewrite(v);
+        }
+        self.buffer_order.visit_values(rewrite);
+    }
+
     /// Collect at a strand wait point. All externally retained Values must be in
     /// `roots`; compaction rewrites them. Never share private Values across VMs.
     /// Runtime register, global, binding and inline-cache roots are added here.
@@ -1435,7 +1452,7 @@ impl Vm {
         ];
         let fill: Vec<usize> = tables.iter().map(|table| table.1).collect();
         let maps: Vec<Vec<usize>> = tables.into_iter().map(|table| table.0).collect();
-        let rewrite = |v: &mut Value| {
+        let mut rewrite = |v: &mut Value| {
             let tag = v.tag();
             let arena = match tag {
                 // Same omission as the mark phase, same cause: tag 3..=5 was
@@ -1470,17 +1487,7 @@ impl Vm {
             Some((cell.payload() as usize, pair))
         });
         self.cells.collector_compact(&maps[2], |v| rewrite(v));
-        // The traced register slots (`register_roots`); above the tops is NIL.
-        let tops = self.register_tops();
-        let registers = self.stack.files_mut().zip(tops);
-        for v in roots
-            .iter_mut()
-            .chain(registers.flat_map(|(file, top)| file[..top].iter_mut()))
-            .chain(self.external_roots.iter_mut())
-            .chain(self.terminal_bindings.iter_mut().flat_map(|binding| std::iter::once(&mut binding.buffer).chain(binding.away.iter_mut()).chain(binding.unremapped_maps.iter_mut())))
-        {
-            rewrite(v);
-        }
+        self.rewrite_root_slots(roots, &mut rewrite);
         if let Some(escape) = &mut self.propagated_escape {
             escape.visit_values(&mut |v| rewrite(v));
         }
@@ -2091,6 +2098,9 @@ impl Vm {
         }
         pending.extend(self.terminal_bindings.iter().map(|binding| binding.buffer));
         pending.extend(self.terminal_bindings.iter().flat_map(|binding| binding.away.iter().chain(&binding.unremapped_maps).copied()));
+        // The order holds its buffers itself: a name slot is a symbol Lisp
+        // can set, so it is no root to rely on.
+        self.buffer_order.visit_values(&mut |v| pending.push(*v));
         if let Some(escape) = &mut self.propagated_escape {
             escape.visit_values(&mut |v| if keep(v) { pending.push(*v) });
         }

@@ -77,6 +77,11 @@ impl<'vm> Local<'vm> {
     pub fn bytes(self) -> Result<&'vm [u8]> {
         self.vm.bytes_value(self.value)
     }
+    /// The node this buffer occupies in the order arena, for image tests.
+    #[cfg(feature = "test-hooks")]
+    pub fn buffer_order_node(self) -> Option<u32> {
+        self.vm.order_node(self.value)
+    }
     /// Overlays of this buffer covering a UTF-8 byte boundary. The visitor
     /// receives each overlay as a `Local` of the same borrow.
     pub fn visit_overlays_at(
