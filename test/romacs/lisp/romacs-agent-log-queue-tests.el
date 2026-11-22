@@ -201,11 +201,18 @@
       (should (equal (romacs-agent-log-queue-tests--rows) '("theirs" "mine" "Romacs's own" "last")))
       ;; Another's mark is the table's; marks of one width keep the
       ;; numbers in a column.
-      (let ((romacs-agent-glyph-alist (append '((queue-held . "H>") (queue-other . "O<")) romacs-agent-glyph-alist)))
+      (let ((romacs-agent-glyph-alist (append '((queue-held . "H>>") (queue-other . "O")) romacs-agent-glyph-alist)))
         (romacs-agent-log--separator t)
-        (let ((shown (buffer-substring-no-properties romacs-agent-log--end romacs-agent-log--input)))
-          (should (string-match-p "  O<1 +theirs" shown))
-          (should (string-match-p "    2 +mine" shown))))
+        (let* ((shown (buffer-substring-no-properties romacs-agent-log--end romacs-agent-log--input))
+               (column (lambda (regexp) (and (string-match regexp shown)
+                                             (- (match-beginning 1) (save-match-data
+                                                                      (or (cl-position ?\n shown :end (match-beginning 1) :from-end t) -1))
+                                                1)))))
+          (should (string-match-p "  O  1 +theirs" shown))
+          ;; Another's, one column, and one's own, none, padded to the
+          ;; held mark's three: every number in one column.
+          (should (equal (funcall column "O *\\([0-9]\\) +theirs") (funcall column "^ *\\([0-9]\\) +mine")))
+          (should (= (funcall column "O *\\([0-9]\\) +theirs") 5))))
       (romacs-agent-log--separator t)
       (should (equal (romacs-agent-item-text (romacs-agent-log-queue--item-at)) "mine"))
       ;; Put first goes with the place.
