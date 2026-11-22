@@ -230,25 +230,21 @@ state root that has said two things, its writes to its harness in
 
 (ert-deftest romacs-agent-renew-codex-keeps-an-unfinished-goal ()
   (romacs-agent-renew-tests--with 'codex
-    (let ((romacs-agent-renew-at 0.8))
-      (setf (romacs-agent-harness-session session) "thread-old"
-            (romacs-agent-context-window session) 200000
-            (romacs-agent-context-used session) 170000)
-      (romacs-agent-renew-tests--codex-goal session "thread-old" "active")
-      (romacs-agent-renew-tests--codex-goal session "child" nil)
-      (should-not (romacs-agent-renew-threshold session))
-      (should-not (romacs-agent-renew--why-now session))
-      (should-error (romacs-agent-renew session) :type 'user-error)
-      (should-error (romacs-agent-renew-soon session) :type 'user-error)
-      (romacs-agent--record session (romacs-mcp--object "seq" (1+ (romacs-agent-seq session)) "exit" 0))
-      (romacs-agent-renew-tests--ran session)
-      (should-not (romacs-agent-renew-threshold session))
-      (romacs-agent-renew-tests--codex-goal session "thread-old" "complete")
-      (should (equal (romacs-agent-renew-threshold session) 0.8))
-      (romacs-agent-renew-tests--codex-goal session "thread-old" "paused")
-      (should-not (romacs-agent-renew-threshold session))
-      (romacs-agent-renew-tests--codex-goal session "thread-old" nil)
-      (should (equal (romacs-agent-renew-threshold session) 0.8)))))
+    (setf (romacs-agent-harness-session session) "thread-old")
+    (romacs-agent-renew-tests--codex-goal session "thread-old" "active")
+    (romacs-agent-renew-tests--codex-goal session "child" nil)
+    (should (romacs-agent-renew--obstacle session))
+    (should-error (romacs-agent-renew session) :type 'user-error)
+    (should-error (romacs-agent-renew-soon session) :type 'user-error)
+    (romacs-agent--record session (romacs-mcp--object "seq" (1+ (romacs-agent-seq session)) "exit" 0))
+    (romacs-agent-renew-tests--ran session)
+    (should (romacs-agent-renew--obstacle session))
+    (romacs-agent-renew-tests--codex-goal session "thread-old" "complete")
+    (should-not (romacs-agent-renew--obstacle session))
+    (romacs-agent-renew-tests--codex-goal session "thread-old" "paused")
+    (should (romacs-agent-renew--obstacle session))
+    (romacs-agent-renew-tests--codex-goal session "thread-old" nil)
+    (should-not (romacs-agent-renew--obstacle session))))
 
 (ert-deftest romacs-agent-renew-codex-goal-can-arrive-during-the-handoff ()
   (romacs-agent-renew-tests--with 'codex
@@ -490,11 +486,18 @@ there (`live') and ready; `outcome' the renewal's outcome cell."
           (romacs-agent-context-used session) 170000)
     (romacs-agent-renew--at-end session '(:type done))))
 
-(ert-deftest romacs-agent-renew-automatic-handoff-dispatches-without-user-input ()
+(ert-deftest romacs-agent-renew-codex-keeps-native-compaction ()
   (romacs-agent-renew-tests--with 'codex
-    (romacs-agent-renew-tests--journal
-     session (romacs-mcp--object "in" (romacs-agent--codex-input session "build the parser" 1))
-     (romacs-mcp--object "out" (romacs-mcp--object "type" "turn.completed")))
+    (setf (romacs-agent-caught-up session) t
+          (romacs-agent-harness-session session) "original")
+    (romacs-agent-renew-tests--automatic session)
+    (should-not (romacs-agent-renew-threshold session))
+    (should-not (romacs-agent--held-p session))
+    (should (equal (romacs-agent-harness-session session) "original"))
+    (should-not (romacs-agent-renew-tests--notes session))))
+
+(ert-deftest romacs-agent-renew-automatic-handoff-dispatches-without-user-input ()
+  (romacs-agent-renew-tests--with 'claude
     (setf (romacs-agent-caught-up session) t)
     (unwind-protect
         (progn
@@ -513,8 +516,8 @@ there (`live') and ready; `outcome' the renewal's outcome cell."
             (romacs-agent--dispatch session)
             (should (= (length written) 1))
             (let* ((line (caar written)) (record (cdar written))
-                   (wire (romacs-agent--text-of (gethash "input" (gethash "params" line))))
-                   (prompt (romacs-agent--text-of (gethash "input" (gethash "params" record)))))
+                   (wire (romacs-agent--text-of (gethash "content" (gethash "message" line))))
+                   (prompt (romacs-agent--text-of (gethash "content" (gethash "message" record)))))
               (should (string-search "Continue" prompt))
               (should (equal wire (concat brief prompt)))
               (should (eq (gethash "romacsBrief" record) t))

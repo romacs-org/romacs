@@ -757,6 +757,8 @@ instances) is derived again when it changes.")
       nil when the harness names it as it starts.  A driver may fold
       :renew-block (NATIVE . REASON) into its state to keep an unfinished
       conversation on its own native id, or nil to clear the block;
+  :manual-renew-only   non-nil leaves automatic compaction to the
+      harness while still allowing explicitly requested renewal;
   :conversation-files (HOME SESSION)   the files, relative to its
       configuration directory HOME, that hold SESSION's conversation:
       what moves with it to another instance of the harness;

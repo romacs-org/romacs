@@ -43,7 +43,8 @@ turns alone (T3 Code's way: no extra turn)."
 
 (defcustom romacs-agent-renew-at 0.8
   "The share of its model's context window past which a session renews by
-itself at a turn's end, once a conversation; nil never.  Below Claude
+itself at a turn's end, once a conversation; nil never.  Harnesses
+that manage their own context may opt out.  Below Claude
 Code's own automatic compaction, so the renewal comes first."
   :type '(choice (const :tag "Never" nil) (number :tag "Share of the window"))
   :group 'romacs-agent)
@@ -536,6 +537,7 @@ itself at a turn's end (`romacs-agent-renew-at'), for a view to show; nil
 when auto-renewal is off, barred for this conversation, or already
 done from it."
   (and romacs-agent-renew-at (romacs-agent--harness-get session :renew)
+       (not (romacs-agent--harness-get session :manual-renew-only))
        (not (romacs-agent-renew--obstacle session))
        (not (equal (gethash session romacs-agent-renew--automatic) (romacs-agent--native-id session)))
        romacs-agent-renew-at))

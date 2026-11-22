@@ -827,6 +827,7 @@ thread: its rollout, wherever its day put it."
   ;; A renewed conversation is a new thread, named once Codex starts it
   ;; (`romacs-agent--codex-thread').
   :renew #'ignore
+  :manual-renew-only t
   :select #'romacs-agent--codex-select
   :models-probe #'romacs-agent--codex-models-probe
   :argv #'romacs-agent--codex-argv
