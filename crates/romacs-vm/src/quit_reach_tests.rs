@@ -443,16 +443,39 @@ fn call_process_deadlines_and_debug_events_wake_their_own_waits() {
     assert!(!vm.take_debug_event(), "each debugger event was delivered once");
 }
 
-/// The native sort, in runs merged a level at a time, orders as the sort
-/// through a Lisp predicate does, ties kept in order: over several merge
-/// levels and many equal keys.
 #[test]
-fn a_native_sort_in_runs_is_stable_and_ordered() {
+fn a_native_sort_matches_a_lisp_predicate() {
     let (mut vm, _) = busy_vm();
-    let form = "(let (l) (dotimes (i 100000) (push (cons (% (* i 7919) 97) i) l)) \
+    let form = "(let (l) (dotimes (i 128) (push (cons (% (* i 7919) 97) i) l)) \
                   (equal (sort (copy-sequence l) :key #'car) \
                          (sort (copy-sequence l) :key #'car :lessp (lambda (a b) (< a b)))))";
     assert_eq!(vm.eval_source(form).unwrap().display().unwrap(), "t");
+}
+
+#[test]
+fn a_native_sort_in_runs_is_stable_and_ordered() {
+    let (mut vm, _) = busy_vm();
+    // The first two chunks coalesce, leaving three runs and an odd tail.
+    let mut order = vec![
+        (2, 'a'), (4, 'b'), (2, 'c'), (4, 'd'),
+        (5, 'e'), (6, 'f'), (5, 'g'), (6, 'h'),
+        (3, 'i'), (5, 'j'), (3, 'k'), (5, 'l'),
+        (2, 'm'),
+    ];
+    let (mut merged_middle, mut merged_tail) = (false, false);
+    crate::prim::prims::leaf_sequences::sort_polled(&mut Leaf::new(&mut vm), &mut order, 4, |_, a, b| {
+        // These pairs occur in the merge levels, beyond the boundary checks.
+        merged_middle |= (a.1, b.1) == ('i', 'a');
+        merged_tail |= (a.1, b.1) == ('m', 'a');
+        a.0.cmp(&b.0)
+    }).unwrap();
+    assert!(merged_middle, "merged the coalesced and middle runs");
+    assert!(merged_tail, "merged the odd tail in the next level");
+    assert_eq!(order, [
+        (2, 'a'), (2, 'c'), (2, 'm'), (3, 'i'), (3, 'k'),
+        (4, 'b'), (4, 'd'), (5, 'e'), (5, 'g'), (5, 'j'), (5, 'l'),
+        (6, 'f'), (6, 'h'),
+    ]);
 }
 
 /// Coding conversion stops between the chunks of its passes, before the
