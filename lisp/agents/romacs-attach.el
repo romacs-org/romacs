@@ -513,10 +513,13 @@ a no-break space: word wrap never parts it from its name."
   "STRING with each plain space a no-break space drawn as a plain one: a
 chip is one word.  Word wrap classes an element by the text under it,
 so a tray's line breaks between chips, never inside one."
-  (dotimes (i (length string) string)
-    (when (and (eq (aref string i) ?\s) (not (get-text-property i 'display string)))
-      (aset string i ?\u00a0)
-      (put-text-property i (1+ i) 'display '(space :width 1) string))))
+  (let ((at 0))
+    (while (< at (length string))
+      (when (and (eq (aref string at) ?\s) (not (get-text-property at 'display string)))
+        (aset string at ?\u00a0)
+        (put-text-property at (1+ at) 'display '(space :width 1) string))
+      (setq at (1+ at)))
+    string))
 
 (defun romacs-attach--chip (entry selected)
   "Plan ENTRY's chip, SELECTED or not."
