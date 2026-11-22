@@ -111,7 +111,7 @@ fn gnu_completion_reads_commands_files_and_buffers_through_icomplete() {
         let mut report = vec![];
         // Romacs's defaults are standard values, set through their :set.
         report.push(printed(&mut vm, "(list completion-styles completion-ignore-case completions-format completions-sort
-            completion-category-overrides icomplete-compute-delay
+            completion-category-overrides completion-category-defaults icomplete-compute-delay
             (equal (eval (car (get 'completions-sort 'standard-value)) t) completions-sort)
             fido-vertical-mode fido-mode icomplete-mode (eval (car (get 'fido-vertical-mode 'standard-value)) t)
             (lookup-key icomplete-fido-mode-map (kbd \"TAB\")) resize-mini-windows)"));
@@ -138,15 +138,15 @@ fn gnu_completion_reads_commands_files_and_buffers_through_icomplete() {
         report.push(texts.iter().any(|t| t.contains("M-x gc-probe \ngc-probe-command")).to_string());
         report.push(texts.iter().any(|t| t.contains("M-x gc-probe-command \n")).to_string());
 
-        // C-x C-f: partial completion of s/n to sub/notes.txt, then visit.
+        // C-x C-f: completion of sub/n to sub/notes.txt, then visit.
         vm.eval_source(&format!("(setq default-directory {})", quoted(&work))).unwrap();
-        let frames = attach(&mut vm, "s/n\t\n");
+        let frames = attach(&mut vm, "sub/n\t\n");
         let outcome = keys(&mut vm, &[24, 6]);
         let (tallest, texts) = shown(&frames);
         report.push(format!("{:?}", outcome.and_then(|o| o.signal).map(|s| s.condition)));
         report.push(printed(&mut vm, &format!("(list (file-relative-name buffer-file-name {}) (buffer-string))", quoted(&work))));
         report.push(format!("{} {}", tallest > LINE, mini_height(&mut vm) == LINE));
-        report.push(texts.iter().any(|t| t.contains(&format!("Find file: {work}s/n \nsub/notes.txt"))).to_string());
+        report.push(texts.iter().any(|t| t.contains(&format!("Find file: {work}sub/n \nnotes.txt"))).to_string());
         // GNU's files.el visits: uniquify names, a visited file is found
         // again, and closing the window asks before losing an edit to it,
         // a literal visit's too.
@@ -180,13 +180,13 @@ fn gnu_completion_reads_commands_files_and_buffers_through_icomplete() {
     }).unwrap().join().unwrap();
     let _ = std::fs::remove_dir_all(&root);
     assert_eq!(report, [
-        "((fzf basic partial-completion emacs22) t one-column historical ((file (styles fzf partial-completion)) (project-file (styles fzf substring))) 0.15 t t t t t icomplete-force-complete grow-only)",
-        "(fzf basic partial-completion emacs22)",
-        "None", r#""(zqab-x ((fzf basic partial-completion emacs22) (\"zqab-x\" \"zq-alpha-beta\" \"xzqab\")))""#,
+        "((fzf) t one-column historical nil nil 0.15 t t t t t icomplete-force-complete grow-only)",
+        "(fzf)",
+        "None", r#""(zqab-x ((fzf) (\"zqab-x\" \"zq-alpha-beta\" \"xzqab\")))""#,
         "None", "(ran \"gc-probe-command\")", "true true", "true", "true",
         "None", r#"("sub/notes.txt" "notes\n")"#, "true true", "true",
         r#"("notes.org<a>" "notes.org<b>" t ((nil quit) (nil quit)))"#,
-        "None", "(\"zqab.txt\" (fzf partial-completion basic emacs22))",
+        "None", "(\"zqab.txt\" (fzf))",
         "None", "(\"alpha-kt-buffer\" \"alpha-kt-buffer\")", "true",
     ]);
 }

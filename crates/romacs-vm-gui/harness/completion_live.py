@@ -22,10 +22,10 @@ user's init may, and the same keys drive icomplete's fido-vertical display:
 
 - M-x with a few letters shows the vertical candidate list in a grown
   mini-window, TAB force-completes the selected command, Return runs it;
-- C-x C-f with partial completion of s/n to sub/notes.txt, TAB, Return
+- C-x C-f with completion of sub/n to sub/notes.txt, TAB, Return
   visits the file;
-- C-x b lists the buffers with the default in the prompt, TAB takes
-  *scratch*, Return switches to it.
+- C-x b finds agent buffers even with a competing prefix match. TAB takes
+  the selected agent buffer and Return switches to it.
 
 Each state is captured as a screenshot and as the prompt's minibuffer text.
 labwc, wlr-randr, wtype and grim come from PATH (the gate's headless tools).
@@ -49,9 +49,12 @@ INIT = live.WRITE_WHOLE + '''(live-write-whole
   (list completion-styles completion-auto-select completion-auto-help completions-format
         completions-sort completions-max-height completion-ignore-case
         icomplete-compute-delay icomplete-delay-completions-threshold
-        completion-category-overrides fido-vertical-mode romacs-complete-mode
+        completion-category-overrides completion-category-defaults fido-vertical-mode romacs-complete-mode
         (lookup-key icomplete-fido-mode-map (kbd "TAB"))))
  {defaults})
+(get-buffer-create "*agent: alpha*")
+(get-buffer-create "*agent: beta*")
+(get-buffer-create "agent-log")
 (defun romacs-live-completion-probe ()
   "Record that M-x ran this command."
   (interactive)
@@ -89,9 +92,9 @@ LAYER_INIT = '''(defun romacs-live-root-height (where)
 (add-hook 'minibuffer-exit-hook (lambda () (run-at-time 0 nil #'romacs-live-root-height 'exit)))
 '''
 
-EXPECTED_DEFAULTS = ('((fzf basic partial-completion emacs22) t visible one-column historical 20 t 0.15 400 '
-                     '((file (styles fzf partial-completion)) (project-file (styles fzf substring))) '
-                     'nil t icomplete-force-complete)')
+EXPECTED_DEFAULTS = ('((fzf) t visible one-column historical 20 t 0.15 400 '
+                     'nil nil nil t icomplete-force-complete)')
+AGENT_BUFFERS = ('*agent: alpha*', '*agent: beta*', 'agent-log')
 # Appended for --fido: GNU's fido-vertical display instead of the layer.
 FIDO_INIT = '(romacs-complete-mode -1)\n(fido-vertical-mode 1)\n'
 
@@ -118,12 +121,12 @@ def default_ui(report, keys, minibuffer, shown, selected, probe, work, timeout, 
     fio.wait(probe.exists, timeout, 'the probe command ran', process)
     report['checks'].append({'mx_ran': probe.read_text()})
 
-    # C-x C-f: partial completion of s/n.
+    # C-x C-f: completion of sub/n.
     keys('-M', 'ctrl', 'x', '-m', 'ctrl', '-M', 'ctrl', 'f', '-m', 'ctrl')
     fio.wait(lambda: 'Find file: ' in minibuffer(), timeout, 'find-file prompt', process)
-    keys('s/n')
-    shown('ff-list', 'partial completion of s/n',
-          lambda m: f'Find file: {work}/s/n' in m and '\nsub/notes.txt' in m)
+    keys('sub/n')
+    shown('ff-list', 'completion of sub/n',
+          lambda m: f'Find file: {work}/sub/n' in m and '\nnotes.txt' in m)
     keys('-k', 'Tab')
     shown('ff-tab', 'find-file force-completed', lambda m: f'Find file: {work}/sub/notes.txt' in m)
     keys('-k', 'Return')
@@ -132,12 +135,13 @@ def default_ui(report, keys, minibuffer, shown, selected, probe, work, timeout, 
     # C-x b: buffers, the default in the prompt.
     keys('-M', 'ctrl', 'x', '-m', 'ctrl', 'b')
     fio.wait(lambda: 'Switch to buffer (default ' in minibuffer(), timeout, 'switch prompt', process)
-    keys('scr')
-    shown('cxb-list', 'buffer candidates', lambda m: '): scr' in m and '\n*scratch*' in m)
+    keys('agent')
+    shown('cxb-list', 'buffer candidates', lambda m: '): agent' in m and all(name in m for name in AGENT_BUFFERS))
+    keys('al')
     keys('-k', 'Tab')
-    shown('cxb-tab', 'buffer force-completed', lambda m: '): *scratch*' in m)
+    shown('cxb-tab', 'buffer force-completed', lambda m: '): *agent: alpha*' in m)
     keys('-k', 'Return')
-    selected('cxb-switched', '*scratch*')
+    selected('cxb-switched', '*agent: alpha*')
 
 
 def check_panels(recorded, position):
@@ -187,10 +191,10 @@ def romacs_complete(report, keys, layer, selected, probe, heights, work, timeout
 
     keys('-M', 'ctrl', 'x', '-m', 'ctrl', '-M', 'ctrl', 'f', '-m', 'ctrl')
     fio.wait(lambda: 'Find file: ' in layer()[0], timeout, 'find-file prompt', process)
-    keys('s/n')
+    keys('sub/n')
     # A file candidate's row is its name, then its directory.
-    shown('ff-list', 'partial completion of s/n in the layer',
-          lambda m, rows: m.endswith(f'Find file: {work}/s/n') and 'notes.txt  sub/' in rows)
+    shown('ff-list', 'completion of sub/n in the layer',
+          lambda m, rows: m.endswith(f'Find file: {work}/sub/n') and 'notes.txt' in rows)
     keys('-k', 'Tab')
     shown('ff-tab', 'find-file candidate inserted', lambda m, rows: m.endswith(f'Find file: {work}/sub/notes.txt'))
     keys('-k', 'Return')
@@ -198,12 +202,13 @@ def romacs_complete(report, keys, layer, selected, probe, heights, work, timeout
 
     keys('-M', 'ctrl', 'x', '-m', 'ctrl', 'b')
     fio.wait(lambda: 'Switch to buffer (default ' in layer()[0], timeout, 'switch prompt', process)
-    keys('scr')
-    shown('cxb-list', 'buffer candidates in the layer', lambda m, rows: m.endswith('): scr') and '*scratch*' in rows)
+    keys('agent')
+    shown('cxb-list', 'buffer candidates in the layer', lambda m, rows: m.endswith('): agent') and all(name in rows for name in AGENT_BUFFERS))
+    keys('al')
     keys('-k', 'Tab')
-    shown('cxb-tab', 'buffer candidate inserted', lambda m, rows: m.endswith('): *scratch*'))
+    shown('cxb-tab', 'buffer candidate inserted', lambda m, rows: m.endswith('): *agent: alpha*'))
     keys('-k', 'Return')
-    selected('cxb-switched', '*scratch*')
+    selected('cxb-switched', '*agent: alpha*')
 
     # C-g leaves the prompt and hides its layer.
     keys('-M', 'alt', 'x', '-m', 'alt')
@@ -246,7 +251,7 @@ def main():
 
     def prepare(s):
         (s.work / 'sub').mkdir(parents=True)
-        (s.work / 'sub' / 'notes.txt').write_text('Notes reached by partial completion.\n')
+        (s.work / 'sub' / 'notes.txt').write_text('Notes reached by file completion.\n')
         paths.update(defaults=s.work / 'defaults.el', probe=s.work / 'probe', heights=s.work / 'heights.el')
         (s.home / 'config/romacs/init.el').write_text(INIT.format(
             defaults=json.dumps(str(paths['defaults'])), probe=json.dumps(str(paths['probe'])))
