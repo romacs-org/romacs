@@ -35,25 +35,37 @@ pub fn gnu_lisp(then: &[&str]) -> Vm {
 /// source, SOURCE then evaluated.
 pub fn gnu_lisp_with(source: &str) -> Vm {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let store = Path::new(env!("CARGO_TARGET_TMPDIR")).join("gnu-lisp-worlds");
-    let mut recipe = vec!["romacs-vm tests gnu_lisp".into(), format!("lisp {}", root.display())];
-    if !source.is_empty() {
-        recipe.push(format!("then {source}"));
-    }
-    let evaluated = |mut vm: Vm| {
+    let evaluate = |vm: &mut Vm| {
         if !source.is_empty() {
             vm.eval_source(source).map_err(|error| format!("{source}: {error}"))?;
         }
-        Ok::<_, String>(vm)
+        Ok(())
     };
-    let restored = World::for_test(store, &recipe, || {
-        romacs_vm::host::end_at_dump_point();
-        Ok((evaluated(booted(&root, true))?, ()))
-    });
-    match restored {
-        Some((vm, ())) => vm,
-        None => evaluated(booted(&root, false)).unwrap(),
+    if let Some((vm, ())) = gnu_world_with(source, evaluate) {
+        return vm;
     }
+    let mut vm = booted(&root, false);
+    evaluate(&mut vm).unwrap();
+    vm
+}
+
+/// The world builder's VM and carry, only when both were restored. RECIPE
+/// identifies the setup the caller performs on the booted VM.
+pub fn gnu_world_with<T: romacs_snapshot::Schema + romacs_snapshot::SnapshotSafe + 'static>(
+    recipe: &str, setup: impl FnOnce(&mut Vm) -> Result<T, String>,
+) -> Option<(Vm, T)> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let store = Path::new(env!("CARGO_TARGET_TMPDIR")).join("gnu-lisp-worlds");
+    let mut steps = vec!["romacs-vm tests gnu_lisp".into(), format!("lisp {}", root.display())];
+    if !recipe.is_empty() {
+        steps.push(format!("then {recipe}"));
+    }
+    World::for_test(store, &steps, || {
+        romacs_vm::host::end_at_dump_point();
+        let mut vm = booted(&root, true);
+        let carry = setup(&mut vm)?;
+        Ok((vm, carry))
+    })
 }
 
 /// The boot from source, recording for a world when WORLD.

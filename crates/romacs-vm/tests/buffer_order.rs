@@ -6,7 +6,7 @@
 mod gnu_lisp;
 #[path = "support/gnu_batch.rs"]
 mod gnu_batch;
-use gnu_lisp::{gnu_lisp, gnu_lisp_with};
+use gnu_lisp::{gnu_lisp, gnu_world_with};
 
 /// The names of the `bo-` buffers in `buffer-list`'s order: only those, as
 /// each engine starts with buffers of its own (GNU batch has `*Messages*`,
@@ -60,7 +60,7 @@ fn lead_buffer_list_puts_its_buffers_first() {
 /// The order through collections that move every object (forced: every
 /// collection compacts, one every 50 allocations), with buffers made, buried,
 /// recorded and killed in between. The collector's verifier runs at each,
-/// checking that every buffer in the order is held by its name slot.
+/// checking that every linked buffer is live and knows its node.
 #[test]
 fn buffer_order_survives_moving_collections() {
     let mut vm = romacs_vm::Vm::new();
@@ -81,26 +81,40 @@ fn buffer_order_survives_moving_collections() {
         r#"(("bo-0" "bo-1" "bo-2" "bo-3" "bo-4" "bo-5") ("bo-0" "bo-2" "bo-4" "bo-5" "bo-1") ("bo-4" "bo-0" "bo-2" "bo-5" "bo-1" "bo-6"))"#);
 }
 
-/// A world image keeps the order its builder made: made, buried and killed
-/// before the capture, read after the restore. The restored order then
-/// takes a bury, a kill and a birth, which need each buffer's node and the
-/// free list as captured; the collector's verifier checks the arena after
-/// them. In the `gnu` target, whose allocator is the world arena, the
-/// session must be the restored world's: a boot from source would make the
-/// same order without any image.
+/// The builder carries the index it freed. In the GNU target the restored
+/// VM must reuse that exact index on its first birth, before any new release.
 #[test]
 fn buffer_order_survives_a_world_image() {
+    fn prepare(vm: &mut romacs_vm::Vm) -> Result<u32, String> {
+        let buffer = vm.eval_source(r#"(progn
+            (dolist (n '("bo-w1" "bo-w2" "bo-w3" "bo-w4")) (get-buffer-create n))
+            (bury-buffer-internal (get-buffer "bo-w1"))
+            (get-buffer "bo-w3"))"#)?;
+        let freed = buffer.buffer_order_node().expect("live buffer has an order node");
+        vm.eval_source(r#"(kill-buffer "bo-w3")"#)?;
+        Ok(freed)
+    }
+
     let actual = in_thread(|| {
-        let mut vm = gnu_lisp_with(r#"(progn (dolist (n '("bo-w1" "bo-w2" "bo-w3" "bo-w4")) (get-buffer-create n))
-                                               (bury-buffer-internal (get-buffer "bo-w1")) (kill-buffer "bo-w3"))"#);
-        assert!(romacs_vm::world::arena::mapped_image().is_some() || !romacs_vm::world::arena::serves_heap(),
-                "no world was restored: run under nextest's process-per-test, as dev-check does");
+        let (mut vm, freed) = if env!("CARGO_CRATE_NAME") == "gnu" {
+            gnu_world_with("buffer order with a released node", prepare)
+                .expect("GNU target must restore the test world; run it with nextest")
+        } else {
+            // The standalone test target boots from source.
+            let mut vm = gnu_lisp(&[]);
+            let freed = prepare(&mut vm).unwrap();
+            (vm, freed)
+        };
         vm.set_gc_verify(true);
-        printed(vm, &format!(r#"(list (funcall {NAMES})
-                                      (progn (bury-buffer-internal (get-buffer "bo-w2")) (kill-buffer "bo-w4")
-                                             (get-buffer-create "bo-w5") (garbage-collect) (funcall {NAMES})))"#))
+        vm.collect_garbage();
+        let names = format!("(funcall {NAMES})");
+        assert_eq!(vm.eval_source(&names).unwrap().display().unwrap(), r#"("bo-w2" "bo-w4" "bo-w1")"#);
+        let born = vm.eval_source(r#"(get-buffer-create "bo-w5")"#).unwrap();
+        assert_eq!(born.buffer_order_node(), Some(freed), "birth uses the slot the builder released");
+        printed(vm, &format!(r#"(progn (bury-buffer-internal (get-buffer "bo-w2")) (kill-buffer "bo-w4")
+                                       (garbage-collect) {names})"#))
     });
-    assert_eq!(actual, r#"(("bo-w2" "bo-w4" "bo-w1") ("bo-w1" "bo-w2" "bo-w5"))"#);
+    assert_eq!(actual, r#"("bo-w1" "bo-w5" "bo-w2")"#);
 }
 
 /// Burying a killed buffer leaves the order as it was: a dead buffer joins

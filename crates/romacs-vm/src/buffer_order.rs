@@ -27,6 +27,31 @@ struct Node {
     next: Option<u32>,
 }
 
+/// The same walk serves buffer-list, marking and moving. A cycle reaches a
+/// node from a second predecessor (or revisits the head) and fails before
+/// another copy of its root reaches the collector's worklist.
+struct Links {
+    next: Option<u32>,
+    prev: Option<u32>,
+    remaining: usize,
+}
+
+impl Links {
+    fn step(&mut self, order: &BufferOrder) -> Option<u32> {
+        let Some(at) = self.next else {
+            assert_eq!(self.prev, order.tail, "buffer order ends before its tail");
+            assert_eq!(self.remaining, 0, "buffer order has unlinked nodes");
+            return None;
+        };
+        let node = &order.nodes[at as usize];
+        assert_eq!(node.prev, self.prev, "broken back link at buffer order node {at}");
+        self.remaining = self.remaining.checked_sub(1).expect("buffer order exceeds its live count");
+        self.prev = Some(at);
+        self.next = node.next;
+        Some(at)
+    }
+}
+
 impl BufferOrder {
     /// BUFFER joins at the back; its node.
     pub(crate) fn push_back(&mut self, buffer: Value) -> u32 {
@@ -64,42 +89,27 @@ impl BufferOrder {
         n.prev = self.tail;
         self.link_after_tail(node);
     }
+    fn links(&self) -> Links {
+        let remaining = self.nodes.len().checked_sub(self.free.len()).expect("too many free buffer order nodes");
+        Links { next: self.head, prev: None, remaining }
+    }
     /// The buffers, front to back.
     pub(crate) fn iter(&self) -> impl Iterator<Item = Value> + '_ {
-        std::iter::successors(self.head, |&at| self.nodes[at as usize].next).map(|at| self.nodes[at as usize].buffer)
+        self.linked().map(|(_, buffer)| buffer)
     }
-    /// Every buffer the order holds, front to back, for the collector to
-    /// mark or rewrite: the linked nodes only, so freed ones cost nothing.
+    /// Mark or rewrite only the live buffers, even after a much larger peak.
     pub(crate) fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
-        let mut at = self.head;
-        while let Some(i) = at {
-            let node = &mut self.nodes[i as usize];
-            visit(&mut node.buffer);
-            at = node.next;
+        let mut links = self.links();
+        while let Some(at) = links.step(self) {
+            visit(&mut self.nodes[at as usize].buffer);
         }
     }
-    /// The linked nodes, front to back, with their buffers.
     pub(crate) fn linked(&self) -> impl Iterator<Item = (u32, Value)> + '_ {
-        std::iter::successors(self.head, |&at| self.nodes[at as usize].next).map(|at| (at, self.nodes[at as usize].buffer))
-    }
-    /// Why the arena is not whole, if it is not: every node must be linked
-    /// once, both ways, or free once and holding nil.
-    pub(crate) fn fault(&self) -> Option<String> {
-        let mut seen = vec![false; self.nodes.len()];
-        let mut prev = None;
-        for (at, _) in self.linked() {
-            let i = at as usize;
-            if std::mem::replace(&mut seen[i], true) { return Some(format!("node {at} is linked twice")); }
-            if self.nodes[i].prev != prev { return Some(format!("node {at}'s back link is {:?}, not {prev:?}", self.nodes[i].prev)); }
-            prev = Some(at);
-        }
-        if self.tail != prev { return Some(format!("the tail is {:?}, not the last linked node {prev:?}", self.tail)); }
-        for &at in &self.free {
-            let i = at as usize;
-            if std::mem::replace(&mut seen[i], true) { return Some(format!("free node {at} is linked or free twice")); }
-            if self.nodes[i].buffer != Value::NIL { return Some(format!("free node {at} holds {:?}", self.nodes[i].buffer)); }
-        }
-        seen.iter().position(|s| !s).map(|at| format!("node {at} is neither linked nor free"))
+        let mut links = self.links();
+        std::iter::from_fn(move || {
+            let at = links.step(self)?;
+            Some((at, self.nodes[at as usize].buffer))
+        })
     }
     fn link_after_tail(&mut self, at: u32) {
         self.nodes[at as usize].next = None;
@@ -125,6 +135,19 @@ mod tests {
     fn order(o: &BufferOrder) -> Vec<u64> { o.iter().map(|v| v.0).collect() }
     fn v(n: u64) -> Value { Value(n) }
 
+    /// The exhaustive arena audit belongs at explicit test points. A collection
+    /// needs the free count, but should never read released nodes or indices.
+    fn check_arena(o: &BufferOrder) {
+        let mut seen = vec![false; o.nodes.len()];
+        for (at, _) in o.linked() { seen[at as usize] = true; }
+        for &at in &o.free {
+            let i = at as usize;
+            assert!(!std::mem::replace(&mut seen[i], true), "node {at} is linked or free twice");
+            assert_eq!(o.nodes[i].buffer, Value::NIL, "free node {at} holds a buffer");
+        }
+        assert!(seen.into_iter().all(|s| s), "unaccounted buffer order node");
+    }
+
     #[test]
     fn steps_keep_the_order_and_reuse_freed_nodes() {
         let mut o = BufferOrder::default();
@@ -146,7 +169,7 @@ mod tests {
         assert_eq!(order(&o), Vec::<u64>::new());
         o.push_back(v(5));
         assert_eq!(order(&o), [5]);
-        assert_eq!(o.fault(), None);
+        check_arena(&o);
     }
 
     #[test]
@@ -157,14 +180,39 @@ mod tests {
         let mut seen = Vec::new();
         o.visit_values(&mut |b| seen.push(b.0));
         assert_eq!(seen, [1, 2], "a freed node is no root");
-        assert_eq!(o.fault(), None);
+        check_arena(&o);
     }
 
     #[test]
-    fn fault_names_a_node_lost_from_the_arena() {
+    #[should_panic(expected = "buffer order has unlinked nodes")]
+    fn a_walk_detects_a_node_lost_from_the_arena() {
         let mut o = BufferOrder::default();
         let [_, b, _] = [1, 2, 3].map(|n| o.push_back(v(n)));
         o.unlink(b);
-        assert_eq!(o.fault().as_deref(), Some("node 1 is neither linked nor free"));
+        o.visit_values(&mut |_| {});
+    }
+
+    #[test]
+    #[should_panic(expected = "broken back link")]
+    fn a_cyclic_root_walk_stops_before_visiting_a_buffer_twice() {
+        let mut o = BufferOrder::default();
+        let [a, b] = [1, 2].map(|n| o.push_back(v(n)));
+        o.nodes[b as usize].next = Some(a);
+        let mut count = 0;
+        o.visit_values(&mut |_| {
+            count += 1;
+            assert!(count <= 2, "the collector revisited a root");
+        });
+    }
+
+    #[test]
+    fn a_verified_full_collection_does_not_read_the_free_nodes() {
+        let mut vm = crate::Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        vm.eval_source(r#"(progn (get-buffer-create "peak") (kill-buffer "peak"))"#).unwrap();
+        // Dereferencing this deliberately invalid free index fails immediately.
+        *vm.buffer_order.free.last_mut().expect("released node") = u32::MAX;
+        vm.set_gc_verify(true);
+        vm.collect_garbage();
     }
 }
