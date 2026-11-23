@@ -294,7 +294,7 @@ answer, or a message a steer missed its turn with, as a new turn."
      (let ((line (romacs-agent--codex-turn session (romacs-agent-request-id session)
                                            (let ((romacs-agent--message-images images))
                                              (romacs-agent--codex-items
-                                              (if (car rest) (romacs-agent--messages-text (car rest) text) text))))))
+                                              (if (car rest) (romacs-agent--messages-text (car rest) text session) text))))))
        ;; Its echo is known by the steer it stands for.
        (puthash "clientUserMessageId" steer (gethash "params" line))
        line))))
