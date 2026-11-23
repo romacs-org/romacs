@@ -372,7 +372,64 @@ pub fn drive_loadup(vm: &mut Vm, dir: &std::path::Path) -> Result<crate::loadup:
     // `noninteractive' while they load.  The interactive session begins
     // after the chain (lisp/session/romacs-gui-loadup.el).
     vm.eval_source("(setq noninteractive t)")?;
-    crate::loadup::drive_bootstrap(vm, &loadup_bootstrap(dir), &path)
+    let loadup = crate::loadup::drive_bootstrap(vm, &loadup_bootstrap(dir), &path)?;
+    // A file of the chain that signalled, which the chain goes on past
+    // where GNU's dump would stop, is noted as one of Romacs's Lisp is.
+    for failure in chain_failures(vm, &loadup, &path) {
+        note_lisp_error(vm, &failure)?;
+    }
+    Ok(loadup)
+}
+
+/// LOADUP's failures in the loader's words (`FILE: line N form K:
+/// MESSAGE`), in the order they ran, a form's load sites before the form:
+/// each site that signalled, at its file as SEARCH resolves it and the
+/// form the loader recorded failing there, and each top-level form of the
+/// chain that did, at that form.
+fn chain_failures(vm: &mut Vm, loadup: &crate::loadup::Loadup, search: &[std::path::PathBuf]) -> Vec<String> {
+    use crate::loadup::Outcome;
+    let mut failures = vec![];
+    for row in &loadup.rows {
+        let Outcome::Partial { failed, line, error, .. } = &row.outcome else { continue };
+        let message = site_message(vm, row.site.index).unwrap_or_else(|| error.clone());
+        // Line 0: no form of the file failed (its after-load hooks did, say),
+        // so the place is the site's call in the bootstrap.
+        let place = if *line == 0 {
+            placed(&message, &loadup.loadup, row.site.line, row.site.form + 1)
+        } else {
+            let file = crate::loadup::resolve(search, &row.site.name).unwrap_or_else(|| row.site.name.clone().into());
+            placed(&message, &file, *line, *failed)
+        };
+        failures.push((row.site.form, place));
+    }
+    // A form's own failure: the error that escaped it, after its first line,
+    // as the loader says a form's (which preloaded file it loads, here).
+    failures.extend(loadup.form_failures.iter().map(|f| {
+        let head = f.source.trim().lines().next().unwrap_or_default();
+        (f.form, placed(&format!("{head}: {}", f.error), &loadup.loadup, f.line, f.form + 1))
+    }));
+    failures.sort_by_key(|(form, _)| *form);
+    failures.into_iter().map(|(_, failure)| failure).collect()
+}
+
+/// MESSAGE placed at FILE, LINE and FORM in the loader's words, which
+/// [`lisp_error_fields`] reads back: the place is the drive's data, never
+/// one the message's text names.
+fn placed(message: &str, file: &std::path::Path, line: usize, form: usize) -> String {
+    format!("{}: line {line} form {form}: {message}", file.display())
+}
+
+/// What the condition the chain's load site SITE signalled says
+/// (`error-message-string'), when the drive's wrapper logged one
+/// (`romacs-loadup--log', src/loadup.rs) and it can be read.
+fn site_message(vm: &mut Vm, site: usize) -> Option<String> {
+    let message = vm.eval_source(&format!(
+        "(let ((e (cdr (assq {site} romacs-loadup--log)))) (and (eq (car-safe e) 'error) (error-message-string (cdr e))))"
+    )).ok()?;
+    if message == romacs_vm::Fixed::NIL {
+        return None;
+    }
+    message.bytes().ok().map(|bytes| String::from_utf8_lossy(bytes).into_owned())
 }
 
 /// Romacs's own directories of the Lisp tree `dir`, on top of GNU's: its
@@ -699,6 +756,19 @@ pub fn noted_lisp_errors(vm: &mut Vm) -> Result<Vec<serde_json::Value>, String> 
                                           \"[]\")"))?;
     let errors: Vec<String> = serde_json::from_slice(json.bytes()?).map_err(|e| format!("noted Lisp errors: {e}"))?;
     Ok(errors.iter().map(String::as_str).map(lisp_error_fields).collect())
+}
+
+/// Say on stderr each error of Romacs's Lisp a restored world's build
+/// noted, as a boot from source says them while it boots.
+///
+/// # Errors
+///
+/// The VM's error when it cannot read the notes.
+pub fn say_noted_lisp_errors(vm: &mut Vm) -> Result<(), String> {
+    for error in noted_lisp_errors(vm)? {
+        eprintln!("romacs: {}", error["error"].as_str().unwrap_or_default());
+    }
+    Ok(())
 }
 
 /// A noted error of Romacs's Lisp as JSON: its file and line where the

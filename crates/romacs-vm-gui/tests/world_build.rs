@@ -288,7 +288,10 @@ fn an_installed_gui_world_serves_any_home_without_asking_its_records() {
     let again = command(&a).env("EMACS_TEST_DIRECTORY", "/elsewhere").arg("--loadup").arg("--world-store").arg(&installed)
         .arg("--world-build").output().unwrap();
     let said = String::from_utf8_lossy(&again.stderr);
-    assert!(again.status.success() && said.contains(r#""launch":"batch","mode":"prepared""#) && !said.contains("skipped"), "{said}");
+    let batch_prepared = said.lines().filter_map(|line| line.strip_prefix("romacs-world: "))
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .any(|event| event["launch"] == "batch" && event["mode"] == "prepared");
+    assert!(again.status.success() && batch_prepared && !said.contains("skipped"), "{said}");
     // An installation's store without this launch's world: the census, as a
     // launch, goes on to the user's store.
     let c = root.join("home-c");

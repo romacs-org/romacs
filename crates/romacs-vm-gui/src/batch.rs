@@ -175,7 +175,7 @@ fn compiled_store(worlds: Option<&Path>, interactive: bool) -> Option<(PathBuf, 
 pub fn configure_compiled_lisp(worlds: Option<&Path>, interactive: bool, compiling: Option<&Path>) {
     if !romacs_vm::compiled_lisp::requested(interactive) || romacs_vm::world::store::disabled() { return; }
     let Some((store, compiles)) = compiled_store(worlds, interactive) else { return };
-    configure_store(store, compiles, interactive, compiling.map(Path::to_path_buf));
+    configure_store(store, compiles, interactive, compiling);
 }
 
 /// Load compiled Lisp in a worker isolate from STORE, the store its
@@ -206,7 +206,7 @@ fn installation_lisp(dir: &Path, runtime_root: &Path) -> Vec<PathBuf> {
 /// Load compiled Lisp from STORE; COMPILES when this process may compile
 /// into it; DEFER_MISSES when no load may wait for a compile; COMPILING,
 /// the file a compile process compiles.
-fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool, compiling: Option<PathBuf>) {
+fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool, compiling: Option<&Path>) {
     let Ok(dir) = super::startup::lisp_root(&super::startup::lisp_dir()) else { return };
     let Ok(exe) = std::env::current_exe() else { return };
     // The tree the Lisp lies in, by its true name (DIR is canonical): the
@@ -268,8 +268,7 @@ fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool, compiling
         }),
         runtime,
         root,
-        compiling,
-    });
+    }, compiling);
 }
 
 /// `--compile-lisp FILE`: a compile process. The batch session's VM, with
@@ -342,9 +341,14 @@ fn diagnose(what: &serde_json::Value) {
 }
 
 /// A restored VM made this process's: its startup steps taken
-/// (`romacs-world-restart`).
+/// (`romacs-world-restart`), and the errors of Romacs's Lisp its world's
+/// build noted said on stderr, as a boot from source says them: unless
+/// that is the compile log, which its build's said them in.
 fn restarted(mut vm: Vm) -> Result<Vm, String> {
     vm.world_reinit();
+    if !romacs_vm::compiled_lisp::nested() {
+        super::startup::say_noted_lisp_errors(&mut vm)?;
+    }
     vm.eval_source("(romacs-world-restart)")?;
     Ok(vm)
 }
@@ -466,7 +470,8 @@ pub fn prepare(store: PathBuf) -> Result<(), String> {
     let world = World::new(store, recipe(&dir)).map_err(|e| e.to_string())?;
     match world.prepare(|| builder_args(&world), |_| {}) {
         Ok(manifest) => {
-            romacs_vm::host::event_line("romacs-world", &serde_json::json!({"mode": "prepared", "launch": "batch", "key": manifest["key"]}));
+            romacs_vm::host::event_line("romacs-world", &serde_json::json!({"mode": "prepared", "launch": "batch", "key": manifest["key"],
+                                                                         "lisp_errors": manifest["events"]["lisp_errors"]}));
             Ok(())
         }
         Err(reason) => Err(format!("batch world not prepared: {reason}")),
@@ -529,7 +534,13 @@ fn chain(dir: &Path) -> Result<Vm, String> {
 fn build(world: &World, dir: &Path) -> Result<usize, String> {
     world.begin_build().map_err(|e| e.to_string())?;
     romacs_vm::host::end_at_dump_point();
-    world.build(|| Ok((chain(dir)?, (), serde_json::json!({}))))
+    world.build(|| {
+        let mut vm = chain(dir)?;
+        // Romacs's Lisp that failed in the build, for the manifest: each
+        // session restored from the world says the same errors itself.
+        let events = serde_json::json!({"lisp_errors": super::startup::noted_lisp_errors(&mut vm)?});
+        Ok((vm, (), events))
+    })
 }
 
 /// The leading options startup.el `command-line' consumes before

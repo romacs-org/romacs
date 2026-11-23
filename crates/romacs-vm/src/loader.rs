@@ -830,14 +830,7 @@ fn eval_file_forms<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, path: &Path, 
         let read = crate::reader::read_next(m, gc.by_ref(), &source[at..], (), |vm, (), read| {
             read.map(|read| read.map(|(value, begin, used)| (vm.source_form(value, 0), begin, used)))
         });
-        let Some((form, begin, used)) = read.map_err(|e| {
-            format!(
-                "{}: line {} form {}: reader: {e}",
-                path.display(),
-                source[..at].iter().filter(|b| **b == b'\n').count() + 1,
-                ordinal + 1
-            )
-        })?
+        let Some((form, begin, used)) = read.map_err(|(e, begin)| read_failed(m, step_file, path, source, at + begin, ordinal + 1, e))?
         else {
             break;
         };
@@ -873,6 +866,17 @@ fn eval_file_forms<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, path: &Path, 
         vm.loader.completed_files += 1;
         vm.build_load_history(history_slot)
     })
+}
+/// The ORDINAL-th form of PATH, at byte AT of SOURCE, that the reader could
+/// not read (ERROR): a step that failed, where a report finds its file,
+/// line and form as it finds an evaluated form's; and the load's error.
+fn read_failed(m: &mut Mx<'_, '_, Vm>, file: usize, path: &Path, source: &[u8], at: usize, ordinal: usize, error: impl std::fmt::Display) -> String {
+    let line = source[..at].iter().filter(|b| **b == b'\n').count() + 1;
+    m.leaf(((file, ordinal), at, line, format!("reader: {error}")), |vm, ((file, ordinal), byte, line, error)| {
+        let step = vm.loader.enter_step(file, ordinal, byte, line);
+        vm.loader.step_failed(step, error, String::new());
+    });
+    format!("{}: line {line} form {ordinal}: reader: {error}", path.display())
 }
 /// GNU's load of a compiled file (lread.c Fload with `compiled`), running
 /// COMPILED's units in order. NAMED is the file's name as openp found it, PATH
