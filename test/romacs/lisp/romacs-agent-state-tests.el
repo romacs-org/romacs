@@ -12,8 +12,6 @@
   (require 'romacs-agent)
   (require 'romacs-agent-ui))
 
-(defvar romacs-mode-line-agent)
-
 (defun romacs-agent-state-tests--session (&rest fields)
   (apply #'romacs-agent--make (append fields (list :id "s" :harness 'claude :provider "claude"))))
 
@@ -299,19 +297,12 @@
         (should (eq (romacs-agent-ui--state-key worker) 'idle))
         (should (eq (romacs-agent-ui--state-key lead) 'idle))))))
 
-(ert-deftest romacs-agent-state-status-bar-rolls-up-the-news ()
-  (let ((romacs-agent-glyphs nil)
-        (romacs-mode-line-agent nil)
-        (romacs-agent--sessions (make-hash-table :test #'equal)))
-    (dolist (fields '((:id "a" :state waiting-approval) (:id "b" :state idle :done-seq 3)
-                      (:id "c" :state idle :done-seq 3 :settled-seq 3) (:id "d" :state running)))
-      (let ((session (apply #'romacs-agent--make :harness 'claude fields)))
-        (puthash (romacs-agent-id session) session romacs-agent--sessions)))
-    (romacs-agent-ui--status-bar)
-    (should (equal (substring-no-properties romacs-mode-line-agent) "1 needs approval · 1 working · 1 completed"))
-    (clrhash romacs-agent--sessions)
-    (romacs-agent-ui--status-bar)
-    (should-not romacs-mode-line-agent)))
+(ert-deftest romacs-agent-state-rollup-ranks-news ()
+  (let ((romacs-agent-glyphs nil))
+    (should (equal (substring-no-properties
+                    (romacs-agent-ui--rollup '(completed settled working idle approval)))
+                   "1 needs approval · 1 working · 1 completed"))
+    (should-not (romacs-agent-ui--rollup '(idle settled)))))
 
 (provide 'romacs-agent-state-tests)
 ;;; romacs-agent-state-tests.el ends here

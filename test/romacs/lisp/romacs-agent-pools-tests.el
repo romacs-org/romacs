@@ -136,14 +136,10 @@ a time, `allow' marks it allowed."
         (spend "claude3" (+ (float-time) 3600))
         (should-error (romacs-agent-move-on session) :type 'user-error)))))
 
-(ert-deftest romacs-agent-pools-shown-to-agents-and-the-user ()
+(ert-deftest romacs-agent-pools-exposed-in-capabilities ()
   (romacs-agent-pools-tests--with
-    (should-not (romacs-agent-ui--pools-line))
     (spend "claude" (+ (float-time) 3600))
     (allow "claude2")
-    (let ((line (romacs-agent-ui--pools-line)))
-      (should (equal (substring-no-properties line) "⛽claude 2/3"))
-      (should (string-match-p "\\`claude: rejected, resets " (get-text-property 0 'help-echo line))))
     (let* ((pools (gethash "pools" (cl-letf (((symbol-function 'romacs-agent--want-models) #'ignore))
                                      (romacs-agent-tools--capabilities (romacs-mcp--object)))))
            (claude (cl-find "claude" pools :key (lambda (p) (gethash "harness" p)) :test #'equal)))
