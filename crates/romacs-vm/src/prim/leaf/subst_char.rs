@@ -81,7 +81,7 @@ impl Leaf<'_> {
             _ => unreachable!(),
         };
         state.record_text_change((end - pos) as usize);
-        if noundo { keep_unmodified(&mut state.modification); }
+        if noundo { state.modification.keep_unmodified(); }
         Ok(())
     }
 
@@ -109,10 +109,4 @@ impl Leaf<'_> {
         self.vm.display_state.version += 1;
         Ok(())
     }
-}
-
-/// NOUNDO: a buffer unmodified before this change stays unmodified.
-fn keep_unmodified(m: &mut crate::modification::Modification) {
-    if m.save_modiff == m.modiff - 1 { m.save_modiff = m.modiff; }
-    if m.autosave_modiff == m.modiff - 1 { m.autosave_modiff = m.modiff; }
 }

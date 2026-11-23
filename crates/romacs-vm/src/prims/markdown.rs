@@ -54,7 +54,7 @@ fn markdown_fontify_buffer(cx, beg: Value, end: Value, faces: Value) {
 // (romacs-markdown--block-at POS): the top-level block of the current
 // buffer, a Markdown document, holding POS, as (START . END), found by the
 // buffer's block index.
-defsubr! { name = "romacs-markdown--block-at", gnu = "romacs:markdown", effect = Reads,
+defsubr! { name = "romacs-markdown--block-at", gnu = "romacs:markdown", effect = Global,
 fn markdown_block_at(cx, pos: Value) {
     cx.markdown_block_at(pos)
 }}
@@ -62,7 +62,7 @@ fn markdown_block_at(cx, pos: Value) {
 // (romacs-markdown--links BEG END): the links of BEG..END of the current
 // buffer, one Markdown document, each (START END . DESTINATION); the
 // destination is empty for a reference defined outside the region.
-defsubr! { name = "romacs-markdown--links", gnu = "romacs:markdown", effect = Reads,
+defsubr! { name = "romacs-markdown--links", gnu = "romacs:markdown", effect = Global,
 fn markdown_links(cx, beg: Value, end: Value) {
     cx.markdown_links(beg, end)
 }}

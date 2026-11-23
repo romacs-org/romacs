@@ -29,6 +29,46 @@ pub(crate) use index::Index;
 pub(crate) use spans::{spans, spans_with, Code, Parsed, Span};
 pub(crate) use table::{align, grid};
 
+/// YAML front matter belongs to the start of a document. An unmatched
+/// opening line is still a Markdown thematic break until its closer arrives.
+enum FrontMatter {
+    Absent,
+    Unclosed,
+    Yaml { body: std::ops::Range<usize>, end: usize },
+}
+
+impl FrontMatter {
+    fn read(text: &str) -> Self {
+        if !text.starts_with("---") {
+            return Self::Absent;
+        }
+        let mut lines = text.split_inclusive('\n');
+        let first = lines.next().unwrap_or_default();
+        if first.trim_end_matches([' ', '\t', '\r', '\n']) != "---" {
+            return Self::Absent;
+        }
+        if lines.clone().next().is_some_and(|line| line.trim_matches([' ', '\t', '\r', '\n']).is_empty()) {
+            return Self::Absent;
+        }
+        let mut at = first.len();
+        for line in lines {
+            if Self::closes(line) {
+                return Self::Yaml { body: first.len()..at, end: at + line.len() };
+            }
+            at += line.len();
+        }
+        Self::Unclosed
+    }
+
+    fn closes(line: &str) -> bool {
+        matches!(line.trim_end_matches([' ', '\t', '\r', '\n']), "---" | "...")
+    }
+
+    fn end(&self) -> usize {
+        match self { Self::Yaml { end, .. } => *end, _ => 0 }
+    }
+}
+
 /// What a stretch of Markdown is, for its face.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum Kind {
@@ -133,9 +173,12 @@ impl Kind {
 /// one holding FROM, since text arriving can join a block to the one
 /// before it (a list continued, a setext underline). STARTS are the
 /// top-level blocks' line starts, ascending ([`Parsed::tops`]).
-pub(crate) fn restart(starts: &[usize], from: usize) -> usize {
+pub(crate) fn restart(text: &str, starts: &[usize], from: usize) -> usize {
     let holding = starts.partition_point(|&s| s <= from);
-    starts.get(holding.saturating_sub(2)).copied().unwrap_or(0).min(from)
+    // The next streamed slice is itself read as a document. A thematic
+    // break inside the body must never become its opening YAML delimiter.
+    starts[..holding.saturating_sub(1)].iter().rev().copied()
+        .find(|&start| !text[start..].starts_with("---")).unwrap_or(0)
 }
 
 #[cfg(test)]

@@ -13,7 +13,9 @@ face runs, block structure and table grids, and keeps a buffer's block index.
   `lisp/textmodes/romacs-markdown-mode.el`.
 - A buffer's `Index` lives on its text (`crates/romacs-vm/src/text.rs`,
   `edit_derived`), empty until Markdown is asked of it; it holds no text.
-- The dialect is `spans::options()` alone.
+- `FrontMatter` separates leading YAML metadata from the Markdown body;
+  `spans::options()` selects the body's dialect. A blank line after
+  the opening rule keeps its ordinary Markdown meaning.
 - Markdown anywhere in Romacs goes through here: no second parser or regexp
   fontifier for it.
 

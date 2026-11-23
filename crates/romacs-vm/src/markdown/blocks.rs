@@ -30,26 +30,19 @@ pub(crate) struct Block {
 
 /// TEXT's blocks in document order, nested ones after their container.
 pub(crate) fn blocks(text: &str) -> Vec<Block> {
+    let offset = super::FrontMatter::read(text).end();
     let mut out = Vec::new();
     // The open elements: the index of their block in OUT, if they are one,
     // and, for a list, whether it is ordered.
     let mut open: Vec<(Option<usize>, bool)> = Vec::new();
     let mut depth = 0u32;
-    for (event, range) in Parser::new_ext(text, options()).into_offset_iter() {
+    for (event, range) in Parser::new_ext(&text[offset..], options()).into_offset_iter() {
+        let range = offset + range.start..offset + range.end;
         match event {
             Event::Start(tag) => {
                 let ordered = matches!(tag, Tag::List(Some(_)));
                 let in_ordered = open.last().is_some_and(|&(_, o)| o);
-                let kind = match &tag {
-                    Tag::Heading { level, .. } => Some(BlockKind::Heading(heading_level(*level))),
-                    Tag::CodeBlock(kind) => Some(code(text, kind, &range)),
-                    Tag::Table(_) => Some(BlockKind::Table),
-                    Tag::Item => Some(BlockKind::Item { ordered: in_ordered }),
-                    Tag::BlockQuote(_) => Some(BlockKind::Quote),
-                    Tag::HtmlBlock => Some(BlockKind::Html),
-                    _ => None,
-                };
-                let index = kind.map(|kind| {
+                let index = block_kind(text, &tag, &range, in_ordered).map(|kind| {
                     out.push(Block { kind, range: range.clone(), depth });
                     out.len() - 1
                 });
@@ -82,6 +75,18 @@ pub(crate) fn blocks(text: &str) -> Vec<Block> {
         }
     }
     out
+}
+
+fn block_kind(text: &str, tag: &Tag<'_>, range: &Range<usize>, in_ordered: bool) -> Option<BlockKind> {
+    match tag {
+        Tag::Heading { level, .. } => Some(BlockKind::Heading(heading_level(*level))),
+        Tag::CodeBlock(kind) => Some(code(text, kind, range)),
+        Tag::Table(_) => Some(BlockKind::Table),
+        Tag::Item => Some(BlockKind::Item { ordered: in_ordered }),
+        Tag::BlockQuote(_) => Some(BlockKind::Quote),
+        Tag::HtmlBlock => Some(BlockKind::Html),
+        _ => None,
+    }
 }
 
 /// A code block opening at RANGE: its language, and an empty body at its

@@ -184,8 +184,8 @@ column's widest on the side its delimiter row names."
 ;;;###autoload
 (define-derived-mode romacs-markdown-mode text-mode "Markdown"
   "Edit Markdown: CommonMark with GFM tables, strikethrough and task lists.
-Faces come from `romacs-markdown-faces'; code blocks are coloured as
-their language.
+Leading YAML front matter and fenced code use their language's highlighting.
+Markdown faces come from `romacs-markdown-faces'.
 
 \\{romacs-markdown-mode-map}"
   (setq-local font-lock-defaults '(nil t))
