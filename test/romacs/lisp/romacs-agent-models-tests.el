@@ -54,8 +54,8 @@ executable there running the shell SCRIPT; BINDINGS, of `let*', see them."
 (ert-deftest romacs-agent-models-codex-model-list-read ()
   (let ((line (romacs-agent-models-tests--json romacs-agent-models-tests--listed)))
     (should (equal (romacs-agent--codex-probed-models line)
-                   '(:models (("gpt-6.2-sol" :label "GPT-6.2-Sol" :efforts ("low" "ultra") :default-effort "low")
-                              ("gpt-6.2-astra" :label "GPT-6.2-Astra" :efforts ("medium")
+                   '(:models (("gpt-6.2-sol" :label "GPT-6.2-Sol" :default-model t :efforts ("low" "ultra") :default-effort "low")
+                              ("gpt-6.2-astra" :label "GPT-6.2-Astra" :default-model nil :efforts ("medium")
                                :default-effort "medium"))))))
   ;; Another line is no answer; a refusal says why.
   (should-not (romacs-agent--codex-probed-models (romacs-agent-models-tests--json "{\"method\":\"x\"}")))
@@ -187,6 +187,7 @@ executable there running the shell SCRIPT; BINDINGS, of `let*', see them."
   ;; still being asked for, the menu not opened again.
   (romacs-agent-models-tests--with "exit 0\n"
       ((romacs-agent-providers `(("codex" :program ,program)))
+       (romacs-agent-models-changed-functions nil)
        (seen nil))
     (let ((instance (romacs-agent--configured "codex")))
       (cl-letf (((symbol-function 'romacs-agent--want-models) #'ignore)
@@ -204,6 +205,8 @@ executable there running the shell SCRIPT; BINDINGS, of `let*', see them."
                        "gpt-6.2-astra")))
       (should (equal (cadr seen) '("Codex · default")))
       (should (member "Codex · GPT-6.2-Sol" (car seen)))
+      (should (equal (plist-get (cdar (romacs-agent--instance-rows instance "Codex" nil)) :note)
+                     "gpt-6.2-sol · effort low"))
       ;; Its watch ends with it.
       (should-not romacs-agent-models-changed-functions))))
 
