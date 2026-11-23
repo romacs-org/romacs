@@ -16,15 +16,15 @@ const EXPRESSIONS: &[&str] = &[
         '((depth . -99)))
       (list (commandp 'ce-captured) (interactive-form 'ce-captured)
             (call-interactively 'ce-captured)))"#,
-    r#"(progn
+    r"(progn
       (defun ce-iform-function (x) (interactive (list 2)) x)
       (advice-add 'ce-iform-function :around
         (let ((k 40))
           (lambda (o &rest a)
             (interactive (lambda (spec) (list (+ k (car (advice-eval-interactive-spec spec))))))
             (apply o a))))
-      (list (commandp 'ce-iform-function) (call-interactively 'ce-iform-function)))"#,
-    r#"(progn
+      (list (commandp 'ce-iform-function) (call-interactively 'ce-iform-function)))",
+    r"(progn
       (defun ce-once (x) (interactive (list 2)) x)
       (let ((k 40) (offset 3))
         (letrec ((wrapper (lambda (o x)
@@ -32,7 +32,7 @@ const EXPRESSIONS: &[&str] = &[
                             (advice-remove 'ce-once wrapper)
                             (funcall o (+ offset x)))))
           (advice-add 'ce-once :around wrapper)))
-      (list (commandp 'ce-once) (call-interactively 'ce-once) (call-interactively 'ce-once)))"#,
+      (list (commandp 'ce-once) (call-interactively 'ce-once) (call-interactively 'ce-once)))",
     "(let ((k 1) (unused 9)) (aref (lambda (x) (interactive (list k)) x) 2))",
     "(let ((y 5) (unused 9)) (aref (lambda (x) (+ x y)) 2))",
     "(let ((y 5)) (aref (lambda (x) x) 2))",
