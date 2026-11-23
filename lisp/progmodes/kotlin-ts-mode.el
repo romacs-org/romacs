@@ -34,142 +34,114 @@
     table)
   "Syntax table used in Kotlin buffers.")
 
-(defconst kotlin-ts-mode--syntax-chunk-size 512
-  "Maximum distance between lexical checkpoints, plus a short delimiter.")
+(defun kotlin-ts-mode--skip-code-token (end)
+  "Advance over a comment, character or escaped identifier up to END."
+  (save-restriction
+    (narrow-to-region (point-min) end)
+    (let ((parse-sexp-lookup-properties nil))
+      (pcase (char-after)
+        (?/
+         (if (looking-at-p (rx "/" (any "/*")))
+             (unless (forward-comment 1)
+               (goto-char end))
+           (forward-char)))
+        (?'
+         (goto-char (or (ignore-error scan-error (scan-sexps (point) 1)) end)))
+        (?`
+         (forward-char)
+         (skip-chars-forward "^`\r\n")
+         (when (eq (char-after) ?`)
+           (forward-char)))))))
 
-(defun kotlin-ts-mode--syntax-fence (pos)
-  "Mark the character at POS as a string fence."
-  (put-text-property pos (1+ pos) 'syntax-table (string-to-syntax "|")))
+(defun kotlin-ts-mode--string-opener (end)
+  "Skip a string opener up to END and return its kind."
+  (if (looking-at-p "\"\"\"")
+      (progn (goto-char (min end (+ (point) 3))) 'raw)
+    (forward-char)
+    'string))
 
-(defun kotlin-ts-mode--syntax-symbol (beg end)
-  "Mark the escaped identifier text from BEG to END as symbol syntax."
-  (put-text-property beg end 'syntax-table (string-to-syntax "_")))
+(defun kotlin-ts-mode--scan-string (end)
+  "Advance across a string through END and return whether it closed.
+Track braces, comments, identifiers and nested strings in templates."
+  (let ((states (list (kotlin-ts-mode--string-opener end))))
+    (while (and states (< (point) end)
+                (re-search-forward
+                 (pcase (car states)
+                   ('raw "[$\"]")
+                   ('string (rx (or "$" "\"" (seq "\\" anything))))
+                   ('code "[\"'`/{}]"))
+                 end 'move))
+      (let* ((start (match-beginning 0))
+             (char (char-after start)))
+        (if (eq (car states) 'code)
+            (pcase char
+              (?{ (push 'code states))
+              (?} (pop states))
+              (?\" (goto-char start)
+                   (push (kotlin-ts-mode--string-opener end) states))
+              (_ (goto-char start)
+                 (kotlin-ts-mode--skip-code-token end)))
+          (pcase char
+            (?$
+             (when (< (point) end)
+               (pcase (char-after)
+                 (?{ (forward-char) (push 'code states))
+                 (?` (kotlin-ts-mode--skip-code-token end)))))
+            (?\" (if (eq (car states) 'string)
+                     (pop states)
+                   (when (looking-at-p "\"\"")
+                     (skip-chars-forward "\"" end)
+                     (unless (eq (char-after) ?\")
+                       (pop states)))))))))
+    (null states)))
 
-(defun kotlin-ts-mode--lex-code (states)
-  "Advance the lexical STATES after a code delimiter."
-  (pcase (char-before)
-    (?\" (unless states (kotlin-ts-mode--syntax-fence (1- (point))))
-         (if (looking-at-p "\"\"")
-             (progn (forward-char 2) (cons 'raw states))
-           (cons 'string states)))
-    (?' (cons 'character states))
-    (?` (unless states (kotlin-ts-mode--syntax-symbol (1- (point)) (point)))
-        (cons 'identifier states))
-    (?/ (pcase (char-after)
-          (?/ (forward-char) (cons 'line-comment states))
-          (?* (forward-char) (cons 'block-comment states))
-          (_ states)))
-    (?{ (cons 'code states))
-    (?} (cdr states))))
-
-(defun kotlin-ts-mode--lex-string (states)
-  "Advance the lexical STATES after a string or character delimiter."
-  (pcase (char-before)
-    (?\\ (when (char-after) (forward-char)) states)
-    (?$ (pcase (char-after)
-          (?{ (forward-char) (cons 'code states))
-          (?` (forward-char) (cons 'identifier states))
-          (_ states)))
-    (?' (cdr states))
-    (?\" (if (eq (car states) 'raw)
-             (if (looking-at-p "\"\"")
-                 (progn (forward-char 2) (cons 'raw-end (cdr states)))
-               states)
-           (unless (cdr states) (kotlin-ts-mode--syntax-fence (1- (point))))
-           (cdr states)))))
-
-(defun kotlin-ts-mode--lex-comment (states)
-  "Advance the lexical STATES after a comment delimiter."
-  (pcase (car states)
-    ('line-comment (cdr states))
-    ('block-comment
-     (cond
-      ((and (eq (char-before) ?/) (eq (char-after) ?*))
-       (forward-char)
-       (cons 'block-comment states))
-      ((and (eq (char-before) ?*) (eq (char-after) ?/))
-       (forward-char)
-       (cdr states))
-      (t states)))))
-
-(defun kotlin-ts-mode--lex-identifier (states limit)
-  "Advance identifier STATES through its closing backtick or LIMIT."
-  (let ((start (point))
-        (closed (re-search-forward "[`\r\n]" limit 'move)))
-    (unless (cdr states)
-      (kotlin-ts-mode--syntax-symbol
-       start (if (and closed (not (eq (char-before) ?`)))
-                 (1- (point))
-               (point))))
-    (if closed (cdr states) states)))
-
-(defun kotlin-ts-mode--lex-raw-end (states limit end)
-  "Resume a run of closing quotes in STATES through LIMIT.
-Mark the final quote if it falls before the region boundary END."
-  (skip-chars-forward "\"" (max (point) limit))
-  (if (eq (char-after) ?\")
-      states
-    (when (and (null (cdr states)) (<= (point) end))
-      (kotlin-ts-mode--syntax-fence (1- (point))))
-    (cdr states)))
-
-(defun kotlin-ts-mode--lex-chunk (states limit end)
-  "Advance lexical STATES up to LIMIT, with at most delimiter lookahead.
-END is the end of the propertized region."
-  (while (< (point) limit)
-    (setq states
-          (pcase (car states)
-            ('raw-end (kotlin-ts-mode--lex-raw-end states limit end))
-            ('identifier (kotlin-ts-mode--lex-identifier states limit))
-            ((or 'nil 'code)
-             (if (re-search-forward
-                  (if states "[\"'`/{}]" "[\"'`/]") limit 'move)
-                 (kotlin-ts-mode--lex-code states)
-               states))
-            ((or 'raw 'string 'character)
-             (if (re-search-forward
-                  (pcase (car states)
-                    ('raw "[$\"]")
-                    ('string (rx (any "$\"\\")))
-                    ('character (rx (any "'\\"))))
-                  limit 'move)
-                 (kotlin-ts-mode--lex-string states)
-               states))
-            ((or 'line-comment 'block-comment)
-             (if (re-search-forward
-                  (if (eq (car states) 'line-comment) "\n" "[/*]")
-                  limit 'move)
-                 (kotlin-ts-mode--lex-comment states)
-               states)))))
-  (if (eq (car states) 'raw-end)
-      (kotlin-ts-mode--lex-raw-end states limit end)
-    states))
+(defun kotlin-ts-mode--mark-literal (beg end)
+  "Scan the token at point and mark its syntax within BEG and END."
+  (let ((start (point)))
+    (if (eq (char-after) ?\")
+        (let ((closed (kotlin-ts-mode--scan-string end))
+              (fence (string-to-syntax "|")))
+          (when (>= start beg)
+            (put-text-property start (1+ start) 'syntax-table fence))
+          (when (and closed (> (point) beg))
+            (put-text-property (1- (point)) (point) 'syntax-table fence)))
+      (let ((identifier (eq (char-after) ?`)))
+        (kotlin-ts-mode--skip-code-token end)
+        (when identifier
+          (add-text-properties
+           start (point) (list 'syntax-table (string-to-syntax "_")
+                               'syntax-multiline t)))))))
 
 (defun kotlin-ts-mode--syntax-extend-region (beg end)
-  "Start propertizing BEG through END at a preceding lexical checkpoint."
+  "Move BEG back through a partially propertized identifier or comment opener."
   (when (> beg (point-min))
-    (unless (get-text-property (1- beg) 'kotlin-ts-mode--lexical-state)
-      (cons (previous-single-property-change beg 'kotlin-ts-mode--lexical-state
-                                              nil (point-min))
-            end))))
+    (cond
+     ((get-text-property (1- beg) 'syntax-multiline)
+      (cons (previous-single-property-change beg 'syntax-multiline
+                                             nil (point-min))
+            end))
+     ((and (eq (char-before beg) ?/) (memq (char-after beg) '(?/ ?*)))
+      (cons (1- beg) end)))))
 
 (defun kotlin-ts-mode--syntax-before-change (beg _end)
-  "Invalidate the three-character syntax lookahead before an edit at BEG."
+  "Invalidate the three-character syntax lookahead before an edit at BEG.
+Electric pairing can query BEG itself, before region extension runs."
   (syntax-ppss-flush-cache (max (point-min) (- beg 3))))
 
 (defun kotlin-ts-mode--syntax-propertize (beg end)
-  "Mark strings and escaped identifiers from checkpoint BEG through END.
-Save the lexical stack on the last character before each checkpoint."
-  (let ((states (and (> beg (point-min))
-                     (cdr (get-text-property (1- beg) 'kotlin-ts-mode--lexical-state)))))
-    (remove-list-of-text-properties beg end '(kotlin-ts-mode--lexical-state))
-    (goto-char beg)
-    (while (< (point) end)
-      (setq states (kotlin-ts-mode--lex-chunk
-                    states (min end (+ (point) kotlin-ts-mode--syntax-chunk-size)) end))
-      (when (<= (point) end)
-        (put-text-property (1- (point)) (point) 'kotlin-ts-mode--lexical-state
-                           (cons t states))))))
+  "Set literal syntax within BEG and END using the widened syntax state."
+  (let ((clipped (and (buffer-narrowed-p) (= beg (point-min)))))
+    (save-restriction
+      (widen)
+      (when clipped
+        ;; The shared propertizer may have skipped invalidated text before BEG.
+        (remove-text-properties (point-min) beg '(syntax-table nil syntax-multiline nil))
+        (setq beg (point-min))
+        (syntax-ppss-flush-cache beg))
+      (goto-char (or (nth 8 (syntax-ppss beg)) beg))
+      (while (and (< (point) end) (re-search-forward "[\"'`/]" end t))
+        (goto-char (match-beginning 0))
+        (kotlin-ts-mode--mark-literal beg end)))))
 
 (defconst kotlin-ts-mode--indent-rules
   `((kotlin

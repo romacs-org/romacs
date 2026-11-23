@@ -135,8 +135,7 @@
     (kotlin-ts-mode)
     (cl-letf (((symbol-function 'treesit-parser-changed-regions)
                (lambda (&rest _) (ert-fail "Lexical scan requested a reparse"))))
-      (let ((syntax-propertize-chunk-size 16)
-            (kotlin-ts-mode--syntax-chunk-size 7))
+      (let ((syntax-propertize-chunk-size 16))
         (should (nth 3 (syntax-ppss (kotlin-ts-mode-tests--position "before"))))
         (goto-char (kotlin-ts-mode-tests--position "\"/*\""))
         (delete-char 4)
@@ -172,3 +171,27 @@
 (defun kotlin-ts-mode-tests--string-start (pos)
   "Return the enclosing string or comment reported by `syntax-ppss' at POS."
   (nth 8 (syntax-ppss pos)))
+
+(ert-deftest kotlin-ts-mode-syntax-after-narrowed-raw-edit ()
+  (dolist (case '(("fun f() {\n val s = \"\"\"before\n abc \" def\n ghi\n jkl\n \"\"\"\n val following = 0\n}\n"
+                  "abc" "jkl" 0 "abc")
+                 ("fun f() {\n val s = \"\"\"before\"\"\"\"\n val following = 0\n}\n"
+                  nil "\"\"\"\"" 3 "before")))
+    (pcase-let ((`(,source ,start ,stop ,offset ,edit) case))
+      (dolist (warm '(nil t))
+        (with-temp-buffer
+          (insert source)
+          (kotlin-ts-mode)
+          (when warm (syntax-ppss (point-max)))
+          (save-restriction
+            (narrow-to-region
+             (if start (kotlin-ts-mode-tests--position start) (point-min))
+             (+ (kotlin-ts-mode-tests--position stop) offset))
+            (goto-char (kotlin-ts-mode-tests--position edit))
+            (insert "x")
+            (syntax-ppss (point-max)))
+          (let ((state (syntax-ppss
+                        (kotlin-ts-mode-tests--position "val following"))))
+            (should (= (nth 0 state) 1))
+            (should-not (nth 3 state))
+            (should-not (nth 4 state))))))))
