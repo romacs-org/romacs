@@ -19,6 +19,7 @@ The first two cases use the pinned JSON grammar and input `{"k": 1}`.
   `(number) @n`. The C compiler accepts it and the cursor drops the final
   match because the starting step index wraps. Romacs yields `end` on
   the `true` node.
+- Romacs also widens `pattern_index` and `start_depth` from 16 to 32 bits, for the same reason as the step index. The old limits of these two fields are unreachable in practice.
 
 A package can observe each through `treesit-query-capture`. The
 differential checks the expected difference on each reproducer and

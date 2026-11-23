@@ -23,6 +23,9 @@ pub(crate) enum PredicateStep<'a> {
 /// A matched pattern and its ordered captures.
 pub(crate) type Match = execute::Match<Node>;
 
+#[derive(Debug)]
+pub(crate) struct InvalidQueryNode;
+
 impl Query {
     /// Compile grammar query SOURCE and keep its error's byte offset and kind.
     pub(crate) fn new(language: &Language, source: &[u8]) -> Result<Self, (u32, &'static str)> {
@@ -77,10 +80,11 @@ impl Query {
         node: Node,
         range: (u32, u32),
         stop: &NativeStop,
-    ) -> Option<Vec<Match>> {
-        self.matches_in(&tree.binding(), node, range, stop)
+    ) -> Result<Option<Vec<Match>>, InvalidQueryNode> {
+        self.try_matches_in(&tree.binding(), node, range, stop)
     }
 
+    #[cfg(test)]
     pub(in crate::treesit) fn matches_in(
         &self,
         tree: &tree_sitter::Tree,
@@ -88,10 +92,21 @@ impl Query {
         range: (u32, u32),
         stop: &NativeStop,
     ) -> Option<Vec<Match>> {
-        let cursor = CCursor::for_node(tree, node);
+        self.try_matches_in(tree, node, range, stop)
+            .expect("node belongs to the oracle tree")
+    }
+
+    fn try_matches_in(
+        &self,
+        tree: &tree_sitter::Tree,
+        node: Node,
+        range: (u32, u32),
+        stop: &NativeStop,
+    ) -> Result<Option<Vec<Match>>, InvalidQueryNode> {
+        let cursor = CCursor::for_node(tree, node)?;
         let mut due = || stop.due();
         let poll = stop.armed().then_some(&mut due as &mut dyn FnMut() -> bool);
-        execute::matches(&self.0, cursor, range, poll, Node::from)
+        Ok(execute::matches(&self.0, cursor, range, poll, Node::from))
     }
 }
 
@@ -115,7 +130,7 @@ mod tests {
         let (language, tree) = json_tree(source);
         let grammar = CGrammar::new(&language);
         let query = compile::compile(query.as_bytes(), &grammar).expect("valid query");
-        let cursor = CCursor::for_node(&tree, Node::from(tree.root_node()));
+        let cursor = CCursor::for_node(&tree, Node::from(tree.root_node())).expect("root cursor");
         execute::matches(&query, cursor, (0, 0), None, std::convert::identity)
             .expect("unstopped scan")
             .into_iter()
@@ -126,6 +141,20 @@ mod tests {
                 )
             })
             .collect()
+    }
+
+    #[test]
+    fn query_rejects_a_node_from_another_tree() {
+        let (language, tree) = json_tree("1");
+        let (_, other) = json_tree("2");
+        let node = Node::from(other.root_node());
+        let query =
+            Query(compile::compile(b"(number) @n", &CGrammar::new(&language)).expect("query"));
+        assert!(
+            query
+                .try_matches_in(&tree, node, (0, 0), &NativeStop::never())
+                .is_err()
+        );
     }
 
     #[test]
@@ -177,7 +206,7 @@ mod tests {
             polls += 1;
             polls == 2
         };
-        let cursor = || CCursor::for_node(&tree, root);
+        let cursor = || CCursor::for_node(&tree, root).expect("root cursor");
         assert!(
             execute::matches(
                 &query,

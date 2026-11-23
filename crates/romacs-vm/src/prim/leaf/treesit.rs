@@ -1423,10 +1423,15 @@ impl Leaf<'_> {
         };
         // A query stops consistently between matches: nothing is written
         // before it ends.
+        let scan = |stop: &crate::quit::NativeStop| {
+            compiled.query.matches(&n.tree, n.node, range, stop)
+                .map_err(|_| Fault::Error("Invalid node for tree-sitter query".into()))
+        };
         let found = self.quittable(|cx| {
-            if let Some(found) = compiled.query.matches(&n.tree, n.node, range, &cx.native_stop()) { return Ok(found); }
+            if let Some(found) = scan(&cx.native_stop())? { return Ok(found); }
             cx.native_poll()?;
-            Ok(compiled.query.matches(&n.tree, n.node, range, &crate::quit::NativeStop::never()).expect("never stopped"))
+            scan(&crate::quit::NativeStop::never())?
+                .ok_or_else(|| Fault::Error("Uninterruptible tree-sitter query stopped".into()))
         })?;
         self.ts_capture_matches(n, compiled, found, flags, fontify)
     }

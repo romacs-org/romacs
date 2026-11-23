@@ -51,5 +51,9 @@ reparse, many buffers per grammar, and fontify by visible region.
 - 2026-11-23 (owner): the 11-15 rule permits the Rust parser stage once the
   Rust query stage preserves query behavior and fontify performance and
   removes the C query engine.
+- 2026-11-23: Q met "preserves query behavior and fontify performance".
+  Whole-scroll instructions fell 0.9% for C and 1.0% for Rust. Python
+  fontify calls used 0.03% fewer instructions. Python's focused replay at
+  +0.10% is within that reading. Stage P may start.
 - The unsafe census and smell counts still leave `crates/vendor/` out; code
   written here for Romacs is held to the workspace's rules all the same.

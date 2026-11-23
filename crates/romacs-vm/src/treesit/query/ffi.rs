@@ -257,16 +257,21 @@ pub(super) struct CCursor<'tree> {
 }
 
 impl<'tree> CCursor<'tree> {
-    pub(super) fn for_node(tree: &'tree tree_sitter::Tree, node: super::Node) -> Self {
+    pub(super) fn for_node(
+        tree: &'tree tree_sitter::Tree,
+        node: super::Node,
+    ) -> Result<Self, super::InvalidQueryNode> {
         let raw = node.raw();
-        assert!(std::ptr::eq(raw.tree, tree.as_raw()) && !raw.id.is_null());
+        if !std::ptr::eq(raw.tree, tree.as_raw()) || raw.id.is_null() {
+            return Err(super::InvalidQueryNode);
+        }
         // UNSAFE(the native query cursor walks hidden nodes)
         // SAFETY: the handle comes from this borrowed tree and is non-null.
         let raw = unsafe { ffi::ts_tree_cursor_new(raw) };
-        Self {
+        Ok(Self {
             raw,
             tree: PhantomData,
-        }
+        })
     }
 }
 

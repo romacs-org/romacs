@@ -39,7 +39,8 @@ Each is its own commit in Romacs's history.
   Such nodes are now reused whatever their entry state. A typed character's
   reparse there re-lexes 570 bytes instead of 31 KB (6.7 to 1.4 ms); trees
   equal the published runtime's after every edit `tools/treesit-fuzz` makes.
-- Slice Q moves compilation and matching into the VM's `treesit/query`
+- `perf(treesit): Switch query compilation and matching to Rust` moves
+  compilation and matching into the VM's `treesit/query`
   module and removes the 4,880-line C query engine and its bindings.
   `src/query_adapter.c` copies grammar facts and hidden cursor state and
   returns both node byte offsets in one call until the tree moves to Rust.
@@ -50,7 +51,9 @@ Each is its own commit in Romacs's history.
   On the query-only C, Rust and Python corpus, cold compile took
   86–90% of the C engine's instructions and warm matching took 87–98%.
   Page-scroll evaluator instruction ratios against the C parent were
-  0.993 for C, 0.990 for Rust and 0.999 for Python, with identical faces.
+  0.9912 for C, 0.9896 for Rust and 1.0037 for Python over five Python
+  pairs, with identical faces. The live Python fontification calls used
+  0.03% fewer instructions. The focused Python replay used 0.10% more.
   The engine checks negated fields on wildcard roots, keeps every capture
   attached to a step and uses wide step indices. The differential records
   the three C defects in isolated probes. See VM2-TREESIT-QUERY.

@@ -1,7 +1,7 @@
 //! Bounded exploration of a grammar's productions for query validation.
 use super::model::{
-    Action, ERROR, Error, ErrorKind, Field, GrammarTables, Operation, Program, StateId, StepId,
-    Symbol, WILDCARD,
+    Action, ERROR, Error, ErrorKind, Field, GrammarTables, Operation, Program, StateId, Step,
+    StepId, Symbol, WILDCARD,
 };
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
@@ -78,8 +78,8 @@ pub(super) fn analyze(
     let rootless: Vec<_> = program
         .starts
         .iter()
-        .copied()
         .filter(|start| !start.rooted && start.symbol != WILDCARD)
+        .map(|start| start.step)
         .collect();
     if parents.is_empty() && rootless.is_empty() {
         return Ok(());
@@ -102,7 +102,18 @@ pub(super) fn analyze(
     for parent in parents {
         validate_parent(grammar, program, offsets, &graphs, &mut analysis, parent)?;
     }
-    for start in rootless {
+    collect_repetitions(grammar, program, &graphs, &rootless, &mut analysis);
+    Ok(())
+}
+
+fn collect_repetitions(
+    grammar: &impl GrammarTables,
+    program: &mut Program,
+    graphs: &Graphs,
+    rootless: &[StepId],
+    analysis: &mut Analysis,
+) {
+    for &step in rootless {
         let initial = graphs
             .iter()
             .filter(|&(symbol, _)| {
@@ -113,16 +124,15 @@ pub(super) fn analyze(
                 graph
                     .starts
                     .iter()
-                    .map(move |&state| Explore::new(start.step, symbol, state))
+                    .map(move |&state| Explore::new(step, symbol, state))
             });
-        explore(grammar, program, &graphs, initial, &mut analysis);
+        explore(grammar, program, graphs, initial, analysis);
         program
             .repetitions
             .extend(analysis.finished.iter().copied());
     }
     program.repetitions.sort_unstable();
     program.repetitions.dedup();
-    Ok(())
 }
 
 fn classify(
@@ -201,41 +211,60 @@ fn collect_rows(
         grammar.actions(state, &mut actions);
         transitions.append(state, &actions);
         let primary = grammar.primary(state);
-        for &(symbol, action) in &actions {
-            match action {
-                Action::Goto(next) => {
-                    if next != state {
-                        predecessor(&mut predecessors, next, state);
-                    }
-                    if !primary {
-                        continue;
-                    }
-                    grammar.aliases(symbol, &mut aliases);
-                    register_start(graphs, &aliases, state);
-                }
-                Action::Shift(next) => predecessor(&mut predecessors, next, state),
-                Action::Reduce {
-                    symbol,
-                    production,
-                    children,
-                } => {
-                    grammar.aliases(symbol, &mut aliases);
-                    register_reduction(
-                        graphs,
-                        &aliases,
-                        ProductionState {
-                            state,
-                            child: children,
-                            done: true,
-                            production,
-                        },
-                    );
-                }
-                Action::Extra | Action::Other => {}
-            }
+        for &action in &actions {
+            collect_action(
+                grammar,
+                graphs,
+                &mut predecessors,
+                &mut aliases,
+                state,
+                primary,
+                action,
+            );
         }
     }
     (transitions, predecessors)
+}
+
+fn collect_action(
+    grammar: &impl GrammarTables,
+    graphs: &mut Graphs,
+    predecessors: &mut [Vec<StateId>],
+    aliases: &mut Vec<Symbol>,
+    state: StateId,
+    primary: bool,
+    (symbol, action): (Symbol, Action),
+) {
+    match action {
+        Action::Goto(next) => {
+            if next != state {
+                predecessor(predecessors, next, state);
+            }
+            if primary {
+                grammar.aliases(symbol, aliases);
+                register_start(graphs, aliases, state);
+            }
+        }
+        Action::Shift(next) => predecessor(predecessors, next, state),
+        Action::Reduce {
+            symbol,
+            production,
+            children,
+        } => {
+            grammar.aliases(symbol, aliases);
+            register_reduction(
+                graphs,
+                aliases,
+                ProductionState {
+                    state,
+                    child: children,
+                    done: true,
+                    production,
+                },
+            );
+        }
+        Action::Extra | Action::Other => {}
+    }
 }
 
 fn register_start(graphs: &mut Graphs, aliases: &[Symbol], state: StateId) {
@@ -517,19 +546,7 @@ fn advance_child(
         .filter(|&symbol| symbol != WILDCARD);
     let field = frame.field.or(field);
     let step = &program.steps[state.step];
-    let matched = step.symbol == ERROR
-        || visible.is_some_and(|symbol| {
-            (if step.symbol == WILDCARD {
-                !step.named || grammar.symbol_info(symbol).named
-            } else {
-                step.symbol == symbol
-            }) && step.field.is_none_or(|expected| field == Some(expected))
-                && step.supertype.is_none_or(|expected| {
-                    state.frames[..state.len]
-                        .iter()
-                        .any(|frame| expected == frame.symbol)
-                })
-        });
+    let matched = matches_child(grammar, step, visible, field, &state);
     state.frames[state.len - 1] = Frame {
         state: node.state,
         child: node.child,
@@ -557,6 +574,28 @@ fn advance_child(
         return;
     }
     record_results(program, out, state, step.depth, matched);
+}
+
+fn matches_child(
+    grammar: &impl GrammarTables,
+    step: &Step,
+    visible: Option<Symbol>,
+    field: Option<Field>,
+    state: &Explore,
+) -> bool {
+    step.symbol == ERROR
+        || visible.is_some_and(|symbol| {
+            (if step.symbol == WILDCARD {
+                !step.named || grammar.symbol_info(symbol).named
+            } else {
+                step.symbol == symbol
+            }) && step.field.is_none_or(|expected| field == Some(expected))
+                && step.supertype.is_none_or(|expected| {
+                    state.frames[..state.len]
+                        .iter()
+                        .any(|frame| expected == frame.symbol)
+                })
+        })
 }
 
 fn descend(
