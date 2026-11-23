@@ -14,11 +14,8 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'romacs-agent-log)
 (require 'romacs-markdown)
-
-(declare-function romacs-agent-log--rule-width "romacs-agent-log" ())
-(declare-function romacs-agent-log--sealed "romacs-agent-log" (text))
-(defvar romacs-agent-log--end)
 
 (defun romacs-agent-log-tables--width ()
   "The columns a table may take: the narrowest window showing the chat,
@@ -64,7 +61,7 @@ its entry and round on the first character, the rest throughout."
     (when (plist-get marks 'romacs-agent-log-dimmed)
       (add-face-text-property 0 (length grid) 'romacs-agent-log-note nil grid))
     (setq grid (romacs-agent-log--sealed grid))
-    (with-silent-modifications
+    (romacs-agent-log--writing
       ;; Diff the text so point, mark, and narrowing follow the surviving cells.
       (replace-region-contents beg end grid)
       ;; Matching characters keep old properties in `replace-region-contents'.
