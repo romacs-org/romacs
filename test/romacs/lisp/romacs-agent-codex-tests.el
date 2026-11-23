@@ -14,6 +14,27 @@
 (defvar romacs-agent-codex-tests--written nil
   "What the session wrote, newest first: (OBJECT . JOURNAL).")
 
+(ert-deftest romacs-agent-codex-collaboration-reports-worker-lifecycle ()
+  (let ((session (romacs-agent--make :harness 'codex :harness-session "parent"))
+        (romacs-agent-ui--children-timer 'coalesced))
+    (cl-flet ((item (json)
+                (let* ((notification (json-parse-string json))
+                       (events (romacs-agent--codex-events session notification)))
+                  (dolist (event events) (romacs-agent-ui-track-workers session event))
+                  events)))
+      (item "{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"collabAgentToolCall\",\"id\":\"spawn\",\"tool\":\"spawnAgent\",\"prompt\":\"Audit changes\",\"agentsStates\":{\"child\":{\"status\":\"running\"}}}}}")
+      (item "{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"subAgentActivity\",\"id\":\"started\",\"kind\":\"started\",\"agentThreadId\":\"child\",\"agentPath\":\"/root/audit\"}}}")
+      (item "{\"method\":\"item/started\",\"params\":{\"threadId\":\"child\",\"item\":{\"type\":\"commandExecution\",\"id\":\"command\",\"command\":\"sleep 30\"}}}")
+      (should-not (item "{\"method\":\"turn/completed\",\"params\":{\"threadId\":\"child\",\"turn\":{\"status\":\"completed\"}}}"))
+      (romacs-agent-ui-track-workers session '(:type done))
+      (let ((row (gethash "child" (romacs-agent-subagents session))))
+        (should (= (hash-table-count (romacs-agent-subagents session)) 1))
+        (should (equal (plist-get row :state) "running"))
+        (should (equal (plist-get row :activity) "sleep 30"))
+        (should (equal (plist-get row :title) "Audit changes")))
+      (item "{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"subAgentActivity\",\"id\":\"finished\",\"kind\":\"completed\",\"agentThreadId\":\"child\",\"agentPath\":\"/root/audit\"}}}")
+      (should (equal (plist-get (gethash "child" (romacs-agent-subagents session)) :state) "completed")))))
+
 (defun romacs-agent-codex-tests--json (object)
   "OBJECT as the journal gives it back: parsed from its JSON."
   (json-parse-string (romacs-agent--json object) :object-type 'hash-table :null-object :null :false-object :false))
@@ -360,7 +381,29 @@ journals what its harness writes."
     (should (plist-get (romacs-agent-driver-state session) :owed))))
 
 (defun romacs-agent-codex-tests--events (session line)
-  (romacs-agent--codex-events session (romacs-agent-codex-tests--json line)))
+  "Fold LINE and return the public events seen by SESSION's observers."
+  (let* ((events nil)
+         (romacs-agent-event-functions
+          (list (lambda (_ event) (push (romacs-agent--without event '(:seq :last :time)) events)))))
+    (romacs-agent--record session (romacs-mcp--object "seq" (1+ (romacs-agent-seq session))
+                                                     "out" (romacs-agent-codex-tests--json line)))
+    (nreverse events)))
+
+(ert-deftest romacs-agent-codex-decoding-leaves-reply-and-stream-state-to-the-journal ()
+  (let* ((session (romacs-agent--make :id "c" :harness 'codex :reply "earlier"))
+         (delta (romacs-mcp--object "method" "item/agentMessage/delta"
+                                   "params" (romacs-mcp--object "itemId" "m" "delta" "new")))
+         (completed (romacs-mcp--object "method" "item/completed"
+                                       "params" (romacs-mcp--object
+                                                 "item" (romacs-mcp--object "id" "m" "type" "agentMessage" "text" "new")))))
+    (romacs-agent--codex-events session delta)
+    (romacs-agent--codex-events session completed)
+    (should-not (gethash "m" (romacs-agent-streamed session)))
+    (should (equal (romacs-agent-reply session) "earlier"))
+    (romacs-agent--record session (romacs-mcp--object "seq" 1 "out" delta))
+    (romacs-agent--record session (romacs-mcp--object "seq" 2 "out" completed))
+    (should (gethash "m" (romacs-agent-streamed session)))
+    (should (equal (romacs-agent-reply session) "new"))))
 
 (ert-deftest romacs-agent-codex-notifications ()
   (let ((session (romacs-agent--make :id "c" :harness 'codex :driver-state (list :turn "t1"))))
@@ -420,13 +463,16 @@ journals what its harness writes."
       (should-not (events "mcpServer/startupStatus/updated" "name" "x")))))
 
 (ert-deftest romacs-agent-codex-reports-the-configured-thread-effort ()
-  (let* ((session (romacs-agent--make :id "c" :harness 'codex))
-         (result (romacs-mcp--object "thread" (romacs-mcp--object "id" "t")
-                                    "model" "m" "reasoningEffort" "xhigh"))
-         (events (romacs-agent--codex-answer session "thread/start:1"
-                                            (romacs-mcp--object "result" result))))
-    (should (equal (plist-get (plist-get (car events) :state) :reported-effort) '("m" . "xhigh")))
-    (should (equal (plist-get (cadr events) :model) "m"))))
+  (let ((session (romacs-agent--make :id "c" :harness 'codex :options '(:model "configured"))))
+    (dolist (reported '("m" :null))
+      (let* ((model (romacs-agent--value reported))
+             (expected (or model "configured"))
+             (result (romacs-mcp--object "thread" (romacs-mcp--object "id" "t")
+                                        "model" reported "reasoningEffort" "xhigh")))
+        (romacs-agent-codex-tests--events session (romacs-mcp--object "id" "thread/start:1" "result" result))
+        (should (equal (romacs-agent-model session) expected))
+        (should (equal (plist-get (romacs-agent-driver-state session) :reported-effort)
+                       (cons expected "xhigh")))))))
 
 (ert-deftest romacs-agent-codex-reads-exec-journals ()
   ;; A session an earlier Romacs ran by `codex exec' replays as it did.

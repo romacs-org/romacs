@@ -26,6 +26,7 @@
 (declare-function romacs-agent-resume-time "romacs-agent-tools" (session))
 (declare-function romacs-agent-tools--cancel-resume "romacs-agent-tools" (session &optional why))
 (declare-function romacs-agent-ui--batch "romacs-agent-ui" ())
+(declare-function romacs-agent-ui--default-effort "romacs-agent-ui" (session selection))
 (declare-function romacs-agent-ui--selection-label "romacs-agent-ui" (selection))
 (declare-function romacs-agent-ui--instance "romacs-agent-ui" (provider harness model default))
 (declare-function romacs-agent-log-attach-paste "romacs-agent-log-attach" (type at &optional spaced))

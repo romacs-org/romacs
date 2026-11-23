@@ -117,6 +117,14 @@
         (should (equal (mapcar #'car (romacs-agent--models (plist-put (copy-sequence instance) :program other)))
                        '("a" "b")))))))
 
+(defun romacs-agent-picker--record-output (session line)
+  "Fold LINE and collect the public events raised for SESSION."
+  (let* ((events nil)
+         (romacs-agent-event-functions
+          (list (lambda (_ event) (push (romacs-agent--without event '(:seq :last :time)) events)))))
+    (romacs-agent--record session (romacs-mcp--object "seq" (1+ (romacs-agent-seq session)) "out" line))
+    (nreverse events)))
+
 (ert-deftest romacs-agent-picker-the-run-s-initialize-brings-the-models ()
   (romacs-agent-picker--with
       ((session (romacs-agent--make :id "s" :harness 'claude :provider "claude" :caught-up t
@@ -129,10 +137,13 @@
                                                                           "response" body))))
            (answer (romacs-agent-picker--answer (romacs-agent-picker--model "x" "model-x" "X" '("low")))))
       ;; Another's answer is nothing to keep.
-      (should-not (romacs-agent--claude-events session (funcall response "other" answer)))
+      (should-not (romacs-agent-picker--record-output session (funcall response "other" answer)))
+      (should-not (file-exists-p (romacs-agent--models-file "claude")))
+      ;; Decoding alone leaves the cache unchanged.
+      (romacs-agent--claude-events session (funcall response "romacs-init-1" answer))
       (should-not (file-exists-p (romacs-agent--models-file "claude")))
       ;; The run's own: its models kept, and the run is initialized.
-      (should (equal (romacs-agent--claude-events session (funcall response "romacs-init-1" answer))
+      (should (equal (romacs-agent-picker--record-output session (funcall response "romacs-init-1" answer))
                      '((:type handshake :state (:initialized t)))))
       (should (assoc "model-x" (romacs-agent--models (romacs-agent--configured "claude")))))))
 
@@ -150,7 +161,7 @@
        (romacs-agent-providers `(("claude" :program ,program))))
     (romacs-agent--keep-models (romacs-agent--configured "claude") '(("kept" :label "Kept")))
     (let ((answer (romacs-agent-picker--answer (romacs-agent-picker--model "x" "model-x" "X" '("low")))))
-      (should (equal (romacs-agent--claude-events
+      (should (equal (romacs-agent-picker--record-output
                       copy (romacs-mcp--object "type" "control_response"
                                                "response" (romacs-mcp--object "subtype" "success"
                                                                               "request_id" "romacs-init-1"
@@ -165,7 +176,7 @@
        (romacs-agent--sessions (let ((table (make-hash-table :test #'equal))) (puthash "s" session table) table))
        (romacs-agent-providers `(("claude" :program ,program))))
     ;; Refused, it keeps nothing, yet the run goes on: messages are not held.
-    (should (equal (romacs-agent--claude-events
+    (should (equal (romacs-agent-picker--record-output
                     session (romacs-mcp--object "type" "control_response"
                                                 "response" (romacs-mcp--object "subtype" "error" "request_id" "r" "error" "no")))
                    '((:type handshake :state (:initialized t)))))

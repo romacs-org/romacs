@@ -1,5 +1,6 @@
 //! GNU fns.c sequence callbacks. All state crossing Lisp calls is traced.
 use super::*;
+use std::cmp::Ordering;
 
 fn number(n: usize) -> Value {
     Value::integer(n as i64).expect("sequence index")
@@ -41,7 +42,10 @@ fn sort(cx, sequence: Value; rest options) -> Step {
         let mut values = Vec::new();
         let mut seen = HashSet::default();
         let mut tail = sequence;
+        // Nothing is written yet: polled anywhere.
+        let mut steps = crate::quit::Steps::default();
         while let Some((car, cdr)) = cx.pair(tail) {
+            if steps.tick() { cx.quittable(Leaf::native_poll)?; }
             if !seen.insert(tail.0) { return Err(Fault::Circular(sequence)); }
             values.push(car);
             tail = cdr;
@@ -65,7 +69,8 @@ fn sort_key(cx: &mut Leaf<'_>, mut state: Vec<Value>) -> Next {
     let n = cx.vector_len(state[5])?;
     let i = index(state[7]);
     if state[2] == Value::NIL || state[2] == cx.intern("identity") || i == n {
-        if sort_native(cx, &state)? { return sort_finish(cx, &state); }
+        // Its sort stops consistently: the input is written only at the end.
+        if cx.quittable(|cx| sort_native(cx, &state))? { return sort_finish(cx, &state); }
         state[7] = number(1);
         state[8] = number(1);
         if n < 64 {
@@ -93,6 +98,124 @@ fn sort_keyed(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
     state[7] = number(index(state[7]) + 1);
     sort_key(cx, state)
 }
+/// A stable sort of ORDER by COMPARE that polls as it goes: runs of RUN
+/// elements sorted alone, then coalesced or merged pairwise. Nothing
+/// outside ORDER is written.
+pub(crate) fn sort_polled<T: Copy>(cx: &mut Leaf<'_>, order: &mut Vec<T>, run: usize,
+                        mut compare: impl FnMut(&mut Leaf<'_>, &T, &T) -> Ordering) -> std::result::Result<(), Fault> {
+    if order.is_empty() {
+        return Ok(());
+    }
+    if order.len() <= run {
+        return sort_run(cx, order, &mut compare);
+    }
+    if sort_monotone_run(cx, order, run, &mut compare)? {
+        return Ok(());
+    }
+    let mut ends = sort_run_ends(cx, order, run, &mut compare)?;
+    if ends.is_empty() {
+        return Ok(());
+    }
+    let mut other = Vec::with_capacity(order.len());
+    while ends.len() > 1 {
+        other.clear();
+        let mut start = 0;
+        for pair in (0..ends.len()).step_by(2) {
+            let mid = ends[pair];
+            let end = ends.get(pair + 1).copied().unwrap_or(mid);
+            merge_sort_runs(cx, &order[start..end], &mut other, mid - start, run, &mut compare)?;
+            ends[pair / 2] = end;
+            start = end;
+        }
+        std::mem::swap(order, &mut other);
+        ends.truncate(ends.len().div_ceil(2));
+    }
+    Ok(())
+}
+
+fn sort_run<T>(cx: &mut Leaf<'_>, run: &mut [T],
+               compare: &mut impl FnMut(&mut Leaf<'_>, &T, &T) -> Ordering) -> std::result::Result<(), Fault> {
+    run.sort_by(|a, b| compare(cx, a, b));
+    cx.native_poll()
+}
+
+fn sort_monotone_run<T>(cx: &mut Leaf<'_>, order: &mut [T], run: usize,
+                        compare: &mut impl FnMut(&mut Leaf<'_>, &T, &T) -> Ordering) -> std::result::Result<bool, Fault> {
+    // Reversing a run with equal keys would reverse their stable order.
+    let descending = compare(cx, &order[1], &order[0]) == Ordering::Less;
+    for (i, pair) in order.windows(2).enumerate().skip(1) {
+        if (compare(cx, &pair[1], &pair[0]) == Ordering::Less) != descending {
+            return Ok(false);
+        }
+        if (i + 1).is_multiple_of(run) {
+            cx.native_poll()?;
+        }
+    }
+    cx.native_poll()?;
+    if !descending {
+        return Ok(true);
+    }
+    let (left, right) = order.split_at_mut(order.len() / 2);
+    for (front, back) in left.chunks_mut(run).zip(right.rchunks_mut(run)) {
+        for (a, b) in front.iter_mut().zip(back.iter_mut().rev()) {
+            std::mem::swap(a, b);
+        }
+        cx.native_poll()?;
+    }
+    Ok(true)
+}
+
+/// Only a disordered boundary needs a run endpoint.
+fn sort_run_ends<T: Copy>(cx: &mut Leaf<'_>, order: &mut [T], run: usize,
+                         compare: &mut impl FnMut(&mut Leaf<'_>, &T, &T) -> Ordering) -> std::result::Result<Vec<usize>, Fault> {
+    let mut ends = Vec::new();
+    let mut last = None;
+    for (i, chunk) in order.chunks_mut(run).enumerate() {
+        sort_run(cx, chunk, compare)?;
+        if let Some(last) = last
+            && compare(cx, &chunk[0], &last) == Ordering::Less
+        {
+            ends.push(i * run);
+        }
+        last = chunk.last().copied();
+    }
+    if !ends.is_empty() {
+        ends.push(order.len());
+    }
+    Ok(ends)
+}
+
+fn merge_sort_runs<T: Copy>(cx: &mut Leaf<'_>, source: &[T], target: &mut Vec<T>, mid: usize, run: usize,
+                            compare: &mut impl FnMut(&mut Leaf<'_>, &T, &T) -> Ordering) -> std::result::Result<(), Fault> {
+    let (mut left, mut right) = (0, mid);
+    let start = target.len();
+    while left < mid && right < source.len() {
+        // Stable: the right element goes first only when strictly less.
+        if compare(cx, &source[right], &source[left]) == Ordering::Less {
+            target.push(source[right]);
+            right += 1;
+        } else {
+            target.push(source[left]);
+            left += 1;
+        }
+        if (target.len() - start).is_multiple_of(run) {
+            cx.native_poll()?;
+        }
+    }
+    let rest = if left < mid { &source[left..mid] } else { &source[right..] };
+    for chunk in rest.chunks(run) {
+        target.extend_from_slice(chunk);
+        cx.native_poll()?;
+    }
+    Ok(())
+}
+
+/// Fixnums a sort's run holds between two polls: about 10 ms.
+const SORT_RUN: usize = 1 << 18;
+/// Strings a run holds: a comparison reads both strings' text, about six
+/// times a fixnum's, so about 15 ms.
+const STRING_RUN: usize = 1 << 14;
+
 /// The orders `sort_native` takes natively: by string, or by fixnum
 /// ascending (`<`, `value<`) or descending (`>`).
 enum Native { Strings, Ascending, Descending }
@@ -128,6 +251,8 @@ fn sort_native(cx: &mut Leaf<'_>, state: &[Value]) -> std::result::Result<bool, 
         Some(">") if fixnums() => Native::Descending,
         _ => return Ok(false),
     };
+    // The keys' order, sorted with no Lisp to poll: polled between runs
+    // (`sort_polled`), nothing written to the input before it ends.
     let mut order: Vec<usize> = (0..keys.len()).collect();
     // Fixnum keys read once, not at each comparison.
     let ints = || -> Vec<i64> { keys.iter().map(|k| k.integer_value().expect("checked fixnums")).collect() };
@@ -135,12 +260,15 @@ fn sort_native(cx: &mut Leaf<'_>, state: &[Value]) -> std::result::Result<bool, 
     // as GNU's stable sort keeps them for any predicate.
     match native {
         // Validated above, so the comparison cannot fail.
-        Native::Strings => order.sort_by(|&a, &b| cx.string_order(keys[a], keys[b]).unwrap_or(std::cmp::Ordering::Equal)),
-        Native::Ascending => { let ints = ints(); order.sort_by_key(|&i| ints[i]); }
-        Native::Descending => { let ints = ints(); order.sort_by(|&a, &b| ints[b].cmp(&ints[a])); }
+        Native::Strings => sort_polled(cx, &mut order, STRING_RUN, |cx, a, b| cx.string_order(keys[*a], keys[*b]).unwrap_or(std::cmp::Ordering::Equal))?,
+        Native::Ascending => { let ints = ints(); sort_polled(cx, &mut order, SORT_RUN, |_, a, b| ints[*a].cmp(&ints[*b]))?; }
+        Native::Descending => { let ints = ints(); sort_polled(cx, &mut order, SORT_RUN, |_, a, b| ints[*b].cmp(&ints[*a]))?; }
     }
     let items = cx.vector_values(state[5])?;
+    // Into the sort's own vectors: polled anywhere.
+    let mut steps = crate::quit::Steps::default();
     for (to, &from) in order.iter().enumerate() {
+        if steps.tick() { cx.native_poll()?; }
         cx.vector_set(state[5], number(to), items[from])?;
         cx.vector_set(state[6], number(to), keys[from])?;
     }
@@ -279,6 +407,8 @@ fn sort_finish(cx: &mut Leaf<'_>, state: &[Value]) -> Next {
     let result = if state[4] != Value::NIL {
         if cx.pair(original).is_some() {
             let mut tail = original;
+            // NOPOLL: the list's length, one store each; a quit would leave
+            // it half sorted.
             for value in values {
                 let Some((_, cdr)) = cx.pair(tail) else { break };
                 cx.setcar(tail, value)?;

@@ -30,8 +30,15 @@
 
 (ert-deftest romacs-agent-approval-question-is-asked ()
   (let* ((session (romacs-agent-approval-tests--session))
-         (event (car (romacs-agent--claude-events session (json-parse-string romacs-agent-approval-tests--ask)))))
+         (line (json-parse-string romacs-agent-approval-tests--ask))
+         (event (car (romacs-agent--claude-events session line)))
+         (romacs-agent-event-functions
+          (list (lambda (_session observed)
+                  (should (gethash "q1" (romacs-agent-approvals session)))
+                  (should-not (plist-member observed :approval-wire))))))
     (should (eq (plist-get event :type) 'approval))
+    (should-not (gethash "q1" (romacs-agent-approvals session)))
+    (romacs-agent--record session (romacs-mcp--object "seq" 1 "out" line))
     (should (equal (plist-get event :questions)
                    '(("Which colour do you prefer?" :header "Colour" :options ("Red" "Blue")
                       :notes (("Red" . "Choose red.") ("Blue" . "Choose blue.")) :multi nil))))
@@ -47,7 +54,8 @@
 
 (ert-deftest romacs-agent-approval-for-the-session ()
   (let ((session (romacs-agent-approval-tests--session)))
-    (romacs-agent--claude-events session (json-parse-string romacs-agent-approval-tests--bash))
+    (romacs-agent--record
+     session (romacs-mcp--object "seq" 1 "out" (json-parse-string romacs-agent-approval-tests--bash)))
     (should-not (plist-get (car (romacs-agent--claude-events session (json-parse-string romacs-agent-approval-tests--bash)))
                            :questions))
     (let* ((response (romacs-agent-approval-tests--response (romacs-agent--claude-respond session "b1" '(:always t) nil)))
@@ -69,6 +77,27 @@
                                              0))
                       0)))
       (should (equal (gethash "toolName" rule) "Edit")))))
+
+(ert-deftest romacs-agent-approval-plan-is-registered-before-observers ()
+  (let* ((session (romacs-agent-approval-tests--session))
+         (request (romacs-mcp--object "subtype" "can_use_tool" "tool_name" "ExitPlanMode"
+                                      "input" (romacs-mcp--object "plan" "Make a plan.")))
+         (seen nil)
+         (romacs-agent-event-functions
+          (list (lambda (observed event)
+                  (should (eq request (gethash "plan" (romacs-agent-approvals observed))))
+                  (push (list (plist-get event :type) (plist-get event :last)) seen)))))
+    (romacs-agent--record
+     session (romacs-mcp--object "seq" 1 "out"
+                                 (romacs-mcp--object "type" "control_request" "request_id" "plan" "request" request)))
+    (should (equal (nreverse seen) '((plan nil) (approval t))))
+    (setq seen nil)
+    (romacs-agent--record
+     session (romacs-mcp--object "seq" 2 "out"
+                                 (romacs-mcp--object "type" "control_response"
+                                                     "response" (romacs-mcp--object "request_id" "plan" "subtype" "error"))))
+    (should-not (gethash "plan" (romacs-agent-approvals session)))
+    (should-not seen)))
 
 (provide 'romacs-agent-approval-tests)
 ;;; romacs-agent-approval-tests.el ends here

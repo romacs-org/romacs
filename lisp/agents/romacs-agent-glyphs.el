@@ -71,7 +71,7 @@
     (approval "✋" "A session that needs an approval")
     (question "❓" "A session that asks the user")
     (failure "❗" "A session failed, or never started")
-    (working "🤖" "A session working")
+    (working "🛠️" "A session working")
     (threads "🧵" "Threads live under a session")
     (waiting "⏳" "A session waiting on its workers")
     (completed "✅" "A session that completed")
@@ -83,6 +83,7 @@
     (chip-working "●" "A chip: working")
     ;; The board and the answering layer
     (board-threads "▸" "Before a session's thread count on the board")
+    (board-settled "✔️" "Before the project's settled thread count on the board")
     (board-history "◇" "Before a session from history on the board")
     (board-open "˅" "A board row whose threads show")
     (board-closed "›" "A board row whose threads are folded")

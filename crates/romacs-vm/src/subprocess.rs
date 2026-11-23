@@ -157,6 +157,11 @@ impl Table {
     pub(crate) fn remove(&mut self, serial: u64) -> Option<Channel> {
         self.channels.remove(&serial)
     }
+    /// Whether PID, a child handed to the reaper of deleted children, is still
+    /// owned there: false once it is reaped, the positive notice of its death.
+    pub(crate) fn owns(&self, pid: i32) -> bool {
+        self.deleted.iter().any(|&(owned, _)| owned == pid)
+    }
     /// Reap killed children recorded by `delete-process' and `call-process'.
     pub(crate) fn reap_deleted(&mut self) {
         self.deleted.retain(|(pid, file)| {
@@ -439,6 +444,21 @@ pub(crate) fn wait_status(pid: i32, options: rustix::process::WaitOptions) -> Op
             }
             Err(rustix::io::Errno::INTR) => {}
             Ok(None) | Err(_) => return None,
+        }
+    }
+}
+
+/// Whether child PID has ended, left unreaped for the wait that takes its
+/// status (waitid's WNOWAIT): true too once it is no child of this host's.
+/// A waiter without a pidfd asks it between ticks.
+pub(crate) fn exited(pid: i32) -> bool {
+    let Some(child) = child(pid) else { return true };
+    let options = rustix::process::WaitIdOptions::EXITED | rustix::process::WaitIdOptions::NOHANG | rustix::process::WaitIdOptions::NOWAIT;
+    loop {
+        match rustix::process::waitid(rustix::process::WaitId::Pid(child), options) {
+            Err(rustix::io::Errno::INTR) => {}
+            Ok(found) => return found.is_some(),
+            Err(_) => return true,
         }
     }
 }

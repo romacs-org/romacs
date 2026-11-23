@@ -198,7 +198,11 @@ impl Leaf<'_> {
     pub(crate) fn find_coding_systems_region(&mut self, start: Value, end: Value, exclude: Value) -> super::super::Out {
         let text = self.text_span(start, end, false)?;
         if !text.multibyte || text.ascii() { return Ok(Value::TRUE); }
-        let chars: Vec<u32> = text.view().chars().collect();
+        let mut chars: Vec<u32> = Vec::with_capacity(text.bytes.len());
+        for part in text.view().char_parts(1 << 14) {
+            chars.extend(part);
+            self.native_poll()?;
+        }
         let list = self.intern("coding-system-list");
         let names = self.variable_value(list)?.unwrap_or(Value::NIL);
         let excluded = if exclude == Value::NIL { Vec::new() } else { self.coding_items(exclude)? };
@@ -217,13 +221,16 @@ impl Leaf<'_> {
         let first = chars.iter().position(|&c| c >= 0x80).unwrap_or(chars.len());
         let last = chars.iter().rposition(|&c| c >= 0x80).map_or(first, |i| i + 1);
         let mut seen = std::collections::HashSet::new();
-        for &c in &chars[first..last] {
-            if c < 0x80 || !seen.insert(c) { continue; }
-            let mut kept = Vec::with_capacity(candidates.len());
-            for candidate in std::mem::take(&mut candidates) {
-                if self.coding_encodable(&candidate.1, &candidate.2, c)? { kept.push(candidate); }
+        for part in chars[first..last].chunks(1 << 14) {
+            for &c in part {
+                if c < 0x80 || !seen.insert(c) { continue; }
+                let mut kept = Vec::with_capacity(candidates.len());
+                for candidate in std::mem::take(&mut candidates) {
+                    if self.coding_encodable(&candidate.1, &candidate.2, c)? { kept.push(candidate); }
+                }
+                candidates = kept;
             }
-            candidates = kept;
+            self.native_poll()?;
         }
         let mut result = vec![];
         result.extend(candidates.iter().map(|(name, _, _)| *name));

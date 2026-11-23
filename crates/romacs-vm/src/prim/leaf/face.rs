@@ -213,11 +213,7 @@ impl Leaf<'_> {
     /// the primitive as it would through GNU's Lisp loop.
     pub(crate) fn face_loop_quit(&mut self) -> std::result::Result<(), Fault> {
         if !self.vm.quit_poll_due() { return Ok(()); }
-        match self.vm.maybe_quit() {
-            None => Ok(()),
-            Some(crate::threaded::Escape::Signal(condition, data)) => Err(Fault::Signal(condition, data)),
-            Some(escape) => { self.vm.propagated_escape = Some(escape); Err(Fault::Escape) }
-        }
+        self.vm.quit_fault()
     }
 
     /// `(condition-case () ... (error nil))' around FAULT: Ok when FAULT is

@@ -1337,6 +1337,7 @@ after `romacs-agent-switch-delay', as `romacs-agent-switch-on-limit' says,
 that end held from its parent meanwhile.  With every account spent it
 says so, and its parent is woken with the end."
   (when-let* (((plist-get event :limit))
+              ((not (romacs-agent-settled-p session)))
               ;; A live end: one replayed was handled when it came.
               ((romacs-agent-caught-up session))
               ((eq romacs-agent-switch-on-limit 'lossless))
@@ -1356,6 +1357,7 @@ moved it); with no account left, say so; its end then goes to its parent
 as it would have."
   (when (eq (gethash (romacs-agent-id session) romacs-agent-tools--moving) token)
     (cond ((not (and (eq (romacs-agent-loaded (romacs-agent-id session)) session) (not (romacs-agent-cancelled session))
+                     (not (romacs-agent-settled-p session))
                      (eql (romacs-agent-done-seq session) (car token)) (romacs-agent-limited session)
                      (not (romacs-agent-pending-selection session))))
            (romacs-agent-tools--not-moved session nil))
@@ -1406,15 +1408,17 @@ its own record, written as asked, so a restarted server arms it again."
   (unless time (romacs-agent-mark (romacs-agent-id session) 'resume nil)))
 
 (defun romacs-agent-tools--arm-resume (session time)
-  (puthash session (cons time (run-at-time (max 1 (- time (float-time))) nil #'romacs-agent-tools--resume session time))
-           romacs-agent-tools--resumes)
-  (romacs-agent--changed session))
+  (unless (romacs-agent-settled-p session)
+    (puthash session (cons time (run-at-time (max 1 (- time (float-time))) nil #'romacs-agent-tools--resume session time))
+             romacs-agent-tools--resumes)
+    (romacs-agent--changed session)))
 
 (defun romacs-agent-tools--schedule-resume (session)
   "SESSION waits at its limit, every account spent: it resumes by itself
 at the earliest reset plus the margin, journaled, unless that is unknown
 or `romacs-agent-resume-at-reset' is off."
-  (when-let* (((and romacs-agent-resume-at-reset (not (romacs-agent-resume-time session))))
+  (when-let* (((and romacs-agent-resume-at-reset (not (romacs-agent-settled-p session))
+                    (not (romacs-agent-resume-time session))))
               (resets (romacs-agent--earliest-reset (romacs-agent-harness session)))
               ((> resets (gethash session romacs-agent-tools--resets-used 0))))
     (puthash session resets romacs-agent-tools--resets-used)
@@ -1440,7 +1444,7 @@ reset, once."
   (cond
    ((not (equal (romacs-agent-resume-time session) time)))
    ;; Turned off since: forgotten.
-   ((not romacs-agent-resume-at-reset)
+   ((or (not romacs-agent-resume-at-reset) (romacs-agent-settled-p session))
     (remhash session romacs-agent-tools--resumes)
     (romacs-agent-tools--keep-resume session nil))
    ;; Its journal still replaying: what it is at is not yet known.
@@ -1457,14 +1461,16 @@ reset, once."
             (romacs-agent-tools--schedule-resume session)
           (romacs-agent--note session (romacs-mcp--object "type" "resume" "state" "fired" "on" (plist-get target :name)))
           (if (equal (plist-get target :name) (romacs-agent-provider session))
-              (romacs-agent-tools--tell session romacs-agent-tools--resumed)
+              (romacs-agent-tools--tell session romacs-agent-tools--resumed nil
+                                       (lambda () (not (romacs-agent-settled-p session))))
             (romacs-agent-move-on session "limit reset"))))))))
 
 (defun romacs-agent-tools--rearm-resume (session manifest)
   "SESSION, loaded by a new server, resumes at the time its MANIFEST
 kept, if any; with `romacs-agent-resume-at-reset' off, that is forgotten."
   (when-let* ((time (gethash "resumeAt" manifest)) ((numberp time)))
-    (if romacs-agent-resume-at-reset (romacs-agent-tools--arm-resume session time)
+    (if (and romacs-agent-resume-at-reset (not (romacs-agent-settled-p session)))
+        (romacs-agent-tools--arm-resume session time)
       (romacs-agent-tools--keep-resume session nil))))
 
 (add-hook 'romacs-agent-loaded-functions #'romacs-agent-tools--rearm-resume)
@@ -1486,9 +1492,10 @@ each waiting to resume on its harness's pool resumes now."
       (condition-case err
           (romacs-agent-tools--resume session time)
         ;; It waits on as it did, its own failure said.
-        (error (romacs-agent-tools--arm-resume session time)
-               ;; Kept as it can be: the others still go on.
-               (ignore-errors (romacs-agent-tools--keep-resume session time))
+        (error (unless (romacs-agent-settled-p session)
+                 (romacs-agent-tools--arm-resume session time)
+                 ;; Kept as it can be: the others still go on.
+                 (ignore-errors (romacs-agent-tools--keep-resume session time)))
                (message "Resuming %s: %s" (romacs-agent-id session) (error-message-string err)))))))
 
 (add-hook 'romacs-agent-room-functions #'romacs-agent-tools--room-back)
@@ -1521,7 +1528,11 @@ woken with it."
               (remhash (romacs-agent-id session) romacs-agent-tools--moving)
               (when (romacs-agent-resume-time session) (remhash session romacs-agent-tools--resets-used))
               (romacs-agent-tools--cancel-resume session "a message came")))
-    ('settled (romacs-agent-tools--cancel-resume session "settled"))))
+    ('settled
+     (when (romacs-agent-settled-p session)
+       (romacs-agent-tools--cancel-resume session)
+       (when (gethash (romacs-agent-id session) romacs-agent-tools--moving)
+         (romacs-agent-tools--not-moved session nil))))))
 
 (add-hook 'romacs-agent-event-functions #'romacs-agent-tools--limit-on-event)
 
@@ -1655,7 +1666,7 @@ once its running turn ends (`romacs-agent-renew-soon')."
 
 (defun romacs-agent-tools--effort-option (instance)
   "The name INSTANCE's harness's effort goes by in a target's options."
-  (if (eq (plist-get instance :harness) 'codex) "reasoningEffort" "effort"))
+  (or (plist-get (romacs-agent--driver-of (plist-get instance :harness)) :effort-option) "effort"))
 
 (defun romacs-agent-tools--model (instance row)
   "ROW of `romacs-agent--models' as T3 Code lists a model."

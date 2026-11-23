@@ -185,7 +185,7 @@
 (ert-deftest romacs-agent-children-claude-task-notices ()
   (let ((line (lambda (json) (romacs-agent--claude-events (romacs-agent--make :harness 'claude) (json-parse-string json)))))
     (should (equal (funcall line "{\"type\":\"system\",\"subtype\":\"task_started\",\"task_id\":\"a1\",\"tool_use_id\":\"t1\",\"description\":\"Read package.json\",\"task_type\":\"local_agent\"}")
-                   '((:type task :id "t1" :state started :task "a1" :title "Read package.json" :background t))))
+                   '((:type task :id "t1" :state started :task "a1" :title "Read package.json" :subagent t :background t))))
     ;; A subagent's own command is its.
     (should-not (funcall line "{\"type\":\"system\",\"subtype\":\"task_started\",\"task_id\":\"b2\",\"tool_use_id\":\"t5\",\"parent_task_id\":\"a1\",\"owned_by_subagent\":true}"))
     (should (equal (funcall line "{\"type\":\"system\",\"subtype\":\"task_updated\",\"task_id\":\"b3\",\"patch\":{\"is_backgrounded\":true}}")
@@ -228,7 +228,7 @@
         ;; Hovering lists them, what wants the user first.
         (should (equal (get-text-property 0 'help-echo (romacs-agent-children-summary parent))
                        "task 2: needs approval\ntask 1: working"))
-        (should (equal (substring-no-properties (romacs-agent-ui--label (romacs-agent-ui--state parent))) "🤖")))
+        (should (equal (substring-no-properties (romacs-agent-ui--label (romacs-agent-ui--state parent))) "🛠️")))
       ;; Turned off, a summary made before says words at once.
       (cl-letf (((symbol-function 'char-displayable-p) (lambda (_) t))
                 ((symbol-function 'romacs-agent-sessions) (lambda () (list parent))))

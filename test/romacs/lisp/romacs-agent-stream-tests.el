@@ -92,6 +92,27 @@
           (should-not (process-get process 'pending)))
       (delete-process process))))
 
+(ert-deftest romacs-agent-stream-history-keeps-the-current-manifest ()
+  (let* ((dir (make-temp-file "romacs-stream-" t))
+         (manifest (expand-file-name "manifest.json" dir))
+         (session (romacs-agent--make :id "history" :harness 'claude :dir dir :harness-session "current"))
+         (old (romacs-mcp--object "seq" 1 "out" (romacs-mcp--object "type" "system" "subtype" "init"
+                                                                  "session_id" "historical"))))
+    (unwind-protect
+        (progn
+          (romacs-agent--write-json manifest (romacs-mcp--object "harnessSession" "current"))
+          (with-temp-file (expand-file-name "journal.jsonl" dir)
+            (insert (json-serialize old) "\n{\"seq\":2,\"out\":\"unknown\"}\n"))
+          (cl-letf (((symbol-function 'run-at-time) (lambda (_delay _repeat fn &rest args) (apply fn args))))
+            (let ((sync (romacs-agent-events session)) (async nil))
+              (romacs-agent-events-async session (lambda (events) (setq async events)) 1)
+              (should (equal sync async))
+              (should (equal (plist-get (car sync) :harness-session) "historical"))))
+          (should (equal (gethash "harnessSession" (romacs-agent--read-json manifest)) "current"))
+          (romacs-agent--record session old)
+          (should (equal (gethash "harnessSession" (romacs-agent--read-json manifest)) "historical")))
+      (delete-directory dir t))))
+
 (ert-deftest romacs-agent-stream-replay-ends-though-the-journal-grows ()
   ;; A replay reads what the journal held when it began: a record written
   ;; meanwhile does not keep it going.

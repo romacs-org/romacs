@@ -92,10 +92,11 @@ start launched, its manifest written."
 (ert-deftest romacs-agent-fork-codex-answer-names-the-new-thread ()
   (let ((session (romacs-agent--make :id "c" :harness 'codex :options '(:fork "01aa"))))
     (let ((events (romacs-agent--codex-answer
-                   session "thread/fork:3"
+                   nil "fallback" nil "thread/fork:3"
                    (romacs-mcp--object "id" "thread/fork:3"
                                        "result" (romacs-mcp--object "thread" (romacs-mcp--object "id" "01cc"))))))
       (should (equal (plist-get (cadr events) :harness-session) "01cc"))
+      (should (equal (plist-get (cadr events) :model) "fallback"))
       (should (equal (car events) '(:type handshake :state (:thread "01cc")))))
     (should (equal (romacs-agent--codex-input-events
                     session (romacs-mcp--object "id" "thread/fork:3" "method" "thread/fork"))

@@ -12,7 +12,8 @@ fn fixnum(n: i64) -> Value { Value::integer(n).expect("buffer position") }
 // hooks; the overlay hooks are those `romacs--before-change' returns.
 defsubr! { name = "subst-char-in-region", gnu = "editfns.c:2294", effect = Global,
 fn subst_char_in_region(cx, start: Value, end: Value, fromchar: Value, tochar: Value; optional noundo: Value) -> Step {
-    let (hits, stop) = cx.subst_char_hits(start, end, fromchar, tochar)?;
+    // Quittable before the change starts; the rescan after the hooks is not.
+    let (hits, stop) = cx.quittable(|cx| cx.subst_char_hits(start, end, fromchar, tochar))?;
     let Some(&pos) = hits.first() else { return Ok(Step::Done(Value::NIL)) };
     let prepared = cx.prepare_change(pos, stop)?;
     if (prepared.before || cx.after_change_runs(false, false)?) && super::insdel::half_missing(cx)? {

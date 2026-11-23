@@ -189,12 +189,7 @@ struct TextTessellator<'r, 'p> {
 impl TextTessellator<'_, '_> {
     fn tessellate(&mut self, out: &mut TextStreams) {
         let frame_glyphs = self.params.frame_glyphs;
-        let faces = self.params.faces;
-        let face_debug_call_id = self.params.face_debug_call_id;
-        let cursor_visible = self.params.cursor_visible;
-        let has_line_anims = self.params.has_line_anims;
         let want_overlay = self.want_overlay;
-        let enable_subpixel = self.enable_subpixel;
 
         for (glyph_index, glyph) in frame_glyphs.glyphs.iter().enumerate() {
             if let FrameGlyph::Char {
@@ -241,7 +236,7 @@ impl TextTessellator<'_, '_> {
                     let font_size = rf.font_size;
                     let overstrike = rf.overstrike;
 
-                    let face = faces.get(&face_id);
+                    let face = self.params.faces.get(&face_id);
 
                     // Snap glyph origins to whole physical pixels via the SAME
                     // shared helper the child-frame path uses (see
@@ -251,7 +246,7 @@ impl TextTessellator<'_, '_> {
                     // local `SubpixelBin::new`) is what makes content.rs's
                     // "full parity with the main frame" claim structurally true.
                     let sf = self.renderer.scale_factor;
-                    let y_offset = if has_line_anims {
+                    let y_offset = if self.params.has_line_anims {
                         self.renderer.line_y_offset(*x, *y)
                     } else {
                         0.0
@@ -261,9 +256,8 @@ impl TextTessellator<'_, '_> {
                     let phys_y = baseline_y * sf;
                     let (x_int, y_int, x_bin, y_bin) =
                         super::content::snap_glyph_origin(phys_x, phys_y);
-                    let font_identity = self.atlas.glyph_font_identity_for_char(face, *char);
 
-                    let subpixel_request = if enable_subpixel {
+                    let subpixel_request = if self.enable_subpixel {
                         SubpixelRequest::Enabled
                     } else {
                         SubpixelRequest::Disabled
@@ -280,7 +274,7 @@ impl TextTessellator<'_, '_> {
                             text: text.clone(),
                             face_id,
                             font_size_bits: font_size.to_bits(),
-                            font_identity,
+                            font_identity: self.atlas.glyph_font_identity_for_char(face, *char),
                             glyph_stream_identity: self
                                 .atlas
                                 .glyph_stream_identity_for_composed(face, text),
@@ -305,7 +299,6 @@ impl TextTessellator<'_, '_> {
                             charcode: *char as u32,
                             face_id,
                             font_size_bits: font_size.to_bits(),
-                            font_identity,
                             x_bin,
                             y_bin,
                         };
@@ -313,7 +306,7 @@ impl TextTessellator<'_, '_> {
                         if trace_face_debug_enabled() && !want_overlay && !color_is_grayscale(*fg) {
                             tracing::info!(
                                 "face-debug call={} milestone=before_get_or_create char={:?} face={} pos=({:.1},{:.1}) fg=({:.3},{:.3},{:.3},{:.3})",
-                                face_debug_call_id,
+                                self.params.face_debug_call_id,
                                 char,
                                 face_id,
                                 x,
@@ -358,11 +351,17 @@ impl TextTessellator<'_, '_> {
                         let raster_bounds = Rect::new(glyph_x, glyph_y, glyph_w, glyph_h);
                         // An overstruck glyph is drawn a device pixel right again.
                         let struck = if overstrike { 1.0 / sf } else { 0.0 };
+                        let ink = Rect::new(glyph_x, glyph_y, glyph_w + struck, glyph_h);
                         super::root_picture::reach::note(
                             slot_id.window_id.get(),
                             Rect::new(*x, *y, *width, *height),
-                            Rect::new(glyph_x, glyph_y, glyph_w + struck, glyph_h),
+                            ink,
                         );
+                        if !self.geometry_diagnostics
+                            && self.params.glyph_cull_bounds.is_some_and(|clip| !clip.intersects(&ink))
+                        {
+                            continue;
+                        }
 
                         let tex_u_min = uv.min()[0];
                         let tex_u_max = uv.max()[0];
@@ -462,7 +461,7 @@ impl TextTessellator<'_, '_> {
                         let mut effective_bg =
                             WgpuRenderer::sample_face_paint_background(face, bg, paint)
                                 .unwrap_or(Color::rgb(1.0, 1.0, 1.0));
-                        if cursor_visible
+                        if self.params.cursor_visible
                             && let Some(inverse) = self.params.cursor_inverse_video
                             && glyph.slot_id().is_some_and(|slot| slot == inverse.slot_id)
                         {

@@ -556,21 +556,22 @@ error nor anything owed to its parent (`romacs-agent-quiet-p'); and
 nothing came since its state was kept: its records in SQLite go no
 further than the seq that state folded.  One still in a journal is not
 quiet: whether more came cannot be told there without reading it.
-Quiet, the place its records were found to end at (the seq after the
-kept one): what its supervisor writes from there is new."
+Return the place its records were found to end at (the seq after the
+kept one), or `settled' if the user explicitly put it aside."
   (when-let* (((fboundp 'romacs-agent-events--db))
               ;; Its records' tables, made with the database.
               (db (romacs-agent-events--db))
               (id (file-name-nondirectory dir))
-              (row (car (sqlite-select db (concat "select state, attention, seq,"
+              (row (car (sqlite-select db (concat "select state, attention, seq, settled_seq,"
                                                   " (select 1 from imported where imported.session = sessions.id),"
                                                   " (select max(seq) from events where events.session = sessions.id)"
                                                   " from sessions where id = ?")
                                        (list id)))))
-    (pcase-let ((`(,state ,attention ,seq ,imported ,last) row))
-      (and (member state romacs-agent-store--quiet-states) (eql attention 0)
-           imported (integerp seq) (or (null last) (<= last seq))
-           (1+ seq)))))
+    (pcase-let ((`(,state ,attention ,seq ,settled ,imported ,last) row))
+      (cond ((eql settled romacs-agent--inactive-settlement) 'settled)
+            ((and (member state romacs-agent-store--quiet-states) (eql attention 0)
+                  imported (integerp seq) (or (null last) (<= last seq)))
+             (1+ seq))))))
 
 (defconst romacs-agent-store--row-columns
   "id, dir, harness, provider, model, title, cwd, parent, state, last_time, cost, input_seq, done_seq,
@@ -864,6 +865,51 @@ nothing else of it.  A failure signals."
   (let ((db (or (romacs-agent-store--open) (error "No agents store to keep a title in"))))
     (sqlite-execute db "update sessions set title = ? where id = ?" (list title id))
     t))
+
+(defun romacs-agent-store--settlement (dir)
+  "The settlement fields in DIR's manifest, or nil if gone."
+  (when-let* ((manifest (romacs-agent--read-json (expand-file-name "manifest.json" dir))))
+    (list (romacs-agent--value (gethash "seenSeq" manifest))
+          (romacs-agent--value (gethash "settledSeq" manifest))
+          (romacs-agent--value (gethash "resumeAt" manifest)))))
+
+(defun romacs-agent-store--settlement-row (id dir)
+  "Project ID's settlement from DIR, preserving the rest of its row."
+  (when-let* ((fields (romacs-agent-store--settlement dir))
+              (db (or (romacs-agent-store--open) (error "No agents store to keep settlement"))))
+    (sqlite-execute db "update sessions set seen_seq = ?, settled_seq = ?, resume_time = ? where id = ?"
+                    (append fields (list id)))
+    fields))
+
+(defun romacs-agent-store-project-settlement (session &optional then)
+  "Project SESSION's saved settlement into its row, then call THEN."
+  (let ((id (romacs-agent-id session)) (dir (romacs-agent-dir session)))
+    (romacs-agent-write
+     'romacs-agent-store--settlement-row (list id dir)
+     (lambda (answer)
+       (when (eq (car answer) 'ok)
+         (when (equal (cadr answer) (romacs-agent-store--settlement dir))
+           (romacs-agent-mark id 'settlement nil)
+           (when then (funcall then)))
+         (run-hooks 'romacs-agent-store-settlement-hook)))
+     (list 'settlement id))))
+
+(defvar romacs-agent-store-settlement-hook nil
+  "Run after the writer projects a settlement into the store.")
+
+(defun romacs-agent-store--settlement-pending-p (dir)
+  "Whether the editor still owes DIR's saved settlement to the store."
+  (and dir (file-exists-p (expand-file-name (concat (file-name-nondirectory (directory-file-name dir)) ".settlement")
+                                           (romacs-agent--marks-dir)))))
+
+(defun romacs-agent-store--restore-settlement (session _manifest)
+  "Finish projecting SESSION's settlement if a previous editor stopped first."
+  (when (romacs-agent-store--settlement-pending-p (romacs-agent-dir session))
+    (romacs-agent-store-project-settlement session)))
+
+(add-hook 'romacs-agent-loaded-functions #'romacs-agent-store--restore-settlement)
+(add-to-list 'romacs-agent-mark-kinds
+             (cons 'settlement (lambda (dir _manifest) (romacs-agent-store--settlement-pending-p dir))))
 
 (defun romacs-agent-store-requested (parent request)
   "The id of the session PARENT (nil: no session) started with client

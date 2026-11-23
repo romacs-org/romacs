@@ -204,6 +204,7 @@ string, an overlay."
               (should (shows "  Working"))
               ;; Its startup over with no turn to take up: idle.
               (setq live t)
+              (setf (romacs-agent-caught-up session) t)
               (cl-letf (((symbol-function 'romacs-agent--harness-get)
                          (lambda (_session key) (and (eq key :next) (lambda (_) :ready)))))
                 (romacs-agent--step session))
@@ -259,7 +260,7 @@ string, an overlay."
                 ((symbol-function 'romacs-agent-sessions) (lambda () (list session))))
         (unwind-protect
             (progn (customize-set-variable 'romacs-agent-glyphs t)
-                   (should (string-suffix-p "  🤖  opus-5-5 high  🧵1  44%%" (romacs-agent-header-tests--header))))
+                   (should (string-suffix-p "  🛠️  opus-5-5 high  🧵1  44%%" (romacs-agent-header-tests--header))))
           (customize-set-variable 'romacs-agent-glyphs nil))
         (should (string-suffix-p "  Working  opus-5-5 high  1 threads live  44%%" (romacs-agent-header-tests--header))))
       ;; A font set that cannot draw the harness's icon: its name.

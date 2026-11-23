@@ -18,7 +18,7 @@
 ;; Any module shows one over COLS characters of its own text (a long
 ;; command, a mail send, a build, an agent's turn):
 ;;
-;;   (romacs-working-show ID BUFFER START COLS &optional WORK)
+;;   (romacs-working-show ID BUFFER START COLS &optional WORK RUNNING-FACE)
 ;;   (romacs-working-set ID WORK)
 ;;   (romacs-working-advance ID &optional N)  ; N pieces of progress
 ;;   (romacs-working-stop ID)
@@ -145,19 +145,22 @@ user's own spec still wins."
 
 (defvar romacs-working--threads (make-hash-table :test #'equal)
   "Each thread shown, by id: a plist of :buffer, :start (a marker), :own
-\(whether the thread made the marker), :cols, :work, :beats and
-:animated (whether the display draws its motion).")
+\(whether the thread made the marker), :cols, :work, :running-face, :beats,
+:kill (its cleanup hook) and :animated (whether the display draws its motion).")
 
-(defun romacs-working--face (work)
-  (intern (format "romacs-working-%s" work)))
+(defun romacs-working--face (work running-face)
+  "Return the face for WORK, using RUNNING-FACE for running when given."
+  (or (and (eq work 'running) running-face)
+      (intern (format "romacs-working-%s" work))))
 
 (defun romacs-working--moving-p (work)
   (eq work 'running))
 
-(defun romacs-working-still (cols work)
+(defun romacs-working-still (cols work &optional running-face)
   "COLS characters of the thread for WORK at rest, in its face: idle a
 line sagging in its middle, waiting a taut solid bar, failed cut in
-two, running a line the display sets moving."
+two, running a line the display sets moving.  RUNNING-FACE overrides
+the running face when given."
   (propertize (pcase work
                 ('idle (if (< cols 3) (make-string cols ?⠤)
                          (concat "⠤" (make-string (- cols 2) ?⣀) "⠤")))
@@ -167,7 +170,7 @@ two, running a line the display sets moving."
                              (concat (make-string left ?⠤) (make-string gap ?⠀)
                                      (make-string (- cols left gap) ?⠤)))))
                 (_ (make-string cols ?⠤)))
-              'face (romacs-working--face work)))
+              'face (romacs-working--face work running-face)))
 
 (defun romacs-working--paint (thread)
   "Write THREAD's still frame over its cells, in place: every braille
@@ -176,7 +179,8 @@ keeps its other properties.  A character that is no braille is not
 the thread's, and is left."
   (let* ((buffer (plist-get thread :buffer))
          (start (marker-position (plist-get thread :start)))
-         (still (romacs-working-still (plist-get thread :cols) (plist-get thread :work))))
+         (still (romacs-working-still (plist-get thread :cols) (plist-get thread :work)
+                                     (plist-get thread :running-face))))
     (when (and start (buffer-live-p buffer))
       (with-current-buffer buffer
         (with-silent-modifications
@@ -194,7 +198,8 @@ the display reads as it freezes each frame, its state, colour and beats."
               ((marker-position (plist-get thread :start))))
     (list :start (plist-get thread :start) :cols (plist-get thread :cols) :rows 1
           :kind (list 'working (plist-get thread :work) 0
-                      (romacs-working--face (plist-get thread :work)) (plist-get thread :beats)))))
+                      (romacs-working--face (plist-get thread :work) (plist-get thread :running-face))
+                      (plist-get thread :beats)))))
 
 (defun romacs-working--animate (id thread)
   "Let the display draw THREAD's motion while its work moves, its motion
@@ -209,19 +214,21 @@ registered for it."
                                  (lambda (_dt) (romacs-working--paint thread))
                                  (lambda (_window) (romacs-working--element id))))))
 
-(defun romacs-working-show (id buffer start cols &optional work)
+(defun romacs-working-show (id buffer start cols &optional work running-face)
   "Show thread ID over the COLS characters from START, a line's start in
 BUFFER (a marker, followed as it moves), its work WORK (`idle' by
-default).  A thread ID shown already moves there."
+default).  RUNNING-FACE overrides the running face when given.
+A thread ID shown already moves there."
   (romacs-working-stop id)
   (let ((thread (list :buffer buffer
                       :start (if (markerp start) start (with-current-buffer buffer (copy-marker start)))
-                      :own (not (markerp start)) :cols cols :work (or work 'idle) :beats 0)))
+                      :own (not (markerp start)) :cols cols :work (or work 'idle)
+                      :running-face running-face :beats 0 :kill nil)))
     (puthash id thread romacs-working--threads)
     (with-current-buffer buffer
-      (add-hook 'kill-buffer-hook
-                (lambda () (when (eq (gethash id romacs-working--threads) thread) (romacs-working-stop id)))
-                nil t))
+      (let ((kill (lambda () (when (eq (gethash id romacs-working--threads) thread) (romacs-working-stop id)))))
+        (plist-put thread :kill kill)
+        (add-hook 'kill-buffer-hook kill nil t)))
     (romacs-working--paint thread)
     (romacs-working--animate id thread))
   id)
@@ -247,6 +254,9 @@ steps on as many cells."
   "Show thread ID no more."
   (when-let* ((thread (gethash id romacs-working--threads)))
     (when (plist-get thread :own) (set-marker (plist-get thread :start) nil))
+    (when-let* ((kill (plist-get thread :kill)) ((buffer-live-p (plist-get thread :buffer))))
+      (with-current-buffer (plist-get thread :buffer)
+        (remove-hook 'kill-buffer-hook kill t)))
     (remhash id romacs-working--threads)
     (romacs-animate-stop id)))
 

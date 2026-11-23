@@ -348,7 +348,8 @@ pub(crate) const POISON: Value = Value(((u32::MAX as u64) << 3) | 6);
 
 /// What can stand at a `Vm::catching` outside any engine, for a panic to put
 /// back: an embedder's root frames and holds, the bindings, handlers and
-/// backtrace entries below it, watchers already running, and the Lisp depth.
+/// backtrace entries below it, watchers already running, the Lisp depth,
+/// and the caller's native quit permission.
 struct NestingMark {
     roots: usize,
     holds: usize,
@@ -357,6 +358,7 @@ struct NestingMark {
     handlers: usize,
     backtrace: usize,
     eval_depth: usize,
+    native_quit: bool,
 }
 
 /// Bytes charged per heap object against `gc-cons-threshold': GNU's cons.
@@ -569,6 +571,7 @@ impl Vm {
             handlers: self.signal_handlers.len(),
             backtrace: self.backtrace.frames.len(),
             eval_depth: self.eval_depth,
+            native_quit: self.native_quit,
         };
         let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| body(self)));
         if caught.is_err() {
@@ -577,7 +580,8 @@ impl Vm {
         caught
     }
     fn restore_nesting(&mut self, mark: &NestingMark) {
-        // First, while the backtrace still names them.
+        self.native_quit = mark.native_quit;
+        // Unwind bindings while the backtrace still names them.
         let trapped = std::mem::take(&mut self.trapped);
         self.unwind(self.dynamic.len().saturating_sub(mark.dynamic));
         self.trapped = trapped;
@@ -1316,6 +1320,23 @@ impl Vm {
     fn host_key_pending(&mut self) -> bool {
         self.host_input.as_mut().is_some_and(|host| host.key_pending())
     }
+    /// Forward the caller's roots and the evaluator and buffer roots at
+    /// the collection boundary. A terminal binding retains its saved maps.
+    fn rewrite_root_slots(&mut self, roots: &mut [Value], rewrite: &mut impl FnMut(&mut Value)) {
+        // The traced register slots (`register_roots`); above the tops is NIL.
+        let tops = self.register_tops();
+        let registers = self.stack.files_mut().zip(tops);
+        for v in roots
+            .iter_mut()
+            .chain(registers.flat_map(|(file, top)| file[..top].iter_mut()))
+            .chain(self.external_roots.iter_mut())
+            .chain(self.terminal_bindings.iter_mut().flat_map(|binding| std::iter::once(&mut binding.buffer).chain(binding.away.iter_mut()).chain(binding.unremapped_maps.iter_mut())))
+        {
+            rewrite(v);
+        }
+        self.buffer_order.visit_values(rewrite);
+    }
+
     /// Collect at a strand wait point. All externally retained Values must be in
     /// `roots`; compaction rewrites them. Never share private Values across VMs.
     /// Runtime register, global, binding and inline-cache roots are added here.
@@ -1323,7 +1344,10 @@ impl Vm {
     /// collected, and the heap is as it was (marking writes only caches and
     /// local marks, and an undo list's cut waits for the end of the mark).
     /// Whether it collected.
-    pub(super) fn collect_marked(&mut self, roots: &mut [Value], until_key: bool) -> bool {
+    pub(super) fn collect_at_wait(&mut self, roots: &mut [Value], until_key: bool) -> bool {
+        crate::gap_probe::within(self, move || "(gc)", |vm| vm.collect_marked(roots, until_key))
+    }
+    fn collect_marked(&mut self, roots: &mut [Value], until_key: bool) -> bool {
         // The one funnel: no collection while a hold is open or an engine runs
         // unsuspended, whatever reached here. Raw code cannot suspend its own
         // engine (only the engine's lends do), so it cannot make this pass.
@@ -1432,7 +1456,7 @@ impl Vm {
         ];
         let fill: Vec<usize> = tables.iter().map(|table| table.1).collect();
         let maps: Vec<Vec<usize>> = tables.into_iter().map(|table| table.0).collect();
-        let rewrite = |v: &mut Value| {
+        let mut rewrite = |v: &mut Value| {
             let tag = v.tag();
             let arena = match tag {
                 // Same omission as the mark phase, same cause: tag 3..=5 was
@@ -1467,17 +1491,7 @@ impl Vm {
             Some((cell.payload() as usize, pair))
         });
         self.cells.collector_compact(&maps[2], |v| rewrite(v));
-        // The traced register slots (`register_roots`); above the tops is NIL.
-        let tops = self.register_tops();
-        let registers = self.stack.files_mut().zip(tops);
-        for v in roots
-            .iter_mut()
-            .chain(registers.flat_map(|(file, top)| file[..top].iter_mut()))
-            .chain(self.external_roots.iter_mut())
-            .chain(self.terminal_bindings.iter_mut().flat_map(|binding| std::iter::once(&mut binding.buffer).chain(binding.away.iter_mut()).chain(binding.unremapped_maps.iter_mut())))
-        {
-            rewrite(v);
-        }
+        self.rewrite_root_slots(roots, &mut rewrite);
         if let Some(escape) = &mut self.propagated_escape {
             escape.visit_values(&mut |v| rewrite(v));
         }
@@ -1761,6 +1775,9 @@ impl Vm {
     /// promotes everything instead.
     /// Whether it collected.
     pub(crate) fn collect_minor(&mut self, roots: &[Value]) -> bool {
+        crate::gap_probe::within(self, move || "(gc minor)", |vm| vm.collect_minor_probed(roots))
+    }
+    fn collect_minor_probed(&mut self, roots: &[Value]) -> bool {
         if !self.may_collect(0) {
             return false;
         }
@@ -2085,6 +2102,9 @@ impl Vm {
         }
         pending.extend(self.terminal_bindings.iter().map(|binding| binding.buffer));
         pending.extend(self.terminal_bindings.iter().flat_map(|binding| binding.away.iter().chain(&binding.unremapped_maps).copied()));
+        // The order holds its buffers itself: a name slot is a symbol Lisp
+        // can set, so it is no root to rely on.
+        self.buffer_order.visit_values(&mut |v| pending.push(*v));
         if let Some(escape) = &mut self.propagated_escape {
             escape.visit_values(&mut |v| if keep(v) { pending.push(*v) });
         }
@@ -2737,6 +2757,24 @@ mod tests {
         vm.eval_source_raw("(dotimes (_ 100) (list 1 2 3))").unwrap();
         assert!(vm.collect_minor(&[]));
         assert_eq!(vm.eval_source_raw("(equal panic-held '((5)))").unwrap(), Value::TRUE, "what was old survived the next minor");
+    }
+
+    #[test]
+    fn catching_restores_native_quit_permission() {
+        let mut vm = Vm::new();
+        assert!(vm.quit.interrupt());
+        let panic: fn(&mut Vm) = |vm| std::panic::panic_any(vm.native_stop_due());
+
+        let caught = vm.catching(|vm| vm.inside_quit_scope(panic));
+        assert_eq!(caught.unwrap_err().downcast_ref::<bool>(), Some(&true));
+        assert!(!vm.native_stop_due(), "the interrupted scope no longer grants permission");
+
+        vm.inside_quit_scope(|vm| {
+            let caught = vm.catching(|vm| vm.outside_quit_scope(panic));
+            assert_eq!(caught.unwrap_err().downcast_ref::<bool>(), Some(&false));
+            assert!(vm.native_stop_due(), "the caller's scope grants permission again");
+        });
+        assert!(!vm.native_stop_due());
     }
 
     /// A capture cell's lexical pair is named by `cell_pairs` alone. One

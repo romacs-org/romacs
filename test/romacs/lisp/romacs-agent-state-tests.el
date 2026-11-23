@@ -12,7 +12,6 @@
   (require 'romacs-agent)
   (require 'romacs-agent-ui))
 
-
 (defun romacs-agent-state-tests--session (&rest fields)
   (apply #'romacs-agent--make (append fields (list :id "s" :harness 'claude :provider "claude"))))
 
@@ -116,11 +115,11 @@
     (should (romacs-agent-settled-p session))
     (should-not (romacs-agent-unseen-p session))
     (let ((manifest (romacs-agent-state-tests--manifest dir)))
-      (should (= (gethash "settledSeq" manifest) 5))
+      (should (= (gethash "settledSeq" manifest) romacs-agent--inactive-settlement))
       (should (= (gethash "seenSeq" manifest) 5)))
     (let ((romacs-agent--sessions (make-hash-table :test #'equal)))
       (let ((loaded (romacs-agent--load dir)))
-        (should (= (romacs-agent-settled-seq loaded) 5))
+        (should (= (romacs-agent-settled-seq loaded) romacs-agent--inactive-settlement))
         (should (= (romacs-agent-seen-seq loaded) 5))))))
 
 (ert-deftest romacs-agent-state-seen-survives-a-restart ()
@@ -154,6 +153,34 @@
         (should (= (romacs-agent-done-seq loaded) 2))
         (should (romacs-agent-unseen-p loaded))))))
 
+(ert-deftest romacs-agent-state-journal-status-formats-at-delivery ()
+  (let* ((session (romacs-agent-state-tests--session :state 'idle))
+         (time 1795352400)
+         (local-time (format-time-string "%a %H:%M" time))
+         (seen nil)
+         (romacs-agent-event-functions (list (lambda (_ event) (push event seen)))))
+    (dolist (case `((("type" "resume" "state" "scheduled" "at" ,time)
+                     (:type record-status :kind resume-scheduled :at ,time)
+                     ,(format "resumes by itself at %s, once its limit resets" local-time))
+                    (("type" "handoff" "from" "a" "to" "b" "why" "limit" "resets" ,time)
+                     (:type record-status :kind handoff :from "a" :to "b" :why "limit" :resets ,time)
+                     ,(format "moved from a to b: limit (resets %s)" local-time))
+                    (("type" "handoff" "from" "a" "to" :null "why" "limit")
+                     (:type record-status :kind handoff :from "a" :to :null :why "limit" :resets nil)
+                     "stays on a: limit")
+                    (("type" "resume" "state" "fired" "on" "a")
+                     (:type record-status :kind resume-fired :on "a")
+                     "resumed on a: its limit reset")
+                    (("type" "resume" "state" "cancelled" "why" "settled")
+                     (:type record-status :kind resume-cancelled :why "settled")
+                     "will not resume by itself: settled")))
+      (pcase-let* ((`(,fields ,decoded ,text) case)
+                   (note (apply #'romacs-mcp--object fields))
+                   (seq (1+ (romacs-agent-seq session))))
+        (should (equal (romacs-agent--record-note-events note) (list decoded)))
+        (romacs-agent--record session (romacs-mcp--object "note" note "seq" seq "t" time))
+        (should (equal (pop seen) (list :type 'status :text text :seq seq :last t :time time)))))))
+
 (ert-deftest romacs-agent-state-an-older-session-has-seen-its-past ()
   ;; Recorded before turn ends were kept as seen: what it had is no news,
   ;; and its manifest keeps that.
@@ -166,16 +193,50 @@
         (should-not (romacs-agent-unseen-p loaded))
         (should (= (gethash "seenSeq" (romacs-agent-state-tests--manifest dir)) 2))))))
 
-(ert-deftest romacs-agent-state-new-activity-unsettles ()
+(ert-deftest romacs-agent-state-inactive-until-brought-back ()
   (romacs-agent-state-tests--recorded (:state 'idle :input-seq 4 :done-seq 5 :caught-up t)
     (romacs-agent-settle session)
     (should (eq (romacs-agent-ui--state-key session) 'settled))
     (romacs-agent--raise session '(:type input :seq 6 :text "more"))
-    (should (eq (romacs-agent-ui--state-key session) 'working))
+    (should (eq (romacs-agent-ui--state-key session) 'settled))
     (romacs-agent--raise session '(:type done :seq 7 :text "done"))
-    (should (eq (romacs-agent-ui--state-key session) 'completed))
-    (romacs-agent-settle session)
-    (should (eq (romacs-agent-ui--state-key session) 'settled))))
+    (should (eq (romacs-agent-ui--state-key session) 'settled))
+    (romacs-agent-settle session t)
+    (should (eq (romacs-agent-ui--state-key session) 'idle))))
+
+(ert-deftest romacs-agent-state-steer-and-exit-are-folded-before-observers ()
+  (romacs-agent-state-tests--recorded (:state 'idle :options '(:parent "p"))
+    (let* ((seen nil)
+           (romacs-agent-event-functions
+            (list (lambda (state event)
+                    (push (list (plist-get event :type) (romacs-agent-state state)
+                                (romacs-agent-answering state) (romacs-agent-interrupted state)
+                                (plist-get (romacs-agent-driver-state state) :compact-turn)
+                                (romacs-agent-ends state))
+                          seen)))))
+      (romacs-agent--raise session '(:type input :seq 1 :text "/compact" :messages ((:kind "parent" :id "first"))))
+      (romacs-agent--raise session '(:type input :seq 2 :text "Steer" :messages ((:kind "parent" :id "later"))))
+      (romacs-agent--raise session '(:type exit :seq 3 :status 1))
+      (should (equal (nreverse seen)
+                     '((input running "first" nil t nil)
+                       (input running "first" nil t nil)
+                       (exit ended "first" t nil
+                             ((3 "the harness exited (1) before its turn ended" t "first"))))))
+      (should (equal (mapcar (lambda (message) (plist-get message :id)) (romacs-agent-received session))
+                     '("later" "first"))))))
+
+(ert-deftest romacs-agent-state-completion-computes-the-turn-from-its-inputs ()
+  (let* ((before '(:turns 2 :provider "account" :model "model" :context-window 64000 :cost 0.5))
+         (event '(:type done :seq 7 :limit model :error t :reason "out of room"))
+         (room '(:window "daily" :resets 100))
+         (done (romacs-agent--completed-turn before event room)))
+    (should (equal done
+                   '(:seq 7 :turns 3 :reply nil :failed t
+                     :limited (:provider "account" :model "model" :text "out of room" :window "daily" :resets 100)
+                     :context-window 64000 :cost 0.5)))
+    (should (equal before '(:turns 2 :provider "account" :model "model" :context-window 64000 :cost 0.5)))
+    (should (equal (romacs-agent--completed-turn before '(:type done :text "ok" :context-window 32000 :cost 0.75) nil)
+                   '(:seq 0 :turns 3 :reply "ok" :failed nil :limited nil :context-window 32000 :cost 0.75)))))
 
 (ert-deftest romacs-agent-state-questions-and-plans-from-events ()
   (romacs-agent-state-tests--recorded (:state 'running :input-seq 4)
@@ -235,6 +296,13 @@
           (romacs-agent-ui--children-flush))
         (should (eq (romacs-agent-ui--state-key worker) 'idle))
         (should (eq (romacs-agent-ui--state-key lead) 'idle))))))
+
+(ert-deftest romacs-agent-state-rollup-ranks-news ()
+  (let ((romacs-agent-glyphs nil))
+    (should (equal (substring-no-properties
+                    (romacs-agent-ui--rollup '(completed settled working idle approval)))
+                   "1 needs approval · 1 working · 1 completed"))
+    (should-not (romacs-agent-ui--rollup '(idle settled)))))
 
 (provide 'romacs-agent-state-tests)
 ;;; romacs-agent-state-tests.el ends here

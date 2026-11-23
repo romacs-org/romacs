@@ -141,48 +141,94 @@ impl Vm {
         }
     }
 
-    pub(super) fn core_nreverse(&mut self, seq: Value) -> Result<Value> {
+    /// The rest of `core_nreverse`'s walk, from a restart of Brent's check
+    /// that set SLOW to FAST with a power of `KERNEL_CHUNK`, after
+    /// `KERNEL_CHUNK` - 1 steps: the same steps, polled at each
+    /// `KERNEL_CHUNK` of the whole walk, the first of them the next step
+    /// (`Vm::kernel_poll`), which writes nothing. Ok at the walk's end or at
+    /// the cycle it found.
+    #[cold]
+    #[inline(never)]
+    fn brent_polled<const SCOPED: bool>(&mut self, seq: Value, mut slow: Value, mut fast: Value) -> Result<()> {
+        let (mut power, mut lam, mut until_poll) = (crate::quit::KERNEL_CHUNK, 0usize, 1usize);
+        while fast.tag_is(3) {
+            if Self::image_value(fast) {
+                return Err(self.refuse_read_only(seq));
+            }
+            fast = self.conses[fast.index(3)?].1;
+            lam += 1;
+            // Asked before the cycle check: a step that finds the cycle is
+            // still one of the walk's, and a press waiting then quits.
+            until_poll -= 1;
+            if until_poll == 0 {
+                until_poll = crate::quit::KERNEL_CHUNK;
+                self.kernel_poll::<SCOPED>()?;
+            }
+            if fast == slow {
+                break;
+            }
+            if lam == power {
+                (slow, power, lam) = (fast, power * 2, 0);
+            }
+        }
+        Ok(())
+    }
+
+    /// fns.c Fnreverse. SCOPED: called by the engine's own call target
+    /// (`Vm::kernel_poll`).
+    fn nreverse_list<const SCOPED: bool>(&mut self, seq: Value) -> Result<Value> {
+        // VM2 contract (tests/gc.rs, tests/image_startup.rs): an image
+        // cons is never written and the refusal precedes every write.
+        // Image edges reach only image objects, so the private prefix ends
+        // at the first image cons; Brent's walk finds it, a private end or
+        // a private cycle in bounded steps without mutating.
+        let (mut slow, mut fast, mut power, mut lam) = (seq, seq, 1usize, 0usize);
+        while fast.tag_is(3) {
+            if Self::image_value(fast) {
+                return Err(self.refuse_read_only(seq));
+            }
+            fast = self.conses[fast.index(3)?].1;
+            lam += 1;
+            if fast == slow {
+                break;
+            }
+            if lam == power {
+                (slow, power, lam) = (fast, power * 2, 0);
+                // A walk past a chunk goes on polled.
+                if power == crate::quit::KERNEL_CHUNK {
+                    self.brent_polled::<SCOPED>(seq, slow, fast)?;
+                    break;
+                }
+            }
+        }
+        let mut prev = Value::NIL;
+        let mut tail = seq;
+        // NOPOLL: the list's length, which the polled walk above bounded; the reversal writes as it goes,
+        // and GNU's Fnreverse stops it only at rarely_quit.
+        while tail.tag_is(3) {
+            let i = tail.index(3)?;
+            let next = self.conses[i].1;
+            // "If SEQ contains a cycle, attempting to reverse it in-place
+            // will inevitably come back to SEQ."
+            if next == seq {
+                return Err("circular list".into());
+            }
+            self.conses.set_cdr(i, prev);
+            prev = tail;
+            tail = next;
+        }
+        if tail != Value::NIL {
+            return Err("list required".into());
+        }
+        Ok(prev)
+    }
+
+    pub(super) fn core_nreverse<const SCOPED: bool>(&mut self, seq: Value) -> Result<Value> {
         if seq == Value::NIL {
             return Ok(seq);
         }
         if seq.tag_is(3) {
-            // VM2 contract (tests/gc.rs, tests/image_startup.rs): an image
-            // cons is never written and the refusal precedes every write.
-            // Image edges reach only image objects, so the private prefix ends
-            // at the first image cons; Brent's walk finds it, a private end or
-            // a private cycle in bounded steps without mutating.
-            let (mut slow, mut fast, mut power, mut lam) = (seq, seq, 1usize, 0usize);
-            while fast.tag_is(3) {
-                if Self::image_value(fast) {
-                    return Err(self.refuse_read_only(seq));
-                }
-                fast = self.conses[fast.index(3)?].1;
-                lam += 1;
-                if fast == slow {
-                    break;
-                }
-                if lam == power {
-                    (slow, power, lam) = (fast, power * 2, 0);
-                }
-            }
-            let mut prev = Value::NIL;
-            let mut tail = seq;
-            while tail.tag_is(3) {
-                let i = tail.index(3)?;
-                let next = self.conses[i].1;
-                // "If SEQ contains a cycle, attempting to reverse it in-place
-                // will inevitably come back to SEQ."
-                if next == seq {
-                    return Err("circular list".into());
-                }
-                self.conses.set_cdr(i, prev);
-                prev = tail;
-                tail = next;
-            }
-            if tail != Value::NIL {
-                return Err("list required".into());
-            }
-            return Ok(prev);
+            return self.nreverse_list::<SCOPED>(seq);
         }
         if let Some(text) = self.str_view(seq) {
             // Freverse: a fresh string; unibyte exactly when chars == bytes.
@@ -211,6 +257,8 @@ impl Vm {
             return Ok(seq);
         }
         if let Some(data::Object::BoolVector(bits)) = index.and_then(|i| self.objects.get_entry_mut(i)) {
+            // NOPOLL: half the bool-vector's length, swapped in place: a quit halfway would leave it half
+            // reversed (a3 REPORT C8, known list).
             for i in 0..bits.len / 2 {
                 let j = bits.len - 1 - i;
                 let left = bits.get(i).unwrap();

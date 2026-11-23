@@ -8,7 +8,8 @@ fn next_property_change(cx, position: Value; optional object: Value, limit: Valu
 
 defsubr! { name = "next-single-char-property-change", gnu = "textprop.c:771", effect = Reads,
 fn next_single_char_property_change(cx, position: Value, property: Value; optional object: Value, limit: Value) {
-    cx.next_single_char_property_change(position, property, object, limit)
+    // A read: its walk stops anywhere (redisplay's own walk does not quit).
+    cx.quittable(|cx| cx.next_single_char_property_change(position, property, object, limit))
 }}
 
 defsubr! { name = "previous-single-char-property-change", gnu = "textprop.c:857", effect = Reads,

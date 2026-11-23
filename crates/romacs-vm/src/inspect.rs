@@ -251,7 +251,7 @@ mod tests {
         assert_eq!(shown.map(|(elements, _)| elements.len()).ok(), Some(20000));
         assert!(vm.quit.due(), "redisplay took the quit");
         assert!(!crate::host::inspect_pending(), "redisplay left the inspection unanswered");
-        vm.motion_quit = true;
+        vm.native_quit = true;
         assert!(crate::prim::window_shown_elements(&mut vm, window, 1, 20001).is_err(), "a Lisp-called motion did not quit");
     }
 
@@ -317,7 +317,7 @@ mod tests {
         assert!(vm.next_single_char_property_change_values(start, display, buffer, Value::NIL).is_ok());
         assert!(!crate::host::inspect_pending(), "the walk left the inspection unanswered");
         assert!(signal.interrupt(), "a busy evaluator takes the press");
-        vm.motion_quit = true;
+        vm.native_quit = true;
         assert!(vm.next_single_char_property_change_values(start, display, buffer, Value::NIL).is_err(), "the walk did not quit");
     }
 }

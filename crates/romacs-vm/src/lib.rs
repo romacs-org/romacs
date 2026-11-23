@@ -36,6 +36,7 @@ mod cell_pairs;
 mod oclosure;
 mod host_input;
 mod quit;
+mod gap_probe;
 pub use gc_mark::{forbid_threads as forbid_gc_threads, set_workers as set_gc_workers};
 pub use quit::QuitSignal;
 #[cfg(feature = "test-hooks")]
@@ -154,6 +155,7 @@ mod active_keymaps;
 mod annotation_primitives;
 mod annotations;
 mod buffer;
+mod buffer_order;
 mod buffer_swap;
 mod bytes;
 mod modification;
@@ -693,6 +695,11 @@ enum Primitive {
 }
 /// The file declaring [`PRIMITIVES`], relative to the source tree.
 pub(crate) const PRIMITIVES_FILE: &str = file!();
+/// A lib.rs primitive's name, for the gap probe (`gap_probe`).
+pub(crate) fn legacy_primitive_name(primitive: Primitive) -> &'static str {
+    PRIMITIVES.iter().find(|(_, p)| *p == primitive).map_or("(legacy)", |(name, _)| name)
+}
+
 const PRIMITIVES: &[(&str, Primitive)] = &[
     ("+", Primitive::Add),
     ("/", Primitive::Div),
@@ -1382,9 +1389,13 @@ pub struct Vm {
     display_state: display::DisplayState,
     window_state: window::WindowState,
     world_version: u64,
-    /// A Lisp-called motion runs, whose polls may quit (`Vm::native_poll`).
-    /// Off in redisplay, which never unwinds half done.
-    motion_quit: bool,
+    /// A primitive Lisp called runs a native loop that stops consistently at
+    /// its polls, so a poll may quit (`Vm::native_poll`, `Leaf::quittable`).
+    /// Off in redisplay, which never unwinds half done, and wherever Rust
+    /// reaches the same loop without a caller that would unwind. Granted at
+    /// a primitive's own entry only, and off in any Lisp or primitive entered
+    /// below it (`Vm::outside_quit_scope`).
+    native_quit: bool,
     // CELL(Plain)
     #[cfg(test)]
     variable_read_probes: std::cell::Cell<usize>,
@@ -1537,6 +1548,8 @@ pub struct Vm {
     #[snapshot(at_rest)]
     terminal_host: Option<Box<dyn terminal_host::TerminalHost>>,
     terminal_bindings: Vec<terminal_host::TerminalBinding>,
+    /// The buffer list's order (buffer_order.rs): roots for collection.
+    buffer_order: buffer_order::BufferOrder,
     pending_specials: NameSet<String>,
     /// Names a one-argument top-level `(defvar NAME)` declared in the file
     /// being loaded: special for the rest of that file only (GNU Fdefvar,
@@ -1858,7 +1871,7 @@ impl Vm {
             display_state: display::DisplayState::new(),
             window_state: window::WindowState::default(),
             world_version: 1,
-            motion_quit: false,
+            native_quit: false,
             #[cfg(test)]
             variable_read_probes: std::cell::Cell::new(0),
             #[cfg(test)]
@@ -1910,7 +1923,7 @@ impl Vm {
             treesit_plain: Vec::new(),
             treesit_deferred: None,
             treesit_parse_owed: false,
-            quit: std::sync::Arc::default(),
+            quit: gap_probe::as_hosted(std::sync::Arc::default()),
             force_quit_count: 0,
             deferred_escapes: 0,
             quit_slots: [0; 3],
@@ -1925,6 +1938,7 @@ impl Vm {
             doc_file: None,
             terminal_host: None,
             terminal_bindings: Vec::new(),
+            buffer_order: buffer_order::BufferOrder::default(),
             propagate_next: false,
             pending_specials: NameSet::default(),
             file_specials: NameSet::default(),
@@ -2156,9 +2170,7 @@ impl Vm {
         for name in ["print-length", "print-level", "print-escape-nonascii", "print-escape-multibyte", "print-escape-control-characters", "print-circle", "print-escape-newlines", "menu-bar-mode", "truncate-lines"] {
             vm.declare_special_raw(name, Value::NIL);
         }
-        for name in ["kill-buffer-hook", "kill-buffer-query-functions", "buffer-list-update-hook"] {
-            vm.declare_special_raw(name, Value::NIL);
-        }
+        vm.declare_special_raw("buffer-list-update-hook", Value::NIL);
         vm.declare_special_raw("macroexp--dynvars", Value::NIL);
         vm.truncate_lines_slot = vm.slot("truncate-lines");
         vm.permanent_local_slot = vm.slot("permanent-local");
@@ -3926,7 +3938,7 @@ impl Vm {
             return self.process_lines(start, n);
         }
         if p == Format {
-            return self.format_string(start, n);
+            return self.format_polled(start, n);
         }
         if matches!(
             p,
@@ -4002,7 +4014,7 @@ impl Vm {
                     tails::TailEnd::Circular(_) => Err("circular list".into()),
                 }
             }
-            Nreverse => self.core_nreverse(a[0]),
+            Nreverse => self.core_nreverse::<false>(a[0]),
             _ => Err("primitive requires executor adapter".into()),
         }
     }

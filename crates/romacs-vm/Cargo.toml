@@ -85,6 +85,9 @@ sha2 = "0.11"
 # (`declaration_stores`). Only test targets enable it, through the
 # dev-dependency on this crate below.
 test-hooks = []
+# The safepoint-gap probe (src/gap_probe.rs): a test build's record of the
+# spans no quit poll reaches. Off in every shipped build.
+safepoint-gap-probe = []
 
 [dev-dependencies]
 # This crate with its test hooks, for its own tests.

@@ -271,12 +271,12 @@ call and result, an answer and a result a turn."
       (should (equal (gethash "Which?" answers) "A, B"))
       (should-not (gethash "Unanswered?" answers)))
     (should-not (romacs-agent--codex-given-answers params (romacs-mcp--object "decision" "accept"))))
-  (let ((session (romacs-agent--make :id "c" :harness 'codex :tools (make-hash-table :test #'equal)
-                                     :streamed (make-hash-table :test #'equal))))
-    (should (equal (romacs-agent-turns--status (romacs-agent--codex-done session (romacs-mcp--object "status" "interrupted")))
-                   "interrupted"))
-    (should (equal (romacs-agent-turns--status (romacs-agent--codex-done session (romacs-mcp--object "status" "failed")))
-                   "failed"))))
+  (should (equal (romacs-agent-turns--status
+                  (romacs-agent--codex-done (romacs-mcp--object "status" "interrupted") nil nil))
+                 "interrupted"))
+  (should (equal (romacs-agent-turns--status
+                  (romacs-agent--codex-done (romacs-mcp--object "status" "failed") nil nil))
+                 "failed")))
 
 (ert-deftest romacs-agent-turns-a-long-output-is-read-when-asked ()
   ;; A tool's output over the inline size is not in its row: read from

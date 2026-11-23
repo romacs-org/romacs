@@ -216,6 +216,188 @@ fn local_sockets_match_pinned_gnu() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+/// A busy VM with GNU's Lisp, the signal its host's input thread holds,
+/// and a private scratch directory NAME. The boot first: a missing world is
+/// built by the test run again, which ends inside `gnu_lisp`, before any
+/// of the test's own setup.
+fn busy_gnu_vm(name: &str) -> (Vm, std::sync::Arc<romacs_vm::QuitSignal>, std::path::PathBuf) {
+    let mut vm = gnu_lisp(&[]);
+    let base = scratch(name);
+    std::fs::create_dir_all(&base).unwrap();
+    let signal = std::sync::Arc::new(romacs_vm::QuitSignal::new());
+    vm.share_quit_signal(signal.clone());
+    vm.enter_busy();
+    (vm, signal, base)
+}
+
+// The child observes its own pipe. The marker certifies the complete output
+// was read, with no descriptor lookup or exec between that check and readiness.
+const QUIT_OUTPUT_CHILD: &str = r#"
+import array, fcntl, pathlib, signal, sys, termios, time
+
+if len(sys.argv) == 4:
+    count = pathlib.Path(sys.argv[3])
+    runs = int(count.read_text()) + 1 if count.exists() else 1
+    count.write_text(str(runs))
+    if runs != 1:
+        sys.exit(0)
+
+signal.signal(signal.SIGINT, signal.SIG_DFL)
+signal.alarm(30)
+sys.stdout.buffer.write(b'a' * int(sys.argv[2]))
+sys.stdout.buffer.flush()
+unread = array.array('i', [0])
+while True:
+    fcntl.ioctl(sys.stdout.fileno(), termios.FIONREAD, unread, True)
+    if unread[0] == 0:
+        break
+    time.sleep(0.001)
+pathlib.Path(sys.argv[1]).touch()
+time.sleep(30)
+"#;
+
+/// C-g on SIGNAL when the child has published MARKER after its last output
+/// was read, from another thread. Return the moment of the press.
+fn press_once_drained(signal: &std::sync::Arc<romacs_vm::QuitSignal>, marker: &Path) -> std::thread::JoinHandle<std::time::Instant> {
+    use std::time::{Duration, Instant};
+    let (signal, marker) = (signal.clone(), marker.to_path_buf());
+    std::thread::spawn(move || {
+        let start = Instant::now();
+        while !marker.exists() {
+            assert!(start.elapsed() < Duration::from_mins(1), "the child never wrote its marker");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let pressed_at = Instant::now();
+        assert!(signal.interrupt(), "a busy evaluator takes the press");
+        pressed_at
+    })
+}
+
+/// C-g during call-process's wait, once its child has written 128 KiB, all
+/// of it read, and gone to sleep: the output read is in the buffer, the
+/// whole of it here (callproc.c inserts only each full block it read, a
+/// partial one lost to the quit: ledger VM2-CALLPROC-QUIT-OUTPUT). The call
+/// must end within 100 ms of the press in a restored session.
+#[test]
+fn a_quit_in_call_process_keeps_the_output_read() {
+    use romacs_vm::world::{arena, store};
+    use std::time::{Duration, Instant};
+    let (mut vm, signal, base) = busy_gnu_vm("quit");
+    let marker = base.join("drained");
+    let presser = press_once_drained(&signal, &marker);
+    let value = vm.eval_source(&format!(r#"(progn (setq default-directory "/")
+        (with-temp-buffer (let ((coding-system-for-read 'no-conversion))
+          (list (condition-case nil (call-process "python3" nil t nil "-c" {QUIT_OUTPUT_CHILD:?} {:?} "131072") (quit 'quit)) (buffer-size)))))"#,
+        marker.display().to_string()));
+    let ended = Instant::now();
+    let value = value.and_then(romacs_vm::Local::display);
+    let pressed_at = presser.join().unwrap();
+    std::fs::remove_dir_all(&base).unwrap();
+    assert_eq!(value.as_deref(), Ok("(quit 131072)"));
+    let latency = ended.saturating_duration_since(pressed_at);
+    let restored = arena::restore_outcome() == arena::Restore::Mapped;
+    if romacs_vm::host::one_test_process() && arena::serves_heap() && !store::disabled() {
+        assert!(restored, "the latency trial requires a restored test world");
+    }
+    eprintln!("call-process after C-g: {latency:?} (world restored: {restored})");
+    if restored {
+        assert!(latency < Duration::from_millis(100), "the call ended {latency:?} after C-g");
+    }
+}
+
+/// C-g during a call-process a macro's expansion runs, as `eval` compiles
+/// the form that calls it, with output read: the quit is raised again as
+/// C-g's once the output is inserted (`romacs--call-process-quit`), so the
+/// expansion defers it to the call's reach (`quit_watched`), which raises it
+/// without expanding the macro, and running its child, a second time. Lisp
+/// the insertion runs may catch what it likes meanwhile, here a change hook
+/// that throws to its own catch, or run a call-process of its own, or try
+/// to raise a quit of its own with a forged token (a number), each of which
+/// leaves the outer quit's token alone. The child counts its runs in a
+/// file; only the first writes and waits.
+#[test]
+fn a_quit_in_an_expansions_call_process_runs_its_child_once() {
+    let (mut vm, signal, base) = busy_gnu_vm("expansion");
+    let hooks = ["nil", "(lambda (&rest _) (catch 'a (throw 'a nil)))", "(lambda (&rest _) (call-process \"true\" nil nil nil))",
+                 "(lambda (&rest _) (dotimes (i 100) (condition-case nil (romacs--call-process-quit (1+ i)) (quit nil))))"];
+    for (case, hook) in hooks.into_iter().enumerate() {
+        let dir = base.join(case.to_string());
+        std::fs::create_dir_all(&dir).unwrap();
+        let (marker, count) = (dir.join("drained"), dir.join("count"));
+        let [marker_name, count_name] = [&marker, &count].map(|path| path.display().to_string());
+        vm.eval_source(&format!(r#"(progn (setq default-directory "/")
+            (defmacro quit-expansion-child ()
+              (with-temp-buffer
+                (when {hook} (add-hook 'after-change-functions {hook} nil t))
+                (let ((coding-system-for-read 'no-conversion))
+                  (call-process "python3" nil t nil "-c" {QUIT_OUTPUT_CHILD:?} {marker_name:?} "4096" {count_name:?})))
+              ''expanded))"#)).unwrap();
+        let presser = press_once_drained(&signal, &marker);
+        let value = vm.eval_source("(condition-case nil (eval '(list (quit-expansion-child)) t) (quit 'quit))")
+            .and_then(romacs_vm::Local::display);
+        presser.join().unwrap();
+        let runs = std::fs::read_to_string(&count).unwrap();
+        assert_eq!((value.as_deref(), runs.trim()), (Ok("quit"), "1"), "hook {hook}: one C-g quits the call, its child run once");
+    }
+    std::fs::remove_dir_all(&base).unwrap();
+}
+
+/// C-g during call-process's wait whose output then cannot be inserted (a
+/// read-only buffer), a hundred times: each insertion's error ends its call,
+/// and its quit's token is retired as the call ends, so none is left. No
+/// later caller takes a quit's place: a macro calling
+/// `romacs--call-process-quit` with no token of its own signals a plain
+/// quit, which its expansion treats as any error.
+#[test]
+fn a_quit_whose_output_is_not_inserted_leaves_no_c_g_quit_behind() {
+    let (mut vm, signal, base) = busy_gnu_vm("read-only");
+    for round in 0..100 {
+        let dir = base.join(round.to_string());
+        std::fs::create_dir_all(&dir).unwrap();
+        let marker = dir.join("drained");
+        let presser = press_once_drained(&signal, &marker);
+        let value = vm.eval_source(&format!(r#"(progn (setq default-directory "/")
+            (with-temp-buffer (setq buffer-read-only t) (let ((coding-system-for-read 'no-conversion))
+              (condition-case nil (call-process "python3" nil t nil "-c" {QUIT_OUTPUT_CHILD:?} {:?} "4096") (buffer-read-only 'read-only) (quit 'quit)))))"#,
+            marker.display().to_string())).and_then(romacs_vm::Local::display);
+        presser.join().unwrap();
+        assert_eq!(value.as_deref(), Ok("read-only"), "round {round}: the insertion's error ends the call");
+    }
+    std::fs::remove_dir_all(&base).unwrap();
+    let left = vm.eval_source("(length (symbol-value (intern \"#:vm2-call-process-quits\")))").and_then(romacs_vm::Local::display);
+    assert_eq!(left.as_deref(), Ok("0"), "a token outlived its call");
+    vm.eval_source("(defmacro quit-stale () (romacs--call-process-quit))").unwrap();
+    let value = vm.eval_source("(eval '(if nil (quit-stale) 'else) t)").and_then(romacs_vm::Local::display);
+    assert_eq!(value.as_deref(), Ok("else"), "the unraised quit was taken by another caller");
+}
+
+/// A quit's token is the call's own before the wait can register it: an
+/// advice on `romacs--call-process-run` that throws out of a quit's result,
+/// past the rest of call-process, leaves no token behind, call after call.
+#[test]
+fn a_throw_out_of_call_process_s_run_leaves_no_token_behind() {
+    let (mut vm, signal, base) = busy_gnu_vm("thrown");
+    vm.eval_source("(progn (defun quit-test-throw (result)
+                             (if (eq (car-safe (car-safe result)) 'quit) (throw 'quit-test-out 'thrown) result))
+                           (advice-add 'romacs--call-process-run :filter-return #'quit-test-throw))").unwrap();
+    for round in 0..20 {
+        let dir = base.join(round.to_string());
+        std::fs::create_dir_all(&dir).unwrap();
+        let marker = dir.join("drained");
+        let presser = press_once_drained(&signal, &marker);
+        let value = vm.eval_source(&format!(r#"(progn (setq default-directory "/")
+            (with-temp-buffer (let ((coding-system-for-read 'no-conversion))
+              (catch 'quit-test-out (call-process "python3" nil t nil "-c" {QUIT_OUTPUT_CHILD:?} {:?} "4096")))))"#,
+            marker.display().to_string())).and_then(romacs_vm::Local::display);
+        presser.join().unwrap();
+        assert_eq!(value.as_deref(), Ok("thrown"), "round {round}: the advice threw out of the quit's result");
+    }
+    std::fs::remove_dir_all(&base).unwrap();
+    vm.eval_source("(advice-remove 'romacs--call-process-run #'quit-test-throw)").unwrap();
+    let left = vm.eval_source("(length (symbol-value (intern \"#:vm2-call-process-quits\")))").and_then(romacs_vm::Local::display);
+    assert_eq!(left.as_deref(), Ok("0"), "a token outlived its call");
+}
+
 // A host outlives its VM: children the VM leaves, running or deleted, are
 // still reaped once they exit, not left as zombies.
 #[test]

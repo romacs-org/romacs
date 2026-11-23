@@ -461,7 +461,8 @@ runs, once it ends."
              :name "romacs-agent-turns-fill" :noquery t :connection-type 'pipe
              :buffer (generate-new-buffer " *romacs-agent-turns-fill*" t)
              :command (append (list (expand-file-name invocation-name invocation-directory) "--batch"
-                                    "-l" "romacs-agent" "-f" "romacs-agent-turns-fill-batch")
+                                    "-l" "romacs-agent" "--eval" (romacs-agent--driver-batch-form)
+                                    "-f" "romacs-agent-turns-fill-batch")
                               ids)
              :sentinel (lambda (process _event)
                          (unless (process-live-p process)

@@ -13,7 +13,7 @@ use super::batch::{Batch, Scissor};
 use super::color::linear_premultiplied;
 use super::draw::{CellsPaint, Color, Font, TextPaint};
 use crate::glyph_atlas::{
-    GlyphAtlasHandle, GlyphKey, SubpixelRequest, WgpuGlyphAtlas, glyph_font_identity,
+    GlyphAtlasHandle, GlyphKey, SubpixelRequest, WgpuGlyphAtlas,
 };
 use crate::vertex::GlyphVertex;
 use cosmic_text::SubpixelBin;
@@ -184,7 +184,6 @@ fn rasters(
                 charcode: ch as u32,
                 face_id: font.face.id,
                 font_size_bits: size_bits,
-                font_identity: glyph_font_identity(Some(&font.face)),
                 x_bin: SubpixelBin::Zero,
                 y_bin: SubpixelBin::Zero,
             };

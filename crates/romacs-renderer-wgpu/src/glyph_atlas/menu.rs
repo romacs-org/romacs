@@ -1,5 +1,5 @@
 //! Native menu text measurement through the same font/raster source as paint.
-use super::{GlyphKey, SubpixelRequest, WgpuGlyphAtlas, glyph_font_identity};
+use super::{GlyphKey, SubpixelRequest, WgpuGlyphAtlas};
 use cosmic_text::SubpixelBin;
 use romacs_display_protocol::FaceId;
 
@@ -20,7 +20,6 @@ impl WgpuGlyphAtlas {
                 charcode: ch as u32,
                 face_id: FaceId::new(0),
                 font_size_bits: 0.0_f32.to_bits(),
-                font_identity: glyph_font_identity(face),
                 x_bin: SubpixelBin::Zero,
                 y_bin: SubpixelBin::Zero,
             };

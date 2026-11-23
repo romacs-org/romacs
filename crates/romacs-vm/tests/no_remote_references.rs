@@ -45,7 +45,7 @@ const FIELDS: &[(&str, Class)] = &[
     // `Shown`'s Values are compared only while `collections` still matches, and
     // `previous` and the bar's caches go the same way; faces are hidden slots.
     ("display_state", Cache),
-    ("window_state", Free), ("world_version", Free), ("motion_quit", Free),
+    ("window_state", Free), ("world_version", Free), ("native_quit", Free),
     // The current buffer as last resolved: a collection and a kill clear it,
     // and a slot holding another value resolves afresh (buffer.rs).
     ("resolved_buffer", Cache), ("buffer_resolutions", Free),
@@ -85,6 +85,10 @@ const FIELDS: &[(&str, Class)] = &[
     ("debug_event_slots", Free), ("keymap_generation", Free), ("process_jobs", Free), ("subprocesses", Free),
     ("environment_snapshot", Free), ("trapped", Free), ("retrap", Free), ("doc_file", Free),
     ("terminal_host", Free), ("terminal_bindings", Root),
+    // The buffer list's order: read at every mark and rewritten when objects
+    // move. Its buffers' name slots are symbols Lisp can set, so the order
+    // roots them itself (buffer_order.rs).
+    ("buffer_order", Root),
     ("pending_specials", Free), ("file_specials", Free), ("seed_file_specials", Free), ("file_level_request", Free),
     ("lazy_regime", Free), ("interpreting_source", Free), ("defer_expansion_errors", Free), ("evaluating", Free), ("quit_unwinding", Free),
     // Weak: one whose error a Rust caller discarded goes at the next collection.

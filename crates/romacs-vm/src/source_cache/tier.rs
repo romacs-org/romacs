@@ -57,7 +57,8 @@ impl Vm {
                     _ => self.literal(f)?,
                 });
             }
-            self.with_kernel_stack(&args, |vm, n| vm.primitive(p, 0, n))
+            // A primitive entered natively: outside any caller's quit scope.
+            self.with_kernel_stack(&args, |vm, n| vm.outside_quit_scope(|vm| vm.primitive(p, 0, n)))
         })();
         // This tier has no escape channel. Fall back before returning a fault
         // whose symbol data must be carried by the ordinary evaluator.

@@ -97,25 +97,28 @@ date from it: the same record for its id each time."
   (when-let* ((buffer (gethash id (romacs-agent-remote-chats source))) ((buffer-live-p buffer)))
     buffer))
 
-(defun romacs-agent-remote--draw-unit (session unit &optional live)
-  "Draw UNIT, a record unit the service sent, in the current chat: LIVE,
-as its live events are drawn."
-  (if (eq (gethash "oversize" unit) t)
-      (romacs-agent-log--writing (romacs-agent-log--note nil "a record too large to send"))
-    (dolist (event (romacs-agent-wire-decode-unit (gethash "events" unit)))
-      (if live (romacs-agent-log--draw-live session event) (romacs-agent-log-draw session event))))
-  (setq romacs-agent-log--seq (max romacs-agent-log--seq (gethash "seq" unit))))
+(defun romacs-agent-remote--draw-unit (session unit &optional source)
+  "Draw UNIT from the service.  SOURCE is `live', `snapshot', or nil for history."
+  (let ((seq (gethash "seq" unit)))
+    (when (or (not (eq source 'live)) (> seq romacs-agent-log--seq))
+      (if (eq (gethash "oversize" unit) t)
+          (romacs-agent-log--writing (romacs-agent-log--note nil "a record too large to send"))
+        (dolist (event (romacs-agent-wire-decode-unit (gethash "events" unit)))
+          (when source (romacs-agent-ui-track-workers session event))
+          (if (eq source 'live) (romacs-agent-log--draw-live session event) (romacs-agent-log-draw session event))))
+      (setq romacs-agent-log--seq (max romacs-agent-log--seq seq)))))
 
 (defun romacs-agent-remote--drawn (session units from)
   "Draw SESSION afresh: UNITS, beginning at seq FROM (nil, its start)."
   (romacs-agent-log--clear)
+  (romacs-agent-ui-reset-workers session)
   (setq romacs-agent-log--from from romacs-agent-remote--earlier nil)
   (when from
     (romacs-agent-log--writing (save-excursion (goto-char (point-min)) (insert (romacs-agent-log--earlier-line from)))))
   ;; What streams at its end goes on streaming: the live units that
   ;; follow may carry on its message.
   (let ((romacs-agent-log--closes-deferred t))
-    (dolist (unit units) (romacs-agent-remote--draw-unit session unit)))
+    (dolist (unit units) (romacs-agent-remote--draw-unit session unit 'snapshot)))
   (romacs-agent-log--sync-asks session)
   (romacs-agent-log--separator t)
   (romacs-agent-log--header-show))
@@ -132,7 +135,7 @@ as its live events are drawn."
         (let ((session romacs-agent-log--session))
           (pcase notice
             (`(drawn ,units ,from) (romacs-agent-remote--drawn session units from))
-            (`(more ,units) (dolist (unit units) (romacs-agent-remote--draw-unit session unit t)))
+            (`(more ,units) (dolist (unit units) (romacs-agent-remote--draw-unit session unit 'live)))
             (`(row ,_) (romacs-agent-log--separator) (romacs-agent-log--header-show))
             (`(pending ,_)
              (when romacs-agent-log--filled (romacs-agent-log--sync-asks session))
@@ -209,7 +212,7 @@ its mirror's approvals, each the approval event that asks it."
                requests)
       (setf (romacs-agent-approvals session) approvals))))
 
-(cl-defmethod romacs-agent-log-source-request-event ((_source romacs-agent-remote) _id request)
+(cl-defmethod romacs-agent-log-source-request-event ((_source romacs-agent-remote) _session _id request)
   "REQUEST, of a mirror's approvals, is its approval event."
   request)
 

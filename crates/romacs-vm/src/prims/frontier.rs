@@ -16,7 +16,9 @@ use crate::gc::MEMORY_FULL;
 /// elements of LIST, `(wrong-type-argument listp TERMINATOR)` for a dotted
 /// list, and `(circular-list TAIL)` naming the tail at which Brent's check
 /// fired (the tortoise teleports at power-of-two multiples of 4096 steps).
-fn list_elements(cx: &Leaf<'_>, list: Value) -> Result<Vec<Value>, Fault> {
+/// LIST's elements, polled every 4096 (`Leaf::native_poll`, which quits only
+/// inside the caller's own scope): nothing is made from them yet.
+fn list_elements(cx: &mut Leaf<'_>, list: Value) -> Result<Vec<Value>, Fault> {
     let mut out = Vec::new();
     let mut tail = list;
     let mut tortoise = list;
@@ -26,7 +28,10 @@ fn list_elements(cx: &Leaf<'_>, list: Value) -> Result<Vec<Value>, Fault> {
         tail = cdr;
         if tail == tortoise { return Err(Fault::Circular(tail)); }
         steps += 1;
-        if steps & 4095 == 0 && steps.is_power_of_two() { tortoise = tail; }
+        if steps & 4095 == 0 {
+            if steps.is_power_of_two() { tortoise = tail; }
+            cx.native_poll()?;
+        }
     }
     if tail != Value::NIL { return Err(Fault::Wrong("listp", tail)); }
     Ok(out)
@@ -34,8 +39,22 @@ fn list_elements(cx: &Leaf<'_>, list: Value) -> Result<Vec<Value>, Fault> {
 
 /// Character codes of STRING as fns.c reads them: SREF bytes for unibyte,
 /// decoded characters (raw bytes as #x3FFF80..) for multibyte.
-fn string_codes(cx: &Leaf<'_>, string: Value) -> Result<Vec<Value>, Fault> {
-    Ok(cx.string_view(string)?.chars().map(|c| Value::integer(i64::from(c)).unwrap()).collect())
+/// STRING's character codes, a part at a time, the quit probe asked
+/// between parts. Stopped, the poll quits, or, nothing to quit for after
+/// all, the codes are taken again unpolled: nothing is made from them yet.
+fn string_codes(cx: &mut Leaf<'_>, string: Value) -> Result<Vec<Value>, Fault> {
+    let code = |c: u32| Value::integer(i64::from(c)).map_err(Fault::Error);
+    let stop = cx.native_stop();
+    let (mut codes, mut stopped) = (Vec::new(), false);
+    for part in cx.string_view_from(string, 0)?.char_parts(crate::quit::KERNEL_CHUNK) {
+        for c in part { codes.push(code(c)?); }
+        if stop.due() { stopped = true; break; }
+    }
+    if stopped {
+        cx.native_poll()?;
+        codes = cx.string_view(string)?.chars().map(code).collect::<Result<_, _>>()?;
+    }
+    Ok(codes)
 }
 
 fn allocate_vector(cx: &mut Leaf<'_>, values: Vec<Value>) -> Value {
@@ -57,8 +76,13 @@ fn make_vector(cx, length: Value, init: Value) {
 
 defsubr! { name = "vconcat", gnu = "fns.c:750", effect = Pure,
 fn vconcat(cx; rest sequences) {
-    // concat_to_vector (fns.c:1114): every argument's type and length is
-    // checked, in order, before the result exists.
+    // Its walks quit: the vector is made only after them.
+    cx.quittable(|cx| vconcat_values(cx, sequences)).map(|values| allocate_vector(cx, values))
+}}
+
+/// `concat_to_vector` (fns.c:1114): every argument's type and length is
+/// checked, in order, before the result exists.
+fn vconcat_values(cx: &mut Leaf<'_>, sequences: &[Value]) -> Result<Vec<Value>, Fault> {
     let mut values = Vec::new();
     for &arg in sequences {
         if arg == Value::NIL { continue; }
@@ -67,7 +91,12 @@ fn vconcat(cx; rest sequences) {
         } else if let Ok(items) = cx.vector_values(arg) {
             values.extend(items);
         } else if let Ok(bits) = cx.bool_vector(arg) {
-            values.extend((0..bits.len).map(|i| if bits.get(i).unwrap() { Value::TRUE } else { Value::NIL }));
+            // Its bits (a copy) a chunk at a time, polled between.
+            let len = bits.len;
+            for start in (0..len).step_by(crate::quit::KERNEL_CHUNK) {
+                if start > 0 { cx.native_poll()?; }
+                values.extend((start..(start + crate::quit::KERNEL_CHUNK).min(len)).map(|i| if bits.get(i).unwrap() { Value::TRUE } else { Value::NIL }));
+            }
         } else if cx.is_readable_string(arg) {
             values.extend(string_codes(cx, arg)?);
         } else {
@@ -75,8 +104,8 @@ fn vconcat(cx; rest sequences) {
             return Err(Fault::Wrong("sequencep", arg));
         }
     }
-    Ok(allocate_vector(cx, values))
-}}
+    Ok(values)
+}
 
 defsubr! { name = "propertize", gnu = "editfns.c:3296", effect = Pure,
 fn propertize(cx, string: Value; rest properties) {

@@ -612,7 +612,6 @@ impl WgpuRenderer {
                     let baseline_y = *baseline + offset_y;
                     let phys_y = baseline_y * sf;
                     let (x_int, y_int, x_bin, y_bin) = snap_glyph_origin(phys_x, phys_y);
-                    let font_identity = glyph_atlas.glyph_font_identity_for_char(face, *ch);
 
                     let subpixel_request = if enable_subpixel {
                         SubpixelRequest::Enabled
@@ -626,7 +625,7 @@ impl WgpuRenderer {
                             text: text.clone(),
                             face_id,
                             font_size_bits: font_size.to_bits(),
-                            font_identity,
+                            font_identity: glyph_atlas.glyph_font_identity_for_char(face, *ch),
                             glyph_stream_identity: glyph_atlas
                                 .glyph_stream_identity_for_composed(face, text),
                             x_bin,
@@ -651,7 +650,6 @@ impl WgpuRenderer {
                             charcode: *ch as u32,
                             face_id,
                             font_size_bits: font_size.to_bits(),
-                            font_identity,
                             x_bin,
                             y_bin,
                         };

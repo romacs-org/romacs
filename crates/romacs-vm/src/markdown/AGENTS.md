@@ -27,8 +27,8 @@ face runs, block structure and table grids, and keeps a buffer's block index.
 - The face writes are silent: the fontify primitives refuse to run unless
   modification hooks are inhibited and undo is off.
 - `Index::sync` leaves the block starts a fresh read of the text finds
-  (`index_follows_edits`); what it read again outside the asked blocks
-  loses `fontified`, so redisplay asks for it.
+  (`index_follows_edits`); blocks that may have changed outside the asked region
+  lose `fontified`, so redisplay asks for them.
 
 ## Tests
 - `python3 tools/dev-loop romacs-vm --profile gate -E 'test(markdown)'`.

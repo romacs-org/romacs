@@ -27,7 +27,7 @@
     (message-end message parent)
     (tool id name (state symbol) input output parent)
     (tool-output id text)
-    (task id task (state symbol) background activity summary title)
+    (task id task (state symbol) background activity summary title subagent)
     (status text parent)
     (error text parent)
     (done text error (limit symbol) interrupted duration cost reason)

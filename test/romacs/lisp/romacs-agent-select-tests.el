@@ -170,6 +170,16 @@
     (should-not (romacs-agent-pending-selection session))
     (should-not (gethash "switch" (romacs-agent--read-json (expand-file-name "manifest.json" dir))))))
 
+(ert-deftest romacs-agent-select-retargets-a-restart-with-new-state ()
+  (romacs-agent-select-tests--with (:state 'idle :options '(:model "a"))
+    (let ((prior (list :state 'restarting :stopped t :model "b" :effort "high")))
+      (setf (romacs-agent-pending-selection session) prior)
+      (cl-letf (((symbol-function 'romacs-agent--restarted) #'ignore))
+        (should (romacs-agent-select session "c" "low")))
+      (should (equal prior '(:state restarting :stopped t :model "b" :effort "high")))
+      (should (equal (romacs-agent-pending-selection session)
+                     '(:state restarting :stopped t :model "c" :effort "low" :provider "claude"))))))
+
 (ert-deftest romacs-agent-select-armed-while-a-turn-runs ()
   (dolist (state '(running waiting-approval))
     (romacs-agent-select-tests--with (:state state)

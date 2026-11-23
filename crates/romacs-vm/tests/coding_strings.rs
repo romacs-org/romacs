@@ -62,13 +62,17 @@ fn expressions() -> Vec<String> {
     for coding in ["'coding-string-utf8-dos", "'coding-string-utf8", "'coding-string-utf8-unix"] {
         cases.push(format!("(let ((result (decode-coding-string {long} {coding}))) (list (length result) (vconcat (substring result 19995 20010)) (vconcat (substring result -14)) last-coding-system-used))"));
     }
+    for coding in ["nil", "'coding-string-utf8"] {
+        cases.push(format!(r#"(let ((last-coding-system-used 'keep))
+          (list (condition-case e (decode-coding-string "a" {coding} nil 'wrong) (error (car e)))
+                last-coding-system-used))"#));
+    }
     cases.extend([
         r#"(let ((inhibit-eol-conversion t)) (list (vconcat (decode-coding-string "λ\r\n" 'coding-string-utf8)) last-coding-system-used))"#,
         r#"(let ((source (propertize "a" 'p t))) (list (get-text-property 0 'p (encode-coding-string source nil)) (get-text-property 0 'p (decode-coding-string source 'no-conversion))))"#,
         r#"(list (encode-coding-string 1 'wrong) (decode-coding-string 1 nil))"#,
         r#"(encode-coding-string "a" 'coding-string-missing)"#,
         r#"(encode-coding-string "a" 15)"#,
-        r#"(decode-coding-string "a" 'coding-string-utf8 nil 'wrong)"#,
         r#"(let* ((source "é") (result (decode-coding-string source nil t t))) (list (eq result source) (multibyte-string-p result) (vconcat result) last-coding-system-used))"#,
     ].into_iter().map(str::to_owned));
     cases

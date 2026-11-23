@@ -232,6 +232,7 @@ impl LispString {
         // it, with the flag.
         unsafe { std::str::from_utf8_unchecked(&self.bytes) }
     }
+    #[inline]
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
     }
@@ -651,6 +652,27 @@ impl Vm {
         }
         Ok(values)
     }
+    /// `list_values` for a primitive's own walk (`copy-sequence`, `append`,
+    /// `apply`'s spread): polled every `KERNEL_CHUNK` elements
+    /// (`Vm::kernel_poll`, SCOPED from its engine target), nothing yet made
+    /// from the elements.
+    pub(super) fn list_values_polled<const SCOPED: bool>(&mut self, mut value: Value) -> Result<Vec<Value>> {
+        let mut values = Vec::new();
+        // One compare a step, for the circularity bound and the poll both.
+        let limit = self.list_limit();
+        let mut check = crate::quit::KERNEL_CHUNK.min(limit + 1);
+        while value != Value::NIL {
+            let (car, cdr) = self.cons_pair(value)?;
+            values.push(car);
+            value = cdr;
+            if values.len() >= check {
+                if values.len() > limit { return Err("circular list".into()); }
+                self.kernel_poll::<SCOPED>()?;
+                check = (check + crate::quit::KERNEL_CHUNK).min(limit + 1);
+            }
+        }
+        Ok(values)
+    }
     #[inline(never)]
     /// `apply`'s spread, written at AT, the caller's end: (FUNCTION, AT,
     /// COUNT), or Err(NEED) when the file needs NEED slots to hold it with
@@ -666,7 +688,10 @@ impl Vm {
         }
         // GNU eval.c Fapply: FUNCTION, ARGS..., then the spread list; with a
         // single argument the list's first element is the function.
-        let tail = self.list_values(self.stack[start + argc - 1])?;
+        // The spread is apply's own walk: polled in the scope it grants at
+        // its first chunk, its escape raised by `t2_prepare_apply`.
+        let list = self.stack[start + argc - 1];
+        let tail = self.list_values_polled::<true>(list)?;
         let mut values = self.stack[start..start + argc - 1].to_vec();
         values.extend(tail);
         let target = values.first().copied().unwrap_or(Value::NIL);
@@ -699,6 +724,13 @@ impl Vm {
         if error == "buffer mutation refused: read-only" {
             let condition = self.intern("buffer-read-only");
             let data = self.list_value(&[self.slots[self.buffer_slot].value]);
+            return Some((condition, data));
+        }
+        // A native poll's escape, for a caller that takes only a condition
+        // (the engine takes any escape first, `primitive_value`).
+        if error == crate::quit::ESCAPED
+            && let Some(crate::threaded::Escape::Signal(condition, data)) = self.propagated_escape {
+            self.propagated_escape = None;
             return Some((condition, data));
         }
         if matches!(p, Primitive::Format | Primitive::Message) && error == "floating-point overflow" {
@@ -808,58 +840,7 @@ impl Vm {
         } else if error.contains("index out of range") {
             ("args-out-of-range", vec![x, y])
         } else if error.contains("required") || error.contains("value type") {
-            use Primitive::*;
-            let (predicate, value) = match p {
-                Load => ("stringp", x),
-                Require | Provide | Featurep => ("symbolp", x),
-                Car | Cdr => ("listp", x),
-                Memq | Assq | Member => ("listp", y),
-                Nth if self.bigint_value(x).is_none() => ("integerp", x),
-                Nth => {
-                    // nthcdr errors blame the original list; a final car error
-                    // blames the reached atom. Rewalk only on this cold path.
-                    let mut tail = y;
-                    let mut remaining = x.integer_value().map_or(usize::MAX, |n| n.max(0) as usize);
-                    while remaining != 0 {
-                        let Ok((_, next)) = self.cons_pair(tail) else {
-                            break;
-                        };
-                        tail = next;
-                        remaining -= 1;
-                    }
-                    ("listp", if remaining == 0 { tail } else { y })
-                }
-                Setcar | Setcdr => ("consp", x),
-                Length | Nreverse | CopySequence => ("sequencep", x),
-                Aref | Aset
-                    if !Self::image_string(x) && self.object_if(x).is_none() =>
-                {
-                    ("arrayp", x)
-                }
-                Aref | Aset if error == "character index required" => ("characterp", y),
-                Aref | Aset => ("fixnump", y),
-                CharAfter | OverlaysAt | NextOverlayChange => ("integer-or-marker-p", x),
-                OverlaysIn => ("integer-or-marker-p", if self.scalar_position(x).is_ok() { y } else { x }),
-                BufferSize => ("bufferp", x),
-                Add | Sub | Mul | Div | Abs | Less | Equal | Inc | Dec | Min | Max => {
-                    let value = self.stack[start..start + argc]
-                        .iter()
-                        .copied()
-                        .find(|v| {
-                            self.coerce_number(*v, p != Abs).is_err()
-                        })
-                        .unwrap_or(x);
-                    (
-                        if p == Abs {
-                            "numberp"
-                        } else {
-                            "number-or-marker-p"
-                        },
-                        value,
-                    )
-                }
-                _ => ("listp", x),
-            };
+            let (predicate, value) = self.required_argument(p, start, argc, x, y, error);
             let slot = self.slot(predicate);
             (
                 "wrong-type-argument",
@@ -871,6 +852,74 @@ impl Vm {
         let slot = self.slot(condition);
         let data = self.list_value(&values);
         Some((Value::reference(slot + 1, 7), data))
+    }
+    /// The predicate and offending argument for a primitive's type error.
+    fn required_argument(&self, p: Primitive, start: usize, argc: usize, x: Value, y: Value, error: &str) -> (&'static str, Value) {
+        use Primitive::*;
+        match p {
+            Load => ("stringp", x),
+            Require | Provide | Featurep => ("symbolp", x),
+            Car | Cdr => ("listp", x),
+            Memq | Assq | Member => ("listp", y),
+            Nth if self.bigint_value(x).is_none() => ("integerp", x),
+            Nth => ("listp", self.nth_list_error_argument(x, y)),
+            Setcar | Setcdr => ("consp", x),
+            Length | Nreverse | CopySequence => ("sequencep", x),
+            Aref | Aset
+                if !Self::image_string(x) && self.object_if(x).is_none() =>
+            {
+                ("arrayp", x)
+            }
+            Aref | Aset if error == "character index required" => ("characterp", y),
+            Aref | Aset => ("fixnump", y),
+            CharAfter | OverlaysAt | NextOverlayChange => ("integer-or-marker-p", x),
+            OverlaysIn => ("integer-or-marker-p", if self.scalar_position(x).is_ok() { y } else { x }),
+            BufferSize => ("bufferp", x),
+            Add | Sub | Mul | Div | Abs | Less | Equal | Inc | Dec | Min | Max => {
+                let value = self.stack[start..start + argc]
+                    .iter()
+                    .copied()
+                    .find(|v| {
+                        self.coerce_number(*v, p != Abs).is_err()
+                    })
+                    .unwrap_or(x);
+                (
+                    if p == Abs {
+                        "numberp"
+                    } else {
+                        "number-or-marker-p"
+                    },
+                    value,
+                )
+            }
+            _ => ("listp", x),
+        }
+    }
+    /// On an nthcdr error, blame the original list; when the final car
+    /// fails, blame the atom reached. Only the error path repeats the walk.
+    fn nth_list_error_argument(&self, index: Value, list: Value) -> Value {
+        let count = index.integer_value().map_or(usize::MAX, |n| n.max(0) as usize);
+        let mut tail = list;
+        for _ in 0..count {
+            let Ok((_, next)) = self.cons_pair(tail) else { return list };
+            tail = next;
+        }
+        tail
+    }
+    /// `copy-sequence` of the list X: a new list, the caller's only once it
+    /// returns. Past a chunk, polled per chunk of the walk and of the build
+    /// (`Vm::kernel_poll`, SCOPED from its engine target).
+    pub(super) fn copy_list<const SCOPED: bool>(&mut self, x: Value) -> Result<Value> {
+        let values = self.list_values_polled::<SCOPED>(x)?;
+        if values.len() <= crate::quit::KERNEL_CHUNK {
+            return Ok(self.list_value(&values));
+        }
+        let mut copy = Value::NIL;
+        for (i, chunk) in values.rchunks(crate::quit::KERNEL_CHUNK).enumerate() {
+            if i > 0 { self.kernel_poll::<SCOPED>()?; }
+            for &value in chunk.iter().rev() { copy = self.alloc_cons(value, copy); }
+        }
+        Ok(copy)
     }
     pub(super) fn data_primitive(&mut self, p: Primitive, start: usize, n: usize) -> Result<Value> {
         use Primitive::*;
@@ -1047,8 +1096,7 @@ impl Vm {
                     return Ok(x);
                 }
                 if x.tag() == 3 {
-                    let values = self.list_values(x)?;
-                    return Ok(self.list_value(&values));
+                    return self.copy_list::<false>(x);
                 }
                 if Self::image_string(x) {
                     let copy = LispString::new(self.string_value(x)?);

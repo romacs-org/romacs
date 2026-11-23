@@ -52,6 +52,10 @@
     ('nil (list (list :type 'answered :request-id (gethash "id" object)
                       :behavior (gethash "outcome" (gethash "result" object)))))))
 
+(defun fakerpc--request-event (id params)
+  "The approval event of a Fake RPC request ID with PARAMS."
+  (list :type 'approval :request-id id :tool (gethash "tool" params) :input (gethash "input" params)))
+
 (defun fakerpc--events (session object)
   "The events of a line the harness wrote."
   (let ((state (romacs-agent-driver-state session))
@@ -60,8 +64,7 @@
      ((and method id)
       ;; A request of its own: a permission to ask.
       (let ((params (gethash "params" object)))
-        (puthash id params (romacs-agent-approvals session))
-        (list (list :type 'approval :request-id id :tool (gethash "tool" params) :input (gethash "input" params)))))
+        (list (append (fakerpc--request-event id params) (list :approval-wire params)))))
      ((equal method "session/update")
       (list (list :type 'delta :text (gethash "text" (gethash "params" object)) :message "reply")))
      (method nil)
@@ -114,6 +117,7 @@
                (romacs-mcp--object "jsonrpc" "2.0" "method" "session/cancel"
                                    "params" (romacs-mcp--object "sessionId" (romacs-agent-harness-session session))))
   :respond #'fakerpc--respond
+  :request-event #'fakerpc--request-event
   :events #'fakerpc--events
   :input-events #'fakerpc--input-events
   :native-id-p (lambda (id) (and (stringp id) (string-prefix-p "rpc-" id)))

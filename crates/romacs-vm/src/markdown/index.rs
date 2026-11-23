@@ -34,7 +34,9 @@ impl Index {
         let new_end = start + inserted;
         let shift = |p: usize| if p >= end { p - end + new_end } else if p > start { new_end } else { p };
         self.starts.retain(|&s| s <= start || s > end);
-        for s in &mut self.starts {
+        // A block at the edit may still start where the inserted text begins.
+        let after_start = self.starts.partition_point(|&s| s <= start);
+        for s in &mut self.starts[after_start..] {
             *s = shift(*s);
         }
         for (at, _) in &mut self.defs {
@@ -60,8 +62,8 @@ impl Index {
 
     /// Make the starts right for a document of LEN characters, reading it
     /// through READ: the whole once, then what changed and the blocks
-    /// around it until an old start is found again. Returns the span read
-    /// again, whose faces may have changed; None when nothing had.
+    /// around it until an old start is found again. Returns the span whose
+    /// faces may have changed; None when nothing had.
     pub(crate) fn sync(&mut self, len: usize, read: &mut Read<'_>) -> Option<Range<usize>> {
         if !self.built || self.len != len {
             let text = read(0..len);
@@ -89,6 +91,12 @@ impl Index {
             let found = char_starts(&text, &parsed.tops, from);
             if cut.is_none_or(|c| found.contains(&c)) {
                 let cut_at = cut.unwrap_or(len);
+                // The preceding block was read to detect a join. If the
+                // edited block still starts where it did, the preceding
+                // block ends there as before and its text has not changed.
+                let damage_from = self.starts[..held].last().copied()
+                    .filter(|start| found.contains(start))
+                    .unwrap_or(from);
                 let mut starts = self.starts[..keep].to_vec();
                 starts.extend(found.into_iter().filter(|&s| s < cut_at));
                 starts.extend_from_slice(&self.starts[k.min(self.starts.len())..]);
@@ -109,7 +117,7 @@ impl Index {
                 }
                 let gained = labels.keys().any(|label| !self.labels.contains_key(label));
                 self.labels = labels;
-                return Some(if gained { 0..len } else { from..cut_at });
+                return Some(if gained { 0..len } else { damage_from..cut_at });
             }
             // Not found again: look twice as far.
             k = (k + (k - after).max(1)).min(self.starts.len());

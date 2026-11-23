@@ -595,33 +595,19 @@ impl Vm {
             let undo = if name.starts_with(' ') { Value::TRUE } else { Value::NIL };
             self.set_undo_list_of(value.index(0)? - 1, undo);
         }
-        let mut order = self.buffer_order();
-        order.push(value);
-        self.set_buffer_order(&order);
+        let node = self.buffer_order.push_back(value);
+        self.buffer_state_mut(value)?.order_node = Some(node);
         Ok(value)
     }
-    /// GNU's Vbuffer_alist order: creation order, with buried buffers moved
-    /// to the end; kept as a list in a traced hidden slot.
-    pub(crate) fn buffer_order(&mut self) -> Vec<Value> {
-        let slot = self.slot(BUFFER_ORDER);
-        let list = self.slots[slot].value;
-        if list == Value::UNBOUND { Vec::new() } else { self.list_values(list).unwrap_or_default() }
-    }
-    /// The buffer list's order without creating its slot.
-    pub(crate) fn buffer_order_snapshot(&self) -> Vec<Value> {
-        let Some(&slot) = self.names.get(BUFFER_ORDER) else { return Vec::new() };
-        let list = self.slots[slot].value;
-        if list == Value::UNBOUND { Vec::new() } else { self.list_values(list).unwrap_or_default() }
+    /// GNU's Vbuffer_alist order (buffer_order.rs), copied out for a reader
+    /// that walks it whole.
+    pub(crate) fn buffer_order(&self) -> Vec<Value> {
+        self.buffer_order.iter().collect()
     }
     /// *scratch* exists from startup in GNU; VM2 makes it on first use, so
     /// until it has been made once, its name counts as taken.
     pub(crate) fn scratch_unmade(&self) -> bool {
         !self.names.contains_key("#:vm2-buffer:*scratch*")
-    }
-    pub(crate) fn set_buffer_order(&mut self, buffers: &[Value]) {
-        let list = self.list_value(buffers);
-        let slot = self.slot(BUFFER_ORDER);
-        self.slots[slot].value = list;
     }
     /// Frename_buffer's renaming: BUFFER (live) is now NAME, keeping its
     /// place in the buffer list.
@@ -635,20 +621,30 @@ impl Vm {
         self.display_state.version += 1;
         Ok(())
     }
-    /// Fbury_buffer_internal: BUFFER moves to the end of the buffer list.
-    /// buffer.c record_buffer's list: BUFFER first.
+    /// buffer.c record_buffer's list: BUFFER, when in it, first.
     pub(crate) fn record_buffer_model(&mut self, buffer: Value) {
-        let mut order = self.buffer_order();
-        if order.first() == Some(&buffer) || !order.contains(&buffer) { return; }
-        order.retain(|&b| b != buffer);
-        order.insert(0, buffer);
-        self.set_buffer_order(&order);
+        if let Some(node) = self.order_node(buffer) { self.buffer_order.move_to_front(node); }
     }
+    /// Fbury_buffer_internal: BUFFER, when in the buffer list, moves to its
+    /// end. A killed buffer is in no list and stays out (GNU's own crashes).
     pub(crate) fn bury_buffer_model(&mut self, buffer: Value) {
-        let mut order = self.buffer_order();
-        order.retain(|&b| b != buffer);
-        order.push(buffer);
-        self.set_buffer_order(&order);
+        if let Some(node) = self.order_node(buffer) { self.buffer_order.move_to_back(node); }
+    }
+    /// The buffers LEAD, in their order and each once, move to the front of
+    /// the buffer list, ahead of the rest in theirs; one not in it is skipped.
+    pub(crate) fn lead_buffer_order(&mut self, lead: &[Value]) {
+        let mut seen = std::collections::HashSet::new();
+        let leaders: Vec<u32> = lead.iter().filter(|b| seen.insert(b.0)).filter_map(|&b| self.order_node(b)).collect();
+        for &node in leaders.iter().rev() { self.buffer_order.move_to_front(node); }
+    }
+    /// BUFFER leaves the buffer list (its kill).
+    pub(crate) fn unlist_buffer(&mut self, buffer: Value) {
+        if let Ok(state) = self.buffer_state_mut(buffer) && let Some(node) = state.order_node.take() {
+            self.buffer_order.release(node);
+        }
+    }
+    pub(crate) fn order_node(&self, buffer: Value) -> Option<u32> {
+        self.buffer_state(buffer).ok().and_then(|s| s.order_node)
     }
     /// buffer.c other_buffer_safely, the last defence of Fkill_buffer once
     /// `replace-buffer-in-windows' and `other-buffer' (the Lisp half,
@@ -745,9 +741,7 @@ impl Vm {
         {
             self.slots[slot].value = Value::UNBOUND;
         }
-        let mut order = self.buffer_order();
-        order.retain(|&b| b != value);
-        self.set_buffer_order(&order);
+        self.unlist_buffer(value);
         let index = value.index(0)? - 1;
         let windows: Vec<Value> = self.referrers().windows.clone().into_iter().filter_map(|i| {
             match &self.objects[i] {
@@ -756,6 +750,7 @@ impl Vm {
             }
         }).collect();
         if self.slots[self.buffer_slot].value == value || !windows.is_empty() {
+            let order = self.buffer_order();
             let replacement = self.other_buffer_safely(&order, value, !windows.is_empty())?;
             let point = match self.object(replacement)? {
                 Object::Buffer(b) => b.char_of_byte(b.point)?.0,
@@ -1974,7 +1969,6 @@ mod tests {
 }
 
 /// The hidden slot holding the buffer list's order.
-const BUFFER_ORDER: &str = "#:vm2-buffer-order";
 
 fn buffer_object(vm: &Vm, object: Value) -> bool {
     matches!(vm.object_if(object), Some(Object::Buffer(_) | Object::ByteBuffer(_)))
