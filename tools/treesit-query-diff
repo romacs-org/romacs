@@ -115,7 +115,7 @@ def extract(editor, subject, work):
                        cwd=subject, env=env, stdout=log, stderr=subprocess.STDOUT, check=True)
 
 
-def freeze_manifest(work, reference, subject, tree, editor):
+def freeze_manifest(work, reference, subject, tree, c_editor_sha256):
     # Use the pinned C lockfile to locate the grammar packages' query sources.
     cases = freeze_cases(corpus(reference, work))
     check_cases(cases)
@@ -123,27 +123,29 @@ def freeze_manifest(work, reference, subject, tree, editor):
                          if origin.startswith("lisp/")})
     if not mode_files:
         raise ValueError("no mode source paths in the extracted corpus")
-    manifest = dict(format=1, c_revision=C_REFERENCE, subject_tree=tree, c_editor_sha256=digest(editor),
+    manifest = dict(format=1, c_revision=C_REFERENCE, subject_tree=tree, c_editor_sha256=c_editor_sha256,
                     grammar_pins_sha256=digest(subject / GR_JSON),
                     mode_sources={path: digest(subject / path) for path in mode_files},
                     cases=cases)
     path = work / "corpus.json"
     path.write_text(canonical(manifest) + "\n")
-    expected = digest(path)
-    path.with_suffix(".sha256").write_text(expected + "\n")
     path.chmod(0o444)
-    print(f"Frozen before candidate build: {expected}  {path}", flush=True)
-    return path, expected
+    return path
 
 
 def check_digest(path, expected):
-    if digest(path) != expected:
-        raise ValueError(f"frozen manifest digest changed: {path}")
+    manifest = json.loads(path.read_bytes())
+    if not isinstance(manifest, dict):
+        raise ValueError(f"expected a manifest object: {path}")
+    content = {key: value for key, value in manifest.items() if key != "c_editor_sha256"}
+    actual = sha256((canonical(content) + "\n").encode())
+    if actual != expected:
+        raise ValueError(f"frozen manifest digest changed: {path} (expected {expected}, got {actual})")
+    return manifest
 
 
 def load_manifest(path, expected):
-    check_digest(path, expected)
-    manifest = json.loads(path.read_bytes())
+    manifest = check_digest(path, expected)
     if manifest["format"] != 1 or manifest["c_revision"] != C_REFERENCE:
         raise ValueError("unexpected manifest format or C reference")
     cases = manifest["cases"]
@@ -163,7 +165,7 @@ def record(oracle, manifest, expected):
     return path
 
 
-def run(work):
+def run(work, expected):
     if work == ROOT or ROOT in work.parents:
         raise ValueError("--out must be outside the source tree")
     if not os.environ.get("CARGO_TARGET_DIR") or not Path(os.environ["CARGO_TARGET_DIR"]).is_absolute():
@@ -177,13 +179,18 @@ def run(work):
         raise ValueError("the pinned C arm uses different grammar sources")
     c_editor = build_editor(reference, work / "c-editor")
     extract(c_editor, subject, work)
-    manifest, expected = freeze_manifest(work, reference, subject, tree, c_editor)
+    c_editor_sha256 = digest(c_editor)
+    manifest = freeze_manifest(work, reference, subject, tree, c_editor_sha256)
+    cases = load_manifest(manifest, expected)
+    print(f"Frozen before candidate build: {expected}  {manifest}", flush=True)
     add_reference_tests(reference, subject)
     c_records = record(build_oracle(reference, work / "oracle-c"), manifest, expected)
     rust = not (subject / C_ENGINE).is_file()
     candidate_records = record(build_oracle(subject, work / "oracle-candidate"), manifest, expected)
-    compare(c_records, candidate_records, load_manifest(manifest, expected), rust)
+    compare(c_records, candidate_records, cases, rust)
     build_editor(subject, work / "candidate-editor")
+    receipt = dict(corpus_digest=expected, c_editor_sha256=c_editor_sha256)
+    (work / "receipt.json").write_text(canonical(receipt) + "\n")
 
 
 def main():
@@ -198,11 +205,14 @@ def main():
     check.add_argument("--reference", type=Path, required=True)
     check.add_argument("--candidate", type=Path, required=True)
     check.add_argument("--expect-c", action="store_true")
+    for command in (build_run, check):
+        command.add_argument("--corpus-digest", required=True, metavar="SHA256",
+                             help="expected corpus content digest excluding the C editor fingerprint")
     args = parser.parse_args()
     if args.command == "run":
-        run(args.out.resolve())
+        run(args.out.resolve(), args.corpus_digest)
     else:
-        cases = load_manifest(args.manifest, args.manifest.with_suffix(".sha256").read_text().strip())
+        cases = load_manifest(args.manifest, args.corpus_digest)
         compare(args.reference, args.candidate, cases, not args.expect_c)
 
 

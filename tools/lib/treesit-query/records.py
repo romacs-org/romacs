@@ -1,4 +1,7 @@
-"""Compare the complete ordered record stream for a frozen query corpus."""
+"""Compare the complete ordered record stream for a frozen query corpus.
+
+A differential cannot detect a capture removed from both streams, which is acceptable because the runner records the C arm from the C binary.
+"""
 from contextlib import ExitStack
 import json
 

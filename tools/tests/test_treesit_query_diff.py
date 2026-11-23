@@ -5,7 +5,10 @@ import importlib.machinery
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -14,7 +17,78 @@ LOADER = importlib.machinery.SourceFileLoader("treesit_query_diff", str(SCRIPT))
 SPEC = importlib.util.spec_from_loader(LOADER.name, LOADER)
 DIFF = importlib.util.module_from_spec(SPEC)
 LOADER.exec_module(DIFF)
+from corpus import MODE_MINIMUM, freeze_cases, sha256
 from records import capture, probe_expectations
+
+
+def manifest_fixture():
+    cases = freeze_cases([dict(language=language, text="{}", queries=["(_) @n"],
+                               origins=["shipped.el"], shipped=1)
+                          for language in sorted(MODE_MINIMUM)])
+    return dict(format=1, c_revision=DIFF.C_REFERENCE, cases=cases)
+
+
+def write_manifest(path, manifest):
+    content = (DIFF.canonical(manifest) + "\n").encode()
+    path.write_bytes(content)
+    return sha256(content)
+
+
+def command(*args):
+    return subprocess.run([sys.executable, "-B", SCRIPT, *args], capture_output=True, text=True)
+
+
+class CorpusDigestTest(unittest.TestCase):
+    def setUp(self):
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        self.path = Path(scratch.name) / "corpus.json"
+        self.manifest = manifest_fixture()
+        self.expected = write_manifest(self.path, self.manifest)
+        self.manifest["c_editor_sha256"] = "1" * 64
+        self.compare_args = ("compare", "--manifest", self.path,
+                             "--reference", self.path, "--candidate", self.path)
+
+    def test_editor_fingerprint_does_not_change_identity(self):
+        for fingerprint in ("1" * 64, "2" * 64):
+            with self.subTest(fingerprint=fingerprint):
+                write_manifest(self.path, dict(self.manifest, c_editor_sha256=fingerprint))
+                self.assertEqual(DIFF.load_manifest(self.path, self.expected), self.manifest["cases"])
+
+    def test_changed_query_digest_fails(self):
+        self.manifest["cases"][0]["query_sha256"][0] = "0" * 64
+        write_manifest(self.path, self.manifest)
+        with self.assertRaisesRegex(ValueError, "frozen manifest digest changed"):
+            DIFF.load_manifest(self.path, self.expected)
+
+    def test_substituted_manifest_and_sidecar_fail(self):
+        case = self.manifest["cases"][0]
+        case["queries"][0] = "_ @other"
+        freeze_cases([case])
+        raw_digest = write_manifest(self.path, self.manifest)
+        self.path.with_suffix(".sha256").write_text(raw_digest + "\n")
+        with self.assertRaisesRegex(ValueError, "frozen manifest digest changed"):
+            DIFF.load_manifest(self.path, self.expected)
+        result = command(*self.compare_args, "--corpus-digest", self.expected)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("frozen manifest digest changed", result.stderr)
+
+    def test_missing_digest_fails_for_both_commands(self):
+        for args in (("run", "--out", self.path.parent / "run"), self.compare_args):
+            with self.subTest(command=args[0]):
+                result = command(*args)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("the following arguments are required: --corpus-digest", result.stderr)
+
+    @unittest.skipUnless(os.environ.get("ROMACS_QUERY_CORPUS_FIXTURES"),
+                         "set ROMACS_QUERY_CORPUS_FIXTURES to the typing-modes artifact directory")
+    def test_both_extracted_manifests_verify_against_pinned_digest(self):
+        root = Path(os.environ["ROMACS_QUERY_CORPUS_FIXTURES"])
+        expected = "357a891a6b1c7921f74927894e79a79a0d80eb37139e47fc1ad46a6f3cc1f293"
+        for name in ("q-verify/recheck/production-equivalent", "ts-query/hardened"):
+            with self.subTest(extraction=name):
+                self.assertEqual(len(DIFF.load_manifest(root / name / "corpus.json", expected)),
+                                 len(MODE_MINIMUM))
 
 
 def fixture():
