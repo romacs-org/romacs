@@ -821,6 +821,8 @@ pub struct WindowEnd {
     pub origin_y: f32,
     /// Where point shows, when a laid-out row holds it.
     pub point: Option<PointPlace>,
+    /// Ranges of display bytes that the text area actually painted.
+    pub visible_text_bytes: Vec<Range<usize>>,
 }
 
 /// Point on its row, in pixels from the text area's left edge, as GNU's

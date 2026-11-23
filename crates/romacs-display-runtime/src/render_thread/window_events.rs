@@ -15,9 +15,10 @@ impl RenderApp {
         window: WindowId,
         key: PhysicalKey,
         event: InputEvent,
+        ingress: Option<romacs_display_protocol::frame_time::EventTime>,
     ) {
         let pressed = matches!(&event, InputEvent::Key { pressed: true, .. });
-        let read = self.comms.send_key_input_with_receipt(event);
+        let read = self.comms.send_key_input_with_receipt(event, ingress);
         if pressed {
             self.key_repeats.queued(window, key, read);
             // The key may start a long command: look at the evaluator later.
@@ -25,6 +26,14 @@ impl RenderApp {
                 self.busy_toast.arm(romacs_display_protocol::frame_time::observe_platform_now());
             }
         }
+    }
+
+    fn key_press(&mut self, window: WindowId, key: PhysicalKey, repeat: bool) -> romacs_display_protocol::frame_time::EventTime {
+        let at = romacs_display_protocol::frame_time::observe_platform_now();
+        if let Some(after) = self.key_repeats.pressed(window, key, repeat, at) {
+            self.comms.tell(crate::thread_comm::Fact::KeyRepeatTiming(crate::input_bridge::RepeatTiming::Repeat(after)));
+        }
+        at
     }
 
     /// Record the physical modifier keys' own press and release.
@@ -273,6 +282,7 @@ impl RenderApp {
         }
     }
 
+    // SMELL(long-function): Window events retain their platform ordering, including the admitted key press observation.
     pub(super) fn handle_window_event(
         &mut self,
         event_loop: &dyn ActiveEventLoop,
@@ -473,11 +483,7 @@ impl RenderApp {
                 {
                     return;
                 }
-                if state == ElementState::Pressed
-                    && let Some(after) = self.key_repeats.pressed(window_id, physical_key, repeat, romacs_display_protocol::frame_time::observe_platform_now())
-                {
-                    self.comms.tell(crate::thread_comm::Fact::KeyRepeatTiming(crate::input_bridge::RepeatTiming::Repeat(after)));
-                }
+                let ingress = (state == ElementState::Pressed).then(|| self.key_press(window_id, physical_key, repeat));
                 if state == ElementState::Pressed {
                     tracing::debug!(
                         "KeyboardInput: logical_key={:?} physical_key={:?} text={:?} mods={} ime={}",
@@ -536,6 +542,7 @@ impl RenderApp {
                                     pressed: true,
                                     emacs_frame_id: self.emacs_frame_for_window_event(window_id),
                                 },
+                                ingress,
                             );
                             self.record_idle_dim_activity(window_id);
                             self.record_typing_speed_keypress(window_id);
@@ -549,6 +556,7 @@ impl RenderApp {
                                 keys,
                                 ordinary_modifiers
                             );
+                            let ingress = ingress.filter(|_| keys.len() == 1);
                             for key in keys {
                                 tracing::debug!(
                                     "Queueing text key event: key={:?} mods=0x{:x}",
@@ -565,6 +573,7 @@ impl RenderApp {
                                         emacs_frame_id: self
                                             .emacs_frame_for_window_event(window_id),
                                     },
+                                    ingress,
                                 );
                                 self.record_idle_dim_activity(window_id);
                                 self.record_typing_speed_keypress(window_id);
@@ -614,6 +623,7 @@ impl RenderApp {
                                     pressed: state == ElementState::Pressed,
                                     emacs_frame_id: self.emacs_frame_for_window_event(window_id),
                                 },
+                                ingress,
                             );
                         } else if state == ElementState::Pressed {
                             tracing::debug!(

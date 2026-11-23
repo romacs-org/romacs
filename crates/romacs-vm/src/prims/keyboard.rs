@@ -552,3 +552,24 @@ fn char_resolve_modifiers(_cx, character: Value) {
     let c = character.integer_value().ok_or_else(|| Fault::Wrong("fixnump", character))?;
     Ok(Value::integer(resolve_modifier_mask(c)).unwrap())
 }}
+
+// Take the last host key observation as a session-relative fixnum.
+// Return nil if the last read carried no native observation.
+defsubr! { name = "romacs--take-key-ingress", gnu = "romacs:keyboard", effect = Global,
+fn take_key_ingress(cx) {
+    cx.take_key_ingress()
+}}
+
+// Save the selected view before executing the command that arrived at TICKS.
+// Return t when the observation was accepted, otherwise nil.
+defsubr! { name = "romacs--typing-begin", gnu = "romacs:keyboard", effect = Global,
+fn typing_begin(cx, ticks: Value) {
+    cx.typing_begin(ticks)
+}}
+
+// Finish the most recently started typing observation and return nil.
+// If SUCCESS is non-nil, remember the command's edit and cursor for redisplay.
+defsubr! { name = "romacs--typing-end", gnu = "romacs:keyboard", effect = Global,
+fn typing_end(cx, success: Value) {
+    cx.typing_end(success)
+}}

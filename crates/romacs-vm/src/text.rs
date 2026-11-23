@@ -97,6 +97,7 @@ pub struct TextBody {
     flat_internal: std::sync::OnceLock<Vec<u8>>,
     /// The text kept contiguous for searches across edits (text_gap.rs).
     search: gap::SearchView,
+    pub(crate) last_edit: crate::typing::TextEdit,
     is_ascii: bool,
     // CELL(Plain)
     coordinate: std::cell::Cell<(usize, usize)>,
@@ -472,6 +473,7 @@ impl Text {
                 raw,
                 flat_internal: std::sync::OnceLock::new(),
                 search: Default::default(),
+                last_edit: Default::default(),
                 is_ascii: s.is_ascii(),
                 coordinate: std::cell::Cell::new((0, 0)),
                 chunk: std::cell::RefCell::new(ChunkCursor::default()),
@@ -724,6 +726,7 @@ impl Text {
     /// every parser's tree edited, CHARGE bytes against redisplay's budget
     /// (`Registry::small_edit_due`), and the linecol caches moved.
     fn ts_record(&mut self, old: Range<usize>, inserted: usize, linecols: Option<(crate::treesit::Linecol, crate::treesit::Linecol)>, charge: usize) {
+        if !old.is_empty() || inserted != 0 { self.body.last_edit.record(old.start, inserted); }
         if self.body.treesit.is_empty() {
             return;
         }

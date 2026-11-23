@@ -9,6 +9,7 @@ mod mode_line;
 mod status_bar;
 #[path = "mini_window.rs"]
 mod mini_window;
+pub(super) use mini_window::Segment;
 #[path = "display_check.rs"]
 mod display_check;
 pub(crate) use mini_window::{buffer_of, shown_end};
@@ -582,6 +583,8 @@ impl ShownKey {
 
 #[derive(Clone, romacs_snapshot::Snapshot)]
 struct Shown {
+    view_generation: u64,
+    text_revision: Option<u64>,
     key: ShownKey,
     point: i64,
     mini: bool,
@@ -1385,6 +1388,27 @@ impl Vm {
     pub fn published_buffer_byte(&self, id: u64, display: usize) -> usize {
         self.display_state.segments(id).map_or(self.display_state.base(id) + display, |s| shown_byte(s, display))
     }
+    pub(crate) fn typing_text_revision(&self, buffer: Value) -> Option<u64> {
+        match self.object_if(buffer)? {
+            Object::Buffer(buffer) => Some(buffer.body().last_edit.revision),
+            _ => None,
+        }
+    }
+
+    /// The tracked window's byte coordinates in this exact publication.
+    pub fn typing_picture(&self, frame: &romacs_layout_input::FrameSnapshot) -> Option<crate::TypingPicture> {
+        let candidate = self.typing.candidate()?;
+        let id = candidate.window();
+        let snapshot = frame.windows.iter().chain(frame.children.iter().flat_map(|child| &child.windows))
+            .map(|placed| &placed.snapshot).find(|snapshot| snapshot.id == id)?;
+        let published = self.display_state.previous.get(&id)?;
+        if published.buffer_version != snapshot.buffer_version { return None; }
+        let shown = self.display_state.shown.get(&id)?;
+        Some(crate::TypingPicture::new(candidate.clone(), shown.view_generation, shown.text_revision?,
+            self.published_base(id), self.display_state.segments(id).unwrap_or_default().to_vec(),
+            self.published_buffer_byte(id, snapshot.point_byte)))
+    }
+
     /// How many times a mode-line expansion entered the evaluator: its
     /// `:eval' elements and the `%@' and `%s' specs, since the VM started.
     pub fn mode_line_evals(&self) -> u64 {
@@ -1594,6 +1618,7 @@ impl Vm {
     /// The window in ROOT redisplayed in full: its point kept visible, its
     /// text fontified and read, its bands expanded, and the record made
     /// that the next redisplay reuses it by.
+    // SMELL(long-function): Text coordinates and revision must be frozen in the same publication that the compositor consumes.
     fn rebuild_window(&mut self, root: usize, slot: usize, width: u32, height: u32) -> Result<WindowSnapshot> {
         self.display_state.stats.rebuilt += 1;
         let bands = self.redisplay_and_build_mode_line(root, slot, height, true)?;
@@ -1604,9 +1629,10 @@ impl Vm {
         if !w.live() {
             return Err("window deleted during snapshot".into());
         }
-        let (id, buffer, mini) = (w.id, w.buffer, w.mini);
+        let (id, buffer, mini, view_generation) = (w.id, w.buffer, w.mini, w.shows);
         self.slots[slot].value = buffer;
         let mut shown = self.window_text(window, height, None)?;
+        let text_revision = self.typing_text_revision(self.slots[slot].value);
         // The mini-window shows its overlay strings (icomplete's candidates).
         let segments = if mini { self.splice_mini_window(window, buffer, &mut shown)? } else { shown.segments.take() };
         let ShownText { text: TextSlice { utf8, face_runs, raw, extends }, start_byte, point_byte, faces, base, at_zv, table, merged: _, segments: _, stretches, images, wrap_flips, line_numbers } = shown;
@@ -1658,7 +1684,7 @@ impl Vm {
         let snapshot = self.publish_window(snapshot);
         let point = self.window_point_value(window)?.as_integer()?;
         let key = self.shown_key(window, width, height)?;
-        self.display_state.shown.insert(id, Shown { key, point, mini, len, at_zv, table: table.id, ended: None });
+        self.display_state.shown.insert(id, Shown { view_generation, text_revision, key, point, mini, len, at_zv, table: table.id, ended: None });
         self.display_state.laid.remove(&id);
         Ok(snapshot)
     }

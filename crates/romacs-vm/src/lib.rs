@@ -35,6 +35,8 @@ mod interpreted_closure;
 mod cell_pairs;
 mod oclosure;
 mod host_input;
+mod typing;
+pub use typing::{TypingMatch, TypingPicture};
 mod quit;
 mod gap_probe;
 pub use gc_mark::{forbid_threads as forbid_gc_threads, set_workers as set_gc_workers};
@@ -1487,6 +1489,8 @@ pub struct Vm {
     /// top-level frame it came from: the next read's (host_input.rs).
     #[snapshot(at_rest)]
     deferred_event: Option<(host_input::HostEvent, Option<u64>)>,
+    #[snapshot(at_rest)]
+    typing: typing::Typing,
     /// The embedder's layout while one is attached (layout_host.rs).
     #[snapshot(at_rest)]
     layout_host: Option<Box<dyn layout_host::LayoutHost>>,
@@ -1856,6 +1860,7 @@ impl Vm {
     pub(crate) fn private_objects(&self) -> usize {
         self.conses.live() + self.cells.live() + self.closures.live() + self.objects.live()
     }
+    // SMELL(long-function): The VM root owns initialization of its runtime and evaluator-local state.
     pub fn new() -> Self {
         // emacs_wd is taken when Emacs starts, not when first used.
         let _ = environment::startup_directory();
@@ -1914,6 +1919,7 @@ impl Vm {
             host_input: None,
             host_wait: None,
             deferred_event: None,
+            typing: Default::default(),
             layout_host: None,
             display: None,
             visual: Box::default(),

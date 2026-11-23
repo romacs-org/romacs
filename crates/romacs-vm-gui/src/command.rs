@@ -5,15 +5,6 @@
 use romacs_vm::{CommandEvent, CommandOutcome, CommandSignal, Vm};
 #[cfg(test)]
 use romacs_vm::Fixed;
-use romacs_display_runtime::thread_comm::InputEvent;
-
-pub fn unwrap_event(event: InputEvent) -> InputEvent {
-    match event {
-        InputEvent::Tracked { event, .. } => unwrap_event(*event),
-        event => event,
-    }
-}
-
 /// Whether read_char has an event queued in Lisp: in
 /// `unread-post-input-method-events', `unread-command-events' or
 /// `unread-input-method-events'.

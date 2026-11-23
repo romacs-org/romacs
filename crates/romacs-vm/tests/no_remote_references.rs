@@ -78,6 +78,7 @@ const FIELDS: &[(&str, Class)] = &[
     ("signal_handlers", Root), ("backtrace", Root), ("profiler", Root),
     ("propagated_escape_hooked", Free), ("propagated_eval_depth", Free), ("propagate_next", Free),
     ("host_input", Free), ("host_wait", Free), ("deferred_event", Free), ("layout_host", Free), ("display", Free), ("visual", Free), ("session_host", Free), ("idle_since", Free),
+    ("typing", Free),
     ("redisplay_since_mark", Free), ("treesit_plain", Free), ("treesit_deferred", Free), ("treesit_parse_owed", Free),
     ("quit", Free), ("force_quit_count", Free), ("deferred_escapes", Free), ("quit_slots", Free),
     // Interned symbols, which no collection frees, and indices.

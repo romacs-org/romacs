@@ -27,13 +27,17 @@ pub const QUIT_CHAR: i64 = 7;
 
 /// One redisplay request: the frozen frame, the selected window's id, and
 /// how long freezing the frame took (for latency traces).
-pub struct HostFrame {
+pub struct HostFrame<'a> {
     pub frame: romacs_layout_input::FrameSnapshot,
     pub selected: u64,
     /// The minibuffer window's id: its snapshot is the frame's last
     /// window, or a child frame's when one hosts it.
     pub minibuffer: u64,
     pub snapshot: std::time::Duration,
+    /// Buffer coordinates for the command whose result may be submitted.
+    pub typing: Option<crate::TypingPicture>,
+    /// Filled by the host only when it accepted a new scene submission.
+    pub submission: &'a mut Option<romacs_display_protocol::submission::SubmissionReceipt>,
     /// The text animations drawn over this frame (`Vm::text_animations').
     pub text_animations: Vec<(u64, romacs_display_protocol::text_animation::TextAnimation)>,
 }
@@ -43,6 +47,8 @@ pub struct HostFrame {
 pub enum HostEvent {
     /// A complete input event, GNU's encoding (an integer or a symbol name).
     Key(CommandEvent),
+    /// A key with the observation from its native input delivery.
+    NativeKey(CommandEvent, romacs_display_protocol::frame_time::EventTime),
     /// The frame was resized; the read redisplays and keeps waiting.
     Resize { width: u32, height: u32 },
     /// The frame is gone: the read signals `quit' so every level unwinds.
@@ -75,7 +81,7 @@ pub trait HostInput {
     }
     /// Paint `frame`; return the layout's window ends to commit
     /// (`Vm::display_apply_layout').
-    fn redisplay(&mut self, frame: HostFrame) -> std::result::Result<Vec<crate::WindowEnd>, String>;
+    fn redisplay(&mut self, frame: HostFrame<'_>) -> std::result::Result<Vec<crate::WindowEnd>, String>;
     /// Block until the next event, or until TIMEOUT passes (`Timeout').
     fn next_event(&mut self, timeout: Option<std::time::Duration>) -> std::result::Result<HostEvent, String>;
 
@@ -466,7 +472,10 @@ fn paint(vm: &mut Vm, started: std::time::Instant, frame: Result<romacs_layout_i
     let selected = vm.window(selected)?.id;
     let minibuffer = vm.window(vm.mini_window())?.id;
     let text_animations = vm.text_animations()?;
-    let ends = host(vm).redisplay(HostFrame { frame, selected, minibuffer, snapshot, text_animations })?;
+    let typing = vm.typing_picture(&frame);
+    let mut submission = None;
+    let ends = host(vm).redisplay(HostFrame { frame, selected, minibuffer, snapshot, text_animations, typing, submission: &mut submission })?;
+    if let Some(receipt) = &submission { vm.typing_submitted(receipt); }
     vm.display_apply_layout(&ends)?;
     vm.redisplay_done(crate::host::monotonic().saturating_duration_since(started));
     Ok(())
@@ -534,17 +543,25 @@ fn ended_from(vm: &mut Vm, event: HostEvent, frame: Option<u64>) -> bool {
 fn finish(vm: &mut Vm, (waited, out): (Result<()>, Out<'_>)) -> Result<()> {
     let HostWait { host, event, .. } = vm.host_wait.take().expect("a host wait in progress");
     vm.host_input = Some(host);
+    vm.typing.ingress = None;
     waited?;
     let (event, frame) = event.expect("a wait ends with its event");
     // kbd_buffer_get_event: a key from a frame neither the last event's
     // nor selected is read after the `switch-frame' event it brings.
-    if let (HostEvent::Key(_), Some(id)) = (&event, frame)
+    if let (HostEvent::Key(_) | HostEvent::NativeKey(..), Some(id)) = (&event, frame)
         && let Some(switch) = vm.note_event_frame(id)
     {
         vm.deferred_event = Some((event, frame));
         vm.set_rooted(out.0, out.1, switch);
         return Ok(());
     }
+    let event = match event {
+        HostEvent::NativeKey(key, ingress) => {
+            vm.typing.ingress = Some(ingress);
+            HostEvent::Key(key)
+        }
+        event => event,
+    };
     // kbd_buffer_store_event: input inside `while-no-input' sets
     // `quit-flag' to `throw-on-input', for the next safepoint to throw.
     if let HostEvent::Key(_) = event {
@@ -554,6 +571,7 @@ fn finish(vm: &mut Vm, (waited, out): (Result<()>, Out<'_>)) -> Result<()> {
         HostEvent::Key(CommandEvent::Character(c)) => Value::integer(c)?,
         HostEvent::Key(CommandEvent::Named(name)) => vm.intern(&name),
         HostEvent::Timeout => Value::NIL,
+        HostEvent::NativeKey(..) => unreachable!("native ingress saved above"),
         // make_lispy_focus_in / make_lispy_focus_out: (focus-in FRAME),
         // the frame whose window it is, else the selected one.
         HostEvent::Focus(focused) => {
@@ -695,6 +713,40 @@ mod tests {
     }
     fn shown(vm: &mut Vm, source: &str) -> String {
         vm.eval_source(source).map_or_else(|e| format!("VM-ERROR {e}"), |v| v.display().unwrap())
+    }
+
+    struct PromptReceipt(romacs_display_protocol::frame_time::EventTime);
+    impl HostInput for PromptReceipt {
+        fn input_pending(&mut self) -> bool { false }
+
+        fn next_event(&mut self, _: Option<std::time::Duration>) -> Result<HostEvent> {
+            Ok(HostEvent::Key(CommandEvent::Character(120)))
+        }
+
+        fn redisplay(&mut self, frame: HostFrame<'_>) -> Result<Vec<crate::WindowEnd>> {
+            let window = &frame.frame.windows[0].snapshot;
+            let end = crate::WindowEnd { id: window.id, end: 1, visible_end: 2, body_height: 14.0,
+                rows: Vec::new(), origin_y: 0.0, point: None, visible_text_bytes: vec![0..1] };
+            let painted = frame.typing.as_ref().expect("edited window").painted(&end, true).expect("matching window");
+            *frame.submission = Some(romacs_display_protocol::submission::SubmissionReceipt {
+                presentation: 51, submitted_at: self.0, windows: vec![painted],
+            });
+            Ok(vec![end])
+        }
+    }
+
+    #[test]
+    fn a_prompt_submission_reaches_the_evaluator_matcher() {
+        let mut vm = waiting(vec![]);
+        let ingress = romacs_display_protocol::frame_time::observe_platform_now();
+        vm.typing.ingress = Some(ingress);
+        let ticks = vm.typing.take_ingress().expect("delivered key");
+        assert!(vm.typing_begin(ticks));
+        vm.eval_source("(insert \"a\")").expect("edit");
+        vm.typing_end(Value::TRUE);
+        vm.set_host_input(Some(Box::new(PromptReceipt(ingress.plus(std::time::Duration::from_millis(1))))));
+        assert_eq!(shown(&mut vm, "(romacs--read-host-event)"), "120");
+        assert_eq!(vm.take_typing_match().map(|m| m.presentation), Some(51));
     }
 
     /// The wait's own Lisp (the wait-state probe, echo-sync) and a

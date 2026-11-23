@@ -6,6 +6,7 @@
 use super::{fringe, glyphless, advance, box_step, BoxStep, color, Color, DisplayWindowId, edges, escaped, Face, face_at, FaceHandle, FaceId, font_request, FontRequest, FontResolver, FrameGlyphBuffer, glyph, glyph_of, Glyphless, GlyphRowRole, is_icon, LineWrap, Measured, MeasureInput, Metrics, new_frame, NoFont, paint_band, PointPlace, publish_face_text, publish_selected_glyph, Rect, relief_strips, Row, RowMarks, set_box_edges, set_glyph_box_edges, settle_row, shown, Shown, shows_glyphs, stretch_advance, StretchWidth, tab_advance, TextSlice, underline_placement, validate_runs, warn_once, WindowEnd, WindowSnapshot};
 
 /// Paint SNAPSHOT's window at OX, OY, and report its rows (`WindowEnd`).
+// SMELL(long-function): The independent layout oracle records coverage where its existing paint walk sees source bytes.
 pub(super) fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolver: &mut FontResolver, ox: f32, oy: f32, cursor: Option<(bool, Color)>, no_font: &NoFont) -> Result<WindowEnd, String> {
     let text = &snapshot.text.utf8;
     if snapshot.height == 0
@@ -32,7 +33,7 @@ pub(super) fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuf
     // repaired to prevent. A window whose *total* geometry does not fit its
     // parent is still rejected, by layout_frame's placement check.
     if snapshot.width == 0 {
-        return Ok(WindowEnd { id: snapshot.id, end: snapshot.start_byte, visible_end: snapshot.start_byte, body_height: 0.0, rows: vec![], origin_y: 0.0, point: None });
+        return Ok(WindowEnd { id: snapshot.id, end: snapshot.start_byte, visible_end: snapshot.start_byte, body_height: 0.0, rows: vec![], origin_y: 0.0, point: None, visible_text_bytes: vec![] });
     }
     validate_runs(&snapshot.text, snapshot.faces.len())?;
     if snapshot.stretches.windows(2).any(|w| w[0].byte >= w[1].byte)
@@ -177,6 +178,7 @@ pub(super) fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuf
     // how it breaks, which the fringes indicate; whether the row being
     // built continues a line a break or the window start split.
     let mut rows: Vec<Row> = vec![];
+    let mut visible_text_bytes = Vec::new();
     let mut marks: Vec<RowMarks> = vec![];
     let mut continuation = line_start != snapshot.start_byte;
     // The end of the composed sequence being laid out, and its glyph's x
@@ -203,6 +205,9 @@ pub(super) fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuf
         }
         if ch == '\n' {
             if drawing {
+                if !hidden && body_height > 0.0 && y < body_height && y + row_height > 0.0 {
+                    super::cover(&mut visible_text_bytes, byte..byte + 1);
+                }
                 // xdisp.c extend_face_to_end_of_line: the row paints past
                 // its text, to the text area's edge, in its extend face.
                 if let Some(extend) = snapshot.text.extends.binary_search_by_key(&(byte as u32), |e| e.byte).ok().map(|i| snapshot.text.extends[i]) {
@@ -337,6 +342,9 @@ pub(super) fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuf
         // glyph partly out shows its rest, but none overlaps a line number.
         let left_edge = x0 + shift + left_mark(shift);
         let visible = visible && x + advance_px > x0 + shift && (x >= left_edge || (snapshot.line_numbers.is_none() && left_mark(shift) == 0.0));
+        if visible && !matches!(shown, Shown::Inside) {
+            super::cover(&mut visible_text_bytes, byte..byte + ch.len_utf8());
+        }
         let ox = ox - shift;
         use romacs_display_protocol::BoxVerticalEdges as Edges;
         // A stretch in a box run owns the run's edges at its ends; its
@@ -580,7 +588,7 @@ pub(super) fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuf
         let stretches = (&snapshot.band_stretches.mode_line[..], left as f32);
         paint_band(frame, snapshot, band, snapshot.mode_line_face, bounds, stretches, GlyphRowRole::ModeLine, (face_base, copy), (&metrics, &glyphless))?;
     }
-    Ok(WindowEnd { id: snapshot.id, end: end_byte, visible_end, body_height, rows, origin_y: oy, point: place })
+    Ok(WindowEnd { id: snapshot.id, end: end_byte, visible_end, body_height, rows, origin_y: oy, point: place, visible_text_bytes })
 }
 
 /// Whether any character of TEXT shows in a face of FACES with a box: the

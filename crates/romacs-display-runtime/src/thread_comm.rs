@@ -680,12 +680,13 @@ impl RenderComms {
     pub(super) fn send_key_input_with_receipt(
         &self,
         event: InputEvent,
+        ingress: Option<romacs_display_protocol::frame_time::EventTime>,
     ) -> Option<romacs_display_protocol::input_progress::InputReceipt> {
         if self.input_interrupt.as_ref().is_some_and(|hook| hook.interrupt(&event)) {
             return None;
         }
         let delivery = matches!(&event, InputEvent::Key { pressed: true, .. })
-            .then(romacs_display_protocol::input_progress::InputDelivery::new);
+            .then(|| romacs_display_protocol::input_progress::InputDelivery::with_ingress(ingress));
         let receipt = delivery.as_ref().map(|delivery| delivery.receipt());
         self.queue_input(event, delivery);
         receipt
@@ -696,7 +697,6 @@ impl RenderComms {
         event: InputEvent,
         delivery: Option<romacs_display_protocol::input_progress::InputDelivery>,
     ) {
-        crate::paint_host::trace_key_enqueue(&event, delivery.as_ref());
         // A close orders with the render facts before it on their stream.
         if let InputEvent::WindowClose { emacs_frame_id } = event { self.tell(Fact::FrameClosed(emacs_frame_id)); }
         Self::trace_input_received(&event);

@@ -17,6 +17,7 @@ pub mod font;
 pub mod frame_chrome;
 pub mod frame_glyphs;
 pub mod frame_time;
+pub mod submission;
 pub mod geometry;
 pub mod glyph_matrix;
 pub mod gradient;

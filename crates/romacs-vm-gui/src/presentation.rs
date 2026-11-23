@@ -40,7 +40,7 @@ pub struct Presentation {
     /// The presentations retired and when each rendered, in order, until
     /// taken: a prompt's settled paint and the loop's next may both retire
     /// before the loop takes them, and the trace needs each.
-    retired: Vec<(u64, Instant)>,
+    retired: Vec<(u64, u64, Instant)>,
     /// The current stall has been reported.
     warned: bool,
 }
@@ -151,14 +151,14 @@ impl Presentation {
     pub fn completed(&mut self, presentation: u64, at: Instant) {
         if let Some((actual, _)) = self.in_flight.filter(|(actual, _)| *actual <= presentation) {
             self.in_flight = None;
-            self.retired.push((actual, at));
+            self.retired.push((actual, presentation, at));
             self.warned = false;
         }
     }
 
     /// The presentations retired since the last call, and when each rendered:
     /// the latency trace's keys for it are complete.
-    pub fn take_retired(&mut self) -> Vec<(u64, Instant)> { std::mem::take(&mut self.retired) }
+    pub fn take_retired(&mut self) -> Vec<(u64, u64, Instant)> { std::mem::take(&mut self.retired) }
 
     /// How long to block for input while a paint is in flight: until it
     /// would count as stalled, so the stall is told when it begins. The

@@ -246,7 +246,7 @@ pub(crate) fn append_window(snapshot: &WindowSnapshot, mut frame: Option<&mut Fr
     // A body width of zero is legal: an empty body paints nothing and
     // displays nothing, which makes window-end equal window-start.
     if validate(snapshot)? {
-        return Ok(WindowEnd { id: snapshot.id, end: snapshot.start_byte, visible_end: snapshot.start_byte, body_height: 0.0, rows: vec![], origin_y: 0.0, point: None });
+        return Ok(WindowEnd { id: snapshot.id, end: snapshot.start_byte, visible_end: snapshot.start_byte, body_height: 0.0, rows: vec![], origin_y: 0.0, point: None, visible_text_bytes: vec![] });
     }
     let text = &snapshot.text.utf8;
     let line_start = text[..snapshot.start_byte].rfind('\n').map_or(0, |at| at + 1);
@@ -690,6 +690,7 @@ fn row_is_above(held: &Wrapped, at: usize) -> bool { held.end == at && held.cont
 
 /// The rows SNAPSHOT's window shows from its start, in the window's
 /// inputs FRAME; with their glyphs when PAINT.
+// SMELL(long-function): Collect painted row coverage while assembling the window, where the row’s source offset and clip are known.
 #[allow(clippy::too_many_lines, reason = "the frame-at-once loop's view of the rows, kept in its order")]
 fn rows(snapshot: &WindowSnapshot, frame: &Frame, pass: &mut Pass, numbers_cell: f32, default: Metrics, paint: bool, kept: &mut Kept) -> Result<View, String> {
     let text_len = snapshot.text.utf8.len();
@@ -700,6 +701,7 @@ fn rows(snapshot: &WindowSnapshot, frame: &Frame, pass: &mut Pass, numbers_cell:
     let mut visible_end = snapshot.start_byte;
     let fully_visible = |y: f32, height: f32| y >= 0.0 && y + height <= body;
     let (mut rows, mut marks, mut placed) = (vec![], vec![], vec![]);
+    let mut visible_text_bytes = Vec::new();
     let (mut place, mut cursor): (Option<PointPlace>, Option<CursorRect>) = (None, None);
     let mut n = 0;
     let reached_end = 'lines: loop {
@@ -769,7 +771,15 @@ fn rows(snapshot: &WindowSnapshot, frame: &Frame, pass: &mut Pass, numbers_cell:
                     let (dy, height) = row.settled.map_or((0.0, pointed.rect.2), |ascent| settled_cursor(pointed.rect, ascent, row.height));
                     cursor = Some((pointed.rect.0, y + dy, pointed.rect.1, height, pointed.rect.3));
                 }
-                if paint { placed.push(Placed { seen, y, shift, x0: row.x0, left_mark: marked, row: row.clone() }); }
+                if paint {
+                    let base = seen.start + row.restart.at;
+                    if row.settled.is_none() || fully_visible(y, row.height) {
+                        for range in row.coverage.as_deref().unwrap_or_default() {
+                            crate::cover(&mut visible_text_bytes, base + range.start..base + range.end);
+                        }
+                    }
+                    placed.push(Placed { seen, y, shift, x0: row.x0, left_mark: marked, row: row.clone() });
+                }
             } else if let Some(pointed) = pointed {
                 cursor = Some((pointed.rect.0, y, pointed.rect.1, pointed.rect.2, pointed.rect.3));
             }
@@ -787,7 +797,7 @@ fn rows(snapshot: &WindowSnapshot, frame: &Frame, pass: &mut Pass, numbers_cell:
         }
         count(kept, wrapped);
     };
-    Ok(View { end: WindowEnd { id: snapshot.id, end: end_byte, visible_end, body_height: body, rows, origin_y: 0.0, point: place }, marks, placed, cursor, reached_end })
+    Ok(View { end: WindowEnd { id: snapshot.id, end: end_byte, visible_end, body_height: body, rows, origin_y: 0.0, point: place, visible_text_bytes }, marks, placed, cursor, reached_end })
 }
 
 /// The advance of a scrolled row's left truncation glyph.
