@@ -3089,6 +3089,9 @@ def composer(args, base, real=False):
         a.keys('slow 30'); a.keys('-k', 'Return')
         until(lambda: a.state(sid) in ('running', 'starting'), 10, 'the slow turn')
         a.keys('say queued one'); a.keys(*ctrl('c'), *ctrl('q'))
+        # The keys reach the editor before it handles them: wait for the
+        # queued draft to leave the composer, or a loaded host reads it first.
+        until(lambda: look()[0] == '', 10, 'queued composer cleared')
         steps['queued_composer'] = look()[0]
         until(lambda: 'queued one' in a.chat(sid).split('❯ say queued one', 1)[-1] and '❯ say queued one' in a.chat(sid),
               40, 'the queued message sent after the turn')
