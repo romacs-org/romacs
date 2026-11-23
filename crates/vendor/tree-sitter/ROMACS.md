@@ -69,6 +69,9 @@ Each is its own commit in Romacs's history.
   custom decoding paths. The C input layout still carries the encoding and
   decode slots. Measurement: none (pure deletion).
 
+- `refactor(treesit): remove dead scanner error flow` deletes the flag and
+  exits used by Wasm scanner failures. Measurement: none (pure deletion).
+
 ## Checking it
 
 `tools/treesit-fuzz` builds this runtime and the published one with the

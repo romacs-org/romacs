@@ -47,7 +47,6 @@ struct TSParser {
   TSParseOptions parse_options;
   TSParseState parse_state;
   unsigned included_range_difference_index;
-  bool has_scanner_error;
   bool canceled_balancing;
   bool has_error;
 };
@@ -409,7 +408,6 @@ static Subtree ts_parser__lex(
       ts_lexer_start(&self->lexer);
       ts_parser__external_scanner_deserialize(self, external_token);
       found_token = ts_parser__external_scanner_scan(self, lex_mode.external_lex_state);
-      if (self->has_scanner_error) return NULL_SUBTREE;
       ts_lexer_finish(&self->lexer, &lookahead_end_byte);
 
       if (found_token) {
@@ -1475,7 +1473,6 @@ static bool ts_parser__advance(
     if (needs_lex) {
       needs_lex = false;
       lookahead = ts_parser__lex(self, version, state);
-      if (self->has_scanner_error) return false;
 
       if (lookahead.ptr) {
         ts_parser__set_cached_token(self, position, last_external_token, lookahead);
@@ -1810,7 +1807,6 @@ TSParser *ts_parser_new(void) {
   self->finished_tree = NULL_SUBTREE;
   self->reusable_node = reusable_node_new();
   self->language = NULL;
-  self->has_scanner_error = false;
   self->has_error = false;
   self->canceled_balancing = false;
   self->external_scanner_payload = NULL;
@@ -1897,7 +1893,6 @@ void ts_parser_reset(TSParser *self) {
     self->finished_tree = NULL_SUBTREE;
   }
   self->accept_count = 0;
-  self->has_scanner_error = false;
   self->has_error = false;
   self->canceled_balancing = false;
   self->parse_options = (TSParseOptions) {0};
@@ -1909,7 +1904,6 @@ TSTree *ts_parser_parse(
   const TSTree *old_tree,
   TSInput input
 ) {
-  TSTree *result = NULL;
   if (
     !self->language || !input.read ||
     (old_tree && old_tree->language != self->language)
@@ -1925,7 +1919,6 @@ TSTree *ts_parser_parse(
     if (self->canceled_balancing) goto balance;
   } else {
     ts_parser__external_scanner_create(self);
-    if (self->has_scanner_error) goto exit;
 
     if (old_tree) {
       ts_subtree_retain(old_tree->root);
@@ -1952,7 +1945,6 @@ TSTree *ts_parser_parse(
       bool allow_node_reuse = version_count == 1;
       while (ts_stack_is_active(self->stack, version)) {
         if (!ts_parser__advance(self, version, allow_node_reuse)) {
-          if (self->has_scanner_error) goto exit;
           return NULL;
         }
 
@@ -1995,7 +1987,7 @@ balance:
   }
   self->canceled_balancing = false;
 
-  result = ts_tree_new(
+  TSTree *result = ts_tree_new(
     self->finished_tree,
     self->language,
     self->lexer.included_ranges,
@@ -2003,7 +1995,6 @@ balance:
   );
   self->finished_tree = NULL_SUBTREE;
 
-exit:
   ts_parser_reset(self);
   return result;
 }
