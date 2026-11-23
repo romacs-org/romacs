@@ -153,7 +153,7 @@ pub(crate) enum Halt {
 pub(crate) type R<T> = Result<T, Halt>;
 
 /// Where `forw_comment` goes on: the code after each update that can stop.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(crate) enum ForwAt { Read, EscapeSkipped, Incomment, NestedChecks }
 
 impl ForwAt {
@@ -330,7 +330,7 @@ impl<S> From<Halt> for Stopped<S> {
 /// check after its step, the dispatch on the character stepped over, and
 /// inside a symbol, a comment or a string. Backward, `back_comment`'s
 /// decode, which asks `syntax-ppss`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(crate) enum ScanAt { #[default] Top, Stepped, Dispatch, Symbol, Comment, String, Decode }
 impl ScanAt {
     pub(crate) const ALL: [ScanAt; 7] = [

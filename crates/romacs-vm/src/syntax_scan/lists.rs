@@ -312,7 +312,7 @@ impl<T: Text> Scanner<'_, T> {
                     }
                     Token::Close => close!(),
                     Token::String | Token::StringFence => {
-                        mark = self.text.dec(from);
+                        c = self.text.char_at(self.text.dec(from));
                         ScanAt::String
                     }
                     _ => ScanAt::Top,
@@ -356,7 +356,7 @@ impl<T: Text> Scanner<'_, T> {
                     }
                 }
                 ScanAt::String | ScanAt::Decode => {
-                    let stringterm = self.text.char_at(mark);
+                    let stringterm = c;
                     loop {
                         if from.char >= stop { return Err(lose(last_good, from).into()); }
                         update!(ScanAt::String);
