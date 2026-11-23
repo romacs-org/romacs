@@ -508,11 +508,19 @@ by counting characters from the start."
          (t (setq ok nil))))
       (and ok (nreverse wakes)))))
 
+(defconst romacs-agent--parent-reply-line
+  "Your turn's reply answers this message from your parent."
+  "The line after a message from the receiver's parent when the
+receiver's turn's reply reaches it (`romacs-agent--turn-answers-p'): the
+one channel that answers it, so no call is offered to answer it twice.
+Beside the regexp that reads it back, which needs it as it loads.")
+
 (defconst romacs-agent--reply-line-regexp
   (concat "\n\\(?:"
           "Reply to this message with SendMessage(to=\"[^\"\n]*\", message=\\.\\.\\.)\\."
           "\\|Reply to this \\(?:message\\|result\\) with romacs_task_reply(messageId=\"[^\"\n]*\", text=\\.\\.\\.)\\."
           "\\|Its sender is outside Romacs and has no reply route: it reads only your turn's reply\\."
+          "\\|" (regexp-quote romacs-agent--parent-reply-line)
           "\\)[ \t]*\\(?:\n[ \t\n]*\\|\\'\\)")
   "The line `romacs-agent--message-reply-line' writes after an envelope,
 each of its forms whole, and the space after it.")
@@ -2032,7 +2040,7 @@ last result, whole: the tools that act on a task answer only its length (resultC
  "Delivery: queued until the task's turn ends unless steer is true, which reaches a running task at its next tool \
 boundary. Send a message to a task you delegated, or to another task of your own parent (your parent gets a copy with its \
 next wake, never woken for it); any other session is refused. It reads it as a <romacs-message> naming you, and \
-answers with romacs_task_reply or its turn's reply; inReplyTo links this one to a message it answers. An idle task gets \
+answers as its last line says: your own task by its turn's reply when that wakes you (wake end or all), else by romacs_task_reply; inReplyTo links this one to a message it answers. An idle task gets \
 it at once; one whose harness ended is resumed for it. mode queue (default); replace: in place of your messages still \
 waiting for it; interrupt: its turn cut short, then this first. A task's next turn end wakes its parent with its reply \
 by its wake rule: end your turn then, do \
@@ -2054,8 +2062,8 @@ resultChars), never its last result: romacs_task_status reads that."
 (romacs-mcp-register-tool
  "romacs_task_reply"
  "Answer a message another session sent you (a <romacs-message>, by its id): routed back to its sender, whatever \
-it is to you (parent, child, sibling), linked to the message it answers. A message from your parent is answered \
-by your turn's reply too: use this to answer before your turn ends, or anyone else. mode as romacs_task_send's. \
+it is to you (parent, child, sibling), linked to the message it answers. When a message's last line says your \
+turn's reply answers it, use this only for an interim note to its sender while you work. mode as romacs_task_send's. \
 Answers the reply's messageId and the sender's short record, as romacs_task_send's."
  (romacs-mcp--object
   "type" "object"

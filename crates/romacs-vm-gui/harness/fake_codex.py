@@ -121,6 +121,7 @@ def log_turn(thread, params, prompt):
                                      'model': params.get('model'), 'effort': params.get('effort'),
                                      'argv': sys.argv[1:], 'pid': os.getpid(),
                                      'codex_home': os.environ.get('CODEX_HOME'), 'prompt': first[:200],
+                                     'last': (prompt.strip().splitlines() or [''])[-1][:200],
                                      'env': {k: v for k, v in os.environ.items()
                                              if k.startswith(('ROMACS_', 'CLAUDE', 'CODEX_', 'T3CODE_', 'AGENT_TEST_'))}}) + '\n')
 
