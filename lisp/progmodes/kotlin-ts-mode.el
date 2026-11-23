@@ -6,6 +6,10 @@
 ;;; Commentary:
 
 ;; Major mode for Kotlin source files and scripts.
+;;
+;; Syntax parsing treats interpolation as part of the string.  An
+;; unescaped quote inside ${...} can confuse the syntax state until
+;; the syntax engine supports interpolation.
 
 ;;; Code:
 
@@ -34,114 +38,48 @@
     table)
   "Syntax table used in Kotlin buffers.")
 
-(defun kotlin-ts-mode--skip-code-token (end)
-  "Advance over a comment, character or escaped identifier up to END."
-  (save-restriction
-    (narrow-to-region (point-min) end)
-    (let ((parse-sexp-lookup-properties nil))
-      (pcase (char-after)
-        (?/
-         (if (looking-at-p (rx "/" (any "/*")))
-             (unless (forward-comment 1)
-               (goto-char end))
-           (forward-char)))
-        (?'
-         (goto-char (or (ignore-error scan-error (scan-sexps (point) 1)) end)))
-        (?`
-         (forward-char)
-         (skip-chars-forward "^`\r\n")
-         (when (eq (char-after) ?`)
-           (forward-char)))))))
+(defun kotlin-ts-mode--raw-fence ()
+  "Mark an opening or closing raw-string fence in a run of double quotes.
+A closer needs three quotes after the opener, even if a region splits the run."
+  (let ((beg (match-beginning 0))
+        (end (point)))
+    (when (or (>= (- end beg) 3)
+              (eq (char-before beg) ?\")
+              (eq (char-after end) ?\"))
+      (let ((state (save-excursion (syntax-ppss beg)))
+            (fence (string-to-syntax "|")))
+        (cond
+         ((nth 4 state) nil)
+         ((eq (nth 3 state) t)
+          (when (and (not (eq (char-after end) ?\"))
+                     (>= (- end 3) (+ (nth 8 state) 3))
+                     (save-excursion
+                       (goto-char (- end 3))
+                       (looking-at-p "\"\"\"")))
+            (put-text-property (1- end) end 'syntax-table fence)))
+         ((nth 5 state) (goto-char (1+ beg)))
+         ((and (not (nth 3 state))
+               (save-excursion (goto-char beg) (looking-at-p "\"\"\"")))
+          (put-text-property beg (1+ beg) 'syntax-table fence)
+          (goto-char (min end (+ beg 3)))))))))
 
-(defun kotlin-ts-mode--string-opener (end)
-  "Skip a string opener up to END and return its kind."
-  (if (looking-at-p "\"\"\"")
-      (progn (goto-char (min end (+ (point) 3))) 'raw)
-    (forward-char)
-    'string))
-
-(defun kotlin-ts-mode--scan-string (end)
-  "Advance across a string through END and return whether it closed.
-Track braces, comments, identifiers and nested strings in templates."
-  (let ((states (list (kotlin-ts-mode--string-opener end))))
-    (while (and states (< (point) end)
-                (re-search-forward
-                 (pcase (car states)
-                   ('raw "[$\"]")
-                   ('string (rx (or "$" "\"" (seq "\\" anything))))
-                   ('code "[\"'`/{}]"))
-                 end 'move))
-      (let* ((start (match-beginning 0))
-             (char (char-after start)))
-        (if (eq (car states) 'code)
-            (pcase char
-              (?{ (push 'code states))
-              (?} (pop states))
-              (?\" (goto-char start)
-                   (push (kotlin-ts-mode--string-opener end) states))
-              (_ (goto-char start)
-                 (kotlin-ts-mode--skip-code-token end)))
-          (pcase char
-            (?$
-             (when (< (point) end)
-               (pcase (char-after)
-                 (?{ (forward-char) (push 'code states))
-                 (?` (kotlin-ts-mode--skip-code-token end)))))
-            (?\" (if (eq (car states) 'string)
-                     (pop states)
-                   (when (looking-at-p "\"\"")
-                     (skip-chars-forward "\"" end)
-                     (unless (eq (char-after) ?\")
-                       (pop states)))))))))
-    (null states)))
-
-(defun kotlin-ts-mode--mark-literal (beg end)
-  "Scan the token at point and mark its syntax within BEG and END."
-  (let ((start (point)))
-    (if (eq (char-after) ?\")
-        (let ((closed (kotlin-ts-mode--scan-string end))
-              (fence (string-to-syntax "|")))
-          (when (>= start beg)
-            (put-text-property start (1+ start) 'syntax-table fence))
-          (when (and closed (> (point) beg))
-            (put-text-property (1- (point)) (point) 'syntax-table fence)))
-      (let ((identifier (eq (char-after) ?`)))
-        (kotlin-ts-mode--skip-code-token end)
-        (when identifier
-          (add-text-properties
-           start (point) (list 'syntax-table (string-to-syntax "_")
-                               'syntax-multiline t)))))))
-
-(defun kotlin-ts-mode--syntax-extend-region (beg end)
-  "Move BEG back through a partially propertized identifier or comment opener."
-  (when (> beg (point-min))
-    (cond
-     ((get-text-property (1- beg) 'syntax-multiline)
-      (cons (previous-single-property-change beg 'syntax-multiline
-                                             nil (point-min))
-            end))
-     ((and (eq (char-before beg) ?/) (memq (char-after beg) '(?/ ?*)))
-      (cons (1- beg) end)))))
+(defconst kotlin-ts-mode--syntax-propertize
+  (syntax-propertize-rules
+   ((rx "`" (+ (not (any "`\r\n"))) "`")
+    (0 (let ((beg (match-beginning 0)))
+         (if (nth 8 (save-excursion (syntax-ppss beg)))
+             (progn (goto-char (1+ beg)) nil)
+           (string-to-syntax "_")))))
+   ((rx (+ "\""))
+    (0 (ignore (kotlin-ts-mode--raw-fence)))))
+  "Syntax rules for raw strings and escaped identifiers.")
 
 (defun kotlin-ts-mode--syntax-before-change (beg _end)
   "Invalidate the three-character syntax lookahead before an edit at BEG.
 Electric pairing can query BEG itself, before region extension runs."
-  (syntax-ppss-flush-cache (max (point-min) (- beg 3))))
-
-(defun kotlin-ts-mode--syntax-propertize (beg end)
-  "Set literal syntax within BEG and END using the widened syntax state."
-  (let ((clipped (and (buffer-narrowed-p) (= beg (point-min)))))
-    (save-restriction
-      (widen)
-      (when clipped
-        ;; The shared propertizer may have skipped invalidated text before BEG.
-        (remove-text-properties (point-min) beg '(syntax-table nil syntax-multiline nil))
-        (setq beg (point-min))
-        (syntax-ppss-flush-cache beg))
-      (goto-char (or (nth 8 (syntax-ppss beg)) beg))
-      (while (and (< (point) end) (re-search-forward "[\"'`/]" end t))
-        (goto-char (match-beginning 0))
-        (kotlin-ts-mode--mark-literal beg end)))))
+  (save-restriction
+    (widen)
+    (syntax-ppss-flush-cache (max (point-min) (- beg 3)))))
 
 (defconst kotlin-ts-mode--indent-rules
   `((kotlin
@@ -254,9 +192,8 @@ Electric pairing can query BEG itself, before region extension runs."
   (setq-local comment-start "// "
               comment-end ""
               comment-start-skip "//+\\s-*\\|/\\*+\\s-*"
-              syntax-propertize-function #'kotlin-ts-mode--syntax-propertize
-              syntax-propertize-extend-region-functions
-              '(kotlin-ts-mode--syntax-extend-region)
+              syntax-propertize-function kotlin-ts-mode--syntax-propertize
+              syntax-propertize-widen t
               indent-tabs-mode nil)
   (add-hook 'before-change-functions #'kotlin-ts-mode--syntax-before-change nil t)
   (when (and (treesit-ensure-installed 'kotlin)

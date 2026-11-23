@@ -392,9 +392,22 @@ It's also used so that `syntax-ppss-flush-cache' can be used from within
 
 (defvar-local syntax-ppss--updated-cache nil)
 
+(defvar-local syntax-propertize-widen nil
+  "Whether to widen while setting syntax properties.
+Modes can set this when their syntax rules need the whole buffer's
+context.  The caller's restriction is restored and labeled restrictions
+remain in force.")
+
 (defun syntax-propertize (pos)
   "Ensure that syntax-table properties are set until POS (a buffer point)."
-  (when (< syntax-propertize--done pos)
+  (cond
+   ((>= syntax-propertize--done pos) nil)
+   ((and syntax-propertize-widen (buffer-narrowed-p))
+    (save-restriction
+      (widen)
+      (let ((syntax-propertize-widen nil))
+        (syntax-propertize pos))))
+   (t
     (if (memq syntax-propertize-function '(nil ignore))
         (setq syntax-propertize--done (max (point-max) pos))
       ;; (message "Needs to syntax-propertize from %s to %s"
@@ -466,7 +479,7 @@ It's also used so that `syntax-ppss-flush-cache' can be used from within
                   ;; cache can be updated by too many functions, so the author
                   ;; of the syntax-propertize-function may not be aware it
                   ;; can happen.
-                  (syntax-ppss-flush-cache start))))))))))
+                  (syntax-ppss-flush-cache start)))))))))))
 
 ;;; Link syntax-propertize with syntax.c.
 

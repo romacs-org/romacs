@@ -89,7 +89,7 @@
                      ("interface" . nil)))
       (should (equal (nth 4 (syntax-ppss (kotlin-ts-mode-tests--position (car entry))))
                      (cdr entry))))
-    (dolist (entry '(("Hello" . t) ("${prefix}" . t)
+    (dolist (entry '(("Hello" . ?\") ("${prefix}" . ?\")
                      ("quoted" . t) ("a backslash" . t)
                      ("val empty" . nil) ("val trailingQuote" . nil)
                      ("val done" . nil)))
@@ -113,13 +113,10 @@
         (should-not (nth 3 state))
         (should-not (nth 4 state))))))
 
-(ert-deftest kotlin-ts-mode-syntax-after-nested-templates ()
-  (dolist (literal '("\"before ${\"/*\"} after\""
-                     "\"before ${\"}\"} after\""
-                     "\"\"\"before ${\"\"\"}\"\"\"} after\"\"\""
-                     "\"before $`has\"quote` after\""
-                     "\"before \\${literal} and \\\" after\""
-                     "\"before ${if (true) { \"}\" } else { /* } */ \"{\" }} after\""))
+(ert-deftest kotlin-ts-mode-syntax-after-simple-templates ()
+  (dolist (literal '("\"before ${name} after\""
+                     "\"\"\"before ${name} after\"\"\""
+                     "\"before \\${literal} and \\\" after\""))
     (with-temp-buffer
       (insert "fun f() {\n    val text = " literal "\n    val following = 0\n}\n")
       (kotlin-ts-mode)
@@ -128,10 +125,10 @@
         (should-not (nth 3 state))
         (should-not (nth 4 state))))))
 
-(ert-deftest kotlin-ts-mode-syntax-revisits-an-edited-multiline-template ()
+(ert-deftest kotlin-ts-mode-syntax-edits-a-raw-string-without-a-reparse ()
   (with-temp-buffer
-    (insert "fun f() {\n    val text = \"\"\"before ${listOf(\n"
-            "        \"/*\"\n    )} after\"\"\"\n    val following = 0\n}\n")
+    (insert "fun f() {\n    val text = \"\"\"before ${name}\n"
+            "        \"/*\"\n    after\"\"\"\n    val following = 0\n}\n")
     (kotlin-ts-mode)
     (cl-letf (((symbol-function 'treesit-parser-changed-regions)
                (lambda (&rest _) (ert-fail "Lexical scan requested a reparse"))))
@@ -139,7 +136,7 @@
         (should (nth 3 (syntax-ppss (kotlin-ts-mode-tests--position "before"))))
         (goto-char (kotlin-ts-mode-tests--position "\"/*\""))
         (delete-char 4)
-        (insert "\"\"\"}\"\"\"")
+        (insert "\"}\"")
         (let ((state (syntax-ppss (kotlin-ts-mode-tests--position "val following"))))
           (should (= (nth 0 state) 1))
           (should-not (nth 3 state))
@@ -195,3 +192,53 @@
             (should (= (nth 0 state) 1))
             (should-not (nth 3 state))
             (should-not (nth 4 state))))))))
+
+(defun kotlin-ts-mode-tests--edit-with-local-syntax (string)
+  "Insert a character and check STRING state and the lexical search bounds."
+  (let ((lower (- (point) 80))
+        (upper (+ (point) 600))
+        (search (symbol-function 're-search-forward))
+        seen)
+    (cl-letf (((symbol-function 're-search-forward)
+               (lambda (regexp &optional bound noerror count)
+                 (when (syntax-propertize--in-process-p)
+                   (setq seen t)
+                   (should (>= (point) lower))
+                   (should (<= (or bound (point-max)) upper)))
+                 (funcall search regexp bound noerror count))))
+      (insert "x")
+      (should (eq (nth 3 (syntax-ppss)) string)))
+    (should seen)))
+
+(ert-deftest kotlin-ts-mode-syntax-edit-beside-an-unterminated-opener ()
+  (with-temp-buffer
+    (insert "val raw = \"\"\"\n")
+    (let ((edit (point)))
+      (dotimes (_ 80) (insert "Raw content with ${value} and \"quotes\".\n"))
+      (kotlin-ts-mode)
+      (goto-char edit)
+      (kotlin-ts-mode-tests--edit-with-local-syntax t))))
+
+(ert-deftest kotlin-ts-mode-syntax-edit-far-from-a-raw-opener ()
+  (with-temp-buffer
+    (insert "val raw = \"\"\"\n")
+    (dotimes (_ 80) (insert "Raw content with ${value} and \"quotes\".\n"))
+    (let ((edit (point)))
+      (insert "edit here\n\"\"\"\n")
+      (kotlin-ts-mode)
+      (syntax-ppss (point-max))
+      (goto-char edit)
+      (kotlin-ts-mode-tests--edit-with-local-syntax t))))
+
+(ert-deftest kotlin-ts-mode-syntax-edit-at-the-narrowing-bound ()
+  (with-temp-buffer
+    (dotimes (_ 80) (insert "val text = \"value ${name}\"\n"))
+    (let ((edit (point)))
+      (insert "val edit = 0\n")
+      (kotlin-ts-mode)
+      (syntax-ppss (point-max))
+      (save-restriction
+        (narrow-to-region edit (point-max))
+        (goto-char (point-min))
+        (kotlin-ts-mode-tests--edit-with-local-syntax nil)
+        (should (= (point-min) edit))))))
