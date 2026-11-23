@@ -1,7 +1,6 @@
 # crates/vendor/tree-sitter
-Romacs's own tree-sitter runtime: forked from the published 0.27.0 crate and
-tailored to how Romacs parses, which is after every key, with a background
-reparse, many buffers per grammar, and fontify by visible region.
+Romacs's fork of tree-sitter 0.27.0 supports per-key and background reparses,
+many buffers per grammar, and fontification by visible region.
 
 ## Boundary
 - The runtime parses native UTF-8 only, with no Wasm support or logger.
