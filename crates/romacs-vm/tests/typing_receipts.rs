@@ -262,7 +262,8 @@ fn keys_a_command_reads_are_its_own() {
     s.press_at_once(character('x'));
     s.command();
     s.redisplay();
-    s.expect(&[(0, "awaited-input"), (1, "rendered")]);
+    // x is charged the frame its step's redisplay submitted, the newest.
+    assert_eq!(s.outcomes(), [(0, "awaited-input", None), (1, "rendered", Some(s.presented.get()))]);
     s.press(CommandEvent::Character(24));
     s.press_at_once(character('h'));
     s.command();
@@ -286,7 +287,8 @@ fn keys_a_command_reads_are_its_own() {
 
 /// The key that opens a prompt is charged the prompt's first frame
 /// (`opened`), not the prompt: M-x's minibuffer, C-x C-f's after a prefix
-/// with no echo.
+/// with no echo. A prefix whose step submitted a frame before the next key
+/// (its echo; this screen submits on every redisplay) is charged that frame.
 #[test]
 fn an_opener_is_charged_its_prompts_first_frame() {
     let mut s = Session::new();
@@ -311,6 +313,18 @@ fn an_opener_is_charged_its_prompts_first_frame() {
     let settled = s.outcomes();
     assert_eq!(&settled[..3], &[(8, "awaited-input", None), (9, "opened", Some(before + 2)), (10, "rendered", Some(before + 3))], "settled: {settled:?}");
     assert_eq!(settled.iter().map(|(i, _, _)| *i).collect::<Vec<_>>(), (8..12).collect::<Vec<_>>(), "settled: {settled:?}");
+    // C-f typed after C-x's frame: a redisplay before the C-x read, one
+    // before the C-f read (C-x's), then the prompt's first frame.
+    let before = s.presented.get();
+    s.press(CommandEvent::Character(24));
+    s.press(CommandEvent::Character(6));
+    s.press(character('z'));
+    s.press(CommandEvent::Character(7));
+    s.command();
+    s.redisplay();
+    let settled = s.outcomes();
+    assert_eq!(&settled[..3], &[(12, "opened", Some(before + 2)), (13, "opened", Some(before + 3)), (14, "rendered", Some(before + 4))], "settled: {settled:?}");
+    assert_eq!(settled.iter().map(|(i, _, _)| *i).collect::<Vec<_>>(), (12..16).collect::<Vec<_>>(), "settled: {settled:?}");
 }
 
 /// A step inside another (the minibuffer's, a recursive edit's) settles
