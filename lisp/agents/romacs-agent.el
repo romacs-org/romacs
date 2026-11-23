@@ -978,6 +978,10 @@ missing: the harness would start empty there, and could not resume."
     (user-error "Agent provider %s: configuration directory %s does not exist"
                 provider (expand-file-name dir))))
 
+(defun romacs-agent--check-session-config (session)
+  "Refuse to run SESSION when its recorded configuration directory is gone."
+  (romacs-agent--check-config-dir (romacs-agent-provider session) (romacs-agent-config-dir session)))
+
 (defun romacs-agent--env-words (variable dir)
   "The `env' words setting VARIABLE to DIR, or unsetting it for nil:
 whatever the editor's own environment and the user manager's say."
@@ -1738,7 +1742,7 @@ on whatever becomes of this server."
                                                       "prompt" (secure-hash 'sha1 prompt)
                                                       "messages" (vconcat (mapcar #'romacs-agent--message-json messages))))
       (setq text prompt)))
-  (romacs-agent--check-config-dir (romacs-agent-provider session) (romacs-agent-config-dir session))
+  (romacs-agent--check-session-config session)
   (let ((input (expand-file-name "input" (romacs-agent-dir session)))
         (images (romacs-agent--sendable-images images)))
     (let ((coding-system-for-write 'utf-8-unix))
@@ -4294,6 +4298,17 @@ first).  One timer for however many records come meanwhile."
                          (romacs-agent-item-messages item) (romacs-agent-item-own item)
                          (romacs-agent-item-id item))))
 
+(defun romacs-agent--message-ended (session)
+  "Refuse a queued message to SESSION until its harness is resumed."
+  (user-error "Session %s has ended: resume it (r) to go on" (romacs-agent-title session)))
+
+(defun romacs-agent--check-message-run (session attached)
+  "Refuse a message to SESSION if its records say its harness ended.
+When ATTACHED, let the replay finish before deciding."
+  (when (and (memq (romacs-agent-state session) '(ended unstarted))
+             (or (not attached) (romacs-agent-caught-up session)))
+    (romacs-agent--message-ended session)))
+
 (defun romacs-agent--open (session)
   "Start what lets SESSION's waiting messages go: a supervisor still
 running is attached; a stopped harness is resumed once it has gone
@@ -4302,17 +4317,12 @@ not resumed by a message: `user-error' says to resume it."
   (cond ((romacs-agent--per-turn-p session))
         ((romacs-agent-stopped session)
          (unless (process-live-p (romacs-agent-connection session)) (romacs-agent-resume session)))
-        ;; An attachment replaying still: what ran since its kept state decides.
-        ((and (process-live-p (romacs-agent-connection session)) (not (romacs-agent-caught-up session))))
-        ;; Its run's exit read, whatever its supervisor still holds open.
-        ((memq (romacs-agent-state session) '(ended unstarted))
-         (user-error "Session %s has ended: resume it (r) to go on" (romacs-agent-title session)))
-        ((process-live-p (romacs-agent-connection session)))
-        ((eq (romacs-agent-state session) 'starting))
-        ;; A stopped supervisor leaves its socket: only a connection says it listens.
-        ((and (romacs-agent-host-socket session) (file-exists-p (romacs-agent-host-socket session))
-              (processp (romacs-agent--attach session 0))))
-        (t (user-error "Session %s has ended: resume it (r) to go on" (romacs-agent-title session)))))
+        (t (let ((attached (process-live-p (romacs-agent-connection session))))
+             (romacs-agent--check-message-run session attached)
+             (unless (or attached (eq (romacs-agent-state session) 'starting)
+                         (and (romacs-agent-host-socket session) (file-exists-p (romacs-agent-host-socket session))
+                              (processp (romacs-agent--attach session 0))))
+               (romacs-agent--message-ended session))))))
 
 (defun romacs-agent--admit (session item &optional first keep)
   "Put ITEM in SESSION's queue (FIRST: ahead of what waits), start what
@@ -4759,20 +4769,36 @@ SESSION's last fork note, a new one says how far the fork now goes."
               ((> (romacs-agent-seq source) (cadr forked))))
     (romacs-agent--note session (romacs-agent--fork-note source (cadr forked)))))
 
+(defun romacs-agent--continuation (session)
+  "Choose how SESSION can continue, without starting or attaching it."
+  (cond ((romacs-agent--folding-p session) 'fold)
+        ((romacs-agent--per-turn-p session) 'turn)
+        ((process-live-p (romacs-agent-connection session)) 'attached)
+        ((eq (plist-get (romacs-agent-pending-selection session) :state) 'restarting) 'restart)
+        ((when-let* ((socket (romacs-agent-host-socket session))) (file-exists-p socket)) 'attach)
+        (t 'resume)))
+
+(defun romacs-agent--check-continuation (session)
+  "Check SESSION's continuation prerequisites without changing the session."
+  (unless (eq (romacs-agent-state session) 'starting)
+    (pcase (romacs-agent--continuation session)
+      ('turn (romacs-agent--check-session-config session))
+      ('attached (unless (romacs-agent-stopped session)
+                   (romacs-agent--check-message-run session t)))
+      ('attach (unless (romacs-agent--listening-p (romacs-agent-host-socket session))
+                 (romacs-agent--check-resume session)))
+      ('resume (romacs-agent--check-resume session)))))
+
 (defun romacs-agent--continue (session)
   "SESSION, going on: attached to its supervisor when one runs, else
 resumed; a per-turn harness goes on with its next message.  One a
 worker folds still goes on once it is folded."
-  (cond ((romacs-agent--folding-p session)
-         (romacs-agent--when-folded session (lambda () (romacs-agent--continue session))))
-        ((process-live-p (romacs-agent-connection session)))
-        ((romacs-agent--per-turn-p session))
-        ;; A selection's restart under way resumes it on the selection itself:
-        ;; a resume now would run the old one.
-        ((eq (plist-get (romacs-agent-pending-selection session) :state) 'restarting))
-        ;; A stopped supervisor leaves its socket: only a connection says it listens.
-        ((and (file-exists-p (romacs-agent-host-socket session)) (processp (romacs-agent--attach session 0))))
-        (t (romacs-agent-resume session)))
+  (pcase (romacs-agent--continuation session)
+    ('fold (romacs-agent--when-folded session (lambda () (romacs-agent--continue session))))
+    ;; A stopped supervisor leaves its socket behind.
+    ('attach (unless (processp (romacs-agent--attach session 0))
+               (romacs-agent-resume session)))
+    ('resume (romacs-agent-resume session)))
   session)
 
 (defun romacs-agent--when-attached (session function &optional tries)
@@ -5182,10 +5208,14 @@ source a worker folds, is resumed once they are folded."
       (unless (gethash (romacs-agent-id session) romacs-agent--resuming)
         (romacs-agent--resume-now session)))))
 
+(defun romacs-agent--check-resume (session)
+  "Check SESSION's configuration directory and launch companions."
+  (romacs-agent--check-session-config session)
+  (romacs-agent--check-companions))
+
 (defun romacs-agent--resume-now (session)
   "Resume SESSION (`romacs-agent-resume'), its launch once it is moved."
-  (romacs-agent--check-config-dir (romacs-agent-provider session) (romacs-agent-config-dir session))
-  (romacs-agent--check-companions)
+  (romacs-agent--check-resume session)
   (romacs-agent--refork session)
   (setf (romacs-agent-state session) 'starting (romacs-agent-driver-state session) (romacs-agent--driver-anew session)
         (romacs-agent-startup-pending session) nil)
@@ -6626,12 +6656,14 @@ listening, serve their relays, sweep what ended processes left, and say so."
   (sort (hash-table-values romacs-agent--sessions)
         (lambda (a b) (string> (or (romacs-agent-dir a) "") (or (romacs-agent-dir b) "")))))
 
-(defun romacs-agent-get (id)
+(defun romacs-agent-get (id &optional row-only)
   "The session ID names, loaded from its record the first time it is asked
 for when this process does not have it loaded yet (one a start left a row,
 or has not reached): every caller that names a session by its id gets it.
-Nil when none is recorded."
-  (or (gethash id romacs-agent--sessions) (romacs-agent-load-session id)))
+With ROW-ONLY, read the store's row for an unloaded session without
+loading its records or attaching.  Nil when none is recorded."
+  (or (gethash id romacs-agent--sessions)
+      (if row-only (romacs-agent-store-row-session id) (romacs-agent-load-session id))))
 
 (defun romacs-agent-loaded (id)
   "The session ID names when this process has it loaded, else nil: for a

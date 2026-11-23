@@ -350,8 +350,9 @@ task taskId (the caller's own by default), which the caller is or
 delegated; a unit not running now is refused."
   (romacs-mcp--instance arguments)
   (let* ((caller (romacs-agent-tools--caller))
-         (id (or (gethash "taskId" arguments) caller (user-error "taskId is required: you are no task")))
-         (task (or (romacs-agent-load-session id) (user-error "No task %s" id)))
+         (task (romacs-agent-tools--known
+                (or (gethash "taskId" arguments) caller (user-error "taskId is required: you are no task"))))
+         (id (romacs-agent-id task))
          (watch (progn (unless (equal id caller) (romacs-agent-tools--own task caller "watch for it"))
                        (romacs-agent-watch--described arguments task)))
          (known (cl-remove-if-not (lambda (w) (romacs-agent-watch--same-p w watch))

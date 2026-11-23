@@ -35,6 +35,18 @@
     (should-error (romacs-mcp--arguments schema (romacs-mcp--object)))
     (should-error (romacs-mcp--arguments schema (romacs-mcp--object "code" "ok" "extra" 1)))))
 
+(ert-deftest romacs-mcp-unknown-arguments-suggest-only-a-close-unique-field ()
+  (let* ((schema (romacs-mcp--schema '(("mode" . "string") ("more" . "string")) nil))
+         (refusal (lambda (key)
+                    (nth 2 (should-error (romacs-mcp--arguments schema (romacs-mcp--object key "ok"))
+                                         :type 'romacs-mcp-protocol-error)))))
+    (dolist (key '("zzzzzzzzzzzzzz" "mole" "mo"))
+      (let ((message (funcall refusal key)))
+        (should-not (string-search "Did you mean" message))
+        (should (string-search "mode" message))
+        (should (string-search "more" message))))
+    (should (string-search "Did you mean mode?" (funcall refusal "modex")))))
+
 (ert-deftest romacs-mcp-companion-preserves-study ()
   (romacs-mcp-enable-companion-tools)
   (let* ((study (current-buffer))
