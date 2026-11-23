@@ -276,6 +276,8 @@ impl Summary {
     }
 }
 
+pub(crate) mod lists;
+
 #[cfg(test)]
 mod tests {
     use super::*;

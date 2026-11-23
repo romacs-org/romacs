@@ -178,7 +178,7 @@ names none runs on the Romacs it reaches; naming one (romacs_identity)
 refuses a call meant for a Romacs that has since restarted."
   (let ((given (gethash "instance" arguments :absent)))
     (unless (or (eq given :absent) (equal given (gethash "instance" (romacs-mcp-identity))))
-      (user-error "Romacs instance mismatch"))))
+      (user-error "Romacs instance mismatch. Call romacs_identity to check the current instance."))))
 
 (defun romacs-mcp-register-tool (name description schema handler &optional annotations)
   "Register a named tool with a JSON schema and handler.
@@ -263,6 +263,36 @@ list's changes)."
                    append (list name (romacs-mcp--object "type" type))))
    "required" (vconcat required) "additionalProperties" :false))
 
+(defconst romacs-mcp--argument-aliases
+  '(("log" . "output") ("logFile" . "output"))
+  "Names to suggest for unknown arguments when the schema has the suggested field.")
+
+(defun romacs-mcp--argument-suggestion (key properties)
+  "Suggest a field for unknown KEY from the schema's PROPERTIES."
+  (let* ((alias (cdr (assoc key romacs-mcp--argument-aliases)))
+         (nested (cl-loop for name being the hash-keys of properties using (hash-values property)
+                          for fields = (and (hash-table-p property) (gethash "properties" property))
+                          when (and (hash-table-p fields) (gethash key fields))
+                          collect (concat name "." key))))
+    (cond ((and alias (gethash alias properties)) alias)
+          (nested (unless (cdr nested) (car nested)))
+          (t (cl-loop with best
+                      with nearest = (1+ (min 2 (/ (length key) 3)))
+                      for name being the hash-keys of properties
+                      for distance = (string-distance key name)
+                      if (< distance nearest) do (setq best name nearest distance)
+                      else if (= distance nearest) do (setq best nil)
+                      finally return best)))))
+
+(defun romacs-mcp--unknown-argument (key properties)
+  "Explain unknown KEY and name a suggestion or the schema's PROPERTIES."
+  (let ((wrong (format "Unknown argument: %s" key)))
+    (cond ((when-let* ((suggestion (romacs-mcp--argument-suggestion key properties)))
+             (format "%s. Did you mean %s?" wrong suggestion)))
+          ((hash-table-empty-p properties) (concat wrong ". This tool takes no arguments."))
+          (t (format "%s. Accepted fields: %s" wrong
+                     (string-join (sort (hash-table-keys properties) #'string<) ", "))))))
+
 (defun romacs-mcp--arguments (schema arguments)
   "Validate ARGUMENTS against the supported object subset of SCHEMA.
 Require fields, primitive types and closed properties; return ARGUMENTS.
@@ -274,10 +304,11 @@ Custom handlers own additional constraints, including nested JSON Schema."
         (gethash "required" schema))
   (maphash
    (lambda (key value)
-     (let* ((property (gethash key (gethash "properties" schema)))
+     (let* ((properties (gethash "properties" schema))
+            (property (gethash key properties))
             (type (and property (gethash "type" property))))
        (when (and (not property) (eq (gethash "additionalProperties" schema) :false))
-         (romacs-mcp--fail -32602 (concat "Unknown argument: " key)))
+         (romacs-mcp--fail -32602 (romacs-mcp--unknown-argument key properties)))
        (unless (pcase type
                  ("string" (stringp value)) ("integer" (integerp value))
                  ("number" (numberp value)) ("object" (hash-table-p value))

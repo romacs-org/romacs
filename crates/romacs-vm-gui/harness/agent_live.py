@@ -1304,6 +1304,55 @@ def delegate(args, base):
         a.close()
 
 
+def one_answer(args, base):
+    """One channel per answer: a parent's message to a task whose reply
+    wakes it (wake end) ends saying the turn's reply answers it, offers no
+    romacs_task_reply, and its answer wakes the parent once; to a task
+    whose reply wakes no one (wake none) it offers romacs_task_reply, and
+    its turn wakes no one."""
+    a = Agents(args, base, 'oa')
+    try:
+        a.up()
+        a.codex_instance()
+        parent = a.start('say ready')
+        a.idle(parent)
+
+        def call(tool, arguments):
+            a.send(parent, f'call {tool} ' + json.dumps(arguments))
+            a.idle(parent, 60)
+            return json.loads(a.called(tool)['text'])
+
+        def told(task):
+            return [w for w in (e['wake'] for e in a.logged() if 'wake' in e)
+                    for _ in range(w.count(f'Delegated task {task} '))]
+
+        ending = call('romacs_delegate_task', {'task': 'say first', 'target': {'provider': 'codex'}, 'clientRequestId': 'oa-end'})
+        until(lambda: told(ending['taskId']), 30, 'first end woke the parent')
+        a.idle(parent)
+        quiet = call('romacs_delegate_task', {'task': 'say first', 'target': {'provider': 'codex'}, 'wake': 'none',
+                                              'clientRequestId': 'oa-none'})
+        a.idle(quiet['taskId'])
+        runs = len(a.codex_runs())
+        call('romacs_task_send', {'taskId': ending['taskId'], 'message': 'which approach?'})
+        until(lambda: len(told(ending['taskId'])) >= 2, 30, 'answer woke the parent')
+        end_line = [e['last'] for e in a.codex_runs()[runs:] if e['prompt'].startswith('<romacs-message')][-1]
+        a.idle(parent)
+        runs = len(a.codex_runs())
+        call('romacs_task_send', {'taskId': quiet['taskId'], 'message': 'which approach?'})
+        until(lambda: any(e['prompt'].startswith('<romacs-message') for e in a.codex_runs()[runs:]), 30, 'none task read it')
+        a.idle(quiet['taskId'])
+        none_line = [e['last'] for e in a.codex_runs()[runs:] if e['prompt'].startswith('<romacs-message')][-1]
+        time.sleep(2)
+        result = {'end_line': end_line, 'none_line': none_line,
+                  'end_wakes': len(told(ending['taskId'])), 'none_wakes': len(told(quiet['taskId']))}
+        result['ok'] = (end_line == "Your turn's reply answers this message from your parent."
+                        and none_line.startswith('Reply to this message with romacs_task_reply(messageId="m-')
+                        and result['end_wakes'] == 2 and result['none_wakes'] == 0)
+        return result
+    finally:
+        a.close()
+
+
 WOKEN = re.compile(r'Delegated task (\S+) \(.*?\) \[(\w+), (\d+) chars\]:\n(.*?)'
                    r'(?=\n\nDelegated task |\n\nReply to this result|\Z)', re.S)
 
@@ -4049,7 +4098,7 @@ def chat_images(args, base):
         a.close()
 
 
-WORKFLOWS = {'chat_images': chat_images, 'chat_menu': chat_menu, 'history_view': history_view, 'host': host, 'sockets': sockets, 'reap': reap, 'deadline': deadline, 'providers': providers, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe,
+WORKFLOWS = {'one_answer': one_answer, 'chat_images': chat_images, 'chat_menu': chat_menu, 'history_view': history_view, 'host': host, 'sockets': sockets, 'reap': reap, 'deadline': deadline, 'providers': providers, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe,
              'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race, 'restart-rollback': restart_rollback, 'restart-hang': restart_hang, 'renew': renew,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
              'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode,

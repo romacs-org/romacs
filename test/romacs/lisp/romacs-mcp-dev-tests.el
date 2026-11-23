@@ -55,51 +55,77 @@ and the report at once."
       (delete-directory tree t))))
 
 (ert-deftest romacs-mcp-dev-tests-a-task-calling-is-told-and-given-the-report ()
-  "With the agents layer watching for the caller, the answer says so, and
-names the report a caller never told reads."
+  "Give the watch callback the launched invocation, including a missing ID."
   (let* ((tree (romacs-mcp-dev-tests--tree 0)) (watched nil)
-         (romacs-mcp-dev-watch-function (lambda (unit report started) (setq watched (list unit report (numberp started))))))
+         (romacs-mcp-dev-watch-function
+          (lambda (unit report invocation) (setq watched (list unit report invocation)))))
     (unwind-protect
-        (romacs-mcp-dev-tests--starting _started
-          (let ((answer (romacs-mcp-dev--check (romacs-mcp--object "worktree" tree))))
-            (should (eq (gethash "watched" answer) t))
-            (should (equal watched (list (gethash "unit" answer) (gethash "report" answer) t)))
-            (should (string-match-p (regexp-quote (gethash "report" answer)) (gethash "next" answer)))))
+        (dolist (invocation '("122534cba7c64808aefa06d661fec7c8" nil))
+          (cl-letf (((symbol-function 'romacs-mcp-dev--start) (lambda (&rest _) invocation)))
+            (let ((answer (romacs-mcp-dev--check (romacs-mcp--object "worktree" tree))))
+              (should (eq (gethash "watched" answer) t))
+              (should (equal watched (list (gethash "unit" answer) (gethash "report" answer) invocation)))
+              (should (string-match-p (regexp-quote (gethash "report" answer)) (gethash "next" answer))))))
       (delete-directory tree t))))
 
 (ert-deftest romacs-mcp-dev-tests-the-environment-systemd-takes ()
   "Each name once, its first value as `getenv' reads it; entries systemd
 refuses are left out."
-  (should (equal (romacs-mcp-dev--environment '("A=1" "B=2" "A=3" "BASH_FUNC_f%%=() { :; }" "C=x\ny" "UNSET"))
-                 '("A=1" "B=2"))))
+  (should (equal (romacs-mcp-dev--environment
+                  '("A=1" "B=2" "A=3" "BASH_FUNC_f%%=() { :; }" "C=x\ny" "UNSET"
+                    "XDG_RUNTIME_DIR=/private" "RUNTIME_DIRECTORY=/wrong" "INVOCATION_ID=parent"
+                    "SERVICE_RESULT=parent" "EXIT_CODE=parent" "EXIT_STATUS=parent"))
+                 '("A=1" "B=2" "XDG_RUNTIME_DIR=/private"))))
 
 (ert-deftest romacs-mcp-dev-tests-the-unit-is-collected-in-the-build-slice ()
-  (should (equal (romacs-mcp-dev--unit-argv "u" "/r.txt" '("/t/tools/dev-check" "--binary" "/b$x") "/t/" '("A=1"))
-                 `("--user" "--quiet" "--collect" "--slice=romacs-build" "--expand-environment=no"
-                   "--unit=u" "--working-directory=/t/" "--property=StandardOutput=truncate:/r.txt"
-                   "--property=StandardError=inherit"
-                   ,(concat "--property=UnsetEnvironment=" (string-join (romacs--launch-markers) " "))
-                   "--setenv=A=1" "--" "/t/tools/dev-check" "--binary" "/b$x"))))
+  (cl-letf (((symbol-function 'executable-find)
+             (lambda (name &optional _remote)
+               (should (equal name "mv"))
+               "/test tools/mv")))
+    (should (equal (romacs-mcp-dev--unit-argv "u" "/r.txt" '("/t/tools/dev-check" "--binary" "/b$x") "/t/" '("A=1"))
+                   `("--user" "--collect" "--slice=romacs-build" "--expand-environment=no"
+                     "--unit=u" "--working-directory=/t/" "--property=StandardOutput=truncate:/r.txt"
+                     "--property=StandardError=inherit"
+                     "--property=RuntimeDirectory=unit-exit"
+                     "--property=RuntimeDirectoryPreserve=yes"
+                     "--property=ExecStopPost=-:/bin/sh -c 'd=\"$RUNTIME_DIRECTORY\"; echo \"$SERVICE_RESULT $EXIT_CODE $EXIT_STATUS $INVOCATION_ID\" > \"$d/.$$.tmp\" && exec \"$1\" -f \"$d/.$$.tmp\" \"$d/u.service\"' sh \"/test tools/mv\""
+                     ,(concat "--property=UnsetEnvironment=" (string-join (romacs--launch-markers) " "))
+                     "--setenv=A=1" "--" "/t/tools/dev-check" "--binary" "/b$x")))))
 
-(ert-deftest romacs-mcp-dev-tests-a-unit-that-did-not-start-is-said ()
-  "systemd-run runs with the unit's arguments; its refusal (a check of
-the tree running) is an error naming the unit and its report."
+(ert-deftest romacs-mcp-dev-tests-launches-without-mv ()
+  ;; The exit record is best effort: without mv the unit starts, unrecorded.
+  (cl-letf (((symbol-function 'executable-find) (lambda (&rest _) nil)))
+    (let ((argv (romacs-mcp-dev--unit-argv "u" "/r.txt" '("/t/tools/dev-check") "/t/" nil)))
+      (should (member "--unit=u" argv))
+      (should-not (cl-some (lambda (word) (string-match-p "ExecStopPost\\|RuntimeDirectory" word)) argv)))))
+
+(ert-deftest romacs-mcp-dev-tests-refuses-an-unsafe-unit-name ()
+  (should-error
+   (romacs-mcp-dev--unit-argv "u;echo" "/r.txt" '("/t/tools/dev-check") "/t/" nil)
+   :type 'user-error))
+
+(ert-deftest romacs-mcp-dev-tests-launch-captures-invocation-or-reports-refusal ()
+  "Capture the launched invocation or report systemd-run's refusal."
   (let* ((bin (make-temp-file "romacs-mcp-dev-tests-bin-" t))
          (calls (expand-file-name "calls" bin))
          (report (expand-file-name "reports/u.txt" bin))
-         (exec-path (list bin)))
+         (exec-path (cons bin exec-path)))
     (unwind-protect
-        (cl-flet ((fake (status)
+        (cl-flet ((fake (status output)
                     (with-temp-file (expand-file-name "systemd-run" bin)
-                      (insert (format "#!/bin/sh\nprintf '%%s\\n' \"$@\" > %s\necho 'Unit u.service was already loaded'\nexit %d\n"
-                                      calls status)))
+                      (insert (format "#!/bin/sh\nprintf '%%s\\n' \"$@\" > %s\necho '%s' >&2\nexit %d\n"
+                                      calls output status)))
                     (set-file-modes (expand-file-name "systemd-run" bin) #o755)))
-          (fake 0)
-          (romacs-mcp-dev--start "u" report '("/t/tools/dev-check") "/t/" '("A=1"))
+          (let ((id "122534cba7c64808aefa06d661fec7c8"))
+            (fake 0 (concat "Running as unit: u.service; invocation ID: " id))
+            (should (equal (romacs-mcp-dev--start "u" report '("/t/tools/dev-check") "/t/" '("A=1"))
+                           id)))
           (should (file-directory-p (file-name-directory report)))
           (should (equal (with-temp-buffer (insert-file-contents calls) (split-string (buffer-string) "\n" t))
                          (romacs-mcp-dev--unit-argv "u" report '("/t/tools/dev-check") "/t/" '("A=1"))))
-          (fake 1)
+          (fake 0 "Running as unit: u.service")
+          (should-not (romacs-mcp-dev--start "u" report '("/t/tools/dev-check") "/t/" nil))
+          (fake 1 "Unit u.service was already loaded")
           (let ((said (cadr (should-error (romacs-mcp-dev--start "u" report '("/t/tools/dev-check") "/t/" nil)
                                           :type 'user-error))))
             (should (string-match-p (regexp-quote report) said))

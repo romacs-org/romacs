@@ -42,6 +42,7 @@ runs: harnesses are never started."
           (romacs-agent--sessions (make-hash-table :test #'equal))
           (romacs-agent--children (make-hash-table :test #'equal))
           (romacs-agent--requests (make-hash-table :test #'equal))
+          (romacs-agent-store--db nil)
           (romacs-agent-tools--pending (make-hash-table :test #'equal))
           (romacs-agent-tools--waking (make-hash-table :test #'equal))
           (romacs-agent-tools--answered (make-hash-table :test #'equal))
@@ -75,7 +76,10 @@ runs: harnesses are never started."
                ;; Children start at once here (romacs-agent-launch-tests
                ;; has one that never does).
                ((symbol-function 'romacs-agent-tools--started) (lambda (_child then &rest _) (funcall then))))
-       (unwind-protect (progn ,@body) (delete-directory root t) (delete-directory run t)))))
+       (unwind-protect (progn ,@body)
+         (when (cdr romacs-agent-store--db) (sqlite-close (cdr romacs-agent-store--db)))
+         (delete-directory root t)
+         (delete-directory run t)))))
 
 (defun romacs-agent-lead-tests--args (&rest pairs)
   "A tool's arguments of PAIRS, as the endpoint parses them."
@@ -389,6 +393,172 @@ wait gives the end it waited for once, in place of its wake."
         (should (= (gethash "resultChars" row) 1000))
         (should (<= (length (gethash "result" row)) 301))
         (should-not (gethash "next" row))))))
+
+(defun romacs-agent-lead-tests--stored-task (id parent)
+  "Register and store an idle session with ID and PARENT in the store."
+  (let ((task (romacs-agent--make :id id :harness 'claude :provider "claude"
+                                  :state 'idle :dir (expand-file-name id (romacs-agent--state-root))
+                                  :options (list :parent parent))))
+    (make-directory (romacs-agent-dir task) t)
+    (puthash id task romacs-agent--sessions)
+    (romacs-agent-store-put task)
+    (should (romacs-agent-store-row-session id))
+    task))
+
+(ert-deftest romacs-agent-lead-short-prefixes-are-refused ()
+  (romacs-agent-lead-tests--with
+    (let* ((caller-id (romacs-agent-tools--caller))
+           (task (romacs-agent-lead-tests--stored-task "abcdef01-0000-4000-8000-000000000000" caller-id)))
+      (dolist (prefix '("a" "ab" "abc" "abcdef0"))
+        (let* ((err (should-error (romacs-agent-tools--known prefix) :type 'user-error))
+               (message (cadr err)))
+          (should (string-prefix-p "No task " message))
+          (should (string-search "romacs_task_list" message))))
+      (should (eq task (romacs-agent-tools--known "abcdef01")))
+      (let ((exact (romacs-agent-lead-tests--stored-task "a" caller-id)))
+        (should (eq exact (romacs-agent-tools--known "a"))))
+      (should (eq (romacs-agent-get caller-id) (romacs-agent-tools--known caller-id))))))
+
+(ert-deftest romacs-agent-lead-task-prefix-obeys-list-visibility ()
+  (romacs-agent-lead-tests--with
+    (let* ((caller-id (romacs-agent-tools--caller))
+           (prefix "12345678")
+           (hidden (concat prefix "-0000-4000-8000-000000000000"))
+           (first (concat prefix "-0000-4000-8000-000000000001"))
+           (second (concat prefix "-0000-4000-8000-000000000002")))
+      (romacs-agent-lead-tests--stored-task hidden nil)
+      (let* ((all (gethash "tasks" (romacs-agent-tools--list (romacs-agent-lead-tests--args "all" t))))
+             (err (should-error (romacs-agent-tools--known prefix) :type 'user-error)))
+        (should (= (length all) 0))
+        (should (string-prefix-p "No task " (cadr err)))
+        (should-not (string-search hidden (cadr err))))
+      (remhash hidden romacs-agent--sessions)
+      (let ((task (romacs-agent-lead-tests--stored-task first caller-id)))
+        (should (eq task (romacs-agent-tools--known prefix))))
+      (romacs-agent-lead-tests--stored-task second caller-id)
+      (let ((message (cadr (should-error (romacs-agent-tools--known prefix) :type 'user-error))))
+        (should (string-search first message))
+        (should (string-search second message))
+        (should-not (string-search hidden message))))))
+
+(ert-deftest romacs-agent-lead-cancel-requires-ownership-after-lookup ()
+  (romacs-agent-lead-tests--with
+    (let ((task (romacs-agent-lead-tests--stored-task
+                 "abcdef01-0000-4000-8000-000000000000" romacs-agent-lead-tests--other)))
+      (cl-letf (((symbol-function 'romacs-agent-stop) #'ignore))
+        (dolist (id (list "abcdef01" (romacs-agent-id task)))
+          (let ((err (should-error (romacs-agent-tools--cancel (romacs-agent-lead-tests--args "taskId" id))
+                                   :type 'user-error)))
+            (should (string-search romacs-agent-lead-tests--other (cadr err)))))
+        (should-not (romacs-agent-cancelled task))
+        (should-not (file-exists-p (expand-file-name "cancelled" (romacs-agent-dir task))))
+        (cl-letf (((symbol-function 'romacs-agent-tools--caller) (lambda () romacs-agent-lead-tests--other)))
+          (romacs-agent-tools--cancel (romacs-agent-lead-tests--args "taskId" "abcdef01")))
+        (should (romacs-agent-cancelled task))))))
+
+(ert-deftest romacs-agent-lead-owner-refusal-names-a-working-route ()
+  (romacs-agent-lead-tests--with
+    (let* ((sender (romacs-agent-get (romacs-agent-tools--caller)))
+           (owner (romacs-agent-lead-tests--stored-task romacs-agent-lead-tests--other nil))
+           (task (romacs-agent-lead-tests--stored-task
+                  "abcdef01-0000-4000-8000-000000000000" (romacs-agent-id owner)))
+           (args (romacs-agent-lead-tests--args "taskId" (romacs-agent-id task) "message" "hi"))
+           (refusal (lambda ()
+                      (cadr (should-error (romacs-agent-tools--send args) :type 'user-error)))))
+      (let ((message (funcall refusal)))
+        (should (string-search (romacs-agent-id owner) message))
+        (should (string-search "ask the user" message))
+        (should-not (string-search "romacs_task_send" message))
+        (should-not (string-search "romacs_task_reply" message)))
+      (setf (romacs-agent-options sender) (list :parent (romacs-agent-id owner)))
+      (let ((message-id "m-abcdef01-0000-4000-8000-000000000000"))
+        (romacs-agent--received sender (list (romacs-agent-make-message
+                                           message-id "parent" (list :session (romacs-agent-id owner)))))
+        (let ((message
+               (cadr (should-error (romacs-agent-tools--cancel (romacs-agent-lead-tests--args
+                                                                "taskId" (romacs-agent-id task)))
+                                   :type 'user-error))))
+          (should (string-search "romacs_task_reply" message))
+          (should (string-search message-id message))))
+      (setf (romacs-agent-options sender) nil
+            (romacs-agent-options owner) (list :parent (romacs-agent-id sender)))
+      (should (string-search "romacs_task_send" (funcall refusal)))
+      (setf (romacs-agent-cancelled owner) t)
+      (should (string-search "ask the user" (funcall refusal))))))
+
+(ert-deftest romacs-agent-lead-reply-suggests-at-most-eight-ids ()
+  (romacs-agent-lead-tests--with
+    (let* ((receiver (romacs-agent-get (romacs-agent-tools--caller)))
+           (ids (cl-loop for i below 200
+                         collect (format "m-%08x-0000-4000-8000-000000000000" i)))
+           (messages (mapcar (lambda (id) (romacs-agent-make-message id "child" '(:session "sender"))) ids))
+           (prefix "m-0000000a"))
+      (romacs-agent--received receiver messages)
+      (should (= (length (romacs-agent-received receiver)) 200))
+      (let* ((err (should-error (romacs-agent-tools--reply (romacs-agent-lead-tests--args
+                                                           "messageId" prefix "text" "answer"))
+                                :type 'user-error))
+             (named (seq-filter (lambda (id) (string-search id (cadr err))) ids))
+             (matching (nth 10 ids))
+             (newest (car (last ids))))
+        (should (equal named (cons matching (last ids 7))))
+        (should (< (string-search matching (cadr err)) (string-search newest (cadr err))))))))
+
+(ert-deftest romacs-agent-lead-owner-route-refuses-a-missing-provider-directory ()
+  (let ((continue (symbol-function 'romacs-agent--continue)))
+    (romacs-agent-lead-tests--with
+      (let* ((caller-id (romacs-agent-tools--caller))
+             (owner (romacs-agent-lead-tests--stored-task romacs-agent-lead-tests--other caller-id))
+             (task (romacs-agent-lead-tests--stored-task
+                    "abcdef01-0000-4000-8000-000000000000" (romacs-agent-id owner)))
+             (provider-dir (make-temp-file (expand-file-name "provider-" (romacs-agent--state-root)) t)))
+        (setf (romacs-agent-state owner) 'detached
+              (romacs-agent-config-dir owner) provider-dir
+              (romacs-agent-host-socket owner) (romacs-agent--host-socket (romacs-agent-id owner)))
+        (delete-directory provider-dir)
+        (cl-letf (((symbol-function 'romacs-agent--continue) continue))
+          (let ((err (should-error (romacs-agent-tools--send (romacs-agent-lead-tests--args
+                                                              "taskId" (romacs-agent-id owner) "message" "hi"))
+                                   :type 'user-error)))
+            (should (string-search "configuration directory" (cadr err)))
+            (should (string-search provider-dir (cadr err))))
+          (let* ((err (should-error (romacs-agent-tools--send (romacs-agent-lead-tests--args
+                                                              "taskId" (romacs-agent-id task) "message" "hi"))
+                                    :type 'user-error))
+                 (message (cadr err)))
+            (should (string-search (romacs-agent-id owner) message))
+            (should-not (string-search "romacs_task_send" message))
+            (should (string-search "ask the user" message))))))))
+
+(ert-deftest romacs-agent-lead-root-send-only-suggests-an-answer-to-that-session ()
+  (romacs-agent-lead-tests--with
+    (let* ((sender (romacs-agent-get (romacs-agent-tools--caller)))
+           (target (romacs-agent-lead-tests--child sender (file-name-directory (romacs-agent-dir sender))))
+           (target-id (romacs-agent-id target))
+           (other "m-aaaaaaaa-0000-4000-8000-000000000001")
+           (received "m-aaaaaaaa-0000-4000-8000-000000000002")
+           (args (romacs-agent-lead-tests--args "taskId" target-id "message" "hi"))
+           (refusal (lambda () (cadr (should-error (romacs-agent-tools--send args) :type 'user-error)))))
+      (setf (romacs-agent-options target) nil
+            (romacs-agent-state target) 'idle
+            (romacs-agent-driver-state target) '(:ready t))
+      (unwind-protect
+          (progn
+            (romacs-agent--received sender (list (romacs-agent-make-message other "external" '(:session "stranger"))))
+            (let ((message (funcall refusal)))
+              (should (string-search target-id message))
+              (should (string-search "ask the user" message))
+              (should-not (string-search "romacs_task_reply" message))
+              (should-not (string-search other message)))
+            (romacs-agent--received sender
+                                    (list (romacs-agent-make-message received "external" (list :session target-id))))
+            (let ((message (funcall refusal))
+                  (reply (romacs-agent-tools--reply (romacs-agent-lead-tests--args "messageId" received "text" "answer"))))
+              (should (string-search "romacs_task_reply" message))
+              (should (string-search received message))
+              (should-not (string-search other message))
+              (should (equal target-id (gethash "taskId" reply)))))
+        (delete-process (romacs-agent-connection target))))))
 
 (provide 'romacs-agent-lead-tests)
 ;;; romacs-agent-lead-tests.el ends here

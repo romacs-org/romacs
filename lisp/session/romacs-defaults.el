@@ -131,8 +131,9 @@
     ;; `romacs-markdown-mode''s, not a ts mode's.
     (treesit-enabled-modes
      '(bash-ts-mode c-ts-mode c++-ts-mode c-or-c++-ts-mode css-ts-mode go-ts-mode
-       java-ts-mode js-ts-mode json-ts-mode mhtml-ts-mode python-ts-mode
-       rust-ts-mode toml-ts-mode tsx-ts-mode typescript-ts-mode yaml-ts-mode))
+       java-ts-mode js-ts-mode json-ts-mode kotlin-ts-mode mhtml-ts-mode
+       python-ts-mode rust-ts-mode toml-ts-mode tsx-ts-mode typescript-ts-mode
+       yaml-ts-mode))
     (imenu-auto-rescan t)
     (imenu-flatten 'prefix)
     ;; `use-package' forms in a Lisp buffer's imenu, under "Packages".
