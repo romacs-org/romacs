@@ -487,9 +487,24 @@ def run_tests(root, names, threads):
     answer = impact.select(names, root, impact.metadata_of(root))
     runs = plan(answer, root)
     if runs is None:
+        # The rest is the queue's, but the structural rules take seconds and no
+        # path selects them: a change that reaches everything still runs them.
+        rules = plan({**answer, 'everything': False, 'packages': {}, 'files': {}, 'leave': []}, root)
+        status, log, spent = execute(root, rules, threads)
+        if status:
+            return failed_runs(log.read_text(errors='replace'), spent)
         why = ', '.join(answer['reasons'][:3]) + (' ...' if len(answer['reasons']) > 3 else '')
-        return 'SKIP', f'the change reaches everything ({why}): the queue runs the full check', [
+        return 'SKIP', f'the change reaches everything ({why}): the structural rules hold ({spent}); the queue runs the full check', [
             'fix: none needed; submit, or run `python3 tools/gate full` for the whole suite here']
+    status, log, spent = execute(root, runs, threads)
+    reached = f'{len(answer["packages"])} package(s) and {len(answer["files"])} test file(s) reached'
+    if status == 0:
+        return 'ok', f'{reached} hold ({spent}); {queue_runs(answer)}', []
+    return failed_runs(log.read_text(errors='replace'), spent)
+
+
+def execute(root, runs, threads):
+    """Run RUNS' commands on ROOT's tree: (STATUS, LOG, SPENT), STATUS nonzero when any failed."""
     log, started, status = log_path(root), time.monotonic(), 0
     with log.open('w') as sink, tempfile.TemporaryDirectory(prefix='rdc-', dir=log.parent) as scratch:
         env = test_environment(scratch)
@@ -498,11 +513,7 @@ def run_tests(root, names, threads):
             sink.flush()
             status |= subprocess.run(command, cwd=root, env=env, stdin=subprocess.DEVNULL,
                                      stdout=sink, stderr=subprocess.STDOUT).returncode
-    reached = f'{len(answer["packages"])} package(s) and {len(answer["files"])} test file(s) reached'
-    spent = f'{time.monotonic() - started:.0f} s, log {log}'
-    if status == 0:
-        return 'ok', f'{reached} hold ({spent}); {queue_runs(answer)}', []
-    return failed_runs(log.read_text(errors='replace'), spent)
+    return status, log, f'{time.monotonic() - started:.0f} s, log {log}'
 
 
 def failed_runs(log, spent):
