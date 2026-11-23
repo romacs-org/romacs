@@ -2068,6 +2068,7 @@ mod leaf {
     pub(crate) use text_pixel_size::{TextSizeArgs, LineLabels};
     mod session;
     mod world;
+    mod macro_record;
     mod finalizer;
 }
 #[cfg(test)]

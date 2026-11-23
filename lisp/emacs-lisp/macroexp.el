@@ -122,9 +122,13 @@ case return FORM unchanged."
   (if macroexp-inhibit-compiler-macros
       form
     (condition-case-unless-debug err
-        (macroexp-preserve-posification
-             form
-          (apply handler form (cdr form)))
+        (let ((newform (macroexp-preserve-posification
+                           form
+                         (apply handler form (cdr form)))))
+          ;; Romacs: the compile now running depends on this handler.
+          (unless (eq newform form)
+            (romacs--record-macroexpansion (car form) handler))
+          newform)
       (error
        ;; Don't complain if there's an arity error when calling the handler
        ;; itself as that is likely the just wrong number of arguments
@@ -238,11 +242,16 @@ It should normally be a symbol with position and it defaults to FORM."
             (cond
              ;; Follow alias, but only for macros, otherwise we may end up
              ;; skipping an important compiler-macro (e.g. cl--block-wrapper).
-             ((and (symbolp def) (macrop def)) (cons def (cdr form)))
+             ((and (symbolp def) (macrop def))
+              ;; Romacs: the compile now running depends on HEAD's cell.
+              (romacs--record-macroexpansion head)
+              (cons def (cdr form)))
              ((not (consp def)) form)
              (t
               (if (eq 'macro (car def))
-                  (apply (cdr def) (cdr form))
+                  (progn
+                    (romacs--record-macroexpansion head)
+                    (apply (cdr def) (cdr form)))
                 form))))))))
    (t form)))
 

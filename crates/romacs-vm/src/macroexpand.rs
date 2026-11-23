@@ -63,6 +63,26 @@ impl Vm {
         self.reader_call(function, args)
     }
 
+    /// FORM's arguments, its tail as a list: one that is none signals.
+    fn macro_arguments(&mut self, form: Value) -> Result<Vec<Value>> {
+        let arguments = self.cons_pair(form)?.1;
+        let Ok(args) = self.list_values(arguments) else {
+            let listp = self.intern("listp");
+            return self.macroexpand_fault("wrong-type-argument", &[listp, arguments]);
+        };
+        Ok(args)
+    }
+
+    /// Record that FORM's head expands through its function cell, not an
+    /// environment entry (`macro_record`).
+    fn record_global_expansion(&mut self, form: Value) {
+        if let Ok((head, _)) = self.cons_pair(form)
+            && let Some(slot) = self.macro_symbol_slot(head)
+        {
+            self.record_alias_chain(slot, self.macro_alias_end(slot));
+        }
+    }
+
     pub(super) fn macroexpand_primitive(&mut self, args: &[Value]) -> Result<Value> {
         if args.is_empty() || args.len() > 2 {
             let name = Value::reference(Primitive::Macroexpand as usize, 6);
@@ -160,14 +180,10 @@ impl Vm {
             };
             // apply1 validates the argument spine only after a macro is found.
             let form = self.rooted(frame, 0);
-            let arguments = self.cons_pair(form)?.1;
-            let args = match self.list_values(arguments) {
-                Ok(args) => args,
-                Err(_) => {
-                    let listp = self.intern("listp");
-                    return self.macroexpand_fault("wrong-type-argument", &[listp, arguments]);
-                }
-            };
+            if entry.is_none() {
+                self.record_global_expansion(form);
+            }
+            let args = self.macro_arguments(form)?;
             let newform = self.call_macro_expander(expander, &args)?;
             let form = self.rooted(frame, 0);
             if newform == form {

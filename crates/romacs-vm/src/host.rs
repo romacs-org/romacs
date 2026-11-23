@@ -2025,6 +2025,14 @@ pub fn collection_clock() -> Option<Instant> {
     (!building() && !crate::world::arena::heap_is_image()).then(Instant::now)
 }
 
+/// Now, for a timing statistic of the VM's own (`romacs-macro-invalidation-stats`):
+/// none where `collection_clock` gives none, so a world's heap never
+/// depends on how long anything took.
+#[must_use]
+pub fn stat_clock() -> Option<Instant> {
+    collection_clock()
+}
+
 // Effects.
 
 /// Four bytes of kernel entropy; in build mode the pinned seed.

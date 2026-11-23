@@ -51,6 +51,7 @@ fn image_function_header(id: usize, meta: &Json) -> Result<Function> {
         environment: None,
         params: None,
         key,
+        macros: Box::default(),
     };
     if f.regs == 0
         || f.required > f.arity

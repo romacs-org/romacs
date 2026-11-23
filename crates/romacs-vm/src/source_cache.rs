@@ -199,7 +199,7 @@ impl Vm {
     /// copy of it is stale: the macros it expanded, the special-ness of the
     /// symbols it names, and which of its calls are macro calls.
     fn compile_guarded(&mut self, form: &Form) -> Result<(usize, Vec<usize>, Entry)> {
-        self.expanded_macros.clear();
+        self.macro_record.expansions = 0;
         self.expanded_symbols.clear();
         let (function, compiled) = self.compile_request(form)?;
         self.source_cache.stats.compilations += 1;
@@ -244,10 +244,9 @@ impl Vm {
         );
         calls.sort_unstable();
         calls.dedup();
-        let mut macros = self.expanded_macros.clone();
-        macros.sort_unstable();
-        macros.dedup();
-        let macros = macros
+        // The request's record (`MacroRecord::request`): what its root
+        // function and the eager lambdas in it expanded through.
+        let macros = std::mem::take(&mut self.macro_record.request)
             .into_iter()
             .map(|(s, v)| (s, v, self.macro_stamp(s).unwrap_or_default()))
             .collect();
@@ -535,13 +534,13 @@ impl Vm {
         if !self.macros.contains(&slot) {
             return Ok(None);
         }
-        if slot != head {
-            self.expanded_macros.push((head, self.slots[head].version));
-        }
-        if self.expanding.len() >= 128 || self.expanded_macros.len() >= 4096 {
+        // An alias head counts as an expansion of its own (VM2's former
+        // limit counted it before testing, then the macro).
+        self.macro_record.expansions += 1 + usize::from(slot != head);
+        if self.expanding.len() >= 128 || self.macro_record.expansions > 4096 {
             return Err("macro expansion limit exceeded".into());
         }
-        self.expanded_macros.push((slot, self.slots[slot].version));
+        self.record_alias_chain(head, slot);
         let function = self.slots[slot].function;
         // The standard backquote needs no call: a malformed template goes
         // on to signal from it (VM2-BACKQUOTE). Only by its reader spelling,
@@ -622,13 +621,31 @@ impl Vm {
     pub(super) fn macro_alias_end(&self, slot: usize) -> usize {
         let mut slot = slot;
         for _ in 0..self.slots.len() {
-            let f = self.slots[slot].function;
-            if f.tag() != 7 || f == Value::NIL || f == Value::UNBOUND || self.macros.contains(&slot) {
-                break;
-            }
-            slot = f.payload() as usize - 1;
+            let Some(next) = self.alias_step(slot) else { break };
+            slot = next;
         }
         slot
+    }
+    /// The symbol SLOT's cell aliases, None where its chain ends: at a
+    /// macro, or a cell that holds no symbol.
+    fn alias_step(&self, slot: usize) -> Option<usize> {
+        let f = self.slots[slot].function;
+        let ends = f.tag() != 7 || f == Value::NIL || f == Value::UNBOUND || self.macros.contains(&slot);
+        (!ends).then(|| f.payload() as usize - 1)
+    }
+    /// Record an expansion through HEAD's cell: every link of its alias
+    /// chain, as `macro_alias_end` walks it, and the macro at its END.
+    pub(super) fn record_alias_chain(&mut self, head: usize, end: usize) {
+        let mut slot = head;
+        self.record_macro_use(slot);
+        if head == end {
+            return;
+        }
+        for _ in 0..self.slots.len() {
+            let Some(next) = self.alias_step(slot) else { break };
+            slot = next;
+            self.record_macro_use(slot);
+        }
     }
 }
 /// Whether FORM names something by identity rather than by spelling: an
