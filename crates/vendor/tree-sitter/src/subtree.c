@@ -1007,69 +1007,6 @@ char *ts_subtree_string(
   return result;
 }
 
-void ts_subtree__print_dot_graph(const Subtree *self, uint32_t start_offset,
-                                 const TSLanguage *language, TSSymbol alias_symbol,
-                                 FILE *f) {
-  TSSymbol subtree_symbol = ts_subtree_symbol(*self);
-  TSSymbol symbol = alias_symbol ? alias_symbol : subtree_symbol;
-  uint32_t end_offset = start_offset + ts_subtree_total_bytes(*self);
-  fprintf(f, "tree_%p [label=\"", (void *)self);
-  ts_language_write_symbol_as_dot_string(language, f, symbol);
-  fprintf(f, "\"");
-
-  if (ts_subtree_child_count(*self) == 0) fprintf(f, ", shape=plaintext");
-  if (ts_subtree_extra(*self)) fprintf(f, ", fontcolor=gray");
-  if (ts_subtree_has_changes(*self)) fprintf(f, ", color=green, penwidth=2");
-
-  fprintf(f, ", tooltip=\""
-    "range: %u - %u\n"
-    "state: %d\n"
-    "error-cost: %u\n"
-    "has-changes: %u\n"
-    "depends-on-column: %u\n"
-    "descendant-count: %u\n"
-    "repeat-depth: %u\n"
-    "lookahead-bytes: %u",
-    start_offset, end_offset,
-    ts_subtree_parse_state(*self),
-    ts_subtree_error_cost(*self),
-    ts_subtree_has_changes(*self),
-    ts_subtree_depends_on_column(*self),
-    ts_subtree_visible_descendant_count(*self),
-    ts_subtree_repeat_depth(*self),
-    ts_subtree_lookahead_bytes(*self)
-  );
-
-  if (ts_subtree_is_error(*self) && ts_subtree_child_count(*self) == 0 && self->ptr->lookahead_char != 0) {
-    fprintf(f, "\ncharacter: '%c'", self->ptr->lookahead_char);
-  }
-
-  fprintf(f, "\"]\n");
-
-  uint32_t child_start_offset = start_offset;
-  uint32_t child_info_offset =
-    language->max_alias_sequence_length *
-    ts_subtree_production_id(*self);
-  for (uint32_t i = 0, n = ts_subtree_child_count(*self); i < n; i++) {
-    const Subtree *child = &ts_subtree_children(*self)[i];
-    TSSymbol subtree_alias_symbol = 0;
-    if (!ts_subtree_extra(*child) && child_info_offset) {
-      subtree_alias_symbol = language->alias_sequences[child_info_offset];
-      child_info_offset++;
-    }
-    ts_subtree__print_dot_graph(child, child_start_offset, language, subtree_alias_symbol, f);
-    fprintf(f, "tree_%p -> tree_%p [tooltip=%u]\n", (void *)self, (void *)child, i);
-    child_start_offset += ts_subtree_total_bytes(*child);
-  }
-}
-
-void ts_subtree_print_dot_graph(Subtree self, const TSLanguage *language, FILE *f) {
-  fprintf(f, "digraph tree {\n");
-  fprintf(f, "edge [arrowhead=none]\n");
-  ts_subtree__print_dot_graph(&self, 0, language, 0, f);
-  fprintf(f, "}\n");
-}
-
 const ExternalScannerState *ts_subtree_external_scanner_state(Subtree self) {
   static const ExternalScannerState empty_state = {{.short_data = {0}}, .length = 0};
   if (

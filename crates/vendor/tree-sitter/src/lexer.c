@@ -4,25 +4,7 @@
 
 #include "tree_sitter/api.h"
 
-#include <stdarg.h>
-#include <stdio.h>
-
-#define LOG(message, character)              \
-  if (self->logger.log) {                    \
-    snprintf(                                \
-      self->debug_buffer,                    \
-      TREE_SITTER_SERIALIZATION_BUFFER_SIZE, \
-      32 <= character && character < 127 ?   \
-        message " character:'%c'" :          \
-        message " character:%d",             \
-      character                              \
-    );                                       \
-    self->logger.log(                        \
-      self->logger.payload,                  \
-      TSLogTypeLex,                          \
-      self->debug_buffer                     \
-    );                                       \
-  }
+#define LOG(message, character)
 
 static const int32_t BYTE_ORDER_MARK = 0xFEFF;
 
@@ -363,16 +345,7 @@ static bool ts_lexer__is_at_included_range_start(const TSLexer *_self) {
   }
 }
 
-static void ts_lexer__log(const TSLexer *_self, const char *fmt, ...) {
-  Lexer *self = (Lexer *)_self;
-  va_list args;
-  va_start(args, fmt);
-  if (self->logger.log) {
-    vsnprintf(self->debug_buffer, TREE_SITTER_SERIALIZATION_BUFFER_SIZE, fmt, args);
-    self->logger.log(self->logger.payload, TSLogTypeLex, self->debug_buffer);
-  }
-  va_end(args);
-}
+static void ts_lexer__log(const TSLexer *_self, const char *fmt, ...) {}
 
 void ts_lexer_init(Lexer *self) {
   *self = (Lexer) {
@@ -393,10 +366,6 @@ void ts_lexer_init(Lexer *self) {
     .chunk_size = 0,
     .chunk_start = 0,
     .current_position = {0, {0, 0}},
-    .logger = {
-      .payload = NULL,
-      .log = NULL
-    },
     .included_ranges = NULL,
     .included_range_count = 0,
     .current_included_range_index = 0,

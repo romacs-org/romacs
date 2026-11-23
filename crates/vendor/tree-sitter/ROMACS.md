@@ -61,6 +61,10 @@ Each is its own commit in Romacs's history.
 - `refactor(treesit): remove wasm runtime support` removes the unused Wasm
   store, build paths and bindings. Measurement: none (pure deletion).
 
+- `refactor(treesit): remove parser logging and dot graphs` deletes unused
+  diagnostics and their bindings. The scanner serialization buffer and
+  grammar ABI logging callback remain. Measurement: none (pure deletion).
+
 ## Checking it
 
 `tools/treesit-fuzz` builds this runtime and the published one with the

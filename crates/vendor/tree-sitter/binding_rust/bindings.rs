@@ -81,21 +81,6 @@ pub struct TSParseOptions {
     pub progress_callback:
         ::core::option::Option<unsafe extern "C" fn(state: *mut TSParseState) -> bool>,
 }
-pub const TSLogTypeParse: TSLogType = 0;
-pub const TSLogTypeLex: TSLogType = 1;
-pub type TSLogType = ::core::ffi::c_uint;
-#[repr(C)]
-#[derive(Debug)]
-pub struct TSLogger {
-    pub payload: *mut ::core::ffi::c_void,
-    pub log: ::core::option::Option<
-        unsafe extern "C" fn(
-            payload: *mut ::core::ffi::c_void,
-            log_type: TSLogType,
-            buffer: *const ::core::ffi::c_char,
-        ),
-    >,
-}
 #[doc = " A summary of a change to a text document.\n\n The `start_byte` and `start_point` values must be less than or equal to the\n `old_end_byte` and `old_end_point` values, respectively. Passing an edit\n that violates these invariants may produce nonsensical results."]
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -197,18 +182,6 @@ unsafe extern "C" {
     pub fn ts_parser_reset(self_: *mut TSParser);
 }
 unsafe extern "C" {
-    #[doc = " Set the logger that a parser should use during parsing.\n\n The parser does not take ownership over the logger payload. If a logger was\n previously assigned, the caller is responsible for releasing any memory\n owned by the previous logger."]
-    pub fn ts_parser_set_logger(self_: *mut TSParser, logger: TSLogger);
-}
-unsafe extern "C" {
-    #[doc = " Get the parser's current logger."]
-    pub fn ts_parser_logger(self_: *const TSParser) -> TSLogger;
-}
-unsafe extern "C" {
-    #[doc = " Set the file descriptor to which the parser should write debugging graphs\n during parsing. The graphs are formatted in the DOT language. You may want\n to pipe these graphs directly to a `dot(1)` process in order to generate\n SVG output. You can turn off this logging by passing a negative number."]
-    pub fn ts_parser_print_dot_graphs(self_: *mut TSParser, fd: ::core::ffi::c_int);
-}
-unsafe extern "C" {
     #[doc = " Create a shallow copy of the syntax tree. This is very fast.\n\n You need to copy a syntax tree in order to use it on more than one thread at\n a time, as syntax trees are not thread safe."]
     pub fn ts_tree_copy(self_: *const TSTree) -> *mut TSTree;
 }
@@ -247,10 +220,6 @@ unsafe extern "C" {
         new_tree: *const TSTree,
         length: *mut u32,
     ) -> *mut TSRange;
-}
-unsafe extern "C" {
-    #[doc = " Write a DOT graph describing the syntax tree to the given file."]
-    pub fn ts_tree_print_dot_graph(self_: *const TSTree, file_descriptor: ::core::ffi::c_int);
 }
 unsafe extern "C" {
     #[doc = " Get the node's type as a null-terminated string."]

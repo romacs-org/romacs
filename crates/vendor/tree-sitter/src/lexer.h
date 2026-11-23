@@ -24,7 +24,6 @@ typedef struct {
   TSRange *included_ranges;
   const char *chunk;
   TSInput input;
-  TSLogger logger;
 
   uint32_t included_range_count;
   uint32_t current_included_range_index;

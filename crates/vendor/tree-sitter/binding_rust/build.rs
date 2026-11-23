@@ -50,7 +50,6 @@ fn generate_bindings(out_dir: &std::path::Path) {
     let no_copy = [
         "TSInput",
         "TSLanguage",
-        "TSLogger",
         "TSLookaheadIterator",
         "TSParser",
         "TSTree",

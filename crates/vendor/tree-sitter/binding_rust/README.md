@@ -105,4 +105,3 @@ assert_eq!(
 - **std** - This feature is enabled by default and allows `tree-sitter` to use the standard library.
   - Error types implement the `std::error:Error` trait.
   - `regex` performance optimizations are enabled.
-  - The DOT graph methods are enabled.

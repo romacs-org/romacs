@@ -289,32 +289,6 @@ static inline void ts_language_aliases_for_symbol(
   }
 }
 
-static inline void ts_language_write_symbol_as_dot_string(
-  const TSLanguage *self,
-  FILE *f,
-  TSSymbol symbol
-) {
-  const char *name = ts_language_symbol_name(self, symbol);
-  for (const char *chr = name; *chr; chr++) {
-    switch (*chr) {
-      case '"':
-      case '\\':
-        fputc('\\', f);
-        fputc(*chr, f);
-        break;
-      case '\n':
-        fputs("\\n", f);
-        break;
-      case '\t':
-        fputs("\\t", f);
-        break;
-      default:
-        fputc(*chr, f);
-        break;
-    }
-  }
-}
-
 #ifdef __cplusplus
 }
 #endif

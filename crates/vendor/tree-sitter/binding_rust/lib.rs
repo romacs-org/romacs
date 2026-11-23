@@ -8,7 +8,7 @@ mod util;
 #[cfg(not(feature = "std"))]
 extern crate alloc;
 #[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, string::String, string::ToString, vec::Vec};
+use alloc::{string::String, string::ToString, vec::Vec};
 use core::{
     ffi::{CStr, c_char, c_void},
     fmt::{self, Write},
@@ -21,11 +21,6 @@ use core::{
 };
 #[cfg(feature = "std")]
 use std::error;
-#[cfg(all(unix, feature = "std"))]
-use std::os::fd::AsRawFd;
-#[cfg(all(windows, feature = "std"))]
-use std::os::windows::io::AsRawHandle;
-
 use tree_sitter_language::LanguageFn;
 
 /// The latest ABI version that is supported by the current version of the
@@ -222,20 +217,7 @@ impl<'a> ParseOptions<'a> {
     }
 }
 
-/// A type of log message.
-#[derive(Debug, PartialEq, Eq)]
-pub enum LogType {
-    Parse,
-    Lex,
-}
-
 type FieldId = NonZeroU16;
-
-/// A callback that receives log messages during parsing.
-type Logger = Box<dyn FnMut(LogType, &str) + Send + 'static>;
-
-/// A callback that receives log messages during parsing, with relaxed constraints.
-type UnsafeLogger<'a> = Box<dyn FnMut(LogType, &str) + Send + 'a>;
 
 /// A callback that receives the parse state during parsing.
 type ParseProgressCallback<'a> = &'a mut dyn FnMut(&ParseState) -> ControlFlow<()>;
@@ -556,114 +538,6 @@ impl Parser {
     pub fn language(&self) -> Option<LanguageRef<'_>> {
         let ptr = unsafe { ffi::ts_parser_language(self.0.as_ptr()) };
         (!ptr.is_null()).then_some(LanguageRef(ptr, PhantomData))
-    }
-
-    /// Get the parser's current logger.
-    #[doc(alias = "ts_parser_logger")]
-    #[must_use]
-    pub fn logger(&self) -> Option<&Logger> {
-        let logger = unsafe { ffi::ts_parser_logger(self.0.as_ptr()) };
-        unsafe { logger.payload.cast::<Logger>().as_ref() }
-    }
-
-    /// Set the logging callback that the parser should use during parsing.
-    ///
-    /// To log through a callback that borrows non-`'static` data, see
-    /// [`set_logger_unchecked`](Parser::set_logger_unchecked).
-    #[doc(alias = "ts_parser_set_logger")]
-    pub fn set_logger(&mut self, logger: Option<Logger>) {
-        // SAFETY: `Logger` is `Send + 'static`
-        unsafe { self.set_logger_unchecked(logger) };
-    }
-
-    /// Set the logging callback, allowing the callback to borrow non-`'static`
-    /// data. See [`set_logger`](Parser::set_logger).
-    ///
-    /// # Safety
-    ///
-    /// Any data borrowed by `logger` must remain valid until the logger is
-    /// removed. Equivalently, the parser must not be used to parse once the
-    /// borrowed data has gone out of scope.
-    pub unsafe fn set_logger_unchecked(&mut self, logger: Option<UnsafeLogger<'_>>) {
-        let prev_logger = unsafe { ffi::ts_parser_logger(self.0.as_ptr()) };
-        if !prev_logger.payload.is_null() {
-            drop(unsafe { Box::from_raw(prev_logger.payload.cast::<Logger>()) });
-        }
-
-        let c_logger = if let Some(logger) = logger {
-            let container = Box::new(logger);
-
-            unsafe extern "C" fn log(
-                payload: *mut c_void,
-                c_log_type: ffi::TSLogType,
-                c_message: *const c_char,
-            ) {
-                unsafe {
-                    let callback = payload.cast::<Logger>().as_mut().unwrap();
-                    if let Ok(message) = CStr::from_ptr(c_message).to_str() {
-                        let log_type = if c_log_type == ffi::TSLogTypeParse {
-                            LogType::Parse
-                        } else {
-                            LogType::Lex
-                        };
-                        callback(log_type, message);
-                    }
-                }
-            }
-
-            let raw_container = Box::into_raw(container);
-
-            ffi::TSLogger {
-                payload: raw_container.cast::<c_void>(),
-                log: Some(log),
-            }
-        } else {
-            ffi::TSLogger {
-                payload: ptr::null_mut(),
-                log: None,
-            }
-        };
-
-        unsafe { ffi::ts_parser_set_logger(self.0.as_ptr(), c_logger) };
-    }
-
-    /// Set the destination to which the parser should write debugging graphs
-    /// during parsing. The graphs are formatted in the DOT language. You may
-    /// want to pipe these graphs directly to a `dot(1)` process in order to
-    /// generate SVG output.
-    #[doc(alias = "ts_parser_print_dot_graphs")]
-    #[cfg(not(target_os = "wasi"))]
-    #[cfg(feature = "std")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
-    pub fn print_dot_graphs(
-        &mut self,
-        #[cfg(unix)] file: &impl AsRawFd,
-        #[cfg(windows)] file: &impl AsRawHandle,
-    ) {
-        #[cfg(unix)]
-        {
-            let fd = file.as_raw_fd();
-            unsafe {
-                ffi::ts_parser_print_dot_graphs(self.0.as_ptr(), ffi::_ts_dup(fd));
-            }
-        }
-
-        #[cfg(windows)]
-        {
-            let handle = file.as_raw_handle();
-            unsafe {
-                ffi::ts_parser_print_dot_graphs(self.0.as_ptr(), ffi::_ts_dup(handle));
-            }
-        }
-    }
-
-    /// Stop the parser from printing debugging graphs while parsing.
-    #[doc(alias = "ts_parser_print_dot_graphs")]
-    #[cfg(not(target_os = "wasi"))]
-    #[cfg(feature = "std")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
-    pub fn stop_printing_dot_graphs(&mut self) {
-        unsafe { ffi::ts_parser_print_dot_graphs(self.0.as_ptr(), -1) }
     }
 
     /// Parse a slice of UTF8 text.
@@ -1229,19 +1103,8 @@ impl Parser {
 
 impl Drop for Parser {
     fn drop(&mut self) {
-        #[cfg(feature = "std")]
-        #[cfg(not(target_os = "wasi"))]
-        {
-            self.stop_printing_dot_graphs();
-        }
-        self.set_logger(None);
         unsafe { ffi::ts_parser_delete(self.0.as_ptr()) }
     }
-}
-
-#[cfg(windows)]
-unsafe extern "C" {
-    fn _open_osfhandle(osfhandle: isize, flags: core::ffi::c_int) -> core::ffi::c_int;
 }
 
 impl Tree {
@@ -1332,33 +1195,6 @@ impl Tree {
             let result = ranges.iter().copied().map(Into::into).collect();
             ts_free(ptr.cast::<c_void>());
             result
-        }
-    }
-
-    /// Print a graph of the tree to the given file descriptor.
-    /// The graph is formatted in the DOT language. You may want to pipe this
-    /// graph directly to a `dot(1)` process in order to generate SVG
-    /// output.
-    #[doc(alias = "ts_tree_print_dot_graph")]
-    #[cfg(not(target_os = "wasi"))]
-    #[cfg(feature = "std")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
-    pub fn print_dot_graph(
-        &self,
-        #[cfg(unix)] file: &impl AsRawFd,
-        #[cfg(windows)] file: &impl AsRawHandle,
-    ) {
-        #[cfg(unix)]
-        {
-            let fd = file.as_raw_fd();
-            unsafe { ffi::ts_tree_print_dot_graph(self.0.as_ptr(), fd) }
-        }
-
-        #[cfg(windows)]
-        {
-            let handle = file.as_raw_handle();
-            let fd = unsafe { _open_osfhandle(handle as isize, 0) };
-            unsafe { ffi::ts_tree_print_dot_graph(self.0.as_ptr(), fd) }
         }
     }
 }

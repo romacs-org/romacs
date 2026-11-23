@@ -102,16 +102,6 @@ typedef struct TSParseOptions {
   bool (*progress_callback)(TSParseState *state);
 } TSParseOptions;
 
-typedef enum TSLogType {
-  TSLogTypeParse,
-  TSLogTypeLex,
-} TSLogType;
-
-typedef struct TSLogger {
-  void *payload;
-  void (*log)(void *payload, TSLogType log_type, const char *buffer);
-} TSLogger;
-
 /**
  * A summary of a change to a text document.
  *
@@ -327,28 +317,6 @@ TSTree *ts_parser_parse_string_encoding(
  */
 void ts_parser_reset(TSParser *self);
 
-/**
- * Set the logger that a parser should use during parsing.
- *
- * The parser does not take ownership over the logger payload. If a logger was
- * previously assigned, the caller is responsible for releasing any memory
- * owned by the previous logger.
- */
-void ts_parser_set_logger(TSParser *self, TSLogger logger);
-
-/**
- * Get the parser's current logger.
- */
-TSLogger ts_parser_logger(const TSParser *self);
-
-/**
- * Set the file descriptor to which the parser should write debugging graphs
- * during parsing. The graphs are formatted in the DOT language. You may want
- * to pipe these graphs directly to a `dot(1)` process in order to generate
- * SVG output. You can turn off this logging by passing a negative number.
- */
-void ts_parser_print_dot_graphs(TSParser *self, int fd);
-
 /******************/
 /* Section - Tree */
 /******************/
@@ -436,11 +404,6 @@ TSRange *ts_tree_get_changed_ranges(
   const TSTree *new_tree,
   uint32_t *length
 );
-
-/**
- * Write a DOT graph describing the syntax tree to the given file.
- */
-void ts_tree_print_dot_graph(const TSTree *self, int file_descriptor);
 
 /******************/
 /* Section - Node */
