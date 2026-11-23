@@ -34,26 +34,112 @@
     table)
   "Syntax table used in Kotlin buffers.")
 
+(defun kotlin-ts-mode--skip-code-token ()
+  "Advance over a comment, character literal, or escaped identifier at point.
+For a slash that does not start a comment, advance over the slash."
+  (pcase (char-after)
+    (?/
+     (if (looking-at-p (rx "/" (any "/*")))
+         (let ((parse-sexp-lookup-properties nil))
+           (unless (forward-comment 1)
+             (goto-char (point-max))))
+       (forward-char)))
+    (?'
+     (let ((parse-sexp-lookup-properties nil))
+       (goto-char (or (ignore-error scan-error (scan-sexps (point) 1))
+                      (point-max)))))
+    (?`
+     (forward-char)
+     (skip-chars-forward "^`\r\n")
+     (when (eq (char-after) ?`)
+       (forward-char)))))
+
+(defun kotlin-ts-mode--string-opener ()
+  "Skip an opening quote at point and return its string kind."
+  (if (looking-at-p "\"\"\"")
+      (progn (forward-char 3) 'raw)
+    (forward-char)
+    'string))
+
+(defun kotlin-ts-mode--scan-string ()
+  "Advance across the string at point and return non-nil if it ends.
+Track braces in template expressions and skip their nested strings,
+comments, character literals, and escaped identifiers."
+  (let ((states (list (kotlin-ts-mode--string-opener))))
+    (while (and states
+                (re-search-forward
+                 (pcase (car states)
+                   ('raw (rx (or "$" (seq "\"\"\"" (* "\"")))))
+                   ('string (rx (or "$" "\"" (seq "\\" anything))))
+                   ('code (rx (any "\"'`/{}"))))
+                 nil 'move))
+      (let* ((beg (match-beginning 0))
+             (char (char-after beg)))
+        (if (eq (car states) 'code)
+            (pcase char
+              (?{ (push 'code states))
+              (?} (pop states))
+              (?\" (goto-char beg)
+                   (push (kotlin-ts-mode--string-opener) states))
+              (_ (goto-char beg)
+                 (kotlin-ts-mode--skip-code-token)))
+          (pcase char
+            (?$
+             (pcase (char-after)
+               (?{ (forward-char) (push 'code states))
+               (?` (when (looking-at (rx "`" (+ (not (any "`\r\n"))) "`"))
+                     (goto-char (match-end 0))))))
+            (?\" (pop states))))))
+    (null states)))
+
+(defun kotlin-ts-mode--mark-string (beg closed)
+  "Mark the outer fences of the string from BEG to point.
+Mark a closing fence only if CLOSED is non-nil."
+  (let ((fence (string-to-syntax "|")))
+    (put-text-property beg (1+ beg) 'syntax-table fence)
+    (when closed
+      (put-text-property (1- (point)) (point) 'syntax-table fence)))
+  (put-text-property beg (point) 'syntax-multiline t))
+
+(defun kotlin-ts-mode--scan-syntax (beg end &optional mark)
+  "Scan from BEG through the lexical token crossing END.
+When MARK is non-nil, mark strings and escaped identifiers."
+  (let ((state (syntax-ppss beg)))
+    (goto-char (if (nth 4 state) (nth 8 state) beg)))
+  (while (and (< (point) end) (re-search-forward "[\"'`/]" end t))
+    (let ((start (match-beginning 0)))
+      (goto-char start)
+      (if (eq (char-after) ?\")
+          (let ((closed (kotlin-ts-mode--scan-string)))
+            (when mark
+              (kotlin-ts-mode--mark-string start closed)))
+        (let ((identifier (eq (char-after) ?`)))
+          (kotlin-ts-mode--skip-code-token)
+          (when (and mark identifier)
+            (add-text-properties
+             start (point) (list 'syntax-table (string-to-syntax "_")
+                                 'syntax-multiline t)))))))
+  (point))
+
+(defun kotlin-ts-mode--syntax-extend-region (beg end)
+  "Extend BEG and END to include complete lexical tokens."
+  (pcase-let ((`(,start . ,limit) (syntax-propertize-multiline beg end)))
+    (cons start (max limit (kotlin-ts-mode--scan-syntax start limit)))))
+
 (defun kotlin-ts-mode--syntax-propertize (beg end)
-  "Mark the raw string fences between BEG and END."
-  (goto-char beg)
-  (while (search-forward "\"\"\"" end t)
-    (let* ((start (- (point) 3))
-           (state (save-excursion (syntax-ppss start))))
-      (cond
-       ((eq (nth 3 state) t)
-        (skip-chars-forward "\"" end)
-        (put-text-property (1- (point)) (point) 'syntax-table (string-to-syntax "|")))
-       ((not (or (nth 3 state) (nth 4 state) (nth 5 state)))
-        (put-text-property start (1+ start) 'syntax-table (string-to-syntax "|")))))))
+  "Make strings and escaped identifiers opaque between BEG and END."
+  (kotlin-ts-mode--scan-syntax beg end t))
 
 (defconst kotlin-ts-mode--indent-rules
   `((kotlin
      ((parent-is "multiline_string_literal") no-indent 0)
      ((parent-is "block_comment") no-indent 0)
      ((node-is ,(rx bos (any "]})") eos)) parent-bol 0)
+     ((match ,(rx bos (or "else" "block") eos) ,(rx bos "if_expression" eos))
+      parent-bol 0)
      ((parent-is ,(rx bos (or "class_body" "enum_class_body" "block"
-                              "lambda_literal" "when_expression") eos))
+                              "lambda_literal" "when_expression" "when_entry"
+                              "if_expression") eos))
       parent-bol kotlin-ts-mode-indent-offset)
      ((parent-is ,(rx bos (or "class_parameters" "function_value_parameters"
                               "value_arguments" "collection_literal"
@@ -157,6 +243,8 @@
               comment-start-skip "//+\\s-*\\|/\\*+\\s-*"
               syntax-propertize-function #'kotlin-ts-mode--syntax-propertize
               indent-tabs-mode nil)
+  (add-hook 'syntax-propertize-extend-region-functions
+            #'kotlin-ts-mode--syntax-extend-region 'append t)
   (when (and (treesit-ensure-installed 'kotlin)
              (treesit-ready-p 'kotlin))
     (treesit-parser-create 'kotlin)
@@ -172,7 +260,9 @@
                               "function_declaration" "property_declaration") 'symbols)
                 treesit-defun-name-function #'kotlin-ts-mode--defun-name
                 treesit-simple-imenu-settings kotlin-ts-mode--imenu-settings)
-    (treesit-major-mode-setup)))
+    (treesit-major-mode-setup)
+    (remove-hook 'syntax-propertize-extend-region-functions
+                 #'treesit--pre-syntax-ppss t)))
 
 ;;;###autoload
 (defun kotlin-ts-mode-maybe ()

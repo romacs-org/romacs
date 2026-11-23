@@ -2,6 +2,7 @@
 
 (require 'ert)
 (require 'ert-x)
+(require 'cl-lib)
 (require 'kotlin-ts-mode)
 
 (defun kotlin-ts-mode-tests--position (text)
@@ -88,7 +89,7 @@
                      ("interface" . nil)))
       (should (equal (nth 4 (syntax-ppss (kotlin-ts-mode-tests--position (car entry))))
                      (cdr entry))))
-    (dolist (entry '(("Hello" . ?\") ("${prefix}" . ?\")
+    (dolist (entry '(("Hello" . t) ("${prefix}" . t)
                      ("quoted" . t) ("a backslash" . t)
                      ("val empty" . nil) ("val trailingQuote" . nil)
                      ("val done" . nil)))
@@ -101,3 +102,45 @@
     (should (eq (nth 3 (syntax-ppss
                         (1+ (kotlin-ts-mode-tests--position "'\"'"))))
                 ?'))))
+
+(ert-deftest kotlin-ts-mode-syntax-escaped-identifiers ()
+  (dolist (name '("odd\"name" "odd(name" "odd/*name"))
+    (with-temp-buffer
+      (insert "fun `" name "`() {}\nval following = 3\n")
+      (kotlin-ts-mode)
+      (let ((state (syntax-ppss (kotlin-ts-mode-tests--position "val following"))))
+        (should (= (nth 0 state) 0))
+        (should-not (nth 3 state))
+        (should-not (nth 4 state))))))
+
+(ert-deftest kotlin-ts-mode-syntax-after-nested-templates ()
+  (dolist (literal '("\"before ${\"/*\"} after\""
+                     "\"before ${\"}\"} after\""
+                     "\"\"\"before ${\"\"\"}\"\"\"} after\"\"\""
+                     "\"before $`has\"quote` after\""
+                     "\"before \\${literal} and \\\" after\""
+                     "\"before ${if (true) { \"}\" } else { /* } */ \"{\" }} after\""))
+    (with-temp-buffer
+      (insert "fun f() {\n    val text = " literal "\n    val following = 0\n}\n")
+      (kotlin-ts-mode)
+      (let ((state (syntax-ppss (kotlin-ts-mode-tests--position "val following"))))
+        (should (= (nth 0 state) 1))
+        (should-not (nth 3 state))
+        (should-not (nth 4 state))))))
+
+(ert-deftest kotlin-ts-mode-syntax-revisits-an-edited-multiline-template ()
+  (with-temp-buffer
+    (insert "fun f() {\n    val text = \"\"\"before ${listOf(\n"
+            "        \"/*\"\n    )} after\"\"\"\n    val following = 0\n}\n")
+    (kotlin-ts-mode)
+    (cl-letf (((symbol-function 'treesit-parser-changed-regions)
+               (lambda (&rest _) (ert-fail "Lexical scan requested a reparse"))))
+      (let ((syntax-propertize-chunk-size 16))
+        (should (nth 3 (syntax-ppss (kotlin-ts-mode-tests--position "before"))))
+        (goto-char (kotlin-ts-mode-tests--position "\"/*\""))
+        (delete-char 4)
+        (insert "\"\"\"}\"\"\"")
+        (let ((state (syntax-ppss (kotlin-ts-mode-tests--position "val following"))))
+          (should (= (nth 0 state) 1))
+          (should-not (nth 3 state))
+          (should-not (nth 4 state)))))))
