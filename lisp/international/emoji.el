@@ -490,12 +490,16 @@ glyphs, and the glyph to insert if it has no submenu."
                collect (list key label
                              (concat title " > " name) children
                              (if (equal name "Recent") t done-derived) nil))
-    (cl-loop for glyph in spec
+    (cl-loop with height = (list :height (face-attribute 'default :height))
+             for glyph in spec
              for char in (emoji--char-sequence)
              for derived = (unless (or (eq done-derived t)
                                        (member glyph done-derived))
                              (gethash glyph emoji--derived))
-             collect (list (string char) glyph
+             collect (list (string char)
+                           ;; Popup rows fit the default font height.
+                           (propertize glyph 'face
+                                       (list height (if derived 'emoji-with-derivations 'emoji)))
                            (and derived (concat title " " glyph))
                            (and derived (cons glyph derived))
                            (and derived (cons glyph done-derived))
@@ -530,7 +534,7 @@ Return nil if there are no choices."
       (keymap-popup-attach
        map (cl-loop for group in (seq-partition entries group-size)
                     append (cons :group (cons nil (apply #'append group))))
-       :description title :exit-key "<escape>"))))
+       :description title :exit-key "<escape>" :persistent nil))))
 
 (defun emoji--show-popup (title glyphs done-derived)
   "Show the popup TITLE with GLYPHS for insertion in the current buffer.
