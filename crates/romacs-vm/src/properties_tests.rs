@@ -61,6 +61,25 @@ fn absence_nil_and_value_are_independent_per_key() {
     assert!(p.has_key(named("fontified")));
 }
 #[test]
+fn resolved_run_ignores_stamps_and_keys_not_read() {
+    let mut p = Properties::new();
+    for byte in 2..130 {
+        p.put(ByteOffset(byte)..ByteOffset(byte + 1), named("face"), Value::NIL);
+    }
+    p.put(ByteOffset(7)..ByteOffset(9), named("other"), Value::TRUE);
+    for (byte, value, end) in [(0, None, 2), (2, Some(Value::NIL), 130), (129, Some(Value::NIL), 130), (130, None, 140)] {
+        let raw = RunAt::new(&p, ByteOffset(byte), 140);
+        assert_eq!(raw.property(named("face")), value);
+        assert_eq!(raw.end(), end);
+    }
+    let raw = RunAt::new(&p, ByteOffset(3), 60);
+    assert_eq!(raw.property(named("face")), Some(Value::NIL));
+    assert_eq!(raw.end(), 60);
+    assert_eq!(raw.property(named("other")), None);
+    assert_eq!(raw.end(), 7);
+}
+
+#[test]
 fn replacement_preserves_stamp_and_new_keys_prepend() {
     let mut p = Properties::new();
     let r = ByteOffset(0)..ByteOffset(10);

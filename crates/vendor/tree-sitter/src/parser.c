@@ -1482,6 +1482,41 @@ static void ts_parser__recover(
   self->has_error = has_error;
 }
 
+#define MISSING_SHIFT_LIMIT 256
+
+// A compact row groups terminals with the same actions. Test each group
+// once, then leave the order and effectful trials to the caller.
+static bool ts_parser__missing_shift_states(
+  const TSLanguage *language, TSStateId state, TSSymbol lookahead,
+  TSStateId shifts[static MISSING_SHIFT_LIMIT]
+) {
+  uint16_t token_count = (uint16_t)language->token_count;
+  if (token_count > MISSING_SHIFT_LIMIT || state >= language->state_count ||
+      language->parse_actions[0].entry.count != 0) return false;
+
+  memset(shifts, 0, token_count * sizeof(*shifts));
+  uint32_t previous_actions = UINT32_MAX;
+  TSStateId next_state = 0;
+  LookaheadIterator it = ts_language_lookaheads(language, state);
+  while (ts_lookahead_iterator__next(&it)) {
+    if (it.symbol == 0 || it.symbol >= token_count || it.symbol >= language->symbol_count) continue;
+    if (it.table_value != previous_actions) {
+      previous_actions = it.table_value;
+      // The group's first symbol need not be a terminal. Interpret the
+      // table value as a terminal action index for this symbol.
+      const TSParseActionEntry *entry = &language->parse_actions[it.table_value];
+      const TSParseAction *actions = (const TSParseAction *)(entry + 1);
+      next_state = ts_language_shift_state(state, actions, entry->entry.count);
+      if (next_state == state ||
+          (next_state && !ts_language_has_reduce_action(language, next_state, lookahead))) {
+        next_state = 0;
+      }
+    }
+    shifts[it.symbol] = next_state;
+  }
+  return true;
+}
+
 static void ts_parser__handle_error(
   TSParser *self,
   StackVersion version,
@@ -1502,19 +1537,22 @@ static void ts_parser__handle_error(
   for (StackVersion v = version; v < version_count;) {
     if (!did_insert_missing_token) {
       TSStateId state = ts_stack_state(self->stack, v);
+      TSStateId shifts[MISSING_SHIFT_LIMIT];
+      bool expanded = ts_parser__missing_shift_states(
+        self->language, state, ts_subtree_leaf_symbol(lookahead), shifts
+      );
       for (
         TSSymbol missing_symbol = 1;
         missing_symbol < (uint16_t)self->language->token_count;
         missing_symbol++
       ) {
-        TSStateId state_after_missing_symbol = ts_language_next_state(
-          self->language, state, missing_symbol
-        );
+        TSStateId state_after_missing_symbol = expanded ? shifts[missing_symbol] :
+          ts_language_next_state(self->language, state, missing_symbol);
         if (state_after_missing_symbol == 0 || state_after_missing_symbol == state) {
           continue;
         }
 
-        if (ts_language_has_reduce_action(
+        if (expanded || ts_language_has_reduce_action(
           self->language,
           state_after_missing_symbol,
           ts_subtree_leaf_symbol(lookahead)
