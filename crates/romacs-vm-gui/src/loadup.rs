@@ -27,14 +27,16 @@
 //!    only if `load` returned normally, which in VM2's loader means every form
 //!    was read and evaluated without error.
 //!
-//! 3. **GNU's `subdirs.el` step of `normal-top-level` is done in Rust.**
-//!    loadup.el's last form, `(eval top-level t)`, calls `normal-top-level`
-//!    (startup.el), which loads `subdirs.el` from each `load-path` directory
-//!    (startup.el:612-638); that is how GNU's path grows past loadup.el's 7
-//!    directories to `org/`, `calendar/`, `obsolete/`... A partially loaded
-//!    startup can define the function without completing this loop. Unless
-//!    the resulting ordered path is already established, [`apply_subdirs`]
-//!    supplies it when startup left its input unchanged. The entries
+//! 3. **The drive ends at `(eval top-level t)`; its `subdirs.el` step is
+//!    done in Rust.** loadup.el's last form calls `normal-top-level`
+//!    (startup.el), which starts the session: the session's own startup
+//!    (lisp/session/romacs-gui-loadup.el) takes those steps, so the drive
+//!    does not evaluate the form, and the built world holds the runtime
+//!    alone, nothing of a session's HOME or command line. Of
+//!    `normal-top-level` it keeps one step: loading `subdirs.el` from each
+//!    `load-path` directory (startup.el:612-638), which is how GNU's path
+//!    grows past loadup.el's 7 directories to `org/`, `calendar/`,
+//!    `obsolete/`... [`apply_subdirs`] does it. The entries
 //!    are what GNU's build writes into each `subdirs.el` ([`update_subdirs`],
 //!    a port of `build-aux/update-subdirs`, applied where `lisp/Makefile.in`
 //!    applies it), spliced exactly as `normal-top-level-add-to-load-path`
@@ -119,9 +121,8 @@ pub struct Loadup {
     /// Seconds spent in the drive.
     pub seconds: f64,
     /// The `load-path` directories whose `subdirs.el` [`apply_subdirs`]
-    /// applied, or `None` when the ordered subdirs result was already present (so the
-    /// step was GNU's, not ours).
-    pub subdirs: Option<Vec<String>>,
+    /// applied: none for a bootstrap whose path is already the installed one.
+    pub subdirs: Vec<String>,
     /// `load-path` entries whose `subdirs.el` [`apply_subdirs`] did NOT
     /// apply, and why (outside the domain it reproduces; see `portable`).
     pub subdirs_skipped: Vec<(String, String)>,
@@ -129,8 +130,6 @@ pub struct Loadup {
     pub load_path_len: usize,
     /// Exact GNU command definitions loaded independently of unrelated bootstrap failures.
     pub command_definitions: Vec<(String, usize)>,
-    /// `load-path` when loadup.el reached `(eval top-level t)`, for [`drive`]'s subdirs step.
-    before_startup: Option<Vec<String>>,
 }
 
 impl Loadup {
@@ -161,16 +160,13 @@ impl Loadup {
         self.loadup.file_name().map_or_else(|| self.loadup.display().to_string(), |n| n.to_string_lossy().into_owned())
     }
     pub fn status(&self) -> String {
+        let skipped = if self.subdirs_skipped.is_empty() { String::new() } else {
+            format!(" (NOT APPLIED: {})", self.subdirs_skipped.iter().map(|(d, why)| format!("{d}: {why}")).collect::<Vec<_>>().join("; "))
+        };
         format!(
-            "{} ({} top-level forms): {} load sites; {} complete, {} partial, {} missing, {} absent, {} native, {} never reached; {} top-level loadup forms signalled; {}",
+            "{} ({} top-level forms): {} load sites; {} complete, {} partial, {} missing, {} absent, {} native, {} never reached; {} top-level loadup forms signalled; subdirs.el applied by romacs for {} director{}, load-path {} entries{skipped}",
             self.loadup.display(), self.forms, self.rows.len(), self.complete(), self.partial(), self.missing(), self.absent(), self.native(), self.not_reached(), self.form_failures.len(),
-            match &self.subdirs {
-                Some(dirs) => format!("subdirs.el applied by romacs for {} director{}, load-path {} entries{}", dirs.len(), if dirs.len() == 1 { "y" } else { "ies" }, self.load_path_len,
-                    if self.subdirs_skipped.is_empty() { String::new() } else {
-                        format!(" (NOT APPLIED: {})", self.subdirs_skipped.iter().map(|(d, why)| format!("{d}: {why}")).collect::<Vec<_>>().join("; "))
-                    }),
-                None => format!("ordered subdirs path is already established; load-path {} entries", self.load_path_len),
-            }
+            self.subdirs.len(), if self.subdirs.len() == 1 { "y" } else { "ies" }, self.load_path_len,
         )
     }
     /// One line per site, tab-separated, for the evidence table.
@@ -365,22 +361,10 @@ pub fn drive(vm: &mut Vm, dir: &Path) -> Result<Loadup, String> {
     let dir = dir.canonicalize().map_err(|e| format!("GNU lisp directory {}: {e}", dir.display()))?;
     vm.set_load_path(std::slice::from_ref(&dir))?;
     let mut loadup = run(vm, &dir.join("loadup.el"), std::slice::from_ref(&dir), true)?;
-    let current_path = load_path(vm)?;
-    let initial_path = loadup.before_startup.take().unwrap_or_else(|| current_path.clone());
-    let (path, applied, mut subdirs_skipped) = apply_subdirs(initial_path.clone(), &dir);
-    // A defined normal-top-level is not evidence that its subdirs loop ran.
-    // Compare the whole ordered result: replaying a completed loop duplicates
-    // entries, while accepting the unexpanded prefix hides GNU libraries.
-    loadup.subdirs = if current_path == path {
-        None
-    } else if current_path == initial_path {
-        vm.set_load_path(&path.iter().map(PathBuf::from).collect::<Vec<_>>())?;
-        Some(applied)
-    } else {
-        subdirs_skipped.push(("load-path".into(),
-            "startup left neither its initial path nor the completed subdirs path".into()));
-        Some(vec![])
-    };
+    // normal-top-level's subdirs loop, the one step of it the drive keeps.
+    let (path, applied, subdirs_skipped) = apply_subdirs(load_path(vm)?, &dir);
+    vm.set_load_path(&path.iter().map(PathBuf::from).collect::<Vec<_>>())?;
+    loadup.subdirs = applied;
     loadup.subdirs_skipped = subdirs_skipped;
     loadup.load_path_len = load_path(vm)?.len();
     if loadup.rows.iter().any(|row| row.site.name == "simple" && matches!(row.outcome, Outcome::Partial { .. })) {
@@ -431,10 +415,10 @@ fn run(vm: &mut Vm, file: &Path, search: &[PathBuf], adapt: bool) -> Result<Load
     let mut form_errors: Vec<Option<String>> = vec![None; spans.len()];
     // Steps of the VM's loader, per site invocation: (site, from, to).
     let mut windows: Vec<(usize, usize, usize)> = vec![];
-    let mut before_startup = None;
     for (k, &(start, end, line)) in spans.iter().enumerate() {
+        // The session's own startup runs what this form starts (deviation 3).
         if source[start..end].split_whitespace().collect::<String>() == "(evaltop-levelt)" {
-            before_startup = Some(load_path(vm)?);
+            continue;
         }
         let inside: Vec<Site> = sites.iter().filter(|s| s.form == k).cloned().collect();
         let text = rewrite(&source[start..end], start, &inside);
@@ -509,8 +493,8 @@ fn run(vm: &mut Vm, file: &Path, search: &[PathBuf], adapt: bool) -> Result<Load
         };
         rows.push(Row { site: site.clone(), outcome, nested });
     }
-    Ok(Loadup { loadup, forms: spans.len(), rows, form_failures, seconds: 0.0, subdirs: None, subdirs_skipped: vec![],
-                load_path_len: 0, command_definitions: vec![], before_startup })
+    Ok(Loadup { loadup, forms: spans.len(), rows, form_failures, seconds: 0.0, subdirs: vec![], subdirs_skipped: vec![],
+                load_path_len: 0, command_definitions: vec![] })
 }
 
 fn load_line_command_definitions(vm: &mut Vm, source: &str) -> Result<Vec<(String, usize)>, String> {
@@ -911,37 +895,31 @@ mod tests {
         std::thread::Builder::new().stack_size(64 << 20).spawn(f).unwrap().join().unwrap()
     }
 
+    /// The drive ends at loadup.el's `(eval top-level t)`: `normal-top-level`
+    /// does not run, and the subdirs step it would have taken is the drive's.
     #[test]
-    fn subdirs_completion_requires_established_path_not_function_binding() {
+    fn the_drive_stops_before_normal_top_level() {
         on_evaluator(|| {
-            for established in [false, true] {
-                let dir = std::env::temp_dir().join(format!(
-                    "romacs-subdirs-completion-{}-{established}", std::process::id()
-                ));
-                std::fs::create_dir_all(&dir).unwrap();
-                for name in ["a", "b", "obsolete", "term"] {
-                    std::fs::create_dir_all(dir.join(name)).unwrap();
-                }
-                let dir = dir.canonicalize().unwrap();
-                let expected: Vec<String> = ["", "b", "a", "obsolete"].iter()
-                    .map(|name| if name.is_empty() { dir.clone() } else { dir.join(name) })
-                    .map(|path| path.to_string_lossy().into_owned()).collect();
-                let body = if established {
-                    format!("(setq load-path '({}))", expected.iter()
-                        .map(|p| format!("{p:?}")).collect::<Vec<_>>().join(" "))
-                } else { "(car 1)".to_owned() };
-                std::fs::write(dir.join("loadup.el"), format!(
-                    "(defun normal-top-level () {body})\n(setq top-level '(normal-top-level))\n(eval top-level t)\n"
-                )).unwrap();
-                let mut vm = Vm::new();
-                let report = drive(&mut vm, &dir).unwrap();
-                let path = load_path_of(&mut vm);
-                std::fs::remove_dir_all(&dir).unwrap();
-                assert_eq!(path, expected,
-                    "SUBDIRS_COMPLETION_PATH: bound-but-failed startup needs fallback; completed startup must not duplicate entries (established={established})");
-                assert_eq!(report.subdirs.is_none(), established,
-                    "SUBDIRS_COMPLETION_AUTHORITY: only established path suppresses fallback");
+            let dir = std::env::temp_dir().join(format!("romacs-top-level-boundary-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            for name in ["a", "b", "obsolete", "term"] {
+                std::fs::create_dir_all(dir.join(name)).unwrap();
             }
+            let dir = dir.canonicalize().unwrap();
+            std::fs::write(dir.join("loadup.el"),
+                "(defun normal-top-level () (setq top-level-ran t))\n(setq top-level '(normal-top-level))\n(eval top-level t)\n").unwrap();
+            let mut vm = Vm::new();
+            let report = drive(&mut vm, &dir).unwrap();
+            let ran = vm.eval_source("(boundp 'top-level-ran)").unwrap().display().unwrap();
+            let path = load_path_of(&mut vm);
+            std::fs::remove_dir_all(&dir).unwrap();
+            let expected: Vec<String> = ["", "b", "a", "obsolete"].iter()
+                .map(|name| if name.is_empty() { dir.clone() } else { dir.join(name) })
+                .map(|path| path.to_string_lossy().into_owned()).collect();
+            assert_eq!(ran, "nil", "normal-top-level ran during the drive");
+            assert!(report.form_failures.is_empty(), "{:?}", report.form_failures);
+            assert_eq!(path, expected);
+            assert_eq!(report.subdirs, [dir.to_string_lossy().into_owned()]);
         });
     }
 
@@ -1020,8 +998,8 @@ mod tests {
     /// `normal-top-level` (startup.el:612-638), which loads each load-path
     /// directory's `subdirs.el`; `normal-top-level-add-to-load-path`
     /// (startup.el:472) splices its entries in right after that directory.
-    /// loadup.el's last form never reaches `normal-top-level` in the VM, so
-    /// without the drive's subdirs step Org was not even findable.
+    /// The drive does not run `normal-top-level` (deviation 3), so without
+    /// its subdirs step Org would not even be findable.
     #[test]
     fn loadup_load_path_reaches_gnu_subdirectories_in_gnu_order() {
         let dir = crate::startup::lisp_dir().canonicalize().unwrap();

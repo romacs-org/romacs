@@ -18,6 +18,9 @@ pub enum Launch {
     Loadup,
     /// `--gnu-lisp`: GNU's `loadup.el` and nothing romacs adds: no stand-ins,
     /// no Rum faces, no workspace. Shows what GNU's Lisp alone gives today.
+    /// The boot ends before `normal-top-level`; the session then takes GNU's
+    /// own steps of it before the command line ([`GNU_SESSION_STEPS`]), under
+    /// its own HOME and locale, and none of `command-line`.
     GnuOnly,
     /// Default (also `--no-gnu-lisp`): VM2's own workspace with no GNU Lisp
     /// and every stand-in.
@@ -601,6 +604,25 @@ pub fn resume_loadup(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Loadup)
     started
 }
 
+/// `--gnu-lisp`'s session steps, GNU's own forms of startup.el
+/// `normal-top-level` (startup.el:584-592, 640-668), taken at session time
+/// under the session's HOME and environment: the boot ends before them
+/// (loadup.rs, deviation 3), and `--gnu-lisp` has no startup of Romacs's.
+/// The command line is processed once, the per-user directory, Unix's
+/// end-of-line mnemonics and the locale. Not the rest of `command-line`.
+const GNU_SESSION_STEPS: &str = r#"(progn
+  (setq command-line-processed t)
+  (setq startup--xdg-config-home-emacs
+        (let ((xdg-config-home (getenv-internal "XDG_CONFIG_HOME")))
+          (if xdg-config-home
+              (concat xdg-config-home "/emacs/")
+            startup--xdg-config-default)))
+  (setq user-emacs-directory
+        (startup--xdg-or-homedot startup--xdg-config-home-emacs nil))
+  (setq eol-mnemonic-dos "(DOS)"
+        eol-mnemonic-mac "(Mac)")
+  (set-locale-environment nil))"#;
+
 /// Romacs's Lisp a `--loadup` launch takes from its runtime tree before the
 /// chain, on the VM's own `defun`: the session's startup steps and its
 /// install command.
@@ -832,6 +854,7 @@ pub fn start_session(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Loadup,
     // buffer.c's default is "%-" until bindings.el replaces it.
     let gnu_mode_line = vm.eval_source("(not (equal (default-value 'mode-line-format) \"%-\"))")? != romacs_vm::Fixed::NIL;
     if launch == Launch::GnuOnly {
+        vm.eval_source(GNU_SESSION_STEPS)?;
         return Ok(Started { launch, loadup: Some(loadup), bindings: vec![], gnu_mode_line, files: vec![] });
     }
     for path in EDITING_LISP { load_lisp(vm, &own_lisp(dir), path)?; }
@@ -2787,6 +2810,38 @@ mod tests {
     /// every load site of lisp/session/romacs-loadup-bootstrap.el in order and each
     /// complete, then the interactive session; the window keeps a mode line
     /// and a cursor, and GNU's commands run the journey keys.
+    /// The GNU Lisp boot ends before `normal-top-level` (loadup.rs,
+    /// deviation 3), so a world holds nothing of its builder's session: with
+    /// the whole tree under the builder's HOME, which this test arranges, no
+    /// `~' is cached from that HOME and `default-directory' stays absolute.
+    /// The session then takes GNU's steps under its own HOME and locale
+    /// (`GNU_SESSION_STEPS'): its directory is still there, its per-user
+    /// directory is under its HOME, and its coding systems are its locale's.
+    #[test]
+    fn a_boot_under_home_keeps_nothing_of_the_builders_session() {
+        let (booted, started) = on_evaluator(|| {
+            let dir = lisp_dir().canonicalize().unwrap();
+            let builder = dir.ancestors().nth(2).unwrap().to_string_lossy().into_owned();
+            let mut vm = Vm::new();
+            vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+            vm.eval_source(&format!("(setq process-environment (cons {} process-environment))", lisp_string(&format!("HOME={builder}")))).unwrap();
+            let loadup = initialize_chain(&mut vm, Launch::GnuOnly, None, &dir).unwrap();
+            install_session_definitions(&mut vm, Launch::GnuOnly, &dir).unwrap();
+            let state = "(list (string-prefix-p (expand-file-name \"~\") default-directory) (file-name-absolute-p default-directory) \
+                          (string-prefix-p \"~\" default-directory) abbreviated-home-dir command-line-processed)";
+            let booted = printed(&mut vm, state);
+            private_home(&mut vm, "boot-under-home");
+            vm.eval_source("(setq process-environment (append '(\"LANG=en_US.UTF-8\" \"LC_ALL\" \"LC_CTYPE\") process-environment))").unwrap();
+            resume_loadup(&mut vm, Launch::GnuOnly, loadup).unwrap();
+            (booted, printed(&mut vm, "(list (file-directory-p default-directory) (string-prefix-p \"~\" default-directory) command-line-processed \
+                                             (string-prefix-p (expand-file-name \"~\") (expand-file-name user-emacs-directory)) \
+                                             eol-mnemonic-dos current-locale-environment locale-coding-system)"))
+        });
+        assert_eq!(booted, "(t t nil nil nil)", "the boot: under HOME, absolute, no ~, no cached home, no command line");
+        assert_eq!(started, "(t nil t t \"(DOS)\" \"en_US.UTF-8\" utf-8-unix)",
+                   "the session: its directory, no ~, GNU's steps under its own HOME and locale");
+    }
+
     #[test]
     fn loadup_launch_runs_the_shared_chain_and_keeps_a_cursor() {
         let (rows, complete, sites, mode_line, keys, live, ran, bundled) = on_evaluator(|| {
