@@ -244,7 +244,7 @@ latest (default 3), latest first."
 examples of each: tool-refused and tool-error (a romacs_task_* or delegate call refused or failing), crossed (a \
 task's result made before messages its parent sent meanwhile), no-result, failed, result-shape (a result its \
 role's shape does not fit, as a review with no verdict), limit, moved (to another instance), resume-failed, \
-watch-unknown. hours: only the last N hours; kind: one kind; examples: how many of each (default 3)."
+historical watch-unknown. hours: only the last N hours; kind: one kind; examples: how many of each (default 3)."
  (romacs-mcp--schema '(("instance" . "string") ("hours" . "number") ("kind" . "string") ("examples" . "integer")) nil)
  #'romacs-agent-issues--tool
  (romacs-mcp--object "readOnlyHint" t))

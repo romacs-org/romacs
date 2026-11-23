@@ -15,37 +15,38 @@
 (ert-deftest romacs-agent-watch-reads-systemd ()
   (let ((states (romacs-agent-watch--states
                  "Id=check-a.service\nActiveState=active\n\nId=check-b.service\nActiveState=inactive\n\nId=c.service\nActiveState=failed\n")))
-    (should (equal (gethash "check-a.service" states) "active"))
+    (should (equal (gethash "check-a.service" states) '("active")))
     (should (equal (mapcar #'car (romacs-agent-watch--ended
                                   (list (cons "t1" '(:unit "check-a")) (cons "t2" '(:unit "check-b.service"))
                                         (cons "t3" '(:unit "c.service")) (cons "t4" '(:unit "unanswered")))
                                   states))
                    ;; Running and unnamed units are still waited on.
-                   '("t2" "t3"))))
-  (should (equal (romacs-agent-watch--status "x.service: Main process exited, code=exited, status=1/FAILURE\nx.service: Failed with result 'exit-code'.\n")
-                 "exited, status=1/FAILURE (failed: exit-code)"))
-  (should (equal (romacs-agent-watch--status "x.service: Deactivated successfully.\n") "exited, status=0/SUCCESS"))
-  ;; As the user manager logs them: a success only by what it consumed,
-  ;; a stop by its own line, a failure with its exit before the tally.
-  (should (equal (romacs-agent-watch--status "Started [systemd-run] check.\nx.service: Consumed 3h 30min CPU time over 3h wall clock time, 10.5G memory peak.\n")
-                 "exited, status=0/SUCCESS"))
-  (should (equal (romacs-agent-watch--status "Stopping [systemd-run] check...\nStopped [systemd-run] check.\nx.service: Consumed 2min CPU time over 4min wall clock time.\n")
-                 "stopped"))
-  (should (equal (romacs-agent-watch--status "x.service: Main process exited, code=exited, status=2/INVALIDARGUMENT\nx.service: Failed with result 'exit-code'.\nx.service: Consumed 1s CPU time over 2s wall clock time.\n")
-                 "exited, status=2/INVALIDARGUMENT (failed: exit-code)"))
-  ;; A quick clean exit logs nothing after the watch began, or its start
-  ;; alone, as a death by SIGTERM does: no exit is claimed.
-  (should (equal (romacs-agent-watch--status "") "no exit status in the journal"))
-  (should (equal (romacs-agent-watch--status "Started forge watch r1.\n") "no exit status in the journal"))
-  (should (equal (romacs-agent-watch--status "x.service: Main process exited, code=killed, status=9/KILL\n")
-                 "killed, status=9/KILL")))
+                   '("t2" "t3")))))
+
+(ert-deftest romacs-agent-watch-parses-exit-records ()
+  (let ((id "76c58ced7ce741669e018765c54ff31a"))
+    (pcase-dolist (`(,fields ,text)
+                  '((("success" "exited" "0") "exited, status=0 (success)")
+                    (("exit-code" "exited" "7") "exited, status=7 (exit-code)")
+                    (("success" "killed" "TERM") "killed, signal=TERM")
+                    (("core-dump" "dumped" "SEGV") "dumped, signal=SEGV")
+                    (("signal" "killed" "RTMIN+1") "killed, signal=RTMIN+1")))
+      (let* ((expected (append fields (list id)))
+             (record (romacs-agent-watch--parse-exit-record
+                      (concat (string-join expected " ") "\n"))))
+        (should (equal record expected))
+        (should (equal (romacs-agent-watch--exit-text record) text))))
+    ;; No exit status past 255, nor a signal not named.
+    (dolist (fields '(("success" "exited" "999") ("success" "exited" "0007") ("signal" "killed" "+1")))
+      (should-not (romacs-agent-watch--parse-exit-record (concat (string-join (append fields (list id)) " ") "\n"))))))
 
 (defmacro romacs-agent-watch-tests--with (&rest body)
   "BODY with the lead `lead' calling and its idle task `child', in a
 private directory `root'.  `told' collects (TASK . TEXT) a task is told,
-`state' is what systemd says of any unit, `journal' its journal."
+systemd reports `state' and `invocation' for each unit."
   (declare (indent 0))
   `(let* ((root (make-temp-file "romacs-watch-" t))
+          (process-environment (copy-sequence process-environment))
           (romacs-agent--sessions (make-hash-table :test #'equal))
           (romacs-agent--children (make-hash-table :test #'equal))
           (romacs-agent-watch--watches (make-hash-table :test #'equal))
@@ -54,20 +55,35 @@ private directory `root'.  `told' collects (TASK . TEXT) a task is told,
           (child (romacs-agent--make :id "child" :harness 'claude :state 'idle :title "lane" :cwd root
                                      :dir (expand-file-name "child" root) :options '(:parent "lead")))
           (caller "lead") (state "active")
-          (journal "check.service: Main process exited, code=exited, status=0/SUCCESS\n")
-          (journal-exit 0) (issues nil)
+          (invocation "76c58ced7ce741669e018765c54ff31a")
+          (real-call-process (symbol-function 'call-process))
+          (issues nil)
           (told nil))
+     (setenv "XDG_RUNTIME_DIR" root)
+     (make-directory (expand-file-name "unit-exit" root))
      (make-directory (romacs-agent-dir child))
      (dolist (s (list lead child)) (puthash (romacs-agent-id s) s romacs-agent--sessions))
      (romacs-agent--index child)
      (cl-letf (((symbol-function 'romacs-agent-tools--caller) (lambda () caller))
-               ((symbol-function 'romacs-agent-watch--unit-state) (lambda (_unit) state))
+               ((symbol-function 'call-process)
+                (lambda (program &rest args)
+                  (if (equal program "systemctl")
+                      (progn
+                        (should (equal (butlast args 1)
+                                       '(nil t nil "--user" "show" "-p" "Id,ActiveState,InvocationID" "--")))
+                        (insert (format "InvocationID=%s\nId=%s\nActiveState=%s\n"
+                                        (or invocation "") (car (last args)) state))
+                        0)
+                    (apply real-call-process program args))))
                ((symbol-function 'romacs-agent-watch--output)
                 (lambda (program args then)
-                  (funcall then (if (equal program "journalctl") journal
-                                  (mapconcat (lambda (unit) (format "Id=%s\nActiveState=%s\n" unit state))
-                                             (cdr (member "--" args)) "\n"))
-                           (if (equal program "journalctl") journal-exit 0))
+                  (should (equal program "systemctl"))
+                  (should (member "Id,ActiveState,InvocationID" args))
+                  (funcall then (mapconcat (lambda (unit)
+                                             (format "Id=%s\nActiveState=%s\nInvocationID=%s\n"
+                                                     unit state (or invocation "")))
+                                           (cdr (member "--" args)) "\n")
+                           0)
                   nil))
                ((symbol-function 'romacs-agent-issues-record) (lambda (kind &rest _) (push kind issues)))
                ((symbol-function 'romacs-agent-tools--tell) (lambda (task text &rest _) (push (cons task text) told) task))
@@ -99,39 +115,60 @@ private directory `root'.  `told' collects (TASK . TEXT) a task is told,
     ;; Still running: nothing is said.
     (romacs-agent-watch--tick)
     (should-not told)
+    (with-temp-file (expand-file-name "unit-exit/check.service" root)
+      (insert (format "success exited 0 %s\n" invocation)))
     (setq state "inactive")
     (romacs-agent-watch--tick)
     (should (= (length told) 1))
     (should (eq (car (car told)) child))
     (let ((text (cdr (car told))))
-      (should (string-match-p "Unit check.service ended: exited, status=0/SUCCESS" text))
+      (should (string-match-p "Unit check.service ended: exited, status=0 (success)" text))
       (should (string-match-p "line 29\\'" text))
       (should (string-match-p "line 10\n" text))
       (should-not (string-match-p "line 9\n" text)))
-    ;; Told once; nothing watched, no timer, no record.
+    ;; Told once; nothing watched, no timer, no saved watch.
     (romacs-agent-watch--tick)
     (should (= (length told) 1))
     (should-not (gethash "child" romacs-agent-watch--watches))
     (should-not romacs-agent-watch--timer)
     (should-not (file-exists-p (romacs-agent-watch--file child)))))
 
-(ert-deftest romacs-agent-watch-says-no-exit-it-did-not-read ()
-  ;; A short clean exit leaves no line after the watch began: the task is
-  ;; told no exit is recorded, and it is no issue.  A journal that could
-  ;; not be read is the watch's failure, whatever its output says.
+(ert-deftest romacs-agent-watch-reports-without-an-exit-record ()
+  (romacs-agent-watch-tests--with
+    (with-temp-file (expand-file-name "check.log" root)
+      (insert "check output\n"))
+    (romacs-agent-watch-tests--watch "taskId" "child" "unit" "check" "output" "check.log")
+    (setq state "inactive")
+    (romacs-agent-watch--tick)
+    (should (= (length told) 1))
+    (should (string-match-p "Unit check.service ended: no exit record" (cdar told)))
+    (should (string-suffix-p "check output" (cdar told)))
+    (should-not issues)))
+
+(ert-deftest romacs-agent-watch-retries-a-failed-tell ()
   (romacs-agent-watch-tests--with
     (romacs-agent-watch-tests--watch "taskId" "child" "unit" "check")
-    (setq state "inactive" journal "")
+    (setq state "inactive")
+    (let ((attempts 0))
+      (cl-letf (((symbol-function 'romacs-agent-tools--tell)
+                 (lambda (&rest _) (cl-incf attempts) (error "harness gone"))))
+        (romacs-agent-watch--tick))
+      (should (= attempts 1)))
+    (should (gethash "child" romacs-agent-watch--watches))
+    (should (file-exists-p (romacs-agent-watch--file child)))
+    (should-not told)
+    (let ((tell (symbol-function 'romacs-agent-tools--tell))
+          (reentered nil))
+      (cl-letf (((symbol-function 'romacs-agent-tools--tell)
+                 (lambda (task text)
+                   (unless reentered
+                     (setq reentered t)
+                     (romacs-agent-watch--tick))
+                   (funcall tell task text))))
+        (romacs-agent-watch--tick)))
     (romacs-agent-watch--tick)
-    (should (string-match-p "Unit check.service ended: no exit status in the journal" (cdr (car told))))
-    (should-not issues)
-    (setq state "active" told nil)
-    (romacs-agent-watch-tests--watch "taskId" "child" "unit" "check")
-    (setq state "inactive" journal-exit 1
-          journal "check.service: Main process exited, code=exited, status=0/SUCCESS\n")
-    (romacs-agent-watch--tick)
-    (should (string-match-p "Unit check.service ended: unknown: journalctl exited 1" (cdr (car told))))
-    (should (equal issues '(watch-unknown)))))
+    (should (= (length told) 1))
+    (should-not (gethash "child" romacs-agent-watch--watches))))
 
 (ert-deftest romacs-agent-watch-refusals ()
   (romacs-agent-watch-tests--with
@@ -159,7 +196,38 @@ private directory `root'.  `told' collects (TASK . TEXT) a task is told,
     (should (equal (plist-get (car (gethash "child" romacs-agent-watch--watches)) :unit) "check.service"))
     (should (equal (plist-get (car (gethash "child" romacs-agent-watch--watches)) :output)
                    (expand-file-name "check.log" root)))
+    (should (equal (plist-get (car (gethash "child" romacs-agent-watch--watches)) :invocation)
+                   invocation))
     (should romacs-agent-watch--timer)))
+
+(ert-deftest romacs-agent-watch-restores-a-watch-without-an-invocation ()
+  (romacs-agent-watch-tests--with
+    (romacs-agent--write-json (romacs-agent-watch--file child)
+                              (vector (romacs-mcp--object "unit" "check.service" "since" 100)))
+    (romacs-agent-watch--restore)
+    (with-temp-file (expand-file-name "unit-exit/check.service" root)
+      (insert (format "success exited 0 %s\n" invocation)))
+    (setq state "inactive")
+    (romacs-agent-watch--tick)
+    (should (string-match-p "Unit check.service ended: no exit record" (cdar told)))))
+
+(ert-deftest romacs-agent-watch-distinguishes-reused-unit-names ()
+  (romacs-agent-watch-tests--with
+    (romacs-agent-watch-tests--watch "taskId" "child" "unit" "check")
+    (setq invocation (make-string 32 ?a))
+    (romacs-agent-watch-tests--watch "taskId" "child" "unit" "check")
+    (should (= (length (gethash "child" romacs-agent-watch--watches)) 2))
+    (with-temp-file (expand-file-name "unit-exit/check.service" root)
+      (insert (format "exit-code exited 7 %s\n" invocation)))
+    (romacs-agent-watch--tick)
+    (should (= (length told) 1))
+    (should (string-match-p "Unit check.service ended: no exit record" (cdar told)))
+    (should (equal (plist-get (car (gethash "child" romacs-agent-watch--watches)) :invocation)
+                   invocation))
+    (setq state "inactive")
+    (romacs-agent-watch--tick)
+    (should (= (length told) 2))
+    (should (string-match-p "exited, status=7 (exit-code)" (cdar told)))))
 
 (ert-deftest romacs-agent-watch-a-file-section ()
   (romacs-agent-watch-tests--with
@@ -215,30 +283,50 @@ private directory `root'.  `told' collects (TASK . TEXT) a task is told,
         (should (= (length told) 3))))))
 
 (ert-deftest romacs-agent-watch-a-dev-check-for-the-task-calling ()
-  ;; romacs_dev_check's unit is watched for the task that called it, from
-  ;; when it was started, its report the output; a caller that is no
-  ;; task is not told, and its answer says so.
   (romacs-agent-watch-tests--with
     (should (eq romacs-mcp-dev-watch-function #'romacs-agent-watch--dev-check))
-    (setq caller "child")
-    (should (funcall romacs-mcp-dev-watch-function "romacs-dev-check-x" "/r/x.txt" 100.0))
-    (should (equal (gethash "child" romacs-agent-watch--watches)
-                   '((:unit "romacs-dev-check-x.service" :output "/r/x.txt" :since 100.0))))
-    (should (file-exists-p (romacs-agent-watch--file child)))
+    (let ((launched invocation))
+      (setq caller "child" state "inactive" invocation nil)
+      (with-temp-file (expand-file-name "unit-exit/romacs-dev-check-x.service" root)
+        (insert (format "success exited 0 %s\n" launched)))
+      (cl-letf (((symbol-function 'romacs-agent-watch--unit-state)
+                 (lambda (&rest _) (ert-fail "Dev check looked up the unit after launch"))))
+        (should (funcall romacs-mcp-dev-watch-function "romacs-dev-check-x" nil launched)))
+      (should (equal (gethash "child" romacs-agent-watch--watches)
+                     `((:unit "romacs-dev-check-x.service" :output nil :invocation ,launched))))
+      (should (file-exists-p (romacs-agent-watch--file child)))
+      (romacs-agent-watch--tick)
+      (should (string-match-p "exited, status=0 (success)" (cdar told))))
     (setq caller nil)
-    (should-not (funcall romacs-mcp-dev-watch-function "romacs-dev-check-y" "/r/y.txt" 100.0))))
+    (should-not (funcall romacs-mcp-dev-watch-function "romacs-dev-check-y" "/r/y.txt" nil))))
 
-(ert-deftest romacs-agent-watch-reads-the-journal-from-its-start ()
-  ;; A unit started again at once (a tree's check after one that failed)
-  ;; is not told by the earlier run's end in the same second: the journal
-  ;; is read from the watch's start, to the microsecond.
+(ert-deftest romacs-agent-watch-matches-exit-records-by-invocation ()
   (romacs-agent-watch-tests--with
-    (let ((watch (list :unit "check.service" :since 100.25)) (asked nil))
-      (puthash "child" (list watch) romacs-agent-watch--watches)
-      (cl-letf (((symbol-function 'romacs-agent-watch--output)
-                 (lambda (program args _then) (push (cons program args) asked) nil)))
-        (romacs-agent-watch--report "child" watch))
-      (should (member "@100.250000" (cdr (assoc "journalctl" asked)))))))
+    (let* ((record (expand-file-name "unit-exit/check.service" root))
+           (id "76c58ced7ce741669e018765c54ff31a")
+           (line (format "exit-code exited 7 %s\n" id)))
+      (should-not (romacs-agent-watch--exit-record "check.service" id))
+      (with-temp-file record (insert line))
+      (set-file-times record 1)
+      (should (equal (romacs-agent-watch--exit-record "check.service" id)
+                     (list "exit-code" "exited" "7" id)))
+      (should-not (romacs-agent-watch--exit-record "check.service" (make-string 32 ?a)))
+      (should-not (romacs-agent-watch--exit-record "check.service" nil))
+      (set-file-modes record 0)
+      (should-not (romacs-agent-watch--exit-record "check.service" id))
+      (set-file-modes record #o600)
+      (dolist (bad (list "success exited 0\n"
+                         (format "bad unknown bogus %s\n" id)
+                         (format "SUCCESS exited 0 %s\n" id)
+                         (format "bad1 exited 7 %s\n" id)
+                         (format "bogus exited TERM %s\n" id)
+                         (format "exit-code exited -7 %s\n" id)
+                         (format "success killed term %s\n" id)
+                         (format "core-dump dumped SIG-SEGV %s\n" id)
+                         "success exited 0 invalid-id\n"
+                         (concat line line)))
+        (with-temp-file record (insert bad))
+        (should-not (romacs-agent-watch--exit-record "check.service" id))))))
 
 (provide 'romacs-agent-watch-tests)
 ;;; romacs-agent-watch-tests.el ends here
