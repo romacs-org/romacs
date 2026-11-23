@@ -1,13 +1,18 @@
 //! A preloaded file that fails to load is said, never swallowed: the chain
 //! goes on past it (`startup::drive_loadup`), and notes its error as it
-//! notes one of Romacs's Lisp. A batch session booted from source says it
-//! on stderr, a batch world's build records it (`lisp_errors`), and a
-//! session restored from that world says it too.
+//! notes one of Romacs's Lisp, at the place the drive knows as data. A
+//! batch session booted from source says it on stderr, a batch world's
+//! build records it (`lisp_errors`), and a session or isolate worker
+//! restored from a world says it too.
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// A preloaded file: the bootstrap loads it after `simple'.
-const PRELOADED: &str = "lisp/completion/romacs-commands.el";
+/// A file the bootstrap loads through a load site of its own.
+const SITE: &str = "lisp/frame.el";
+/// A file the bootstrap loads from inside one of its forms, after `simple'.
+const FOLLOWED: &str = "lisp/completion/romacs-commands.el";
+/// The bootstrap the chain drives.
+const BOOTSTRAP: &str = "lisp/session/romacs-loadup-bootstrap.el";
 
 /// The Lisp and data of this checkout, copied (reflinked where the file
 /// system can) into ROOT/tree, by its true name.
@@ -21,9 +26,17 @@ fn tree_copy(root: &Path) -> PathBuf {
     copy.canonicalize().unwrap()
 }
 
+/// TEXT appended to FILE.
+fn plant(file: &Path, text: &str) {
+    let mut source = std::fs::read_to_string(file).unwrap();
+    source.push_str(text);
+    std::fs::write(file, source).unwrap();
+}
+
 /// The romacs-vm-gui ARGS over TREE in the HOME ROOT/home, worlds and
-/// compiled Lisp at their defaults (none made yet): (exit success, stderr).
-fn run(root: &Path, tree: &Path, args: &[&str]) -> (bool, String) {
+/// compiled Lisp at their defaults (none made yet): (exit success, stdout,
+/// stderr).
+fn run(root: &Path, tree: &Path, args: &[&str]) -> (bool, String, String) {
     let home = root.join("home");
     std::fs::create_dir_all(&home).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_romacs-vm-gui"))
@@ -36,49 +49,106 @@ fn run(root: &Path, tree: &Path, args: &[&str]) -> (bool, String) {
         .envs(std::env::var_os("LD_LIBRARY_PATH").map(|v| ("LD_LIBRARY_PATH", v)))
         .stdin(std::process::Stdio::null())
         .output().unwrap();
-    (output.status.success(), String::from_utf8_lossy(&output.stderr).into_owned())
+    let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
+    (output.status.success(), text(&output.stdout), text(&output.stderr))
 }
 
-/// The lines of STDERR that say FILE's planted error, as a noted error of
-/// Romacs's Lisp is said.
-fn said(stderr: &str, file: &Path) -> usize {
-    let head = format!("romacs: {}: line ", file.display());
-    stderr.lines().filter(|line| line.starts_with(&head) && line.contains("planted on purpose")).count()
+/// The errors STDERR says were noted (`romacs: ...`).
+fn noted(stderr: &str) -> Vec<&str> {
+    stderr.lines().filter_map(|line| line.strip_prefix("romacs: ")).filter(|line| line.contains(": line ")).collect()
 }
 
+/// The `romacs-world` event of STDERR that says a world was prepared, for
+/// which the predicate holds.
+fn prepared(stderr: &str, which: impl Fn(&serde_json::Value) -> bool) -> serde_json::Value {
+    stderr.lines().filter_map(|line| line.strip_prefix("romacs-world: "))
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find(|event| event["mode"] == "prepared" && which(event))
+        .unwrap_or_else(|| panic!("no prepared world:\n{stderr}"))
+}
+
+/// A load site's file that the reader cannot finish (an unfinished
+/// `defun`) is said at that file, by the drive's own place for it, from
+/// source, in the batch world's manifest, and from a session restored from
+/// it: the reader's text never names the place.
 #[test]
-fn a_preloaded_file_that_fails_to_load_is_said_from_source_and_from_its_world() {
-    let root = std::env::temp_dir().join(format!("romacs-loadup-errors-{}", std::process::id()));
+fn an_unfinished_defun_in_a_site_file_is_said_at_that_file() {
+    let root = std::env::temp_dir().join(format!("romacs-loadup-errors-site-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     let tree = tree_copy(&root);
-    let file = tree.join(PRELOADED);
-    let mut source = std::fs::read_to_string(&file).unwrap();
-    source.push_str("\n(error \"planted on purpose\")\n");
-    std::fs::write(&file, source).unwrap();
-    let session = ["--batch", "--eval", "(princ 1)"];
+    let file = tree.join(SITE);
+    plant(&file, "\n(defun planted-broken (\n");
+    let head = format!("{}: line ", file.display());
 
-    // No world yet: the session boots from source.
-    let (ok, stderr) = run(&root, &tree, &session);
+    let (ok, _, stderr) = run(&root, &tree, &["--batch", "--eval", "(princ 1)"]);
     assert!(ok, "{stderr}");
-    assert_eq!(said(&stderr, &file), 1, "the source boot swallowed the error:\n{stderr}");
+    let said = noted(&stderr);
+    assert_eq!(said.len(), 1, "{stderr}");
+    assert!(said[0].starts_with(&head) && said[0].contains("end-of-file"), "{stderr}");
 
-    // The batch world's build records it.
     let store = root.join("worlds");
     let store = store.to_str().unwrap();
-    let (ok, stderr) = run(&root, &tree, &["--world-store", store, "--world-build", "--batch"]);
+    let (ok, _, stderr) = run(&root, &tree, &["--world-store", store, "--world-build", "--batch"]);
     assert!(ok, "{stderr}");
-    let prepared = stderr.lines().filter_map(|line| line.strip_prefix("romacs-world: "))
-        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
-        .find(|event| event["mode"] == "prepared" && event["launch"] == "batch")
-        .unwrap_or_else(|| panic!("no prepared batch world:\n{stderr}"));
-    let errors = prepared["lisp_errors"].as_array().unwrap_or_else(|| panic!("{prepared}"));
-    assert_eq!(errors.len(), 1, "{prepared}");
-    assert_eq!(errors[0]["file"], file.to_string_lossy().as_ref(), "{prepared}");
+    let event = prepared(&stderr, |event| event["launch"] == "batch");
+    let errors = event["lisp_errors"].as_array().unwrap_or_else(|| panic!("{event}"));
+    assert_eq!(errors.len(), 1, "{event}");
+    assert_eq!(errors[0]["file"], file.to_string_lossy().as_ref(), "{event}");
+    assert!(errors[0]["line"].as_u64().is_some_and(|line| line > 1), "{event}");
 
-    // A session restored from it says it.
-    let (ok, stderr) = run(&root, &tree, &["--world-store", store, "--batch", "--eval", "(princ 1)"]);
+    let (ok, _, stderr) = run(&root, &tree, &["--world-store", store, "--batch", "--eval", "(princ 1)"]);
     assert!(ok, "{stderr}");
     assert!(stderr.contains(r#""mode":"restored""#), "not restored:\n{stderr}");
-    assert_eq!(said(&stderr, &file), 1, "the restored session swallowed the error:\n{stderr}");
+    assert_eq!(noted(&stderr), said, "the restored session says what the source boot said");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A form that caught a failed load and then signalled something else is
+/// said with the error that escaped it, at the bootstrap's form that ran
+/// it, never with the one it caught.
+#[test]
+fn the_error_that_escaped_is_said_not_one_caught_before_it() {
+    let root = std::env::temp_dir().join(format!("romacs-loadup-errors-caught-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let tree = tree_copy(&root);
+    let dependency = tree.join("lisp/completion/romacs-planted-dependency.el");
+    std::fs::write(&dependency, "(error \"the caught failure\")\n").unwrap();
+    plant(&tree.join(FOLLOWED), &format!("\n(condition-case nil (load {:?} nil t) (error nil))\n\
+                                         (error \"the escaped failure\")\n", dependency.to_str().unwrap()));
+    let (ok, _, stderr) = run(&root, &tree, &["--batch", "--eval", "(princ 1)"]);
+    assert!(ok, "{stderr}");
+    let said = noted(&stderr);
+    assert_eq!(said.len(), 1, "{stderr}");
+    assert!(said[0].starts_with(&format!("{}: line ", tree.join(BOOTSTRAP).display())), "{stderr}");
+    assert!(said[0].contains("the escaped failure") && !said[0].contains("the caught failure"), "{stderr}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// An isolate worker restored from a world whose build noted an error says
+/// it, as a worker booted from source says the errors its boot meets.
+#[test]
+fn an_isolate_worker_restored_from_a_world_says_its_noted_errors() {
+    let root = std::env::temp_dir().join(format!("romacs-loadup-errors-isolate-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let tree = tree_copy(&root);
+    // Romacs's Lisp of the GUI's world, loaded after the chain.
+    let file = tree.join("lisp/ui/romacs-popup.el");
+    plant(&file, "\n(error \"planted on purpose\")\n");
+    let store = root.join("worlds");
+    let store = store.to_str().unwrap();
+    let (ok, _, stderr) = run(&root, &tree, &["--loadup", "--world-store", store, "--world-build"]);
+    assert!(ok, "{stderr}");
+    let event = prepared(&stderr, |event| event["recipe"][0] == "consumer romacs-vm-gui");
+    assert_eq!(event["lisp_errors"].as_array().map(Vec::len), Some(1), "{event}");
+    let key = event["key"].as_str().unwrap();
+    let script = format!("(progn (setq isolate-boot 'world isolate-world (cons {store:?} {key:?}) isolate-pool-size 1)
+                            (prin1 (isolate-await (isolate-spawn '+ 1 2) 60)) (isolate-kill-all))");
+    let (ok, stdout, stderr) = run(&root, &tree, &["-Q", "--batch", "--eval", &script]);
+    assert!(ok, "{stderr}");
+    assert_eq!(stdout.trim(), "3", "{stderr}");
+    let head = format!("{}: line ", file.display());
+    let said: Vec<&str> = noted(&stderr).into_iter().filter(|line| line.starts_with(&head)).collect();
+    assert_eq!(said.len(), 1, "the worker said its world's error:\n{stderr}");
+    assert!(said[0].contains("planted on purpose"), "{stderr}");
     let _ = std::fs::remove_dir_all(&root);
 }

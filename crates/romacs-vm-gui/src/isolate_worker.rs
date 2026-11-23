@@ -79,6 +79,8 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
                 };
                 let mut vm = *vm;
                 vm.world_reinit();
+                // The errors its world's build noted, as a source worker says its own.
+                super::startup::say_noted_lisp_errors(&mut vm)?;
                 vm.eval_source("(romacs-world-restart)")?;
                 // A worker is batch, whatever its world.
                 vm.eval_source("(setq noninteractive t)")?;

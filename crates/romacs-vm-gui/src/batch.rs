@@ -347,9 +347,7 @@ fn diagnose(what: &serde_json::Value) {
 fn restarted(mut vm: Vm) -> Result<Vm, String> {
     vm.world_reinit();
     if !romacs_vm::compiled_lisp::nested() {
-        for error in super::startup::noted_lisp_errors(&mut vm)? {
-            eprintln!("romacs: {}", error["error"].as_str().unwrap_or_default());
-        }
+        super::startup::say_noted_lisp_errors(&mut vm)?;
     }
     vm.eval_source("(romacs-world-restart)")?;
     Ok(vm)
