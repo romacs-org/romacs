@@ -41,10 +41,10 @@ pub struct Shared {
     /// Under --trace-latency, the keys' records, which both loops write
     /// as keys settle (latency.rs).
     pub trace: Option<crate::latency::Trace>,
-    /// The prompt's last painted frame, its selected window, presentation,
-    /// window ends and text animations: an unchanged redisplay answers
-    /// these again.
-    pub painted: Option<(romacs_layout_input::FrameSnapshot, u64, u64, Vec<romacs_vm::WindowEnd>, Vec<(u64, romacs_display_protocol::text_animation::TextAnimation)>)>,
+    /// The frame either loop last painted, its selected window,
+    /// presentation, window ends and text animations: an unchanged
+    /// redisplay answers these again (`Shared::unchanged`).
+    pub painted: Option<(Rc<romacs_layout_input::FrameSnapshot>, u64, u64, Vec<romacs_vm::WindowEnd>, Vec<(u64, romacs_display_protocol::text_animation::TextAnimation)>)>,
     /// A server session's window (`romacs--native-window'), None in a
     /// session that is its window.
     pub server: Option<ServerWindow>,
@@ -67,6 +67,17 @@ impl Shared {
     /// frame it submitted.
     pub fn end_loading(&mut self) {
         if let Some(loading) = self.loading.take() { self.presentation = self.presentation.max(loading.finish()); }
+    }
+
+    /// The window ends of the paint on screen when FRAME, its SELECTED
+    /// window and ANIMATIONS show just what it shows, with nothing presented
+    /// since: such a redisplay submits no frame. The paint is either loop's,
+    /// so the read after a prefix key repaints nothing.
+    pub fn unchanged(&self, frame: &romacs_layout_input::FrameSnapshot, selected: u64,
+                     animations: &[(u64, romacs_display_protocol::text_animation::TextAnimation)]) -> Option<Vec<romacs_vm::WindowEnd>> {
+        let (painted, shown, presentation, ends, drawn_over) = self.painted.as_ref()?;
+        (*presentation == self.presentation && self.in_flight.is_none_or(|(p, _)| p == *presentation)
+            && *shown == selected && crate::frames_alike(painted, frame) && drawn_over == animations).then(|| ends.clone())
     }
 
     /// Whether painting has a window to go to.
@@ -325,19 +336,15 @@ impl HostInput for GuiHost {
     }
 
     fn redisplay(&mut self, frame: HostFrame<'_>) -> Result<Vec<romacs_vm::WindowEnd>, String> {
-        // As the loop's changed_frame: a timer run in a prompt that left the
-        // frame as this prompt last painted it, with nothing presented
-        // since, submits no frame and answers that paint's window ends.
+        // As the loop's changed_frame: a redisplay that leaves the frame as
+        // either loop last painted it, with nothing presented since,
+        // submits no frame and answers that paint's window ends.
         // A server with no window shows nothing; the layout stays as it is.
         if !self.shared.borrow().window_shown() { return Ok(Vec::new()); }
         self.shared.borrow_mut().end_loading();
-        if let Some((painted, selected, presentation, ends, animations)) = &self.shared.borrow().painted {
-            let shared = self.shared.borrow();
-            if *presentation == shared.presentation && shared.in_flight.is_none_or(|(p, _)| p == *presentation)
-                && *selected == frame.selected && crate::frames_alike(painted, &frame.frame)
-                && *animations == frame.text_animations && !self.images.borrow().must_repaint(self.sender.as_ref()) {
-                return Ok(ends.clone());
-            }
+        let unchanged = self.shared.borrow().unchanged(&frame.frame, frame.selected, &frame.text_animations);
+        if let Some(ends) = unchanged && !self.images.borrow().must_repaint(self.sender.as_ref()) {
+            return Ok(ends);
         }
         let presentation = {
             let mut shared = self.shared.borrow_mut();
@@ -359,7 +366,7 @@ impl HostInput for GuiHost {
             let drawn = self.sender.wait_for_render(romacs_display_runtime::paint_host::INITIAL_FRAME, presentation, Duration::ZERO).is_ok();
             shared.in_flight = (!drawn).then_some((presentation, since));
             if drawn { shared.settled = Some(presentation); }
-            shared.painted = Some((frame.frame.clone(), frame.selected, presentation, ends.clone(), frame.text_animations.clone()));
+            shared.painted = Some((Rc::new(frame.frame.clone()), frame.selected, presentation, ends.clone(), frame.text_animations.clone()));
             drawn
         };
         if crate::diagnostics() { crate::diagnostic_line(&serde_json::json!({"diagnostic":"prompt-paint","presentation":presentation,
@@ -487,6 +494,29 @@ mod tests {
             let event = InputEvent::WindowFocus { focused, emacs_frame_id: 0 };
             assert_eq!(classify(&event), Some(HostEvent::Focus(focused)));
         }
+    }
+
+    /// A prompt's redisplay of the frame the loop just painted submits
+    /// nothing: the read after a prefix key repaints no copy of the screen.
+    /// A changed frame, another selected window or a presentation since
+    /// does submit.
+    #[test]
+    fn the_loops_unchanged_frame_is_not_repainted() {
+        let mut vm = romacs_vm::Vm::new();
+        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::startup::initialize(&mut vm).unwrap();
+        let painted = crate::frame(&mut vm, false, 1200, 800).unwrap();
+        let mut shared = Shared { presentation: 7, in_flight: Some((7, std::time::Instant::now())), ..Shared::default() };
+        crate::record_painted(&mut shared, &painted, 7, &[]);
+        let selected = painted.selected.unwrap();
+        let again = crate::frame(&mut vm, false, 1200, 800).unwrap();
+        assert_eq!(shared.unchanged(&again.snapshot, selected, &again.animations), Some(vec![]));
+        assert_eq!(shared.unchanged(&again.snapshot, selected + 1, &again.animations), None, "another selected window");
+        vm.eval_source("(insert \"x\")").unwrap();
+        let changed = crate::frame(&mut vm, false, 1200, 800).unwrap();
+        assert_eq!(shared.unchanged(&changed.snapshot, selected, &changed.animations), None, "a changed frame");
+        shared.presentation = 8;
+        assert_eq!(shared.unchanged(&again.snapshot, selected, &again.animations), None, "a presentation since");
     }
 
     /// A native model's event during a Lisp read reaches the read, which

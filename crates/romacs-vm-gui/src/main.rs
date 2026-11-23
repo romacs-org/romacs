@@ -378,12 +378,12 @@ mod frame_tests {
         assert!(selected.selected != moved.selected && selected != moved, "selecting another window must repaint");
         // Opacity alone, the frame's or a child frame's, repaints.
         let mut translucent = frame(&mut vm);
-        translucent.snapshot.background_alpha = 0.8;
+        std::rc::Rc::make_mut(&mut translucent.snapshot).background_alpha = 0.8;
         assert!(translucent != selected, "a new `alpha-background' must repaint");
         vm.eval_source("(romacs--create-frame `((parent-frame . ,(selected-frame)) (width . 10) (height . 3)))").unwrap();
         let child = frame(&mut vm);
         let mut translucent = frame(&mut vm);
-        translucent.snapshot.children[0].background_alpha = 0.5;
+        std::rc::Rc::make_mut(&mut translucent.snapshot).children[0].background_alpha = 0.5;
         assert!(translucent != child, "a child's new `alpha-background' must repaint");
     }
 
@@ -412,7 +412,7 @@ mod frame_tests {
         vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
         crate::startup::initialize(&mut vm).unwrap();
         let mut painted = super::frame(&mut vm, false, 1200, 800).unwrap();
-        painted.snapshot.tab_bar = Some(romacs_layout_input::TabBarSnapshot { height: 20, face: Default::default(), faces: vec![],
+        std::rc::Rc::make_mut(&mut painted.snapshot).tab_bar = Some(romacs_layout_input::TabBarSnapshot { height: 20, face: Default::default(), faces: vec![],
             text: romacs_layout_input::TextSlice { extends: vec![], utf8: "ab".into(), face_runs: vec![], raw: vec![] } });
         let shown = super::Shown { frame: painted, ends: vec![], presentation: 1, tab_bar: vec![(0.0, 10.0), (10.0, 12.0)], status_bar: Default::default() };
         let click = |x, y, button, pressed| super::tab_bar_click(&shown, &InputEvent::PositionedPointer(PositionedPointerInput {
@@ -434,7 +434,7 @@ mod frame_tests {
         vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
         crate::startup::initialize(&mut vm).unwrap();
         let mut painted = super::frame(&mut vm, false, 1200, 800).unwrap();
-        painted.snapshot.status_bar = Some(romacs_layout_input::StatusBarSnapshot { x: 6, y: 760, width: 1188, height: 20,
+        std::rc::Rc::make_mut(&mut painted.snapshot).status_bar = Some(romacs_layout_input::StatusBarSnapshot { x: 6, y: 760, width: 1188, height: 20,
             text: romacs_layout_input::TextSlice { extends: vec![], utf8: "ab".into(), face_runs: vec![], raw: vec![] },
             face: Default::default(), faces: vec![], window: 1, focused: true, marks: Default::default() });
         let shown = super::Shown { frame: painted, ends: vec![], presentation: 1, tab_bar: vec![],
@@ -483,7 +483,7 @@ mod frame_tests {
             |c| c.style.layer_radius += 1.0,
         ];
         for change in changes {
-            let mut other = painted.snapshot.clone();
+            let mut other = (*painted.snapshot).clone();
             change(&mut other.chrome);
             assert!(!super::frames_alike(&painted.snapshot, &other));
         }
@@ -513,7 +513,9 @@ mod frame_tests {
 
 /// What one paint shows: the windows and which of them has the cursor.
 struct Frame {
-    snapshot: romacs_layout_input::FrameSnapshot,
+    /// Shared with the prompt host's record of what is on screen
+    /// (`record_painted`).
+    snapshot: std::rc::Rc<romacs_layout_input::FrameSnapshot>,
     selected: Option<u64>,
     /// The text animations drawn over it (`Vm::text_animations').
     animations: Vec<(u64, romacs_display_protocol::text_animation::TextAnimation)>,
@@ -580,7 +582,7 @@ fn frame(vm: &mut Vm, g1: bool, width: u32, height: u32) -> Result<Frame, String
     let snapshot = snapshot(vm, g1, width, height)?;
     let selected = selected_window(vm, &snapshot)?;
     let animations = if g1 { vec![] } else { vm.text_animations()? };
-    Ok(Frame { snapshot, selected, animations })
+    Ok(Frame { snapshot: std::rc::Rc::new(snapshot), selected, animations })
 }
 
 /// The selected window's id, once the GUI's own Lisp lays out windows: a
@@ -1257,7 +1259,14 @@ fn paint(
             diagnostic_ns: diagnostics_prepare_ns + diagnostics_write_ns + mode_line_start.unwrap().elapsed().as_nanos(),
             submit_ns, layout_apply_ns });
     }
+    record_painted(&mut host.borrow_mut(), &shown, presentation, &ends);
     Ok(Shown { frame: shown, ends, presentation, tab_bar, status_bar })
+}
+
+/// The loop painted SHOWN as PRESENTATION, laid out to ENDS: what a
+/// prompt's redisplay finds on screen (`prompt::Shared::unchanged`).
+fn record_painted(shared: &mut prompt::Shared, shown: &Frame, presentation: u64, ends: &[romacs_vm::WindowEnd]) {
+    shared.painted = shown.selected.map(|selected| (std::rc::Rc::clone(&shown.snapshot), selected, presentation, ends.to_vec(), shown.animations.clone()));
 }
 
 /// A mouse button event over the root frame's tab bar as the Lisp that

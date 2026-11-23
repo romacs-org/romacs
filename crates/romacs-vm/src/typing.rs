@@ -7,7 +7,11 @@
 //! lisp/vm/keyboard.el), or settled at once when no step is running. When
 //! the next native key is read, every key a running step still holds
 //! settles: `opened` against the first frame submitted since it was read (a
-//! prompt, a prefix's echo), else `awaited-input`. A step that ends proposes
+//! prompt, a prefix's echo), else `awaited-input`. A redisplay that leaves
+//! the screen as it was submits no frame, so a prefix typed with a pause
+//! waited for input. Known limit: a frame a timer or process output submits
+//! between a prefix key and the next key is charged as the prefix's
+//! `opened` frame, though the key did not cause it. A step that ends proposes
 //! one candidate for the keys it still holds: its window's view, text
 //! revision and point, and the bytes it edited (`EditEntry`, kept by each
 //! text body). The next redisplay settles the candidate's keys exactly once:

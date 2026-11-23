@@ -4,7 +4,7 @@
 //! very state its step left, the bytes the step edited among those painted.
 use romacs_display_protocol::frame_time::{EventTime, observe_platform_now};
 use romacs_display_protocol::submission::SubmissionReceipt;
-use romacs_layout_input::{PointPlace, Row, WindowSnapshot};
+use romacs_layout_input::{FrameSnapshot, PointPlace, Row, WindowSnapshot};
 use romacs_vm::{CommandEvent, HostEvent, HostFrame, HostInput, KeyOutcome, Outcome, Vm, WindowEnd};
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -36,6 +36,9 @@ struct Screen {
     paint: Rc<Cell<Paint>>,
     last: Option<u64>,
     presented: Rc<Cell<u64>>,
+    /// The frame on screen and how it was painted: a redisplay that would
+    /// paint it again submits nothing, as the GUI's does.
+    shown: Option<(FrameSnapshot, u64, Paint)>,
     /// The outcomes handed over as reads settled them, and how many had
     /// been handed when each event was read.
     handed: Rc<RefCell<Vec<KeyOutcome>>>,
@@ -44,6 +47,11 @@ struct Screen {
 
 /// SNAPSHOT laid out on one row, showing its bytes from its start up to
 /// `visible_end`.
+/// Whether frames A and B paint alike (the GUI's `frames_alike`, in short).
+fn alike(a: &FrameSnapshot, b: &FrameSnapshot) -> bool {
+    a.lays_out_like(b) && a.children == b.children
+}
+
 fn laid(snapshot: &WindowSnapshot, paint: Paint) -> WindowEnd {
     let len = snapshot.text.utf8.len();
     let visible_end = match paint { Paint::Head(n) => (snapshot.start_byte + n).min(len + 1), _ => len + 1 };
@@ -56,7 +64,9 @@ impl HostInput for Screen {
     fn redisplay(&mut self, frame: HostFrame<'_>) -> Result<Vec<WindowEnd>, String> {
         let paint = self.paint.get();
         let ends: Vec<_> = frame.frame.windows.iter().map(|placed| laid(&placed.snapshot, paint)).collect();
-        if paint != Paint::Nothing {
+        let again = self.shown.as_ref().is_some_and(|(shown, selected, painted)| (*selected, *painted) == (frame.selected, paint) && alike(shown, &frame.frame));
+        if paint != Paint::Nothing && !again {
+            self.shown = Some((frame.frame.clone(), frame.selected, paint));
             self.presented.set(self.presented.get() + 1);
             let picture = frame.typing.as_ref().filter(|_| paint != Paint::Elsewhere);
             let window = picture.and_then(|picture| ends.iter().find_map(|end| picture.painted(end, true)));
@@ -108,7 +118,7 @@ impl Session {
         vm.eval_source(COMMANDS).unwrap();
         let s = Self { vm, events: Rc::default(), paint: Rc::new(Cell::new(Paint::Whole)), presented: Rc::default(),
                        handed: Rc::default(), handed_at_reads: Rc::default(), keys: Vec::new() };
-        let screen = Screen { events: Rc::clone(&s.events), paint: Rc::clone(&s.paint), last: None, presented: Rc::clone(&s.presented),
+        let screen = Screen { events: Rc::clone(&s.events), paint: Rc::clone(&s.paint), last: None, presented: Rc::clone(&s.presented), shown: None,
                               handed: Rc::clone(&s.handed), handed_at_reads: Rc::clone(&s.handed_at_reads) };
         let mut s = s;
         s.vm.set_host_input(Some(Box::new(screen)));
@@ -269,13 +279,14 @@ fn keys_a_command_reads_are_its_own() {
     s.command();
     s.redisplay();
     s.expect(&[(2, "awaited-input"), (3, "rendered")]);
-    // f5 reads z, after a redisplay, and pushes it back for the next step.
+    // f5 reads z after a redisplay that finds nothing to paint, so f5
+    // waited for input; it pushes z back for the next step.
     s.press(named("f5"));
     s.press(character('z'));
     s.command();
     s.command();
     s.redisplay();
-    s.expect(&[(4, "opened"), (5, "unread")]);
+    s.expect(&[(4, "awaited-input"), (5, "unread")]);
     s.press(named("f6"));
     s.command();
     s.redisplay();
@@ -287,8 +298,9 @@ fn keys_a_command_reads_are_its_own() {
 
 /// The key that opens a prompt is charged the prompt's first frame
 /// (`opened`), not the prompt: M-x's minibuffer, C-x C-f's after a prefix
-/// with no echo. A prefix whose step submitted a frame before the next key
-/// (its echo; this screen submits on every redisplay) is charged that frame.
+/// with no echo. A prefix typed with a pause, whose read's redisplay finds
+/// the frame as painted, waited for input; one whose read changed the
+/// screen is charged that frame.
 #[test]
 fn an_opener_is_charged_its_prompts_first_frame() {
     let mut s = Session::new();
@@ -313,8 +325,11 @@ fn an_opener_is_charged_its_prompts_first_frame() {
     let settled = s.outcomes();
     assert_eq!(&settled[..3], &[(8, "awaited-input", None), (9, "opened", Some(before + 2)), (10, "rendered", Some(before + 3))], "settled: {settled:?}");
     assert_eq!(settled.iter().map(|(i, _, _)| *i).collect::<Vec<_>>(), (8..12).collect::<Vec<_>>(), "settled: {settled:?}");
-    // C-f typed after C-x's frame: a redisplay before the C-x read, one
-    // before the C-f read (C-x's), then the prompt's first frame.
+    // C-f typed a while after C-x, the screen settled first: the read of
+    // C-f redisplays, finds the frame as painted and submits nothing, so
+    // C-x waited for input; C-f is charged the prompt's first frame.
+    s.eval("(message nil)");
+    s.redisplay();
     let before = s.presented.get();
     s.press(CommandEvent::Character(24));
     s.press(CommandEvent::Character(6));
@@ -323,8 +338,22 @@ fn an_opener_is_charged_its_prompts_first_frame() {
     s.command();
     s.redisplay();
     let settled = s.outcomes();
-    assert_eq!(&settled[..3], &[(12, "opened", Some(before + 2)), (13, "opened", Some(before + 3)), (14, "rendered", Some(before + 4))], "settled: {settled:?}");
+    assert_eq!(&settled[..3], &[(12, "awaited-input", None), (13, "opened", Some(before + 1)), (14, "rendered", Some(before + 2))], "settled: {settled:?}");
     assert_eq!(settled.iter().map(|(i, _, _)| *i).collect::<Vec<_>>(), (12..16).collect::<Vec<_>>(), "settled: {settled:?}");
+    // A prefix whose read changed the screen (here it cleared the echo
+    // area; Romacs's key-help echo is another) is charged that frame.
+    s.eval("(message \"hello\")");
+    s.redisplay();
+    let before = s.presented.get();
+    s.press(CommandEvent::Character(24));
+    s.press(CommandEvent::Character(6));
+    s.press(character('z'));
+    s.press(CommandEvent::Character(7));
+    s.command();
+    s.redisplay();
+    let settled = s.outcomes();
+    assert_eq!(&settled[..3], &[(16, "opened", Some(before + 1)), (17, "opened", Some(before + 2)), (18, "rendered", Some(before + 3))], "settled: {settled:?}");
+    assert_eq!(settled.iter().map(|(i, _, _)| *i).collect::<Vec<_>>(), (16..20).collect::<Vec<_>>(), "settled: {settled:?}");
 }
 
 /// A step inside another (the minibuffer's, a recursive edit's) settles
