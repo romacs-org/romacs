@@ -58,6 +58,9 @@ Each is its own commit in Romacs's history.
   attached to a step and uses wide step indices. The differential records
   the three C defects in isolated probes. See VM2-TREESIT-QUERY.
 
+- `refactor(treesit): remove wasm runtime support` removes the unused Wasm
+  store, build paths and bindings. Measurement: none (pure deletion).
+
 ## Checking it
 
 `tools/treesit-fuzz` builds this runtime and the published one with the

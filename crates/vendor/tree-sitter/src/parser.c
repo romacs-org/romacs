@@ -16,7 +16,6 @@
 #include "./subtree.h"
 #include "./tree.h"
 #include "./ts_assert.h"
-#include "./wasm_store.h"
 
 #define LOG(...)                                                                            \
   if (self->lexer.logger.log || self->dot_graph_file) {                                     \
@@ -91,7 +90,6 @@ struct TSParser {
   Stack *stack;
   SubtreePool tree_pool;
   const TSLanguage *language;
-  TSWasmStore *wasm_store;
   ReduceActionSet reduce_actions;
   Subtree finished_tree;
   SubtreeArray trailing_extras;
@@ -339,33 +337,18 @@ static bool ts_parser__better_version_exists(
 }
 
 static bool ts_parser__call_main_lex_fn(TSParser *self, TSLexerMode lex_mode) {
-  if (ts_language_is_wasm(self->language)) {
-    return ts_wasm_store_call_lex_main(self->wasm_store, lex_mode.lex_state);
-  } else {
-    return self->language->lex_fn(&self->lexer.data, lex_mode.lex_state);
-  }
+  return self->language->lex_fn(&self->lexer.data, lex_mode.lex_state);
 }
 
 static bool ts_parser__call_keyword_lex_fn(TSParser *self) {
-  if (ts_language_is_wasm(self->language)) {
-    return ts_wasm_store_call_lex_keyword(self->wasm_store, 0);
-  } else {
-    return self->language->keyword_lex_fn(&self->lexer.data, 0);
-  }
+  return self->language->keyword_lex_fn(&self->lexer.data, 0);
 }
 
 static void ts_parser__external_scanner_create(
   TSParser *self
 ) {
   if (self->language && self->language->external_scanner.states) {
-    if (ts_language_is_wasm(self->language)) {
-      self->external_scanner_payload = (void *)(uintptr_t)ts_wasm_store_call_scanner_create(
-        self->wasm_store
-      );
-      if (ts_wasm_store_has_error(self->wasm_store)) {
-        self->has_scanner_error = true;
-      }
-    } else if (self->language->external_scanner.create) {
+    if (self->language->external_scanner.create) {
       self->external_scanner_payload = self->language->external_scanner.create();
     }
   }
@@ -377,8 +360,7 @@ static void ts_parser__external_scanner_destroy(
   if (
     self->language &&
     self->external_scanner_payload &&
-    self->language->external_scanner.destroy &&
-    !ts_language_is_wasm(self->language)
+    self->language->external_scanner.destroy
   ) {
     self->language->external_scanner.destroy(
       self->external_scanner_payload
@@ -390,22 +372,10 @@ static void ts_parser__external_scanner_destroy(
 static unsigned ts_parser__external_scanner_serialize(
   TSParser *self
 ) {
-  uint32_t length;
-  if (ts_language_is_wasm(self->language)) {
-    length = ts_wasm_store_call_scanner_serialize(
-      self->wasm_store,
-      (uintptr_t)self->external_scanner_payload,
-      self->lexer.debug_buffer
-    );
-    if (ts_wasm_store_has_error(self->wasm_store)) {
-      self->has_scanner_error = true;
-    }
-  } else {
-    length = self->language->external_scanner.serialize(
-      self->external_scanner_payload,
-      self->lexer.debug_buffer
-    );
-  }
+  uint32_t length = self->language->external_scanner.serialize(
+    self->external_scanner_payload,
+    self->lexer.debug_buffer
+  );
   ts_assert(length <= TREE_SITTER_SERIALIZATION_BUFFER_SIZE);
   return length;
 }
@@ -421,50 +391,26 @@ static void ts_parser__external_scanner_deserialize(
     length = external_token.ptr->external_scanner_state.length;
   }
 
-  if (ts_language_is_wasm(self->language)) {
-    ts_wasm_store_call_scanner_deserialize(
-      self->wasm_store,
-      (uintptr_t)self->external_scanner_payload,
-      data,
-      length
-    );
-    if (ts_wasm_store_has_error(self->wasm_store)) {
-      self->has_scanner_error = true;
-    }
-  } else {
-    self->language->external_scanner.deserialize(
-      self->external_scanner_payload,
-      data,
-      length
-    );
-  }
+  self->language->external_scanner.deserialize(
+    self->external_scanner_payload,
+    data,
+    length
+  );
 }
 
 static bool ts_parser__external_scanner_scan(
   TSParser *self,
   TSStateId external_lex_state
 ) {
-  if (ts_language_is_wasm(self->language)) {
-    bool result = ts_wasm_store_call_scanner_scan(
-      self->wasm_store,
-      (uintptr_t)self->external_scanner_payload,
-      external_lex_state * self->language->external_token_count
-    );
-    if (ts_wasm_store_has_error(self->wasm_store)) {
-      self->has_scanner_error = true;
-    }
-    return result;
-  } else {
-    const bool *valid_external_tokens = ts_language_enabled_external_tokens(
-      self->language,
-      external_lex_state
-    );
-    return self->language->external_scanner.scan(
-      self->external_scanner_payload,
-      &self->lexer.data,
-      valid_external_tokens
-    );
-  }
+  const bool *valid_external_tokens = ts_language_enabled_external_tokens(
+    self->language,
+    external_lex_state
+  );
+  return self->language->external_scanner.scan(
+    self->external_scanner_payload,
+    &self->lexer.data,
+    valid_external_tokens
+  );
 }
 
 // Whether TREE's first leaf is a word that the keyword lexer matched. Only
@@ -2061,7 +2007,6 @@ void ts_parser_delete(TSParser *self) {
     ts_subtree_release(&self->tree_pool, self->old_tree);
     self->old_tree = NULL_SUBTREE;
   }
-  ts_wasm_store_delete(self->wasm_store);
   ts_lexer_delete(&self->lexer);
   ts_parser__set_cached_token(self, 0, NULL_SUBTREE, NULL_SUBTREE);
   ts_subtree_pool_delete(&self->tree_pool);
@@ -2088,13 +2033,6 @@ bool ts_parser_set_language(TSParser *self, const TSLanguage *language) {
     ) return false;
 
     if (!ts_language_is_parseable(language)) return false;
-
-    if (ts_language_is_wasm(language)) {
-      if (
-        !self->wasm_store ||
-        !ts_wasm_store_start(self->wasm_store, &self->lexer.data, language)
-      ) return false;
-    }
   }
 
   self->language = ts_language_copy(language);
@@ -2139,10 +2077,6 @@ const TSRange *ts_parser_included_ranges(const TSParser *self, uint32_t *count) 
 
 void ts_parser_reset(TSParser *self) {
   ts_parser__external_scanner_destroy(self);
-  if (self->wasm_store) {
-    ts_wasm_store_reset(self->wasm_store);
-  }
-
   if (self->old_tree.ptr) {
     ts_subtree_release(&self->tree_pool, self->old_tree);
     self->old_tree = NULL_SUBTREE;
@@ -2174,11 +2108,6 @@ TSTree *ts_parser_parse(
     !self->language || !input.read ||
     (old_tree && old_tree->language != self->language)
   ) return NULL;
-
-  if (ts_language_is_wasm(self->language)) {
-    if (!self->wasm_store) return NULL;
-    ts_wasm_store_start(self->wasm_store, &self->lexer.data, self->language);
-  }
 
   ts_lexer_set_input(&self->lexer, input);
   array_clear(&self->included_range_differences);
@@ -2331,28 +2260,6 @@ TSTree *ts_parser_parse_string_encoding(
     encoding,
     NULL,
   });
-}
-
-void ts_parser_set_wasm_store(TSParser *self, TSWasmStore *store) {
-  if (self->language && ts_language_is_wasm(self->language)) {
-    // Copy the assigned language into the new store.
-    const TSLanguage *copy = ts_language_copy(self->language);
-    ts_parser_set_language(self, copy);
-    ts_language_delete(copy);
-  }
-
-  ts_wasm_store_delete(self->wasm_store);
-  self->wasm_store = store;
-}
-
-TSWasmStore *ts_parser_take_wasm_store(TSParser *self) {
-  if (self->language && ts_language_is_wasm(self->language)) {
-    ts_parser_set_language(self, NULL);
-  }
-
-  TSWasmStore *result = self->wasm_store;
-  self->wasm_store = NULL;
-  return result;
 }
 
 #undef LOG

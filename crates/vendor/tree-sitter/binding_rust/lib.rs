@@ -5,10 +5,7 @@
 pub mod ffi;
 mod util;
 
-#[cfg(any(
-    not(feature = "std"),
-    all(target_arch = "wasm32", target_os = "unknown")
-))]
+#[cfg(not(feature = "std"))]
 extern crate alloc;
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, string::String, string::ToString, vec::Vec};
@@ -30,15 +27,6 @@ use std::os::fd::AsRawFd;
 use std::os::windows::io::AsRawHandle;
 
 use tree_sitter_language::LanguageFn;
-
-#[cfg(feature = "wasm")]
-mod wasm_language;
-#[cfg(feature = "wasm")]
-#[cfg_attr(docsrs, doc(cfg(feature = "wasm")))]
-pub use wasm_language::*;
-
-#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-mod wasm_allocator;
 
 /// The latest ABI version that is supported by the current version of the
 /// library.
@@ -263,14 +251,10 @@ pub trait Decode {
 pub struct TreeCursor<'tree>(ffi::TSTreeCursor, PhantomData<&'tree ()>);
 
 /// An error that occurred when trying to assign a [`Language`] to a [`Parser`].
-/// If the `wasm` feature is enabled, this can also indicate a failure to load
-/// the Wasm store.
 #[derive(Debug, PartialEq, Eq)]
 pub enum LanguageError {
     Version(usize),
     NotParseable,
-    #[cfg(feature = "wasm")]
-    Wasm,
 }
 
 /// An error that occurred in [`Parser::set_included_ranges`].
@@ -559,15 +543,7 @@ impl Parser {
             if !language.is_parseable() {
                 return Err(LanguageError::NotParseable);
             }
-            #[cfg_attr(
-                not(feature = "wasm"),
-                expect(unused_variables, reason = "only used when wasm feature is enabled")
-            )]
-            let success = unsafe { ffi::ts_parser_set_language(self.0.as_ptr(), language.0) };
-            #[cfg(feature = "wasm")]
-            if !success {
-                return Err(LanguageError::Wasm);
-            }
+            unsafe { ffi::ts_parser_set_language(self.0.as_ptr(), language.0) };
             Ok(())
         } else {
             Err(LanguageError::Version(version))
@@ -2389,10 +2365,6 @@ impl fmt::Display for LanguageError {
             Self::NotParseable => {
                 write!(f, "Language cannot be used for parsing.")
             }
-            #[cfg(feature = "wasm")]
-            Self::Wasm => {
-                write!(f, "Failed to load the Wasm store.")
-            }
         }
     }
 }
@@ -2497,14 +2469,6 @@ pub fn format_sexp(sexp: &str, initial_indent_level: usize) -> String {
     }
 
     formatted
-}
-
-pub fn wasm_stdlib_symbols() -> impl Iterator<Item = &'static str> {
-    const WASM_STDLIB_SYMBOLS: &str = include_str!(concat!(env!("OUT_DIR"), "/stdlib-symbols.txt"));
-
-    WASM_STDLIB_SYMBOLS
-        .lines()
-        .map(|s| s.trim_matches(|c| c == '"' || c == ','))
 }
 
 unsafe extern "C" {

@@ -1,37 +1,17 @@
 use std::{env, fs, path::PathBuf};
 
 fn main() {
+    #[cfg(feature = "bindgen")]
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-    let target = env::var("TARGET").unwrap();
 
     #[cfg(feature = "bindgen")]
     generate_bindings(&out_dir);
 
-    fs::copy(
-        "src/wasm-stdlib/imports.txt",
-        out_dir.join("stdlib-symbols.txt"),
-    )
-    .unwrap();
-
     let mut config = cc::Build::new();
-
-    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_WASM");
-    if env::var("CARGO_FEATURE_WASM").is_ok() {
-        config
-            .define("TREE_SITTER_FEATURE_WASM", "")
-            .define("static_assert(...)", "")
-            .include(env::var("DEP_WASMTIME_C_API_INCLUDE").unwrap());
-    }
 
     let manifest_path = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let include_path = manifest_path.join("include");
     let src_path = manifest_path.join("src");
-    let wasm_path = src_path.join("wasm");
-
-    if target.starts_with("wasm32-unknown") {
-        configure_wasm_build(&mut config);
-    }
-
     for entry in fs::read_dir(&src_path).unwrap() {
         let entry = entry.unwrap();
         let path = src_path.join(entry.file_name());
@@ -45,7 +25,6 @@ fn main() {
         .flag_if_supported("-Wno-unused-parameter")
         .flag_if_supported("-Wno-incompatible-pointer-types")
         .include(&src_path)
-        .include(&wasm_path)
         .include(&include_path)
         .define("_POSIX_C_SOURCE", "200112L")
         .define("_DEFAULT_SOURCE", None)
@@ -56,17 +35,6 @@ fn main() {
         .compile("tree-sitter");
 
     println!("cargo:include={}", include_path.display());
-}
-
-fn configure_wasm_build(config: &mut cc::Build) {
-    let Ok(wasm_headers) = env::var("DEP_TREE_SITTER_LANGUAGE_WASM_HEADERS") else {
-        panic!(
-            "Environment variable DEP_TREE_SITTER_LANGUAGE_WASM_HEADERS must be set by the language crate"
-        );
-    };
-    config
-        .define("TREE_SITTER_WASM_STDLIB", "")
-        .include(&wasm_headers);
 }
 
 #[cfg(feature = "bindgen")]
@@ -99,7 +67,6 @@ fn generate_bindings(out_dir: &std::path::Path) {
         .no_copy(no_copy.join("|"))
         .prepend_enum_name(false)
         .use_core()
-        .clang_arg("-D TREE_SITTER_FEATURE_WASM")
         .rust_target(RustTarget::from_str(rust_version).unwrap())
         .generate()
         .expect("Failed to generate bindings");

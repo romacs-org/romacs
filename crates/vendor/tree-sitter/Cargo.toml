@@ -27,7 +27,6 @@ include = [
     "/src/*.c",
     "/src/portable/*",
     "/src/unicode/*",
-    "/src/wasm-stdlib/**/*",
     "/include/tree_sitter/api.h",
     "/LICENSE",
 ]
@@ -68,10 +67,6 @@ targets = [
 [features]
 default = ["std"]
 std = []
-wasm = [
-    "std",
-    "wasmtime-c-api",
-]
 
 [lib]
 name = "tree_sitter"
@@ -79,17 +74,6 @@ path = "binding_rust/lib.rs"
 
 [dependencies.tree-sitter-language]
 version = "0.1.8"
-
-[dependencies.wasmtime-c-api]
-version = "48.0.1"
-features = [
-    "cranelift",
-    "gc",
-    "gc-null",
-]
-optional = true
-default-features = false
-package = "wasmtime-c-api-impl"
 
 [build-dependencies.bindgen]
 version = "0.72.1"
