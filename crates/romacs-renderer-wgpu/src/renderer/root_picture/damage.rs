@@ -128,29 +128,11 @@ pub(crate) fn plan(old: &Indexed, new: &FrameGlyphBuffer, new_runs: &[Run], inks
         runs: new_runs,
         after: groups(new_runs),
     };
-    let (before, after) = (&sides.before, &sides.after);
     let changed = changed_groups(&sides);
     let same = |key: &Key| changed.binary_search(key).is_err();
     let moved = moves::find(&sides, &changed, inks, scale);
     let placed = |key: &Key| moved.placed.binary_search(key).is_ok();
-    // A changed group the moves place needs no repaint; nor does one of the
-    // old frame whose ink lies inside a band a move overwrites.
-    let mut damaged: Vec<Rect> = Vec::new();
-    for (key, indices) in after {
-        if !same(key) && !placed(key) {
-            damaged.extend(indices.iter().map(|&i| new_runs[i].bounds));
-        }
-    }
-    for (key, indices) in before {
-        if !same(key) {
-            damaged.extend(
-                indices
-                    .iter()
-                    .map(|&i| old.runs[i].bounds)
-                    .filter(|bounds| !moved.bands.iter().any(|band| moves::holds_ink(*band, *bounds, inks.drawn(key.0, *bounds), new))),
-            );
-        }
-    }
+    let damaged = damaged_bounds(&sides, same, placed, &moved.bands, inks);
     // Past this many changed runs the frame changed nearly everywhere, and
     // joining them pairwise would cost more than the whole repaint saves.
     if damaged.len() > MAX_DAMAGED_RUNS {
@@ -174,6 +156,38 @@ pub(crate) fn plan(old: &Indexed, new: &FrameGlyphBuffer, new_runs: &[Run], inks
         regions,
         rows_kept,
     }
+}
+
+/// Bounds of changed runs still needing repaint after the moves.
+fn damaged_bounds(
+    sides: &Sides<'_>,
+    same: impl Fn(&Key) -> bool,
+    placed: impl Fn(&Key) -> bool,
+    bands: &[Rect],
+    inks: Inks<'_>,
+) -> Vec<Rect> {
+    let Sides { old, before, new, runs, after } = sides;
+    // A changed group the moves place needs no repaint; nor does one of the
+    // old frame whose ink lies inside a band a move overwrites.
+    let mut damaged: Vec<Rect> = Vec::new();
+    for (key, indices) in after {
+        if !same(key) && !placed(key) {
+            damaged.extend(indices.iter().map(|&i| runs[i].bounds));
+        }
+    }
+    for (key, indices) in before {
+        if !same(key) {
+            damaged.extend(
+                indices
+                    .iter()
+                    .map(|&i| old.runs[i].bounds)
+                    .filter(|bounds| {
+                        !bands.iter().any(|band| moves::holds_ink(*band, *bounds, inks.drawn(key.0, *bounds), new))
+                    }),
+            );
+        }
+    }
+    damaged
 }
 
 /// The sorted keys of the groups that differ or appear on just one side.
