@@ -42,16 +42,7 @@ pub(crate) fn blocks(text: &str) -> Vec<Block> {
             Event::Start(tag) => {
                 let ordered = matches!(tag, Tag::List(Some(_)));
                 let in_ordered = open.last().is_some_and(|&(_, o)| o);
-                let kind = match &tag {
-                    Tag::Heading { level, .. } => Some(BlockKind::Heading(heading_level(*level))),
-                    Tag::CodeBlock(kind) => Some(code(text, kind, &range)),
-                    Tag::Table(_) => Some(BlockKind::Table),
-                    Tag::Item => Some(BlockKind::Item { ordered: in_ordered }),
-                    Tag::BlockQuote(_) => Some(BlockKind::Quote),
-                    Tag::HtmlBlock => Some(BlockKind::Html),
-                    _ => None,
-                };
-                let index = kind.map(|kind| {
+                let index = block_kind(text, &tag, &range, in_ordered).map(|kind| {
                     out.push(Block { kind, range: range.clone(), depth });
                     out.len() - 1
                 });
@@ -84,6 +75,18 @@ pub(crate) fn blocks(text: &str) -> Vec<Block> {
         }
     }
     out
+}
+
+fn block_kind(text: &str, tag: &Tag<'_>, range: &Range<usize>, in_ordered: bool) -> Option<BlockKind> {
+    match tag {
+        Tag::Heading { level, .. } => Some(BlockKind::Heading(heading_level(*level))),
+        Tag::CodeBlock(kind) => Some(code(text, kind, range)),
+        Tag::Table(_) => Some(BlockKind::Table),
+        Tag::Item => Some(BlockKind::Item { ordered: in_ordered }),
+        Tag::BlockQuote(_) => Some(BlockKind::Quote),
+        Tag::HtmlBlock => Some(BlockKind::Html),
+        _ => None,
+    }
 }
 
 /// A code block opening at RANGE: its language, and an empty body at its

@@ -74,14 +74,7 @@ impl Index {
     /// faces may have changed; None when nothing had.
     pub(crate) fn sync(&mut self, len: usize, read: &mut Read<'_>) -> Option<Range<usize>> {
         if !self.built || self.len != len {
-            let text = read(0..len);
-            let parsed = spans(&text);
-            self.body_start = parsed.body_start.map(|end| text[..end].chars().count());
-            self.starts = char_starts(&text, &parsed.tops, 0);
-            self.defs = defs(&text, parsed.labels, 0);
-            self.labels = counts(&self.defs);
-            (self.len, self.built, self.dirty) = (len, true, None);
-            return Some(0..len);
+            return Some(self.rebuild(len, read));
         }
         let dirty = self.dirty.take()?;
         // From the block before the one the change starts in: what arrives
@@ -102,8 +95,7 @@ impl Index {
             if (parsed.body_start.is_none() && end < len)
                 || (from > 0 && self.body_start.is_none() && text.lines().any(FrontMatter::closes))
             {
-                self.built = false;
-                return self.sync(len, read);
+                return Some(self.rebuild(len, read));
             }
             if from == 0 {
                 self.body_start = parsed.body_start.map(|end| text[..end].chars().count());
@@ -132,8 +124,7 @@ impl Index {
                 if lost {
                     // A parse keeps only a label's first definition, so one
                     // gone may hide another outside the span: read it all.
-                    self.built = false;
-                    return self.sync(len, read);
+                    return Some(self.rebuild(len, read));
                 }
                 let gained = labels.keys().any(|label| !self.labels.contains_key(label));
                 self.labels = labels;
@@ -142,6 +133,17 @@ impl Index {
             // Not found again: look twice as far.
             k = (k + (k - after).max(1)).min(self.starts.len());
         }
+    }
+
+    fn rebuild(&mut self, len: usize, read: &mut Read<'_>) -> Range<usize> {
+        let text = read(0..len);
+        let parsed = spans(&text);
+        self.body_start = parsed.body_start.map(|end| text[..end].chars().count());
+        self.starts = char_starts(&text, &parsed.tops, 0);
+        self.defs = defs(&text, parsed.labels, 0);
+        self.labels = counts(&self.defs);
+        (self.len, self.built, self.dirty) = (len, true, None);
+        0..len
     }
 
     /// The blocks holding BEG..END: from the start of the block BEG is in
