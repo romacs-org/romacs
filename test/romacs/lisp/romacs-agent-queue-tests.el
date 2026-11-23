@@ -172,6 +172,31 @@
     (should (equal (romacs-agent--answered (list (funcall message "s" "sibling") (funcall message "c" "child"))) "s"))
     (should-not (romacs-agent--answered nil))))
 
+(ert-deftest romacs-agent-a-limit-s-continuation-answers-what-its-turn-did ()
+  ;; The turn going on from one stopped at a usage limit answers that
+  ;; turn's message, at its write and as its record is folded (a replay too).
+  (let ((parent (list (romacs-agent-make-message "m-2" "parent" '(:session "p")))))
+    (should (equal (romacs-agent--turn-answers romacs-agent--limit-continue nil "m-1") "m-1"))
+    (should (equal (romacs-agent--turn-answers nil parent "m-1") "m-2"))
+    (should-not (romacs-agent--turn-answers nil nil "m-1"))
+    (should (equal (plist-get (romacs-agent--input-transition (list :own romacs-agent--limit-continue :seq 5)
+                                                              4 4 nil nil "m-1")
+                              :answering)
+                   "m-1"))
+    (should-not (plist-get (romacs-agent--input-transition (list :own "renew-note" :seq 5) 4 4 nil nil "m-1")
+                           :answering))
+    ;; Work: its end goes to its parent, and a full context renews at it.
+    (should (romacs-agent--work-turn-p romacs-agent--limit-continue))
+    (should (romacs-agent--work-turn-p nil))
+    (should-not (romacs-agent--work-turn-p "renew-note"))
+    (let ((session (romacs-agent--make :id "c" :harness 'claude :state 'idle :done-seq 4 :input-seq 4
+                                       :completed-seq 4 :answering "m-1" :options '(:parent "p"))))
+      (romacs-agent--apply-input-event session (list :type 'input :own romacs-agent--limit-continue :seq 5))
+      (should (equal (romacs-agent-answering session) "m-1"))
+      ;; Its end goes to the parent, saying what it answers.
+      (romacs-agent--apply-completed-turn session (list :seq 6 :turns 1 :reply "done"))
+      (should (equal (nth 3 (car (romacs-agent-ends session))) "m-1")))))
+
 (ert-deftest romacs-agent-messages-in-one-turn-are-each-told ()
   ;; One message's delivery failing, or quit, leaves the others' told:
   ;; each was written, none waits to go again.
@@ -531,6 +556,93 @@ message is sent, `romacs-agent-send' by default.")
       (should-not (romacs-agent-store-queued id))
       (should-not (file-exists-p mark)))))
 
+(ert-deftest romacs-agent-a-limit-continuation-is-made-once ()
+  ;; Sol S2: a stop after its row was kept, before the selection's manifest
+  ;; write, applies the move again as the session loads, ahead of the kept
+  ;; rows: the one continuation (named by its limit), not two.  The limit's
+  ;; end is answered at once (no wake sends it meanwhile), with the ends
+  ;; there then, and kept answered only once that row is: a stop before
+  ;; leaves it to the parent.  A store of its own, as
+  ;; `romacs-agent-test-with-store' makes one.
+  (let* ((store-root (file-name-as-directory (make-temp-file "romacs-store-" t)))
+         (process-environment (cons (concat "XDG_STATE_HOME=" store-root) process-environment))
+         (romacs-agent-store--db nil) (romacs-agent-events--made nil)
+         (romacs-agent-events--imported (make-hash-table :test #'equal)))
+    (unwind-protect
+     (let* ((id "c1c1c1c1-0000-4000-8000-000000000000")
+           (dir (expand-file-name id (romacs-agent--state-root)))
+           (make (lambda () (romacs-agent--make :id id :harness 'claude :state 'ended :dir dir :done-seq 84
+                                                :limited '(:provider "claude"))))
+           (told nil)
+           (romacs-agent-moved-functions (list (lambda (_s from to _l &optional _k) (push (cons from to) told)))))
+      (make-directory (file-name-directory (romacs-agent-store--file)) t)
+      (should (romacs-agent-store--open))
+      (make-directory dir t)
+      (write-region "" nil (expand-file-name "journal.jsonl" dir) nil 'silent)
+      (cl-letf (((symbol-function 'run-at-time) #'ignore))
+        (romacs-agent--moved (funcall make) "claude" "claude2" '(:provider "claude"))
+        (should (= (length (romacs-agent-store-queued id)) 1))
+        (let ((again (funcall make)))
+          (romacs-agent--moved again "claude" "claude2" '(:provider "claude"))
+          (romacs-agent-store--requeue again nil)
+          (should (equal (mapcar #'romacs-agent-item-id (romacs-agent-queue again)) '("limit-continue-84")))
+          (should (= (length (romacs-agent-store-queued id)) 1)))
+        (should (equal told '(("claude" . "claude2") ("claude" . "claude2"))))
+        (let* ((written nil) (other (expand-file-name "other" store-root))
+               (session (romacs-agent--make :id "d1d1d1d1-0000-4000-8000-000000000000" :harness 'claude :dir other
+                                            :state 'ended :done-seq 9 :limited '(:provider "claude")
+                                            :ends (list (list 9 "limit" t "m-1"))))
+               (romacs-agent-tools--answered (make-hash-table :test #'equal))
+               (romacs-agent-moved-functions (list #'romacs-agent-tools--moved))
+               (answered (lambda () (and (file-exists-p (expand-file-name "answered" other))
+                                         (with-temp-buffer (insert-file-contents (expand-file-name "answered" other))
+                                                           (buffer-string))))))
+          (make-directory other t)
+          (cl-letf (((symbol-function 'romacs-agent-store-queued-put) (lambda (_id _item done) (setq written done))))
+            (romacs-agent--moved session "claude" "claude2" '(:provider "claude"))
+            (should-not (romacs-agent-tools--wanted-p session 9))
+            (should-not (funcall answered))
+            ;; Its going on's own end, come before the row is kept: not answered.
+            (push (list 11 "continued" nil "m-1") (romacs-agent-ends session))
+            (funcall written '(ok t))
+            (should (equal (funcall answered) "9\n"))
+            (should (romacs-agent-tools--wanted-p session 11))
+            ;; A row the writer could not keep: the end not kept answered.
+            (setf (romacs-agent-queue session) nil (romacs-agent-done-seq session) 12
+                  (romacs-agent-ends session) (list (list 12 "limit" t "m-2")))
+            (romacs-agent--moved session "claude" "claude2" '(:provider "claude"))
+            (funcall written '(error (error "Disk full")))
+            (should (equal (funcall answered) "9\n"))))))
+      (when (cdr romacs-agent-store--db) (ignore-errors (sqlite-close (cdr romacs-agent-store--db))))
+      (delete-directory store-root t))))
+
+(ert-deftest romacs-agent-kept-messages-start-their-harness ()
+  ;; Sol S2: restored with a move's continuation kept, its harness stopped
+  ;; for the move (a stop after its commit, before its new run), its queue
+  ;; never ran and its end was answered: neither.  That continuation starts
+  ;; its harness.  An ordinary kept prompt never does: a task its user
+  ;; stopped stays stopped, and a settled one too.
+  (let* ((romacs-agent--sessions (make-hash-table :test #'equal))
+         (opened 0)
+         (load (lambda (item &optional settled)
+                 (let ((session (romacs-agent--make :id "k" :harness 'claude :state 'ended)))
+                   (puthash "k" session romacs-agent--sessions)
+                   (cl-letf (((symbol-function 'romacs-agent-store-queued) (lambda (_) (list item)))
+                             ((symbol-function 'romacs-agent-settled-p) (lambda (_) settled)))
+                     (romacs-agent-store--requeue session nil))
+                   (mapcar #'car (romacs-agent-queue session))))))
+    (cl-letf (((symbol-function 'romacs-agent--sent-queued) (lambda (&rest _) '(nil)))
+              ((symbol-function 'romacs-agent--open) (lambda (_) (cl-incf opened))))
+      (should (equal (funcall load (romacs-agent-item "kept" :id "q" :position 1.0 :kept t)) '("kept")))
+      (should (= opened 0))
+      (let ((continuation (romacs-agent--limit-continuation "claude" "claude2" 84)))
+        (setf (romacs-agent-item-position continuation) 1.0 (romacs-agent-item-kept continuation) t)
+        (should (= (length (funcall load continuation)) 1))
+        (should (= opened 1))
+        (setf (romacs-agent-item-kept continuation) t)
+        (funcall load continuation t)
+        (should (= opened 1))))))
+
 (ert-deftest romacs-agent-a-kept-message-written-is-never-sent-twice ()
   ;; Written to its harness, its id in the journal's input record, then
   ;; the editor ends before its kept row is let go: the session made
@@ -573,7 +685,8 @@ message is sent, `romacs-agent-send' by default.")
 
 (ert-deftest romacs-agent-a-kept-message-unsure-waits ()
   ;; Its lookup failed (grep unable to read its journal): not sent now,
-  ;; its row kept for the next load.
+  ;; its row kept for the next load, and said as an error (its parent's
+  ;; to be told).
   (romacs-agent-test-with-store
     (make-directory (file-name-directory (romacs-agent-store--file)) t)
     (should (romacs-agent-store--open))
@@ -588,8 +701,13 @@ message is sent, `romacs-agent-send' by default.")
       (romacs-agent-send-later session "maybe")
       (let ((again (romacs-agent-test-attach
                     (romacs-agent--make :id id :harness 'claude :state 'idle :title "unsure" :dir dir) t)))
-        (cl-letf (((symbol-function 'call-process) (lambda (&rest _) 2)))
-          (romacs-agent-queue-tests--writing sent (romacs-agent-store--requeue again nil)))
+        (let* ((said nil)
+               (romacs-agent-event-functions (list (lambda (_s event) (when (plist-get event :unsure) (push event said))))))
+          (cl-letf (((symbol-function 'call-process) (lambda (&rest _) 2)))
+            (romacs-agent-queue-tests--writing sent (romacs-agent-store--requeue again nil)))
+          (should (equal (mapcar (lambda (e) (plist-get e :type)) said) '(error)))
+          (should (string-match-p (format "task %s (unsure) may not have reached it.*\"maybe\".*none is sent twice" id)
+                                  (plist-get (car said) :text))))
         (should-not sent)
         (should-not (romacs-agent-queue again)))
       (should (equal (mapcar #'car (romacs-agent-store-queued id)) '("maybe"))))))
