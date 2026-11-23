@@ -386,6 +386,13 @@ pub(super) enum HashFault {
 }
 type Hashed<T> = std::result::Result<T, HashFault>;
 
+struct Lookup<T> {
+    index: usize,
+    found: Option<T>,
+    hash: u64,
+    moving: bool,
+}
+
 /// Comparison view of a Lisp object for GNU `internal_equal` and `sxhash`.
 enum Shape<'a> {
     Atom,
@@ -573,28 +580,27 @@ impl Vm {
     }
     /// The table's hash function: (hash, depends on a moving heap index).
     fn hash_key(&self, test: Test, key: Value) -> (u64, bool) {
-        let mut moving = false;
-        let hash = match (test, self.shape(key)) {
-            (Test::Equal | Test::User(_, Native::EqualIncludingProperties), _) => self.sxhash(key, 0, &mut moving),
-            (Test::User(_, Native::FunctionEqual), _) => match crate::profiler::code_identity(&self.closures, key) {
+        let identity = || (key.0, Self::moving_reference(key));
+        match test {
+            Test::Eq => identity(),
+            Test::Eql => match self.object_if(key) {
+                Some(data::Object::Float(f)) => (f.to_bits(), false),
+                Some(data::Object::Bignum(n)) => (hash_bytes(&n.to_signed_bytes_le()), false),
+                _ => identity(),
+            },
+            Test::Equal | Test::User(_, Native::EqualIncludingProperties) => {
+                let mut moving = false;
+                (self.sxhash(key, 0, &mut moving), moving)
+            }
+            Test::User(_, Native::FunctionEqual) => match crate::profiler::code_identity(&self.closures, key) {
                 // A closure's compiled function is a stable index.
-                Some(crate::profiler::Identity::Code(function)) => combine(function as u64, 4),
+                Some(crate::profiler::Identity::Code(function)) => (combine(function as u64, 4), false),
                 // An explicit closure's body can move while the closure
                 // does not, which `forward' would not notice: one bucket.
-                Some(crate::profiler::Identity::Body(_)) => combine(0, 5),
-                _ => {
-                    moving = Self::moving_reference(key);
-                    key.0
-                }
+                Some(crate::profiler::Identity::Body(_)) => (combine(0, 5), false),
+                _ => identity(),
             },
-            (Test::Eql, Shape::Float(bits)) => bits,
-            (Test::Eql, Shape::Bignum(n)) => hash_bytes(&n.to_signed_bytes_le()),
-            _ => {
-                moving = Self::moving_reference(key);
-                key.0
-            }
-        };
-        (hash, moving)
+        }
     }
     /// GNU `Feql`: floats by bit pattern, so 0.0 and -0.0 differ and NaNs
     /// with identical bits match.
@@ -932,16 +938,12 @@ impl Vm {
         Ok((a, b, None))
     }
 
-    /// The private index of the table V, for writing: a frozen table
-    /// refuses with GNU's read-only error (`frozen.rs`).
-    fn table_index(&self, v: Value) -> Hashed<usize> {
-        match self.object_if(v) {
-            Some(data::Object::HashTable(_)) if !Self::image_value(v) => {
-                Ok(v.payload() as usize - 1)
-            }
-            Some(data::Object::HashTable(_)) => Err(HashFault::Error(crate::frozen::READ_ONLY, Some(v))),
-            _ => Err(HashFault::Wrong("hash-table-p", v)),
+    /// GNU's read-only error for an already checked frozen table.
+    fn check_table_writable(v: Value) -> Hashed<()> {
+        if Self::image_value(v) {
+            return Err(HashFault::Error(crate::frozen::READ_ONLY, Some(v)));
         }
+        Ok(())
     }
     /// The table V, private or frozen, for reading.
     fn table(&self, v: Value) -> Hashed<&HashTable> {
@@ -963,52 +965,71 @@ impl Vm {
     fn table_mut(&mut self, i: usize) -> (&mut HashTable, Stores<'_>) {
         self.objects.hash_mut(i).expect("checked hash table")
     }
-    /// Re-hash keys whose hash read a heap index, then rebuild the chains.
-    /// A frozen table's keys never move, so it is never stale.
-    fn fresh_table(&mut self, v: Value) -> Hashed<()> {
-        if Self::image_value(v) {
-            self.table(v)?;
-            return Ok(());
+    /// Compute replacement hashes while the old table is still borrowed.
+    #[cold]
+    fn moving_hashes(&self, t: &HashTable) -> Vec<(usize, (u64, bool))> {
+        t.entries()
+            .filter(|(slot, _, _)| t.moving[*slot])
+            .map(|(slot, key, _)| (slot, self.hash_key(t.test, key)))
+            .collect()
+    }
+    /// The same keys and values, in new chains: nothing is stored.
+    #[cold]
+    fn fresh_table(&mut self, i: usize, hashes: Vec<(usize, (u64, bool))>) {
+        let (table, _) = self.table_mut(i);
+        for (slot, (hash, moving)) in hashes {
+            table.hashes[slot] = hash;
+            table.moving[slot] = moving;
         }
-        let i = self.table_index(v)?;
-        let table = self.table(v)?;
-        if table.stale {
-            let test = table.test;
-            let hashes: Vec<_> = table
-                .entries()
-                .filter(|(slot, _, _)| table.moving[*slot])
-                .map(|(slot, key, _)| (slot, self.hash_key(test, key)))
-                .collect();
-            // The same keys and values, in new chains: nothing is stored.
-            let (table, _) = self.table_mut(i);
-            for (slot, (hash, moving)) in hashes {
-                table.hashes[slot] = hash;
-                table.moving[slot] = moving;
-            }
-            table.rebuild();
-            table.stale = false;
-        }
-        Ok(())
+        table.rebuild();
+        table.stale = false;
     }
     /// GNU `hash_find`: `eq` first, then the stored hash and the test.
-    fn table_lookup(
+    fn table_lookup<T>(
         &mut self,
         table: Value,
         key: Value,
-    ) -> Hashed<(Option<usize>, u64, bool)> {
-        self.fresh_table(table)?;
+        hit: impl FnOnce(&HashTable, usize) -> T,
+    ) -> Hashed<Lookup<T>> {
         let t = self.table(table)?;
+        let index = table.payload() as usize - 1;
+        let t = if t.stale {
+            // Frozen tables never become stale.
+            let hashes = self.moving_hashes(t);
+            self.fresh_table(index, hashes);
+            let Some(data::Object::HashTable(t)) = self.objects.get(index) else {
+                unreachable!("checked hash table");
+            };
+            t
+        } else {
+            t
+        };
         let (hash, moving) = self.hash_key(t.test, key);
         let mut at = t.chain(hash);
         while at != END {
             let slot = at as usize;
             let stored = t.keys[slot];
             if key == stored || t.hashes[slot] == hash && self.keys_match(t.test, key, stored)? {
-                return Ok((Some(slot), hash, moving));
+                return Ok(Lookup { index, found: Some(hit(t, slot)), hash, moving });
             }
             at = t.next[slot];
         }
-        Ok((None, hash, moving))
+        Ok(Lookup { index, found: None, hash, moving })
+    }
+    fn hash_put(&mut self, table: Value, key: Value, value: Value) -> Hashed<Value> {
+        let Lookup { index, found, hash, moving } = self.table_lookup(table, key, |_, slot| slot)?;
+        Self::check_table_writable(table)?;
+        let (table, stores) = self.table_mut(index);
+        table.put(stores, found, key, value, hash, moving);
+        Ok(value)
+    }
+    fn hash_remove(&mut self, table: Value, key: Value) -> Hashed<Value> {
+        let Lookup { index, found, .. } = self.table_lookup(table, key, |_, slot| slot)?;
+        Self::check_table_writable(table)?;
+        if let Some(slot) = found {
+            self.table_mut(index).0.remove(slot);
+        }
+        Ok(Value::NIL)
     }
     pub(super) fn hash_call(
         &mut self,
@@ -1062,14 +1083,13 @@ impl Vm {
         table: Value,
         key: Value,
     ) -> Result<Option<Value>> {
-        let (found, _, _) = self
-            .table_lookup(table, key)
-            .map_err(|_| "hash table required")?;
-        Ok(found.and_then(|slot| self.table(table).ok().map(|t| t.values[slot])))
+        self.table_lookup(table, key, |t, slot| t.values[slot])
+            .map(|found| found.found)
+            .map_err(|_| "hash table required".into())
     }
 
     pub(crate) fn completion_hash_find(&mut self, table: Value, key: Value) -> std::result::Result<Option<(Value, Value)>, prim::Fault> {
-        let (found, _, _) = self.table_lookup(table, key).map_err(|fault| match fault {
+        let found = self.table_lookup(table, key, |t, slot| (t.keys[slot], t.values[slot])).map_err(|fault| match fault {
             HashFault::Wrong(predicate, value) => prim::Fault::Wrong(predicate, value),
             HashFault::Error(message, value) => match value {
                 Some(value) if message == "circular-list" => prim::Fault::Circular(value),
@@ -1078,7 +1098,7 @@ impl Vm {
             HashFault::Internal(message) => prim::Fault::Error(message),
             HashFault::Arity(_, _) | HashFault::Stopped => unreachable!(),
         })?;
-        Ok(found.and_then(|slot| self.table(table).ok()?.entry(slot)))
+        Ok(found.found)
     }
     pub(super) fn declaration_hash_entries(&self, table: Value) -> Result<Vec<(Value, Value)>> {
         let table = self.table(table).map_err(|_| "hash table required")?;
@@ -1086,13 +1106,7 @@ impl Vm {
     }
     pub(super) fn declaration_hash_remove(&mut self, table: Value, key: Value) -> Result<()> {
         count_declaration_store();
-        let (found, _, _) = self.table_lookup(table, key).map_err(|_| "hash table required")?;
-        let i = self.table_index(table).map_err(|_| "hash table required")?;
-        if let Some(slot) = found {
-            let (table, _) = self.table_mut(i);
-            table.remove(slot);
-        }
-        Ok(())
+        self.hash_remove(table, key).map(|_| ()).map_err(|_| "hash table required".into())
     }
     pub(super) fn declaration_hash_put(
         &mut self,
@@ -1101,13 +1115,7 @@ impl Vm {
         value: Value,
     ) -> Result<()> {
         count_declaration_store();
-        let (found, hash, moving) = self
-            .table_lookup(table, key)
-            .map_err(|_| "hash table required")?;
-        let i = self.table_index(table).map_err(|_| "hash table required")?;
-        let (table, stores) = self.table_mut(i);
-        table.put(stores, found, key, value, hash, moving);
-        Ok(())
+        self.hash_put(table, key, value).map(|_| ()).map_err(|_| "hash table required".into())
     }
     fn hash_primitive(&mut self, p: Primitive, start: usize, n: usize) -> Hashed<Value> {
         use Primitive::*;
@@ -1121,44 +1129,49 @@ impl Vm {
         if !arity {
             return Err(HashFault::Arity(p, n));
         }
-        let args = self.stack[start..start + n].to_vec();
+        let args = &self.stack[start..start + n];
         let truth = |b: bool| if b { Value::TRUE } else { Value::NIL };
         match p {
-            MakeHashTable => self.make_hash_table(&args),
+            MakeHashTable => {
+                let options = self.hash_table_options(args)?;
+                self.make_hash_table(options)
+            }
             HashTableP => Ok(truth(self.table(args[0]).is_ok())),
             Gethash => {
-                let (found, _, _) = self.table_lookup(args[1], args[0])?;
-                Ok(match found {
-                    Some(slot) => self.table(args[1])?.values[slot],
-                    None => args.get(2).copied().unwrap_or(Value::NIL),
-                })
+                let default = args.get(2).copied().unwrap_or(Value::NIL);
+                let found = self.table_lookup(args[1], args[0], |t, slot| t.values[slot])?;
+                Ok(found.found.unwrap_or(default))
             }
-            HashTableContainsP => Ok(truth(self.table_lookup(args[1], args[0])?.0.is_some())),
-            Puthash => {
-                let (key, value) = (args[0], args[1]);
-                let (found, hash, moving) = self.table_lookup(args[2], key)?;
-                let i = self.table_index(args[2])?;
-                let (table, stores) = self.table_mut(i);
-                table.put(stores, found, key, value, hash, moving);
+            HashTableContainsP => Ok(truth(self.table_lookup(args[1], args[0], |_, _| ())?.found.is_some())),
+            Puthash => self.hash_put(args[2], args[0], args[1]),
+            Remhash => self.hash_remove(args[1], args[0]),
+            Clrhash => {
+                let v = args[0];
+                self.table(v)?;
+                Self::check_table_writable(v)?;
+                self.table_mut(v.payload() as usize - 1).0.clear();
+                Ok(v)
+            }
+            DefineHashTableTest => {
+                let (name, functions) = (args[0], [args[1], args[2]]);
+                let property = self.intern("hash-table-test");
+                let value = self.list_value(&functions);
+                self.put_symbol_property(name, property, value)
+                    .map_err(HashFault::Internal)?;
                 Ok(value)
             }
-            Remhash => {
-                let (found, _, _) = self.table_lookup(args[1], args[0])?;
-                let i = self.table_index(args[1])?;
-                if let Some(slot) = found {
-                    self.table_mut(i).0.remove(slot);
-                }
-                Ok(Value::NIL)
-            }
-            Clrhash => {
-                let i = self.table_index(args[0])?;
-                self.table_mut(i).0.clear();
-                Ok(args[0])
-            }
-            HashTableCount => Ok(Value::integer(self.table(args[0])?.count() as i64).unwrap()),
-            HashTableSize => Ok(Value::integer(self.table(args[0])?.size() as i64).unwrap()),
+            HashNext | HashKeyAt | HashValueAt => self.hash_iterate(p, args[0], args[1]),
+            _ => self.hash_table_property(p, args[0]),
+        }
+    }
+    fn hash_table_property(&mut self, p: Primitive, value: Value) -> Hashed<Value> {
+        use Primitive::*;
+        let table = self.table(value)?;
+        match p {
+            HashTableCount => Ok(Value::integer(table.count() as i64).unwrap()),
+            HashTableSize => Ok(Value::integer(table.size() as i64).unwrap()),
             HashTableTest => {
-                let name = match self.table(args[0])?.test {
+                let name = match table.test {
                     Test::Eq => "eq",
                     Test::Eql => "eql",
                     Test::Equal => "equal",
@@ -1167,7 +1180,7 @@ impl Vm {
                 Ok(self.intern(name))
             }
             HashTableWeakness => {
-                let name = self.table(args[0])?.weakness.name();
+                let name = table.weakness.name();
                 Ok(if name == "nil" {
                     Value::NIL
                 } else {
@@ -1175,7 +1188,6 @@ impl Vm {
                 })
             }
             HashTableRehashSize | HashTableRehashThreshold => {
-                self.table(args[0])?;
                 let nominal = if p == HashTableRehashSize {
                     1.5
                 } else {
@@ -1184,47 +1196,33 @@ impl Vm {
                 Ok(self.allocate_object(data::Object::Float(nominal)))
             }
             CopyHashTable => {
-                let copy = self.table(args[0])?.clone();
+                let copy = table.clone();
                 Ok(self.allocate_object(data::Object::HashTable(Box::new(copy))))
             }
             HashTableKeys | HashTableValues => {
                 // subr-x pushes in maphash order, so the result is reversed.
-                let t = self.table(args[0])?;
-                let mut items: Vec<_> = t
+                let mut items: Vec<_> = table
                     .entries()
                     .map(|(_, k, v)| if p == HashTableKeys { k } else { v })
                     .collect();
                 items.reverse();
                 Ok(self.list_value(&items))
             }
-            DefineHashTableTest => {
-                let property = self.intern("hash-table-test");
-                let value = self.list_value(&args[1..]);
-                self.put_symbol_property(args[0], property, value)
-                    .map_err(HashFault::Internal)?;
-                Ok(value)
-            }
-            HashNext => {
-                let from = args[1]
-                    .as_integer()
-                    .map_err(|_| HashFault::Wrong("integerp", args[1]))?;
-                let next = self.table(args[0])?.next_used(from.max(0) as usize);
-                Ok(next.map_or(Value::NIL, |i| Value::integer(i as i64).unwrap()))
-            }
-            HashKeyAt | HashValueAt => {
-                let at = args[1]
-                    .as_integer()
-                    .map_err(|_| HashFault::Wrong("integerp", args[1]))?;
-                // Primitive calls never collect, so the slot found by HashNext
-                // is still the one the lowered loop reads.
-                let (k, v) = self
-                    .table(args[0])?
-                    .entry(at.max(0) as usize)
-                    .ok_or_else(|| HashFault::Internal("maphash slot vanished".into()))?;
-                Ok(if p == HashKeyAt { k } else { v })
-            }
             _ => unreachable!("hash primitive dispatch"),
         }
+    }
+    fn hash_iterate(&self, p: Primitive, table: Value, at: Value) -> Hashed<Value> {
+        let at = at.as_integer().map_err(|_| HashFault::Wrong("integerp", at))?.max(0) as usize;
+        let table = self.table(table)?;
+        if p == Primitive::HashNext {
+            let next = table.next_used(at);
+            return Ok(next.map_or(Value::NIL, |i| Value::integer(i as i64).unwrap()));
+        }
+        // Primitive calls never collect, so the slot found by HashNext
+        // is still the one the lowered loop reads.
+        let (key, value) = table.entry(at)
+            .ok_or_else(|| HashFault::Internal("maphash slot vanished".into()))?;
+        Ok(if p == Primitive::HashKeyAt { key } else { value })
     }
     /// GNU `hash_table_from_plist` (lread.c:3153), for the reader's
     /// `#s(hash-table ...)`. PLIST is everything after `hash-table`. Only
@@ -1274,12 +1272,10 @@ impl Vm {
         }
         params.push(self.intern(":size"));
         params.push(Value::integer(items.len() as i64 / 2).map_err(HashFault::Internal)?);
-        let table = self.make_hash_table(&params)?;
+        let options = self.hash_table_options(&params)?;
+        let table = self.make_hash_table(options)?;
         for pair in items.chunks_exact(2) {
-            let (found, hash, moving) = self.table_lookup(table, pair[0])?;
-            let i = self.table_index(table)?;
-            let (t, stores) = self.table_mut(i);
-            t.put(stores, found, pair[0], pair[1], hash, moving);
+            self.hash_put(table, pair[0], pair[1])?;
         }
         Ok(table)
     }
@@ -1335,7 +1331,7 @@ impl Vm {
     }
     /// GNU `Fmake_hash_table`: pairs are consumed from the end, so the first
     /// occurrence of a keyword wins and the last invalid keyword is reported.
-    fn make_hash_table(&mut self, args: &[Value]) -> Hashed<Value> {
+    fn hash_table_options(&self, args: &[Value]) -> Hashed<(Value, Value, Value)> {
         if args.len() % 2 == 1 {
             return Err(HashFault::Error("Odd number of arguments", None));
         }
@@ -1358,7 +1354,10 @@ impl Vm {
                 }
             }
         }
-        let test = if test == Value::NIL || test == self.intern("eql") {
+        Ok((test, weakness, size))
+    }
+    fn resolve_hash_test(&mut self, test: Value) -> Hashed<Test> {
+        Ok(if test == Value::NIL || test == self.intern("eql") {
             Test::Eql
         } else if test == self.intern("eq") {
             Test::Eq
@@ -1381,7 +1380,10 @@ impl Vm {
                     ));
                 }
             }
-        };
+        })
+    }
+    fn make_hash_table(&mut self, (test, weakness, size): (Value, Value, Value)) -> Hashed<Value> {
+        let test = self.resolve_hash_test(test)?;
         let size = if size == Value::NIL {
             0
         } else {
