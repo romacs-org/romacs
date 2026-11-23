@@ -1,5 +1,6 @@
 """Assemble queries from the editor's modes and pinned grammar packages."""
 import json
+import hashlib
 from itertools import product
 from pathlib import Path
 import sys
@@ -7,7 +8,6 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from treesit_grammars import crate_dirs, table
 
-DATA = Path(__file__).resolve().parent
 # Distinct individual, combined and indent queries observed from each mode.
 MODE_MINIMUM = dict(bash=20, c=24, cpp=23, css=17, go=21, html=9, java=17,
                     javascript=26, jsdoc=9, json=12, python=21, rust=22,
@@ -51,7 +51,7 @@ def repetitions():
 
 
 def build(root, work):
-    samples = json.loads((DATA / "samples.json").read_text())
+    samples = json.loads((work / "samples.json").read_text())
     modes = json.loads((work / "mode-queries.json").read_text())
     dirs = crate_dirs(root)
     cases = []
@@ -82,3 +82,54 @@ def build(root, work):
     if pinned < 18 or set(samples) != {case["language"] for case in cases}:
         raise ValueError(f"incomplete grammar inventory ({pinned} pinned query files)")
     return cases
+
+
+def sha256(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def ranges(near):
+    return [[0, 2**32 - 1], [max(0, near - 7), near + 8], [near, near]]
+
+
+def edit_state(text, near, random):
+    random ^= random >> 12
+    random ^= (random << 25) & (2**64 - 1)
+    random ^= random >> 27
+    start = min(max(0, near - 8) + random % 17, len(text))
+    delete, insert = [(1, ""), (2, "}"), (0, "x"), (0, "\n"), (0, '"'), (0, ","), (0, "(")][random % 7]
+    end = min(start + delete, len(text))
+    text[start:end] = insert.encode()
+    return random, start + len(insert), [start, end, insert]
+
+
+def states(sample):
+    """Freeze every actual edit, resulting input digest and ordered range."""
+    for seed in (1, 2, 3):
+        text = bytearray(sample.encode())
+        random, near = seed, len(text) // 2
+        yield [seed, 0, None, ranges(near), sha256(text)]
+        for index in range(1, 17):
+            random, near, change = edit_state(text, near, random)
+            yield [seed, index, change, ranges(near), sha256(text)]
+
+
+def freeze_cases(cases):
+    for case in cases:
+        case.update(text_sha256=sha256(case["text"].encode()),
+                    query_sha256=[sha256(query.encode()) for query in case["queries"]],
+                    states=list(states(case["text"])))
+    return cases
+
+
+def check_cases(cases):
+    if [case["language"] for case in cases] != sorted(MODE_MINIMUM):
+        raise ValueError("incomplete or duplicate manifest grammar inventory")
+    for case in cases:
+        fresh = freeze_cases([dict(case)])[0]
+        key = ("text_sha256", "query_sha256", "states")
+        if any(case[field] != fresh[field] for field in key):
+            raise ValueError(f"manifest digests or schedule differ for {case['language']}")
+        count = len(case["queries"])
+        if len(case["origins"]) != count or not 0 < case["shipped"] <= count:
+            raise ValueError(f"invalid manifest sources for {case['language']}")

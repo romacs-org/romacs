@@ -3,6 +3,14 @@
 (require 'json)
 (require 'treesit)
 (setq treesit-enabled-modes t)
+(with-temp-buffer
+  (insert "1")
+  (let ((captures (treesit-query-capture
+                   (treesit-parser-root-node (treesit-parser-create 'json))
+                   "(number) @a @b @c @d")))
+    (unless (equal (mapcar #'car captures) '(a b c))
+      (error "Corpus extraction requires the pinned C query engine"))
+    (message "Verified pinned C query behavior before extracting mode queries")))
 (defvar q-probe-queries (make-hash-table :test 'eq))
 (defvar q-probe-owner nil)
 

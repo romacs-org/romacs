@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 """Build and compare the pinned C query engine and this checkout."""
 import argparse
-from collections import Counter, defaultdict
-import hashlib
-import itertools
 import json
 import os
 from pathlib import Path
@@ -13,221 +10,204 @@ import sys
 import tarfile
 
 ROOT = Path(__file__).resolve().parent.parent
-SUPPORT = ROOT / "tools/lib/treesit-query"
-sys.path.insert(0, str(SUPPORT))
+SUPPORT = Path("tools/lib/treesit-query")
+sys.path.insert(0, str(ROOT / SUPPORT))
 from corpus import build as corpus
+from corpus import check_cases, freeze_cases, sha256
+from records import canonical, compare
 
-# The first oracle commit changes no production code from f5162409c.
+# This commit's production engine is f5162409c's.
 C_REFERENCE = "48dd6bd636846a80496764e3ba07b66cd2602f01"
 NATIVE = Path("crates/romacs-vm/src/treesit/native.rs")
 RECORDER = NATIVE.with_name("query_oracle.rs")
 QUIT = Path("crates/romacs-vm/src/quit.rs")
-TEST = "treesit::native::query_oracle::query_oracle_"
+POLLS = QUIT.with_suffix("") / "query_polls.rs"
+GR_JSON = Path("crates/romacs-grammars/sources.json")
 C_ENGINE = Path("crates/vendor/tree-sitter/src/query.c")
+TEST = "treesit::native::query_oracle::query_oracle_"
 
 
 def git(*args):
     return subprocess.check_output(["git", *args], cwd=ROOT)
 
 
-def add_test_source(path, anchor, source):
-    text = path.read_text()
-    if text.count(anchor) != 1:
-        raise ValueError(f"missing C reference anchor in {path}")
-    path.write_text(text.replace(anchor, source.read_text().rstrip() + "\n\n" + anchor))
+def digest(path):
+    return sha256(path.read_bytes())
 
 
-def reference(work):
-    """Extract the pinned production sources and add the shared test recorder."""
-    dest = work / "reference"
+def archive(ref, dest):
     dest.mkdir()
-    with subprocess.Popen(["git", "archive", C_REFERENCE], cwd=ROOT, stdout=subprocess.PIPE) as archive:
-        with tarfile.open(fileobj=archive.stdout, mode="r|") as contents:
+    with subprocess.Popen(["git", "archive", ref], cwd=ROOT, stdout=subprocess.PIPE) as job:
+        with tarfile.open(fileobj=job.stdout, mode="r|") as contents:
             contents.extractall(dest, filter="data")
-        if archive.wait():
-            raise ValueError(f"could not extract {C_REFERENCE}")
-    shutil.copyfile(ROOT / RECORDER, dest / RECORDER)
-    add_test_source(dest / NATIVE, "    /// Every match of the query under NODE",
-                    SUPPORT / "c-matches.rs")
-    add_test_source(dest / QUIT, "    /// Whether it may ever say to stop:",
-                    SUPPORT / "test-stop.rs")
+        if job.wait():
+            raise ValueError(f"could not extract {ref}")
     return dest
 
 
-def touch_sources(root):
-    if root == ROOT:
-        paths = [root / os.fsdecode(name) for name in git("ls-files", "-z").split(b"\0") if name]
-    else:
-        paths = root.rglob("*")
-    for path in paths:
+def insert_before(path, anchor, source):
+    text = path.read_text()
+    if text.count(anchor) != 1:
+        raise ValueError(f"missing C reference anchor in {path}")
+    path.write_text(text.replace(anchor, source + anchor))
+
+
+def add_reference_tests(reference, subject):
+    """Use the same recorder and test-only poll observer on the pinned C arm."""
+    shutil.copyfile(subject / RECORDER, reference / RECORDER)
+    (reference / POLLS).parent.mkdir(exist_ok=True)
+    shutil.copyfile(subject / POLLS, reference / POLLS)
+    insert_before(reference / NATIVE, "    /// Every match of the query under NODE",
+                  (subject / SUPPORT / "c-matches.rs").read_text() + "\n")
+    insert_before(reference / QUIT, "    /// Whether it may ever say to stop:",
+                  (subject / SUPPORT / "test-stop.rs").read_text() + "\n")
+    insert_before(reference / QUIT, "/// A loop's quit probe, taken from the VM before the loop",
+                  '#[cfg(test)]\n#[path = "quit/query_polls.rs"]\npub(crate) mod query_polls;\n\n')
+    insert_before(reference / QUIT,
+                  "        if self.quit.is_some() { crate::gap_probe::safepoint(None); }",
+                  "        #[cfg(test)]\n        if let Some(due) = query_polls::record() { return due; }\n")
+
+
+def build(root, dest, args, testing=False):
+    # The archives have no index and are the only inputs being compiled.
+    for path in root.rglob("*"):
         if path.is_file() and not path.is_symlink():
             path.touch(exist_ok=True)
-
-
-def build_oracle(root, dest):
-    touch_sources(root)
-    command = ["cargo", "test", "-p", "romacs-vm", "--profile", "gate", "--locked",
-               "--offline", "--lib", "--no-run", "--message-format=json"]
-    with open(dest.with_suffix(".build.jsonl"), "w", encoding="utf-8") as log:
-        subprocess.run(command, cwd=root, check=True, stdout=log)
-    with open(dest.with_suffix(".build.jsonl"), encoding="utf-8") as log:
-        executables = [row["executable"] for line in log
-                       if (row := json.loads(line)).get("executable") and row["profile"]["test"]]
+    flags = ["--profile", "gate", "--locked", "--offline", "--message-format=json"]
+    report = dest.with_suffix(".build.jsonl")
+    with report.open("w") as log:
+        subprocess.run(["cargo", *args, *flags], cwd=root, check=True, stdout=log)
+    with report.open() as log:
+        executables = [row["executable"] for line in log if (row := json.loads(line)).get("executable")
+                       and row["profile"]["test"] == testing]
     if len(executables) != 1:
-        raise ValueError(f"expected one oracle binary, found {executables}")
+        raise ValueError(f"expected one executable, found {executables}")
     shutil.copy2(executables[0], dest)
+    print(f"{digest(dest)}  {dest}", flush=True)
+    return dest
 
 
-def extract(editor, work):
+def build_editor(source, dest):
+    return build(source, dest, ["build", "-p", "romacs-vm-gui", "--bin", "romacs-vm-gui"])
+
+
+def build_oracle(source, dest):
+    return build(source, dest, ["test", "-p", "romacs-vm", "--lib", "--no-run"], testing=True)
+
+
+def extract(editor, subject, work):
+    symbols = subprocess.check_output(["nm", "--defined-only", editor], text=True)
+    if not {"ts_query_new", "ts_query_cursor_next_match"} <= {
+        line.rsplit(maxsplit=1)[-1] for line in symbols.splitlines() if line
+    }:
+        raise ValueError("corpus editor is missing the linked C query engine")
     home = work / "editor-home"
     home.mkdir()
-    env = dict(os.environ, HOME=str(home), ROMACS_RUNTIME_ROOT=str(ROOT),
+    env = {key: value for key, value in os.environ.items() if not key.startswith("ROMACS_")}
+    env.update(HOME=str(home), ROMACS_RUNTIME_ROOT=str(subject),
+               ROMACS_SOURCE_DIRECTORY=str(subject), ROMACS_LISP_DIR=str(subject / "lisp"),
                ROMACS_QUERY_SCRATCH=str(work))
     for kind in ("CACHE", "CONFIG", "DATA", "STATE"):
         env[f"XDG_{kind}_HOME"] = str(home / kind.lower())
-    shutil.copyfile(SUPPORT / "samples.json", work / "samples.json")
+    shutil.copyfile(subject / SUPPORT / "samples.json", work / "samples.json")
     with (work / "extract.log").open("w") as log:
-        subprocess.run([editor, "-Q", "--batch", "--load", SUPPORT / "extract.el"],
-                       cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT, check=True)
+        subprocess.run([editor, "-Q", "--batch", "--load", subject / SUPPORT / "extract.el"],
+                       cwd=subject, env=env, stdout=log, stderr=subprocess.STDOUT, check=True)
 
 
-def record(oracle, work):
-    subprocess.run([oracle, TEST, "--skip", TEST + "record"], check=True)
+def freeze_manifest(work, reference, subject, tree, editor):
+    # Use the pinned C lockfile to locate the grammar packages' query sources.
+    cases = freeze_cases(corpus(reference, work))
+    check_cases(cases)
+    mode_files = sorted({origin for case in cases for origin in case["origins"][:case["shipped"]]
+                         if origin.startswith("lisp/")})
+    if not mode_files:
+        raise ValueError("no mode source paths in the extracted corpus")
+    manifest = dict(format=1, c_revision=C_REFERENCE, subject_tree=tree, c_editor_sha256=digest(editor),
+                    grammar_pins_sha256=digest(subject / GR_JSON),
+                    mode_sources={path: digest(subject / path) for path in mode_files},
+                    cases=cases)
+    path = work / "corpus.json"
+    path.write_text(canonical(manifest) + "\n")
+    expected = digest(path)
+    path.with_suffix(".sha256").write_text(expected + "\n")
+    path.chmod(0o444)
+    print(f"Frozen before candidate build: {expected}  {path}", flush=True)
+    return path, expected
+
+
+def check_digest(path, expected):
+    if digest(path) != expected:
+        raise ValueError(f"frozen manifest digest changed: {path}")
+
+
+def load_manifest(path, expected):
+    check_digest(path, expected)
+    manifest = json.loads(path.read_bytes())
+    if manifest["format"] != 1 or manifest["c_revision"] != C_REFERENCE:
+        raise ValueError("unexpected manifest format or C reference")
+    cases = manifest["cases"]
+    check_cases(cases)
+    return cases
+
+
+def record(oracle, manifest, expected):
+    check_digest(manifest, expected)
+    subprocess.run([oracle, TEST, "--skip", TEST + "record", "--nocapture"], check=True)
     path = oracle.with_suffix(".records")
-    env = dict(os.environ, ROMACS_QUERY_CORPUS=str(work / "corpus.json"),
-               ROMACS_QUERY_RECORDS=str(path))
+    env = dict(os.environ, ROMACS_QUERY_CORPUS=str(manifest), ROMACS_QUERY_RECORDS=str(path))
     subprocess.run([oracle, "--ignored", "--exact", TEST + "record"], env=env, check=True)
+    check_digest(manifest, expected)
     if not path.is_file() or not path.stat().st_size:
         raise ValueError(f"{oracle} produced no records")
     return path
 
 
-def captures(matches):
-    return [(pattern, [capture[0] for capture in found]) for pattern, found in matches]
-
-
-def verify_probes(old, new, rust):
-    """Exactly three known C defects on isolated, named reproducers."""
-    # The other row of this probe is the explicit pair control.
-    wildcard = "wildcard-negated-field"
-    fourth = "fourth-capture"
-    wide = "wide-step-index"
-    if set(old) != {wildcard, fourth, wide, "subtree-and-bounds"} or old.keys() != new.keys():
-        raise ValueError("missing or unknown probe")
-    if old["subtree-and-bounds"] != new["subtree-and-bounds"] or [
-        len(found) for found in old["subtree-and-bounds"]
-    ] != [2, 1, 2, 1]:
-        raise ValueError("subtree or byte-bound probe changed")
-    if len(old[wildcard]) != 2 or old[wildcard][0] or captures(old[wildcard][1]) != [(0, [1, 0])]:
-        raise ValueError("unexpected C wildcard reproducer")
-    if len(old[fourth]) != 1 or captures(old[fourth][0]) != [(0, [0, 1, 2])]:
-        raise ValueError("unexpected C capture-limit reproducer")
-    if old[wide] != [[]]:
-        raise ValueError("unexpected C step-index reproducer")
-    if not rust:
-        if old != new:
-            raise ValueError("C candidate changed the pinned probes")
-        return
-    if new[wildcard] != [[], []] or len(new[fourth]) != 1 or len(new[wide]) != 1:
-        raise ValueError("invalid Rust wildcard or probe results")
-    if captures(new[fourth][0]) != [(0, [0, 1, 2, 3])] or captures(new[wide][0]) != [(32768, [1])]:
-        raise ValueError("Rust dropped a capture or wrapped the wide step index")
-    before, after = old[fourth][0][0][1], new[fourth][0][0][1]
-    if before != after[:3] or after[3][1:] != before[0][1:]:
-        raise ValueError("Rust fourth-capture probe changed the captured node")
-
-
-def compare(reference_records, candidate_records, cases, rust):
-    found = {}
-    case = None
-    seed = None
-    probes = defaultdict(list), defaultdict(list)
-    states = Counter()
-    compiled = Counter()
-    runs = Counter()
-    hits = defaultdict(set)
-    inventory = {case["language"]: case for case in cases}
-    with reference_records.open() as baseline, candidate_records.open() as candidate:
-        for old, new in itertools.zip_longest(baseline, candidate):
-            if old is None or new is None:
-                raise ValueError("record count differs")
-            label, *fields = old.split(maxsplit=4)
-            if label == "probe":
-                for rows, line in zip(probes, (old, new), strict=True):
-                    _, name, payload = line.split(maxsplit=2)
-                    rows[name].append(json.loads(payload))
-                continue
-            if label == "grammar":
-                language = fields[0]
-                case = inventory[language]
-                if language in found or int(fields[2]) != len(case["queries"]):
-                    raise ValueError(f"bad grammar header for {language}")
-                found[language] = int(fields[2])
-            elif label == "seed":
-                seed = old.strip()
-                states[language] += 1
-            elif label == "query":
-                compiled[language] += 1
-            elif label.isdecimal():
-                runs[language] += 1
-                if any(items for _, items in json.loads(old.split(maxsplit=3)[3])):
-                    hits[language].add(int(label))
-            if old != new:
-                if label == "query":
-                    tag, index, left = old.split(maxsplit=2)
-                    other_tag, other_index, right = new.split(maxsplit=2)
-                    if (tag, index, json.loads(left)) == (other_tag, other_index, json.loads(right)):
-                        continue
-                index = int(label) if label.isdecimal() else (
-                    int(fields[0]) if label in {"error", "query"} else None)
-                sample = f"\n{case['origins'][index]}\n{case['queries'][index]}" if index is not None else ""
-                raise ValueError(f"{language}, {seed}{sample}\nC {old[:400]}Rust {new[:400]}")
-    if found.keys() != inventory.keys():
-        raise ValueError("missing grammar records")
-    for name, case in inventory.items():
-        if (states[name] != 51 or compiled[name] < 8 or runs[name] != compiled[name] * 51 * 3
-                or len(hits[name]) < 3 or not any(index < case["shipped"] for index in hits[name])):
-            raise ValueError(f"insufficient coverage for {name}: {compiled[name]} compiles, "
-                             f"{states[name]} states, {runs[name]} runs, {len(hits[name])} matching queries")
-        print(f"{name:12} {found[name]:3} sources  {compiled[name]:3} accepted  "
-              f"{len(hits[name]):3} with captures  {runs[name]:5} executions")
-    verify_probes(*probes, rust)
-    print(f"{len(found)} grammars, {sum(found.values())} sources, "
-          f"{sum(states.values()) - len(found) * 3} seeded edits, {sum(runs.values())} executions")
-    print("Shipped-query outputs are identical."
-          + (" Three isolated C defects reproduced and corrected." if rust else ""))
+def run(work):
+    if work == ROOT or ROOT in work.parents:
+        raise ValueError("--out must be outside the source tree")
+    if not os.environ.get("CARGO_TARGET_DIR") or not Path(os.environ["CARGO_TARGET_DIR"]).is_absolute():
+        raise ValueError("set CARGO_TARGET_DIR to the assigned absolute target path")
+    subprocess.run(["git", "diff", "--exit-code"], cwd=ROOT, check=True)
+    work.mkdir(parents=True)
+    tree = git("write-tree").decode().strip()
+    subject = archive(tree, work / "subject")
+    reference = archive(C_REFERENCE, work / "reference")
+    if (reference / GR_JSON).read_bytes() != (subject / GR_JSON).read_bytes():
+        raise ValueError("the pinned C arm uses different grammar sources")
+    c_editor = build_editor(reference, work / "c-editor")
+    extract(c_editor, subject, work)
+    manifest, expected = freeze_manifest(work, reference, subject, tree, c_editor)
+    add_reference_tests(reference, subject)
+    c_records = record(build_oracle(reference, work / "oracle-c"), manifest, expected)
+    rust = not (subject / C_ENGINE).is_file()
+    candidate_records = record(build_oracle(subject, work / "oracle-candidate"), manifest, expected)
+    compare(c_records, candidate_records, load_manifest(manifest, expected), rust)
+    build_editor(subject, work / "candidate-editor")
 
 
 def main():
-    args = argparse.ArgumentParser(description=__doc__)
-    args.add_argument("--editor", type=Path, required=True, help="editor built from the current inputs")
-    args.add_argument("--out", type=Path, required=True, help="new scratch directory outside the checkout")
-    opts = args.parse_args()
-    work = opts.out.resolve()
-    if work == ROOT or ROOT in work.parents:
-        args.error("--out must be outside the source tree")
-    if not os.environ.get("CARGO_TARGET_DIR") or not Path(os.environ["CARGO_TARGET_DIR"]).is_absolute():
-        args.error("set CARGO_TARGET_DIR to the assigned absolute target path")
-    work.mkdir(parents=True)
-    # The grammar sources in the two executables must have the same pins.
-    if git("show", f"{C_REFERENCE}:crates/romacs-grammars/sources.json") != (
-        ROOT / "crates/romacs-grammars/sources.json"
-    ).read_bytes():
-        raise ValueError("the pinned C arm uses different grammar sources")
-    touch_sources(ROOT)
-    extract(opts.editor.resolve(strict=True), work)
-    cases = corpus(ROOT, work)
-    (work / "corpus.json").write_text(json.dumps(cases, ensure_ascii=False))
-    c, candidate = (work / name for name in ("oracle-c", "oracle-candidate"))
-    build_oracle(reference(work), c)
-    build_oracle(ROOT, candidate)
-    for path in (c, candidate):
-        print(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path}", flush=True)
-    compare(record(c, work), record(candidate, work), cases, not (ROOT / C_ENGINE).is_file())
+    for key in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+        os.environ.pop(key, None)
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+    build_run = commands.add_parser("run", help="build both editors and freeze the corpus using C")
+    build_run.add_argument("--out", type=Path, required=True)
+    check = commands.add_parser("compare", help="validate existing records against a frozen corpus")
+    check.add_argument("--manifest", type=Path, required=True)
+    check.add_argument("--reference", type=Path, required=True)
+    check.add_argument("--candidate", type=Path, required=True)
+    check.add_argument("--expect-c", action="store_true")
+    args = parser.parse_args()
+    if args.command == "run":
+        run(args.out.resolve())
+    else:
+        cases = load_manifest(args.manifest, args.manifest.with_suffix(".sha256").read_text().strip())
+        compare(args.reference, args.candidate, cases, not args.expect_c)
 
 
 if __name__ == "__main__":
     try:
         main()
-    except (ValueError, subprocess.CalledProcessError) as error:
+    except (ValueError, OSError, subprocess.CalledProcessError) as error:
         sys.exit(str(error))

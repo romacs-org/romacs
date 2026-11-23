@@ -15,6 +15,27 @@ struct Case {
     language: String,
     text: String,
     queries: Vec<String>,
+    states: Vec<State>,
+}
+
+type Change = (usize, usize, String);
+
+struct State {
+    seed: u64,
+    index: u64,
+    change: Option<Change>,
+    ranges: Vec<[u32; 2]>,
+}
+
+impl State {
+    fn from_json(row: &Value) -> Self {
+        Self {
+            seed: row[0].as_u64().expect("state seed"),
+            index: row[1].as_u64().expect("state index"),
+            change: serde_json::from_value(row[2].clone()).expect("scheduled edit"),
+            ranges: serde_json::from_value(row[3].clone()).expect("scheduled ranges"),
+        }
+    }
 }
 
 impl Case {
@@ -28,6 +49,12 @@ impl Case {
                 .expect("query corpus array")
                 .iter()
                 .map(string)
+                .collect(),
+            states: value["states"]
+                .as_array()
+                .expect("query states")
+                .iter()
+                .map(State::from_json)
                 .collect(),
         }
     }
@@ -164,32 +191,14 @@ fn point(text: &[u8], offset: usize) -> Point {
     position
 }
 
-fn edit(text: &mut Vec<u8>, seed: &mut u64, near: usize) -> InputEdit {
-    *seed ^= *seed >> 12;
-    *seed ^= *seed << 25;
-    *seed ^= *seed >> 27;
-    let start_byte = near
-        .saturating_sub(8)
-        .saturating_add((*seed % 17) as usize)
-        .min(text.len());
-    let (delete, insert): (usize, &[u8]) = match *seed % 7 {
-        0 => (1, b""),
-        1 => (2, b"}"),
-        2 => (0, b"x"),
-        3 => (0, b"\n"),
-        4 => (0, b"\""),
-        5 => (0, b","),
-        _ => (0, b"("),
-    };
-    let old_end_byte = (start_byte + delete).min(text.len());
-    let start_position = point(text, start_byte);
-    let old_end_position = point(text, old_end_byte);
-    assert!(start_byte <= old_end_byte);
-    text.splice(start_byte..old_end_byte, insert.iter().copied());
-    let new_end_byte = start_byte + insert.len();
+fn edit(text: &mut Vec<u8>, (start, end, insert): &Change) -> InputEdit {
+    let start_position = point(text, *start);
+    let old_end_position = point(text, *end);
+    text.splice(*start..*end, insert.bytes());
+    let new_end_byte = start + insert.len();
     InputEdit {
-        start_byte,
-        old_end_byte,
+        start_byte: *start,
+        old_end_byte: *end,
         new_end_byte,
         start_position,
         old_end_position,
@@ -197,45 +206,48 @@ fn edit(text: &mut Vec<u8>, seed: &mut u64, near: usize) -> InputEdit {
     }
 }
 
+fn record(output: &mut impl Write, row: &Value) {
+    writeln!(output, "{row}").expect("write record");
+}
+
 fn write_matches(
     output: &mut impl Write,
     tree: &tree_sitter::Tree,
     queries: &[Option<Query>],
-    near: u32,
+    state: &State,
 ) {
     let root = Node::from(tree.root_node());
     let (digest, ids) = tree_index(root);
-    writeln!(output, "tree {digest:016x}").expect("write tree");
-    let ranges = [
-        (0, u32::MAX),
-        (near.saturating_sub(7), near.saturating_add(8)),
-        (near, near),
-    ];
+    record(
+        output,
+        &json!([
+            "state",
+            state.seed,
+            state.index,
+            state.change,
+            format!("{digest:016x}")
+        ]),
+    );
     for (index, query) in queries.iter().enumerate() {
         let Some(query) = query else { continue };
-        for range in ranges {
-            let found = matches(query, tree, root, range, &ids);
-            writeln!(output, "{index} {} {} {}", range.0, range.1, json!(found))
-                .expect("write matches");
+        for (slot, &[start, end]) in state.ranges.iter().enumerate() {
+            let found = matches(query, tree, root, (start, end), &ids);
+            record(output, &json!(["run", index, slot, [start, end], found]));
         }
     }
 }
 
-fn run_case(case: &Case, output: &mut impl Write, edits: u32) {
-    assert!(
-        !case.text.is_empty() && !case.queries.is_empty(),
-        "empty case for {}",
-        case.language
-    );
+fn run_case(case: &Case, output: &mut impl Write) {
     let language = language(&case.language);
-    writeln!(
+    record(
         output,
-        "grammar {} {} {}",
-        case.language,
-        language.abi_version(),
-        case.queries.len()
-    )
-    .expect("write grammar");
+        &json!([
+            "grammar",
+            case.language,
+            case.queries.len(),
+            language.abi_version()
+        ]),
+    );
     let queries: Vec<_> = case
         .queries
         .iter()
@@ -243,66 +255,46 @@ fn run_case(case: &Case, output: &mut impl Write, edits: u32) {
         .map(
             |(index, source)| match Query::new(&language, source.as_bytes()) {
                 Ok(query) => {
-                    writeln!(output, "query {index} {}", metadata(&query)).expect("write query");
+                    record(output, &json!(["compile", index, ["ok", metadata(&query)]]));
                     Some(query)
                 }
                 Err((offset, kind)) => {
-                    writeln!(output, "error {index} {offset} {kind}").expect("write error");
+                    record(output, &json!(["compile", index, ["error", offset, kind]]));
                     None
                 }
             },
         )
         .collect();
-    assert!(
-        queries.iter().any(Option::is_some),
-        "all queries failed for {}",
-        case.language
-    );
-    for seed in [1, 2, 3] {
-        run_edits(case, output, &language, &queries, edits, seed);
-    }
+    run_states(case, output, &language, &queries);
 }
 
-fn run_edits(
+fn run_states(
     case: &Case,
     output: &mut impl Write,
     language: &Language,
     queries: &[Option<Query>],
-    edits: u32,
-    seed: u64,
 ) {
     let mut parser = tree_sitter::Parser::new();
     parser
         .set_language(&language.0)
         .expect("compatible grammar");
-    let mut text = case.text.as_bytes().to_vec();
-    let mut tree = parser.parse(&text, None).expect("fresh tree");
-    let mut random = seed;
-    let mut near = text.len() / 2;
-    writeln!(output, "seed {seed} edit 0").expect("write initial state");
-    write_matches(
-        output,
-        &tree,
-        queries,
-        u32::try_from(near).expect("fixture fits in u32 bytes"),
-    );
-    for index in 1..=edits {
-        let edit = edit(&mut text, &mut random, near);
-        near = edit.new_end_byte;
-        tree.edit(&edit);
-        tree = parser.parse(&text, Some(&tree)).expect("incremental tree");
-        writeln!(
-            output,
-            "seed {seed} edit {index} {} {} {}",
-            edit.start_byte, edit.old_end_byte, edit.new_end_byte
-        )
-        .expect("write edit");
-        write_matches(
-            output,
-            &tree,
-            queries,
-            u32::try_from(near).expect("fixture fits in u32 bytes"),
-        );
+    let mut text = Vec::new();
+    let mut previous: Option<tree_sitter::Tree> = None;
+    for state in &case.states {
+        if let Some(change) = &state.change {
+            previous
+                .as_mut()
+                .expect("initial state")
+                .edit(&edit(&mut text, change));
+        } else {
+            text = case.text.as_bytes().to_vec();
+            previous = None;
+        }
+        let tree = parser
+            .parse(&text, previous.as_ref())
+            .expect("parse scheduled state");
+        write_matches(output, &tree, queries, state);
+        previous = Some(tree);
     }
 }
 
@@ -340,8 +332,13 @@ fn query_oracle_preserves_match_and_capture_order() {
 fn query_oracle_record() {
     let path = |name| PathBuf::from(std::env::var_os(name).expect(name));
     let manifest = std::fs::read(path("ROMACS_QUERY_CORPUS")).expect("query corpus");
-    let manifest: Vec<Value> = serde_json::from_slice(&manifest).expect("corpus JSON");
-    let cases: Vec<_> = manifest.iter().map(Case::from_json).collect();
+    let manifest: Value = serde_json::from_slice(&manifest).expect("corpus JSON");
+    let cases: Vec<_> = manifest["cases"]
+        .as_array()
+        .expect("cases")
+        .iter()
+        .map(Case::from_json)
+        .collect();
     let languages: std::collections::BTreeSet<_> =
         cases.iter().map(|case| case.language.as_str()).collect();
     assert_eq!(
@@ -351,7 +348,7 @@ fn query_oracle_record() {
     let mut output =
         BufWriter::new(std::fs::File::create(path("ROMACS_QUERY_RECORDS")).expect("records"));
     for case in &cases {
-        run_case(case, &mut output, 16);
+        run_case(case, &mut output);
     }
     write_probes(&mut output);
     output.flush().expect("flush records");
@@ -374,11 +371,11 @@ fn probe(
     let (language, tree) = json_tree(source);
     let root = tree.root_node();
     let (_, ids) = tree_index(Node::from(root));
-    for &(query, child, range) in runs {
+    for (index, &(query, child, range)) in runs.iter().enumerate() {
         let node = child.map_or(root, |index| root.named_child(index).expect("probe child"));
         let query = Query::new(&language, query.as_bytes()).expect("probe query");
         let found = matches(&query, &tree, Node::from(node), range, &ids);
-        writeln!(output, "probe {name} {}", json!(found)).expect("write probe");
+        record(output, &json!(["probe", name, index, found]));
     }
 }
 
@@ -431,11 +428,17 @@ fn query_oracle_stops_no_match_scan() {
     let (language, tree) = json_tree(&format!("[{}0]", "1,".repeat(4096)));
     let root = Node::from(tree.root_node());
     let query = Query::new(&language, b"(string) @s").expect("probe query");
-    let quit = std::sync::Arc::new(crate::quit::QuitSignal::new());
-    quit.set_busy(true);
-    assert!(quit.interrupt());
-    let stop = NativeStop::with_test_signal(quit);
-    assert!(query.matches_in(&tree, root, (0, 0), &stop).is_none());
-    let done = query.matches_in(&tree, root, (0, 0), &NativeStop::never());
-    assert!(done.expect("unstopped scan").is_empty());
+    let stop = NativeStop::with_test_signal(std::sync::Arc::new(crate::quit::QuitSignal::new()));
+    let walk = || query.matches_in(&tree, root, (0, 0), &stop);
+    let (complete, full_polls) = crate::quit::query_polls::count(None, walk);
+    assert!(complete.expect("unstopped scan").is_empty());
+
+    // Cancel on the second real poll. A final check alone cannot reach it.
+    let (stopped, early_polls) = crate::quit::query_polls::count(Some(2), walk);
+    assert!(stopped.is_none());
+    assert!((2..=3).contains(&early_polls), "{early_polls}");
+    assert!(
+        full_polls > early_polls,
+        "full walk only polled {full_polls} times"
+    );
 }

@@ -658,6 +658,10 @@ impl Steps {
 #[derive(Debug)]
 pub(crate) struct Stopped;
 
+#[cfg(test)]
+#[path = "quit/query_polls.rs"]
+pub(crate) mod query_polls;
+
 /// A loop's quit probe, taken from the VM before the loop
 /// ([`Vm::native_stop`]): whether a press or a debug event waits that
 /// `native_poll` would quit for. It reads one atomic word.
@@ -692,6 +696,8 @@ impl NativeStop {
     /// that stops ends in the quit. Where it is armed, a safepoint.
     #[inline]
     pub(crate) fn due(&self) -> bool {
+        #[cfg(test)]
+        if let Some(due) = query_polls::record() { return due; }
         if self.quit.is_some() { crate::gap_probe::safepoint(None); }
         self.latched || self.quit.as_ref().is_some_and(|quit| quit.pressed() || quit.deadline_current())
             || crate::host::user_signal_waiting(self.debug_events)
