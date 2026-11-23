@@ -426,11 +426,16 @@ cache, it reports none) or does not say."
      (when text (list (list :type 'message-end :message id :parent parent))))))
 
 (defun romacs-agent--claude-assistant-events (line parent streamed)
-  "Decode a live Claude assistant LINE from PARENT, already STREAMED when non-nil."
+  "Decode a live Claude assistant LINE from PARENT, already STREAMED when non-nil.
+An API error's code (its `error') is kept for the turn's end, the next
+line (`romacs-agent--claude-result-events')."
   (let ((uuid (gethash "uuid" line))
-        (message (gethash "message" line)))
+        (message (gethash "message" line))
+        (code (romacs-agent--value (gethash "error" line))))
     (append (when (and (not parent) (stringp uuid))
               (list (list :type 'record-state :state (list :resume-at uuid))))
+            (when (and (not parent) (stringp code))
+              (list (list :type 'handshake :state (list :api-error code))))
             (romacs-agent--claude-message-events message parent streamed))))
 
 (defun romacs-agent--claude-user-events (line parent compacting)
@@ -464,10 +469,14 @@ cache, it reports none) or does not say."
                when (equal btype "text")
                collect (list :type 'status :text (gethash "text" block) :parent parent))))))
 
-(defun romacs-agent--claude-result-events (line)
-  "Decode a Claude Code result LINE."
+(defun romacs-agent--claude-result-events (line api-error)
+  "Decode a Claude Code result LINE, API-ERROR the code its turn's API
+error said (`romacs-agent--claude-assistant-events'), or nil."
   (list (list :type 'done :cost (gethash "total_cost_usd" line)
               :error (eq (gethash "is_error" line) t) :text (gethash "result" line)
+              ;; Its account's sign-in refused.
+              :failure (and (eq (gethash "is_error" line) t) (equal api-error "authentication_failed")
+                            'authentication)
               ;; Refused at a usage limit: its instance's, or its model's
               ;; alone (one that needs usage credits the account has spent;
               ;; its other models still run).
@@ -506,6 +515,7 @@ cache, it reports none) or does not say."
      (list :compacting (romacs-agent-compacting session))
      (pcase (gethash "type" line)
        ("stream_event" (list :message (romacs-agent-message session)))
+       ("result" (list :api-error (plist-get (romacs-agent-driver-state session) :api-error)))
        ("assistant"
         (list :streamed (gethash (gethash "id" (gethash "message" line)) (romacs-agent-streamed session))))
        ("control_request" (list :owed (plist-get (romacs-agent-driver-state session) :owed)))
@@ -537,7 +547,10 @@ cache, it reports none) or does not say."
               ("assistant"
                (romacs-agent--claude-assistant-events line parent (plist-get context :streamed)))
               ("user" (romacs-agent--claude-user-events line parent compacting))
-              ("result" (romacs-agent--claude-result-events line))
+              ("result" (let ((api-error (plist-get context :api-error)))
+                          ;; Its turn's error ends with it.
+                          (append (and api-error (list (list :type 'handshake :state (list :api-error nil))))
+                                  (romacs-agent--claude-result-events line api-error))))
               ("control_request"
                (romacs-agent--claude-control-request (plist-get context :owed)
                                                    (gethash "request_id" line) (gethash "request" line)))
@@ -573,6 +586,13 @@ seconds since the epoch, or nil."
               (token (gethash "accessToken" oauth))
               ((stringp token)))
     (cons token (/ (or (gethash "expiresAt" oauth) 0) 1000.0))))
+
+(defun romacs-agent--claude-credentials-stamp (home)
+  "The stamp of the sign-in kept at HOME (`:credentials-stamp' of
+`romacs-agent-define-harness'), its credentials file's
+\(`romacs-agent--file-stamp'): Claude Code rewrites that file as its user
+signs in or it renews the sign-in.  Nil with none."
+  (romacs-agent--file-stamp (expand-file-name ".credentials.json" home)))
 
 (defun romacs-agent--claude-usage-report (object time)
   "OBJECT, what Claude's usage endpoint answered, as a `rate-limit' event
@@ -1056,6 +1076,7 @@ name is longer than Claude Code keeps."
   :decode #'romacs-agent--claude-decode
   :decode-context #'romacs-agent--claude-decode-context
   :usage #'romacs-agent--claude-usage
+  :credentials-stamp #'romacs-agent--claude-credentials-stamp
   ;; A turn the harness's end cut short goes on (Claude Code's own switch).
   :resume-environment '("CLAUDE_CODE_RESUME_INTERRUPTED_TURN=1")
   :native-id-p #'romacs-agent--uuid-p

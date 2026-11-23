@@ -711,6 +711,9 @@ instances) is derived again when it changes.")
       callbacks for older drivers without :decode, for out and in;
   Decoder events include:
       `handshake' events (:state PLIST) fold into its startup state.
+      `done' ends a turn: :error, :text, :reason, :limit (refused at
+      its usage limit) and :failure `authentication' (its account's
+      sign-in refused, `romacs-agent-sign-in-refuse').
       `record-state' applies private bookkeeping (:state PLIST of
       :reply, :message, :streamed, :compacting, :incoming or :resume-at).
       A tool
@@ -743,6 +746,11 @@ instances) is derived again when it changes.")
       `rate-limit' event naming every window that binds the account,
       or nil when that is not known now.  An account at its limit is
       asked again and again (`romacs-agent-room-check-interval');
+  :credentials-stamp (HOME)   optional: the stamp of the account's
+      sign-in configured at HOME, its credentials file's
+      (`romacs-agent--file-stamp'), which changes as it signs in again:
+      a refused sign-in no longer holds once it does
+      (`romacs-agent-sign-in-refused');
   :presented-plan-p (SESSION ID)   optional: whether request ID is the
       plan the harness presents, its allowing taking it out of plan mode
       (`romacs-agent-respond'); a harness whose plans are no request marks
@@ -1844,13 +1852,23 @@ ANSWERING is what the previous turn answered."
       (when (romacs-agent-title-auto session)
         (romacs-agent--title-from session (plist-get event :text))))))
 
+(defun romacs-agent--refused-text (before event)
+  "What a turn ends with whose instance refused its sign-in (EVENT): on
+which, the instance its run was launched on (BEFORE's :attempt-provider,
+`romacs-agent--attempt-provider'), and why, the harness's words."
+  (format "Sign-in refused on %s: %s" (or (plist-get before :attempt-provider) (plist-get before :provider))
+          (or (plist-get event :reason) (plist-get event :text))))
+
 (defun romacs-agent--completed-turn (before event room)
   "Return the completed turn's state from BEFORE, EVENT, and account ROOM.
 BEFORE has the session's count, provider, model, context window, cost and
 limit: a limit again while it moves on from one (`:moving') is the same
-move's, as nothing goes to its harness meanwhile."
+move's, as nothing goes to its harness meanwhile.  A turn its instance
+refused the sign-in for (EVENT's :failure `authentication') says where
+and why."
   (let ((limit (plist-get event :limit))
-        (reply (plist-get event :text))
+        (reply (if (eq (plist-get event :failure) 'authentication) (romacs-agent--refused-text before event)
+                 (plist-get event :text)))
         (cost (plist-get event :cost)))
     (list :seq (or (plist-get event :seq) 0)
           :turns (1+ (plist-get before :turns))
@@ -1893,13 +1911,42 @@ move's, as nothing goes to its harness meanwhile."
          (before (list :turns (romacs-agent-turns session) :provider provider
                        :model (romacs-agent-model session)
                        :context-window (romacs-agent-context-window session)
-                       :cost (romacs-agent-cost session) :limited (romacs-agent-limited session))))
-    (romacs-agent--apply-completed-turn session (romacs-agent--completed-turn before event room)))
+                       :cost (romacs-agent-cost session) :limited (romacs-agent-limited session)
+                       :attempt-provider (romacs-agent--attempt-provider session))))
+    (romacs-agent--apply-completed-turn session (romacs-agent--completed-turn before event room))
+    ;; Seen live only: a replay's, a copy's or a worker's fold says nothing now.
+    (when (romacs-agent--live-p session)
+      (romacs-agent--sign-in-seen session event)))
   ;; In a persistent harness the selection applies before the queued message.
   (when (and (or (romacs-agent-queue session) (romacs-agent-pending-selection session))
              (not (romacs-agent--per-turn-p session))
              (process-live-p (romacs-agent-connection session)))
     (run-at-time 0 nil #'romacs-agent--settle session)))
+
+(defun romacs-agent--attempt-provider (session)
+  "The instance SESSION's run was launched on (its run note's), else the
+one it runs on now: what its turns' sign-in says is of that one."
+  (or (plist-get (romacs-agent-driver-state session) :credentials-provider) (romacs-agent-provider session)))
+
+(defun romacs-agent--attempt-stamp (session)
+  "The credentials stamp SESSION's run was launched with (its run note's,
+`romacs-agent--run-note'), or nil when it says none (an older build's
+run, or a harness whose driver cannot say): unknown."
+  (plist-get (romacs-agent-driver-state session) :credentials-stamp))
+
+(defun romacs-agent--sign-in-seen (session event)
+  "A live turn end (EVENT) says whether the instance SESSION's run was
+launched on (`romacs-agent--attempt-provider') takes the login it was
+launched with (`romacs-agent--attempt-stamp'; an unknown one says
+nothing): refused, it is kept so (`romacs-agent-sign-in-refuse'); gone
+through, a refusal of that login is kept no more
+\(`romacs-agent-sign-in-holds')."
+  (let ((provider (romacs-agent--attempt-provider session)) (stamp (romacs-agent--attempt-stamp session)))
+    (when stamp
+      (cond ((eq (plist-get event :failure) 'authentication)
+             (romacs-agent-sign-in-refuse provider stamp (or (plist-get event :reason) (plist-get event :text))))
+            ((not (plist-get event :error))
+             (romacs-agent-sign-in-holds provider stamp))))))
 
 (defun romacs-agent--apply-session-event (session event)
   "Apply the harness identity and permission mode in EVENT to SESSION."
@@ -1927,11 +1974,20 @@ move's, as nothing goes to its harness meanwhile."
       (setf (romacs-agent-limited session) nil))
     (when model (setf (romacs-agent-model session) model))))
 
+(defun romacs-agent--run-attempt (_session event)
+  "What the run EVENT starts knows of its attempt's sign-in: its note's
+instance and credentials stamp (`romacs-agent--run-note'), else nothing."
+  (when-let* ((credentials (plist-get event :credentials))
+              ((stringp credentials))
+              (time (romacs-agent--time-of-text (plist-get event :stamp))))
+    (list :credentials-stamp (cons credentials time) :credentials-provider (plist-get event :provider))))
+
 (defun romacs-agent--apply-run-event (session event)
   "Start SESSION's run from EVENT on the currently defined driver."
   (setf (romacs-agent-driver session) nil
         (romacs-agent-renewing session) nil
-        (romacs-agent-driver-state session) (romacs-agent--driver-anew session :run (plist-get event :seq))
+        (romacs-agent-driver-state session)
+        (apply #'romacs-agent--driver-anew session :run (plist-get event :seq) (romacs-agent--run-attempt session event))
         (romacs-agent-permission-mode session) nil
         (romacs-agent-startup-pending session) nil))
 
@@ -3466,12 +3522,17 @@ another, FUNCTION is tried again shortly, never run without the lock and
 never waited for on the command loop; a lock older than 10 s is a crashed
 writer's, taken over."
   (let ((lock (concat file ".lock")))
-    (make-directory (file-name-directory file) t)
-    (let ((made (file-attribute-modification-time (file-attributes lock))))
-      (when (and made (> (float-time (time-since made)) 10)) (ignore-errors (delete-directory lock))))
-    (if (condition-case nil (progn (make-directory lock) t) (file-already-exists nil))
+    (if (romacs-agent--take-lock lock)
         (unwind-protect (funcall function) (ignore-errors (delete-directory lock)))
       (run-at-time 0.2 nil #'romacs-agent--with-lock file function))))
+
+(defun romacs-agent--take-lock (lock)
+  "Take LOCK, a directory made atomically, its parent made first; one
+older than 10 s is a crashed writer's, taken over.  Whether it was got."
+  (make-directory (file-name-directory lock) t)
+  (let ((made (file-attribute-modification-time (file-attributes lock))))
+    (when (and made (> (float-time (time-since made)) 10)) (ignore-errors (delete-directory lock))))
+  (condition-case nil (progn (make-directory lock) t) (file-already-exists nil)))
 
 (defun romacs-agent--room-summary (windows time fallback)
   "Summarize WINDOWS at TIME, using FALLBACK when no window binds."
@@ -3684,15 +3745,162 @@ to the nearest 5%."
           windows))
 
 (defun romacs-agent-room-of (provider)
-  "Instance PROVIDER's last usage-limit report (`romacs-agent--room'), or nil."
-  (gethash provider (romacs-agent--room-table)))
+  "Instance PROVIDER's last usage-limit report (`romacs-agent--room'), or
+nil.  While its sign-in is refused (`romacs-agent-sign-in-refused'), its
+status reads `unavailable', with the :reason, and no reset brings it
+back; the report itself is as its usage left it."
+  (let ((room (gethash provider (romacs-agent--room-table))))
+    (if-let* ((reason (romacs-agent-sign-in-refused provider)))
+        (append (list :status 'unavailable :reason reason :resets nil)
+                (romacs-agent--without room '(:status :resets)))
+      room)))
 
 (defun romacs-agent-room (provider)
   "Whether instance PROVIDER has room: no report of its limit, or one
-not rejected, or one whose window has reset since."
+not rejected, or one whose window has reset since; none while its
+sign-in is refused (status `unavailable')."
   (let ((room (romacs-agent-room-of provider)))
-    (or (null room) (not (eq (plist-get room :status) 'rejected))
-        (and (plist-get room :resets) (> (float-time) (plist-get room :resets))))))
+    (pcase (plist-get room :status)
+      ('unavailable nil)
+      ('rejected (and (plist-get room :resets) (> (float-time) (plist-get room :resets))))
+      (_ t))))
+
+;;; Instances whose sign-in is refused
+
+;; An account whose login was refused is skipped until its user signs in
+;; again or a turn on that login goes through.  Its own file, apart from
+;; its usage (room.eld), read again by each editor as it changes.
+
+(defun romacs-agent--home-stamp (harness config-dir)
+  "HARNESS's credentials stamp of its configuration directory CONFIG-DIR
+\(nil: its default), by its driver's :credentials-stamp: a value that
+changes as its user signs in again; nil when the driver cannot say."
+  (when-let* ((stamp (plist-get (romacs-agent--driver-of harness) :credentials-stamp)))
+    (funcall stamp (romacs-agent--home harness config-dir))))
+
+;; A credentials stamp is (TRUENAME . TIME): the credentials file a
+;; driver names (`romacs-agent--file-stamp'), its links resolved, and its
+;; modification time, exact, as (TICKS . HZ).  Two harnesses' files in one
+;; directory, changed at one moment, are two logins.
+
+(defun romacs-agent--file-stamp (file)
+  "The credentials stamp of FILE, the credentials a driver keeps (its
+`:credentials-stamp'): its truename and exact modification time, or nil
+with none."
+  (let ((truename (file-truename file)))
+    (when-let* ((attributes (file-attributes truename)))
+      (cons truename (time-convert (file-attribute-modification-time attributes) 1000000000)))))
+
+(defun romacs-agent--valid-stamp-p (stamp)
+  "Whether STAMP is a credentials stamp: a truename and a time (TICKS . HZ)."
+  (and (consp stamp) (stringp (car stamp))
+       (consp (cdr stamp)) (integerp (cadr stamp)) (integerp (cddr stamp)) (> (cddr stamp) 0)))
+
+(defun romacs-agent--same-stamp-p (one other)
+  "Whether credentials stamps ONE and OTHER are one login: the same file at
+the same time.  What is no stamp (nil, malformed) is none."
+  (and (romacs-agent--valid-stamp-p one) (romacs-agent--valid-stamp-p other)
+       (equal (car one) (car other)) (time-equal-p (cdr one) (cdr other))))
+
+(defun romacs-agent--time-text (time)
+  "TIME, (TICKS . HZ), as a run note carries it: its nanoseconds since the
+epoch, a decimal integer, exact either side of it (a JSON number rounds)."
+  (number-to-string (car (time-convert time 1000000000))))
+
+(defun romacs-agent--time-of-text (text)
+  "The time TEXT says (`romacs-agent--time-text'), or nil when it says none."
+  (and (stringp text) (string-match-p "\\`-?[0-9]+\\'" text)
+       (cons (string-to-number text) 1000000000)))
+
+(defun romacs-agent--credentials-stamp (instance)
+  "Instance INSTANCE's credentials stamp now, of its configured directory
+\(`romacs-agent--home-stamp')."
+  (when-let* ((configured (romacs-agent--configured instance)))
+    (romacs-agent--home-stamp (plist-get configured :harness) (plist-get configured :config-dir))))
+
+(defun romacs-agent--sign-in-file ()
+  (expand-file-name "sign-in.eld" (romacs-agent--state-root)))
+
+(defvar romacs-agent--sign-in-cache nil
+  "The sign-in file as this editor last read it: (FILE VERSION . ENTRIES),
+VERSION its modification time and inode (each write a new file).")
+
+(defun romacs-agent--sign-in-read (file)
+  "FILE's entries, (INSTANCE STAMP . REASON) each, STAMP a credentials
+stamp (`romacs-agent--valid-stamp-p') and REASON a string: what is not
+one is skipped, so nothing read from the file can signal later."
+  (let ((kept (ignore-errors (with-temp-buffer (insert-file-contents file) (read (current-buffer))))))
+    (and (proper-list-p kept)
+         (cl-remove-if-not (lambda (entry) (and (consp entry) (stringp (car entry)) (consp (cdr entry))
+                                                (romacs-agent--valid-stamp-p (cadr entry)) (stringp (cddr entry))))
+                           kept))))
+
+(defun romacs-agent--sign-in-entries ()
+  "The refused sign-ins, as every editor has written them: the file read
+again whenever it changed since this editor last read it."
+  (let* ((file (romacs-agent--sign-in-file))
+         (attributes (file-attributes file))
+         (version (and attributes (cons (file-attribute-modification-time attributes)
+                                        (file-attribute-inode-number attributes)))))
+    (unless (and (equal (car romacs-agent--sign-in-cache) file) (equal (cadr romacs-agent--sign-in-cache) version))
+      (setq romacs-agent--sign-in-cache (cons file (cons version (and version (romacs-agent--sign-in-read file))))))
+    (cddr romacs-agent--sign-in-cache)))
+
+(defun romacs-agent-sign-in-refused (instance)
+  "Why instance INSTANCE's sign-in is refused, or nil: its login was
+refused, and is the one it has now (its credentials stamp the refused
+one's)."
+  (when-let* ((entry (assoc instance (romacs-agent--sign-in-entries)))
+              ((romacs-agent--same-stamp-p (cadr entry) (romacs-agent--credentials-stamp instance))))
+    (cddr entry)))
+
+(defconst romacs-agent--sign-in-wait 0.2
+  "Seconds a sign-in write waits for another editor's to end.  Each holds
+the lock for one read and one write of a file of a line or two, a few
+milliseconds; waited for on the command loop, it is bounded below what a
+user notices.  Not got by then, the observation is dropped: the next
+launch or turn on that login says it again.")
+
+(defun romacs-agent--sign-in-update (instance function)
+  "Make INSTANCE's entry FUNCTION's of it ((STAMP . REASON), or nil for
+none) in the sign-in file as it is now, holding its lock, waited for at
+most `romacs-agent--sign-in-wait' seconds, the file replaced whole.  The
+lock not got by then, nothing is written."
+  (let* ((file (romacs-agent--sign-in-file)) (lock (concat file ".lock"))
+         (deadline (+ (float-time) romacs-agent--sign-in-wait)) (held nil))
+    (while (and (not (setq held (romacs-agent--take-lock lock))) (< (float-time) deadline))
+      (sleep-for 0.01))
+    (when held
+      (unwind-protect
+          (let* ((entries (romacs-agent--sign-in-read file))
+                 (old (cdr (assoc instance entries)))
+                 (new (funcall function old)))
+            (unless (equal old new)
+              (setq entries (append (and new (list (cons instance new)))
+                                    (cl-remove instance entries :key #'car :test #'equal)))
+              (let ((temporary (make-temp-file (expand-file-name "sign-in-" (file-name-directory file)) nil ".tmp")))
+                (with-temp-file temporary (prin1 entries (current-buffer)))
+                (rename-file temporary file t))
+              (setq romacs-agent--sign-in-cache nil)))
+        (ignore-errors (delete-directory lock))))))
+
+(defun romacs-agent-sign-in-refuse (instance stamp reason)
+  "Instance INSTANCE refused the login of credentials STAMP, for REASON:
+skipped (`romacs-agent-room') while that login is its own.  Kept only
+while it still is, as the lock is held: a login made since says nothing
+of this one's refusal."
+  (romacs-agent--sign-in-update
+   instance (lambda (old)
+              (if (romacs-agent--same-stamp-p stamp (romacs-agent--credentials-stamp instance))
+                  (cons stamp (or reason "sign-in refused"))
+                old))))
+
+(defun romacs-agent-sign-in-holds (instance stamp)
+  "A turn on instance INSTANCE with the login of credentials STAMP went
+through: a refusal of that login is kept no more."
+  (when (assoc instance (romacs-agent--sign-in-entries))
+    (romacs-agent--sign-in-update
+     instance (lambda (old) (unless (romacs-agent--same-stamp-p (car old) stamp) old)))))
 
 (defcustom romacs-agent-pools nil
   "Each harness's accounts in the order new work draws on them: an alist
@@ -3723,10 +3931,12 @@ an instance's name, as it is."
 
 (defun romacs-agent-pool-pick (harness &optional except)
   "The instance new work of HARNESS draws on: the first of its pool with
-room, but EXCEPT; with none, the one whose limit resets first."
+room, but EXCEPT; with none, the one whose limit resets first; nil when
+every one's sign-in is refused (`romacs-agent-sign-in-refused')."
   (let ((pool (cl-remove except (romacs-agent-pool harness) :key (lambda (i) (plist-get i :name)) :test #'equal)))
     (or (cl-find-if (lambda (i) (romacs-agent-room (plist-get i :name))) pool)
-        (car (sort (copy-sequence pool)
+        (car (sort (copy-sequence (cl-remove 'unavailable pool
+                                             :key (lambda (i) (plist-get (romacs-agent-room-of (plist-get i :name)) :status))))
                    (lambda (a b) (< (or (plist-get (romacs-agent-room-of (plist-get a :name)) :resets) most-positive-fixnum)
                                     (or (plist-get (romacs-agent-room-of (plist-get b :name)) :resets) most-positive-fixnum))))))))
 
@@ -4708,6 +4918,31 @@ shows on a command line other users can read."
            when (string-match "\\`\\([A-Za-z_][A-Za-z0-9_]*\\)=" entry)
            collect (concat "--setenv=" (match-string 1 entry))))
 
+(defun romacs-agent--before-launch (session)
+  "Make SESSION ready for its supervisor's launch (`romacs-agent--launch')."
+  (romacs-agent--fold-now session)
+  ;; A notes-only host of it is let go: this supervisor takes the lock as
+  ;; it ends, and is the one attached.
+  (romacs-agent--end-notes-host session)
+  ;; The process launching it attaches it: its relays lead here from the start.
+  (romacs-agent--route-here session)
+  (romacs-agent--set-stopped session nil)
+  ;; Its records move to SQLite before a supervisor writes any more of them.
+  (romacs-agent-events-own session))
+
+(defun romacs-agent--run-note (session)
+  "The note SESSION's supervisor journals first, where its run's records
+start: the instance it is launched on, and the credentials stamp its
+launch finds by its harness's driver in the directory the harness gets
+\(`romacs-agent--home-stamp'): a refusal or a turn gone through in this
+run is of that login (`romacs-agent--attempt-stamp')."
+  (let ((stamp (romacs-agent--home-stamp (romacs-agent-harness session) (romacs-agent-config-dir session))))
+    (json-serialize
+     (romacs-mcp--object "type" "run" "provider" (romacs-agent-provider session)
+                         ;; Its two parts: the file, and its time to the nanosecond.
+                         "credentials" (if (romacs-agent--valid-stamp-p stamp) (car stamp) :null)
+                         "stamp" (if (romacs-agent--valid-stamp-p stamp) (romacs-agent--time-text (cdr stamp)) :null)))))
+
 (defun romacs-agent--launch (session argv &optional input images)
   "Run SESSION's supervisor with harness ARGV, as a user unit when a user
 manager answers, else detached.  INPUT is a file the supervisor gives the
@@ -4720,20 +4955,12 @@ to it."
     (setf (romacs-agent-state session) 'ended)
     (romacs-agent--changed session)
     (user-error "Session %s is not started: the editor is ending" (romacs-agent-title session)))
-  (romacs-agent--fold-now session)
-  ;; A notes-only host of it is let go: this supervisor takes the lock as
-  ;; it ends, and is the one attached.
-  (romacs-agent--end-notes-host session)
-  ;; The process launching it attaches it: its relays lead here from the start.
-  (romacs-agent--route-here session)
-  (romacs-agent--set-stopped session nil)
-  ;; Its records move to SQLite before a supervisor writes any more of them.
-  (romacs-agent-events-own session)
+  (romacs-agent--before-launch session)
   (let* ((host (romacs-agent--program "romacs-agent-host"))
          (command (append (list host "--dir" (romacs-agent-dir session)
                                 "--socket" (romacs-agent-host-socket session)
                                 ;; Journaled first: where this run's records start.
-                                "--note" "{\"type\":\"run\"}")
+                                "--note" (romacs-agent--run-note session))
                           (and (romacs-agent-events-p session) (list "--store" (romacs-agent-store--file)))
                           (and input (list "--input" input))
                           (and images (list "--input-images" (json-serialize (vconcat images))))
@@ -4796,6 +5023,8 @@ start there: unknown, disabled, or its configuration directory missing."
                    (plist-get (romacs-agent--configured (romacs-agent--default-provider)) :harness)))
          (pool (and (symbolp name) name))
          (instance (or (and pool (romacs-agent-pool-pick pool))
+                       (and pool (romacs-agent-pool pool)
+                            (user-error "Every %s account's sign-in is refused: sign in again" pool))
                        (romacs-agent--configured name)
                        (user-error "No agent provider %s; configured: %s" name
                                    (mapconcat #'identity (cl-loop for i in (romacs-agent-instances)

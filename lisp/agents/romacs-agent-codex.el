@@ -654,10 +654,22 @@ owed lines."
          (ms (gethash "durationMs" turn)))
     (list :type 'done :text reply :error (not (equal status "completed"))
           :interrupted (equal status "interrupted") :reason reason :duration (and (numberp ms) (/ ms 1000.0))
-          ;; Refused at its account's usage limit.
-          :limit (let ((error (gethash "error" turn)))
-                   (and (hash-table-p error) (equal (gethash "codexErrorInfo" error) "usageLimitExceeded")))
+          ;; Refused at its account's usage limit, or its sign-in refused.
+          :limit (romacs-agent--codex-error-is turn "usageLimitExceeded")
+          :failure (and (romacs-agent--codex-error-is turn "unauthorized") 'authentication)
           :context-window window)))
+
+(defun romacs-agent--codex-error-is (turn info)
+  "Whether TURN's error says INFO, its codexErrorInfo."
+  (let ((error (gethash "error" turn)))
+    (and (hash-table-p error) (equal (gethash "codexErrorInfo" error) info))))
+
+(defun romacs-agent--codex-credentials-stamp (home)
+  "The stamp of the sign-in kept at HOME (`:credentials-stamp' of
+`romacs-agent-define-harness'), its auth.json's (`romacs-agent--file-stamp'):
+Codex rewrites that file as its user signs in or it renews the sign-in.
+Nil with none."
+  (romacs-agent--file-stamp (expand-file-name "auth.json" home)))
 
 (defun romacs-agent--codex-turn-started-events (state params)
   "Decode the start of a Codex turn from driver STATE and PARAMS."
@@ -922,6 +934,7 @@ thread: its rollout, wherever its day put it."
   ;; (`romacs-agent--codex-thread').
   :renew #'ignore
   :manual-renew-only t
+  :credentials-stamp #'romacs-agent--codex-credentials-stamp
   :select #'romacs-agent--codex-select
   :models-probe #'romacs-agent--codex-models-probe
   :argv #'romacs-agent--codex-argv
