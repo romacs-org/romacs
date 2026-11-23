@@ -104,6 +104,7 @@ const COMMANDS: &str = r#"(progn
   (insert "hello\nworld\n")
   (goto-char 3)
   (defun typed-tail () (save-excursion (goto-char (point-max)) (insert "tail")))
+  (defun typed-hint (key) (when (eq key 24) (with-current-buffer "typed" (save-excursion (goto-char (point-max)) (insert "C-x-")))))
   (global-set-key [f5] (lambda () (interactive) (push (read-event) unread-command-events)))
   (global-set-key [f6] (lambda () (interactive) (execute-kbd-macro "xy")))
   (global-set-key [f7] (lambda () (interactive) (insert (read-string "? "))))
@@ -341,10 +342,10 @@ fn an_opener_is_charged_its_prompts_first_frame() {
     let settled = s.outcomes();
     assert_eq!(&settled[..3], &[(12, "awaited-input", None), (13, "opened", Some(before + 1)), (14, "rendered", Some(before + 2))], "settled: {settled:?}");
     assert_eq!(settled.iter().map(|(i, _, _)| *i).collect::<Vec<_>>(), (12..16).collect::<Vec<_>>(), "settled: {settled:?}");
-    // A prefix whose read changed the screen (here it cleared the echo
-    // area; Romacs's key-help echo is another) is charged that frame.
-    s.eval("(message \"hello\")");
-    s.redisplay();
+    // A prefix whose read changed the screen is charged that frame: a key
+    // hint, shown from `romacs--key-read-functions' as C-x is read (here
+    // written into the shown buffer), is its echo.
+    s.eval("(add-hook 'romacs--key-read-functions #'typed-hint)");
     let before = s.presented.get();
     s.press(CommandEvent::Character(24));
     s.press(CommandEvent::Character(6));
@@ -354,6 +355,7 @@ fn an_opener_is_charged_its_prompts_first_frame() {
     s.redisplay();
     let settled = s.outcomes();
     assert_eq!(&settled[..3], &[(16, "opened", Some(before + 1)), (17, "opened", Some(before + 2)), (18, "rendered", Some(before + 3))], "settled: {settled:?}");
+    s.eval("(remove-hook 'romacs--key-read-functions #'typed-hint)");
     assert_eq!(settled.iter().map(|(i, _, _)| *i).collect::<Vec<_>>(), (16..20).collect::<Vec<_>>(), "settled: {settled:?}");
 }
 
