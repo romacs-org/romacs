@@ -485,8 +485,9 @@ Each entry contains its key, label, submenu title, children, expanded
 glyphs, and the glyph to insert if it has no submenu."
   (if (consp (car spec))
       (cl-loop for (key name . children) in (emoji--compute-prefix spec)
-               when children
-               collect (list key (emoji--compute-name (cons name children))
+               for label = (emoji--compute-name (cons name children))
+               when label
+               collect (list key label
                              (concat title " > " name) children
                              (if (equal name "Recent") t done-derived) nil))
     (cl-loop for glyph in spec
@@ -501,12 +502,13 @@ glyphs, and the glyph to insert if it has no submenu."
                            glyph))))
 
 (defun emoji--popup-binding (map entry buffer)
-  "Bind ENTRY's insertion command in MAP and return its popup description.
-Submenus use popup navigation, and insertion requires the original BUFFER."
+  "Bind ENTRY in MAP and return its popup description.
+Submenus build their maps on entry.  Insertion requires the original BUFFER."
   (pcase-let ((`(,key ,label ,title ,children ,expanded ,glyph) entry))
     (if children
-        (when-let* ((child (emoji--popup-map title children expanded buffer)))
-          (list key (list label :keymap child)))
+        (let ((submenu (lambda () (emoji--popup-map title children expanded buffer))))
+          (keymap-set map key (lambda () (interactive) (keymap-popup (funcall submenu))))
+          (list key (list label :keymap submenu)))
       (let ((action (lambda ()
                       (interactive "*")
                       (unless (eq (current-buffer) buffer)
@@ -516,12 +518,12 @@ Submenus use popup navigation, and insertion requires the original BUFFER."
         (list key (list label action))))))
 
 (defun emoji--popup-map (title glyphs done-derived buffer)
-  "Build a popup titled TITLE for GLYPHS with destination BUFFER.
+  "Build one popup level titled TITLE for GLYPHS with destination BUFFER.
 DONE-DERIVED has the meaning it has in `emoji--layout'.
 Return nil if there are no choices."
   (let* ((map (make-sparse-keymap))
-         (entries (seq-keep (lambda (entry) (emoji--popup-binding map entry buffer))
-                            (emoji--layout title glyphs done-derived)))
+         (entries (mapcar (lambda (entry) (emoji--popup-binding map entry buffer))
+                          (emoji--layout title glyphs done-derived)))
          (columns (if (consp (car glyphs)) 2 8))
          (group-size (ceiling (length entries) columns)))
     (when entries
@@ -569,11 +571,11 @@ We prefer the earliest unique letter."
                          entry)))
 
 (defun emoji--compute-name (entry)
-  "Add example emojis to the name."
-  (let* ((name (concat (car entry) " "))
-         (children (emoji--flatten entry))
-         (length (length name))
-         (max 30))
+  "Add example emojis to ENTRY's name, or return nil if it has none."
+  (when-let* ((children (emoji--flatten entry))
+              (name (concat (car entry) " "))
+              (length (length name))
+              (max 30))
     (cl-loop for i from 0 upto 20
              ;; Choose from all the children.
              while (< length max)
@@ -590,11 +592,12 @@ We prefer the earliest unique letter."
       name)))
 
 (defun emoji--flatten (alist)
+  "Return ALIST's nonempty glyph lists in category order."
   (pop alist)
-  (if (consp (cadr alist))
+  (if (consp (car alist))
       (cl-loop for child in alist
                append (emoji--flatten child))
-    (list alist)))
+    (and alist (list alist))))
 
 (defun emoji--split-long-lists (alist)
   (let ((whole alist))
