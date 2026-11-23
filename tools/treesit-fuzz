@@ -56,7 +56,14 @@ tools/lib/treesit-fuzz/corpus), and seven of GNU's C files when
 $ROMACS_GNU_SOURCE is set (they start with errors, so they feed E2 only). A
 failure is printed with its first difference and the command that shows it.
 Run it whenever the runtime, its patches or a shipped grammar change. Builds
-go to $CARGO_TARGET_DIR/treesit-fuzz, else target/treesit-fuzz."""
+go to $CARGO_TARGET_DIR/treesit-fuzz, else target/treesit-fuzz.
+
+Known limits. The census guards against honest omission, not code written
+to hide a runtime call. Its map from the native.rs wrappers to getters is
+kept by hand, so a change inside an existing wrapper can leave it stale.
+Position and range lookups are sampled per seed, so a fault at a position
+no seed reaches goes unseen. The row parser accepts a getter digest key
+given twice in a well-formed line."""
 import argparse, collections, concurrent.futures, importlib.util, json, os, re, statistics, subprocess, sys
 from pathlib import Path
 
