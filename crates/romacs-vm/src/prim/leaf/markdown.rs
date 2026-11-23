@@ -45,7 +45,7 @@ impl Leaf<'_> {
             Some(position) if position > beg => byte_of_char(&text, usize::try_from(position.min(end) - beg).unwrap_or(0)),
             _ => 0,
         };
-        let restart = markdown::restart(&parsed.tops, from_byte);
+        let restart = if parsed.body_start.is_none() { 0 } else { markdown::restart(&text, &parsed.tops, from_byte) };
         let (start, codes) = self.markdown_write_runs(&text, &parsed, restart..text.len(), beg, faces, buffer)?;
         Ok(self.cons(start, codes))
     }
@@ -61,11 +61,12 @@ impl Leaf<'_> {
         let buffer = self.markdown_silent_buffer()?;
         let shape = self.buffer_shape()?;
         let to_offset = |p: i64| usize::try_from(p - 1).unwrap_or(0);
-        let ((blocks, text, parsed), changed) = self.markdown_synced(buffer, |index, read| {
+        let (blocks, text, parsed) = self.markdown_synced(buffer, |index, read| {
             let blocks = index.blocks(to_offset(beg), to_offset(end));
             let text = read(blocks.clone());
-            let parsed = markdown::spans_with(&text, &|label| index.defines(label));
-            (blocks, text, parsed)
+            let parsed = markdown::spans_with(&text, blocks.start == 0, &|label| index.defines(label));
+            let written = blocks.start.max(to_offset(shape.begv))..blocks.end.min(to_offset(shape.zv));
+            ((blocks, text, parsed), written)
         })?;
         let lo = i64::try_from(blocks.start).map_err(|_| Fault::Error("position out of range".into()))? + 1;
         let hi = lo + i64::try_from(text.chars().count()).map_err(|_| Fault::Error("position out of range".into()))?;
@@ -73,27 +74,15 @@ impl Leaf<'_> {
         let write_from = byte_of_char(&text, usize::try_from((shape.begv - lo).max(0)).unwrap_or(0));
         let write_to = byte_of_char(&text, usize::try_from((shape.zv.min(hi) - lo).max(0)).unwrap_or(0));
         let (start, codes) = self.markdown_write_runs(&text, &parsed, write_from..write_to.max(write_from), lo, faces, buffer)?;
-        if let Some(changed) = changed {
-            let fontified = self.intern("fontified");
-            let (cf, ct) = (i64::try_from(changed.start).unwrap_or(0) + 1, i64::try_from(changed.end).unwrap_or(0) + 1);
-            for (a, b) in [(cf, lo.min(ct)), (hi.max(cf), ct)] {
-                let (a, b) = (a.max(shape.begv), b.min(shape.zv));
-                if a < b {
-                    let (a, b) = (Value::integer(a).map_err(Fault::Error)?, Value::integer(b).map_err(Fault::Error)?);
-                    self.markdown_write(&PropertyEdit::Remove(vec![fontified]), a, b, buffer)?;
-                }
-            }
-        }
         let end_value = Value::integer(hi.min(shape.zv)).map_err(Fault::Error)?;
         let tail = self.cons(end_value, codes);
         Ok(self.cons(start, tail))
     }
 
-    /// F over BUFFER's Markdown index, synced to the text, and a reader of
-    /// its text by character offsets; with the span whose faces may have changed,
-    /// when the index was already built.
-    fn markdown_synced<T>(&mut self, buffer: Value, f: impl FnOnce(&markdown::Index, &dyn Fn(std::ops::Range<usize>) -> String) -> T)
-        -> R<(T, Option<std::ops::Range<usize>>)> {
+    /// Sync the block index, then invalidate the damaged text except what F
+    /// is already fontifying. A navigation query can discover damage too.
+    fn markdown_synced<T>(&mut self, buffer: Value, f: impl FnOnce(&markdown::Index, &dyn Fn(std::ops::Range<usize>) -> String)
+        -> (T, std::ops::Range<usize>)) -> R<T> {
         let Some(data::Object::Buffer(body)) = self.vm.object_if(buffer) else {
             return Err(Fault::Error("romacs-markdown: not a multibyte buffer".into()));
         };
@@ -108,7 +97,31 @@ impl Leaf<'_> {
         let mut index = body.markdown.borrow_mut();
         let was_built = index.built();
         let changed = index.sync(body.len_chars(), &mut |r| read(r)).filter(|_| was_built);
-        Ok((f(&index, &read), changed))
+        let (result, written) = f(&index, &read);
+        drop(index);
+        if let Some(d) = changed {
+            self.markdown_unfontify(buffer, d.start..d.end.min(written.start))?;
+            self.markdown_unfontify(buffer, d.start.max(written.end)..d.end)?;
+        }
+        Ok(result)
+    }
+
+    /// Drop JIT Lock's derived mark, including outside a narrowed view.
+    /// This is cache invalidation; it runs no edit hooks and records no undo.
+    fn markdown_unfontify(&mut self, buffer: Value, range: std::ops::Range<usize>) -> R<()> {
+        if range.is_empty() { return Ok(()); }
+        let Some(key) = self.vm.property_key("fontified") else { return Ok(()) };
+        let data::Object::Buffer(body) = self.object_mut(buffer)? else { unreachable!() };
+        let begin = body.byte_of_char(crate::coordinates::CharOffset(range.start)).map_err(Fault::Error)?;
+        let end = body.byte_of_char(crate::coordinates::CharOffset(range.end)).map_err(Fault::Error)?;
+        if body.properties.first_unlike(begin..end, key, None).is_some() {
+            body.properties.remove(begin..end, key);
+            // All windows sharing this text must reconsider its cached rows.
+            body.state.record_change(false);
+            body.state.modification.keep_unmodified();
+            self.vm.display_state.version += 1;
+        }
+        Ok(())
     }
 
     /// The top-level block of the current buffer, a Markdown document,
@@ -117,7 +130,7 @@ impl Leaf<'_> {
         let pos = pos.integer_value().ok_or_else(|| Fault::Wrong("integer-or-marker-p", pos))?;
         let buffer = self.current_buffer()?;
         let offset = usize::try_from(pos - 1).unwrap_or(0);
-        let (blocks, _) = self.markdown_synced(buffer, |index, _| index.blocks(offset, offset))?;
+        let blocks = self.markdown_synced(buffer, |index, _| (index.blocks(offset, offset), 0..0))?;
         let (a, b) = (at(1, blocks.start)?, at(1, blocks.end)?);
         Ok(self.cons(a, b))
     }
@@ -130,12 +143,14 @@ impl Leaf<'_> {
         let (beg, end) = self.validate_region(beg, end)?;
         let buffer = self.current_buffer()?;
         let range = usize::try_from(beg - 1).unwrap_or(0)..usize::try_from(end - 1).unwrap_or(0);
-        let ((text, parsed), _) = self.markdown_synced(buffer, |index, read| {
-            let text = read(range);
-            let parsed = markdown::spans_with(&text, &|label| index.defines(label));
-            (text, parsed)
+        let (text, parsed, start) = self.markdown_synced(buffer, |index, read| {
+            let start = range.start.max(index.body_start()).min(range.end);
+            let text = read(start..range.end);
+            let parsed = markdown::spans_with(&text, false, &|label| index.defines(label));
+            ((text, parsed, start), 0..0)
         })?;
-        let positions = Positions::new(&text, parsed.links.iter().flat_map(|(r, _)| [r.start, r.end]).collect(), beg);
+        let base = i64::try_from(start + 1).map_err(|_| Fault::Error("position out of range".into()))?;
+        let positions = Positions::new(&text, parsed.links.iter().flat_map(|(r, _)| [r.start, r.end]).collect(), base);
         let mut list = Value::NIL;
         for (range, dest) in parsed.links.iter().rev() {
             let dest = self.make_string(dest.clone().into_bytes(), true);

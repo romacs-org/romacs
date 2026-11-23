@@ -103,6 +103,16 @@ ends faced as the whole would be, and earlier blocks are not rewritten."
       (should (memq 'romacs-lexical-added (ensure-list (romacs-markdown-tests--face-at "new\n```"))))
       (should (memq 'romacs-lexical-removed (ensure-list (romacs-markdown-tests--face-at "old")))))))
 
+(ert-deftest romacs-markdown-front-matter-in-a-document-region ()
+  (with-temp-buffer
+    (insert "Earlier reply.\n")
+    (let ((beg (point)))
+      (insert "---\nname: example\n---\n# Title\n")
+      (romacs-markdown-fontify-region beg (point-max))
+      (should-not (memq 'romacs-markdown-heading-2
+                        (ensure-list (get-text-property (+ beg 4) 'face))))
+      (should (equal (mapcar #'car (romacs-markdown-blocks beg (point-max))) '(heading))))))
+
 (ert-deftest romacs-markdown-blocks-describe-structure ()
   (with-temp-buffer
     (insert "# T\n\n```py\nx = 1\n```\n\n- a\n  1. b\n\n| h |\n|---|\n")

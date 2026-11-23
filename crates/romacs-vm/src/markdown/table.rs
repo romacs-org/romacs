@@ -2,7 +2,7 @@
 //! width by what they hold, cells wrap at spaces, and a table too wide for
 //! its narrowest columns is drawn as panels of columns, each with its
 //! header. The cells keep their own Markdown's faces.
-use super::spans::spans;
+use super::spans::spans_with;
 use super::runs::{runs, Run};
 use super::{Kind, Span};
 use pulldown_cmark::{Event, Parser, Tag};
@@ -30,6 +30,7 @@ const INLINE: u32 = 16;
 /// 6), each character as many columns as COLUMNS says. None when SOURCE
 /// holds no table.
 pub(crate) fn grid(source: &str, width: usize, columns: &dyn Fn(char) -> usize) -> Option<Grid> {
+    let source = &source[super::FrontMatter::read(source).end()..];
     let rows = rows(source);
     if rows.is_empty() {
         return None;
@@ -164,6 +165,7 @@ fn carry(spans: &mut Vec<Span>, runs: &[Run], piece: Range<usize>, at: usize) {
 /// row's colons say, and the delimiter row as wide. None when SOURCE holds
 /// no table. The source's other lines (around the table) are left out.
 pub(crate) fn align(source: &str, columns: &dyn Fn(char) -> usize) -> Option<String> {
+    let source = &source[super::FrontMatter::read(source).end()..];
     let rows = rows(source);
     let aligns = alignments(source)?;
     let count = rows.iter().map(Vec::len).max()?.max(aligns.len());
@@ -213,7 +215,7 @@ fn alignments(source: &str) -> Option<Vec<pulldown_cmark::Alignment>> {
 
 /// SOURCE's table rows, header first: each cell's text and inline runs.
 fn rows(source: &str) -> Vec<Vec<Cell>> {
-    let all = runs(&spans(source).spans);
+    let all = runs(&spans_with(source, false, &|_| false).spans);
     let mut rows: Vec<Vec<Cell>> = Vec::new();
     let mut in_table = false;
     for (event, range) in Parser::new_ext(source, super::spans::options()).into_offset_iter() {

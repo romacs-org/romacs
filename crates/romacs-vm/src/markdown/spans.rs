@@ -1,5 +1,5 @@
 //! pulldown-cmark's events as spans by [`Kind`].
-use super::Kind;
+use super::{FrontMatter, Kind};
 use pulldown_cmark::{BrokenLink, CodeBlockKind, CowStr, Event, HeadingLevel, Options, Parser, Tag};
 use std::ops::Range;
 
@@ -21,6 +21,8 @@ pub(crate) struct Span {
 pub(crate) struct Parsed {
     pub spans: Vec<Span>,
     pub tops: Vec<usize>,
+    /// Byte offset of the Markdown body, unknown while a leading YAML fence is open.
+    pub body_start: Option<usize>,
     pub codes: Vec<Code>,
     pub labels: Vec<(usize, String)>,
     /// Each link's range and destination (empty when its definition is
@@ -78,69 +80,86 @@ struct Open {
 
 /// TEXT's spans and top-level block starts.
 pub(crate) fn spans(text: &str) -> Parsed {
-    spans_with(text, &|_| false)
+    spans_with(text, true, &|_| false)
 }
 
 /// TEXT's spans, a reference to a label KNOWN says is defined (elsewhere
 /// in the document TEXT is part of) taken as a link.
-pub(crate) fn spans_with(text: &str, known: &dyn Fn(&str) -> bool) -> Parsed {
-    let mut out = Parsed::default();
+pub(crate) fn spans_with(text: &str, document_start: bool, known: &dyn Fn(&str) -> bool) -> Parsed {
+    let front = if document_start { FrontMatter::read(text) } else { FrontMatter::Absent };
+    let offset = front.end();
+    let mut out = Parsed { body_start: Some(offset), ..Parsed::default() };
+    match front {
+        FrontMatter::Yaml { body, end } => {
+            out.tops.push(0);
+            markup(&mut out.spans, 0, body.start);
+            markup(&mut out.spans, body.end, end);
+            out.codes.push(Code { language: Some("yaml".into()), body });
+        }
+        FrontMatter::Unclosed => out.body_start = None,
+        FrontMatter::Absent => {}
+    }
     let mut open: Vec<Open> = Vec::new();
     let resolve = |link: BrokenLink<'_>| known(&label_key(&link.reference)).then_some((CowStr::Borrowed(""), CowStr::Borrowed("")));
-    let mut parser = Parser::new_with_broken_link_callback(text, options(), Some(resolve)).into_offset_iter();
+    let mut parser = Parser::new_with_broken_link_callback(&text[offset..], options(), Some(resolve)).into_offset_iter();
     for (event, range) in parser.by_ref() {
-        let depth = u32::try_from(open.len()).unwrap_or(u32::MAX - 1);
-        match event {
-            Event::Start(tag) => {
-                note_child(&mut open, &range);
-                if let Tag::Link { dest_url, .. } = &tag {
-                    out.links.push((range.clone(), dest_url.to_string()));
-                }
-                if depth == 0 {
-                    out.tops.push(line_start(text, range.start));
-                }
-                let frame = start(text, &tag, &range, depth, &mut open, &mut out.spans);
-                open.push(Open { frame, range, children: None, cells: Vec::new(), head_end: None, first_row: None });
-            }
-            Event::End(_) => {
-                if let Some(element) = open.pop() {
-                    close(text, &element, &mut out);
-                }
-            }
-            Event::Code(_) => {
-                note_child(&mut open, &range);
-                out.spans.push(Span { start: range.start, end: range.end, kind: Kind::Code, depth });
-                let ticks = text[range.clone()].bytes().take_while(|&b| b == b'`').count();
-                if range.len() >= 2 * ticks {
-                    markup(&mut out.spans, range.start, range.start + ticks);
-                    markup(&mut out.spans, range.end - ticks, range.end);
-                }
-            }
-            Event::InlineHtml(_) => {
-                note_child(&mut open, &range);
-                out.spans.push(Span { start: range.start, end: range.end, kind: Kind::Html, depth });
-            }
-            Event::TaskListMarker(_) => {
-                note_child(&mut open, &range);
-                out.spans.push(Span { start: range.start, end: range.end, kind: Kind::Task, depth });
-            }
-            Event::Rule => {
-                if depth == 0 {
-                    out.tops.push(line_start(text, range.start));
-                }
-                out.spans.push(Span { start: range.start, end: range.end, kind: Kind::Rule, depth });
-            }
-            _ => note_child(&mut open, &range),
-        }
+        let range = offset + range.start..offset + range.end;
+        record_event(text, event, range, &mut open, &mut out);
     }
     for (label, definition) in parser.reference_definitions().iter() {
-        let span = definition.span.clone();
+        let span = offset + definition.span.start..offset + definition.span.end;
         out.spans.push(Span { start: span.start, end: span.end, kind: Kind::Url, depth: 0 });
         out.labels.push((span.start, label_key(label)));
     }
     out.tops.dedup();
     out.labels.sort();
     out
+}
+
+fn record_event(text: &str, event: Event<'_>, range: Range<usize>, open: &mut Vec<Open>, out: &mut Parsed) {
+    let depth = u32::try_from(open.len()).unwrap_or(u32::MAX - 1);
+    match event {
+        Event::Start(tag) => {
+            note_child(open, &range);
+            if let Tag::Link { dest_url, .. } = &tag {
+                out.links.push((range.clone(), dest_url.to_string()));
+            }
+            if depth == 0 {
+                out.tops.push(line_start(text, range.start));
+            }
+            let frame = start(text, &tag, &range, depth, open, &mut out.spans);
+            open.push(Open { frame, range, children: None, cells: Vec::new(), head_end: None, first_row: None });
+        }
+        Event::End(_) => {
+            if let Some(element) = open.pop() {
+                close(text, &element, out);
+            }
+        }
+        Event::Code(_) => {
+            note_child(open, &range);
+            out.spans.push(Span { start: range.start, end: range.end, kind: Kind::Code, depth });
+            let ticks = text[range.clone()].bytes().take_while(|&b| b == b'`').count();
+            if range.len() >= 2 * ticks {
+                markup(&mut out.spans, range.start, range.start + ticks);
+                markup(&mut out.spans, range.end - ticks, range.end);
+            }
+        }
+        Event::InlineHtml(_) => {
+            note_child(open, &range);
+            out.spans.push(Span { start: range.start, end: range.end, kind: Kind::Html, depth });
+        }
+        Event::TaskListMarker(_) => {
+            note_child(open, &range);
+            out.spans.push(Span { start: range.start, end: range.end, kind: Kind::Task, depth });
+        }
+        Event::Rule => {
+            if depth == 0 {
+                out.tops.push(line_start(text, range.start));
+            }
+            out.spans.push(Span { start: range.start, end: range.end, kind: Kind::Rule, depth });
+        }
+        _ => note_child(open, &range),
+    }
 }
 
 /// The spans an element opening at RANGE adds at once, and how its markup
