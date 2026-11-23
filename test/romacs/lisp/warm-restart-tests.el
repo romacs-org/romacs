@@ -275,6 +275,28 @@
       (ignore-errors (kill-buffer (get-file-buffer file)))
       (delete-directory dir t))))
 
+(ert-deftest warm-restart-a-clean-file-open-only-through-a-dangling-alias-is-reported ()
+  ;; Open only through a symlink whose target is gone: the visit would not
+  ;; reuse that buffer, so the file is reported, never made empty.
+  (let* ((dir (make-temp-file "romacs-wr-file-" t)) (file (expand-file-name "target.txt" dir))
+         (alias (expand-file-name "alias.txt" dir))
+         (record (list :id "t" :name "target.txt" :strategy 'file :file file :mode 'text-mode :point 1
+                       :directory dir))
+         (find-file-visit-truename nil)
+         (warm-restart--problems nil))
+    (unwind-protect
+        (progn
+          (write-region "aliased\n" nil file nil 'silent)
+          (make-symbolic-link file alias)
+          (find-file-noselect alias)
+          (delete-file file)
+          (warm-restart--restore-buffer record [] (make-hash-table :test #'equal))
+          (should-not (get-file-buffer file))
+          (should (equal (plist-get (car warm-restart--problems) :buffer) "target.txt")))
+      (ignore-errors (kill-buffer (get-file-buffer alias)))
+      (ignore-errors (kill-buffer (get-file-buffer file)))
+      (delete-directory dir t))))
+
 (ert-deftest warm-restart-a-window-laid-out-early-gets-its-history-back ()
   ;; Its windows laid out before every buffer was back: once they are, each
   ;; window's earlier buffers come back after those shown in it since.
