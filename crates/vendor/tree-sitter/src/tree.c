@@ -14,10 +14,6 @@ TSTree *ts_tree_new(
   TSTree *result = ts_malloc(sizeof(TSTree));
   result->root = root;
   result->language = ts_language_copy(language);
-#ifdef __wasm__
-  result->language_context_id = ts_language_current_context_id();
-  result->unparseable_language = NULL;
-#endif
   result->included_ranges = ts_calloc(included_range_count, sizeof(TSRange));
   memcpy(result->included_ranges, included_ranges, included_range_count * sizeof(TSRange));
   result->included_range_count = included_range_count;
@@ -32,9 +28,6 @@ TSTree *ts_tree_copy(const TSTree *self) {
     self->included_ranges,
     self->included_range_count
   );
-#ifdef __wasm__
-  result->language_context_id = self->language_context_id;
-#endif
   return result;
 }
 
@@ -44,9 +37,6 @@ void ts_tree_delete(TSTree *self) {
   SubtreePool pool = ts_subtree_pool_new(0);
   ts_subtree_release(&pool, self->root);
   ts_subtree_pool_delete(&pool);
-#ifdef __wasm__
-  ts_language_delete(__atomic_load_n(&self->unparseable_language, __ATOMIC_ACQUIRE));
-#endif
   ts_language_delete(self->language);
   ts_free(self->included_ranges);
   ts_free(self);
@@ -66,31 +56,6 @@ TSNode ts_tree_root_node_with_offset(
 }
 
 const TSLanguage *ts_tree_language(const TSTree *self) {
-#ifdef __wasm__
-  if (self->language_context_id != ts_language_current_context_id()) {
-    TSTree *tree = (TSTree *)self;
-    const TSLanguage *result = __atomic_load_n(
-      &tree->unparseable_language,
-      __ATOMIC_ACQUIRE
-    );
-    if (!result) {
-      const TSLanguage *candidate = ts_language_copy_without_callbacks(self->language);
-      if (__atomic_compare_exchange_n(
-        &tree->unparseable_language,
-        &result,
-        candidate,
-        false,
-        __ATOMIC_RELEASE,
-        __ATOMIC_ACQUIRE
-      )) {
-        result = candidate;
-      } else {
-        ts_language_delete(candidate);
-      }
-    }
-    return result;
-  }
-#endif
   return self->language;
 }
 
@@ -135,48 +100,3 @@ TSRange *ts_tree_get_changed_ranges(const TSTree *old_tree, const TSTree *new_tr
   array_delete(&cursor2.stack);
   return result;
 }
-
-#ifdef _WIN32
-
-#include <io.h>
-#include <windows.h>
-
-int _ts_dup(HANDLE handle) {
-  HANDLE dup_handle;
-  if (!DuplicateHandle(
-    GetCurrentProcess(), handle,
-    GetCurrentProcess(), &dup_handle,
-    0, FALSE, DUPLICATE_SAME_ACCESS
-  )) return -1;
-
-  return _open_osfhandle((intptr_t)dup_handle, 0);
-}
-
-void ts_tree_print_dot_graph(const TSTree *self, int fd) {
-  FILE *file = _fdopen(_ts_dup((HANDLE)_get_osfhandle(fd)), "a");
-  ts_subtree_print_dot_graph(self->root, self->language, file);
-  fclose(file);
-}
-
-#elif !defined(__wasm__) // Wasm doesn't support dup
-
-#include <unistd.h>
-
-int _ts_dup(int file_descriptor) {
-  return dup(file_descriptor);
-}
-
-void ts_tree_print_dot_graph(const TSTree *self, int file_descriptor) {
-  FILE *file = fdopen(_ts_dup(file_descriptor), "a");
-  ts_subtree_print_dot_graph(self->root, self->language, file);
-  fclose(file);
-}
-
-#else
-
-void ts_tree_print_dot_graph(const TSTree *self, int file_descriptor) {
-  (void)self;
-  (void)file_descriptor;
-}
-
-#endif

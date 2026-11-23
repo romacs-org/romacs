@@ -45,11 +45,6 @@ TSLexerMode ts_language_lex_mode_for_state(const TSLanguage *self, TSStateId sta
 bool ts_language_is_reserved_word(const TSLanguage *self, TSStateId state, TSSymbol symbol);
 TSSymbolMetadata ts_language_symbol_metadata(const TSLanguage *self, TSSymbol symbol);
 TSSymbol ts_language_public_symbol(const TSLanguage *self, TSSymbol symbol);
-const TSLanguage *ts_language_copy_without_callbacks(const TSLanguage *self);
-#ifdef __wasm__
-uint32_t ts_language_current_context_id(void);
-#endif
-
 static inline const TSParseAction *ts_language_actions(
   const TSLanguage *self,
   TSStateId state,
@@ -291,32 +286,6 @@ static inline void ts_language_aliases_for_symbol(
       break;
     }
     idx += count;
-  }
-}
-
-static inline void ts_language_write_symbol_as_dot_string(
-  const TSLanguage *self,
-  FILE *f,
-  TSSymbol symbol
-) {
-  const char *name = ts_language_symbol_name(self, symbol);
-  for (const char *chr = name; *chr; chr++) {
-    switch (*chr) {
-      case '"':
-      case '\\':
-        fputc('\\', f);
-        fputc(*chr, f);
-        break;
-      case '\n':
-        fputs("\\n", f);
-        break;
-      case '\t':
-        fputs("\\t", f);
-        break;
-      default:
-        fputc(*chr, f);
-        break;
-    }
   }
 }
 

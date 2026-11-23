@@ -124,7 +124,6 @@ void ts_stack_remove_version(Stack *self, StackVersion version);
 
 void ts_stack_clear(Stack *self);
 
-bool ts_stack_print_dot_graph(Stack *self, const TSLanguage *language, FILE *f);
 
 #ifdef __cplusplus
 }

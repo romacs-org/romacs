@@ -9,18 +9,6 @@ include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 #[cfg(not(feature = "bindgen"))]
 include!("./bindings.rs");
 
-#[cfg(unix)]
-#[cfg(feature = "std")]
-unsafe extern "C" {
-    pub(crate) fn _ts_dup(fd: std::os::raw::c_int) -> std::os::raw::c_int;
-}
-
-#[cfg(windows)]
-#[cfg(feature = "std")]
-unsafe extern "C" {
-    pub(crate) fn _ts_dup(handle: *mut std::os::raw::c_void) -> std::os::raw::c_int;
-}
-
 use core::{marker::PhantomData, mem::ManuallyDrop, ptr::NonNull};
 
 use crate::{
@@ -63,12 +51,6 @@ impl Parser {
     }
 
     /// Consumes the [`Parser`], returning a raw pointer to the underlying C structure.
-    ///
-    /// # Safety
-    ///
-    /// It's a caller responsibility to adjust parser's state
-    /// like disable logging or dot graphs printing if this
-    /// may cause issues like use after free.
     #[must_use]
     pub fn into_raw(self) -> *mut TSParser {
         ManuallyDrop::new(self).0.as_ptr()
