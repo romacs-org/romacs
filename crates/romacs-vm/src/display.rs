@@ -177,8 +177,6 @@ struct ElementFaces {
     layered: std::collections::HashMap<Vec<u64>, FaceHandle>,
     /// The end-of-line faces of layer lists (`Vm::extend_face').
     extended: std::collections::HashMap<Vec<u64>, Option<FaceHandle>>,
-    /// The region's bytes, which bound runs as an overlay's do.
-    region: Option<(usize, usize)>,
 }
 
 impl ElementFaces {
@@ -188,7 +186,24 @@ impl ElementFaces {
     fn add_region(&mut self, range: std::ops::Range<usize>, face: Value) {
         let item = SortItem { overlay: Value::NIL, start: range.start as u32, end: range.end as u32, priority: 0, secondary: 100, inserted: u64::MAX };
         self.overlays.push((item, range.start, range.end, face));
-        self.region = Some((range.start, range.end));
+    }
+
+    /// The layers covering AT, ordered by priority, and the first byte
+    /// at which an overlay can join or leave that set.
+    fn layers_at(&self, at: usize) -> (Vec<Value>, usize) {
+        let mut next = self.end.max(at + 1);
+        let mut covering = Vec::new();
+        for &(item, start, end, face) in &self.overlays {
+            if at < start {
+                next = next.min(start);
+            } else if at < end {
+                next = next.min(end);
+                covering.push((item, face));
+            }
+        }
+        let layers = crate::overlay_order::sort_overlays(covering, |o| o.0).into_iter().rev()
+            .map(|(_, face)| face).filter(|&face| face != Value::NIL).collect();
+        (layers, next)
     }
 
     /// For WINDOW's BUFFER over the bytes SPAN.
@@ -212,7 +227,7 @@ impl ElementFaces {
         let plain = vm.annotation_variable("default-text-properties") == Value::NIL
             && !aliases.into_iter().any(|entry| vm.cons_pair(entry).is_ok_and(|(key, _)| key == face));
         Ok(ElementFaces { buffer, face, overlays, end,
-            run: (0, 0, FaceHandle(0), vec![]), plain, cursor: (0, 0), merged: Default::default(), layered: Default::default(), extended: Default::default(), region: None })
+            run: (0, 0, FaceHandle(0), vec![]), plain, cursor: (0, 0), merged: Default::default(), layered: Default::default(), extended: Default::default() })
     }
 }
 
@@ -3599,25 +3614,23 @@ impl Vm {
         };
         if !(sources.run.0..sources.run.1).contains(&at) {
             // face_at_buffer_position sorts the overlays covering AT.
-            let covering = sources.overlays.iter().copied().filter(|&(_, start, end, _)| (start..end).contains(&at)).collect();
-            let mut layers: Vec<Value> = crate::overlay_order::sort_overlays(covering, |o| o.0).into_iter().rev().map(|(.., face)| face).filter(|&face| face != Value::NIL).collect();
-            // The text's own face last, nil past the text; the mini-window
-            // shows text outside a narrowing too.
-            let text_face = match self.shown_text(sources.buffer) {
-                Ok(_) if at >= sources.end => Value::NIL,
-                // The property itself, where nothing could stand in for it.
-                Ok(b) if sources.plain && b.properties.get_property(ByteOffset(at), Key::CATEGORY).is_none() =>
-                    b.properties.get_property(ByteOffset(at), Key::FACE).unwrap_or(Value::NIL),
-                Ok(b) => self.annotation_resolve(&b.properties.properties_at(ByteOffset(at)), sources.face)?,
-                _ => return Err("Unicode display buffer required".into()),
-            };
-            let end = sources.end.max(at + 1);
+            let (mut layers, mut next) = sources.layers_at(at);
+            // Only keys consulted for this face can end its run.
+            let text_face = if at < sources.end {
+                use crate::properties::{Plist, RunAt};
+                let b = self.shown_text(sources.buffer)?;
+                let raw = RunAt::new(&b.properties, ByteOffset(at), next);
+                let face = if sources.plain && raw.property(Key::CATEGORY).is_none() {
+                    raw.property(Key::FACE).unwrap_or(Value::NIL)
+                } else { self.annotation_resolve(&raw, sources.face)? };
+                next = raw.end();
+                // The unibyte buffer owns its property runs in its original byte coordinates.
+                if matches!(self.object_if(sources.buffer), Some(Object::ByteBuffer(_))) {
+                    next = self.next_property_boundary(sources.buffer, ByteOffset(at), ByteOffset(next))?.0.max(at + 1);
+                }
+                face
+            } else { Value::NIL };
             layers.push(text_face);
-            let mut next = self.next_property_boundary(sources.buffer, ByteOffset(at), ByteOffset(end))?.0.max(at + 1);
-            // The region's edges end a run as an overlay's do.
-            if let Some((start, end)) = sources.region {
-                if at < start && start < next { next = start; } else if at < end && end < next { next = end; }
-            }
             let handle = self.layered_face(table, faces, sources, &layers);
             sources.run = (at, next, handle, layers);
         }

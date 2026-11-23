@@ -16,7 +16,7 @@ use winit::window::{
 };
 
 use super::cursor::{CursorState, CursorTarget};
-pub(crate) use super::frame_compositor::{FrameCompositor, RetainedCursorCell, RetainedStatic};
+pub(crate) use super::frame_compositor::{FrameCompositor, RetainedStatic};
 use super::geometry_hints::apply_window_geometry_hints;
 use super::state::{
     FpsCounter, GuiChromeInteractionState, IdleDimState, ImeCursorArea, PendingPointerDamage,

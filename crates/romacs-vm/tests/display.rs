@@ -143,3 +143,34 @@ fn a_faceless_overlay_still_ranks_the_overlay_faces() {
     let at = |byte: usize| s.text.face_runs.iter().find(|r| r.bytes.contains(&byte)).map(|r| s.faces[r.face.0 as usize].foreground);
     assert_eq!(at(3), Some([0, 255, 0]), "position 4");
 }
+
+#[test]
+fn projected_face_runs_follow_aliases_categories_and_overlay_edges() {
+    let mut vm = Vm::new();
+    vm.eval_source(r##"(progn
+      (defface run-red '((t (:foreground "#ff0000"))) "red")
+      (defface run-blue '((t (:foreground "#0000ff"))) "blue")
+      (insert "αβγδεζηθ")
+      (setq char-property-alias-alist '((face second-face)))
+      (put 'run-category 'face 'run-red)
+      (put-text-property 2 8 'second-face 'run-blue)
+      (put-text-property 3 7 'category 'run-category)
+      (put-text-property 4 6 'face 'run-blue)
+      (put-text-property 1 5 'irrelevant 1)
+      (put-text-property 5 8 'irrelevant 2)
+      (setq run-overlay (make-overlay 5 6))
+      (overlay-put run-overlay 'face 'run-red))"##).unwrap();
+    let colors = |vm: &mut Vm| {
+        let view = vm.display_snapshot(640, 480).unwrap();
+        view.text.utf8.char_indices().map(|(byte, _)| {
+            let run = view.text.face_runs.iter().find(|r| r.bytes.contains(&byte)).unwrap();
+            view.faces[run.face.0 as usize].foreground
+        }).collect::<Vec<_>>()
+    };
+    let direct = colors(&mut vm);
+    let default = direct[0];
+    let (red, blue) = ([255, 0, 0], [0, 0, 255]);
+    assert_eq!(direct, [default, blue, red, blue, red, red, blue, default]);
+    vm.eval_source("(delete-overlay run-overlay)").unwrap();
+    assert_eq!(colors(&mut vm), [default, blue, red, blue, blue, red, blue, default]);
+}
