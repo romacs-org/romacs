@@ -995,6 +995,35 @@ environment."
                                                   (file-expand-wildcards (expand-file-name (format "projects/*/%s" id) home))))
                         (list (concat "file-history/" id) (concat "session-env/" id))))))
 
+(defconst romacs-agent--claude-project-max 200
+  "The longest project name Claude Code files under projects/ as it is:
+a longer one is cut there and given a hash this cannot make.")
+
+(defun romacs-agent--claude-project (directory)
+  "The directory under projects/ where Claude Code files the
+conversations run in DIRECTORY: its path, each character but an ASCII
+letter or digit a hyphen."
+  (replace-regexp-in-string "[^A-Za-z0-9]" "-" (directory-file-name (expand-file-name directory))))
+
+(defun romacs-agent--claude-cwd-copies (home session froms to)
+  "The copies, (SOURCE . TARGET) under HOME, that let SESSION's Claude
+Code conversation resume from TO, where Claude Code looks: its transcript
+and the directory beside it, from the project of the first of the names
+FROMS that holds it to TO's.  `lost' when none does, or TO's project's
+name is longer than Claude Code keeps."
+  (let* ((projects (expand-file-name "projects" home)) (id (romacs-agent--native-id session))
+         (new (romacs-agent--claude-project to))
+         (old (cl-loop for from in froms
+                       for project = (romacs-agent--claude-project from)
+                       when (and (<= (length project) romacs-agent--claude-project-max)
+                                 (file-exists-p (expand-file-name (concat project "/" id ".jsonl") projects)))
+                       return project)))
+    (if (or (null old) (> (length new) romacs-agent--claude-project-max)) 'lost
+      (cl-loop for name in (list (concat id ".jsonl") id)
+               for source = (expand-file-name name (expand-file-name old projects))
+               when (file-exists-p source)
+               collect (cons source (expand-file-name name (expand-file-name new projects)))))))
+
 (romacs-agent-define-harness 'claude
   :display "Claude Code" :icon 'claude :t3-driver "claudeAgent"
   :config-variable "CLAUDE_CONFIG_DIR" :config-default "~/.claude"
@@ -1009,6 +1038,7 @@ environment."
   ;; Its calls' results, told from their text: parsed when opened.
   :result-summary #'romacs-agent--claude-result-summary
   :conversation-files #'romacs-agent--claude-conversation-files
+  :cwd-copies #'romacs-agent--claude-cwd-copies
   :rollback #'romacs-agent--claude-rollback
   :resume-at #'romacs-agent--claude-cursor
   ;; A renewed conversation is named by Romacs, as a first one is.
