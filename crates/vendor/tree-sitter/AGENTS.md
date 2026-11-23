@@ -4,6 +4,7 @@ tailored to how Romacs parses, which is after every key, with a background
 reparse, many buffers per grammar, and fontify by visible region.
 
 ## Boundary
+- The runtime parses native UTF-8 only, with no Wasm support or logger.
 - The goal is a runtime that is cheap and fast for Romacs, not a copy of
   upstream. Upstream's assumptions about its other users (Zed, Neovim, the
   CLI, wasm) carry no weight here: change, delete or replace anything whose

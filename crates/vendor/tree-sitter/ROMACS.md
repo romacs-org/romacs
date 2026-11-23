@@ -72,6 +72,9 @@ Each is its own commit in Romacs's history.
 - `refactor(treesit): remove dead scanner error flow` deletes the flag and
   exits used by Wasm scanner failures. Measurement: none (pure deletion).
 
+- `docs(treesit): record the native UTF-8 boundary` documents the runtime
+  after removing its unused paths. Measurement: none.
+
 ## Checking it
 
 `tools/treesit-fuzz` builds this runtime and the published one with the
