@@ -11,11 +11,13 @@
 ;; unescaped quote inside ${...} can confuse the syntax state until
 ;; the syntax engine supports interpolation.
 ;;
-;; Editing a raw string while narrowing hides its unpropertized opener
-;; can leave later code classified as string content after widening.
-;; The comparison probe in ledger/divergences/KOTLIN-TS.md reproduces
-;; this in GNU's python-mode.  Widened propertization belongs in the
-;; shared syntax engine.
+;; Narrowed edits can leave later code classified as string content
+;; after widening.  This can happen if narrowing hides an unpropertized
+;; raw-string opener, or if an edit at the edge of the restriction needs
+;; to revisit a raw-string fence or escaped identifier outside it.
+;; The probes in ledger/divergences/KOTLIN-TS.md reproduce the narrowing
+;; limitation in GNU's python-mode.  Widened propertization belongs in
+;; the shared syntax engine.
 
 ;;; Code:
 

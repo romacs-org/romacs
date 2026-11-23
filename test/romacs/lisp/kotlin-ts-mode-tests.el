@@ -125,6 +125,20 @@
         (should-not (nth 3 state))
         (should-not (nth 4 state))))))
 
+(ert-deftest kotlin-ts-mode-syntax-after-templates-with-nested-quotes ()
+  (dolist (case '(("\"before ${\"/*\"} after\"" 1 1)
+                  ("\"before ${\"}\"} after\"" 0 nil)))
+    (pcase-let ((`(,literal ,depth ,comment) case))
+      (with-temp-buffer
+        (insert "fun f() {\n    val text = " literal "\n    val following = 0\n}\n")
+        (kotlin-ts-mode)
+        (should-not
+         (treesit-node-check (treesit-buffer-root-node 'kotlin) 'has-error))
+        (let ((state (syntax-ppss (kotlin-ts-mode-tests--position "val following"))))
+          (should (= (nth 0 state) depth))
+          (should-not (nth 3 state))
+          (should (equal (nth 4 state) comment)))))))
+
 (ert-deftest kotlin-ts-mode-syntax-edits-a-raw-string-without-a-reparse ()
   (with-temp-buffer
     (insert "fun f() {\n    val text = \"\"\"before ${name}\n"
@@ -194,6 +208,33 @@
             ;; on widening, as in GNU's python-mode.
             (should (eq (nth 3 state) (and start (not warm))))
             (should-not (nth 4 state))))))))
+
+(ert-deftest kotlin-ts-mode-syntax-after-edits-at-the-narrowing-edge ()
+  (dolist (case '(("val x = \"\"\"body\"\"\"" "body\"\"\"" "\"")
+                  ("val `abc \"def` = 1" "`" "x")))
+    (pcase-let ((`(,declaration ,prefix ,edit) case))
+      (with-temp-buffer
+        (insert "fun f() {\n    " declaration "\n    val following = 0\n}\n")
+        (kotlin-ts-mode)
+        (syntax-ppss (point-max))
+        (should-not (nth 3 (syntax-ppss
+                            (kotlin-ts-mode-tests--position "val following"))))
+        (save-restriction
+          (narrow-to-region
+           (+ (kotlin-ts-mode-tests--position prefix) (length prefix))
+           (point-max))
+          (goto-char (point-min))
+          (insert edit)
+          (syntax-ppss))
+        (should (eq (nth 3 (syntax-ppss
+                            (kotlin-ts-mode-tests--position "val following")))
+                    ?\"))
+        (let ((edited (buffer-substring-no-properties (point-min) (point-max))))
+          (with-temp-buffer
+            (insert edited)
+            (kotlin-ts-mode)
+            (should-not (nth 3 (syntax-ppss
+                                (kotlin-ts-mode-tests--position "val following"))))))))))
 
 (defun kotlin-ts-mode-tests--edit-with-local-syntax (string)
   "Insert a character and check STRING state and the lexical search bounds."

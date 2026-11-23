@@ -33,5 +33,35 @@ prints `t` under `-Q --batch` on pinned GNU revision
   (prin1 (nth 3 (syntax-ppss (match-beginning 0)))))
 ```
 
+Even when syntax is already propertized, an edit at the lower edge of the
+restriction can leave stale string state after widening. Adding a fourth
+quote just after a Kotlin raw-string closer needs to move the closing
+fence. Inserting text just inside an escaped identifier that contains a
+quote needs to revisit the opening backtick. In both cases the syntax
+propertizer cannot reach the preceding text while narrowed.
+
+In GNU's `python-mode`, a fourth quote after the closer starts an ordinary
+string in both edited and fresh buffers. To reproduce the narrowing
+limitation on the same GNU revision, complete a new triple-quoted opener
+immediately after a closer by changing five consecutive quotes to six.
+This probe prints `t`. With the `narrow-to-region` call omitted, or with
+the final text inserted in a fresh buffer, it prints `nil`.
+
+```elisp
+(with-temp-buffer
+  (insert "def f():\n    x = \"\"\"before\"\"\"\"\"body \" mid\n    \"\"\"\n    following = 0\n")
+  (let ((python-indent-guess-indent-offset nil)) (python-mode))
+  (syntax-ppss (point-max))
+  (goto-char (point-min))
+  (search-forward "before\"\"\"\"\"")
+  (save-restriction
+    (narrow-to-region (point) (point-max))
+    (insert "\"")
+    (syntax-ppss))
+  (goto-char (point-min))
+  (search-forward "following")
+  (prin1 (nth 3 (syntax-ppss (match-beginning 0)))))
+```
+
 Making `syntax-propertize` work on the widened buffer is future work for
 the shared syntax engine.
