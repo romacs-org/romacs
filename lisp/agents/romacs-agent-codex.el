@@ -254,6 +254,7 @@ names, its label, efforts and default effort."
            for efforts = (romacs-agent--value (gethash "supportedReasoningEfforts" model))
            when (stringp id)
            collect (cons id (list :label (or (romacs-agent--value (gethash "displayName" model)) id)
+                                  :default-model (eq (gethash "isDefault" model) t)
                                   :efforts (cl-loop for option across (or efforts [])
                                                     collect (gethash "reasoningEffort" option))
                                   :default-effort (romacs-agent--value (gethash "defaultReasoningEffort" model))))))
@@ -423,11 +424,13 @@ MODEL is the configured fallback.  INTERRUPTED says a prior turn was cut."
        (list (list :type 'error :text (format "Codex could not start: %s" error))))
       ("initialize" (list (list :type 'handshake :state (list :initialized t))))
       ((or "thread/start" "thread/resume" "thread/fork")
-       (let ((thread (gethash "id" (gethash "thread" result))))
-         (append (list (list :type 'handshake :state (list :thread thread))
-                       (list :type 'session :harness-session thread
-                             :model (or (romacs-agent--value (gethash "model" result))
-                                        model)))
+       (let* ((thread (gethash "id" (gethash "thread" result)))
+              (selected-model (or (romacs-agent--value (gethash "model" result)) model))
+              (effort (romacs-agent--value (gethash "reasoningEffort" result))))
+         (append (list (list :type 'handshake :state
+                             (append (list :thread thread)
+                                     (and (stringp effort) (list :reported-effort (cons selected-model effort)))))
+                       (list :type 'session :harness-session thread :model selected-model))
                  ;; Codex takes up no turn its last run was cut in: it is over.
                  (when interrupted
                    (list (list :type 'done :error t :interrupted t :reason "Cut short when Codex stopped"))))))

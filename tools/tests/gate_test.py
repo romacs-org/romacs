@@ -887,9 +887,12 @@ class Receipts(unittest.TestCase):
         self.enterContext(mock.patch.multiple(gate, HOME=self.root, CACHE=self.root / 'cache',
                                              SHORT=self.root / 'ng'))
         (self.root / 'run-user').mkdir(mode=0o700)
+        # The receipt names a cache executable even when the build is stubbed.
         self.enterContext(mock.patch.dict(os.environ, {'CARGO_HOME': str(self.root / 'cargo'),
+                                                       'ROMACS_SCCACHE': '/bin/true',
                                                        'XDG_RUNTIME_DIR': str(self.root / 'run-user')}, clear=False))
-        self.enterContext(mock.patch.multiple(gate, ORACLE=str(self.oracle), FORGE='/bin/true', start_sccache=mock.DEFAULT))
+        self.enterContext(mock.patch.multiple(gate, ORACLE=str(self.oracle), FORGE='/bin/true',
+                                             SCCACHE='/bin/true', start_sccache=mock.DEFAULT))
         original = gate.out
         self.rustc = self.enterContext(mock.patch.object(gate, 'out', wraps=gate.out))
         self.rustc.side_effect = lambda *a, **k: b'rustc fixture' if a[:2] == ('rustc', '-vV') else original(*a, **k)
