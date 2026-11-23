@@ -250,6 +250,40 @@ moment more under load."
        (should (equal (romacs-agent-journal-start session) (romacs-agent-events-end session)))
        (should (= (romacs-agent-journal-start session) 8))))))
 
+(ert-deftest romacs-agent-events-replay-starts-before-the-first-historical-prompt ()
+  (romacs-agent-events-tests--with-session
+   0
+   (lambda (session journal)
+     (setf (romacs-agent-input-seq session) 30
+           (romacs-agent-done-seq session) 20
+           (romacs-agent-completed-seq session) 20)
+     (let ((prompts (cl-loop for text in '("/compact" "continue") for seq from 2
+                             collect (romacs-agent-events-tests--line
+                                      seq "in" (romacs-mcp--object "type" "user" "romacsRequest" seq "message"
+                                                                   (romacs-mcp--object "role" "user" "content" text))))))
+       (write-region (string-join prompts "") nil journal t 'silent)
+       (should (equal (cl-loop for event in (romacs-agent-events session)
+                               when (eq (plist-get event :type) 'input)
+                               collect (plist-get event :steer))
+                      '(nil t)))
+       (let ((copy (romacs-agent-replay-copy session 0))
+             (romacs-agent-event-functions nil))
+         (dolist (line prompts)
+           (romacs-agent-replay-record copy (json-parse-string line)))
+         (should (plist-get (romacs-agent-driver-state copy) :compact-turn))))
+     (should (= (romacs-agent-input-seq session) 30)))))
+
+(ert-deftest romacs-agent-events-a-replayed-limit-does-not-read-current-account-room ()
+  (let* ((session (romacs-agent--make :id "c" :provider "claude" :harness 'claude))
+         (copy (romacs-agent-replay-copy session 0))
+         (seen nil)
+         (romacs-agent-event-functions (list (lambda (_ event) (push event seen)))))
+    (cl-letf (((symbol-function 'romacs-agent-room-of)
+               (lambda (&rest _) (ert-fail "A replay read the current account"))))
+      (romacs-agent--raise copy '(:type done :seq 1 :error t :limit t)))
+    (should (equal (plist-get (car seen) :type) 'done))
+    (should (= (romacs-agent-done-seq copy) 1))))
+
 (ert-deftest romacs-agent-events-a-failed-replay-lets-its-pages-go ()
   ;; A replay that fails in a step lets go of its snapshot; one that is done
   ;; lets go of it too, once.

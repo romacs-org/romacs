@@ -757,6 +757,50 @@ a state root of its own, and a service of its own on `socket'."
         (kill-buffer local)
         (when remote (kill-buffer remote))))))
 
+(ert-deftest romacs-agent-service-remote-send-distinguishes-refused-from-unconfirmed ()
+  (require 'romacs-agent-remote)
+  (let ((source (romacs-agent-remote--make :client 'test-client))
+        (session (romacs-agent--make :id "remote-test" :harness 'claude :state 'idle))
+        (reply nil))
+    (cl-letf (((symbol-function 'romacs-agent-client-live-p) (lambda (_) t))
+              ((symbol-function 'romacs-agent-client-command)
+               (lambda (_client _method _params callback) (setq reply callback))))
+      (dolist (kind '("disconnected" "not-kept" "unknown-session"))
+        (with-temp-buffer
+          (romacs-agent-log-mode)
+          (setq-local romacs-agent-log--session session
+                      romacs-agent-log--source source
+                      romacs-agent-log--end (point-min-marker)
+                      romacs-agent-log--input (point-min-marker)
+                      romacs-agent-log--prompts nil)
+          (set-marker-insertion-type romacs-agent-log--end t)
+          (romacs-agent-log--separator t)
+          (goto-char (point-max))
+          (insert "sent prompt")
+          (romacs-agent-log--deliver (lambda (text) (romacs-agent-log-source-send source session text)))
+          (insert "new draft")
+          (funcall reply nil (romacs-agent-rpc-object "message" "Test error"
+                                                      "data" (romacs-agent-rpc-object "kind" kind)))
+          (if (equal kind "unknown-session")
+              (should (equal (romacs-agent-log--draft) "sent prompt\n\nnew draft"))
+            (romacs-agent-remote--drawn session nil nil)
+            (should (equal (romacs-agent-log--draft) "new draft"))
+            (romacs-agent-log-history-previous)
+            (should (equal (romacs-agent-log--draft) "sent prompt"))
+            (romacs-agent-log-history-next)
+            (should (equal (romacs-agent-log--draft) "new draft"))))))))
+
+(ert-deftest romacs-agent-service-command-digest-orders-nested-objects ()
+  (let ((a (json-parse-string "{\"cid\":\"a\",\"rows\":[{\"b\":2,\"a\":1},null]}"))
+        (b (json-parse-string "{\"rows\":[{\"a\":1,\"b\":2},null],\"cid\":\"b\"}"))
+        (c (json-parse-string "{\"rows\":[null,{\"a\":1,\"b\":2}]}")))
+    (let ((digest-a (romacs-agent-service--command-digests "test" a))
+          (digest-b (romacs-agent-service--command-digests "test" b))
+          (digest-c (romacs-agent-service--command-digests "test" c)))
+      (should (equal (car digest-a) (car digest-b)))
+      (should-not (equal (car digest-a) (car digest-c)))
+      (should (equal (cadr digest-a) (secure-hash 'sha1 "test {\"rows\":[{\"b\":2,\"a\":1},null]}"))))))
+
 (ert-deftest romacs-agent-service-runs-a-command-once ()
   ;; A command runs once by its cid: again, its kept result; the cid with
   ;; other params, refused.  An answer reserves its request: a second
@@ -784,13 +828,14 @@ a state root of its own, and a service of its own on `socket'."
         (unwind-protect
             (progn
               (should (wait (romacs-agent-client-revision client)))
-              (let ((send (romacs-agent-rpc-object "cid" "c1" "id" id "text" "hi" "mode" "now")))
+              (let ((send (romacs-agent-rpc-object "cid" "c1" "id" id "text" "hi" "mode" "now"))
+                    (repeat (romacs-agent-rpc-object "mode" "now" "text" "hi" "id" id "cid" "c1")))
                 (should (equal (gethash "state" (car (funcall ask "agents/send" send))) "written"))
-                (should (equal (gethash "state" (car (funcall ask "agents/send" send))) "written"))
+                (should (equal (gethash "state" (car (funcall ask "agents/send" repeat))) "written"))
                 (should (equal calls '((send "hi"))))
                 ;; Kept in the store too: a service started again runs it no second time.
                 (clrhash romacs-agent-service--commands)
-                (should (equal (gethash "state" (car (funcall ask "agents/send" send))) "written"))
+                (should (equal (gethash "state" (car (funcall ask "agents/send" repeat))) "written"))
                 (should (equal calls '((send "hi"))))
                 (puthash "text" "other" send)
                 (should (equal (gethash "kind" (gethash "data" (cadr (funcall ask "agents/send" send)))) "cid-conflict"))

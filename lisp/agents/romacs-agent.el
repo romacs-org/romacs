@@ -1820,7 +1820,8 @@ BEFORE has the session's count, provider, model, context window and cost."
 (defun romacs-agent--complete-turn (session event)
   "Finish SESSION's turn from EVENT, then schedule any waiting work."
   (let* ((provider (romacs-agent-provider session))
-         (room (and (plist-get event :limit) (romacs-agent-room-of provider)))
+         (room (and (plist-get event :limit) (not (romacs-agent--replay-copy-p session))
+                    (romacs-agent-room-of provider)))
          (before (list :turns (romacs-agent-turns session) :provider provider
                        :model (romacs-agent-model session)
                        :context-window (romacs-agent-context-window session)
@@ -1834,12 +1835,16 @@ BEFORE has the session's count, provider, model, context window and cost."
 
 (defun romacs-agent--apply-session-event (session event)
   "Apply the harness identity and permission mode in EVENT to SESSION."
-  (let ((native (plist-get event :harness-session)))
-    (when (and native (not (equal native (romacs-agent-harness-session session))))
-      (romacs-agent--manifest-put session "harnessSession" native))
+  (let ((native (plist-get event :harness-session))
+        (before (romacs-agent-harness-session session)))
     (setf (romacs-agent-model session) (or (plist-get event :model) (romacs-agent-model session))
           (romacs-agent-harness-session session) native
-          (romacs-agent-state session) 'running))
+          (romacs-agent-state session) 'running)
+    (when (and native (not (equal native before)))
+      (condition-case err
+          (romacs-agent--manifest-put session "harnessSession" native)
+        (file-error (message "Could not keep the harness session for %s: %s"
+                             (romacs-agent-id session) (error-message-string err))))))
   (when-let* ((mode (plist-get event :permission-mode)))
     (romacs-agent--mode-seen session mode)))
 
@@ -2313,6 +2318,8 @@ and changes nothing of SESSION's, writes nothing to its harness, and sends
 nothing that waits."
   (let ((scratch (copy-romacs-agent session)))
     (setf (romacs-agent-seq scratch) 0 (romacs-agent-turns scratch) 0
+          (romacs-agent-input-seq scratch) 0 (romacs-agent-done-seq scratch) 0
+          (romacs-agent-completed-seq scratch) 0
           (romacs-agent-title-auto scratch) nil
           (romacs-agent-streamed scratch) (make-hash-table :test #'equal)
           (romacs-agent-tools scratch) (make-hash-table :test #'equal)
@@ -2340,10 +2347,7 @@ session's.  Every reader of a session's history replays into one."
   (let ((scratch (romacs-agent--scratch session)))
     (setf (romacs-agent-driver-state scratch)
           (list :run (or (and from (romacs-agent-events-p session) (romacs-agent-events-note-seq session "run" from))
-                         (plist-get (romacs-agent-driver-state session) :run)))
-          ;; No turn under way at FROM, a turn's start: its first prompt
-          ;; is no steer, whatever the live session is doing.
-          (romacs-agent-input-seq scratch) 0 (romacs-agent-completed-seq scratch) 0)
+                         (plist-get (romacs-agent-driver-state session) :run))))
     scratch))
 
 (defun romacs-agent-replay-record (copy record)

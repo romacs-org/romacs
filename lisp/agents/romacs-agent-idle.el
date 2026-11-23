@@ -29,38 +29,36 @@ request reported (an hour, or five minutes)."
 to start while it is still warm.")
 
 (defun romacs-agent-idle--busy-p (session)
-  "Whether anything waits on SESSION or runs under it: an approval, a
-message queued, a selection waiting, its harness's own subagents or
-commands, or a task it delegated."
+  "Whether SESSION has an approval, queued prompt, or active worker."
   (or (> (hash-table-count (romacs-agent-approvals session)) 0)
       (romacs-agent-queue session)
-      (romacs-agent-pending-selection session)
       (and (romacs-agent-subagents session)
            (cl-some (lambda (row) (equal (plist-get row :state) "running"))
                     (hash-table-values (romacs-agent-subagents session))))
       (cl-some (lambda (child) (memq (romacs-agent-state child) '(starting running waiting-approval)))
                (romacs-agent-children session))))
 
+(defun romacs-agent-idle--warm-p (state context now)
+  "Whether STATE's cache for CONTEXT is worth compacting at NOW."
+  (let ((expires (plist-get state :cache-expires)))
+    (and (>= (or context 0) romacs-agent-idle--min-tokens)
+         (not (plist-get state :compact-turn))
+         (numberp expires)
+         (<= (- expires romacs-agent-idle--lead) now)
+         (< now expires))))
+
 (defun romacs-agent-idle-due-p (session now)
   "Whether SESSION's thread is to be compacted at NOW (`float-time')."
-  (let ((expires (plist-get (romacs-agent-driver-state session) :cache-expires)))
-    (and romacs-agent-idle-compaction
-         (romacs-agent--idle-compact-prompt session)
-         (not (plist-get (romacs-agent-options session) :parent))
-         (eq (romacs-agent-loaded (romacs-agent-id session)) session)
-         (romacs-agent-caught-up session)
-         (process-live-p (romacs-agent-connection session))
-         (romacs-agent--ready-p session)
-         (eq (romacs-agent-state session) 'idle)
-         (not (romacs-agent-failed session))
-         (>= (or (romacs-agent-context-used session) 0) romacs-agent-idle--min-tokens)
-         ;; Never a compaction's compaction: once per idle spell.
-         (not (plist-get (romacs-agent-driver-state session) :compact-turn))
-         ;; Unknown (no request this run, or one served wholly from the
-         ;; cache): not guessed.
-         (numberp expires)
-         (>= now (- expires romacs-agent-idle--lead)) (< now expires)
-         (not (romacs-agent-idle--busy-p session)))))
+  (and romacs-agent-idle-compaction
+       (romacs-agent--idle-compact-prompt session)
+       (not (plist-get (romacs-agent-options session) :parent))
+       (eq (romacs-agent-loaded (romacs-agent-id session)) session)
+       (eq (romacs-agent-state session) 'idle)
+       (not (or (romacs-agent-failed session) (romacs-agent-settled-p session)
+                (romacs-agent--per-turn-p session)))
+       (romacs-agent-idle--warm-p (romacs-agent-driver-state session) (romacs-agent-context-used session) now)
+       (romacs-agent--open-p session nil)
+       (not (romacs-agent-idle--busy-p session))))
 
 (defun romacs-agent-idle--compact (session)
   "Send SESSION's harness the prompt that compacts its thread."

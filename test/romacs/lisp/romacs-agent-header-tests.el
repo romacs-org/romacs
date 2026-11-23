@@ -290,6 +290,19 @@ string, an overlay."
       (should (timerp romacs-agent-ui--children-timer))
       (flush))))
 
+(ert-deftest romacs-agent-header-refreshes-a-workers-tooltip-without-a-count-change ()
+  (romacs-agent-header-tests--with
+    (let ((worker "First worker"))
+      (cl-letf (((symbol-function 'romacs-agent-children-summary)
+                 (lambda (_) (propertize "Workers" 'help-echo worker))))
+        (romacs-agent-ui--header-refresh session)
+        (should (equal (get-text-property (string-search "Workers" header-line-format) 'help-echo header-line-format)
+                       "First worker"))
+        (setq worker "Next worker")
+        (romacs-agent-ui--header-refresh session)
+        (should (equal (get-text-property (string-search "Workers" header-line-format) 'help-echo header-line-format)
+                       "Next worker"))))))
+
 (ert-deftest romacs-agent-header-unchanged-is-not-written ()
   (romacs-agent-header-tests--with
     (let ((shown header-line-format))
@@ -304,7 +317,7 @@ string, an overlay."
       ;; Its views were told its state already: the board's batch waits on nothing.
       (should-not (timerp romacs-agent-ui--children-timer))
       ;; Made again, it reads the same: not written.
-      (setq romacs-agent-ui--header nil)
+      (setq romacs-agent-log--header-made nil)
       (romacs-agent-ui--header-refresh session)
       (should (eq header-line-format shown))
       (should (= written 0))

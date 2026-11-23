@@ -209,8 +209,9 @@ over, and one missing is nil."
   "EVENTS, the vector of one record unit `agents/event' sent, as the
 events raised for it: those of a type not known left out, the last
 marked :last (`romacs-agent--record')."
-  (let ((decoded (delq nil (mapcar #'romacs-agent-wire-decode events))))
-    (mapcar (lambda (event) (append event (list :last (eq event (car (last decoded)))))) decoded)))
+  (let* ((decoded (delq nil (mapcar #'romacs-agent-wire-decode events)))
+         (last-event (car (last decoded))))
+    (mapcar (lambda (event) (append event (list :last (eq event last-event)))) decoded)))
 
 (provide 'romacs-agent-wire)
 ;;; romacs-agent-wire.el ends here

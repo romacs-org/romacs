@@ -52,7 +52,7 @@ one with nothing to resume.")
   (plist-get (plist-get (romacs-agent--driver-of harness) :history) key))
 
 (defun romacs-agent-history--places ()
-  "The directories holding history, each once: (DIR HARNESS PROVIDER
+  "The directories holding history, once per harness: (DIR HARNESS PROVIDER
 CONFIG-DIR), every instance's own and its harness's default (under the
 first instance of that harness, run with the default directory)."
   (let ((places nil))
@@ -64,8 +64,10 @@ first instance of that harness, run with the default directory)."
           (push (list (or config-dir default) harness (plist-get provider :name) config-dir) places)
           (push (list default harness (plist-get provider :name) nil) places))))
     (let ((seen (make-hash-table :test #'equal)))
-      (cl-remove-if (lambda (place) (prog1 (gethash (car place) seen) (puthash (car place) t seen)))
-                    (nreverse places)))))
+      (cl-loop for place in (nreverse places)
+               for key = (list (car place) (cadr place))
+               unless (gethash key seen)
+               collect (progn (puthash key t seen) place)))))
 
 (defun romacs-agent-history--describe (path size mtime harness)
   "PATH's description, read from its head once per SIZE and MTIME: from

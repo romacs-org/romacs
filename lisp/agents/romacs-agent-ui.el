@@ -704,7 +704,7 @@ nothing more."
 ;;; The header
 ;;
 ;; A value, never a form: the buffer's `header-line-format' is the string
-;; `romacs-agent-ui--header-show' last made, so showing it runs no Lisp.
+;; `romacs-agent-log--header-show' last made, so showing it runs no Lisp.
 ;; It is made where the board's views are told a session changed: after
 ;; each of the session's events (a `changed' one too, for what no harness
 ;; event says), when the batch remakes the session's rows, and when what
@@ -792,26 +792,6 @@ display clipping the band where the window ends."
                  workers
                  (and share (propertize share 'face 'romacs-agent-context))))
      "  ")))
-
-(defvar-local romacs-agent-ui--header nil
-  "What the chat's header was last made from (`romacs-agent-ui--header-inputs').")
-
-(defun romacs-agent-ui--header-format (text)
-  "TEXT as a header line shows it: each `%' said literally."
-  (string-replace "%" "%%" text))
-
-(defun romacs-agent-ui--header-show (&optional force)
-  "Make this chat's header say what its session says now.
-While what the header reads is what it was made from, nothing is made;
-while it would read the same, nothing is written, so display sees no
-change.  FORCE makes it again whatever it was made from."
-  (let ((inputs (romacs-agent-ui--header-inputs romacs-agent-ui--session)))
-    (unless (and (not force) (equal-including-properties inputs romacs-agent-ui--header))
-      (let ((header (romacs-agent-ui--header-format (romacs-agent-ui--header-text inputs))))
-        (setq romacs-agent-ui--header inputs)
-        (unless (equal-including-properties header header-line-format)
-          (setq header-line-format header)
-          (force-mode-line-update))))))
 
 (defun romacs-agent-ui--header-refresh (session)
   "Make the header of SESSION's chat say what SESSION says now: its

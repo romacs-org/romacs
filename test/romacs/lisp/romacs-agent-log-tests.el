@@ -82,6 +82,41 @@ them inherits."
     (should (equal (romacs-agent-log-tests--transcript)
                    "🤔 I think.\n\nPara one.\n\nPara two.\n\n\n▌ ❯ next\n\n"))))
 
+(ert-deftest romacs-agent-log-tool-rows-indent-and-mark-failures ()
+  (romacs-agent-log-tests--with
+    (draw :type 'input :text "Check the build")
+    (draw :type 'tool :state 'started :id "b" :seq 2 :name "Bash"
+          :input (romacs-agent-log-tests--input "command" "make"))
+    (draw :type 'tool :state 'started :id "w" :name "Wait for subagents")
+    (draw :type 'tool :state 'completed :id "w")
+    (should (string-match-p "^  \\$ make\n  · Wait for subagents\n"
+                            (romacs-agent-log-tests--transcript)))
+    (goto-char (point-min))
+    (search-forward "$ make")
+    (should (memq 'romacs-agent-log-tool (ensure-list (get-text-property (match-beginning 0) 'face))))
+    (draw :type 'tool :state 'failed :id "b" :output "Build failed")
+    (should (string-match-p "^  ✘ \\$ make\n    ⎿ Build failed\n  · Wait for subagents\n"
+                            (romacs-agent-log-tests--transcript)))
+    (goto-char (point-min))
+    (search-forward "✘ $ make")
+    (should (memq 'romacs-agent-log-tool-failed (ensure-list (get-text-property (match-beginning 0) 'face))))
+    (should (= (get-text-property (match-beginning 0) 'romacs-agent-log-seq) 2))
+    (should (equal (cdr (get-text-property (match-beginning 0) 'romacs-agent-log-full)) "Build failed"))))
+
+(ert-deftest romacs-agent-log-a-tool-row-keeps-outcome-emphasis ()
+  (romacs-agent-log-tests--with
+    (draw :type 'tool :state 'started :id "m" :name "mcp__build__check")
+    (draw :type 'tool :state 'completed :id "m" :output "{\"error\":\"Build rejected\"}")
+    (goto-char (point-min))
+    (search-forward "Build rejected")
+    (should (eq (car (ensure-list (get-text-property (match-beginning 0) 'face))) 'romacs-agent-error))))
+
+(ert-deftest romacs-agent-log-a-failed-generic-tool-shows-its-final-input ()
+  (romacs-agent-log-tests--with
+    (draw :type 'tool :state 'started :id "w" :name "Wait for subagents")
+    (draw :type 'tool :state 'failed :id "w" :input (romacs-agent-log-tests--input "description" "two workers"))
+    (should (string-prefix-p "  ✘ Wait for subagents two workers\n" (romacs-agent-log-tests--transcript)))))
+
 (ert-deftest romacs-agent-log-long-output-says-how-much-more ()
   (romacs-agent-log-tests--with
     (let ((romacs-agent-log-output-lines 2))
@@ -89,7 +124,7 @@ them inherits."
       (draw :type 'tool :state 'completed :id "t" :output "1\n2\n3\n4\n5")
       (let ((text (romacs-agent-log-tests--transcript)))
         ;; A command that ended well is its row: how many lines it gave.
-        (should (equal text "● $ seq 5 · 5 lines\n"))
+        (should (equal text "  $ seq 5 · 5 lines\n"))
         ;; RET on it shows all of it.
         (goto-char (point-min))
         (search-forward "seq 5")
@@ -107,7 +142,7 @@ them inherits."
       (draw :type 'tool-output :id "c" :text "one\ntwo\n")
       (draw :type 'tool-output :id "c" :text "three\n")
       (let ((text (romacs-agent-log-tests--transcript)))
-        (should (string-match-p "make[^\n]*\n  ⋮ running: 3 lines so far, the last 2\n    two\n    three\n\nafter" text)))
+        (should (string-match-p "make[^\n]*\n    ⋮ running: 3 lines so far, the last 2\n      two\n      three\n\nafter" text)))
       (draw :type 'tool :state 'completed :id "c" :output "one\ntwo\nthree")
       (let ((text (romacs-agent-log-tests--transcript)))
         (should-not (string-match-p "so far" text))
@@ -124,7 +159,7 @@ them inherits."
     (draw :type 'tool :state 'completed :id "a" :output "2 words")
     (let ((text (romacs-agent-log-tests--transcript)))
       ;; A read says how much it read, its text RET away; a report, under its call.
-      (should (string-match-p "⑂ count · 2 words\n│ ● [^\n]*n.txt[^\n]*· 1 line\n\nMain goes on." text)))))
+      (should (string-match-p "⑂ count · 2 words\n│   ◧ [^\n]*n.txt[^\n]*· 1 line\n\nMain goes on." text)))))
 
 (ert-deftest romacs-agent-log-an-approval-waits-in-plain-sight ()
   (romacs-agent-log-tests--with
@@ -136,7 +171,8 @@ them inherits."
       (should (string-match-p "y allow" text))
       (should (string-match-p "d deny" text)))
     (should (string-match-p "waits on you" (buffer-substring-no-properties romacs-agent-log--end romacs-agent-log--input)))
-    (should (string-match-p "1 waits on you" (romacs-agent-log--header)))
+    (romacs-agent-log--header-show)
+    (should (string-match-p "1 waits on you" header-line-format))
     ;; Answered by the user: who and how, and the block no longer waits.
     (remhash "b1" (romacs-agent-approvals session))
     (draw :type 'attributed :request-id "b1" :actor '(:kind "user" :client "editor") :decision "deny" :scope "once" :reason "not now")
@@ -373,7 +409,7 @@ them inherits."
     (draw :type 'tool :state 'started :id "r" :name "Read" :parent "a")
     (draw :type 'tool :state 'completed :id "a" :output "done")
     (let ((text (romacs-agent-log-tests--transcript)))
-      (should (string-match-p "│ hello world\n│ next\n│ ● " text))
+      (should (string-match-p "│ hello world\n│ next\n│   ◧ " text))
       ;; Ended well: its row says its report's first line.
       (should (string-match-p "⑂ d · done\n" text)))
     ;; A background subagent's later word goes under its call still.
@@ -998,7 +1034,7 @@ them inherits."
     (draw :type 'tool-output :id "x" :text "line 1\n")
     (draw :type 'tool :state 'started :id "x" :name "Bash" :input (romacs-agent-log-tests--input "command" "seq 2"))
     (draw :type 'tool-output :id "x" :text "line 2\n")
-    (should (string-match-p "⋮ running: 2 lines so far\n    line 1\n    line 2" (romacs-agent-log-tests--transcript)))))
+    (should (string-match-p "⋮ running: 2 lines so far\n      line 1\n      line 2" (romacs-agent-log-tests--transcript)))))
 
 (ert-deftest romacs-agent-log-interrupt-and-send-asks-the-live-session ()
   ;; A restored chat shows its row, idle; its session, loaded, runs a
@@ -1143,7 +1179,7 @@ them inherits."
       (should-not (string-match-p "a long report\\|{" text))
       (should (string-match-p "◧ n\\.txt  /a · 2 lines\n" text))
       (should-not (string-match-p "⎿ one" text))
-      (should (string-match-p "\\$ make\n  ⎿ make: no rule\n" text))
+      (should (string-match-p "  ✘ \\$ make\n    ⎿ make: no rule\n" text))
       (goto-char (point-min))
       (search-forward "make: no rule")
       (should (memq 'romacs-agent-log-denied (ensure-list (get-text-property (match-beginning 0) 'face))))
@@ -1518,7 +1554,7 @@ none when dropped.")
     (draw :type 'thinking :text "\n\n")
     (draw :type 'tool :state 'started :id "t1" :name "Bash" :input (romacs-agent-log-tests--input "command" "ls"))
     (draw :type 'delta :text "Done.")
-    (should (string-match-p "\\`▌ ❯ one\n\n\n▌ ❯ two\n\n● [^\n]*\n\nDone\\.\n\\'" (romacs-agent-log-tests--transcript)))))
+    (should (string-match-p "\\`▌ ❯ one\n\n\n▌ ❯ two\n\n  \\$ ls\n\nDone\\.\n\\'" (romacs-agent-log-tests--transcript)))))
 
 (ert-deftest romacs-agent-log-rounds-arrival-without-its-call-is-top-level ()
   ;; Its parent call never drawn: a round of its own at the top level.

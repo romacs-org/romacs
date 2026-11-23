@@ -462,43 +462,41 @@ first), owed as a turn of its own."
                                :owed (append (plist-get state :owed) (list (cons :turn steer)))))))))
 
 (defun romacs-agent--codex-request-event (id request)
-  "The approval event for a pending Codex REQUEST with ID."
-  (pcase-let ((`(,_ ,method ,params) request))
-    (list :type 'approval :request-id id :tool method :input params
-          :questions (and (equal method "item/tool/requestUserInput")
-                          (romacs-agent--codex-questions params)))))
+  "Describe Codex REQUEST with handle ID, or nil if unsupported."
+  (pcase-let* ((`(,_ ,method ,params) request)
+               (user (equal method "item/tool/requestUserInput"))
+               (`(,tool ,input)
+                (pcase method
+                  ("item/commandExecution/requestApproval"
+                   (list "Bash" (romacs-mcp--object "command" (romacs-agent--value (gethash "command" params))
+                                                   "cwd" (romacs-agent--value (gethash "cwd" params)))))
+                  ("item/fileChange/requestApproval"
+                   (list "Edit" (romacs-mcp--object "grantRoot" (or (romacs-agent--value (gethash "grantRoot" params))
+                                                                   :null))))
+                  ("item/permissions/requestApproval" (list "Permissions" (gethash "permissions" params)))
+                  ("item/tool/requestUserInput" (list "Question" params)))))
+    (when tool
+      (list :type 'approval :request-id id :tool tool :input input
+            :questions (and user (romacs-agent--codex-questions params))
+            :user user :description (romacs-agent--value (gethash "reason" params))))))
 
 (defun romacs-agent--codex-asked (state id method params)
   "The events of request ID, METHOD with PARAMS, Codex asks of Romacs:
 An approval or questions go to the user.  STATE holds the run and its
 owed lines."
-  (cl-flet ((approval (tool input &optional questions)
-              (let ((approval (romacs-agent--codex-approval-id (plist-get state :run) id)))
-                ;; A question is the user's alone to answer.
-                (list (list :type 'approval :request-id approval :tool tool :input input :questions questions
-                            :approval-wire (list id method params)
-                            :user (equal method "item/tool/requestUserInput")
-                            :description (romacs-agent--value (gethash "reason" params))))))
-            (refused (&optional why)
-              (append (and why (list (list :type 'status :text why)))
-                      (list (list :type 'handshake
-                                  :state (list :owed (append (plist-get state :owed)
-                                                             (list (list :reply id method)))))))))
-    (pcase method
-      ("item/commandExecution/requestApproval"
-       (approval "Bash" (romacs-mcp--object "command" (romacs-agent--value (gethash "command" params))
-                                            "cwd" (romacs-agent--value (gethash "cwd" params)))))
-      ("item/fileChange/requestApproval"
-       (approval "Edit" (romacs-mcp--object "grantRoot" (or (romacs-agent--value (gethash "grantRoot" params)) :null))))
-      ("item/permissions/requestApproval" (approval "Permissions" (gethash "permissions" params)))
-      ("item/tool/requestUserInput"
-       ;; An answer is journaled and shown: a secret is not asked here.
-       (if (cl-some (lambda (q) (eq (gethash "isSecret" q) t)) (gethash "questions" params))
-           (refused "Codex asked for a secret: answer it in Codex's own client")
-         (approval "Question" params (romacs-agent--codex-questions params))))
-      ;; An MCP server's form wants typed JSON (numbers, booleans, lists),
-      ;; and its url mode a browser: neither is a question's answer.
-      (_ (refused)))))
+  (let* ((wire (list id method params))
+         (handle (romacs-agent--codex-approval-id (plist-get state :run) id))
+         ;; Answers are journaled and shown.
+         (secret (and (equal method "item/tool/requestUserInput")
+                      (cl-some (lambda (q) (eq (gethash "isSecret" q) t)) (gethash "questions" params))))
+         (event (unless secret (romacs-agent--codex-request-event handle wire))))
+    (if event
+        (list (append event (list :approval-wire wire)))
+      (append (when secret
+                (list (list :type 'status :text "Codex asked for a secret: answer it in Codex's own client")))
+              (list (list :type 'handshake
+                          :state (list :owed (append (plist-get state :owed)
+                                                     (list (list :reply id method))))))))))
 
 (defun romacs-agent--codex-tool (item)
   "An item's tool name and input, for the tool block."
