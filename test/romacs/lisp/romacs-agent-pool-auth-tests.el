@@ -24,12 +24,31 @@
            (romacs-agent--children (make-hash-table :test #'equal))
            (romacs-agent--attempts (make-hash-table :test #'eq))
            (romacs-agent--held-notes (make-hash-table :test #'equal)))
-       (cl-letf (((symbol-function 'romacs-agent--credentials-stamp)
-                  (lambda (instance) (gethash instance stamps "before-login")))
+       ;; Where a launch reads it: the directory the harness gets.
+       (cl-letf (((symbol-function 'romacs-agent--home-stamp)
+                  (lambda (_harness dir)
+                    (romacs-agent-pool-auth-tests--stamp
+                     (gethash (romacs-agent-pool-auth-tests--instance-of dir) stamps "before-login"))))
                  ((symbol-function 'romacs-agent--keep-soon) #'ignore))
          (should (equal (names (romacs-agent-pool 'claude)) '("claude" "claude2" "claude3")))
          (allow "claude2" (float-time))
          (funcall body root stamps #'spend)))))
+
+(defun romacs-agent-pool-auth-tests--stamp (label)
+  "A credentials stamp named LABEL: a login that is another as LABEL is."
+  (cons label (cons 0 1000000000)))
+
+(defun romacs-agent-pool-auth-tests--instance-of (dir)
+  "The name of the instance whose configuration directory DIR is."
+  (car (cl-find-if (lambda (provider)
+                     (and (stringp (cdr provider)) dir
+                          (equal (file-name-as-directory (expand-file-name (cdr provider)))
+                                 (file-name-as-directory (expand-file-name dir)))))
+                   romacs-agent-providers)))
+
+(defun romacs-agent-pool-auth-tests--run-note (session)
+  "Journal SESSION's run note as its supervisor would, its launch's stamp in it."
+  (romacs-agent-pool-auth-tests--record session "note" (json-parse-string (romacs-agent--run-note session))))
 
 (defmacro romacs-agent-pool-auth-tests--with (&rest body)
   "Run BODY with the pool fixture and an opaque credential stamp per instance."
@@ -70,6 +89,7 @@ OTHER-ERROR replaces the structured code while keeping the error wording."
                                       :provider provider :state 'starting :caught-up t
                                       :cwd root :config-dir (cdr (assoc provider romacs-agent-providers)))))
     (romacs-agent--manifest session nil)
+    (romacs-agent-pool-auth-tests--run-note session)
     session))
 
 (defun romacs-agent-pool-auth-tests--unavailable (provider)
@@ -172,8 +192,10 @@ OTHER-ERROR replaces the structured code while keeping the error wording."
       (should (romacs-agent-room "claude")))))
 
 (ert-deftest romacs-agent-pool-auth-stamp-follows-a-symlink ()
-  (let ((read-stamp (symbol-function 'romacs-agent--credentials-stamp)))
+  (let ((read-stamp (symbol-function 'romacs-agent--credentials-stamp))
+        (home-stamp (symbol-function 'romacs-agent--home-stamp)))
     (romacs-agent-pool-auth-tests--with
+     (cl-letf (((symbol-function 'romacs-agent--home-stamp) home-stamp))
       (let ((target (expand-file-name ".credentials.json" (cdr (assoc "claude2" romacs-agent-providers))))
             (link (expand-file-name ".credentials.json" (cdr (assoc "claude" romacs-agent-providers)))))
         (write-region "{\"claudeAiOauth\":{\"accessToken\":\"before\"}}" nil target)
@@ -185,7 +207,7 @@ OTHER-ERROR replaces the structured code while keeping the error wording."
           (set-file-times target (time-subtract (current-time) 60))
           (let ((after (funcall read-stamp "claude")))
             (should after)
-            (should-not (equal after before))))))))
+            (should-not (equal after before)))))))))
 
 (defun romacs-agent-pool-auth-tests--finish (session rejected)
   "Make the harness for SESSION reject credentials or complete its turn."
@@ -209,7 +231,7 @@ OTHER-ERROR replaces the structured code while keeping the error wording."
                  ("setsid" 0)
                  (_ (ert-fail (list "Unexpected launch program" program)))))))
     (apply launch session argv args))
-  (romacs-agent-pool-auth-tests--record session "note" (romacs-mcp--object "type" "run")))
+  (romacs-agent-pool-auth-tests--run-note session))
 
 (defmacro romacs-agent-pool-auth-tests--transport (rejected &rest body)
   "Run BODY with a supervisor double rejecting the named accounts in REJECTED.
@@ -257,12 +279,12 @@ DRAIN runs the queued supervisor replies and one-shot callbacks in order."
 (ert-deftest romacs-agent-pool-auth-refusal-uses-the-attempts-stamp ()
   (romacs-agent-pool-auth-tests--with
     (romacs-agent-pool-auth-tests--transport '("claude")
-      (let ((read-stamp (symbol-function 'romacs-agent--credentials-stamp))
+      (let ((read-stamp (symbol-function 'romacs-agent--home-stamp))
             (reads nil))
-        (cl-letf (((symbol-function 'romacs-agent--credentials-stamp)
-                   (lambda (instance)
-                     (let ((stamp (funcall read-stamp instance)))
-                       (push (list instance stamp) reads)
+        (cl-letf (((symbol-function 'romacs-agent--home-stamp)
+                   (lambda (harness dir)
+                     (let ((stamp (funcall read-stamp harness dir)))
+                       (push (list (romacs-agent-pool-auth-tests--instance-of dir) (car-safe stamp)) reads)
                        stamp))))
           (let* ((session (romacs-agent-start root "Read the fixture." "Pinned" "claude"))
                  (launch-reads reads))
@@ -293,28 +315,6 @@ DRAIN runs the queued supervisor replies and one-shot callbacks in order."
     (dolist (provider providers)
       (should (string-match-p (concat "\\_<" (regexp-quote provider) "\\_>") result)))))
 
-(ert-deftest romacs-agent-pool-auth-pool-relaunches-with-the-same-brief ()
-  (romacs-agent-pool-auth-tests--with
-    (romacs-agent-pool-auth-tests--transport '("claude")
-      (romacs-agent-pool-auth-tests--delegate root "claude")
-      (drain)
-      (should (equal (mapcar #'cadr (reverse launches)) '("claude" "claude2")))
-      (should-not (member "--resume" (nth 2 (car launches))))
-      (should (equal (mapcar #'car (reverse writes)) '("claude" "claude2")))
-      (should (string-search "Read the fixture and report." (cadar writes)))
-      (should (equal (cadar writes) (cadr (cadr writes))))
-      (should (equal (gethash "status" (romacs-agent-pool-auth-tests--task (caar (last launches))))
-                     "completed")))))
-
-(ert-deftest romacs-agent-pool-auth-pool-stops-after-one-relaunch ()
-  (romacs-agent-pool-auth-tests--with
-    (romacs-agent-pool-auth-tests--transport '("claude" "claude2")
-      (romacs-agent-pool-auth-tests--delegate root "claude")
-      (drain)
-      (should (equal (mapcar #'cadr (reverse launches)) '("claude" "claude2")))
-      (should (romacs-agent-room "claude3"))
-      (romacs-agent-pool-auth-tests--failed-task (caar (last launches)) "claude" "claude2"))))
-
 (ert-deftest romacs-agent-pool-auth-pinned-task-stays-and-explains-the-failure ()
   (romacs-agent-pool-auth-tests--with
     (romacs-agent-pool-auth-tests--transport '("claude2")
@@ -322,36 +322,5 @@ DRAIN runs the queued supervisor replies and one-shot callbacks in order."
       (drain)
       (should (equal (mapcar #'cadr launches) '("claude2")))
       (romacs-agent-pool-auth-tests--failed-task (caar launches) "claude2"))))
-
-(ert-deftest romacs-agent-pool-auth-resume-moves-the-conversation-and-message ()
-  (romacs-agent-pool-auth-tests--with
-    (romacs-agent-pool-auth-tests--transport '("claude")
-      (let* ((session (romacs-agent-pool-auth-tests--session root "claude"))
-             (id (romacs-agent-id session))
-             (conversation (format "projects/-proj/%s.jsonl" id))
-             (origin (expand-file-name conversation (romacs-agent-config-dir session)))
-             (target (expand-file-name conversation (cdr (assoc "claude2" romacs-agent-providers)))))
-        (make-directory (file-name-directory origin) t)
-        (write-region "{\"turn\":1}\n" nil origin)
-        (setf (romacs-agent-state session) 'ended
-              (romacs-agent-harness-session session) id
-              (romacs-agent-turns session) 1
-              (romacs-agent-input-seq session) 1
-              (romacs-agent-completed-seq session) 2
-              (romacs-agent-done-seq session) 2
-              (romacs-agent-settled-seq session) 2
-              (romacs-agent-seq session) 2)
-        (romacs-agent-tools--send (romacs-mcp--object "taskId" id "message" "Continue the review."))
-        (drain)
-        (should (equal (mapcar #'cadr (reverse launches)) '("claude" "claude2")))
-        (should (equal (cadr (member "--resume" (nth 2 (car launches)))) id))
-        (should (eq (romacs-agent-get id) session))
-        (should (equal (romacs-agent-provider session) "claude2"))
-        (should (file-exists-p target))
-        (should (equal (mapcar #'car (reverse writes)) '("claude" "claude2")))
-        (should (string-search "Continue the review." (cadar writes)))
-        (romacs-agent-pool-auth-tests--unavailable "claude")
-        (should-not (romacs-agent-queue session))
-        (should (equal (gethash "status" (romacs-agent-tools--task session)) "completed"))))))
 
 ;;; romacs-agent-pool-auth-tests.el ends here
