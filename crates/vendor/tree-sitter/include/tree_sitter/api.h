@@ -55,14 +55,8 @@ typedef uint32_t (*TSDecodeFunction)(
   int32_t *code_point
 );
 
-// Deprecated alias to be removed in ABI 16
-typedef TSDecodeFunction DecodeFunction;
-
 typedef enum TSInputEncoding {
   TSInputEncodingUTF8,
-  TSInputEncodingUTF16LE,
-  TSInputEncodingUTF16BE,
-  TSInputEncodingCustom
 } TSInputEncoding;
 
 typedef enum TSSymbolType {
@@ -229,7 +223,7 @@ const TSRange *ts_parser_included_ranges(
  * way that exactly matches the source code changes.
  *
  * The [`TSInput`] parameter lets you specify how to read the text. It has the
- * following three fields:
+ * following fields:
  * 1. [`read`]: A function to retrieve a chunk of text at a given byte offset
  *    and (row, column) position. The function should return a pointer to the
  *    text and write its length to the [`bytes_read`] pointer. The parser does
@@ -238,12 +232,8 @@ const TSRange *ts_parser_included_ranges(
  *    [`bytes_read`] pointer to indicate the end of the document.
  * 2. [`payload`]: An arbitrary pointer that will be passed to each invocation
  *    of the [`read`] function.
- * 3. [`encoding`]: An indication of how the text is encoded. Either
- *    `TSInputEncodingUTF8`, `TSInputEncodingUTF16LE`, `TSInputEncoding16BE`,
- *    or `TSInputEncodingCustom`.
- * 4. [`decode`]: A function to read one code point from the given input. This
- *    function should return the number of bytes consumed and write the code point
- *    to the [`code_point`] pointer, or write -1 if the input is invalid.
+ * 3. [`encoding`]: Set to `TSInputEncodingUTF8`.
+ * 4. [`decode`]: Unused. Set to `NULL`.
  *
  * This function returns a syntax tree on success, and `NULL` on failure. There
  * are two possible reasons for failure:
@@ -257,7 +247,6 @@ const TSRange *ts_parser_included_ranges(
  * [`encoding`]: TSInput::encoding
  * [`bytes_read`]: TSInput::read
  * [`decode`]: TSInput::decode
- * [`code_point`]: TSDecodeFunction::code_point
  */
 TSTree *ts_parser_parse(
   TSParser *self,
@@ -290,20 +279,6 @@ TSTree *ts_parser_parse_string(
   const TSTree *old_tree,
   const char *string,
   uint32_t length
-);
-
-/**
- * Use the parser to parse some source code stored in one contiguous buffer with
- * a given encoding. The first four parameters work the same as in the
- * [`ts_parser_parse_string`] method above. The final parameter indicates whether
- * the text is encoded as UTF8 or UTF16.
- */
-TSTree *ts_parser_parse_string_encoding(
-  TSParser *self,
-  const TSTree *old_tree,
-  const char *string,
-  uint32_t length,
-  TSInputEncoding encoding
 );
 
 /**

@@ -65,6 +65,10 @@ Each is its own commit in Romacs's history.
   diagnostics and their bindings. The scanner serialization buffer and
   grammar ABI logging callback remain. Measurement: none (pure deletion).
 
+- `refactor(treesit): remove non-UTF-8 parsing` deletes unused UTF-16 and
+  custom decoding paths. The C input layout still carries the encoding and
+  decode slots. Measurement: none (pure deletion).
+
 ## Checking it
 
 `tools/treesit-fuzz` builds this runtime and the published one with the

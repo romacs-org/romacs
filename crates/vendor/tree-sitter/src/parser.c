@@ -2028,21 +2028,11 @@ TSTree *ts_parser_parse_string(
   const char *string,
   uint32_t length
 ) {
-  return ts_parser_parse_string_encoding(self, old_tree, string, length, TSInputEncodingUTF8);
-}
-
-TSTree *ts_parser_parse_string_encoding(
-  TSParser *self,
-  const TSTree *old_tree,
-  const char *string,
-  uint32_t length,
-  TSInputEncoding encoding
-) {
   TSStringInput input = {string, length};
   return ts_parser_parse(self, old_tree, (TSInput) {
     &input,
     ts_string_input_read,
-    encoding,
+    TSInputEncodingUTF8,
     NULL,
   });
 }

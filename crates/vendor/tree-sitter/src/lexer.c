@@ -97,18 +97,13 @@ static void ts_lexer__get_lookahead(Lexer *self) {
 
   const uint8_t *chunk = (const uint8_t *)self->chunk + position_in_chunk;
 
-  if (self->input.encoding == TSInputEncodingUTF8 && chunk[0] < 0x80) {
+  if (chunk[0] < 0x80) {
     self->data.lookahead = chunk[0];
     self->lookahead_size = 1;
     return;
   }
 
-  TSDecodeFunction decode =
-    self->input.encoding == TSInputEncodingUTF8    ? ts_decode_utf8     :
-    self->input.encoding == TSInputEncodingUTF16LE ? ts_decode_utf16_le :
-    self->input.encoding == TSInputEncodingUTF16BE ? ts_decode_utf16_be : self->input.decode;
-
-  self->lookahead_size = decode(chunk, size, &self->data.lookahead);
+  self->lookahead_size = ts_decode_utf8(chunk, size, &self->data.lookahead);
 
   // If this chunk ended in the middle of a multi-byte character,
   // try again with a fresh chunk.
@@ -116,7 +111,7 @@ static void ts_lexer__get_lookahead(Lexer *self) {
     ts_lexer__get_chunk(self);
     chunk = (const uint8_t *)self->chunk;
     size = self->chunk_size;
-    self->lookahead_size = decode(chunk, size, &self->data.lookahead);
+    self->lookahead_size = ts_decode_utf8(chunk, size, &self->data.lookahead);
   }
 
   if (self->data.lookahead == TS_DECODE_ERROR) {
@@ -254,7 +249,6 @@ static void ts_lexer__advance(TSLexer *_self, bool skip) {
   const uint32_t current_range_end =
     self->included_ranges[self->current_included_range_index].end_byte;
   if (
-    self->input.encoding == TSInputEncodingUTF8 &&
     self->lookahead_size == 1 &&
     self->data.lookahead != '\n' &&
     next_position < current_range_end &&
