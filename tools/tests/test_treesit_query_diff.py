@@ -113,6 +113,71 @@ class CorpusDigestTest(unittest.TestCase):
                                  16)
 
 
+class CReferenceQueryTest(unittest.TestCase):
+    def setUp(self):
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        self.root = Path(scratch.name)
+        self.native = self.write(DIFF.NATIVE, """use tree_sitter::ffi;
+pub(crate) use ffi::{TSNode};
+pub(crate) struct Query(*mut ffi::TSQuery);
+impl Query {
+    fn new() {}
+    fn capture_name() {}
+    fn pattern_count() {}
+    fn predicates() {}
+    /// Every match of the query under NODE
+    fn matches() {}
+}
+""")
+        self.bindings = self.write("crates/vendor/tree-sitter/binding_rust/bindings.rs",
+                                   "    pub fn ts_query_capture_count(self_: *const TSQuery) -> u32;\n")
+        self.engine = self.write(DIFF.C_ENGINE, "uint32_t ts_query_capture_count(const TSQuery *self) {\n")
+
+    def write(self, name, content):
+        path = self.root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+        return path
+
+    def install(self):
+        DIFF.add_reference_query_tests(self.root, DIFF.ROOT / DIFF.SUPPORT)
+        return self.native.read_text()
+
+    def test_adds_accessor_once(self):
+        installed = self.install()
+        self.assertIn("#[cfg(test)]\n    fn capture_count(&self) -> u32", installed)
+        self.assertEqual(installed, self.install())
+
+    def test_keeps_existing_accessor(self):
+        text = self.native.read_text().replace("    fn capture_name",
+                                              "    fn capture_count() {}\n    fn capture_name")
+        self.native.write_text(text)
+        self.engine.unlink()
+        self.bindings.unlink()
+        self.assertEqual(self.install().count("fn capture_count("), 1)
+
+    def test_accessor_requires_the_c_symbol_and_rust_binding(self):
+        for path in (self.engine, self.bindings):
+            with self.subTest(path=path.name):
+                original = path.read_text()
+                path.write_text("/* capture count removed */\n")
+                with self.assertRaisesRegex(ValueError, f"ts_query_capture_count.*{path.name}"):
+                    self.install()
+                path.write_text(original)
+
+    def test_missing_wrapper_method_and_anchor_are_reported(self):
+        original = self.native.read_text()
+        for old, message in (
+            ("fn matches()", "missing C reference method Query::matches"),
+            ("/// Every match of the query under NODE", "C reference anchor.*Every match"),
+        ):
+            with self.subTest(missing=old):
+                self.native.write_text(original.replace(old, ""))
+                with self.assertRaisesRegex(ValueError, message):
+                    self.install()
+
+
 def fixture():
     case = dict(language="json", queries=["(_) @n"] * 8, origins=["shipped.el"] * 8,
                 shipped=8, states=[[1, 0, None, [[0, 10]], "hash"],
