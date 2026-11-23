@@ -88,7 +88,8 @@ fn closure_constants_with_outside_relations_are_refused() {
         let form = vm.expansion_form(datum, 0).unwrap();
         let mut names = unit::Names::default();
         let refused = vm.compile_unit(&form, NameSet::default(), &mut names).expect_err(why);
-        assert!(refused.to_string().contains("cannot be serialised") && refused.to_string().contains(why), "{refused}");
+        // A refusal by design: the walk keeps the file as source, not as an error.
+        assert!(refused.starts_with(unit::UNSERIALISABLE) && refused.contains(why), "{refused}");
     }
     assert_eq!(through_unit(&mut vm, "(list 'funcall (list 'quote unit-plain))"), "1");
 }

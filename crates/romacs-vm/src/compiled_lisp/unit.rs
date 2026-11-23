@@ -239,13 +239,13 @@ impl<'a> Encoder<'a> {
     fn char_table(&mut self, v: Value, out: &mut Writer) -> Result<()> {
         let Object::CharTable(t) = self.vm.object(v)? else { return Err("not a char-table".into()) };
         if self.vm.is_uniprop_table(t) {
-            return Err("a constant that cannot be serialised: char-table".into());
+            return Err(unserialisable("char-table"));
         }
         if t.validate_mapping().is_err() {
-            return Err("a constant that cannot be serialised: a char-table whose ASCII slot is not its root's".into());
+            return Err(unserialisable("a char-table whose ASCII slot is not its root's"));
         }
         if t.parent() != Value::NIL && !matches!(self.vm.object(t.parent()), Ok(Object::CharTable(_))) {
-            return Err("a constant that cannot be serialised: a char-table whose parent is not a char-table".into());
+            return Err(unserialisable("a char-table whose parent is not a char-table"));
         }
         let (fields, extras, runs) = ([t.purpose(), t.default(), t.parent()], t.extras().to_vec(), t.own_runs()?);
         out.byte(NODE_CHAR_TABLE);
@@ -268,7 +268,7 @@ impl<'a> Encoder<'a> {
     /// pair (`aref' slot 2): the unit would rebuild the two apart.
     fn cell(&mut self, v: Value, out: &mut Writer) -> Result<()> {
         if self.vm.cell_pairs.get(v.payload() as usize).is_some() {
-            return Err("a constant that cannot be serialised: a capture whose lexical pair is shared".into());
+            return Err(unserialisable("a capture whose lexical pair is shared"));
         }
         let content = self.vm.read_capture_cell(v.payload() as usize);
         out.byte(NODE_CELL);
@@ -281,7 +281,7 @@ impl<'a> Encoder<'a> {
     /// closure: the unit would rebuild it as no command.
     fn closure(&mut self, v: Value, out: &mut Writer) -> Result<()> {
         if self.vm.interactive_entry(v).is_some() {
-            return Err("a constant that cannot be serialised: an interactive closure".into());
+            return Err(unserialisable("an interactive closure"));
         }
         let closure = self.vm.closures.get(v.index(4)?).ok_or("invalid closure")?;
         let (function, captures, metadata, document) =
@@ -374,7 +374,7 @@ impl<'a> Encoder<'a> {
                 out.n(b.len);
                 out.data(&b.bytes);
             }
-            other => return Err(format!("a constant that cannot be serialised: {}", object_kind(&other))),
+            other => return Err(unserialisable(object_kind(&other))),
         }
         Ok(out.bytes)
     }
@@ -903,6 +903,15 @@ impl Vm {
         validate_body(&decoded, |child| self.functions.get(child).map(|f| f.captures), self.slots.len(), self.caches.len())?;
         Ok(decoded)
     }
+}
+
+/// What starts the reason a unit refuses a constant it cannot keep: the
+/// walk then stores its file as source (`compile_walk'), a refusal by
+/// design, not a failed compile.
+pub(super) const UNSERIALISABLE: &str = "a constant that cannot be serialised";
+
+fn unserialisable(what: &str) -> String {
+    format!("{UNSERIALISABLE}: {what}")
 }
 
 fn read_name(r: &mut Reader, tag: u8, names: &[usize], uninterned: &[usize], vm: &Vm) -> Result<Name> {

@@ -117,6 +117,10 @@ const EXPRESSIONS: &[&str] = &[
                   (aref (lambda () (interactive "p")) 1))
             t)"#,
     r#"(let ((f (lambda () (interactive "p") "value" 42))) (list (documentation f) (length f) (funcall f)))"#,
+    // `(:documentation FORM)' is the docstring: the string after it is body.
+    r#"(eval '(let ((f (lambda () (:documentation "doc") "value" 42)))
+              (list (aref f 1) (documentation f) (funcall f)))
+            t)"#,
 ];
 
 // VM2-CLOSEQ1: neither mutation nor pair identity reaches an unboxed capture.

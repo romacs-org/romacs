@@ -30,6 +30,11 @@ const CASES: &[&str] = &[
         "(let* ((f (make-interpreted-closure (list 'x) '(1) '(t))) (args (list 'x 'y)) (g (make-interpreted-closure args '(1) '(t))) (h (make-hash-table :test 'equal))) (puthash f 'f h) (setcdr args nil) (list (equal f g) (= (sxhash-equal f) (sxhash-equal g)) (gethash g h)))",
         "(let* ((f (let ((x 2)) (lambda () x))) (env (list (cons 'x 1) t)) (g (make-interpreted-closure nil '(x) env)) (env2 (list (cons 'x 1) t)) (h (make-interpreted-closure nil '(x) env2))) (setcar env (cons 'x 2)) (list (equal f g) (equal g h) (progn (setcar env2 (cons 'x 2)) (equal g h))))",
         "(let* ((env (list (cons 'x 1) (cons 'y 2) t)) (f (make-interpreted-closure nil '(x) env)) (h (make-hash-table :test 'equal))) (puthash f 'f h) (setcdr env (list t)) (let ((g (make-interpreted-closure nil '(x) env))) (list (equal f g) (= (sxhash-equal f) (sxhash-equal g)) (gethash g h))))",
+        // The key sees the executable body alone, the spec apart, whether
+        // the lambda compiles now or lazily (under `eval'): a string after
+        // the interactive form is body, not a docstring.
+        "(list (equal (lambda () (interactive) 1) (make-interpreted-closure nil '(1) '(t) nil '(interactive))) (equal (lambda () (interactive \"p\") 1) (make-interpreted-closure nil '(1) '(t) nil '(interactive \"p\"))) (equal (lambda () (interactive \"p\") \"a\" 1) (lambda () (interactive \"p\") \"b\" 1)) (equal (lambda () \"d\" (interactive \"p\") 1) (lambda () \"e\" (interactive \"p\") 1)))",
+        "(eval '(list (equal (lambda () (interactive) 1) (make-interpreted-closure nil '(1) '(t) nil '(interactive))) (equal (lambda () (interactive \"p\") 1) (make-interpreted-closure nil '(1) '(t) nil '(interactive \"p\"))) (equal (lambda () (interactive \"p\") \"a\" 1) (lambda () (interactive \"p\") \"b\" 1)) (equal (lambda () \"d\" (interactive \"p\") 1) (lambda () \"e\" (interactive \"p\") 1))) t)",
 ];
 
 #[test]

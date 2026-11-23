@@ -2426,15 +2426,16 @@ impl Vm {
                 }
             }
         }
-        // GNU's definition expansion consumes metadata before compiling the
-        // executable body. Do not invoke a user-defined `declare' macro here.
-        let mut body = self.lambda_body(body);
-        while matches!(body.first(), Some(Form::List(items)) if matches!(items.first(), Some(Form::Sym(name)) if name == "declare"))
+        // BODY holds the executable forms, its metadata already parsed
+        // (`closure'). Leading `declare' forms run nothing: do not invoke a
+        // user-defined `declare' macro for them.
+        let mut code = body;
+        while matches!(code.first(), Some(Form::List(items)) if matches!(items.first(), Some(Form::Sym(name)) if name == "declare"))
         {
-            body = &body[1..];
+            code = &code[1..];
         }
         let deferred = self.deferred_escapes;
-        let r = self.progn(&mut b, body)?;
+        let r = self.progn(&mut b, code)?;
         // An escape deferred while this body compiled belongs to the
         // evaluation that compiled it. A reach it passed over has not taken
         // it, so the body's end does, inside that same evaluation; every
@@ -2567,18 +2568,6 @@ impl Vm {
         b.emit(Op::Closure(r, id, site));
         Ok(r)
     }
-    /// What follows a lambda's metadata, as GNU's `function' parses it
-    /// (eval.c Ffunction): a docstring (a string with more after it), then
-    /// an `(interactive ...)' form. Parsed once, so a string after the
-    /// interactive form stays in the body.
-    fn lambda_body<'a>(&self, body: &'a [Form]) -> &'a [Form] {
-        let body = if body.len() > 1 && self.form_is_string(&body[0]) { &body[1..] } else { body };
-        match body.split_first() {
-            Some((Form::List(items) | Form::Dotted(items, _), rest))
-                if matches!(items.first(), Some(Form::Sym(head)) if head == "interactive") => rest,
-            _ => body,
-        }
-    }
     /// R215: a closure over an UNEXPANDED body, compiled at its first call.
     /// It captures every visible lexical binding, since free variables are unknown
     /// until expansion. Each capture is reported as mutated, so no binding
@@ -2591,9 +2580,7 @@ impl Vm {
         let cells = names.iter().map(|n| b.env[n].cell).collect();
         let lates = names.iter().map(|n| b.env[n].late).collect();
         let shadows = names.iter().map(|n| b.env[n].shadow).collect();
-        // GNU never leaves the body empty: `(interactive)' alone runs nil.
-        let executable = match self.lambda_body(body) { [] => vec![Form::Sym("nil".into())], forms => forms.to_vec() };
-        let body_value = self.literal(&Form::List(executable))?;
+        let body_value = self.literal(&Form::List(body.to_vec()))?;
         let lazy = LazyBody {
             body: body_value,
             args: args.to_vec(),
@@ -3228,7 +3215,11 @@ impl Vm {
                         let name = rest[0].sym()?;
                         let slot = self.slot(name);
                         let closure = if head == "defmacro" {
-                            self.lambda(b, rest[1].list()?, &rest[2..])?
+                            // byte-run.el's `defmacro' keeps its docstring
+                            // out of the body, as `function' would.
+                            let body = &rest[2..];
+                            let body = if body.len() > 1 && self.form_is_string(&body[0]) { &body[1..] } else { body };
+                            self.lambda(b, rest[1].list()?, body)?
                         } else {
                             self.closure(b, &rest[1], &rest[2..], true, false)?
                         };

@@ -23,6 +23,11 @@ pub struct CommandOutcome {
 fn sym(s: &str) -> Form {
     Form::Sym(s.into())
 }
+/// A lambda's executable FORMS, never empty: GNU's `function' makes an
+/// empty body `(nil)'.
+fn executable_forms(forms: &[Form]) -> Vec<Form> {
+    if forms.is_empty() { vec![sym("nil")] } else { forms.to_vec() }
+}
 fn call(s: &str, a: Vec<Form>) -> Form {
     Form::List(std::iter::once(sym(s)).chain(a).collect())
 }
@@ -208,6 +213,7 @@ impl Vm {
             }
             _ => false,
         };
+        let params = args.list()?;
         // `defun' (byte-run.el:462-487) first takes its metadata forms in any
         // order, as `byte-run--parse-body' does (byte-run.el:324-356): the
         // first docstring (a string with more body, or `(:documentation
@@ -246,8 +252,8 @@ impl Vm {
         let mut doc_register = None;
         // `(:documentation FORM)': GNU evaluates FORM when the closure is
         // made (eval_sub, eval.c:594-600) and takes it out of the body. VM2
-        // retains the resulting object in CLOSURE_DOC_STRING. A
-        // string docstring stays in the body, where `lambda' handles it.
+        // retains the resulting object in CLOSURE_DOC_STRING, as it does a
+        // string docstring taken from the body below.
         let (owned, body): (Vec<Form>, &[Form]) = if head_is(body.first(), ":documentation") {
             let doc = match &body[0] {
                 // Fcar (XCDR (docstring)): a dotted tail after FORM is ignored.
@@ -273,12 +279,13 @@ impl Vm {
             builder.emit(Op::Const(register, doc));
             doc_register = Some(register);
         }
-        if body.is_empty() {
-            let result = self.lambda_with_metadata(builder, args.list()?, &[sym("nil")], exposed)?;
-            return Ok(if let Some(doc) = doc_register { self.closure_native_call(builder, Primitive::ClosureDocument, &[result, doc]) } else { result });
-        }
-        if !head_is(body.get(i), "interactive") {
-            let result = self.lambda_with_metadata(builder, args.list()?, body, exposed)?;
+        // The metadata is parsed once, here, as Ffunction parses it: what
+        // follows the docstring and the interactive form is the executable
+        // body, all that compiling, a lazy body and the closure's key see.
+        let interactive = head_is(body.get(i), "interactive");
+        let executable = executable_forms(&body[i + usize::from(interactive)..]);
+        if !interactive {
+            let result = self.lambda_with_metadata(builder, params, &executable, exposed)?;
             return Ok(if let Some(doc) = doc_register { self.closure_native_call(builder, Primitive::ClosureDocument, &[result, doc]) } else { result });
         }
         // make-interpreted-closure (eval.c:539-544): the spec is (car (cdr
@@ -322,15 +329,14 @@ impl Vm {
         };
         let saved_captures = std::mem::replace(&mut self.keep_captures, exposed);
         self.closure_key_extra = key_extra;
-        // The body keeps its metadata: `lambda' parses it once (`lambda_body').
-        let parts = self.lambda(builder, args.list()?, body)
+        let parts = self.lambda(builder, params, &executable)
             .and_then(|closure| Ok((closure, self.expr(builder, &thunk)?)));
         self.closure_key_extra.clear();
         self.keep_captures = saved_captures;
         let (closure, thunk) = parts?;
         let register = crate::prim::subr_named("#:vm2-set-interactive-form").expect("registration subr");
         let result = Self::native_call(builder, register, &[closure, spec_reg, thunk]);
-        let result = if exposed { self.expose_closure(builder, args.list()?, body, result)? } else { result };
+        let result = if exposed { self.expose_closure(builder, params, &executable, result)? } else { result };
         let doc = match doc_register { Some(doc) => doc, None => { let doc = builder.reg(); builder.emit(Op::Const(doc, Value::NIL)); doc } };
         Ok(self.closure_native_call(builder, Primitive::ClosureDocument, &[result, doc, spec_reg]))
     }
