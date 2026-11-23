@@ -32,6 +32,7 @@ mod names;
 mod command_set;
 mod command;
 mod interpreted_closure;
+use interpreted_closure::{CaptureBinding, CaptureLayout, CaptureSlot};
 mod cell_pairs;
 mod oclosure;
 mod host_input;
@@ -1101,12 +1102,11 @@ struct Function {
     /// holds an interpreted closure's body before macroexp.el is loaded.
     /// `code` is empty while this is present; every frame entry forces it.
     lazy: Option<Arc<LazyBody>>,
-    /// Whether it was compiled under dynamic binding, recorded where its
-    /// closure site sees no lexical binding: GNU's interpreted closure
-    /// keeps its whole visible environment, so there `(aref CLOSURE 2)'
-    /// is the dialect's alone, nil or (t). Code images and older cache
-    /// entries do not record it.
+    /// The binding dialect for interpreting an empty capture environment.
     dynamic: Option<bool>,
+    /// Slot 2 metadata in capture-register order, with the local special
+    /// declarations. Code images do not record this layout.
+    environment: Option<CaptureLayout>,
     /// A compiled-Lisp body not yet decoded (`compiled_lisp`), decoded at
     /// its first call as a `mapped_code` body is. `code` is empty while it
     /// is here.
@@ -2301,21 +2301,22 @@ impl Vm {
         self.slots[i].value = value;
     }
     pub fn compile(&mut self, form: &Form) -> Result<usize> {
+        self.compile_entry(form, &NameMap::default(), NameSet::default()).map(|(id, _)| id)
+    }
+    fn compile_entry(
+        &mut self, form: &Form, outer: &NameMap<Name, Binding>, mut specials: NameSet<String>,
+    ) -> Result<(usize, Vec<Name>)> {
         if self.compile_depth == 0 {
             self.pending_specials.clear();
             self.expanded_macros.clear();
             self.expanded_symbols.clear();
         }
         self.compile_depth += 1;
-        let seed = if std::mem::take(&mut self.seed_file_specials) {
-            self.file_specials.clone()
-        } else {
-            NameSet::default()
-        };
+        if std::mem::take(&mut self.seed_file_specials) {
+            specials.extend(self.file_specials.iter().cloned());
+        }
         self.loader_order_request = true;
-        let result = self
-            .function(&[], std::slice::from_ref(form), &NameMap::default(), &seed)
-            .map(|(id, _)| id);
+        let result = self.function(&[], std::slice::from_ref(form), outer, &specials);
         self.compile_depth -= 1;
         if self.compile_depth == 0 {
             self.pending_specials.clear();
@@ -2425,18 +2426,16 @@ impl Vm {
                 }
             }
         }
-        // GNU's definition expansion consumes metadata before compiling the
-        // executable body. Do not invoke a user-defined `declare' macro here.
-        let mut body = body;
-        if body.len() > 1 && body.first().is_some_and(|form| self.form_is_string(form)) {
-            body = &body[1..];
-        }
-        while matches!(body.first(), Some(Form::List(items)) if matches!(items.first(), Some(Form::Sym(name)) if name == "declare"))
+        // BODY holds the executable forms, its metadata already parsed
+        // (`closure'). Leading `declare' forms run nothing: do not invoke a
+        // user-defined `declare' macro for them.
+        let mut code = body;
+        while matches!(code.first(), Some(Form::List(items)) if matches!(items.first(), Some(Form::Sym(name)) if name == "declare"))
         {
-            body = &body[1..];
+            code = &code[1..];
         }
         let deferred = self.deferred_escapes;
-        let r = self.progn(&mut b, body)?;
+        let r = self.progn(&mut b, code)?;
         // An escape deferred while this body compiled belongs to the
         // evaluation that compiled it. A reach it passed over has not taken
         // it, so the body's end does, inside that same evaluation; every
@@ -2472,10 +2471,6 @@ impl Vm {
             .zip(&used)
             .filter_map(|(&mutated, &keep)| keep.then_some(mutated || keep_captures))
             .collect();
-        if keep_captures {
-            used.fill(true);
-        }
-        let visible = names.len();
         let retained = used.iter().filter(|&&keep| keep).count();
         let removed = names.len() - retained;
         if removed != 0 {
@@ -2508,6 +2503,7 @@ impl Vm {
         let id = self.install_function(Function {
             capture_mutations,
             mapped_code: None,
+            environment: Some(self.capture_layout(&names, outer, local_specials, Some(&b.code))),
             code: optimize(b.code, &b.sites, b.next),
             regs: b.next,
             captures: names.len(),
@@ -2517,7 +2513,7 @@ impl Vm {
             sites: b.sites,
             lazy: None,
             pending: None,
-            dynamic: (visible == 0).then_some(self.dynamic_scope),
+            dynamic: Some(self.dynamic_scope),
             params: Some(args.to_vec()),
             key: closure_key::of_forms(self, &closure_key::Context { dynamic: self.dynamic_scope, names: &names, specials: local_specials }, args, body, &key_extra),
         });
@@ -2550,8 +2546,8 @@ impl Vm {
         if self.lazy_regime || ((self.lambda_depth > 0 || self.evaluating) && b.env.is_empty()) {
             return self.lazy_lambda(b, args, body, false);
         }
-        // Ordinary closures retain only executable state. Source metadata is
-        // reserved for explicit make-interpreted-closure values.
+        // Eager compilation keeps the lambda list and capture names, but
+        // only a lazily held body keeps its source forms.
         self.lambda_depth += 1;
         let compiled = self.function(args, body, &b.env, &b.local_specials);
         self.lambda_depth -= 1;
@@ -2572,9 +2568,13 @@ impl Vm {
         b.emit(Op::Closure(r, id, site));
         Ok(r)
     }
+    /// A `defmacro' BODY's executable forms: byte-run.el's `defmacro' keeps
+    /// its docstring out of the body, as `function' would.
+    fn macro_body<'a>(&self, body: &'a [Form]) -> &'a [Form] {
+        if body.len() > 1 && self.form_is_string(&body[0]) { &body[1..] } else { body }
+    }
     /// R215: a closure over an UNEXPANDED body, compiled at its first call.
-    /// It captures every visible lexical binding (GNU's interpreted closure
-    /// captures its whole environment), since free variables are unknown
+    /// It captures every visible lexical binding, since free variables are unknown
     /// until expansion. Each capture is reported as mutated, so no binding
     /// it can see is ever unboxed out from under the later compilation.
     fn lazy_lambda(&mut self, b: &mut Builder, args: &[Form], body: &[Form], deferred: bool) -> Result<usize> {
@@ -2611,7 +2611,8 @@ impl Vm {
             required,
             rest,
             sites: vec![],
-            dynamic: names.is_empty().then_some(self.dynamic_scope),
+            dynamic: Some(self.dynamic_scope),
+            environment: Some(self.capture_layout(&names, &b.env, &b.local_specials, None)),
             lazy: Some(Arc::new(lazy)),
             pending: None,
             params: Some(args.to_vec()),
@@ -3219,7 +3220,7 @@ impl Vm {
                         let name = rest[0].sym()?;
                         let slot = self.slot(name);
                         let closure = if head == "defmacro" {
-                            self.lambda(b, rest[1].list()?, &rest[2..])?
+                            self.lambda(b, rest[1].list()?, self.macro_body(&rest[2..]))?
                         } else {
                             self.closure(b, &rest[1], &rest[2..], true, false)?
                         };
@@ -3966,8 +3967,8 @@ impl Vm {
             Cons => {
                 Ok(self.alloc_cons(a[0], a[1]))
             }
+            Length if a[0].tag() == 4 => Value::integer(self.closure_length(a[0])? as i64),
             Length => {
-                if a[0].tag() == 4 && !self.closures[a[0].index(4)?].metadata.is_empty() { return Value::integer(self.closures[a[0].index(4)?].metadata.len() as i64); }
                 if a[0] != Value::NIL && a[0].tag() == 0 {
                     // Three sources: mapped UTF-8 strings, heap strings/vectors,
                     // and byte strings. Text counts scalars; byte strings count

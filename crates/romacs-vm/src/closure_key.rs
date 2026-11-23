@@ -86,18 +86,13 @@ fn kept_special(vm: &Vm, name: &str) -> bool {
     vm.names.get(name).is_none_or(|&slot| !vm.slot_is_special(slot))
 }
 
-/// The key of a lambda compiled from PARAMS and BODY forms, with the
+/// The key of a lambda compiled from PARAMS and its executable BODY forms
+/// (its docstring, which `equal` compares apart, already out), with the
 /// interactive spec and modes its closure keeps apart from the body
 /// (INTERACTIVE: empty, or SPEC and MODES).
 pub(crate) fn of_forms(vm: &Vm, cx: &Context<'_>, params: &[Form], body: &[Form], interactive: &[Form]) -> Option<u128> {
     let mut canon = Canon::new(cx, |name| kept_special(vm, name));
     forms(vm, &mut canon, params, 0)?;
-    // The docstring is the closure's own slot, which `equal` compares apart.
-    let body = match body {
-        [Form::String(_) | Form::Bytes(_), rest @ ..] if !rest.is_empty() => rest,
-        [Form::Object(object), rest @ ..] if !rest.is_empty() && object.value(vm).is_ok_and(|v| vm.str_view(v).is_some()) => rest,
-        _ => body,
-    };
     forms(vm, &mut canon, body, 0)?;
     match interactive {
         [] => canon.tag(b'n'),

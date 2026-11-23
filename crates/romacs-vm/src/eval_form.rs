@@ -1,11 +1,12 @@
 //! GNU `eval` (src/eval.c Feval): evaluate a Lisp datum as a form.
 //!
-//! The datum is converted to source and compiled with an empty lexical
-//! environment, then executed by a reentrant engine. LEXICAL nil makes every
+//! The datum is converted to source, compiled and executed by a reentrant
+//! engine. LEXICAL nil makes every
 //! binding the form introduces dynamic, as GNU's interpreter does with
 //! `internal-interpreter-environment' nil; t or an alist selects lexical
 //! binding, an alist's `(SYMBOL . VALUE)' entries becoming the initial lexical
-//! bindings. A signal or throw leaving the form is handed back to the caller's
+//! bindings. A lexical pair already backed by a capture cell shares that
+//! cell with the evaluation. A signal or throw is handed back to the caller's
 //! engine unchanged, so `condition-case' and `catch' around `eval' see GNU's
 //! condition, data and tag (`threaded::reentrant_load').
 //!
@@ -21,6 +22,14 @@
 //! the closures it makes, are dynamic, while an alist binding of the same
 //! name stays lexical.
 use super::*;
+use std::ops::ControlFlow;
+
+#[derive(Default)]
+struct EvalEnvironment {
+    pairs: NameMap<Name, (Value, Value)>,
+    specials: NameSet<String>,
+}
+
 
 impl Vm {
     pub(super) fn eval_primitive(&mut self, args: &[Value]) -> Result<Value> {
@@ -56,91 +65,107 @@ impl Vm {
                 return Err(format!("{name} in eval form"));
             }
         }
-        let mut bindings = Vec::new();
-        let mut specials = Vec::new();
-        if lexical.tag() == 3 {
-            let mut seen = HashSet::default();
-            let mut tail = lexical;
-            let limit = self.list_limit();
-            let mut steps = 0usize;
-            let mut circular = false;
-            // GNU looks bindings up with assq: the first entry for a name wins.
-            while let Ok((entry, next)) = self.cons_pair(tail) {
-                steps += 1;
-                if steps > limit {
-                    circular = true;
-                    break;
-                }
-                if let Ok((name, value)) = self.cons_pair(entry) {
-                    if symbol && name == datum {
-                        return Ok(value);
-                    }
-                    if name.tag() == 7 && name != Value::NIL && name != Value::TRUE && seen.insert(name.0) {
-                        bindings.push((name, value));
-                    }
-                } else if entry.tag() == 7 && entry != Value::TRUE {
-                    // A bare symbol declares its name locally special.
-                    specials.push(entry);
-                }
-                tail = next;
+        match self.eval_environment(lexical, symbol.then_some(datum))? {
+            ControlFlow::Break(value) => Ok(value),
+            ControlFlow::Continue(environment) => {
+                let form = self.eval_datum_form(datum)?;
+                self.execute_eval(&form, lexical == Value::NIL, environment)
             }
-            // Looking a symbol up walks the whole alist: assq signals on a
-            // circular or dotted one (src/fns.c Fassq). Other forms look
-            // nothing up unless they reference a variable; VM2-EVAL2 records
-            // that such forms then evaluate without the environment.
-            if symbol && (circular || tail != Value::NIL) {
-                let (name, data) = if circular {
-                    ("circular-list", vec![lexical])
+        }
+    }
+
+    fn eval_environment(&mut self, lexical: Value, symbol: Option<Value>)
+        -> Result<ControlFlow<Value, EvalEnvironment>>
+    {
+        let mut env = EvalEnvironment::default();
+        if lexical.tag() != 3 {
+            return Ok(ControlFlow::Continue(env));
+        }
+        let mut tail = lexical;
+        let mut steps = 0;
+        let limit = self.list_limit();
+        while let Ok((entry, next)) = self.cons_pair(tail) {
+            steps += 1;
+            if steps > limit {
+                return if symbol.is_some() {
+                    Err(self.eval_environment_error("circular-list", lexical))
                 } else {
-                    ("wrong-type-argument", vec![self.intern("listp"), lexical])
+                    env.pairs.clear();
+                    Ok(ControlFlow::Continue(env))
                 };
-                let condition = self.intern(name);
-                let data = self.list_value(&data);
-                self.propagated_escape = Some(threaded::Escape::Signal(condition, data));
-                return Err(format!("{name} in eval lexical environment"));
             }
-            if circular {
-                bindings.clear();
+            if let Ok((name, value)) = self.cons_pair(entry) {
+                if symbol == Some(name) {
+                    return Ok(ControlFlow::Break(value));
+                }
+                if name.tag() == 7 && name != Value::UNBOUND {
+                    let name = self.expansion_form(name, 0)?.name()?;
+                    env.pairs.entry(name).or_insert((entry, value));
+                }
+            } else if entry.tag() == 7 && entry != Value::TRUE && entry != Value::UNBOUND
+                && let Some(name) = self.expansion_form(entry, 0)?.name()?.source()
+            {
+                env.specials.insert(name.to_owned());
             }
+            tail = next;
         }
-        let mut form = self.eval_datum_form(datum)?;
-        // The declarations scope the form's own bindings, inside the
-        // supplied ones: those stay lexical, as GNU's alist entries do.
-        if !specials.is_empty() {
-            let mut body = vec![Form::Sym("let".into()), Form::List(vec![])];
-            for name in specials {
-                body.push(Form::List(vec![Form::Sym("defvar".into()), self.source_form(name, 0)?]));
-            }
-            body.push(form);
-            form = Form::List(body);
+        if symbol.is_some() && tail != Value::NIL {
+            return Err(self.eval_environment_error("wrong-type-argument", lexical));
         }
-        if !bindings.is_empty() {
-            let bindings = bindings
-                .into_iter()
-                .map(|(name, value)| Ok(Form::List(vec![self.source_form(name, 0)?, self.eval_quoted_form(value)])))
-                .collect::<Result<Vec<_>>>()?;
-            form = Form::List(vec![Form::Sym("let".into()), Form::List(bindings), form]);
-        }
+        Ok(ControlFlow::Continue(env))
+    }
+
+    fn eval_environment_error(&mut self, name: &str, lexical: Value) -> String {
+        let condition = self.intern(name);
+        let data = if name == "circular-list" {
+            self.list_value(&[lexical])
+        } else {
+            let predicate = self.intern("listp");
+            self.list_value(&[predicate, lexical])
+        };
+        self.propagated_escape = Some(threaded::Escape::Signal(condition, data));
+        format!("{name} in eval lexical environment")
+    }
+
+    fn execute_eval(&mut self, form: &Form, dynamic: bool, environment: EvalEnvironment) -> Result<Value> {
+        let (outer, cells) = self.eval_capture_cells(environment.pairs);
         // Request code: the entry is released on return and the closures the
         // form made are retired once unreachable, as for any request. Code
         // compiled per call and never retired grew every collection's walk.
-        let saved = std::mem::replace(&mut self.dynamic_scope, lexical == Value::NIL);
+        let saved = std::mem::replace(&mut self.dynamic_scope, dynamic);
         // GNU's `eval' interprets, expanding each macro call at its reach:
         // an expansion that escapes defers there, and a definition's body
         // compiles at its first call.
         let saved_evaluating = std::mem::replace(&mut self.evaluating, true);
         let saved_defer = std::mem::replace(&mut self.defer_expansion_errors, true);
-        let compiled = self.compile_request(&form);
+        let compiled = self.compile_eval_request(form, &outer, environment.specials);
         self.defer_expansion_errors = saved_defer;
         self.evaluating = saved_evaluating;
         self.dynamic_scope = saved;
-        let (function, _) = compiled?;
+        let (function, names) = compiled?;
+        let captures: Vec<_> = names.iter().map(|name| cells[name]).collect();
         self.propagate_next = true;
-        let result = self.execute_raw(function);
+        let result = threaded::execute_args(self, function, &captures);
         self.propagate_next = false;
         self.release_request_entry(function);
         result
     }
+
+    fn eval_capture_cells(&mut self, pairs: NameMap<Name, (Value, Value)>)
+        -> (NameMap<Name, Binding>, NameMap<Name, Value>)
+    {
+        let mut outer = NameMap::default();
+        let mut cells = NameMap::default();
+        for (name, (pair, value)) in pairs {
+            // Ordinary alists supply initial values. A published pair
+            // already names a location, which nested evals must share.
+            let cell = self.cell_pairs.cell_of(pair).unwrap_or_else(|| self.alloc_cell(value));
+            outer.insert(name.clone(), Binding { reg: outer.len(), cell: true, late: false, shadow: None });
+            cells.insert(name, Value::reference(cell, 5));
+        }
+        (outer, cells)
+    }
+
 }
 
 #[cfg(test)]

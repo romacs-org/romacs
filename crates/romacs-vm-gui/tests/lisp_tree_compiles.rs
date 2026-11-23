@@ -13,6 +13,10 @@ use std::process::Command;
 /// The known failures, beside this file: `PATH: reason` a line.
 const KNOWN: &str = include_str!("lisp_tree_compile_failures.txt");
 
+/// What starts the reason a unit refuses a constant it cannot keep
+/// (romacs-vm's `compiled_lisp::unit::UNSERIALISABLE`).
+const UNSERIALISABLE: &str = "a constant that cannot be serialised";
+
 /// Compile processes at a time.
 const JOBS: usize = 4;
 
@@ -93,7 +97,11 @@ fn every_file_of_the_lisp_tree_compiles_but_the_known_failures() {
     let count = |field: &str| summary[field].as_u64().or_else(|| summary[field].as_array().map(|a| a.len() as u64)).unwrap();
     let ends: u64 = ["compiled", "compiled_before", "source_only", "errors"].into_iter().map(count).sum();
     assert!(count("files") > 1000 && ends == count("files"), "the run did not compile the tree: {summary}");
-    let errors: BTreeMap<String, String> = summary["errors"].as_array().unwrap().iter().map(|entry| {
+    // A constant a unit cannot keep leaves its file source-only by design,
+    // yet the file does not compile: it is held to the list as a failure is.
+    let refused = summary["source_only"].as_array().unwrap().iter()
+        .filter(|entry| entry["why"].as_str().is_some_and(|why| why.contains(UNSERIALISABLE)));
+    let errors: BTreeMap<String, String> = summary["errors"].as_array().unwrap().iter().chain(refused).map(|entry| {
         let file = Path::new(entry["file"].as_str().unwrap());
         let file = file.strip_prefix(&tree).unwrap_or(file).display().to_string();
         (file, entry["why"].as_str().unwrap_or_default().to_owned())

@@ -944,6 +944,7 @@ impl Vm {
         match p {
             Aref | Aset => {
                 let index = y.as_integer()?;
+                if p == Aset && x.tag() == 4 { return Err("array required".into()); }
                 // data.c Faref, Faset: a char-table's index is a character.
                 if matches!(self.object_if(x), Some(Object::CharTable(_))) && !(0..=crate::lstring::MAX_CHAR as i64).contains(&index) {
                     return Err("character index required".into());
@@ -960,24 +961,8 @@ impl Vm {
                             .ok_or("index out of range")? as i64,
                     );
                 }
-                if p == Aref && x.tag() == 4 && !self.closures[x.index(4)?].metadata.is_empty() {
-                    return self.closures[x.index(4)?].metadata.get(index).copied().ok_or_else(|| "index out of range".into());
-                }
-                // CLOSURE_CONSTANTS of a closure made where no lexical
-                // binding is visible: the dialect's empty environment, as
-                // nadvice reads it (VM2-CLOSEQ1).
-                // An ordinary closure's lambda list, slot 0 (VM2-CLOSEQ1).
-                if p == Aref && x.tag() == 4 && index == 0 {
-                    let function = self.closures[x.index(4)?].function;
-                    if let Some(params) = self.functions[function].params.clone() {
-                        return self.literal(&Form::List(params));
-                    }
-                }
-                if p == Aref && x.tag() == 4 && index == 2 {
-                    let function = self.closures[x.index(4)?].function;
-                    if let Some(dynamic) = self.functions[function].dynamic {
-                        return Ok(if dynamic { Value::NIL } else { self.list_value(&[Value::TRUE]) });
-                    }
+                if p == Aref && x.tag() == 4 {
+                    return self.closure_slot(x, index);
                 }
                 if p == Aref {
                     return match self.object(x)? {

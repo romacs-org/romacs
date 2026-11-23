@@ -239,13 +239,13 @@ impl<'a> Encoder<'a> {
     fn char_table(&mut self, v: Value, out: &mut Writer) -> Result<()> {
         let Object::CharTable(t) = self.vm.object(v)? else { return Err("not a char-table".into()) };
         if self.vm.is_uniprop_table(t) {
-            return Err("a constant that cannot be serialised: char-table".into());
+            return Err(unserialisable("char-table"));
         }
         if t.validate_mapping().is_err() {
-            return Err("a constant that cannot be serialised: a char-table whose ASCII slot is not its root's".into());
+            return Err(unserialisable("a char-table whose ASCII slot is not its root's"));
         }
         if t.parent() != Value::NIL && !matches!(self.vm.object(t.parent()), Ok(Object::CharTable(_))) {
-            return Err("a constant that cannot be serialised: a char-table whose parent is not a char-table".into());
+            return Err(unserialisable("a char-table whose parent is not a char-table"));
         }
         let (fields, extras, runs) = ([t.purpose(), t.default(), t.parent()], t.extras().to_vec(), t.own_runs()?);
         out.byte(NODE_CHAR_TABLE);
@@ -263,6 +263,38 @@ impl<'a> Encoder<'a> {
         }
         Ok(())
     }
+    /// A closure's mutable capture: shared by the unit's closures that hold
+    /// it, as in the compile process. Not stored when Lisp holds its lexical
+    /// pair (`aref' slot 2): the unit would rebuild the two apart.
+    fn cell(&mut self, v: Value, out: &mut Writer) -> Result<()> {
+        if self.vm.cell_pairs.get(v.payload() as usize).is_some() {
+            return Err(unserialisable("a capture whose lexical pair is shared"));
+        }
+        let content = self.vm.read_capture_cell(v.payload() as usize);
+        out.byte(NODE_CELL);
+        let r = self.value(content)?;
+        Self::write_ref(out, r);
+        Ok(())
+    }
+    /// A closure: its function, captures, metadata and document. Not stored
+    /// when it is a command, whose spec lives in the VM's table, not in the
+    /// closure: the unit would rebuild it as no command.
+    fn closure(&mut self, v: Value, out: &mut Writer) -> Result<()> {
+        if self.vm.interactive_entry(v).is_some() {
+            return Err(unserialisable("an interactive closure"));
+        }
+        let closure = self.vm.closures.get(v.index(4)?).ok_or("invalid closure")?;
+        let (function, captures, metadata, document) =
+            (closure.function, closure.captures.clone(), closure.metadata.clone(), closure.document);
+        out.byte(NODE_CLOSURE);
+        let f = self.function(function)?;
+        out.n(f);
+        self.refs(out, &captures)?;
+        self.refs(out, &metadata)?;
+        let doc = self.value(document)?;
+        Self::write_ref(out, doc);
+        Ok(())
+    }
     fn encode_node(&mut self, v: Value) -> Result<Vec<u8>> {
         let mut out = Writer::default();
         if v.tag() == 3 {
@@ -274,25 +306,11 @@ impl<'a> Encoder<'a> {
             return Ok(out.bytes);
         }
         if v.tag() == 5 {
-            // A closure's mutable capture: shared by the unit's closures
-            // that hold it, as in the compile process.
-            let content = self.vm.read_capture_cell(v.payload() as usize);
-            out.byte(NODE_CELL);
-            let r = self.value(content)?;
-            Self::write_ref(&mut out, r);
+            self.cell(v, &mut out)?;
             return Ok(out.bytes);
         }
         if v.tag() == 4 {
-            let closure = self.vm.closures.get(v.index(4)?).ok_or("invalid closure")?;
-            let (function, captures, metadata, document) =
-                (closure.function, closure.captures.clone(), closure.metadata.clone(), closure.document);
-            out.byte(NODE_CLOSURE);
-            let f = self.function(function)?;
-            out.n(f);
-            self.refs(&mut out, &captures)?;
-            self.refs(&mut out, &metadata)?;
-            let doc = self.value(document)?;
-            Self::write_ref(&mut out, doc);
+            self.closure(v, &mut out)?;
             return Ok(out.bytes);
         }
         if Vm::image_string(v) {
@@ -356,7 +374,7 @@ impl<'a> Encoder<'a> {
                 out.n(b.len);
                 out.data(&b.bytes);
             }
-            other => return Err(format!("a constant that cannot be serialised: {}", object_kind(&other))),
+            other => return Err(unserialisable(object_kind(&other))),
         }
         Ok(out.bytes)
     }
@@ -380,28 +398,7 @@ impl<'a> Encoder<'a> {
             return Err("an unmaterialised function body".into());
         }
         let mut out = Writer::default();
-        for n in [f.regs, f.captures, f.arity, f.required] {
-            out.n(n);
-        }
-        out.byte(u8::from(f.rest));
-        out.byte(match f.dynamic { None => 0, Some(false) => 1, Some(true) => 2 });
-        match &f.params {
-            None => out.byte(0),
-            Some(params) => {
-                out.byte(1);
-                out.n(params.len());
-                for p in params {
-                    self.form(&mut out, p)?;
-                }
-            }
-        }
-        match f.key {
-            None => out.byte(0),
-            Some(key) => {
-                out.byte(1);
-                for byte in key.to_le_bytes() { out.byte(byte); }
-            }
-        }
+        self.write_function_header(&mut out, &f)?;
         let mut body = Writer::default();
         let mut deps = Deps::default();
         body.n(f.sites.len());
@@ -431,6 +428,33 @@ impl<'a> Encoder<'a> {
         out.data(&body.bytes);
         Ok(out.bytes)
     }
+    fn write_function_header(&mut self, out: &mut Writer, f: &Function) -> Result<()> {
+        for n in [f.regs, f.captures, f.arity, f.required] {
+            out.n(n);
+        }
+        out.byte(u8::from(f.rest));
+        out.byte(match f.dynamic { None => 0, Some(false) => 1, Some(true) => 2 });
+        match &f.params {
+            None => out.byte(0),
+            Some(params) => {
+                out.byte(1);
+                out.n(params.len());
+                for p in params {
+                    self.form(out, p)?;
+                }
+            }
+        }
+        self.write_environment(out, f.environment.as_ref())?;
+        match f.key {
+            None => out.byte(0),
+            Some(key) => {
+                out.byte(1);
+                for byte in key.to_le_bytes() { out.byte(byte); }
+            }
+        }
+        Ok(())
+    }
+
     /// R in a body: a node or uninterned symbol by its index in DEPS.
     fn write_local(out: &mut Writer, deps: &mut Deps, r: Ref) {
         match r {
@@ -503,6 +527,33 @@ impl<'a> Encoder<'a> {
         }
         Ok(())
     }
+    fn write_environment(&mut self, out: &mut Writer, layout: Option<&CaptureLayout>) -> Result<()> {
+        let Some(layout) = layout else {
+            out.byte(0);
+            return Ok(());
+        };
+        out.byte(1);
+        out.byte(u8::from(layout.bare_context));
+        out.n(layout.specials.len());
+        for name in &layout.specials {
+            out.n(self.names.of(name));
+        }
+        out.n(layout.slots.len());
+        for slot in &layout.slots {
+            match slot.binding {
+                CaptureBinding::Lexical => out.byte(0),
+                CaptureBinding::Late { shadow: None } => out.byte(1),
+                CaptureBinding::Late { shadow: Some(index) } => { out.byte(2); out.n(index); }
+            }
+            match &slot.name {
+                None => out.byte(0),
+                Some(Name::Source(name)) => self.form(out, &Form::Sym(name.clone()))?,
+                Some(Name::Generated(id)) => self.form(out, &Form::Generated(*id))?,
+            }
+        }
+        Ok(())
+    }
+
     fn form(&mut self, out: &mut Writer, form: &Form) -> Result<()> {
         match form {
             Form::Int(n) => { out.byte(0); out.i(*n) }
@@ -701,6 +752,7 @@ impl Install<'_> {
             }
             _ => return Err("bad parameter list".into()),
         };
+        let environment = self.read_environment(r, captures, uninterned, vm)?;
         let key = match r.byte()? {
             0 => None,
             1 => {
@@ -716,8 +768,51 @@ impl Install<'_> {
         let body = r.data()?;
         let start = body.as_ptr() as usize - self.bytes.as_ptr() as usize;
         let function = Function { capture_mutations: vec![], mapped_code: None, code: vec![], regs, captures, arity, required, rest,
-                                  sites: vec![], lazy: None, dynamic, params, pending: None, key };
+                                  sites: vec![], lazy: None, dynamic, environment, params, pending: None, key };
         Ok((function, BodyRefs { values, children, caches, body: start..start + body.len() }))
+    }
+
+    fn read_environment(&self, r: &mut Reader, captures: usize, uninterned: &[usize], vm: &Vm)
+        -> Result<Option<CaptureLayout>>
+    {
+        match r.byte()? {
+            0 => return Ok(None),
+            1 => (),
+            _ => return Err("bad capture layout".into()),
+        }
+        let bare_context = r.byte()? != 0;
+        let special_count = r.count()?;
+        let specials = (0..special_count).map(|_| {
+            let slot = *self.slots.get(r.n()?).ok_or("bad local special")?;
+            Ok(vm.symbol_names[slot].clone())
+        }).collect::<Result<Vec<_>>>()?;
+        if r.count()? != captures {
+            return Err("capture layout does not match the body".into());
+        }
+        let slots = (0..captures).map(|_| {
+            self.read_capture_slot(r, captures, uninterned, vm)
+        }).collect::<Result<Vec<_>>>()?;
+        Ok(Some(CaptureLayout { slots, specials, bare_context }))
+    }
+
+    fn read_capture_slot(&self, r: &mut Reader, captures: usize, uninterned: &[usize], vm: &Vm)
+        -> Result<CaptureSlot>
+    {
+        let binding = match r.byte()? {
+            0 => CaptureBinding::Lexical,
+            1 => CaptureBinding::Late { shadow: None },
+            2 => {
+                let index = r.n()?;
+                if index >= captures {
+                    return Err("invalid late capture shadow".into());
+                }
+                CaptureBinding::Late { shadow: Some(index) }
+            }
+            _ => return Err("invalid capture binding".into()),
+        };
+        let tag = r.byte()?;
+        let name = if tag == 0 { None } else { Some(read_name(r, tag, self.slots, uninterned, vm)?) };
+        Ok(CaptureSlot { name, binding })
     }
 }
 
@@ -804,9 +899,34 @@ impl Vm {
         }
         let decoded = Function { capture_mutations, mapped_code: None, code, regs: f.regs, captures: f.captures, arity: f.arity,
                                  required: f.required, rest: f.rest, sites, lazy: None, dynamic: f.dynamic,
-                                 params: f.params.clone(), pending: None, key: f.key };
+                                 environment: f.environment.clone(), params: f.params.clone(), pending: None, key: f.key };
         validate_body(&decoded, |child| self.functions.get(child).map(|f| f.captures), self.slots.len(), self.caches.len())?;
         Ok(decoded)
+    }
+}
+
+/// What starts the reason a unit refuses a constant it cannot keep: the
+/// walk then stores its file as source (`compile_walk'), a refusal by
+/// design, not a failed compile.
+pub(super) const UNSERIALISABLE: &str = "a constant that cannot be serialised";
+
+fn unserialisable(what: &str) -> String {
+    format!("{UNSERIALISABLE}: {what}")
+}
+
+fn read_name(r: &mut Reader, tag: u8, names: &[usize], uninterned: &[usize], vm: &Vm) -> Result<Name> {
+    let bad = || "compiled Lisp artifact: bad symbol";
+    match tag {
+        2 => {
+            let slot = *names.get(r.n()?).ok_or_else(bad)?;
+            Ok(Name::Source(vm.symbol_names[slot].clone()))
+        }
+        3 => {
+            let slot = *uninterned.get(r.n()?).ok_or_else(bad)?;
+            let id = vm.generated_slots.get(&slot).ok_or_else(bad)?;
+            Ok(Name::Generated(*id))
+        }
+        _ => Err(bad().into()),
     }
 }
 
@@ -818,11 +938,10 @@ fn read_form(r: &mut Reader, names: &[usize], uninterned: &[usize], vm: &Vm) -> 
     Ok(match r.byte()? {
         0 => Form::Int(r.i()?),
         1 => Form::Float(f64::from_bits(r.u()?)),
-        2 => Form::Sym(vm.symbol_names[*names.get(r.n()?).ok_or("compiled Lisp artifact: bad name")?].clone()),
-        3 => {
-            let slot = *uninterned.get(r.n()?).ok_or("compiled Lisp artifact: bad symbol")?;
-            Form::Generated(*vm.generated_slots.get(&slot).ok_or("compiled Lisp artifact: bad symbol")?)
-        }
+        tag @ (2 | 3) => match read_name(r, tag, names, uninterned, vm)? {
+            Name::Source(name) => Form::Sym(name),
+            Name::Generated(id) => Form::Generated(id),
+        },
         4 => Form::List(list(r)?),
         5 => Form::String(r.str()?.to_owned()),
         6 => Form::Bytes(r.data()?.to_vec()),

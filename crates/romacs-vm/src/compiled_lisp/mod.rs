@@ -730,6 +730,8 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
             for (form, [byte, end, line, ordinal], specials) in emitted {
                 let data = match self.compile_unit(&form, specials, names) {
                     Ok(data) => data,
+                    // A constant a unit cannot keep: the file is source by design.
+                    Err(reason) if reason.starts_with(unit::UNSERIALISABLE) => return Ok(Err(format!("line {}: {reason}", line?))),
                     Err(reason) => return Err(format!("line {}: {reason}", line?).into()),
                 };
                 units.push((ordinal?, byte?, end?, line?, data));
