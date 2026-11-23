@@ -330,6 +330,7 @@ impl Core {
         let (mut beg, mut end) = self.visible;
         if beg != begv || end != zv {
             self.need_reparse = true;
+            tree.forget_revision();
         }
         let track = linecols.zip(self.linecols);
         let (mut beg_lc, mut end_lc) = self.linecols.unwrap_or((EMPTY_LINECOL, EMPTY_LINECOL));

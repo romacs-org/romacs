@@ -525,7 +525,13 @@ impl Leaf<'_> {
                 && c.linecols.is_some() == core.linecols.is_some())?;
             let o = self.ts_parser(*other).ok().filter(|o| o.buffer == p.buffer)?;
             let n = o.native.borrow();
-            (n.language() == native.language() && n.sees_all(length)).then(|| tree.duplicate())
+            (n.language() == native.language() && n.sees_all(length)).then(|| {
+                let copy = tree.duplicate();
+                if c.linecols != core.linecols {
+                    copy.forget_revision();
+                }
+                copy
+            })
         })
     }
 
@@ -680,21 +686,35 @@ impl Leaf<'_> {
             return Err(quit);
         }
         let (old, visible) = { let c = core.borrow(); (c.tree.clone(), c.visible) };
+        let ahead = core.borrow_mut().ahead.take();
+        let (mut new, fresh) = self.ts_reparse_tree(parser, buffer, visible, old.as_deref(), ahead)?;
+        let changed = old.as_ref().map(|old| {
+            let included = self.ts_parser(parser).map(|p| p.native.borrow().included_ranges())?;
+            Ok(new.compare(old, included))
+        }).transpose()?;
+        {
+            let mut c = core.borrow_mut();
+            c.tree = Some(Rc::new(new));
+            c.need_reparse = false;
+            c.waiting_slot = false;
+            c.fresh = fresh;
+        }
+        self.ts_parser_mut(parser).timestamp += 1;
+        Ok(Some(self.ts_reparse_ranges(buffer, visible.0, changed)))
+    }
+
+    fn ts_reparse_tree(&mut self, parser: Value, buffer: Value, visible: (i64, i64),
+                       old: Option<&native::Tree>, ahead: Option<ts::ahead::Ahead>) -> R<(native::Tree, bool)> {
         // A reparse a frame started on a thread: its tree, waited for, is
         // this parse's if the text has not changed since it began, and the
         // nearest old tree if it has.
-        let ahead = core.borrow_mut().ahead.take();
         // A killed buffer's parser parses as it always has: no thread's,
         // twin's or early tree, all of the text the buffer had, is used.
         let live = self.ts_live(buffer);
-        let ahead = ahead.filter(|_| live);
-        let ahead = ahead.and_then(|ahead| ahead.finish(self.ts_buffer_text(self.ts_base(buffer))?))
-            .filter(|(_, region, ..)| *region == visible);
-        let (ahead, ahead_changed) = match ahead {
-            Some((tree, _, edited, changed)) => (Some((tree, edited)), changed),
-            None => (None, None),
-        };
         let (done, behind) = if live {
+            let ahead = ahead.and_then(|ahead| ahead.finish(self.ts_buffer_text(self.ts_base(buffer))?))
+                .filter(|(_, region, _)| *region == visible)
+                .map(|(tree, _, edited)| (tree, edited));
             self.ts_reparse_source(parser, old.is_none(), ahead)
         } else {
             (None, None)
@@ -702,20 +722,9 @@ impl Leaf<'_> {
         let new = match done {
             Some(tree) => Some(tree),
             // A thread's tree that fell behind the text is newer than the old one.
-            None => self.ts_parse_visible(parser, visible, behind.as_ref().or(old.as_deref()))?,
+            None => self.ts_parse_visible(parser, visible, behind.as_ref().or(old))?,
         }.ok_or_else(|| self.ts_signal("treesit-parse-error", &[buffer]))?;
-        let new = Rc::new(new);
-        // The thread compared the same two trees, when it parsed this one.
-        let changed = old.as_ref().map(|old| ahead_changed.unwrap_or_else(|| new.changed_since(old)));
-        {
-            let mut c = core.borrow_mut();
-            c.tree = Some(new);
-            c.need_reparse = false;
-            c.waiting_slot = false;
-            c.fresh = old.is_none() && behind.is_none();
-        }
-        self.ts_parser_mut(parser).timestamp += 1;
-        Ok(Some(self.ts_reparse_ranges(buffer, visible.0, changed)))
+        Ok((new, old.is_none() && behind.is_none()))
     }
 
     fn ts_parse_visible(&mut self, parser: Value, visible: (i64, i64), old: Option<&native::Tree>) -> R<Option<native::Tree>> {

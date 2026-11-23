@@ -38,34 +38,38 @@ pub(crate) struct Ahead {
     changes: Vec<Change>,
     // CELL(Plain)
     result: Rc<RefCell<Receipt>>,
-    /// The worker compared its tree with this parser's own previous tree.
-    same_old_tree: bool,
 }
 
 /// What the thread sends: the tree, and the byte ranges where it differs
 /// from the tree it started from (`Tree::changed_since`), which are the
 /// parser's changed ranges when the text has not changed since.
-type Landed<T = native::Tree> = (T, Vec<(u32, u32)>);
-
-fn adopt_landed((tree, changed): Landed<native::Loose>) -> Landed {
-    (tree.tree(), changed)
-}
+type Landed = (native::Loose, Vec<(u32, u32)>);
 
 /// One worker's result, retained until the last matching reparse takes it.
 enum Receipt {
-    Waiting(mpsc::Receiver<Option<Landed<native::Loose>>>),
-    Ready(Option<Landed>),
+    Waiting {
+        receiver: mpsc::Receiver<Option<Landed>>,
+        old: Option<native::Revision>,
+    },
+    Ready(Option<native::Tree>),
 }
 
 impl Receipt {
     fn wait(&mut self, timeout: Duration) -> bool {
-        let Self::Waiting(receiver) = self else { return true };
+        let Self::Waiting { receiver, old } = self else { return true };
         let result = match receiver.recv_timeout(timeout) {
             Ok(result) => result,
             Err(mpsc::RecvTimeoutError::Disconnected) => None,
             Err(mpsc::RecvTimeoutError::Timeout) => return false,
         };
-        *self = Self::Ready(result.map(adopt_landed));
+        *self = Self::Ready(result.map(|(tree, changed)| {
+            let mut tree = tree.tree();
+            if let Some(old) = old.take() {
+                let included = tree.included_ranges();
+                tree.publish_comparison(old, included, changed);
+            }
+            tree
+        }));
         true
     }
 }
@@ -93,48 +97,52 @@ struct Started {
 }
 
 /// What `Ahead::finish` gives: the tree, the region the text's changes left
-/// it, whether there were any, and the changed ranges of a parser's next tree.
-type Finished = (native::Tree, (i64, i64), bool, Option<Vec<(u32, u32)>>);
+/// it, and whether there were any.
+type Finished = (native::Tree, (i64, i64), bool);
 
 /// What a parser needs of the thread: its language, its included ranges
-/// and its tree, edited up to the text the thread reads; none for a first
-/// parse.
+/// and its old tree, edited up to the text the thread reads; none for a
+/// first parse. A landed worker tree can seed the parse, but notifications
+/// still compare against the parser's own old tree.
 struct Job {
     language: native::Language,
     ranges: Vec<(u32, u32)>,
     old: Option<native::Loose>,
+    behind: Option<native::Loose>,
     visible: (i64, i64),
 }
 
 impl Ahead {
     /// The parse of JOB over TEXT in SLOT, calling WAKE when it ends.
-    fn start(slot: EarlySlot, job: Job, text: FrozenText, same_old_tree: bool, wake: crate::process_jobs::Wake) -> Option<Self> {
-        let (sender, result) = mpsc::channel();
+    fn start(slot: EarlySlot, job: Job, text: FrozenText, old: Option<native::Revision>, wake: crate::process_jobs::Wake) -> Option<Self> {
+        let (sender, receiver) = mpsc::channel();
         let visible = job.visible;
         std::thread::Builder::new().name("treesit-reparse".into()).spawn(move || {
             let text = text;
             let old = job.old.map(native::Loose::tree);
+            let behind = job.behind.map(native::Loose::tree);
             let mut parser = native::Parser::new();
             let tree = (parser.set_language(&job.language) && parser.set_included_ranges(&job.ranges)).then(|| {
                 let offset = |position: i64| usize::try_from(position - 1).unwrap_or(0);
                 let reader = Reader::new(Some(&text), (offset(visible.0), offset(visible.1)));
-                parser.parse(old.as_ref(), &reader).map(|new| {
+                parser.parse(behind.as_ref().or(old.as_ref()), &reader).map(|new| {
                     // A first parse has no old tree to differ from.
                     let changed = old.as_ref().map_or_else(Vec::new, |old| new.changed_since(old));
                     (new.loose(), changed)
                 })
             }).flatten();
-            // The copy shares the parser's subtrees: release it here. The slot
+            // The copies share subtrees: release them here. The slot
             // outlives the text, and is free before the wake, so the frame it
             // wakes finds it for a parse waiting on one.
             drop(old);
+            drop(behind);
             drop(text);
             drop(slot);
             let _ = sender.send(tree);
             note_early_landed();
             wake();
         }).ok()?;
-        Some(Self { visible, changes: Vec::new(), result: Rc::new(RefCell::new(Receipt::Waiting(result))), same_old_tree })
+        Some(Self { visible, changes: Vec::new(), result: Rc::new(RefCell::new(Receipt::Waiting { receiver, old })) })
     }
     /// Whether the thread has sent its result.
     pub(crate) fn ready(&mut self) -> bool {
@@ -153,19 +161,18 @@ impl Ahead {
     /// The worker's landed tree, edited by the text's changes since
     /// the parse started, with the region those left it, whether there were
     /// any (such a tree is an old one, nearer the text than the parser's
-    /// own) and, when it is the parser's next tree, its changed ranges.
+    /// own).
     pub(crate) fn finish(self, text: &TextBody) -> Option<Finished> {
         let edited = !self.changes.is_empty();
-        let compare_to_own_tree = self.same_old_tree && !edited;
-        let (tree, changed) = match Rc::try_unwrap(self.result) {
+        let tree = match Rc::try_unwrap(self.result) {
             Ok(receipt) => {
                 let Receipt::Ready(Some(result)) = receipt.into_inner() else { return None };
                 result
             }
             Err(receipt) => {
                 let receipt = receipt.borrow();
-                let Receipt::Ready(Some((tree, changed))) = &*receipt else { return None };
-                (tree.duplicate(), if compare_to_own_tree { changed.clone() } else { Vec::new() })
+                let Receipt::Ready(Some(tree)) = &*receipt else { return None };
+                tree.duplicate()
             }
         };
         let mut core = Core::new(self.visible, None);
@@ -173,8 +180,7 @@ impl Ahead {
         for change in &self.changes {
             core.record(Change { linecols: None, ..*change }, text);
         }
-        let changed = compare_to_own_tree.then_some(changed);
-        Rc::into_inner(core.tree.take()?).map(|tree| (tree, core.visible, edited, changed))
+        Rc::into_inner(core.tree.take()?).map(|tree| (tree, core.visible, edited))
     }
 }
 
@@ -282,20 +288,20 @@ impl Vm {
                 core.borrow_mut().waiting_slot = false;
             }
             let landed = core.borrow_mut().ahead.as_mut().map(Ahead::ready);
-            let same_old_tree = match landed {
+            match landed {
                 Some(false) => {
                     state = State::Running;
                     continue;
                 }
-                Some(true) if core.borrow().ahead.as_ref().is_some_and(|ahead| !ahead.changes.is_empty()) => false,
+                Some(true) if core.borrow().ahead.as_ref().is_some_and(|ahead| !ahead.changes.is_empty()) => (),
                 Some(true) => {
                     if state == State::None { state = State::Landed; }
                     continue;
                 }
-                None if (start && !treeless) || first => true,
+                None if (start && !treeless) || first => (),
                 None => continue,
             };
-            if self.treesit_start_ahead(buffer, parser, &core, same_old_tree, wake.clone(), started.as_mut())? {
+            if self.treesit_start_ahead(buffer, parser, &core, wake.clone(), started.as_mut())? {
                 state = State::Running;
             } else if core.borrow().waiting_slot {
                 state = State::Running;
@@ -357,7 +363,7 @@ impl Vm {
     /// from nothing. False when it has nothing to reparse, tracks lines and
     /// columns (an edit replayed on the thread's tree has no points), or no
     /// thread is free.
-    fn treesit_start_ahead(&mut self, buffer: Value, parser: Value, core: &Rc<RefCell<Core>>, same_old_tree: bool,
+    fn treesit_start_ahead(&mut self, buffer: Value, parser: Value, core: &Rc<RefCell<Core>>,
                            wake: crate::process_jobs::Wake, started: Option<&mut Vec<Started>>) -> crate::Result<bool> {
         let (language, ranges, own) = match self.object(parser)? {
             data::Object::Treesit(object) => match &**object {
@@ -383,36 +389,36 @@ impl Vm {
             c.visible = region;
         }
         let view = View { owner: own, language, ranges, visible: c.visible };
-        Ok(Self::treesit_launch_ahead(&mut c, view, text, behind, same_old_tree, wake, started))
+        Ok(Self::treesit_launch_ahead(&mut c, view, text, behind, wake, started))
     }
 
     /// Share only within this round: their target text is the same without
     /// needing to tie either parser's lifecycle to the other.
     fn treesit_launch_ahead(
-        core: &mut Core, view: View, text: &TextBody, behind: Option<Ahead>, same_old_tree: bool,
+        core: &mut Core, view: View, text: &TextBody, behind: Option<Ahead>,
         wake: crate::process_jobs::Wake, started: Option<&mut Vec<Started>>,
     ) -> bool {
         let started = started.filter(|_| core.tree.is_some() && view.sees_all());
         if let Some(first) = started.as_ref().and_then(|jobs| jobs.iter().find(|job| job.view == view)) {
             core.ahead = Some(Ahead {
-                visible: view.visible, changes: Vec::new(), result: first.receipt.clone(), same_old_tree: false,
+                visible: view.visible, changes: Vec::new(), result: first.receipt.clone(),
             });
             core.waiting_slot = false;
             return true;
         }
 
-        let old = match behind.and_then(|ahead| ahead.finish(text)) {
-            Some((tree, region, ..)) if region == view.visible => Some(tree.loose()),
-            _ => core.tree.as_ref().map(|tree| tree.share()),
-        };
+        let behind = behind.and_then(|ahead| ahead.finish(text))
+            .filter(|(_, region, _)| *region == view.visible).map(|(tree, _, _)| tree.loose());
+        let (old, revision) = core.tree.as_ref()
+            .map_or((None, None), |tree| (Some(tree.share()), Some(tree.revision())));
         let Some(slot) = EarlySlot::take() else {
             core.waiting_slot = core.tree.is_none();
             return false;
         };
         let sharing = started.filter(|started| started.len() < super::EARLY_LIMIT)
             .map(|started| (started, view.clone()));
-        let job = Job { language: view.language, ranges: view.ranges, old, visible: view.visible };
-        core.ahead = Ahead::start(slot, job, text.frozen(), same_old_tree, wake);
+        let job = Job { language: view.language, ranges: view.ranges, old, behind, visible: view.visible };
+        core.ahead = Ahead::start(slot, job, text.frozen(), revision, wake);
         core.waiting_slot = false;
         if let (Some(ahead), Some((started, view))) = (&core.ahead, sharing) {
             started.push(Started { view, receipt: ahead.result.clone() });
