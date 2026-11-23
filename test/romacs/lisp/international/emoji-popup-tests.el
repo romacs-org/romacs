@@ -17,6 +17,44 @@
       (should (equal (buffer-string) "😖"))
       (should (equal (car (multisession-value emoji--recent)) "😖")))))
 
+(ert-deftest emoji-popup-selection-closes-a-globally-persistent-popup ()
+  (let ((keymap-popup-persistent t)
+        (keymap-popup-backend #'keymap-popup-backend-side-window)
+        (recent (multisession-value emoji--recent)))
+    (unwind-protect
+        (save-window-excursion
+          (with-temp-buffer
+            (switch-to-buffer (current-buffer))
+            (execute-kbd-macro (kbd "C-e"))
+            (setf (multisession-value emoji--recent) (list "😀" "😖"))
+            (emoji-recent)
+            (execute-kbd-macro (kbd "a b"))
+            (should (equal (buffer-string) "😀b"))))
+      (keymap-popup-dismiss)
+      (setf (multisession-value emoji--recent) recent))))
+
+(ert-deftest emoji-popup-glyph-faces-stay-in-the-popup ()
+  (emoji--init)
+  (let ((keymap-popup-backend #'keymap-popup-backend-side-window)
+        (recent (multisession-value emoji--recent)))
+    (unwind-protect
+        (save-window-excursion
+          (with-temp-buffer
+            (switch-to-buffer (current-buffer))
+            (execute-kbd-macro (kbd "C-e"))
+            (emoji--show-popup "Emoji" '("😀" "👍") nil)
+            (with-current-buffer (keymap-popup--popup-buffer)
+              (dolist (choice '(("😀" . emoji) ("👍" . emoji-with-derivations)))
+                (goto-char (point-min))
+                (search-forward (car choice))
+                (let ((face (get-text-property (1- (point)) 'face)))
+                  (should (memq (cdr choice) (ensure-list face))))))
+            (execute-kbd-macro (kbd "a"))
+            (should (equal (buffer-string) "😀"))
+            (should-not (get-text-property (point-min) 'face))))
+      (keymap-popup-dismiss)
+      (setf (multisession-value emoji--recent) recent))))
+
 (ert-deftest emoji-popup-derived-glyphs-terminate-narrowing ()
   (emoji--init)
   (let* ((glyph "👍")

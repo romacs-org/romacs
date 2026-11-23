@@ -1,6 +1,13 @@
 ;;; romacs-commands-tests.el --- M-x over the kept command set -*- lexical-binding: t; -*-
 (require 'ert)
+(require 'oclosure)
 (require 'romacs-commands)
+
+(oclosure-define romacs-commands-tests--bad-command
+  "A function whose interactive form signals an error.")
+
+(cl-defmethod oclosure-interactive-form ((_ romacs-commands-tests--bad-command))
+  (error "Broken interactive form"))
 
 (defun romacs-commands-tests--keys (strings)
   "M-x's candidates for each of STRINGS, as its table lists them on
@@ -104,6 +111,29 @@ successive keys, and as simple.el's table over the obarray lists them."
      (should (romacs-commands-tests--offered-p "mx-test-a"))
      (setq offered nil)
      (should-not (romacs-commands-tests--offered-p "mx-test-a")))))
+
+(ert-deftest romacs-commands-skip-a-command-that-signals ()
+  (romacs-commands-tests--with
+   (defun mx-test-good () (interactive))
+   (fset 'mx-test-bad (oclosure-lambda (romacs-commands-tests--bad-command) () nil))
+   (should-error (commandp 'mx-test-bad) :type 'error)
+   (let ((debug-on-error t)
+         (read-extended-command-predicate (lambda (_ _) t))
+         (romacs-commands--reported-command-errors (make-hash-table :test #'eq))
+         (messages nil))
+     (cl-letf (((symbol-function 'message)
+                (lambda (format &rest args)
+                  (let ((text (apply #'format format args)))
+                    (when (string-match-p "mx-test-bad" text)
+                      (push text messages))))))
+       (let* ((buffer (current-buffer))
+              (pred (romacs-commands--predicate buffer))
+              (table (romacs-commands--table pred buffer)))
+         (should (equal (all-completions "mx-test-" table pred) '("mx-test-good")))
+         (should (equal (all-completions "mx-test-g" table pred) '("mx-test-good")))
+         (should-not (test-completion "mx-test-bad" table pred))))
+     (should (= (length messages) 1))
+     (should (string-match-p "Broken interactive form" (car messages))))))
 
 (ert-deftest romacs-commands-offer-an-obsolete-command-typed-in-full ()
   (romacs-commands-tests--with

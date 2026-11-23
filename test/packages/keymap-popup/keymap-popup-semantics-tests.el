@@ -100,6 +100,48 @@
     (should (equal (where-is-internal #'forward-char
                                     keymap-popup-semantics--map t) [97]))))
 
+(ert-deftest keymap-popup-semantics-lazy-submenu ()
+  (keymap-popup-input--with-source
+    (let* ((root (make-sparse-keymap))
+           (child (keymap-popup-input--suffix-map #'ignore nil))
+           (builds 0)
+           (factory (lambda () (cl-incf builds) child)))
+      (keymap-set root "c" (lambda () (interactive) (keymap-popup (funcall factory))))
+      (keymap-popup-attach root (list "c" (list "Child" :keymap factory)))
+      (keymap-popup root)
+      (should (commandp (key-binding (kbd "c"))))
+      (should (= builds 0))
+      (execute-kbd-macro (kbd "c"))
+      (should (eq (keymap-popup--active-get (keymap-popup--popup-buffer) :keymap) child))
+      (should (= builds 1))
+      (execute-kbd-macro (kbd "q"))
+      (should (eq (keymap-popup--active-get (keymap-popup--popup-buffer) :keymap) root))
+      (should (= builds 1))
+      (execute-kbd-macro
+       (keymap-popup-mouse-test--click (keymap-popup-mouse-test--position "Child")))
+      (should (eq (keymap-popup--active-get (keymap-popup--popup-buffer) :keymap) child))
+      (should (= builds 2))
+      (execute-kbd-macro (kbd "q q"))
+      (use-local-map root)
+      (execute-kbd-macro (kbd "c"))
+      (should (eq (keymap-popup--active-get (keymap-popup--popup-buffer) :keymap) child))
+      (should (= builds 3))
+      (execute-kbd-macro (kbd "q"))
+      (keymap-popup-input--clean-p))))
+
+(ert-deftest keymap-popup-semantics-submenu-factory-can-replace-popup ()
+  (keymap-popup-input--with-source
+    (let* ((root (make-sparse-keymap))
+           (child (keymap-popup-input--suffix-map #'ignore nil))
+           (successor (keymap-popup-input--suffix-map #'forward-char nil))
+           (factory (lambda () (keymap-popup successor) child)))
+      (keymap-popup-attach root (list "c" (list "Child" :keymap factory)))
+      (keymap-popup root)
+      (execute-kbd-macro (kbd "c"))
+      (should (eq (keymap-popup--active-get (keymap-popup--popup-buffer) :keymap) successor))
+      (execute-kbd-macro (kbd "q"))
+      (keymap-popup-input--clean-p))))
+
 (ert-deftest keymap-popup-semantics-control-labels ()
   (keymap-popup-input--with-source
     (let ((map (make-sparse-keymap)))
