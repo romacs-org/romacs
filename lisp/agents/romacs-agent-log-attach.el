@@ -52,7 +52,10 @@ where the link was, TEXT the link as written, SPACE the side, `before' or
 `after', of the space that went with it.")
 
 (defvar-local romacs-agent-log-attach--dirty nil
-  "The composer changed since its links were read; a read is scheduled.")
+  "The pending callback to read the composer's links, or nil.")
+
+(defvar-local romacs-agent-log-attach--link-prefix nil
+  "Marker at a possible link's `](', or nil when the draft has none.")
 
 (defvar-local romacs-agent-log-attach--paste nil
   "The clipboard paste under way: the marker where C-y was typed.")
@@ -85,8 +88,9 @@ escaped."
     (let ((link (romacs-agent-log-images-link file)))
       (substring link 1 (string-search "]" link)))))
 
-(defun romacs-agent-log-attach--links ()
-  "The composer's image links (code holds none), in order:
+(cl-defun romacs-agent-log-attach--links
+    (&optional (links (romacs-agent-log-images-links nil romacs-agent-log--input (point-max))))
+  "Enrich LINKS, defaulting to the composer's image links, in order:
 \(BEG END FILE CAPTION LABEL-BEG LABEL-END ID) each, ID the chip id its
 text carries."
   (mapcar (pcase-lambda (`(,beg ,end ,file))
@@ -98,18 +102,20 @@ text carries."
                      (romacs-agent-log-attach--unescape (match-string-no-properties 1)))
                     (match-beginning 1) (match-end 1)
                     (get-text-property beg romacs-agent-log-attach--id))))
-          (romacs-agent-log-images-links nil (marker-position romacs-agent-log--input) (point-max))))
+          links))
 
 ;;;; Reading: the draft's links as chips
 
 (defun romacs-agent-log-attach-sync ()
-  "Show the composer's links as the tray's chips.  The draft's text is
-never changed here; a link without a chip id gets its chip's."
+  "Show the composer's links as images and tray chips.
+The draft's characters stay as written, and each chip marks its link."
   (setq romacs-agent-log-attach--dirty nil)
   (when (markerp romacs-agent-log--input)
-    (let ((old (mapcar (lambda (item) (cons (plist-get item :id) item)) romacs-attach-items))
+    (let ((links (romacs-agent-log-images-links nil romacs-agent-log--input (point-max)))
+          (old (mapcar (lambda (item) (cons (plist-get item :id) item)) romacs-attach-items))
           (seen nil) (items nil))
-      (pcase-dolist (`(,beg ,end ,file ,caption ,_ ,_ ,id) (romacs-agent-log-attach--links))
+      (romacs-agent-log-images-composer romacs-agent-log--input links)
+      (pcase-dolist (`(,beg ,end ,file ,caption ,_ ,_ ,id) (romacs-agent-log-attach--links links))
         (let* ((kept (and id (not (member id seen)) (cdr (assoc id old))))
                (item (if (and kept (equal (plist-get kept :path) file))
                          (if (equal (plist-get kept :caption) caption) kept
@@ -126,17 +132,34 @@ never changed here; a link without a chip id gets its chip's."
         (let ((romacs-agent-log-attach--reading t))
           (romacs-attach-set-items items))))))
 
-(defun romacs-agent-log-attach--changed (beg _end _length)
-  "After a change from BEG: in the composer, its links read again once
-the current command or timer is done."
+(defun romacs-agent-log-attach--link-edit-p (start beg end)
+  "Whether the edit at BEG..END can affect links in the draft at START.
+One `](' suffices as a witness: edits elsewhere can change Markdown code
+boundaries. Without one, only the new text and its joins can create one."
+  (let* ((prefix romacs-agent-log-attach--link-prefix)
+         (at (and prefix (marker-position prefix))))
+    (or (and at (>= at start) (eq (char-after at) ?\])
+             (eq (char-after (1+ at)) ?\())
+        (let* ((from (if prefix start (max start (1- beg))))
+               (to (if prefix (point-max) (min (point-max) (1+ end))))
+               (hit (string-search "](" (buffer-substring-no-properties from to))))
+          (when prefix (set-marker prefix nil))
+          (setq romacs-agent-log-attach--link-prefix (and hit (copy-marker (+ from hit) t)))
+          (or hit prefix)))))
+
+(defun romacs-agent-log-attach--changed (beg end _length)
+  "Schedule one refresh if the edit at BEG..END can affect links."
   (when (and (markerp romacs-agent-log--input) (>= beg romacs-agent-log--input)
+             (romacs-agent-log-attach--link-edit-p romacs-agent-log--input beg end)
              (not romacs-agent-log-attach--dirty))
-    (setq romacs-agent-log-attach--dirty t)
     (let ((chat (current-buffer)))
-      (run-at-time 0 nil (lambda ()
-                           (when (buffer-live-p chat)
-                             (with-current-buffer chat
-                               (when romacs-agent-log-attach--dirty (romacs-agent-log-attach-sync)))))))))
+      (cl-labels ((read-draft ()
+                    (when (buffer-live-p chat)
+                      (with-current-buffer chat
+                        (when (eq romacs-agent-log-attach--dirty #'read-draft)
+                          (romacs-agent-log-attach-sync))))))
+        (setq romacs-agent-log-attach--dirty #'read-draft)
+        (run-at-time 0 nil #'read-draft)))))
 
 ;;;; Writing: a chip edit to its links
 
@@ -274,7 +297,7 @@ the separator, written again, takes that line's start with it."
   (romacs-attach-tray-setup :consumer 'agent-chat :redisplay #'romacs-agent-log-attach--redisplay)
   ;; The chips show the composer's images: not again under the draft.
   (setq romacs-agent-log-images-under-draft nil)
-  (add-hook 'after-change-functions #'romacs-agent-log-attach--changed nil t)
+  (add-hook 'after-change-functions #'romacs-agent-log-attach--changed 90 t)
   (add-hook 'romacs-agent-log-draft-replaced-hook #'romacs-agent-log-attach--draft-replaced nil t))
 
 ;;;; Keys
