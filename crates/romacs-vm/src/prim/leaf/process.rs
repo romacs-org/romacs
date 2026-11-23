@@ -1279,12 +1279,19 @@ impl Leaf<'_> {
 }
 
 impl Vm {
+    /// The descriptors of every process the wait selects on, each with the
+    /// poll events it waits for: what an owner's loop waits on beside its
+    /// spawner (`romacs--isolate-wait`).
+    pub(crate) fn process_fds(&mut self) -> Vec<(RawFd, i16)> {
+        Leaf::new(self).select_set(Value::NIL, false).0
+    }
+
     /// The descriptors the command loop's idle wait watches with the
     /// keyboard, as wait_reading_process_output selects on every process's
     /// (process.c:5358), each with the poll events it waits for.  They stay
     /// open while the VM runs no Lisp.
     pub fn process_wait_fds(&mut self) -> Vec<(RawFd, i16)> {
-        let mut fds = Leaf::new(self).select_set(Value::NIL, false).0;
+        let mut fds = self.process_fds();
         // The isolates' sockets and workers' pidfds wake the same wait,
         // and so do file notification events, the keyboard's.
         fds.extend(self.isolate_fds());

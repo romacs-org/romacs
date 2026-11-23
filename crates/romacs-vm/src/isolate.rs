@@ -26,7 +26,7 @@ use crate::frozen::{Backing, INLINE_LIMIT};
 use std::collections::VecDeque;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 
-pub(crate) const PROTOCOL: u32 = 2;
+pub(crate) const PROTOCOL: u32 = 3;
 const HEADER: usize = 10;
 /// A packet buffer: the header, an inline frozen encoding, and slack for
 /// hello.
@@ -39,12 +39,14 @@ const TERMINATION_SECONDS: u32 = 2;
 /// Frame kinds. `fork' (spawner to zygote: make a child, whose socket
 /// rides beside the frame), `forked' (zygote to spawner: its pid and
 /// pidfd) and `reaped' (zygote to spawner: a child's wait status) are the
-/// zygote protocol (worker-vms design §2.2); `died' is never sent.
+/// zygote protocol (worker-vms design §2.2); `died` is never sent. `ping`
+/// (spawner to owner) and `pong` (owner to spawner) are liveness
+/// (`crate::owner`), sent and answered in Rust, never queued for Lisp.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub(crate) enum Kind {
     Hello = 1, Job = 2, Result = 3, Error = 4, Message = 5, Child = 6, Retire = 7, Bye = 8, Died = 9, Interrupt = 10,
-    Fork = 11, Forked = 12, Reaped = 13, Memory = 14, Text = 15,
+    Fork = 11, Forked = 12, Reaped = 13, Memory = 14, Text = 15, Ping = 16, Pong = 17,
 }
 
 impl Kind {
@@ -53,15 +55,16 @@ impl Kind {
             Kind::Hello => "hello", Kind::Job => "job", Kind::Result => "result", Kind::Error => "error", Kind::Message => "message",
             Kind::Child => "child", Kind::Retire => "retire", Kind::Bye => "bye", Kind::Died => "died", Kind::Interrupt => "interrupt",
             Kind::Fork => "fork", Kind::Forked => "forked", Kind::Reaped => "reaped", Kind::Memory => "memory", Kind::Text => "text",
+            Kind::Ping => "ping", Kind::Pong => "pong",
         }
     }
     /// The kinds Lisp posts (`romacs--isolate-post').
     const POSTED: [Kind; 10] = [Kind::Hello, Kind::Job, Kind::Result, Kind::Error, Kind::Message, Kind::Child, Kind::Retire,
                                Kind::Bye, Kind::Interrupt, Kind::Text];
-    /// `memory' is among them, never among POSTED: only a job child's
-    /// `job_memory_exit' sends it, from Rust.
-    const RECEIVED: [Kind; 14] = [Kind::Hello, Kind::Job, Kind::Result, Kind::Error, Kind::Message, Kind::Child, Kind::Retire, Kind::Bye,
-                                  Kind::Interrupt, Kind::Fork, Kind::Forked, Kind::Reaped, Kind::Memory, Kind::Text];
+    /// `memory`, `ping` and `pong` are among them, never among `POSTED`:
+    /// only Rust sends them (a job child's `job_memory_exit`, `crate::owner`).
+    const RECEIVED: [Kind; 16] = [Kind::Hello, Kind::Job, Kind::Result, Kind::Error, Kind::Message, Kind::Child, Kind::Retire, Kind::Bye,
+                                  Kind::Interrupt, Kind::Fork, Kind::Forked, Kind::Reaped, Kind::Memory, Kind::Text, Kind::Ping, Kind::Pong];
     pub(crate) fn parse(name: &str) -> Option<Self> {
         Self::POSTED.into_iter().find(|k| k.name() == name)
     }
@@ -102,15 +105,18 @@ fn decode_generation(bytes: [u8; 8]) -> std::io::Result<u64> {
     Ok(generation)
 }
 
-/// What a frame reports about processes, taken as it is read rather than
-/// queued for Lisp: a worker's subprocess spawned (`child') or reaped
-/// (`retire'), and a zygote's child forked (`forked', for the spawner's
-/// worker ID) or reaped (`reaped').
+/// What a frame reports, taken as it is read rather than queued for Lisp:
+/// a worker's subprocess spawned (`child`) or reaped (`retire`), a
+/// zygote's child forked (`forked`, for the spawner's worker ID) or reaped
+/// (`reaped`), and liveness: a spawner's `ping` and an owner's `pong`,
+/// each naming its sequence number.
 pub(crate) enum Report {
     Child(i32, Option<OwnedFd>),
     Retire(i32),
     Forked { id: u64, pid: i32, pidfd: Option<OwnedFd> },
     Reaped { pid: i32, status: i32 },
+    Ping(u64),
+    Pong(u64),
 }
 
 /// How a worker ended: its wait status, or unknown (a forked worker,
@@ -180,16 +186,31 @@ impl Peer {
         }
     }
 
-    /// Read every packet the socket holds now (`receive` each).
-    fn drain(&mut self, mut report: impl FnMut(Report)) -> std::io::Result<()> {
+    /// Read every packet the socket holds now (`receive` each): how many.
+    fn drain(&mut self, mut report: impl FnMut(Report)) -> std::io::Result<usize> {
+        let mut read = 0;
         while !self.closed {
             match self.receive(&mut report) {
-                Ok(Received::Frame) => {}
+                Ok(Received::Frame) => read += 1,
                 Ok(Received::Nothing) | Ok(Received::Closed) => break,
                 Err(e) => return Err(e),
             }
         }
-        Ok(())
+        Ok(read)
+    }
+
+    /// In a worker, drain the spawner's socket, answering each `ping` at
+    /// once with its `pong` (`crate::owner`); every other frame stays
+    /// queued for its turn. Whether any frame was queued. A pong that finds
+    /// the socket full is dropped: the spawner's next ping asks again.
+    fn drain_answering(&mut self) -> std::io::Result<bool> {
+        let before = self.inbox.len();
+        let mut pings = Vec::new();
+        self.drain(|report| if let Report::Ping(seq) = report { pings.push(seq) })?;
+        for seq in pings {
+            let _ = self.send(Kind::Pong, seq, &Payload::None, false);
+        }
+        Ok(self.inbox.len() != before)
     }
 
     /// Read one packet into the inbox: the frame, or a process report,
@@ -220,11 +241,13 @@ impl Peer {
             Ok(i32::from_le_bytes(bytes.try_into().unwrap()))
         };
         let payload = match kind {
-            Kind::Child | Kind::Retire | Kind::Forked | Kind::Reaped => {
+            Kind::Child | Kind::Retire | Kind::Forked | Kind::Reaped | Kind::Ping | Kind::Pong => {
                 report(match kind {
                     Kind::Child => Report::Child(int(0)?, fds.pop()),
                     Kind::Retire => Report::Retire(int(0)?),
                     Kind::Forked => Report::Forked { id: generation, pid: int(0)?, pidfd: fds.pop() },
+                    Kind::Ping => Report::Ping(generation),
+                    Kind::Pong => Report::Pong(generation),
                     _ => Report::Reaped { pid: int(0)?, status: int(4)? },
                 });
                 return Ok(Received::Frame);
@@ -251,15 +274,22 @@ impl Peer {
 enum Received { Frame, Nothing, Closed }
 
 /// Read what worker ID's socket holds: its subprocess reports into its
-/// children, a zygote's fork reports into FORKED and REAPED.
-fn drain_worker(id: u64, worker: &mut Worker, forked: &mut Vec<(u64, i32, Option<OwnedFd>)>, reaped: &mut Vec<(u64, i32, i32)>) -> std::io::Result<()> {
+/// children, a zygote's fork reports into FORKED and REAPED, an owner's
+/// pongs into its ping state. Whether anything but a pong was read: a pong
+/// is no news for Lisp.
+fn drain_worker(id: u64, worker: &mut Worker, forked: &mut Vec<(u64, i32, Option<OwnedFd>)>, reaped: &mut Vec<(u64, i32, i32)>) -> std::io::Result<bool> {
     let children = &mut worker.children;
-    worker.peer.drain(|report| match report {
+    let ping = &mut worker.ping;
+    let mut pongs = 0;
+    let read = worker.peer.drain(|report| match report {
         Report::Child(pid, pidfd) => { children.insert(pid, pidfd); }
         Report::Retire(pid) => { children.remove(&pid); }
         Report::Forked { id: child, pid, pidfd } => forked.push((child, pid, pidfd)),
         Report::Reaped { pid, status } => reaped.push((id, pid, status)),
-    })
+        Report::Pong(seq) => { pongs += 1; ping.answered(seq); }
+        Report::Ping(_) => {}
+    })?;
+    Ok(read > pongs)
 }
 
 /// Whether forked WORKER, of zygote ZYGOTE, is gone without a pidfd to
@@ -286,9 +316,32 @@ pub(crate) struct Worker {
     zygote: Option<u64>,
     /// The wait status its zygote reported.
     reported: Option<i32>,
+    /// Its liveness, once it serves as an owner (`crate::owner`).
+    pub(crate) ping: crate::owner::Ping,
+    /// The last signal asked of it before its zygote reported it, sent
+    /// once the report comes (`Vm::isolate_signal`).
+    held: Option<i32>,
 }
 
 impl Worker {
+    /// Send it ping SEQ, not waiting for room (`crate::owner`).
+    pub(crate) fn send_ping(&self, seq: u64) {
+        let _ = self.peer.send(Kind::Ping, seq, &Payload::None, false);
+    }
+
+    /// Send it SIGNAL, through its pidfd when it has one. Gone already is
+    /// no error for a forked worker, which its zygote reaps.
+    fn signal(&self, signal: i32) -> std::io::Result<()> {
+        let sent = match &self.pidfd {
+            Some(pidfd) => crate::host::pidfd_send_signal(pidfd.as_fd(), signal, false),
+            None => crate::host::kill(self.pid, signal),
+        };
+        match sent {
+            Err(e) if e.raw_os_error() == Some(libc::ESRCH) && self.zygote.is_some() => Ok(()),
+            other => other,
+        }
+    }
+
     /// It ended as EXIT: published as one Died frame.
     fn die(&mut self, exit: Exit) {
         self.status = Some(exit);
@@ -353,6 +406,9 @@ pub(crate) struct Isolates {
     /// In a zygote: children forked and not yet reported, by generation:
     /// pid and the gate's write end, which lets the child run.
     unreleased: HashMap<u64, (i32, OwnedFd)>,
+    /// In a worker: it serves as an owner, so every wait it makes answers
+    /// its spawner's pings (`crate::owner`).
+    pub(crate) owner: bool,
 }
 
 impl Isolates {
@@ -441,7 +497,7 @@ impl Vm {
         let pidfd = crate::host::pidfd_open(pid);
         self.isolates.next += 1;
         let id = self.isolates.next;
-        self.isolates.workers.insert(id, Worker { peer: Peer::new(ours), pid, pidfd, children: HashMap::default(), status: None, zygote: None, reported: None });
+        self.isolates.workers.insert(id, Worker { peer: Peer::new(ours), pid, pidfd, children: HashMap::default(), status: None, zygote: None, reported: None, ping: crate::owner::Ping::default(), held: None });
         Ok(id)
     }
 
@@ -454,7 +510,7 @@ impl Vm {
         let peer = &self.isolates.workers.get(&zygote).ok_or_else(|| format!("no isolate {zygote}"))?.peer;
         peer.send(Kind::Fork, id, &Payload::Socket(theirs), false).map_err(|e| format!("Cannot ask zygote {zygote} to fork: {e}"))?;
         self.isolates.next = id;
-        let worker = Worker { peer: Peer::new(ours), pid: 0, pidfd: None, children: HashMap::default(), status: None, zygote: Some(zygote), reported: None };
+        let worker = Worker { peer: Peer::new(ours), pid: 0, pidfd: None, children: HashMap::default(), status: None, zygote: Some(zygote), reported: None, ping: crate::owner::Ping::default(), held: None };
         self.isolates.workers.insert(id, worker);
         Ok(id)
     }
@@ -625,6 +681,24 @@ impl Vm {
         self.isolates.parent = Some(peer);
     }
 
+    /// In a worker: the socket to its spawner, while it is open.
+    pub(crate) fn isolate_parent_socket(&self) -> Option<RawFd> {
+        self.isolates.parent.as_ref().filter(|p| !p.closed).map(|p| p.socket.as_raw_fd())
+    }
+
+    /// In a worker: read what its spawner sent, answering pings at once
+    /// (`Peer::drain_answering`). Whether a frame was queued.
+    pub(crate) fn isolate_drain_parent(&mut self) -> std::io::Result<bool> {
+        match &mut self.isolates.parent {
+            Some(parent) => parent.drain_answering(),
+            None => Ok(false),
+        }
+    }
+
+    pub(crate) fn isolate_worker_mut(&mut self, id: u64) -> Result<&mut Worker> {
+        self.isolates.workers.get_mut(&id).ok_or_else(|| format!("no isolate {id}"))
+    }
+
     pub(crate) fn isolate_has_parent(&self) -> bool {
         self.isolates.parent.is_some()
     }
@@ -682,7 +756,7 @@ impl Vm {
         // No spawner to name a generation: the signal is taken as it is.
         let Some(parent) = self.isolates.parent.as_mut() else { return true };
         let Some(running) = running else { return false };
-        let _ = parent.drain(|_| {});
+        let _ = parent.drain_answering();
         let before = parent.inbox.len();
         parent.inbox.retain(|frame| frame.kind != Kind::Interrupt || frame.generation != running);
         let targeted = parent.inbox.len() != before;
@@ -774,7 +848,9 @@ impl Vm {
     /// A worker's socket closing with nothing in it is no news: the worker
     /// is exiting, and exit closes its descriptors before its pidfd turns
     /// readable, so the wait goes on for the death that follows.
-    pub(crate) fn isolate_wait(&mut self, timeout: Option<std::time::Duration>) -> Result<bool> {
+    /// EXTRA, polled beside them, ends the wait when one is ready, read by
+    /// nothing here: an owner's loop waits on its processes so (`process_wait_fds`).
+    pub(crate) fn isolate_wait(&mut self, timeout: Option<std::time::Duration>, extra: &[(RawFd, i16)]) -> Result<bool> {
         // Interrupted or terminating: no wait, but what the sockets hold is
         // still read (the frame naming the interrupt's job is there).
         let interrupted = self.process_interrupt_pending() || (self.mutator.process_signals && crate::host::terminate_pending());
@@ -782,7 +858,8 @@ impl Vm {
         let deadline = timeout.map(|timeout| crate::host::monotonic() + timeout);
         loop {
             let timeout = deadline.map(|deadline| deadline.saturating_duration_since(crate::host::monotonic()));
-            let fds = self.isolate_fds();
+            let mut fds = self.isolate_fds();
+            fds.extend_from_slice(extra);
             if fds.is_empty() {
                 if let Some(timeout) = timeout { std::thread::sleep(timeout.min(std::time::Duration::from_millis(50))); }
                 return Ok(interrupted);
@@ -796,9 +873,10 @@ impl Vm {
             }
             let interrupted = interrupted || self.process_interrupt_pending();
             if ready.is_empty() { return Ok(interrupted); }
+            news |= extra.iter().any(|(fd, _)| ready.contains(fd));
             if let Some(parent) = &mut self.isolates.parent && ready.contains(&parent.socket.as_raw_fd()) {
-                parent.drain(|_| {}).map_err(|e| e.to_string())?;
-                news = true;
+                // A ping alone is answered here and is no news.
+                news |= parent.drain_answering().map_err(|e| e.to_string())? || parent.closed;
             }
             news |= self.reap_forked(&ready);
             // Every report is read and applied before any death is settled:
@@ -809,8 +887,8 @@ impl Vm {
                 let gone = worker.status.is_none() && worker.pidfd.as_ref().is_some_and(|fd| ready.contains(&fd.as_raw_fd()));
                 if gone || ready.contains(&worker.peer.socket.as_raw_fd()) {
                     let before = worker.peer.inbox.len();
-                    drain_worker(id, worker, &mut forked, &mut reaped).map_err(|e| e.to_string())?;
-                    news |= !worker.peer.closed || worker.peer.inbox.len() != before;
+                    let read = drain_worker(id, worker, &mut forked, &mut reaped).map_err(|e| e.to_string())?;
+                    news |= (read && !worker.peer.closed) || worker.peer.inbox.len() != before;
                 }
                 if gone { exited.push(id); }
             }
@@ -849,6 +927,7 @@ impl Vm {
         for (id, pid, pidfd) in forked {
             if let Some(worker) = workers.get_mut(&id) && worker.pid == 0 {
                 (worker.pid, worker.pidfd) = (pid, pidfd);
+                if let Some(signal) = worker.held.take() { let _ = worker.signal(signal); }
             }
         }
         for (zygote, pid, status) in reaped {
@@ -898,20 +977,17 @@ impl Vm {
         Ok(self.list_value(&[kind, generation, value]))
     }
 
-    pub(crate) fn isolate_signal(&self, id: u64, signal: i32) -> Result<()> {
-        let worker = self.isolates.workers.get(&id).ok_or_else(|| format!("no isolate {id}"))?;
-        // A worker not forked yet has nothing to signal; its zygote's end
-        // ends it (`unforkable').
-        if worker.status.is_some() || worker.pid == 0 { return Ok(()); }
-        let sent = match &worker.pidfd {
-            Some(pidfd) => crate::host::pidfd_send_signal(pidfd.as_fd(), signal, false),
-            None => crate::host::kill(worker.pid, signal),
-        };
-        match sent {
-            // Gone already: a forked worker its zygote has reaped.
-            Err(e) if e.raw_os_error() == Some(libc::ESRCH) && worker.zygote.is_some() => Ok(()),
-            other => other.map_err(|e| e.to_string()),
+    /// Send worker ID SIGNAL. One its zygote has not reported yet holds it,
+    /// the last asked, until the report (`apply_fork_reports`): its zygote
+    /// releases it then, so a kill asked before still lands.
+    pub(crate) fn isolate_signal(&mut self, id: u64, signal: i32) -> Result<()> {
+        let worker = self.isolates.workers.get_mut(&id).ok_or_else(|| format!("no isolate {id}"))?;
+        if worker.status.is_some() { return Ok(()); }
+        if worker.pid == 0 {
+            worker.held = Some(signal);
+            return Ok(());
         }
+        worker.signal(signal).map_err(|e| e.to_string())
     }
 
     /// The worker's exit once it has exited, reaping it. A death seen here
@@ -1202,5 +1278,27 @@ mod tests {
         assert_eq!(peer.inbox.iter().map(|frame| frame.kind).collect::<Vec<_>>(), [Kind::Memory]);
         assert_eq!(reported, [42]);
         assert!(peer.closed);
+    }
+
+    /// A worker's drain answers each ping at once with its pong, and
+    /// leaves every other frame queued; a ping is no frame of Lisp's.
+    #[test]
+    fn a_drain_answers_pings_and_leaves_other_frames_queued() {
+        let (ours, theirs) = crate::host::socketpair().unwrap();
+        crate::host::set_nonblocking(ours.as_fd()).unwrap();
+        crate::host::set_nonblocking(theirs.as_fd()).unwrap();
+        let mut worker = Peer::new(ours);
+        let mut spawner = Peer::new(theirs);
+        spawner.send(Kind::Ping, 1, &Payload::None, false).unwrap();
+        spawner.send(Kind::Bye, 0, &Payload::None, false).unwrap();
+        spawner.send(Kind::Ping, 2, &Payload::None, false).unwrap();
+        assert!(worker.drain_answering().unwrap(), "the bye was queued");
+        assert_eq!(worker.inbox.iter().map(|frame| frame.kind).collect::<Vec<_>>(), [Kind::Bye]);
+        let mut pongs = Vec::new();
+        spawner.drain(|report| if let Report::Pong(seq) = report { pongs.push(seq) }).unwrap();
+        assert_eq!(pongs, [1, 2]);
+        assert!(spawner.inbox.is_empty(), "a pong is no frame of Lisp's");
+        spawner.send(Kind::Ping, 3, &Payload::None, false).unwrap();
+        assert!(!worker.drain_answering().unwrap(), "a ping alone queues nothing");
     }
 }

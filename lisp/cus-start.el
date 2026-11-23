@@ -621,6 +621,13 @@ Leaving \"Default\" unchecked is equivalent with specifying a default of
 	     ;; process.c
 	     (delete-exited-processes processes-basics boolean)
              (process-error-pause-time processes-basics integer "29.1")
+             ;; lisp/vm/owner.el
+             (owner-wedge-delay processes
+                                (number :match ,(lambda (_widget value)
+                                                  (and (numberp value) (< 0 value 1e6)))))
+             (owner-output-batch processes
+                                 (integer :match ,(lambda (_widget value)
+                                                    (and (integerp value) (> value 0)))))
 	     ;; syntax.c
 	     (parse-sexp-ignore-comments editing-basics boolean)
 	     (words-include-escapes editing-basics boolean)

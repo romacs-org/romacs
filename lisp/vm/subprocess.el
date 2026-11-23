@@ -900,6 +900,25 @@ the wait loop's end-of-file and error handling."
         (romacs--proc-read-done proc nread (if (< nread 0) text 0)))
     nread))
 
+(defvar romacs--process-dispatches nil
+  "How many filter and sentinel calls the waits may still make, or nil
+for no bound.  An owner's loop binds it (`romacs--isolate-run-between'),
+so a burst of output leaves its calls their turn; a call binds it nil
+again, so a wait inside a filter or a sentinel is bounded by nothing.
+Not in GNU.")
+
+(defun romacs--process-spent-p ()
+  "Whether no filter or sentinel call is left (`romacs--process-dispatches')."
+  (and romacs--process-dispatches (<= romacs--process-dispatches 0)))
+
+(defun romacs--process-dispatch (function args context)
+  "Call FUNCTION on ARGS as a filter or sentinel (`romacs--process-call'),
+one of `romacs--process-dispatches', with no bound inside it."
+  (when romacs--process-dispatches
+    (setq romacs--process-dispatches (1- romacs--process-dispatches)))
+  (let ((romacs--process-dispatches nil))
+    (romacs--process-call function args context)))
+
 (defun romacs--dispose-process-output (proc text)
   "read_and_dispose_of_process_output: call PROC's filter on TEXT with the
 caller's match data preserved."
@@ -909,7 +928,7 @@ caller's match data preserved."
           (last-nonmenu-event t))
       (unwind-protect
           (if (> (string-bytes text) 0)
-              (romacs--process-call filter (list proc text) "error in process filter: "))
+              (romacs--process-dispatch filter (list proc text) "error in process filter: "))
         (set-match-data match-data t)))))
 
 (defun romacs--exec-sentinel (proc reason)
@@ -920,20 +939,24 @@ caller's match data preserved."
       (let ((inhibit-quit t)
             (last-nonmenu-event t))
         (unwind-protect
-            (romacs--process-call (process-sentinel proc) (list proc reason)
-                                  "error in process sentinel: ")
+            (romacs--process-dispatch (process-sentinel proc) (list proc reason)
+                                      "error in process sentinel: ")
           (set-match-data match-data t))))
     (setq deactivate-mark odeactivate)))
 
 (defun romacs--status-notify (deleting wait-proc)
   "status_notify: run the sentinel of each process whose status changed,
-first reading what remains of its output.  GNU's got_some_output."
-  (let ((got -1))
+first reading what remains of its output.  GNU's got_some_output.  With
+no call left (`romacs--process-dispatches') it stops at the process it is
+on, which stays changed: a later one reads the rest of its output, then
+runs its sentinel."
+  (let ((got -1) (held nil))
     (romacs--proc-ticks-acknowledge)
     (dolist (proc (process-list))
-      (if (romacs--proc-changed proc)
+      (if (and (not held) (romacs--proc-changed proc))
           (let ((more t))
             (while (and more
+                        (not (romacs--process-spent-p))
                         (not (eq (process-filter proc) t))
                         (not (romacs--connecting-p proc))
                         (not (eq (romacs--proc-get proc 'status) 'listen))
@@ -944,7 +967,9 @@ first reading what remains of its output.  GNU's got_some_output."
                 (if (and (or (null wait-proc) (eq wait-proc proc)) (< got nread))
                     (setq got nread))
                 (if (<= nread 0) (setq more nil))))
-            (romacs--exec-sentinel proc (romacs--proc-status-finish proc)))))
+            (if (romacs--process-spent-p)
+                (progn (romacs--proc-tick proc) (setq held t))
+              (romacs--exec-sentinel proc (romacs--proc-status-finish proc))))))
     got))
 
 ;;;; Timers
@@ -1111,7 +1136,8 @@ reader sees what the timer changed.  Return GNU's got_some_output."
                   (apply #'romacs--tls-finished (cdr ready)))
                  ((eq (romacs--proc-get ready 'status) 'listen)
                   (romacs--server-accept-connection ready))
-                 (t
+                 ;; With no call left, its output waits for the next round.
+                 ((not (romacs--process-spent-p))
                   (let ((nread (romacs--read-process-output ready t)))
                     (if (and (or (null wait-proc) (eq wait-proc ready))
                              (< got-some-output nread))

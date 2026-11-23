@@ -150,6 +150,7 @@ pub use handle::{Arg, Fixed, Local, Rooted};
 mod image;
 mod frozen;
 mod isolate;
+mod owner;
 mod keeper;
 pub use isolate::worker_socket as isolate_worker_socket;
 pub use isolate::refuse as isolate_refuse;

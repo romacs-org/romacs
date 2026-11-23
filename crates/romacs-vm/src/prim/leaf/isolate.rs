@@ -25,8 +25,11 @@ impl Leaf<'_> {
         self.vm.isolate_post(id, kind, generation, value).map_err(|e| self.freeze_error(e))
     }
 
-    pub(crate) fn isolate_wait(&mut self, timeout: Option<std::time::Duration>) -> Out {
-        Ok(if self.vm.isolate_wait(timeout).map_err(Fault::Error)? { Value::TRUE } else { Value::NIL })
+    /// With PROCESSES, a process's descriptor ready ends the wait too (an
+    /// owner's loop: `romacs--isolate-serve`).
+    pub(crate) fn isolate_wait(&mut self, timeout: Option<std::time::Duration>, processes: bool) -> Out {
+        let extra = if processes { self.vm.process_fds() } else { Vec::new() };
+        Ok(if self.vm.isolate_wait(timeout, &extra).map_err(Fault::Error)? { Value::TRUE } else { Value::NIL })
     }
 
     pub(crate) fn isolate_take(&mut self, id: u64) -> Out {
@@ -195,5 +198,20 @@ impl Leaf<'_> {
 
     pub(crate) fn isolate_pool_memory(&mut self) -> u64 {
         self.vm.isolate_pool_memory()
+    }
+
+    pub(crate) fn owner_become(&mut self) -> std::result::Result<(), Fault> {
+        self.vm.owner_become().map_err(Fault::Error)
+    }
+
+    /// `(WEDGED NEXT SENT ANSWERED)` of owner ID (`Vm::owner_ping`): NEXT the
+    /// seconds until it needs another look, or nil.
+    pub(crate) fn owner_ping(&mut self, id: u64, delay: std::time::Duration, busy: bool) -> Out {
+        let state = self.vm.owner_ping(id, delay, busy).map_err(Fault::Error)?;
+        let wedged = if state.wedged { Value::TRUE } else { Value::NIL };
+        let look = state.next.map_or(Value::NIL, |next| self.float(next.as_secs_f64()));
+        let pinged = Value::integer(i64::try_from(state.sent).unwrap_or(i64::MAX)).map_err(Fault::Error)?;
+        let answered = Value::integer(i64::try_from(state.answered).unwrap_or(i64::MAX)).map_err(Fault::Error)?;
+        Ok(self.vm.list_value(&[wedged, look, pinged, answered]))
     }
 }

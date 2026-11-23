@@ -57,7 +57,32 @@ fn a_workers_error_is_resignalled_with_its_ancestry() {
     // Unfreezable error data travels printed.
     assert_eq!(eval(&mut vm, "(condition-case e (isolate-await (isolate-spawn '(lambda () (signal 'error (list \"data\" (current-buffer)))))) (error (list (nth 1 e) (car (nth 2 e)))))"), "(\"data\" isolate-unfreezable)");
     assert_eq!(eval(&mut vm, "(isolate-await (isolate-spawn '+ 2 2))"), "4");
+    // The worker's backtrace comes with its error, from where it was signalled.
+    let backtrace = eval(&mut vm, "(let (seen) (condition-case nil
+                                     (handler-bind-1 (lambda () (isolate-await (isolate-spawn '(lambda () (defun failing-step (x) (car x)) (failing-step 1)))))
+                                                     '(error) (lambda (_) (setq seen isolate-error-backtrace)))
+                                   (error nil))
+                                 seen)");
+    assert!(backtrace.contains("(car 1)") && backtrace.contains("(failing-step 1)"), "{backtrace}");
     eval(&mut vm, "(isolate-kill-all)");
+}
+
+/// A retired zygote lingers while its owners live: it is not on its way out,
+/// so admission at the process limit waits for no end of it.
+#[test]
+fn a_retired_zygote_with_owners_is_not_ending() {
+    let mut vm = vm();
+    let out = eval(&mut vm, "(let* ((zygote (romacs--isolate-make 901 nil nil nil))
+                                    (record (record 'isolate-zygote zygote nil 'ready nil nil nil nil nil nil 0 nil nil 0 nil))
+                                    (owner (romacs--isolate-make 902 nil nil nil))
+                                    (romacs--isolates (list owner zygote)))
+                               (aset zygote 10 'zygote)
+                               (aset zygote 3 'retired)
+                               (aset owner 10 'owner)
+                               (aset owner 11 record)
+                               (list (romacs--isolate-owners zygote) (romacs--isolate-ending-p)
+                                     (progn (setq romacs--isolates (list zygote)) (romacs--isolate-ending-p))))");
+    assert_eq!(out, "(1 nil t)");
 }
 
 #[test]
@@ -159,7 +184,7 @@ fn protocol_one_is_refused_at_hello_with_the_version_mismatch() {
             (isolate-refused (list (car e) (car (nth 2 e)) (isolate-list)))))"));
     eval(&mut vm, "(isolate-kill-all)");
     std::fs::remove_file(&script).unwrap();
-    assert_eq!(out, r#"(isolate-refused "Isolate protocol mismatch: expected 2, got 1" nil)"#);
+    assert_eq!(out, r#"(isolate-refused "Isolate protocol mismatch: expected 3, got 1" nil)"#);
 }
 
 #[test]

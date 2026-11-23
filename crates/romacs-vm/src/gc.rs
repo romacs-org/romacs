@@ -819,6 +819,10 @@ impl Vm {
         let objects = (bytes / CONS_BYTES as usize).max(1);
         self.job_budget = Some((self.job_live(), objects));
     }
+    /// An owner serves for the session, not one job: no budget ends it.
+    pub(crate) fn clear_job_budget(&mut self) {
+        self.job_budget = None;
+    }
     /// What the last collection kept, in objects at the collector's charge:
     /// the retained objects and the payload allocation charged for them.
     fn job_live(&self) -> usize {
