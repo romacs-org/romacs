@@ -459,6 +459,39 @@ fn fontify_applies_captures_as_gnus_loop() {
     assert!(ours.contains("(call \"init_declarator\" nil 5 40)") && ours.contains("(bold font-lock-type-face)"), "the run exercised what it names: {ours}");
 }
 
+#[test]
+fn four_capture_names_reach_lisp_and_font_lock_in_query_order() {
+    let mut vm = gnu_lisp(&[]);
+    let source = r#"
+      (progn
+        (require 'treesit)
+        (with-temp-buffer
+          (insert "int n = 1;")
+          (let* ((parser (treesit-parser-create 'c))
+                 (raw "(number_literal) @a @b @c @d")
+                 (eager (treesit-query-compile 'c raw t))
+                 (lazy (treesit-query-compile 'c '((number_literal) @a @b @c @d)))
+                 (names (lambda (query) (mapcar #'car (treesit-query-capture parser query)))))
+            (defvar ts-four-capture-order nil)
+            (dolist (name '(ts-capture-a ts-capture-b ts-capture-c ts-capture-d))
+              (fset name `(lambda (&rest _) (push ',name ts-four-capture-order))))
+            (setq-local treesit-primary-parser parser)
+            (setq-local treesit-font-lock-settings
+                        (treesit-font-lock-rules
+                         :language 'c :feature 'query
+                         '((number_literal) @ts-capture-a @ts-capture-b
+                           @ts-capture-c @ts-capture-d)))
+            (treesit-font-lock-fontify-region (point-min) (point-max))
+            (list (funcall names raw) (funcall names eager) (funcall names lazy)
+                  (reverse ts-four-capture-order)))))
+    "#;
+    let value = vm.eval_source(source).and_then(romacs_vm::Local::display);
+    assert_eq!(
+        value.as_deref(),
+        Ok("((a b c d) (a b c d) (a b c d) (ts-capture-a ts-capture-b ts-capture-c ts-capture-d))")
+    );
+}
+
 /// romacs-treesit-code.el: a code block takes its language's faces in front
 /// of the faces it has, as a buffer of its own would give them, so an
 /// unclosed brace in one block leaves the next alone; a block that grows

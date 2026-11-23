@@ -8,6 +8,7 @@
 pub(crate) mod ahead;
 pub(crate) mod native;
 pub(crate) mod query_memo;
+mod query;
 
 use crate::text::{FrozenText, TextBody};
 use std::sync::OnceLock;

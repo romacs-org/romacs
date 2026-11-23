@@ -67,10 +67,7 @@ targets = [
 
 [features]
 default = ["std"]
-std = [
-    "regex/std",
-    "regex/perf",
-]
+std = []
 wasm = [
     "std",
     "wasmtime-c-api",
@@ -79,14 +76,6 @@ wasm = [
 [lib]
 name = "tree_sitter"
 path = "binding_rust/lib.rs"
-
-[dependencies.regex]
-version = "1.12.3"
-features = ["unicode"]
-default-features = false
-
-[dependencies.streaming-iterator]
-version = "0.1.9"
 
 [dependencies.tree-sitter-language]
 version = "0.1.8"

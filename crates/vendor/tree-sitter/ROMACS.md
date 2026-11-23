@@ -39,13 +39,21 @@ Each is its own commit in Romacs's history.
   Such nodes are now reused whatever their entry state. A typed character's
   reparse there re-lexes 570 bytes instead of 31 KB (6.7 to 1.4 ms); trees
   equal the published runtime's after every edit `tools/treesit-fuzz` makes.
-- `perf(query): find the progress offset only when the callback runs`
-  (`src/query.c`). With a progress callback set, the cursor found the
-  current node's start byte at every step of its walk, though the callback
-  that reads it runs once in 100 steps. That cost a query 3%, enough that
-  Romacs ran its queries without the callback and a query that matched
-  nothing could not be stopped. The offset is now found just before the
-  callback runs; what the callback sees is unchanged.
+- Slice Q moves compilation and matching into the VM's `treesit/query`
+  module and removes the 4,880-line C query engine and its bindings.
+  `src/query_adapter.c` copies grammar facts and hidden cursor state and
+  returns both node byte offsets in one call until the tree moves to Rust.
+  Progress polling is in the
+  Rust walk, including walks that produce no matches. The prior C patch
+  computed the progress offset only at callback time and saved 3% of a
+  query's work.
+  On the query-only C, Rust and Python corpus, cold compile took
+  86–90% of the C engine's instructions and warm matching took 87–98%.
+  Page-scroll evaluator instruction ratios against the C parent were
+  0.993 for C, 0.990 for Rust and 0.999 for Python, with identical faces.
+  The engine checks negated fields on wildcard roots, keeps every capture
+  attached to a step and uses wide step indices. The differential records
+  the three C defects in isolated probes. See VM2-TREESIT-QUERY.
 
 ## Checking it
 
