@@ -337,7 +337,7 @@ impl romacs_vm::LayoutHost for Cells {
     fn lay_out(&mut self, frame: &romacs_layout_input::FrameSnapshot) -> Result<Vec<romacs_vm::WindowEnd>, String> {
         Ok(frame.windows.iter().map(|w| {
             let len = w.snapshot.text.utf8.len();
-            romacs_vm::WindowEnd { id: w.snapshot.id, end: len, visible_end: len, body_height: w.snapshot.height as f32, rows: vec![], origin_y: 0.0, point: None, visible_text_bytes: vec![] }
+            romacs_vm::WindowEnd { id: w.snapshot.id, end: len, visible_end: len, body_height: w.snapshot.height as f32, rows: vec![], origin_y: 0.0, point: None }
         }).collect())
     }
 }

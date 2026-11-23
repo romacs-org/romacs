@@ -38,6 +38,8 @@ impl InputDelivery {
         Self(Arc::new(Delivery(Arc::default())), ingress)
     }
 
+    /// When the platform delivered the key press, stamped on the render
+    /// thread; None for an event no platform key made.
     #[must_use]
     pub fn ingress(&self) -> Option<EventTime> {
         self.1

@@ -111,7 +111,7 @@ impl Store {
             if self.check {
                 let mut whole = new_frame(snapshot.width.max(1), snapshot.height.max(1), 1)?;
                 let oracle = whole::append_window(snapshot, &mut whole, &mut self.resolver, ox, oy, None, no_font)?;
-                if !same_end(&oracle, &end) { self.mismatch(&format!("window {} ends {end:?}, whole {oracle:?}", snapshot.id)); }
+                if oracle != end { self.mismatch(&format!("window {} ends {end:?}, whole {oracle:?}", snapshot.id)); }
             }
             return Ok(end);
         };
@@ -119,7 +119,7 @@ impl Store {
         let end = window::append_window(snapshot, Some(frame), &mut self.kept(), ox, oy, cursor, window::Paint::Whole)?;
         if let Some(mut whole) = before {
             let oracle = whole::append_window(snapshot, &mut whole, &mut self.resolver, ox, oy, cursor, no_font)?;
-            if !same_end(&oracle, &end) { self.mismatch(&format!("window {} ends {end:?}, whole {oracle:?}", snapshot.id)); }
+            if oracle != end { self.mismatch(&format!("window {} ends {end:?}, whole {oracle:?}", snapshot.id)); }
             else if whole != *frame { self.mismatch(&format!("window {} paints otherwise than whole: {}", snapshot.id, differ(&whole, frame))); }
         }
         Ok(end)
@@ -205,11 +205,7 @@ impl LayoutEngine {
         if moved {
             let last = self.last.as_mut().expect("compared above");
             let bars = last.snapshot.tab_bar != snapshot.tab_bar || last.snapshot.status_bar != snapshot.status_bar;
-            let mut ends = cursors_moved(snapshot, &mut last.frame, &last.bars, cursor, &mut self.store)?;
-            for (next, previous) in ends.iter_mut().zip(&mut last.ends) {
-                next.visible_text_bytes = std::mem::take(&mut previous.visible_text_bytes);
-            }
-            last.ends = ends;
+            last.ends = cursors_moved(snapshot, &mut last.frame, &last.bars, cursor, &mut self.store)?;
             // Only cursors moved: the same layout. Bars painted again: another.
             if bars { last.frame.layout_identity = next_layout_identity(); }
             if self.store.check {
@@ -1202,19 +1198,4 @@ fn advance(frame: &FrameGlyphBuffer, id: FaceId, ch: char, cell: f32) -> f32 {
     // An icon is one column in any family and size (VM2-MODE-LINE).
     if is_icon(ch) { return cell; }
     frame.char_fonts.get(&id).and_then(|chars| chars.get(&ch)).map_or(cell, |glyph| glyph.advance_px)
-}
-
-/// Compare cursors and row geometry with the whole-window layout oracle.
-fn same_end(a: &WindowEnd, b: &WindowEnd) -> bool {
-    (a.id, a.end, a.visible_end, a.body_height, a.origin_y, a.point, &a.rows)
-        == (b.id, b.end, b.visible_end, b.body_height, b.origin_y, b.point, &b.rows)
-}
-
-/// Record the next run in text order, joining adjacent runs without a new allocation.
-fn cover(ranges: &mut Vec<std::ops::Range<usize>>, range: std::ops::Range<usize>) {
-    if let Some(last) = ranges.last_mut().filter(|last| last.end == range.start) {
-        last.end = range.end;
-    } else {
-        ranges.push(range);
-    }
 }

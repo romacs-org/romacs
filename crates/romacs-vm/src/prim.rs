@@ -247,19 +247,14 @@ mod leaf {
         pub(in crate::prim) fn new(vm: &'a mut Vm) -> Self {
             Leaf { vm }
         }
-        pub(crate) fn take_key_ingress(&mut self) -> super::Out {
-            self.vm.typing.take_ingress().map_or(Ok(Value::NIL), |ticks| Value::integer(ticks).map_err(Fault::Error))
+        /// A command step begins (`Vm::typing_begin').
+        pub(crate) fn typing_begin(&mut self) {
+            self.vm.typing_begin();
         }
-
-        pub(crate) fn typing_begin(&mut self, ticks: Value) -> super::Out {
-            Ok(if ticks.integer_value().is_some_and(|ticks| self.vm.typing_begin(ticks)) { Value::TRUE } else { Value::NIL })
+        /// The step that began last ends, LOCAL unless thrown out of (`Vm::typing_end').
+        pub(crate) fn typing_end(&mut self, local: bool) {
+            self.vm.typing_end(local);
         }
-
-        pub(crate) fn typing_end(&mut self, success: Value) -> super::Out {
-            self.vm.typing_end(success);
-            Ok(Value::NIL)
-        }
-
         /// The automatic collection's trigger (`Vm::collection_budget').
         pub(crate) fn collection_budget(&self) -> (f64, f64) {
             self.vm.collection_budget()

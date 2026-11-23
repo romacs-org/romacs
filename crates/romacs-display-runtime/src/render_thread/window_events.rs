@@ -28,6 +28,8 @@ impl RenderApp {
         }
     }
 
+    /// A key press the platform delivers now: its repeat timing told, and
+    /// the instant returned, the key's ingress (`InputDelivery::ingress`).
     fn key_press(&mut self, window: WindowId, key: PhysicalKey, repeat: bool) -> romacs_display_protocol::frame_time::EventTime {
         let at = romacs_display_protocol::frame_time::observe_platform_now();
         if let Some(after) = self.key_repeats.pressed(window, key, repeat, at) {
@@ -282,7 +284,6 @@ impl RenderApp {
         }
     }
 
-    // SMELL(long-function): Window events retain their platform ordering, including the admitted key press observation.
     pub(super) fn handle_window_event(
         &mut self,
         event_loop: &dyn ActiveEventLoop,
@@ -556,7 +557,8 @@ impl RenderApp {
                                 keys,
                                 ordinary_modifiers
                             );
-                            let ingress = ingress.filter(|_| keys.len() == 1);
+                            // One platform event: its ingress goes with the first key.
+                            let mut ingress = ingress;
                             for key in keys {
                                 tracing::debug!(
                                     "Queueing text key event: key={:?} mods=0x{:x}",
@@ -573,7 +575,7 @@ impl RenderApp {
                                         emacs_frame_id: self
                                             .emacs_frame_for_window_event(window_id),
                                     },
-                                    ingress,
+                                    ingress.take(),
                                 );
                                 self.record_idle_dim_activity(window_id);
                                 self.record_typing_speed_keypress(window_id);

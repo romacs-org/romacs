@@ -207,14 +207,11 @@ pub(crate) struct Row {
     pub(crate) x0: f32,
     /// Its glyphs, once something painted it.
     pub(crate) ops: Option<Rc<[Op]>>,
-    /// Painted ranges, relative to the row restart so cached rows can move.
-    pub(crate) coverage: Option<Rc<[std::ops::Range<usize>]>>,
 }
 
 impl Row {
     pub(crate) fn bytes(&self) -> usize {
-        std::mem::size_of::<Row>() + self.coverage.as_ref().map_or(0, |ranges| std::mem::size_of_val(&**ranges))
-            + self.ops.as_ref().map_or(0, |ops| std::mem::size_of_val(&**ops))
+        std::mem::size_of::<Row>() + self.ops.as_ref().map_or(0, |ops| ops.len() * std::mem::size_of::<Op>())
     }
 }
 
@@ -465,7 +462,6 @@ impl Walk<'_> {
     }
 
     /// The row from STANDING on: `Walked`.
-    // SMELL(long-function): Visibility and the buffer byte are both known in this row walk.
     #[allow(clippy::too_many_lines, reason = "one row of the frame-at-once loop, kept in its order")]
     #[expect(clippy::float_cmp, reason = "layout coordinates are whole pixels, compared as the frame-at-once loop compared them")]
     pub(crate) fn row(&mut self, from: &Standing, restart: &Restart, mut ask: Ask) -> Walked {
@@ -500,7 +496,6 @@ impl Walk<'_> {
         let mut end = line.len();
         let mut next = None;
         let mut continued = false;
-        let mut coverage = Vec::new();
         let mut pos = from.at;
         while let Some(ch) = text[pos..].chars().next() {
             let byte = pos;
@@ -635,9 +630,6 @@ impl Walk<'_> {
                 }
                 0.0
             };
-            if visible && ask.ops.is_some() && !matches!(shown, Shown::Inside) {
-                crate::cover(&mut coverage, byte - restart.at..pos - restart.at);
-            }
             if at_point {
                 // Point inside a composed sequence shows on its glyph.
                 let (x, cursor) = if matches!(shown, Shown::Inside) { s.composed } else { (s.x, cursor) };
@@ -676,10 +668,6 @@ impl Walk<'_> {
             // xdisp.c extend_face_to_end_of_line: the row paints past its
             // text, to the text area's edge, in its extend face.
             let shows = if line.newline.is_some() { seen(s.row_height) } else { below(s.row_height) };
-            if line.newline.is_some() && drawing && !s.hidden && shows && ask.ops.is_some() {
-                let at = line.len() - restart.at;
-                crate::cover(&mut coverage, at..at + 1);
-            }
             if let Some(slot) = line.extend && !s.hidden && shows {
                 let (from, to) = ((s.x - shift).max(x0), context.width);
                 if to > from && let Some(ops) = ask.ops.as_deref_mut() {
@@ -696,11 +684,7 @@ impl Walk<'_> {
             }
             _ => (raw_height, None),
         };
-        if unsettled && clip.is_some_and(|clip| clip.y < 0.0 || clip.y + height > clip.body) {
-            coverage.clear();
-        }
-        let row = Row { restart, end, horizon, raw_height, height, settled, continued, truncated: s.hidden, mixed: s.mixed, pen: s.x, x0, ops: None,
-            coverage: (!coverage.is_empty()).then(|| coverage.into()) };
+        let row = Row { restart, end, horizon, raw_height, height, settled, continued, truncated: s.hidden, mixed: s.mixed, pen: s.x, x0, ops: None };
         let point = point.zip(rect).map(|(place, rect)| Pointed { rect, place });
         Walked::Row { row, next, point, unsettled: unsettled && ask.ops.is_none(), started }
     }

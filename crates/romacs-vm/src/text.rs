@@ -97,7 +97,9 @@ pub struct TextBody {
     flat_internal: std::sync::OnceLock<Vec<u8>>,
     /// The text kept contiguous for searches across edits (text_gap.rs).
     search: gap::SearchView,
-    pub(crate) last_edit: crate::typing::TextEdit,
+    /// The open edit entry: the revision and the unchanged bounds of the
+    /// writes since a command step last took it (typing.rs).
+    edits: crate::typing::EditEntry,
     is_ascii: bool,
     // CELL(Plain)
     coordinate: std::cell::Cell<(usize, usize)>,
@@ -473,7 +475,7 @@ impl Text {
                 raw,
                 flat_internal: std::sync::OnceLock::new(),
                 search: Default::default(),
-                last_edit: Default::default(),
+                edits: Default::default(),
                 is_ascii: s.is_ascii(),
                 coordinate: std::cell::Cell::new((0, 0)),
                 chunk: std::cell::RefCell::new(ChunkCursor::default()),
@@ -521,6 +523,10 @@ impl Text {
     }
     pub(crate) fn body(&self) -> &TextBody {
         &self.body
+    }
+    /// The body's open edit entry, which a command step takes (typing.rs).
+    pub(crate) fn edit_entry(&mut self) -> &mut crate::typing::EditEntry {
+        &mut self.body.edits
     }
     /// Whether THIS and OTHER are views of one body.
     #[cfg(test)]
@@ -724,9 +730,11 @@ impl Text {
     }
     /// treesit_record_change of the change of OLD to INSERTED bytes, made:
     /// every parser's tree edited, CHARGE bytes against redisplay's budget
-    /// (`Registry::small_edit_due`), and the linecol caches moved.
+    /// (`Registry::small_edit_due`), the linecol caches moved, and the
+    /// body's open edit entry told (typing.rs): every body write comes here.
     fn ts_record(&mut self, old: Range<usize>, inserted: usize, linecols: Option<(crate::treesit::Linecol, crate::treesit::Linecol)>, charge: usize) {
-        if !old.is_empty() || inserted != 0 { self.body.last_edit.record(old.start, inserted); }
+        let len = self.len_bytes();
+        self.body.edits.record(old.start, inserted, len);
         if self.body.treesit.is_empty() {
             return;
         }
@@ -750,6 +758,10 @@ impl Text {
     }
 }
 impl TextBody {
+    /// The revision of this text (typing.rs `EditEntry`).
+    pub(crate) fn edits_revision(&self) -> u64 {
+        self.edits.revision()
+    }
     /// Characters START..END replaced by INSERTED ones: the caches derived
     /// from the text follow.
     fn edit_derived(&mut self, start: usize, end: usize, inserted: usize) {

@@ -132,6 +132,7 @@ impl Vm {
         self.reset_collection_counters();
         self.forget_system_name();
         self.forget_source_directory();
+        self.reseed_text_revisions();
     }
 }
 

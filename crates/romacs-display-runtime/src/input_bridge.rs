@@ -23,6 +23,9 @@ use std::time::Duration;
 pub struct PaintDiagnostic {
     pub presentation: u64,
     pub unresolved_face_text_total: u64,
+    /// When the render thread's present call for it returned: the queue
+    /// took the frame, not when the compositor showed it.
+    pub drawn_at: romacs_display_protocol::frame_time::EventTime,
 }
 
 /// How a held key repeated, as the render thread saw it.
@@ -84,10 +87,10 @@ enum Notice {
 /// Apply FACT to STATE: what the evaluator's waits must hear of it.
 fn apply(state: &mut State, fact: Fact) -> Notice {
     match fact {
-        Fact::PresentationRendered { frame, presentation, unresolved_face_text_total } => {
+        Fact::PresentationRendered { frame, presentation, unresolved_face_text_total, drawn_at } => {
             let latest = state.rendered.get(&frame).map_or(0, |sample| sample.presentation);
             if presentation >= latest {
-                state.rendered.insert(frame, PaintDiagnostic { presentation, unresolved_face_text_total });
+                state.rendered.insert(frame, PaintDiagnostic { presentation, unresolved_face_text_total, drawn_at });
             }
             if presentation > latest { Notice::Rendered(frame) } else { Notice::Nothing }
         }
@@ -268,7 +271,8 @@ mod tests {
     }
 
     fn rendered(frame: u64, presentation: u64) -> Fact {
-        Fact::PresentationRendered { frame, presentation, unresolved_face_text_total: presentation * 10 }
+        let drawn_at = romacs_display_protocol::frame_time::observe_platform_now();
+        Fact::PresentationRendered { frame, presentation, unresolved_face_text_total: presentation * 10, drawn_at }
     }
 
     fn bridge(capacity: usize) -> (Sender<InputEvent>, Sender<Fact>, Arc<Facts>, Receiver<InputEvent>) {

@@ -64,6 +64,23 @@ impl RenderApp {
         result
     }
 
+    /// Tell the evaluator FRAME's PRESENTATION drew, the queue having
+    /// returned from presenting it at PRESENTED, with the window's atlas
+    /// sample. Read the actual per-window renderer atlas only after
+    /// successful drawing and presentation. Missing atlas is missing
+    /// evidence, never zero. Once per presentation: a frame the render
+    /// thread draws again on its own (effects, video) renders nothing new.
+    fn report_rendered(&mut self, frame: u64, presentation: u64, presented: romacs_display_protocol::frame_time::EventTime) {
+        if let Some(window) = self.frame_windows.get_mut(frame)
+            && window.render.reported_presentation < presentation
+            && let Some(atlas) = window.render.compositor.glyph_atlas.as_ref()
+        {
+            let unresolved_face_text_total = atlas.unresolved_face_text_total();
+            window.render.reported_presentation = presentation;
+            self.comms.tell(crate::thread_comm::Fact::PresentationRendered { frame, presentation, unresolved_face_text_total, drawn_at: presented });
+        }
+    }
+
     fn render_frame_window_impl(
         &mut self,
         emacs_frame_id: u64,
@@ -244,22 +261,8 @@ impl RenderApp {
             emacs_frame_id,
             frame.presentation_id,
         );
-        // Read the actual per-window renderer atlas only after successful drawing
-        // and presentation. Missing atlas is missing evidence, never zero.
-        // Once per presentation: a frame the render thread draws again on
-        // its own (effects, video) renders nothing new.
-        if let Some(window) = self.frame_windows.get_mut(emacs_frame_id)
-            && window.render.reported_presentation < frame.presentation_id.get()
-            && let Some(atlas) = window.render.compositor.glyph_atlas.as_ref()
-        {
-            let unresolved_face_text_total = atlas.unresolved_face_text_total();
-            window.render.reported_presentation = frame.presentation_id.get();
-            self.comms.tell(crate::thread_comm::Fact::PresentationRendered {
-                frame: emacs_frame_id,
-                presentation: frame.presentation_id.get(),
-                unresolved_face_text_total,
-            });
-        }
+        let presented = romacs_display_protocol::frame_time::observe_platform_now();
+        self.report_rendered(emacs_frame_id, frame.presentation_id.get(), presented);
         // This projection describes the frame just handed to the compositor.
         // Keep input publication at submission; native confirmation is separate.
         if let Some(window_state) = self.frame_windows.get_mut(emacs_frame_id) {
@@ -268,7 +271,7 @@ impl RenderApp {
             }
             window_state.render.publish_submitted_projection(projection);
         }
-        frame_stats::note_submission(romacs_display_protocol::frame_time::observe_platform_now());
+        frame_stats::note_submission(presented);
         self.note_models_frame_submitted(emacs_frame_id, &models, blends_older);
 
         if !child_frame_ids.is_empty() || !removed_child_frame_ids.is_empty() {

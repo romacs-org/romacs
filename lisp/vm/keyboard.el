@@ -98,14 +98,7 @@ timer) ends the wait, so the deadline is computed again (host_input.rs)."
       (setq times (cons 'idle times) lists (cdr lists)))
     (cons (romacs--unread-p) times)))
 
-(defvar romacs--char-ingress nil
-  "The delivered key time when the sequence reader asks for it.")
-
-(defvar romacs--key-sequence-ingress nil
-  "The first native ingress of the command sequence being read.")
-
-;; SMELL(long-function): The wait filters special events before publishing one returned key’s ingress.
-(defun romacs--read-host-char (seconds &optional auto-save capture)
+(defun romacs--read-host-char (seconds &optional auto-save)
   "keyboard.c kbd_buffer_get_event's wait for the host keyboard: the next
 host event, running timers as they fall due, or nil once SECONDS pass or a
 timer queues input in `unread-command-events' (which read_char reads next).
@@ -113,8 +106,7 @@ Without SECONDS Emacs is idle meanwhile, so idle timers run too (read_char's
 timer_start_idle and timer_stop_idle), and it collects garbage as the host's
 idle pass does (`romacs--idle-collect'), once what it ran is on screen.
 After AUTO-SAVE idle seconds with no input, it auto-saves once and waits
-on.  A VM without the process prelude runs no timers.
-CAPTURE saves the native observation for the key this wait returns."
+on.  A VM without the process prelude runs no timers."
   (let ((end (and seconds (+ (float-time) seconds)))
         (save-at (and auto-save (+ (float-time) auto-save)))
         (timers (fboundp 'romacs--timer-check))
@@ -181,7 +173,7 @@ CAPTURE saves the native observation for the key this wait returns."
                             (let ((inhibit-quit outer-inhibit))
                               (romacs--host-event
                                (if (and delay left) (min delay left) (or delay left))
-                               current capture)))
+                               current)))
                       shown ran)
                 ;; read_char: an event `special-event-map' binds (focus, a
                 ;; user signal, a native model's) runs its binding at once
@@ -192,7 +184,6 @@ CAPTURE saves the native observation for the key this wait returns."
                            (lookup-key special-event-map (vector (if (consp c) (car c) c))))
                   (let ((inhibit-quit outer-inhibit))
                     (romacs--special-event c))
-                  (when capture (setq romacs--char-ingress nil))
                   (setq c nil shown nil))
                 (setq waiting (null c)))))))
       (and timers (null end) (romacs--timer-stop-idle)))
@@ -262,17 +253,14 @@ that reports errors cannot spin on this one."
       (throw 'exit (lambda () (signal 'end-of-file '("Error reading from stdin"))))
     (signal 'end-of-file '("Error reading from stdin"))))
 
-(defun romacs--host-event (seconds display &optional capture)
+(defun romacs--host-event (seconds display)
   "`romacs--read-host-event', whose `quit' is one of two.  A C-g that quit the
 wait's redisplay is the read's key, as one typed in the wait itself.  Once the
 frame has closed (the quit's data says so) it leaves the innermost recursive
 edit first, as end of input does: the command loop there reports every signal
 (GNU's C `error' handler), so it would read, and quit, again.  Each level
 quits in turn, down to the host's command."
-  (condition-case err
-      (let ((event (romacs--read-host-event seconds display)))
-        (when capture (setq romacs--char-ingress (romacs--take-key-ingress)))
-        event)
+  (condition-case err (romacs--read-host-event seconds display)
     ((debug quit)
      (cond ((null (cdr err)) ?\C-g)
            ((> (recursion-depth) 0) (throw 'exit (lambda () (signal 'quit nil))))
@@ -422,8 +410,7 @@ of a key sequence and the method must not use the echo area."
       (setq romacs--command-keys keys romacs--single-command-key-start start
             romacs--keyboard-quit nil))))
 
-;; SMELL(long-function): The reader knows whether the returned key came from native input or a replay.
-(defun romacs--read-char (&optional seconds prev-event keymap-read capture)
+(defun romacs--read-char (&optional seconds prev-event keymap-read)
   "keyboard.c read_char: the next event, recorded as input.
 It comes from `unread-post-input-method-events', `unread-command-events'
 or `unread-input-method-events', in that order, else from the executing
@@ -435,13 +422,11 @@ is one.
 A character from anywhere but `unread-post-input-method-events' goes through
 `input-method-function' unless PREV-EVENT, the event before it in its key
 sequence, says it is not the first; that function's default `list' changes
-nothing but the echo area.  KEYMAP-READ says a key sequence is being read.
-CAPTURE saves native ingress for this read in `romacs--char-ingress'."
+nothing but the echo area.  KEYMAP-READ says a key sequence is being read."
   (let ((reread nil) (recorded nil) (post nil) (previous nil) c (again t)
         (end (and seconds (+ (float-time) seconds))))
    (setq romacs--keyboard-quit nil)
    (while again
-    (when capture (setq romacs--char-ingress nil))
     (setq again nil reread nil recorded nil post nil c nil)
     (cond
      (unread-post-input-method-events
@@ -479,7 +464,7 @@ CAPTURE saves native ingress for this read in `romacs--char-ingress'."
       (when (and romacs--reading-command-keys (romacs--auto-save-due-p) (not (romacs--unread-p)) (not (input-pending-p)))
         (romacs--auto-save))
       (let ((sit (and romacs--reading-command-keys (null seconds) (romacs--auto-save-delay))))
-        (setq c (romacs--read-host-char seconds sit capture)
+        (setq c (romacs--read-host-char seconds sit)
               romacs--keyboard-quit (eq c ?\C-g))
         ;; An event a timer or filter queued in `unread-command-events'
         ;; while the host waited: when the wait was read_char's auto-save
@@ -734,7 +719,6 @@ of `help-event-list'."
 ends, normally or not: a choice made at its start is undone here, so a
 read nested in another's restores the outer one's.")
 
-;; SMELL(long-function): Record ingress where the sequence accepts raw input, before translation replays it.
 (defun romacs--read-key-sequence (dont-downcase-last &optional command can-return-switch-frame)
   "keyboard.c read_key_sequence: read a complete key sequence.
 Return its events as a vector, or nil at the end of an executing
@@ -783,11 +767,9 @@ the sequence (keyboard.c `delayed_switch_frame')."
             ;; left to try: drop it and go on after it.
             (let ((drop (1+ first-unbound)))
               (setq keys (romacs--subvector keys drop n) mock (- n drop) state 'replay)
-              (when command (setq romacs--key-sequence-ingress nil))
               (dolist (remap (list indec fkey keytran))
                 (romacs--keyremap-reset remap (- (aref remap 2) drop))))
-          (let ((local-keys romacs--command-keys) (key nil) (again t)
-                (romacs--char-ingress nil))
+          (let ((local-keys romacs--command-keys) (key nil) (again t))
             ;; replay_key, again after a fake prefix key.
             (while again
               (setq again nil romacs--command-keys local-keys)
@@ -809,7 +791,7 @@ the sequence (keyboard.c `delayed_switch_frame')."
                                                 (and defining-kbd-macro romacs--kbd-macro-events))
                                clean (not (or unread-command-events executing-kbd-macro
                                               (and (boundp 'inhibit--record-char) inhibit--record-char)))))
-                       (setq key (romacs--read-char nil last-nonmenu-event t command)
+                       (setq key (romacs--read-char nil last-nonmenu-event t)
                              quit-flag nil)
                        (if (and (memq (car-safe key) '(switch-frame select-window))
                                 (or (> n 0) (not can-return-switch-frame)))
@@ -823,8 +805,6 @@ the sequence (keyboard.c `delayed_switch_frame')."
                          ;; and before it is looked up; replays of the
                          ;; sequence do not run it again.
                          (unless started
-                           (when command
-                             (setq romacs--key-sequence-ingress romacs--char-ingress))
                            (setq started t)
                            (run-hooks 'romacs--sequence-start-functions)))))
               ;; A click in a mode line, header line or margin is looked
@@ -957,70 +937,70 @@ idle timers and redisplay see `this-command' nil."
   (setq deactivate-mark nil this-command nil real-this-command nil
         this-original-command nil this-command-keys-shift-translated nil))
 
-(defun romacs--execute-key-command (keys)
-  "Execute the binding of KEYS and finish its command-loop bookkeeping."
-  (let (cmd previous-buffer previous-tick)
-    (set-buffer (window-buffer (selected-window)))
-    (setq num-input-keys (1+ num-input-keys))
-    (setq last-command-event (aref keys (1- (length keys)))
-          cmd romacs--key-sequence-command
-          previous-buffer (current-buffer)
-          previous-tick (buffer-modified-tick)
-          deactivate-mark nil
-          this-original-command cmd)
-    (when romacs--key-sequence-remapped
-      (setq cmd romacs--key-sequence-remapped))
-    (romacs--record-input cmd t)
-    (setq this-command cmd real-this-command cmd)
-    (romacs--safe-run-hooks 'pre-command-hook)
-    (if (null this-command)
-        (undefined)
-      (when (fboundp 'undo-auto--add-boundary) (undo-auto--add-boundary))
-      ;; point_before_last_command_or_undo, before the command's edits.
-      (romacs--note-command-point)
-      ;; The display's delete-selection policy (romacs-editing.el). A
-      ;; command the deletion supersedes runs as `ignore', as delsel.el's
-      ;; pre-command-hook makes it, so it still consumes the prefix argument.
-      (when (and (fboundp 'romacs-delete-selection-before-command)
-                 (romacs-delete-selection-before-command this-command))
-        (setq this-command 'ignore))
-      (command-execute this-command))
-    (setq last-prefix-arg current-prefix-arg)
-    (romacs--safe-run-hooks 'post-command-hook)
-    (setq last-command this-command real-last-command real-this-command)
-    (unless (consp last-command-event)
-      (setq last-repeatable-command real-this-command))
-    (setq romacs--command-keys [] romacs--single-command-key-start 0)
-    (romacs--after-command-mark previous-buffer previous-tick)
-    ;; A step of a session's flight recording (crate::flight).
-    (romacs--flight-step this-command)
-    ;; The keys of a command that ran, unless it set a prefix argument
-    ;; for the next one, belong to the macro being defined.
-    (when (and defining-kbd-macro (null prefix-arg))
-      (romacs--finalize-kbd-macro-chars))))
-
 (defun romacs--command-loop-step ()
-  "Read one key sequence and execute its command.
+  "One pass of keyboard.c command_loop_1's loop: read a key sequence and
+run its command between `pre-command-hook' and `post-command-hook'.
 Return the keys read, nil at the end of an executing keyboard macro."
   (romacs--command-loop-top)
-  (let* ((romacs--key-sequence-ingress nil)
-         (keys (let ((romacs--reading-command-keys t)) (romacs--read-key-sequence nil t t)))
-         (typing (and keys romacs--key-sequence-command romacs--key-sequence-ingress
-                      (romacs--typing-begin romacs--key-sequence-ingress)))
-         completed)
-    (if keys
-        (unwind-protect
-            (progn (romacs--execute-key-command keys) (setq completed t))
-          (when typing (romacs--typing-end completed)))
-      (set-buffer (window-buffer (selected-window)))
-      (setq num-input-keys (1+ num-input-keys)))
+  ;; command_loop_1 reads a key sequence that may be a `switch-frame'.
+  (let ((keys (let ((romacs--reading-command-keys t)) (romacs--read-key-sequence nil t t)))
+        cmd previous-buffer previous-tick)
+    (set-buffer (window-buffer (selected-window)))
+    (setq num-input-keys (1+ num-input-keys))
+    (when keys
+      (setq last-command-event (aref keys (1- (length keys)))
+            cmd romacs--key-sequence-command
+            previous-buffer (current-buffer)
+            previous-tick (buffer-modified-tick)
+            deactivate-mark nil
+            this-original-command cmd)
+      (when romacs--key-sequence-remapped
+        (setq cmd romacs--key-sequence-remapped))
+      (romacs--record-input cmd t)
+      (setq this-command cmd real-this-command cmd)
+      (romacs--safe-run-hooks 'pre-command-hook)
+      (if (null this-command)
+          (undefined)
+        (when (fboundp 'undo-auto--add-boundary) (undo-auto--add-boundary))
+        ;; point_before_last_command_or_undo, before the command's edits.
+        (romacs--note-command-point)
+        ;; The display's delete-selection policy (romacs-editing.el). A
+        ;; command the deletion supersedes runs as `ignore', as delsel.el's
+        ;; pre-command-hook makes it, so it still consumes the prefix argument.
+        (when (and (fboundp 'romacs-delete-selection-before-command)
+                   (romacs-delete-selection-before-command this-command))
+          (setq this-command 'ignore))
+        (command-execute this-command))
+      (setq last-prefix-arg current-prefix-arg)
+      (romacs--safe-run-hooks 'post-command-hook)
+      (setq last-command this-command real-last-command real-this-command)
+      (unless (consp last-command-event)
+        (setq last-repeatable-command real-this-command))
+      (setq romacs--command-keys [] romacs--single-command-key-start 0)
+      (romacs--after-command-mark previous-buffer previous-tick)
+      ;; A step of a session's flight recording (crate::flight).
+      (romacs--flight-step this-command)
+      ;; The keys of a command that ran, unless it set a prefix argument
+      ;; for the next one, belong to the macro being defined.
+      (when (and defining-kbd-macro (null prefix-arg))
+        (romacs--finalize-kbd-macro-chars)))
     keys))
+
+(defun romacs--typing-step ()
+  "`romacs--command-loop-step' as one command step of the native keys it
+reads: `romacs--typing-begin' before it, and `romacs--typing-end' after,
+told whether it returned or was thrown out of (crates/romacs-vm/src/typing.rs).
+Return its value."
+  (let ((returned nil))
+    (romacs--typing-begin)
+    (unwind-protect (prog1 (romacs--command-loop-step) (setq returned t))
+      (romacs--typing-end returned))))
 
 (defun romacs--command-loop-1 ()
   "keyboard.c command_loop_1: read and execute commands.
 Return nil at the end of an executing keyboard macro."
   (romacs--command-loop-resume)
-  (while (romacs--command-loop-step))
+  (while (romacs--typing-step))
   nil)
 
 (defun romacs--special-event (event)
@@ -1046,7 +1026,7 @@ The host waits for the next input at the top of the loop."
   (let ((error nil) (thrown t))
     (catch 'top-level
       (condition-case data
-          (romacs--note-signals #'romacs--command-loop-step)
+          (romacs--note-signals #'romacs--typing-step)
         ((debug t) (setq error data) (romacs--cmd-error data)))
       (setq thrown nil))
     (when (or error thrown)
