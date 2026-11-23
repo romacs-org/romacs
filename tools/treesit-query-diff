@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -22,6 +23,7 @@ QUIT = Path("crates/romacs-vm/src/quit.rs")
 POLLS = QUIT.with_suffix("") / "query_polls.rs"
 GR_JSON = Path("crates/romacs-grammars/sources.json")
 C_ENGINE = Path("crates/vendor/tree-sitter/src/query.c")
+C_BINDINGS = C_ENGINE.parent.parent / "binding_rust/bindings.rs"
 TEST = "treesit::native::query_oracle::query_oracle_"
 
 
@@ -55,19 +57,56 @@ def insert_before(path, anchor, source):
     if source in text:
         return
     if text.count(anchor) != 1:
-        raise ValueError(f"missing C reference anchor in {path}")
+        raise ValueError(f"missing or ambiguous C reference anchor in {path}: {anchor.strip()}")
     path.write_text(text.replace(anchor, source + anchor))
+
+
+def require_methods(path, owner, *required):
+    impl = re.search(rf"^impl {owner} \{{\n(.*?)^\}}", path.read_text(), re.M | re.S)
+    if impl is None:
+        raise ValueError(f"missing C reference impl {owner} in {path}")
+    methods = set(re.findall(r"^ +(?:pub(?:\(crate\))? )?fn (\w+)\(", impl[1], re.M))
+    for method in required:
+        if method not in methods:
+            raise ValueError(f"missing C reference method {owner}::{method} in {path}")
+    return methods
+
+
+def require_capture_count_binding(reference, native):
+    text = native.read_text()
+    for declaration in ("use tree_sitter::ffi;", "struct Query(*mut ffi::TSQuery);"):
+        if declaration not in text:
+            raise ValueError(f"missing C reference declaration in {native}: {declaration}")
+    for path, declaration in (
+        (reference / C_ENGINE, r"^uint32_t ts_query_capture_count\("),
+        (reference / C_BINDINGS, r"^ +pub fn ts_query_capture_count\("),
+    ):
+        if not path.is_file() or not re.search(declaration, path.read_text(), re.M):
+            raise ValueError(f"missing C reference symbol ts_query_capture_count in {path}")
+
+
+def add_reference_query_tests(reference, support):
+    native = reference / NATIVE
+    methods = require_methods(native, "Query", "new", "matches", "pattern_count", "capture_name", "predicates")
+    anchor = "    /// Every match of the query under NODE"
+    if "capture_count" not in methods:
+        require_capture_count_binding(reference, native)
+        insert_before(native, anchor, (support / "c-capture-count.rs").read_text() + "\n")
+    insert_before(native, anchor, (support / "c-matches.rs").read_text() + "\n")
+    insert_before(native, "pub(crate) use ffi::{",
+                  '#[cfg(test)]\n#[path = "query_oracle.rs"]\nmod query_oracle;\n\n')
 
 
 def add_reference_tests(reference, subject):
     """Use the same recorder and test-only poll observer on the pinned C arm."""
+    require_methods(reference / NATIVE, "Language", "from_function", "abi_version")
+    require_methods(reference / NATIVE, "Node", "ts", "identity")
+    require_methods(reference / QUIT, "NativeStop", "never", "armed", "due")
+    require_methods(reference / QUIT, "QuitSignal", "new")
+    add_reference_query_tests(reference, subject / SUPPORT)
     shutil.copyfile(subject / RECORDER, reference / RECORDER)
-    insert_before(reference / NATIVE, "pub(crate) use ffi::{",
-                  '#[cfg(test)]\n#[path = "query_oracle.rs"]\nmod query_oracle;\n\n')
     (reference / POLLS).parent.mkdir(exist_ok=True)
     shutil.copyfile(subject / POLLS, reference / POLLS)
-    insert_before(reference / NATIVE, "    /// Every match of the query under NODE",
-                  (subject / SUPPORT / "c-matches.rs").read_text() + "\n")
     insert_before(reference / QUIT, "    /// Whether it may ever say to stop:",
                   (subject / SUPPORT / "test-stop.rs").read_text() + "\n")
     insert_before(reference / QUIT, "/// A loop's quit probe, taken from the VM before the loop",
