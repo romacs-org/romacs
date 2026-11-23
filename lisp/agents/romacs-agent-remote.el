@@ -229,9 +229,9 @@ its mirror's approvals, each the approval event that asks it."
 (cl-defmethod romacs-agent-log-source-seen ((_source romacs-agent-remote) _session)
   nil)
 
-(defun romacs-agent-remote--command (source method params &optional refused)
-  "Run METHOD with PARAMS on SOURCE's service; said when it is refused,
-and REFUSED, when given, called then."
+(defun romacs-agent-remote--command (source method params &optional on-error)
+  "Run METHOD with PARAMS on SOURCE's service.
+On error, report it and call ON-ERROR with `unconfirmed' or `refused'."
   (let ((client (romacs-agent-remote-client source)))
     (unless (and client (romacs-agent-client-live-p client))
       (user-error (substitute-command-keys "Not connected: \\[romacs-agents-remote] connects")))
@@ -239,10 +239,22 @@ and REFUSED, when given, called then."
      client method params
      (lambda (_result error)
        (when error
-         (message "%s: %s" method (gethash "message" error))
-         ;; One whose end was not kept may have taken effect: not refused.
-         (unless (let ((data (gethash "data" error))) (and (hash-table-p data) (equal (gethash "kind" data) "not-kept")))
-           (when refused (funcall refused))))))))
+         (let* ((data (gethash "data" error))
+                (unconfirmed (and (hash-table-p data) (member (gethash "kind" data) '("not-kept" "disconnected")))))
+           (message "%s%s — %s" method (if unconfirmed " delivery unconfirmed" "") (gethash "message" error))
+           (when on-error (funcall on-error (if unconfirmed 'unconfirmed 'refused)))))))))
+
+(defun romacs-agent-remote--recover-send (buffer session text outcome)
+  "Keep TEXT from a remote send of OUTCOME in BUFFER for SESSION."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (when (eq romacs-agent-log--session session)
+        (if (eq outcome 'unconfirmed)
+            (unless (equal text (car romacs-agent-log--prompts))
+              (push text romacs-agent-log--prompts))
+          (save-excursion
+            (goto-char romacs-agent-log--input)
+            (insert text (if (string-empty-p (romacs-agent-log--draft)) "" "\n\n"))))))))
 
 (cl-defmethod romacs-agent-log-source-send ((source romacs-agent-remote) session text &optional when)
   "Send SESSION TEXT through SOURCE's service, WHEN as the chat says it."
@@ -254,14 +266,7 @@ and REFUSED, when given, called then."
        source "agents/send"
        (romacs-agent-rpc-object "id" (romacs-agent-id session) "text" text
                                 "mode" (if (memq when '(later interrupt)) "next" "now"))
-       ;; Not sent: the text is the composer's again, when it holds none.
-       (lambda ()
-         (when (buffer-live-p buffer)
-           (with-current-buffer buffer
-             (save-excursion
-               (goto-char romacs-agent-log--input)
-               ;; Ahead of a draft written meanwhile, kept whole.
-               (insert text (if (string-empty-p (romacs-agent-log--draft)) "" "\n\n")))))))))
+       (lambda (outcome) (romacs-agent-remote--recover-send buffer session text outcome)))))
   (when (and (string-empty-p text) (eq when 'interrupt) (romacs-agent-log--running-p session))
     (romacs-agent-log-source-interrupt source session)))
 
