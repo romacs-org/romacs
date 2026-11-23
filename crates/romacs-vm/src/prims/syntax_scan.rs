@@ -53,8 +53,10 @@ fn parse_partial_sexp(cx, from: Value, to: Value; optional targetdepth: Value, s
 }}
 
 // Counters of the current buffer's syntax summaries, the index a syntax scan carries
-// its state across, as a plist: `:served', `:declined' (an alist of the reasons a scan was
-// not served, with counts), `:leaves', `:leaf-scans', `:plain-leaves', `:composed',
+// its state across, as a plist: `:served' and `:declined' for parses, `:list-served',
+// `:list-declined' and `:list-fallbacks' for forward list scans with a nonbinding count.
+// Declines are alists of reasons and counts.  List fallbacks count restarts from FROM
+// after an unusable index result.  The plist also has `:leaves', `:leaf-scans', `:plain-leaves', `:composed',
 // `:context-switches', `:log-overflows' and `:bytes'; and `:char-table-writes', the writes
 // to any char table in this process so far.  nil in a unibyte buffer.
 defsubr! { name = "romacs-syntax-summaries-stats", gnu = "romacs:syntax-summaries", effect = Reads,

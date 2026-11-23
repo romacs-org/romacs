@@ -1,5 +1,5 @@
 //! Forward list-scan spans, using the scanner's existing suspension states.
-use crate::syntax_scan::{Forw, ForwAt, Halt, Pos, Scan, ScanAt, Scanner, Text};
+use crate::syntax_scan::{Forw, ForwAt, Halt, Pos, R, Scan, ScanAt, Scanner, Text};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 struct Comment {
@@ -156,22 +156,26 @@ pub(crate) fn summarize<T: Text>(
     start: Pos,
     end: i64,
     key: Key,
-) -> Option<Span> {
+) -> R<Option<Span>> {
     let original = scanner.options.propertize_done;
     // The caller has already supplied the syntax properties. Use the same
     // resume boundary as propertization without performing any Lisp call.
     scanner.options.propertize_done = Some(end);
     let result = scanner.lists(key.scan(start, -1), true);
     scanner.options.propertize_done = original;
-    let stopped = result.err()?;
-    let Halt::Propertize(_, position) = stopped.halt else {
-        return None;
+    let Err(stopped) = result else {
+        return Ok(None);
     };
-    if position != end {
-        return None;
-    }
-    let scan = stopped.suspended?;
-    let exit = Key::of(&scan, key.ignore_comments, key.multibyte_symbol)?;
+    let scan = match stopped.halt {
+        Halt::Poll => return Err(Halt::Poll),
+        Halt::Propertize(_, position) if position == end => stopped.suspended,
+        _ => None,
+    };
+    Ok(scan.and_then(|scan| span(start, key, &scan)))
+}
+
+fn span(start: Pos, key: Key, scan: &Scan) -> Option<Span> {
+    let exit = Key::of(scan, key.ignore_comments, key.multibyte_symbol)?;
     let last_good = if scan.last_good == -1 {
         None
     } else {
