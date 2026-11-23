@@ -1456,16 +1456,19 @@ chat shows it: a plan it offers waits on the user, as a request does."
   "How many things wait on the user here: its approvals, and a plan offered."
   (+ (length romacs-agent-log--asks) (if (romacs-agent-log--proceed-offered) 1 0)))
 
-(defun romacs-agent-log--header-show ()
-  "Make the header say what the session says now: a value, never a form,
-so a redisplay runs no Lisp for it; made only when what it reads changed."
-  (let* ((session romacs-agent-log--session)
-         (state (romacs-agent-state session))
+(defun romacs-agent-log--header-snapshot (session)
+  "Read the values from SESSION and this chat that the header needs."
+  (let* ((state (romacs-agent-state session))
          (pending (romacs-agent-log--waiting-count))
          (start (romacs-agent-turn-start session))
          (elapsed (and start (zerop pending) (memq state '(starting running))
-                       (round (- (float-time) start))))
-         (inputs (list (romacs-agent-log--header-inputs session) pending elapsed (eq state 'history))))
+                       (round (- (float-time) start)))))
+    (list (romacs-agent-log--header-inputs session) pending elapsed (eq state 'history))))
+
+(defun romacs-agent-log--header-show ()
+  "Make the header say what the session says now: a value, never a form,
+so a redisplay runs no Lisp for it; made only when what it reads changed."
+  (let ((inputs (romacs-agent-log--header-snapshot romacs-agent-log--session)))
     (unless (equal-including-properties inputs romacs-agent-log--header-made)
       (setq romacs-agent-log--header-made inputs)
       (let ((header (string-replace "%" "%%" (apply #'romacs-agent-log--header inputs))))

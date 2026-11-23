@@ -110,15 +110,19 @@ date from it: the same record for its id each time."
 
 (defun romacs-agent-remote--drawn (session units from)
   "Draw SESSION afresh: UNITS, beginning at seq FROM (nil, its start)."
-  (romacs-agent-log--clear)
-  (romacs-agent-ui-reset-workers session)
-  (setq romacs-agent-log--from from romacs-agent-remote--earlier nil)
-  (when from
-    (romacs-agent-log--writing (save-excursion (goto-char (point-min)) (insert (romacs-agent-log--earlier-line from)))))
-  ;; What streams at its end goes on streaming: the live units that
-  ;; follow may carry on its message.
-  (let ((romacs-agent-log--closes-deferred t))
-    (dolist (unit units) (romacs-agent-remote--draw-unit session unit 'snapshot)))
+  (let ((unconfirmed (seq-filter (lambda (prompt) (get-text-property 0 'romacs-agent-remote-unconfirmed prompt))
+                                 romacs-agent-log--prompts)))
+    (romacs-agent-log--clear)
+    (romacs-agent-ui-reset-workers session)
+    (setq romacs-agent-log--from from romacs-agent-remote--earlier nil)
+    (when from
+      (romacs-agent-log--writing (save-excursion (goto-char (point-min)) (insert (romacs-agent-log--earlier-line from)))))
+    ;; What streams at its end goes on streaming: the live units that
+    ;; follow may carry on its message.
+    (let ((romacs-agent-log--closes-deferred t))
+      (dolist (unit units) (romacs-agent-remote--draw-unit session unit 'snapshot)))
+    ;; An unconfirmed send may have no journal entry to replay.
+    (setq romacs-agent-log--prompts (append unconfirmed romacs-agent-log--prompts)))
   (romacs-agent-log--sync-asks session)
   (romacs-agent-log--separator t)
   (romacs-agent-log--header-show))
@@ -250,8 +254,7 @@ On error, report it and call ON-ERROR with `unconfirmed' or `refused'."
     (with-current-buffer buffer
       (when (eq romacs-agent-log--session session)
         (if (eq outcome 'unconfirmed)
-            (unless (equal text (car romacs-agent-log--prompts))
-              (push text romacs-agent-log--prompts))
+            (push (propertize text 'romacs-agent-remote-unconfirmed t) romacs-agent-log--prompts)
           (save-excursion
             (goto-char romacs-agent-log--input)
             (insert text (if (string-empty-p (romacs-agent-log--draft)) "" "\n\n"))))))))

@@ -345,6 +345,7 @@ journals what its harness writes."
                                 "item/permissions/requestApproval"
                                 "item/tool/requestUserInput")
                  for id from 1
+                 do (setq events nil)
                  do (out "id" id "method" method "params" params)
                  do (let* ((live (cl-find 'approval events :key (lambda (event) (plist-get event :type))))
                            (handle (plist-get live :request-id))

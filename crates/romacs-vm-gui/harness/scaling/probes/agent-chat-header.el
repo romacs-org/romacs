@@ -8,4 +8,5 @@
           (romacs-agent--raise session (list :type 'done :context-window 200000))
           (dotimes (i 200)
             (romacs-agent--raise session (list :type 'usage :context-used (* 10000 (/ i 10))))
-            (with-current-buffer it (romacs-agent-log--header)))))
+            (with-current-buffer it
+              (apply #'romacs-agent-log--header (romacs-agent-log--header-snapshot session))))))
