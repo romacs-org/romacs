@@ -4,6 +4,8 @@ reconnecting romacs-mcp relay) in a private headless labwc, HOME, XDG and
 TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
 `claude' (no model is called).
 
+  limit_move  queued input and parent wakes across account usage limits.
+              Use a short private XDG_RUNTIME_DIR for the agent sockets.
   providers  two instances of one harness: each harness gets its own
              CLAUDE_CONFIG_DIR (the default instance none); a resume after a
              restart uses the recorded one; a missing directory is refused.
@@ -1066,7 +1068,7 @@ def tour(work, delegate_target):
         ('romacs_task_cancel', {'taskId': '<the same taskId>'}, lambda t: '"cancelled"' in t),
         # Refused, and says why: the tour's session received no message.
         ('romacs_task_reply', {'messageId': 'm-none', 'text': 'hello'},
-         lambda t: 'No message m-none among the ones this session received' in t),
+         lambda t: 'No message m-none' in t and 'no received message ids' in t),
     ]
 
 
@@ -1299,6 +1301,450 @@ def delegate(args, base):
                         # async child, the waited child's follow-up, the expired wait, the missed one
                         # (a replay repeats none), and the interrupted child's failed run and next turn.
                         and woken_ids(wakes, [asynced, waited, expired, missed], stopped))
+        return result
+    finally:
+        a.close()
+
+
+LIMIT_PROMPTS = (
+    ('say watched-entry-7f3a', '97e0122c59812c7464d8f84d9369f27b859cb5c519b0e496e6cb9630bbc0b784'),
+    ('say queued-behind-2c91', 'd7e69ade00ce7de678c1a3445eb04cb9eb1717a65f10adade2998ff6217f2d80'),
+)
+LIMIT_CASES = ('automatic', 'restart-before-move', 'restart-after-selection', 'manual-switch',
+               'same-account-reset', 'codex-spent', 'codex-refuse', 'restart-after-copy',
+               'restart-without-room', 'restart-during-selection', 'two-moves',
+               'move-parent-send', 'move-parent-cancel')
+LIMIT_PARENT_SEND = 'say parent-during-move'
+LIMIT_WAKE = re.compile(r'^Delegated task (\S+) \([^\n]*\) \[(failed|completed), \d+ chars(?:, re ([^\]]+))?\]:',
+                        re.M)
+
+
+def limit_accounts(a, case):
+    codex = case.startswith('codex-')
+    source, target = ('codex', 'codex2') if codex else ('claude', 'claude2')
+    names = ('claude', 'claude2', 'codex', 'codex2') if codex else ('claude', 'claude2')
+    if case == 'two-moves':
+        names += ('claude3',)
+        target = 'claude3'
+    accounts = {name: a.home / f'.config/{name}' for name in names}
+    for home in accounts.values():
+        home.mkdir()
+    if case == 'two-moves':
+        (accounts['claude2'] / 'spent').touch()
+    entries = [
+        f'(list "{name}" :config-dir {lisp(home)} :program {lisp(CODEX if name.startswith("codex") else HARNESS)})'
+        for name, home in accounts.items()
+    ]
+    pool = """'((claude "claude"))""" if case == 'same-account-reset' else 'nil'
+    settings = (f'(setq romacs-agent-providers (list {" ".join(entries)}) '
+                f'romacs-agent-pools {pool} romacs-agent-switch-delay 2 romacs-agent-resume-margin 0)')
+    with (a.home / '.config/romacs/init.el').open('a') as init:
+        init.write(f'\n{settings}\n')
+    a.eval(settings)
+    return source, accounts[source], accounts[source if case == 'same-account-reset' else target]
+
+
+def limit_call(a, parent, tool, **arguments):
+    a.send(parent, f'call {tool} ' + json.dumps(arguments))
+    reply = a.called(tool)
+    if reply['error']:
+        raise RuntimeError(f'{tool}: {reply["text"]}')
+    a.idle(parent)
+    return json.loads(reply['text'])
+
+
+def limit_setup(a, source, parent_provider):
+    parent = a.start('say ready', parent_provider)
+    a.idle(parent)
+    child = limit_call(a, parent, 'romacs_delegate_task', task='say child ready',
+                       target={'provider': source})['taskId']
+    native = parity_live.read_sexp(a.eval(f'(romacs-agent-harness-session {a.s(child)})'))
+    until(lambda: any(child in e.get('wake', '') for e in a.logged()), 25, 'initial child wake')
+    a.idle(parent)
+    return parent, child, native
+
+
+def limit_crash_at(a, child, case, hit):
+    """Kill only the private editor at the selected move boundary."""
+    if case in ('restart-before-move', 'restart-without-room'):
+        check = "(and (eq (plist-get event :type) 'done) (plist-get event :limit))"
+        install = "(add-hook 'romacs-agent-event-functions HANDLER t)"
+    elif case == 'restart-after-selection':
+        check = '(equal (plist-get (plist-get event :to) :provider) "claude2")'
+        install = "(advice-add 'romacs-agent--apply-selection-event :before HANDLER)"
+    elif case == 'restart-after-copy':
+        check = '(equal event "claude2")'
+        install = "(advice-add 'romacs-agent--move-conversation :after HANDLER)"
+    elif case == 'restart-during-selection':
+        check = ("(let ((switch (romacs-agent-pending-selection session))) "
+                 "(and (eq (plist-get switch :state) 'restarting) (equal (plist-get switch :provider) \"claude2\")))")
+        install = "(advice-add 'romacs-agent--stop-then :before HANDLER)"
+    else:
+        return
+    handler = (f'(lambda (session event) (when (and (equal (romacs-agent-id session) {lisp_text(child)}) {check}) '
+               f'(write-region "" nil {lisp(hit)} nil (quote silent)) (signal-process (emacs-pid) 9)))')
+    a.eval(install.replace('HANDLER', handler))
+
+
+def limit_input(record):
+    entry = record.get('in') or {}
+    if entry.get('type') == 'user':
+        content = entry['message']['content']
+        return content if isinstance(content, str) else ''.join(p.get('text', '') for p in content)
+    if entry.get('method') == 'turn/start':
+        return ''.join(p.get('text', '') for p in entry['params']['input'] if p.get('type') == 'text')
+    return ''
+
+
+def limit_done(record):
+    out = record.get('out') or {}
+    error = out.get('params', {}).get('turn', {}).get('error') or {}
+    return out.get('api_error') == 'usage_limit_reached' or error.get('codexErrorInfo') == 'usageLimitExceeded'
+
+
+def limit_boundary(record, case):
+    note = record.get('note') or {}
+    if case == 'same-account-reset':
+        return note.get('type') == 'resume' and note.get('state') == 'fired' and note.get('on') == 'claude'
+    return (note.get('type') == 'selection'
+            and ((note.get('from') or {}).get('provider'), (note.get('to') or {}).get('provider')) in
+            (('claude', 'claude2'), ('codex', 'codex2'), ('claude2', 'claude3')))
+
+
+def limit_snapshot(a, child, native, mark):
+    records = a.journal(child)
+    events = a.logged()[mark:]
+    return records, [e for e in events if e.get('session') == native], [
+        {'t': e['t'], 'text': e['received']} for e in events
+        if e.get('received', '').startswith('Delegated task ') and child in e['received']]
+
+
+def limit_has_input(text, prompt):
+    return text == prompt or f'\n{prompt}\n</romacs-message>' in text
+
+
+def limit_intervals(records, case):
+    """The first limit/selection, or both pairs for the two-hop move."""
+    starts = [i for i, r in enumerate(records) if limit_done(r)]
+    ends = [i for i, r in enumerate(records) if limit_boundary(r, case)]
+    count = 2 if case == 'two-moves' else 1
+    starts = (starts + [None] * count)[:count]
+    ends = (ends + [None] * count)[:count]
+    return list(zip(starts, ends))
+
+
+def limit_ordered(records, intervals, case):
+    if any(start is None or end is None for start, end in intervals):
+        return None
+    if case == 'two-moves':
+        (first_done, first_move), (last_done, last_move) = intervals
+        moves = [r['note'] for r in records if limit_boundary(r, case)]
+        path = [(note['from']['provider'], note['to']['provider']) for note in moves]
+        return (first_done < first_move < last_done < last_move
+                and path == [('claude', 'claude2'), ('claude2', 'claude3')])
+    start, end = intervals[0]
+    return start < end
+
+
+def limit_assertions(records, events, wakes, case, target, message, wait):
+    intervals = limit_intervals(records, case)
+    done, boundary = intervals[-1]
+    prompts = {
+        p: {'received': [e['config_dir'] for e in events if e.get('received') == p],
+            'seen': [e['config_dir'] for e in events if e.get('seen') == p]}
+        for p, _ in LIMIT_PROMPTS
+    }
+    early = [limit_input(r) for start, end in intervals if start is not None
+             for r in records[start + 1:end] if limit_input(r) in prompts]
+    ordered = limit_ordered(records, intervals, case)
+    waits = [e['received'] for e in events if limit_has_input(e.get('received', ''), wait)]
+    wait_seen = [e['config_dir'] for e in events if limit_has_input(e.get('seen', ''), wait)]
+    reset = case == 'same-account-reset'
+    expected_seen = [str(target.parent / 'claude2'), str(target)] if case == 'two-moves' else [str(target)]
+    copied = case == 'codex-spent' or wait_seen == expected_seen
+    continuations = [i for i, r in enumerate(records) if (r.get('in') or {}).get('romacsOwn') == 'limit-continue']
+    headers = [(w['t'], *m.groups()[1:]) for w in wakes for m in LIMIT_WAKE.finditer(w['text'])]
+    boundary_time = records[boundary]['t'] if boundary is not None else float('inf')
+    answers = [t for t, state, reply in headers if state == 'completed' and reply == message]
+    # A reset wait can accept notes at the limit. The first input after
+    # the reset itself must be the continuation.
+    after = [next((i for i in range(end + 1, len(records)) if limit_input(records[i])), None)
+             for _, end in intervals if end is not None]
+    return {
+        'A1': (len(waits) == 1 and copied and all(p['received'] == p['seen'] == [str(target)] for p in prompts.values())),
+        'A2': None if reset else (False if early else ordered),
+        'A3': None if reset else (len(answers) == 1 and answers[0] >= boundary_time
+                                  and all(state != 'failed' for _, state, _ in headers)),
+        'A4': (len(continuations) == len(intervals) and after == continuations
+               and (case != 'manual-switch' or any(i > continuations[0] and 'say manual-next' in limit_input(r)
+                                                   for i, r in enumerate(records)))),
+        'limit_done': done, 'boundary': boundary, 'early': early, 'accepted_wait': len(waits), 'wait_seen': wait_seen,
+        'prompts': prompts, 'wakes': wakes, 'continuations': continuations, 'intervals': intervals,
+    }
+
+
+def limit_refusal(a, parent, child, native, mark, marker, wait):
+    marker.touch()
+    message = limit_call(a, parent, 'romacs_task_send', taskId=child, message=wait)['messageId']
+    until(lambda: any(child in e.get('wake', '') for e in a.logged()[mark:]), 20, 'refusal wakes the parent')
+    a.idle(child)
+    a.idle(parent)
+    # Give any wrongly armed move the same timer window as a real limit.
+    a.eval("(run-at-time (1+ romacs-agent-switch-delay) nil "
+           "(lambda () (setq limit-move-refusal-observed t)))")
+    until(lambda: a.eval("(bound-and-true-p limit-move-refusal-observed)") == 't', 12, 'refusal move window elapsed')
+    records, events, wakes = limit_snapshot(a, child, native, mark)
+    (a.root / 'child-journal.json').write_text(json.dumps(records, indent=2))
+    delivery = [r['in'] for r in records if limit_has_input(limit_input(r), wait)]
+    refused = [e['attempted'] for e in events if 'attempted' in e]
+    named = any(match.groups() == (child, 'failed', message)
+                for wake in wakes for match in LIMIT_WAKE.finditer(wake['text']))
+    refusal = (len(delivery) == 1 and any(out.get('id') == delivery[0]['id'] and out.get('error')
+                                        for r in records if (out := r.get('out'))))
+    no_resend = (refusal and len(refused) == 1 and limit_has_input(refused[0], wait)
+                 and not any('received' in e for e in events)
+                 and not any(limit_done(r) or limit_boundary(r, 'codex-refuse') for r in records))
+    return {'ok': named and no_resend, 'A1': no_resend, 'A2': None, 'A3': named, 'A4': None,
+            'message': message, 'attempts': len(refused), 'wakes': wakes}
+
+
+def limit_restart(a, forget_room=False):
+    until(lambda: not Path(f'/proc/{a.pid}').exists(), 15, 'private editor exited')
+    rooms = list(a.home.rglob('room.eld')) if forget_room else []
+    if forget_room and not rooms:
+        raise RuntimeError('no room.eld removed at the restart boundary')
+    for room in rooms:
+        room.unlink()
+    a.restart()
+    return len(rooms)
+
+
+def limit_restart_at(a, case, hit):
+    if not case.startswith('restart-'):
+        return 0
+    try:
+        until(hit.exists, 8, case)
+    except RuntimeError:
+        return 0
+    return limit_restart(a, forget_room=case == 'restart-without-room')
+
+
+def limit_hold_handover(a, child, release):
+    """Pause the timer callback at entry until the parent has acted."""
+    a.eval(f"""
+(advice-add 'romacs-agent-tools--hand-over :around
+ (lambda (run session seq)
+   (if (and (equal (romacs-agent-id session) {lisp_text(child)})
+            (not (file-exists-p {lisp(release)})))
+       (run-at-time 0.05 nil #'romacs-agent-tools--hand-over session seq)
+     (funcall run session seq))))
+""")
+
+
+def limit_parent_action(a, case, parent, child, release):
+    until(lambda: a.eval(f'(plist-get (romacs-agent-limited {a.s(child)}) :moving)').isdigit(),
+          15, 'limit gate armed before parent action')
+    if case == 'move-parent-send':
+        reply = limit_call(a, parent, 'romacs_task_send', taskId=child, mode='queue', message=LIMIT_PARENT_SEND)
+        queued = a.eval(f'(cl-some (lambda (item) (equal (romacs-agent-item-text item) {lisp_text(LIMIT_PARENT_SEND)})) '
+                        f'(romacs-agent-queue {a.s(child)}))') == 't'
+        action = {'messageId': reply['messageId'], 'queued': queued}
+    else:
+        reply = limit_call(a, parent, 'romacs_task_cancel', taskId=child)
+        action = {'status': reply['status']}
+    release.touch()
+    return action
+
+
+def limit_parent_sent(records, events, wakes, result, action, target):
+    inputs = [i for i, r in enumerate(records) if limit_has_input(limit_input(r), LIMIT_PARENT_SEND)]
+    sent = [e['config_dir'] for e in events if limit_has_input(e.get('received', ''), LIMIT_PARENT_SEND)]
+    answered = [reply for w in wakes for _, state, reply in LIMIT_WAKE.findall(w['text'])
+                if state == 'completed' and reply == action['messageId']]
+    if len(inputs) != 1 or len(result['continuations']) != 1:
+        return False
+    continuation = result['continuations'][0]
+    prior_turn_ended = any((out := r.get('out')) and out.get('type') == 'result' and not out.get('is_error')
+                           for r in records[continuation + 1:inputs[0]])
+    return action['queued'] and sent == [str(target)] and len(answered) == 1 and prior_turn_ended
+
+
+def limit_cancelled(a, child, native, mark, action):
+    until(lambda: a.state(child) == 'ended', 15, 'cancelled harness ended')
+    a.eval("(run-at-time (1+ romacs-agent-switch-delay) nil (lambda () (setq limit-cancel-observed t)))")
+    until(lambda: a.eval("(bound-and-true-p limit-cancel-observed)") == 't', 12, 'cancelled move window elapsed')
+    records, events, wakes = limit_snapshot(a, child, native, mark)
+    (a.root / 'child-journal.json').write_text(json.dumps(records, indent=2))
+    prompts = dict(LIMIT_PROMPTS)
+    delivered = [e['received'] for e in events if e.get('received') in prompts]
+    written = [limit_input(r) for r in records if limit_input(r) in prompts]
+    no_move = not any(limit_boundary(r, 'move-parent-cancel') for r in records)
+    no_continuation = not any((r.get('in') or {}).get('romacsOwn') == 'limit-continue' for r in records)
+    cancelled = (action['status'] == 'cancelled' and no_move and no_continuation
+                 and not written and not delivered and not wakes)
+    return {'ok': cancelled, 'A1': None, 'A2': not written, 'A3': not wakes, 'A4': None,
+            'parent_cancel': cancelled, 'cancel_status': action['status'], 'delivered': delivered, 'wakes': wakes,
+            'written': written}
+
+
+def limit_wait_parent_reply(a, parent, action):
+    header = f', re {action["messageId"]}]'
+    try:
+        until(lambda: any(e.get('session') == parent and header in e.get('received', '') for e in a.logged()),
+              10, 'parent send answered')
+    except RuntimeError:
+        pass
+
+
+def limit_drive(a, case, parent, child, native, account, wait_file):
+    wait = f'wait {wait_file}'
+    message = limit_call(a, parent, 'romacs_task_send', taskId=child, message=wait)['messageId']
+    until(lambda: any(e.get('session') == native and wait in e.get('received', '') for e in a.logged()),
+          20, 'child accepted parent wait')
+    spent = account / 'spent'
+    spent.write_text(str(int(time.time()) + 12) if case == 'same-account-reset' else '')
+    prompts = ' '.join(f'(romacs-agent-send-later {a.s(child)} {lisp_text(p)})' for p, _ in LIMIT_PROMPTS)
+    a.eval(f'(progn {prompts} t)')
+    wait_file.touch()
+    if case == 'manual-switch':
+        until(lambda: any(map(limit_done, a.journal(child))), 15, 'manual switch after limit')
+        limit_call(a, parent, 'romacs_task_switch', taskId=child, provider='claude2', next='say manual-next')
+    return message
+
+
+def limit_wait(a, child, native, mark, case):
+    """A missing move is evidence in its own right. Keep the observed records."""
+    def finished():
+        records, events, wakes = limit_snapshot(a, child, native, mark)
+        expected = 2 if case == 'two-moves' else 1
+        return (sum(limit_boundary(r, case) for r in records) >= expected
+                and all(any(e.get('received') == p for e in events) for p, _ in LIMIT_PROMPTS)
+                and any('completed,' in w['text'] for w in wakes)
+                and a.state(child) == 'idle')
+    try:
+        until(finished, 18 if case == 'same-account-reset' else 10, 'move, queue and parent wake')
+        return True
+    except RuntimeError as error:
+        if not str(error).startswith('timed out'):
+            raise
+        return False
+
+
+def limit_case(a, case):
+    a.up()
+    source, account, target = limit_accounts(a, case)
+    parent, child, native = limit_setup(a, source, 'claude3' if case == 'two-moves' else 'claude2')
+    mark = len(a.logged())
+    wait_file, hit = a.root / 'release', a.root / 'restart-boundary'
+    if case == 'codex-refuse':
+        return limit_refusal(a, parent, child, native, mark, account / 'refuse', f'wait {wait_file}')
+    limit_crash_at(a, child, case, hit)
+    release = a.root / 'release-handover'
+    if case.startswith('move-parent-'):
+        limit_hold_handover(a, child, release)
+    message = limit_drive(a, case, parent, child, native, account, wait_file)
+    action = limit_parent_action(a, case, parent, child, release) if case.startswith('move-parent-') else None
+    if case == 'move-parent-cancel':
+        return limit_cancelled(a, child, native, mark, action)
+    rooms = limit_restart_at(a, case, hit)
+    completed = limit_wait(a, child, native, mark, case)
+    restarted = False
+    if case == 'automatic' and completed:
+        a.client('--stop=none')
+        limit_restart(a)
+        until(lambda: a.eval(f'(romacs-agent-caught-up {a.s(child)})') == 't', 20, 'moved child caught up after restart')
+        limit_wait(a, child, native, mark, case)
+        restarted = True
+    if case == 'move-parent-send':
+        # A completed wake for the original limit can arrive before the new reply.
+        limit_wait_parent_reply(a, parent, action)
+    records, events, wakes = limit_snapshot(a, child, native, mark)
+    (a.root / 'child-journal.json').write_text(json.dumps(records, indent=2))
+    result = limit_assertions(records, events, wakes, case, target, message, f'wait {wait_file}')
+    result.update(message=message, completed=completed, restarted_after_move=restarted, crash_hit=hit.exists())
+    if case == 'restart-without-room':
+        result['room_files_removed'] = rooms
+    if case == 'move-parent-send':
+        result['parent_send'] = limit_parent_sent(records, events, wakes, result, action, target)
+        result['parent_send_action'] = action
+    if case == 'manual-switch':
+        result['manual'] = (result['boundary'] is not None
+                            and not any((r.get('note') or {}).get('why') == 'usage limit' for r in records))
+    checks = ('A1', 'A4') if case == 'same-account-reset' else ('A1', 'A2', 'A3', 'A4')
+    result['ok'] = (completed and all(result[key] is True for key in checks)
+                    and (not case.startswith('restart-') or hit.exists())
+                    and result.get('parent_send', True)
+                    and result.get('manual', True)
+                    and (case != 'automatic' or restarted))
+    return result
+
+
+def limit_move(args, base):
+    """Input accepted at a usage limit, queued input, and the delegated reply."""
+    for prompt, digest in LIMIT_PROMPTS:
+        if hashlib.sha256(prompt.encode()).hexdigest() != digest:
+            raise ValueError(f'limit_move prompt pin changed: {prompt!r}')
+    cases = {}
+    for case in args.limit_case or LIMIT_CASES:
+        case_root = base / case
+        case_root.mkdir()
+        try:
+            # Its conversations kept by the fake harness, as a move copies them.
+            a = Agents(args, case_root, 'lm', {'FAKE_HARNESS_TRANSCRIPT': '1'})
+            try:
+                cases[case] = limit_case(a, case)
+            finally:
+                a.close()
+        except Exception as error:  # Keep running the other independent cases.
+            cases[case] = {'ok': False, 'error': repr(error)}
+        print(f'limit_move/{case}', json.dumps(cases[case]), flush=True)
+    return {'ok': all(r['ok'] for r in cases.values()), 'cases': cases}
+
+
+def one_answer(args, base):
+    """One channel per answer: a parent's message to a task whose reply
+    wakes it (wake end) ends saying the turn's reply answers it, offers no
+    romacs_task_reply, and its answer wakes the parent once; to a task
+    whose reply wakes no one (wake none) it offers romacs_task_reply, and
+    its turn wakes no one."""
+    a = Agents(args, base, 'oa')
+    try:
+        a.up()
+        a.codex_instance()
+        parent = a.start('say ready')
+        a.idle(parent)
+
+        def call(tool, arguments):
+            a.send(parent, f'call {tool} ' + json.dumps(arguments))
+            a.idle(parent, 60)
+            return json.loads(a.called(tool)['text'])
+
+        def told(task):
+            return [w for w in (e['wake'] for e in a.logged() if 'wake' in e)
+                    for _ in range(w.count(f'Delegated task {task} '))]
+
+        ending = call('romacs_delegate_task', {'task': 'say first', 'target': {'provider': 'codex'}, 'clientRequestId': 'oa-end'})
+        until(lambda: told(ending['taskId']), 30, 'first end woke the parent')
+        a.idle(parent)
+        quiet = call('romacs_delegate_task', {'task': 'say first', 'target': {'provider': 'codex'}, 'wake': 'none',
+                                              'clientRequestId': 'oa-none'})
+        a.idle(quiet['taskId'])
+        runs = len(a.codex_runs())
+        call('romacs_task_send', {'taskId': ending['taskId'], 'message': 'which approach?'})
+        until(lambda: len(told(ending['taskId'])) >= 2, 30, 'answer woke the parent')
+        end_line = [e['last'] for e in a.codex_runs()[runs:] if e['prompt'].startswith('<romacs-message')][-1]
+        a.idle(parent)
+        runs = len(a.codex_runs())
+        call('romacs_task_send', {'taskId': quiet['taskId'], 'message': 'which approach?'})
+        until(lambda: any(e['prompt'].startswith('<romacs-message') for e in a.codex_runs()[runs:]), 30, 'none task read it')
+        a.idle(quiet['taskId'])
+        none_line = [e['last'] for e in a.codex_runs()[runs:] if e['prompt'].startswith('<romacs-message')][-1]
+        time.sleep(2)
+        result = {'end_line': end_line, 'none_line': none_line,
+                  'end_wakes': len(told(ending['taskId'])), 'none_wakes': len(told(quiet['taskId']))}
+        result['ok'] = (end_line == "Your turn's reply answers this message from your parent."
+                        and none_line.startswith('Reply to this message with romacs_task_reply(messageId="m-')
+                        and result['end_wakes'] == 2 and result['none_wakes'] == 0)
         return result
     finally:
         a.close()
@@ -4049,7 +4495,7 @@ def chat_images(args, base):
         a.close()
 
 
-WORKFLOWS = {'chat_images': chat_images, 'chat_menu': chat_menu, 'history_view': history_view, 'host': host, 'sockets': sockets, 'reap': reap, 'deadline': deadline, 'providers': providers, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe,
+WORKFLOWS = {'limit_move': limit_move, 'one_answer': one_answer, 'chat_images': chat_images, 'chat_menu': chat_menu, 'history_view': history_view, 'host': host, 'sockets': sockets, 'reap': reap, 'deadline': deadline, 'providers': providers, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe,
              'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race, 'restart-rollback': restart_rollback, 'restart-hang': restart_hang, 'renew': renew,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
              'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode,
@@ -4065,6 +4511,8 @@ def main():
     parser.add_argument('--tools', default=parity_live.TOOLS)
     parser.add_argument('--emacsclient', default='emacsclient')
     parser.add_argument('--workflow', action='append', choices=sorted(WORKFLOWS))
+    parser.add_argument('--limit-case', action='append', choices=LIMIT_CASES,
+                        help='run only the selected limit_move cases')
     # The real-harness workflow's models: cheap by default; real reviews use Sol, high.
     parser.add_argument('--claude-model', default='haiku')
     parser.add_argument('--codex-model', default='gpt-6-luna')

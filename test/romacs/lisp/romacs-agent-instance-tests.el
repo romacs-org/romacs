@@ -33,7 +33,6 @@ conversation is in `one'; `told' collects what a task is told."
           (romacs-agent--room (make-hash-table :test #'equal))
           (romacs-agent--room-loaded t)
           (romacs-agent-tools--answered (make-hash-table :test #'equal))
-          (romacs-agent-tools--moving (make-hash-table :test #'equal))
           (romacs-agent-tools--pending (make-hash-table :test #'equal))
           (session (romacs-agent--make :id romacs-agent-instance-tests--id :harness 'claude :provider "claude"
                                        :config-dir one :cwd root :title "lane" :state 'ended :turns 2 :caught-up t
@@ -203,7 +202,8 @@ conversation is in `one'; `told' collects what a task is told."
 (ert-deftest romacs-agent-instance-on-limit-moves-a-lane ()
   (romacs-agent-instance-tests--with
     (let ((romacs-agent-switch-on-limit 'lossless) (sent nil) (waits nil))
-      (cl-letf (((symbol-function 'romacs-agent--enqueue) (lambda (_s item) (push (car item) sent)))
+      (cl-letf (((symbol-function 'romacs-agent--enqueue-first)
+                 (lambda (_s item &optional done) (push (car item) sent) (when done (funcall done '(ok t)))))
                 ((symbol-function 'run-at-time)
                  (lambda (delay _repeat function &rest args)
                    (when (eq function #'romacs-agent-tools--hand-over) (push (cons delay (cons function args)) waits)))))
@@ -217,9 +217,12 @@ conversation is in `one'; `told' collects what a task is told."
         (setf (romacs-agent-caught-up session) t)
         (romacs-agent--raise session (list :type 'rate-limit :status 'rejected :time 1.0))
         (romacs-agent--raise session (list :type 'done :error t :limit t :text "You've hit your weekly limit" :seq 9))
+        ;; While it waits nothing goes to its harness.
+        (should (eql (plist-get (romacs-agent-limited session) :moving) 9))
         ;; One wait for one limit: a second report of it starts none.
         (romacs-agent--raise session (list :type 'done :error t :limit t :text "again" :seq 9))
         (should (= (length waits) 1))
+        (should (eql (plist-get (romacs-agent-limited session) :moving) 9))
         ;; Nothing moves before the wait ends.
         (should (equal (romacs-agent-provider session) "claude"))
         (waited)
@@ -229,6 +232,8 @@ conversation is in `one'; `told' collects what a task is told."
                                 (mapconcat #'romacs-agent--json (romacs-agent--journal-records session) "
 ")))
         (should (string-match-p "stopped at claude's usage limit; you now run on claude2" (car sent)))
+        (should (= (length sent) 1))
+        (should-not (romacs-agent-limited session))
         (should-not (romacs-agent-tools--wanted-p session 9))
         ;; One that cannot move wakes its parent with its end, as without the option.
         (let ((parent (romacs-agent--make :id "lead" :harness 'claude :state 'running)))

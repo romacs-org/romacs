@@ -384,7 +384,7 @@ fn a_tree_decides_held_artifacts_itself() {
     std::fs::write(lib.join("b.el"), "(provide 'b)\n").unwrap();
     let configured = Configured {
         config: Config { compiler: vec![], environment: vec![], inherited: &[], defer_misses: false, store: store.clone(),
-                         identity: Box::new(|| Some("env".into())), runtime: vec![], root: None },
+                         identity: Box::new(|| Some("env".into())), runtime: vec![], root: None, compiling: None },
         chain: String::new(), trace: false, no_prune: false, record: None, scratch: store.join("tmp"),
         identity: std::sync::OnceLock::new(),
     };
@@ -444,7 +444,7 @@ fn a_compile_that_does_not_start_leaves_no_record() {
     std::fs::create_dir_all(&scratch).unwrap();
     let configured = Configured {
         config: Config { compiler: vec![], environment: vec![], inherited: &[], defer_misses: false, store: store.clone(),
-                         identity: Box::new(|| None), runtime: vec![], root: None },
+                         identity: Box::new(|| None), runtime: vec![], root: None, compiling: None },
         chain: String::new(), trace: false, no_prune: false, record: None, scratch: scratch.clone(),
         identity: std::sync::OnceLock::new(),
     };

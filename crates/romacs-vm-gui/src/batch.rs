@@ -75,7 +75,7 @@ pub fn run(args: Vec<String>, quick: bool, store: Option<PathBuf>) -> Result<(),
 /// the chain's end is the batch world's ([`boot`]).
 fn run_emacs(args: Vec<String>, quick: bool, store: Option<PathBuf>) -> Result<(), String> {
     let (quick, args) = command_line_options(args, quick);
-    configure_compiled_lisp(store.as_deref(), false);
+    configure_compiled_lisp(store.as_deref(), false, None);
     super::spawn_evaluator(move || -> Result<(), String> {
         // A flight recording or replay (ROMACS_FLIGHT) covers the boot too.
         romacs_vm::flight::start_from_environment()?;
@@ -171,10 +171,11 @@ fn compiled_store(worlds: Option<&Path>, interactive: bool) -> Option<(PathBuf, 
 /// and that world's identity keys every artifact. An interactive session
 /// never waits for a compile: a load with no artifact reads source and the
 /// session compiles the file in the background (lisp/session/romacs-precompile.el).
-pub fn configure_compiled_lisp(worlds: Option<&Path>, interactive: bool) {
+/// COMPILING is the file a compile process compiles.
+pub fn configure_compiled_lisp(worlds: Option<&Path>, interactive: bool, compiling: Option<&Path>) {
     if !romacs_vm::compiled_lisp::requested(interactive) || romacs_vm::world::store::disabled() { return; }
     let Some((store, compiles)) = compiled_store(worlds, interactive) else { return };
-    configure_store(store, compiles, interactive);
+    configure_store(store, compiles, interactive, compiling.map(Path::to_path_buf));
 }
 
 /// Load compiled Lisp in a worker isolate from STORE, the store its
@@ -184,7 +185,7 @@ pub fn configure_compiled_lisp(worlds: Option<&Path>, interactive: bool) {
 /// time.
 pub fn configure_worker_compiled_lisp(store: PathBuf) {
     if !romacs_vm::compiled_lisp::requested(true) || romacs_vm::world::store::disabled() { return; }
-    configure_store(store, false, true);
+    configure_store(store, false, true, None);
 }
 
 /// The installation's Lisp trees, every directory of it a session loads
@@ -203,8 +204,9 @@ fn installation_lisp(dir: &Path, runtime_root: &Path) -> Vec<PathBuf> {
 }
 
 /// Load compiled Lisp from STORE; COMPILES when this process may compile
-/// into it; DEFER_MISSES when no load may wait for a compile.
-fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool) {
+/// into it; DEFER_MISSES when no load may wait for a compile; COMPILING,
+/// the file a compile process compiles.
+fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool, compiling: Option<PathBuf>) {
     let Ok(dir) = super::startup::lisp_root(&super::startup::lisp_dir()) else { return };
     let Ok(exe) = std::env::current_exe() else { return };
     // The tree the Lisp lies in, by its true name (DIR is canonical): the
@@ -266,6 +268,7 @@ fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool) {
         }),
         runtime,
         root,
+        compiling,
     });
 }
 
@@ -276,7 +279,7 @@ fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool) {
 pub fn compile_lisp(file: PathBuf, store: Option<PathBuf>) -> Result<(), String> {
     let file = std::path::absolute(&file).map_err(|e| e.to_string())?;
     if let Some(home) = std::env::var_os("HOME") { std::env::set_current_dir(home).map_err(|e| e.to_string())?; }
-    configure_compiled_lisp(store.as_deref(), false);
+    configure_compiled_lisp(store.as_deref(), false, Some(&file));
     super::spawn_evaluator(move || -> Result<(), String> {
         let mut vm = boot(store, true)?;
         // A tree's compile (none given) keeps the chain's own.
@@ -307,7 +310,7 @@ pub fn compile_lisp(file: PathBuf, store: Option<PathBuf>) -> Result<(), String>
 /// faults are files that failed to compile (their artifacts say so, and
 /// they load as source) exits with status 2, for the installer to judge.
 pub fn compile_lisp_tree(jobs: usize) -> Result<(), String> {
-    configure_compiled_lisp(None, true);
+    configure_compiled_lisp(None, true, None);
     let summary = romacs_vm::compiled_lisp::compile_tree(jobs)?;
     println!("{summary}");
     let empty = |field: &str| summary[field].as_array().is_none_or(Vec::is_empty);

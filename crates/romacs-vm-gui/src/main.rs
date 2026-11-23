@@ -931,7 +931,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
         world::build_here(&world::open(store.clone())?)?;
     }
     if live && launch == startup::Launch::Loadup && !romacs_vm::world::store::building() {
-        batch::configure_compiled_lisp(named_store.as_deref(), true);
+        batch::configure_compiled_lisp(named_store.as_deref(), true, None);
     }
     // The session from here: its every end says why.
     exit::install();

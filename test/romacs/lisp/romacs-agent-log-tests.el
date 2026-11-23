@@ -1248,6 +1248,9 @@ them inherits."
 (ert-deftest romacs-agent-log-rounds-tell-the-user-from-elsewhere ()
   (should (equal (romacs-agent-incoming-of "<romacs-message id=\"m-1\" kind=\"parent\" from=\"lead\">\nGo on\n</romacs-message>\nReply to this message with romacs_task_reply(messageId=\"m-1\", text=...).")
                  '((:from "lead" :state "parent" :text "Go on"))))
+  ;; A parent's message since it is answered by the turn's reply alone.
+  (should (equal (romacs-agent-incoming-of "<romacs-message id=\"m-1\" kind=\"parent\" from=\"lead\">\nGo on\n</romacs-message>\nYour turn's reply answers this message from your parent.")
+                 '((:from "lead" :state "parent" :text "Go on"))))
   (should-not (romacs-agent-incoming-of "my own words"))
   (romacs-agent-log-tests--with
     ;; The user's message: its surface.

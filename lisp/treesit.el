@@ -5475,6 +5475,11 @@ The currently supported keywords:
 in the \"queries\" directory from the source directory to the
 installation directory.")
 
+(add-to-list
+ 'treesit-language-source-alist
+ '(kotlin "https://github.com/tree-sitter-grammars/tree-sitter-kotlin"
+          :revision "v1.1.0" :commit "77dd60ea0a9003ce062c9728a513ffe1aaff8c82"))
+
 (defun treesit--install-language-grammar-build-recipe (lang)
   "Interactively produce a download/build recipe for LANG and return it.
 See `treesit-language-source-alist' for details."

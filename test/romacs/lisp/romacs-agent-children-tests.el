@@ -153,6 +153,7 @@
           (progn
             (should (equal (romacs-agent-children-tests--summary parent) "1 failed"))
             (cl-letf (((symbol-function 'romacs-mcp--instance) #'ignore)
+                      ((symbol-function 'romacs-agent-tools--caller) (lambda () (romacs-agent-id parent)))
                       ((symbol-function 'romacs-agent-stop) #'ignore))
               (romacs-agent-tools--cancel (romacs-mcp--object "taskId" (romacs-agent-id session))))
             (should (gethash parent romacs-agent-ui--children-changed))

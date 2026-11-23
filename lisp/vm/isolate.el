@@ -1,4 +1,4 @@
-;;; isolate.el --- Isolated VMs that exchange frozen values  -*- lexical-binding: t -*-
+;;; isolate.el --- Isolated VMs that exchange frozen values and text  -*- lexical-binding: t -*-
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
@@ -10,9 +10,12 @@
 ;; a frozen result, over the leaf primitives of prims/isolate.rs.  A worker
 ;; adopts its spawner's world (or boots as its spawner did), sees none of
 ;; the spawner's later state, and is seeded once with
-;; `isolate-inherited-variables'.  Every value that crosses is frozen
-;; (`freeze'); closures cannot cross, a symbol or a lambda form with
+;; `isolate-inherited-variables'.  Ordinary messages and job data cross
+;; frozen (`freeze'); closures cannot cross, a symbol or a lambda form with
 ;; `:bindings' can (ledger/divergences VM2-ISOLATE-CLOSURES).
+;; `isolate-send-text' sends a string as up to 4096 UTF-8 bytes.  Text
+;; bypasses freezing and arrives as (text GENERATION STRING) through
+;; `isolate-receive' or `isolate-message-functions'.
 ;;
 ;; Not in GNU (ledger/divergences VM2-ISOLATE).  `isolate-await' re-signals a
 ;; worker's error where GNU's `thread-join' would store it in
@@ -144,8 +147,11 @@ future settling with the error.")
 A value that cannot be frozen is left out.")
 
 (defvar isolate-message-functions nil
-  "Abnormal hook run with (SENDER MESSAGE) for each message received.
-In the spawner SENDER is the worker's isolate; in a worker it is `parent'.")
+  "Abnormal hook run in the spawner with (SENDER MESSAGE).
+SENDER is the worker's isolate.  MESSAGE is the frozen value sent by
+`isolate-send', or (text GENERATION STRING) from `isolate-send-text'.
+For that list shape, `frozen-p' on MESSAGE distinguishes frozen data
+from a text frame.  Workers take parent messages with `isolate-receive'.")
 
 (defvar isolate-error-functions nil
   "Abnormal hook run with (ISOLATE EVENT DATA) when a worker dies or is refused.")
@@ -155,7 +161,8 @@ In the spawner SENDER is the worker's isolate; in a worker it is `parent'.")
 
 (defvar romacs--isolates nil "The live isolates this VM spawned.")
 (defvar romacs--isolate-generation 0 "The last job generation this VM issued.")
-(defvar romacs--isolate-inbox nil "In a worker: messages received and not yet taken, oldest first.")
+(defvar romacs--isolate-inbox nil
+  "In a worker: frozen values and text frames not yet taken, oldest first.")
 (defvar romacs--isolate-deferred nil "In a worker: jobs that arrived inside a job, oldest first.")
 (defvar romacs--isolate-serving nil "In a worker: whether its loop runs.")
 (defvar romacs--isolate-nested 0 "In a worker: how deep inside a job the frame loop runs.")
@@ -1111,6 +1118,19 @@ still names it, so later workers boot from source
       (romacs--isolate-resubmit future)
     (error (romacs--isolate-resolve future 'error (list (car err) (cdr err) nil (get (car err) 'error-conditions))))))
 
+(defun romacs--isolate-accept-hello (isolate text)
+  "Handle ISOLATE's hello TEXT and settle it if refused."
+  (aset isolate 9 t)
+  (let ((mismatch (romacs--isolate-hello-check text (aref isolate 8)))
+        (id (romacs--isolate-id isolate)))
+    (cond
+     (mismatch
+      (romacs--isolate-signal id 9)
+      (while (null (romacs--isolate-reap id)) (romacs--isolate-wait 0.01))
+      (romacs--isolate-dead isolate 'isolate-refused (list mismatch text)))
+     ((romacs--isolate-hello-refusal text)
+      (romacs--isolate-world-refused isolate (romacs--isolate-hello-refusal text))))))
+
 (defun romacs--isolate-dispatch ()
   "Deliver every frame that has arrived from every worker."
   (dolist (isolate (copy-sequence romacs--isolates))
@@ -1119,14 +1139,7 @@ still names it, so later workers boot from source
         (let ((kind (car frame)) (generation (nth 1 frame)) (value (nth 2 frame)))
           (cond
            ((eq kind 'hello)
-            (aset isolate 9 t)
-            (cond
-             ((not (romacs--isolate-hello-ok-p value (aref isolate 8)))
-              (romacs--isolate-signal id 9)
-              (while (null (romacs--isolate-reap id)) (romacs--isolate-wait 0.01))
-              (romacs--isolate-dead isolate 'isolate-refused (list "worker is not this executable" value)))
-             ((romacs--isolate-hello-refusal value)
-              (romacs--isolate-world-refused isolate (romacs--isolate-hello-refusal value)))))
+            (romacs--isolate-accept-hello isolate value))
            ((memq kind '(result error))
             ;; A forked child exits after its one job: its end is no news.
             (when (eq (aref isolate 10) 'job) (romacs--isolate-mark-ending isolate))
@@ -1148,6 +1161,8 @@ still names it, so later workers boot from source
                     (isolate-retire isolate))))))
            ((eq kind 'message)
             (run-hook-with-args 'isolate-message-functions isolate value))
+           ((eq kind 'text)
+            (run-hook-with-args 'isolate-message-functions isolate frame))
            ((eq kind 'memory)
             ;; A job child ending for growing past its budget, the one its
             ;; zygote record holds, its death next: its job's reply,
@@ -1262,8 +1277,17 @@ the job running after it is not hit in its place."
   (romacs--isolate-post (if (eq isolate 'parent) 0 (romacs--isolate-id isolate)) 'message 0 message)
   message)
 
+(defun isolate-send-text (isolate text)
+  "Send TEXT as an inline UTF-8 frame to ISOLATE (`parent' in a worker).
+Return TEXT after sending it.  Its bytes must be valid UTF-8 and fit in
+4096 bytes.  It arrives as (text 0 STRING), with a fresh string."
+  (romacs--isolate-post (if (eq isolate 'parent) 0 (romacs--isolate-id isolate)) 'text 0 text)
+  text)
+
 (defun isolate-receive (&optional timeout)
   "In a worker: the next message from the parent, waiting up to TIMEOUT.
+Return the frozen value from `isolate-send', or (text GENERATION STRING)
+for a text frame.  Return nil if no message arrives.
 A TIMEOUT of 0 polls: it takes what has arrived without waiting, so a
 running job can look for new requests between its own steps."
   (let ((end (and timeout (+ (float-time) timeout))))

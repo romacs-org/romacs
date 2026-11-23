@@ -348,8 +348,29 @@ is romacs_task_status's."
     (when result (puthash "result" result ack))
     ack))
 
-(defun romacs-agent-tools--known (arguments)
-  (or (romacs-agent-get (gethash "taskId" arguments)) (user-error "No task %s" (gethash "taskId" arguments))))
+(defun romacs-agent-tools--listed-p (task caller all)
+  "Whether TASK is listed for CALLER, including other delegated tasks with ALL."
+  (let ((parent (plist-get (romacs-agent-options task) :parent)))
+    (or (equal parent caller) (and all parent))))
+
+(defun romacs-agent-tools--visible-prefix (prefix caller)
+  "Return stored ids with PREFIX that CALLER can see in the full task list."
+  (when (>= (length prefix) 8)
+    (cl-remove-if-not
+     (lambda (id)
+       (when-let* ((task (romacs-agent-get id t)))
+         (romacs-agent-tools--listed-p task caller t)))
+     (romacs-agent-store-prefixed-ids prefix))))
+
+(defun romacs-agent-tools--known (id)
+  "Return the task with exact ID or a unique visible prefix matching ID."
+  (or (romacs-agent-get id)
+      (let ((matches (romacs-agent-tools--visible-prefix id (romacs-agent-tools--caller))))
+        (when (cdr matches)
+          (user-error "Ambiguous task id %s. Use one of these full ids: %s"
+                      id (string-join matches ", ")))
+        (or (and matches (romacs-agent-get (car matches)))
+            (user-error "No task %s. Call romacs_task_list for task ids." id)))))
 
 (defun romacs-agent-tools--woken-file (session)
   (expand-file-name "woken" (romacs-agent-dir session)))
@@ -508,11 +529,19 @@ by counting characters from the start."
          (t (setq ok nil))))
       (and ok (nreverse wakes)))))
 
+(defconst romacs-agent--parent-reply-line
+  "Your turn's reply answers this message from your parent."
+  "The line after a message from the receiver's parent when the
+receiver's turn's reply reaches it (`romacs-agent--turn-answers-p'): the
+one channel that answers it, so no call is offered to answer it twice.
+Beside the regexp that reads it back, which needs it as it loads.")
+
 (defconst romacs-agent--reply-line-regexp
   (concat "\n\\(?:"
           "Reply to this message with SendMessage(to=\"[^\"\n]*\", message=\\.\\.\\.)\\."
           "\\|Reply to this \\(?:message\\|result\\) with romacs_task_reply(messageId=\"[^\"\n]*\", text=\\.\\.\\.)\\."
           "\\|Its sender is outside Romacs and has no reply route: it reads only your turn's reply\\."
+          "\\|" (regexp-quote romacs-agent--parent-reply-line)
           "\\)[ \t]*\\(?:\n[ \t\n]*\\|\\'\\)")
   "The line `romacs-agent--message-reply-line' writes after an envelope,
 each of its forms whole, and the space after it.")
@@ -578,18 +607,23 @@ read once from its `answered' file.")
             (puthash (string-to-number line) t table)))
         (puthash (romacs-agent-id session) table romacs-agent-tools--answered))))
 
-(defun romacs-agent-tools--mark-answered (session seq)
-  "SESSION's turn end SEQ is answered: its parent has it, and earlier
-ends still on their way stay so."
-  (puthash seq t (romacs-agent-tools--answered-table session))
+(defun romacs-agent-tools--write-answered (session seq)
+  "Keep that SESSION's turn end SEQ is answered, in its `answered' file."
   (write-region (format "%d\n" seq) nil (expand-file-name "answered" (romacs-agent-dir session)) t 'silent))
 
-(defun romacs-agent-tools--answer (session seq)
+(defun romacs-agent-tools--mark-answered (session seq &optional unwritten)
+  "SESSION's turn end SEQ is answered: its parent has it, and earlier
+ends still on their way stay so.  UNWRITTEN: not kept yet, its caller
+writes it (`romacs-agent-tools--write-answered')."
+  (puthash seq t (romacs-agent-tools--answered-table session))
+  (unless unwritten (romacs-agent-tools--write-answered session seq)))
+
+(defun romacs-agent-tools--answer (session seq &optional unwritten)
   "A `wait' answered with SESSION's turn end SEQ: marked so
-\(`romacs-agent-tools--mark-answered'), it goes from SESSION's ends now, no
-delivery may follow.  The ends are walked only down to it: a wait answers
-its newest end."
-  (romacs-agent-tools--mark-answered session seq)
+\(`romacs-agent-tools--mark-answered', UNWRITTEN as it says), it goes from
+SESSION's ends now, no delivery may follow.  The ends are walked only
+down to it: a wait answers its newest end."
+  (romacs-agent-tools--mark-answered session seq unwritten)
   ;; Newest first: past an older seq it is not there (gone already).
   (let ((ends (romacs-agent-ends session)))
     (if (eql (car (car ends)) seq)
@@ -642,15 +676,22 @@ its result is empty (a resumed harness's own turn) or quiet
       (_ (or (nth 2 end)
              (not (or (string-empty-p result) (string-prefix-p romacs-agent-tools--quiet result))))))))
 
-(defvar romacs-agent-tools--moving (make-hash-table :test #'equal)
-  "A task moved on its own at its usage limit, its id to (SEQ . FROM):
-that end's wake waits for the move's outcome.")
+(defun romacs-agent-tools--wake-held-p (limited replaying)
+  "Whether a child's ends wait to go to its parent, the one rule: at its
+usage limit (LIMITED, `romacs-agent-limited'), it waits to move on
+\=(`:moving', for a bounded time: `romacs-agent-tools--hand-over'), or its
+records are still REPLAYING, so whether it moves is not yet known (till
+it catches up or its attachment goes: `romacs-agent-tools--on-event')."
+  (and limited (or (plist-get limited :moving) replaying) t))
 
 (defun romacs-agent-tools--wake (child)
   "Hand CHILD's new turn ends to its parent's next wake, as CHILD's wake
 rule says; an end no rule lets wake it is done with.  Each end is handed
-on once; none while CHILD moves on its own at its usage limit."
-  (unless (gethash (romacs-agent-id child) romacs-agent-tools--moving)
+on once; none while CHILD may move on at its usage limit
+\=(`romacs-agent-tools--wake-held-p')."
+  (unless (romacs-agent-tools--wake-held-p
+           (romacs-agent-limited child)
+           (and (process-live-p (romacs-agent-connection child)) (not (romacs-agent-caught-up child))))
     (romacs-agent-tools--hand-on child)))
 
 (defvar romacs-agent-tools--handed (make-hash-table :test #'eq :weakness 'key)
@@ -806,7 +847,11 @@ its parent again."
   (when (and (plist-get (romacs-agent-options session) :parent)
              (or (memq (plist-get event :type) '(done unstarted))
                  (and (eq (plist-get event :type) 'exit) (romacs-agent-failed session)
-                      (= (romacs-agent-done-seq session) (or (plist-get event :seq) -1)))))
+                      (= (romacs-agent-done-seq session) (or (plist-get event :seq) -1)))
+                 ;; At its limit, its attachment gone or back: ends held
+                 ;; while it replayed (`romacs-agent-tools--wake-held-p') go now.
+                 (and (eq (plist-get event :type) 'status) (romacs-agent-limited session)
+                      (romacs-agent-tools--unhanded session))))
     ;; A moment later: a `wait' answering with this end (its poll runs
     ;; every 0.05 s) marks it answered first; an abandoned one does not.
     ;; One timer per child: the ends that come meanwhile go with it.
@@ -817,6 +862,16 @@ its parent again."
                              (romacs-agent-tools--wake session))))))
 
 (add-hook 'romacs-agent-event-functions #'romacs-agent-tools--on-event)
+
+(defun romacs-agent-tools--say-unsure (session event)
+  "Tell SESSION's parent, when it has one, EVENT's error saying messages
+kept for SESSION may not have reached it (`romacs-agent-store--sent-of'):
+a turn of its own, nothing sent again."
+  (when-let* (((eq (plist-get event :type) 'error)) ((plist-get event :unsure))
+              (parent (romacs-agent-load-session (plist-get (romacs-agent-options session) :parent))))
+    (romacs-agent-tools--deliver parent (plist-get event :text) #'ignore nil nil 'next)))
+
+(add-hook 'romacs-agent-event-functions #'romacs-agent-tools--say-unsure)
 
 (defun romacs-agent-tools--wake-missed ()
   "After a restart: wake the parents of children that ended meanwhile."
@@ -1017,16 +1072,47 @@ with resume it goes on with that conversation of the instance's
                                          (lambda (child) (funcall answer child briefed))))
           (t (funcall answer (funcall start cwd) briefed)))))
 
+(defun romacs-agent-tools--receivable-p (session)
+  "Whether SESSION can accept a queued message on its current setup."
+  (ignore-error user-error
+    (romacs-agent-tools--check-message-target session)
+    (romacs-agent--check-continuation session)
+    t))
+
+(defun romacs-agent-tools--reply-route (sender target)
+  "Give SENDER a reply route to TARGET when a received message permits it."
+  (when-let* ((message (and sender target
+                            (cl-find (romacs-agent-id target) (romacs-agent-received sender) :test #'equal
+                                     :key (lambda (item) (plist-get (plist-get item :from) :session)))))
+              ((romacs-agent-tools--receivable-p target)))
+    (format "Use romacs_task_reply with messageId %s." (plist-get message :id))))
+
+(defun romacs-agent-tools--owner-route (parent caller)
+  "Tell CALLER how to ask the task owner PARENT, or the user."
+  (let ((owner (romacs-agent-get parent))
+        (sender (and caller (romacs-agent-get caller))))
+    (or (and owner (eq (romacs-agent-tools--send-route owner caller sender) 'send)
+             (romacs-agent-tools--receivable-p owner)
+             "Please ask that session with romacs_task_send.")
+        (romacs-agent-tools--reply-route sender owner)
+        "Please ask the user to arrange it.")))
+
 (defun romacs-agent-tools--own (session caller what)
   "SESSION, when CALLER delegated it (a caller that is no agent session
-owns the sessions none delegated); else a `user-error' saying only its
-parent may do WHAT."
+owns the sessions none delegated); else a `user-error' saying who may do WHAT."
   (let ((parent (plist-get (romacs-agent-options session) :parent)))
     (unless (equal parent caller)
-      (user-error "%s (%s) is %s: only the session that delegated it may %s"
-                  (romacs-agent-id session) (romacs-agent-title session)
-                  (if parent (format "task of session %s" parent) "no delegated task") what))
+      (if parent
+          (user-error "Task %s belongs to session %s, and among agents only the session that delegated it may %s. %s"
+                      (romacs-agent-id session) parent what (romacs-agent-tools--owner-route parent caller))
+        (user-error "Session %s is a root session. Ask the user to %s."
+                    (romacs-agent-id session) what)))
     session))
+
+(defun romacs-agent-tools--check-message-target (session)
+  "Refuse to send to a cancelled SESSION."
+  (when (romacs-agent-cancelled session)
+    (user-error "Task %s (%s) was cancelled" (romacs-agent-id session) (romacs-agent-title session))))
 
 (defun romacs-agent-tools--tell (child text &optional mode valid messages)
   "Send TEXT to CHILD as its next message by the session's own send:
@@ -1038,8 +1124,7 @@ is asked before a waiting message goes: nil drops it.  MESSAGES, when
 given, say it comes from other sessions (`romacs-agent--input').  Its
 next turn end wakes its parent by its wake rule, as its first did.  An
 empty TEXT sends nothing."
-  (when (romacs-agent-cancelled child)
-    (user-error "Task %s (%s) was cancelled" (romacs-agent-id child) (romacs-agent-title child)))
+  (romacs-agent-tools--check-message-target child)
   (unless (string-empty-p (string-trim text))
     (let ((busy (memq (romacs-agent-state child) '(running waiting-approval))))
       (cond ((and busy (eq mode 'steer) (not (romacs-agent--per-turn-p child)))
@@ -1068,12 +1153,17 @@ cutting the turn short.  `steer' is taken as a mode too, as it was one.")
 task: a `replace' starts a new one, and the waiting messages of an older
 one are dropped as they come up.")
 
-(defun romacs-agent-tools--sibling-p (session caller)
-  "Whether CALLER is another task of SESSION's parent."
-  (let ((parent (plist-get (romacs-agent-options session) :parent)))
-    (and parent caller (not (equal caller (romacs-agent-id session)))
-         (when-let* ((sender (romacs-agent-get caller)))
-           (equal (plist-get (romacs-agent-options sender) :parent) parent)))))
+(defun romacs-agent-tools--send-route (session caller sender)
+  "Whether CALLER may send to SESSION, needs a reply, or needs its owner.
+SENDER is the calling session, if known."
+  (let ((parent (plist-get (romacs-agent-options session) :parent))
+        (sender-parent (and sender (plist-get (romacs-agent-options sender) :parent)))
+        (id (romacs-agent-id session)))
+    (cond ((and caller (or (null parent) (equal id sender-parent))) 'reply)
+          ((or (equal parent caller)
+               (and parent sender (not (equal caller id)) (equal parent sender-parent)))
+           'send)
+          (t 'owner))))
 
 (defvar romacs-agent-tools--copies (make-hash-table :test #'equal)
   "A parent's id to the copies of its tasks' messages to each other, oldest
@@ -1154,11 +1244,22 @@ and the message's id."
 another task of the caller's parent, its parent then copied."
   (romacs-mcp--instance arguments)
   (let* ((caller (romacs-agent-tools--caller))
-         (task (romacs-agent-tools--known arguments))
-         (sibling (romacs-agent-tools--sibling-p task caller)))
-    (unless sibling (romacs-agent-tools--own task caller "send it messages (or another of its parent's tasks)"))
-    (romacs-agent-tools--message-to (and caller (romacs-agent-get caller)) task (gethash "message" arguments)
+         (task (romacs-agent-tools--known (gethash "taskId" arguments)))
+         (sender (and caller (romacs-agent-get caller))))
+    (pcase (romacs-agent-tools--send-route task caller sender)
+      ('reply (user-error "You cannot send messages to session %s. %s"
+                          (romacs-agent-id task)
+                          (or (romacs-agent-tools--reply-route sender task) "Please ask the user.")))
+      ('owner (romacs-agent-tools--own task caller "send it messages")))
+    (romacs-agent-tools--message-to sender task (gethash "message" arguments)
                                     (romacs-agent-tools--send-mode arguments) (gethash "inReplyTo" arguments))))
+
+(defun romacs-agent-tools--reply-ids (prefix received)
+  "Return up to eight ids from RECEIVED, putting PREFIX matches first.
+Order matches and the remaining ids by most recent first."
+  (let ((groups (seq-group-by (lambda (id) (string-prefix-p prefix id))
+                              (mapcar (lambda (message) (plist-get message :id)) received))))
+    (seq-take (append (alist-get t groups) (alist-get nil groups)) 8)))
 
 (defun romacs-agent-answer (session id text &optional mode by-user)
   "Answer the message ID SESSION received with TEXT, routed to its sender
@@ -1169,7 +1270,10 @@ answered.  Return the sender's task record with the answer's messageId;
 a `user-error' for a message SESSION did not receive, one from outside
 Romacs (its own channel's reply line says how), or a sender gone."
   (let* ((message (or (romacs-agent-received-message session id)
-                      (user-error "No message %s among the ones this session received" id)))
+                      (if-let* ((received (romacs-agent-received session)))
+                          (user-error "No received message %s. Use a full messageId: %s" id
+                                      (string-join (romacs-agent-tools--reply-ids id received) ", "))
+                        (user-error "No message %s. This session has no received message ids." id))))
          (sender-id (plist-get (plist-get message :from) :session))
          (sender (cond ((null sender-id)
                         ;; Its own channel's, when it came by one: the call to copy.
@@ -1263,8 +1367,7 @@ sessions' own on disk: a restarted server lists them all."
   (let* ((caller (romacs-agent-tools--caller))
          (all (eq (gethash "all" arguments) t))
          (tasks (cl-remove-if-not
-                 (lambda (session) (let ((parent (plist-get (romacs-agent-options session) :parent)))
-                                     (or (equal parent caller) (and all parent))))
+                 (lambda (session) (romacs-agent-tools--listed-p session caller all))
                  ;; Those left unloaded too, as their rows have them.
                  (append (romacs-agent-sessions) (romacs-agent-store-unloaded)))))
     (romacs-mcp--object
@@ -1331,42 +1434,127 @@ spent, and when the first resets."
                                "why" (format "every %s account is at its limit" (romacs-agent-harness session))
                                "resets" (or (romacs-agent--earliest-reset (romacs-agent-harness session)) :null))))
 
-(defun romacs-agent-tools--switch-on-limit (session event)
-  "SESSION's turn ended at its account's usage limit (EVENT): it moves on
-after `romacs-agent-switch-delay', as `romacs-agent-switch-on-limit' says,
-that end held from its parent meanwhile.  With every account spent it
-says so, and its parent is woken with the end."
-  (when-let* (((plist-get event :limit))
-              ((not (romacs-agent-settled-p session)))
-              ;; A live end: one replayed was handled when it came.
-              ((romacs-agent-caught-up session))
-              ((eq romacs-agent-switch-on-limit 'lossless))
-              ;; One move for one limit.
-              ((not (gethash (romacs-agent-id session) romacs-agent-tools--moving))))
-    (if (not (cl-find-if (lambda (a) (plist-get a :lossless)) (romacs-agent-alternatives session)))
-        ;; Said, in its journal; its end goes to its parent as it would.
-        (progn (romacs-agent-tools--spent session)
-               (romacs-agent-tools--schedule-resume session))
-      (let ((token (cons (romacs-agent-done-seq session) (romacs-agent-provider session))))
-        (puthash (romacs-agent-id session) token romacs-agent-tools--moving)
-        (run-at-time romacs-agent-switch-delay nil #'romacs-agent-tools--hand-over session token)))))
+(defun romacs-agent-tools--lossless-p (session)
+  "Whether SESSION has an account of its own harness with room to move to."
+  (and (cl-find-if (lambda (a) (plist-get a :lossless)) (romacs-agent-alternatives session)) t))
 
-(defun romacs-agent-tools--hand-over (session token)
-  "Move SESSION on, its wait TOKEN still its own (no message since, nothing
-moved it); with no account left, say so; its end then goes to its parent
-as it would have."
-  (when (eq (gethash (romacs-agent-id session) romacs-agent-tools--moving) token)
-    (cond ((not (and (eq (romacs-agent-loaded (romacs-agent-id session)) session) (not (romacs-agent-cancelled session))
-                     (not (romacs-agent-settled-p session))
-                     (eql (romacs-agent-done-seq session) (car token)) (romacs-agent-limited session)
-                     (not (romacs-agent-pending-selection session))))
+(defun romacs-agent-tools--moving-p (session)
+  "The turn end SESSION waits at its usage limit from to move on, or nil
+\=(`romacs-agent-tools--arm-move')."
+  (plist-get (romacs-agent-limited session) :moving))
+
+(defun romacs-agent-tools--arm-move (session)
+  "SESSION, at its usage limit, moves on after `romacs-agent-switch-delay':
+its `limited' says `:moving' with the turn end it waits from, and while
+it does its messages wait (`romacs-agent--open-p') and so do its ends
+\=(`romacs-agent-tools--wake')."
+  (let ((seq (romacs-agent-done-seq session)))
+    (setf (romacs-agent-limited session)
+          (append (list :moving seq :moving-since (float-time))
+                  (romacs-agent--without (romacs-agent-limited session) '(:moving :moving-since))))
+    (run-at-time romacs-agent-switch-delay nil #'romacs-agent-tools--hand-over session seq)))
+
+(defun romacs-agent-tools--at-limit (session)
+  "SESSION waits at its usage limit, as `romacs-agent-switch-on-limit'
+says: moving on, once (`romacs-agent-tools--arm-move'); with every account
+spent, said and resumed at the first reset, unless that is waited for
+already: its ends go to its parent."
+  (cond ((romacs-agent-tools--moving-p session))
+        ((romacs-agent-tools--lossless-p session) (romacs-agent-tools--arm-move session))
+        ((not (romacs-agent-resume-time session))
+         (romacs-agent-tools--spent session)
+         (romacs-agent-tools--schedule-resume session))))
+
+(defun romacs-agent-tools--switch-on-limit (session event)
+  "SESSION's turn ended at its account's usage limit (EVENT): it waits
+there (`romacs-agent-tools--at-limit')."
+  (when (and (plist-get event :limit) (not (romacs-agent-settled-p session))
+             ;; A live end: one replayed is seen to as its replay ends.
+             (romacs-agent-caught-up session)
+             (eq romacs-agent-switch-on-limit 'lossless))
+    (romacs-agent-tools--at-limit session)))
+
+(defun romacs-agent-tools--hand-over (session seq)
+  "Move SESSION on, still waiting at its limit from turn end SEQ; with a
+selection pending, once that is in effect, waiting at most
+`romacs-agent-start-deadline' since the wait began; with no account left,
+say so: its end then goes to its parent as it would have."
+  ;; A session no longer the one loaded (a load replaced it) is not this
+  ;; one's to move or wake: the one loaded waits for its own.
+  (when (and (eql (romacs-agent-tools--moving-p session) seq)
+             (eq (romacs-agent-loaded (romacs-agent-id session)) session))
+    (cond ((or (romacs-agent-cancelled session) (romacs-agent-settled-p session))
            (romacs-agent-tools--not-moved session nil))
-          ((not (cl-find-if (lambda (a) (plist-get a :lossless)) (romacs-agent-alternatives session)))
+          ;; One asked meanwhile (romacs_task_switch, or a move a restart
+          ;; cut): it decides first, unless it never comes to it.
+          ((romacs-agent-pending-selection session)
+           (if (< (- (float-time) (or (plist-get (romacs-agent-limited session) :moving-since) 0))
+                  romacs-agent-start-deadline)
+               (run-at-time romacs-agent-switch-delay nil #'romacs-agent-tools--hand-over session seq)
+             (romacs-agent-tools--withdraw-move session)
+             (romacs-agent-tools--not-moved session "Its move to another account did not take effect")))
+          ((not (romacs-agent-tools--lossless-p session))
            (romacs-agent-tools--spent session)
            (romacs-agent-tools--schedule-resume session)
            (romacs-agent-tools--not-moved session nil))
           (t (condition-case err (romacs-agent-move-on session "usage limit")
                (error (romacs-agent-tools--not-moved session (error-message-string err))))))))
+
+(defun romacs-agent-tools--withdraw-move (session)
+  "Take back the selection SESSION waits on: selected as it runs now, as
+a user would (`romacs-agent-select'), a stop under way for it ends on the
+account it has, so no late commit moves it after its parent was told."
+  (let ((now (romacs-agent--selection session)))
+    (condition-case err
+        (romacs-agent-select session (plist-get now :model) (plist-get now :effort) (plist-get now :provider))
+      (error (romacs-agent--raise session (list :type 'error :text (error-message-string err)))))))
+
+(defun romacs-agent-tools--moves-again-p (limited idle asked room)
+  "Whether a session its replay leaves at its usage limit waits there
+again, a restart having cut that: LIMITED (`romacs-agent-limited'), IDLE,
+nothing ASKED of it since, and no ROOM known back on that limit's account
+\=(none known is none).  A selection pending is waited out
+\=(`romacs-agent-tools--hand-over')."
+  (and limited idle (not asked) (not room)))
+
+(defun romacs-agent-tools--room-back-p (provider since)
+  "Whether instance PROVIDER is known to have room again since SINCE, its
+limit's time: its limit reset, or a report of room newer than that.  A
+limit of unknown time (kept by an older Romacs) knows only its reset."
+  (when-let* ((room (romacs-agent-room-of provider)) ((romacs-agent-room provider)))
+    (let ((resets (plist-get room :resets)) (time (plist-get room :time)))
+      (or (and (numberp resets) (> (float-time) resets))
+          (and (numberp since) (numberp time) (> time since))))))
+
+(defun romacs-agent-tools--limit-caught-up (session)
+  "SESSION's replay is over: still at its usage limit as a restart left it,
+it waits there (`romacs-agent-tools--at-limit'); else the ends it held
+from its parent while it replayed go on (`romacs-agent-tools--wake')."
+  (when (and (romacs-agent--live-p session)
+             (eq romacs-agent-switch-on-limit 'lossless) (not (romacs-agent-settled-p session))
+             (romacs-agent-tools--moves-again-p
+              (romacs-agent-limited session) (eq (romacs-agent-state session) 'idle)
+              (> (or (romacs-agent-input-seq session) 0) (romacs-agent-done-seq session))
+              (romacs-agent-tools--room-back-p (plist-get (romacs-agent-limited session) :provider)
+                                               (plist-get (romacs-agent-limited session) :time))))
+    (romacs-agent-tools--at-limit session))
+  (when (and (plist-get (romacs-agent-options session) :parent) (romacs-agent-tools--unhanded session))
+    (romacs-agent-tools--wake session)))
+
+(add-hook 'romacs-agent-caught-up-functions #'romacs-agent-tools--limit-caught-up)
+
+(defun romacs-agent-tools--limit-loaded (session _manifest)
+  "SESSION, loaded at its usage limit with a move to another account still
+pending (a restart cut it), waits for it as a live move does: its ends
+held, for a bounded time (`romacs-agent-tools--arm-move')."
+  (let ((switch (romacs-agent-pending-selection session)))
+    (when (and (romacs-agent-limited session) (not (romacs-agent-tools--moving-p session))
+               (eq romacs-agent-switch-on-limit 'lossless)
+               (plist-get switch :provider) (not (equal (plist-get switch :provider) (romacs-agent-provider session)))
+               (not (romacs-agent-settled-p session)) (not (romacs-agent-cancelled session)))
+      (romacs-agent-tools--arm-move session))))
+
+(add-hook 'romacs-agent-loaded-functions #'romacs-agent-tools--limit-loaded)
 
 ;;; Resuming at a limit's reset
 
@@ -1379,10 +1567,6 @@ left with room, goes on by itself once the first of their limits resets
 (defcustom romacs-agent-resume-margin 60
   "Seconds after a limit's reported reset a session resumes at."
   :type 'number :group 'romacs-agent)
-
-(defconst romacs-agent-tools--resumed
-  "Your usage limit has reset; go on from where you were."
-  "What a session resumed at its limit's reset is told.")
 
 (defvar romacs-agent-tools--resumes (make-hash-table :test #'eq :weakness 'key)
   "Each session waiting to resume to (TIME . TIMER).")
@@ -1438,7 +1622,8 @@ or `romacs-agent-resume-at-reset' is off."
 
 (defun romacs-agent-tools--resume (session time)
   "SESSION's resume at TIME is due: still stopped at its limit, it goes on
-under the first account of its pool with room, told to; else nothing.
+under the first account of its pool with room, first of what waits
+\=(`romacs-agent--limit-continuation'); else nothing.
 An account still spent (its report not yet renewed) waits for the next
 reset, once."
   (cond
@@ -1461,8 +1646,11 @@ reset, once."
             (romacs-agent-tools--schedule-resume session)
           (romacs-agent--note session (romacs-mcp--object "type" "resume" "state" "fired" "on" (plist-get target :name)))
           (if (equal (plist-get target :name) (romacs-agent-provider session))
-              (romacs-agent-tools--tell session romacs-agent-tools--resumed nil
-                                       (lambda () (not (romacs-agent-settled-p session))))
+              ;; An ended harness, resumed to take it.
+              (romacs-agent--admit (romacs-agent--continue session)
+                                   (romacs-agent--limit-continuation (plist-get target :name) (plist-get target :name)
+                                                                     (romacs-agent-done-seq session))
+                                   t)
             (romacs-agent-move-on session "limit reset"))))))))
 
 (defun romacs-agent-tools--rearm-resume (session manifest)
@@ -1501,37 +1689,50 @@ each waiting to resume on its harness's pool resumes now."
 (add-hook 'romacs-agent-room-functions #'romacs-agent-tools--room-back)
 
 (defun romacs-agent-tools--not-moved (session why)
-  "SESSION stays where its limit stopped it, WHY when said: its end goes
-to its parent."
-  (remhash (romacs-agent-id session) romacs-agent-tools--moving)
+  "SESSION stays where its limit stopped it, WHY when said: no longer
+`:moving', its messages go, and its end goes to its parent."
+  (when-let* ((limited (romacs-agent-limited session)))
+    (setf (romacs-agent-limited session) (romacs-agent--without limited '(:moving :moving-since))))
   (when why (romacs-agent--raise session (list :type 'status :text why)))
-  (romacs-agent-tools--wake session))
+  (romacs-agent-tools--wake session)
+  (romacs-agent--dispatch-soon session))
 
-(defun romacs-agent-tools--moved (session from to)
-  "SESSION's move from FROM took effect, onto TO, or did not (TO is FROM):
-moved, the end that caused it is handed on to no one; not, its parent is
-woken with it."
-  (when-let* ((moving (gethash (romacs-agent-id session) romacs-agent-tools--moving)))
-    (remhash (romacs-agent-id session) romacs-agent-tools--moving)
-    (if (equal to from) (romacs-agent-tools--wake session)
-      (romacs-agent-tools--answer session (car moving)))))
+(defun romacs-agent-tools--moved (session from to limited &optional kept)
+  "SESSION, at its usage limit LIMITED, was put on another account: moved
+off FROM, the ends from the one its move waited from (else its last, a
+move a restart applied) are answered by its going on, handed on to no
+one, and kept so once its continuation is (KEPT, as
+`romacs-agent-moved-functions' says); not (TO is FROM), it stays
+\=(`romacs-agent-tools--not-moved')."
+  (if (equal to from) (romacs-agent-tools--not-moved session nil)
+    ;; Every end from the limit on, not the newest alone: a limit reported
+    ;; again (a duplicate completion) ends a turn too, and the turn going on
+    ;; answers them all.  Those there now: the going on's own come later.
+    (let* ((from-seq (or (plist-get limited :moving) (romacs-agent-done-seq session)))
+           (seqs (cl-loop for end in (romacs-agent-ends session) when (>= (car end) from-seq) collect (car end))))
+      (dolist (seq seqs) (romacs-agent-tools--answer session seq t))
+      ;; Written only once the continuation is kept: a stop before that
+      ;; leaves the end to its parent, never neither.
+      (funcall (or kept (lambda (then) (funcall then '(ok nil))))
+               (lambda (answer)
+                 (when (eq (car answer) 'ok)
+                   (dolist (seq seqs) (romacs-agent-tools--write-answered session seq))))))))
 
 (add-hook 'romacs-agent-moved-functions #'romacs-agent-tools--moved)
 
 (defun romacs-agent-tools--limit-on-event (session event)
   (pcase (plist-get event :type)
     ('done (romacs-agent-tools--switch-on-limit session event))
-    ;; A message after the limit: neither a wait for a move nor a resume is
-    ;; its.  Its turn may end at the limit again: that end schedules a resume
-    ;; anew, the reset not yet used by one that fired.
+    ;; A message after the limit: a resume is not its (none goes while it
+    ;; moves).  Its turn may end at the limit again: that end schedules a
+    ;; resume anew, the reset not yet used by one that fired.
     ('input (when (and (romacs-agent-caught-up session) (not (romacs-agent-pending-selection session)))
-              (remhash (romacs-agent-id session) romacs-agent-tools--moving)
               (when (romacs-agent-resume-time session) (remhash session romacs-agent-tools--resets-used))
               (romacs-agent-tools--cancel-resume session "a message came")))
     ('settled
      (when (romacs-agent-settled-p session)
        (romacs-agent-tools--cancel-resume session)
-       (when (gethash (romacs-agent-id session) romacs-agent-tools--moving)
+       (when (romacs-agent-tools--moving-p session)
          (romacs-agent-tools--not-moved session nil))))))
 
 (add-hook 'romacs-agent-event-functions #'romacs-agent-tools--limit-on-event)
@@ -1544,8 +1745,9 @@ ends; of another, a handoff (a new task on a brief of the thread, with
 its parent and wake rule)."
   (romacs-mcp--instance arguments)
   (let* ((caller (romacs-agent-tools--caller))
-         (id (or (gethash "taskId" arguments) caller (user-error "taskId is required: you are no session")))
-         (task (or (romacs-agent-get id) (user-error "No task %s" id)))
+         (task (romacs-agent-tools--known
+                (or (gethash "taskId" arguments) caller (user-error "taskId is required: you are no session"))))
+         (id (romacs-agent-id task))
          (provider (or (gethash "provider" arguments) (romacs-agent-provider task)))
          (instance (or (romacs-agent--configured provider) (user-error "No agent provider %s" provider)))
          (model (gethash "model" arguments)) (effort (gethash "effort" arguments))
@@ -1640,9 +1842,9 @@ CELL's error as the call's."
 once its running turn ends (`romacs-agent-renew-soon')."
   (romacs-mcp--instance arguments)
   (let* ((caller (romacs-agent-tools--caller))
-         (id (or (gethash "taskId" arguments) caller (user-error "taskId is required: you are no session")))
-         (task (or (romacs-agent-load-session id) (user-error "No task %s" id)))
-         (own (equal id caller)))
+         (task (romacs-agent-tools--known
+                (or (gethash "taskId" arguments) caller (user-error "taskId is required: you are no session"))))
+         (own (equal (romacs-agent-id task) caller)))
     (unless own (romacs-agent-tools--own task caller "renew it"))
     (let ((when (romacs-agent-renew-soon task (or (gethash "why" arguments) (if own "its own" "its parent's"))))
           (record (romacs-agent-tools--ack task)))
@@ -1654,7 +1856,8 @@ once its running turn ends (`romacs-agent-renew-soon')."
 
 (defun romacs-agent-tools--cancel (arguments)
   (romacs-mcp--instance arguments)
-  (let ((child (romacs-agent-tools--known arguments)))
+  (let ((child (romacs-agent-tools--known (gethash "taskId" arguments))))
+    (romacs-agent-tools--own child (romacs-agent-tools--caller) "cancel it")
     (setf (romacs-agent-cancelled child) t)
     (romacs-agent--clear-queue child)
     ;; A restarted server knows it was cancelled.
@@ -2024,7 +2227,9 @@ result. Talk to a running task with romacs_task_send; romacs_task_list finds you
  "A delegated task's status (running, waiting, completed, failed, cancelled), provider, model, turns, cost and its \
 last result, whole: the tools that act on a task answer only its length (resultChars)."
  (romacs-mcp--schema '(("instance" . "string") ("taskId" . "string")) '("taskId"))
- (lambda (arguments) (romacs-mcp--instance arguments) (romacs-agent-tools--task (romacs-agent-tools--known arguments)))
+ (lambda (arguments)
+   (romacs-mcp--instance arguments)
+   (romacs-agent-tools--task (romacs-agent-tools--known (gethash "taskId" arguments))))
  (romacs-mcp--object "readOnlyHint" t))
 
 (romacs-mcp-register-tool
@@ -2032,7 +2237,7 @@ last result, whole: the tools that act on a task answer only its length (resultC
  "Delivery: queued until the task's turn ends unless steer is true, which reaches a running task at its next tool \
 boundary. Send a message to a task you delegated, or to another task of your own parent (your parent gets a copy with its \
 next wake, never woken for it); any other session is refused. It reads it as a <romacs-message> naming you, and \
-answers with romacs_task_reply or its turn's reply; inReplyTo links this one to a message it answers. An idle task gets \
+answers as its last line says: your own task by its turn's reply when that wakes you (wake end or all), else by romacs_task_reply; inReplyTo links this one to a message it answers. An idle task gets \
 it at once; one whose harness ended is resumed for it. mode queue (default); replace: in place of your messages still \
 waiting for it; interrupt: its turn cut short, then this first. A task's next turn end wakes its parent with its reply \
 by its wake rule: end your turn then, do \
@@ -2054,8 +2259,8 @@ resultChars), never its last result: romacs_task_status reads that."
 (romacs-mcp-register-tool
  "romacs_task_reply"
  "Answer a message another session sent you (a <romacs-message>, by its id): routed back to its sender, whatever \
-it is to you (parent, child, sibling), linked to the message it answers. A message from your parent is answered \
-by your turn's reply too: use this to answer before your turn ends, or anyone else. mode as romacs_task_send's. \
+it is to you (parent, child, sibling), linked to the message it answers. When a message's last line says your \
+turn's reply answers it, use this only for an interim note to its sender while you work. mode as romacs_task_send's. \
 Answers the reply's messageId and the sender's short record, as romacs_task_send's."
  (romacs-mcp--object
   "type" "object"

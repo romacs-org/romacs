@@ -319,11 +319,22 @@ enum Result_ { Comment(Pos, bool), Lists(Option<i64>), Parse(ParseState), Prefix
 /// What a stopped scan goes on from.
 enum Kept { Parse(Box<scan::Suspended>), Scan(Box<scan::Scan>) }
 
-/// A parse the text's summaries serve (`crate::syntax_index`), and whether
+type ParseArgs = (i64, i64, i64, bool, i32, ParseState);
+
+/// A scan the text's summaries serve (`crate::syntax_index`), and whether
 /// the plain scanner checks it.
 struct Served {
     context: Context,
     check: bool,
+}
+
+enum SummaryScan {
+    Parse { plain: bool },
+    Lists,
+}
+
+fn syntax_count(n: u64) -> Value {
+    Value::integer(n as i64).expect("count")
 }
 
 
@@ -649,15 +660,10 @@ impl Leaf<'_> {
         let table = self.vm.buffer_syntax_table(index);
         // The scan reads the table through its flat view, kept between calls.
         self.vm.flatten_table(table);
-        if let (Op::ParsePartialSexp, None, Some((from, to, target, stopbefore, commentstop, state))) = (op, &memory, &parse) {
-            let plain = *target != i64::MIN || *stopbefore || *commentstop != 0;
-            if let Some(served) = self.served(index, table, *from, *to, plain, options)? {
-                let mut state = state.clone();
-                if self.summarized(index, table, &served, options, (*from, *to), &mut state)? {
-                    self.syntax_set_point(state.location)?;
-                    return Ok(Outcome::Done(self.externalize_parse_state(&state)));
-                }
-            }
+        if memory.is_none()
+            && let Some(value) = self.initial_summary(op, args, parse.as_ref(), (index, table), options)?
+        {
+            return Ok(Outcome::Done(value));
         }
         let (begv, zv, point) = self.syntax_bounds(index)?;
         let epoch = self.vm.defun_start_epoch;
@@ -786,18 +792,18 @@ impl Leaf<'_> {
         }))
     }
 
-    /// Whether the summaries of the current buffer's text serve a parse
+    /// Whether the summaries of the current buffer's text serve a scan
     /// from FROM to TO, PLAIN when its arguments ask for a stop: a long
     /// enough span of a multibyte text whose `syntax-table' properties, if
     /// honoured, are propertized past TO, so that no scan of it would stop
     /// for Lisp. Counts the reason when they do not; when they do, gives
     /// the summaries the property changes since they last served.
-    fn served(&mut self, index: usize, table: Value, from: i64, to: i64, plain: bool, options: scan::Options)
+    fn served(&mut self, index: usize, table: Value, from: i64, to: i64, kind: SummaryScan, options: scan::Options)
         -> std::result::Result<Option<Served>, Fault> {
         if !matches!(self.vm.objects[index], data::Object::Buffer(_)) { return Ok(None); }
         let decline = if !SyntaxIndex::pays(to - from) {
             Some(Decline::Short)
-        } else if plain {
+        } else if matches!(kind, SummaryScan::Parse { plain: true }) {
             Some(Decline::Arguments)
         } else if self.syntax_var("romacs-inhibit-syntax-summaries")? != Value::NIL {
             Some(Decline::Inhibited)
@@ -811,7 +817,12 @@ impl Leaf<'_> {
         };
         let text: &crate::text::Text = buffer_text(self.vm, index);
         if let Some(decline) = decline {
-            text.syntax.borrow_mut().stats.declined[decline as usize] += 1;
+            let stats = &mut text.syntax.borrow_mut().stats;
+            let counts: &mut [u64] = match kind {
+                SummaryScan::Parse { .. } => &mut stats.declined,
+                SummaryScan::Lists => &mut stats.list_declined,
+            };
+            counts[decline as usize] += 1;
             return Ok(None);
         }
         // Summaries hold no Values: only taking property changes needs the
@@ -876,6 +887,68 @@ impl Leaf<'_> {
         Ok(summarized)
     }
 
+    fn initial_summary(&mut self, op: Op, args: &[Value], parse: Option<&ParseArgs>,
+                       (index, table): (usize, Value), options: scan::Options) -> std::result::Result<Option<Value>, Fault> {
+        if let Some((from, to, target, stopbefore, commentstop, state)) = parse {
+            let plain = *target != i64::MIN || *stopbefore || *commentstop != 0;
+            if let Some(served) = self.served(index, table, *from, *to, SummaryScan::Parse { plain }, options)? {
+                let mut state = state.clone();
+                if self.summarized(index, table, &served, options, (*from, *to), &mut state)? {
+                    self.syntax_set_point(state.location)?;
+                    return Ok(Some(self.externalize_parse_state(&state)));
+                }
+            }
+        }
+        if matches!(op, Op::ScanSexps)
+            && let Some(count) = args[1].integer_value().filter(|&count| SyntaxIndex::pays(count))
+        {
+            let (begv, zv, _) = self.syntax_bounds(index)?;
+            let from = self.fixnum(args[0])?;
+            if count > zv.char - from.clamp(begv.char, zv.char) {
+                return self.summarized_lists(index, table, options, from, count);
+            }
+        }
+        Ok(None)
+    }
+
+    fn summarized_lists(&mut self, index: usize, table: Value, options: scan::Options,
+                        original_from: i64, count: i64) -> std::result::Result<Option<Value>, Fault> {
+        let (begv, zv, _) = self.syntax_bounds(index)?;
+        let from = original_from.clamp(begv.char, zv.char);
+        let Some(served) = self.served(index, table, from, zv.char, SummaryScan::Lists, options)? else { return Ok(None) };
+        let result = {
+            let view = View::new(self.vm, index, table, options.propertize_done.is_some(), true);
+            let Body::Multibyte(text, _) = &view.body else { return Ok(None) };
+            let mut scanner = Scanner { text: &view, begv, zv, options, ppss: &UNANSWERED, defun_start: None, modiff: 0 };
+            let mut syntax = text.syntax.borrow_mut();
+            let result = syntax.lists(&mut scanner, text.len_chars(), served.context, original_from);
+            if let Some(result) = &result
+                && served.check && !matches!(result, Err(Halt::Poll))
+            {
+                let plain = scanner.scan_lists(original_from, count, 0, true).map_err(|stopped| stopped.halt);
+                if *result != plain && !matches!(plain, Err(Halt::Poll)) {
+                    return Err(Fault::Error(format!("syntax summaries: list scan {from}..{}: index {result:?}, scanner {plain:?}", zv.char)));
+                }
+            }
+            result
+        };
+        match result {
+            Some(Ok(result)) => Ok(Some(result.map(Value::integer).transpose().map_err(Fault::Error)?.unwrap_or(Value::NIL))),
+            Some(Err(Halt::ScanError(message, a, b))) => Err(self.scan_error(message, a, b)),
+            _ => Ok(None),
+        }
+    }
+
+    fn syntax_declines(&mut self, reasons: &[Decline], counts: &[u64]) -> Value {
+        let mut declined = Value::NIL;
+        for &decline in reasons.iter().rev() {
+            let name = self.intern(decline.name());
+            let pair = self.cons(name, syntax_count(counts[decline as usize]));
+            declined = self.cons(pair, declined);
+        }
+        declined
+    }
+
     /// `romacs-syntax-summaries-stats' of the current buffer.
     pub(crate) fn syntax_summaries_stats(&mut self) -> super::super::Out {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
@@ -884,15 +957,13 @@ impl Leaf<'_> {
             let summaries = buffer_text(self.vm, index).syntax.borrow();
             (summaries.stats, summaries.leaves(), summaries.storage_bytes())
         };
-        let int = |n: u64| Value::integer(n as i64).expect("count");
-        let mut declined = Value::NIL;
-        for decline in Decline::ALL.into_iter().rev() {
-            let name = self.intern(decline.name());
-            let pair = self.cons(name, int(stats.declined[decline as usize]));
-            declined = self.cons(pair, declined);
-        }
+        let int = syntax_count;
+        let declined = self.syntax_declines(&Decline::PARSE, &stats.declined);
+        let list_declined = self.syntax_declines(&Decline::LISTS, &stats.list_declined);
         let items = [
             ("served", int(stats.served)), ("declined", declined), ("leaves", int(leaves as u64)),
+            ("list-served", int(stats.list_served)), ("list-declined", list_declined),
+            ("list-fallbacks", int(stats.list_fallbacks)),
             ("leaf-scans", int(stats.leaf_scans)), ("plain-leaves", int(stats.plain_leaves)),
             ("composed", int(stats.composed)), ("context-switches", int(stats.switches)),
             ("log-overflows", int(stats.log_overflows)),
@@ -945,6 +1016,62 @@ impl Leaf<'_> {
 #[cfg(test)]
 mod tests {
     use crate::Vm;
+
+    #[test]
+    fn list_summary_stats_report_service_and_fallback_to_plain_scanning() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        let result = vm.eval_source_raw(r#"(with-temp-buffer
+          (insert (make-string 20000 ?a))
+          (goto-char 7)
+          (setq indexed (list (scan-sexps 1 (point-max)) (point)))
+          (scan-sexps (- (point-max) 5) (point-max))
+          (let ((saved (syntax-table)))
+            (set-syntax-table (copy-syntax-table saved))
+            (scan-sexps 1 (point-max))
+            (set-syntax-table saved))
+          (setq romacs-inhibit-syntax-summaries t)
+          (setq plain (list (scan-sexps 1 (point-max)) (point)))
+          (setq romacs-inhibit-syntax-summaries nil)
+          (let ((parse-sexp-lookup-properties t)
+                (syntax-propertize--done 1))
+            (fset 'internal--syntax-propertize
+                  (lambda (_) (setq syntax-propertize--done most-positive-fixnum)))
+            (scan-sexps 1 (point-max)))
+          (goto-char 1)
+          (delete-char 1)
+          (insert ")")
+          (goto-char 7)
+          (list indexed plain
+                (condition-case err (scan-sexps 1 (point-max)) (scan-error err))
+                (point)
+                (let* ((stats (romacs-syntax-summaries-stats))
+                       (declined (plist-get stats :list-declined)))
+                  (list (plist-get stats :served) (plist-get stats :list-served)
+                        (plist-get stats :list-fallbacks)
+                        (cdr (assq 'short declined)) (cdr (assq 'context declined))
+                        (cdr (assq 'inhibited declined)) (cdr (assq 'properties declined))
+                        (cdr (assq 'quit declined))))))"#).unwrap();
+        assert_eq!(vm.display(result).unwrap(),
+                   "((nil 7) (nil 7) (scan-error \"Containing expression ends prematurely\" 1 2) 7 (0 1 1 1 1 1 1 0))");
+    }
+
+    #[test]
+    fn a_property_edit_changes_a_warm_unbounded_sexp_scan() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        let result = vm.eval_source_raw(r#"(with-temp-buffer
+          (set (make-local-variable 'parse-sexp-lookup-properties) t)
+          (set (make-local-variable 'syntax-propertize--done) most-positive-fixnum)
+          (insert (make-string 20000 ?a))
+          (scan-sexps (point-min) (point-max))
+          (put-text-property 12000 12001 'syntax-table '(5))
+          (condition-case err
+              (scan-sexps (point-min) (point-max))
+            (scan-error err)))"#).unwrap();
+        assert_eq!(vm.display(result).unwrap(),
+                   "(scan-error \"Containing expression ends prematurely\" 12000 12001)");
+    }
 
     /// A parse that stops for `internal--syntax-propertize` at every chunk
     /// reads each character once, as GNU's one scan does, however many

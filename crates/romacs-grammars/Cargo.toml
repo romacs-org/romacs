@@ -1,11 +1,11 @@
 [package]
 name = "romacs-grammars"
-description = "The tree-sitter grammars Romacs ships, at the commits GNU's ts modes pin"
+description = "The tree-sitter grammars Romacs ships, at their pinned source commits"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-# Each grammar is the commit its GNU ts mode names in
+# Each grammar matches its pinned commit in
 # `treesit-language-source-alist' (lisp/), as a crates.io release whose
 # sources are that commit's, or the commit itself. etc/tree-sitter/README.md
 # records each one's provenance and licence.
@@ -21,6 +21,7 @@ tree-sitter-java = "=0.23.5"
 tree-sitter-javascript = "=0.23.1"
 tree-sitter-jsdoc = "=0.23.2"
 tree-sitter-json = "=0.24.8"
+tree-sitter-kotlin-ng = "=1.1.0"
 tree-sitter-python = "=0.23.6"
 tree-sitter-rust = "=0.24.0"
 tree-sitter-toml-ng = "=0.7.0"

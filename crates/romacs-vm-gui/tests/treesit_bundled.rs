@@ -1,5 +1,5 @@
 //! The grammars the executable ships (crates/romacs-grammars, ledger/divergences
-//! VM2-TREESIT-BUNDLED): each is the commit its GNU ts mode pins in
+//! VM2-TREESIT-BUNDLED): each matches its pinned commit in
 //! `treesit-language-source-alist', and the loader finds it after the
 //! user's grammar directories and before the system's, never for a
 //! language `treesit-load-name-override-list' names.
@@ -81,15 +81,21 @@ fn bundled_grammars_load_unless_overridden_and_before_the_systems() {
             printed(&mut vm, "(with-temp-buffer (insert \"class Sample {}\")
                 (let ((root (treesit-parser-root-node (treesit-parser-create 'java))))
                   (list (treesit-node-type root) (treesit-node-type (treesit-node-child root 0 t)))))"),
+            printed(&mut vm, "(with-temp-buffer (insert \"/* one /* two */ three */\\nobject Sample {}\")
+                (let ((root (treesit-parser-root-node (treesit-parser-create 'kotlin))))
+                  (list (treesit-node-type (treesit-node-child root 0 t))
+                        (treesit-node-type (treesit-node-child root 1 t))
+                        (treesit-node-check root 'has-error))))"),
         ]
     });
     assert_eq!(report, [
         "(nil not-found)",
         "t",
-        "(bash c cpp css go html java javascript jsdoc json python rust toml tsx typescript yaml)",
+        "(bash c cpp css go html java javascript jsdoc json kotlin python rust toml tsx typescript yaml)",
         "nil",
         "t",
         r#"("program" "class_declaration")"#,
+        r#"("block_comment" "object_declaration" nil)"#,
     ]);
 }
 
@@ -115,21 +121,21 @@ fn a_library_in_the_users_grammar_directory_comes_first() {
     assert_eq!(String::from_utf8_lossy(&output.stdout), "(symbol-error t)");
 }
 
-/// Each bundled grammar is the repository and commit its GNU ts mode
-/// names in `treesit-language-source-alist' (read from lisp/, its
-/// entries evaluated as the files would).
+/// Each bundled grammar matches its `treesit-language-source-alist' recipe.
+/// Read the recipes from Lisp and evaluate them as the libraries would.
 #[test]
-fn bundled_grammars_are_the_commits_gnu_pins() {
+fn bundled_grammars_match_the_install_recipes() {
     let user = scratch("pins");
     let report = on_big_stack(move || {
         let mut vm = bootstrapped(&user);
-        let files: Vec<String> = ["progmodes", "textmodes"].iter().flat_map(|dir| {
+        let mut files: Vec<String> = ["progmodes", "textmodes"].iter().flat_map(|dir| {
             std::fs::read_dir(root().join("lisp").join(dir)).unwrap().filter_map(|e| e.ok()).map(|e| e.path())
                 .filter(|p| p.extension().is_some_and(|x| x == "el")
                     && std::fs::read_to_string(p).is_ok_and(|t| t.contains("'treesit-language-source-alist")))
                 .map(|p| format!("{:?}", p.display().to_string()))
                 .collect::<Vec<_>>()
         }).collect();
+        files.push(format!("{:?}", root().join("lisp/treesit.el").display().to_string()));
         printed(&mut vm, &format!("(let (recipes)
             (dolist (file (list {}))
               (with-temp-buffer

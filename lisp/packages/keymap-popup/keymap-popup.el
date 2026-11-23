@@ -429,6 +429,20 @@ RUNTIME means values have already been evaluated."
     (apply #'keymap-popup--entry nil description 'suffix
            :command key properties)))
 
+(defun keymap-popup--parse-submenu-target (target context runtime)
+  "Validate a submenu TARGET in CONTEXT for RUNTIME or macro input."
+  (cond
+   ((not runtime)
+    (unless (and (symbolp target) (not (memq target '(nil t)))
+                 (not (keywordp target)))
+      (keymap-popup--invalid context "submenu needs a keymap symbol"))
+    target)
+   ((keymapp target) target)
+   ((functionp target)
+    ;; Stored target symbols in macro declarations name keymap variables.
+    (if (symbolp target) (apply-partially #'funcall target) target))
+   (t (keymap-popup--invalid context "submenu needs a keymap or function"))))
+
 (defun keymap-popup--parse-keyed-entry (key spec context runtime)
   "Parse keyed SPEC for KEY in CONTEXT.
 RUNTIME means values have already been evaluated."
@@ -452,15 +466,8 @@ RUNTIME means values have already been evaluated."
                 (cdr payload) keymap-popup--entry-properties context)
                context runtime)))
       (:keymap
-       (if runtime
-           (unless (keymapp (car payload))
-             (keymap-popup--invalid context "submenu target is not a keymap"))
-         (unless (and (symbolp (car payload))
-                      (not (memq (car payload) '(nil t)))
-                      (not (keywordp (car payload))))
-           (keymap-popup--invalid context "submenu needs a keymap symbol")))
        (apply #'keymap-popup--entry key description 'keymap
-              :target (car payload)
+              :target (keymap-popup--parse-submenu-target (car payload) context runtime)
               (keymap-popup--validate-properties
                (keymap-popup--parse-properties
                 (cdr payload) keymap-popup--entry-properties context)
@@ -1015,7 +1022,11 @@ so it suits anonymous keymaps and menus built from runtime lists.
 Reattaching replaces prior descriptions and options; omitted
 options return to their defaults.  It does not bind keys or define
 commands; keyed entries should already be bound in KEYMAP.  Switch
-entries require `keymap-popup-define' and are rejected here."
+entries require `keymap-popup-define' and are rejected here.
+
+For a submenu, use KEY (DESCRIPTION :keymap TARGET . PROPS).
+TARGET can be a keymap or a zero-argument function returning a
+keymap.  The popup calls that function each time it enters the submenu."
   (let ((parsed (keymap-popup--parse-options
                  opts keymap-popup--attach-options "attachment")))
     (when (cdr parsed)
@@ -2304,20 +2315,29 @@ otherwise tears down completely."
      :description-candidates candidates)))
 
 (defun keymap-popup--resolve-submenu-target (target)
-  "Return TARGET's keymap value or signal a clear user error."
-  (let ((keymap (if (symbolp target)
-                    (and (boundp target) (symbol-value target))
-                  target)))
+  "Return the keymap from TARGET, a keymap, variable or function."
+  (let ((keymap (cond ((symbolp target) (and (boundp target) (symbol-value target)))
+                      ((functionp target) (funcall target))
+                      (t target))))
     (or (and (keymapp keymap) keymap)
-        (user-error "Submenu target %S is not a keymap" target))))
+        (if (and (not (symbolp target)) (functionp target))
+            (user-error "Submenu function did not return a keymap")
+          (user-error "Submenu target %S is not a keymap" target)))))
 
-(defun keymap-popup--push-submenu (buf child-keymap)
-  "Push current popup state in BUF and activate CHILD-KEYMAP's transient map."
-  (let* ((child-keymap (keymap-popup--resolve-submenu-target child-keymap))
-         (session (keymap-popup--session-state buf))
-         (parent (plist-get session :active))
-         (child (keymap-popup--state-for-keymap child-keymap))
-         (stack (cons parent (plist-get session :stack)))
+(defun keymap-popup--push-submenu (buf target)
+  "Resolve TARGET and activate its state in BUF if the parent still owns it."
+  (let* ((parent (keymap-popup--session-get buf :active))
+         (keymap (keymap-popup--resolve-submenu-target target)))
+    (when (eq buf (keymap-popup--popup-buffer))
+      (let ((child (keymap-popup--state-for-keymap keymap))
+            (session (keymap-popup--session-state buf)))
+        (when (and (eq buf (keymap-popup--popup-buffer))
+                   (eq parent (plist-get session :active)))
+          (keymap-popup--activate-submenu buf session child))))))
+
+(defun keymap-popup--activate-submenu (buf session child)
+  "Activate CHILD in BUF, retaining SESSION for return or rollback."
+  (let* ((stack (cons (plist-get session :active) (plist-get session :stack)))
          (content (with-current-buffer buf (buffer-string)))
          (position (with-current-buffer buf (point)))
          (complete nil))

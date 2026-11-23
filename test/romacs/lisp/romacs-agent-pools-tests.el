@@ -117,21 +117,29 @@ a time, `allow' marks it allowed."
       (spend "claude" (+ (float-time) 3600))
       (cl-letf (((symbol-function 'romacs-agent-select)
                  (lambda (_session _model _effort provider) (setq selected provider) t))
-                ((symbol-function 'romacs-agent--enqueue) (lambda (_s item) (push (car item) queued))))
-        (let ((romacs-agent-moved-functions (list (lambda (_s from to) (push (cons from to) moved)))))
+                ((symbol-function 'romacs-agent--enqueue-first)
+                 (lambda (_s item &optional done) (push item queued) (funcall done '(ok t))))
+                ((symbol-function 'run-at-time) #'ignore))
+        (let ((romacs-agent-moved-functions (list (lambda (_s from to limited &optional _kept) (push (list from to limited) moved)))))
           (should (equal (romacs-agent-move-on session) "claude2"))
           (should (equal selected "claude2"))
-          ;; Told to go on only once the move took effect.
+          ;; Told to go on only once the move took effect: first of what
+          ;; waits, its own turn, all data (kept across a restart).
           (should-not queued)
-          (romacs-agent--raise session '(:type selection :from (:provider "claude") :to (:provider "claude2")))
-          (should (string-match-p "claude's usage limit; you now run on claude2" (car queued)))
-          (should (equal moved '(("claude" . "claude2"))))
+          (romacs-agent--moved session "claude" "claude2" '(:provider "claude"))
+          (should (string-match-p "claude's usage limit; you now run on claude2" (romacs-agent-item-text (car queued))))
+          (should (equal (romacs-agent-item-own (car queued)) romacs-agent--limit-continue))
+          (should (romacs-agent--keepable-p (car queued)))
+          (should (equal moved '(("claude" "claude2" (:provider "claude")))))
           ;; A move that did not take effect: nothing to go on with.
           (setq queued nil)
-          (romacs-agent-move-on session)
-          (romacs-agent--raise session '(:type selection :from (:provider "claude") :to (:provider "claude")))
+          (romacs-agent--moved session "claude" "claude" '(:provider "claude"))
           (should-not queued)
-          (should (equal (car moved) '("claude" . "claude"))))
+          (should (equal (car moved) '("claude" "claude" (:provider "claude"))))
+          ;; A move with no limit behind it: nothing to go on from.
+          (romacs-agent--moved session "claude" "claude2" nil)
+          (should-not queued)
+          (should (= (length moved) 2)))
         (spend "claude2" (+ (float-time) 3600))
         (spend "claude3" (+ (float-time) 3600))
         (should-error (romacs-agent-move-on session) :type 'user-error)))))
@@ -159,7 +167,6 @@ a time, `allow' marks it allowed."
                                         :dir dir :done-seq 4 :input-seq 3 :limited '(:provider "claude")))
            (soon (+ (float-time) 3600)) (armed nil) (told nil) (moved nil)
            (romacs-agent-tools--resumes (make-hash-table :test #'eq :weakness 'key))
-           (romacs-agent-tools--moving (make-hash-table :test #'equal))
            (romacs-agent-switch-delay 0) (romacs-agent-resume-margin 1))
       (puthash "r" session romacs-agent--sessions)
       (romacs-agent--manifest session nil)
@@ -167,7 +174,10 @@ a time, `allow' marks it allowed."
       (cl-letf (((symbol-function 'run-at-time) (lambda (delay _ function &rest args) (push (list delay function args) armed) 'timer))
                 ((symbol-function 'cancel-timer) #'ignore)
                 ((symbol-function 'romacs-agent-tools--wake) #'ignore)
-                ((symbol-function 'romacs-agent-tools--tell) (lambda (_s text &rest _) (push text told)))
+                ;; Its harness, ended meanwhile, is resumed to take it.
+                ((symbol-function 'romacs-agent--continue) (lambda (s) (push 'continued told) s))
+                ((symbol-function 'romacs-agent--admit)
+                 (lambda (_s item first) (push (list (romacs-agent-item-text item) (romacs-agent-item-own item) first) told)))
                 ((symbol-function 'romacs-agent-move-on) (lambda (_s why) (push why moved))))
         (romacs-agent-tools--switch-on-limit session '(:limit t))
         ;; Scheduled at the earliest reset plus its margin, said and kept.
@@ -181,10 +191,12 @@ a time, `allow' marks it allowed."
           (clrhash romacs-agent-tools--resumes)
           (run-hook-with-args 'romacs-agent-loaded-functions session manifest))
         (should (= (romacs-agent-resume-time session) (+ soon 1)))
-        ;; Due, its own account back: told to go on there.
+        ;; Due, its own account back: told to go on there, first of what waits.
         (spend "claude" (- (float-time) 1) 9.0)
         (romacs-agent-tools--resume session (+ soon 1))
-        (should (equal told (list romacs-agent-tools--resumed)))
+        (should (equal told (list (list "Your usage limit has reset; go on from where you were."
+                                        romacs-agent--limit-continue t)
+                                  'continued)))
         (should-not (romacs-agent-resume-time session))
         (should (string-match-p "\"state\":\"fired\",\"on\":\"claude\""
                                 (mapconcat #'romacs-agent--json (romacs-agent--journal-records session) "\n")))
@@ -227,7 +239,6 @@ a time, `allow' marks it allowed."
                                         :state 'idle :caught-up t :dir dir :done-seq 4
                                         :limited '(:provider "claude")))
            (romacs-agent-tools--resumes (make-hash-table :test #'eq))
-           (romacs-agent-tools--moving (make-hash-table :test #'equal))
            (romacs-agent-event-functions (list #'romacs-agent-tools--limit-on-event))
            (time (+ (float-time) 3600)) callbacks)
       (make-directory dir)
@@ -237,11 +248,13 @@ a time, `allow' marks it allowed."
                 ((symbol-function 'cancel-timer) #'ignore)
                 ((symbol-function 'romacs-agent-tools--wake) #'ignore)
                 ((symbol-function 'romacs-agent--stop-then) (lambda (_ then) (push (list then) callbacks)))
-                ((symbol-function 'romacs-agent-tools--tell) (lambda (&rest _) (ert-fail "Resumed")))
+                ((symbol-function 'romacs-agent--admit) (lambda (&rest _) (ert-fail "Resumed")))
                 ((symbol-function 'romacs-agent-resume) (lambda (&rest _) (ert-fail "Relaunched")))
                 ((symbol-function 'romacs-agent-move-on) (lambda (&rest _) (ert-fail "Moved"))))
         (romacs-agent-tools--switch-on-limit session '(:limit t))
-        (should (gethash "settled" romacs-agent-tools--moving))
+        (should (romacs-agent-tools--moving-p session))
+        ;; A continuation waiting goes with it: a settled thread goes on from nothing.
+        (romacs-agent--enqueue session (romacs-agent--limit-continuation "claude" "claude2" 4))
         (romacs-agent-tools--arm-resume session time)
         (romacs-agent-tools--keep-resume session time)
         (setf (romacs-agent-pending-selection session) (list :state 'armed :provider "other"))
@@ -249,7 +262,8 @@ a time, `allow' marks it allowed."
         (romacs-agent-settle session)
         (should-not (romacs-agent-pending-selection session))
         (should-not (romacs-agent-resume-time session))
-        (should-not (gethash "settled" romacs-agent-tools--moving))
+        (should-not (romacs-agent-tools--moving-p session))
+        (should-not (romacs-agent-queue session))
         (while-let ((callback (pop callbacks))) (apply (car callback) (cdr callback)))
         (romacs-agent--raise session '(:type done :seq 5 :limit t))
         (romacs-agent-tools--rearm-resume session (romacs-mcp--object "resumeAt" time))
@@ -269,7 +283,6 @@ a time, `allow' marks it allowed."
            (soon (+ (float-time) 600))
            (romacs-agent-tools--resumes (make-hash-table :test #'eq :weakness 'key))
            (romacs-agent-tools--resets-used (make-hash-table :test #'eq :weakness 'key))
-           (romacs-agent-tools--moving (make-hash-table :test #'equal))
            (romacs-agent-switch-delay 0) (romacs-agent-resume-margin 1))
       (ignore #'allow #'names)
       (puthash "c" session romacs-agent--sessions)
@@ -294,36 +307,325 @@ a time, `allow' marks it allowed."
            (session (romacs-agent--make :id "w" :harness 'claude :provider "claude" :state 'idle :caught-up t
                                         :dir dir :done-seq 4 :input-seq 3 :limited '(:provider "claude")))
            (armed nil) (moves 0) (selects 0)
-           (romacs-agent-tools--moving (make-hash-table :test #'equal))
            (romacs-agent-tools--resumes (make-hash-table :test #'eq :weakness 'key)))
       (puthash "w" session romacs-agent--sessions)
       (spend "claude" (+ (float-time) 600))
       (cl-letf (((symbol-function 'run-at-time) (lambda (_d _r function &rest args) (push (cons function args) armed) 'timer))
                 ((symbol-function 'romacs-agent-tools--wake) #'ignore)
                 ((symbol-function 'romacs-agent-select) (lambda (&rest _) (cl-incf selects) (= selects 1))))
-        ;; A message after the limit: the wait it armed moves nothing.
+        ;; A selection asked meanwhile (romacs_task_switch): the wait leaves
+        ;; the move to it, and looks again later.
         (romacs-agent-tools--switch-on-limit session '(:limit t))
+        (setf (romacs-agent-pending-selection session) '(:state armed :provider "claude2"))
         (let ((wait (cl-find #'romacs-agent-tools--hand-over armed :key #'car)))
-          (romacs-agent-tools--limit-on-event session '(:type input))
+          (setq armed nil)
           (cl-letf (((symbol-function 'romacs-agent-move-on) (lambda (&rest _) (cl-incf moves))))
             (apply (car wait) (cdr wait))))
         (should (= moves 0))
-        ;; The same move asked again while it is pending keeps its bookkeeping.
+        (should (romacs-agent-tools--moving-p session))
+        (should (equal (cdr (cl-find #'romacs-agent-tools--hand-over armed :key #'car)) (list session 4)))
+        ;; The same move asked again while it is pending selects it once.
+        (setf (romacs-agent-pending-selection session) nil)
         (romacs-agent-move-on session)
         (setf (romacs-agent-pending-selection session) '(:state armed :provider "claude2"))
         (cl-letf (((symbol-function 'romacs-agent--wanted) (lambda (_) '(:provider "claude2"))))
           (romacs-agent-move-on session))
-        (should (gethash session romacs-agent--moving-on))
+        (should (= selects 1))
         (setf (romacs-agent-pending-selection session) nil)
-        ;; The rest spent during the wait: said in the journal, with the reset.
-        (remhash session romacs-agent--moving-on)
+        ;; The same limit reported again: one move, no second wait.
         (setq armed nil)
         (romacs-agent-tools--switch-on-limit session '(:limit t))
+        (should-not armed)
+        ;; The rest spent during the wait: said in the journal, with the reset.
         (spend "claude2" (+ (float-time) 600) 5.0) (spend "claude3" (+ (float-time) 900) 5.0)
-        (let ((wait (cl-find #'romacs-agent-tools--hand-over armed :key #'car)))
-          (apply (car wait) (cdr wait)))
+        (romacs-agent-tools--hand-over session 4)
+        (should-not (romacs-agent-tools--moving-p session))
         (should (string-match-p "\"to\":null,\"why\":\"every claude account is at its limit\",\"resets\":[0-9]"
                                 (mapconcat #'romacs-agent--json (romacs-agent--journal-records session) "\n")))))))
+
+;; A move at the limit holds the queue in the gate, its end from the
+;; parent, and is armed again once a restart's replay is over.
+
+(ert-deftest romacs-agent-pools-a-move-at-the-limit-holds-the-gate ()
+  (let ((session (romacs-agent--make :id "g" :harness 'claude :provider "claude" :state 'idle :caught-up t
+                                     :limited '(:provider "claude"))))
+    (cl-letf (((symbol-function 'process-live-p) #'always)
+              ((symbol-function 'romacs-agent--per-turn-p) #'ignore)
+              ((symbol-function 'romacs-agent--folding-p) #'ignore)
+              ((symbol-function 'romacs-agent--ready-p) #'always)
+              ((symbol-function 'romacs-agent-stopped) #'ignore)
+              ((symbol-function 'romacs-agent-tools--hand-on) #'ignore)
+              ((symbol-function 'romacs-agent--dispatch-soon) #'ignore))
+      (should (romacs-agent--open-p session nil))
+      (setf (romacs-agent-limited session) '(:provider "claude" :moving 4))
+      ;; Nothing goes, a hold's own prompt neither.
+      (should-not (romacs-agent--open-p session nil))
+      (should-not (romacs-agent--open-p session 'token))
+      ;; Its kept state never says it moves: that wait is this process's.
+      (let ((kept (car (read-from-string (romacs-agent--kept-text session)))))
+        (should (equal (alist-get 'limited (plist-get kept :fields)) '(:provider "claude"))))
+      ;; Not moved: its limit stays, its messages go.
+      (romacs-agent-tools--not-moved session nil)
+      (should (equal (romacs-agent-limited session) '(:provider "claude")))
+      (should (romacs-agent--open-p session nil)))))
+
+(ert-deftest romacs-agent-pools-a-limit-holds-its-end-while-it-may-move ()
+  (should-not (romacs-agent-tools--wake-held-p nil t))
+  (should-not (romacs-agent-tools--wake-held-p '(:provider "claude") nil))
+  (should (romacs-agent-tools--wake-held-p '(:provider "claude" :moving 4) nil))
+  ;; Replaying still: whether it moves is not known yet.
+  (should (romacs-agent-tools--wake-held-p '(:provider "claude") t)))
+
+(ert-deftest romacs-agent-pools-a-held-wake-is-bounded ()
+  ;; Opus 1: a selection of a model alone at a limit held its failed end
+  ;; for hours.  Sol S1: a selection to another account that never came
+  ;; to it (its reattach retries spent) held the end, the hand-over
+  ;; polling for ever.  Neither holds it now: only a move's bounded wait.
+  (let* ((romacs-agent--sessions (make-hash-table :test #'equal))
+         (session (romacs-agent--make :id "h" :harness 'claude :provider "claude" :state 'idle :caught-up t
+                                      :dir (make-temp-file "h" t)
+                                      :done-seq 4 :limited '(:provider "claude") :options '(:parent "p")
+                                      :ends (list (list 4 "You've hit your limit" t "m-1"))
+                                      :pending-selection '(:state armed :provider "claude" :model "sonnet")))
+         (woken 0))
+    (puthash "h" session romacs-agent--sessions)
+    (cl-letf (((symbol-function 'romacs-agent-tools--hand-on) (lambda (_) (cl-incf woken)))
+              ((symbol-function 'run-at-time) #'ignore)
+              ((symbol-function 'romacs-agent--dispatch-soon) #'ignore))
+      (romacs-agent-tools--wake session)
+      (should (= woken 1))
+      ;; Moving, a selection to another account on its way: held, waited out.
+      (setf (romacs-agent-pending-selection session) '(:state armed :provider "claude2"))
+      (romacs-agent-tools--arm-move session)
+      (romacs-agent-tools--wake session)
+      (romacs-agent-tools--hand-over session 4)
+      (should (romacs-agent-tools--moving-p session))
+      (should (= woken 1))
+      ;; Never coming to it: the wait ends, the end goes to the parent, and
+      ;; the selection is taken back (Sol S1: a late stop committed the move
+      ;; after the parent was told it failed).
+      (setf (romacs-agent-limited session)
+            (plist-put (romacs-agent-limited session) :moving-since (- (float-time) romacs-agent-start-deadline 1)))
+      (romacs-agent-tools--hand-over session 4)
+      (should-not (romacs-agent-tools--moving-p session))
+      (should (= woken 2))
+      (should-not (romacs-agent-pending-selection session))
+      ;; Its stop under way: it ends on the account it has.
+      (setf (romacs-agent-pending-selection session) '(:state restarting :provider "claude2"))
+      (romacs-agent-tools--arm-move session)
+      (setf (romacs-agent-limited session)
+            (plist-put (romacs-agent-limited session) :moving-since (- (float-time) romacs-agent-start-deadline 1)))
+      (romacs-agent-tools--hand-over session 4)
+      (should (equal (plist-get (romacs-agent-pending-selection session) :provider) "claude"))
+      ;; A session a load replaced: its wait moves nothing and wakes no one.
+      (let ((stale (romacs-agent--make :id "h" :harness 'claude :provider "claude" :done-seq 4
+                                       :limited (list :provider "claude" :moving 4 :moving-since 0.0)
+                                       :options '(:parent "p") :ends (list (list 4 "limit" t "m-1")))))
+        (romacs-agent-tools--hand-over stale 4)
+        (should (eql (romacs-agent-tools--moving-p stale) 4))
+        (should (= woken 3))))))
+
+(ert-deftest romacs-agent-pools-a-move-a-restart-cut-holds-from-its-load ()
+  ;; Its harness stopped for a move, the editor gone before the selection
+  ;; committed: loaded, it waits for that move as a live one does, so a
+  ;; restart's wake of missed ends sends no failed one meanwhile.
+  (let ((session (romacs-agent--make :id "l" :harness 'claude :provider "claude" :state 'ended :done-seq 4
+                                     :limited '(:provider "claude")
+                                     :pending-selection '(:state armed :provider "claude2")))
+        (romacs-agent-switch-on-limit 'lossless) (armed nil))
+    (cl-letf (((symbol-function 'run-at-time) (lambda (_d _r function &rest args) (push (cons function args) armed))))
+      (run-hook-with-args 'romacs-agent-loaded-functions session (romacs-mcp--object))
+      (should (eql (romacs-agent-tools--moving-p session) 4))
+      (should (equal (car armed) (list #'romacs-agent-tools--hand-over session 4)))
+      ;; A model alone pending: no move to wait for.
+      (setf (romacs-agent-limited session) '(:provider "claude") armed nil
+            (romacs-agent-pending-selection session) '(:state armed :provider "claude" :model "sonnet"))
+      (romacs-agent-tools--limit-loaded session nil)
+      (should-not (romacs-agent-tools--moving-p session))
+      (should-not armed))))
+
+(ert-deftest romacs-agent-pools-a-move-cancelled-as-its-harness-stops-goes-nowhere ()
+  ;; Sol S3: cancelled (or settled) while its harness stops for the move,
+  ;; the stop's callback committed, made a continuation and resumed it.
+  (let ((session (romacs-agent--make :id "x" :harness 'claude :provider "claude" :state 'detached :cancelled t
+                                     :limited '(:provider "claude")
+                                     :pending-selection '(:state restarting :provider "claude2" :stopped t))))
+    (cl-letf (((symbol-function 'romacs-agent--commit-switch) (lambda (_) (ert-fail "Committed")))
+              ((symbol-function 'romacs-agent-resume) (lambda (_) (ert-fail "Resumed"))))
+      (romacs-agent--restarted session)
+      (setf (romacs-agent-cancelled session) nil)
+      (cl-letf (((symbol-function 'romacs-agent-settled-p) #'always))
+        (romacs-agent--restarted session)))
+    (should (equal (romacs-agent-provider session) "claude"))
+    (should-not (romacs-agent-queue session))))
+
+(ert-deftest romacs-agent-pools-room-malformed-or-stale-is-none ()
+  ;; Sol S4: a kept room file that is not a list aborted catching up; an
+  ;; old report of room, from before the limit, released the queue to the
+  ;; spent account.
+  (romacs-agent-pools-tests--with
+    (let ((romacs-agent--room (make-hash-table :test #'equal)) (romacs-agent--room-loaded nil))
+      (make-directory (file-name-directory (romacs-agent--room-file)) t)
+      (cl-letf (((symbol-function 'romacs-agent--room-watch) #'ignore))
+        (dolist (text '("42" "\"x\"" "((\"claude2\" :status allowed :time \"bad\") (\"claude3\" :status rejected :time 1.0 :resets \"x\"))"
+                        "(nil 3 (\"claude\" :status allowed :time 5.0) (7 . 8))"))
+          (write-region text nil (romacs-agent--room-file) nil 'silent)
+          (setq romacs-agent--room-loaded nil)
+          (clrhash romacs-agent--room)
+          (should (hash-table-p (romacs-agent--room-table)))))
+      (should (equal (hash-table-keys romacs-agent--room) '("claude")))
+      ;; Kept again over a bad file: merged, no error.
+      (write-region "((\"claude2\" :status allowed :time \"bad\"))" nil (romacs-agent--room-file) nil 'silent)
+      (romacs-agent--merge-room)
+      (should (equal (sort (mapcar #'car (romacs-agent--room-kept)) #'string<) '("claude"))))
+    ;; Room back only since the limit: a report after it, or its reset passed.
+    (puthash "claude" (list :status 'allowed :time 50.0) romacs-agent--room)
+    (should-not (romacs-agent-tools--room-back-p "claude" 100.0))
+    (should (romacs-agent-tools--room-back-p "claude" 40.0))
+    (puthash "claude" (list :status 'rejected :resets (- (float-time) 1) :time 50.0) romacs-agent--room)
+    (should (romacs-agent-tools--room-back-p "claude" 100.0))
+    ;; A limit of unknown time (an older snapshot): only its reset counts.
+    (puthash "claude" (list :status 'allowed :time 50.0) romacs-agent--room)
+    (should-not (romacs-agent-tools--room-back-p "claude" nil))
+    (remhash "claude" romacs-agent--room)
+    (should-not (romacs-agent-tools--room-back-p "claude" 100.0))
+    ;; As its replay ends, an allowed report older than its limit: it moves.
+    (let ((session (romacs-agent--make :id "o" :harness 'claude :provider "claude" :state 'idle :caught-up t
+                                       :done-seq 4 :input-seq 4 :limited '(:provider "claude" :time 100.0)))
+          (romacs-agent-switch-on-limit 'lossless))
+      (puthash "o" session romacs-agent--sessions)
+      (puthash "claude" (list :status 'allowed :time 50.0) romacs-agent--room)
+      (cl-letf (((symbol-function 'run-at-time) #'ignore))
+        (run-hook-with-args 'romacs-agent-caught-up-functions session))
+      (should (eql (romacs-agent-tools--moving-p session) 4)))))
+
+(ert-deftest romacs-agent-pools-a-restart-arms-the-move-again ()
+  (let ((limited '(:provider "claude")))
+    (should (romacs-agent-tools--moves-again-p limited t nil nil))
+    (should-not (romacs-agent-tools--moves-again-p nil t nil nil))
+    ;; Busy, asked since, or room known back.
+    (should-not (romacs-agent-tools--moves-again-p limited nil nil nil))
+    (should-not (romacs-agent-tools--moves-again-p limited t t nil))
+    (should-not (romacs-agent-tools--moves-again-p limited t nil t)))
+  ;; As its replay ends: armed again, its end held, a selection pending or
+  ;; its room unknown too; with room back, its end goes.
+  (romacs-agent-pools-tests--with
+    (let* ((session (romacs-agent--make :id "a" :harness 'claude :provider "claude" :state 'idle :caught-up t
+                                        :done-seq 4 :input-seq 4 :limited '(:provider "claude")
+                                        :ends (list (list 4 "You've hit your limit" t "m-1"))
+                                        :options '(:parent "p")))
+           (romacs-agent-switch-on-limit 'lossless) (armed nil) (woken 0))
+      (puthash "a" session romacs-agent--sessions)
+      (puthash "claude" (list :status 'rejected :resets (+ (float-time) 600) :time 1.0) romacs-agent--room)
+      (cl-letf (((symbol-function 'run-at-time) (lambda (_d _r function &rest args) (push (cons function args) armed)))
+                ((symbol-function 'romacs-agent-tools--hand-on) (lambda (_) (cl-incf woken))))
+        (run-hook-with-args 'romacs-agent-caught-up-functions session)
+        (should (eql (romacs-agent-tools--moving-p session) 4))
+        (should (equal (cl-find #'romacs-agent-tools--hand-over armed :key #'car)
+                       (list #'romacs-agent-tools--hand-over session 4)))
+        (should (= woken 0))
+        (dolist (state (list (lambda () (setf (romacs-agent-pending-selection session) '(:state armed :provider "claude2")))
+                             (lambda () (remhash "claude" romacs-agent--room))))
+          (setf (romacs-agent-limited session) '(:provider "claude") armed nil)
+          (funcall state)
+          (run-hook-with-args 'romacs-agent-caught-up-functions session)
+          (should (eql (romacs-agent-tools--moving-p session) 4))
+          (should (= woken 0)))
+        (setf (romacs-agent-pending-selection session) nil)
+        (setf (romacs-agent-limited session) '(:provider "claude" :time 2.0) armed nil)
+        (puthash "claude" (list :status 'allowed :time 3.0) romacs-agent--room)
+        (run-hook-with-args 'romacs-agent-caught-up-functions session)
+        (should-not (romacs-agent-tools--moving-p session))
+        (should-not armed)
+        (should (= woken 1))
+        ;; Its replay moved it (no limit left): its ends go all the same.
+        (setf (romacs-agent-limited session) nil)
+        (run-hook-with-args 'romacs-agent-caught-up-functions session)
+        (should (= woken 2))
+        ;; Every account spent: said, and resumed at the first reset, as live.
+        (setf (romacs-agent-limited session) '(:provider "claude"))
+        (puthash "claude" (list :status 'rejected :resets (+ (float-time) 600) :time 4.0) romacs-agent--room)
+        (dolist (name '("claude2" "claude3"))
+          (puthash name (list :status 'rejected :resets (+ (float-time) 900) :time 4.0) romacs-agent--room))
+        (cl-letf (((symbol-function 'romacs-agent-tools--spent) (lambda (_) (push 'spent armed)))
+                  ((symbol-function 'romacs-agent-tools--schedule-resume) (lambda (_) (push 'resume armed))))
+          (run-hook-with-args 'romacs-agent-caught-up-functions session))
+        (should (equal armed '(resume spent)))
+        (should-not (romacs-agent-tools--moving-p session))))))
+
+(ert-deftest romacs-agent-pools-a-limit-again-is-the-same-move ()
+  ;; A limit reported again while it moves (a duplicate completion) keeps
+  ;; the move; moved, every end from the first on is answered by going on.
+  (let* ((dir (make-temp-file "d" t))
+         (session (romacs-agent--make :id "d" :harness 'claude :provider "claude" :state 'idle :caught-up t
+                                      :dir dir :done-seq 3 :limited '(:provider "claude" :moving 3)
+                                      :ends (list (list 3 "limit" t "m-1") (list 1 "earlier" nil nil))))
+         (romacs-agent-tools--answered (make-hash-table :test #'equal)))
+    (let ((completed (romacs-agent--completed-turn (list :turns 1 :provider "claude" :limited (romacs-agent-limited session))
+                                                   '(:seq 4 :limit t :text "limit" :error t) nil)))
+      (should (eql (plist-get (plist-get completed :limited) :moving) 3))
+      (should-not (plist-get (plist-get (romacs-agent--completed-turn (list :turns 1 :provider "claude")
+                                                                      '(:seq 4 :limit t) nil)
+                                        :limited)
+                             :moving)))
+    (push (list 4 "limit" t "m-1") (romacs-agent-ends session))
+    (romacs-agent-tools--moved session "claude" "claude2" (romacs-agent-limited session))
+    (should (equal (romacs-agent-ends session) '((1 "earlier" nil nil))))
+    ;; A move a restart applied as it loaded (no wait armed): its last end.
+    (setf (romacs-agent-done-seq session) 5)
+    (push (list 5 "limit" t "m-2") (romacs-agent-ends session))
+    (romacs-agent-tools--moved session "claude" "claude2" '(:provider "claude"))
+    (should (equal (romacs-agent-ends session) '((1 "earlier" nil nil))))))
+
+(ert-deftest romacs-agent-pools-a-move-applied-as-it-loads-goes-on ()
+  ;; Its harness stopped for the move, the editor gone before it came back:
+  ;; the move applied as it loads resumes it to take its continuation.
+  (let* ((romacs-agent--sessions (make-hash-table :test #'equal))
+         (session (romacs-agent--make :id "g" :harness 'claude :state 'ended))
+         (opened 0))
+    (puthash "g" session romacs-agent--sessions)
+    (cl-letf (((symbol-function 'romacs-agent--opened) (lambda (_) (cl-incf opened))))
+      (romacs-agent--go-on session)
+      (should (= opened 1))
+      ;; Settled, cancelled, or no longer the session loaded: nothing.
+      (romacs-agent--go-on (romacs-agent--make :id "g" :harness 'claude :state 'ended))
+      (setf (romacs-agent-cancelled session) t)
+      (romacs-agent--go-on session)
+      (should (= opened 1)))))
+
+(ert-deftest romacs-agent-pools-an-attachment-gone-wakes-what-it-held ()
+  ;; Ends held while it replayed go once its attachment's status changes;
+  ;; not at a limit, nothing of its was held.
+  (let* ((session (romacs-agent--make :id "r" :harness 'claude :options '(:parent "p") :limited '(:provider "claude")
+                                      :ends (list (list 4 "limit" t nil))))
+         (romacs-agent-tools--scheduled (make-hash-table :test #'equal))
+         (scheduled nil))
+    (cl-letf (((symbol-function 'run-at-time) (lambda (&rest args) (push args scheduled))))
+      (romacs-agent-tools--on-event session '(:type status :text "detached"))
+      (should (= (length scheduled) 1))
+      (clrhash romacs-agent-tools--scheduled)
+      (setf (romacs-agent-limited session) nil)
+      (romacs-agent-tools--on-event session '(:type status :text "detached"))
+      (should (= (length scheduled) 1))
+      (setf (romacs-agent-limited session) '(:provider "claude") (romacs-agent-ends session) nil)
+      (romacs-agent-tools--on-event session '(:type status :text "detached"))
+      (should (= (length scheduled) 1)))))
+
+(ert-deftest romacs-agent-pools-a-message-unsure-is-told-to-the-parent ()
+  ;; Kept messages whose sending its records could not say: its parent is
+  ;; told once, a turn of its own; a task with no parent has it in its chat.
+  (let ((delivered nil)
+        (parent (romacs-agent--make :id "p" :harness 'claude :state 'idle))
+        (romacs-agent--sessions (make-hash-table :test #'equal))
+        (event (list :type 'error :unsure t :text "may not have reached it")))
+    (puthash "p" parent romacs-agent--sessions)
+    (cl-letf (((symbol-function 'romacs-agent-tools--deliver)
+               (lambda (session text _delivered _valid _messages kind) (push (list session text kind) delivered))))
+      (romacs-agent-tools--say-unsure (romacs-agent--make :id "c" :options '(:parent "p")) event)
+      (should (equal delivered (list (list parent "may not have reached it" 'next))))
+      (romacs-agent-tools--say-unsure (romacs-agent--make :id "o") event)
+      (romacs-agent-tools--say-unsure (romacs-agent--make :id "c" :options '(:parent "p")) '(:type error :text "other"))
+      (should (= (length delivered) 1)))))
 
 (ert-deftest romacs-agent-pools-the-room-file-has-one-writer ()
   (romacs-agent-pools-tests--with
@@ -429,7 +731,6 @@ a time, `allow' marks it allowed."
            (romacs-agent-room-check-interval 600)
            (romacs-agent-tools--resumes (make-hash-table :test #'eq :weakness 'key))
            (romacs-agent-tools--resets-used (make-hash-table :test #'eq :weakness 'key))
-           (romacs-agent-tools--moving (make-hash-table :test #'equal))
            (romacs-agent-switch-delay 0) (romacs-agent-resume-margin 1))
       (puthash "e" session romacs-agent--sessions)
       (romacs-agent--manifest session nil)

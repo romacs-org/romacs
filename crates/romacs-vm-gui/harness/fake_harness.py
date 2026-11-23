@@ -27,9 +27,16 @@ its tools as a real harness does, and answers control requests.  Its
                      0.2 s (the unit's cgroup must end it)
 
 Every tool call it makes is logged to $FAKE_HARNESS_LOG as one JSON line.
+A spent file in the account directory rejects turns until its epoch-second
+reset (an empty file means no reset during the test).  With
+$FAKE_HARNESS_TRANSCRIPT set it keeps each prompt in its own transcript, in
+the account directory, as Claude Code does, and reads it on --resume;
+unset, it writes nothing there (the workflows that hold Romacs to writing
+nothing in a configuration directory).
 """
 import json
 import os
+from pathlib import Path
 import queue
 import subprocess
 import sys
@@ -75,6 +82,23 @@ def argument(name):
     return sys.argv[sys.argv.index(name) + 1] if name in sys.argv else None
 
 
+def message_body(text):
+    """Unwrap a parent's scripted command while keeping the actual input in the log."""
+    if text.startswith('<romacs-message '):
+        _, _, body = text.partition('\n')
+        if body.startswith(('wait ', 'say ')):
+            return body.partition('\n</romacs-message>')[0]
+    return text
+
+
+def spent_until(marker):
+    try:
+        reset = marker.read_text().strip()
+    except FileNotFoundError:
+        return None
+    return int(reset) if reset else int(time.time()) + 3600
+
+
 def evaluator_reply(prompt):
     """A model's answer to Gnosis's evaluator or tutor prompt, or None:
     `pass' unless the response says MALFORMED, then not JSON."""
@@ -96,6 +120,29 @@ class Harness:
         self.busy = False
         self.approvals = {}
         self.turn = 0
+        self.config = Path(os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude')
+        self.transcript = self.config / 'projects' / os.getcwd().replace('/', '-') / f'{self.session}.jsonl'
+        self.unseen = []
+
+    def log_input(self, **fields):
+        log(session=self.session, config_dir=str(self.config), **fields)
+
+    def record_input(self, text):
+        if os.environ.get('FAKE_HARNESS_TRANSCRIPT'):
+            self.transcript.parent.mkdir(parents=True, exist_ok=True)
+            with self.transcript.open('a') as transcript:
+                transcript.write(json.dumps({'type': 'user', 'sessionId': self.session,
+                                             'cwd': os.getcwd(), 'message': {'role': 'user', 'content': text}}) + '\n')
+        self.log_input(received=text)
+        self.unseen.append(text)
+
+    def read_transcript(self):
+        if self.transcript.exists():
+            for line in self.transcript.read_text().splitlines():
+                entry = json.loads(line)
+                content = entry.get('message', {}).get('content')
+                if entry.get('type') == 'user' and isinstance(content, str):
+                    self.log_input(seen=content, resumed=True)
 
     @staticmethod
     def connect(config_file):
@@ -119,8 +166,19 @@ class Harness:
               'message': {'id': message_id, 'content': [{'type': 'text', 'text': text}]}})
 
     def result(self, text, error=False):
+        reset = spent_until(self.config / 'spent')
+        fields = {}
+        if reset is not None and time.time() < reset:
+            emit({'type': 'rate_limit_event', 'rate_limit_info': {'status': 'rejected', 'resetsAt': reset,
+                                                                'rateLimitType': 'seven_day', 'utilization': 1.0}})
+            text, error = "You've hit your weekly limit", True
+            fields['api_error'] = 'usage_limit_reached'
+        else:
+            for prompt in self.unseen:
+                self.log_input(seen=prompt)
+            self.unseen.clear()
         emit({'type': 'result', 'subtype': 'error_during_execution' if error else 'success', 'is_error': error,
-              'result': text, 'session_id': self.session, 'total_cost_usd': 0.0})
+              'result': text, 'session_id': self.session, 'total_cost_usd': 0.0, **fields})
 
     def call(self, name, arguments):
         if arguments.get('instance') == '?':
@@ -222,6 +280,9 @@ class Harness:
             log(wake=text[:400])
             self.stream('woken')
             return self.result(text)
+        if text.startswith(('Your last turn stopped', 'Your usage limit has reset')):
+            self.stream('continued')
+            return self.result('continued')
         reply = evaluator_reply(text)
         if reply is not None:
             log(evaluated=text[:200])
@@ -279,13 +340,21 @@ class Harness:
         threading.Thread(target=self.read_stdin, daemon=True).start()
         log(started=self.session, pid=os.getpid(), argv=sys.argv[1:], config_dir=os.environ.get('CLAUDE_CONFIG_DIR'),
             cwd=os.getcwd(), env={k: v for k, v in os.environ.items() if k.startswith(WATCHED)})
+        if argument('--resume'):
+            self.read_transcript()
         while True:
             text = self.inbox.get()
             if text is None:
                 return 0
             self.busy = True
             self.init()
-            self.run(text)
+            self.record_input(text)
+            body = message_body(text)
+            reset = spent_until(self.config / 'spent')
+            if not body.startswith('wait ') and reset is not None and time.time() < reset:
+                self.result('')
+            else:
+                self.run(body)
             self.busy = False
 
 

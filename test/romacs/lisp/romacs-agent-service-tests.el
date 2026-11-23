@@ -980,4 +980,32 @@ a state root of its own, and a service of its own on `socket'."
     (romacs-agent-replay-record copy (json-parse-string "{\"note\":{\"romacsNote\":1,\"type\":\"selection\"},\"seq\":3,\"t\":1.0}"))
     (should (equal (gethash "live" romacs-agent--held-notes) (list held)))))
 
+(ert-deftest romacs-agent-held-notes-of-two-runs-never-collide ()
+  ;; A journal an older run wrote has numeric note ids, this run's are
+  ;; UUIDs: replaying both lets go of each held note once, on its own echo.
+  (let* ((romacs-agent--held-notes (make-hash-table :test #'equal))
+         (session (romacs-agent--make :id "mixed" :harness 'claude :state 'idle))
+         (record (lambda (id) (json-parse-string (format "{\"note\":{\"romacsNote\":%s,\"type\":\"selection\"},\"seq\":3}"
+                                                         (if (numberp id) id (format "\"%s\"" id)))))))
+    (cl-letf (((symbol-function 'romacs-agent--check-note) #'ignore)
+              ((symbol-function 'romacs-agent--ensure-host) #'ignore)
+              ((symbol-function 'romacs-agent--notes-written) #'ignore))
+      (romacs-agent--note session (romacs-mcp--object "type" "selection"))
+      (romacs-agent--note session (romacs-mcp--object "type" "handoff")))
+    (let* ((held (gethash "mixed" romacs-agent--held-notes))
+           (ids (mapcar (lambda (h) (gethash "romacsNote" h)) held)))
+      (should (= (length ids) 2))
+      (should (cl-every #'romacs-agent--uuid-p ids))
+      (should-not (equal (car ids) (cadr ids)))
+      ;; The older run's notes, numbered from 1: none is this run's echo.
+      (dolist (old '(1 2 3)) (romacs-agent--held-echoed session (funcall record old)))
+      (should (equal (gethash "mixed" romacs-agent--held-notes) held))
+      ;; Each echo lets go of its own note, once; one seen again changes nothing.
+      (romacs-agent--held-echoed session (funcall record (car ids)))
+      (should (equal (gethash "mixed" romacs-agent--held-notes) (cdr held)))
+      (romacs-agent--held-echoed session (funcall record (car ids)))
+      (should (equal (gethash "mixed" romacs-agent--held-notes) (cdr held)))
+      (romacs-agent--held-echoed session (funcall record (cadr ids)))
+      (should-not (gethash "mixed" romacs-agent--held-notes)))))
+
 ;;; romacs-agent-service-tests.el ends here

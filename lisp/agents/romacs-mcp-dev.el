@@ -31,6 +31,7 @@
 (require 'cl-lib)
 (require 'romacs-mcp)
 (require 'romacs-dev-guide)
+(require 'romacs-agent-watch-exit)
 
 ;; Registering the tool must not load romacs-live, and a batch session has
 ;; no bundled autoloads to make its handler a function.
@@ -74,9 +75,8 @@ request is still there to poll for it."
     (romacs-mcp-defer (lambda () result))))
 
 (defvar romacs-mcp-dev-watch-function nil
-  "Called with a check's UNIT, its REPORT file and the time it was started,
-once it runs: non-nil when the session calling the tool will be told of
-its end (the agents layer watches it for that task).")
+  "Called after launch with a check's UNIT, REPORT file and INVOCATION ID.
+The ID may be nil.  Return non-nil when the calling session will be told.")
 
 (defun romacs-mcp-dev--unit (worktree)
   "The unit a check of WORKTREE runs as: one at a time for a tree, whose
@@ -93,33 +93,43 @@ test log is one too."
 (defun romacs-mcp-dev--environment (environment)
   "ENVIRONMENT, entries as in `process-environment', as systemd takes it:
 each name once with its first value, as `getenv' reads it, and only the
-entries systemd accepts."
+entries systemd accepts.  Leave exit-record variables to the manager."
   (let ((seen (make-hash-table :test #'equal)) (kept nil))
     (dolist (entry environment (nreverse kept))
-      (when (and (string-match "\\`\\([A-Za-z_][A-Za-z0-9_]*\\)=[^\n]*\\'" entry)
-                 (not (gethash (match-string 1 entry) seen)))
-        (puthash (match-string 1 entry) t seen)
+      (when-let* (((string-match "\\`\\([A-Za-z_][A-Za-z0-9_]*\\)=[^\n]*\\'" entry))
+                  (name (match-string 1 entry))
+                  ((not (member name '("RUNTIME_DIRECTORY" "INVOCATION_ID" "SERVICE_RESULT" "EXIT_CODE" "EXIT_STATUS"))))
+                  ((not (gethash name seen))))
+        (puthash name t seen)
         (push entry kept)))))
 
 (defun romacs-mcp-dev--unit-argv (unit report command directory environment)
   "systemd-run's arguments that run COMMAND in DIRECTORY as the user unit
 UNIT in the romacs-build slice, with ENVIRONMENT, its output in REPORT."
-  (append (list "--user" "--quiet" "--collect" "--slice=romacs-build" "--expand-environment=no"
+  (append (list "--user" "--collect" "--slice=romacs-build" "--expand-environment=no"
                 (concat "--unit=" unit) (concat "--working-directory=" directory)
-                (concat "--property=StandardOutput=truncate:" report) "--property=StandardError=inherit"
-                ;; The user manager's launch markers reach no checked binary.
-                (concat "--property=UnsetEnvironment=" (string-join (romacs--launch-markers) " ")))
+                (concat "--property=StandardOutput=truncate:" report) "--property=StandardError=inherit")
+          (romacs-agent-watch--exit-properties
+           (if (string-suffix-p ".service" unit) unit (concat unit ".service")))
+          ;; The user manager's launch markers reach no checked binary.
+          (list (concat "--property=UnsetEnvironment=" (string-join (romacs--launch-markers) " ")))
           (mapcar (lambda (entry) (concat "--setenv=" entry)) environment)
           (cons "--" command)))
 
 (defun romacs-mcp-dev--start (unit report command directory environment)
-  "Start COMMAND as UNIT (`romacs-mcp-dev--unit-argv'), or say why not."
+  "Start COMMAND as UNIT (`romacs-mcp-dev--unit-argv'), or say why not.
+Return the invocation ID printed by systemd-run, or nil if absent."
   (make-directory (file-name-directory report) t)
   (with-temp-buffer
     (unless (eql 0 (apply #'call-process "systemd-run" nil t nil
                           (romacs-mcp-dev--unit-argv unit report command directory environment)))
       (user-error "The check did not start as %s (one of this tree may be running; its report is %s): %s"
-                  unit report (string-trim (buffer-string))))))
+                  unit report (string-trim (buffer-string))))
+    (goto-char (point-min))
+    (let ((case-fold-search nil))
+      (save-match-data
+        (when (re-search-forward "invocation ID: \\([0-9a-f]\\{32\\}\\)\\_>" nil t)
+          (match-string 1))))))
 
 (defun romacs-mcp-dev--worktree (arguments)
   "The worktree ARGUMENTS name, as a directory."
@@ -134,13 +144,12 @@ with the unit, its report file, and whether the caller will be told."
          (command (romacs-mcp-dev--command worktree arguments))
          (unit (romacs-mcp-dev--unit worktree))
          (report (romacs-mcp-dev--report unit))
-         (started (float-time)))
-    (romacs-mcp-dev--start unit report command worktree
-                           (romacs-mcp-dev--environment
-                            (append (and target (list (concat "CARGO_TARGET_DIR=" (expand-file-name target))))
-                                    process-environment)))
+         (environment (romacs-mcp-dev--environment
+                       (append (and target (list (concat "CARGO_TARGET_DIR=" (expand-file-name target))))
+                               process-environment)))
+         (invocation (romacs-mcp-dev--start unit report command worktree environment)))
     (let ((watched (and romacs-mcp-dev-watch-function
-                        (funcall romacs-mcp-dev-watch-function unit report started))))
+                        (funcall romacs-mcp-dev-watch-function unit report invocation))))
       (romacs-mcp--object
        "unit" unit "report" report "watched" (if watched t :false)
        "next" (format (if watched
