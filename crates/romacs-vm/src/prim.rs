@@ -439,22 +439,13 @@ mod leaf {
         /// entry holds the slot's value as GNU makes it: SPEC, or
         /// `[SPEC MODES]' for a command with modes.
         pub(crate) fn interactive_spec(&mut self, closure: Value) -> Option<(Value, Value)> {
-            let (form, thunk) = self.interactive_entry(closure)?;
+            let (form, thunk) = self.vm.interactive_entry(closure)?;
             Some((self.vector_get(form, Value::integer(0).unwrap()).unwrap_or(form), thunk))
         }
         /// The MODES of a closure's `(interactive SPEC . MODES)', or nil.
         pub(crate) fn interactive_modes(&mut self, closure: Value) -> Value {
-            let Some((form, _)) = self.interactive_entry(closure) else { return Value::NIL };
+            let Some((form, _)) = self.vm.interactive_entry(closure) else { return Value::NIL };
             self.vector_get(form, Value::integer(1).unwrap()).unwrap_or(Value::NIL)
-        }
-        fn interactive_entry(&mut self, closure: Value) -> Option<(Value, Value)> {
-            let slot = *self.vm.names.get(super::INTERACTIVE_TABLE)?;
-            let table = self.vm.slots[slot].value;
-            if table == Value::UNBOUND {
-                return None;
-            }
-            let entry = self.vm.declaration_hash_get(table, closure).ok()??;
-            self.pair(entry)
         }
         pub(crate) fn closure_document(&self, closure: Value) -> Value {
             closure.index_if(4).and_then(|i| self.vm.closures.get(i))
@@ -467,18 +458,7 @@ mod leaf {
             Some((f.required, f.arity, f.rest))
         }
         pub(crate) fn set_interactive_spec(&mut self, closure: Value, spec: Value, thunk: Value) -> std::result::Result<(), Fault> {
-            let slot = self.vm.slot(super::INTERACTIVE_TABLE);
-            if self.vm.slots[slot].value == Value::UNBOUND {
-                // A private key-weak `eq' table that also sheds dead slots and
-                // capacity after each collection (`compact_local_bindings'):
-                // an ordinary GNU table keeps its slot array, which would hold
-                // the high-water mark of every interactive closure ever made.
-                let table = hash::HashTable::new_local_bindings();
-                self.vm.slots[slot].value = self.vm.allocate_object(data::Object::HashTable(Box::new(table)));
-            }
-            let table = self.vm.slots[slot].value;
-            let entry = self.cons(spec, thunk);
-            self.vm.declaration_hash_put(table, closure, entry).map_err(Fault::Error)
+            self.vm.register_interactive_spec(closure, spec, thunk).map_err(Fault::Error)
         }
         pub(crate) fn lifecycle_buffer(&mut self, arg: Value, create: bool, inhibit: bool) -> std::result::Result<(Value, bool), Fault> {
             if matches!(self.kind(arg), Kind::Buffer | Kind::ByteBuffer) { return Ok((arg, false)); }

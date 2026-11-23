@@ -890,10 +890,11 @@ impl Marking {
         // which may be through a closure alone.
         if let Some(lazy) = &function.lazy {
             w.stack.push(lazy.body);
-            for name in &lazy.names {
-                if let Name::Generated(id) = name && let Some(&slot) = view.generated_symbols.get(id) {
-                    w.stack.push(Value::reference(slot + 1, 7));
-                }
+        }
+        let capture_names = function.capture_names.iter().flatten().flatten();
+        for name in capture_names.chain(function.lazy.iter().flat_map(|lazy| &lazy.names)) {
+            if let Name::Generated(id) = name && let Some(&slot) = view.generated_symbols.get(id) {
+                w.stack.push(Value::reference(slot + 1, 7));
             }
         }
         // A pending compiled-Lisp body: what its code will name.

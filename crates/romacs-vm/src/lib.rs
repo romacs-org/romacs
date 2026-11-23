@@ -1101,12 +1101,11 @@ struct Function {
     /// holds an interpreted closure's body before macroexp.el is loaded.
     /// `code` is empty while this is present; every frame entry forces it.
     lazy: Option<Arc<LazyBody>>,
-    /// Whether it was compiled under dynamic binding, recorded where its
-    /// closure site sees no lexical binding: GNU's interpreted closure
-    /// keeps its whole visible environment, so there `(aref CLOSURE 2)'
-    /// is the dialect's alone, nil or (t). Code images and older cache
-    /// entries do not record it.
+    /// The binding dialect for interpreting an empty capture environment.
     dynamic: Option<bool>,
+    /// Names in capture-register order for slot 2. A compiler temporary
+    /// has no Lisp symbol. Code images do not record the names.
+    capture_names: Option<Vec<Option<Name>>>,
     /// A compiled-Lisp body not yet decoded (`compiled_lisp`), decoded at
     /// its first call as a `mapped_code` body is. `code` is empty while it
     /// is here.
@@ -2427,10 +2426,7 @@ impl Vm {
         }
         // GNU's definition expansion consumes metadata before compiling the
         // executable body. Do not invoke a user-defined `declare' macro here.
-        let mut body = body;
-        if body.len() > 1 && body.first().is_some_and(|form| self.form_is_string(form)) {
-            body = &body[1..];
-        }
+        let mut body = self.without_lambda_doc(body);
         while matches!(body.first(), Some(Form::List(items)) if matches!(items.first(), Some(Form::Sym(name)) if name == "declare"))
         {
             body = &body[1..];
@@ -2472,10 +2468,6 @@ impl Vm {
             .zip(&used)
             .filter_map(|(&mutated, &keep)| keep.then_some(mutated || keep_captures))
             .collect();
-        if keep_captures {
-            used.fill(true);
-        }
-        let visible = names.len();
         let retained = used.iter().filter(|&&keep| keep).count();
         let removed = names.len() - retained;
         if removed != 0 {
@@ -2517,7 +2509,8 @@ impl Vm {
             sites: b.sites,
             lazy: None,
             pending: None,
-            dynamic: (visible == 0).then_some(self.dynamic_scope),
+            dynamic: Some(self.dynamic_scope),
+            capture_names: Some(self.capture_names(&names)),
             params: Some(args.to_vec()),
             key: closure_key::of_forms(self, &closure_key::Context { dynamic: self.dynamic_scope, names: &names, specials: local_specials }, args, body, &key_extra),
         });
@@ -2550,8 +2543,8 @@ impl Vm {
         if self.lazy_regime || ((self.lambda_depth > 0 || self.evaluating) && b.env.is_empty()) {
             return self.lazy_lambda(b, args, body, false);
         }
-        // Ordinary closures retain only executable state. Source metadata is
-        // reserved for explicit make-interpreted-closure values.
+        // Eager compilation keeps the lambda list and capture names, but
+        // only a lazily held body keeps its source forms.
         self.lambda_depth += 1;
         let compiled = self.function(args, body, &b.env, &b.local_specials);
         self.lambda_depth -= 1;
@@ -2572,9 +2565,15 @@ impl Vm {
         b.emit(Op::Closure(r, id, site));
         Ok(r)
     }
+    fn without_lambda_doc<'a>(&self, body: &'a [Form]) -> &'a [Form] {
+        if body.len() > 1 && body.first().is_some_and(|form| self.form_is_string(form)) {
+            &body[1..]
+        } else {
+            body
+        }
+    }
     /// R215: a closure over an UNEXPANDED body, compiled at its first call.
-    /// It captures every visible lexical binding (GNU's interpreted closure
-    /// captures its whole environment), since free variables are unknown
+    /// It captures every visible lexical binding, since free variables are unknown
     /// until expansion. Each capture is reported as mutated, so no binding
     /// it can see is ever unboxed out from under the later compilation.
     fn lazy_lambda(&mut self, b: &mut Builder, args: &[Form], body: &[Form], deferred: bool) -> Result<usize> {
@@ -2585,7 +2584,7 @@ impl Vm {
         let cells = names.iter().map(|n| b.env[n].cell).collect();
         let lates = names.iter().map(|n| b.env[n].late).collect();
         let shadows = names.iter().map(|n| b.env[n].shadow).collect();
-        let body_value = self.literal(&Form::List(body.to_vec()))?;
+        let body_value = self.literal(&Form::List(self.without_lambda_doc(body).to_vec()))?;
         let lazy = LazyBody {
             body: body_value,
             args: args.to_vec(),
@@ -2611,7 +2610,8 @@ impl Vm {
             required,
             rest,
             sites: vec![],
-            dynamic: names.is_empty().then_some(self.dynamic_scope),
+            dynamic: Some(self.dynamic_scope),
+            capture_names: Some(self.capture_names(&names)),
             lazy: Some(Arc::new(lazy)),
             pending: None,
             params: Some(args.to_vec()),
@@ -3966,8 +3966,8 @@ impl Vm {
             Cons => {
                 Ok(self.alloc_cons(a[0], a[1]))
             }
+            Length if a[0].tag() == 4 => Value::integer(self.closure_length(a[0])? as i64),
             Length => {
-                if a[0].tag() == 4 && !self.closures[a[0].index(4)?].metadata.is_empty() { return Value::integer(self.closures[a[0].index(4)?].metadata.len() as i64); }
                 if a[0] != Value::NIL && a[0].tag() == 0 {
                     // Three sources: mapped UTF-8 strings, heap strings/vectors,
                     // and byte strings. Text counts scalars; byte strings count

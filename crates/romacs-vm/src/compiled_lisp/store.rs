@@ -17,9 +17,9 @@ use serde_json::Value as Json;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
-const MAGIC: &[u8] = b"RLC4\n";
+const MAGIC: &[u8] = b"RLC5\n";
 /// What a key binds besides its inputs: this format and the compiler.
-const FORMAT: &str = concat!("romacs-compiled-lisp 6\n", env!("VM2_COMPILER_ID"));
+const FORMAT: &str = concat!("romacs-compiled-lisp 7\n", env!("VM2_COMPILER_ID"));
 /// The default cap on the store's artifacts, in bytes.
 pub(super) const BUDGET: u64 = 256 << 20;
 

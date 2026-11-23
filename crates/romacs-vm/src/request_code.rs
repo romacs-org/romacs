@@ -266,6 +266,7 @@ impl Vm {
                 lazy: None,
                 pending: None,
                 dynamic: None,
+                capture_names: None,
                 params: None,
                 key: None,
             },

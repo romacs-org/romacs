@@ -38,6 +38,10 @@ mod tests {
         let document = loaded.closures[f.index(4).unwrap()].document;
         assert!(!Vm::image_value(document));
         assert_eq!(loaded.str_view(document).unwrap().bytes(), "κείμενο".as_bytes());
+        assert_eq!(loaded.closure_slot(f, 0).unwrap_err(), "array required");
+        assert_eq!(loaded.closure_slot(f, 2).unwrap_err(), "array required");
+        assert_eq!(loaded.closure_length(f).unwrap(), 5);
+        assert_eq!(loaded.closure_slot(f, 4).unwrap(), document);
         std::fs::remove_dir_all(path).unwrap();
     }
     #[test]
@@ -95,7 +99,7 @@ mod tests {
         let mut vm = Vm::new();
         vm.set_gc_verify(true);
         // COUNTER counts in X; (twin F) is a closure over F's environment, as
-        // nadvice makes one: both interpreted, the ordinary kind being opaque.
+        // nadvice makes one: both from explicit interpreted-closure metadata.
         check(&mut vm, "(progn (defalias 'twin (lambda (f) (make-interpreted-closure '() '((setq x (1+ x))) (aref f 2) nil nil))) \
             (setq garbage (make-list 500 'g)) (setq counter (make-interpreted-closure '() '((setq x (1+ x))) (list (cons 'x 0) t) nil nil)) (setq garbage nil) t)", "t");
         let shared = "(let ((g (twin counter))) (list (funcall counter) (funcall g) (funcall counter) (eq (car (aref g 2)) (car (aref counter 2)))))";
@@ -231,20 +235,65 @@ mod tests {
     }
 
     #[test]
-    fn ordinary_closures_remain_opaque_in_both_regimes() {
+    fn ordinary_closure_slots_in_both_regimes() {
         for lazy in [false, true] {
             let mut vm = Vm::new();
             vm.lazy_regime = lazy;
-            for source in [
-                "(lambda () 1)",
-                "(lambda () (:documentation 'kind) 1)",
-                "(lambda () (interactive \"p\") 1)",
+            let value = vm.eval_source_raw(r#"
+                (setq slot-test (let ((y 5))
+                  (lambda (x) "doc" (interactive (list y)) (+ x y))))"#).unwrap();
+            assert_eq!(vm.closure_length(value).unwrap(), 6);
+            for (index, expected) in [
+                (0, "(x)"), (2, "((y . 5))"), (3, "nil"), (4, "\"doc\""), (5, "(list y)"),
             ] {
-                let value = vm.eval_source_raw(&format!("(let ((f {source})) (list (condition-case nil (length f) (wrong-type-argument 'opaque)) (condition-case nil (aref f 1) (wrong-type-argument 'opaque)) (funcall f)))")).unwrap();
-                assert_eq!(vm.display(value).unwrap(), "(opaque opaque 1)");
+                let slot = vm.closure_slot(value, index).unwrap();
+                assert_eq!(vm.display(slot).unwrap(), expected);
             }
+            if lazy {
+                let body = vm.closure_slot(value, 1).unwrap();
+                assert_eq!(vm.display(body).unwrap(), "((+ x y))");
+                assert_eq!(vm.eval_source_raw("(funcall slot-test 2)").unwrap().as_integer().unwrap(), 7);
+            }
+            assert_eq!(vm.closure_slot(value, 1).unwrap_err(), "array required");
+            assert_eq!(vm.closure_slot(value, 6).unwrap_err(), "index out of range");
         }
     }
+
+    #[test]
+    fn ordinary_closure_environment_pair_shares_its_cell_across_collection() {
+        for lazy in [false, true] {
+            let mut vm = Vm::new();
+            vm.lazy_regime = lazy;
+            vm.set_gc_verify(true);
+            vm.allocation.compact = true;
+            let created = vm.eval_source_raw("
+                (let ((y (list 5)))
+                  (setq slot-counter (lambda () (setq y (list (1+ (car y)))))
+                        slot-env (aref slot-counter 2)))
+                (assq 'y slot-env)").unwrap();
+            assert_eq!(vm.display(created).unwrap(), "(y 5)");
+            vm.collect(&mut []);
+            let result = vm.eval_source_raw("
+                (setcdr (assq 'y slot-env) (list 40))
+                (list (funcall slot-counter)
+                      (cdr (assq 'y slot-env))
+                      (eq (assq 'y slot-env) (assq 'y (aref slot-counter 2))))").unwrap();
+            assert_eq!(vm.display(result).unwrap(), "((41) (41) t)");
+        }
+    }
+
+    #[test]
+    fn ordinary_closure_environment_keeps_an_uninterned_name_alive() {
+        let mut vm = Vm::new();
+        vm.eval_source_raw("
+            (setq uninterned-capture
+                  (let ((name (make-symbol \"local-name\")))
+                    (eval `(let ((,name 12)) (lambda () ,name)) t)))").unwrap();
+        vm.collect(&mut []);
+        let result = vm.eval_source_raw("(symbol-name (car (car (aref uninterned-capture 2))))").unwrap();
+        assert_eq!(vm.display(result).unwrap(), "\"local-name\"");
+    }
+
     #[test]
     fn ordinary_closures_answer_their_lambda_list() {
         for lazy in [false, true] {
@@ -265,6 +314,10 @@ mod tests {
 
 use super::*;
 
+fn ordinary_slot_count(document: Value, interactive: bool) -> usize {
+    if interactive { 6 } else if document != Value::NIL { 5 } else { 3 }
+}
+
 impl Vm {
     pub(super) fn read_capture_cell(&self, index: usize) -> Value {
         self.cell_pairs
@@ -279,6 +332,97 @@ impl Vm {
             self.conses.set_cdr(pair.index(3).expect("private lexical pair"), value);
         }
     }
+    pub(super) fn interactive_entry(&mut self, closure: Value) -> Option<(Value, Value)> {
+        let slot = *self.names.get(prim::INTERACTIVE_TABLE)?;
+        let table = self.slots[slot].value;
+        let entry = self.declaration_hash_get(table, closure).ok()??;
+        self.cons_pair(entry).ok()
+    }
+
+    pub(super) fn register_interactive_spec(&mut self, closure: Value, spec: Value, thunk: Value) -> Result<()> {
+        let slot = self.slot(prim::INTERACTIVE_TABLE);
+        if self.slots[slot].value == Value::UNBOUND {
+            // The key-weak table sheds capacity as well as dead closures.
+            let table = Box::new(hash::HashTable::new_local_bindings());
+            self.slots[slot].value = self.allocate_object(data::Object::HashTable(table));
+        }
+        let table = self.slots[slot].value;
+        let entry = self.keymap_cons(spec, thunk);
+        self.declaration_hash_put(table, closure, entry)
+    }
+
+    pub(super) fn capture_names(&self, names: &[Name]) -> Vec<Option<Name>> {
+        names.iter().map(|name| match name {
+            Name::Generated(id) if !self.generated_symbols.contains_key(id) => None,
+            name => Some(name.clone()),
+        }).collect()
+    }
+
+    pub(super) fn closure_length(&mut self, value: Value) -> Result<usize> {
+        let closure = &self.closures[value.index(4)?];
+        if !closure.metadata.is_empty() {
+            return Ok(closure.metadata.len());
+        }
+        let document = closure.document;
+        Ok(ordinary_slot_count(document, self.interactive_entry(value).is_some()))
+    }
+
+    pub(super) fn closure_slot(&mut self, value: Value, index: usize) -> Result<Value> {
+        let closure = &self.closures[value.index(4)?];
+        let out_of_range = || "index out of range".into();
+        if !closure.metadata.is_empty() {
+            return closure.metadata.get(index).copied().ok_or_else(out_of_range);
+        }
+        let (function, document) = (closure.function, closure.document);
+        let interactive = (index >= 2).then(|| self.interactive_entry(value)).flatten();
+        if index >= ordinary_slot_count(document, interactive.is_some()) {
+            return Err(out_of_range());
+        }
+        let function = &self.functions[function];
+        let missing = || "array required".into();
+        match index {
+            0 => self.literal(&Form::List(function.params.clone().ok_or_else(missing)?)),
+            1 => function.lazy.as_ref().map(|body| body.body).ok_or_else(missing),
+            2 => self.closure_environment(value, interactive.map(|(_, thunk)| thunk)).ok_or_else(missing),
+            3 => Ok(Value::NIL),
+            4 => Ok(document),
+            5 => interactive.map(|(spec, _)| spec).ok_or_else(out_of_range),
+            _ => Err(out_of_range()),
+        }
+    }
+
+    fn closure_environment(&mut self, value: Value, thunk: Option<Value>) -> Option<Value> {
+        let dynamic = self.functions[self.closures[value.index_if(4)?].function].dynamic?;
+        let mut entries = self.named_captures(value)?.collect::<Vec<_>>();
+        if let Some(thunk) = thunk.filter(|&thunk| thunk != Value::NIL) {
+            let mut seen: NameSet<_> = entries.iter().map(|(name, _)| name.clone()).collect();
+            entries.extend(self.named_captures(thunk)?.filter(|(name, _)| seen.insert(name.clone())));
+        }
+        if entries.is_empty() {
+            return Some(if dynamic { Value::NIL } else { self.list_value(&[Value::TRUE]) });
+        }
+        let mut env = Value::NIL;
+        for (name, capture) in entries.into_iter().rev() {
+            let symbol = Value::reference(self.name_slot(&name) + 1, 7);
+            let pair = self.lexical_pair(symbol, capture);
+            env = self.keymap_cons(pair, env);
+        }
+        Some(env)
+    }
+
+    fn named_captures(&self, value: Value) -> Option<impl Iterator<Item = (Name, Value)> + '_> {
+        let closure = self.closures.get(value.index_if(4)?)?;
+        let function = &self.functions[closure.function];
+        let names = match &function.capture_names {
+            Some(names) => names.as_slice(),
+            None if closure.captures.is_empty() => &[],
+            None => return None,
+        };
+        Some(names.iter().zip(&closure.captures).filter_map(|(name, &capture)| {
+            Some((name.clone()?, capture))
+        }))
+    }
+
     fn lexical_pair(&mut self, name: Value, capture: Value) -> Value {
         if capture.tag() == 5 {
             let index = capture.payload() as usize;
@@ -459,7 +603,8 @@ impl Vm {
                     key: None,
                     lazy: Some(Arc::new(lazy)),
                     pending: None,
-                    dynamic: names.is_empty().then_some(a[2] == Value::NIL),
+                    dynamic: Some(a[2] == Value::NIL),
+                    capture_names: Some(self.capture_names(&names)),
                 });
                 (function, names)
                 } else {
@@ -521,15 +666,7 @@ impl Vm {
                         });
                         thunk
                     };
-                    let slot = self.slot(prim::INTERACTIVE_TABLE);
-                    if self.slots[slot].value == Value::UNBOUND {
-                        self.slots[slot].value = self.allocate_object(data::Object::HashTable(
-                            Box::new(hash::HashTable::new_local_bindings()),
-                        ));
-                    }
-                    let table = self.slots[slot].value;
-                    let entry = self.keymap_cons(slot_value, thunk);
-                    self.declaration_hash_put(table, result, entry)?;
+                    self.register_interactive_spec(result, slot_value, thunk)?;
                 }
                 Ok(result)
             }

@@ -380,28 +380,7 @@ impl<'a> Encoder<'a> {
             return Err("an unmaterialised function body".into());
         }
         let mut out = Writer::default();
-        for n in [f.regs, f.captures, f.arity, f.required] {
-            out.n(n);
-        }
-        out.byte(u8::from(f.rest));
-        out.byte(match f.dynamic { None => 0, Some(false) => 1, Some(true) => 2 });
-        match &f.params {
-            None => out.byte(0),
-            Some(params) => {
-                out.byte(1);
-                out.n(params.len());
-                for p in params {
-                    self.form(&mut out, p)?;
-                }
-            }
-        }
-        match f.key {
-            None => out.byte(0),
-            Some(key) => {
-                out.byte(1);
-                for byte in key.to_le_bytes() { out.byte(byte); }
-            }
-        }
+        self.write_function_header(&mut out, &f)?;
         let mut body = Writer::default();
         let mut deps = Deps::default();
         body.n(f.sites.len());
@@ -431,6 +410,33 @@ impl<'a> Encoder<'a> {
         out.data(&body.bytes);
         Ok(out.bytes)
     }
+    fn write_function_header(&mut self, out: &mut Writer, f: &Function) -> Result<()> {
+        for n in [f.regs, f.captures, f.arity, f.required] {
+            out.n(n);
+        }
+        out.byte(u8::from(f.rest));
+        out.byte(match f.dynamic { None => 0, Some(false) => 1, Some(true) => 2 });
+        match &f.params {
+            None => out.byte(0),
+            Some(params) => {
+                out.byte(1);
+                out.n(params.len());
+                for p in params {
+                    self.form(out, p)?;
+                }
+            }
+        }
+        self.write_capture_names(out, f.capture_names.as_deref())?;
+        match f.key {
+            None => out.byte(0),
+            Some(key) => {
+                out.byte(1);
+                for byte in key.to_le_bytes() { out.byte(byte); }
+            }
+        }
+        Ok(())
+    }
+
     /// R in a body: a node or uninterned symbol by its index in DEPS.
     fn write_local(out: &mut Writer, deps: &mut Deps, r: Ref) {
         match r {
@@ -503,6 +509,24 @@ impl<'a> Encoder<'a> {
         }
         Ok(())
     }
+    fn write_capture_names(&mut self, out: &mut Writer, names: Option<&[Option<Name>]>) -> Result<()> {
+        let Some(names) = names else {
+            out.byte(0);
+            return Ok(());
+        };
+        out.byte(1);
+        out.n(names.len());
+        for name in names {
+            let form = match name {
+                None => { out.byte(0); continue; }
+                Some(Name::Source(name)) => Form::Sym(name.clone()),
+                Some(Name::Generated(id)) => Form::Generated(*id),
+            };
+            self.form(out, &form)?;
+        }
+        Ok(())
+    }
+
     fn form(&mut self, out: &mut Writer, form: &Form) -> Result<()> {
         match form {
             Form::Int(n) => { out.byte(0); out.i(*n) }
@@ -701,6 +725,7 @@ impl Install<'_> {
             }
             _ => return Err("bad parameter list".into()),
         };
+        let capture_names = self.read_capture_names(r, captures, uninterned, vm)?;
         let key = match r.byte()? {
             0 => None,
             1 => {
@@ -716,8 +741,28 @@ impl Install<'_> {
         let body = r.data()?;
         let start = body.as_ptr() as usize - self.bytes.as_ptr() as usize;
         let function = Function { capture_mutations: vec![], mapped_code: None, code: vec![], regs, captures, arity, required, rest,
-                                  sites: vec![], lazy: None, dynamic, params, pending: None, key };
+                                  sites: vec![], lazy: None, dynamic, capture_names, params, pending: None, key };
         Ok((function, BodyRefs { values, children, caches, body: start..start + body.len() }))
+    }
+
+    fn read_capture_names(&self, r: &mut Reader, captures: usize, uninterned: &[usize], vm: &Vm)
+        -> Result<Option<Vec<Option<Name>>>>
+    {
+        match r.byte()? {
+            0 => return Ok(None),
+            1 => {},
+            _ => return Err("bad capture names".into()),
+        }
+        if r.count()? != captures {
+            return Err("capture names do not match the capture layout".into());
+        }
+        (0..captures)
+            .map(|_| {
+                let tag = r.byte()?;
+                if tag == 0 { Ok(None) } else { read_name(r, tag, self.slots, uninterned, vm).map(Some) }
+            })
+            .collect::<Result<Vec<_>>>()
+            .map(Some)
     }
 }
 
@@ -804,9 +849,25 @@ impl Vm {
         }
         let decoded = Function { capture_mutations, mapped_code: None, code, regs: f.regs, captures: f.captures, arity: f.arity,
                                  required: f.required, rest: f.rest, sites, lazy: None, dynamic: f.dynamic,
-                                 params: f.params.clone(), pending: None, key: f.key };
+                                 capture_names: f.capture_names.clone(), params: f.params.clone(), pending: None, key: f.key };
         validate_body(&decoded, |child| self.functions.get(child).map(|f| f.captures), self.slots.len(), self.caches.len())?;
         Ok(decoded)
+    }
+}
+
+fn read_name(r: &mut Reader, tag: u8, names: &[usize], uninterned: &[usize], vm: &Vm) -> Result<Name> {
+    let bad = || "compiled Lisp artifact: bad symbol";
+    match tag {
+        2 => {
+            let slot = *names.get(r.n()?).ok_or_else(bad)?;
+            Ok(Name::Source(vm.symbol_names[slot].clone()))
+        }
+        3 => {
+            let slot = *uninterned.get(r.n()?).ok_or_else(bad)?;
+            let id = vm.generated_slots.get(&slot).ok_or_else(bad)?;
+            Ok(Name::Generated(*id))
+        }
+        _ => Err(bad().into()),
     }
 }
 
@@ -818,11 +879,10 @@ fn read_form(r: &mut Reader, names: &[usize], uninterned: &[usize], vm: &Vm) -> 
     Ok(match r.byte()? {
         0 => Form::Int(r.i()?),
         1 => Form::Float(f64::from_bits(r.u()?)),
-        2 => Form::Sym(vm.symbol_names[*names.get(r.n()?).ok_or("compiled Lisp artifact: bad name")?].clone()),
-        3 => {
-            let slot = *uninterned.get(r.n()?).ok_or("compiled Lisp artifact: bad symbol")?;
-            Form::Generated(*vm.generated_slots.get(&slot).ok_or("compiled Lisp artifact: bad symbol")?)
-        }
+        tag @ (2 | 3) => match read_name(r, tag, names, uninterned, vm)? {
+            Name::Source(name) => Form::Sym(name),
+            Name::Generated(id) => Form::Generated(id),
+        },
         4 => Form::List(list(r)?),
         5 => Form::String(r.str()?.to_owned()),
         6 => Form::Bytes(r.data()?.to_vec()),

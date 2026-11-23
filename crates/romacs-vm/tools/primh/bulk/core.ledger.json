@@ -21,10 +21,6 @@
    "class": "PRINTER",
    "divergence": "VM2-EV2"
   },
-  "length/0071": {
-   "class": "VALUE",
-   "divergence": "VM2-CLOSEQ1"
-  },
   "mapcar/0011": {
    "class": "PRINTER",
    "divergence": "VM2-EV2"

@@ -1,5 +1,5 @@
-//! Bounded oclosure frontier evidence. Ordinary closure introspection is parked;
-//! explicit interpreted constructors own their metadata independently.
+//! Ordinary compiled closures discard their source body. Explicit
+//! interpreted constructors own the body in their metadata.
 use romacs_vm::Vm;
 
 fn value(vm: &mut Vm, source: &str) -> String {

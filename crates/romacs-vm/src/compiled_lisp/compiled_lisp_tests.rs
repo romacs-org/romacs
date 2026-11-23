@@ -56,6 +56,16 @@ fn units_round_trip() {
     }
 }
 
+#[test]
+fn capture_names_survive_a_unit_and_pending_decode() {
+    let mut vm = Vm::new();
+    let form = "'(let ((f (let ((body-var 4) (spec-var 5) (unused 6))
+                       (lambda () (interactive (list spec-var)) body-var))))
+                   (list (aref f 2) (funcall f) (aref f 2)))";
+    assert_eq!(through_unit(&mut vm, form),
+               "(((body-var . 4) (spec-var . 5)) 4 ((body-var . 4) (spec-var . 5)))");
+}
+
 /// A char-table constant round-trips: its subtype, default, parent, extra
 /// slots and own values, the default not baked into them, so
 /// `map-char-table' sees what the original holds.
