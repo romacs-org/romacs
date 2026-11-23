@@ -41,13 +41,26 @@ obsolete, with no current name or for an older major version."
                        (>= (car (version-to-list (caddr obsolete))) emacs-major-version)
                      (error t)))))))
 
+(defvar romacs-commands--reported-command-errors (make-hash-table :test #'eq)
+  "Symbols whose errors from `commandp' M-x has already reported.")
+
+(defun romacs-commands--command-p (symbol)
+  "Return whether SYMBOL is a command, reporting a lookup error once."
+  (condition-case err
+      (commandp symbol)
+    (error
+     (unless (gethash symbol romacs-commands--reported-command-errors)
+       (puthash symbol t romacs-commands--reported-command-errors)
+       (message "M-x: commandp for %s: %s" symbol (error-message-string err)))
+     nil)))
+
 (defun romacs-commands--predicate (buffer)
   "M-x's predicate in BUFFER, as simple.el's: a command that
 `read-extended-command-predicate' accepts (any command, when it is nil).
 A predicate that signals an error is taken to accept, the error shown
 (`condition-case-unless-debug')."
   (lambda (sym)
-    (and (commandp sym)
+    (and (romacs-commands--command-p sym)
          (cond ((null read-extended-command-predicate))
                ((functionp read-extended-command-predicate)
                 ;; Don't let bugs break M-x completion; interpret
