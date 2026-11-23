@@ -1,4 +1,4 @@
-//! The parse-state summaries of a text (`crate::syntax_summary`), kept in
+//! The forward syntax summaries of a text (`crate::syntax_summary`), kept in
 //! a tree beside it: leaves of about a leaf's characters ([`LEAF`]) under
 //! a B-tree, each node holding its span's summary for the keys it was
 //! entered in, and for the level counts where the span closes past the
@@ -6,7 +6,8 @@
 //! its two partial ends and applies O(log n) summaries between. An edit
 //! changes the leaves it touches and the nodes above them, nothing else:
 //! every position a summary holds is relative to its node, and a split or
-//! a removal stays inside the edited path.
+//! a removal stays inside the edited path. A forward list scan with a
+//! nonbinding count uses the same tree, carrying scanner continuations.
 //!
 //! Summaries read the text, the syntax table and `comment-end-can-be-escaped'
 //! and nothing else (scan_sexps_forward's inputs), so the index is valid
@@ -15,16 +16,14 @@
 //! them as the scanner does, and a change of the property drops the
 //! summaries of the leaves it touches (`TextBody::sync_syntax_properties`).
 //!
-//! A leaf never ends between the two characters of a two-character comment
-//! start, where a scan cannot stop and resume exactly
-//! (`crate::syntax_scan::Continuation`): an edit, a property change or a new
-//! context leaves its end unchecked, and the next parse moves such an end
-//! past the pair, at most a leaf's length on; a leaf with no such place
-//! keeps an unsafe end, and a parse scans across it to the next safe one.
+//! A leaf prefers to end where both scanners can stop and resume exactly.
+//! An edit, a property change or a new context leaves its end unchecked.
+//! The next scan moves a cut after a possible split token at most a leaf's
+//! length on. A cut with no such place stays unsafe.
 //!
 //! It holds no Lisp value: a derived cache, neither a root nor visited by
 //! the collector, and a copy of a text starts without one.
-use crate::syntax_scan::{ParseState, R, Scanner, Text};
+use crate::syntax_scan::{self as scan, ParseState, R, Scanner, Text};
 use crate::syntax_summary::{self as summary, Key, Span, Summary};
 
 /// Characters in a leaf the index cuts; a leaf grown past twice this splits.
@@ -39,6 +38,12 @@ const KEYS: usize = 8;
 /// the count of open levels the summary is exact for, or none for the
 /// general one.
 type Slot = (Key, Option<u32>);
+
+#[derive(Clone, Debug, romacs_snapshot::Snapshot)]
+enum Entry {
+    Parse(Slot, Span),
+    Lists(summary::lists::Key, Option<summary::lists::Span>),
+}
 
 /// What summaries depend on besides the text: the syntax table, by its
 /// serial (`Vm::char_table_serial`) and the char-table writes so far (`crate::char_table::writes`:
@@ -57,13 +62,10 @@ pub(crate) struct Context {
 #[derive(Clone, Debug, Default, romacs_snapshot::Snapshot)]
 struct Node {
     chars: usize,
-    spans: Vec<(Slot, Span)>,
-    /// Leaves below (a leaf: itself) whose end is not yet known to lie
-    /// outside every two-character comment start, in the context's syntax.
+    spans: Vec<Entry>,
+    /// Leaves below (a leaf: itself) whose ends still need checking.
     unchecked: usize,
-    /// A checked leaf whose end lies inside one, with no place outside one
-    /// near enough to move it to: its span is Deep, and a parse scans it
-    /// together with the leaf after.
+    /// A checked leaf with no safe cut close enough to move its end to.
     unsafe_end: bool,
     children: Vec<Node>,
 }
@@ -72,6 +74,17 @@ impl Node {
     fn leaf(chars: usize) -> Self {
         Self { chars, unchecked: 1, ..Self::default() }
     }
+    fn parse_span(&self, at: usize) -> &Span {
+        let Entry::Parse(_, span) = &self.spans[at] else { unreachable!("a parse entry") };
+        span
+    }
+
+    fn remember(&mut self, entry: Entry) {
+        self.spans.truncate(KEYS - 1);
+        self.spans.reserve_exact(1);
+        self.spans.insert(0, entry);
+    }
+
     fn is_leaf(&self) -> bool {
         self.children.is_empty()
     }
@@ -187,6 +200,20 @@ impl SyntaxIndex {
         usize::try_from(chars).is_ok_and(|chars| chars >= 4 * LEAF)
     }
 
+    fn prepare<T: Text>(&mut self, scanner: &Scanner<'_, T>, chars: usize, context: Context) {
+        if self.context.as_ref() != Some(&context) {
+            if self.context.is_some() {
+                self.stats.switches += 1;
+            }
+            self.forget();
+            self.context = Some(context);
+        }
+        if self.root.as_ref().is_none_or(|root| root.chars != chars) {
+            self.root = Some(Self::build(Self::cut(self.leaf, chars)));
+        }
+        self.check_ends(scanner);
+    }
+
     /// Leaves of up to LEAF characters over CHARS.
     fn cut(leaf: usize, chars: usize) -> Vec<Node> {
         (0..chars).step_by(leaf).map(|at| Node::leaf(leaf.min(chars - at))).collect()
@@ -252,10 +279,9 @@ impl SyntaxIndex {
         }
     }
 
-    /// Check every unchecked leaf end: one inside a two-character comment
-    /// start moves to the first place after it that is not, if one lies
-    /// within a leaf's length, the characters between leaving the leaves
-    /// after; else the end stays, unsafe.
+    /// Move an unchecked cut past a possible split token at most a leaf's
+    /// length on, taking those characters from the next leaves. If there
+    /// is no safe cut in range, mark the existing one unsafe.
     fn check_ends<T: Text>(&mut self, scanner: &Scanner<'_, T>) {
         let leaf_chars = self.leaf;
         let Some(root) = &mut self.root else { return };
@@ -263,8 +289,14 @@ impl SyntaxIndex {
         let syntax = |at: usize| text.syntax(text.pos(position(at)));
         // Whether a scan can stop at offset AT and resume exactly.
         let total = root.chars;
-        let safe = |at: usize| at == 0 || at >= total
-            || !(crate::syntax_scan::comstart_first(syntax(at - 1)) && crate::syntax_scan::comstart_second(syntax(at)));
+        let safe = |at: usize| {
+            if at == 0 || at >= total {
+                return true;
+            }
+            let before = syntax(at - 1);
+            !matches!(before & 0xff, scan::SESCAPE | scan::SCHARQUOTE | scan::SMATH)
+                && !(scan::comstart_first(before) && scan::comstart_second(syntax(at)))
+        };
         while let Some((start, chars, was_unsafe)) = first_unchecked(root, 0) {
             let end = start + chars;
             let moved = (end..=(end + leaf_chars).min(total)).find(|&at| safe(at));
@@ -297,16 +329,16 @@ impl SyntaxIndex {
     /// that changes the count. NODE starts at character offset START.
     fn span<'a, T: Text>(counts: &mut Stats, scanner: &mut Scanner<'_, T>, node: &'a mut Node, start: usize, key: Key, levels: Option<u32>) -> &'a Span {
         let wanted = |span: &Span| levels.is_none_or(|open| matches!(span, Span::Exact(summary) if summary.fits(open as usize)));
-        let kept = |node: &Node, slot: Slot| node.spans.iter().position(|(kept, _)| *kept == slot);
+        let kept = |node: &Node, slot: Slot| node.spans.iter().position(|entry| matches!(entry, Entry::Parse(kept, _) if *kept == slot));
         let general = kept(node, (key, None));
-        if let Some(at) = general.filter(|&at| wanted(&node.spans[at].1)) {
-            return &node.spans[at].1;
+        if let Some(at) = general.filter(|&at| wanted(node.parse_span(at))) {
+            return node.parse_span(at);
         }
         if let Some(at) = levels.and_then(|_| kept(node, (key, levels))) {
-            return &node.spans[at].1;
+            return node.parse_span(at);
         }
         if general.is_none() && wanted(Self::make(counts, scanner, node, start, (key, None))) {
-            return &node.spans[0].1;
+            return node.parse_span(0);
         }
         Self::make(counts, scanner, node, start, (key, levels))
     }
@@ -322,12 +354,8 @@ impl SyntaxIndex {
         } else {
             Self::composed(counts, scanner, node, start, slot).map_or(Span::Deep, Span::Exact)
         };
-        node.spans.truncate(KEYS - 1);
-        // Room for this one only: most nodes keep one or two keys, and a
-        // slot is large beside a leaf's characters.
-        node.spans.reserve_exact(1);
-        node.spans.insert(0, (slot, span));
-        &node.spans[0].1
+        node.remember(Entry::Parse(slot, span));
+        node.parse_span(0)
     }
 
     /// The summaries of NODE's children as one, the first child entered as
@@ -357,16 +385,13 @@ impl SyntaxIndex {
         })
     }
 
-    /// Carry STATE by summaries from offset FROM toward TO, both leaf
-    /// boundaries, under NODE, which starts at START: the offset reached,
-    /// TO or the start of a leaf no summary carries STATE across.
-    fn fold<T: Text>(counts: &mut Stats, scanner: &mut Scanner<'_, T>, state: &mut ParseState, node: &mut Node,
-                     start: usize, (from, to): (usize, usize)) -> usize {
+    /// Visit nodes in order, descending where the caller cannot cross
+    /// under that node. Stop at the first leaf it cannot cross.
+    fn fold(node: &mut Node, start: usize, (from, to): (usize, usize),
+            visit: &mut impl FnMut(&mut Node, usize) -> bool) -> usize {
         let end = start + node.chars;
         if from <= start && end <= to {
-            let levels = u32::try_from(state.levelstarts.len()).ok();
-            if let Span::Exact(span) = Self::span(counts, scanner, node, start, Key::of(state), levels)
-                && summary::apply(state, span, position(start)) {
+            if visit(node, start) {
                 return end;
             }
             if node.is_leaf() {
@@ -377,7 +402,7 @@ impl SyntaxIndex {
         for child in &mut node.children {
             let child_end = at + child.chars;
             if from < child_end && at < to {
-                let reached = Self::fold(counts, scanner, state, child, at, (from, to));
+                let reached = Self::fold(child, at, (from, to), visit);
                 if reached < child_end.min(to) {
                     return reached;
                 }
@@ -397,19 +422,7 @@ impl SyntaxIndex {
     /// `resumable`.
     pub(crate) fn parse<T: Text>(&mut self, scanner: &mut Scanner<'_, T>, chars: usize, context: Context,
                                  from: i64, to: i64, state: &mut ParseState) -> R<bool> {
-        if self.context.as_ref() != Some(&context) {
-            if self.context.is_some() {
-                self.stats.switches += 1;
-            }
-            if let Some(root) = &mut self.root {
-                forget(root);
-            }
-            self.context = Some(context);
-        }
-        if self.root.as_ref().is_none_or(|root| root.chars != chars) {
-            self.root = Some(Self::build(Self::cut(self.leaf, chars)));
-        }
-        self.check_ends(scanner);
+        self.prepare(scanner, chars, context);
         let Self { root: Some(root), stats, .. } = self else { unreachable!("built above") };
         let (first_end, _) = safe_end(root, offset(from));
         let (last_start, ..) = locate(root, offset((to - 1).max(from)));
@@ -429,7 +442,14 @@ impl SyntaxIndex {
         }
         let mut at = first_end;
         loop {
-            at = Self::fold(stats, scanner, &mut carried, root, 0, (at, last_start));
+            at = Self::fold(root, 0, (at, last_start), &mut |node, start| {
+                let levels = u32::try_from(carried.levelstarts.len()).ok();
+                if let Span::Exact(span) = Self::span(stats, scanner, node, start, Key::of(&carried), levels) {
+                    summary::apply(&mut carried, span, position(start))
+                } else {
+                    false
+                }
+            });
             if at == last_start {
                 break;
             }
@@ -454,12 +474,86 @@ impl SyntaxIndex {
         Ok(true)
     }
 
+    fn list_span<T: Text>(scanner: &mut Scanner<'_, T>, node: &mut Node, start: usize,
+                          key: summary::lists::Key) -> Option<summary::lists::Span> {
+        if let Some(value) = node.spans.iter().find_map(|entry| match entry {
+            Entry::Lists(kept, value) if *kept == key => Some(*value),
+            _ => None,
+        }) {
+            return value;
+        }
+        if scanner.text.stop_uncounted() {
+            return None;
+        }
+        let value = if node.is_leaf() {
+            if node.unsafe_end {
+                None
+            } else {
+                let from = scanner.text.pos(position(start));
+                summary::lists::summarize(scanner, from, position(start + node.chars), key)
+            }
+        } else {
+            Self::compose_lists(scanner, node, start, key)
+        };
+        if !scanner.text.stop_uncounted() {
+            node.remember(Entry::Lists(key, value));
+        }
+        value
+    }
+
+    fn compose_lists<T: Text>(scanner: &mut Scanner<'_, T>, node: &mut Node, start: usize,
+                              mut key: summary::lists::Key) -> Option<summary::lists::Span> {
+        let (mut at, mut span) = (start, None::<summary::lists::Span>);
+        for child in &mut node.children {
+            let next = Self::list_span(scanner, child, at, key)?;
+            span = Some(match span {
+                Some(prev) => prev.then(next, u32::try_from(at - start).ok()?)?,
+                None => next,
+            });
+            key = next.exit();
+            at += child.chars;
+        }
+        span
+    }
+
+    /// A scan-sexps with a positive count larger than its suffix.
+    pub(crate) fn lists<T: Text>(&mut self, scanner: &mut Scanner<'_, T>, chars: usize, context: Context,
+                                 original_from: i64) -> Option<R<Option<i64>>> {
+        // A temporary syntax table, as used by electric-pair inside strings
+        // and comments, must not displace the buffer's partial-parse spans.
+        if self.context.as_ref().is_some_and(|kept| {
+            kept.table != context.table || kept.properties != context.properties || kept.escaped_ends != context.escaped_ends
+        }) {
+            return None;
+        }
+        self.prepare(scanner, chars, context);
+        let from = original_from.clamp(scanner.begv.char, scanner.zv.char);
+        let root = self.root.as_mut()?;
+        let (first_end, _) = safe_end(root, offset(from));
+        let (last_start, ..) = locate(root, offset((scanner.zv.char - 1).max(from)));
+        if first_end >= last_start {
+            return None;
+        }
+        let options = scanner.options;
+        let start = scanner.text.pos(from);
+        let mut scan = scan::Scan { from: start, last_good: original_from, count: i64::MAX, ..scan::Scan::default() };
+        let key = |s: &scan::Scan| summary::lists::Key::of(s, options.ignore_comments, options.multibyte_syntax_as_symbol);
+        let prefix = summary::lists::summarize(scanner, start, position(first_end), key(&scan)?)?;
+        prefix.apply(&mut scan, start, scanner.text.pos(position(first_end)));
+        Self::fold(root, 0, (first_end, last_start), &mut |node, start| {
+            let Some(span) = key(&scan).and_then(|key| Self::list_span(scanner, node, start, key)) else { return false };
+            span.apply(&mut scan, scanner.text.pos(position(start)), scanner.text.pos(position(start + node.chars)));
+            true
+        });
+        Some(scanner.lists(scan, true).map_err(|stopped| stopped.halt))
+    }
+
     /// Bytes the index holds, for memory accounting.
     pub(crate) fn storage_bytes(&self) -> usize {
         fn bytes(node: &Node) -> usize {
             size_of::<Node>()
-                + node.spans.capacity() * size_of::<(Slot, Span)>()
-                + node.spans.iter().map(|(_, span)| if let Span::Exact(summary) = span { summary.opened_bytes() } else { 0 }).sum::<usize>()
+                + node.spans.capacity() * size_of::<Entry>()
+                + node.spans.iter().map(|entry| if let Entry::Parse(_, Span::Exact(summary)) = entry { summary.opened_bytes() } else { 0 }).sum::<usize>()
                 + node.children.iter().map(bytes).sum::<usize>()
                 + (node.children.capacity() - node.children.len()) * size_of::<Node>()
         }
@@ -951,5 +1045,90 @@ mod tests {
         let mut served = start.clone();
         assert!(!index.parse(&mut scanner, text.len(), context, from, end, &mut served).unwrap());
         assert_eq!((served, index.stats.declined[Decline::Unresumable as usize]), (start, 1));
+    }
+}
+
+#[cfg(test)]
+mod list_tests {
+    use super::*;
+    use crate::syntax_scan::tests::{Plain, Rng};
+    use std::collections::BTreeMap;
+
+    fn dialect(byte: u8) -> i32 {
+        match byte {
+            b'(' | b'[' | b'{' => scan::SOPEN,
+            b')' | b']' | b'}' => scan::SCLOSE,
+            b'"' => scan::SSTRING,
+            b'\\' => scan::SESCAPE,
+            b'\'' => scan::SQUOTE | (1 << 20),
+            b'$' => scan::SMATH,
+            b'/' => scan::SPUNCT | (1 << 16) | (1 << 19),
+            b'*' => scan::SPUNCT | (1 << 17) | (1 << 18),
+            b'_' => scan::SSYMBOL | (1 << 16),
+            b' ' | b'\n' => scan::SWHITESPACE,
+            _ => scan::SWORD,
+        }
+    }
+
+    #[test]
+    fn a_warm_list_scan_reads_only_edited_and_end_leaves() {
+        let reads = std::cell::Cell::new(0);
+        let table = |c| {
+            reads.set(reads.get() + 1);
+            dialect(c)
+        };
+        let mut text = Plain { text: b"(ab [cd] ef)\n".repeat(9000), table };
+        let mut index = SyntaxIndex::default();
+        let context = Context { table: 1, writes: 0, escaped_ends: false, properties: false };
+        let ppss = BTreeMap::new();
+        let scan = |index: &mut SyntaxIndex, text: &Plain<_>| {
+            let options = scan::Options::default();
+            let mut scanner = Scanner { text, begv: text.pos(1), zv: text.pos(i64::MAX), options, ppss: &ppss, defun_start: None, modiff: 0 };
+            index.lists(&mut scanner, text.text.len(), context.clone(), 1)
+        };
+        assert_eq!(scan(&mut index, &text), Some(Ok(None)));
+        text.text.insert(99, b'x');
+        index.edit(99, 99, 1);
+        reads.set(0);
+        assert_eq!(scan(&mut index, &text), Some(Ok(None)));
+        assert!(reads.get() <= 8 * LEAF, "{} syntax reads after one local edit", reads.get());
+    }
+
+    #[test]
+    fn indexed_list_spans_match_plain_scans_before_and_after_edits() {
+        let mut rng = Rng(0x0e22_1ca1);
+        let ppss = BTreeMap::new();
+        let mut served = 0;
+        let chunks: &[&[u8]] = &[b"(a [b] {c}) ", b"/*)*/ ", b"$$a$$ ", b"\"a\\\"b\"", b"'x ", b"a_* / ) */ "];
+        for ignore_comments in [false, true] {
+            for seed in 0..160 {
+                let mut text = Plain { text: vec![], table: dialect as fn(u8) -> i32 };
+                for _ in 0..36 {
+                    text.text.extend_from_slice(chunks[rng.below(if seed % 4 == 0 { 6 } else { 5 })]);
+                }
+                let mut index = SyntaxIndex { leaf: 9 + rng.below(24), ..SyntaxIndex::default() };
+                let options = scan::Options { ignore_comments, comment_end_can_be_escaped: seed % 2 == 0, ..scan::Options::default() };
+                let context = Context { table: 0, writes: 0, escaped_ends: options.comment_end_can_be_escaped, properties: false };
+                for edit in 0..4 {
+                    if edit > 0 {
+                        let at = rng.below(text.text.len());
+                        let byte = b" a(]\\"[rng.below(5)];
+                        text.text.insert(at, byte);
+                        index.edit(at, at, 1);
+                    }
+                    let end = text.pos(i64::MAX);
+                    let from = if edit == 0 { 1 } else { position(rng.below(text.text.len() / 2)) };
+                    let mut scanner = Scanner { text: &text, begv: text.pos(1), zv: end, options, ppss: &ppss, defun_start: None, modiff: 0 };
+                    let expected = scanner.scan_lists(from, end.char, 0, true).map_err(|stopped| stopped.halt);
+                    for _ in 0..2 {
+                        if let Some(actual) = index.lists(&mut scanner, text.text.len(), context.clone(), from) {
+                            assert_eq!(actual, expected, "seed {seed}, edit {edit}, from {from}, text {:?}", String::from_utf8_lossy(&text.text));
+                            served += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(served >= 600, "only {served} list scans used the index");
     }
 }

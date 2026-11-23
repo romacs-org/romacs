@@ -319,7 +319,9 @@ enum Result_ { Comment(Pos, bool), Lists(Option<i64>), Parse(ParseState), Prefix
 /// What a stopped scan goes on from.
 enum Kept { Parse(Box<scan::Suspended>), Scan(Box<scan::Scan>) }
 
-/// A parse the text's summaries serve (`crate::syntax_index`), and whether
+type ParseArgs = (i64, i64, i64, bool, i32, ParseState);
+
+/// A scan the text's summaries serve (`crate::syntax_index`), and whether
 /// the plain scanner checks it.
 struct Served {
     context: Context,
@@ -649,15 +651,10 @@ impl Leaf<'_> {
         let table = self.vm.buffer_syntax_table(index);
         // The scan reads the table through its flat view, kept between calls.
         self.vm.flatten_table(table);
-        if let (Op::ParsePartialSexp, None, Some((from, to, target, stopbefore, commentstop, state))) = (op, &memory, &parse) {
-            let plain = *target != i64::MIN || *stopbefore || *commentstop != 0;
-            if let Some(served) = self.served(index, table, *from, *to, plain, options)? {
-                let mut state = state.clone();
-                if self.summarized(index, table, &served, options, (*from, *to), &mut state)? {
-                    self.syntax_set_point(state.location)?;
-                    return Ok(Outcome::Done(self.externalize_parse_state(&state)));
-                }
-            }
+        if memory.is_none()
+            && let Some(value) = self.initial_summary(op, args, parse.as_ref(), (index, table), options)?
+        {
+            return Ok(Outcome::Done(value));
         }
         let (begv, zv, point) = self.syntax_bounds(index)?;
         let epoch = self.vm.defun_start_epoch;
@@ -876,6 +873,61 @@ impl Leaf<'_> {
         Ok(summarized)
     }
 
+    fn initial_summary(&mut self, op: Op, args: &[Value], parse: Option<&ParseArgs>,
+                       (index, table): (usize, Value), options: scan::Options) -> std::result::Result<Option<Value>, Fault> {
+        if let Some((from, to, target, stopbefore, commentstop, state)) = parse {
+            let plain = *target != i64::MIN || *stopbefore || *commentstop != 0;
+            if let Some(served) = self.served(index, table, *from, *to, plain, options)? {
+                let mut state = state.clone();
+                if self.summarized(index, table, &served, options, (*from, *to), &mut state)? {
+                    self.syntax_set_point(state.location)?;
+                    return Ok(Some(self.externalize_parse_state(&state)));
+                }
+            }
+        }
+        if matches!(op, Op::ScanSexps)
+            && let Some(count) = args[1].integer_value().filter(|&count| SyntaxIndex::pays(count))
+        {
+            let (begv, zv, _) = self.syntax_bounds(index)?;
+            let from = self.fixnum(args[0])?;
+            if count > zv.char - from.clamp(begv.char, zv.char) {
+                return self.summarized_lists(index, table, options, from, count);
+            }
+        }
+        Ok(None)
+    }
+
+    fn summarized_lists(&mut self, index: usize, table: Value, options: scan::Options,
+                        original_from: i64, count: i64) -> std::result::Result<Option<Value>, Fault> {
+        let (begv, zv, _) = self.syntax_bounds(index)?;
+        let from = original_from.clamp(begv.char, zv.char);
+        if !SyntaxIndex::pays(zv.char - from) {
+            return Ok(None);
+        }
+        let Some(served) = self.served(index, table, from, zv.char, false, options)? else { return Ok(None) };
+        let result = {
+            let view = View::new(self.vm, index, table, options.propertize_done.is_some(), true);
+            let Body::Multibyte(text, _) = &view.body else { return Ok(None) };
+            let mut scanner = Scanner { text: &view, begv, zv, options, ppss: &UNANSWERED, defun_start: None, modiff: 0 };
+            let mut syntax = text.syntax.borrow_mut();
+            let result = syntax.lists(&mut scanner, text.len_chars(), served.context, original_from);
+            if let Some(result) = &result
+                && served.check && !matches!(result, Err(Halt::Poll))
+            {
+                let plain = scanner.scan_lists(original_from, count, 0, true).map_err(|stopped| stopped.halt);
+                if *result != plain && !matches!(plain, Err(Halt::Poll)) {
+                    return Err(Fault::Error(format!("syntax summaries: list scan {from}..{}: index {result:?}, scanner {plain:?}", zv.char)));
+                }
+            }
+            result
+        };
+        match result {
+            Some(Ok(result)) => Ok(Some(result.map(Value::integer).transpose().map_err(Fault::Error)?.unwrap_or(Value::NIL))),
+            Some(Err(Halt::ScanError(message, a, b))) => Err(self.scan_error(message, a, b)),
+            _ => Ok(None),
+        }
+    }
+
     /// `romacs-syntax-summaries-stats' of the current buffer.
     pub(crate) fn syntax_summaries_stats(&mut self) -> super::super::Out {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
@@ -945,6 +997,23 @@ impl Leaf<'_> {
 #[cfg(test)]
 mod tests {
     use crate::Vm;
+
+    #[test]
+    fn a_property_edit_changes_a_warm_unbounded_sexp_scan() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        let result = vm.eval_source_raw(r#"(with-temp-buffer
+          (set (make-local-variable 'parse-sexp-lookup-properties) t)
+          (set (make-local-variable 'syntax-propertize--done) most-positive-fixnum)
+          (insert (make-string 20000 ?a))
+          (scan-sexps (point-min) (point-max))
+          (put-text-property 12000 12001 'syntax-table '(5))
+          (condition-case err
+              (scan-sexps (point-min) (point-max))
+            (scan-error err)))"#).unwrap();
+        assert_eq!(vm.display(result).unwrap(),
+                   "(scan-error \"Containing expression ends prematurely\" 12000 12001)");
+    }
 
     /// A parse that stops for `internal--syntax-propertize` at every chunk
     /// reads each character once, as GNU's one scan does, however many

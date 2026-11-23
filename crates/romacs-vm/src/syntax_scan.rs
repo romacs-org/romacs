@@ -14,6 +14,7 @@
 //!
 //! The syntax of a position is always looked up at that exact position,
 //! which is what gl_state's interval bookkeeping arranges in GNU.
+use self::forward::{comment_pair, string_part, symbol_part, token, Part, Token};
 use std::collections::BTreeMap;
 
 pub(crate) const SWHITESPACE: i32 = 0;
@@ -152,7 +153,7 @@ pub(crate) enum Halt {
 pub(crate) type R<T> = Result<T, Halt>;
 
 /// Where `forw_comment` goes on: the code after each update that can stop.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(crate) enum ForwAt { Read, EscapeSkipped, Incomment, NestedChecks }
 
 impl ForwAt {
@@ -329,7 +330,7 @@ impl<S> From<Halt> for Stopped<S> {
 /// check after its step, the dispatch on the character stepped over, and
 /// inside a symbol, a comment or a string. Backward, `back_comment`'s
 /// decode, which asks `syntax-ppss`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(crate) enum ScanAt { #[default] Top, Stepped, Dispatch, Symbol, Comment, String, Decode }
 impl ScanAt {
     pub(crate) const ALL: [ScanAt; 7] = [
@@ -725,9 +726,9 @@ impl<T: Text> Scanner<'_, T> {
     fn two_char_comment_start(&self, state: &mut ParseState, prev_from_syntax: i32, prev_from: Pos, from: Pos) -> bool {
         if !comstart_first(prev_from_syntax) { return false; }
         let syntax = self.text.syntax(from);
-        if !comstart_second(syntax) { return false; }
-        state.comstyle = comment_style(syntax, prev_from_syntax);
-        state.incomment = if nested(prev_from_syntax) || nested(syntax) { 1 } else { -1 };
+        let Some(comment) = comment_pair(prev_from_syntax, syntax) else { return false };
+        state.comstyle = comment.style;
+        state.incomment = if comment.nested { 1 } else { -1 };
         state.comstr_start = prev_from.char;
         true
     }
@@ -899,27 +900,24 @@ impl<T: Text> Scanner<'_, T> {
                     if from.char < end && self.two_char_comment_start(state, prev_from_syntax, prev_from, from) {
                         inc_from!(At::CommentStarted);
                         At::CommentStarted
-                    } else if prefix(prev_from_syntax) {
-                        At::Top
                     } else {
-                        let code = prev_from_syntax & 0xff;
-                        match code {
-                            SESCAPE | SCHARQUOTE | SWORD | SSYMBOL if stopbefore => At::Stop,
-                            SESCAPE | SCHARQUOTE => { cur!().last = prev_from.char; At::Quoted }
-                            SWORD | SSYMBOL => { cur!().last = prev_from.char; At::Symbol }
-                            SCOMMENT_FENCE => {
+                        match token(prev_from_syntax, prev_from_syntax & 0xff) {
+                            Token::Escape | Token::Word if stopbefore => At::Stop,
+                            Token::Escape => { cur!().last = prev_from.char; At::Quoted }
+                            Token::Word => { cur!().last = prev_from.char; At::Symbol }
+                            Token::CommentFence => {
                                 state.comstyle = ST_COMMENT_STYLE;
                                 state.incomment = -1;
                                 state.comstr_start = prev_from.char;
                                 At::AtComment
                             }
-                            SCOMMENT => {
+                            Token::Comment => {
                                 state.comstyle = comment_style(prev_from_syntax, 0);
                                 state.incomment = if nested(prev_from_syntax) { 1 } else { -1 };
                                 state.comstr_start = prev_from.char;
                                 At::AtComment
                             }
-                            SOPEN => {
+                            Token::Open => {
                                 if stopbefore { At::Stop } else {
                                     depth += 1;
                                     maxdepth = maxdepth.max(depth);
@@ -932,7 +930,7 @@ impl<T: Text> Scanner<'_, T> {
                                     if targetdepth == depth { At::Done } else { At::Top }
                                 }
                             }
-                            SCLOSE => {
+                            Token::Close => {
                                 depth -= 1;
                                 if depth < mindepth { mindepth = depth; }
                                 if levels.len() > 1 { levels.pop(); }
@@ -940,11 +938,11 @@ impl<T: Text> Scanner<'_, T> {
                                 level.prev = level.last;
                                 if targetdepth == depth { At::Done } else { At::Top }
                             }
-                            SSTRING | SSTRING_FENCE => {
+                            delimiter @ (Token::String | Token::StringFence) => {
                                 state.comstr_start = from.char - 1;
                                 if stopbefore { At::Stop } else {
                                     cur!().last = prev_from.char;
-                                    state.instring = if code == SSTRING {
+                                    state.instring = if delimiter == Token::String {
                                         self.text.char_at(prev_from) as i32
                                     } else {
                                         ST_STRING_STYLE
@@ -969,7 +967,7 @@ impl<T: Text> Scanner<'_, T> {
                         // Constituents that start no comment, after one
                         // that does not either.
                         if !comstart_first(prev_from_syntax) {
-                            pass!(|_, s| matches!(s & 0xff, SWORD | SSYMBOL | SQUOTE) && !comstart_first(s));
+                            pass!(|_, s| matches!(symbol_part(s & 0xff), Part::Body) && !comstart_first(s));
                             if from.char >= end { break; }
                         }
                         if self.two_char_comment_start(state, prev_from_syntax, prev_from, from) {
@@ -977,14 +975,14 @@ impl<T: Text> Scanner<'_, T> {
                             next = Some(At::SymbolToComment);
                             break;
                         }
-                        match self.text.syntax(from) & 0xff {
-                            SCHARQUOTE | SESCAPE => {
+                        match symbol_part(self.text.syntax(from) & 0xff) {
+                            Part::Escape => {
                                 inc_from!(At::SymbolQuoted);
                                 next = Some(At::SymbolQuoted);
                                 break;
                             }
-                            SWORD | SSYMBOL | SQUOTE => {}
-                            _ => {
+                            Part::Body => {}
+                            Part::End => {
                                 ended = true;
                                 break;
                             }
@@ -1046,8 +1044,9 @@ impl<T: Text> Scanner<'_, T> {
                     if boundary_stop { At::Done } else { At::Top }
                 }
                 At::InString | At::QuotedInString => {
-                    let nofence = state.instring != ST_STRING_STYLE;
                     let instring = state.instring;
+                    let fenced = instring == ST_STRING_STYLE;
+                    let terminator = instring.cast_unsigned();
                     let mut quoted = matches!(at, At::QuotedInString);
                     let mut next = None;
                     loop {
@@ -1058,15 +1057,14 @@ impl<T: Text> Scanner<'_, T> {
                             if from.char >= end { next = Some(At::Done); break; }
                             let c = self.text.char_at(from);
                             let c_code = self.text.syntax(from) & 0xff;
-                            if nofence && c as i32 == state.instring && c_code == SSTRING { break; }
-                            match c_code {
-                                SSTRING_FENCE if !nofence => break,
-                                SCHARQUOTE | SESCAPE => {
+                            match string_part(c, c_code, terminator, fenced) {
+                                Part::End => break,
+                                Part::Escape => {
                                     // Going on inline is entering QuotedInString.
                                     inc_from!(At::QuotedInString);
                                     quoted = true;
                                 }
-                                _ => {}
+                                Part::Body => {}
                             }
                         }
                         if quoted {
@@ -1112,6 +1110,7 @@ impl<T: Text> Scanner<'_, T> {
     }
 }
 
+mod forward;
 mod lists;
 
 #[cfg(test)]
