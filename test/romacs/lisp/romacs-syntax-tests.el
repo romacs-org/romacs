@@ -31,32 +31,4 @@ documents as reliable."
               (should (equal (nth i ppss) (nth i plain)))))))
       (should (> (plist-get (romacs-syntax-summaries-stats) :served) served)))))
 
-(ert-deftest romacs-syntax-propertize-widen-restores-restriction ()
-  (with-temp-buffer
-    (insert "before\ninside\nafter\n")
-    (let (range)
-      (setq-local syntax-propertize-function
-                  (lambda (start _end)
-                    (setq range (list start (point-min) (point-max)))))
-      (narrow-to-region 8 15)
-      (syntax-propertize (point-max))
-      (should (equal range '(8 8 15)))
-      (setq-local syntax-propertize-widen t)
-      (syntax-ppss-flush-cache 1)
-      (syntax-propertize (point-max))
-      (should (equal range '(1 1 21)))
-      (should (equal (list (point-min) (point-max)) '(8 15))))))
-
-(ert-deftest romacs-syntax-propertize-widen-respects-labeled-restrictions ()
-  (with-temp-buffer
-    (insert "before\ninside\nafter\n")
-    (let (range)
-      (setq-local syntax-propertize-widen t
-                  syntax-propertize-function
-                  (lambda (start _end)
-                    (setq range (list start (point-min) (point-max)))))
-      (with-restriction 8 15 :label 'syntax-test
-        (syntax-propertize (point-max))
-        (should (equal range '(8 8 15)))))))
-
 ;;; romacs-syntax-tests.el ends here

@@ -10,6 +10,12 @@
 ;; Syntax parsing treats interpolation as part of the string.  An
 ;; unescaped quote inside ${...} can confuse the syntax state until
 ;; the syntax engine supports interpolation.
+;;
+;; Editing a raw string while narrowing hides its unpropertized opener
+;; can leave later code classified as string content after widening.
+;; The comparison probe in ledger/divergences/KOTLIN-TS.md reproduces
+;; this in GNU's python-mode.  Widened propertization belongs in the
+;; shared syntax engine.
 
 ;;; Code:
 
@@ -193,7 +199,6 @@ Electric pairing can query BEG itself, before region extension runs."
               comment-end ""
               comment-start-skip "//+\\s-*\\|/\\*+\\s-*"
               syntax-propertize-function kotlin-ts-mode--syntax-propertize
-              syntax-propertize-widen t
               indent-tabs-mode nil)
   (add-hook 'before-change-functions #'kotlin-ts-mode--syntax-before-change nil t)
   (when (and (treesit-ensure-installed 'kotlin)
