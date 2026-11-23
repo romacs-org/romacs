@@ -1066,7 +1066,7 @@ def tour(work, delegate_target):
         ('romacs_task_cancel', {'taskId': '<the same taskId>'}, lambda t: '"cancelled"' in t),
         # Refused, and says why: the tour's session received no message.
         ('romacs_task_reply', {'messageId': 'm-none', 'text': 'hello'},
-         lambda t: 'No message m-none among the ones this session received' in t),
+         lambda t: 'No message m-none' in t and 'no received message ids' in t),
     ]
 
 
