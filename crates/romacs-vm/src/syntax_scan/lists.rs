@@ -4,8 +4,9 @@
 //! scan runs the code an unstopped one does. Backward, a scan stops for
 //! propertization at its start only, and after it for `syntax-ppss` in
 //! `back_comment`'s decode.
+use super::forward::{comment_pair, string_part, symbol_part, token, Part, Token};
 use super::{
-    comend_second, comment_style, comstart_first, comstart_second, nested, prefix, CommentHalt, Halt, Pos, Scan, ScanAt,
+    comend_second, comment_style, comstart_first, nested, prefix, CommentHalt, Halt, Pos, Scan, ScanAt,
     Scanner, Stopped, Text, R, SCHARQUOTE, SCLOSE, SCOMMENT, SCOMMENT_FENCE, SENDCOMMENT, SESCAPE, SMATH, SOPEN, SQUOTE,
     SSTRING, SSTRING_FENCE, SSYMBOL, SWHITESPACE, SWORD, ST_COMMENT_STYLE,
 };
@@ -57,10 +58,10 @@ impl<T: Text> Scanner<'_, T> {
                 ScanAt::Stepped => {
                     if from.char < stop && comstart_first(syntax) {
                         let other = self.text.syntax(from);
-                        if comstart_second(other) {
+                        if let Some(comment) = comment_pair(syntax, other) {
                             code = SCOMMENT;
-                            comstyle = comment_style(other, syntax);
-                            comnested |= nested(other);
+                            comstyle = comment.style;
+                            comnested = comment.nested;
                             from = self.text.inc(from);
                             update!(ScanAt::Dispatch);
                         }
@@ -272,30 +273,29 @@ impl<T: Text> Scanner<'_, T> {
                     if from.char < stop && comstart_first(syntax) {
                         c = self.text.char_at(from);
                         let other = self.text.syntax(from);
-                        if comstart_second(other) && self.options.ignore_comments {
+                        if let Some(comment) = comment_pair(syntax, other).filter(|_| self.options.ignore_comments) {
                             code = SCOMMENT;
-                            comstyle = comment_style(other, syntax);
-                            comnested |= nested(other);
+                            comstyle = comment.style;
+                            comnested = comment.nested;
                             from = self.text.inc(from);
                             update!(ScanAt::Dispatch);
                         }
                     }
                     ScanAt::Dispatch
                 }
-                ScanAt::Dispatch if prefix(syntax) => ScanAt::Top,
-                ScanAt::Dispatch => match code {
-                    SESCAPE | SCHARQUOTE | SWORD | SSYMBOL => {
-                        if code == SESCAPE || code == SCHARQUOTE {
+                ScanAt::Dispatch => match token(syntax, code) {
+                    kind @ (Token::Escape | Token::Word) => {
+                        if kind == Token::Escape {
                             if from.char == stop { return Err(lose(last_good, from).into()); }
                             from = self.text.inc(from);
                         }
                         if depth != 0 || !sexpflag { ScanAt::Top } else { ScanAt::Symbol }
                     }
-                    SCOMMENT_FENCE | SCOMMENT => {
-                        if code == SCOMMENT_FENCE { comstyle = ST_COMMENT_STYLE; }
+                    kind @ (Token::CommentFence | Token::Comment) => {
+                        if kind == Token::CommentFence { comstyle = ST_COMMENT_STYLE; }
                         if self.options.ignore_comments { ScanAt::Comment } else { ScanAt::Top }
                     }
-                    SMATH if sexpflag => {
+                    Token::Math if sexpflag => {
                         if from.char != stop && c == self.text.char_at(from) { from = self.text.inc(from); }
                         if mathexit {
                             mathexit = false;
@@ -306,12 +306,12 @@ impl<T: Text> Scanner<'_, T> {
                             if depth == 0 { done!() } else { ScanAt::Top }
                         }
                     }
-                    SOPEN => {
+                    Token::Open => {
                         depth += 1;
                         if depth == 0 { done!() } else { ScanAt::Top }
                     }
-                    SCLOSE => close!(),
-                    SSTRING | SSTRING_FENCE => {
+                    Token::Close => close!(),
+                    Token::String | Token::StringFence => {
                         mark = self.text.dec(from);
                         ScanAt::String
                     }
@@ -321,13 +321,13 @@ impl<T: Text> Scanner<'_, T> {
                     // This word counts as a sexp: go on to its end.
                     while from.char < stop {
                         update!(ScanAt::Symbol);
-                        match self.class(from, symbol) {
-                            SCHARQUOTE | SESCAPE => {
+                        match symbol_part(self.class(from, symbol)) {
+                            Part::Escape => {
                                 from = self.text.inc(from);
                                 if from.char == stop { return Err(lose(last_good, from).into()); }
                             }
-                            SWORD | SSYMBOL | SQUOTE => {}
-                            _ => break,
+                            Part::Body => {}
+                            Part::End => break,
                         }
                         from = self.text.inc(from);
                     }
@@ -362,10 +362,11 @@ impl<T: Text> Scanner<'_, T> {
                         update!(ScanAt::String);
                         let c = self.text.char_at(from);
                         let c_code = self.class(from, symbol);
-                        if if code == SSTRING { c == stringterm && c_code == SSTRING } else { c_code == SSTRING_FENCE } {
-                            break;
+                        match string_part(c, c_code, stringterm, code != SSTRING) {
+                            Part::End => break,
+                            Part::Escape => from = self.text.inc(from),
+                            Part::Body => {}
                         }
-                        if c_code == SCHARQUOTE || c_code == SESCAPE { from = self.text.inc(from); }
                         from = self.text.inc(from);
                     }
                     from = self.text.inc(from);
