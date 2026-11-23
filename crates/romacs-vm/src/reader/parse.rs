@@ -968,9 +968,10 @@ impl Reader<'_, '_, '_, '_, '_> {
 
 /// One read of INPUT, under GC when it may call Lisp: THEN gets what it read
 /// (`super::Read`) at once, in a leaf, the read's roots already released, as
-/// a request's value goes straight to its leaf.
+/// a request's value goes straight to its leaf, with where the form began
+/// past whitespace and comments, which a read that failed has too.
 pub(super) fn read_input<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Option<Gc<'_, 'b>>, input: Input<'_>, b: B,
-    then: impl FnOnce(&mut Vm, B, super::Read) -> R + Copy + 'static) -> R {
+    then: impl FnOnce(&mut Vm, B, super::Read, usize) -> R + Copy + 'static) -> R {
     let mark = m.leaf((), |vm, ()| vm.external_roots.len());
     let initial_byte = match &input { Input::String { byte, .. } => *byte, _ => 0 };
     let mut reader = Reader {
@@ -1005,7 +1006,7 @@ pub(super) fn read_input<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Opt
         (Err(e), Ok(_)) => Err(e),
         (_, result) => result,
     };
-    reader.m.leaf((result, reader.signal, mark, b), move |vm, (result, signal, mark, b)| {
+    reader.m.leaf(((result, begin), reader.signal, mark, b), move |vm, ((result, begin), signal, mark, b)| {
         let read = match result {
             Ok(found) => Ok(found.map(|(root, begin, end)| (vm.external_roots[root], begin, end))),
             Err(message) => {
@@ -1014,7 +1015,7 @@ pub(super) fn read_input<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Opt
             }
         };
         vm.external_roots.truncate(mark);
-        then(vm, b, read)
+        then(vm, b, read, begin)
     })
 }
 

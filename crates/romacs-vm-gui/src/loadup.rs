@@ -497,12 +497,6 @@ fn run(vm: &mut Vm, file: &Path, search: &[PathBuf], adapt: bool) -> Result<Load
                     s.line, s.source.clone().unwrap_or_default(), s.error.clone().unwrap_or_default(),
                 )).unwrap_or((0, String::new(), String::new()));
                 let total = path.as_ref().map(|p| total_forms(vm, p)).unwrap_or(Total::Forms(0));
-                // No failing step: the loader's READER stopped before the form
-                // was entered (VM2's loader records a step only once read).
-                let step_error = match (&failed, &total) {
-                    (None, Total::ReaderStopped { at, error }) if *at == ok + 1 => format!("reader: {error}"),
-                    _ => step_error,
-                };
                 let error = if step_error.is_empty() { error.to_owned() } else { format!("{step_error} | condition {error}") };
                 Outcome::Partial { forms: ok, failed: ok + 1, line, source, error, total }
             }

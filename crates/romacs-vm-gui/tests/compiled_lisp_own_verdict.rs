@@ -116,6 +116,8 @@ fn a_nested_compile_failure_reaches_the_compile_that_started_it() {
     let log: String = generations.filter_map(|g| std::fs::read_to_string(g.path().join("compile.log")).ok()).collect();
     let count = |head: &str| log.lines().filter(|line| line.starts_with(head)).count();
     assert_eq!(count(&head), 1, "{log}");
-    assert!(count(&format!("romacs: {}: ", broken.display())) <= 1, "{log}");
+    let broken_name = broken.display().to_string();
+    let noted = log.lines().filter(|line| line.starts_with("romacs: ") && line.contains(&broken_name) && line.contains("end-of-file"));
+    assert!(noted.count() <= 1, "{log}");
     let _ = std::fs::remove_dir_all(&root);
 }

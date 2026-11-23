@@ -68,17 +68,20 @@ fn prepared(stderr: &str, which: impl Fn(&serde_json::Value) -> bool) -> serde_j
 }
 
 /// A load site's file that the reader cannot finish (an unfinished
-/// `defun`) is said at that file, by the drive's own place for it, from
-/// source, in the batch world's manifest, and from a session restored from
-/// it: the reader's text never names the place.
+/// `defun` after comments) is said at that file and the line the form
+/// begins on, by the drive's own place for it, from source, in the batch
+/// world's manifest, and from a session restored from it: the reader's
+/// text never names the place.
 #[test]
 fn an_unfinished_defun_in_a_site_file_is_said_at_that_file() {
     let root = std::env::temp_dir().join(format!("romacs-loadup-errors-site-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     let tree = tree_copy(&root);
     let file = tree.join(SITE);
-    plant(&file, "\n(defun planted-broken (\n");
-    let head = format!("{}: line ", file.display());
+    let before = format!("{}\n;; a comment\n\n;; another\n", std::fs::read_to_string(&file).unwrap());
+    let line = before.matches('\n').count() + 1;
+    std::fs::write(&file, format!("{before}(defun planted-broken (\n")).unwrap();
+    let head = format!("{}: line {line} form ", file.display());
 
     let (ok, _, stderr) = run(&root, &tree, &["--batch", "--eval", "(princ 1)"]);
     assert!(ok, "{stderr}");
@@ -94,12 +97,33 @@ fn an_unfinished_defun_in_a_site_file_is_said_at_that_file() {
     let errors = event["lisp_errors"].as_array().unwrap_or_else(|| panic!("{event}"));
     assert_eq!(errors.len(), 1, "{event}");
     assert_eq!(errors[0]["file"], file.to_string_lossy().as_ref(), "{event}");
-    assert!(errors[0]["line"].as_u64().is_some_and(|line| line > 1), "{event}");
+    assert_eq!(errors[0]["line"], line, "{event}");
 
     let (ok, _, stderr) = run(&root, &tree, &["--world-store", store, "--batch", "--eval", "(princ 1)"]);
     assert!(ok, "{stderr}");
     assert!(stderr.contains(r#""mode":"restored""#), "not restored:\n{stderr}");
     assert_eq!(noted(&stderr), said, "the restored session says what the source boot said");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A site whose file loaded whole but whose after-load hook failed has no
+/// form of its own that failed: it is said at the site's call in the
+/// bootstrap.
+#[test]
+fn a_failed_after_load_hook_is_said_at_the_sites_call() {
+    let root = std::env::temp_dir().join(format!("romacs-loadup-errors-hook-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let tree = tree_copy(&root);
+    plant(&tree.join(SITE), "\n(eval-after-load \"frame\" '(error \"planted after-load\"))\n");
+    let bootstrap = tree.join(BOOTSTRAP);
+    let text = std::fs::read_to_string(&bootstrap).unwrap();
+    let call = text.lines().position(|l| l.starts_with("(load \"frame.el\"")).expect("the bootstrap's frame.el site") + 1;
+    let (ok, _, stderr) = run(&root, &tree, &["--batch", "--eval", "(princ 1)"]);
+    assert!(ok, "{stderr}");
+    let said = noted(&stderr);
+    assert_eq!(said.len(), 1, "{stderr}");
+    assert!(said[0].starts_with(&format!("{}: line {call} form ", bootstrap.display())), "{stderr}");
+    assert!(said[0].contains("planted after-load"), "{stderr}");
     let _ = std::fs::remove_dir_all(&root);
 }
 

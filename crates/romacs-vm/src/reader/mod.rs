@@ -19,10 +19,13 @@ use parse::Input;
 pub(crate) type Read = std::result::Result<Option<(Value, usize, usize)>, (String, Option<(Value, Value)>)>;
 
 /// The loader's read: the next form of SOURCE, GNU internal text, under the
-/// permission (a `\N{NAME}` calls Lisp). THEN consumes it at once.
+/// permission (a `\N{NAME}` calls Lisp). THEN consumes it at once; a read
+/// that failed says why, and where in SOURCE the form it could not read
+/// began.
 pub(crate) fn read_next<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, source: &[u8], b: B,
-    then: impl FnOnce(&mut Vm, B, Result<Option<(Value, usize, usize)>>) -> R + Copy + 'static) -> R {
-    parse::read_input(m, Some(gc), Input::Host { text: source, byte: 0 }, b, move |vm, b, read: Read| then(vm, b, read.map_err(|(text, _)| text)))
+    then: impl FnOnce(&mut Vm, B, std::result::Result<Option<(Value, usize, usize)>, (String, usize)>) -> R + Copy + 'static) -> R {
+    parse::read_input(m, Some(gc), Input::Host { text: source, byte: 0 }, b,
+                      move |vm, b, read: Read, begin| then(vm, b, read.map_err(|(text, _)| (text, begin))))
 }
 
 /// Characters START to END of the string rooted at ROOT, read; without the
@@ -35,7 +38,7 @@ pub(crate) fn read_string<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Op
         let all = vm.str_view(stream).expect("a string stream").bytes.len();
         all - vm.str_view_from(stream, start).expect("a string stream").bytes.len()
     });
-    parse::read_input(m, gc, Input::String { root, byte, character: start, end }, b, then)
+    parse::read_input(m, gc, Input::String { root, byte, character: start, end }, b, move |vm, b, read, _| then(vm, b, read))
 }
 
 /// The stream rooted at ROOT read under the permission: a string, a buffer
@@ -53,7 +56,7 @@ pub(crate) fn read_stream<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Gc
         (None, true) => Input::Buffer { root },
         (None, false) => Input::Function { root },
     };
-    parse::read_input(m, Some(gc), input, b, then)
+    parse::read_input(m, Some(gc), input, b, move |vm, b, read, _| then(vm, b, read))
 }
 
 /// A read's datum and condition, rooted for a caller with no permission,
@@ -82,7 +85,7 @@ impl Vm {
     pub(crate) fn read_source_raw(&mut self, source: &str) -> Result<Option<(Value, usize)>> {
         let mark = self.external_roots.len();
         let kept = crate::threaded::toplevel(self, source, |mut m, gc, source| read_next(&mut m, gc, source.as_bytes(), (), |vm, (), read| {
-            read.map(|found| found.map(|(value, _, end)| { vm.external_roots.push(value); (vm.external_roots.len() - 1, end) }))
+            read.map_err(|(text, _)| text).map(|found| found.map(|(value, _, end)| { vm.external_roots.push(value); (vm.external_roots.len() - 1, end) }))
         }));
         let read = kept.map(|found| found.map(|(root, end)| (self.external_roots[root], end)));
         self.external_roots.truncate(mark);

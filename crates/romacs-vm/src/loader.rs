@@ -830,7 +830,7 @@ fn eval_file_forms<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, path: &Path, 
         let read = crate::reader::read_next(m, gc.by_ref(), &source[at..], (), |vm, (), read| {
             read.map(|read| read.map(|(value, begin, used)| (vm.source_form(value, 0), begin, used)))
         });
-        let Some((form, begin, used)) = read.map_err(|e| read_failed(m, step_file, path, source, at, ordinal + 1, e))?
+        let Some((form, begin, used)) = read.map_err(|(e, begin)| read_failed(m, step_file, path, source, at + begin, ordinal + 1, e))?
         else {
             break;
         };

@@ -391,9 +391,16 @@ fn chain_failures(vm: &mut Vm, loadup: &crate::loadup::Loadup, search: &[std::pa
     let mut failures = vec![];
     for row in &loadup.rows {
         let Outcome::Partial { failed, line, error, .. } = &row.outcome else { continue };
-        let file = crate::loadup::resolve(search, &row.site.name).unwrap_or_else(|| row.site.name.clone().into());
         let message = site_message(vm, row.site.index).unwrap_or_else(|| error.clone());
-        failures.push((row.site.form, placed(&message, &file, *line, *failed)));
+        // Line 0: no form of the file failed (its after-load hooks did, say),
+        // so the place is the site's call in the bootstrap.
+        let place = if *line == 0 {
+            placed(&message, &loadup.loadup, row.site.line, row.site.form + 1)
+        } else {
+            let file = crate::loadup::resolve(search, &row.site.name).unwrap_or_else(|| row.site.name.clone().into());
+            placed(&message, &file, *line, *failed)
+        };
+        failures.push((row.site.form, place));
     }
     // A form's own failure: the error that escaped it, after its first line,
     // as the loader says a form's (which preloaded file it loads, here).
