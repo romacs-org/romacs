@@ -42,9 +42,12 @@ One line a stage and one a finding, each with its fix. Exit 1 when a stage
 fails, 2 when one could not run.
 
 A run on a worktree with no uncommitted change leaves a receipt for HEAD's
-tree, $XDG_CACHE_HOME/romacs/dev-check/receipts/TREE.json: the exit, each
+tree, ~/.cache/romacs/dev-check/receipts/TREE.json: the exit, each
 stage's status, whether the tests ran. The merge queue's submit reads it to
-know this exact tree was checked, and never reruns the check.
+know this exact tree was checked, and never reruns the check. ~ is the
+account's home from the password database, so a run under a private HOME
+or XDG_CACHE_HOME still leaves it there; ROMACS_DEV_CHECK_RECEIPTS names
+another directory.
 
 cargo and cargo-nextest are looked for on PATH, then in the host's pins
 ROMACS_TOOLCHAIN_BIN and ROMACS_NEXTEST_BIN, which an agent's shell has even
@@ -58,6 +61,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import pwd
 import re
 import shutil
 import subprocess
@@ -527,8 +531,9 @@ def report(stages):
 
 
 def receipt_path(tree):
-    cache = Path(os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache')
-    return cache / 'romacs/dev-check/receipts' / f'{tree}.json'
+    named = os.environ.get('ROMACS_DEV_CHECK_RECEIPTS')
+    receipts = Path(named) if named else Path(pwd.getpwuid(os.getuid()).pw_dir) / '.cache/romacs/dev-check/receipts'
+    return receipts / f'{tree}.json'
 
 
 def receipt(tree, head, trunk, stages, status, tests_ran):
