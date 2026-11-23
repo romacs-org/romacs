@@ -10,3 +10,10 @@ scanner's continuation, including depth, math phase, comment policy and the
 relative last-good position for an error. Where a span cannot be skipped,
 the list scanner resumes with its ordinary rules. The summary inhibition and
 checking options also apply to this path.
+
+`romacs-syntax-summaries-stats` counts this path in `:list-served`,
+`:list-declined` and `:list-fallbacks`. A quit poll discards the speculative
+scan's continuation and restarts the plain scan from FROM. The list path
+keeps the first syntax-table context it sees. If that is a temporary table
+such as electric-pair's table inside a string, it declines later list scans
+in the buffer's normal context until a long parse switches the context.
