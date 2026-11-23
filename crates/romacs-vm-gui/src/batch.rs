@@ -342,9 +342,16 @@ fn diagnose(what: &serde_json::Value) {
 }
 
 /// A restored VM made this process's: its startup steps taken
-/// (`romacs-world-restart`).
+/// (`romacs-world-restart`), and the errors of Romacs's Lisp its world's
+/// build noted said on stderr, as a boot from source says them: unless
+/// that is the compile log, which its build's said them in.
 fn restarted(mut vm: Vm) -> Result<Vm, String> {
     vm.world_reinit();
+    if !romacs_vm::compiled_lisp::nested() {
+        for error in super::startup::noted_lisp_errors(&mut vm)? {
+            eprintln!("romacs: {}", error["error"].as_str().unwrap_or_default());
+        }
+    }
     vm.eval_source("(romacs-world-restart)")?;
     Ok(vm)
 }
@@ -466,7 +473,8 @@ pub fn prepare(store: PathBuf) -> Result<(), String> {
     let world = World::new(store, recipe(&dir)).map_err(|e| e.to_string())?;
     match world.prepare(|| builder_args(&world), |_| {}) {
         Ok(manifest) => {
-            romacs_vm::host::event_line("romacs-world", &serde_json::json!({"mode": "prepared", "launch": "batch", "key": manifest["key"]}));
+            romacs_vm::host::event_line("romacs-world", &serde_json::json!({"mode": "prepared", "launch": "batch", "key": manifest["key"],
+                                                                         "lisp_errors": manifest["events"]["lisp_errors"]}));
             Ok(())
         }
         Err(reason) => Err(format!("batch world not prepared: {reason}")),
@@ -529,7 +537,13 @@ fn chain(dir: &Path) -> Result<Vm, String> {
 fn build(world: &World, dir: &Path) -> Result<usize, String> {
     world.begin_build().map_err(|e| e.to_string())?;
     romacs_vm::host::end_at_dump_point();
-    world.build(|| Ok((chain(dir)?, (), serde_json::json!({}))))
+    world.build(|| {
+        let mut vm = chain(dir)?;
+        // Romacs's Lisp that failed in the build, for the manifest: each
+        // session restored from the world says the same errors itself.
+        let events = serde_json::json!({"lisp_errors": super::startup::noted_lisp_errors(&mut vm)?});
+        Ok((vm, (), events))
+    })
 }
 
 /// The leading options startup.el `command-line' consumes before

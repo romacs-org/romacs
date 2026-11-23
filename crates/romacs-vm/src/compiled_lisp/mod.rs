@@ -102,6 +102,9 @@ struct Configured {
     /// A compile process's channel to the process that started it: the
     /// file it writes its record to (`write_record`).
     record: Option<PathBuf>,
+    /// A compile process another started: its standard error is the
+    /// store's compile log, which every compile's diagnostic reaches once.
+    nested: bool,
     /// This process's temporary directory, where the records of the
     /// compile processes it starts are made (`run_compile`): its own, not
     /// the shared store, so a record a killed process leaves is no store's.
@@ -148,7 +151,9 @@ pub fn configure(config: Config) {
     // A compile process ends with the process that started it, and within
     // a deadline: nothing outlives a session or holds its queue forever.
     // The name is its own, not its children's (a world builder, say).
-    if let Some(parent) = host::take_marker(PARENT).and_then(|p| p.to_str()?.parse().ok()) {
+    let parent: Option<u32> = host::take_marker(PARENT).and_then(|p| p.to_str()?.parse().ok());
+    let nested = parent.is_some();
+    if let Some(parent) = parent {
         host::die_with_parent(parent);
         std::thread::spawn(|| {
             std::thread::sleep(std::time::Duration::from_secs(600));
@@ -160,7 +165,7 @@ pub fn configure(config: Config) {
             std::process::exit(124);
         });
     }
-    let _ = CONFIG.set(Configured { config, chain, trace, no_prune, record, scratch, identity: std::sync::OnceLock::new() });
+    let _ = CONFIG.set(Configured { config, chain, trace, no_prune, record, nested, scratch, identity: std::sync::OnceLock::new() });
 }
 
 /// The chain CHAIN with FILE on it, unless it is there already (the
@@ -172,6 +177,23 @@ fn on_chain(mut chain: String, file: Option<&Path>) -> String {
         chain.push('\n');
     }
     chain
+}
+
+/// Whether this process is a compile process another started: its
+/// standard error is the store's compile log (`run_compile`), which says
+/// each compile's diagnostic and each world's errors once already.
+pub fn nested() -> bool {
+    configured().is_some_and(|configured| configured.nested)
+}
+
+/// Say on standard error why the compile of PATH this process just started
+/// failed (STATUS, its artifact's), as that compile said it in the compile
+/// log: unless this process's standard error is that log. A refusal by the
+/// file's own word (`no-byte-compile') is no failure.
+fn say_failure(configured: &Configured, path: &Path, status: &store::Status) {
+    if let store::Status::Error(reason) = status && !configured.nested {
+        eprintln!("romacs-compile: {}: {reason}", path.display());
+    }
 }
 
 /// Count a load of PATH that took ROUTE, once its input is in hand
@@ -540,7 +562,12 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
                 .and_then(|(artifact, held)| store::open(&artifact).ok().map(|data| (artifact, held, data))) {
                 // A compile that found an artifact holding already (another
                 // process published it since this one looked) compiled nothing.
-                Some((artifact, held, data)) => (if held { Route::Taken } else { Route::Compiled }, artifact, data),
+                Some((artifact, held, data)) => {
+                    if !held {
+                        say_failure(configured, path, &data.status);
+                    }
+                    (if held { Route::Taken } else { Route::Compiled }, artifact, data)
+                }
                 None => return Ok((Route::Miss(Miss::Failed), None)),
             },
         };

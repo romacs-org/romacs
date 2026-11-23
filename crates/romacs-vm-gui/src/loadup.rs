@@ -456,7 +456,7 @@ fn run(vm: &mut Vm, file: &Path, search: &[PathBuf], adapt: bool) -> Result<Load
                 None => windows.push((*site, to, to)),
             }
         }
-        if let Err(error) = outcome {
+        if let Err(error) = outcome.map_err(|error| failed_step(vm, from, to).unwrap_or(error)) {
             form_errors[k] = Some(error.clone());
             form_failures.push(FormFailure { form: k, line, source: source[start..end].to_owned(), error });
         }
@@ -733,9 +733,20 @@ fn log_entry(vm: &mut Vm, site: usize) -> Result<Option<String>, String> {
 }
 
 /// Where `(load NAME)` finds NAME on `search`: per directory, NAME.el, then NAME.
-fn resolve(search: &[PathBuf], name: &str) -> Option<PathBuf> {
+pub(crate) fn resolve(search: &[PathBuf], name: &str) -> Option<PathBuf> {
     search.iter().flat_map(|dir| [dir.join(format!("{name}.el")), dir.join(name)])
         .find(|p| p.is_file()).and_then(|p| p.canonicalize().ok())
+}
+
+/// The last form a load read between steps FROM and TO that signalled, in
+/// the loader's words (`FILE: line N form K: ERROR`): where a top-level
+/// form's error came from when a load inside it failed.
+fn failed_step(vm: &Vm, from: usize, to: usize) -> Option<String> {
+    let steps = vm.load_steps();
+    let steps = &steps[from.min(steps.len())..to.min(steps.len())];
+    let step = steps.iter().rev().find(|step| step.status == romacs_vm::LoadStepStatus::Error)?;
+    let file = vm.load_step_file(step).display().to_string();
+    Some(format!("{file}: line {} form {}: {}", step.line, step.ordinal, step.error.as_deref()?))
 }
 
 fn first_step(vm: &Vm, from: usize, to: usize, path: Option<&Path>) -> Option<usize> {

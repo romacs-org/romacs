@@ -385,7 +385,7 @@ fn a_tree_decides_held_artifacts_itself() {
     let configured = Configured {
         config: Config { compiler: vec![], environment: vec![], inherited: &[], defer_misses: false, store: store.clone(),
                          identity: Box::new(|| Some("env".into())), runtime: vec![], root: None, compiling: None },
-        chain: String::new(), trace: false, no_prune: false, record: None, scratch: store.join("tmp"),
+        chain: String::new(), trace: false, no_prune: false, record: None, nested: false, scratch: store.join("tmp"),
         identity: std::sync::OnceLock::new(),
     };
     // A's artifact, published as its compile would, having resolved NAME.
@@ -445,7 +445,7 @@ fn a_compile_that_does_not_start_leaves_no_record() {
     let configured = Configured {
         config: Config { compiler: vec![], environment: vec![], inherited: &[], defer_misses: false, store: store.clone(),
                          identity: Box::new(|| None), runtime: vec![], root: None, compiling: None },
-        chain: String::new(), trace: false, no_prune: false, record: None, scratch: scratch.clone(),
+        chain: String::new(), trace: false, no_prune: false, record: None, nested: false, scratch: scratch.clone(),
         identity: std::sync::OnceLock::new(),
     };
     assert_eq!(run_compile(&configured, store.join("no-such-program").into(), vec![], vec![]), None);

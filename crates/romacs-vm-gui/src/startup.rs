@@ -372,7 +372,53 @@ pub fn drive_loadup(vm: &mut Vm, dir: &std::path::Path) -> Result<crate::loadup:
     // `noninteractive' while they load.  The interactive session begins
     // after the chain (lisp/session/romacs-gui-loadup.el).
     vm.eval_source("(setq noninteractive t)")?;
-    crate::loadup::drive_bootstrap(vm, &loadup_bootstrap(dir), &path)
+    let loadup = crate::loadup::drive_bootstrap(vm, &loadup_bootstrap(dir), &path)?;
+    // A file of the chain that signalled, which the chain goes on past
+    // where GNU's dump would stop, is noted as one of Romacs's Lisp is.
+    for failure in chain_failures(vm, &loadup, &path) {
+        note_lisp_error(vm, &failure)?;
+    }
+    Ok(loadup)
+}
+
+/// LOADUP's failures in the loader's words (`FILE: line N form K:
+/// MESSAGE`), in the order they ran, a form's load sites before the form:
+/// each site that signalled, its file as SEARCH resolves it, and each
+/// top-level form of the chain that did.
+fn chain_failures(vm: &mut Vm, loadup: &crate::loadup::Loadup, search: &[std::path::PathBuf]) -> Vec<String> {
+    use crate::loadup::Outcome;
+    let mut failures = vec![];
+    for row in &loadup.rows {
+        let Outcome::Partial { failed, line, error, .. } = &row.outcome else { continue };
+        let file = crate::loadup::resolve(search, &row.site.name).unwrap_or_else(|| row.site.name.clone().into());
+        let message = site_message(vm, row.site.index).unwrap_or_else(|| error.clone());
+        failures.push((row.site.form, placed(&message, &file, *line, *failed)));
+    }
+    failures.extend(loadup.form_failures.iter().map(|f| (f.form, placed(&f.error, &loadup.loadup, f.line, f.form + 1))));
+    failures.sort_by_key(|(form, _)| *form);
+    failures.into_iter().map(|(_, failure)| failure).collect()
+}
+
+/// MESSAGE in the loader's words: itself when it names its own place (a
+/// nested load's, or the reader's), else placed at FILE, LINE and FORM.
+fn placed(message: &str, file: &std::path::Path, line: usize, form: usize) -> String {
+    if lisp_error_fields(message).get("file").is_some() {
+        return message.to_owned();
+    }
+    format!("{}: line {line} form {form}: {message}", file.display())
+}
+
+/// What the condition the chain's load site SITE signalled says
+/// (`error-message-string'), when the drive's wrapper logged one
+/// (`romacs-loadup--log', src/loadup.rs) and it can be read.
+fn site_message(vm: &mut Vm, site: usize) -> Option<String> {
+    let message = vm.eval_source(&format!(
+        "(let ((e (cdr (assq {site} romacs-loadup--log)))) (and (eq (car-safe e) 'error) (error-message-string (cdr e))))"
+    )).ok()?;
+    if message == romacs_vm::Fixed::NIL {
+        return None;
+    }
+    message.bytes().ok().map(|bytes| String::from_utf8_lossy(bytes).into_owned())
 }
 
 /// Romacs's own directories of the Lisp tree `dir`, on top of GNU's: its
