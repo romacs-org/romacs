@@ -4797,7 +4797,6 @@ before calling this function."
     (setq-local forward-list-function #'treesit-forward-list)
     (setq-local down-list-function #'treesit-down-list)
     (setq-local up-list-function #'treesit-up-list)
-    (setq-local show-paren-data-function #'treesit-show-paren-data)
     (setq-local hs-c-start-regexp nil
                 hs-block-start-regexp nil
                 hs-block-end-regexp #'treesit-hs-block-end
