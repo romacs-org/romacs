@@ -250,6 +250,31 @@
       (ignore-errors (kill-buffer (get-file-buffer file)))
       (delete-directory dir t))))
 
+(ert-deftest warm-restart-a-clean-file-gone-from-disk-but-open-is-reused ()
+  ;; Its file gone, a clean file still open here keeps its text: the
+  ;; restore reuses that buffer, so a view indirect on it comes back too.
+  (let* ((dir (make-temp-file "romacs-wr-file-" t)) (file (expand-file-name "open.txt" dir))
+         (record (list :id "o" :name "open.txt" :strategy 'file :file file :mode 'text-mode :point 1
+                       :directory dir))
+         (view (list :id "v" :name "open.txt<view>" :strategy 'indirect :base "o" :mode 'text-mode
+                     :point 1 :directory dir))
+         (buffers (make-hash-table :test #'equal))
+         (warm-restart--problems nil))
+    (unwind-protect
+        (progn
+          (write-region "kept text\n" nil file nil 'silent)
+          (let ((base (find-file-noselect file)))
+            (delete-file file)
+            (warm-restart--restore-buffer record [] buffers)
+            (warm-restart--restore-buffer view [] buffers)
+            (should (eq (gethash "o" buffers) base))
+            (should (equal (with-current-buffer base (buffer-string)) "kept text\n"))
+            (should (eq (buffer-base-buffer (gethash "v" buffers)) base))
+            (should-not warm-restart--problems)))
+      (ignore-errors (kill-buffer (gethash "v" buffers)))
+      (ignore-errors (kill-buffer (get-file-buffer file)))
+      (delete-directory dir t))))
+
 (ert-deftest warm-restart-a-window-laid-out-early-gets-its-history-back ()
   ;; Its windows laid out before every buffer was back: once they are, each
   ;; window's earlier buffers come back after those shown in it since.

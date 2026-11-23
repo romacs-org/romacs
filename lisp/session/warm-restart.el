@@ -905,8 +905,10 @@ it was dropped instead."
   "Visit RECORD's file, put its carried text back, and return the buffer.
 A buffer with carried text keeps the old visited-file modtime, so saving
 over a file changed on disk still asks.  A clean file's text lives on
-disk alone: gone from there, it is reported, not restored empty."
-  (unless (or (plist-get record :blob) (file-exists-p (plist-get record :file)))
+disk, or in a live buffer still visiting it: with neither, it is
+reported, not restored empty."
+  (unless (or (plist-get record :blob) (file-exists-p (plist-get record :file))
+              (find-buffer-visiting (plist-get record :file)))
     (error "%s no longer exists" (plist-get record :file)))
   (let* ((enable-local-variables :safe)
          (large-file-warning-threshold nil)
