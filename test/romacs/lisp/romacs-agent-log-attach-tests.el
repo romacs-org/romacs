@@ -341,6 +341,43 @@ PNG files in a fresh directory, and `composer' its draft's text."
             (should (equal (composer) (concat "look: " (link a) " words")))
             (romacs-agent-log-attach-tests--shown (list a))))))))
 
+(defun romacs-agent-log-attach-tests--del-at-start-is-quiet ()
+  "Assert that DEL at the draft start leaves the chat and point intact."
+  (should (= (point) romacs-agent-log--input))
+  (should-not romacs-attach-items)
+  (should-not (use-region-p))
+  (let ((before (buffer-string))
+        (start (point)))
+    (call-interactively #'romacs-agent-log-attach-delete-backward)
+    (should (equal-including-properties (buffer-string) before))
+    (should (= (point) start))))
+
+(ert-deftest romacs-agent-log-attach-del-at-the-start-of-an-empty-draft ()
+  (romacs-agent-log-attach-tests--with
+    (should (equal (composer) ""))
+    (romacs-agent-log-attach-tests--del-at-start-is-quiet)))
+
+(ert-deftest romacs-agent-log-attach-del-at-the-start-of-a-nonempty-draft ()
+  (romacs-agent-log-attach-tests--with
+    (insert "draft")
+    (goto-char romacs-agent-log--input)
+    (romacs-agent-log-attach-tests--del-at-start-is-quiet)))
+
+(ert-deftest romacs-agent-log-attach-del-at-the-start-after-streaming ()
+  (romacs-agent-log-attach-tests--with
+    (let ((session romacs-agent-log--session))
+      (romacs-agent-log-draw session '(:type delta :text "Reply"))
+      (buffer-enable-undo)
+      (insert "draft")
+      (goto-char romacs-agent-log--input)
+      (let ((start (point)))
+        (romacs-agent-log-draw session '(:type delta :text " continues"))
+        (should (> romacs-agent-log--input start)))
+      (should (equal (buffer-substring-no-properties (point-min) romacs-agent-log--end)
+                     "Reply continues\n"))
+      (should (equal (composer) "draft"))
+      (romacs-agent-log-attach-tests--del-at-start-is-quiet))))
+
 (ert-deftest romacs-agent-log-attach-del-at-the-start-edits-the-chips ()
   (romacs-agent-log-attach-tests--with
     (insert (link a))
@@ -355,6 +392,27 @@ PNG files in a fresh directory, and `composer' its draft's text."
         (romacs-agent-log-attach-delete-backward)
         (should-not edited)
         (should (= (length (composer)) (1- (length (link a)))))))))
+
+(ert-deftest romacs-agent-log-attach-del-one-character-into-the-draft ()
+  (romacs-agent-log-attach-tests--with
+    (insert "xdraft")
+    (goto-char (1+ romacs-agent-log--input))
+    (call-interactively #'romacs-agent-log-attach-delete-backward)
+    (should (equal (composer) "draft"))
+    (should (= (point) romacs-agent-log--input))))
+
+(ert-deftest romacs-agent-log-attach-del-at-the-start-deletes-the-active-region ()
+  (romacs-agent-log-attach-tests--with
+    (insert "cutdraft")
+    (goto-char romacs-agent-log--input)
+    (let ((transient-mark-mode t)
+          (select-active-regions nil)
+          (delete-active-region t))
+      (set-mark (+ (point) 3))
+      (should (use-region-p))
+      (call-interactively #'romacs-agent-log-attach-delete-backward))
+    (should (equal (composer) "draft"))
+    (should (= (point) romacs-agent-log--input))))
 
 (ert-deftest romacs-agent-log-attach-reading-never-writes ()
   ;; A link to a file that is gone has no chip, and stays: neither a read

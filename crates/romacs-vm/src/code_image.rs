@@ -26,6 +26,45 @@ fn value(v: &Json) -> Result<Value> {
     Ok(Value(v.as_u64().ok_or("image value required")?))
 }
 
+fn image_function_header(id: usize, meta: &Json) -> Result<Function> {
+    let m = array(meta)?;
+    if m.len() != 6 {
+        return Err("invalid function metadata".into());
+    }
+    let key = match &m[5] {
+        Json::Null => None,
+        k => Some(k.as_str().and_then(|k| u128::from_str_radix(k, 16).ok()).ok_or("invalid function key")?),
+    };
+    let f = Function {
+        capture_mutations: Vec::new(),
+        mapped_code: Some(id + 1),
+        code: vec![],
+        sites: vec![],
+        regs: number(&m[0])?,
+        captures: number(&m[1])?,
+        arity: number(&m[2])?,
+        required: number(&m[3])?,
+        rest: m[4].as_bool().ok_or("invalid rest flag")?,
+        lazy: None,
+        pending: None,
+        dynamic: None,
+        environment: None,
+        params: None,
+        key,
+    };
+    if f.regs == 0
+        || f.required > f.arity
+        || f.captures
+            .checked_add(f.arity)
+            .and_then(|n| n.checked_add(usize::from(f.rest)))
+            .is_none_or(|n| n > f.regs)
+        || f.regs > 1_000_000
+    {
+        return Err("invalid register/argument metadata".into());
+    }
+    Ok(f)
+}
+
 impl Vm {
     /// Save a quiescent compiled world. Mutable buffers, vectors, and captured
     /// cells are deliberately unsupported rather than silently flattened.
@@ -284,41 +323,7 @@ impl Vm {
             vm.macros.insert(slot);
         }
         for (id, meta) in array(field(&directory, "functions")?)?.iter().enumerate() {
-            let m = array(meta)?;
-            if m.len() != 6 {
-                return Err("invalid function metadata".into());
-            }
-            let key = match &m[5] {
-                Json::Null => None,
-                k => Some(k.as_str().and_then(|k| u128::from_str_radix(k, 16).ok()).ok_or("invalid function key")?),
-            };
-            let f = Function {
-                capture_mutations: Vec::new(),
-                mapped_code: Some(id + 1),
-                code: vec![],
-                sites: vec![],
-                regs: number(&m[0])?,
-                captures: number(&m[1])?,
-                arity: number(&m[2])?,
-                required: number(&m[3])?,
-                rest: m[4].as_bool().ok_or("invalid rest flag")?,
-                lazy: None,
-                pending: None,
-                dynamic: None,
-                params: None,
-                key,
-            };
-            if f.regs == 0
-                || f.required > f.arity
-                || f.captures
-                    .checked_add(f.arity)
-                    .and_then(|n| n.checked_add(usize::from(f.rest)))
-                    .is_none_or(|n| n > f.regs)
-                || f.regs > 1_000_000
-            {
-                return Err("invalid register/argument metadata".into());
-            }
-            vm.install_function(f);
+            vm.install_function(image_function_header(id, meta)?);
         }
         for closure in array(field(&directory, "closures")?)? {
             let c = array(closure)?;
@@ -515,20 +520,10 @@ impl Vm {
             .map(words)
             .collect::<Result<Vec<_>>>()?;
         let f = Function {
-            capture_mutations: Vec::new(),
             mapped_code: None,
             code,
             sites,
-            regs: f.regs,
-            captures: f.captures,
-            arity: f.arity,
-            required: f.required,
-            rest: f.rest,
-            lazy: None,
-            pending: None,
-            dynamic: f.dynamic,
-            params: f.params.clone(),
-            key: f.key,
+            ..f.as_ref().clone()
         };
         self.validate_image_function(&f)?;
         let roots = field(&body, "roots")?.as_object().ok_or("invalid image literal roots")?;

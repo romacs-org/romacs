@@ -26,8 +26,7 @@ display.rs fontify_range call_prepared_source_raw 1 clean  # the arguments are f
 display.rs treesit_stopgap call_prepared_source_raw 1 clean  # the arguments are fixnums and the window, which slots[root] holds and nothing reads back after the call
 display_host/models.rs run_model_event call_prepared_source_raw 1 clean  # the event list is only the call's argument; its value is discarded, and nothing heap from before it is used after
 eval_buffer.rs eval_buffer_primitive write_from_native 2 held  # the bootstrap's emacs-lisp-mode and menu-bar-mode, as set writes: queued for the legacy call's engine, which always runs here, so the watchers run at the drain; with no engine, at once with collection held (rooted_write unset)
-eval_form.rs eval_primitive compile_request 1 held  # an open compiler builder holds collection
-eval_form.rs eval_primitive execute_raw 1 clean  # DATUM and the lexical environment are converted to forms first
+eval_form.rs execute_eval execute_args 1 clean  # the captures are the call's arguments, cells made before it; only its result is used after
 forwarded.rs notify_unbind_forwarded notify_watchers 1 rooted  # OLD and OWNER are read from the caller's frame before each call
 forwarded.rs notify_unbind_forwarded notify_watchers_at 2 rooted  # OLD and OWNER are read from the caller's frame before each call
 gc.rs assert_no_retention_growth collect 1 collector  # a test helper collecting with no engine running
@@ -96,6 +95,7 @@ request_code.rs eval_form_raw execute_raw 1 clean  # FORM's objects are rooted
 request_code.rs eval_form_raw finish_request 1 collector  # the request's result is its root
 request_code.rs finish_request collect 1 collector  # at a request boundary, when may_collect(0)
 request_code.rs finish_request run_aftermath 1 rooted  # the outcome's value is a RootFrame across the run, read back
+request_code.rs request_compilation compile 1 held  # an open compiler builder holds collection
 source_cache.rs cached_datum compile_guarded 1 held  # an open compiler builder holds collection
 source_cache.rs cached_source_form compile 1 held  # an open compiler builder holds collection
 source_cache.rs cached_source_form compile_guarded 1 held  # an open compiler builder holds collection

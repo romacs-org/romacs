@@ -1,0 +1,16 @@
+/**
+ * Merge two sorted lists into one, keeping the order of equal elements:
+ * the JSDoc sample tools/treesit-fuzz edits.
+ *
+ * @template T
+ * @param {Array<T>} left - the first list, sorted by `compare`.
+ * @param {Array<T>} right - the second list, sorted by `compare`.
+ * @param {Function} [compare] - negative when its first
+ *   argument comes first, as {@link Array#sort} expects.
+ * @param {{stable: boolean, limit: (number|undefined)}} options - how to merge.
+ * @returns {Array<T>} a new list with every element of both.
+ * @throws {TypeError} when either list is not an array.
+ * @see mergeAll
+ * @since 1.2.0
+ * @deprecated Use {@link mergeAll} for more than two lists.
+ */

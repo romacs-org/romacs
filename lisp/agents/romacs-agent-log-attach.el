@@ -303,12 +303,16 @@ the separator, written again, takes that line's start with it."
 ;;;; Keys
 
 (defun romacs-agent-log-attach-delete-backward ()
-  "DEL: at the composer's start with chips, the chips to edit; else a
-character back, as ever."
+  "Delete backward, or delete the active region as usual.
+At the composer's start, edit the attachment chips if present.
+With neither chips nor an active region, do nothing there."
   (interactive nil romacs-agent-log-mode)
-  (if (and romacs-attach-items (= (point) romacs-agent-log--input))
-      (romacs-attach-edit)
-    (call-interactively #'delete-backward-char)))
+  (let ((at-start (and romacs-agent-log--input
+                       (= (point) romacs-agent-log--input))))
+    (cond ((and at-start romacs-attach-items)
+           (romacs-attach-edit))
+          ((or (not at-start) (use-region-p))
+           (call-interactively #'delete-backward-char)))))
 
 (defun romacs-agent-log-attach--forget-paste (paste)
   "Let PASTE go when it is the paste under way."

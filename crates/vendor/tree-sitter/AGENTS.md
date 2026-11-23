@@ -19,13 +19,13 @@ reparse, many buffers per grammar, and fontify by visible region.
   `treesit` API plus `lisp/romacs-treesit-font-lock.el`.
 
 ## Contracts
-- On input without errors, every grammar's trees equal the published
-  runtime's: there the grammar defines the answer, and that is what "grammars
-  work" means. `tools/treesit-fuzz` checks it for the grammars Romacs ships.
-- On input with errors (code being typed, broken code), recovery and tree
-  shape are Romacs's to design for locality and cost. A tree may differ from
-  the published runtime's only inside the top-level form under edit; forms
-  the edit did not touch keep their trees.
+- On error-free input, trees equal the published runtime's (E1), and a
+  reparse equals a fresh parse of the same text (E2). `tools/treesit-fuzz`
+  checks both for every grammar Romacs ships, after each of its edits. On
+  input with errors, today's runtime and the published one both break E2
+  through history-dependent recovery. Stage P has two goals: E2 on any
+  input, which `--e2-everywhere` checks, and each top-level form parsing
+  from its own text alone, which P's own tests check.
 - Work saved is the measure: a change states the parse or query work it
   removes on a real file (bytes re-lexed per key, instructions per reparse)
   against the runtime before it.
@@ -47,8 +47,9 @@ reparse, many buffers per grammar, and fontify by visible region.
   agent-opened pull requests), but nothing waits on it.
 - 2026-11-23 (owner): we own this runtime, and the only restriction is
   compatibility with third-party grammars (the Boundary's limit). The
-  published runtime is an oracle on error-free input only; form-local
-  reparsing of the edited form is this runtime's design.
+  published runtime is an oracle on error-free input only.
+- 2026-11-23: the end state is a Rust runtime, built in slices T0 (fuzz),
+  Q, L and P, each deleting its C counterpart.
 - 2026-11-23 (owner): the 11-15 rule permits the Rust parser stage once the
   Rust query stage preserves query behavior and fontify performance and
   removes the C query engine.

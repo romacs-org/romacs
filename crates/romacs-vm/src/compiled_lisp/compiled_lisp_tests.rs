@@ -56,6 +56,58 @@ fn units_round_trip() {
     }
 }
 
+#[test]
+fn capture_names_survive_a_unit_and_pending_decode() {
+    let mut vm = Vm::new();
+    let form = "'(let ((f (let ((body-var 4) (spec-var 5) (unused 6))
+                       (lambda () (interactive (list spec-var)) body-var))))
+                   (list (aref f 2) (funcall f) (aref f 2)))";
+    assert_eq!(through_unit(&mut vm, form),
+               "(((body-var . 4) (spec-var . 5)) 4 ((body-var . 4) (spec-var . 5)))");
+    let special = "'(let ((value 40))
+        (defvar unit-local-special)
+        (let ((f (lambda () (let ((unit-local-special value))
+                              (symbol-value 'unit-local-special)))))
+          (list (aref f 2) (funcall f) (aref f 2))))";
+    assert_eq!(through_unit(&mut vm, special),
+               "(((value . 40) unit-local-special) 40 ((value . 40) unit-local-special))");
+}
+
+/// A closure constant a unit could not rebuild whole is refused, so its
+/// file loads as source: a command, whose spec lives in the VM's table,
+/// and a capture whose lexical pair Lisp holds from slot 2.
+#[test]
+fn closure_constants_with_outside_relations_are_refused() {
+    let mut vm = Vm::new();
+    vm.eval_source("(setq unit-command (let ((k 1)) (lambda () (interactive) k))
+                          unit-counter (let ((n 0)) (lambda () (setq n (1+ n))))
+                          unit-plain (let ((m 0)) (lambda () (setq m (1+ m))))
+                          unit-pair (assq 'n (aref unit-counter 2)))").unwrap();
+    for (constant, why) in [("unit-command", "interactive closure"), ("unit-counter", "lexical pair")] {
+        let datum = vm.eval_source_raw(&format!("(list 'funcall (list 'quote {constant}))")).unwrap();
+        let form = vm.expansion_form(datum, 0).unwrap();
+        let mut names = unit::Names::default();
+        let refused = vm.compile_unit(&form, NameSet::default(), &mut names).expect_err(why);
+        // A refusal by design: the walk keeps the file as source, not as an error.
+        assert!(refused.starts_with(unit::UNSERIALISABLE) && refused.contains(why), "{refused}");
+    }
+    assert_eq!(through_unit(&mut vm, "(list 'funcall (list 'quote unit-plain))"), "1");
+}
+
+/// A string with a text property keyed by an uninterned symbol, as an
+/// `eval-when-compile' may return one, is refused by design: the walk keeps
+/// its file as source, not as an error.
+#[test]
+fn a_string_keyed_by_an_uninterned_property_is_refused_by_design() {
+    let mut vm = Vm::new();
+    vm.eval_source("(setq unit-keyed (propertize \"a\" (make-symbol \"key\") 1))").unwrap();
+    let datum = vm.eval_source_raw("(list 'length (list 'quote unit-keyed))").unwrap();
+    let form = vm.expansion_form(datum, 0).unwrap();
+    let mut names = unit::Names::default();
+    let refused = vm.compile_unit(&form, NameSet::default(), &mut names).expect_err("an uninterned key");
+    assert!(refused.starts_with(unit::UNSERIALISABLE) && refused.contains("not interned"), "{refused}");
+}
+
 /// A char-table constant round-trips: its subtype, default, parent, extra
 /// slots and own values, the default not baked into them, so
 /// `map-char-table' sees what the original holds.

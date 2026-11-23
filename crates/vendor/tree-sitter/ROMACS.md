@@ -113,9 +113,33 @@ instructions on every per-key row in both profiles.
 ## Checking it
 
 `tools/treesit-fuzz` builds this runtime and the published one with the
-grammars Romacs ships, and compares their trees after every one of a few
-hundred seeded typing-like edits per file; any difference fails it. Run it
-whenever this crate, its patches, or a grammar pin in
-`crates/romacs-grammars` change.
+grammars Romacs ships, makes a few hundred seeded typing-like edits per file,
+and after each one checks the two equalities `AGENTS.md` names, on every
+state where either runtime's reparse or fresh parse has no error: E1, the
+reparsed tree equals the published runtime's in the ranges that changed and
+in every node and cursor getter Lisp can reach; E2, the reparsed tree
+equals this runtime's own fresh parse. A difference in either fails it, as
+does a worker that fails or whose output is missing or misnamed, a
+self-test plant that produces anything but its own (check, cause) failure,
+or, in a default run, a grammar of `crates/romacs-grammars` with no such
+state after an edit. `tools/lib/treesit-fuzz/test_getters.py` holds the
+worker's getters to the wrappers in `crates/romacs-vm/src/treesit/native.rs`,
+and every other file of `crates/romacs-vm/src` but Q's query engine and
+its differential test to not naming the runtime; it guards against honest omission, not against code
+written to hide a call. On text with
+errors this runtime, like the published one, does not hold E2 yet (a reparse
+keeps some recovery a fresh parse makes otherwise, in GNU's C sources a few
+nodes in some of the edits), so those are counted and fail only with
+`--e2-everywhere`. Run it whenever this crate, its patches, or a grammar pin
+in `crates/romacs-grammars` change.
+
+Parse states are counted apart and do not fail it; GNU's `treesit` API does
+not show them. One difference there is known: the word-token patch above
+changes `ts_parser__can_reuse_first_leaf`, which the token cache also calls
+(`src/parser.c`, `ts_parser__get_cached_token`), so a cached word keeps the
+state it was lexed in. That gives other parse states than the published
+runtime in the 11 grammars with a keyword-capture token (bash, C, C++, Go,
+Java, JavaScript, Kotlin, Python, Rust, TypeScript, TSX); tree shape is the
+same.
 
 Licence: MIT, `LICENSE` here.

@@ -580,3 +580,93 @@ fn moving_filled_box_matches_whole_over_adjacent_ink() {
         }
     }
 }
+
+/// One layout slot. The cluster has two glyphs in the same slot, the second
+/// extending beyond the first glyph's cell.
+fn typing_slot(frame: &mut FrameGlyphBuffer, ch: char, slot: DisplaySlotId, x: f32, y: f32) -> f32 {
+    let width = match ch {
+        'W' => 12.0,
+        'i' => 4.0,
+        '@' => 8.0,
+        _ => unreachable!("unexpected typing fixture character"),
+    };
+    let mut add = |ch, x, width| {
+        frame.add_char(ch, x, y, width, ROW, 9.0, false);
+        let Some(FrameGlyph::Char { slot_id, .. }) = frame.glyphs.last_mut() else {
+            unreachable!("add_char appends a character")
+        };
+        *slot_id = slot;
+    };
+    if ch == '@' {
+        add('i', x, 4.0);
+        add('l', x + 4.0, 4.0);
+    } else {
+        add(ch, x, width);
+    }
+    width
+}
+
+fn typing_frame(lines: [&str; 2], (row, col): (u32, u16)) -> FrameGlyphBuffer {
+    let mut frame = FrameGlyphBuffer::with_size(96.0, 64.0);
+    let window_id = DisplayWindowId::new(1);
+    frame.background = Color::BLACK;
+    frame.set_draw_context(window_id, GlyphRowRole::Text, None);
+    frame.set_face_with_font(
+        FaceId::new(NORMAL), Color::WHITE, Some(Color::BLACK), "DejaVu Sans",
+        400, false, 12.0, 0, None, 0, None, 0, None, false,
+    );
+    for (line, y, row) in [(lines[0], 0.0, 0), (lines[1], ROW, 1)] {
+        let mut x = 2.0;
+        for (ch, col) in line.chars().zip(0_u16..) {
+            x += typing_slot(&mut frame, ch, DisplaySlotId { window_id, row, col }, x, y);
+        }
+    }
+    frame.window_cursors.push(WindowCursor {
+        window_id,
+        slot_id: DisplaySlotId { window_id, row, col },
+        x: 2.0 + f32::from(col) * CELL,
+        y: if row == 0 { 0.0 } else { ROW },
+        width: CELL,
+        height: ROW,
+        style: CursorStyle::FilledBox,
+        color: Color::rgb(1.0, 0.5, 0.0),
+        cursor_fg: Color::BLACK,
+        ascent: 9.0,
+        active: true,
+    });
+    frame
+}
+
+#[test]
+fn typing_through_the_root_picture_equals_whole_frames() {
+    use Painted::{Clean, Direct, Regions, Whole};
+
+    let mut h = try_harness().expect("typing pixel comparison requires an offscreen GPU adapter");
+    h.renderer.effects.cursor_color_cycle.enabled = false;
+    let mut picture = RootPicture::new(&h.renderer, SnapshotSize::new(W, H).unwrap());
+    let steps = [
+        (["WiW", ""], (0, 3), Direct),
+        (["WiW", ""], (0, 3), Whole),
+        (["WiWi", ""], (0, 4), Regions(1)),
+        // Inserting the cluster wraps it to the next row. The empty cursor
+        // slot follows two glyphs tied at the preceding column.
+        (["WiWi", "@"], (1, 1), Regions(1)),
+        (["WiWi", "@"], (1, 0), Clean),
+        (["WiW@", ""], (0, 3), Regions(1)),
+        (["WiW", ""], (0, 3), Regions(1)),
+    ];
+    for (step, (lines, cursor, expected)) in steps.into_iter().enumerate() {
+        let frame = typing_frame(lines, cursor);
+        let mapping = mapping_for(&frame, W, H);
+        h.atlas.set_current_frame_fonts(frame.font_bindings());
+        h.renderer.render_frame_glyphs(
+            &h.view, &frame, &mut h.atlas, mapping, true, None, None, None, None,
+        );
+        let whole = read_back(&h);
+        let target = PaintTarget { view: &h.view, mapping, cursor_visible: true, animated_cursor: None };
+        let painted = picture.paint(&mut h.renderer, &mut h.atlas, &frame, target);
+        let retained = read_back(&h);
+        assert!(retained == whole, "typing step {step}, {lines:?}, cursor {cursor:?}");
+        assert_eq!(painted, expected, "typing step {step}, {lines:?}");
+    }
+}

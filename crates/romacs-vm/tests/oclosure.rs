@@ -8,9 +8,9 @@ fn check(source: &str, expected: &str) {
 }
 
 #[test]
-fn documentation_does_not_expose_ordinary_closures() {
+fn documentation_is_visible_on_ordinary_closures() {
     for (source, expected) in [
-        ("(let ((n 0)) (let ((f (lambda () (:documentation (progn (setq n (1+ n)) 'kind)) 7))) (garbage-collect) (list n (romacs--oclosure-type f) (funcall f) (condition-case e (length f) (wrong-type-argument (car (cdr e)))) (condition-case e (aref f 4) (wrong-type-argument (car (cdr e)))))))", "(1 kind 7 sequencep arrayp)"),
+        ("(let ((n 0)) (let ((f (lambda () (:documentation (progn (setq n (1+ n)) 'kind)) 7))) (garbage-collect) (list n (romacs--oclosure-type f) (funcall f) (length f) (aref f 4))))", "(1 kind 7 5 kind)"),
         ("(list (romacs--oclosure-type (lambda () nil)) (romacs--oclosure-type (lambda () (:documentation 42) nil)) (romacs--oclosure-type (lambda () \"doc\" nil)) (romacs--oclosure-type 'car) (romacs--oclosure-type [1]))", "(nil nil nil nil nil)"),
         ("(let ((f (make-interpreted-closure nil '(7) '(t) 'before nil))) (list (romacs--oclosure-type f) (let ((g (make-interpreted-closure (aref f 0) (aref f 1) (aref f 2) 'after nil))) (garbage-collect) (romacs--oclosure-type g)) (funcall f)))", "(before after 7)"),
     ] { check(source, expected); }

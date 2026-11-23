@@ -190,7 +190,7 @@ impl RootPicture {
         let plan = match &shown {
             None => Plan::Whole,
             Some(s) if repeats => Plan::Clean {
-                rows: damage::text_rows(&s.indexed, |_| true),
+                rows: damage::text_rows(&s.indexed.runs, |_| true),
             },
             Some(s) => {
                 let inks = reach::Inks { all: self.reach, rows: &self.rows };
@@ -527,13 +527,8 @@ fn adopt_presentation(shown: &mut FrameGlyphBuffer, frame: &FrameGlyphBuffer) {
 /// colours wherever it is (a row set shorter than the frame's cell can give
 /// two glyphs one slot).
 fn slot_facts(frame: &FrameGlyphBuffer, slot: DisplaySlotId) -> (Option<usize>, Option<Rect>) {
-    let in_slot = frame
-        .glyphs
-        .iter()
-        .filter(|g| g.slot_id() == Some(slot))
-        .filter_map(FrameGlyph::geometry)
-        .reduce(damage::union);
-    (frame.cursor_anchor(slot), in_slot)
+    let (anchor, glyphs) = frame.cursor_anchor_and_slot(slot);
+    (anchor, glyphs.filter_map(FrameGlyph::geometry).reduce(damage::union))
 }
 
 /// Where A and B, both on whole device pixels at SCALE, overlap on a
