@@ -166,6 +166,9 @@ user's own spec still wins."
 \(romacs-agent-log-queue.el).")
 (defvar-local romacs-agent-log--input nil
   "Marker: the composer's start, after the separator.")
+(defvar-local romacs-agent-log--undo-shifts nil
+  "Deferred composer motions, newest first.
+Each entry holds an undo list cell, the old composer start and the delta.")
 (defvar-local romacs-agent-log--seq 0 "The seq of the last record drawn.")
 (defvar-local romacs-agent-log--active-start nil
   "Start of the current session's transcript, after earlier handoffs.")
@@ -383,12 +386,102 @@ passing nothing to what is typed after it."
           (setq position end))))
     text))
 
+(defun romacs-agent-log--shift-undo-entry (entry start delta)
+  "Shift composer positions in ENTRY at or after START by DELTA."
+  (pcase entry
+    ((and (pred integerp) (guard (>= entry start)))
+     (+ entry delta))
+    ((and `(,(and beg (pred integerp)) . ,end) (guard (>= beg start)))
+     (cons (+ beg delta) (+ end delta)))
+    ((and `(,(and text (pred stringp)) . ,pos) (guard (>= (abs pos) start)))
+     (cons text (if (< pos 0) (- pos delta) (+ pos delta))))
+    ((and `(nil ,prop ,val ,beg . ,end) (guard (>= beg start)))
+     `(nil ,prop ,val ,(+ beg delta) . ,(+ end delta)))
+    ((and `(apply ,(and change (pred integerp)) (,beg . ,end) ,fun . ,args)
+          (guard (>= beg start)))
+     `(apply ,change (,(+ beg delta) . ,(+ end delta)) ,fun . ,args))
+    ((and `(apply ,(and change (pred integerp)) ,(and beg (pred integerp))
+                  ,end ,fun . ,args)
+          (guard (>= beg start)))
+     `(apply ,change ,(+ beg delta) ,(+ end delta) ,fun . ,args))
+    (_ entry)))
+
+(defun romacs-agent-log--shift-undo (undo start delta)
+  "Shift composer positions in UNDO at or after START by DELTA.
+This is temporary until slice 8b moves the composer into its own buffer."
+  (if (or (not (consp undo)) (zerop delta))
+      undo
+    (mapcar (lambda (entry) (romacs-agent-log--shift-undo-entry entry start delta)) undo)))
+
+(defun romacs-agent-log--record-undo-shift (start delta)
+  "Defer shifting undo from START by DELTA, after ending its edit group."
+  (let ((cell (if (car buffer-undo-list) buffer-undo-list (cdr buffer-undo-list))))
+    (when cell
+      ;; A timer can write here while another buffer owns the saved undo point.
+      (when (car buffer-undo-list) (push nil buffer-undo-list))
+      (setq undo-auto--last-boundary-cause 'explicit)
+      (if (eq cell (caar romacs-agent-log--undo-shifts))
+          (cl-incf (cddar romacs-agent-log--undo-shifts) delta)
+        (push (cons cell (cons start delta)) romacs-agent-log--undo-shifts)))))
+
+(defun romacs-agent-log--undo-updates (undo shifts)
+  "Return replacements for cells of UNDO affected by deferred SHIFTS.
+At each cell, the oldest applicable motion supplies the composer start
+in the entry's own coordinates.  Subsequent motions move its positions
+and the composer start together, so test membership once."
+  (let (start (delta 0) updates)
+    (while (consp undo)
+      (when (eq undo (caar shifts))
+        (setq start (cadar shifts)
+              delta (+ delta (cddar shifts)))
+        (pop shifts))
+      (unless (zerop delta)
+        (let* ((entry (car undo))
+               (shifted (romacs-agent-log--shift-undo-entry entry start delta)))
+          (unless (eq entry shifted) (push (cons undo shifted) updates))))
+      (setq undo (cdr undo)))
+    updates))
+
+(defun romacs-agent-log--shift-selective-undo (undo shifts)
+  "Apply all SHIFTS to the selective UNDO list prepared before them."
+  (let (start (delta 0))
+    (dolist (shift shifts)
+      (setq start (cadr shift))
+      (cl-incf delta (cddr shift)))
+    (romacs-agent-log--shift-undo undo start delta)))
+
+(defun romacs-agent-log--apply-undo-shifts (&rest _)
+  "Bring this chat's undo positions up to date before undo or redo.
+Remove this with slice 8b, when the composer gets its own buffer."
+  (when romacs-agent-log--undo-shifts
+    (let* ((shifts romacs-agent-log--undo-shifts)
+           (updates (romacs-agent-log--undo-updates buffer-undo-list shifts))
+           (selective (and undo-in-region (local-variable-p 'pending-undo-list)
+                           (consp pending-undo-list) pending-undo-list))
+           (pending (and selective (romacs-agent-log--shift-selective-undo selective shifts)))
+           (inhibit-quit t))
+      (dolist (update updates) (setcar (car update) (cdr update)))
+      (when selective (cl-mapl (lambda (old new) (setcar old (car new))) selective pending))
+      (setq romacs-agent-log--undo-shifts nil))))
+
+(advice-add 'undo :before #'romacs-agent-log--apply-undo-shifts)
+(advice-add 'undo-redo :before #'romacs-agent-log--apply-undo-shifts)
+
 (defmacro romacs-agent-log--writing (&rest body)
-  "Run BODY, which writes the transcript: read-only lifted, no undo kept,
-no hook told of it, and the buffer no more modified than it was (it is
-no edit of the user's: only a draft typed is)."
+  "Run BODY silently with read-only lifted, recording composer motion.
+The undo command applies the recorded position changes to draft undo."
   (declare (indent 0) (debug t))
-  `(with-silent-modifications ,@body))
+  (let ((start (make-symbol "start"))
+        (end (make-symbol "end")))
+    `(let ((,start (and (consp buffer-undo-list) romacs-agent-log--input
+                        (marker-position romacs-agent-log--input))))
+       (unwind-protect
+           (with-silent-modifications ,@body)
+         (when-let* ((,start)
+                     (,end (and romacs-agent-log--input
+                                (marker-position romacs-agent-log--input)))
+                     ((/= ,start ,end)))
+           (romacs-agent-log--record-undo-shift ,start (- ,end ,start)))))))
 
 (defun romacs-agent-log--put (text &optional block)
   "Insert TEXT, sealed, at the transcript's end, or at the end of BLOCK, an
@@ -1413,8 +1506,9 @@ to be sent: romacs-agent-log-queue.el), or nil for none.")
       (let ((text (romacs-agent-log-activity-lines
                    (romacs-agent-children-rows romacs-agent-log--session) romacs-agent-log--width))
             (end (marker-position romacs-agent-log--end)))
-        (romacs-agent-log-activity-set (romacs-agent-log--separator-field text) end)
-        (set-marker romacs-agent-log--end end)))))
+        (romacs-agent-log--writing
+          (romacs-agent-log-activity-set (romacs-agent-log--separator-field text) end)
+          (set-marker romacs-agent-log--end end))))))
 
 (defun romacs-agent-log--separator (&optional force)
   "Write the separator again when what the session does, or the room the
@@ -1679,7 +1773,7 @@ where the chat reads and acts on SESSION, this editor by default
 drew forgotten, its markers let go, its composer kept."
   ;; What streams is dropped, not faced: its text goes too.
   (romacs-agent-log--close-stream 'discard)
-  (romacs-agent-log-activity-set "")
+  (romacs-agent-log--writing (romacs-agent-log-activity-set ""))
   (when romacs-agent-log--blocks
     (mapc #'romacs-agent-log--close-block (hash-table-values romacs-agent-log--blocks)))
   (dolist (ask romacs-agent-log--asks)
@@ -2269,6 +2363,7 @@ On the transcript's text:
   (setq-local scroll-conservatively 101)
   (setq-local header-line-format "")
   (setq-local desktop-save-buffer #'romacs-agent-log--desktop-save)
+  (setq-local pending-undo-list nil undo-in-region nil)
   ;; A quote's bar is decoration: never in what one copies.
   (add-function :filter-return (local 'filter-buffer-substring-function) #'romacs-agent-log--undecorated)
   ;; The separator's rule fits the window it is shown in.
