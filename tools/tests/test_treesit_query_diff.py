@@ -11,12 +11,14 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 SCRIPT = Path(__file__).resolve().parents[1] / "treesit-query-diff"
 LOADER = importlib.machinery.SourceFileLoader("treesit_query_diff", str(SCRIPT))
 SPEC = importlib.util.spec_from_loader(LOADER.name, LOADER)
 DIFF = importlib.util.module_from_spec(SPEC)
 LOADER.exec_module(DIFF)
+import corpus
 from corpus import MODE_MINIMUM, freeze_cases, sha256
 from records import capture, probe_expectations
 
@@ -25,7 +27,7 @@ def manifest_fixture():
     cases = freeze_cases([dict(language=language, text="{}", queries=["(_) @n"],
                                origins=["shipped.el"], shipped=1)
                           for language in sorted(MODE_MINIMUM)])
-    return dict(format=1, c_revision=DIFF.C_REFERENCE, cases=cases)
+    return dict(format=1, c_revision="a" * 40, cases=cases)
 
 
 def write_manifest(path, manifest):
@@ -74,11 +76,31 @@ class CorpusDigestTest(unittest.TestCase):
         self.assertIn("frozen manifest digest changed", result.stderr)
 
     def test_missing_digest_fails_for_both_commands(self):
-        for args in (("run", "--out", self.path.parent / "run"), self.compare_args):
+        for args in (("run", "--out", self.path.parent / "run", "--c-reference", "HEAD"),
+                     self.compare_args):
             with self.subTest(command=args[0]):
                 result = command(*args)
                 self.assertEqual(result.returncode, 2, result.stderr)
                 self.assertIn("the following arguments are required: --corpus-digest", result.stderr)
+
+    def test_missing_c_reference_fails(self):
+        result = command("run", "--out", self.path.parent / "run", "--corpus-digest", self.expected)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("the following arguments are required: --c-reference", result.stderr)
+
+    def test_reference_without_c_query_engine_fails(self):
+        with patch.object(DIFF, "archive", return_value=self.path.parent):
+            with self.assertRaisesRegex(ValueError, r"C reference .* has no .*query\.c"):
+                DIFF.archive_reference("a" * 40, self.path.parent / "reference")
+
+    def test_bundled_grammar_without_sample_fails(self):
+        root = self.path.parent
+        bundle = root / "crates/romacs-grammars/src/lib.rs"
+        bundle.parent.mkdir(parents=True)
+        bundle.write_text('"kotlin" tree_sitter_kotlin_ng::LANGUAGE, "https://example.org/kotlin" '
+                          f'"{self.manifest["c_revision"]}";\n')
+        with self.assertRaisesRegex(ValueError, "no corpus sample for bundled grammar kotlin"):
+            corpus.grammar_samples(root, {})
 
     @unittest.skipUnless(os.environ.get("ROMACS_QUERY_CORPUS_FIXTURES"),
                          "set ROMACS_QUERY_CORPUS_FIXTURES to the typing-modes artifact directory")
@@ -88,7 +110,7 @@ class CorpusDigestTest(unittest.TestCase):
         for name in ("q-verify/recheck/production-equivalent", "ts-query/hardened"):
             with self.subTest(extraction=name):
                 self.assertEqual(len(DIFF.load_manifest(root / name / "corpus.json", expected)),
-                                 len(MODE_MINIMUM))
+                                 16)
 
 
 def fixture():

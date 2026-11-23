@@ -13,11 +13,9 @@ ROOT = Path(__file__).resolve().parent.parent
 SUPPORT = Path("tools/lib/treesit-query")
 sys.path.insert(0, str(ROOT / SUPPORT))
 from corpus import build as corpus
-from corpus import check_cases, freeze_cases, sha256
+from corpus import check_cases, freeze_cases, grammar_samples, sha256
 from records import canonical, compare
 
-# This commit's production engine is f5162409c's.
-C_REFERENCE = "48dd6bd636846a80496764e3ba07b66cd2602f01"
 NATIVE = Path("crates/romacs-vm/src/treesit/native.rs")
 RECORDER = NATIVE.with_name("query_oracle.rs")
 QUIT = Path("crates/romacs-vm/src/quit.rs")
@@ -45,8 +43,17 @@ def archive(ref, dest):
     return dest
 
 
+def archive_reference(revision, dest):
+    reference = archive(revision, dest)
+    if not (reference / C_ENGINE).is_file():
+        raise ValueError(f"C reference {revision} has no {C_ENGINE}")
+    return reference
+
+
 def insert_before(path, anchor, source):
     text = path.read_text()
+    if source in text:
+        return
     if text.count(anchor) != 1:
         raise ValueError(f"missing C reference anchor in {path}")
     path.write_text(text.replace(anchor, source + anchor))
@@ -55,6 +62,8 @@ def insert_before(path, anchor, source):
 def add_reference_tests(reference, subject):
     """Use the same recorder and test-only poll observer on the pinned C arm."""
     shutil.copyfile(subject / RECORDER, reference / RECORDER)
+    insert_before(reference / NATIVE, "pub(crate) use ffi::{",
+                  '#[cfg(test)]\n#[path = "query_oracle.rs"]\nmod query_oracle;\n\n')
     (reference / POLLS).parent.mkdir(exist_ok=True)
     shutil.copyfile(subject / POLLS, reference / POLLS)
     insert_before(reference / NATIVE, "    /// Every match of the query under NODE",
@@ -66,6 +75,11 @@ def add_reference_tests(reference, subject):
     insert_before(reference / QUIT,
                   "        if self.quit.is_some() { crate::gap_probe::safepoint(None); }",
                   "        #[cfg(test)]\n        if let Some(due) = query_polls::record() { return due; }\n")
+    manifest = reference / "crates/romacs-vm/Cargo.toml"
+    dependency = 'romacs-grammars = { path = "../romacs-grammars" }\n'
+    if dependency not in manifest.read_text():
+        insert_before(manifest, "# This crate with its test hooks, for its own tests.\n", dependency)
+        subprocess.run(["cargo", "update", "--workspace", "--offline"], cwd=reference, check=True)
 
 
 def build(root, dest, args, testing=False):
@@ -95,7 +109,10 @@ def build_oracle(source, dest):
     return build(source, dest, ["test", "-p", "romacs-vm", "--lib", "--no-run"], testing=True)
 
 
-def extract(editor, subject, work):
+def extract(editor, subject, work, *, reference=None):
+    samples = json.loads((subject / SUPPORT / "samples.json").read_bytes())
+    selected = grammar_samples(reference or subject, samples)
+    (work / "samples.json").write_text(canonical(selected) + "\n")
     symbols = subprocess.check_output(["nm", "--defined-only", editor], text=True)
     if not {"ts_query_new", "ts_query_cursor_next_match"} <= {
         line.rsplit(maxsplit=1)[-1] for line in symbols.splitlines() if line
@@ -109,13 +126,12 @@ def extract(editor, subject, work):
                ROMACS_QUERY_SCRATCH=str(work))
     for kind in ("CACHE", "CONFIG", "DATA", "STATE"):
         env[f"XDG_{kind}_HOME"] = str(home / kind.lower())
-    shutil.copyfile(subject / SUPPORT / "samples.json", work / "samples.json")
     with (work / "extract.log").open("w") as log:
         subprocess.run([editor, "-Q", "--batch", "--load", subject / SUPPORT / "extract.el"],
                        cwd=subject, env=env, stdout=log, stderr=subprocess.STDOUT, check=True)
 
 
-def freeze_manifest(work, reference, subject, tree, c_editor_sha256):
+def freeze_manifest(work, reference, subject, tree, c_editor_sha256, c_revision):
     # Use the pinned C lockfile to locate the grammar packages' query sources.
     cases = freeze_cases(corpus(reference, work))
     check_cases(cases)
@@ -123,7 +139,7 @@ def freeze_manifest(work, reference, subject, tree, c_editor_sha256):
                          if origin.startswith("lisp/")})
     if not mode_files:
         raise ValueError("no mode source paths in the extracted corpus")
-    manifest = dict(format=1, c_revision=C_REFERENCE, subject_tree=tree, c_editor_sha256=c_editor_sha256,
+    manifest = dict(format=1, c_revision=c_revision, subject_tree=tree, c_editor_sha256=c_editor_sha256,
                     grammar_pins_sha256=digest(subject / GR_JSON),
                     mode_sources={path: digest(subject / path) for path in mode_files},
                     cases=cases)
@@ -146,7 +162,8 @@ def check_digest(path, expected):
 
 def load_manifest(path, expected):
     manifest = check_digest(path, expected)
-    if manifest["format"] != 1 or manifest["c_revision"] != C_REFERENCE:
+    revision = manifest.get("c_revision")
+    if manifest.get("format") != 1 or not isinstance(revision, str) or not revision:
         raise ValueError("unexpected manifest format or C reference")
     cases = manifest["cases"]
     check_cases(cases)
@@ -165,7 +182,7 @@ def record(oracle, manifest, expected):
     return path
 
 
-def run(work, expected):
+def run(work, expected, c_reference):
     if work == ROOT or ROOT in work.parents:
         raise ValueError("--out must be outside the source tree")
     if not os.environ.get("CARGO_TARGET_DIR") or not Path(os.environ["CARGO_TARGET_DIR"]).is_absolute():
@@ -173,14 +190,15 @@ def run(work, expected):
     subprocess.run(["git", "diff", "--exit-code"], cwd=ROOT, check=True)
     work.mkdir(parents=True)
     tree = git("write-tree").decode().strip()
+    revision = git("rev-parse", "--verify", "--end-of-options", f"{c_reference}^{{commit}}").decode().strip()
+    reference = archive_reference(revision, work / "reference")
     subject = archive(tree, work / "subject")
-    reference = archive(C_REFERENCE, work / "reference")
     if (reference / GR_JSON).read_bytes() != (subject / GR_JSON).read_bytes():
         raise ValueError("the pinned C arm uses different grammar sources")
     c_editor = build_editor(reference, work / "c-editor")
-    extract(c_editor, subject, work)
+    extract(c_editor, subject, work, reference=reference)
     c_editor_sha256 = digest(c_editor)
-    manifest = freeze_manifest(work, reference, subject, tree, c_editor_sha256)
+    manifest = freeze_manifest(work, reference, subject, tree, c_editor_sha256, revision)
     cases = load_manifest(manifest, expected)
     print(f"Frozen before candidate build: {expected}  {manifest}", flush=True)
     add_reference_tests(reference, subject)
@@ -200,6 +218,8 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     build_run = commands.add_parser("run", help="build both editors and freeze the corpus using C")
     build_run.add_argument("--out", type=Path, required=True)
+    build_run.add_argument("--c-reference", required=True, metavar="REV",
+                           help="C-backed editor revision to archive and compare against")
     check = commands.add_parser("compare", help="validate existing records against a frozen corpus")
     check.add_argument("--manifest", type=Path, required=True)
     check.add_argument("--reference", type=Path, required=True)
@@ -210,7 +230,7 @@ def main():
                              help="expected corpus content digest excluding the C editor fingerprint")
     args = parser.parse_args()
     if args.command == "run":
-        run(args.out.resolve(), args.corpus_digest)
+        run(args.out.resolve(), args.corpus_digest, args.c_reference)
     else:
         cases = load_manifest(args.manifest, args.corpus_digest)
         compare(args.reference, args.candidate, cases, not args.expect_c)

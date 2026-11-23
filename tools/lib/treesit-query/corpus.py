@@ -10,7 +10,7 @@ from treesit_grammars import crate_dirs, table
 
 # Distinct individual, combined and indent queries observed from each mode.
 MODE_MINIMUM = dict(bash=20, c=24, cpp=23, css=17, go=21, html=9, java=17,
-                    javascript=26, jsdoc=9, json=12, python=21, rust=22,
+                    javascript=26, jsdoc=9, json=12, kotlin=16, python=21, rust=22,
                     toml=11, tsx=22, typescript=21, yaml=14)
 PROBES = [
     "(_) @named", "_ @any", "(ERROR) @error", "(MISSING) @missing",
@@ -50,21 +50,32 @@ def repetitions():
         yield f"(array {first}{left} @first {anchor}{second}{right} @second) @array"
 
 
+def grammar_samples(root, samples):
+    """Select and validate samples for the reference's bundled grammars."""
+    names = [name for name, *_ in table(root)]
+    if not names or len(names) != len(set(names)):
+        raise ValueError("empty or duplicate bundled grammar inventory")
+    for name in names:
+        if not samples.get(name):
+            raise ValueError(f"no corpus sample for bundled grammar {name}")
+        if name not in MODE_MINIMUM:
+            raise ValueError(f"no mode minimum for bundled grammar {name}")
+    return {name: samples[name] for name in names}
+
+
 def build(root, work):
-    samples = json.loads((work / "samples.json").read_text())
+    samples = grammar_samples(root, json.loads((work / "samples.json").read_text()))
     modes = json.loads((work / "mode-queries.json").read_text())
     dirs = crate_dirs(root)
     cases = []
-    pinned = 0
-    for name, crate, _, _ in table(root):
+    for name, crate, _, _ in sorted(table(root)):
         directory = dirs[crate] / "queries"
         files = sorted(path for pattern in ("highlights*.scm", "indents*.scm", "indent*.scm")
                        for path in directory.rglob(pattern))
         files = list(dict.fromkeys(files))
-        pinned += len(files)
         queries = [path.read_text() for path in files]
         origins = [f"{crate}/queries/{path.relative_to(directory)}" for path in files]
-        shipped = dict(modes[name])
+        shipped = dict(modes.get(name, []))
         if len(shipped) < MODE_MINIMUM[name]:
             raise ValueError(f"{name} only extracted {len(shipped)} mode queries")
         queries.extend(shipped)
@@ -79,8 +90,6 @@ def build(root, work):
         origins.extend(["hand-written probe"] * len(focused))
         cases.append(dict(language=name, text=samples[name], queries=queries,
                           origins=origins, shipped=len(shipped) + len(files)))
-    if pinned < 18 or set(samples) != {case["language"] for case in cases}:
-        raise ValueError(f"incomplete grammar inventory ({pinned} pinned query files)")
     return cases
 
 
@@ -123,8 +132,9 @@ def freeze_cases(cases):
 
 
 def check_cases(cases):
-    if [case["language"] for case in cases] != sorted(MODE_MINIMUM):
-        raise ValueError("incomplete or duplicate manifest grammar inventory")
+    names = [case["language"] for case in cases]
+    if not names or names != sorted(set(names)):
+        raise ValueError("empty, unordered or duplicate manifest grammar inventory")
     for case in cases:
         fresh = freeze_cases([dict(case)])[0]
         key = ("text_sha256", "query_sha256", "states")
