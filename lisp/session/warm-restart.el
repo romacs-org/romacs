@@ -904,7 +904,10 @@ it was dropped instead."
 (defun warm-restart--restore-file (record blobs)
   "Visit RECORD's file, put its carried text back, and return the buffer.
 A buffer with carried text keeps the old visited-file modtime, so saving
-over a file changed on disk still asks."
+over a file changed on disk still asks.  A clean file's text lives on
+disk alone: gone from there, it is reported, not restored empty."
+  (unless (or (plist-get record :blob) (file-exists-p (plist-get record :file)))
+    (error "%s no longer exists" (plist-get record :file)))
   (let* ((enable-local-variables :safe)
          (large-file-warning-threshold nil)
          (text (warm-restart--carried-text record blobs))
