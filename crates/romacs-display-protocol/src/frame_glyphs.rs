@@ -2377,22 +2377,41 @@ impl FrameGlyphBuffer {
     /// this one does.
     #[must_use]
     pub fn cursor_anchor(&self, slot_id: DisplaySlotId) -> Option<usize> {
-        let in_slot = |glyph: &FrameGlyph| glyph.slot_id() == Some(slot_id);
-        self.glyphs.iter().position(in_slot).or_else(|| {
-            self.glyphs
-                .iter()
-                .enumerate()
-                .filter_map(|(at, glyph)| {
-                    let slot = glyph.slot_id()?;
-                    (slot.window_id == slot_id.window_id
-                        && slot.row == slot_id.row
-                        && slot.col < slot_id.col
-                        && glyph.cell_rect().is_some())
-                    .then_some((slot.col, at))
-                })
-                .max_by_key(|(col, _)| *col)
-                .map(|(_, at)| at)
-        })
+        self.cursor_anchor_and_slot(slot_id).0
+    }
+
+    /// The cursor's anchor index and the glyphs occupying its slot in frame
+    /// order. For an empty slot the iterator is empty even if there is a
+    /// preceding glyph to use as the anchor.
+    #[inline]
+    #[must_use]
+    pub fn cursor_anchor_and_slot(
+        &self,
+        slot_id: DisplaySlotId,
+    ) -> (Option<usize>, impl Iterator<Item = &FrameGlyph>) {
+        let mut glyphs = self.glyphs.iter().enumerate();
+        let mut preceding = None;
+        let first = glyphs.find_map(|(at, glyph)| {
+            let slot = glyph.slot_id()?;
+            if slot == slot_id {
+                return Some((at, glyph));
+            }
+            if slot.window_id == slot_id.window_id
+                && slot.row == slot_id.row
+                && slot.col < slot_id.col
+                && preceding.is_none_or(|(col, _)| slot.col >= col)
+                && glyph.cell_rect().is_some()
+            {
+                // Equal columns use the last glyph, like row_pen_x_before.
+                preceding = Some((slot.col, at));
+            }
+            None
+        });
+        let anchor = first.map(|(at, _)| at).or(preceding.map(|(_, at)| at));
+        let in_slot = first.into_iter().map(|(_, glyph)| glyph).chain(
+            glyphs.filter_map(move |(_, glyph)| (glyph.slot_id() == Some(slot_id)).then_some(glyph)),
+        );
+        (anchor, in_slot)
     }
 
     /// The pixel x where a glyph in `slot_id`'s column would begin: the right
