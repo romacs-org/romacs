@@ -50,6 +50,12 @@ impl Modification {
         }
     }
 
+    /// Preserve save and autosave status after a single silent modification tick.
+    pub(crate) fn keep_unmodified(&mut self) {
+        if self.save_modiff == self.modiff - 1 { self.save_modiff = self.modiff; }
+        if self.autosave_modiff == self.modiff - 1 { self.autosave_modiff = self.modiff; }
+    }
+
     /// GNU `Frestore_buffer_modified_p` (buffer.c): marking a clean buffer
     /// dirty saves the old MODIFF and increments only MODIFF, not CHARS_MODIFF.
     pub fn set_modified(&mut self, flag: bool) {

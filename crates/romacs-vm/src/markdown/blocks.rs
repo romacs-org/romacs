@@ -30,12 +30,14 @@ pub(crate) struct Block {
 
 /// TEXT's blocks in document order, nested ones after their container.
 pub(crate) fn blocks(text: &str) -> Vec<Block> {
+    let offset = super::FrontMatter::read(text).end();
     let mut out = Vec::new();
     // The open elements: the index of their block in OUT, if they are one,
     // and, for a list, whether it is ordered.
     let mut open: Vec<(Option<usize>, bool)> = Vec::new();
     let mut depth = 0u32;
-    for (event, range) in Parser::new_ext(text, options()).into_offset_iter() {
+    for (event, range) in Parser::new_ext(&text[offset..], options()).into_offset_iter() {
+        let range = offset + range.start..offset + range.end;
         match event {
             Event::Start(tag) => {
                 let ordered = matches!(tag, Tag::List(Some(_)));

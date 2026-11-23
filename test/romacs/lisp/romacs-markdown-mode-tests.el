@@ -29,6 +29,36 @@
     (should (memq 'romacs-markdown-code (romacs-markdown-mode-tests--faces-at "code`")))
     (should (memq 'romacs-markdown-list-marker (romacs-markdown-mode-tests--faces-at "- item")))))
 
+(ert-deftest romacs-markdown-mode-yaml-front-matter ()
+  (romacs-markdown-mode-tests--with
+      "---\nname: public-release\ndescription: **release**\n# note\n---\n\n# Public release\n\nSection\n---\n"
+    (font-lock-ensure)
+    (should-not (memq 'romacs-markdown-heading-2 (romacs-markdown-mode-tests--faces-at "description:")))
+    (should-not (memq 'romacs-markdown-strong (romacs-markdown-mode-tests--faces-at "release**")))
+    (should (equal (mapcar #'car (romacs-markdown--imenu)) '("Public release" "Section")))
+    (outline-next-heading)
+    (should (looking-at "# Public release"))))
+
+(ert-deftest romacs-markdown-mode-closer-invalidates-before-outline-reads ()
+  (romacs-markdown-mode-tests--with "---\nname: skill\n\n# Note\n\nMore.\n\nStill more.\n\nLast.\n"
+    (font-lock-ensure)
+    (let ((note (progn (search-forward "# Note") (1- (point)))))
+      (put-text-property (point-min) (point-max) 'fontified t)
+      (goto-char (point-max))
+      (insert "---\n\n# Real\n")
+      (set-buffer-modified-p nil)
+      (let ((tick (buffer-modified-tick))
+            (chars (buffer-chars-modified-tick))
+            (undo buffer-undo-list))
+        (should (= (car (romacs-markdown--block-at note)) (point-min)))
+        (should (> (buffer-modified-tick) tick))
+        (should (= (buffer-chars-modified-tick) chars))
+        (should (eq buffer-undo-list undo)))
+      (should-not (get-text-property note 'fontified))
+      (should-not (buffer-modified-p))
+      (font-lock-ensure note (1+ note))
+      (should-not (memq 'romacs-markdown-heading-1 (romacs-markdown-mode-tests--faces-at "Note"))))))
+
 (ert-deftest romacs-markdown-mode-faces-only-the-blocks-asked-for ()
   (romacs-markdown-mode-tests--with (concat (mapconcat (lambda (i) (format "Para *%d*." i)) (number-sequence 1 200) "\n\n") "\n")
     (let* ((beg (progn (goto-char (point-min)) (search-forward "Para *100*") (match-beginning 0)))

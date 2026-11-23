@@ -2,7 +2,8 @@
 //! is parsed as the blocks that hold it and an edit reparses the blocks it
 //! touched. Positions are character offsets into the document. The text is
 //! read through a READ function: the index holds none of it.
-use super::spans::spans;
+use super::spans::{spans, spans_with};
+use super::FrontMatter;
 use std::collections::HashMap;
 use std::ops::Range;
 
@@ -23,6 +24,8 @@ pub(crate) struct Index {
     /// The document's length, in characters, as its edits leave it.
     len: usize,
     built: bool,
+    /// First Markdown character (zero without metadata), unknown until a leading YAML fence closes.
+    body_start: Option<usize>,
 }
 
 impl Index {
@@ -55,6 +58,11 @@ impl Index {
         self.built
     }
 
+    /// The body excludes only a closed front matter block.
+    pub(crate) fn body_start(&self) -> usize {
+        self.body_start.unwrap_or(0)
+    }
+
     /// Whether a reference to LABEL (a `label_key`) resolves in the document.
     pub(crate) fn defines(&self, label: &str) -> bool {
         self.labels.get(label).is_some_and(|&n| n > 0)
@@ -68,6 +76,7 @@ impl Index {
         if !self.built || self.len != len {
             let text = read(0..len);
             let parsed = spans(&text);
+            self.body_start = parsed.body_start.map(|end| text[..end].chars().count());
             self.starts = char_starts(&text, &parsed.tops, 0);
             self.defs = defs(&text, parsed.labels, 0);
             self.labels = counts(&self.defs);
@@ -87,7 +96,18 @@ impl Index {
             let cut = self.starts.get(k).copied();
             let end = self.starts.get(k + 1).copied().unwrap_or(len);
             let text = read(from..end);
-            let parsed = spans(&text);
+            let parsed = spans_with(&text, from == 0, &|_| false);
+            // An opening delimiter may now match beyond this slice, or a
+            // new closer here may match an earlier, still unmatched opener.
+            if (parsed.body_start.is_none() && end < len)
+                || (from > 0 && self.body_start.is_none() && text.lines().any(FrontMatter::closes))
+            {
+                self.built = false;
+                return self.sync(len, read);
+            }
+            if from == 0 {
+                self.body_start = parsed.body_start.map(|end| text[..end].chars().count());
+            }
             let found = char_starts(&text, &parsed.tops, from);
             if cut.is_none_or(|c| found.contains(&c)) {
                 let cut_at = cut.unwrap_or(len);

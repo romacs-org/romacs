@@ -107,12 +107,13 @@ fn runs_are_ascending_disjoint_and_joined() {
 
 #[test]
 fn restart_steps_back_a_block() {
-    let parsed = spans("a\n\nb\n\nc\n");
+    let text = "a\n\nb\n\nc\n";
+    let parsed = spans(text);
     assert_eq!(parsed.tops, [0, 3, 6]);
-    assert_eq!(restart(&parsed.tops, 7), 3);
-    assert_eq!(restart(&parsed.tops, 4), 0);
-    assert_eq!(restart(&parsed.tops, 0), 0);
-    assert_eq!(restart(&[], 5), 0);
+    assert_eq!(restart(text, &parsed.tops, 7), 3);
+    assert_eq!(restart(text, &parsed.tops, 4), 0);
+    assert_eq!(restart(text, &parsed.tops, 0), 0);
+    assert_eq!(restart("", &[], 5), 0);
 }
 
 /// What streaming relies on: text arriving at the end never changes the
@@ -134,13 +135,59 @@ fn appended_text_leaves_runs_before_restart() {
             // Every later end: a chunk of any length arriving at once.
             for &next in &cuts[i + 1..] {
                 let new = spans(&text[..next]);
-                let from = restart(&new.tops, cut);
+                let from = restart(&text[..next], &new.tops, cut);
                 let clip = |runs: &[Run]| -> Vec<Run> {
                     runs.iter().filter(|r| r.start < from).map(|r| Run { end: r.end.min(from), ..r.clone() }).collect()
                 };
                 assert_eq!(clip(&old_runs), clip(&runs(&new.spans)), "appending {:?} after {:?}", &text[cut..next], &text[..cut]);
             }
         }
+    }
+}
+
+#[test]
+fn front_matter_ends_before_markdown_blocks() {
+    let text = "---\r\nname: π\r\n# note\r\n[r]: /hidden\r\n...  \r\n# Real\n\n---\nSection\n---\n";
+    let parsed = spans(text);
+    let code = &parsed.codes[0];
+    assert_eq!(code.language.as_deref(), Some("yaml"));
+    assert_eq!(&text[code.body.clone()], "name: π\r\n# note\r\n[r]: /hidden\r\n");
+    assert_eq!(parsed.body_start, text.find("# Real"));
+    assert!(parsed.labels.is_empty());
+    let headings: Vec<_> = blocks(text).into_iter().filter_map(|b| match b.kind {
+        BlockKind::Heading(level) => Some((level, &text[b.range])), _ => None,
+    }).collect();
+    assert_eq!(headings, [(1, "# Real\n"), (2, "Section\n---\n")]);
+    for ordinary in ["---\n\n# Real\n\n---\n", "---\n# Real\n", "Intro\n\n---\n# Real\n---\n"] {
+        assert!(spans(ordinary).codes.is_empty());
+        assert!(!covered(ordinary, Kind::Heading(1)).is_empty());
+    }
+}
+
+#[test]
+fn resumed_body_slice_does_not_acquire_front_matter() {
+    let text = "Intro\n\n---\n# Real\n\nThree.\n\n---\nTail.\n";
+    let end = text.find("Three").unwrap();
+    let prefix = &text[..end];
+    let start = restart(prefix, &spans(prefix).tops, end);
+    assert!(blocks(&text[start..]).iter().any(|b| b.kind == BlockKind::Heading(1)));
+}
+
+#[test]
+fn closing_front_matter_after_several_blocks_updates_the_index() {
+    let mut text = "---\nname: test\n\n# Note\n\nMore.\n\nStill more.\n\nLast.\n".to_owned();
+    let mut index = Index::default();
+    let before = text.len();
+    index.sync(before, &mut |r| text[r].to_owned());
+    for (append, closed) in [("---\n", true), ("", false)] {
+        let old_end = text.len();
+        text.truncate(before);
+        text.push_str(append);
+        index.edit(before, old_end, append.len());
+        let damaged = index.sync(text.len(), &mut |r| text[r].to_owned()).unwrap();
+        assert_eq!(damaged.start, 0);
+        assert_eq!(index.starts(), spans(&text).tops);
+        assert_eq!(index.body_start(), if closed { text.len() } else { 0 });
     }
 }
 
@@ -312,7 +359,7 @@ fn references_resolve_outside_the_slice() {
     let mut index = Index::default();
     index.sync(text.len(), &mut |r| text[r].to_owned());
     assert!(index.defines("r"));
-    let parsed = spans_with("[go][r]\n", &|label| index.defines(label));
+    let parsed = spans_with("[go][r]\n", false, &|label| index.defines(label));
     assert_eq!(parsed.links.len(), 1, "{:?}", parsed.links);
     assert!(spans("[go][r]\n").links.is_empty());
 }
