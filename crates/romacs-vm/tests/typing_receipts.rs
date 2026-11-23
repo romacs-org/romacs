@@ -323,7 +323,8 @@ fn an_opener_is_charged_its_prompts_first_frame() {
     s.command();
     s.redisplay();
     let settled = s.outcomes();
-    assert_eq!(&settled[..3], &[(8, "awaited-input", None), (9, "opened", Some(before + 2)), (10, "rendered", Some(before + 3))], "settled: {settled:?}");
+    // The redisplay before the C-x read finds the frame as painted.
+    assert_eq!(&settled[..3], &[(8, "awaited-input", None), (9, "opened", Some(before + 1)), (10, "rendered", Some(before + 2))], "settled: {settled:?}");
     assert_eq!(settled.iter().map(|(i, _, _)| *i).collect::<Vec<_>>(), (8..12).collect::<Vec<_>>(), "settled: {settled:?}");
     // C-f typed a while after C-x, the screen settled first: the read of
     // C-f redisplays, finds the frame as painted and submits nothing, so

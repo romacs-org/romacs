@@ -1259,14 +1259,15 @@ fn paint(
             diagnostic_ns: diagnostics_prepare_ns + diagnostics_write_ns + mode_line_start.unwrap().elapsed().as_nanos(),
             submit_ns, layout_apply_ns });
     }
-    record_painted(&mut host.borrow_mut(), &shown, presentation, &ends);
-    Ok(Shown { frame: shown, ends, presentation, tab_bar, status_bar })
+    Ok(record_painted(&mut host.borrow_mut(), Shown { frame: shown, ends, presentation, tab_bar, status_bar }))
 }
 
-/// The loop painted SHOWN as PRESENTATION, laid out to ENDS: what a
-/// prompt's redisplay finds on screen (`prompt::Shared::unchanged`).
-fn record_painted(shared: &mut prompt::Shared, shown: &Frame, presentation: u64, ends: &[romacs_vm::WindowEnd]) {
-    shared.painted = shown.selected.map(|selected| (std::rc::Rc::clone(&shown.snapshot), selected, presentation, ends.to_vec(), shown.animations.clone()));
+/// SHOWN, which the loop just painted, recorded as what a prompt's
+/// redisplay finds on screen (`prompt::Shared::unchanged`).
+fn record_painted(shared: &mut prompt::Shared, shown: Shown) -> Shown {
+    let frame = &shown.frame;
+    shared.painted = frame.selected.map(|selected| (std::rc::Rc::clone(&frame.snapshot), selected, shown.presentation, shown.ends.clone(), frame.animations.clone()));
+    shown
 }
 
 /// A mouse button event over the root frame's tab bar as the Lisp that

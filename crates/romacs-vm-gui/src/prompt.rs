@@ -506,9 +506,9 @@ mod tests {
         vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
         crate::startup::initialize(&mut vm).unwrap();
         let painted = crate::frame(&mut vm, false, 1200, 800).unwrap();
-        let mut shared = Shared { presentation: 7, in_flight: Some((7, std::time::Instant::now())), ..Shared::default() };
-        crate::record_painted(&mut shared, &painted, 7, &[]);
         let selected = painted.selected.unwrap();
+        let mut shared = Shared { presentation: 7, in_flight: Some((7, std::time::Instant::now())), ..Shared::default() };
+        crate::record_painted(&mut shared, crate::Shown { frame: painted, ends: vec![], presentation: 7, tab_bar: vec![], status_bar: Default::default() });
         let again = crate::frame(&mut vm, false, 1200, 800).unwrap();
         assert_eq!(shared.unchanged(&again.snapshot, selected, &again.animations), Some(vec![]));
         assert_eq!(shared.unchanged(&again.snapshot, selected + 1, &again.animations), None, "another selected window");
