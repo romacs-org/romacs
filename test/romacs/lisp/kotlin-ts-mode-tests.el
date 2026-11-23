@@ -1,0 +1,103 @@
+;;; kotlin-ts-mode-tests.el --- Tests for Kotlin mode  -*- lexical-binding: t; -*-
+
+(require 'ert)
+(require 'ert-x)
+(require 'kotlin-ts-mode)
+
+(defun kotlin-ts-mode-tests--position (text)
+  "Return the position of the first occurrence of TEXT."
+  (save-excursion
+    (goto-char (point-min))
+    (search-forward text)
+    (match-beginning 0)))
+
+(ert-deftest kotlin-ts-mode-selects-source-and-script ()
+  (dolist (name '("Greeter.kt" "example.kts"))
+    (let ((buffer (find-file-noselect (ert-resource-file name))))
+      (unwind-protect
+          (with-current-buffer buffer
+            (should (eq major-mode 'kotlin-ts-mode))
+            (let ((root (treesit-buffer-root-node 'kotlin)))
+              (should (equal (treesit-node-type root) "source_file"))
+              (should-not (treesit-node-check root 'has-error))))
+        (kill-buffer buffer)))))
+
+(ert-deftest kotlin-ts-mode-compiles-all-font-lock-queries ()
+  (should (treesit-language-available-p 'kotlin))
+  (should kotlin-ts-mode--font-lock-settings)
+  (dolist (setting kotlin-ts-mode--font-lock-settings)
+    (treesit-query-capture 'kotlin (treesit-font-lock-setting-query setting))))
+
+(ert-deftest kotlin-ts-mode-font-lock ()
+  (with-temp-buffer
+    (insert-file-contents (ert-resource-file "Greeter.kt"))
+    (let ((treesit-font-lock-level 4))
+      (kotlin-ts-mode)
+      (font-lock-ensure))
+    (dolist (entry '(("class Greeter" . font-lock-keyword-face)
+                     ("Greeter" . font-lock-type-face)
+                     ("fun greet" . font-lock-keyword-face)
+                     ("greet(name" . font-lock-function-name-face)
+                     ("val prefix" . font-lock-keyword-face)
+                     ("prefix =" . font-lock-variable-name-face)
+                     ("var count" . font-lock-keyword-face)
+                     ("${prefix}" . font-lock-delimiter-face)
+                     ("Hello" . font-lock-string-face)
+                     ("@Deprecated" . font-lock-preprocessor-face)
+                     ("Deprecated" . font-lock-preprocessor-face)
+                     ("// Count" . font-lock-comment-face)
+                     ("nested" . font-lock-comment-face)
+                     ("0" . font-lock-number-face)
+                     ("true" . font-lock-constant-face)))
+      (should (eq (get-text-property
+                   (kotlin-ts-mode-tests--position (car entry)) 'face)
+                  (cdr entry))))))
+
+(ert-deftest kotlin-ts-mode-indents-blocks-and-continuations ()
+  (with-temp-buffer
+    (insert-file-contents (ert-resource-file "example.kts"))
+    (let ((expected (buffer-string)))
+      (goto-char (point-min))
+      (while (re-search-forward "^ +" nil t)
+        (replace-match ""))
+      (kotlin-ts-mode)
+      (indent-region (point-min) (point-max))
+      (should (equal (buffer-string) expected)))))
+
+(ert-deftest kotlin-ts-mode-navigates-and-indexes-declarations ()
+  (with-temp-buffer
+    (insert-file-contents (ert-resource-file "Greeter.kt"))
+    (kotlin-ts-mode)
+    (goto-char (kotlin-ts-mode-tests--position "// Count"))
+    (should (beginning-of-defun))
+    (should (bolp))
+    (back-to-indentation)
+    (should (looking-at-p "override fun greet"))
+    (let ((index (funcall imenu-create-index-function)))
+      (dolist (entry '(("Class" . "Greeter") ("Object" . "Examples")
+                       ("Interface" . "Greeting") ("Function" . "greet")
+                       ("Property" . "prefix")))
+        (should (assoc (cdr entry) (cdr (assoc (car entry) index))))))))
+
+(ert-deftest kotlin-ts-mode-syntax-comments-and-strings ()
+  (with-temp-buffer
+    (insert-file-contents (ert-resource-file "Greeter.kt"))
+    (kotlin-ts-mode)
+    (dolist (entry '(("nested" . 2) ("still outer" . 1)
+                     ("// Count" . nil) ("Count each" . t)
+                     ("interface" . nil)))
+      (should (equal (nth 4 (syntax-ppss (kotlin-ts-mode-tests--position (car entry))))
+                     (cdr entry))))
+    (dolist (entry '(("Hello" . ?\") ("${prefix}" . ?\")
+                     ("quoted" . t) ("a backslash" . t)
+                     ("val empty" . nil) ("val trailingQuote" . nil)
+                     ("val done" . nil)))
+      (should (eq (nth 3 (syntax-ppss (kotlin-ts-mode-tests--position (car entry))))
+                  (cdr entry))))
+    (let* ((pos (kotlin-ts-mode-tests--position "literal text"))
+           (state (syntax-ppss pos)))
+      (should (nth 3 state))
+      (should-not (nth 4 state)))
+    (should (eq (nth 3 (syntax-ppss
+                        (1+ (kotlin-ts-mode-tests--position "'\"'"))))
+                ?'))))

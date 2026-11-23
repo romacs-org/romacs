@@ -20355,6 +20355,24 @@ Such a \"function\" cannot be called from Lisp, but it is a valid editor command
 (register-definition-prefixes "korea-util" '("exit-korean-environment" "isearch-" "korean-key-bindings" "quail-hangul-switch-" "toggle-korean-input-method"))
 
 
+;;; Generated autoloads from progmodes/kotlin-ts-mode.el
+
+(autoload 'kotlin-ts-mode "kotlin-ts-mode"
+"Major mode for editing Kotlin using tree-sitter.
+
+In addition to any hooks its parent mode `prog-mode' might have run,
+this mode runs the hook `kotlin-ts-mode-hook', as the final or
+penultimate step during initialization.
+
+\\{kotlin-ts-mode-map}" t)
+(autoload 'kotlin-ts-mode-maybe "kotlin-ts-mode"
+"Enable `kotlin-ts-mode' when its grammar is available.
+Also offer to install the grammar when `treesit-enabled-modes' enables
+the mode, subject to `treesit-auto-install-grammar'.")
+(when (boundp 'treesit-major-mode-remap-alist) (add-to-list 'auto-mode-alist '("\\.kts?\\'" . kotlin-ts-mode-maybe)))
+(register-definition-prefixes "kotlin-ts-mode" '("kotlin-ts-mode-"))
+
+
 ;;; Generated autoloads from leim/quail/lao.el
 
 (register-definition-prefixes "quail/lao" '("lao-" "quail-lao-update-translation"))

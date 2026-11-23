@@ -300,14 +300,14 @@ fn use_package_forms_are_in_imenu() {
 
 /// Files of the languages whose grammars Romacs ships open in their
 /// tree-sitter modes (`treesit-enabled-modes'); the switch gives the regex
-/// modes back, except where GNU's own `*-ts-mode-maybe' picks the ts mode
-/// whenever its grammar is available (Rust).
+/// modes back, except where `*-ts-mode-maybe' picks the ts mode whenever
+/// its grammar is available (Rust and Kotlin).
 #[test]
 fn files_of_bundled_languages_open_in_their_ts_modes() {
     let report = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
         grammars::register();
         let (mut vm, home) = session("treesit", false);
-        let files: Vec<String> = ["x.rs", "x.py", "x.c", "x.json", "x.java"].iter().map(|name| {
+        let files: Vec<String> = ["x.rs", "x.py", "x.c", "x.json", "x.java", "x.kt", "x.kts"].iter().map(|name| {
             let path = home.join(name);
             std::fs::write(&path, "\n").unwrap();
             quoted(&path.display().to_string())
@@ -323,9 +323,9 @@ fn files_of_bundled_languages_open_in_their_ts_modes() {
         report
     }).unwrap().join().unwrap();
     assert_eq!(report, [
-        r#"(("rs" rust-ts-mode (rust)) ("py" python-ts-mode (python)) ("c" c-ts-mode (c)) ("json" json-ts-mode (json)) ("java" java-ts-mode (java)))"#,
+        r#"(("rs" rust-ts-mode (rust)) ("py" python-ts-mode (python)) ("c" c-ts-mode (c)) ("json" json-ts-mode (json)) ("java" java-ts-mode (java)) ("kt" kotlin-ts-mode (kotlin)) ("kts" kotlin-ts-mode (kotlin)))"#,
         "(nil nil)",
-        r#"(("rs" rust-ts-mode (rust)) ("py" python-mode nil) ("c" c-mode nil) ("json" js-json-mode nil) ("java" java-mode nil))"#,
+        r#"(("rs" rust-ts-mode (rust)) ("py" python-mode nil) ("c" c-mode nil) ("json" js-json-mode nil) ("java" java-mode nil) ("kt" kotlin-ts-mode (kotlin)) ("kts" kotlin-ts-mode (kotlin)))"#,
     ]);
 }
 
