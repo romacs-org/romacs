@@ -18,6 +18,15 @@ lands as its own commit, listed below with its reason and measurement.
 
 Each is its own commit in Romacs's history.
 
+- `perf(parser): enumerate viable missing terminals from the grammar row`
+  (`src/parser.c`, `src/language.c`, `src/language.h`). Recovery scans
+  the grammar's existing entries once to collect shifts whose destination
+  can reduce the current lookahead. The parser still tries those candidates
+  in ascending symbol order and scans scalar lookups for larger grammars
+  and nonempty default actions. An edit in GNU's `xdisp.c` needed 40,154
+  terminal lookups to try 277 candidates. The scratch row retains
+  those same 277 attempts and carries no state across recoveries.
+
 - `fix(parser): reuse a word token that can be no keyword` (`src/parser.c`).
   A node whose first leaf is the keyword-capture token (Python's
   `identifier`) was reused only when its recorded entry state, the state of

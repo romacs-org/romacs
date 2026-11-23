@@ -39,6 +39,21 @@ fn successful_accesses_do_not_allocate_errors() {
         );
     }
 }
+#[test]
+fn hash_hits_do_not_allocate_per_call() {
+    let mut vm = Vm::new();
+    vm.set_collection_floor(usize::MAX / 4);
+    vm.eval_source("(defvar H (make-hash-table)) (puthash 1 2 H)")
+        .unwrap();
+    for body in ["(gethash 1 H)", "(puthash 1 i H)"] {
+        let source = format!(
+            "(let ((i 0) result) (while (< i 1000) (setq result {body}) (setq i (1+ i))) (if result i 0))"
+        );
+        let allocations = count(&mut vm, &source);
+        assert!(allocations <= 2, "{body}: {allocations} allocations for 1000 calls");
+    }
+}
+
 /// `string=' and `string-lessp' read their arguments in place: a string
 /// or a symbol's name is compared where it lies, never copied first.
 #[test]

@@ -1506,39 +1506,6 @@ impl WgpuRenderer {
         );
     }
 
-    /// Render a frame into `view` preserving existing content (`LoadOp::Load`)
-    /// and clipped to `scissor` (physical x, y, w, h). Used by the
-    /// retained-static fast path to redraw only the filled-box cursor cell
-    /// (box plus the inverse-video character) over the composited scene, from a
-    /// single-glyph mini-frame so no full-frame glyph work is done.
-    #[allow(clippy::too_many_arguments)]
-    pub fn render_frame_cell_loaded(
-        &mut self,
-        view: &wgpu::TextureView,
-        frame_glyphs: &FrameGlyphBuffer,
-        glyph_atlas: &mut WgpuGlyphAtlas,
-        mapping: romacs_display_protocol::PresentMapping,
-        cursor_visible: bool,
-        animated_cursor: Option<AnimatedCursor>,
-        scissor: (u32, u32, u32, u32),
-    ) {
-        self.render_frame_glyphs_impl(
-            view,
-            frame_glyphs,
-            glyph_atlas,
-            mapping,
-            cursor_visible,
-            animated_cursor,
-            // A retained cursor cell is one character and its box; the
-            // mini-frame carries no scroll bar there could be a highlight on.
-            None,
-            None,
-            None,
-            true,
-            Some(scissor),
-        );
-    }
-
     // The parameter mirrors `FrameParams` and the display-runtime effects
     // boundary; a local alias would only hide this one site.
     #[allow(clippy::type_complexity)]
@@ -1849,8 +1816,8 @@ impl WgpuRenderer {
     /// (`LoadOp::Load`). Used by the retained-scene composite path: the static
     /// scene is blitted first, then the cursor is drawn on top. Correct only
     /// for clean top-layer cursor styles (bar/hbar/hollow); the filled-box
-    /// inverse-video cursor is not separable this way and must go through the
-    /// full render (see `CursorStyle::is_clean_top_layer`).
+    /// inverse-video cursor paints through the ordinary scene path.
+    /// See `CursorStyle::is_clean_top_layer`.
     #[allow(clippy::too_many_arguments)]
     pub fn render_cursor_only(
         &mut self,
@@ -1907,13 +1874,6 @@ impl WgpuRenderer {
             });
             // As in the full frame pass, layers inherit the target's group 0.
             render_pass.set_bind_group(0, draw.binding(), &[]);
-            // Filled-box inverse-video parts (cursor_bg, behind-text trail) are
-            // empty for clean cursors; drawing them is a harmless no-op there.
-            self.draw_pre_text_cursor_layers(
-                &mut render_pass,
-                &chrome.cursor_bg,
-                &chrome.behind_text_cursor,
-            );
             let rounded = wgpu::RenderPipeline::clone(&self.pipelines.rounded_rect);
             self.draw_cursor_glow(&mut render_pass, &rounded, &chrome.cursor_glow);
             if let Some(upload) =

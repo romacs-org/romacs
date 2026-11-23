@@ -231,23 +231,10 @@ pub(crate) struct RetainedStatic {
     /// `current_scene_generation` this was built from; a new scene commit
     /// bumps that stamp and invalidates this.
     pub(super) generation: u64,
-    /// Per-filled-box-cursor single-glyph mini-frames, built once per
-    /// generation so the composite path re-renders each cursor cell (box plus
-    /// inverse-video character) without cloning the frame's font tables every
-    /// frame. The box color still cycles: it is recomputed from the frame
-    /// sample time inside `emit_cursor_visual`, not baked here.
-    pub(super) cursor_cells: Vec<RetainedCursorCell>,
     /// The raster's model provenance (every model it composited, root and
     /// child, at the snapshot drawn) and dependencies (every model its
     /// glyphs referenced, drawable or not, as the store had it then).
     pub(super) models: crate::render_thread::render_pass::retained_static::RetainedModels,
-}
-
-/// A retained single-glyph mini-frame for one filled-box cursor cell, plus the
-/// physical-pixel scissor rect it is drawn within.
-pub(crate) struct RetainedCursorCell {
-    pub(super) mini: romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
-    pub(super) scissor: (u32, u32, u32, u32),
 }
 
 impl RetainedStatic {
@@ -258,7 +245,6 @@ impl RetainedStatic {
             // Sentinel: no valid scene captured yet, forcing a build on the
             // first fast-path frame.
             generation: u64::MAX,
-            cursor_cells: Vec::new(),
             models: Default::default(),
         }
     }

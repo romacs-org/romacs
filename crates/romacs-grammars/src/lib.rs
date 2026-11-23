@@ -28,6 +28,7 @@ pub const BUNDLED: &[Bundled] = bundled! {
     "css" tree_sitter_css::LANGUAGE, "https://github.com/tree-sitter/tree-sitter-css" "6a442a3cf461b0ce275339e5afa178693484c927";
     "go" tree_sitter_go::LANGUAGE, "https://github.com/tree-sitter/tree-sitter-go" "12fe553fdaaa7449f764bc876fd777704d4fb752";
     "html" tree_sitter_html::LANGUAGE, "https://github.com/tree-sitter/tree-sitter-html" "d9219ada6e1a2c8f0ab0304a8bd9ca4285ae0468";
+    "java" tree_sitter_java::LANGUAGE, "https://github.com/tree-sitter/tree-sitter-java" "94703d5a6bed02b98e438d7cad1136c01a60ba2c";
     "javascript" tree_sitter_javascript::LANGUAGE, "https://github.com/tree-sitter/tree-sitter-javascript" "108b2d4d17a04356a340aea809e4dd5b801eb40d";
     "jsdoc" tree_sitter_jsdoc::LANGUAGE, "https://github.com/tree-sitter/tree-sitter-jsdoc" "b253abf68a73217b7a52c0ec254f4b6a7bb86665";
     "json" tree_sitter_json::LANGUAGE, "https://github.com/tree-sitter/tree-sitter-json" "4d770d31f732d50d3ec373865822fbe659e47c75";

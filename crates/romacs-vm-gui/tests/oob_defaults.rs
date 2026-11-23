@@ -307,7 +307,7 @@ fn files_of_bundled_languages_open_in_their_ts_modes() {
     let report = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
         grammars::register();
         let (mut vm, home) = session("treesit", false);
-        let files: Vec<String> = ["x.rs", "x.py", "x.c", "x.json"].iter().map(|name| {
+        let files: Vec<String> = ["x.rs", "x.py", "x.c", "x.json", "x.java"].iter().map(|name| {
             let path = home.join(name);
             std::fs::write(&path, "\n").unwrap();
             quoted(&path.display().to_string())
@@ -323,9 +323,9 @@ fn files_of_bundled_languages_open_in_their_ts_modes() {
         report
     }).unwrap().join().unwrap();
     assert_eq!(report, [
-        r#"(("rs" rust-ts-mode (rust)) ("py" python-ts-mode (python)) ("c" c-ts-mode (c)) ("json" json-ts-mode (json)))"#,
+        r#"(("rs" rust-ts-mode (rust)) ("py" python-ts-mode (python)) ("c" c-ts-mode (c)) ("json" json-ts-mode (json)) ("java" java-ts-mode (java)))"#,
         "(nil nil)",
-        r#"(("rs" rust-ts-mode (rust)) ("py" python-mode nil) ("c" c-mode nil) ("json" js-json-mode nil))"#,
+        r#"(("rs" rust-ts-mode (rust)) ("py" python-mode nil) ("c" c-mode nil) ("json" js-json-mode nil) ("java" java-mode nil))"#,
     ]);
 }
 

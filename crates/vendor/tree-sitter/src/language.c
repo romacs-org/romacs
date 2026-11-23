@@ -248,13 +248,7 @@ TSStateId ts_language_next_state(
   } else if (symbol < self->token_count) {
     uint32_t count;
     const TSParseAction *actions = ts_language_actions(self, state, symbol, &count);
-    if (count > 0) {
-      TSParseAction action = actions[count - 1];
-      if (action.type == TSParseActionTypeShift) {
-        return action.shift.extra ? state : action.shift.state;
-      }
-    }
-    return 0;
+    return ts_language_shift_state(state, actions, count);
   } else {
     return ts_language_lookup(self, state, symbol);
   }
