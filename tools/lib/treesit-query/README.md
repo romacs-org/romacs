@@ -1,10 +1,16 @@
 # Tree-sitter query differential
 
-Run `python3 tools/treesit-query-diff run --out DIR --corpus-digest SHA256`
-with the prepared toolchain, the lane's `CARGO_TARGET_DIR` and its build
-lock. Stage the intended source before running. The runner archives that
-tree and the pinned C revision under a new scratch directory outside the
-checkout.
+Run `python3 tools/treesit-query-diff run --out DIR --c-reference REV
+--corpus-digest SHA256` with the prepared toolchain, the lane's
+`CARGO_TARGET_DIR` and its build lock. Stage the intended source before
+running. The runner archives that tree and the pinned C revision under
+a new scratch directory outside the checkout.
+
+`run` requires a C reference with `crates/vendor/tree-sitter/src/query.c`
+and records its resolved commit as `c_revision`. The reference's bundled
+grammars determine the corpus inventory, and each needs a sample and a
+mode query minimum. `compare` verifies existing manifests with the
+revision and grammar inventory they record.
 
 The runner builds and verifies the C-backed editor first. That editor
 loads the archived subject's Lisp to collect actual mode queries. It
