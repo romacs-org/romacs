@@ -1,5 +1,5 @@
 //! The tree-sitter grammars Romacs ships (ledger/divergences VM2-TREESIT-BUNDLED).
-//! Each is the commit its GNU ts mode pins in `treesit-language-source-alist',
+//! Each matches its pinned commit in `treesit-language-source-alist',
 //! linked into the executable; `romacs-vm-gui' registers [`BUNDLED`] with the
 //! VM's grammar loader, which finds them after the user's grammar directories
 //! and before the system's.
@@ -32,6 +32,7 @@ pub const BUNDLED: &[Bundled] = bundled! {
     "javascript" tree_sitter_javascript::LANGUAGE, "https://github.com/tree-sitter/tree-sitter-javascript" "108b2d4d17a04356a340aea809e4dd5b801eb40d";
     "jsdoc" tree_sitter_jsdoc::LANGUAGE, "https://github.com/tree-sitter/tree-sitter-jsdoc" "b253abf68a73217b7a52c0ec254f4b6a7bb86665";
     "json" tree_sitter_json::LANGUAGE, "https://github.com/tree-sitter/tree-sitter-json" "4d770d31f732d50d3ec373865822fbe659e47c75";
+    "kotlin" tree_sitter_kotlin_ng::LANGUAGE, "https://github.com/tree-sitter-grammars/tree-sitter-kotlin" "77dd60ea0a9003ce062c9728a513ffe1aaff8c82";
     "python" tree_sitter_python::LANGUAGE, "https://github.com/tree-sitter/tree-sitter-python" "bffb65a8cfe4e46290331dfef0dbf0ef3679de11";
     "rust" tree_sitter_rust::LANGUAGE, "https://github.com/tree-sitter/tree-sitter-rust" "18b0515fca567f5a10aee9978c6d2640e878671a";
     "toml" tree_sitter_toml_ng::LANGUAGE, "https://github.com/tree-sitter-grammars/tree-sitter-toml" "64b56832c2cffe41758f28e05c756a3a98d16f41";
