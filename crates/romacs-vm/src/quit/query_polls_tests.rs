@@ -8,7 +8,6 @@ struct Polls {
 }
 
 thread_local! {
-    // CELL(Plain)
     static POLLS: Cell<Option<Polls>> = const { Cell::new(None) };
 }
 

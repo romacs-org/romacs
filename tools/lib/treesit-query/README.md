@@ -38,6 +38,8 @@ The named probes check exact records for subtree and byte bounds and for
 the three isolated C differences below. Only those probe records may
 differ. The regular tests also prove that cancellation returns before a
 no-match traversal exhausts the tree.
+Both arms use the same test-only recorder in `crates/romacs-vm/src/treesit/query_oracle_tests.rs`
+and poll observer in `crates/romacs-vm/src/quit/query_polls_tests.rs`.
 
 Use `tools/treesit-query-diff compare --manifest DIR/corpus.json
 --corpus-digest SHA256 --reference DIR/oracle-c.records --candidate FILE`

@@ -659,7 +659,7 @@ impl Steps {
 pub(crate) struct Stopped;
 
 #[cfg(test)]
-#[path = "quit/query_polls.rs"]
+#[path = "quit/query_polls_tests.rs"]
 pub(crate) mod query_polls;
 
 /// A loop's quit probe, taken from the VM before the loop

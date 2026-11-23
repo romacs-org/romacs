@@ -10,7 +10,7 @@ use std::rc::Rc;
 use tree_sitter::ffi;
 
 #[cfg(test)]
-#[path = "query_oracle.rs"]
+#[path = "query_oracle_tests.rs"]
 mod query_oracle;
 
 pub(crate) use ffi::{TSInputEdit, TSPoint};

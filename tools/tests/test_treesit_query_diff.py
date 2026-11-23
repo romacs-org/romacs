@@ -147,6 +147,7 @@ impl Query {
     def test_adds_accessor_once(self):
         installed = self.install()
         self.assertIn("#[cfg(test)]\n    fn capture_count(&self) -> u32", installed)
+        self.assertIn('#[path = "query_oracle_tests.rs"]\nmod query_oracle;', installed)
         self.assertEqual(installed, self.install())
 
     def test_keeps_existing_accessor(self):

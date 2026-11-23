@@ -18,9 +18,9 @@ from corpus import check_cases, freeze_cases, grammar_samples, sha256
 from records import canonical, compare
 
 NATIVE = Path("crates/romacs-vm/src/treesit/native.rs")
-RECORDER = NATIVE.with_name("query_oracle.rs")
+RECORDER = NATIVE.with_name("query_oracle_tests.rs")
 QUIT = Path("crates/romacs-vm/src/quit.rs")
-POLLS = QUIT.with_suffix("") / "query_polls.rs"
+POLLS = QUIT.with_suffix("") / "query_polls_tests.rs"
 GR_JSON = Path("crates/romacs-grammars/sources.json")
 C_ENGINE = Path("crates/vendor/tree-sitter/src/query.c")
 C_BINDINGS = C_ENGINE.parent.parent / "binding_rust/bindings.rs"
@@ -94,7 +94,7 @@ def add_reference_query_tests(reference, support):
         insert_before(native, anchor, (support / "c-capture-count.rs").read_text() + "\n")
     insert_before(native, anchor, (support / "c-matches.rs").read_text() + "\n")
     insert_before(native, "pub(crate) use ffi::{",
-                  '#[cfg(test)]\n#[path = "query_oracle.rs"]\nmod query_oracle;\n\n')
+                  '#[cfg(test)]\n#[path = "query_oracle_tests.rs"]\nmod query_oracle;\n\n')
 
 
 def add_reference_tests(reference, subject):
@@ -110,7 +110,7 @@ def add_reference_tests(reference, subject):
     insert_before(reference / QUIT, "    /// Whether it may ever say to stop:",
                   (subject / SUPPORT / "test-stop.rs").read_text() + "\n")
     insert_before(reference / QUIT, "/// A loop's quit probe, taken from the VM before the loop",
-                  '#[cfg(test)]\n#[path = "quit/query_polls.rs"]\npub(crate) mod query_polls;\n\n')
+                  '#[cfg(test)]\n#[path = "quit/query_polls_tests.rs"]\npub(crate) mod query_polls;\n\n')
     insert_before(reference / QUIT,
                   "        if self.quit.is_some() { crate::gap_probe::safepoint(None); }",
                   "        #[cfg(test)]\n        if let Some(due) = query_polls::record() { return due; }\n")

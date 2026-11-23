@@ -155,6 +155,7 @@ threaded_lend.rs unwind_to unwind 1 clean  # the binding stack is traced; the re
 threaded_lend.rs watched bind_variable 1 suspended  # the value is read from the frame just before; the caller's stay in registers
 threaded_lend.rs watched set_variable_value 1 suspended  # it roots the value it was given; the caller's stay in registers
 threaded_lend.rs write_from set_variable_value 1 rooted  # the value is the frame's, read just before; the requester holds no Value
+treesit/query/mod.rs new compile 1 clean  # the tree-sitter compiler uses only query bytes and grammar tables
 variable_runtime.rs bind_variable bind_variable 1 clean  # a tracked variable's binding, again through the tracking: VALUE is passed on and nothing is used after
 variable_runtime.rs bind_variable notify_watchers 1 rooted  # VALUE is a frame, read back for the store; the old value is a binding
 variable_runtime.rs bind_variable notify_watchers_at 1 rooted  # VALUE is a frame, read back for the store; the old value is a binding
