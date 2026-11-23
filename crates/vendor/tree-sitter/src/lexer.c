@@ -4,8 +4,6 @@
 
 #include "tree_sitter/api.h"
 
-#define LOG(message, character)
-
 static const int32_t BYTE_ORDER_MARK = 0xFEFF;
 
 static const TSRange DEFAULT_RANGE = {
@@ -239,12 +237,6 @@ static void ts_lexer__advance(TSLexer *_self, bool skip) {
   Lexer *self = (Lexer *)_self;
   if (!self->chunk) return;
 
-  if (skip) {
-    LOG("skip", self->data.lookahead)
-  } else {
-    LOG("consume", self->data.lookahead)
-  }
-
   const uint32_t next_position = self->current_position.bytes + 1;
   const uint32_t current_range_end =
     self->included_ranges[self->current_included_range_index].end_byte;
@@ -470,5 +462,3 @@ TSRange *ts_lexer_included_ranges(const Lexer *self, uint32_t *count) {
   *count = self->included_range_count;
   return self->included_ranges;
 }
-
-#undef LOG

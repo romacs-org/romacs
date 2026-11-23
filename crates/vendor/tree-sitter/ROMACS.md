@@ -83,6 +83,9 @@ Each is its own commit in Romacs's history.
 - `refactor(treesit): remove the remaining UTF-16 binding helper` drops
   the unused slice accessor and describes only the supported text input.
 
+- `refactor(treesit): remove empty lexer logging` drops the no-op macro
+  and its calls. The grammar ABI keeps the callable logging slot.
+
 The cost rig at `7a80f952a` compared L0 `8b5eb2504` to `fa9115480`
 using Callgrind. Runtime lexing used 7.1–11.2% fewer instructions and
 per-key lexer lifecycle ranged from 4.4% fewer to 0.62% more. Per-key
