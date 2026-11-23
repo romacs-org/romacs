@@ -3558,6 +3558,7 @@ dependencies = [
  "romacs-brand",
  "romacs-display-protocol",
  "romacs-face",
+ "romacs-grammars",
  "romacs-keeper",
  "romacs-layout",
  "romacs-layout-input",

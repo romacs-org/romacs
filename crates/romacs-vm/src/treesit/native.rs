@@ -13,6 +13,10 @@ use std::ffi::{CStr, CString};
 use std::rc::Rc;
 use tree_sitter::ffi;
 
+#[cfg(test)]
+#[path = "query_oracle.rs"]
+mod query_oracle;
+
 pub(crate) use ffi::{TSInputEdit, TSNode, TSPoint};
 
 pub(crate) const ABI_VERSION: u32 = tree_sitter::LANGUAGE_VERSION as u32;
@@ -454,6 +458,12 @@ impl Query {
     pub(crate) fn pattern_count(&self) -> u32 {
         // SAFETY: the query is live.
         unsafe { ffi::ts_query_pattern_count(self.0) }
+    }
+    #[cfg(test)]
+    fn capture_count(&self) -> u32 {
+        // UNSAFE(the reference query exposes its capture table through C)
+        // SAFETY: the query is live.
+        unsafe { ffi::ts_query_capture_count(self.0) }
     }
     pub(crate) fn capture_name(&self, index: u32) -> &[u8] {
         let mut length = 0;

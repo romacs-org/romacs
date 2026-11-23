@@ -97,6 +97,8 @@ romacs-vm = { path = ".", features = ["test-hooks"] }
 # this out of the shipped graph. Without it such a test can only live outside
 # the repository, where it rots unrun.
 romacs-layout = { path = "../romacs-layout" }
+# Exercise raw queries with the same ABI tables as the editor.
+romacs-grammars = { path = "../romacs-grammars" }
 # Compile-fail proofs that the heap boundary is a type property (tests/compile_boundaries.rs).
 trybuild = "1.0"
 # The derive the compile-fail proofs of the snapshot contract use, which names this crate.
