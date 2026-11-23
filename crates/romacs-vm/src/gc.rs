@@ -359,6 +359,7 @@ struct NestingMark {
     backtrace: usize,
     eval_depth: usize,
     native_quit: bool,
+    macro_record: crate::macro_record::RecordMark,
 }
 
 /// Bytes charged per heap object against `gc-cons-threshold': GNU's cons.
@@ -572,6 +573,7 @@ impl Vm {
             backtrace: self.backtrace.frames.len(),
             eval_depth: self.eval_depth,
             native_quit: self.native_quit,
+            macro_record: self.macro_record.mark(),
         };
         let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| body(self)));
         if caught.is_err() {
@@ -591,6 +593,7 @@ impl Vm {
         self.signal_handlers.truncate(mark.handlers);
         self.backtrace.leave(mark.backtrace);
         self.eval_depth = mark.eval_depth;
+        self.macro_record.restore(&mark.macro_record);
         // Outside any engine, these are all at rest.
         self.suspended.clear();
         self.stack.reset();

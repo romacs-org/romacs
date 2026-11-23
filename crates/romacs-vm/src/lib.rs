@@ -2235,7 +2235,7 @@ impl Vm {
         self.world_version = world;
         self.command_set.changed(slot);
         if self.macro_record.named(slot) {
-            self.macro_record.log_write(slot, previous);
+            self.log_macro_write(slot, previous);
         }
         Ok(())
     }

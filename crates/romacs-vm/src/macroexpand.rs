@@ -73,16 +73,6 @@ impl Vm {
         Ok(args)
     }
 
-    /// Record that FORM's head expands through its function cell, not an
-    /// environment entry (`macro_record`).
-    fn record_global_expansion(&mut self, form: Value) {
-        if let Ok((head, _)) = self.cons_pair(form)
-            && let Some(slot) = self.macro_symbol_slot(head)
-        {
-            self.record_alias_chain(slot, self.macro_alias_end(slot));
-        }
-    }
-
     pub(super) fn macroexpand_primitive(&mut self, args: &[Value]) -> Result<Value> {
         if args.is_empty() || args.len() > 2 {
             let name = Value::reference(Primitive::Macroexpand as usize, 6);
@@ -120,6 +110,8 @@ impl Vm {
             let mut symbol = definition;
             let mut entry = None;
             let mut aliases = HashSet::default();
+            // The global cells this step resolves through, as it reads them.
+            let mut cells = Vec::new();
             while definition.tag() == 7 || definition == Value::NIL || definition == Value::TRUE {
                 symbol = definition;
                 if !aliases.insert(symbol.0) {
@@ -132,6 +124,7 @@ impl Vm {
                 let Some(slot) = self.macro_symbol_slot(symbol) else {
                     return Ok(form);
                 };
+                cells.push((slot, self.slots[slot].version));
                 // Native macro cells store their expander directly; GNU's
                 // (macro . EXPANDER) discriminator lives in this side table.
                 if self.macros.contains(&slot) {
@@ -156,8 +149,11 @@ impl Vm {
                 let macro_symbol = self.intern("macro");
                 let loaded = self.autoload_do_load(definition, symbol, macro_symbol)?;
                 let form = self.rooted(frame, 0);
-                // autoload_do_load can install an alias to a native macro.
+                // autoload_do_load can install an alias to a native macro:
+                // the cells it left are the ones resolved, not the autoload.
                 if let Some(slot) = self.macro_symbol_slot(symbol) {
+                    cells.pop();
+                    cells.extend(self.alias_cells(slot));
                     let end = self.macro_alias_end(slot);
                     if self.macros.contains(&end) {
                         self.slots[end].function
@@ -180,9 +176,7 @@ impl Vm {
             };
             // apply1 validates the argument spine only after a macro is found.
             let form = self.rooted(frame, 0);
-            if entry.is_none() {
-                self.record_global_expansion(form);
-            }
+            self.record_macro_uses(&cells);
             let args = self.macro_arguments(form)?;
             let newform = self.call_macro_expander(expander, &args)?;
             let form = self.rooted(frame, 0);

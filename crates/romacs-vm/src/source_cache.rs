@@ -244,12 +244,8 @@ impl Vm {
         );
         calls.sort_unstable();
         calls.dedup();
-        // The request's record (`MacroRecord::request`): what its root
-        // function and the eager lambdas in it expanded through.
-        let macros = std::mem::take(&mut self.macro_record.request)
-            .into_iter()
-            .map(|(s, v)| (s, v, self.macro_stamp(s).unwrap_or_default()))
-            .collect();
+        let record = std::mem::take(&mut self.macro_record.request);
+        let macros = self.macro_guard(record);
         let e = Entry {
             function,
             macros,
@@ -459,6 +455,17 @@ impl Vm {
         }
         Ok(function)
     }
+    /// The cache's guard over a request's record (`MacroRecord::request`):
+    /// the cells its root function and the eager lambdas in it expanded
+    /// through, a nested request's apart, each with its version and the
+    /// stamp of the constant macro it held. `cache_valid` holds every cell to
+    /// both, so a cell with no stamp (an alias link, a compiler-macro
+    /// handler, a macro whose expander computes) leaves the entry never
+    /// valid: such a request compiles again each time, as one through an
+    /// alias always has.
+    fn macro_guard(&self, record: Vec<crate::macro_record::MacroUse>) -> Vec<(usize, u64, String)> {
+        record.into_iter().map(|(s, v)| (s, v, self.macro_stamp(s).unwrap_or_default())).collect()
+    }
     fn macro_stamp(&self, slot: usize) -> Option<String> {
         if !self.constant_macro(slot) {
             return None;
@@ -633,19 +640,27 @@ impl Vm {
         let ends = f.tag() != 7 || f == Value::NIL || f == Value::UNBOUND || self.macros.contains(&slot);
         (!ends).then(|| f.payload() as usize - 1)
     }
-    /// Record an expansion through HEAD's cell: every link of its alias
-    /// chain, as `macro_alias_end` walks it, and the macro at its END.
+    /// Record an expansion through HEAD's cell, just resolved to END: every
+    /// link of its alias chain and the macro at its end, as they are now.
     pub(super) fn record_alias_chain(&mut self, head: usize, end: usize) {
-        let mut slot = head;
-        self.record_macro_use(slot);
         if head == end {
-            return;
+            self.record_macro_use(head);
+        } else {
+            let cells = self.alias_cells(head);
+            self.record_macro_uses(&cells);
         }
+    }
+    /// SLOT's cell and each alias link after it to the end of its chain, as
+    /// `macro_alias_end` walks it, with their versions now.
+    pub(super) fn alias_cells(&self, slot: usize) -> Vec<crate::macro_record::MacroUse> {
+        let mut cells = vec![(slot, self.slots[slot].version)];
+        let mut at = slot;
         for _ in 0..self.slots.len() {
-            let Some(next) = self.alias_step(slot) else { break };
-            slot = next;
-            self.record_macro_use(slot);
+            let Some(next) = self.alias_step(at) else { break };
+            at = next;
+            cells.push((at, self.slots[at].version));
         }
+        cells
     }
 }
 /// Whether FORM names something by identity rather than by spelling: an

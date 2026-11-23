@@ -4,12 +4,19 @@ use super::{Fault, Leaf};
 use crate::Value;
 
 impl Leaf<'_> {
-    /// The compile now running expanded through SYMBOL's function cell;
-    /// nothing for a non-symbol.
-    pub(crate) fn record_macro_use(&mut self, symbol: Value) {
-        if let Some(slot) = self.symbol_index(symbol) {
-            self.vm.record_macro_use(slot);
-        }
+    /// Each of SYMBOLS' function cells and the alias links from it to the
+    /// end of its chain, each as (SYMBOL-SLOT . VERSION) now; nothing for a
+    /// non-symbol.
+    pub(crate) fn macro_cells(&self, symbols: &[Value]) -> Vec<crate::macro_record::MacroUse> {
+        symbols.iter().filter_map(|&symbol| self.symbol_index(symbol)).flat_map(|slot| self.vm.alias_cells(slot)).collect()
+    }
+    /// The compile now running expanded through each of USES.
+    pub(crate) fn record_macro_cells(&mut self, uses: &[crate::macro_record::MacroUse]) {
+        self.vm.record_macro_uses(uses);
+    }
+    /// SYMBOL's slot, for a cell `romacs--record-macro-cells` names.
+    pub(crate) fn macro_cell_slot(&self, symbol: Value) -> std::result::Result<usize, Fault> {
+        self.symbol_slot(symbol)
     }
     /// `Vm::who_macroexpands` of SYMBOL.
     pub(crate) fn who_macroexpands(&self, symbol: Value, transitive: bool) -> std::result::Result<Vec<usize>, Fault> {

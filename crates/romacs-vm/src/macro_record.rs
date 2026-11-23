@@ -57,20 +57,46 @@ enum ScopeKind {
     /// A compile of its own inside another (a forced lazy body, a nested
     /// load): it records nothing, and no scope above it reaches past it.
     Detached,
-    /// One top-level load form while it is expanded and run. It holds that
-    /// form's own expansions (its head's), not its functions'. Pre-expanded
-    /// once it records an expansion made while an expander deeper than
-    /// EXPANDING ran (a `cl-macrolet` expanding its body): the functions
-    /// compiled from it then take its uses too.
-    Toplevel { expanding: usize, pre_expanded: bool },
+    /// One top-level load form while it is expanded and run. It records
+    /// only while HEADING, as its head is expanded (`Vm::set_heading`), so
+    /// it holds that form's own expansions, never its functions' or what its
+    /// run expands. Pre-expanded once it records an expansion made while an
+    /// expander deeper than EXPANDING ran (a `cl-macrolet` expanding its
+    /// body): the functions compiled from it then take its uses too.
+    Toplevel { expanding: usize, pre_expanded: bool, heading: bool },
 }
 
 /// The writes to named slots: how many, and the latest `LOG_LIMIT`, oldest
-/// first, each the slot and the version it replaced.
+/// first.
 #[derive(Clone, Debug, Default, romacs_snapshot::Snapshot)]
 pub(crate) struct Invalidations {
     pub(crate) events: u64,
-    writes: Vec<MacroUse>,
+    writes: Vec<Write>,
+}
+
+/// One write to a named slot: the version it replaced, and its symbol as it
+/// was then, which a collected symbol's reused slot no longer names.
+#[derive(Clone, Debug, romacs_snapshot::Snapshot)]
+struct Write {
+    slot: usize,
+    version: u64,
+    symbol: Named,
+}
+
+/// A logged symbol: by its slot while that slot can only ever name it (the
+/// initial obarray's, which no collection reuses), else by its name alone.
+#[derive(Clone, Debug, romacs_snapshot::Snapshot)]
+pub(crate) enum Named {
+    Interned(usize),
+    Name(String),
+}
+
+/// What a panic leaves to undo (`Vm::catching`): the scopes and uses open
+/// when it began, and the runaway count.
+pub(crate) struct RecordMark {
+    scopes: usize,
+    uses: usize,
+    expansions: usize,
 }
 
 /// One logged write as it reads now: the live functions it would make
@@ -79,7 +105,7 @@ pub(crate) struct Invalidations {
 /// no clock runs).
 #[derive(Clone, Debug)]
 pub(crate) struct Invalidation {
-    pub(crate) slot: usize,
+    pub(crate) symbol: Named,
     pub(crate) functions: usize,
     pub(crate) rounds: usize,
     pub(crate) joined: Vec<usize>,
@@ -182,14 +208,15 @@ impl MacroRecord {
     fn push(&mut self, entry: MacroUse, expanding: usize) {
         match self.scopes.last_mut() {
             Some(Scope { kind: ScopeKind::Function, .. }) => self.uses.push(entry),
-            Some(Scope { kind: ScopeKind::Toplevel { expanding: base, pre_expanded }, .. }) => {
+            Some(Scope { kind: ScopeKind::Toplevel { expanding: base, pre_expanded, heading: true }, .. }) => {
                 if !*pre_expanded && expanding > *base {
                     *pre_expanded = true;
                     self.pre_expanded += 1;
                 }
                 self.uses.push(entry);
             }
-            Some(Scope { kind: ScopeKind::Detached | ScopeKind::Request { .. }, .. }) | None => {}
+            Some(Scope { kind: ScopeKind::Detached | ScopeKind::Request { .. } | ScopeKind::Toplevel { heading: false, .. }, .. })
+            | None => {}
         }
     }
     /// The innermost function scope's uses, sorted and deduplicated in
@@ -235,14 +262,29 @@ impl MacroRecord {
     pub(crate) fn named(&self, slot: usize) -> bool {
         self.named.get(slot).copied().unwrap_or(false)
     }
-    /// Log a write to SLOT, which replaced VERSION.
-    pub(crate) fn log_write(&mut self, slot: usize, version: u64) {
+    /// Log a write to SLOT, SYMBOL's, which replaced VERSION.
+    fn log_write(&mut self, slot: usize, version: u64, symbol: Named) {
         let log = &mut self.invalidations;
         log.events += 1;
         if log.writes.len() >= LOG_LIMIT {
             log.writes.remove(0);
         }
-        log.writes.push((slot, version));
+        log.writes.push(Write { slot, version, symbol });
+    }
+    fn set_heading(&mut self, on: bool) {
+        if let Some(Scope { kind: ScopeKind::Toplevel { heading, .. }, .. }) = self.scopes.last_mut() {
+            *heading = on;
+        }
+    }
+    pub(crate) fn mark(&self) -> RecordMark {
+        RecordMark { scopes: self.scopes.len(), uses: self.uses.len(), expansions: self.expansions }
+    }
+    /// Back to MARK, dropping the scopes a panic left open.
+    pub(crate) fn restore(&mut self, mark: &RecordMark) {
+        self.scopes.truncate(mark.scopes);
+        self.uses.truncate(mark.uses);
+        self.expansions = mark.expansions;
+        self.pre_expanded = self.scopes.iter().filter(|s| matches!(s.kind, ScopeKind::Toplevel { pre_expanded: true, .. })).count();
     }
 }
 
@@ -265,8 +307,19 @@ impl Vm {
     }
     /// Open one top-level load form's scope (`eval_toplevel`).
     pub(super) fn open_toplevel_scope(&mut self) -> usize {
-        let kind = ScopeKind::Toplevel { expanding: self.expanding.len(), pre_expanded: false };
+        let kind = ScopeKind::Toplevel { expanding: self.expanding.len(), pre_expanded: false, heading: false };
         self.macro_record.open(kind)
+    }
+    /// Whether the innermost top-level form's head is being expanded now:
+    /// only then does its scope record.
+    pub(super) fn set_heading(&mut self, on: bool) {
+        self.macro_record.set_heading(on);
+    }
+    /// A write to SLOT's cell, which replaced VERSION, that a record names
+    /// (`MacroRecord::named`): logged, its symbol kept as it is now.
+    pub(super) fn log_macro_write(&mut self, slot: usize, version: u64) {
+        let symbol = if self.in_initial_obarray(slot) { Named::Interned(slot) } else { Named::Name(self.symbol_names[slot].clone()) };
+        self.macro_record.log_write(slot, version, symbol);
     }
     #[inline]
     pub(super) fn close_scope(&mut self, depth: usize) {
@@ -275,8 +328,14 @@ impl Vm {
     /// Record that the compile in the innermost scope expanded through
     /// SLOT's cell as it is now.
     pub(super) fn record_macro_use(&mut self, slot: usize) {
-        let entry = (slot, self.slots[slot].version);
-        self.macro_record.push(entry, self.expanding.len());
+        self.record_macro_uses(&[(slot, self.slots[slot].version)]);
+    }
+    /// Record that the compile in the innermost scope expanded through each
+    /// of USES, the cells and versions it read.
+    pub(super) fn record_macro_uses(&mut self, uses: &[MacroUse]) {
+        for &entry in uses {
+            self.macro_record.push(entry, self.expanding.len());
+        }
     }
     /// The record of the function the innermost scope compiles, as it is
     /// installed: its own uses and those of the pre-expanded forms it came from.
@@ -376,13 +435,13 @@ impl Vm {
     pub(crate) fn macro_invalidations(&self) -> (u64, Vec<Invalidation>) {
         let log = &self.macro_record.invalidations;
         // Newest first, so the latest write's scan is timed cold.
-        let resolved = log.writes.iter().rev().map(|&(slot, version)| {
+        let resolved = log.writes.iter().rev().map(|&Write { slot, version, ref symbol }| {
             let started = crate::host::stat_clock();
             let reach = self.staleness(slot, Some(version));
             // HOST(Instant::now): the scan's own clock, running only once
             // `host::stat_clock` started it, which no world builder does
             let ns = started.map_or(0, |at| u64::try_from(std::time::Instant::now().duration_since(at).as_nanos()).unwrap_or(u64::MAX));
-            Invalidation { slot, functions: reach.stale.len(), rounds: reach.rounds, joined: reach.joined, ns }
+            Invalidation { symbol: symbol.clone(), functions: reach.stale.len(), rounds: reach.rounds, joined: reach.joined, ns }
         });
         let mut resolved: Vec<Invalidation> = resolved.collect();
         resolved.reverse();
@@ -446,6 +505,32 @@ mod tests {
     }
 
     #[test]
+    fn a_top_level_form_records_only_while_its_head_expands() {
+        let mut record = MacroRecord::default();
+        record.open(ScopeKind::Toplevel { expanding: 0, pre_expanded: false, heading: false });
+        record.push((1, 0), 0);
+        record.set_heading(true);
+        record.push((2, 0), 1);
+        record.set_heading(false);
+        record.push((3, 0), 1);
+        assert_eq!(record.uses, vec![(2, 0)], "its run records nothing");
+        assert_eq!(record.pre_expanded, 1);
+    }
+
+    #[test]
+    fn a_panic_leaves_the_record_as_it_was() {
+        let mut vm = Vm::new();
+        let caught = vm.catching(|vm| {
+            vm.open_function_scope();
+            vm.macro_record.push((1, 0), 0);
+            vm.macro_record.expansions = 7;
+            std::panic::panic_any("in a compile")
+        });
+        assert!(caught.is_err());
+        assert!(vm.macro_record.scopes.is_empty() && vm.macro_record.uses.is_empty() && vm.macro_record.expansions == 0);
+    }
+
+    #[test]
     fn a_request_keeps_its_root_s_uses_as_its_own() {
         let mut record = MacroRecord::default();
         let request = record.open(ScopeKind::Request { detached: true });
@@ -466,9 +551,9 @@ mod tests {
     #[test]
     fn only_pre_expanded_top_level_forms_are_inherited() {
         let mut record = MacroRecord::default();
-        let plain = record.open(ScopeKind::Toplevel { expanding: 0, pre_expanded: false });
+        let plain = record.open(ScopeKind::Toplevel { expanding: 0, pre_expanded: false, heading: true });
         record.push((5, 0), 0);
-        record.open(ScopeKind::Toplevel { expanding: 0, pre_expanded: false });
+        record.open(ScopeKind::Toplevel { expanding: 0, pre_expanded: false, heading: true });
         record.push((6, 1), 1);
         record.open(ScopeKind::Function);
         record.push((7, 0), 1);
