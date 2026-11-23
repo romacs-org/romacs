@@ -51,7 +51,7 @@ obsolete, with no current name or for an older major version."
     (error
      (unless (gethash symbol romacs-commands--reported-command-errors)
        (puthash symbol t romacs-commands--reported-command-errors)
-       (message "M-x: commandp for %s: %s" symbol (error-message-string err)))
+       (message "execute-extended-command: commandp for %s: %s" symbol (error-message-string err)))
      nil)))
 
 (defun romacs-commands--predicate (buffer)
