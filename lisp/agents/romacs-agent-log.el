@@ -623,6 +623,9 @@ left out."
                         (format " · %s shows all" (romacs-agent-log--key 'romacs-agent-log-open)))
                 'face 'romacs-agent-log-note)))
 
+(defconst romacs-agent-log--tool-indent "  "
+  "Indent of a tool row within its turn, after any subagent bars.")
+
 (defun romacs-agent-log--output (output face full)
   "OUTPUT under its call, its mark first, its first lines in FACE, then how
 many more there are.  FULL, (INPUT . OUTPUT), is what RET on it shows."
@@ -631,7 +634,7 @@ many more there are.  FULL, (INPUT . OUTPUT), is what RET on it shows."
     ;; reads, the answer's size, never the part's count.
     (unless (romacs-agent-rows-readable-p (cdr full)) (setq count nil))
     (let* ((more (romacs-agent-log--more count romacs-agent-log-output-lines (cdr full)))
-           (prefix (concat "    " (romacs-agent-glyph 'output) " "))
+           (prefix (concat romacs-agent-log--tool-indent "  " (romacs-agent-glyph 'output) " "))
            (hang (concat "\n" (romacs-agent-glyph-hang prefix)))
            (shown (propertize (replace-regexp-in-string "\n" hang (if (string-empty-p shown) "(no output)" shown) t t)
                               'face face))
@@ -651,14 +654,15 @@ many more there are.  FULL, (INPUT . OUTPUT), is what RET on it shows."
         (buffer-string))
     (error (format "%S" value))))
 
-(defun romacs-agent-log--call-row (name input)
+(defun romacs-agent-log--call-row (name input &optional failed)
   "The row of a call of tool NAME with INPUT, a table, as it starts: its
-renderer's, else its name and the brief of its input."
-  (let* ((renderer (romacs-agent-rows-get name))
+renderer's, else its name and a brief.  FAILED leaves the fallback mark off."
+  (let* ((input (if (hash-table-p input) input (make-hash-table :test #'equal)))
+         (renderer (romacs-agent-rows-get name))
          (row (and renderer
                    (condition-case err (funcall (plist-get renderer :row) input)
                      (error (message "The row of %s failed: %s" name (error-message-string err)) nil)))))
-    (or row (concat (romacs-agent-glyph 'tool) " " name
+    (or row (concat (unless failed (concat (romacs-agent-glyph 'tool) " ")) name
                     ;; One line of it, its own description when it gives
                     ;; one: RET shows all of it.
                     (let* ((described (gethash "description" input))
@@ -684,9 +688,6 @@ Read only a bounded prefix.  RET shows the whole text."
              (concat (substring row 0 (min (length row) (- limit (length ellipsis)))) ellipsis)
            row))))
 
-(defconst romacs-agent-log--tool-indent "  "
-  "Indent of a tool row within its turn, after any subagent bars.")
-
 (defun romacs-agent-log--style-tool-row (row &optional failed)
   "Dim ROW while keeping the renderer's outcome faces.
 Mark FAILED calls in the error face."
@@ -701,11 +702,10 @@ Mark FAILED calls in the error face."
 (defun romacs-agent-log--call (name input)
   "The first line of tool NAME with INPUT, indented within the turn."
   (concat romacs-agent-log--tool-indent
-          (romacs-agent-log--style-tool-row
-           (romacs-agent-log--call-row name (if (hash-table-p input) input (make-hash-table :test #'equal))))))
+          (romacs-agent-log--style-tool-row (romacs-agent-log--call-row name input))))
 
 (defun romacs-agent-log--replace-tool-row (block row &optional failed)
-  "Replace BLOCK's row text with ROW, or mark the current text FAILED."
+  "Replace BLOCK's row text with ROW, styling it for FAILED."
   (save-excursion
     (let* ((start (romacs-agent-log-call-start block))
            (at (+ start (romacs-agent-log-call-indent block)))
@@ -714,7 +714,7 @@ Mark FAILED calls in the error face."
            (body (+ at (length prefix)))
            (end (progn (goto-char at) (line-end-position))))
       (when (and (<= body end) (equal (buffer-substring-no-properties at body) prefix))
-        (let ((text (romacs-agent-log--style-tool-row (or row (buffer-substring body end)) failed))
+        (let ((text (romacs-agent-log--style-tool-row row failed))
               (properties (list 'romacs-agent-log-seq (get-text-property at 'romacs-agent-log-seq)
                                 'romacs-agent-log-full (get-text-property at 'romacs-agent-log-full)
                                 'romacs-agent-log-tool (get-text-property at 'romacs-agent-log-tool))))
@@ -755,7 +755,7 @@ its call, in place of those shown before."
                         ;; The empty piece after a final newline is no line.
                         (if (string-suffix-p "\n" streamed) (butlast lines) lines))
                       romacs-agent-log-output-lines))
-         (prefix (concat "    " (romacs-agent-glyph 'running) " "))
+         (prefix (concat romacs-agent-log--tool-indent "  " (romacs-agent-glyph 'running) " "))
          (hang (romacs-agent-glyph-hang prefix))
          (under (romacs-agent-log-call-under block))
          (live (or (romacs-agent-log-call-live block) (copy-marker under))))
@@ -836,7 +836,8 @@ RET on it shows all."
         (put-text-property start (save-excursion (goto-char start) (line-end-position)) 'romacs-agent-log-full full))
       (if failed
           (progn
-            (romacs-agent-log--replace-tool-row block nil t)
+            (romacs-agent-log--replace-tool-row
+             block (romacs-agent-log--call-row (romacs-agent-log-call-name block) (car full) t) t)
             (romacs-agent-log--put (romacs-agent-log--indent (romacs-agent-log--failed-text output full)
                                                              (romacs-agent-log-call-depth block))
                                    block))
@@ -1459,42 +1460,36 @@ chat shows it: a plan it offers waits on the user, as a request does."
   "Make the header say what the session says now: a value, never a form,
 so a redisplay runs no Lisp for it; made only when what it reads changed."
   (let* ((session romacs-agent-log--session)
+         (state (romacs-agent-state session))
+         (pending (romacs-agent-log--waiting-count))
          (start (romacs-agent-turn-start session))
-         (running (and (null romacs-agent-log--asks) (memq (romacs-agent-state session) '(starting running))))
-         (inputs (list (romacs-agent-log--header-inputs session) (romacs-agent-log--waiting-count)
-                       (and start running (round (- (float-time) start))))))
-    (unless (equal inputs romacs-agent-log--header-made)
+         (elapsed (and start (zerop pending) (memq state '(starting running))
+                       (round (- (float-time) start))))
+         (inputs (list (romacs-agent-log--header-inputs session) pending elapsed (eq state 'history))))
+    (unless (equal-including-properties inputs romacs-agent-log--header-made)
       (setq romacs-agent-log--header-made inputs)
-      (let ((header (string-replace "%" "%%" (romacs-agent-log--header))))
+      (let ((header (string-replace "%" "%%" (apply #'romacs-agent-log--header inputs))))
         (unless (equal-including-properties header header-line-format)
           (setq header-line-format header)
           (force-mode-line-update))))))
 
-(defun romacs-agent-log--header ()
-  "The header line: the session's own header, what waits on the user, and
-how long the turn has run."
-  (let* ((session romacs-agent-log--session)
-         (pending (romacs-agent-log--waiting-count))
-         (start (romacs-agent-turn-start session)))
-    (concat (romacs-agent-ui--header-text (romacs-agent-log--header-inputs session))
-            (if (> pending 0)
-                (propertize (format "  %s %d wait%s on you" (romacs-agent-glyph 'asks) pending (if (= pending 1) "s" ""))
-                            'face 'romacs-agent-log-ask)
-              "")
-            ;; A harness's transcript, shown: it is read, not typed at.
-            (if (eq (romacs-agent-state session) 'history)
-                ;; The header's own colour, read first: what this view is.
-                (concat " read-only · "
-                        (propertize (substitute-command-keys
-                                     "\\<romacs-agent-history-text-map>\\[romacs-agent-history-resume-this]")
-                                    'face 'romacs-agent-log-header-key)
-                        " resumes")
-              "")
-            (if (and start (zerop pending) (memq (romacs-agent-state session) '(starting running)))
-                (propertize (format "  %ds · %s stops" (round (- (float-time) start))
-                                    (substitute-command-keys "\\<romacs-agent-log-mode-map>\\[romacs-agent-log-interrupt]"))
-                            'face 'romacs-agent-log-note)
-              ""))))
+(defun romacs-agent-log--header (inputs pending elapsed history)
+  "Render the chat header from INPUTS, PENDING requests and ELAPSED seconds.
+HISTORY says the chat shows a read-only transcript."
+  (concat (romacs-agent-ui--header-text inputs)
+          (when (> pending 0)
+            (propertize (format "  %s %d wait%s on you" (romacs-agent-glyph 'asks) pending (if (= pending 1) "s" ""))
+                        'face 'romacs-agent-log-ask))
+          (when history
+            (concat " read-only · "
+                    (propertize (substitute-command-keys
+                                 "\\<romacs-agent-history-text-map>\\[romacs-agent-history-resume-this]")
+                                'face 'romacs-agent-log-header-key)
+                    " resumes"))
+          (when elapsed
+            (propertize (format "  %ds · %s stops" elapsed
+                                (substitute-command-keys "\\<romacs-agent-log-mode-map>\\[romacs-agent-log-interrupt]"))
+                        'face 'romacs-agent-log-note))))
 
 ;;; Events
 

@@ -111,6 +111,12 @@ them inherits."
     (search-forward "Build rejected")
     (should (eq (car (ensure-list (get-text-property (match-beginning 0) 'face))) 'romacs-agent-error))))
 
+(ert-deftest romacs-agent-log-a-failed-generic-tool-shows-its-final-input ()
+  (romacs-agent-log-tests--with
+    (draw :type 'tool :state 'started :id "w" :name "Wait for subagents")
+    (draw :type 'tool :state 'failed :id "w" :input (romacs-agent-log-tests--input "description" "two workers"))
+    (should (string-prefix-p "  ✘ Wait for subagents two workers\n" (romacs-agent-log-tests--transcript)))))
+
 (ert-deftest romacs-agent-log-long-output-says-how-much-more ()
   (romacs-agent-log-tests--with
     (let ((romacs-agent-log-output-lines 2))
@@ -165,7 +171,8 @@ them inherits."
       (should (string-match-p "y allow" text))
       (should (string-match-p "d deny" text)))
     (should (string-match-p "waits on you" (buffer-substring-no-properties romacs-agent-log--end romacs-agent-log--input)))
-    (should (string-match-p "1 waits on you" (romacs-agent-log--header)))
+    (romacs-agent-log--header-show)
+    (should (string-match-p "1 waits on you" header-line-format))
     ;; Answered by the user: who and how, and the block no longer waits.
     (remhash "b1" (romacs-agent-approvals session))
     (draw :type 'attributed :request-id "b1" :actor '(:kind "user" :client "editor") :decision "deny" :scope "once" :reason "not now")
