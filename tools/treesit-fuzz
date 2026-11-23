@@ -1,61 +1,389 @@
 #!/usr/bin/env python3
-"""treesit-fuzz [--edits N] [--seeds S,...] [FILE...]: do the tree-sitter
-runtime Romacs links (crates/vendor/tree-sitter) and the published one build
-the same trees?
+"""treesit-fuzz [--edits N] [--seeds S,...] [--jobs J] [--reference DIR]
+[--strict] [--e2-everywhere] [FILE...]: does the tree-sitter runtime Romacs
+links (crates/vendor/tree-sitter) keep its contract (its AGENTS.md)?
 
-Builds tools/lib/treesit-fuzz twice, against each runtime, with the grammars
-Romacs ships, and runs both over the same seeded typing-like edits of each
-FILE, a reparse from the edited tree after every edit. Any edit after which
-the two trees differ fails the run. Run it whenever the vendored runtime, its
-patches or a shipped grammar change (crates/vendor/tree-sitter/ROMACS.md).
+Builds tools/lib/treesit-fuzz twice, against this runtime and the published
+one, with the grammars Romacs ships, and runs both over the same seeded
+typing-like edits of each FILE: after every edit a reparse from the edited
+tree, and a fresh parse of the same text. A state is clean when either
+runtime's reparse or fresh parse has no error (clean_states()).
 
-FILE defaults to a C, a Rust and a Python file: xdisp.c from
-$ROMACS_GNU_SOURCE when it is set, and two files of this tree. Builds go to
-$CARGO_TARGET_DIR/treesit-fuzz, else target/treesit-fuzz."""
-import argparse, os, statistics, subprocess, sys
+A run's verdict is the set of every failure it shows, each a (check, cause)
+pair, from one table (table()); each row names its check, how it compares,
+and the planted faults that must produce exactly its pairs:
+
+completeness  each worker exits 0, names the grammar its file's extension
+              names, and prints the states 0..N in order, every field of
+              each in its form (causes worker-exit, wrong-grammar,
+              missing-state, malformed-state);
+e1            on clean states, the reparsed tree's records and changed
+              ranges equal the published runtime's; the causes are every
+              record field that differs on any of them, or ranges;
+e2            on clean states, the reparsed tree equals this runtime's own
+              fresh parse (cause clean);
+inventory     the grammars Romacs ships, which the `inventory` program
+              built from this tree prints from crates/romacs-grammars'
+              BUNDLED, are not none (cause empty);
+coverage      in a default run, every one of them has a clean state after
+              an edit (cause missing-grammar).
+
+A record holds every node and cursor getter Lisp can reach
+(tools/lib/treesit-fuzz/test_getters.py holds the worker to the wrappers in
+crates/romacs-vm/src/treesit/native.rs, and every other file to not calling
+the runtime), index getters at every index up to 256 children, range
+lookups at each node's extent and a seeded interior range, and position
+lookups at each edit's ends and 8 seeded offsets.
+
+--strict compares E1 on every state and adds parse states to it (cause
+states), as a change to the runtime is held against its parent
+(--reference DIR, a checkout's crates/vendor/tree-sitter, in place of the
+published runtime). In an error region today's runtime, like the published
+one, keeps some recovery a fresh parse makes otherwise, so E2 on states
+with errors is a check (cause errors) only with --e2-everywhere, which stage
+P is to pass. Otherwise it is counted, as are parse states, which the
+word-token patch already changes (crates/vendor/tree-sitter/ROMACS.md), and
+the published runtime's own E2. Counted figures are reported and never fail
+a run.
+
+Before the files, the self-test runs the active table on a clean sample:
+unplanted it must produce no failure, and each planted fault exactly the
+pairs its row names. Each build is checked, from `cargo metadata`, to link
+the runtime asked for, and the getter census must pass. Without FILE it runs
+the default files, an error-free one per grammar (of this tree, or for
+JavaScript, TypeScript, TSX, JSDoc and Java a sample in
+tools/lib/treesit-fuzz/corpus), and seven of GNU's C files when
+$ROMACS_GNU_SOURCE is set (they start with errors, so they feed E2 only). A
+failure is printed with its first difference and the command that shows it.
+Run it whenever the runtime, its patches or a shipped grammar change. Builds
+go to $CARGO_TARGET_DIR/treesit-fuzz, else target/treesit-fuzz."""
+import argparse, collections, concurrent.futures, importlib.util, json, os, re, statistics, subprocess, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / 'tools/lib/treesit-fuzz/Cargo.toml'
 VENDORED = ROOT / 'crates/vendor/tree-sitter'
+PUBLISHED = '0.27.0'
+SAMPLES = ROOT / 'tools/lib/treesit-fuzz/corpus'
+CORPUS = ['crates/vendor/freetype-sys/freetype2/src/sfnt/ttsbit.c', 'crates/romacs-vm/src/threaded.rs',
+          'crates/romacs-vm-gui/harness/agent_live.py', 'test/gnu/test/manual/etags/cp-src/functions.cpp',
+          'test/gnu/test/lisp/progmodes/go-ts-mode-resources/font-lock.go', 'tools/lib/treesit-fuzz/corpus/list.js',
+          'Cargo.toml', 'crates/romacs-grammars/sources.json', '.github/workflows/release.yml',
+          'test/gnu/restatement/restatement-command.sh', 'test/gnu/test/manual/etags/html-src/software.html',
+          'tools/lib/treesit-fuzz/corpus/Ledger.java', 'test/gnu/test/lisp/textmodes/css-mode-resources/test-indent.css',
+          'tools/lib/treesit-fuzz/corpus/store.ts', 'tools/lib/treesit-fuzz/corpus/panel.tsx',
+          'tools/lib/treesit-fuzz/corpus/doc.jsdoc', 'test/romacs/lisp/kotlin-ts-mode-resources/Greeter.kt']
+GNU = ['xdisp.c', 'keyboard.c', 'alloc.c', 'fns.c', 'buffer.c', 'eval.c', 'fileio.c']
+GRAMMARS = {'c': 'c', 'h': 'c', 'cc': 'cpp', 'cpp': 'cpp', 'cxx': 'cpp', 'hh': 'cpp', 'hpp': 'cpp', 'py': 'python',
+            'rs': 'rust', 'go': 'go', 'java': 'java', 'js': 'javascript', 'mjs': 'javascript', 'cjs': 'javascript',
+            'jsdoc': 'jsdoc', 'ts': 'typescript', 'tsx': 'tsx', 'json': 'json', 'toml': 'toml', 'yaml': 'yaml',
+            'yml': 'yaml', 'sh': 'bash', 'bash': 'bash', 'css': 'css', 'html': 'html', 'htm': 'html',
+            'kt': 'kotlin', 'kts': 'kotlin'}
+# A state's fields in a worker's output, after its number, and each field's records in a dump;
+# FIELDS, last, maps each record field's name to its (reparsed, fresh) digests.
+ERROR, FRESH_ERROR, NODES, STATES, RANGES, FRESH, FRESH_STATES, MICROS, FIELDS = range(9)
+RECORDS = {NODES: 'node', STATES: 'state', RANGES: 'range', FRESH: 'fresh', FRESH_STATES: 'freshstate'}
+REFERENCE = 'reference'
+DIGEST = re.compile(r'[0-9a-f]{16}')
+FIELD = re.compile(r'([a-z_:]+)=([0-9a-f]{16})/([0-9a-f]{16})')
+# A row of the table: CHECK fails with CAUSE (None: each record field that differs) when FIELD
+# of this runtime's states differs from AGAINST (the reference runtime's same field, or another
+# field of its own) over SCOPE ('clean', 'errors' or 'all' states). CONTROLS are (plant, causes):
+# a fault, and the causes it must produce, exactly (CHECK, cause) for each, in the self-test.
+# A row without a field is checked by the driver: completeness as it reads a worker,
+# inventory and coverage over a run.
+Row = collections.namedtuple('Row', 'check cause field against scope controls')
+SAMPLE, SAMPLE_EDITS, SAMPLE_SEED = SAMPLES / 'Ledger.java', 6, 1
 
 
-def build(target, patched):
-    patch = ['--config', f'patch.crates-io.tree-sitter.path="{VENDORED}"'] if patched else []
+def table(options):
+    """The rows a run with OPTIONS checks."""
+    e1 = 'all' if options.strict else 'clean'
+    rows = [Row('completeness', None, None, None, None,
+                (('drop-row', ('missing-state',)), ('exit', ('worker-exit',)),
+                 ('wrong-grammar', ('wrong-grammar',)), ('bad-flags', ('malformed-state',)))),
+            Row('e1', None, NODES, REFERENCE, e1,
+                (('node', ('kind',)), ('child-swap', ('child',)), ('kind-and-child', ('child', 'kind')),
+                 ('interior-range', ('descendant_for_byte_range',)))),
+            Row('e1', 'ranges', RANGES, REFERENCE, e1, (('ranges', ('ranges',)),)),
+            Row('e2', 'clean', NODES, FRESH, 'clean', (('fresh-clean', ('clean',)),)),
+            Row('inventory', 'empty', None, None, None, (('empty-inventory', ('empty',)),)),
+            Row('coverage', 'missing-grammar', None, None, None, (('uncovered-grammar', ('missing-grammar',)),))]
+    if options.strict:
+        rows.append(Row('e1', 'states', STATES, REFERENCE, 'all', (('states', ('states',)),)))
+    if options.e2_everywhere:
+        rows.append(Row('e2', 'errors', NODES, FRESH, 'errors', (('fresh-errors', ('errors',)),)))
+    return rows
+
+
+# Comparisons counted, never failed (a row with the same check and cause replaces one).
+COUNTED = [Row('e1', 'states', STATES, REFERENCE, 'clean', ()), Row('e2', 'errors', NODES, FRESH, 'errors', ()),
+           Row('e2', 'parse states', STATES, FRESH_STATES, 'all', ()),
+           Row('published e2', 'nodes', NODES, FRESH, 'all', ())]
+
+
+class WorkerError(Exception):
+    """A worker whose run is not whole: CAUSE, and what was seen."""
+
+    def __init__(self, cause, text):
+        super().__init__(f'{cause}: {text}')
+        self.cause = cause
+
+
+def cargo_patch(runtime):
+    return ['--config', f'patch.crates-io.tree-sitter.path="{runtime}"'] if runtime else []
+
+
+def check_linked(runtime):
+    """Fail unless the fuzz resolves tree-sitter to RUNTIME, a directory, else to the published crate."""
+    metadata = subprocess.run(['cargo', 'metadata', '--offline', '--format-version', '1', '--manifest-path',
+                               str(MANIFEST), *cargo_patch(runtime)], check=True, capture_output=True, text=True)
+    package = next(p for p in json.loads(metadata.stdout)['packages'] if p['name'] == 'tree-sitter')
+    linked = Path(package['manifest_path']).parent
+    if runtime and (package['source'] is not None or linked.resolve() != runtime.resolve()):
+        sys.exit(f'treesit-fuzz: asked for the runtime in {runtime}, cargo links {package["id"]}')
+    if not runtime and (not (package['source'] or '').startswith('registry+') or package['version'] != PUBLISHED):
+        sys.exit(f'treesit-fuzz: asked for the published {PUBLISHED}, cargo links {package["id"]}')
+
+
+def build(target, runtime=None):
+    """The release directory of the fuzz's programs against RUNTIME, a runtime directory,
+    else the published crate."""
+    check_linked(runtime)
     subprocess.run(['cargo', 'build', '--release', '--offline', '--quiet', '--manifest-path', str(MANIFEST),
-                    '--target-dir', str(target), *patch], check=True)
-    return target / 'release/treesit-fuzz'
+                    '--target-dir', str(target), *cargo_patch(runtime)], check=True)
+    return target / 'release'
 
 
-def run(binary, path, edits, seed):
-    """[(digest, microseconds)] per state."""
-    out = subprocess.run([str(binary), str(path), str(edits), str(seed)], check=True, capture_output=True, text=True).stdout
-    return [(fields[1], int(fields[2])) for fields in (line.split() for line in out.splitlines())]
+def census():
+    """Fail unless the boundary holds and the worker records every wrapped getter (test_getters.py)."""
+    spec = importlib.util.spec_from_file_location('test_getters', ROOT / 'tools/lib/treesit-fuzz/test_getters.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    if module.boundary_breaches():
+        sys.exit(f'treesit-fuzz: files besides native.rs name the runtime: {module.boundary_breaches()}')
+    if module.wrapper_methods() ^ set(module.WRAPPERS):
+        sys.exit(f'treesit-fuzz: WRAPPERS differs from native.rs: {sorted(module.wrapper_methods() ^ set(module.WRAPPERS))}')
+    if module.missing():
+        sys.exit(f'treesit-fuzz: the worker does not record wrapped getters: {module.missing()}')
+
+
+def inventory(program):
+    """The grammars PROGRAM, the `inventory` built from this tree, prints."""
+    out = subprocess.run([str(program)], check=True, capture_output=True, text=True).stdout.split('\n')
+    names = [line for line in out if line]
+    if any(not re.fullmatch(r'[a-z_]+', name) for name in names):
+        sys.exit(f'treesit-fuzz: {program} printed {names[:5]}..., not grammar names')
+    return names
+
+
+def inventory_failures(names):
+    return set() if names else {('inventory', 'empty')}
+
+
+def coverage_failures(grammars, results):
+    """A failure unless each of GRAMMARS had a clean state after an edit in RESULTS."""
+    covered = {g: sum(r['covered'] for r in results if r['grammar'] == g) for g in grammars}
+    return {('coverage', 'missing-grammar')} if any(n == 0 for n in covered.values()) else set()
+
+
+def grammar_of(path):
+    grammar = GRAMMARS.get(path.suffix[1:])
+    if not grammar:
+        sys.exit(f'treesit-fuzz: {path}: no shipped grammar for "{path.suffix}"')
+    return grammar
+
+
+def parse_state(line, number):
+    """State NUMBER from LINE: its fields after the number, each in its form, else None."""
+    words = line.split()
+    if len(words) < 9 or words[0] != str(number) or any(flag not in ('0', '1') for flag in words[1:3]):
+        return None
+    if not all(DIGEST.fullmatch(word) for word in words[3:8]) or not words[8].isdigit():
+        return None
+    fields = [FIELD.fullmatch(word) for word in words[9:]]
+    if not fields or not all(fields):
+        return None
+    return [*words[1:9], {m[1]: (m[2], m[3]) for m in fields}]
+
+
+def run(binary, path, edits, seed, dump=None, plant=''):
+    """The states of BINARY's run on PATH, each checked to be there, in order, in form and
+    for PATH's grammar; or with DUMP that state's records."""
+    grammar = grammar_of(path)
+    command = [str(binary), grammar, str(path), str(edits), str(seed), *([str(dump)] if dump is not None else [])]
+    out = subprocess.run(command, capture_output=True, text=True, env=dict(os.environ, TREESIT_FUZZ_PERTURB=plant))
+    if out.returncode:
+        raise WorkerError('worker-exit', f'{" ".join(command)}: exit {out.returncode}: {out.stderr.strip()[-600:]}')
+    lines = out.stdout.splitlines()
+    if not lines or lines[0] != f'grammar {grammar}':
+        raise WorkerError('wrong-grammar', f'{binary} names {lines[:1]}, not grammar {grammar}')
+    if dump is not None:
+        return lines[1:]
+    states = [parse_state(line, i) for i, line in enumerate(lines[1:])]
+    if None in states or len(states) > edits + 1:
+        bad = next((i for i, state in enumerate(states) if state is None), edits + 1)
+        raise WorkerError('malformed-state', f'{binary}: state line {bad} is not state {bad} in form')
+    if len(states) < edits + 1:
+        raise WorkerError('missing-state', f'{binary}: {len(states)} state lines, not the {edits + 1} states 0..{edits}')
+    return states
+
+
+def clean_states(a, b):
+    """The states where either runtime's reparse or fresh parse has no error: the one
+    source of E1's and E2's scopes and of coverage, which no option changes."""
+    return {i for i, (x, y) in enumerate(zip(a, b)) if '0' in (x[ERROR], y[ERROR], x[FRESH_ERROR], y[FRESH_ERROR])}
+
+
+def scope_states(row, clean, count):
+    return {'clean': sorted(clean), 'errors': [i for i in range(count) if i not in clean], 'all': range(count)}[row.scope]
+
+
+def differing(row, a, b, clean, own=None):
+    """The states in ROW's scope where its field differs: A the reference's states, B this
+    runtime's; OWN, when given, the runtime whose field is checked against its own."""
+    rows = b if own is None else own
+    other = (lambda i: a[i][row.field]) if row.against == REFERENCE else (lambda i: rows[i][row.against])
+    return [i for i in scope_states(row, clean, len(rows)) if rows[i][row.field] != other(i)]
+
+
+def field_causes(a, b, states):
+    """Every record field whose reparsed digest differs between A and B on any of STATES."""
+    causes = set()
+    for i in states:
+        x, y = a[i][FIELDS], b[i][FIELDS]
+        causes |= {name for name in x.keys() | y.keys() if x.get(name, ('',))[0] != y.get(name, ('',))[0]}
+    return causes or {'record'}
+
+
+def first_difference(binaries, path, edits, seed, state, row, plant=''):
+    """The first records of STATE where ROW's field differs, as text, for the report.
+    PLANT is the second binary's fault."""
+    own = row.against != REFERENCE
+    kinds = (RECORDS[row.field], RECORDS[row.against] if own else RECORDS[row.field])
+    a = run(binaries[1] if own else binaries[0], path, edits, seed, state, plant if own else '')
+    b = run(binaries[1], path, edits, seed, state, plant)
+    a, b = ([r.split(' ', 1)[1] for r in rows if r.split(' ', 1)[0] == kind] for rows, kind in zip((a, b), kinds))
+    for i, (x, y) in enumerate(zip(a, b)):
+        if x != y:
+            return f'record {i}:\n' + '\n'.join(f'      {kind:10} {line.replace(chr(31), " ")[:600]}'
+                                                for kind, line in zip(kinds, (x, y)))
+    return f'{len(a)} records {kinds[0]}, {len(b)} {kinds[1]}'
+
+
+def compare(binaries, path, edits, seed, options, plant=''):
+    """A run of PATH at SEED, with PLANT in this runtime's worker: its line, grammar,
+    failures, counted differences, and clean states after an edit."""
+    result = {'grammar': grammar_of(path), 'counted': {}, 'covered': 0, 'compared': 0}
+    try:
+        a, b = run(binaries[0], path, edits, seed), run(binaries[1], path, edits, seed, plant=plant)
+    except WorkerError as error:
+        return result | {'line': f'{path.name} seed {seed}: completeness/{error}', 'failures': {('completeness', error.cause)}}
+    clean = clean_states(a, b)
+    active = [row for row in table(options) if row.field is not None]
+    differ = {row: differing(row, a, b, clean) for row in active}
+    counted = {f'{c.check} {c.cause}': differing(c, a, b, clean, a if c.check.startswith('published') else None)
+               for c in COUNTED if (c.check, c.cause) not in {(r.check, r.cause) for r in active}}
+    median = lambda states: statistics.median(int(s[MICROS]) for s in states[1:]) / 1000  # noqa: E731
+    line = (f'{path.name} seed {seed} ({grammar_of(path)}): {edits} edits, {len(clean)} clean states; differ after: '
+            + ', '.join(f'{r.check} {r.cause or "records"} {len(s)}' for r, s in differ.items())
+            + ', counted: ' + ', '.join(f'{name} {len(s)}' for name, s in counted.items())
+            + f'; median reparse {median(a):.3f} ms reference, {median(b):.3f} ms vendored')
+    failures = set()
+    for row, states in differ.items():
+        if states:
+            causes = [row.cause] if row.cause else field_causes(a, b, scope_states(row, clean, len(b)))
+            failures |= {(row.check, cause) for cause in causes}
+            line += (f'\n  {row.check} {row.cause or "/".join(sorted(causes))} first after edit {states[0]}: '
+                     + first_difference(binaries, path, edits, seed, states[0], row, plant)
+                     + f'\n  shown by: {binaries[1]} {grammar_of(path)} {path} {edits} {seed} {states[0]}')
+    return result | {'line': line, 'failures': failures, 'counted': counted,
+                     'covered': sum(i > 0 for i in clean), 'compared': len(b)}
+
+
+def self_test(binaries, options, names):
+    """(whether the clean sample produces no failure unplanted and each plant exactly its
+    row's pairs, the report lines). NAMES is the inventory."""
+    base = compare(binaries, SAMPLE, SAMPLE_EDITS, SAMPLE_SEED, options)
+    unplanted = base['failures'] | inventory_failures(names) | coverage_failures([base['grammar']], [base])
+    driver = {'empty-inventory': lambda: inventory_failures([]),
+              'uncovered-grammar': lambda: coverage_failures([base['grammar'], 'planted'], [base])}
+    verdicts, lines = {'unplanted: no failure': not unplanted}, [f'self-test unplanted: {base["line"]}']
+    for row in table(options):
+        for plant, causes in row.controls:
+            if plant in driver:
+                got, shown = driver[plant](), 'driver'
+            else:
+                result = compare(binaries, SAMPLE, SAMPLE_EDITS, SAMPLE_SEED, options, plant)
+                got, shown = result['failures'], result['line']
+            verdicts[f'{plant} -> ' + ' '.join(f'{row.check}/{c}' for c in causes)] = got == {(row.check, c) for c in causes}
+            lines.append(f'self-test {plant}: {sorted(got)}: {shown}')
+    return verdicts, lines
+
+
+def default_files():
+    files = [ROOT / f for f in CORPUS]
+    if os.environ.get('ROMACS_GNU_SOURCE'):
+        files += [Path(os.environ['ROMACS_GNU_SOURCE']) / 'src' / f for f in GNU]
+    return files
+
+
+def summary(results, extra):
+    """The summary lines: clean states after an edit by grammar, and failures by (check, cause)."""
+    covered = collections.Counter()
+    for r in results:
+        covered[r['grammar']] += r['covered']
+    failures = collections.Counter(pair for r in results for pair in r['failures']) + collections.Counter(extra)
+    counted = collections.Counter()
+    for r in results:
+        counted.update({name: len(states) for name, states in r['counted'].items()})
+    return ['clean states after an edit (a parse without errors), by grammar: '
+            + ', '.join(f'{g} {n}' for g, n in sorted(covered.items())),
+            f'{len(results)} runs, {sum(r["compared"] for r in results)} states compared; failures: '
+            + (', '.join(f'{c}/{cause} {n}' for (c, cause), n in sorted(failures.items())) or 'none')
+            + '; counted differing states: ' + ', '.join(f'{name} {n}' for name, n in sorted(counted.items()))]
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--edits', type=int, default=200)
     parser.add_argument('--seeds', default='1,2,3')
+    parser.add_argument('--jobs', type=int, default=1, help='runs at once')
+    parser.add_argument('--reference', type=Path, help='runtime directory to compare against')
+    parser.add_argument('--strict', action='store_true', help='E1 on every field and every state')
+    parser.add_argument('--e2-everywhere', action='store_true', help='E2 on states with errors too')
     parser.add_argument('files', nargs='*', type=Path)
     args = parser.parse_args()
-    files = args.files or [ROOT / 'crates/romacs-vm/src/threaded.rs', ROOT / 'crates/romacs-vm-gui/harness/agent_live.py']
-    if not args.files and os.environ.get('ROMACS_GNU_SOURCE'):
-        files.insert(0, Path(os.environ['ROMACS_GNU_SOURCE']) / 'src/xdisp.c')
-    base = Path(os.environ.get('CARGO_TARGET_DIR') or ROOT / 'target') / 'treesit-fuzz'
-    published, vendored = build(base / 'published', False), build(base / 'vendored', True)
-    failed = False
+    files = args.files or default_files()
     for path in files:
-        for seed in (int(s) for s in args.seeds.split(',')):
-            a, b = run(published, path, args.edits, seed), run(vendored, path, args.edits, seed)
-            differ = [i for i, (x, y) in enumerate(zip(a, b)) if x[0] != y[0]]
-            failed |= bool(differ) or len(a) != len(b)
-            median = lambda states: statistics.median(us for _, us in states[1:]) / 1000  # noqa: E731
-            print(f'{path.name} seed {seed}: {len(a) - 1} edits, trees differ after {len(differ)}'
-                  + (f' (first: edit {differ[0]})' if differ else '')
-                  + f'; median reparse {median(a):.3f} ms published, {median(b):.3f} ms vendored')
-    print('FAIL: the vendored runtime built other trees' if failed else 'ok: the same trees after every edit')
-    return 1 if failed else 0
+        grammar_of(path)
+    census()
+    base = Path(os.environ.get('CARGO_TARGET_DIR') or ROOT / 'target') / 'treesit-fuzz'
+    reference = build(base / 'reference', args.reference.resolve()) if args.reference else build(base / 'published')
+    vendored = build(base / 'vendored', VENDORED)
+    names = inventory(vendored / 'inventory')
+    if inventory_failures(names):
+        sys.exit(f'FAIL: [inventory/empty]: {vendored / "inventory"} names no grammar')
+    for path in files:
+        if grammar_of(path) not in names:
+            sys.exit(f'treesit-fuzz: {path}: grammar {grammar_of(path)} is not one Romacs ships')
+    binaries = reference / 'treesit-fuzz', vendored / 'treesit-fuzz'
+    verdicts, report = self_test(binaries, args, names)
+    print('\n'.join(report))
+    print('self-test: ' + ', '.join(f'{name} {"yes" if ok else "NO"}' for name, ok in verdicts.items()))
+    runs = [(path, int(seed)) for path in files for seed in args.seeds.split(',')]
+    results = []
+    with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
+        for result in pool.map(lambda r: compare(binaries, r[0], args.edits, r[1], args), runs):
+            print(result['line'], flush=True)
+            results.append(result)
+    extra = set() if args.files else coverage_failures(names, results)
+    print('\n'.join(summary(results, extra)))
+    failures = set().union(extra, *(r['failures'] for r in results))
+    ok = not failures and all(verdicts.values())
+    print(f'ok: every check holds after every edit of {len(runs)} runs' if ok
+          else f'FAIL: {sorted(failures)}{"" if all(verdicts.values()) else ", and a self-test verdict NO"}')
+    return 0 if ok else 1
 
 
 if __name__ == '__main__':
