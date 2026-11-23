@@ -1,4 +1,4 @@
-//! Compiled queries, shared: one `ts_query_new` per grammar and query text
+//! Compiled queries, shared: one compilation per grammar and query text
 //! for the VM, where a major mode compiles the same queries for every
 //! buffer it sets up (c-ts-mode's font-lock settings probe each optional
 //! keyword with `treesit-query-valid-p`). A failure is kept as well, so a
@@ -7,7 +7,7 @@
 //! Lisp sees nothing of it: each `treesit-query-compile` still makes a
 //! query object of its own, with its own source, which holds the shared
 //! `Compiled`, and a failure's signal is made anew from the caller's
-//! source. The key is the text `ts_query_new` reads, predicates and all,
+//! source. The key is the query text, predicates and all,
 //! so two sources that expand alike share. The memo is the VM's
 //! (`Vm::treesit_queries`), as the compiled queries are its alone: a
 //! worker VM compiles its own. A query keeps its text (`Compiled::text`),
@@ -17,7 +17,7 @@ use super::{Compiled, native};
 use std::collections::HashMap;
 use std::rc::Rc;
 
-/// What compiling gives: the shared query, or `ts_query_new`'s error offset
+/// What compiling gives: the shared query, or the compiler's error offset
 /// and GNU's description of its type.
 pub(crate) type Outcome = Result<Rc<Compiled>, (u32, &'static str)>;
 

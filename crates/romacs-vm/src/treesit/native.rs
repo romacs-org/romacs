@@ -1,19 +1,21 @@
 //! The tree-sitter runtime behind GNU treesit.c's primitives, through the
 //! tree-sitter crate's safe API. Grammars are dlopened as GNU does
-//! (`dynlib.c`). Three things stay raw, each for a stated reason: a node is
-//! kept as the runtime's `TSNode` beside an owner that keeps its tree alive
-//! (a Lisp value cannot hold the crate's borrowed `Node<'tree>`), so one
-//! conversion gives it back its lifetime; a node's type name is read raw,
-//! since the crate panics where the runtime has none; and queries are the
-//! runtime's own, since the crate's `Query` evaluates `#match?` and `#eq?`
-//! itself, with Rust's regex syntax, where GNU evaluates every predicate in
-//! Lisp. `prim/leaf/treesit.rs` uses the safe types below.
+//! (`dynlib.c`). A Lisp node stores the runtime's `TSNode` beside the
+//! owner of its generation, so a method can borrow the node for a call.
+//! Type names are read raw because the binding panics on a missing name.
+//! The Rust query engine borrows this module's trees for structural search.
 use std::cell::{OnceCell, RefCell};
 use std::ffi::{CStr, CString};
 use std::rc::Rc;
 use tree_sitter::ffi;
 
-pub(crate) use ffi::{TSInputEdit, TSNode, TSPoint};
+#[cfg(test)]
+#[path = "query_oracle_tests.rs"]
+mod query_oracle;
+
+pub(crate) use ffi::{TSInputEdit, TSPoint};
+use ffi::TSNode;
+pub(crate) use super::query::{Match, PredicateStep, Query};
 
 pub(crate) const ABI_VERSION: u32 = tree_sitter::LANGUAGE_VERSION as u32;
 pub(crate) const MIN_ABI_VERSION: u32 = tree_sitter::MIN_COMPATIBLE_LANGUAGE_VERSION as u32;
@@ -105,6 +107,9 @@ fn library_file(address: *const std::ffi::c_void) -> Option<String> {
 }
 
 impl Language {
+    pub(super) fn binding(&self) -> &tree_sitter::Language {
+        &self.0
+    }
     /// The language a grammar's `tree_sitter_LANG` returns.
     pub(crate) fn from_function(function: tree_sitter_language::LanguageFn) -> Self {
         Language(tree_sitter::Language::new(function))
@@ -223,8 +228,11 @@ impl Tree {
             new_end_position: point(edit.new_end_point),
         });
     }
-    pub(crate) fn root(&self) -> TSNode {
-        self.inner.borrow().tree.root_node().into_raw()
+    pub(crate) fn root(&self) -> Node {
+        self.inner.borrow().tree.root_node().into()
+    }
+    pub(super) fn binding(&self) -> std::cell::Ref<'_, tree_sitter::Tree> {
+        std::cell::Ref::map(self.inner.borrow(), |inner| &inner.tree)
     }
     /// This tree, new from a parse, to send to another thread.
     pub(crate) fn loose(self) -> Loose {
@@ -384,7 +392,7 @@ impl Parser {
 /// A node of a live tree generation. Copy, as the runtime's TSNode is; the
 /// caller keeps its `Tree` alive (`TreeOwner` in `treesit::Node`).
 #[derive(Clone, Copy)]
-pub(crate) struct Node(pub(crate) TSNode);
+pub(crate) struct Node(TSNode);
 
 macro_rules! node_flag {
     ($($name:ident),* $(,)?) => {$(
@@ -404,6 +412,9 @@ impl From<tree_sitter::Node<'_>> for Node {
 }
 
 impl Node {
+    pub(super) fn raw(self) -> TSNode {
+        self.0
+    }
     /// The crate's view of this node. Its lifetime is the owner's, which
     /// the type cannot name: the view never leaves the method that asks.
     fn ts(self) -> tree_sitter::Node<'static> {
@@ -487,133 +498,5 @@ impl Cursor {
     /// ts_tree_cursor_goto_first_child_for_byte: the child's index or -1.
     pub(crate) fn first_child_for_byte(&mut self, byte: u32) -> i64 {
         self.0.goto_first_child_for_byte(byte as usize).map_or(-1, |index| index as i64)
-    }
-}
-
-/// A compiled query, deleted when dropped. Nothing changes it once
-/// compiled: every method takes `&self` and only reads it, and a match
-/// runs on a cursor of its own (`matches`), so query objects may share one
-/// (`query_memo`).
-pub(crate) struct Query(*mut ffi::TSQuery);
-impl Drop for Query {
-    fn drop(&mut self) {
-        // SAFETY: owned since ts_query_new.
-        unsafe { ffi::ts_query_delete(self.0) };
-    }
-}
-
-/// One step of a pattern's predicates.
-pub(crate) enum PredicateStep<'a> {
-    /// A capture, by its index in the query.
-    Capture(u32),
-    String(&'a [u8]),
-    Done,
-}
-
-/// A match: its pattern and its captures (node, capture index), in order.
-pub(crate) struct Match {
-    pub pattern: u32,
-    pub captures: Vec<(Node, u32)>,
-}
-
-/// The LENGTH items at POINTER, which the runtime leaves NULL when there
-/// are none.
-///
-/// # Safety
-/// A non-null POINTER is valid for LENGTH reads for the caller's borrow.
-unsafe fn raw_slice<'a, T>(pointer: *const T, length: u32) -> &'a [T] {
-    if pointer.is_null() || length == 0 {
-        return &[];
-    }
-    // SAFETY: the caller's contract, for a non-null POINTER.
-    unsafe { std::slice::from_raw_parts(pointer, length as usize) }
-}
-
-impl Query {
-    /// ts_query_new of SOURCE for LANGUAGE, or the error's offset and
-    /// GNU's description of its type.
-    pub(crate) fn new(language: &Language, source: &[u8]) -> Result<Self, (u32, &'static str)> {
-        let (mut offset, mut kind) = (0, 0);
-        // A static grammar's copy is itself: no count is kept for it.
-        let language = language.0.clone().into_raw();
-        // SAFETY: SOURCE is read for its length; the language is loaded.
-        let query = unsafe { ffi::ts_query_new(language, source.as_ptr().cast(), source.len() as u32, &mut offset, &mut kind) };
-        if !query.is_null() {
-            return Ok(Self(query));
-        }
-        let message = match kind {
-            ffi::TSQueryErrorNone => "None",
-            ffi::TSQueryErrorSyntax => "Syntax error at",
-            ffi::TSQueryErrorNodeType => "Node type error at",
-            ffi::TSQueryErrorField => "Field error at",
-            ffi::TSQueryErrorCapture => "Capture error at",
-            ffi::TSQueryErrorStructure => "Structure error at",
-            _ => "Unknown error",
-        };
-        Err((offset, message))
-    }
-    pub(crate) fn pattern_count(&self) -> u32 {
-        // SAFETY: the query is live.
-        unsafe { ffi::ts_query_pattern_count(self.0) }
-    }
-    pub(crate) fn capture_name(&self, index: u32) -> &[u8] {
-        let mut length = 0;
-        // SAFETY: names live as long as the query.
-        unsafe { raw_slice(ffi::ts_query_capture_name_for_id(self.0, index, &mut length).cast(), length) }
-    }
-    fn string_value(&self, index: u32) -> &[u8] {
-        let mut length = 0;
-        // SAFETY: strings live as long as the query.
-        unsafe { raw_slice(ffi::ts_query_string_value_for_id(self.0, index, &mut length).cast(), length) }
-    }
-    pub(crate) fn predicates(&self, pattern: u32) -> Vec<PredicateStep<'_>> {
-        let mut length = 0;
-        // SAFETY: the steps live as long as the query.
-        let steps = unsafe { raw_slice(ffi::ts_query_predicates_for_pattern(self.0, pattern, &mut length), length) };
-        steps.iter().map(|step| match step.type_ {
-            ffi::TSQueryPredicateStepTypeCapture => PredicateStep::Capture(step.value_id),
-            ffi::TSQueryPredicateStepTypeString => PredicateStep::String(self.string_value(step.value_id)),
-            _ => PredicateStep::Done,
-        }).collect()
-    }
-    /// Every match of the query under NODE whose span overlaps the byte
-    /// RANGE, in `ts_query_cursor_next_match` order, STOP asked between
-    /// matches and as the cursor walks (the runtime's progress callback, once
-    /// in 100 of its steps), so a query that matches nothing stops too: None
-    /// once it stopped.
-    pub(crate) fn matches(&self, node: Node, range: (u32, u32), stop: &crate::quit::NativeStop) -> Option<Vec<Match>> {
-        // UNSAFE(the runtime's progress callback type is an unsafe extern fn)
-        // SAFETY: the runtime calls it only during this walk, with the state
-        // whose payload OPTIONS below set.
-        unsafe extern "C" fn progress(state: *mut ffi::TSQueryCursorState) -> bool {
-            // UNSAFE(the runtime hands the callback its payload back as a raw pointer)
-            // SAFETY: the payload is the probe `matches` borrows for the whole walk.
-            unsafe { &*(*state).payload.cast::<crate::quit::NativeStop>() }.due()
-        }
-        let options = ffi::TSQueryCursorOptions {
-            payload: std::ptr::from_ref(stop).cast_mut().cast(),
-            progress_callback: stop.armed().then_some(progress as unsafe extern "C" fn(*mut ffi::TSQueryCursorState) -> bool),
-        };
-        let mut steps = crate::quit::Steps::default();
-        // SAFETY: the cursor is ours; NODE's tree is live (see `Node`); a
-        // match's captures are read before the next step; OPTIONS and the
-        // probe it points at outlive the cursor, deleted before return.
-        unsafe {
-            let cursor = ffi::ts_query_cursor_new();
-            ffi::ts_query_cursor_set_byte_range(cursor, range.0, range.1);
-            ffi::ts_query_cursor_exec_with_options(cursor, self.0, node.0, &raw const options);
-            let mut out = Some(Vec::new());
-            let mut found: ffi::TSQueryMatch = std::mem::zeroed();
-            while ffi::ts_query_cursor_next_match(cursor, &mut found) {
-                if steps.tick() && stop.due() { out = None; break; }
-                let captures = raw_slice(found.captures, u32::from(found.capture_count));
-                if let Some(out) = &mut out {
-                    out.push(Match { pattern: u32::from(found.pattern_index), captures: captures.iter().map(|c| (Node(c.node), c.index)).collect() });
-                }
-            }
-            if stop.armed() && stop.due() { out = None; }
-            ffi::ts_query_cursor_delete(cursor);
-            out
-        }
     }
 }

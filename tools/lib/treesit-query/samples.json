@@ -1,0 +1,19 @@
+{
+  "bash": "greet() { printf '%s\\n' \"${1:-world}\"; }\nfor x in one two; do greet \"$x\"; done\ncat <<EOF\nhello $USER\nEOF\n",
+  "c": "#define WRAP(x) ((x) + 1)\nstruct item { int value; };\nint f(struct item *x) { if (x) return WRAP(x->value); return 0; }\n",
+  "cpp": "template<class T> struct Box { T value; };\nint main() { auto lambda = [](int i) { return i + 1; }; Box<int> x{2}; return lambda(x.value); }\n",
+  "css": "@media screen {\n  #main > .card:hover { color: #fff; padding: 1rem 0; }\n}\n",
+  "go": "package main\nimport \"fmt\"\nfunc hello(n int) int {\n if n > 2 { return n+1 }; return 0\n}\nfunc main() { fmt.Println(hello(3)) }\n",
+  "html": "<!DOCTYPE html>\n<html><body><main class=\"card\">\n  <!-- comment --><p>Hello &amp; welcome</p>\n  <script>let n = 1;</script>\n</main></body></html>\n",
+  "java": "package sample;\npublic class Widget {\n  private final String title = \"hello\";\n  public int size() { return title.length(); }\n}\n",
+  "javascript": "/** Add one. */\nexport function hello(n = 0) {\n  const name = `hello ${n + 1}`;\n  return { name, view: <span>{name}</span> };\n}\n",
+  "jsdoc": "/**\n * Add an item.\n * @param {Array<string>} items - the old items\n * @returns {Promise<number>} the count\n */",
+  "json": "{\"k\": 1, \"nested\": [true, null, 2], \"text\": \"Hello λ\"}\n",
+  "kotlin": "package sample.catalog\n\n@Target(AnnotationTarget.CLASS)\nannotation class DisplayName(val value: String)\n\n@DisplayName(\"Product\")\ndata class Product(val code: String, val price: Int) {\n    fun label(currency: String = \"USD\"): String = when {\n        price == 0 -> \"$code is free\"\n        price < 10 -> \"$code: $price $currency (sale)\"\n        else -> \"$code: $price $currency\"\n    }\n}\n\nclass Catalog(private val products: List<Product>) {\n    fun search(prefix: String): List<String> {\n        return products\n            .filter { item -> item.code.startsWith(prefix, ignoreCase = true) }\n            .sortedBy { it.price }\n            .map { \"  ${it.label()}\" }\n    }\n}\n\nfun main() {\n    val goods = listOf(Product(\"Pen\", 3), Product(\"Pencil\", 0))\n    Catalog(goods).search(\"pe\").forEach { println(it) }\n}\n",
+  "python": "class Widget:\n    def greet(self, name: str = \"λ\") -> str:\n        if name:\n            return f\"Hello {name}\"\n        return \"\"\n",
+  "rust": "use std::fmt;\nstruct Item<'a> { name: &'a str }\nfn greet(x: &Item<'_>) -> String {\n    format!(\"Hello {}\", x.name)\n}\n",
+  "toml": "title = \"Hello λ\"\n[server]\nport = 8080\nitems = [{ key = \"one\" }, { key = \"two\" }]\n",
+  "tsx": "type Props = {name: string};\nexport function Card({name}: Props) {\n  return <main className=\"card\"><h1>Hello {name}</h1></main>;\n}\n",
+  "typescript": "interface Item { value: number }\nexport function add(x: Item, y = 1): number {\n  const {value} = x;\n  return value + y;\n}\n",
+  "yaml": "defaults: &defaults\n  color: blue\n  values: [one, two]\nwidget:\n  <<: *defaults\n  text: |\n    hello\n    world\n"
+}

@@ -34,6 +34,8 @@ reparse, many buffers per grammar, and fontify by visible region.
 ## Tests
 - `tools/treesit-fuzz` whenever this crate, a change listed in `ROMACS.md`,
   or a grammar pin in `crates/romacs-grammars` changes.
+- `tools/treesit-query-diff` for query compiler and cursor changes. Run it
+  as described in `tools/lib/treesit-query/README.md`.
 - `python3 tools/dev-loop romacs-vm --profile gate -E 'test(treesit)'` for
   the callers.
 
@@ -46,5 +48,12 @@ reparse, many buffers per grammar, and fontify by visible region.
   compatibility with third-party grammars (the Boundary's limit). The
   published runtime is an oracle on error-free input only; form-local
   reparsing of the edited form is this runtime's design.
+- 2026-11-23 (owner): the 11-15 rule permits the Rust parser stage once the
+  Rust query stage preserves query behavior and fontify performance and
+  removes the C query engine.
+- 2026-11-23: Q met "preserves query behavior and fontify performance".
+  Whole-scroll instructions fell 0.9% for C and 1.0% for Rust. Python
+  fontify calls used 0.03% fewer instructions. Python's focused replay at
+  +0.10% is within that reading. Stage P may start.
 - The unsafe census and smell counts still leave `crates/vendor/` out; code
   written here for Romacs is held to the workspace's rules all the same.

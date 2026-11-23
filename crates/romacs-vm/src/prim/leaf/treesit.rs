@@ -773,7 +773,7 @@ impl Leaf<'_> {
     pub(crate) fn ts_root(&mut self, parser: Value) -> Out {
         let tree = self.ts_parser(parser)?.core.borrow().tree.clone();
         match tree {
-            Some(tree) => Ok(self.ts_make_node(parser, native::Node(tree.root()))),
+            Some(tree) => Ok(self.ts_make_node(parser, tree.root())),
             None => Err(self.ts_signal("treesit-parse-error", &[self.ts_parser(parser)?.buffer])),
         }
     }
@@ -886,7 +886,7 @@ fn cursor_to(cursor: &mut native::Cursor, target: native::Node, start: u32, end:
 /// treesit_cursor_helper: a cursor on NODE made from TREE's root, so its
 /// parents and siblings are reachable; None past the recursion limit.
 pub(crate) fn cursor_on(tree: &native::Tree, node: native::Node) -> Option<native::Cursor> {
-    let mut cursor = native::Cursor::new(native::Node(tree.root()));
+    let mut cursor = native::Cursor::new(tree.root());
     cursor_to(&mut cursor, node, node.start(), node.end(), RECURSION_LIMIT).then_some(cursor)
 }
 
@@ -1433,10 +1433,15 @@ impl Leaf<'_> {
         };
         // A query stops consistently between matches: nothing is written
         // before it ends.
+        let scan = |stop: &crate::quit::NativeStop| {
+            compiled.query.matches(&n.tree, n.node, range, stop)
+                .map_err(|_| Fault::Error("Invalid node for tree-sitter query".into()))
+        };
         let found = self.quittable(|cx| {
-            if let Some(found) = compiled.query.matches(n.node, range, &cx.native_stop()) { return Ok(found); }
+            if let Some(found) = scan(&cx.native_stop())? { return Ok(found); }
             cx.native_poll()?;
-            Ok(compiled.query.matches(n.node, range, &crate::quit::NativeStop::never()).expect("never stopped"))
+            scan(&crate::quit::NativeStop::never())?
+                .ok_or_else(|| Fault::Error("Uninterruptible tree-sitter query stopped".into()))
         })?;
         self.ts_capture_matches(n, compiled, found, flags, fontify)
     }
