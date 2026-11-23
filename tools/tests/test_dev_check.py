@@ -553,6 +553,37 @@ if __name__ == '__main__':
     unittest.main()
 
 
+class Everything(unittest.TestCase):
+    """A change that reaches everything leaves the tests to the queue but still runs the structural
+    rules: Q's Cargo.lock change skipped every test here and bounced on four of them."""
+
+    def run_with(self, status):
+        seen = []
+        everything = {'everything': True, 'reasons': ['Cargo.lock'], 'packages': {}, 'files': {}, 'lisp': [],
+                      'filter': None, 'harnesses': {}, 'packages_to_build': [], 'leave': []}
+        saved = (check.impact.select, check.impact.metadata_of, check.execute)
+        check.impact.select = lambda names, root, meta: everything
+        check.impact.metadata_of = lambda root: {}
+        check.execute = lambda root, runs, threads: seen.append(runs) or (status, Path('/dev/null'), '1 s, log x')
+        try:
+            return check.run_tests(ROOT, ['Cargo.lock'], 1), seen
+        finally:
+            check.impact.select, check.impact.metadata_of, check.execute = saved
+
+    def test_the_structural_rules_run_and_the_rest_is_left(self):
+        (status, summary, _), seen = self.run_with(0)
+        self.assertEqual(status, 'SKIP')
+        self.assertIn('structural rules hold', summary)
+        filters = ' '.join(rule for runs in seen for _, _, rule in runs)
+        for rule in ('quit_polls', 'reentry_sites', 'no_remote_references'):
+            self.assertIn(rule, filters)
+        self.assertNotIn('package(', filters)
+
+    def test_a_broken_structural_rule_fails_the_stage(self):
+        (status, _, _), _ = self.run_with(4)
+        self.assertEqual(status, 'FAIL')
+
+
 class Receipt(unittest.TestCase):
     """A run on a clean worktree leaves a receipt for HEAD's tree; on a dirty one, none."""
 
@@ -562,7 +593,7 @@ class Receipt(unittest.TestCase):
         self.root = Path(tmp.name) / 'wt'
         self.root.mkdir()
         env = {'GIT_AUTHOR_NAME': 't', 'GIT_AUTHOR_EMAIL': 't@t', 'GIT_COMMITTER_NAME': 't',
-               'GIT_COMMITTER_EMAIL': 't@t', 'XDG_CACHE_HOME': str(Path(tmp.name) / 'cache')}
+               'GIT_COMMITTER_EMAIL': 't@t', 'ROMACS_DEV_CHECK_RECEIPTS': str(Path(tmp.name) / 'receipts')}
         self.old = {k: os.environ.get(k) for k in env}
         os.environ.update(env)
         self.addCleanup(lambda: [os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
@@ -581,6 +612,21 @@ class Receipt(unittest.TestCase):
         got = json.loads(path.read_text())
         self.assertEqual((got['tree'], got['exit'], got['tests'], got['stages'][1]),
                          (tree, 1, True, {'name': 'lint', 'status': 'FAIL'}))
+
+    def test_a_private_home_does_not_move_the_receipt(self):
+        import pwd
+        account = Path(pwd.getpwuid(os.getuid()).pw_dir) / '.cache/romacs/dev-check/receipts'
+        named = os.environ.pop('ROMACS_DEV_CHECK_RECEIPTS')
+        try:
+            old = {k: os.environ.get(k) for k in ('HOME', 'XDG_CACHE_HOME')}
+            os.environ.update({'HOME': '/private/home', 'XDG_CACHE_HOME': '/private/cache'})
+            try:
+                self.assertEqual(check.receipt_path('T'), account / 'T.json')
+            finally:
+                for k, v in old.items():
+                    os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+        finally:
+            os.environ['ROMACS_DEV_CHECK_RECEIPTS'] = named
 
     def test_a_worktree_with_uncommitted_changes_gets_none(self):
         (self.root / 'a').write_text('changed\n')

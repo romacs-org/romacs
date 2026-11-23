@@ -129,6 +129,23 @@
         (should (equal (plist-get (romacs-agent-options loaded) :model) "b"))
         (should (equal (plist-get (romacs-agent-options loaded) :effort) "high"))))))
 
+(ert-deftest romacs-agent-select-a-cancelled-task-s-switch-is-not-applied ()
+  ;; Sol S3: loaded offline, a cancelled task's kept selection was applied
+  ;; as it loaded (committed: a move made, a continuation queued).
+  (let* ((root (make-temp-file "romacs-select-" t))
+         (session (romacs-agent--make :id "s" :harness 'claude :provider "claude" :dir root :state 'ended
+                                      :options '(:model "a") :host-socket (expand-file-name "none.sock" root))))
+    (unwind-protect
+        (progn
+          (romacs-agent--manifest session nil)
+          (setf (romacs-agent-pending-selection session) (list :state 'armed :model "b"))
+          (romacs-agent--keep-switch session)
+          (write-region "" nil (expand-file-name "cancelled" root) nil 'silent)
+          (let* ((romacs-agent--sessions (make-hash-table :test #'equal))
+                 (loaded (romacs-agent--load root)))
+            (should (equal (plist-get (romacs-agent-options loaded) :model) "a"))))
+      (delete-directory root t))))
+
 (ert-deftest romacs-agent-select-restart-with-the-harness-already-gone ()
   ;; No unit, and no connection for a sentinel to report on.
   (romacs-agent-select-tests--with (:state 'ended)

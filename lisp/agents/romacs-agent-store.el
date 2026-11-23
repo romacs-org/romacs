@@ -687,12 +687,13 @@ comes back as a turn of its own: the turn it steered is no next run's."
                        :user (eq (gethash "user" object) t)
                        :id id :position position :kept t)))
 
-(defun romacs-agent-store-queued-put (id item)
-  "Keep ITEM, waiting in the queue of the session ID names, by the writer."
+(defun romacs-agent-store-queued-put (id item &optional done)
+  "Keep ITEM, waiting in the queue of the session ID names, by the writer;
+DONE as `romacs-agent-write' says."
   (romacs-agent-write 'romacs-agent-store--queued-row
                       (list id (romacs-agent-item-id item) (romacs-agent-item-position item)
                             (romacs-agent-store--item-json item))
-                      nil (list 'queued id (romacs-agent-item-id item))))
+                      done (list 'queued id (romacs-agent-item-id item))))
 
 (defun romacs-agent-store-queued-reorder (id items)
   "Move the rows of ITEMS, waiting for the session ID names, to their
@@ -759,10 +760,31 @@ there is no store.  A store that cannot be read signals
         (error (signal 'romacs-agent-store-unread (list id (error-message-string err)))))
       (signal 'romacs-agent-store-unread (list id "the store could not be opened"))))))
 
+(defun romacs-agent-store--unsure-text (id title texts)
+  "What task ID (TITLE) is told of TEXTS, messages kept for it whose
+records could not be read to say whether they were sent: never sent
+again unread, they wait for a load that can tell."
+  (format "Messages queued for task %s (%s) may not have reached it, its records unread: %s.  They wait, unsent, for a later load that can tell whether they were; none is sent twice."
+          id title (mapconcat (lambda (text) (format "%S" (car (split-string (or text "") "\n")))) texts ", ")))
+
+(defun romacs-agent-store--sent-of (session kept)
+  "What SESSION's records say of KEPT, messages kept for it, as
+`romacs-agent--sent-queued' says; those it cannot tell of are said on
+SESSION, an error its parent is told too (`romacs-agent-tools')."
+  (let ((found (romacs-agent--sent-queued session (mapcar #'romacs-agent-item-id kept))))
+    (when-let* ((unsure (cl-remove-if-not (lambda (item) (member (romacs-agent-item-id item) (cdr found))) kept)))
+      (romacs-agent--raise session (list :type 'error :unsure t
+                                         :text (romacs-agent-store--unsure-text
+                                                (romacs-agent-id session) (romacs-agent-title session)
+                                                (mapcar #'romacs-agent-item-text unsure)))))
+    found))
+
 (defun romacs-agent-store--requeue (session _manifest)
   "SESSION, loaded: what was kept waiting in its queue waits there again,
 in order with what was sent to it while it loaded, sent once its harness
-may take it.  A cancelled task's is let go."
+may take it.  A move's continuation among them goes on, its harness the
+move stopped started for it (`romacs-agent--go-on'); nothing else starts
+one.  A cancelled task's is let go."
   (catch 'romacs-agent-store--unread
   (if (romacs-agent-cancelled session)
       (romacs-agent--clear-queue session)
@@ -778,7 +800,7 @@ may take it.  A cancelled task's is let go."
                                   (throw 'romacs-agent-store--unread nil)))))
            ;; Sent already (an editor that ended before its row went): let
            ;; go.  Its lookup failed: kept for the next load, not sent now.
-           (found (and kept (romacs-agent--sent-queued session (mapcar #'romacs-agent-item-id kept)))))
+           (found (and kept (romacs-agent-store--sent-of session kept))))
       (dolist (id (car found)) (romacs-agent-store-queued-delete (romacs-agent-id session) id))
       (setq kept (cl-remove-if (lambda (item) (or (member (romacs-agent-item-id item) (car found))
                                                   (member (romacs-agent-item-id item) (cdr found))))
@@ -808,7 +830,9 @@ may take it.  A cancelled task's is let go."
           (let ((romacs-agent--queue-quiet t))
             (dolist (item order) (romacs-agent--enqueue session item)))
           (romacs-agent--changed session))
-        (romacs-agent--dispatch session))))))
+        (romacs-agent--dispatch session)
+        (when (cl-find romacs-agent--limit-continue kept :key #'romacs-agent-item-own :test #'equal)
+          (romacs-agent--go-on session)))))))
 
 (add-hook 'romacs-agent-loaded-functions #'romacs-agent-store--requeue)
 ;; A session with messages kept waiting is loaded as a restore runs.

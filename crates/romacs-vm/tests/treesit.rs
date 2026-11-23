@@ -11,6 +11,8 @@ mod gnu_lisp;
 #[path = "support/own_test.rs"]
 mod own_test;
 use gnu_lisp::gnu_lisp;
+#[path = "treesit/twin_ranges.rs"]
+mod twin_ranges;
 
 /// One expression per line, on the system C grammar both editors find by
 /// GNU's default search (a bare library name), with `user-emacs-directory'
@@ -340,48 +342,6 @@ impl romacs_vm::LayoutHost for Cells {
             romacs_vm::WindowEnd { id: w.snapshot.id, end: len, visible_end: len, body_height: w.snapshot.height as f32, rows: vec![], origin_y: 0.0, point: None }
         }).collect())
     }
-}
-
-/// Parsers of one buffer that see the same text with the same grammar parse
-/// an edit once: one due a reparse takes the tree of another that has parsed
-/// the text since (VM2-TREESIT-TWIN), in whichever order they are asked,
-/// edits between them included. Each still runs its own notifiers, with what
-/// changed since its own last tree, and a parser of other ranges parses for
-/// itself.
-#[test]
-fn twin_parsers_parse_an_edit_once() {
-    let mut vm = gnu_lisp(&[]);
-    vm.eval_source("(require 'treesit)").unwrap();
-    let setup = format!("(progn {SYSTEM_SETUP} \
-        (set-buffer (get-buffer-create \"twin\")) (insert \"int a;\\nint b = ;\\nint c;\\n\") \
-        (setq twin-a (treesit-parser-create 'c) twin-b (treesit-parser-create 'c nil nil 'twin) seen-a nil seen-b nil) \
-        (defalias 'twin-seen-a (lambda (ranges _) (push ranges seen-a))) \
-        (defalias 'twin-seen-b (lambda (ranges _) (push ranges seen-b))) \
-        (treesit-parser-add-notifier twin-a 'twin-seen-a) (treesit-parser-add-notifier twin-b 'twin-seen-b) \
-        (defalias 'twin-string (lambda (p) (treesit-node-string (treesit-parser-root-node p)))) \
-        (defalias 'twin-fresh (lambda (&optional ranges) \
-          (let ((p (treesit-parser-create 'c nil t 'fresh))) \
-            (when ranges (treesit-parser-set-included-ranges p ranges)) \
-            (prog1 (twin-string p) (treesit-parser-delete p))))) \
-        (twin-string twin-a) (twin-string twin-b) (setq seen-a nil seen-b nil))");
-    vm.eval_source(&setup).unwrap();
-    let check = |vm: &mut Vm, form: &str| vm.eval_source(form).and_then(|v| v.display()).unwrap();
-    // One edit, the parsers asked in turn: both trees are the text's parse,
-    // and each parser is told the same change once.
-    assert_eq!(check(&mut vm, "(progn (goto-char 1) (insert \"long \") (twin-string twin-a) \
-        (list (equal (twin-string twin-b) (twin-string twin-a)) (equal (twin-string twin-b) (twin-fresh)) \
-              (length seen-a) (length seen-b) (equal seen-a seen-b)))"), "(t t 1 1 t)");
-    // An edit between them: the first asked parses for itself, the other then
-    // takes its tree, and is told what changed since its own last one.
-    assert_eq!(check(&mut vm, "(progn (setq seen-a nil seen-b nil) (goto-char 14) (insert \"1\") (twin-string twin-a) \
-        (goto-char (point-max)) (insert \"int d;\\n\") (twin-string twin-b) \
-        (list (equal (twin-string twin-a) (twin-string twin-b)) (equal (twin-string twin-a) (twin-fresh)) \
-              (length seen-a) (length seen-b) \
-              (and (<= (caar (car seen-b)) 14) (>= (cdar (last (car seen-b))) (- (point-max) 7)) t)))"), "(t t 2 1 t)");
-    // A parser of other ranges is no twin.
-    assert_eq!(check(&mut vm, "(progn (treesit-parser-set-included-ranges twin-b '((1 . 12))) (twin-string twin-b) \
-        (goto-char (point-max)) (insert \"int e;\") (twin-string twin-a) \
-        (list (equal (twin-string twin-b) (twin-string twin-a)) (equal (twin-string twin-b) (twin-fresh '((1 . 12))))))"), "(nil t)");
 }
 
 /// While a visit's first parse runs on its thread (lisp/romacs-treesit.el),
@@ -1039,6 +999,10 @@ fn a_small_edit_starts_no_first_parse_for_a_twin_never_asked() {
     }
     vm.eval_source("(with-current-buffer \"ts-edit-twin\" (treesit-parser-root-node treesit-test-parser))").unwrap();
     assert_eq!(romacs_vm::treesit_parses_in_process(), before + 2, "the early parse, and the asked parser's reparse alone");
+    let compared = romacs_vm::treesit_comparisons_on_this_thread();
+    vm.eval_source("(with-current-buffer \"ts-edit-twin\" (treesit-parser-root-node treesit-test-twin))").unwrap();
+    assert_eq!(romacs_vm::treesit_parses_on_this_thread(), evaluator + 1, "FIRST cannot take the incremental twin");
+    assert_eq!(romacs_vm::treesit_comparisons_on_this_thread(), compared, "FIRST has no old tree");
 }
 
 #[test]
@@ -1063,6 +1027,8 @@ fn twins_take_one_background_reparse_and_each_notify() {
         (treesit-parser-add-notifier treesit-test-twin 'treesit-test-notify))").unwrap();
     let before = romacs_vm::treesit_parses_in_process();
     let evaluator = romacs_vm::treesit_parses_on_this_thread();
+    let compared = romacs_vm::treesit_comparisons_on_this_thread;
+    let comparisons = compared();
     vm.eval_source("(with-current-buffer \"ts-reparse-twins\" (goto-char (point-min)) (insert \"static \"))").unwrap();
     deferred_frame(&mut vm);
     wait_landed(&mut vm, "ts-reparse-twins");
@@ -1074,6 +1040,7 @@ fn twins_take_one_background_reparse_and_each_notify() {
     assert_eq!(notified, "((nil (1 . 8)) (twin (1 . 8)))");
     assert_eq!(romacs_vm::treesit_parses_in_process(), before + 1, "both trees came from one native parse");
     assert_eq!(romacs_vm::treesit_parses_on_this_thread(), evaluator);
+    assert_eq!(compared(), comparisons, "both notifiers take the worker comparison");
     deferred_frame(&mut vm);
 
     let before = romacs_vm::treesit_parses_in_process();
@@ -1090,11 +1057,14 @@ fn twins_take_one_background_reparse_and_each_notify() {
     assert_eq!(caught_up, "t");
     assert_eq!(romacs_vm::treesit_parses_in_process(), before + 2, "one worker and one catch-up parse");
     assert_eq!(romacs_vm::treesit_parses_on_this_thread(), evaluator + 1);
+    assert_eq!(compared() - comparisons, 1, "the behind receipt needs a new comparison");
+    twin_ranges::check_restarted_background_twins(&mut vm);
     check_background_twin_notifier_histories(&mut vm);
 }
 
 fn check_background_twin_notifier_histories(vm: &mut Vm) {
     vm.eval_source("(with-current-buffer \"ts-reparse-twins\" \
+        (setq romacs-treesit-show-before-parse 128) \
         (goto-char (point-min)) \
         (setq treesit-test-cut (line-end-position)) \
         (treesit-parser-set-included-ranges treesit-test-parser (list (cons (point) treesit-test-cut))) \
@@ -1102,6 +1072,8 @@ fn check_background_twin_notifier_histories(vm: &mut Vm) {
         (treesit-parser-set-included-ranges treesit-test-parser nil) \
         (setq treesit-test-notifications nil))").unwrap();
     let before = romacs_vm::treesit_parses_in_process();
+    let evaluator = romacs_vm::treesit_parses_on_this_thread();
+    let comparisons = romacs_vm::treesit_comparisons_on_this_thread();
     vm.eval_source("(with-current-buffer \"ts-reparse-twins\" (insert \"/*x*/\"))").unwrap();
     deferred_frame(vm);
     let notified = vm.eval_source("(with-current-buffer \"ts-reparse-twins\" \
@@ -1113,6 +1085,22 @@ fn check_background_twin_notifier_histories(vm: &mut Vm) {
                 (> (cdar (last part)) treesit-test-cut) whole)))").unwrap().display().unwrap();
     assert_eq!(notified, "(2 t ((1 . 6)))");
     assert_eq!(romacs_vm::treesit_parses_in_process(), before + 1, "both parsers now see the whole text");
+    assert_eq!(romacs_vm::treesit_parses_on_this_thread(), evaluator, "the worker reparsed");
+    assert_eq!(romacs_vm::treesit_comparisons_on_this_thread() - comparisons, 1,
+               "only the parser with a different old tree compares on the evaluator");
+
+    let parses = romacs_vm::treesit_parses_in_process();
+    vm.eval_source("(with-current-buffer \"ts-reparse-twins\" (insert \"/*y*/\"))").unwrap();
+    deferred_frame(vm);
+    wait_landed(vm, "ts-reparse-twins");
+    assert_eq!(romacs_vm::treesit_parses_in_process() - parses, 1, "a worker result is ready before kill");
+    let comparisons = romacs_vm::treesit_comparisons_on_this_thread();
+    let result = vm.eval_source("(progn (kill-buffer \"ts-reparse-twins\") \
+        (condition-case e (treesit-node-string (treesit-parser-root-node treesit-test-twin)) (error (car e))))")
+        .unwrap().display().unwrap();
+    assert_eq!(result, "treesit-node-buffer-killed");
+    assert_eq!(romacs_vm::treesit_comparisons_on_this_thread() - comparisons, 1,
+               "a killed buffer compares against its own parse, discarding the worker receipt");
 }
 
 /// A twin asked after its buffer was narrowed is judged against the region

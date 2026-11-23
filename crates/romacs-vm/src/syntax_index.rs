@@ -30,9 +30,8 @@ use crate::syntax_summary::{self as summary, Key, Span, Summary};
 pub(crate) const LEAF: usize = 1024;
 /// Children a node holds before it splits.
 const FANOUT: usize = 16;
-/// Summaries a node keeps; the oldest goes first. A key whose span closes
-/// past the bottom level takes two, its general one and its exact one, so
-/// this holds four keys, or three keys in such text with room to spare.
+/// FIFO slots shared by parse and list entries. A parse key whose span
+/// closes past the bottom level can take two slots, general and exact.
 const KEYS: usize = 8;
 /// What a node keeps a summary under: the key its span is entered in, and
 /// the count of open levels the summary is exact for, or none for the
@@ -112,7 +111,11 @@ impl Node {
 pub(crate) struct Stats {
     /// Parses served, and parses the plain scanner took, by reason.
     pub served: u64,
-    pub declined: [u64; Decline::COUNT],
+    pub declined: [u64; Decline::PARSE.len()],
+    pub list_served: u64,
+    pub list_declined: [u64; Decline::COUNT],
+    /// List scans restarted from FROM after an unusable index result.
+    pub list_fallbacks: u64,
     /// Leaf summaries scanned, leaves scanned into a state with no summary
     /// applied, summaries composed.
     pub leaf_scans: u64,
@@ -124,7 +127,7 @@ pub(crate) struct Stats {
     pub log_overflows: u64,
 }
 
-/// Why a parse took the plain scanner.
+/// Why a scan took the plain scanner.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Decline {
     /// `romacs-inhibit-syntax-summaries'.
@@ -139,10 +142,15 @@ pub(crate) enum Decline {
     /// OLDSTATE both in a string and in a comment, or a nested comment an
     /// escaped end used up (forw_comment then never ends it).
     Unresumable,
+    /// The list scan's table or options differ from the retained context.
+    Context,
+    /// A quit poll interrupted the speculative list scan.
+    Quit,
 }
 impl Decline {
-    pub(crate) const COUNT: usize = 5;
-    pub(crate) const ALL: [Decline; Self::COUNT] = [Self::Inhibited, Self::Arguments, Self::Short, Self::Properties, Self::Unresumable];
+    const COUNT: usize = 7;
+    pub(crate) const PARSE: [Self; 5] = [Self::Inhibited, Self::Arguments, Self::Short, Self::Properties, Self::Unresumable];
+    pub(crate) const LISTS: [Self; 5] = [Self::Inhibited, Self::Short, Self::Properties, Self::Context, Self::Quit];
     pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Inhibited => "inhibited",
@@ -150,6 +158,8 @@ impl Decline {
             Self::Short => "short",
             Self::Properties => "properties",
             Self::Unresumable => "unresumable",
+            Self::Context => "context",
+            Self::Quit => "quit",
         }
     }
 }
@@ -490,7 +500,7 @@ impl SyntaxIndex {
                 None
             } else {
                 let from = scanner.text.pos(position(start));
-                summary::lists::summarize(scanner, from, position(start + node.chars), key)
+                summary::lists::summarize(scanner, from, position(start + node.chars), key).unwrap_or(None)
             }
         } else {
             Self::compose_lists(scanner, node, start, key)
@@ -524,21 +534,37 @@ impl SyntaxIndex {
         if self.context.as_ref().is_some_and(|kept| {
             kept.table != context.table || kept.properties != context.properties || kept.escaped_ends != context.escaped_ends
         }) {
+            self.stats.list_declined[Decline::Context as usize] += 1;
             return None;
         }
         self.prepare(scanner, chars, context);
-        let from = original_from.clamp(scanner.begv.char, scanner.zv.char);
-        let root = self.root.as_mut()?;
-        let (first_end, _) = safe_end(root, offset(from));
-        let (last_start, ..) = locate(root, offset((scanner.zv.char - 1).max(from)));
+        let from = scanner.text.pos(original_from.clamp(scanner.begv.char, scanner.zv.char));
+        let Some(root) = self.root.as_mut() else { unreachable!("built above") };
+        let (first_end, _) = safe_end(root, offset(from.char));
+        let (last_start, ..) = locate(root, offset((scanner.zv.char - 1).max(from.char)));
         if first_end >= last_start {
+            self.stats.list_declined[Decline::Short as usize] += 1;
             return None;
         }
+        let result = Self::scan_list_spans(scanner, root, (first_end, last_start), from, original_from);
+        match &result {
+            Some(Ok(_) | Err(scan::Halt::ScanError(..))) => self.stats.list_served += 1,
+            Some(Err(scan::Halt::Poll)) => self.stats.list_declined[Decline::Quit as usize] += 1,
+            _ => self.stats.list_fallbacks += 1,
+        }
+        result
+    }
+
+    fn scan_list_spans<T: Text>(scanner: &mut Scanner<'_, T>, root: &mut Node,
+                               (first_end, last_start): (usize, usize), start: scan::Pos,
+                               original_from: i64) -> Option<R<Option<i64>>> {
         let options = scanner.options;
-        let start = scanner.text.pos(from);
         let mut scan = scan::Scan { from: start, last_good: original_from, count: i64::MAX, ..scan::Scan::default() };
         let key = |s: &scan::Scan| summary::lists::Key::of(s, options.ignore_comments, options.multibyte_syntax_as_symbol);
-        let prefix = summary::lists::summarize(scanner, start, position(first_end), key(&scan)?)?;
+        let prefix = match summary::lists::summarize(scanner, start, position(first_end), key(&scan)?) {
+            Ok(prefix) => prefix?,
+            Err(halt) => return Some(Err(halt)),
+        };
         prefix.apply(&mut scan, start, scanner.text.pos(position(first_end)));
         Self::fold(root, 0, (first_end, last_start), &mut |node, start| {
             let Some(span) = key(&scan).and_then(|key| Self::list_span(scanner, node, start, key)) else { return false };
@@ -735,9 +761,9 @@ mod tests {
 
     /// PLAIN with a syntax per position where PROPERTIES has one, as
     /// `syntax-table' properties honoured.
-    struct Propertied<'a, F: Fn(u8) -> i32> {
-        plain: &'a Plain<F>,
-        properties: &'a [Option<i32>],
+    pub(super) struct Propertied<'a, F: Fn(u8) -> i32> {
+        pub(super) plain: &'a Plain<F>,
+        pub(super) properties: &'a [Option<i32>],
     }
     impl<F: Fn(u8) -> i32> crate::syntax_scan::Text for Propertied<'_, F> {
         fn char_at(&self, at: Pos) -> u32 { self.plain.char_at(at) }
@@ -1051,7 +1077,8 @@ mod tests {
 #[cfg(test)]
 mod list_tests {
     use super::*;
-    use crate::syntax_scan::tests::{Plain, Rng};
+    use super::tests::Propertied;
+    use crate::syntax_scan::tests::{Plain, Rng, random_table, random_text, ALPHABET};
     use std::collections::BTreeMap;
 
     fn dialect(byte: u8) -> i32 {
@@ -1130,5 +1157,100 @@ mod list_tests {
             }
         }
         assert!(served >= 600, "only {served} list scans used the index");
+    }
+
+    #[test]
+    fn randomized_list_scans_match_the_plain_scanner() {
+        randomized_lists(0x8e6a_11c9_a97f_8b3d, 400);
+    }
+
+    #[test]
+    #[ignore = "larger syntax-index differential run"]
+    fn randomized_list_scans_extended() {
+        randomized_lists(0x01e7_1064_f5a8_ab2b, 4000);
+    }
+
+    fn randomized_lists(seed: u64, cases: usize) {
+        let mut rng = Rng(seed);
+        let mut served = 0;
+        let mut errors = 0;
+        let mut calls = 0;
+        for case in 0..cases {
+            let options = scan::Options {
+                ignore_comments: case.is_multiple_of(2),
+                comment_end_can_be_escaped: case % 4 < 2,
+                multibyte_syntax_as_symbol: case % 8 < 4,
+                propertize_done: Some(i64::MAX),
+                ..scan::Options::default()
+            };
+            let mut context = Context { table: 1, writes: 0, escaped_ends: options.comment_end_can_be_escaped, properties: true };
+            let mut index = SyntaxIndex { leaf: 1 + rng.below(16), ..SyntaxIndex::default() };
+            let mut table = random_table(&mut rng);
+            let len = 64 + rng.below(192);
+            let mut bytes = random_text(&mut rng, len);
+            let mut properties = vec![None; len];
+            for round in 0..10 {
+                if round > 0 {
+                    edit_list_text(&mut rng, &mut index, &mut bytes, &mut properties, &table, options.multibyte_syntax_as_symbol);
+                    if rng.chance(15) {
+                        table = random_table(&mut rng);
+                        context.writes += 1;
+                    }
+                }
+                let plain = Plain { text: bytes.clone(), table: |c| table.get(usize::from(c)).copied().unwrap_or(scan::SCLOSE) };
+                let text = Propertied { plain: &plain, properties: &properties };
+                let (begv, end) = list_bounds(&mut rng, bytes.len());
+                let ppss = BTreeMap::new();
+                let mut scanner = Scanner { text: &text, begv: text.pos(begv), zv: text.pos(end), options, ppss: &ppss, defun_start: None, modiff: 0 };
+                let accessible = usize::try_from(end - begv).unwrap();
+                let random_from = begv + i64::try_from(rng.below(accessible + 1)).unwrap();
+                for from in [0, begv, random_from] {
+                    let count = end - from.clamp(begv, end) + 1 + i64::try_from(rng.below(3)).unwrap();
+                    let expected = scanner.scan_lists(from, count, 0, true).map_err(|stopped| stopped.halt);
+                    if let Some(actual) = index.lists(&mut scanner, bytes.len(), context.clone(), from) {
+                        assert_eq!(actual, expected,
+                                   "seed {seed:#x}, case {case}, round {round}, leaf {}, bounds {begv}..{end}, from {from}, count {count}",
+                                   index.leaf);
+                        errors += usize::from(actual.is_err());
+                    }
+                    calls += 1;
+                }
+            }
+            served += index.stats.list_served;
+        }
+        println!("list index served {served}/{calls} scans ({errors} scan errors)");
+        assert!(served * 2 > calls && errors > 0, "served {served}/{calls}, errors {errors}");
+    }
+
+    fn list_bounds(rng: &mut Rng, len: usize) -> (i64, i64) {
+        if rng.chance(35) {
+            let start = rng.below(len + 1);
+            (position(start), position(start + rng.below(len - start + 1)))
+        } else {
+            (1, position(len))
+        }
+    }
+
+    fn edit_list_text(rng: &mut Rng, index: &mut SyntaxIndex, bytes: &mut Vec<u8>, properties: &mut Vec<Option<i32>>,
+                      table: &[i32; 128], multibyte_symbol: bool) {
+        if rng.chance(80) {
+            let start = rng.below(bytes.len() + 1);
+            let end = (start + rng.below(6)).min(bytes.len());
+            let len = rng.below(6);
+            let mut inserted = random_text(rng, len);
+            if multibyte_symbol && rng.chance(35) {
+                inserted.push(0xe9);
+            }
+            index.edit(start, end, inserted.len());
+            properties.splice(start..end, std::iter::repeat_n(None, inserted.len()));
+            bytes.splice(start..end, inserted);
+        }
+        if rng.chance(40) && !bytes.is_empty() {
+            let start = rng.below(bytes.len());
+            let end = (start + 1 + rng.below(8)).min(bytes.len());
+            let syntax = rng.chance(70).then(|| table[usize::from(ALPHABET[rng.below(ALPHABET.len())])]);
+            properties[start..end].fill(syntax);
+            index.touch(start, end);
+        }
     }
 }

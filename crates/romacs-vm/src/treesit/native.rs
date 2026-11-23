@@ -138,14 +138,50 @@ impl Language {
 /// changing them in place, and a node of the tree points into those
 /// subtrees: the pinned copy keeps them for as long as any tree sharing
 /// them, and so any node of one, lives.
-// CELL(Plain)
-pub(crate) struct Tree(RefCell<tree_sitter::Tree>, OnceCell<Rc<tree_sitter::Tree>>);
+pub(crate) struct Tree {
+    // CELL(Plain)
+    inner: RefCell<Editable>,
+    // CELL(Plain)
+    pinned: OnceCell<Rc<tree_sitter::Tree>>,
+    parsed_from_scratch: bool,
+}
+
+struct Editable {
+    tree: tree_sitter::Tree,
+    revision: Revision,
+    comparison: Option<Rc<Comparison>>,
+}
+
+/// Copies of a parse share an origin when the parsers belong to the same
+/// text's registry, which applies each edit to the whole group. A copy
+/// across registries or a parser's private view edit starts a new origin.
+#[derive(Clone)]
+pub(crate) struct Revision {
+    origin: Rc<()>,
+    edits: u64,
+}
+
+struct Comparison {
+    old: Revision,
+    included: Vec<(u32, u32)>,
+    changed: Vec<(u32, u32)>,
+}
+
+impl Revision {
+    fn new() -> Self {
+        Self { origin: Rc::new(()), edits: 0 }
+    }
+}
 
 /// A tree no thread holds yet, on its way to or from the one that parses.
-pub(crate) struct Loose(tree_sitter::Tree);
+pub(crate) struct Loose {
+    tree: tree_sitter::Tree,
+    parsed_from_scratch: bool,
+}
+
 impl Loose {
     pub(crate) fn tree(self) -> Tree {
-        Tree(RefCell::new(self.0), OnceCell::new())
+        Tree::new(self.tree, self.parsed_from_scratch)
     }
 }
 
@@ -154,10 +190,36 @@ fn point(p: TSPoint) -> tree_sitter::Point {
 }
 
 impl Tree {
+    fn new(tree: tree_sitter::Tree, parsed_from_scratch: bool) -> Self {
+        let revision = Revision::new();
+        Self { inner: RefCell::new(Editable { tree, revision, comparison: None }), pinned: OnceCell::new(), parsed_from_scratch }
+    }
+
+    pub(crate) fn parsed_from_scratch(&self) -> bool {
+        self.parsed_from_scratch
+    }
+
+    pub(crate) fn revision(&self) -> Revision {
+        self.inner.borrow().revision.clone()
+    }
+
+    pub(crate) fn forget_revision(&self) {
+        let mut inner = self.inner.borrow_mut();
+        inner.revision = Revision::new();
+        inner.comparison = None;
+    }
+
     /// ts_tree_edit of this generation in place, as GNU edits its tree:
     /// nodes made before the edit keep their old offsets.
     pub(crate) fn edit(&self, edit: &TSInputEdit) {
-        self.0.borrow_mut().edit(&tree_sitter::InputEdit {
+        let mut inner = self.inner.borrow_mut();
+        inner.comparison = None;
+        if let Some(edits) = inner.revision.edits.checked_add(1) {
+            inner.revision.edits = edits;
+        } else {
+            inner.revision = Revision::new();
+        }
+        inner.tree.edit(&tree_sitter::InputEdit {
             start_byte: edit.start_byte as usize,
             old_end_byte: edit.old_end_byte as usize,
             new_end_byte: edit.new_end_byte as usize,
@@ -167,32 +229,65 @@ impl Tree {
         });
     }
     pub(crate) fn root(&self) -> Node {
-        self.0.borrow().root_node().into()
+        self.inner.borrow().tree.root_node().into()
     }
     pub(super) fn binding(&self) -> std::cell::Ref<'_, tree_sitter::Tree> {
-        self.0.borrow()
+        std::cell::Ref::map(self.inner.borrow(), |inner| &inner.tree)
     }
     /// This tree, new from a parse, to send to another thread.
     pub(crate) fn loose(self) -> Loose {
-        Loose(self.0.into_inner())
+        Loose { tree: self.inner.into_inner().tree, parsed_from_scratch: self.parsed_from_scratch }
     }
     /// `ts_tree_copy` for another thread to parse from: a tree of its own,
     /// sharing this one's subtrees. No node is made of it here.
     pub(crate) fn share(&self) -> Loose {
-        Loose(self.0.borrow().clone())
+        Loose { tree: self.inner.borrow().tree.clone(), parsed_from_scratch: self.parsed_from_scratch }
     }
     /// ts_tree_copy: a tree of its own to edit, sharing this one's subtrees
     /// until the edits part them, so O(1) in the tree's size. Only an
     /// unedited tree: the nodes its pinned copy keeps are the ones it had.
     pub(crate) fn duplicate(&self) -> Tree {
-        let tree = self.0.borrow();
-        let pinned = self.1.get_or_init(|| Rc::new(tree.clone()));
-        Tree(RefCell::new(tree.clone()), OnceCell::from(pinned.clone()))
+        let inner = self.inner.borrow();
+        let pinned = self.pinned.get_or_init(|| Rc::new(inner.tree.clone()));
+        let copy = Editable { tree: inner.tree.clone(), revision: inner.revision.clone(), comparison: inner.comparison.clone() };
+        Tree { inner: RefCell::new(copy), pinned: OnceCell::from(pinned.clone()), parsed_from_scratch: self.parsed_from_scratch }
     }
     /// ts_tree_get_changed_ranges from OLD to this tree, as byte ranges.
     pub(crate) fn changed_since(&self, old: &Tree) -> Vec<(u32, u32)> {
-        old.0.borrow().changed_ranges(&self.0.borrow()).map(|r| (r.start_byte as u32, r.end_byte as u32)).collect()
+        COMPARISONS.with(|n| n.set(n.get() + 1));
+        old.inner.borrow().tree.changed_ranges(&self.inner.borrow().tree)
+            .map(|r| (r.start_byte as u32, r.end_byte as u32)).collect()
     }
+
+    pub(crate) fn publish_comparison(&mut self, old: Revision, included: Vec<(u32, u32)>, changed: Vec<(u32, u32)>) {
+        self.inner.get_mut().comparison = Some(Rc::new(Comparison { old, included, changed }));
+    }
+
+    /// The published comparison belongs to this new tree. A handle with
+    /// different input still needs its own ranges for its notifiers.
+    pub(crate) fn compare(&mut self, old: &Tree, included: Vec<(u32, u32)>) -> Vec<(u32, u32)> {
+        let revision = old.revision();
+        if let Some(published) = self.inner.get_mut().comparison.as_deref()
+            && Rc::ptr_eq(&published.old.origin, &revision.origin)
+            && published.old.edits == revision.edits && published.included == included
+        {
+            return published.changed.clone();
+        }
+        let changed = self.changed_since(old);
+        if self.inner.get_mut().comparison.is_none() && self.included_ranges() == included {
+            self.publish_comparison(revision, included, changed.clone());
+        }
+        changed
+    }
+
+    pub(crate) fn included_ranges(&self) -> Vec<(u32, u32)> {
+        byte_ranges(&self.inner.borrow().tree.included_ranges())
+    }
+}
+
+fn byte_ranges(ranges: &[tree_sitter::Range]) -> Vec<(u32, u32)> {
+    let byte = |offset: usize| u32::try_from(offset).unwrap_or(u32::MAX);
+    ranges.iter().map(|range| (byte(range.start_byte), byte(range.end_byte))).collect()
 }
 
 /// One read of a parse: a run of the text, or a raw byte's two internal
@@ -216,6 +311,13 @@ pub(crate) trait Source {
 thread_local! {
     /// The parses this thread ran (`parses_on_this_thread`).
     static PARSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// The changed-range comparisons this thread ran.
+    static COMPARISONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+/// How many changed-range comparisons the calling thread has run.
+#[must_use]
+pub fn comparisons_on_this_thread() -> usize {
+    COMPARISONS.with(std::cell::Cell::get)
 }
 /// The parses every thread of the process has run.
 static PARSES_IN_PROCESS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -252,8 +354,7 @@ impl Parser {
     }
     /// `ts_parser_included_ranges`, as `set_included_ranges` takes them.
     pub(crate) fn included_ranges(&self) -> Vec<(u32, u32)> {
-        let byte = |offset: usize| u32::try_from(offset).unwrap_or(u32::MAX);
-        self.0.included_ranges().iter().map(|range| (byte(range.start_byte), byte(range.end_byte))).collect()
+        byte_ranges(&self.0.included_ranges())
     }
     /// Whether its included ranges show all of a text of LENGTH bytes: the
     /// runtime's default, or one range that covers it.
@@ -269,7 +370,7 @@ impl Parser {
     /// starts afresh rather than resuming this one.
     pub(crate) fn parse_until(&mut self, old: Option<&Tree>, source: &dyn Source, stop: &crate::quit::NativeStop)
                               -> Result<Option<Tree>, crate::quit::Stopped> {
-        let old = old.map(|tree| tree.0.borrow());
+        let old = old.map(|tree| tree.inner.borrow());
         PARSES.with(|n| n.set(n.get() + 1));
         PARSES_IN_PROCESS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let (mut stopped, mut calls) = (false, 0u32);
@@ -279,12 +380,12 @@ impl Parser {
             if stopped { std::ops::ControlFlow::Break(()) } else { std::ops::ControlFlow::Continue(()) }
         };
         let options = stop.armed().then(|| tree_sitter::ParseOptions::new().progress_callback(&mut progress));
-        let tree = self.0.parse_with_options(&mut |offset, _| source.read(offset), old.as_deref(), options);
+        let tree = self.0.parse_with_options(&mut |offset, _| source.read(offset), old.as_ref().map(|old| &old.tree), options);
         if stopped {
             self.0.reset();
             return Err(crate::quit::Stopped);
         }
-        Ok(tree.map(|tree| Tree(RefCell::new(tree), OnceCell::new())))
+        Ok(tree.map(|tree| Tree::new(tree, old.is_none())))
     }
 }
 

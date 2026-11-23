@@ -251,12 +251,13 @@ IMAGE, its file's, is non-nil."
   "Whether the composer's images show under its draft: nil where a tray
 of chips shows them instead (romacs-agent-log-attach.el).")
 
-(defun romacs-agent-log-images-composer (start)
+(cl-defun romacs-agent-log-images-composer (start &optional (links nil supplied-p))
   "Show the image links of the composer, from START to the buffer's end:
 each as its file's name, their images under the draft.  Drawn again only
 when its links change, which alone reads their files (their headers);
-between, their images follow the draft's end."
-  (let ((links (and (< start (point-max)) (romacs-agent-log-images-links nil start (point-max)))))
+between, their images follow the draft's end.  Use LINKS when supplied."
+  (let ((links (if supplied-p links
+                 (and (< start (point-max)) (romacs-agent-log-images-links nil start (point-max))))))
     (if (romacs-agent-log-images--drawn-p links)
         (when-let* ((block (cdr romacs-agent-log-images--composer)))
           (unless (= (overlay-end block) (point-max))

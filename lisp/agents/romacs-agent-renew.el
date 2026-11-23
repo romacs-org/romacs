@@ -548,7 +548,7 @@ done from it."
   "Why SESSION renews at its turn's end now: asked to, or its context
 full (`romacs-agent-renew--full'), once a conversation; else nil."
   (or (gethash session romacs-agent-renew--wanted)
-      (when-let* (((not (romacs-agent-own-turn session)))
+      (when-let* (((romacs-agent--work-turn-p (romacs-agent-own-turn session)))
                   ((romacs-agent-renew-threshold session))
                   (full (romacs-agent-renew--full session))
                   ((romacs-agent-renew--settled-p session)))
