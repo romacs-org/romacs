@@ -4,19 +4,15 @@ use super::{Fault, Leaf};
 use crate::Value;
 
 impl Leaf<'_> {
-    /// Each of SYMBOLS' function cells and the alias links from it to the
-    /// end of its chain, each as (SYMBOL-SLOT . VERSION) now; nothing for a
-    /// non-symbol.
-    pub(crate) fn macro_cells(&self, symbols: &[Value]) -> Vec<crate::macro_record::MacroUse> {
-        symbols.iter().filter_map(|&symbol| self.symbol_index(symbol)).flat_map(|slot| self.vm.alias_cells(slot)).collect()
+    /// `Vm::open_macro_capture` of SYMBOLS' slots, its depth; non-symbols
+    /// are left out.
+    pub(crate) fn open_macro_capture(&mut self, symbols: &[Value]) -> usize {
+        let slots = symbols.iter().filter_map(|&symbol| self.symbol_index(symbol)).collect();
+        self.vm.open_macro_capture(slots)
     }
-    /// The compile now running expanded through each of USES.
-    pub(crate) fn record_macro_cells(&mut self, uses: &[crate::macro_record::MacroUse]) {
-        self.vm.record_macro_uses(uses);
-    }
-    /// SYMBOL's slot, for a cell `romacs--record-macro-cells` names.
-    pub(crate) fn macro_cell_slot(&self, symbol: Value) -> std::result::Result<usize, Fault> {
-        self.symbol_slot(symbol)
+    /// `Vm::close_macro_capture`.
+    pub(crate) fn close_macro_capture(&mut self, depth: usize, record: bool) {
+        self.vm.close_macro_capture(depth, record);
     }
     /// `Vm::who_macroexpands` of SYMBOL.
     pub(crate) fn who_macroexpands(&self, symbol: Value, transitive: bool) -> std::result::Result<Vec<usize>, Fault> {

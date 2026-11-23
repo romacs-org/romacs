@@ -197,6 +197,71 @@ fn a_compiler_macro_records_its_handler_as_it_resolved_it() {
     });
 }
 
+/// A handler still autoloaded at its first call is recorded as it runs:
+/// the alias its file installs and the function at the alias's end.
+#[test]
+fn an_autoloaded_compiler_macro_handler_is_recorded_as_it_loads() {
+    with_gnu(|vm| {
+        let library = file("mr-cm-lib.el", "(defun mr-cm-real (_form x) (list 'quote (list x 'real)))\n(defalias 'mr-cm-h 'mr-cm-real)\n");
+        load(vm, "mr-cm-users.el", &format!("(defun mr-target3 (x) x)
+(autoload 'mr-cm-h {library:?})
+(put 'mr-target3 'compiler-macro 'mr-cm-h)
+(defmacro mr-all (form) (macroexpand-all form))
+(defun mr-auto-handled () (mr-all (mr-target3 1)))\n"));
+        assert_eq!(shown(vm, "(mr-auto-handled)"), "(1 real)", "the loaded handler ran");
+        assert!(finds(vm, "mr-cm-h", "mr-auto-handled") && finds(vm, "mr-cm-real", "mr-auto-handled"));
+    });
+}
+
+/// A handler whose first library aliases it to a second autoload is
+/// recorded as it finally ran: every link the two loads installed.
+#[test]
+fn a_chained_autoload_handler_is_recorded_as_it_finally_runs() {
+    with_gnu(|vm| {
+        let second = file("mr-chain-cm-2.el", "(defun mr-ch-real (_form x) (list 'quote (list x 'chained)))\n(defalias 'mr-ch2 'mr-ch-real)\n");
+        let first = file("mr-chain-cm-1.el", &format!("(autoload 'mr-ch2 {second:?})\n(defalias 'mr-ch 'mr-ch2)\n"));
+        load(vm, "mr-chain-cm-users.el", &format!("(defun mr-target4 (x) x)
+(autoload 'mr-ch {first:?})
+(put 'mr-target4 'compiler-macro 'mr-ch)
+(defmacro mr-all (form) (macroexpand-all form))
+(defun mr-chain-handled () (mr-all (mr-target4 1)))\n"));
+        assert_eq!(shown(vm, "(mr-chain-handled)"), "(1 chained)", "the handler at the chain's end ran");
+        for link in ["mr-ch", "mr-ch2", "mr-ch-real"] {
+            assert!(finds(vm, link, "mr-chain-handled"), "{link}");
+        }
+    });
+}
+
+/// Recording a compiler macro calls nothing Lisp can see: advice on
+/// `autoload-do-load` sees the calls pinned GNU's makes for the probe's
+/// own symbols, and no other. (GNU's load of the handler's file expands it
+/// eagerly in Lisp, so calls naming what that file uses differ already.)
+#[test]
+fn recording_a_handler_calls_autoload_do_load_as_gnu_does() {
+    let library = file("mr-probe-lib.el", "(defun mr-ph-real (_form x) (list 'quote (list x 'p)))\n(defalias 'mr-ph 'mr-ph-real)\n");
+    let case = format!("(progn
+  (defvar mr-calls nil)
+  (advice-add 'autoload-do-load :before
+              (lambda (_def &optional name &rest _)
+                (when (memq name '(mr-tp mr-ph mr-ph-real)) (push name mr-calls))))
+  (defun mr-tp (x) x)
+  (autoload 'mr-ph {library:?})
+  (put 'mr-tp 'compiler-macro 'mr-ph)
+  (list (macroexpand-all '(mr-tp 1)) (nreverse mr-calls)))");
+    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let output = std::process::Command::new(&binary)
+        .args(["-Q", "--batch", "--eval", &format!("(princ (prin1-to-string {case}))")])
+        .output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let expected = String::from_utf8(output.stdout).unwrap();
+    let actual = std::thread::Builder::new().stack_size(256 << 20).spawn(move || {
+        let mut vm = gnu_lisp(&[]);
+        let printed = vm.eval_source(&format!("(prin1-to-string {case})"))?.display()?;
+        Ok::<_, String>(serde_json::from_str::<String>(&printed).unwrap_or(printed))
+    }).unwrap().join().unwrap();
+    assert_eq!(actual.as_deref(), Ok(expected.as_str()));
+}
+
 /// A load a compile triggers, its after-load forms included, records
 /// nothing into that compile.
 #[test]

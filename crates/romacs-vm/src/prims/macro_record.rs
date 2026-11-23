@@ -18,35 +18,27 @@ fn integer(n: u64) -> Value {
     i64::try_from(n).ok().and_then(|n| Value::integer(n).ok()).unwrap_or(Value::NIL)
 }
 
-// (romacs--macro-cells &rest SYMBOLS): the function cells an expansion
-// through SYMBOLS resolves now: each symbol's own and every alias link
-// from it to the end of its chain, as a list of (SYMBOL . VERSION).  A
-// non-symbol is ignored.  `macroexpand-1' and `macroexp--compiler-macro'
-// read them as they resolve a head or handler, before it runs, and hand
-// them to `romacs--record-macro-cells' once it expanded.  Not in GNU.
-defsubr! { name = "romacs--macro-cells", gnu = "romacs:macro-record", effect = Reads,
-fn macro_cells(cx; rest symbols) {
-    let cells = cx.macro_cells(symbols);
-    let mut list = Value::NIL;
-    for &(slot, version) in cells.iter().rev() {
-        let cell = cx.cons(symbol(slot), integer(version));
-        list = cx.cons(cell, list);
-    }
-    Ok(list)
+// (romacs--macro-capture &rest SYMBOLS): open a capture of the function
+// cells a call through SYMBOLS resolves through: each symbol's own and
+// every alias link from it to the end of its chain.  They are read now,
+// and again whenever a call of one of SYMBOLS autoloads its definition,
+// so a capture open across the call holds the cells that ran.  Returns
+// the capture's depth, for `romacs--macro-capture-end'.  A non-symbol is
+// left out.  `macroexpand-1' and `macroexp--compiler-macro' open one as
+// they resolve a head or apply a handler.  Not in GNU.
+defsubr! { name = "romacs--macro-capture", gnu = "romacs:macro-record", effect = Global,
+fn macro_capture(cx; rest symbols) {
+    let depth = cx.open_macro_capture(symbols);
+    Ok(integer(depth as u64))
 }}
 
-// (romacs--record-macro-cells CELLS): the compile now running expanded a
-// form through each of CELLS, a list `romacs--macro-cells' made, at the
-// versions it holds.  Returns nil.  Not in GNU.
-defsubr! { name = "romacs--record-macro-cells", gnu = "romacs:macro-record", effect = Global,
-fn record_macro_cells(cx, cells: Value) {
-    let mut uses = Vec::new();
-    for cell in super::widen::list_elements(cx, cells)? {
-        let (name, version) = cx.pair(cell).ok_or_else(|| Fault::Wrong("consp", cell))?;
-        let version = version.as_integer().ok().and_then(|v| u64::try_from(v).ok()).ok_or_else(|| Fault::Wrong("natnump", version))?;
-        uses.push((cx.macro_cell_slot(name)?, version));
-    }
-    cx.record_macro_cells(&uses);
+// (romacs--macro-capture-end DEPTH RECORD): close the capture at DEPTH,
+// and any left open above it; with RECORD non-nil, the compile now running
+// expanded a form through its cells.  Returns nil.  Not in GNU.
+defsubr! { name = "romacs--macro-capture-end", gnu = "romacs:macro-record", effect = Global,
+fn macro_capture_end(cx, depth: Value, record: Value) {
+    let depth = depth.as_integer().ok().and_then(|d| usize::try_from(d).ok()).ok_or_else(|| Fault::Wrong("natnump", depth))?;
+    cx.close_macro_capture(depth, record != Value::NIL);
     Ok(Value::NIL)
 }}
 

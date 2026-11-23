@@ -122,14 +122,16 @@ case return FORM unchanged."
   (if macroexp-inhibit-compiler-macros
       form
     (condition-case-unless-debug err
-        ;; Romacs: the cells the handler resolves through, read before it
-        ;; runs; the compile now running depends on them if it rewrote FORM.
-        (let* ((cells (romacs--macro-cells (car form) handler))
-               (newform (macroexp-preserve-posification
-                            form
-                          (apply handler form (cdr form)))))
-          (unless (eq newform form)
-            (romacs--record-macro-cells cells))
+        ;; Romacs: the cells the handler runs through, captured across the
+        ;; call (an autoload it loads reads them again); the compile now
+        ;; running depends on them if it rewrote FORM.
+        (let ((capture (romacs--macro-capture (car form) handler))
+              (newform form))
+          (unwind-protect
+              (setq newform (macroexp-preserve-posification
+                                form
+                              (apply handler form (cdr form))))
+            (romacs--macro-capture-end capture (not (eq newform form))))
           newform)
       (error
        ;; Don't complain if there's an arity error when calling the handler
@@ -247,13 +249,13 @@ It should normally be a symbol with position and it defaults to FORM."
              ((and (symbolp def) (macrop def))
               ;; Romacs: the compile now running depends on the cells HEAD
               ;; resolves through, an autoload's just installed among them.
-              (romacs--record-macro-cells (romacs--macro-cells head))
+              (romacs--macro-capture-end (romacs--macro-capture head) t)
               (cons def (cdr form)))
              ((not (consp def)) form)
              (t
               (if (eq 'macro (car def))
                   (progn
-                    (romacs--record-macro-cells (romacs--macro-cells head))
+                    (romacs--macro-capture-end (romacs--macro-capture head) t)
                     (apply (cdr def) (cdr form)))
                 form))))))))
    (t form)))

@@ -301,7 +301,11 @@ impl Nested<'_> {
                 let (function, fundef) = (vm.rooted(frame, 0), vm.rooted(frame, 1));
                 let args = vm.autoload_args(fundef, function, Value::NIL);
                 let outcome = over_vm(vm, gc, &args, |mut m, gc, args| crate::autoload::do_load(&mut m, gc, args));
-                vm.autoload_result(args, outcome)
+                let result = vm.autoload_result(args, outcome);
+                if result.is_ok() {
+                    vm.refresh_macro_captures(vm.rooted(frame, 0));
+                }
+                result
             }
             Nested::LambdaList(frame) => {
                 let list = vm.rooted(frame, 0);

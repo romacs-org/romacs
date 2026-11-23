@@ -34,7 +34,19 @@ pub(crate) struct MacroRecord {
     /// The uses of the request compile that closed last (`Vm::compile_entry`),
     /// sorted: the source cache's guard for it.
     pub(crate) request: Vec<MacroUse>,
+    /// The cells Lisp expanders are about to run through, innermost last
+    /// (`romacs--macro-capture`).
+    captures: Vec<Capture>,
     pub(crate) invalidations: Invalidations,
+}
+
+/// The cells a call about to run resolves through: those of SYMBOLS, read
+/// when the capture opened and again after each autoload a call of one of
+/// them loads, so they are the ones that run (`Vm::refresh_macro_captures`).
+#[derive(Clone, Debug, romacs_snapshot::Snapshot)]
+struct Capture {
+    symbols: Vec<usize>,
+    cells: Vec<MacroUse>,
 }
 
 #[derive(Clone, Copy, Debug, romacs_snapshot::Snapshot)]
@@ -97,6 +109,7 @@ pub(crate) struct RecordMark {
     scopes: usize,
     uses: usize,
     expansions: usize,
+    captures: usize,
 }
 
 /// One logged write as it reads now: the live functions it would make
@@ -277,13 +290,14 @@ impl MacroRecord {
         }
     }
     pub(crate) fn mark(&self) -> RecordMark {
-        RecordMark { scopes: self.scopes.len(), uses: self.uses.len(), expansions: self.expansions }
+        RecordMark { scopes: self.scopes.len(), uses: self.uses.len(), expansions: self.expansions, captures: self.captures.len() }
     }
     /// Back to MARK, dropping the scopes a panic left open.
     pub(crate) fn restore(&mut self, mark: &RecordMark) {
         self.scopes.truncate(mark.scopes);
         self.uses.truncate(mark.uses);
         self.expansions = mark.expansions;
+        self.captures.truncate(mark.captures);
         self.pre_expanded = self.scopes.iter().filter(|s| matches!(s.kind, ScopeKind::Toplevel { pre_expanded: true, .. })).count();
     }
 }
@@ -336,6 +350,38 @@ impl Vm {
         for &entry in uses {
             self.macro_record.push(entry, self.expanding.len());
         }
+    }
+    /// Open a capture of the cells a call through SYMBOLS (slots) resolves
+    /// through: its depth, for `close_macro_capture`.
+    pub(crate) fn open_macro_capture(&mut self, symbols: Vec<usize>) -> usize {
+        let cells = self.capture_cells(&symbols);
+        self.macro_record.captures.push(Capture { symbols, cells });
+        self.macro_record.captures.len() - 1
+    }
+    /// Close the capture at DEPTH and any left above it; when RECORD, the
+    /// compile now running expanded through its cells.
+    pub(crate) fn close_macro_capture(&mut self, depth: usize, record: bool) {
+        let Some(capture) = self.macro_record.captures.get(depth) else { return };
+        let cells = if record { capture.cells.clone() } else { Vec::new() };
+        self.macro_record.captures.truncate(depth);
+        self.record_macro_uses(&cells);
+    }
+    /// A call of FUNCTION has just autoloaded its definition and is about
+    /// to run it: each open capture through FUNCTION reads its cells again.
+    pub(crate) fn refresh_macro_captures(&mut self, function: Value) {
+        if self.macro_record.captures.is_empty() {
+            return;
+        }
+        let Some(slot) = function.index_if(7).and_then(|i| i.checked_sub(1)) else { return };
+        for i in 0..self.macro_record.captures.len() {
+            if self.macro_record.captures[i].symbols.contains(&slot) {
+                let cells = self.capture_cells(&self.macro_record.captures[i].symbols);
+                self.macro_record.captures[i].cells = cells;
+            }
+        }
+    }
+    fn capture_cells(&self, symbols: &[usize]) -> Vec<MacroUse> {
+        symbols.iter().flat_map(|&slot| self.alias_cells(slot)).collect()
     }
     /// The record of the function the innermost scope compiles, as it is
     /// installed: its own uses and those of the pre-expanded forms it came from.
