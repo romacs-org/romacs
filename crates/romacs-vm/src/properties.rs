@@ -726,15 +726,19 @@ impl Tree {
     /// The first position after `at` whose value differs from `at`'s, or
     /// `limit` when that is nearer.
     fn change_after(&self, at: ByteOffset, limit: ByteOffset) -> ByteOffset {
-        let Some(after) = at.0.checked_add(1) else {
-            return limit;
+        self.value_through(at, limit).1
+    }
+    /// The value at AT and the first observable change before LIMIT.
+    /// Adjacent writes of that value may carry different ordering stamps.
+    fn value_through(&self, at: ByteOffset, limit: ByteOffset) -> (Option<Value>, ByteOffset) {
+        let Some((start, run)) = self.run_at(at.0) else { return (None, limit) };
+        let value = run.observed();
+        let after = start + run.len as usize;
+        let next = if after >= limit.0 { limit.0 } else {
+            self.next_different(0, after, value, limit.0)
+                .unwrap_or_else(|| if value.is_some() { self.len().min(limit.0) } else { limit.0 })
         };
-        let before = self.at(at.0).filter(|r| r.stamp != 0).map(|r| r.value);
-        match self.next_different(0, after, before, limit.0) {
-            Some(p) => ByteOffset(p.min(limit.0)),
-            None if before.is_some() && self.len() >= after => ByteOffset(self.len().min(limit.0)),
-            None => limit,
-        }
+        (value, ByteOffset(next.min(limit.0)))
     }
     /// The first position from `at`, before `limit`, whose run does not
     /// read `value`. A uniform subtree that reads it is passed whole, so a
@@ -885,6 +889,27 @@ pub(crate) struct At<'a>(pub &'a Properties, pub ByteOffset);
 impl Plist for At<'_> {
     fn property(&self, key: Key) -> Option<Value> {
         self.0.get_property(self.1, key)
+    }
+}
+
+/// A property lookup and the first boundary of any key it actually read.
+pub(crate) struct RunAt<'a> {
+    store: &'a Properties,
+    byte: ByteOffset,
+    // CELL(Plain): The byte limit of this borrowed lookup holds no Lisp value.
+    end: std::cell::Cell<usize>,
+}
+impl<'a> RunAt<'a> {
+    pub fn new(store: &'a Properties, at: ByteOffset, end: usize) -> Self {
+        Self { store, byte: at, end: std::cell::Cell::new(end) }
+    }
+    pub fn end(&self) -> usize { self.end.get() }
+}
+impl Plist for RunAt<'_> {
+    fn property(&self, key: Key) -> Option<Value> {
+        let (value, next) = self.store.tree(key)?.value_through(self.byte, ByteOffset(self.end.get()));
+        self.end.set(next.0);
+        value
     }
 }
 
