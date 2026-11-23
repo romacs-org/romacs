@@ -288,3 +288,28 @@ fn a_deferred_key_is_claimed_once() {
     let settled = s.settled();
     assert_eq!(settled.iter().map(|(i, _)| *i).collect::<Vec<_>>(), vec![0], "settled: {settled:?}");
 }
+
+/// A C-g that quits a key sequence throws out of its step: the sequence's
+/// keys still settle, each once.
+#[test]
+fn a_quit_sequence_settles_its_keys() {
+    let mut s = Session::new();
+    s.press(CommandEvent::Character(24));
+    s.press(CommandEvent::Character(7));
+    s.command();
+    s.redisplay();
+    let settled = s.settled();
+    assert_eq!(settled.iter().map(|(i, _)| *i).collect::<Vec<_>>(), vec![0, 1], "settled: {settled:?}");
+}
+
+/// A window deleted before the frame: the frame cannot show its step.
+#[test]
+fn a_window_deleted_before_the_frame_is_not_shown() {
+    let mut s = Session::new();
+    s.eval("(select-window (split-window))");
+    s.press(character('w'));
+    s.command();
+    s.eval("(delete-window)");
+    s.redisplay();
+    s.expect(&[(0, "not-shown")]);
+}
