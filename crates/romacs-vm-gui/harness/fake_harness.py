@@ -28,7 +28,11 @@ its tools as a real harness does, and answers control requests.  Its
 
 Every tool call it makes is logged to $FAKE_HARNESS_LOG as one JSON line.
 A spent file in the account directory rejects turns until its epoch-second
-reset (an empty file means no reset during the test).
+reset (an empty file means no reset during the test).  With
+$FAKE_HARNESS_TRANSCRIPT set it keeps each prompt in its own transcript, in
+the account directory, as Claude Code does, and reads it on --resume;
+unset, it writes nothing there (the workflows that hold Romacs to writing
+nothing in a configuration directory).
 """
 import json
 import os
@@ -124,10 +128,11 @@ class Harness:
         log(session=self.session, config_dir=str(self.config), **fields)
 
     def record_input(self, text):
-        self.transcript.parent.mkdir(parents=True, exist_ok=True)
-        with self.transcript.open('a') as transcript:
-            transcript.write(json.dumps({'type': 'user', 'sessionId': self.session,
-                                         'cwd': os.getcwd(), 'message': {'role': 'user', 'content': text}}) + '\n')
+        if os.environ.get('FAKE_HARNESS_TRANSCRIPT'):
+            self.transcript.parent.mkdir(parents=True, exist_ok=True)
+            with self.transcript.open('a') as transcript:
+                transcript.write(json.dumps({'type': 'user', 'sessionId': self.session,
+                                             'cwd': os.getcwd(), 'message': {'role': 'user', 'content': text}}) + '\n')
         self.log_input(received=text)
         self.unseen.append(text)
 

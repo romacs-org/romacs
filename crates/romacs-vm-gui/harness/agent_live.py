@@ -1689,7 +1689,8 @@ def limit_move(args, base):
         case_root = base / case
         case_root.mkdir()
         try:
-            a = Agents(args, case_root, 'lm')
+            # Its conversations kept by the fake harness, as a move copies them.
+            a = Agents(args, case_root, 'lm', {'FAKE_HARNESS_TRANSCRIPT': '1'})
             try:
                 cases[case] = limit_case(a, case)
             finally:
