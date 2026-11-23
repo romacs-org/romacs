@@ -232,6 +232,71 @@
       (ignore-errors (with-current-buffer (get-file-buffer file) (set-buffer-modified-p nil) (kill-buffer)))
       (delete-directory dir t))))
 
+(ert-deftest warm-restart-a-clean-file-gone-from-disk-is-reported-not-restored-empty ()
+  ;; A clean file's record carries no text: deleted before the restore, it
+  ;; comes back as no buffer and a problem naming it, never an empty clean
+  ;; buffer that passes for the file.
+  (let* ((dir (make-temp-file "romacs-wr-file-" t)) (file (expand-file-name "gone.txt" dir))
+         (record (list :id "g" :name "gone.txt" :strategy 'file :file file :mode 'text-mode :point 5
+                       :directory dir))
+         (warm-restart--problems nil))
+    (unwind-protect
+        (progn
+          (warm-restart--restore-buffer record [] (make-hash-table :test #'equal))
+          (should-not (get-file-buffer file))
+          (should-not (get-buffer "gone.txt"))
+          (should (equal (plist-get (car warm-restart--problems) :buffer) "gone.txt"))
+          (should (string-match-p "no longer exists" (plist-get (car warm-restart--problems) :reason))))
+      (ignore-errors (kill-buffer (get-file-buffer file)))
+      (delete-directory dir t))))
+
+(ert-deftest warm-restart-a-clean-file-gone-from-disk-but-open-is-reused ()
+  ;; Its file gone, a clean file still open here keeps its text: the
+  ;; restore reuses that buffer, so a view indirect on it comes back too.
+  (let* ((dir (make-temp-file "romacs-wr-file-" t)) (file (expand-file-name "open.txt" dir))
+         (record (list :id "o" :name "open.txt" :strategy 'file :file file :mode 'text-mode :point 1
+                       :directory dir))
+         (view (list :id "v" :name "open.txt<view>" :strategy 'indirect :base "o" :mode 'text-mode
+                     :point 1 :directory dir))
+         (buffers (make-hash-table :test #'equal))
+         (warm-restart--problems nil))
+    (unwind-protect
+        (progn
+          (write-region "kept text\n" nil file nil 'silent)
+          (let ((base (find-file-noselect file)))
+            (delete-file file)
+            (warm-restart--restore-buffer record [] buffers)
+            (warm-restart--restore-buffer view [] buffers)
+            (should (eq (gethash "o" buffers) base))
+            (should (equal (with-current-buffer base (buffer-string)) "kept text\n"))
+            (should (eq (buffer-base-buffer (gethash "v" buffers)) base))
+            (should-not warm-restart--problems)))
+      (ignore-errors (kill-buffer (gethash "v" buffers)))
+      (ignore-errors (kill-buffer (get-file-buffer file)))
+      (delete-directory dir t))))
+
+(ert-deftest warm-restart-a-clean-file-open-only-through-a-dangling-alias-is-reported ()
+  ;; Open only through a symlink whose target is gone: the visit would not
+  ;; reuse that buffer, so the file is reported, never made empty.
+  (let* ((dir (make-temp-file "romacs-wr-file-" t)) (file (expand-file-name "target.txt" dir))
+         (alias (expand-file-name "alias.txt" dir))
+         (record (list :id "t" :name "target.txt" :strategy 'file :file file :mode 'text-mode :point 1
+                       :directory dir))
+         (find-file-visit-truename nil)
+         (warm-restart--problems nil))
+    (unwind-protect
+        (progn
+          (write-region "aliased\n" nil file nil 'silent)
+          (make-symbolic-link file alias)
+          (find-file-noselect alias)
+          (delete-file file)
+          (warm-restart--restore-buffer record [] (make-hash-table :test #'equal))
+          (should-not (get-file-buffer file))
+          (should (equal (plist-get (car warm-restart--problems) :buffer) "target.txt")))
+      (ignore-errors (kill-buffer (get-file-buffer alias)))
+      (ignore-errors (kill-buffer (get-file-buffer file)))
+      (delete-directory dir t))))
+
 (ert-deftest warm-restart-a-window-laid-out-early-gets-its-history-back ()
   ;; Its windows laid out before every buffer was back: once they are, each
   ;; window's earlier buffers come back after those shown in it since.
