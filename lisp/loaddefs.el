@@ -10749,10 +10749,17 @@ Message buffer where you can explain more about the patch.
 
 ;;; Generated autoloads from international/emoji.el
 
-(autoload 'emoji-insert "emoji" nil t)
-(autoload 'emoji-recent "emoji" nil t)
+(autoload 'emoji-insert "emoji"
+"Choose and insert an emoji glyph." t)
+(autoload 'emoji-recent "emoji"
+"Choose and insert one of the recently-used emoji glyphs." t)
 (autoload 'emoji-search "emoji"
-"
+"Choose and insert an emoji glyph by typing its Unicode name.
+This command prompts for an emoji name, with completion, and
+inserts it.  It recognizes the Unicode Standard names of emoji,
+and also consults the `emoji-alternate-names' alist.
+GLYPH is the chosen emoji.  If DERIVED is non-nil, offer GLYPH and
+its variants in a popup.
 
 (fn GLYPH DERIVED)" t)
 (autoload 'emoji-list "emoji"
@@ -10775,7 +10782,8 @@ the name is not known.
 
 (fn GLYPH &optional INTERACTIVE)" t)
 (autoload 'emoji-list-select "emoji"
-"
+"Select the emoji at EVENT and insert it in the originating buffer.
+Offer a choice first if the emoji has variants.
 
 (fn EVENT)" '(emoji-list-mode))
 (autoload 'emoji--init "emoji"
@@ -35279,73 +35287,6 @@ Interactively, with a prefix argument, prompt for a different method." t)
 
 (push '(tramp 2 9 0 -1) package--builtin-versions)
 (register-definition-prefixes "trampver" '("tramp-"))
-
-
-;;; Generated autoloads from transient.el
-
-(push '(transient 0 13 8) package--builtin-versions)
-(autoload 'transient-insert-suffix "transient"
-"Insert a SUFFIX into PREFIX before LOC.
-PREFIX is a prefix command, a symbol.
-SUFFIX is a suffix command or a group specification (of
-  the same forms as expected by `transient-define-prefix').
-LOC is a command, a key vector, a key description (a string
-  as returned by `key-description'), or a coordination list
-  (whose last element may also be a command or key).
-Remove a conflicting binding unless optional KEEP-OTHER is
-  non-nil.  When the conflict appears to be a false-positive,
-  non-nil KEEP-OTHER may be ignored, which can be prevented
-  by using `always'.
-See info node `(transient)Modifying Existing Transients'.
-
-(fn PREFIX LOC SUFFIX &optional KEEP-OTHER)")
-(function-put 'transient-insert-suffix 'lisp-indent-function 'defun)
-(autoload 'transient-append-suffix "transient"
-"Insert a SUFFIX into PREFIX after LOC.
-PREFIX is a prefix command, a symbol.
-SUFFIX is a suffix command or a group specification (of
-  the same forms as expected by `transient-define-prefix').
-LOC is a command, a key vector, a key description (a string
-  as returned by `key-description'), or a coordination list
-  (whose last element may also be a command or key).
-Remove a conflicting binding unless optional KEEP-OTHER is
-  non-nil.  When the conflict appears to be a false-positive,
-  non-nil KEEP-OTHER may be ignored, which can be prevented
-  by using `always'.
-See info node `(transient)Modifying Existing Transients'.
-
-(fn PREFIX LOC SUFFIX &optional KEEP-OTHER)")
-(function-put 'transient-append-suffix 'lisp-indent-function 'defun)
-(autoload 'transient-replace-suffix "transient"
-"Replace the suffix at LOC in PREFIX with SUFFIX.
-PREFIX is a prefix command, a symbol.
-SUFFIX is a suffix command or a group specification (of
-  the same forms as expected by `transient-define-prefix').
-LOC is a command, a key vector, a key description (a string
-  as returned by `key-description'), or a coordination list
-  (whose last element may also be a command or key).
-See info node `(transient)Modifying Existing Transients'.
-
-(fn PREFIX LOC SUFFIX)")
-(function-put 'transient-replace-suffix 'lisp-indent-function 'defun)
-(autoload 'transient-inline-group "transient"
-"Inline the included GROUP into PREFIX.
-Replace the symbol GROUP with its expanded layout in the
-layout of PREFIX.
-
-(fn PREFIX GROUP)")
-(function-put 'transient-inline-group 'lisp-indent-function 'defun)
-(autoload 'transient-remove-suffix "transient"
-"Remove the suffix or group at LOC in PREFIX.
-PREFIX is a prefix command, a symbol.
-LOC is a command, a key vector, a key description (a string
-  as returned by `key-description'), or a coordination list
-  (whose last element may also be a command or key).
-See info node `(transient)Modifying Existing Transients'.
-
-(fn PREFIX LOC)")
-(function-put 'transient-remove-suffix 'lisp-indent-function 'defun)
-(register-definition-prefixes "transient" '("find-function-advised-original" "transient"))
 
 
 ;;; Generated autoloads from tree-widget.el
