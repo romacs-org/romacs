@@ -610,7 +610,8 @@ pub fn resume_loadup(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Loadup)
 /// (loadup.rs, deviation 3), and `--gnu-lisp` has no startup of Romacs's.
 /// The command line is processed once, the per-user directory, Unix's
 /// end-of-line mnemonics and the locale. Not the rest of `command-line`.
-const GNU_SESSION_STEPS: &str = r#"(progn
+/// A chain that never defined GNU's startup has none of them to take.
+const GNU_SESSION_STEPS: &str = r#"(when (fboundp 'normal-top-level)
   (setq command-line-processed t)
   (setq startup--xdg-config-home-emacs
         (let ((xdg-config-home (getenv-internal "XDG_CONFIG_HOME")))

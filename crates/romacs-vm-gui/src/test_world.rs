@@ -7,7 +7,8 @@
 //! itself (`startup::resume_loadup`), after anything of its own process
 //! (a private HOME), as a restored launch does. A world is keyed by this
 //! executable and records every file its boot read, so a rebuilt
-//! executable or an edited Lisp file builds it again. Anywhere else
+//! executable or an edited Lisp file builds it again. `--gnu-lisp`, whose
+//! launch has no world, boots from source in every process. Anywhere else
 //! (libtest's threads, a process that already maps an image, a refused
 //! restore, `ROMACS_WORLD=off`) the boot runs from source, and answers the
 //! same.
@@ -53,6 +54,12 @@ impl Boot {
 /// When the boot fails.
 pub fn chain(boot: Boot) -> (Vm, Loadup) {
     let dir = startup::lisp_root(&startup::lisp_dir()).unwrap();
+    // `--gnu-lisp' has no world, as its launch has none (main.rs: worlds
+    // are `--loadup''s), and no per-process steps a restore would take
+    // again (`romacs-world-restart'): its session takes GNU's at session time.
+    if boot.launch == Launch::GnuOnly {
+        return booted(boot, &dir, false).unwrap();
+    }
     // In this executable's profile directory (it is in PROFILE/deps).
     let exe = std::env::current_exe().unwrap();
     let store = exe.parent().and_then(std::path::Path::parent).unwrap().join("romacs-vm-gui-test-worlds");
