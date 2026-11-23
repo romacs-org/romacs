@@ -553,6 +553,37 @@ if __name__ == '__main__':
     unittest.main()
 
 
+class Everything(unittest.TestCase):
+    """A change that reaches everything leaves the tests to the queue but still runs the structural
+    rules: Q's Cargo.lock change skipped every test here and bounced on four of them."""
+
+    def run_with(self, status):
+        seen = []
+        everything = {'everything': True, 'reasons': ['Cargo.lock'], 'packages': {}, 'files': {}, 'lisp': [],
+                      'filter': None, 'harnesses': {}, 'packages_to_build': [], 'leave': []}
+        saved = (check.impact.select, check.impact.metadata_of, check.execute)
+        check.impact.select = lambda names, root, meta: everything
+        check.impact.metadata_of = lambda root: {}
+        check.execute = lambda root, runs, threads: seen.append(runs) or (status, Path('/dev/null'), '1 s, log x')
+        try:
+            return check.run_tests(ROOT, ['Cargo.lock'], 1), seen
+        finally:
+            check.impact.select, check.impact.metadata_of, check.execute = saved
+
+    def test_the_structural_rules_run_and_the_rest_is_left(self):
+        (status, summary, _), seen = self.run_with(0)
+        self.assertEqual(status, 'SKIP')
+        self.assertIn('structural rules hold', summary)
+        filters = ' '.join(rule for runs in seen for _, _, rule in runs)
+        for rule in ('quit_polls', 'reentry_sites', 'no_remote_references'):
+            self.assertIn(rule, filters)
+        self.assertNotIn('package(', filters)
+
+    def test_a_broken_structural_rule_fails_the_stage(self):
+        (status, _, _), _ = self.run_with(4)
+        self.assertEqual(status, 'FAIL')
+
+
 class Receipt(unittest.TestCase):
     """A run on a clean worktree leaves a receipt for HEAD's tree; on a dirty one, none."""
 
