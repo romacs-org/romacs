@@ -2104,13 +2104,11 @@ transcript, it goes there."
 (defun romacs-agent-log--composer-plain (beg end _length)
   "Text typed or yanked into the composer is plain: nothing of the
 transcript's comes with it."
-  (when (and (markerp romacs-agent-log--input) (< beg end) (>= beg romacs-agent-log--input))
+  (when (and (markerp romacs-agent-log--input) (< beg end) (>= beg romacs-agent-log--input)
+             (or (text-properties-at beg)
+                 (and (< (1+ beg) end)
+                      (< (next-property-change beg nil end) end))))
     (let ((inhibit-modification-hooks t) (inhibit-read-only t)) (set-text-properties beg end nil))))
-
-(defun romacs-agent-log--composer-images (_beg end _length)
-  "Show the composer's image links once a change reaches it."
-  (when (and (markerp romacs-agent-log--input) (>= end romacs-agent-log--input))
-    (romacs-agent-log-images-composer romacs-agent-log--input)))
 
 (defun romacs-agent-log-composer ()
   "Go to the composer."
@@ -2277,8 +2275,7 @@ On the transcript's text:
   (add-hook 'window-size-change-functions (lambda (_) (when romacs-agent-log--input (romacs-agent-log--separator))) nil t)
   (add-hook 'window-size-change-functions #'romacs-agent-log-tables-refit nil t)
   (romacs-agent-log-attach-setup)
-  (add-hook 'after-change-functions #'romacs-agent-log--composer-plain nil t)
-  (add-hook 'after-change-functions #'romacs-agent-log--composer-images nil t))
+  (add-hook 'after-change-functions #'romacs-agent-log--composer-plain nil t))
 
 (provide 'romacs-agent-log)
 ;; Its turns' place in the transcript, which needs it loaded.
