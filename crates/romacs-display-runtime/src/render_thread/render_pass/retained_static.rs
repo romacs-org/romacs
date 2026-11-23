@@ -2,14 +2,12 @@
 //! frame takes when nothing but the cursor has moved.
 //!
 //! Owns: the rule deciding whether a frame is eligible, the retained
-//! cursorless scene texture and its per-generation validity, the filled-box
-//! cursor mini-frames retained alongside it, and the composite that puts the
-//! two back together.
+//! cursorless scene texture and its per-generation validity, and the
+//! composition of front cursors over it.
 //!
-//! The composite is proven bit-identical to a full render
-//! (`offscreen_frame::composite_matches_full_render`, and
-//! `offscreen_frame::filled_box_composite_matches_full_render` for the
-//! inverse-video cells), which is what lets the fast path exist at all.
+//! Front cursors paint over retained root text
+//! (`offscreen_frame::composite_matches_full_render`). Filled boxes paint
+//! beneath text, through the ordinary scene painter.
 //!
 //! Must not: acquire or present a surface, start or advance a transition, or
 //! publish a projection. It exists precisely for frames where none of those
@@ -19,10 +17,11 @@
 use super::FrameDrawInputs;
 use crate::render_thread::frame_stats;
 use crate::render_thread::frame_windows::{
-    GuiFrameNativeWindowState, GuiFrameRenderState, RetainedCursorCell, RetainedStatic,
+    GuiFrameNativeWindowState, GuiFrameRenderState, RetainedStatic,
 };
 use crate::render_thread::models::{ModelPicture, picture_of};
 use crate::render_thread::state::PointerAppearanceState;
+use romacs_display_protocol::frame_glyphs::FrameGlyphBuffer;
 use romacs_renderer_wgpu::model::store::Snapshot;
 use romacs_renderer_wgpu::{FullFrameTexture, SnapshotSize, UnpooledTexture, WgpuRenderer};
 use std::collections::{BTreeMap, HashSet};
@@ -54,6 +53,8 @@ pub(super) fn is_eligible(
     render: &GuiFrameRenderState,
 ) -> bool {
     compositor_only_hint
+        && render.compositor.current_frame.as_deref().is_some_and(top_layer_cursors)
+        && render.compositor.child_frames.frames.values().all(|child| top_layer_cursors(&child.frame))
         && pane_placements.is_empty()
         && !render.compositor.transitions.has_active()
         && !window_has_active_overlays(render)
@@ -62,13 +63,16 @@ pub(super) fn is_eligible(
         && std::env::var_os("ROMACS_DISABLE_RETAINED_STATIC").is_none()
 }
 
+fn top_layer_cursors(frame: &FrameGlyphBuffer) -> bool {
+    frame.window_cursors.iter().all(|cursor| cursor.style.is_clean_top_layer())
+}
+
 pub(super) fn is_valid(render: &GuiFrameRenderState, size: SnapshotSize) -> bool {
     matches!(&render.compositor.retained_static,
         Some(rs) if rs.generation == render.compositor.current_scene_generation && rs.texture.size() == size)
 }
 
-/// Compose one frame from the retained cursorless scene: blit it, draw the
-/// cursor over it, and redraw each filled-box cell.
+/// Blit the retained cursorless scene and draw the cursor over it.
 ///
 /// Rebuilds the retained texture first when the scene generation or the
 /// window size has moved on — that rebuild is the one place this path runs
@@ -78,8 +82,7 @@ pub(super) fn is_valid(render: &GuiFrameRenderState, size: SnapshotSize) -> bool
 /// post shader is on and the swapchain view otherwise; the caller owns that
 /// choice and the frame-post step that follows.
 ///
-/// Answers what the composed frame pictures of the native models
-/// ([`retained_frame_picture`]).
+/// Answers what the retained frame pictures of the native models.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn draw(
     renderer: &mut WgpuRenderer,
@@ -132,11 +135,6 @@ pub(super) fn draw(
             false,
             true,
         )?;
-        let cells = build_filled_box_cursor_cells(
-            frame,
-            native.scale_factor as f32,
-            &render.pointer_appearance,
-        );
         let models = RetainedModels::record(
             renderer.take_drawn_surfaces(),
             renderer.take_referenced_surfaces(),
@@ -144,7 +142,6 @@ pub(super) fn draw(
         );
         if let Some(rs) = render.compositor.retained_static.as_mut() {
             rs.generation = generation;
-            rs.cursor_cells = cells;
             rs.models = models;
         }
         frame_stats::count(&frame_stats::RETAINED_STATIC_BUILDS);
@@ -172,43 +169,15 @@ pub(super) fn draw(
         inputs.animated_cursor,
         hovered_scroll_bar,
     );
-    // Filled-box cursors are inverse-video: the retained scene has the
-    // character in its normal color, so each filled-box cell (box plus
-    // the character in cursor_fg) is redrawn over the composite from a
-    // single-glyph mini-frame, scissored to the cell. Bit-identical to
-    // the full render (offscreen_frame::filled_box_composite_matches_
-    // full_render).
-    composite_filled_box_cursor_cells(
-        renderer,
-        render,
-        composition_view,
-        inputs.present_mapping,
-        inputs.animated_cursor,
-    );
     frame_stats::count(&frame_stats::COMPOSITE_ONLY_FRAMES);
     Ok(retained_frame_picture(
-        render
-            .compositor
-            .retained_static
-            .as_ref()
-            .map(|rs| &rs.models.picture),
-        picture_of(renderer.take_drawn_surfaces(), inputs.models),
+        render.compositor.retained_static.as_ref().map(|rs| &rs.models),
     ))
 }
 
-/// What a retained-static frame pictures of the models: the retained
-/// raster's provenance (the whole picture, root and child), and any model
-/// a partial cursor overlay redrew in a cell over it. The overlay never
-/// replaces the raster's provenance: it repaints a cell of the same scene.
-pub(in crate::render_thread) fn retained_frame_picture(
-    retained: Option<&ModelPicture>,
-    overlay: ModelPicture,
-) -> ModelPicture {
-    let mut picture = retained.cloned().unwrap_or_default();
-    for (id, snapshot) in overlay {
-        picture.entry(id).or_insert(snapshot);
-    }
-    picture
+/// A blit preserves the model provenance originally recorded for the raster.
+pub(in crate::render_thread) fn retained_frame_picture(retained: Option<&RetainedModels>) -> ModelPicture {
+    retained.map(|r| r.picture.clone()).unwrap_or_default()
 }
 
 /// What a retained raster records of the native models when it is built.
@@ -267,104 +236,6 @@ pub(in crate::render_thread) fn retained_scene_is_current(
             .depends_on
             .iter()
             .all(|(id, snapshot)| now.2.get(id) == snapshot.as_ref())
-}
-
-/// Build a single-glyph mini-frame for each filled-box cursor in the frame
-/// (only the glyphs in that cursor's slot, with the frame's font tables),
-/// paired with the physical-pixel scissor rect for its cell. Called once
-/// per scene generation when the retained static scene is rebuilt; the
-/// results are reused across cursor-only frames so the font tables are not
-/// cloned every frame.
-pub(super) fn build_filled_box_cursor_cells(
-    frame: &romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
-    scale: f32,
-    pointer_appearance: &PointerAppearanceState,
-) -> Vec<RetainedCursorCell> {
-    use romacs_display_protocol::frame_glyphs::{CursorStyle, FrameGlyphBuffer};
-    if !pointer_appearance_allowed(pointer_appearance) {
-        return Vec::new();
-    }
-    let mut cells = Vec::new();
-    for cursor in &frame.window_cursors {
-        if !matches!(cursor.style, CursorStyle::FilledBox) {
-            continue;
-        }
-        let mut mini = FrameGlyphBuffer::with_size(frame.width, frame.height);
-        mini.presentation_id = frame.presentation_id;
-        mini.clone_font_bindings_from(frame);
-        mini.background = frame.background;
-        mini.background_alpha = frame.background_alpha;
-        // Carry the parent's default glyph metrics: a metric-less frame
-        // makes render_frame_glyphs fall back to invented defaults, and a
-        // default-metric change clears the whole glyph atlas — so a bare
-        // mini-frame silently evicted every cached glyph on each
-        // filled-box cursor composite (defeating this path's "the glyph
-        // is warm in the atlas" premise) and again on the next real frame.
-        mini.font_pixel_size = frame.font_pixel_size;
-        mini.char_height = frame.char_height;
-        for glyph in &frame.glyphs {
-            if glyph.slot_id() == Some(cursor.slot_id) {
-                mini.glyphs.push(glyph.clone());
-            }
-        }
-        let mut only_cursor = cursor.clone();
-        only_cursor.active = true;
-        mini.window_cursors = vec![only_cursor];
-        // The retained cursor cell is rendered independently from its
-        // source frame. Preserve the source window's local profile so the
-        // cursor-only and full-render paths resolve configuration through
-        // the same local-over-global rule.
-        if let Some(effects) = frame.window_cursor_effects(cursor.window_id) {
-            mini.set_window_cursor_effects(cursor.window_id, effects.clone());
-        }
-        // The box covers the cell = the cursor rect; scissor to it in
-        // physical pixels (glyph positions are logical, scaled by the
-        // uniform, so the scissor rect is logical * scale).
-        let scissor = (
-            (cursor.x * scale).floor().max(0.0) as u32,
-            (cursor.y * scale).floor().max(0.0) as u32,
-            (cursor.width * scale).ceil().max(1.0) as u32,
-            (cursor.height * scale).ceil().max(1.0) as u32,
-        );
-        cells.push(RetainedCursorCell { mini, scissor });
-    }
-    cells
-}
-
-/// Redraw each filled-box cursor's inverse-video cell over the composited
-/// scene, from the mini-frames retained for this generation. The retained
-/// static scene has the character in its normal color; a filled-box cursor
-/// covers that cell with a box in the cursor color and redraws the
-/// character in `cursor_fg`. Each cell renders scissored with
-/// `LoadOp::Load`, so no full-frame glyph work runs and the rest of the
-/// composite is preserved. The glyph is warm in the atlas from the retained
-/// build, so it is a cache hit; the box color is recomputed from the frame
-/// sample time, so it still cycles.
-fn composite_filled_box_cursor_cells(
-    renderer: &mut WgpuRenderer,
-    render: &mut GuiFrameRenderState,
-    surface_view: &wgpu::TextureView,
-    present_mapping: romacs_display_protocol::PresentMapping,
-    animated_cursor: Option<romacs_display_protocol::types::AnimatedCursor>,
-) {
-    let Some(atlas) = render.compositor.glyph_atlas.as_mut() else {
-        return;
-    };
-    let Some(retained) = render.compositor.retained_static.as_ref() else {
-        return;
-    };
-    for cell in &retained.cursor_cells {
-        atlas.set_current_frame_fonts(cell.mini.font_bindings());
-        renderer.render_frame_cell_loaded(
-            surface_view,
-            &cell.mini,
-            atlas,
-            present_mapping,
-            true,
-            animated_cursor,
-            cell.scissor,
-        );
-    }
 }
 
 /// Whether any dynamic overlay is active. Overlays are not part of the

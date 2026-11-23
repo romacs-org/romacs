@@ -456,3 +456,127 @@ fn a_frame_through_the_root_picture_equals_it_drawn_whole_where_rows_share_slots
 fn a_frame_through_the_root_picture_equals_it_drawn_whole_at_a_fractional_scale() {
     through_picture_equals_whole(1.5, false, 1.0);
 }
+
+
+#[test]
+fn moving_filled_box_matches_whole_over_adjacent_ink() {
+    let mut h = try_harness().expect("this comparison requires a GPU adapter");
+    h.renderer.effects.cursor_color_cycle.enabled = false;
+
+    for (label, scale, frame_alpha, base_alpha, cursor_alpha) in [
+        ("opaque", 1.0, 1.0, 1.0, 1.0),
+        ("alpha-over-alpha", 1.0, 0.71, 1.0, 0.43),
+        ("fractional-device-scale", 1.25, 0.71, 1.0, 0.43),
+        ("nonopaque-base-color", 1.25, 0.71, 0.82, 0.43),
+    ] {
+        h.renderer.set_scale_factor(scale);
+        let mut frame = filled_box_frame();
+        frame.background_alpha = frame_alpha;
+        frame.background.a = base_alpha;
+        frame.active_cursor_mut().unwrap().color.a = cursor_alpha;
+        frame.active_cursor_mut().unwrap().cursor_fg.a = 0.73;
+
+        // The original failure: this glyph is outside the destination
+        // cursor slot, but intersects the moving box.
+        frame.add_char('W', 9.0, 16.0, 10.0, 18.0, 14.0, false);
+
+        // Its second layer has a different ink color and baseline. The
+        // overlay and the face background must also stay in draw order.
+        face(
+            &mut frame,
+            1,
+            Color::new(0.80, 0.21, 0.31, 0.51),
+            Color::new(0.12, 0.42, 0.72, 0.58),
+        );
+        frame.set_draw_context(DisplayWindowId::new(1), GlyphRowRole::Text, None);
+        let row = frame.slot_row(16.0);
+        frame.add_char_on_row(
+            'f',
+            (12.0, 16.0, row),
+            (10.0, 18.0, 12.0),
+            FaceId::new(1),
+            BoxVerticalEdges::Both,
+        );
+        if let Some(FrameGlyph::Char { composed, bidi_level, .. }) = frame.glyphs.last_mut() {
+            *composed = Some("ffi".into());
+            *bidi_level = 1;
+        }
+        frame.set_draw_context(DisplayWindowId::new(1), GlyphRowRole::ModeLine, None);
+        frame.add_stretch(20.0, 25.0, 4.0, 5.0, Color::new(0.2, 0.7, 0.2, 0.53), FaceId::new(1), false);
+        frame.set_draw_context(DisplayWindowId::new(1), GlyphRowRole::Text, None);
+        // Match the destination's real slot to exercise settled inversion too.
+        let slot = frame.glyphs[0].slot_id().unwrap();
+        frame.active_cursor_mut().unwrap().slot_id = slot;
+
+        h.atlas.set_current_frame_fonts(frame.font_bindings());
+        let mapping = mapping_for_scale(&frame, W, H, scale);
+        let (expected_texture, expected_view) = make_tex(&h.renderer, label);
+        let (actual_texture, actual_view) = make_tex(&h.renderer, label);
+        let mut picture = RootPicture::new(&h.renderer, SnapshotSize::new(W, H).unwrap());
+        let mut previous = None;
+        for (step, moving, visible) in [
+            ("first", None, true),
+            ("warm", None, true),
+            ("adjacent W", Some((12.5, 16.0, None)), true),
+            (
+                "skewed trail",
+                Some((12.5, 16.0, Some([(13.0, 11.0), (24.0, 18.0), (23.0, 33.0), (9.0, 29.0)]))),
+                true,
+            ),
+            ("blinked", None, false),
+            ("settled", None, true),
+        ] {
+            let animated_cursor = moving.map(|(x, y, corners)| AnimatedCursor {
+                window_id: frame.active_cursor().unwrap().window_id,
+                x,
+                y,
+                width: 10.0,
+                height: 18.0,
+                corners,
+                frame_id: DisplayFrameId::new(0),
+            });
+            h.renderer.render_frame_glyphs(
+                &expected_view,
+                &frame,
+                &mut h.atlas,
+                mapping,
+                visible,
+                animated_cursor,
+                None,
+                None,
+                None,
+            );
+            let expected = read_tex(&h.renderer, &expected_texture);
+            let painted = picture.paint(
+                &mut h.renderer,
+                &mut h.atlas,
+                &frame,
+                PaintTarget {
+                    view: &actual_view,
+                    mapping,
+                    cursor_visible: visible,
+                    animated_cursor,
+                },
+            );
+            let actual = read_tex(&h.renderer, &actual_texture);
+            let differing: Vec<_> = expected.chunks_exact(4).zip(actual.chunks_exact(4))
+                .enumerate().filter(|(_, (a, b))| a != b).collect();
+            assert!(
+                differing.is_empty(),
+                "{label}, {step}, {painted:?}: {} pixels differ, first {:?}",
+                differing.len(),
+                differing.first().map(|(i, (a, b))| (i % W as usize, i / W as usize, a, b)),
+            );
+            if let Some(previous) = previous.as_ref().filter(|_| step != "warm") {
+                assert_ne!(&expected, previous, "{label}, {step} must visibly change");
+            }
+            let expected_path = match (step, base_alpha == 1.0) {
+                (_, false) | ("first", true) => Painted::Direct,
+                ("warm", true) => Painted::Whole,
+                _ => Painted::Clean,
+            };
+            assert_eq!(painted, expected_path, "{label}, {step}");
+            previous = Some(expected);
+        }
+    }
+}

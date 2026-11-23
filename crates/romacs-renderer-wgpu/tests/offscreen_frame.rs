@@ -1625,87 +1625,6 @@ fn filled_box_frame() -> FrameGlyphBuffer {
 }
 
 #[test]
-fn filled_box_composite_matches_full_render() {
-    let Some(mut h) = try_harness() else {
-        return;
-    };
-    h.renderer.effects.cursor_color_cycle.enabled = false;
-    let frame = filled_box_frame();
-    h.atlas.set_current_frame_fonts(frame.font_bindings());
-
-    // A: full render with the filled-box cursor inline.
-    let (ta, va) = make_tex(&h.renderer, "fb-full");
-    h.renderer.render_frame_glyphs(
-        &va,
-        &frame,
-        &mut h.atlas,
-        mapping_for(&frame, W, H),
-        true,
-        None,
-        None,
-        None,
-        None,
-    );
-    let full = read_tex(&h.renderer, &ta);
-
-    // B: cursorless static -> blit -> scissored cell redraw (box + char).
-    let (_ts, vs) = make_tex(&h.renderer, "fb-static");
-    h.renderer.render_frame_glyphs(
-        &vs,
-        &frame,
-        &mut h.atlas,
-        mapping_for(&frame, W, H),
-        false,
-        None,
-        None,
-        None,
-        None,
-    );
-    let (tc, vc) = make_tex(&h.renderer, "fb-composite");
-    let bg = h.renderer.create_texture_bind_group(&vs);
-    h.renderer
-        .begin_draw(romacs_renderer_wgpu::renderer::RenderTarget::new(
-            &vc,
-            mapping_for(&frame, W, H).surface(),
-        ))
-        .blit_retained(&bg);
-    // Match the runtime sequence exactly: render_cursor_only draws the box
-    // (cursor_bg) unscissored, then the scissored cell redraw adds box + char.
-    h.renderer
-        .render_cursor_only(&vc, &frame, mapping_for(&frame, W, H), true, None, None);
-    // cursor cell = the glyph cell (20,16,10,18)
-    h.renderer.render_frame_cell_loaded(
-        &vc,
-        &frame,
-        &mut h.atlas,
-        mapping_for(&frame, W, H),
-        true,
-        None,
-        (20, 16, 10, 18),
-    );
-    let comp = read_tex(&h.renderer, &tc);
-
-    let mut max_diff = 0i32;
-    for y in 0..H {
-        for x in 0..W {
-            let a = pxb(&full, x, y);
-            let b = pxb(&comp, x, y);
-            for c in 0..4 {
-                let d = (a[c] as i32 - b[c] as i32).abs();
-                if d > max_diff {
-                    max_diff = d;
-                }
-            }
-        }
-    }
-    eprintln!("filled-box composite vs full: max_diff={}", max_diff);
-    assert!(
-        max_diff <= 2,
-        "filled-box composite must match full render, max_diff={max_diff}"
-    );
-}
-
-#[test]
 fn filled_box_vertical_motion_keeps_destination_text_normal_until_arrival() {
     let Some(mut h) = try_harness() else {
         return;
@@ -1845,30 +1764,6 @@ fn child_filled_box_motion_uses_the_same_inverse_video_contract() {
     assert!(
         (40..58).any(|y| (24..34).any(|x| pxb(&in_flight, x, y) != pxb(&cursorless, x, y))),
         "child in-flight body must include the child-frame offset exactly once"
-    );
-}
-
-#[test]
-fn filled_box_cell_redraw_ignores_stale_cell_below_resized_surface() {
-    let Some(mut h) = try_harness() else {
-        return;
-    };
-    let frame = filled_box_frame();
-    h.atlas.set_current_frame_fonts(frame.font_bindings());
-
-    // Model a rapid shrink: the committed frame still places the cursor cell
-    // at y=16..34, while the newly acquired surface is only eight pixels tall.
-    // The stale cell has no intersection with the render target and must be
-    // skipped rather than encoded as an out-of-bounds zero-height scissor.
-    let (_target, view) = make_tex_sized(&h.renderer, "resized-below-cursor", W, 8);
-    h.renderer.render_frame_cell_loaded(
-        &view,
-        &frame,
-        &mut h.atlas,
-        mapping_for(&frame, W, 8),
-        true,
-        None,
-        (20, 16, 10, 18),
     );
 }
 
