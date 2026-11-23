@@ -2568,6 +2568,11 @@ impl Vm {
         b.emit(Op::Closure(r, id, site));
         Ok(r)
     }
+    /// A `defmacro' BODY's executable forms: byte-run.el's `defmacro' keeps
+    /// its docstring out of the body, as `function' would.
+    fn macro_body<'a>(&self, body: &'a [Form]) -> &'a [Form] {
+        if body.len() > 1 && self.form_is_string(&body[0]) { &body[1..] } else { body }
+    }
     /// R215: a closure over an UNEXPANDED body, compiled at its first call.
     /// It captures every visible lexical binding, since free variables are unknown
     /// until expansion. Each capture is reported as mutated, so no binding
@@ -3215,11 +3220,7 @@ impl Vm {
                         let name = rest[0].sym()?;
                         let slot = self.slot(name);
                         let closure = if head == "defmacro" {
-                            // byte-run.el's `defmacro' keeps its docstring
-                            // out of the body, as `function' would.
-                            let body = &rest[2..];
-                            let body = if body.len() > 1 && self.form_is_string(&body[0]) { &body[1..] } else { body };
-                            self.lambda(b, rest[1].list()?, body)?
+                            self.lambda(b, rest[1].list()?, self.macro_body(&rest[2..]))?
                         } else {
                             self.closure(b, &rest[1], &rest[2..], true, false)?
                         };
