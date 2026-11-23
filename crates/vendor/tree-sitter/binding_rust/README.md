@@ -65,8 +65,8 @@ let new_tree = parser.parse(new_source_code, Some(&tree));
 
 ### Text Input
 
-The source code to parse can be provided either as a string, a slice, a vector,
-or as a function that returns a slice. The text can be encoded as either UTF8 or UTF16:
+The parser accepts UTF-8 text as a string, a byte slice, a byte vector,
+or through a callback that returns chunks of bytes.
 
 ```rust
 // Store some source code in an array of lines.
@@ -78,7 +78,7 @@ let lines = &[
 
 // Parse the source code using a custom callback. The callback is called
 // with both a byte offset and a row/column offset.
-let tree = parser.parse_with(&mut |_byte: usize, position: Point| -> &[u8] {
+let tree = parser.parse_with_options(&mut |_byte: usize, position: Point| -> &[u8] {
     let row = position.row as usize;
     let column = position.column as usize;
     if row < lines.len() {
@@ -90,7 +90,7 @@ let tree = parser.parse_with(&mut |_byte: usize, position: Point| -> &[u8] {
     } else {
         &[]
     }
-}, None).unwrap();
+}, None, None).unwrap();
 
 assert_eq!(
   tree.root_node().to_sexp(),

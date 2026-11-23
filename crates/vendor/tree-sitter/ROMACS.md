@@ -80,6 +80,9 @@ Each is its own commit in Romacs's history.
 - `docs(treesit): record L0 instruction counts` records the cost of the
   combined deletion slice.
 
+- `refactor(treesit): remove the remaining UTF-16 binding helper` drops
+  the unused slice accessor and describes only the supported text input.
+
 The cost rig at `7a80f952a` compared L0 `8b5eb2504` to `fa9115480`
 using Callgrind. Runtime lexing used 7.1–11.2% fewer instructions and
 per-key lexer lifecycle ranged from 4.4% fewer to 0.62% more. Per-key

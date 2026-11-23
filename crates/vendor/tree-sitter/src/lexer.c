@@ -421,7 +421,7 @@ void ts_lexer_finish(Lexer *self, uint32_t *lookahead_end_byte) {
 
   uint32_t current_lookahead_end_byte = self->current_position.bytes + 1;
 
-  // In order to determine that a byte sequence is invalid UTF8 or UTF16,
+  // In order to determine that a byte sequence is invalid UTF-8,
   // the character decoding algorithm may have looked at the following byte.
   // Therefore, the next byte *after* the current (invalid) character
   // affects the interpretation of the current character.

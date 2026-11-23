@@ -1340,11 +1340,6 @@ impl<'tree> Node<'tree> {
         str::from_utf8(&source[self.start_byte()..self.end_byte()])
     }
 
-    #[must_use]
-    pub fn utf16_text<'a>(&self, source: &'a [u16]) -> &'a [u16] {
-        &source[self.start_byte() / 2..self.end_byte() / 2]
-    }
-
     /// Create a new [`TreeCursor`] starting from this node.
     ///
     /// Note that the given node is considered the root of the cursor,
