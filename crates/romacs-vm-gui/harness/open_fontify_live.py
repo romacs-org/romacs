@@ -62,11 +62,10 @@ import sys
 import tempfile
 import time
 
-import perkey_live
-
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import live_oracle as live  # noqa: E402
+import perkey_live  # noqa: E402
 import parity_live  # noqa: E402
 
 MEASURE = r''';;; -*- lexical-binding: t -*-
