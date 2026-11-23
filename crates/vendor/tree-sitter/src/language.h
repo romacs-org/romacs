@@ -62,6 +62,20 @@ static inline const TSParseAction *ts_language_actions(
   return entry.actions;
 }
 
+static inline TSStateId ts_language_shift_state(
+  TSStateId state,
+  const TSParseAction *actions,
+  uint32_t count
+) {
+  if (count > 0) {
+    TSParseAction action = actions[count - 1];
+    if (action.type == TSParseActionTypeShift) {
+      return action.shift.extra ? state : action.shift.state;
+    }
+  }
+  return 0;
+}
+
 static inline bool ts_language_has_reduce_action(
   const TSLanguage *self,
   TSStateId state,
