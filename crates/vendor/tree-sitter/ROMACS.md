@@ -86,6 +86,10 @@ Each is its own commit in Romacs's history.
 - `refactor(treesit): remove empty lexer logging` drops the no-op macro
   and its calls. The grammar ABI keeps the callable logging slot.
 
+- `perf(treesit): restore inlining of subtree size` keeps
+  `ts_subtree_total_size` inline at the hot reuse and stack sites where
+  GCC emitted calls after L0.
+
 The cost rig at `7a80f952a` compared L0 `8b5eb2504` to `fa9115480`
 using Callgrind. Runtime lexing used 7.1–11.2% fewer instructions and
 per-key lexer lifecycle ranged from 4.4% fewer to 0.62% more. Per-key
@@ -96,6 +100,15 @@ disassembly attribute the increase chiefly to GCC emitting out-of-line
 calls to `ts_subtree_total_size`, `reusable_node_descend` and the
 `ts_stack_push.constprop` clone at hot sites where the reference inlined
 the work.
+
+The cost rig at `3bfc984ab` compared the inlining fix `ee12843e3` to
+`fa9115480`. With the rope reader, per-key whole-parse instructions fell
+0.24–2.36% across both profiles. T0 `clean-large` fell from 2,737,505,260
+to 2,715,967,148 instructions and T0 `wide` fell from 2,754,222,182 to
+2,732,581,672. Runtime lexing used 7.04–10.78% fewer instructions and
+per-key lexer lifecycle ranged from 2.46% fewer to 0.37% more. Both rig
+gates passed. The whole-tail reader also used fewer whole-parse
+instructions on every per-key row in both profiles.
 
 ## Checking it
 

@@ -292,6 +292,10 @@ static inline Length ts_subtree_size(Subtree self) {
   }
 }
 
+// After L0, GCC stopped inlining this at hot reuse and stack sites.
+#ifdef __GNUC__
+__attribute__((always_inline))
+#endif
 static inline Length ts_subtree_total_size(Subtree self) {
   return length_add(ts_subtree_padding(self), ts_subtree_size(self));
 }
