@@ -64,6 +64,16 @@
   },
   "url": "https://github.com/tree-sitter/tree-sitter-html"
  },
+ "java": {
+  "commit": "94703d5a6bed02b98e438d7cad1136c01a60ba2c",
+  "files": {
+   "src/parser.c": "4add5150cf4531eb5dd97f3343dcf65cd11704c84711348b328582b83424a0e4",
+   "src/tree_sitter/alloc.h": "b29c1c9fb7cc82f58c84b376df1297d6e2737a1d655fd356db0859e3c29c2fea",
+   "src/tree_sitter/array.h": "5bdf6ed1a78e3409fd443e085ca967a64c188a5d082aaf7f819bccd53a471c94",
+   "src/tree_sitter/parser.h": "a1f6ef161fbaf48a0e10fca90ef5290a062462b307b3898aa562993853b9f80a"
+  },
+  "url": "https://github.com/tree-sitter/tree-sitter-java"
+ },
  "javascript": {
   "commit": "108b2d4d17a04356a340aea809e4dd5b801eb40d",
   "files": {
