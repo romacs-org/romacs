@@ -1,0 +1,233 @@
+#!/usr/bin/env python3
+"""Build and compare the pinned C query engine and this checkout."""
+import argparse
+from collections import Counter, defaultdict
+import hashlib
+import itertools
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tarfile
+
+ROOT = Path(__file__).resolve().parent.parent
+SUPPORT = ROOT / "tools/lib/treesit-query"
+sys.path.insert(0, str(SUPPORT))
+from corpus import build as corpus
+
+# The first oracle commit changes no production code from f5162409c.
+C_REFERENCE = "48dd6bd636846a80496764e3ba07b66cd2602f01"
+NATIVE = Path("crates/romacs-vm/src/treesit/native.rs")
+RECORDER = NATIVE.with_name("query_oracle.rs")
+QUIT = Path("crates/romacs-vm/src/quit.rs")
+TEST = "treesit::native::query_oracle::query_oracle_"
+C_ENGINE = Path("crates/vendor/tree-sitter/src/query.c")
+
+
+def git(*args):
+    return subprocess.check_output(["git", *args], cwd=ROOT)
+
+
+def add_test_source(path, anchor, source):
+    text = path.read_text()
+    if text.count(anchor) != 1:
+        raise ValueError(f"missing C reference anchor in {path}")
+    path.write_text(text.replace(anchor, source.read_text().rstrip() + "\n\n" + anchor))
+
+
+def reference(work):
+    """Extract the pinned production sources and add the shared test recorder."""
+    dest = work / "reference"
+    dest.mkdir()
+    with subprocess.Popen(["git", "archive", C_REFERENCE], cwd=ROOT, stdout=subprocess.PIPE) as archive:
+        with tarfile.open(fileobj=archive.stdout, mode="r|") as contents:
+            contents.extractall(dest, filter="data")
+        if archive.wait():
+            raise ValueError(f"could not extract {C_REFERENCE}")
+    shutil.copyfile(ROOT / RECORDER, dest / RECORDER)
+    add_test_source(dest / NATIVE, "    /// Every match of the query under NODE",
+                    SUPPORT / "c-matches.rs")
+    add_test_source(dest / QUIT, "    /// Whether it may ever say to stop:",
+                    SUPPORT / "test-stop.rs")
+    return dest
+
+
+def touch_sources(root):
+    if root == ROOT:
+        paths = [root / os.fsdecode(name) for name in git("ls-files", "-z").split(b"\0") if name]
+    else:
+        paths = root.rglob("*")
+    for path in paths:
+        if path.is_file() and not path.is_symlink():
+            path.touch(exist_ok=True)
+
+
+def build_oracle(root, dest):
+    touch_sources(root)
+    command = ["cargo", "test", "-p", "romacs-vm", "--profile", "gate", "--locked",
+               "--offline", "--lib", "--no-run", "--message-format=json"]
+    with open(dest.with_suffix(".build.jsonl"), "w", encoding="utf-8") as log:
+        subprocess.run(command, cwd=root, check=True, stdout=log)
+    with open(dest.with_suffix(".build.jsonl"), encoding="utf-8") as log:
+        executables = [row["executable"] for line in log
+                       if (row := json.loads(line)).get("executable") and row["profile"]["test"]]
+    if len(executables) != 1:
+        raise ValueError(f"expected one oracle binary, found {executables}")
+    shutil.copy2(executables[0], dest)
+
+
+def extract(editor, work):
+    home = work / "editor-home"
+    home.mkdir()
+    env = dict(os.environ, HOME=str(home), ROMACS_RUNTIME_ROOT=str(ROOT),
+               ROMACS_QUERY_SCRATCH=str(work))
+    for kind in ("CACHE", "CONFIG", "DATA", "STATE"):
+        env[f"XDG_{kind}_HOME"] = str(home / kind.lower())
+    shutil.copyfile(SUPPORT / "samples.json", work / "samples.json")
+    with (work / "extract.log").open("w") as log:
+        subprocess.run([editor, "-Q", "--batch", "--load", SUPPORT / "extract.el"],
+                       cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT, check=True)
+
+
+def record(oracle, work):
+    subprocess.run([oracle, TEST, "--skip", TEST + "record"], check=True)
+    path = oracle.with_suffix(".records")
+    env = dict(os.environ, ROMACS_QUERY_CORPUS=str(work / "corpus.json"),
+               ROMACS_QUERY_RECORDS=str(path))
+    subprocess.run([oracle, "--ignored", "--exact", TEST + "record"], env=env, check=True)
+    if not path.is_file() or not path.stat().st_size:
+        raise ValueError(f"{oracle} produced no records")
+    return path
+
+
+def captures(matches):
+    return [(pattern, [capture[0] for capture in found]) for pattern, found in matches]
+
+
+def verify_probes(old, new, rust):
+    """Exactly three known C defects on isolated, named reproducers."""
+    # The other row of this probe is the explicit pair control.
+    wildcard = "wildcard-negated-field"
+    fourth = "fourth-capture"
+    wide = "wide-step-index"
+    if set(old) != {wildcard, fourth, wide, "subtree-and-bounds"} or old.keys() != new.keys():
+        raise ValueError("missing or unknown probe")
+    if old["subtree-and-bounds"] != new["subtree-and-bounds"] or [
+        len(found) for found in old["subtree-and-bounds"]
+    ] != [2, 1, 2, 1]:
+        raise ValueError("subtree or byte-bound probe changed")
+    if len(old[wildcard]) != 2 or old[wildcard][0] or captures(old[wildcard][1]) != [(0, [1, 0])]:
+        raise ValueError("unexpected C wildcard reproducer")
+    if len(old[fourth]) != 1 or captures(old[fourth][0]) != [(0, [0, 1, 2])]:
+        raise ValueError("unexpected C capture-limit reproducer")
+    if old[wide] != [[]]:
+        raise ValueError("unexpected C step-index reproducer")
+    if not rust:
+        if old != new:
+            raise ValueError("C candidate changed the pinned probes")
+        return
+    if new[wildcard] != [[], []] or len(new[fourth]) != 1 or len(new[wide]) != 1:
+        raise ValueError("invalid Rust wildcard or probe results")
+    if captures(new[fourth][0]) != [(0, [0, 1, 2, 3])] or captures(new[wide][0]) != [(32768, [1])]:
+        raise ValueError("Rust dropped a capture or wrapped the wide step index")
+    before, after = old[fourth][0][0][1], new[fourth][0][0][1]
+    if before != after[:3] or after[3][1:] != before[0][1:]:
+        raise ValueError("Rust fourth-capture probe changed the captured node")
+
+
+def compare(reference_records, candidate_records, cases, rust):
+    found = {}
+    case = None
+    seed = None
+    probes = defaultdict(list), defaultdict(list)
+    states = Counter()
+    compiled = Counter()
+    runs = Counter()
+    hits = defaultdict(set)
+    inventory = {case["language"]: case for case in cases}
+    with reference_records.open() as baseline, candidate_records.open() as candidate:
+        for old, new in itertools.zip_longest(baseline, candidate):
+            if old is None or new is None:
+                raise ValueError("record count differs")
+            label, *fields = old.split(maxsplit=4)
+            if label == "probe":
+                for rows, line in zip(probes, (old, new), strict=True):
+                    _, name, payload = line.split(maxsplit=2)
+                    rows[name].append(json.loads(payload))
+                continue
+            if label == "grammar":
+                language = fields[0]
+                case = inventory[language]
+                if language in found or int(fields[2]) != len(case["queries"]):
+                    raise ValueError(f"bad grammar header for {language}")
+                found[language] = int(fields[2])
+            elif label == "seed":
+                seed = old.strip()
+                states[language] += 1
+            elif label == "query":
+                compiled[language] += 1
+            elif label.isdecimal():
+                runs[language] += 1
+                if any(items for _, items in json.loads(old.split(maxsplit=3)[3])):
+                    hits[language].add(int(label))
+            if old != new:
+                if label == "query":
+                    tag, index, left = old.split(maxsplit=2)
+                    other_tag, other_index, right = new.split(maxsplit=2)
+                    if (tag, index, json.loads(left)) == (other_tag, other_index, json.loads(right)):
+                        continue
+                index = int(label) if label.isdecimal() else (
+                    int(fields[0]) if label in {"error", "query"} else None)
+                sample = f"\n{case['origins'][index]}\n{case['queries'][index]}" if index is not None else ""
+                raise ValueError(f"{language}, {seed}{sample}\nC {old[:400]}Rust {new[:400]}")
+    if found.keys() != inventory.keys():
+        raise ValueError("missing grammar records")
+    for name, case in inventory.items():
+        if (states[name] != 51 or compiled[name] < 8 or runs[name] != compiled[name] * 51 * 3
+                or len(hits[name]) < 3 or not any(index < case["shipped"] for index in hits[name])):
+            raise ValueError(f"insufficient coverage for {name}: {compiled[name]} compiles, "
+                             f"{states[name]} states, {runs[name]} runs, {len(hits[name])} matching queries")
+        print(f"{name:12} {found[name]:3} sources  {compiled[name]:3} accepted  "
+              f"{len(hits[name]):3} with captures  {runs[name]:5} executions")
+    verify_probes(*probes, rust)
+    print(f"{len(found)} grammars, {sum(found.values())} sources, "
+          f"{sum(states.values()) - len(found) * 3} seeded edits, {sum(runs.values())} executions")
+    print("Shipped-query outputs are identical."
+          + (" Three isolated C defects reproduced and corrected." if rust else ""))
+
+
+def main():
+    args = argparse.ArgumentParser(description=__doc__)
+    args.add_argument("--editor", type=Path, required=True, help="editor built from the current inputs")
+    args.add_argument("--out", type=Path, required=True, help="new scratch directory outside the checkout")
+    opts = args.parse_args()
+    work = opts.out.resolve()
+    if work == ROOT or ROOT in work.parents:
+        args.error("--out must be outside the source tree")
+    if not os.environ.get("CARGO_TARGET_DIR") or not Path(os.environ["CARGO_TARGET_DIR"]).is_absolute():
+        args.error("set CARGO_TARGET_DIR to the assigned absolute target path")
+    work.mkdir(parents=True)
+    # The grammar sources in the two executables must have the same pins.
+    if git("show", f"{C_REFERENCE}:crates/romacs-grammars/sources.json") != (
+        ROOT / "crates/romacs-grammars/sources.json"
+    ).read_bytes():
+        raise ValueError("the pinned C arm uses different grammar sources")
+    touch_sources(ROOT)
+    extract(opts.editor.resolve(strict=True), work)
+    cases = corpus(ROOT, work)
+    (work / "corpus.json").write_text(json.dumps(cases, ensure_ascii=False))
+    c, candidate = (work / name for name in ("oracle-c", "oracle-candidate"))
+    build_oracle(reference(work), c)
+    build_oracle(ROOT, candidate)
+    for path in (c, candidate):
+        print(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path}", flush=True)
+    compare(record(c, work), record(candidate, work), cases, not (ROOT / C_ENGINE).is_file())
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (ValueError, subprocess.CalledProcessError) as error:
+        sys.exit(str(error))

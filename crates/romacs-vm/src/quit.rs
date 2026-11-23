@@ -676,6 +676,11 @@ impl NativeStop {
         Self { quit: None, latched: false, debug_events: 0 }
     }
 
+    #[cfg(test)]
+    pub(crate) fn with_test_signal(quit: std::sync::Arc<QuitSignal>) -> Self {
+        Self { quit: Some(quit), latched: false, debug_events: 0 }
+    }
+
     /// Whether it may ever say to stop: a probe that cannot needs no
     /// callback installed.
     pub(crate) fn armed(&self) -> bool {

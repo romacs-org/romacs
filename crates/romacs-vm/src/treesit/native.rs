@@ -485,6 +485,17 @@ impl Query {
             _ => PredicateStep::Done,
         }).collect()
     }
+    #[cfg(test)]
+    fn matches_in(
+        &self,
+        _tree: &tree_sitter::Tree,
+        node: Node,
+        range: (u32, u32),
+        stop: &crate::quit::NativeStop,
+    ) -> Option<Vec<Match>> {
+        self.matches(node, range, stop)
+    }
+
     /// Every match of the query under NODE whose span overlaps the byte
     /// RANGE, in `ts_query_cursor_next_match` order, STOP asked between
     /// matches and as the cursor walks (the runtime's progress callback, once

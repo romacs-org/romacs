@@ -80,50 +80,88 @@ fn metadata(query: &Query) -> Value {
         .collect();
     let predicates: Vec<Vec<_>> = (0..query.pattern_count())
         .map(|pattern| {
-            query
-                .predicates(pattern)
-                .into_iter()
-                .map(|step| match step {
+            let mut out = Vec::new();
+            for step in query.predicates(pattern) {
+                out.push(match step {
                     PredicateStep::Capture(id) => json!({"capture": id}),
                     PredicateStep::String(bytes) => json!({"string": bytes}),
                     PredicateStep::Done => Value::Null,
-                })
-                .collect()
+                });
+            }
+            out
         })
         .collect();
     json!({"patterns": query.pattern_count(), "captures": captures, "predicates": predicates})
 }
 
+type CaptureFacts = (u32, usize, u16, u8, [usize; 2], [[usize; 2]; 2]);
+type MatchFacts = (u32, Vec<CaptureFacts>);
+
+fn capture_facts(node: Node, capture: u32, ids: &HashMap<Identity, usize>) -> CaptureFacts {
+    let raw = node.ts();
+    let flags = u8::from(raw.is_named())
+        | u8::from(raw.is_missing()) << 1
+        | u8::from(raw.is_extra()) << 2
+        | u8::from(raw.is_error()) << 3;
+    let position = |point: Point| [point.row, point.column];
+    (
+        capture,
+        ids[&node.identity()],
+        raw.kind_id(),
+        flags,
+        [raw.start_byte(), raw.end_byte()],
+        [position(raw.start_position()), position(raw.end_position())],
+    )
+}
+
 fn matches(
     query: &Query,
+    tree: &tree_sitter::Tree,
     node: Node,
     range: (u32, u32),
     ids: &HashMap<Identity, usize>,
-) -> Vec<(u32, Vec<(u32, usize)>)> {
+) -> Vec<MatchFacts> {
     query
-        .matches(node, range, &NativeStop::never())
+        .matches_in(tree, node, range, &NativeStop::never())
         .expect("unstopped walk")
         .into_iter()
         .map(|matched| {
             let captures = matched
                 .captures
                 .into_iter()
-                .map(|(node, id)| (id, ids[&node.identity()]))
+                .map(|(node, id)| capture_facts(node, id, ids))
                 .collect();
             (matched.pattern, captures)
         })
         .collect()
 }
 
+fn captures_only(matches: &[MatchFacts]) -> Vec<(u32, Vec<(u32, usize)>)> {
+    matches
+        .iter()
+        .map(|(pattern, captures)| {
+            (
+                *pattern,
+                captures
+                    .iter()
+                    .map(|capture| (capture.0, capture.1))
+                    .collect(),
+            )
+        })
+        .collect()
+}
+
 fn point(text: &[u8], offset: usize) -> Point {
-    let before = &text[..offset];
-    Point {
-        row: before.iter().filter(|&&byte| byte == b'\n').count(),
-        column: before
-            .iter()
-            .rposition(|&byte| byte == b'\n')
-            .map_or(offset, |line| offset - line - 1),
+    let mut position = Point { row: 0, column: 0 };
+    for &byte in &text[..offset] {
+        if byte == b'\n' {
+            position.row += 1;
+            position.column = 0;
+        } else {
+            position.column += 1;
+        }
     }
+    position
 }
 
 fn edit(text: &mut Vec<u8>, seed: &mut u64, near: usize) -> InputEdit {
@@ -176,7 +214,7 @@ fn write_matches(
     for (index, query) in queries.iter().enumerate() {
         let Some(query) = query else { continue };
         for range in ranges {
-            let found = matches(query, root, range, &ids);
+            let found = matches(query, tree, root, range, &ids);
             writeln!(output, "{index} {} {} {}", range.0, range.1, json!(found))
                 .expect("write matches");
         }
@@ -242,7 +280,12 @@ fn run_edits(
     let mut random = seed;
     let mut near = text.len() / 2;
     writeln!(output, "seed {seed} edit 0").expect("write initial state");
-    write_matches(output, &tree, queries, near as u32);
+    write_matches(
+        output,
+        &tree,
+        queries,
+        u32::try_from(near).expect("fixture fits in u32 bytes"),
+    );
     for index in 1..=edits {
         let edit = edit(&mut text, &mut random, near);
         near = edit.new_end_byte;
@@ -254,7 +297,12 @@ fn run_edits(
             edit.start_byte, edit.old_end_byte, edit.new_end_byte
         )
         .expect("write edit");
-        write_matches(output, &tree, queries, near as u32);
+        write_matches(
+            output,
+            &tree,
+            queries,
+            u32::try_from(near).expect("fixture fits in u32 bytes"),
+        );
     }
 }
 
@@ -274,9 +322,9 @@ fn query_oracle_preserves_match_and_capture_order() {
         b"(number) @item (array (number) @first . (number) @second) @parent",
     )
     .expect("query");
-    let found = matches(&query, root, (0, u32::MAX), &ids);
+    let found = matches(&query, &tree, root, (0, u32::MAX), &ids);
     assert_eq!(
-        found,
+        captures_only(&found),
         [
             (0, vec![(0, 3)]),
             (1, vec![(3, 1), (1, 3), (2, 5)]),
@@ -305,5 +353,89 @@ fn query_oracle_record() {
     for case in &cases {
         run_case(case, &mut output, 16);
     }
+    write_probes(&mut output);
     output.flush().expect("flush records");
+}
+
+fn json_tree(source: &str) -> (Language, tree_sitter::Tree) {
+    let language = language("json");
+    let mut parser = tree_sitter::Parser::new();
+    parser.set_language(&language.0).expect("JSON grammar");
+    let tree = parser.parse(source, None).expect("JSON tree");
+    (language, tree)
+}
+
+fn probe(
+    name: &str,
+    source: &str,
+    runs: &[(&str, Option<u32>, (u32, u32))],
+    output: &mut impl Write,
+) {
+    let (language, tree) = json_tree(source);
+    let root = tree.root_node();
+    let (_, ids) = tree_index(Node::from(root));
+    for &(query, child, range) in runs {
+        let node = child.map_or(root, |index| root.named_child(index).expect("probe child"));
+        let query = Query::new(&language, query.as_bytes()).expect("probe query");
+        let found = matches(&query, &tree, Node::from(node), range, &ids);
+        writeln!(output, "probe {name} {}", json!(found)).expect("write probe");
+    }
+}
+
+fn write_probes(output: &mut impl Write) {
+    probe(
+        "subtree-and-bounds",
+        "[1, 2]\n",
+        &[
+            ("(number) @n", Some(0), (0, 0)),
+            ("(number) @n", Some(0), (3, 0)),
+            ("(number) @n", Some(0), (5, 1)),
+            ("(number) @n", Some(0), (1, 3)),
+        ],
+        output,
+    );
+    probe(
+        "wildcard-negated-field",
+        "{\"k\": 1}",
+        &[
+            ("(pair !key (number) @number) @parent", None, (0, 0)),
+            ("(_ !key (number) @number) @parent", None, (0, 0)),
+        ],
+        output,
+    );
+    probe(
+        "fourth-capture",
+        "{\"k\": 1}",
+        &[("(number) @a @b @c @d", None, (0, 0))],
+        output,
+    );
+    let query = "(number) @n\n".repeat(32_768) + "(true) @end";
+    probe("wide-step-index", "true", &[(&query, None, (0, 0))], output);
+}
+
+#[test]
+fn query_oracle_keeps_empty_matches_for_predicate_only_patterns() {
+    let (language, tree) = json_tree("1");
+    let root = Node::from(tree.root_node());
+    let (_, ids) = tree_index(root);
+    let query = Query::new(&language, br#"(number) @n (#eq? @n "1")"#).expect("probe query");
+    let found = matches(&query, &tree, root, (0, 0), &ids);
+    assert_eq!(
+        captures_only(&found),
+        [(1, vec![]), (0, vec![(0, 1)]), (1, vec![])]
+    );
+}
+
+#[test]
+fn query_oracle_stops_no_match_scan() {
+    let (language, tree) = json_tree(&format!("[{}0]", "1,".repeat(4096)));
+    let root = Node::from(tree.root_node());
+    let query = Query::new(&language, b"(string) @s").expect("probe query");
+    let quit = std::sync::Arc::new(crate::quit::QuitSignal::new());
+    quit.set_busy(true);
+    assert!(quit.interrupt());
+    let stop = NativeStop::with_test_signal(quit);
+    assert!(query.matches_in(&tree, root, (0, 0), &stop).is_none());
+    let done = query.matches_in(&tree, root, (0, 0), &NativeStop::never());
+    assert!(done.expect("unstopped scan").is_empty());
 }
