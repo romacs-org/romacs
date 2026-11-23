@@ -244,7 +244,6 @@ fn present_retained(
     window: u64,
     retained: &mut Option<crate::render_thread::render_pass::retained_static::RetainedModels>,
     scene: &[u32],
-    overlay: &[u32],
 ) -> bool {
     use crate::render_thread::render_pass::retained_static::{
         RetainedModels, retained_frame_picture, retained_scene_is_current,
@@ -267,16 +266,13 @@ fn present_retained(
             .collect();
         *retained = Some(RetainedModels::record(Some(drawn), referenced, &current));
     }
-    let picture = retained_frame_picture(
-        retained.as_ref().map(|r| &r.picture),
-        super::picture_of(Some(overlay.iter().copied().collect()), &current),
-    );
+    let picture = retained_frame_picture(retained.as_ref());
     app.note_models_presented(window, &picture);
     rebuild
 }
 
 /// A retained scene holding a child frame's model keeps showing it across
-/// a cursor-only frame whose filled-box overlay redraws no model.
+/// a cursor-only frame.
 #[test]
 fn a_cursor_overlay_keeps_an_unchanged_retained_child_model() {
     let (mut app, emacs) = app_with_channel();
@@ -284,9 +280,9 @@ fn a_cursor_overlay_keeps_an_unchanged_retained_child_model() {
     with_ready_model(&mut app, &mut host);
     let mut retained = None;
     // The child frame's model is composited into the retained raster.
-    assert!(present_retained(&mut app, A, &mut retained, &[MODEL], &[]));
+    assert!(present_retained(&mut app, A, &mut retained, &[MODEL]));
     assert_eq!(delivered(&emacs), ["ready", "R{true,1,0}"]);
-    assert!(!present_retained(&mut app, A, &mut retained, &[MODEL], &[]));
+    assert!(!present_retained(&mut app, A, &mut retained, &[MODEL]));
     assert!(
         delivered(&emacs).is_empty(),
         "the retained child model is still on screen"
@@ -304,7 +300,7 @@ fn two_windows_a_retained_child_member_still_counts_for_readiness() {
     let mut host = FakeHost::default();
     with_ready_model(&mut app, &mut host);
     let mut retained = None;
-    present_retained(&mut app, A, &mut retained, &[MODEL], &[]);
+    present_retained(&mut app, A, &mut retained, &[MODEL]);
     present(&mut app, B);
     assert_eq!(delivered(&emacs), ["ready", "R{true,1,0}"]);
     update(&mut app, &mut host, 1, yaw(30.0));
@@ -316,7 +312,7 @@ fn two_windows_a_retained_child_member_still_counts_for_readiness() {
         "A still pictures rev 1"
     );
     assert!(
-        present_retained(&mut app, A, &mut retained, &[MODEL], &[]),
+        present_retained(&mut app, A, &mut retained, &[MODEL]),
         "A's raster pictures the old camera"
     );
     assert_eq!(delivered(&emacs), ["R{true,2,1}"]);
@@ -324,7 +320,7 @@ fn two_windows_a_retained_child_member_still_counts_for_readiness() {
     app.models.render_dirty(&mut host);
     present(&mut app, B);
     assert_eq!(delivered(&emacs), ["R{false,3,2}"], "A still counts");
-    present_retained(&mut app, A, &mut retained, &[MODEL], &[]);
+    present_retained(&mut app, A, &mut retained, &[MODEL]);
     assert_eq!(delivered(&emacs), ["R{true,3,2}"]);
 }
 
@@ -354,7 +350,7 @@ fn a_cursor_frame_after_a_model_change_shows_and_picks_the_new_camera() {
     let mut host = FakeHost::default();
     with_ready_model(&mut app, &mut host);
     let mut retained = None;
-    assert!(present_retained(&mut app, A, &mut retained, &[MODEL], &[]));
+    assert!(present_retained(&mut app, A, &mut retained, &[MODEL]));
     assert_eq!(delivered(&emacs), ["ready", "R{true,1,0}"]);
     let before = app.models.rendered(MODEL).unwrap();
 
@@ -365,7 +361,7 @@ fn a_cursor_frame_after_a_model_change_shows_and_picks_the_new_camera() {
 
     // A cursor blink: compositor-only, same generation and size.
     assert!(
-        present_retained(&mut app, A, &mut retained, &[MODEL], &[]),
+        present_retained(&mut app, A, &mut retained, &[MODEL]),
         "the raster from before the change was blitted again"
     );
     assert!(delivered(&emacs).is_empty(), "A still shows rev 2");
@@ -601,7 +597,7 @@ fn a_raster_built_while_the_model_loads_is_rebuilt_once_the_model_is_drawable() 
     // Inserted while loading: the full frame and the first cursor blink
     // composite nothing of it, and the raster is built that way.
     present(&mut app, A);
-    assert!(present_retained(&mut app, A, &mut retained, &[MODEL], &[]));
+    assert!(present_retained(&mut app, A, &mut retained, &[MODEL]));
     finish_loading(&mut app, &mut host);
     assert_eq!(delivered(&emacs), ["ready"]);
     // The upload's full frame shows it.
@@ -609,7 +605,7 @@ fn a_raster_built_while_the_model_loads_is_rebuilt_once_the_model_is_drawable() 
     assert_eq!(delivered(&emacs), ["R{true,1,0}"]);
     // The next blink: same generation, same size, no redisplay.
     assert!(
-        present_retained(&mut app, A, &mut retained, &[MODEL], &[]),
+        present_retained(&mut app, A, &mut retained, &[MODEL]),
         "the raster from before the upload was blitted again"
     );
     assert!(

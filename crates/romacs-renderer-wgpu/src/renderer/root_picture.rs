@@ -75,6 +75,22 @@ pub struct PaintTarget<'a> {
     pub animated_cursor: Option<AnimatedCursor>,
 }
 
+impl PaintTarget<'_> {
+    fn paint_direct(self, renderer: &mut WgpuRenderer, atlas: &mut WgpuGlyphAtlas, frame: &FrameGlyphBuffer) {
+        renderer.render_frame_glyphs(
+            self.view,
+            frame,
+            atlas,
+            self.mapping,
+            self.cursor_visible,
+            self.animated_cursor,
+            None,
+            None,
+            None,
+        );
+    }
+}
+
 /// The root glyph pass's cursorless pixels, and the frame they show.
 pub struct RootPicture {
     texture: FullFrameTexture,
@@ -150,12 +166,14 @@ impl RootPicture {
         frame: &FrameGlyphBuffer,
         target: PaintTarget<'_>,
     ) -> Painted {
-        let PaintTarget {
-            view,
-            mapping,
-            cursor_visible,
-            animated_cursor,
-        } = target;
+        let mapping = target.mapping;
+        // A patch starts with an opacity-adjusted background draw. The
+        // base color must cover the saved pixels exactly as a clear would.
+        if frame.background.a != 1.0 {
+            self.shown = None;
+            target.paint_direct(renderer, atlas, frame);
+            return Painted::Direct;
+        }
         let (scale_bits, subpixel) = (renderer.scale_factor().to_bits(), atlas.subpixel_enabled());
         let shown = self
             .shown
@@ -194,17 +212,7 @@ impl RootPicture {
             // A frame that needs a whole repaint is drawn as it comes: the
             // next frame may not repeat it (scrolling, a change of theme).
             (Plan::Whole, _) => {
-                renderer.render_frame_glyphs(
-                    view,
-                    frame,
-                    atlas,
-                    mapping,
-                    cursor_visible,
-                    animated_cursor,
-                    None,
-                    None,
-                    None,
-                );
+                target.paint_direct(renderer, atlas, frame);
                 self.shown = Some(keep(frame, runs, false, renderer.effects.clone()));
                 return Painted::Direct;
             }

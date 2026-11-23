@@ -40,7 +40,7 @@ waits for every parse, as GNU does."
 (defconst romacs-treesit--mode-languages
   '((bash-ts-mode . bash) (c-ts-mode . c) (c++-ts-mode . cpp)
     (c-or-c++-ts-mode . c) (css-ts-mode . css) (go-ts-mode . go)
-    (js-ts-mode . javascript) (json-ts-mode . json)
+    (java-ts-mode . java) (js-ts-mode . javascript) (json-ts-mode . json)
     (mhtml-ts-mode . html) (python-ts-mode . python)
     (rust-ts-mode . rust) (toml-ts-mode . toml) (tsx-ts-mode . tsx)
     (typescript-ts-mode . typescript) (yaml-ts-mode . yaml))

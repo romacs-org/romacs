@@ -78,14 +78,18 @@ fn bundled_grammars_load_unless_overridden_and_before_the_systems() {
             printed(&mut vm, "(with-temp-buffer (insert \"fn f() {}\")
                 (string= (treesit-node-type (treesit-node-child (treesit-parser-root-node (treesit-parser-create 'rust)) 0))
                          \"function_item\"))"),
+            printed(&mut vm, "(with-temp-buffer (insert \"class Sample {}\")
+                (let ((root (treesit-parser-root-node (treesit-parser-create 'java))))
+                  (list (treesit-node-type root) (treesit-node-type (treesit-node-child root 0 t)))))"),
         ]
     });
     assert_eq!(report, [
         "(nil not-found)",
         "t",
-        "(bash c cpp css go html javascript jsdoc json python rust toml tsx typescript yaml)",
+        "(bash c cpp css go html java javascript jsdoc json python rust toml tsx typescript yaml)",
         "nil",
         "t",
+        r#"("program" "class_declaration")"#,
     ]);
 }
 
