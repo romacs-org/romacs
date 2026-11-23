@@ -77,7 +77,7 @@ fn function_json(f: &Function) -> J {
         f.dynamic,
         params_json(f.params.as_deref()),
         f.key.map(|key| format!("{key:032x}")),
-        f.capture_names.as_ref().map(|names| names.iter().map(|n| n.as_ref().and_then(Name::source)).collect::<Vec<_>>())
+        f.environment.as_ref().map(environment_json)
     ])
 }
 /// A lambda list holding a generated symbol is not portable: null.
@@ -88,6 +88,41 @@ fn params_json(params: Option<&[Form]>) -> J {
         }
         _ => J::Null,
     }
+}
+/// A layout naming an uninterned symbol is not portable: null, so slot 2
+/// refuses rather than answering without that binding.
+fn environment_json(layout: &CaptureLayout) -> J {
+    if layout.slots.iter().any(|slot| matches!(slot.name, Some(Name::Generated(_)))) {
+        return J::Null;
+    }
+    let slots = layout.slots.iter().map(|slot| {
+        let name = slot.name.as_ref().and_then(Name::source);
+        match slot.binding {
+            CaptureBinding::Lexical => json!([name]),
+            CaptureBinding::Late { shadow } => json!([name, shadow]),
+        }
+    }).collect::<Vec<_>>();
+    json!([slots, layout.specials, layout.bare_context])
+}
+fn environment(v: &J, count: usize) -> Option<CaptureLayout> {
+    let slots = v.get(0)?.as_array()?;
+    if slots.len() != count {
+        return None;
+    }
+    let slots = slots.iter().map(|slot| {
+        let slot = slot.as_array()?;
+        let name = slot.first()?.as_str().map(|name| Name::Source(name.to_owned()));
+        let binding = match slot.get(1) {
+            None => CaptureBinding::Lexical,
+            Some(J::Null) => CaptureBinding::Late { shadow: None },
+            Some(index) => CaptureBinding::Late { shadow: Some(num(index).filter(|&index| index < count)?) },
+        };
+        Some(CaptureSlot { name, binding })
+    }).collect::<Option<Vec<_>>>()?;
+    let specials = v.get(1)?.as_array()?.iter()
+        .map(|name| name.as_str().map(str::to_owned)).collect::<Option<Vec<_>>>()?;
+    let bare_context = v.get(2)?.as_bool()?;
+    Some(CaptureLayout { slots, specials, bare_context })
 }
 fn function(v: &J) -> Option<Function> {
     let a = v.as_array()?;
@@ -113,8 +148,7 @@ fn function(v: &J) -> Option<Function> {
         lazy: None,
         pending: None,
         dynamic: a.get(7).and_then(J::as_bool),
-        capture_names: a.get(10).and_then(J::as_array).filter(|names| names.len() == num(&a[1]).unwrap_or(0))
-            .map(|names| names.iter().map(|name| name.as_str().map(|name| Name::Source(name.to_owned()))).collect()),
+        environment: a.get(10).and_then(|layout| environment(layout, num(&a[1])?)),
         params: a.get(8).and_then(J::as_array).and_then(|p| p.iter().map(|v| form(v, 0)).collect::<Option<Vec<_>>>()),
         key: a.get(9).and_then(J::as_str).and_then(|k| u128::from_str_radix(k, 16).ok()),
         code: a[6]
@@ -166,5 +200,44 @@ impl Artifact {
                 .map(function)
                 .collect::<Option<Vec<_>>>()?,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn slot(name: Option<Name>, binding: CaptureBinding) -> CaptureSlot {
+        CaptureSlot { name, binding }
+    }
+
+    /// The layout round-trips: names, late bindings with their shadows, the
+    /// local specials and the bare context.
+    #[test]
+    fn a_capture_layout_round_trips() {
+        let layout = CaptureLayout {
+            slots: vec![
+                slot(Some(Name::Source("x".into())), CaptureBinding::Late { shadow: Some(1) }),
+                slot(None, CaptureBinding::Lexical),
+                slot(Some(Name::Source("y".into())), CaptureBinding::Late { shadow: None }),
+            ],
+            specials: vec!["s".into()],
+            bare_context: false,
+        };
+        let back = environment(&environment_json(&layout), 3).expect("a layout");
+        assert_eq!(format!("{back:?}"), format!("{layout:?}"));
+        assert!(environment(&environment_json(&layout), 2).is_none(), "the capture count binds it");
+    }
+
+    /// An uninterned name has no spelling: the whole layout is null, so a
+    /// warm closure refuses slot 2 instead of answering without it.
+    #[test]
+    fn a_layout_naming_an_uninterned_symbol_is_not_portable() {
+        let layout = CaptureLayout {
+            slots: vec![slot(Some(Name::Generated(crate::expand::generated_id())), CaptureBinding::Lexical)],
+            specials: vec![],
+            bare_context: false,
+        };
+        assert_eq!(environment_json(&layout), J::Null);
     }
 }

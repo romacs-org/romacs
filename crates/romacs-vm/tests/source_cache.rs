@@ -202,3 +202,27 @@ fn macro_redefinition_invalidates_only_dependent_source() {
     vm.eval_source("(let ((x 8)) (+ x 9))").unwrap();
     assert_eq!(vm.source_cache_stats().hits, hits + 1);
 }
+
+/// A closure's slot 2 reads the same from a warm cache as from a cold
+/// compile: the capture layout and the local specials travel with the IR.
+#[test]
+fn a_cached_closure_shows_the_same_environment() {
+    let dir = std::path::PathBuf::from(std::env::var("HOME").unwrap()).join(format!(
+        ".hermes/cache/scratch/romacs/vm2/cache-layout-test-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = "(let ((y 5) (unused 6))
+                    (defvar cache-layout-special)
+                    (let ((f (lambda () (let ((cache-layout-special y)) (symbol-value 'cache-layout-special)))))
+                      (list (aref f 2) (funcall f))))";
+    let expected = "(((y . 5) cache-layout-special) 5)";
+    let mut cold = Vm::new();
+    cold.set_source_cache_store(dir.clone()).unwrap();
+    assert_eq!(cold.eval_source(source).unwrap().display().unwrap(), expected);
+    let mut warm = Vm::new();
+    warm.set_source_cache_store(dir.clone()).unwrap();
+    assert_eq!(warm.eval_source(source).unwrap().display().unwrap(), expected);
+    assert_eq!(warm.source_cache_stats().disk_hits, 1);
+    std::fs::remove_dir_all(dir).unwrap();
+}

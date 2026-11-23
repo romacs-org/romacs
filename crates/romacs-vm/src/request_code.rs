@@ -206,10 +206,20 @@ impl Vm {
     }
 
     pub(super) fn compile_request(&mut self, form: &Form) -> Result<(usize, Vec<usize>)> {
+        self.request_compilation(|vm| vm.compile(form))
+    }
+
+    pub(super) fn compile_eval_request(
+        &mut self, form: &Form, outer: &NameMap<Name, Binding>, specials: NameSet<String>,
+    ) -> Result<(usize, Vec<Name>)> {
+        self.request_compilation(|vm| vm.compile_entry(form, outer, specials)).map(|(entry, _)| entry)
+    }
+
+    fn request_compilation<T>(&mut self, compile: impl FnOnce(&mut Self) -> Result<T>) -> Result<(T, Vec<usize>)> {
         let previous = self.request_code.compiling;
         let start = self.request_code.compiled.len();
         self.request_code.compiling = true;
-        let result = self.compile(form);
+        let result = compile(self);
         if result.is_err() {
             self.request_code.since_collection += 1;
         }
@@ -266,7 +276,7 @@ impl Vm {
                 lazy: None,
                 pending: None,
                 dynamic: None,
-                capture_names: None,
+                environment: None,
                 params: None,
                 key: None,
             },

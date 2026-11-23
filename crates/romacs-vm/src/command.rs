@@ -298,19 +298,11 @@ impl Vm {
             }
             _ => unreachable!("head_is matched a list"),
         };
-        let mut lambda = vec![sym("lambda"), args.clone()];
-        lambda.extend_from_slice(&body[..i]);
-        lambda.extend_from_slice(&body[i + 1..]);
-        if i + 1 == body.len() {
-            // `if (NILP (cdr)) cdr = Fcons (Qnil, Qnil)': the body is never empty.
-            lambda.push(sym("nil"));
-        }
         let thunk = match &spec {
             form if self.form_is_string(form) => sym("nil"),
             Form::Sym(s) if s == "nil" => sym("nil"),
             form => call("function", vec![Form::List(vec![sym("lambda"), Form::List(vec![]), form.clone()])]),
         };
-        let executable = lambda[2..].to_vec();
         // One slot value, registered and in the closure's slot 5, as GNU's
         // closure holds it once. [SPEC MODES] is a fresh vector for each
         // closure, as make-interpreted-closure's Fvector makes it.
@@ -330,14 +322,15 @@ impl Vm {
         };
         let saved_captures = std::mem::replace(&mut self.keep_captures, exposed);
         self.closure_key_extra = key_extra;
-        let parts = self.expr(builder, &call("function", vec![Form::List(lambda)]))
+        // The body keeps its metadata: `lambda' parses it once (`lambda_body').
+        let parts = self.lambda(builder, args.list()?, body)
             .and_then(|closure| Ok((closure, self.expr(builder, &thunk)?)));
         self.closure_key_extra.clear();
         self.keep_captures = saved_captures;
         let (closure, thunk) = parts?;
         let register = crate::prim::subr_named("#:vm2-set-interactive-form").expect("registration subr");
         let result = Self::native_call(builder, register, &[closure, spec_reg, thunk]);
-        let result = if exposed { self.expose_closure(builder, args.list()?, &executable, result)? } else { result };
+        let result = if exposed { self.expose_closure(builder, args.list()?, body, result)? } else { result };
         let doc = match doc_register { Some(doc) => doc, None => { let doc = builder.reg(); builder.emit(Op::Const(doc, Value::NIL)); doc } };
         Ok(self.closure_native_call(builder, Primitive::ClosureDocument, &[result, doc, spec_reg]))
     }

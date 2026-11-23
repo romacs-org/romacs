@@ -263,6 +263,38 @@ impl<'a> Encoder<'a> {
         }
         Ok(())
     }
+    /// A closure's mutable capture: shared by the unit's closures that hold
+    /// it, as in the compile process. Not stored when Lisp holds its lexical
+    /// pair (`aref' slot 2): the unit would rebuild the two apart.
+    fn cell(&mut self, v: Value, out: &mut Writer) -> Result<()> {
+        if self.vm.cell_pairs.get(v.payload() as usize).is_some() {
+            return Err("a constant that cannot be serialised: a capture whose lexical pair is shared".into());
+        }
+        let content = self.vm.read_capture_cell(v.payload() as usize);
+        out.byte(NODE_CELL);
+        let r = self.value(content)?;
+        Self::write_ref(out, r);
+        Ok(())
+    }
+    /// A closure: its function, captures, metadata and document. Not stored
+    /// when it is a command, whose spec lives in the VM's table, not in the
+    /// closure: the unit would rebuild it as no command.
+    fn closure(&mut self, v: Value, out: &mut Writer) -> Result<()> {
+        if self.vm.interactive_entry(v).is_some() {
+            return Err("a constant that cannot be serialised: an interactive closure".into());
+        }
+        let closure = self.vm.closures.get(v.index(4)?).ok_or("invalid closure")?;
+        let (function, captures, metadata, document) =
+            (closure.function, closure.captures.clone(), closure.metadata.clone(), closure.document);
+        out.byte(NODE_CLOSURE);
+        let f = self.function(function)?;
+        out.n(f);
+        self.refs(out, &captures)?;
+        self.refs(out, &metadata)?;
+        let doc = self.value(document)?;
+        Self::write_ref(out, doc);
+        Ok(())
+    }
     fn encode_node(&mut self, v: Value) -> Result<Vec<u8>> {
         let mut out = Writer::default();
         if v.tag() == 3 {
@@ -274,25 +306,11 @@ impl<'a> Encoder<'a> {
             return Ok(out.bytes);
         }
         if v.tag() == 5 {
-            // A closure's mutable capture: shared by the unit's closures
-            // that hold it, as in the compile process.
-            let content = self.vm.read_capture_cell(v.payload() as usize);
-            out.byte(NODE_CELL);
-            let r = self.value(content)?;
-            Self::write_ref(&mut out, r);
+            self.cell(v, &mut out)?;
             return Ok(out.bytes);
         }
         if v.tag() == 4 {
-            let closure = self.vm.closures.get(v.index(4)?).ok_or("invalid closure")?;
-            let (function, captures, metadata, document) =
-                (closure.function, closure.captures.clone(), closure.metadata.clone(), closure.document);
-            out.byte(NODE_CLOSURE);
-            let f = self.function(function)?;
-            out.n(f);
-            self.refs(&mut out, &captures)?;
-            self.refs(&mut out, &metadata)?;
-            let doc = self.value(document)?;
-            Self::write_ref(&mut out, doc);
+            self.closure(v, &mut out)?;
             return Ok(out.bytes);
         }
         if Vm::image_string(v) {
@@ -426,7 +444,7 @@ impl<'a> Encoder<'a> {
                 }
             }
         }
-        self.write_capture_names(out, f.capture_names.as_deref())?;
+        self.write_environment(out, f.environment.as_ref())?;
         match f.key {
             None => out.byte(0),
             Some(key) => {
@@ -509,20 +527,29 @@ impl<'a> Encoder<'a> {
         }
         Ok(())
     }
-    fn write_capture_names(&mut self, out: &mut Writer, names: Option<&[Option<Name>]>) -> Result<()> {
-        let Some(names) = names else {
+    fn write_environment(&mut self, out: &mut Writer, layout: Option<&CaptureLayout>) -> Result<()> {
+        let Some(layout) = layout else {
             out.byte(0);
             return Ok(());
         };
         out.byte(1);
-        out.n(names.len());
-        for name in names {
-            let form = match name {
-                None => { out.byte(0); continue; }
-                Some(Name::Source(name)) => Form::Sym(name.clone()),
-                Some(Name::Generated(id)) => Form::Generated(*id),
-            };
-            self.form(out, &form)?;
+        out.byte(u8::from(layout.bare_context));
+        out.n(layout.specials.len());
+        for name in &layout.specials {
+            out.n(self.names.of(name));
+        }
+        out.n(layout.slots.len());
+        for slot in &layout.slots {
+            match slot.binding {
+                CaptureBinding::Lexical => out.byte(0),
+                CaptureBinding::Late { shadow: None } => out.byte(1),
+                CaptureBinding::Late { shadow: Some(index) } => { out.byte(2); out.n(index); }
+            }
+            match &slot.name {
+                None => out.byte(0),
+                Some(Name::Source(name)) => self.form(out, &Form::Sym(name.clone()))?,
+                Some(Name::Generated(id)) => self.form(out, &Form::Generated(*id))?,
+            }
         }
         Ok(())
     }
@@ -725,7 +752,7 @@ impl Install<'_> {
             }
             _ => return Err("bad parameter list".into()),
         };
-        let capture_names = self.read_capture_names(r, captures, uninterned, vm)?;
+        let environment = self.read_environment(r, captures, uninterned, vm)?;
         let key = match r.byte()? {
             0 => None,
             1 => {
@@ -741,28 +768,51 @@ impl Install<'_> {
         let body = r.data()?;
         let start = body.as_ptr() as usize - self.bytes.as_ptr() as usize;
         let function = Function { capture_mutations: vec![], mapped_code: None, code: vec![], regs, captures, arity, required, rest,
-                                  sites: vec![], lazy: None, dynamic, capture_names, params, pending: None, key };
+                                  sites: vec![], lazy: None, dynamic, environment, params, pending: None, key };
         Ok((function, BodyRefs { values, children, caches, body: start..start + body.len() }))
     }
 
-    fn read_capture_names(&self, r: &mut Reader, captures: usize, uninterned: &[usize], vm: &Vm)
-        -> Result<Option<Vec<Option<Name>>>>
+    fn read_environment(&self, r: &mut Reader, captures: usize, uninterned: &[usize], vm: &Vm)
+        -> Result<Option<CaptureLayout>>
     {
         match r.byte()? {
             0 => return Ok(None),
-            1 => {},
-            _ => return Err("bad capture names".into()),
+            1 => (),
+            _ => return Err("bad capture layout".into()),
         }
+        let bare_context = r.byte()? != 0;
+        let special_count = r.count()?;
+        let specials = (0..special_count).map(|_| {
+            let slot = *self.slots.get(r.n()?).ok_or("bad local special")?;
+            Ok(vm.symbol_names[slot].clone())
+        }).collect::<Result<Vec<_>>>()?;
         if r.count()? != captures {
-            return Err("capture names do not match the capture layout".into());
+            return Err("capture layout does not match the body".into());
         }
-        (0..captures)
-            .map(|_| {
-                let tag = r.byte()?;
-                if tag == 0 { Ok(None) } else { read_name(r, tag, self.slots, uninterned, vm).map(Some) }
-            })
-            .collect::<Result<Vec<_>>>()
-            .map(Some)
+        let slots = (0..captures).map(|_| {
+            self.read_capture_slot(r, captures, uninterned, vm)
+        }).collect::<Result<Vec<_>>>()?;
+        Ok(Some(CaptureLayout { slots, specials, bare_context }))
+    }
+
+    fn read_capture_slot(&self, r: &mut Reader, captures: usize, uninterned: &[usize], vm: &Vm)
+        -> Result<CaptureSlot>
+    {
+        let binding = match r.byte()? {
+            0 => CaptureBinding::Lexical,
+            1 => CaptureBinding::Late { shadow: None },
+            2 => {
+                let index = r.n()?;
+                if index >= captures {
+                    return Err("invalid late capture shadow".into());
+                }
+                CaptureBinding::Late { shadow: Some(index) }
+            }
+            _ => return Err("invalid capture binding".into()),
+        };
+        let tag = r.byte()?;
+        let name = if tag == 0 { None } else { Some(read_name(r, tag, self.slots, uninterned, vm)?) };
+        Ok(CaptureSlot { name, binding })
     }
 }
 
@@ -849,7 +899,7 @@ impl Vm {
         }
         let decoded = Function { capture_mutations, mapped_code: None, code, regs: f.regs, captures: f.captures, arity: f.arity,
                                  required: f.required, rest: f.rest, sites, lazy: None, dynamic: f.dynamic,
-                                 capture_names: f.capture_names.clone(), params: f.params.clone(), pending: None, key: f.key };
+                                 environment: f.environment.clone(), params: f.params.clone(), pending: None, key: f.key };
         validate_body(&decoded, |child| self.functions.get(child).map(|f| f.captures), self.slots.len(), self.caches.len())?;
         Ok(decoded)
     }

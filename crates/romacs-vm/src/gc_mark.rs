@@ -891,7 +891,8 @@ impl Marking {
         if let Some(lazy) = &function.lazy {
             w.stack.push(lazy.body);
         }
-        let capture_names = function.capture_names.iter().flatten().flatten();
+        let capture_names = function.environment.iter()
+            .flat_map(|layout| &layout.slots).filter_map(|slot| slot.name.as_ref());
         for name in capture_names.chain(function.lazy.iter().flat_map(|lazy| &lazy.names)) {
             if let Name::Generated(id) = name && let Some(&slot) = view.generated_symbols.get(id) {
                 w.stack.push(Value::reference(slot + 1, 7));

@@ -48,7 +48,7 @@ fn image_function_header(id: usize, meta: &Json) -> Result<Function> {
         lazy: None,
         pending: None,
         dynamic: None,
-        capture_names: None,
+        environment: None,
         params: None,
         key,
     };

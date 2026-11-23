@@ -64,6 +64,33 @@ fn capture_names_survive_a_unit_and_pending_decode() {
                    (list (aref f 2) (funcall f) (aref f 2)))";
     assert_eq!(through_unit(&mut vm, form),
                "(((body-var . 4) (spec-var . 5)) 4 ((body-var . 4) (spec-var . 5)))");
+    let special = "'(let ((value 40))
+        (defvar unit-local-special)
+        (let ((f (lambda () (let ((unit-local-special value))
+                              (symbol-value 'unit-local-special)))))
+          (list (aref f 2) (funcall f) (aref f 2))))";
+    assert_eq!(through_unit(&mut vm, special),
+               "(((value . 40) unit-local-special) 40 ((value . 40) unit-local-special))");
+}
+
+/// A closure constant a unit could not rebuild whole is refused, so its
+/// file loads as source: a command, whose spec lives in the VM's table,
+/// and a capture whose lexical pair Lisp holds from slot 2.
+#[test]
+fn closure_constants_with_outside_relations_are_refused() {
+    let mut vm = Vm::new();
+    vm.eval_source("(setq unit-command (let ((k 1)) (lambda () (interactive) k))
+                          unit-counter (let ((n 0)) (lambda () (setq n (1+ n))))
+                          unit-plain (let ((m 0)) (lambda () (setq m (1+ m))))
+                          unit-pair (assq 'n (aref unit-counter 2)))").unwrap();
+    for (constant, why) in [("unit-command", "interactive closure"), ("unit-counter", "lexical pair")] {
+        let datum = vm.eval_source_raw(&format!("(list 'funcall (list 'quote {constant}))")).unwrap();
+        let form = vm.expansion_form(datum, 0).unwrap();
+        let mut names = unit::Names::default();
+        let refused = vm.compile_unit(&form, NameSet::default(), &mut names).expect_err(why);
+        assert!(refused.to_string().contains("cannot be serialised") && refused.to_string().contains(why), "{refused}");
+    }
+    assert_eq!(through_unit(&mut vm, "(list 'funcall (list 'quote unit-plain))"), "1");
 }
 
 /// A char-table constant round-trips: its subtype, default, parent, extra

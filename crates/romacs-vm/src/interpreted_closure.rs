@@ -283,6 +283,24 @@ mod tests {
     }
 
     #[test]
+    fn a_forwarded_capture_follows_the_lexical_shadow() {
+        let mut vm = Vm::new();
+        let layout = CaptureLayout {
+            slots: vec![
+                CaptureSlot { name: None, binding: CaptureBinding::Late { shadow: Some(1) } },
+                CaptureSlot { name: None, binding: CaptureBinding::Late { shadow: Some(2) } },
+                CaptureSlot { name: None, binding: CaptureBinding::Lexical },
+            ],
+            specials: vec![],
+            bare_context: false,
+        };
+        let forwarded = Value::reference(vm.alloc_cell(Value::UNBOUND), 5);
+        let lexical = Value::reference(vm.alloc_cell(Value::TRUE), 5);
+        assert_eq!(vm.lexical_capture(&layout, &[forwarded, forwarded, lexical], 0), Some(lexical));
+        assert_eq!(vm.lexical_capture(&layout, &[lexical, forwarded, Value::NIL], 0), Some(lexical));
+    }
+
+    #[test]
     fn ordinary_closure_environment_keeps_an_uninterned_name_alive() {
         let mut vm = Vm::new();
         vm.eval_source_raw("
@@ -313,6 +331,31 @@ mod tests {
 }
 
 use super::*;
+
+#[derive(Clone, Debug, romacs_snapshot::Snapshot)]
+pub(super) struct CaptureSlot {
+    pub(super) name: Option<Name>,
+    pub(super) binding: CaptureBinding,
+}
+
+#[derive(Clone, Copy, Debug, romacs_snapshot::Snapshot)]
+pub(super) enum CaptureBinding {
+    Lexical,
+    Late { shadow: Option<usize> },
+}
+
+#[derive(Clone, Debug, romacs_snapshot::Snapshot)]
+pub(super) struct CaptureLayout {
+    pub(super) slots: Vec<CaptureSlot>,
+    pub(super) specials: Vec<String>,
+    /// GNU keeps untrimmed declarations and the lexical sentinel when
+    /// no lexical variable was in view.
+    pub(super) bare_context: bool,
+}
+
+/// What slot 2 shows of one closure: its named lexical captures, each the
+/// value or cell it reads, and its local special declarations.
+type ClosureBindings = (Vec<(Name, Value)>, Vec<String>);
 
 fn ordinary_slot_count(document: Value, interactive: bool) -> usize {
     if interactive { 6 } else if document != Value::NIL { 5 } else { 3 }
@@ -351,11 +394,50 @@ impl Vm {
         self.declaration_hash_put(table, closure, entry)
     }
 
-    pub(super) fn capture_names(&self, names: &[Name]) -> Vec<Option<Name>> {
-        names.iter().map(|name| match name {
-            Name::Generated(id) if !self.generated_symbols.contains_key(id) => None,
-            name => Some(name.clone()),
-        }).collect()
+    pub(super) fn capture_layout(
+        &self, names: &[Name], outer: &NameMap<Name, Binding>, specials: &NameSet<String>,
+        code: Option<&[Op]>,
+    ) -> CaptureLayout {
+        let slots = names.iter().map(|name| {
+            let exposed = !matches!(name, Name::Generated(id) if !self.generated_symbols.contains_key(id));
+            let binding = outer[name];
+            let binding = if binding.late {
+                let shadow = binding.shadow.and_then(|id| names.binary_search(&Name::Generated(id)).ok());
+                CaptureBinding::Late { shadow }
+            } else {
+                CaptureBinding::Lexical
+            };
+            CaptureSlot { name: exposed.then(|| name.clone()), binding }
+        }).collect();
+        let bare_context = outer.is_empty();
+        let specials = self.closure_specials(specials, if bare_context { None } else { code });
+        CaptureLayout { slots, specials, bare_context }
+    }
+
+    fn closure_specials(&self, in_scope: &NameSet<String>, code: Option<&[Op]>) -> Vec<String> {
+        if in_scope.is_empty() {
+            return Vec::new();
+        }
+        let mut used: NameSet<&str> = NameSet::default();
+        if let Some(code) = code {
+            for op in code {
+                match *op {
+                    Op::Bind(slot, _) => { used.insert(&self.symbol_names[slot]); }
+                    Op::Closure(_, id, _) => {
+                        if let Some(layout) = &self.functions[id].environment {
+                            used.extend(layout.specials.iter().map(String::as_str));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let mut specials: Vec<_> = in_scope.iter().filter(|name| {
+            (code.is_none() || used.contains(name.as_str()))
+                && self.names.get(name).is_none_or(|&slot| !self.slot_is_special(slot))
+        }).cloned().collect();
+        specials.sort_unstable();
+        specials
     }
 
     pub(super) fn closure_length(&mut self, value: Value) -> Result<usize> {
@@ -392,16 +474,26 @@ impl Vm {
     }
 
     fn closure_environment(&mut self, value: Value, thunk: Option<Value>) -> Option<Value> {
-        let dynamic = self.functions[self.closures[value.index_if(4)?].function].dynamic?;
-        let mut entries = self.named_captures(value)?.collect::<Vec<_>>();
+        let function = &self.functions[self.closures[value.index_if(4)?].function];
+        if function.dynamic? {
+            return Some(Value::NIL);
+        }
+        let mut bare_context = function.environment.as_ref().is_some_and(|layout| layout.bare_context);
+        let (mut entries, mut specials) = self.closure_bindings(value)?;
         if let Some(thunk) = thunk.filter(|&thunk| thunk != Value::NIL) {
-            let mut seen: NameSet<_> = entries.iter().map(|(name, _)| name.clone()).collect();
-            entries.extend(self.named_captures(thunk)?.filter(|(name, _)| seen.insert(name.clone())));
+            let (other_entries, other_specials) = self.closure_bindings(thunk)?;
+            let named: NameSet<_> = entries.iter().map(|(name, _)| name.clone()).collect();
+            entries.extend(other_entries.into_iter().filter(|(name, _)| !named.contains(name)));
+            specials.extend(other_specials);
+            specials.sort_unstable();
+            specials.dedup();
         }
-        if entries.is_empty() {
-            return Some(if dynamic { Value::NIL } else { self.list_value(&[Value::TRUE]) });
+        bare_context |= entries.is_empty() && specials.is_empty();
+        let mut env = if bare_context { self.list_value(&[Value::TRUE]) } else { Value::NIL };
+        for name in specials.into_iter().rev() {
+            let symbol = self.intern(&name);
+            env = self.keymap_cons(symbol, env);
         }
-        let mut env = Value::NIL;
         for (name, capture) in entries.into_iter().rev() {
             let symbol = Value::reference(self.name_slot(&name) + 1, 7);
             let pair = self.lexical_pair(symbol, capture);
@@ -410,17 +502,31 @@ impl Vm {
         Some(env)
     }
 
-    fn named_captures(&self, value: Value) -> Option<impl Iterator<Item = (Name, Value)> + '_> {
+    fn closure_bindings(&self, value: Value) -> Option<ClosureBindings> {
         let closure = self.closures.get(value.index_if(4)?)?;
         let function = &self.functions[closure.function];
-        let names = match &function.capture_names {
-            Some(names) => names.as_slice(),
-            None if closure.captures.is_empty() => &[],
-            None => return None,
+        let Some(layout) = &function.environment else {
+            return closure.captures.is_empty().then(|| (Vec::new(), Vec::new()));
         };
-        Some(names.iter().zip(&closure.captures).filter_map(|(name, &capture)| {
-            Some((name.clone()?, capture))
-        }))
+        let entries = layout.slots.iter().enumerate().filter_map(|(index, slot)| {
+            Some((slot.name.clone()?, self.lexical_capture(layout, &closure.captures, index)?))
+        }).collect();
+        Some((entries, layout.specials.clone()))
+    }
+
+    fn lexical_capture(&self, layout: &CaptureLayout, captures: &[Value], mut index: usize) -> Option<Value> {
+        for _ in 0..captures.len() {
+            let capture = *captures.get(index)?;
+            let CaptureBinding::Late { shadow } = layout.slots.get(index)?.binding else {
+                return Some(capture);
+            };
+            // A forwarded late cell holds a sentinel, never a lexical value.
+            if capture.index_if(5).map_or(capture, |cell| self.read_capture_cell(cell)) != Value::UNBOUND {
+                return Some(capture);
+            }
+            index = shadow?;
+        }
+        None
     }
 
     fn lexical_pair(&mut self, name: Value, capture: Value) -> Value {
@@ -604,7 +710,7 @@ impl Vm {
                     lazy: Some(Arc::new(lazy)),
                     pending: None,
                     dynamic: Some(a[2] == Value::NIL),
-                    capture_names: Some(self.capture_names(&names)),
+                    environment: Some(self.capture_layout(&names, &outer, &specials, None)),
                 });
                 (function, names)
                 } else {

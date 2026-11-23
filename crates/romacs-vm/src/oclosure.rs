@@ -42,7 +42,7 @@ impl Vm {
             };
             Form::Dotted(vec![symbol], Box::new(Form::Int(index as i64)))
         }).collect();
-        let body = if body.len() > 1 && self.form_is_string(&body[0]) { &body[1..] } else { body };
+        let body = match self.lambda_body(body) { [] => &[Form::Sym("nil".into())][..], forms => forms };
         let mut registers = vec![result];
         for form in [Form::List(args.to_vec()), Form::List(body.to_vec()), Form::List(descriptors), Form::Sym("nil".into()), Form::Sym("t".into())] {
             let value = self.literal(&form)?;

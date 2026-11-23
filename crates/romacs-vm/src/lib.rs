@@ -32,6 +32,7 @@ mod names;
 mod command_set;
 mod command;
 mod interpreted_closure;
+use interpreted_closure::{CaptureBinding, CaptureLayout, CaptureSlot};
 mod cell_pairs;
 mod oclosure;
 mod host_input;
@@ -1103,9 +1104,9 @@ struct Function {
     lazy: Option<Arc<LazyBody>>,
     /// The binding dialect for interpreting an empty capture environment.
     dynamic: Option<bool>,
-    /// Names in capture-register order for slot 2. A compiler temporary
-    /// has no Lisp symbol. Code images do not record the names.
-    capture_names: Option<Vec<Option<Name>>>,
+    /// Slot 2 metadata in capture-register order, with the local special
+    /// declarations. Code images do not record this layout.
+    environment: Option<CaptureLayout>,
     /// A compiled-Lisp body not yet decoded (`compiled_lisp`), decoded at
     /// its first call as a `mapped_code` body is. `code` is empty while it
     /// is here.
@@ -2300,21 +2301,22 @@ impl Vm {
         self.slots[i].value = value;
     }
     pub fn compile(&mut self, form: &Form) -> Result<usize> {
+        self.compile_entry(form, &NameMap::default(), NameSet::default()).map(|(id, _)| id)
+    }
+    fn compile_entry(
+        &mut self, form: &Form, outer: &NameMap<Name, Binding>, mut specials: NameSet<String>,
+    ) -> Result<(usize, Vec<Name>)> {
         if self.compile_depth == 0 {
             self.pending_specials.clear();
             self.expanded_macros.clear();
             self.expanded_symbols.clear();
         }
         self.compile_depth += 1;
-        let seed = if std::mem::take(&mut self.seed_file_specials) {
-            self.file_specials.clone()
-        } else {
-            NameSet::default()
-        };
+        if std::mem::take(&mut self.seed_file_specials) {
+            specials.extend(self.file_specials.iter().cloned());
+        }
         self.loader_order_request = true;
-        let result = self
-            .function(&[], std::slice::from_ref(form), &NameMap::default(), &seed)
-            .map(|(id, _)| id);
+        let result = self.function(&[], std::slice::from_ref(form), outer, &specials);
         self.compile_depth -= 1;
         if self.compile_depth == 0 {
             self.pending_specials.clear();
@@ -2426,7 +2428,7 @@ impl Vm {
         }
         // GNU's definition expansion consumes metadata before compiling the
         // executable body. Do not invoke a user-defined `declare' macro here.
-        let mut body = self.without_lambda_doc(body);
+        let mut body = self.lambda_body(body);
         while matches!(body.first(), Some(Form::List(items)) if matches!(items.first(), Some(Form::Sym(name)) if name == "declare"))
         {
             body = &body[1..];
@@ -2500,6 +2502,7 @@ impl Vm {
         let id = self.install_function(Function {
             capture_mutations,
             mapped_code: None,
+            environment: Some(self.capture_layout(&names, outer, local_specials, Some(&b.code))),
             code: optimize(b.code, &b.sites, b.next),
             regs: b.next,
             captures: names.len(),
@@ -2510,7 +2513,6 @@ impl Vm {
             lazy: None,
             pending: None,
             dynamic: Some(self.dynamic_scope),
-            capture_names: Some(self.capture_names(&names)),
             params: Some(args.to_vec()),
             key: closure_key::of_forms(self, &closure_key::Context { dynamic: self.dynamic_scope, names: &names, specials: local_specials }, args, body, &key_extra),
         });
@@ -2565,11 +2567,16 @@ impl Vm {
         b.emit(Op::Closure(r, id, site));
         Ok(r)
     }
-    fn without_lambda_doc<'a>(&self, body: &'a [Form]) -> &'a [Form] {
-        if body.len() > 1 && body.first().is_some_and(|form| self.form_is_string(form)) {
-            &body[1..]
-        } else {
-            body
+    /// What follows a lambda's metadata, as GNU's `function' parses it
+    /// (eval.c Ffunction): a docstring (a string with more after it), then
+    /// an `(interactive ...)' form. Parsed once, so a string after the
+    /// interactive form stays in the body.
+    fn lambda_body<'a>(&self, body: &'a [Form]) -> &'a [Form] {
+        let body = if body.len() > 1 && self.form_is_string(&body[0]) { &body[1..] } else { body };
+        match body.split_first() {
+            Some((Form::List(items) | Form::Dotted(items, _), rest))
+                if matches!(items.first(), Some(Form::Sym(head)) if head == "interactive") => rest,
+            _ => body,
         }
     }
     /// R215: a closure over an UNEXPANDED body, compiled at its first call.
@@ -2584,7 +2591,9 @@ impl Vm {
         let cells = names.iter().map(|n| b.env[n].cell).collect();
         let lates = names.iter().map(|n| b.env[n].late).collect();
         let shadows = names.iter().map(|n| b.env[n].shadow).collect();
-        let body_value = self.literal(&Form::List(self.without_lambda_doc(body).to_vec()))?;
+        // GNU never leaves the body empty: `(interactive)' alone runs nil.
+        let executable = match self.lambda_body(body) { [] => vec![Form::Sym("nil".into())], forms => forms.to_vec() };
+        let body_value = self.literal(&Form::List(executable))?;
         let lazy = LazyBody {
             body: body_value,
             args: args.to_vec(),
@@ -2611,7 +2620,7 @@ impl Vm {
             rest,
             sites: vec![],
             dynamic: Some(self.dynamic_scope),
-            capture_names: Some(self.capture_names(&names)),
+            environment: Some(self.capture_layout(&names, &b.env, &b.local_specials, None)),
             lazy: Some(Arc::new(lazy)),
             pending: None,
             params: Some(args.to_vec()),
