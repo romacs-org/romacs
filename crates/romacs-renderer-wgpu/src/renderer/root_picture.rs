@@ -190,7 +190,7 @@ impl RootPicture {
         let plan = match &shown {
             None => Plan::Whole,
             Some(s) if repeats => Plan::Clean {
-                rows: damage::text_rows(&s.indexed, |_| true),
+                rows: damage::text_rows(&s.indexed.runs, |_| true),
             },
             Some(s) => {
                 let inks = reach::Inks { all: self.reach, rows: &self.rows };

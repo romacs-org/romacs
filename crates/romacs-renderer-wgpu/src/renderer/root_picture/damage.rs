@@ -51,6 +51,8 @@ pub(crate) struct Run {
     /// It holds characters or stretches: a row's text, which underline and
     /// box runs span.
     pub(crate) text: bool,
+    /// It holds a character, so it counts toward reused text rows.
+    has_char: bool,
     /// Its visual row (`assign_rows`): text runs of one window that overlap
     /// vertically share one; any other run is a row of its own.
     pub(crate) row: usize,
@@ -101,12 +103,11 @@ pub(crate) fn repeats(old: &FrameGlyphBuffer, new: &FrameGlyphBuffer) -> bool {
     old.layout_identity != 0 && old.layout_identity == new.layout_identity && old.sets_glyphs_like(new)
 }
 
-/// The text rows of INDEXED whose run KEPT holds: its groups that hold text.
-pub(crate) fn text_rows(indexed: &Indexed, kept: impl Fn(&Run) -> bool) -> usize {
-    let mut keys: Vec<Key> = indexed
-        .runs
+/// The character-bearing groups with a run accepted by KEPT.
+pub(crate) fn text_rows(runs: &[Run], kept: impl Fn(&Run) -> bool) -> usize {
+    let mut keys: Vec<Key> = runs
         .iter()
-        .filter(|r| kept(r) && has_text(&indexed.frame, r))
+        .filter(|r| r.has_char && kept(r))
         .map(|r| r.key)
         .collect();
     keys.sort_unstable();
@@ -117,16 +118,6 @@ pub(crate) fn text_rows(indexed: &Indexed, kept: impl Fn(&Run) -> bool) -> usize
 /// What a picture of OLD does to show NEW, whose runs are `new_runs`: its
 /// ink reaches INKS past its cells, at SCALE device pixels per logical one.
 pub(crate) fn plan(old: &Indexed, new: &FrameGlyphBuffer, new_runs: &[Run], inks: Inks<'_>, scale: f32) -> Plan {
-    let rows = |runs: &[Run], kept: &dyn Fn(&Run) -> bool| {
-        let mut keys: Vec<Key> = runs
-            .iter()
-            .filter(|r| kept(r) && has_text(new, r))
-            .map(|r| r.key)
-            .collect();
-        keys.sort_unstable();
-        keys.dedup();
-        keys.len()
-    };
     if !old.frame.sets_glyphs_like(new) || !tables_agree(&old.frame, new) {
         return Plan::Whole;
     }
@@ -138,18 +129,7 @@ pub(crate) fn plan(old: &Indexed, new: &FrameGlyphBuffer, new_runs: &[Run], inks
         after: groups(new_runs),
     };
     let (before, after) = (&sides.before, &sides.after);
-    // Each group compared once: the keys of those that differ, or that one
-    // frame alone holds.
-    let mut changed: Vec<Key> = before
-        .keys()
-        .chain(after.keys().filter(|key| !before.contains_key(*key)))
-        .filter(|key| match (before.get(*key), after.get(*key)) {
-            (Some(a), Some(b)) => !glyphs_of(&old.frame, &old.runs, a).eq(glyphs_of(new, new_runs, b)),
-            _ => true,
-        })
-        .copied()
-        .collect();
-    changed.sort_unstable();
+    let changed = changed_groups(&sides);
     let same = |key: &Key| changed.binary_search(key).is_err();
     let moved = moves::find(&sides, &changed, inks, scale);
     let placed = |key: &Key| moved.placed.binary_search(key).is_ok();
@@ -179,14 +159,14 @@ pub(crate) fn plan(old: &Indexed, new: &FrameGlyphBuffer, new_runs: &[Run], inks
     let regions = merge(damaged);
     if regions.is_empty() && moved.moves.is_empty() {
         return Plan::Clean {
-            rows: rows(new_runs, &|_| true),
+            rows: text_rows(new_runs, |_| true),
         };
     }
     let area: f32 = regions.iter().map(|r| r.width * r.height).sum();
     if regions.len() > MAX_REGIONS || area > WHOLE_SHARE * new.width * new.height {
         return Plan::Whole;
     }
-    let rows_kept = rows(new_runs, &|run| {
+    let rows_kept = text_rows(new_runs, |run| {
         (same(&run.key) || placed(&run.key)) && !regions.iter().any(|r| overlaps(*r, run.bounds))
     });
     Plan::Regions {
@@ -196,11 +176,20 @@ pub(crate) fn plan(old: &Indexed, new: &FrameGlyphBuffer, new_runs: &[Run], inks
     }
 }
 
-/// Whether RUN of FRAME holds text.
-fn has_text(frame: &FrameGlyphBuffer, run: &Run) -> bool {
-    frame.glyphs[run.glyphs.clone()]
-        .iter()
-        .any(|g| matches!(g, FrameGlyph::Char { .. }))
+/// The sorted keys of the groups that differ or appear on just one side.
+fn changed_groups(sides: &Sides<'_>) -> Vec<Key> {
+    let Sides { old, before, new, runs, after } = sides;
+    let mut changed: Vec<Key> = before
+        .keys()
+        .chain(after.keys().filter(|key| !before.contains_key(*key)))
+        .filter(|key| match (before.get(*key), after.get(*key)) {
+            (Some(a), Some(b)) => !glyphs_of(&old.frame, &old.runs, a).eq(glyphs_of(new, runs, b)),
+            _ => true,
+        })
+        .copied()
+        .collect();
+    changed.sort_unstable();
+    changed
 }
 
 /// GLYPHS as runs, in frame order.
@@ -208,17 +197,20 @@ pub(crate) fn runs(glyphs: &[FrameGlyph]) -> Vec<Run> {
     let mut out: Vec<Run> = Vec::new();
     for (at, glyph) in glyphs.iter().enumerate() {
         let (key, painted, text) = place(glyph);
+        let has_char = matches!(glyph, FrameGlyph::Char { .. });
         match out.last_mut() {
             Some(run) if run.key == key => {
                 run.glyphs.end = at + 1;
                 run.bounds = union(run.bounds, painted);
                 run.text |= text;
+                run.has_char |= has_char;
             }
             _ => out.push(Run {
                 key,
                 glyphs: at..at + 1,
                 bounds: painted,
                 text,
+                has_char,
                 row: 0,
             }),
         }
