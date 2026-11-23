@@ -1,0 +1,5 @@
+## Observable by a package
+
+| # | mechanism | GNU | romacs | why |
+|---|---|---|---|---|
+| VM2-CLOSEQ2 | a `declare` form in the body of a closure over lexical bindings | `cconv-make-interpreted-closure` (`lisp/emacs-lisp/cconv.el`) macroexpands the body of a closure that sees lexical bindings before it stores it, so slot 1 holds `declare`'s expansion and `equal` compares that: on GNU 32.0.50, `(eval '(let ((y 1)) (list (aref (lambda () (declare (a)) y) 1) (equal (lambda () (declare (a)) y) (lambda () (progn '(declare (a)) nil) y)))) t)` gives `(((progn '(declare (a)) nil) y) t)` | A lazy closure keeps its body as written, so slot 1 holds the `declare` form itself and the closure's key covers it: the same form gives `(((declare (a)) y) nil)`. A closure compiled at once has no slot 1 (VM2-CLOSEQ1). Executing it is the same: the leading `declare` runs nothing either way | No caller depends on it: nadvice, help and cl-print read slot 2, slot 0 or the documentation, and two lambdas written alike compare alike. Expanding every closure's body when it is made would cost a macroexpansion per closure for this alone | <!-- symbols: equal, aref, declare -->

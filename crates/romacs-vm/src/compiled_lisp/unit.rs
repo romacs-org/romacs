@@ -349,7 +349,8 @@ impl<'a> Encoder<'a> {
                     out.n(props.len());
                     for (key, value) in props {
                         // Keys are written by name, which only an interned symbol's gives back.
-                        let name = self.vm.property_key_name(key).ok_or("a text property keyed by a symbol that is not interned")?;
+                        let name = self.vm.property_key_name(key)
+                            .ok_or_else(|| unserialisable("a text property keyed by a symbol that is not interned"))?;
                         let key = self.names.of(name);
                         out.n(key);
                         let r = self.value(value)?;
