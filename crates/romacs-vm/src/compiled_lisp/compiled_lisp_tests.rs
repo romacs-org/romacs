@@ -94,6 +94,20 @@ fn closure_constants_with_outside_relations_are_refused() {
     assert_eq!(through_unit(&mut vm, "(list 'funcall (list 'quote unit-plain))"), "1");
 }
 
+/// A string with a text property keyed by an uninterned symbol, as an
+/// `eval-when-compile' may return one, is refused by design: the walk keeps
+/// its file as source, not as an error.
+#[test]
+fn a_string_keyed_by_an_uninterned_property_is_refused_by_design() {
+    let mut vm = Vm::new();
+    vm.eval_source("(setq unit-keyed (propertize \"a\" (make-symbol \"key\") 1))").unwrap();
+    let datum = vm.eval_source_raw("(list 'length (list 'quote unit-keyed))").unwrap();
+    let form = vm.expansion_form(datum, 0).unwrap();
+    let mut names = unit::Names::default();
+    let refused = vm.compile_unit(&form, NameSet::default(), &mut names).expect_err("an uninterned key");
+    assert!(refused.starts_with(unit::UNSERIALISABLE) && refused.contains("not interned"), "{refused}");
+}
+
 /// A char-table constant round-trips: its subtype, default, parent, extra
 /// slots and own values, the default not baked into them, so
 /// `map-char-table' sees what the original holds.

@@ -86,6 +86,14 @@ Use `record.py --out` to keep exploratory recordings separate from fixtures.
   main integration lane.
 - Rust emission currently keeps its smoke fixture at `cdr-safe`; retain that
   fixture/spec when selecting a different primitive subset.
+- The file cases of `insert-file-contents` and `write-region` write and read
+  fixed paths, `/tmp/romacs-primh-fio-*`, and GNU's expected answers name them.
+  Two replays at once on one host share those files, so one can read what the
+  other wrote: a spurious `NEW DIVERGENCE` (seen as `insert-file-contents`
+  inserting 0 characters where GNU inserts 2) that passes when run alone. A
+  per-run path is a generator change, not a replay one: every evidence file
+  hashes the replay template, so the path must be chosen where the cases are
+  generated (`primh.py`, `gnu_driver.el`) and the fileio evidence re-recorded.
 
 ## Bulk and prompt cases
 
