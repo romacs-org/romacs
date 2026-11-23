@@ -135,7 +135,8 @@
     (kotlin-ts-mode)
     (cl-letf (((symbol-function 'treesit-parser-changed-regions)
                (lambda (&rest _) (ert-fail "Lexical scan requested a reparse"))))
-      (let ((syntax-propertize-chunk-size 16))
+      (let ((syntax-propertize-chunk-size 16)
+            (kotlin-ts-mode--syntax-chunk-size 7))
         (should (nth 3 (syntax-ppss (kotlin-ts-mode-tests--position "before"))))
         (goto-char (kotlin-ts-mode-tests--position "\"/*\""))
         (delete-char 4)
@@ -144,3 +145,30 @@
           (should (= (nth 0 state) 1))
           (should-not (nth 3 state))
           (should-not (nth 4 state)))))))
+
+(ert-deftest kotlin-ts-mode-syntax-first-read-after-quote-edit ()
+  (require 'elec-pair)
+  (dolist (line '("val x = \"\"" "val x = \"\"\"raw\"\"\""))
+    (dolist (reader '(kotlin-ts-mode-tests--electric-string-start
+                      kotlin-ts-mode-tests--string-start))
+      (with-temp-buffer
+        (insert line "\nval following = 0\n")
+        (kotlin-ts-mode)
+        (syntax-ppss (point-max))
+        (goto-char (1+ (length line)))
+        (insert "\"")
+        (let* ((pos (point))
+               (opener (kotlin-ts-mode-tests--position "\""))
+               (opening (equal line "val x = \"\"")))
+          (should (equal (funcall reader (if opening pos (1- pos))) opener))
+          (should (equal (kotlin-ts-mode-tests--string-start pos)
+                         (and opening opener))))))))
+
+(defun kotlin-ts-mode-tests--electric-string-start (pos)
+  "Return the enclosing string or comment electric pairing sees at POS."
+  (goto-char pos)
+  (nth 3 (electric-pair-syntax-info ?\")))
+
+(defun kotlin-ts-mode-tests--string-start (pos)
+  "Return the enclosing string or comment reported by `syntax-ppss' at POS."
+  (nth 8 (syntax-ppss pos)))
