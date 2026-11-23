@@ -58,22 +58,38 @@ Each is its own commit in Romacs's history.
   attached to a step and uses wide step indices. The differential records
   the three C defects in isolated probes. See VM2-TREESIT-QUERY.
 
+### L0
+
 - `refactor(treesit): remove wasm runtime support` removes the unused Wasm
-  store, build paths and bindings. Measurement: none (pure deletion).
+  store, build paths and bindings.
 
 - `refactor(treesit): remove parser logging and dot graphs` deletes unused
   diagnostics and their bindings. The scanner serialization buffer and
-  grammar ABI logging callback remain. Measurement: none (pure deletion).
+  grammar ABI logging callback remain.
 
 - `refactor(treesit): remove non-UTF-8 parsing` deletes unused UTF-16 and
   custom decoding paths. The C input layout still carries the encoding and
-  decode slots. Measurement: none (pure deletion).
+  decode slots.
 
 - `refactor(treesit): remove dead scanner error flow` deletes the flag and
-  exits used by Wasm scanner failures. Measurement: none (pure deletion).
+  exits used by Wasm scanner failures.
 
 - `docs(treesit): record the native UTF-8 boundary` documents the runtime
-  after removing its unused paths. Measurement: none.
+  after removing its unused paths.
+
+- `docs(treesit): record L0 instruction counts` records the cost of the
+  combined deletion slice.
+
+The cost rig at `7a80f952a` compared L0 `8b5eb2504` to `fa9115480`
+using Callgrind. Runtime lexing used 7.1–11.2% fewer instructions and
+per-key lexer lifecycle ranged from 4.4% fewer to 0.62% more. Per-key
+whole-parse instructions rose 3.19% on T0 `clean-large` and 3.17% on
+T0 `wide`, and 2.98% and 2.96% on the same rows in release. Lex dispatch
+and parse call counts were unchanged on those rows. The profiles and
+disassembly attribute the increase chiefly to GCC emitting out-of-line
+calls to `ts_subtree_total_size`, `reusable_node_descend` and the
+`ts_stack_push.constprop` clone at hot sites where the reference inlined
+the work.
 
 ## Checking it
 
