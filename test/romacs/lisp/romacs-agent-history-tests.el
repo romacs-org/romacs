@@ -8,6 +8,7 @@
       (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
   (require 'romacs-agent)
   (require 'romacs-agent-claude)
+  (require 'romacs-agent-codex)
   (require 'romacs-agent-history))
 
 (defvar romacs-agent-t3-settings)
@@ -100,6 +101,30 @@
   (let ((form (cl-letf (((symbol-function 'boundp) (lambda (s) (not (eq s 'romacs-agent-t3-settings)))))
                 (romacs-agent-history--settings))))
     (should-not (string-search "romacs-agent-t3-settings" form))))
+
+(ert-deftest romacs-agent-history-scans-each-harness-at-a-shared-root ()
+  (let* ((root (make-temp-file "romacs-history-" t))
+         (romacs-agent-providers
+          (list (list "claude" :harness 'claude :config-dir root)
+                (list "also-claude" :harness 'claude :config-dir root)
+                (list "codex" :harness 'codex :config-dir root)))
+         (romacs-agent-history--descriptions (make-hash-table :test #'equal))
+         (day (expand-file-name "sessions/2026/01/01" root))
+         (path (expand-file-name "rollout-codex.jsonl" day)))
+    (unwind-protect
+        (progn
+          (romacs-agent-history-tests--transcript root romacs-agent-history-tests--id "Claude prompt")
+          (make-directory day t)
+          (with-temp-file path
+            (insert "{\"type\":\"session_meta\",\"payload\":{\"id\":\"01234567-89ab-4cde-8012-3456789abcde\",\"cwd\":\"/p/one\"}}\n"
+                    "{\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"Codex prompt\"}}\n"))
+          (should (equal (mapcar (lambda (item)
+                                   (list (plist-get item :harness)
+                                         (plist-get item :provider)
+                                         (plist-get item :title)))
+                                 (romacs-agent-history--scan))
+                         '((claude "claude" "Claude prompt") (codex "codex" "Codex prompt")))))
+      (delete-directory root t))))
 
 (ert-deftest romacs-agent-history-view-is-a-read-only-chat ()
   ;; A transcript is drawn as a chat's; its text's keys read it, and r

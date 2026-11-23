@@ -382,7 +382,7 @@ def session(args, base):
                                                          # An eval's answer, on its row.
                                                          '⇒ 42')},
                                # A Romacs tool's row: its mark, then its name as words.
-                               '● ◈ buffer edit': bool(re.search(r'● \S+ buffer edit', chat))}}
+                               'indented buffer edit': bool(re.search(r'^  \S+ buffer edit', chat, re.M))}}
         result['ok'] = (edited == '"ALPHA beta\\n"' and evaluated == '42'
                         and approval.get('behavior') == 'allow'
                         and approval.get('updatedInput', {}).get('run_in_background') is False
@@ -2468,7 +2468,8 @@ def composer(args, base, real=False):
         # Held until released: the call's output is the transcript's last text.
         transcript = lambda: parity_live.read_sexp(a.eval(
             f'(with-current-buffer {chat} (buffer-substring-no-properties (point-min) romacs-agent-log--end))')) or ''
-        last_call = lambda: (lambda tail: '⎿' in tail and '❯' not in tail)(transcript().rsplit('● ', 1)[-1])
+        last_call = lambda: (lambda tail: '⎿' in tail and '❯' not in tail)(
+            re.split(r'^  (?=\S)', transcript(), flags=re.M)[-1])
         until(lambda: a.state(sid) == 'running' and last_call(), 15, 'tool output last')
         steps['output_last'] = a.eval(f'(with-current-buffer {chat} (format "%S" (text-properties-at (1- romacs-agent-log--input))))')
         good.append(typed('while_output_last', 'typed while'))
@@ -2806,8 +2807,8 @@ def history(args, base):
             and home.index(a.work.name) < home.index('◇')
             and all(v.split('|')[1] == 't' for v in views.values())
             and views[cid].startswith('*history: list the files here*')
-            and order(views[cid], '❯ list the files here', 'Two files') and '● $ ls' in views[cid]
-            and order(views[tid], '❯ count the lines of a.txt', 'a.txt has 3 lines') and '● $ wc -l a.txt' in views[tid]
+            and order(views[cid], '❯ list the files here', 'Two files') and '\n  $ ls' in views[cid]
+            and order(views[tid], '❯ count the lines of a.txt', 'a.txt has 3 lines') and '\n  $ wc -l a.txt' in views[tid]
             and claude_run and claude_run[-1]['argv'][claude_run[-1]['argv'].index('--resume') + 1] == cid
             and claude_run[-1].get('config_dir') == str(claude_dir)
             and codex_run and codex_run[-1]['resumed'] and codex_run[-1]['codex'] == tid

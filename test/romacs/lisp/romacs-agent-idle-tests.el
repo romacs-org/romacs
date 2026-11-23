@@ -77,6 +77,17 @@ is sent."
     (romacs-agent--raise session '(:type cache :ttl 300 :time 1300.0))
     (should (romacs-agent-idle-due-p session (+ 1300 300 -60)))))
 
+(ert-deftest romacs-agent-idle-only-compacts-when-a-message-can-go-now ()
+  (let ((now 4550))
+    (romacs-agent-idle-tests--with ()
+      (let ((romacs-agent-hold-functions (list (lambda (_) 'renewal))))
+        (should-not (romacs-agent-idle-due-p session now)))
+      (setf (romacs-agent-startup-pending session) t)
+      (should-not (romacs-agent-idle-due-p session now))
+      (setf (romacs-agent-startup-pending session) nil
+            (romacs-agent-settled-seq session) romacs-agent--inactive-settlement)
+      (should-not (romacs-agent-idle-due-p session now)))))
+
 (ert-deftest romacs-agent-idle-what-is-not-compacted ()
   (let ((at (+ 1000 3600 -60)))
     (romacs-agent-idle-tests--with (:context-used 150000)

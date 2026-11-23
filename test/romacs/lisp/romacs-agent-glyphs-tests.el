@@ -20,7 +20,7 @@
   ;; draws its default.
   (should (equal (romacs-agent-glyph 'thinking) "🤔"))
   (let ((romacs-agent-glyph-alist nil))
-    (should (equal (romacs-agent-glyph 'tool) "●")))
+    (should (equal (romacs-agent-glyph 'tool) "·")))
   (should-error (romacs-agent-glyph 'no-such-role)))
 
 (ert-deftest romacs-agent-glyphs-a-change-draws-at-once ()
@@ -40,7 +40,7 @@
   (should (equal (romacs-agent-glyph-hang "  🤔 ") "     "))
   (let ((romacs-agent-glyph-alist (cons '(output . "🤔") romacs-agent-glyph-alist)))
     (let ((text (romacs-agent-log--output "one\ntwo" 'romacs-agent-log-output (cons nil "one\ntwo"))))
-      (should (string-prefix-p "  🤔 one\n     two" (substring-no-properties text))))))
+      (should (string-prefix-p "    🤔 one\n       two" (substring-no-properties text))))))
 
 ;; What a mark change meets: a call drawn with the old mark ends.
 (ert-deftest romacs-agent-glyphs-a-call-ends-whatever-its-mark-became ()
@@ -57,15 +57,14 @@
       (let ((romacs-agent-glyph-alist (copy-alist romacs-agent-glyph-alist)))
         (romacs-agent-log-draw session (list :type 'tool :state 'started :id "a" :name "Agent"
                                              :input (let ((h (make-hash-table :test #'equal))) (puthash "description" "dig" h) h)))
-        ;; Drawn with no mark at all, then the mark changed while it runs:
-        ;; its row still says what came of it, its bars whole.
-        (setf (alist-get 'tool romacs-agent-glyph-alist) "")
+        ;; A wide mark changes while the call runs.
+        (setf (alist-get 'read romacs-agent-glyph-alist) "📖")
         (romacs-agent-log-draw session (list :type 'tool :state 'started :id "r" :name "Read" :parent "a"
                                              :input (funcall input "/x/notes.txt")))
-        (setf (alist-get 'tool romacs-agent-glyph-alist) "●")
+        (setf (alist-get 'read romacs-agent-glyph-alist) "R")
         (romacs-agent-log-draw session (list :type 'tool :state 'completed :id "r" :output "a\nb"))
         (let ((text (buffer-substring-no-properties (point-min) romacs-agent-log--end)))
-          (should (string-match-p "^│  ◧ notes.txt  /x · 2 lines$" text)))))))
+          (should (string-match-p "^│   R notes.txt  /x · 2 lines$" text)))))))
 
 (ert-deftest romacs-agent-glyphs-a-narrowed-chat-keeps-its-narrowing ()
   ;; Narrowed to its transcript's end, a changed mark's separator is

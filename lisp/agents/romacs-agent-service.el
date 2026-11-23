@@ -764,20 +764,22 @@ event."
   ;; Who answered is said a unit before the answer: kept until it leaves.
   (when (and (eq (plist-get event :type) 'attributed) (eq session (romacs-agent-loaded id)))
     (puthash (cons id (plist-get event :request-id)) event romacs-agent-service--attributed))
-  (when (and (eq session (romacs-agent-loaded id)) (plist-get event :seq)
-             (romacs-agent-service--subscriptions id))
+  (when-let* (((eq session (romacs-agent-loaded id)))
+              (seq (plist-get event :seq))
+              (subscriptions (romacs-agent-service--subscriptions id)))
     (push event (gethash id romacs-agent-service--units))
     (when (plist-get event :last)
-      (let ((events (nreverse (gethash id romacs-agent-service--units))) (seq (plist-get event :seq)))
+      (let ((events (nreverse (gethash id romacs-agent-service--units))))
         ;; Taken before it is encoded: a failure never leaves it for the next.
         (remhash id romacs-agent-service--units)
-        (let ((sent (romacs-agent-service--bounded events session)))
-          (pcase-dolist (`(,rpc . ,subscription) (romacs-agent-service--subscriptions id))
+        (let ((sent (romacs-agent-service--bounded events session))
+              (pending (romacs-agent-service--requests session events)))
+          (pcase-dolist (`(,rpc . ,subscription) subscriptions)
             (when (and (> seq (romacs-agent-service--subscription-cutoff subscription)) (not (equal sent [])))
               (romacs-agent-service--send-unit rpc subscription id seq sent))
             ;; What it waits on, whatever its cutoff: a request kept by the
             ;; open's cursor may be folded only now.
-            (romacs-agent-service--pending-changed rpc subscription session events))))))
+            (romacs-agent-service--pending-changed rpc subscription session pending events))))))
   (when (and (plist-get event :last) (> (hash-table-count romacs-agent-service--attributed) 0)
              (eq session (romacs-agent-loaded id)))
     (romacs-agent-service--attributed-gone session)))
@@ -813,90 +815,101 @@ restarts (`romacs-agent-store-command').")
   "While a command's effect runs, a function keeping what it reached, a
 result's table: a repeat after the service stops gets that.")
 
+(defun romacs-agent-service--ordered-json (value)
+  "Return JSON VALUE with its object keys in a stable order."
+  (cond ((hash-table-p value)
+         (let ((ordered (make-hash-table :test #'equal)))
+           (dolist (key (sort (hash-table-keys value) #'string<))
+             (puthash key (romacs-agent-service--ordered-json (gethash key value)) ordered))
+           ordered))
+        ((vectorp value) (vconcat (mapcar #'romacs-agent-service--ordered-json value)))
+        (t value)))
+
+(defun romacs-agent-service--command-digests (method params)
+  "Return the current and legacy digests of METHOD with PARAMS, ignoring cid."
+  (let ((arguments (copy-hash-table params)))
+    (remhash "cid" arguments)
+    (list (concat "v2:" (secure-hash 'sha1
+                                    (concat method " " (json-serialize (romacs-agent-service--ordered-json arguments)))))
+          (secure-hash 'sha1 (concat method " " (json-serialize arguments))))))
+
+(defun romacs-agent-service--command-finish (key entry result &optional kept-at outcome)
+  "Reply to ENTRY's waiting calls with RESULT, keeping OUTCOME at KEPT-AT."
+  (let ((waiting (cdr (cddr entry))))
+    (if outcome
+        (setcdr entry (cons kept-at outcome))
+      (remhash key romacs-agent-service--commands))
+    (dolist (respond waiting) (funcall respond result))))
+
+(defun romacs-agent-service--command-run (key digest effect finish)
+  "Run admitted command EFFECT, then keep its result before calling FINISH."
+  (cl-flet ((complete (result)
+              (let ((json (json-serialize (if (eq (car-safe result) 'error)
+                                             (romacs-agent-rpc-object "refused" (vconcat (cdr result)))
+                                           result)))
+                    (at (float-time)))
+                (romacs-agent-store-command-put
+                 key digest json
+                 (lambda (written)
+                   (if (equal written '(ok t))
+                       (funcall finish result at json)
+                     (funcall finish '(error -32018 "not-kept" "How the command ended was not kept: it may have taken effect"))))
+                 at))))
+    (condition-case err
+        (let* ((romacs-agent-service--progress
+                (lambda (outcome &optional done)
+                  (romacs-agent-store-command-put key digest (json-serialize outcome) done)))
+               (result (funcall effect)))
+          (if (functionp result)
+              (funcall result (lambda (result) (complete result)))
+            (complete result)))
+      ((romacs-agent-service-error error quit)
+       (complete (if (eq (car err) 'romacs-agent-service-error)
+                     (list 'error (nth 1 err) (nth 2 err) (nth 3 err))
+                   (list 'error -32603 "internal" (error-message-string err))))))))
+
+(defun romacs-agent-service--command-admit (key digests effect respond)
+  "Keep one admission by KEY before running EFFECT, then call RESPOND.
+DIGESTS includes the legacy digest for rows written by an older service."
+  (let* ((digest (car digests))
+         (entry (list digest (float-time) 'waiting respond))
+         (finish (lambda (result &optional at outcome)
+                   (romacs-agent-service--command-finish key entry result at outcome))))
+    (puthash key entry romacs-agent-service--commands)
+    (romacs-agent-store-command-admit
+     key digest (json-serialize (romacs-agent-rpc-object "state" "unknown"))
+     (- (float-time) romacs-agent-service--command-life)
+     (lambda (kept)
+       (pcase kept
+         (`(ok t) (romacs-agent-service--command-run key digest effect finish))
+         (`(ok (,stored ,outcome ,at))
+          (if (member stored digests)
+              (progn
+                (setcar entry stored)
+                (funcall finish (romacs-agent-service--kept-result outcome) at outcome))
+            (funcall finish '(error -32015 "cid-conflict" "This cid named another command"))))
+         (_ (funcall finish '(error -32603 "internal" "The command was not kept: not run"))))))))
+
 (defun romacs-agent-service--command (rpc method params effect)
-  "Run the command METHOD with PARAMS once, by its client's id (cid):
-EFFECT is called once its admission is kept in the store, and its result,
-a table with its state, kept and answered; EFFECT may instead return a
-function, called with one that takes its result once it has it.  The same
-command again gets the result kept, or waits with the first; the same cid
-with another method or other params is refused (cid-conflict).  A command
-kept as admitted, its effect unknown (the service stopped before its
-result was kept), is never run again: its state is unknown."
+  "Run METHOD with PARAMS once for RPC's peer and the client's cid.
+A matching repeat gets the kept result or waits for the original reply.
+A different call with the same cid gets cid-conflict.  Run EFFECT only
+after admission is kept, even if the service lost the original result."
   (let* ((peer (romacs-agent-rpc-data rpc)) (cid (gethash "cid" params)))
     (unless (stringp cid) (romacs-agent-service--fail -32602 "bad-params" "A command carries its cid"))
     (let* ((identity (romacs-agent-service--peer-identity peer))
            (key (format "%s %s %s" (or (and (hash-table-p identity) (gethash "login" identity)) "")
                         (or (romacs-agent-service--peer-instance peer) "") cid))
-           (digest (let ((rest (copy-hash-table params))) (remhash "cid" rest)
-                        (secure-hash 'sha1 (concat method " " (json-serialize rest)))))
+           (digests (romacs-agent-service--command-digests method params))
            (kept (romacs-agent-service--kept key)))
       (cond
-       ((and kept (not (equal (car kept) digest)))
+       ((and kept (not (member (car kept) digests)))
         (romacs-agent-service--fail -32015 "cid-conflict" "This cid named another command"))
        ((and kept (eq (car-safe (cddr kept)) 'waiting))
         (lambda (respond) (setcdr (cddr kept) (cons respond (cdr (cddr kept))))))
        (kept (let ((result (romacs-agent-service--kept-result (cddr kept))))
                (if (eq (car-safe result) 'error) (apply #'romacs-agent-service--fail (cdr result)) result)))
-       (t
-        (lambda (respond)
-          (let ((entry (cons digest (cons (float-time) (list 'waiting respond)))))
-            (puthash key entry romacs-agent-service--commands)
-            (cl-labels
-                ((answer (result &optional kept-at outcome)
-                   ;; Its repeats as they are now, one may have come
-                   ;; meanwhile; then what is kept of it, OUTCOME kept at
-                   ;; KEPT-AT, else nothing.
-                   (let ((waiting (cdr (cddr entry))))
-                     (if outcome (setcdr entry (cons kept-at outcome)) (remhash key romacs-agent-service--commands))
-                     (dolist (respond waiting) (funcall respond result))))
-                 (complete (result)
-                   ;; Kept as it ended, refused too, a repeat getting the
-                   ;; same: its repeats wait until that is kept.
-                   (let ((json (json-serialize
-                                (if (eq (car-safe result) 'error)
-                                    (romacs-agent-rpc-object "refused" (vconcat (cdr result)))
-                                  result)))
-                         (at (float-time)))
-                     (romacs-agent-store-command-put
-                      key digest json
-                      (lambda (written)
-                        ;; Not kept: said so, as a repeat finds it admitted,
-                        ;; its end unknown.
-                        (if (equal written '(ok t)) (answer result at json)
-                          (answer (list 'error -32018 "not-kept" "How the command ended was not kept: it may have taken effect"))))
-                      at)))
-                 (failed (err)
-                   (if (eq (car err) 'romacs-agent-service-error)
-                       (pcase-let ((`(,code ,kind ,text) (cdr err))) (list 'error code kind text))
-                     (list 'error -32603 "internal" (error-message-string err))))
-                 (run ()
-                   (condition-case err
-                       (let* ((romacs-agent-service--progress
-                               ;; What it reached, kept for a repeat after a stop.
-                               (lambda (outcome &optional done)
-                                 (romacs-agent-store-command-put key digest (json-serialize outcome) done)))
-                              (result (funcall effect)))
-                         (if (functionp result)
-                             (funcall result (lambda (result) (complete result)))
-                           (complete result)))
-                     ((romacs-agent-service-error error quit) (complete (failed err))))))
-              ;; Admitted once, in one step of the store: kept as admitted
-              ;; before its effect, so a service that stops before its
-              ;; result is kept runs it no second time; one there already
-              ;; is a repeat.
-              (romacs-agent-store-command-admit
-               key digest (json-serialize (romacs-agent-rpc-object "state" "unknown"))
-               (- (float-time) romacs-agent-service--command-life)
-               (lambda (kept)
-                 (pcase kept
-                   (`(ok t) (run))
-                   ;; One kept already: a repeat, or a conflict, answered as
-                   ;; that one is, the store's row as it was.
-                   (`(ok (,stored ,outcome ,at))
-                    (if (equal stored digest)
-                        (answer (romacs-agent-service--kept-result outcome) at outcome)
-                      (answer (list 'error -32015 "cid-conflict" "This cid named another command"))))
-                   (_ (answer (list 'error -32603 "internal" "The command was not kept: not run"))))))))))))))
+       (t (lambda (respond) (romacs-agent-service--command-admit key digests effect respond)))))))
 
 (defun romacs-agent-service--kept-result (json)
   "The result JSON, a kept command's, says: unknown when it says none,
@@ -1202,11 +1215,11 @@ say, and who answered it, its note's (kept since it came):
      "reason" (or (plist-get attributed :reason) :null)
      "answers" (or (plist-get attributed :answers) (plist-get answered :answers) :null))))
 
-(defun romacs-agent-service--pending-changed (rpc subscription session events)
-  "Tell RPC what SESSION waits on that SUBSCRIPTION was not told, and what
-it no longer waits on, EVENTS the record unit that changed it, if any."
+(defun romacs-agent-service--pending-changed (rpc subscription session now events)
+  "Tell RPC what changed from SUBSCRIPTION's pending requests to NOW.
+SESSION and EVENTS, if any, describe how a request was resolved."
   (let ((known (romacs-agent-service--subscription-pending subscription))
-        (now (romacs-agent-service--requests session events)) (id (romacs-agent-id session)))
+        (id (romacs-agent-id session)))
     (maphash (lambda (harness-id asked)
                (unless (gethash harness-id now)
                  (remhash harness-id known)
@@ -1226,15 +1239,17 @@ it no longer waits on, EVENTS the record unit that changed it, if any."
 \(a worker's fold, a journal read with no supervisor): each subscription
 whose cutoff is behind is sent that gap at once, an event of no events.
 It reads nothing."
-  (let ((id (romacs-agent-id session)) (seq (romacs-agent-seq session)))
-    (when (integerp seq)
-      (pcase-dolist (`(,rpc . ,subscription) (romacs-agent-service--subscriptions id))
-        (let ((cutoff (romacs-agent-service--subscription-cutoff subscription)))
-          (when (> seq cutoff)
-            (romacs-agent-service--send-unit rpc subscription id seq [] (cons cutoff seq)))
-          ;; What it waits on, whatever its gap: a fold may reach a
-          ;; request kept by the open's cursor only now.
-          (romacs-agent-service--pending-changed rpc subscription session nil))))))
+  (when-let* ((id (romacs-agent-id session))
+              (seq (romacs-agent-seq session))
+              ((integerp seq))
+              (subscriptions (romacs-agent-service--subscriptions id))
+              (pending (romacs-agent-service--requests session)))
+    (pcase-dolist (`(,rpc . ,subscription) subscriptions)
+      (let ((cutoff (romacs-agent-service--subscription-cutoff subscription)))
+        (when (> seq cutoff)
+          (romacs-agent-service--send-unit rpc subscription id seq [] (cons cutoff seq)))
+        ;; A fold may reach a request kept by the open's cursor only now.
+        (romacs-agent-service--pending-changed rpc subscription session pending nil)))))
 
 (defun romacs-agent-service--row-changed (row)
   "Tell the subscribers of ROW's session its row."

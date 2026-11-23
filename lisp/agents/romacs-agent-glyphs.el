@@ -22,7 +22,7 @@
     (composer "❯" "Before the composer's line")
     (queue-held "»" "Before a queued message being edited")
     (queue-other "<" "Before a queued message from elsewhere")
-    (tool "●" "Before a tool call's row")
+    (tool "·" "Before a tool call without its own mark")
     (output "⎿" "Before what a call put out")
     (running "⋮" "Before a running call's last lines")
     (subagent "│" "The rule a subagent's work hangs on")
