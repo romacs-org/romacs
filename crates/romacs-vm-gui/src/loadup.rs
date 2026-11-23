@@ -366,7 +366,7 @@ pub fn drive(vm: &mut Vm, dir: &Path) -> Result<Loadup, String> {
     vm.set_load_path(&path.iter().map(PathBuf::from).collect::<Vec<_>>())?;
     loadup.subdirs = applied;
     loadup.subdirs_skipped = subdirs_skipped;
-    loadup.load_path_len = load_path(vm)?.len();
+    loadup.load_path_len = path.len();
     if loadup.rows.iter().any(|row| row.site.name == "simple" && matches!(row.outcome, Outcome::Partial { .. })) {
         let source = std::fs::read_to_string(dir.join("simple.el")).map_err(|e| e.to_string())?;
         loadup.command_definitions = load_line_command_definitions(vm, &source)?;
@@ -399,6 +399,14 @@ pub fn drive_bootstrap(vm: &mut Vm, bootstrap: &Path, load_path: &[PathBuf]) -> 
     Ok(loadup)
 }
 
+/// Whether the top-level FORM is loadup.el's `(eval top-level)`, with or
+/// without its dialect argument (GNU 27.1 has none), as the reader reads it.
+/// A form the reader refuses is not it: its own evaluation reports that.
+fn starts_session(vm: &mut Vm, form: &str) -> bool {
+    let test = format!("(let ((f (quote {form}\n))) (and (eq (car-safe f) 'eval) (eq (car-safe (cdr f)) 'top-level) (null (nthcdr 3 f))))");
+    vm.eval_source(&test).is_ok_and(|answer| answer != romacs_vm::Fixed::NIL)
+}
+
 /// Every top-level form of `file` in order, its load sites through the
 /// wrapper; each site's file is found on `search` as `load` finds it.
 fn run(vm: &mut Vm, file: &Path, search: &[PathBuf], adapt: bool) -> Result<Loadup, String> {
@@ -417,7 +425,7 @@ fn run(vm: &mut Vm, file: &Path, search: &[PathBuf], adapt: bool) -> Result<Load
     let mut windows: Vec<(usize, usize, usize)> = vec![];
     for (k, &(start, end, line)) in spans.iter().enumerate() {
         // The session's own startup runs what this form starts (deviation 3).
-        if source[start..end].split_whitespace().collect::<String>() == "(evaltop-levelt)" {
+        if starts_session(vm, &source[start..end]) {
             continue;
         }
         let inside: Vec<Site> = sites.iter().filter(|s| s.form == k).cloned().collect();
@@ -906,20 +914,24 @@ mod tests {
                 std::fs::create_dir_all(dir.join(name)).unwrap();
             }
             let dir = dir.canonicalize().unwrap();
-            std::fs::write(dir.join("loadup.el"),
-                "(defun normal-top-level () (setq top-level-ran t))\n(setq top-level '(normal-top-level))\n(eval top-level t)\n").unwrap();
-            let mut vm = Vm::new();
-            let report = drive(&mut vm, &dir).unwrap();
-            let ran = vm.eval_source("(boundp 'top-level-ran)").unwrap().display().unwrap();
-            let path = load_path_of(&mut vm);
-            std::fs::remove_dir_all(&dir).unwrap();
             let expected: Vec<String> = ["", "b", "a", "obsolete"].iter()
                 .map(|name| if name.is_empty() { dir.clone() } else { dir.join(name) })
                 .map(|path| path.to_string_lossy().into_owned()).collect();
-            assert_eq!(ran, "nil", "normal-top-level ran during the drive");
-            assert!(report.form_failures.is_empty(), "{:?}", report.form_failures);
-            assert_eq!(path, expected);
-            assert_eq!(report.subdirs, [dir.to_string_lossy().into_owned()]);
+            // As the reader reads it: with a comment inside, and GNU 27.1's
+            // one-argument spelling.
+            for form in ["(eval top-level t)", "(eval top-level ; the dialect\n t)", "(eval top-level)"] {
+                std::fs::write(dir.join("loadup.el"),
+                    format!("(defun normal-top-level () (setq top-level-ran t))\n(setq top-level '(normal-top-level))\n{form}\n")).unwrap();
+                let mut vm = Vm::new();
+                let report = drive(&mut vm, &dir).unwrap();
+                let ran = vm.eval_source("(boundp 'top-level-ran)").unwrap().display().unwrap();
+                assert_eq!(ran, "nil", "normal-top-level ran during the drive: {form}");
+                assert!(report.form_failures.is_empty(), "{form}: {:?}", report.form_failures);
+                assert_eq!(load_path_of(&mut vm), expected, "{form}");
+                assert_eq!(report.subdirs, [dir.to_string_lossy().into_owned()], "{form}");
+                assert_eq!(report.load_path_len, expected.len(), "{form}");
+            }
+            std::fs::remove_dir_all(&dir).unwrap();
         });
     }
 

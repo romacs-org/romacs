@@ -2807,10 +2807,6 @@ mod tests {
         startup_after_the_init_screen_keys: "screen-keys",
     }
 
-    /// `--loadup` on this tree: it runs the batch package runner's chain,
-    /// every load site of lisp/session/romacs-loadup-bootstrap.el in order and each
-    /// complete, then the interactive session; the window keeps a mode line
-    /// and a cursor, and GNU's commands run the journey keys.
     /// The GNU Lisp boot ends before `normal-top-level` (loadup.rs,
     /// deviation 3), so a world holds nothing of its builder's session: with
     /// the whole tree under the builder's HOME, which this test arranges, no
@@ -2843,6 +2839,10 @@ mod tests {
                    "the session: its directory, no ~, GNU's steps under its own HOME and locale");
     }
 
+    /// `--loadup` on this tree: it runs the batch package runner's chain,
+    /// every load site of lisp/session/romacs-loadup-bootstrap.el in order and each
+    /// complete, then the interactive session; the window keeps a mode line
+    /// and a cursor, and GNU's commands run the journey keys.
     #[test]
     fn loadup_launch_runs_the_shared_chain_and_keeps_a_cursor() {
         let (rows, complete, sites, mode_line, keys, live, ran, bundled) = on_evaluator(|| {
