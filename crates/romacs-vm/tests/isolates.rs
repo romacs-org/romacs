@@ -69,6 +69,100 @@ fn messages_travel_both_ways() {
 }
 
 #[test]
+fn text_and_frozen_messages_travel_in_order_both_ways() {
+    let mut vm = vm();
+    let out = eval(&mut vm, r#"
+        (let* ((iso (isolate-create))
+               (received nil)
+               (isolate-message-functions
+                (list (lambda (sender message)
+                        (when (eq sender iso) (push message received)))))
+               (f (isolate-spawn
+                   '(lambda ()
+                      (let ((a (isolate-receive 5))
+                            (b (isolate-receive 5))
+                            (c (isolate-receive 5)))
+                        (romacs--isolate-post 0 'text 19 (nth 2 a))
+                        (isolate-send 'parent b)
+                        (isolate-send-text 'parent (nth 2 c))
+                        (list a b c (frozen-p (nth 2 a)) (frozen-p b))))
+                   :isolate iso)))
+          (romacs--isolate-post (romacs--isolate-id iso) 'text 7 "λ🌲")
+          (isolate-send iso '(text 7 "frozen"))
+          (isolate-send-text iso "")
+          (let ((result (isolate-await f 10)))
+            (isolate-kill iso)
+            (setq received (nreverse received))
+            (list result received (mapcar 'frozen-p received))))"#);
+    assert_eq!(out, r#"(((text 7 "λ🌲") (text 7 "frozen") (text 0 "") nil t) ((text 19 "λ🌲") (text 7 "frozen") (text 0 "")) (nil t nil))"#);
+}
+
+#[test]
+fn text_frames_enforce_the_inline_byte_limit_and_utf8() {
+    let mut vm = vm();
+    let out = eval(&mut vm, r"
+        (let* ((iso (isolate-create))
+               (f (isolate-spawn
+                   '(lambda ()
+                      (let ((text (nth 2 (isolate-receive 5))))
+                        (list (length text) (string-bytes text) (aref text 0))))
+                   :isolate iso)))
+          (unwind-protect
+              (list (condition-case e (isolate-send-text iso (make-string 2049 ?λ))
+                      (error (car (cdr e))))
+                    (condition-case e (isolate-send-text iso (make-string 4097 ?a))
+                      (error (car (cdr e))))
+                    (condition-case e (isolate-send-text iso (unibyte-string 255))
+                      (error (car (cdr e))))
+                    (progn (isolate-send-text iso (make-string 2048 ?λ))
+                           (isolate-await f 10)))
+            (isolate-kill iso)))");
+    let too_long = r#""Isolate text frame exceeds the 4096-byte inline limit""#;
+    assert_eq!(out, format!(r#"({too_long} {too_long} "Isolate text frame requires valid UTF-8" (2048 4096 955))"#));
+}
+
+fn isolate_script(name: &str, body: &str) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let script = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("romacs-isolate-{name}-{}", std::process::id()));
+    std::fs::write(&script, format!("#!/bin/sh\n{body}\n")).unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    script
+}
+
+#[test]
+fn invalid_utf8_from_a_peer_is_a_protocol_error() {
+    let script = isolate_script("bad-text",
+        "exec /usr/bin/printf '\\017\\000\\000\\000\\000\\000\\000\\000\\000\\000\\377' >&0");
+    let mut vm = vm();
+    let out = eval(&mut vm, &format!(r"
+        (let ((id (romacs--isolate-start {script:?} nil)))
+          (let ((reason (condition-case e (romacs--isolate-wait 5)
+                          (error (car (cdr e))))))
+            (prog1 (list reason (romacs--isolate-take id))
+              (romacs--isolate-wait 5)
+              (romacs--isolate-close id))))"));
+    std::fs::remove_file(&script).unwrap();
+    assert_eq!(out, r#"("Isolate text frame requires valid UTF-8" nil)"#);
+}
+
+#[test]
+fn protocol_one_is_refused_at_hello_with_the_version_mismatch() {
+    let script = isolate_script("protocol-one", concat!(
+        "/usr/bin/printf '\\001\\000\\000\\000\\000\\000\\000\\000\\000\\000romacs-isolate\\n1\\n%s\\nbare' \"$0\" >&0\n",
+        "exec sleep 15",
+    ));
+    let mut vm = vm();
+    let out = eval(&mut vm, &format!(r"
+        (let ((isolate-worker-program {script:?}))
+          (condition-case e (isolate-await (isolate-spawn '+ 1 2) 5)
+            (isolate-refused (list (car e) (car (nth 2 e)) (isolate-list)))))"));
+    eval(&mut vm, "(isolate-kill-all)");
+    std::fs::remove_file(&script).unwrap();
+    assert_eq!(out, r#"(isolate-refused "Isolate protocol mismatch: expected 2, got 1" nil)"#);
+}
+
+#[test]
 fn an_interrupt_quits_cpu_bound_lisp_and_the_worker_serves_on() {
     let mut vm = vm();
     // A booted worker (its seed job done) runs a tight loop; the interrupt
@@ -463,8 +557,31 @@ fn sends_to_a_full_queue_signal_instead_of_blocking() {
     // Sol r1 S2: the transport is nonblocking; a full socket buffer is
     // `isolate-queue-full', never a wait.
     let mut vm = vm();
-    let out = eval(&mut vm, "(let* ((iso (isolate-create)) (busy (progn (isolate-await (isolate-spawn 'list :isolate iso)) (isolate-spawn '(lambda () (while t)) :isolate iso))) (sent 0) (t0 (float-time)) (big (make-string 3000 ?x))) (condition-case e (while (< sent 100000) (isolate-send iso big) (setq sent (1+ sent))) (isolate-queue-full (setq sent (- sent)))) (isolate-kill iso) (list (< sent 0) (< (- (float-time) t0) 2.0)))");
-    assert_eq!(out, "(t t)");
+    for send in ["isolate-send", "isolate-send-text"] {
+        let out = eval(&mut vm, &format!("(let* ((iso (isolate-create)) (busy (progn (isolate-await (isolate-spawn 'list :isolate iso)) (isolate-spawn '(lambda () (while t)) :isolate iso))) (sent 0) (t0 (float-time)) (big (make-string 3000 ?x))) (condition-case e (while (< sent 100000) ({send} iso big) (setq sent (1+ sent))) (isolate-queue-full (setq sent (- sent)))) (isolate-kill iso) (list (< sent 0) (< (- (float-time) t0) 2.0)))"));
+        assert_eq!(out, "(t t)", "{send}");
+    }
+}
+
+#[test]
+fn a_text_send_to_a_closed_peer_signals_isolate_died() {
+    let mut vm = vm();
+    let out = eval(&mut vm, r#"
+        (let* ((iso (isolate-create))
+               (id (romacs--isolate-id iso))
+               (deadline (+ (float-time) 10)))
+          (unwind-protect
+              (progn
+                (isolate-await (isolate-spawn 'list :isolate iso) 5)
+                (romacs--isolate-signal id 9)
+                (while (and (null (romacs--isolate-reap id)) (< (float-time) deadline))
+                  (romacs--isolate-wait 0.01))
+                (unless (romacs--isolate-reap id) (error "worker did not exit"))
+                (condition-case e (isolate-send-text iso "hello")
+                  (isolate-died (car e))))
+            (romacs--isolate-pump 0)
+            (isolate-kill-all)))"#);
+    assert_eq!(out, "isolate-died");
 }
 
 #[test]

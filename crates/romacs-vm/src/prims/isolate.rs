@@ -15,8 +15,9 @@ fn isolate_start(cx, program: Value, args: Value) {
     cx.isolate_start(program, args)
 }}
 
-// (romacs--isolate-post ID KIND GENERATION VALUE): VALUE, frozen, as a
-// frame of KIND (`job', `result', `error', `message', `hello', `bye').
+// (romacs--isolate-post ID KIND GENERATION VALUE): send a frame of KIND.
+// A `text' frame sends VALUE as inline UTF-8. A `job', `result',
+// `error' or `message' frame sends VALUE frozen.
 defsubr! { name = "romacs--isolate-post", gnu = "romacs:isolate", effect = Global,
 fn isolate_post(cx, isolate: Value, kind: Value, generation: Value, value: Value) {
     cx.isolate_post(id(cx, isolate)?, kind, generation, value)?;
@@ -34,7 +35,8 @@ fn isolate_wait(cx, timeout: Value) {
 }}
 
 // (romacs--isolate-take ID): the next frame from peer ID as (KIND
-// GENERATION VALUE), VALUE frozen; nil when none waits.
+// GENERATION VALUE), with an ordinary string for `text' and `hello'
+// and frozen data for `job', `result', `error' and `message'. Nil when none waits.
 defsubr! { name = "romacs--isolate-take", gnu = "romacs:isolate", effect = Global,
 fn isolate_take(cx, isolate: Value) {
     cx.isolate_take(id(cx, isolate)?)
@@ -118,11 +120,11 @@ fn isolate_terminated_p(cx) {
     Ok(if crate::host::terminate_pending() || cx.isolate_parent_closed() { Value::TRUE } else { Value::NIL })
 }}
 
-// (romacs--isolate-hello-ok-p TEXT PROGRAM): whether a worker's hello
-// TEXT names this protocol and the executable PROGRAM it was started as.
-defsubr! { name = "romacs--isolate-hello-ok-p", gnu = "romacs:isolate", effect = Reads,
-fn isolate_hello_ok_p(cx, text: Value, program: Value) {
-    Ok(if cx.isolate_hello_ok(text, program)? { Value::TRUE } else { Value::NIL })
+// (romacs--isolate-hello-check TEXT PROGRAM): why a worker's hello TEXT
+// failed validation, or nil if its protocol and PROGRAM match.
+defsubr! { name = "romacs--isolate-hello-check", gnu = "romacs:isolate", effect = Reads,
+fn isolate_hello_check(cx, text: Value, program: Value) {
+    cx.isolate_hello_check(text, program)
 }}
 
 // (romacs--isolate-hello-refusal TEXT): the reason a worker's hello TEXT

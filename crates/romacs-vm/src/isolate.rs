@@ -1,16 +1,17 @@
-//! Isolates: worker VMs in child processes that exchange frozen values
+//! Isolates: worker VMs in child processes that exchange frozen values and text
 //! (vm-concurrency design §4, §4.6). This is the substrate the Lisp half
 //! (lisp/vm/isolate.el) drives: spawning a worker with a control socket,
-//! packets of frozen values in either direction, waiting on the sockets and
+//! packets in either direction, waiting on the sockets and
 //! on the workers' pidfds, signals, and the children a worker reports so the
 //! parent can reach their process groups after a kill.
 //!
 //! A packet is a frame: KIND, GENERATION, then either the frozen encoding
 //! inline (below a page) or a sealed memfd passed beside the packet. The
 //! same frame carries a job, a result, an error or a message; what the value
-//! means is the Lisp half's. Values are never decoded here: a frame waits in
-//! the peer's inbox as bytes or a descriptor until Lisp takes it, when it is
-//! attached as a frozen region (`frozen.rs`).
+//! means is the Lisp half's. A frozen value waits in the peer's inbox as
+//! bytes or a descriptor until Lisp takes it, when it is attached as a
+//! frozen region (`frozen.rs`). A text frame carries inline UTF-8 and is
+//! delivered as an ordinary string.
 //!
 //! Lifecycle, as the design states it: a worker installs `PR_SET_PDEATHSIG`
 //! and checks its parent's pid; SIGTERM ends its loop and drops its VM, whose
@@ -21,15 +22,15 @@
 //! signals the leader alone and says so. SIGUSR1 is the interrupt the
 //! engine's safepoints turn into `quit` (`threaded.rs`).
 use super::*;
-use crate::frozen::Backing;
+use crate::frozen::{Backing, INLINE_LIMIT};
 use std::collections::VecDeque;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 
-pub(crate) const PROTOCOL: u32 = 1;
+pub(crate) const PROTOCOL: u32 = 2;
 const HEADER: usize = 10;
 /// A packet buffer: the header, an inline frozen encoding, and slack for
-/// the text frames.
-const PACKET: usize = crate::frozen::INLINE_LIMIT + 1024;
+/// hello.
+const PACKET: usize = INLINE_LIMIT + 1024;
 const FLAG_SEALED: u8 = 1;
 /// How long a worker has to end after SIGTERM, past `isolate-kill-timeout',
 /// the spawner's own escalation while it lives.
@@ -43,7 +44,7 @@ const TERMINATION_SECONDS: u32 = 2;
 #[repr(u8)]
 pub(crate) enum Kind {
     Hello = 1, Job = 2, Result = 3, Error = 4, Message = 5, Child = 6, Retire = 7, Bye = 8, Died = 9, Interrupt = 10,
-    Fork = 11, Forked = 12, Reaped = 13, Memory = 14,
+    Fork = 11, Forked = 12, Reaped = 13, Memory = 14, Text = 15,
 }
 
 impl Kind {
@@ -51,15 +52,16 @@ impl Kind {
         match self {
             Kind::Hello => "hello", Kind::Job => "job", Kind::Result => "result", Kind::Error => "error", Kind::Message => "message",
             Kind::Child => "child", Kind::Retire => "retire", Kind::Bye => "bye", Kind::Died => "died", Kind::Interrupt => "interrupt",
-            Kind::Fork => "fork", Kind::Forked => "forked", Kind::Reaped => "reaped", Kind::Memory => "memory",
+            Kind::Fork => "fork", Kind::Forked => "forked", Kind::Reaped => "reaped", Kind::Memory => "memory", Kind::Text => "text",
         }
     }
     /// The kinds Lisp posts (`romacs--isolate-post').
-    const POSTED: [Kind; 9] = [Kind::Hello, Kind::Job, Kind::Result, Kind::Error, Kind::Message, Kind::Child, Kind::Retire, Kind::Bye, Kind::Interrupt];
+    const POSTED: [Kind; 10] = [Kind::Hello, Kind::Job, Kind::Result, Kind::Error, Kind::Message, Kind::Child, Kind::Retire,
+                               Kind::Bye, Kind::Interrupt, Kind::Text];
     /// `memory' is among them, never among POSTED: only a job child's
     /// `job_memory_exit' sends it, from Rust.
-    const RECEIVED: [Kind; 13] = [Kind::Hello, Kind::Job, Kind::Result, Kind::Error, Kind::Message, Kind::Child, Kind::Retire, Kind::Bye,
-                                  Kind::Interrupt, Kind::Fork, Kind::Forked, Kind::Reaped, Kind::Memory];
+    const RECEIVED: [Kind; 14] = [Kind::Hello, Kind::Job, Kind::Result, Kind::Error, Kind::Message, Kind::Child, Kind::Retire, Kind::Bye,
+                                  Kind::Interrupt, Kind::Fork, Kind::Forked, Kind::Reaped, Kind::Memory, Kind::Text];
     pub(crate) fn parse(name: &str) -> Option<Self> {
         Self::POSTED.into_iter().find(|k| k.name() == name)
     }
@@ -75,6 +77,29 @@ pub(crate) enum Payload {
     Status(i32),
     /// A `fork' frame's socket, the child's end.
     Socket(OwnedFd),
+}
+
+fn inline_text(bytes: &[u8]) -> Result<&str> {
+    if bytes.len() > INLINE_LIMIT {
+        return Err(format!("Isolate text frame exceeds the {INLINE_LIMIT}-byte inline limit"));
+    }
+    std::str::from_utf8(bytes).map_err(|_| "Isolate text frame requires valid UTF-8".into())
+}
+
+fn receive_text(bytes: &[u8], flags: u8, fds: &[OwnedFd]) -> std::io::Result<Payload> {
+    if flags != 0 || !fds.is_empty() {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Isolate text frame must be inline"));
+    }
+    let text = inline_text(bytes).map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    Ok(Payload::Text(text.to_owned()))
+}
+
+fn decode_generation(bytes: [u8; 8]) -> std::io::Result<u64> {
+    let generation = u64::from_le_bytes(bytes);
+    if generation > Value::MAX_FIXNUM as u64 {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "isolate frame generation is outside the fixnum range"));
+    }
+    Ok(generation)
 }
 
 /// What a frame reports about processes, taken as it is read rather than
@@ -187,7 +212,7 @@ impl Peer {
         };
         if bytes.len() < HEADER { return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "short isolate frame")); }
         let kind = Kind::of(bytes[0]).ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "unknown isolate frame"))?;
-        let generation = u64::from_le_bytes(bytes[1..9].try_into().unwrap());
+        let generation = decode_generation(bytes[1..9].try_into().unwrap())?;
         let sealed = bytes[9] & FLAG_SEALED != 0;
         let body = &bytes[HEADER..];
         let int = |at: usize| -> std::io::Result<i32> {
@@ -206,6 +231,7 @@ impl Peer {
             }
             Kind::Fork => Payload::Socket(fds.pop().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "fork frame without a socket"))?),
             Kind::Hello => Payload::Text(String::from_utf8_lossy(body).into_owned()),
+            Kind::Text => receive_text(body, bytes[9], &fds)?,
             Kind::Bye | Kind::Interrupt | Kind::Memory => Payload::None,
             Kind::Job | Kind::Result | Kind::Error | Kind::Message => {
                 if sealed {
@@ -679,11 +705,16 @@ impl Vm {
         }
     }
 
-    /// Send VALUE as a frame of KIND with GENERATION to peer ID: frozen as
-    /// it is when it is a region's root, else frozen now.
+    /// Send VALUE as a frame of KIND with GENERATION to peer ID. Data is
+    /// frozen unless KIND is text, which sends only the string's bytes.
     pub(crate) fn isolate_post(&mut self, id: u64, kind: Kind, generation: u64, value: Value) -> std::result::Result<(), crate::frozen::FreezeError> {
         let payload = match kind {
             Kind::Hello => Payload::Text(self.str_view(value).map(|v| String::from_utf8_lossy(v.bytes()).into_owned()).unwrap_or_default()),
+            Kind::Text => {
+                let view = self.str_view(value).ok_or_else(|| crate::frozen::FreezeError::Failed("Isolate text frame requires a string".into()))?;
+                let text = inline_text(view.bytes()).map_err(crate::frozen::FreezeError::Failed)?;
+                Payload::Text(text.to_owned())
+            }
             Kind::Bye | Kind::Interrupt => Payload::None,
             _ => {
                 let backing = match self.frozen_backing(value) {
@@ -836,22 +867,25 @@ impl Vm {
     }
 
     /// The next frame from peer ID as `(KIND GENERATION VALUE)`, its value
-    /// attached as a frozen region, or nil when none waits. A frame whose
-    /// value cannot be attached now stays queued and the error is signalled.
+    /// attached as a frozen region (or an ordinary string for text and
+    /// hello), or nil when none waits. A frame whose value cannot be
+    /// attached now stays queued and the error is signalled.
     pub(crate) fn isolate_take(&mut self, id: u64) -> Result<Value> {
-        let Some(mut frame) = self.peer_mut(id)?.inbox.pop_front() else { return Ok(Value::NIL) };
-        // A fork's socket waits here for `isolate_fork'.
-        if let Payload::Socket(_) = frame.payload
-            && let Payload::Socket(socket) = std::mem::replace(&mut frame.payload, Payload::None) {
-            self.isolates.fork_sockets.insert(frame.generation, socket);
-        }
-        let value = match &frame.payload {
-            Payload::None | Payload::Socket(_) => Value::NIL,
-            Payload::Text(text) => self.make_lisp_string(text.as_bytes().to_vec(), true),
-            Payload::Status(status) => Value::integer(i64::from(*status))?,
+        let Some(frame) = self.peer_mut(id)?.inbox.pop_front() else { return Ok(Value::NIL) };
+        let value = match frame.payload {
+            Payload::None => Value::NIL,
+            Payload::Socket(socket) => {
+                self.isolates.fork_sockets.insert(frame.generation, socket);
+                Value::NIL
+            }
+            Payload::Text(text) => self.make_lisp_string(text.into_bytes(), true),
+            Payload::Status(status) => Value::integer(i64::from(status))?,
             Payload::Frozen(backing) => match self.attach(backing.clone()) {
                 Ok(root) => root,
-                Err(error) => { self.peer_mut(id)?.inbox.push_front(frame); return Err(error); }
+                Err(error) => {
+                    self.peer_mut(id)?.inbox.push_front(Frame { payload: Payload::Frozen(backing), ..frame });
+                    return Err(error);
+                }
             },
         };
         let kind = self.intern(frame.kind.name());
@@ -1045,6 +1079,103 @@ impl Vm {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn packet(kind: Kind, generation: u64, flags: u8, body: &[u8]) -> Vec<u8> {
+        let mut packet = report_frame(kind, generation, &[]);
+        packet[9] = flags;
+        packet.extend_from_slice(body);
+        packet
+    }
+
+    fn assert_refused(peer: &mut Peer, sender: &OwnedFd, packet: &[u8], fd: Option<BorrowedFd<'_>>, reason: &str) {
+        crate::host::send_packet(sender.as_fd(), packet, fd).unwrap();
+        let error = peer.receive(&mut |_| panic!("unexpected process report"))
+            .err().unwrap_or_else(|| panic!("accepted {reason}"));
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains(reason), "{error}");
+        assert!(peer.inbox.is_empty());
+    }
+
+    #[test]
+    fn wire_generations_must_fit_a_nonnegative_fixnum() {
+        let (receiver, sender) = crate::host::socketpair().unwrap();
+        let mut vm = Vm::new();
+        vm.isolates.parent = Some(Peer::new(receiver));
+        let frozen = vm.encode_frozen(Value::TRUE).unwrap_or_else(|_| panic!("t must freeze"));
+        let max = Value::MAX_FIXNUM as u64;
+        for (kind, body) in [(Kind::Text, b"payload".as_slice()), (Kind::Message, frozen.as_slice())] {
+            let peer = vm.isolates.parent.as_mut().unwrap();
+            for generation in [max + 1, u64::MAX] {
+                assert_refused(peer, &sender, &packet(kind, generation, 0, body), None, "generation");
+            }
+            crate::host::send_packet(sender.as_fd(), &packet(kind, max, 0, body), None).unwrap();
+            assert!(matches!(peer.receive(&mut |_| unreachable!()).unwrap(), Received::Frame));
+            let value = vm.isolate_take(0).unwrap();
+            let [tag, generation, _] = vm.list_values(value).unwrap().try_into().unwrap();
+            assert_eq!(tag, vm.intern(kind.name()));
+            assert_eq!(generation.integer_value(), Some(Value::MAX_FIXNUM));
+        }
+    }
+
+    #[test]
+    fn text_packets_must_fit_inline_and_carry_no_flags_or_descriptor() {
+        let (receiver, sender) = crate::host::socketpair().unwrap();
+        let mut peer = Peer::new(receiver);
+        let extra_byte = vec![b'x'; INLINE_LIMIT + 1];
+        let truncated = vec![b'x'; PACKET];
+        for (body, flags, fd, reason) in [
+            (extra_byte.as_slice(), 0, None, "inline limit"),
+            (truncated.as_slice(), 0, None, "larger than its buffer"),
+            (b"text", FLAG_SEALED, None, "must be inline"),
+            (b"text", 0, Some(sender.as_fd()), "must be inline"),
+        ] {
+            assert_refused(&mut peer, &sender, &packet(Kind::Text, 0, flags, body), fd, reason);
+        }
+    }
+
+    #[test]
+    fn a_worker_text_reply_waits_for_socket_space() {
+        use std::sync::mpsc::{RecvTimeoutError, channel};
+        use std::time::Duration;
+
+        let (worker, parent) = crate::host::socketpair().unwrap();
+        rustix::net::sockopt::set_socket_send_buffer_size(&worker, INLINE_LIMIT * 2).unwrap();
+        // Fill the worker's socket with equally sized packets before it starts the reply.
+        let peer = Peer::new(worker);
+        let filler = Payload::Text("x".repeat(INLINE_LIMIT));
+        let mut queued = 0;
+        loop {
+            match peer.send(Kind::Text, 0, &filler, false) {
+                Ok(()) => queued += 1,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+                Err(e) => panic!("filling worker socket: {e}"),
+            }
+        }
+        assert!(queued > 0);
+        let (started, sending) = channel();
+        let (done, result) = channel();
+        let worker = std::thread::spawn(move || {
+            let mut vm = Vm::new();
+            vm.isolates.parent = Some(peer);
+            let value = vm.make_lisp_string(vec![b'y'; INLINE_LIMIT], true);
+            started.send(()).unwrap();
+            done.send(vm.isolate_post(0, Kind::Text, 17, value).is_ok()).unwrap();
+        });
+        sending.recv_timeout(Duration::from_secs(5)).unwrap();
+        let was_waiting = result.recv_timeout(Duration::from_millis(100));
+        for _ in 0..queued {
+            crate::host::recv_packet(parent.as_fd(), PACKET).unwrap().unwrap();
+        }
+        let sent = result.recv_timeout(Duration::from_secs(5));
+        let reply = crate::host::recv_packet(parent.as_fd(), PACKET);
+        drop(parent);
+        worker.join().unwrap();
+        assert_eq!(was_waiting, Err(RecvTimeoutError::Timeout));
+        assert_eq!(sent, Ok(true));
+        let (bytes, fds) = reply.unwrap().unwrap();
+        assert!(fds.is_empty());
+        assert_eq!(bytes, packet(Kind::Text, 17, 0, &[b'y'; INLINE_LIMIT]));
+    }
 
     /// A peer that dies with a frame of ours unread: the reset comes first,
     /// and its last frame and report still come through, then the close.

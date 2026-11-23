@@ -103,8 +103,9 @@ onto the queue."
                (setq romacs--isolate-deferred (nconc romacs--isolate-deferred (list frame))))
               ((eq kind 'fork)
                (setq romacs--isolate-forks (nconc romacs--isolate-forks (list (nth 1 frame)))))
-              ((eq kind 'message)
-               (setq romacs--isolate-inbox (nconc romacs--isolate-inbox (list (nth 2 frame)))))
+              ((memq kind '(message text))
+               (let ((message (if (eq kind 'text) frame (nth 2 frame))))
+                 (setq romacs--isolate-inbox (nconc romacs--isolate-inbox (list message)))))
               ((eq kind 'interrupt)
                ;; For a job not yet run; one running took it at a safepoint.
                (push (nth 1 frame) romacs--isolate-cancelled))
