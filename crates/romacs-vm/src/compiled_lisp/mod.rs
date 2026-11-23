@@ -81,6 +81,12 @@ pub struct Config {
     /// the tree elsewhere, a candidate install say, reuses its artifacts.
     /// None: every file by its path.
     pub root: Option<PathBuf>,
+    /// The file this process compiles, in a compile process
+    /// (`Vm::compile_lisp_file`): on its chain from the start, so no load
+    /// of it while the process boots starts a compile of it, whose
+    /// artifact the process would then find held, its diagnostic left in
+    /// the compile log.
+    pub compiling: Option<PathBuf>,
 }
 
 /// The configuration, with what this process read of its environment
@@ -126,7 +132,10 @@ pub fn requested(interactive: bool) -> bool {
 /// Load compiled Lisp with CONFIG for the rest of this process; a second
 /// call changes nothing.
 pub fn configure(config: Config) {
-    let chain = host::getenv(CHAIN).map(|c| c.to_string_lossy().into_owned()).unwrap_or_default();
+    let inherited = host::getenv(CHAIN).map(|c| c.to_string_lossy().into_owned()).unwrap_or_default();
+    // By its true name, as a load names the file it reads (`admitted_load').
+    let own = config.compiling.as_deref().map(|file| host::canonicalize(file).unwrap_or_else(|_| file.to_owned()));
+    let chain = on_chain(inherited, own.as_deref());
     let trace = host::getenv("ROMACS_COMPILED_LISP_TRACE").is_some();
     let no_prune = host::getenv(NO_PRUNE).is_some();
     // A launch marker, as PARENT is: compile-time code that reads
@@ -152,6 +161,17 @@ pub fn configure(config: Config) {
         });
     }
     let _ = CONFIG.set(Configured { config, chain, trace, no_prune, record, scratch, identity: std::sync::OnceLock::new() });
+}
+
+/// The chain CHAIN with FILE on it, unless it is there already (the
+/// process that started this one put it there).
+fn on_chain(mut chain: String, file: Option<&Path>) -> String {
+    let name = file.map(|file| file.to_string_lossy().into_owned());
+    if let Some(name) = name.filter(|name| !chain.lines().any(|line| line == name.as_str())) {
+        chain.push_str(&name);
+        chain.push('\n');
+    }
+    chain
 }
 
 /// Count a load of PATH that took ROUTE, once its input is in hand
