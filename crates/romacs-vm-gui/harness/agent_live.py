@@ -70,6 +70,9 @@ TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
              instances and models, with an effort; the first session's
              models kept once.
   environment  a harness sees none of the editor's own launch variables.
+  gone_cwd   a delegated Claude or Codex task whose directory disappears
+             while attached or after reaping answers two messages from an
+             existing directory and is told where it runs once.
   unicode    non-ASCII (’, é, CJK, emoji, a combining mark, a raw byte)
              through prompts, replies, the journal, titles, tools, Codex
              and history.
@@ -1386,7 +1389,7 @@ def limit_crash_at(a, child, case, hit):
     a.eval(install.replace('HANDLER', handler))
 
 
-def limit_input(record):
+def journal_input(record):
     entry = record.get('in') or {}
     if entry.get('type') == 'user':
         content = entry['message']['content']
@@ -1454,8 +1457,8 @@ def limit_assertions(records, events, wakes, case, target, message, wait):
             'seen': [e['config_dir'] for e in events if e.get('seen') == p]}
         for p, _ in LIMIT_PROMPTS
     }
-    early = [limit_input(r) for start, end in intervals if start is not None
-             for r in records[start + 1:end] if limit_input(r) in prompts]
+    early = [journal_input(r) for start, end in intervals if start is not None
+             for r in records[start + 1:end] if journal_input(r) in prompts]
     ordered = limit_ordered(records, intervals, case)
     waits = [e['received'] for e in events if limit_has_input(e.get('received', ''), wait)]
     wait_seen = [e['config_dir'] for e in events if limit_has_input(e.get('seen', ''), wait)]
@@ -1468,7 +1471,7 @@ def limit_assertions(records, events, wakes, case, target, message, wait):
     answers = [t for t, state, reply in headers if state == 'completed' and reply == message]
     # A reset wait can accept notes at the limit. The first input after
     # the reset itself must be the continuation.
-    after = [next((i for i in range(end + 1, len(records)) if limit_input(records[i])), None)
+    after = [next((i for i in range(end + 1, len(records)) if journal_input(records[i])), None)
              for _, end in intervals if end is not None]
     return {
         'A1': (len(waits) == 1 and copied and all(p['received'] == p['seen'] == [str(target)] for p in prompts.values())),
@@ -1476,7 +1479,7 @@ def limit_assertions(records, events, wakes, case, target, message, wait):
         'A3': None if reset else (len(answers) == 1 and answers[0] >= boundary_time
                                   and all(state != 'failed' for _, state, _ in headers)),
         'A4': (len(continuations) == len(intervals) and after == continuations
-               and (case != 'manual-switch' or any(i > continuations[0] and 'say manual-next' in limit_input(r)
+               and (case != 'manual-switch' or any(i > continuations[0] and 'say manual-next' in journal_input(r)
                                                    for i, r in enumerate(records)))),
         'limit_done': done, 'boundary': boundary, 'early': early, 'accepted_wait': len(waits), 'wait_seen': wait_seen,
         'prompts': prompts, 'wakes': wakes, 'continuations': continuations, 'intervals': intervals,
@@ -1495,7 +1498,7 @@ def limit_refusal(a, parent, child, native, mark, marker, wait):
     until(lambda: a.eval("(bound-and-true-p limit-move-refusal-observed)") == 't', 12, 'refusal move window elapsed')
     records, events, wakes = limit_snapshot(a, child, native, mark)
     (a.root / 'child-journal.json').write_text(json.dumps(records, indent=2))
-    delivery = [r['in'] for r in records if limit_has_input(limit_input(r), wait)]
+    delivery = [r['in'] for r in records if limit_has_input(journal_input(r), wait)]
     refused = [e['attempted'] for e in events if 'attempted' in e]
     named = any(match.groups() == (child, 'failed', message)
                 for wake in wakes for match in LIMIT_WAKE.finditer(wake['text']))
@@ -1557,7 +1560,7 @@ def limit_parent_action(a, case, parent, child, release):
 
 
 def limit_parent_sent(records, events, wakes, result, action, target):
-    inputs = [i for i, r in enumerate(records) if limit_has_input(limit_input(r), LIMIT_PARENT_SEND)]
+    inputs = [i for i, r in enumerate(records) if limit_has_input(journal_input(r), LIMIT_PARENT_SEND)]
     sent = [e['config_dir'] for e in events if limit_has_input(e.get('received', ''), LIMIT_PARENT_SEND)]
     answered = [reply for w in wakes for _, state, reply in LIMIT_WAKE.findall(w['text'])
                 if state == 'completed' and reply == action['messageId']]
@@ -1577,7 +1580,7 @@ def limit_cancelled(a, child, native, mark, action):
     (a.root / 'child-journal.json').write_text(json.dumps(records, indent=2))
     prompts = dict(LIMIT_PROMPTS)
     delivered = [e['received'] for e in events if e.get('received') in prompts]
-    written = [limit_input(r) for r in records if limit_input(r) in prompts]
+    written = [journal_input(r) for r in records if journal_input(r) in prompts]
     no_move = not any(limit_boundary(r, 'move-parent-cancel') for r in records)
     no_continuation = not any((r.get('in') or {}).get('romacsOwn') == 'limit-continue' for r in records)
     cancelled = (action['status'] == 'cancelled' and no_move and no_continuation
@@ -1748,6 +1751,140 @@ def one_answer(args, base):
         return result
     finally:
         a.close()
+
+
+def gone_cwd_call(a, parent, tool, arguments):
+    a.idle(parent)
+    a.send(parent, f'call {tool} ' + json.dumps(arguments))
+    return a.called(tool, 60)
+
+
+def gone_cwd_followup(a, parent, child, reply, journal_mark):
+    mark = len(a.logged())
+    call = gone_cwd_call(a, parent, 'romacs_task_send', {'taskId': child, 'message': f'say {reply}'})
+    evidence = {'send': call['text'], 'accepted': False}
+    if call['error']:
+        return evidence
+    ack = json.loads(call['text'])
+    message_id = ack.get('messageId')
+    evidence['accepted'] = ack.get('taskId') == child and bool(message_id)
+    if not evidence['accepted']:
+        return evidence
+    envelope = f'<romacs-message id="{message_id}" '
+    try:
+        turn = until(lambda: next((e for e in a.logged()[mark:] if envelope in e.get('input', '')), None),
+                     30, f'{child} received {reply}')
+        evidence.update(pid=turn['pid'], cwd=turn['cwd'], existing_cwd=Path(turn['cwd']).is_dir())
+        if 'claude' in turn:
+            evidence['conversation'] = turn['claude']
+        a.until(child, lambda: a.eval(f'(romacs-agent-reply {a.s(child)})') == lisp_text(reply),
+                30, f'{child} answered {reply}')
+        a.idle(child)
+        records = a.journal(child)[journal_mark:]
+        if not any(message['id'] == message_id for record in records
+                   for message in (record.get('in') or {}).get('romacsMessages', [])):
+            raise RuntimeError(f'{child} did not journal delivery of {message_id}')
+        evidence['reply'] = reply
+        notes = [json.dumps(r['note'], ensure_ascii=False) for r in records if 'note' in r]
+        evidence['inputs_and_notes'] = [e['input'] for e in a.logged()[mark:]
+                                        if e.get('pid') == turn['pid'] and 'input' in e] + notes
+    except RuntimeError as error:
+        evidence['turn_error'] = str(error)
+    return evidence
+
+
+def cwd_notices(followup, cwd):
+    """New harness inputs or journal notes naming the actual directory."""
+    path = re.compile(r'(?<![\w./~-])' + re.escape(cwd.rstrip('/') or '/') + r'/?(?![\w/~-]|\.[\w./~-])')
+    return [text for text in followup.get('inputs_and_notes', []) if path.search(text)]
+
+
+def gone_cwd_start(a, parent, provider, cwd):
+    """Delegate and prove the first turn ran in the directory we will remove."""
+    mark = len(a.logged())
+    delegated = gone_cwd_call(a, parent, 'romacs_delegate_task',
+                              {'task': 'say before removal', 'cwd': str(cwd), 'mode': 'wait',
+                               'target': {'provider': provider}})
+    if delegated['error']:
+        raise RuntimeError(delegated['text'])
+    task = json.loads(delegated['text'])
+    if task.get('status') != 'completed' or (task.get('result') or '').partition('\n')[0] != 'before removal':
+        raise RuntimeError(f'initial turn did not complete: {task}')
+    child = task['taskId']
+    prompt = next(text for r in a.journal(child)
+                  if (text := journal_input(r)).partition('\n')[0] == 'say before removal')
+    first = next(e for e in a.logged()[mark:] if e.get('input') == prompt)
+    if first['cwd'] != str(cwd.resolve()):
+        raise RuntimeError(f'task started in {first["cwd"]}, expected {cwd}')
+    return child, first
+
+
+def gone_cwd_case(a, provider, reaped, result):
+    a.up()
+    a.codex_instance()
+    a.eval(f'(setq romacs-agent-reap-after {"1" if reaped else "nil"})')
+    parent = a.start('say ready')
+    cwd = a.root / 'task-cwd'
+    cwd.mkdir()
+    child, first = gone_cwd_start(a, parent, provider, cwd)
+
+    def wait_reaped(pid):
+        a.until(child, lambda: not Path(f'/proc/{pid}').exists()
+                and a.eval(f'(and (romacs-agent-reaped-p {a.s(child)}) '
+                           f'(not (process-live-p (romacs-agent-connection {a.s(child)}))))') == 't',
+                30, 'idle task reaped and harness gone')
+
+    a.idle(child)
+    pid = first['pid']
+    if reaped:
+        wait_reaped(pid)
+    elif (os.readlink(f'/proc/{pid}/cwd') != first['cwd']
+          or a.eval(f'(process-live-p (romacs-agent-connection {a.s(child)}))') == 'nil'):
+        raise RuntimeError('idle task is not attached in its original directory')
+    mark = len(a.journal(child))
+    cwd.rmdir()
+    result.update(task=child, initial_pid=pid, removed=str(cwd))
+    first_send = gone_cwd_followup(a, parent, child, 'after removal one', mark)
+    result['first_send'] = first_send
+    result['G1'] = first_send['accepted']
+    if result['G1']:
+        result['G2'] = bool(first_send.get('reply') and first_send.get('existing_cwd'))
+        if first_send.get('existing_cwd'):
+            result['G3'] = bool(cwd_notices(first_send, first_send['cwd']))
+    if provider == 'claude':
+        old, new = first.get('claude'), first_send.get('conversation')
+        result.update(initial_conversation=old, G5=bool(old and new and old != new))
+    mark = len(a.journal(child))
+    if reaped and first_send.get('reply'):
+        wait_reaped(first_send['pid'])
+    second = gone_cwd_followup(a, parent, child, 'after removal two', mark)
+    result['second_send'] = second
+    result['G4'] = bool(second['accepted'] and second.get('reply') and second.get('existing_cwd')
+                        and not cwd.exists()
+                        and not cwd_notices(second, second['cwd'])
+                        and not cwd_notices(second, first_send.get('cwd', second['cwd'])))
+
+
+def gone_cwd(args, base):
+    """Both persistent harness drivers, with and without an idle reap."""
+    variants = {}
+    for provider in ('claude', 'codex'):
+        for lifecycle in ('reaped', 'attached'):
+            name = f'{provider}-{lifecycle}'
+            assertions = ('G1', 'G2', 'G3', 'G4') + (('G5',) if provider == 'claude' else ())
+            result = dict.fromkeys(assertions)
+            variants[name] = result
+            a = Agents(args, base, name)
+            try:
+                gone_cwd_case(a, provider, lifecycle == 'reaped', result)
+            except (RuntimeError, OSError, ValueError, StopIteration) as error:
+                result['error'] = repr(error)
+            finally:
+                a.close()
+            issues = a.home / '.local/state/romacs/agents/issues.jsonl'
+            result['issues'] = [json.loads(line) for line in issues.read_text().splitlines()] if issues.exists() else []
+            result['ok'] = all(result[key] is True for key in assertions)
+    return {'ok': all(r['ok'] for r in variants.values()), 'variants': variants}
 
 
 WOKEN = re.compile(r'Delegated task (\S+) \(.*?\) \[(\w+), (\d+) chars\]:\n(.*?)'
@@ -4495,7 +4632,7 @@ def chat_images(args, base):
         a.close()
 
 
-WORKFLOWS = {'limit_move': limit_move, 'one_answer': one_answer, 'chat_images': chat_images, 'chat_menu': chat_menu, 'history_view': history_view, 'host': host, 'sockets': sockets, 'reap': reap, 'deadline': deadline, 'providers': providers, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe,
+WORKFLOWS = {'gone_cwd': gone_cwd, 'limit_move': limit_move, 'one_answer': one_answer, 'chat_images': chat_images, 'chat_menu': chat_menu, 'history_view': history_view, 'host': host, 'sockets': sockets, 'reap': reap, 'deadline': deadline, 'providers': providers, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe,
              'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race, 'restart-rollback': restart_rollback, 'restart-hang': restart_hang, 'renew': renew,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
              'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode,

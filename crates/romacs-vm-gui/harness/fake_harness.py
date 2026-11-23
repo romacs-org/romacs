@@ -38,6 +38,7 @@ import json
 import os
 from pathlib import Path
 import queue
+import re
 import subprocess
 import sys
 import threading
@@ -80,6 +81,12 @@ def log(**fields):
 
 def argument(name):
     return sys.argv[sys.argv.index(name) + 1] if name in sys.argv else None
+
+
+def delegated_say(prompt):
+    """A one-line 'say TEXT' inside a Romacs message envelope."""
+    match = re.search(r'^<romacs-message [^\n]*>\nsay ([^\n]+)\n</romacs-message>$', prompt, re.M)
+    return match[1] if match else None
 
 
 def message_body(text):
@@ -152,7 +159,8 @@ class Harness:
 
     def init(self):
         emit({'type': 'system', 'subtype': 'init', 'session_id': self.session, 'model': 'fake-model',
-              'cwd': os.getcwd(), 'tools': ['Bash'], 'mcp_servers': [{'name': 'romacs', 'status': 'connected'}]})
+              'cwd': os.readlink('/proc/self/cwd'), 'tools': ['Bash'],
+              'mcp_servers': [{'name': 'romacs', 'status': 'connected'}]})
 
     def stream(self, text, parent=None):
         self.turn += 1
@@ -346,10 +354,13 @@ class Harness:
             text = self.inbox.get()
             if text is None:
                 return 0
+            log(claude=self.session, input=text, cwd=os.readlink('/proc/self/cwd'))
             self.busy = True
             self.init()
             self.record_input(text)
             body = message_body(text)
+            if (reply := delegated_say(text)) is not None:
+                body = 'say ' + reply
             reset = spent_until(self.config / 'spent')
             if not body.startswith('wait ') and reset is not None and time.time() < reset:
                 self.result('')

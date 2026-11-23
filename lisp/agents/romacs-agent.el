@@ -777,6 +777,12 @@ instances) is derived again when it changes.")
   :conversation-files (HOME SESSION)   the files, relative to its
       configuration directory HOME, that hold SESSION's conversation:
       what moves with it to another instance of the harness;
+  :cwd-copies (HOME SESSION FROMS TO)   optional, for a harness that
+      files a conversation by the directory it ran in: the copies, each
+      (SOURCE . TARGET), absolute, under HOME, that let SESSION's
+      conversation, run in the first of the names FROMS that holds it,
+      resume from TO; `lost' when none holds it or it cannot be put
+      where the harness looks, and it begins anew (`romacs-agent--rehome');
   :history PLIST   optional transcript reader.  :files (DIRECTORY LIMIT)
       returns (PATH SIZE MTIME) rows; :find (DIRECTORY ID) returns a path
       or nil.  :keep (OBJECT) selects parsed JSON lines.  :describe
@@ -2096,6 +2102,10 @@ Nonnegative values in older records acknowledge activity through that seq.")
     (and settled (or (eql settled romacs-agent--inactive-settlement)
                      (>= settled (romacs-agent-activity-seq session))))))
 
+(defun romacs-agent--goes-on-p (session)
+  "Whether SESSION may still go on by itself: neither cancelled nor settled."
+  (not (or (romacs-agent-cancelled session) (romacs-agent-settled-p session))))
+
 (defun romacs-agent-mark-seen (session)
   "SESSION's last turn end has been shown, in its manifest too."
   (unless (eql (romacs-agent-seen-seq session) (romacs-agent-done-seq session))
@@ -2259,6 +2269,7 @@ keeps across runs (`:rolled-back', `:resume-at', `:renew-block', and
   (pcase (plist-get event :type)
     ('record-state (romacs-agent--apply-record-state session (plist-get event :state)) nil)
     ('record-status (list :type 'status :text (romacs-agent--format-record-status event)))
+    ('cwd (romacs-agent--apply-cwd-event session event))
     ('selection-ack
      (romacs-agent--select-answered session (plist-get event :request-id) (plist-get event :ok))
      nil)
@@ -2859,7 +2870,9 @@ nonlocally (a quit) leaves the lines after it waiting."
           ;; selection restarted it: that resumes it once the selection is
           ;; in effect, below, and a resume now would run the old one.
           (when (and (romacs-agent-stopped session) (romacs-agent-queue session)
-                     (not (romacs-agent-pending-selection session)))
+                     (not (romacs-agent-pending-selection session))
+                     ;; A relaunch resumes it.
+                     (not (gethash session romacs-agent--relaunching)))
             (romacs-agent-resume session))
           (romacs-agent--reattach-later session)
           ;; The harness gone (a turn cut, a restart asked for): a selection
@@ -3287,6 +3300,123 @@ a stop before that copies it again."
           (romacs-agent-limited session) nil)
     (romacs-agent--changed session)))
 
+;;; Its directory gone
+
+;; A task's directory can go while the task lives on: a worktree removed
+;; once its branch merged.  Its harness then runs again from the nearest
+;; of that directory's parents that exists: always there, closest to the
+;; work it did, and no other writer's checkout it was not already in.
+
+(defun romacs-agent--nearest-directory (directory exists)
+  "DIRECTORY, or the nearest of its parents EXISTS (a predicate of a
+directory) says is there, as an absolute name without its slash: the
+root, when none is."
+  (let ((dir (directory-file-name (expand-file-name directory))))
+    (while (not (or (funcall exists dir)
+                    (equal dir (directory-file-name (file-name-directory dir)))))
+      (setq dir (directory-file-name (file-name-directory dir))))
+    dir))
+
+(defun romacs-agent--cwd-note (from to lost)
+  "What a task's next message is told first once its directory FROM is
+gone and it runs from TO.  LOST: its conversation could not be put where
+its harness looks for it from TO."
+  (concat (format "Romacs: this task's directory %s no longer exists, so it now runs from %s instead."
+                  from to)
+          (if lost " Its conversation could not follow it there: you may start fresh, without the turns before this one." "")
+          "\n\n"))
+
+(defun romacs-agent--with-note (brief note)
+  "BRIEF with NOTE after it, once: a BRIEF holding NOTE already is BRIEF."
+  (if (and brief (string-search note brief)) brief (concat brief note)))
+
+(defun romacs-agent--cwd-gone-p (session)
+  "Whether SESSION's directory, when it has one, no longer exists."
+  (when-let* ((cwd (romacs-agent-cwd session))) (not (file-directory-p cwd))))
+
+(defun romacs-agent--copy-once (copies)
+  "Make each of COPIES, (SOURCE . TARGET), absolute, a file or a whole
+directory, unless TARGET exists: copied under a temporary name beside
+TARGET and renamed to it, so a TARGET there is a whole copy, kept as it
+is.  A copy that fails leaves nothing.  SOURCE is never changed."
+  (pcase-dolist (`(,source . ,target) copies)
+    (unless (file-exists-p target)
+      (make-directory (file-name-directory (directory-file-name target)) t)
+      (let ((temporary (make-temp-name (concat (directory-file-name target) ".romacs-"))))
+        (condition-case err
+            (progn (if (file-directory-p source)
+                       (copy-directory source temporary t nil t)
+                     (copy-file source temporary nil t))
+                   (rename-file temporary target))
+          (error (if (file-directory-p temporary) (delete-directory temporary t)
+                   (ignore-errors (delete-file temporary)))
+                 ;; Made meanwhile, whole: kept.
+                 (unless (eq (car err) 'file-already-exists) (signal (car err) (cdr err)))))))))
+
+(defun romacs-agent--rehome (session)
+  "When SESSION's directory is gone, make the nearest of its parents that
+exists its directory before its harness runs again: its conversation
+copied where the harness looks for it from there (its driver's
+:cwd-copies), or, when it cannot be, begun anew there under a new id
+\(its driver's :renew); its manifest names both, the move is journaled
+with the conversation it leaves, and its next message tells it
+\(`romacs-agent-brief')."
+  (when (romacs-agent--cwd-gone-p session)
+    (let* ((from (expand-file-name (romacs-agent-cwd session)))
+           (nearest (romacs-agent--nearest-directory from #'file-directory-p))
+           (to (file-truename nearest))
+           ;; Where it ran, its links resolved as the harness saw them.
+           (physical (expand-file-name (file-relative-name from nearest) to))
+           (home (romacs-agent--home (romacs-agent-harness session) (romacs-agent-config-dir session)))
+           (copies (funcall (or (romacs-agent--harness-get session :cwd-copies) #'ignore)
+                            home session (delete-dups (list physical from)) to))
+           (lost (and (eq copies 'lost) (romacs-agent--conversation-p session)))
+           (conversation (romacs-agent--native-id session)))
+      (if (not lost) (romacs-agent--copy-once (and (listp copies) copies))
+        ;; Begun anew where it now runs, from its start, under a new id as a
+        ;; renewal's: two conversations never share one, and it is no fork.
+        (setf (romacs-agent-harness-session session)
+              (funcall (or (romacs-agent--harness-get session :renew) #'ignore) session)
+              (romacs-agent-options session) (romacs-agent--without (romacs-agent-options session) '(:fork)))
+        (romacs-agent--manifest-put session "options" (romacs-agent--options-object (romacs-agent-options session)))
+        (romacs-agent--apply-driver-state session (list :rolled-back t :resume-at nil)))
+      (setf (romacs-agent-cwd session) to
+            (romacs-agent-brief session) (romacs-agent--with-note (romacs-agent-brief session)
+                                                                  (romacs-agent--cwd-note from to lost)))
+      (romacs-agent--manifest-put session "cwd" to "harnessSession" (or (romacs-agent-harness-session session) :null))
+      (romacs-agent--note session (romacs-mcp--object "type" "cwd" "from" from "to" to "lost" (if lost t :false)
+                                                      "conversation" conversation
+                                                      "anew" (if lost (or (romacs-agent-harness-session session) :null) :null)))
+      ;; Its row too (its transcript, by the conversation's id), once idle.
+      (romacs-agent--keep-soon session)
+      (romacs-agent--changed session))))
+
+(defun romacs-agent--apply-cwd-event (session event)
+  "Fold a `cwd' EVENT, SESSION's move from a directory gone: a conversation
+begun anew is its conversation from here, in its manifest too, whatever
+an earlier run named; replayed, not live, its note waits again for the
+next message, unless an input since took it (`romacs-agent--rehome' gave
+it live).  Its status line."
+  (when-let* ((anew (plist-get event :anew))
+              ((not (equal anew (romacs-agent-harness-session session)))))
+    (setf (romacs-agent-harness-session session) anew)
+    (romacs-agent--manifest-put session "harnessSession" anew))
+  (unless (romacs-agent-caught-up session)
+    (setf (romacs-agent-brief session)
+          (romacs-agent--with-note (romacs-agent-brief session)
+                                   (romacs-agent--cwd-note (plist-get event :from) (plist-get event :to)
+                                                           (plist-get event :lost)))))
+  (list :type 'status :text (format "runs from %s: %s is gone" (plist-get event :to) (plist-get event :from))))
+
+(defun romacs-agent--stranded-p (session)
+  "Whether SESSION's live harness would take its next message now in a
+directory removed since it started: it runs again first, elsewhere."
+  (and (or (romacs-agent-queue session) (romacs-agent--pending-renewal-input session))
+       (not (romacs-agent--per-turn-p session))
+       (romacs-agent--cwd-gone-p session)
+       (not (romacs-agent--turn-under-way-p session))
+       (romacs-agent--open-p session nil)))
+
 ;;; Room on an instance, and pools of them
 
 (defvar romacs-agent--room (make-hash-table :test #'equal)
@@ -3660,7 +3790,7 @@ continuation is kept (`romacs-agent--enqueue-kept'), nil when none is made."
     (let ((item (romacs-agent--limit-continuation from to (romacs-agent-done-seq session))))
       (run-hook-with-args
        'romacs-agent-moved-functions session from to limited
-       (unless (or (equal to from) (romacs-agent-settled-p session) (romacs-agent-cancelled session)
+       (unless (or (equal to from) (not (romacs-agent--goes-on-p session))
                    ;; Made already, a move a stop cut done again: the same one.
                    (cl-find (romacs-agent-item-id item) (romacs-agent-queue session)
                             :key #'romacs-agent-item-id :test #'equal))
@@ -3683,7 +3813,7 @@ continuation go is started (`romacs-agent--opened'), a harness the move
 stopped resumed, as when a restart applied the move as it loaded.  A
 selection's restart under way brings it back itself."
   (when (and (eq (romacs-agent-loaded (romacs-agent-id session)) session)
-             (not (romacs-agent-cancelled session)) (not (romacs-agent-settled-p session)))
+             (romacs-agent--goes-on-p session))
     (condition-case err (romacs-agent--opened session)
       (error (romacs-agent--raise session (list :type 'error :text (error-message-string err)))))))
 
@@ -4077,6 +4207,12 @@ next run takes the unit's name; at once when it ran detached."
     (romacs-agent-stop session)
     (funcall then)))
 
+(defvar romacs-agent--relaunching (make-hash-table :test #'eq :weakness 'key)
+  "The sessions a relaunch stopped and resumes once their run is gone
+\(`romacs-agent--resume-when-gone'): the first resume takes one from here
+\(`romacs-agent--resume-now'), and its old run's end resumes none
+\(`romacs-agent--sentinel').")
+
 (defun romacs-agent--relaunch (session &optional before)
   "Run SESSION's harness anew, its conversation where its journal now has
 it (a rollback's, a renewal's): stopped first when it runs.  BEFORE, when
@@ -4086,10 +4222,12 @@ given, is called just before the resume."
     ;; Held from here: nothing more goes to the run it ends, attached still
     ;; while it stops (its exit, or the resume, starts the next run's state).
     (setf (romacs-agent-driver-state session) (plist-put (romacs-agent-driver-state session) :relaunching t))
+    (puthash session t romacs-agent--relaunching)
     (condition-case err
         (romacs-agent--stop-then session (lambda () (romacs-agent--resume-when-gone session 50 before)))
       ;; Its stop not even started: held still, as for one that does not stop.
-      (error (romacs-agent--not-stopped session)
+      (error (remhash session romacs-agent--relaunching)
+             (romacs-agent--not-stopped session)
              (signal (car err) (cdr err))))))
 
 (defun romacs-agent--not-stopped (session)
@@ -4099,19 +4237,25 @@ goes to the conversation it left; a stop and a resume go on."
 
 (defun romacs-agent--resume-when-gone (session tries &optional before)
   "Resume SESSION once its connection to the stopped supervisor is gone,
-looking again for TRIES tenths of a second; BEFORE as `romacs-agent--relaunch'."
-  (cond ((not (process-live-p (romacs-agent-connection session)))
+looking again for TRIES tenths of a second; BEFORE as `romacs-agent--relaunch'.
+Not once it was resumed meanwhile, nor cancelled: nothing runs then.  A
+settled one goes on, as a message to it does."
+  (cond ((not (gethash session romacs-agent--relaunching)))
+        ((romacs-agent-cancelled session) (remhash session romacs-agent--relaunching))
+        ((not (process-live-p (romacs-agent-connection session)))
+         (remhash session romacs-agent--relaunching)
          (when before (funcall before))
          (romacs-agent-resume session))
         ((> tries 0) (run-at-time 0.1 nil #'romacs-agent--resume-when-gone session (1- tries) before))
-        (t (romacs-agent--not-stopped session))))
+        (t (remhash session romacs-agent--relaunching)
+           (romacs-agent--not-stopped session))))
 
 (defun romacs-agent--restarted (session)
   "Resume SESSION on its selection, once its harness and its unit are gone;
 not one cancelled or settled meanwhile."
   (when (and (plist-get (romacs-agent-pending-selection session) :stopped)
              (not (process-live-p (romacs-agent-connection session)))
-             (not (romacs-agent-cancelled session)) (not (romacs-agent-settled-p session)))
+             (romacs-agent--goes-on-p session))
     ;; Its unit stopped, confirmed: ended, whatever socket it left, so its
     ;; journal is this server's to note the switch in.
     (when (eq (romacs-agent-state session) 'detached) (setf (romacs-agent-state session) 'ended))
@@ -4215,7 +4359,10 @@ is under way, else a steer of the turn it was sent into, still running."
   "Whether ITEM steers SESSION's turn under way: the turn it was sent into,
 which its harness can steer."
   (and (eql (romacs-agent-item-turn item) (romacs-agent-turns session))
-       (romacs-agent--steerable-p session)))
+       (romacs-agent--steerable-p session)
+       ;; Its directory gone, it waits for the turn's end, and the run
+       ;; that follows (`romacs-agent--stranded-p').
+       (not (romacs-agent--cwd-gone-p session))))
 
 (defun romacs-agent--pending-renewal-input (session)
   "The pending continuation of SESSION's automatic renewal, if any."
@@ -4248,7 +4395,8 @@ waits first.  An automatic renewal supplies a message to an empty queue."
                           until (romacs-agent-item-held item)
                           when (and (romacs-agent-item-turn item) (romacs-agent--steer-p session item))
                           return item))))
-    (romacs-agent--renewal-item session)))
+    ;; Its directory gone, the run that follows takes it (`romacs-agent--stranded-p').
+    (unless (romacs-agent--cwd-gone-p session) (romacs-agent--renewal-item session))))
 
 (defvar romacs-agent--queue-quiet)  ; below, with the queue
 
@@ -4310,17 +4458,19 @@ A steer passing the queue's head goes alone."
     t))
 
 (defun romacs-agent--dispatch (session)
-  "Drain SESSION's eligible messages, deferring reentrant dispatch requests."
-  (if (romacs-agent-dispatch session)
-      (setf (romacs-agent-dispatch session) 'again)
-    (setf (romacs-agent-dispatch session) 'busy)
-    (unwind-protect
-        (let ((more t))
-          (while more
-            (setq more (or (romacs-agent--dispatch-one session)
-                           (eq (romacs-agent-dispatch session) 'again)))
-            (setf (romacs-agent-dispatch session) 'busy)))
-      (setf (romacs-agent-dispatch session) nil))))
+  "Drain SESSION's eligible messages, deferring reentrant dispatch requests.
+A harness whose directory is gone runs again first, from another
+\(`romacs-agent--stranded-p'): they go to that run."
+  (cond ((romacs-agent-dispatch session) (setf (romacs-agent-dispatch session) 'again))
+        ((romacs-agent--stranded-p session) (romacs-agent--relaunch session))
+        (t (setf (romacs-agent-dispatch session) 'busy)
+           (unwind-protect
+               (let ((more t))
+                 (while more
+                   (setq more (or (romacs-agent--dispatch-one session)
+                                  (eq (romacs-agent-dispatch session) 'again)))
+                   (setf (romacs-agent-dispatch session) 'busy)))
+             (setf (romacs-agent-dispatch session) nil)))))
 
 ;; Messages from other sessions that wait for a new turn go in one turn
 ;; (romacs#405): a turn each, a lane with a backlog would read its
@@ -4866,7 +5016,10 @@ SESSION's last fork note, a new one says how far the fork now goes."
     (pcase (romacs-agent--continuation session)
       ('turn (romacs-agent--check-session-config session))
       ('attached (unless (romacs-agent-stopped session)
-                   (romacs-agent--check-message-run session t)))
+                   (romacs-agent--check-message-run session t))
+                 ;; Its directory gone, it is resumed elsewhere.
+                 (when (romacs-agent--cwd-gone-p session)
+                   (romacs-agent--check-resume session)))
       ('attach (unless (romacs-agent--listening-p (romacs-agent-host-socket session))
                  (romacs-agent--check-resume session)))
       ('resume (romacs-agent--check-resume session)))))
@@ -5302,6 +5455,8 @@ source a worker folds, is resumed once they are folded."
 (defun romacs-agent--resume-now (session)
   "Resume SESSION (`romacs-agent-resume'), its launch once it is moved."
   (romacs-agent--check-resume session)
+  (remhash session romacs-agent--relaunching)
+  (romacs-agent--rehome session)
   (romacs-agent--refork session)
   (setf (romacs-agent-state session) 'starting (romacs-agent-driver-state session) (romacs-agent--driver-anew session)
         (romacs-agent-startup-pending session) nil)
@@ -5962,7 +6117,7 @@ supervisor runs, else its journal read on here."
       (romacs-agent--changed session))
     ;; A cancelled or settled one's goes nowhere.
     (when (and (romacs-agent-pending-selection session)
-               (not (romacs-agent-cancelled session)) (not (romacs-agent-settled-p session)))
+               (romacs-agent--goes-on-p session))
       (romacs-agent--settle session)))
   ;; Replayed already, unless attached (its replay ends `attached').
   (unless (romacs-agent-connection session) (romacs-agent--seen-caught-up session))

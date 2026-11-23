@@ -69,6 +69,9 @@ event carries them: plists of :path :kind (image, file or capture) :alt
   (cond ((romacs-agent--rollback-note-p record)
          (let ((at (gethash "at" (gethash "note" record) 'unknown)))
            (list :rolled-back t :resume-at (unless (eq at :null) at))))
+        ;; Its conversation could not follow its directory: begun anew.
+        ((and (romacs-agent--note-p record "cwd") (eq (gethash "lost" (gethash "note" record)) t))
+         '(:rolled-back t :resume-at nil))
         ((romacs-agent--note-p record "renew")
          (let ((prompt (gethash "continue" (gethash "note" record))))
            (list :rolled-back t :resume-at nil :renew-continuation (and (stringp prompt) prompt))))
@@ -145,6 +148,8 @@ STEER is non-nil when the journal already records a turn under way."
     ("handoff" (list :type 'record-status :kind 'handoff :from (gethash "from" note)
                      :to (gethash "to" note) :why (gethash "why" note) :resets (gethash "resets" note)))
     ("resume" (romacs-agent--record-resume-event note))
+    ("cwd" (list :type 'cwd :from (gethash "from" note) :to (gethash "to" note) :lost (eq (gethash "lost" note) t)
+                 :anew (romacs-agent--value (gethash "anew" note))))
     ("fork" (list :type 'forked :from (gethash "from" note) :title (gethash "title" note)
                   :seq-from (gethash "seq" note) :turns (gethash "turns" note) :after (gethash "after" note)))
     ("rollback" (list :type 'rolled-back :to (gethash "to" note) :turns (gethash "turns" note)

@@ -48,7 +48,7 @@ journals what its harness writes."
           (romacs-agent--sessions (make-hash-table :test #'equal))
           (romacs-agent-codex-tests--written nil)
           (seq 0)
-          (session (romacs-agent--make :id "c" :harness 'codex :provider "codex" :cwd "/work" :dir dir
+          (session (romacs-agent--make :id "c" :harness 'codex :provider "codex" :cwd dir :dir dir
                                        :title "t" :state 'starting :caught-up t ,@fields)))
      (puthash "c" session romacs-agent--sessions)
      (unwind-protect
@@ -89,7 +89,7 @@ journals what its harness writes."
     (let ((start (romacs-agent-codex-tests--handshake session #'last-written #'echo #'out)))
       (should (equal (gethash "method" start) "thread/start"))
       (should (equal (gethash "developerInstructions" (gethash "params" start)) (romacs-agent--instructions session)))
-      (should (equal (gethash "cwd" (gethash "params" start)) "/work"))
+      (should (equal (gethash "cwd" (gethash "params" start)) dir))
       (should (equal (gethash "model" (gethash "params" start)) "m"))
       (echo)
       (should-not (romacs-agent--ready-p session))

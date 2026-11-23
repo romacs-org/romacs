@@ -28,7 +28,7 @@ import threading
 import time
 import uuid
 
-from fake_harness import message_body
+from fake_harness import delegated_say, evaluator_reply, message_body
 
 LOG = os.environ.get('FAKE_HARNESS_LOG')
 OUT = threading.Lock()
@@ -61,8 +61,9 @@ class Thread:
 
 def reply_for(prompt, first):
     if prompt.startswith('Evaluate the learner response'):
-        from fake_harness import evaluator_reply
         return evaluator_reply(prompt)
+    if (reply := delegated_say(prompt)) is not None:
+        return reply
     if first.startswith('say '):
         return first[4:]
     return f'VERDICT: APPROVE\nreviewed {len(prompt.splitlines())} lines'
@@ -143,6 +144,7 @@ def log_turn(thread, params, prompt, refused):
                                      'argv': sys.argv[1:], 'pid': os.getpid(),
                                      'codex_home': os.environ.get('CODEX_HOME'), 'prompt': first[:200],
                                      'last': (prompt.strip().splitlines() or [''])[-1][:200],
+                                     'input': prompt, 'cwd': os.readlink('/proc/self/cwd'),
                                      'session': thread.id, 'config_dir': os.environ.get('CODEX_HOME'), **fields,
                                      'env': {k: v for k, v in os.environ.items()
                                              if k.startswith(('ROMACS_', 'CLAUDE', 'CODEX_', 'T3CODE_', 'AGENT_TEST_'))}}) + '\n')
