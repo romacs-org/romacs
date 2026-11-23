@@ -1,4 +1,4 @@
-use super::{SYSTEM_SETUP, Vm, deferred_frame, gnu_lisp, wait_landed};
+use super::{SYSTEM_SETUP, Vm, deferred_frame, first_parse_vm, gnu_lisp, wait_landed};
 
 /// Parsers of one buffer that see the same text with the same grammar parse
 /// an edit once: one due a reparse takes the tree of another that has parsed
@@ -78,6 +78,83 @@ fn twin_comparisons_require_the_same_view() {
         vm.eval_source(&source).unwrap();
         assert_eq!(compared() - before, 2, "{reason}");
     }
+}
+
+#[test]
+fn twin_ranges_follow_the_registry_that_edited_each_tree() {
+    let mut vm = gnu_lisp(&[]);
+    vm.eval_source(&format!("(progn {SYSTEM_SETUP} (require 'treesit) \
+        (setq treesit-languages-require-line-column-tracking nil) \
+        (defalias 'twin-refresh (lambda (p) \
+          (treesit-parser-set-included-ranges p (list (cons (point-min) (point-max)))) \
+          (treesit-parser-set-included-ranges p nil))))")).unwrap();
+    for (edit_x, edit_y, refresh, expected) in [
+        ("(goto-char 8) (insert \"static \")", "(goto-char 1) (insert \"static \")",
+         "", "(((1 . 8)) ((1 . 14)))"),
+        ("", "(subst-char-in-region 1 2 ?i ?*)", "(twin-refresh a)", "(((1 . 7)) ((1 . 7)))"),
+    ] {
+        let parses = romacs_vm::treesit_parses_on_this_thread();
+        vm.eval_source("(progn (setq x (generate-new-buffer \" *twin-x*\")) \
+          (setq y (generate-new-buffer \" *twin-y*\")) \
+          (with-current-buffer x (insert \"int a; int b;\n\")) \
+          (with-current-buffer y (insert \"int a; int b;\n\")) \
+          (with-current-buffer x \
+            (setq a (treesit-parser-create 'c nil t 'a)) (treesit-parser-root-node a) \
+            (buffer-swap-text y) \
+            (setq b (treesit-parser-create 'c nil t 'b)) (treesit-parser-root-node b) \
+            (twin-refresh a) (treesit-parser-root-node a) (buffer-swap-text y)))").unwrap();
+        assert_eq!(romacs_vm::treesit_parses_on_this_thread() - parses, 2,
+                   "the refresh of a copied b's tree");
+        let before = romacs_vm::treesit_comparisons_on_this_thread();
+        let ranges = vm.eval_source(&format!("(progn (with-current-buffer x {edit_x}) \
+            (with-current-buffer y {edit_y}) \
+            (with-current-buffer x (buffer-swap-text y) {refresh} \
+              (list (treesit-parser-changed-regions b) (treesit-parser-changed-regions a))))"))
+            .unwrap().display().unwrap();
+        assert_eq!(ranges, expected);
+        assert_eq!(romacs_vm::treesit_comparisons_on_this_thread() - before, 2);
+        vm.eval_source("(kill-buffer x) (kill-buffer y)").unwrap();
+    }
+}
+
+#[test]
+fn twin_notifier_edit_requires_another_comparison() {
+    let mut vm = gnu_lisp(&[]);
+    vm.eval_source(&format!("(progn {SYSTEM_SETUP} (require 'treesit) \
+      (set-buffer (get-buffer-create \"twin-notifier\")) (insert \"int a; int b;\") \
+      (setq a (treesit-parser-create 'c nil t 'a) b (treesit-parser-create 'c nil t 'b) notices nil) \
+      (treesit-parser-root-node a) (treesit-parser-root-node b) \
+      (defalias 'twin-record (lambda (ranges parser) \
+        (push (cons (treesit-parser-tag parser) ranges) notices) \
+        (when (eq parser a) (goto-char (point-max)) (insert \"int c;\")))) \
+      (treesit-parser-add-notifier a 'twin-record) (treesit-parser-add-notifier b 'twin-record))")).unwrap();
+    let before = romacs_vm::treesit_comparisons_on_this_thread();
+    let notices = vm.eval_source("(progn (goto-char (point-min)) (insert \"static \") \
+        (treesit-parser-root-node a) (treesit-parser-root-node b) (reverse notices))")
+        .unwrap().display().unwrap();
+    assert_eq!(notices, "((a (1 . 8)) (b (1 . 8) (21 . 27)))");
+    assert_eq!(romacs_vm::treesit_comparisons_on_this_thread() - before, 2);
+}
+
+#[test]
+fn a_restarted_first_parse_cannot_supply_a_first_twin() {
+    let mut vm = first_parse_vm("ts-first-restart", 4000, true);
+    let parses = romacs_vm::treesit_parses_on_this_thread();
+    deferred_frame(&mut vm);
+    wait_landed(&mut vm, "ts-first-restart");
+    vm.eval_source("(with-current-buffer \"ts-first-restart\" (goto-char 1) (insert \"static \"))").unwrap();
+    deferred_frame(&mut vm);
+    wait_landed(&mut vm, "ts-first-restart");
+    let before = romacs_vm::treesit_comparisons_on_this_thread();
+    let result = vm.eval_source("(with-current-buffer \"ts-first-restart\" \
+        (string-prefix-p \"static \" (treesit-node-text (treesit-parser-root-node treesit-test-parser))))")
+        .unwrap().display().unwrap();
+    assert_eq!(result, "t");
+    assert_eq!(romacs_vm::treesit_parses_on_this_thread(), parses, "the worker restarted the first parse");
+    vm.eval_source("(with-current-buffer \"ts-first-restart\" \
+        (treesit-parser-root-node (treesit-parser-create 'c nil t 'twin)))").unwrap();
+    assert_eq!(romacs_vm::treesit_parses_on_this_thread() - parses, 1);
+    assert_eq!(romacs_vm::treesit_comparisons_on_this_thread(), before);
 }
 
 pub(super) fn check_restarted_background_twins(vm: &mut Vm) {

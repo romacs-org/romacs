@@ -516,18 +516,21 @@ impl Leaf<'_> {
         if !native.sees_all(length) {
             return None;
         }
-        self.ts_registry(self.ts_base(p.buffer)).parsers.iter().find_map(|(other, other_core)| {
+        let parsers = &self.ts_registry(self.ts_base(p.buffer)).parsers;
+        parsers.iter().find_map(|(other, other_core)| {
             if *other == parser {
                 return None;
             }
             let c = other_core.borrow();
-            let tree = c.tree.as_ref().filter(|_| (c.fresh || !first) && !c.need_reparse && c.visible == core.visible
+            let tree = c.tree.as_ref().filter(|tree| (!first || tree.parsed_from_scratch()) && !c.need_reparse && c.visible == core.visible
                 && c.linecols.is_some() == core.linecols.is_some())?;
             let o = self.ts_parser(*other).ok().filter(|o| o.buffer == p.buffer)?;
             let n = o.native.borrow();
             (n.language() == native.language() && n.sees_all(length)).then(|| {
                 let copy = tree.duplicate();
-                if c.linecols != core.linecols {
+                // buffer-swap-text moves the registry with the text, while
+                // parser Lisp objects keep their buffer identities.
+                if c.linecols != core.linecols || !parsers.iter().any(|(member, _)| *member == parser) {
                     copy.forget_revision();
                 }
                 copy
@@ -687,7 +690,7 @@ impl Leaf<'_> {
         }
         let (old, visible) = { let c = core.borrow(); (c.tree.clone(), c.visible) };
         let ahead = core.borrow_mut().ahead.take();
-        let (mut new, fresh) = self.ts_reparse_tree(parser, buffer, visible, old.as_deref(), ahead)?;
+        let mut new = self.ts_reparse_tree(parser, buffer, visible, old.as_deref(), ahead)?;
         let changed = old.as_ref().map(|old| {
             let included = self.ts_parser(parser).map(|p| p.native.borrow().included_ranges())?;
             Ok(new.compare(old, included))
@@ -697,14 +700,13 @@ impl Leaf<'_> {
             c.tree = Some(Rc::new(new));
             c.need_reparse = false;
             c.waiting_slot = false;
-            c.fresh = fresh;
         }
         self.ts_parser_mut(parser).timestamp += 1;
         Ok(Some(self.ts_reparse_ranges(buffer, visible.0, changed)))
     }
 
     fn ts_reparse_tree(&mut self, parser: Value, buffer: Value, visible: (i64, i64),
-                       old: Option<&native::Tree>, ahead: Option<ts::ahead::Ahead>) -> R<(native::Tree, bool)> {
+                       old: Option<&native::Tree>, ahead: Option<ts::ahead::Ahead>) -> R<native::Tree> {
         // A reparse a frame started on a thread: its tree, waited for, is
         // this parse's if the text has not changed since it began, and the
         // nearest old tree if it has.
@@ -719,12 +721,11 @@ impl Leaf<'_> {
         } else {
             (None, None)
         };
-        let new = match done {
+        match done {
             Some(tree) => Some(tree),
             // A thread's tree that fell behind the text is newer than the old one.
             None => self.ts_parse_visible(parser, visible, behind.as_ref().or(old))?,
-        }.ok_or_else(|| self.ts_signal("treesit-parse-error", &[buffer]))?;
-        Ok((new, old.is_none() && behind.is_none()))
+        }.ok_or_else(|| self.ts_signal("treesit-parse-error", &[buffer]))
     }
 
     fn ts_parse_visible(&mut self, parser: Value, visible: (i64, i64), old: Option<&native::Tree>) -> R<Option<native::Tree>> {

@@ -59,9 +59,6 @@ pub(crate) const EMPTY_LINECOL: Linecol = Linecol { line: 0, col: 0, bytepos: 0 
 pub(crate) struct Core {
     pub tree: Option<Rc<Tree>>,
     pub need_reparse: bool,
-    /// Whether TREE came from no earlier tree. An incremental parse need
-    /// not build what a parse from nothing would: error recovery differs.
-    pub fresh: bool,
     /// `visible_beg/end`: the text the tree sees, 1-based bytes.
     pub visible: (i64, i64),
     /// `visi_beg/end_linecol`; None unless the parser tracks linecols.
@@ -287,7 +284,7 @@ impl Core {
     }
 
     pub(crate) fn new(visible: (i64, i64), linecols: Option<(Linecol, Linecol)>) -> Self {
-        Self { tree: None, need_reparse: true, fresh: false, visible, linecols, ahead: None, waiting_slot: false }
+        Self { tree: None, need_reparse: true, visible, linecols, ahead: None, waiting_slot: false }
     }
     /// treesit_record_change_1 for this parser: the change clipped to the
     /// visible region, the region moved, and the tree edited.

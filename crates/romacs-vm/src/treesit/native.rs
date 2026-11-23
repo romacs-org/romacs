@@ -138,6 +138,7 @@ pub(crate) struct Tree {
     inner: RefCell<Editable>,
     // CELL(Plain)
     pinned: OnceCell<Rc<tree_sitter::Tree>>,
+    parsed_from_scratch: bool,
 }
 
 struct Editable {
@@ -146,9 +147,9 @@ struct Editable {
     comparison: Option<Rc<Comparison>>,
 }
 
-/// Copies of a parse share an origin. Its buffer applies the same text
-/// edits to all copies of the same view, in registry order. A parser's
-/// private edits of the view break that proof (see Core::sync_visible).
+/// Copies of a parse share an origin when the parsers belong to the same
+/// text's registry, which applies each edit to the whole group. A copy
+/// across registries or a parser's private view edit starts a new origin.
 #[derive(Clone)]
 pub(crate) struct Revision {
     origin: Rc<()>,
@@ -168,10 +169,14 @@ impl Revision {
 }
 
 /// A tree no thread holds yet, on its way to or from the one that parses.
-pub(crate) struct Loose(tree_sitter::Tree);
+pub(crate) struct Loose {
+    tree: tree_sitter::Tree,
+    parsed_from_scratch: bool,
+}
+
 impl Loose {
     pub(crate) fn tree(self) -> Tree {
-        Tree::new(self.0)
+        Tree::new(self.tree, self.parsed_from_scratch)
     }
 }
 
@@ -180,9 +185,13 @@ fn point(p: TSPoint) -> tree_sitter::Point {
 }
 
 impl Tree {
-    fn new(tree: tree_sitter::Tree) -> Self {
+    fn new(tree: tree_sitter::Tree, parsed_from_scratch: bool) -> Self {
         let revision = Revision::new();
-        Self { inner: RefCell::new(Editable { tree, revision, comparison: None }), pinned: OnceCell::new() }
+        Self { inner: RefCell::new(Editable { tree, revision, comparison: None }), pinned: OnceCell::new(), parsed_from_scratch }
+    }
+
+    pub(crate) fn parsed_from_scratch(&self) -> bool {
+        self.parsed_from_scratch
     }
 
     pub(crate) fn revision(&self) -> Revision {
@@ -219,12 +228,12 @@ impl Tree {
     }
     /// This tree, new from a parse, to send to another thread.
     pub(crate) fn loose(self) -> Loose {
-        Loose(self.inner.into_inner().tree)
+        Loose { tree: self.inner.into_inner().tree, parsed_from_scratch: self.parsed_from_scratch }
     }
     /// `ts_tree_copy` for another thread to parse from: a tree of its own,
     /// sharing this one's subtrees. No node is made of it here.
     pub(crate) fn share(&self) -> Loose {
-        Loose(self.inner.borrow().tree.clone())
+        Loose { tree: self.inner.borrow().tree.clone(), parsed_from_scratch: self.parsed_from_scratch }
     }
     /// ts_tree_copy: a tree of its own to edit, sharing this one's subtrees
     /// until the edits part them, so O(1) in the tree's size. Only an
@@ -233,7 +242,7 @@ impl Tree {
         let inner = self.inner.borrow();
         let pinned = self.pinned.get_or_init(|| Rc::new(inner.tree.clone()));
         let copy = Editable { tree: inner.tree.clone(), revision: inner.revision.clone(), comparison: inner.comparison.clone() };
-        Tree { inner: RefCell::new(copy), pinned: OnceCell::from(pinned.clone()) }
+        Tree { inner: RefCell::new(copy), pinned: OnceCell::from(pinned.clone()), parsed_from_scratch: self.parsed_from_scratch }
     }
     /// ts_tree_get_changed_ranges from OLD to this tree, as byte ranges.
     pub(crate) fn changed_since(&self, old: &Tree) -> Vec<(u32, u32)> {
@@ -368,7 +377,7 @@ impl Parser {
             self.0.reset();
             return Err(crate::quit::Stopped);
         }
-        Ok(tree.map(Tree::new))
+        Ok(tree.map(|tree| Tree::new(tree, old.is_none())))
     }
 }
 

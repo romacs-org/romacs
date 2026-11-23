@@ -40,9 +40,8 @@ pub(crate) struct Ahead {
     result: Rc<RefCell<Receipt>>,
 }
 
-/// What the thread sends: the tree, and the byte ranges where it differs
-/// from the tree it started from (`Tree::changed_since`), which are the
-/// parser's changed ranges when the text has not changed since.
+/// What the thread sends: the tree, and how it differs from the parser's
+/// previous published tree, when it had one.
 type Landed = (native::Loose, Vec<(u32, u32)>);
 
 /// One worker's result, retained until the last matching reparse takes it.
