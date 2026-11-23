@@ -101,6 +101,24 @@ journals what its harness writes."
       ;; One of each step.
       (should (= (length romacs-agent-codex-tests--written) 3)))))
 
+(ert-deftest romacs-agent-codex-keeps-the-journaled-thread-if-the-manifest-write-fails ()
+  (romacs-agent-codex-tests--with ()
+    (let ((start (romacs-agent-codex-tests--handshake session #'last-written #'echo #'out))
+          (observed nil))
+      (echo)
+      (let ((romacs-agent-event-functions
+             (list (lambda (s event)
+                     (when (eq (plist-get event :type) 'session)
+                       (setq observed (romacs-agent-harness-session s)))))))
+        (cl-letf (((symbol-function 'romacs-agent--manifest-put)
+                   (lambda (&rest _) (signal 'file-error '("Cannot replace manifest")))))
+          (out "id" (gethash "id" start)
+               "result" (romacs-mcp--object "thread" (romacs-mcp--object "id" "thread-kept") "model" "m"))))
+      (should (equal observed "thread-kept"))
+      (should (equal (romacs-agent-harness-session session) "thread-kept"))
+      (should (equal (romacs-agent-model session) "m"))
+      (should (eq (romacs-agent-state session) 'idle)))))
+
 (ert-deftest romacs-agent-codex-resumes-its-thread ()
   ;; A thread `codex exec' made goes on the same way.
   (romacs-agent-codex-tests--with (:harness-session "01bb-exec")
@@ -311,6 +329,32 @@ journals what its harness writes."
 
 (defun romacs-agent-codex-tests--question (id text &rest fields)
   (apply #'romacs-mcp--object "id" id "question" text "isOther" t "isSecret" :false fields))
+
+(ert-deftest romacs-agent-codex-pending-request-matches-live-approval ()
+  (let ((romacs-agent-approval-policy 'ask))
+    (romacs-agent-codex-tests--with ()
+      (romacs-agent-codex-tests--ready session)
+      (let* ((events nil)
+             (romacs-agent-event-functions (list (lambda (_session event) (push event events))))
+             (params (romacs-mcp--object
+                      "reason" "Please review" "command" "make" "cwd" "/work"
+                      "grantRoot" "/work" "permissions" (romacs-mcp--object "network" t)
+                      "questions" (vector (romacs-agent-codex-tests--question "color" "Which color?")))))
+        (cl-loop for method in '("item/commandExecution/requestApproval"
+                                "item/fileChange/requestApproval"
+                                "item/permissions/requestApproval"
+                                "item/tool/requestUserInput")
+                 for id from 1
+                 do (out "id" id "method" method "params" params)
+                 do (let* ((live (cl-find 'approval events :key (lambda (event) (plist-get event :type))))
+                           (handle (plist-get live :request-id))
+                           (request (gethash handle (romacs-agent-approvals session)))
+                           (pending (romacs-agent-request-event session handle request)))
+                      (should request)
+                      (dolist (key '(:tool :description :questions :user))
+                        (should (equal (plist-get live key) (plist-get pending key))))
+                      (should (equal (json-serialize (plist-get live :input))
+                                     (json-serialize (plist-get pending :input))))))))))
 
 (ert-deftest romacs-agent-codex-questions ()
   ;; Codex's questions are an approval's, by their text; the wire's by id.
