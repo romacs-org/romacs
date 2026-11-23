@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use romacs_display_protocol::frame_glyphs::{FrameGlyph, FrameGlyphBuffer, GlyphRowRole};
-use romacs_display_protocol::types::{Color, DisplayWindowId, FaceId, Rect};
+use romacs_display_protocol::types::{Color, DisplayWindowId, FaceId, ImageId, Rect};
 
 use super::super::reach::{Inks, Reach, Rows};
 use super::{Indexed, Plan, agree, merge, nested_agree, plan, repeats, runs};
@@ -65,6 +65,28 @@ fn an_equal_frame_repaints_nothing_whatever_its_cursors() {
     new.presentation_id = romacs_display_protocol::PresentationId::new(9);
     new.window_cursors.clear();
     assert_eq!(planned(&old, &new), Plan::Clean { rows: 3 });
+}
+
+#[test]
+fn a_stretch_only_run_does_not_count_as_a_reused_row() {
+    let mut f = frame(&[], &["x"]);
+    f.add_stretch(200.0, ROW, 10.0, ROW, Color::BLACK, FaceId::new(0), false);
+    assert_eq!(planned(&f, &f), Plan::Clean { rows: 1 });
+}
+
+#[test]
+fn an_image_only_run_does_not_count_as_a_reused_row() {
+    let mut f = frame(&[], &["x"]);
+    f.add_image(ImageId::new(1), 200.0, ROW, 10.0, ROW);
+    assert_eq!(planned(&f, &f), Plan::Clean { rows: 1 });
+}
+
+#[test]
+fn a_run_with_a_character_after_a_stretch_counts_as_a_reused_row() {
+    let mut f = frame(&[], &[]);
+    f.add_stretch(200.0, 0.0, 10.0, ROW, Color::BLACK, FaceId::new(0), false);
+    f.add_char('x', 210.0, 0.0, 10.0, ROW, 15.0, false);
+    assert_eq!(planned(&f, &f), Plan::Clean { rows: 1 });
 }
 
 #[test]
