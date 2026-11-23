@@ -245,13 +245,11 @@ pub enum Reply {
 #[derive(Debug, Clone)]
 pub enum Fact {
     /// FRAME's PRESENTATION has drawn: the first time it has, with the
-    /// window atlas's cumulative count of face text it could not resolve,
-    /// and when the render thread's present call returned (DRAWN_AT).
+    /// window atlas's cumulative count of face text it could not resolve.
     PresentationRendered {
         frame: u64,
         presentation: u64,
         unresolved_face_text_total: u64,
-        drawn_at: romacs_display_protocol::frame_time::EventTime,
     },
     /// The windows draw with this adapter: a software rasterizer or not.
     AdapterChosen { software: bool },

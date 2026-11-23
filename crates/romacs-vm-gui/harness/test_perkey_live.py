@@ -101,7 +101,7 @@ class Delivery(unittest.TestCase):
 class Latency(unittest.TestCase):
     def sample(self, sequence, rendered=5_000_000, unchanged=False):
         return {'diagnostic': 'latency-key', 'key_sequence': sequence,
-                'key_to_render_observed_ns': None if unchanged or rendered is None else rendered,
+                'key_to_drawn_ns': None if unchanged or rendered is None else rendered,
                 **({'unchanged': True} if unchanged else {})}
 
     def test_one_sample_per_key_each_rendered_or_unchanged(self):
@@ -120,6 +120,18 @@ class Latency(unittest.TestCase):
         self.assertTrue(pk.latency_check([self.sample(1), self.sample(1)], 2)[2])
         self.assertTrue(pk.latency_check([self.sample(1), self.sample(3)], 2)[2])
         self.assertTrue(pk.latency_check([self.sample(None), self.sample(2)], 2)[2])
+
+
+class Joined(unittest.TestCase):
+    def test_a_key_takes_the_first_drawn_presentation_at_or_after_its_own(self):
+        found = pk.joined([
+            {'diagnostic': 'latency-key', 'presentation': 5, 'ingress_ns': 100},
+            {'diagnostic': 'drawn', 'presentation': 4, 'drawn_ns': 150},
+            {'diagnostic': 'drawn', 'presentation': 7, 'drawn_ns': 400},
+            {'diagnostic': 'drawn', 'presentation': 6, 'drawn_ns': 300},
+            {'diagnostic': 'latency-key', 'presentation': None, 'ingress_ns': 200, 'unchanged': True},
+            {'diagnostic': 'latency-key', 'presentation': 8, 'ingress_ns': 350}])
+        self.assertEqual([r['key_to_drawn_ns'] for r in found if r['diagnostic'] == 'latency-key'], [200, None, None])
 
 
 class Summaries(unittest.TestCase):

@@ -32,31 +32,17 @@ pub fn render_stall() -> Duration {
         std::env::var("ROMACS_RENDER_STALL_MS").ok().and_then(|ms| ms.parse().ok()).unwrap_or(2000)))
 }
 
-/// A presentation seen drawn: the newest drawn, when the evaluator saw it,
-/// and when the render thread's present call for it returned
-/// (`PaintDiagnostic::drawn_at`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Drawn {
-    pub presentation: u64,
-    pub observed: Instant,
-    pub drawn_at: Option<romacs_display_protocol::frame_time::EventTime>,
-}
-
 pub struct Presentation {
     dirty: bool,
     /// The paint submitted and not yet drawn, and when the oldest undrawn
     /// paint it stands for was submitted.
     in_flight: Option<(u64, Instant)>,
-    /// What was seen drawn as each paint retired, in order, until taken: a
-    /// prompt's settled paint and the loop's next may both retire before the
-    /// loop takes them, and the trace needs each.
-    retired: Vec<Drawn>,
     /// The current stall has been reported.
     warned: bool,
 }
 
 impl Presentation {
-    pub fn new() -> Self { Self { dirty: false, in_flight: None, retired: Vec::new(), warned: false } }
+    pub fn new() -> Self { Self { dirty: false, in_flight: None, warned: false } }
 
     pub fn changed(&mut self) { self.dirty = true; }
 
@@ -155,20 +141,15 @@ impl Presentation {
         Some((presentation, since.elapsed()))
     }
 
-    /// DRAWN's presentation rendered, whether the loop saw it or a prompt
-    /// settled it first (main.rs `Lent'): it settles the paint in flight,
-    /// or an earlier one it superseded.
-    pub fn completed(&mut self, drawn: Drawn) {
-        if self.in_flight.is_some_and(|(actual, _)| actual <= drawn.presentation) {
+    /// PRESENTATION rendered, whether the loop saw it or a prompt settled
+    /// it first (main.rs `Lent'): it settles the paint in flight, or an
+    /// earlier one it superseded.
+    pub fn completed(&mut self, presentation: u64) {
+        if self.in_flight.is_some_and(|(actual, _)| actual <= presentation) {
             self.in_flight = None;
-            self.retired.push(drawn);
             self.warned = false;
         }
     }
-
-    /// What was seen drawn as each paint retired since the last call: the
-    /// latency trace's keys in those frames are complete.
-    pub fn take_retired(&mut self) -> Vec<Drawn> { std::mem::take(&mut self.retired) }
 
     /// How long to block for input while a paint is in flight: until it
     /// would count as stalled, so the stall is told when it begins. The
@@ -183,10 +164,6 @@ impl Presentation {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn drawn(presentation: u64) -> Drawn {
-        Drawn { presentation, observed: Instant::now(), drawn_at: None }
-    }
 
     fn workspace() -> romacs_vm::Vm {
         let mut vm = romacs_vm::Vm::new();
@@ -314,7 +291,7 @@ mod tests {
         let value = vm.eval_source("(list (buffer-string) (point))").unwrap();
         assert_eq!(value.display().unwrap(), "(\"aλΔ\" 3)");
         assert!(vm.heap_stats().collections > collections);
-        presentation.completed(drawn(1));
+        presentation.completed(1);
         assert!(presentation.ready());
         let snapshot = vm.frame_snapshot(1200, 800).unwrap();
         assert_eq!(snapshot.windows[0].snapshot.text.utf8, "aλΔ");
@@ -344,7 +321,7 @@ mod tests {
         assert_eq!(next.windows[0].snapshot.text.utf8, "aλ!Δ");
         assert_eq!(next.windows[0].snapshot.point_byte, 4);
         assert_ne!(snapshot, next);
-        presentation.completed(drawn(2));
+        presentation.completed(2);
         assert!(presentation.ready());
     }
 
@@ -378,7 +355,7 @@ mod tests {
         assert_eq!(presentation.stall_warning(stall).map(|(p, _)| p), Some(7));
         assert_eq!(presentation.stall_warning(stall), None, "one warning per stall");
         assert_eq!(presentation.wait(stall), None, "nothing polls while hidden: the render wakes the wait");
-        presentation.completed(drawn(7));
+        presentation.completed(7);
         assert!(presentation.ready(), "the frame drawn on showing releases the newest");
         presentation.submitted(8, Instant::now());
         std::thread::sleep(stall);
@@ -393,12 +370,12 @@ mod tests {
         presentation.changed();
         presentation.changed();
         assert!(!presentation.ready(), "input must not trigger per-command layout while rendering");
-        presentation.completed(drawn(0));
+        presentation.completed(0);
         assert!(!presentation.ready(), "stale completion cannot release a frame");
-        presentation.completed(drawn(1));
+        presentation.completed(1);
         assert!(presentation.ready(), "dirty commands must survive renderer completion");
         presentation.submitted(2, now);
-        presentation.completed(drawn(2));
+        presentation.completed(2);
         assert!(!presentation.ready());
     }
 }

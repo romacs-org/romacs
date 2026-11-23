@@ -36,7 +36,7 @@ mod cell_pairs;
 mod oclosure;
 mod host_input;
 mod typing;
-pub use typing::{KeyOutcome, Outcome, TypingPicture, Unattributed};
+pub use typing::{KeyOutcome, Outcome, SubmittedFrame, TypingPicture, Unattributed};
 mod quit;
 mod gap_probe;
 pub use gc_mark::{forbid_threads as forbid_gc_threads, set_workers as set_gc_workers};

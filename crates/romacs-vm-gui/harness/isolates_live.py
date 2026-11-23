@@ -18,8 +18,8 @@ drains queued keys into several).
 During each command the harness types --keys C-f keys at --gap intervals
 and records when it sent each and when its command ran (the post-command
 stamp): the key's latency while the job runs.  Romacs sessions run with
---trace-latency, whose `latency-key' samples give key enqueue to render
-observed in the isolate variant.  `project-find-regexp' runs twice: cold (the worker starts) and
+--trace-latency, whose `latency-key' samples give key ingress to its
+frame drawn in the isolate variant.  `project-find-regexp' runs twice: cold (the worker starts) and
 warm (the pooled worker is reused).  Pinned GNU (--gnu-batch, the oracle)
 times the same enumeration and search in batch: it blocks for that long
 in a session, so a key typed meanwhile waits the rest of the job.
@@ -223,9 +223,9 @@ def analyse(run, name):
 
 
 def render_latencies(stderr_path, since):
-    """key enqueue to render observed, in ms, of latency-key samples after SINCE records."""
+    """key ingress to its frame drawn, in ms, of latency-key samples after SINCE records."""
     samples = [r for r in records(stderr_path)[since:] if r.get('diagnostic') == 'latency-key']
-    return [s['key_to_render_observed_ns'] / 1e6 for s in samples if s.get('key_to_render_observed_ns') is not None]
+    return [s['key_to_drawn_ns'] / 1e6 for s in samples if s.get('key_to_drawn_ns') is not None]
 
 
 def records(path):

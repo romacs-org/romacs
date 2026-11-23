@@ -172,7 +172,7 @@ mod lent_tests {
             let mut shared = host.borrow_mut();
             let seen = (shared.presentation, shared.in_flight.map(|(p, _)| p), shared.pending.len());
             // What a prompt's drawn redisplay does: settle the loop's frame, submit its own.
-            shared.settled = shared.in_flight.take().map(|(p, _)| drawn(p, Instant::now()));
+            shared.settled = shared.in_flight.take().map(|(p, _)| p);
             shared.presentation += 1;
             shared.size = Some((30, 40));
             shared.closed = true;
@@ -211,94 +211,38 @@ mod lent_tests {
         assert_eq!(remaining, [romacs_vm::CommandEvent::Character('a' as i64), romacs_vm::CommandEvent::Character('b' as i64)]);
     }
 
-    fn drawn(presentation: u64, observed: Instant) -> presentation::Drawn {
-        presentation::Drawn { presentation, observed, drawn_at: None }
-    }
-
-    /// A key the loop delivered at INGRESS, which the evaluator settled as
-    /// rendered in PRESENTATION.
-    fn rendered(trace: &mut latency::Trace, ingress: Instant, presentation: u64) -> Vec<Json> {
-        let ingress = romacs_display_protocol::frame_time::EventTime::from_observed_instant(ingress);
-        trace.delivered(ingress, latency::Stages { start: ingress.into_instant(), ready: ingress.into_instant(), command_ns: 0, diagnostic_ns: 0, reply_ns: 0 });
-        let receipt = SubmissionReceipt { presentation, submitted_at: ingress, drawn_at: None, window: None };
-        trace.settled(vec![romacs_vm::KeyOutcome { ingress, outcome: romacs_vm::Outcome::Rendered(receipt) }])
-    }
-
-    /// A presentation a prompt settled inside the loop's Lisp retires as one
-    /// the loop saw render, so the latency trace completes its keys and
-    /// takes the next paint; it used to stay in flight in the trace, whose
-    /// next submission asserted and ended the session.
+    /// A prompt settles the loop's paint and leaves its own undrawn: that
+    /// one is the loop's in flight, and its render retires it.
     #[test]
-    fn a_presentation_a_prompt_settled_completes_the_latency_trace() {
+    fn a_prompts_undrawn_paint_becomes_the_loops_in_flight() {
         let host = std::rc::Rc::new(std::cell::RefCell::new(prompt::Shared::default()));
         let now = Instant::now();
-        let (mut trace, mut live) = (latency::Trace::default(), presentation::Presentation::new());
-        let paint = || latency::Paint { submitted: now, layout_ns: 0, diagnostic_ns: 0, submit_ns: 0, layout_apply_ns: 0 };
+        let mut live = presentation::Presentation::new();
         host.borrow_mut().presentation = 7;
         live.submitted(7, now);
-        trace.submitted(7, paint(), now, 0);
-        assert!(rendered(&mut trace, now, 7).is_empty(), "a rendered key waits for its frame to draw");
         let (mut width, mut height) = (10, 20);
         let lent = Lent { live: &mut live, width: &mut width, height: &mut height };
         lent.run(&host, |_| {
             let mut shared = host.borrow_mut();
-            shared.settled = shared.in_flight.take().map(|(p, _)| drawn(p, now));
-            shared.presentation += 1;
-        });
-        let [retired] = live.take_retired()[..] else { panic!("the settled presentation retired") };
-        assert_eq!(retired, drawn(7, now));
-        let samples = trace.seen_drawn(retired);
-        assert_eq!((samples.len(), &samples[0]["presentation"], &samples[0]["accounted_ns"]), (1, &json!(7), &json!(0)));
-        live.submitted(9, now);
-        trace.submitted(9, paint(), now, 0);
-        assert!(rendered(&mut trace, now, 9).is_empty());
-        assert_eq!(trace.seen_drawn(drawn(9, now)).len(), 1);
-    }
-
-    /// A prompt settles the loop's traced paint and leaves its own undrawn;
-    /// that one renders before the loop takes the first retirement. Both
-    /// retire, in order, and the trace completes its key once.
-    #[test]
-    fn two_retirements_before_the_loop_looks_both_reach_the_trace() {
-        let host = std::rc::Rc::new(std::cell::RefCell::new(prompt::Shared::default()));
-        let now = Instant::now();
-        let (mut trace, mut live) = (latency::Trace::default(), presentation::Presentation::new());
-        let paint = || latency::Paint { submitted: now, layout_ns: 0, diagnostic_ns: 0, submit_ns: 0, layout_apply_ns: 0 };
-        host.borrow_mut().presentation = 7;
-        live.submitted(7, now);
-        trace.submitted(7, paint(), now, 0);
-        assert!(rendered(&mut trace, now, 7).is_empty());
-        let (mut width, mut height) = (10, 20);
-        let lent = Lent { live: &mut live, width: &mut width, height: &mut height };
-        lent.run(&host, |_| {
-            let mut shared = host.borrow_mut();
-            shared.settled = shared.in_flight.take().map(|(p, _)| drawn(p, now));
+            shared.settled = shared.in_flight.take().map(|(p, _)| p);
             shared.presentation = 8;
             shared.in_flight = Some((8, now));
         });
         assert_eq!(live.in_flight(), Some((8, now)), "the prompt's undrawn paint is the loop's now");
-        live.completed(drawn(8, now));
-        let retired = live.take_retired();
-        assert_eq!(retired.iter().map(|r| r.presentation).collect::<Vec<_>>(), vec![7, 8]);
-        let samples: usize = retired.into_iter().map(|drawn| trace.seen_drawn(drawn).len()).sum();
-        assert_eq!(samples, 1, "the traced key completes with its paint");
+        live.completed(8);
+        assert!(live.in_flight().is_none());
     }
 
     /// A prompt that painted into a window the compositor does not draw
     /// leaves the loop's undrawn paint in flight: the stall goes on counting,
-    /// and the prompt's render when the window shows settles it, so the
-    /// latency trace completes the loop's key with the later frame drawn.
+    /// and the prompt's render when the window shows settles it.
     #[test]
     fn an_undrawn_prompt_paint_leaves_the_loops_in_flight() {
         let host = std::rc::Rc::new(std::cell::RefCell::new(prompt::Shared::default()));
         let since = Instant::now();
         let mut live = presentation::Presentation::new();
-        let mut trace = latency::Trace::default();
-        let paint = || latency::Paint { submitted: since, layout_ns: 0, diagnostic_ns: 0, submit_ns: 0, layout_apply_ns: 0 };
         host.borrow_mut().presentation = 7;
         live.submitted(7, since);
-        trace.submitted(7, paint(), since, 0);
-        assert!(rendered(&mut trace, since, 7).is_empty());
         let (mut width, mut height) = (10, 20);
         let lent = Lent { live: &mut live, width: &mut width, height: &mut height };
         lent.run(&host, |_| {
@@ -307,11 +251,8 @@ mod lent_tests {
             shared.in_flight = Some((shared.presentation, shared.in_flight.unwrap().1));
         });
         assert_eq!(live.in_flight(), Some((7, since)));
-        live.completed(drawn(8, Instant::now()));
-        let [retired] = live.take_retired()[..] else { panic!("the prompt's render retired the loop's paint") };
-        assert_eq!(retired.presentation, 8);
-        let samples = trace.seen_drawn(retired);
-        assert_eq!((samples.len(), &samples[0]["presentation"]), (1, &json!(7)), "the loop's key, shown by the later frame");
+        live.completed(8);
+        assert!(live.in_flight().is_none(), "the prompt's render retired the loop's paint");
         assert!(live.ready(), "the prompt's paint leaves the frame to repaint");
     }
 
@@ -1312,7 +1253,7 @@ fn paint(
         );
     }
     if tracing() {
-        *timings = Some(latency::Paint { submitted: submit_start, layout_ns,
+        *timings = Some(latency::Paint { layout_ns,
             diagnostic_ns: diagnostics_prepare_ns + diagnostics_write_ns + mode_line_start.unwrap().elapsed().as_nanos(),
             submit_ns, layout_apply_ns });
     }
@@ -1449,7 +1390,7 @@ fn submit_scene_receipt(
     let window = submitted_window(picture, ends, (&frame, &children));
     sender.submit_scene(frame, children, placed_animations(animations, ends))?;
     let submitted_at = romacs_display_protocol::frame_time::observe_platform_now();
-    Ok(SubmissionReceipt { presentation, submitted_at, drawn_at: None, window })
+    Ok(SubmissionReceipt { presentation, submitted_at, window })
 }
 /// Keep a native key's delivery until the command loop reads it, which
 /// takes its receipt, with the instant the platform delivered it.
@@ -1476,10 +1417,10 @@ fn tracked(event: InputEvent, delivery: Option<romacs_display_protocol::input_pr
     }
 }
 
-/// The native keys the evaluator settled since the last pass, as TRACE's
-/// records when tracing (romacs-vm typing.rs).
-fn settle_typing(vm: &mut Vm, trace: Option<&mut latency::Trace>) {
-    let outcomes = vm.take_typing_outcomes();
+/// OUTCOMES, keys the evaluator settled, as TRACE's records when tracing:
+/// the loop's after each pass, a prompt's as its reads settle them
+/// (romacs-vm typing.rs, `GuiHost::typing_settled`).
+fn settle_typing(outcomes: Vec<romacs_vm::KeyOutcome>, trace: &mut Option<latency::Trace>) {
     if let Some(trace) = trace {
         for sample in trace.settled(outcomes) { eprintln!("{sample}"); }
     }
@@ -1733,7 +1674,7 @@ fn evaluate(
     let initial = frame(&mut vm, g1, width, height)?;
     startup::mark_phase("initial-frame");
     let mut paint_timings = None;
-    let mut key_trace = tracing().then(latency::Trace::default);
+    host.borrow_mut().trace = tracing().then(latency::Trace::default);
     let first_submitted = Instant::now();
     // A window asked for at the server's start is the session's first: it
     // gets the first paint, as a session's window does.
@@ -1925,7 +1866,7 @@ fn evaluate(
                         "evaluator_total_ns":command_start.elapsed().as_nanos(),
                         "force_gc":force_gc,"gc_floor":floor,"scene_dumps":SCENE_DUMPS.load(std::sync::atomic::Ordering::Relaxed)}));
                 }
-                let diagnostic_start = key_trace.as_ref().map(|_| Instant::now());
+                let diagnostic_start = tracing().then(Instant::now);
                 let mut reply_ns = 0;
                 match outcome {
                     Ok(Some(outcome)) => {
@@ -1948,7 +1889,7 @@ fn evaluate(
                         reply_ns = reply_start.map(|start| start.elapsed().as_nanos()).unwrap_or(0);
                     },
                 }
-                if live && let (Some(trace), Some(ingress)) = (&mut key_trace, received) {
+                if live && let (Some(trace), Some(ingress)) = (&mut host.borrow_mut().trace, received) {
                     let ready = Instant::now();
                     trace.delivered(ingress, latency::Stages { start: command_start, ready,
                         command_ns, diagnostic_ns: ready.duration_since(diagnostic_start.unwrap()).as_nanos() - reply_ns, reply_ns });
@@ -1961,7 +1902,7 @@ fn evaluate(
             let mut retired = false;
             if let Some((in_flight, submitted)) = live_presentation.in_flight() {
                 if let Ok(diagnostic) = sender.wait_for_render(romacs_display_runtime::paint_host::INITIAL_FRAME, in_flight, std::time::Duration::ZERO) {
-                    live_presentation.completed(presentation::Drawn { presentation: diagnostic.presentation, observed: Instant::now(), drawn_at: Some(diagnostic.drawn_at) });
+                    live_presentation.completed(in_flight);
                     if diagnostics() { crate::diagnostic_line(&json!({"diagnostic":"paint","presentation":diagnostic.presentation,
                         "buffer_versions":previous.frame.snapshot.windows.iter().map(|w|w.snapshot.buffer_version).collect::<Vec<_>>(),
                         "unresolved_face_text_total":diagnostic.unresolved_face_text_total})); }
@@ -1977,12 +1918,6 @@ fn evaluate(
                     // it shows. Editing goes on, its paints coalesced meanwhile.
                     eprintln!("romacs: render stalled: presentation {undrawn} undrawn for {:.1}s \
                                (window hidden?); editing continues and repaints when it shows", waited.as_secs_f64());
-                }
-            }
-            // Here, or in a prompt that settled it first (`Lent').
-            for drawn in live_presentation.take_retired() {
-                if let Some(trace) = &mut key_trace {
-                    for sample in trace.seen_drawn(drawn) { eprintln!("{sample}"); }
                 }
             }
             // Pixels landed, a parse a window waits on did, a publication
@@ -2014,7 +1949,7 @@ fn evaluate(
             }) {
                 if let Some((snapshot_start, snapshot_ns, presentation)) = result? {
                     live_presentation.submitted(presentation, Instant::now());
-                    if let Some(trace) = &mut key_trace {
+                    if let Some(trace) = &mut host.borrow_mut().trace {
                         trace.submitted(presentation, paint_timings.take().expect("traced paint"), snapshot_start, snapshot_ns);
                     }
                     if tracing() {
@@ -2026,7 +1961,7 @@ fn evaluate(
                     vm.typing_unchanged();
                 }
             }
-            settle_typing(&mut vm, key_trace.as_mut());
+            settle_typing(vm.take_typing_outcomes(), &mut host.borrow_mut().trace);
             if vm.deferred_parse_done() { live_presentation.changed(); }
             if queue(&host).is_empty() && sender.input().is_empty() {
                 // read_char: with no key to read, idle and run ripe timers;
@@ -2174,7 +2109,7 @@ impl Lent<'_> {
             shared.presentation += 1;
         }
         if shared.presentation != before { self.live.changed(); }
-        if let Some(drawn) = shared.settled.take() { self.live.completed(drawn); }
+        if let Some(settled) = shared.settled.take() { self.live.completed(settled); }
         self.live.lent_back(shared.in_flight.take());
         if let Some((w, h)) = shared.size.take() { (*self.width, *self.height) = (w, h); }
         (value, std::mem::take(&mut shared.closed))

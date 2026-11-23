@@ -1,15 +1,20 @@
 //! Typing receipts: the native keys each command step consumed, and the
 //! first submitted frame that shows the step's result.
 //!
-//! Every native key Lisp reads (`host_input::finish`) is claimed by the
-//! innermost command step (`romacs--typing-step`, lisp/vm/keyboard.el), or
-//! settled at once when no step is running. A step that ends proposes one
-//! candidate: its window's view, text revision and point, and the bytes it
-//! edited (`EditEntry`, kept by each text body). The next redisplay settles
-//! the candidate's keys exactly once: `rendered` when a submitted frame shows
-//! that very state, its edit among the bytes the frame painted; `unchanged`
-//! when the redisplay submitted nothing; else `unattributed` with a reason.
-//! The host drains the outcomes (`Vm::take_typing_outcomes`).
+//! A key's latency ends at the first frame it caused; time waiting for the
+//! user is never latency. Every native key Lisp reads (`host_input::finish`)
+//! is held by the innermost command step (`romacs--typing-step`,
+//! lisp/vm/keyboard.el), or settled at once when no step is running. When
+//! the next native key is read, every key a running step still holds
+//! settles: `opened` against the first frame submitted since it was read (a
+//! prompt, a prefix's echo), else `awaited-input`. A step that ends proposes
+//! one candidate for the keys it still holds: its window's view, text
+//! revision and point, and the bytes it edited (`EditEntry`, kept by each
+//! text body). The next redisplay settles the candidate's keys exactly once:
+//! `rendered` when a submitted frame shows that very state, its edit among
+//! the bytes the frame painted; `unchanged` when the redisplay submitted
+//! nothing; else `unattributed` with a reason. The host takes the outcomes
+//! as they settle (`HostInput::typing_settled`, `Vm::take_typing_outcomes`).
 use crate::Vm;
 use romacs_display_protocol::frame_time::EventTime;
 use romacs_display_protocol::submission::{SubmissionReceipt, SubmittedWindow};
@@ -115,11 +120,18 @@ struct Selected {
     len: usize,
 }
 
+/// A native key a running step holds, and the first frame submitted since
+/// it was read.
+struct Held {
+    ingress: EventTime,
+    opened: Option<SubmittedFrame>,
+}
+
 /// A running command step.
 struct Active {
     began: Option<(View, u64)>,
     bounds: Bounds,
-    keys: Vec<EventTime>,
+    keys: Vec<Held>,
 }
 
 /// A finished step, until the next redisplay settles it.
@@ -130,6 +142,16 @@ struct Candidate {
     revision: u64,
     point: usize,
     edit: Edit,
+    /// A step that read no native key ran after it (`Typing::ending`).
+    unread: bool,
+}
+
+/// A submitted frame: its presentation, and when the evaluator thread's
+/// `submit_scene` returned.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SubmittedFrame {
+    pub presentation: u64,
+    pub submitted_at: EventTime,
 }
 
 /// Why a key's step was charged no frame.
@@ -145,6 +167,12 @@ pub enum Unattributed {
     EditUnknown,
     /// Read with no command step running (a timer's or a filter's read).
     OutsideCommand,
+    /// Its step read another native key before any frame was submitted:
+    /// the step was waiting for the user (C-q, a prefix key).
+    AwaitedInput,
+    /// A step that read no native key ran after it before any frame showed
+    /// it: an event Lisp pushed back, such as this very key read again.
+    Unread,
 }
 
 impl Unattributed {
@@ -156,6 +184,8 @@ impl Unattributed {
             Self::Offscreen => "offscreen",
             Self::EditUnknown => "edit-unknown",
             Self::OutsideCommand => "outside-command",
+            Self::AwaitedInput => "awaited-input",
+            Self::Unread => "unread",
         }
     }
 }
@@ -163,8 +193,11 @@ impl Unattributed {
 /// What became of one native key.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Outcome {
-    /// This submission was the first to show its step's result.
-    Rendered(SubmissionReceipt),
+    /// This frame was the first to show its step's result.
+    Rendered(SubmittedFrame),
+    /// This frame, submitted while its step went on to read the user's next
+    /// key (a prompt, a prefix's echo), was the first it caused.
+    Opened(SubmittedFrame),
     /// The redisplay after its step submitted no frame.
     Unchanged,
     Unattributed(Unattributed),
@@ -190,10 +223,16 @@ impl Typing {
         self.settled.extend(keys.into_iter().map(|ingress| KeyOutcome { ingress, outcome: outcome.clone() }));
     }
 
-    /// A native key Lisp read: the innermost step's.
+    /// A native key Lisp read: the keys the running steps hold settle, and
+    /// it is the innermost step's.
     pub(crate) fn read(&mut self, ingress: EventTime) {
+        let held: Vec<Held> = self.active.iter_mut().flat_map(|step| std::mem::take(&mut step.keys)).collect();
+        for key in held {
+            let outcome = key.opened.map_or(Outcome::Unattributed(Unattributed::AwaitedInput), Outcome::Opened);
+            self.settle(vec![key.ingress], &outcome);
+        }
         match self.active.last_mut() {
-            Some(step) => step.keys.push(ingress),
+            Some(step) => step.keys.push(Held { ingress, opened: None }),
             None => self.settle(vec![ingress], &Outcome::Unattributed(Unattributed::OutsideCommand)),
         }
     }
@@ -219,6 +258,8 @@ impl Typing {
     fn ending(&mut self, local: bool) -> Option<Active> {
         let step = self.active.pop()?;
         if step.keys.is_empty() {
+            // At top level, a step reads only events from Lisp's unread queue.
+            if let (true, true, Some(pending)) = (local, self.active.is_empty(), self.pending.as_mut()) { pending.unread = true; }
             return None;
         }
         if !local && let Some(outer) = self.active.last_mut() {
@@ -229,8 +270,9 @@ impl Typing {
     }
 
     fn end(&mut self, step: Active, selected: Option<Selected>) {
+        let keys = step.keys.into_iter().map(|key| key.ingress).collect();
         let Some(s) = selected else {
-            return self.settle(step.keys, &Outcome::Unattributed(Unattributed::NotShown));
+            return self.settle(keys, &Outcome::Unattributed(Unattributed::NotShown));
         };
         self.taken(s.origin, s.bounds);
         let edit = match step.began {
@@ -238,16 +280,22 @@ impl Typing {
             Some((_, origin)) if origin == s.origin => step.bounds.merge(s.bounds).edit(s.len),
             _ => Edit::Unknown,
         };
-        let candidate = Candidate { keys: step.keys, view: s.view, revision: s.revision, point: s.point, edit };
+        let candidate = Candidate { keys, view: s.view, revision: s.revision, point: s.point, edit, unread: false };
         if let Some(old) = self.pending.replace(candidate) {
             self.settle(old.keys, &Outcome::Unattributed(Unattributed::Superseded));
         }
     }
 
+    /// RECEIPT's frame was submitted: it settles the pending step, and is
+    /// the first frame of every held key that has none yet.
     fn submitted(&mut self, receipt: &SubmissionReceipt) {
         if let Some(candidate) = self.pending.take() {
             let outcome = candidate.judge(receipt);
             self.settle(candidate.keys, &outcome);
+        }
+        let frame = SubmittedFrame { presentation: receipt.presentation, submitted_at: receipt.submitted_at };
+        for key in self.active.iter_mut().flat_map(|step| &mut step.keys) {
+            key.opened.get_or_insert(frame);
         }
     }
 
@@ -266,11 +314,12 @@ impl Candidate {
             return Outcome::Unattributed(Unattributed::NotShown);
         };
         if (window.view_generation, window.text_revision, window.cursor_byte) != (self.view.shows, self.revision, Some(self.point)) {
-            return Outcome::Unattributed(Unattributed::Superseded);
+            return Outcome::Unattributed(if self.unread { Unattributed::Unread } else { Unattributed::Superseded });
         }
+        let frame = SubmittedFrame { presentation: receipt.presentation, submitted_at: receipt.submitted_at };
         match &self.edit {
-            Edit::Moved | Edit::Clean => Outcome::Rendered(receipt.clone()),
-            Edit::Span(span) if covered(span, &window.visible_text_bytes) => Outcome::Rendered(receipt.clone()),
+            Edit::Moved | Edit::Clean => Outcome::Rendered(frame),
+            Edit::Span(span) if covered(span, &window.visible_text_bytes) => Outcome::Rendered(frame),
             Edit::Span(_) => Outcome::Unattributed(Unattributed::Offscreen),
             Edit::Unknown => Outcome::Unattributed(Unattributed::EditUnknown),
         }
@@ -409,6 +458,11 @@ impl Vm {
     /// The native keys settled since the last call, in the order settled.
     pub fn take_typing_outcomes(&mut self) -> Vec<KeyOutcome> {
         std::mem::take(&mut self.typing.settled)
+    }
+
+    /// OUTCOMES taken and not consumed: kept, ahead of any settled since.
+    pub(crate) fn keep_typing_outcomes(&mut self, outcomes: Vec<KeyOutcome>) {
+        self.typing.settled.splice(0..0, outcomes);
     }
 }
 

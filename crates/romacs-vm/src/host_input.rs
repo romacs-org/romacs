@@ -87,6 +87,13 @@ pub trait HostInput {
     fn redisplay(&mut self, frame: HostFrame<'_>) -> std::result::Result<Vec<crate::WindowEnd>, String>;
     /// Block until the next event, or until TIMEOUT passes (`Timeout').
     fn next_event(&mut self, timeout: Option<std::time::Duration>) -> std::result::Result<HostEvent, String>;
+    /// The native keys the evaluator settled (typing.rs), handed over as a
+    /// read settles them, so a host records a prompt's keys while it runs.
+    /// Value: those the host did not take, which `Vm::take_typing_outcomes`
+    /// gives later; by default, all.
+    fn typing_settled(&mut self, outcomes: Vec<crate::KeyOutcome>) -> Vec<crate::KeyOutcome> {
+        outcomes
+    }
 
     /// The process descriptors the next `next_event' also waits on, as
     /// wait_reading_process_output selects on them with the keyboard:
@@ -479,9 +486,22 @@ fn paint(vm: &mut Vm, started: std::time::Instant, frame: Result<romacs_layout_i
     let mut submission = None;
     let ends = host(vm).redisplay(HostFrame { frame, selected, minibuffer, snapshot, text_animations, typing, submission: &mut submission })?;
     match &submission { Some(receipt) => vm.typing_submitted(receipt), None => vm.typing_unchanged() }
+    hand_typing(vm);
     vm.display_apply_layout(&ends)?;
     vm.redisplay_done(crate::host::monotonic().saturating_duration_since(started));
     Ok(())
+}
+
+/// The keys settled so far, to the host (`HostInput::typing_settled`).
+fn hand_typing(vm: &mut Vm) {
+    let outcomes = vm.take_typing_outcomes();
+    if outcomes.is_empty() {
+        return;
+    }
+    // In the wait, or given back by `finish'.
+    let host = match vm.host_wait.as_mut() { Some(wait) => Some(wait.host.as_mut()), None => vm.host_input.as_deref_mut() };
+    let kept = match host { Some(host) => host.typing_settled(outcomes), None => outcomes };
+    vm.keep_typing_outcomes(kept);
 }
 
 /// The host's next event, waited for with the evaluator idle: a C-g typed now
@@ -559,7 +579,7 @@ fn finish(vm: &mut Vm, (waited, out): (Result<()>, Out<'_>)) -> Result<()> {
     }
     // A native key is its command step's from here (typing.rs).
     let event = match event {
-        HostEvent::NativeKey(key, ingress) => { vm.typing_read(ingress); HostEvent::Key(key) }
+        HostEvent::NativeKey(key, ingress) => { vm.typing_read(ingress); hand_typing(vm); HostEvent::Key(key) }
         event => event,
     };
     // kbd_buffer_store_event: input inside `while-no-input' sets

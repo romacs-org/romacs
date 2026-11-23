@@ -64,12 +64,13 @@ impl RenderApp {
         result
     }
 
-    /// Tell the evaluator FRAME's PRESENTATION drew, the queue having
-    /// returned from presenting it at PRESENTED, with the window's atlas
-    /// sample. Read the actual per-window renderer atlas only after
-    /// successful drawing and presentation. Missing atlas is missing
-    /// evidence, never zero. Once per presentation: a frame the render
-    /// thread draws again on its own (effects, video) renders nothing new.
+    /// Tell the evaluator FRAME's PRESENTATION drew, with the window's
+    /// atlas sample, and trace when the queue returned from presenting it
+    /// (PRESENTED, `paint_host::trace_drawn`). Read the actual per-window
+    /// renderer atlas only after successful drawing and presentation.
+    /// Missing atlas is missing evidence, never zero. Once per presentation:
+    /// a frame the render thread draws again on its own (effects, video)
+    /// renders nothing new.
     fn report_rendered(&mut self, frame: u64, presentation: u64, presented: romacs_display_protocol::frame_time::EventTime) {
         if let Some(window) = self.frame_windows.get_mut(frame)
             && window.render.reported_presentation < presentation
@@ -77,7 +78,8 @@ impl RenderApp {
         {
             let unresolved_face_text_total = atlas.unresolved_face_text_total();
             window.render.reported_presentation = presentation;
-            self.comms.tell(crate::thread_comm::Fact::PresentationRendered { frame, presentation, unresolved_face_text_total, drawn_at: presented });
+            crate::paint_host::trace_drawn(frame, presentation, presented);
+            self.comms.tell(crate::thread_comm::Fact::PresentationRendered { frame, presentation, unresolved_face_text_total });
         }
     }
 

@@ -128,6 +128,24 @@ pub fn enable_key_latency_trace() {
     let _ = TRACE_START.set(std::time::Instant::now());
 }
 static TRACE_START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+
+/// When the latency trace began, which its records' times count from.
+pub fn trace_origin() -> Option<std::time::Instant> {
+    TRACE_START.get().copied()
+}
+
+/// Under the latency trace, one line as FRAME's PRESENTATION draws:
+/// `{"diagnostic":"drawn","frame":F,"presentation":P,"drawn_ns":N}`, N the
+/// nanoseconds from the trace's start to DRAWN, when the render thread's
+/// present call returned (not when the compositor showed it). A reader
+/// joins a key's `latency-key` record to the first drawn presentation at
+/// or after the key's.
+pub(crate) fn trace_drawn(frame: u64, presentation: u64, drawn: romacs_display_protocol::frame_time::EventTime) {
+    if let Some(start) = TRACE_START.get() {
+        let since = drawn.saturating_since(romacs_display_protocol::frame_time::EventTime::from_observed_instant(*start));
+        eprintln!("{{\"diagnostic\":\"drawn\",\"frame\":{frame},\"presentation\":{presentation},\"drawn_ns\":{}}}", since.as_nanos());
+    }
+}
 /// Under the latency trace, one line as a GPU startup PHASE ends:
 /// `romacs-gpu: {"phase": PHASE, "ms": since the trace was enabled}`.
 pub(crate) fn trace_gpu(phase: &str) {

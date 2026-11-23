@@ -46,11 +46,14 @@ fn a_nested_command_keeps_the_outer_edit_span() {
     typing.read(observe_platform_now());
     let inner = typing.ending(true).expect("the inner step read a key");
     typing.end(inner, Some(selected(9, Bounds { beg: 12, end: 4, unknown: false }, 3, 20)));
+    // The outer step reads on, as data, after the inner one ended.
+    typing.read(observe_platform_now());
     let outer = typing.ending(true).expect("the outer step read a key");
     typing.end(outer, Some(selected(9, Bounds::CLEAN, 3, 20)));
     let pending = typing.pending.as_ref().expect("the outer candidate");
     assert_eq!(pending.edit, Edit::Span(5..16));
-    assert_eq!(typing.take_settled(), vec!["superseded"], "the inner candidate never showed");
+    assert_eq!(typing.take_settled(), vec!["awaited-input", "superseded"],
+               "the inner step's read settled the outer key; the inner candidate never showed");
 }
 
 /// A step thrown out of hands its keys to the step around it; a body that
@@ -64,13 +67,13 @@ fn a_thrown_step_hands_its_keys_out() {
     typing.read(observe_platform_now());
     assert!(typing.ending(false).is_none(), "its keys went out");
     let outer = typing.ending(true).expect("the outer step's keys");
-    assert_eq!(outer.keys.len(), 2);
+    assert_eq!(outer.keys.len(), 1, "the inner read settled the outer step's own key");
     typing.end(outer, Some(selected(10, Bounds::CLEAN, 1, 20)));
     assert_eq!(typing.pending.as_ref().map(|c| c.edit.clone()), Some(Edit::Unknown));
 }
 
 fn receipt(window: Option<SubmittedWindow>) -> SubmissionReceipt {
-    SubmissionReceipt { presentation: 3, submitted_at: observe_platform_now(), drawn_at: None, window }
+    SubmissionReceipt { presentation: 3, submitted_at: observe_platform_now(), window }
 }
 
 fn painted(visible: Vec<Range<usize>>, cursor: Option<usize>) -> Option<SubmittedWindow> {
@@ -78,7 +81,7 @@ fn painted(visible: Vec<Range<usize>>, cursor: Option<usize>) -> Option<Submitte
 }
 
 fn candidate(edit: Edit) -> Candidate {
-    Candidate { keys: Vec::new(), view: View { window: 4, shows: 2 }, revision: 6, point: 12, edit }
+    Candidate { keys: Vec::new(), view: View { window: 4, shows: 2 }, revision: 6, point: 12, edit, unread: false }
 }
 
 fn judged(edit: Edit, window: Option<SubmittedWindow>) -> Outcome {
@@ -104,6 +107,7 @@ impl Typing {
     fn take_settled(&mut self) -> Vec<&'static str> {
         std::mem::take(&mut self.settled).into_iter().map(|key| match key.outcome {
             Outcome::Rendered(_) => "rendered",
+            Outcome::Opened(_) => "opened",
             Outcome::Unchanged => "unchanged",
             Outcome::Unattributed(why) => why.name(),
         }).collect()
@@ -146,4 +150,36 @@ fn coverage_leaves_out_strings() {
     let picture = TypingPicture::new((4, 2, 6), (0, segments), (5, 105), false);
     let painted = picture.painted(&end(25, None), true).expect("the window");
     assert_eq!(painted.visible_text_bytes, vec![110..112, 112..121]);
+}
+
+/// A key its step still holds when the next native key is read settles:
+/// against the first frame submitted since, else as awaited input.
+#[test]
+fn a_held_key_settles_at_the_next_read() {
+    let mut typing = Typing::default();
+    typing.begin(Some(selected(9, Bounds::CLEAN, 1, 20)));
+    let (opener, prefix) = (observe_platform_now(), observe_platform_now());
+    typing.read(opener);
+    typing.submitted(&receipt(None));
+    typing.read(prefix);
+    typing.read(observe_platform_now());
+    let settled = std::mem::take(&mut typing.settled);
+    assert_eq!(settled.iter().map(|k| k.ingress).collect::<Vec<_>>(), vec![opener, prefix]);
+    assert!(matches!(settled[0].outcome, Outcome::Opened(SubmittedFrame { presentation: 3, .. })));
+    assert_eq!(settled[1].outcome, Outcome::Unattributed(Unattributed::AwaitedInput));
+}
+
+/// A top-level step that read no native key (an event Lisp pushed back)
+/// marks the pending step: a frame that does not show it says so.
+#[test]
+fn a_step_from_the_unread_queue_is_named() {
+    let mut typing = Typing::default();
+    typing.begin(Some(selected(9, Bounds::CLEAN, 1, 20)));
+    typing.read(observe_platform_now());
+    let step = typing.ending(true).expect("a key");
+    typing.end(step, Some(selected(9, Bounds::CLEAN, 1, 20)));
+    typing.begin(Some(selected(9, Bounds::CLEAN, 1, 20)));
+    assert!(typing.ending(true).is_none());
+    typing.submitted(&receipt(painted(vec![8..20], Some(13))));
+    assert_eq!(typing.take_settled(), vec!["unread"]);
 }

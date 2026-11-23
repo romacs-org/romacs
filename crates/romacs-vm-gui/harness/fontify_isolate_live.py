@@ -15,8 +15,8 @@ the recentring of GNU's default 0).
 Lisp hooks stamp, with `float-time', every `jit-lock-fontify-now' call and
 its duration (the session's own fontification cost, or the cost of putting
 the worker's properties), each block the worker delivers and the job's
-end.  Latency sessions run with --trace-latency (key enqueue to render
-observed per key); counted sessions count the evaluator thread's
+end.  Latency sessions run with --trace-latency (key ingress to its frame
+drawn per key); counted sessions count the evaluator thread's
 instructions (`perf stat -t', instructions:u) over the F9 phase.  At the
 end each session writes the text properties of the buffer up to the
 window's end (all but `fontified' and cc-mode's scan caches, keys sorted)
@@ -129,7 +129,7 @@ class Session(perkey.Session):
         count, seconds, replies = self.counted(lambda: self.run_keys(DOWN, self.args.keys))
         new = perkey.records(self.stderr)[start:]
         samples = [r for r in new if r.get('diagnostic') == 'latency-key']
-        latency = [s['key_to_render_observed_ns'] / 1e6 for s in samples if s.get('key_to_render_observed_ns') is not None]
+        latency = [s['key_to_drawn_ns'] / 1e6 for s in samples if s.get('key_to_drawn_ns') is not None]
         scrolled = time.time()
         self.eval_form(f'(romacs-journey-dump {json.dumps(str(self.root / "runs.eld"))})')
         if self.variant == 'isolate':
@@ -140,8 +140,8 @@ class Session(perkey.Session):
         # Typing drops the results; the buffer is snapshotted again once idle.
         start = len(perkey.records(self.stderr))
         _, _, typed = self.counted(lambda: self.run_keys(['x'], 5))
-        typed_ms = [s['key_to_render_observed_ns'] / 1e6 for s in perkey.records(self.stderr)[start:]
-                    if s.get('diagnostic') == 'latency-key' and s.get('key_to_render_observed_ns') is not None]
+        typed_ms = [s['key_to_drawn_ns'] / 1e6 for s in perkey.records(self.stderr)[start:]
+                    if s.get('diagnostic') == 'latency-key' and s.get('key_to_drawn_ns') is not None]
         edited = time.time()
         time.sleep(5)
         found = stamps(self.log)

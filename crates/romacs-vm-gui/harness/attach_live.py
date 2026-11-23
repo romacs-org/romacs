@@ -108,8 +108,8 @@ class Session(perkey.Session):
             time.sleep(self.args.gap)
         time.sleep(1)
         self.eval_form('(setq attach-journey-logging t)')
-        return [r['key_to_render_observed_ns'] / 1e6 for r in perkey.records(self.stderr)[start:]
-                if r.get('diagnostic') == 'latency-key' and r.get('key_to_render_observed_ns') is not None][:self.args.keys]
+        return [r['key_to_drawn_ns'] / 1e6 for r in perkey.records(self.stderr)[start:]
+                if r.get('diagnostic') == 'latency-key' and r.get('key_to_drawn_ns') is not None][:self.args.keys]
 
     def journey(self):
         self.log = self.root / 'states.eld'

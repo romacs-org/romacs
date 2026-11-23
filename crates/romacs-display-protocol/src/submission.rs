@@ -4,9 +4,12 @@
 //! The timestamps, on the one platform clock (`frame_time::EventTime`):
 //! - a key's ingress: the render thread, as the platform delivers the key
 //!   press (`input_progress::InputDelivery::ingress`);
-//! - `submitted_at`: the evaluator thread, as `submit_scene` returns Ok;
-//! - `drawn_at`: the render thread, as the GPU queue returns from presenting
-//!   the frame, which is not when the compositor shows it.
+//! - `submitted_at`: the evaluator thread, as `submit_scene` returns Ok.
+//!
+//! A receipt never changes once made. When a presentation drew is the
+//! render thread's own fact, which it traces per presentation (romacs-
+//! display-runtime `paint_host::trace_drawn`); a reader joins it to a
+//! receipt by presentation.
 //!
 //! The receipt covers the keys the evaluator reads as Lisp input. A key
 //! the terminal passthrough takes (measured by `key-ingress`) and a C-g the
@@ -21,10 +24,6 @@ pub struct SubmissionReceipt {
     pub presentation: u64,
     /// When `submit_scene` returned Ok, on the evaluator thread.
     pub submitted_at: EventTime,
-    /// When the render thread's present call for this presentation, or the
-    /// first later one, returned: None until the evaluator sees it drawn
-    /// (`PaintDiagnostic::drawn_at`), which it fills in then.
-    pub drawn_at: Option<EventTime>,
     /// The pending step's window as painted, or None when the scene did not
     /// show it: the one window a receipt describes.
     pub window: Option<SubmittedWindow>,
