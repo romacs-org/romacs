@@ -33,6 +33,10 @@
 //! unknown API, or gives no reason fails, so the comments cannot rot. A
 //! trailing comment, a doc comment, and a comment in a `#[cfg(test)]` item
 //! cover nothing.
+//!
+//! Host classes (L1-0): each host access names one of `CLASSES` in the same
+//! comment, `// HOST(API, ..., CLASS): REASON` outside host.rs, `// HOST(CLASS):
+//! REASON` above a host.rs function or a `DESCRIPTOR` operation; `census`.
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -523,6 +527,9 @@ struct Tag {
     path: String,
     line: usize,
     covers: Option<usize>,
+    /// The item line it sits above: COVERS, past any attribute lines and
+    /// comment lines between them and the item.
+    item: Option<usize>,
     apis: Vec<String>,
     reason: String,
 }
@@ -542,10 +549,12 @@ fn tags(rel: &str, src: &str, views: &Views) -> Vec<Tag> {
         let rest = raw[i].trim_start().strip_prefix("// HOST(")?;
         let (apis, reason) = rest.split_once(')').unwrap_or((rest, ""));
         let below = (i + 1..raw.len()).find(|&j| !comment(j)).unwrap_or(raw.len());
+        let covers = (below < raw.len() && !blank(below)).then_some(below + 1);
         Some(Tag {
             path: rel.to_owned(),
             line: i + 1,
-            covers: (below < raw.len() && !blank(below)).then_some(below + 1),
+            covers,
+            item: covers.map(|c| past_attributes(&raw, c - 1) + 1),
             apis: apis.split(',').map(|a| a.trim().to_owned()).collect(),
             reason: reason.strip_prefix(':').unwrap_or("").trim().to_owned(),
         })
@@ -584,17 +593,18 @@ fn roots(krate: &Path) -> Vec<PathBuf> {
 
 /// The sites and HOST comments of every non-test module reachable from
 /// ROOTS, with paths relative to BASE.
-fn scan(base: &Path, roots: Vec<PathBuf>) -> (Vec<Violation>, Vec<Tag>) {
+fn scan(base: &Path, roots: Vec<PathBuf>) -> (Vec<Violation>, Vec<Tag>, Vec<Row>) {
     let mut seen = BTreeSet::new();
     let mut work: Vec<(PathBuf, PathBuf)> = roots.into_iter().map(|r| { let d = r.parent().unwrap().to_owned(); (r, d) }).collect();
-    let (mut sites, mut comments) = (Vec::new(), Vec::new());
+    let (mut sites, mut comments, mut rows) = (Vec::new(), Vec::new(), Vec::new());
     while let Some((file, dir)) = work.pop() {
         if !seen.insert(file.clone()) { continue; }
         let src = std::fs::read_to_string(&file).unwrap_or_else(|e| panic!("{}: {e}", file.display()));
         let rel = file.strip_prefix(base).unwrap().to_string_lossy().into_owned();
-        let (found, said, outline) = file_scan(&rel, &src);
+        let (found, said, outline, listed) = file_scan(&rel, &src);
         sites.extend(found);
         comments.extend(said);
+        rows.extend(listed);
         let here = file.parent().unwrap();
         work.extend(outline.includes.iter().map(|f| (here.join(f), dir.clone())));
         for (inline, name, path) in outline.mods {
@@ -614,13 +624,14 @@ fn scan(base: &Path, roots: Vec<PathBuf>) -> (Vec<Violation>, Vec<Tag>) {
         }
     }
     sites.sort();
-    (sites, comments)
+    rows.sort();
+    (sites, comments, rows)
 }
 
-/// The sites and HOST comments of the source SRC of REL, and its outline.
-/// `#[cfg(test)]` items hold no site; BOUNDARY and its modules hold none
-/// either.
-fn file_scan(rel: &str, src: &str) -> (Vec<Violation>, Vec<Tag>, Outline) {
+/// The sites and HOST comments of the source SRC of REL, its outline, and
+/// its rows of the host class census. `#[cfg(test)]` items hold no site and
+/// no row; BOUNDARY and its modules hold no site either.
+fn file_scan(rel: &str, src: &str) -> (Vec<Violation>, Vec<Tag>, Outline, Vec<Row>) {
     let mut v = views(src);
     let said = tags(rel, src, &v);
     let outline = outline(&v);
@@ -631,8 +642,16 @@ fn file_scan(rel: &str, src: &str) -> (Vec<Violation>, Vec<Tag>, Outline) {
             }
         }
     }
-    let found = if rel == BOUNDARY || rel.starts_with(BOUNDARY_MODULES) { Vec::new() } else { violations(rel, &v) };
-    (found, said, outline)
+    let inside = rel == BOUNDARY || rel.starts_with(BOUNDARY_MODULES);
+    let found = if inside { Vec::new() } else { violations(rel, &v) };
+    let rows = if rel == BOUNDARY {
+        boundary_functions(rel, &v)
+    } else if inside {
+        Vec::new()
+    } else {
+        descriptor_operations(rel, src, &v)
+    };
+    (found, said, outline, rows)
 }
 
 /// One view as its tokens joined without whitespace (a space only between
@@ -854,7 +873,8 @@ fn problems(sites: &[Violation], comments: &[Tag]) -> Vec<String> {
     let mut out: Vec<String> = sites.iter().filter(|v| !covered.contains(&(v.path.as_str(), v.line, v.api)))
         .map(|v| format!("  uncovered {}:{} {}", v.path, v.line, v.api)).collect();
     for t in comments {
-        for api in &t.apis {
+        // A class is the census's (`census`), not an API.
+        for api in t.apis.iter().filter(|a| !CLASSES.contains(&a.as_str())) {
             let fault = if !known(api) { Some("unknown API") }
                 else if !at(&t.path, t.covers, api) { Some("covers nothing") }
                 else { None };
@@ -867,6 +887,245 @@ fn problems(sites: &[Violation], comments: &[Tag]) -> Vec<String> {
     out
 }
 
+/// L1-0's boundary classes, one to a host access (owner-log `l1-0/SPEC.md`,
+/// L1 design §2.3): `block` may wait on an outside peer; `escape` is an
+/// effect another party can observe; `acquisition` makes an outside
+/// resource; `take` consumes host input without blocking; `logged-inverse`
+/// is a host write the VM can undo; `pure` is a query with no outside effect.
+const CLASSES: &[&str] = &["block", "escape", "acquisition", "take", "logged-inverse", "pure"];
+
+/// Whether API is one of the lint's rows that fence the VM's own state or
+/// name an import form, so a comment naming only these is no host access.
+fn fences_state(api: &str) -> bool {
+    api.starts_with("slot:") || api.starts_with("dynamic:") || api == "delayed-variable" || FORMS.contains(&api)
+}
+
+/// Descriptor and standard-stream operations: allowed outside host.rs (they
+/// act on what it made), each a host access the census lists. Not `.write(`,
+/// `.flush(`, `write!` or `Read` calls: a token cannot tell them from in-memory ones.
+const DESCRIPTOR: &[Api] = &[
+    api!("descriptor:read", "rustix::io::read", "rustix::io::pread", "rustix::io::readv", "rustix::io::preadv*",
+         "rustix::net::recv*", "libc::read", "libc::pread*", "libc::readv", "libc::recv*", "io::stdin("),
+    api!("descriptor:write", "rustix::io::write", "rustix::io::pwrite", "rustix::io::writev", "rustix::io::pwritev*",
+         "rustix::net::send*", "rustix::net::shutdown", "libc::write", "libc::pwrite*", "libc::writev", "libc::send*",
+         "libc::shutdown", ".write_all(", ".sync_all(", ".sync_data(", ".set_len("),
+    api!("descriptor:wait", "rustix::event::poll", "rustix::event::epoll*", "rustix::event::select", "rustix::process::wait*",
+         "libc::poll", "libc::ppoll", "libc::select", "libc::pselect", "libc::epoll_wait", "libc::wait*"),
+    api!("descriptor:control", "rustix::termios::tcset*", "rustix::termios::tcflush", "rustix::termios::tcdrain",
+         "rustix::termios::tcsendbreak", "libc::ioctl", "libc::tcset*"),
+    api!("stdio", "io::stdout(", "io::stderr(", "println!", "eprintln!", "print!", "eprint!"),
+];
+
+/// A host access that must carry one class, WHAT naming it without a line:
+/// `fn NAME`, `HOST(APIS)`, or an operation and its site's text. EFFECT: a host.rs
+/// function whose own body calls `effect(`, the world build's gate on every effect.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct Row {
+    path: String,
+    line: usize,
+    what: String,
+    effect: bool,
+}
+
+/// The line index past LINES's attribute and comment lines from FROM: the
+/// item a comment above them sits on.
+fn past_attributes(lines: &[&str], from: usize) -> usize {
+    let mut k = from;
+    while k < lines.len() {
+        let line = lines[k].trim_start();
+        if line.starts_with("#[") {
+            let mut depth = 0i32;
+            while k < lines.len() {
+                depth += lines[k].chars().map(|c| match c { '[' => 1, ']' => -1, _ => 0 }).sum::<i32>();
+                k += 1;
+                if depth <= 0 { break; }
+            }
+        } else if line.starts_with("//") {
+            k += 1;
+        } else {
+            break;
+        }
+    }
+    k
+}
+
+/// The functions host.rs gives the workspace, outside `#[cfg(test)]` (blanked
+/// in V): `pub` and `pub(..)` ones but `pub(super)` in an inline module, and
+/// trait impl methods; not nested fns nor trait declarations. `host/` is
+/// reached only through host.rs, so it holds no row.
+fn boundary_functions(rel: &str, v: &Views) -> Vec<Row> {
+    #[derive(Clone, Copy, PartialEq)]
+    enum Scope { Module, Impl { of_trait: bool }, Function, Trait, Other }
+    let toks = tokens(&v.code);
+    let word = |j: usize| match toks.get(j).map(|t| t.1) {
+        Some(Tok::Ident(a, b)) => std::str::from_utf8(&v.code[a..b]).unwrap(),
+        _ => "",
+    };
+    let punct = |j: usize, b: u8| toks.get(j).is_some_and(|t| t.1 == Tok::Punct(b));
+    let newlines: Vec<usize> = v.code.iter().enumerate().filter(|&(_, &b)| b == b'\n').map(|(i, _)| i).collect();
+    let line = |at: usize| newlines.partition_point(|&n| n < at) + 1;
+    // An item starts after `;`, `{`, `}`, an attribute's `]`, or the file's start.
+    let at_item = |j: usize| j == 0 || punct(j - 1, b';') || punct(j - 1, b'{') || punct(j - 1, b'}') || punct(j - 1, b']');
+    let mut rows = Vec::new();
+    let mut stack: Vec<(Scope, usize, String)> = Vec::new();
+    let mut pending: Option<(Scope, String)> = None;
+    let mut depth = 0;
+    let mut i = 0;
+    while i < toks.len() {
+        let in_function = stack.iter().any(|s| s.0 == Scope::Function);
+        match toks[i].1 {
+            Tok::Punct(b'{') => {
+                let (scope, name) = pending.take().unwrap_or((Scope::Other, String::new()));
+                stack.push((scope, depth, name));
+                depth += 1;
+            }
+            Tok::Punct(b'}') => {
+                depth -= 1;
+                if stack.last().is_some_and(|s| s.1 == depth) { stack.pop(); }
+            }
+            Tok::Punct(b';') if pending.as_ref().is_some_and(|p| p.0 == Scope::Function) => pending = None,
+            Tok::Ident(..) if pending.is_none() && !in_function && word(i) == "mod" && toks.get(i + 1).is_some() && punct(i + 2, b'{') => {
+                pending = Some((Scope::Module, word(i + 1).to_owned()));
+            }
+            Tok::Ident(..) if pending.is_none() && !in_function && word(i) == "trait" => pending = Some((Scope::Trait, String::new())),
+            Tok::Ident(..) if pending.is_none() && !in_function && word(i) == "impl"
+                && (at_item(i) || (word(i - 1) == "unsafe" && at_item(i - 1))) => {
+                // The header to its `{`: `impl<..> Trait for Type`, or `impl Type`.
+                let open = (i..toks.len()).find(|&j| punct(j, b'{')).unwrap_or(toks.len());
+                let of_trait = (i..open).any(|j| word(j) == "for");
+                let mut from = (i..open).rposition(|j| word(j) == "for").map_or(i + 1, |k| i + k + 1);
+                if punct(from, b'<') {
+                    // Past the impl's generics, `<'a, T: X<Y>>`.
+                    let mut angle = 0;
+                    while from < open {
+                        angle += i32::from(punct(from, b'<')) - i32::from(punct(from, b'>'));
+                        from += 1;
+                        if angle == 0 { break; }
+                    }
+                }
+                let name = (from..open).map(word).find(|w| !w.is_empty() && *w != "dyn").unwrap_or("").to_owned();
+                pending = Some((Scope::Impl { of_trait }, name));
+            }
+            Tok::Ident(..) if pending.is_none() && word(i) == "fn" && matches!(toks.get(i + 1).map(|t| t.1), Some(Tok::Ident(..))) => {
+                let name = word(i + 1).to_owned();
+                // The visibility before its qualifiers: `pub`, `pub(..)`, or none.
+                let mut k = i;
+                while k > 0 && (matches!(word(k - 1), "const" | "unsafe" | "async" | "extern")
+                    || matches!(toks[k - 1].1, Tok::Str(..))) { k -= 1; }
+                let visibility = if k > 0 && word(k - 1) == "pub" {
+                    k -= 1;
+                    Some(String::new())
+                } else if k > 0 && punct(k - 1, b')') {
+                    let open = (0..k - 1).rev().find(|&j| punct(j, b'(')).unwrap_or(0);
+                    if open > 0 && word(open - 1) == "pub" {
+                        let inner = (open + 1..k - 1).map(word).collect::<Vec<_>>().join(" ");
+                        k = open - 1;
+                        Some(inner)
+                    } else { None }
+                } else { None };
+                let enclosing = stack.iter().rev().find(|s| s.0 != Scope::Other).map(|s| s.0);
+                let in_module = stack.iter().any(|s| s.0 == Scope::Module);
+                let of_trait = matches!(enclosing, Some(Scope::Impl { of_trait: true }));
+                let listed = !in_function && enclosing != Some(Scope::Trait)
+                    && (of_trait || visibility.as_deref().is_some_and(|v| !(v == "super" && in_module)));
+                // Its body: the first `{` or `;` outside the signature's brackets.
+                let (mut nest, mut j) = (0i32, i + 2);
+                while j < toks.len() {
+                    match toks[j].1 {
+                        Tok::Punct(b'(' | b'[') => nest += 1,
+                        Tok::Punct(b')' | b']') => nest -= 1,
+                        Tok::Punct(b'{' | b';') if nest == 0 => break,
+                        _ => (),
+                    }
+                    j += 1;
+                }
+                let body_end = if punct(j, b'{') { matching(&toks, j) } else { j };
+                let effect = (j..body_end).any(|m| word(m) == "effect" && punct(m + 1, b'(') && !punct(m - 1, b'.') && !punct(m - 1, b':'));
+                if listed {
+                    let owner = stack.iter().rev().find(|s| matches!(s.0, Scope::Impl { .. })).map(|s| s.2.clone());
+                    let module: Vec<&str> = stack.iter().filter(|s| s.0 == Scope::Module).map(|s| s.2.as_str()).collect();
+                    let path: Vec<&str> = module.into_iter().chain(owner.as_deref()).chain([name.as_str()]).collect();
+                    rows.push(Row { path: rel.to_owned(), line: line(toks[k].0), what: format!("fn {}", path.join("::")), effect });
+                }
+                pending = Some((Scope::Function, name));
+                i = j;
+                continue;
+            }
+            _ => (),
+        }
+        i += 1;
+    }
+    rows
+}
+
+/// The descriptor and standard-stream operations of REL (`DESCRIPTOR`), one
+/// row per line and operation.
+fn descriptor_operations(rel: &str, src: &str, v: &Views) -> Vec<Row> {
+    let toks = tokens(&v.code);
+    let code = compact(&v.code, &toks);
+    let newlines: Vec<usize> = v.code.iter().enumerate().filter(|&(_, &b)| b == b'\n').map(|(i, _)| i).collect();
+    let line = |at: usize| newlines.partition_point(|&n| n < at) + 1;
+    let raw: Vec<&str> = src.split('\n').collect();
+    let mut rows: Vec<Row> = DESCRIPTOR.iter().flat_map(|api| spellings(api, &code.text).into_iter().map(|i| {
+        let at = line(code.at[i]);
+        let text: String = raw[at - 1].trim().chars().take(80).collect();
+        Row { path: rel.to_owned(), line: at, what: format!("{} `{text}`", api.name), effect: false }
+    })).collect();
+    rows.sort();
+    rows.dedup();
+    rows
+}
+
+/// The faults of ROWS and the classes their HOST COMMENTS name: none, unknown,
+/// two, `pure` with an `effect(`, or a class above nothing. A host.rs function is
+/// classed above its item, a descriptor operation above its line, and an
+/// exception site outside host.rs by its own comment.
+fn census(rows: &[Row], comments: &[Tag]) -> Vec<(String, Row)> {
+    let mut faults = Vec::new();
+    let mut used = BTreeSet::new();
+    let classify = |row: &Row, tags: &[&Tag], faults: &mut Vec<(String, Row)>| {
+        let items: Vec<&str> = tags.iter().flat_map(|t| t.apis.iter().map(String::as_str)).collect();
+        let classes: Vec<&str> = items.iter().copied().filter(|a| CLASSES.contains(a)).collect();
+        let unknown: Vec<&str> = items.iter().copied().filter(|a| !CLASSES.contains(a) && !known(a) && !fences_state(a)).collect();
+        let fault = if !unknown.is_empty() {
+            Some(format!("unknown class `{}`", unknown.join("`, `")))
+        } else if classes.is_empty() {
+            Some("unclassed".to_owned())
+        } else if classes.len() > 1 {
+            Some(format!("two classes `{}`", classes.join("`, `")))
+        } else if classes == ["pure"] && row.effect {
+            Some("pure, but its body calls effect(".to_owned())
+        } else {
+            None
+        };
+        faults.extend(fault.map(|f| (f, row.clone())));
+    };
+    for row in rows {
+        let boundary = row.path == BOUNDARY;
+        let above: Vec<&Tag> = comments.iter().filter(|t| t.path == row.path
+            && if boundary { t.item == Some(row.line) } else { t.covers == Some(row.line) }).collect();
+        used.extend(above.iter().map(|t| (t.path.clone(), t.line)));
+        classify(row, &above, &mut faults);
+    }
+    for t in comments {
+        let inside = t.path == BOUNDARY || t.path.starts_with(BOUNDARY_MODULES);
+        let host = t.apis.iter().any(|a| !CLASSES.contains(&a.as_str()) && !fences_state(a));
+        if !inside && host {
+            used.insert((t.path.clone(), t.line));
+            let row = Row { path: t.path.clone(), line: t.line, what: format!("HOST({})", t.apis.join(", ")), effect: false };
+            classify(&row, &[t], &mut faults);
+        }
+    }
+    for t in comments.iter().filter(|t| t.apis.iter().any(|a| CLASSES.contains(&a.as_str()))) {
+        if !used.contains(&(t.path.clone(), t.line)) {
+            let row = Row { path: t.path.clone(), line: t.line, what: format!("HOST({})", t.apis.join(", ")), effect: false };
+            faults.push(("a class above nothing it classes".to_owned(), row));
+        }
+    }
+    faults.sort_by(|a, b| (&a.1.path, a.1.line, &a.0).cmp(&(&b.1.path, b.1.line, &b.0)));
+    faults
+}
+
 fn repository() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
 }
@@ -875,7 +1134,7 @@ fn repository() -> PathBuf {
 #[test]
 fn host_boundary_holds() {
     let base = repository();
-    let (sites, comments) = scan(&base, CRATES.iter().flat_map(|c| roots(&base.join(c))).collect());
+    let (sites, comments, _) = scan(&base, CRATES.iter().flat_map(|c| roots(&base.join(c))).collect());
     let report = problems(&sites, &comments);
     assert!(report.is_empty(), "host boundary: outside {BOUNDARY}, each site needs `// HOST(API): REASON` in the comment \
                                 lines directly above it, or a call through host.rs:\n{}", report.join("\n"));
@@ -911,7 +1170,7 @@ fn lint_flags_each_planted_violation() {
 
 /// The problems of one source file, `src/lib.rs`.
 fn report(source: &str) -> Vec<String> {
-    let (sites, comments, _) = file_scan("src/lib.rs", source);
+    let (sites, comments, _, _) = file_scan("src/lib.rs", source);
     problems(&sites, &comments)
 }
 
@@ -993,4 +1252,247 @@ fn read() {
         "  no reason: src/lib.rs:2 HOST(std::fs)",
         "  no reason: src/lib.rs:4 HOST(std::fs)",
     ]);
+}
+
+/// L1-0's closing rule: every host access names exactly one class.
+#[test]
+fn host_classes_hold() {
+    let base = repository();
+    let (_, comments, rows) = scan(&base, CRATES.iter().flat_map(|c| roots(&base.join(c))).collect());
+    let faults = census(&rows, &comments);
+    assert!(faults.is_empty(), "host classes: {} of {} host accesses need one class, `// HOST(CLASS): REASON` above \
+                                each host.rs function and descriptor operation, and `// HOST(API, ..., CLASS): REASON` at \
+                                an exception site; a class is one of {CLASSES:?}:\n{}",
+            faults.len(), rows.len() + comments.iter().filter(|t| t.path != BOUNDARY
+                && t.apis.iter().any(|a| !CLASSES.contains(&a.as_str()) && !fences_state(a))).count(),
+            faults.iter().map(|(f, r)| format!("  {f}: {}:{} {}", r.path, r.line, r.what)).collect::<Vec<_>>().join("\n"));
+}
+
+/// The census of one source file REL: each fault with what it names, no line.
+fn census_of(rel: &str, source: &str) -> Vec<(String, String)> {
+    let (_, comments, _, rows) = file_scan(rel, source);
+    census(&rows, &comments).into_iter().map(|(fault, row)| (fault, row.what)).collect()
+}
+
+fn pairs(expected: &[(&str, &str)]) -> Vec<(String, String)> {
+    expected.iter().map(|&(f, w)| (f.to_owned(), w.to_owned())).collect()
+}
+
+#[test]
+fn census_lists_what_host_rs_gives_the_workspace() {
+    let source = "\
+pub fn open(path: &Path) -> io::Result<File> { File::open(path) }
+pub(crate) fn wait(child: &Child) -> io::Result<i32> { child.wait() }
+fn helper() {}
+pub fn outer() {
+    fn nested() {}
+}
+pub struct Input(File);
+impl Input {
+    pub fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> { self.0.read(buf) }
+    fn private(&self) {}
+}
+impl Iterator for ReadDir {
+    type Item = io::Result<DirEntry>;
+    fn next(&mut self) -> Option<Self::Item> { None }
+}
+impl<'a> Drop for Guard<'a> {
+    fn drop(&mut self) {}
+}
+pub trait Probe {
+    fn probe(&self);
+}
+pub mod call_deadline {
+    pub fn arm() {}
+    pub(super) fn waiter() {}
+    fn run() {}
+}
+pub unsafe extern \"C\" fn handler(signal: i32) {}
+pub fn lookup(buf: [u8; 16]) -> Option<([u8; 16], usize)> { None }
+#[cfg(test)]
+mod tests {
+    pub fn fixture() {}
+}
+";
+    let listed: Vec<String> = census_of(BOUNDARY, source).into_iter().map(|(_, what)| what).collect();
+    assert_eq!(listed, [
+        "fn open", "fn wait", "fn outer", "fn Input::read", "fn ReadDir::next", "fn Guard::drop",
+        "fn call_deadline::arm", "fn handler", "fn lookup",
+    ]);
+}
+
+#[test]
+fn a_class_above_a_host_function_classes_it() {
+    let source = "\
+// HOST(acquisition): makes the file
+pub fn create(path: &Path) -> io::Result<File> {
+    effect(|| format!(\"create {}\", bytes(path)))?;
+    File::create(path)
+}
+/// The doc comment and attributes may come between.
+// HOST(pure): a regular file's bytes
+#[inline]
+#[allow(
+    clippy::x,
+)]
+pub fn read_file(path: &Path) -> io::Result<Vec<u8>> { std::fs::read(path) }
+// HOST(block): waits for the child
+/// Either order.
+pub fn wait(child: &Child) -> io::Result<i32> { child.wait() }
+impl Iterator for ReadDir {
+    type Item = io::Result<DirEntry>;
+    // HOST(pure): the next entry of a directory host.rs opened
+    fn next(&mut self) -> Option<Self::Item> { None }
+}
+";
+    assert_eq!(census_of(BOUNDARY, source), pairs(&[]));
+}
+
+#[test]
+fn an_unclassed_host_write_fails() {
+    let source = "\
+pub fn remove_file(path: &Path) -> io::Result<()> {
+    effect(|| format!(\"remove {}\", bytes(path)))?;
+    std::fs::remove_file(path)
+}
+// Renames FROM to TO: a comment, but no HOST class.
+pub fn rename(from: &Path, to: &Path) -> io::Result<()> { std::fs::rename(from, to) }
+";
+    assert_eq!(census_of(BOUNDARY, source), pairs(&[("unclassed", "fn remove_file"), ("unclassed", "fn rename")]));
+}
+
+#[test]
+fn an_unknown_class_fails() {
+    let source = "\
+// HOST(escapes): a misspelt class
+pub fn rename(from: &Path, to: &Path) -> io::Result<()> { std::fs::rename(from, to) }
+// HOST(Escape): classes are lower case
+pub fn remove(path: &Path) -> io::Result<()> { std::fs::remove_file(path) }
+";
+    assert_eq!(census_of(BOUNDARY, source), pairs(&[
+        ("unknown class `escapes`", "fn rename"),
+        ("unknown class `Escape`", "fn remove"),
+    ]));
+}
+
+#[test]
+fn two_classes_on_one_site_fail() {
+    let source = "\
+// HOST(acquisition, block): spawns, then waits
+pub fn call_process(argv: &[CString]) -> io::Result<i32> { spawn(argv)?.wait() }
+// HOST(escape): writes
+// HOST(pure): and reads
+pub fn write(file: &File, bytes: &[u8]) -> io::Result<()> { Ok(()) }
+";
+    assert_eq!(census_of(BOUNDARY, source), pairs(&[
+        ("two classes `acquisition`, `block`", "fn call_process"),
+        ("two classes `escape`, `pure`", "fn write"),
+    ]));
+}
+
+#[test]
+fn a_pure_host_function_that_performs_an_effect_fails() {
+    let source = "\
+// HOST(pure): claims to be a query
+pub fn chmod(path: &Path, mode: u32) -> io::Result<()> {
+    effect(|| format!(\"chmod {}\", bytes(path)))?;
+    sys::chmod(path, mode)
+}
+// HOST(pure): a method named effect is no effect
+pub fn describe(fact: &Fact) -> String { fact.effect().to_string() }
+";
+    assert_eq!(census_of(BOUNDARY, source), pairs(&[("pure, but its body calls effect(", "fn chmod")]));
+}
+
+#[test]
+fn a_class_above_nothing_fails() {
+    let source = "\
+// HOST(escape): above a private helper, which carries none
+fn helper() {}
+// HOST(pure): a blank line away
+
+pub fn pid() -> u32 { 0 }
+";
+    assert_eq!(census_of(BOUNDARY, source), pairs(&[
+        ("a class above nothing it classes", "HOST(escape)"),
+        ("a class above nothing it classes", "HOST(pure)"),
+        ("unclassed", "fn pid"),
+    ]));
+}
+
+#[test]
+fn an_exception_site_outside_host_rs_names_its_class() {
+    let source = "\
+fn store(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    // HOST(std::fs): the code-image store
+    std::fs::create_dir_all(path).map_err(|e| e.to_string())?;
+    // HOST(std::fs, acquisition): the code-image store's new file
+    std::fs::write(path.join(\"pages\"), bytes).map_err(|e| e.to_string())?;
+    // HOST(std::env::var, pure, block): two classes
+    let knob = std::env::var(\"KNOB\").ok();
+    // HOST(std::env::var, pur): an unknown class
+    let other = std::env::var(\"OTHER\").ok();
+    Ok(())
+}
+fn state(vm: &Vm) {
+    // HOST(dynamic:saved): the VM's own binding stack: no host access, no class
+    let saved = vm.dynamic.last();
+}
+";
+    assert_eq!(census_of("src/lib.rs", source), pairs(&[
+        ("unclassed", "HOST(std::fs)"),
+        ("two classes `pure`, `block`", "HOST(std::env::var, pure, block)"),
+        ("unknown class `pur`", "HOST(std::env::var, pur)"),
+    ]));
+}
+
+#[test]
+fn a_descriptor_operation_outside_host_rs_names_its_class() {
+    let source = "\
+fn send(fd: BorrowedFd<'_>, buf: &[u8]) -> io::Result<usize> {
+    rustix::net::send(fd, buf, rustix::net::SendFlags::NOSIGNAL)
+}
+fn wait(set: &mut [libc::pollfd]) -> i32 {
+    // HOST(block): waits for a process's output
+    unsafe { libc::poll(set.as_mut_ptr(), set.len() as libc::nfds_t, -1) }
+}
+fn print(bytes: &[u8]) {
+    // HOST(escape): stdout is a send
+    std::io::stdout().write_all(bytes).unwrap();
+    eprintln!(\"done\");
+    let text = \"println!(not code)\";
+}
+fn save(file: &mut File, bytes: &[u8]) -> io::Result<()> {
+    // HOST(OpenOptions, std::fs, acquisition): one comment classes the API and the write
+    std::fs::OpenOptions::new().append(true).open(\"log\")?.write_all(bytes)
+}
+#[cfg(test)]
+mod tests {
+    fn t() { println!(\"test output\"); }
+}
+";
+    assert_eq!(census_of("src/lib.rs", source), pairs(&[
+        ("unclassed", "descriptor:write `rustix::net::send(fd, buf, rustix::net::SendFlags::NOSIGNAL)`"),
+        ("unclassed", "stdio `eprintln!(\"done\");`"),
+    ]));
+}
+
+#[test]
+fn the_lint_reads_a_class_as_no_api() {
+    let outside = "\
+fn write(bytes: &[u8]) {
+    // HOST(std::fs, escape): writes the trace
+    std::fs::write(\"trace\", bytes).unwrap();
+    // HOST(escape): stdout is a send
+    std::io::stdout().write_all(bytes).unwrap();
+}
+";
+    assert_eq!(report(outside), Vec::<String>::new());
+    let (sites, comments, _, _) = file_scan(BOUNDARY, "\
+// HOST(escape): renames
+pub fn rename(from: &Path, to: &Path) -> io::Result<()> { std::fs::rename(from, to) }
+");
+    assert_eq!(problems(&sites, &comments), Vec::<String>::new());
+    let (sites, comments, _, _) = file_scan(BOUNDARY, "// HOST(escape):\npub fn f() {}\n");
+    assert_eq!(problems(&sites, &comments), ["  no reason: crates/romacs-vm/src/host.rs:1 HOST(escape)"]);
 }
