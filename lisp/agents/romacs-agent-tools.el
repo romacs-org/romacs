@@ -476,8 +476,15 @@ parent's harness takes them in order."
   (when (> seq (romacs-agent-tools--woken session))
     (with-temp-file (romacs-agent-tools--woken-file session) (insert (number-to-string seq)))
     (puthash session seq romacs-agent-tools--woken-seqs)
+    (romacs-agent-tools--owed-paid session seq)
     ;; Its summary says whether an end waits to be delivered.
     (romacs-agent--summary-stale (romacs-agent-id session))))
+
+(defun romacs-agent-tools--owed-paid (session seq)
+  "SESSION's ends through SEQ are its parent's: its newest among them, its
+`owed' mark goes (`romacs-agent-tools--hand-on')."
+  (when (>= seq (or (romacs-agent-done-seq session) 0))
+    (romacs-agent-mark (romacs-agent-id session) 'owed nil)))
 
 (defconst romacs-agent-tools--wake-limit 16000
   "The most of a child's result a wake carries: the rest is
@@ -714,6 +721,7 @@ read once from its `answered' file.")
 ends still on their way stay so.  UNWRITTEN: not kept yet, its caller
 writes it (`romacs-agent-tools--write-answered')."
   (puthash seq t (romacs-agent-tools--answered-table session))
+  (romacs-agent-tools--owed-paid session seq)
   (romacs-agent--summary-stale (romacs-agent-id session))
   (unless unwritten (romacs-agent-tools--write-answered session seq)))
 
@@ -845,8 +853,12 @@ CHILD's, when read already."
         (puthash child (car end) romacs-agent-tools--handed)
         (when (romacs-agent-tools--wanted-p child (car end) summary)
           (if (romacs-agent-tools--wakes-p child end summary)
-              ;; Newest first: an end is added in constant time.
-              (push (cons child end) (gethash (romacs-agent-id parent) romacs-agent-tools--pending))
+              (progn
+                ;; Owed to its parent till delivered: a restart meanwhile
+                ;; loads it (its mark), and hands it on again.
+                (romacs-agent-mark (romacs-agent-id child) 'owed t)
+                ;; Newest first: an end is added in constant time.
+                (push (cons child end) (gethash (romacs-agent-id parent) romacs-agent-tools--pending)))
             ;; Done with on its own: an earlier end still waiting stays wanted.
             (romacs-agent-tools--mark-answered child (car end))
             (puthash (car end) t (or answered (setq answered (make-hash-table)))))))
@@ -965,6 +977,7 @@ launches' failures, each numbered as the first, so the next one wakes
 its parent again."
   (delete-file (romacs-agent-tools--woken-file child))
   (remhash child romacs-agent-tools--woken-seqs)
+  (romacs-agent-mark (romacs-agent-id child) 'owed nil)
   (delete-file (expand-file-name "answered" (romacs-agent-dir child)))
   (remhash (romacs-agent-id child) romacs-agent-tools--answered)
   (remhash child romacs-agent-tools--handed)

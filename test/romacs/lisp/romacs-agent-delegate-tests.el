@@ -96,7 +96,9 @@ recorded in a private directory; `delivered' collects what wakes it."
                 collect `(progn (puthash (romacs-agent-id ,name) ,name romacs-agent--sessions) (romacs-agent--index ,name)))
      (cl-letf (((symbol-function 'romacs-agent-tools--deliver)
                 (lambda (_session text done &rest _) (push text delivered) (funcall done)))
-               ((symbol-function 'run-at-time) #'ignore))
+               ((symbol-function 'run-at-time) #'ignore)
+               ;; Its marks in its own directory, never a state root of its process.
+               ((symbol-function 'romacs-agent--marks-dir) (lambda () (expand-file-name "marks" root))))
        (unwind-protect (progn ,@body) (delete-directory root t)))))
 
 (defun romacs-agent-delegate-tests--end (child seq result &optional failed)
@@ -107,6 +109,17 @@ recorded in a private directory; `delivered' collects what wakes it."
   (romacs-agent--summary-stale (romacs-agent-id child))
   (push (list seq result failed) (romacs-agent-ends child))
   (romacs-agent-tools--wake child))
+
+(ert-deftest romacs-agent-delegate-an-owed-end-is-marked-till-delivered ()
+  ;; Owed to its parent, a task is marked, so a restart before delivery
+  ;; loads it and hands its end on again; delivered, the mark goes.
+  (romacs-agent-delegate-tests--family ((a nil))
+    (let ((mark (expand-file-name (format "%s.owed" (romacs-agent-id a)) (romacs-agent--marks-dir))))
+      (romacs-agent-delegate-tests--end a 5 "A done")
+      (should (file-exists-p mark))
+      (romacs-agent-tools--flush parent)
+      (should delivered)
+      (should-not (file-exists-p mark)))))
 
 (ert-deftest romacs-agent-delegate-ends-together-wake-once ()
   (romacs-agent-delegate-tests--family ((a nil) (b nil))
