@@ -247,6 +247,42 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
               (should (romacs-agent-settled-p (romacs-agent-get "b")))))
         (delete-directory dir t)))))
 
+(ert-deftest romacs-agent-board-settle-holds-delegated-results ()
+  (romacs-agent-board-tests--with
+    (let* ((dir (make-temp-file "romacs-board-wake-" t))
+           (lead (mk "lead" "Lead" 'idle 10 :dir dir))
+           (worker (mk "worker" "Worker" 'running 5 :dir dir :options '(:parent "lead")))
+           (romacs-agent-event-functions '(romacs-agent-tools--on-event))
+           (romacs-agent-tools--pending (make-hash-table :test #'equal))
+           (romacs-agent-tools--waking (make-hash-table :test #'equal))
+           (timer nil) (delivered nil) (notices nil))
+      (unwind-protect
+          (progn
+            (romacs-agent-ui--summarize-children lead)
+            (romacs-agent-board-tests--board
+              (cl-letf (((symbol-function 'run-at-time) (lambda (_delay _repeat then) (setq timer then)))
+                        ((symbol-function 'message)
+                         (lambda (template &rest args) (when template (push (apply #'format template args) notices))))
+                        ((symbol-function 'romacs-agent-tools--deliver)
+                         (lambda (_session text done &rest _) (push text delivered) (funcall done))))
+                (should (equal (romacs-agent-board-tests--at) "lead"))
+                (romacs-agent-tools--wake-soon lead)
+                (romacs-agent-board-settle)
+                (setf (romacs-agent-state worker) 'idle (romacs-agent-done-seq worker) 1
+                      (romacs-agent-ends worker) '((1 "Work is ready." nil)))
+                (romacs-agent-tools--wake worker)
+                (funcall (prog1 timer (setq timer nil)))
+                (should-not delivered)
+                (should (gethash "lead" romacs-agent-tools--pending))
+                (should (cl-some (lambda (notice) (string-search "still at work" notice)) notices))
+                (romacs-agent-board-toggle-settled)
+                (romacs-agent-board-settle)
+                (should timer)
+                (funcall timer)
+                (should (string-search "Work is ready." (car delivered)))
+                (should-not (gethash "lead" romacs-agent-tools--pending)))))
+        (delete-directory dir t)))))
+
 (ert-deftest romacs-agent-board-keys-fold-and-open ()
   (romacs-agent-board-tests--with
     (let ((lead (mk "lead" "lead" 'idle 10)))
@@ -629,12 +665,15 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
             (romacs-agent-event-functions '(romacs-agent-ui--on-event)))
        (cl-letf (((symbol-function 'romacs-agent--state-root) (lambda () root))
                  ((symbol-function 'romacs-agent-tools--caller) (lambda () "writer"))
-                 ((symbol-function 'romacs-agent-watch--unit-state) (lambda (_) '("active" . "invocation"))))
+                 ((symbol-function 'romacs-agent-watch--output)
+                  (lambda (_program _args then)
+                    (funcall then "Id=forge-check.service\nActiveState=active\nInvocationID=invocation\n" 0))))
          (unwind-protect
              (progn
                (mapc #'romacs-agent-ui--children-changed (list writer lane lead))
                (romacs-agent-board-tests--flush-worker-rows)
-               (let ((reply (romacs-agent-watch--watch (romacs-mcp--object "unit" "forge-check.service"))))
+               (let* ((deferred (romacs-agent-watch--watch (romacs-mcp--object "unit" "forge-check.service")))
+                      (reply (car (funcall (nth 1 deferred)))))
                  (should (equal (gethash "watching" reply) ["forge-check.service"])))
                (romacs-agent-board-tests--flush-worker-rows)
                ,@body)

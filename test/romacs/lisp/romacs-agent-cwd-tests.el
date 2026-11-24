@@ -120,6 +120,18 @@ note, and the move is journaled, once."
       (should (= (length notes) 1))
       (should (equal (romacs-agent-brief session) (romacs-agent--cwd-note gone parent nil))))))
 
+(ert-deftest romacs-agent-cwd-resume-refuses-a-missing-worktree ()
+  (romacs-agent-cwd-tests--with
+    (let ((branch "agent/isolated"))
+      (setf (romacs-agent-options session) (list :worktree gone :branch branch))
+      (cl-letf (((symbol-function 'romacs-agent--check-resume) #'ignore)
+                ((symbol-function 'romacs-agent--launch-when-placed) #'ignore))
+        (let ((text (error-message-string (should-error (romacs-agent-resume session) :type 'user-error))))
+          (should (string-search gone text))
+          (should (string-search branch text))))
+      (should (equal (romacs-agent-cwd session) gone))
+      (should-not notes))))
+
 (ert-deftest romacs-agent-cwd-rehome-keeps-brief ()
   "A brief already waiting (a renewal's) keeps its place: the note
 follows it.  Codex files no conversation by directory: nothing copied."

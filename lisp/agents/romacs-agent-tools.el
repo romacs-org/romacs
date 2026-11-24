@@ -846,12 +846,15 @@ CHILD's, when read already."
 
 (defun romacs-agent-tools--wake-soon (parent)
   "Wake PARENT a moment from now with what waits for it: ends that come
-meanwhile go with it."
-  (unless (gethash (romacs-agent-id parent) romacs-agent-tools--waking)
-    (puthash (romacs-agent-id parent) t romacs-agent-tools--waking)
-    (run-at-time 0.5 nil (lambda ()
-                           (remhash (romacs-agent-id parent) romacs-agent-tools--waking)
-                           (romacs-agent-tools--flush parent)))))
+meanwhile go with it.  A settled parent's ends stay pending."
+  (let ((id (romacs-agent-id parent)))
+    (when (and (romacs-agent--goes-on-p parent) (not (gethash id romacs-agent-tools--waking)))
+      (puthash id t romacs-agent-tools--waking)
+      (run-at-time 0.5 nil (lambda ()
+                             (remhash id romacs-agent-tools--waking)
+                             (when (and (eq (gethash id romacs-agent--sessions) parent)
+                                        (romacs-agent--goes-on-p parent))
+                               (romacs-agent-tools--flush parent)))))))
 
 (defun romacs-agent-tools--summary-of (session)
   "The summary of SESSION, by its id (`romacs-agent-summary-held'): what
@@ -961,8 +964,9 @@ its parent again."
   ;; A launch failed: its end is new, whatever an earlier failure's was.
   (when (eq (plist-get event :type) 'unstarted)
     (romacs-agent-tools--forget-ends session))
-  ;; A parent's turn ended: what waited while it worked wakes it now.
-  (when (and (eq (plist-get event :type) 'done) (gethash (romacs-agent-id session) romacs-agent-tools--pending))
+  ;; A parent finished its turn or was brought back: its waiting ends can go.
+  (when (and (memq (plist-get event :type) '(done settled))
+             (gethash (romacs-agent-id session) romacs-agent-tools--pending))
     (romacs-agent-tools--wake-soon session))
   (when (and (plist-get (romacs-agent-options session) :parent)
              (or (memq (plist-get event :type) '(done unstarted))

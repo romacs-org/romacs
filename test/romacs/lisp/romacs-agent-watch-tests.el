@@ -68,12 +68,7 @@ systemd reports `state' and `invocation' for each unit."
                ((symbol-function 'call-process)
                 (lambda (program &rest args)
                   (if (equal program "systemctl")
-                      (progn
-                        (should (equal (butlast args 1)
-                                       '(nil t nil "--user" "show" "-p" "Id,ActiveState,InvocationID" "--")))
-                        (insert (format "InvocationID=%s\nId=%s\nActiveState=%s\n"
-                                        (or invocation "") (car (last args)) state))
-                        0)
+                      (ert-fail "Watch ran systemctl synchronously")
                     (apply real-call-process program args))))
                ((symbol-function 'romacs-agent-watch--output)
                 (lambda (program args then)
@@ -91,7 +86,24 @@ systemd reports `state' and `invocation' for each unit."
        (unwind-protect (progn ,@body) (delete-directory root t)))))
 
 (defun romacs-agent-watch-tests--watch (&rest pairs)
-  (romacs-agent-watch--watch (apply #'romacs-mcp--object pairs)))
+  (let ((reply (romacs-agent-watch--watch (apply #'romacs-mcp--object pairs))))
+    (if (eq (car-safe reply) 'romacs-mcp--deferred)
+        (car (funcall (nth 1 reply)))
+      reply)))
+
+(ert-deftest romacs-agent-watch-registration-rechecks-the-task-after-systemd ()
+  (romacs-agent-watch-tests--with
+    (let (complete)
+      (cl-letf (((symbol-function 'romacs-agent-watch--output)
+                 (lambda (_program _args then) (setq complete then))))
+        (let ((reply (romacs-agent-watch--watch (romacs-mcp--object "taskId" "child" "unit" "check"))))
+          (should (eq (car-safe reply) 'romacs-mcp--deferred))
+          (should-not (funcall (nth 1 reply)))
+          (should-not (file-exists-p (romacs-agent-watch--file child)))
+          (setf (romacs-agent-cancelled child) t)
+          (funcall complete "Id=check.service\nActiveState=active\n" 0)
+          (should-error (funcall (nth 1 reply)) :type 'user-error)
+          (should-not (file-exists-p (romacs-agent-watch--file child))))))))
 
 (ert-deftest romacs-agent-watch-answers-no-result ()
   ;; What it watches, never the task's last result.
@@ -289,7 +301,7 @@ systemd reports `state' and `invocation' for each unit."
       (setq caller "child" state "inactive" invocation nil)
       (with-temp-file (expand-file-name "unit-exit/romacs-dev-check-x.service" root)
         (insert (format "success exited 0 %s\n" launched)))
-      (cl-letf (((symbol-function 'romacs-agent-watch--unit-state)
+      (cl-letf (((symbol-function 'romacs-agent-watch--output)
                  (lambda (&rest _) (ert-fail "Dev check looked up the unit after launch"))))
         (should (funcall romacs-mcp-dev-watch-function "romacs-dev-check-x" nil launched)))
       (should (equal (gethash "child" romacs-agent-watch--watches)
