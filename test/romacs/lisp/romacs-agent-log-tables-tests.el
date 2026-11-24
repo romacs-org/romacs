@@ -15,7 +15,7 @@
 BODY may set), its events drawn by `draw', a reply by `reply'."
   (declare (indent 1))
   `(let ((width ,width)
-         (actual-width (symbol-function 'romacs-agent-log--rule-width))
+         (actual-width (symbol-function 'romacs-agent-log-tables--window-width))
          (session (romacs-agent--make :id "T" :harness 'claude :state 'running
                                       :tools (make-hash-table :test #'equal)
                                       :streamed (make-hash-table :test #'equal))))
@@ -24,7 +24,7 @@ BODY may set), its events drawn by `draw', a reply by `reply'."
        (setq romacs-agent-log--session session
              romacs-agent-log--end (point-min-marker))
        (set-marker-insertion-type romacs-agent-log--end t)
-       (cl-letf (((symbol-function 'romacs-agent-log--rule-width) (lambda () (or width (funcall actual-width)))))
+       (cl-letf (((symbol-function 'romacs-agent-log-tables--window-width) (lambda () (or width (funcall actual-width)))))
          (cl-flet* ((draw (&rest event) (romacs-agent-log-draw session event))
                     (reply (text) (draw :type 'delta :text text) (draw :type 'message-end))
                     (transcript () (buffer-substring-no-properties (point-min) romacs-agent-log--end)))
@@ -66,6 +66,20 @@ BODY may set), its events drawn by `draw', a reply by `reply'."
         (setq width 70)
         (romacs-agent-log-tables-refit)
         (should (equal (transcript) wide))))))
+
+(ert-deftest romacs-agent-log-tables-a-table-drawn-hidden-fits-the-window-showing-it ()
+  (romacs-agent-log-tables-tests--with nil
+    (ignore #'transcript)
+    (reply (concat "| Name | Cost |\n|---|---|\n| " (make-string 120 ?a) " | low |\n"))
+    (let ((drawn (lambda () (nth 1 (get-text-property (text-property-not-all (point-min) (point-max) 'romacs-agent-log-table nil)
+                                                       'romacs-agent-log-table)))))
+      (should (= (funcall drawn) 78))
+      (save-window-excursion
+        (delete-other-windows)
+        (let ((window (split-window-right)))
+          (set-window-buffer window (current-buffer))
+          (romacs--run-window-change-functions)
+          (should (= (funcall drawn) (- (window-body-width window) 2))))))))
 
 (ert-deftest romacs-agent-log-tables-a-table-keeps-its-reply-s-marks ()
   ;; A reply that opens with its table: its entry still starts there, on

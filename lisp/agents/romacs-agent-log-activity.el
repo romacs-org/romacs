@@ -125,7 +125,8 @@ The default leaves room for the transcript and work still in progress."
               'romacs-agent-worker id 'romacs-agent-worker-cols cols))
 
 (defun romacs-agent-log-activity--line (title activity prefix width face &optional activity-face)
-  "Draw TITLE in FACE and ACTIVITY after PREFIX, within WIDTH.
+  "Draw TITLE in FACE and ACTIVITY after PREFIX, within WIDTH, wrapping
+under TITLE in a narrower window.
 With ACTIVITY-FACE, make room for the inactive state word before the title."
   (let* ((room (max 1 (- width (string-width (or prefix "")) 1)))
          (title-width (if (> room 14) (min 40 (/ room 2)) room))
@@ -138,7 +139,8 @@ With ACTIVITY-FACE, make room for the inactive state word before the title."
                                    (concat (propertize "  ·  " 'face 'romacs-agent-log-note)
                                            (propertize (romacs-agent-log-activity--clip activity action)
                                                        'face (or activity-face 'romacs-agent-log-note)))))
-                        'help-echo (if activity (concat title " · " activity) title)))))
+                        'help-echo (if activity (concat title " · " activity) title)
+                        'wrap-prefix (make-string (string-width (or prefix "")) ?\s)))))
 
 (defun romacs-agent-log-activity--subagent-line (row width)
   "Draw the native subagent ROW within WIDTH columns."
