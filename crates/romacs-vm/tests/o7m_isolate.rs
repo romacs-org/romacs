@@ -1,4 +1,4 @@
-//! O7m C3 through the master and worker Lisp over SOCK_SEQPACKET.
+//! O7m C3 through the master and worker Lisp over `SOCK_SEQPACKET`.
 //! The proxy forwards the worker hello under the launcher name, then
 //! replaces the frozen payload in a selected local test frame.
 #[path = "support/own_test.rs"]
@@ -13,16 +13,15 @@ use std::{
 };
 
 const WORKER: &str = env!("CARGO_BIN_EXE_romacs-vm-isolate");
-const PROXY: &str = r#"#!/usr/bin/python3
-import array
+const PROXY: &str = r#"import array
 import os
 import select
 import socket
 import subprocess
 import sys
 
-worker, mode, log, launcher = sys.argv[1:5]
-args = sys.argv[5:]
+launcher = __file__
+args = sys.argv[1:]
 if '--parent' in args:
     args[args.index('--parent') + 1] = str(os.getpid())
 master = socket.socket(fileno=0)
@@ -76,33 +75,32 @@ fn worker_program() -> std::path::PathBuf {
 fn worker_vm(program: &Path) -> Vm {
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
+    let program = serde_json::to_string(program).unwrap();
     eval(
         &mut vm,
-        &format!("(setq isolate-worker-program {program:?} isolate-zygotes nil)"),
+        &format!("(setq isolate-worker-program {program} isolate-zygotes nil)"),
     );
     vm
 }
 
 fn eval(vm: &mut Vm, source: &str) -> String {
-    vm.eval_source(source).and_then(|v| v.display()).unwrap()
+    vm.eval_source(source)
+        .and_then(romacs_vm::Local::display)
+        .unwrap()
 }
 
 fn in_proxy(test: &str, mode: &str, run: impl FnOnce(&mut Vm, &Path)) {
     const MARKER: &str = "ROMACS_O7M_PROXY_CHILD";
     if let Some(dir) = std::env::var_os(MARKER) {
         let dir = Path::new(&dir);
-        let proxy = dir.join("proxy.py");
         let launch = dir.join("launch");
         let log = dir.join("frames");
-        fs::write(&proxy, PROXY).unwrap();
-        fs::write(
-            &launch,
-            format!(
-                "#!/bin/sh\nexec /usr/bin/python3 {proxy:?} {:?} {mode} {log:?} {launch:?} \"$@\"\n",
-                worker_program()
-            ),
-        )
-        .unwrap();
+        let worker_literal = serde_json::to_string(&worker_program()).unwrap();
+        let log_literal = serde_json::to_string(&log).unwrap();
+        let script = format!(
+            "#!/usr/bin/python3\nworker = {worker_literal}\nmode = {mode:?}\nlog = {log_literal}\n{PROXY}"
+        );
+        fs::write(&launch, script).unwrap();
         fs::set_permissions(&launch, fs::Permissions::from_mode(0o700)).unwrap();
         let mut vm = worker_vm(&launch);
         run(&mut vm, &log);
@@ -136,7 +134,7 @@ fn in_proxy(test: &str, mode: &str, run: impl FnOnce(&mut Vm, &Path)) {
 }
 
 fn check_bad_frame(vm: &mut Vm, log: &Path, kind: u8) {
-    let actual = vm.eval_source(r#"
+    let actual = vm.eval_source(r"
         (let ((iso (isolate-create)))
           (unwind-protect
               (let* ((bad (isolate-spawn '(lambda () (setq o7m-ran-bad t)) :isolate iso))
@@ -145,7 +143,7 @@ fn check_bad_frame(vm: &mut Vm, log: &Path, kind: u8) {
                                    (error (car err)))))
                 (list (aref bad 2) error-kind (isolate-future-done-p bad)
                       (isolate-await good 5) (isolate-live-p iso)))
-            (isolate-kill iso)))"#).and_then(|v| v.display());
+            (isolate-kill iso)))").and_then(romacs_vm::Local::display);
     let injected = fs::read_to_string(log)
         .unwrap_or_else(|error| panic!("proxy did not inject: {error}; VM result: {actual:?}"));
     assert_eq!(injected, format!("{kind} 2\n"));
@@ -183,7 +181,7 @@ fn plain_job_args_still_thawed() {
     let mut vm = worker_vm(&worker_program());
     let actual = eval(
         &mut vm,
-        r#"
+        r"
         (let ((iso (isolate-create))
               (arg (list 'unchanged))
               (binding (vector 'untouched)))
@@ -196,7 +194,7 @@ fn plain_job_args_still_thawed() {
                                     arg :bindings (list (cons 'o7m-binding binding))
                                     :isolate iso) 5)
                     arg binding)
-            (isolate-kill iso)))"#,
+            (isolate-kill iso)))",
     );
     assert_eq!(
         actual,
@@ -224,8 +222,8 @@ const TABLE: &str = "'(:incarnation (123 . 1) :world \"o7m-test-world\" :files n
 fn backing(vm: &mut Vm) {
     eval(
         vm,
-        r#"(setq o7m-root (let ((s (make-string 8192 ?x)))
-                                (lambda () (cons (length s) 'code))))"#,
+        r"(setq o7m-root (let ((s (make-string 8192 ?x)))
+                                (lambda () (cons (length s) 'code))))",
     );
     let form = format!(
         "(setq o7m-backing (romacs--seed-build '((variable o7m-root)) {TABLE} 100000)) (cdr o7m-backing)"
@@ -248,7 +246,7 @@ fn backing_encoded_once() {
         };
         let actual = eval(
             vm,
-            r#"
+            r"
           (let ((iso (isolate-create)))
             (unwind-protect
                 (let ((probe '(lambda ()
@@ -259,7 +257,7 @@ fn backing_encoded_once() {
                   (isolate-send iso (car o7m-backing))
                   (list (isolate-await (isolate-spawn probe :isolate iso) 5)
                         (isolate-await (isolate-spawn probe :isolate iso) 5)))
-              (isolate-kill iso)))"#,
+              (isolate-kill iso)))",
         );
         assert_eq!(actual, "((nil (8192 . code)) (nil (8192 . code)))");
         assert_eq!(
@@ -294,29 +292,36 @@ fn collection_after_drop() {
     );
     eval(
         &mut vm,
-        r#"
+        r"
        (setq o7m-weak (make-hash-table :test 'eq :weakness 'key)
              isolate-message-functions
              (list (lambda (_sender seed)
                      (setq o7m-received (nth 1 (assq 'o7m-root (mapcar 'cdr (nth 2 seed)))))
-                     (puthash o7m-received t o7m-weak))))"#,
+                     (puthash o7m-received t o7m-weak))))",
     );
+    // Cache the exact submitted forms before counting their request code.
     vm.collect_compacting();
+    receive_and_drop(&mut vm, &transfer);
     let before_code = request_code_counts(&mut vm);
-    assert_eq!(eval(&mut vm, &transfer), "t");
-    vm.collect_compacting();
-    assert_eq!(eval(&mut vm, "(funcall o7m-received)"), "(live)");
-    assert_eq!(eval(&mut vm, "(hash-table-count o7m-weak)"), "1");
-    let held = request_code_counts(&mut vm);
+    let held = receive_and_drop(&mut vm, &transfer);
     assert!(
         held.0 > before_code.0 && held.1 > before_code.1,
         "{before_code:?} -> {held:?}"
     );
-    eval(&mut vm, "(setq o7m-received nil)");
-    vm.collect_compacting();
     assert_eq!(request_code_counts(&mut vm), before_code);
-    assert_eq!(eval(&mut vm, "(hash-table-count o7m-weak)"), "0");
     eval(&mut vm, "(isolate-kill o7m-iso)");
+}
+
+fn receive_and_drop(vm: &mut Vm, transfer: &str) -> (i64, i64) {
+    assert_eq!(eval(vm, transfer), "t");
+    vm.collect_compacting();
+    assert_eq!(eval(vm, "(funcall o7m-received)"), "(live)");
+    assert_eq!(eval(vm, "(hash-table-count o7m-weak)"), "1");
+    let held = request_code_counts(vm);
+    eval(vm, "(setq o7m-received nil)");
+    vm.collect_compacting();
+    assert_eq!(eval(vm, "(hash-table-count o7m-weak)"), "0");
+    held
 }
 
 fn request_code_counts(vm: &mut Vm) -> (i64, i64) {

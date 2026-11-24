@@ -58,5 +58,7 @@ pub fn configure_store(store: &Path) {
 }
 
 pub fn eval(vm: &mut Vm, form: &str) -> String {
-    vm.eval_source(form).and_then(|v| v.display()).unwrap()
+    vm.eval_source(form)
+        .and_then(romacs_vm::Local::display)
+        .unwrap()
 }

@@ -5,7 +5,7 @@ mod support;
 
 use self::support::{configure_store, eval, gnu_lisp};
 use sha2::{Digest, Sha256};
-use std::{fs, path::Path};
+use std::{fmt::Write as _, fs, path::Path};
 
 const SOURCE: &str = ";; -*- lexical-binding: t; -*-\n\
 (defun o7m-call (x) (if x (o7m-target '(7)) x))\n";
@@ -69,10 +69,8 @@ fn load_and_probe(source: &Path, probe: &str, expected: &str) {
     eval(&mut receiver, "(defun o7m-target (x) x)");
     let taken = "(plist-get (romacs-compiled-lisp-stats) :taken)";
     let before = eval(&mut receiver, taken).parse::<usize>().unwrap();
-    eval(
-        &mut receiver,
-        &format!("(load {:?} nil t)", source.with_extension("")),
-    );
+    let name = serde_json::to_string(&source.with_extension("")).unwrap();
+    eval(&mut receiver, &format!("(load {name} nil t)"));
     assert_eq!(
         eval(&mut receiver, taken),
         (before + 1).to_string(),
@@ -93,10 +91,10 @@ fn load_and_probe(source: &Path, probe: &str, expected: &str) {
 fn artifact_payload_unchanged() {
     in_private_store!(artifact_payload_unchanged, |root| {
         let (source, _, bytes) = artifact(root);
-        let digest: String = Sha256::digest(payload(&bytes))
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect();
+        let mut digest = String::with_capacity(64);
+        for byte in Sha256::digest(payload(&bytes)) {
+            write!(digest, "{byte:02x}").unwrap();
+        }
         assert_eq!(
             digest,
             "8621e51f2b7e90f14829862d6106dcda034cf39837a1dee46dd72ba6f330ee97"
@@ -126,7 +124,7 @@ fn form_object_header_resolved() {
 fn patch_parameter(bytes: &mut Vec<u8>) {
     let mut units = payload(bytes);
     let x = (0..natural(&mut units))
-        .find_map(|i| (field(&mut units) == b"x").then_some(i))
+        .find(|_| field(&mut units) == b"x")
         .unwrap();
     // Rewind to skip the whole name table, including the names after x.
     units = payload(bytes);
