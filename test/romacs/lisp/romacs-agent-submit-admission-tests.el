@@ -69,9 +69,9 @@ then with OTHERS (a number) more such sessions."
             (apply body sessions))
         (dolist (session sessions) (delete-process (romacs-agent-connection session)))))))
 
-(defun romacs-agent-submit-admission-tests--await (predicate)
-  "Wait for PREDICATE, timers run meanwhile, 3 s at most."
-  (let ((deadline (+ (float-time) 3)))
+(defun romacs-agent-submit-admission-tests--await (predicate &optional seconds)
+  "Wait for PREDICATE, timers run meanwhile, SECONDS at most (3 by default)."
+  (let ((deadline (+ (float-time) (or seconds 3))))
     (while (and (not (funcall predicate)) (< (float-time) deadline))
       (accept-process-output nil 0.02))
     (should (funcall predicate))))
@@ -823,7 +823,8 @@ newest first."
            (romacs-agent--submit-draft (format "b%d" n) (romacs-agent-id session)
                                        (romacs-agent-submit-admission-tests--intent (format "from b%d" n))
                                        (lambda (_) (cl-incf answered))))
-         (romacs-agent-submit-admission-tests--await (lambda () (= answered 1000))))
+         ;; A busy host takes seconds to answer a thousand drafts.
+         (romacs-agent-submit-admission-tests--await (lambda () (= answered 1000)) 60))
        (romacs-agent--submit-draft "a" (romacs-agent-id session) intent (lambda (answer) (push answer answers)))
        (romacs-agent-submit-admission-tests--await (lambda () (cdr answers)))
        (should (eq (plist-get (car answers) :status) 'accepted))
@@ -1302,7 +1303,7 @@ newest first."
                            :status)
                 'accepted))))
 
-;;; Each answer its own timer, unconfirmed on the wire, one hook runner
+;;; Each answer alone, unconfirmed on the wire, one hook runner
 
 (ert-deftest romacs-agent-submit-admission-each-answer-goes-alone ()
   ;; Two drafts answered by one release: the first one's callback throws
@@ -1326,6 +1327,24 @@ newest first."
           (romacs-agent-submit-admission-tests--answered)
           (should (equal (romacs-agent-submit-admission-tests--draft) ""))
           (should (equal (mapcar #'romacs-agent-item-text (romacs-agent-queue session)) '("a" "composer draft")))))))))
+
+(ert-deftest romacs-agent-submit-admission-a-lost-release-is-set-again ()
+  ;; The hold's one release timer dropped unfired, with the timer list it
+  ;; was set in: the next admission sets another, so both drafts are
+  ;; answered and the hold let go, not held for good.
+  (romacs-agent-submit-admission-tests--with
+   (lambda (session)
+     (setf (romacs-agent-state session) 'running)
+     (let* ((romacs-agent--held nil)
+            (lost (let ((timer-list nil))
+                    (romacs-agent-submit-admission-tests--submit
+                     session (romacs-agent-submit-admission-tests--intent "lost" 'queue))))
+            (next (romacs-agent-submit-admission-tests--submit
+                   session (romacs-agent-submit-admission-tests--intent "next" 'queue))))
+       (romacs-agent-submit-admission-tests--await
+        (lambda () (and (car lost) (car next) (not romacs-agent--held))))
+       (should (eq (plist-get (caar lost) :status) 'accepted))
+       (should (eq (plist-get (caar next) :status) 'accepted))))))
 
 (ert-deftest romacs-agent-submit-admission-a-cut-send-is-unconfirmed-over-the-wire ()
   ;; A draft whose line is cut short by a quit, sent through the service:

@@ -92,6 +92,8 @@ what waited for that end goes."
         (romacs-agent-reply child) result (romacs-agent-done-seq child) seq
         (romacs-agent-driver-state child) '(:ready t))
   (push (list seq result nil) (romacs-agent-ends child))
+  ;; Its summary told, as its done event tells it.
+  (romacs-agent--summary-stale (romacs-agent-id child))
   ;; Said on its attachment.
   (unless (process-live-p (romacs-agent-connection child)) (romacs-agent-test-attach child))
   (romacs-agent-tools--wake child)
@@ -174,7 +176,7 @@ what waited for that end goes."
 (ert-deftest romacs-agent-lead-resume-adopts-and-wakes-the-parent ()
   (romacs-agent-lead-tests--with
     (let* ((child (romacs-agent-get (gethash "taskId" (romacs-agent-lead-tests--adopt cwd "wake" "end"))))
-           (task (romacs-agent-tools--task child)))
+           (task (romacs-agent-tools--task (romacs-agent-summary (romacs-agent-id child)))))
       ;; The conversation's own session, its parent's task, resumed in its directory.
       (should (equal (gethash "conversation" task) romacs-agent-lead-tests--thread))
       (should (equal (gethash "parent" task) romacs-agent-lead-tests--lead))
@@ -231,7 +233,7 @@ wait gives the end it waited for once, in place of its wake."
                                                                   "taskId" (romacs-agent-id child))))))
         (should (equal (gethash "provider" limit) "claude"))
         (should-not (gethash "text" limit)))
-      (should (equal (gethash "result" (romacs-agent-tools--task child)) big)))))
+      (should (equal (gethash "result" (romacs-agent-tools--task (romacs-agent-summary (romacs-agent-id child)))) big)))))
 
 (ert-deftest romacs-agent-lead-resume-is-idempotent-and-owned ()
   (romacs-agent-lead-tests--with
@@ -245,6 +247,23 @@ wait gives the end it waited for once, in place of its wake."
       (setq caller romacs-agent-lead-tests--other)
       (let ((err (should-error (romacs-agent-lead-tests--adopt cwd) :type 'user-error)))
         (should (string-match-p "only the session that delegated it may take it over" (cadr err)))))))
+
+(ert-deftest romacs-agent-lead-resume-of-a-cancelled-task-says-so ()
+  ;; Taken over again once cancelled, by resume or its request: the answer
+  ;; says it is cancelled and that nothing was sent, at once, waited for or not.
+  (romacs-agent-lead-tests--with
+    (let ((child (romacs-agent-get (gethash "taskId" (romacs-agent-lead-tests--adopt cwd "clientRequestId" "r1")))))
+      (setf (romacs-agent-cancelled child) t)
+      ;; As a cancel tells its views.
+      (romacs-agent--changed child)
+      (dolist (record (list (romacs-agent-lead-tests--adopt cwd)
+                            (romacs-agent-lead-tests--adopt cwd "mode" "wait")
+                            (romacs-agent-lead-tests--adopt cwd "clientRequestId" "r1")))
+        (should (equal (gethash "taskId" record) (romacs-agent-id child)))
+        (should (equal (gethash "status" record) "cancelled"))
+        (should (string-match-p "cancelled: nothing was sent" (gethash "note" record))))
+      (should (= (romacs-agent-queue-length child) 1))
+      (should (= (length launched) 1)))))
 
 (ert-deftest romacs-agent-lead-resume-refusals ()
   (romacs-agent-lead-tests--with
@@ -311,7 +330,7 @@ wait gives the end it waited for once, in place of its wake."
       (should-not (romacs-agent-tools--wanted-p child 3))
       (should-not (romacs-agent-tools--wanted-p child 5))
       ;; Still the task's result.
-      (should (string-prefix-p "[quiet] still" (gethash "result" (romacs-agent-tools--task child))))
+      (should (string-prefix-p "[quiet] still" (gethash "result" (romacs-agent-tools--task (romacs-agent-summary (romacs-agent-id child))))))
       ;; A landing wakes it, and a failure does, empty or not.
       (romacs-agent-lead-tests--end child 7 "landed abc123")
       (setf (romacs-agent-failed child) t)
@@ -470,7 +489,7 @@ wait gives the end it waited for once, in place of its wake."
         (should (string-search "ask the user" message))
         (should-not (string-search "romacs_task_send" message))
         (should-not (string-search "romacs_task_reply" message)))
-      (setf (romacs-agent-options sender) (list :parent (romacs-agent-id owner)))
+      (romacs-agent--set-options sender (list :parent (romacs-agent-id owner)))
       (let ((message-id "m-abcdef01-0000-4000-8000-000000000000"))
         (romacs-agent--received sender (list (romacs-agent-make-message
                                            message-id "parent" (list :session (romacs-agent-id owner)))))
@@ -480,10 +499,12 @@ wait gives the end it waited for once, in place of its wake."
                                    :type 'user-error))))
           (should (string-search "romacs_task_reply" message))
           (should (string-search message-id message))))
-      (setf (romacs-agent-options sender) nil
-            (romacs-agent-options owner) (list :parent (romacs-agent-id sender)))
+      (romacs-agent--set-options sender nil)
+      (romacs-agent--set-options owner (list :parent (romacs-agent-id sender)))
       (should (string-search "romacs_task_send" (funcall refusal)))
       (setf (romacs-agent-cancelled owner) t)
+      ;; As a cancel tells its views.
+      (romacs-agent--changed owner)
       (should (string-search "ask the user" (funcall refusal))))))
 
 (ert-deftest romacs-agent-lead-reply-suggests-at-most-eight-ids ()
@@ -528,6 +549,27 @@ wait gives the end it waited for once, in place of its wake."
                  (message (cadr err)))
             (should (string-search (romacs-agent-id owner) message))
             (should-not (string-search "romacs_task_send" message))
+            (should (string-search "ask the user" message))))))))
+
+(ert-deftest romacs-agent-lead-owner-route-names-why-its-owner-cannot-take-a-message ()
+  ;; Its owner asked whether it can take a message: the refusal says why not.
+  (let ((continue (symbol-function 'romacs-agent--continue)))
+    (romacs-agent-lead-tests--with
+      (let* ((caller-id (romacs-agent-tools--caller))
+             (owner (romacs-agent-lead-tests--stored-task romacs-agent-lead-tests--other caller-id))
+             (task (romacs-agent-lead-tests--stored-task
+                    "abcdef01-0000-4000-8000-000000000000" (romacs-agent-id owner)))
+             (provider-dir (make-temp-file (expand-file-name "provider-" (romacs-agent--state-root)) t)))
+        (setf (romacs-agent-state owner) 'detached
+              (romacs-agent-config-dir owner) provider-dir
+              (romacs-agent-host-socket owner) (romacs-agent--host-socket (romacs-agent-id owner)))
+        (delete-directory provider-dir)
+        (cl-letf (((symbol-function 'romacs-agent--continue) continue))
+          (let ((message (cadr (should-error (romacs-agent-tools--send (romacs-agent-lead-tests--args
+                                                                       "taskId" (romacs-agent-id task) "message" "hi"))
+                                             :type 'user-error))))
+            (should (string-search "It cannot take a message now" message))
+            (should (string-search provider-dir message))
             (should (string-search "ask the user" message))))))))
 
 (ert-deftest romacs-agent-lead-root-send-only-suggests-an-answer-to-that-session ()

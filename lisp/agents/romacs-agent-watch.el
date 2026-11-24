@@ -89,14 +89,19 @@ KEYS the first words of the entries already there.")
       (with-demoted-errors "romacs_task_watch: clearing the watch mark: %S"
         (romacs-agent-mark (romacs-agent-id session) 'watches nil)))))
 
+(defun romacs-agent-watch--put (id watches)
+  "Make WATCHES, nil for none, the task ID's: its summary's watched unit
+follows (`romacs-agent-watch-unit')."
+  (if watches (puthash id watches romacs-agent-watch--watches) (remhash id romacs-agent-watch--watches))
+  (romacs-agent--summary-stale id))
+
 (defun romacs-agent-watch--set (session watches &optional persist)
   "Replace SESSION's WATCHES and notify observers when they change.
 With PERSIST, write the change before publishing and scheduling it."
   (let* ((id (romacs-agent-id session))
          (previous (gethash id romacs-agent-watch--watches)))
     (when persist (romacs-agent-watch--write session watches))
-    (if watches (puthash id watches romacs-agent-watch--watches)
-      (remhash id romacs-agent-watch--watches))
+    (romacs-agent-watch--put id watches)
     (when persist (romacs-agent-watch--schedule))
     (unless (equal previous watches)
       (romacs-agent--run-hook 'romacs-agent-event-functions session '(:type watch-changed)))))
@@ -177,7 +182,8 @@ An omitted or empty InvocationID is represented by nil."
      (format "%s, status=%s (%s)" code status result))))
 
 (defun romacs-agent-watch--tail (file)
-  "FILE's last `romacs-agent-watch--lines' lines, or why there are none."
+  "FILE's last `romacs-agent-watch--lines' lines, or why there are none.
+A byte that is not UTF-8 (a character cut by the tail too) reads U+FFFD."
   (if (not (file-readable-p file)) (format "(%s cannot be read)" file)
     (with-temp-buffer
       (let* ((size (file-attribute-size (file-attributes file)))
@@ -187,7 +193,7 @@ An omitted or empty InvocationID is represented by nil."
       (skip-chars-backward "\n")
       (let ((end (point)))
         (forward-line (- 1 romacs-agent-watch--lines))
-        (buffer-substring-no-properties (line-beginning-position) end)))))
+        (romacs-mcp--unicode (buffer-substring-no-properties (line-beginning-position) end))))))
 
 (defun romacs-agent-watch--message (watch status)
   "What a task is told when WATCH's unit ended with STATUS."
@@ -201,12 +207,13 @@ An omitted or empty InvocationID is represented by nil."
 (defun romacs-agent-watch--entries (file section)
   "FILE's entries under the heading SECTION (anywhere, when nil): each
 non-empty line not a heading, as (KEY . LINE), KEY its first word after a
-list marker; nil when FILE cannot be read."
+list marker; nil when FILE cannot be read.  A byte that is not UTF-8
+reads U+FFFD."
   (when (file-readable-p file)
     (with-temp-buffer
       (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
       (let ((in (null section)) (entries nil))
-        (dolist (line (split-string (buffer-string) "\n"))
+        (dolist (line (split-string (romacs-mcp--unicode (buffer-string)) "\n"))
           (cond ((string-match "\\`#+[ \t]+\\(.*\\)" line)
                  (setq in (or (null section) (equal (string-trim (match-string 1 line)) section))))
                 ((and in (string-match "\\`[ \t]*\\(?:[-*+][ \t]+\\)?\\([^ \t]+\\)" line))
@@ -232,7 +239,7 @@ looked, and remember what is there now (an entry gone and back is new)."
                                  each))
                              (gethash id romacs-agent-watch--watches))))
         (romacs-agent-watch--write task updated)
-        (puthash id updated romacs-agent-watch--watches)))))
+        (romacs-agent-watch--put id updated)))))
 
 ;;; The reactor
 
@@ -241,7 +248,7 @@ looked, and remember what is there now (an entry gone and back is new)."
   (let ((all nil))
     (maphash (lambda (id watches)
                (let ((task (romacs-agent-get id)))
-                 (cond ((null task) (remhash id romacs-agent-watch--watches))
+                 (cond ((null task) (romacs-agent-watch--put id nil))
                        ((romacs-agent-watch--stopped-p task)
                         (with-demoted-errors "romacs_task_watch: clearing stopped task: %S"
                           (romacs-agent-watch-stop task)))
@@ -265,7 +272,7 @@ looked, and remember what is there now (an entry gone and back is new)."
       (romacs-agent-watch--set task (cl-remove-if (lambda (watch) (memq watch watches))
                                                 (gethash id romacs-agent-watch--watches))
                                t)
-    (remhash id romacs-agent-watch--watches)
+    (romacs-agent-watch--put id nil)
     (romacs-agent-watch--schedule)))
 
 (defun romacs-agent-watch--output (program args then)

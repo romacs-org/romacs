@@ -6,16 +6,20 @@
 ;;; Commentary:
 
 ;; Native Alacritty terminal for Romacs.  Every key goes through the
-;; command loop.  While a window shows the terminal with point on its
-;; cursor, keys reach the program through generated passthrough keymaps,
-;; except the keys in `romacs-term-keymap-exceptions', which keep their
-;; Emacs bindings (vterm's `vterm-keymap-exceptions').  On the alternate
-;; screen (a full-screen program) only `romacs-term-alternate-exceptions'
-;; stay with Emacs.  A command that moves a window's point off the cursor,
-;; or scrolls it back, leaves that window a plain read-only Emacs buffer
-;; over the scrollback; typing there puts it back on the cursor and sends
-;; the key.  While the shell has the terminal, M-p and M-n recall its
-;; history, as in eshell.
+;; command loop.  Each window showing a terminal is in one of two modes:
+;;
+;; - Input mode: the window follows the cursor and keys reach the program
+;;   through generated passthrough keymaps, except the keys in
+;;   `romacs-term-keymap-exceptions' (vterm's `vterm-keymap-exceptions'),
+;;   or on the alternate screen (a full-screen program)
+;;   `romacs-term-alternate-exceptions', which keep their Emacs bindings.
+;;   C-x and C-c stay Emacs prefixes on every screen; C-q gives the
+;;   program the next key as it is (C-q C-x for nano's C-x), and C-c C-c
+;;   sends C-c.
+;; - Free mode: the window is a plain read-only Emacs buffer that output
+;;   does not move, to search, select and copy from.  C-c C-j enters it on
+;;   any screen; moving point off the cursor or scrolling back enters it
+;;   too.  C-c C-j, typing, or a switch of screens returns to input mode.
 ;;
 ;; The keymap is chosen once per key sequence, when its first event is
 ;; read (`romacs--sequence-start-functions'), and is the buffer's local map
@@ -34,7 +38,10 @@
   "What a terminal's mode line says around its state and keys.")
 
 (defface romacs-term-running '((t :inherit success))
-  "A terminal's state in its mode line while its program runs.")
+  "A terminal's mode in its mode line while its window takes input.")
+
+(defface romacs-term-free '((t :inherit font-lock-keyword-face))
+  "A terminal's mode in its mode line while its window is free.")
 
 (defface romacs-term-exited '((t :inherit warning))
   "A terminal's state in its mode line once its program has exited.")
@@ -57,31 +64,17 @@ says whether the program runs.")
   "Keys that keep their Emacs bindings in a terminal running a program.
 Each is a `kbd' string.  While the window follows the cursor on the normal
 screen, the other keys the terminal has bytes for (M-ESC aside), and not
-bound in `romacs-term-mode-map', go to the program, but for
-`romacs-term-shell-exceptions' and `romacs-term-history-map' at the
-shell's prompt; the alternate screen
+bound in `romacs-term-mode-map', go to the program; the alternate screen
 keeps `romacs-term-alternate-exceptions' and `romacs-term-alternate-map'
 instead.  After changing this outside Customize, run
 `romacs-term-update-keymaps'.")
 
-(defvar romacs-term-shell-exceptions '("C-p" "C-n" "M-<" "M->")
-  "Keys that also keep their Emacs bindings while the shell itself has the
-terminal on the normal screen and the window follows the cursor: the
-shell's process group is the terminal's foreground one, as at its
-prompt.  They move point, as in shell-mode, which leaves the cursor for
-the scrollback until typing returns; the shell's history is on M-p and
-M-n (`romacs-term-history-map'), and Up and Down.  A program the shell runs
-in the foreground (a REPL, a pager, fzf) gets them while the window follows
-the cursor on the normal screen; the alternate screen keeps
-`romacs-term-alternate-exceptions' and `romacs-term-alternate-map'
-instead.  Each is a `kbd' string.  After changing this outside Customize,
-run `romacs-term-update-keymaps'.")
-
-(defvar romacs-term-alternate-exceptions '("C-x" "M-x" "C-g")
+(defvar romacs-term-alternate-exceptions '("C-c" "C-x" "M-x" "C-g")
   "Keys that keep their Emacs bindings while a program has the alternate
 screen (a full-screen program such as an editor or pager).  Each is a
-`kbd' string.  After changing this outside Customize, run
-`romacs-term-update-keymaps'.")
+`kbd' string.  The keys of `romacs-term-mode-map' stay with Emacs there
+too; C-q gives the program any key (`romacs-term-send-next-key').  After
+changing this outside Customize, run `romacs-term-update-keymaps'.")
 
 (defun romacs-term--set-exceptions (symbol value)
   "Customize's setter for the exception lists: set SYMBOL to VALUE and
@@ -93,9 +86,6 @@ reads the lists as they are then."
 (defvar romacs-term--passthrough-base nil
   "The generated passthrough bindings, rebuilt from
 `romacs-term-keymap-exceptions'.")
-(defvar romacs-term--shell-base nil
-  "The generated bindings while the shell has the terminal, rebuilt from
-`romacs-term-keymap-exceptions' and `romacs-term-shell-exceptions'.")
 (defvar romacs-term--alternate-base nil
   "The generated alternate-screen bindings, rebuilt from
 `romacs-term-alternate-exceptions'; parent of `romacs-term-alternate-map'.")
@@ -105,39 +95,34 @@ reads the lists as they are then."
     (define-key map [3 3] 'romacs-term-interrupt)
     (define-key map [3 11] 'romacs-term-interrupt)
     (define-key map [3 10] 'romacs-term-leave)
+    (define-key map [17] 'romacs-term-send-next-key)
+    map)
+  "Keys of a terminal buffer on every screen: C-c C-c interrupts, C-c C-j
+switches between input and free mode, and C-q sends the next key as it
+is.  A binding made here wins over the keys sent to a program, and
+survives `romacs-term-update-keymaps'.")
+
+(defvar romacs-term-yank-map
+  (let ((map (make-sparse-keymap)))
     (define-key map [25] 'romacs-term-yank)
     (define-key map [?\M-y] 'romacs-term-yank-pop)
     map)
-  "Keys of a terminal buffer: C-c C-c interrupts, C-c C-j leaves the
-cursor and returns to it, and C-y and M-y send kills.  While a program
-runs on the normal screen, a binding made here wins over the keys sent to
-it, and survives `romacs-term-update-keymaps'; the alternate screen reads
-`romacs-term-alternate-map' instead.")
+  "Keys that send kills: C-y and M-y.  Bound on the normal screen and in a
+free window; a full-screen program gets them.")
 
 ;; The key the mode line names, of the two that interrupt.
 (put 'romacs-term-interrupt :advertised-binding [3 3])
 
-(defvar romacs-term--passthrough (list 'keymap romacs-term-mode-map (make-sparse-keymap))
-  "The passthrough route's keymap: `romacs-term-mode-map' composed over
-the generated bindings (its third element, `romacs-term--passthrough-base').")
-(defvar romacs-term-history-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map [?\M-p] 'romacs-term-previous-input)
-    (define-key map [?\M-n] 'romacs-term-next-input)
-    map)
-  "Keys that recall the shell's history.  They are bound on the normal
-screen while the shell has the terminal, and in a window away from the
-cursor; there they put the window back on the cursor and send Up or Down
-to whatever runs.  A program the shell runs gets them while the window
-follows the cursor.")
-(defvar romacs-term--shell
-  (list 'keymap romacs-term-mode-map romacs-term-history-map (make-sparse-keymap))
-  "The shell route's keymap: `romacs-term-mode-map', whose bindings win, and
-`romacs-term-history-map' composed over the generated bindings that keep
-`romacs-term-shell-exceptions' too (its fourth element,
-`romacs-term--shell-base').")
+(defvar romacs-term--passthrough (list 'keymap romacs-term-mode-map romacs-term-yank-map (make-sparse-keymap))
+  "The passthrough route's keymap: `romacs-term-mode-map' and
+`romacs-term-yank-map' composed over the generated bindings (its fourth
+element, `romacs-term--passthrough-base').")
 (defvar romacs-term-alternate-map (make-sparse-keymap)
-  "Keys of a terminal on its alternate screen, above the generated ones.")
+  "Keys of a terminal on its alternate screen, above the generated ones
+and below `romacs-term-mode-map'.")
+(defvar romacs-term--alternate (list 'keymap romacs-term-mode-map romacs-term-alternate-map)
+  "The alternate route's keymap: `romacs-term-mode-map' composed over
+`romacs-term-alternate-map', whose parent is the generated bindings.")
 (defvar romacs-term-away-map
   (let ((map (make-sparse-keymap)))
     (define-key map [remap self-insert-command] 'romacs-term-send-key)
@@ -150,15 +135,14 @@ follows the cursor.")
 typing puts the window back on the cursor and sends the key.")
 
 (defvar romacs-term--away
-  (list 'keymap romacs-term-away-map romacs-term-mode-map romacs-term-history-map)
-  "The away route's keymap: `romacs-term-away-map' and
-`romacs-term-mode-map' composed over `romacs-term-history-map'.")
+  (list 'keymap romacs-term-away-map romacs-term-mode-map romacs-term-yank-map)
+  "The free route's keymap: `romacs-term-away-map' and `romacs-term-mode-map'
+composed over `romacs-term-yank-map'.")
 
 (defun romacs-term--route-map (route)
   "The local keymap of a key sequence read on ROUTE."
   (cond ((eq route 'passthrough) romacs-term--passthrough)
-        ((eq route 'shell) romacs-term--shell)
-        ((eq route 'alternate) romacs-term-alternate-map)
+        ((eq route 'alternate) romacs-term--alternate)
         ((eq route 'away) romacs-term--away)
         (t romacs-term-mode-map)))
 
@@ -274,10 +258,8 @@ Bindings in `romacs-term-mode-map' and `romacs-term-alternate-map' are
 kept."
   (interactive)
   (setq romacs-term--passthrough-base (romacs-term--passthrough-keymap romacs-term-keymap-exceptions)
-        romacs-term--shell-base (romacs-term--passthrough-keymap (append romacs-term-keymap-exceptions romacs-term-shell-exceptions))
         romacs-term--alternate-base (romacs-term--passthrough-keymap romacs-term-alternate-exceptions))
-  (setcar (cdr (cdr romacs-term--passthrough)) romacs-term--passthrough-base)
-  (setcar (nthcdr 3 romacs-term--shell) romacs-term--shell-base)
+  (setcar (nthcdr 3 romacs-term--passthrough) romacs-term--passthrough-base)
   (set-keymap-parent romacs-term-alternate-map romacs-term--alternate-base))
 
 (defun romacs-term--ensure-keymaps ()
@@ -290,19 +272,18 @@ kept."
 ;;;; Routing
 
 (defun romacs-term--route ()
-  "The current buffer's route for a key sequence starting now:
-`alternate'; `shell' or `passthrough' where the selected window follows
-the cursor and the shell, or a program it runs, has the terminal's
-foreground; `away' where it does not follow; or nil: not a running
+  "The current buffer's route for a key sequence starting now: `away'
+where the selected window is free (does not follow the cursor), on any
+screen; else `alternate' or `passthrough' as the screen is a full-screen
+program's or not; or nil: not a running
 terminal in the selected window, or one whose local map another owns (a
 confirmation's answers)."
   (when (and romacs-term-session (eq (window-buffer (selected-window)) (current-buffer))
              (eq (current-local-map) romacs-term-mode-map))
     (let ((state (romacs--term-state romacs-term-session)))
       (cond ((not (plist-get state :running)) nil)
-            ((plist-get state :alternate) 'alternate)
             ((not (plist-get state :following)) 'away)
-            ((plist-get state :shell-foreground) 'shell)
+            ((plist-get state :alternate) 'alternate)
             (t 'passthrough)))))
 
 (defun romacs-term--select (latch on)
@@ -346,11 +327,8 @@ cursor, or scrolled back, becomes a plain Emacs buffer."
     (error nil)))
 
 (defun romacs-term--away-keys ()
-  "How keys work away from the cursor.  C-p and C-n are named as keys, not
-looked up: `romacs-term-shell-exceptions' keeps those keys, whatever they
-run."
-  (substitute-command-keys
-   "\\`C-p'/\\`C-n' move; type or \\<romacs-term-mode-map>\\[romacs-term-leave] to return; there \\<romacs-term-history-map>\\[romacs-term-previous-input]/\\[romacs-term-next-input] recall history"))
+  "How a free window returns to input mode."
+  (substitute-command-keys "type or \\<romacs-term-mode-map>\\[romacs-term-leave] to return to input"))
 
 (defun romacs-term--motion-hint ()
   "The first time a command leaves a terminal's cursor, say once how keys
@@ -362,7 +340,7 @@ work there (`romacs-term--away-keys').  A command's own message (M-<'s
       (when (and (plist-get state :running) (not (plist-get state :alternate))
                  (not (plist-get state :following)) (not (current-message)))
         (setq romacs-term--motion-hinted t)
-        (message "%s" (romacs-term--away-keys))))))
+        (message "Free mode: %s" (romacs-term--away-keys))))))
 
 ;;;; Commands
 
@@ -370,26 +348,32 @@ work there (`romacs-term--away-keys').  A command's own message (M-<'s
   "The current buffer's terminal session, or a `user-error'."
   (or romacs-term-session (signal 'user-error '("Not a terminal buffer"))))
 
+(defun romacs-term-input-mode ()
+  "The selected window's mode in the current buffer's terminal: `input'
+while it follows the cursor and keys go to the program, `free' while it
+is a plain Emacs buffer, or nil where no terminal runs."
+  (when (romacs-term-running-p)
+    (if (plist-get (romacs--term-state romacs-term-session) :following) 'input 'free)))
+
 (defun romacs-term--snap ()
   "Put the selected window back on the terminal's cursor."
   (romacs--term-follow (romacs-term--session) t))
 
 (defun romacs-term-leave ()
-  "Leave the terminal's cursor, or return to it.
-While the window follows the cursor, stop following it: point stays at
-the cursor and the buffer is an ordinary Emacs buffer, its scrollback
-there to move through, search and copy.  Typing, or this command again,
-puts the window back on the cursor, as GNU term's line mode key does."
+  "Switch the selected window between input mode and free mode.
+In input mode the window follows the cursor and keys go to the program.
+In free mode point stays where it is and the buffer is an ordinary
+read-only Emacs buffer, on the normal screen or a full-screen program's,
+to move through, search, select and copy; output does not move it.
+Typing, or this command again, returns to input mode."
   (interactive nil romacs-term-mode)
   (let* ((session (romacs-term--session))
          (state (romacs--term-state session)))
     (cond ((not (plist-get state :running)) (signal 'user-error '("The terminal has exited")))
-          ;; A full-screen program owns every row: there is no scrollback.
-          ((plist-get state :alternate) (signal 'user-error '("A full-screen program has the terminal")))
           ((not (plist-get state :following)) (romacs-term--snap))
           (t (romacs--term-follow session nil)
              (setq romacs-term--motion-hinted t)
-             (message "Terminal left at its cursor: %s" (romacs-term--away-keys))))))
+             (message "Free mode: %s" (romacs-term--away-keys))))))
 
 (defun romacs-term-send-key ()
   "Send the key that ran this command to the terminal, as the terminal's
@@ -406,20 +390,17 @@ makes it a meta key.  The selected window follows the cursor again."
     (romacs-term--snap)
     (romacs--term-send-event session event)))
 
-(defun romacs-term--recall (event)
-  "Put the selected window back on the cursor and send EVENT, a history key."
-  (romacs-term--snap)
-  (romacs--term-send-event (romacs-term--session) event))
-
-(defun romacs-term-previous-input ()
-  "Recall the previous line of the shell's history, on the shell's prompt."
+(defun romacs-term-send-next-key ()
+  "Read a key and send it to the terminal as it is, whatever Emacs binds
+it to: \\[romacs-term-send-next-key] C-x gives a program C-x, and
+\\[romacs-term-send-next-key] C-c gives it C-c.  As `quoted-insert', C-g
+is read, not a quit.  The selected window follows the cursor again."
   (interactive nil romacs-term-mode)
-  (romacs-term--recall 'up))
-
-(defun romacs-term-next-input ()
-  "Recall the next line of the shell's history, on the shell's prompt."
-  (interactive nil romacs-term-mode)
-  (romacs-term--recall 'down))
+  (unless (romacs-term-running-p) (signal 'user-error '("The terminal has exited")))
+  (let ((session (romacs-term--session))
+        (event (let ((inhibit-quit t)) (read-event "Send key: "))))
+    (romacs-term--snap)
+    (romacs--term-send-event session event)))
 
 (defun romacs-term--paste (text)
   "Send TEXT to the terminal as a paste, after `yank-transform-functions'."
@@ -470,18 +451,24 @@ delivers SIGINT."
     (condition-case nil (romacs--keeper-call 'close romacs-term-handle nil) (error nil))
     (setq romacs-term-handle nil)))
 
-(defun romacs-term--hint ()
-  "The mode line's keys."
-  (romacs-key-hint "\\<romacs-term-mode-map>\\[romacs-term-interrupt] interrupt  \\[romacs-term-leave] leave"
+(defun romacs-term--hint (&optional mode)
+  "The mode line's keys in MODE, `input' or `free'."
+  (romacs-key-hint (if (eq mode 'free)
+                       "\\<romacs-term-mode-map>\\[romacs-term-leave] input"
+                     "\\<romacs-term-mode-map>\\[romacs-term-interrupt] interrupt  \\[romacs-term-send-next-key] quote  \\[romacs-term-leave] free")
                    'romacs-term-dim))
 
 (defconst romacs-term--mode-line
   (let ((separator (propertize "  |  " 'face 'romacs-term-dim))
-        (running (propertize "running" 'face 'romacs-term-running))
+        (input (propertize "input" 'face 'romacs-term-running))
+        (free (propertize "free" 'face 'romacs-term-free))
         (exited (propertize "exited" 'face 'romacs-term-exited)))
     `("  " (:propertize "%b" face mode-line-buffer-id) ,separator mode-name "  "
-      (:eval (if (romacs-term-running-p) ,running ,exited)) ,separator (:eval (romacs-term--hint))))
-  "A terminal's `mode-line-format'.")
+      (:eval (let ((mode (romacs-term-input-mode)))
+               (list (cond ((eq mode 'input) ,input) ((eq mode 'free) ,free) (t ,exited))
+                     ,separator (romacs-term--hint mode))))))
+  "A terminal's `mode-line-format': its buffer, its mode (input, free or
+exited) and that mode's keys.")
 
 (defun romacs-term--buffer-name (arg)
   "The terminal buffer's name for prefix ARG, as `eshell' chooses its
@@ -509,15 +496,14 @@ exited.  Any other buffer of that name is someone's text: a `user-error'."
 `default-directory'.  With a numeric prefix ARG N, *romacs-term*<N>
 instead; with \\[universal-argument] alone, a new terminal.  A terminal
 whose program has exited starts afresh.
-While the window follows the cursor on the normal screen, keys go to the
-program, except `romacs-term-keymap-exceptions' and the keys of
-`romacs-term-mode-map'; the shell's prompt and the alternate screen keep
-the keys their own lists name.  On the normal screen C-c C-c sends
-Ctrl-C and C-y and M-y send kills; at the shell's prompt M-p and M-n
-recall its history, and away from the cursor they return to it and send
-Up or Down to whatever runs.  C-c C-j, moving
-point off the cursor, or scrolling back makes the window a plain Emacs
-buffer until you type or press C-c C-j again."
+In input mode keys go to the program, except
+`romacs-term-keymap-exceptions' and the keys of `romacs-term-mode-map';
+the alternate screen keeps `romacs-term-alternate-exceptions'.  C-x and
+C-c stay Emacs prefixes: C-c C-c sends Ctrl-C, and C-q sends the next key
+as it is (C-q C-x for nano).  On the normal screen C-y and M-y send
+kills.  C-c C-j, on any screen, makes the window free: a plain Emacs
+buffer to search, select and copy from, until you type or press C-c C-j
+again.  Moving point off the cursor or scrolling back frees it too."
   (interactive (list nil current-prefix-arg))
   (romacs-term--ensure-keymaps)
   (let* ((name (romacs-term--buffer-name arg))
@@ -594,9 +580,6 @@ and show it."
                            :type '(repeat string) :set 'romacs-term--set-exceptions :group 'terminals)
   (custom-declare-variable 'romacs-term-alternate-exceptions (list 'quote romacs-term-alternate-exceptions)
                            (get 'romacs-term-alternate-exceptions 'variable-documentation)
-                           :type '(repeat string) :set 'romacs-term--set-exceptions :group 'terminals)
-  (custom-declare-variable 'romacs-term-shell-exceptions (list 'quote romacs-term-shell-exceptions)
-                           (get 'romacs-term-shell-exceptions 'variable-documentation)
                            :type '(repeat string) :set 'romacs-term--set-exceptions :group 'terminals))
 
 (provide 'romacs-term)

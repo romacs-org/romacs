@@ -34,7 +34,11 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
                    (romacs-agent--index session)
                    session))
                (rows (&rest view)
-                 (romacs-agent-board-rows (hash-table-values romacs-agent--sessions) (plist-get view :history)
+                 ;; Of the sessions as each test leaves them: summaries made anew.
+                 (romacs-agent-board-rows (let ((romacs-agent--summaries (make-hash-table :test #'equal)))
+                                            (mapcar (lambda (session) (romacs-agent-summary (romacs-agent-id session)))
+                                                    (hash-table-values romacs-agent--sessions)))
+                                          (plist-get view :history)
                                           (append view (list :folds (or (plist-get view :folds)
                                                                         (make-hash-table :test #'equal)))))))
        ,@body)))
@@ -273,7 +277,7 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
         ;; A thread no longer known: the board is drawn again.
         (remhash "a" romacs-agent--sessions)
         (romacs-agent-board-next 1)
-        (should (eq (plist-get (romacs-agent-board--row) :session) a))
+        (should (equal (plist-get (romacs-agent-board--row) :id) (romacs-agent-id a)))
         (should-error (romacs-agent-board-open) :type 'user-error)
         (should-not (romacs-agent-board--shown-rows))
         (should (= (length shown) 1))))))
@@ -327,7 +331,7 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
   (romacs-agent-board-tests--with
     (mk "a" "Port the theme" 'idle 120)
     (let ((romacs-agent-board-columns
-           (list (cons (lambda (row) (upcase (romacs-agent-title (plist-get row :session)))) 'fill)
+           (list (cons (lambda (row) (upcase (romacs-agent-summary-title (plist-get row :summary)))) 'fill)
                  (cons #'romacs-agent-board-time 4))))
       (should (equal (substring-no-properties (romacs-agent-board--line (cadr (rows)) 30))
                      "  PORT THE THEME          2m  ")))))
@@ -380,7 +384,7 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
       (mk "b" "b" 'idle 50)
       (romacs-agent-board-tests--board
         (let ((before (buffer-string)) (romacs-agent-board--ticker (run-at-time 3600 nil #'ignore)))
-          (setf (romacs-agent-activity session) "Bash")
+          (romacs-agent--raise session '(:type tool :state started :name "Bash"))
           (cl-letf (((symbol-function 'romacs-agent-board--shown) (lambda () (current-buffer))))
             (romacs-agent-board--tick))
           (should (string-search "Bash" (buffer-string)))
@@ -390,6 +394,7 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
           (should (equal (romacs-agent-board-tests--ids (romacs-agent-board--shown-rows)) '("/p/one" "a" "b")))
           ;; Nothing at work: the clock stops.
           (setf (romacs-agent-state session) 'idle)
+          (romacs-agent--changed session)
           (romacs-agent-board--redraw)
           (cl-letf (((symbol-function 'romacs-agent-board--shown) (lambda () (current-buffer))))
             (romacs-agent-board--tick))
@@ -789,11 +794,12 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
       (romacs-agent-ui--summarize-children lead)
       (with-temp-buffer
         (setq-local romacs-agent-log--session lead)
+        (setq-local romacs-agent-log--session-id (romacs-agent-id lead))
         (let ((panel (mapcar #'car (romacs-agent-board-tests--activity-rows
                                    (romacs-agent-board-tests--activity lead))))
               (menu (cl-loop for i below 9
                              while (romacs-agent-menu--worker-label i)
-                             collect (romacs-agent-id (aref (romacs-agent-menu--slots) i)))))
+                             collect (aref (romacs-agent-menu--slots) i))))
           (should (equal menu panel))
           (should (equal panel '("busy" "lane" "idle"))))))))
 
@@ -827,7 +833,7 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
              (chat (romacs-agent-log-chat lead)))
         (unwind-protect
             (with-current-buffer chat
-              (should (equal (mapcar #'romacs-agent-id (romacs-agent-menu--workers))
+              (should (equal (romacs-agent-menu--workers)
                              '("stored-0" "stored-1" "stored-2" "stored-3"))))
           (kill-buffer chat)))
       (let ((text (romacs-agent-board-tests--activity lead)))
@@ -855,7 +861,7 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
             (romacs-agent-board-tests--flush-worker-rows)
             (should (eq (romacs-agent-ui--state-key lead) 'waiting))
             (should (equal (romacs-agent-board-tests--ids
-                            (romacs-agent-board-rows (romacs-agent-board--sessions) nil
+                            (romacs-agent-board-rows (romacs-agent-summary nil) nil
                                                      (list :folds (make-hash-table :test #'equal))))
                            '("/p/one" "lead" "middle" "lane" "writer")))
             (romacs-agent-watch--forget "writer" (gethash "writer" romacs-agent-watch--watches))

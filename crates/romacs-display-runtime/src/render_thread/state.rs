@@ -233,48 +233,24 @@ pub(crate) type SharedImageRenderState = Arc<ImageRenderState>;
 /// The Condvar is notified once monitors have been populated.
 pub(crate) type SharedMonitorInfo = Arc<(Mutex<Vec<MonitorInfo>>, std::sync::Condvar)>;
 
-pub(super) fn backend_uses_winit_logical_pixels() -> bool {
-    std::env::var_os("WAYLAND_DISPLAY").is_some()
-}
-
-pub(super) fn effective_window_scale_factor(raw_scale_factor: f64) -> f64 {
-    // On X11 fontconfig already handles DPI — the font metrics returned are
-    // already scaled for the display.  Only Wayland needs us to apply the
-    // compositor scale factor to rendering.
-    if backend_uses_winit_logical_pixels() {
-        raw_scale_factor
-    } else {
-        1.0
-    }
-}
-
-pub(super) fn window_size_from_emacs_pixels(width: u32, height: u32) -> Size {
-    if backend_uses_winit_logical_pixels() {
-        Size::Logical(LogicalSize::new(width as f64, height as f64))
-    } else {
-        // X11: physical pixels as-is, matching GNU Emacs.  fontconfig DPI
-        // already scales font sizes, so window dimensions are already at
-        // the correct physical size.
-        Size::Physical(PhysicalSize::new(width, height))
+impl super::PixelPolicy {
+    pub(super) fn window_size(self, width: u32, height: u32) -> Size {
+        match self {
+            Self::Logical => Size::Logical(LogicalSize::new(f64::from(width), f64::from(height))),
+            Self::Physical => Size::Physical(PhysicalSize::new(width, height)),
+        }
     }
 }
 
 pub(super) fn emacs_pixels_from_window_size(
     width: u32,
     height: u32,
-    scale_factor: f64,
+    effective_scale: f64,
 ) -> (u32, u32) {
-    if backend_uses_winit_logical_pixels() {
-        (
-            (width as f64 / scale_factor).round() as u32,
-            (height as f64 / scale_factor).round() as u32,
-        )
-    } else {
-        // X11: fontconfig handles DPI.  Return physical pixels as-is
-        // so Emacs computes the correct character grid with the already-
-        // scaled font metrics.
-        (width, height)
-    }
+    (
+        (f64::from(width) / effective_scale).round() as u32,
+        (f64::from(height) / effective_scale).round() as u32,
+    )
 }
 
 /// FPS counter and frame time tracking state.

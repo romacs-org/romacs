@@ -21,10 +21,12 @@
   (require 'romacs-agent-menu))
 
 (defmacro romacs-agent-compose-pair-tests--with (&rest body)
-  "Run BODY with a clean `session', its `chat' and its `composer'."
+  "Run BODY with a clean registered `session', its `chat' and its `composer'."
   (declare (indent 0))
   `(let* ((romacs-agent-log--chats (make-hash-table :test #'equal))
-          (session (romacs-agent--make :id "pair-test" :harness 'claude :state 'running))
+          (romacs-agent--sessions (make-hash-table :test #'equal))
+          (session (puthash "pair-test" (romacs-agent--make :id "pair-test" :harness 'claude :state 'running)
+                            romacs-agent--sessions))
           (chat (romacs-agent-log-chat session))
           (composer (romacs-agent-log-composer-buffer chat)))
      (unwind-protect

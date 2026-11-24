@@ -92,8 +92,11 @@ conversation anew under a new id."
     (cl-return-from romacs-agent--claude-rollback
       (list 'relaunch (lambda ()
                         (let ((native (romacs-agent--uuid)))
+                          ;; Its manifest first: a write that fails leaves
+                          ;; the session, and what its views say, as they were.
+                          (romacs-agent--manifest-put session "harnessSession" native)
                           (setf (romacs-agent-harness-session session) native)
-                          (romacs-agent--manifest-put session "harnessSession" native))))))
+                          (romacs-agent--changed session))))))
   '(relaunch))
 
 (defun romacs-agent--claude-renew (_session)

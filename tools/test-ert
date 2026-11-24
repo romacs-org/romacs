@@ -25,7 +25,6 @@ import math
 import os
 from pathlib import Path
 import shlex
-import signal
 import subprocess
 import sys
 import tempfile
@@ -45,6 +44,7 @@ SCRUBBED = ('DISPLAY', 'WAYLAND_DISPLAY', 'DBUS_SESSION_BUS_ADDRESS', 'EMACSLOAD
 EMPTY_SELECTION = 'empty or invalid selection inventory'
 NOTHING = dict(selected=0, started=0, completed=0, passed=0, failed=0, skipped=0)
 XDG = ('XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME')
+REAPER = ROOT / 'tools/lib/reaper.py'
 
 
 def directories(root):
@@ -147,40 +147,28 @@ def prepared_store(binary, persistent, directory, timeout):
     return None, why
 
 
-def session_members(session):
-    """The processes of SESSION, by /proc: a host's own process groups, as a world
-    builder's, stay in the session it was started in."""
-    members = []
-    for stat in Path('/proc').glob('[0-9]*/stat'):
-        try:
-            fields = stat.read_text().rsplit(')', 1)[1].split()
-        except (OSError, IndexError):
-            continue
-        if int(fields[3]) == session:
-            members.append(int(stat.parent.name))
-    return members
-
-
 def run_host(command, env, home, log, timeout):
     """The host's status, or None when it ran out of TIMEOUT; either way nothing it
-    started outlives it.  It starts in its private HOME, so `default-directory' is
-    never the source tree: a test that writes or locks a relative file does it
-    there.  Its output goes to a file: a descendant keeping it open cannot hold
-    the run."""
+    started outlives it.  It runs under the reaper (tools/lib/reaper.py), the parent
+    every process it starts comes back to, in a session of its own or not: an
+    editor's subprocesses each are.  Once the reaper ends, they all have, so none
+    writes in the directories the caller removes.  It starts in its private HOME,
+    so `default-directory' is never the source tree: a test that writes or locks a
+    relative file does it there.  Its output goes to a file: a descendant keeping
+    it open cannot hold the run."""
     with log.open('wb') as sink:
-        process = subprocess.Popen(command, stdout=sink, stderr=subprocess.STDOUT, env=env,
+        process = subprocess.Popen([sys.executable, '-I', str(REAPER), *command], stdout=sink,
+                                   stderr=subprocess.STDOUT, env=dict(env, REAPER_PARENT=str(os.getpid())),
                                    cwd=home, start_new_session=True)
     try:
-        return process.wait(timeout=timeout)
+        status = process.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
-        return None
+        status = None
     finally:
-        for pid in [process.pid, *session_members(process.pid)]:
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-        process.wait()
+        if process.returncode is None:
+            process.terminate()
+            process.wait()
+    return status
 
 
 def verdict(output, status):

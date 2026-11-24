@@ -130,7 +130,9 @@
 
 (ert-deftest romacs-agent-summary-waiting-for-a-plan ()
   (romacs-agent-summary-tests--with-chat session
-    (romacs-agent-log-draw session '(:type plan :text "Proceed when ready." :proceed t))
+    (let ((event '(:type plan :text "Proceed when ready." :proceed t :seq 38)))
+      (romacs-agent--raise session event)
+      (romacs-agent-log-draw session event))
     (should (eq (car (romacs-agent-log--doing session)) 'waiting))
     (should (= (romacs-agent-log--waiting-count) 1))
     (romacs-agent-summary-tests--check-live
@@ -202,6 +204,8 @@
          (should (romacs-agent--attached-p id))
          (romacs-agent-summary-tests--check-live (romacs-agent-summary-tests--get id) session)
          (delete-process connection)
+         ;; As its sentinel, set aside here, says it.
+         (romacs-agent--changed session)
          (should (romacs-agent-caught-up session))
          (should-not (romacs-agent--attached-p id))
          (romacs-agent-summary-tests--check-live (romacs-agent-summary-tests--get id) session))))))

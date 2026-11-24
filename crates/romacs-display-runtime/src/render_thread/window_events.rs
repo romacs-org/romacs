@@ -1,6 +1,5 @@
 use super::RenderApp;
 use super::modifier_sides::{TrackedModifier, TrackedSide};
-use super::state::effective_window_scale_factor;
 use crate::thread_comm::InputEvent;
 use crate::host_types::FrontendKey;
 use romacs_display_protocol::{ModifierEventKind, TransportModifierBit, TransportModifierBits};
@@ -828,7 +827,7 @@ impl RenderApp {
             }
 
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                let effective_scale = effective_window_scale_factor(scale_factor);
+                let effective_scale = self.comms.pixel_policy.effective_scale(scale_factor);
                 if let Some(ws) = self.frame_windows.get_by_winit_mut(window_id) {
                     tracing::info!(
                         "Scale factor changed for frame 0x{:x}: previous_effective={} raw={} effective={}",
@@ -837,7 +836,7 @@ impl RenderApp {
                         scale_factor,
                         effective_scale
                     );
-                    ws.pending_scale_factor = Some(scale_factor);
+                    ws.pending_scale_factor = Some(effective_scale);
                     ws.forget_applied_geometry_hints();
                 }
             }

@@ -612,7 +612,8 @@ contents, so two equal states print the same."
       (should (romacs-agent-get romacs-agent-kept-tests--id)))))
 
 ;; Worker VMs as these tests see them: a job is held until `--work' runs
-;; it in a VM of its own (a private session table), then its callback.
+;; it in a VM of its own (private session, kept and summary tables), then
+;; its callback.
 (defmacro romacs-agent-kept-tests--with-workers (&rest body)
   "BODY with every journal folded aside, its job pushed on `jobs'."
   (declare (indent 0))
@@ -636,7 +637,8 @@ contents, so two equal states print the same."
 (defun romacs-agent-kept-tests--work (future)
   "Run FUTURE's job as its worker would, then its callback, then load on."
   (setf (nth 4 future) (let ((romacs-agent--sessions (make-hash-table :test #'equal))
-                             (romacs-agent--kept (make-hash-table :test #'eq :weakness 'key)))
+                             (romacs-agent--kept (make-hash-table :test #'eq :weakness 'key))
+                             (romacs-agent--summaries (make-hash-table :test #'equal)))
                          (funcall (nth 1 future) (nth 2 future))))
   (funcall (nth 3 future) future)
   (romacs-agent-kept-tests--drain))
@@ -825,6 +827,42 @@ contents, so two equal states print the same."
               (romacs-agent-kept-tests--drain))
             (should-not read))
           (should (= romacs-agent--fold-running 0)))))))
+
+(defmacro romacs-agent-kept-tests--fold-summary (finish)
+  "Load the session folded aside, draw its summary, FINISH its fold (a
+function of the session and the worker's job), and check its summary
+says its folded state, as one made anew does."
+  `(progn
+     (require 'romacs-agent-summary)
+     (romacs-agent-kept-tests--with
+       (romacs-agent-kept-tests--write dir (romacs-agent-kept-tests--claude))
+       (romacs-agent-kept-tests--with-workers
+         (clrhash romacs-agent--sessions)
+         (let* ((romacs-agent--summaries (make-hash-table :test #'equal))
+                (id romacs-agent-kept-tests--id)
+                (session (romacs-agent--load dir))
+                (drawn (romacs-agent-summary id)))
+           (funcall ,finish session (car jobs))
+           (should-not (gethash id romacs-agent--folding))
+           (let ((anew (let ((romacs-agent--summaries (make-hash-table :test #'equal)))
+                         (romacs-agent-summary id))))
+             (should-not (equal drawn anew))
+             (should (equal (romacs-agent-summary id) anew))))))))
+
+(ert-deftest romacs-agent-kept-a-fold-here-leaves-no-summary-behind ()
+  ;; Acted on while a worker folded it, after the worker kept its state.
+  (romacs-agent-kept-tests--fold-summary
+   (lambda (session future)
+     (let ((romacs-agent--sessions (make-hash-table :test #'equal))
+           (romacs-agent--kept (make-hash-table :test #'eq :weakness 'key))
+           (romacs-agent--summaries (make-hash-table :test #'equal)))
+       (funcall (nth 1 future) (nth 2 future)))
+     (cl-letf (((symbol-function 'romacs-agent--connect) #'ignore))
+       (romacs-agent--fold-now session)))))
+
+(ert-deftest romacs-agent-kept-a-worker-s-fold-leaves-no-summary-behind ()
+  (romacs-agent-kept-tests--fold-summary
+   (lambda (_session future) (romacs-agent-kept-tests--work future))))
 
 (ert-deftest romacs-agent-kept-an-attach-to-a-folding-session-waits-for-its-fold ()
   ;; 2026-11-21: relays saying hello after a restart attached sessions a

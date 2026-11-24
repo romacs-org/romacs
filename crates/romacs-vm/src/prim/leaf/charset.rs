@@ -177,12 +177,12 @@ impl Leaf<'_> {
     }
     /// load_charset: the record's tables, read from its map (MAP) or
     /// unify map (OFFSET) once and kept until unify-charset changes it.
-    fn charset_tables(&mut self, i: usize) -> std::result::Result<std::rc::Rc<crate::charset::Tables>, Fault> {
+    fn charset_tables(&mut self, i: usize) -> std::result::Result<std::sync::Arc<crate::charset::Tables>, Fault> {
         if let Some(tables) = &self.vm.charsets.records[i].tables { return Ok(tables.clone()); }
         let record = &self.vm.charsets.records[i];
         let (map, min, max) = (if record.offset.is_some() { record.attrs[8] } else { record.attrs[3] }, record.min, record.max);
         let entries = if map == Value::NIL { Vec::new() } else { self.charset_map_entries(map, min, max)? };
-        let tables = std::rc::Rc::new(self.vm.charsets.records[i].tables(&entries));
+        let tables = std::sync::Arc::new(self.vm.charsets.records[i].tables(&entries));
         self.vm.charsets.records[i].tables = Some(tables.clone());
         Ok(tables)
     }

@@ -3688,6 +3688,19 @@ mod tests {
     }
     use super::*;
 
+    /// A writer that never ends holds a stop for its bound, and no longer.
+    #[test]
+    fn a_stop_waits_for_the_store_writer_at_most_its_bound() {
+        let store = InspectStore::default();
+        let started = Instant::now();
+        assert!(!store.stop(INSPECT_STOP_WAIT), "no writer said it ended");
+        let waited = started.elapsed();
+        eprintln!("a stop past its bound took {waited:?}");
+        assert!(waited >= INSPECT_STOP_WAIT && waited < std::time::Duration::from_secs(1), "{waited:?}");
+        store.end();
+        assert!(store.stop(INSPECT_STOP_WAIT), "an ended writer is seen at once");
+    }
+
     /// An unpacked release finds its runtime tree beside its `bin/`; a
     /// development binary under `target/` has none there.
     #[test]
@@ -3801,6 +3814,9 @@ const INSPECT_IO: std::time::Duration = std::time::Duration::from_millis(500);
 const INSPECT_PENDING: usize = 4;
 /// The snapshot files kept.
 const INSPECT_KEEP: usize = 8;
+/// How long a stop waits for the store's writer, well inside the one-second
+/// rule: on a sound disk it ends in milliseconds ([`inspect_stop`]).
+const INSPECT_STOP_WAIT: std::time::Duration = std::time::Duration::from_millis(500);
 
 #[derive(Clone)]
 struct InspectSnapshot {
@@ -3822,6 +3838,8 @@ struct InspectStore {
 struct InspectQueue {
     pending: std::collections::VecDeque<InspectSnapshot>,
     stopped: bool,
+    /// The writer has ended: it makes no file call any more.
+    ended: bool,
 }
 
 impl InspectStore {
@@ -3834,9 +3852,21 @@ impl InspectStore {
         queue.pending.push_back(snapshot);
         self.changed.notify_one();
     }
-    fn stop(&self) {
-        self.lock().stopped = true;
+    fn stopped(&self) -> bool {
+        self.lock().stopped
+    }
+    fn end(&self) {
+        self.lock().ended = true;
         self.changed.notify_all();
+    }
+    /// Stop the writer, and wait up to WAIT for it to end: whether it did.
+    fn stop(&self, wait: std::time::Duration) -> bool {
+        let mut queue = self.lock();
+        queue.stopped = true;
+        self.changed.notify_all();
+        queue = self.changed.wait_timeout_while(queue, wait, |queue| !queue.ended)
+            .map_or_else(|poisoned| poisoned.into_inner().0, |(queue, _)| queue);
+        queue.ended
     }
     /// The next snapshot to save, or None once stopped.
     fn next(&self) -> Option<InspectSnapshot> {
@@ -4055,7 +4085,10 @@ fn inspect_store_ready(store: &Path) -> bool {
     })
 }
 
-fn inspect_save(store: &Path, snapshot: &InspectSnapshot) -> io::Result<()> {
+/// Save SNAPSHOT in STORE, then keep the newest [`INSPECT_KEEP`]. Each file
+/// call after the first looks at LIVE first: stopped, none follows, and an
+/// unfinished snapshot's temporary file goes.
+fn inspect_save(store: &Path, snapshot: &InspectSnapshot, live: &InspectStore) -> io::Result<()> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
     let pid = std::process::id();
@@ -4065,22 +4098,29 @@ fn inspect_save(store: &Path, snapshot: &InspectSnapshot) -> io::Result<()> {
     let mut file = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temporary)?;
     write!(file, r#"{{"v":1,"pid":{pid},"time":{time},"generation":{},"snapshot":{}}}"#, snapshot.generation, snapshot.json)?;
     file.sync_all()?;
+    if live.stopped() { return std::fs::remove_file(&temporary); }
     std::fs::rename(&temporary, store.join(name))?;
     let mut saved: Vec<(SystemTime, PathBuf)> = std::fs::read_dir(store)?.filter_map(Result::ok)
+        .take_while(|_| !live.stopped())
         .filter(|entry| entry.file_name().to_string_lossy().starts_with("inspect-"))
         .filter_map(|entry| Some((entry.metadata().ok()?.modified().ok()?, entry.path())))
         .collect();
     saved.sort();
     let surplus = saved.len().saturating_sub(INSPECT_KEEP);
-    for (_, path) in &saved[..surplus] { let _ = std::fs::remove_file(path); }
+    for (_, path) in &saved[..surplus] {
+        if live.stopped() { break; }
+        let _ = std::fs::remove_file(path);
+    }
     Ok(())
 }
 
-fn inspect_store_thread(directory: PathBuf, store: std::sync::Arc<InspectStore>) {
-    if !inspect_store_ready(&directory) { return; }
-    while let Some(snapshot) = store.next() {
-        let _ = inspect_save(&directory, &snapshot);
+fn inspect_store_thread(directory: &Path, store: &InspectStore) {
+    if !store.stopped() && inspect_store_ready(directory) {
+        while let Some(snapshot) = store.next() {
+            let _ = inspect_save(directory, &snapshot, store);
+        }
     }
+    store.end();
 }
 
 /// Listen for inspect requests at DIRECTORY/inspect.sock, and keep snapshots
@@ -4114,7 +4154,8 @@ pub fn inspect_listen(directory: &str, store: Option<&str>) -> io::Result<()> {
         Some(directory) => {
             let store = std::sync::Arc::<InspectStore>::default();
             let storing = store.clone();
-            std::thread::Builder::new().name("romacs-inspect-store".into()).spawn(move || inspect_store_thread(directory, storing))?;
+            std::thread::Builder::new().name("romacs-inspect-store".into())
+                .spawn(move || inspect_store_thread(&directory, &storing))?;
             Some(store)
         }
         None => None,
@@ -4126,6 +4167,12 @@ pub fn inspect_listen(directory: &str, store: Option<&str>) -> io::Result<()> {
 }
 
 /// Stop listening: the threads end and the socket goes, if it is still ours.
+/// The store's writer has ended when this returns, so its directory can be
+/// removed (a test's private state is, at once): it looks at its stop before
+/// each file call, and this waits for it at most [`INSPECT_STOP_WAIT`]. Past
+/// that, a file system stalled in the one call under way, this returns anyway;
+/// that call may still complete, and the writer then ends making nothing more
+/// (it removes its own unfinished temporary file).
 // HOST(acquisition): connects to the listener to wake it (a socket, rule 1: acquisition first),
 // then removes its file
 pub fn inspect_stop() {
@@ -4134,7 +4181,7 @@ pub fn inspect_stop() {
     let Some(listener) = inspect_lock(&INSPECT_LISTENER).take() else { return };
     INSPECT_ENABLED.store(false, SeqCst);
     listener.stop.store(true, SeqCst);
-    if let Some(store) = &listener.store { store.stop(); }
+    if let Some(store) = &listener.store { store.stop(INSPECT_STOP_WAIT); }
     // The accept loop looks at its flag once a connection wakes it.
     let _ = std::os::unix::net::UnixStream::connect(&listener.path);
     let ours = std::fs::symlink_metadata(&listener.path).is_ok_and(|meta| (meta.dev(), meta.ino()) == listener.identity);
