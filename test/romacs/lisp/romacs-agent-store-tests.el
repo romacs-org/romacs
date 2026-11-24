@@ -57,11 +57,11 @@ journal one turn long."
     (should-not (romacs-agent-store--missing))
     (should (= (hash-table-count romacs-agent--sessions) 0))
     (should (equal (sqlite-select (romacs-agent-store--open)
-                                  "select id, title, cwd, state, cost, last_time from sessions order by id")
-                   `(("aaaaaaaa-0000-4000-8000-000000000001" "one" "/p/one/" "detached" nil
+                                  "select id, title, cwd, state, failed, cost, last_time from sessions order by id")
+                   `(("aaaaaaaa-0000-4000-8000-000000000001" "one" "/p/one/" "detached" nil nil
                       ,(float-time (file-attribute-modification-time
                                     (file-attributes (expand-file-name "aaaaaaaa-0000-4000-8000-000000000001/journal.jsonl" root)))))
-                     ("aaaaaaaa-0000-4000-8000-000000000002" "two kept" "/p/one/" "idle" 0.5 101.0))))
+                     ("aaaaaaaa-0000-4000-8000-000000000002" "two kept" "/p/one/" "idle" 0 0.5 101.0))))
     ;; Filled again: nothing to do.
     (should (= (romacs-agent-store-fill) 0))))
 
@@ -750,6 +750,51 @@ has it: in a transaction of its own, after the statement FIRST when given."
         (should (equal (sqlite-select db "select * from sessions order by id") rows))
         (should (sqlite-select db "select 1 from sqlite_master where type = 'index' and name = 'sessions_parent'"))
         (should-not (sqlite-select db "select 1 from sqlite_master where name = 'sessions_reformed'"))))))
+
+(ert-deftest romacs-agent-store-v5-migration-leaves-unknown-failures-without-reading-folds ()
+  (romacs-agent-store-tests--with
+    (let* ((session (romacs-agent--make :id "old" :dir root :harness 'claude
+                                       :state 'idle :done-seq 7 :failed t))
+           (db (romacs-agent-store--open)))
+      (should (romacs-agent-store--put session nil))
+      (should-not (sqlite-select db "select 1 from sqlite_master where name = 'turns'"))
+      (sqlite-execute db "alter table sessions drop column failed")
+      (sqlite-pragma db "user_version = 5")
+      (sqlite-close db)
+      (setq romacs-agent-store--db nil)
+      (cl-letf (((symbol-function 'romacs-agent-store--read-fold)
+                 (lambda (&rest _) (error "Migration read a fold"))))
+        (let ((migrated (romacs-agent-store--open)))
+          (should migrated)
+          (should (equal (sqlite-select migrated "pragma user_version") '((6))))
+          (should (equal (sqlite-select migrated "select id, done_seq, attention, failed from sessions")
+                         '(("old" 7 1 nil))))
+          (should-not (romacs-agent-failed (romacs-agent-store-row-session "old"))))))))
+
+(ert-deftest romacs-agent-store-v5-migration-uses-the-last-turn-through-done ()
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-store-tests--with
+    (ignore #'record)
+    (let ((db (sqlite-open (romacs-agent-store--file))))
+      (unwind-protect
+          (progn
+            (sqlite-execute db "create table sessions (id text primary key, dir text not null, done_seq integer)")
+            (sqlite-execute db "insert into sessions values ('bad', '/b', 7), ('good', '/g', 7),
+                               ('unknown', '/u', 7), ('missing', '/m', 7)")
+            (sqlite-execute db "create table turns (session text, first_seq integer, status text,
+                               primary key (session, first_seq)) without rowid")
+            (sqlite-execute db "insert into turns values ('bad', 1, 'done'), ('bad', 4, 'failed'),
+                               ('bad', 8, 'done'), ('good', 1, 'failed'), ('good', 7, 'done'),
+                               ('unknown', 1, 'failed'), ('unknown', 4, null), ('missing', 8, 'failed')")
+            (sqlite-pragma db "user_version = 5"))
+        (sqlite-close db)))
+    (cl-letf (((symbol-function 'romacs-agent-store--read-fold)
+               (lambda (&rest _) (error "Migration read a fold"))))
+      (let ((db (romacs-agent-store--open)))
+        (should db)
+        (should (equal (sqlite-select db "pragma user_version") '((6))))
+        (should (equal (sqlite-select db "select id, failed from sessions order by id")
+                       '(("bad" 1) ("good" 0) ("missing" nil) ("unknown" nil))))))))
 
 (ert-deftest romacs-agent-store-a-start-chooses-from-rows-as-from-files ()
   ;; A start chooses the sessions to load from the rows, the marks and one

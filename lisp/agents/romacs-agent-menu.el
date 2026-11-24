@@ -5,7 +5,7 @@
 ;;; Commentary:
 ;; The actions of an agent chat (romacs-agent-log.el), as a keymap-popup
 ;; menu: what waits on the user, the turn, what the session runs on and
-;; the workers it delegated that are at work, the session, the view.  Its
+;; the unsettled workers it delegated, the session, the view.  Its
 ;; title names the session; each worker row says its state, then its
 ;; title, and its digit opens the worker the row showed.
 
@@ -36,19 +36,21 @@
   (concat "Agent · " (propertize (or (and romacs-agent-log--session (romacs-agent-title romacs-agent-log--session)) "chat")
                                  'face 'bold)))
 
-(defun romacs-agent-menu--workers ()
-  "The sessions this chat's delegated that are at work, those waiting on
-the user first: a finished one is the board's."
+(defun romacs-agent-menu--worker-rows ()
+  "The chat's unsettled delegated rows, in panel order."
   (when romacs-agent-log--session
-    (let ((live (seq-filter (lambda (child) (memq (romacs-agent-state child) '(starting running waiting-approval)))
-                            (romacs-agent-children romacs-agent-log--session))))
-      (append (seq-filter (lambda (child) (eq (romacs-agent-state child) 'waiting-approval)) live)
-              (seq-remove (lambda (child) (eq (romacs-agent-state child) 'waiting-approval)) live)))))
+    (pcase-let ((`(,live . ,inactive) (romacs-agent-log-activity-delegated-rows
+                                        (romacs-agent-children-rows romacs-agent-log--session))))
+      (append live inactive))))
+
+(defun romacs-agent-menu--workers ()
+  "The chat's unsettled delegated sessions, in panel order."
+  (mapcar (lambda (row) (plist-get row :session)) (romacs-agent-menu--worker-rows)))
 
 (defvar-local romacs-agent-menu--shown nil
   "The worker each digit's row last showed, however the menu was opened,
 a vector of nine, the chat's own: a digit opens that one, saying so when
-it finished since.")
+it settled since.")
 
 (defun romacs-agent-menu--slots ()
   (unless (and (local-variable-p 'romacs-agent-menu--shown)
@@ -56,26 +58,21 @@ it finished since.")
     (setq romacs-agent-menu--shown (make-vector 9 nil)))
   romacs-agent-menu--shown)
 
-(defun romacs-agent-menu--worker-state (child)
-  "CHILD's state in the menu: the board's mark and a word, in its face."
-  (if (eq (romacs-agent-state child) 'waiting-approval)
-      (cons (propertize (romacs-agent-glyph 'chip-you) 'face 'romacs-working-waiting) (propertize "asks you" 'face '(romacs-working-waiting bold)))
-    (cons (propertize (romacs-agent-glyph 'chip-working) 'face 'romacs-working-running) (propertize "running" 'face '(romacs-working-running bold)))))
-
 (defun romacs-agent-menu--worker-label (index)
-  "The menu's row of the worker at INDEX: a mark and a word for what it
-does, then its title, so a long title is what the menu cuts; nil, no
-row, when there is none.  The row's digit then opens what it showed."
-  (when-let* ((child (aset (romacs-agent-menu--slots) index (nth index (romacs-agent-menu--workers)))))
-    ;; Its state first: whatever cuts the row, at any width, cuts the title.
-    (let ((state (romacs-agent-menu--worker-state child)))
-      (concat (car state) " " (cdr state) " · " (romacs-agent-title child)))))
+  "Draw the panel row for the worker at INDEX and remember its digit."
+  (let* ((row (nth index (romacs-agent-menu--worker-rows)))
+         (child (aset (romacs-agent-menu--slots) index (plist-get row :session))))
+    (when child
+      (propertize (romacs-agent-log-activity-delegated-line row keymap-popup--max-description-width)
+                  'keymap-popup-preformatted t))))
 
 (defun romacs-agent-menu--open-worker (child)
-  "Open worker CHILD's chat, unless it finished since it was shown."
-  (unless (memq child (romacs-agent-menu--workers))
-    (user-error "%s is no longer at work: the board has it" (romacs-agent-title child)))
-  (romacs-agent-show child '(display-buffer-same-window)))
+  "Open worker CHILD's chat if it is still among the unsettled workers."
+  (if-let* ((current (seq-find (lambda (worker) (equal (romacs-agent-id worker) (romacs-agent-id child)))
+                              (romacs-agent-menu--workers)))
+              ((not (romacs-agent-settled-p current))))
+      (romacs-agent-show current '(display-buffer-same-window))
+    (user-error "%s is no longer in the Workers list" (romacs-agent-title child))))
 
 (defun romacs-agent-menu-open-worker ()
   "Open the chat of the worker the menu showed on the digit just pressed."
@@ -85,9 +82,9 @@ row, when there is none.  The row's digit then opens what it showed."
                                        (user-error "No such worker")))))
 
 (defun romacs-agent-menu-workers ()
-  "Open the chat of one of the workers at work, chosen by its title."
+  "Open the chat of an unsettled delegated worker, chosen by its title."
   (interactive nil romacs-agent-log-mode)
-  (let* ((workers (or (romacs-agent-menu--workers) (user-error "No worker is at work")))
+  (let* ((workers (or (romacs-agent-menu--workers) (user-error "No unsettled delegated workers")))
          ;; Its id makes each line its own, whatever the titles.
          (named (mapcar (lambda (child) (cons (format "%s  %s" (romacs-agent-title child) (romacs-agent-id child)) child))
                         workers)))
@@ -447,7 +444,7 @@ the session, the view."
   "z" ("Cancel the resume at its limit's reset" romacs-agent-chat-cancel-resume
        :if (lambda () (and romacs-agent-log--session (romacs-agent-resume-time romacs-agent-log--session))))
   ;; No :if: a group whose rows are all empty is not drawn, and a digit
-  ;; whose worker finished since says so rather than falling through.
+  ;; whose worker settled since says so rather than falling through.
   :group "Workers"
   "1" ((lambda () (romacs-agent-menu--worker-label 0)) romacs-agent-menu-open-worker)
   "2" ((lambda () (romacs-agent-menu--worker-label 1)) romacs-agent-menu-open-worker)
@@ -459,7 +456,7 @@ the session, the view."
   "8" ((lambda () (romacs-agent-menu--worker-label 7)) romacs-agent-menu-open-worker)
   "9" ((lambda () (romacs-agent-menu--worker-label 8)) romacs-agent-menu-open-worker)
   "o" ((lambda () (let ((n (length (romacs-agent-menu--workers))))
-                    (and (> n 9) (format "All %d at work" n))))
+                    (and (> n 9) (format "All %d workers" n))))
        romacs-agent-menu-workers)
   :row
   :group ("Session" :if #'romacs-agent-log--commands-p)

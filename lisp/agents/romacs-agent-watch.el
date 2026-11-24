@@ -50,21 +50,26 @@ KEYS the first words of the entries already there.")
 (defvar romacs-agent-watch--reporting nil
   "Unit watches whose notification is under way.")
 
+(defun romacs-agent-watch--stopped-p (session)
+  "Whether SESSION has been cancelled or explicitly stopped."
+  (or (romacs-agent-cancelled session)
+      (and (romacs-agent-stopped session) (not (romacs-agent-reaped-p session)))))
+
 (defun romacs-agent-watch-unit (session)
   "Return SESSION's oldest watched unit, or nil if no unit is watched."
-  (unless (romacs-agent-cancelled session)
-    (seq-some (lambda (watch) (plist-get watch :unit))
-              (gethash (romacs-agent-id session) romacs-agent-watch--watches))))
+  (when-let* ((unit (seq-some (lambda (watch) (plist-get watch :unit))
+                             (gethash (romacs-agent-id session) romacs-agent-watch--watches)))
+              ((not (romacs-agent-watch--stopped-p session))))
+    unit))
 
 ;;; Records
 
 (defun romacs-agent-watch--file (session)
   (expand-file-name "watches.json" (romacs-agent-dir session)))
 
-(defun romacs-agent-watch--save (session)
-  "Keep SESSION's watches in its directory, or none."
-  (let ((watches (gethash (romacs-agent-id session) romacs-agent-watch--watches))
-        (file (romacs-agent-watch--file session)))
+(defun romacs-agent-watch--write (session watches)
+  "Keep WATCHES in SESSION's directory, or remove its watch file."
+  (let ((file (romacs-agent-watch--file session)))
     ;; Marked before its file is written, unmarked after it goes: a stop
     ;; between leaves a mark too many, which a load sees through.
     (when watches (romacs-agent-mark (romacs-agent-id session) 'watches t))
@@ -80,24 +85,38 @@ KEYS the first words of the entries already there.")
                                                        "invocation" (or (plist-get w :invocation) :null))))
                                watches)))
       (when (file-exists-p file) (delete-file file)))
-    (unless watches (romacs-agent-mark (romacs-agent-id session) 'watches nil))))
+    (unless watches
+      (with-demoted-errors "romacs_task_watch: clearing the watch mark: %S"
+        (romacs-agent-mark (romacs-agent-id session) 'watches nil)))))
 
 (defun romacs-agent-watch--set (session watches &optional persist)
   "Replace SESSION's WATCHES and notify observers when they change.
-Save and schedule the watches when PERSIST is non-nil."
+With PERSIST, write the change before publishing and scheduling it."
   (let* ((id (romacs-agent-id session))
          (previous (gethash id romacs-agent-watch--watches)))
+    (when persist (romacs-agent-watch--write session watches))
     (if watches (puthash id watches romacs-agent-watch--watches)
       (remhash id romacs-agent-watch--watches))
-    (when persist
-      (romacs-agent-watch--save session)
-      (romacs-agent-watch--schedule))
+    (when persist (romacs-agent-watch--schedule))
     (unless (equal previous watches)
       (romacs-agent--run-hook 'romacs-agent-event-functions session '(:type watch-changed)))))
 
+(defun romacs-agent-watch-stop (session)
+  "Retire SESSION's watches when its user stops or cancels it."
+  (when (or (gethash (romacs-agent-id session) romacs-agent-watch--watches)
+            (and (romacs-agent-dir session) (file-exists-p (romacs-agent-watch--file session))))
+    (romacs-agent-watch--set session nil t)))
+
 (defun romacs-agent-watch--load (session)
   "SESSION's watches kept in its directory, known again."
-  (let ((kept (romacs-agent--read-json (romacs-agent-watch--file session))))
+  (if (romacs-agent-watch--stopped-p session)
+      (romacs-agent-watch-stop session)
+    (romacs-agent-watch--load-kept session)))
+
+(defun romacs-agent-watch--load-kept (session)
+  "Read SESSION's watches from disk."
+  (let ((kept (and (romacs-agent-dir session)
+                   (romacs-agent--read-json (romacs-agent-watch--file session)))))
     (when (vectorp kept)
       (romacs-agent-watch--set
        session
@@ -207,8 +226,13 @@ looked, and remember what is there now (an entry gone and back is new)."
                     (if (plist-get watch :section) (format "\"%s\"" (plist-get watch :section)) "its lines")
                     (plist-get watch :file) (mapconcat #'cdr new "\n"))))
     (unless (equal (mapcar #'car entries) (plist-get watch :seen))
-      (plist-put watch :seen (mapcar #'car entries))
-      (romacs-agent-watch--save task))))
+      (let ((updated (mapcar (lambda (each)
+                               (if (eq each watch)
+                                   (plist-put (copy-sequence watch) :seen (mapcar #'car entries))
+                                 each))
+                             (gethash id romacs-agent-watch--watches))))
+        (romacs-agent-watch--write task updated)
+        (puthash id updated romacs-agent-watch--watches)))))
 
 ;;; The reactor
 
@@ -217,9 +241,11 @@ looked, and remember what is there now (an entry gone and back is new)."
   (let ((all nil))
     (maphash (lambda (id watches)
                (let ((task (romacs-agent-get id)))
-                 (if (or (null task) (romacs-agent-cancelled task))
-                     (progn (remhash id romacs-agent-watch--watches) (when task (romacs-agent-watch--save task)))
-                   (dolist (watch watches) (push (cons id watch) all)))))
+                 (cond ((null task) (remhash id romacs-agent-watch--watches))
+                       ((romacs-agent-watch--stopped-p task)
+                        (with-demoted-errors "romacs_task_watch: clearing stopped task: %S"
+                          (romacs-agent-watch-stop task)))
+                       (t (dolist (watch watches) (push (cons id watch) all))))))
              romacs-agent-watch--watches)
     all))
 
@@ -259,7 +285,7 @@ and its exit status."
   "Tell task ID that WATCH's unit ended and retire the watch once told.
 Delivery is at-least-once under I/O failure."
   (when-let* ((task (romacs-agent-get id))
-              ((not (romacs-agent-cancelled task)))
+              ((not (romacs-agent-watch--stopped-p task)))
               ((memq watch (gethash id romacs-agent-watch--watches)))
               ((not (memq watch romacs-agent-watch--reporting))))
     (let* ((romacs-agent-watch--reporting (cons watch romacs-agent-watch--reporting))

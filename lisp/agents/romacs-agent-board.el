@@ -41,7 +41,7 @@
 ;;; The view: what the user chose, kept in the board's buffer
 
 (defvar-local romacs-agent-board--settled nil "Non-nil: the Settled section shows.")
-(defvar-local romacs-agent-board--words nil "Words every thread shown matches, or nil.")
+(defvar-local romacs-agent-board--words nil "Filter terms every thread shown matches, or nil.")
 (defvar-local romacs-agent-board--folds nil "Session id -> `open' or `closed', as the user left it.")
 (defvar-local romacs-agent-board--all-history nil "Every project's transcripts show, not its newest few.")
 (defvar-local romacs-agent-board--folded nil
@@ -149,11 +149,19 @@ is done here, where its parent's user reads it."
                                          (romacs-agent-provider session) (romacs-agent-model session)))
                          " ")))
 
+(defun romacs-agent-board--text-matches-p (text words &optional parent)
+  "Whether lower-case TEXT and PARENT match all filter terms in WORDS."
+  (cl-every (lambda (word)
+              (if (string-prefix-p "parent:" word)
+                  (equal parent (substring word (length "parent:")))
+                (string-search (downcase word) text)))
+            words))
+
 (defun romacs-agent-board--matches-p (session words)
-  "Whether SESSION's own text has every one of WORDS."
+  "Whether SESSION matches all filter terms in WORDS."
   (or (null words)
-      (let ((text (romacs-agent-board--text session)))
-        (cl-every (lambda (word) (string-search word text)) words))))
+      (romacs-agent-board--text-matches-p (romacs-agent-board--text session) words
+                                          (plist-get (romacs-agent-options session) :parent))))
 
 (defun romacs-agent-board--sorted (sessions keys)
   "SESSIONS by rank of their KEYS (a table), then the newest first."
@@ -238,8 +246,7 @@ them; KEYS has every session's key, MARKS whether it shows."
 then a row saying how many more, unless VIEW shows them all."
   (let* ((words (plist-get view :words))
          (items (seq-filter (lambda (item)
-                              (let ((title (downcase (or (plist-get item :title) ""))))
-                                (cl-every (lambda (word) (string-search word title)) words)))
+                              (romacs-agent-board--text-matches-p (downcase (or (plist-get item :title) "")) words))
                             items))
          (shown (if (plist-get view :all-history) items (seq-take items romacs-agent-history-per-project))))
     (append (mapcar (lambda (item) (list :kind 'history :id (plist-get item :path) :item item)) shown)
@@ -886,12 +893,13 @@ run (`romacs-agent-board-source')."
 
 (defun romacs-agent-board-filter ()
   "Show only the threads whose title, project, provider or model have
-every word typed, the board following as they are typed."
+every word typed, the board following as they are typed.
+A parent:ID term matches the threads directly delegated by session ID."
   (interactive nil romacs-agent-board-mode)
   (let ((board (current-buffer)) (before romacs-agent-board--words))
     (cl-flet ((filter (text)
                 (with-current-buffer board
-                  (setq romacs-agent-board--words (split-string (downcase text) nil t))
+                  (setq romacs-agent-board--words (split-string text nil t))
                   (romacs-agent-board--redraw))))
       (condition-case nil
           (filter (minibuffer-with-setup-hook
@@ -968,6 +976,13 @@ every word typed, the board following as they are typed."
       (with-current-buffer (get-buffer-create romacs-agent-board--name)
         (romacs-agent-board-mode)
         (current-buffer))))
+
+(defun romacs-agent-board-open-threads (session)
+  "Show the agent board filtered to threads delegated by SESSION."
+  (with-current-buffer (romacs-agent-board--buffer)
+    (setq romacs-agent-board--words (list (concat "parent:" (romacs-agent-id session)))
+          romacs-agent-board--settled nil))
+  (romacs-agents))
 
 ;;;###autoload
 (defun romacs-agents ()

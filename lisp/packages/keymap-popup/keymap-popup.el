@@ -1166,12 +1166,15 @@ when a draw records."
 (defun keymap-popup--resolve-description (desc)
   "Resolve DESC to a display string.
 If DESC is a function, call it.  Return nil for nil and stringify
-other non-string values.  Collapse runs of whitespace and cut at a
+other non-string values.  Collapse runs of whitespace unless the line
+starts with a `keymap-popup-preformatted' property.  Cut at a
 word past `keymap-popup--max-description-width' (`romacs-grid-cut');
 the label's text properties are kept."
   (let* ((raw (if (functionp desc) (funcall desc) desc))
          (text (and raw (if (stringp raw) raw (format "%s" raw))))
-         (collapsed (and text (string-clean-whitespace text))))
+         (collapsed (if (and text (get-text-property 0 'keymap-popup-preformatted text))
+                        text
+                      (and text (string-clean-whitespace text)))))
     (and collapsed
          (romacs-grid-cut collapsed keymap-popup--max-description-width))))
 
@@ -1216,7 +1219,7 @@ KEY-WIDTH pads the key column for alignment."
                                         'face (if prefix-mode 'warning 'shadow))))
               (line (concat "  " key-str
                             (apply #'propertize
-                                   (concat desc value-str (or c-u-str ""))
+                                   (concat (propertize desc 'romacs-grid-align-offset (+ 2 (string-width key-str))) value-str (or c-u-str ""))
                                    mouse-props))))
            (keymap-popup--note-drawn entry raw-desc)
 	 (cond

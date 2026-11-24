@@ -272,7 +272,7 @@ them inherits."
             (goto-char start)
             (search-forward "Review the patch" (line-end-position))
             (should (eq (get-text-property (1- (point)) 'face) 'romacs-agent-log-delegated-title))
-            (should (eq (face-attribute 'romacs-agent-log-delegated-title :underline) t)))
+            (should (eq (face-attribute 'romacs-agent-log-delegated-title :weight) 'bold)))
           (goto-char start)
           (should (eq (key-binding (kbd "RET")) 'romacs-agent-log-open))
           (cl-letf (((symbol-function 'romacs-agent-show)
@@ -460,13 +460,13 @@ them inherits."
         (should (equal (substring-no-properties (romacs-agent-menu--title)) "Agent · lane chat"))
         ;; A settled one is hidden; one waiting on the user comes first.
         (should (equal (mapcar #'romacs-agent-title (romacs-agent-menu--workers)) '("asks" "builds")))
-        (should (equal (substring-no-properties (romacs-agent-menu--worker-label 0)) "◆ asks you · asks"))
-        (should (equal (substring-no-properties (romacs-agent-menu--worker-label 1)) "● running · builds"))
+        (should (string-suffix-p "asks  ·  Needs approval" (romacs-agent-menu--worker-label 0)))
+        (should (string-suffix-p "builds  ·  Working" (romacs-agent-menu--worker-label 1)))
         (should-not (romacs-agent-menu--worker-label 2))
         ;; A long title is what a cut row loses, its state never.
         (setf (romacs-agent-title (nth 0 children)) (make-string 60 ?x))
         (romacs-agent-ui--summarize-children session)
-        (should (string-prefix-p "● running · " (substring-no-properties (romacs-agent-menu--worker-label 1))))
+        (should (string-suffix-p "  ·  Working" (romacs-agent-menu--worker-label 1)))
         (setf (romacs-agent-title (nth 0 children)) "builds")
         ;; A digit opens the worker it showed, even if the rows have shifted.
         (let (shown)

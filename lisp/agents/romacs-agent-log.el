@@ -67,6 +67,8 @@
 (declare-function romacs-agent-ui--header-text "romacs-agent-ui" (inputs))
 (declare-function romacs-agent-ui--header-inputs "romacs-agent-ui" (session))
 (declare-function romacs-agents "romacs-agent-board" ())
+(declare-function romacs-agent-board-open-threads "romacs-agent-board" (session))
+(declare-function romacs-agent-ui--summarize-children "romacs-agent-ui" (session))
 (declare-function romacs-agent-menu--session "romacs-agent-menu" ())
 (declare-function romacs-agent-events-p "romacs-agent-events" (session))
 (declare-function romacs-agent-events-end "romacs-agent-events" (session))
@@ -1516,7 +1518,7 @@ to be sent: romacs-agent-log-queue.el), or nil for none.")
     (set-marker romacs-agent-log--end end)))
 
 (defun romacs-agent-log--activity-refresh ()
-  "Show the current session's active workers above the divider."
+  "Show the session's unsettled threads and active subagents above the divider."
   (when (and romacs-agent-log--input romacs-agent-log--width)
     (save-restriction
       (widen)
@@ -1848,6 +1850,8 @@ the board.  TARGET owns the composer and all subsequent live events."
   (unless romacs-agent-log--filled
     (setq romacs-agent-log--filled t)
     (romacs-agent-log-source-fill romacs-agent-log--source romacs-agent-log--session)
+    (when (romacs-agent-log--commands-p)
+      (romacs-agent-ui--summarize-children romacs-agent-log--session))
     (romacs-agent-log--separator t)
     (romacs-agent-log--activity-refresh)
     (romacs-agent-log--header-show)))
@@ -2221,8 +2225,20 @@ REASON when given."
       (romacs-agent-show child '(display-buffer-same-window))
     (user-error "That delegated thread is no longer available")))
 
+(defun romacs-agent-log--open-delegated-list (_button)
+  "Open the board with only this chat's delegated threads."
+  (require 'romacs-agent-board)
+  (romacs-agent-board-open-threads romacs-agent-log--session))
+
+(defun romacs-agent-log-copy-job-unit ()
+  "Copy the full unit name from the watched job row at point."
+  (interactive nil romacs-agent-log-mode)
+  (if-let* ((unit (get-text-property (point) 'romacs-agent-log-job-unit)))
+      (progn (kill-new unit) (message "%s" unit))
+    (user-error "No watched job at point")))
+
 (defun romacs-agent-log-open ()
-  "Open the delegated thread, earlier turns, or full tool call at point."
+  "Open the delegated thread, earlier turns, or tool call at point."
   (interactive nil romacs-agent-log-mode)
   (cond ((get-text-property (point) 'romacs-agent-log-delegated-thread)
          (romacs-agent-log--open-delegated-thread (get-text-property (point) 'romacs-agent-log-delegated-thread)))
@@ -2362,6 +2378,8 @@ A character typed on it goes to the composer."
   "M-n" #'romacs-agent-log-next-prompt
   "M-p" #'romacs-agent-log-previous-prompt
   "RET" #'romacs-agent-log-open
+  "TAB" #'forward-button
+  "C-c C-u" #'romacs-agent-log-copy-job-unit
   "w" #'romacs-agent-log-copy
   "e" #'romacs-agent-log-earlier
   "u" #'romacs-agent-chat-rollback
@@ -2464,6 +2482,7 @@ On the transcript's text:
   (add-hook 'window-size-change-functions (lambda (_) (when romacs-agent-log--input (romacs-agent-log--separator))) nil t)
   (add-hook 'window-size-change-functions #'romacs-agent-log-tables-refit nil t)
   (romacs-agent-log-attach-setup)
+  (add-hook 'post-command-hook #'romacs-agent-log-activity-focus nil t)
   (add-hook 'after-change-functions #'romacs-agent-log--composer-plain nil t)
   (add-hook 'after-change-functions #'romacs-agent-log--draft-emptied nil t))
 
