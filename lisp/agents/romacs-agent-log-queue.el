@@ -210,8 +210,9 @@ with DELTA, it has no place DELTA away: a menu row's own test."
 
 (defun romacs-agent-log-queue-cannot-edit-p ()
   "Whether the row at point's message cannot go to the composer: none of
-its user's there, the composer holding a draft or another being edited."
-  (or (romacs-agent-log-queue-not-here-p) romacs-agent-log-queue--editing
+its user's there, the composer holding a draft, sending one or another
+being edited."
+  (or (romacs-agent-log-queue-not-here-p) romacs-agent-log-queue--editing romacs-agent-log--sending
       (not (string-blank-p (buffer-substring-no-properties romacs-agent-log--input (point-max))))))
 
 (defun romacs-agent-log-queue-cannot-drop-p ()
@@ -222,20 +223,22 @@ user's there, or it is the one being edited."
 
 (defun romacs-agent-log-queue-edit ()
   "Edit the queued message at point (else the first) in the composer: held
-where it waits meanwhile; RET there puts it back in its place."
+where it waits meanwhile; RET there puts it back in its place.  Nothing
+while the composer's draft is sent (`romacs-agent-log--sending')."
   (interactive nil romacs-agent-log-mode)
-  (let ((item (romacs-agent-log-queue--own (romacs-agent-log-queue--target))))
-    (when romacs-agent-log-queue--editing
-      (user-error "The composer holds a queued message already: %s puts it back" (romacs-agent-log-queue--send-key)))
-    (unless (string-blank-p (buffer-substring-no-properties romacs-agent-log--input (point-max)))
-      (user-error "The composer holds a draft: send or clear it first"))
-    (romacs-agent-log-queue--change 'hold item t)
-    (setq romacs-agent-log-queue--editing item)
-    ;; Its row says it is held, and the line under the rows how it goes
-    ;; back, whatever tells views of the change.
-    (romacs-agent-log--separator t)
-    (goto-char (point-max))
-    (insert (romacs-agent-item-text item))))
+  (unless romacs-agent-log--sending
+    (let ((item (romacs-agent-log-queue--own (romacs-agent-log-queue--target))))
+      (when romacs-agent-log-queue--editing
+        (user-error "The composer holds a queued message already: %s puts it back" (romacs-agent-log-queue--send-key)))
+      (unless (string-blank-p (buffer-substring-no-properties romacs-agent-log--input (point-max)))
+        (user-error "The composer holds a draft: send or clear it first"))
+      (romacs-agent-log-queue--change 'hold item t)
+      (setq romacs-agent-log-queue--editing item)
+      ;; Its row says it is held, and the line under the rows how it goes
+      ;; back, whatever tells views of the change.
+      (romacs-agent-log--separator t)
+      (goto-char (point-max))
+      (insert (romacs-agent-item-text item)))))
 
 (defun romacs-agent-log-queue-put-back ()
   "Put the message the composer holds back in its place in the queue, said
