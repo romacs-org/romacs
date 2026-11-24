@@ -845,7 +845,23 @@ mod leaf {
             Ok(Value::NIL)
         }
         pub fn sxhash(&self, value: Value) -> Value {
-            Value::integer((self.vm.public_sxhash(value) & ((1u64 << 60)-1)) as i64).unwrap()
+            let hash = self.vm.public_sxhash::<false>(value).unwrap_or_else(|| unreachable!());
+            Self::sxhash_fixnum(hash)
+        }
+        pub fn sxhash_quittable(&mut self, value: Value) -> super::Out {
+            match self.vm.public_sxhash::<true>(value) {
+                Some(hash) => Ok(Self::sxhash_fixnum(hash)),
+                None => self.finish_sxhash_stop(value),
+            }
+        }
+        #[cold]
+        #[inline(never)]
+        fn finish_sxhash_stop(&mut self, value: Value) -> super::Out {
+            self.quittable(Self::native_poll)?;
+            Ok(self.sxhash(value))
+        }
+        fn sxhash_fixnum(hash: u64) -> Value {
+            Value::fixnum((hash & ((1u64 << 60) - 1)) as i64).unwrap_or_else(|| unreachable!())
         }
         pub fn string_to_syntax(&mut self, string: Value) -> super::Out {
             let description = self.string_view(string)?;

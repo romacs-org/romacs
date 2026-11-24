@@ -144,6 +144,32 @@ fn leaf_poll_file_name_handler_walk() {
 }
 
 #[test]
+fn leaf_poll_hash_bytes() {
+    reaches("sxhash-equal", "(setq key (make-string 200000 ?a))", "(list key)",
+            "(= (length key) 200000)");
+    reaches("sxhash-equal", "(setq key (vector (make-string 200000 ?a)))", "(list key)", "t");
+}
+
+#[test]
+fn leaf_poll_hash_lookup_leaves_a_press_pending() {
+    use crate::Primitive::{Gethash, Puthash};
+    let (mut vm, signal) = busy_vm();
+    eval(&mut vm, "(setq a (make-string 200000 ?a) b (make-string 200000 ?a)
+                         table (make-hash-table :test 'equal))");
+    let [a, b, table] = ["a", "b", "table"].map(|name| eval(&mut vm, name));
+    assert!(signal.interrupt());
+    let insert = vm.with_kernel_stack(&[a, Value::TRUE, table], |vm, n| {
+        vm.inside_quit_scope(|vm| vm.primitive(Puthash, 0, n))
+    });
+    assert_eq!(insert.ok(), Some(Value::TRUE));
+    let lookup = vm.with_kernel_stack(&[b, table], |vm, n| {
+        vm.inside_quit_scope(|vm| vm.primitive(Gethash, 0, n))
+    });
+    assert_eq!(lookup.ok(), Some(Value::TRUE));
+    assert!(signal.due(), "table hashing and equal leave the press pending");
+}
+
+#[test]
 fn a_digest_quits_between_chunks() {
     let setup = "(setq big (make-string (* 3 1024 1024) ?a))";
     reaches("romacs--secure-hash", setup, "(list 'sha256 big)", "t");
