@@ -19,7 +19,7 @@
 ;; - Free mode: the window is a plain read-only Emacs buffer that output
 ;;   does not move, to search, select and copy from.  C-c C-j enters it on
 ;;   any screen; moving point off the cursor or scrolling back enters it
-;;   too.  C-c C-j, or typing, returns to input mode.
+;;   too.  C-c C-j, typing, or a switch of screens returns to input mode.
 ;;
 ;; While the shell has the terminal, M-p and M-n recall its history, as
 ;; in eshell.
@@ -417,7 +417,10 @@ Typing, or this command again, returns to input mode."
           ((not (plist-get state :following)) (romacs-term--snap))
           (t (romacs--term-follow session nil)
              (setq romacs-term--motion-hinted t)
-             (message "Free mode: %s" (romacs-term--away-keys))))))
+             (message "Free mode: %s"
+                      (if (plist-get state :alternate)
+                          (substitute-command-keys "type or \\<romacs-term-mode-map>\\[romacs-term-leave] to return")
+                        (romacs-term--away-keys)))))))
 
 (defun romacs-term-send-key ()
   "Send the key that ran this command to the terminal, as the terminal's
@@ -436,12 +439,13 @@ makes it a meta key.  The selected window follows the cursor again."
 
 (defun romacs-term-send-next-key ()
   "Read a key and send it to the terminal as it is, whatever Emacs binds
-it to: \[romacs-term-send-next-key] C-x gives a program C-x, and
-\[romacs-term-send-next-key] C-c gives it C-c.  As `quoted-insert', C-g
+it to: \\[romacs-term-send-next-key] C-x gives a program C-x, and
+\\[romacs-term-send-next-key] C-c gives it C-c.  As `quoted-insert', C-g
 is read, not a quit.  The selected window follows the cursor again."
   (interactive nil romacs-term-mode)
+  (unless (romacs-term-running-p) (signal 'user-error '("The terminal has exited")))
   (let ((session (romacs-term--session))
-        (event (let ((inhibit-quit t)) (read-event))))
+        (event (let ((inhibit-quit t)) (read-event "Send key: "))))
     (romacs-term--snap)
     (romacs--term-send-event session event)))
 

@@ -224,6 +224,17 @@ fn input_and_free_modes_hold_on_every_screen() {
         assert_eq!(following(&mut vm), "(t input)", "C_C_C_J_RETURNS_TO_INPUT {alternate}");
         assert!(sent(&state).is_empty());
     }
+    // A switch of screens (a program starts or leaves) returns a free window
+    // to input: the text it was freed over is gone.
+    type_keys(&mut vm, &state, keys(&[c(3), c(10)]), 1);
+    assert_eq!(following(&mut vm), "(nil free)");
+    { let mut s = state.borrow_mut(); s.alternate = false; s.show("$ ", 0); }
+    vm.poll_terminal_output().unwrap();
+    assert_eq!(following(&mut vm), "(t input)", "A_SCREEN_SWITCH_RETURNS_TO_INPUT");
+    // C-q in an exited terminal says so before it reads a key.
+    { let mut s = state.borrow_mut(); s.exited = true; s.show("$ exit", 0); }
+    vm.poll_terminal_output().unwrap();
+    assert_eq!(printed(&mut vm, "(condition-case e (romacs-term-send-next-key) (user-error (car (cdr e))))"), "\"The terminal has exited\"", "C_Q_IN_AN_EXITED_TERMINAL");
     // An exited terminal is plain text already.
     { let mut s = state.borrow_mut(); s.alternate = false; s.exited = true; s.show("$ exit", 0); }
     vm.poll_terminal_output().unwrap();

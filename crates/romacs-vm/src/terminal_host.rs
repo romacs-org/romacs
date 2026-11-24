@@ -132,7 +132,7 @@ pub(crate) struct TerminalBinding {
     /// command moved their point off the cursor or their start off the
     /// grid, or its user freed it (`romacs-term-leave'), on either screen.
     /// The rest follow. Every window writer obeys it (publication,
-    /// geometry). Roots for collection.
+    /// geometry); a switch of screens clears it. Roots for collection.
     pub(crate) away: Vec<Value>,
     pub(crate) columns: u16,
     pub(crate) rows: u16,
@@ -251,6 +251,9 @@ impl Vm {
                 index += 1;
                 continue;
             }
+            // A switch of screens returns free windows to input: the text
+            // they were freed over is gone. Within one screen they stay free.
+            if snapshot.alternate_screen != self.terminal_bindings[index].alternate { self.terminal_bindings[index].away.clear(); }
             self.prune_away(index)?;
             // Buffer point is the selected window's when it shows the buffer.
             let selected = self.selected_window_value()?;
