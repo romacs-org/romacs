@@ -2,6 +2,7 @@
 use romacs_display_protocol::FrameGlyphBuffer;
 use romacs_display_protocol::submission::{SubmissionReceipt, SubmittedWindow};
 use romacs_display_runtime::paint_host::{PaintHost, PaintSender};
+use romacs_display_runtime::render_thread::DisplaySelection;
 use romacs_display_runtime::thread_comm::InputEvent;
 use romacs_vm::Vm;
 use serde_json::{Value as Json, json};
@@ -855,6 +856,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
         batch::prepare_beside(store);
         return Ok(None);
     }
+    let display = DisplaySelection::from_env(socket.as_deref().map(std::ffi::OsStr::new))?;
     // A live --loadup launch boots from its world, in --world-store or by
     // default in the user's cache (world::default_store), unless
     // ROMACS_WORLD=off. Its builder builds here, before any window; a launch
@@ -882,18 +884,13 @@ fn run() -> Result<Option<exit::Exit>, String> {
     // world open: the evaluator's first font question finds it loaded, or
     // waits for it.
     if live { std::thread::spawn(romacs_font::load_catalog); }
-    let socket = socket.or_else(|| std::env::var("WAYLAND_DISPLAY").ok()).unwrap_or_else(|| "wayland-0".into());
     if serve.is_some() && !live { return Err("--serve needs a live session".into()); }
     // A server runs GNU's server.el and its own Lisp on GNU's (romacs-server.el).
     if serve.is_some() && launch == startup::Launch::Workspace {
         return Err("--serve needs GNU's Lisp: --loadup or --gnu-lisp".into());
     }
     let title = if live { "romacs — VM" } else { "VM G1a" };
-    let (mut host, sender) = if serve.is_some() {
-        PaintHost::wayland_server(std::path::Path::new(&socket), width, height, title.into())?
-    } else {
-        PaintHost::wayland(std::path::Path::new(&socket), width, height, title.into())?
-    };
+    let (mut host, sender) = PaintHost::new(&display, width, height, title.into(), serve.is_some())?;
     // A live session's C-g quits a busy evaluator out of band (quit.rs).
     let quit = live.then(|| std::sync::Arc::new(romacs_vm::QuitSignal::new()));
     if let Some(quit) = &quit { host.set_input_interrupt(std::sync::Arc::new(quit::QuitHook(quit.clone()))); }
@@ -960,7 +957,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
         // startup that fails keeps its screen (`hold_failed_startup`).
         let host = std::rc::Rc::new(std::cell::RefCell::new(prompt::Shared { presentation: first_presentation, loading, ..Default::default() }));
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            evaluate(&sender, floor, force_gc, g1, live, launch, width, height, load_user_init, quick, restored,
+            evaluate(&sender, &display, floor, force_gc, g1, live, launch, width, height, load_user_init, quick, restored,
                      isolate_world, store_problem, &host, quit, prune, serve, serve_landing, &mut early_window)
         }));
         let (end, failed) = evaluator_end(result);
@@ -1436,9 +1433,36 @@ fn settle_typing(outcomes: Vec<romacs_vm::KeyOutcome>, trace: &mut Option<latenc
     }
 }
 
+fn install_display_host(
+    vm: &mut Vm,
+    display: &DisplaySelection,
+    sender: &std::sync::Arc<PaintSender>,
+    images: residency::Shared,
+    wake: std::sync::Arc<dyn Fn() + Send + Sync>,
+) -> Result<(), String> {
+    let alpha_sender = sender.clone();
+    let visual_sender = sender.clone();
+    let lose_sender = sender.clone();
+    vm.eval_source(&format!("(setq romacs-pgtk--display-class {:?})", display.pgtk_display_class()))?;
+    vm.set_display_host(Some(Box::new(fonts::Display::new()?.with_name(display.name().to_string_lossy().into_owned())
+        .with_images(images).with_wake(wake)
+        .with_alpha_hook(move |frame, alpha, limit| {
+            // Only a closed window refuses, and then nothing shows it.
+            let _ = alpha_sender.set_frame_alpha(frame, alpha, limit);
+        })
+        .with_visual_hook(move |config| {
+            // Only a closed render thread refuses, and then nothing paints.
+            let _ = visual_sender.set_visual_config(config.clone());
+        })
+        .with_lose_device_hook(move || lose_sender.debug_lose_device().unwrap_or(false))
+        .with_models(sender.clone()))));
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn evaluate(
     sender: &std::sync::Arc<PaintSender>,
+    display: &DisplaySelection,
     floor: Option<usize>,
     force_gc: bool,
     g1: bool,
@@ -1499,27 +1523,13 @@ fn evaluate(
     // host unwinds the evaluator to the worker, which drops the VM (killing
     // its children, as shut_down_emacs does) and exits with the status.
     if live { vm.set_session_host(Some(Box::new(|code| std::panic::resume_unwind(Box::new(SessionEnd(code)))))); }
-    // Its window system, which the session opens (fonts.rs).
-    let alpha_sender = sender.clone();
-    let visual_sender = sender.clone();
-    let lose_sender = sender.clone();
     let images = residency::Shared::default();
     let terminal_service = terminal_service::Service::new();
     let terminal_ready = terminal_service.ready();
     // A paint rendered wakes the wait, which then retires it: nothing polls.
     if live { sender.on_render(terminal_service.waker()); }
     // An image decoded off the VM wakes the same wait as a terminal.
-    vm.set_display_host(Some(Box::new(fonts::Display::new()?.with_images(images.clone()).with_wake(terminal_service.waker())
-        .with_alpha_hook(move |frame, alpha, limit| {
-            // Only a closed window refuses, and then nothing shows it.
-            let _ = alpha_sender.set_frame_alpha(frame, alpha, limit);
-        })
-        .with_visual_hook(move |config| {
-            // Only a closed render thread refuses, and then nothing paints.
-            let _ = visual_sender.set_visual_config(config.clone());
-        })
-        .with_lose_device_hook(move || lose_sender.debug_lose_device().unwrap_or(false))
-        .with_models(sender.clone()))));
+    install_display_host(&mut vm, display, sender, images.clone(), terminal_service.waker())?;
     // A completed background command wakes the same wait as a terminal.
     if live { vm.set_background_wake(terminal_service.waker()); }
     // SIGTERM and SIGHUP end the session through `kill-emacs' (terminate):

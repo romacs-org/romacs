@@ -3322,10 +3322,12 @@ dependencies = [
  "serde",
  "serde_json",
  "strum",
+ "tempfile",
  "wayland-client",
  "wayland-protocols-wlr",
  "wgpu",
  "winit",
+ "x11rb",
 ]
 
 [[package]]

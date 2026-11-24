@@ -17,11 +17,11 @@ use winit::window::{
 
 use super::cursor::{CursorState, CursorTarget};
 pub(crate) use super::frame_compositor::{FrameCompositor, RetainedStatic};
-use super::geometry_hints::apply_window_geometry_hints;
+use super::{PixelPolicy, geometry_hints::apply_window_geometry_hints};
 use super::state::{
     FpsCounter, GuiChromeInteractionState, IdleDimState, ImeCursorArea, PendingPointerDamage,
     PointerAppearanceState, PresentedInteractionKey, PresentedPointerHit, PresentedPressCapture,
-    TypingSpeedState, WindowChrome, effective_window_scale_factor, window_size_from_emacs_pixels,
+    TypingSpeedState, WindowChrome,
 };
 use super::transitions::clear_frame_transition_textures;
 use romacs_display_protocol::frame_glyphs::{FrameGlyph, FrameGlyphBuffer};
@@ -1461,8 +1461,7 @@ impl GuiFrameWindowState {
         }
     }
 
-    fn set_scale_factor(&mut self, scale_factor: f64) {
-        let effective_scale = effective_window_scale_factor(scale_factor);
+    fn set_scale_factor(&mut self, effective_scale: f64) {
         match &mut self.lifecycle {
             FrameLifecycle::Active { native, .. } => {
                 native.scale_factor = effective_scale;
@@ -1491,11 +1490,11 @@ impl GuiFrameWindowState {
 
     /// Replay retained cosmetic state onto this frame's owner-held window.
     /// Never request a size: primary adoption must preserve native host geometry.
-    pub(super) fn replay_pending_native_state(&self, window: &dyn Window) {
+    pub(super) fn replay_pending_native_state(&self, pixels: PixelPolicy, window: &dyn Window) {
         if let FrameLifecycle::Pending { chrome, .. } = &self.lifecycle {
             window.set_title(&chrome.title);
             if let Some(hints) = self.lifecycle.geometry_hints() {
-                apply_window_geometry_hints(window, hints);
+                apply_window_geometry_hints(pixels, window, hints);
             }
         }
     }
@@ -1515,11 +1514,11 @@ impl GuiFrameWindowState {
         }
     }
 
-    pub(super) fn apply_geometry_hints(&mut self, geometry_hints: GuiFrameGeometryHints) {
+    pub(super) fn apply_geometry_hints(&mut self, pixels: PixelPolicy, geometry_hints: GuiFrameGeometryHints) {
         match &mut self.lifecycle {
             FrameLifecycle::Active { native, .. } => {
                 if native.applied_geometry_hints != Some(geometry_hints) {
-                    apply_window_geometry_hints(native.window.as_ref(), geometry_hints);
+                    apply_window_geometry_hints(pixels, native.window.as_ref(), geometry_hints);
                     native.applied_geometry_hints = Some(geometry_hints);
                 }
             }
@@ -1847,11 +1846,11 @@ impl GuiFrameWindowManager {
         self.sync_primary_mapping();
     }
 
-    pub(super) fn populate_primary_native(&mut self, mut native: GuiFrameNativeWindowState) {
+    pub(super) fn populate_primary_native(&mut self, pixels: PixelPolicy, mut native: GuiFrameNativeWindowState) {
         native.refresh_content_geometry();
         let key = self.primary_frame_key();
         if let Some(window_state) = self.windows.get_mut(&key) {
-            window_state.replay_pending_native_state(native.window.as_ref());
+            window_state.replay_pending_native_state(pixels, native.window.as_ref());
             let winit_id = native.window.id();
             let surface_state = native.surface_state();
             window_state.render.cursor.seed_focus(native.window.has_focus());
@@ -1973,7 +1972,7 @@ impl GuiFrameWindowManager {
 
             let attrs = winit::window::WindowAttributes::default()
                 .with_title(&req.title)
-                .with_surface_size(window_size_from_emacs_pixels(req.width, req.height))
+                .with_surface_size(comms.pixel_policy.window_size(req.width, req.height))
                 .with_transparent(true)
                 .with_decorations(self.chrome_defaults.decorations_enabled);
             let attrs = crate::window_chrome::WindowChromeController::prepare(
@@ -1987,12 +1986,12 @@ impl GuiFrameWindowManager {
                     let window: Arc<dyn winit::window::Window> = Arc::from(window);
                     window_icon.apply(window.as_ref(), &event_loop.owned_display_handle());
                     let raw_scale_factor = window.scale_factor();
-                    let scale_factor = effective_window_scale_factor(raw_scale_factor);
+                    let scale_factor = comms.pixel_policy.effective_scale(raw_scale_factor);
                     let phys =
                         crate::window_chrome::WindowChromeController::request_initial_content_size(
                             window.as_ref(),
                             self.chrome_defaults.decorations_enabled,
-                            window_size_from_emacs_pixels(req.width, req.height)
+                            comms.pixel_policy.window_size(req.width, req.height)
                                 .to_physical(raw_scale_factor),
                         );
 
@@ -2038,7 +2037,7 @@ impl GuiFrameWindowManager {
                     );
 
                     NativeTextInputPolicy::for_gui_frame().apply_to_window(window.as_ref());
-                    apply_window_geometry_hints(window.as_ref(), req.geometry_hints);
+                    apply_window_geometry_hints(comms.pixel_policy, window.as_ref(), req.geometry_hints);
 
                     let winit_id = window.id();
                     tracing::info!(

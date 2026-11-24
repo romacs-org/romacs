@@ -1,9 +1,10 @@
 use crate::host_types::GuiFrameGeometryHints;
 use winit::window::Window;
 
-use super::state::window_size_from_emacs_pixels;
+use super::PixelPolicy;
 
 pub(crate) fn apply_window_geometry_hints(
+    pixels: PixelPolicy,
     window: &dyn Window,
     geometry_hints: GuiFrameGeometryHints,
 ) {
@@ -15,11 +16,11 @@ pub(crate) fn apply_window_geometry_hints(
     // Wayland/Cocoa use logical units; X11's font metrics are already physical.
     // Labeling logical hints PhysicalSize halves the grid at scale 2 and lets
     // native configure snap a correctly sized 91-column window to 90 columns.
-    window.set_min_surface_size(Some(window_size_from_emacs_pixels(
+    window.set_min_surface_size(Some(pixels.window_size(
         geometry_hints.min_width.max(1),
         geometry_hints.min_height.max(1),
     )));
-    window.set_surface_resize_increments(Some(window_size_from_emacs_pixels(
+    window.set_surface_resize_increments(Some(pixels.window_size(
         geometry_hints.width_inc.max(1),
         geometry_hints.height_inc.max(1),
     )));

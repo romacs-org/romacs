@@ -83,7 +83,7 @@ impl RenderApp {
                     geometry_hints.height_inc
                 );
                 if let Some(window_state) = self.frame_windows.get_mut(emacs_frame_id) {
-                    window_state.apply_geometry_hints(geometry_hints);
+                    window_state.apply_geometry_hints(self.comms.pixel_policy, geometry_hints);
                 } else if let Some(pending) = self.frame_windows.pending_creates.iter_mut()
                     .find(|request| request.emacs_frame_id == emacs_frame_id)
                 {
@@ -260,7 +260,7 @@ impl RenderApp {
             && let Some(pending) = &self.gpu_startup
             && let Some(primary) = self.frame_windows.primary_window()
         {
-            primary.replay_pending_native_state(pending.window());
+            primary.replay_pending_native_state(self.comms.pixel_policy, pending.window());
         }
     }
 }
