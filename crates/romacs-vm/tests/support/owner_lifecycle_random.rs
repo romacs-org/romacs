@@ -10,14 +10,15 @@ struct Random(u64);
 
 impl Random {
     fn pick(&mut self, limit: u64) -> u64 {
-        self.0 = self.0.wrapping_add(0x9e3779b97f4a7c15);
+        self.0 = self.0.wrapping_add(0x9e37_79b9_7f4a_7c15);
         let mut n = self.0;
-        n = (n ^ (n >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
-        n = (n ^ (n >> 27)).wrapping_mul(0x94d049bb133111eb);
+        n = (n ^ (n >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        n = (n ^ (n >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
         (n ^ (n >> 31)) % limit
     }
 }
 
+#[expect(clippy::cast_possible_truncation, reason = "a pick below the event count fits usize")]
 fn actions(seed: u64) -> String {
     let mut random = Random(seed);
     let mut actions = String::new();
@@ -85,6 +86,7 @@ struct Round {
 }
 
 impl Round {
+    #[expect(clippy::cast_possible_truncation, reason = "a pick below three fits usize")]
     fn from_seed(seed: u64) -> Self {
         let mut random = Random(seed);
         Self {
