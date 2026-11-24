@@ -11,7 +11,8 @@
       (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
   (require 'romacs-agent)
   (require 'romacs-agent-tools)
-  (require 'romacs-agent-ui))
+  (require 'romacs-agent-ui)
+  (require 'romacs-agent-watch))
 
 (defmacro romacs-agent-children-tests--with (&rest body)
   "BODY with `parent', a session of no children, and `child', which makes one."
@@ -298,3 +299,22 @@
         ;; Its end: the restored hook's batch.
         (romacs-agent-ui--batch)
         (should (= told 1))))))
+
+(ert-deftest romacs-agent-children-watch-keeps-a-root-session-live ()
+  (romacs-agent-children-tests--with
+    (let ((root (make-temp-file "romacs-root-watch-" t))
+          (romacs-agent-watch--watches (make-hash-table :test #'equal))
+          (romacs-agent-watch--timer nil))
+      (setf (romacs-agent-state parent) 'idle (romacs-agent-dir parent) root)
+      (cl-letf (((symbol-function 'romacs-agent--state-root) (lambda () root))
+                ((symbol-function 'romacs-agent-tools--caller) (lambda () "parent"))
+                ((symbol-function 'romacs-agent-watch--unit-state) (lambda (_) '("active" . "invocation"))))
+        (unwind-protect
+            (let ((reply (romacs-agent-watch--watch (romacs-mcp--object "unit" "forge-check.service"))))
+              (should (equal (gethash "watching" reply) ["forge-check.service"]))
+              (should-not (plist-get (romacs-agent-options parent) :parent))
+              (should-not (romacs-agent-children parent))
+              (should (memq (romacs-agent-ui--state-key parent) romacs-agent-ui--live-keys)))
+          (when romacs-agent-ui--children-timer (cancel-timer romacs-agent-ui--children-timer))
+          (when romacs-agent-watch--timer (cancel-timer romacs-agent-watch--timer))
+          (delete-directory root t))))))

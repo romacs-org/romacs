@@ -10,7 +10,8 @@
 (let ((romacs-mcp-call-function romacs-mcp-call-function)
       (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
   (require 'romacs-agent)
-  (require 'romacs-agent-board))
+  (require 'romacs-agent-board)
+  (require 'romacs-agent-watch))
 
 (defvar romacs-agent-history-per-project)
 
@@ -547,5 +548,83 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
           (romacs-agent-board-next 1)
           (romacs-agent-board-fold)
           (should (= (hash-table-count kept) 1)))))))
+
+;;; A job watched by a delegated session
+
+(defun romacs-agent-board-tests--flush-worker-rows ()
+  "Run the pending UI batches, including propagation to ancestors."
+  (while romacs-agent-ui--children-timer
+    (cancel-timer romacs-agent-ui--children-timer)
+    (romacs-agent-ui--children-flush)))
+
+(defun romacs-agent-board-tests--activity (session)
+  (substring-no-properties
+   (romacs-agent-log-activity-lines (romacs-agent-children-rows session) 120)))
+
+(defmacro romacs-agent-board-tests--watch-tree (&rest body)
+  "Run BODY with lead, lane and writer sessions and a private watch store."
+  (declare (indent 0))
+  `(romacs-agent-board-tests--with
+     (let* ((root (make-temp-file "romacs-board-watch-" t))
+            (lead (mk "lead" "Lead" 'idle 3))
+            (lane (mk "lane" "Lane" 'idle 2 :options '(:parent "lead")))
+            (writer (mk "writer" "Writer" 'idle 1 :dir root :options '(:parent "lane")))
+            (romacs-agent-watch--watches (make-hash-table :test #'equal))
+            (romacs-agent-watch--timer nil)
+            (romacs-agent-ui--announced (make-hash-table :test #'eq))
+            (romacs-agent-ui--children-changed (make-hash-table :test #'eq))
+            (romacs-agent-ui--children-timer nil)
+            (romacs-agent-event-functions '(romacs-agent-ui--on-event)))
+       (cl-letf (((symbol-function 'romacs-agent--state-root) (lambda () root))
+                 ((symbol-function 'romacs-agent-tools--caller) (lambda () "writer"))
+                 ((symbol-function 'romacs-agent-watch--unit-state) (lambda (_) '("active" . "invocation"))))
+         (unwind-protect
+             (progn
+               (mapc #'romacs-agent-ui--children-changed (list writer lane lead))
+               (romacs-agent-board-tests--flush-worker-rows)
+               (let ((reply (romacs-agent-watch--watch (romacs-mcp--object "unit" "forge-check.service"))))
+                 (should (equal (gethash "watching" reply) ["forge-check.service"])))
+               (romacs-agent-board-tests--flush-worker-rows)
+               ,@body)
+           (when romacs-agent-ui--children-timer (cancel-timer romacs-agent-ui--children-timer))
+           (when romacs-agent-watch--timer (cancel-timer romacs-agent-watch--timer))
+           (delete-directory root t))))))
+
+(ert-deftest romacs-agent-board-watch-keeps-a-lane-visible-in-activity ()
+  (romacs-agent-board-tests--watch-tree
+    (should (string-match-p "Lane[^\n]*Waiting on workers"
+                            (romacs-agent-board-tests--activity lead)))
+    (should (string-match-p "Writer[^\n]*Waiting on job: forge-check[.]service"
+                            (romacs-agent-board-tests--activity lane)))
+    (should (equal (romacs-agent-board-tests--ids (rows))
+                   '("/p/one" "lead" "lane" "writer")))))
+
+(ert-deftest romacs-agent-board-watch-end-returns-ancestors-to-idle ()
+  (romacs-agent-board-tests--watch-tree
+    (let ((before (mapcar #'romacs-agent-ui--state-key (list lead lane)))
+          (watch (car (gethash "writer" romacs-agent-watch--watches))))
+      (cl-letf (((symbol-function 'romacs-agent-watch--output)
+                 (lambda (_program _args then)
+                   (funcall then "Id=forge-check.service\nActiveState=inactive\nInvocationID=invocation\n" 0)))
+                ((symbol-function 'romacs-agent-tools--tell) #'ignore))
+        (should watch)
+        (romacs-agent-watch--tick))
+      (romacs-agent-board-tests--flush-worker-rows)
+      (should-not (gethash "writer" romacs-agent-watch--watches))
+      (should (equal (list before (mapcar #'romacs-agent-ui--state-key (list lead lane writer)))
+                     '((waiting waiting) (idle idle idle))))
+      (should (equal (romacs-agent-board-tests--activity lead) ""))
+      (should (equal (romacs-agent-board-tests--activity lane) "")))))
+
+(ert-deftest romacs-agent-board-watch-and-live-child-both-show ()
+  (romacs-agent-board-tests--watch-tree
+    (let ((worker (mk "worker" "Worker" 'starting 0 :options '(:parent "writer"))))
+      (setf (romacs-agent-state worker) 'running)
+      (romacs-agent-ui--on-event worker '(:type run))
+      (romacs-agent-board-tests--flush-worker-rows)
+      (should (string-match-p "Worker[^\n]*Working"
+                              (romacs-agent-board-tests--activity writer)))
+      (should (string-match-p "Writer[^\n]*Waiting on job: forge-check[.]service"
+                              (romacs-agent-board-tests--activity lane))))))
 
 ;;; romacs-agent-board-tests.el ends here
