@@ -1120,7 +1120,10 @@ a turn of its own, nothing sent again."
 (defun romacs-agent-tools--ask-parent (session event)
   "Tell SESSION's parent the request EVENT, live, that waits on SESSION's
 user, once, unless SESSION's rule wakes no one or the parent is settled
-\(the user sees it in SESSION's chat): dropped once it is answered."
+\(the user sees it in SESSION's chat): dropped once it is answered.  A
+request answered or withdrawn is forgotten here too."
+  (when (memq (plist-get event :type) '(answered approval-withdrawn))
+    (remhash (cons (romacs-agent-id session) (plist-get event :request-id)) romacs-agent-tools--asked-parents))
   (when-let* (((eq (plist-get event :type) 'approval))
               (parent-id (plist-get (romacs-agent-options session) :parent))
               ((romacs-agent--live-p session))

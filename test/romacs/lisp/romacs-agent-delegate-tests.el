@@ -158,10 +158,15 @@ recorded in a private directory; `delivered' collects what wakes it."
       ;; The writer done, its end not yet delivered to the coordinator:
       ;; still at work.  Delivered, the coordinator's next turn ends its task.
       (setf (romacs-agent-state writer) 'idle (romacs-agent-turns writer) 1 (romacs-agent-done-seq writer) 3)
+      (push (list 3 "written" nil) (romacs-agent-ends writer))
       (romacs-agent--summary-stale (romacs-agent-id writer))
       (romacs-agent-ui--summarize-children a)
       (should (equal (romacs-agent-tools--status (romacs-agent-summary (romacs-agent-id a))) "running"))
       (romacs-agent-tools--mark-woken writer 3)
+      (should (equal (romacs-agent-tools--status (romacs-agent-summary (romacs-agent-id a))) "completed"))
+      ;; A note (a renewal's) advancing its seq is no end to deliver.
+      (setf (romacs-agent-done-seq writer) 4)
+      (romacs-agent--summary-stale (romacs-agent-id writer))
       (should (equal (romacs-agent-tools--status (romacs-agent-summary (romacs-agent-id a))) "completed"))
       ;; A writer that wakes it only on failure holds nothing: its success
       ;; would leave the coordinator asleep.
@@ -197,6 +202,9 @@ recorded in a private directory; `delivered' collects what wakes it."
         (romacs-agent--set-asks a '("q1"))
         (romacs-agent-tools--ask-parent-pending a)
         (should (= (length delivered) 1))
+        ;; Answered, it is forgotten: the table holds what is pending alone.
+        (romacs-agent-tools--ask-parent a '(:type answered :request-id "q1"))
+        (should (zerop (hash-table-count romacs-agent-tools--asked-parents)))
         (romacs-agent-tools--answer-request
          (romacs-mcp--object "taskId" (romacs-agent-id a) "requestId" "q1"
                              "answers" (romacs-mcp--object "Which one?" "B")))

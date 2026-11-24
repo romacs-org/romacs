@@ -265,9 +265,12 @@ its user: as data, its reply shared, not copied
           (romacs-agent-summary-reply summary) (romacs-agent-summary--shared (romacs-agent-reply session))
           (romacs-agent-summary-handed-to summary) (romacs-agent-summary--plain (plist-get options :handed-to)))
     ;; Its cancellation read first, above.
+    ;; Of the ends it keeps for its parent alone: a seq a note advanced is
+    ;; none, and one with no ends kept reads no file.
     (setf (romacs-agent-summary-undelivered summary)
-          (and (plist-get options :parent) (> (or (romacs-agent-done-seq session) 0) 0)
-               (romacs-agent-tools--wanted-p session (romacs-agent-done-seq session) summary)
+          (and (plist-get options :parent)
+               (cl-some (lambda (end) (romacs-agent-tools--wanted-p session (car end) summary))
+                        (romacs-agent-ends session))
                t))
     summary))
 
