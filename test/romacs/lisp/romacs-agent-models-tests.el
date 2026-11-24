@@ -189,15 +189,20 @@ executable there running the shell SCRIPT; BINDINGS, of `let*', see them."
       ((romacs-agent-providers `(("codex" :program ,program)))
        (romacs-agent-models-changed-functions nil)
        (seen nil))
-    (let ((instance (romacs-agent--configured "codex")))
+    (let ((instance (romacs-agent--configured "codex"))
+          (minibuffer-setup-hook nil))
       (cl-letf (((symbol-function 'romacs-agent--want-models) #'ignore)
                 ((symbol-function 'completing-read)
-                 (lambda (_prompt table &rest _)
-                   (push (all-completions "" table) seen)
-                   (romacs-agent--keep-models
-                    instance (cadr (romacs-agent--codex-probed-models
-                                    (romacs-agent-models-tests--json romacs-agent-models-tests--listed))))
-                   (push (all-completions "" table) seen)
+                 ;; In its minibuffer, what it completes is what it shows.
+                 (lambda (_prompt candidates &rest _)
+                   (with-temp-buffer
+                     (setq-local minibuffer-completion-table candidates)
+                     (run-hooks 'minibuffer-setup-hook)
+                     (push (all-completions "" minibuffer-completion-table) seen)
+                     (romacs-agent--keep-models
+                      instance (cadr (romacs-agent--codex-probed-models
+                                      (romacs-agent-models-tests--json romacs-agent-models-tests--listed))))
+                     (push (all-completions "" minibuffer-completion-table) seen))
                    "Codex · GPT-6.2-Astra")))
         (should (equal (plist-get (cdr (romacs-agent--pick-row
                                          (lambda () (romacs-agent--instance-rows instance "Codex" nil))))

@@ -1604,10 +1604,17 @@ its own record, written as asked, so a restarted server arms it again."
   (romacs-agent--manifest-put session "resumeAt" (or time :null))
   (unless time (romacs-agent-mark (romacs-agent-id session) 'resume nil)))
 
+(defun romacs-agent-tools--put-resume (session pending)
+  "Make PENDING, (TIME . TIMER) or nil for none, SESSION's resume at its
+limit's reset (`romacs-agent-tools--resumes'): its summary's
+`romacs-agent-resume-time' follows."
+  (if pending (puthash session pending romacs-agent-tools--resumes) (remhash session romacs-agent-tools--resumes))
+  (romacs-agent--summary-stale (romacs-agent-id session)))
+
 (defun romacs-agent-tools--arm-resume (session time)
   (unless (romacs-agent-settled-p session)
-    (puthash session (cons time (run-at-time (max 1 (- time (float-time))) nil #'romacs-agent-tools--resume session time))
-             romacs-agent-tools--resumes)
+    (romacs-agent-tools--put-resume
+     session (cons time (run-at-time (max 1 (- time (float-time))) nil #'romacs-agent-tools--resume session time)))
     (romacs-agent--changed session)))
 
 (defun romacs-agent-tools--schedule-resume (session)
@@ -1628,7 +1635,7 @@ or `romacs-agent-resume-at-reset' is off."
   "SESSION no longer resumes by itself; WHY, when given, is journaled."
   (when-let* ((pending (gethash session romacs-agent-tools--resumes)))
     (cancel-timer (cdr pending))
-    (remhash session romacs-agent-tools--resumes)
+    (romacs-agent-tools--put-resume session nil)
     (romacs-agent-tools--keep-resume session nil)
     (when why (romacs-agent--note session (romacs-mcp--object "type" "resume" "state" "cancelled" "why" why)))
     (romacs-agent--changed session)))
@@ -1643,13 +1650,13 @@ reset, once."
    ((not (equal (romacs-agent-resume-time session) time)))
    ;; Turned off since: forgotten.
    ((or (not romacs-agent-resume-at-reset) (romacs-agent-settled-p session))
-    (remhash session romacs-agent-tools--resumes)
+    (romacs-agent-tools--put-resume session nil)
     (romacs-agent-tools--keep-resume session nil))
    ;; Its journal still replaying: what it is at is not yet known.
    ((and (process-live-p (romacs-agent-connection session)) (not (romacs-agent-caught-up session)))
     (romacs-agent-tools--arm-resume session time))
    (t
-    (remhash session romacs-agent-tools--resumes)
+    (romacs-agent-tools--put-resume session nil)
     (romacs-agent-tools--keep-resume session nil)
     (when (and (eq (romacs-agent-loaded (romacs-agent-id session)) session) (not (romacs-agent-cancelled session))
                (not (romacs-agent-stopped session)) (romacs-agent-limited session)

@@ -582,12 +582,15 @@ them inherits."
     (let ((children (list (romacs-agent--make :id "c1" :state 'running :title "builds")
                           (romacs-agent--make :id "c2" :state 'idle :title "settled"
                                               :settled-seq romacs-agent--inactive-settlement)
-                          (romacs-agent--make :id "c3" :state 'waiting-approval :title "asks"))))
+                          (romacs-agent--make :id "c3" :state 'waiting-approval :title "asks")))
+          (romacs-agent--sessions (make-hash-table :test #'equal)))
+      (dolist (known (cons session children)) (puthash (romacs-agent-id known) known romacs-agent--sessions))
+      (setq romacs-agent-log--session-id (romacs-agent-id session))
       (cl-letf (((symbol-function 'romacs-agent-children) (lambda (_) children)))
         (romacs-agent-ui--summarize-children session)
         (should (equal (substring-no-properties (romacs-agent-menu--title)) "Agent · lane chat"))
         ;; A settled one is hidden; one waiting on the user comes first.
-        (should (equal (mapcar #'romacs-agent-title (romacs-agent-menu--workers)) '("asks" "builds")))
+        (should (equal (romacs-agent-menu--workers) '("c3" "c1")))
         (should (string-suffix-p "asks  ·  Needs approval" (romacs-agent-menu--worker-label 0)))
         (should (string-suffix-p "builds  ·  Working" (romacs-agent-menu--worker-label 1)))
         (should-not (romacs-agent-menu--worker-label 2))

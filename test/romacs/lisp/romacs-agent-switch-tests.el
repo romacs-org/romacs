@@ -14,20 +14,23 @@
 
 (defmacro romacs-agent-switch-tests--with (&rest body)
   "BODY with `chat' making a chat buffer (NAME SESSION) and `session'
-making a session (ID STATE &rest FIELDS); the buffers are killed after."
+making a session (ID STATE &rest FIELDS) in a registry of its own; the
+buffers are killed after."
   (declare (indent 0))
-  `(let ((romacs-agent-glyphs nil) (made nil))
+  `(let ((romacs-agent-glyphs nil) (made nil) (romacs-agent--sessions (make-hash-table :test #'equal)))
      (cl-flet ((chat (name session)
                  (let ((buffer (generate-new-buffer name)))
                    (push buffer made)
                    (with-current-buffer buffer
                      (romacs-agent-log-mode)
-                     (setq romacs-agent-log--session session))
+                     (setq romacs-agent-log--session session
+                           romacs-agent-log--session-id (and session (romacs-agent-id session))))
                    buffer))
                (session (id state &rest fields)
-                 (apply #'romacs-agent--make
-                        (append fields (list :id id :harness 'claude :provider "claude" :state state
-                                             :cwd "/p/romacs/")))))
+                 (puthash id (apply #'romacs-agent--make
+                                    (append fields (list :id id :harness 'claude :provider "claude" :state state
+                                                         :cwd "/p/romacs/")))
+                          romacs-agent--sessions)))
        (ignore #'chat #'session)
        (unwind-protect (progn ,@body)
          (mapc #'kill-buffer made)))))
@@ -45,39 +48,38 @@ making a session (ID STATE &rest FIELDS); the buffers are killed after."
 
 (ert-deftest romacs-agent-switch-annotation-says-state-instance-project ()
   (romacs-agent-switch-tests--with
-    (let ((text (romacs-agent-switch--annotation (session "s1" 'running :model "claude-opus-5-5"))))
+    (let ((text (romacs-agent-switch--annotation
+                 (romacs-agent-summary (romacs-agent-id (session "s1" 'running :model "claude-opus-5-5"))))))
       (should (equal (substring-no-properties text) "  Working claude · opus-5-5 romacs"))
       (should (eq (get-text-property 2 'face text) 'romacs-agent-running))
       (should (eq (get-text-property (string-search "claude" text) 'face text) 'romacs-agent-model))
       (should (eq (get-text-property (string-search "romacs" text) 'face text) 'romacs-agent-dim)))
-    (should (equal (substring-no-properties (romacs-agent-switch--annotation (session "s2" 'idle)))
+    (should (equal (substring-no-properties
+                    (romacs-agent-switch--annotation (romacs-agent-summary (romacs-agent-id (session "s2" 'idle)))))
                    "  Idle claude romacs"))
     (should (equal (romacs-agent-switch--annotation nil) ""))))
 
-(ert-deftest romacs-agent-switch-table-keeps-order-and-category ()
+(ert-deftest romacs-agent-switch-properties-say-category-and-state ()
   (romacs-agent-switch-tests--with
     (let* ((chats (list (chat "*agent: z*" (session "z" 'running)) (chat "*agent: a*" (session "a" 'idle))))
-           (table (romacs-agent-switch--table chats))
-           (metadata (completion-metadata "" table nil)))
-      (should (eq (completion-metadata-get metadata 'category) 'romacs-agent-chat))
-      (should (eq (completion-metadata-get metadata 'display-sort-function) #'identity))
-      (should (eq (completion-metadata-get metadata 'cycle-sort-function) #'identity))
-      (should (equal (all-completions "" table) '("*agent: z*" "*agent: a*")))
-      (let ((annotate (completion-metadata-get metadata 'annotation-function)))
+           (properties (romacs-agent-switch--properties chats)))
+      (should (eq (plist-get properties :category) 'romacs-agent-chat))
+      (let ((annotate (plist-get properties :annotation-function)))
         (should (equal (substring-no-properties (funcall annotate "*agent: z*")) "  Working claude romacs"))
         (should (equal (substring-no-properties (funcall annotate "*agent: a*")) "  Idle claude romacs")))))
   (romacs-agent-switch-tests--with
-    (let* ((table (romacs-agent-switch--table (list (chat "*agent: z*" (session "z" 'idle))
-                                                    (chat "*agent: longer*" (session "l" 'idle)))))
-           (annotate (completion-metadata-get (completion-metadata "" table nil) 'annotation-function)))
+    (let* ((properties (romacs-agent-switch--properties (list (chat "*agent: z*" (session "z" 'idle))
+                                                              (chat "*agent: longer*" (session "l" 'idle)))))
+           (annotate (plist-get properties :annotation-function)))
       (should (equal (+ (string-width "*agent: z*") (length (funcall annotate "*agent: z*")))
                      (+ (string-width "*agent: longer*") (length (funcall annotate "*agent: longer*"))))))))
 
 (ert-deftest romacs-agent-switch-says-what-the-chats-header-says ()
   (romacs-agent-switch-tests--with
     (let ((session (session "w" 'waiting-approval)))
-      (should (string-prefix-p (concat "  " (nth 2 (romacs-agent-ui--state session)))
-                               (substring-no-properties (romacs-agent-switch--annotation session)))))))
+      (should (string-prefix-p (concat "  " (nth 2 (romacs-agent-ui--state-of (romacs-agent-ui--state-key session))))
+                               (substring-no-properties
+                                (romacs-agent-switch--annotation (romacs-agent-summary (romacs-agent-id session)))))))))
 
 (ert-deftest romacs-agent-switch-switches-to-the-chosen-chat ()
   (romacs-agent-switch-tests--with
@@ -108,8 +110,9 @@ making a session (ID STATE &rest FIELDS); the buffers are killed after."
 (ert-deftest romacs-agent-switch-aligns-annotations-at-most-so-far ()
   (romacs-agent-switch-tests--with
     (let* ((long (make-string 70 ?x))
-           (table (romacs-agent-switch--table (list (chat "*agent: z*" (session "z" 'idle)) (chat long (session "l" 'idle)))))
-           (annotate (completion-metadata-get (completion-metadata "" table nil) 'annotation-function)))
+           (annotate (plist-get (romacs-agent-switch--properties
+                                 (list (chat "*agent: z*" (session "z" 'idle)) (chat long (session "l" 'idle))))
+                                :annotation-function)))
       (should (= (+ (string-width "*agent: z*") (length (funcall annotate "*agent: z*")))
                  (+ romacs-agent-switch--column (length "  Idle claude romacs"))))
       (should (equal (substring-no-properties (funcall annotate long)) "  Idle claude romacs")))))

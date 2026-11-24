@@ -260,6 +260,16 @@ session told it changed, in order (`romacs-agent--run-held')."
             (setf (nth 3 held) nil)
             (when (zerop romacs-agent--admitting) (romacs-agent--release-later))))))))
 
+(defvar romacs-agent--summaries (make-hash-table :test #'equal)
+  "Each session's summary as last made (`romacs-agent-summary'), by id:
+\(STAMP . SUMMARY), STAMP what it was made from.  Dropped when a fact of
+the session changes (`romacs-agent--summary-stale'), and made again when
+next read.")
+
+(defun romacs-agent--summary-stale (id)
+  "Session ID's summary no longer says it: made again when next read."
+  (remhash id romacs-agent--summaries))
+
 (defun romacs-agent--changed (session)
   "Tell SESSION's views its state changed where no harness event says so
 \(a turn launched, a selection armed or in effect, its options set, its
@@ -267,7 +277,9 @@ connection gone, its last turn seen): a `changed' event, as settling is
 a `settled' one, so every view follows one stream of events.  Whatever
 writes a field a view shows outside `romacs-agent--raise' calls this
 after the write.  While drafts are admitted and answered, it is said
-once, after their answers (`romacs-agent--held')."
+once, after their answers (`romacs-agent--held'); its summary is stale
+at once."
+  (romacs-agent--summary-stale (romacs-agent-id session))
   (if romacs-agent--held
       (cl-pushnew session (car romacs-agent--held))
     (romacs-agent--raise session (list :type 'changed))))
@@ -331,6 +343,9 @@ kept, not as the line is written.")
   title-auto (seen-seq 0) settled-seq
   ;; The tool its running turn called last.
   activity
+  ;; The plan it offers to proceed with by leaving plan mode, by its
+  ;; event's seq, or nil (`romacs-agent-proceed').
+  plan-offer
   ;; The harness's own transcript this session continues, when it was
   ;; imported from the harness's history: (:path PATH :size BYTES), the
   ;; bytes the harness had written before this session went on with it.
@@ -379,8 +394,10 @@ kept, not as the line is written.")
   (gethash session romacs-agent--copies))
 
 (defun romacs-agent--set-options (session options)
-  "Make OPTIONS SESSION's, in its manifest too."
+  "Make OPTIONS SESSION's, in its manifest too.  Out of plan mode, it
+offers no plan to proceed with."
   (setf (romacs-agent-options session) options)
+  (unless (plist-get options :plan) (setf (romacs-agent-plan-offer session) nil))
   (romacs-agent--manifest-put session "options" (romacs-agent--options-object options))
   (romacs-agent--changed session))
 
@@ -423,6 +440,51 @@ launch."
                   (object (funcall line session on from)))
         (romacs-agent--line session object))
       (romacs-agent--note session (romacs-mcp--object "type" "plan" "on" (if on t :false))))))
+
+(defun romacs-agent-plan-offered (session)
+  "The plan SESSION offers to proceed with, its event's seq, or nil: an
+offer stands only in plan mode, whatever its records, kept state or row
+kept of it."
+  (and (plist-get (romacs-agent-options session) :plan) (romacs-agent-plan-offer session)))
+
+(defun romacs-agent-plan-offer-waits (session)
+  "The plan SESSION offers (`romacs-agent-plan-offered') while it waits
+on its user: SESSION neither put aside (settled, cancelled) nor ended or
+detached.  What its state, its summary and its chat say waits on the
+user."
+  (and (not (romacs-agent-settled-p session)) (not (romacs-agent-cancelled session))
+       (not (memq (romacs-agent-state session) '(ended detached)))
+       (romacs-agent-plan-offered session)))
+
+(defvar romacs-agent--folding)
+
+(defun romacs-agent--read-through-p (session)
+  "Whether SESSION's records are all folded into it: the registered
+session, its supervisor's replay over (`romacs-agent--live-p'), or none
+attached nor its journal folded aside, its journal read here."
+  (let ((id (romacs-agent-id session)))
+    (and (eq (romacs-agent-loaded id) session)
+         (or (romacs-agent-caught-up session)
+             (not (or (process-live-p (romacs-agent-connection session)) (gethash id romacs-agent--folding)))))))
+
+(defun romacs-agent-proceed (id seq)
+  "Proceed with the plan session ID offers, its event's SEQ: it leaves
+plan mode (`romacs-agent-set-plan'), and its next message carries the
+plan out.  Refused unless SEQ is the plan it offers
+\(`romacs-agent-plan-offered'): asked first of its row while it is not
+loaded, so a stale SEQ loads nothing, then of its loaded record once
+every record of it is folded in (`romacs-agent--read-through-p'): an offer
+its row or kept state still names may since be replaced, proceeded with
+or taken back."
+  (cl-flet ((offered (session)
+              (unless (and seq session (eql seq (romacs-agent-plan-offered session)))
+                (user-error "That plan is no longer offered"))
+              session))
+    (offered (romacs-agent-get id t))
+    (let ((session (romacs-agent-get id)))
+      (unless (and session (romacs-agent--read-through-p session))
+        (user-error "Its records are still being read: try again once it has caught up"))
+      (romacs-agent-set-plan (offered session) nil))))
 
 (defun romacs-agent--answer-unasked (session id)
   "Allow SESSION's request ID that no user is asked, under the `allow'
@@ -732,6 +794,7 @@ the acknowledgement {\"attached\": ID} a supervisor sends).  SESSION's
 relays lead here from now."
   (unless (process-get process 'romacs-agent-kept)
     (process-put process 'romacs-agent-kept t)
+    (romacs-agent--summary-stale (romacs-agent-id session))
     (when (and (eq (romacs-agent-connection session) process) (process-live-p process))
       (romacs-agent-relay-attached (romacs-agent-id session)))))
 
@@ -1505,29 +1568,13 @@ default instance's first."
              do (puthash display t labels)
              append (romacs-agent--instance-rows instance label (equal (plist-get instance :name) default)))))
 
-(defun romacs-agent--ordered-table (candidates &rest metadata)
-  "A completion table of CANDIDATES in their order, with METADATA;
-CANDIDATES may be a function returning them, asked each time."
-  (lambda (string predicate action)
-    (if (eq action 'metadata)
-        `(metadata (display-sort-function . identity) (cycle-sort-function . identity) ,@metadata)
-      (complete-with-action action (if (functionp candidates) (funcall candidates) candidates)
-                            string predicate))))
-
-(defun romacs-agent--rows-table (rows)
-  "A completion table of the rows the function ROWS returns, asked each
-time (`romacs-agent--picker-rows'): grouped by instance, each with its note."
-  (let ((fields (lambda (text) (cdr (assoc text (funcall rows))))))
-    (romacs-agent--ordered-table
-     rows
-     (cons 'group-function
-           (lambda (text transform) (if transform text (plist-get (funcall fields text) :group))))
-     (cons 'affixation-function
-           (lambda (texts)
-             (mapcar (lambda (text)
-                       (list text "" (propertize (concat "  " (plist-get (funcall fields text) :note))
-                                                 'face 'completions-annotations)))
-                     texts))))))
+(defun romacs-agent--read-ordered (prompt candidates properties &rest arguments)
+  "Read one of CANDIDATES, a list, with PROMPT, in their order; PROPERTIES
+is more of their metadata (`completion-extra-properties'), ARGUMENTS the
+rest of `completing-read''s."
+  (let ((completion-extra-properties
+         (append '(:display-sort-function identity :cycle-sort-function identity) properties)))
+    (apply #'completing-read prompt candidates arguments)))
 
 (declare-function romacs-complete-refresh "romacs-complete" (minibuffer))
 
@@ -1539,14 +1586,28 @@ due is asked in the background (`romacs-agent--want-models'), and its
 answer shows in the rows while they are asked for."
   (romacs-agent--want-models)
   (let* ((rows (funcall rows-of)) (default (unless prompt (caar rows))) (minibuffer nil)
+         (fields (lambda (text) (cdr (assoc text rows))))
          (changed (lambda (_instance)
                     (setq rows (funcall rows-of))
+                    (when (buffer-live-p minibuffer)
+                      (with-current-buffer minibuffer
+                        (setq-local minibuffer-completion-table (mapcar #'car rows))))
                     (when (fboundp 'romacs-complete-refresh) (romacs-complete-refresh minibuffer)))))
     (add-hook 'romacs-agent-models-changed-functions changed)
     (unwind-protect
         (let ((text (minibuffer-with-setup-hook (lambda () (setq minibuffer (current-buffer)))
-                      (completing-read (format-prompt (or prompt "Agent") default) (romacs-agent--rows-table (lambda () rows))
-                                       nil t nil nil default))))
+                      (romacs-agent--read-ordered
+                       (format-prompt (or prompt "Agent") default) (mapcar #'car rows)
+                       ;; Grouped by instance, each with its note.
+                       (list :group-function
+                             (lambda (text transform) (if transform text (plist-get (funcall fields text) :group)))
+                             :affixation-function
+                             (lambda (texts)
+                               (mapcar (lambda (text)
+                                         (list text "" (propertize (concat "  " (plist-get (funcall fields text) :note))
+                                                                   'face 'completions-annotations)))
+                                       texts)))
+                       nil t nil nil default))))
           (cons text (cdr (assoc text rows))))
       (remove-hook 'romacs-agent-models-changed-functions changed))))
 
@@ -1556,8 +1617,7 @@ When OFFER-DEFAULT, offer nil as Default with the INHERITED level."
   (let* ((label (and offer-default (if inherited (format "Default (%s)" inherited) "Default")))
          (choices (if label (cons label efforts) efforts))
          (default (or default label))
-         (answer (completing-read (format-prompt "Effort" default) (romacs-agent--ordered-table choices)
-                                  nil t nil nil default)))
+         (answer (romacs-agent--read-ordered (format-prompt "Effort" default) choices nil nil t nil nil default)))
     (unless (or (equal label answer) (string-empty-p answer)) answer)))
 
 (defun romacs-agent--read-selection (ask-effort &optional accounts)
@@ -1992,7 +2052,7 @@ ANSWERING is what the previous turn answered."
           (romacs-agent-turn-start session) (plist-get event :time)
           (romacs-agent-input-seq session) (plist-get transition :seq))
     (unless own
-      (setf (romacs-agent-brief session) nil)
+      (setf (romacs-agent-brief session) nil (romacs-agent-plan-offer session) nil)
       (when (romacs-agent-title-auto session)
         (romacs-agent--title-from session (plist-get event :text))))))
 
@@ -2212,6 +2272,13 @@ instance and credentials stamp (`romacs-agent--run-note'), else nothing."
     ('run (romacs-agent--apply-run-event session event))
     ('handshake (romacs-agent--apply-driver-state session (plist-get event :state)))
     ('input (romacs-agent--apply-input-event session event))
+    ;; A plan offered to proceed with is a fact of the session, kept with
+    ;; it: a replayed one counts, as a restart brings it back.
+    ('plan (when (and (plist-get event :proceed) (plist-get (romacs-agent-options session) :plan))
+             (setf (romacs-agent-plan-offer session) (plist-get event :seq))))
+    ('plan-switch (unless (plist-get event :on) (setf (romacs-agent-plan-offer session) nil)))
+    ;; A rollback takes the offered plan back with its turns.
+    ('rolled-back (setf (romacs-agent-plan-offer session) nil))
     ('approval (romacs-agent--apply-approval-event session event))
     ('mode (romacs-agent--mode-seen session (plist-get event :permission-mode)))
     ('tool (when (and (eq (plist-get event :state) 'started) (not (plist-get event :parent)))
@@ -2230,6 +2297,7 @@ instance and credentials stamp (`romacs-agent--run-note'), else nothing."
   (when-let* ((time (plist-get event :time)))
     (setf (romacs-agent-last-time session) time))
   (romacs-agent--apply-event session event)
+  (romacs-agent--summary-stale (romacs-agent-id session))
   (romacs-agent--run-hook 'romacs-agent-event-functions session event))
 
 (defcustom romacs-agent-preambles
@@ -2283,14 +2351,30 @@ the row is written (`romacs-agent-store-title')."
   (unless (or (romacs-agent--replay-copy-p session) (not (file-exists-p (romacs-agent-store--file))))
     (romacs-agent-store-title (romacs-agent-id session) (romacs-agent-title session) then)))
 
+(declare-function romacs-agent-ui--batch "romacs-agent-ui" ())
+
+(defun romacs-agent-rename (id title)
+  "Name session ID TITLE, its own name from now on, in its manifest and
+its row too; its views follow."
+  (let ((session (or (romacs-agent-get id) (user-error "No session %s" id))))
+    (setf (romacs-agent-title session) title (romacs-agent-title-auto session) nil)
+    ;; Those of a session not loaded read its row: drawn again once it says it.
+    (romacs-agent--update-manifest session #'romacs-agent-ui--batch)
+    (romacs-agent--changed session)
+    (romacs-agent-ui--batch)))
+
 (defun romacs-agent-activity-seq (session)
   "The seq of SESSION's last turn activity: its last prompt or turn end."
   (max (or (romacs-agent-input-seq session) 0) (romacs-agent-done-seq session)))
 
 (defun romacs-agent-unseen-p (session)
   "Whether SESSION's last turn end is one its chat has not shown."
-  (let ((seen (romacs-agent-seen-seq session)))
-    (and seen (> (romacs-agent-done-seq session) seen))))
+  (romacs-agent--unseen-p (romacs-agent-seen-seq session) (romacs-agent-done-seq session)))
+
+(defun romacs-agent--unseen-p (seen done)
+  "Whether a session's last turn end, at seq DONE, is past SEEN, the last
+its chat has shown (nil: recorded before it was kept)."
+  (and seen (> done seen)))
 
 (defconst romacs-agent--inactive-settlement -1
   "A settledSeq that stays settled until explicitly undone.
@@ -2535,6 +2619,8 @@ The original session acknowledges held notes during catch-up."
         (let* ((events (romacs-agent--apply-record-events session (romacs-agent--record-events session record input)))
                (time (gethash "t" record))
                (ends (cl-some (lambda (event) (memq (plist-get event :type) '(done exit))) events)))
+          ;; Its bookkeeping (a request withdrawn) raises no event.
+          (romacs-agent--summary-stale (romacs-agent-id session))
           (romacs-agent--deliver-record-events session events seq time)
           (romacs-agent--after-record session seq ends))))))
 
@@ -6807,7 +6893,10 @@ no string in a record can hold, and only those are parsed."
 at: the byte its journal goes on from after that record.  Else nil,
 SESSION untouched.  A field this build added since keeps its default: a
 new field only records can give a value must change
-`romacs-agent--kept-version'.  A field this build removed is dropped:
+`romacs-agent--kept-version', unless its store row keeps it too and its
+loss at the upgrade is acceptable (`plan-offer': an offer standing then
+is lost, as every offer was across a restart before it was kept).  A
+field this build removed is dropped:
 nothing reads it.  (2026-11-21: a build that removed one refused every
 kept state, and each session's whole history was replayed into the
 editor.)  With LIMIT, `beyond' and SESSION untouched when that record is
@@ -6824,7 +6913,9 @@ not within the journal's last LIMIT bytes (`romacs-agent--journal-after')."
             (aset session (cl-struct-slot-offset 'romacs-agent slot) value))))
       (when-let* ((forked (plist-get kept :forked)))
         (setf (romacs-agent-options session) (plist-put (copy-sequence (romacs-agent-options session)) :forked forked)))
-      (puthash session (plist-get kept :seq) romacs-agent--kept))
+      (puthash session (plist-get kept :seq) romacs-agent--kept)
+      ;; Its fields written in place: no event says so.
+      (romacs-agent--summary-stale (romacs-agent-id session)))
     from))
 
 ;;; A new server
@@ -6868,6 +6959,11 @@ once, and loads on once its kept state is written."
   (let ((manifest (romacs-agent--read-json (expand-file-name "manifest.json" dir))))
     (when (and manifest (not (gethash (gethash "id" manifest) romacs-agent--sessions)))
       (let ((session (romacs-agent--of-manifest dir manifest)))
+        ;; The plan it offered as its row says it, its kept state's or its
+        ;; records' word over it once read.
+        (setf (romacs-agent-plan-offer session)
+              (and-let* ((row (romacs-agent-store-row-session (romacs-agent-id session))))
+                (romacs-agent-plan-offer row)))
         (puthash (romacs-agent-id session) session romacs-agent--sessions)
         (romacs-agent--index session)
         ;; Its kept state back, its journal is read on from there: by its
@@ -7717,7 +7813,7 @@ lookup that finds any session."
 (autoload 'romacs-agent-summary "romacs-agent-summary"
   "Session ID's state as plain data, what its views read of it.
 
-\(fn ID)")
+\(fn ID &optional SOURCE)")
 
 (defvar romacs-agent--requests (make-hash-table :test #'equal)
   "A delegating session's id and a client request id, to the session it

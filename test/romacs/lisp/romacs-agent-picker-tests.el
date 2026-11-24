@@ -228,9 +228,9 @@
   "A `completing-read' giving ANSWERS in turn, each prompt, group and
 affixation it saw pushed on the list in cell ASKED."
   (lambda (prompt table &rest _)
-    (let* ((metadata (cdr (completion-metadata "" table nil)))
-           (group (alist-get 'group-function metadata))
-           (affix (alist-get 'affixation-function metadata))
+    (let* ((metadata (completion-metadata "" table nil))
+           (group (completion-metadata-get metadata 'group-function))
+           (affix (completion-metadata-get metadata 'affixation-function))
            (answer (pop (car answers))))
       (push (list prompt
                   (and group (funcall group answer nil))

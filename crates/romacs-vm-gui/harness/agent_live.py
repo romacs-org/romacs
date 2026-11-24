@@ -190,6 +190,16 @@ def end_marked(prefix, seconds=10):
     return ended
 
 
+def unit_ended(unit, seconds=10):
+    """Wait until the user unit UNIT is no longer running, its ExecStopPost
+    done; at once when no user manager answers (a server run detached)."""
+    def state():
+        done = subprocess.run(['systemctl', '--user', 'show', '-p', 'ActiveState', '--value', unit],
+                              capture_output=True, text=True)
+        return done.stdout.strip() if done.returncode == 0 else 'inactive'
+    until(lambda: state() in ('inactive', 'failed'), seconds, f'{unit} ended')
+
+
 class Agents(Server):
     def __init__(self, args, base, name, env_extra=None):
         super().__init__(args, base, name, env_extra)
@@ -296,12 +306,18 @@ class Agents(Server):
 
     def journal(self, sid):
         """SID's records, as the editor reads them wherever they are kept:
-        its journal, or the agents' database once they are moved there."""
-        text = parity_live.read_sexp(self.eval(
-            f'(let ((session {self.s(sid)}) (records nil)) '
-            '(when session (romacs-agent--read-journal session (lambda (record) (push record records)))) '
-            '(decode-coding-string (json-serialize (vconcat (nreverse records))) (quote utf-8)))'))
-        return json.loads(text) if text else []
+        its journal, or the agents' database once they are moved there.
+        Written to a file, not printed: a session's records outgrow what one
+        eval may print."""
+        out = self.root / 'journal.json'
+        self.eval(f'(let ((session {self.s(sid)}) (records nil) (coding-system-for-write (quote utf-8))) '
+                  '(when session (romacs-agent--read-journal session (lambda (record) (push record records)))) '
+                  f'(with-temp-file {lisp(out)} '
+                  '(insert (decode-coding-string (json-serialize (vconcat (nreverse records))) (quote utf-8)))) t)')
+        try:
+            return json.loads(out.read_text(encoding='utf-8'))
+        finally:
+            out.unlink()
 
     def results(self, sid):
         return [r['out'].get('result') for r in self.journal(sid)
@@ -333,8 +349,13 @@ class Agents(Server):
         # Every process this tree started carries MARK: the editor, its
         # sessions' supervisors (detached or user units), their harnesses
         # and MCP relays.  They end with it, whatever host.json still names
-        # (a workflow may remove a session's directory).
+        # (a workflow may remove a session's directory).  A server run as a
+        # user unit leaves one more once it is gone: the unit's ExecStopPost
+        # (`romacs --server-exited'), which systemd starts after the editor
+        # ends, so the tree is swept again once the unit has stopped.
         try:
+            end_marked(str(self.root.resolve()))
+            unit_ended(f'romacs-server-{self.name}')
             end_marked(str(self.root.resolve()))
         finally:
             super().close()
@@ -557,7 +578,7 @@ def providers(args, base):
         started = {'default': a.config_dirs(first), 'claude2': a.config_dirs(other)}
         # The board names each session's harness, its account on hover.
         hovers = parity_live.read_sexp(a.eval('(progn (require (quote romacs-agent-board)) (with-temp-buffer (romacs-agent-board-mode) '
-                                              '(romacs-agent-board--draw (romacs-agent-board-rows (hash-table-values romacs-agent--sessions) '
+                                              '(romacs-agent-board--draw (romacs-agent-board-rows (romacs-agent-summary nil) '
                                               'nil (romacs-agent-board--view)) 120) '
                                               '(let ((pos (point-min)) (found nil)) '
                                               '(while (setq pos (next-single-property-change pos (quote help-echo))) '
@@ -4157,7 +4178,7 @@ def board_keys(args, base):
         steps['project_with_session'] = settled(lambda: [showing(), shown()], [sids[1], 'nil'])
         steps['nested'] = parity_live.read_sexp(a.eval(
             f'(length (plist-get (seq-find (lambda (row) (equal (plist-get row :id) {lisp_text(sids[0])})) '
-            '(romacs-agent-board-rows (hash-table-values romacs-agent--sessions) nil (romacs-agent-board--view))) '
+            '(romacs-agent-board-rows (romacs-agent-summary nil) nil (romacs-agent-board--view))) '
             ':children))'))
         open_board()
         ret_on('◇ +[0-9]+ more')

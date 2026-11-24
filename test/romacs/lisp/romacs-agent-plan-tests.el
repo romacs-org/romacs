@@ -232,56 +232,72 @@
             romacs-agent-log--end (point-min-marker))
       (set-marker-insertion-type romacs-agent-log--end t)
       (cl-letf (((symbol-function 'romacs-agent-log--loaded) (lambda (_) session)))
-        ;; A replayed plan offers nothing; the live one its row, by y.
-        (let ((romacs-agent-log--replaying t))
-          (romacs-agent-log-draw session '(:type plan :text "0. old" :proceed t)))
-        (should-not (text-property-any (point-min) (point-max) 'romacs-agent-log-proceed t))
-        (should-error (romacs-agent-log-proceed) :type 'user-error)
-        (should (plist-get (romacs-agent-options session) :plan))
-        (romacs-agent-log-draw session '(:type plan :text "1. do it" :proceed t))
-        (goto-char (text-property-any (point-min) (point-max) 'romacs-agent-log-proceed t))
-        (call-interactively (lookup-key (get-text-property (point) 'keymap) "y"))
-        (should-not (text-property-any (point-min) (point-max) 'romacs-agent-log-proceed t))
-        ;; The plan's own text whole.
-        (should (string-match-p "1\\. do it\n" (buffer-substring-no-properties (point-min) romacs-agent-log--end)))
-        ;; A plan offered at rest: the separator says so, and C-c C-y
-        ;; from anywhere proceeds, as it allows a request.
-        (romacs-agent-set-plan session t)
-        (setf (romacs-agent-state session) 'idle)
-        (romacs-agent-log-draw session '(:type plan :text "2. again" :proceed t))
-        (should (string-match-p "plan ready" (cdr (romacs-agent-log--doing session))))
-        (goto-char (point-max))
-        (call-interactively (keymap-lookup romacs-agent-log-mode-map "C-c C-y"))
-        (should-not (romacs-agent-log--proceed-offered))
-        (should-not (plist-get (romacs-agent-options session) :plan))
-        (should (equal (romacs-agent-log--doing session) '(idle)))
-        ;; A rollback takes an offered plan back; narrowed, the chat still
-        ;; reads what it offers.
-        (romacs-agent-set-plan session t)
-        (romacs-agent-log-draw session '(:type plan :text "3. once more" :proceed t))
-        (save-restriction
-          (narrow-to-region (point-min) (1+ (point-min)))
-          (should (romacs-agent-log--proceed-offered)))
-        (should (= (romacs-agent-log--waiting-count) 1))
-        ;; Its header's mark is a request's: it waits on the user.
-        (should (eq (plist-get (romacs-agent-log--header-inputs session) :state) 'approval))
-        ;; A failed turn says it failed, the offer or not.
-        (setf (romacs-agent-failed session) t)
-        (should (equal (cdr (romacs-agent-log--doing session)) "failed"))
-        (setf (romacs-agent-failed session) nil)
-        (romacs-agent-log-draw session '(:type rolled-back :to 1 :turns 1 :prompt "x"))
-        (should (= (romacs-agent-log--waiting-count) 0))
-        ;; Narrowed, C-c C-y proceeds and the separator says so.
-        (romacs-agent-set-plan session t)
-        (romacs-agent-log-draw session '(:type plan :text "4. last" :proceed t))
-        (save-restriction
-          (narrow-to-region (point-min) (1+ (point-min)))
-          (call-interactively (keymap-lookup romacs-agent-log-mode-map "C-c C-y")))
-        (should-not (romacs-agent-log--proceed-offered))
-        (should-not (string-match-p "plan ready" (buffer-substring-no-properties romacs-agent-log--end (point-max))))
-        (should-not (romacs-agent-log--proceed-offered))
-        (should (equal (romacs-agent-log--doing session) '(idle)))
-        (romacs-agent-set-plan session nil)))
+        (cl-flet ((offer (seq text)
+                    ;; The session's own event, then the chat's line of it.
+                    (let ((event (list :type 'plan :text text :proceed t :seq seq))
+                          (romacs-agent-event-functions nil))
+                      (romacs-agent--raise session event)
+                      (romacs-agent-log-draw session event))))
+          ;; A replayed plan the session no longer offers takes no y.
+          (let ((romacs-agent-log--replaying t))
+            (romacs-agent-log-draw session '(:type plan :text "0. old" :proceed t :seq 1)))
+          (should-not (text-property-not-all (point-min) (point-max) 'romacs-agent-log-proceed nil))
+          (should-error (romacs-agent-log-proceed) :type 'user-error)
+          (should (plist-get (romacs-agent-options session) :plan))
+          (offer 2 "1. do it")
+          (goto-char (text-property-not-all (point-min) (point-max) 'romacs-agent-log-proceed nil))
+          (call-interactively (lookup-key (get-text-property (point) 'keymap) "y"))
+          (should-not (romacs-agent-log--proceed-offered))
+          ;; Its row offers it no more: its keys are the transcript's again.
+          (should-not (get-text-property (point) 'romacs-agent-log-proceed))
+          (should-not (eq (get-text-property (point) 'keymap) romacs-agent-log-plan-map))
+          ;; The plan's own text whole.
+          (should (string-match-p "1\\. do it\n" (buffer-substring-no-properties (point-min) romacs-agent-log--end)))
+          ;; A plan offered at rest: the separator says so, and C-c C-y
+          ;; from anywhere proceeds, as it allows a request.
+          (romacs-agent-set-plan session t)
+          (setf (romacs-agent-state session) 'idle)
+          (offer 3 "2. again")
+          (should (string-match-p "plan ready" (cdr (romacs-agent-log--doing session))))
+          (goto-char (point-max))
+          (call-interactively (keymap-lookup romacs-agent-log-mode-map "C-c C-y"))
+          (should-not (romacs-agent-log--proceed-offered))
+          (should-not (plist-get (romacs-agent-options session) :plan))
+          (should (equal (romacs-agent-log--doing session) '(idle)))
+          ;; A rollback takes an offered plan back; narrowed, the chat still
+          ;; reads what it offers.
+          (romacs-agent-set-plan session t)
+          (offer 4 "3. once more")
+          (save-restriction
+            (narrow-to-region (point-min) (1+ (point-min)))
+            (should (romacs-agent-log--proceed-offered)))
+          (should (= (romacs-agent-log--waiting-count) 1))
+          ;; Its header's mark is the board's: it asks the user.
+          (should (eq (plist-get (romacs-agent-log--header-inputs session) :state) 'question))
+          ;; A failed turn says it failed, the offer or not.
+          (setf (romacs-agent-failed session) t)
+          (should (equal (cdr (romacs-agent-log--doing session)) "failed"))
+          (setf (romacs-agent-failed session) nil)
+          (let ((romacs-agent-event-functions nil))
+            (romacs-agent--raise session '(:type rolled-back :to 1 :turns 1 :prompt "x" :seq 5)))
+          (should (= (romacs-agent-log--waiting-count) 0))
+          ;; Narrowed, C-c C-y proceeds and the separator says so.
+          (romacs-agent-set-plan session t)
+          (offer 6 "4. last")
+          ;; Only the plan offered now takes y: the rows before it, the transcript's keys.
+          (should (equal (let ((at (point-min)) (seqs nil))
+                           (while (setq at (text-property-not-all at (point-max) 'romacs-agent-log-proceed nil))
+                             (push (get-text-property at 'romacs-agent-log-proceed) seqs)
+                             (setq at (next-single-property-change at 'romacs-agent-log-proceed nil (point-max))))
+                           seqs)
+                         '(6)))
+          (save-restriction
+            (narrow-to-region (point-min) (1+ (point-min)))
+            (call-interactively (keymap-lookup romacs-agent-log-mode-map "C-c C-y")))
+          (should-not (romacs-agent-log--proceed-offered))
+          (should-not (string-match-p "plan ready" (buffer-substring-no-properties romacs-agent-log--end (point-max))))
+          (should (equal (romacs-agent-log--doing session) '(idle)))
+          (romacs-agent-set-plan session nil))))
     (should (equal (gethash "mode" (gethash "collaborationMode" (gethash "params" (romacs-agent--codex-turn session 1 []))))
                    "default"))))
 

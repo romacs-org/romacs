@@ -18,6 +18,7 @@
 (require 'keymap-popup)
 (require 'romacs-working)
 (require 'romacs-agent-log)
+(require 'romacs-agent-summary)
 (require 'romacs-attach)
 
 (defvar romacs-complete-file-preview)
@@ -25,7 +26,6 @@
 (declare-function romacs-agents "romacs-agent-board" ())
 (declare-function romacs-agent-resume-time "romacs-agent-tools" (session))
 (declare-function romacs-agent-tools--cancel-resume "romacs-agent-tools" (session &optional why))
-(declare-function romacs-agent-ui--batch "romacs-agent-ui" ())
 (declare-function romacs-agent-ui--default-effort "romacs-agent-ui" (session selection))
 (declare-function romacs-agent-ui--selection-label "romacs-agent-ui" (selection))
 (declare-function romacs-agent-ui--instance "romacs-agent-ui" (provider harness model default))
@@ -34,24 +34,27 @@
 
 (defun romacs-agent-menu--title ()
   "The actions menu's title: whose chat it is, its name first to read."
-  (concat "Agent · " (propertize (or (and romacs-agent-log--session (romacs-agent-title romacs-agent-log--session)) "chat")
+  (concat "Agent · " (propertize (or (when-let* ((summary (romacs-agent-log--summary)))
+                                       (romacs-agent-summary-title summary))
+                                     "chat")
                                  'face 'bold)))
 
 (defun romacs-agent-menu--worker-rows ()
-  "The chat's unsettled delegated rows, in panel order."
-  (when romacs-agent-log--session
+  "The chat's unsettled delegated rows, in panel order, each naming its
+worker by :id."
+  (when-let* ((summary (romacs-agent-log--summary)))
     (pcase-let ((`(,live . ,inactive) (romacs-agent-log-activity-delegated-rows
-                                        (romacs-agent-children-rows romacs-agent-log--session))))
+                                        (romacs-agent-summary-children-rows summary))))
       (append live inactive))))
 
 (defun romacs-agent-menu--workers ()
-  "The chat's unsettled delegated sessions, in panel order."
-  (mapcar (lambda (row) (plist-get row :session)) (romacs-agent-menu--worker-rows)))
+  "The ids of the chat's unsettled delegated sessions, in panel order."
+  (mapcar (lambda (row) (plist-get row :id)) (romacs-agent-menu--worker-rows)))
 
 (defvar-local romacs-agent-menu--shown nil
-  "The worker each digit's row last showed, however the menu was opened,
-a vector of nine, the chat's own: a digit opens that one, saying so when
-it settled since.")
+  "The id of the worker each digit's row last showed, however the menu
+was opened, a vector of nine, the chat's own: a digit opens that one,
+saying so when it settled since.")
 
 (defun romacs-agent-menu--slots ()
   (unless (and (local-variable-p 'romacs-agent-menu--shown)
@@ -62,18 +65,17 @@ it settled since.")
 (defun romacs-agent-menu--worker-label (index)
   "Draw the panel row for the worker at INDEX and remember its digit."
   (let* ((row (nth index (romacs-agent-menu--worker-rows)))
-         (child (aset (romacs-agent-menu--slots) index (plist-get row :session))))
+         (child (aset (romacs-agent-menu--slots) index (plist-get row :id))))
     (when child
       (propertize (romacs-agent-log-activity-delegated-line row keymap-popup--max-description-width)
                   'keymap-popup-preformatted t))))
 
-(defun romacs-agent-menu--open-worker (child)
-  "Open worker CHILD's chat if it is still among the unsettled workers."
-  (if-let* ((current (seq-find (lambda (worker) (equal (romacs-agent-id worker) (romacs-agent-id child)))
-                              (romacs-agent-menu--workers)))
-              ((not (romacs-agent-settled-p current))))
-      (romacs-agent-show current '(display-buffer-same-window))
-    (user-error "%s is no longer in the Workers list" (romacs-agent-title child))))
+(defun romacs-agent-menu--open-worker (id)
+  "Open the chat of worker ID if it is still among the unsettled workers."
+  (let ((child (and (member id (romacs-agent-menu--workers)) (romacs-agent-get id))))
+    (if (and child (not (romacs-agent-settled-p child)))
+        (romacs-agent-show child '(display-buffer-same-window))
+      (user-error "%s is no longer in the Workers list" (if child (romacs-agent-title child) id)))))
 
 (defun romacs-agent-menu-open-worker ()
   "Open the chat of the worker the menu showed on the digit just pressed."
@@ -85,12 +87,12 @@ it settled since.")
 (defun romacs-agent-menu-workers ()
   "Open the chat of an unsettled delegated worker, chosen by its title."
   (interactive nil romacs-agent-log-mode)
-  (let* ((workers (or (romacs-agent-menu--workers) (user-error "No unsettled delegated workers")))
+  (let* ((rows (or (romacs-agent-menu--worker-rows) (user-error "No unsettled delegated workers")))
          ;; Its id makes each line its own, whatever the titles.
-         (named (mapcar (lambda (child) (cons (format "%s  %s" (romacs-agent-title child) (romacs-agent-id child)) child))
-                        workers)))
+         (named (mapcar (lambda (row) (cons (format "%s  %s" (plist-get row :title) (plist-get row :id)) (plist-get row :id)))
+                        rows)))
     (romacs-agent-menu--open-worker
-     (cdr (assoc (completing-read "Worker: " (romacs-agent--ordered-table (mapcar #'car named)) nil t) named)))))
+     (cdr (assoc (romacs-agent--read-ordered "Worker: " (mapcar #'car named) nil nil t) named)))))
 
 ;;; The session's commands, as the menu offers them
 
@@ -129,18 +131,13 @@ the session stays."
                                                  (`(:error ,why) (message "Not renewed: %s" why)))))))))
 
 (defun romacs-agent-chat-rename (title)
-  "Name this session TITLE."
+  "Name this session TITLE (`romacs-agent-rename'), and its chat after it."
   (interactive (list (read-string "Title: " (romacs-agent-title (romacs-agent-menu--session))))
                romacs-agent-log-mode romacs-agent-compose-mode)
   (romacs-agent-log-in-chat
     (let ((session (romacs-agent-menu--session)))
-      (setf (romacs-agent-title session) title (romacs-agent-title-auto session) nil)
-      ;; Its views drawn again now, and once its row says it: those of a
-      ;; session not loaded read the row.
-      (romacs-agent--update-manifest session #'romacs-agent-ui--batch)
-      (rename-buffer (romacs-agent-log--buffer-name session) t)
-      (romacs-agent--changed session)
-      (romacs-agent-ui--batch))))
+      (romacs-agent-rename (romacs-agent-id session) title)
+      (rename-buffer (romacs-agent-log--buffer-name session) t))))
 
 (defun romacs-agent-chat-effort (effort)
   "Run this session at reasoning EFFORT from its next turn on, its model
@@ -182,16 +179,17 @@ with a prefix argument, asked for."
 
 (defun romacs-agent-menu--model-label ()
   "The model entry: the model running, and the one to come if it differs."
-  (let* ((session romacs-agent-log--session)
-         (harness (and session (romacs-agent-harness session)))
+  (let* ((summary (romacs-agent-log--summary))
+         (harness (and summary (romacs-agent-summary-harness summary)))
          (shown (lambda (model)
                   (propertize (or (and model (romacs-agent-ui--instance nil harness model nil)) "default")
                               ;; A menu's value is never dim: dim is a command it cannot run.
                               'face 'bold)))
-         (now (and session (or (plist-get (romacs-agent--selection session) :model) (romacs-agent-model session))))
-         (next (and session (plist-get (romacs-agent--wanted session) :model))))
+         (now (and summary (romacs-agent-summary-selected-model summary)))
+         (switch (and summary (romacs-agent-summary-pending-selection summary)))
+         (next (plist-get switch :model)))
     (concat "Model: " (funcall shown now)
-            (if (or (null (romacs-agent-pending-selection session)) (equal now next)) ""
+            (if (or (null switch) (equal now next)) ""
               (concat " → " (funcall shown next))))))
 
 (defun romacs-agent-menu--handoff-rows ()
@@ -303,9 +301,26 @@ proceed."
 
 (defun romacs-agent-menu--plan-label ()
   "The plan mode entry: whether the chat's session plans now."
-  (if (and romacs-agent-log--session (plist-get (romacs-agent-options romacs-agent-log--session) :plan))
+  (if (when-let* ((summary (romacs-agent-log--summary))) (romacs-agent-summary-plan summary))
       (concat "Plan mode: " (propertize "on" 'face 'bold))
     (concat "Plan mode: " (propertize "off" 'face 'bold))))
+
+(defun romacs-agent-menu--waits-p ()
+  "Whether something waits on the user here: a request the chat shows
+still pending, ahead of its session's summary, or what the summary counts."
+  (and romacs-agent-log--session
+       (or (romacs-agent-log--pending)
+           (when-let* ((summary (romacs-agent-log--summary)))
+             (> (romacs-agent-summary-user-wait-count summary) 0)))))
+
+(defun romacs-agent-menu--asks-p ()
+  "Whether a request waits on the user here, not a plan offered alone:
+what only a request takes (allowing for the session, denying, going to
+it) is offered then."
+  (and romacs-agent-log--session
+       (or (romacs-agent-log--pending)
+           (when-let* ((summary (romacs-agent-log--summary)))
+             (memq (romacs-agent-summary-user-wait-kind summary) '(approval question))))))
 
 (defun romacs-agent-chat-new ()
   "Start a new session, in this one's directory."
@@ -315,21 +330,17 @@ proceed."
            (romacs-agent--start-arguments (file-name-as-directory (romacs-agent-cwd (romacs-agent-menu--session)))))))
 
 (defun romacs-agent-menu--effort-label ()
-  "The effort entry: the effort running, and the one to come if it differs."
-  (let* ((session romacs-agent-log--session)
-         (selection (and session (romacs-agent--selection session)))
-         (wanted (and session (romacs-agent--wanted session)))
-         (now (romacs-agent-menu--effort-text session selection))
-         (next (if (equal selection wanted) now (romacs-agent-menu--effort-text session wanted))))
-    (concat "Effort: " now (unless (equal now next) (concat " → " next)))))
-
-(defun romacs-agent-menu--effort-text (session selection)
-  "SELECTION's effort, including its level when it follows the default."
-  (propertize (or (plist-get selection :effort)
-                  (when-let* ((level (and session (romacs-agent-ui--default-effort session selection))))
-                    (format "%s (default)" level))
-                  "default")
-              'face 'bold))
+  "The effort entry: the effort running, its level when it follows the
+model's default, and the effort to come if a switch under way changes it."
+  (let* ((summary (romacs-agent-log--summary))
+         (switch (and summary (romacs-agent-summary-pending-selection summary)))
+         (now (propertize (or (and summary (romacs-agent-summary-effort summary))
+                              (when-let* ((level (and summary (romacs-agent-summary-default-effort summary))))
+                                (format "%s (default)" level))
+                              "default")
+                          'face 'bold))
+         (next (and switch (propertize (or (plist-get switch :effort) "default") 'face 'bold))))
+    (concat "Effort: " now (when (and next (not (equal now next))) (concat " → " next)))))
 
 ;;; What the chat does with its turns and files
 
@@ -424,11 +435,11 @@ the session, the view."
   :popup-key "?"
   :exit-key "C-g"
   :description #'romacs-agent-menu--title
-  :group ("Waits on you" :if (lambda () (and romacs-agent-log--session (romacs-agent-log--pending))))
+  :group ("Waits on you" :if #'romacs-agent-menu--waits-p)
   "y" ("Allow" romacs-agent-log-allow)
-  "!" ("Allow for this session" romacs-agent-log-allow-always)
-  "d" ("Deny" romacs-agent-log-deny)
-  "j" ("Go to it" romacs-agent-log-next-ask)
+  "!" ("Allow for this session" romacs-agent-log-allow-always :if #'romacs-agent-menu--asks-p)
+  "d" ("Deny" romacs-agent-log-deny :if #'romacs-agent-menu--asks-p)
+  "j" ("Go to it" romacs-agent-log-next-ask :if #'romacs-agent-menu--asks-p)
   :group "Turn"
   "i" ("Interrupt" romacs-agent-log-interrupt :inapt-if (lambda () (not (romacs-agent-log--running-p))))
   "k" ("Interrupt, then send" romacs-agent-log-interrupt-and-send)

@@ -89,14 +89,19 @@ KEYS the first words of the entries already there.")
       (with-demoted-errors "romacs_task_watch: clearing the watch mark: %S"
         (romacs-agent-mark (romacs-agent-id session) 'watches nil)))))
 
+(defun romacs-agent-watch--put (id watches)
+  "Make WATCHES, nil for none, the task ID's: its summary's watched unit
+follows (`romacs-agent-watch-unit')."
+  (if watches (puthash id watches romacs-agent-watch--watches) (remhash id romacs-agent-watch--watches))
+  (romacs-agent--summary-stale id))
+
 (defun romacs-agent-watch--set (session watches &optional persist)
   "Replace SESSION's WATCHES and notify observers when they change.
 With PERSIST, write the change before publishing and scheduling it."
   (let* ((id (romacs-agent-id session))
          (previous (gethash id romacs-agent-watch--watches)))
     (when persist (romacs-agent-watch--write session watches))
-    (if watches (puthash id watches romacs-agent-watch--watches)
-      (remhash id romacs-agent-watch--watches))
+    (romacs-agent-watch--put id watches)
     (when persist (romacs-agent-watch--schedule))
     (unless (equal previous watches)
       (romacs-agent--run-hook 'romacs-agent-event-functions session '(:type watch-changed)))))
@@ -234,7 +239,7 @@ looked, and remember what is there now (an entry gone and back is new)."
                                  each))
                              (gethash id romacs-agent-watch--watches))))
         (romacs-agent-watch--write task updated)
-        (puthash id updated romacs-agent-watch--watches)))))
+        (romacs-agent-watch--put id updated)))))
 
 ;;; The reactor
 
@@ -243,7 +248,7 @@ looked, and remember what is there now (an entry gone and back is new)."
   (let ((all nil))
     (maphash (lambda (id watches)
                (let ((task (romacs-agent-get id)))
-                 (cond ((null task) (remhash id romacs-agent-watch--watches))
+                 (cond ((null task) (romacs-agent-watch--put id nil))
                        ((romacs-agent-watch--stopped-p task)
                         (with-demoted-errors "romacs_task_watch: clearing stopped task: %S"
                           (romacs-agent-watch-stop task)))
@@ -267,7 +272,7 @@ looked, and remember what is there now (an entry gone and back is new)."
       (romacs-agent-watch--set task (cl-remove-if (lambda (watch) (memq watch watches))
                                                 (gethash id romacs-agent-watch--watches))
                                t)
-    (remhash id romacs-agent-watch--watches)
+    (romacs-agent-watch--put id nil)
     (romacs-agent-watch--schedule)))
 
 (defun romacs-agent-watch--output (program args then)
