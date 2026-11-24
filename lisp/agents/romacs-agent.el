@@ -573,11 +573,31 @@ connection, is answered on catching up."
 
 ;;; Places
 
-(defun romacs-agent--state-root ()
-  (expand-file-name "romacs/agents/" (or (getenv "XDG_STATE_HOME") "~/.local/state")))
+;; Keep startup's probe available without loading this library.
+;;;###autoload
+(progn
+  (defun romacs-agent--state-root ()
+    (expand-file-name "romacs/agents/" (or (getenv "XDG_STATE_HOME") "~/.local/state")))
 
-(defun romacs-agent--runtime-root ()
-  (expand-file-name "romacs/agents/" (or (getenv "XDG_RUNTIME_DIR") (format "/tmp/romacs%d" (user-uid)))))
+  (defun romacs-agent--runtime-root ()
+    (expand-file-name "romacs/agents/" (or (getenv "XDG_RUNTIME_DIR") (format "/tmp/romacs%d" (user-uid)))))
+
+  (defun romacs-agent--marks-dir ()
+    (expand-file-name "marks" (romacs-agent--state-root)))
+
+  (defun romacs-agent--mark-files (dir &optional count)
+    "List up to COUNT obligation mark names in DIR, or all if COUNT is nil."
+    (directory-files dir nil "\\`[0-9a-f]" count count))
+
+  (defun romacs-agent--restore-at-startup ()
+    "Schedule a restore at GUI startup when supervisors or obligations exist."
+    (unless noninteractive
+      (let ((root (romacs-agent--runtime-root)) (marks (romacs-agent--marks-dir)))
+        (when (or (and (file-directory-p root) (file-expand-wildcards (concat root "*/host.sock")))
+                  (and (file-directory-p marks) (romacs-agent--mark-files marks 1)))
+          (run-at-time 0 nil (lambda () (require 'romacs-agent) (romacs-agent-restore-soon)))))))
+
+  (add-hook 'after-init-hook #'romacs-agent--restore-at-startup))
 
 (defun romacs-agent--short (id) (substring id 0 (min 8 (length id))))
 
@@ -7346,9 +7366,6 @@ says so meanwhile (`romacs-agent-mark').")
 ;; a start knows which to load by listing it: never a session's own
 ;; directory, however many sessions are recorded.
 
-(defun romacs-agent--marks-dir ()
-  (expand-file-name "marks" (romacs-agent--state-root)))
-
 (defun romacs-agent-mark (id kind on)
   "Mark that KIND waits on the session ID names, ON, or no longer."
   (let ((file (expand-file-name (format "%s.%s" id kind) (romacs-agent--marks-dir))))
@@ -7366,7 +7383,7 @@ unless ANY: then those marked so far."
   (let ((dir (romacs-agent--marks-dir)))
     (when (if any (file-directory-p dir) (file-exists-p (expand-file-name ".complete" dir)))
       (let ((table (make-hash-table :test #'equal)))
-        (dolist (file (directory-files dir nil "\\`[0-9a-f]"))
+        (dolist (file (romacs-agent--mark-files dir))
           (puthash (file-name-sans-extension file) t table))
         table))))
 
@@ -7814,19 +7831,6 @@ listening, serve their relays, sweep what ended processes left, and say so."
   (romacs-agent--sweep)
   (setq romacs-agent--restored romacs-agent--sessions)
   (run-hooks 'romacs-agent-restored-hook))
-
-;; At startup, cheaply, without loading this library unless a supervisor
-;; runs: then its sessions are known and its tools answer with no command.
-;;;###autoload
-(progn
-  (defun romacs-agent--restore-at-startup ()
-    "Once started, restore agent sessions when any supervisor runs."
-    (unless noninteractive
-      (let ((root (expand-file-name "romacs/agents/" (or (getenv "XDG_RUNTIME_DIR")
-                                                         (format "/tmp/romacs%d" (user-uid))))))
-        (when (and (file-directory-p root) (file-expand-wildcards (concat root "*/host.sock")))
-          (run-at-time 0 nil (lambda () (require 'romacs-agent) (romacs-agent-restore-soon)))))))
-  (add-hook 'after-init-hook #'romacs-agent--restore-at-startup))
 
 (defun romacs-agent-sessions ()
   "Every known session, newest first."

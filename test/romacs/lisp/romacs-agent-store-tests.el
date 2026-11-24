@@ -893,6 +893,24 @@ has it: in a transaction of its own, after the statement FIRST when given."
                       (format "romacs-agent-store: filled 0\nromacs-agent-store: marked %s\n" one))
                      (list one))))))
 
+(ert-deftest romacs-agent-store-gui-start-restores-marks-without-a-supervisor ()
+  (let* ((root (make-temp-file "romacs-cold-start-" t))
+         (process-environment (copy-sequence process-environment))
+         (noninteractive nil)
+         (restored nil))
+    (setenv "XDG_STATE_HOME" (expand-file-name "state" root))
+    (setenv "XDG_RUNTIME_DIR" (expand-file-name "run" root))
+    (unwind-protect
+        (cl-letf (((symbol-function 'run-at-time) (lambda (_time _repeat then) (funcall then)))
+                  ((symbol-function 'romacs-agent-restore-soon) (lambda () (setq restored t))))
+          (romacs-agent--marks-known)
+          (romacs-agent--restore-at-startup)
+          (should-not restored)
+          (romacs-agent-mark "aaaaaaaa-0000-4000-8000-000000000001" 'watches t)
+          (romacs-agent--restore-at-startup)
+          (should restored))
+      (delete-directory root t))))
+
 (ert-deftest romacs-agent-store-a-start-asks-of-the-marked-and-the-live-alone ()
   ;; Its marks known, an editor's start asks whether to load only the
   ;; sessions something waits on and those whose supervisor's socket is
