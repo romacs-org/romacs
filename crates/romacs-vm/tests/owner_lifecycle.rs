@@ -940,3 +940,6 @@ fn closing_an_owner_does_not_make_a_full_job_pool_queue_work() {
 
 #[path = "support/owner_lifecycle_table.rs"]
 mod table_walk;
+
+#[path = "support/owner_lifecycle_round_four.rs"]
+mod round_four;
