@@ -367,6 +367,10 @@ waits on (`romacs-agent-log-source-approvals').")
 (cl-defgeneric romacs-agent-log-source-chats (source)
   "SOURCE's chat buffers, a table by session id.")
 
+(cl-defgeneric romacs-agent-log-source-close (_source _id)
+  "Release SOURCE's resources for the chat of session ID."
+  nil)
+
 (cl-defgeneric romacs-agent-log-source-answers-p (_source _session _event)
   "Whether this editor answers SESSION's approval EVENT itself, by its
 policy, as SOURCE has it: no other source's requests."
@@ -1794,6 +1798,14 @@ FROM, nil at the session's start."
 (defun romacs-agent-log--buffer-name (session)
   (format "*agent: %s*" (or (romacs-agent-title session) (romacs-agent-id session))))
 
+(defun romacs-agent-log--unregister-chat ()
+  "Release this chat if it still owns its source's registration."
+  (let ((chats (romacs-agent-log-source-chats romacs-agent-log--source))
+        (id romacs-agent-log--session-id))
+    (when (eq (gethash id chats) (current-buffer))
+      (remhash id chats)
+      (romacs-agent-log-source-close romacs-agent-log--source id))))
+
 (defun romacs-agent-log-chat (session &optional later source)
   "SESSION's chat buffer, made when it has none, and drawn from its
 records now, or with LATER when a window first shows it.  SOURCE is
@@ -1818,6 +1830,7 @@ where the chat reads and acts on SESSION, this editor by default
         (romacs-working-show buffer buffer (romacs-agent-log--divider-marker) romacs-agent-log--thread-cols
                              (romacs-agent-log--work romacs-agent-log--state))
         (puthash (romacs-agent-id session) buffer chats)
+        (add-hook 'kill-buffer-hook #'romacs-agent-log--unregister-chat nil t)
         (add-hook 'window-buffer-change-functions #'romacs-agent-log--shown nil t)))
     (unless later (with-current-buffer buffer (romacs-agent-log--ensure-filled)))
     buffer))

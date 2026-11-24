@@ -152,15 +152,14 @@ date from it: the same record for its id each time."
 (add-hook 'romacs-agent-client-follow-functions #'romacs-agent-remote--followed)
 
 (cl-defmethod romacs-agent-log-source-fill ((source romacs-agent-remote) session)
-  "Follow SESSION on SOURCE's service, drawn as it is told; no longer once
-the chat is killed."
-  (let ((id (romacs-agent-id session)))
-    (add-hook 'kill-buffer-hook
-              (lambda ()
-                (remhash id (romacs-agent-remote-chats source))
-                (when-let* ((client (romacs-agent-remote-client source))) (romacs-agent-client-unfollow client id)))
-              nil t)
-    (romacs-agent-client-follow (romacs-agent-remote-client source) id romacs-agent-log-turns romacs-agent-log-records)))
+  "Follow SESSION on SOURCE's service, drawing events as they arrive."
+  (romacs-agent-client-follow (romacs-agent-remote-client source) (romacs-agent-id session)
+                              romacs-agent-log-turns romacs-agent-log-records))
+
+(cl-defmethod romacs-agent-log-source-close ((source romacs-agent-remote) id)
+  "Stop following session ID on SOURCE's service."
+  (when-let* ((client (romacs-agent-remote-client source)))
+    (romacs-agent-client-unfollow client id)))
 
 (defvar-local romacs-agent-remote--earlier nil
   "While the chat's earlier turns are read, the read's own token: (END),

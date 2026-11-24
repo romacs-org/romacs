@@ -1836,5 +1836,23 @@ none when dropped.")
         (apply (caar callbacks) (cdar callbacks))
         (should (= headers queues 1))))))
 
+(ert-deftest romacs-agent-log-killed-chat-releases-its-registration ()
+  (require 'romacs-agent-remote)
+  (let ((romacs-agent-log--chats (make-hash-table :test #'equal)))
+    (dolist (source (list romacs-agent-log-local (romacs-agent-remote--make)))
+      (let* ((session (romacs-agent--make :id "cleanup" :harness 'claude :state 'idle))
+             (chats (romacs-agent-log-source-chats source))
+             (chat (romacs-agent-log-chat session t source)))
+        (unwind-protect
+            (progn
+              (kill-buffer chat)
+              (should-not (gethash "cleanup" chats))
+              (setq chat (romacs-agent-log-chat session t source))
+              (with-temp-buffer
+                (puthash "cleanup" (current-buffer) chats)
+                (kill-buffer chat)
+                (should (eq (gethash "cleanup" chats) (current-buffer)))))
+          (when (buffer-live-p chat) (kill-buffer chat)))))))
+
 (provide 'romacs-agent-log-tests)
 ;;; romacs-agent-log-tests.el ends here
