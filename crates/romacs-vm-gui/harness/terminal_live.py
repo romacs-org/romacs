@@ -38,12 +38,12 @@ def process_running(pid):
 
 
 def exercise_history_buffers(keys, control, extended, shell, visible, check, trace, report):
-    """Real bash: M-p recalls and re-runs its last line; C-2 M-x romacs-term
+    """Real bash: C-p recalls and re-runs its last line; C-2 M-x romacs-term
     makes *romacs-term*<2>, and each name switches back to its own terminal."""
     shell('n=0')
     shell('echo HISTORY_$((++n))')
     visible('HISTORY_1')
-    keys('-M', 'alt', 'p', '-m', 'alt')
+    control('p')
     keys('-k', 'Return')
     visible('HISTORY_2')
     control('2')
@@ -57,6 +57,7 @@ def exercise_history_buffers(keys, control, extended, shell, visible, check, tra
     extended('romacs-term')
     visible('SECOND_TERMINAL')
     report['checks'].append('TERMINAL_HISTORY_AND_NUMBERED_BUFFERS')
+    report.update(status='PASS', exit=0)
 
 
 def exercise_exit_resize(process, keys, control, extended, shell, visible, capture,
@@ -271,18 +272,17 @@ def check_leave(keys, control, shell, visible, capture, trace, report):
     visible('COPIED:TOP_SENTINEL')
     capture('leave-returned', cursor=False)
     report['checks'] += ['ISEARCH_AND_M_W_COPY_FROM_THE_SCROLLBACK', 'TYPING_RETURNS_TO_THE_PROMPT']
-    # Motion keys stay with Emacs at the prompt, as in shell-mode: C-p moves
-    # into the scrollback, C-n back; typing then runs at the prompt.
-    control('p')
-    control('p')
-    control('n')
+    # In input mode the prompt's C-p is bash's: it recalls the last line.
     shell('printf "TYPED_%s\\n" AWAY')
     visible('TYPED_AWAY')
-    report['checks'] += ['C_P_C_N_MOVE_AT_THE_PROMPT', 'TYPING_AFTER_MOVING_RUNS_AT_THE_PROMPT']
+    control('p')
+    keys('-k', 'Return')
+    fio.wait(lambda: sum('TYPED_AWAY' in row for row in ff.current_rows(trace())) >= 2, 30, 'C-p recalls the last command', None)
+    report['checks'].append('C_P_IS_BASH_S_IN_INPUT_MODE')
     # Up stays bash's history: the last command runs again.
     keys('-k', 'Up')
     keys('-k', 'Return')
-    fio.wait(lambda: sum('TYPED_AWAY' in row for row in ff.current_rows(trace())) >= 2, 30, 'Up recalls the last command', None)
+    fio.wait(lambda: sum('TYPED_AWAY' in row for row in ff.current_rows(trace())) >= 3, 30, 'Up recalls the last command', None)
     report['checks'].append('UP_RECALLS_BASH_HISTORY')
     # A program the shell runs in the foreground gets C-p: Python's REPL
     # recalls its own history with it.
@@ -381,7 +381,7 @@ def main():
     parser.add_argument('--prompt-grow', action='store_true',
                         help='under --loadup (fido-vertical), a growing minibuffer must not resize the pty')
     parser.add_argument('--history-buffers', action='store_true',
-                        help='M-p recalls the shell history; numeric prefixes choose the terminal')
+                        help='C-p recalls the shell history; numeric prefixes choose the terminal')
     args = parser.parse_args()
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)

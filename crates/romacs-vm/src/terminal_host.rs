@@ -576,10 +576,7 @@ impl Vm {
         // The route's map, then the global map, as the command loop's lookup:
         // `romacs-term-send-key' directly, or a global command the route
         // remaps to it (`self-insert-command' for non-ASCII characters).
-        // While the shell itself has the terminal (its prompt), the shell
-        // route keeps `romacs-term-shell-exceptions' for Emacs too.
-        let shell = !alternate && self.terminal_input_state(session).is_ok_and(|s| s.shell_foreground);
-        let route = value(self, if alternate { "romacs-term--alternate" } else if shell { "romacs-term--shell" } else { "romacs-term--passthrough" })?;
+        let route = value(self, if alternate { "romacs-term--alternate" } else { "romacs-term--passthrough" })?;
         let global = self.slots[self.names["#:vm2-global-keymap"]].value;
         // Events with default bindings, as the reader's `key-binding'; remaps
         // without, as `command-remapping'.
