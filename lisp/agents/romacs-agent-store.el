@@ -90,17 +90,20 @@ has made it."
 
 (define-error 'romacs-agent-store-unread "The agents' store could not be read")
 
-(defun romacs-agent-store--readable (what)
+(defun romacs-agent-store--readable (what &optional listing)
   "The store opened to read, or nil when there is none.  A store there
 that will not open (of another version until the writer makes it again,
 a lock timed out) signals `romacs-agent-store-unread' with WHAT, naming
-what was read: unread rows are never taken for no rows."
+what was read: unread rows are never taken for no rows.  For a LISTING
+(which sessions have rows), so does one the editor's writer is still to
+make: absent there is not yet, not none, and a start waits for it."
   (or (condition-case err (romacs-agent-store--open)
         (error (signal 'romacs-agent-store-unread (list what (error-message-string err)))))
       ;; There unless known absent: a link to one out of reach is there; a
       ;; lookup that fails is no proof of absence.
-      (when (condition-case err (file-attributes (romacs-agent-store--file))
-              (error (signal 'romacs-agent-store-unread (list what (error-message-string err)))))
+      (when (or (and listing (romacs-agent-writer-queued-p))
+                (condition-case err (file-attributes (romacs-agent-store--file))
+                  (error (signal 'romacs-agent-store-unread (list what (error-message-string err))))))
         (signal 'romacs-agent-store-unread (list what "the store could not be opened")))))
 
 (defconst romacs-agent-store-patient 60000
@@ -409,9 +412,11 @@ manifest."
             :seq (let ((seq (plist-get state :seq))) (and (integerp seq) seq))))))
 
 (defun romacs-agent-store--missing ()
-  "The directories of recorded sessions that have no row."
+  "The directories of recorded sessions that have no row.  A store that
+cannot be read signals `romacs-agent-store-unread': its rows unknown,
+none is taken for missing."
   (let ((rows (make-hash-table :test #'equal)))
-    (when-let* ((db (romacs-agent-store--open)))
+    (when-let* ((db (romacs-agent-store--readable 'missing t)))
       (dolist (row (sqlite-select db "select id from sessions")) (puthash (car row) t rows)))
     (cl-remove-if (lambda (dir) (gethash (file-name-nondirectory dir) rows))
                   (and (file-directory-p (romacs-agent--state-root))
@@ -526,7 +531,9 @@ else every session with no row and every marked one, asked here."
     ;; What it said lost or cut short: asked here, the rows missing and
     ;; every marked session, one it marked before it stopped among them.
     (romacs-agent-store--load-missing
-     (append (mapcar #'file-name-nondirectory (romacs-agent-store--missing))
+     (append (mapcar #'file-name-nondirectory
+                     ;; Unread: none taken for missing, the marked alone.
+                     (ignore-error romacs-agent-store-unread (romacs-agent-store--missing)))
              ;; Its marks so far, known whole or not.
              (when-let* ((marked (romacs-agent--marked t))) (hash-table-keys marked)))
      t)))
@@ -552,7 +559,7 @@ waited on (`romacs-agent--marks-reconcile').  Not SAID, every recorded
 session with no row, asked here."
   (let ((idle (null romacs-agent--restore-pending)))
     (dolist (dir (if said (mapcar (lambda (id) (expand-file-name id (romacs-agent--state-root))) ids)
-                   (romacs-agent-store--missing)))
+                   (ignore-error romacs-agent-store-unread (romacs-agent-store--missing))))
       ;; One gone (a mark it left): nothing to load, nor to know as loaded.
       (unless (or (gethash (file-name-nondirectory dir) romacs-agent--sessions)
                   (not (file-directory-p dir))
@@ -574,7 +581,7 @@ only the live and waiting sessions, the others shown as their rows land;
 one still missing a row after a fill is loaded as it is.  A store that
 cannot be read signals `romacs-agent-store-unread': a start then waits
 for it, never loading every session as unlisted."
-  (when-let* ((db (romacs-agent-store--readable dir)))
+  (when-let* ((db (romacs-agent-store--readable dir t)))
     (or (and (sqlite-select db "select 1 from sessions where id = ?" (list (file-name-nondirectory dir))) t)
         (and romacs-agent--restoring (not noninteractive)
              (progn (unless (or romacs-agent-store--filled (process-live-p romacs-agent-store--filling))
@@ -1011,7 +1018,7 @@ with REQUEST, or nil."
   "The ids of the sessions with a row, as a table: one query, however many.
 A store that cannot be read signals `romacs-agent-store-unread'."
   (let ((table (make-hash-table :test #'equal)))
-    (when-let* ((db (romacs-agent-store--readable 'listed)))
+    (when-let* ((db (romacs-agent-store--readable 'listed t)))
       (dolist (row (sqlite-select db "select id from sessions")) (puthash (car row) t table)))
     table))
 

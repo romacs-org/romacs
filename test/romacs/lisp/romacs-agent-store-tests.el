@@ -225,6 +225,12 @@ journal one turn long."
                 ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args))))
         (cl-letf (((symbol-function 'romacs-agent-store--open) #'ignore))
           (should-error (romacs-agent-store-listed-ids) :type 'romacs-agent-store-unread)
+          ;; Absent while the editor's writer is still to make it: not yet, not none.
+          (let ((file (romacs-agent-store--file)))
+            (cl-letf (((symbol-function 'romacs-agent-store--file) (lambda () (concat file ".absent")))
+                      ((symbol-function 'romacs-agent-writer-queued-p) (lambda () t)))
+              (should-error (romacs-agent-store-listed-ids) :type 'romacs-agent-store-unread)
+              (should-error (romacs-agent-store--missing) :type 'romacs-agent-store-unread)))
           (romacs-agent-restore-soon)
           (should-not romacs-agent--restoring)
           (should (zerop (hash-table-count romacs-agent--sessions)))
