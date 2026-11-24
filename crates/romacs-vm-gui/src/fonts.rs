@@ -92,7 +92,8 @@ pub struct Display {
     /// (residency.rs).
     images: std::sync::Arc<romacs_imaging::decode::SemanticImageDecoder>,
     decoded: residency::Shared,
-    next_image: u64,
+    /// How many image ids the master has allocated.
+    next_image: u32,
     /// The decode worker: images sized from their headers decode there,
     /// off the VM, and their results wait here until taken.
     worker: Option<Worker>,
@@ -205,11 +206,12 @@ impl Display {
         use romacs_display_protocol::image_diagnostic::{ImageDiagnosticSubject, ImageFormatName, ImageLoadIdentity};
         use romacs_display_protocol::{EncodedBytes, ImageAnimationPolicy, ImageSequenceId};
         use romacs_imaging::decode::{SemanticImageRequest, SemanticImageSource};
-        // The renderer's image ids are 32 bits; the VM's take the upper half,
-        // apart from those the renderer allocates for itself (its toolbar).
-        if self.next_image >= u64::from(u32::MAX >> 1) { return Err("too many images loaded".into()); }
+        // The master's image ids are its own space of the renderer's 32-bit
+        // ids, apart from the renderer's toolbar and the owners' slots.
+        let id = romacs_display_protocol::pane_picture::ImageIdSpace::Master.id(self.next_image)
+            .ok_or("too many images loaded")?;
         self.next_image += 1;
-        let id = (1 << 31) + self.next_image;
+        let id = u64::from(id.get());
         let (source, subject) = match query.source {
             romacs_vm::ImageSource::File(path) => {
                 let path = path.to_string_lossy().into_owned();

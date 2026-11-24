@@ -10,7 +10,7 @@ mod alternative_state_tests;
 #[path = "resolver/tests/fontset_test.rs"]
 mod fontset_tests;
 
-use crate::instance::{FontInstanceInterner, FontInstanceProperties};
+use crate::instance::{FontIdBase, FontInstanceInterner, FontInstanceProperties};
 use crate::style::{FontRequest, RequestKey, style_score};
 use romacs_layout_input::{Alternatives, FontAlternativeState, FontDef, FontSelectionAttribute, FontSelectionState, FontsetState, OpenedDefFont};
 use std::sync::Arc;
@@ -243,10 +243,19 @@ impl std::fmt::Debug for FontResolver {
 
 impl FontResolver {
     pub fn new() -> Result<Self, FontResolveError> {
+        Self::with_font_base(FontIdBase::MASTER)
+    }
+
+    /// A resolver whose fonts take BASE's ids.
+    ///
+    /// # Errors
+    ///
+    /// When the platform's font catalog or `FreeType` is unavailable.
+    pub fn with_font_base(base: FontIdBase) -> Result<Self, FontResolveError> {
         catalog::handle().ok_or(FontResolveError::CatalogUnavailable)?;
         Ok(Self {
             library: freetype::Library::init().map_err(|_| FontResolveError::CatalogUnavailable)?,
-            interner: FontInstanceInterner::default(),
+            interner: FontInstanceInterner::with_base(base),
             selection_order: FontSelectionState::default(),
             alternatives: FontAlternativeState::default(),
             fontsets: Arc::default(),
