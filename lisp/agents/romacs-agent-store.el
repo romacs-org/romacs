@@ -934,7 +934,8 @@ was asked for meanwhile."
   "Set the title in the row of the session ID names to TITLE, here, and
 nothing else of it.  A failure signals."
   (let ((db (or (romacs-agent-store--open) (error "No agents store to keep a title in"))))
-    (sqlite-execute db "update sessions set title = ? where id = ?" (list title id))
+    (sqlite-execute db "update sessions set rowid = (select max(rowid) + 1 from sessions),
+                       title = ? where id = ?" (list title id))
     t))
 
 (defun romacs-agent-store--settlement (dir)
@@ -948,7 +949,8 @@ nothing else of it.  A failure signals."
   "Project ID's settlement from DIR, preserving the rest of its row."
   (when-let* ((fields (romacs-agent-store--settlement dir))
               (db (or (romacs-agent-store--open) (error "No agents store to keep settlement"))))
-    (sqlite-execute db "update sessions set seen_seq = ?, settled_seq = ?, resume_time = ? where id = ?"
+    (sqlite-execute db "update sessions set rowid = (select max(rowid) + 1 from sessions),
+                       seen_seq = ?, settled_seq = ?, resume_time = ? where id = ?"
                     (append fields (list id)))
     fields))
 
@@ -1037,8 +1039,8 @@ A store that cannot be read signals `romacs-agent-store-unread'."
 
 (defun romacs-agent-store-rows-since (place)
   "(IDS . PLACE): the ids of the sessions whose rows were written after
-PLACE (a rowid: a row written again takes a new one), nil for none yet,
-and the place after them; nil with no listing to ask."
+PLACE, and the place after them.  Inserts, replacements and updates
+take a new rowid.  Nil PLACE starts at the end; nil result means no listing."
   (when-let* ((db (romacs-agent-store--open)))
     (if (null place)
         (cons nil (or (caar (sqlite-select db "select max(rowid) from sessions")) 0))

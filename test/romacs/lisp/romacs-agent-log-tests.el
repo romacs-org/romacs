@@ -1814,5 +1814,45 @@ none when dropped.")
     (search-forward "[id]")
     (should (get-text-property (1+ (match-beginning 0)) 'face))))
 
+(ert-deftest romacs-agent-log-batches-live-chrome ()
+  (romacs-agent-log-tests--with
+    (let* ((romacs-agent-log--title (romacs-agent-title session))
+          (romacs-agent-log--ticker nil)
+          (headers 0) (queues 0) callbacks
+          (header (symbol-function 'romacs-agent-log--header-snapshot))
+          (romacs-agent-log-separator-rows-function (lambda () (cl-incf queues) nil)))
+      (setq romacs-agent-log--filled t)
+      (cl-letf (((symbol-function 'romacs-agent-log--header-snapshot)
+                 (lambda (session) (cl-incf headers) (funcall header session)))
+                ((symbol-function 'run-at-time)
+                 (lambda (delay _repeat function &rest args)
+                   (when (equal delay 0) (push (cons function args) callbacks))
+                   'timer)))
+        (dolist (text '("first " "second " "third"))
+          (romacs-agent-log--draw-live session (list :type 'delta :text text)))
+        (should (string-search "first second third" (romacs-agent-log-tests--transcript)))
+        (should (= headers queues 0))
+        (should (= (length callbacks) 1))
+        (apply (caar callbacks) (cdar callbacks))
+        (should (= headers queues 1))))))
+
+(ert-deftest romacs-agent-log-killed-chat-releases-its-registration ()
+  (require 'romacs-agent-remote)
+  (let ((romacs-agent-log--chats (make-hash-table :test #'equal)))
+    (dolist (source (list romacs-agent-log-local (romacs-agent-remote--make)))
+      (let* ((session (romacs-agent--make :id "cleanup" :harness 'claude :state 'idle))
+             (chats (romacs-agent-log-source-chats source))
+             (chat (romacs-agent-log-chat session t source)))
+        (unwind-protect
+            (progn
+              (kill-buffer chat)
+              (should-not (gethash "cleanup" chats))
+              (setq chat (romacs-agent-log-chat session t source))
+              (with-temp-buffer
+                (puthash "cleanup" (current-buffer) chats)
+                (kill-buffer chat)
+                (should (eq (gethash "cleanup" chats) (current-buffer)))))
+          (when (buffer-live-p chat) (kill-buffer chat)))))))
+
 (provide 'romacs-agent-log-tests)
 ;;; romacs-agent-log-tests.el ends here

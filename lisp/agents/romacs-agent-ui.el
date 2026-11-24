@@ -869,7 +869,7 @@ workers' states, which its own events do not tell it, among it."
               ((buffer-live-p buffer))
               ;; A copy a journal is replayed into names the same buffer.
               ((eq (buffer-local-value 'romacs-agent-log--session buffer) session)))
-    (with-current-buffer buffer (romacs-agent-log--header-show))))
+    (with-current-buffer buffer (romacs-agent-log--chrome-soon))))
 
 (defun romacs-agent-ui--headers-remake ()
   "Make every chat's header again, a transcript's view's too, whose

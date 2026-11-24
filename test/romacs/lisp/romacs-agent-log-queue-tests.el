@@ -132,6 +132,8 @@
           (dotimes (_ 3)
             (setf (romacs-agent-state session) 'idle)
             (romacs-agent--dispatch session))
+          (when (timerp romacs-agent-log--chrome-timer)
+            (timer-event-handler romacs-agent-log--chrome-timer))
           (should-not (romacs-agent-log-queue-tests--rows))))
       (should (equal (nreverse sent) '("second, edited" "third")))
       (should-not (romacs-agent-queue session))

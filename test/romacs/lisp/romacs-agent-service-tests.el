@@ -1099,3 +1099,37 @@ a state root of its own, and a service of its own on `socket'."
       (should-not (gethash "mixed" romacs-agent--held-notes)))))
 
 ;;; romacs-agent-service-tests.el ends here
+
+(ert-deftest romacs-agent-service-keeps-unchanged-pending-projections ()
+  (romacs-agent-service-tests--with
+    (let* ((session (mk "followed" 'waiting-approval))
+           (approvals (romacs-agent-approvals session))
+           (subscription (romacs-agent-service--subscription-make :cutoff 0))
+           (project (symbol-function 'romacs-agent-service--bounded-request))
+           (projections 0) notices)
+      (cl-flet ((ask (path)
+                  (puthash "r" (romacs-agent-rpc-object "method" "can_use_tool"
+                                                       "tool_name" "Read"
+                                                       "input" (romacs-agent-rpc-object "path" path))
+                           approvals)))
+        (ask "/before")
+        (setf (romacs-agent-service--subscription-pending subscription)
+              (romacs-agent-service--requests session))
+        (cl-letf (((symbol-function 'romacs-agent-service--subscriptions)
+                   (lambda (_) (list (cons nil subscription))))
+                  ((symbol-function 'romacs-agent-service--bounded-request)
+                   (lambda (request) (cl-incf projections) (funcall project request)))
+                  ((symbol-function 'romacs-agent-service--notify)
+                   (lambda (_rpc _sub _id method params)
+                     (when (equal method "agents/pending.added") (push (gethash "request" params) notices)))))
+          (dotimes (index 3)
+            (romacs-agent-service--unit-event "followed" session
+                                              (list :type 'delta :text "output" :seq (1+ index) :last t)))
+          (should (= projections 0))
+          (should-not notices)
+          (ask "/after")
+          (romacs-agent-service--unit-event "followed" session
+                                            '(:type approval :request-id "r" :tool "Read"
+                                              :description "updated" :seq 4 :last t))
+          (should (= projections (length notices) 1))
+          (should (equal (gethash "reason" (gethash "tool" (car notices))) "updated")))))))
