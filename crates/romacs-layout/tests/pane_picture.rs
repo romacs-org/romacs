@@ -3,6 +3,8 @@
 //! slot's receiver accepts, drawn as the master would lay out the same
 //! window (commits 1a-1 and 1a-2; design O1b.md rev 3, §2.3, §6.2).
 //!
+//! `PanePicture::encode(&self) -> Result<Vec<u8>, PictureError>` supplies the wire bytes.
+//!
 //! The interface these tests drive beyond `romacs_display_protocol::
 //! pane_picture` (see `romacs-display-protocol/src/tests/pane_picture_test.rs`):
 //!
@@ -98,7 +100,8 @@ fn a_laid_out_pane_round_trips_and_draws_as_the_masters_window() {
         PaneFrame { frame: owned, animations: vec![], submitted: None },
         DisplayWindowId::new(OWN.cast_signed()),
     );
-    let decoded = PanePicture::decode(&picture.encode(), SLOT).expect("slot SLOT's receiver accepts its owner's picture");
+    let bytes = picture.encode().unwrap();
+    let decoded = PanePicture::decode(&bytes, SLOT).expect("slot SLOT's receiver accepts its owner's picture");
     assert_eq!(decoded, picture);
     assert_eq!((decoded.width, decoded.height), (400, 100));
     // The same window laid out under the master's id, by an engine of the

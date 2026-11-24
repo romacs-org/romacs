@@ -2,68 +2,27 @@
 //! every window id relabelled to the master's, and decoding refuses what a
 //! receiver must not draw (design O1b.md rev 3, §2.3, §5).
 //!
-//! The interface these tests drive, in `crate::pane_picture`:
-//!
-//! ```ignore
-//! /// The format word: bytes 0..2 of every encoding, little-endian, before
-//! /// the Postcard body.
-//! pub const PANE_PICTURE_FORMAT: u16;
-//! /// The largest width or height a picture's box may have, logical px.
-//! pub const PANE_BOX_LIMIT: u32 = 16_384;
-//!
-//! #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-//! pub struct PaneHead { pub owner: u64, pub window: u64, pub view: u64,
-//!                       pub request: u64, pub v: u64, pub c: u64 }
-//!
-//! /// What the owner laid out for one pane: the frame, and what travels
-//! /// beside it (`thread_comm`'s text animations; the coverage receipt).
-//! pub struct PaneFrame {
-//!     pub frame: FrameGlyphBuffer,
-//!     pub animations: Vec<(u64, TextAnimation)>,
-//!     pub submitted: Option<SubmittedWindow>,
-//! }
-//!
-//! #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-//! pub struct PanePicture { /* the fields of O1b.md §2.3, all pub */ }
-//!
-//! #[derive(Debug)]
-//! pub enum PictureError {
-//!     Malformed(..),            // payload the writer's choice; truncation lands here
-//!     UnknownFormat(u16),
-//!     MissingFace(FaceId),
-//!     FontOutsideSlot(ResolvedFontId),
-//!     ImageOutsideSlot(ImageId),
-//!     BoxTooLarge { width: u32, height: u32 },
-//! }
-//!
-//! impl PanePicture {
-//!     /// OWN_ID relabelled to `head.window` in glyph `window_id`,
-//!     /// `slot_id.window_id`, the cursor, each animation's `window` and
-//!     /// its key's low 32 bits, and `submitted.window_id`. The cursor is
-//!     /// the frame's `window_cursors` entry for OWN_ID.
-//!     pub fn from_frame(head: PaneHead, frame: PaneFrame, own_id: DisplayWindowId) -> Self;
-//!     /// The frame a pane draws: the carried fields, the cursor as the one
-//!     /// `window_cursors` entry.
-//!     pub fn into_frame(self) -> FrameGlyphBuffer;
-//!     /// Unvalidated: format word, then Postcard.
-//!     pub fn encode(&self) -> Vec<u8>;
-//!     /// Validated against owner slot SLOT: every glyph face id in
-//!     /// `faces`; every font id (`fonts` keys and ids, `char_fonts`,
-//!     /// `shaped_clusters`, faces' `default_resolved_font_id`) and image
-//!     /// id in `(SLOT+1) << 24 .. (SLOT+2) << 24`; the box at most
-//!     /// `PANE_BOX_LIMIT` each way.
-//!     pub fn decode(bytes: &[u8], slot: u8) -> Result<Self, PictureError>;
-//! }
-//! ```
+//! The interface these tests expect in `crate::pane_picture`:
+//! - `ImageIdSpace` is a copyable enum with `Renderer`, `Master` and `Owner(u8)`.
+//!   Its `id(index: u32) -> Option<ImageId>` uses the zero-based index in
+//!   the image ranges of O1b.md §4.4.1 (A2).
+//! - `PanePicture::encode(&self) -> Result<Vec<u8>, PictureError>` writes the
+//!   little-endian format word, then Postcard.
+//! - `PanePicture::decode(bytes: &[u8], slot: u8) -> Result<Self, PictureError>`
+//!   validates font and image IDs in their own ranges. It returns
+//!   `PictureError::UnsupportedGlyph` for Video, Xwidget, Surface or Terminal,
+//!   and `PictureError::MemoryFont` for a memory-backed outline in the font table.
+//! - `FrameGlyph::image_id(&self) -> Option<ImageId>` returns an image glyph's ID.
 use crate::face::Face;
 use crate::font::{
-    CharFontTable, FontCatalogGeneration, FontFileAsset, FontOutlineAsset, FontReplay,
+    CharFontTable, FontBackendKind, FontCatalogGeneration, FontFileAsset, FontMemoryAsset,
+    FontOutlineAsset, FontReplay,
     FontSlantKind, FontUnderline, ResolvedCharGlyph, ResolvedFont, ResolvedFontAdvance,
     ResolvedFontId, ResolvedFontIdentity,
     ResolvedFontTable, ResolvedGlyph, ResolvedGlyphId, ShapedClusterTable,
 };
 use crate::pane_picture::{
-    PaneFrame, PaneHead, PanePicture, PictureError, PANE_BOX_LIMIT, PANE_PICTURE_FORMAT,
+    ImageIdSpace, PaneFrame, PaneHead, PanePicture, PictureError, PANE_BOX_LIMIT, PANE_PICTURE_FORMAT,
 };
 use crate::submission::SubmittedWindow;
 use crate::text_animation::{LogoColours, TextAnimation, TextAnimationKind};
@@ -75,8 +34,9 @@ use crate::{
     XwidgetPresentationGeometry,
 };
 use rustc_hash::FxHashMap as HashMap;
+use std::sync::Arc;
 
-/// The owner's slot, and the first id it may use.
+/// The owner's slot and its first font ID.
 const SLOT: u8 = 3;
 const BASE: u32 = (SLOT as u32 + 1) << 24;
 /// The window as the owner laid it out, and as the master knows it: both
@@ -86,7 +46,10 @@ const MASTER: DisplayWindowId = DisplayWindowId::new(900);
 
 const PLAIN: FaceId = FaceId::new(0);
 const EMOJI: FaceId = FaceId::new(21);
-const IMAGE: ImageId = ImageId::new(BASE + 7);
+const MASTER_IMAGE_BASE: u32 = 1 << 24;
+const OWNER_IMAGE_BASE: u32 = 1 << 31;
+const IMAGE_SLOT_SPAN: u32 = 1 << 23;
+const IMAGE: ImageId = ImageId::new(OWNER_IMAGE_BASE + SLOT as u32 * IMAGE_SLOT_SPAN + 7);
 const HEART: &str = "\u{2764}\u{FE0F}";
 
 fn head() -> PaneHead {
@@ -135,9 +98,18 @@ fn cursor(window: DisplayWindowId) -> WindowCursor {
     }
 }
 
-/// A frame of one window, WINDOW, with a glyph of every kind, its faces,
-/// fonts in `SLOT`, a fringe bitmap and its cursor. Laid out by hand: the
-/// codec must carry what any layout makes.
+fn image_glyph(window: DisplayWindowId, image_id: ImageId) -> FrameGlyph {
+    FrameGlyph::Image {
+        window_id: window, row_role: GlyphRowRole::Text,
+        clip_rect: Some(Rect::new(0.0, 0.0, 320.0, 184.0)), slot_id: Some(slot(window, 1, 0)),
+        image_id, source_rect: ImageSourceRect::FULL,
+        slot_rect: Rect::new(0.0, 16.0, 32.0, 32.0), box_rect: Rect::new(0.0, 16.0, 32.0, 32.0),
+        x: 0.0, y: 16.0, width: 32.0, height: 32.0, face_id: PLAIN, box_vertical_edges: BoxVerticalEdges::Unboxed,
+    }
+}
+
+/// A frame of one window, WINDOW, with supported glyphs, their faces,
+/// fonts in `SLOT`, a fringe bitmap and its cursor.
 fn frame(window: DisplayWindowId) -> FrameGlyphBuffer {
     let mut frame = FrameGlyphBuffer::with_size(320.0, 200.0);
     let (role, clip, edges) = (GlyphRowRole::Text, Some(Rect::new(0.0, 0.0, 320.0, 184.0)), BoxVerticalEdges::Unboxed);
@@ -164,33 +136,7 @@ fn frame(window: DisplayWindowId) -> FrameGlyphBuffer {
             bidi_level: 0, x: 24.0, y: 0.0, width: 296.0, height: 16.0, bg: colour,
             face_id: PLAIN, box_vertical_edges: edges,
         },
-        FrameGlyph::Image {
-            window_id: window, row_role: role, clip_rect: clip, slot_id: Some(slot(window, 1, 0)),
-            image_id: IMAGE, source_rect: ImageSourceRect::FULL,
-            slot_rect: Rect::new(0.0, 16.0, 32.0, 32.0), box_rect: Rect::new(0.0, 16.0, 32.0, 32.0),
-            x: 0.0, y: 16.0, width: 32.0, height: 32.0, face_id: PLAIN, box_vertical_edges: edges,
-        },
-        FrameGlyph::Video {
-            window_id: window, row_role: role, clip_rect: clip, slot_id: Some(slot(window, 1, 4)),
-            video_id: VideoId::new(2), x: 32.0, y: 16.0, width: 32.0, height: 32.0, opacity: 0.5,
-            face_id: PLAIN, box_vertical_edges: edges,
-        },
-        FrameGlyph::Xwidget {
-            window_id: window, row_role: role, slot_id: Some(slot(window, 1, 8)),
-            xwidget_id: XwidgetId::new(3), webview_id: WebViewId::new(4),
-            presentation: XwidgetPresentationGeometry::new(
-                GeometryPoint::<FrameSpace, LogicalPixels>::from_px(64.0, 16.0).unwrap(),
-                XwidgetContentExtent::new(60.0, 40.0).unwrap(),
-                XwidgetLayoutAdvance::new(Px(64.0)).unwrap(),
-                None,
-            ),
-            face_id: PLAIN, box_vertical_edges: edges,
-        },
-        FrameGlyph::Surface {
-            window_id: window, row_role: role, clip_rect: clip, slot_id: Some(slot(window, 1, 16)),
-            surface_id: SurfaceId::new(5), x: 128.0, y: 16.0, width: 32.0, height: 32.0,
-            face_id: PLAIN, box_vertical_edges: edges,
-        },
+        image_glyph(window, IMAGE),
         FrameGlyph::FringeBitmap {
             window_id: window, row_role: role, clip_rect: clip, x: 0.0, y: 48.0, width: 8.0,
             height: 16.0, bitmap_index: 1, face_id: PLAIN, side: FringeSide::Left,
@@ -272,13 +218,13 @@ fn picture() -> PanePicture {
 
 /// PICTURE through the wire, as slot `SLOT`'s receiver decodes it.
 fn through_wire(picture: &PanePicture) -> Result<PanePicture, PictureError> {
-    PanePicture::decode(&picture.encode(), SLOT)
+    PanePicture::decode(&picture.encode().unwrap(), SLOT)
 }
 
 #[test]
 fn a_pane_picture_round_trips_with_every_id_the_masters() {
     let picture = picture();
-    let bytes = picture.encode();
+    let bytes = picture.encode().unwrap();
     assert_eq!(bytes[..2], PANE_PICTURE_FORMAT.to_le_bytes(), "the format word comes first");
     let decoded = PanePicture::decode(&bytes, SLOT).expect("a well-formed picture decodes");
     assert_eq!(decoded, picture);
@@ -314,7 +260,7 @@ fn a_pane_picture_round_trips_with_every_id_the_masters() {
 
 #[test]
 fn truncated_bytes_are_malformed() {
-    let bytes = picture().encode();
+    let bytes = picture().encode().unwrap();
     assert!(PanePicture::decode(&bytes, SLOT).is_ok(), "the whole picture decodes");
     for cut in [0, 1, 2, bytes.len() / 2, bytes.len() - 1] {
         let result = PanePicture::decode(&bytes[..cut], SLOT);
@@ -324,7 +270,7 @@ fn truncated_bytes_are_malformed() {
 
 #[test]
 fn an_unknown_format_word_is_refused() {
-    let mut bytes = picture().encode();
+    let mut bytes = picture().encode().unwrap();
     let other = PANE_PICTURE_FORMAT.wrapping_add(1);
     bytes[..2].copy_from_slice(&other.to_le_bytes());
     let result = PanePicture::decode(&bytes, SLOT);
@@ -364,19 +310,134 @@ fn a_font_id_outside_the_owners_slot_is_refused() {
     }
 }
 
+fn assert_image_space(space: ImageIdSpace, first: u32, last: u32) {
+    assert_eq!(space.id(0), Some(ImageId::new(first)));
+    assert_eq!(space.id(last - first), Some(ImageId::new(last)));
+    assert_eq!(space.id(last - first + 1), None);
+}
+
+#[test]
+fn renderer_images_stay_below_master_images() {
+    assert_image_space(ImageIdSpace::Renderer, 1, MASTER_IMAGE_BASE - 1);
+}
+
+#[test]
+fn master_images_stay_between_renderer_and_owner_images() {
+    assert_image_space(ImageIdSpace::Master, MASTER_IMAGE_BASE, OWNER_IMAGE_BASE - 1);
+}
+
+#[test]
+fn owner_image_slots_have_distinct_bounds_and_refuse_slot_255() {
+    for slot in 0..254 {
+        let first = OWNER_IMAGE_BASE + u32::from(slot) * IMAGE_SLOT_SPAN;
+        assert_image_space(ImageIdSpace::Owner(slot), first, first + IMAGE_SLOT_SPAN - 1);
+    }
+    assert_image_space(ImageIdSpace::Owner(254), 0xff00_0000, 0xff7f_ffff);
+    assert_eq!(ImageIdSpace::Owner(255).id(0), None);
+}
+
+fn decode_image_for_slot(image: ImageId, slot: u8) -> Result<PanePicture, PictureError> {
+    let mut frame = FrameGlyphBuffer::with_size(320.0, 200.0);
+    frame.faces.insert(PLAIN, Face::new(PLAIN));
+    frame.glyphs.push(image_glyph(OWN, image));
+    let picture = PanePicture::from_frame(
+        head(),
+        PaneFrame { frame, animations: vec![], submitted: None },
+        OWN,
+    );
+    PanePicture::decode(&picture.encode().unwrap(), slot)
+}
+
+fn assert_image_refused(image: ImageId, slot: u8) {
+    let result = decode_image_for_slot(image, slot);
+    assert!(matches!(result, Err(PictureError::ImageOutsideSlot(id)) if id == image), "{image:?}: {result:?}");
+}
+
 #[test]
 fn an_image_id_outside_the_owners_slot_is_refused() {
-    assert!(through_wire(&picture()).is_ok());
-    for id in [ImageId::new(7), ImageId::new(BASE + (1 << 24))] {
-        let mut picture = picture();
-        for glyph in &mut picture.glyphs {
-            if let FrameGlyph::Image { ref mut image_id, .. } = *glyph {
-                *image_id = id;
-            }
-        }
-        let result = through_wire(&picture);
-        assert!(matches!(result, Err(PictureError::ImageOutsideSlot(image)) if image == id), "{id:?}: {result:?}");
-    }
+    assert!(decode_image_for_slot(IMAGE, SLOT).is_ok());
+    assert_image_refused(ImageId::new(MASTER_IMAGE_BASE + 1), SLOT);
+    assert_image_refused(ImageId::new(IMAGE.get() + IMAGE_SLOT_SPAN), SLOT);
+}
+
+#[test]
+fn an_image_id_in_the_owners_font_range_is_refused() {
+    assert_image_refused(ImageId::new(BASE + 7), SLOT);
+}
+
+#[test]
+fn master_image_ids_are_refused_in_owner_slot_127() {
+    assert_image_refused(ImageId::new(MASTER_IMAGE_BASE + 1), 127);
+    // The previous master allocator issued this ID in slot 127's font range.
+    assert_image_refused(ImageId::new(OWNER_IMAGE_BASE + 1), 127);
+}
+
+fn assert_unsupported_glyph(glyph: FrameGlyph) {
+    let mut picture = picture();
+    picture.glyphs.push(glyph);
+    let result = through_wire(&picture);
+    assert!(matches!(result, Err(PictureError::UnsupportedGlyph)), "{result:?}");
+}
+
+#[test]
+fn a_video_glyph_is_refused() {
+    assert_unsupported_glyph(FrameGlyph::Video {
+        window_id: MASTER, row_role: GlyphRowRole::Text, clip_rect: None, slot_id: None,
+        video_id: VideoId::new(2), x: 32.0, y: 16.0, width: 32.0, height: 32.0, opacity: 0.5,
+        face_id: PLAIN, box_vertical_edges: BoxVerticalEdges::Unboxed,
+    });
+}
+
+#[test]
+fn an_xwidget_glyph_is_refused() {
+    assert_unsupported_glyph(FrameGlyph::Xwidget {
+        window_id: MASTER, row_role: GlyphRowRole::Text, slot_id: None,
+        xwidget_id: XwidgetId::new(3), webview_id: WebViewId::new(4),
+        presentation: XwidgetPresentationGeometry::new(
+            GeometryPoint::<FrameSpace, LogicalPixels>::from_px(64.0, 16.0).unwrap(),
+            XwidgetContentExtent::new(60.0, 40.0).unwrap(),
+            XwidgetLayoutAdvance::new(Px(64.0)).unwrap(),
+            None,
+        ),
+        face_id: PLAIN, box_vertical_edges: BoxVerticalEdges::Unboxed,
+    });
+}
+
+#[test]
+fn a_surface_glyph_is_refused() {
+    assert_unsupported_glyph(FrameGlyph::Surface {
+        window_id: MASTER, row_role: GlyphRowRole::Text, clip_rect: None, slot_id: None,
+        surface_id: SurfaceId::new(5), x: 128.0, y: 16.0, width: 32.0, height: 32.0,
+        face_id: PLAIN, box_vertical_edges: BoxVerticalEdges::Unboxed,
+    });
+}
+
+#[cfg(feature = "romacs-term")]
+#[test]
+fn a_terminal_glyph_is_refused() {
+    assert_unsupported_glyph(FrameGlyph::Terminal {
+        terminal_id: 1, x: 0.0, y: 0.0, width: 8.0, height: 16.0,
+    });
+}
+
+#[test]
+fn a_memory_backed_font_is_refused() {
+    let mut picture = picture();
+    let font = picture.fonts.get_mut(&ResolvedFontId(BASE)).unwrap();
+    font.identity = ResolvedFontIdentity::from_memory(FontBackendKind::CoreText, "test-font".into(), 0, None);
+    let asset = FontMemoryAsset::new("test-font", Arc::new(vec![0, 1, 0, 0]), 0).unwrap();
+    font.replay = FontReplay::Swash { asset: FontOutlineAsset::Memory(asset) };
+    let result = through_wire(&picture);
+    assert!(matches!(result, Err(PictureError::MemoryFont)), "{result:?}");
+}
+
+#[test]
+fn image_id_names_the_image_and_is_absent_on_a_char() {
+    let picture = picture();
+    let image = picture.glyphs.iter().find(|glyph| matches!(glyph, FrameGlyph::Image { .. })).unwrap();
+    let character = picture.glyphs.iter().find(|glyph| matches!(glyph, FrameGlyph::Char { .. })).unwrap();
+    assert_eq!(image.image_id(), Some(IMAGE));
+    assert_eq!(character.image_id(), None);
 }
 
 #[test]
