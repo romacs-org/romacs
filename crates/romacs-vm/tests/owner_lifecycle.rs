@@ -49,7 +49,7 @@ impl Master {
     fn eval(&mut self, source: &str) -> String {
         self.0
             .eval_source(source)
-            .and_then(|value| value.display())
+            .and_then(romacs_vm::Local::display)
             .unwrap_or_else(|error| panic!("{error}\n{source}"))
     }
 
@@ -64,7 +64,7 @@ impl Master {
     fn await_file(&mut self, path: &Path) {
         let start = Instant::now();
         while !path.exists() {
-            assert!(start.elapsed() < SETUP_TIMEOUT, "no marker at {path:?}");
+            assert!(start.elapsed() < SETUP_TIMEOUT, "no marker at {}", path.display());
             // Read transport traffic without dispatching master pings before
             // the owner has entered the intended turn.
             self.eval("(romacs--isolate-wait 0.01)");
@@ -308,7 +308,7 @@ fn killing_a_blocked_owner_uses_under_50ms_of_master_cpu() {
     let start = Instant::now();
     let cpu_start = thread_cpu();
     let result = master.0.eval_source("(owner-kill owner)");
-    let cpu = thread_cpu() - cpu_start;
+    let cpu = thread_cpu().checked_sub(cpu_start).unwrap();
     let wall = start.elapsed();
     eprintln!(
         "[measured] owner-kill master CPU {cpu:?}, wall {wall:?}, load1 {load}; \
@@ -433,6 +433,7 @@ fn three_second_owner_waits_answer_every_ping() {
     }
 }
 
+#[expect(clippy::float_cmp, reason = "the option's default is exactly 1.0, read back from Lisp")]
 fn check_wedge(name: &str, body: impl FnOnce(&str) -> String) {
     let markers = Markers::new();
     let mut master = Master::new();
