@@ -731,12 +731,12 @@ fn frame_total_lines(cx; optional frame: Value) {
 defsubr! { name = "window-system", gnu = "frame.c:415", effect = Reads,
 fn window_system(cx; optional frame: Value) { cx.windows().window_system(frame) }}
 defsubr! { name = "current-message", gnu = "editfns.c:3288", effect = Reads,
-fn current_message(cx) {
-    // In batch, message writes to stderr and the echo area stays empty.
-    let noninteractive = cx.intern("noninteractive");
-    if cx.variable_value(noninteractive)?.unwrap_or(Value::NIL) != Value::NIL { return Ok(Value::NIL); }
-    let echo = cx.intern(crate::prim::ECHO_AREA_MESSAGE);
-    Ok(cx.variable_value(echo)?.unwrap_or(Value::NIL))
+fn current_message(cx) { cx.current_message() }}
+
+// Return non-nil if the host can establish that echo sync has nothing to show.
+defsubr! { name = "romacs--echo-current-p", gnu = "romacs:echo", effect = Reads,
+fn romacs_echo_current_p(cx) {
+    Ok(if cx.echo_current() { Value::TRUE } else { Value::NIL })
 }}
 defsubr! { name = "internal-handle-focus-in", gnu = "keyboard.c:7891", effect = Reads,
 fn internal_handle_focus_in(cx, event: Value) {

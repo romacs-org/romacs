@@ -83,7 +83,7 @@ const FIELDS: &[(&str, Class)] = &[
     ("quit", Free), ("force_quit_count", Free), ("deferred_escapes", Free), ("quit_slots", Free),
     // Interned symbols, which no collection frees, and indices.
     ("face_keys", Free),
-    ("debug_event_slots", Free), ("keymap_generation", Free), ("process_jobs", Free), ("subprocesses", Free),
+    ("debug_event_slots", Free), ("echo_function_slots", Free), ("keymap_generation", Free), ("process_jobs", Free), ("subprocesses", Free),
     ("environment_snapshot", Free), ("trapped", Free), ("retrap", Free), ("doc_file", Free),
     ("terminal_host", Free), ("terminal_bindings", Root),
     // The buffer list's order: read at every mark and rewritten when objects

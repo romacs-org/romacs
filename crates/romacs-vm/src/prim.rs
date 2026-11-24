@@ -251,6 +251,12 @@ mod leaf {
         pub(crate) fn typing_begin(&mut self) {
             self.vm.typing_begin();
         }
+        pub(crate) fn current_message(&mut self) -> super::Out {
+            self.vm.current_message().map_err(Fault::Error)
+        }
+        pub(crate) fn echo_current(&mut self) -> bool {
+            self.vm.echo_current()
+        }
         /// The step that began last ends, LOCAL unless thrown out of (`Vm::typing_end').
         pub(crate) fn typing_end(&mut self, local: bool) {
             self.vm.typing_end(local);

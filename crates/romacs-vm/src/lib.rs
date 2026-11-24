@@ -1554,6 +1554,9 @@ pub struct Vm {
     /// The slots of `debug-on-event' and of the user signal events, in
     /// host::USER_SIGNAL_NAMES's order (`Vm::debug_event_mask').
     debug_event_slots: [usize; 3],
+    /// `current-message' and `minibuffer-depth''s symbol slots, the symbols
+    /// Lisp read since startup calls (`Vm::echo_current').
+    echo_function_slots: [usize; 2],
     /// Counts keymap stores and parent changes, GNU's two flushes of the
     /// reverse-map cache `where-is-internal' keeps (keymap.c where_is_cache).
     keymap_generation: u64,
@@ -1967,6 +1970,7 @@ impl Vm {
             quit_slots: [0; 3],
             face_keys: crate::prim::FaceKeys::EMPTY,
             debug_event_slots: [0; 3],
+            echo_function_slots: [0; 2],
             keymap_generation: 0,
             process_jobs: process_jobs::Jobs::default(),
             subprocesses: subprocess::Table::default(),
@@ -2126,10 +2130,7 @@ impl Vm {
         // already-read forms compile their bindings dynamically.
         vm.specials.extend(forwarded::C_SPECIALS.iter().map(|v| v.name)
             .filter(|name| !forwarded::NOT_SPECIAL.contains(name)).map(str::to_owned));
-        vm.quit_slots = ["quit-flag", "inhibit-quit", "throw-on-input"].map(|name| vm.slot(name));
-        vm.face_keys = crate::prim::FaceKeys::new(&mut vm);
-        let [usr2, usr1] = crate::host::USER_SIGNAL_NAMES;
-        vm.debug_event_slots = ["debug-on-event", usr2, usr1].map(|name| vm.slot(name));
+        vm.capture_symbol_slots();
         vm.declare_special_raw("inhibit-eol-conversion", Value::NIL);
         vm.declare_special_raw("text-quoting-style", Value::NIL);
         vm.declare_special_raw("internal--text-quoting-flag", Value::TRUE);
@@ -2220,6 +2221,16 @@ impl Vm {
         // retaining Plain here would mask an image's already-interned plist.
         vm.variable_redirects.clear();
         vm
+    }
+    /// The symbols the VM reads by slot from its first form on, interned in
+    /// this order: the quit polls', the face primitives', `debug-on-event''s
+    /// and the user signals', and the echo guard's public functions.
+    fn capture_symbol_slots(&mut self) {
+        self.quit_slots = ["quit-flag", "inhibit-quit", "throw-on-input"].map(|name| self.slot(name));
+        self.face_keys = crate::prim::FaceKeys::new(self);
+        let [usr2, usr1] = crate::host::USER_SIGNAL_NAMES;
+        self.debug_event_slots = ["debug-on-event", usr2, usr1].map(|name| self.slot(name));
+        self.echo_function_slots = ["current-message", "minibuffer-depth"].map(|name| self.slot(name));
     }
     /// Publish a semantic function-cell write atomically with both invalidators.
     /// Slot stamps retain precise source-macro dependencies; the world epoch

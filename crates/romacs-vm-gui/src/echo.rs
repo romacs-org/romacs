@@ -46,14 +46,20 @@ const LISP: &str = r#"(progn
                       (substring-no-properties text) ""))
         text)))
   (defun romacs--echo-sync ()
-    (let ((message (current-message)))
-      (unless (or (eq message romacs--echo-shown) (> (minibuffer-depth) 0))
-        (romacs--echo-display (and message (romacs--echo-printable message)))
-        t))))"#;
+    (unless (romacs--echo-current-p)
+      ;; Keep the Lisp checks when native reads cannot establish currency,
+      ;; including when either public function has been advised.
+      (let ((message (current-message)))
+        (unless (or (eq message romacs--echo-shown) (> (minibuffer-depth) 0))
+          (romacs--echo-display (and message (romacs--echo-printable message)))
+          t)))))"#;
 
 /// FORM, after LISP the first time. LISP holds strings, which keep a form
 /// from the source cache (source_cache.rs): it is read once per VM, and a
-/// key's clearing, with no string, is compiled once.
+/// key's clearing, with no string, is compiled once. Its body calls the
+/// `current-message' and `minibuffer-depth' `Vm::echo_current' checks;
+/// altering the reader (including `read-symbol-shorthands'), the evaluator
+/// or core macros before this install is outside that guard's contract.
 fn display(vm: &mut Vm, form: &str) -> Result<(), String> {
     if vm.eval_source(&format!("(and (fboundp 'romacs--echo-sync) (progn {form} t))"))?.is_nil() {
         vm.eval_source(LISP)?;
@@ -122,7 +128,113 @@ pub fn text(vm: &mut Vm) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use romacs_vm::CommandEvent;
+    use romacs_vm::{CommandEvent, HostEvent, HostFrame, HostInput, WindowEnd};
+    use std::{cell::RefCell, collections::VecDeque, rc::Rc};
+
+    struct EchoRead {
+        pending: bool,
+        keys: VecDeque<i64>,
+        paints: Rc<RefCell<Vec<String>>>,
+    }
+
+    impl HostInput for EchoRead {
+        fn input_pending(&mut self) -> bool { self.pending && !self.keys.is_empty() }
+        fn redisplay(&mut self, frame: HostFrame<'_>) -> Result<Vec<WindowEnd>, String> {
+            let echo = frame.frame.windows.iter().find(|window| window.snapshot.id == frame.minibuffer)
+                .ok_or("missing minibuffer window")?;
+            self.paints.borrow_mut().push(echo.snapshot.text.utf8.clone());
+            Ok(Vec::new())
+        }
+        fn next_event(&mut self, _: Option<std::time::Duration>) -> Result<HostEvent, String> {
+            self.keys.pop_front().map(|key| HostEvent::Key(CommandEvent::Character(key))).ok_or_else(|| "keys exhausted".into())
+        }
+    }
+
+    fn echo_read(vm: &mut Vm, pending: bool, keys: impl Into<VecDeque<i64>>) -> Rc<RefCell<Vec<String>>> {
+        install(vm).unwrap();
+        let paints = Rc::new(RefCell::new(Vec::new()));
+        vm.set_host_input(Some(Box::new(EchoRead { pending, keys: keys.into(), paints: Rc::clone(&paints) })));
+        paints
+    }
+
+    fn gnu_echo_read() -> Vm {
+        let boot = crate::test_world::Boot { echo_area: true, ..crate::test_world::Boot::LOADUP };
+        let (mut vm, loadup) = crate::test_world::chain(boot);
+        crate::test_home::private_home(&mut vm, "echo-read");
+        crate::startup::resume_loadup(&mut vm, boot.launch, loadup).unwrap();
+        vm
+    }
+
+    #[test]
+    fn a_pending_key_wait_paints_a_message_left_by_a_timer() {
+        std::thread::Builder::new().stack_size(64 << 20).spawn(|| {
+            let mut vm = gnu_echo_read();
+            let paints = echo_read(&mut vm, true, [97]);
+            vm.eval_source("(setq timer-list nil timer-idle-list nil)
+                            (run-with-timer 0 nil (lambda () (message \"tick\")))").unwrap();
+            assert_eq!(vm.eval_source("(read-event)").unwrap().display().unwrap(), "97");
+            assert_eq!(*paints.borrow(), ["tick"]);
+        }).unwrap().join().unwrap();
+    }
+
+    /// Advice on a public function the echo sync calls runs on an ordinary
+    /// wait and on a pending read alike, as the full path calls it: advice on
+    /// `current-message', on an uninterned `current-message' whose namesake
+    /// holds the primitive, and on `minibuffer-depth' while a minibuffer is
+    /// counted. Each case: its setup once, then the two reads' (KEY CALLS).
+    #[test]
+    fn advised_echo_functions_are_dispatched_on_ordinary_and_pending_reads() {
+        const ADVICE: &str = "(defvar romacs-test-calls 0)
+            (defun romacs-test-virtual (&rest _) (setq romacs-test-calls (1+ romacs-test-calls)) \"virtual message\")
+            (defun romacs-test-depth (&rest _) (setq romacs-test-calls (1+ romacs-test-calls)) 0)";
+        let cases = [
+            ("(advice-add 'current-message :around #'romacs-test-virtual)", "", ["(97 2)", "(97 3)"]),
+            ("(let ((primitive (symbol-function 'current-message)))
+                (advice-add 'current-message :around #'romacs-test-virtual)
+                (unintern \"current-message\" obarray)
+                (fset (intern \"current-message\") primitive))", "", ["(97 2)", "(97 3)"]),
+            ("(advice-add 'minibuffer-depth :around #'romacs-test-depth)",
+             "(setq romacs--minibuf-level 1) (message \"virtual message\") (setq romacs--echo-shown nil)", ["(97 1)", "(97 1)"]),
+        ];
+        for (setup, each, reads) in cases {
+            std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
+                let mut vm = gnu_echo_read();
+                install(&mut vm).unwrap();
+                vm.eval_source(ADVICE).unwrap();
+                vm.eval_source(setup).unwrap();
+                for pending in [false, true] {
+                    let paints = echo_read(&mut vm, pending, [97, 97]);
+                    vm.eval_source(&format!("(setq timer-list nil timer-idle-list nil) (message nil) (setq romacs--echo-shown nil romacs-test-calls 0) {each}")).unwrap();
+                    let read = "(list (romacs--read-host-event) romacs-test-calls)";
+                    assert_eq!(vm.eval_source(read).unwrap().display().unwrap(), reads[0], "{setup} pending {pending}");
+                    assert_eq!(*paints.borrow(), ["virtual message"], "{setup} pending {pending}");
+                    assert_eq!(vm.eval_source(read).unwrap().display().unwrap(), reads[1], "{setup} pending {pending}");
+                    assert_eq!(paints.borrow().len(), if pending { 1 } else { 2 }, "{setup} pending {pending}");
+                }
+            }).unwrap().join().unwrap();
+        }
+    }
+
+    #[test]
+    fn quail_guidance_is_painted_before_a_pending_continuation() {
+        std::thread::Builder::new().stack_size(64 << 20).spawn(|| {
+            let mut vm = gnu_echo_read();
+            let paints = echo_read(&mut vm, true, [39, 101]);
+            vm.eval_source("(erase-buffer)
+                (setq timer-list nil timer-idle-list nil romacs-test-quail-waits 0)
+                (activate-input-method \"latin-1-prefix\")
+                (setq input-method-use-echo-area t)
+                (advice-add 'romacs--wait-state :before
+                  (lambda () (when quail-translating
+                    (setq romacs-test-quail-waits (1+ romacs-test-quail-waits)))))
+                (message nil)").unwrap();
+            let command = crate::command::run(&mut vm).unwrap();
+            assert_eq!((command.command.as_deref(), command.signal), (Some("self-insert-command"), None));
+            assert_eq!(vm.eval_source("(list (buffer-string) romacs-test-quail-waits)").unwrap().display().unwrap(), "(\"é\" 2)");
+            assert_eq!(paints.borrow().len(), 1);
+            assert!(paints.borrow()[0].contains("AEIOUYaeiouy"), "{paints:?}");
+        }).unwrap().join().unwrap();
+    }
 
     fn workspace() -> (Vm, crate::command::Commands, crate::presentation::Presentation) {
         let mut vm = Vm::new();
