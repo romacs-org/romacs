@@ -49,6 +49,7 @@
 (declare-function romacs-agent-switch "romacs-agent-switch" ())
 (declare-function romacs-agent-resume-time "romacs-agent-tools" (session))
 (declare-function romacs-agent-tools--cancel-resume "romacs-agent-tools" (session &optional why))
+(declare-function romacs-agent-watch-unit "romacs-agent-watch" (session))
 
 ;;; Faces
 
@@ -351,7 +352,7 @@ new turn starts, and last turn's failures have been seen."
 
 (defun romacs-agent-ui--state-event-p (event)
   "Whether EVENT may change its session's state (`romacs-agent-ui--state')."
-  (or (memq (plist-get event :type) '(run session input approval answered done exit unstarted settled))
+  (or (memq (plist-get event :type) '(run session input approval answered done exit unstarted settled watch-changed))
       (and (eq (plist-get event :type) 'status) (member (plist-get event :text) romacs-agent-ui--state-statuses))))
 
 (defvar romacs-agent-ui--announced (make-hash-table :test #'eq :weakness 'key)
@@ -401,6 +402,8 @@ Return whether SESSION's state may have moved (`romacs-agent-ui--state-moved-p')
 decided once per event."
   (let ((moved (romacs-agent-ui--state-moved-p session event)))
     (romacs-agent-ui-track-workers session event)
+    (when (eq (plist-get event :type) 'watch-changed)
+      (romacs-agent-ui--children-changed session))
     (when moved
       (when-let* ((parent (plist-get (romacs-agent-options session) :parent))
                   (known (romacs-agent-loaded parent)))
@@ -412,8 +415,9 @@ decided once per event."
 
 (defun romacs-agent-ui--child-row (child)
   "Delegated session CHILD as a row."
-  (list :session child :key (romacs-agent-ui--state-key child) :title (romacs-agent-title child)
-        :time (romacs-agent-last-time child)))
+  (let ((key (romacs-agent-ui--state-key child)))
+    (list :session child :key key :title (romacs-agent-title child) :time (romacs-agent-last-time child)
+          :activity (and (eq key 'watching) (nth 2 (romacs-agent-ui--state child key))))))
 
 (defun romacs-agent-ui--row-key (row)
   "Harness task ROW's state key, by its status: a failure is news until a
@@ -467,8 +471,11 @@ every worker by title and state."
                                   romacs-agent-ui--worker-kinds))))
     (when parts
       (let ((text (mapconcat #'identity parts (propertize (if romacs-agent-glyphs " " " · ") 'face 'romacs-agent-dim)))
-            (listing (mapconcat (lambda (row) (format "%s: %s" (or (plist-get row :title) "task")
-                                                      (downcase (nth 2 (romacs-agent-ui--state-of (plist-get row :key))))))
+            (listing (mapconcat (lambda (row)
+                                  (let ((key (plist-get row :key)))
+                                    (format "%s: %s" (or (plist-get row :title) "task")
+                                            (or (and (eq key 'watching) (plist-get row :activity))
+                                                (downcase (nth 2 (romacs-agent-ui--state-of key)))))))
                                 (seq-take rows 20) "\n")))
         (add-text-properties 0 (length text) (list 'help-echo listing) text)
         text))))
@@ -529,6 +536,7 @@ failed...) where the frame can draw it: the word shows on hover."
      (failed failure "Failed" romacs-agent-error)
      (working working "Working" romacs-agent-running)
      (waiting waiting "Waiting on its workers" romacs-agent-running)
+     (watching watching "Waiting on job" romacs-agent-running)
      (completed completed "Completed" romacs-agent-done)
      ;; Nothing to say: no glyph.
      (idle nil "Idle" romacs-agent-dim)
@@ -539,27 +547,32 @@ failed...) where the frame can draw it: the word shows on hover."
      (settled nil "Settled" romacs-agent-dim)))
   "Every state a session or its worker is in, as (KEY GLYPH WORD FACE
 RANK), GLYPH its mark's role (`romacs-agent-glyph-alist'), RANK its
-place here.  The states ranked before `idle' are news.")
+place here.")
 
-(defconst romacs-agent-ui--live-keys '(approval question working waiting)
+(defconst romacs-agent-ui--live-keys '(approval question working waiting watching)
   "The states something still goes on in.")
 
-(defun romacs-agent-ui--state-of (key)
-  "The state KEY names."
-  (assq key romacs-agent-ui--states))
+(defun romacs-agent-ui--state-of (key &optional unit)
+  "The state KEY names, with UNIT in the label when watching it."
+  (let ((state (assq key romacs-agent-ui--states)))
+    (if (and (eq key 'watching) unit)
+        (cl-destructuring-bind (name glyph word face rank) state
+          (list name glyph (format "%s: %s" word unit) face rank))
+      state)))
 
 (defun romacs-agent-ui--rank (key)
   (nth 4 (romacs-agent-ui--state-of key)))
 
 (defun romacs-agent-ui--news-p (key)
-  "Whether state KEY says something to the user."
-  (< (romacs-agent-ui--rank key) (romacs-agent-ui--rank 'idle)))
+  "Whether state KEY reports news about a turn or its workers."
+  (and (not (eq key 'watching))
+       (< (romacs-agent-ui--rank key) (romacs-agent-ui--rank 'idle))))
 
 (defun romacs-agent-ui--workers-live-p (session)
   "Whether one of SESSION's workers still goes on.  Its rows are ranked
 \(`romacs-agent-ui--summarize-children'): the live ones rank no later
-than `waiting', so the finished ones are never read."
-  (let ((last (romacs-agent-ui--rank 'waiting)))
+than `watching', so the finished ones are never read."
+  (let ((last (romacs-agent-ui--rank 'watching)))
     (cl-loop for row in (romacs-agent-children-rows session)
              while (<= (romacs-agent-ui--row-rank row) last)
              thereis (memq (plist-get row :key) romacs-agent-ui--live-keys))))
@@ -579,6 +592,7 @@ completion went to its parent: not news to the user."
            'failed)
           ((memq state '(starting running)) 'working)
           ((eq state 'history) 'history)
+          ((romacs-agent-watch-unit session) 'watching)
           ((romacs-agent-ui--workers-live-p session) 'waiting)
           ((romacs-agent-settled-p session) 'settled)
           ((romacs-agent-cancelled session) 'ended)
@@ -590,9 +604,10 @@ completion went to its parent: not news to the user."
           ((eq state 'ended) 'ended)
           (t 'idle))))
 
-(defun romacs-agent-ui--state (session)
-  "SESSION's state, as (KEY GLYPH WORD FACE RANK)."
-  (romacs-agent-ui--state-of (romacs-agent-ui--state-key session)))
+(defun romacs-agent-ui--state (session &optional key)
+  "SESSION's state, as (KEY GLYPH WORD FACE RANK), using KEY when given."
+  (let ((key (or key (romacs-agent-ui--state-key session))))
+    (romacs-agent-ui--state-of key (and (eq key 'watching) (romacs-agent-watch-unit session)))))
 
 (defun romacs-agent-ui--status-key (word)
   "A task's status WORD, as `romacs-agent-tools--status' or a harness
@@ -634,11 +649,11 @@ its word."
                 'face face 'help-echo (format "%d %s" count word))))
 
 (defun romacs-agent-ui--rollup (keys)
-  "State KEYS as a line of each news state's count (🛠️2 ✋1), in rank
-order, or nil when none is news."
+  "Count live and news states in KEYS in rank order (✋1 🛠️2), or return nil."
   (let ((parts (delq nil (mapcar (lambda (state)
-                                   (let ((count (cl-count (car state) keys)))
-                                     (and (> count 0) (romacs-agent-ui--news-p (car state))
+                                   (let* ((key (car state)) (count (cl-count key keys)))
+                                     (and (> count 0)
+                                          (or (memq key romacs-agent-ui--live-keys) (romacs-agent-ui--news-p key))
                                           (romacs-agent-ui--count state count))))
                                  romacs-agent-ui--states))))
     (and parts (mapconcat #'identity parts (propertize (if romacs-agent-glyphs " " " · ") 'face 'romacs-agent-dim)))))
@@ -677,7 +692,7 @@ nothing more."
   (pcase key
     ((or 'approval 'question) 'you)
     ((or 'failed 'unstarted) 'failed)
-    ((or 'working 'waiting) 'working)
+    ((or 'working 'watching 'waiting) 'working)
     ('completed 'done)
     (_ 'idle)))
 
@@ -755,7 +770,9 @@ nothing more."
   "All that SESSION's header reads of it, a plist, with whether glyphs
 are on: the header is made from it (`romacs-agent-ui--header-text'), and
 made again when it differs."
-  (let ((options (romacs-agent-options session)) (switch (romacs-agent-pending-selection session)))
+  (let ((options (romacs-agent-options session))
+        (switch (romacs-agent-pending-selection session))
+        (key (romacs-agent-ui--state-key session)))
     (list :harness (romacs-agent-harness session) :provider (romacs-agent-provider session)
           :mode (if (plist-get options :plan) 'plan (romacs-agent-permission-mode session))
           :model (romacs-agent-model session) :effort (romacs-agent-ui--current-effort session)
@@ -763,7 +780,7 @@ made again when it differs."
           :workers (romacs-agent-children-summary session)
           :share (romacs-agent-ui--context-share session)
           :resume (romacs-agent-resume-time session)
-          :state (romacs-agent-ui--state-key session)
+          :state key :unit (and (eq key 'watching) (romacs-agent-watch-unit session))
           :glyphs romacs-agent-glyphs)))
 
 (defun romacs-agent-ui--header-text (inputs)
@@ -773,13 +790,13 @@ effort, the instance when not the harness's own, a permission mode other
 than bypassing them, a selection waiting, its workers, and how full its
 context is.  The whole line: a window too narrow for it shows its start,
 display clipping the band where the window ends."
-  (cl-destructuring-bind (&key harness provider mode model effort switch workers share state resume &allow-other-keys)
+  (cl-destructuring-bind (&key harness provider mode model effort switch workers share state unit resume &allow-other-keys)
       inputs
     (mapconcat
      #'identity
      (delq nil
            (list (romacs-agent-ui--harness-icon harness)
-                 (romacs-agent-ui--label (romacs-agent-ui--state-of state))
+                 (romacs-agent-ui--label (romacs-agent-ui--state-of state unit))
                  (concat (propertize (or (romacs-agent-ui--instance nil harness model nil) "...")
                                      'face 'romacs-agent-model 'help-echo (and provider (format "account %s" provider)))
                          (if effort (concat " " (romacs-agent-ui--effort effort)) ""))

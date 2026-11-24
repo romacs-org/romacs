@@ -25,6 +25,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'seq)
 (require 'romacs-agent)
 (require 'romacs-agent-tools)
 (require 'romacs-agent-watch-exit)
@@ -48,6 +49,12 @@ KEYS the first words of the entries already there.")
 
 (defvar romacs-agent-watch--reporting nil
   "Unit watches whose notification is under way.")
+
+(defun romacs-agent-watch-unit (session)
+  "Return SESSION's oldest watched unit, or nil if no unit is watched."
+  (unless (romacs-agent-cancelled session)
+    (seq-some (lambda (watch) (plist-get watch :unit))
+              (gethash (romacs-agent-id session) romacs-agent-watch--watches))))
 
 ;;; Records
 
@@ -75,20 +82,33 @@ KEYS the first words of the entries already there.")
       (when (file-exists-p file) (delete-file file)))
     (unless watches (romacs-agent-mark (romacs-agent-id session) 'watches nil))))
 
+(defun romacs-agent-watch--set (session watches &optional persist)
+  "Replace SESSION's WATCHES and notify observers when they change.
+Save and schedule the watches when PERSIST is non-nil."
+  (let* ((id (romacs-agent-id session))
+         (previous (gethash id romacs-agent-watch--watches)))
+    (if watches (puthash id watches romacs-agent-watch--watches)
+      (remhash id romacs-agent-watch--watches))
+    (when persist
+      (romacs-agent-watch--save session)
+      (romacs-agent-watch--schedule))
+    (unless (equal previous watches)
+      (romacs-agent--run-hook 'romacs-agent-event-functions session '(:type watch-changed)))))
+
 (defun romacs-agent-watch--load (session)
   "SESSION's watches kept in its directory, known again."
   (let ((kept (romacs-agent--read-json (romacs-agent-watch--file session))))
     (when (vectorp kept)
-      (puthash (romacs-agent-id session)
-               (mapcar (lambda (w)
-                         (if (gethash "file" w)
-                             (list :file (gethash "file" w) :section (romacs-agent--value (gethash "section" w))
-                                   :seen (append (gethash "seen" w) nil))
-                           (list :unit (gethash "unit" w)
-                                 :output (romacs-agent--value (gethash "output" w))
-                                 :invocation (romacs-agent--value (gethash "invocation" w)))))
-                       kept)
-               romacs-agent-watch--watches))))
+      (romacs-agent-watch--set
+       session
+       (mapcar (lambda (w)
+                 (if (gethash "file" w)
+                     (list :file (gethash "file" w) :section (romacs-agent--value (gethash "section" w))
+                           :seen (append (gethash "seen" w) nil))
+                   (list :unit (gethash "unit" w)
+                         :output (romacs-agent--value (gethash "output" w))
+                         :invocation (romacs-agent--value (gethash "invocation" w)))))
+               kept)))))
 
 ;;; Reading systemd
 
@@ -214,12 +234,12 @@ looked, and remember what is there now (an entry gone and back is new)."
       (setq romacs-agent-watch--timer nil))))
 
 (defun romacs-agent-watch--forget (id watches)
-  (let ((task (romacs-agent-get id)))
-    (puthash id (cl-remove-if (lambda (watch) (memq watch watches))
-                             (gethash id romacs-agent-watch--watches))
-             romacs-agent-watch--watches)
-    (unless (gethash id romacs-agent-watch--watches) (remhash id romacs-agent-watch--watches))
-    (when task (romacs-agent-watch--save task))
+  "Retire WATCHES of the task with ID."
+  (if-let* ((task (romacs-agent-get id)))
+      (romacs-agent-watch--set task (cl-remove-if (lambda (watch) (memq watch watches))
+                                                (gethash id romacs-agent-watch--watches))
+                               t)
+    (remhash id romacs-agent-watch--watches)
     (romacs-agent-watch--schedule)))
 
 (defun romacs-agent-watch--output (program args then)
@@ -317,9 +337,7 @@ watched file may be gone)."
 
 (defun romacs-agent-watch--add (id task watch)
   "Watch WATCH for TASK, whose id is ID, and keep it in its directory."
-  (puthash id (append (gethash id romacs-agent-watch--watches) (list watch)) romacs-agent-watch--watches)
-  (romacs-agent-watch--save task)
-  (romacs-agent-watch--schedule))
+  (romacs-agent-watch--set task (append (gethash id romacs-agent-watch--watches) (list watch)) t))
 
 (defun romacs-agent-watch--dev-check (unit report invocation)
   "Watch check UNIT with output REPORT and launch ID INVOCATION for the caller.

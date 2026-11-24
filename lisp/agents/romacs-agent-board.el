@@ -189,7 +189,9 @@ while filtering or while one of them wants the user or works."
     ('open t)
     ('closed nil)
     (_ (or (plist-get view :words)
-           (cl-some (lambda (child) (memq (gethash child keys) '(approval question failed working waiting)))
+           (cl-some (lambda (child)
+                      (let ((key (gethash child keys)))
+                        (or (eq key 'failed) (memq key romacs-agent-ui--live-keys))))
                     children)))))
 
 (defun romacs-agent-board--hidden-context-p (session marks)
@@ -324,7 +326,8 @@ thread at work, while the board shows."
 
 (defun romacs-agent-board-state (row)
   "ROW's state: its glyph, or its word."
-  (romacs-agent-ui--label (romacs-agent-ui--state-of (plist-get row :key))))
+  (when-let* ((key (plist-get row :key)))
+    (romacs-agent-ui--label (romacs-agent-ui--state (plist-get row :session) key))))
 
 (defun romacs-agent-board-state-width ()
   "The state column's width: its widest label's, a word cut to nine."

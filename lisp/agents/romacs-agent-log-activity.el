@@ -39,7 +39,7 @@
 
 (defconst romacs-agent-log-activity--delegated-states
   '((working . "Working") (approval . "Needs approval") (question . "Asks you")
-    (waiting . "Waiting on workers"))
+    (watching . "Waiting on job") (waiting . "Waiting on workers"))
   "The activity to show for each visible delegated-thread state.")
 
 (defun romacs-agent-log-activity--running-p (row)
@@ -92,7 +92,8 @@
                          (when (> width (+ 2 (string-width mark))) (concat mark " ")))))
     (propertize (romacs-agent-log-activity--line
                  (or (plist-get row :title) "Delegated thread")
-                 (alist-get state romacs-agent-log-activity--delegated-states)
+                 (or (plist-get row :activity)
+                     (alist-get state romacs-agent-log-activity--delegated-states))
                  prefix width 'romacs-agent-log-delegated-title)
                 'romacs-agent-log-delegated-thread id)))
 

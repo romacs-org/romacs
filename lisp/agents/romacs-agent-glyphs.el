@@ -73,6 +73,7 @@
     (failure "❗" "A session failed, or never started")
     (working "🛠️" "A session working")
     (threads "🧵" "Threads live under a session")
+    (watching "⌛" "A session waiting on a watched job")
     (waiting "⏳" "A session waiting on its workers")
     (completed "✅" "A session that completed")
     (detached "🔌" "A session detached")
