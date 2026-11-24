@@ -1,12 +1,10 @@
 //! One compiled unit: the VM2 function tree a top-level form compiled to,
 //! and the constants its code holds, as bytes; and back into a VM.
 //!
-//! Constants are a graph of nodes, so sharing and cycles survive.
-//! A function's body is encoded apart, after the values, functions and
-//! inline caches it names, so a load installs it pending (`PendingBody`)
-//! and decodes it when it is first called (`Vm::decode_pending`), as a
-//! code image's bodies stay mapped until their first call; most functions
-//! a file defines are not called while it loads.
+//! Constants are a graph of nodes, so sharing and cycles survive. Its
+//! functions are encoded by the shared function codec (`function_codec`),
+//! which leaves each body pending until its first call; this module says
+//! what a value, a symbol, a child function and a cache are in a unit.
 //! Interned symbols are indices into the artifact's name table; an
 //! uninterned symbol is one of the unit's own, made afresh at each load
 //! (GNU's `.elc` reads `#:x` per form). Each function's quoted constants
@@ -14,6 +12,7 @@
 //! `byte-compile-get-constant` coalesces a constant vector's.
 use super::codec::{Reader, Writer};
 use crate::data::Object;
+use crate::function_codec::{self, BodyRefs, CodeRefs, Ref, Symbols, read_ref, read_refs, write_ref};
 use crate::*;
 
 /// The artifact's interned symbol names, shared by its units.
@@ -33,18 +32,6 @@ impl Names {
     }
 }
 
-/// A reference to a value inside a unit.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-enum Ref {
-    Nil,
-    True,
-    Fixnum(i64),
-    Name(usize),
-    Uninterned(usize),
-    Node(usize),
-    Primitive(u64),
-}
-
 const NODE_CONS: u8 = 0;
 const NODE_FLOAT: u8 = 1;
 const NODE_BIGNUM: u8 = 2;
@@ -56,36 +43,6 @@ const NODE_BOOL_VECTOR: u8 = 7;
 const NODE_CLOSURE: u8 = 8;
 const NODE_CELL: u8 = 9;
 const NODE_CHAR_TABLE: u8 = 10;
-
-/// What one function's body names of its unit, each once, in order: the
-/// values (nodes and uninterned symbols), child functions and inline
-/// caches. The body refers to them by these local indices.
-#[derive(Default)]
-struct Deps {
-    values: Vec<Ref>,
-    value_of: HashMap<Ref, usize>,
-    children: Vec<usize>,
-    child_of: HashMap<usize, usize>,
-    caches: Vec<usize>,
-    cache_of: HashMap<usize, usize>,
-}
-fn local<T: Copy + Eq + std::hash::Hash>(list: &mut Vec<T>, of: &mut HashMap<T, usize>, x: T) -> usize {
-    *of.entry(x).or_insert_with(|| {
-        list.push(x);
-        list.len() - 1
-    })
-}
-impl Deps {
-    fn value(&mut self, r: Ref) -> usize {
-        local(&mut self.values, &mut self.value_of, r)
-    }
-    fn child(&mut self, f: usize) -> usize {
-        local(&mut self.children, &mut self.child_of, f)
-    }
-    fn cache(&mut self, c: usize) -> usize {
-        local(&mut self.caches, &mut self.cache_of, c)
-    }
-}
 
 /// Encodes one unit from the VM it was compiled in.
 pub(super) struct Encoder<'a> {
@@ -155,16 +112,16 @@ impl<'a> Encoder<'a> {
         self.pending_functions.push((index, id));
         Ok(index)
     }
-    fn symbol(&mut self, slot: usize) -> Result<usize> {
+    fn symbol_index(&mut self, slot: usize) -> usize {
         if self.vm.generated_slots.contains_key(&slot) || self.vm.obarray_symbol_names.contains_key(&slot) {
             let next = self.uninterned_names.len();
             let index = *self.uninterned.entry(slot).or_insert(next);
             if index == next {
                 self.uninterned_names.push(self.vm.symbol_names[slot].clone());
             }
-            Ok(index << 1 | 1)
+            index << 1 | 1
         } else {
-            Ok(self.names.of(&self.vm.symbol_names[slot]) << 1)
+            self.names.of(&self.vm.symbol_names[slot]) << 1
         }
     }
     fn value(&mut self, v: Value) -> Result<Ref> {
@@ -178,7 +135,7 @@ impl<'a> Encoder<'a> {
             1 => Ref::Fixnum(v.as_integer()?),
             7 if v != Value::UNBOUND => {
                 let slot = v.index(7)? - 1;
-                let s = self.symbol(slot)?;
+                let s = self.symbol_index(slot);
                 if s & 1 == 1 { Ref::Uninterned(s >> 1) } else { Ref::Name(s >> 1) }
             }
             6 => Ref::Primitive(v.0),
@@ -195,37 +152,11 @@ impl<'a> Encoder<'a> {
             _ => return Err("an unbound marker".into()),
         })
     }
-    fn write_ref(out: &mut Writer, r: Ref) {
-        match r {
-            Ref::Nil => out.byte(0),
-            Ref::True => out.byte(1),
-            Ref::Fixnum(n) => {
-                out.byte(2);
-                out.i(n);
-            }
-            Ref::Name(i) => {
-                out.byte(3);
-                out.n(i);
-            }
-            Ref::Uninterned(i) => {
-                out.byte(4);
-                out.n(i);
-            }
-            Ref::Node(i) => {
-                out.byte(5);
-                out.n(i);
-            }
-            Ref::Primitive(bits) => {
-                out.byte(6);
-                out.u(bits);
-            }
-        }
-    }
     fn refs(&mut self, out: &mut Writer, values: &[Value]) -> Result<()> {
         out.n(values.len());
         for &v in values {
             let r = self.value(v)?;
-            Self::write_ref(out, r);
+            write_ref(out, r);
         }
         Ok(())
     }
@@ -251,7 +182,7 @@ impl<'a> Encoder<'a> {
         out.byte(NODE_CHAR_TABLE);
         for field in fields {
             let r = self.value(field)?;
-            Self::write_ref(out, r);
+            write_ref(out, r);
         }
         self.refs(out, &extras)?;
         out.n(runs.len());
@@ -259,7 +190,7 @@ impl<'a> Encoder<'a> {
             out.u(u64::from(from));
             out.u(u64::from(to));
             let r = self.value(value)?;
-            Self::write_ref(out, r);
+            write_ref(out, r);
         }
         Ok(())
     }
@@ -273,7 +204,7 @@ impl<'a> Encoder<'a> {
         let content = self.vm.read_capture_cell(v.payload() as usize);
         out.byte(NODE_CELL);
         let r = self.value(content)?;
-        Self::write_ref(out, r);
+        write_ref(out, r);
         Ok(())
     }
     /// A closure: its function, captures, metadata and document. Not stored
@@ -292,7 +223,7 @@ impl<'a> Encoder<'a> {
         self.refs(out, &captures)?;
         self.refs(out, &metadata)?;
         let doc = self.value(document)?;
-        Self::write_ref(out, doc);
+        write_ref(out, doc);
         Ok(())
     }
     fn encode_node(&mut self, v: Value) -> Result<Vec<u8>> {
@@ -301,8 +232,8 @@ impl<'a> Encoder<'a> {
             let (car, cdr) = self.vm.cons_pair(v)?;
             out.byte(NODE_CONS);
             let (a, b) = (self.value(car)?, self.value(cdr)?);
-            Self::write_ref(&mut out, a);
-            Self::write_ref(&mut out, b);
+            write_ref(&mut out, a);
+            write_ref(&mut out, b);
             return Ok(out.bytes);
         }
         if v.tag() == 5 {
@@ -354,7 +285,7 @@ impl<'a> Encoder<'a> {
                         let key = self.names.of(name);
                         out.n(key);
                         let r = self.value(value)?;
-                        Self::write_ref(&mut out, r);
+                        write_ref(&mut out, r);
                     }
                 }
             }
@@ -395,202 +326,33 @@ impl<'a> Encoder<'a> {
     }
     fn encode_function(&mut self, id: usize) -> Result<Vec<u8>> {
         let f = self.vm.functions[id].clone();
-        if f.mapped_code.is_some() || f.lazy.is_some() {
-            return Err("an unmaterialised function body".into());
-        }
-        let mut out = Writer::default();
-        self.write_function_header(&mut out, &f)?;
-        let mut body = Writer::default();
-        let mut deps = Deps::default();
-        body.n(f.sites.len());
-        for site in &f.sites {
-            body.n(site.len());
-            for &r in site {
-                body.n(r);
-            }
-        }
-        body.n(f.capture_mutations.len());
-        for &m in &f.capture_mutations {
-            body.byte(u8::from(m));
-        }
-        body.n(f.code.len());
-        let mut consts = vec![];
-        for &op in &f.code {
-            self.op(&mut body, op, &mut consts, &mut deps)?;
-        }
-        out.n(deps.values.len());
-        for &r in &deps.values {
-            Self::write_ref(&mut out, r);
-        }
-        for list in [&deps.children, &deps.caches] {
-            out.n(list.len());
-            list.iter().for_each(|&x| out.n(x));
-        }
-        out.data(&body.bytes);
-        Ok(out.bytes)
+        function_codec::encode(self, &f)
     }
-    fn write_function_header(&mut self, out: &mut Writer, f: &Function) -> Result<()> {
-        for n in [f.regs, f.captures, f.arity, f.required] {
-            out.n(n);
-        }
-        out.byte(u8::from(f.rest));
-        out.byte(match f.dynamic { None => 0, Some(false) => 1, Some(true) => 2 });
-        match &f.params {
-            None => out.byte(0),
-            Some(params) => {
-                out.byte(1);
-                out.n(params.len());
-                for p in params {
-                    self.form(out, p)?;
-                }
-            }
-        }
-        self.write_environment(out, f.environment.as_ref())?;
-        match f.key {
-            None => out.byte(0),
-            Some(key) => {
-                out.byte(1);
-                for byte in key.to_le_bytes() { out.byte(byte); }
-            }
-        }
-        Ok(())
-    }
+}
 
-    /// R in a body: a node or uninterned symbol by its index in DEPS.
-    fn write_local(out: &mut Writer, deps: &mut Deps, r: Ref) {
-        match r {
-            Ref::Node(_) | Ref::Uninterned(_) => {
-                out.byte(5);
-                out.n(deps.value(r));
-            }
-            r => Self::write_ref(out, r),
-        }
+impl CodeRefs for Encoder<'_> {
+    fn vm(&self) -> &Vm {
+        self.vm
     }
-    /// The symbol SLOT in a body: a name's index, shifted, or an
-    /// uninterned symbol's index in DEPS, shifted and odd.
-    fn local_symbol(&mut self, slot: usize, deps: &mut Deps) -> Result<usize> {
-        let s = self.symbol(slot)?;
-        Ok(if s & 1 == 1 { deps.value(Ref::Uninterned(s >> 1)) << 1 | 1 } else { s })
+    fn value(&mut self, v: Value) -> Result<Ref> {
+        Encoder::value(self, v)
     }
-    fn op(&mut self, out: &mut Writer, op: Op, consts: &mut Vec<Value>, deps: &mut Deps) -> Result<()> {
-        let n = |out: &mut Writer, xs: &[usize]| xs.iter().for_each(|&x| out.n(x));
-        match op {
-            Op::Const(d, v) => {
-                out.byte(0);
-                n(out, &[d]);
-                let r = self.constant(consts, v)?;
-                Self::write_local(out, deps, r);
-            }
-            Op::Move(a, b) => { out.byte(1); n(out, &[a, b]) }
-            Op::Cell(a) => { out.byte(2); n(out, &[a]) }
-            Op::ReadCell(a, b) => { out.byte(3); n(out, &[a, b]) }
-            Op::WriteCell(a, b) => { out.byte(4); n(out, &[a, b]) }
-            Op::Global(d, s) => { out.byte(5); let s = self.local_symbol(s, deps)?; n(out, &[d, s]) }
-            Op::SetGlobal(s, r) => { out.byte(6); let s = self.local_symbol(s, deps)?; n(out, &[s, r]) }
-            Op::Bind(s, r) => { out.byte(7); let s = self.local_symbol(s, deps)?; n(out, &[s, r]) }
-            Op::Unbind(k) => { out.byte(8); n(out, &[k]) }
-            Op::BindLate(s, r) => { out.byte(25); let s = self.local_symbol(s, deps)?; n(out, &[s, r]) }
-            Op::UnbindLate(r) => { out.byte(26); n(out, &[r]) }
-            Op::ReadLate(d, c, s) => { out.byte(27); let s = self.local_symbol(s, deps)?; n(out, &[d, c, s]) }
-            Op::WriteLate(c, x, s) => { out.byte(28); let s = self.local_symbol(s, deps)?; n(out, &[c, x, s]) }
-            Op::LateForwarded(d, c) => { out.byte(29); n(out, &[d, c]) }
-            Op::Jump(t) => { out.byte(9); n(out, &[t]) }
-            Op::Unless(r, t) => { out.byte(10); n(out, &[r, t]) }
-            Op::Closure(d, id, site) => {
-                out.byte(11);
-                let f = self.function(id)?;
-                n(out, &[d, deps.child(f), site])
-            }
-            Op::Define(s, r) => { out.byte(12); let s = self.local_symbol(s, deps)?; n(out, &[s, r]) }
-            Op::DefineMacro(s, r) => { out.byte(13); let s = self.local_symbol(s, deps)?; n(out, &[s, r]) }
-            Op::Call(d, x, start, k) => { out.byte(15); n(out, &[d, x, start, k]) }
-            Op::Direct(d, s, cache, start, k) => {
-                out.byte(16);
-                let s = self.local_symbol(s, deps)?;
-                let next = self.caches.len();
-                let c = *self.caches.entry(cache).or_insert(next);
-                n(out, &[d, s, deps.cache(c), start, k])
-            }
-            Op::Sealed(d, s, start, k) => { out.byte(17); let s = self.local_symbol(s, deps)?; n(out, &[d, s, start, k]) }
-            Op::Return(r) => { out.byte(18); n(out, &[r]) }
-            Op::Catch(d, x, t) => { out.byte(19); n(out, &[d, x, t]) }
-            Op::Condition(d, v, t) => {
-                out.byte(20);
-                n(out, &[d]);
-                let r = self.constant(consts, v)?;
-                Self::write_local(out, deps, r);
-                n(out, &[t]);
-            }
-            Op::PopHandlers(k) => { out.byte(21); n(out, &[k]) }
-            Op::Protect(d, c, e) => { out.byte(22); n(out, &[d, c, e]) }
-            Op::LeaveProtect(r) => { out.byte(23); n(out, &[r]) }
-            Op::ResumeExit => out.byte(24),
-        }
-        Ok(())
+    fn constant(&mut self, consts: &mut Vec<Value>, v: Value) -> Result<Ref> {
+        Encoder::constant(self, consts, v)
     }
-    fn write_environment(&mut self, out: &mut Writer, layout: Option<&CaptureLayout>) -> Result<()> {
-        let Some(layout) = layout else {
-            out.byte(0);
-            return Ok(());
-        };
-        out.byte(1);
-        out.byte(u8::from(layout.bare_context));
-        out.n(layout.specials.len());
-        for name in &layout.specials {
-            out.n(self.names.of(name));
-        }
-        out.n(layout.slots.len());
-        for slot in &layout.slots {
-            match slot.binding {
-                CaptureBinding::Lexical => out.byte(0),
-                CaptureBinding::Late { shadow: None } => out.byte(1),
-                CaptureBinding::Late { shadow: Some(index) } => { out.byte(2); out.n(index); }
-            }
-            match &slot.name {
-                None => out.byte(0),
-                Some(Name::Source(name)) => self.form(out, &Form::Sym(name.clone()))?,
-                Some(Name::Generated(id)) => self.form(out, &Form::Generated(*id))?,
-            }
-        }
-        Ok(())
+    fn name(&mut self, name: &str) -> usize {
+        self.names.of(name)
     }
-
-    fn form(&mut self, out: &mut Writer, form: &Form) -> Result<()> {
-        match form {
-            Form::Int(n) => { out.byte(0); out.i(*n) }
-            Form::Float(f) => { out.byte(1); out.u(f.to_bits()) }
-            Form::Sym(s) => { out.byte(2); let i = self.names.of(s); out.n(i) }
-            Form::Generated(id) => {
-                let slot = *self.vm.generated_symbols.get(id).ok_or("unknown generated symbol")?;
-                out.byte(3);
-                let s = self.symbol(slot)?;
-                out.n(s >> 1);
-            }
-            Form::List(items) | Form::Vector(items) => {
-                out.byte(if matches!(form, Form::List(_)) { 4 } else { 7 });
-                out.n(items.len());
-                for item in items {
-                    self.form(out, item)?;
-                }
-            }
-            Form::String(s) => { out.byte(5); out.str(s) }
-            Form::Bytes(b) => { out.byte(6); out.data(b) }
-            Form::Dotted(items, tail) => {
-                out.byte(8);
-                out.n(items.len());
-                for item in items {
-                    self.form(out, item)?;
-                }
-                self.form(out, tail)?;
-            }
-            Form::Object(object) => {
-                out.byte(9);
-                let v = object.value(self.vm)?;
-                let r = self.value(v)?;
-                Self::write_ref(out, r);
-            }
-        }
-        Ok(())
+    fn symbol(&mut self, slot: usize) -> Result<Ref> {
+        let s = self.symbol_index(slot);
+        Ok(if s & 1 == 1 { Ref::Uninterned(s >> 1) } else { Ref::Name(s >> 1) })
+    }
+    fn function(&mut self, id: usize) -> Result<usize> {
+        Encoder::function(self, id)
+    }
+    fn cache(&mut self, cache: usize) -> usize {
+        let next = self.caches.len();
+        *self.caches.entry(cache).or_insert(next)
     }
 }
 
@@ -634,22 +396,6 @@ enum Node {
     CharTable([Ref; 3], Vec<Ref>, Vec<(usize, usize, Ref)>),
 }
 
-fn read_ref(r: &mut Reader) -> Result<Ref> {
-    Ok(match r.byte()? {
-        0 => Ref::Nil,
-        1 => Ref::True,
-        2 => Ref::Fixnum(r.i()?),
-        3 => Ref::Name(r.n()?),
-        4 => Ref::Uninterned(r.n()?),
-        5 => Ref::Node(r.n()?),
-        6 => Ref::Primitive(r.u()?),
-        _ => return Err("compiled Lisp artifact: bad value reference".into()),
-    })
-}
-fn read_refs(r: &mut Reader) -> Result<Vec<Ref>> {
-    let n = r.count()?;
-    (0..n).map(|_| read_ref(r)).collect()
-}
 fn read_node(r: &mut Reader) -> Result<Node> {
     Ok(match r.byte()? {
         NODE_CONS => Node::Cons(read_ref(r)?, read_ref(r)?),
@@ -685,21 +431,11 @@ fn read_node(r: &mut Reader) -> Result<Node> {
     })
 }
 
-/// A decoded op operand that names a value or a function, resolved once
-/// the unit's nodes and function ids exist.
 /// What decoding needs of the artifact: its bytes, which pending bodies
 /// keep, and its names' slots.
 pub(super) struct Install<'a> {
     pub(super) bytes: &'a Arc<Vec<u8>>,
     pub(super) slots: &'a Arc<Vec<usize>>,
-}
-
-/// What a function's body names, and where its bytes are in the artifact.
-struct BodyRefs {
-    values: Vec<Ref>,
-    children: Vec<usize>,
-    caches: Vec<usize>,
-    body: std::ops::Range<usize>,
 }
 
 impl Install<'_> {
@@ -713,196 +449,21 @@ impl Install<'_> {
         let n = r.count()?;
         let nodes = (0..n).map(|_| read_node(r)).collect::<Result<Vec<_>>>()?;
         let n = r.count()?;
-        let (headers, refs): (Vec<Function>, Vec<BodyRefs>) =
-            (0..n).map(|_| self.read_function(r, &uninterned, vm)).collect::<Result<Vec<_>>>()?.into_iter().unzip();
+        let symbols = Symbols { names: self.slots, uninterned: &uninterned };
+        let (headers, refs): (Vec<Function>, Vec<Option<BodyRefs>>) = (0..n)
+            .map(|_| function_codec::read_function(r, self.bytes, symbols, vm).map(|(f, l)| (f, Some(l))))
+            .collect::<Result<Vec<_>>>()?.into_iter().unzip();
         let entry = r.n()?;
         let caches = r.n()?;
         if caches > 1_000_000 {
             return Err("compiled Lisp artifact: too many caches".into());
         }
         validate(&headers, &refs, &nodes, entry, caches)?;
-        let (ids, cache_ids) = vm.reserve_request_artifact(headers, caches);
-        let values = materialise(vm, &nodes, &ids, self.slots, &uninterned)?;
-        // All or none: a published body owns its cache slots.
-        let bodies = refs.into_iter().map(|l| {
-            Ok(PendingBody {
-                bytes: Arc::clone(self.bytes),
-                body: l.body,
-                values: l.values.iter().map(|&r| resolve_ref(r, &values, self.slots, &uninterned)).collect::<Result<_>>()?,
-                children: l.children.iter().map(|&f| ids[f]).collect(),
-                caches: l.caches.iter().map(|&c| cache_ids[c]).collect(),
-                names: Arc::clone(self.slots),
-            })
-        }).collect::<Result<Vec<_>>>()?;
-        for (pending, &id) in bodies.into_iter().zip(&ids) {
-            Arc::get_mut(vm.functions.change(id)).expect("a function just installed is private").pending = Some(Box::new(pending));
-        }
-        vm.claim_caches(&cache_ids);
+        let (ids, _) = function_codec::install(vm, headers, refs, caches, self.bytes, self.slots, |vm, ids| {
+            let values = materialise(vm, &nodes, ids, self.slots, &uninterned)?;
+            Ok(move |r| resolve_ref(r, &values, self.slots, &uninterned))
+        })?;
         Ok(ids[entry])
-    }
-
-    fn read_function(&self, r: &mut Reader, uninterned: &[usize], vm: &Vm) -> Result<(Function, BodyRefs)> {
-        let (regs, captures, arity, required) = (r.n()?, r.n()?, r.n()?, r.n()?);
-        let rest = r.byte()? != 0;
-        let dynamic = match r.byte()? { 0 => None, 1 => Some(false), 2 => Some(true), _ => return Err("bad dialect".into()) };
-        let params = match r.byte()? {
-            0 => None,
-            1 => {
-                let n = r.count()?;
-                Some((0..n).map(|_| read_form(r, self.slots, uninterned, vm)).collect::<Result<Vec<_>>>()?)
-            }
-            _ => return Err("bad parameter list".into()),
-        };
-        let environment = self.read_environment(r, captures, uninterned, vm)?;
-        let key = match r.byte()? {
-            0 => None,
-            1 => {
-                let mut bytes = [0; 16];
-                for byte in &mut bytes { *byte = r.byte()?; }
-                Some(u128::from_le_bytes(bytes))
-            }
-            _ => return Err("bad structural key".into()),
-        };
-        let values = read_refs(r)?;
-        let list = |r: &mut Reader| -> Result<Vec<usize>> { let n = r.count()?; (0..n).map(|_| r.n()).collect() };
-        let (children, caches) = (list(r)?, list(r)?);
-        let body = r.data()?;
-        let start = body.as_ptr() as usize - self.bytes.as_ptr() as usize;
-        let function = Function { capture_mutations: vec![], mapped_code: None, code: vec![], regs, captures, arity, required, rest,
-                                  sites: vec![], lazy: None, dynamic, environment, params, pending: None, key, macros: Box::default() };
-        Ok((function, BodyRefs { values, children, caches, body: start..start + body.len() }))
-    }
-
-    fn read_environment(&self, r: &mut Reader, captures: usize, uninterned: &[usize], vm: &Vm)
-        -> Result<Option<CaptureLayout>>
-    {
-        match r.byte()? {
-            0 => return Ok(None),
-            1 => (),
-            _ => return Err("bad capture layout".into()),
-        }
-        let bare_context = r.byte()? != 0;
-        let special_count = r.count()?;
-        let specials = (0..special_count).map(|_| {
-            let slot = *self.slots.get(r.n()?).ok_or("bad local special")?;
-            Ok(vm.symbol_names[slot].clone())
-        }).collect::<Result<Vec<_>>>()?;
-        if r.count()? != captures {
-            return Err("capture layout does not match the body".into());
-        }
-        let slots = (0..captures).map(|_| {
-            self.read_capture_slot(r, captures, uninterned, vm)
-        }).collect::<Result<Vec<_>>>()?;
-        Ok(Some(CaptureLayout { slots, specials, bare_context }))
-    }
-
-    fn read_capture_slot(&self, r: &mut Reader, captures: usize, uninterned: &[usize], vm: &Vm)
-        -> Result<CaptureSlot>
-    {
-        let binding = match r.byte()? {
-            0 => CaptureBinding::Lexical,
-            1 => CaptureBinding::Late { shadow: None },
-            2 => {
-                let index = r.n()?;
-                if index >= captures {
-                    return Err("invalid late capture shadow".into());
-                }
-                CaptureBinding::Late { shadow: Some(index) }
-            }
-            _ => return Err("invalid capture binding".into()),
-        };
-        let tag = r.byte()?;
-        let name = if tag == 0 { None } else { Some(read_name(r, tag, self.slots, uninterned, vm)?) };
-        Ok(CaptureSlot { name, binding })
-    }
-}
-
-impl Vm {
-    /// The function ID with its pending body decoded (`PendingBody`): its
-    /// code and closure sites, each operand checked as a unit's are.
-    pub(crate) fn decode_pending(&self, id: usize) -> Result<Function> {
-        let f = self.functions.get(id).ok_or("invalid function")?;
-        let p = f.pending.as_deref().ok_or("function is not pending")?;
-        let mut r = Reader::new(&p.bytes[p.body.clone()]);
-        let n = r.count()?;
-        let mut sites = Vec::with_capacity(n);
-        for _ in 0..n {
-            let k = r.count()?;
-            sites.push((0..k).map(|_| r.n()).collect::<Result<Vec<_>>>()?);
-        }
-        let n = r.count()?;
-        let capture_mutations = (0..n).map(|_| Ok(r.byte()? != 0)).collect::<Result<Vec<_>>>()?;
-        let bad = |what: &str| format!("compiled Lisp artifact: invalid {what}");
-        let symbol = |s: usize| -> Result<usize> {
-            if s & 1 == 0 {
-                p.names.get(s >> 1).copied().ok_or_else(|| bad("name"))
-            } else {
-                p.values.get(s >> 1).and_then(|v| v.index(7).ok()).map(|i| i - 1).ok_or_else(|| bad("symbol"))
-            }
-        };
-        let value = |r: &mut Reader| -> Result<Value> {
-            Ok(match r.byte()? {
-                0 => Value::NIL,
-                1 => Value::TRUE,
-                2 => Value::integer(r.i()?)?,
-                3 => Value::reference(*p.names.get(r.n()?).ok_or_else(|| bad("name"))? + 1, 7),
-                5 => *p.values.get(r.n()?).ok_or_else(|| bad("value"))?,
-                6 => resolve_ref(Ref::Primitive(r.u()?), &[], &[], &[])?,
-                _ => return Err(bad("value reference")),
-            })
-        };
-        let child = |i: usize| p.children.get(i).copied().ok_or_else(|| bad("closure"));
-        let n = r.count()?;
-        let mut code = Vec::with_capacity(n);
-        for _ in 0..n {
-            let op = r.byte()?;
-            let mut v = || r.n();
-            code.push(match op {
-                0 => { let d = v()?; Op::Const(d, value(&mut r)?) }
-                1 => Op::Move(v()?, v()?),
-                2 => Op::Cell(v()?),
-                3 => Op::ReadCell(v()?, v()?),
-                4 => Op::WriteCell(v()?, v()?),
-                5 => Op::Global(v()?, symbol(v()?)?),
-                6 => { let s = symbol(v()?)?; Op::SetGlobal(s, v()?) }
-                7 => { let s = symbol(v()?)?; Op::Bind(s, v()?) }
-                8 => Op::Unbind(v()?),
-                9 => Op::Jump(v()?),
-                10 => Op::Unless(v()?, v()?),
-                11 => { let d = v()?; let c = child(v()?)?; Op::Closure(d, c, v()?) }
-                12 => { let s = symbol(v()?)?; Op::Define(s, v()?) }
-                13 => { let s = symbol(v()?)?; Op::DefineMacro(s, v()?) }
-                15 => Op::Call(v()?, v()?, v()?, v()?),
-                16 => {
-                    let d = v()?;
-                    let s = symbol(v()?)?;
-                    let c = *p.caches.get(v()?).ok_or_else(|| bad("cache"))?;
-                    Op::Direct(d, s, c, v()?, v()?)
-                }
-                17 => { let d = v()?; let s = symbol(v()?)?; Op::Sealed(d, s, v()?, v()?) }
-                18 => Op::Return(v()?),
-                19 => Op::Catch(v()?, v()?, v()?),
-                20 => { let d = v()?; let x = value(&mut r)?; Op::Condition(d, x, r.n()?) }
-                21 => Op::PopHandlers(v()?),
-                22 => Op::Protect(v()?, v()?, v()?),
-                23 => Op::LeaveProtect(v()?),
-                24 => Op::ResumeExit,
-                25 => { let s = symbol(v()?)?; Op::BindLate(s, v()?) }
-                26 => Op::UnbindLate(v()?),
-                27 => { let d = v()?; let c = v()?; Op::ReadLate(d, c, symbol(v()?)?) }
-                28 => { let c = v()?; let x = v()?; Op::WriteLate(c, x, symbol(v()?)?) }
-                29 => Op::LateForwarded(v()?, v()?),
-                _ => return Err(bad("op")),
-            });
-        }
-        if !r.done() {
-            return Err(bad("body"));
-        }
-        let decoded = Function { capture_mutations, mapped_code: None, code, regs: f.regs, captures: f.captures, arity: f.arity,
-                                 required: f.required, rest: f.rest, sites, lazy: None, dynamic: f.dynamic,
-                                 environment: f.environment.clone(), params: f.params.clone(), pending: None, key: f.key, macros: f.macros.clone() };
-        validate_body(&decoded, |child| self.functions.get(child).map(|f| f.captures), self.slots.len(), self.caches.len())?;
-        Ok(decoded)
     }
 }
 
@@ -915,49 +476,10 @@ fn unserialisable(what: &str) -> String {
     format!("{UNSERIALISABLE}: {what}")
 }
 
-fn read_name(r: &mut Reader, tag: u8, names: &[usize], uninterned: &[usize], vm: &Vm) -> Result<Name> {
-    let bad = || "compiled Lisp artifact: bad symbol";
-    match tag {
-        2 => {
-            let slot = *names.get(r.n()?).ok_or_else(bad)?;
-            Ok(Name::Source(vm.symbol_names[slot].clone()))
-        }
-        3 => {
-            let slot = *uninterned.get(r.n()?).ok_or_else(bad)?;
-            let id = vm.generated_slots.get(&slot).ok_or_else(bad)?;
-            Ok(Name::Generated(*id))
-        }
-        _ => Err(bad().into()),
-    }
-}
-
-fn read_form(r: &mut Reader, names: &[usize], uninterned: &[usize], vm: &Vm) -> Result<Form> {
-    let list = |r: &mut Reader| -> Result<Vec<Form>> {
-        let n = r.count()?;
-        (0..n).map(|_| read_form(r, names, uninterned, vm)).collect()
-    };
-    Ok(match r.byte()? {
-        0 => Form::Int(r.i()?),
-        1 => Form::Float(f64::from_bits(r.u()?)),
-        tag @ (2 | 3) => match read_name(r, tag, names, uninterned, vm)? {
-            Name::Source(name) => Form::Sym(name),
-            Name::Generated(id) => Form::Generated(id),
-        },
-        4 => Form::List(list(r)?),
-        5 => Form::String(r.str()?.to_owned()),
-        6 => Form::Bytes(r.data()?.to_vec()),
-        7 => Form::Vector(list(r)?),
-        8 => {
-            let items = list(r)?;
-            Form::Dotted(items, Box::new(read_form(r, names, uninterned, vm)?))
-        }
-        _ => return Err("compiled Lisp artifact: unsupported parameter form".into()),
-    })
-}
-
-/// A unit's bounds that hold without its bodies: headers, what each body
-/// names, closures among the nodes, and the entry's signature.
-fn validate(functions: &[Function], refs: &[BodyRefs], nodes: &[Node], entry: usize, caches: usize) -> Result<()> {
+/// A unit's bounds that hold without its bodies: its functions
+/// (`function_codec::validate`), closures among the nodes, the objects its
+/// headers name, and the entry's signature.
+fn validate(functions: &[Function], refs: &[Option<BodyRefs>], nodes: &[Node], entry: usize, caches: usize) -> Result<()> {
     let bad = |what: &str| -> Result<()> { Err(format!("compiled Lisp artifact: invalid {what}")) };
     if entry >= functions.len() {
         return bad("entry");
@@ -969,61 +491,13 @@ fn validate(functions: &[Function], refs: &[BodyRefs], nodes: &[Node], entry: us
             return bad("closure");
         }
     }
-    for (f, l) in functions.iter().zip(refs) {
-        if f.regs == 0 || f.regs > 65536 || f.captures + f.arity + usize::from(f.rest) > f.regs || f.required > f.arity {
-            return bad("function header");
-        }
-        if l.children.iter().any(|&c| c >= functions.len()) || l.caches.iter().any(|&c| c >= caches) {
-            return bad("body references");
-        }
+    if refs.iter().flatten().flat_map(|l| &l.objects).any(|r| matches!(*r, Ref::Node(i) if i >= nodes.len())) {
+        return bad("header object");
     }
+    function_codec::validate(functions, refs, caches)?;
     let f = &functions[entry];
     if f.captures != 0 || f.arity != 0 || f.rest {
         return bad("entry signature");
-    }
-    Ok(())
-}
-
-/// Bounds of every operand of a decoded body F, so only valid IR reaches
-/// threaded lowering (as `code_image.rs` checks its own). CAPTURES gives a
-/// child function's capture count; SLOTS and CACHES bound symbols and
-/// inline caches.
-fn validate_body(f: &Function, captures: impl Fn(usize) -> Option<usize>, slots: usize, caches: usize) -> Result<()> {
-    let bad = |what: &str| -> Result<()> { Err(format!("compiled Lisp artifact: invalid {what}")) };
-    if !matches!(f.code.last(), Some(Op::Return(_) | Op::Jump(_))) {
-        return bad("function body");
-    }
-    let r = |r: usize| r < f.regs;
-    let s = |s: usize| s < slots;
-    let jump = |t: usize| t < f.code.len();
-    let window = |start: usize, n: usize| n <= 4096 && start.checked_add(n).is_some_and(|end| end <= f.regs);
-    for op in &f.code {
-        let ok = match *op {
-            Op::Const(d, _) | Op::Cell(d) | Op::Return(d) | Op::LeaveProtect(d) => r(d),
-            Op::Move(d, x) | Op::ReadCell(d, x) | Op::WriteCell(d, x) => r(d) && r(x),
-            Op::ReadLate(d, x, slot) | Op::WriteLate(d, x, slot) => r(d) && r(x) && s(slot),
-            Op::BindLate(slot, d) => s(slot) && r(d),
-            Op::UnbindLate(d) => r(d),
-            Op::LateForwarded(d, x) => r(d) && r(x),
-            Op::Global(d, x) => r(d) && s(x),
-            Op::SetGlobal(x, d) | Op::Bind(x, d) | Op::Define(x, d) | Op::DefineMacro(x, d) => s(x) && r(d),
-            Op::Unbind(n) | Op::PopHandlers(n) => n <= f.code.len(),
-            Op::Protect(d, cleanup, end) => r(d) && jump(cleanup) && jump(end),
-            Op::ResumeExit => true,
-            Op::Jump(t) => jump(t),
-            Op::Unless(d, t) => r(d) && jump(t),
-            Op::Catch(d, x, t) => r(d) && r(x) && jump(t),
-            Op::Condition(d, _, t) => r(d) && jump(t),
-            Op::Closure(d, id, site) => r(d) && f.sites.get(site).is_some_and(|regs| {
-                captures(id) == Some(regs.len()) && regs.iter().all(|x| r(*x))
-            }),
-            Op::Call(d, x, start, n) => r(d) && r(x) && window(start, n),
-            Op::Direct(d, x, c, start, n) => r(d) && s(x) && c < caches && window(start, n),
-            Op::Sealed(d, x, start, n) => r(d) && s(x) && window(start, n),
-        };
-        if !ok {
-            return bad("operand");
-        }
     }
     Ok(())
 }
@@ -1037,13 +511,7 @@ fn resolve_ref(r: Ref, values: &[Value], names: &[usize], uninterned: &[usize]) 
         Ref::Name(i) => symbol(*names.get(i).ok_or("compiled Lisp artifact: bad name")?),
         Ref::Uninterned(i) => symbol(*uninterned.get(i).ok_or("compiled Lisp artifact: bad symbol")?),
         Ref::Node(i) => *values.get(i).ok_or("compiled Lisp artifact: bad node reference")?,
-        Ref::Primitive(bits) => {
-            let v = Value(bits);
-            if v.tag() != 6 || prim::name(v).is_none() {
-                return Err("compiled Lisp artifact: bad primitive".into());
-            }
-            v
-        }
+        Ref::Primitive(bits) => function_codec::resolve_primitive(bits)?,
     })
 }
 

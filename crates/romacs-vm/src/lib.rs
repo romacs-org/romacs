@@ -147,6 +147,7 @@ mod handle;
 pub use handle::{Arg, Fixed, Local, Rooted};
 mod image;
 mod frozen;
+mod function_codec;
 mod isolate;
 mod keeper;
 pub use isolate::worker_socket as isolate_worker_socket;
