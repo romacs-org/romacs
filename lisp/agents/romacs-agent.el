@@ -4732,25 +4732,45 @@ waits first.  An automatic renewal supplies a message to an empty queue."
 
 (defvar romacs-agent--queue-quiet)  ; below, with the queue
 
-(defun romacs-agent--wanted-item-p (item)
-  "Whether ITEM is still wanted at dispatch time."
+(defun romacs-agent--wanted-item-p (session item)
+  "Whether ITEM is still wanted at dispatch time.  A VALID that fails
+cannot say so: ITEM is not, its failure said on SESSION, and nothing
+behind it waits on it."
   (let ((valid (romacs-agent-item-valid item)))
-    (or (null valid) (funcall valid))))
+    (or (null valid)
+        (condition-case err (funcall valid)
+          (error (romacs-agent--raise session (list :type 'error :text (format "A message was not sent: %s"
+                                                                              (error-message-string err))))
+                 nil)))))
 
-(defun romacs-agent--validate-queue-group (queue head)
-  "Return (PARTS . STALE) for HEAD's turn, calling followers' validators.
-A steer passing the queue's head goes alone."
-  (let ((parts (list head)) (stale nil))
+(defun romacs-agent--encodable-p (item)
+  "Whether ITEM is text JSON carries: its text, images and messages as
+its line and its record hold them.  One that is not (a raw byte, as a
+Lisp caller's string can hold) goes to no harness and no store."
+  (ignore-errors
+    (json-serialize (vconcat (list (romacs-agent-item-text item)) (romacs-agent-item-images item)
+                             (mapcar #'romacs-agent--message-json (romacs-agent-item-messages item))))
+    t))
+
+(defun romacs-agent--validate-queue-group (session head)
+  "Return (PARTS . STALE) for HEAD's turn in SESSION's queue, calling
+followers' validators.  A steer passing the queue's head goes alone."
+  (let ((queue (romacs-agent-queue session)) (parts (list head)) (stale nil))
     (when (and (eq head (car queue)) (romacs-agent--joinable-p head))
       (let ((results (romacs-agent--results-p head)))
         ;; A validator can reorder items farther down the queue.
         (cl-loop for item in (cdr queue)
                  while (romacs-agent--queue-group-follower-p item results)
-                 do (if (romacs-agent--wanted-item-p item) (push item parts) (push item stale)))))
+                 do (if (romacs-agent--wanted-item-p session item) (push item parts) (push item stale)))))
     (cons (nreverse parts) stale)))
 
 (defvar romacs-agent--writing nil
   "The queue items whose line is being written (`romacs-agent--write-queue-group').")
+
+(defvar romacs-agent--failed nil
+  "While `romacs-agent--opened' dispatches a session: (SESSION . ITEMS),
+ITEMS the ones of SESSION whose write or delivery failed, as that failure
+leaves the dispatch (`romacs-agent--send-queue-group').  Nil otherwise.")
 
 (defun romacs-agent--written (unsure)
   "The items being written (`romacs-agent--writing') are: `written',
@@ -4804,31 +4824,40 @@ before it was written (`romacs-agent--written'), never after.  They are
 
 (defun romacs-agent--send-queue-group (session next)
   "Write NEXT with its group and retire the accepted and stale entries:
-once written, whatever follows the write."
-  (pcase-let ((`(,parts . ,stale) (romacs-agent--validate-queue-group (romacs-agent-queue session) next)))
-    ;; A kept row restored after the write is skipped by its journaled id.
-    (unwind-protect (romacs-agent--write-queue-group session next parts)
-      ;; Get every accepted entry off the queue before a view or a quit can run.
-      (when (eq (romacs-agent-item-held (car parts)) 'written)
-        (let ((inhibit-quit t) (romacs-agent--queue-quiet t))
-          (dolist (part (append parts stale)) (romacs-agent--dequeue session part)))))
-    (romacs-agent--after-write "romacs-agent--changed" (lambda () (romacs-agent--changed session)))
-    (romacs-agent--observe (lambda () (romacs-agent--notify-delivered parts)))))
+once written, whatever follows the write.  Should the write or their
+delivery fail, the group is what failed (`romacs-agent--failed')."
+  (pcase-let ((`(,parts . ,stale) (romacs-agent--validate-queue-group session next)))
+    (condition-case err
+        (progn
+          ;; A kept row restored after the write is skipped by its journaled id.
+          (unwind-protect (romacs-agent--write-queue-group session next parts)
+            ;; Get every accepted entry off the queue before a view or a quit can run.
+            (when (eq (romacs-agent-item-held (car parts)) 'written)
+              (let ((inhibit-quit t) (romacs-agent--queue-quiet t))
+                (dolist (part (append parts stale)) (romacs-agent--dequeue session part)))))
+          (romacs-agent--after-write "romacs-agent--changed" (lambda () (romacs-agent--changed session)))
+          (romacs-agent--observe (lambda () (romacs-agent--notify-delivered parts))))
+      ((error quit)
+       (when (eq (car romacs-agent--failed) session) (setcdr romacs-agent--failed parts))
+       (signal (car err) (cdr err))))))
 
 (defun romacs-agent--dispatch-one (session)
-  "Send or discard the next eligible item.  Return non-nil on progress.
+  "Send or discard the next eligible item.  Return non-nil on progress:
+an item written, or taken out of the queue.  A renewal's prompt let go
+is none: in no queue, it would be the next item again.
 A queued item is captured `sending' as it is chosen, before anything can
 wait (its validator), so nothing takes it out of the queue or changes it
 meanwhile; unwritten, it is let go again."
+  (when (eq (car romacs-agent--failed) session) (setcdr romacs-agent--failed nil))
   (when-let* ((next (romacs-agent--next-item session)))
     (when (memq next (romacs-agent-queue session))
       (setf (romacs-agent-item-held next) 'sending))
     (unwind-protect
-        (if (romacs-agent--wanted-item-p next)
-            (romacs-agent--send-queue-group session next)
-          (romacs-agent--dequeue session next))
-      (when (eq (romacs-agent-item-held next) 'sending) (setf (romacs-agent-item-held next) nil)))
-    t))
+        (cond ((not (romacs-agent--wanted-item-p session next)) (romacs-agent--dequeue session next))
+              ((romacs-agent--encodable-p next) (romacs-agent--send-queue-group session next) t)
+              (t (prog1 (romacs-agent--dequeue session next)
+                   (romacs-agent--raise session (list :type 'error :text "A message was not sent: its text is not UTF-8")))))
+      (when (eq (romacs-agent-item-held next) 'sending) (setf (romacs-agent-item-held next) nil)))))
 
 (defun romacs-agent--dispatch (session)
   "Drain SESSION's eligible messages, deferring reentrant dispatch requests.
@@ -4865,8 +4894,10 @@ waits); the dispatcher's own capture of it (`sending') is no hold."
   (and (cl-some (lambda (m) (plist-get m :wake)) (romacs-agent-item-messages item)) t))
 
 (defun romacs-agent--queue-group-follower-p (item results)
-  "Whether ITEM can follow a queue head whose result flag is RESULTS."
-  (and (romacs-agent--joinable-p item) (eq (romacs-agent--results-p item) results)))
+  "Whether ITEM can follow a queue head whose result flag is RESULTS: one
+not encodable ends the group, let go as a head."
+  (and (romacs-agent--joinable-p item) (eq (romacs-agent--results-p item) results)
+       (romacs-agent--encodable-p item)))
 
 (defun romacs-agent--joined (parts)
   "PARTS, the wanted messages of a queue group, as the one item
@@ -4981,16 +5012,22 @@ delivery): kept for the resume instead, the refusal said on SESSION."
 
 (defun romacs-agent--opened (session &optional item)
   "Start what lets SESSION's waiting messages go, and dispatch.  ITEM,
-when given, is taken out of the queue should that fail: its sender keeps
-it, and sends it again."
-  (condition-case err
-      (progn
-        ;; Not while its selection changes or something holds it: that resumes it.
-        (unless (or (romacs-agent-pending-selection session) (romacs-agent--held-p session))
-          (romacs-agent--open session))
-        (romacs-agent--dispatch session))
-    (error (when item (romacs-agent--dequeue session item))
-           (signal (car err) (cdr err)))))
+when given, is taken out of the queue should that fail, or its own write
+or delivery fail: its sender keeps it, and sends it again.  Another
+message's failure is not ITEM's: it is said on SESSION, a message whose
+write failed stays first for its next chance, and ITEM waits behind it."
+  (let ((romacs-agent--failed (list session)))
+    (condition-case err
+        (progn
+          ;; Not while its selection changes or something holds it: that resumes it.
+          (unless (or (romacs-agent-pending-selection session) (romacs-agent--held-p session))
+            (romacs-agent--open session))
+          (romacs-agent--dispatch session))
+      (error
+       (if (and (cdr romacs-agent--failed) (not (memq item (cdr romacs-agent--failed))))
+           (romacs-agent--raise session (list :type 'error :text (error-message-string err)))
+         (when item (romacs-agent--dequeue session item))
+         (signal (car err) (cdr err)))))))
 
 (defun romacs-agent-send-later (session text &optional first images valid messages user)
   "Send TEXT to SESSION, with the attached IMAGES, as a turn of its own:
@@ -5955,9 +5992,11 @@ prompt either, written at once or not at all."
 store when there is one (the editor's writer makes it as it starts): its
 session marked first, so a start loads it (`romacs-agent-mark').  DONE,
 when given, is called with the write's answer (`romacs-agent-write') once
-it is kept, at once with (ok nil) when nothing is written."
+it is kept, at once with (ok nil) when nothing is written.  Its record is
+JSON: one JSON cannot carry (`romacs-agent--encodable-p') is not kept, and
+dispatch lets it go."
   (if (not (and (romacs-agent--keepable-p item) (not (romacs-agent-item-kept item))
-                (file-exists-p (romacs-agent-store--file))))
+                (file-exists-p (romacs-agent-store--file)) (romacs-agent--encodable-p item)))
       (when done (funcall done '(ok nil)))
     (setf (romacs-agent-item-id item) (or (romacs-agent-item-id item) (romacs-agent--uuid))
           (romacs-agent-item-kept item) t)

@@ -246,6 +246,21 @@ wait gives the end it waited for once, in place of its wake."
       (let ((err (should-error (romacs-agent-lead-tests--adopt cwd) :type 'user-error)))
         (should (string-match-p "only the session that delegated it may take it over" (cadr err)))))))
 
+(ert-deftest romacs-agent-lead-resume-of-a-cancelled-task-says-so ()
+  ;; Taken over again once cancelled, by resume or its request: the answer
+  ;; says it is cancelled and that nothing was sent, at once, waited for or not.
+  (romacs-agent-lead-tests--with
+    (let ((child (romacs-agent-get (gethash "taskId" (romacs-agent-lead-tests--adopt cwd "clientRequestId" "r1")))))
+      (setf (romacs-agent-cancelled child) t)
+      (dolist (record (list (romacs-agent-lead-tests--adopt cwd)
+                            (romacs-agent-lead-tests--adopt cwd "mode" "wait")
+                            (romacs-agent-lead-tests--adopt cwd "clientRequestId" "r1")))
+        (should (equal (gethash "taskId" record) (romacs-agent-id child)))
+        (should (equal (gethash "status" record) "cancelled"))
+        (should (string-match-p "cancelled: nothing was sent" (gethash "note" record))))
+      (should (= (romacs-agent-queue-length child) 1))
+      (should (= (length launched) 1)))))
+
 (ert-deftest romacs-agent-lead-resume-refusals ()
   (romacs-agent-lead-tests--with
     ;; Its own directory, required and checked.

@@ -177,7 +177,8 @@ An omitted or empty InvocationID is represented by nil."
      (format "%s, status=%s (%s)" code status result))))
 
 (defun romacs-agent-watch--tail (file)
-  "FILE's last `romacs-agent-watch--lines' lines, or why there are none."
+  "FILE's last `romacs-agent-watch--lines' lines, or why there are none.
+A byte that is not UTF-8 (a character cut by the tail too) reads U+FFFD."
   (if (not (file-readable-p file)) (format "(%s cannot be read)" file)
     (with-temp-buffer
       (let* ((size (file-attribute-size (file-attributes file)))
@@ -187,7 +188,7 @@ An omitted or empty InvocationID is represented by nil."
       (skip-chars-backward "\n")
       (let ((end (point)))
         (forward-line (- 1 romacs-agent-watch--lines))
-        (buffer-substring-no-properties (line-beginning-position) end)))))
+        (romacs-mcp--unicode (buffer-substring-no-properties (line-beginning-position) end))))))
 
 (defun romacs-agent-watch--message (watch status)
   "What a task is told when WATCH's unit ended with STATUS."
@@ -201,12 +202,13 @@ An omitted or empty InvocationID is represented by nil."
 (defun romacs-agent-watch--entries (file section)
   "FILE's entries under the heading SECTION (anywhere, when nil): each
 non-empty line not a heading, as (KEY . LINE), KEY its first word after a
-list marker; nil when FILE cannot be read."
+list marker; nil when FILE cannot be read.  A byte that is not UTF-8
+reads U+FFFD."
   (when (file-readable-p file)
     (with-temp-buffer
       (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
       (let ((in (null section)) (entries nil))
-        (dolist (line (split-string (buffer-string) "\n"))
+        (dolist (line (split-string (romacs-mcp--unicode (buffer-string)) "\n"))
           (cond ((string-match "\\`#+[ \t]+\\(.*\\)" line)
                  (setq in (or (null section) (equal (string-trim (match-string 1 line)) section))))
                 ((and in (string-match "\\`[ \t]*\\(?:[-*+][ \t]+\\)?\\([^ \t]+\\)" line))
