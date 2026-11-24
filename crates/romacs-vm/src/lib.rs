@@ -136,6 +136,7 @@ mod indirect;
 use romacs_brand as brand;
 mod gc;
 mod registers;
+mod mutator;
 mod gc_check;
 mod gc_image;
 mod functions;
@@ -1398,8 +1399,6 @@ pub struct Vm {
     standard_case_tables: [Value; 4],
     /// undo.c's point_before_last_command_or_undo and its buffer.
     command_point: (i64, Value),
-    /// A storage kernel runs inside insdel's bracket, which checked read-only.
-    change_prepared: bool,
     /// The slots insdel's bracket reads on every change, once resolved.
     change_slots: Option<insdel::ChangeSlots>,
     case_symbols_slot: usize,
@@ -1431,7 +1430,8 @@ pub struct Vm {
     /// Times `buffer_index` resolved the current buffer afresh.
     #[cfg(test)]
     buffer_resolutions: usize,
-    regexp: regexp::MatchState,
+    /// The running mutator's context (`mutator.rs`).
+    pub(crate) mutator: mutator::Mutator,
     #[snapshot(at_rest)]
     regexp_cache: regexp::PatternCache,
     /// Compiled tree-sitter queries by grammar and text (`treesit::query_memo`).
@@ -1667,12 +1667,6 @@ pub struct Vm {
     #[snapshot(at_rest)]
     inotify: Option<std::os::fd::OwnedFd>,
     buffer_slot: usize,
-    /// The current buffer as `buffer_index` last resolved it: the slot's
-    /// value then, a live buffer, and its object index. Kept by value, not
-    /// by writer: `let` and its unwinding write the slot like any special
-    /// variable, and a different value simply resolves again. Killing a
-    /// buffer and a collection (which may move buffers) drop it.
-    resolved_buffer: Option<(Value, usize)>,
     pub(crate) multibyte_slot: usize,
     truncate_lines_slot: usize,
     /// The slots of `permanent-local' and `permanent-local-hook', the
@@ -1848,12 +1842,6 @@ pub struct Vm {
     /// forwarded in place, and dropped with the engine by a caught panic.
     #[snapshot(at_rest)]
     suspended: Vec<threaded::Suspended>,
-    /// Menu-item `:filter' results for the keymap walk in progress, as
-    /// (menu item, result); set and cleared around one walk, which never
-    /// collects.
-    keymap_filters: Vec<(Value, Value)>,
-    /// The first filter that walk needed: (menu item, filter, definition).
-    keymap_pending_filter: Option<(Value, Value, Value)>,
     /// The `let` bindings in effect: (variable, saved value, buffer current
     /// when bound, kind).
     dynamic: Vec<(usize, Value, Value, Let)>,
@@ -1900,7 +1888,6 @@ impl Vm {
             charsets: charset::Registry::default(),
             standard_case_tables: [Value::NIL; 4],
             command_point: (0, Value::NIL),
-            change_prepared: false,
             change_slots: None,
             case_symbols_slot: usize::MAX,
             print_number_index: 0,
@@ -1921,7 +1908,7 @@ impl Vm {
             speculative_misses: 0,
             #[cfg(test)]
             buffer_resolutions: 0,
-            regexp: regexp::MatchState::default(),
+            mutator: mutator::Mutator::default(),
             regexp_cache: regexp::PatternCache::default(),
             treesit_queries: treesit::query_memo::Memo::default(),
             flat_tables: char_table::FlatTables::default(),
@@ -2007,7 +1994,6 @@ impl Vm {
             keeper: None,
             inotify: None,
             buffer_slot: 0,
-            resolved_buffer: None,
             multibyte_slot: 0,
             truncate_lines_slot: usize::MAX,
             permanent_local_slot: usize::MAX,
@@ -2081,8 +2067,6 @@ impl Vm {
             unwinding: 0,
             aftermath_runs: 0,
             suspended: vec![],
-            keymap_filters: Vec::new(),
-            keymap_pending_filter: None,
             dynamic: vec![],
             conditions: conditions::Registry::default(),
             rooted: handle::RootSet::default(),

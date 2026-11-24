@@ -130,7 +130,7 @@ fn scratch(name: &str) -> PathBuf {
 }
 
 fn restored() -> String {
-    json!({"mode": "restored", "carry": 42, "value": "(built 1)", "forked": false}).to_string()
+    json!({"mode": "restored", "carry": 42, "value": "(built 1)", "match": "(1 3 2 3)", "forked": false}).to_string()
 }
 
 /// What a child printed of its outcome.
@@ -206,8 +206,11 @@ fn launch_world(store: &Path, recipe: &str) {
     match world.launch::<u64>(|| std::env::args_os().skip(1).collect(), true, |_| println!("WAITING-FOR-BUILD")) {
         Launch::Restored { mut vm, carry, .. } => {
             vm.world_reinit();
+            // Before any Lisp runs here: the builder's match data, which
+            // the image carries with the mutator's context (`mutator.rs`).
+            let matched = vm.eval_source("(match-data)").and_then(|v| v.display()).unwrap();
             let value = vm.eval_source("(world-image-probe)").and_then(|v| v.display()).unwrap();
-            println!("WORLD-IMAGE {}", json!({"mode": "restored", "carry": carry, "value": value,
+            println!("WORLD-IMAGE {}", json!({"mode": "restored", "carry": carry, "value": value, "match": matched,
                                                "forked": FORKS.with(std::cell::Cell::get) > 0}));
         }
         Launch::Build => {
@@ -234,6 +237,7 @@ fn launch_world(store: &Path, recipe: &str) {
                 vm.eval_source("(defalias 'world-image-probe (let ((table (make-hash-table :test 'equal))) \
                                 (puthash \"key\" 'built table) (lambda () (list (gethash \"key\" table) (hash-table-count table)))))")
                     .unwrap();
+                vm.eval_source(r#"(string-match "b\\(c\\)" "abcd")"#).unwrap();
                 // An address of this executable, which no image should
                 // hold: the stray test's carry.
                 let carry = if flag.trim() == "stray" { std::ptr::addr_of!(STRAY_BYTE) as u64 } else { 42 };
