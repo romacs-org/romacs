@@ -1298,22 +1298,32 @@ next turn end wakes its parent by its wake rule, as its first did.  An
 empty TEXT sends nothing."
   (romacs-agent-tools--check-message-target child)
   (unless (string-empty-p (string-trim text))
-    (let ((busy (memq (romacs-agent-state child) '(running waiting-approval))))
-      (cond ((and busy (eq mode 'steer) (not (romacs-agent--per-turn-p child)))
-             (romacs-agent-send child text nil valid nil messages))
-            ((and busy (eq mode 'interrupt))
-             ;; First in line before the cut: a turn not yet under way
-             ;; (Codex's before it names it) cannot be cut, and it goes after.
-             (romacs-agent-send-later child text t nil valid messages)
-             (ignore-error user-error (romacs-agent-interrupt child)))
-            (t
-             ;; One starting is going on already: attaching it again would take its
-             ;; supervisor from the attachment under way.
-             (unless (eq (romacs-agent-state child) 'starting) (romacs-agent--continue child))
-             ;; It waits for the turn running: that turn's result is made before it.
-             (when busy (romacs-agent-issues-told child))
-             (romacs-agent-send-later child text nil nil valid messages)))))
+    (pcase (romacs-agent-tools--delivery child mode)
+      ('steered (romacs-agent-send child text nil valid nil messages))
+      ('interrupting
+       ;; First in line before the cut: a turn not yet under way
+       ;; (Codex's before it names it) cannot be cut, and it goes after.
+       (romacs-agent-send-later child text t nil valid messages)
+       (ignore-error user-error (romacs-agent-interrupt child)))
+      (delivery
+       ;; One starting is going on already: attaching it again would take its
+       ;; supervisor from the attachment under way.
+       (unless (eq (romacs-agent-state child) 'starting) (romacs-agent--continue child))
+       ;; It waits for the turn running: that turn's result is made before it.
+       (when (eq delivery 'queued) (romacs-agent-issues-told child))
+       (romacs-agent-send-later child text nil nil valid messages))))
   child)
+
+(defun romacs-agent-tools--delivery (child mode)
+  "How a message by MODE reaches CHILD as it is now: `steered' into its
+running turn, `interrupting' that turn, `queued' behind it, or `sent' as
+its next turn at once.  A steer a turn cannot take (none runs, or its
+harness runs a process a turn) is queued or sent."
+  (let ((busy (memq (romacs-agent-state child) '(running waiting-approval))))
+    (cond ((and busy (eq mode 'steer) (not (romacs-agent--per-turn-p child))) 'steered)
+          ((and busy (eq mode 'interrupt)) 'interrupting)
+          (busy 'queued)
+          (t 'sent))))
 
 (defconst romacs-agent-tools--send-modes '("queue" "replace" "interrupt")
   "How romacs_task_send delivers, as its schema names them: after the running
@@ -1413,10 +1423,12 @@ and the message's id."
     (user-error "mode must be one of %s" (string-join romacs-agent-tools--send-modes ", ")))
   (let* ((caller (and sender (romacs-agent-id sender)))
          (kind (romacs-agent-tools--kind sender target))
-         (message (romacs-agent-tools--message kind sender in-reply-to by-user)))
+         (message (romacs-agent-tools--message kind sender in-reply-to by-user))
+         (delivery nil))
     ;; Dropped now, not at dispatch: the message stays all data, so the
     ;; store keeps it across a restart.
     (when (equal mode "replace") (romacs-agent-tools--replace-waiting target caller))
+    (setq delivery (romacs-agent-tools--delivery target (intern mode)))
     (romacs-agent-tools--tell target text (intern mode) nil (list message))
     ;; Text no harness takes is never copied: it would ride every wake after.
     (when (and (equal kind "sibling") (romacs-agent--encodable-p (romacs-agent-item text)))
@@ -1425,6 +1437,8 @@ and the message's id."
                  romacs-agent-tools--copies)))
     (let ((record (romacs-agent-tools--ack target)))
       (puthash "messageId" (plist-get message :id) record)
+      ;; What became of it, a steer asked for included: T3 Code's delivery.
+      (puthash "delivery" (symbol-name delivery) record)
       record)))
 
 (defun romacs-agent-tools--send (arguments)
@@ -2476,8 +2490,9 @@ answers as its last line says: your own task by its turn's reply when that wakes
 it at once; one whose harness ended is resumed for it. mode queue (default); replace: in place of your messages still \
 waiting for it; interrupt: its turn cut short, then this first. A task's next turn end wakes its parent with its reply \
 by its wake rule: end your turn then, do \
-not poll. Answers the messageId and the task's short record (taskId, status, title, provider, model, next, \
-resultChars), never its last result: romacs_task_status reads that."
+not poll. Answers the messageId, its delivery (steered into the running turn, interrupting it, queued behind it, or \
+sent as its next turn now: a steer no turn can take is queued or sent) and the task's short record (taskId, status, \
+title, provider, model, next, resultChars), never its last result: romacs_task_status reads that."
  (romacs-mcp--object
   "type" "object"
   "properties" (romacs-mcp--object

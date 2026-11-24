@@ -276,14 +276,15 @@ message's record for TEXT, `interrupted' each interrupted."
 
 (ert-deftest romacs-agent-delegate-send-steers-queues-and-interrupts ()
   (romacs-agent-delegate-tests--sending parent
-    (send a "later")
+    ;; Each answer says what became of it.
+    (should (equal (gethash "delivery" (send a "later")) "queued"))
     (should-not written)
     (should (= (romacs-agent-queue-length a) 1))
     ;; Into the running turn.
-    (send a "now" "steer")
+    (should (equal (gethash "delivery" (send a "now" "steer")) "steered"))
     (should (equal written '(("a" . "now"))))
     ;; Cut short, then first.
-    (send a "first" "interrupt")
+    (should (equal (gethash "delivery" (send a "first" "interrupt")) "interrupting"))
     (should (equal interrupted '("a")))
     (drain a)
     (should (equal (car written) '("a" . "first")))))
