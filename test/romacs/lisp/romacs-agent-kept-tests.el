@@ -611,6 +611,17 @@ contents, so two equal states print the same."
       (should-not (romacs-agent-loaded romacs-agent-kept-tests--id))
       (should (romacs-agent-get romacs-agent-kept-tests--id)))))
 
+(ert-deftest romacs-agent-kept-a-failed-load-leaves-it-unknown ()
+  ;; A read that fails mid-load (a store read signals) leaves the session
+  ;; unknown, never half loaded: the next ask loads it whole.
+  (romacs-agent-kept-tests--with
+    (romacs-agent-kept-tests--write dir (romacs-agent-kept-tests--claude))
+    (clrhash romacs-agent--sessions)
+    (cl-letf (((symbol-function 'romacs-agent--restore-kept) (lambda (&rest _) (error "Store busy"))))
+      (should-error (romacs-agent-get romacs-agent-kept-tests--id)))
+    (should-not (romacs-agent-loaded romacs-agent-kept-tests--id))
+    (should (romacs-agent-get romacs-agent-kept-tests--id))))
+
 ;; Worker VMs as these tests see them: a job is held until `--work' runs
 ;; it in a VM of its own (private session, kept and summary tables), then
 ;; its callback.

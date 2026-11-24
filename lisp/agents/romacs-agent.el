@@ -6983,14 +6983,30 @@ once, and loads on once its kept state is written."
         (puthash (romacs-agent-id session) session romacs-agent--sessions)
         (romacs-agent--index session)
         ;; Its kept state back, its journal is read on from there: by its
-        ;; supervisor's replay from that record, or here.
-        (let ((from (romacs-agent--restore-kept session (and (romacs-agent--fold-aside-p session 0)
-                                                             romacs-agent-fold-bytes))))
-          (if (or (eq from 'beyond) (romacs-agent--fold-aside-p session from))
-              (romacs-agent--fold-aside session manifest)
-            (when from (setf (romacs-agent-journal-start session) from))
-            (romacs-agent--load-rest session manifest)))
+        ;; supervisor's replay from that record, or here.  A read that
+        ;; fails leaves it unknown, not half loaded: the next ask loads it.
+        (condition-case err
+            (let ((from (romacs-agent--restore-kept session (and (romacs-agent--fold-aside-p session 0)
+                                                                 romacs-agent-fold-bytes))))
+              (if (or (eq from 'beyond) (romacs-agent--fold-aside-p session from))
+                  (romacs-agent--fold-aside session manifest)
+                (when from (setf (romacs-agent-journal-start session) from))
+                (romacs-agent--load-rest session manifest)))
+          ((error quit)
+           (romacs-agent--unpublish session)
+           (signal (car err) (cdr err))))
         session))))
+
+(defun romacs-agent--unpublish (session)
+  "Forget SESSION, whose load failed: out of the registry and its indexes."
+  (let ((id (romacs-agent-id session)) (options (romacs-agent-options session)))
+    (when (eq (gethash id romacs-agent--sessions) session) (remhash id romacs-agent--sessions))
+    (when-let* ((parent (plist-get options :parent)))
+      (puthash parent (delq session (gethash parent romacs-agent--children)) romacs-agent--children))
+    (when-let* ((request (plist-get options :request))
+                (key (cons (plist-get options :parent) request))
+                ((equal (gethash key romacs-agent--requests) id)))
+      (remhash key romacs-agent--requests))))
 
 (defun romacs-agent--load-rest (session manifest)
   "SESSION, made from MANIFEST and its kept state back: attached when its
