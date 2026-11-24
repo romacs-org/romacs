@@ -867,8 +867,9 @@ impl Vm {
     }
 
     /// The next frame from peer ID as `(KIND GENERATION VALUE)`, its value
-    /// attached as a frozen region (or an ordinary string for text and
-    /// hello), or nil when none waits. A frame whose value cannot be
+    /// taken as `take_backing` says: a data graph attached as a frozen
+    /// region, a code graph placed as private copies (or an ordinary string
+    /// for text and hello), or nil when none waits. A frame whose value cannot be
     /// attached now stays queued and the error is signalled.
     pub(crate) fn isolate_take(&mut self, id: u64) -> Result<Value> {
         let Some(frame) = self.peer_mut(id)?.inbox.pop_front() else { return Ok(Value::NIL) };
@@ -880,7 +881,7 @@ impl Vm {
             }
             Payload::Text(text) => self.make_lisp_string(text.into_bytes(), true),
             Payload::Status(status) => Value::integer(i64::from(status))?,
-            Payload::Frozen(backing) => match self.attach(backing.clone()) {
+            Payload::Frozen(backing) => match self.take_backing(backing.clone()) {
                 Ok(root) => root,
                 Err(error) => {
                     self.peer_mut(id)?.inbox.push_front(Frame { payload: Payload::Frozen(backing), ..frame });

@@ -3868,6 +3868,7 @@ impl Vm {
         let buffer = owner.index_if(0)? - 1;
         Some(crate::variable_runtime::LocalEntry { buffer, at: self.local_at(buffer, base)?.ok()? })
     }
+    // SMELL(long-function): an arm for each Object variant, each kind one decision a reader checks in place.
     #[inline(never)]
     fn primitive(&mut self, p: Primitive, start: usize, n: usize) -> Result<Value> {
         use Primitive::*;
@@ -4027,6 +4028,7 @@ impl Vm {
                             | data::Object::Treesit(_)
                             | data::Object::Finalizer(_)
                             | data::Object::Thread
+                            | data::Object::Backing(_)
                             | data::Object::Process(_)
                             | data::Object::HashTable(_) => {
                                 return Err("sequence required".into());
@@ -4049,6 +4051,7 @@ impl Vm {
     pub(crate) fn display(&self, v: Value) -> Result<String> {
         self.display_depth(v, 0)
     }
+    // SMELL(long-function): an arm for each Object variant, each kind one decision a reader checks in place.
     fn display_depth(&self, v: Value, depth: usize) -> Result<String> {
         if depth > 100 {
             return Err("display depth exceeded".into());
@@ -4074,6 +4077,7 @@ impl Vm {
                 // print.c PVEC_FINALIZER.
                 data::Object::Finalizer(function) => Ok(if *function == Value::NIL { "#<finalizer used>" } else { "#<finalizer>" }.into()),
                 data::Object::Thread => Ok("#<thread>".into()),
+                data::Object::Backing(b) => Ok(format!("#<frozen-backing {} bytes>", b.len())),
                 data::Object::Process(p) => Ok(format!("#<process {}>", self.process_name_text(p))),
                 data::Object::Marker(_) => Ok(self.marker_text(v, false).unwrap_or_else(|| "#<marker>".into())),
                 data::Object::Overlay(_) => Ok("#<overlay>".into()),

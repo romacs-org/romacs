@@ -265,7 +265,7 @@ impl Vm {
                     Marker(m) => m.visit_values(&mut push),
                     Overlay(o) => o.visit_values(&mut push),
                     Obarray(t) => t.visit_values(&mut push),
-                    Float(_) | Bignum(_) | BoolVector(_) | Bytes(..) | SyntaxTable(_) | Sqlite(_) | Thread | Free => {}
+                    Float(_) | Bignum(_) | BoolVector(_) | Bytes(..) | SyntaxTable(_) | Sqlite(_) | Thread | Backing(_) | Free => {}
                 }
             }
             _ => {}

@@ -35,3 +35,15 @@ defsubr! { name = "romacs--frozen-regions", gnu = "romacs:frozen", effect = Read
 fn frozen_regions(cx) {
     Ok(cx.frozen_regions())
 }}
+
+// Build a seed (design O7m §2.6): the entries ROOTS name, each one of (variable SYM [FILE]),
+// (function SYM [FILE]), (plist SYM) and (after-load KEY FUNCS), with a function and a plist
+// entry for each symbol they mention whose definition does not cross by name, encoded once as
+// one code graph within LIMIT nodes of work, refused work included.  TABLE is the zygote's, a
+// plist whose :incarnation the seed names.  Returns (BACKING . REFUSALS): BACKING is sent as it
+// is, and arrives as private, mutable copies; each refusal is (KIND NAME REASON . DETAIL), its
+// entry left out.
+defsubr! { name = "romacs--seed-build", gnu = "romacs:frozen", effect = Global,
+fn seed_build(cx, roots: Value, table: Value, limit: Value) {
+    cx.seed_build(roots, table, limit)
+}}

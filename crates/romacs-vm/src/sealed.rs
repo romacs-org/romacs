@@ -8,7 +8,7 @@
 //! in file order, with the arities GNU's handlers emit the opcode for: a call
 //! with any other number of arguments is an ordinary function call there and
 //! here. `sealed_set_matches_gnu_bytecomp` pins the table to the pinned file.
-use super::{prim, PRIMITIVES, Value};
+use super::{prim, Value};
 use std::sync::OnceLock;
 
 /// One `byte-defop-compiler` row: `name` compiles to the primitive `target`
@@ -135,20 +135,12 @@ struct Sealed {
     max: usize,
     target: Value,
 }
-/// The primitive declared under NAME: a legacy row or a generated defsubr.
-fn builtin(name: &str) -> Option<Value> {
-    PRIMITIVES
-        .iter()
-        .position(|(n, _)| *n == name)
-        .map(|i| Value::reference(i, 6))
-        .or_else(|| prim::subr_named(name))
-}
 fn table() -> &'static rustc_hash::FxHashMap<&'static str, Sealed> {
     static TABLE: OnceLock<rustc_hash::FxHashMap<&'static str, Sealed>> = OnceLock::new();
     TABLE.get_or_init(|| {
         ROWS.iter()
             .filter_map(|r| {
-                let target = builtin(r.target)?;
+                let target = prim::subr_named(r.target)?;
                 Some((r.name, Sealed { min: r.min, max: r.max, target }))
             })
             .collect()
@@ -268,7 +260,7 @@ mod tests {
         vm.eval_source("nil").unwrap();
         let mut missing = vec![];
         for r in ROWS {
-            let Some(primitive) = builtin(r.target) else {
+            let Some(primitive) = prim::subr_named(r.target) else {
                 missing.push(r.name);
                 continue;
             };
@@ -284,7 +276,7 @@ mod tests {
         assert_eq!(missing, Vec::<&str>::new(), "byte-op names without a Romacs primitive");
         assert_eq!(target("car", 2), None);
         assert_eq!(target("list", 256), None);
-        assert_eq!(target("nconc", 300), builtin("nconc"));
+        assert_eq!(target("nconc", 300), prim::subr_named("nconc"));
         assert_eq!(target("plist-get", 2), None);
     }
 }

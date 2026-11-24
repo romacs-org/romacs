@@ -121,8 +121,8 @@ enum Seen<'a> {
     Text { bytes: usize, properties: bool },
     /// A bignum, bytes, a bool vector: memory, and no Values, its payload.
     Memory(usize),
-    /// A syntax table, an SQLite handle, the thread: no Values, and side
-    /// effects when dropped.
+    /// A syntax table, an SQLite handle, the thread, a frozen backing: no
+    /// Values, and side effects when dropped.
     Inert,
     Finalizer(Value),
     Buffer,
@@ -155,10 +155,12 @@ impl<'a> Seen<'a> {
             Vector(values) | Record(values) => Seen::Values(values, values.capacity() - values.len()),
             String(s) | RawString(s) => Seen::Text { bytes: s.bytes().len(), properties: !s.properties.is_empty() },
             Bignum(_) | Bytes(..) | BoolVector(_) => Seen::Memory(data::payload_bytes(object)),
-            SyntaxTable(_) | Sqlite(_) | Thread => Seen::Inert,
+            SyntaxTable(_) | Sqlite(_) | Thread | Backing(_) => Seen::Inert,
             Finalizer(function) => Seen::Finalizer(*function),
             Buffer(_) | ByteBuffer(_) => Seen::Buffer,
-            _ => Seen::Other,
+            // Each kind is named, so a new one is classified before it compiles.
+            Window(_) | Frame(_) | Terminal(_) | WindowConfiguration(_) | Treesit(_) | Process(_) | CharTable(_)
+            | SubCharTable(_) | MapKeymapCursor(_) | Marker(_) | Overlay(_) | HashTable(_) | Obarray(_) => Seen::Other,
         }
     }
 }

@@ -580,7 +580,7 @@ impl Vm {
     }
     /// The table's hash function: (hash, depends on a moving heap index).
     fn hash_key(&self, test: Test, key: Value) -> (u64, bool) {
-        let identity = || (key.0, Self::moving_reference(key));
+        let identity = || Self::identity_hash(key);
         match test {
             Test::Eq => identity(),
             Test::Eql => match self.object_if(key) {
@@ -601,6 +601,10 @@ impl Vm {
                 _ => identity(),
             },
         }
+    }
+    /// An `eq` hash: KEY's own bits, and whether a compaction can move it.
+    fn identity_hash(key: Value) -> (u64, bool) {
+        (key.0, Self::moving_reference(key))
     }
     /// GNU `Feql`: floats by bit pattern, so 0.0 and -0.0 differ and NaNs
     /// with identical bits match.
@@ -984,6 +988,27 @@ impl Vm {
         table.rebuild();
         table.stale = false;
     }
+    /// Rehash TABLE if a collection left it stale, so that lookups in it
+    /// are indexed again. Frozen tables never become stale.
+    pub(super) fn freshen_table(&mut self, table: Value) {
+        let Ok(t) = self.table(table) else { return };
+        if !t.stale { return; }
+        let Some(index) = table.index_if(0).and_then(|i| i.checked_sub(1)) else { return };
+        if t.test == Test::Eq {
+            // An `eq` hash is its key's own: rehashed in place, nothing copied.
+            let (t, _) = self.table_mut(index);
+            for slot in 0..t.keys.len() {
+                if t.keys[slot] != UNUSED && t.moving[slot] {
+                    (t.hashes[slot], t.moving[slot]) = Self::identity_hash(t.keys[slot]);
+                }
+            }
+            t.rebuild();
+            t.stale = false;
+        } else {
+            let hashes = self.moving_hashes(t);
+            self.fresh_table(index, hashes);
+        }
+    }
     /// GNU `hash_find`: `eq` first, then the stored hash and the test.
     fn table_lookup<T>(
         &mut self,
@@ -994,13 +1019,8 @@ impl Vm {
         let t = self.table(table)?;
         let index = table.payload() as usize - 1;
         let t = if t.stale {
-            // Frozen tables never become stale.
-            let hashes = self.moving_hashes(t);
-            self.fresh_table(index, hashes);
-            let Some(data::Object::HashTable(t)) = self.objects.get(index) else {
-                unreachable!("checked hash table");
-            };
-            t
+            self.freshen_table(table);
+            self.table(table)?
         } else {
             t
         };

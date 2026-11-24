@@ -50,9 +50,9 @@ fn assert_heap_kind_inventory(source: &str) {
     // finalizer's function and treesit objects (a parser's buffer,
     // language and notifiers; a node's parser) contain ordinary values;
     // none constructs positioned-symbol objects, and a free entry holds
-    // nothing. The reader check above
+    // nothing; a frozen backing holds bytes alone. The reader check above
     // exercises the new public subtable representation.
-    assert_eq!(variants, ["SyntaxTable", "Float", "Bignum", "Window", "Frame", "Terminal", "WindowConfiguration", "Sqlite", "Treesit", "Process", "Finalizer", "Thread", "String", "RawString", "Vector", "BoolVector", "Record", "CharTable", "SubCharTable", "MapKeymapCursor", "Buffer", "Marker", "Overlay", "Bytes", "ByteBuffer", "HashTable", "Obarray", "Free"], "new heap kinds require re-auditing the no-positioned-symbol premise");
+    assert_eq!(variants, ["SyntaxTable", "Float", "Bignum", "Window", "Frame", "Terminal", "WindowConfiguration", "Sqlite", "Treesit", "Process", "Finalizer", "Thread", "String", "RawString", "Vector", "BoolVector", "Record", "CharTable", "SubCharTable", "MapKeymapCursor", "Buffer", "Marker", "Overlay", "Bytes", "ByteBuffer", "HashTable", "Obarray", "Backing", "Free"], "new heap kinds require re-auditing the no-positioned-symbol premise");
 }
 
 #[test]

@@ -82,6 +82,24 @@ impl<'vm> Local<'vm> {
     pub fn buffer_order_node(self) -> Option<u32> {
         self.vm.order_node(self.value)
     }
+    /// A copy of the bytes of this frozen backing (`romacs--seed-build`).
+    ///
+    /// # Errors
+    ///
+    /// When this is no frozen backing, or its memfd cannot be read.
+    #[cfg(feature = "test-hooks")]
+    pub fn seed_backing_bytes(self) -> Result<Vec<u8>> {
+        self.vm.backing_bytes(self.value)
+    }
+    /// How this closure holds its body: `eager`, `pending`, `mapped` or `lazy`.
+    ///
+    /// # Errors
+    ///
+    /// When this is no closure.
+    #[cfg(feature = "test-hooks")]
+    pub fn function_body_kind(self) -> Result<&'static str> {
+        self.vm.function_body_kind(self.value)
+    }
     /// Overlays of this buffer covering a UTF-8 byte boundary. The visitor
     /// receives each overlay as a `Local` of the same borrow.
     pub fn visit_overlays_at(

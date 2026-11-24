@@ -41,6 +41,9 @@ use crate::data::Object;
 use crate::image::IMAGE;
 use std::sync::Arc;
 
+mod code;
+mod seed;
+
 /// Region id bits of a frozen payload: above the 48-bit index, below `IMAGE`.
 pub(crate) const REGION_SHIFT: u32 = 48;
 const REGION_BITS: u32 = 12;
@@ -273,31 +276,59 @@ impl<'a> Reader<'a> {
 }
 
 /// The edges a region's words encode: immediates as their bits, conses and
-/// objects region-relative, symbols by descriptor.
-#[derive(Clone, Copy)]
-enum Edge { Immediate(Value), Cons(usize), Object(usize), Symbol(usize) }
+/// objects region-relative, symbols by descriptor; in a code graph
+/// (`code.rs`) also closures, capture cells and subrs by their index, and
+/// the unbound marker a forwarded late cell holds.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Edge { Immediate(Value), Cons(usize), Object(usize), Symbol(usize), Closure(usize), Cell(usize), Subr(usize), Unbound }
+
+/// How many of each kind of node an encoding holds: the bounds its edges
+/// are parsed against. A data graph's code counts are 0.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Counts {
+    pub(crate) conses: usize,
+    pub(crate) objects: usize,
+    pub(crate) symbols: usize,
+    pub(crate) closures: usize,
+    pub(crate) cells: usize,
+    pub(crate) subrs: usize,
+}
 
 impl Edge {
-    fn word(self) -> u64 {
+    pub(crate) fn word(self) -> u64 {
         match self {
             Edge::Immediate(v) => v.0,
             Edge::Cons(i) => ((i as u64) << 3) | 3,
             Edge::Object(i) => (i as u64 + 1) << 3,
             Edge::Symbol(i) => ((i as u64 + 1) << 3) | 7,
+            Edge::Closure(i) => ((i as u64 + 1) << 3) | 4,
+            Edge::Cell(i) => ((i as u64 + 1) << 3) | 2,
+            Edge::Subr(i) => ((i as u64 + 1) << 3) | 6,
+            Edge::Unbound => Value::UNBOUND.0,
         }
     }
-    fn parse(word: u64, conses: usize, objects: usize, symbols: usize) -> Result<Self> {
+    /// The edge WORD encodes, within COUNTS. The unbound marker is no edge
+    /// here (`parse_content`).
+    pub(crate) fn parse(word: u64, counts: &Counts) -> Result<Self> {
         let v = Value(word);
         let index = (word >> 3) as usize;
+        let one_based = |n: usize| index >= 1 && index <= n;
         match word & 7 {
             1 | 5 => Ok(Edge::Immediate(v)),
             0 if word == 0 => Ok(Edge::Immediate(Value::NIL)),
             2 if word == 2 => Ok(Edge::Immediate(Value::TRUE)),
-            3 if index < conses => Ok(Edge::Cons(index)),
-            0 if index >= 1 && index <= objects => Ok(Edge::Object(index - 1)),
-            7 if index >= 1 && index <= symbols => Ok(Edge::Symbol(index - 1)),
+            3 if index < counts.conses => Ok(Edge::Cons(index)),
+            0 if one_based(counts.objects) => Ok(Edge::Object(index - 1)),
+            7 if one_based(counts.symbols) => Ok(Edge::Symbol(index - 1)),
+            4 if one_based(counts.closures) => Ok(Edge::Closure(index - 1)),
+            2 if one_based(counts.cells) => Ok(Edge::Cell(index - 1)),
+            6 if one_based(counts.subrs) => Ok(Edge::Subr(index - 1)),
             _ => Err("frozen region edge is invalid".into()),
         }
+    }
+    /// A capture cell's content: an edge, or the unbound marker.
+    pub(crate) fn parse_content(word: u64, counts: &Counts) -> Result<Self> {
+        if word == Value::UNBOUND.0 { Ok(Edge::Unbound) } else { Self::parse(word, counts) }
     }
 }
 
@@ -306,9 +337,21 @@ impl Edge {
 #[derive(Clone, Copy)]
 pub(crate) enum Label {
     Root, Car, Cdr, Aref(usize), Key(usize), Val(usize), Property(usize), Purpose, Default, Parent, Extra(usize), Range(usize),
+    // A code graph's (`code.rs`).
+    Capture(usize), Metadata(usize), Document, Interactive, Constant(usize), Cell, Body,
 }
 
 struct Node { value: Value, parent: Option<usize>, label: Label }
+
+/// What one step of a walk found (`Walk::step`).
+enum Step {
+    /// An immediate, or a value already entered.
+    Seen,
+    /// A cons, object or symbol, now entered.
+    New,
+    /// The node of a closure, capture cell or subr, for a code walk.
+    Code(usize),
+}
 
 /// What `freeze` and `thaw` refuse: the object and the path of edges to it.
 pub(crate) struct Refusal { pub(crate) object: Value, pub(crate) path: Vec<Label> }
@@ -342,6 +385,12 @@ impl<'a> Walk<'a> {
         Refusal { object: self.nodes[node].value, path }
     }
 
+    /// Refuse VALUE, reached from PARENT by LABEL, without entering it.
+    fn refuse(&mut self, value: Value, parent: Option<usize>, label: Label) -> Refusal {
+        self.nodes.push(Node { value, parent, label });
+        self.refusal(self.nodes.len() - 1)
+    }
+
     fn symbol_named(&self, v: Value, name: &str) -> bool {
         v.index_if(7).and_then(|i| i.checked_sub(1)).and_then(|slot| self.vm.symbol_names.get(slot)).is_some_and(|n| n == name)
     }
@@ -359,93 +408,132 @@ impl<'a> Walk<'a> {
             Object::HashTable(t) => t.weakness == hash::Weakness::None && !t.local_bindings
                 && !matches!(t.test, hash::Test::User(..)),
             Object::SyntaxTable(_) | Object::Window(_) | Object::Frame(_) | Object::Terminal(_) | Object::WindowConfiguration(_)
-            | Object::Sqlite(_) | Object::Treesit(_) | Object::Process(_) | Object::Finalizer(_) | Object::Thread | Object::SubCharTable(_) | Object::MapKeymapCursor(_)
+            | Object::Sqlite(_) | Object::Treesit(_) | Object::Process(_) | Object::Finalizer(_) | Object::Thread | Object::Backing(_) | Object::SubCharTable(_) | Object::MapKeymapCursor(_)
             | Object::Buffer(_) | Object::Marker(_) | Object::Overlay(_) | Object::ByteBuffer(_) | Object::Obarray(_)
             | Object::Free => false,
         }
     }
 
-    /// Discover every node reachable from ROOT, assigning indices.
+    /// Discover every node reachable from ROOT, assigning indices. A
+    /// closure, capture cell or subr is refused: they are per VM.
     fn discover(&mut self, root: Value) -> std::result::Result<(), Refusal> {
         let mut pending = vec![(root, None, Label::Root)];
         while let Some((value, parent, label)) = pending.pop() {
-            match value.tag() {
-                1 => continue,
-                0 if value == Value::NIL => continue,
-                2 if value == Value::TRUE => continue,
-                7 => {
-                    if value == Value::UNBOUND || self.symbol_memo.contains_key(&value.0) { continue; }
-                    let slot = value.payload() as usize - 1;
-                    let interned = self.vm.initial_obarray.get(slot).copied().unwrap_or(false);
-                    let name = self.vm.symbol_names.get(slot).cloned().unwrap_or_default();
-                    self.symbol_memo.insert(value.0, self.symbols.len());
-                    self.symbols.push((name, interned));
-                }
-                3 => {
-                    if self.memo.contains_key(&value.0) { continue; }
-                    let node = self.nodes.len();
-                    self.nodes.push(Node { value, parent, label });
-                    // A frozen graph is closed, so a cons reached through a
-                    // frozen value is always readable.
-                    let Ok((car, cdr)) = self.vm.cons_pair(value) else { return Err(self.refusal(node)) };
-                    self.memo.insert(value.0, Edge::Cons(self.cons_nodes.len()));
-                    self.cons_nodes.push(node);
-                    pending.push((cdr, Some(node), Label::Cdr));
-                    pending.push((car, Some(node), Label::Car));
-                }
-                0 => {
-                    if self.memo.contains_key(&value.0) { continue; }
-                    let node = self.nodes.len();
-                    self.nodes.push(Node { value, parent, label });
-                    let Some(object) = self.vm.object_if(value).filter(|o| self.freezable(o)) else { return Err(self.refusal(node)) };
-                    self.memo.insert(value.0, Edge::Object(self.object_nodes.len()));
-                    self.object_nodes.push(node);
-                    match object {
-                        Object::String(s) | Object::RawString(s) => {
-                            for (i, (_, values)) in s.properties.runs(coordinates::ByteOffset(0)..coordinates::ByteOffset(s.bytes().len())).into_iter().enumerate() {
-                                for (key, v) in values {
-                                    // Keys are frozen by name, which only an interned symbol's gives back.
-                                    if self.vm.property_key_name(key).is_none() { return Err(self.refusal(node)); }
-                                    pending.push((v, Some(node), Label::Property(i)));
-                                }
-                            }
-                        }
-                        Object::Vector(items) | Object::Record(items) => {
-                            for (i, &v) in items.iter().enumerate().rev() { pending.push((v, Some(node), Label::Aref(i))); }
-                        }
-                        Object::HashTable(t) => {
-                            for (i, k, v) in t.entries() {
-                                pending.push((v, Some(node), Label::Val(i)));
-                                pending.push((k, Some(node), Label::Key(i)));
-                            }
-                        }
-                        Object::CharTable(t) => {
-                            pending.push((t.purpose(), Some(node), Label::Purpose));
-                            pending.push((t.default(), Some(node), Label::Default));
-                            pending.push((t.parent(), Some(node), Label::Parent));
-                            for (i, &v) in t.extras().iter().enumerate() { pending.push((v, Some(node), Label::Extra(i))); }
-                            for (from, _, v) in char_table_runs(t).map_err(|_| self.refusal(node))? {
-                                pending.push((v, Some(node), Label::Range(from)));
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                _ => {
-                    // Closures, lexical cells and subrs are per VM.
-                    let node = self.nodes.len();
-                    self.nodes.push(Node { value, parent, label });
-                    return Err(self.refusal(node));
-                }
+            if let Step::Code(node) = self.step(value, parent, label, &mut pending)? {
+                return Err(self.refusal(node));
             }
         }
         Ok(())
     }
 
+    /// Enter VALUE, reached from PARENT by LABEL: a new cons or object is
+    /// given its index and its edges pushed on PENDING; a closure, capture
+    /// cell or subr is given a node alone, for a code walk to enter.
+    /// What entering VALUE will ask, known before it is entered: its
+    /// payload's 64-byte units, and how many edges it will add beyond a
+    /// few, counted no further than past ROOM. Nothing for a value entered
+    /// already or with no such cost.
+    fn ahead(&self, value: Value, room: usize) -> (usize, usize) {
+        if self.memo.contains_key(&value.0) { return (0, 0); }
+        match value.tag() {
+            0 => self.vm.object_if(value).map_or((0, 0), |object| {
+                let edges = match object {
+                    Object::Vector(items) | Object::Record(items) => items.len(),
+                    Object::HashTable(t) => 2 * t.count(),
+                    Object::CharTable(t) => t.extras().len() + char_table_runs(t, room).map_or(0, |runs| runs.len()),
+                    Object::String(s) | Object::RawString(s) => property_values(&s.properties, s.bytes().len(), room),
+                    _ => 0,
+                };
+                (crate::data::payload_bytes(object) / 64, edges)
+            }),
+            4 => value.index_if(4).and_then(|i| self.vm.closures.get(i)).map_or((0, 0), |c| (0, c.captures.len() + c.metadata.len())),
+            _ => (0, 0),
+        }
+    }
+
+    fn step(&mut self, value: Value, parent: Option<usize>, label: Label, pending: &mut Vec<(Value, Option<usize>, Label)>)
+        -> std::result::Result<Step, Refusal>
+    {
+        match value.tag() {
+            7 => {
+                if value == Value::UNBOUND || self.symbol_memo.contains_key(&value.0) { return Ok(Step::Seen); }
+                let slot = value.payload() as usize - 1;
+                let interned = self.vm.initial_obarray.get(slot).copied().unwrap_or(false);
+                let name = self.vm.symbol_names.get(slot).cloned().unwrap_or_default();
+                self.symbol_memo.insert(value.0, self.symbols.len());
+                self.symbols.push((name, interned));
+                Ok(Step::New)
+            }
+            3 | 4 | 5 | 6 | 0 if value != Value::NIL && value != Value::TRUE && !self.memo.contains_key(&value.0) => {
+                let node = self.nodes.len();
+                self.nodes.push(Node { value, parent, label });
+                match value.tag() {
+                    3 => self.enter_cons(value, node, pending),
+                    0 => self.enter_object(value, node, pending),
+                    _ => Ok(Step::Code(node)),
+                }
+            }
+            _ => Ok(Step::Seen),
+        }
+    }
+
+    fn enter_cons(&mut self, value: Value, node: usize, pending: &mut Vec<(Value, Option<usize>, Label)>)
+        -> std::result::Result<Step, Refusal>
+    {
+        // A frozen graph is closed, so a cons reached through a frozen
+        // value is always readable.
+        let Ok((car, cdr)) = self.vm.cons_pair(value) else { return Err(self.refusal(node)) };
+        self.memo.insert(value.0, Edge::Cons(self.cons_nodes.len()));
+        self.cons_nodes.push(node);
+        pending.push((cdr, Some(node), Label::Cdr));
+        pending.push((car, Some(node), Label::Car));
+        Ok(Step::New)
+    }
+
+    fn enter_object(&mut self, value: Value, node: usize, pending: &mut Vec<(Value, Option<usize>, Label)>)
+        -> std::result::Result<Step, Refusal>
+    {
+        let Some(object) = self.vm.object_if(value).filter(|o| self.freezable(o)) else { return Err(self.refusal(node)) };
+        self.memo.insert(value.0, Edge::Object(self.object_nodes.len()));
+        self.object_nodes.push(node);
+        match object {
+            Object::String(s) | Object::RawString(s) => {
+                for (i, (_, values)) in s.properties.runs(coordinates::ByteOffset(0)..coordinates::ByteOffset(s.bytes().len())).into_iter().enumerate() {
+                    for (key, v) in values {
+                        // Keys are frozen by name, which only an interned symbol's gives back.
+                        if self.vm.property_key_name(key).is_none() { return Err(self.refusal(node)); }
+                        pending.push((v, Some(node), Label::Property(i)));
+                    }
+                }
+            }
+            Object::Vector(items) | Object::Record(items) => {
+                for (i, &v) in items.iter().enumerate().rev() { pending.push((v, Some(node), Label::Aref(i))); }
+            }
+            Object::HashTable(t) => {
+                for (i, k, v) in t.entries() {
+                    pending.push((v, Some(node), Label::Val(i)));
+                    pending.push((k, Some(node), Label::Key(i)));
+                }
+            }
+            Object::CharTable(t) => {
+                pending.push((t.purpose(), Some(node), Label::Purpose));
+                pending.push((t.default(), Some(node), Label::Default));
+                pending.push((t.parent(), Some(node), Label::Parent));
+                for (i, &v) in t.extras().iter().enumerate() { pending.push((v, Some(node), Label::Extra(i))); }
+                for (from, _, v) in char_table_runs(t, usize::MAX).map_err(|_| self.refusal(node))? {
+                    pending.push((v, Some(node), Label::Range(from)));
+                }
+            }
+            _ => {}
+        }
+        Ok(Step::New)
+    }
+
     fn edge(&self, v: Value) -> Edge {
         match v.tag() {
             7 if v != Value::UNBOUND => Edge::Symbol(self.symbol_memo[&v.0]),
-            3 | 0 if !(v == Value::NIL) => self.memo[&v.0],
+            7 => Edge::Unbound,
+            3 | 4 | 5 | 6 | 0 if v != Value::NIL && v != Value::TRUE => self.memo[&v.0],
             _ => Edge::Immediate(v),
         }
     }
@@ -541,7 +629,7 @@ impl<'a> Walk<'a> {
                 w.u64(self.edge(t.parent()).word());
                 w.u32(t.extras().len() as u32);
                 for &v in t.extras() { w.u64(self.edge(v).word()); }
-                let runs = char_table_runs(t).expect("discovered char-table");
+                let runs = char_table_runs(t, usize::MAX).expect("discovered char-table");
                 w.u64(runs.len() as u64);
                 for (from, to, v) in runs {
                     w.u64(from as u64);
@@ -554,12 +642,25 @@ impl<'a> Walk<'a> {
     }
 }
 
+/// How many property values the runs of text END bytes long hold,
+/// counted no further than past MAX.
+fn property_values(properties: &crate::properties::Properties, end: usize, max: usize) -> usize {
+    let (end, mut at, mut values) = (coordinates::ByteOffset(end), coordinates::ByteOffset(0), 0);
+    while at < end && values <= max {
+        values += properties.properties_at(at).len();
+        at = properties.next_change(at, end);
+    }
+    values
+}
+
 /// A char-table's raw entries as maximal runs of its own subdivision:
-/// (from, to, value), with nil where it has no value of its own.
-fn char_table_runs(t: &char_table::CharTable) -> Result<Vec<(usize, usize, Value)>> {
+/// (from, to, value), with nil where it has no value of its own. No more
+/// than MAX + 1 are read, so a caller can bound a table before reading
+/// it whole.
+fn char_table_runs(t: &char_table::CharTable, max: usize) -> Result<Vec<(usize, usize, Value)>> {
     let mut runs = vec![];
     let mut at = 0;
-    while at < char_table::CharTable::LEN {
+    while at < char_table::CharTable::LEN && runs.len() <= max {
         let (value, from, to) = char_table::CharTableNode::checked_span(t.root(), at)?;
         if from != at { return Err("invalid sub-char-table geometry".into()); }
         if let Some(last) = runs.last_mut().filter(|(_, _, v): &&mut (usize, usize, Value)| *v == value) {
@@ -599,89 +700,108 @@ fn decode(bytes: &[u8]) -> Result<Decoded> {
     let (conses, objects, symbols, blob_len) = (r.count()?, r.count()?, r.count()?, r.count()?);
     let root_word = r.u64()?;
     let _reserved = r.u64()?;
-    let edge = |word: u64| Edge::parse(word, conses, objects, symbols);
-    let root = edge(root_word)?;
-    let tables = HEADER + 16 * conses;
-    let blob_start = tables + 16 * (objects + symbols);
-    if blob_start.checked_add(blob_len) != Some(bytes.len()) { return Err("invalid frozen region lengths".into()); }
-    let mut pairs = Vec::with_capacity(conses);
-    for _ in 0..conses { pairs.push((edge(r.u64()?)?, edge(r.u64()?)?)); }
-    let mut entries = Vec::with_capacity(objects + symbols);
-    for _ in 0..objects + symbols {
+    let counts = Counts { conses, objects, symbols, ..Counts::default() };
+    let root = Edge::parse(root_word, &counts)?;
+    let (pairs, entries) = sections(&mut r, &counts, objects + symbols, blob_len)?;
+    let decoded_objects = entries[..objects].iter().map(|&(start, end, _)| decode_object(&bytes[start..end], &counts)).collect::<Result<Vec<_>>>()?;
+    let names = entries[objects..].iter().map(|&(start, end, interned)| symbol_entry(&bytes[start..end], interned)).collect::<Result<Vec<_>>>()?;
+    Ok(Decoded { conses: pairs, objects: decoded_objects, symbols: names, root })
+}
+
+/// What follows a header at R: COUNTS' cons pairs, then a table of ENTRIES
+/// (offset, length, flag) into the blob of `blob_len` bytes that ends the
+/// encoding. The pairs, and each entry as its absolute range and flag.
+fn sections(r: &mut Reader, counts: &Counts, entries: usize, blob_len: usize) -> Result<Sections> {
+    let blob_start = r.at.checked_add(counts.conses.checked_mul(16).ok_or("frozen region count out of range")?)
+        .and_then(|at| at.checked_add(entries.checked_mul(16)?)).ok_or("frozen region count out of range")?;
+    if blob_start.checked_add(blob_len) != Some(r.bytes.len()) { return Err("invalid frozen region lengths".into()); }
+    let mut pairs = Vec::with_capacity(counts.conses);
+    for _ in 0..counts.conses { pairs.push((Edge::parse(r.u64()?, counts)?, Edge::parse(r.u64()?, counts)?)); }
+    let mut table = Vec::with_capacity(entries);
+    for _ in 0..entries {
         let offset = r.count()?;
         let word = r.u64()?;
         let len = (word & !(1 << 63)) as usize;
         let end = offset.checked_add(len).filter(|&end| end <= blob_len).ok_or("frozen region table out of range")?;
-        entries.push((blob_start + offset, blob_start + end, word >> 63 == 1));
+        table.push((blob_start + offset, blob_start + end, word >> 63 == 1));
     }
-    let mut decoded_objects = Vec::with_capacity(objects);
-    for &(start, end, _) in &entries[..objects] {
-        let mut r = Reader { bytes: &bytes[start..end], at: 0 };
-        let object = match r.u8()? {
-            KIND_STRING => {
-                let flags = r.u8()?;
-                let (multibyte, object) = (flags & STRING_MULTIBYTE != 0, flags & STRING_OBJECT != 0);
-                let text = r.bytes()?.to_vec();
-                let mut runs = vec![];
-                for _ in 0..r.u32()? {
-                    let (from, to) = (r.count()?, r.count()?);
-                    if from > to || to > text.len() { return Err("frozen string property run out of range".into()); }
-                    let mut values = vec![];
-                    for _ in 0..r.u32()? {
-                        let key = std::str::from_utf8(r.bytes()?).map_err(|_| "frozen property name is not UTF-8")?.to_owned();
-                        values.push((key, edge(r.u64()?)?));
-                    }
-                    runs.push((from, to, values));
-                }
-                if multibyte && !internal_encoding(&text) { return Err("frozen multibyte string is not internal encoding".into()); }
-                DecodedObject::String { multibyte, object, bytes: text, runs }
-            }
-            kind @ (KIND_VECTOR | KIND_RECORD) => {
-                let n = r.count()?;
-                let items = (0..n).map(|_| edge(r.u64()?)).collect::<Result<Vec<_>>>()?;
-                if kind == KIND_RECORD && items.is_empty() { return Err("frozen record is empty".into()); }
-                if kind == KIND_VECTOR { DecodedObject::Vector(items) } else { DecodedObject::Record(items) }
-            }
-            KIND_FLOAT => DecodedObject::Float(f64::from_bits(r.u64()?)),
-            KIND_BIGNUM => DecodedObject::Bignum(r.bytes()?.to_vec()),
-            KIND_BOOL_VECTOR => {
-                let len = usize::try_from(r.u64()?).map_err(|_| "frozen bool-vector length overflow")?;
-                let bits = r.bytes()?.to_vec();
-                if bits.len() != len.div_ceil(8) { return Err("frozen bool-vector length mismatch".into()); }
-                DecodedObject::BoolVector { len, bytes: bits }
-            }
-            KIND_HASH_TABLE => {
-                let test = match r.u8()? { 0 => hash::Test::Eq, 1 => hash::Test::Eql, 2 => hash::Test::Equal, _ => return Err("frozen hash table test is invalid".into()) };
-                let n = r.count()?;
-                let entries = (0..n).map(|_| Ok((edge(r.u64()?)?, edge(r.u64()?)?))).collect::<Result<Vec<_>>>()?;
-                DecodedObject::HashTable { test, entries }
-            }
-            KIND_CHAR_TABLE => {
-                let (purpose, default, parent) = (edge(r.u64()?)?, edge(r.u64()?)?, edge(r.u64()?)?);
-                let extras = (0..r.u32()?).map(|_| edge(r.u64()?)).collect::<Result<Vec<_>>>()?;
-                let n = r.count()?;
-                let mut runs = Vec::with_capacity(n);
-                let mut next = 0;
-                for _ in 0..n {
-                    let (from, to) = (r.u64()? as usize, r.u64()? as usize);
-                    if from != next || to < from || to >= char_table::CharTable::LEN { return Err("frozen char-table runs are not a partition".into()); }
-                    runs.push((from, to, edge(r.u64()?)?));
-                    next = to + 1;
-                }
-                if next != char_table::CharTable::LEN { return Err("frozen char-table runs are not a partition".into()); }
-                DecodedObject::CharTable { purpose, default, parent, extras, runs }
-            }
-            _ => return Err("frozen object kind is invalid".into()),
-        };
-        if !r.done() { return Err("frozen object has trailing bytes".into()); }
-        decoded_objects.push(object);
+    Ok((pairs, table))
+}
+
+/// The cons pairs and the entry table of an encoding (`sections`).
+type Sections = (Vec<(Edge, Edge)>, Vec<(usize, usize, bool)>);
+
+fn symbol_entry(bytes: &[u8], interned: bool) -> Result<(String, bool)> {
+    let name = std::str::from_utf8(bytes).map_err(|_| "frozen symbol name is not UTF-8")?;
+    Ok((name.to_owned(), interned))
+}
+
+/// The object BYTES encode, its edges within COUNTS.
+fn decode_object(bytes: &[u8], counts: &Counts) -> Result<DecodedObject> {
+    let mut r = Reader { bytes, at: 0 };
+    let edge = |word: u64| Edge::parse(word, counts);
+    let object = match r.u8()? {
+        KIND_STRING => decode_string(&mut r, &edge)?,
+        kind @ (KIND_VECTOR | KIND_RECORD) => {
+            let n = r.count()?;
+            let items = (0..n).map(|_| edge(r.u64()?)).collect::<Result<Vec<_>>>()?;
+            if kind == KIND_RECORD && items.is_empty() { return Err("frozen record is empty".into()); }
+            if kind == KIND_VECTOR { DecodedObject::Vector(items) } else { DecodedObject::Record(items) }
+        }
+        KIND_FLOAT => DecodedObject::Float(f64::from_bits(r.u64()?)),
+        KIND_BIGNUM => DecodedObject::Bignum(r.bytes()?.to_vec()),
+        KIND_BOOL_VECTOR => {
+            let len = usize::try_from(r.u64()?).map_err(|_| "frozen bool-vector length overflow")?;
+            let bits = r.bytes()?.to_vec();
+            if bits.len() != len.div_ceil(8) { return Err("frozen bool-vector length mismatch".into()); }
+            DecodedObject::BoolVector { len, bytes: bits }
+        }
+        KIND_HASH_TABLE => {
+            let test = match r.u8()? { 0 => hash::Test::Eq, 1 => hash::Test::Eql, 2 => hash::Test::Equal, _ => return Err("frozen hash table test is invalid".into()) };
+            let n = r.count()?;
+            let entries = (0..n).map(|_| Ok((edge(r.u64()?)?, edge(r.u64()?)?))).collect::<Result<Vec<_>>>()?;
+            DecodedObject::HashTable { test, entries }
+        }
+        KIND_CHAR_TABLE => decode_char_table(&mut r, &edge)?,
+        _ => return Err("frozen object kind is invalid".into()),
+    };
+    if !r.done() { return Err("frozen object has trailing bytes".into()); }
+    Ok(object)
+}
+
+fn decode_string(r: &mut Reader, edge: &impl Fn(u64) -> Result<Edge>) -> Result<DecodedObject> {
+    let flags = r.u8()?;
+    let (multibyte, object) = (flags & STRING_MULTIBYTE != 0, flags & STRING_OBJECT != 0);
+    let text = r.bytes()?.to_vec();
+    let mut runs = vec![];
+    for _ in 0..r.u32()? {
+        let (from, to) = (r.count()?, r.count()?);
+        if from > to || to > text.len() { return Err("frozen string property run out of range".into()); }
+        let mut values = vec![];
+        for _ in 0..r.u32()? {
+            let key = std::str::from_utf8(r.bytes()?).map_err(|_| "frozen property name is not UTF-8")?.to_owned();
+            values.push((key, edge(r.u64()?)?));
+        }
+        runs.push((from, to, values));
     }
-    let mut names = Vec::with_capacity(symbols);
-    for &(start, end, interned) in &entries[objects..] {
-        let name = std::str::from_utf8(&bytes[start..end]).map_err(|_| "frozen symbol name is not UTF-8")?;
-        names.push((name.to_owned(), interned));
+    if multibyte && !internal_encoding(&text) { return Err("frozen multibyte string is not internal encoding".into()); }
+    Ok(DecodedObject::String { multibyte, object, bytes: text, runs })
+}
+
+fn decode_char_table(r: &mut Reader, edge: &impl Fn(u64) -> Result<Edge>) -> Result<DecodedObject> {
+    let (purpose, default, parent) = (edge(r.u64()?)?, edge(r.u64()?)?, edge(r.u64()?)?);
+    let extras = (0..r.u32()?).map(|_| edge(r.u64()?)).collect::<Result<Vec<_>>>()?;
+    let n = r.count()?;
+    let mut runs = Vec::with_capacity(n);
+    let mut next = 0;
+    for _ in 0..n {
+        let (from, to) = (r.u64()? as usize, r.u64()? as usize);
+        if from != next || to < from || to >= char_table::CharTable::LEN { return Err("frozen char-table runs are not a partition".into()); }
+        runs.push((from, to, edge(r.u64()?)?));
+        next = to + 1;
     }
-    Ok(Decoded { conses: pairs, objects: decoded_objects, symbols: names, root })
+    if next != char_table::CharTable::LEN { return Err("frozen char-table runs are not a partition".into()); }
+    Ok(DecodedObject::CharTable { purpose, default, parent, extras, runs })
 }
 
 /// Whether BYTES are a sequence of characters in GNU's internal encoding.
@@ -695,6 +815,9 @@ fn internal_encoding(bytes: &[u8]) -> bool {
     }
     true
 }
+
+/// A decoded graph's conses and objects as values (`Vm::place`).
+type Placed = (Vec<(Value, Value)>, Vec<Object>);
 
 /// Where decoded objects are placed: a region, or the private heap at the
 /// bases its arenas had when decoding began (nothing collects meanwhile).
@@ -710,6 +833,8 @@ impl Place {
             (Place::Region(id), Edge::Object(i)) => frozen_value(id, i + 1, 0),
             (Place::Private { conses, .. }, Edge::Cons(i)) => Value::reference(conses + i, 3),
             (Place::Private { objects, .. }, Edge::Object(i)) => Value::reference(objects + i + 1, 0),
+            (_, Edge::Unbound) => Value::UNBOUND,
+            (_, Edge::Closure(_) | Edge::Cell(_) | Edge::Subr(_)) => unreachable!("a data graph's edges parse with no code counts"),
         }
     }
 }
@@ -717,7 +842,9 @@ impl Place {
 impl Vm {
     /// The path of a refusal as Lisp: `car`, `cdr`, `(aref N)`, `(key N)`,
     /// `(value N)`, `(property N)`, `purpose`, `default`, `parent`,
-    /// `(extra N)`, `(range FROM)`.
+    /// `(extra N)`, `(range FROM)`; in a code graph `(capture N)`,
+    /// `(metadata N)`, `document`, `interactive`, `(constant N)`, `cell` and
+    /// `body`.
     pub(crate) fn refusal_path(&mut self, path: &[Label]) -> Value {
         let mut items = vec![];
         for label in path {
@@ -734,6 +861,13 @@ impl Vm {
                 Label::Parent => ("parent", None),
                 Label::Extra(n) => ("extra", Some(n)),
                 Label::Range(n) => ("range", Some(n)),
+                Label::Capture(n) => ("capture", Some(n)),
+                Label::Metadata(n) => ("metadata", Some(n)),
+                Label::Document => ("document", None),
+                Label::Interactive => ("interactive", None),
+                Label::Constant(n) => ("constant", Some(n)),
+                Label::Cell => ("cell", None),
+                Label::Body => ("body", None),
             };
             let symbol = self.intern(name);
             items.push(match n {
@@ -831,7 +965,17 @@ impl Vm {
         let decoded = decode(&bytes).map_err(FreezeError::Failed)?;
         let symbols = self.resolve_symbols(&decoded);
         let place = Place::Private { conses: self.conses.len(), objects: self.objects.len() };
-        let (conses, objects) = self.place(&decoded, place, &symbols).map_err(FreezeError::Failed)?;
+        let value = |edge: Edge| place.value(edge, &symbols);
+        self.place_private(&decoded, &value).map_err(FreezeError::Failed)?;
+        Ok(value(decoded.root))
+    }
+
+    /// Place DECODED's conses and objects in the private heap, appended to
+    /// its arenas, VALUE resolving each edge (its conses and objects at the
+    /// arenas' lengths now): a private copy, charged as one allocation.
+    fn place_private(&mut self, decoded: &Decoded, value: &dyn Fn(Edge) -> Value) -> Result<()> {
+        let base = self.objects.len();
+        let (conses, objects) = self.place(decoded, value)?;
         let tables: Vec<usize> = objects.iter().enumerate().filter(|(_, o)| matches!(o, Object::HashTable(_))).map(|(i, _)| i).collect();
         let profiled: usize = objects.iter().map(crate::data::profiled_bytes).sum();
         self.allocation.allocated += (conses.len() * size_of::<(Value, Value)>() + profiled) as u64;
@@ -840,10 +984,9 @@ impl Vm {
         self.conses.extend(conses);
         self.charge_payload(objects.iter().map(crate::data::payload_bytes).sum());
         self.objects.extend(objects);
-        let Place::Private { objects: base, .. } = place else { unreachable!() };
         for i in tables {
             let DecodedObject::HashTable { test, entries } = &decoded.objects[i] else { unreachable!() };
-            let entries: Vec<(Value, Value)> = entries.iter().map(|&(k, v)| (place.value(k, &symbols), place.value(v, &symbols))).collect();
+            let entries: Vec<(Value, Value)> = entries.iter().map(|&(k, v)| (value(k), value(v))).collect();
             let table = self.table_from_entries(*test, &entries);
             // Its placeholder was charged empty (above).
             let empty = match &self.objects[base + i] { Object::HashTable(t) => t.storage_bytes(false), _ => 0 };
@@ -852,7 +995,7 @@ impl Vm {
             self.allocation.consed.vector_cells += (filled / size_of::<Value>()) as u64;
             *self.objects.entry_mut(base + i) = Object::HashTable(Box::new(table));
         }
-        Ok(place.value(decoded.root, &symbols))
+        Ok(())
     }
 
     /// Attach BACKING as a new region: its root value. Signals when every
@@ -869,7 +1012,7 @@ impl Vm {
         };
         let place = Place::Region(id);
         let symbols = self.resolve_symbols(&decoded);
-        let (conses, objects) = match self.place(&decoded, place, &symbols) {
+        let (conses, objects) = match self.place(&decoded, &|edge| place.value(edge, &symbols)) {
             Ok(placed) => placed,
             Err(e) => { self.region_free.push(id); return Err(e); }
         };
@@ -890,6 +1033,17 @@ impl Vm {
         Ok(root)
     }
 
+    /// What a frame's BACKING is taken as: a data graph attached as a
+    /// region, a code graph placed as private copies (`code.rs`).
+    pub(crate) fn take_backing(&mut self, backing: Backing) -> Result<Value> {
+        let bytes = backing.bytes().map_err(|e| e.to_string())?;
+        if code::is_code(&bytes) {
+            return self.place_code(&Arc::new(bytes.into_owned()));
+        }
+        drop(bytes);
+        self.attach(backing)
+    }
+
     /// This VM's symbol for each of DECODED's descriptors: interned by
     /// name, or one fresh uninterned symbol per descriptor.
     fn resolve_symbols(&mut self, decoded: &Decoded) -> Vec<Value> {
@@ -898,11 +1052,10 @@ impl Vm {
             .collect()
     }
 
-    /// DECODED's conses and objects as this VM's values at PLACE, with
-    /// SYMBOLS resolved. Hash tables are placed empty: their index is built
-    /// once their keys can be read.
-    fn place(&mut self, decoded: &Decoded, place: Place, symbols: &[Value]) -> Result<(Vec<(Value, Value)>, Vec<Object>)> {
-        let value = |edge: Edge| place.value(edge, symbols);
+    /// DECODED's conses and objects as this VM's values, VALUE resolving
+    /// each edge. Hash tables are placed empty: their index is built once
+    /// their keys can be read.
+    fn place(&mut self, decoded: &Decoded, value: &dyn Fn(Edge) -> Value) -> Result<Placed> {
         let conses = decoded.conses.iter().map(|&(a, b)| (value(a), value(b))).collect();
         let mut objects = Vec::with_capacity(decoded.objects.len());
         for object in &decoded.objects {
@@ -980,6 +1133,38 @@ impl Vm {
     /// without a second encoding.
     pub(crate) fn frozen_backing(&self, v: Value) -> Option<Backing> {
         self.region(v).filter(|r| r.root == v).map(|r| r.backing.clone())
+    }
+}
+
+#[cfg(feature = "test-hooks")]
+impl Vm {
+    /// Place the code graph BYTES as an isolate's take would: its root, a
+    /// private copy.
+    ///
+    /// # Errors
+    ///
+    /// When BYTES are no code graph, or name what this VM lacks.
+    pub fn place_seed(&mut self, bytes: &[u8]) -> Result<Local<'_>> {
+        let root = self.place_code(&Arc::new(bytes.to_vec()))?;
+        Ok(Local::new(self, root))
+    }
+}
+
+#[cfg(feature = "test-hooks")]
+impl Vm {
+    /// A copy of the bytes of the frozen backing V.
+    pub(crate) fn backing_bytes(&self, v: Value) -> Result<Vec<u8>> {
+        match self.object_if(v) {
+            Some(Object::Backing(backing)) => Ok(backing.bytes().map_err(|e| e.to_string())?.into_owned()),
+            _ => Err("not a frozen backing".into()),
+        }
+    }
+    /// How the closure V holds its body: `eager`, `pending` (a
+    /// compiled-Lisp body), `mapped` (a code image's) or `lazy`.
+    pub(crate) fn function_body_kind(&self, v: Value) -> Result<&'static str> {
+        let closure = v.index_if(4).and_then(|i| self.closures.get(i)).ok_or("not a closure")?;
+        let f = self.functions.get(closure.function).ok_or("invalid function")?;
+        Ok(if f.lazy.is_some() { "lazy" } else if f.pending.is_some() { "pending" } else if f.mapped_code.is_some() { "mapped" } else { "eager" })
     }
 }
 

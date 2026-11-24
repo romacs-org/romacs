@@ -101,6 +101,12 @@ pub(super) enum Object {
     ByteBuffer(Box<bytes::ByteBuffer>),
     HashTable(Box<hash::HashTable>),
     Obarray(Box<obarray::Obarray>),
+    /// An encoded value graph held whole, never placed in this VM: a seed
+    /// `romacs--seed-build` made, which a send forwards as it is
+    /// (`frozen/seed.rs`). At rest in an image: `foreign_resource` refuses
+    /// it, its sealed memfd being this process's.
+    #[snapshot(at_rest)]
+    Backing(crate::frozen::Backing),
     /// A free table entry (table.rs `sweep`): no Value names it but a
     /// stale one, which finds no object here. Never in an image, whose
     /// tables are dense (gc.rs `collect_compacting`).
@@ -121,6 +127,7 @@ impl Object {
             // The terminal's device is the terminal host's, which a VM at
             // rest holds none of; the object is its parameters.
             Object::Terminal(_) => None,
+            Object::Backing(_) => Some("a frozen backing"),
             Object::SyntaxTable(_) | Object::Float(_) | Object::Bignum(_) | Object::Window(_) | Object::Frame(_)
             | Object::WindowConfiguration(_) | Object::String(_) | Object::RawString(_) | Object::Vector(_)
             | Object::BoolVector(_) | Object::Record(_) | Object::CharTable(_) | Object::SubCharTable(_)
@@ -921,6 +928,7 @@ impl Vm {
         }
         Ok(copy)
     }
+    // SMELL(long-function): an arm for each Object variant, each kind one decision a reader checks in place.
     pub(super) fn data_primitive(&mut self, p: Primitive, start: usize, n: usize) -> Result<Value> {
         use Primitive::*;
         let arity = match p {
@@ -996,6 +1004,7 @@ impl Vm {
                             | Object::Treesit(_)
                             | Object::Finalizer(_)
                             | Object::Thread
+                            | Object::Backing(_)
                             | Object::Process(_)
                         | Object::HashTable(_)
                         | Object::SyntaxTable(_) => Err("array required".into()),
@@ -1054,6 +1063,7 @@ impl Vm {
                             | Object::Treesit(_)
                             | Object::Finalizer(_)
                             | Object::Thread
+                            | Object::Backing(_)
                             | Object::Process(_)
                         | Object::HashTable(_)
                     | Object::SyntaxTable(_) => {
@@ -1107,6 +1117,7 @@ impl Vm {
                             | Object::Treesit(_)
                             | Object::Finalizer(_)
                             | Object::Thread
+                            | Object::Backing(_)
                             | Object::Process(_)
                         | Object::HashTable(_)
                         | Object::SyntaxTable(_)

@@ -9,6 +9,10 @@ impl Leaf<'_> {
     pub(crate) fn thaw(&mut self, object: Value) -> std::result::Result<Value, Fault> {
         self.vm.thaw(object).map_err(|e| self.vm.freeze_fault(e))
     }
+    pub(crate) fn seed_build(&mut self, roots: Value, table: Value, limit: Value) -> std::result::Result<Value, Fault> {
+        let limit = limit.as_integer().ok().and_then(|n| usize::try_from(n).ok()).ok_or_else(|| Fault::Wrong("natnump", limit))?;
+        self.vm.seed_build(roots, table, limit).map_err(Fault::Error)
+    }
     pub(crate) fn frozen_p(&self, object: Value) -> bool {
         Vm::frozen(object)
     }

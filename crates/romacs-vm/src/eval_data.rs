@@ -688,6 +688,7 @@ impl Vm {
             }
             // print.c PVEC_THREAD: a thread without a name, at its address.
             Some(data::Object::Thread) => format!("#<thread {:#x}>", value.payload()),
+            Some(data::Object::Backing(b)) => format!("#<frozen-backing {} bytes>", b.len()),
             Some(data::Object::Overlay(overlay)) => match (self.overlay_positions(value)?, buffer_name(overlay.buffer)) {
                 (Some((start, end)), Some(name)) => format!("#<overlay from {start} to {end} in {name}>"),
                 _ => "#<overlay in no buffer>".into(),
