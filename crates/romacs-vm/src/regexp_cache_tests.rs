@@ -3,18 +3,19 @@
 //! read a table's content, a syntax table's (`used_syntax`) or a case
 //! table's through a completion translation, is compiled again, against the
 //! tables as they are now.
+use super::{PatternId, Translation};
 use crate::Vm;
-use romacs_regex as regex;
-use std::{cell::RefCell, rc::Rc};
 
-/// The compilation the cache holds for SOURCE, kept alive so its identity
-/// can be compared after an edit.
-fn compiled(vm: &Vm, source: &str) -> Option<Rc<RefCell<regex::CompiledPattern>>> {
-    vm.regexp_cache.patterns.get(source.as_bytes()).and_then(|v| v.first()).map(|e| e.compiled.clone())
+/// The pattern the cache holds for SOURCE: its id, which a compile of it
+/// afresh does not share.
+fn compiled(vm: &Vm, source: &str) -> Option<PatternId> {
+    let cache = &vm.regexp_cache;
+    let slot = *cache.index.get(source.as_bytes())?.first()?;
+    cache.entries[slot].as_ref().map(|e| PatternId { slot, serial: e.serial })
 }
 
-fn same(a: Option<&Rc<RefCell<regex::CompiledPattern>>>, b: &Rc<RefCell<regex::CompiledPattern>>) -> bool {
-    a.is_some_and(|a| Rc::ptr_eq(a, b))
+fn same(a: Option<&PatternId>, b: &PatternId) -> bool {
+    a == Some(b)
 }
 
 /// A fresh syntax table inheriting the standard one, as `make-syntax-table` (Lisp) makes it.
@@ -81,4 +82,22 @@ fn a_syntax_edit_under_the_case_canon_recompiles_completion_patterns() {
     let fresh = eval(&mut vm, complete);
     assert_ne!(before, fresh, "the edit changes how completion folds ?A");
     assert_eq!(after, fresh, "the kept completion pattern answers as a fresh one");
+}
+
+/// A matcher keeps its patterns' ids across its tests; a pattern that left
+/// the cache meanwhile, its slot now another pattern's, is compiled again,
+/// never read from the slot.
+#[test]
+fn a_matcher_compiles_again_a_pattern_that_left_the_cache() {
+    let mut vm = Vm::new();
+    let pattern = vm.eval_source_raw(r#""foo[0-9]+""#).unwrap();
+    let mut matcher = vm.string_matcher(&[pattern], Translation::None, None).ok().flatten().expect("a matcher, with no syntax properties");
+    let hit = vm.eval_source_raw(r#""x foo12""#).unwrap();
+    assert_eq!(vm.string_matcher_matches(&mut matcher, hit).ok(), Some(true));
+    vm.regexp_cache.retain(|_| false);
+    eval(&mut vm, r#"(string-match "bar" "bar")"#);
+    let hit = vm.eval_source_raw(r#""x foo12""#).unwrap();
+    assert_eq!(vm.string_matcher_matches(&mut matcher, hit).ok(), Some(true), "the pattern compiled again");
+    let miss = vm.eval_source_raw(r#""bar""#).unwrap();
+    assert_eq!(vm.string_matcher_matches(&mut matcher, miss).ok(), Some(false), "not the slot's new pattern");
 }

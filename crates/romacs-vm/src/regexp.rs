@@ -216,11 +216,19 @@ pub(crate) enum Translation { None, Standard, Completion(Value) }
 /// 20; one major mode's font-lock keywords and cc-mode's scanners use a
 /// few hundred, so this keeps enough for a session's working set and drops
 /// the least recently used beyond it.
+/// The cache owns its patterns, and a search borrows one where it lies
+/// (`PatternId`), so nothing shares them and nothing locks them: the cache
+/// moves with its VM.
 #[derive(Default)]
 pub(crate) struct PatternCache {
-    patterns: HashMap<Vec<u8>, Vec<CachedPattern>>,
+    /// The cached patterns by slot; a slot eviction freed is None until reused.
+    entries: Vec<Option<CachedPattern>>,
+    /// Each source's slots.
+    index: HashMap<Vec<u8>, Vec<usize>>,
+    /// The slots eviction freed.
+    free: Vec<usize>,
     len: usize,
-    /// Uses so far: the clock `CachedPattern::used` reads.
+    /// Uses so far: the clock `CachedPattern::used` and `serial` read.
     clock: u64,
     /// The variables every search or syntax scan reads, found by name at
     /// the first and kept: each reads the variable itself, as GNU's reads
@@ -256,23 +264,90 @@ impl PatternCache {
         self.len == 0
     }
     fn retain(&mut self, keep: impl Fn(&CachedPattern) -> bool) {
-        self.patterns.retain(|_, v| { v.retain(&keep); !v.is_empty() });
-        self.len = self.patterns.values().map(Vec::len).sum();
+        let (entries, free) = (&mut self.entries, &mut self.free);
+        self.index.retain(|_, slots| {
+            slots.retain(|&slot| {
+                let kept = entries[slot].as_ref().is_some_and(&keep);
+                if !kept { entries[slot] = None; free.push(slot); }
+                kept
+            });
+            !slots.is_empty()
+        });
+        self.len = self.index.values().map(Vec::len).sum();
     }
     /// Drop the least recently used pattern.
     fn evict(&mut self) {
-        let oldest = self.patterns.iter()
-            .flat_map(|(source, v)| v.iter().enumerate().map(move |(i, e)| (e.used.get(), source, i)))
+        let entries = &self.entries;
+        let oldest = self.index.iter()
+            .flat_map(|(source, slots)| slots.iter().enumerate()
+                .filter_map(move |(i, &slot)| Some((entries[slot].as_ref()?.used, source, i))))
             .min_by_key(|&(used, ..)| used)
             .map(|(_, source, i)| (source.clone(), i));
-        if let Some((source, i)) = oldest {
-            let v = self.patterns.get_mut(&source).expect("present");
-            v.swap_remove(i);
-            if v.is_empty() { self.patterns.remove(&source); }
-            self.len -= 1;
+        let Some((source, i)) = oldest else { return };
+        let Some(slots) = self.index.get_mut(&source) else { return };
+        let slot = slots.swap_remove(i);
+        if slots.is_empty() { self.index.remove(&source); }
+        self.entries[slot] = None;
+        self.free.push(slot);
+        self.len -= 1;
+    }
+    /// The slot of SOURCE's cached pattern that MATCHES accepts.
+    #[inline(always)]
+    fn find(&self, source: &[u8], matches: impl Fn(&CachedPattern) -> bool) -> Option<usize> {
+        self.index.get(source)?.iter().copied().find(|&slot| self.entries[slot].as_ref().is_some_and(&matches))
+    }
+    /// The pattern in SLOT (`find`), its use counted, and set for a search
+    /// of MULTIBYTE text when given.
+    #[inline(always)]
+    fn touch(&mut self, slot: usize, multibyte: Option<bool>) -> Option<PatternId> {
+        self.clock += 1;
+        let entry = self.entries.get_mut(slot)?.as_mut()?;
+        entry.used = self.clock;
+        if let Some(multibyte) = multibyte { entry.compiled.set_target_multibyte(multibyte); }
+        Some(PatternId { slot, serial: entry.serial })
+    }
+    /// The slot of SOURCE's cached pattern that MATCHES accepts, its use counted.
+    #[inline(always)]
+    fn hit(&mut self, source: &[u8], matches: impl Fn(&CachedPattern) -> bool) -> Option<PatternId> {
+        let slot = self.find(source, matches)?;
+        self.touch(slot, None)
+    }
+    /// ENTRY cached for SOURCE, in place of the least recently used at the bound.
+    fn insert(&mut self, source: &[u8], mut entry: CachedPattern) -> PatternId {
+        if self.len >= PATTERN_CACHE_SIZE {
+            self.evict();
         }
+        self.clock += 1;
+        (entry.used, entry.serial) = (self.clock, self.clock);
+        let id = PatternId { slot: self.free.pop().unwrap_or(self.entries.len()), serial: self.clock };
+        if id.slot == self.entries.len() { self.entries.push(None); }
+        self.entries[id.slot] = Some(entry);
+        self.index.entry(source.to_vec()).or_default().push(id.slot);
+        self.len += 1;
+        id
+    }
+    /// The pattern ID names, unless it left the cache.
+    #[inline(always)]
+    fn pattern(&self, id: PatternId) -> Option<&regex::CompiledPattern> {
+        self.entries.get(id.slot)?.as_ref().filter(|e| e.serial == id.serial).map(|e| &*e.compiled)
+    }
+    #[inline(always)]
+    fn pattern_mut(&mut self, id: PatternId) -> Option<&mut regex::CompiledPattern> {
+        self.entries.get_mut(id.slot)?.as_mut().filter(|e| e.serial == id.serial).map(|e| &mut *e.compiled)
     }
 }
+
+/// A cached pattern: its slot, and the clock it was cached at, which a
+/// pattern cached later in the same slot does not share.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct PatternId {
+    slot: usize,
+    serial: u64,
+}
+
+/// `Send`, as a `Vm` moving to another thread needs its pattern cache, and a
+/// matcher built from it, to be.
+const _: fn() = || { fn send<T: Send>() {} send::<PatternCache>(); send::<StringMatcher>(); };
 
 struct CachedPattern {
     multibyte: bool,
@@ -281,23 +356,30 @@ struct CachedPattern {
     translation: Translation,
     /// The syntax table the compiled fastmap read (GNU `used_syntax').
     syntax: Option<Value>,
-    // CELL(Plain)
-    compiled: std::rc::Rc<std::cell::RefCell<regex::CompiledPattern>>,
-    /// The cache's clock at the last use: a hit moves it without the cache.
-    // CELL(Plain)
-    used: std::cell::Cell<u64>,
+    /// Whether the compilation reads a syntax or category table
+    /// (`CompiledPattern::reads_lookup`), fixed when it compiled.
+    reads_lookup: bool,
+    compiled: Box<regex::CompiledPattern>,
+    /// The cache's clock at the last use.
+    used: u64,
+    /// The cache's clock when it was cached (`PatternId`).
+    serial: u64,
 }
 
 /// The patterns [`PatternCache`] keeps.
 const PATTERN_CACHE_SIZE: usize = 1024;
 
-/// Patterns to test many strings, each taken from the pattern cache once:
+/// A cached pattern dropped between its lookup and its search: no path
+/// collects or compiles there, so this is a bug.
+const STALE: &str = "a cached regexp left the cache before its search";
+
+/// Patterns to test many strings, each found in the pattern cache once:
 /// no Lisp runs between the tests, so the patterns, the current buffer's
-/// syntax table and the case translation hold throughout.
+/// syntax table and the case translation hold throughout. A pattern that
+/// left the cache meanwhile is compiled again.
 pub(crate) struct StringMatcher {
     sources: Vec<Value>,
-    // CELL(Plain)
-    patterns: Vec<Option<std::rc::Rc<std::cell::RefCell<regex::CompiledPattern>>>>,
+    patterns: Vec<Option<PatternId>>,
     key: Translation,
     translation: Option<regex::CaseTranslation>,
     syntax: syntax::SyntaxSource,
@@ -351,20 +433,23 @@ impl Vm {
 
     fn string_matcher_search(&mut self, matcher: &mut StringMatcher, i: usize, string: Value)
         -> std::result::Result<Option<MatchRegisters>, prim::Fault> {
-        if matcher.patterns[i].is_none() {
-            let compiled = self.regexp_input(matcher.sources[i])
-                .and_then(|source| self.regexp_pattern(&source, false, matcher.key, || matcher.translation.clone(), &matcher.syntax))
-                .map_err(|fault| self.regexp_fault(fault))?;
-            matcher.patterns[i] = Some(compiled);
-        }
-        let pattern = matcher.patterns[i].clone().unwrap();
-        let mut pattern = pattern.borrow_mut();
+        let id = match matcher.patterns[i] {
+            Some(id) if self.regexp_cache.pattern(id).is_some() => id,
+            _ => {
+                let id = self.regexp_input(matcher.sources[i])
+                    .and_then(|source| self.regexp_pattern(&source, false, matcher.key, || matcher.translation.clone(), &matcher.syntax))
+                    .map_err(|fault| self.regexp_fault(fault))?;
+                matcher.patterns[i] = Some(id);
+                id
+            }
+        };
+        let multibyte = self.str_view(string).ok_or_else(|| prim::Fault::Wrong("stringp", string))?.is_multibyte();
+        self.regexp_aim(id, multibyte).map_err(|fault| self.regexp_fault(fault))?;
         let found = {
             let view = self.str_view(string).ok_or_else(|| prim::Fault::Wrong("stringp", string))?;
-            let (bytes, multibyte) = (view.bytes(), view.is_multibyte());
+            let pattern = self.regexp_cached(id).map_err(|_| prim::Fault::Error(STALE.into()))?;
             let syntax = syntax::VmSyntax::new(self, matcher.syntax.clone());
-            pattern.set_target_multibyte(multibyte);
-            regex::re_search(&pattern, bytes, 0, bytes.len() as isize, &syntax, usize::MAX)
+            regex::re_search(pattern, view.bytes(), 0, view.bytes().len() as isize, &syntax, usize::MAX)
         };
         if regex::take_matcher_overflow() {
             return Err(self.regexp_fault(Fault::Text("error", regex::MATCHER_OVERFLOW_MESSAGE.into())));
@@ -377,30 +462,45 @@ impl Vm {
     /// SOURCE reads: the cached one, or a new one cached in place of the
     /// least recently used.
     fn regexp_pattern(&mut self, pattern: &Input<'_>, posix: bool, key: Translation,
-                      translation: impl FnOnce() -> Option<regex::CaseTranslation>, source: &syntax::SyntaxSource) -> SearchResult<std::rc::Rc<std::cell::RefCell<regex::CompiledPattern>>> {
+                      translation: impl FnOnce() -> Option<regex::CaseTranslation>, source: &syntax::SyntaxSource) -> SearchResult<PatternId> {
         let table = source.table();
-        let cache = &mut self.regexp_cache;
-        cache.clock += 1;
-        let clock = cache.clock;
-        if let Some(entry) = cache.patterns.get(&*pattern.bytes).and_then(|v| v.iter().find(|e| e.multibyte == pattern.multibyte
-            && e.posix == posix && e.translation == key && e.syntax.is_none_or(|t| t == table))) {
-            entry.used.set(clock);
-            return Ok(entry.compiled.clone());
+        if let Some(id) = self.regexp_cache.hit(&pattern.bytes, |e| e.multibyte == pattern.multibyte
+            && e.posix == posix && e.translation == key && e.syntax.is_none_or(|t| t == table)) {
+            return Ok(id);
         }
         let mut compiled = regex::regex_compile_lisp_with_translation(
             &EmacsStr::new(&pattern.bytes, pattern.multibyte), posix, translation(),
         ).map_err(|e| Fault::Text("invalid-regexp", e.to_string()))?;
         compiled.rebind_syntax_table(&syntax::VmSyntax::new(self, source.clone()));
-        let syntax = compiled.used_syntax().then_some(table);
-        let compiled = std::rc::Rc::new(std::cell::RefCell::new(compiled));
-        let cache = &mut self.regexp_cache;
-        if cache.len >= PATTERN_CACHE_SIZE {
-            cache.evict();
+        let entry = CachedPattern { multibyte: pattern.multibyte, posix, translation: key, syntax: compiled.used_syntax().then_some(table),
+            reads_lookup: compiled.reads_lookup(), compiled: Box::new(compiled), used: 0, serial: 0 };
+        Ok(self.regexp_cache.insert(&pattern.bytes, entry))
+    }
+
+    /// The cached pattern ID names, set for a search of MULTIBYTE text.
+    #[inline(always)]
+    fn regexp_aim(&mut self, id: PatternId, multibyte: bool) -> SearchResult<()> {
+        self.regexp_cache.pattern_mut(id).ok_or_else(|| Fault::Internal(STALE.into()))?.set_target_multibyte(multibyte);
+        Ok(())
+    }
+
+    /// The cached pattern ID names, for a search to borrow where it lies.
+    #[inline(always)]
+    fn regexp_cached(&self, id: PatternId) -> SearchResult<&regex::CompiledPattern> {
+        self.regexp_cache.pattern(id).ok_or_else(|| Fault::Internal(STALE.into()))
+    }
+
+    /// PATTERNS compiled for a search of multibyte text, each still cached:
+    /// a compile that collects drops the table-bound patterns compiled
+    /// before it, which compile again.
+    fn regexp_compiled_all(&mut self, patterns: &[Input<'_>], source: &syntax::SyntaxSource) -> SearchResult<Vec<PatternId>> {
+        for _ in 0..3 {
+            let ids = patterns.iter().map(|p| self.regexp_compiled(p, true, false, false, source)).collect::<SearchResult<Vec<_>>>()?;
+            if ids.iter().all(|&id| self.regexp_cache.pattern(id).is_some()) {
+                return Ok(ids);
+            }
         }
-        cache.patterns.entry(pattern.bytes.to_vec()).or_default().push(CachedPattern {
-            multibyte: pattern.multibyte, posix, translation: key, syntax, compiled: compiled.clone(), used: std::cell::Cell::new(clock) });
-        cache.len += 1;
-        Ok(compiled)
+        Err(Fault::Internal(STALE.into()))
     }
 
     /// Drop the patterns whose compilation read a table's content: a
@@ -426,7 +526,7 @@ impl Vm {
             if !matches!(vm.objects[index], Object::Buffer(_)) { return Err(Fault::Internal("multibyte buffer required".into())) }
             let patterns = patterns.iter().map(|&p| vm.regexp_input(p)).collect::<SearchResult<Vec<_>>>()?;
             let source = vm.regexp_syntax(None)?;
-            let compiled = patterns.iter().map(|p| vm.regexp_compiled(p, true, false, false, &source)).collect::<SearchResult<Vec<_>>>()?;
+            let ids = vm.regexp_compiled_all(&patterns, &source)?;
             // Compiling may have collected: find the buffer again.
             let index = vm.buffer_index()?;
             let Object::Buffer(b) = vm.objects.entry_mut(index) else { return Err(Fault::Internal("multibyte buffer required".into())) };
@@ -456,9 +556,10 @@ impl Vm {
                 (std::borrow::Cow::Borrowed(text), std::borrow::Cow::Borrowed(bytes))
             };
             let point = b.point.0.clamp(accessible.start.0, accessible.end.0) - accessible.start.0;
+            let compiled = ids.iter().map(|&id| vm.regexp_cached(id)).collect::<SearchResult<Vec<_>>>()?;
             let syntax = syntax::VmSyntax::new(vm, source);
             let mut looks = |pattern: usize, at: usize| {
-                let found = regex::re_match(&compiled[pattern].borrow(), &internal, at, internal.len(), &syntax, point);
+                let found = regex::re_match(compiled[pattern], &internal, at, internal.len(), &syntax, point);
                 // An overflow is GNU's error; here it is no match.
                 (!regex::take_matcher_overflow()).then_some(found).flatten().map(|(end, _)| end - at)
             };
@@ -479,11 +580,11 @@ impl Vm {
                 Some((buffer, base)) => vm.regexp_buffer_syntax(buffer, base)?,
                 None => vm.regexp_syntax(None)?,
             };
-            let compiled = vm.regexp_pattern(&pattern, false, Translation::None, || None, &source)?;
-            let mut compiled = compiled.borrow_mut();
+            let id = vm.regexp_pattern(&pattern, false, Translation::None, || None, &source)?;
+            vm.regexp_aim(id, multibyte)?;
+            let compiled = vm.regexp_cached(id)?;
             let syntax = syntax::VmSyntax::new(vm, source);
-            compiled.set_target_multibyte(multibyte);
-            let found = regex::re_search(&compiled, bytes, 0, bytes.len() as isize, &syntax, usize::MAX).is_some();
+            let found = regex::re_search(compiled, bytes, 0, bytes.len() as isize, &syntax, usize::MAX).is_some();
             if regex::take_matcher_overflow() {
                 return Err(Fault::Text("error", regex::MATCHER_OVERFLOW_MESSAGE.into()));
             }
@@ -513,12 +614,12 @@ impl Vm {
             let pattern = vm.regexp_input(pattern)?;
             let input = vm.regexp_input(string)?;
             let source = vm.regexp_syntax(Some(string))?;
-            let compiled = vm.regexp_pattern(&pattern, false, key, move || translation, &source)?;
-            let mut compiled = compiled.borrow_mut();
+            let id = vm.regexp_pattern(&pattern, false, key, move || translation, &source)?;
+            vm.regexp_aim(id, input.multibyte)?;
+            let compiled = vm.regexp_cached(id)?;
             let syntax = syntax::VmSyntax::new(vm, source);
-            compiled.set_target_multibyte(input.multibyte);
             let armed = vm.arm_regexp_quit();
-            let found = regex::re_search(&compiled, &input.bytes, 0, input.bytes.len() as isize, &syntax, usize::MAX);
+            let found = regex::re_search(compiled, &input.bytes, 0, input.bytes.len() as isize, &syntax, usize::MAX);
             drop((syntax, compiled));
             vm.regexp_quit(armed)?;
             if regex::take_matcher_overflow() {
@@ -540,13 +641,14 @@ impl Vm {
         let run = |vm: &mut Self| -> SearchResult<Option<usize>> {
             let pattern = vm.regexp_input(pattern)?;
             let source = vm.regexp_syntax(Some(string))?;
-            let compiled = vm.regexp_pattern(&pattern, false, Translation::None, || None, &source)?;
-            let mut compiled = compiled.borrow_mut();
+            let id = vm.regexp_pattern(&pattern, false, Translation::None, || None, &source)?;
+            let multibyte = vm.regexp_subject(string)?.multibyte;
+            vm.regexp_aim(id, multibyte)?;
+            let compiled = vm.regexp_cached(id)?;
             let input = vm.regexp_subject(string)?;
             input.remember(at_byte, at);
-            compiled.set_target_multibyte(input.multibyte);
             let syntax = syntax::VmSyntax::new(vm, source);
-            let found = regex::re_match(&compiled, &input.bytes, at_byte, input.bytes.len(), &syntax, usize::MAX);
+            let found = regex::re_match(compiled, &input.bytes, at_byte, input.bytes.len(), &syntax, usize::MAX);
             drop((syntax, compiled));
             if regex::take_matcher_overflow() { return Ok(None); }
             Ok(found.map(|(end, _)| input.character(end)))
@@ -848,13 +950,13 @@ impl Vm {
         posix: bool,
         folded: bool,
         source: &syntax::SyntaxSource,
-    ) -> SearchResult<std::rc::Rc<std::cell::RefCell<regex::CompiledPattern>>> {
+    ) -> SearchResult<PatternId> {
         // The translation is built only for a pattern the cache lacks: the
         // standard one is a 256-entry table.
         let key = if folded { Translation::Standard } else { Translation::None };
-        let compiled = self.regexp_pattern(pattern, posix, key, || folded.then(regex::CaseTranslation::standard), source)?;
-        compiled.borrow_mut().set_target_multibyte(multibyte);
-        Ok(compiled)
+        let id = self.regexp_pattern(pattern, posix, key, || folded.then(regex::CaseTranslation::standard), source)?;
+        self.regexp_aim(id, multibyte)?;
+        Ok(id)
     }
     /// `regexp_compiled` of the string PATTERN, which a cached pattern
     /// answers from the string's own bytes; only a miss copies them.
@@ -865,25 +967,21 @@ impl Vm {
         posix: bool,
         folded: bool,
         source: &syntax::SyntaxSource,
-    ) -> SearchResult<std::rc::Rc<std::cell::RefCell<regex::CompiledPattern>>> {
+    ) -> SearchResult<PatternId> {
         let key = if folded { Translation::Standard } else { Translation::None };
         let table = source.table();
-        self.regexp_cache.clock += 1;
-        let clock = self.regexp_cache.clock;
-        let hit = self.str_view(pattern).and_then(|view| {
-            let entry = self.regexp_cache.patterns.get(view.bytes())?.iter().find(|e| e.multibyte == view.is_multibyte()
-                && e.posix == posix && e.translation == key && e.syntax.is_none_or(|t| t == table))?;
-            entry.used.set(clock);
-            Some(entry.compiled.clone())
+        let slot = self.str_view(pattern).and_then(|view| {
+            let multibyte = view.is_multibyte();
+            self.regexp_cache.find(view.bytes(), |e| e.multibyte == multibyte
+                && e.posix == posix && e.translation == key && e.syntax.is_none_or(|t| t == table))
         });
-        let compiled = if let Some(compiled) = hit {
-            compiled
-        } else {
-            let pattern = self.regexp_input(pattern)?;
-            self.regexp_pattern(&pattern, posix, key, || folded.then(regex::CaseTranslation::standard), source)?
-        };
-        compiled.borrow_mut().set_target_multibyte(multibyte);
-        Ok(compiled)
+        if let Some(id) = slot.and_then(|slot| self.regexp_cache.touch(slot, Some(multibyte))) {
+            return Ok(id);
+        }
+        let pattern = self.regexp_input(pattern)?;
+        let id = self.regexp_pattern(&pattern, posix, key, || folded.then(regex::CaseTranslation::standard), source)?;
+        self.regexp_aim(id, multibyte)?;
+        Ok(id)
     }
     /// REGISTERS, positions already (`place_registers`), as the match data,
     /// of the current buffer when BUFFER: into the groups GNU's one
@@ -911,7 +1009,7 @@ impl Vm {
     /// with RE false is the same search over STRING quoted, which matches
     /// where the literal does, with the same folding.
     fn regexp_compiled_literal(&mut self, string: Value, multibyte: bool, posix: bool, folded: bool, source: &syntax::SyntaxSource)
-        -> SearchResult<std::rc::Rc<std::cell::RefCell<regex::CompiledPattern>>> {
+        -> SearchResult<PatternId> {
         let mut quoted = std::mem::take(&mut self.regexp_cache.quoted);
         quoted.clear();
         let view = self.str_view(string).ok_or_else(|| Fault::Wrong("stringp", string))?;
@@ -1185,9 +1283,8 @@ impl Vm {
         };
         let folded = self.regexp_case_fold()?;
         let key = if folded { Translation::Standard } else { Translation::None };
-        let (compiled, source) = if let Some(compiled) = self.regexp_plain_hit(pattern, posix, key) {
-            compiled.borrow_mut().set_target_multibyte(multibyte);
-            (compiled, None)
+        let (id, source) = if let Some(id) = self.regexp_plain_hit(pattern, posix, key, multibyte) {
+            (id, None)
         } else {
             let source = self.regexp_syntax(Some(string))?;
             (self.regexp_compiled_string(pattern, multibyte, posix, folded, &source)?, Some(source))
@@ -1205,15 +1302,15 @@ impl Vm {
                 let rest = self.str_view_from(string, from).map_or(0, |view| view.bytes.len());
                 input.remember(all - rest, from);
             }
-            let compiled = compiled.borrow();
+            let compiled = self.regexp_cached(id)?;
             let byte = input.byte(from);
             // GNU at_dot compares the text pointer with buffer point; a
             // standalone string cannot contain that buffer address.
             let range = (input.bytes.len() - byte).cast_signed();
             let found = if let Some(source) = source {
-                regex::re_search(&compiled, &input.bytes, byte, range, &syntax::VmSyntax::new(self, source), usize::MAX)
+                regex::re_search(compiled, &input.bytes, byte, range, &syntax::VmSyntax::new(self, source), usize::MAX)
             } else {
-                regex::re_search(&compiled, &input.bytes, byte, range, &regex::DefaultSyntaxLookup, usize::MAX)
+                regex::re_search(compiled, &input.bytes, byte, range, &regex::DefaultSyntaxLookup, usize::MAX)
             };
             match found {
                 Some((at, mut registers)) => {
@@ -1263,7 +1360,7 @@ impl Vm {
         }
         let folded = self.regexp_case_fold()?;
         let source = self.regexp_syntax_of(index, None)?;
-        let compiled = if matches!(p, SearchForward | SearchBackward) {
+        let id = if matches!(p, SearchForward | SearchBackward) {
             self.regexp_compiled_literal(pattern, multibyte, posix, folded, &source)?
         } else {
             self.regexp_compiled_string(pattern, multibyte, posix, folded, &source)?
@@ -1287,14 +1384,14 @@ impl Vm {
         let mut point = origin - window.start;
         let limit = limit - window.start;
         {
-            let compiled = compiled.borrow();
+            let compiled = self.regexp_cached(id)?;
             let text = self.regexp_buffer_input(index, window.clone());
             let syntax = syntax::VmSyntax::new(self, source.rebased(window.start));
             for _ in 0..count.unsigned_abs() {
                 let found = if looking {
-                    regex::re_match(&compiled, text.bytes, point, text.bytes.len(), &syntax, text.point)
+                    regex::re_match(compiled, text.bytes, point, text.bytes.len(), &syntax, text.point)
                 } else {
-                    regex::re_search(&compiled, text.bytes, point, limit.cast_signed() - point.cast_signed(), &syntax, text.point)
+                    regex::re_search(compiled, text.bytes, point, limit.cast_signed() - point.cast_signed(), &syntax, text.point)
                 };
                 // An overflow still keeps an earlier iteration's match data.
                 overflow = regex::take_matcher_overflow();

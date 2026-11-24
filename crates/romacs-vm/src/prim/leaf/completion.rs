@@ -5,7 +5,6 @@ use romacs_regex::{CaseTable, CaseTranslation};
 #[derive(Debug)]
 struct CompletionCase {
     ranges: std::sync::Arc<Vec<(u32, u32, i64)>>,
-    standard: CaseTranslation,
 }
 
 impl CaseTable for CompletionCase {
@@ -16,7 +15,7 @@ impl CaseTable for CompletionCase {
                 return if mapped < 0 { code } else { mapped as u32 };
             }
         }
-        self.standard.translate(code)
+        CaseTranslation::canonicalize_char(code)
     }
     fn write_tick(&self) -> u64 {
         0
@@ -72,8 +71,8 @@ impl Leaf<'_> {
             (true, true) => (Translation::Standard, Some(CaseTranslation::standard())),
             (true, false) => {
                 let canon = self.completion_case_canon()?;
-                let case = CompletionCase { ranges: self.walk_case_ranges(canon, walk)?, standard: CaseTranslation::standard() };
-                (Translation::Completion(canon), Some(CaseTranslation::from_case_table(std::rc::Rc::new(case))))
+                let case = CompletionCase { ranges: self.walk_case_ranges(canon, walk)? };
+                (Translation::Completion(canon), Some(CaseTranslation::from_case_table(std::sync::Arc::new(case))))
             }
         })
     }
