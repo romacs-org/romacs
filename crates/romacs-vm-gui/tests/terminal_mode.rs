@@ -172,7 +172,7 @@ fn c_c_c_j_leaves_the_cursor_and_returns() {
     let cursor = printed(&mut vm, "(point)");
     type_keys(&mut vm, &state, keys(&[CommandEvent::Character(3), CommandEvent::Character(10)]), 1);
     assert_eq!(printed(&mut vm, "(list (point) (plist-get (romacs--term-state romacs-term-session) :following) (current-message))"),
-               format!("({cursor} nil \"Terminal left at its cursor: C-p/C-n move; type or C-c C-j to return; there M-p/M-n recall history\")"), "C_C_C_J_LEAVES_AT_THE_CURSOR");
+               format!("({cursor} nil \"Free mode: C-p/C-n move; type or C-c C-j to return; there M-p/M-n recall history\")"), "C_C_C_J_LEAVES_AT_THE_CURSOR");
     assert!(sent(&state).is_empty(), "LEAVING_SENDS_NOTHING");
     // Emacs keys move there; C-c C-j again returns to the cursor.
     type_keys(&mut vm, &state, keys(&[CommandEvent::Character(16)]), 1);
@@ -183,17 +183,51 @@ fn c_c_c_j_leaves_the_cursor_and_returns() {
     type_keys(&mut vm, &state, keys(&[CommandEvent::Character(3), CommandEvent::Character(10), ch('x')]), 2);
     assert_eq!(sent(&state), vec![b"x".to_vec()], "TYPING_AFTER_LEAVING_SENDS");
     assert_eq!(printed(&mut vm, "(plist-get (romacs--term-state romacs-term-session) :following)"), "t", "TYPING_RETURNS");
-    // A full-screen program's terminal has no scrollback to leave for.
-    { let mut s = state.borrow_mut(); s.alternate = true; s.show("vim", 0); }
-    vm.poll_terminal_output().unwrap();
-    assert_eq!(printed(&mut vm, "(condition-case e (romacs-term-leave) (user-error (car (cdr e))))"), "\"A full-screen program has the terminal\"",
-               "NO_LEAVING_THE_ALTERNATE_SCREEN");
-    assert_eq!(printed(&mut vm, "(plist-get (romacs--term-state romacs-term-session) :following)"), "t");
-    // Nor an exited one, whose buffer typing cannot return from.
-    { let mut s = state.borrow_mut(); s.alternate = false; s.exited = true; s.show("$ exit", 0); }
+    // An exited terminal's buffer is plain already: no mode to switch.
+    { let mut s = state.borrow_mut(); s.exited = true; s.show("$ exit", 0); }
     vm.poll_terminal_output().unwrap();
     assert_eq!(printed(&mut vm, "(condition-case e (romacs-term-leave) (user-error (car (cdr e))))"), "\"The terminal has exited\"",
                "NO_LEAVING_AN_EXITED_TERMINAL");
+}
+
+/// Input mode and free mode: C-c and C-x stay Emacs prefixes on every
+/// screen, C-q gives the program the next key whatever it is, and C-c C-j
+/// frees the window (search, select, copy) and returns, on the alternate
+/// screen too.
+#[test]
+fn input_and_free_modes_hold_on_every_screen() {
+    let (mut vm,state)=setup(); open(&mut vm);
+    let following = |vm: &mut Vm| printed(vm, "(list (plist-get (romacs--term-state romacs-term-session) :following) (romacs-term-input-mode))");
+    let c = CommandEvent::Character;
+    for alternate in [false, true] {
+        { let mut s = state.borrow_mut(); s.alternate = alternate; s.show(if alternate { "nano\nline two\n" } else { "one\ntwo\n$ " }, 0); }
+        vm.poll_terminal_output().unwrap();
+        sent(&state);
+        // C-c is a prefix: a quit, an undefined suffix and C-c C-c leak no byte but ETX.
+        assert!(!vm.terminal_passthrough_key(&c(3)).unwrap() && !vm.terminal_passthrough_key(&c(17)).unwrap(), "C_C_AND_C_Q_GO_THROUGH_THE_LOOP {alternate}");
+        type_keys(&mut vm, &state, keys(&[c(3), c(7), c(3), ch('z'), c(3), c(3)]), 3);
+        assert_eq!(sent(&state), vec![vec![3]], "ONLY_C_C_C_C_REACHES_THE_PROGRAM {alternate}");
+        // C-q sends the next key raw: C-x and C-c for nano, C-q itself.
+        type_keys(&mut vm, &state, keys(&[c(17), c(24), c(17), c(3), c(17), c(17)]), 3);
+        assert_eq!(sent(&state), vec![vec![24], vec![3], vec![17]], "C_Q_QUOTES_THE_NEXT_KEY {alternate}");
+        assert_eq!(following(&mut vm), "(t input)", "INPUT_MODE {alternate}");
+        // C-c C-j frees the window: output leaves it where it is, Emacs keys move it.
+        type_keys(&mut vm, &state, keys(&[c(3), c(10)]), 1);
+        assert_eq!(following(&mut vm), "(nil free)", "C_C_C_J_FREES {alternate}");
+        type_keys(&mut vm, &state, keys(&[c(META | '<' as i64)]), 1);
+        { let mut s = state.borrow_mut(); let text = format!("{}x", s.text); s.show(&text, 0); }
+        vm.poll_terminal_output().unwrap();
+        assert_eq!(printed(&mut vm, "(list (point) (romacs-term-input-mode))"), "(1 free)", "OUTPUT_KEEPS_A_FREE_WINDOW {alternate}");
+        assert!(!vm.terminal_passthrough_key(&ch('a')).unwrap(), "A_FREE_WINDOW_TAKES_NO_FAST_PATH {alternate}");
+        assert!(sent(&state).is_empty(), "FREEING_SENDS_NOTHING {alternate}");
+        type_keys(&mut vm, &state, keys(&[c(3), c(10)]), 1);
+        assert_eq!(following(&mut vm), "(t input)", "C_C_C_J_RETURNS_TO_INPUT {alternate}");
+        assert!(sent(&state).is_empty());
+    }
+    // An exited terminal is plain text already.
+    { let mut s = state.borrow_mut(); s.alternate = false; s.exited = true; s.show("$ exit", 0); }
+    vm.poll_terminal_output().unwrap();
+    assert_eq!(printed(&mut vm, "(romacs-term-input-mode)"), "nil", "AN_EXITED_TERMINAL_HAS_NO_MODE");
 }
 
 #[test]
@@ -359,13 +393,12 @@ fn the_hint_waits_for_the_echo_area() {
 #[test]
 fn the_alternate_screen_takes_every_key_but_its_exceptions() {
     let (mut vm,state)=setup(); open(&mut vm);
-    vm.eval_source("(romacs--term-follow romacs-term-session nil) (setq ran nil) (define-key global-map [24 ?t] (lambda () (interactive) (setq ran 'c-x-t)))").unwrap();
+    vm.eval_source("(setq ran nil) (define-key global-map [24 ?t] (lambda () (interactive) (setq ran 'c-x-t)))").unwrap();
     { let mut s = state.borrow_mut(); s.alternate = true; s.show("vim", 0); }
     vm.poll_terminal_output().unwrap();
-    assert_eq!(printed(&mut vm, "(plist-get (romacs--term-state romacs-term-session) :following)"), "t", "THE_ALTERNATE_SCREEN_HAS_NO_AWAY");
-    type_keys(&mut vm, &state, keys(&[CommandEvent::Character(3), CommandEvent::Character(25), CommandEvent::Character(22), named("escape"),
-                                      CommandEvent::Character(24), ch('t')]), 5);
-    assert_eq!(sent(&state), vec![vec![3], vec![25], vec![22], vec![27]], "C_C_C_Y_C_V_AND_ESCAPE_REACH_THE_PROGRAM_AT_ONCE");
+    type_keys(&mut vm, &state, keys(&[CommandEvent::Character(25), CommandEvent::Character(22), named("escape"),
+                                      CommandEvent::Character(24), ch('t')]), 4);
+    assert_eq!(sent(&state), vec![vec![25], vec![22], vec![27]], "C_Y_C_V_AND_ESCAPE_REACH_THE_PROGRAM_AT_ONCE");
     assert_eq!(printed(&mut vm, "ran"), "c-x-t", "C_X_STAYS_WITH_EMACS");
 }
 
@@ -465,7 +498,8 @@ fn plain_passthrough_keys_skip_the_command_loop_when_the_keymaps_agree() {
     vm.eval_source("(set-default 'pre-command-hook '(ignore)) (set-default 'post-command-hook (cons 'ignore (default-value 'post-command-hook)))").unwrap();
     assert!(fast(&mut vm, ch('a')), "GLOBAL_COMMAND_HOOKS_ARE_SKIPPED");
     state.borrow_mut().alternate = true; state.borrow_mut().show("vim", 0); vm.poll_terminal_output().unwrap();
-    assert!(fast(&mut vm, CommandEvent::Character(3)) && !fast(&mut vm, CommandEvent::Character(24)), "THE_ALTERNATE_SCREEN_S_MAP_DECIDES");
+    assert!(fast(&mut vm, CommandEvent::Character(25)) && !fast(&mut vm, CommandEvent::Character(3)) && !fast(&mut vm, CommandEvent::Character(24)),
+            "THE_ALTERNATE_SCREEN_S_MAP_DECIDES");
 }
 
 #[test]
@@ -539,15 +573,16 @@ fn terminal_base_colours_follow_the_ansi_color_faces() {
 #[test]
 fn terminal_commands_declare_their_mode_and_its_hints_show_real_keys() {
     let (mut vm,_)=setup(); open(&mut vm);
-    assert_eq!(printed(&mut vm,"(mapcar #'command-modes '(romacs-term-interrupt romacs-term-send-key romacs-term-yank romacs-term))"),
-               "((romacs-term-mode) (romacs-term-mode) (romacs-term-mode) nil)","ENTRY_POINT_STAYS_GLOBAL");
-    assert_eq!(printed(&mut vm,"(equal (substring-no-properties (romacs-term--hint)) \"C-c C-c interrupt  C-c C-j leave\")"),"t");
+    assert_eq!(printed(&mut vm,"(mapcar #'command-modes '(romacs-term-interrupt romacs-term-send-key romacs-term-send-next-key romacs-term-yank romacs-term))"),
+               "((romacs-term-mode) (romacs-term-mode) (romacs-term-mode) (romacs-term-mode) nil)","ENTRY_POINT_STAYS_GLOBAL");
+    assert_eq!(printed(&mut vm,"(equal (substring-no-properties (romacs-term--hint)) \"C-c C-c interrupt  C-q quote  C-c C-j free\")"),"t");
+    assert_eq!(printed(&mut vm,"(substring-no-properties (romacs-term--hint 'free))"),"\"C-c C-j input\"","FREE_MODE_NAMES_ITS_WAY_BACK");
     assert_eq!(printed(&mut vm,"(let ((text (romacs-term--hint))) (list (get-text-property 0 'face text) (get-text-property 8 'face text)))"),
                "((help-key-binding romacs-term-dim) romacs-term-dim)","KEYS_IN_THEIR_FACE_OVER_THE_DIM_TEXT");
     assert_eq!(printed(&mut vm,"(let ((first (romacs-term--hint))) (eq first (romacs-term--hint)))"),"t","NO_LOOKUP_PER_REDISPLAY");
     vm.eval_source("(define-key romacs-term-mode-map [3 3] nil) (define-key romacs-term-mode-map [3 11] nil)
                     (define-key romacs-term-mode-map [3 105] 'romacs-term-interrupt)").unwrap();
-    assert_eq!(printed(&mut vm,"(equal (substring-no-properties (romacs-term--hint)) \"C-c i interrupt  C-c C-j leave\")"),"t","A_REBINDING_SHOWS");
+    assert_eq!(printed(&mut vm,"(equal (substring-no-properties (romacs-term--hint)) \"C-c i interrupt  C-q quote  C-c C-j free\")"),"t","A_REBINDING_SHOWS");
     assert_eq!(printed(&mut vm,"(equal (substring-no-properties (romacs-term--away-keys)) \"C-p/C-n move; type or C-c C-j to return; there M-p/M-n recall history\")"),"t");
     assert_eq!(printed(&mut vm,"(get-text-property 0 'face (romacs-term--away-keys))"),"help-key-binding");
 }
@@ -573,11 +608,11 @@ fn status_bar_shows_only_the_selected_window() {
     // Wide enough that nothing is dropped to fit.
     let bar = |vm: &mut Vm| vm.frame_snapshot(3000, 700).unwrap().status_bar.expect("a status bar").text.utf8;
     let term = bar(&mut vm);
-    assert!(term.contains("*romacs-term*") && term.contains("running"), "THE_SELECTED_TERMINAL_IS_THE_BAR: {term:?}");
+    assert!(term.contains("*romacs-term*") && term.contains("input"), "THE_SELECTED_TERMINAL_IS_THE_BAR: {term:?}");
     vm.eval_source("(setq term-window (selected-window)) (select-window (split-window-right)) (switch-to-buffer (get-buffer-create \"notes\"))").unwrap();
     let notes = bar(&mut vm);
     assert!(notes.contains("notes"), "{notes:?}");
-    for text in ["*romacs-term*", "running", "interrupt"] {
+    for text in ["*romacs-term*", "input", "interrupt"] {
         assert!(!notes.contains(text), "AN_UNSELECTED_TERMINAL_STAYS_OUT_OF_THE_BAR: {notes:?}");
     }
     // Output in the unselected terminal leaves the bar as it was.
@@ -587,5 +622,5 @@ fn status_bar_shows_only_the_selected_window() {
     assert_eq!(bar(&mut vm), notes, "OUTPUT_ELSEWHERE_DOES_NOT_REACH_THE_BAR");
     vm.eval_source("(select-window term-window)").unwrap();
     let selected = bar(&mut vm);
-    assert!(selected.contains("*romacs-term*") && selected.contains("running") && !selected.contains("notes"), "SELECTED_AGAIN_IT_IS_THE_BAR: {selected:?}");
+    assert!(selected.contains("*romacs-term*") && selected.contains("input") && !selected.contains("notes"), "SELECTED_AGAIN_IT_IS_THE_BAR: {selected:?}");
 }
