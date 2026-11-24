@@ -32,6 +32,15 @@
 
 ;;; Code:
 
+(defvar shortdoc--loading-doc nil
+  "Non-nil while loading Shortdoc to expand the built-in groups.")
+
+(eval-when-compile
+  (unless (and (fboundp 'define-short-documentation-group)
+               (not (autoloadp (symbol-function 'define-short-documentation-group))))
+    (let ((shortdoc--loading-doc t))
+      (require 'shortdoc))))
+
 (define-short-documentation-group alist
   "Alist Basics"
   (assoc

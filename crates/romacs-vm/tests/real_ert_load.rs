@@ -4,6 +4,23 @@ mod gnu_ert_vm;
 use gnu_ert_vm::bootstrapped;
 
 #[test]
+fn shortdoc_doc_source_loads_builtin_groups_once() {
+    let mut vm = bootstrapped();
+    assert!(vm.eval_source("(autoloadp (symbol-function 'define-short-documentation-group))").unwrap().is_t());
+    let source = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../lisp/emacs-lisp/shortdoc-doc.el")
+        .canonicalize().unwrap();
+    let from = vm.load_steps().len();
+    vm.load_file(&source).unwrap();
+    let entries = vm.load_steps()[from..].iter()
+        .filter(|step| step.ordinal == 1 && vm.load_step_file(step) == source)
+        .count();
+    assert_eq!(entries, 1, "shortdoc-doc started loading {entries} times");
+    assert!(vm.eval_source("(and (featurep 'shortdoc) (featurep 'shortdoc-doc)
+                                 (consp (assq 'alist shortdoc--groups)))").unwrap().is_t());
+}
+
+#[test]
 fn complete_gnu_ert_dependency_closure() {
     let mut vm = bootstrapped();
     assert!(vm.load_report()["steps"].as_array().unwrap().iter().all(|step| step["status"] == "ok"), "strict ERT bootstrap retained a failed load form");
