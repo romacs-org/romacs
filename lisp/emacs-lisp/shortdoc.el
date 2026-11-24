@@ -229,11 +229,9 @@ A FUNC form can have any number of `:no-eval' (or `:no-value'),
       (macroexp-warn-and-return
        (error-message-string err) exp nil t))))
 
-;; FIXME: As long as we do not have a better mechanism to load shortdoc
-;; definitions on demand, we must require `shortdoc-doc' after above
-;; macro to avoid loading cycles.  But at least we do not require
-;; `shortdoc-doc' while compiling this file, only when loading it.
-(if t (require 'shortdoc-doc))
+(defvar shortdoc--loading-doc)
+(unless (bound-and-true-p shortdoc--loading-doc)
+  (require 'shortdoc-doc))
 
 
 ;;;###autoload

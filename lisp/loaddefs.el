@@ -30781,6 +30781,11 @@ If SAME-WINDOW, don't pop to a new window.
 (register-definition-prefixes "shortdoc" '("shortdoc-"))
 
 
+;;; Generated autoloads from emacs-lisp/shortdoc-doc.el
+
+(register-definition-prefixes "shortdoc-doc" '("shortdoc--loading-doc"))
+
+
 ;;; Generated autoloads from net/shr.el
 
 (autoload 'shr-render-region "shr"
