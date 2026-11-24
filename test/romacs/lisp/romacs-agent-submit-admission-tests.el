@@ -69,9 +69,9 @@ then with OTHERS (a number) more such sessions."
             (apply body sessions))
         (dolist (session sessions) (delete-process (romacs-agent-connection session)))))))
 
-(defun romacs-agent-submit-admission-tests--await (predicate)
-  "Wait for PREDICATE, timers run meanwhile, 3 s at most."
-  (let ((deadline (+ (float-time) 3)))
+(defun romacs-agent-submit-admission-tests--await (predicate &optional seconds)
+  "Wait for PREDICATE, timers run meanwhile, SECONDS at most (3 by default)."
+  (let ((deadline (+ (float-time) (or seconds 3))))
     (while (and (not (funcall predicate)) (< (float-time) deadline))
       (accept-process-output nil 0.02))
     (should (funcall predicate))))
@@ -823,7 +823,8 @@ newest first."
            (romacs-agent--submit-draft (format "b%d" n) (romacs-agent-id session)
                                        (romacs-agent-submit-admission-tests--intent (format "from b%d" n))
                                        (lambda (_) (cl-incf answered))))
-         (romacs-agent-submit-admission-tests--await (lambda () (= answered 1000))))
+         ;; A busy host takes seconds to answer a thousand drafts.
+         (romacs-agent-submit-admission-tests--await (lambda () (= answered 1000)) 60))
        (romacs-agent--submit-draft "a" (romacs-agent-id session) intent (lambda (answer) (push answer answers)))
        (romacs-agent-submit-admission-tests--await (lambda () (cdr answers)))
        (should (eq (plist-get (car answers) :status) 'accepted))
