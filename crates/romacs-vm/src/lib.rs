@@ -152,6 +152,7 @@ mod keeper;
 pub use isolate::worker_socket as isolate_worker_socket;
 pub use isolate::refuse as isolate_refuse;
 mod request_code;
+mod macro_record;
 pub use gc::HeapStats;
 pub use image::{ImageBuilder, ImageRegion};
 pub mod anchors;
@@ -1123,6 +1124,10 @@ struct Function {
     /// the source has no canonical spelling; such closures compare by
     /// identity.
     key: Option<u128>,
+    /// The function cells its compile expanded through, sorted
+    /// (`macro_record`): empty for code no compile here made (images,
+    /// compiled Lisp) and for a lazy body until it is forced.
+    macros: Box<[macro_record::MacroUse]>,
 }
 /// A function body a compiled load left in its artifact's bytes
 /// (`Vm::decode_pending`), with what the body names: a collection keeps
@@ -1171,6 +1176,19 @@ struct LazyBody {
     file_level: bool,
     /// Made while interpreting a source file (`Vm::interpreting_source`).
     interpreting: bool,
+}
+impl LazyBody {
+    /// The lexical environment the body compiles in: one binding per
+    /// capture register, as the closure was made.
+    fn outer(&self) -> NameMap<Name, Binding> {
+        self.names
+            .iter()
+            .zip(&self.cells)
+            .enumerate()
+            .zip(self.lates.iter().zip(&self.shadows))
+            .map(|((reg, (name, &cell)), (&late, &shadow))| (name.clone(), Binding { reg, cell, late, shadow }))
+            .collect()
+    }
 }
 #[derive(Clone, Copy)]
 struct Binding {
@@ -1620,7 +1638,9 @@ pub struct Vm {
     /// The windows the last window change functions run saw
     /// (host_input.rs `window_change_signature').
     window_change_seen: Vec<u64>,
-    expanded_macros: Vec<(usize, u64)>,
+    /// The macro cells the open compiles expanded through, by scope
+    /// (`macro_record`).
+    macro_record: macro_record::MacroRecord,
     expanded_symbols: NameSet<String>,
     #[snapshot(at_rest)]
     image: Option<std::sync::Arc<ImageRegion>>,
@@ -1976,7 +1996,7 @@ impl Vm {
             closure_key_extra: Vec::new(),
             lambda_depth: 0,
             window_change_seen: Vec::new(),
-            expanded_macros: vec![],
+            macro_record: macro_record::MacroRecord::default(),
             expanded_symbols: NameSet::default(),
             image: None,
             regions: frozen::Regions::default(),
@@ -2218,7 +2238,7 @@ impl Vm {
             .ok_or("function version overflow")?;
         let old = std::mem::replace(&mut self.slots[slot].function, value);
         self.charge_definition(old, value);
-        self.slots[slot].version = version;
+        let previous = std::mem::replace(&mut self.slots[slot].version, version);
         if is_macro {
             self.macros.insert(slot);
         } else {
@@ -2226,6 +2246,9 @@ impl Vm {
         }
         self.world_version = world;
         self.command_set.changed(slot);
+        if self.macro_record.named(slot) {
+            self.log_macro_write(slot, previous);
+        }
         Ok(())
     }
     /// Record whether `names' maps SLOT's name to SLOT.
@@ -2320,7 +2343,7 @@ impl Vm {
     ) -> Result<(usize, Vec<Name>)> {
         if self.compile_depth == 0 {
             self.pending_specials.clear();
-            self.expanded_macros.clear();
+            self.macro_record.expansions = 0;
             self.expanded_symbols.clear();
         }
         self.compile_depth += 1;
@@ -2328,7 +2351,9 @@ impl Vm {
             specials.extend(self.file_specials.iter().cloned());
         }
         self.loader_order_request = true;
+        let scope = self.open_request_scope();
         let result = self.function(&[], std::slice::from_ref(form), outer, &specials);
+        self.close_scope(scope);
         self.compile_depth -= 1;
         if self.compile_depth == 0 {
             self.pending_specials.clear();
@@ -2348,7 +2373,9 @@ impl Vm {
         local_specials: &NameSet<String>,
     ) -> Result<(usize, Vec<Name>)> {
         self.gc_holds += 1;
+        let scope = self.open_function_scope();
         let result = self.build_function(args, body, outer, local_specials);
+        self.close_scope(scope);
         self.gc_holds -= 1;
         result
     }
@@ -2463,21 +2490,7 @@ impl Vm {
         // Discover actual free variables from compiled operands, after macro
         // expansion and lexical shadowing. Nested lambdas have already pruned
         // their sites, so transitive free variables are included precisely.
-        let mut used = vec![false; names.len()];
-        for op in &mut b.code {
-            op.map_registers(&mut |r| {
-                if r < used.len() {
-                    used[r] = true;
-                }
-                r
-            });
-        }
-        for &r in b.sites.iter().flatten() {
-            if r < used.len() {
-                used[r] = true;
-            }
-        }
-        if keep_captures { used.fill(true); }
+        let used = used_captures(&mut b, names.len(), keep_captures);
         let capture_mutations = mutations[..names.len()]
             .iter()
             .zip(&used)
@@ -2512,6 +2525,7 @@ impl Vm {
                 .filter_map(|(name, keep)| keep.then_some(name))
                 .collect();
         }
+        let macros = self.function_record();
         let id = self.install_function(Function {
             capture_mutations,
             mapped_code: None,
@@ -2528,6 +2542,7 @@ impl Vm {
             dynamic: Some(self.dynamic_scope),
             params: Some(args.to_vec()),
             key: closure_key::of_forms(self, &closure_key::Context { dynamic: self.dynamic_scope, names: &names, specials: local_specials }, args, body, &key_extra),
+            macros,
         });
         Ok((id, names))
     }
@@ -2613,6 +2628,7 @@ impl Vm {
             file_level: deferred && b.file_level,
             interpreting: self.interpreting_source,
         };
+        let macros = self.lazy_record();
         let id = self.install_function(Function {
             capture_mutations: vec![true; names.len()],
             mapped_code: None,
@@ -2629,6 +2645,7 @@ impl Vm {
             pending: None,
             params: Some(args.to_vec()),
             key: closure_key::of_forms(self, &closure_key::Context { dynamic: self.dynamic_scope, names: &names, specials: &b.local_specials }, args, body, &key_extra),
+            macros,
         });
         let regs = names.iter().map(|n| b.env[n].reg).collect();
         let site = b.sites.len();
@@ -2654,14 +2671,7 @@ impl Vm {
             Form::Sym(nil) if nil == "nil" => vec![],
             _ => return Err("invalid lazy body".into()),
         };
-        let outer: NameMap<Name, Binding> = lazy
-            .names
-            .iter()
-            .zip(&lazy.cells)
-            .enumerate()
-            .zip(lazy.lates.iter().zip(&lazy.shadows))
-            .map(|((reg, (name, &cell)), (&late, &shadow))| (name.clone(), Binding { reg, cell, late, shadow }))
-            .collect();
+        let outer = lazy.outer();
         let saved_regime = std::mem::replace(&mut self.lazy_regime, true);
         let saved_defer = std::mem::replace(&mut self.defer_expansion_errors, true);
         let saved_strict = std::mem::replace(&mut self.strict_root, lazy.deferred);
@@ -2670,16 +2680,18 @@ impl Vm {
         let saved_evaluating = std::mem::replace(&mut self.evaluating, lazy.evaluated);
         let saved_interpreting = std::mem::replace(&mut self.interpreting_source, lazy.interpreting);
         if self.compile_depth == 0 {
-            self.expanded_macros.clear();
+            self.macro_record.expansions = 0;
             self.expanded_symbols.clear();
         }
         self.compile_depth += 1;
         self.keep_captures = true;
+        let scope = self.open_detached_scope();
         // A deferred form is evaluated at its reach, as GNU's interpreter
         // evaluates it: an unbound head is named before the arguments run.
         self.loader_order_request = lazy.deferred;
         self.file_level_request = lazy.file_level;
         let result = self.compile_lazy_request(&lazy.args, &body, &outer, &lazy.local_specials);
+        self.close_scope(scope);
         self.keep_captures = false;
         self.compile_depth -= 1;
         self.lazy_regime = saved_regime;
@@ -2697,6 +2709,7 @@ impl Vm {
         function.capture_mutations = vec![true; names.len()];
         // The closure stays the one its key named before its first call.
         function.key = self.functions[id].key;
+        function.macros = macro_record::union(&self.functions[id].macros, &function.macros);
         self.functions.set(id, Arc::new(function));
         Ok(())
     }
@@ -4393,4 +4406,24 @@ mod object_index_tests {
     fn a_release_build_signals_for_nils_entry() {
         assert!(Value::NIL.object_index().is_err());
     }
+}
+
+/// Which of the first CAPTURES registers B's code and closure sites read:
+/// a body's free variables after expansion and shadowing; all when KEEP.
+fn used_captures(b: &mut Builder, captures: usize, keep: bool) -> Vec<bool> {
+    let mut used = vec![keep; captures];
+    for op in &mut b.code {
+        op.map_registers(&mut |r| {
+            if r < captures {
+                used[r] = true;
+            }
+            r
+        });
+    }
+    for &r in b.sites.iter().flatten() {
+        if r < captures {
+            used[r] = true;
+        }
+    }
+    used
 }

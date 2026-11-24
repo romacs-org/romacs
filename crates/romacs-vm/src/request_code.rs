@@ -279,6 +279,7 @@ impl Vm {
                 environment: None,
                 params: None,
                 key: None,
+                macros: Box::default(),
             },
         );
         if self.request_code.live[id] && !self.request_code.permanent[id] {
@@ -436,6 +437,7 @@ impl Vm {
         f.capture_mutations = Vec::new();
         f.lazy = None;
         f.pending = None;
+        f.macros = Box::default();
         self.request_code.live[id] = false;
         self.request_code.free.push(id);
     }

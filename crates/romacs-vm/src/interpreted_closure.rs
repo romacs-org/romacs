@@ -560,6 +560,51 @@ impl Vm {
         result
     }
 
+    /// `make-interpreted-closure`'s function in a regime that holds bodies
+    /// unexpanded (R215): BODY as a lazy body over OUTER's captures, with
+    /// SPECIALS, compiled at its first call.
+    fn install_interpreted_lazy(
+        &mut self, body: Value, args: Vec<Form>, outer: &NameMap<Name, Binding>, specials: &NameSet<String>, dynamic: bool,
+    ) -> Result<(usize, Vec<Name>)> {
+        let (arity, required, rest) = lambda_arity(&args)?;
+        let mut names: Vec<_> = outer.keys().cloned().collect();
+        names.sort();
+        let lazy = LazyBody {
+            body,
+            args,
+            names: names.clone(),
+            cells: vec![true; names.len()],
+            lates: vec![false; names.len()],
+            shadows: vec![None; names.len()],
+            local_specials: specials.clone(),
+            pending_specials: self.pending_specials.clone(),
+            dynamic_scope: dynamic,
+            deferred: false,
+            file_level: false,
+            // GNU's interpreted closure evaluates the structure it holds.
+            evaluated: true,
+            interpreting: false,
+        };
+        let function = self.install_function(Function {
+            capture_mutations: vec![true; names.len()],
+            mapped_code: None,
+            code: vec![],
+            regs: names.len() + arity + usize::from(rest),
+            captures: names.len(),
+            arity,
+            required,
+            rest,
+            sites: vec![],
+            params: Some(lazy.args.clone()),
+            key: None,
+            macros: Box::default(),
+            lazy: Some(Arc::new(lazy)),
+            pending: None,
+            dynamic: Some(dynamic),
+            environment: Some(self.capture_layout(&names, outer, specials, None)),
+        });
+        Ok((function, names))
+    }
     pub(super) fn interpreted_closure_primitive(
         &mut self,
         p: Primitive,
@@ -676,43 +721,7 @@ impl Vm {
                 }
                 let key_args = args.clone();
                 let (function, names) = if self.lazy_regime || self.source_load_active() {
-                let (arity, required, rest) = lambda_arity(&args)?;
-                let mut names: Vec<_> = outer.keys().cloned().collect();
-                names.sort();
-                let lazy = LazyBody {
-                    body: a[1],
-                    args,
-                    names: names.clone(),
-                    cells: vec![true; names.len()],
-                    lates: vec![false; names.len()],
-                    shadows: vec![None; names.len()],
-                    local_specials: specials.clone(),
-                    pending_specials: self.pending_specials.clone(),
-                    dynamic_scope: a[2] == Value::NIL,
-                    deferred: false,
-                    file_level: false,
-                    // GNU's interpreted closure evaluates the structure it holds.
-                    evaluated: true,
-                    interpreting: false,
-                };
-                let function = self.install_function(Function {
-                    capture_mutations: vec![true; names.len()],
-                    mapped_code: None,
-                    code: vec![],
-                    regs: names.len() + arity + usize::from(rest),
-                    captures: names.len(),
-                    arity,
-                    required,
-                    rest,
-                    sites: vec![],
-                    params: Some(lazy.args.clone()),
-                    key: None,
-                    lazy: Some(Arc::new(lazy)),
-                    pending: None,
-                    dynamic: Some(a[2] == Value::NIL),
-                    environment: Some(self.capture_layout(&names, &outer, &specials, None)),
-                });
-                (function, names)
+                    self.install_interpreted_lazy(a[1], args, &outer, &specials, a[2] == Value::NIL)?
                 } else {
                     let body = self.list_values(a[1])?.into_iter()
                         .map(|v| self.expansion_form(v, 0)).collect::<Result<Vec<_>>>()?;

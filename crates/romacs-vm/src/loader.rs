@@ -10,7 +10,8 @@ struct SourceRegime {
     lazy: bool,
     defer: bool,
     interpreting: bool,
-    expanded_macros: Vec<(usize, u64)>,
+    /// The outer compile's runaway count.
+    expansions: usize,
     expanded_symbols: NameSet<String>,
 }
 #[derive(Default, romacs_snapshot::Snapshot)]
@@ -603,9 +604,9 @@ impl Vm {
         self.enter_file_specials();
         // A macro can load a file while an outer compilation is suspended.
         // Child compilations must not erase its nonconstant-macro guards.
-        let expanded_macros = std::mem::take(&mut self.expanded_macros);
+        let expansions = std::mem::take(&mut self.macro_record.expansions);
         let expanded_symbols = std::mem::take(&mut self.expanded_symbols);
-        self.loader.regimes.push(SourceRegime { lazy: saved_lazy, defer, interpreting, expanded_macros, expanded_symbols });
+        self.loader.regimes.push(SourceRegime { lazy: saved_lazy, defer, interpreting, expansions, expanded_symbols });
     }
     /// A load's own set of `(defvar X)`s, empty; `Self::leave_file_specials` puts
     /// the outer file's back.
@@ -622,7 +623,7 @@ impl Vm {
         self.defer_expansion_errors = saved.defer;
         self.interpreting_source = saved.interpreting;
         self.leave_file_specials();
-        self.expanded_macros = saved.expanded_macros;
+        self.macro_record.expansions = saved.expansions;
         self.expanded_symbols = saved.expanded_symbols;
     }
     /// In a compile process, record that it loaded PATH, with its digest
@@ -762,16 +763,21 @@ pub(crate) fn load_discarding<'b>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, path: 
 }
 /// Load PATH, the last form's value going to OUT. COMPILED when the file's
 /// compiled form may run; EXPLICIT when a Lisp `load` named its `.el`
-/// (`Vm::gnu_interprets`).
+/// (`Vm::gnu_interprets`). The load, its after-load forms included, is a
+/// detached scope of the macro record: what it expands is no part of a
+/// compile that triggered it.
 fn load_file<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, path: &Path, compiled: bool, explicit: bool, out: Out<'_>) -> Result<()> {
     let (named, path) = m.leaf(path, Vm::admitted_load)?;
     let (artifact, source) = m.leaf((path.as_path(), compiled), Vm::load_input)?;
-    let values = m.leaf(named.as_str(), Vm::load_values)?;
+    let (values, scope) = m.leaf(named.as_str(), |vm, named| Ok::<_, String>((vm.load_values(named)?, vm.open_detached_scope())))?;
     let result = match &artifact {
         Some(artifact) => load_compiled(m, gc.by_ref(), &named, &path, artifact, &values, out),
         None => load_source(m, gc.by_ref(), (&named, &path), (&source, explicit), &values, out),
     };
-    m.leaf(values, Vm::drop_frame);
+    m.leaf((values, scope), |vm, (values, scope)| {
+        vm.close_scope(scope);
+        vm.drop_frame(values);
+    });
     result
 }
 /// Each public variable binds as a `let` does, in pinned GNU's order: Fload's
@@ -974,20 +980,32 @@ fn after_load<'b>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, named: &str, scratch: 
 /// GNU lread.c `readevalloop_eager_expand_eval`: expand the head only, then recurse
 /// into a resulting progn before expanding its next child. A prog2 macro can
 /// produce a progn too; prog1 itself is not split. The last value goes to OUT.
-fn eval_toplevel<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, form: &Form, depth: usize, out: Out<'_>) -> Result<()> {
+/// Each form, and each piece its expansion splits into, is one scope of the
+/// macro record (`Vm::open_toplevel_scope`), open while it is expanded and run.
+fn eval_toplevel<'b>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, form: &Form, depth: usize, out: Out<'_>) -> Result<()> {
+    let scope = m.leaf((), |vm, ()| vm.open_toplevel_scope());
+    let result = eval_toplevel_form(m, gc, form, depth, out);
+    m.leaf(scope, Vm::close_scope);
+    result
+}
+fn eval_toplevel_form<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, form: &Form, depth: usize, out: Out<'_>) -> Result<()> {
     if depth >= 128 || !eval_depth::native_stack_room() {
         return Err("top-level macro expansion limit exceeded".into());
     }
     // These are per-compilation dependency collectors, not a lifetime expansion
     // budget across sibling top-level forms.
     let mark = m.leaf((), |vm, ()| {
-        vm.expanded_macros.clear();
+        vm.macro_record.expansions = 0;
         vm.expanded_symbols.clear();
         vm.propagated_escape = None;
+        vm.set_heading(true);
         vm.enter_load_expansion()
     });
     let expanded = crate::threaded::expand_form(m, gc.by_ref(), form);
-    m.leaf(mark, Vm::leave_load_expansion);
+    m.leaf(mark, |vm, mark| {
+        vm.set_heading(false);
+        vm.leave_load_expansion(mark);
+    });
     let expanded = match expanded {
         Ok(expanded) => expanded,
         Err(error) => return Err(m.leaf(error, Vm::eager_expansion_failure)),

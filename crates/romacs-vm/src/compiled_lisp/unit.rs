@@ -769,7 +769,7 @@ impl Install<'_> {
         let body = r.data()?;
         let start = body.as_ptr() as usize - self.bytes.as_ptr() as usize;
         let function = Function { capture_mutations: vec![], mapped_code: None, code: vec![], regs, captures, arity, required, rest,
-                                  sites: vec![], lazy: None, dynamic, environment, params, pending: None, key };
+                                  sites: vec![], lazy: None, dynamic, environment, params, pending: None, key, macros: Box::default() };
         Ok((function, BodyRefs { values, children, caches, body: start..start + body.len() }))
     }
 
@@ -900,7 +900,7 @@ impl Vm {
         }
         let decoded = Function { capture_mutations, mapped_code: None, code, regs: f.regs, captures: f.captures, arity: f.arity,
                                  required: f.required, rest: f.rest, sites, lazy: None, dynamic: f.dynamic,
-                                 environment: f.environment.clone(), params: f.params.clone(), pending: None, key: f.key };
+                                 environment: f.environment.clone(), params: f.params.clone(), pending: None, key: f.key, macros: f.macros.clone() };
         validate_body(&decoded, |child| self.functions.get(child).map(|f| f.captures), self.slots.len(), self.caches.len())?;
         Ok(decoded)
     }

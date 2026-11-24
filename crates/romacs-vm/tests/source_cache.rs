@@ -226,3 +226,29 @@ fn a_cached_closure_shows_the_same_environment() {
     assert_eq!(warm.source_cache_stats().disk_hits, 1);
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// A request's guard is its own record: the requests a load inside its
+/// compile ran (an autoloaded macro's file) keep guards of their own, and
+/// their macros' redefinition leaves it valid.
+#[test]
+fn a_request_s_guard_leaves_out_what_a_nested_request_expanded() {
+    let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("source-cache-nested");
+    std::fs::create_dir_all(&dir).unwrap();
+    let library = dir.join("nest-lib.el");
+    std::fs::write(&library, ";;; -*- lexical-binding: t -*-\n(defmacro nest-other () 6)\n(defvar nest-seen (nest-other))\n(defmacro nest-auto () 5)\n").unwrap();
+    let mut vm = Vm::new();
+    vm.eval_source(&format!("(autoload 'nest-auto {library:?} nil nil 'macro)")).unwrap();
+    let run = |vm: &mut Vm| vm.eval_source("(list (nest-auto))").unwrap().display().unwrap();
+    assert_eq!(run(&mut vm), "(5)", "the load ran inside the request's compile");
+    let first = vm.source_cache_stats();
+    assert_eq!(run(&mut vm), "(5)");
+    assert_eq!(vm.source_cache_stats().hits, first.hits + 1, "reused while its own macro is unchanged");
+    vm.eval_source("(defmacro nest-other () 7)").unwrap();
+    let second = vm.source_cache_stats();
+    assert_eq!(run(&mut vm), "(5)");
+    assert_eq!(vm.source_cache_stats().hits, second.hits + 1, "the nested request's macro is not its guard");
+    vm.eval_source("(defmacro nest-auto () 8)").unwrap();
+    let third = vm.source_cache_stats();
+    assert_eq!(run(&mut vm), "(8)");
+    assert_eq!(vm.source_cache_stats().invalidations, third.invalidations + 1);
+}

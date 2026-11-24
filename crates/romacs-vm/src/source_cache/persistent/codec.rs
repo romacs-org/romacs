@@ -151,6 +151,7 @@ fn function(v: &J) -> Option<Function> {
         environment: a.get(10).and_then(|layout| environment(layout, num(&a[1])?)),
         params: a.get(8).and_then(J::as_array).and_then(|p| p.iter().map(|v| form(v, 0)).collect::<Option<Vec<_>>>()),
         key: a.get(9).and_then(J::as_str).and_then(|k| u128::from_str_radix(k, 16).ok()),
+        macros: Box::default(),
         code: a[6]
             .as_array()?
             .iter()
