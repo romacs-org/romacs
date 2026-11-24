@@ -7642,7 +7642,9 @@ directory named by no known session's id, its records not read for one
 that is, and none left unloaded (`romacs-agent--unloaded-p').  Non-nil
 when any was loaded."
   (let ((loaded nil))
-    (dolist (dir (pcase-let ((`(,dirs . ,few) (romacs-agent--recorded-since))) (romacs-agent--to-load dirs few)))
+    ;; The store not read yet: none loaded now, a later view asks again.
+    (dolist (dir (ignore-error romacs-agent-store-unread
+                   (pcase-let ((`(,dirs . ,few) (romacs-agent--recorded-since))) (romacs-agent--to-load dirs few))))
       (romacs-agent--load dir)
       (when (gethash (file-name-nondirectory dir) romacs-agent--sessions) (setq loaded t)))
     loaded))
@@ -7706,17 +7708,31 @@ start, so sessions survive it."
     ;; Restoring as the sessions to load are chosen: one with no row yet
     ;; is listed while a start's fill runs (`romacs-agent-listed-p').
     (setq romacs-agent--restoring t)
-    (if-let* ((dirs (condition-case err (pcase-let ((`(,dirs . ,quick) (romacs-agent--start-choice)))
-                                          (romacs-agent--to-load dirs quick))
-                      ;; Not chosen (the store held): no start under way, so
-                      ;; the next view's asks again.
-                      (error (setq romacs-agent--restoring nil romacs-agent--rows-seen nil)
-                             (signal (car err) (cdr err))))))
-        (progn (setq romacs-agent--restore-pending dirs romacs-agent--restore-count (length dirs))
-               (romacs-agent--restore-progress 'running)
-               (run-at-time 0 nil #'romacs-agent--restore-step))
+    (pcase (condition-case err (pcase-let ((`(,dirs . ,quick) (romacs-agent--start-choice)))
+                                 (cons 'chosen (romacs-agent--to-load dirs quick)))
+             ;; Not chosen: no start under way, so the next view's asks again.
+             ;; The store not read yet (the writer making it again for this
+             ;; build) is no rows unknown: chosen once it is, never every
+             ;; session loaded as unlisted.
+             (romacs-agent-store-unread
+              (setq romacs-agent--restoring nil romacs-agent--rows-seen nil)
+              (add-hook 'romacs-agent-store-readable-hook #'romacs-agent--restore-when-readable)
+              nil)
+             (error (setq romacs-agent--restoring nil romacs-agent--rows-seen nil)
+                    (signal (car err) (cdr err))))
+      (`(chosen . ,(and dirs (pred consp)))
+       (setq romacs-agent--restore-pending dirs romacs-agent--restore-count (length dirs))
+       (romacs-agent--restore-progress 'running)
+       (run-at-time 0 nil #'romacs-agent--restore-step))
       ;; Its tail waits for sessions loaded earlier and folded aside still.
-      (romacs-agent--restore-finish))))
+      (`(chosen . ,_) (romacs-agent--restore-finish)))))
+
+(defvar romacs-agent-store-readable-hook)
+
+(defun romacs-agent--restore-when-readable ()
+  "The store is read now: the start's restore it held goes on."
+  (remove-hook 'romacs-agent-store-readable-hook #'romacs-agent--restore-when-readable)
+  (romacs-agent-restore-soon))
 
 (defun romacs-agent--restore-step ()
   "Load the next turn's sessions of a `romacs-agent-restore-soon'; the last
