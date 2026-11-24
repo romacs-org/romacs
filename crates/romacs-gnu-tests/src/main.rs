@@ -70,6 +70,7 @@ struct Args {
 }
 
 fn usage() -> ! {
+    // HOST(escape): stdout and stderr are sends another process reads
     eprintln!(
         "usage: romacs-gnu-ert --harness FILE --plan PLAN.json [--load-path DIR]... \
          [--preload FILE]... [--skip-test NAME]... [--probe EXPR]... \
@@ -172,6 +173,7 @@ fn retained_prefix_requires_exact_outer_failure() {
 }
 
 fn emit(event: Json) {
+    // HOST(escape): stdout and stderr are sends another process reads
     let mut out = std::io::stdout().lock();
     writeln!(out, "{event}").expect("stdout");
     out.flush().expect("stdout");
@@ -257,6 +259,7 @@ fn integer_of(vm: &mut Vm, source: &str) -> Result<usize, String> {
 /// stay ordered and are streamed even if the supervisor later kills a test.
 #[cfg(unix)]
 fn native_output_to_stdout() -> std::io::Result<()> {
+    // HOST(escape): stdout and stderr are sends another process reads
     rustix::stdio::dup2_stderr(std::io::stdout()).map_err(std::io::Error::from)
 }
 #[cfg(not(unix))]
@@ -426,6 +429,7 @@ fn evaluate() {
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok())
         .unwrap_or_else(|| {
+            // HOST(escape): stdout and stderr are sends another process reads
             eprintln!("romacs-gnu-ert: unreadable plan {}", args.plan.display());
             std::process::exit(2)
         });

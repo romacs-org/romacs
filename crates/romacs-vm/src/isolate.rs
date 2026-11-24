@@ -1069,6 +1069,7 @@ impl Vm {
         let served = self.eval_source("(romacs--isolate-serve)").map(|_| ());
         if crate::host::forked_child() {
             let shutdown = self.shutdown_background_processes();
+            // HOST(escape): stdout and stderr are sends another process reads
             if let Err(error) = served.as_ref().and(shutdown.as_ref()) { eprintln!("isolate worker: {error}"); }
             std::process::exit(i32::from(served.is_err() || shutdown.is_err()));
         }

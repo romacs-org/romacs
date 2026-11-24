@@ -154,6 +154,7 @@ pub fn configure(config: Config, compiling: Option<&Path>) {
         host::die_with_parent(parent);
         std::thread::spawn(|| {
             std::thread::sleep(std::time::Duration::from_secs(600));
+            // HOST(escape): stdout and stderr are sends another process reads
             eprintln!("romacs-compile: deadline passed");
             // A nested compile this process waits on keeps its record file
             // in this process's temporary directory (the store's tmp/, the
@@ -189,6 +190,7 @@ pub fn nested() -> bool {
 /// file's own word (`no-byte-compile') is no failure.
 fn say_failure(configured: &Configured, path: &Path, status: &store::Status) {
     if let store::Status::Error(reason) = status && !configured.nested {
+        // HOST(escape): stdout and stderr are sends another process reads
         eprintln!("romacs-compile: {}: {reason}", path.display());
     }
 }
@@ -666,10 +668,12 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
         let (status, units) = match walked {
             Ok(Ok(units)) => (store::Status::Compiled, units),
             Ok(Err(reason)) => {
+                // HOST(escape): stdout and stderr are sends another process reads
                 eprintln!("romacs-compile: {}: {reason}", source.display());
                 (store::Status::Source(reason), vec![])
             }
             Err(reason) => {
+                // HOST(escape): stdout and stderr are sends another process reads
                 eprintln!("romacs-compile: {}: {reason}", source.display());
                 (store::Status::Error(reason.to_string()), vec![])
             }
@@ -743,6 +747,7 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
             .filter_map(|s| s.index_if(7).map(|slot| self.symbol_names[slot - 1].clone()))
             .collect();
         if !not_inlined.is_empty() {
+            // HOST(escape): stdout and stderr are sends another process reads
             eprintln!("romacs-compile: {}: {}", source.display(), json!({"not-inlined": not_inlined}));
         }
         Ok(Ok(units))

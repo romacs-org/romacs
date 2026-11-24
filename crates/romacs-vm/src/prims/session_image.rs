@@ -61,12 +61,16 @@ fn publish(cx: &Leaf<'_>, path: &Path, head: &[u8], form: &[u8], buffers: &[Valu
     let parent = path.parent().unwrap_or(Path::new("."));
     let (temporary, mut file) = host::temp_file(&parent.join(".session-XXXXXX"))?;
     let written = (|| {
+        // HOST(escape): writes and syncs the session image file
         file.write_all(head)?;
+        // HOST(escape): writes and syncs the session image file
         file.write_all(form)?;
         for &buffer in buffers {
+            // HOST(escape): writes and syncs the session image file
             cx.with_buffer_text(buffer, |bytes, _| file.write_all(bytes))
                 .map_err(|_| std::io::Error::other("buffer killed while writing"))??;
         }
+        // HOST(escape): writes and syncs the session image file
         file.sync_all()?;
         host::rename(&temporary, path)?;
         host::sync_dir(parent)?;

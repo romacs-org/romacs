@@ -137,7 +137,7 @@ fn parse_path(value: Option<OsString>) -> Result<Option<PathBuf>, &'static str> 
 fn recorder() -> Option<&'static Recorder> {
     RECORDER
         .get_or_init(|| {
-            // HOST(std::env::var_os): romacs-vm depends on this crate, so it cannot call host.rs;
+            // HOST(std::env::var_os, pure): romacs-vm depends on this crate, so it cannot call host.rs;
             // GUI present trace behind ROMACS_PRESENT_TRACE, not reached by the batch VM
             let path = match parse_path(std::env::var_os("ROMACS_PRESENT_TRACE")) {
                 Ok(path) => path?,
@@ -157,7 +157,7 @@ fn recorder() -> Option<&'static Recorder> {
             let writer = match std::thread::Builder::new()
                 .name("romacs-present-trace".into())
                 .spawn(move || {
-                    // HOST(OpenOptions, std::fs): romacs-vm depends on this crate, so it cannot
+                    // HOST(OpenOptions, std::fs, acquisition): romacs-vm depends on this crate, so it cannot
                     // call host.rs; GUI present trace behind ROMACS_PRESENT_TRACE, not reached by
                     // the batch VM
                     let result = std::fs::OpenOptions::new()
@@ -206,7 +206,7 @@ fn clock_ns(clock: libc::clockid_t) -> Option<u64> {
         tv_nsec: 0,
     };
     // SAFETY: clock_gettime writes to this valid, initialized timespec.
-    // HOST(libc::clock): romacs-vm depends on this crate, so it cannot call host.rs; GUI present
+    // HOST(libc::clock, pure): romacs-vm depends on this crate, so it cannot call host.rs; GUI present
     // trace behind ROMACS_PRESENT_TRACE, not reached by the batch VM
     if unsafe { libc::clock_gettime(clock, &mut time) } != 0 {
         return None;
@@ -471,6 +471,7 @@ pub fn presented_draw(
 
 fn write_record(writer: &mut impl Write, record: &Record) -> io::Result<()> {
     serde_json::to_writer(&mut *writer, record)?;
+    // HOST(escape): writes the GUI present trace file
     writer.write_all(b"\n")
 }
 

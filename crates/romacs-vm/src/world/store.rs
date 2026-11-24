@@ -384,6 +384,7 @@ fn store_path(store: &Path) -> std::io::Result<PathBuf> {
 /// never through a symlink.
 fn write_marker(dir: &std::os::fd::OwnedFd) -> std::io::Result<()> {
     use std::io::Write;
+    // HOST(escape): the marker's bytes; the new file is open_store_file_at's acquisition
     host::open_store_file_at(dir.as_fd(), MARKER, host::StoreOpen::New)?.write_all(MARKER_TEXT.as_bytes())
 }
 
@@ -799,17 +800,20 @@ impl World {
                 // The family's other worlds are of this executable before it
                 // was rebuilt, which nothing restores: gone before the build.
                 if let Err(error) = world.prune_family_to_current() {
+                    // HOST(escape): stdout and stderr are sends another process reads
                     eprintln!("test world: prune failed: {error}");
                 }
                 let outcome = world.begin_build().map_err(|e| e.to_string())
                     .and_then(|()| world.build(|| build().map(|(vm, carry)| (vm, carry, Json::Null))));
                 if let Err(error) = &outcome {
+                    // HOST(escape): stdout and stderr are sends another process reads
                     eprintln!("test world: {error}");
                 }
                 host::exit_at_once(i32::from(outcome.is_err()))
             }
             Launch::Chain { reason } => {
                 // Said, so a test that needs its world can tell why it has none.
+                // HOST(escape): stdout and stderr are sends another process reads
                 eprintln!("test world: booting from source: {reason}");
                 None
             }
@@ -1081,6 +1085,7 @@ impl World {
     fn publish(&self, suffix: &str, bytes: &[u8]) -> std::io::Result<()> {
         use std::io::Write;
         let (temporary, mut file) = self.temporary(suffix)?;
+        // HOST(escape): writes a world store file
         file.write_all(bytes)?;
         read_only(&temporary)?;
         host::rename(&temporary, self.file(suffix))
@@ -1177,6 +1182,7 @@ impl World {
         vm.collect_compacting();
         let (temporary, file) = self.temporary(".rwi").map_err(|e| e.to_string())?;
         let placed = image::capture(vm, carry, &file, self.key).and_then(|len| {
+            // HOST(escape): forces a world store file's writes to disk: no inverse
             file.sync_all().map_err(|e| e.to_string())?;
             read_only(&temporary).map_err(|e| e.to_string())?;
             host::rename(&temporary, self.file(".rwi")).map_err(|e| e.to_string()).map(|()| len)

@@ -119,6 +119,7 @@ fn create(cx: &Leaf<'_>, path: &Path, identity: &[u8], force: bool) -> std::io::
     if !result.as_ref().is_err_and(|e| matches!(e.raw_os_error(), Some(libc::ENOSYS | libc::EPERM | libc::ENAMETOOLONG))) { return result; }
     let (nonce, mut file) = cx.filelock_create_nonce(path)?;
     let result = (|| {
+        // HOST(escape): writes a lock file's owner others read; L1b may make a fresh lock logged-inverse
         file.write_all(identity)?; file.set_permissions(std::fs::Permissions::from_mode(0o644))?;
         cx.fileio_close_output(file)?;
         if force { host::rename(&nonce, path) } else { host::hard_link(&nonce, path) }

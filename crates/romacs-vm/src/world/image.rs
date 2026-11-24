@@ -175,7 +175,7 @@ const TMPFS_MAGIC: u32 = 0x0102_1994;
 /// this build with ENOSPC instead, as any failed write does. On a disk
 /// the holes stay holes.
 fn whole_in_memory(file: &std::fs::File, len: usize) -> Result<(), String> {
-    // HOST(rustix::file): the type of filesystem of the image file the builder opened through host
+    // HOST(rustix::file, pure): the type of filesystem of the image file the builder opened through host
     let in_memory = rustix::fs::fstatfs(file).map_err(|e| format!("world image: {e}"))?.f_type;
     if u32::try_from(in_memory).ok() != Some(TMPFS_MAGIC) {
         return Ok(());

@@ -615,6 +615,7 @@ fn copy_staged(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
                 Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(e) => return Err(errno(cx, "Read error", &[file], e)),
             };
+            // HOST(escape): writes `write-region`'s bytes
             output.write_all(&buffer[..count]).map_err(|e| errno(cx, "Write error", &[newname], e))?;
         }
     }

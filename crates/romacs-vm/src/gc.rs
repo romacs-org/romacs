@@ -270,7 +270,7 @@ impl Lap {
     /// Charge the time since the last lap to PHASE of TIMES.
     pub(crate) fn lap(&mut self, times: &mut GcTimes, phase: Phase) {
         let Some(at) = self.0 else { return };
-        // HOST(Instant::now): a collection's phase clock (`romacs--gc-phases'), running only once
+        // HOST(Instant::now, pure): a collection's phase clock (`romacs--gc-phases'), running only once
         // `host::collection_clock' started it, which no builder does, its heap being the image
         let now = std::time::Instant::now();
         times.ns[phase as usize] += (now - at).as_nanos() as u64;
@@ -413,21 +413,21 @@ pub(crate) fn deferral(p: f64) -> f64 {
 
 impl Stress {
     pub(crate) fn from_env() -> Self {
-        // HOST(std::env::var): the collector's thread count for a test (ROMACS_GC_WORKERS): what a
+        // HOST(std::env::var, pure): the collector's thread count for a test (ROMACS_GC_WORKERS): what a
         // collection leaves is the same at any count; invisible to Lisp, read again on restore
         // (Stress::rearm)
         let every = std::env::var("ROMACS_GC_STRESS").ok().and_then(|n| n.parse().ok()).unwrap_or(0);
-        // HOST(std::env::var_os): the collector's in-place stress mode (ROMACS_GC_INPLACE): stress
+        // HOST(std::env::var_os, pure): the collector's in-place stress mode (ROMACS_GC_INPLACE): stress
         // collections free in place instead of moving; invisible to Lisp, read again on restore
         // (Stress::rearm)
         let verify = std::env::var_os("ROMACS_GC_VERIFY").is_some_and(|v| !v.is_empty() && v != "0");
-        // HOST(std::env::var): the collector's test mode (ROMACS_GC_STRESS): collections are
+        // HOST(std::env::var, pure): the collector's test mode (ROMACS_GC_STRESS): collections are
         // invisible to Lisp, so no world keys it, and a restored VM reads it again (Stress::rearm)
         let threads = std::env::var("ROMACS_GC_WORKERS").ok().and_then(|n| n.parse().ok()).unwrap_or(0);
-        // HOST(std::env::var_os): the collector's verify mode (ROMACS_GC_VERIFY): freed entries are
+        // HOST(std::env::var_os, pure): the collector's verify mode (ROMACS_GC_VERIFY): freed entries are
         // poisoned, never reused; invisible to Lisp, read again on restore (Stress::rearm)
         let inplace = std::env::var_os("ROMACS_GC_INPLACE").is_some_and(|v| !v.is_empty() && v != "0");
-        // HOST(std::env::var_os): whether automatic collections may be minors (ROMACS_GC_MINOR): a
+        // HOST(std::env::var_os, pure): whether automatic collections may be minors (ROMACS_GC_MINOR): a
         // minor frees only what nothing reaches, as a full does; invisible to Lisp, read again on
         // restore (Stress::rearm)
         let minor = std::env::var_os("ROMACS_GC_MINOR").is_none_or(|v| v != "0");
@@ -512,6 +512,7 @@ pub fn assert_no_retention_growth(
         report.sizes.push(n);
         report.objects.push(s.live_objects);
         report.bytes.push(s.live_bytes);
+        // HOST(escape): stdout and stderr are sends another process reads
         eprintln!(
             "retention size={n} collections={} objects={} bytes={} capacity={}",
             s.collections, s.live_objects, s.live_bytes, s.capacity_bytes
