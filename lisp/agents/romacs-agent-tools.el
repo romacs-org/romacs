@@ -2044,17 +2044,40 @@ once its running turn ends (`romacs-agent-renew-soon')."
                record)
       record)))
 
+(defun romacs-agent-tools--subtree (session)
+  "SESSION and the tasks it delegated, theirs too, all the way down, not
+yet cancelled: loaded ones by the index, unloaded ones by their rows when
+their supervisor still runs (loaded to be acted on); one whose
+supervisor is gone runs nothing."
+  (let ((todo (list session)) (found nil))
+    (while todo
+      (let ((at (pop todo)))
+        (unless (or (memq at found) (romacs-agent-cancelled at))
+          (push at found)
+          (setq todo (append (romacs-agent-children at)
+                             (delq nil (mapcar (lambda (row)
+                                                 (and (file-exists-p (romacs-agent--host-socket (car row)))
+                                                      (romacs-agent-load-session (car row))))
+                                               (romacs-agent-store-unloaded-rows (romacs-agent-id at))))
+                             todo)))))
+    (nreverse found)))
+
 (defun romacs-agent-tools--cancel (arguments)
+  "Cancel the task ARGUMENTS name and every task under it: all marked
+first, so none's end wakes a parent being cancelled, then each stopped."
   (romacs-mcp--instance arguments)
-  (let ((child (romacs-agent-tools--known (gethash "taskId" arguments))))
-    (romacs-agent-tools--own child (romacs-agent-tools--caller) "cancel it")
-    (setf (romacs-agent-cancelled child) t)
-    (romacs-agent--clear-queue child)
-    ;; A restarted server knows it was cancelled.
-    (with-temp-file (expand-file-name "cancelled" (romacs-agent-dir child)))
-    ;; An idle one has no end of a run to tell its views.
-    (romacs-agent--raise child (list :type 'status :text "cancelled"))
-    (romacs-agent-stop child)
+  (let* ((child (romacs-agent-tools--known (gethash "taskId" arguments)))
+         (tree (progn (romacs-agent-tools--own child (romacs-agent-tools--caller) "cancel it")
+                      (romacs-agent-tools--subtree child))))
+    (dolist (task tree)
+      (setf (romacs-agent-cancelled task) t)
+      (romacs-agent--clear-queue task)
+      ;; A restarted server knows it was cancelled.
+      (with-temp-file (expand-file-name "cancelled" (romacs-agent-dir task))))
+    (dolist (task tree)
+      ;; An idle one has no end of a run to tell its views.
+      (romacs-agent--raise task (list :type 'status :text "cancelled"))
+      (romacs-agent-stop task))
     (romacs-agent-tools--ack child)))
 
 (defun romacs-agent-tools--effort-option (instance)

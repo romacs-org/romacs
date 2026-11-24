@@ -163,6 +163,31 @@
         (when romacs-agent-ui--children-timer (cancel-timer romacs-agent-ui--children-timer))
         (delete-directory dir t)))))
 
+(ert-deftest romacs-agent-children-cancelling-a-coordinator-cancels-its-tree ()
+  ;; A coordinator's writers stop with it: nothing under a cancelled task
+  ;; goes on editing, and each knows it after a restart.
+  (romacs-agent-children-tests--with
+    (let* ((coordinator (child 'idle))
+           (writer (romacs-agent--make :id "wwwwwwww-0000-4000-8000-000000000000" :harness 'claude :state 'running
+                                       :options (list :parent (romacs-agent-id coordinator))))
+           (dirs (list (make-temp-file "romacs-children-" t) (make-temp-file "romacs-children-" t)))
+           (stopped nil))
+      (setf (romacs-agent-dir coordinator) (car dirs) (romacs-agent-dir writer) (cadr dirs))
+      (puthash (romacs-agent-id writer) writer romacs-agent--sessions)
+      (romacs-agent--index writer)
+      (unwind-protect
+          (cl-letf (((symbol-function 'romacs-mcp--instance) #'ignore)
+                    ((symbol-function 'romacs-agent-tools--caller) (lambda () (romacs-agent-id parent)))
+                    ((symbol-function 'romacs-agent-store-unloaded-rows) #'ignore)
+                    ((symbol-function 'romacs-agent-stop) (lambda (s &rest _) (push s stopped))))
+            (romacs-agent-tools--cancel (romacs-mcp--object "taskId" (romacs-agent-id coordinator)))
+            (should (romacs-agent-cancelled coordinator))
+            (should (romacs-agent-cancelled writer))
+            (should (memq writer stopped))
+            (should (file-exists-p (expand-file-name "cancelled" (cadr dirs)))))
+        (when romacs-agent-ui--children-timer (cancel-timer romacs-agent-ui--children-timer))
+        (mapc (lambda (dir) (delete-directory dir t)) dirs)))))
+
 (ert-deftest romacs-agent-children-a-cut-turn-ends-its-subagents ()
   (dolist (type '(done exit))
     (romacs-agent-children-tests--with
