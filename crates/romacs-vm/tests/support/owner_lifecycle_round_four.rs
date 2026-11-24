@@ -5,7 +5,6 @@ use std::path::PathBuf;
 
 #[test]
 fn shutdown_settles_reported_and_unreported_jobs_without_resubmitting() {
-    let marker = Markers::new();
     let mut master = Master::bare();
     master.run(
         "(setq isolate-zygotes t isolate-pool-size 4 isolate-kill-timeout 0.2)
@@ -15,7 +14,8 @@ fn shutdown_settles_reported_and_unreported_jobs_without_resubmitting() {
         m.eval("(integerp (nth 3 (isolate-zygote nil)))") == "t"
     });
     master.run(
-        "(setq zid (romacs--isolate-id (aref (gethash nil romacs--isolate-zygotes) 1))
+        "(setq z (gethash nil romacs--isolate-zygotes) spare (aref z 4)
+                      zid (romacs--isolate-id (aref z 1))
                       zpid (romacs--isolate-pid zid))
                 (romacs--isolate-signal zid 19)",
     );
@@ -24,15 +24,12 @@ fn shutdown_settles_reported_and_unreported_jobs_without_resubmitting() {
         "zygote stopped before replacement fork",
         |m| m.eval("(cdr (assq 'state (process-attributes zpid)))") == r#""T""#,
     );
-    master.run(&format!(
-        r#"(setq began (isolate-spawn '(lambda ()
-                       (write-region "" nil {} nil 'silent) (while t)))
-                 held (isolate-spawn 'identity 42)
-                 began-worker (isolate-future-isolate began)
-                 held-worker (isolate-future-isolate held))"#,
-        literal(&marker.ready())
-    ));
-    master.await_file(&marker.ready());
+    master.run(
+        "(setq began (isolate-spawn '(lambda () (while t)) :isolate spare)
+               held (isolate-spawn 'identity 42 :isolate (aref z 4))
+               began-worker (isolate-future-isolate began)
+               held-worker (isolate-future-isolate held))",
+    );
     assert_eq!(
         master.eval(
             "(list (integerp (romacs--isolate-pid (romacs--isolate-id began-worker)))
@@ -50,7 +47,7 @@ fn shutdown_settles_reported_and_unreported_jobs_without_resubmitting() {
                  (and worker (not (eq worker held-worker))))
                (mapcar (lambda (i) (aref i 10))
                        (delq nil (mapcar (lambda (i) (and (isolate-live-p i) i))
-                                         romacs--isolates))))"
+                                         (isolate-list)))))"
         ),
         "(t t nil nil)",
         "both futures settle, the held job retains its identity, and no worker is live"
@@ -80,7 +77,7 @@ fn quitting_sentinel_keeps_the_later_reaped_child_pending() {
                              (make-process :name "two" :command '("/bin/sh" "-c" "printf x")
                                            :connection-type 'pipe :noquery t))))
                  {REAP_BEFORE_DISPATCH}
-                 (let* ((ordered (process-list)) (first (car ordered)) (second (cadr ordered)))
+                 (let* ((ordered (process-list)) (first (car ordered)) (second (nth 1 ordered)))
                    (set-process-filter first (lambda (_ _) (isolate-send 'parent 'first-filter)))
                    (set-process-filter second (lambda (_ _) (isolate-send 'parent 'second-filter)))
                    (set-process-sentinel first (lambda (_ _) (isolate-send 'parent 'first-sentinel)
@@ -244,6 +241,12 @@ fn spent_pool_worker_is_retired_before_result_callback() {
 fn ready_output_runs_before_a_call_arriving_during_the_previous_call() {
     let mut master = Master::new();
     record_owner_events(&mut master);
+    // A must wake the idle worker from its native wait. That is the path
+    // whose post-wait snapshot can bypass the next output batch.
+    master.until(SETUP_TIMEOUT, "owner parked in its idle wait", |m| {
+        m.eval("(cdr (assq 'state (process-attributes (plist-get (owner-describe owner) :pid))))")
+            == r#""S""#
+    });
     master.run(&format!(
         r#"(setq a (owner-call owner '(lambda ()
                     (let ((children
