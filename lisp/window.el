@@ -9496,9 +9496,10 @@ currently selected window; otherwise it will be displayed in
 another window."
   (pop-to-buffer buffer display-buffer--same-window-action norecord))
 
-(defun read-buffer-to-switch (prompt)
+(defun read-buffer-to-switch (prompt &optional default)
   "Read the name of a buffer to switch to, prompting with PROMPT.
 Return the name of the buffer as a string.
+DEFAULT, if non-nil, supplies the default buffer.
 
 This function is intended for the `switch-to-buffer' family of
 commands since these need to omit the name of the current buffer
@@ -9516,7 +9517,7 @@ from the list of completions and default values."
               (setq-local icomplete-with-completion-tables
                           (cons rbts-completion-table
                                 icomplete-with-completion-tables))))
-      (read-buffer prompt (other-buffer (current-buffer))
+      (read-buffer prompt (or default (other-buffer (current-buffer)))
                    (confirm-nonexistent-file-or-buffer)))))
 
 (defun window-normalize-buffer-to-switch-to (buffer-or-name)
@@ -9592,6 +9593,46 @@ the buffer in the window specified by the rules from these variables."
   :group 'windows
   :version "27.1")
 
+(defun window--switch-to-buffer-force-same-window ()
+  "Handle interactive window dedication and return whether to switch in place."
+  (cond
+   ((window-minibuffer-p) nil)
+   ((not (eq (window-dedicated-p) t)) 'force-same-window)
+   ((pcase switch-to-buffer-in-dedicated-window
+      ('nil (user-error "Cannot switch buffers in a dedicated window"))
+      ('prompt
+       (if (y-or-n-p
+            (format "Window is dedicated to %s; undedicate it?"
+                    (window-buffer)))
+           (progn
+             (set-window-dedicated-p nil nil)
+             'force-same-window)
+         (user-error "Cannot switch buffers in a dedicated window")))
+      ('pop nil)
+      (_ (set-window-dedicated-p nil nil) 'force-same-window)))))
+
+(defun window--switch-to-buffer-interactive (&optional default-function)
+  "Read the interactive arguments for `switch-to-buffer'.
+Call DEFAULT-FUNCTION for the default buffer when supplied."
+  (let ((force (unless switch-to-buffer-obey-display-actions
+                 (window--switch-to-buffer-force-same-window))))
+    (list (read-buffer-to-switch "Switch to buffer: "
+                                 (and default-function (funcall default-function)))
+          nil force)))
+
+(defun window--switch-to-buffer-pop-p (force-same-window)
+  "Return non-nil if another buffer must be displayed in a different window.
+If FORCE-SAME-WINDOW is non-nil, signal an error in that case."
+  (cond
+   ((window-minibuffer-p)
+    (if force-same-window
+        (user-error "Cannot switch buffers in minibuffer window")
+      t))
+   ((eq (window-dedicated-p) t)
+    (if force-same-window
+        (user-error "Cannot switch buffers in a dedicated window")
+      t))))
+
 (defun switch-to-buffer (buffer-or-name &optional norecord force-same-window)
   "Display buffer BUFFER-OR-NAME in the selected window.
 
@@ -9644,27 +9685,12 @@ In either case, call `display-buffer-record-window' to avoid disrupting
 a sequence of `display-buffer' operations using this window.
 
 Return the buffer switched to."
-  (interactive
-   (let ((force-same-window
-          (unless switch-to-buffer-obey-display-actions
-            (cond
-             ((window-minibuffer-p) nil)
-             ((not (eq (window-dedicated-p) t)) 'force-same-window)
-             ((pcase switch-to-buffer-in-dedicated-window
-                ('nil (user-error
-                       "Cannot switch buffers in a dedicated window"))
-                ('prompt
-                 (if (y-or-n-p
-                      (format "Window is dedicated to %s; undedicate it?"
-                              (window-buffer)))
-                     (progn
-                       (set-window-dedicated-p nil nil)
-                       'force-same-window)
-                   (user-error
-                    "Cannot switch buffers in a dedicated window")))
-                ('pop nil)
-                (_ (set-window-dedicated-p nil nil) 'force-same-window)))))))
-     (list (read-buffer-to-switch "Switch to buffer: ") nil force-same-window)))
+  (interactive (window--switch-to-buffer-interactive))
+  (window--switch-to-buffer buffer-or-name norecord force-same-window))
+
+(defun window--switch-to-buffer (buffer-or-name norecord force-same-window)
+  "Switch to BUFFER-OR-NAME according to the selected window and display rules.
+NORECORD and FORCE-SAME-WINDOW are as in `switch-to-buffer'."
   (let ((buffer (window-normalize-buffer-to-switch-to buffer-or-name))
         (set-window-start-and-point (not switch-to-buffer-obey-display-actions)))
     (cond
@@ -9674,16 +9700,9 @@ Return the buffer switched to."
            ;; pop-to-buffer-same-window might decide to display
            ;; the same buffer in another window
            (not switch-to-buffer-obey-display-actions)))
-     ((and (window-minibuffer-p)
-           (not switch-to-buffer-obey-display-actions))
-      (if force-same-window
-          (user-error "Cannot switch buffers in minibuffer window")
-        (pop-to-buffer buffer norecord)))
-     ((and (eq (window-dedicated-p) t)
-           (not switch-to-buffer-obey-display-actions))
-      (if force-same-window
-          (user-error "Cannot switch buffers in a dedicated window")
-        (pop-to-buffer buffer norecord)))
+     ((and (not switch-to-buffer-obey-display-actions)
+           (window--switch-to-buffer-pop-p force-same-window))
+      (pop-to-buffer buffer norecord))
      (t
       (when switch-to-buffer-obey-display-actions
         (let* ((selected-window (selected-window))

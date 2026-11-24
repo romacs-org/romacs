@@ -7,25 +7,81 @@
 
 ;; Buffer selection for Romacs, in both regimes.  The workspace reads
 ;; buffer names with romacs-workspace-completion.el; --loadup with GNU's
-;; `read-buffer'.
+;; `read-buffer'.  Both retain a previous-buffer default and per-buffer
+;; point.  Window selection delegates to window.el when it is available.
 
 ;;; Code:
+(declare-function window--switch-to-buffer-interactive "window" (&optional default-function))
+(declare-function window--switch-to-buffer "window" (buffer-or-name norecord force-same-window))
+(declare-function pop-to-buffer-same-window "window" (buffer &optional norecord))
+(declare-function romacs-gui-split "romacs-startup" (horizontal &optional window))
+
 (defvar romacs-buffer--previous nil)
+(defvar switch-to-buffer-in-dedicated-window nil)
+
+(defun romacs-buffer--select (display target norecord &rest args)
+  "Call DISPLAY on TARGET with NORECORD and ARGS.
+NORECORD preserves the previous-buffer default.  Keep TARGET's buffer point
+if it appears in the selected window."
+  (let* ((old (window-buffer))
+         (buffer (get-buffer target))
+         (position (and buffer (with-current-buffer buffer (point-marker)))))
+    (unwind-protect
+        (let ((result (apply display target norecord args)))
+          (when (eq result (window-buffer))
+            (unless (or norecord (eq old result))
+              (setq romacs-buffer--previous old))
+            (when (and position (eq (marker-buffer position) result))
+              (set-window-point (selected-window) position)))
+          result)
+      (when position
+        (set-marker position nil)))))
+
+(defun romacs-buffer--workspace-window (buffer force-same-window)
+  "Find a workspace window for BUFFER, splitting only if necessary.
+Signal an error when FORCE-SAME-WINDOW requires an unavailable window."
+  (let ((window (selected-window)))
+    (cond
+     ((eq buffer (window-buffer window)) window)
+     ((not (or (window-minibuffer-p window) (eq (window-dedicated-p window) t)))
+      window)
+     (force-same-window
+      (signal 'user-error
+              (list (if (window-minibuffer-p window)
+                        "Cannot switch buffers in minibuffer window"
+                      "Cannot switch buffers in a dedicated window"))))
+     (t
+      (let* ((ordinary (window-list nil 'never))
+             (windows ordinary)
+            (available nil))
+        (while (and windows (not available))
+          (let ((candidate (car windows)))
+            (unless (window-dedicated-p candidate)
+              (setq available candidate)))
+          (setq windows (cdr windows)))
+        (or (get-buffer-window buffer)
+            available
+            (romacs-gui-split nil (if (window-minibuffer-p window)
+                                      (car ordinary) window))))))))
+
+(defun romacs-buffer--workspace-display (buffer norecord &optional force-same-window)
+  "Display BUFFER in the workspace, respecting NORECORD and FORCE-SAME-WINDOW."
+  (let ((window (romacs-buffer--workspace-window buffer force-same-window)))
+    (unless (eq (window-buffer window) buffer)
+      (set-window-buffer window buffer))
+    (select-window window norecord)
+    (set-buffer buffer)))
 
 (defun romacs-select-buffer (buffer &optional norecord)
-  "Display live BUFFER in the selected window, retaining each buffer's point.
-Shared by interactive and programmatic file visits and buffer switches."
+  "Display live BUFFER, preferring the selected window and keeping its point.
+NORECORD preserves the previous-buffer default and buffer list ordering."
   (unless (buffer-live-p buffer)
     (signal 'error (list "Cannot select a dead buffer" buffer)))
-  (let ((old (window-buffer (selected-window))))
-    (unless (or norecord (eq old buffer)) (setq romacs-buffer--previous old))
-    (set-window-buffer (selected-window) buffer)
-    ;; window.el `switch-to-buffer': selecting the selected window records
-    ;; BUFFER first in `buffer-list' (record_buffer).
-    (unless norecord (select-window (selected-window)))
-    (set-buffer buffer)
-    (set-window-point (selected-window) (point))
-    buffer))
+  (romacs-buffer--select
+   (if (fboundp 'pop-to-buffer-same-window)
+       #'pop-to-buffer-same-window
+     #'romacs-buffer--workspace-display)
+   buffer norecord))
 
 (defun romacs-display-buffer-paired (buffer anchor paired fraction)
   "Display BUFFER below ANCHOR without selecting its window.
@@ -77,19 +133,41 @@ The caller validates its buffer ownership before calling."
         (setq buffers (cdr buffers)))
       (or found (current-buffer)))))
 
+(defun romacs-buffer--workspace-switch-force ()
+  "Handle interactive dedication before reading the workspace target."
+  (cond
+   ((window-minibuffer-p) nil)
+   ((not (eq (window-dedicated-p) t)) t)
+   ((eq switch-to-buffer-in-dedicated-window 'pop) nil)
+   ((or (eq switch-to-buffer-in-dedicated-window t)
+        (and (eq switch-to-buffer-in-dedicated-window 'prompt)
+             (memq (read-char "Undedicate selected window? (y or n) ") '(?y ?Y))))
+    (set-window-dedicated-p nil nil)
+    t)
+   (t (signal 'user-error '("Cannot switch buffers in a dedicated window")))))
+
+(defun romacs-buffer--switch-arguments ()
+  "Read arguments for the interactive buffer switch."
+  (if (fboundp 'window--switch-to-buffer-interactive)
+      (window--switch-to-buffer-interactive #'romacs-buffer-default)
+    (let ((force (romacs-buffer--workspace-switch-force)))
+      (list (read-buffer "Switch to buffer: " (buffer-name (romacs-buffer-default)))
+            nil force))))
+
 (defun switch-to-buffer (buffer-or-name &optional norecord force-same-window)
-  "Display BUFFER-OR-NAME in the selected window, creating a named buffer.
-Romacs's same-window GNU-conventional switch API.  Nil selects the previous
-live buffer.  NORECORD preserves the previous-buffer default.  This slice
-always uses the selected window, so FORCE-SAME-WINDOW is accepted."
-  (interactive
-   (let ((default (buffer-name (romacs-buffer-default))))
-     (list (read-buffer "Switch to buffer: " default))))
-  (let ((buffer (cond ((null buffer-or-name) (romacs-buffer-default))
-                      ((bufferp buffer-or-name) buffer-or-name)
-                      ((stringp buffer-or-name)
-                       (when (= (length buffer-or-name) 0) (signal 'error '("Empty buffer name")))
-                       (get-buffer-create buffer-or-name))
-                      (t (signal 'wrong-type-argument (list 'buffer-or-string-p buffer-or-name))))))
-    (romacs-select-buffer buffer norecord)))
+  "Display BUFFER-OR-NAME, creating a named buffer if needed.
+Nil selects the previous live buffer.  NORECORD preserves the previous-buffer
+default.  If FORCE-SAME-WINDOW is non-nil, require the selected window unless
+display actions apply.  Interactively, respect
+`switch-to-buffer-in-dedicated-window'."
+  (interactive (romacs-buffer--switch-arguments))
+  (let ((target (or buffer-or-name (romacs-buffer-default))))
+    (if (fboundp 'window--switch-to-buffer)
+        (romacs-buffer--select #'window--switch-to-buffer target
+                               norecord force-same-window)
+      (let ((buffer (if (bufferp target) target (get-buffer-create target))))
+        (unless (buffer-live-p buffer)
+          (signal 'error (list "Cannot select a dead buffer" buffer)))
+        (romacs-buffer--select #'romacs-buffer--workspace-display buffer
+                               norecord force-same-window)))))
 ;;; romacs-buffer-switch.el ends here

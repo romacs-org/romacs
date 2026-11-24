@@ -292,6 +292,71 @@ def check_scroll(proc, keys, control, wait_visible, capture, trace, work, timeou
     report.update(status="PASS", minimal_reveal=True, eof_stable=True, clean_exit=True)
 
 
+DEDICATED_INIT = """
+(setq switch-to-buffer-in-dedicated-window 'pop)
+(defvar dedicated-origin nil)
+(defvar dedicated-neighbor nil)
+(defun dedicated-reset ()
+  (interactive)
+  (when (window-live-p dedicated-origin)
+    (select-window dedicated-origin))
+  (romacs-gui-delete-other-windows)
+  (setq dedicated-origin (selected-window))
+  (set-window-dedicated-p dedicated-origin nil)
+  (set-window-buffer dedicated-origin (get-buffer-create "dedicated-source"))
+  (set-buffer (window-buffer dedicated-origin))
+  (erase-buffer)
+  (insert "Dedicated source\n")
+  (set-window-dedicated-p dedicated-origin t)
+  (setq dedicated-neighbor (romacs-gui-split-below))
+  (set-window-buffer dedicated-neighbor (get-buffer-create "dedicated-neighbor"))
+  (set-window-dedicated-p dedicated-neighbor 'weak))
+(defun dedicated-check ()
+  (interactive)
+  (message (if (and (not (eq (selected-window) dedicated-origin))
+                    (not (eq (selected-window) dedicated-neighbor))
+                    (eq (window-dedicated-p dedicated-origin) t)
+                    (eq (window-dedicated-p dedicated-neighbor) 'weak)
+                    (equal (buffer-name (window-buffer dedicated-origin)) "dedicated-source")
+                    (equal (buffer-name (window-buffer dedicated-neighbor)) "dedicated-neighbor"))
+               "Dedicated panes preserved" "Dedicated panes check failed")))
+(define-key global-map [f7] #'dedicated-reset)
+(define-key global-map [f8] #'dedicated-check)
+(with-current-buffer (get-buffer-create "dedicated-target")
+  (insert "Dedicated switch destination\n"))
+(with-current-buffer (get-buffer-create "dedicated-neighbor")
+  (insert "Dedicated neighbor\n"))
+"""
+
+
+def check_dedicated(keys, control, extended, wait_visible, capture, report):
+    """Visit a file, directory and buffer while preserving dedicated panes."""
+    failures = []
+    for name, open_prompt, prompt, argument, destination in (
+        ("file", lambda: (control("x"), control("f")), "Find file:", "original.txt",
+         "Original sentinel"),
+        ("dired", lambda: extended("dired"), "Dired (directory):", "dir",
+         "Dired destination"),
+        ("switch", lambda: (control("x"), keys("b")), "Switch to buffer",
+         "dedicated-target", "Dedicated switch destination"),
+    ):
+        try:
+            keys("-k", "F7")
+            wait_visible("Dedicated source")
+            wait_visible("Dedicated neighbor")
+            open_prompt()
+            wait_visible(prompt)
+            keys(argument, "-k", "Return")
+            wait_visible(destination)
+            keys("-k", "F8")
+            wait_visible("Dedicated panes preserved")
+            capture("dedicated-" + name)
+        except (AssertionError, RuntimeError, TimeoutError) as error:
+            failures.append(f"{name}: {error}")
+    assert not failures, failures
+    report.update(status="PASS", dedicated_visits=3)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", required=True, type=Path)
@@ -301,6 +366,7 @@ def main():
     parser.add_argument("--extended-commands", action="store_true")
     parser.add_argument("--scroll", action="store_true")
     parser.add_argument("--dired", action="store_true")
+    parser.add_argument("--dedicated", action="store_true")
     parser.add_argument("--width", type=int, default=1600)
     parser.add_argument("--height", type=int, default=1000)
     parser.add_argument("--font")
@@ -313,6 +379,9 @@ def main():
         work = s.work
         (work / "original.txt").write_text("Original sentinel\nsecond line\n")
         (work / "completion λ.txt").write_text("Completion sentinel λ\n")
+        if args.dedicated:
+            (work / "dir").mkdir()
+            (work / "dir" / "Dired destination").touch()
         if args.scroll:
             report["scroll_source"] = '\n'.join(f"ROW {i:03d} λ" for i in range(1, 151))
             (work / "scroll.txt").write_text(report["scroll_source"])
@@ -326,7 +395,9 @@ def main():
 
     font = {"ROMACS_GUI_FONT": args.font, "ROMACS_GUI_FONT_SIZE": str(args.font_size)} if args.font else {}
     try:
-        with live.session(args.binary, args.output, prefix="find-file-live-", args=("--trace-scene",), env=font,
+        with live.session(args.binary, args.output, prefix="find-file-live-",
+                          args=("--no-gnu-lisp", "--trace-scene"), env=font,
+                          init=DEDICATED_INIT if args.dedicated else None,
                           size=f"{args.width}x{args.height}", prepare=prepare) as s:
             proc, env, work, stderr_path = s.process, s.env, s.work, s.log
             original = work / "original.txt"
@@ -376,6 +447,9 @@ def main():
                     report["steps"].append({"name": name, "rows": current_rows(trace())})
 
                 fio.wait(lambda: '"ready":true' in trace(), args.timeout, "native GUI ready", proc)
+                if args.dedicated:
+                    check_dedicated(keys, control, extended, wait_visible, capture, report)
+                    return
                 if args.scroll:
                     check_scroll(proc, keys, control, wait_visible, capture, trace,
                                  work, args.timeout, report)
