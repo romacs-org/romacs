@@ -176,7 +176,8 @@ parent, wake rule, role and worktree carry over.  A task is one task
 still: SESSION's harness stops, its chat kept as history, and its id
 names the new session to every task action (its :handed-to).  Return
 the new session."
-  (let* ((from (mapconcat #'identity (delq nil (list (romacs-agent-provider session)
+  (let* ((options-before (romacs-agent-options session))
+         (from (mapconcat #'identity (delq nil (list (romacs-agent-provider session)
                                                      (or (romacs-agent-model session)
                                                          (plist-get (romacs-agent-options session) :model))))
                           " · "))
@@ -189,10 +190,29 @@ the new session."
                                                             when (plist-get (romacs-agent-options session) key)
                                                             append (list key (plist-get (romacs-agent-options session) key)))))))
     (when (and (romacs-agent-p new) (plist-get (romacs-agent-options session) :parent))
-      (romacs-agent--set-options session (plist-put (copy-sequence (romacs-agent-options session))
+      ;; The tasks it delegated are the new session's: their wakes, their
+      ;; questions, cancelling and listing all reach it by their parent.
+      (romacs-agent-handoff--adopt session new)
+      ;; The old one keeps its chat as history, no task of its parent's
+      ;; any more; its id still names the new one (:handed-to).
+      (romacs-agent--set-options session (plist-put (romacs-agent--without (romacs-agent-options session) '(:parent))
                                                     :handed-to (romacs-agent-id new)))
+      (romacs-agent--unindex-parent session (plist-get options-before :parent))
       (romacs-agent-stop session))
     new))
+
+(declare-function romacs-agent-store-unloaded-rows "romacs-agent-store" (&optional parent))
+
+(defun romacs-agent-handoff--adopt (old new)
+  "Make the tasks OLD delegated NEW's: loaded ones and those left as rows,
+their parent and its index moved."
+  (let ((old-id (romacs-agent-id old)) (new-id (romacs-agent-id new)))
+    (dolist (child (append (romacs-agent-children old)
+                           (delq nil (mapcar (lambda (row) (romacs-agent-load-session (car row)))
+                                             (romacs-agent-store-unloaded-rows old-id)))))
+      (romacs-agent--unindex-parent child old-id)
+      (romacs-agent--set-options child (plist-put (copy-sequence (romacs-agent-options child)) :parent new-id))
+      (romacs-agent--index child))))
 
 (provide 'romacs-agent-handoff)
 ;;; romacs-agent-handoff.el ends here

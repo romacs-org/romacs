@@ -7041,12 +7041,16 @@ once, and loads on once its kept state is written."
            (signal (car err) (cdr err))))
         session))))
 
+(defun romacs-agent--unindex-parent (session parent)
+  "Take SESSION out of PARENT's children in the index."
+  (when parent
+    (puthash parent (delq session (gethash parent romacs-agent--children)) romacs-agent--children)))
+
 (defun romacs-agent--unpublish (session)
   "Forget SESSION, whose load failed: out of the registry and its indexes."
   (let ((id (romacs-agent-id session)) (options (romacs-agent-options session)))
     (when (eq (gethash id romacs-agent--sessions) session) (remhash id romacs-agent--sessions))
-    (when-let* ((parent (plist-get options :parent)))
-      (puthash parent (delq session (gethash parent romacs-agent--children)) romacs-agent--children))
+    (romacs-agent--unindex-parent session (plist-get options :parent))
     (when-let* ((request (plist-get options :request))
                 (key (cons (plist-get options :parent) request))
                 ((equal (gethash key romacs-agent--requests) id)))

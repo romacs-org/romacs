@@ -387,11 +387,9 @@ yet, goes with it when given.  The whole record is romacs_task_status's."
 
 (defun romacs-agent-tools--listed-p (summary caller all)
   "Whether the task SUMMARY says is listed for CALLER, including other
-delegated tasks with ALL.  One handed to another harness is not: its
-successor is the task."
+delegated tasks with ALL."
   (let ((parent (romacs-agent-summary-parent summary)))
-    (and (not (romacs-agent-summary-handed-to summary))
-         (or (equal parent caller) (and all parent)))))
+    (or (equal parent caller) (and all parent))))
 
 (defun romacs-agent-tools--visible-prefix (prefix caller)
   "Return stored ids with PREFIX that CALLER can see in the full task list."
