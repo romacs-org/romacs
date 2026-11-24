@@ -2153,13 +2153,20 @@ the child START starts in it, whether or not anyone still waits."
          cwd (lambda (made)
                (remhash key romacs-agent-tools--making)
                (setcar cell
-                       (if (plist-get made :error) made
+                       (cond
+                        ((plist-get made :error) made)
+                        ;; Its parent cancelled meanwhile: no writer starts under it.
+                        ((when-let* ((parent (and (car key) (romacs-agent-loaded (car key)))))
+                           (romacs-agent-cancelled parent))
+                         (list :error (format "Worktree %s (branch %s) was made, but the task that asked for it was cancelled"
+                                              (plist-get made :path) (plist-get made :branch))))
+                        (t
                          (condition-case err
                              (list :child (funcall start (plist-get made :cwd) :worktree (plist-get made :path)
                                                    :branch (plist-get made :branch)))
                            (error (list :error (format "Worktree %s (branch %s) was made, but the child did not start: %s"
                                                        (plist-get made :path) (plist-get made :branch)
-                                                       (error-message-string err)))))))))
+                                                       (error-message-string err))))))))))
         cell)))
 
 (defun romacs-agent-tools--isolated (cell answer)
@@ -2196,19 +2203,23 @@ once its running turn ends (`romacs-agent-renew-soon')."
 
 (defun romacs-agent-tools--subtree (session)
   "SESSION and the tasks it delegated, theirs too, all the way down, not
-yet cancelled: loaded ones by the index, unloaded ones by their rows when
-their supervisor still runs (loaded to be acted on); one whose
-supervisor is gone runs nothing."
-  (let ((todo (list session)) (found nil))
+yet cancelled.  The lineage is walked whatever each one's state: a task
+may still run under a coordinator whose own harness ended.  Loaded ones
+by the index, unloaded ones by their rows, loaded to be acted on only
+when their supervisor still runs: one whose supervisor is gone runs
+nothing."
+  (let ((todo (list (romacs-agent-id session))) (seen nil) (found nil))
     (while todo
-      (let ((at (pop todo)))
-        (unless (or (memq at found) (romacs-agent-cancelled at))
-          (push at found)
-          (setq todo (append (romacs-agent-children at)
-                             (delq nil (mapcar (lambda (row)
-                                                 (and (file-exists-p (romacs-agent--host-socket (car row)))
-                                                      (romacs-agent-load-session (car row))))
-                                               (romacs-agent-store-unloaded-rows (romacs-agent-id at))))
+      (let ((id (pop todo)))
+        (unless (member id seen)
+          (push id seen)
+          (when-let* ((at (if (equal id (romacs-agent-id session)) session
+                            (or (romacs-agent-loaded id)
+                                (and (file-exists-p (romacs-agent--host-socket id)) (romacs-agent-load-session id)))))
+                      ((not (romacs-agent-cancelled at))))
+            (push at found))
+          (setq todo (append (mapcar #'romacs-agent-id (gethash id romacs-agent--children))
+                             (mapcar #'car (romacs-agent-store-unloaded-rows id))
                              todo)))))
     (nreverse found)))
 

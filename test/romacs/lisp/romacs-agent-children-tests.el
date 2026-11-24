@@ -183,6 +183,18 @@
             (romacs-agent-tools--cancel (romacs-mcp--object "taskId" (romacs-agent-id coordinator)))
             (should (romacs-agent-cancelled coordinator))
             (should (romacs-agent-cancelled writer))
+            ;; Under a coordinator left unloaded with no supervisor (after a
+            ;; restart), its writer still running is reached by the rows.
+            (let ((late (romacs-agent--make :id "llllllll-0000-4000-8000-000000000000" :harness 'claude :state 'running
+                                            :dir (car dirs) :options '(:parent "gone-coordinator"))))
+              (puthash (romacs-agent-id late) late romacs-agent--sessions)
+              (cl-letf (((symbol-function 'romacs-agent-store-unloaded-rows)
+                         (lambda (id) (and (equal id (romacs-agent-id coordinator)) '(("gone-coordinator")))))
+                        ((symbol-function 'romacs-agent-loaded)
+                         (lambda (id) (and (not (equal id "gone-coordinator")) (gethash id romacs-agent--sessions)))))
+                (romacs-agent--index late)
+                (setf (romacs-agent-cancelled coordinator) nil)
+                (should (memq late (romacs-agent-tools--subtree coordinator)))))
             (should (memq writer stopped))
             (should (file-exists-p (expand-file-name "cancelled" (cadr dirs)))))
         (when romacs-agent-ui--children-timer (cancel-timer romacs-agent-ui--children-timer))
