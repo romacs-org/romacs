@@ -290,6 +290,39 @@ fn sqlite_interrupts_a_long_statement() {
     reaches("sqlite-next", &setup, "(list set)", "(and (null (sqlite-next set)) (null (sqlite-more-p set)))");
 }
 
+#[test]
+fn sqlite_quits_before_loading_an_extension() {
+    let (mut vm, signal) = busy_vm();
+    eval(&mut vm, "(setq db (sqlite-open))");
+    let path = std::env::temp_dir().join(format!("romacs-missing-extension-{}", std::process::id())).join("rot13.so");
+    let call = prepare(&mut vm, "sqlite-load-extension", &format!("(list db {:?})", path.to_str().unwrap()));
+    assert!(signal.interrupt());
+    let outcome = invoke(&mut vm, call);
+    assert!(quit_signalled(&mut vm, &outcome), "quit before entering the extension loader");
+    assert!(!signal.due());
+}
+
+#[test]
+fn sqlite_extension_cancel_reverts_the_loading_flag() {
+    let (mut vm, _) = busy_vm();
+    let db = eval(&mut vm, "(setq db (sqlite-open))");
+    let conn = Leaf::new(&mut vm).sqlite_connection_of(db).unwrap_or_else(|_| panic!("open connection"));
+    let path = std::env::temp_dir().join(format!("romacs-missing-extension-{}", std::process::id())).join("rot13.so");
+    let args = format!("(list db {:?})", path.to_str().unwrap());
+    let call = prepare(&mut vm, "sqlite-load-extension", &args);
+    assert!(matches!(invoke(&mut vm, call), Ok(Value::NIL)), "a missing extension fails normally");
+    assert!(!conn.extension_loading_enabled(), "a normal load attempt leaves loading disabled");
+
+    for enabled in [false, true] {
+        conn.set_extension_loading_for_test(enabled);
+        let call = prepare(&mut vm, "sqlite-load-extension", &args);
+        let (outcome, polls) = crate::quit::query_polls::count_once(2, || invoke(&mut vm, call));
+        assert_eq!(conn.extension_loading_enabled(), enabled, "a canceled load restores the prior flag");
+        assert_eq!(polls, 2, "the loader checks quit after enabling extension loading");
+        assert!(outcome.is_err(), "the second check prevents entering the loader");
+    }
+}
+
 /// sqlite-select polls between rows only a statement that writes nothing:
 /// SQLite says which, once the statement is prepared.
 #[test]
