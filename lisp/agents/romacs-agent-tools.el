@@ -1653,13 +1653,23 @@ unloaded as their rows have them."
   (romacs-mcp--instance arguments)
   (let* ((caller (romacs-agent-tools--caller))
          (all (eq (gethash "all" arguments) t))
+         (limit (max 1 (min 200 (or (gethash "limit" arguments) romacs-agent-tools--list-page))))
+         (offset (max 0 (or (gethash "offset" arguments) 0)))
          (tasks (cl-remove-if-not (lambda (summary) (romacs-agent-tools--listed-p summary caller all))
-                                  (romacs-agent-tools--listing))))
+                                  (romacs-agent-tools--listing)))
+         ;; Stable: those as recent stay in the listing's order.
+         (sorted (sort tasks (lambda (a b) (> (or (romacs-agent-summary-last-time a) 0)
+                                              (or (romacs-agent-summary-last-time b) 0)))))
+         (total (length sorted))
+         ;; Rows made for the page alone: a long history stays one answer.
+         (page (seq-take (nthcdr offset sorted) limit)))
     (romacs-mcp--object
-     "tasks" (vconcat (mapcar #'romacs-agent-tools--row
-                              ;; Stable: those as recent stay in the listing's order.
-                              (sort tasks (lambda (a b) (> (or (romacs-agent-summary-last-time a) 0)
-                                                           (or (romacs-agent-summary-last-time b) 0)))))))))
+     "tasks" (vconcat (mapcar #'romacs-agent-tools--row page))
+     "total" total
+     "nextOffset" (if (< (+ offset limit) total) (+ offset limit) :null))))
+
+(defconst romacs-agent-tools--list-page 50
+  "The rows romacs_task_list answers by default: a page, not every task.")
 
 (defun romacs-agent-tools--listing ()
   "Every session's summary in the order the task list takes them before
@@ -2610,9 +2620,10 @@ Answers the reply's messageId and the sender's short record, as romacs_task_send
  "romacs_task_list"
  "The tasks you delegated (with all, every session's), most recently active first: each task's record with the \
 first 300 characters of its result and resultChars, its whole length. They are kept on disk, so a restarted Romacs \
-or a lead that lost its context finds them again. Read one whole with romacs_task_status; talk to one with \
+or a lead that lost its context finds them again. A page at a time: limit rows (default 50, at most 200) from offset; \
+total counts them all and nextOffset reads on. Read one whole with romacs_task_status; talk to one with \
 romacs_task_send."
- (romacs-mcp--schema '(("instance" . "string") ("all" . "boolean")) nil)
+ (romacs-mcp--schema '(("instance" . "string") ("all" . "boolean") ("limit" . "integer") ("offset" . "integer")) nil)
  #'romacs-agent-tools--list
  (romacs-mcp--object "readOnlyHint" t))
 

@@ -217,9 +217,11 @@
     (ert-info ((format "all=%S" (car case)))
       (should
        (equal (romacs-agent-tools-summary-tests--call "romacs_task_list" "all" (or (car case) :false))
-              (list (cons "tasks" (vconcat (mapcar (lambda (number)
+              (list (cons "nextOffset" :null)
+                    (cons "tasks" (vconcat (mapcar (lambda (number)
                                                     (romacs-agent-tools-summary-tests--gold number t))
-                                                  (cdr case)))))))))
+                                                  (cdr case))))
+                    (cons "total" (length (cdr case))))))))
   (should-not (gethash (romacs-agent-tools-summary-tests--id 9) romacs-agent--sessions)))
 
 (defun romacs-agent-tools-summary-tests--wake-gold ()
