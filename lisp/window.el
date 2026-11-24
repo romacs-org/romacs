@@ -2347,6 +2347,7 @@ window even if it isn't active.  MINIBUF nil or omitted means
 to return the minibuffer window if and only if it is currently active.
 MINIBUF neither nil nor t means never return the minibuffer window.
 However, if WRAP is non-nil, always act as if MINIBUF were nil.
+An inactive minibuffer hosted in a Romacs child frame is never a candidate.
 
 Return nil if no suitable window can be found."
   (setq window (window-normalize-window window t))
@@ -2462,7 +2463,12 @@ Return nil if no suitable window can be found."
 	   (setq best-edge-2 w-top)
 	   (setq best-diff-2 best-diff-2-new)
 	   (setq best-2 w)))))
-     frame nil minibuf)
+     frame nil
+     (unless (and (eq minibuf t)
+                  (fboundp 'romacs--minibuffer-host)
+                  (not (minibuffer-window-active-p (minibuffer-window frame)))
+                  (romacs--minibuffer-host frame))
+       minibuf))
     (or best best-2)))
 
 (defun get-window-with-predicate (predicate &optional minibuf all-frames default)

@@ -5,8 +5,7 @@
 //! and minibuf.c `active-minibuffer-window`.
 //!
 //! Tier: T1 leaves over `Leaf::windows`, which owns every read and write of
-//! the window tree, except `run-window-scroll-functions`, which is T2: it runs
-//! `window-scroll-functions` (Lisp) with one `Step::Call`. Nothing here
+//! the window tree. T2 bodies run Lisp through `Step::Call`. Nothing here
 //! collects; every Value a body returns is rooted in a window, a slot, or a
 //! fresh allocation.
 use super::*;
@@ -122,9 +121,48 @@ fn window_list_1(cx; optional window: Value, minibuf: Value, all_frames: Value) 
 }}
 
 defsubr! { name = "delete-other-windows-internal", gnu = "window.c:3467", effect = Global,
-fn delete_other_windows_internal(cx; optional window: Value, root: Value) {
-    cx.windows().delete_other_windows_internal(window, root)
+fn delete_other_windows_internal(cx; optional window: Value, root: Value) -> Step {
+    let (window, root) = cx.windows().delete_other_windows_target(window, root)?;
+    if window == root {
+        return Ok(Step::Done(Value::NIL));
+    }
+    let selected = cx.windows().select_in_subtree(window)?;
+    let resize = cx.intern("window--resize-root-window");
+    if window == selected || !cx.fboundp(resize) {
+        return cx.windows().keep_window_subtree(window, root, false).map(Step::Done);
+    }
+    expand_window_subtree(cx, window, root, selected, Value::NIL, Value::NIL, Value::NIL)
 }}
+
+fn expand_window_subtree(cx: &mut Leaf<'_>, window: Value, root: Value, selected: Value, axis: Value, ignore: Value, heights: Value) -> Next {
+    let delta = cx.windows().subtree_expansion(window, root, axis != Value::NIL)?;
+    Ok(Step::Call {
+        f: cx.intern("window--resize-root-window"),
+        args: vec![window, delta, axis, ignore, Value::TRUE],
+        then: apply_window_subtree_expansion,
+        saved: vec![window, root, selected, axis, ignore, heights],
+    })
+}
+
+fn apply_window_subtree_expansion(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    let &[window, root, selected, axis, ignore, heights] = saved else {
+        unreachable!("window resize continuation saves six values")
+    };
+    if cx.windows().subtree_expansion_prepared(window, root, axis != Value::NIL)? {
+        if axis == Value::NIL {
+            let sizes = cx.windows().subtree_prepared_sizes(window)?;
+            let heights = cx.vector_from(sizes);
+            return expand_window_subtree(cx, window, root, selected, Value::TRUE, Value::NIL, heights);
+        }
+        let heights = cx.vector_values(heights)?;
+        cx.windows().keep_resized_subtree(window, root, &heights).map(Step::Done)
+    } else if ignore == Value::NIL {
+        expand_window_subtree(cx, window, root, selected, axis, Value::TRUE, heights)
+    } else {
+        cx.windows().delete_other_windows_target(selected, root)?;
+        cx.windows().keep_window_subtree(selected, root, false).map(Step::Done)
+    }
+}
 
 defsubr! { name = "run-window-scroll-functions", gnu = "window.c:3852", effect = Global,
 fn run_window_scroll_functions(cx; optional window: Value) -> Step {

@@ -611,6 +611,16 @@ impl Vm {
         }
         Ok(())
     }
+    fn apply_prepared_size(&mut self, root: Value, horizontal: bool, size: u32, edge: u32) -> Result<bool> {
+        if !self.prepared_size_valid(root, horizontal, size)? {
+            return Ok(false);
+        }
+        self.apply_prepared(root, horizontal, edge)?;
+        Ok(true)
+    }
+    fn prepared_size_valid(&self, root: Value, horizontal: bool, size: u32) -> Result<bool> {
+        Ok(self.window(root)?.new_pixel == size && self.prepared_check(root, horizontal, Value::NIL)?)
+    }
     fn replace_tree_node(&mut self, old: Value, new: Value) -> Result<()> {
         let parent = self.window(old)?.parent;
         if parent == Value::NIL {
@@ -1406,8 +1416,8 @@ impl Vm {
                 _ => return Ok(()),
             }
             let root = self.root_window_of_id(frame)?;
-            if self.window(root)?.new_pixel == size && self.prepared_check(root, horizontal, Value::NIL)? {
-                return self.apply_prepared(root, horizontal, edge);
+            if self.apply_prepared_size(root, horizontal, size, edge)? {
+                break;
             }
         }
         Ok(())
@@ -2869,10 +2879,25 @@ impl<'a> Windows<'a> {
         self.vm.display_state.version += 1;
         Ok(Value::TRUE)
     }
-    /// minibuf.c:215: the minibuffer window while a minibuffer is active.
+    /// minibuf.c:215: find the window showing the innermost prompt's buffer.
     pub(crate) fn active_minibuffer_window(&mut self) -> Out {
         self.vm.ensure_windows().map_err(internal)?;
-        Ok(if self.minibuf_level() > 0 { self.vm.window_root(MINI) } else { Value::NIL })
+        let depth = self.minibuf_level();
+        if depth <= 0 {
+            return Ok(Value::NIL);
+        }
+        let slot = self.vm.slot("romacs--minibuffer-list");
+        let list = self.vm.variable_value(slot).unwrap_or(Value::NIL);
+        let Ok((buffer, _)) = (0..depth)
+            .try_fold(list, |tail, _| self.vm.cons_pair(tail).map(|(_, rest)| rest))
+            .and_then(|entry| self.vm.cons_pair(entry))
+        else {
+            return Ok(Value::NIL);
+        };
+        Ok(self.vm.frames().into_iter()
+            .filter_map(|frame| self.vm.frame(frame).ok().map(|frame| frame.minibuffer))
+            .find(|&mini| self.vm.window(mini).is_ok_and(|w| w.live() && w.buffer == buffer))
+            .unwrap_or(Value::NIL))
     }
     /// GNU `window_list`: every frame's windows, frames in `frame-list'
     /// order, each frame's leaves in tree order, then the minibuffer window
@@ -3031,8 +3056,8 @@ impl<'a> Windows<'a> {
         self.vm.display_state.version += 1;
         Ok(w)
     }
-    /// window.c:3467 `Fdelete_other_windows_internal`, for VM2's one frame.
-    pub(crate) fn delete_other_windows_internal(&mut self, window: Value, root: Value) -> Out {
+    /// Decode the surviving subtree and the ancestor it will replace.
+    pub(crate) fn delete_other_windows_target(&mut self, window: Value, root: Value) -> std::result::Result<(Value, Value), Fault> {
         let w = self.valid(window)?;
         let frame_root = self.vm.root_of(w).map_err(internal)?;
         let root = if root == Value::NIL {
@@ -3048,44 +3073,91 @@ impl<'a> Windows<'a> {
             }
             r
         };
-        if w == root {
-            return Ok(Value::NIL);
-        }
-        if self.get(w)?.mini {
+        if w != root && self.get(w)?.mini {
             return Err(Fault::Error("Can’t expand minibuffer to full frame".into()));
         }
+        Ok((w, root))
+    }
+    /// Keep the selection in the surviving subtree before the expansion.
+    pub(crate) fn select_in_subtree(&mut self, w: Value) -> Out {
         let selected = self.vm.window_root(SELECTED);
         if self.get(w)?.live() {
             if w != selected {
                 self.vm.select_window_value(w, true).map_err(internal)?;
             }
-        } else {
-            // The selected window, or the nearest previous window inside
-            // WINDOW's subtree, stays selected.
-            let mut s = selected;
-            loop {
-                let mut p = s;
-                while p != Value::NIL && p != w {
-                    p = self.get(p)?.parent;
-                }
-                if p == w {
-                    break;
-                }
-                let lambda = self.vm.intern("lambda");
-                s = self.next_window(s, lambda, Value::NIL, false)?;
-            }
-            if s != selected {
-                self.vm.select_window_value(s, true).map_err(internal)?;
-            }
+            return Ok(w);
         }
-        // WINDOW takes ROOT's place and geometry; everything else in ROOT's
-        // subtree is deleted. An internal WINDOW's children are resized
-        // proportionally (GNU asks `window--resize-root-window`; VM2 uses its
-        // frame-resize plan, ledger/divergences VM2-WIN2).
-        let (x, y, width, height) = {
-            let r = self.get(root)?;
-            (r.x, r.y, r.width, r.height)
-        };
+        let lambda = self.vm.intern("lambda");
+        let mut s = selected;
+        loop {
+            let mut p = s;
+            while p != Value::NIL && p != w {
+                p = self.get(p)?.parent;
+            }
+            if p == w {
+                break;
+            }
+            s = self.next_window(s, lambda, Value::NIL, false)?;
+        }
+        if s != selected {
+            self.vm.select_window_value(s, true).map_err(internal)?;
+        }
+        Ok(s)
+    }
+    pub(crate) fn subtree_expansion(&self, w: Value, root: Value, horizontal: bool) -> Out {
+        let size = |v| self.get(v).map(|w| if horizontal { w.width } else { w.height });
+        Self::int(i64::from(size(root)?) - i64::from(size(w)?))
+    }
+    pub(crate) fn subtree_expansion_prepared(&mut self, w: Value, root: Value, horizontal: bool) -> std::result::Result<bool, Fault> {
+        self.delete_other_windows_target(w, root)?;
+        let r = self.get(root)?;
+        let size = if horizontal { r.width } else { r.height };
+        self.vm.prepared_size_valid(w, horizontal, size).map_err(internal)
+    }
+    /// Pack the prepared sizes as (window, pixels, normal size) triples so
+    /// both axes can be prepared before changing the live window geometry.
+    pub(crate) fn subtree_prepared_sizes(&self, root: Value) -> std::result::Result<Vec<Value>, Fault> {
+        let mut sizes = Vec::new();
+        let mut pending = vec![root];
+        while let Some(v) = pending.pop() {
+            let w = self.get(v)?;
+            sizes.extend([v, Self::int(i64::from(w.new_pixel))?, w.new_normal]);
+            pending.extend(w.children.iter().rev());
+        }
+        Ok(sizes)
+    }
+    fn restore_subtree_prepared_sizes(&mut self, sizes: &[Value]) -> std::result::Result<(), Fault> {
+        for size in sizes.chunks_exact(3) {
+            let w = self.get_mut(size[0])?;
+            w.new_pixel = size[1].integer_value().and_then(|n| u32::try_from(n).ok())
+                .ok_or_else(|| Fault::Wrong("natnump", size[1]))?;
+            w.new_normal = size[2];
+        }
+        Ok(())
+    }
+    pub(crate) fn keep_resized_subtree(&mut self, w: Value, root: Value, heights: &[Value]) -> Out {
+        let widths = self.subtree_prepared_sizes(w)?;
+        if !heights.iter().step_by(3).eq(widths.iter().step_by(3)) {
+            return Err(Fault::Error("Window subtree changed during resize".into()));
+        }
+        let r = self.get(root)?;
+        let (x, y, height) = (r.x, r.y, r.height);
+        self.restore_subtree_prepared_sizes(heights)?;
+        if !self.vm.prepared_size_valid(w, false, height).map_err(internal)? {
+            self.restore_subtree_prepared_sizes(&widths)?;
+            return Err(Fault::Error("Prepared window heights no longer fit".into()));
+        }
+        self.vm.apply_prepared(w, false, y).map_err(internal)?;
+        self.restore_subtree_prepared_sizes(&widths)?;
+        self.vm.apply_prepared(w, true, x).map_err(internal)?;
+        self.keep_window_subtree(w, root, true)
+    }
+    /// Replace ROOT with W. A leaf, or a bare VM without window.el, still
+    /// needs its geometry assigned. A prepared subtree already tiles ROOT.
+    pub(crate) fn keep_window_subtree(&mut self, w: Value, root: Value, prepared: bool) -> Out {
+        if !prepared {
+            self.fit_window_subtree(w, root)?;
+        }
         let parent = self.get(w)?.parent;
         self.get_mut(parent)?.children.retain(|c| *c != w);
         // replace_window (root, window, true) (window.c:3667, 2571-2574):
@@ -3101,6 +3173,12 @@ impl<'a> Windows<'a> {
         }
         self.vm.replace_tree_node(root, w).map_err(internal)?;
         self.vm.retire_window(root).map_err(internal)?;
+        self.vm.display_state.version += 1;
+        Ok(Value::NIL)
+    }
+    fn fit_window_subtree(&mut self, w: Value, root: Value) -> std::result::Result<(), Fault> {
+        let r = self.get(root)?;
+        let (x, y, width, height) = (r.x, r.y, r.width, r.height);
         let (line, column) = (self.vm.window_state.line, self.vm.window_state.column);
         let mut geometry = vec![];
         self.vm
@@ -3116,8 +3194,7 @@ impl<'a> Windows<'a> {
             window.height = ht;
             window.end_valid = false;
         }
-        self.vm.display_state.version += 1;
-        Ok(Value::NIL)
+        Ok(())
     }
     /// window.c:3852: the window's buffer, its start, and the hook value,
     /// for the T2 body that runs `window-scroll-functions`.
