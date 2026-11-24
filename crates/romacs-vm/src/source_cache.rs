@@ -200,12 +200,12 @@ impl Vm {
     /// symbols it names, and which of its calls are macro calls.
     fn compile_guarded(&mut self, form: &Form) -> Result<(usize, Vec<usize>, Entry)> {
         self.macro_record.expansions = 0;
-        self.expanded_symbols.clear();
+        self.mutator.expanded_symbols.clear();
         let (function, compiled) = self.compile_request(form)?;
         self.source_cache.stats.compilations += 1;
         let mut names = NameSet::default();
         collect_symbols(form, &mut names);
-        names.extend(self.expanded_symbols.iter().cloned());
+        names.extend(self.mutator.expanded_symbols.iter().cloned());
         for f in compiled.iter().map(|&id| &self.functions[id]) {
             for op in &f.code {
                 if let Op::Global(_, s) | Op::Bind(s, _) | Op::SetGlobal(s, _)
@@ -386,7 +386,7 @@ impl Vm {
         // A loading file's form declares its value-less defvars for the
         // file's rest (`Builder::file_level'); the same text evaluated
         // elsewhere does not: they compile apart, under keys apart.
-        let file_level = self.file_level_request;
+        let file_level = self.mutator.file_level_request;
         let namespaced;
         let source = if file_level {
             namespaced = format!("\0file\0{source}");
@@ -395,7 +395,7 @@ impl Vm {
             source
         };
         if let Some(f) = self.cached_submission(source) {
-            self.file_level_request = false;
+            self.mutator.file_level_request = false;
             return Ok(f);
         }
         let k = key(source);
@@ -433,13 +433,13 @@ impl Vm {
                     match kind {
                         SpecialKind::Global => portable.declare_special_raw(name, Value::NIL),
                         SpecialKind::FileLocal => {
-                            portable.file_specials.insert(name.clone());
+                            portable.mutator.file_specials.insert(name.clone());
                         }
                         SpecialKind::Lexical => {}
                     }
                 }
-                portable.seed_file_specials = true;
-                portable.file_level_request = file_level;
+                portable.mutator.seed_file_specials = true;
+                portable.mutator.file_level_request = file_level;
                 let function = portable.compile(form)?;
                 portable.source_cache.store = self.source_cache.store.clone();
                 let disk_entry = Entry {
@@ -558,7 +558,7 @@ impl Vm {
             && self.standard_backquote(function)
             && let Ok(part) = expand::Walk::standard().template(template, 0)
         {
-            collect_symbols(&part.form, &mut self.expanded_symbols);
+            collect_symbols(&part.form, &mut self.mutator.expanded_symbols);
             return Ok(Some(part.form));
         }
         self.expanding.push(slot);
@@ -593,7 +593,7 @@ impl Vm {
         })();
         self.expanding.pop();
         if let Ok(form) = &result {
-            collect_symbols(form, &mut self.expanded_symbols);
+            collect_symbols(form, &mut self.mutator.expanded_symbols);
         }
         result.map(Some)
     }

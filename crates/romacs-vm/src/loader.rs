@@ -437,7 +437,7 @@ impl Vm {
     /// The variable's slot and its new value, rooted, for the watchers' write;
     /// None when this file had declared it.
     fn declared_file_special(&mut self, name: &str) -> Result<Option<(usize, RootFrame)>> {
-        if !self.file_specials.insert(name.to_owned()) {
+        if !self.mutator.file_specials.insert(name.to_owned()) {
             return Ok(None);
         }
         let symbol = self.intern(name);
@@ -593,11 +593,11 @@ impl Vm {
         let expander = self.slot("internal-macroexpand-for-load");
         let lazy = matches!(self.slots[expander].function, f if f == Value::UNBOUND || f == Value::NIL);
         let saved_lazy = std::mem::replace(&mut self.lazy_regime, lazy);
-        let defer = std::mem::replace(&mut self.defer_expansion_errors, lazy);
+        let defer = std::mem::replace(&mut self.mutator.defer_expansion_errors, lazy);
         // GNU's readevalloop interprets a file it reads as source: its
         // `let's decide as they bind (VM2-LATE-SPECIAL1).
         let interpreting = self.gnu_interprets(path, explicit);
-        let interpreting = std::mem::replace(&mut self.interpreting_source, interpreting);
+        let interpreting = std::mem::replace(&mut self.mutator.interpreting_source, interpreting);
         // readevalloop binds `internal-interpreter-environment' once for the
         // file, so a top-level `(defvar NAME)' reaches every LATER form of
         // this file and no other file (VM2-FILESPECIAL1 in ledger/divergences).
@@ -605,26 +605,26 @@ impl Vm {
         // A macro can load a file while an outer compilation is suspended.
         // Child compilations must not erase its nonconstant-macro guards.
         let expansions = std::mem::take(&mut self.macro_record.expansions);
-        let expanded_symbols = std::mem::take(&mut self.expanded_symbols);
+        let expanded_symbols = std::mem::take(&mut self.mutator.expanded_symbols);
         self.loader.regimes.push(SourceRegime { lazy: saved_lazy, defer, interpreting, expansions, expanded_symbols });
     }
     /// A load's own set of `(defvar X)`s, empty; `Self::leave_file_specials` puts
     /// the outer file's back.
     fn enter_file_specials(&mut self) {
-        let outer = std::mem::take(&mut self.file_specials);
+        let outer = std::mem::take(&mut self.mutator.file_specials);
         self.loader.file_specials.push(outer);
     }
     fn leave_file_specials(&mut self) {
-        self.file_specials = self.loader.file_specials.pop().expect("a load's saved specials");
+        self.mutator.file_specials = self.loader.file_specials.pop().expect("a load's saved specials");
     }
     fn leave_source_regime(&mut self) {
         let saved = self.loader.regimes.pop().expect("a source load's regime");
         self.lazy_regime = saved.lazy;
-        self.defer_expansion_errors = saved.defer;
-        self.interpreting_source = saved.interpreting;
+        self.mutator.defer_expansion_errors = saved.defer;
+        self.mutator.interpreting_source = saved.interpreting;
         self.leave_file_specials();
         self.macro_record.expansions = saved.expansions;
-        self.expanded_symbols = saved.expanded_symbols;
+        self.mutator.expanded_symbols = saved.expanded_symbols;
     }
     /// In a compile process, record that it loaded PATH, with its digest
     /// (`compiled_lisp`): a change to it changes what the compile saw.
@@ -996,7 +996,7 @@ fn eval_toplevel_form<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, form: &For
     // budget across sibling top-level forms.
     let mark = m.leaf((), |vm, ()| {
         vm.macro_record.expansions = 0;
-        vm.expanded_symbols.clear();
+        vm.mutator.expanded_symbols.clear();
         vm.propagated_escape = None;
         vm.set_heading(true);
         vm.enter_load_expansion()
@@ -1049,15 +1049,15 @@ fn eval_one_form<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, form: &Form, ou
         return done;
     }
     let mark = m.leaf((), |vm, ()| {
-        vm.seed_file_specials = true;
-        vm.file_level_request = true;
+        vm.mutator.seed_file_specials = true;
+        vm.mutator.file_level_request = true;
         vm.enter_load_expansion()
     });
     let compiled = crate::threaded::compile_form(m, gc.by_ref(), form);
     m.leaf(mark, |vm, mark| {
         vm.leave_load_expansion(mark);
-        vm.seed_file_specials = false;
-        vm.file_level_request = false;
+        vm.mutator.seed_file_specials = false;
+        vm.mutator.file_level_request = false;
     });
     let function = match compiled {
         Ok(function) => function,

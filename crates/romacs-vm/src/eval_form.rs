@@ -136,11 +136,11 @@ impl Vm {
         // GNU's `eval' interprets, expanding each macro call at its reach:
         // an expansion that escapes defers there, and a definition's body
         // compiles at its first call.
-        let saved_evaluating = std::mem::replace(&mut self.evaluating, true);
-        let saved_defer = std::mem::replace(&mut self.defer_expansion_errors, true);
+        let saved_evaluating = std::mem::replace(&mut self.mutator.evaluating, true);
+        let saved_defer = std::mem::replace(&mut self.mutator.defer_expansion_errors, true);
         let compiled = self.compile_eval_request(form, &outer, environment.specials);
-        self.defer_expansion_errors = saved_defer;
-        self.evaluating = saved_evaluating;
+        self.mutator.defer_expansion_errors = saved_defer;
+        self.mutator.evaluating = saved_evaluating;
         self.dynamic_scope = saved;
         let (function, names) = compiled?;
         let captures: Vec<_> = names.iter().map(|name| cells[name]).collect();

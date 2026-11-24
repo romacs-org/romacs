@@ -327,12 +327,12 @@ impl Vm {
             }
             None => spec_reg,
         };
-        let saved_captures = std::mem::replace(&mut self.keep_captures, exposed);
-        self.closure_key_extra = key_extra;
+        let saved_captures = std::mem::replace(&mut self.mutator.keep_captures, exposed);
+        self.mutator.closure_key_extra = key_extra;
         let parts = self.lambda(builder, params, &executable)
             .and_then(|closure| Ok((closure, self.expr(builder, &thunk)?)));
-        self.closure_key_extra.clear();
-        self.keep_captures = saved_captures;
+        self.mutator.closure_key_extra.clear();
+        self.mutator.keep_captures = saved_captures;
         let (closure, thunk) = parts?;
         let register = crate::prim::subr_named("#:vm2-set-interactive-form").expect("registration subr");
         let result = Self::native_call(builder, register, &[closure, spec_reg, thunk]);

@@ -797,7 +797,7 @@ impl Vm {
             // `macroexp--dynvars' records it as macroexpand--all-toplevel does.
             DefvarFileLocal => {
                 let name = self.symbol_names[original].clone();
-                if self.file_specials.insert(name) {
+                if self.mutator.file_specials.insert(name) {
                     let dynvars = self.slot("macroexp--dynvars");
                     let declared = self.variable_value(dynvars)?;
                     let declared = self.keymap_cons(symbol, declared);

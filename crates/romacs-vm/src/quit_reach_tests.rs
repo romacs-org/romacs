@@ -681,7 +681,7 @@ fn a_native_poll_quits_inside_a_compiling_macro_expansion() {
     let (mut vm, signal) = busy_vm();
     eval(&mut vm, "(setq l (make-list 50000 'a))");
     let call = prepare(&mut vm, "prin1-to-string", "(list l)");
-    vm.compile_depth += 1;
+    vm.mutator.compile_depth += 1;
     vm.expanding.push(0);
     assert!(signal.interrupt(), "a busy evaluator takes the press");
     let outcome = invoke(&mut vm, call);
@@ -695,7 +695,7 @@ fn a_native_poll_quits_inside_a_compiling_macro_expansion() {
     assert!(signal.due(), "inhibit-quit holds the press");
     vm.slots[inhibit].value = Value::NIL;
     vm.expanding.pop();
-    vm.compile_depth -= 1;
+    vm.mutator.compile_depth -= 1;
 }
 
 /// A C-g an `inhibit-quit` held, released before the call, leaves
