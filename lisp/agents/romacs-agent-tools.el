@@ -1039,6 +1039,17 @@ its parent again."
 
 (add-hook 'romacs-agent-event-functions #'romacs-agent-tools--on-event)
 
+(defun romacs-agent-tools--delegate-gone (session event)
+  "SESSION, a delegated task, stopped, ended or was cancelled (EVENT): its
+parent's end held while it worked may go now (`romacs-agent-tools--release-held')."
+  (when-let* (((memq (plist-get event :type) '(exit status)))
+              (parent-id (plist-get (romacs-agent-options session) :parent))
+              (parent (romacs-agent-loaded parent-id))
+              ((gethash parent romacs-agent-tools--held)))
+    (romacs-agent-tools--release-held parent)))
+
+(add-hook 'romacs-agent-event-functions #'romacs-agent-tools--delegate-gone)
+
 (defconst romacs-agent-tools--streaming-events
   '(delta thinking tool tool-output record-state usage cache rate-limit message-end handshake)
   "The events of a turn under way, which never end a task's work.")

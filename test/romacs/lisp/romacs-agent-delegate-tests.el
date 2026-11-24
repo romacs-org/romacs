@@ -219,6 +219,22 @@ recorded in a private directory; `delivered' collects what wakes it."
       (romacs-agent-tools--flush parent)
       (should (equal (mapcar (lambda (w) (plist-get w :result)) (romacs-agent-tools--wakes-parse (car delivered)))
                      '("delegated a writer")))
+      ;; Held again, its writer stopped by the user, no end of its own:
+      ;; the stop lets it go.
+      (setq delivered nil)
+      (setf (romacs-agent-state writer) 'running)
+      (romacs-agent--summary-stale (romacs-agent-id writer))
+      (romacs-agent-ui--summarize-children a)
+      (romacs-agent-delegate-tests--end a 7 "delegated again")
+      (romacs-agent-tools--flush parent)
+      (should-not delivered)
+      (setf (romacs-agent-state writer) 'ended)
+      (romacs-agent--summary-stale (romacs-agent-id writer))
+      (romacs-agent-ui--summarize-children a)
+      (romacs-agent-tools--delegate-gone writer '(:type status :text "stopped"))
+      (romacs-agent-tools--flush parent)
+      (should (equal (mapcar (lambda (w) (plist-get w :result)) (romacs-agent-tools--wakes-parse (car delivered)))
+                     '("delegated again")))
       (delete-directory (romacs-agent-dir writer) t))))
 
 (ert-deftest romacs-agent-delegate-a-starting-task-queues ()
