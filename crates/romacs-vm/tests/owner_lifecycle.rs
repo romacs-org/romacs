@@ -943,3 +943,6 @@ mod table_walk;
 
 #[path = "support/owner_lifecycle_round_four.rs"]
 mod round_four;
+
+#[path = "support/owner_lifecycle_random.rs"]
+mod random_walk;
