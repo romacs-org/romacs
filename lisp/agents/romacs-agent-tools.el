@@ -98,15 +98,22 @@ by C-g, at its next safepoint.  0 means no budget."
 
 (defun romacs-agent-tools--note (session-id key record)
   "Record RECORD for call KEY of SESSION-ID: in memory, and one line
-appended to its log."
+appended to its log.  Past twice `romacs-agent-tools--kept' calls in
+memory, its table is let go: the next call reads the log back, its
+newest kept and the log compacted (`romacs-agent-tools--load'), so a
+long run holds and appends a bounded number."
   (puthash "key" key record)
-  (puthash key record (romacs-agent-tools--table session-id))
-  (let ((dir (romacs-agent-tools--dir session-id)))
-    (when (file-directory-p dir)
-      (let ((coding-system-for-write 'utf-8-unix) (file (romacs-agent-tools--log-file session-id)))
-        (write-region (concat (json-serialize record :false-object :false :null-object :null) "\n")
-                      nil file t 'silent)
-        (set-file-modes file #o600)))))
+  (let ((table (romacs-agent-tools--table session-id)))
+    (puthash key record table)
+    (let ((dir (romacs-agent-tools--dir session-id)))
+      (when (file-directory-p dir)
+        (let ((coding-system-for-write 'utf-8-unix) (file (romacs-agent-tools--log-file session-id)))
+          (write-region (concat (json-serialize record :false-object :false :null-object :null) "\n")
+                        nil file t 'silent)
+          (set-file-modes file #o600))
+        ;; Written: the log has every record the table had.
+        (when (> (hash-table-count table) (* 2 romacs-agent-tools--kept))
+          (remhash session-id romacs-agent-tools--calls))))))
 
 (defun romacs-agent-tools--key (peer id)
   "A call's key: the relay that sent it (its incarnation) and its request
