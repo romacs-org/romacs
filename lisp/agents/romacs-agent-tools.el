@@ -1072,21 +1072,39 @@ a turn of its own, nothing sent again."
                   (t (format "It asks to run %s." (plist-get event :tool))))
             "\nAnswer it with romacs_task_answer, or leave it to the user in its chat.")))
 
+(defvar romacs-agent-tools--asked-parents (make-hash-table :test #'equal)
+  "(TASK-ID . REQUEST-ID) its parent was told of this process: once.")
+
 (defun romacs-agent-tools--ask-parent (session event)
   "Tell SESSION's parent the request EVENT, live, that waits on SESSION's
-user, unless SESSION's rule wakes no one: dropped once it is answered."
+user, once, unless SESSION's rule wakes no one or the parent is settled
+\(the user sees it in SESSION's chat): dropped once it is answered."
   (when-let* (((eq (plist-get event :type) 'approval))
               (parent-id (plist-get (romacs-agent-options session) :parent))
               ((romacs-agent--live-p session))
               (id (plist-get event :request-id))
+              (key (cons (romacs-agent-id session) id))
+              ((not (gethash key romacs-agent-tools--asked-parents)))
               ((romacs-agent--user-answers-p session id))
               ((not (equal (romacs-agent-tools--wake-rule session) "none")))
-              (parent (romacs-agent-successor (romacs-agent-load-session parent-id))))
+              (parent (romacs-agent-successor (romacs-agent-load-session parent-id)))
+              ((romacs-agent--goes-on-p parent)))
+    (puthash key t romacs-agent-tools--asked-parents)
     (romacs-agent-tools--deliver parent (romacs-agent-tools--question-text session event) #'ignore
                                  (lambda () (and (gethash id (romacs-agent-approvals session)) t))
                                  nil 'next)))
 
 (add-hook 'romacs-agent-event-functions #'romacs-agent-tools--ask-parent)
+
+(defun romacs-agent-tools--ask-parent-pending (session)
+  "SESSION caught up with its records: its parent is told the requests
+still waiting on its user that came while it replayed."
+  (dolist (id (romacs-agent-asks session))
+    (when-let* ((wire (gethash id (romacs-agent-approvals session))))
+      (romacs-agent-tools--ask-parent
+       session (append (list :type 'approval :request-id id) (romacs-agent-request-event session id wire))))))
+
+(add-hook 'romacs-agent-caught-up-functions #'romacs-agent-tools--ask-parent-pending)
 
 (defun romacs-agent-tools--answer-request (arguments)
   "Answer the request of a task the caller delegated, as its user would:

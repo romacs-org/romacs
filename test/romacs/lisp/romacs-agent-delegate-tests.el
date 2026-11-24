@@ -175,7 +175,7 @@ recorded in a private directory; `delivered' collects what wakes it."
   ;; A question only a user answers blocks a task: its parent is told it
   ;; with its request id, and answers it as the user would.
   (romacs-agent-delegate-tests--family ((a nil))
-    (let ((answered nil))
+    (let ((answered nil) (romacs-agent-tools--asked-parents (make-hash-table :test #'equal)))
       (puthash "q1" t (romacs-agent-approvals a))
       (cl-letf (((symbol-function 'romacs-agent--live-p) (lambda (_) t))
                 ((symbol-function 'romacs-agent-tools--caller) (lambda () (romacs-agent-id parent)))
@@ -186,6 +186,10 @@ recorded in a private directory; `delivered' collects what wakes it."
         (romacs-agent-tools--ask-parent a '(:type approval :request-id "q1"
                                                   :questions (("Which one?" :header "Pick" :options ("A" "B")))))
         (should (string-match-p "request q1:\n- Which one\\? \\[A | B\\]" (car delivered)))
+        ;; Told once: a replay's catch-up asks again, and it is not repeated.
+        (romacs-agent--set-asks a '("q1"))
+        (romacs-agent-tools--ask-parent-pending a)
+        (should (= (length delivered) 1))
         (romacs-agent-tools--answer-request
          (romacs-mcp--object "taskId" (romacs-agent-id a) "requestId" "q1"
                              "answers" (romacs-mcp--object "Which one?" "B")))
