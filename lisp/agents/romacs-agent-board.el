@@ -229,18 +229,82 @@ then a row saying how many more, unless VIEW shows them all."
      (cl-loop for child in (romacs-agent-board--children session)
               sum (romacs-agent-board--settled-count child keys))))
 
+(defun romacs-agent-board--folded-project (project threads transcripts keys marks view)
+  "Summarize a folded PROJECT and keep its first openable item."
+  (when (or threads transcripts)
+    (let* ((all (mapcan (lambda (session) (romacs-agent-board--tree-keys session keys marks)) threads))
+           (first (car threads))
+           (summary (if (romacs-agent-board--hidden-context-p first marks)
+                        (car (romacs-agent-board--sorted (romacs-agent-board--shown-children first marks) keys))
+                      first))
+           (item (car transcripts))
+           (first-row (cond (summary
+                             (list :kind 'thread :id (romacs-agent-summary-id summary) :summary summary))
+                            ((or (plist-get view :all-history) (> romacs-agent-history-per-project 0))
+                             (list :kind 'history :id (plist-get item :path) :item item))
+                            (t (list :kind 'more :id (cons 'more (plist-get project :cwd))
+                                     :count (length transcripts))))))
+      (append project (list :keys all :folded (length all)
+                            :first first-row)))))
+
 (defun romacs-agent-board--project-rows (cwd threads transcripts keys marks view settled-count)
   "Rows for project CWD and its THREADS and TRANSCRIPTS in VIEW."
-  (let* ((rows (append (mapcan (lambda (session) (romacs-agent-board--thread session 0 keys marks view)) threads)
-                       (romacs-agent-board--history-rows cwd transcripts view)))
-         (project (list :kind 'project :id cwd :cwd cwd :settled-count settled-count)))
-    (when rows
-      (if (and (plist-get view :projects) (gethash cwd (plist-get view :projects)) (not (plist-get view :words)))
-          (let ((all (mapcan (lambda (session) (romacs-agent-board--tree-keys session keys marks)) threads)))
-            (list (append project (list :keys all :folded (length all) :first (car rows)))))
+  (let ((project (list :kind 'project :id cwd :cwd cwd :settled-count settled-count)))
+    (if (and (plist-get view :projects) (gethash cwd (plist-get view :projects)) (not (plist-get view :words)))
+        (when-let* ((folded (romacs-agent-board--folded-project project threads transcripts keys marks view)))
+          (list folded))
+      (when-let* ((rows (append (mapcan (lambda (session) (romacs-agent-board--thread session 0 keys marks view)) threads)
+                                (romacs-agent-board--history-rows cwd transcripts view))))
         (cons (plist-put project :keys (cl-loop for row in rows when (eql (plist-get row :depth) 0)
                                                collect (plist-get row :key)))
               rows)))))
+
+(defun romacs-agent-board--archive (history)
+  "Group newest-first HISTORY by project, in order of each project's first item."
+  (let ((items (make-hash-table :test #'equal)) order)
+    (dolist (item history)
+      (let ((cwd (romacs-agent-board--project (plist-get item :cwd))))
+        (unless (gethash cwd items) (push cwd order))
+        (push item (gethash cwd items))))
+    (dolist (cwd order) (puthash cwd (nreverse (gethash cwd items)) items))
+    (cons (nreverse order) items)))
+
+(defun romacs-agent-board--prepare (sessions history)
+  "Index SESSIONS, order their roots and group HISTORY for repeated views."
+  (let* ((index (romacs-agent-board--index-of sessions))
+         (romacs-agent-board--index index)
+         (keys (make-hash-table :test #'eq))
+         (settled (make-hash-table :test #'equal))
+         roots)
+    (dolist (session sessions) (puthash session (romacs-agent-summary-state-key session) keys))
+    (dolist (session (romacs-agent-board--sorted sessions keys))
+      (unless (romacs-agent-board--parent session)
+        (let ((cwd (romacs-agent-board--project (romacs-agent-summary-cwd session))))
+          (cl-incf (gethash cwd settled 0) (romacs-agent-board--settled-count session keys))
+          (push (cons cwd session) roots))))
+    (list sessions index keys (nreverse roots) (romacs-agent-board--archive history) settled)))
+
+(defun romacs-agent-board--listing-rows (listing view)
+  "Project a prepared LISTING into rows for VIEW."
+  (pcase-let* ((`(,sessions ,romacs-agent-board--index ,keys ,roots ,archive ,settled) listing)
+               (marks (romacs-agent-board--marks sessions keys view))
+               (threads (make-hash-table :test #'equal))
+               (active (not (plist-get view :settled)))
+               (order nil))
+    (dolist (root roots)
+      (when (gethash (cdr root) marks)
+        (unless (gethash (car root) threads) (push (car root) order))
+        (push (cdr root) (gethash (car root) threads))))
+    (when active
+      (dolist (cwd (car archive))
+        (unless (gethash cwd threads) (push cwd order))))
+    (append
+     (mapcan (lambda (cwd)
+               (romacs-agent-board--project-rows cwd (nreverse (gethash cwd threads))
+                                                 (and active (gethash cwd (cdr archive))) keys marks view (and active (gethash cwd settled))))
+             (nreverse order))
+     (when (and active (null (car archive)) (plist-get view :reading))
+       (list (list :kind 'reading :id 'reading))))))
 
 (defun romacs-agent-board-rows (sessions history view)
   "The board's rows for SESSIONS, their summaries (`romacs-agent-summary'),
@@ -256,32 +320,7 @@ filter is on; its :first is the row it would show first.  Each row is a
 plist of :kind (`project', `thread', `history', `more' or `reading', the
 transcripts' first scan under way) and :id, which names it across
 redraws; a thread's :summary is its session's."
-  (let ((keys (make-hash-table :test #'eq)) (order nil)
-        (roots (make-hash-table :test #'equal)) (items (make-hash-table :test #'equal))
-        (settled (unless (plist-get view :settled) (make-hash-table :test #'equal)))
-        (romacs-agent-board--index (romacs-agent-board--index-of sessions)))
-    (dolist (session sessions) (puthash session (romacs-agent-summary-state-key session) keys))
-    (let ((marks (romacs-agent-board--marks sessions keys view)))
-      (dolist (session (romacs-agent-board--sorted sessions keys))
-        (when (null (romacs-agent-board--parent session))
-          (let ((cwd (romacs-agent-board--project (romacs-agent-summary-cwd session))))
-            (when settled
-              (cl-incf (gethash cwd settled 0) (romacs-agent-board--settled-count session keys)))
-            (when (gethash session marks)
-              (unless (gethash cwd roots) (push cwd order))
-              (push session (gethash cwd roots))))))
-      (when settled
-        (dolist (item history)
-          (let ((cwd (romacs-agent-board--project (plist-get item :cwd))))
-            (unless (or (gethash cwd roots) (gethash cwd items)) (push cwd order))
-            (push item (gethash cwd items)))))
-      (append
-       (mapcan (lambda (cwd)
-                 (romacs-agent-board--project-rows cwd (nreverse (gethash cwd roots)) (nreverse (gethash cwd items))
-                                                   keys marks view (and settled (gethash cwd settled))))
-              (nreverse order))
-       (and (not (plist-get view :settled)) (null history) (plist-get view :reading)
-            (list (list :kind 'reading :id 'reading)))))))
+  (romacs-agent-board--listing-rows (romacs-agent-board--prepare sessions history) view))
 
 ;;; Columns
 
@@ -541,6 +580,17 @@ count: slack, so a row's last column is not cut."
        (if windows (apply #'min (mapcar #'window-body-width windows)) (frame-width)))
      3))
 
+(defvar-local romacs-agent-board--listing nil
+  "The board's prepared listing, paired with the source it was read from.")
+
+(defun romacs-agent-board--listing (source)
+  "Return the current listing from SOURCE, reading it once after a change."
+  (unless (and romacs-agent-board--listing (eq (car romacs-agent-board--listing) source))
+    (setq romacs-agent-board--listing
+          (cons source (romacs-agent-board--prepare (romacs-agent-summary nil source)
+                                                   (romacs-agent-board-source-history source)))))
+  (cdr romacs-agent-board--listing))
+
 (defun romacs-agent-board--render (buffer &optional columns)
   "Draw BUFFER's board COLUMNS wide, by default as wide as its windows:
 each window showing it keeps the row at its point and at its start."
@@ -555,9 +605,8 @@ each window showing it keeps the row at its point and at its start."
         ;; leaves them so.
         (setq romacs-agent-board--drawn-source 'drawing)
         (romacs-agent-board--draw
-         (romacs-agent-board-rows (romacs-agent-summary nil source)
-                                  (and (not romacs-agent-board--settled) (romacs-agent-board-source-history source))
-                                  (romacs-agent-board--view))
+         (romacs-agent-board--listing-rows (romacs-agent-board--listing source)
+                                          (romacs-agent-board--view))
          (or columns (romacs-agent-board--columns buffer)))
         ;; Its rows are SOURCE's once drawn: only then are they acted on as such.
         (setq romacs-agent-board--drawn-source source))
@@ -611,19 +660,35 @@ shows one; else stop."
     buffer))
 
 (defun romacs-agent-board--refresh ()
-  "Draw the board again while it shows: hidden, it is drawn when shown."
-  (when-let* ((buffer (romacs-agent-board--shown)))
-    (romacs-agent-board--render buffer)))
+  "Invalidate the listing and draw it again while the board shows."
+  (let ((shown (romacs-agent-board--shown)))
+    (when-let* ((buffer (or shown (get-buffer romacs-agent-board--name))))
+      (with-current-buffer buffer (setq romacs-agent-board--listing nil))
+      (when shown (romacs-agent-board--render buffer)))))
 
-(add-hook 'romacs-agent-ui-changed-hook #'romacs-agent-board--refresh)
+(defun romacs-agent-board--local-refresh ()
+  "Refresh the board when its listing is this editor's own."
+  (when (eq romacs-agent-board-source romacs-agent-log-local)
+    (romacs-agent-board--refresh)))
+
+(defun romacs-agent-board--listing-event (_session event)
+  "Invalidate the local listing when EVENT can move its filter inputs."
+  (when-let* (((memq (plist-get event :type) '(changed selection cwd)))
+              ((eq romacs-agent-board-source romacs-agent-log-local))
+              (buffer (get-buffer romacs-agent-board--name)))
+    (with-current-buffer buffer (setq romacs-agent-board--listing nil))))
+
+(add-hook 'romacs-agent-event-functions #'romacs-agent-board--listing-event)
+(add-hook 'romacs-agent-ui-changed-hook #'romacs-agent-board--local-refresh)
 ;; The sessions' rows made: those left unloaded show.
-(add-hook 'romacs-agent-store-filled-hook #'romacs-agent-board--refresh)
+(add-hook 'romacs-agent-store-filled-hook #'romacs-agent-board--local-refresh)
 (add-hook 'romacs-agent-store-settlement-hook #'romacs-agent-ui--batch)
 ;; The transcripts listed anew, aside: the board shows them.
-(add-hook 'romacs-agent-history-indexed-hook #'romacs-agent-board--refresh)
+(add-hook 'romacs-agent-history-indexed-hook #'romacs-agent-board--local-refresh)
 
-(defun romacs-agent-board--redraw ()
-  "Draw the board, from one of its commands."
+(defun romacs-agent-board--redraw (&optional listing-changed)
+  "Draw the board, re-reading the listing when LISTING-CHANGED is non-nil."
+  (when listing-changed (setq romacs-agent-board--listing nil))
   (romacs-agent-board--render (current-buffer)))
 
 (defun romacs-agent-board--in (window)
@@ -709,7 +774,7 @@ newest thread; on \"more\", list every transcript."
   "The session of SUMMARY as it is now, to act on, unless no longer known:
 then the board is drawn again."
   (or (romacs-agent-board-source-live romacs-agent-board-source (romacs-agent-summary-id summary))
-      (progn (romacs-agent-board--redraw)
+      (progn (romacs-agent-board--redraw t)
              (user-error "That thread is gone: the board is drawn again"))))
 
 (cl-defmethod romacs-agent-board-source-live ((_source romacs-agent-log-local-source) id)
@@ -824,7 +889,7 @@ where it is answered."
   (let ((summary (or (plist-get (romacs-agent-board--row) :summary) (user-error "No thread on this line"))))
     (unless (romacs-agent-settle-recorded (romacs-agent-summary-id summary) t)
       (user-error "That thread is gone"))
-    (romacs-agent-board--redraw)))
+    (romacs-agent-board--redraw t)))
 
 (defun romacs-agent-board--shown-rows ()
   "The rows the board shows, in order."
@@ -853,7 +918,7 @@ going on."
     (when (y-or-n-p (format "Settle %d finished thread%s? " (length finished) (if (cdr finished) "s" "")))
       (dolist (id finished)
         (romacs-agent-settle-recorded id))
-      (romacs-agent-board--redraw))))
+      (romacs-agent-board--redraw t))))
 
 (defun romacs-agent-board-new ()
   "Start a new thread, in this row's project, where the board's sessions
@@ -919,7 +984,7 @@ A parent:ID term matches the threads directly delegated by session ID."
   "Draw the board again, the harnesses' transcripts listed anew: its
 `revert-buffer-function'."
   (romacs-agent-history-list)
-  (romacs-agent-board--redraw))
+  (romacs-agent-board--redraw t))
 
 (defvar-keymap romacs-agent-board-mode-map
   :doc "Keys of the agent board, besides `special-mode''s."
@@ -981,7 +1046,7 @@ keys act on the thread at point.
   (romacs-agent-history-list)
   (let ((buffer (romacs-agent-board--buffer)))
     ;; Drawn first: a window sized to its text fits it.
-    (romacs-agent-board--render buffer)
+    (with-current-buffer buffer (romacs-agent-board--redraw t))
     (when-let* ((window (display-buffer buffer '(display-buffer-same-window)))
                 ;; A frame taking no focus (a floating menu) takes keys of its own.
                 ((not (frame-parameter (window-frame window) 'no-accept-focus))))
