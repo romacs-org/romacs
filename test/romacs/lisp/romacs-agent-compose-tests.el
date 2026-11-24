@@ -204,7 +204,10 @@
       (insert "draft\nsecond line")
       (should (equal (buffer-string) "draft\nsecond line"))
       (goto-char (point-min))
-      (should (get-char-property (point) 'line-prefix)))
+      ;; The prompt's mark shows once, before the draft's first line
+      ;; (round 2 ruling: no `line-prefix', one overlay at its start).
+      (should (seq-some (lambda (overlay) (overlay-get overlay 'before-string))
+                        (overlays-in (point-min) (point-min)))))
     (with-current-buffer chat
       (should (equal (romacs-agent-log--draft) "draft\nsecond line"))
       (should-not (string-search "second line" (buffer-string))))))
@@ -239,9 +242,9 @@
             (romacs-agent-log-attach-sync)
             (should (equal (mapcar (lambda (item) (plist-get item :path)) romacs-attach-items)
                            (list file)))
-            (should (eq (overlay-buffer romacs-agent-log-attach--overlay) composer))
-            (should (= (overlay-start romacs-agent-log-attach--overlay) (point-min)))
-            (should (overlay-get romacs-agent-log-attach--overlay 'before-string)))
+            (should (eq (overlay-buffer romacs-agent-compose--start) composer))
+            (should (= (overlay-start romacs-agent-compose--start) (point-min)))
+            (should (overlay-get romacs-agent-compose--start 'before-string)))
         (delete-file file)))))
 
 (ert-deftest romacs-agent-compose-attach-plain-typing-neither-schedules-nor-scans ()

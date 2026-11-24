@@ -34,8 +34,7 @@ them inherits."
     (with-temp-buffer
       (romacs-agent-log-mode)
       (setq romacs-agent-log--session session
-            romacs-agent-log--end (point-min-marker)
-            romacs-agent-log--input (point-min-marker))
+            romacs-agent-log--end (point-min-marker))
       (set-marker-insertion-type romacs-agent-log--end t)
       (romacs-agent-log-draw session '(:type delta :text "## Done\n\nSome **bold**, _em_ and `code`.\n\n```sh\nmake\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |"))
       (romacs-agent-log-draw session '(:type message-end))
@@ -75,8 +74,7 @@ them inherits."
     (with-temp-buffer
       (romacs-agent-log-mode)
       (setq romacs-agent-log--session session
-            romacs-agent-log--end (point-min-marker)
-            romacs-agent-log--input (point-min-marker))
+            romacs-agent-log--end (point-min-marker))
       (set-marker-insertion-type romacs-agent-log--end t)
       (romacs-agent-log-draw session '(:type input :text "first line\nsecond line" :request 1))
       (goto-char (point-min))
@@ -97,8 +95,7 @@ them inherits."
     (with-temp-buffer
       (romacs-agent-log-mode)
       (setq romacs-agent-log--session session
-            romacs-agent-log--end (point-min-marker)
-            romacs-agent-log--input (point-min-marker))
+            romacs-agent-log--end (point-min-marker))
       (set-marker-insertion-type romacs-agent-log--end t)
       (romacs-agent-log-draw session (list :type 'input
                                            :text (concat "<romacs-message id=\"m-1\" kind=\"child\" from=\"lane x\">\n"
@@ -152,8 +149,7 @@ them inherits."
      (with-temp-buffer
        (romacs-agent-log-mode)
        (setq romacs-agent-log--session session
-             romacs-agent-log--end (point-min-marker)
-             romacs-agent-log--input (point-min-marker))
+             romacs-agent-log--end (point-min-marker))
        (set-marker-insertion-type romacs-agent-log--end t)
        (cl-flet ((draw (&rest event) (romacs-agent-log-draw session event)))
          ,@body))))

@@ -3000,10 +3000,16 @@ SUBMIT_PROBE = r"""
       (cl-loop for p from start to input
                thereis
                (let ((face (get-char-property p 'face))
-                     (prefix (get-char-property p 'line-prefix)))
+                     (prefix (get-char-property p 'line-prefix))
+                     ;; The mark an overlay at the start shows before it.
+                     (before (mapcar (lambda (o) (let ((s (overlay-get o 'before-string)))
+                                                   (and (stringp s) (> (length s) 0)
+                                                        (text-properties-at (1- (length s)) s))))
+                                     (overlays-in p p))))
                  (string-match-p "\\_<romacs-agent-compose-sending\\_>"
-                                 (format "%S %S" face (and (stringp prefix)
-                                                           (text-properties-at 0 prefix))))))))
+                                 (format "%S %S %S" face (and (stringp prefix)
+                                                              (text-properties-at 0 prefix))
+                                         before))))))
   (advice-add 'romacs-agent-submit :around #'s8-submit-record)
   (global-set-key [f8] (lambda () (interactive) (cl-incf s8-submit-barrier)))
   t)
@@ -4099,10 +4105,12 @@ def board_keys(args, base):
         a.keyboard_ready()
         board = '(get-buffer-window "*romacs-agents*" t)'
         shown = lambda: a.eval(f'(and {board} (frame-visible-p (window-frame {board})) t)')
-        # The session whose chat the selected window shows, if any.
+        # The session whose chat the selected window shows, or whose
+        # composer it shows below its chat, if any.
         showing = lambda: parity_live.read_sexp(a.eval(
             '(with-current-buffer (window-buffer (selected-window)) '
-            '(and (bound-and-true-p romacs-agent-ui--session) (romacs-agent-id romacs-agent-ui--session)))'))
+            "(with-current-buffer (if (derived-mode-p 'romacs-agent-compose-mode) romacs-agent-log--chat (current-buffer)) "
+            '(and (bound-and-true-p romacs-agent-ui--session) (romacs-agent-id romacs-agent-ui--session))))'))
 
         def open_board():
             # Keys must reach the frame, then the board, before one is
@@ -4313,14 +4321,16 @@ def start_picker(args, base):
             return directory
 
         def chat_shown():
-            """Whether the selected window shows a chat, its composer the place to type."""
+            """Whether the selected window shows a chat's composer, the place to type."""
             return a.eval('(with-current-buffer (window-buffer (selected-window)) '
-                          '(and (derived-mode-p (quote romacs-agent-log-mode)) romacs-agent-log--input (not (active-minibuffer-window)) t))') == 't'
+                          "(and (or (derived-mode-p 'romacs-agent-compose-mode) "
+                          "(and (derived-mode-p 'romacs-agent-log-mode) (bound-and-true-p romacs-agent-log--input))) "
+                          '(not (active-minibuffer-window)) t))') == 't'
 
         def holds(text):
-            """Whether the selected chat's composer ends with TEXT."""
-            return a.eval('(with-current-buffer (window-buffer (selected-window)) (and romacs-agent-log--input (string-suffix-p '
-                          + lisp_text(text) + ' (buffer-substring-no-properties romacs-agent-log--input (point-max)))))') == 't'
+            """Whether the selected composer ends with TEXT."""
+            return a.eval('(with-current-buffer (window-buffer (selected-window)) (string-suffix-p '
+                          + lisp_text(text) + f' (buffer-substring-no-properties {COMPOSER_START} (point-max))))') == 't'
 
         def composed(text):
             """TEXT typed in the chat a start opened: its first message."""
@@ -4804,16 +4814,17 @@ def chat_images(args, base):
         a.idle(sid)
         a.eval(f'(progn (romacs-agent-show {a.s(sid)}) (delete-other-windows) t)')
         a.keyboard_ready()
-        chat = '(window-buffer (selected-window))'
+        chat = f'(romacs-agent-log-chat {a.s(sid)})'
+        typing = composer_buffer(chat)
 
         def composer():
             return parity_live.read_sexp(a.eval(
-                f'(with-current-buffer {chat} (buffer-substring-no-properties romacs-agent-log--input (point-max)))'))
+                f'(with-current-buffer {typing} (buffer-substring-no-properties {COMPOSER_START} (point-max)))'))
 
         def drawn():
             """The composer's drawn links' files, and whether images show under it."""
             files, block = parity_live.read_sexp(a.eval(
-                f'(with-current-buffer {chat} (list (cons 0 (mapcar (lambda (o) (overlay-get o (quote romacs-agent-log-image))) '
+                f'(with-current-buffer {typing} (list (cons 0 (mapcar (lambda (o) (overlay-get o (quote romacs-agent-log-image))) '
                 '(car romacs-agent-log-images--composer))) (if (cdr romacs-agent-log-images--composer) 1 0)))'))
             return [files[1:], block == 1]
 

@@ -36,9 +36,7 @@
                                    :tools (make-hash-table :test #'equal))))
      (with-temp-buffer
        (romacs-agent-chat-mode)
-       (setq romacs-agent-ui--session ,var
-             romacs-agent-ui--messages (make-hash-table :test #'equal)
-             romacs-agent-ui--end (point-marker))
+       (setq romacs-agent-ui--session ,var)
        ,@body)))
 
 (defun romacs-agent-compact-tests--draw (session &rest event)

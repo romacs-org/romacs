@@ -16,8 +16,9 @@
   "A PNG of one pixel.")
 
 (defmacro romacs-agent-log-attach-tests--with (&rest body)
-  "BODY in a chat whose composer holds nothing, with `a', `b' and `c', three
-PNG files in a fresh directory, and `composer' its draft's text."
+  "BODY in the composer of a chat, `chat', the composer holding nothing,
+with `a', `b' and `c', three PNG files in a fresh directory, and
+`composer' its draft's text."
   (declare (indent 0))
   `(let* ((dir (file-name-as-directory (make-temp-file "romacs-attach-" t)))
           (a (expand-file-name "a.png" dir)) (b (expand-file-name "b.png" dir)) (c (expand-file-name "c.png" dir)))
@@ -31,16 +32,17 @@ PNG files in a fresh directory, and `composer' its draft's text."
              (setq romacs-agent-log--session (romacs-agent--make :id "A" :harness 'claude :state 'running
                                                                  :tools (make-hash-table :test #'equal)
                                                                  :streamed (make-hash-table :test #'equal))
-                   romacs-agent-log--end (point-min-marker)
-                   romacs-agent-log--input (point-min-marker))
+                   romacs-agent-log--end (point-min-marker))
              (set-marker-insertion-type romacs-agent-log--end t)
              (romacs-agent-log--separator t)
-             (goto-char (point-max))
-             (cl-flet ((composer () (buffer-substring-no-properties romacs-agent-log--input (point-max)))
-                       (link (file) (romacs-agent-log-images-link file))
-                       (files () (mapcar (lambda (item) (plist-get item :path)) romacs-attach-items)))
-               (ignore #'composer #'link #'files)
-               ,@body)))
+             (let ((chat (current-buffer)))
+               (ignore chat)
+               (with-current-buffer (romacs-agent-log-composer-buffer chat)
+                 (cl-flet ((composer () (buffer-substring-no-properties (point-min) (point-max)))
+                           (link (file) (romacs-agent-log-images-link file))
+                           (files () (mapcar (lambda (item) (plist-get item :path)) romacs-attach-items)))
+                   (ignore #'composer #'link #'files)
+                   ,@body)))))
        (delete-directory dir t))))
 
 (defmacro romacs-agent-log-attach-tests--with-images (&rest body)
@@ -58,7 +60,7 @@ PNG files in a fresh directory, and `composer' its draft's text."
   (let ((overlays (car romacs-agent-log-images--composer)))
     (should (= (length overlays) (length files)))
     (save-excursion
-      (goto-char romacs-agent-log--input)
+      (goto-char (point-min))
       (cl-mapc (lambda (file overlay)
                  (let ((link (romacs-agent-log-images-link file)))
                    (should (search-forward link nil t))
@@ -77,7 +79,7 @@ PNG files in a fresh directory, and `composer' its draft's text."
 
 (ert-deftest romacs-agent-log-attach-uses-file-completion-in-the-session-directory ()
   (romacs-agent-log-attach-tests--with
-    (setf (romacs-agent-cwd romacs-agent-log--session) (directory-file-name dir))
+    (setf (romacs-agent-cwd (buffer-local-value 'romacs-agent-log--session chat)) (directory-file-name dir))
     (let ((read-file-name-function #'read-file-name-default)
           (insert-default-directory t)
           (use-dialog-box nil))
@@ -99,18 +101,15 @@ PNG files in a fresh directory, and `composer' its draft's text."
     (romacs-agent-log-attach-sync)
     (should (equal (files) (list a b)))
     (should (equal (mapcar (lambda (item) (plist-get item :caption)) romacs-attach-items) '(nil "the second")))
-    ;; The chips show above the draft's line, its prompt mark included,
-    ;; the images not again under it.
-    (should (overlay-get romacs-agent-log-attach--overlay 'before-string))
-    (should (= (overlay-start romacs-agent-log-attach--overlay)
-               (save-excursion (goto-char romacs-agent-log--input) (forward-line 0) (point))))
-    (should (< (overlay-start romacs-agent-log-attach--overlay) romacs-agent-log--input))
-    ;; The separator written again: the chips stay above its prompt line.
-    (romacs-agent-log--separator t)
-    (should (< (overlay-start romacs-agent-log-attach--overlay) romacs-agent-log--input))
+    ;; The chips show at the draft's start, the images not again under it.
+    (should (overlay-get romacs-agent-compose--start 'before-string))
+    (should (= (overlay-start romacs-agent-compose--start) (point-min)))
+    ;; The chat's separator written again leaves them there.
+    (with-current-buffer chat (romacs-agent-log--separator t))
+    (should (= (overlay-start romacs-agent-compose--start) (point-min)))
     (should-not romacs-agent-log-images-under-draft)
     ;; No links, no chips.
-    (delete-region romacs-agent-log--input (point-max))
+    (delete-region (point-min) (point-max))
     (romacs-agent-log-attach-sync)
     (should-not romacs-attach-items)))
 
@@ -145,7 +144,9 @@ PNG files in a fresh directory, and `composer' its draft's text."
             (insert " tail")
             (should (= (length timer-list) 1))
             (finish (list a b))
-            (buffer-enable-undo)
+            ;; The composer keeps undo from its start: the edit undone
+            ;; is the deletion alone.
+            (undo-boundary)
             (backward-char (length " tail"))
             (delete-char -1)
             (finish (list a))
@@ -160,12 +161,12 @@ PNG files in a fresh directory, and `composer' its draft's text."
                  (lambda (_delay _repeat fn) (push fn pending))))
         (insert "[image] (" a ")")
         (should-not pending)
-        (goto-char (+ romacs-agent-log--input (length "[image]")))
+        (goto-char (+ (point-min) (length "[image]")))
         (delete-char 1)
         (should (= (length pending) 1))
         (funcall (pop pending))
         (should (equal (files) (list a)))
-        (delete-region romacs-agent-log--input (point-max))
+        (delete-region (point-min) (point-max))
         (funcall (pop pending))
         (should-not (files))
         (should-not romacs-agent-log-images--composer)
@@ -181,13 +182,13 @@ PNG files in a fresh directory, and `composer' its draft's text."
                     (romacs-agent-log-attach-tests--shown expected)))
           (insert (link a) "\n" (link b))
           (finish (list a b))
-          (goto-char romacs-agent-log--input)
+          (goto-char (point-min))
           (insert "```\n")
           (finish nil)
           (forward-line 1)
           (insert "```\n")
           (finish (list b))
-          (goto-char romacs-agent-log--input)
+          (goto-char (point-min))
           (insert "x")
           (finish (list a)))))))
 
@@ -200,7 +201,7 @@ PNG files in a fresh directory, and `composer' its draft's text."
       (yank)
       (should (equal (composer) "plain styled"))
       (should (equal-including-properties
-               (buffer-substring romacs-agent-log--input (point-max))
+               (buffer-substring (point-min) (point-max))
                "plain styled")))))
 
 (ert-deftest romacs-agent-log-attach-a-timer-yank-settles-without-a-key ()
@@ -239,7 +240,7 @@ PNG files in a fresh directory, and `composer' its draft's text."
         (let ((timer-list nil) (timer-idle-list nil)
               (transient-mark-mode t) (select-active-regions nil) (deactivate-mark-hook nil))
           (romacs-agent-log-attach-tests--key "x")
-          (set-mark romacs-agent-log--input)
+          (set-mark (point-min))
           (keymap-local-set "<f8>" (lambda () (interactive) (setq deactivate-mark t)))
           (add-hook 'deactivate-mark-hook (lambda () (insert (link a))))
           (romacs-agent-log-attach-tests--key "<f8>")
@@ -276,7 +277,7 @@ PNG files in a fresh directory, and `composer' its draft's text."
           (romacs-agent-log-attach-tests--key "<f8>")
           (romacs--timer-check)
           (romacs-agent-log-attach-tests--shown (list a b))
-          (goto-char (+ romacs-agent-log--input (length "left ")))
+          (goto-char (+ (point-min) (length "left ")))
           (set-mark (- (point-max) (length "right")))
           (setq mark-active t)
           (romacs-agent-log-attach-tests--key "<f9>")
@@ -343,7 +344,7 @@ PNG files in a fresh directory, and `composer' its draft's text."
 
 (defun romacs-agent-log-attach-tests--del-at-start-is-quiet ()
   "Assert that DEL at the draft start leaves the chat and point intact."
-  (should (= (point) romacs-agent-log--input))
+  (should (= (point) (point-min)))
   (should-not romacs-attach-items)
   (should-not (use-region-p))
   (let ((before (buffer-string))
@@ -360,20 +361,17 @@ PNG files in a fresh directory, and `composer' its draft's text."
 (ert-deftest romacs-agent-log-attach-del-at-the-start-of-a-nonempty-draft ()
   (romacs-agent-log-attach-tests--with
     (insert "draft")
-    (goto-char romacs-agent-log--input)
+    (goto-char (point-min))
     (romacs-agent-log-attach-tests--del-at-start-is-quiet)))
 
 (ert-deftest romacs-agent-log-attach-del-at-the-start-after-streaming ()
   (romacs-agent-log-attach-tests--with
-    (let ((session romacs-agent-log--session))
-      (romacs-agent-log-draw session '(:type delta :text "Reply"))
-      (buffer-enable-undo)
+    (let ((session (buffer-local-value 'romacs-agent-log--session chat)))
+      (with-current-buffer chat (romacs-agent-log-draw session '(:type delta :text "Reply")))
       (insert "draft")
-      (goto-char romacs-agent-log--input)
-      (let ((start (point)))
-        (romacs-agent-log-draw session '(:type delta :text " continues"))
-        (should (> romacs-agent-log--input start)))
-      (should (equal (buffer-substring-no-properties (point-min) romacs-agent-log--end)
+      (goto-char (point-min))
+      (with-current-buffer chat (romacs-agent-log-draw session '(:type delta :text " continues")))
+      (should (equal (with-current-buffer chat (buffer-substring-no-properties (point-min) romacs-agent-log--end))
                      "Reply continues\n"))
       (should (equal (composer) "draft"))
       (romacs-agent-log-attach-tests--del-at-start-is-quiet))))
@@ -384,7 +382,7 @@ PNG files in a fresh directory, and `composer' its draft's text."
     (romacs-agent-log-attach-sync)
     (let ((edited nil))
       (cl-letf (((symbol-function 'romacs-attach-edit) (lambda (&rest _) (setq edited t))))
-        (goto-char romacs-agent-log--input)
+        (goto-char (point-min))
         (romacs-agent-log-attach-delete-backward)
         (should edited)
         (setq edited nil)
@@ -396,15 +394,15 @@ PNG files in a fresh directory, and `composer' its draft's text."
 (ert-deftest romacs-agent-log-attach-del-one-character-into-the-draft ()
   (romacs-agent-log-attach-tests--with
     (insert "xdraft")
-    (goto-char (1+ romacs-agent-log--input))
+    (goto-char (1+ (point-min)))
     (call-interactively #'romacs-agent-log-attach-delete-backward)
     (should (equal (composer) "draft"))
-    (should (= (point) romacs-agent-log--input))))
+    (should (= (point) (point-min)))))
 
 (ert-deftest romacs-agent-log-attach-del-at-the-start-deletes-the-active-region ()
   (romacs-agent-log-attach-tests--with
     (insert "cutdraft")
-    (goto-char romacs-agent-log--input)
+    (goto-char (point-min))
     (let ((transient-mark-mode t)
           (select-active-regions nil)
           (delete-active-region t))
@@ -412,7 +410,7 @@ PNG files in a fresh directory, and `composer' its draft's text."
       (should (use-region-p))
       (call-interactively #'romacs-agent-log-attach-delete-backward))
     (should (equal (composer) "draft"))
-    (should (= (point) romacs-agent-log--input))))
+    (should (= (point) (point-min)))))
 
 (ert-deftest romacs-agent-log-attach-reading-never-writes ()
   ;; A link to a file that is gone has no chip, and stays: neither a read
@@ -480,7 +478,7 @@ PNG files in a fresh directory, and `composer' its draft's text."
         (should (equal (composer) (concat "see " (link a) " now!")))
         ;; Sent before the image is saved: it lands nowhere.
         (romacs-agent-log-attach-yank)
-        (delete-region romacs-agent-log--input (point-max))
+        (delete-region (point-min) (point-max))
         (run-hooks 'romacs-agent-log-draft-replaced-hook)
         (funcall pending b)
         (should (equal (composer) ""))
@@ -494,7 +492,9 @@ PNG files in a fresh directory, and `composer' its draft's text."
       (copy-file a spaced)
       (insert (link a) " " (link b) " " (link spaced)))
     (romacs-agent-log-attach-sync)
-    (let ((tray (overlay-get romacs-agent-log-attach--overlay 'before-string)))
+    ;; The chips, before the prompt's mark the overlay shows after them.
+    (let ((tray romacs-agent-log-attach--tray))
+      (should (string-prefix-p tray (overlay-get romacs-agent-compose--start 'before-string)))
       (should (= (length (split-string tray "  " t "\n")) 3))
       (should (= (cl-count ?\s tray) 4))
       ;; A chip's size keeps its own face over the chip's.
@@ -524,7 +524,7 @@ PNG files in a fresh directory, and `composer' its draft's text."
       (insert "[image](a.png)")
       (romacs-agent-log-attach-sync)
       (let ((id (plist-get (car romacs-attach-items) :id)))
-        (goto-char romacs-agent-log--input)
+        (goto-char (point-min))
         (insert (link a) " ")
         (romacs-attach-set-items (romacs-attach-remove romacs-attach-items id))
         (should (equal (composer) (link a)))))))
@@ -599,7 +599,7 @@ PNG files in a fresh directory, and `composer' its draft's text."
     (insert (link a) " " (link b))
     (romacs-agent-log-attach-sync)
     (delete-region (- (point-max) (length (link b)) 1) (point-max))
-    (goto-char (1+ romacs-agent-log--input))
+    (goto-char (1+ (point-min)))
     (delete-char 5)
     (insert "mine")
     (romacs-attach-set-items romacs-attach-items)

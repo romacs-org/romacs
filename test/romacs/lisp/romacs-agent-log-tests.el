@@ -26,12 +26,22 @@
      (with-temp-buffer
        (romacs-agent-log-mode)
        (setq romacs-agent-log--session session
-             romacs-agent-log--end (point-min-marker)
-             romacs-agent-log--input (point-min-marker))
+             romacs-agent-log--end (point-min-marker))
        (set-marker-insertion-type romacs-agent-log--end t)
        (romacs-agent-log--separator t)
        (cl-flet ((draw (&rest event) (romacs-agent-log-draw session event) (romacs-agent-log--separator)))
          ,@body))))
+
+(defun romacs-agent-log-tests--type (text)
+  "Type TEXT at the end of the current chat's composer; return the composer."
+  (with-current-buffer (romacs-agent-log-composer-buffer (current-buffer))
+    (goto-char (point-max))
+    (insert text)
+    (current-buffer)))
+
+(defun romacs-agent-log-tests--chrome ()
+  "The chat's text after its transcript: its activity, divider and queue."
+  (buffer-substring-no-properties romacs-agent-log--end (point-max)))
 
 ;; What runs before a redisplay: a batch session has no host to run it.
 (unless (fboundp 'romacs--run-window-change-functions)
@@ -173,7 +183,7 @@ them inherits."
       (should (string-match-p "rm -rf build" text))
       (should (string-match-p "y allow" text))
       (should (string-match-p "d deny" text)))
-    (should (string-match-p "waits on you" (buffer-substring-no-properties romacs-agent-log--end romacs-agent-log--input)))
+    (should (string-match-p "waits on you" (romacs-agent-log-tests--chrome)))
     (romacs-agent-log--header-show)
     (should (string-match-p "1 waits on you" header-line-format))
     ;; Answered by the user: who and how, and the block no longer waits.
@@ -197,10 +207,8 @@ them inherits."
                     (apply #'draw event)
                     (romacs-agent-ui--children-flush)
                     (setq romacs-agent-ui--children-timer 'coalesced))
-                  (chrome () (buffer-substring-no-properties romacs-agent-log--end romacs-agent-log--input)))
-          (goto-char (point-max))
-          (insert "draft")
-          (backward-char 2)
+                  (chrome () (romacs-agent-log-tests--chrome)))
+          (with-current-buffer (romacs-agent-log-tests--type "draft") (backward-char 2))
           (deliver (list :type 'tool :state 'started :id "a" :name "Agent"
                          :input (romacs-agent-log-tests--input "description" "Read the docs")))
           (deliver '(:type task :id "a" :task "worker" :state started :background t :subagent t))
@@ -218,10 +226,11 @@ them inherits."
               (goto-char mark)
               (search-forward "Read the docs" (line-end-position))
               (should (eq (get-text-property (1- (point)) 'face) 'romacs-agent-log-subagent))))
-          (should (string-suffix-p "A queued message\n❯ " (chrome)))
+          ;; The queue's rows end the chat: its composer is a buffer below.
+          (should (string-suffix-p "A queued message" (chrome)))
           (save-excursion
             (goto-char (1+ (car (romacs-agent-log-activity-bounds))))
-            (should-error (insert "x") :type 'text-read-only))
+            (should-error (insert "x") :type 'buffer-read-only))
           (should-not (string-match-p "Reading guide.org" (romacs-agent-log-tests--transcript)))
           (deliver '(:type tool :id "a" :state completed :output "Worker started"))
           (draw :type 'delta :text "Parent output")
@@ -233,14 +242,15 @@ them inherits."
             (romacs-agent-log--separator t)
             (deliver '(:type task :id "a" :state progress :activity "Checking the result"))
             (should (string-match-p "Read the docs  ·  Checking the result" (chrome)))
-            (should (string-suffix-p "A different queue\n❯ " (chrome))))
+            (should (string-suffix-p "A different queue" (chrome))))
           (deliver '(:type task :id "a" :state completed :summary "Finished reading"))
           (should-not (romacs-agent-log-activity-bounds))
           (should-not romacs-agent-log-activity--threads)
           (deliver '(:type task :id "a" :state progress :activity "Stale update"))
           (should-not (string-match-p "Stale update\\|Read the docs" (chrome)))
-          (should (equal (buffer-substring-no-properties romacs-agent-log--input (point-max)) "draft"))
-          (should (= (- (point) romacs-agent-log--input) 3)))))))
+          (with-current-buffer romacs-agent-log--composer
+            (should (equal (buffer-string) "draft"))
+            (should (= (point) 4))))))))
 
 (ert-deftest romacs-agent-log-opens-an-inline-delegated-thread ()
   (romacs-agent-log-tests--with
@@ -254,8 +264,7 @@ them inherits."
       (romacs-agent--index child)
       (save-window-excursion
         (switch-to-buffer parent-buffer)
-        (goto-char (point-max))
-        (insert "parent draft")
+        (romacs-agent-log-tests--type "parent draft")
         (romacs-agent-ui--summarize-children session)
         (romacs-agent-log--activity-refresh)
         (let* ((bounds (romacs-agent-log-activity-bounds))
@@ -291,7 +300,7 @@ them inherits."
         (romacs-agent-log--activity-refresh)
         (should-not (romacs-agent-log-activity-bounds))
         (should-not romacs-agent-log-activity--threads)
-        (should (equal (buffer-substring-no-properties romacs-agent-log--input (point-max)) "parent draft"))))))
+        (should (equal (romacs-agent-log--draft) "parent draft"))))))
 
 (ert-deftest romacs-agent-log-remote-history-leaves-live-workers-alone ()
   (require 'romacs-agent-remote)
@@ -337,10 +346,10 @@ them inherits."
     (dotimes (i 5) (draw :type 'input :text (format "prompt %d" i)))
     (draw :type 'tool :state 'started :id "t" :name "Bash" :input (romacs-agent-log-tests--input "command" "sleep 9"))
     (draw :type 'delta :text "streaming")
-    (goto-char (point-max))
-    (insert "my draft")
+    (romacs-agent-log-tests--type "my draft")
     (should (equal (romacs-agent-log--draft) "my draft"))
-    ;; Up from the composer into the transcript, line by line.
+    ;; Up from the chat's end through the transcript, line by line.
+    (goto-char (point-max))
     (let ((lines 0))
       (while (and (> (point) (point-min)) (< lines 50))
         (let ((before (point)))
@@ -355,26 +364,24 @@ them inherits."
       (draw :type 'tool :state 'completed :id "t" :output "done")
       (should (= (point) here)))
     (should (equal (romacs-agent-log--draft) "my draft"))
-    ;; A point in the composer stays there as the separator changes.
+    ;; A point at the chat's end stays there as the separator changes.
     (goto-char (point-max))
     (puthash "w" t (romacs-agent-approvals session))
     (draw :type 'approval :request-id "w" :tool "Bash")
-    (should (= (point) (point-max)))
-    (should (>= (point) romacs-agent-log--input))))
+    (should (= (point) (point-max)))))
 
 (ert-deftest romacs-agent-log-composer-edits-stop-at-its-start ()
+  ;; The composer is a buffer of its own: killing past its start leaves
+  ;; the chat as it was, and the chat, read-only, takes no edit.
   (romacs-agent-log-tests--with
     (draw :type 'input :text "a prompt")
-    (goto-char (point-max))
-    (insert "two words")
-    (let ((separator (buffer-substring-no-properties romacs-agent-log--end romacs-agent-log--input)))
-      (dotimes (_ 5) (backward-kill-word 1))
+    (let ((chat (buffer-string)))
+      (with-current-buffer (romacs-agent-log-tests--type "two words")
+        (dotimes (_ 5) (ignore-error beginning-of-buffer (backward-kill-word 1))))
       (should (equal (romacs-agent-log--draft) ""))
-      (should (equal (buffer-substring-no-properties romacs-agent-log--end romacs-agent-log--input) separator)))
-    ;; Line motion leaves the composer all the same.
-    (goto-char (point-max))
-    (previous-line 2)
-    (should (< (point) romacs-agent-log--end))))
+      (should (equal (buffer-string) chat))
+      (goto-char (point-max))
+      (should-error (insert "x") :type 'buffer-read-only))))
 
 (ert-deftest romacs-agent-log-n-and-p-move-between-entries ()
   (romacs-agent-log-tests--with
@@ -535,8 +542,8 @@ them inherits."
         (search-backward "reply one")
         (romacs-agent-chat-rollback))
       (should (equal asked 4)))
-    (romacs-agent-menu--link "/tmp/shot one.png")
-    (should (equal (buffer-substring-no-properties romacs-agent-log--input (point-max)) "[image](</tmp/shot one.png>)"))))
+    (romacs-agent-log-in-composer (romacs-agent-menu--link "/tmp/shot one.png"))
+    (should (equal (romacs-agent-log--draft) "[image](</tmp/shot one.png>)"))))
 
 (ert-deftest romacs-agent-log-prompt-motion-lands-on-its-turn ()
   ;; Prompt motion lands on a prompt's first character, its leading blank
@@ -845,7 +852,7 @@ them inherits."
     (puthash "b" t (romacs-agent-approvals session))
     (draw :type 'approval :request-id "b" :tool "Bash" :input (romacs-agent-log-tests--input "command" "make"))
     (goto-char (romacs-agent-log-ask-start (romacs-agent-log--ask-of "b")))
-    (should (eq (lookup-key (get-text-property (point) 'keymap) (kbd "RET")) #'romacs-agent-log-open))
+    (should (eq (key-binding (kbd "RET")) #'romacs-agent-log-open))
     (let (answered)
       (cl-letf (((symbol-function 'romacs-agent-respond) (lambda (&rest args) (push args answered))))
         (save-window-excursion (romacs-agent-log-open)))
@@ -869,15 +876,14 @@ them inherits."
   (romacs-agent-log-tests--with
     (draw :type 'input :text "first")
     (draw :type 'input :text "second")
-    (goto-char (point-max))
-    (insert "my draft")
-    (romacs-agent-log-history-previous)
-    (should (equal (romacs-agent-log--draft) "second"))
-    (romacs-agent-log-history-previous)
-    (should (equal (romacs-agent-log--draft) "first"))
-    (romacs-agent-log-history-next)
-    (romacs-agent-log-history-next)
-    (should (equal (romacs-agent-log--draft) "my draft"))))
+    (with-current-buffer (romacs-agent-log-tests--type "my draft")
+      (romacs-agent-log-history-previous)
+      (should (equal (romacs-agent-log--draft) "second"))
+      (romacs-agent-log-history-previous)
+      (should (equal (romacs-agent-log--draft) "first"))
+      (romacs-agent-log-history-next)
+      (romacs-agent-log-history-next)
+      (should (equal (romacs-agent-log--draft) "my draft")))))
 
 ;; Sol review round 2.
 
@@ -1061,9 +1067,8 @@ them inherits."
                    ;; It waits, as its admission would leave it.
                    (let ((romacs-agent--queue-quiet t)) (romacs-agent--enqueue s item))
                    item)))
-        (goto-char (point-max))
-        (insert "stop that")
-        (romacs-agent-log-interrupt-and-send))
+        (with-current-buffer (romacs-agent-log-tests--type "stop that")
+          (romacs-agent-log-interrupt-and-send)))
       (should (equal (reverse calls) (list (list 'admit live "stop that" 'next t) (list 'interrupt live)))))))
 
 ;; A chat's source.
@@ -1082,11 +1087,11 @@ them inherits."
   (romacs-agent-submit-answer callback (list :draft-id (plist-get intent :draft-id) :status 'accepted)))
 
 (defun romacs-agent-log-tests--answered ()
-  "Wait for the current chat's draft to be answered."
+  "Wait for the current chat's or composer's draft to be answered."
   (let ((deadline (+ (float-time) 3)))
-    (while (and romacs-agent-log--sending (< (float-time) deadline))
+    (while (and (romacs-agent-log--sending-p) (< (float-time) deadline))
       (accept-process-output nil 0.01))
-    (should-not romacs-agent-log--sending)))
+    (should-not (romacs-agent-log--sending-p))))
 (cl-defmethod romacs-agent-log-source-interrupt ((source romacs-agent-log-tests--source) _session)
   (romacs-agent-log-tests--called source 'interrupt))
 (cl-defmethod romacs-agent-log-source-respond ((source romacs-agent-log-tests--source) _session id allow reason)
@@ -1103,14 +1108,13 @@ them inherits."
   ;; draft stays, writable, and RET sends it again.
   (romacs-agent-log-tests--with
     (draw :type 'input :text "first" :request 1)
-    (goto-char (point-max))
-    (insert "keep me")
-    (cl-letf (((symbol-function 'romacs-agent-log--loaded) (lambda (_) (error "Lookup failed"))))
-      (should-error (romacs-agent-log-steer)))
-    (should-not romacs-agent-log--sending)
-    (should (equal (romacs-agent-log--draft) "keep me"))
-    (insert " too")
-    (should (equal (romacs-agent-log--draft) "keep me too"))))
+    (with-current-buffer (romacs-agent-log-tests--type "keep me")
+      (cl-letf (((symbol-function 'romacs-agent-log--loaded) (lambda (_) (error "Lookup failed"))))
+        (should-error (romacs-agent-log-send)))
+      (should-not romacs-agent-log--sending)
+      (should (equal (romacs-agent-log--draft) "keep me"))
+      (insert " too")
+      (should (equal (romacs-agent-log--draft) "keep me too")))))
 
 (ert-deftest romacs-agent-log-reads-and-acts-through-its-source ()
   ;; A chat of another source draws what it gives and acts through it
@@ -1131,19 +1135,20 @@ them inherits."
             (should-not romacs-agent-ui--session)
             (should-not desktop-save-buffer)
             (should (stringp warm-restart-left-out))
-            ;; Drawn, it holds nothing typed; a draft typed, it does.
-            (should-not (buffer-modified-p))
-            (cl-flet ((type (text) (goto-char (point-max)) (insert text)))
-              (type "now")
-              (should (buffer-modified-p))
-              (romacs-agent-log-send)
-              (romacs-agent-log-tests--answered)
+            ;; Its composer holds nothing typed; a draft typed, it does.
+            (with-current-buffer (romacs-agent-log-composer-buffer buffer)
               (should-not (buffer-modified-p))
-              (type "later") (romacs-agent-log-queue)
-              (romacs-agent-log-tests--answered)
-              (romacs-agent-log-interrupt)
-              (type "after") (romacs-agent-log-interrupt-and-send)
-              (romacs-agent-log-tests--answered))
+              (cl-flet ((type (text) (goto-char (point-max)) (insert text)))
+                (type "now")
+                (should (buffer-modified-p))
+                (romacs-agent-log-send)
+                (romacs-agent-log-tests--answered)
+                (should-not (buffer-modified-p))
+                (type "later") (romacs-agent-log-queue)
+                (romacs-agent-log-tests--answered)
+                (romacs-agent-log-interrupt)
+                (type "after") (romacs-agent-log-interrupt-and-send)
+                (romacs-agent-log-tests--answered)))
             (puthash "r1" t (romacs-agent-log-tests--source-approvals source))
             (romacs-agent-log-draw session '(:type approval :request-id "r1" :tool "Bash"))
             (goto-char (point-max))
@@ -1408,22 +1413,33 @@ them inherits."
   '(("RET" . romacs-agent-log-send) ("C-j" . newline) ("S-<return>" . newline)
     ("C-c C-c" . romacs-agent-log-interrupt) ("C-c C-i" . romacs-agent-log-interrupt)
     ("C-c C-k" . romacs-agent-log-interrupt-and-send) ("C-c C-q" . romacs-agent-log-queue)
-    ("C-c C-s" . romacs-agent-log-steer) ("C-c C-a" . romacs-agent-chat-attach)
-    ("C-c C-d" . romacs-agent-log-deny) ("C-c C-o" . romacs-agent-menu-map-popup)
+    ("C-c C-s" . romacs-agent-log-send) ("C-c C-a" . romacs-agent-chat-attach)
+    ("C-c C-d" . romacs-agent-log-deny) ("C-c C-o" . romacs-agent-log-menu)
     ("C-c C-/" . describe-mode) ("C-c C-n" . romacs-agent-chat-new)
     ("C-c C-r" . romacs-agent-chat-rename) ("C-c C-e" . romacs-agent-chat-effort)
     ("C-c C-b" . romacs-agents) ("C-c C-t" . romacs-agents)
-    ("C-c C-j" . romacs-agent-log-composer)
+    ("C-c C-j" . romacs-agent-compose-transcript)
     ("M-p" . romacs-agent-log-history-previous) ("M-n" . romacs-agent-log-history-next)
     ;; Dropped with what they acted on: no prompt is predicted to
     ;; complete, and an attached file is a path in the composer's text,
     ;; with no tray of images to take one off.
     ("TAB") ("C-c C-w"))
-  "The keys of the chat before this one, each with its command here, or
-none when dropped.")
+  "The keys of the chat before this one, each with its command in the
+composer now, or none when dropped.")
 
 (ert-deftest romacs-agent-log-has-the-keys-of-the-chat-before ()
+  ;; Its composer's keys, each in its own buffer now; the chat's own: the
+  ;; C-c keys the composer's, its RET the transcript's, g and C-c C-j to
+  ;; the composer, M-p its prompts'.
   (dolist (key romacs-agent-log-tests--chat-keys)
+    (should (equal (cons (car key) (keymap-lookup romacs-agent-compose-mode-map (car key)))
+                   key)))
+  (dolist (key '(("RET" . romacs-agent-log-open) ("C-c C-j" . romacs-agent-log-composer)
+                 ("g" . romacs-agent-log-composer)
+                 ("C-c C-c" . romacs-agent-log-interrupt) ("C-c C-o" . romacs-agent-log-menu)
+                 ("C-c C-q" . romacs-agent-log-queue) ("C-c C-s" . romacs-agent-log-send)
+                 ("C-c C-k" . romacs-agent-log-interrupt-and-send) ("C-c C-a" . romacs-agent-chat-attach)
+                 ("M-p")))
     (should (equal (cons (car key) (keymap-lookup romacs-agent-log-mode-map (car key)))
                    key))))
 
@@ -1448,11 +1464,16 @@ none when dropped.")
     (let ((modes (command-modes command)))
       ;; Named, so a failure says which.
       (should (equal (list command (commandp command) (or (null modes) (and (memq 'romacs-agent-log-mode modes) t)))
+                     (list command t t)))))
+  ;; Its composer's too, the session's keys among them, offered there.
+  (dolist (command (romacs-agent-log-tests--commands romacs-agent-compose-mode-map))
+    (let ((modes (command-modes command)))
+      (should (equal (list command (commandp command) (or (null modes) (and (memq 'romacs-agent-compose-mode modes) t)))
                      (list command t t))))))
 
 (ert-deftest romacs-agent-log-session-keys-act-on-the-chat ()
-  ;; From the transcript: C-c C-a puts a path in the composer, C-c C-s
-  ;; sends it, C-c C-r names the session.
+  ;; From the composer: C-c C-a puts a path in it, C-c C-s sends it, C-c
+  ;; C-r names the chat's session.
   (romacs-agent-log-tests--with
     (draw :type 'input :text "first" :request 4)
     (draw :type 'delta :text "reply")
@@ -1473,32 +1494,33 @@ none when dropped.")
                    ;; As its write would say.
                    (romacs-agent--draft-written (romacs-agent-item-id item))
                    item)))
-        (call-interactively (keymap-lookup romacs-agent-log-mode-map "C-c C-a"))
-        (should (equal (buffer-substring-no-properties romacs-agent-log--input (point-max)) "[file](/tmp/notes.org)"))
-        (goto-char (point-min))
-        (call-interactively (keymap-lookup romacs-agent-log-mode-map "C-c C-s"))
-        (should (equal sent "[file](/tmp/notes.org)"))
-        (romacs-agent-log-tests--answered)
-        (should (= romacs-agent-log--input (point-max)))
-        (call-interactively (keymap-lookup romacs-agent-log-mode-map "C-c C-r"))
-        (should (equal (romacs-agent-title session) "named"))))))
+        (with-current-buffer (romacs-agent-log-composer-buffer (current-buffer))
+          (call-interactively (keymap-lookup romacs-agent-compose-mode-map "C-c C-a"))
+          (should (equal (buffer-string) "[file](/tmp/notes.org)"))
+          (goto-char (point-min))
+          (call-interactively (keymap-lookup romacs-agent-compose-mode-map "C-c C-s"))
+          (should (equal sent "[file](/tmp/notes.org)"))
+          (romacs-agent-log-tests--answered)
+          (should (= (point-min) (point-max)))
+          (call-interactively (keymap-lookup romacs-agent-compose-mode-map "C-c C-r")))
+        (should (equal (romacs-agent-title session) "named"))
+        (should (equal (buffer-name) "*agent: named*"))))))
 
 (ert-deftest romacs-agent-log-attach-links-the-clipboard-s-image ()
   ;; C-c C-a with an image in the clipboard links the file it is, where
   ;; it is, at the composer's end.
   (romacs-agent-log-tests--with
     (ignore #'draw)
-    (goto-char (point-max))
-    (insert "see")
+    (romacs-agent-log-tests--type "see")
     (cl-letf (((symbol-function 'romacs-attach-clipboard-image-type) (lambda () "image/png"))
               ((symbol-function 'romacs-agent-log--loaded) #'identity)
               ((symbol-function 'romacs-attach-clipboard-file)
                (lambda (type then)
                  (should (equal type "image/png"))
                  (funcall then "/pictures/Screenshots/shot.png"))))
-      (call-interactively (keymap-lookup romacs-agent-log-mode-map "C-c C-a"))
-      (should (equal (buffer-substring-no-properties romacs-agent-log--input (point-max))
-                     "see [image](/pictures/Screenshots/shot.png)")))))
+      ;; From the chat, as its menu's row runs it: the composer gets it.
+      (call-interactively #'romacs-agent-chat-attach)
+      (should (equal (romacs-agent-log--draft) "see [image](/pictures/Screenshots/shot.png)")))))
 
 ;;; A command's output
 

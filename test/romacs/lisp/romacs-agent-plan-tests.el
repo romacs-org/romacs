@@ -229,7 +229,7 @@
     (with-temp-buffer
       (romacs-agent-log-mode)
       (setq romacs-agent-log--session session
-            romacs-agent-log--end (point-min-marker) romacs-agent-log--input (point-min-marker))
+            romacs-agent-log--end (point-min-marker))
       (set-marker-insertion-type romacs-agent-log--end t)
       (cl-letf (((symbol-function 'romacs-agent-log--loaded) (lambda (_) session)))
         ;; A replayed plan offers nothing; the live one its row, by y.
@@ -278,7 +278,7 @@
           (narrow-to-region (point-min) (1+ (point-min)))
           (call-interactively (keymap-lookup romacs-agent-log-mode-map "C-c C-y")))
         (should-not (romacs-agent-log--proceed-offered))
-        (should-not (string-match-p "plan ready" (buffer-substring-no-properties romacs-agent-log--end romacs-agent-log--input)))
+        (should-not (string-match-p "plan ready" (buffer-substring-no-properties romacs-agent-log--end (point-max))))
         (should-not (romacs-agent-log--proceed-offered))
         (should (equal (romacs-agent-log--doing session) '(idle)))
         (romacs-agent-set-plan session nil)))

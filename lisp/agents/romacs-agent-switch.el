@@ -19,6 +19,7 @@
 (require 'romacs-agent-log)
 
 (declare-function romacs-agents "romacs-agent-board" ())
+(declare-function romacs-agent-log--leave-composer "romacs-agent-log-compose" ())
 
 (defconst romacs-agent-switch--column 30
   "The widest a candidate's name pushes the annotations' column: a longer
@@ -81,13 +82,15 @@ the annotations in one column (`romacs-agent-switch--column' at most)."
 completion: the most recently used first, the current chat last.
 With none open, offer the board (`romacs-agents')."
   (interactive)
-  (if-let* ((chats (romacs-agent-switch--chats (buffer-list) (current-buffer))))
+  (if-let* ((chats (romacs-agent-switch--chats (buffer-list) (romacs-agent-log--chat))))
       (let* ((named (mapcar (lambda (buffer) (cons (buffer-name buffer) buffer)) chats))
              (name (completing-read (format-prompt "Agent chat" (caar named))
                                     (romacs-agent-switch--table chats) nil t nil nil (caar named)))
              (buffer (romacs-agent-switch--named name named)))
         (unless (romacs-agent-switch--chat-p buffer)
           (user-error "No open agent chat is named %s" name))
+        ;; From a composer, the selected window is its chat's above.
+        (romacs-agent-log--leave-composer)
         (let ((switch-to-buffer-obey-display-actions nil))
           (switch-to-buffer buffer nil t)))
     (when (y-or-n-p "No agent chats are open.  Show the board? ")
