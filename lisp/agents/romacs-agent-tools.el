@@ -1160,14 +1160,31 @@ shell of its at work."
        (>= (- (float-time) (or (romacs-agent-last-time session) 0)) (romacs-agent-tools--reap-delay session))
        (not (romacs-agent-tools--working-p session))))
 
+(defun romacs-agent-tools--quiet-due (id)
+  "Whether the quiet session ID (unloaded, its supervisor running:
+`romacs-agent--quiet') is a task idle its time by its row: loaded then,
+so the reaper sees it attached.  Nil for one to look at again later, and
+`never' for one no reaper stops (a user's own session)."
+  (let* ((row (romacs-agent-store-row-session id))
+         (delay (and row (romacs-agent-tools--reap-delay row))))
+    (cond ((not delay) 'never)
+          ((>= (- (float-time) (or (romacs-agent-last-time row) 0)) delay) t))))
+
 (defun romacs-agent-tools--reap-sweep ()
   "Stop to sleep the harness of each watched task that is due; with no
-other task's harness left running, stop looking."
+other task's harness left running, stop looking.  A quiet task (a
+restart left it unloaded, its supervisor running) idle its time is
+loaded, attached, and stopped by a look after."
   (let ((due nil) (watched 0))
     (maphash (lambda (_id session)
                (when (romacs-agent-tools--reap-watched-p session)
                  (if (romacs-agent-tools--reap-due-p session) (push session due) (cl-incf watched))))
              romacs-agent--sessions)
+    (dolist (id (hash-table-keys romacs-agent--quiet))
+      (pcase (ignore-error romacs-agent-store-unread (romacs-agent-tools--quiet-due id))
+        ('never nil)
+        ('nil (cl-incf watched))
+        (_ (when (romacs-agent-load-session id) (cl-incf watched)))))
     (dolist (session due) (romacs-agent-stop session t))
     (when (and (zerop watched) (timerp romacs-agent-tools--reaper))
       (cancel-timer romacs-agent-tools--reaper)

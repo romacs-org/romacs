@@ -91,6 +91,25 @@ period), `stopped' each session stopped and `asleep' each reaped to sleep;
       (should romacs-agent-tools--reaper)
       (should (reaped-p #'ignore)))))
 
+(ert-deftest romacs-agent-reap-a-quiet-task-idle-its-time ()
+  ;; A restart left a finished task unloaded, its supervisor running: the
+  ;; reaper loads it when its row says it sat idle its time, and keeps
+  ;; looking at one whose time is not yet up; a user's own, never.
+  (romacs-agent-reap-tests--with
+    (clrhash romacs-agent--sessions)
+    (let ((romacs-agent--quiet (make-hash-table :test #'equal)) (loaded nil)
+          (rows (list (cons "old" (romacs-agent--make :id "old" :options '(:parent "lead") :last-time (- (float-time) 1000)))
+                      (cons "new" (romacs-agent--make :id "new" :options '(:parent "lead") :last-time (float-time)))
+                      (cons "mine" (romacs-agent--make :id "mine" :last-time 0)))))
+      (dolist (row rows) (puthash (car row) 1 romacs-agent--quiet))
+      (cl-letf (((symbol-function 'romacs-agent-store-row-session) (lambda (id) (cdr (assoc id rows))))
+                ((symbol-function 'romacs-agent-load-session) (lambda (id) (push id loaded) t)))
+        (romacs-agent-tools--reap-watch)
+        (romacs-agent-tools--reap-sweep)
+        (should (equal loaded '("old")))
+        ;; "new" still to look at: the reaper runs on.
+        (should romacs-agent-tools--reaper)))))
+
 (ert-deftest romacs-agent-reap-waits-for-what-it-was-told-and-its-replay ()
   (romacs-agent-reap-tests--with
     (remhash "l" romacs-agent--sessions)
