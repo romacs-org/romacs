@@ -259,7 +259,7 @@ fn integer_of(vm: &mut Vm, source: &str) -> Result<usize, String> {
 /// stay ordered and are streamed even if the supervisor later kills a test.
 #[cfg(unix)]
 fn native_output_to_stdout() -> std::io::Result<()> {
-    // HOST(escape): stdout and stderr are sends another process reads
+    // HOST(escape): points stderr at stdout, a redirection the reader of either sees
     rustix::stdio::dup2_stderr(std::io::stdout()).map_err(std::io::Error::from)
 }
 #[cfg(not(unix))]
@@ -402,6 +402,7 @@ fn main() {
     let evaluator = std::thread::Builder::new()
         .name("romacs-evaluator".into())
         .stack_size(EVALUATOR_STACK_SIZE)
+        // HOST(pure): starts a thread of this process, no outside resource (rule 5)
         .spawn(evaluate);
     match evaluator.map(|thread| thread.join()) {
         Ok(Ok(())) => {}

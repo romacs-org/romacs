@@ -57,6 +57,7 @@ pub fn trace(out: &Path) -> ! {
         args.extend([OsString::from("--world-trace-child"), dir.clone().into_os_string()]);
         host::command(host::current_exe()?)?
             .args(args).env_clear().envs(pinned_env(&host::env_snapshot(), &dir))
+            // HOST(acquisition): runs a child and waits for it (rule 1: acquisition first)
             .current_dir(dir.join("p/cwd")).status()
     });
     match status {

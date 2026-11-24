@@ -404,8 +404,9 @@ impl ImageBuilder {
                     }
                     Err(e) => return Err(e.to_string()),
                 }
-                // HOST(File::open, pure): the code-image store, reached only through the vm2 adapter's
-                // --image, --code-image and --cache-store; world builds refuse images (M1)
+                // HOST(File::open, block): the code-image store, reached only through the vm2 adapter's
+                // --image, --code-image and --cache-store; world builds refuse images (M1); a fresh
+                // open by path, which a FIFO put at that name would block
                 File::open(store)
                     // HOST(escape): forces the code-image store's writes to disk: no inverse
                     .and_then(|d| d.sync_all())

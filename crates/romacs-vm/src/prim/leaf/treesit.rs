@@ -616,11 +616,13 @@ impl Leaf<'_> {
         let slice = crate::quit::QUIT_SLICE;
         loop {
             let (first, length) = { let c = core.borrow(); (c.tree.is_none(), c.visible.1 - c.visible.0) };
+            // HOST(pure): waits on a thread of this process, no outside peer (rule 5)
             let ahead = core.borrow_mut().ahead.as_mut().is_none_or(|ahead| ahead.wait(slice));
             // Only an early parse this parser can take is worth its wait.
             let early = !first || {
                 let native = native.borrow();
                 let (language, sees_all) = (native.language(), native.sees_all(u32::try_from(length).unwrap_or(u32::MAX)));
+                // HOST(pure): waits on a thread of this process, no outside peer (rule 5)
                 !self.ts_registry_mut(base).early.as_mut().is_some_and(|early| early.pending_for(language.as_ref(), sees_all) && !early.wait(slice))
             };
             // A press during the slice that got the tree quits too.

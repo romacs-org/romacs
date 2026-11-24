@@ -1115,7 +1115,8 @@ impl Captured {
 }
 
 /// open(2) of PATH for reading, with FLAGS (`O_NONBLOCK`, `O_NOFOLLOW` …).
-// HOST(block): opens by path, nonblocking only when FLAGS asks: a FIFO's open can block; a regular file is pure
+// HOST(block): opens by path, nonblocking only when FLAGS asks: a FIFO's open can block; a regular
+// file is pure
 pub fn open_input(path: impl AsRef<Path>, flags: i32) -> io::Result<Input> {
     use std::os::unix::fs::OpenOptionsExt;
     credential_in_build(path.as_ref())?;
@@ -1279,7 +1280,8 @@ impl Input {
     }
 
     /// close(2), with its error.
-    // HOST(escape): closes a descriptor, with no inverse (the closing rule); a regular file's read end refines to pure
+    // HOST(escape): closes a descriptor, with no inverse (the closing rule); a regular file's read
+    // end refines to pure
     pub fn close(self) -> io::Result<()> {
         sys::close_owned(self.0.into())
     }
@@ -1884,7 +1886,7 @@ pub fn group_by_name(name: &CStr, buffer: usize) -> Result<u32, i32> {
 /// for, in its order, then endpwent or endgrent, as dired.c Fsystem_users and
 /// Fsystem_groups do (so NSS sources count). The walk's cursor is the C
 /// library's, shared by the process, so one walk runs at a time.
-// HOST(pure): a process, user or system query
+// HOST(block): walks the account database through NSS, which can wait on sssd or LDAP
 pub fn account_names(groups: bool) -> Vec<Vec<u8>> {
     static WALK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _walk = WALK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1952,7 +1954,7 @@ fn count_processors(set: Processors) -> u64 {
 /// probes compare work at two sizes by it. None where the kernel refuses
 /// counters (perf_event_paranoid above 2, no PMU) or cannot keep this one
 /// counting all the time: a number is always a whole count.
-// HOST(pure): this thread's hardware counter: a meter no other party sees
+// HOST(acquisition): instruction_count's first call opens this thread's perf counter, later ones read it
 pub(crate) fn thread_instructions() -> Option<u64> {
     crate::flight::value("instructions", instruction_count)
 }
@@ -1962,7 +1964,8 @@ pub(crate) fn thread_instructions() -> Option<u64> {
 /// calls. What a meter hands on to Lisp is a host result, and logged
 /// there. A session installs it as the render thread's meter too
 /// (`romacs_display_protocol::meter`).
-// HOST(pure): opens once and reads this thread's hardware counter: a meter no other party sees
+// HOST(acquisition): opens this thread's perf counter on its first call (a kernel event and its
+// descriptor), then reads it
 #[must_use]
 pub fn instruction_count() -> Option<u64> {
     INSTRUCTION_COUNTER.with(|counter| {
@@ -2121,7 +2124,8 @@ pub(crate) fn flight_base() -> Instant {
 
 /// F with every signal blocked on this thread, so threads it starts leave
 /// signals to the threads that handle them.
-// HOST(pure): this thread's signal mask, restored before it returns: no lasting effect
+// HOST(pure): this thread's own signal mask, which no other party observes (rule 5), restored
+// before it returns
 pub fn with_signals_blocked<T>(f: impl FnOnce() -> T) -> T {
     sys::with_signals_blocked(f)
 }
@@ -2338,7 +2342,8 @@ pub fn temp_file(template: &Path) -> io::Result<(PathBuf, File)> {
 
 /// Every child process the VM starts comes from a Command made here: a
 /// world build refuses it, as an effect it cannot capture (`child`).
-// HOST(acquisition): starts a child process (a spawn)
+// HOST(acquisition): the world build's guard on a child: the caller's `.spawn(`, `.output(` or
+// `.status(` is classed too
 pub fn command(program: impl AsRef<OsStr>) -> io::Result<Command> {
     effect(|| format!("run {}", String::from_utf8_lossy(program.as_ref().as_bytes())))?;
     Ok(child(program))
@@ -2348,7 +2353,8 @@ pub fn command(program: impl AsRef<OsStr>) -> io::Result<Command> {
 /// markers (`LAUNCH_MARKERS`): every child of this program starts from one,
 /// through `command` when the VM starts it. A child that is to have a marker
 /// sets it.
-// HOST(acquisition): starts a child process (a spawn)
+// HOST(pure): builds a Command in memory; the `.spawn(`, `.output(` or `.status(` at the caller
+// starts the child
 pub fn child(program: impl AsRef<OsStr>) -> Command {
     let mut command = Command::new(program);
     for marker in LAUNCH_MARKERS {
@@ -2413,7 +2419,8 @@ pub enum Flock {
 ///
 /// # Errors
 /// What flock(2) reports, but a `Try` lock's `EWOULDBLOCK`.
-// HOST(acquisition): a flock others see, held until its file closes; a blocking HOW also waits (acquisition first)
+// HOST(acquisition): a flock others see, held until its file closes; a blocking HOW also waits
+// (acquisition first)
 pub fn lock(fd: impl std::os::fd::AsFd, how: Flock) -> io::Result<bool> {
     use rustix::fs::FlockOperation as Op;
     let operation = match how {
@@ -2720,7 +2727,8 @@ pub fn send_packet(socket: std::os::fd::BorrowedFd<'_>, bytes: &[u8], fd: Option
 /// One packet from SOCKET, up to CAPACITY bytes, with the descriptors passed
 /// beside it (close-on-exec); None once the peer has closed. A packet the
 /// buffer cannot hold whole is an error, never a prefix.
-// HOST(take): one packet from a nonblocking socket, consumed
+// HOST(take): one packet, consumed; its sockets are nonblocking (callers keep it so), SCM_RIGHTS
+// descriptors part of the take
 pub fn recv_packet(socket: std::os::fd::BorrowedFd<'_>, capacity: usize) -> io::Result<Option<(Vec<u8>, Vec<OwnedFd>)>> {
     use rustix::net::{RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, ReturnFlags};
     let mut bytes = vec![0u8; capacity];
@@ -3092,7 +3100,8 @@ pub fn process_pss(pid: i32) -> Option<u64> {
 
 /// Wait at GATE, a pipe's read end, until one byte arrives (true) or the
 /// write end closes unwritten (false); a termination ends the wait too.
-// HOST(block): waits on a pipe until a byte or its close
+// HOST(escape): waits for the gate's byte, then closes its read end, which a later write sees as
+// EPIPE (rule 1: escape first)
 pub fn await_gate(gate: OwnedFd) -> bool {
     let mut byte = [0u8];
     loop {
@@ -3359,7 +3368,8 @@ pub fn connect(addr: SocketAddr) -> io::Result<TcpStream> {
 /// writes the file itself, past this boundary. In a build the open is an
 /// effect, so it is not made: a definition form that opens one is deferred
 /// to restore, and any other form leaves its entry to load in the session.
-// HOST(acquisition): `sqlite-open`: a connection, and the file SQLite may create
+// HOST(acquisition): the world build's guard on `sqlite-open`; its `Connection::open` is classed
+// where it runs
 pub fn sqlite_open(name: &[u8]) -> io::Result<()> {
     effect(|| format!("open sqlite database {}", String::from_utf8_lossy(name)))
 }
@@ -3744,7 +3754,8 @@ pub mod call_deadline {
     }
 
     /// Call GENERATION (nonzero) starts with BUDGET before its quit.
-    // HOST(logged-inverse): the agent call's deadline: arming logs the previous pair, replay re-arms it (L1 §2.3)
+    // HOST(logged-inverse): the agent call's deadline: arming logs the previous pair, replay
+    // re-arms it; its waiter thread is in-process (rule 5)
     pub fn arm(signal: Arc<QuitSignal>, generation: u64, budget: Duration) {
         CURRENT.store(generation, Ordering::Release);
         let waiter = waiter();
@@ -3753,7 +3764,8 @@ pub mod call_deadline {
     }
 
     /// The call ended: its deadline, passed or not, reaches nothing more.
-    // HOST(logged-inverse): the agent call's deadline: arming logs the previous pair, replay re-arms it (L1 §2.3)
+    // HOST(logged-inverse): the agent call's deadline: arming logs the previous pair, replay
+    // re-arms it (L1 §2.3)
     pub fn disarm(signal: &QuitSignal) {
         CURRENT.store(0, Ordering::Release);
         if let Some(waiter) = WAITER.get() {
@@ -3950,7 +3962,8 @@ pub fn on_stall_take(look: fn()) { let _ = STALL_LOOK.set(look); }
 /// session is ENDING, the records brought up to date first and the stall
 /// still going last (it ends inside it), and how many were dropped
 /// meanwhile.
-// HOST(pure): drains stall records kept between this process's threads: no host access
+// HOST(escape): drains stall records kept between threads; when ENDING, the watchdog's look may
+// print a stall to stderr
 pub fn take_stalls(ending: bool) -> (Vec<String>, u64) {
     if ending && let Some(look) = STALL_LOOK.get() { look(); }
     let (mut lines, dropped) = std::mem::take(&mut *inspect_lock(&STALLS));
@@ -4113,7 +4126,8 @@ pub fn inspect_listen(directory: &str, store: Option<&str>) -> io::Result<()> {
 }
 
 /// Stop listening: the threads end and the socket goes, if it is still ours.
-// HOST(escape): ends the listener and removes its socket file
+// HOST(acquisition): connects to the listener to wake it (a socket, rule 1: acquisition first),
+// then removes its file
 pub fn inspect_stop() {
     use std::os::unix::fs::MetadataExt;
     use std::sync::atomic::Ordering::SeqCst;
@@ -4156,7 +4170,7 @@ pub fn keeper_reconnect(client: &mut romacs_keeper::Client) -> Result<(), String
 /// # Errors
 /// An effect a build did not perform, the keeper's refusal of PROGRAM, or no keeper of the
 /// same epoch after it, in words.
-// HOST(escape): has the keeper exec a binary in place
+// HOST(acquisition): has the keeper exec in place, then reconnects to it (rule 1: acquisition first)
 pub fn keeper_exec(client: &mut romacs_keeper::Client, program: &Path) -> Result<(), String> {
     effect(|| format!("keeper {} exec {}", bytes(client.path()), bytes(program))).map_err(|e| e.to_string())?;
     client.exec(program)

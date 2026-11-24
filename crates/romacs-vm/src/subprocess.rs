@@ -222,6 +222,7 @@ static REAPER: Reaper = Reaper { state: std::sync::Mutex::new(Reaping { orphans:
 type Start = fn(Box<dyn FnOnce() + Send>) -> io::Result<()>;
 
 fn spawn_reaper(run: Box<dyn FnOnce() + Send>) -> io::Result<()> {
+    // HOST(pure): starts a thread of this process, no outside resource (rule 5)
     std::thread::Builder::new().name("romacs-reaper".into()).stack_size(64 * 1024).spawn(run).map(drop)
 }
 
@@ -254,6 +255,7 @@ impl Reaper {
 
     fn start(&'static self, start: Start) -> io::Result<std::fs::File> {
         let wake = std::fs::File::from(crate::host::eventfd()?);
+        // HOST(acquisition): duplicates the reaper's wake descriptor
         let read_end = wake.try_clone()?;
         start(Box::new(move || self.run(read_end)))?;
         Ok(wake)
@@ -314,15 +316,18 @@ pub(crate) fn last_error() -> io::Error {
 
 pub(crate) fn set_nonblocking(fd: BorrowedFd<'_>) -> io::Result<()> {
     let flags = rustix::fs::fcntl_getfl(fd)?;
+    // HOST(escape): changes a process descriptor's flags: no inverse (the closing rule)
     Ok(rustix::fs::fcntl_setfl(fd, flags | rustix::fs::OFlags::NONBLOCK)?)
 }
 
 pub(crate) fn dup(fd: &OwnedFd) -> io::Result<OwnedFd> {
+    // HOST(acquisition): duplicates a descriptor: a new one, which must be closed
     fd.try_clone()
 }
 
 /// The terminal modes of the pty on FD, or None if it is not one.
 pub(crate) fn terminal_modes(fd: BorrowedFd<'_>) -> Option<Termios> {
+    // HOST(pure): a terminal's modes: a query
     rustix::termios::tcgetattr(fd).ok()
 }
 
@@ -357,6 +362,7 @@ pub(crate) fn tty_eof_char(fd: BorrowedFd<'_>) -> u8 {
 /// A close-on-exec duplicate of FD numbered 3 or above, so placing a child's
 /// standard descriptors cannot close it first.
 fn duplicate_above_stdio(fd: BorrowedFd<'_>) -> io::Result<OwnedFd> {
+    // HOST(acquisition): duplicates a descriptor above the standard three
     Ok(rustix::io::fcntl_dupfd_cloexec(fd, 3)?)
 }
 
@@ -406,6 +412,7 @@ pub(crate) fn spawn(spec: &Spawn<'_>) -> io::Result<i32> {
     // async-signal-safe functions (setsid, ioctl, signal), allocating nothing.
     unsafe {
         command.pre_exec(move || {
+            // HOST(escape): in the forked child before exec: a session of its own
             if libc::setsid() < 0 {
                 return Err(io::Error::last_os_error());
             }
@@ -414,11 +421,13 @@ pub(crate) fn spawn(spec: &Spawn<'_>) -> io::Result<i32> {
                 libc::ioctl(0, libc::TIOCSCTTY, 0);
             }
             for signal in [libc::SIGINT, libc::SIGQUIT, libc::SIGPROF] {
+                // HOST(escape): in the forked child before exec: the default dispositions it starts with
                 libc::signal(signal, libc::SIG_DFL);
             }
             Ok(())
         });
     }
+    // HOST(acquisition): starts the child; host::command is its world-build guard
     let child = command.spawn()?;
     // The Child handle is dropped without waiting: the table reaps the pid.
     let pid = child.id() as i32;
@@ -548,6 +557,7 @@ impl ProcessWatch {
         // HOST(std::net, acquisition): ProcessWatch's cancel pair: a socket pair private to this process that
         // stops its own poll thread; it reaches no host fact
         let (cancel, stop) = std::os::unix::net::UnixStream::pair()?;
+        // HOST(pure): starts a thread of this process, no outside resource (rule 5)
         let thread = std::thread::Builder::new().name("process-watch".into()).spawn(move || {
             use std::os::fd::AsRawFd;
             fds.push((stop.as_raw_fd(), libc::POLLIN));
@@ -644,6 +654,7 @@ fn local_name(address: &rustix::net::SocketAddrAny) -> Vec<u8> {
 
 /// getsockname (LOCAL) or getpeername of the socket FD.
 pub(crate) fn socket_address(fd: BorrowedFd<'_>, local: bool) -> io::Result<Option<Address>> {
+    // HOST(pure): a socket's address: a query
     let address = if local { Some(rustix::net::getsockname(fd)?) } else { rustix::net::getpeername(fd)? };
     Ok(address.and_then(decode_sockaddr))
 }
@@ -657,6 +668,7 @@ pub(crate) fn accept(listener: BorrowedFd<'_>) -> io::Result<(OwnedFd, Option<Ad
 
 /// SO_ERROR of the socket FD: how its nonblocking connect ended.
 pub(crate) fn socket_error(fd: BorrowedFd<'_>) -> i32 {
+    // HOST(take): reads and clears SO_ERROR: a nonblocking connect's outcome, consumed
     match rustix::net::sockopt::socket_error(fd) {
         Ok(Ok(())) => 0,
         Ok(Err(error)) | Err(error) => error.raw_os_error(),
@@ -665,6 +677,7 @@ pub(crate) fn socket_error(fd: BorrowedFd<'_>) -> i32 {
 
 /// emacs_get_tty_pgrp: the foreground group of the pty on FD.
 pub(crate) fn tty_pgrp(fd: BorrowedFd<'_>) -> Option<i32> {
+    // HOST(pure): a terminal's foreground process group: a query
     rustix::termios::tcgetpgrp(fd).ok().map(rustix::process::Pid::as_raw_nonzero).map(std::num::NonZeroI32::get)
 }
 

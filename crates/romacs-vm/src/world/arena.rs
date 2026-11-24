@@ -730,6 +730,7 @@ fn release(heap: &Heap<'_>, at: usize, len: usize) {
     if let Some(backing) = BACKING.get().filter(|_| in_backing(at)) {
         let offset = (at - heap.base) as u64;
         let punch = rustix::fs::FallocateFlags::PUNCH_HOLE | rustix::fs::FallocateFlags::KEEP_SIZE;
+        // HOST(escape): punches holes in the arena's backing file: no inverse, though no other party sees it
         let _ = rustix::fs::fallocate(backing, punch, offset, len as u64);
     } else {
         // UNSAFE(madvise on memory this module maps has no safe wrapper: rustix's is unsafe)
@@ -757,6 +758,7 @@ fn reserve() -> Option<usize> {
 /// error when the query is refused (a syscall filter may refuse it).
 fn address_space_limit() -> std::io::Result<Option<u64>> {
     let mut limit = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+    // HOST(pure): the address-space limit: a query
     // UNSAFE(rustix's getrlimit takes the call as infallible, and a refused one would read garbage)
     // SAFETY: getrlimit writes only the local it is given.
     if unsafe { libc::getrlimit(libc::RLIMIT_AS, &raw mut limit) } != 0 {

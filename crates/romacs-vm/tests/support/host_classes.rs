@@ -2,7 +2,7 @@
 //! `host_boundary_lint`, whose scanner lists its rows (`file_scan`) and reads
 //! the HOST comments that class them.
 use super::{BOUNDARY, BOUNDARY_MODULES, CLASSES, CRATES, Row, Tag, fences_state, file_scan, known, repository, roots, scan};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// The faults of ROWS and the classes their HOST COMMENTS name: none, unknown,
 /// two, `pure` with an `effect(`, or a class above nothing. A host.rs function is
@@ -35,14 +35,11 @@ fn census(rows: &[Row], comments: &[Tag]) -> Vec<(String, Row)> {
         used.extend(above.iter().map(|t| (t.path.clone(), t.line)));
         classify(row, &above, &mut faults);
     }
-    for t in comments {
-        let inside = t.path == BOUNDARY || t.path.starts_with(BOUNDARY_MODULES);
-        let host = t.apis.iter().any(|a| !CLASSES.contains(&a.as_str()) && !fences_state(a));
-        if !inside && host {
-            used.insert((t.path.clone(), t.line));
-            let row = Row { path: t.path.clone(), line: t.line, what: format!("HOST({})", t.apis.join(", ")), effect: false };
-            classify(&row, &[t], &mut faults);
-        }
+    for site in exception_sites(comments) {
+        used.extend(site.iter().map(|t| (t.path.clone(), t.line)));
+        let what = site.iter().map(|t| t.apis.join(", ")).collect::<Vec<_>>().join("; ");
+        let row = Row { path: site[0].path.clone(), line: site[0].line, what: format!("HOST({what})"), effect: false };
+        classify(&row, &site, &mut faults);
     }
     for t in comments.iter().filter(|t| t.apis.iter().any(|a| CLASSES.contains(&a.as_str()))) {
         if !used.contains(&(t.path.clone(), t.line)) {
@@ -52,6 +49,22 @@ fn census(rows: &[Row], comments: &[Tag]) -> Vec<(String, Row)> {
     }
     faults.sort_by(|a, b| (&a.1.path, a.1.line, &a.0).cmp(&(&b.1.path, b.1.line, &b.0)));
     faults
+}
+
+/// The exception comments outside host.rs that name a host API, grouped by
+/// the line they cover: one site, however many comments are stacked above it.
+fn exception_sites(comments: &[Tag]) -> Vec<Vec<&Tag>> {
+    let mut sites: BTreeMap<(&str, usize, usize), Vec<&Tag>> = BTreeMap::new();
+    for t in comments {
+        let inside = t.path == BOUNDARY || t.path.starts_with(BOUNDARY_MODULES);
+        let host = t.apis.iter().any(|a| !CLASSES.contains(&a.as_str()) && !fences_state(a));
+        if !inside && host {
+            // A comment that covers no line is a site of its own.
+            let key = t.covers.map_or((t.path.as_str(), 0, t.line), |c| (t.path.as_str(), c, 0));
+            sites.entry(key).or_default().push(t);
+        }
+    }
+    sites.into_values().collect()
 }
 
 /// L1-0's closing rule: every host access names exactly one class.
@@ -274,5 +287,100 @@ mod tests {
     assert_eq!(census_of("src/lib.rs", source), pairs(&[
         ("unclassed", "descriptor:write `rustix::net::send(fd, buf, rustix::net::SendFlags::NOSIGNAL)`"),
         ("unclassed", "stdio `eprintln!(\"done\");`"),
+    ]));
+}
+
+#[test]
+fn stacked_classes_over_one_exception_site_fail() {
+    let source = "\
+fn create(path: &Path) -> std::io::Result<File> {
+    // HOST(std::fs, acquisition): makes the file
+    // HOST(OpenOptions, block): and claims to wait
+    std::fs::OpenOptions::new().create_new(true).write(true).open(path)
+}
+fn read(path: &Path) -> std::io::Result<Vec<u8>> {
+    // HOST(std::fs, block): a read by path
+    // HOST(std::env::var): one class covers the site
+    std::fs::read(std::env::var(\"P\").unwrap_or_default())
+}
+";
+    assert_eq!(census_of("src/lib.rs", source), pairs(&[
+        ("two classes `acquisition`, `block`", "HOST(std::fs, acquisition; OpenOptions, block)"),
+    ]));
+}
+
+#[test]
+fn a_qualified_effect_call_counts_and_a_nested_function_does_not() {
+    let source = "\
+// HOST(pure): claims to be a query
+pub fn chmod(path: &Path, mode: u32) -> io::Result<()> {
+    self::effect(|| format!(\"chmod {}\", bytes(path)))?;
+    sys::chmod(path, mode)
+}
+// HOST(pure): claims to be a query
+pub fn remove(path: &Path) -> io::Result<()> {
+    crate::host::effect(|| format!(\"remove {}\", bytes(path)))?;
+    sys::remove(path)
+}
+// HOST(pure): another type's effect is no gate
+pub fn describe(fact: &Fact) -> String { Fact::effect(fact).to_string() }
+// HOST(pure): a nested helper's gate is not this body's
+pub fn pid() -> u32 {
+    fn helper() -> io::Result<()> { effect(|| String::new()) }
+    0
+}
+";
+    assert_eq!(census_of(BOUNDARY, source), pairs(&[
+        ("pure, but its body calls effect(", "fn chmod"),
+        ("pure, but its body calls effect(", "fn remove"),
+    ]));
+}
+
+#[test]
+fn a_process_operation_outside_host_rs_names_its_class() {
+    let source = "\
+fn run(mut command: Command) -> io::Result<()> {
+    let mut child = command.spawn()?;
+    let _ = command.output()?;
+    let _ = command.status()?;
+    let _ = child.try_wait()?;
+    let _ = child.wait()?;
+    let db = Connection::open(name, false, true, true);
+    // HOST(acquisition): starts the child its guard let through
+    let other = command.spawn()?;
+    Ok(())
+}
+";
+    let found = census_of("src/lib.rs", source);
+    assert_eq!(found, pairs(&[
+        ("unclassed", "process `let mut child = command.spawn()?;`"),
+        ("unclassed", "process `let _ = command.output()?;`"),
+        ("unclassed", "process `let _ = command.status()?;`"),
+        ("unclassed", "process `let _ = child.try_wait()?;`"),
+        ("unclassed", "process `let _ = child.wait()?;`"),
+        ("unclassed", "process `let db = Connection::open(name, false, true, true);`"),
+    ]));
+}
+
+#[test]
+fn a_descriptor_mutation_duplicate_or_query_names_its_class() {
+    let source = "\
+fn file(output: &File, times: FileTimes, fd: BorrowedFd<'_>) -> io::Result<()> {
+    output.set_times(times)?;
+    rustix::fs::fallocate(fd, FallocateFlags::empty(), 0, 4096)?;
+    let copy = output.try_clone()?;
+    let error = rustix::net::sockopt::socket_error(fd);
+    let modes = rustix::termios::tcgetattr(fd);
+    // HOST(escape): the child's own session, before exec
+    unsafe { libc::setsid() };
+    Ok(())
+}
+";
+    assert_eq!(census_of("src/lib.rs", source), pairs(&[
+        ("unclassed", "descriptor:write `output.set_times(times)?;`"),
+        ("unclassed", "descriptor:write `rustix::fs::fallocate(fd, FallocateFlags::empty(), 0, 4096)?;`"),
+        ("unclassed", "descriptor:dup `let copy = output.try_clone()?;`"),
+        ("unclassed", "descriptor:read `let error = rustix::net::sockopt::socket_error(fd);`"),
+        ("unclassed", "descriptor:query `let modes = rustix::termios::tcgetattr(fd);`"),
     ]));
 }

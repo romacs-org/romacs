@@ -516,6 +516,7 @@ impl Vm {
         let memory = std::sync::Arc::new(PoolMemory { pids: std::sync::Mutex::new(pids), kilobytes: total.into() });
         let sampler = std::sync::Arc::downgrade(&memory);
         // Without the thread the figure stays as first measured.
+        // HOST(pure): starts a thread of this process, no outside resource (rule 5)
         let _ = std::thread::Builder::new().name("romacs-pool-memory".into()).stack_size(64 * 1024).spawn(move || PoolMemory::sample(sampler));
         self.isolates.pool_memory = Some(memory);
         total

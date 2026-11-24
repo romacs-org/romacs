@@ -156,6 +156,7 @@ fn recorder() -> Option<&'static Recorder> {
             let writer_dropped = dropped.clone();
             let writer = match std::thread::Builder::new()
                 .name("romacs-present-trace".into())
+                // HOST(pure): starts a thread of this process, no outside resource (rule 5)
                 .spawn(move || {
                     // HOST(OpenOptions, std::fs, acquisition): romacs-vm depends on this crate, so it cannot
                     // call host.rs; GUI present trace behind ROMACS_PRESENT_TRACE, not reached by

@@ -349,6 +349,7 @@ fn private_store(store: &Path) -> std::io::Result<()> {
     let now = host::open_store_dir(store, false)?;
     let identity = |fd: &std::os::fd::OwnedFd| -> std::io::Result<(u64, u64)> {
         use std::os::unix::fs::MetadataExt;
+        // HOST(acquisition): duplicates a store descriptor for its stat, closed at once
         host::file_metadata(&std::fs::File::from(fd.try_clone()?)).map(|m| (m.dev(), m.ino()))
     };
     if identity(&now)? != identity(&dir)? {
@@ -414,6 +415,7 @@ fn marker_error(dir: &std::os::fd::OwnedFd) -> Option<String> {
 fn owned_store(dir: &std::os::fd::OwnedFd, store: &Path, home: Option<&Path>) -> std::io::Result<()> {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     let fail = |why: &str| Err(std::io::Error::other(format!("world store {}: {why}", store.display())));
+    // HOST(acquisition): duplicates a store descriptor for its stat, closed at once
     let meta = host::file_metadata(&std::fs::File::from(dir.try_clone()?))?;
     if !meta.file_type().is_dir() {
         return fail("not a directory");
@@ -907,6 +909,7 @@ impl World {
             // not record itself.
             std::thread::spawn(move || {
                 let mut child = child;
+                // HOST(block): waits for the child to end
                 let status = child.wait();
                 world.note_builder_end(status.map(|s| s.to_string()).map_err(|e| e.to_string()), attempts, published);
             });
@@ -983,7 +986,9 @@ impl World {
         // The builder holds the lock this process took, on its descriptor 0;
         // this one's copy closes once the builder runs.
         command.args(args).env_clear().envs(env).current_dir(pinned.join("cwd"))
+            // HOST(acquisition): duplicates the log descriptor for the child's output
             .stdin(lock).stdout(log.try_clone()?).stderr(log).process_group(0);
+        // HOST(acquisition): starts the world builder's child
         command.spawn()
     }
 
@@ -1023,6 +1028,7 @@ impl World {
     fn mark_use(&self) {
         let Ok(_store) = self.store_lock(host::Flock::Shared) else { return };
         if let Ok(file) = host::open_store_file(self.file(".use"), host::StoreOpen::Write { create: true, truncate: false }) {
+            // HOST(escape): the usage marker's time, which pruning reads: metadata others see
             let _ = file.set_modified(host::clock());
             if host::lock(&file, host::Flock::TryShared).unwrap_or(false) {
                 std::mem::forget(file);
@@ -1538,12 +1544,14 @@ fn now_seconds() -> u64 {
 fn wait_bounded(mut child: std::process::Child, timeout: std::time::Duration) -> Result<String, String> {
     let deadline = host::monotonic() + timeout;
     loop {
+        // HOST(take): reaps a finished child without blocking: its exit is consumed
         match child.try_wait() {
             Ok(Some(status)) if status.success() => return Ok(status.to_string()),
             Ok(Some(status)) => return Err(format!("the builder ended: {status}")),
             Ok(None) if host::monotonic() < deadline => std::thread::sleep(std::time::Duration::from_millis(50)),
             Ok(None) => {
                 let _ = child.kill();
+                // HOST(block): waits for the child to end
                 let _ = child.wait();
                 return Err(format!("the builder ran past {} s and was killed", timeout.as_secs()));
             }

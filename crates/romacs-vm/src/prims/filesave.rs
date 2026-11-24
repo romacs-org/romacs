@@ -647,7 +647,9 @@ fn copy_staged(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
     }
     if keep_time != Value::NIL {
         let times = status.accessed().and_then(|atime| Ok(std::fs::FileTimes::new()
+            // HOST(pure): builds the times as a value; set_times below applies them
             .set_accessed(atime).set_modified(status.modified()?)));
+        // HOST(escape): `copy-file`'s preserved times on the copy: metadata others see
         if times.and_then(|times| output.set_times(times)).is_err() {
             let message = cx.string("Cannot set file date");
             let data = cx.cons(newname, Value::NIL);

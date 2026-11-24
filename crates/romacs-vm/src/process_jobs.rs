@@ -88,6 +88,7 @@ impl Jobs {
         self.workers.retain(|worker| !worker.is_finished());
         let worker = std::thread::Builder::new()
             .name(format!("cli-job-{id}"))
+            // HOST(pure): starts a thread of this process, no outside resource (rule 5)
             .spawn(move || {
                 let output = run(request, command, worker_cancel);
                 if sender.send(Arc::new(output)).is_ok() {
@@ -226,6 +227,7 @@ fn run(request: Request, mut command: std::process::Command, cancel: Arc<AtomicB
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .process_group(0)
+        // HOST(acquisition): starts the job's child
         .spawn();
     let mut child = match child {
         Ok(child) => child,
@@ -312,6 +314,7 @@ fn run(request: Request, mut command: std::process::Command, cancel: Arc<AtomicB
     let _ = crate::host::kill(-pid, libc::SIGKILL);
     let _ = crate::host::kill(pid, libc::SIGKILL);
     stdin.take();
+    // HOST(block): waits for the child to end
     let waited = child.wait();
     crate::isolate::child_reaped(pid);
     match waited {

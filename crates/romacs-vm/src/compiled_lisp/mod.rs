@@ -374,14 +374,17 @@ fn run_compile(configured: &Configured, program: OsString, args: Vec<OsString>, 
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(stderr);
+    // HOST(acquisition): starts the compile's child
     let mut child = command.spawn().ok()?;
     let deadline = host::monotonic() + std::time::Duration::from_secs(600);
     let status = loop {
+        // HOST(take): reaps a finished child without blocking: its exit is consumed
         match child.try_wait() {
             Ok(Some(status)) => break Some(status),
             Ok(None) if host::monotonic() < deadline => std::thread::sleep(std::time::Duration::from_millis(2)),
             _ => {
                 let _ = child.kill();
+                // HOST(block): waits for the child to end
                 let _ = child.wait();
                 break None;
             }

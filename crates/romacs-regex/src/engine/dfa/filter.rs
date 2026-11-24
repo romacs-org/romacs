@@ -299,6 +299,7 @@ fn register_stats_report() {
     // SAFETY: `report` is an `extern "C" fn()` that only reads this
     // thread's counters and writes one line to stderr.
     unsafe {
+        // HOST(acquisition): registers an exit hook, which writes the stats report to stderr
         libc::atexit(report);
     }
 }

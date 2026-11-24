@@ -420,6 +420,7 @@ impl Vm {
         let read = matches!(access, Access::Read | Access::SavedRead);
         if host::in_startup() {
             if cell.root == Root::Observed {
+                // HOST(pure): the world recorder's own output, not a process's
                 if read { self.observe(Input::Variable(slot)) } else { self.output(slot) }
             }
             return;

@@ -180,6 +180,7 @@ fn whole_in_memory(file: &std::fs::File, len: usize) -> Result<(), String> {
     if u32::try_from(in_memory).ok() != Some(TMPFS_MAGIC) {
         return Ok(());
     }
+    // HOST(escape): fills the image file's holes: a write with no inverse
     rustix::fs::fallocate(file, rustix::fs::FallocateFlags::empty(), 0, len as u64)
         .map_err(|e| format!("world image in memory (tmpfs): {e}"))
 }

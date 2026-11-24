@@ -30,6 +30,7 @@ impl Vm {
             })
             .collect::<Result<Vec<_>>>()?;
         let output = crate::host::command(&args[0])
+            // HOST(acquisition): runs a child and reads its output (rule 1: acquisition first)
             .and_then(|mut command| command.args(&args[1..]).stdin(std::process::Stdio::null()).output())
             .map_err(|e| e.to_string())?;
         if !output.status.success() {

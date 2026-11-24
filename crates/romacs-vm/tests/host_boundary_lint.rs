@@ -903,21 +903,31 @@ fn fences_state(api: &str) -> bool {
     api.starts_with("slot:") || api.starts_with("dynamic:") || api == "delayed-variable" || FORMS.contains(&api)
 }
 
-/// Descriptor and standard-stream operations: allowed outside host.rs (they
-/// act on what it made), each a host access the census lists. Not `.write(`,
-/// `.flush(`, `write!` or `Read` calls: a token cannot tell them from in-memory ones.
+/// Descriptor, standard-stream and process operations: allowed outside host.rs
+/// (they act on what it made, or run what its world-build guards let through),
+/// each a host access the census lists. Not `.write(`, `.flush(`, `write!` or
+/// `Read` calls: a token cannot tell them from in-memory ones. A spelling a
+/// value of the VM's own shares (a thread's `.spawn(`, a condition's `.wait(`)
+/// is a row too, classed at its site.
 const DESCRIPTOR: &[Api] = &[
     api!("descriptor:read", "rustix::io::read", "rustix::io::pread", "rustix::io::readv", "rustix::io::preadv*",
-         "rustix::net::recv*", "libc::read", "libc::pread*", "libc::readv", "libc::recv*", "io::stdin("),
+         "rustix::net::recv*", "libc::read", "libc::pread*", "libc::readv", "libc::recv*", "io::stdin(",
+         "rustix::net::sockopt::socket_error"),
     api!("descriptor:write", "rustix::io::write", "rustix::io::pwrite", "rustix::io::writev", "rustix::io::pwritev*",
          "rustix::net::send*", "rustix::net::shutdown", "libc::write", "libc::pwrite*", "libc::writev", "libc::send*",
-         "libc::shutdown", ".write_all(", ".sync_all(", ".sync_data(", ".set_len(",
-         ".set_permissions("),
+         "libc::shutdown", ".write_all(", ".sync_all(", ".sync_data(", ".set_len(", ".set_permissions(",
+         ".set_times(", ".set_modified(", "rustix::fs::fallocate", "libc::fallocate*", "rustix::fs::fcntl_setfl"),
     api!("descriptor:wait", "rustix::event::poll", "rustix::event::epoll*", "rustix::event::select", "rustix::process::wait*",
          "libc::poll", "libc::ppoll", "libc::select", "libc::pselect", "libc::epoll_wait", "libc::wait*"),
     api!("descriptor:control", "rustix::termios::tcset*", "rustix::termios::tcflush", "rustix::termios::tcdrain",
          "rustix::termios::tcsendbreak", "libc::ioctl", "libc::tcset*"),
+    api!("descriptor:dup", ".try_clone(", "rustix::io::dup*", "rustix::io::fcntl_dupfd*", "rustix::stdio::dup2*", "libc::dup*"),
+    api!("descriptor:query", "rustix::net::getsockname", "rustix::net::getpeername", "rustix::termios::tcget*",
+         "rustix::termios::isatty", "libc::isatty"),
     api!("stdio", "io::stdout(", "io::stderr(", "println!", "eprintln!", "print!", "eprint!"),
+    api!("process", ".spawn(", ".output(", ".status(", ".wait(", ".try_wait(", "Connection::open*", "libc::setsid",
+         "rustix::process::setsid", "libc::signal", "libc::sigaction", "libc::atexit", "libc::getrlimit",
+         "rustix::process::getrlimit"),
 ];
 
 /// A host access that must carry one class, WHAT naming it without a line:
@@ -953,31 +963,145 @@ fn past_attributes(lines: &[&str], from: usize) -> usize {
     k
 }
 
+/// What encloses a token of host.rs, for `boundary_functions`.
+#[derive(Clone, Copy, PartialEq)]
+enum Scope { Module, Impl { of_trait: bool }, Function, Trait, Other }
+
+/// One view's tokens, read by position.
+struct Code<'a> {
+    code: &'a [u8],
+    toks: Vec<(usize, Tok)>,
+}
+
+impl<'a> Code<'a> {
+    fn word(&self, j: usize) -> &'a str {
+        match self.toks.get(j).map(|t| t.1) {
+            Some(Tok::Ident(a, b)) => std::str::from_utf8(&self.code[a..b]).unwrap(),
+            _ => "",
+        }
+    }
+    fn punct(&self, j: usize, b: u8) -> bool {
+        self.toks.get(j).is_some_and(|t| t.1 == Tok::Punct(b))
+    }
+    /// An item starts after `;`, `{`, `}`, an attribute's `]`, or the file's start.
+    fn at_item(&self, j: usize) -> bool {
+        j == 0 || [b';', b'{', b'}', b']'].iter().any(|&b| self.punct(j - 1, b))
+    }
+    /// Whether J is `fn NAME`.
+    fn function(&self, j: usize) -> bool {
+        self.word(j) == "fn" && matches!(self.toks.get(j + 1).map(|t| t.1), Some(Tok::Ident(..)))
+    }
+    /// The first `{` or `;` past the signature of the `fn` at I.
+    fn signature_end(&self, i: usize) -> usize {
+        let (mut nest, mut j) = (0i32, i + 2);
+        while j < self.toks.len() {
+            match self.toks[j].1 {
+                Tok::Punct(b'(' | b'[') => nest += 1,
+                Tok::Punct(b')' | b']') => nest -= 1,
+                Tok::Punct(b'{' | b';') if nest == 0 => break,
+                _ => (),
+            }
+            j += 1;
+        }
+        j
+    }
+    /// The end of the item whose signature ends at J: its body's `}`, or J.
+    fn body_end(&self, j: usize) -> usize {
+        if self.punct(j, b'{') { matching(&self.toks, j) } else { j }
+    }
+}
+
+/// The scope and name of the `impl` at I: `impl<..> Trait for Type`, or `impl Type`.
+fn impl_header(c: &Code, i: usize) -> (Scope, String) {
+    let open = (i..c.toks.len()).find(|&j| c.punct(j, b'{')).unwrap_or(c.toks.len());
+    let of_trait = (i..open).any(|j| c.word(j) == "for");
+    let mut from = (i..open).rposition(|j| c.word(j) == "for").map_or(i + 1, |k| i + k + 1);
+    if c.punct(from, b'<') {
+        // Past the impl's generics, `<'a, T: X<Y>>`.
+        let mut angle = 0;
+        while from < open {
+            angle += i32::from(c.punct(from, b'<')) - i32::from(c.punct(from, b'>'));
+            from += 1;
+            if angle == 0 { break; }
+        }
+    }
+    let name = (from..open).map(|j| c.word(j)).find(|w| !w.is_empty() && *w != "dyn").unwrap_or("").to_owned();
+    (Scope::Impl { of_trait }, name)
+}
+
+/// The visibility of the `fn` at I, before its qualifiers: `pub` (empty),
+/// `pub(..)` (what is inside), or none; and the token it starts at.
+fn visibility(c: &Code, i: usize) -> (usize, Option<String>) {
+    let mut k = i;
+    while k > 0 && (matches!(c.word(k - 1), "const" | "unsafe" | "async" | "extern") || matches!(c.toks[k - 1].1, Tok::Str(..))) {
+        k -= 1;
+    }
+    if k > 0 && c.word(k - 1) == "pub" {
+        return (k - 1, Some(String::new()));
+    }
+    if k > 0 && c.punct(k - 1, b')') {
+        let open = (0..k - 1).rev().find(|&j| c.punct(j, b'(')).unwrap_or(0);
+        if open > 0 && c.word(open - 1) == "pub" {
+            return (open - 1, Some((open + 1..k - 1).map(|j| c.word(j)).collect::<Vec<_>>().join(" ")));
+        }
+    }
+    (k, None)
+}
+
+/// Whether the body FROM..TO calls the world build's gate, `effect(`, bare or
+/// through `self::`, `super::` or `host::`, outside the bodies of functions nested in it.
+fn calls_effect(c: &Code, from: usize, to: usize) -> bool {
+    let mut m = from + 1;
+    while m < to {
+        if c.function(m) {
+            m = c.body_end(c.signature_end(m)) + 1;
+            continue;
+        }
+        let path = !c.punct(m - 1, b':') || (m >= 3 && c.punct(m - 2, b':') && matches!(c.word(m - 3), "self" | "super" | "host"));
+        if c.word(m) == "effect" && c.punct(m + 1, b'(') && !c.punct(m - 1, b'.') && path {
+            return true;
+        }
+        m += 1;
+    }
+    false
+}
+
+/// The row of the `fn` at I in STACK, if host.rs gives it the workspace:
+/// `pub` or `pub(..)` but `pub(super)` in a module, or a trait impl's method;
+/// not nested, nor a trait's declaration.
+fn function_row(rel: &str, c: &Code, stack: &[(Scope, usize, String)], i: usize, line: &dyn Fn(usize) -> usize) -> Option<Row> {
+    let (k, visibility) = visibility(c, i);
+    let enclosing = stack.iter().rev().find(|s| s.0 != Scope::Other).map(|s| s.0);
+    let in_module = stack.iter().any(|s| s.0 == Scope::Module);
+    let of_trait = matches!(enclosing, Some(Scope::Impl { of_trait: true }));
+    let in_function = stack.iter().any(|s| s.0 == Scope::Function);
+    let listed = !in_function && enclosing != Some(Scope::Trait)
+        && (of_trait || visibility.as_deref().is_some_and(|v| !(v == "super" && in_module)));
+    if !listed { return None; }
+    let owner = stack.iter().rev().find(|s| matches!(s.0, Scope::Impl { .. })).map(|s| s.2.as_str());
+    let module = stack.iter().filter(|s| s.0 == Scope::Module).map(|s| s.2.as_str());
+    let path: Vec<&str> = module.chain(owner).chain([c.word(i + 1)]).collect();
+    let end = c.signature_end(i);
+    let effect = calls_effect(c, end, c.body_end(end));
+    Some(Row { path: rel.to_owned(), line: line(c.toks[k].0), what: format!("fn {}", path.join("::")), effect })
+}
+
 /// The functions host.rs gives the workspace, outside `#[cfg(test)]` (blanked
-/// in V): `pub` and `pub(..)` ones but `pub(super)` in an inline module, and
-/// trait impl methods; not nested fns nor trait declarations. `host/` is
-/// reached only through host.rs, so it holds no row.
+/// in V), as `function_row` lists them. `host/` is reached only through
+/// host.rs, so it holds no row.
 fn boundary_functions(rel: &str, v: &Views) -> Vec<Row> {
-    #[derive(Clone, Copy, PartialEq)]
-    enum Scope { Module, Impl { of_trait: bool }, Function, Trait, Other }
-    let toks = tokens(&v.code);
-    let word = |j: usize| match toks.get(j).map(|t| t.1) {
-        Some(Tok::Ident(a, b)) => std::str::from_utf8(&v.code[a..b]).unwrap(),
-        _ => "",
-    };
-    let punct = |j: usize, b: u8| toks.get(j).is_some_and(|t| t.1 == Tok::Punct(b));
+    let c = Code { code: &v.code, toks: tokens(&v.code) };
     let newlines: Vec<usize> = v.code.iter().enumerate().filter(|&(_, &b)| b == b'\n').map(|(i, _)| i).collect();
     let line = |at: usize| newlines.partition_point(|&n| n < at) + 1;
-    // An item starts after `;`, `{`, `}`, an attribute's `]`, or the file's start.
-    let at_item = |j: usize| j == 0 || punct(j - 1, b';') || punct(j - 1, b'{') || punct(j - 1, b'}') || punct(j - 1, b']');
     let mut rows = Vec::new();
     let mut stack: Vec<(Scope, usize, String)> = Vec::new();
     let mut pending: Option<(Scope, String)> = None;
     let mut depth = 0;
     let mut i = 0;
-    while i < toks.len() {
+    while i < c.toks.len() {
         let in_function = stack.iter().any(|s| s.0 == Scope::Function);
-        match toks[i].1 {
+        let free = pending.is_none() && !in_function;
+        match c.toks[i].1 {
             Tok::Punct(b'{') => {
                 let (scope, name) = pending.take().unwrap_or((Scope::Other, String::new()));
                 stack.push((scope, depth, name));
@@ -988,71 +1112,17 @@ fn boundary_functions(rel: &str, v: &Views) -> Vec<Row> {
                 if stack.last().is_some_and(|s| s.1 == depth) { stack.pop(); }
             }
             Tok::Punct(b';') if pending.as_ref().is_some_and(|p| p.0 == Scope::Function) => pending = None,
-            Tok::Ident(..) if pending.is_none() && !in_function && word(i) == "mod" && toks.get(i + 1).is_some() && punct(i + 2, b'{') => {
-                pending = Some((Scope::Module, word(i + 1).to_owned()));
+            Tok::Ident(..) if free && c.word(i) == "mod" && c.toks.get(i + 1).is_some() && c.punct(i + 2, b'{') => {
+                pending = Some((Scope::Module, c.word(i + 1).to_owned()));
             }
-            Tok::Ident(..) if pending.is_none() && !in_function && word(i) == "trait" => pending = Some((Scope::Trait, String::new())),
-            Tok::Ident(..) if pending.is_none() && !in_function && word(i) == "impl"
-                && (at_item(i) || (word(i - 1) == "unsafe" && at_item(i - 1))) => {
-                // The header to its `{`: `impl<..> Trait for Type`, or `impl Type`.
-                let open = (i..toks.len()).find(|&j| punct(j, b'{')).unwrap_or(toks.len());
-                let of_trait = (i..open).any(|j| word(j) == "for");
-                let mut from = (i..open).rposition(|j| word(j) == "for").map_or(i + 1, |k| i + k + 1);
-                if punct(from, b'<') {
-                    // Past the impl's generics, `<'a, T: X<Y>>`.
-                    let mut angle = 0;
-                    while from < open {
-                        angle += i32::from(punct(from, b'<')) - i32::from(punct(from, b'>'));
-                        from += 1;
-                        if angle == 0 { break; }
-                    }
-                }
-                let name = (from..open).map(word).find(|w| !w.is_empty() && *w != "dyn").unwrap_or("").to_owned();
-                pending = Some((Scope::Impl { of_trait }, name));
+            Tok::Ident(..) if free && c.word(i) == "trait" => pending = Some((Scope::Trait, String::new())),
+            Tok::Ident(..) if free && c.word(i) == "impl" && (c.at_item(i) || (c.word(i - 1) == "unsafe" && c.at_item(i - 1))) => {
+                pending = Some(impl_header(&c, i));
             }
-            Tok::Ident(..) if pending.is_none() && word(i) == "fn" && matches!(toks.get(i + 1).map(|t| t.1), Some(Tok::Ident(..))) => {
-                let name = word(i + 1).to_owned();
-                // The visibility before its qualifiers: `pub`, `pub(..)`, or none.
-                let mut k = i;
-                while k > 0 && (matches!(word(k - 1), "const" | "unsafe" | "async" | "extern")
-                    || matches!(toks[k - 1].1, Tok::Str(..))) { k -= 1; }
-                let visibility = if k > 0 && word(k - 1) == "pub" {
-                    k -= 1;
-                    Some(String::new())
-                } else if k > 0 && punct(k - 1, b')') {
-                    let open = (0..k - 1).rev().find(|&j| punct(j, b'(')).unwrap_or(0);
-                    if open > 0 && word(open - 1) == "pub" {
-                        let inner = (open + 1..k - 1).map(word).collect::<Vec<_>>().join(" ");
-                        k = open - 1;
-                        Some(inner)
-                    } else { None }
-                } else { None };
-                let enclosing = stack.iter().rev().find(|s| s.0 != Scope::Other).map(|s| s.0);
-                let in_module = stack.iter().any(|s| s.0 == Scope::Module);
-                let of_trait = matches!(enclosing, Some(Scope::Impl { of_trait: true }));
-                let listed = !in_function && enclosing != Some(Scope::Trait)
-                    && (of_trait || visibility.as_deref().is_some_and(|v| !(v == "super" && in_module)));
-                // Its body: the first `{` or `;` outside the signature's brackets.
-                let (mut nest, mut j) = (0i32, i + 2);
-                while j < toks.len() {
-                    match toks[j].1 {
-                        Tok::Punct(b'(' | b'[') => nest += 1,
-                        Tok::Punct(b')' | b']') => nest -= 1,
-                        Tok::Punct(b'{' | b';') if nest == 0 => break,
-                        _ => (),
-                    }
-                    j += 1;
-                }
-                let body_end = if punct(j, b'{') { matching(&toks, j) } else { j };
-                let effect = (j..body_end).any(|m| word(m) == "effect" && punct(m + 1, b'(') && !punct(m - 1, b'.') && !punct(m - 1, b':'));
-                if listed {
-                    let owner = stack.iter().rev().find(|s| matches!(s.0, Scope::Impl { .. })).map(|s| s.2.clone());
-                    let module: Vec<&str> = stack.iter().filter(|s| s.0 == Scope::Module).map(|s| s.2.as_str()).collect();
-                    let path: Vec<&str> = module.into_iter().chain(owner.as_deref()).chain([name.as_str()]).collect();
-                    rows.push(Row { path: rel.to_owned(), line: line(toks[k].0), what: format!("fn {}", path.join("::")), effect });
-                }
-                pending = Some((Scope::Function, name));
-                i = j;
+            Tok::Ident(..) if pending.is_none() && c.function(i) => {
+                rows.extend(function_row(rel, &c, &stack, i, &line));
+                pending = Some((Scope::Function, c.word(i + 1).to_owned()));
+                i = c.signature_end(i);
                 continue;
             }
             _ => (),
@@ -1225,5 +1295,6 @@ pub fn rename(from: &Path, to: &Path) -> io::Result<()> { std::fs::rename(from, 
 ");
     assert_eq!(problems(&sites, &comments), Vec::<String>::new());
     let (sites, comments, _, _) = file_scan(BOUNDARY, "// HOST(escape):\npub fn f() {}\n");
-    assert_eq!(problems(&sites, &comments), ["  no reason: crates/romacs-vm/src/host.rs:1 HOST(escape)"]);
+    let problems = problems(&sites, &comments);
+    assert!(matches!(problems.as_slice(), [p] if p.starts_with("  no reason: ") && p.ends_with(" HOST(escape)")), "{problems:?}");
 }

@@ -133,6 +133,7 @@ impl Leaf<'_> {
         if crate::host::sqlite_open(name).is_err() {
             return Ok(Value::NIL);
         }
+        // HOST(acquisition): `sqlite-open`'s connection and the file SQLite may make; host::sqlite_open is its guard
         let Some(connection) = Connection::open(name, readonly != Value::NIL, disable_uri == Value::NIL, memory) else {
             return Ok(Value::NIL);
         };
