@@ -33,6 +33,9 @@
 ;; Rendering is pure: commands mutate state in the user's buffer and the
 ;; popup re-reads it on refresh.  A compact session plist owns only popup
 ;; navigation, transient-map, and display lifecycle state.
+;;
+;; Use `keymap-popup-exit-hook' to run code once after a popup closes.
+;; The hook runs in the buffer and window from which the popup opened.
 
 ;;; Code:
 
@@ -147,6 +150,13 @@ no explicit :exit-key, for both `keymap-popup-define' and
 `keymap-popup-annotate'."
   :type 'key
   :group 'keymap-popup)
+
+(defvar keymap-popup-exit-hook nil
+  "Normal hook run once after a popup's display is removed.
+This runs whether a key dismisses the popup or selects a command,
+even if the selected command subsequently signals an error.
+The opening buffer and window are made current for the hook if
+they are still live.")
 
 (defconst keymap-popup--buffer-name "*keymap-popup*"
   "Preferred name for a newly allocated popup buffer.")
@@ -1959,8 +1969,54 @@ INCLUDE-ACTIVE also deactivates the active transient map."
         ((error quit) (unless failure (setq failure err)))))
     (when failure (signal (car failure) (cdr failure)))))
 
+(defun keymap-popup--display-deleted-p (session)
+  "Return non-nil when SESSION's owned display window was deleted."
+  (let ((window (plist-get session :window)))
+    (and window (not (window-live-p window)))))
+
+(defun keymap-popup--retire-missing-display (&rest _)
+  "Retire the active popup once its owned display window has been deleted."
+  (when-let* ((buf (keymap-popup--popup-buffer))
+              ((keymap-popup--display-deleted-p
+                (keymap-popup--session-state buf))))
+    (keymap-popup--cleanup buf)))
+
+(defun keymap-popup--watch-window-deletion (buf window)
+  "Retire BUF after WINDOW is deleted, preserving its deletion parameter."
+  (let ((previous (window-parameter window 'delete-window))
+        (watch nil))
+    (setq watch
+          (lambda (target)
+            (set-window-parameter target 'delete-window previous)
+            (unwind-protect
+                (delete-window target)
+              (if (window-live-p target)
+                  (when (and (eq buf (keymap-popup--popup-buffer))
+                             (eq (window-parameter target 'delete-window) previous))
+                    (set-window-parameter target 'delete-window watch))
+                (keymap-popup--retire-missing-display)))))
+    (set-window-parameter window 'delete-window watch)
+    (keymap-popup--set-session
+     buf :unwatch-window
+     (lambda ()
+       (when (and (window-live-p window)
+                  (eq (window-parameter window 'delete-window) watch))
+         (set-window-parameter window 'delete-window previous))))))
+
+(defun keymap-popup--watch-display (buf)
+  "Watch for external deletion of BUF's display."
+  (when-let* ((window (keymap-popup--display-window buf)))
+    (add-hook 'window-configuration-change-hook #'keymap-popup--retire-missing-display)
+    (add-hook 'after-delete-frame-functions #'keymap-popup--retire-missing-display)
+    (unless (keymap-popup--session-get buf :frame)
+      (keymap-popup--watch-window-deletion buf window))))
+
 (defun keymap-popup--remove-session-hooks (session)
   "Remove hooks owned by the captured SESSION."
+  (remove-hook 'window-configuration-change-hook #'keymap-popup--retire-missing-display)
+  (remove-hook 'after-delete-frame-functions #'keymap-popup--retire-missing-display)
+  (when-let* ((unwatch (plist-get session :unwatch-window)))
+    (funcall unwatch))
   (remove-hook 'minibuffer-setup-hook #'keymap-popup--suspend)
   (remove-hook 'minibuffer-exit-hook #'keymap-popup--resume)
   (when-let* ((source (plist-get session :source))
@@ -1988,6 +2044,15 @@ INCLUDE-ACTIVE also deactivates the active transient map."
   (when-let* ((backend (keymap-popup--session-get buf :backend))
               (hide (plist-get backend :hide)))
     (funcall hide buf)))
+
+(defun keymap-popup--run-exit-hook (session)
+  "Run `keymap-popup-exit-hook' in SESSION's opening context."
+  (let ((window (plist-get session :source-window))
+        (buffer (plist-get session :source)))
+    (with-selected-window (if (window-live-p window) window (selected-window))
+      (when (buffer-live-p buffer)
+        (set-buffer buffer))
+      (run-hooks 'keymap-popup-exit-hook))))
 
 (defun keymap-popup--cleanup (buf &optional keep-buffer)
   "Retire BUF's session, completing internal cleanup after callback failures.
@@ -2019,6 +2084,10 @@ Signal the first cleanup failure after attempting the remaining steps."
               (condition-case err
                   (kill-buffer buf)
                 ((error quit) (unless failure (setq failure err)))))))
+        (when session
+          (condition-case err
+              (keymap-popup--run-exit-hook session)
+            ((error quit) (unless failure (setq failure err)))))
         (when failure (signal (car failure) (cdr failure)))))))
 
 (defun keymap-popup--kill-buffer-cleanup ()
@@ -2221,65 +2290,80 @@ recursive edit it opens (a minibuffer) sees none."
   (and keymap-popup--pressed (= (car keymap-popup--pressed) (recursion-depth))
        (cdr keymap-popup--pressed)))
 
+(defun keymap-popup--keep-command-p (buf session)
+  "Return non-nil if the current command keeps BUF's popup SESSION open."
+  (let* ((active (plist-get session :active))
+         (key-str (key-description (this-command-keys-vector))))
+    (keymap-popup--note-press session key-str)
+    (cond
+     ((and (symbolp this-command)
+           (get this-command 'keymap-popup--failure)) t)
+     ((and (mouse-event-p last-input-event)
+           (let ((window (posn-window (event-start last-input-event))))
+             (and (window-live-p window)
+                  (eq (window-buffer window) buf))))
+      ;; Consume the position before any suffix retires its window.
+      ;; This hook stays active while maps are suspended for a reader.
+      (setq this-command #'keymap-popup--mouse)
+      (keymap-popup--set-session buf :reentering nil)
+      t)
+     ((eq this-command #'keymap-popup--ignore-mouse) t)
+     ((active-minibuffer-window) t)
+     ((plist-get session :reentering)
+      (keymap-popup--set-session buf :reentering nil)
+      t)
+     ((memq this-command
+            '(universal-argument universal-argument-more
+              digit-argument negative-argument
+              keymap-popup--prefix-argument
+              keymap-popup-next-page keymap-popup-previous-page
+              describe-key describe-key-briefly)))
+     ((keymap-popup--same-key-p key-str (plist-get active :exit-key)) nil)
+     ((eq this-command 'keyboard-quit) nil)
+     ((keymap-popup--inapt-key-p buf key-str)
+      ;; Lookup preceded earlier pre-command hooks.  Enforce the
+      ;; refusal observed here, without wrapping accepted commands.
+      (setq this-command
+            (lambda () (interactive)
+              (keymap-popup--refuse-inapt buf))
+            real-this-command this-command)
+      t)
+     ((plist-get session :persistent)
+      ;; Settle presentation before native dispatch, even on failure.
+      (keymap-popup--consume-prefix buf)
+      t)
+     ((keymap-popup--keep-popup-p
+       (keymap-popup--active-descriptions buf) key-str)
+      (keymap-popup--consume-prefix buf)
+      t))))
+
+(defun keymap-popup--keep-live-command-p (buf session)
+  "Keep BUF's popup for this command only while SESSION's display lives."
+  (let ((keep (unless (keymap-popup--display-deleted-p session)
+                (keymap-popup--keep-command-p buf session))))
+    (if (keymap-popup--display-deleted-p session)
+        (progn
+          ;; Native lookup already resolved this key against the expired map.
+          (unless (or (eq this-command 'keyboard-quit)
+                      (and (symbolp this-command)
+                           (get this-command 'keymap-popup--failure)))
+            (setq this-command #'ignore real-this-command this-command))
+          nil)
+      keep)))
+
 (defun keymap-popup--make-keep-pred (buf)
-  "Return a keep-pred for `set-transient-map'.
-Read state from BUF and consume its reentering flag on read.
+  "Return a keep predicate for BUF's transient map.
 Defer predicate failures to command execution so an error or quit cannot
 remove the native exit hook while leaving its transient map installed."
   (lambda ()
-    (condition-case err
-        (and (buffer-live-p buf)
-             (let* ((session (keymap-popup--session-state buf))
-                    (active (plist-get session :active))
-                    (key-str (key-description (this-command-keys-vector))))
-               (keymap-popup--note-press session key-str)
-               (cond
-                ((and (symbolp this-command)
-                      (get this-command 'keymap-popup--failure)) t)
-                ((and (mouse-event-p last-input-event)
-                      (let ((window (posn-window (event-start last-input-event))))
-                        (and (window-live-p window)
-                             (eq (window-buffer window) buf))))
-                 ;; Consume the position before any suffix retires its window.
-                 ;; This hook stays active while maps are suspended for a reader.
-                 (setq this-command #'keymap-popup--mouse)
-                 (keymap-popup--set-session buf :reentering nil)
-                 t)
-                ((eq this-command #'keymap-popup--ignore-mouse) t)
-                ((active-minibuffer-window) t)
-                ((plist-get session :reentering)
-                 (keymap-popup--set-session buf :reentering nil)
-                 t)
-                ((memq this-command
-                       '(universal-argument universal-argument-more
-                         digit-argument negative-argument
-                         keymap-popup--prefix-argument
-                         keymap-popup-next-page keymap-popup-previous-page
-                         describe-key describe-key-briefly)))
-                ((keymap-popup--same-key-p key-str (plist-get active :exit-key)) nil)
-                ((eq this-command 'keyboard-quit) nil)
-                ((keymap-popup--inapt-key-p buf key-str)
-                 ;; Lookup preceded earlier pre-command hooks.  Enforce the
-                 ;; refusal observed here, without wrapping accepted commands.
-                 (setq this-command
-                       (lambda () (interactive)
-                         (keymap-popup--refuse-inapt buf))
-                       real-this-command this-command)
-                 t)
-                ((plist-get session :persistent)
-                 ;; Settle presentation before native dispatch, even on failure.
-                 (keymap-popup--consume-prefix buf)
-                 t)
-                ((keymap-popup--keep-popup-p
-                  (keymap-popup--active-descriptions buf) key-str)
-                 (keymap-popup--consume-prefix buf)
-                 t))))
-      ((error quit)
-       ;; Fail closed outside `pre-command-hook', preserving the exact failure.
-       ;; Do not clean up here: the predicate may have installed a successor.
-       (setq this-command (keymap-popup--failure-command err)
-             real-this-command this-command)
-       t))))
+    (when-let* ((session (keymap-popup--session-state buf)))
+      (condition-case err
+          (keymap-popup--keep-live-command-p buf session)
+        ((error quit)
+         ;; Signal from command execution, after any expired map retires.
+         (setq this-command (keymap-popup--failure-command err)
+               real-this-command this-command)
+         (not (keymap-popup--display-deleted-p session)))))))
 
 (defun keymap-popup--make-on-exit (buf)
   "Return an on-exit callback for `set-transient-map' closing BUF.
@@ -2293,6 +2377,7 @@ otherwise tears down completely."
              (key-str (key-description (this-command-keys-vector))))
         (unless (plist-get session :closing)
           (if (and stack
+                   (not (keymap-popup--display-deleted-p session))
                    (or (keymap-popup--same-key-p key-str (plist-get active :exit-key))
                        (equal key-str "C-g")))
               (progn
@@ -2672,6 +2757,31 @@ Use ACTIVE instead of deriving the initial navigation state when non-nil."
     (keymap-popup--set-session buf :persistent-hook hook-fn)
     (add-hook 'post-command-hook hook-fn)))
 
+(defun keymap-popup--open (keymap active)
+  "Open KEYMAP with ACTIVE as its initial navigation state."
+  (let ((session (keymap-popup--make-session keymap active))
+        (buf (keymap-popup--prepare-buffer))
+        (complete nil))
+    (unwind-protect
+        (progn
+          (keymap-popup--init-session buf session)
+          (let ((rendered-rows (keymap-popup--refresh buf)))
+            (funcall (plist-get (plist-get session :backend) :show) buf)
+            ;; Reflow saved columns at the chosen window's actual width.
+            (keymap-popup--write-rendered buf rendered-rows))
+          (keymap-popup--watch-display buf)
+          (keymap-popup--activate-transient-map buf)
+          (add-hook 'minibuffer-setup-hook #'keymap-popup--suspend)
+          (add-hook 'minibuffer-exit-hook #'keymap-popup--resume)
+          (keymap-popup--install-persistent-hook buf)
+          (setq complete t))
+      (unless complete
+        ;; Preserve the launch error or quit, even if :hide also fails.
+        (condition-case err
+            (keymap-popup--cleanup buf)
+          ((error quit) (message "Popup cleanup failed: %s"
+                                 (error-message-string err))))))))
+
 ;;;###autoload
 (defun keymap-popup (keymap)
   "Show popup help for described KEYMAP.
@@ -2682,33 +2792,15 @@ dispatch.  Sub-menu keys push a navigation stack.
 The exit key, \\[universal-argument], and C-v and M-v (and C-M-v and C-M-S-v:
 a popup too big for its room pages, its source keeping focus) are popup controls; source actions
 shadowed by those controls are omitted from the displayed entries.
-\\[universal-argument] toggles prefix mode."
+\\[universal-argument] toggles prefix mode.
+If dismissing the current popup opens a successor, keep that popup."
   (let ((active (keymap-popup--state-for-keymap keymap)))
     (or (keymap-popup--descriptions-present-p
          (plist-get active :descriptions))
         (user-error "No descriptions in keymap"))
     (keymap-popup-dismiss)
-    (let ((session (keymap-popup--make-session keymap active))
-          (buf (keymap-popup--prepare-buffer))
-          (complete nil))
-      (unwind-protect
-          (progn
-            (keymap-popup--init-session buf session)
-            (let ((rendered-rows (keymap-popup--refresh buf)))
-              (funcall (plist-get (plist-get session :backend) :show) buf)
-              ;; Reflow saved columns at the chosen window's actual width.
-              (keymap-popup--write-rendered buf rendered-rows))
-            (keymap-popup--activate-transient-map buf)
-            (add-hook 'minibuffer-setup-hook #'keymap-popup--suspend)
-            (add-hook 'minibuffer-exit-hook #'keymap-popup--resume)
-            (keymap-popup--install-persistent-hook buf)
-            (setq complete t))
-        (unless complete
-          ;; Preserve the launch error or quit, even if :hide also fails.
-          (condition-case err
-              (keymap-popup--cleanup buf)
-            ((error quit) (message "Popup cleanup failed: %s"
-                                   (error-message-string err)))))))))
+    (or (and (keymap-popup--popup-buffer) t)
+        (keymap-popup--open keymap active))))
 
 (provide 'keymap-popup)
 ;;; keymap-popup.el ends here

@@ -372,5 +372,38 @@ With STAY-OPEN, exercise the non-exiting action before DRIVE."
        (execute-kbd-macro (kbd "q")))
      t)))
 
+(defun keymap-popup-input--check-deleted-display (delete)
+  "Run DELETE on the popup display and reject a key resolved from that popup."
+  (keymap-popup-input--with-source
+    (let* ((configuration (current-window-configuration))
+           (keymap-popup-backend #'keymap-popup-backend-side-window)
+           (hits 0)
+           (exits 0)
+           (keymap-popup-exit-hook (list (lambda () (cl-incf exits)))))
+      (keymap-popup
+       (keymap-popup-input--suffix-map
+        (lambda () (interactive) (cl-incf hits)) nil :stay-open t))
+      (let ((window (get-buffer-window (get-buffer keymap-popup--buffer-name))))
+        (should (window-live-p window))
+        (funcall delete window configuration)
+        (should-not (window-live-p window))
+        (execute-kbd-macro (kbd "a"))
+        (should (= hits 0))
+        (should (= exits 1))
+        (keymap-popup-input--clean-p)))))
+
+(ert-deftest keymap-popup-input-display-deleted-by-delete-other-windows ()
+  (keymap-popup-input--check-deleted-display
+   (lambda (_window _configuration) (delete-other-windows))))
+
+(ert-deftest keymap-popup-input-display-deleted-by-configuration-restore ()
+  (keymap-popup-input--check-deleted-display
+   (lambda (_window configuration) (set-window-configuration configuration))))
+
+(ert-deftest keymap-popup-input-display-deleted-with-parameters-ignored ()
+  (keymap-popup-input--check-deleted-display
+   (lambda (window _configuration)
+     (let ((ignore-window-parameters t)) (delete-window window)))))
+
 (provide 'keymap-popup-input-tests)
 ;;; keymap-popup-input-tests.el ends here
