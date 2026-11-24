@@ -4494,7 +4494,7 @@ next run takes the unit's name; at once when it ran detached."
       (make-process :name "romacs-agent-restart" :noquery t :connection-type 'pipe
                     :command (list "systemctl" "--user" "stop" unit)
                     :sentinel (lambda (process _event) (unless (process-live-p process) (funcall then))))
-    (romacs-agent-stop session)
+    (romacs-agent--stop-harness session)
     (funcall then)))
 
 (defvar romacs-agent--relaunching (make-hash-table :test #'eq :weakness 'key)
@@ -6056,14 +6056,29 @@ message, which resumes it.  Kept, as the stop is, in its directory."
   "What SESSION reads once its harness has ended: idle when that is how
 it goes on (asleep after a reap, or between a per-turn harness's runs),
 else ended."
-  (if (or (romacs-agent--per-turn-p session) (romacs-agent-reaped-p session)) 'idle 'ended))
+  (cond ((romacs-agent-reaped-p session) 'idle)
+        ((romacs-agent-stopped session) 'ended)
+        ((romacs-agent--per-turn-p session) 'idle)
+        (t 'ended)))
+
+(declare-function romacs-agent-watch-stop "romacs-agent-watch" (session))
 
 (defun romacs-agent-stop (session &optional reaped)
   "End SESSION: its unit stops, ending the harness and everything it started.
 It reads ended, not detached: its supervisor, stopped too, journals no end.
 REAPED: its task is done and it only sleeps (`romacs-agent-reaped-p'); it
 reads idle, and its next message resumes it."
+  (unless reaped (romacs-agent-watch-stop session))
   (romacs-agent--set-stopped session (if reaped 'reaped t))
+  (unless reaped
+    (unless (or (process-live-p (romacs-agent-connection session))
+                (eq (romacs-agent-state session) 'starting))
+      (setf (romacs-agent-state session) 'ended)
+      (romacs-agent--changed session)))
+  (romacs-agent--stop-harness session))
+
+(defun romacs-agent--stop-harness (session)
+  "Stop SESSION's current harness without changing its stop or watch records."
   (cond ((romacs-agent-unit session)
          (call-process "systemctl" nil 0 nil "--user" "stop" (romacs-agent-unit session)))
         ;; Detached, only while attached: the pids are then the live
@@ -6073,7 +6088,7 @@ reads idle, and its next message resumes it."
          (when-let* ((pid (romacs-agent-harness-pid session))) (signal-process pid 'TERM)))
         ;; Just launched: stopped once attached.
         ((eq (romacs-agent-state session) 'starting)
-         (romacs-agent--when-attached session (lambda () (romacs-agent-stop session reaped))))))
+         (romacs-agent--when-attached session (lambda () (romacs-agent--stop-harness session))))))
 
 (defun romacs-agent--conversation-p (session)
   "Whether SESSION's harness has a conversation to resume: one imported or

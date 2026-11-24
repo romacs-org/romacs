@@ -265,12 +265,14 @@ that position in any band."
 
 (defun romacs-grid--anchor (text x)
   "TEXT, set at column X: each run of it carrying `romacs-grid-align' N
-displayed as a stretch to column X+N, so a block's own columns (a key
-column's padding) hold whatever its glyphs paint."
+displayed as a stretch to column X+N, plus its `romacs-grid-align-offset'
+if present.  The block's columns hold whatever its glyphs paint."
   (let ((pos 0) (text (copy-sequence text)))
     (while (setq pos (text-property-not-all pos (length text) 'romacs-grid-align nil text))
-      (let ((end (next-single-property-change pos 'romacs-grid-align text (length text))))
-        (put-text-property pos end 'display `(space :align-to ,(+ x (get-text-property pos 'romacs-grid-align text))) text)
+      (let* ((end (next-single-property-change pos 'romacs-grid-align text (length text)))
+             (column (+ x (get-text-property pos 'romacs-grid-align text)
+                        (or (get-text-property pos 'romacs-grid-align-offset text) 0))))
+        (put-text-property pos end 'display `(space :align-to ,column) text)
         (setq pos end)))
     text))
 

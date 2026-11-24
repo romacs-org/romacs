@@ -31,7 +31,7 @@
 (require 'romacs-agent-attachments)
 (require 'romacs-agent-limits)
 
-(declare-function romacs-agent-store-unloaded "romacs-agent-store" ())
+(declare-function romacs-agent-store-unloaded "romacs-agent-store" (&optional parent))
 
 (defcustom romacs-agent-eval-budget 5000
   "Milliseconds an agent's `romacs_eval' may run before it is quit, as

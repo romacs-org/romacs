@@ -31,7 +31,7 @@
 (defconst romacs-agent-store--columns
   '(id dir harness provider model title cwd parent state last_time cost transcript
        input_seq done_seq seen_seq settled_seq attention
-       effort plan permission_mode context_used context_window resume_time seq request)
+       effort plan permission_mode context_used context_window resume_time seq request failed)
   "The table's columns, in order.")
 
 (defconst romacs-agent-store--schema
@@ -40,7 +40,7 @@
        title text, cwd text, parent text, state text, last_time real, cost real, transcript text,
        input_seq integer, done_seq integer, seen_seq integer, settled_seq integer,
        attention integer, effort text, plan integer, permission_mode text, context_used integer,
-       context_window integer, resume_time real, seq integer, request text)"
+       context_window integer, resume_time real, seq integer, request text, failed integer)"
     "create index if not exists sessions_state on sessions (state)"
     "create index if not exists sessions_recent on sessions (last_time desc)"
     "create index if not exists sessions_cwd on sessions (cwd)"
@@ -53,7 +53,7 @@
     "create index if not exists commands_at on commands (at)")
   "The table and its indexes, made when the database is opened.")
 
-(defconst romacs-agent-store--version 5
+(defconst romacs-agent-store--version 6
   "The table's form (`user_version'): a database of another has its table
 made in this form, its rows kept (`romacs-agent-store--reform').")
 
@@ -168,6 +168,17 @@ wait for the store's lock, every connection of its life."
 
 (setq romacs-agent-writer-bindings-function #'romacs-agent-store--writer-bindings)
 
+(defun romacs-agent-store--backfill-turn-failures (db)
+  "Fill DB's unknown failure flags from the last turns through `done_seq'."
+  (when (sqlite-select db "select 1 from sqlite_master where type = 'table' and name = 'turns'")
+    (let ((columns (mapcar #'cadr (sqlite-select db "pragma table_info(turns)"))))
+      (when (and (member "session" columns) (member "status" columns) (member "first_seq" columns))
+        (sqlite-execute db "update sessions_reformed set failed = (
+          select status = 'failed' from turns
+          where session = sessions_reformed.id and first_seq <= sessions_reformed.done_seq
+          order by first_seq desc limit 1)
+          where failed is null")))))
+
 (defun romacs-agent-store--reform (db)
   "Make DB's sessions table, of another version, in this one's form, every
 row kept with the columns both forms have, in one transaction: a row lost
@@ -185,6 +196,7 @@ refuses (a column it needs, missing) is left out."
                  (old (mapcar #'cadr (sqlite-select db "pragma table_info(sessions)")))
                  (both (string-join (seq-filter (lambda (column) (member column old)) new) ", ")))
             (sqlite-execute db (format "insert or ignore into sessions_reformed (%s) select %s from sessions" both both)))
+          (romacs-agent-store--backfill-turn-failures db)
           (sqlite-execute db "drop table sessions")
           (sqlite-execute db "alter table sessions_reformed rename to sessions"))
         (sqlite-pragma db (format "user_version = %d" romacs-agent-store--version))
@@ -285,6 +297,7 @@ moment later, unless AGAIN says this is that try."
                                                      (romacs-agent-harness-session session))
          :input_seq (romacs-agent-input-seq session) :done_seq (romacs-agent-done-seq session)
          :seen_seq (romacs-agent-seen-seq session) :settled_seq (romacs-agent-settled-seq session)
+         :failed (if (romacs-agent-failed session) 1 0)
          ;; Wanting the user or its parent: its last turn failed, or a task
          ;; holding ends its parent may not have had yet.
          :attention (if (or (romacs-agent-failed session)
@@ -315,18 +328,22 @@ moment later, unless AGAIN says this is that try."
                  (re-search-backward "^{\"seq\":\\([0-9]+\\)," nil t))
              (string-to-number (match-string 1)))))))
 
+(defun romacs-agent-store--read-fold (dir &optional text)
+  "Read a saved fold from TEXT or the older state file in DIR."
+  (let* ((file (expand-file-name "state.eld" dir))
+         (source (or text (and (file-readable-p file)
+                               (with-temp-buffer
+                                 (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
+                                 (buffer-string))))))
+    (and source (ignore-errors (car (read-from-string source))))))
+
 (defun romacs-agent-store--recorded-row (dir)
   "The row of the session recorded in DIR, from its manifest and its kept
 state (`romacs-agent--kept-text'); no journal is read.  Nil with no
 manifest."
   (when-let* ((manifest (romacs-agent--read-json (expand-file-name "manifest.json" dir))))
-    (let* ((state (let ((text (or (and (fboundp 'romacs-agent-turns-fold) (romacs-agent-turns-fold (gethash "id" manifest)))
-                                  (let ((file (expand-file-name "state.eld" dir)))
-                                    (and (file-readable-p file)
-                                         (with-temp-buffer
-                                           (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
-                                           (buffer-string)))))))
-                    (and text (ignore-errors (car (read-from-string text))))))
+    (let* ((state (romacs-agent-store--read-fold
+                   dir (and (fboundp 'romacs-agent-turns-fold) (romacs-agent-turns-fold (gethash "id" manifest)))))
            (kept (plist-get state :fields))
            (field (lambda (slot) (cdr (assq slot kept))))
            (options (gethash "options" manifest))
@@ -360,6 +377,7 @@ manifest."
             :done_seq (if kept (funcall field 'done-seq) (romacs-agent-store--last-seq journal))
             :seen_seq (let ((seen (gethash "seenSeq" manifest))) (and (integerp seen) seen))
             :settled_seq (let ((settled (gethash "settledSeq" manifest))) (and (integerp settled) settled))
+            :failed (and kept (if (funcall field 'failed) 1 0))
             ;; Its last turn failed, or a task's ends for its parent, as
             ;; kept; unknown with no kept state, so wanted.
             :attention (if (or (funcall field 'failed)
@@ -575,21 +593,21 @@ kept one), or `settled' if the user explicitly put it aside."
 
 (defconst romacs-agent-store--row-columns
   "id, dir, harness, provider, model, title, cwd, parent, state, last_time, cost, input_seq, done_seq,
- seen_seq, settled_seq, effort, plan, permission_mode, context_used, context_window, resume_time"
+ seen_seq, settled_seq, effort, plan, permission_mode, context_used, context_window, resume_time, failed"
   "The columns a session is made from its row alone (`romacs-agent-store--row-of').")
 
 (defun romacs-agent-store--row-of (row)
   "The session ROW (`romacs-agent-store--row-columns') says, made from it
 alone: one projection, whoever reads rows."
   (pcase-let ((`(,id ,dir ,harness ,provider ,model ,title ,cwd ,parent ,state ,last ,cost ,input ,done ,seen ,settled
-                 ,effort ,plan ,mode ,used ,window ,resume)
+                 ,effort ,plan ,mode ,used ,window ,resume ,failed)
                row))
     (romacs-agent--make :id id :dir dir :harness (intern harness) :provider provider :model model
                         :title title :cwd cwd
                         :options (append (and parent (list :parent parent)) (and effort (list :effort effort))
                                          (and (eql plan 1) (list :plan t)) (and resume (list :resume-at resume)))
                         :state (intern (or state "detached")) :last-time last :cost cost
-                        :input-seq input :done-seq (or done 0) :seen-seq seen :settled-seq settled
+                        :input-seq input :done-seq (or done 0) :seen-seq seen :settled-seq settled :failed (eql failed 1)
                         :permission-mode mode :context-used used :context-window window)))
 
 (defun romacs-agent-store-row-session (id)
@@ -603,15 +621,17 @@ header's facts too.  Nil with no row.  Acting on it loads it
                                        (list id)))))
     (romacs-agent-store--row-of row)))
 
-(defun romacs-agent-store-unloaded ()
+(defun romacs-agent-store-unloaded (&optional parent)
   "The sessions that have a row but are not loaded, newest first, each a
 session record made from its row alone: to show, not to act on (acting
-on one loads it, `romacs-agent-get')."
+on one loads it, `romacs-agent-get').  With PARENT, only its direct children."
   (when-let* ((db (romacs-agent-store--open)))
     (delq nil
           (mapcar (lambda (row) (unless (romacs-agent-loaded (car row)) (romacs-agent-store--row-of row)))
                   (sqlite-select db (concat "select " romacs-agent-store--row-columns
-                                            " from sessions order by last_time desc"))))))
+                                            " from sessions" (and parent " where parent = ?")
+                                            " order by last_time desc")
+                                 (and parent (list parent)))))))
 
 ;;; The agents service's commands (doc/agent-protocol.org, Commands)
 
@@ -915,6 +935,8 @@ nothing else of it.  A failure signals."
          (when (equal (cadr answer) (romacs-agent-store--settlement dir))
            (romacs-agent-mark id 'settlement nil)
            (when then (funcall then)))
+         (unless (gethash id romacs-agent--sessions)
+           (romacs-agent--raise session (list :type 'settled)))
          (romacs-agent--run-hook 'romacs-agent-store-settlement-hook)))
      (list 'settlement id))))
 

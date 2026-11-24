@@ -103,7 +103,8 @@
   (dolist (work '(idle running waiting failed))
     (dolist (cols '(1 2 3 9))
       (should (= (length (romacs-working-still cols work)) cols))
-      (should (string-match-p "[⠤⠿⣀]" (romacs-working-still cols work))))))
+      (should (string-match-p (if (and (eq work 'running) (= cols 1)) "⣶" "[⠤⠿⣀]")
+                              (romacs-working-still cols work))))))
 
 (ert-deftest romacs-working-leaves-text-that-is-not-its-own ()
   (with-temp-buffer

@@ -462,6 +462,7 @@ derived by `romacs-theme-rules'."
     (link-visited :foreground (text magenta) :underline t)
     (button :inherit link)
     (shadow :foreground (dim fg-muted))
+    (romacs-agent-log-activity-idle :foreground (text fg-muted))
     (trailing-whitespace :background red)
     (escape-glyph :foreground (text orange))
     (homoglyph :foreground (text orange))

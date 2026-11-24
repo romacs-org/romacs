@@ -169,7 +169,7 @@ the running face when given."
                            (let* ((gap (max 1 (/ cols 6))) (left (- (/ cols 2) gap)))
                              (concat (make-string left ?⠤) (make-string gap ?⠀)
                                      (make-string (- cols left gap) ?⠤)))))
-                (_ (make-string cols ?⠤)))
+                (_ (if (= cols 1) "⣶" (make-string cols ?⠤))))
               'face (romacs-working--face work running-face)))
 
 (defun romacs-working--paint (thread)

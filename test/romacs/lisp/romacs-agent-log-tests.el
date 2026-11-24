@@ -272,7 +272,7 @@ them inherits."
             (goto-char start)
             (search-forward "Review the patch" (line-end-position))
             (should (eq (get-text-property (1- (point)) 'face) 'romacs-agent-log-delegated-title))
-            (should (eq (face-attribute 'romacs-agent-log-delegated-title :underline) t)))
+            (should (eq (face-attribute 'romacs-agent-log-delegated-title :weight) 'bold)))
           (goto-char start)
           (should (eq (key-binding (kbd "RET")) 'romacs-agent-log-open))
           (cl-letf (((symbol-function 'romacs-agent-show)
@@ -285,7 +285,8 @@ them inherits."
         (pcase-let ((`(,start . ,end) (romacs-agent-log-activity-bounds)))
           (should (string-search "Needs approval" (buffer-substring-no-properties start end))))
         (should-not romacs-agent-log-activity--threads)
-        (setf (romacs-agent-state child) 'idle)
+        (setf (romacs-agent-state child) 'idle
+              (romacs-agent-settled-seq child) romacs-agent--inactive-settlement)
         (romacs-agent-ui--summarize-children session)
         (romacs-agent-log--activity-refresh)
         (should-not (romacs-agent-log-activity-bounds))
@@ -446,34 +447,41 @@ them inherits."
                 (should (> (funcall rule) short)))))
         (remhash "L" romacs-agent-log--chats)))))
 
-(ert-deftest romacs-agent-log-menu-lists-the-workers-at-work ()
+(ert-deftest romacs-agent-log-menu-keys-keep-the-worker-they-showed ()
   (romacs-agent-log-tests--with
     (ignore #'draw)
     (setf (romacs-agent-title session) "lane chat")
     (let ((children (list (romacs-agent--make :id "c1" :state 'running :title "builds")
-                          (romacs-agent--make :id "c2" :state 'idle :title "finished")
+                          (romacs-agent--make :id "c2" :state 'idle :title "settled"
+                                              :settled-seq romacs-agent--inactive-settlement)
                           (romacs-agent--make :id "c3" :state 'waiting-approval :title "asks"))))
       (cl-letf (((symbol-function 'romacs-agent-children) (lambda (_) children)))
+        (romacs-agent-ui--summarize-children session)
         (should (equal (substring-no-properties (romacs-agent-menu--title)) "Agent · lane chat"))
-        ;; A finished one is the board's; one waiting on the user first.
+        ;; A settled one is hidden; one waiting on the user comes first.
         (should (equal (mapcar #'romacs-agent-title (romacs-agent-menu--workers)) '("asks" "builds")))
-        (should (equal (substring-no-properties (romacs-agent-menu--worker-label 0)) "◆ asks you · asks"))
-        (should (equal (substring-no-properties (romacs-agent-menu--worker-label 1)) "● running · builds"))
+        (should (string-suffix-p "asks  ·  Needs approval" (romacs-agent-menu--worker-label 0)))
+        (should (string-suffix-p "builds  ·  Working" (romacs-agent-menu--worker-label 1)))
         (should-not (romacs-agent-menu--worker-label 2))
         ;; A long title is what a cut row loses, its state never.
         (setf (romacs-agent-title (nth 0 children)) (make-string 60 ?x))
-        (should (string-prefix-p "● running · " (substring-no-properties (romacs-agent-menu--worker-label 1))))
+        (romacs-agent-ui--summarize-children session)
+        (should (string-suffix-p "  ·  Working" (romacs-agent-menu--worker-label 1)))
         (setf (romacs-agent-title (nth 0 children)) "builds")
-        ;; A digit opens the worker it showed; one finished since is the board's.
+        ;; A digit opens the worker it showed, even if the rows have shifted.
         (let (shown)
           (cl-letf (((symbol-function 'romacs-agent-show) (lambda (child &rest _) (setq shown child))))
-            (setf (romacs-agent-state (nth 2 children)) 'idle)
+            (setf (romacs-agent-state (nth 2 children)) 'idle
+                  (romacs-agent-settled-seq (nth 2 children)) romacs-agent--inactive-settlement)
+            (romacs-agent-ui--summarize-children session)
             (let ((last-command-event ?2)) (romacs-agent-menu-open-worker))
             (should (equal (romacs-agent-title shown) "builds"))
             (let ((last-command-event ?1)) (should-error (romacs-agent-menu-open-worker) :type 'user-error))
-            ;; All finished while it is open: its keys still dispatch (the
+            ;; All settled while it is open: its keys still dispatch (the
             ;; group has no :if), each saying so.
-            (setf (romacs-agent-state (car children)) 'idle)
+            (setf (romacs-agent-state (car children)) 'idle
+                  (romacs-agent-settled-seq (car children)) romacs-agent--inactive-settlement)
+            (romacs-agent-ui--summarize-children session)
             (should-not (romacs-agent-menu--workers))
             (let ((group (seq-find (lambda (group) (equal (plist-get group :name) "Workers"))
                                    (apply #'append (keymap-popup--meta romacs-agent-menu-map 'descriptions)))))
@@ -481,9 +489,7 @@ them inherits."
               (should-not (plist-get group :if)))
             (let ((last-command-event ?2)) (should-error (romacs-agent-menu-open-worker) :type 'user-error))
             ;; Each chat its own rows.
-            (should-not (eq romacs-agent-menu--shown (default-value 'romacs-agent-menu--shown)))
-            (setf (romacs-agent-state (car children)) 'running)
-            (setf (romacs-agent-state (nth 2 children)) 'waiting-approval)))
+            (should-not (eq romacs-agent-menu--shown (default-value 'romacs-agent-menu--shown)))))
         ;; Its values read as values, never dim as a command it cannot run.
         (let ((romacs-agent-log--session session))
           (dolist (label (list (romacs-agent-menu--effort-label) (romacs-agent-menu--model-label)))
