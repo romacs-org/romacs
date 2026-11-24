@@ -93,25 +93,39 @@ root; nil when it is no git project or git fails.  Only a `start' or
                (apply #'romacs-agent-diff--run (car head)))
       (remhash id romacs-agent-diff--queues))))
 
+(defun romacs-agent-diff--finish (session turn edge then output success)
+  "Release OUTPUT and advance SESSION's queue, passing TURN's EDGE to THEN.
+SUCCESS says git ran successfully.  If reading or keeping its tree fails,
+THEN receives two nils."
+  (unwind-protect
+      (let ((lines (unwind-protect
+                       (with-demoted-errors "romacs-agent checkpoint: %S"
+                         (when (and success (buffer-live-p output))
+                           (let ((lines (split-string (with-current-buffer output (buffer-string)) "\n" t)))
+                             (when (and (cadr lines) (memq edge '(start end))
+                                        (file-directory-p (romacs-agent-dir session)))
+                               (write-region (format "%d\t%s\t%s\t%s\n" turn edge (car lines) (cadr lines))
+                                             nil (romacs-agent-diff--file session) t 'silent))
+                             (and (cadr lines) lines))))
+                     (when (buffer-live-p output) (kill-buffer output)))))
+        (when then (funcall then (car lines) (cadr lines))))
+    (romacs-agent-diff--next session)))
+
 (defun romacs-agent-diff--run (session turn edge then)
   "Take SESSION's snapshot now (`romacs-agent-diff--snapshot')."
-  (let* ((directory (romacs-agent-dir session))
-         (index (make-temp-name (expand-file-name "checkpoint-index-" directory)))
-         (output (generate-new-buffer " *romacs-agent-checkpoint*")))
-    (make-process
-     :name "romacs-agent-checkpoint" :buffer output :noquery t :connection-type 'pipe
-     :command (list "sh" "-c" romacs-agent-diff--script "sh" (expand-file-name (romacs-agent-cwd session)) index)
-     :sentinel
-     (lambda (process _)
-       (unless (process-live-p process)
-         (let ((lines (and (buffer-live-p output) (eq (process-exit-status process) 0)
-                           (split-string (with-current-buffer output (buffer-string)) "\n" t))))
-           (kill-buffer output)
-           (when (and lines (memq edge '(start end)) (file-directory-p directory))
-             (write-region (format "%d\t%s\t%s\t%s\n" turn edge (car lines) (cadr lines))
-                           nil (romacs-agent-diff--file session) t 'silent))
-           (unwind-protect (when then (funcall then (car lines) (cadr lines)))
-             (romacs-agent-diff--next session))))))))
+  (let ((output (generate-new-buffer " *romacs-agent-checkpoint*")))
+    (condition-case err
+        (let ((index (make-temp-name (expand-file-name "checkpoint-index-" (romacs-agent-dir session)))))
+          (make-process
+           :name "romacs-agent-checkpoint" :buffer output :noquery t :connection-type 'pipe
+           :command (list "sh" "-c" romacs-agent-diff--script "sh" (expand-file-name (romacs-agent-cwd session)) index)
+           :sentinel
+           (lambda (process _)
+             (unless (process-live-p process)
+               (romacs-agent-diff--finish session turn edge then output (eq (process-exit-status process) 0))))))
+      (error
+       (message "romacs-agent checkpoint: %s" (error-message-string err))
+       (run-at-time 0 nil #'romacs-agent-diff--finish session turn edge then output nil)))))
 
 (defun romacs-agent-diff--live-p (session)
   "Whether SESSION's events now happen now: the registered session, its
