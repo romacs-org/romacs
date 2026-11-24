@@ -581,14 +581,14 @@ impl Vm {
         let change = newend - oldend;
         let start_moved = |at: i64| if at <= oldstart { at } else if at >= oldend { at + change } else { oldstart };
         let end_moved = |at: i64| if at >= oldend { at + change } else if at > oldstart { oldstart } else { at };
-        for (start, end) in self.regexp.groups.iter_mut().flatten() {
+        for (start, end) in self.mutator.regexp.groups.iter_mut().flatten() {
             (*start, *end) = (start_moved(*start as i64) as usize, end_moved(*end as i64) as usize);
         }
     }
 
     pub(crate) fn regexp_translate_match_data(&mut self, delta: i64) {
-        if self.regexp.succeeded {
-            for (start, end) in self.regexp.groups.iter_mut().flatten() {
+        if self.mutator.regexp.succeeded {
+            for (start, end) in self.mutator.regexp.groups.iter_mut().flatten() {
                 // set-match-data retains signed offsets in usize slots. Recover
                 // their signed meaning before adding, including negative ends.
                 *start = (*start as i64).wrapping_add(delta).max(0) as usize;
@@ -616,9 +616,9 @@ impl Vm {
             tail = next;
         }
         if tail != Value::NIL { return Err(Fault::Wrong("listp", tail)); }
-        self.regexp.succeeded = true;
+        self.mutator.regexp.succeeded = true;
         let length = cells.len() / 2;
-        self.regexp.groups.resize(self.regexp.groups.len().max(length), None);
+        self.mutator.regexp.groups.resize(self.mutator.regexp.groups.len().max(length), None);
         let mut i = 0;
         while i * 2 < cells.len() {
             let (cell, from) = cells[i * 2];
@@ -628,7 +628,7 @@ impl Vm {
             }
             if i >= length { break; }
             if from == Value::NIL {
-                self.regexp.groups[i] = None;
+                self.mutator.regexp.groups[i] = None;
             } else {
                 if let Some(Object::Marker(m)) = self.object_if(from) {
                     if m.buffer != Value::NIL { self.slots[buffer_slot].value = m.buffer; }
@@ -637,12 +637,12 @@ impl Vm {
                 self.regexp_reseat(cell, from, reseat)?;
                 let (end_cell, end) = cells[i * 2 + 1];
                 let b = self.regexp_match_position(end)?;
-                self.regexp.groups[i] = (a >= 0).then_some((a as usize, b as usize));
+                self.mutator.regexp.groups[i] = (a >= 0).then_some((a as usize, b as usize));
                 self.regexp_reseat(end_cell, end, reseat)?;
             }
             i += 1;
         }
-        self.regexp.groups[i..].fill(None);
+        self.mutator.regexp.groups[i..].fill(None);
         Ok(Value::NIL)
     }
     fn regexp_match_position(&self, value: Value) -> std::result::Result<i64, prim::Fault> {
@@ -891,7 +891,7 @@ impl Vm {
     /// nothing to fill.
     fn regexp_save(&mut self, registers: &MatchRegisters, buffer: bool) {
         let (starts, ends) = (&registers.start[..], &registers.end[..]);
-        let groups = &mut self.regexp.groups;
+        let groups = &mut self.mutator.regexp.groups;
         groups.clear();
         for (i, &start) in starts.iter().enumerate() {
             groups.push(match (register(start), register(ends[i])) {
@@ -899,7 +899,7 @@ impl Vm {
                 _ => None,
             });
         }
-        self.regexp.succeeded = true;
+        self.mutator.regexp.succeeded = true;
         let slot = self.search_slots().match_buffer;
         self.slots[slot].value = if buffer {
             self.slots[self.buffer_slot].value
@@ -934,13 +934,13 @@ impl Vm {
                 vec![v, Value::integer(0)?],
             ));
         }
-        if !self.regexp.succeeded {
+        if !self.mutator.regexp.succeeded {
             return Err(Fault::Text(
                 "error",
                 "No match data, because no search succeeded".into(),
             ));
         }
-        Ok(self.regexp.groups.get(n as usize).copied().flatten())
+        Ok(self.mutator.regexp.groups.get(n as usize).copied().flatten())
     }
     fn regexp_match_string(&mut self, group: Value, string: Value) -> SearchResult<Value> {
         let Some((a, b)) = self.regexp_group(group)? else {
@@ -1029,10 +1029,10 @@ impl Vm {
         reuse: Value,
         reseat: Value,
     ) -> SearchResult<Value> {
-        if !self.regexp.succeeded {
+        if !self.mutator.regexp.succeeded {
             return Ok(Value::NIL);
         }
-        let groups = self.regexp.groups.clone();
+        let groups = self.mutator.regexp.groups.clone();
         let len = groups
             .iter()
             .rposition(Option::is_some)

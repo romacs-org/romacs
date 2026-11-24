@@ -26,8 +26,8 @@ impl Leaf<'_> {
     fn replace_match_group(&mut self, newtext: Value, string: Value, subexp: Value) -> std::result::Result<(usize, usize, usize), Fault> {
         self.string_view(newtext)?;
         if string != Value::NIL { self.string_view(string)?; }
-        let register_count = self.vm.regexp.groups.len();
-        if !self.vm.regexp.succeeded || register_count == 0 {
+        let register_count = self.vm.mutator.regexp.groups.len();
+        if !self.vm.mutator.regexp.succeeded || register_count == 0 {
             return Err(self.formatted_error("`replace-match' called before any match found"));
         }
         let sub = if subexp == Value::NIL { 0 } else {
@@ -36,7 +36,7 @@ impl Leaf<'_> {
             usize::try_from(n).ok().filter(|&n| n < register_count)
                 .ok_or_else(|| Fault::Range3(subexp, Value::integer(0).unwrap(), last))?
         };
-        match self.vm.regexp.groups.get(sub).copied().flatten() {
+        match self.vm.mutator.regexp.groups.get(sub).copied().flatten() {
             Some((start, end)) => Ok((sub, start, end)),
             None => {
                 let condition = self.intern("error");
@@ -115,7 +115,7 @@ impl Leaf<'_> {
         let as_buffer = |c: u32| if multibyte { if !replacement.multibyte && c >= 128 { c + crate::lstring::BYTE8_OFFSET } else { c } }
             else if c >= crate::lstring::BYTE8_OFFSET { c - crate::lstring::BYTE8_OFFSET } else { c & 0xff };
         let chars: Vec<u32> = replacement.chars().map(as_buffer).collect();
-        let groups = self.vm.regexp.groups.clone();
+        let groups = self.vm.mutator.regexp.groups.clone();
         let mut out = Vec::with_capacity(chars.len());
         let mut i = 0;
         while i < chars.len() {
@@ -159,7 +159,7 @@ impl Leaf<'_> {
             let matched: Vec<u32> = source.chars().skip(start).take(end - start).collect();
             self.replace_case_action(&matched, source.multibyte)?
         } else { 0 };
-        let groups = self.vm.regexp.groups.clone();
+        let groups = self.vm.mutator.regexp.groups.clone();
         let replacement = self.string_view(newtext)?;
         let literal = literal != Value::NIL || !replacement.bytes.contains(&b'\\');
         let mut pieces = vec![(string, 0, start)];

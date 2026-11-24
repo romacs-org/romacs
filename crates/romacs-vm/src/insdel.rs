@@ -490,9 +490,9 @@ impl Vm {
     /// The bracket made its read-only checks, which GNU does not repeat.
     fn edit_kernel(&mut self, args: &[Value], run: impl FnOnce(&mut Self, usize) -> Result<Value>) -> Faulty<Value> {
         self.with_kernel_stack(args, |vm, n| {
-            vm.change_prepared = true;
+            vm.mutator.change_prepared = true;
             let result = run(vm, n);
-            vm.change_prepared = false;
+            vm.mutator.change_prepared = false;
             result
         })
         .map_err(Fault::Error)
