@@ -362,7 +362,8 @@ tools' groups, short, since every session pays for it.")
     ("input" "romacs_send_keys" "romacs_wait_idle")
     ("options" . "romacs_option_")
     ("agents" "romacs_delegate_task" "romacs_task_status" "romacs_task_send" "romacs_task_list"
-     "romacs_task_watch" "romacs_task_switch" "romacs_task_cancel" "romacs_orchestrator_capabilities")
+     "romacs_task_watch" "romacs_task_switch" "romacs_task_cancel" "romacs_task_answer"
+     "romacs_orchestrator_capabilities")
     ("restart" "romacs_restart" "romacs_restart_status" "romacs_restart_request" "romacs_call_outcome")
     ("development" "romacs_dev_check" "romacs_dev_guide" "romacs_live_update" "romacs_live_test")
     ("gnosis" . "gnosis_"))

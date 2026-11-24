@@ -146,6 +146,31 @@ recorded in a private directory; `delivered' collects what wakes it."
                      '("all done")))
       (delete-directory (romacs-agent-dir writer) t))))
 
+(ert-deftest romacs-agent-delegate-a-task-asks-its-parent ()
+  ;; A question only a user answers blocks a task: its parent is told it
+  ;; with its request id, and answers it as the user would.
+  (romacs-agent-delegate-tests--family ((a nil))
+    (let ((answered nil))
+      (puthash "q1" t (romacs-agent-approvals a))
+      (cl-letf (((symbol-function 'romacs-agent--live-p) (lambda (_) t))
+                ((symbol-function 'romacs-agent-tools--caller) (lambda () (romacs-agent-id parent)))
+                ((symbol-function 'romacs-mcp--instance) #'ignore)
+                ((symbol-function 'romacs-agent-respond)
+                 (lambda (session id allow &rest _) (push (list session id allow) answered)))
+                (romacs-agent-approval-policy 'ask))
+        (romacs-agent-tools--ask-parent a '(:type approval :request-id "q1"
+                                                  :questions (("Which one?" :header "Pick" :options ("A" "B")))))
+        (should (string-match-p "request q1:\n- Which one\\? \\[A | B\\]" (car delivered)))
+        (romacs-agent-tools--answer-request
+         (romacs-mcp--object "taskId" (romacs-agent-id a) "requestId" "q1"
+                             "answers" (romacs-mcp--object "Which one?" "B")))
+        (should (equal answered (list (list a "q1" '(:answers (("Which one?" . "B")))))))
+        ;; Only the session that delegated it may.
+        (cl-letf (((symbol-function 'romacs-agent-tools--caller) (lambda () "someone-else")))
+          (should-error (romacs-agent-tools--answer-request
+                         (romacs-mcp--object "taskId" (romacs-agent-id a) "requestId" "q1"))
+                        :type 'user-error))))))
+
 (ert-deftest romacs-agent-delegate-a-working-parent-is-woken-after ()
   (romacs-agent-delegate-tests--family ((a nil))
     (setf (romacs-agent-state parent) 'running)

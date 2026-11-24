@@ -1004,6 +1004,63 @@ a turn of its own, nothing sent again."
 
 (add-hook 'romacs-agent-restored-hook #'romacs-agent-tools--wake-missed)
 
+;;; A task's question to its parent (T3 Code's delegated question)
+;;
+;; A request only a user answers (a question, a plan to proceed with,
+;; a call under a policy that asks) blocks a delegated task.  Its parent
+;; is told, a turn of its own, and may answer it (romacs_task_answer) as
+;; its user would; the user may still answer in the task's chat.
+
+(defun romacs-agent-tools--question-text (child event)
+  "What CHILD's request EVENT asks, as its parent is told it."
+  (let ((questions (plist-get event :questions)))
+    (concat (format "Delegated task %s (%s) waits on an answer, request %s:\n"
+                    (romacs-agent-title child) (romacs-agent-id child) (plist-get event :request-id))
+            (cond (questions
+                   (mapconcat (lambda (q)
+                                (concat "- " (car q)
+                                        (when-let* ((options (plist-get (cdr q) :options)))
+                                          (concat " [" (string-join options " | ") "]"))))
+                              questions "\n"))
+                  ((plist-get event :plan) "It presents its plan: proceed?")
+                  (t (format "It asks to run %s." (plist-get event :tool))))
+            "\nAnswer it with romacs_task_answer, or leave it to the user in its chat.")))
+
+(defun romacs-agent-tools--ask-parent (session event)
+  "Tell SESSION's parent the request EVENT, live, that waits on SESSION's
+user, unless SESSION's rule wakes no one: dropped once it is answered."
+  (when-let* (((eq (plist-get event :type) 'approval))
+              (parent-id (plist-get (romacs-agent-options session) :parent))
+              ((romacs-agent--live-p session))
+              (id (plist-get event :request-id))
+              ((romacs-agent--user-answers-p session id))
+              ((not (equal (romacs-agent-tools--wake-rule session) "none")))
+              (parent (romacs-agent-load-session parent-id)))
+    (romacs-agent-tools--deliver parent (romacs-agent-tools--question-text session event) #'ignore
+                                 (lambda () (and (gethash id (romacs-agent-approvals session)) t))
+                                 nil 'next)))
+
+(add-hook 'romacs-agent-event-functions #'romacs-agent-tools--ask-parent)
+
+(defun romacs-agent-tools--answer-request (arguments)
+  "Answer the request of a task the caller delegated, as its user would:
+allow (with answers to its questions) or deny with a message."
+  (romacs-mcp--instance arguments)
+  (let* ((caller (romacs-agent-tools--caller))
+         (child (romacs-agent-tools--own (romacs-agent-tools--known (gethash "taskId" arguments)) caller "answer it"))
+         (answers (gethash "answers" arguments))
+         (allow (not (eq (gethash "allow" arguments) :false))))
+    (romacs-agent-respond child (gethash "requestId" arguments)
+                          (if (and allow (hash-table-p answers) (> (hash-table-count answers) 0))
+                              (list :answers (let ((alist nil))
+                                               (maphash (lambda (question answer) (push (cons question answer) alist))
+                                                        answers)
+                                               (nreverse alist)))
+                            allow)
+                          (gethash "message" arguments)
+                          (list :kind 'user :login (user-login-name) :client (format "task %s" caller)))
+    (romacs-agent-tools--ack child)))
+
 ;;; Reaping finished tasks
 ;;
 ;; A delegated task whose turn has ended keeps no processes it does not
@@ -2560,6 +2617,22 @@ far (its first request, the latest turns, its tool calls). Now when it is idle, 
  "Cancel a delegated task: its session stops, with everything its harness started."
  (romacs-mcp--schema '(("instance" . "string") ("taskId" . "string")) '("taskId"))
  #'romacs-agent-tools--cancel)
+
+(romacs-mcp-register-tool
+ "romacs_task_answer"
+ "Answer a request a task you delegated waits on (a question it asks, a plan it presents, a call it asks to run), \
+as its user would: you are told of each with its requestId. allow (default true) with answers, an object from each \
+question's text to the answer chosen; allow false denies, message saying why. The user may answer it in the task's \
+chat instead; a request answered already is refused."
+ (romacs-mcp--object
+  "type" "object"
+  "properties" (romacs-mcp--object
+                "instance" (romacs-mcp--object "type" "string")
+                "taskId" (romacs-mcp--object "type" "string") "requestId" (romacs-mcp--object "type" "string")
+                "allow" (romacs-mcp--object "type" "boolean") "answers" (romacs-mcp--object "type" "object")
+                "message" (romacs-mcp--object "type" "string"))
+  "required" ["taskId" "requestId"] "additionalProperties" :false)
+ #'romacs-agent-tools--answer-request)
 
 (romacs-mcp-register-tool
  "romacs_restart"
