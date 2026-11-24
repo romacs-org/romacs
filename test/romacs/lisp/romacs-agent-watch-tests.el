@@ -294,6 +294,31 @@ systemd reports `state' and `invocation' for each unit."
         (romacs-agent-watch--tick)
         (should (= (length told) 3))))))
 
+(ert-deftest romacs-agent-watch-reads-a-changed-file-once-for-all-watches ()
+  (romacs-agent-watch-tests--with
+    (let ((index (expand-file-name "INDEX.md" root))
+          (read-file (symbol-function 'insert-file-contents))
+          (reads 0))
+      (with-temp-file index (insert "# Ready\n- a known\n# Held\n- b known\n"))
+      (romacs-agent-watch-tests--watch "taskId" "lead" "file" index "section" "Ready")
+      (romacs-agent-watch-tests--watch "taskId" "child" "file" index "section" "Held")
+      (cl-letf (((symbol-function 'insert-file-contents)
+                 (lambda (file &rest args)
+                   (when (equal file index) (cl-incf reads))
+                   (apply read-file file args))))
+        (romacs-agent-watch--tick)
+        (should (= reads 0))
+        (with-temp-file index
+          (insert "# Ready\n- a rewritten\n- c ready\n# Held\n- b rewritten\n- d held\n"))
+        (romacs-agent-watch--tick)
+        (should (= reads 1))
+        (should (equal (length told) 2))
+        (should (string-suffix-p "- c ready" (alist-get lead told)))
+        (should (string-suffix-p "- d held" (alist-get child told)))
+        (romacs-agent-watch--tick)
+        (should (= reads 1))
+        (should (equal (length told) 2))))))
+
 (ert-deftest romacs-agent-watch-a-dev-check-for-the-task-calling ()
   (romacs-agent-watch-tests--with
     (should (eq romacs-mcp-dev-watch-function #'romacs-agent-watch--dev-check))
