@@ -228,7 +228,7 @@ impl Vm {
                     self.track_variable(slot, Root::Observed);
                 }
             }
-            self.backtrace.observe();
+            self.mutator.backtrace.observe();
         } else {
             self.end_startup();
         }
@@ -255,7 +255,7 @@ impl Vm {
     }
 
     fn end_startup(&mut self) {
-        let calls = self.backtrace.observed();
+        let calls = self.mutator.backtrace.observed();
         let tracking = self.tracking_mut();
         tracking.observing = false;
         let observed: Vec<usize> = tracking.cells.iter().filter(|(_, cell)| cell.root == Root::Observed).map(|(&slot, _)| slot).collect();
@@ -314,7 +314,7 @@ impl Vm {
             Some(VariableRedirect::Forwarded(Fwd::Tracked(_))) => {}
             Some(VariableRedirect::Plain | VariableRedirect::Forwarded(_)) => {
                 // HOST(dynamic:saved): reads the bound variable, not the saved value
-                let older = (0..self.dynamic.len()).filter(|&at| self.dynamic[at].0 == slot).collect();
+                let older = (0..self.mutator.dynamic.len()).filter(|&at| self.mutator.dynamic[at].0 == slot).collect();
                 self.tracking_mut().cells.insert(slot, Cell { root, redirect, older });
                 self.variable_redirects[slot] = Some(VariableRedirect::Forwarded(Fwd::Tracked(slot as u32)));
             }
@@ -430,7 +430,7 @@ impl Vm {
         let per_buffer = matches!(cell.redirect, Some(VariableRedirect::Forwarded(Fwd::Buffer(_))));
         let saved = matches!(access, Access::SavedRead | Access::SavedWrite);
         // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
-        let shadowed = !saved && self.dynamic.iter().enumerate().any(|(at, &(bound, _, owner, kind))|
+        let shadowed = !saved && self.mutator.dynamic.iter().enumerate().any(|(at, &(bound, _, owner, kind))|
             bound == slot && !cell.older.contains(&at) && (!per_buffer || kind == crate::Let::Default || owner == buffer));
         if !shadowed {
             let within = self.innermost_function();
@@ -442,13 +442,13 @@ impl Vm {
     /// The functions of the innermost COUNT Lisp calls, innermost first,
     /// for a reader of what was not captured to find the code that made it.
     pub(super) fn innermost_calls(&self, count: usize) -> Vec<String> {
-        self.backtrace.frames.iter().rev().take(count).filter_map(|frame| self.symbol_name_of(frame.function)).collect()
+        self.mutator.backtrace.frames.iter().rev().take(count).filter_map(|frame| self.symbol_name_of(frame.function)).collect()
     }
 
     /// The function the innermost Lisp call is in, for the reader of what
     /// was not captured: the site names the top-level form, this the code under it.
     pub(super) fn innermost_function(&self) -> Option<String> {
-        self.backtrace.frames.last().and_then(|frame| self.symbol_name_of(frame.function))
+        self.mutator.backtrace.frames.last().and_then(|frame| self.symbol_name_of(frame.function))
     }
 
     /// ACCESS to the value a `let` saved in dynamic entry AT, by
@@ -463,7 +463,7 @@ impl Vm {
     /// The tracked variable at SLOT lost its innermost binding, the dynamic
     /// entry past the stack's end.
     pub(crate) fn tracked_unbound(&mut self, slot: usize) {
-        let at = self.dynamic.len();
+        let at = self.mutator.dynamic.len();
         if let Some(cell) = self.tracking.as_mut().and_then(|tracking| tracking.cells.get_mut(&slot)) {
             cell.older.retain(|&older| older != at);
         }

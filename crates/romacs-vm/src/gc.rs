@@ -565,12 +565,12 @@ impl Vm {
     pub fn catching<T>(&mut self, body: impl FnOnce(&mut Vm) -> T) -> std::thread::Result<T> {
         assert_eq!(self.running_engines, 0, "a panic is caught outside any engine");
         let mark = NestingMark {
-            roots: self.external_roots.len(),
-            holds: self.gc_holds,
-            dynamic: self.dynamic.len(),
-            retrap: self.retrap.len(),
-            handlers: self.signal_handlers.len(),
-            backtrace: self.backtrace.frames.len(),
+            roots: self.mutator.external_roots.len(),
+            holds: self.mutator.gc_holds,
+            dynamic: self.mutator.dynamic.len(),
+            retrap: self.mutator.retrap.len(),
+            handlers: self.mutator.signal_handlers.len(),
+            backtrace: self.mutator.backtrace.frames.len(),
             eval_depth: self.eval_depth,
             native_quit: self.native_quit,
             macro_record: self.macro_record.mark(),
@@ -585,13 +585,13 @@ impl Vm {
         self.native_quit = mark.native_quit;
         // Unwind bindings while the backtrace still names them.
         let trapped = std::mem::take(&mut self.trapped);
-        self.unwind(self.dynamic.len().saturating_sub(mark.dynamic));
+        self.unwind(self.mutator.dynamic.len().saturating_sub(mark.dynamic));
         self.trapped = trapped;
-        for base in self.retrap.drain(mark.retrap.min(self.retrap.len())..) { self.trapped.insert(base); }
-        self.external_roots.truncate(mark.roots);
-        self.gc_holds = mark.holds;
-        self.signal_handlers.truncate(mark.handlers);
-        self.backtrace.leave(mark.backtrace);
+        for base in self.mutator.retrap.drain(mark.retrap.min(self.mutator.retrap.len())..) { self.trapped.insert(base); }
+        self.mutator.external_roots.truncate(mark.roots);
+        self.mutator.gc_holds = mark.holds;
+        self.mutator.signal_handlers.truncate(mark.handlers);
+        self.mutator.backtrace.leave(mark.backtrace);
         self.eval_depth = mark.eval_depth;
         self.macro_record.restore(&mark.macro_record);
         // Outside any engine, these are all at rest.
@@ -614,24 +614,24 @@ impl Vm {
         self.promote_all();
     }
     pub(crate) fn root_frame(&mut self, values: &[Value]) -> RootFrame {
-        let base = self.external_roots.len();
-        self.external_roots.extend_from_slice(values);
+        let base = self.mutator.external_roots.len();
+        self.mutator.external_roots.extend_from_slice(values);
         RootFrame { base, len: values.len(), vm: std::ptr::from_ref(self) }
     }
     pub(crate) fn rooted(&self, frame: &RootFrame, i: usize) -> Value {
         assert!(std::ptr::eq(frame.vm, self), "a root frame of another VM");
         assert!(i < frame.len, "root frame index");
-        self.external_roots[frame.base + i]
+        self.mutator.external_roots[frame.base + i]
     }
     pub(crate) fn set_rooted(&mut self, frame: &RootFrame, i: usize, value: Value) {
         assert!(std::ptr::eq(frame.vm, self), "a root frame of another VM");
         assert!(i < frame.len, "root frame index");
-        self.external_roots[frame.base + i] = value;
+        self.mutator.external_roots[frame.base + i] = value;
     }
     /// FRAME's values, forwarded.
     pub(crate) fn rooted_values(&self, frame: &RootFrame) -> &[Value] {
         assert!(std::ptr::eq(frame.vm, self), "a root frame of another VM");
-        &self.external_roots[frame.base..frame.base + frame.len]
+        &self.mutator.external_roots[frame.base..frame.base + frame.len]
     }
     /// Release FRAME, returning its forwarded values.
     pub(crate) fn release_frame<const N: usize>(&mut self, frame: RootFrame) -> [Value; N] {
@@ -642,8 +642,8 @@ impl Vm {
     }
     pub(crate) fn drop_frame(&mut self, frame: RootFrame) {
         assert!(std::ptr::eq(frame.vm, self), "a root frame of another VM");
-        assert_eq!(self.external_roots.len(), frame.base + frame.len, "root frames are released in reverse order");
-        self.external_roots.truncate(frame.base);
+        assert_eq!(self.mutator.external_roots.len(), frame.base + frame.len, "root frames are released in reverse order");
+        self.mutator.external_roots.truncate(frame.base);
     }
     /// GNU's `garbage_collection_inhibited`, derived from its owners: a
     /// collection may run only when no frame keeps heap Values in untraced
@@ -655,7 +655,7 @@ impl Vm {
     /// storage: a binding, a `#:` slot or a [`RootFrame`]
     /// (tests/fixtures/reentry-sites.txt lists each call site).
     pub(crate) fn may_collect(&self, own: usize) -> bool {
-        self.gc_holds == 0 && self.deferred_writes.is_empty()
+        self.mutator.gc_holds == 0 && self.deferred_writes.is_empty()
             && self.running_engines.saturating_sub(self.suspended.len()) == own
     }
     /// Set the register stack aside (`Registers::suspend`).
@@ -1332,7 +1332,7 @@ impl Vm {
         for v in roots
             .iter_mut()
             .chain(registers.flat_map(|(file, top)| file[..top].iter_mut()))
-            .chain(self.external_roots.iter_mut())
+            .chain(self.mutator.external_roots.iter_mut())
             .chain(self.terminal_bindings.iter_mut().flat_map(|binding| std::iter::once(&mut binding.buffer).chain(binding.away.iter_mut()).chain(binding.unremapped_maps.iter_mut())))
         {
             rewrite(v);
@@ -1495,16 +1495,16 @@ impl Vm {
         });
         self.cells.collector_compact(&maps[2], |v| rewrite(v));
         self.rewrite_root_slots(roots, &mut rewrite);
-        if let Some(escape) = &mut self.propagated_escape {
+        if let Some(escape) = &mut self.mutator.propagated_escape {
             escape.visit_values(&mut |v| rewrite(v));
         }
-        for v in &mut self.thrown_no_catch {
+        for v in &mut self.mutator.thrown_no_catch {
             rewrite(v);
         }
-        for handler in &mut self.signal_handlers {
+        for handler in &mut self.mutator.signal_handlers {
             handler.visit_values(&mut |v| rewrite(v));
         }
-        self.backtrace.visit_values(&mut |v| rewrite(v));
+        self.mutator.backtrace.visit_values(&mut |v| rewrite(v));
         self.profiler.visit_values(&mut |v| rewrite(v));
         for (slot, name) in &mut self.obarray_symbol_names {
             if obarray_symbols_live.contains(*slot) { rewrite(name); }
@@ -1522,7 +1522,7 @@ impl Vm {
         for v in self.finalizers.iter_mut().chain(self.doomed_finalizers.iter_mut()) { rewrite(v); }
         self.charsets.rewrite(&rewrite);
         // HOST(dynamic:saved): collector: marks the saved values
-        for (_, v, buffer, _) in &mut self.dynamic {
+        for (_, v, buffer, _) in &mut self.mutator.dynamic {
             rewrite(v);
             rewrite(buffer);
         }
@@ -1645,8 +1645,8 @@ impl Vm {
     fn drop_weak(&mut self, weak_tables: &[usize], untraced_lists: Vec<u64>, symbols: &KeptSymbols, regions: &[bool]) {
         // A throw's no-catch mark is weak: an error object nothing else
         // reaches is carried by no escape, so its mark goes.
-        let thrown = std::mem::take(&mut self.thrown_no_catch);
-        self.thrown_no_catch = thrown
+        let thrown = std::mem::take(&mut self.mutator.thrown_no_catch);
+        self.mutator.thrown_no_catch = thrown
             .into_iter()
             .filter(|&object| self.survives(symbols, regions, object))
             .collect();
@@ -1979,7 +1979,7 @@ impl Vm {
         let undo_limits = self.undo_view();
         let mut pending = self.mark_roots(roots, in_obarray, matches!(r#for, MarkFor::Minor));
         // HOST(dynamic:saved): collector: forwards the saved values
-        for &(slot, old, buffer, _) in &self.dynamic {
+        for &(slot, old, buffer, _) in &self.mutator.dynamic {
             // Both saved and active values stay roots even if Lisp switches
             // away from their buffer during the dynamic extent.
             pending.extend([old, self.slots[slot].value, buffer, Value::reference(slot + 1, 7)]);
@@ -2091,7 +2091,7 @@ impl Vm {
     fn mark_roots(&mut self, roots: &[Value], in_obarray: &[bool], minor: bool) -> Vec<Value> {
         let keep = |v: &Value| traced(*v, in_obarray);
         let mut pending: Vec<Value> = roots.iter().copied().filter(keep).collect();
-        pending.extend_from_slice(&self.external_roots);
+        pending.extend_from_slice(&self.mutator.external_roots);
         for engine in &mut self.suspended {
             engine.visit_state_values(&mut |v| if keep(v) { pending.push(*v) });
         }
@@ -2108,13 +2108,13 @@ impl Vm {
         // The order holds its buffers itself: a name slot is a symbol Lisp
         // can set, so it is no root to rely on.
         self.buffer_order.visit_values(&mut |v| pending.push(*v));
-        if let Some(escape) = &mut self.propagated_escape {
+        if let Some(escape) = &mut self.mutator.propagated_escape {
             escape.visit_values(&mut |v| if keep(v) { pending.push(*v) });
         }
-        for handler in &mut self.signal_handlers {
+        for handler in &mut self.mutator.signal_handlers {
             handler.visit_values(&mut |v| if keep(v) { pending.push(*v) });
         }
-        self.backtrace.visit_values(&mut |v| if keep(v) { pending.push(*v) });
+        self.mutator.backtrace.visit_values(&mut |v| if keep(v) { pending.push(*v) });
         self.profiler.visit_values(&mut |v| if keep(v) { pending.push(*v) });
         // GNU's C globals and `buffer_defaults`: roots outside every value
         // cell (forwarded.rs). Per-buffer values are traced with their buffer.

@@ -128,7 +128,7 @@ mod on {
 
     fn frames(vm: Option<&crate::Vm>) -> String {
         let Some(vm) = vm else { return "(no-vm)".into() };
-        let names: Vec<&str> = vm.backtrace.frames.iter().rev().take(4)
+        let names: Vec<&str> = vm.mutator.backtrace.frames.iter().rev().take(4)
             .map(|f| f.function.index_if(7).and_then(|n| n.checked_sub(1)).and_then(|n| vm.symbol_names.get(n))
                  .map_or("?", String::as_str))
             .collect();

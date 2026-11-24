@@ -316,12 +316,12 @@ impl Vm {
     /// is a load form's own compile.
     pub(super) fn open_request_scope(&mut self) -> usize {
         let own = matches!(self.macro_record.scopes.last(),
-            Some(Scope { kind: ScopeKind::Toplevel { expanding, .. }, .. }) if *expanding == self.expanding.len());
+            Some(Scope { kind: ScopeKind::Toplevel { expanding, .. }, .. }) if *expanding == self.mutator.expanding.len());
         self.macro_record.open(ScopeKind::Request { detached: !own })
     }
     /// Open one top-level load form's scope (`eval_toplevel`).
     pub(super) fn open_toplevel_scope(&mut self) -> usize {
-        let kind = ScopeKind::Toplevel { expanding: self.expanding.len(), pre_expanded: false, heading: false };
+        let kind = ScopeKind::Toplevel { expanding: self.mutator.expanding.len(), pre_expanded: false, heading: false };
         self.macro_record.open(kind)
     }
     /// Whether the innermost top-level form's head is being expanded now:
@@ -348,7 +348,7 @@ impl Vm {
     /// of USES, the cells and versions it read.
     pub(super) fn record_macro_uses(&mut self, uses: &[MacroUse]) {
         for &entry in uses {
-            self.macro_record.push(entry, self.expanding.len());
+            self.macro_record.push(entry, self.mutator.expanding.len());
         }
     }
     /// Open a capture of the cells a call through SYMBOLS (slots) resolves

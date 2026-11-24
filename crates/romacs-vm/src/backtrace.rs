@@ -239,8 +239,8 @@ enum Unrewind {
 impl Vm {
     /// The arguments of activation INDEX, where they were pushed.
     pub(super) fn backtrace_arguments(&self, index: usize) -> &[Value] {
-        match &self.backtrace.frames[index].args {
-            Arguments::Copied(range) => &self.backtrace.arguments[range.clone()],
+        match &self.mutator.backtrace.frames[index].args {
+            Arguments::Copied(range) => &self.mutator.backtrace.arguments[range.clone()],
             &Arguments::Registers { stack, offset, count } => {
                 &self.stack.file(stack)[offset..offset + count]
             }
@@ -248,8 +248,8 @@ impl Vm {
     }
     /// `backtrace_arguments' for a reader that must not panic.
     pub(super) fn backtrace_arguments_if(&self, index: usize) -> Option<&[Value]> {
-        match &self.backtrace.frames.get(index)?.args {
-            Arguments::Copied(range) => self.backtrace.arguments.get(range.clone()),
+        match &self.mutator.backtrace.frames.get(index)?.args {
+            Arguments::Copied(range) => self.mutator.backtrace.arguments.get(range.clone()),
             &Arguments::Registers { stack, offset, count } => {
                 self.stack.file(stack).get(offset..offset.checked_add(count)?)
             }
@@ -288,11 +288,11 @@ impl Vm {
             base = rest;
         }
         let index = if unbased {
-            self.backtrace.frames.len().checked_sub(1)
+            self.mutator.backtrace.frames.len().checked_sub(1)
         } else {
             let target = self.backtrace_resolve(base)?;
             let mut found = None;
-            for (i, frame) in self.backtrace.frames.iter().enumerate().rev() {
+            for (i, frame) in self.mutator.backtrace.frames.iter().enumerate().rev() {
                 if self.backtrace_resolve(frame.function)? == target {
                     found = Some(i);
                     break;
@@ -306,14 +306,14 @@ impl Vm {
     /// `SPECPDL_LET_LOCAL` of a variable without per-buffer native storage).
     fn backtrace_lisp_local(&self, at: usize) -> bool {
         // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
-        let (slot, _, _, kind) = self.dynamic[at];
+        let (slot, _, _, kind) = self.mutator.dynamic[at];
         kind == Let::Local && !matches!(self.forwarding_ref(slot), Some(forwarded::Fwd::Buffer(_)))
     }
     /// Whether the binding at AT still binds something: a buffer's local
     /// one, while its buffer lives and has the local.
     fn backtrace_binding_live(&self, at: usize) -> bool {
         // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
-        let (slot, _, owner, kind) = self.dynamic[at];
+        let (slot, _, owner, kind) = self.mutator.dynamic[at];
         if self.backtrace_lisp_local(at) {
             return self.owner_local(slot, owner).is_some();
         }
@@ -329,7 +329,7 @@ impl Vm {
     /// variable: its slot, whether it is a buffer's local, and whose.
     fn backtrace_shadow_key(&self, at: usize) -> (usize, bool, u64) {
         // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
-        let (slot, _, owner, kind) = self.dynamic[at];
+        let (slot, _, owner, kind) = self.mutator.dynamic[at];
         let local = kind == Let::Local;
         (slot, local, if local { owner.0 } else { Value::NIL.0 })
     }
@@ -339,13 +339,13 @@ impl Vm {
     /// `backtrace_successors` gives every binding's in one sweep.
     fn backtrace_successor(&self, at: usize) -> Option<usize> {
         let key = self.backtrace_shadow_key(at);
-        (at + 1..self.dynamic.len()).find(|&next| self.backtrace_shadow_key(next) == key)
+        (at + 1..self.mutator.dynamic.len()).find(|&next| self.backtrace_shadow_key(next) == key)
     }
     /// Every binding's `backtrace_successor`, from the newest down: O(bindings).
     fn backtrace_successors(&self) -> Vec<Option<usize>> {
-        let mut successors = vec![None; self.dynamic.len()];
+        let mut successors = vec![None; self.mutator.dynamic.len()];
         let mut newer = std::collections::HashMap::new();
-        for at in (0..self.dynamic.len()).rev() {
+        for at in (0..self.mutator.dynamic.len()).rev() {
             let key = self.backtrace_shadow_key(at);
             successors[at] = newer.insert(key, at);
         }
@@ -355,12 +355,12 @@ impl Vm {
     fn backtrace_binding_value(&mut self, at: usize, successor: Option<usize>) -> Result<Value> {
         // HOST(dynamic:saved): reads a later binding's saved value, the value of binding AT: a
         // let's own, never the root's
-        let (slot, _, owner, kind) = self.dynamic[at];
+        let (slot, _, owner, kind) = self.mutator.dynamic[at];
         if let Some(next) = successor {
             if !self.backtrace_lisp_local(at) { self.tracked_binding(slot, at, owner); }
             // HOST(dynamic:saved): reads a later binding's saved value, the value of binding AT: a
             // let's own, never the root's
-            return Ok(self.dynamic[next].1);
+            return Ok(self.mutator.dynamic[next].1);
         }
         if self.backtrace_lisp_local(at) {
             let local = self.owner_local(slot, owner).ok_or("missing local binding")?;
@@ -373,9 +373,9 @@ impl Vm {
     /// conses, oldest first (GNU unrewind omits LET_LOCAL entries whose
     /// storage disappeared). SUCCESSORS, when given, are the sweep's.
     fn backtrace_frame_locals(&mut self, index: usize, successors: Option<&[Option<usize>]>) -> Result<Vec<Value>> {
-        let start = self.backtrace.frames[index].dynamic;
-        let end = self.backtrace.frames[index + 1].dynamic;
-        let bindings = self.backtrace.binding_range(start, end).to_vec();
+        let start = self.mutator.backtrace.frames[index].dynamic;
+        let end = self.mutator.backtrace.frames[index + 1].dynamic;
+        let bindings = self.mutator.backtrace.binding_range(start, end).to_vec();
         let mut values = Vec::with_capacity(bindings.len());
         let inert = self.intern(INERT_BINDING);
         for (at, symbol) in bindings {
@@ -430,7 +430,7 @@ impl Vm {
     }
     /// An activation's FLAGS as `mapbacktrace` passes them.
     pub(super) fn backtrace_flags(&mut self, index: usize) -> Value {
-        if self.backtrace.debug_on_exit(self.backtrace.frames[index].token) {
+        if self.mutator.backtrace.debug_on_exit(self.mutator.backtrace.frames[index].token) {
             let key = self.intern(":debug-on-exit");
             self.list_value(&[key, Value::TRUE])
         } else {
@@ -439,7 +439,7 @@ impl Vm {
     }
     /// `mapbacktrace`'s (EVALD FUNCTION ARGS FLAGS) for activation INDEX.
     pub(super) fn backtrace_frame_values(&mut self, index: usize) -> [Value; 4] {
-        let function = self.backtrace.frames[index].function;
+        let function = self.mutator.backtrace.frames[index].function;
         let args = self.backtrace_arguments(index).to_vec();
         let args = self.list_value(&args);
         let flags = self.backtrace_flags(index);
@@ -467,8 +467,8 @@ impl Vm {
     }
     /// `backtrace-debug`: set activation INDEX's debug-on-exit flag.
     pub(super) fn backtrace_set_debug(&mut self, index: usize, on: bool) {
-        let token = self.backtrace.frames[index].token;
-        self.backtrace.set_debug_on_exit(token, on);
+        let token = self.mutator.backtrace.frames[index].token;
+        self.mutator.backtrace.set_debug_on_exit(token, on);
         self.debug_hooks_changed();
     }
     /// GNU specpdl_unrewind from the top of the stack to activation INDEX's
@@ -482,17 +482,17 @@ impl Vm {
             return Err("backtrace-eval while a world is built".into());
         }
         let span = [
-            self.backtrace.frames[index].dynamic,
-            self.dynamic.len(),
-            self.backtrace.excursions.partition_point(|e| e.frames <= index),
-            self.backtrace.excursions.len(),
+            self.mutator.backtrace.frames[index].dynamic,
+            self.mutator.dynamic.len(),
+            self.mutator.backtrace.excursions.partition_point(|e| e.frames <= index),
+            self.mutator.backtrace.excursions.len(),
         ];
         self.backtrace_swap(span, true)?;
         Ok(span)
     }
     pub(super) fn backtrace_rewind(&mut self, span: [usize; 4]) -> Result<()> {
         let [_, end, _, excursions] = span;
-        if end > self.dynamic.len() || excursions > self.backtrace.excursions.len() {
+        if end > self.mutator.dynamic.len() || excursions > self.mutator.backtrace.excursions.len() {
             return Err("backtrace-eval's stack changed under it".into());
         }
         self.backtrace_swap(span, false)
@@ -505,7 +505,7 @@ impl Vm {
         while at > start || k > from {
             // An excursion begun once the stack held K's depth of bindings is
             // newer than the bindings below that depth.
-            if k > from && (at == start || self.backtrace.excursions[k - 1].dynamic >= at) {
+            if k > from && (at == start || self.mutator.backtrace.excursions[k - 1].dynamic >= at) {
                 k -= 1;
                 steps.push(Unrewind::Excursion(k));
             } else {
@@ -544,9 +544,9 @@ impl Vm {
     fn backtrace_swap_binding(&mut self, at: usize) -> Result<()> {
         // HOST(dynamic:saved): backtrace-eval's unrewind swaps the saved value with the current one
         // (eval.c specpdl_unrewind); not done while a world is built, so no tracking sees it
-        let (slot, saved, owner, kind) = self.dynamic[at];
+        let (slot, saved, owner, kind) = self.mutator.dynamic[at];
         let default = kind == Let::Default;
-        let symbol = self.backtrace.binding_symbol(at);
+        let symbol = self.mutator.backtrace.binding_symbol(at);
         let base = symbol.and_then(|symbol| symbol.index_if(7)).map(|index| index - 1);
         let lisp_local = self.backtrace_lisp_local(at);
         let present = if lisp_local { self.owner_local(slot, owner).is_some() } else {
@@ -570,7 +570,7 @@ impl Vm {
         restored?;
         // HOST(dynamic:saved): backtrace-eval's unrewind swaps the saved value with the current one
         // (eval.c specpdl_unrewind); not done while a world is built, so no tracking sees it
-        self.dynamic[at].1 = current;
+        self.mutator.dynamic[at].1 = current;
         Ok(())
     }
     /// The binding at AT binds nothing from now on: unbinding it, or
@@ -582,9 +582,9 @@ impl Vm {
         let slot = nothing.index_if(7).expect("inert binding symbol") - 1;
         // HOST(dynamic:saved): backtrace-eval's unrewind makes a binding whose buffer lost its
         // local inert (eval.c SPECPDL_NOP); not done while a world is built, so no tracking sees it
-        self.dynamic[at] = (slot, Value::NIL, Value::NIL, Let::Plain);
-        if let Ok(i) = self.backtrace.bindings.binary_search_by_key(&at, |(depth, _)| *depth) {
-            self.backtrace.bindings[i].1 = nothing;
+        self.mutator.dynamic[at] = (slot, Value::NIL, Value::NIL, Let::Plain);
+        if let Ok(i) = self.mutator.backtrace.bindings.binary_search_by_key(&at, |(depth, _)| *depth) {
+            self.mutator.backtrace.bindings[i].1 = nothing;
         }
     }
     /// The selected window when it shows the current buffer, else nil (GNU
@@ -599,7 +599,7 @@ impl Vm {
     /// window's point when another window is selected and it still shows
     /// that buffer.
     fn backtrace_swap_excursion(&mut self, k: usize) -> Result<()> {
-        let (marker, window) = (self.backtrace.excursions[k].marker, self.backtrace.excursions[k].window);
+        let (marker, window) = (self.mutator.backtrace.excursions[k].marker, self.mutator.backtrace.excursions[k].window);
         let current = self.slots[self.buffer_slot].value;
         let here = self.save_excursion_data()?;
         let here_window = self.excursion_window()?;
@@ -610,7 +610,7 @@ impl Vm {
             result = self.set_marker_object(marker, here, current).map(drop);
         }
         let [_, _, here, _, here_window] = self.release_frame(frame);
-        self.backtrace.excursions[k].window = here_window;
+        self.mutator.backtrace.excursions[k].window = here_window;
         let detached = self.set_marker_object(here, Value::NIL, Value::NIL).map(drop);
         result.and(detached)
     }

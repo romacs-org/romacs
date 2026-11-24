@@ -11,7 +11,7 @@ fn callback_collects_and_forwards_suspended_stack_in_place() {
     }
     let function = vm.intern("collecting-reader");
     let value = vm.list_value(&[Value::NIL]);
-    vm.external_roots.push(value);
+    vm.mutator.external_roots.push(value);
     *vm.stack.test_vec() = vec![value, function];
     let ptr = vm.stack.as_ptr();
     let capacity = vm.stack.test_vec().capacity();
@@ -22,7 +22,7 @@ fn callback_collects_and_forwards_suspended_stack_in_place() {
         "callback collection was inhibited"
     );
     assert_ne!(result, value, "fixture must force forwarding");
-    assert_eq!(vm.external_roots, vec![result]);
+    assert_eq!(vm.mutator.external_roots, vec![result]);
     assert_eq!(*vm.stack, [result, function]);
     assert_eq!(vm.stack.as_ptr(), ptr);
     assert_eq!(vm.stack.test_vec().capacity(), capacity);
@@ -136,12 +136,12 @@ fn callback_preserves_an_open_builders_collection_hold() {
         .unwrap();
     let callback = vm.intern("inhibited-reader");
     // A compiler builder expanding a macro holds collection (`Vm::function').
-    vm.gc_holds += 1;
+    vm.mutator.gc_holds += 1;
     let before = vm.heap_stats().collections;
     let result = vm.reader_call(callback, &[]).unwrap();
     assert_eq!(result, Value::NIL, "garbage-collect returns nil while inhibited");
     assert_eq!(vm.heap_stats().collections, before);
-    assert_eq!(vm.gc_holds, 1);
+    assert_eq!(vm.mutator.gc_holds, 1);
 }
 
 /// Big payloads under a collection hold leave their request pending
@@ -153,13 +153,13 @@ fn a_held_collection_keeps_its_request_without_polling_at_every_return() {
     vm.install_lisp_prelude().unwrap();
     // GNU's threshold, which the 4 MB string passes (VM2-GC-PACING).
     vm.eval_source("(progn (setq gc-cons-threshold 800000) (defvar held-big nil))").unwrap();
-    vm.gc_holds += 1;
+    vm.mutator.gc_holds += 1;
     POLLS.with(|polls| polls.set(0));
     vm.eval_source("(progn (setq held-big (make-string 4000000 ?x)) (dotimes (_ 5000) (make-string 4 ?y)))").unwrap();
     let polls = POLLS.with(|polls| polls.get());
     assert!(vm.poll_requested(), "the request waits for the hold");
     assert!(polls < 50, "{polls} polls over 5000 native returns under a hold");
-    vm.gc_holds -= 1;
+    vm.mutator.gc_holds -= 1;
     let before = vm.heap_stats().collections;
     vm.eval_source("(dotimes (_ 3) (make-string 4 ?y))").unwrap();
     assert!(vm.heap_stats().collections > before, "collected once the hold ended");
@@ -220,12 +220,12 @@ fn a_job_claim_is_one_at_a_time_and_never_in_a_world() {
     let mut vm = Vm::new();
     let refused = vm.eval_source_raw("(condition-case e (progn (romacs--isolate-claim 1) (romacs--isolate-claim 2)) (error (error-message-string e)))").unwrap();
     assert_eq!(vm.display(refused).unwrap(), "\"Job 1 already runs here\"");
-    assert!(vm.signal_handlers.is_empty(), "the request's end took the marker");
+    assert!(vm.mutator.signal_handlers.is_empty(), "the request's end took the marker");
     assert_eq!(vm.isolate_claim(), None, "and with it the claim");
     vm.world_normalize();
     assert_eq!(vm.world_quiescent(), Ok(()), "normalizing forgot the stale record");
     vm.isolate_claim_job(3).unwrap();
-    vm.signal_handlers.clear();
+    vm.mutator.signal_handlers.clear();
     assert!(vm.world_quiescent().unwrap_err().contains("isolates"), "a stale record is refused");
 }
 
@@ -254,9 +254,9 @@ fn a_panic_inside_suspended_calls_unwinds_the_suspension_state() {
     assert!(caught.is_err(), "the host panic propagates");
     assert!(vm.suspended.is_empty(), "no suspended engine outlives the panic");
     assert!(vm.stack.at_rest());
-    assert!(vm.external_roots.is_empty());
-    assert_eq!((vm.running_engines, vm.gc_holds, vm.rooted_write), (0, 0, false));
-    assert!(vm.signal_handlers.is_empty());
+    assert!(vm.mutator.external_roots.is_empty());
+    assert_eq!((vm.running_engines, vm.mutator.gc_holds, vm.rooted_write), (0, 0, false));
+    assert!(vm.mutator.signal_handlers.is_empty());
     vm.set_host_input(None);
     vm.collect(&mut []);
     vm.set_gc_stress(1);
@@ -287,7 +287,7 @@ fn a_panic_inside_a_cleanup_or_a_run_leaves_aftermath_idle() {
         let caught = vm.catching(|vm| vm.eval_source_raw(&form));
         assert!(caught.is_err(), "{name}: the host panic propagates");
         assert!(!vm.aftermath_held(), "{name}: idle again");
-        assert_eq!((vm.running_engines, vm.gc_holds), (0, 0), "{name}");
+        assert_eq!((vm.running_engines, vm.mutator.gc_holds), (0, 0), "{name}");
         vm.set_host_input(None);
         assert_finalizers_run(&mut vm, name);
     }
@@ -324,7 +324,7 @@ fn a_panic_in_a_run_at_a_request_end_leaves_aftermath_idle() {
         let nil = vm.compile_source("nil").unwrap();
         // The embedder's collection dooms it and leaves it pending.
         vm.collect(&mut []);
-        let roots = vm.external_roots.len();
+        let roots = vm.mutator.external_roots.len();
         vm.set_host_input(Some(Box::new(PanickingHost)));
         let caught = vm.catching(|vm| match name {
             "a request's end" => vm.eval_source_raw("nil").map(|_| ()),
@@ -332,8 +332,8 @@ fn a_panic_in_a_run_at_a_request_end_leaves_aftermath_idle() {
         });
         assert!(caught.is_err(), "{name}: the host panic propagates");
         assert!(!vm.aftermath_held(), "{name}: idle again");
-        assert_eq!(vm.external_roots.len(), roots, "{name}: no root frame left behind");
-        assert_eq!((vm.running_engines, vm.gc_holds), (0, 0), "{name}");
+        assert_eq!(vm.mutator.external_roots.len(), roots, "{name}: no root frame left behind");
+        assert_eq!((vm.running_engines, vm.mutator.gc_holds), (0, 0), "{name}");
         vm.set_host_input(None);
         assert_finalizers_run(&mut vm, name);
     }

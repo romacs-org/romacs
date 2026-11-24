@@ -151,8 +151,8 @@ impl Vm {
 /// VALUE, rooted.
 #[inline]
 fn keep(vm: &mut Vm, value: Value) -> usize {
-    vm.external_roots.push(value);
-    vm.external_roots.len() - 1
+    vm.mutator.external_roots.push(value);
+    vm.mutator.external_roots.len() - 1
 }
 /// GNU's `(CONDITION . DATA)` for CONDITION on DATA, rooted.
 fn condition(vm: &mut Vm, condition: &str, data: &[Value]) -> usize {
@@ -183,7 +183,7 @@ pub(super) fn pending_signal(vm: &mut Vm, (): ()) -> Option<usize> {
 /// The character at BYTE of the string stream rooted at ROOT, and its width.
 #[inline]
 pub(super) fn string_char(vm: &mut Vm, (root, byte): (usize, usize)) -> Result<(u32, usize)> {
-    let view = vm.str_view(vm.external_roots[root]).ok_or("string stream no longer exists")?;
+    let view = vm.str_view(vm.mutator.external_roots[root]).ok_or("string stream no longer exists")?;
     let bytes = view.bytes().get(byte..).filter(|b| !b.is_empty()).ok_or("string stream changed length")?;
     super::parse::string_input_char(bytes, view.is_multibyte())
 }
@@ -195,7 +195,7 @@ pub(super) fn width_u8(width: usize) -> u8 {
 /// Up to N characters of the string stream rooted at ROOT from BYTE: each
 /// one's code and width, as `string_char` reads them one at a time.
 pub(super) fn string_chars(vm: &mut Vm, (root, mut byte, n): (usize, usize, usize)) -> Result<Vec<(u32, u8)>> {
-    let view = vm.str_view(vm.external_roots[root]).ok_or("string stream no longer exists")?;
+    let view = vm.str_view(vm.mutator.external_roots[root]).ok_or("string stream no longer exists")?;
     let (bytes, multibyte) = (view.bytes(), view.is_multibyte());
     // The characters up to the first the string no longer holds (Lisp may
     // have shortened it): the reader errs only if it reaches that one.
@@ -216,20 +216,20 @@ pub(super) fn string_chars(vm: &mut Vm, (root, mut byte, n): (usize, usize, usiz
 }
 /// Where the buffer or marker stream rooted at ROOT reads from.
 pub(super) fn buffer_start(vm: &mut Vm, root: usize) -> Result<usize> {
-    vm.reader_buffer_start(vm.external_roots[root])
+    vm.reader_buffer_start(vm.mutator.external_roots[root])
 }
 /// Up to N characters of the buffer or marker stream rooted at ROOT, from byte AT.
 pub(super) fn buffer_chars(vm: &mut Vm, (root, at, n): (usize, usize, usize)) -> Result<Vec<(u32, u8)>> {
-    vm.reader_buffer_chars(vm.external_roots[root], at, n)
+    vm.reader_buffer_chars(vm.mutator.external_roots[root], at, n)
 }
 /// The buffer or marker stream rooted at ROOT left at byte AT.
 pub(super) fn buffer_commit(vm: &mut Vm, (root, at): (usize, usize)) -> Result<()> {
-    vm.reader_buffer_commit(vm.external_roots[root], at)
+    vm.reader_buffer_commit(vm.mutator.external_roots[root], at)
 }
 /// The width CODE takes in the string stream rooted at ROOT.
 #[inline]
 pub(super) fn string_width(vm: &mut Vm, (root, code): (usize, u32)) -> Result<usize> {
-    let view = vm.str_view(vm.external_roots[root]).ok_or("string stream no longer exists")?;
+    let view = vm.str_view(vm.mutator.external_roots[root]).ok_or("string stream no longer exists")?;
     Ok(if view.is_multibyte() { crate::lstring::char_string(code, &mut [0; 5]) } else { 1 })
 }
 /// Inside a string literal read from the string stream rooted at ROOT, from
@@ -238,7 +238,7 @@ pub(super) fn string_width(vm: &mut Vm, (root, code): (usize, u32)) -> Result<us
 /// character the run stopped at.
 pub(super) fn string_run(vm: &mut Vm, (mut s, (root, mut byte, mut character, end)): (Vec<u32>, (usize, usize, usize, usize))) -> (Vec<u32>, bool, usize, usize) {
     let mut unicode = false;
-    if let Some(view) = vm.str_view(vm.external_roots[root]) {
+    if let Some(view) = vm.str_view(vm.mutator.external_roots[root]) {
         let (bytes, multibyte) = (view.bytes(), view.is_multibyte());
         while character < end {
             let Some(rest) = bytes.get(byte..).filter(|rest| !matches!(rest.first(), None | Some(b'"' | b'\\'))) else { break };
@@ -254,12 +254,12 @@ pub(super) fn string_run(vm: &mut Vm, (mut s, (root, mut byte, mut character, en
 #[inline]
 /// CODE unread to the buffer or marker stream rooted at ROOT.
 pub(super) fn buffer_unget(vm: &mut Vm, (root, code): (usize, u32)) -> Result<()> {
-    vm.reader_buffer_unget(vm.external_roots[root], code)
+    vm.reader_buffer_unget(vm.mutator.external_roots[root], code)
 }
 /// A stream's call (`Input::Function`): the function rooted at ROOT, given
 /// CODE to unread or nothing to read, in a frame of its own.
 pub(super) fn stream_call(vm: &mut Vm, (root, code): (usize, Option<u32>)) -> Result<RootFrame> {
-    let function = vm.external_roots[root];
+    let function = vm.mutator.external_roots[root];
     Ok(match code {
         Some(code) => { let code = Value::integer(i64::from(code))?; vm.root_frame(&[function, code]) }
         None => vm.root_frame(&[function]),
@@ -353,12 +353,12 @@ pub(super) fn string_literal(vm: &mut Vm, (s, unicode): (Vec<u32>, bool)) -> usi
 /// dotted list's tail rooted at TAIL.
 pub(super) fn sequence(vm: &mut Vm, (vector, values, tail): (bool, Vec<usize>, Option<usize>)) -> usize {
     let value = if vector {
-        let values = values.into_iter().map(|i| vm.external_roots[i]).collect();
+        let values = values.into_iter().map(|i| vm.mutator.external_roots[i]).collect();
         vm.allocate_object(Object::Vector(values))
     } else {
-        let mut list = tail.map_or(Value::NIL, |t| vm.external_roots[t]);
+        let mut list = tail.map_or(Value::NIL, |t| vm.mutator.external_roots[t]);
         for index in values.into_iter().rev() {
-            let value = vm.external_roots[index];
+            let value = vm.mutator.external_roots[index];
             list = vm.alloc_cons(value, list);
         }
         list
@@ -367,13 +367,13 @@ pub(super) fn sequence(vm: &mut Vm, (vector, values, tail): (bool, Vec<usize>, O
 }
 /// `(SYMBOL VALUE)', each rooted: a quote, backquote, comma or `#''.
 pub(super) fn prefixed(vm: &mut Vm, (symbol, value): (usize, usize)) -> usize {
-    let list = vm.list_value(&[vm.external_roots[symbol], vm.external_roots[value]]);
+    let list = vm.list_value(&[vm.mutator.external_roots[symbol], vm.mutator.external_roots[value]]);
     keep(vm, list)
 }
 /// GNU lread.c `read_bool_vector`'s object: LENGTH bits from the string rooted
 /// at STRING, of exactly ceil(LENGTH/8) bytes (or one more, as Emacs 19 printed it).
 pub(super) fn bool_vector(vm: &mut Vm, (length, string): (usize, usize)) -> Built {
-    let view = vm.str_view(vm.external_roots[string]).ok_or(("bool-vector literal string".to_owned(), None))?;
+    let view = vm.str_view(vm.mutator.external_roots[string]).ok_or(("bool-vector literal string".to_owned(), None))?;
     // Host-source literals keep ASCII text multibyte; its bytes are the same.
     let (multibyte, bytes) = (view.is_multibyte() && !view.bytes().is_ascii(), view.bytes().to_vec());
     let size = length.div_ceil(8);
@@ -388,7 +388,7 @@ pub(super) fn bool_vector(vm: &mut Vm, (length, string): (usize, usize)) -> Buil
 }
 /// `#^[...]', or `#^^[...]' when SUB: the char-table of the values rooted at ROOTS.
 pub(super) fn char_table(vm: &mut Vm, (sub, roots): (bool, Vec<usize>)) -> Built {
-    let values = roots.iter().map(|&i| vm.external_roots[i]).collect::<Vec<_>>();
+    let values = roots.iter().map(|&i| vm.mutator.external_roots[i]).collect::<Vec<_>>();
     let table = if sub { vm.sub_char_table_from_literal(&values) } else { vm.char_table_from_literal(&values) };
     match table {
         Ok(table) => Ok(keep(vm, table)),
@@ -400,7 +400,7 @@ pub(super) fn char_table(vm: &mut Vm, (sub, roots): (bool, Vec<usize>)) -> Built
 /// the properties of each triple rooted after it.
 pub(super) fn property_string(vm: &mut Vm, roots: &[usize]) -> Built {
     let Some(&root) = roots.first() else { return Err(syntax(vm, "#")) };
-    let value = vm.external_roots[root];
+    let value = vm.mutator.external_roots[root];
     if vm.str_view(value).is_none() {
         return Err(syntax(vm, "#"));
     }
@@ -409,9 +409,9 @@ pub(super) fn property_string(vm: &mut Vm, roots: &[usize]) -> Built {
     }
     let plain = |e: String| (e, None);
     for triple in roots[1..].chunks_exact(3) {
-        let start = vm.external_roots[triple[0]];
-        let end = vm.external_roots[triple[1]];
-        let plist = vm.external_roots[triple[2]];
+        let start = vm.mutator.external_roots[triple[0]];
+        let end = vm.mutator.external_roots[triple[1]];
+        let plist = vm.mutator.external_roots[triple[2]];
         let integerp = vm.intern("integer-or-marker-p");
         let Some(a) = start.integer_value() else {
             return Err(("invalid property start".into(), Some(condition(vm, "wrong-type-argument", &[integerp, start]))));
@@ -470,7 +470,7 @@ pub(super) fn property_string(vm: &mut Vm, roots: &[usize]) -> Built {
 /// `#s(...)` of the values rooted at ROOTS: a record, or, when the first is
 /// the symbol `hash-table`, the table `hash_table_from_plist` builds.
 pub(super) fn record(vm: &mut Vm, roots: &[usize]) -> Built {
-    let values: Vec<Value> = roots.iter().map(|&i| vm.external_roots[i]).collect();
+    let values: Vec<Value> = roots.iter().map(|&i| vm.mutator.external_roots[i]).collect();
     let Some(&head) = values.first() else { return Err(syntax(vm, "#s")) };
     if head == vm.intern("hash-table") {
         return match vm.hash_table_from_plist(&values[1..]) {
@@ -499,7 +499,7 @@ pub(super) fn label(vm: &mut Vm, (): ()) -> usize {
 /// rooted at SLOT. A cons becomes the placeholder; anything else replaces it
 /// within itself (lread.c `substitute_object_recurse`).
 pub(super) fn labelled(vm: &mut Vm, (slot, value): (usize, usize)) -> Built {
-    let (placeholder, object) = (vm.external_roots[slot], vm.external_roots[value]);
+    let (placeholder, object) = (vm.mutator.external_roots[slot], vm.mutator.external_roots[value]);
     if object == placeholder {
         return Err(syntax(vm, "nonsensical self-reference"));
     }
@@ -514,7 +514,7 @@ pub(super) fn labelled(vm: &mut Vm, (slot, value): (usize, usize)) -> Built {
             Ok(slot)
         }
         None => {
-            vm.external_roots[slot] = object;
+            vm.mutator.external_roots[slot] = object;
             substitute(vm, object, placeholder);
             Ok(value)
         }
@@ -522,7 +522,7 @@ pub(super) fn labelled(vm: &mut Vm, (slot, value): (usize, usize)) -> Built {
 }
 /// `#N#`: the object labelled at SLOT, rooted again.
 pub(super) fn reference(vm: &mut Vm, slot: usize) -> usize {
-    let object = vm.external_roots[slot];
+    let object = vm.mutator.external_roots[slot];
     keep(vm, object)
 }
 /// lread.c `substitute_object_recurse`: replace PLACEHOLDER by OBJECT

@@ -44,7 +44,7 @@ impl Leaf<'_> {
             None => Ok(Value::NIL),
             Some((false, condition, data)) => Err(crate::prim::Fault::Signal(condition, data)),
             Some((true, tag, value)) => {
-                self.vm.propagated_escape = Some(crate::threaded::Escape::Throw(tag, value));
+                self.vm.mutator.propagated_escape = Some(crate::threaded::Escape::Throw(tag, value));
                 Err(crate::prim::Fault::Escape)
             }
         }

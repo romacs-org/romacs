@@ -5,7 +5,7 @@ impl Vm {
     fn macroexpand_fault<T>(&mut self, name: &str, data: &[Value]) -> Result<T> {
         let condition = self.intern(name);
         let data = self.list_value(data);
-        self.propagated_escape = Some(threaded::Escape::Signal(condition, data));
+        self.mutator.propagated_escape = Some(threaded::Escape::Signal(condition, data));
         Err(format!("{name} in macroexpand"))
     }
 

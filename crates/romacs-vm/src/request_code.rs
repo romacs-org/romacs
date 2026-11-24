@@ -357,7 +357,7 @@ impl Vm {
 
     pub(super) fn finish_request(&mut self, mut outcome: Result<Value>) -> Result<Value> {
         if self.eval_depth == 0 {
-            self.propagated_escape = None;
+            self.mutator.propagated_escape = None;
             self.propagated_escape_hooked = false;
             self.propagated_eval_depth = None;
             self.drop_deferred_escapes();

@@ -56,7 +56,7 @@ MUTANTS = [
      "        let slot = self.macro_alias_end(head);\n        if !self.macros.contains(&slot) && self.autoload_macro",
      "        let slot = head;\n        if !self.macros.contains(&slot) && self.autoload_macro"),
     ("M18 stale load escape kept (neither consumer clears it)", [
-        (VM / "source_cache.rs", "                return Err(match self.propagated_escape.take() {", "                return Err(match None::<threaded::Escape> {"),
+        (VM / "source_cache.rs", "                return Err(match self.mutator.propagated_escape.take() {", "                return Err(match None::<threaded::Escape> {"),
         (VM / "threaded.rs", "        e.vm.propagated_escape = None;\n        let result = e.vm.loader_primitive(p, &args);", "        let result = e.vm.loader_primitive(p, &args);"),
     ], None, None),
     ("M19 alias chain not re-resolved after the load", VM / "source_cache.rs",

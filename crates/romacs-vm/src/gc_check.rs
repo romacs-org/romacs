@@ -141,20 +141,20 @@ impl Vm {
         };
         let (mut values, mut code) = (roots.to_vec(), Vec::new());
         values.extend(self.register_roots().into_iter().flatten().copied());
-        values.extend_from_slice(&self.external_roots);
+        values.extend_from_slice(&self.mutator.external_roots);
         values.extend(self.doomed_finalizers.iter().copied());
         values.extend(self.permanent_symbol_names.values().copied());
         self.reference_buffer_roots(&mut values);
-        if let Some(escape) = &mut self.propagated_escape { escape.visit_values(&mut |v| values.push(*v)); }
-        for handler in &mut self.signal_handlers { handler.visit_values(&mut |v| values.push(*v)); }
-        self.backtrace.visit_values(&mut |v| values.push(*v));
+        if let Some(escape) = &mut self.mutator.propagated_escape { escape.visit_values(&mut |v| values.push(*v)); }
+        for handler in &mut self.mutator.signal_handlers { handler.visit_values(&mut |v| values.push(*v)); }
+        self.mutator.backtrace.visit_values(&mut |v| values.push(*v));
         self.profiler.visit_values(&mut |v| values.push(*v));
         self.forwarded.visit_values(&mut |v| values.push(*v));
         values.extend_from_slice(&self.standard_case_tables);
         values.push(self.command_point.1);
         self.charsets.trace(&mut values);
         // HOST(dynamic:saved): verify's reference marker: the saved values are roots it reads again
-        for &(slot, old, buffer, _) in &self.dynamic {
+        for &(slot, old, buffer, _) in &self.mutator.dynamic {
             values.extend([old, self.slots[slot].value, buffer, Value::reference(slot + 1, 7)]);
         }
         // Every symbol but those of an obarray of their own is a root; a

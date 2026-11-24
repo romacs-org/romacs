@@ -261,11 +261,11 @@ pub(crate) fn write_from<'b>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, slot: usize
 }
 /// GNU `unbind_to` on normal completion, down to MARK (`Vm::unbind`).
 pub(crate) fn unbind_to<'b>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, mark: usize) -> Result<()> {
-    m.request(&EngineKey, gc, |vm| rooted_writer(vm, |vm| vm.unbind(vm.dynamic.len() - mark)), (), |_, (), unbound| unbound)
+    m.request(&EngineKey, gc, |vm| rooted_writer(vm, |vm| vm.unbind(vm.mutator.dynamic.len() - mark)), (), |_, (), unbound| unbound)
 }
 /// Unwinding under an escape, down to MARK (`Vm::unwind`).
 pub(crate) fn unwind_to<'b>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, mark: usize) {
-    m.request(&EngineKey, gc, |vm| rooted_writer(vm, |vm| vm.unwind(vm.dynamic.len() - mark)), (), |_, (), ()| ());
+    m.request(&EngineKey, gc, |vm| rooted_writer(vm, |vm| vm.unwind(vm.mutator.dynamic.len() - mark)), (), |_, (), ()| ());
 }
 
 /// Lisp a suspended engine runs nested.
@@ -345,9 +345,9 @@ pub(super) fn nested<'a, 'b, B: Plain, R: Plain>(m: &mut Orch<'_, 'b, 'a>, gc: G
 /// may keep Values in Rust locals across it (under its builder's hold too).
 /// Named and counted: a deferred collection is latency debt.
 pub(super) fn deferred(e: &mut Engine<'_>, function: usize) -> Result<()> {
-    e.vm.gc_holds += 1;
+    e.vm.mutator.gc_holds += 1;
     let out = e.suspended(|vm| stacker::maybe_grow(512 * 1024, 2 * 1024 * 1024, || vm.force_lazy(function)));
-    e.vm.gc_holds -= 1;
+    e.vm.mutator.gc_holds -= 1;
     out
 }
 
@@ -401,7 +401,7 @@ pub(super) fn unbind<'a, 'b, B: Plain, R: Plain>(m: &mut Orch<'_, 'b, 'a>, _gc: 
     let escape = e.code_suspended(|vm| rooted_writer(vm, |vm| {
         for _ in 0..n {
             if vm.unbind_one().is_err() {
-                return vm.propagated_escape.take();
+                return vm.mutator.propagated_escape.take();
             }
         }
         None

@@ -61,7 +61,7 @@ impl Vm {
             if let Some((name, data)) = failure {
                 let condition = self.intern(name);
                 let data = self.list_value(&data);
-                self.propagated_escape = Some(threaded::Escape::Signal(condition, data));
+                self.mutator.propagated_escape = Some(threaded::Escape::Signal(condition, data));
                 return Err(format!("{name} in eval form"));
             }
         }
@@ -123,7 +123,7 @@ impl Vm {
             let predicate = self.intern("listp");
             self.list_value(&[predicate, lexical])
         };
-        self.propagated_escape = Some(threaded::Escape::Signal(condition, data));
+        self.mutator.propagated_escape = Some(threaded::Escape::Signal(condition, data));
         format!("{name} in eval lexical environment")
     }
 
@@ -132,7 +132,7 @@ impl Vm {
         // Request code: the entry is released on return and the closures the
         // form made are retired once unreachable, as for any request. Code
         // compiled per call and never retired grew every collection's walk.
-        let saved = std::mem::replace(&mut self.dynamic_scope, dynamic);
+        let saved = std::mem::replace(&mut self.mutator.dynamic_scope, dynamic);
         // GNU's `eval' interprets, expanding each macro call at its reach:
         // an expansion that escapes defers there, and a definition's body
         // compiles at its first call.
@@ -141,7 +141,7 @@ impl Vm {
         let compiled = self.compile_eval_request(form, &outer, environment.specials);
         self.mutator.defer_expansion_errors = saved_defer;
         self.mutator.evaluating = saved_evaluating;
-        self.dynamic_scope = saved;
+        self.mutator.dynamic_scope = saved;
         let (function, names) = compiled?;
         let captures: Vec<_> = names.iter().map(|name| cells[name]).collect();
         self.propagate_next = true;
@@ -205,22 +205,22 @@ mod tests {
         vm.install_lisp_prelude().unwrap();
         let value = vm.eval_source("(condition-case nil (eval '(throw 'missing (make-vector 3 nil)) t) (no-catch 'caught))").unwrap();
         assert_eq!(value.display().unwrap(), "caught");
-        assert!(vm.thrown_no_catch.is_empty());
+        assert!(vm.mutator.thrown_no_catch.is_empty());
         // An error a Rust caller dropped: its mark goes with it.
         let object = vm.list_value(&[Value::NIL]);
-        vm.thrown_no_catch.push(object);
+        vm.mutator.thrown_no_catch.push(object);
         vm.collect_at_wait(&mut [], false);
-        assert!(vm.thrown_no_catch.is_empty());
+        assert!(vm.mutator.thrown_no_catch.is_empty());
         // Garbage first, so the kept error moves when the cons space compacts.
         for i in 0..64 {
             vm.list_value(&[Value::integer(i).unwrap()]);
         }
         let mut kept = [vm.list_value(&[Value::NIL])];
         let before = kept[0];
-        vm.thrown_no_catch.push(kept[0]);
+        vm.mutator.thrown_no_catch.push(kept[0]);
         vm.collect_at_wait(&mut kept, false);
         assert_ne!(kept[0], before, "the kept error moved");
-        assert_eq!(vm.thrown_no_catch, kept.to_vec(), "a live error keeps its mark, moved with it");
+        assert_eq!(vm.mutator.thrown_no_catch, kept.to_vec(), "a live error keeps its mark, moved with it");
     }
 
     #[test]
@@ -236,11 +236,11 @@ mod tests {
         let pair = vm.list_value(&[Value::integer(1).unwrap(), payload]);
         let data = vm.list_value(&[payload, pair]);
         let condition = vm.intern("arith-error");
-        vm.propagated_escape = Some(threaded::Escape::Signal(condition, data));
+        vm.mutator.propagated_escape = Some(threaded::Escape::Signal(condition, data));
         let before = vm.heap_objects();
         vm.collect(&mut []);
         assert!(vm.heap_objects() < before, "the collection must reclaim garbage and move survivors");
-        let Some(threaded::Escape::Signal(condition, data)) = vm.propagated_escape.take() else {
+        let Some(threaded::Escape::Signal(condition, data)) = vm.mutator.propagated_escape.take() else {
             panic!("escape lost")
         };
         assert_eq!(vm.display(condition).unwrap(), "arith-error");

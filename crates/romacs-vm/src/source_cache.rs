@@ -525,7 +525,7 @@ impl Vm {
                 // Compilation fails here with the load's condition as text;
                 // its structured escape belongs to no engine and must not
                 // outlive this request (it would replace a later signal).
-                return Err(match self.propagated_escape.take() {
+                return Err(match self.mutator.propagated_escape.take() {
                     Some(threaded::Escape::Signal(condition, data)) => {
                         let name = self.display(condition).unwrap_or_default();
                         let data = self.display(data).unwrap_or_default();
@@ -544,7 +544,7 @@ impl Vm {
         // An alias head counts as an expansion of its own (VM2's former
         // limit counted it before testing, then the macro).
         self.macro_record.expansions += 1 + usize::from(slot != head);
-        if self.expanding.len() >= 128 || self.macro_record.expansions > 4096 {
+        if self.mutator.expanding.len() >= 128 || self.macro_record.expansions > 4096 {
             return Err("macro expansion limit exceeded".into());
         }
         self.record_alias_chain(head, slot);
@@ -561,7 +561,7 @@ impl Vm {
             collect_symbols(&part.form, &mut self.mutator.expanded_symbols);
             return Ok(Some(part.form));
         }
-        self.expanding.push(slot);
+        self.mutator.expanding.push(slot);
         // Inside a compilation, the open builder holds collection while it
         // keeps unrooted constants. At a load's top level nothing does: ITEMS
         // are forms, whose objects are rooted, and the expander roots
@@ -577,7 +577,7 @@ impl Vm {
             let value = self.call_macro_expander(function, &arguments);
             self.propagate_next = false;
             let value = match value {
-                Err(error) => Err(match &self.propagated_escape {
+                Err(error) => Err(match &self.mutator.propagated_escape {
                     Some(threaded::Escape::Signal(condition, data)) => {
                         let (condition, data) = (*condition, *data);
                         let name = self.display(condition).unwrap_or_default();
@@ -591,7 +591,7 @@ impl Vm {
             // Converting the expansion runs no Lisp; its objects are rooted.
             self.expansion_form(value, 0)
         })();
-        self.expanding.pop();
+        self.mutator.expanding.pop();
         if let Ok(form) = &result {
             collect_symbols(form, &mut self.mutator.expanded_symbols);
         }

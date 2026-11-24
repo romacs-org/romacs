@@ -9,18 +9,18 @@ impl Leaf<'_> {
         Ok(self
             .vm
             .backtrace_start(base)?
-            .map(|i| self.vm.backtrace.frames[i].token))
+            .map(|i| self.vm.mutator.backtrace.frames[i].token))
     }
     pub(crate) fn backtrace_entry(
         &mut self,
         token: usize,
     ) -> std::result::Result<Option<(Vec<Value>, usize)>, Fault> {
-        let Some(i) = self.vm.backtrace.index_of(token) else {
+        let Some(i) = self.vm.mutator.backtrace.index_of(token) else {
             return Ok(None);
         };
         let next = i
             .checked_sub(1)
-            .map_or(0, |i| self.vm.backtrace.frames[i].token);
+            .map_or(0, |i| self.vm.mutator.backtrace.frames[i].token);
         Ok(Some((self.vm.backtrace_frame_values(i).to_vec(), next)))
     }
     /// The (EVALD FUNCTION ARGS FLAGS) of the activation NFRAMES out from
