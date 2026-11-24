@@ -120,6 +120,32 @@ recorded in a private directory; `delivered' collects what wakes it."
     (romacs-agent-tools--flush parent)
     (should (= (length delivered) 1))))
 
+(ert-deftest romacs-agent-delegate-a-coordinator-ends-after-its-tasks ()
+  ;; A coordinator delegates a writer and ends its turn: it is not done,
+  ;; and its parent is not told so.  Its turn after the writer's end is
+  ;; its task's end.
+  (romacs-agent-delegate-tests--family ((a nil))
+    (let ((writer (romacs-agent--make :id "wwwwwwww-0000-4000-8000-000000000000" :harness 'claude :title "writer"
+                                      :state 'running :dir (make-temp-file "w" t)
+                                      :options (list :parent (romacs-agent-id a)))))
+      (puthash (romacs-agent-id writer) writer romacs-agent--sessions)
+      (romacs-agent--index writer)
+      (romacs-agent-ui--summarize-children a)
+      (romacs-agent-delegate-tests--end a 5 "delegated a writer")
+      (romacs-agent-tools--flush parent)
+      (should-not delivered)
+      (should (equal (romacs-agent-tools--status (romacs-agent-summary (romacs-agent-id a))) "running"))
+      ;; The writer done, the coordinator's next turn ends its task.
+      (setf (romacs-agent-state writer) 'idle (romacs-agent-turns writer) 1 (romacs-agent-done-seq writer) 3)
+      (romacs-agent--summary-stale (romacs-agent-id writer))
+      (romacs-agent-ui--summarize-children a)
+      (should (equal (romacs-agent-tools--status (romacs-agent-summary (romacs-agent-id a))) "completed"))
+      (romacs-agent-delegate-tests--end a 9 "all done")
+      (romacs-agent-tools--flush parent)
+      (should (equal (mapcar (lambda (w) (plist-get w :result)) (romacs-agent-tools--wakes-parse (car delivered)))
+                     '("all done")))
+      (delete-directory (romacs-agent-dir writer) t))))
+
 (ert-deftest romacs-agent-delegate-a-working-parent-is-woken-after ()
   (romacs-agent-delegate-tests--family ((a nil))
     (setf (romacs-agent-state parent) 'running)

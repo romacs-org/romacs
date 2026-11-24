@@ -299,9 +299,22 @@ T3 Code's words: a plan it offers waits on its user as an approval does."
           ((eq state 'unstarted) "failed")
           ((or (memq state '(starting running)) (> (romacs-agent-summary-queue-length summary) 0)) "running")
           ((romacs-agent-summary-failed summary) "failed")
+          ;; Its turn over, the tasks it delegated still at work: its own
+          ;; task is not done (T3 Code's waiting_for_children).
+          ((romacs-agent-tools--delegates-working-p summary) "running")
           ((> (romacs-agent-summary-turns summary) 0) "completed")
           ((eq state 'ended) "failed")
           (t (symbol-name state)))))
+
+(defun romacs-agent-tools--delegates-working-p (summary)
+  "Whether a task the session SUMMARY says delegated is still at work and
+its end will wake that session: a turn of the session's ending then is
+not its own task's end."
+  (cl-some (lambda (row)
+             (when-let* ((id (plist-get row :id)) (child (romacs-agent-summary id)))
+               (and (not (equal (romacs-agent-summary-wake-rule child) "none"))
+                    (member (romacs-agent-tools--status child) '("running" "waiting")))))
+           (romacs-agent-summary-children-rows summary)))
 
 (defun romacs-agent-tools--running-next (summary)
   "What a caller is told to do about the task SUMMARY says, still running."
@@ -731,13 +744,18 @@ the end wakes no one, and romacs_task_status still has it.")
   "Whether CHILD's turn END, (SEQ RESULT FAILED), wakes its parent: a
 failure, unless its rule, as its SUMMARY says (read when not given), is
 \"none\"; another end by its rule, unless its result is empty (a resumed
-harness's own turn) or quiet (`romacs-agent-tools--quiet')."
-  (let ((result (string-trim (or (nth 1 end) ""))))
-    (pcase (romacs-agent-summary-wake-rule (or summary (romacs-agent-tools--summary-of child)))
+harness's own turn) or quiet (`romacs-agent-tools--quiet'), or the tasks
+CHILD delegated still work and will wake it."
+  (let ((result (string-trim (or (nth 1 end) "")))
+        (summary (or summary (romacs-agent-tools--summary-of child))))
+    (pcase (romacs-agent-summary-wake-rule summary)
       ("none" nil)
       ("failure" (nth 2 end))
       (_ (or (nth 2 end)
-             (not (or (string-empty-p result) (string-prefix-p romacs-agent-tools--quiet result))))))))
+             (not (or (string-empty-p result) (string-prefix-p romacs-agent-tools--quiet result)
+                      ;; A coordinator waiting on its own tasks: its turn
+                      ;; after theirs ends its task (`--delegates-working-p').
+                      (romacs-agent-tools--delegates-working-p summary))))))))
 
 (defun romacs-agent-tools--wake-held-p (limited replaying)
   "Whether a child's ends wait to go to its parent, the one rule: at its
