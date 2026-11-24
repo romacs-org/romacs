@@ -33,6 +33,7 @@
 (require 'romacs-agent-log-images)
 
 (defvar romacs-agent-log--input)
+(defvar romacs-agent-log--sending)
 (defvar romacs-agent-log-draft-replaced-hook)
 (declare-function romacs-agent-log--commands-p "romacs-agent-log" ())
 
@@ -329,7 +330,8 @@ still, after a space when SPACED and the text before it needs one."
       (when (eq paste romacs-agent-log-attach--paste)
         (unwind-protect
             (if (not file) (message "Could not read the clipboard's image")
-              (when (>= paste romacs-agent-log--input)
+              ;; Not into a draft being sent (`romacs-agent-log--sending').
+              (when (and (>= paste romacs-agent-log--input) (not romacs-agent-log--sending))
                 (let ((link (concat (and spaced (> paste romacs-agent-log--input)
                                          (not (memq (char-before paste) '(?\s ?\n)))
                                          " ")

@@ -284,7 +284,13 @@ started by older builds keep working.
 - *Majors.* A major mismatch is refused (=-32013=), with the version
   served in =data.served=.
 - *Minors.* Within a major, a minor adds optional fields, events,
-  methods and capabilities.  Never a changed meaning.
+  methods and capabilities.  Never a changed meaning.  1.1 adds
+  =agents/send='s mode =interrupt=, its result's =queued= and state
+  =unconfirmed=, and =draft-conflict=.  A client of a 1.0 service sends an interrupt with
+  text as =agents/interrupt=, then a =send= of mode =next=.  A 1.0
+  service keeps no drafts, so to one a draft sent again may go twice,
+  and that interrupt may go though its =send= then fails: a draft goes
+  once, and a refusal means nothing was done, from 1.1.
 - *Must-ignore.* A client ignores an unknown event type or field.  An
   ignored event never invalidates the client's state: everything a
   client must know to stay consistent (rows, pending requests, queue,
@@ -307,6 +313,7 @@ JSON-RPC errors with numeric codes and =data.kind=:
 | -32016 | busy             | the session is changing hands (handoff); retry |
 | -32017 | stale            | a continuation token expired; start the call again |
 | -32018 | not-kept         | a command ran, but how it ended was not kept: it may have taken effect |
+| -32019 | draft-conflict   | a =draftId= already sent with other text or attachments: nothing sent |
 | -32603 | internal         | with a message |
 
 ** Generations, revisions and cursors
@@ -575,6 +582,46 @@ paging ever holds live delivery back.
     service stopped before its result was kept) is never run again.
   - A =cid= reused with different params is refused (=cid-conflict=).
   - A repeat after its row expired is a new command.
+- *Drafts.*  A =send= carries the user's draft's =draftId=, a UUID (any
+  other is =bad-params=); one naming none gets a fresh one.  The queue
+  item it becomes, and its =romacsQueued= record, are named by a UUID
+  made from the caller and the =draftId=, so two callers' drafts are two
+  messages.  The serving editor knows every draft it took, per caller
+  (connection identity and client instance), never by =cid=, for the
+  whole of its run:
+  - a =send= naming one again, under any =cid=, with the same session,
+    text and images, gets the first one's result (its place in the
+    queue as it is now) and sends nothing, whatever its mode (the text
+    went already), so a client sends an unconfirmed draft again safely;
+    one still being admitted waits for that result;
+  - with another session, text or images, it is refused
+    (=draft-conflict=), nothing sent: the client keeps the text and
+    sends it under a new =draftId=; a draft its user edits while it
+    waits in the queue is the edited draft from then on;
+  - a refused draft is not kept, nor one taken out of its queue unsent
+    (dropped by its user, or the queue cleared): sent again, it is a
+    fresh attempt;
+  - the drafts it took are not kept across its restart: a draft sent
+    again after one, its first result lost, may go twice.
+  A client sends a draft only once its service's welcome has come: before,
+  it refuses it at once, still connecting, and keeps the =draftId=.  It
+  waits 30 s for a =send='s result.  Past that, or when the connection
+  ends first (=disconnected=) or the outcome was not kept (=not-kept=),
+  it does not know whether the draft went: it says it is unconfirmed,
+  neither taken nor refused, keeps the text and the =draftId=, and drops
+  a late result; sent again, it goes once.  A refusal always means
+  nothing was done.
+  The serving editor admits a draft whole before anything else is told
+  of it: what watches its sessions through the agents module's hooks
+  and events (its views, and the hook =romacs-agent-input-functions= of
+  a message written) never sees a draft still being admitted.  It hears
+  of what happened meanwhile once the draft's result is kept and sent,
+  after it.  Code that reads the module's internals from a timer of its
+  own, while an admission waits, is outside this.
+  A draft whose line is cut short by a quit as it is written (C-g) may
+  have gone or not: it is unconfirmed, and a retry goes no second time,
+  so such a message may be lost, never sent twice; its user edits it to
+  send it again.
 - *Delivery.*  A =send= goes through the session's queue.  The queue's
   items are kept in the store, and the message's =in= record names the
   item it was (=romacsQueued=), so no item goes twice across a restart.
@@ -606,7 +653,11 @@ paging ever holds live delivery back.
   - =recorded=: its =in= record came back.  The host records before it
     writes to the harness, so this proves the line was kept, not that
     the harness acted on it;
+  - =unconfirmed= (=send=, from 1.1): its line was cut short as it was
+    written, so it may not have gone; the draft goes no second time;
   - =unknown=.
+  A client takes only =written= and =queued= as a =send= taken; any
+  other state is unconfirmed, never taken.
 
   What the harness then did arrives as events.
 
@@ -615,7 +666,7 @@ Served: =send=, =answer=, =interrupt=, =start=, =projects.list=,
 
 | method | params | result |
 |--------+--------+--------|
-| =agents/send= | =cid id text mode:"now"/"next"/"steer" images?= | =state= |
+| =agents/send= | =cid id text mode:"now"/"next"/"steer"/"interrupt" images? draftId?= | =state queued?=, its place while queued |
 | =agents/answer= | =cid id handle decision scope? reason? answers?= | =state= |
 | =agents/interrupt=, =agents/stop=, =agents/resume= | =cid id= | =state= |
 | =agents/start= | =cid cwd prompt? title? provider? model? effort? parent?= | =state id= |
@@ -625,6 +676,12 @@ Served: =send=, =answer=, =interrupt=, =start=, =projects.list=,
 | =agents/reply= | =cid id message text= | =state= |
 | =agents/projects.list=, =agents/providers.list= | | ={"projects":[{"cwd","last_time"}]}=; ={"providers":[{"name","harness","models":[{"id","label","efforts"}]}]}= |
 
+- *=send='s modes.*  =now= and =steer= go into the turn under way, when
+  one runs; =next= once it ends; =interrupt= first of what waits, the
+  turn under way then interrupted, once nothing else can fail: one
+  decision of the serving editor's, its result the client's answer.  A
+  =send= has text or images, whatever its mode: an interrupt alone is
+  =agents/interrupt=.
 - *Unsupported in 1.0 (=unsupported=):* rollback, renew, fork, move to
   another account.  Each gets a method in a minor version.
 - *Attachments are references, never copies.*  =images= holds paths: a

@@ -100,6 +100,8 @@ line above them brings earlier ones."
 
 (defface romacs-agent-log-prompt '((t :inherit bold))
   "A message the user sent.")
+(defface romacs-agent-compose-sending '((t :inherit shadow))
+  "The composer's prompt while its draft is sent, until its session answers.")
 (defface romacs-agent-log-prompt-mark '((t :inherit (romacs-working-running bold)))
   "The mark before a message the user sent: the theme's colour for work.")
 (defface romacs-agent-log-thinking '((t :inherit (shadow italic)))
@@ -283,6 +285,11 @@ into: what the session waited on then, not now.")
 (defvar-local romacs-agent-log--recalled nil
   "The cells of `romacs-agent-log--prompts' M-p went through, the one the
 composer shows first; nil when it shows the draft.")
+(defvar-local romacs-agent-log--draft-id nil
+  "The id the composer's draft is submitted under (`romacs-agent-submit'):
+made on its first send, kept until it is accepted, so a retry is the same draft.")
+(defvar-local romacs-agent-log--sending nil
+  "The draft id of the draft being sent, until its answer comes; nil when none is.")
 (defvar-local romacs-agent-log--draft-kept nil
   "The composer's text as M-p first found it, given back past the newest.")
 (defvar-local romacs-agent-log--filled nil
@@ -321,11 +328,10 @@ above them.")
   "What SESSION waits on now, as SOURCE says: a table of request id to
 request, as `romacs-agent-approvals' is.")
 
-(cl-defgeneric romacs-agent-log-source-send (source session text &optional when)
-  "Send SESSION the user's TEXT through SOURCE: now, into the turn under
-way when one runs; WHEN `later', once that turn ends; `interrupt', that
-turn interrupted, then first of the messages waiting (now when none runs).
-An empty TEXT is not sent.")
+(cl-defgeneric romacs-agent-log-source-submit (source session intent callback)
+  "Submit INTENT, the user's draft, to SESSION through SOURCE, and call
+CALLBACK with the answer, as `romacs-agent-submit' does: once, after
+this returns, refusals included.")
 
 (cl-defgeneric romacs-agent-log-source-interrupt (source session)
   "Interrupt SESSION's turn under way, through SOURCE.")
@@ -450,9 +456,18 @@ and the composer start together, so test membership once."
       (cl-incf delta (cddr shift)))
     (romacs-agent-log--shift-undo undo start delta)))
 
-(defun romacs-agent-log--apply-undo-shifts (&rest _)
-  "Bring this chat's undo positions up to date before undo or redo.
-Remove this with slice 8b, when the composer gets its own buffer."
+(defun romacs-agent-log--apply-undo-shifts (undo &rest args)
+  "Call UNDO, `undo' or `undo-redo', with ARGS, this chat's undo positions
+brought up to date first; while its draft is sent, which it then leaves
+as it is (`romacs-agent-log--sending'), it only says so.  Remove the shift with
+slice 8b, when the composer gets its own buffer."
+  (if (and (derived-mode-p 'romacs-agent-log-mode) romacs-agent-log--sending)
+      (message "The draft is being sent: undo waits for its answer")
+    (romacs-agent-log--shift-pending-undo)
+    (apply undo args)))
+
+(defun romacs-agent-log--shift-pending-undo ()
+  "Bring this chat's undo positions up to date before undo or redo."
   (when romacs-agent-log--undo-shifts
     (let* ((shifts romacs-agent-log--undo-shifts)
            (updates (romacs-agent-log--undo-updates buffer-undo-list shifts))
@@ -464,8 +479,8 @@ Remove this with slice 8b, when the composer gets its own buffer."
       (when selective (cl-mapl (lambda (old new) (setcar old (car new))) selective pending))
       (setq romacs-agent-log--undo-shifts nil))))
 
-(advice-add 'undo :before #'romacs-agent-log--apply-undo-shifts)
-(advice-add 'undo-redo :before #'romacs-agent-log--apply-undo-shifts)
+(advice-add 'undo :around #'romacs-agent-log--apply-undo-shifts)
+(advice-add 'undo-redo :around #'romacs-agent-log--apply-undo-shifts)
 
 (defmacro romacs-agent-log--writing (&rest body)
   "Run BODY silently with read-only lifted, recording composer motion.
@@ -1489,7 +1504,9 @@ to be sent: romacs-agent-log-queue.el), or nil for none.")
         (start (marker-position marker))
         (end (marker-position romacs-agent-log--end))
         (old (- romacs-agent-log--input start))
-        (prompt (concat rows (propertize (concat (romacs-agent-glyph 'composer) " ") 'face 'romacs-agent-log-prompt))))
+        (prompt (concat rows (propertize (concat (romacs-agent-glyph 'composer) " ")
+                                         'face (if romacs-agent-log--sending 'romacs-agent-compose-sending
+                                                 'romacs-agent-log-prompt)))))
     (goto-char start)
     (insert (romacs-agent-log--separator-field (concat divider "\n" prompt)))
     (delete-region (point) (+ (point) old))
@@ -1903,7 +1920,9 @@ shows it; its session loaded only then, as its records are read."
               (session (or (romacs-agent-loaded id) (romacs-agent-store-row-session id) (romacs-agent-get id)))
               (buffer (romacs-agent-log-chat session t)))
     (with-current-buffer buffer
-      (save-excursion (goto-char (point-max)) (insert (or (plist-get misc :draft) ""))))
+      ;; A chat sending its draft has one already: the one it sends.
+      (unless romacs-agent-log--sending
+        (save-excursion (goto-char (point-max)) (insert (or (plist-get misc :draft) "")))))
     buffer))
 
 (defvar desktop-buffer-mode-handlers)
@@ -1926,17 +1945,8 @@ shows it; its session loaded only then, as its records are read."
 (cl-defmethod romacs-agent-log-source-approvals ((_source romacs-agent-log-local-source) session)
   (romacs-agent-approvals session))
 
-(cl-defmethod romacs-agent-log-source-send ((_source romacs-agent-log-local-source) session text &optional when)
-  (let ((session (romacs-agent-log--loaded session)))
-    (pcase when
-      ((guard (string-empty-p text)) (when (and (eq when 'interrupt) (romacs-agent-log--running-p session))
-                                       (romacs-agent-interrupt session)))
-      ;; Its user's: theirs to change while it waits.
-      ('later (romacs-agent-send-later session text nil nil nil nil t))
-      ((and 'interrupt (guard (romacs-agent-log--running-p session)))
-       (romacs-agent-interrupt session)
-       (romacs-agent-send-later session text t nil nil nil t))
-      (_ (romacs-agent-send session text nil nil nil nil t)))))
+(cl-defmethod romacs-agent-log-source-submit ((_source romacs-agent-log-local-source) session intent callback)
+  (romacs-agent-submit (romacs-agent-id (romacs-agent-log--loaded session)) intent callback))
 
 (cl-defmethod romacs-agent-log-source-interrupt ((_source romacs-agent-log-local-source) session)
   (romacs-agent-interrupt (romacs-agent-log--loaded session)))
@@ -1978,23 +1988,83 @@ shows it; its session loaded only then, as its records are read."
 recalled prompt: what was pending on its draft lands nowhere.")
 
 (defun romacs-agent-log--draft ()
-  (string-trim (buffer-substring-no-properties romacs-agent-log--input (point-max))))
+  "The composer's text, trimmed, all of it however the chat is narrowed."
+  (save-restriction
+    (widen)
+    (string-trim (buffer-substring-no-properties romacs-agent-log--input (point-max)))))
 
 (declare-function romacs-agent-log-queue-put-back "romacs-agent-log-queue" ())
 
-(defun romacs-agent-log--deliver (send)
-  "Call SEND with the composer's text, then empty it; it stays when SEND
-fails.  A queued message the composer holds to edit goes back in its
-place instead (`romacs-agent-log-queue-put-back'), sent by no one."
-  (let ((text (romacs-agent-log--draft)))
-    (if romacs-agent-log-queue--editing (romacs-agent-log-queue-put-back)
-     (unless (string-empty-p text)
-      (funcall send text)
-      (setq romacs-agent-log--recalled nil)
-      (delete-region romacs-agent-log--input (point-max))
-      (run-hooks 'romacs-agent-log-draft-replaced-hook)
-      ;; Sent: nothing typed is left.
-      (set-buffer-modified-p nil)))))
+(defun romacs-agent-log--lock (on)
+  "Make the composer's draft read-only when ON, else writable again, all
+of it however the chat is narrowed: no undo kept, no edit of the user's."
+  (save-restriction
+    (widen)
+    (with-silent-modifications
+      (if on
+          (add-text-properties romacs-agent-log--input (point-max)
+                               '(read-only romacs-agent-log-sending front-sticky (read-only) rear-nonsticky nil))
+        (remove-text-properties romacs-agent-log--input (point-max)
+                                '(read-only nil front-sticky nil rear-nonsticky nil))))))
+
+(defun romacs-agent-log--sent ()
+  "Empty the composer of the draft its session accepted, all of it however
+the chat is narrowed, as an edit undo can take back, and forget its id
+and what M-p went through."
+  (setq romacs-agent-log--draft-id nil romacs-agent-log--recalled nil)
+  (save-restriction (widen) (delete-region romacs-agent-log--input (point-max)))
+  (run-hooks 'romacs-agent-log-draft-replaced-hook)
+  ;; Sent: nothing typed is left.
+  (set-buffer-modified-p nil))
+
+(defun romacs-agent-log--not-sent (answer)
+  "Say what ANSWER, not an acceptance, means for its draft: why a refusal
+did not send it, in the error face; or that it is unconfirmed (a remote
+send unanswered, `romacs-agent-remote--unconfirmed'), and how it goes."
+  (pcase (plist-get answer :status)
+    ('refused (message "%s" (propertize (plist-get answer :message) 'face 'error)))
+    ('unconfirmed (message "%s" (propertize (plist-get answer :message) 'face 'warning)))))
+
+(defun romacs-agent-log--sending-ended ()
+  "The composer sends no more: its draft writable, its prompt as before."
+  (setq romacs-agent-log--sending nil)
+  (romacs-agent-log--lock nil)
+  (romacs-agent-log--separator t))
+
+(defun romacs-agent-log--draft-answered (chat answer)
+  "CHAT's draft has ANSWER (`romacs-agent-submit'), when it is still the
+one CHAT sends: writable again, and emptied once accepted, else kept,
+the refusal or its being unconfirmed said (`romacs-agent-log--not-sent').
+It keeps its id, so a retry is the same draft, but
+for a `conflict': its id's earlier text was sent, so this text takes a
+new one."
+  (when (buffer-live-p chat)
+    (with-current-buffer chat
+      (when (and romacs-agent-log--sending (equal romacs-agent-log--sending (plist-get answer :draft-id)))
+        (romacs-agent-log--sending-ended)
+        (when (eq (plist-get answer :reason) 'conflict) (setq romacs-agent-log--draft-id nil))
+        (if (eq (plist-get answer :status) 'accepted) (romacs-agent-log--sent) (romacs-agent-log--not-sent answer))))))
+
+(defun romacs-agent-log--submit (kind)
+  "Submit the composer's draft as KIND (`romacs-agent-submit'), under its
+draft id, read-only until its answer comes, or until its source signals
+instead of answering.  Nothing while one is sent, or when it is empty; a
+queued message the composer holds to edit goes back in its place instead
+\(`romacs-agent-log-queue-put-back')."
+  (let ((text (romacs-agent-log--draft)) (chat (current-buffer)) (asked nil))
+    (cond (romacs-agent-log-queue--editing (romacs-agent-log-queue-put-back))
+          ((or romacs-agent-log--sending (string-empty-p text)) nil)
+          (t (setq romacs-agent-log--draft-id (or romacs-agent-log--draft-id (romacs-agent--uuid))
+                   romacs-agent-log--sending romacs-agent-log--draft-id)
+             (romacs-agent-log--lock t)
+             (romacs-agent-log--separator t)
+             (unwind-protect
+                 (progn (romacs-agent-log--act #'romacs-agent-log-source-submit
+                                               (list :draft-id romacs-agent-log--draft-id :kind kind :text text
+                                                     :attachments nil)
+                                               (lambda (answer) (romacs-agent-log--draft-answered chat answer)))
+                        (setq asked t))
+               (unless asked (romacs-agent-log--sending-ended)))))))
 
 (defun romacs-agent-log--running-p (&optional session)
   "Whether SESSION, the chat's by default, runs a turn."
@@ -2012,12 +2082,12 @@ text (`romacs-agent-log-steer')."
   "Send the composer's text now, wherever point is: into the turn under
 way, when one runs."
   (interactive nil romacs-agent-log-mode)
-  (romacs-agent-log--deliver (lambda (text) (romacs-agent-log--act #'romacs-agent-log-source-send text))))
+  (romacs-agent-log--submit 'send))
 
 (defun romacs-agent-log-queue ()
   "Send the composer's text once the turn under way ends."
   (interactive nil romacs-agent-log-mode)
-  (romacs-agent-log--deliver (lambda (text) (romacs-agent-log--act #'romacs-agent-log-source-send text 'later))))
+  (romacs-agent-log--submit 'queue))
 
 (defun romacs-agent-log-interrupt ()
   "Interrupt the turn under way."
@@ -2025,11 +2095,12 @@ way, when one runs."
   (romacs-agent-log--act #'romacs-agent-log-source-interrupt))
 
 (defun romacs-agent-log-interrupt-and-send ()
-  "Interrupt the turn under way; the composer's text is sent once it ends."
+  "Interrupt the turn under way; the composer's text is sent once it ends.
+With no text, only the interrupt goes (`romacs-agent-log-interrupt')."
   (interactive nil romacs-agent-log-mode)
   (if (string-empty-p (romacs-agent-log--draft))
-      (romacs-agent-log--act #'romacs-agent-log-source-send "" 'interrupt)
-    (romacs-agent-log--deliver (lambda (text) (romacs-agent-log--act #'romacs-agent-log-source-send text 'interrupt)))))
+      (romacs-agent-log-interrupt)
+    (romacs-agent-log--submit 'interrupt)))
 
 (defun romacs-agent-log--pending ()
   "The approvals this chat shows that the live session still waits on,
@@ -2195,6 +2266,26 @@ transcript, it goes there."
   (goto-char (point-max))
   (self-insert-command n))
 
+(defvar romacs-agent-log--recalling nil
+  "Non-nil while M-p or M-n replaces the draft (`romacs-agent-log--recall'):
+the composer empties only on the way to its next text.")
+
+(defun romacs-agent-log--draft-emptied (_beg _end _length)
+  "A composer its user emptied holds another draft next: it takes a new id.
+Not as M-p or M-n replaces the draft; and undo, giving the text back,
+gives its id back (`romacs-agent-log--draft-id-again')."
+  (when (and romacs-agent-log--draft-id (not romacs-agent-log--sending) (not romacs-agent-log--recalling)
+             (markerp romacs-agent-log--input)
+             ;; All of it, however the chat is narrowed.
+             (= romacs-agent-log--input (save-restriction (widen) (point-max))))
+    (when (listp buffer-undo-list)
+      (push (list 'apply #'romacs-agent-log--draft-id-again romacs-agent-log--draft-id) buffer-undo-list))
+    (setq romacs-agent-log--draft-id nil)))
+
+(defun romacs-agent-log--draft-id-again (id)
+  "Make ID the composer's draft id again: undo gave back the text it named."
+  (setq romacs-agent-log--draft-id id))
+
 (defun romacs-agent-log--composer-plain (beg end _length)
   "Text typed or yanked into the composer is plain: nothing of the
 transcript's comes with it."
@@ -2210,14 +2301,17 @@ transcript's comes with it."
   (goto-char (point-max)))
 
 (defun romacs-agent-log--recall (cells)
-  "Show the prompt of the first of CELLS in the composer, or the draft."
-  (unless romacs-agent-log--recalled
-    (setq romacs-agent-log--draft-kept (buffer-substring-no-properties romacs-agent-log--input (point-max))))
-  (setq romacs-agent-log--recalled cells)
-  (delete-region romacs-agent-log--input (point-max))
-  (run-hooks 'romacs-agent-log-draft-replaced-hook)
-  (goto-char (point-max))
-  (insert (if cells (car (car cells)) (or romacs-agent-log--draft-kept ""))))
+  "Show the prompt of the first of CELLS in the composer, or the draft;
+nothing while the draft is sent (`romacs-agent-log--sending')."
+  (unless romacs-agent-log--sending
+    (unless romacs-agent-log--recalled
+      (setq romacs-agent-log--draft-kept (buffer-substring-no-properties romacs-agent-log--input (point-max))))
+    (setq romacs-agent-log--recalled cells)
+    (let ((romacs-agent-log--recalling t))
+      (delete-region romacs-agent-log--input (point-max))
+      (run-hooks 'romacs-agent-log-draft-replaced-hook)
+      (goto-char (point-max))
+      (insert (if cells (car (car cells)) (or romacs-agent-log--draft-kept ""))))))
 
 (defun romacs-agent-log-history-previous ()
   "Put the previous prompt in the composer."
@@ -2370,7 +2464,8 @@ On the transcript's text:
   (add-hook 'window-size-change-functions (lambda (_) (when romacs-agent-log--input (romacs-agent-log--separator))) nil t)
   (add-hook 'window-size-change-functions #'romacs-agent-log-tables-refit nil t)
   (romacs-agent-log-attach-setup)
-  (add-hook 'after-change-functions #'romacs-agent-log--composer-plain nil t))
+  (add-hook 'after-change-functions #'romacs-agent-log--composer-plain nil t)
+  (add-hook 'after-change-functions #'romacs-agent-log--draft-emptied nil t))
 
 (provide 'romacs-agent-log)
 ;; Its turns' place in the transcript, which needs it loaded.

@@ -41,7 +41,7 @@
 (require 'romacs-agent-turns)
 (require 'romacs-mcp)
 
-(defconst romacs-agent-service-version '(1 0)
+(defconst romacs-agent-service-version '(1 1)
   "The protocol version served: major, minor.")
 
 (defconst romacs-agent-service--unit-budget (* 768 1024)
@@ -890,6 +890,13 @@ DIGESTS includes the legacy digest for rows written by an older service."
             (funcall finish '(error -32015 "cid-conflict" "This cid named another command"))))
          (_ (funcall finish '(error -32603 "internal" "The command was not kept: not run"))))))))
 
+(defun romacs-agent-service--peer-key (peer)
+  "Who PEER is, as its commands and drafts are kept: its login and its
+client's instance."
+  (let ((identity (romacs-agent-service--peer-identity peer)))
+    (format "%s %s" (or (and (hash-table-p identity) (gethash "login" identity)) "")
+            (or (romacs-agent-service--peer-instance peer) ""))))
+
 (defun romacs-agent-service--command (rpc method params effect)
   "Run METHOD with PARAMS once for RPC's peer and the client's cid.
 A matching repeat gets the kept result or waits for the original reply.
@@ -897,9 +904,7 @@ A different call with the same cid gets cid-conflict.  Run EFFECT only
 after admission is kept, even if the service lost the original result."
   (let* ((peer (romacs-agent-rpc-data rpc)) (cid (gethash "cid" params)))
     (unless (stringp cid) (romacs-agent-service--fail -32602 "bad-params" "A command carries its cid"))
-    (let* ((identity (romacs-agent-service--peer-identity peer))
-           (key (format "%s %s %s" (or (and (hash-table-p identity) (gethash "login" identity)) "")
-                        (or (romacs-agent-service--peer-instance peer) "") cid))
+    (let* ((key (concat (romacs-agent-service--peer-key peer) " " cid))
            (digests (romacs-agent-service--command-digests method params))
            (kept (romacs-agent-service--kept key)))
       (cond
@@ -955,26 +960,39 @@ there is none."
     (or (and (stringp id) (romacs-agent-get id))
         (romacs-agent-service--fail -32010 "unknown-session" "No such session"))))
 
-(defun romacs-agent-service--sent-state (session item)
-  "The state of ITEM, a message sent SESSION: queued while it waits."
-  (romacs-agent-rpc-object "state" (if (memq item (romacs-agent-queue session)) "queued" "written")))
+(defun romacs-agent-service--submitted (answer)
+  "The result of `agents/send' for ANSWER, `romacs-agent-submit''s: its
+state, queued with its place in the queue while it waits, written, or
+unconfirmed (its line cut short as it went: it goes no second time); a
+refusal as the protocol's error for its reason
+\(`romacs-agent-submit-refusals')."
+  (cond ((plist-get answer :reason)
+         (append (list 'error) (or (cdr (assq (plist-get answer :reason) romacs-agent-submit-refusals))
+                                   (cdr (assq 'owner-unavailable romacs-agent-submit-refusals)))
+                 (list (plist-get answer :message))))
+        ((eq (plist-get answer :status) 'unconfirmed) (romacs-agent-rpc-object "state" "unconfirmed"))
+        ((plist-get answer :queued) (romacs-agent-rpc-object "state" "queued" "queued" (plist-get answer :queued)))
+        (t (romacs-agent-rpc-object "state" "written"))))
 
 (defun romacs-agent-service--send (rpc params)
   "`agents/send': the user's TEXT to session ID, MODE now (into the turn
-under way, when one runs), steer (the same) or next (once it ends)."
+under way, when one runs), steer (the same), next (once it ends) or
+interrupt (first of what waits, the turn under way interrupted), as
+`romacs-agent-submit' admits a draft, under its DRAFTID (a fresh one
+when it names none) kept per caller: a draft sent again under its id is
+sent once while this editor runs."
   (romacs-agent-service--command
    rpc "agents/send" params
    (lambda ()
-     (let ((session (romacs-agent-service--live-session params)) (text (gethash "text" params))
-           (mode (gethash "mode" params)) (images (append (gethash "images" params) nil)))
-       (unless (and (stringp text) (member mode '("now" "next" "steer")) (cl-every #'stringp images))
-         (romacs-agent-service--fail -32602 "bad-params" "text, mode now, next or steer, and images paths"))
-       (condition-case err
-           (romacs-agent-service--sent-state
-            session (if (equal mode "next")
-                        (romacs-agent-send-later session text nil images)
-                      (romacs-agent-send session text nil nil images)))
-         (user-error (romacs-agent-service--fail -32012 "not-live" (error-message-string err))))))))
+     (let ((scope (romacs-agent-service--peer-key (romacs-agent-rpc-data rpc)))
+           (images (gethash "images" params)))
+       (lambda (respond)
+         (romacs-agent--submit-draft
+          scope (gethash "id" params)
+          (list :draft-id (gethash "draftId" params (romacs-agent--uuid))
+                :kind (cdr (assoc (gethash "mode" params) romacs-agent-submit-modes))
+                :text (gethash "text" params) :attachments (if (vectorp images) (append images nil) images))
+          (lambda (answer) (funcall respond (romacs-agent-service--submitted answer)))))))))
 
 (defun romacs-agent-service--interrupt (rpc params)
   "`agents/interrupt': session ID's turn under way interrupted."

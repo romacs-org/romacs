@@ -133,7 +133,7 @@ read here goes on.")
     (romacs-agent-write 'romacs-agent-store--made nil
                         (lambda (_answer)
                           (setq romacs-agent-store--making nil)
-                          (run-hooks 'romacs-agent-store-readable-hook)))))
+                          (romacs-agent--run-hook 'romacs-agent-store-readable-hook)))))
 
 (defvar romacs-agent-store-made-functions nil
   "Functions that make the tables of the store's other modules, called by
@@ -478,7 +478,7 @@ no fill runs; `romacs-agent-store-filled-hook' runs once it ends."
                             (prog1 (with-current-buffer (process-buffer process) (buffer-string))
                               (kill-buffer (process-buffer process))))
                           (process-exit-status process))
-                         (run-hooks 'romacs-agent-store-filled-hook)))))))
+                         (romacs-agent--run-hook 'romacs-agent-store-filled-hook)))))))
 
 (defun romacs-agent-store--filled (output &optional status)
   "A fill ended with STATUS (0 by default), saying OUTPUT: the sessions it
@@ -915,7 +915,7 @@ nothing else of it.  A failure signals."
          (when (equal (cadr answer) (romacs-agent-store--settlement dir))
            (romacs-agent-mark id 'settlement nil)
            (when then (funcall then)))
-         (run-hooks 'romacs-agent-store-settlement-hook)))
+         (romacs-agent--run-hook 'romacs-agent-store-settlement-hook)))
      (list 'settlement id))))
 
 (defvar romacs-agent-store-settlement-hook nil

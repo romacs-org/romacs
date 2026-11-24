@@ -19,7 +19,10 @@
   `(let ((session (romacs-agent--make :id "L" :harness 'claude :state 'running
                                       :tools (make-hash-table :test #'equal)
                                       :streamed (make-hash-table :test #'equal)))
-         (romacs-agent-approval-policy 'ask))
+         (romacs-agent-approval-policy 'ask)
+         ;; A hold of its own: another test's, its release yet to run,
+         ;; would hold this one's observers.
+         (romacs-agent--held nil) (romacs-agent--admitting 0))
      (with-temp-buffer
        (romacs-agent-log-mode)
        (setq romacs-agent-log--session session
@@ -1038,19 +1041,24 @@ them inherits."
 
 (ert-deftest romacs-agent-log-interrupt-and-send-asks-the-live-session ()
   ;; A restored chat shows its row, idle; its session, loaded, runs a
-  ;; turn: that turn is interrupted, the text sent first once it ends.
+  ;; turn: the text waits first, then that turn is interrupted, last.
   (romacs-agent-log-tests--with
     (let ((live (romacs-agent--make :id "L" :harness 'claude :state 'running)) (calls nil))
       (setf (romacs-agent-state session) 'idle)
       (cl-letf (((symbol-function 'romacs-agent-loaded) (lambda (_) nil))
                 ((symbol-function 'romacs-agent-get) (lambda (_) live))
                 ((symbol-function 'romacs-agent-interrupt) (lambda (s) (push (list 'interrupt s) calls)))
-                ((symbol-function 'romacs-agent-send-later) (lambda (s text &optional first &rest _) (push (list 'later s text first) calls)))
-                ((symbol-function 'romacs-agent-send) (lambda (s text &rest _) (push (list 'send s text) calls))))
+                ((symbol-function 'romacs-agent--ended-p) #'ignore)
+                ((symbol-function 'romacs-agent--admit)
+                 (lambda (s item &optional first &rest _)
+                   (push (list 'admit s (romacs-agent-item-text item) (romacs-agent-item-kind item) first) calls)
+                   ;; It waits, as its admission would leave it.
+                   (let ((romacs-agent--queue-quiet t)) (romacs-agent--enqueue s item))
+                   item)))
         (goto-char (point-max))
         (insert "stop that")
         (romacs-agent-log-interrupt-and-send))
-      (should (equal (reverse calls) (list (list 'interrupt live) (list 'later live "stop that" t)))))))
+      (should (equal (reverse calls) (list (list 'admit live "stop that" 'next t) (list 'interrupt live)))))))
 
 ;; A chat's source.
 
@@ -1063,8 +1071,16 @@ them inherits."
 (cl-defmethod romacs-agent-log-source-fill ((source romacs-agent-log-tests--source) session)
   (romacs-agent-log-tests--called source 'fill)
   (romacs-agent-log-draw session '(:type input :text "from the source" :seq 1 :last t)))
-(cl-defmethod romacs-agent-log-source-send ((source romacs-agent-log-tests--source) _session text &optional when)
-  (romacs-agent-log-tests--called source 'send text when))
+(cl-defmethod romacs-agent-log-source-submit ((source romacs-agent-log-tests--source) _session intent callback)
+  (romacs-agent-log-tests--called source 'submit (plist-get intent :text) (plist-get intent :kind))
+  (romacs-agent-submit-answer callback (list :draft-id (plist-get intent :draft-id) :status 'accepted)))
+
+(defun romacs-agent-log-tests--answered ()
+  "Wait for the current chat's draft to be answered."
+  (let ((deadline (+ (float-time) 3)))
+    (while (and romacs-agent-log--sending (< (float-time) deadline))
+      (accept-process-output nil 0.01))
+    (should-not romacs-agent-log--sending)))
 (cl-defmethod romacs-agent-log-source-interrupt ((source romacs-agent-log-tests--source) _session)
   (romacs-agent-log-tests--called source 'interrupt))
 (cl-defmethod romacs-agent-log-source-respond ((source romacs-agent-log-tests--source) _session id allow reason)
@@ -1076,6 +1092,20 @@ them inherits."
 (cl-defmethod romacs-agent-log-source-approvals ((source romacs-agent-log-tests--source) _session)
   (romacs-agent-log-tests--source-approvals source))
 
+(ert-deftest romacs-agent-log-a-send-that-signals-leaves-the-draft-writable ()
+  ;; A source that signals instead of answering ends the sending: the
+  ;; draft stays, writable, and RET sends it again.
+  (romacs-agent-log-tests--with
+    (draw :type 'input :text "first" :request 1)
+    (goto-char (point-max))
+    (insert "keep me")
+    (cl-letf (((symbol-function 'romacs-agent-log--loaded) (lambda (_) (error "Lookup failed"))))
+      (should-error (romacs-agent-log-steer)))
+    (should-not romacs-agent-log--sending)
+    (should (equal (romacs-agent-log--draft) "keep me"))
+    (insert " too")
+    (should (equal (romacs-agent-log--draft) "keep me too"))))
+
 (ert-deftest romacs-agent-log-reads-and-acts-through-its-source ()
   ;; A chat of another source draws what it gives and acts through it
   ;; alone: none of this editor's sessions is touched, its policy answers
@@ -1085,8 +1115,7 @@ them inherits."
          (romacs-agent-approval-policy 'allow)
          (buffer (romacs-agent-log-chat session nil source)))
     (unwind-protect
-        (cl-letf (((symbol-function 'romacs-agent-send) (lambda (&rest _) (error "Sent here")))
-                  ((symbol-function 'romacs-agent-send-later) (lambda (&rest _) (error "Queued here")))
+        (cl-letf (((symbol-function 'romacs-agent--admit) (lambda (&rest _) (error "Sent here")))
                   ((symbol-function 'romacs-agent-interrupt) (lambda (&rest _) (error "Interrupted here")))
                   ((symbol-function 'romacs-agent-respond) (lambda (&rest _) (error "Answered here")))
                   ((symbol-function 'romacs-agent-mark-seen) (lambda (&rest _) (error "Seen here"))))
@@ -1102,10 +1131,13 @@ them inherits."
               (type "now")
               (should (buffer-modified-p))
               (romacs-agent-log-send)
+              (romacs-agent-log-tests--answered)
               (should-not (buffer-modified-p))
               (type "later") (romacs-agent-log-queue)
+              (romacs-agent-log-tests--answered)
               (romacs-agent-log-interrupt)
-              (type "after") (romacs-agent-log-interrupt-and-send))
+              (type "after") (romacs-agent-log-interrupt-and-send)
+              (romacs-agent-log-tests--answered))
             (puthash "r1" t (romacs-agent-log-tests--source-approvals source))
             (romacs-agent-log-draw session '(:type approval :request-id "r1" :tool "Bash"))
             (goto-char (point-max))
@@ -1113,7 +1145,7 @@ them inherits."
             (romacs-agent-log-deny "no")
             (romacs-agent-log-show session nil source)
             (should (equal (reverse (romacs-agent-log-tests--source-calls source))
-                           '((fill) (send "now" nil) (send "later" later) (interrupt) (send "after" interrupt)
+                           '((fill) (submit "now" send) (submit "later" queue) (interrupt) (submit "after" interrupt)
                              (respond "r1" t nil) (respond "r1" nil "no") (seen)))))
           ;; This editor's own session of the same id has a chat of its own.
           (let ((local (romacs-agent-log-chat (romacs-agent--make :id "S-remote" :harness 'claude :state 'idle) t)))
@@ -1427,12 +1459,20 @@ none when dropped.")
                 ((symbol-function 'romacs-agent--changed) #'ignore)
                 ((symbol-function 'romacs-agent-ui--batch) #'ignore)
                 ((symbol-function 'romacs-agent-log--loaded) #'identity)
-                ((symbol-function 'romacs-agent-send) (lambda (_s text &rest _) (setq sent text))))
+                ((symbol-function 'romacs-agent-get) (lambda (_) session))
+                ((symbol-function 'romacs-agent--ended-p) #'ignore)
+                ((symbol-function 'romacs-agent--admit)
+                 (lambda (_s item &rest _)
+                   (setq sent (romacs-agent-item-text item))
+                   ;; As its write would say.
+                   (romacs-agent--draft-written (romacs-agent-item-id item))
+                   item)))
         (call-interactively (keymap-lookup romacs-agent-log-mode-map "C-c C-a"))
         (should (equal (buffer-substring-no-properties romacs-agent-log--input (point-max)) "[file](/tmp/notes.org)"))
         (goto-char (point-min))
         (call-interactively (keymap-lookup romacs-agent-log-mode-map "C-c C-s"))
         (should (equal sent "[file](/tmp/notes.org)"))
+        (romacs-agent-log-tests--answered)
         (should (= romacs-agent-log--input (point-max)))
         (call-interactively (keymap-lookup romacs-agent-log-mode-map "C-c C-r"))
         (should (equal (romacs-agent-title session) "named"))))))
