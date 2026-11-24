@@ -298,5 +298,79 @@ read; the minibuffer's own commands see none."
       (execute-kbd-macro (kbd "q"))
       (keymap-popup-input--clean-p))))
 
+(defun keymap-popup-input--check-exit-hook (command drive &optional stay-open)
+  "Open a popup for COMMAND and check its exit hook after DRIVE.
+With STAY-OPEN, exercise the non-exiting action before DRIVE."
+  (keymap-popup-input--with-source
+    (let* ((origin-buffer (current-buffer))
+           (origin-window (selected-window))
+           (keymap-popup-backend #'keymap-popup-backend-side-window)
+           (window nil)
+           (observed nil)
+           (record (lambda ()
+                     (push (list (current-buffer) (selected-window)
+                                 (window-live-p window))
+                           observed))))
+      (unwind-protect
+          (progn
+            (when (boundp 'keymap-popup-exit-hook)
+              (add-hook 'keymap-popup-exit-hook record))
+            (keymap-popup (keymap-popup-input--suffix-map command nil
+                                                         :stay-open stay-open))
+            (setq window (get-buffer-window (get-buffer keymap-popup--buffer-name)))
+            (should (window-live-p window))
+            (should-not (eq window origin-window))
+            (should-not observed)
+            (when stay-open
+              (execute-kbd-macro (kbd "a"))
+              (should (window-live-p window))
+              (should-not observed))
+            (funcall drive)
+            (should-not (window-live-p window))
+            (should (boundp 'keymap-popup-exit-hook))
+            (should (equal observed (list (list origin-buffer origin-window nil)))))
+        (when (boundp 'keymap-popup-exit-hook)
+          (remove-hook 'keymap-popup-exit-hook record))))))
+
+(ert-deftest keymap-popup-exit-hook-selection ()
+  (let ((invocations 0))
+    (keymap-popup-input--check-exit-hook
+     (lambda () (interactive) (cl-incf invocations))
+     (lambda ()
+       (execute-kbd-macro (kbd "a"))
+       (should (= invocations 1))))))
+
+(ert-deftest keymap-popup-exit-hook-quit-key ()
+  (keymap-popup-input--check-exit-hook
+   #'ignore
+   (lambda ()
+     (with-temp-buffer
+       (let ((other (split-window-right)))
+         (set-window-buffer other (current-buffer))
+         (select-window other)
+         (execute-kbd-macro (kbd "q")))))))
+
+(ert-deftest keymap-popup-exit-hook-keyboard-quit ()
+  (keymap-popup-input--check-exit-hook
+   #'ignore
+   (lambda ()
+     (condition-case nil (execute-kbd-macro (kbd "C-g")) (quit nil)))))
+
+(ert-deftest keymap-popup-exit-hook-command-error ()
+  (keymap-popup-input--check-exit-hook
+   (lambda () (interactive) (user-error "Exit hook test command failed"))
+   (lambda ()
+     (should (equal (should-error (execute-kbd-macro (kbd "a")) :type 'user-error)
+                    '(user-error "Exit hook test command failed"))))))
+
+(ert-deftest keymap-popup-exit-hook-stay-open ()
+  (let ((invocations 0))
+    (keymap-popup-input--check-exit-hook
+     (lambda () (interactive) (cl-incf invocations))
+     (lambda ()
+       (should (= invocations 1))
+       (execute-kbd-macro (kbd "q")))
+     t)))
+
 (provide 'keymap-popup-input-tests)
 ;;; keymap-popup-input-tests.el ends here
