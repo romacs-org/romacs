@@ -1175,7 +1175,7 @@ struct LazyBody {
     evaluated: bool,
     /// A deferred form of a loading file's own (`Builder::file_level`).
     file_level: bool,
-    /// Made while interpreting a source file (`Vm::interpreting_source`).
+    /// Made while interpreting a source file (`Mutator::interpreting_source`).
     interpreting: bool,
 }
 impl LazyBody {
@@ -1475,7 +1475,6 @@ pub struct Vm {
     source_cache: source_cache::SourceCache,
     macros: HashSet<usize>,
     expanding: Vec<usize>,
-    compile_depth: usize,
     /// Active Lisp evaluation depth, shared by reentrant execution engines.
     eval_depth: usize,
     /// GNU `eval` with a nil LEXICAL argument: every binding the form makes
@@ -1575,33 +1574,8 @@ pub struct Vm {
     terminal_bindings: Vec<terminal_host::TerminalBinding>,
     /// The buffer list's order (buffer_order.rs): roots for collection.
     buffer_order: buffer_order::BufferOrder,
-    pending_specials: NameSet<String>,
-    /// Names a one-argument top-level `(defvar NAME)` declared in the file
-    /// being loaded: special for the rest of that file only (GNU Fdefvar,
-    /// eval.c:990-996, consing onto the `internal-interpreter-environment'
-    /// that readevalloop binds once per file). Saved and restored per load.
-    file_specials: NameSet<String>,
-    /// Set by the loader for exactly one root compilation of a file's form,
-    /// so that compilation (and nothing nested in it) starts from
-    /// `file_specials`.
-    seed_file_specials: bool,
-    /// The next built function is a loading file's form (`Builder::file_level`):
-    /// set by the loader around its top-level compile, and by a deferred
-    /// form's thunk made in one.
-    file_level_request: bool,
     /// R215: compile `lambda' bodies lazily (GNU's non-eager load regime).
     lazy_regime: bool,
-    /// Loading a file GNU would read as source (no compiled form,
-    /// `Vm::gnu_loads_compiled'): GNU's readevalloop interprets its forms,
-    /// so its `let's bind late (`Op::BindLate'), as `eval''s do.
-    interpreting_source: bool,
-    /// R215: compile a failing form as a deferred reach-time expansion.
-    defer_expansion_errors: bool,
-    /// Compiling for `eval', which GNU interprets: a macro call whose
-    /// expansion escapes, or a call whose function a form run before it may
-    /// still define, defers to its reach (`defer_expansion_errors'), and a
-    /// `lambda' with nothing to capture compiles at its first call.
-    evaluating: bool,
     /// A quit (or `throw-on-input' throw) `maybe_quit' raised from C-g or
     /// `quit-flag' is unwinding: no `catch' or `condition-case' has ended it
     /// since. An unwind-protect cleanup that replaces it keeps it set, so
@@ -1616,32 +1590,12 @@ pub struct Vm {
     /// (gc.rs), so one whose error a Rust caller discards goes at the next
     /// collection and keeps nothing alive.
     thrown_no_catch: Vec<Value>,
-    /// The next form compiled is a deferred call reached (`force_lazy'): its
-    /// own expansion signals there, the forms inside it defer as ever.
-    strict_root: bool,
-    /// The head of the deferred call being reached, while it compiles: with
-    /// no function, that call compiles to signal void-function at once, not
-    /// to defer again. Consumed by the call's own compilation.
-    reached_head: Option<String>,
-    /// As `reached_head', for a head no name reaches.
-    reached_generated: Option<GeneratedName>,
-    /// Set for the builder about to be created (`Builder::loader_order`).
-    loader_order_request: bool,
-    /// Consumed by the next `function` call: keep every capture register.
-    keep_captures: bool,
-    /// Consumed by the next lambda compiled: the closure slots `closure`
-    /// takes out of its body (an interactive spec and its modes), which its
-    /// structural key covers as GNU's `equal` compares them (`closure_key`).
-    closure_key_extra: Vec<Form>,
-    /// Eager `lambda' bodies being compiled around the current form.
-    lambda_depth: usize,
     /// The windows the last window change functions run saw
     /// (host_input.rs `window_change_signature').
     window_change_seen: Vec<u64>,
     /// The macro cells the open compiles expanded through, by scope
     /// (`macro_record`).
     macro_record: macro_record::MacroRecord,
-    expanded_symbols: NameSet<String>,
     #[snapshot(at_rest)]
     image: Option<std::sync::Arc<ImageRegion>>,
     /// Frozen regions by id (`frozen.rs`); index 0 is the image above.
@@ -1925,7 +1879,6 @@ impl Vm {
             source_cache: source_cache::SourceCache::default(),
             macros: HashSet::default(),
             expanding: vec![],
-            compile_depth: 0,
             eval_depth: 0,
             dynamic_scope: false,
             propagated_escape: None,
@@ -1965,26 +1918,11 @@ impl Vm {
             terminal_bindings: Vec::new(),
             buffer_order: buffer_order::BufferOrder::default(),
             propagate_next: false,
-            pending_specials: NameSet::default(),
-            file_specials: NameSet::default(),
-            seed_file_specials: false,
-            file_level_request: false,
             lazy_regime: false,
-            interpreting_source: false,
-            defer_expansion_errors: false,
-            evaluating: false,
             quit_unwinding: false,
             thrown_no_catch: Vec::new(),
-            strict_root: false,
-            reached_head: None,
-            reached_generated: None,
-            loader_order_request: false,
-            keep_captures: false,
-            closure_key_extra: Vec::new(),
-            lambda_depth: 0,
             window_change_seen: Vec::new(),
             macro_record: macro_record::MacroRecord::default(),
-            expanded_symbols: NameSet::default(),
             image: None,
             regions: frozen::Regions::default(),
             region_free: Vec::new(),
@@ -2307,7 +2245,7 @@ impl Vm {
     pub(crate) fn special_kind(&self, name: &str) -> SpecialKind {
         if self.specials.contains(name) {
             SpecialKind::Global
-        } else if self.file_specials.contains(name) {
+        } else if self.mutator.file_specials.contains(name) {
             SpecialKind::FileLocal
         } else {
             SpecialKind::Lexical
@@ -2325,22 +2263,22 @@ impl Vm {
     fn compile_entry(
         &mut self, form: &Form, outer: &NameMap<Name, Binding>, mut specials: NameSet<String>,
     ) -> Result<(usize, Vec<Name>)> {
-        if self.compile_depth == 0 {
-            self.pending_specials.clear();
+        if self.mutator.compile_depth == 0 {
+            self.mutator.pending_specials.clear();
             self.macro_record.expansions = 0;
-            self.expanded_symbols.clear();
+            self.mutator.expanded_symbols.clear();
         }
-        self.compile_depth += 1;
-        if std::mem::take(&mut self.seed_file_specials) {
-            specials.extend(self.file_specials.iter().cloned());
+        self.mutator.compile_depth += 1;
+        if std::mem::take(&mut self.mutator.seed_file_specials) {
+            specials.extend(self.mutator.file_specials.iter().cloned());
         }
-        self.loader_order_request = true;
+        self.mutator.loader_order_request = true;
         let scope = self.open_request_scope();
         let result = self.function(&[], std::slice::from_ref(form), outer, &specials);
         self.close_scope(scope);
-        self.compile_depth -= 1;
-        if self.compile_depth == 0 {
-            self.pending_specials.clear();
+        self.mutator.compile_depth -= 1;
+        if self.mutator.compile_depth == 0 {
+            self.mutator.pending_specials.clear();
         }
         result
     }
@@ -2370,16 +2308,16 @@ impl Vm {
         outer: &NameMap<Name, Binding>,
         local_specials: &NameSet<String>,
     ) -> Result<(usize, Vec<Name>)> {
-        let keep_captures = std::mem::take(&mut self.keep_captures);
-        let key_extra = std::mem::take(&mut self.closure_key_extra);
+        let keep_captures = std::mem::take(&mut self.mutator.keep_captures);
+        let key_extra = std::mem::take(&mut self.mutator.closure_key_extra);
         let mut b = Builder {
             code: vec![],
             next: 0,
             env: NameMap::default(),
             sites: vec![],
             local_specials: local_specials.clone(),
-            loader_order: std::mem::take(&mut self.loader_order_request),
-            file_level: std::mem::take(&mut self.file_level_request),
+            loader_order: std::mem::take(&mut self.mutator.loader_order_request),
+            file_level: std::mem::take(&mut self.mutator.file_level_request),
         };
         // Stable order is essential: HashMap iteration order is not a closure ABI.
         let mut names: Vec<_> = outer.keys().cloned().collect();
@@ -2554,14 +2492,14 @@ impl Vm {
         // call: GNU's interpreter decides whether each `let' binds
         // dynamically when it runs, after the files loaded since have
         // declared their variables special (VM2-LATE-SPECIAL1).
-        if self.lazy_regime || ((self.lambda_depth > 0 || self.evaluating) && b.env.is_empty()) {
+        if self.lazy_regime || ((self.mutator.lambda_depth > 0 || self.mutator.evaluating) && b.env.is_empty()) {
             return self.lazy_lambda(b, args, body, false);
         }
         // Eager compilation keeps the lambda list and capture names, but
         // only a lazily held body keeps its source forms.
-        self.lambda_depth += 1;
+        self.mutator.lambda_depth += 1;
         let compiled = self.function(args, body, &b.env, &b.local_specials);
-        self.lambda_depth -= 1;
+        self.mutator.lambda_depth -= 1;
         let (id, names) = match compiled {
             Ok(function) => function,
             // Loading a function must not execute its body. Keep the owner's
@@ -2589,7 +2527,7 @@ impl Vm {
     /// until expansion. Each capture is reported as mutated, so no binding
     /// it can see is ever unboxed out from under the later compilation.
     fn lazy_lambda(&mut self, b: &mut Builder, args: &[Form], body: &[Form], deferred: bool) -> Result<usize> {
-        let key_extra = std::mem::take(&mut self.closure_key_extra);
+        let key_extra = std::mem::take(&mut self.mutator.closure_key_extra);
         let (arity, required, rest) = lambda_arity(args)?;
         let mut names: Vec<Name> = b.env.keys().cloned().collect();
         names.sort();
@@ -2605,12 +2543,12 @@ impl Vm {
             lates,
             shadows,
             local_specials: b.local_specials.clone(),
-            pending_specials: self.pending_specials.clone(),
+            pending_specials: self.mutator.pending_specials.clone(),
             dynamic_scope: self.dynamic_scope,
             deferred,
-            evaluated: self.evaluating,
+            evaluated: self.mutator.evaluating,
             file_level: deferred && b.file_level,
-            interpreting: self.interpreting_source,
+            interpreting: self.mutator.interpreting_source,
         };
         let macros = self.lazy_record();
         let id = self.install_function(Function {
@@ -2657,34 +2595,34 @@ impl Vm {
         };
         let outer = lazy.outer();
         let saved_regime = std::mem::replace(&mut self.lazy_regime, true);
-        let saved_defer = std::mem::replace(&mut self.defer_expansion_errors, true);
-        let saved_strict = std::mem::replace(&mut self.strict_root, lazy.deferred);
+        let saved_defer = std::mem::replace(&mut self.mutator.defer_expansion_errors, true);
+        let saved_strict = std::mem::replace(&mut self.mutator.strict_root, lazy.deferred);
         let saved_scope = std::mem::replace(&mut self.dynamic_scope, lazy.dynamic_scope);
-        let saved_pending = std::mem::replace(&mut self.pending_specials, lazy.pending_specials.clone());
-        let saved_evaluating = std::mem::replace(&mut self.evaluating, lazy.evaluated);
-        let saved_interpreting = std::mem::replace(&mut self.interpreting_source, lazy.interpreting);
-        if self.compile_depth == 0 {
+        let saved_pending = std::mem::replace(&mut self.mutator.pending_specials, lazy.pending_specials.clone());
+        let saved_evaluating = std::mem::replace(&mut self.mutator.evaluating, lazy.evaluated);
+        let saved_interpreting = std::mem::replace(&mut self.mutator.interpreting_source, lazy.interpreting);
+        if self.mutator.compile_depth == 0 {
             self.macro_record.expansions = 0;
-            self.expanded_symbols.clear();
+            self.mutator.expanded_symbols.clear();
         }
-        self.compile_depth += 1;
-        self.keep_captures = true;
+        self.mutator.compile_depth += 1;
+        self.mutator.keep_captures = true;
         let scope = self.open_detached_scope();
         // A deferred form is evaluated at its reach, as GNU's interpreter
         // evaluates it: an unbound head is named before the arguments run.
-        self.loader_order_request = lazy.deferred;
-        self.file_level_request = lazy.file_level;
+        self.mutator.loader_order_request = lazy.deferred;
+        self.mutator.file_level_request = lazy.file_level;
         let result = self.compile_lazy_request(&lazy.args, &body, &outer, &lazy.local_specials);
         self.close_scope(scope);
-        self.keep_captures = false;
-        self.compile_depth -= 1;
+        self.mutator.keep_captures = false;
+        self.mutator.compile_depth -= 1;
         self.lazy_regime = saved_regime;
-        self.defer_expansion_errors = saved_defer;
-        self.strict_root = saved_strict;
+        self.mutator.defer_expansion_errors = saved_defer;
+        self.mutator.strict_root = saved_strict;
         self.dynamic_scope = saved_scope;
-        self.pending_specials = saved_pending;
-        self.interpreting_source = saved_interpreting;
-        self.evaluating = saved_evaluating;
+        self.mutator.pending_specials = saved_pending;
+        self.mutator.interpreting_source = saved_interpreting;
+        self.mutator.evaluating = saved_evaluating;
         let (compiled, names) = result?;
         if names != lazy.names {
             return Err("lazy body changed its capture layout".into());
@@ -2711,23 +2649,23 @@ impl Vm {
         // With no function yet, it compiles as a call that signals
         // void-function before any argument runs (`reached_head'); the calls
         // in its arguments defer as ever.
-        if std::mem::take(&mut self.strict_root) {
+        if std::mem::take(&mut self.mutator.strict_root) {
             if let Form::List(items) = f {
                 match items.first() {
-                    Some(Form::Sym(head)) => self.reached_head = Some(head.clone()),
-                    Some(Form::Generated(id)) => self.reached_generated = Some(*id),
+                    Some(Form::Sym(head)) => self.mutator.reached_head = Some(head.clone()),
+                    Some(Form::Generated(id)) => self.mutator.reached_generated = Some(*id),
                     _ => {}
                 }
             }
             let result = self.expr_now(b, f);
-            self.reached_head = None;
-            self.reached_generated = None;
+            self.mutator.reached_head = None;
+            self.mutator.reached_generated = None;
             return result;
         }
-        if self.evaluating && self.defer_expansion_errors {
+        if self.mutator.evaluating && self.mutator.defer_expansion_errors {
             return self.expr_evaluated(b, f);
         }
-        if !self.defer_expansion_errors || !matches!(f, Form::List(a) if !a.is_empty()) {
+        if !self.mutator.defer_expansion_errors || !matches!(f, Form::List(a) if !a.is_empty()) {
             return self.expr_now(b, f);
         }
         let (code, next, sites) = (b.code.len(), b.next, b.sites.len());
@@ -3048,8 +2986,8 @@ impl Vm {
                             return self.expr(b, &Form::List(aliased));
                         }
                         let void = self.function_void(slot);
-                        if self.defer_expansion_errors && void
-                            && self.reached_generated.take_if(|reached| reached == id).is_none()
+                        if self.mutator.defer_expansion_errors && void
+                            && self.mutator.reached_generated.take_if(|reached| reached == id).is_none()
                         {
                             return Err("defer unresolved function".into());
                         }
@@ -3173,7 +3111,7 @@ impl Vm {
                         }
                         let slot = self.slot(name);
                         if rest.len() > 1 {
-                            self.pending_specials.insert(name.into());
+                            self.mutator.pending_specials.insert(name.into());
                             let quote = |form: &Form| Form::List(vec![Form::Sym("quote".into()), form.clone()]);
                             let doc = quote(rest.get(2).unwrap_or(&Form::Sym("nil".into())));
                             if head == "defconst" {
@@ -3327,7 +3265,7 @@ impl Vm {
                             // Code `eval' compiles binds as GNU's interpreter
                             // does: dynamically when the symbol is special as
                             // the binding is made (VM2-LATE-SPECIAL1).
-                            let late = cell && (self.evaluating || self.interpreting_source) && matches!(name, Name::Source(_));
+                            let late = cell && (self.mutator.evaluating || self.mutator.interpreting_source) && matches!(name, Name::Source(_));
                             let bind = (name, Binding { reg, cell, late, shadow: None });
                             if head == "let*" {
                                 let dynamic = self.bind(b, &bind);
@@ -3399,8 +3337,8 @@ impl Vm {
                             // Non-eager Lisp bodies may name a macro before its
                             // defining file is loaded. Keep that entire form
                             // unevaluated until reached, not just its arguments.
-                            if self.defer_expansion_errors && self.function_void(slot)
-                                && self.reached_head.take_if(|reached| reached == head).is_none()
+                            if self.mutator.defer_expansion_errors && self.function_void(slot)
+                                && self.mutator.reached_head.take_if(|reached| reached == head).is_none()
                             {
                                 return Err(format!("defer unresolved function {head}"));
                             }
@@ -3541,7 +3479,7 @@ impl Vm {
     fn binds_dynamically(&self, b: &Builder, name: &Name, local: bool) -> bool {
         match name {
             Name::Generated(id) => self.dynamic_scope && self.generated_symbols.contains_key(id),
-            Name::Source(n) => self.dynamic_scope || self.specials.contains(n.as_str()) || self.pending_specials.contains(n.as_str())
+            Name::Source(n) => self.dynamic_scope || self.specials.contains(n.as_str()) || self.mutator.pending_specials.contains(n.as_str())
                 || (local && b.local_specials.contains(n.as_str())),
         }
     }
