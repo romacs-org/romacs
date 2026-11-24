@@ -1302,10 +1302,24 @@ empty TEXT sends nothing."
 turn (into it with steer), in place of what the sender has waiting, or
 cutting the turn short.  `steer' is taken as a mode too, as it was one.")
 
-(defvar romacs-agent-tools--generations (make-hash-table :test #'equal)
-  "(TASK-ID . SENDER-ID) to the generation of the sender's messages to the
-task: a `replace' starts a new one, and the waiting messages of an older
-one are dropped as they come up.")
+(defun romacs-agent-tools--sent-by-p (item caller)
+  "Whether ITEM, waiting, is CALLER's own messages (a session id, or nil
+for outside Romacs) and nothing else: no task's result, no other sender's."
+  (let ((messages (romacs-agent-item-messages item)))
+    (and messages
+         (cl-every (lambda (message)
+                     (and (not (plist-get message :wake))
+                          (equal (plist-get (plist-get message :from) :session) caller)))
+                   messages))))
+
+(defun romacs-agent-tools--replace-waiting (target caller)
+  "Take CALLER's messages waiting for TARGET out of its queue, their kept
+records with them: a `replace' sends in their place.  One being written
+already goes."
+  (dolist (item (copy-sequence (romacs-agent-queue target)))
+    (when (and (romacs-agent-tools--sent-by-p item caller)
+               (not (memq (romacs-agent-item-held item) '(sending written))))
+      (romacs-agent--dequeue target item))))
 
 (defun romacs-agent-tools--send-route (target caller sender)
   "Whether CALLER may send to the session the summary TARGET says, needs a
@@ -1381,14 +1395,11 @@ and the message's id."
     (user-error "mode must be one of %s" (string-join romacs-agent-tools--send-modes ", ")))
   (let* ((caller (and sender (romacs-agent-id sender)))
          (kind (romacs-agent-tools--kind sender target))
-         (message (romacs-agent-tools--message kind sender in-reply-to by-user))
-         (key (cons (romacs-agent-id target) caller))
-         (generation (if (equal mode "replace")
-                         (puthash key (1+ (gethash key romacs-agent-tools--generations 0))
-                                  romacs-agent-tools--generations)
-                       (gethash key romacs-agent-tools--generations 0)))
-         (valid (lambda () (eql generation (gethash key romacs-agent-tools--generations 0)))))
-    (romacs-agent-tools--tell target text (intern mode) valid (list message))
+         (message (romacs-agent-tools--message kind sender in-reply-to by-user)))
+    ;; Dropped now, not at dispatch: the message stays all data, so the
+    ;; store keeps it across a restart.
+    (when (equal mode "replace") (romacs-agent-tools--replace-waiting target caller))
+    (romacs-agent-tools--tell target text (intern mode) nil (list message))
     ;; Text no harness takes is never copied: it would ride every wake after.
     (when (and (equal kind "sibling") (romacs-agent--encodable-p (romacs-agent-item text)))
       (let ((parent (plist-get (romacs-agent-options target) :parent)))

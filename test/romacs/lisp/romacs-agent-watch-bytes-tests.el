@@ -136,7 +136,7 @@ session as (SESSION . TEXT)."
           (romacs-agent--children (make-hash-table :test #'equal))
           (romacs-agent-watch--watches (make-hash-table :test #'equal))
           (romacs-agent-watch--timer nil)
-          (romacs-agent-tools--generations (make-hash-table :test #'equal))
+         
           (romacs-agent-tools--copies (make-hash-table :test #'equal))
           (lead (romacs-agent--make :id "lead" :harness 'claude :state 'idle :title "lead" :cwd root
                                     :dir (expand-file-name "lead" root)))

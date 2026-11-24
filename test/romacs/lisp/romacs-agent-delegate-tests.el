@@ -231,7 +231,7 @@ message's record for TEXT, `interrupted' each interrupted."
   `(romacs-agent-delegate-tests--family ((a nil) (b nil))
      (dolist (task (list parent a b)) (romacs-agent-test-attach task))
      (dolist (task (list a b)) (setf (romacs-agent-driver-state task) (list :ready t)))
-     (let ((written nil) (messages nil) (interrupted nil) (romacs-agent-tools--generations (make-hash-table :test #'equal))
+     (let ((written nil) (messages nil) (interrupted nil)
            (romacs-agent-tools--copies (make-hash-table :test #'equal)))
        (cl-letf (((symbol-function 'romacs-agent-tools--caller) (lambda () (romacs-agent-id ,caller)))
                  ((symbol-function 'romacs-agent--input)
@@ -298,7 +298,12 @@ message's record for TEXT, `interrupted' each interrupted."
   (romacs-agent-delegate-tests--sending parent
     (send a "one")
     (send a "two")
+    ;; Each one all data: the store keeps it across a restart.
+    (should (cl-every #'romacs-agent--keepable-p (romacs-agent-queue a)))
     (send a "three" "replace")
+    ;; Its older ones gone at once, not at dispatch.
+    (should (= (romacs-agent-queue-length a) 1))
+    (should (romacs-agent--keepable-p (car (romacs-agent-queue a))))
     (dotimes (_ 3) (drain a))
     ;; Only what replaced them went.
     (should (equal (mapcar #'cdr written) '("three")))))
