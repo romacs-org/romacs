@@ -83,6 +83,18 @@ This only has effect if you specify it before loading the smtpmail library."
 The default value would be \"smtp\" or 25."
   :type '(choice (integer :tag "Port") (string :tag "Service")))
 
+(defun smtpmail--quit-timeout-p (value)
+  "Return non-nil if VALUE is a finite, nonnegative timeout in seconds."
+  (and (numberp value) (<= 0 value) (< (float value) 1.0e+INF)))
+
+(defcustom smtpmail-quit-timeout 2
+  "Maximum time in seconds to wait for the SMTP QUIT reply during cleanup.
+Zero skips the wait, as does an invalid value set from Lisp.
+The connection is closed after cleanup."
+  :type '(number :match-alternatives (smtpmail--quit-timeout-p)
+                 :type-error "Enter a finite, nonnegative number of seconds")
+  :group 'smtpmail)
+
 (defcustom smtpmail-smtp-user nil
   "User name to use when looking up credentials in the authinfo file.
 If non-nil, only consider credentials for the specified user."
@@ -726,6 +738,7 @@ Returns an error if the server cannot be contacted."
   (unless smtpmail-smtp-server
     (smtpmail-query-smtp-server))
   (let ((process nil)
+        sent
         (send-attempts (or send-attempts 1))
 	(host (or smtpmail-smtp-server
 		  (error "`smtpmail-smtp-server' not defined")))
@@ -963,16 +976,29 @@ Returns an error if the server cannot be contacted."
 	    ;; Send the contents.
 	    (smtpmail-command-or-throw process "DATA")
 	    (smtpmail-send-data process smtpmail-text-buffer)
+	    (setq sent t)
 	    ;; Return success.
 	    nil))
-      (when (and process
-		 (buffer-live-p process-buffer))
-	(with-current-buffer (process-buffer process)
-	  (smtpmail-send-command process "QUIT")
-	  (smtpmail-read-response process)
-	  (delete-process process)
-	  (unless smtpmail-debug-info
-	    (kill-buffer process-buffer)))))))
+      (smtpmail--close-connection process process-buffer sent))))
+
+(defun smtpmail--close-connection (process buffer sent)
+  "Close PROCESS and clean up its trace BUFFER after an SMTP send.
+Try the QUIT exchange if the connection is still live.
+When SENT is non-nil, let a quit during cleanup propagate."
+  (condition-case err
+      (unwind-protect
+          (when (and process (process-live-p process) (buffer-live-p buffer))
+            (with-current-buffer buffer
+              (let ((timeout smtpmail-quit-timeout))
+                (smtpmail-send-command process "QUIT")
+                (when (and (smtpmail--quit-timeout-p timeout) (> timeout 0))
+                  (smtpmail-read-response process timeout)))))
+        (unwind-protect
+            (when process (delete-process process))
+          (when (and (not smtpmail-debug-info) (buffer-live-p buffer))
+            (kill-buffer buffer))))
+    (error nil)
+    (quit (when sent (signal (car err) (cdr err))))))
 
 
 (defun smtpmail-process-filter (process output)
@@ -981,20 +1007,35 @@ Returns an error if the server cannot be contacted."
     (insert output)
     (set-marker (process-mark process) (point))))
 
-(defun smtpmail-read-response (process)
+(defun smtpmail--read-response-line (process deadline)
+  "Move past the next SMTP response line from PROCESS.
+Return nil if PROCESS closes or DEADLINE, given in `float-time' units,
+expires before a complete line arrives.  A nil DEADLINE allows any wait."
+  (catch 'eof
+    (goto-char smtpmail-read-point)
+    (while (not (search-forward "\r\n" nil t))
+      (let ((remaining (and deadline (- deadline (float-time)))))
+        (unless (and (memq (process-status process) '(open run))
+                     (or (null remaining) (> remaining 0)))
+          (throw 'eof nil))
+        (accept-process-output process remaining))
+      (goto-char smtpmail-read-point))
+    t))
+
+(defun smtpmail-read-response (process &optional timeout)
+  "Read an SMTP response from PROCESS.
+With TIMEOUT, wait at most that many seconds for the complete response.
+Return nil if the deadline expires or the process closes during the wait."
   (let ((case-fold-search nil)
+	(deadline (and timeout (+ (float-time) timeout)))
 	(response-strings nil)
 	(response-continue t)
 	(return-value '(nil ()))
 	match-end)
     (catch 'done
       (while response-continue
-	(goto-char smtpmail-read-point)
-	(while (not (search-forward "\r\n" nil t))
-	  (unless (memq (process-status process) '(open run))
-	    (throw 'done nil))
-	  (accept-process-output process)
-	  (goto-char smtpmail-read-point))
+	(unless (smtpmail--read-response-line process deadline)
+	  (throw 'done nil))
 
 	(setq match-end (point))
 	(setq response-strings
