@@ -165,11 +165,16 @@ checked: the ones not of its shape, and one named romacs, left out."
 
 (defvar romacs-agent--held nil
   "While drafts are admitted, and until their answers have gone out,
-\(SESSIONS OBSERVERS ANSWERS): the sessions whose `changed' waits, the
-calls of observers that would have run, and (CALLBACK . ANSWER) for
-each submit answered, each the newest first.  No observer runs inside
-an admission: the first admission makes it, and `romacs-agent--release',
-a timer the outermost one sets once its answer is kept, lets it go.")
+\(SESSIONS OBSERVERS ANSWERS RELEASE): the sessions whose `changed'
+waits, the calls of observers that would have run, and (CALLBACK .
+ANSWER) for each submit answered, each the newest first; and the one
+timer set to let it go, `romacs-agent--release', from when the outermost
+admission's answer is kept until that release ends.  No observer runs
+inside an admission: the first admission makes it.")
+
+(defvar romacs-agent--releasing nil
+  "The hold (`romacs-agent--held') whose release is running, or nil: its
+timer has fired, and it is not set again meanwhile.")
 
 (defvar romacs-agent--admitting 0
   "How many admissions are under way, one within another: the hold
@@ -193,47 +198,67 @@ them."
       (push (lambda () (apply #'run-hook-with-args hook args)) (nth 1 romacs-agent--held))
     (apply #'run-hook-with-args hook args)))
 
+(defun romacs-agent--call-guarded (what function &rest args)
+  "Call FUNCTION with ARGS, WHAT's call (an answer, an observer): its
+error or quit said, not passed on."
+  (condition-case-unless-debug err (apply function args)
+    ((error quit) (message "romacs-agent: %s: %s" what (error-message-string err)))))
+
 (defun romacs-agent--run-held (functions)
   "Call FUNCTIONS, observers' calls held, in order, each one's error or
 quit said, not passed on; should one leave by a throw, the rest are
 called from a timer, so none is lost."
   (let ((rest functions))
     (unwind-protect
-        (while rest
-          (let ((function (pop rest)))
-            (condition-case err (funcall function)
-              ((error quit) (message "romacs-agent: an observer: %s" (error-message-string err))))))
+        (while rest (romacs-agent--call-guarded "an observer" (pop rest)))
       (when rest (run-at-time 0 nil #'romacs-agent--run-held rest)))))
 
-(defun romacs-agent--answered-then (callback answer)
-  "Call CALLBACK with ANSWER, the last of the answers held, then let the
-hold go on (`romacs-agent--release'), whatever the callback does."
-  (unwind-protect (funcall callback answer) (romacs-agent--release)))
+(defun romacs-agent--release-later ()
+  "Set the hold's release timer (`romacs-agent--held'), unless it has one,
+due or running (`romacs-agent--releasing'): one a hold, however many
+admissions end in it.  One dropped unfired, as with `timer-list' bound
+around it, is set again."
+  (let ((timer (nth 3 romacs-agent--held)))
+    (unless (and timer (or (eq romacs-agent--releasing romacs-agent--held) (memq timer timer-list)))
+      (setf (nth 3 romacs-agent--held) (run-at-time 0 nil #'romacs-agent--release)))))
+
+(defun romacs-agent--hand-out (held)
+  "Call each callback HELD answers with its answer, oldest first, and
+those answered meanwhile after them, each one's error or quit said, not
+passed on.  Should a callback leave by a throw, the answers after it
+stay held, before those that came meanwhile."
+  (while (nth 2 held)
+    (let ((answers (reverse (nth 2 held))))
+      (setf (nth 2 held) nil)
+      (unwind-protect
+          (while answers
+            (let ((each (pop answers)))
+              (romacs-agent--call-guarded "an answer" (car each) (cdr each))))
+        (setf (nth 2 held) (nconc (nth 2 held) (nreverse answers)))))))
 
 (defun romacs-agent--release ()
-  "Let the hold go (`romacs-agent--held'), unless an admission is under
-way (the outermost one's end calls this again).  First every answer,
-each from a timer of its own, so a callback's throw, error or quit
-touches its own answer alone; the last one's timer, after its callback,
-calls this again (`romacs-agent--answered-then'): answers that came
-meanwhile go the same way, and once none waits, the observers' calls
-are made, and each session told it changed, in order
-\(`romacs-agent--run-held').  The hold lasts until then, so what the
-answers' callbacks set off waits its turn behind what was held before."
-  (when (and romacs-agent--held (zerop romacs-agent--admitting))
-    (if-let* ((answers (reverse (nth 2 romacs-agent--held))))
-        (let ((at (current-time)) (n 0))
-          (setf (nth 2 romacs-agent--held) nil)
-          ;; Times one apart: timers due at one time run newest first.
-          (dolist (each answers)
-            (run-at-time (time-add at (* (cl-incf n) 1e-6)) nil
-                         (if (= n (length answers)) #'romacs-agent--answered-then #'funcall)
-                         (car each) (cdr each))))
-      (let ((held romacs-agent--held))
-        (setq romacs-agent--held nil)
-        (romacs-agent--run-held
-         (append (reverse (nth 1 held))
-                 (mapcar (lambda (session) (lambda () (romacs-agent--changed session))) (reverse (nth 0 held)))))))))
+  "Let the hold go (`romacs-agent--held'), from its one timer, unless an
+admission is under way (the outermost one's end sets it again).  First
+every answer, in the order its admission ended, so an outer draft whose
+line admits inner ones is answered after them (`romacs-agent--hand-out'):
+a callback's throw, error or quit touches its own answer alone, and
+should one leave by a throw, a timer goes on with the rest.  The hold
+keeps its timer meanwhile, so what the callbacks set off waits behind
+it.  After the last answer, the observers' calls are made, and each
+session told it changed, in order (`romacs-agent--run-held')."
+  (when-let* ((held romacs-agent--held))
+    (let ((romacs-agent--releasing held) (done nil))
+      (unwind-protect
+          (when (zerop romacs-agent--admitting)
+            (romacs-agent--hand-out held)
+            (setq romacs-agent--held nil done t)
+            (romacs-agent--run-held
+             (append (reverse (nth 1 held))
+                     (mapcar (lambda (session) (lambda () (romacs-agent--changed session))) (reverse (nth 0 held))))))
+        (unless done
+          (let ((inhibit-quit t))
+            (setf (nth 3 held) nil)
+            (when (zerop romacs-agent--admitting) (romacs-agent--release-later))))))))
 
 (defun romacs-agent--changed (session)
   "Tell SESSION's views its state changed where no harness event says so
@@ -5642,7 +5667,7 @@ the outermost admission's answers have gone out (`romacs-agent--held')."
   (let* ((id (romacs-agent--submit-item-id scope (plist-get intent :draft-id)))
          (draft (list 'pending (romacs-agent-id session) digest))
          (failed "The admission was cut short: not sent"))
-    (unless romacs-agent--held (setq romacs-agent--held (list nil nil nil)))
+    (unless romacs-agent--held (setq romacs-agent--held (list nil nil nil nil)))
     (unwind-protect
         (let ((romacs-agent--admitting (1+ romacs-agent--admitting)))
           (puthash id draft romacs-agent--submit-drafts)
@@ -5654,7 +5679,7 @@ the outermost admission's answers have gone out (`romacs-agent--held')."
           (funcall answer settled)
           (dolist (each waiting) (push (cons each (copy-sequence settled)) (nth 2 romacs-agent--held)))
           (cl-pushnew session (car romacs-agent--held))
-          (when (zerop romacs-agent--admitting) (run-at-time 0 nil #'romacs-agent--release)))))))
+          (when (zerop romacs-agent--admitting) (romacs-agent--release-later)))))))
 
 (defun romacs-agent--submit-known (draft intent session-id id digest)
   "What to do with INTENT for SESSION-ID, its item ID and DIGEST, whose
