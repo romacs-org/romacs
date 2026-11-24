@@ -644,9 +644,8 @@ nothing listening) or a link of ours to nothing that answers."
          (not (romacs-agent--listening-p path)))))
 
 (defun romacs-agent--route-here (session)
-  "SESSION is attached here: its route, and any earlier build's path its
-relay names, lead to this process.  A legacy path keeps a live listener;
-a socket its ended editor left is replaced."
+  "Lead SESSION's relay routes to this editor.
+Keep live listeners on legacy paths and replace their stale sockets."
   (romacs-agent--private-directory (file-name-directory (romacs-agent--route session)))
   (romacs-agent--lead (romacs-agent--route session))
   (dolist (socket (romacs-agent--legacy-relays session))
@@ -658,13 +657,28 @@ a socket its ended editor left is replaced."
         (when (or (not (file-exists-p socket)) (romacs-agent--stale-p socket))
           (romacs-agent--lead socket))))))
 
-(defun romacs-agent--drop-relays (session)
-  "SESSION is no longer attached here: its relays' connections to this
+(defun romacs-agent--drop-relays (id)
+  "Session ID is no longer attached here: its relays' connections to this
 endpoint close, so they reconnect through its route to the process that
 attaches it next."
   (dolist (peer (copy-sequence romacs-mcp--peers))
-    (when (equal (process-get peer 'romacs-agent-session) (romacs-agent-id session))
+    (when (equal (process-get peer 'romacs-agent-session) id)
       (romacs-mcp--close peer))))
+
+(defun romacs-agent-relay-claimed (id)
+  "Lead loaded session ID's relays to this editor's endpoint."
+  (when-let* ((session (romacs-agent-loaded id)))
+    (romacs-agent--route-here session)))
+
+(defun romacs-agent-relay-attached (id)
+  "Lead session ID's relays here when its supervisor keeps the attachment.
+Ignore an unloaded ID."
+  (when-let* ((session (romacs-agent-loaded id)))
+    (romacs-agent--route-here session)))
+
+(defun romacs-agent-relay-detached (id)
+  "Close session ID's relay connections so they reconnect through its route."
+  (romacs-agent--drop-relays id))
 
 (defun romacs-agent--kept (session process)
   "PROCESS's first line from SESSION's supervisor that is no refusal: the
@@ -674,15 +688,21 @@ the acknowledgement {\"attached\": ID} a supervisor sends).  SESSION's
 relays lead here from now."
   (unless (process-get process 'romacs-agent-kept)
     (process-put process 'romacs-agent-kept t)
-    (when (eq (romacs-agent-connection session) process) (romacs-agent--route-here session))))
+    (when (and (eq (romacs-agent-connection session) process) (process-live-p process))
+      (romacs-agent-relay-attached (romacs-agent-id session)))))
+
+(defun romacs-agent--attached-p (id)
+  "Whether loaded session ID has a live, acknowledged supervisor connection.
+When its chat moves to its own owner, read the session summary's
+`:attached' here."
+  (when-let* ((session (romacs-agent-loaded id)))
+    (let ((connection (romacs-agent-connection session)))
+      (and (process-live-p connection) (process-get connection 'romacs-agent-kept)))))
 
 (defun romacs-agent--route-attached ()
-  "This process's endpoint changed (a named server took over): every
-session whose attachment here is kept leads here again."
-  (maphash (lambda (_ session)
-             (let ((connection (romacs-agent-connection session)))
-               (when (and (process-live-p connection) (process-get connection 'romacs-agent-kept))
-                 (romacs-agent--route-here session))))
+  "Redirect attached sessions' relays to the new endpoint
+\(a named server took over)."
+  (maphash (lambda (id _) (when (romacs-agent--attached-p id) (romacs-agent-relay-claimed id)))
            romacs-agent--sessions))
 
 (defun romacs-agent--sweep ()
@@ -2990,7 +3010,7 @@ nonlocally (a quit) leaves the lines after it waiting."
         ;; no longer awaited; what follows may launch the next.
         (remhash (romacs-agent-id session) romacs-agent--launched)
         (setf (romacs-agent-connection session) nil)
-        (romacs-agent--drop-relays session)
+        (romacs-agent-relay-detached (romacs-agent-id session))
         ;; A run so short its supervisor left before answering the
         ;; attachment: its journal has what was not sent.
         (when (and (romacs-agent--per-turn-p session) (not (eq (romacs-agent-state session) 'idle)))
@@ -3125,8 +3145,7 @@ while it does not yet listen; the connection it replaces is let go."
               nil)))))
 
 (defun romacs-agent--no-supervisor (session)
-  "The supervisor launched for SESSION will not attach here: no longer
-awaited, and its held notes go through another host."
+  "Stop awaiting SESSION's supervisor and send held notes through another host."
   (remhash (romacs-agent-id session) romacs-agent--launched)
   (romacs-agent--held-host session))
 
@@ -5072,7 +5091,7 @@ shows on a command line other users can read."
   ;; it ends, and is the one attached.
   (romacs-agent--end-notes-host session)
   ;; The process launching it attaches it: its relays lead here from the start.
-  (romacs-agent--route-here session)
+  (romacs-agent-relay-claimed (romacs-agent-id session))
   (romacs-agent--set-stopped session nil)
   ;; Its records move to SQLite before a supervisor writes any more of them.
   (romacs-agent-events-own session))
@@ -7644,34 +7663,35 @@ loaded if a start left it a row."
                       (run-hook-with-args-until-success 'romacs-agent-requested-functions parent request))))
     (romacs-agent-get id)))
 
+(defun romacs-agent--ensure-attached (id)
+  "Attach session ID to its supervisor if available.
+Return non-nil if there is an attachment connection after the attempt."
+  (when-let* ((session (romacs-agent-loaded id)))
+    (and (not (romacs-agent-cancelled session))
+         (file-exists-p (romacs-agent-host-socket session))
+         (processp (romacs-agent--attach session 0)))))
+
 (romacs-mcp-register-method
  "romacs/hello"
  (lambda (peer params)
-   ;; A session's relay says whom it serves; the tools record its calls.
-   (process-put peer 'romacs-agent-session (gethash "session" params))
-   ;; Its incarnation: a resumed harness's relay numbers its calls anew.
-   (process-put peer 'romacs-agent-relay (gethash "relay" params))
-   ;; A session's own: not one of the endpoint's anonymous peers.
-   ;; One a start left a row (its harness idle meanwhile): loaded now,
-   ;; its first use.
-   (when (romacs-agent-get (gethash "session" params)) (romacs-mcp-own-peer peer))
-   ;; A known session another process is attached to: its relay belongs
-   ;; there, through its route, and retries until the route leads there.
-   (when-let* ((session (romacs-agent-get (gethash "session" params))))
-     (unless (process-live-p (romacs-agent-connection session))
-       ;; Its harness runs and this editor is where its relay is led, yet
-       ;; it is not attached here: attached now, so the relay's next try
-       ;; stays (a supervisor attached elsewhere refuses).  With no
-       ;; supervisor listening, no editor can attach it: the relay stays,
-       ;; served, rather than turned away to come back for ever.
-       ;; One a worker folds still is attached once it is folded.
-       (romacs-agent--when-folded
-        session
-        (lambda ()
-          (when (and (not (romacs-agent-cancelled session))
-                     (file-exists-p (romacs-agent-host-socket session))
-                     (processp (romacs-agent--attach session 0)))
-            (run-at-time 0 nil (lambda () (when (memq peer romacs-mcp--peers) (romacs-mcp--close peer)))))))))
+   (let ((id (gethash "session" params)))
+     (process-put peer 'romacs-agent-session id)
+     ;; Its incarnation: a resumed harness's relay numbers its calls anew.
+     (process-put peer 'romacs-agent-relay (gethash "relay" params))
+     (when-let* ((session (romacs-agent-get id)))
+       (romacs-mcp-own-peer peer)
+       ;; A session another process is attached to: its relay belongs
+       ;; there, through its route, and retries until the route leads there.
+       (unless (process-live-p (romacs-agent-connection session))
+         ;; One a worker folds still is attached once it is folded.
+         (romacs-agent--when-folded
+          session
+          (lambda ()
+            ;; Attaching here makes the relay's next try stay (a supervisor
+            ;; attached elsewhere refuses).  With no supervisor listening,
+            ;; the relay stays served rather than turned away to retry for ever.
+            (when (romacs-agent--ensure-attached id)
+              (run-at-time 0 nil (lambda () (when (memq peer romacs-mcp--peers) (romacs-mcp--close peer))))))))))
    (romacs-mcp--object)))
 
 (provide 'romacs-agent)
