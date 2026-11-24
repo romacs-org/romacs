@@ -262,16 +262,6 @@ session told it changed, in order (`romacs-agent--run-held')."
 
 (defvar romacs-agent--summaries (make-hash-table :test #'equal)
   "Each session's summary as last made (`romacs-agent-summary'), by id:
-\(STAMP . SUMMARY), STAMP what it was made from.  Dropped when a fact of
-the session changes (`romacs-agent--summary-stale'), and made again when
-next read.")
-
-(defun romacs-agent--summary-stale (id)
-  "Session ID's summary no longer says it: made again when next read."
-  (remhash id romacs-agent--summaries))
-
-(defvar romacs-agent--summaries (make-hash-table :test #'equal)
-  "Each session's summary as last made (`romacs-agent-summary'), by id:
 \(STAMP KNOWN . SUMMARY), STAMP what it was made from, KNOWN whether its
 parent was known.  Dropped when a fact of
 the session changes (`romacs-agent--summary-stale'), and made again when
