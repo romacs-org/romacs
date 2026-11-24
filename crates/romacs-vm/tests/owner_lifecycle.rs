@@ -937,3 +937,6 @@ fn closing_an_owner_does_not_make_a_full_job_pool_queue_work() {
     master.run("(condition-case nil (romacs--isolate-signal stopped-id 9) (error nil))");
     assert_eq!(actual, "(closing isolate-process-limit)");
 }
+
+#[path = "support/owner_lifecycle_table.rs"]
+mod table_walk;
