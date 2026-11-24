@@ -142,7 +142,13 @@ rolls back by the line (revert REQUEST)."
              (lambda (_root from to) (and (equal from "start-tree") (equal to "now-tree") '("a.txt")))))
     (let ((plan (romacs-agent-rollback--files '((20 start "start-tree" "/r")) '(20) "now-tree")))
       (should (equal (plist-get plan :touched) '("a.txt")))
-      (should (equal (plist-get plan :clobbered) '("a.txt"))))))
+      (should (equal (plist-get plan :clobbered) '("a.txt")))))
+  ;; Cut short, ended by the next turn's start: the same.
+  (cl-letf (((symbol-function 'romacs-agent-rollback--changed)
+             (lambda (_root from to) (and (equal from "s20") (equal to "s30") '("b.txt")))))
+    (let ((plan (romacs-agent-rollback--files '((20 start "s20" "/r") (30 start "s30" "/r") (30 end "e30" "/r"))
+                                              '(20 30) "now-tree")))
+      (should (member "b.txt" (plist-get plan :clobbered))))))
 
 (ert-deftest romacs-agent-rollback-refusals ()
   (romacs-agent-rollback-tests--with (:state 'running)
