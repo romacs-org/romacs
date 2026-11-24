@@ -1481,10 +1481,12 @@ empty TEXT sends nothing.  Return how it went (`romacs-agent-tools--delivery'),
   (unless (string-empty-p (string-trim text))
     (pcase (romacs-agent-tools--delivery child mode)
       ('steered
-       (romacs-agent-send child text nil valid nil messages)
-       ;; Into the turn now only when its harness can steer it now (a
-       ;; Codex turn once named); else it waits for that, as queued.
-       (if (and (romacs-agent--steerable-p child) (not (romacs-agent--cwd-gone-p child))) 'steered 'queued))
+       ;; Into the turn only when it was written there now (a Codex turn
+       ;; named, no switch pending); else it waits, as queued.
+       (let ((item (romacs-agent-send child text nil valid nil messages)))
+         (if (or (not (memq item (romacs-agent-queue child)))
+                 (memq (romacs-agent-item-held item) '(sending written)))
+             'steered 'queued)))
       ('interrupting
        ;; First in line before the cut: a turn not yet under way
        ;; (Codex's before it names it) cannot be cut, and it goes after.
@@ -1526,6 +1528,15 @@ for outside Romacs) and nothing else: no task's result, no other sender's."
                      (and (not (plist-get message :wake))
                           (equal (plist-get (plist-get message :from) :session) caller)))
                    messages))))
+
+(defvar romacs-agent-tools--replacing nil
+  "The session a `replace' admits into, its messages held meanwhile.")
+
+(defun romacs-agent-tools--replacing-p (session)
+  "Whether a `replace' holds SESSION's messages (`romacs-agent-hold-functions')."
+  (eq session romacs-agent-tools--replacing))
+
+(add-hook 'romacs-agent-hold-functions #'romacs-agent-tools--replacing-p)
 
 (defun romacs-agent-tools--waiting-from (target caller)
   "CALLER's messages waiting for TARGET that a `replace' takes the place
@@ -1612,10 +1623,15 @@ and the message's id."
          (message (romacs-agent-tools--message kind sender in-reply-to by-user))
          (delivery nil))
     (let ((replaced (and (equal mode "replace") (romacs-agent-tools--waiting-from target caller))))
-      (setq delivery (romacs-agent-tools--tell target text (intern mode) nil (list message)))
-      ;; Its replacement admitted, they go: now, not at dispatch, so each
-      ;; message stays all data the store keeps; a refusal keeps them.
-      (dolist (item replaced) (romacs-agent--dequeue target item)))
+      (if (not replaced)
+          (setq delivery (romacs-agent-tools--tell target text (intern mode) nil (list message)))
+        ;; Nothing goes meanwhile, so no message it replaces is written
+        ;; first; its replacement admitted, they go: now, not at dispatch,
+        ;; so each stays all data the store keeps; a refusal keeps them.
+        (let ((romacs-agent-tools--replacing target))
+          (setq delivery (romacs-agent-tools--tell target text (intern mode) nil (list message)))
+          (dolist (item replaced) (romacs-agent--dequeue target item)))
+        (romacs-agent--dispatch target)))
     ;; Text no harness takes is never copied: it would ride every wake after.
     (when (and (equal kind "sibling") (romacs-agent--encodable-p (romacs-agent-item text)))
       (let ((parent (plist-get (romacs-agent-options target) :parent)))

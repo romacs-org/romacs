@@ -458,6 +458,16 @@ message's record for TEXT, `interrupted' each interrupted."
     ;; Only what replaced them went.
     (should (equal (mapcar #'cdr written) '("three")))))
 
+(ert-deftest romacs-agent-delegate-a-replace-writes-none-it-replaces ()
+  ;; Its turn over, its drain not yet run: a replace goes in place of what
+  ;; waits, and none of that is written first.
+  (romacs-agent-delegate-tests--sending parent
+    (send a "stale")
+    (setf (romacs-agent-state a) 'idle)
+    (send a "fresh" "replace")
+    (should (equal (mapcar #'cdr written) '("fresh")))
+    (should (= (romacs-agent-queue-length a) 0))))
+
 (ert-deftest romacs-agent-delegate-siblings-send-their-parent-copied ()
   (romacs-agent-delegate-tests--sending a
     (send b "the interface is X" "steer")
