@@ -818,13 +818,21 @@ where it is answered."
       (romacs-agent-resume (romacs-agent-board--session)))))
 
 (defun romacs-agent-board-settle ()
-  "Hide this thread in Settled until explicitly brought back with this key."
+  "Hide this thread in Settled until explicitly brought back with this key.
+Say when its delegated tasks are still at work."
   (interactive nil romacs-agent-board-mode)
   (romacs-agent-board--acting)
-  (let ((summary (or (plist-get (romacs-agent-board--row) :summary) (user-error "No thread on this line"))))
+  (let* ((row (romacs-agent-board--row))
+         (summary (or (plist-get row :summary) (user-error "No thread on this line"))))
     (unless (romacs-agent-settle-recorded (romacs-agent-summary-id summary) t)
       (user-error "That thread is gone"))
-    (romacs-agent-board--redraw)))
+    (romacs-agent-board--redraw)
+    (when (and (not (eq (plist-get row :key) 'settled))
+               (cl-some (lambda (child)
+                          (and (plist-get child :id)
+                               (memq (plist-get child :key) romacs-agent-ui--live-keys)))
+                        (romacs-agent-summary-children-rows summary)))
+      (message "Delegated tasks are still at work. Their results will wait until you bring this thread back."))))
 
 (defun romacs-agent-board--shown-rows ()
   "The rows the board shows, in order."
