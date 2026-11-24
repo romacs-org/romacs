@@ -42,15 +42,45 @@ fn shutdown_settles_reported_and_unreported_jobs_without_resubmitting() {
     assert_eq!(
         master.eval(
             "(isolate-kill-all)
-         (list (isolate-future-done-p began) (isolate-future-done-p held)
+         (list (condition-case e (isolate-await began 0) (isolate-error (car e)))
+               (condition-case e (isolate-await held 0) (isolate-error (car e)))
                (let ((worker (isolate-future-isolate held)))
                  (and worker (not (eq worker held-worker))))
                (mapcar (lambda (i) (aref i 10))
                        (delq nil (mapcar (lambda (i) (and (isolate-live-p i) i))
                                          (isolate-list)))))"
         ),
-        "(t t nil nil)",
-        "both futures settle, the held job retains its identity, and no worker is live"
+        "(isolate-killed isolate-killed nil nil)",
+        "both jobs settle as killed, the held job retains its identity, and no worker is live"
+    );
+}
+
+#[test]
+fn shutdown_settles_a_job_accepted_while_its_zygote_prepares() {
+    let mut master = Master::bare();
+    master.run(
+        "(setq isolate-zygotes t
+                      pending (isolate-spawn '+ 1 2)
+                      original (isolate-future-isolate pending))",
+    );
+    assert_eq!(
+        master.eval(
+            "(list (nth 1 (isolate-zygote nil)) (aref original 10)
+               (romacs--isolate-pid (romacs--isolate-id original)))"
+        ),
+        "(preparing job nil)"
+    );
+    assert_eq!(
+        master.eval(
+            "(isolate-kill-all)
+         (list (condition-case e (isolate-await pending 0) (isolate-error (car e)))
+               (let ((worker (isolate-future-isolate pending)))
+                 (and worker (not (eq worker original))))
+               (isolate-zygote-list)
+               (length (delq nil (mapcar #'isolate-live-p (isolate-list)))))"
+        ),
+        "(isolate-killed nil nil 0)",
+        "preparation shutdown settles without resubmission"
     );
 }
 
@@ -129,72 +159,105 @@ impl Drop for WorkerLink {
     }
 }
 
-fn observe_owner_hello_waits(master: &mut Master) {
+fn observe_fork_hello_waits(master: &mut Master, roles: &str) {
     // Observe the actual rejection path. Every wrapper delegates unchanged,
     // and the test enters the handler only through a real forked owner's hello.
-    master.run(
-        "(defvar test-owner-hello nil)
+    master.run(&format!(
+        "(defvar test-fork-hello nil)
+         (setq test-fork-roles '({roles}))
          (setq test-hello-waits nil test-hello-count 0
                test-accept (symbol-function 'romacs--isolate-accept-hello)
                test-wait (symbol-function 'romacs--isolate-wait)
                test-reap (symbol-function 'romacs--isolate-reap))
          (fset 'romacs--isolate-accept-hello
                (lambda (isolate text)
-                 (let ((test-owner-hello (eq (aref isolate 10) 'owner)))
-                   (when test-owner-hello (setq test-hello-count (1+ test-hello-count)))
+                 (let ((test-fork-hello (memq (aref isolate 10) test-fork-roles)))
+                   (when test-fork-hello (setq test-hello-count (1+ test-hello-count)))
                    (funcall test-accept isolate text))))
          (fset 'romacs--isolate-wait
                (lambda (&rest args)
-                 (when test-owner-hello (push 'wait test-hello-waits))
+                 (when test-fork-hello (push 'wait test-hello-waits))
                  (apply test-wait args)))
          (fset 'romacs--isolate-reap
                (lambda (id)
-                 (when test-owner-hello (push 'reap test-hello-waits))
-                 (funcall test-reap id)))",
-    );
+                 (when test-fork-hello (push 'reap test-hello-waits))
+                 (funcall test-reap id)))"
+    ));
 }
 
-#[test]
-fn worker_path_retarget_never_reaps_synchronously_in_owner_hello() {
-    let worker = WorkerLink::new();
-    let mut master = Master::bare();
+fn start_owner_on(master: &mut Master, path: &std::path::Path) {
     master.run(&format!(
         "(setq isolate-worker-program {} first (owner--spawn))",
-        literal(&worker.path)
+        literal(path)
     ));
     assert_eq!(
         master.eval("(isolate-await (owner-call first 'identity 1) 10)"),
         "1"
     );
-    observe_owner_hello_waits(&mut master);
+    observe_fork_hello_waits(master, "owner");
+}
+
+fn owner_start_results(master: &mut Master, count: usize) -> String {
+    master.eval(&format!(
+        "(let ((out nil))
+            (dotimes (_ {count})
+              (let* ((o (owner--spawn))
+                     (reply (condition-case e (isolate-await (owner-call o 'identity 42) 10)
+                              (isolate-error (car e)))))
+                (push (list reply (owner-state o)) out)))
+            (reverse out))"
+    ))
+}
+
+fn assert_fork_results(master: &mut Master, result: &str, expected: &str) {
+    assert_eq!(
+        (result, master.eval("(reverse test-hello-waits)").as_str()),
+        (expected, "nil"),
+        "fork must use the accepted zygote's binary key and never enter a blocking hello reap"
+    );
+}
+
+#[test]
+fn worker_path_retarget_keeps_owners_on_the_zygotes_binary_key() {
+    let worker = WorkerLink::new();
+    let mut master = Master::bare();
+    start_owner_on(&mut master, &worker.path);
     worker.retarget();
-    master.run("(setq second (owner--spawn) third (owner--spawn))");
+    let result = owner_start_results(&mut master, 2);
+    assert_fork_results(&mut master, &result, "((42 live) (42 live))");
+}
+
+#[test]
+fn unlinked_zygote_executable_does_not_refuse_new_owners() {
+    let worker = WorkerLink::new();
+    let mut master = Master::bare();
+    start_owner_on(&mut master, &worker.files.ready());
+    fs::remove_file(worker.files.ready()).unwrap();
+    let result = owner_start_results(&mut master, 3);
+    assert_fork_results(&mut master, &result, "((42 live) (42 live) (42 live))");
+}
+
+#[test]
+fn unlinked_zygote_executable_does_not_refuse_new_jobs() {
+    let worker = WorkerLink::new();
+    let mut master = Master::bare();
+    master.run(&format!(
+        "(setq isolate-worker-program {} isolate-zygotes t) (isolate-zygote nil)",
+        literal(&worker.files.ready())
+    ));
+    master.until(SETUP_TIMEOUT, "warm zygote", |m| {
+        m.eval("(integerp (nth 3 (isolate-zygote nil)))") == "t"
+    });
+    observe_fork_hello_waits(&mut master, "job");
+    fs::remove_file(worker.files.ready()).unwrap();
     let result = master.eval(
-        "(mapcar (lambda (o)
-                   (let ((reply (condition-case e (isolate-await (owner-call o 'identity 42) 10)
-                                  (isolate-error (car e)))))
-                     (list reply (owner-state o))))
-                 (list second third))",
+        "(let ((out nil))
+           (dotimes (_ 3)
+             (push (condition-case e (isolate-await (isolate-spawn 'identity 42) 10)
+                     (isolate-error (car e))) out))
+           (reverse out))",
     );
-    let hellos = master.eval("test-hello-count").parse::<usize>().unwrap();
-    assert!(
-        hellos > 0 || result.contains("refused"),
-        "no owner hello or refusal: {result}"
-    );
-    assert_eq!(
-        master.eval("(reverse test-hello-waits)"),
-        "nil",
-        "synchronous owner hello reap/wait; outcomes {result}"
-    );
-    assert_eq!(
-        master.eval(
-            "(let ((ok t))
-           (dolist (o (list second third) ok)
-             (unless (memq (owner-state o) '(live refused)) (setq ok nil))))"
-        ),
-        "t",
-        "each owner starts or is refused: {result}"
-    );
+    assert_fork_results(&mut master, &result, "(42 42 42)");
 }
 
 #[test]
