@@ -1,5 +1,6 @@
 //! Widened declaration proving primitives and evaluator regression witnesses.
 use super::*;
+use crate::quit::{KERNEL_CHUNK, POLL_STEPS};
 
 defsubr! { name = "vectorp", gnu = "data.c:398", effect = Pure,
 fn vectorp(cx, object: Value) {
@@ -48,57 +49,132 @@ fn intern(cx, name: Value; optional obarray: Value) {
 
 defsubr! { name = "concat", gnu = "fns.c:737", effect = Pure,
 fn concat(cx; rest args) {
-    if let Some(result)=cx.concat_ascii(args) { return Ok(result); }
-    let mut chunks: Vec<(Vec<u8>, bool)> = Vec::new();
+    if let Some(result) = cx.concat_ascii(args) { return Ok(result); }
+    concat_fallback(cx, args)
+}}
+
+fn concat_fallback(cx: &mut Leaf<'_>, args: &[Value]) -> Out {
+    let mut chunks = Vec::new();
     let mut parts = Vec::new();
     let mut multibyte = false;
-    let mut raw_byte_arg = None;
-    for &arg in args {
+    for (index, &arg) in args.iter().enumerate() {
+        if index != 0 && index.is_multiple_of(POLL_STEPS as usize) {
+            cx.quittable(Leaf::native_poll)?;
+        }
+        // The whole string copy precedes the sliced work. The 128 MiB
+        // fixture cost 2.14 s/GB for the whole call.
         if let Ok(view) = cx.string_view(arg) {
-            // P1 preserves concat's old content-based ASCII rule. P2 owns kind
-            // propagation and widening unibyte high octets in mixed results.
-            if view.multibyte {
-                multibyte |= !view.bytes.is_ascii();
-            } else if !view.bytes.is_ascii() { raw_byte_arg = Some(arg); }
+            // Keep concat's content-based ASCII rule.
+            if view.multibyte && !concat_is_ascii(cx, &view.bytes)? {
+                multibyte = true;
+            }
             parts.push((arg, chunks.len()));
             chunks.push((view.bytes, view.multibyte));
-            continue;
+        } else if arg != Value::NIL {
+            let values = if cx.pair(arg).is_some() {
+                concat_list_chars(cx, arg)?
+            } else {
+                // The vector clone precedes the encoding polls. The
+                // measured whole call cost 1.82 s/GB of vector storage.
+                cx.vector_values(arg).map_err(|_| Fault::Wrong("sequencep", arg))?
+            };
+            let (bytes, multi) = encode_concat_chars(cx, &values)?;
+            multibyte |= multi;
+            chunks.push((bytes, true));
         }
-        let values = if arg == Value::NIL { continue; }
-        else if cx.pair(arg).is_some() {
-            let mut values = Vec::new(); let mut seen = HashSet::default(); let mut tail = arg;
-            while let Some((car,cdr))=cx.pair(tail) {
-                if !seen.insert(tail.0) { return Err(Fault::Circular(arg)); }
-                values.push(car); tail=cdr;
-            }
-            if tail != Value::NIL { return Err(Fault::Wrong("listp",tail)); }
-            values
-        } else { cx.vector_values(arg).map_err(|_|Fault::Wrong("sequencep",arg))? };
-        let mut bytes=Vec::new();
-        for value in values {
-            let code=value.integer_value().and_then(|n|u32::try_from(n).ok()).filter(|&c|c<=crate::lstring::MAX_CHAR).ok_or_else(|| Fault::Wrong("characterp",value))?;
-            multibyte |= code >= 128 && code <= crate::lstring::MAX_5_BYTE_CHAR;
-            let mut encoded=[0;5]; let n=crate::lstring::char_string(code,&mut encoded); bytes.extend_from_slice(&encoded[..n]);
-        }
-        chunks.push((bytes,true));
     }
-    // A unibyte part of a multibyte result: its bytes above 127 become
-    // raw-byte characters (fns.c concat, str_to_multibyte).
-    let _ = raw_byte_arg;
-    let mut bytes=Vec::new();
-    let mut offsets=Vec::with_capacity(chunks.len());
-    for (chunk,multi) in chunks {
+    assemble_concat(cx, chunks, parts, multibyte)
+}
+
+fn concat_list_chars(cx: &mut Leaf<'_>, list: Value) -> std::result::Result<Vec<Value>, Fault> {
+    let mut values = Vec::new();
+    let mut seen = HashSet::default();
+    let mut tail = list;
+    while let Some((car, cdr)) = cx.pair(tail) {
+        // Concat diagnoses the first repeated cons, with the original list.
+        if !seen.insert(tail.0) { return Err(Fault::Circular(list)); }
+        if !values.is_empty() && values.len().is_multiple_of(POLL_STEPS as usize) {
+            cx.quittable(Leaf::native_poll)?;
+        }
+        values.push(car);
+        tail = cdr;
+    }
+    if tail != Value::NIL { return Err(Fault::Wrong("listp", tail)); }
+    Ok(values)
+}
+
+fn encode_concat_chars(cx: &mut Leaf<'_>, values: &[Value]) -> std::result::Result<(Vec<u8>, bool), Fault> {
+    let capacity = if values.len() > POLL_STEPS as usize { values.len() } else { 0 };
+    let mut bytes = Vec::with_capacity(capacity);
+    let mut multibyte = false;
+    for (index, chunk) in values.chunks(POLL_STEPS as usize).enumerate() {
+        if index != 0 { cx.quittable(Leaf::native_poll)?; }
+        multibyte |= encode_concat_chars_into(&mut bytes, chunk)?;
+    }
+    Ok((bytes, multibyte))
+}
+
+#[inline]
+fn encode_concat_chars_into(bytes: &mut Vec<u8>, values: &[Value]) -> std::result::Result<bool, Fault> {
+    let mut multibyte = false;
+    for &value in values {
+        let code = value.integer_value().and_then(|n| u32::try_from(n).ok())
+            .filter(|&c| c <= crate::lstring::MAX_CHAR).ok_or_else(|| Fault::Wrong("characterp", value))?;
+        multibyte |= (128..=crate::lstring::MAX_5_BYTE_CHAR).contains(&code);
+        let mut encoded = [0; 5];
+        let n = crate::lstring::char_string(code, &mut encoded);
+        bytes.extend_from_slice(&encoded[..n]);
+    }
+    Ok(multibyte)
+}
+
+fn concat_is_ascii(cx: &mut Leaf<'_>, bytes: &[u8]) -> std::result::Result<bool, Fault> {
+    for (index, chunk) in bytes.chunks(KERNEL_CHUNK).enumerate() {
+        if index != 0 { cx.quittable(Leaf::native_poll)?; }
+        if !chunk.is_ascii() { return Ok(false); }
+    }
+    Ok(true)
+}
+
+fn assemble_concat(cx: &mut Leaf<'_>, chunks: Vec<(Vec<u8>, bool)>, mut parts: Vec<(Value, usize)>, multibyte: bool) -> Out {
+    let mut bytes = Vec::new();
+    let mut offsets = Vec::with_capacity(chunks.len());
+    for (index, (chunk, multi)) in chunks.into_iter().enumerate() {
+        if index != 0 && index.is_multiple_of(POLL_STEPS as usize) {
+            cx.quittable(Leaf::native_poll)?;
+        }
         offsets.push(bytes.len());
-        if multibyte && !multi { bytes.extend(crate::text::octets_to_multibyte(&chunk)); }
-        else if multibyte || !multi || chunk.is_ascii() { bytes.extend_from_slice(&chunk); }
-        else {
-            let mut tail=chunk.as_slice();
-            while !tail.is_empty() { let (code,n)=crate::lstring::string_char(tail); bytes.push(code as u8); tail=&tail[n..]; }
+        if multibyte || !multi || concat_is_ascii(cx, &chunk)? {
+            append_concat_bytes(cx, &mut bytes, &chunk, multibyte && !multi)?;
+        } else {
+            let mut tail = chunk.as_slice();
+            let mut steps = crate::quit::Steps::default();
+            while !tail.is_empty() {
+                if steps.tick() { cx.quittable(Leaf::native_poll)?; }
+                let (code, width) = crate::lstring::string_char(tail);
+                bytes.push(code as u8);
+                tail = &tail[width..];
+            }
         }
     }
-    let parts=parts.into_iter().map(|(value,chunk)| (value,offsets[chunk])).collect::<Vec<_>>();
-    Ok(cx.concat_result(bytes,multibyte,&parts))
-}}
+    for (index, (_, offset)) in parts.iter_mut().enumerate() {
+        if index != 0 && index.is_multiple_of(POLL_STEPS as usize) {
+            cx.quittable(Leaf::native_poll)?;
+        }
+        *offset = offsets[*offset];
+    }
+    Ok(cx.concat_result(bytes, multibyte, &parts))
+}
+
+fn append_concat_bytes(cx: &mut Leaf<'_>, bytes: &mut Vec<u8>, chunk: &[u8], widen: bool) -> std::result::Result<(), Fault> {
+    for (index, slice) in chunk.chunks(KERNEL_CHUNK).enumerate() {
+        if index != 0 { cx.quittable(Leaf::native_poll)?; }
+        // In a multibyte result, high unibyte octets become raw-byte characters.
+        if widen { bytes.extend(crate::text::octets_to_multibyte(slice)); }
+        else { bytes.extend_from_slice(slice); }
+    }
+    Ok(())
+}
 
 defsubr! { name = "indirect-function", gnu = "data.c:2557", effect = Reads,
 fn indirect_function(cx, object: Value; optional noerror: Value) {
@@ -288,10 +364,13 @@ defsubr! { name = "romacs--concat-list", gnu = "fns.c:3484", effect = Pure,
 fn concat_list(cx, parts: Value; optional separator: Value) {
     let parts = list_elements(cx, parts)?;
     let separator = (separator != Value::NIL && cx.string_chars(separator) != Some(0)).then_some(separator);
-    if let Some(result) = cx.concat_ascii_joined(&parts, separator) { return Ok(result); }
+    if let Some(result) = cx.concat_ascii_joined::<true>(&parts, separator)? { return Ok(result); }
     let Some(separator) = separator else { return concat(cx, &parts) };
     let mut joined = Vec::with_capacity(2 * parts.len());
     for (index, &part) in parts.iter().enumerate() {
+        if index != 0 && index.is_multiple_of(POLL_STEPS as usize) {
+            cx.quittable(Leaf::native_poll)?;
+        }
         if index > 0 { joined.push(separator); }
         joined.push(part);
     }
@@ -299,12 +378,18 @@ fn concat_list(cx, parts: Value; optional separator: Value) {
 }}
 
 /// The elements of LIST, a proper list a mapping function built.
-pub(super) fn list_elements(cx: &Leaf<'_>, list: Value) -> std::result::Result<Vec<Value>, Fault> {
+pub(super) fn list_elements(cx: &mut Leaf<'_>, list: Value) -> std::result::Result<Vec<Value>, Fault> {
     let mut values = Vec::new();
-    let (mut tail, mut tortoise, mut steps) = (list, list, 0);
-    while let Some((car, _)) = cx.pair(tail) {
+    let (mut tail, mut tortoise, mut steps) = (list, list, 0u64);
+    while let Some((car, rest)) = cx.pair(tail) {
         values.push(car);
-        (tail, tortoise, steps) = super::fns_equal::for_each_tail_step(cx, tail, tortoise, steps)?;
+        tail = rest;
+        if tail == tortoise { return Err(Fault::Circular(tail)); }
+        steps += 1;
+        if steps & 4095 == 0 {
+            if steps.is_power_of_two() { tortoise = tail; }
+            cx.quittable(Leaf::native_poll)?;
+        }
     }
     if tail != Value::NIL {
         return Err(Fault::Wrong("listp", tail));

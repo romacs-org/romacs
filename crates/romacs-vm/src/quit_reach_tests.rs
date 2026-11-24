@@ -99,6 +99,41 @@ fn json_parse_and_serialize_quit_between_values() {
 }
 
 #[test]
+fn leaf_poll_concat_fallback() {
+    reaches("concat", "(setq chars (make-list 20000 ?λ))", "(list chars)",
+            "(= (length chars) 20000)");
+    reaches("concat", "(setq chars (make-vector 20000 ?λ))", "(list chars)",
+            "(= (aref chars 19999) ?λ)");
+    reaches("concat", "(setq bytes (make-string 200000 255))",
+            "(list bytes \"λ\")", "(= (length bytes) 200000)");
+}
+
+#[test]
+fn leaf_poll_concat_short_cycle_keeps_its_fault() {
+    let (mut vm, signal) = busy_vm();
+    eval(&mut vm, "(progn (setq cyclic (list 65 66)) (setcdr (cdr cyclic) (cdr cyclic)) nil)");
+    let call = prepare(&mut vm, "concat", "(list cyclic)");
+    let original = call.1[0];
+    assert!(signal.interrupt());
+    let outcome = invoke(&mut vm, call);
+    assert!(matches!(outcome, Err(Fault::Circular(list)) if list == original),
+            "concat must signal circular-list with the original argument");
+    assert!(signal.due(), "the cycle error leaves the quit pending");
+}
+
+#[test]
+fn leaf_poll_concat_list_assembly() {
+    reaches("romacs--concat-list", "(setq parts (list (make-string 200000 ?a) \"b\"))",
+            "(list parts \":\")", "(= (length parts) 2)");
+}
+
+#[test]
+fn leaf_poll_list_elements() {
+    reaches("romacs--nconc-list", "(setq parts (make-list 20000 nil))",
+            "(list parts)", "(= (length parts) 20000)");
+}
+
+#[test]
 fn a_digest_quits_between_chunks() {
     let setup = "(setq big (make-string (* 3 1024 1024) ?a))";
     reaches("romacs--secure-hash", setup, "(list 'sha256 big)", "t");
