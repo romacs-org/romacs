@@ -1,7 +1,7 @@
 use super::RenderApp;
 use super::frame_windows::{FrameLifecycle, NativeTextInputPolicy};
 use super::state::{
-    RenderGpuContext, effective_window_scale_factor, window_size_from_emacs_pixels,
+    RenderGpuContext,
 };
 use crate::thread_comm::InputEvent;
 use romacs_display_protocol::frame_time::EventTime;
@@ -124,7 +124,7 @@ impl RenderApp {
             };
             let attrs = winit::window::WindowAttributes::default()
                 .with_title(&title)
-                .with_surface_size(window_size_from_emacs_pixels(width, height))
+                .with_surface_size(self.comms.pixel_policy.window_size(width, height))
                 .with_decorations(decorations_enabled)
                 .with_transparent(true);
             let attrs =
@@ -153,7 +153,7 @@ impl RenderApp {
                     }
 
                     let raw_scale_factor = window.scale_factor();
-                    let effective_scale = effective_window_scale_factor(raw_scale_factor);
+                    let effective_scale = self.comms.pixel_policy.effective_scale(raw_scale_factor);
                     {
                         let primary = self.frame_windows.primary_window_mut().unwrap();
                         if let FrameLifecycle::Pending { scale_factor, .. } = &mut primary.lifecycle
@@ -171,7 +171,7 @@ impl RenderApp {
                         crate::window_chrome::WindowChromeController::request_initial_content_size(
                             window.as_ref(),
                             decorations_enabled,
-                            window_size_from_emacs_pixels(width, height)
+                            self.comms.pixel_policy.window_size(width, height)
                                 .to_physical(raw_scale_factor),
                         );
                     {
@@ -207,7 +207,7 @@ impl RenderApp {
                     self.frame_windows
                         .primary_window()
                         .unwrap()
-                        .replay_pending_native_state(window.as_ref());
+                        .replay_pending_native_state(self.comms.pixel_policy, window.as_ref());
                     self.window_icon.apply(window.as_ref(), &event_loop.owned_display_handle());
                 }
                 Err(e) => {
@@ -968,7 +968,7 @@ impl RenderApp {
             let (width, height) = super::state::emacs_pixels_from_window_size(
                 content.0,
                 content.1,
-                effective_window_scale_factor(window.scale_factor()),
+                self.comms.pixel_policy.effective_scale(window.scale_factor()),
             );
             self.pending_content_size.observe_content(width, height);
         }

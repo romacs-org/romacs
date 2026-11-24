@@ -123,7 +123,7 @@ impl RenderApp {
         crate::paint_host::trace_gpu("installing");
         let phys = window.surface_size();
         let raw_scale_factor = window.scale_factor();
-        let effective_scale = super::state::effective_window_scale_factor(raw_scale_factor);
+        let effective_scale = self.comms.pixel_policy.effective_scale(raw_scale_factor);
 
         let caps = surface.get_capabilities(&adapter);
         let format = caps
@@ -213,7 +213,7 @@ impl RenderApp {
         self.note_models_renderer_ready();
 
         self.frame_windows
-            .populate_primary_native(GuiFrameNativeWindowState {
+            .populate_primary_native(self.comms.pixel_policy, GuiFrameNativeWindowState {
                 window_chrome: Default::default(),
                 content_insets: Default::default(),
                 window,
@@ -362,23 +362,15 @@ pub(super) fn composite_alpha_mode(modes: &[wgpu::CompositeAlphaMode]) -> wgpu::
     modes[0]
 }
 
-/// Build on the OS-main owner using the exact caller-selected Wayland socket.
-/// This path never consults ambient display/backend discovery.
 #[cfg(target_os = "linux")]
-pub(crate) fn build_render_event_loop_wayland(socket: &std::path::Path) -> Result<EventLoop, String> {
+pub(crate) fn build_render_event_loop(display: &super::DisplaySelection) -> Result<EventLoop, String> {
     use std::os::unix::net::UnixStream;
-    
-    // WAYLAND_DISPLAY names are relative to XDG_RUNTIME_DIR, not the cwd.
-    let resolved;
-    let socket = if socket.is_absolute() {
-        socket
-    } else {
-        resolved = std::path::PathBuf::from(
-            std::env::var_os("XDG_RUNTIME_DIR")
-                .ok_or("XDG_RUNTIME_DIR is required for a relative Wayland socket")?,
-        )
-        .join(socket);
-        &resolved
+    use winit::platform::x11::EventLoopBuilderExtX11;
+
+    let Some(socket) = display.wayland_socket() else {
+        return EventLoop::builder().with_x11().build().map_err(|error| {
+            format!("Cannot open X11 display {}: {error}", display.name().to_string_lossy())
+        });
     };
     let stream = UnixStream::connect(socket).map_err(|error| {
         format!(
