@@ -203,6 +203,39 @@ journal one turn long."
         (should-not (romacs-agent-loaded old))
         (should (romacs-agent-get live))))))
 
+;; A store not read yet (of another version while the writer makes it
+;; again for this build) is rows unknown, not none: the start waits for
+;; it, loading nothing, never every session as unlisted; read, it goes on.
+(ert-deftest romacs-agent-store-an-unread-store-holds-the-restore ()
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-store-tests--with
+    (let ((old "aaaaaaaa-0000-4000-8000-000000000001") (live "aaaaaaaa-0000-4000-8000-000000000002")
+          (romacs-agent--restore-pending nil) (romacs-agent--restoring nil)
+          (romacs-agent--restored nil) (romacs-agent--restore-count 0)
+          (romacs-agent-store-readable-hook nil))
+      (record old "old")
+      (record live "live" t)
+      (romacs-agent-store-fill)
+      (sqlite-execute (romacs-agent-store--open) "update sessions set state = 'running' where id = ?" (list live))
+      (cl-letf (((symbol-function 'romacs-agent--attach) (lambda (&rest _) nil))
+                ((symbol-function 'romacs-agent--endpoint) #'ignore)
+                ((symbol-function 'romacs-agent--sweep) #'ignore)
+                ((symbol-function 'romacs-agent-store-fill-soon) #'ignore)
+                ((symbol-function 'romacs-startup-progress) #'ignore)
+                ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args))))
+        (cl-letf (((symbol-function 'romacs-agent-store--open) #'ignore))
+          (should-error (romacs-agent-store-listed-ids) :type 'romacs-agent-store-unread)
+          (romacs-agent-restore-soon)
+          (should-not romacs-agent--restoring)
+          (should (zerop (hash-table-count romacs-agent--sessions)))
+          (should (memq #'romacs-agent--restore-when-readable romacs-agent-store-readable-hook))
+          ;; A view meanwhile loads none either.
+          (should-not (romacs-agent--load-new)))
+        (run-hooks 'romacs-agent-store-readable-hook)
+        (should-not romacs-agent-store-readable-hook)
+        (should-not (romacs-agent-loaded old))
+        (should (romacs-agent-get live))))))
+
 ;; A first start, no rows yet: their fill runs aside, only the live
 ;; session is loaded; once the fill has run, one still with no row is
 ;; loaded as it is.
