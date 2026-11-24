@@ -229,8 +229,9 @@
     (with-temp-buffer
       (romacs-agent-log-mode)
       (setq romacs-agent-log--session session
-            romacs-agent-log--end (point-min-marker))
+            romacs-agent-log--end (point-min-marker) romacs-agent-log--input (point-min-marker))
       (set-marker-insertion-type romacs-agent-log--end t)
+      (romacs-agent-log--separator t)
       (cl-letf (((symbol-function 'romacs-agent-log--loaded) (lambda (_) session)))
         (cl-flet ((offer (seq text)
                     ;; The session's own event, then the chat's line of it.

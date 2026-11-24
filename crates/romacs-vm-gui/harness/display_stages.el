@@ -215,13 +215,11 @@ line's end; return it."
   :setup (display-stages--turn (display-stages--chat 100000) 0)
   :body (with-current-buffer (display-stages--second it)
           (romacs-agent-log--tick)))
-;; Point moves in the chat's composer, its window below the read-only chat
-;; and selected: the frame changes, the chat's header does not.
+;; Point moves in the chat's composer: the frame changes, its header does not.
 (display-stages-scenario chat-cursor :paints t
-  :setup (progn (display-stages--chat 100000)
-                (romacs-agent-log-composer)
-                (insert "some words typed in the composer")
-                (current-buffer))
+  :setup (with-current-buffer (display-stages--chat 100000)
+           (insert "some words typed in the composer")
+           (current-buffer))
   :body (if (cl-evenp i) (backward-char 1) (forward-char 1)))
 ;; Collections.  A full collection marks all that lives: the world, the
 ;; libraries loaded, what a scenario made.  What a session ran before

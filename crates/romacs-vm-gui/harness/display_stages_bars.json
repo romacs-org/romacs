@@ -26,9 +26,9 @@
   "display_instructions_p90": 352000
  },
  "chat-idle": {
-  "step_instructions": 674000,
+  "step_instructions": 516000,
   "cycles": 1,
-  "display_instructions": 669000,
+  "display_instructions": 511000,
   "display_conses": 0,
   "windows_rebuilt": 0,
   "band_expansions": 1,
@@ -36,13 +36,12 @@
   "frames_submitted": 0,
   "lines_laid": 0,
   "rows_wrapped": 0,
-  "display_instructions_p90": 679000,
-  "display_instructions_note": "a chat is two windows since its composer got a buffer of its own, the composer's below the read-only chat: the composer's window adds about 0.14M to a frozen-and-compared redisplay (0.606M against 0.467M on cf78cca25, the chat alone without its composer 0.472M; three interleaved runs each, one binary), the highest of those runs and the forge run's, a tenth above"
+  "display_instructions_p90": 514000
  },
  "chat-tick": {
-  "step_instructions": 787000,
+  "step_instructions": 578000,
   "cycles": 1,
-  "display_instructions": 672000,
+  "display_instructions": 511000,
   "display_conses": 0,
   "windows_rebuilt": 0,
   "band_expansions": 1,
@@ -50,39 +49,33 @@
   "frames_submitted": 0,
   "lines_laid": 0,
   "rows_wrapped": 0,
-  "display_instructions_p90": 681000,
-  "display_instructions_note": "a chat is two windows since its composer got a buffer of its own, the composer's below the read-only chat: the composer's window adds about 0.14M to the tick's redisplay (0.609M against 0.472M on cf78cca25, the chat alone 0.475M; three interleaved runs each), a tenth above"
+  "display_instructions_p90": 514000
  },
  "chat-tick-second": {
-  "step_instructions": 5550000,
+  "step_instructions": 5520000,
   "cycles": 1,
-  "display_instructions": 4870000,
+  "display_instructions": 4750000,
   "display_conses": 0,
-  "windows_rebuilt": 3,
+  "windows_rebuilt": 2,
   "band_expansions": 2,
   "layouts": 1,
   "frames_submitted": 1,
   "lines_laid": 0,
   "rows_wrapped": 0,
-  "display_instructions_p90": 5000000,
-  "display_instructions_note": "a chat is two windows since its composer got a buffer of its own, the composer's below the read-only chat: the frame laid out again rebuilds the composer's window too, about 0.58M more (4.42M against 3.84M on cf78cca25; three interleaved runs each), a tenth above",
-  "windows_rebuilt_note": "the chat's window, the composer's below it and the minibuffer's: 3 (2 before the composer got a window)"
+  "display_instructions_p90": 4850000
  },
  "chat-cursor": {
-  "step_instructions": 1770000,
+  "step_instructions": 2170000,
   "cycles": 1,
-  "display_instructions": 1760000,
+  "display_instructions": 2160000,
   "display_conses": 0,
-  "windows_rebuilt": 1,
-  "band_expansions": 1,
+  "windows_rebuilt": 0,
+  "band_expansions": 2,
   "layouts": 0,
   "frames_submitted": 1,
   "lines_laid": 0,
   "rows_wrapped": 0,
-  "display_instructions_p90": 1770000,
-  "display_instructions_note": "point moves in the composer, a small window of its own below the read-only chat, which is rebuilt (1) and shows no header line, the status bar the one band (1): 1.60M against 1.90M when point moved in the chat's own composer region (cf78cca25; three interleaved runs each), a tenth above",
-  "windows_rebuilt_note": "the composer's window, a line or two, rebuilt when point moves in it",
-  "band_expansions_note": "the status bar: the composer has no header line, the chat's is not expanded again"
+  "display_instructions_p90": 2180000
  },
  "plain-collected": {
   "step_instructions": "report",
@@ -117,22 +110,18 @@
  "chat-collected": {
   "step_instructions": "report",
   "cycles": 1,
-  "display_instructions": 4420000,
-  "display_conses": 172,
-  "windows_rebuilt": 3,
+  "display_instructions": 4160000,
+  "display_conses": 154,
+  "windows_rebuilt": 2,
   "band_expansions": 2,
-  "layouts": 3,
+  "layouts": 2,
   "frames_submitted": 0,
   "lines_laid": 0,
   "rows_wrapped": 0,
-  "display_instructions_p90": 4440000,
+  "display_instructions_p90": 4180000,
   "step_instructions_note": "reported, not held: a full collection marks the whole session, world and libraries, and what the session ran before moves it (romacs#403); above_instructions holds what the chat adds",
-  "above_instructions": 3690000,
-  "above_instructions_note": "what the chat adds above the agents loaded, its composer's buffer and window among it: the forge run that measured S8b (3.35M) and a tenth, the highest measured; on one host, three interleaved runs each, 2.52-2.62M against 2.40-2.51M on cf78cca25, the composer about 0.12M of it. Before the composer's buffer: the highest of six forge runs (2.90-2.95M) and a tenth, 3250000",
-  "display_instructions_note": "a chat is two windows since its composer got a buffer of its own, the composer's below the read-only chat: a collection's redisplay rebuilds and lays out its window too, about 0.60M more (4.01M against 3.41M on cf78cca25; three interleaved runs each), a tenth above",
-  "windows_rebuilt_note": "the chat's window, the composer's and the minibuffer's: 3 (2 before)",
-  "layouts_note": "one per window rebuilt: 3 (2 before)",
-  "display_conses_note": "156 against 140 on cf78cca25 (three interleaved runs each): the composer's window, a tenth above"
+  "above_instructions": 3250000,
+  "above_instructions_note": "the highest of six forge runs (2.90-2.95M above the agents loaded, its baseline measured once settled, as a step is) and a tenth"
  },
  "cursor-move": {
   "step_instructions": 1860000,

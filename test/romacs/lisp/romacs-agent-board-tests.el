@@ -594,7 +594,7 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
             (switch-to-buffer (current-buffer))
             (romacs-agent-log-mode)
             (setq romacs-agent-log--session session)
-            (let ((inhibit-read-only t)) (insert (romacs-agent-log--sealed text)))
+            (insert (romacs-agent-log--separator-field text))
             (goto-char (point-min))
             (should (search-forward label nil t))
             (goto-char (match-beginning 0))

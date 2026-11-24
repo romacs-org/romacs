@@ -17,7 +17,10 @@
      (unwind-protect
          (with-temp-buffer
            (romacs-agent-chat-mode)
-           (setq romacs-agent-ui--session ,var)
+           (setq romacs-agent-ui--session ,var
+                 romacs-agent-ui--messages (make-hash-table :test #'equal)
+                 romacs-agent-ui--end (point-marker)
+                 romacs-agent-ui--composer (make-overlay (point) (point) nil nil nil))
            ,@body)
        (delete-directory dir t))))
 
