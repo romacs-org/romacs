@@ -1012,8 +1012,15 @@ with REQUEST, or nil."
 
 (add-hook 'romacs-agent-kept-functions #'romacs-agent-store-put)
 (add-hook 'romacs-agent-requested-functions #'romacs-agent-store-requested)
-;; Restored: the rows of sessions recorded with none are made, off the editor.
-(add-hook 'romacs-agent-restored-hook #'romacs-agent-store-fill-soon)
+;; Restored: the rows of sessions recorded with none are made, off the
+;; editor, once a process: the sessions a fill finds load late, and their
+;; restore's hook runs again (`romacs-agent--restore-finish'), never a
+;; second fill on the first's heels.
+(defun romacs-agent-store--fill-at-restore ()
+  "Fill the store once this process, at its first restore."
+  (unless romacs-agent-store--filled (romacs-agent-store-fill-soon)))
+
+(add-hook 'romacs-agent-restored-hook #'romacs-agent-store--fill-at-restore)
 (defun romacs-agent-store-listed-ids ()
   "The ids of the sessions with a row, as a table: one query, however many.
 A store that cannot be read signals `romacs-agent-store-unread'."

@@ -472,8 +472,19 @@ runs, once it ends."
                              (setq romacs-agent-turns--waiting nil)
                              (romacs-agent-turns-fill-soon (unless (eq waiting t) waiting))))))))))
 
-;; Restored: what ran while no editor was there gets its rows, off the editor.
-(add-hook 'romacs-agent-restored-hook #'romacs-agent-turns-fill-soon)
+;; Restored: what ran while no editor was there gets its rows, off the
+;; editor, once a process: a late load's run of the hook again fills
+;; nothing anew (a running session writes its own turns' rows).
+(defvar romacs-agent-turns--filled-at-restore nil
+  "Non-nil once this process's first restore asked its sessions' rows filled.")
+
+(defun romacs-agent-turns--fill-at-restore ()
+  "Fill the turns' rows once this process, at its first restore."
+  (unless romacs-agent-turns--filled-at-restore
+    (setq romacs-agent-turns--filled-at-restore t)
+    (romacs-agent-turns-fill-soon)))
+
+(add-hook 'romacs-agent-restored-hook #'romacs-agent-turns--fill-at-restore)
 
 ;;; Reading
 

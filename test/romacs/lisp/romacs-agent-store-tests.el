@@ -242,6 +242,19 @@ journal one turn long."
         (should-not (romacs-agent-loaded old))
         (should (romacs-agent-get live))))))
 
+;; The sessions a fill finds load late and run the restore's hook again:
+;; no second fill, nor turns' fill, on the first's heels.
+(ert-deftest romacs-agent-store-a-late-load-fills-nothing-again ()
+  (require 'romacs-agent-turns)
+  (let ((fills 0) (turns 0) (romacs-agent-store--filled nil) (romacs-agent-turns--filled-at-restore nil))
+    (cl-letf (((symbol-function 'romacs-agent-store-fill-soon) (lambda () (cl-incf fills) (setq romacs-agent-store--filled t)))
+              ((symbol-function 'romacs-agent-turns-fill-soon) (lambda (&rest _) (cl-incf turns))))
+      (dotimes (_ 3)
+        (romacs-agent-store--fill-at-restore)
+        (romacs-agent-turns--fill-at-restore)))
+    (should (= fills 1))
+    (should (= turns 1))))
+
 ;; A first start, no rows yet: their fill runs aside, only the live
 ;; session is loaded; once the fill has run, one still with no row is
 ;; loaded as it is.
