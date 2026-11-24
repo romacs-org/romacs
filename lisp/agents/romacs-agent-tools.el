@@ -922,8 +922,11 @@ asked first: nil drops the message.  MESSAGES say whose it is
       ;; Whether it runs is known once a worker has folded it.
       (romacs-agent--when-folded session (lambda () (romacs-agent-tools--deliver session text delivered valid messages kind)))
     ;; A parent whose harness was stopped or ended is resumed to take it.
+    ;; A resume that fails leaves it admitted all the same: it waits in the
+    ;; queue for the parent's next run, never dropped with the resume.
     (unless (or (process-live-p (romacs-agent-connection session)) (eq (romacs-agent-state session) 'starting))
-      (romacs-agent--continue session))
+      (condition-case err (romacs-agent--continue session)
+        (error (romacs-agent--raise session (list :type 'error :text (error-message-string err))))))
     ;; No sender keeps it: kept for the resume, should it be refused.
     (romacs-agent--admit session (romacs-agent-item text :messages messages :delivered delivered :valid valid
                                                     :kind (or kind 'now))

@@ -171,6 +171,18 @@ recorded in a private directory; `delivered' collects what wakes it."
                          (romacs-mcp--object "taskId" (romacs-agent-id a) "requestId" "q1"))
                         :type 'user-error))))))
 
+(ert-deftest romacs-agent-delegate-a-failed-resume-keeps-the-result ()
+  ;; The parent cannot be resumed this moment: the result waits in its
+  ;; queue for its next run, never dropped with the resume.
+  (let ((parent (romacs-agent--make :id "p" :harness 'claude :state 'ended))
+        (admitted nil))
+    (cl-letf (((symbol-function 'romacs-agent--continue) (lambda (_) (error "Provider not configured")))
+              ((symbol-function 'romacs-agent--raise) #'ignore)
+              ((symbol-function 'romacs-agent--folding-p) #'ignore)
+              ((symbol-function 'romacs-agent--admit) (lambda (_s item &rest _) (push item admitted))))
+      (romacs-agent-tools--deliver parent "Delegated task x completed" #'ignore))
+    (should (equal (mapcar #'romacs-agent-item-text admitted) '("Delegated task x completed")))))
+
 (ert-deftest romacs-agent-delegate-a-working-parent-is-woken-after ()
   (romacs-agent-delegate-tests--family ((a nil))
     (setf (romacs-agent-state parent) 'running)
