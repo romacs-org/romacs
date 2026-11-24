@@ -151,9 +151,12 @@ are not part of it; CLOSE ends it."
       ;; one seq are never split from each other by a page's end.
       (cons (lambda (from)
               (let* ((seq (if (consp from) (car from) -1)) (rowid (if (consp from) (cdr from) -1))
+                     ;; seq >= ? bounds the index seek: the OR alone reads
+                     ;; the session's records from its first on every page.
                      (rows (sqlite-select db (concat "select seq, record, rowid from events where session = ?"
-                                                     " and (seq > ? or (seq = ? and rowid > ?)) order by seq, rowid limit ?")
-                                          (list id seq seq rowid romacs-agent-events--page))))
+                                                     " and seq >= ? and (seq > ? or (seq = ? and rowid > ?))"
+                                                     " order by seq, rowid limit ?")
+                                          (list id seq seq seq rowid romacs-agent-events--page))))
                 (and rows (cons (mapcar #'cadr rows)
                                 (and (= (length rows) romacs-agent-events--page)
                                      (let ((last (car (last rows)))) (cons (nth 0 last) (nth 2 last))))))))
