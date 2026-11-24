@@ -1415,24 +1415,26 @@ as the chat's steer does (a harness run per turn takes it after);
 is asked before a waiting message goes: nil drops it.  MESSAGES, when
 given, say it comes from other sessions (`romacs-agent--input').  Its
 next turn end wakes its parent by its wake rule, as its first did.  An
-empty TEXT sends nothing."
+empty TEXT sends nothing.  Return how it went (`romacs-agent-tools--delivery'),
+`queued' for an interrupt the turn could not take yet; nil for nothing sent."
   (romacs-agent-tools--check-message-target child)
   (unless (string-empty-p (string-trim text))
     (pcase (romacs-agent-tools--delivery child mode)
-      ('steered (romacs-agent-send child text nil valid nil messages))
+      ('steered (romacs-agent-send child text nil valid nil messages) 'steered)
       ('interrupting
        ;; First in line before the cut: a turn not yet under way
        ;; (Codex's before it names it) cannot be cut, and it goes after.
        (romacs-agent-send-later child text t nil valid messages)
-       (ignore-error user-error (romacs-agent-interrupt child)))
+       (condition-case nil (progn (romacs-agent-interrupt child) 'interrupting)
+         (user-error 'queued)))
       (delivery
        ;; One starting is going on already: attaching it again would take its
        ;; supervisor from the attachment under way.
        (unless (eq (romacs-agent-state child) 'starting) (romacs-agent--continue child))
        ;; It waits for the turn running: that turn's result is made before it.
        (when (eq delivery 'queued) (romacs-agent-issues-told child))
-       (romacs-agent-send-later child text nil nil valid messages))))
-  child)
+       (romacs-agent-send-later child text nil nil valid messages)
+       delivery))))
 
 (defun romacs-agent-tools--delivery (child mode)
   "How a message by MODE reaches CHILD as it is now: `steered' into its
@@ -1545,8 +1547,7 @@ and the message's id."
          (message (romacs-agent-tools--message kind sender in-reply-to by-user))
          (delivery nil))
     (let ((replaced (and (equal mode "replace") (romacs-agent-tools--waiting-from target caller))))
-      (setq delivery (romacs-agent-tools--delivery target (intern mode)))
-      (romacs-agent-tools--tell target text (intern mode) nil (list message))
+      (setq delivery (romacs-agent-tools--tell target text (intern mode) nil (list message)))
       ;; Its replacement admitted, they go: now, not at dispatch, so each
       ;; message stays all data the store keeps; a refusal keeps them.
       (dolist (item replaced) (romacs-agent--dequeue target item)))
@@ -1662,12 +1663,12 @@ refused otherwise.  Its transcript is found as the history finds one."
           (user-error "Conversation %s names no directory it was held in: it cannot be resumed" thread))
         (unless (romacs-agent-tools--same-directory-p (plist-get item :cwd) cwd)
           (user-error "Conversation %s was held in %s: give that directory as cwd" thread (plist-get item :cwd)))
-        (romacs-agent-tools--tell
-         (romacs-agent-import harness thread (plist-get item :path) (expand-file-name cwd)
-                              (or (gethash "title" arguments) (plist-get item :title) (romacs-agent--short thread))
-                              (plist-get instance :name) config-dir
-                              (romacs-agent--instance-options instance options))
-         (gethash "task" arguments))))))
+        (let ((child (romacs-agent-import harness thread (plist-get item :path) (expand-file-name cwd)
+                                          (or (gethash "title" arguments) (plist-get item :title) (romacs-agent--short thread))
+                                          (plist-get instance :name) config-dir
+                                          (romacs-agent--instance-options instance options))))
+          (romacs-agent-tools--tell child (gethash "task" arguments))
+          child)))))
 
 (defconst romacs-agent-tools--row-result 300
   "The most of a task's result a row of romacs_task_list carries.")

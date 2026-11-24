@@ -349,7 +349,11 @@ message's record for TEXT, `interrupted' each interrupted."
     (should (equal (gethash "delivery" (send a "first" "interrupt")) "interrupting"))
     (should (equal interrupted '("a")))
     (drain a)
-    (should (equal (car written) '("a" . "first")))))
+    (should (equal (car written) '("a" . "first")))
+    (setf (romacs-agent-state a) 'running)
+    ;; A turn not yet named cannot be cut: the message waits, and says so.
+    (cl-letf (((symbol-function 'romacs-agent-interrupt) (lambda (_) (user-error "No turn to interrupt yet"))))
+      (should (equal (gethash "delivery" (send a "again" "interrupt")) "queued")))))
 
 (ert-deftest romacs-agent-delegate-send-steer-is-a-flag ()
   ;; steer true: into the running turn at once; false: queued; with

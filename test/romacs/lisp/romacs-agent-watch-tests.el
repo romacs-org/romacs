@@ -81,7 +81,7 @@ systemd reports `state' and `invocation' for each unit."
                            0)
                   nil))
                ((symbol-function 'romacs-agent-issues-record) (lambda (kind &rest _) (push kind issues)))
-               ((symbol-function 'romacs-agent-tools--tell) (lambda (task text &rest _) (push (cons task text) told) task))
+               ((symbol-function 'romacs-agent-tools--tell) (lambda (task text &rest _) (push (cons task text) told) 'queued))
                ((symbol-function 'run-at-time) (lambda (&rest _) (timer-create))))
        (unwind-protect (progn ,@body) (delete-directory root t)))))
 
