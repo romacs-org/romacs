@@ -71,9 +71,17 @@
   "Call RECORD's tool with its arguments, applying key-value REPLACEMENTS."
   (let ((arguments (copy-hash-table (gethash "arguments" record))))
     (cl-loop for (key value) on replacements by #'cddr do (puthash key value arguments))
-    (romacs-mcp--call (romacs-mcp--object "name" (gethash "tool" record)
-                                         "arguments" arguments)
-                      nil)))
+    (let* ((params (romacs-mcp--object "name" (gethash "tool" record) "arguments" arguments))
+           (result (romacs-mcp--call params nil)))
+      (if (not (eq (car-safe result) 'romacs-mcp--deferred)) result
+        (let* ((request (list :message (romacs-mcp--object "params" params)))
+               (romacs-mcp--deferred (list (list request 1 (nth 1 result) (nth 3 result) (nth 2 result))))
+               (romacs-mcp--deferred-index (make-hash-table :test #'equal))
+               (reply nil))
+          (cl-letf (((symbol-function 'romacs-mcp--live-p) (lambda (&rest _) t))
+                    ((symbol-function 'romacs-mcp--send) (lambda (_request answer) (setq reply answer))))
+            (romacs-mcp--poll-deferred))
+          (gethash "result" reply))))))
 
 (defun romacs-agent-refusals-tests--text (result)
   "Read the single text item in an MCP RESULT."
@@ -185,10 +193,10 @@
       (make-directory (expand-file-name "unit-exit" root))
       (with-temp-file (expand-file-name unit (expand-file-name "unit-exit" root))
         (insert "exit-code exited 7 " invocation "\n"))
-      (cl-letf (((symbol-function 'romacs-agent-watch--unit-state)
-                 (lambda (name)
-                   (should (equal name unit))
-                   (cons "inactive" invocation))))
+      (cl-letf (((symbol-function 'romacs-agent-watch--output)
+                 (lambda (_program args then)
+                   (should (equal (car (last args)) unit))
+                   (funcall then (format "Id=%s\nActiveState=inactive\nInvocationID=%s\n" unit invocation) 0))))
         (romacs-agent-refusals-tests--next-steps
          (list (romacs-agent-refusals-tests--refusal record "output" "output.log")
                "read its end" "status=7" "journalctl"))))))

@@ -629,12 +629,15 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
             (romacs-agent-event-functions '(romacs-agent-ui--on-event)))
        (cl-letf (((symbol-function 'romacs-agent--state-root) (lambda () root))
                  ((symbol-function 'romacs-agent-tools--caller) (lambda () "writer"))
-                 ((symbol-function 'romacs-agent-watch--unit-state) (lambda (_) '("active" . "invocation"))))
+                 ((symbol-function 'romacs-agent-watch--output)
+                  (lambda (_program _args then)
+                    (funcall then "Id=forge-check.service\nActiveState=active\nInvocationID=invocation\n" 0))))
          (unwind-protect
              (progn
                (mapc #'romacs-agent-ui--children-changed (list writer lane lead))
                (romacs-agent-board-tests--flush-worker-rows)
-               (let ((reply (romacs-agent-watch--watch (romacs-mcp--object "unit" "forge-check.service"))))
+               (let* ((deferred (romacs-agent-watch--watch (romacs-mcp--object "unit" "forge-check.service")))
+                      (reply (car (funcall (nth 1 deferred)))))
                  (should (equal (gethash "watching" reply) ["forge-check.service"])))
                (romacs-agent-board-tests--flush-worker-rows)
                ,@body)
