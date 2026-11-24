@@ -314,13 +314,18 @@ T3 Code's words: a plan it offers waits on its user as an approval does."
           (t (symbol-name state)))))
 
 (defun romacs-agent-tools--delegates-working-p (summary)
-  "Whether a task the session SUMMARY says delegated is still at work and
-its end will wake that session: a turn of the session's ending then is
-not its own task's end."
+  "Whether a task the session SUMMARY says delegated will yet wake that
+session with its end: it is at work, or its end waits to be delivered.
+A turn of the session's ending then is not its own task's end.  Only a
+task whose every end wakes it (rule end or all) counts: one that wakes
+it only on failure, or never, may end and leave it asleep."
   (cl-some (lambda (row)
              (when-let* ((id (plist-get row :id)) (child (romacs-agent-summary id)))
-               (and (not (equal (romacs-agent-summary-wake-rule child) "none"))
-                    (member (romacs-agent-tools--status child) '("running" "waiting")))))
+               (and (member (or (romacs-agent-summary-wake-rule child) "end") '("end" "all"))
+                    (or (member (romacs-agent-tools--status child) '("running" "waiting"))
+                        ;; Ended, its end not yet in this session's harness.
+                        (when-let* ((session (romacs-agent-loaded id)))
+                          (romacs-agent-tools--wanted-p session (romacs-agent-done-seq session) child))))))
            (romacs-agent-summary-children-rows summary)))
 
 (defun romacs-agent-tools--running-next (summary)

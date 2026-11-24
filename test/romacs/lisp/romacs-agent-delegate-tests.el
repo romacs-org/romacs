@@ -135,11 +135,23 @@ recorded in a private directory; `delivered' collects what wakes it."
       (romacs-agent-tools--flush parent)
       (should-not delivered)
       (should (equal (romacs-agent-tools--status (romacs-agent-summary (romacs-agent-id a))) "running"))
-      ;; The writer done, the coordinator's next turn ends its task.
+      ;; The writer done, its end not yet delivered to the coordinator:
+      ;; still at work.  Delivered, the coordinator's next turn ends its task.
       (setf (romacs-agent-state writer) 'idle (romacs-agent-turns writer) 1 (romacs-agent-done-seq writer) 3)
       (romacs-agent--summary-stale (romacs-agent-id writer))
       (romacs-agent-ui--summarize-children a)
+      (should (equal (romacs-agent-tools--status (romacs-agent-summary (romacs-agent-id a))) "running"))
+      (romacs-agent-tools--mark-woken writer 3)
       (should (equal (romacs-agent-tools--status (romacs-agent-summary (romacs-agent-id a))) "completed"))
+      ;; A writer that wakes it only on failure holds nothing: its success
+      ;; would leave the coordinator asleep.
+      (setf (romacs-agent-state writer) 'running
+            (romacs-agent-options writer) (list :parent (romacs-agent-id a) :wake "failure"))
+      (romacs-agent--summary-stale (romacs-agent-id writer))
+      (should (equal (romacs-agent-tools--status (romacs-agent-summary (romacs-agent-id a))) "completed"))
+      (setf (romacs-agent-state writer) 'idle
+            (romacs-agent-options writer) (list :parent (romacs-agent-id a)))
+      (romacs-agent--summary-stale (romacs-agent-id writer))
       (romacs-agent-delegate-tests--end a 9 "all done")
       (romacs-agent-tools--flush parent)
       (should (equal (mapcar (lambda (w) (plist-get w :result)) (romacs-agent-tools--wakes-parse (car delivered)))
