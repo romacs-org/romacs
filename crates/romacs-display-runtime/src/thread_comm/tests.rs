@@ -19,17 +19,19 @@ fn unpresented_pointer(x: f32, y: f32, target_frame_id: u64, action: PointerActi
 fn a_native_key_receipt_is_taken_once_the_evaluator_drops_the_event() {
     let (emacs, render) = ThreadComms::new().split();
     // A single interactive command may read held-key input indefinitely.
+    let ingress = romacs_display_protocol::frame_time::observe_platform_now();
     for _ in 0..1300 {
         let observer = render.send_key_input_with_receipt(InputEvent::Key {
             key: crate::host_types::FrontendKey::Character('p'),
             modifiers: 0,
             pressed: true,
             emacs_frame_id: 1,
-        });
+        }, Some(ingress));
         let observer = observer.expect("every native key needs a read receipt");
         assert!(!observer.taken());
         let event = emacs.input_rx.try_recv().unwrap();
-        assert!(matches!(event, InputEvent::Tracked { .. }), "native key must keep its delivery through the bridge");
+        let InputEvent::Tracked { ref delivery, .. } = event else { panic!("native key lost its delivery"); };
+        assert_eq!(delivery.ingress(), Some(ingress));
         drop(event);
         assert!(observer.taken());
     }

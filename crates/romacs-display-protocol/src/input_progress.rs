@@ -5,6 +5,7 @@
 //! delivery, which marks the receipt taken. Native key repeats are bounded
 //! by it: a held key queues its next repeat only once the last was taken,
 //! so the event loop never accrues seconds of commands while Lisp runs.
+use crate::frame_time::EventTime;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -14,7 +15,7 @@ pub struct InputReceipt(Arc<AtomicBool>);
 
 /// The queued event's half: dropping its last copy marks the receipt taken.
 #[derive(Clone, Debug)]
-pub struct InputDelivery(Arc<Delivery>);
+pub struct InputDelivery(Arc<Delivery>, Option<EventTime>);
 
 #[derive(Debug)]
 struct Delivery(Arc<AtomicBool>);
@@ -28,7 +29,20 @@ impl Drop for Delivery {
 impl InputDelivery {
     #[must_use]
     pub fn new() -> Self {
-        Self(Arc::new(Delivery(Arc::default())))
+        Self::with_ingress(None)
+    }
+
+    /// The delivery of a native key, with its platform arrival when known.
+    #[must_use]
+    pub fn with_ingress(ingress: Option<EventTime>) -> Self {
+        Self(Arc::new(Delivery(Arc::default())), ingress)
+    }
+
+    /// When the platform delivered the key press, stamped on the render
+    /// thread; None for an event no platform key made.
+    #[must_use]
+    pub fn ingress(&self) -> Option<EventTime> {
+        self.1
     }
 
     #[must_use]
@@ -76,6 +90,14 @@ mod tests {
         assert!(!receipt.taken(), "a copy still queued keeps it untaken");
         drop(copy);
         assert!(receipt.taken());
+    }
+
+    #[test]
+    fn cloned_delivery_carries_the_same_ingress() {
+        let at = crate::frame_time::observe_platform_now();
+        let delivery = InputDelivery::with_ingress(Some(at));
+        assert_eq!(delivery.clone().ingress(), Some(at));
+        assert_eq!(InputDelivery::new().ingress(), None);
     }
 
     #[test]

@@ -986,11 +986,21 @@ Return the keys read, nil at the end of an executing keyboard macro."
         (romacs--finalize-kbd-macro-chars)))
     keys))
 
+(defun romacs--typing-step ()
+  "`romacs--command-loop-step' as one command step of the native keys it
+reads: `romacs--typing-begin' before it, and `romacs--typing-end' after,
+told whether it returned or was thrown out of (crates/romacs-vm/src/typing.rs).
+Return its value."
+  (let ((returned nil))
+    (romacs--typing-begin)
+    (unwind-protect (prog1 (romacs--command-loop-step) (setq returned t))
+      (romacs--typing-end returned))))
+
 (defun romacs--command-loop-1 ()
   "keyboard.c command_loop_1: read and execute commands.
 Return nil at the end of an executing keyboard macro."
   (romacs--command-loop-resume)
-  (while (romacs--command-loop-step))
+  (while (romacs--typing-step))
   nil)
 
 (defun romacs--special-event (event)
@@ -1016,7 +1026,7 @@ The host waits for the next input at the top of the loop."
   (let ((error nil) (thrown t))
     (catch 'top-level
       (condition-case data
-          (romacs--note-signals #'romacs--command-loop-step)
+          (romacs--note-signals #'romacs--typing-step)
         ((debug t) (setq error data) (romacs--cmd-error data)))
       (setq thrown nil))
     (when (or error thrown)

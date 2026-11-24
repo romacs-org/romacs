@@ -247,6 +247,14 @@ mod leaf {
         pub(in crate::prim) fn new(vm: &'a mut Vm) -> Self {
             Leaf { vm }
         }
+        /// A command step begins (`Vm::typing_begin').
+        pub(crate) fn typing_begin(&mut self) {
+            self.vm.typing_begin();
+        }
+        /// The step that began last ends, LOCAL unless thrown out of (`Vm::typing_end').
+        pub(crate) fn typing_end(&mut self, local: bool) {
+            self.vm.typing_end(local);
+        }
         /// The automatic collection's trigger (`Vm::collection_budget').
         pub(crate) fn collection_budget(&self) -> (f64, f64) {
             self.vm.collection_budget()

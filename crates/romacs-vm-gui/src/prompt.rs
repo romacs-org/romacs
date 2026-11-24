@@ -33,20 +33,18 @@ pub struct Shared {
     /// (presentation.rs): the outer loop's, until a prompt's own replaces it.
     pub in_flight: Option<(u64, std::time::Instant)>,
     /// Set when a prompt's drawn paint settled the outer loop's in-flight
-    /// one (a later presentation drawn settles every earlier): it and when.
-    pub settled: Option<(u64, std::time::Instant)>,
+    /// one (a later presentation drawn settles every earlier).
+    pub settled: Option<u64>,
     /// Latest frame geometry seen by the prompt.
     pub size: Option<(u32, u32)>,
     pub closed: bool,
-    /// Under --trace-latency, when the prompt last read a key.
-    pub key_read: Option<std::time::Instant>,
-    /// Under --trace-latency, the key a paint carries until it is drawn:
-    /// its presentation and timings (`KeyPaint`).
-    pub key_paint: Option<KeyPaint>,
-    /// The prompt's last painted frame, its selected window, presentation,
-    /// window ends and text animations: an unchanged redisplay answers
-    /// these again.
-    pub painted: Option<(romacs_layout_input::FrameSnapshot, u64, u64, Vec<romacs_vm::WindowEnd>, Vec<(u64, romacs_display_protocol::text_animation::TextAnimation)>)>,
+    /// Under --trace-latency, the keys' records, which both loops write
+    /// as keys settle (latency.rs).
+    pub trace: Option<crate::latency::Trace>,
+    /// The frame either loop last painted, its selected window,
+    /// presentation, window ends and text animations: an unchanged
+    /// redisplay answers these again (`Shared::unchanged`).
+    pub painted: Option<(Rc<romacs_layout_input::FrameSnapshot>, u64, u64, Vec<romacs_vm::WindowEnd>, Vec<(u64, romacs_display_protocol::text_animation::TextAnimation)>)>,
     /// A server session's window (`romacs--native-window'), None in a
     /// session that is its window.
     pub server: Option<ServerWindow>,
@@ -69,6 +67,17 @@ impl Shared {
     /// frame it submitted.
     pub fn end_loading(&mut self) {
         if let Some(loading) = self.loading.take() { self.presentation = self.presentation.max(loading.finish()); }
+    }
+
+    /// The window ends of the paint on screen when FRAME, its SELECTED
+    /// window and ANIMATIONS show just what it shows, with nothing presented
+    /// since: such a redisplay submits no frame. The paint is either loop's,
+    /// so the read after a prefix key repaints nothing.
+    pub fn unchanged(&self, frame: &romacs_layout_input::FrameSnapshot, selected: u64,
+                     animations: &[(u64, romacs_display_protocol::text_animation::TextAnimation)]) -> Option<Vec<romacs_vm::WindowEnd>> {
+        let (painted, shown, presentation, ends, drawn_over) = self.painted.as_ref()?;
+        (*presentation == self.presentation && self.in_flight.is_none_or(|(p, _)| p == *presentation)
+            && *shown == selected && crate::frames_alike(painted, frame) && drawn_over == animations).then(|| ends.clone())
     }
 
     /// Whether painting has a window to go to.
@@ -96,7 +105,11 @@ pub fn closes(event: &InputEvent) -> bool { matches!(classify(event), Some(HostE
 /// with the event itself.
 fn classify(event: &InputEvent) -> Option<HostEvent> {
     match event {
-        InputEvent::Tracked { event, .. } => classify(event),
+        // A platform key keeps its ingress for the command step reading it.
+        InputEvent::Tracked { event, delivery } => match (classify(event)?, delivery.ingress()) {
+            (HostEvent::Key(key), Some(ingress)) => Some(HostEvent::NativeKey(key, ingress)),
+            (event, _) => Some(event),
+        },
         InputEvent::WindowClose { .. } => Some(HostEvent::Closed),
         &InputEvent::WindowFocus { focused, .. } => Some(HostEvent::Focus(focused)),
         // The read runs it as a special event (`romacs-model').
@@ -129,7 +142,7 @@ fn note(shared: &mut Shared, event: &HostEvent) {
     match *event {
         HostEvent::Closed => shared.closed = true,
         HostEvent::Resize { width, height } => shared.size = Some((width, height)),
-        HostEvent::Key(_) | HostEvent::Background | HostEvent::Process | HostEvent::Timeout | HostEvent::Focus(_)
+        HostEvent::Key(_) | HostEvent::NativeKey(..) | HostEvent::Background | HostEvent::Process | HostEvent::Timeout | HostEvent::Focus(_)
         | HostEvent::Model { .. } => {}
     }
 }
@@ -228,32 +241,6 @@ fn key_waits(shared: &Shared) -> bool {
     shared.closed || shared.pending.iter().any(crate::timers::ends_idle)
 }
 
-/// A key read in a prompt and the paint that carries it, timed until the
-/// paint is drawn.
-#[derive(Debug)]
-pub struct KeyPaint {
-    presentation: u64,
-    read: std::time::Instant,
-    started: std::time::Instant,
-    laying: std::time::Instant,
-    submitted: std::time::Instant,
-    snapshot: Duration,
-}
-
-impl KeyPaint {
-    /// The key's latency, DRAWN being the presentation drawn AT (this paint's,
-    /// or a later one that superseded it).
-    fn tell(&self, drawn: u64, at: std::time::Instant) {
-        crate::diagnostic_line(&serde_json::json!({"diagnostic":"prompt-key-latency","presentation":drawn,"units":"ns",
-            "command_ns":self.started.duration_since(self.read).as_nanos(),"redisplay_ns":self.submitted.duration_since(self.started).as_nanos(),
-            "key_to_render_ns":at.duration_since(self.read).as_nanos(),
-            // command_ns includes snapshot_ns; redisplay_ns is layout_ns and
-            // the submission; render_ns is from submission to drawn.
-            "snapshot_ns":self.snapshot.as_nanos(),"layout_ns":self.submitted.duration_since(self.laying).as_nanos(),
-            "render_ns":at.duration_since(self.submitted).as_nanos()}));
-    }
-}
-
 impl GuiHost {
     /// Settle the prompt's paint in flight once the renderer has drawn it,
     /// noting it (`prompt-drawn`, what harnesses wait on for a prompt on
@@ -263,10 +250,7 @@ impl GuiHost {
         let Some((presentation, _)) = shared.in_flight else { return false };
         if self.sender.wait_for_render(romacs_display_runtime::paint_host::INITIAL_FRAME, presentation, Duration::ZERO).is_err() { return true; }
         shared.in_flight = None;
-        let now = std::time::Instant::now();
-        shared.settled = Some((presentation, now));
-        // A key carried by this paint, or by one it superseded: on screen now.
-        if let Some(paint) = shared.key_paint.take_if(|paint| paint.presentation <= presentation) { paint.tell(presentation, now); }
+        shared.settled = Some(presentation);
         if crate::diagnostics() {
             crate::diagnostic_line(&serde_json::json!({"diagnostic":"prompt-drawn","presentation":presentation}));
         }
@@ -351,29 +335,24 @@ impl HostInput for GuiHost {
         key_waits(&self.shared.borrow())
     }
 
-    fn redisplay(&mut self, frame: HostFrame) -> Result<Vec<romacs_vm::WindowEnd>, String> {
-        // As the loop's changed_frame: a timer run in a prompt that left the
-        // frame as this prompt last painted it, with nothing presented
-        // since, submits no frame and answers that paint's window ends.
+    fn redisplay(&mut self, frame: HostFrame<'_>) -> Result<Vec<romacs_vm::WindowEnd>, String> {
+        // As the loop's changed_frame: a redisplay that leaves the frame as
+        // either loop last painted it, with nothing presented since,
+        // submits no frame and answers that paint's window ends.
         // A server with no window shows nothing; the layout stays as it is.
         if !self.shared.borrow().window_shown() { return Ok(Vec::new()); }
         self.shared.borrow_mut().end_loading();
-        if let Some((painted, selected, presentation, ends, animations)) = &self.shared.borrow().painted {
-            let shared = self.shared.borrow();
-            if *presentation == shared.presentation && shared.in_flight.is_none_or(|(p, _)| p == *presentation)
-                && *selected == frame.selected && crate::frames_alike(painted, &frame.frame)
-                && *animations == frame.text_animations && !self.images.borrow().must_repaint(self.sender.as_ref()) {
-                return Ok(ends.clone());
-            }
+        let unchanged = self.shared.borrow().unchanged(&frame.frame, frame.selected, &frame.text_animations);
+        if let Some(ends) = unchanged && !self.images.borrow().must_repaint(self.sender.as_ref()) {
+            return Ok(ends);
         }
-        let started = std::time::Instant::now();
         let presentation = {
             let mut shared = self.shared.borrow_mut();
             shared.presentation = shared.presentation.checked_add(1).ok_or("presentation exhausted")?;
             shared.presentation
         };
-        let laying = std::time::Instant::now();
-        let (glyphs, ends) = crate::paint_prompt(&mut self.engine.borrow_mut(), &self.sender, &self.images, presentation, &frame)?;
+        let (glyphs, ends, receipt) = crate::paint_prompt(&mut self.engine.borrow_mut(), &self.sender, &self.images, presentation, &frame)?;
+        *frame.submission = Some(receipt);
         let submitted = std::time::Instant::now();
         // Handed to the renderer, never waited for: the evaluator goes on to
         // its key while the frame draws, and a paint not yet drawn is
@@ -386,8 +365,8 @@ impl HostInput for GuiHost {
             let since = shared.in_flight.map_or(submitted, |(_, since)| since);
             let drawn = self.sender.wait_for_render(romacs_display_runtime::paint_host::INITIAL_FRAME, presentation, Duration::ZERO).is_ok();
             shared.in_flight = (!drawn).then_some((presentation, since));
-            if drawn { shared.settled = Some((presentation, std::time::Instant::now())); }
-            shared.painted = Some((frame.frame.clone(), frame.selected, presentation, ends.clone(), frame.text_animations.clone()));
+            if drawn { shared.settled = Some(presentation); }
+            shared.painted = Some((Rc::new(frame.frame.clone()), frame.selected, presentation, ends.clone(), frame.text_animations.clone()));
             drawn
         };
         if crate::diagnostics() { crate::diagnostic_line(&serde_json::json!({"diagnostic":"prompt-paint","presentation":presentation,
@@ -399,13 +378,6 @@ impl HostInput for GuiHost {
                     .map(|w| w.snapshot.text.utf8.clone()).collect::<Vec<_>>()).collect::<Vec<_>>(),
                 "glyphs":glyphs})
         ); }
-        // The key's command and hooks ran before this redisplay began; its
-        // latency is told when a paint carrying it is drawn (`settle_drawn').
-        let read = self.shared.borrow_mut().key_read.take();
-        if let Some(read) = read {
-            let paint = KeyPaint { presentation, read, started, laying, submitted, snapshot: frame.snapshot };
-            if drawn { paint.tell(presentation, std::time::Instant::now()); } else { self.shared.borrow_mut().key_paint = Some(paint); }
-        }
         Ok(ends)
     }
 
@@ -420,11 +392,13 @@ impl HostInput for GuiHost {
         // work (`PaintSender::on_render'): each read settles it, so nothing
         // polls for it.
         self.settle_drawn();
-        let event = next_event(&self.shared, self.sender.input(), &self.terminal_ready, timeout, &processes)?;
-        if crate::tracing() && matches!(event, HostEvent::Key(_)) {
-            self.shared.borrow_mut().key_read = Some(std::time::Instant::now());
-        }
-        Ok(event)
+        next_event(&self.shared, self.sender.input(), &self.terminal_ready, timeout, &processes)
+    }
+
+    /// A prompt's keys are recorded as they settle, not when it ends.
+    fn typing_settled(&mut self, outcomes: Vec<romacs_vm::KeyOutcome>) -> Vec<romacs_vm::KeyOutcome> {
+        crate::settle_typing(outcomes, &mut self.shared.borrow_mut().trace);
+        Vec::new()
     }
 }
 
@@ -520,6 +494,29 @@ mod tests {
             let event = InputEvent::WindowFocus { focused, emacs_frame_id: 0 };
             assert_eq!(classify(&event), Some(HostEvent::Focus(focused)));
         }
+    }
+
+    /// A prompt's redisplay of the frame the loop just painted submits
+    /// nothing: the read after a prefix key repaints no copy of the screen.
+    /// A changed frame, another selected window or a presentation since
+    /// does submit.
+    #[test]
+    fn the_loops_unchanged_frame_is_not_repainted() {
+        let mut vm = romacs_vm::Vm::new();
+        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::startup::initialize(&mut vm).unwrap();
+        let painted = crate::frame(&mut vm, false, 1200, 800).unwrap();
+        let selected = painted.selected.unwrap();
+        let mut shared = Shared { presentation: 7, in_flight: Some((7, std::time::Instant::now())), ..Shared::default() };
+        crate::record_painted(&mut shared, crate::Shown { frame: painted, ends: vec![], presentation: 7, tab_bar: vec![], status_bar: Default::default() });
+        let again = crate::frame(&mut vm, false, 1200, 800).unwrap();
+        assert_eq!(shared.unchanged(&again.snapshot, selected, &again.animations), Some(vec![]));
+        assert_eq!(shared.unchanged(&again.snapshot, selected + 1, &again.animations), None, "another selected window");
+        vm.eval_source("(insert \"x\")").unwrap();
+        let changed = crate::frame(&mut vm, false, 1200, 800).unwrap();
+        assert_eq!(shared.unchanged(&changed.snapshot, selected, &changed.animations), None, "a changed frame");
+        shared.presentation = 8;
+        assert_eq!(shared.unchanged(&again.snapshot, selected, &again.animations), None, "a presentation since");
     }
 
     /// A native model's event during a Lisp read reaches the read, which

@@ -1,15 +1,23 @@
+//! `--trace-latency`'s `latency-key` records: one for each native key the
+//! evaluator settled (romacs-vm typing.rs `KeyOutcome`), written as it
+//! settles: rendered or opened with the frame it caused, unchanged, or
+//! unattributed with a reason. The loop adds the stage timings it measured
+//! for a key it delivered and for a paint it submitted; a key read inside a
+//! command (a prompt's) has none.
+//!
+//! A record holds no drawn time. The render thread traces when each
+//! presentation drew (romacs-display-runtime `paint_host::trace_drawn`), and
+//! a reader joins a key to the first drawn presentation at or after its
+//! own: `ingress_ns` and that record's `drawn_ns` count from the same start
+//! (`paint_host::trace_origin`).
+use romacs_display_protocol::frame_time::EventTime;
+use romacs_vm::{KeyOutcome, Outcome, SubmittedFrame};
+use serde_json::{Value, json};
 use std::time::Instant;
 
-#[derive(Default)]
-pub struct Trace {
-    next: u64,
-    pending: Vec<Key>,
-    in_flight: Option<(u64, Vec<Key>, Paint, Instant, u128)>,
-}
-
-pub struct Key {
-    pub sequence: u64,
-    pub received: Option<Instant>,
+/// The loop's timings of a key it delivered, from its command's start.
+#[derive(Clone, Copy)]
+pub struct Stages {
     pub start: Instant,
     pub ready: Instant,
     pub command_ns: u128,
@@ -17,119 +25,116 @@ pub struct Key {
     pub reply_ns: u128,
 }
 
+/// The loop's timings of a paint it submitted.
+#[derive(Clone, Copy)]
 pub struct Paint {
-    pub submitted: Instant,
     pub layout_ns: u128,
     pub diagnostic_ns: u128,
     pub submit_ns: u128,
     pub layout_apply_ns: u128,
 }
 
+/// The loop's keys and paints kept to time a key's record: a few, as a
+/// key's outcome settles within a pass or two of both.
+const KEPT: usize = 16;
+
+#[derive(Default)]
+pub struct Trace {
+    next: u64,
+    /// Keys the loop delivered, by ingress, until settled; one a prompt
+    /// settled before its command returned has none.
+    stages: Vec<(EventTime, Stages)>,
+    /// The loop's paints by presentation, with their snapshot's start and
+    /// length.
+    paints: Vec<(u64, Paint, Instant, u128)>,
+}
+
 impl Trace {
-    pub fn sequence(&mut self) -> u64 {
+    fn sequence(&mut self) -> u64 {
         self.next = self.next.checked_add(1).expect("key sequence exhausted");
         self.next
     }
 
-    pub fn push(&mut self, key: Key) { self.pending.push(key); }
+    /// The loop delivered the key that arrived at INGRESS, as STAGES timed it.
+    pub fn delivered(&mut self, ingress: EventTime, stages: Stages) {
+        keep(&mut self.stages, (ingress, stages));
+    }
 
+    /// The loop submitted PRESENTATION, as PAINT timed it, its snapshot taken
+    /// from SNAPSHOT_START for SNAPSHOT_NS.
     pub fn submitted(&mut self, presentation: u64, paint: Paint, snapshot_start: Instant, snapshot_ns: u128) {
-        assert!(self.in_flight.is_none());
-        self.in_flight = Some((presentation, std::mem::take(&mut self.pending), paint, snapshot_start, snapshot_ns));
+        keep(&mut self.paints, (presentation, paint, snapshot_start, snapshot_ns));
     }
 
-    /// The keys since the last submission changed nothing shown, so no paint
-    /// will present them: report each as complete, with no render time.
-    pub fn unchanged(&mut self) -> Vec<serde_json::Value> {
-        std::mem::take(&mut self.pending).into_iter().map(|key| {
-            let origin = key.received.unwrap_or(key.start);
-            serde_json::json!({"diagnostic":"latency-key","key_sequence":key.sequence,"presentation":null,
-                "unchanged":true,"units":"ns","command_ns":key.command_ns,
-                "key_to_command_complete_ns":key.start.duration_since(origin).as_nanos()+key.command_ns,
-                "key_to_render_observed_ns":null})
+    /// The records of the keys OUTCOMES settled, in order.
+    pub fn settled(&mut self, outcomes: Vec<KeyOutcome>) -> Vec<Value> {
+        outcomes.into_iter().map(|KeyOutcome { ingress, outcome }| {
+            let sequence = self.sequence();
+            let stages = self.stages.iter().position(|(at, _)| *at == ingress).map(|at| self.stages.remove(at).1);
+            self.record(sequence, ingress, &outcome, stages)
         }).collect()
     }
 
-    pub fn completed(&mut self, presentation: u64, observed: Instant) -> Vec<serde_json::Value> {
-        if !self.in_flight.as_ref().is_some_and(|batch| batch.0 == presentation) { return Vec::new(); }
-        let (_, keys, paint, snapshot_start, snapshot_ns) = self.in_flight.take().unwrap();
-        keys.into_iter().map(|key| {
-            let origin = key.received.unwrap_or(key.start);
-            let queue_ns = key.start.duration_since(origin).as_nanos();
-            let scheduler_ns = snapshot_start.duration_since(key.ready).as_nanos();
-            let total_ns = observed.duration_since(origin).as_nanos();
-            let accounted_ns = queue_ns + key.command_ns + key.diagnostic_ns + key.reply_ns + scheduler_ns
-                + snapshot_ns + paint.layout_ns + paint.diagnostic_ns + paint.submit_ns + paint.layout_apply_ns;
-            serde_json::json!({"diagnostic":"latency-key","key_sequence":key.sequence,"presentation":presentation,"units":"ns",
-                "queue_ns":key.received.map(|_| queue_ns),"command_ns":key.command_ns,
-                "diagnostic_ns":key.diagnostic_ns,"reply_ns":key.reply_ns,"scheduler_ns":scheduler_ns,
-                "snapshot_ns":snapshot_ns,"layout_ns":paint.layout_ns,"paint_diagnostic_ns":paint.diagnostic_ns,
-                "submit_ns":paint.submit_ns,"layout_apply_ns":paint.layout_apply_ns,
-                "accounted_ns":accounted_ns,"residual_ns":total_ns.checked_sub(accounted_ns),
-                "key_to_command_complete_ns":key.start.duration_since(origin).as_nanos()+key.command_ns,
-                "key_to_render_observed_ns":key.received.map(|_| total_ns),
-                "evaluator_to_render_observed_ns":observed.duration_since(key.start).as_nanos(),
-                "submit_to_render_observed_ns":observed.duration_since(paint.submitted).as_nanos(),
-                "completion_poll_interval_ns":1_000_000,
-                "render_semantics":"renderer-successful-submit-observed-not-compositor-present",
-                "observation_bias":"poll-and-evaluator-scheduling-overestimate"})
-        }).collect()
+    fn record(&self, sequence: u64, ingress: EventTime, outcome: &Outcome, stages: Option<Stages>) -> Value {
+        let ingress_ns = romacs_display_runtime::paint_host::trace_origin()
+            .map(|origin| ingress.into_instant().saturating_duration_since(origin).as_nanos());
+        let mut record = json!({"diagnostic":"latency-key","key_sequence":sequence,"units":"ns","ingress_ns":ingress_ns,
+            "presentation":null,"key_to_first_frame_ns":null});
+        merge(&mut record, outcome_fields(outcome));
+        let origin = ingress.into_instant();
+        if let Some(stages) = stages { merge(&mut record, stage_fields(origin, stages)); }
+        if let Outcome::Rendered(SubmittedFrame { presentation, submitted_at }) | Outcome::Opened(SubmittedFrame { presentation, submitted_at }) = *outcome {
+            merge(&mut record, json!({"presentation":presentation,
+                "key_to_first_frame_ns":submitted_at.saturating_since(ingress).as_nanos()}));
+            if let Some(&(_, paint, snapshot_start, snapshot_ns)) = self.paints.iter().find(|(p, ..)| *p == presentation) {
+                merge(&mut record, paint_fields(paint, snapshot_ns));
+                if let Some(stages) = stages { merge(&mut record, accounted(origin, stages, (paint, snapshot_start, snapshot_ns))); }
+            }
+        }
+        record
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::time::Duration;
+/// ITEM kept among the last `KEPT` of ITEMS.
+fn keep<T>(items: &mut Vec<T>, item: T) {
+    if items.len() == KEPT { items.remove(0); }
+    items.push(item);
+}
 
-    #[test]
-    fn batches_map_each_key_to_next_submission_and_only_matching_completion() {
-        let now = Instant::now();
-        let mut trace = Trace::default();
-        let key = |sequence| Key { sequence, received: Some(now), start: now, ready: now,
-            command_ns: 2, diagnostic_ns: 3, reply_ns: 5 };
-        let paint = || Paint { submitted: now, layout_ns: 7, diagnostic_ns: 11, submit_ns: 13, layout_apply_ns: 17 };
-        let first = trace.sequence();
-        trace.push(key(first));
-        let second = trace.sequence();
-        trace.push(key(second));
-        trace.submitted(7, paint(), now, 0);
-        let third = trace.sequence();
-        trace.push(key(third));
-        assert!(trace.completed(6, now).is_empty());
-        let samples = trace.completed(7, now + Duration::from_nanos(100));
-        assert_eq!(samples.len(), 2);
-        assert_eq!(samples[0]["key_sequence"], 1);
-        assert_eq!(samples[1]["key_sequence"], 2);
-        assert_eq!(samples[0]["presentation"], 7);
-        assert_eq!(samples[0]["accounted_ns"], 58);
-        assert_eq!(samples[0]["residual_ns"], 42);
-        assert!(trace.completed(7, now).is_empty());
-        trace.submitted(8, paint(), now, 0);
-        let samples = trace.completed(8, now);
-        assert_eq!(samples.len(), 1);
-        assert_eq!(samples[0]["key_sequence"], 3);
+/// OUTCOME's name, and `unchanged` or the reason a key was charged no frame.
+fn outcome_fields(outcome: &Outcome) -> Value {
+    match outcome {
+        Outcome::Rendered(_) => json!({"outcome":"rendered"}),
+        Outcome::Opened(_) => json!({"outcome":"opened"}),
+        Outcome::Unchanged => json!({"outcome":"unchanged","unchanged":true}),
+        Outcome::Unattributed(why) => json!({"outcome":"unattributed","unattributed":why.name()}),
     }
+}
 
-    #[test]
-    fn keys_that_change_nothing_are_not_charged_to_a_later_paint() {
-        let now = Instant::now();
-        let mut trace = Trace::default();
-        let key = |sequence| Key { sequence, received: Some(now), start: now, ready: now,
-            command_ns: 2, diagnostic_ns: 0, reply_ns: 0 };
-        let first = trace.sequence();
-        trace.push(key(first));
-        let unchanged = trace.unchanged();
-        assert_eq!(unchanged.len(), 1);
-        assert_eq!(unchanged[0]["unchanged"], true);
-        assert!(unchanged[0]["key_to_render_observed_ns"].is_null());
-        let second = trace.sequence();
-        trace.push(key(second));
-        trace.submitted(9, Paint { submitted: now, layout_ns: 0, diagnostic_ns: 0, submit_ns: 0, layout_apply_ns: 0 }, now, 0);
-        let samples = trace.completed(9, now);
-        assert_eq!(samples.len(), 1);
-        assert_eq!(samples[0]["key_sequence"], 2);
-    }
+fn stage_fields(origin: Instant, stages: Stages) -> Value {
+    let queue_ns = stages.start.saturating_duration_since(origin).as_nanos();
+    json!({"queue_ns":queue_ns,"command_ns":stages.command_ns,"diagnostic_ns":stages.diagnostic_ns,"reply_ns":stages.reply_ns,
+        "key_to_command_complete_ns":queue_ns + stages.command_ns})
+}
+
+fn paint_fields(paint: Paint, snapshot_ns: u128) -> Value {
+    json!({"snapshot_ns":snapshot_ns,"layout_ns":paint.layout_ns,"paint_diagnostic_ns":paint.diagnostic_ns,
+        "submit_ns":paint.submit_ns,"layout_apply_ns":paint.layout_apply_ns})
+}
+
+/// The stages a key delivered and painted by the loop is accounted for by,
+/// up to its paint's submission: a reader's drawn time less this is the
+/// residual.
+fn accounted(origin: Instant, stages: Stages, (paint, snapshot_start, snapshot_ns): (Paint, Instant, u128)) -> Value {
+    let queue_ns = stages.start.saturating_duration_since(origin).as_nanos();
+    let scheduler_ns = snapshot_start.saturating_duration_since(stages.ready).as_nanos();
+    let accounted_ns = queue_ns + stages.command_ns + stages.diagnostic_ns + stages.reply_ns + scheduler_ns
+        + snapshot_ns + paint.layout_ns + paint.diagnostic_ns + paint.submit_ns + paint.layout_apply_ns;
+    json!({"scheduler_ns":scheduler_ns,"accounted_ns":accounted_ns})
+}
+
+fn merge(record: &mut Value, fields: Value) {
+    if let (Value::Object(record), Value::Object(fields)) = (record, fields) { record.extend(fields); }
 }
 
 /// AT on CLOCK_MONOTONIC, in nanoseconds: the clock a process outside the
@@ -139,3 +144,7 @@ pub fn monotonic_ns(at: Instant) -> u128 {
     let now = rustix::time::clock_gettime(rustix::time::ClockId::Monotonic);
     (now.tv_sec as u128 * 1_000_000_000 + now.tv_nsec as u128).saturating_sub(at.elapsed().as_nanos())
 }
+
+#[cfg(test)]
+#[path = "latency_tests.rs"]
+mod tests;
