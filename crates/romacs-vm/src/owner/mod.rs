@@ -177,15 +177,19 @@ mod tests {
     }
 
     #[test]
-    fn a_pong_answering_some_counts_the_rest_from_the_last_ping() {
+    fn a_late_partial_pong_keeps_the_oldest_unanswered_deadline() {
         let (start, delay) = (crate::host::monotonic(), Duration::from_secs(1));
         let mut ping = Ping::default();
         let first = ping.went(start);
-        ping.went(at(start, 500));
+        let second = ping.went(at(start, 500));
         ping.went(at(start, 1000));
+        ping.went(at(start, 1500));
         ping.answered(first);
-        assert!(!ping.wedged(at(start, 1999), delay));
-        assert!(ping.wedged(at(start, 2000), delay));
+        assert!(ping.wedged(at(start, 1500), delay),
+                "the second ping is still unanswered and already 1 s old");
+        ping.answered(second);
+        assert!(!ping.wedged(at(start, 1500), delay),
+                "acknowledging the second ping leaves only younger pings");
     }
 
     #[test]

@@ -13,14 +13,20 @@ const PUMP: &str = "(romacs--isolate-pump 0.01)";
 struct Master(Vm);
 
 impl Master {
-    fn new() -> Self {
+    fn bare() -> Self {
         let mut vm = Vm::new();
         vm.install_lisp_prelude().unwrap();
         let mut master = Self(vm);
         master.run(&format!(
-            "(setq isolate-worker-program {:?} owner (owner--spawn))",
+            "(setq isolate-worker-program {:?} isolate-boot 'bare)",
             env!("CARGO_BIN_EXE_romacs-vm-isolate")
         ));
+        master
+    }
+
+    fn new() -> Self {
+        let mut master = Self::bare();
+        master.run("(setq owner (owner--spawn))");
         master.until(SETUP_TIMEOUT, "owner startup", |m| {
             m.eval("(owner-state owner)") != "starting"
         });
@@ -473,4 +479,335 @@ fn a_lisp_loop_and_a_native_hang_miss_the_wedge_deadline() {
     check_wedge("native hang", |ready| {
         format!("(romacs--test-block 12 {ready})")
     });
+}
+
+#[test]
+fn preparing_zygote_retirement_preserves_its_accepted_owner() {
+    let mut master = Master::bare();
+    master.run(
+        "(setq isolate-zygote-limit 1
+               first (owner--spawn)
+               pending (owner-call first '+ 1 1))",
+    );
+    assert_eq!(
+        master.eval("(list (nth 1 (isolate-zygote nil)) (owner-state first))"),
+        "(preparing starting)"
+    );
+    // Admission may refuse the replacement while the original is starting.
+    master.run(
+        "(condition-case nil (owner--spawn '(isolate))
+           (isolate-process-limit nil))",
+    );
+    assert_eq!(
+        master.eval(
+            "(list (condition-case e (isolate-await pending 10)
+                     (isolate-error (car e)))
+                   (owner-state first))"
+        ),
+        "(2 live)"
+    );
+}
+
+fn record_owner_events(master: &mut Master) {
+    master.run(
+        "(setq owner-test-events nil
+               isolate-message-functions
+               (list (lambda (_sender event) (push event owner-test-events))))",
+    );
+}
+
+// Reap the children while still in the call, without dispatching filters
+// or sentinels. The next idle turn cannot rely on a live child's pidfd.
+const REAP_BEFORE_DISPATCH: &str = "
+    (let ((end (+ (float-time) 10)))
+      (while (and (memq 'run (mapcar #'process-status children))
+                  (< (float-time) end))
+        (romacs--isolate-wait 0.01)
+        (romacs--proc-reap)))
+    (unless (equal (mapcar #'process-status children)
+                   (make-list (length children) 'exit))
+      (error \"children did not exit before the idle pass\"))";
+
+#[test]
+fn idle_owner_delivers_reaped_child_sentinels_without_another_frame() {
+    let mut master = Master::new();
+    record_owner_events(&mut master);
+    assert_eq!(
+        master.eval(&format!(
+            r#"
+            (isolate-await
+             (owner-call owner '(lambda ()
+                (setq owner-output-batch 1)
+                (let (children)
+                  (dotimes (i 4)
+                    (push (make-process
+                           :name (format "p%d" i) :command '("/bin/sh" "-c" "printf x")
+                           :connection-type 'pipe :noquery t
+                           :filter (lambda (p _)
+                                     (isolate-send 'parent (list 'filter (process-name p))))
+                           :sentinel (lambda (p _)
+                                       (isolate-send 'parent (list 'sentinel (process-name p)))))
+                          children))
+                  {REAP_BEFORE_DISPATCH}
+                  'reaped)))
+             15)"#,
+        )),
+        "reaped"
+    );
+    assert_eq!(
+        master.eval(
+            "(let ((end (+ (float-time) 3)))
+               (while (and (< (length owner-test-events) 8) (< (float-time) end))
+                 (romacs--isolate-pump 0.05))
+               (let ((events (reverse owner-test-events)) (complete t))
+                 (dotimes (i 4)
+                   (let* ((name (format \"p%d\" i))
+                          (child (delq nil
+                                       (mapcar (lambda (e) (and (equal (nth 1 e) name) (car e)))
+                                               events))))
+                     (unless (equal child '(filter sentinel))
+                       (setq complete nil))))
+                 (list (length events) complete)))"
+        ),
+        "(8 t)",
+        "reaped output must reach its sentinel in the real idle loop"
+    );
+}
+
+fn prepare_connection_batch(master: &mut Master, port: u16, ready: &Path) {
+    let ready = literal(ready);
+    master.run(&format!(
+        r#"(setq pending
+             (owner-call owner '(lambda (port)
+                (setq owner-test-observed nil)
+                (let ((children
+                       (list (make-process
+                              :name "exited-child" :command '("/bin/sh" "-c" "printf x")
+                              :connection-type 'pipe :noquery t
+                              :filter (lambda (_ _) (push 'child-filter owner-test-observed))
+                              :sentinel (lambda (_ _) (push 'child-end owner-test-observed))))))
+                  {REAP_BEFORE_DISPATCH})
+                (make-network-process :name "owner-test-client" :host "127.0.0.1"
+                   :service port :family 'ipv4 :nowait t :noquery t
+                   :sentinel (lambda (_ _) (push 'connected owner-test-observed)))
+                (let ((end (+ (float-time) 10)) (owner-output-batch 1))
+                  (while (and (not (file-exists-p {ready})) (< (float-time) end))
+                    (romacs--isolate-wait 0.01))
+                  (unless (file-exists-p {ready}) (error "server never accepted the connection"))
+                  (romacs--isolate-run-between)
+                  (list (length owner-test-observed) (reverse owner-test-observed))))
+              {port}))"#,
+    ));
+}
+
+#[test]
+fn ready_connection_sentinel_respects_the_batch_bound() {
+    let markers = Markers::new();
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let mut master = Master::new();
+    prepare_connection_batch(
+        &mut master,
+        listener.local_addr().unwrap().port(),
+        &markers.ready(),
+    );
+    let mut peer = None;
+    // Accept confirms the handshake without consuming the owner's pending
+    // connect event. Keep the accepted socket open until the pass returns.
+    master.until(
+        SETUP_TIMEOUT,
+        "loopback TCP handshake",
+        |_| match listener.accept() {
+            Ok((socket, _)) => {
+                peer = Some(socket);
+                true
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => false,
+            Err(error) => panic!("accepting the test connection: {error}"),
+        },
+    );
+    std::fs::write(markers.ready(), []).unwrap();
+    let out = master.eval("(isolate-await pending 15)");
+    drop(peer);
+    assert!(
+        out.starts_with("(1 ("),
+        "expected exactly one callback in the first idle pass: {out}"
+    );
+}
+
+#[test]
+fn a_subnanosecond_ping_delay_cannot_become_an_immediate_wedge() {
+    let mut master = Master::new();
+    let out = master.eval(
+        "(let* ((owner-wedge-delay 1e-100)
+                (id (romacs--isolate-id (owner--isolate owner)))
+                (native (condition-case nil (romacs--owner-ping id 1e-100 t)
+                          (args-out-of-range 'rejected))))
+           (list (romacs--owner-wedge-delay)
+                 (or (eq native 'rejected)
+                     (and (not (car native)) (> (nth 1 native) 0)))
+                 native))",
+    );
+    assert!(
+        out.starts_with("(1.0 t "),
+        "tiny values must fall back in Lisp and be rejected or safely normalized in Rust: {out}"
+    );
+}
+
+#[test]
+fn a_signalling_refusal_callback_leaves_no_owner_or_zygote_pending() {
+    let mut master = Master::bare();
+    master.run(
+        "(setq req '(romacs-owner-test-missing-feature)
+               first (owner--spawn req)
+               fa (owner-call first '+ 1 1)
+               second (owner--spawn req)
+               fb (owner-call second '+ 2 2)
+               zygote (aref (gethash req romacs--isolate-zygotes) 1)
+               callback-count 0)
+         (isolate-on-done fb (lambda (f)
+                             (setq callback-count (1+ callback-count))
+                             (isolate-await f)))",
+    );
+    assert_eq!(
+        master.eval("(list (owner-state first) (owner-state second))"),
+        "(starting starting)"
+    );
+    let got = master.eval(
+        "(let ((end (+ (float-time) 5)))
+           (while (and (< (float-time) end)
+                       (or (not (isolate-future-done-p fa)) (not (isolate-future-done-p fb))
+                           (memq zygote romacs--isolates)))
+             (condition-case nil (romacs--isolate-pump 0.05) (isolate-zygote-refused nil)))
+           (list (owner-state first) (owner-state second)
+                 (condition-case e (isolate-await fa 0) (isolate-error (car e)))
+                 (condition-case e (isolate-await fb 0) (isolate-error (car e)))
+                 (and (memq zygote romacs--isolates) t)
+                 callback-count))",
+    );
+    assert_eq!(
+        got,
+        "(refused refused isolate-zygote-refused isolate-zygote-refused nil 1)"
+    );
+}
+
+#[test]
+fn admitting_owners_leaves_room_for_a_pooled_job() {
+    let mut master = Master::bare();
+    master.run(
+        "(setq isolate-pool-size 1 isolate-zygote-limit 1
+               isolate-process-limit 4 isolate-zygotes t admitted nil)
+         (catch 'full
+           (dotimes (_ 4)
+             (condition-case nil
+                 (let ((candidate (owner--spawn)))
+                   (isolate-await (owner-call candidate 'identity t) 10)
+                   (push candidate admitted))
+               (isolate-process-limit (throw 'full nil)))))",
+    );
+    assert_eq!(master.eval("(and admitted t)"), "t");
+    // Either cap owner admission or budget the pool separately. Already
+    // admitted owners must stay live when the ordinary pooled job runs.
+    let out = master.eval(
+        "(list (condition-case e (isolate-await (isolate-spawn '+ 20 22) 10)
+                     (isolate-error (car e)))
+                   (mapcar #'owner-state admitted))",
+    );
+    assert!(
+        out.starts_with("(42 "),
+        "admitting owners consumed the pool's process allowance: {out}"
+    );
+    assert_eq!(
+        master.eval("(delq 'live (mapcar #'owner-state admitted))"),
+        "nil"
+    );
+}
+
+#[test]
+fn killing_an_unforked_job_preserves_its_zygote_and_owner() {
+    let mut master = Master::new();
+    master.run(
+        "(setq zygote (gethash nil romacs--isolate-zygotes)
+               zid (romacs--isolate-id (aref zygote 1)))
+         (romacs--isolate-signal zid 19)",
+    );
+    let pid = master.eval("(romacs--isolate-pid zid)");
+    // Wait for the kernel stop, so queuing the fork cannot race SIGSTOP.
+    master.until(SETUP_TIMEOUT, "zygote SIGSTOP", |_| {
+        std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|stat| {
+            stat.rsplit_once(") ")
+                .is_some_and(|(_, tail)| tail.starts_with("T "))
+        })
+    });
+    assert_eq!(
+        master.eval(
+            "(unwind-protect
+                 (let* ((job (romacs--isolate-zygote-fork zygote))
+                        (pending (romacs--isolate-submit job 'identity '(unwanted) nil nil nil))
+                        (isolate-kill-timeout 0.15))
+                   (when (romacs--isolate-pid (romacs--isolate-id job))
+                     (error \"test job already forked\"))
+                   (isolate-kill job)
+                   (condition-case e (isolate-await pending 0) (isolate-error (car e))))
+               (condition-case nil (romacs--isolate-signal zid 18) (error nil)))"
+        ),
+        "isolate-killed"
+    );
+    assert_eq!(
+        master.eval(
+            "(list (condition-case nil (romacs--isolate-pid zid) (error nil))
+                   (condition-case e (isolate-await (owner-call owner '+ 1 2) 10)
+                     (isolate-error (car e))))"
+        ),
+        format!("({pid} 3)"),
+        "killing the unforked job killed or disconnected its zygote or owner"
+    );
+}
+
+fn owner_survives_idle_quit(turn: &str) {
+    let mut master = Master::new();
+    record_owner_events(&mut master);
+    assert_eq!(
+        master.eval(&format!("(isolate-await (owner-call owner '{turn}) 10)")),
+        "armed"
+    );
+    master.until(SETUP_TIMEOUT, "idle callback entry", |m| {
+        m.eval("(memq 'entered owner-test-events)") != "nil"
+    });
+    assert_eq!(
+        master.eval(
+            "(condition-case e (isolate-await (owner-call owner '+ 4 5) 10)
+               (isolate-error (car e)))"
+        ),
+        "9",
+        "the idle callback quit must leave the same owner serving"
+    );
+}
+
+#[test]
+fn an_idle_filter_quit_ends_its_turn_without_ending_the_owner() {
+    owner_survives_idle_quit(
+        r#"(lambda ()
+           (make-process :name "quitting-filter" :command '("/bin/sh" "-c" "printf x")
+             :connection-type 'pipe :noquery t
+             :filter (lambda (_ _) (isolate-send 'parent 'entered) (signal 'quit nil)))
+           'armed)"#,
+    );
+}
+
+#[test]
+fn an_idle_timer_quit_ends_its_turn_without_ending_the_owner() {
+    // The bare worker has no GNU timer library. Use its timer vector ABI
+    // and a one-shot handler so the real between-call timer pass runs it.
+    owner_survives_idle_quit(
+        "(lambda ()
+           (defun timer-event-handler (timer)
+             (setq timer-list (delq timer timer-list))
+             (apply (aref timer 5) (aref timer 6)))
+           (setq timer-list
+                 (list (vector nil 0 0 0 nil
+                               (lambda () (isolate-send 'parent 'entered) (signal 'quit nil))
+                               nil nil 0 nil)))
+           'armed)",
+    );
 }
