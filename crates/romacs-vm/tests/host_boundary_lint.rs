@@ -891,8 +891,7 @@ fn problems(sites: &[Violation], comments: &[Tag]) -> Vec<String> {
     out
 }
 
-/// L1-0's boundary classes, one to a host access (owner-log `l1-0/SPEC.md`,
-/// L1 design §2.3): `block` may wait on an outside peer; `escape` is an
+/// L1-0's boundary classes, one to a host access (L1 design §2.3): `block` may wait on an outside peer; `escape` is an
 /// effect another party can observe; `acquisition` makes an outside
 /// resource; `take` consumes host input without blocking; `logged-inverse`
 /// is a host write the VM can undo; `pure` is a query with no outside effect.
@@ -912,7 +911,8 @@ const DESCRIPTOR: &[Api] = &[
          "rustix::net::recv*", "libc::read", "libc::pread*", "libc::readv", "libc::recv*", "io::stdin("),
     api!("descriptor:write", "rustix::io::write", "rustix::io::pwrite", "rustix::io::writev", "rustix::io::pwritev*",
          "rustix::net::send*", "rustix::net::shutdown", "libc::write", "libc::pwrite*", "libc::writev", "libc::send*",
-         "libc::shutdown", ".write_all(", ".sync_all(", ".sync_data(", ".set_len("),
+         "libc::shutdown", ".write_all(", ".sync_all(", ".sync_data(", ".set_len(",
+         ".set_permissions("),
     api!("descriptor:wait", "rustix::event::poll", "rustix::event::epoll*", "rustix::event::select", "rustix::process::wait*",
          "libc::poll", "libc::ppoll", "libc::select", "libc::pselect", "libc::epoll_wait", "libc::wait*"),
     api!("descriptor:control", "rustix::termios::tcset*", "rustix::termios::tcflush", "rustix::termios::tcdrain",

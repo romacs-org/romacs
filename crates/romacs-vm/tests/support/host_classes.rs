@@ -1,4 +1,4 @@
-//! The host class census (L1-0, owner-log `l1-0/SPEC.md`): a child of
+//! The host class census (L1-0): a child of
 //! `host_boundary_lint`, whose scanner lists its rows (`file_scan`) and reads
 //! the HOST comments that class them.
 use super::{BOUNDARY, BOUNDARY_MODULES, CLASSES, CRATES, Row, Tag, fences_state, file_scan, known, repository, roots, scan};

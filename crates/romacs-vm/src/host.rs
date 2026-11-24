@@ -686,7 +686,7 @@ pub const RUNTIME_RECORD: &str = "romacs-runtime-root";
 /// directory linking its lisp/ and etc/, or the tree the executable's place
 /// gives, is the same tree), and its generation. A tree that has stopped being this executable's is noted,
 /// and that build is not published; the session goes on.
-// HOST(pure): reads the environment, the arguments or a path: a query
+// HOST(escape): finds the runtime tree by path; on failure prints why on stderr and exits
 pub fn runtime_root() -> PathBuf {
     found_runtime().unwrap_or_else(|why| {
         eprintln!("romacs: no usable runtime tree: {why}\n  \
@@ -703,7 +703,7 @@ pub fn runtime_root() -> PathBuf {
 /// # Errors
 ///
 /// Why no runtime tree was found ([`runtime_root`]).
-// HOST(pure): reads the environment, the arguments or a path: a query
+// HOST(block): finds the runtime tree, reading its record by path once per process: a FIFO blocks
 pub fn runtime_lisp(path: &str) -> Result<PathBuf, String> {
     found_runtime().map(|root| root.join("lisp").join(path))
 }
@@ -840,7 +840,7 @@ pub const SOURCE_LINK: &str = "source";
 /// same one, as the link belongs to the runtime tree.  The checks are kinds
 /// of entry, not stats: a world built while the tree is edited stays valid
 /// when a file under it is added or renamed, or a commit touches `.git`.
-// HOST(pure): reads the environment, the arguments or a path: a query
+// HOST(block): finds the runtime tree, reading its record by path once per process: a FIFO blocks
 pub fn source_directory() -> Option<PathBuf> {
     source_directory_from(per_process_env("ROMACS_SOURCE_DIRECTORY"), || found_runtime().ok(), &build_root())
 }
@@ -1022,7 +1022,7 @@ pub fn probe(kind: Probe, path: impl AsRef<Path>) -> bool {
     observed
 }
 
-// HOST(pure): a stat, a listing or a path query
+// HOST(pure): a stat; the flight recorder's own retime and log are no boundary
 pub fn metadata(path: impl AsRef<Path>) -> io::Result<Metadata> {
     let absolute = flight_path(path.as_ref());
     let result = crate::flight::stat("stat", || bytes(path.as_ref()), absolute.as_deref(), false, || std::fs::metadata(&path),
@@ -1039,7 +1039,7 @@ pub fn metadata(path: impl AsRef<Path>) -> io::Result<Metadata> {
 /// this answer: every process asks it again (`startup_directory`), and
 /// nothing of either stat is recorded, as a copy or restore of the store
 /// gives the builder's pinned directory another device and inode.
-// HOST(pure): a stat, a listing or a path query
+// HOST(pure): stats DIR and the working directory; the flight recorder's own retime and log are no boundary
 pub fn names_working_directory(dir: &Path) -> bool {
     use std::os::unix::fs::MetadataExt;
     let stat = |path: &Path| {
@@ -1050,7 +1050,7 @@ pub fn names_working_directory(dir: &Path) -> bool {
     matches!((stat(dir), stat(Path::new("."))), (Ok(a), Ok(b)) if a.dev() == b.dev() && a.ino() == b.ino())
 }
 
-// HOST(pure): a stat, a listing or a path query
+// HOST(pure): a stat; the flight recorder's own retime and log are no boundary
 pub fn symlink_metadata(path: impl AsRef<Path>) -> io::Result<Metadata> {
     let absolute = flight_path(path.as_ref());
     let result = crate::flight::stat("lstat", || bytes(path.as_ref()), absolute.as_deref(), false, || std::fs::symlink_metadata(&path),
@@ -1062,7 +1062,7 @@ pub fn symlink_metadata(path: impl AsRef<Path>) -> io::Result<Metadata> {
 }
 
 /// fstat on an output file this module opened.
-// HOST(pure): a stat, a listing or a path query
+// HOST(pure): an fstat; the flight recorder's own retime and log are no boundary
 pub fn file_metadata(file: &File) -> io::Result<Metadata> {
     crate::flight::stat("fstat", String::new, None, true, || file.metadata(), |s, ns| retime_file(file, s, ns))
 }
@@ -1185,7 +1185,7 @@ pub fn random_source() -> io::Result<Input> {
 
 impl Input {
     /// fstat.
-    // HOST(pure): a stat, a listing or a path query
+    // HOST(pure): an fstat; the flight recorder's own retime and log are no boundary
     pub fn stat(&self) -> io::Result<Metadata> {
         let path = match &self.3 { Source::File(path) => path.as_deref(), Source::Entropy => None };
         let result = crate::flight::stat("fstat", || self.3.what(), path, false, || self.0.metadata(),
@@ -1615,7 +1615,7 @@ pub fn same_fact(recorded: &Json, now: &Json) -> bool {
 /// The record a keyed RECORD's query makes now, its site aside: the host's
 /// present answer to the same question, asked the same way (§6.4). None for
 /// a record that asks the host nothing.
-// HOST(pure): asks a keyed query again: a query
+// HOST(escape): asks a keyed query again: reads by path, and reaches runtime_root, which may exit
 pub fn replay(record: &Json) -> Option<Json> {
     let kind = record["kind"].as_str()?;
     let path = || decoded(&record["path"]).map(|bytes| PathBuf::from(OsString::from_vec(bytes)));
@@ -1831,14 +1831,14 @@ pub fn egid() -> u32 {
 
 // User database.
 
-// HOST(pure): a process, user or system query
+// HOST(block): an NSS lookup, which can wait on sssd or LDAP
 pub fn user_by_uid(uid: u32, buffer: usize) -> Result<Passwd, i32> {
     let result = sys::passwd(Ok(uid), buffer);
     user_db(json!({"uid": uid}), &result);
     result
 }
 
-// HOST(pure): a process, user or system query
+// HOST(block): an NSS lookup, which can wait on sssd or LDAP
 pub fn user_by_name(name: &CStr, buffer: usize) -> Result<Passwd, i32> {
     let result = sys::passwd(Err(name), buffer);
     user_db(json!({"name": encoded(name.to_bytes())}), &result);
@@ -1859,7 +1859,7 @@ fn user_db(key: Json, result: &Result<Passwd, i32>) {
 
 /// getgrgid_r into a BUFFER-byte buffer: the group's name, or the status, 0
 /// when there is none.
-// HOST(pure): a process, user or system query
+// HOST(block): an NSS lookup, which can wait on sssd or LDAP
 pub fn group_by_gid(gid: u32, buffer: usize) -> Result<Vec<u8>, i32> {
     let result = sys::group(Ok(gid), buffer).and_then(|(name, _)| name.ok_or(0));
     if building() {
@@ -1870,7 +1870,7 @@ pub fn group_by_gid(gid: u32, buffer: usize) -> Result<Vec<u8>, i32> {
 }
 
 /// The group NAME names: its gid.
-// HOST(pure): a process, user or system query
+// HOST(block): an NSS lookup, which can wait on sssd or LDAP
 pub fn group_by_name(name: &CStr, buffer: usize) -> Result<u32, i32> {
     let result = sys::group(Err(name), buffer).map(|(_, gid)| gid);
     if building() {
@@ -2068,7 +2068,7 @@ pub fn page_size() -> u64 {
 }
 
 /// A time-zone file's bytes: `/etc/localtime`, a TZ file or a zoneinfo entry.
-// HOST(pure): reads a time-zone file, a regular file
+// HOST(block): reads a time-zone file by path, which TZ may name: a FIFO there blocks
 pub fn zone_file(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
     read_file(path)
 }
@@ -2377,7 +2377,7 @@ pub fn spawn_child(argv: &[Vec<u8>], env: &[Vec<u8>], dir: &[u8], fds: [std::os:
 
 /// A file of a world store, opened for reading: the store's own, never a
 /// fact of a build.
-// HOST(pure): reads a world store's regular file or directory, never blocking on what is no file
+// HOST(block): a bare open by path, with no O_NONBLOCK: a FIFO there blocks; a regular file is pure
 pub fn open_world_file(path: impl AsRef<Path>) -> io::Result<File> {
     File::open(path)
 }
@@ -2827,7 +2827,7 @@ pub fn drain_isolate_wake() {
 /// For `romacs--test-block' alone (prims/block_test_hooks.rs): write the
 /// file READY, then sleep SECONDS polling nothing, std's sleep retrying a
 /// signal's EINTR, so no signal ends the wait. Test builds only.
-// HOST(block): the test hook made to block: READY, the file it writes first, only says it is about to
+// HOST(acquisition): the test hook that blocks, but first makes the file READY (acquisition comes first)
 #[cfg(any(test, feature = "test-hooks"))]
 pub fn test_block(ready: &Path, seconds: u64) -> io::Result<()> {
     std::fs::write(ready, b"")?;
@@ -3950,7 +3950,7 @@ pub fn on_stall_take(look: fn()) { let _ = STALL_LOOK.set(look); }
 /// session is ENDING, the records brought up to date first and the stall
 /// still going last (it ends inside it), and how many were dropped
 /// meanwhile.
-// HOST(take): takes the stall records the watchdog thread kept from its clocks: consumed, nonblocking
+// HOST(pure): drains stall records kept between this process's threads: no host access
 pub fn take_stalls(ending: bool) -> (Vec<String>, u64) {
     if ending && let Some(look) = STALL_LOOK.get() { look(); }
     let (mut lines, dropped) = std::mem::take(&mut *inspect_lock(&STALLS));

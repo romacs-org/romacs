@@ -387,6 +387,7 @@ impl ImageBuilder {
                 file.write_all(bytes).map_err(|e| e.to_string())?;
                 // HOST(escape): forces the code-image store's writes to disk: no inverse
                 file.sync_all().map_err(|e| e.to_string())?;
+                // HOST(escape): makes the code-image store's new file read-only: metadata others see
                 file.set_permissions(std::fs::Permissions::from_mode(0o444))
                     .map_err(|e| e.to_string())?;
                 // HOST(std::fs, acquisition): the code-image store, reached only through the vm2 adapter's

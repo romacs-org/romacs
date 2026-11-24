@@ -117,8 +117,13 @@ possible; say so where you do.
   must know of it, `Plain` when it holds no Lisp value. The classes are `Behind`'s
   in `crates/romacs-vm/tests/no_remote_references.rs`, which checks each.
 - A host query or effect (files, environment, clocks, processes) outside
-  `crates/romacs-vm/src/host.rs` carries `// HOST(API): reason` in the
-  comment lines directly above it; the `host_boundary_lint` test checks each.
+  `crates/romacs-vm/src/host.rs` carries `// HOST(API[, CLASS]): reason` in the
+  comment lines directly above it. Each function host.rs gives the workspace,
+  and each descriptor or standard-stream operation outside it, carries
+  `// HOST(CLASS): reason`. CLASS is one of `block` (may wait on a peer),
+  `escape` (seen outside, with no inverse), `acquisition` (makes a resource),
+  `take` (consumes input without waiting), `logged-inverse` (a write the VM
+  can undo) or `pure` (a query). The `host_boundary_lint` test checks each.
 - The render thread takes its time from the frame: a `FrameSample`, an
   `EventTime` or a `FutureDeadline`. A raw clock read there (`Instant::now()`,
   `.elapsed()`) carries `// CLOCK: reason` in the comment lines directly above

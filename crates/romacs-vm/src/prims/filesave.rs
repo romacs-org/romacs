@@ -641,6 +641,7 @@ fn copy_staged(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
         Some(default)
     };
     if let Some(mode) = mode {
+        // HOST(escape): `write-region`'s mode on the file it wrote: metadata others see, with no inverse
         output.set_permissions(std::fs::Permissions::from_mode(mode))
             .map_err(|e| errno(cx, "Copying permissions to", &[newname], e))?;
     }
