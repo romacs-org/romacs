@@ -949,37 +949,56 @@ caller's match data preserved."
 first reading what remains of its output.  GNU's got_some_output.  With
 no call left (`romacs--process-dispatches') it stops at the process it is
 on, which stays changed: a later one reads the rest of its output, then
-runs its sentinel."
-  (let ((got -1) (held nil))
+runs its sentinel.  A callback that leaves the pass leaves what
+`romacs--process-status-row' says: in a worker's bounded pass, every
+status not yet notified stays pending; in the master, GNU's loss."
+  (let ((got -1) (held nil) (stage 'between) (current nil) (procs (process-list)))
     (romacs--proc-ticks-acknowledge)
-    (dolist (proc (process-list))
-      (if (and (not held) (romacs--proc-changed proc))
-          (let ((more t) (drained nil))
-            (unwind-protect
-                (progn
-                  (while (and more
-                              (not (romacs--process-spent-p))
-                              (not (eq (process-filter proc) t))
-                              (not (romacs--connecting-p proc))
-                              (not (eq (romacs--proc-get proc 'status) 'listen))
-                              (not (eq (process-command proc) t))
-                              (romacs--proc-get proc 'infd)
-                              (not (eq proc deleting)))
-                    (let ((nread (romacs--read-process-output proc)))
-                      (if (and (or (null wait-proc) (eq wait-proc proc)) (< got nread))
-                          (setq got nread))
-                      (if (<= nread 0) (setq more nil))))
-                  (setq drained t))
-              ;; A bounded pass (a worker's loop, which serves on after a
-              ;; filter's quit) keeps the status of a process whose filter
-              ;; exited pending: its sentinel has not run.  GNU loses it,
-              ;; as the master does.
-              (when (and (not drained) romacs--process-dispatches)
-                (romacs--proc-tick proc)))
-            (if (romacs--process-spent-p)
-                (progn (romacs--proc-tick proc) (setq held t))
-              (romacs--exec-sentinel proc (romacs--proc-status-finish proc))))))
+    (unwind-protect
+        (progn
+          (while procs
+            (let ((proc (pop procs)))
+              (when (and (not held) (romacs--proc-changed proc))
+                (setq current proc stage 'draining)
+                (setq got (max got (romacs--status-drain proc deleting wait-proc)))
+                (if (romacs--process-spent-p)
+                    (progn (romacs--process-status-apply (romacs--process-status-row stage 'spent t nil) proc)
+                           (setq held t))
+                  (setq stage 'sentinel)
+                  (romacs--exec-sentinel proc (romacs--proc-status-finish proc)))
+                (setq stage 'between current nil))))
+          (setq stage nil))
+      (when stage
+        (romacs--process-status-apply
+         (romacs--process-status-row stage 'exit (and romacs--process-dispatches t) (and procs t)) current)))
     got))
+
+(defun romacs--status-drain (proc deleting wait-proc)
+  "Read what remains of PROC's output for `romacs--status-notify', while
+filter calls are left: the most read at once, as got_some_output counts
+it for WAIT-PROC (any process when nil), or -1.  DELETING is not read."
+  (let ((more t) (got -1))
+    (while (and more
+                (not (romacs--process-spent-p))
+                (not (eq (process-filter proc) t))
+                (not (romacs--connecting-p proc))
+                (not (eq (romacs--proc-get proc 'status) 'listen))
+                (not (eq (process-command proc) t))
+                (romacs--proc-get proc 'infd)
+                (not (eq proc deleting)))
+      (let ((nread (romacs--read-process-output proc)))
+        (if (and (or (null wait-proc) (eq wait-proc proc)) (< got nread))
+            (setq got nread))
+        (if (<= nread 0) (setq more nil))))
+    got))
+
+(defun romacs--process-status-apply (effects proc)
+  "Carry out EFFECTS of `romacs--process-status-row' on PROC: `re-tick'
+keeps its status changed, `raise' the global tick so a later pass visits
+the processes this one did not."
+  (dolist (effect effects)
+    (cond ((eq (car effect) 're-tick) (romacs--proc-tick proc))
+          ((eq (car effect) 'raise) (romacs--proc-tick nil)))))
 
 ;;;; Timers
 

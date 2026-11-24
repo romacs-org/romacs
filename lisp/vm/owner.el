@@ -70,15 +70,16 @@ call fails the owner is `refused', and killed: a zygote refused meanwhile
 `isolate-zygote-refused' and the reason, a feature absent in it with
 `owner-unprepared'.  `isolate-process-limit' without room for its
 process; `isolate-zygote-refused' when REQUIRE's zygote was refused."
-  (let ((zygote (romacs--isolate-zygote-for require t)))
-    (cond ((null zygote)
-           (signal 'isolate-process-limit (list (length romacs--isolates) (isolate--process-limit))))
-          ((eq (aref zygote 3) 'refused)
-           (signal 'isolate-zygote-refused (list (aref zygote 6))))
-          ;; Owners count against `isolate-process-limit' among themselves
-          ;; and the pool's processes; the pool's own room leaves them out.
-          ((not (romacs--isolate-admit-p 'owner require))
-           (signal 'isolate-process-limit (list (length romacs--isolates) (isolate--process-limit)))))
+  (let ((zygote (romacs--isolate-zygote-for require nil)))
+    (when (and zygote (eq (aref zygote 3) 'refused))
+      (signal 'isolate-zygote-refused (list (aref zygote 6))))
+    ;; The whole owner, the zygote it needs included, is admitted before
+    ;; anything changes; owners count against `isolate-process-limit'
+    ;; among themselves and the pool's processes, and end no worker for
+    ;; room (`romacs--isolate-admission').
+    (unless (and (romacs--isolate-admit-p 'owner require (if zygote 1 2))
+                 (setq zygote (or zygote (romacs--isolate-zygote-for require t))))
+      (signal 'isolate-process-limit (list (length romacs--isolates) (isolate--process-limit))))
     (let* ((isolate (romacs--isolate-zygote-child zygote))
            (start (progn (aset isolate 10 'owner)
                          (romacs--isolate-submit isolate 'owner--start (list require) nil nil nil)))

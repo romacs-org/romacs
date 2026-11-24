@@ -475,9 +475,20 @@ fn proc_changed(cx, process: Value) {
 }}
 
 // Mark PROCESS's status as changed, as GNU's `p->tick = ++process_tick' does: the next
-// status notification reports it.  Returns nil.
+// status notification reports it.  With PROCESS nil, raise the global tick alone,
+// no process's own moved: the next notification visits every process whose status
+// it has not notified (a worker's bounded pass, `romacs--process-status-row').
+// Returns nil.
 defsubr! { name = "romacs--proc-tick", gnu = "romacs:process", effect = Global,
-fn proc_tick(cx, process: Value) { check_process(cx, process)?; cx.process_tick(process); Ok(Value::NIL) }}
+fn proc_tick(cx, process: Value) {
+    if process == Value::NIL {
+        cx.process_ticks_raise();
+    } else {
+        check_process(cx, process)?;
+        cx.process_tick(process);
+    }
+    Ok(Value::NIL)
+}}
 
 defsubr! { name = "romacs--proc-status-finish", gnu = "process.c:7889", effect = Global,
 fn proc_status_finish(cx, process: Value) { cx.process_status_finish(process) }}

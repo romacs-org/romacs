@@ -353,6 +353,10 @@ impl Leaf<'_> {
     pub(crate) fn process_ticks_acknowledge(&mut self) {
         self.vm.subprocesses.update_tick = self.vm.subprocesses.tick;
     }
+    /// Make the global tick pending again, no process's own tick moved.
+    pub(crate) fn process_ticks_raise(&mut self) {
+        self.vm.subprocesses.tick += 1;
+    }
     /// status_notify after the drain: update the status, deactivate or
     /// remove a finished process, and return the sentinel's message.
     pub(crate) fn process_status_finish(&mut self, proc: Value) -> Out {

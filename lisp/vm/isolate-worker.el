@@ -166,28 +166,23 @@ owner's process output back at most one round."
 
 (defun romacs--isolate-serve ()
   "The worker's loop, an owner's too (ownership design O1 §2.4), until bye
-or termination.  Each round takes every frame from the parent and runs
-the queued jobs in order, then at most `owner-output-batch' dispatches of
-process output and the due timers, then waits on the parent, the
-processes and the next timer.  So a stream of output never holds a queued
-job back more than one round."
+or termination.  Each round is `romacs--isolate-round-plan''s: it takes
+its calls once, at its head, then at most `owner-output-batch'
+dispatches of process output and the due timers; then, unless calls are
+queued, it waits on the parent, the processes and the next timer, and
+only notes what arrived, for the next round's head.  So a stream of
+output never holds a queued call back more than one round, nor a call a
+batch of ready output."
   (setq romacs--isolate-serving t)
   ;; A zygote told to end forks first the children asked for before it
   ;; was: its spawner waits for them.
   (while (and (or romacs--isolate-serving (and romacs--isolate-zygote romacs--isolate-forks))
               (not (romacs--isolate-terminated-p)))
-    ;; A signal between jobs: its frame, if any, names a queued job.
-    (romacs--isolate-interrupted-p)
-    (romacs--isolate-run-forks)
-    (romacs--isolate-run-queued)
-    (let ((timeout (and romacs--isolate-serving (not romacs--isolate-zygote) (romacs--isolate-run-turns))))
-      ;; What a wait inside a job, a filter or a timer read and queued in
-      ;; Rust while it answered pings: taken now, since no socket says so.
-      (romacs--isolate-note-control-frames)
-      (when (and romacs--isolate-serving (null romacs--isolate-deferred)
-                 (or (null romacs--isolate-forks) (not romacs--isolate-zygote)))
-        (romacs--isolate-wait timeout (and (process-list) t))
-        (romacs--isolate-serve-frames))))
+    (let ((timeout nil))
+      (dolist (step (romacs--isolate-round-plan (list :zygote romacs--isolate-zygote)))
+        (setq timeout (or (romacs--isolate-round-step step) timeout)))
+      (dolist (step (romacs--isolate-wait-plan (romacs--isolate-loop-facts)))
+        (romacs--isolate-round-step step timeout))))
   ;; A zygote told to end outlives its children (they die with it),
   ;; forking no more.
   (when romacs--isolate-zygote
@@ -195,6 +190,26 @@ job back more than one round."
       (setq romacs--isolate-forks nil)
       (romacs--isolate-wait nil)
       (romacs--isolate-note-control-frames))))
+
+(defun romacs--isolate-loop-facts ()
+  "What `romacs--isolate-wait-plan' knows of this worker now."
+  (list :serving romacs--isolate-serving :queued (and romacs--isolate-deferred t)
+        :forks (and romacs--isolate-forks t) :zygote romacs--isolate-zygote))
+
+(defun romacs--isolate-round-step (step &optional timeout)
+  "Carry out STEP of a worker's round (`romacs--isolate-round-plan'):
+`interrupts' (a signal between jobs: its frame, if any, names a queued
+job), `forks', `calls' (the jobs queued now), `turns' (output, sentinels
+and timers: the seconds the wait may last), `note' (frames a wait inside
+a job, a filter or a timer read and queued in Rust, or the wait itself,
+since no socket says so again), `wait' (up to TIMEOUT)."
+  (cond ((eq step 'interrupts) (romacs--isolate-interrupted-p) nil)
+        ((eq step 'forks) (romacs--isolate-run-forks) nil)
+        ((eq step 'calls) (romacs--isolate-run-queued) nil)
+        ;; A worker that became a zygote in this round's calls runs nothing more.
+        ((eq step 'turns) (and romacs--isolate-serving (not romacs--isolate-zygote) (romacs--isolate-run-turns)))
+        ((eq step 'note) (romacs--isolate-note-control-frames) nil)
+        ((eq step 'wait) (romacs--isolate-wait timeout (and (process-list) t)) nil)))
 
 (defun romacs--isolate-run-turns ()
   "`romacs--isolate-run-between' as a command loop runs a command: a quit

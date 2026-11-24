@@ -417,10 +417,26 @@ impl Isolates {
     }
 }
 
-/// The hello a worker sends first: protocol, executable, boot.
+/// The build this process is, as its embedder named it once at start
+/// (`set_build_id`), else this crate's own (`VM2_COMPILER_ID`, its sources
+/// and features): a worker's binary identity. A fork has its zygote's, being
+/// its image.
+static BUILD_ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Name the build this process is, once, before it spawns or serves a
+/// worker: the executable's `ROMACS_BUILD_ID`. A later call is ignored.
+pub fn set_build_id(id: &str) {
+    let _ = BUILD_ID.set(id.to_owned());
+}
+
+/// This process's binary identity (`set_build_id`).
+pub(crate) fn build_id() -> &'static str {
+    BUILD_ID.get().map_or(env!("VM2_COMPILER_ID"), String::as_str)
+}
+
+/// The hello a worker sends first: protocol, binary identity, boot.
 pub(crate) fn hello(boot: &str) -> String {
-    let exe = crate::host::current_exe().map(|p| p.display().to_string()).unwrap_or_default();
-    format!("romacs-isolate\n{PROTOCOL}\n{exe}\n{boot}")
+    format!("romacs-isolate\n{PROTOCOL}\n{}\n{boot}", build_id())
 }
 
 /// The worker's parent socket, for what runs off the VM: the reports of the

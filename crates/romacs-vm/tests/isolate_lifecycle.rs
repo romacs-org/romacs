@@ -82,7 +82,8 @@ fn shutdown_signals_before_it_settles_or_reports() {
         "(nil (signal 9) (end 9) (hup))"
     );
     assert_eq!(step(&mut vm, ":role owner :phase dead :child t", "(shutdown)"), "nil");
-    assert_eq!(step(&mut vm, ":role job :phase live :forked t :pending t :child t", "(shutdown)"), "(killed (kill-wait))");
+    assert_eq!(step(&mut vm, ":role job :phase live :forked t :pending t :child t", "(shutdown)"), "(killed (kill-wait shutdown))");
+    assert_eq!(step(&mut vm, ":role job :phase live :forked t :pending t :child t", "(kill)"), "(killed (kill-wait nil))");
 }
 
 /// I5: no event but an asked kill, end or shutdown signals a live owner;
@@ -90,7 +91,8 @@ fn shutdown_signals_before_it_settles_or_reports() {
 #[test]
 fn only_an_asked_end_signals_a_live_owner() {
     let mut vm = vm();
-    for event in ["(retire)", "(deadline)", "(answered)", "(child-gone)", "(memory nil)", "(refused nil)"] {
+    for event in ["(retire)", "(deadline)", "(answered result 1 (42 nil))", "(spent)", "(child-gone)", "(memory nil)",
+                  "(refused nil)"] {
         let out = step(&mut vm, OWNER, event);
         assert!(!out.contains("(signal"), "{event}: {out}");
     }
@@ -106,14 +108,16 @@ fn only_an_asked_end_signals_a_live_owner() {
 #[test]
 fn every_row_puts_what_callbacks_hear_last() {
     let mut vm = vm();
-    let roles = ["owner", "job", "zygote", "pool"];
+    let roles = ["owner", "job", "zygote", "pool", "fresh"];
     let phases = ["live", "retired", "killed", "dead"];
-    let events = ["(kill)", "(end)", "(retire)", "(deadline)", "(answered)", "(memory v)", "(orphaned)", "(refused v)",
-                  "(refuse r t)", "(death isolate-died d)", "(child-gone)", "(shutdown)"];
+    let events = ["(kill)", "(end)", "(retire)", "(deadline)", "(answered result 1 (42 t))",
+                  "(answered error 1 ((isolate-retired nil nil nil) nil))", "(spent)", "(memory v)", "(orphaned)",
+                  "(orphaned shutdown)", "(refused v)", "(refuse r t)", "(hello-refused d)", "(world-refused r w)",
+                  "(death isolate-died d)", "(death isolate-killed d shutdown)", "(child-gone)", "(shutdown)"];
     for role in roles {
         for phase in phases {
             for forked in ["t", "nil"] {
-                let state = format!(":role {role} :phase {phase} :signal nil :forked {forked} :pending t :child {}",
+                let state = format!(":role {role} :phase {phase} :signal nil :forked {forked} :pending t :spent t :child {}",
                                     if matches!(role, "owner" | "job") { "t" } else { "nil" });
                 for event in events {
                     let order = vm.eval_source(&format!(
@@ -128,4 +132,99 @@ fn every_row_puts_what_callbacks_hear_last() {
             }
         }
     }
+}
+
+/// S14: under shutdown, a dead zygote's busy children settle as killed
+/// and none runs elsewhere; an ordinary zygote death sends an unforked
+/// one's job elsewhere.
+#[test]
+fn a_zygote_killed_at_shutdown_runs_no_job_elsewhere() {
+    let mut vm = vm();
+    let zygote = ":role zygote :phase killed :signal nil :forked t :pending t";
+    assert_eq!(step(&mut vm, zygote, "(death isolate-killed nil shutdown)"),
+               "(nil (hup) (forget) (close) (orphan-children shutdown) (settle isolate-killed nil) (hook isolate-killed nil t))");
+    let unforked = ":role job :phase live :signal nil :forked nil :pending t :child t";
+    assert_eq!(step(&mut vm, unforked, "(death isolate-killed nil shutdown)"),
+               "(dead (hup) (forget) (close) (zygote-gone) (settle isolate-killed nil) (hook isolate-killed nil t))");
+    assert_eq!(step(&mut vm, unforked, "(death isolate-died nil)"),
+               "(dead (hup) (forget) (close) (zygote-gone) (resubmit) (hook isolate-died nil t))");
+    assert_eq!(step(&mut vm, ":role job :phase live", "(orphaned shutdown)"),
+               "(retired (signal 9) (end nil) (settle isolate-killed nil) (hook isolate-killed nil nil))");
+}
+
+/// S19: a reply resolves its call and begins a spent worker's end in one
+/// transition, its callbacks last; an owner's `isolate-retired` is its
+/// call's error, another worker's runs the call elsewhere.
+#[test]
+fn a_reply_ends_a_spent_worker_before_its_callbacks() {
+    let mut vm = vm();
+    assert_eq!(step(&mut vm, ":role pool :phase live :pending t :spent t", "(answered result 7 (42 nil))"),
+               "(nil (reply 7 result 42) (spent-check))");
+    assert_eq!(step(&mut vm, ":role pool :phase live :pending nil :spent t", "(spent)"),
+               "(retired (end nil) (post bye))");
+    assert_eq!(step(&mut vm, ":role job :phase live :pending t :child t", "(answered result 7 (42 t))"),
+               "(retired (end nil) (zygote-gone) (taint) (reply 7 result 42))");
+    let retired = "(answered error 7 ((isolate-retired nil nil nil) nil))";
+    assert_eq!(step(&mut vm, ":role owner :phase live :pending t :child t", retired),
+               "(nil (reply 7 error (isolate-retired nil nil nil)))");
+    assert_eq!(step(&mut vm, ":role nil :phase live :pending t", retired),
+               "(nil (reply 7 requeue (isolate-retired nil nil nil)))");
+}
+
+/// S16: a refused hello kills its worker without waiting; its death comes
+/// later as any death; a world refused is forgotten first.
+#[test]
+fn a_refused_hello_waits_for_nothing() {
+    let mut vm = vm();
+    assert_eq!(step(&mut vm, OWNER, "(hello-refused (why text))"),
+               "(retired (forget-role) (signal 9) (end 9) (settle isolate-refused (why text)) (hook isolate-refused (why text) nil))");
+    assert_eq!(step(&mut vm, ":role pool :phase live", "(world-refused why w)"),
+               "(retired (forget-world why w) (forget-role) (signal 9) (end 9) (settle isolate-world-unavailable (why w)) (hook isolate-world-unavailable (why w) nil))");
+    assert_eq!(step(&mut vm, ":role pool :phase retired", "(hello-refused (why text))"), "nil");
+}
+
+fn eval(vm: &mut Vm, source: &str) -> String {
+    vm.eval_source(source).and_then(romacs_vm::Local::display).unwrap_or_else(|e| format!("ERROR {e}"))
+}
+
+/// P1/P2 and S18: an owner, its zygote counted, ends no worker for room.
+#[test]
+fn admission_decides_and_an_owner_never_evicts() {
+    let mut vm = vm();
+    let decide = |vm: &mut Vm, args: &str| eval(vm, &format!("(romacs--isolate-admission {args})"));
+    assert_eq!(decide(&mut vm, "'owner 1 2 3 nil nil"), "admit");
+    assert_eq!(decide(&mut vm, "'owner 2 2 3 nil nil"), "refuse");
+    assert_eq!(decide(&mut vm, "'owner 2 2 3 t nil"), "refuse");
+    assert_eq!(decide(&mut vm, "'start 3 1 3 t nil"), "wait");
+    assert_eq!(decide(&mut vm, "'start 3 1 3 nil nil"), "evict");
+    assert_eq!(decide(&mut vm, "'start 2 1 3 t nil"), "wait", "room coming, memory short");
+    assert_eq!(decide(&mut vm, "'start 2 1 3 t t"), "admit");
+}
+
+/// §7 and S20: a round takes its calls at its head only; after a wait it
+/// only notes what came.
+#[test]
+fn a_round_takes_calls_once_then_output_before_the_next() {
+    let mut vm = vm();
+    assert_eq!(eval(&mut vm, "(romacs--isolate-round-plan '(:zygote nil))"), "(interrupts forks calls turns note)");
+    assert_eq!(eval(&mut vm, "(romacs--isolate-round-plan '(:zygote t))"), "(interrupts forks calls note)");
+    assert_eq!(eval(&mut vm, "(romacs--isolate-wait-plan '(:serving t :queued nil))"), "(wait note)");
+    assert_eq!(eval(&mut vm, "(romacs--isolate-wait-plan '(:serving t :queued t))"), "nil");
+    assert_eq!(eval(&mut vm, "(romacs--isolate-wait-plan '(:serving t :zygote t :forks t))"), "nil");
+    assert_eq!(eval(&mut vm, "(romacs--isolate-wait-plan '(:serving nil))"), "nil");
+}
+
+/// §8, S12 and S15: a bounded pass keeps every status not yet notified
+/// pending whatever callback leaves it; the master keeps GNU's loss.
+#[test]
+fn a_bounded_status_pass_loses_no_status_to_an_exit() {
+    let mut vm = vm();
+    let row = |vm: &mut Vm, args: &str| eval(vm, &format!("(romacs--process-status-row {args})"));
+    assert_eq!(row(&mut vm, "'draining 'spent t nil"), "((re-tick))");
+    assert_eq!(row(&mut vm, "'draining 'exit t nil"), "((re-tick))");
+    assert_eq!(row(&mut vm, "'sentinel 'exit t t"), "((raise))", "the finished one stays acknowledged");
+    assert_eq!(row(&mut vm, "'sentinel 'exit t nil"), "nil", "nothing left: nothing pending");
+    assert_eq!(row(&mut vm, "'between 'exit t t"), "((raise))");
+    assert_eq!(row(&mut vm, "'draining 'exit nil t"), "nil");
+    assert_eq!(row(&mut vm, "'sentinel 'exit nil t"), "nil");
 }

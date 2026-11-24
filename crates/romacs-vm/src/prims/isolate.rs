@@ -123,11 +123,12 @@ fn isolate_terminated_p(cx) {
     Ok(if (cx.process_signals() && crate::host::terminate_pending()) || cx.isolate_parent_closed() { Value::TRUE } else { Value::NIL })
 }}
 
-// (romacs--isolate-hello-check TEXT PROGRAM): why a worker's hello TEXT
-// failed validation, or nil if its protocol and PROGRAM match.
+// (romacs--isolate-hello-check TEXT): why a worker's hello TEXT failed
+// validation, or nil if its protocol and its build (its binary identity) are
+// this process's own: a fork's is its zygote's, wherever its executable lies.
 defsubr! { name = "romacs--isolate-hello-check", gnu = "romacs:isolate", effect = Reads,
-fn isolate_hello_check(cx, text: Value, program: Value) {
-    cx.isolate_hello_check(text, program)
+fn isolate_hello_check(cx, text: Value) {
+    cx.isolate_hello_check(text)
 }}
 
 // (romacs--isolate-hello-refusal TEXT): the reason a worker's hello TEXT

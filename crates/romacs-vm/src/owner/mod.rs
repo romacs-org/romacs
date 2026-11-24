@@ -1,7 +1,8 @@
 //! Owners (ownership design O1 §2): zygote-forked isolates in the role
 //! `owner`, which hold buffers and processes for the session. This module
 //! holds what Rust keeps of them: liveness by ping, and an owner's own flag.
-//! Their lifecycle is Lisp's (`lisp/vm/owner.el`, `lisp/vm/isolate.el`).
+//! Their lifecycle is Lisp's: one pure transition and its edge
+//! (`lisp/vm/isolate-lifecycle.el`) over `lisp/vm/owner.el` and `lisp/vm/isolate.el`.
 //!
 //! Liveness: while the spawner has a call outstanding on an owner, or a
 //! ping unanswered, it sends a `ping` every half `owner-wedge-delay`. The
@@ -16,9 +17,10 @@ use super::{Result, Vm};
 use std::collections::VecDeque;
 use std::time::Duration;
 
-/// Unanswered pings kept apart at most. Past it the oldest entry takes in
-/// the next, once that one is past its deadline too: a pong can then leave
-/// nothing of the run not yet due, so the judgement stays exact.
+/// Unanswered pings kept apart at most. Past it two neighbours both past
+/// their deadlines become one, keeping the earlier deadline: a pong can then
+/// leave nothing of a merged run not yet due, so the judgement stays exact
+/// whatever delays the pings went under.
 const KEPT: usize = 4;
 
 /// An owner's liveness, as its spawner sees it.
@@ -49,9 +51,10 @@ impl Ping {
         }
     }
 
-    /// Wedged at NOW: its oldest unanswered ping is past its deadline.
+    /// Wedged at NOW: an unanswered ping is past its deadline. With the
+    /// delay lowered, a later ping's deadline can come before an earlier's.
     fn wedged(&self, now: std::time::Instant) -> bool {
-        self.unanswered.front().is_some_and(|&(_, deadline)| now >= deadline)
+        self.unanswered.iter().any(|&(_, deadline)| now >= deadline)
     }
 
     /// When the next ping is due: while BUSY (a call is outstanding) or a
@@ -68,18 +71,24 @@ impl Ping {
         self.seq
     }
 
-    /// Past `KEPT` entries, the oldest takes in the next while that one is
-    /// past its deadline at NOW too.
+    /// Past `KEPT` entries, the first two neighbours both past their
+    /// deadlines at NOW become one, the earlier deadline kept, until none
+    /// is left to merge.
     fn fold(&mut self, now: std::time::Instant) {
-        while self.unanswered.len() > KEPT && now >= self.unanswered[1].1 {
-            if let Some((last, _)) = self.unanswered.remove(1) { self.unanswered[0].0 = last; }
+        while self.unanswered.len() > KEPT {
+            let expired = |i: usize| self.unanswered.get(i).is_some_and(|&(_, deadline)| now >= deadline);
+            let Some(at) = (0..self.unanswered.len() - 1).find(|&i| expired(i) && expired(i + 1)) else { break };
+            if let Some((last, deadline)) = self.unanswered.remove(at + 1) {
+                let entry = &mut self.unanswered[at];
+                *entry = (last, entry.1.min(deadline));
+            }
         }
     }
 
     /// How long from NOW until it next needs a look: the next ping, or its
     /// wedge judged; None when nothing is coming.
     fn next(&self, now: std::time::Instant, delay: Duration, busy: bool) -> Option<Duration> {
-        let wedge = self.unanswered.front().map(|&(_, deadline)| deadline).filter(|&at| at > now);
+        let wedge = self.unanswered.iter().map(|&(_, deadline)| deadline).filter(|&at| at > now).min();
         [self.due_at(now, delay, busy), wedge].into_iter().flatten().min().map(|at| at.saturating_duration_since(now))
     }
 }

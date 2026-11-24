@@ -14,7 +14,7 @@ their liveness (the ping) and an owner's own flag.
   `lisp/vm/isolate-lifecycle.el`.
 
 ## Contracts
-- Wedged means the oldest unanswered ping is past its deadline, the
+- Wedged means an unanswered ping is past its own deadline, the
   `owner-wedge-delay` it went under, nothing else. Pings go every half the delay while a call is outstanding
   or a ping is unanswered, so a lost ping or pong heals at the next; a
   pong answers its ping and every earlier one, and one for a ping never
@@ -35,6 +35,9 @@ their liveness (the ping) and an owner's own flag.
   (`romacs--isolate-counted-p`), and no worker is ended to make an owner room.
 - No callback or `isolate-error-functions` runs before every isolate a
   transition touched holds its next state: shutdown kills every owner first.
+- A worker is its build: a hello naming another build than the master's
+  is refused without a wait (`romacs--isolate-hello-check`); a fork names its
+  zygote's, wherever the executable lies.
 - A quit or error a filter, sentinel or timer lets out between calls ends
   that turn, never the owner (`romacs--isolate-run-turns`).
 

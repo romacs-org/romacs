@@ -88,19 +88,19 @@ impl Leaf<'_> {
         self.vm.isolate_claim_job(generation)
     }
 
-    pub(crate) fn isolate_hello_check(&mut self, text: Value, program: Value) -> Out {
+    pub(crate) fn isolate_hello_check(&mut self, text: Value) -> Out {
         let view = self.string_view(text)?;
         let theirs = String::from_utf8_lossy(view.bytes());
-        let program = String::from_utf8_lossy(self.string_view(program)?.bytes()).into_owned();
-        let program = crate::host::canonicalize(&program).map(|p| p.display().to_string()).unwrap_or(program);
         let mut lines = theirs.splitn(4, '\n');
         let expected = crate::isolate::PROTOCOL.to_string();
+        let ours = crate::isolate::build_id();
         let reason = match (lines.next(), lines.next(), lines.next()) {
             (Some("romacs-isolate"), Some(version), _) if version != expected => {
                 format!("Isolate protocol mismatch: expected {expected}, got {version}")
             }
-            (Some("romacs-isolate"), Some(_), Some(exe)) if exe == program => return Ok(Value::NIL),
-            _ => "worker is not this executable".into(),
+            (Some("romacs-isolate"), Some(_), Some(build)) if build == ours => return Ok(Value::NIL),
+            (Some("romacs-isolate"), Some(_), Some(build)) => format!("worker is another build: expected {ours}, got {build}"),
+            _ => "worker is not a Romacs isolate".into(),
         };
         Ok(self.vm.make_lisp_string(reason.into_bytes(), true))
     }

@@ -662,6 +662,9 @@ fn main() {
         // So nothing touches it concurrently.
         unsafe { std::env::set_var("RADV_PERFTEST", perftest) };
     }
+    // Its workers, and itself as one, are this build (`ROMACS_BUILD_ID`,
+    // build.rs): a worker whose hello names another is refused.
+    romacs_vm::isolate_set_build_id(env!("ROMACS_BUILD_ID"));
     // A session's every end says why (exit.rs); other modes keep their own.
     let end = match std::panic::catch_unwind(run) {
         Ok(Ok(None)) => return,

@@ -44,7 +44,10 @@ A worker of a `world' VM loads its libraries from it too, never compiling
 into it.  The launcher sets it.")
 
 (defvar isolate-worker-program nil
-  "The program a worker runs, or nil for this executable.")
+  "The program a worker runs, or nil for this executable.
+A worker of another build is refused at its hello
+\(`romacs--isolate-hello-check'): a GUI master does not take
+`romacs-vm-isolate' workers.")
 
 (defvar isolate-worker-arguments nil
   "Arguments every worker is started with, after the boot arguments.")
@@ -170,9 +173,11 @@ from a text frame.  Workers take parent messages with `isolate-receive'.")
 (defvar romacs--isolate-zygotes (make-hash-table :test 'equal)
   "The zygotes, by feature list: [isolate-zygote ISOLATE FEATURES STATE
 SPARE INPUTS FILES FILES-STAMP DIRECTORIES DIRECTORIES-STAMP USED THREAD
-MASK HEADROOM AFFINITY]; THREAD its forking thread, MASK its processors'
-digest at its last fork, HEADROOM the budget of its children, AFFINITY
-\(TIME . (COUNT . DIGEST)) as last asked.")
+MASK HEADROOM AFFINITY BINARY]; THREAD its forking thread, MASK its
+processors' digest at its last fork, HEADROOM the budget of its children,
+AFFINITY \(TIME . (COUNT . DIGEST)) as last asked, BINARY its binary
+identity, the build its hello named (`romacs--isolate-hello-build'),
+which every child it forks shares.")
 (defvar romacs--isolate-waiting nil
   "Futures of pooled jobs waiting for room in the pool, oldest first; at
 most `isolate-queue-limit'.  Each has no isolate until it is dispatched.")
@@ -184,6 +189,12 @@ most `isolate-queue-limit'.  Each has no isolate until it is dispatched.")
 (defvar romacs--isolate-unprepared nil
   "In a worker: the error its preparation failed with, (CONDITION . DATA),
 or nil.  A zygote is refused for it (`romacs--isolate-become-zygote').")
+(defvar romacs--isolate-batch nil
+  "While the effects of a lifecycle batch run (`romacs--isolate-run',
+lisp/vm/isolate-lifecycle.el), (LATER): LATER the thunks, in order, to
+run once they are all done; nil outside.  A transition an effect leads to
+joins the batch, and a future resolved meanwhile
+\(`romacs--isolate-resolve') is notified with it.")
 (defvar romacs--isolate-next-deadline nil
   "The time the isolates next need a look: a deadline, a retired worker's
 signal or an owner's ping (`romacs--isolate-check-deadlines'); nil for none.")
@@ -266,8 +277,13 @@ refusal as it happened."
 (defun isolate-future-done-p (future) "Non-nil once FUTURE is resolved." (not (eq (aref future 3) 'pending)))
 
 (defun romacs--isolate-resolve (future state value)
-  "Resolve FUTURE as STATE with VALUE and run its callbacks."
-  (romacs--isolate-notify (romacs--isolate-mark-resolved future state value)))
+  "Resolve FUTURE as STATE with VALUE and run its callbacks: now, or,
+while a lifecycle batch's effects run, once they are done
+\(`romacs--isolate-batch')."
+  (let ((resolved (romacs--isolate-mark-resolved future state value)))
+    (if romacs--isolate-batch
+        (romacs--isolate-defer (lambda () (romacs--isolate-notify resolved)))
+      (romacs--isolate-notify resolved))))
 
 (defun romacs--isolate-mark-resolved (future state value)
   "Resolve FUTURE as STATE with VALUE, running none of its callbacks:
@@ -709,7 +725,7 @@ copied (`setenv' changes an entry in place)."
          (stamp (romacs--isolate-stamp directories))
          (isolate (romacs--isolate-start-worker nil require 'start))
          (zygote (record 'isolate-zygote isolate require 'preparing nil inputs nil nil
-                         directories stamp (float-time) nil nil isolate-job-memory-headroom nil)))
+                         directories stamp (float-time) nil nil isolate-job-memory-headroom nil nil)))
     (aset isolate 10 'zygote)
     (puthash require zygote romacs--isolate-zygotes)
     (isolate-on-done (romacs--isolate-submit isolate 'romacs--isolate-become-zygote
@@ -891,7 +907,7 @@ one running its only job (a forked child, a spent pool worker)."
                           (or (eq (aref isolate 10) 'job) (and (romacs--isolate-one-job-p isolate) (aref isolate 6))))))
         (setq found t)))))
 
-(defun romacs--isolate-admit-p (kind &optional require)
+(defun romacs--isolate-admit-p (kind &optional require need)
   "Whether one more worker process may begin now: fewer than
 `isolate-process-limit' run, every role counted until it is reaped (an
 owner only for KIND `owner': owners serve for the session, and the pool's
@@ -900,22 +916,24 @@ for KIND `start' (a worker for pooled jobs, which may wait) the pool's
 memory with its jobs' reservations is within `isolate-pool-memory-limit'
 while any process is on its way out to free it.  KIND `create' is a
 worker asked for outright, which cannot wait; `fork' a zygote's child,
-whose job `romacs--isolate-room-p' judges; `owner' an owner, which ends
-no worker for room (nil without it).  Without room and nothing on its way
+whose job `romacs--isolate-room-p' judges; `owner' an owner and NEED
+processes for it (its zygote's too, if it has none yet; default 1), which
+ends no worker for room (nil without it).  The decision is
+`romacs--isolate-admission''s.  Without room and nothing on its way
 out, an idle worker of features other than REQUIRE is ended to make it
 \(nil: the room comes at its end); with none to end,
 `isolate-process-limit'."
-  (let ((count (- (length romacs--isolates) (if (eq kind 'owner) 0 (romacs--isolate-owners))))
-        (ending (romacs--isolate-ending-p)))
-    (cond ((and (< count (isolate--process-limit))
-                (or (not (eq kind 'start)) (not ending)
+  (let* ((count (- (length romacs--isolates) (if (eq kind 'owner) 0 (romacs--isolate-owners))))
+         (limit (isolate--process-limit))
+         (ending (romacs--isolate-ending-p))
+         (room (and (eq kind 'start) ending
                     (<= (+ (* 1024 (romacs--isolate-pool-memory)) (romacs--isolate-reserved))
                         isolate-pool-memory-limit)))
-           t)
-          ;; An owner cannot wait for room: none is made for it.
-          ((or ending (eq kind 'owner)) nil)
+         (decision (romacs--isolate-admission kind count (or need 1) limit ending room)))
+    (cond ((eq decision 'admit) t)
+          ((memq decision '(wait refuse)) nil)
           ((romacs--isolate-evict-idle require) nil)
-          (t (signal 'isolate-process-limit (list count (isolate--process-limit)))))))
+          (t (signal 'isolate-process-limit (list count limit))))))
 
 (defun romacs--isolate-evict-idle (require)
   "End one idle worker of features other than REQUIRE, without waiting: a
@@ -1089,26 +1107,6 @@ have sent), its futures settle, the event is reported, and it is forgotten
 \(`romacs--isolate-transition')."
   (romacs--isolate-step isolate (list 'death event data)))
 
-(defun romacs--isolate-world-refused (isolate reason)
-  "ISOLATE's worker could not adopt the world it was told to, for REASON.
-It is ended; its jobs settle with `isolate-world-unavailable', whose data
-is REASON and that world; and the world is forgotten when `isolate-world'
-still names it, so later workers boot from source
-\(`romacs--isolate-boot-arguments'), none of them refused again."
-  (let ((id (romacs--isolate-id isolate))
-        (world (aref isolate 12)))
-    (when (equal isolate-world world)
-      (setq isolate-world nil romacs--isolate-world-refusal (list reason world)))
-    (romacs--isolate-signal id 9)
-    (while (null (romacs--isolate-reap id)) (romacs--isolate-wait 0.01))
-    ;; Out of the dispatch before its futures' callbacks run: the death
-    ;; the reap queued is not reported as well; and closed whatever a
-    ;; callback signals, since no later dispatch will see it.
-    (setq romacs--isolates (delq isolate romacs--isolates))
-    (unwind-protect
-        (romacs--isolate-dead isolate 'isolate-world-unavailable (list reason world))
-      (romacs--isolate-close id))))
-
 (defun romacs--isolate-memory-error (budget)
   "A job's reply when its child ended for growing past BUDGET bytes."
   (list 'isolate-memory-exhausted (list budget) nil
@@ -1121,17 +1119,26 @@ still names it, so later workers boot from source
     (error (romacs--isolate-resolve future 'error (list (car err) (cdr err) nil (get (car err) 'error-conditions))))))
 
 (defun romacs--isolate-accept-hello (isolate text)
-  "Handle ISOLATE's hello TEXT and settle it if refused."
+  "Handle ISOLATE's hello TEXT: one of another build, or of a worker that
+could not adopt its world, is refused without waiting for it
+\(`romacs--isolate-transition'); a zygote's records its binary identity."
   (aset isolate 9 t)
-  (let ((mismatch (romacs--isolate-hello-check text (aref isolate 8)))
-        (id (romacs--isolate-id isolate)))
-    (cond
-     (mismatch
-      (romacs--isolate-signal id 9)
-      (while (null (romacs--isolate-reap id)) (romacs--isolate-wait 0.01))
-      (romacs--isolate-dead isolate 'isolate-refused (list mismatch text)))
-     ((romacs--isolate-hello-refusal text)
-      (romacs--isolate-world-refused isolate (romacs--isolate-hello-refusal text))))))
+  (let ((mismatch (romacs--isolate-hello-check text))
+        (refusal (romacs--isolate-hello-refusal text)))
+    (cond (mismatch (romacs--isolate-step isolate (list 'hello-refused (list mismatch text))))
+          (refusal (romacs--isolate-step isolate (list 'world-refused refusal (aref isolate 12))))
+          ((eq (aref isolate 10) 'zygote)
+           (let ((zygote (gethash (aref isolate 4) romacs--isolate-zygotes)))
+             (when (and zygote (eq (aref zygote 1) isolate))
+               (aset zygote 15 (romacs--isolate-hello-build text))))))))
+
+(defun romacs--isolate-hello-build (text)
+  "The build a worker's hello TEXT names, its third line: its binary
+identity (`romacs--isolate-hello-check' held it to this process's)."
+  (let* ((first (string-search "\n" text))
+         (second (and first (string-search "\n" text (1+ first))))
+         (third (and second (string-search "\n" text (1+ second)))))
+    (and second (substring text (1+ second) third))))
 
 (defun romacs--isolate-dispatch ()
   "Deliver every frame that has arrived from every worker."
@@ -1143,26 +1150,9 @@ still names it, so later workers boot from source
            ((eq kind 'hello)
             (romacs--isolate-accept-hello isolate value))
            ((memq kind '(result error))
-            ;; A forked child exits after its one job: its end is no news.
-            (romacs--isolate-step isolate '(answered))
-            (let ((entry (assq generation (aref isolate 5))))
-              (when (nth 1 value) (aset isolate 6 t))
-              (when entry
-                (aset isolate 5 (delq entry (aref isolate 5)))
-                (aset isolate 7 nil)
-                (unwind-protect
-                    (if (and (eq kind 'error) (eq (car (car value)) 'isolate-retired)
-                             (not (eq (aref isolate 10) 'owner)))
-                        ;; Queued behind a job that changed the features: it
-                        ;; runs on a worker with the features it was queued
-                        ;; for.  An owner never retires so: its call's error.
-                        (condition-case err
-                            (romacs--isolate-resubmit (cdr entry))
-                          (error (romacs--isolate-resolve (cdr entry) 'error (list (car err) (cdr err) nil (get (car err) 'error-conditions)))))
-                      (romacs--isolate-resolve (cdr entry) (if (eq kind 'result) 'done 'error) (car value)))
-                  ;; A spent worker of the pool's ends with its job's answer.
-                  (when (and (romacs--isolate-one-job-p isolate) (aref isolate 6) (null (aref isolate 5)))
-                    (isolate-retire isolate))))))
+            ;; Resolved, and its worker's end begun, by one transition: a
+            ;; callback sees a spent worker retired.
+            (romacs--isolate-step isolate (list 'answered kind generation value)))
            ((eq kind 'message)
             (run-hook-with-args 'isolate-message-functions isolate value))
            ((eq kind 'text)
@@ -1378,17 +1368,23 @@ signalled, and every call settled, before any callback or
 `isolate-error-functions' runs: an owner, whose kill waits for nothing,
 gets SIGKILL at once, and its subprocess groups SIGHUP, since no later
 wait point is left to send them; any other is killed and waited for."
-  (let ((waiting romacs--isolate-waiting) (resolved nil) (owners nil) (others nil))
+  (let ((waiting romacs--isolate-waiting) (resolved nil))
     (setq romacs--isolate-waiting nil)
     (dolist (future waiting)
       (let ((one (romacs--isolate-mark-resolved future 'isolate-killed (list nil nil))))
         (when one (push one resolved))))
-    ;; Those killed without waiting first: none waits behind another's end.
-    (dolist (isolate romacs--isolates)
-      (if (eq (aref isolate 10) 'owner) (push isolate owners) (push isolate others)))
-    (romacs--isolate-run (mapcar (lambda (isolate) (list isolate 'shutdown)) (nconc owners others))
+    (romacs--isolate-run (mapcar (lambda (isolate) (list isolate 'shutdown)) (romacs--isolate-shutdown-order))
                          (nreverse resolved))
     nil))
+
+(defun romacs--isolate-shutdown-order ()
+  "The live isolates in the order a shutdown ends them: owners first,
+whose kill waits for nothing, then job children, newest first, before
+their zygotes, then the rest: no job is left for a zygote's death to
+settle or send elsewhere."
+  (let ((rank (lambda (isolate) (cdr (or (assq (aref isolate 10) '((owner . 0) (job . 1))) '(nil . 2))))))
+    (sort (copy-sequence romacs--isolates)
+          (lambda (a b) (< (funcall rank a) (funcall rank b))))))
 
 (provide 'isolate)
 ;;; isolate.el ends here

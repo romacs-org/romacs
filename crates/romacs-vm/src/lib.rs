@@ -154,6 +154,7 @@ mod owner;
 mod keeper;
 pub use isolate::worker_socket as isolate_worker_socket;
 pub use isolate::refuse as isolate_refuse;
+pub use isolate::set_build_id as isolate_set_build_id;
 mod request_code;
 mod macro_record;
 pub use gc::HeapStats;
