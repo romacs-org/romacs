@@ -376,7 +376,7 @@ fn open_for_reading(path: &std::path::Path) -> std::io::Result<crate::host::Inpu
 // property. A selected handler is called (`handler').
 
 // GNU Fmemq validates a dotted tail only when search reaches it.
-fn handler_member(cx: &Leaf<'_>, value: Value, list: Value) -> std::result::Result<bool, Fault> {
+fn handler_member(cx: &mut Leaf<'_>, value: Value, list: Value) -> std::result::Result<bool, Fault> {
     let mut tail = list;
     let mut tortoise = list;
     let mut steps = 0u64;
@@ -385,10 +385,53 @@ fn handler_member(cx: &Leaf<'_>, value: Value, list: Value) -> std::result::Resu
         tail = rest;
         if tail == tortoise { return Err(Fault::Circular(tail)); }
         steps += 1;
-        if steps & 4095 == 0 && steps.is_power_of_two() { tortoise = tail; }
+        if steps & 4095 == 0 {
+            cx.quittable(Leaf::native_poll)?;
+            if steps.is_power_of_two() { tortoise = tail; }
+        }
     }
     if tail != Value::NIL { return Err(Fault::Wrong("listp", list)); }
     Ok(false)
+}
+
+#[test]
+fn leaf_poll_handler_member() {
+    use crate::prim::quit_reach_tests::{busy_vm, eval, quit_signalled};
+
+    // The real regex search can take a waiting press before membership runs.
+    let (mut vm, signal) = busy_vm();
+    let handlers = eval(&mut vm, "(setq handlers (make-list 20000 'other))");
+    let needle = eval(&mut vm, "'load");
+    assert!(signal.interrupt());
+    let outcome = handler_member(&mut Leaf::new(&mut vm), needle, handlers).map(|_| Value::NIL);
+    assert!(quit_signalled(&mut vm, &outcome), "membership did not quit");
+    assert!(!signal.due());
+    vm.quit_unwinding = false;
+
+    eval(&mut vm, "(setq inhibit-quit t)");
+    assert!(signal.interrupt());
+    let outcome = handler_member(&mut Leaf::new(&mut vm), needle, handlers);
+    assert_eq!(outcome.ok(), Some(false));
+    assert!(signal.due());
+}
+
+/// The operations a symbol handler accepts, or nil if it accepts any.
+fn handler_operations(cx: &mut Leaf<'_>, handler: Value, operations_key: Value) -> Out {
+    if !cx.is_symbol(handler) { return Ok(Value::NIL); }
+    let mut plist = cx.symbol_plist(handler)?;
+    let mut left = cx.list_limit().saturating_add(1);
+    while left > 0 {
+        let count = left.min(4096);
+        for _ in 0..count {
+            let Some((key, rest)) = cx.pair(plist) else { return Ok(Value::NIL); };
+            let Some((value, rest)) = cx.pair(rest) else { return Ok(Value::NIL); };
+            if key == operations_key { return Ok(value); }
+            plist = rest;
+        }
+        left -= count;
+        if left > 0 { cx.quittable(Leaf::native_poll)?; }
+    }
+    Ok(Value::NIL)
 }
 
 /// GNU fileio.c:370: greatest match position wins, first entry wins ties.
@@ -408,18 +451,12 @@ pub(super) fn find_file_name_handler(cx: &mut Leaf<'_>, filename: Value, operati
         chain = tail;
         if chain == tortoise { return Err(refuse("cyclic file-name-handler-alist")); }
         steps += 1;
-        if steps & 4095 == 0 && steps.is_power_of_two() { tortoise = chain; }
-        let Some((pattern, handler)) = cx.pair(entry) else { continue };
-        let mut operations = Value::NIL;
-        if cx.is_symbol(handler) {
-            let mut plist = cx.symbol_plist(handler)?;
-            for _ in 0..=cx.list_limit() {
-                let Some((key, rest)) = cx.pair(plist) else { break };
-                let Some((value, rest)) = cx.pair(rest) else { break };
-                if key == operations_key { operations = value; break; }
-                plist = rest;
-            }
+        if steps & 4095 == 0 {
+            cx.quittable(Leaf::native_poll)?;
+            if steps.is_power_of_two() { tortoise = chain; }
         }
+        let Some((pattern, handler)) = cx.pair(entry) else { continue };
+        let operations = handler_operations(cx, handler, operations_key)?;
         if !cx.is_string(pattern) { continue; }
         let Some(at) = cx.file_name_match(pattern, filename)? else { continue };
         if position.is_some_and(|old| at <= old) { continue; }

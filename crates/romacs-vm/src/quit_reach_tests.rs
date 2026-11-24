@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 /// A VM with the Lisp prelude, busy running a command, and the signal its
 /// host's input thread holds.
-fn busy_vm() -> (Vm, Arc<QuitSignal>) {
+pub(super) fn busy_vm() -> (Vm, Arc<QuitSignal>) {
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
     let signal = Arc::new(QuitSignal::new());
@@ -21,7 +21,7 @@ fn busy_vm() -> (Vm, Arc<QuitSignal>) {
     (vm, signal)
 }
 
-fn eval(vm: &mut Vm, source: &str) -> Value {
+pub(super) fn eval(vm: &mut Vm, source: &str) -> Value {
     vm.eval_source_raw(source).unwrap_or_else(|e| panic!("{source}: {e}"))
 }
 
@@ -56,7 +56,7 @@ fn invoke(vm: &mut Vm, (desc, values): (&'static PrimDesc, Vec<Value>)) -> std::
     }
 }
 
-fn quit_signalled(vm: &mut Vm, outcome: &std::result::Result<Value, Fault>) -> bool {
+pub(super) fn quit_signalled(vm: &mut Vm, outcome: &std::result::Result<Value, Fault>) -> bool {
     let quit = vm.intern("quit");
     matches!(outcome, Err(Fault::Signal(condition, _)) if *condition == quit)
 }
@@ -131,6 +131,16 @@ fn leaf_poll_concat_list_assembly() {
 fn leaf_poll_list_elements() {
     reaches("romacs--nconc-list", "(setq parts (make-list 20000 nil))",
             "(list parts)", "(= (length parts) 20000)");
+}
+
+#[test]
+fn leaf_poll_file_name_handler_walk() {
+    reaches("find-file-name-handler", "(setq file-name-handler-alist (make-list 20000 nil))",
+            "(list \"file\" 'load)", "(= (length file-name-handler-alist) 20000)");
+    reaches("find-file-name-handler",
+            "(progn (setplist 'poll-handler (make-list 40000 nil))
+                    (setq file-name-handler-alist '((nil . poll-handler))))",
+            "(list \"file\" 'load)", "(= (length (symbol-plist 'poll-handler)) 40000)");
 }
 
 #[test]
