@@ -68,6 +68,14 @@ impl DisplaySession {
         &self.env
     }
 
+    /// Launch a client with its own home and only this session's display.
+    pub fn isolated_command(&self, root: &Path, program: &str) -> io::Result<Command> {
+        let mut command = isolated_command(root, program)?;
+        command.envs(self.env.iter().filter(|(_, value)| !value.is_empty())
+            .map(|(key, value)| (key, value)));
+        Ok(command)
+    }
+
     /// The degenerate session: no owned process and no environment, for
     /// scenarios that run on the machine's current desktop (macOS, Windows)
     /// rather than a harness-owned display.
@@ -80,6 +88,28 @@ impl DisplaySession {
             _held_directory: None,
         }
     }
+}
+
+fn isolated_command(root: &Path, program: impl AsRef<std::ffi::OsStr>) -> io::Result<Command> {
+    let mut command = Command::new(program);
+    command.env_clear().current_dir(root);
+    for key in ["PATH", "ROMACS_GNU_SOURCE", "WGPU_BACKEND", "LD_LIBRARY_PATH"] {
+        if let Some(value) = std::env::var_os(key) {
+            command.env(key, value);
+        }
+    }
+    for (key, name) in [
+        ("HOME", "home"), ("XDG_RUNTIME_DIR", "runtime"),
+        ("XDG_CACHE_HOME", "cache"), ("XDG_STATE_HOME", "state"),
+        ("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"),
+        ("TMPDIR", "tmp"),
+    ] {
+        let path = root.join(name);
+        fs::create_dir_all(&path)?;
+        set_owner_only_dir_permissions(&path)?;
+        command.env(key, path);
+    }
+    Ok(command)
 }
 
 impl Drop for DisplaySession {
@@ -638,7 +668,30 @@ pub fn start_sway(artifact_root: &Path, config: &str) -> io::Result<DisplaySessi
     set_owner_only_dir_permissions(artifact_root)?;
     let config_path = artifact_root.join("sway.conf");
     fs::write(&config_path, config)?;
-    let log_path = artifact_root.join("sway.log");
+    let program = std::env::var_os("ROMACS_GUI_SWAY").unwrap_or_else(|| "sway".into());
+    let renderer =
+        std::env::var("ROMACS_GUI_SWAY_RENDERER").unwrap_or_else(|_| "pixman".to_owned());
+    fs::write(artifact_root.join("sway-renderer-request"), &renderer)?;
+    let mut command = Command::new(&program);
+    command.args(["--unsupported-gpu", "--config"]).arg(config_path);
+    start_headless_wlroots(artifact_root, command, "sway", &renderer)
+}
+
+/// A headless Wayland session with a seat for native clipboard tests.
+pub fn start_labwc(artifact_root: &Path, config: &str) -> io::Result<DisplaySession> {
+    let config_path = artifact_root.join("rc.xml");
+    fs::write(&config_path, config)?;
+    let program = std::env::var_os("ROMACS_TEST_LABWC").unwrap_or_else(|| "labwc".into());
+    let mut command = isolated_command(artifact_root, program)?;
+    command.arg("--config").arg(config_path);
+    start_headless_wlroots(artifact_root, command, "labwc", "pixman")
+}
+
+fn start_headless_wlroots(
+    artifact_root: &Path, mut command: Command, name: &str, renderer: &str,
+) -> io::Result<DisplaySession> {
+    set_owner_only_dir_permissions(artifact_root)?;
+    let log_path = artifact_root.join(format!("{name}.log"));
     let log = fs::File::create(&log_path)?;
     let held_directory = fs::File::open(artifact_root)?;
     #[cfg(target_os = "linux")]
@@ -653,37 +706,44 @@ pub fn start_sway(artifact_root: &Path, config: &str) -> io::Result<DisplaySessi
     #[cfg(not(target_os = "linux"))]
     let runtime = artifact_root.to_string_lossy().into_owned();
 
-    let program = std::env::var_os("ROMACS_GUI_SWAY").unwrap_or_else(|| "sway".into());
-    let renderer =
-        std::env::var("ROMACS_GUI_SWAY_RENDERER").unwrap_or_else(|_| "pixman".to_owned());
-    fs::write(artifact_root.join("sway-renderer-request"), &renderer)?;
-    let mut pending = PendingSwaySession::default();
-    let child = Command::new(&program)
-        .args(["--unsupported-gpu", "--config"])
-        .arg(&config_path)
+    let child = command
         .env("XDG_RUNTIME_DIR", &runtime)
         .env("WLR_BACKENDS", "headless")
-        .env("WLR_RENDERER", &renderer)
+        .env("WLR_RENDERER", renderer)
         .env("WLR_LIBINPUT_NO_DEVICES", "1")
         .env_remove("WAYLAND_DISPLAY")
+        .env_remove("WAYLAND_SOCKET")
         .env_remove("DISPLAY")
         .stdout(Stdio::from(log.try_clone()?))
         .stderr(Stdio::from(log))
         .spawn()?;
-    pending.child = Some(child);
+    let mut pending = PendingWlrootsSession { child: Some(child) };
+    let socket = wait_for_wlroots_socket(&mut pending, artifact_root, name, &log_path)?;
+    Ok(pending.into_session(
+        vec![
+            ("XDG_RUNTIME_DIR".to_string(), runtime),
+            ("WAYLAND_DISPLAY".to_string(), socket),
+            locale_pin(),
+        ],
+        held_directory,
+    ))
+}
 
+fn wait_for_wlroots_socket(
+    pending: &mut PendingWlrootsSession, artifact_root: &Path, name: &str, log_path: &Path,
+) -> io::Result<String> {
     let deadline = Instant::now() + Duration::from_secs(8);
     loop {
         if pending
             .child
             .as_mut()
-            .expect("pending sway owns its child")
+            .expect("pending compositor owns its child")
             .try_wait()?
             .is_some()
         {
             return Err(io::Error::other(format!(
-                "sway exited early: {}",
-                read_log_tail(&log_path)
+                "{name} exited early: {}",
+                read_log_tail(log_path)
             )));
         }
         if let Some(socket) = fs::read_dir(artifact_root)?
@@ -695,22 +755,15 @@ pub fn start_sway(artifact_root: &Path, config: &str) -> io::Result<DisplaySessi
             })
             .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
         {
-            return Ok(pending.into_session(
-                vec![
-                    ("XDG_RUNTIME_DIR".to_string(), runtime),
-                    ("WAYLAND_DISPLAY".to_string(), socket),
-                    locale_pin(),
-                ],
-                held_directory,
-            ));
+            return Ok(socket);
         }
         if Instant::now() >= deadline {
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
                 format!(
-                    "sway socket absent below {}: {}",
+                    "{name} socket absent below {}: {}",
                     artifact_root.display(),
-                    read_log_tail(&log_path)
+                    read_log_tail(log_path)
                 ),
             ));
         }
@@ -718,13 +771,12 @@ pub fn start_sway(artifact_root: &Path, config: &str) -> io::Result<DisplaySessi
     }
 }
 
-/// Own every partially-started sway resource until its socket appears.
-#[derive(Default)]
-struct PendingSwaySession {
+/// Own a partially-started compositor until its socket appears.
+struct PendingWlrootsSession {
     child: Option<Child>,
 }
 
-impl PendingSwaySession {
+impl PendingWlrootsSession {
     fn into_session(mut self, env: Vec<(String, String)>, held: fs::File) -> DisplaySession {
         DisplaySession {
             child: self.child.take(),
@@ -736,7 +788,7 @@ impl PendingSwaySession {
     }
 }
 
-impl Drop for PendingSwaySession {
+impl Drop for PendingWlrootsSession {
     fn drop(&mut self) {
         if let Some(mut child) = self.child.take() {
             let _ = child.kill();

@@ -23,7 +23,8 @@ and `wait' waiting until its form holds (5 s at most)."
           (romacs-agent-event-functions nil)
           (romacs-agent-client-rows-functions nil)
           (now (float-time)))
-     (cl-letf (((symbol-function 'romacs-agent-store-unloaded) #'ignore))
+     (cl-letf (((symbol-function 'romacs-agent-store-unloaded-rows) #'ignore)
+               ((symbol-function 'romacs-agent-store-row) #'ignore))
        (cl-flet ((mk (id state &rest fields)
                    (let ((session (apply #'romacs-agent--make
                                          (append fields (list :id id :harness 'claude :provider "claude" :title id
@@ -39,6 +40,12 @@ and `wait' waiting until its form holds (5 s at most)."
                ,@body)
            (romacs-agent-service-stop)
            (delete-directory root t))))))
+
+(defun romacs-agent-service-tests--row (id &optional parent done)
+  "A store row (`romacs-agent-store--row-columns') of an idle Claude
+session ID in /p/, delegated by PARENT, its turns done through DONE."
+  (list id nil "claude" nil nil nil "/p/" parent "idle" nil nil nil (or done 0)
+        nil nil nil 0 nil nil nil nil 0 nil))
 
 (defun romacs-agent-service-tests--raw (socket)
   "A raw connection to SOCKET whose lines are kept, in order, under its
@@ -67,7 +74,7 @@ and `wait' waiting until its form holds (5 s at most)."
         (should (= (hash-table-count rows) 3))
         (dolist (id '("busy" "done" "kid"))
           (should (equal (gethash "key" (gethash id rows))
-                         (symbol-name (romacs-agent-board--key (romacs-agent-get id))))))
+                         (symbol-name (romacs-agent-summary-state-key (romacs-agent-summary id))))))
         (should (equal (gethash "key" (gethash "busy" rows)) "working"))
         (should (equal (gethash "state" (gethash "kid" rows)) "running"))
         (should (equal (gethash "children" (gethash "busy" rows)) 1))
@@ -86,7 +93,8 @@ and `wait' waiting until its form holds (5 s at most)."
         (let ((revision (romacs-agent-client-revision client)))
           (add-hook 'romacs-agent-client-rows-functions (lambda (_ changed removed) (push (list changed removed) seen)))
           (setf (romacs-agent-state busy) 'idle)
-          (run-hook-with-args 'romacs-agent-event-functions busy '(:type changed))
+          ;; As the editor tells a change made beside its events.
+          (romacs-agent--changed busy)
           (should (wait (eql (romacs-agent-client-revision client) (1+ revision))))
           (should (equal (gethash "state" (gethash "busy" (romacs-agent-client-rows client))) "idle"))
           (should (equal seen '((("busy") nil))))
@@ -189,6 +197,21 @@ and `wait' waiting until its form holds (5 s at most)."
     (should (equal (gethash "removed" second) ["b"]))
     (should (eq (gethash "reset" second) :false))))
 
+(ert-deftest romacs-agent-service-a-watch-lists-rows-as-registered ()
+  ;; As recent, the rows come in the order the sessions were registered,
+  ;; whatever their ids or directories.
+  (romacs-agent-service-tests--with
+    (dolist (id '("52" "51" "50" "4f" "4e" "4d")) (mk id 'idle :dir (expand-file-name id root)))
+    (romacs-agent-service-start socket)
+    (let ((raw (romacs-agent-service-tests--raw socket)))
+      (process-send-string raw "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"agents/hello\",\"params\":{\"protocol\":\"romacs-agents\",\"version\":[1,0]}}\n")
+      (process-send-string raw "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"agents/sessions.watch\",\"params\":{\"since\":0}}\n")
+      (should (wait (= (length (process-get raw 'lines)) 2)))
+      (should (equal (mapcar (lambda (row) (gethash "id" row))
+                             (gethash "rows" (gethash "result" (cadr (process-get raw 'lines)))))
+                     '("52" "51" "50" "4f" "4e" "4d")))
+      (delete-process raw))))
+
 (ert-deftest romacs-agent-service-since-is-of-a-generation ()
   ;; A revision of another generation reads as none: the whole list.
   (romacs-agent-service-tests--with
@@ -222,29 +245,72 @@ and `wait' waiting until its form holds (5 s at most)."
   ;; child first: the child's key reads its parent known, as the board's.
   (romacs-agent-service-tests--with
     (romacs-agent-service-start socket)
-    (let ((stored (list (cons "p" (romacs-agent--make :id "p" :harness 'claude :state 'idle :cwd "/p/"))
-                        (cons "c" (romacs-agent--make :id "c" :harness 'claude :state 'idle :cwd "/p/"
-                                                      :done-seq 4 :options '(:parent "p"))))))
-      (cl-letf (((symbol-function 'romacs-agent-store-row-session) (lambda (id) (cdr (assoc id stored)))))
+    (let ((stored (list (cons "p" (romacs-agent-service-tests--row "p"))
+                        (cons "c" (romacs-agent-service-tests--row "c" "p" 4)))))
+      (cl-letf (((symbol-function 'romacs-agent-store-row) (lambda (id) (cdr (assoc id stored)))))
         (let ((updates (romacs-agent-service--rows-of romacs-agent-service--list '("c" "p"))))
           (should (equal (gethash "key" (cdr (assoc "c" updates))) "completed")))))))
 
 (ert-deftest romacs-agent-service-leaves-the-board-its-own-view ()
-  ;; The service's whole pass makes its own view of the unloaded sessions:
-  ;; the board's, whose shown rows hold its sessions, stays as it was.
-  ;; Its keys read its own: an unloaded parent's finished child reads
-  ;; completed, as on the board.
+  ;; The service's whole pass reads the sessions' summaries, as the board
+  ;; does: an unloaded parent's finished child reads completed, as on the
+  ;; board.
   (romacs-agent-service-tests--with
-    (let ((romacs-agent-board--unloaded 'the-boards)
-          (stored (list (romacs-agent--make :id "p" :harness 'claude :state 'idle :cwd "/p/")
-                        (romacs-agent--make :id "c" :harness 'claude :state 'idle :cwd "/p/"
-                                            :done-seq 4 :options '(:parent "p")))))
-      (cl-letf (((symbol-function 'romacs-agent-store-unloaded) (lambda () stored)))
+    (let ((stored (list (romacs-agent-service-tests--row "p") (romacs-agent-service-tests--row "c" "p" 4))))
+      (cl-letf (((symbol-function 'romacs-agent-store-unloaded-rows) (lambda (&rest _) stored))
+                ((symbol-function 'romacs-agent-store-row) (lambda (id) (assoc id stored))))
         (romacs-agent-service-start socket)
         (romacs-agent-service--refresh t))
-      (should (eq romacs-agent-board--unloaded 'the-boards))
       (should (equal (gethash "key" (gethash "c" (romacs-agent-service--list-rows romacs-agent-service--list)))
                      "completed")))))
+
+(ert-deftest romacs-agent-service-remakes-a-child-when-its-parent-comes ()
+  ;; A finished child's key reads its parent known: a parent come since
+  ;; the child's row was made remakes the child's key, completed.
+  (romacs-agent-service-tests--with
+    (mk "c-late" 'idle :done-seq 4 :options '(:parent "p-late"))
+    (let ((stored nil))
+      (cl-letf (((symbol-function 'romacs-agent-store-unloaded-rows) (lambda (&rest _) stored))
+                ((symbol-function 'romacs-agent-store-row) (lambda (id) (assoc id stored))))
+        (romacs-agent-service-start socket)
+        (romacs-agent-service--refresh t)
+        (should (equal (gethash "key" (gethash "c-late" (romacs-agent-service--list-rows romacs-agent-service--list)))
+                       "idle"))
+        (push (romacs-agent-service-tests--row "p-late") stored)
+        (let ((updates (romacs-agent-service--rows-of romacs-agent-service--list '("p-late"))))
+          (should (equal (gethash "key" (cdr (assoc "c-late" updates))) "completed")))))))
+
+(ert-deftest romacs-agent-service-a-child-first-in-a-batch-reads-its-parent-come ()
+  ;; The child looked up before its parent in one batch: its key reads the
+  ;; parent known all the same.
+  (romacs-agent-service-tests--with
+    (mk "c-first" 'idle :done-seq 4 :options '(:parent "p-first"))
+    (let ((stored nil))
+      (cl-letf (((symbol-function 'romacs-agent-store-unloaded-rows) (lambda (&rest _) stored))
+                ((symbol-function 'romacs-agent-store-row) (lambda (id) (assoc id stored))))
+        (romacs-agent-service-start socket)
+        (romacs-agent-service--refresh t)
+        (should (equal (gethash "key" (gethash "c-first" (romacs-agent-service--list-rows romacs-agent-service--list)))
+                       "idle"))
+        (push (romacs-agent-service-tests--row "p-first") stored)
+        (let ((updates (romacs-agent-service--rows-of romacs-agent-service--list '("c-first" "p-first"))))
+          (should (equal (gethash "key" (cdr (assoc "c-first" updates))) "completed")))))))
+
+(ert-deftest romacs-agent-service-remakes-a-child-when-its-parent-goes-unsaid ()
+  ;; A parent gone with no event: the next whole pass says so, and its
+  ;; finished child's key no longer reads it known.
+  (romacs-agent-service-tests--with
+    (mk "p-gone" 'idle)
+    (mk "c-gone" 'idle :done-seq 4 :options '(:parent "p-gone"))
+    (romacs-agent-service-start socket)
+    (romacs-agent-service--refresh t)
+    (should (equal (gethash "key" (gethash "c-gone" (romacs-agent-service--list-rows romacs-agent-service--list)))
+                   "completed"))
+    (remhash "p-gone" romacs-agent--sessions)
+    (romacs-agent-service--refresh t)
+    (should-not (gethash "p-gone" (romacs-agent-service--list-rows romacs-agent-service--list)))
+    (should (equal (gethash "key" (gethash "c-gone" (romacs-agent-service--list-rows romacs-agent-service--list)))
+                   "idle"))))
 
 (ert-deftest romacs-agent-service-runs-its-whole-pass-when-idle ()
   (romacs-agent-service-tests--with
@@ -276,7 +342,7 @@ and `wait' waiting until its form holds (5 s at most)."
          (process-environment (cons (concat "XDG_RUNTIME_DIR=" root) process-environment))
          (romacs-agent--sessions (make-hash-table :test #'equal)))
     (unwind-protect
-        (cl-letf (((symbol-function 'romacs-agent-store-unloaded) #'ignore))
+        (cl-letf (((symbol-function 'romacs-agent-store-unloaded-rows) #'ignore))
           (make-directory (romacs-agent--runtime-root) t)
           (set-file-modes (romacs-agent--runtime-root) #o755)
           (should (equal (romacs-agent-service-start) (romacs-agent-service-socket)))
@@ -412,7 +478,8 @@ and `wait' waiting until its form holds (5 s at most)."
         (romacs-agent-client-open client "busy")
         (should (wait (car log)))
         (setf (romacs-agent-state busy) 'idle)
-        (run-hook-with-args 'romacs-agent-event-functions busy '(:type changed))
+        ;; As the editor tells a change made beside its events.
+        (romacs-agent--changed busy)
         (should (wait (cl-find 'changed (car log) :key #'cadr)))
         (should (equal (gethash "state" (gethash "row" (nth 2 (cl-find 'changed (car log) :key #'cadr)))) "idle"))))))
 
@@ -605,8 +672,8 @@ a state root of its own, and a service of its own on `socket'."
               ;; Running a tool: what it runs and how long, as drawn here.
               (setf (romacs-agent-state session) 'running (romacs-agent-activity session) "Grep"
                     (romacs-agent-turn-start session) (- (float-time) 75))
-              (run-hook-with-args 'romacs-agent-event-functions session
-                                  (list :type 'status :text "working" :seq 21 :last t :time (float-time)))
+              ;; Raised, as the editor tells its views of an event.
+              (romacs-agent--raise session (list :type 'status :text "working" :seq 21 :last t :time (float-time)))
               (should (wait (equal (gethash "activity" (gethash id (romacs-agent-client-rows (romacs-agent-remote-client source))))
                                    "Grep")))
               (should (string-search "Grep" (board source)))

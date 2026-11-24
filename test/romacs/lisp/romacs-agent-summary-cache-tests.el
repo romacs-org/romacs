@@ -166,6 +166,33 @@ of all, equal those made anew; each is kept again for the next change."
     (let ((romacs-agent-models '((codex ("m" :default-effort "low" :efforts ("low"))))))
       (romacs-agent-summary-cache-tests--same))))
 
+;;; What a task record reads
+
+(ert-deftest romacs-agent-summary-cache-follows-task-facts ()
+  ;; The facts MCP reads of a task (`romacs-agent-tools--task'), as each
+  ;; is written: a turn's end and its reply, a move armed at a limit and
+  ;; let go (a move's wait is no fact of its summary), a renewal's new
+  ;; conversation and its commit, its wake rule.
+  (romacs-agent-summary-cache-tests--with
+    (romacs-agent--raise worker '(:type input :seq 3 :request "w3" :text "Work"))
+    (romacs-agent--raise worker '(:type done :seq 4 :text "Reply"))
+    (romacs-agent-summary-cache-tests--same)
+    (setf (romacs-agent-limited worker) '(:provider "codex" :text "Spent"))
+    (romacs-agent--changed worker)
+    (cl-letf (((symbol-function 'run-at-time) #'ignore))
+      (romacs-agent-tools--arm-move worker))
+    (romacs-agent-summary-cache-tests--same)
+    (romacs-agent-tools--not-moved worker nil)
+    (romacs-agent-summary-cache-tests--same)
+    (romacs-agent--raise other '(:type renewed :to "native-2" :seq 5))
+    (romacs-agent-summary-cache-tests--same)
+    (should (equal (romacs-agent-summary-conversation (romacs-agent-summary (romacs-agent-id other))) "native-2"))
+    (romacs-agent-renew--commit other "native-2")
+    (romacs-agent-summary-cache-tests--same)
+    (romacs-agent--set-options worker (plist-put (copy-sequence (romacs-agent-options worker)) :wake "none"))
+    (romacs-agent-summary-cache-tests--same)
+    (should (equal (romacs-agent-summary-wake-rule (romacs-agent-summary (romacs-agent-id worker))) "none"))))
+
 ;;; A resume at a limit's reset that goes nowhere
 
 (defun romacs-agent-summary-cache-tests--resume-goes-nowhere (session before)

@@ -82,7 +82,7 @@
 
 (ert-deftest romacs-agent-handoff-a-wake-is-context ()
   (require 'romacs-agent-tools)
-  (let* ((child (romacs-agent--make :id "11111111-0000-4000-8000-000000000000" :title "t"))
+  (let* ((child (romacs-agent-summary--make :id "11111111-0000-4000-8000-000000000000" :title "t"))
          (wake (romacs-agent-tools--wake-text child '(1 "done" nil)))
          (items (romacs-agent-handoff-items (list '(:type input :text "do it") (list :type 'input :text wake)))))
     (should (equal (mapcar (lambda (i) (plist-get i :role)) items) '(user tool)))

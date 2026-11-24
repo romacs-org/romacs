@@ -38,7 +38,6 @@
            (romacs-agent-watch--watches (make-hash-table :test #'equal))
            (romacs-agent-writer-queued nil)
            (romacs-agent-board-source romacs-agent-log-local)
-           (romacs-agent-board--unloaded nil)
            (romacs-agent-glyphs nil))
        (cl-letf (((symbol-function 'romacs-agent-history-items) #'ignore)
                  ((symbol-function 'float-time) (lambda (&optional _) 110)))

@@ -299,6 +299,53 @@ mod tests {
         assert_eq!((vm.backtrace.frames.len(), vm.site_leaf), (depth, (0, 0)));
     }
 
+    /// The store's writer has ended once the listener stops: its directory,
+    /// removed then, as a test's private state is, stays removed.
+    #[test]
+    fn a_stopped_listener_writes_nothing_after() {
+        let _turn = inspection();
+        let root = std::env::temp_dir().join(format!("romacs-inspect-stop-{}", std::process::id()));
+        let store = root.join("state/romacs/debug");
+        for _ in 0..20 {
+            std::fs::create_dir_all(&root).unwrap();
+            crate::host::inspect_listen(root.to_str().unwrap(), store.to_str()).unwrap();
+            crate::host::inspect_stop();
+            std::fs::remove_dir_all(&root).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            assert!(!root.exists(), "the store's writer made {} after the listener stopped", store.display());
+        }
+    }
+
+    /// A stop finds the store's writer pruning a full store: the writer ends
+    /// at its next file call rather than finish, and the store stays as the
+    /// stop left it.
+    #[test]
+    fn a_stop_ends_a_long_prune_at_once() {
+        use std::os::unix::fs::PermissionsExt;
+        let _turn = inspection();
+        let root = std::env::temp_dir().join(format!("romacs-inspect-prune-{}", std::process::id()));
+        let store = root.join("debug");
+        std::fs::create_dir_all(&store).unwrap();
+        std::fs::set_permissions(&store, std::fs::Permissions::from_mode(0o700)).unwrap();
+        for n in 0..20_000 { std::fs::write(store.join(format!("inspect-0-{n}.json")), "").unwrap(); }
+        crate::host::inspect_listen(root.to_str().unwrap(), store.to_str()).unwrap();
+        let generation = crate::host::inspect_generation();
+        crate::host::inspect_publish(generation, "{}".into());
+        let saved = store.join(format!("inspect-{}-{generation}.json", std::process::id()));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !saved.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert!(saved.exists(), "the snapshot was never saved");
+        crate::host::inspect_stop();
+        let count = || std::fs::read_dir(&store).unwrap().count();
+        let left = count();
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert_eq!(count(), left, "the writer pruned after the stop");
+        assert!(left > 1_000, "the stop waited for the whole prune: {left} files left");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
     /// A display span's end is found past every other run inside it: the walk
     /// polls, for a motion that wants a quit and for an inspection.
     #[test]

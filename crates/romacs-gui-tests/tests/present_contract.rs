@@ -11,6 +11,10 @@
 //! romacs's usage of it.  The backend follows WGPU_BACKEND, exactly as CI
 //! selects it, so this one test runs the GL contract on runners and the
 //! Vulkan contract wherever lavapipe exists.
+//!
+//! Set ROMACS_TEST_BINARY to the editor built from the same candidate to
+//! extend the X11 contract with editor smoke tests on Xvfb and headless labwc.
+//! The Wayland smoke uses wtype from PATH or ROMACS_TEST_WTYPE.
 
 #![cfg(target_os = "linux")]
 
@@ -20,7 +24,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use romacs_gui_tests::DisplayHarness;
+use romacs_gui_tests::{DisplayHarness, DisplaySession};
+use romacs_infra::display::start_labwc;
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
@@ -28,6 +33,8 @@ use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::platform::x11::EventLoopBuilderExtX11;
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::{Window, WindowId};
+use x11rb::connection::Connection;
+use x11rb::protocol::xproto::{ConfigureWindowAux, ConnectionExt, MapState};
 
 const INITIAL: (u32, u32) = (320, 240);
 const RESIZED: (u32, u32) = (480, 360);
@@ -255,8 +262,9 @@ fn resize_then_present_shows_the_new_frame_on_the_current_backend() {
         let _ = std::fs::remove_file(artifacts.join(stale));
     }
 
+    let root = tempfile::tempdir_in("/tmp").unwrap();
     let session = DisplayHarness::Xvfb
-        .start_session(&artifact_root)
+        .start_session(root.path())
         .expect("start isolated Xvfb");
     // The contract's event loop is created in this process, so the session
     // environment must become the process environment: point winit at the
@@ -269,6 +277,7 @@ fn resize_then_present_shows_the_new_frame_on_the_current_backend() {
             std::env::set_var(key, value);
         }
         std::env::remove_var("WAYLAND_DISPLAY");
+        std::env::remove_var("WAYLAND_SOCKET");
         std::env::set_var("WINIT_UNIX_BACKEND", "x11");
     }
 
@@ -304,4 +313,137 @@ fn resize_then_present_shows_the_new_frame_on_the_current_backend() {
         "resized frame shows {ratio:.2} blue on backend {backend_label}; \
          the present path lost the post-resize frame"
     );
+
+    let Some(binary) = std::env::var_os("ROMACS_TEST_BINARY") else {
+        return;
+    };
+    let binary = std::path::absolute(binary).expect("resolve editor binary");
+    let display = session
+        .env()
+        .iter()
+        .find(|(key, _)| key == "DISPLAY")
+        .unwrap();
+    editor_smoke(
+        &binary,
+        root.path(),
+        &session,
+        "GdkX11Display",
+        &display.1,
+        |before| {
+            let (x, screen) = x11rb::connect(Some(&display.1))?;
+            let tree = x.query_tree(x.setup().roots[screen].root)?.reply()?;
+            let mut framed = Vec::new();
+            for window in tree.children {
+                if x.get_window_attributes(window)?.reply()?.map_state == MapState::VIEWABLE
+                    && u32::from(x.get_geometry(window)?.reply()?.width) == before
+                {
+                    framed.push(window);
+                }
+            }
+            let [window] = framed.as_slice() else {
+                return Err(format!(
+                    "Expected one visible {before}px X11 window, found {framed:?}"
+                )
+                .into());
+            };
+            x.configure_window(*window, &ConfigureWindowAux::new().width(before + 160))?
+                .check()?;
+            Ok(())
+        },
+    );
+    drop(session);
+
+    let root = tempfile::tempdir_in("/tmp").unwrap();
+    let config = concat!(
+        "<labwc_config><core><xwayland>no</xwayland></core>",
+        "<keyboard><keybind key=\"C-F11\"><action name=\"ToggleMaximize\"/></keybind></keyboard>",
+        "</labwc_config>",
+    );
+    let session = start_labwc(root.path(), config).expect("start isolated headless labwc");
+    let display = session
+        .env()
+        .iter()
+        .find(|(key, _)| key == "WAYLAND_DISPLAY")
+        .unwrap();
+    editor_smoke(
+        &binary,
+        root.path(),
+        &session,
+        "GdkWaylandDisplay",
+        &display.1,
+        |_| {
+            let status = session
+                .isolated_command(root.path(), "timeout")?
+                .arg("5")
+                .arg(wtype())
+                .args(["-M", "ctrl", "-k", "F11", "-m", "ctrl"])
+                .status()?;
+            if !status.success() {
+                return Err(format!("wtype resize binding exited {status}").into());
+            }
+            Ok(())
+        },
+    );
+}
+
+fn wtype() -> PathBuf {
+    std::env::var_os("ROMACS_TEST_WTYPE").map_or_else(|| "wtype".into(), PathBuf::from)
+}
+
+fn editor_smoke(
+    binary: &std::path::Path,
+    root: &std::path::Path,
+    session: &DisplaySession,
+    class: &str,
+    display: &str,
+    resize: impl FnOnce(u32) -> Result<(), Box<dyn std::error::Error>>,
+) {
+    let workspace = romacs_infra::workspace_root();
+    let fixture = romacs_infra::crate_root!().join("fixtures/display-smoke.el");
+    let log_path = root.join("editor.log");
+    let log = std::fs::File::create(&log_path).unwrap();
+    let mut child = session
+        .isolated_command(root, "timeout")
+        .unwrap()
+        .args(["--kill-after=5", "90"])
+        .arg(binary)
+        .args(["-Q", "--loadup", "--geometry", "640x480", "-l"])
+        .arg(fixture)
+        .env("ROMACS_RUNTIME_ROOT", workspace)
+        .env("ROMACS_WORLD", "off")
+        .env("ROMACS_SMOKE_CLASS", class)
+        .env("ROMACS_SMOKE_DISPLAY", display)
+        .env("ROMACS_SMOKE_WTYPE", wtype())
+        .stdout(log.try_clone().unwrap())
+        .stderr(log)
+        .spawn()
+        .expect("launch editor smoke");
+    let ready = root.join("display-smoke-ready");
+    let started = Instant::now();
+    let resize_result = loop {
+        if let Ok(width) = std::fs::read_to_string(&ready)
+            && let Ok(width) = width.trim().parse()
+        {
+            break resize(width);
+        }
+        if child.try_wait().unwrap().is_some() {
+            break Err("editor exited before the resize".into());
+        }
+        if started.elapsed() >= Duration::from_secs(80) {
+            break Err("editor did not request a native resize".into());
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let status = child.wait().expect("reap editor smoke");
+    assert!(
+        status.success(),
+        "{class} editor exited {status}\n{}",
+        std::fs::read_to_string(log_path).unwrap_or_default()
+    );
+    resize_result.expect("request native resize");
+    assert_eq!(
+        std::fs::read_to_string(root.join("display-smoke-result")).unwrap(),
+        "inserted, pasted, resized\n"
+    );
+    println!("{class}: inserted, pasted, resized");
 }

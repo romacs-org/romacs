@@ -32,7 +32,6 @@
             (romacs-agent-log--chats (make-hash-table :test #'equal))
             (romacs-agent-writer-queued nil)
             (romacs-agent-board-source romacs-agent-log-local)
-            (romacs-agent-board--unloaded nil)
             (romacs-agent-event-functions nil)
             (romacs-agent-loaded-functions nil)
             (romacs-agent-caught-up-functions nil)
