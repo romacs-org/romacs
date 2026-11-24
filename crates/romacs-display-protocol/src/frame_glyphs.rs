@@ -159,7 +159,7 @@ impl ScrollBarIdentity {
 }
 
 /// A single glyph to render
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum FrameGlyph {
     /// Character glyph with text
     Char {
@@ -428,6 +428,18 @@ impl FrameGlyph {
         }
     }
 
+    /// Mutable counterpart to [`Self::slot_id`].
+    pub fn slot_id_mut(&mut self) -> Option<&mut DisplaySlotId> {
+        match self {
+            FrameGlyph::Char { slot_id, .. } | FrameGlyph::Stretch { slot_id, .. } => Some(slot_id),
+            FrameGlyph::Image { slot_id, .. }
+            | FrameGlyph::Video { slot_id, .. }
+            | FrameGlyph::Xwidget { slot_id, .. }
+            | FrameGlyph::Surface { slot_id, .. } => slot_id.as_mut(),
+            _ => None,
+        }
+    }
+
     /// Bidirectional resolved level for displayed character/stretch slots.
     pub fn bidi_level(&self) -> Option<u8> {
         match self {
@@ -592,6 +604,25 @@ impl FrameGlyph {
         }
     }
 
+    /// Mutable counterpart to [`Self::window_id`], for relabelling a
+    /// window (a pane picture names the master's window, not its owner's).
+    pub fn window_id_mut(&mut self) -> Option<&mut DisplayWindowId> {
+        match self {
+            FrameGlyph::Char { window_id, .. }
+            | FrameGlyph::Stretch { window_id, .. }
+            | FrameGlyph::Image { window_id, .. }
+            | FrameGlyph::Video { window_id, .. }
+            | FrameGlyph::Xwidget { window_id, .. }
+            | FrameGlyph::Surface { window_id, .. }
+            | FrameGlyph::FringeBitmap { window_id, .. }
+            | FrameGlyph::Border { window_id, .. }
+            | FrameGlyph::ScrollBar { window_id, .. } => Some(window_id),
+            FrameGlyph::Background { .. } => None,
+            #[cfg(feature = "romacs-term")]
+            FrameGlyph::Terminal { .. } => None,
+        }
+    }
+
     /// Layout row role used for z-ordering. `None` for the frame background
     /// and detached terminal glyphs.
     pub fn row_role(&self) -> Option<GlyphRowRole> {
@@ -714,6 +745,15 @@ impl FrameGlyph {
             | FrameGlyph::Video { face_id, .. }
             | FrameGlyph::Xwidget { face_id, .. }
             | FrameGlyph::Surface { face_id, .. } => Some(*face_id),
+            _ => None,
+        }
+    }
+
+    /// The image an image glyph draws.
+    #[must_use]
+    pub fn image_id(&self) -> Option<ImageId> {
+        match self {
+            FrameGlyph::Image { image_id, .. } => Some(*image_id),
             _ => None,
         }
     }
@@ -1618,6 +1658,26 @@ impl FrameGlyphBuffer {
 
     pub fn new() -> Self {
         Self {
+            glyphs: Vec::with_capacity(10000),
+            window_infos: Vec::with_capacity(16),
+            transition_hints: Vec::with_capacity(16),
+            window_cursors: Vec::with_capacity(8),
+            ..Self::unreserved()
+        }
+    }
+
+    /// A WIDTH by HEIGHT buffer of GLYPHS, moved in as they are: no room
+    /// reserved for a layout to fill.
+    #[must_use]
+    pub fn with_glyphs(width: f32, height: f32, glyphs: Vec<FrameGlyph>) -> Self {
+        Self { width, height, glyphs, ..Self::unreserved() }
+    }
+
+    /// An empty buffer that has allocated nothing.
+    // SMELL(long-function): one line per field of the buffer, which was
+    // `new`'s body; `new` and `with_glyphs` build on it.
+    fn unreserved() -> Self {
+        Self {
             scroll_input_policy: crate::ScrollInputPolicy::default(),
             presentation_id: crate::frame_chrome::PresentationId::default(),
             frame_placement: crate::presented_frame::PresentedFramePlacement::default(),
@@ -1639,18 +1699,18 @@ impl FrameGlyphBuffer {
             layer: crate::child_frame_animation::Layer::default(),
             layout_identity: 0,
             text_over_backgrounds: false,
-            glyphs: Vec::with_capacity(10000),
+            glyphs: Vec::new(),
             frame_chrome: crate::frame_chrome::FrameChrome::default(),
             presented_pointer: crate::presented_pointer::PresentedPointerMap::empty(),
             presented_pointer_source: None,
             presented_hit_index: crate::presented_pointer::PresentedHitIndex::default(),
-            window_infos: Vec::with_capacity(16),
+            window_infos: Vec::new(),
             panes: Vec::new(),
             status_bar: None,
             status_bar_places: Vec::new(),
             rounded_fills: Vec::new(),
-            transition_hints: Vec::with_capacity(16),
-            window_cursors: Vec::with_capacity(8),
+            transition_hints: Vec::new(),
+            window_cursors: Vec::new(),
             cursor_blinked_off: false,
             cursor_effects_by_window: HashMap::default(),
             current_face_id: FaceId::new(0),
@@ -2214,10 +2274,7 @@ impl FrameGlyphBuffer {
 
     /// Image assets whose lifetime is extended by this immutable frame.
     pub fn referenced_images(&self) -> impl Iterator<Item = ImageId> + '_ {
-        self.glyphs.iter().filter_map(|glyph| match glyph {
-            FrameGlyph::Image { image_id, .. } => Some(*image_id),
-            _ => None,
-        })
+        self.glyphs.iter().filter_map(FrameGlyph::image_id)
     }
 
     /// Return a mutable reference to the active (selected window's) cursor.
