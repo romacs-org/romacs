@@ -1,3 +1,9 @@
+## Observable by a package
+
+| # | mechanism | GNU | romacs | why |
+|---|---|---|---|---|
+| VM2-SHORTDOC-LOAD | Loading `shortdoc-doc.el` directly | Pinned GNU autoloads `define-short-documentation-group` from `shortdoc.el`, which requires `shortdoc-doc` while its first form expands: an eager macro-expansion cycle error | `shortdoc-doc.el` loads the macro explicitly, binding `shortdoc--loading-doc` so `shortdoc.el` leaves the groups to its caller; both load orders succeed | Romacs's warm census loads the documentation file directly; matching GNU would make that load fail | <!-- symbols: define-short-documentation-group, shortdoc--loading-doc -->
+
 ## Detail
 
 Loading `shortdoc-doc.el` directly in pinned GNU first autoloads its group
