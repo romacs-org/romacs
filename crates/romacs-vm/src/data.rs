@@ -153,7 +153,7 @@ const UTF8: u8 = 4;
 /// Unibyte text as an object: ASCII keeps the string slot, which every
 /// reader of text takes; only bytes above 127 are a byte string.
 pub(crate) fn unibyte_object(bytes: Vec<u8>) -> Object {
-    if bytes.is_ascii() { string_object(LispString::from_bytes(bytes, false)) } else { Object::Bytes(bytes) }
+    if bytes.is_ascii() { string_object(LispString::from_ascii(bytes, false)) } else { Object::Bytes(bytes) }
 }
 
 pub(crate) fn string_object(string: LispString) -> Object {
@@ -175,43 +175,54 @@ impl LispString {
             flag_scanned: std::cell::Cell::new(0),
         }
     }
-    pub fn from_bytes(bytes: Vec<u8>, multibyte: bool) -> Self {
-        if bytes.is_ascii() {
-            let chars=bytes.len();
-            return Self {
-                bytes, chars, flags: ASCII | UTF8 | if multibyte { MULTIBYTE } else { 0 },
-                properties: crate::properties::Properties::new(),
-                cursors:[std::cell::Cell::new((0,0)),std::cell::Cell::new((chars,chars))],
-                #[cfg(test)]
-                scanned: std::cell::Cell::new(0),
-            #[cfg(test)]
-            flag_scanned: std::cell::Cell::new(0),
-            };
-        }
-        let utf8 = std::str::from_utf8(&bytes);
-        let is_utf8 = bytes.is_ascii() || (multibyte && utf8.is_ok());
-        let chars = if !multibyte {
-            bytes.len()
-        } else if let Ok(text) = utf8 {
-            text.chars().count()
-        } else {
-            let mut rest = bytes.as_slice();
-            let mut count = 0;
-            while !rest.is_empty() {
-                let (_, width) =
-                    crate::lstring::decode_char(rest).expect("valid internal string encoding");
-                rest = &rest[width..];
-                count += 1;
-            }
-            count
-        };
-        let byte_len = bytes.len();
-        let is_ascii = bytes.is_ascii();
+    /// ASCII bytes validated by the caller, with their already-known metadata.
+    pub(super) fn from_ascii(bytes: Vec<u8>, multibyte: bool) -> Self {
+        let chars = bytes.len();
+        Self::with_metadata(bytes, chars, ASCII | UTF8 | if multibyte { MULTIBYTE } else { 0 })
+    }
 
+    pub fn from_bytes(bytes: Vec<u8>, multibyte: bool) -> Self {
+        let (chars, flags) = Self::measure_bytes(&bytes, multibyte);
+        Self::with_metadata(bytes, chars, flags)
+    }
+
+    pub(super) fn from_bytes_polled<E>(
+        bytes: Vec<u8>, multibyte: bool, mut poll: impl FnMut() -> std::result::Result<(), E>,
+    ) -> std::result::Result<Self, E> {
+        let mut chars = 0;
+        let mut flags = ASCII | UTF8 | if multibyte { MULTIBYTE } else { 0 };
+        for (index, part) in crate::lstring::byte_parts(&bytes, multibyte, crate::quit::KERNEL_CHUNK).enumerate() {
+            if index != 0 { poll()?; }
+            let (count, part_flags) = Self::measure_bytes(part, multibyte);
+            chars += count;
+            flags &= part_flags;
+        }
+        Ok(Self::with_metadata(bytes, chars, flags))
+    }
+
+    fn measure_bytes(bytes: &[u8], multibyte: bool) -> (usize, u8) {
+        let kind = if multibyte { MULTIBYTE } else { 0 };
+        if bytes.is_ascii() { return (bytes.len(), kind | ASCII | UTF8); }
+        if !multibyte { return (bytes.len(), kind); }
+        if let Ok(text) = std::str::from_utf8(bytes) {
+            return (text.chars().count(), kind | UTF8);
+        }
+        let mut rest = bytes;
+        let mut count = 0;
+        while !rest.is_empty() {
+            let (_, width) = crate::lstring::decode_char(rest).expect("valid internal string encoding");
+            rest = &rest[width..];
+            count += 1;
+        }
+        (count, kind)
+    }
+
+    fn with_metadata(bytes: Vec<u8>, chars: usize, flags: u8) -> Self {
+        let byte_len = bytes.len();
         Self {
             bytes,
             chars,
-            flags: u8::from(multibyte) * MULTIBYTE | u8::from(is_ascii) * ASCII | u8::from(is_utf8) * UTF8,
+            flags,
             properties: crate::properties::Properties::new(),
             cursors: [
                 std::cell::Cell::new((0, 0)),
@@ -223,6 +234,16 @@ impl LispString {
             flag_scanned: std::cell::Cell::new(0),
         }
     }
+
+    /// Keep the compact Bytes representation for an unpropertized unibyte result.
+    pub(super) fn into_concat_object(self) -> Object {
+        if !self.is_multibyte() && !self.is_ascii() && self.properties.is_empty() {
+            Object::Bytes(self.bytes)
+        } else {
+            string_object(self)
+        }
+    }
+
     pub fn as_str(&self) -> &str {
         assert!(self.is_utf8(), "String slot must contain UTF-8");
         // SAFETY: checked just above, and construction and every byte mutation
