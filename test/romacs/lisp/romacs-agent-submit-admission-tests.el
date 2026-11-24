@@ -23,6 +23,7 @@
 (require 'romacs-agent-claude)
 (require 'romacs-agent-test-attached)
 (require 'romacs-agent-test-stored)
+(require 'romacs-test-socket)
 
 (defvar romacs-agent-remote-submit-deadline)
 
@@ -180,7 +181,7 @@ function making a client of an INSTANCE, and ASK, one sending a request
 over a CLIENT, METHOD and PARAMS, that returns its (RESULT ERROR)."
   (romacs-agent-submit-admission-tests--with
    (lambda (session)
-     (let* ((root (make-temp-file "rsa" t))
+     (let* ((root (romacs-test-socket-directory "rsa"))
             (socket (expand-file-name "s.sock" root))
             (romacs-agent-service--commands (make-hash-table :test #'equal))
             (clients nil))
