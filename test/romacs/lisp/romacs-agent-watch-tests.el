@@ -105,6 +105,19 @@ systemd reports `state' and `invocation' for each unit."
           (should-error (funcall (nth 1 reply)) :type 'user-error)
           (should-not (file-exists-p (romacs-agent-watch--file child))))))))
 
+(ert-deftest romacs-agent-watch-a-stop-while-checking-installs-nothing ()
+  ;; A stop asked while the watch's unit is still being checked: the
+  ;; check's answer installs no watch the caller just removed.
+  (romacs-agent-watch-tests--with
+    (let (complete)
+      (cl-letf (((symbol-function 'romacs-agent-watch--output)
+                 (lambda (_program _args then) (setq complete then))))
+        (let ((reply (romacs-agent-watch--watch (romacs-mcp--object "taskId" "child" "unit" "check"))))
+          (romacs-agent-watch--watch (romacs-mcp--object "taskId" "child" "unit" "check" "stop" t))
+          (funcall complete "Id=check.service\nActiveState=active\n" 0)
+          (should-error (funcall (nth 1 reply)) :type 'user-error)
+          (should-not (gethash "child" romacs-agent-watch--watches)))))))
+
 (ert-deftest romacs-agent-watch-answers-no-result ()
   ;; What it watches, never the task's last result.
   (romacs-agent-watch-tests--with

@@ -452,10 +452,16 @@ STOP removes the watch.  STATUS is the unit's (STATE . INVOCATION)."
       (user-error "Unit %s is not running (%s): start it first, or read its end yourself" unit (car status))))
     (romacs-agent-watch--reply id watch stop)))
 
+(defvar romacs-agent-watch--stops (make-hash-table :test #'equal)
+  "(TASK-ID . UNIT) to how many stops of that watch were asked: a
+registration still checking its unit when one comes installs nothing.")
+
 (defun romacs-agent-watch--register-unit (task caller watch)
-  "Defer registering TASK's unit WATCH until systemd replies to CALLER's request."
+  "Defer registering TASK's unit WATCH until systemd replies to CALLER's
+request, unless a stop of it comes meanwhile."
   (let* ((unit (plist-get watch :unit))
          (id (romacs-agent-id task))
+         (stops (gethash (cons id unit) romacs-agent-watch--stops 0))
          (states nil)
          (deadline (+ (float-time) 10))
          (process (romacs-agent-watch--show
@@ -468,6 +474,8 @@ STOP removes the watch.  STATUS is the unit's (STATE . INVOCATION)."
               (unless (and (eq (gethash id romacs-agent--sessions) task) (not (romacs-agent-watch--stopped-p task)))
                 (user-error "Task %s stopped or disappeared before its watch could start" id))
               (unless (equal id caller) (romacs-agent-tools--own task caller "watch for it"))
+              (unless (eql stops (gethash (cons id unit) romacs-agent-watch--stops 0))
+                (user-error "The watch on unit %s was stopped before it started" unit))
               (list (romacs-agent-watch--update task watch nil (gethash unit states))))
              ((>= (float-time) deadline)
               (when (process-live-p process) (delete-process process))
@@ -486,6 +494,8 @@ delegated; a unit not running now is refused."
          (watch (progn (unless (equal id caller) (romacs-agent-tools--own task caller "watch for it"))
                        (romacs-agent-watch--described arguments task)))
          (stop (eq (gethash "stop" arguments) t)))
+    (when (and stop (plist-get watch :unit))
+      (cl-incf (gethash (cons id (plist-get watch :unit)) romacs-agent-watch--stops 0)))
     (if (and (plist-get watch :unit) (not stop))
         (romacs-agent-watch--register-unit task caller watch)
       (romacs-agent-watch--update task watch stop))))
