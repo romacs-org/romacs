@@ -99,7 +99,14 @@
       (romacs-agent-handoff old '((:type input :text "build it")) "codex" nil "Go on.")
       (should (equal stopped (list old)))
       (should (equal (plist-get (romacs-agent-options old) :handed-to) "new"))
-      (should (eq (romacs-agent-tools--known "old") new)))))
+      (should (eq (romacs-agent-tools--known "old") new))
+      ;; Its delegated tasks' ends go where it goes on.
+      (let ((grandchild (romacs-agent--make :id "gc" :harness 'claude :options '(:parent "old")))
+            (loaded nil))
+        (cl-letf (((symbol-function 'romacs-agent-load-session) (lambda (id) (push id loaded) (gethash id romacs-agent--sessions)))
+                  ((symbol-function 'romacs-agent-tools--wake-soon) (lambda (parent) (push parent loaded))))
+          (romacs-agent-tools--hand-on grandchild)
+          (should (eq (car loaded) new)))))))
 
 (ert-deftest romacs-agent-handoff-a-wake-is-context ()
   (require 'romacs-agent-tools)

@@ -31,6 +31,7 @@
 
 (declare-function romacs-agent-resume-time "romacs-agent-tools" (session))
 (declare-function romacs-agent-tools--wake-rule "romacs-agent-tools" (child))
+(declare-function romacs-agent-tools--wanted-p "romacs-agent-tools" (session seq &optional summary))
 (declare-function romacs-agent-store-unloaded-rows "romacs-agent-store" (&optional parent))
 (declare-function romacs-agent-store-row "romacs-agent-store" (id))
 (declare-function romacs-agent-store-row-parent "romacs-agent-store" (row))
@@ -73,9 +74,11 @@
   ;; its end wakes its parent (`romacs-agent-tools--wake-rule'); its last
   ;; end at its instance's usage limit, the move to another account aside.
   ;; Where it could go on from there is read when asked, never kept
-  ;; (`romacs-agent-summary-alternatives').
+  ;; (`romacs-agent-summary-alternatives').  Whether its last end still
+  ;; waits to be delivered to its parent (`romacs-agent-tools--wanted-p'),
+  ;; and the session a handoff carries it on in (its :handed-to).
   plan-offer-waits turns reply cancelled role worktree branch conversation
-  requested-model wake-rule limited)
+  requested-model wake-rule limited undelivered handed-to)
 
 (defun romacs-agent-summary--plain (value)
   "VALUE with every string in it, at any depth, without text properties:
@@ -259,7 +262,13 @@ its user: as data, its reply shared, not copied
           (romacs-agent-summary-wake-rule summary) (romacs-agent-summary--plain (romacs-agent-tools--wake-rule session))
           (romacs-agent-summary-limited summary)
           (romacs-agent-summary--plain (romacs-agent--without (romacs-agent-limited session) '(:moving :moving-since)))
-          (romacs-agent-summary-reply summary) (romacs-agent-summary--shared (romacs-agent-reply session)))
+          (romacs-agent-summary-reply summary) (romacs-agent-summary--shared (romacs-agent-reply session))
+          (romacs-agent-summary-handed-to summary) (romacs-agent-summary--plain (plist-get options :handed-to)))
+    ;; Its cancellation read first, above.
+    (setf (romacs-agent-summary-undelivered summary)
+          (and (plist-get options :parent) (> (or (romacs-agent-done-seq session) 0) 0)
+               (romacs-agent-tools--wanted-p session (romacs-agent-done-seq session) summary)
+               t))
     summary))
 
 (defvar romacs-agent-summary--made-under nil

@@ -402,6 +402,18 @@ offers no plan to proceed with."
   (romacs-agent--manifest-put session "options" (romacs-agent--options-object options))
   (romacs-agent--changed session))
 
+(defun romacs-agent-successor (session)
+  "SESSION, or the session a handoff to another harness carries it on in
+\(its :handed-to, `romacs-agent-handoff'), all the way: the one a task's
+actions, messages and wakes reach."
+  (let ((seen nil))
+    (while-let ((next (and session (not (memq session seen))
+                           (plist-get (romacs-agent-options session) :handed-to)))
+                (to (romacs-agent-get next)))
+      (push session seen)
+      (setq session to))
+    session))
+
 (defun romacs-agent--without (options keys)
   "OPTIONS, a plist, without KEYS."
   (cl-loop for (key value) on options by #'cddr unless (memq key keys) append (list key value)))

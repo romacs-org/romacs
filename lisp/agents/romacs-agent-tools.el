@@ -324,8 +324,7 @@ it only on failure, or never, may end and leave it asleep."
                (and (member (or (romacs-agent-summary-wake-rule child) "end") '("end" "all"))
                     (or (member (romacs-agent-tools--status child) '("running" "waiting"))
                         ;; Ended, its end not yet in this session's harness.
-                        (when-let* ((session (romacs-agent-loaded id)))
-                          (romacs-agent-tools--wanted-p session (romacs-agent-done-seq session) child))))))
+                        (romacs-agent-summary-undelivered child)))))
            (romacs-agent-summary-children-rows summary)))
 
 (defun romacs-agent-tools--running-next (summary)
@@ -439,16 +438,21 @@ fails for good is the answer's error, never what its row alone says."
                (t (user-error "Task %s's records could not be read by a worker; its status is unknown until a load reads them"
                               id))))))))
 
+(defun romacs-agent-tools--successor-id (id)
+  "ID, or the id of the session a handoff carries it on in, by their
+summaries (`romacs-agent-successor' for the sessions themselves)."
+  (let ((seen nil))
+    (while-let ((summary (and (not (member id seen)) (romacs-agent-summary id)))
+                (next (romacs-agent-summary-handed-to summary)))
+      (push id seen)
+      (setq id next))
+    id))
+
 (defun romacs-agent-tools--known (id)
   "Return the task with exact ID or a unique visible prefix matching ID
 \(`romacs-agent-tools--resolve'), to act on: a task handed off to another
 harness, the session it goes on in (`romacs-agent-handoff')."
-  (let ((task (romacs-agent-get (romacs-agent-tools--resolve id))) (seen nil))
-    (while-let ((next (and task (not (memq task seen)) (plist-get (romacs-agent-options task) :handed-to)))
-                (successor (romacs-agent-get next)))
-      (push task seen)
-      (setq task successor))
-    task))
+  (romacs-agent-successor (romacs-agent-get (romacs-agent-tools--resolve id))))
 
 (defun romacs-agent-tools--woken-file (session)
   (expand-file-name "woken" (romacs-agent-dir session)))
@@ -471,7 +475,9 @@ read or written here: an end is checked against it without reading it.")
 parent's harness takes them in order."
   (when (> seq (romacs-agent-tools--woken session))
     (with-temp-file (romacs-agent-tools--woken-file session) (insert (number-to-string seq)))
-    (puthash session seq romacs-agent-tools--woken-seqs)))
+    (puthash session seq romacs-agent-tools--woken-seqs)
+    ;; Its summary says whether an end waits to be delivered.
+    (romacs-agent--summary-stale (romacs-agent-id session))))
 
 (defconst romacs-agent-tools--wake-limit 16000
   "The most of a child's result a wake carries: the rest is
@@ -708,6 +714,7 @@ read once from its `answered' file.")
 ends still on their way stay so.  UNWRITTEN: not kept yet, its caller
 writes it (`romacs-agent-tools--write-answered')."
   (puthash seq t (romacs-agent-tools--answered-table session))
+  (romacs-agent--summary-stale (romacs-agent-id session))
   (unless unwritten (romacs-agent-tools--write-answered session seq)))
 
 (defun romacs-agent-tools--answer (session seq &optional unwritten)
@@ -824,8 +831,9 @@ CHILD's, when read already."
                               (romacs-agent-ends child))))))
 
 (defun romacs-agent-tools--hand-on (child)
-  ;; Its parent, loaded when only listed: a task's end reaches it all the same.
-  (let ((parent (romacs-agent-load-session (plist-get (romacs-agent-options child) :parent)))
+  ;; Its parent, loaded when only listed: a task's end reaches it all the
+  ;; same; one handed to another harness, where it goes on.
+  (let ((parent (romacs-agent-successor (romacs-agent-load-session (plist-get (romacs-agent-options child) :parent))))
         (handed (gethash child romacs-agent-tools--handed 0))
         (ends (romacs-agent-tools--unhanded child))
         ;; Read once, when it has ends: what each end's handing on reads of it.
@@ -1017,7 +1025,7 @@ for that parent: the ends it held may go now."
 kept for SESSION may not have reached it (`romacs-agent-store--sent-of'):
 a turn of its own, nothing sent again."
   (when-let* (((eq (plist-get event :type) 'error)) ((plist-get event :unsure))
-              (parent (romacs-agent-load-session (plist-get (romacs-agent-options session) :parent))))
+              (parent (romacs-agent-successor (romacs-agent-load-session (plist-get (romacs-agent-options session) :parent)))))
     (romacs-agent-tools--deliver parent (plist-get event :text) #'ignore nil nil 'next)))
 
 (add-hook 'romacs-agent-event-functions #'romacs-agent-tools--say-unsure)
@@ -1060,7 +1068,7 @@ user, unless SESSION's rule wakes no one: dropped once it is answered."
               (id (plist-get event :request-id))
               ((romacs-agent--user-answers-p session id))
               ((not (equal (romacs-agent-tools--wake-rule session) "none")))
-              (parent (romacs-agent-load-session parent-id)))
+              (parent (romacs-agent-successor (romacs-agent-load-session parent-id))))
     (romacs-agent-tools--deliver parent (romacs-agent-tools--question-text session event) #'ignore
                                  (lambda () (and (gethash id (romacs-agent-approvals session)) t))
                                  nil 'next)))
@@ -1581,8 +1589,9 @@ Romacs (its own channel's reply line says how), or a sender gone."
                         ;; Its own channel's, when it came by one: the call to copy.
                         (user-error "Message %s came from outside Romacs. %s" id
                                     (romacs-agent--message-reply-line message)))
-                       ;; One a start left a row: loaded, to be answered.
-                       ((romacs-agent-get sender-id))
+                       ;; One a start left a row: loaded, to be answered; one
+                       ;; handed to another harness, where it goes on.
+                       ((romacs-agent-successor (romacs-agent-get sender-id)))
                        (t (user-error "Message %s's sender, session %s, is gone" id sender-id))))
          ;; Its note first able to go: never an answer sent and its note lost.
          (record (progn (when by-user (romacs-agent--check-note session))
@@ -2586,7 +2595,8 @@ last result, whole: the tools that act on a task answer only its length (resultC
  (romacs-mcp--schema '(("instance" . "string") ("taskId" . "string")) '("taskId"))
  (lambda (arguments)
    (romacs-mcp--instance arguments)
-   (romacs-agent-tools--told (romacs-agent-tools--resolve (gethash "taskId" arguments))
+   (romacs-agent-tools--told (romacs-agent-tools--successor-id
+                              (romacs-agent-tools--resolve (gethash "taskId" arguments)))
                              (lambda (id) (romacs-agent-tools--task (romacs-agent-summary id)))))
  (romacs-mcp--object "readOnlyHint" t))
 
