@@ -142,10 +142,10 @@ impl<'a> Walk<'a> {
             .split(|c: char| !c.is_ascii_digit())
             .filter_map(|word| word.parse::<i32>().ok())
         {
-            if let std::collections::btree_map::Entry::Vacant(entry) = self.pids.entry(pid) {
-                if let Some(fd) = romacs_vm::host::pidfd_open(pid) {
-                    entry.insert(fd);
-                }
+            if let std::collections::btree_map::Entry::Vacant(entry) = self.pids.entry(pid)
+                && let Some(fd) = romacs_vm::host::pidfd_open(pid)
+            {
+                entry.insert(fd);
             }
         }
     }
@@ -1339,10 +1339,13 @@ fn shutdown_wedged(receipt: &mut Receipt) {
     shutdown_held_owner(receipt, "wedged");
 }
 
+/// A scene of the walk: its name, and what drives it.
+type Scene = (&'static str, fn(&mut Receipt));
+
 #[test]
 fn walks_the_observable_owner_lifecycle_table() {
     let mut receipt = Receipt::default();
-    let scenes: &[(&str, fn(&mut Receipt))] = &[
+    let scenes: &[Scene] = &[
         ("start/call/retire", start_call_retire),
         ("kill before report", kill_unforked),
         ("kill while starting", kill_starting),

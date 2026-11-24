@@ -28,6 +28,8 @@ const SITES: &[(&str, usize, &str)] = &[
     ("crates/romacs-vm/tests/gnu_reader.rs", 1, "a test that asserts no panic came"),
     ("crates/romacs-vm/tests/gnutls.rs", 1, "the VM is on the thread the bound gave up on"),
     ("crates/romacs-vm/tests/support/bulk.rs", 1, "a VM made in the closure, which the unwinding drops"),
+    ("crates/romacs-vm/tests/support/owner_lifecycle_table.rs", 2,
+     "its import, and a table walk's scene, whose VM is made in the closure, which the unwinding drops"),
     ("crates/romacs-gnu-tests/src/main.rs", 7,
      "its import, and six that each report the panic and exit (`panic_exit`); what goes on after one uses `catching`"),
 ];
