@@ -5,7 +5,8 @@
 ;; counting from the start.  Its results hold non-ASCII text, as real ones do.
 (scaling-probe agent-wake-parse :n 400
   :setup (progn (scaling--agent)
-                (let ((session (romacs-agent--make :id "5ca1e000-1111-4222-8333-444455556666" :title "parse")))
+                (require 'romacs-agent-summary)
+                (let ((session (romacs-agent-summary--make :id "5ca1e000-1111-4222-8333-444455556666" :title "parse")))
                   (concat (mapconcat (lambda (i) (romacs-agent-tools--wake-text
                                                   session (list i (concat (make-string 200 ?r) " — ✓") nil)))
                                      (number-sequence 1 n) "\n\n")

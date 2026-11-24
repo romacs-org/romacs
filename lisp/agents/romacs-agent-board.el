@@ -106,39 +106,6 @@ first: none, as of a source here."
 (cl-defmethod romacs-agent-board-source-history ((_source romacs-agent-log-local-source))
   (romacs-agent-history-items))
 
-;; The agents service's rows key this editor's sessions as the board
-;; does, from their records (`romacs-agent-service-row').
-
-(defvar romacs-agent-board--unloaded nil
-  "While the agents service's rows are made, the sessions it knows from
-their rows alone (`romacs-agent-store-unloaded'), by id, and their
-children: (BY-ID . CHILDREN), CHILDREN a table from a parent's id to them.")
-
-(cl-defgeneric romacs-agent-board-source-sessions (source)
-  "Every session of SOURCE's, those not loaded known to
-`romacs-agent-board--unloaded'.")
-
-(cl-defmethod romacs-agent-board-source-sessions ((_source romacs-agent-log-local-source))
-  "The loaded sessions, then those known from their rows alone."
-  (let ((unloaded (romacs-agent-store-unloaded))
-        (by-id (make-hash-table :test #'equal)) (children (make-hash-table :test #'equal)))
-    (dolist (session unloaded)
-      (puthash (romacs-agent-id session) session by-id)
-      (when-let* ((parent (plist-get (romacs-agent-options session) :parent)))
-        (push session (gethash parent children))))
-    (setq romacs-agent-board--unloaded (cons by-id children))
-    (append (hash-table-values romacs-agent--sessions) unloaded)))
-
-(defun romacs-agent-board--key (session)
-  "Session record SESSION's state key on the board
-\(`romacs-agent-ui--shown-key')."
-  (let ((parent (plist-get (romacs-agent-options session) :parent)))
-    (romacs-agent-ui--shown-key (romacs-agent-ui--state-key session)
-                                (or (romacs-agent-loaded parent)
-                                    (and romacs-agent-board--unloaded
-                                         (gethash parent (car romacs-agent-board--unloaded))))
-                                (romacs-agent-done-seq session) (romacs-agent-failed session))))
-
 (defun romacs-agent-board--project (cwd)
   "A project's name for CWD, a directory: as every row of it says it."
   (abbreviate-file-name (directory-file-name (expand-file-name (or cwd "~")))))

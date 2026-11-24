@@ -270,7 +270,8 @@ WAKE permits ID routing, child enumeration and delivery deduplication."
   (let* ((tag (make-symbol "record-read"))
          (allowed (if wake '(romacs-agent-id romacs-agent-children
                              romacs-agent-tools--wanted-p romacs-agent-tools--unhanded)))
-         (gateways (cons 'romacs-agent-summary (delq 'romacs-agent-id (copy-sequence allowed))))
+         (gateways (append '(romacs-agent-summary romacs-agent-tools--ask-owner)
+                           (delq 'romacs-agent-id (copy-sequence allowed))))
          (readers (delq nil (mapcar (lambda (reader)
                                     (unless (memq reader allowed)
                                       (cons reader (lambda (&rest _)

@@ -41,7 +41,7 @@
 
 (defun romacs-agent-summary-boundary--as-mcp (session)
   "SESSION's summary beside what MCP says of it: (SUMMARY STATE PENDING)."
-  (let ((task (romacs-agent-tools--task session)))
+  (let ((task (romacs-agent-tools--task (romacs-agent-summary (romacs-agent-id session)))))
     (list (romacs-agent-summary (romacs-agent-id session))
           (gethash "state" task) (eq (gethash "pendingApproval" task) t))))
 

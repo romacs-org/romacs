@@ -1207,7 +1207,7 @@ def reap(args, base):
 
         def looks():
             return {'state': a.state(child),
-                    'status': a.eval(f'(romacs-agent-tools--status {a.s(child)})').strip('"'),
+                    'status': a.eval(f'(romacs-agent-tools--status (romacs-agent-summary {lisp_text(child)}))').strip('"'),
                     'board': a.eval(f'(romacs-agent-ui--state-key {a.s(child)})')}
 
         until(asleep, 30, 'task reaped')
@@ -1288,7 +1288,7 @@ def delegate(args, base):
         until(lambda: a.eval(f'(plist-get (romacs-agent-driver-state {a.s(stopped["taskId"])}) :turn)') != 'nil', 20, 'turn known')
         a.eval(f'(romacs-agent-interrupt {a.s(stopped["taskId"])})')
         until(lambda: a.state(stopped['taskId']) == 'idle', 15, 'interrupted child idle')
-        interrupted = a.eval(f'(romacs-agent-tools--status {a.s(stopped["taskId"])})')
+        interrupted = a.eval(f'(romacs-agent-tools--status (romacs-agent-summary {lisp_text(stopped["taskId"])}))')
         a.eval(f'(romacs-agent-send {a.s(stopped["taskId"])} "say after interrupt")')
         until(lambda: any(e['prompt'] == 'say after interrupt' for e in a.codex_runs()), 20, 'turn after interrupt')
         a.idle(stopped['taskId'])
@@ -1305,7 +1305,7 @@ def delegate(args, base):
         a.restart()
         until(lambda: any(missed['taskId'] in e.get('wake', '') for e in a.logged()), 30, 'missed wake delivered')
         time.sleep(1)
-        cancelled_after = a.eval(f'(romacs-agent-tools--status {a.s(cancelled["taskId"])})')
+        cancelled_after = a.eval(f'(romacs-agent-tools--status (romacs-agent-summary {lisp_text(cancelled["taskId"])}))')
         wakes = [e['wake'] for e in a.logged() if 'wake' in e]
         result = {'waited': {k: waited.get(k) for k in ('status', 'result', 'provider', 'model', 'role')},
                   'codex_home': run['codex_home'], 'argv': run['argv'],

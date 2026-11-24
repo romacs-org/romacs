@@ -140,10 +140,10 @@ conversation is in `one'; `told' collects what a task is told."
     (should (romacs-agent-room "claude2"))
     ;; Where it could go on: its harness's instances first.
     (should (equal (mapcar (lambda (a) (plist-get a :provider)) (romacs-agent-alternatives session)) '("claude2" "codex")))
-    (let ((record (romacs-agent-tools--task session)))
+    (let ((record (romacs-agent-tools--task (romacs-agent-summary (romacs-agent-id session)))))
       (should (equal (gethash "provider" (gethash "limit" record)) "claude"))
       (should (eq (gethash "lossless" (aref (gethash "alternatives" (gethash "limit" record)) 0)) t)))
-    (let ((wake (romacs-agent-tools--wake-text session (list 9 (romacs-agent-reply session) t))))
+    (let ((wake (romacs-agent-tools--wake-text (romacs-agent-summary (romacs-agent-id session)) (list 9 (romacs-agent-reply session) t))))
       (should (string-match-p "Usage limit on claude" wake))
       (should (string-match-p "claude2 (the same conversation moves), codex (a handoff on a brief)" wake))
       ;; Still one wake, read back whole.
@@ -167,8 +167,8 @@ conversation is in `one'; `told' collects what a task is told."
       (romacs-agent--raise session (append (car refused) (list :seq 9))))
     (should (romacs-agent-room "claude"))
     (should (equal (plist-get (romacs-agent-limited session) :model) "fable"))
-    (should (equal (gethash "model" (gethash "limit" (romacs-agent-tools--task session))) "fable"))
-    (let ((wake (romacs-agent-tools--wake-text session (list 9 (romacs-agent-reply session) t))))
+    (should (equal (gethash "model" (gethash "limit" (romacs-agent-tools--task (romacs-agent-summary (romacs-agent-id session))))) "fable"))
+    (let ((wake (romacs-agent-tools--wake-text (romacs-agent-summary (romacs-agent-id session)) (list 9 (romacs-agent-reply session) t))))
       (should (string-match-p "Usage limit for fable on claude" wake))
       (should (string-match-p "romacs_task_switch with taskId and model goes on in place" wake))
       (should (string-match-p "or with provider (claude2) on fable; codex take a handoff on a brief" wake))
