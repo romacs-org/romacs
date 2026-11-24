@@ -284,6 +284,7 @@ impl Vm {
     /// plist later must not demote the alias to a plist redirect.
     pub(super) fn make_variable_alias(&mut self, new: usize, base: usize) {
         for slot in [new, base] {
+            self.slots.mark_written_since_restore(slot);
             let name = self.symbol_names[slot].clone();
             self.specials.insert(name);
         }

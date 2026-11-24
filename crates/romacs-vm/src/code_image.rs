@@ -439,6 +439,7 @@ impl Vm {
             self.conses.set_car(destination, car);
             self.conses.set_cdr(destination, cdr);
         }
+        self.slots.clear_written_since_restore();
         Ok(())
     }
     fn private_image_root(

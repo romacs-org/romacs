@@ -1579,6 +1579,10 @@ mod leaf {
             }
             self.set_symbol_function(v, value)
         }
+        pub fn symbol_written_p(&self, symbol: Value) -> crate::prim::Out {
+            let slot = self.vm.plist_owner(symbol).map_err(|_| Fault::Wrong("symbolp", symbol))?;
+            Ok(if slot.is_some_and(|i| self.vm.slots[i].written_since_restore) { Value::TRUE } else { Value::NIL })
+        }
         /// GNU `XSYMBOL (SYMBOL)->u.s.plist` (data.c:818): the plist owned by
         /// the symbol object itself; uninterned twins never share it.
         pub fn symbol_plist(&self, symbol: Value) -> std::result::Result<Value, Fault> {
