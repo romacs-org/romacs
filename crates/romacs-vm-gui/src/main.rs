@@ -856,7 +856,6 @@ fn run() -> Result<Option<exit::Exit>, String> {
         batch::prepare_beside(store);
         return Ok(None);
     }
-    let display = DisplaySelection::from_env(socket.as_deref().map(std::ffi::OsStr::new))?;
     // A live --loadup launch boots from its world, in --world-store or by
     // default in the user's cache (world::default_store), unless
     // ROMACS_WORLD=off. Its builder builds here, before any window; a launch
@@ -880,6 +879,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
     }
     // The session from here: its every end says why.
     exit::install();
+    let display = DisplaySelection::from_env(socket.as_deref().map(std::ffi::OsStr::new))?;
     // Fontconfig's configuration loads on a helper while the window and the
     // world open: the evaluator's first font question finds it loaded, or
     // waits for it.

@@ -35,9 +35,8 @@ fn expand(args: &[String], file: &std::path::Path) -> Vec<String> {
     out
 }
 
-/// Run the GUI binary with `args`, bounded. The Wayland socket does not
-/// exist, so a command line the binary ACCEPTS ends its session at the display
-/// connect with exactly that diagnostic; anything else means it was rejected.
+/// Run the GUI binary with `args`, bounded. Only arguments it accepts reach
+/// display selection and produce the structured error for an absent display.
 fn accepted(args: &[String]) -> Result<(), String> {
     let dir = std::env::temp_dir().join(format!("romacs-desktop-entry-{}-{}", std::process::id(), args.len()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -46,6 +45,7 @@ fn accepted(args: &[String]) -> Result<(), String> {
         .args(args)
         .env("WAYLAND_DISPLAY", &socket)
         .env_remove("WAYLAND_SOCKET")
+        .env_remove("DISPLAY")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
@@ -66,10 +66,10 @@ fn accepted(args: &[String]) -> Result<(), String> {
     std::io::Read::read_to_string(&mut child.stderr.take().unwrap(), &mut stderr).unwrap();
     let _ = std::fs::remove_dir_all(&dir);
     // The session's one line saying why it ended (src/exit.rs).
-    let expected = format!("Cannot connect to Wayland socket {}: ", socket.display());
+    let expected = "No display available: WAYLAND_DISPLAY must name a socket or DISPLAY must be set";
     let end: Option<serde_json::Value> = stderr.strip_prefix("romacs-exit: ").and_then(|line| serde_json::from_str(line).ok());
     let said = end.as_ref().is_some_and(|end| end["reason"] == "startup-error" && end["status"] == 1
-        && end["detail"].as_str().is_some_and(|detail| detail.starts_with(&expected)));
+        && end["detail"] == expected);
     if status.code() == Some(1) && said && stderr.lines().count() == 1 {
         Ok(())
     } else {
