@@ -3676,8 +3676,12 @@ copied where the harness looks for it from there (its driver's
 :cwd-copies), or, when it cannot be, begun anew there under a new id
 \(its driver's :renew); its manifest names both, the move is journaled
 with the conversation it leaves, and its next message tells it
-\(`romacs-agent-brief')."
+\(`romacs-agent-brief').  A worktree task must stay in its recorded directory."
   (when (romacs-agent--cwd-gone-p session)
+    (when-let* ((options (romacs-agent-options session))
+                (worktree (plist-get options :worktree)))
+      (user-error "Cannot resume from the missing directory %s. Restore worktree %s (branch %s) or relocate the session explicitly"
+                  (romacs-agent-cwd session) worktree (or (plist-get options :branch) "unrecorded")))
     (let* ((from (expand-file-name (romacs-agent-cwd session)))
            (nearest (romacs-agent--nearest-directory from #'file-directory-p))
            (to (file-truename nearest))
