@@ -321,6 +321,37 @@ them inherits."
         (romacs-agent-remote--draw-unit session (unit 'started 5) 'live)
         (should (equal (plist-get (gethash "a" (romacs-agent-subagents session)) :state) "completed"))))))
 
+(ert-deftest romacs-agent-log-a-remote-question-waits-before-its-row ()
+  ;; The service sends a session's pending requests at once and its row
+  ;; after: a question drawn in a remote chat waits on the user while its
+  ;; mirror still says running.
+  (require 'romacs-agent-remote)
+  (let* ((source (romacs-agent-remote--make :client 'far))
+         (romacs-agent-remote--source source)
+         (romacs-agent-approval-policy 'allow)
+         (session (romacs-agent-remote--mirror
+                   source (romacs-mcp--object "id" "S-far" "state" "running" "harness" "claude" "title" "far")))
+         (request (romacs-agent-wire-request
+                   '(:type approval :request-id "toolu_q" :run 3 :tool "AskUserQuestion" :time 10.0
+                     :questions (("Which one?" :header "Pick" :options ("A" "B")))))))
+    (with-temp-buffer
+      (romacs-agent-log-mode)
+      (setq romacs-agent-log--source source romacs-agent-log--session session
+            romacs-agent-log--end (point-min-marker) romacs-agent-log--filled t)
+      (set-marker-insertion-type romacs-agent-log--end t)
+      (puthash "S-far" (current-buffer) (romacs-agent-remote-chats source))
+      (romacs-agent-log--separator t)
+      (let ((requests (make-hash-table :test #'equal)))
+        (puthash (gethash "id" (gethash "handle" request)) request requests)
+        (romacs-agent-remote--followed 'far "S-far" (list 'pending requests)))
+      (should (eq (romacs-agent-state session) 'running))
+      (should (romacs-agent-log--pending))
+      (let ((doing (romacs-agent-log--doing session)))
+        (should (eq (car doing) 'waiting))
+        (should (string-match-p "choose" (cdr doing)))
+        (should (string-match-p "decline" (cdr doing))))
+      (should (string-match-p "waits on you" (romacs-agent-log-tests--chrome))))))
+
 (ert-deftest romacs-agent-log-an-answer-says-who-gave-it ()
   (romacs-agent-log-tests--with
     (draw :type 'attributed :request-id "x" :actor '(:kind "policy") :decision "allow" :scope "once")

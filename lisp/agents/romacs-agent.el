@@ -404,8 +404,7 @@ launch."
 policy: only while it still waits.  Romacs denies nothing on its user's
 behalf: what it does not allow waits on the user."
   (when (and (romacs-agent--live-p session) (gethash id (romacs-agent-approvals session))
-             (not (member id (romacs-agent-asks session)))
-             (eq romacs-agent-approval-policy 'allow))
+             (not (romacs-agent--user-answers-p session id)))
     (condition-case err
         (romacs-agent-respond session id t nil 'policy)
       (error (message "Romacs could not answer %s: %s" id (error-message-string err))))))
@@ -426,6 +425,26 @@ the user, not a tool call to approve."
 
 (defun romacs-agent--set-questions (session questions)
   (setf (romacs-agent-driver-state session) (plist-put (romacs-agent-driver-state session) :questions questions)))
+
+(defun romacs-agent--user-answers-p (session id)
+  "Whether SESSION's request ID is its user's to answer: any under a
+policy but `allow', else one its run asks (`romacs-agent-asks')."
+  (or (not (eq romacs-agent-approval-policy 'allow)) (member id (romacs-agent-asks session))))
+
+(defun romacs-agent-doing (session)
+  "What SESSION does now, from its own facts: `waiting' while it says so
+or a live request of it is its user's to answer
+\(`romacs-agent--user-answers-p'), `working' while it starts or runs a
+turn, `failed' when idle after a turn that failed (until the next), else
+`idle'.  A chat's separator says it (`romacs-agent-log--doing')."
+  (let ((state (romacs-agent-state session)))
+    (cond ((or (eq state 'waiting-approval)
+               (cl-loop for id being the hash-keys of (romacs-agent-approvals session)
+                        thereis (romacs-agent--user-answers-p session id)))
+           'waiting)
+          ((memq state '(starting running)) 'working)
+          ((and (eq state 'idle) (romacs-agent-failed session)) 'failed)
+          (t 'idle))))
 
 (defun romacs-agent-request-event (session id request)
   "Recover SESSION's approval event for its pending REQUEST with ID."
@@ -7630,6 +7649,11 @@ lookup that finds any session."
 
 (put 'romacs-agent-loaded 'romacs-lint-hint
      "only a session already loaded: for identity checks and labels; `romacs-agent-get' finds any session, loading a row")
+
+(autoload 'romacs-agent-summary "romacs-agent-summary"
+  "Session ID's state as plain data, what its views read of it.
+
+\(fn ID)")
 
 (defvar romacs-agent--requests (make-hash-table :test #'equal)
   "A delegating session's id and a client request id, to the session it

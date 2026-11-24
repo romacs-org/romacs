@@ -55,13 +55,13 @@
   "Compare SUMMARY with SESSION and its current chat."
   (romacs-agent-summary-tests--check-row summary session)
   (let ((expected
-         `((activity . ,(romacs-agent-log--doing session))
+         `((activity . ,(if (romacs-agent-log--proceed-offered) 'idle (car (romacs-agent-log--doing session))))
            (turn-start . ,(romacs-agent-turn-start session))
            (children-summary . ,(romacs-agent-children-summary session))
            (children-rows . ,(mapcar #'romacs-agent-summary-tests--child-row
                                       (romacs-agent-children-rows session)))
            (pending-selection . ,(romacs-agent--without (romacs-agent-pending-selection session) '(:timer)))
-           (waiting-count . ,(romacs-agent-log--waiting-count))
+           (waiting-count . ,(hash-table-count (romacs-agent-approvals session)))
            (queue-length . ,(romacs-agent-queue-length session))
            (attached . ,(romacs-agent--attached-p (romacs-agent-id session))))))
     (pcase-dolist (`(,slot . ,value) expected)
