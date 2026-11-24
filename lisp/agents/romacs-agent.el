@@ -7774,6 +7774,11 @@ start, so sessions survive it."
              (romacs-agent-store-unread
               (setq romacs-agent--restoring nil romacs-agent--rows-seen nil)
               (add-hook 'romacs-agent-store-readable-hook #'romacs-agent--restore-when-readable)
+              ;; A read that failed for a moment has no writer to answer
+              ;; it: tried again a while later too, whichever comes first.
+              (unless (timerp romacs-agent--restore-retry)
+                (setq romacs-agent--restore-retry
+                      (run-at-time romacs-agent--restore-retry-after nil #'romacs-agent--restore-when-readable)))
               nil)
              (error (setq romacs-agent--restoring nil romacs-agent--rows-seen nil)
                     (signal (car err) (cdr err))))
@@ -7786,10 +7791,21 @@ start, so sessions survive it."
 
 (defvar romacs-agent-store-readable-hook)
 
+(defvar romacs-agent--restore-retry nil
+  "The timer trying a start's restore again, held by an unread store.")
+
+(defconst romacs-agent--restore-retry-after 10
+  "Seconds after which a restore an unread store held is tried again.")
+
 (defun romacs-agent--restore-when-readable ()
-  "The store is read now: the start's restore it held goes on."
+  "The store is read now, or a while has passed: the start's restore it
+held goes on, once, unless one ran meanwhile."
   (remove-hook 'romacs-agent-store-readable-hook #'romacs-agent--restore-when-readable)
-  (romacs-agent-restore-soon))
+  (when (timerp romacs-agent--restore-retry) (cancel-timer romacs-agent--restore-retry))
+  (setq romacs-agent--restore-retry nil)
+  (unless (or romacs-agent--restoring romacs-agent--restore-pending
+              (eq romacs-agent--restored romacs-agent--sessions))
+    (romacs-agent-restore-soon)))
 
 (defun romacs-agent--restore-step ()
   "Load the next turn's sessions of a `romacs-agent-restore-soon'; the last
