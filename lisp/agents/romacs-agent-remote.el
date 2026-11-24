@@ -402,16 +402,17 @@ SOURCE's service."
 
 (cl-defmethod romacs-agent-summary--entries ((source romacs-agent-remote) id)
   "SOURCE's service's row of ID, or each row it lists, stamping its
-summary: a row changed comes as a new one.  Its record is its mirror."
+summary: a row changed comes as a new one.  Its record is its mirror;
+its key is the service's, whatever its parent here."
   (let ((rows (romacs-agent-remote--rows source)))
-    (cl-flet ((entry (row) (cons (gethash "id" row) (cons row (lambda () (romacs-agent-remote--mirror source row))))))
+    (cl-flet ((entry (row) (cl-list* (gethash "id" row) row nil (lambda () (romacs-agent-remote--mirror source row)))))
       (if id
           (and-let* ((row (gethash id rows))) (list (entry row)))
         (let ((entries nil))
           (maphash (lambda (_ row) (push (entry row) entries)) rows)
           entries)))))
 
-(cl-defmethod romacs-agent-summary--key ((source romacs-agent-remote) session)
+(cl-defmethod romacs-agent-summary--key ((source romacs-agent-remote) session _known)
   "The key SOURCE's service made for SESSION: drawn, never derived here."
   (let ((key (gethash "key" (gethash (romacs-agent-id session) (romacs-agent-remote--rows source)))))
     (if (stringp key) (intern key) 'idle)))

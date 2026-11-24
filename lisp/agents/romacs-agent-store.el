@@ -599,6 +599,11 @@ kept one), or `settled' if the user explicitly put it aside."
  plan_offer"
   "The columns a session is made from its row alone (`romacs-agent-store--row-of').")
 
+(defun romacs-agent-store-row-parent (row)
+  "The id of the session that delegated the one ROW
+\(`romacs-agent-store--row-columns') is, or nil."
+  (nth 7 row))
+
 (defun romacs-agent-store--row-of (row)
   "The session ROW (`romacs-agent-store--row-columns') says, made from it
 alone: one projection, whoever reads rows."

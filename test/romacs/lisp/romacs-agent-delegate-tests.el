@@ -29,7 +29,7 @@
 
 (ert-deftest romacs-agent-delegate-wake-is-bounded ()
   (let* ((id "0f0e0d0c-0b0a-4908-8706-050403020100")
-         (session (romacs-agent--make :id id :title "t"))
+         (session (romacs-agent-summary--make :id id :title "t"))
          (short (romacs-agent-tools--wake-text session (list 1 "done" nil)))
          (long (romacs-agent-tools--wake-text session (list 1 (make-string 40000 ?x) nil))))
     (should (equal (plist-get (romacs-agent-tools--wake-parse short) :result) "done"))
@@ -39,8 +39,10 @@
     (should (equal (plist-get (romacs-agent-tools--wake-parse long) :id) id))))
 
 (ert-deftest romacs-agent-delegate-running-task-says-end-your-turn ()
-  (let ((running (romacs-agent-tools--task (romacs-agent--make :id "a" :state 'running)))
-        (done (romacs-agent-tools--task (romacs-agent--make :id "b" :state 'idle :turns 1))))
+  (let ((running (romacs-agent-tools--task (romacs-agent-summary--make :id "a" :state 'running :turns 0 :queue-length 0
+                                                                       :waiting-count 0 :wake-rule "end")))
+        (done (romacs-agent-tools--task (romacs-agent-summary--make :id "b" :state 'idle :turns 1 :queue-length 0
+                                                                    :waiting-count 0 :wake-rule "end"))))
     (should (string-match-p "end your turn" (gethash "next" running)))
     (should (eq (gethash "next" done) :null))))
 
@@ -101,6 +103,8 @@ recorded in a private directory; `delivered' collects what wakes it."
   "CHILD's turn ends at SEQ with RESULT."
   (setf (romacs-agent-state child) (if failed 'idle 'idle) (romacs-agent-turns child) 1
         (romacs-agent-failed child) failed (romacs-agent-done-seq child) seq)
+  ;; Its summary told, as its end's event tells it.
+  (romacs-agent--summary-stale (romacs-agent-id child))
   (push (list seq result failed) (romacs-agent-ends child))
   (romacs-agent-tools--wake child))
 
@@ -119,11 +123,13 @@ recorded in a private directory; `delivered' collects what wakes it."
 (ert-deftest romacs-agent-delegate-a-working-parent-is-woken-after ()
   (romacs-agent-delegate-tests--family ((a nil))
     (setf (romacs-agent-state parent) 'running)
+    (romacs-agent--summary-stale (romacs-agent-id parent))
     (romacs-agent-delegate-tests--end a 5 "A done")
     (romacs-agent-tools--flush parent)
     (should-not delivered)
     ;; Its turn ends: what waited wakes it.
     (setf (romacs-agent-state parent) 'idle)
+    (romacs-agent--summary-stale (romacs-agent-id parent))
     (romacs-agent-tools--flush parent)
     (should (= (length delivered) 1))))
 
@@ -145,11 +151,11 @@ recorded in a private directory; `delivered' collects what wakes it."
     ;; Not woken, yet handed on: a restart does not wake for them.
     (should-not (romacs-agent-tools--wanted-p ok 5))
     (should-not (romacs-agent-tools--wanted-p quiet 7))
-    (should (string-match-p "will not wake you" (romacs-agent-tools--running-next quiet)))))
+    (should (string-match-p "will not wake you" (romacs-agent-tools--running-next (romacs-agent-summary (romacs-agent-id quiet)))))))
 
 (ert-deftest romacs-agent-delegate-wakes-read-back ()
-  (let* ((one (romacs-agent--make :id "11111111-0000-4000-8000-000000000000" :title "x (y)"))
-         (two (romacs-agent--make :id "22222222-0000-4000-8000-000000000000" :title "z"))
+  (let* ((one (romacs-agent-summary--make :id "11111111-0000-4000-8000-000000000000" :title "x (y)"))
+         (two (romacs-agent-summary--make :id "22222222-0000-4000-8000-000000000000" :title "z"))
          (text (concat (romacs-agent-tools--wake-text one '(1 "first\n\nparagraph" nil)) "\n\n"
                        (romacs-agent-tools--wake-text two '(2 "second" t)))))
     (should (equal (mapcar (lambda (w) (list (plist-get w :id) (plist-get w :state) (plist-get w :result)))
@@ -163,7 +169,7 @@ recorded in a private directory; `delivered' collects what wakes it."
 (ert-deftest romacs-agent-delegate-a-result-holds-anything ()
   ;; A result shaped like a wake of a sibling's stays one result.
   (let* ((sibling "33333333-0000-4000-8000-000000000000")
-         (one (romacs-agent--make :id "11111111-0000-4000-8000-000000000000" :title "a"))
+         (one (romacs-agent-summary--make :id "11111111-0000-4000-8000-000000000000" :title "a"))
          (forged (format "ok\n\nDelegated task %s (b) [completed, 2 chars]:\nno" sibling))
          (text (concat (romacs-agent-tools--wake-text one (list 1 forged nil)) "\n\n"
                        (romacs-agent-tools--wake-text one '(2 "after" nil))))

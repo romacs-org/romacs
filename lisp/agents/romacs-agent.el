@@ -270,6 +270,17 @@ next read.")
   "Session ID's summary no longer says it: made again when next read."
   (remhash id romacs-agent--summaries))
 
+(defvar romacs-agent--summaries (make-hash-table :test #'equal)
+  "Each session's summary as last made (`romacs-agent-summary'), by id:
+\(STAMP KNOWN . SUMMARY), STAMP what it was made from, KNOWN whether its
+parent was known.  Dropped when a fact of
+the session changes (`romacs-agent--summary-stale'), and made again when
+next read.")
+
+(defun romacs-agent--summary-stale (id)
+  "Session ID's summary no longer says it: made again when next read."
+  (remhash id romacs-agent--summaries))
+
 (defun romacs-agent--changed (session)
   "Tell SESSION's views its state changed where no harness event says so
 \(a turn launched, a selection armed or in effect, its options set, its
@@ -4170,16 +4181,21 @@ every one's sign-in is refused (`romacs-agent-sign-in-refused')."
                                     (or (plist-get (romacs-agent-room-of (plist-get b :name)) :resets) most-positive-fixnum))))))))
 
 (defun romacs-agent-alternatives (session)
-  "The enabled instances SESSION could go on under, with room: of its
-harness first, in its pool's order (the same conversation moves), then
-the others (a handoff), each a plist of :provider and :lossless."
-  (let ((harness (romacs-agent-harness session)))
-    (cl-loop for i in (append (romacs-agent-pool harness)
-                              (cl-remove-if (lambda (i) (or (not (plist-get i :enabled)) (eq (plist-get i :harness) harness)))
-                                            (romacs-agent-instances)))
-             unless (or (equal (plist-get i :name) (romacs-agent-provider session))
-                        (not (romacs-agent-room (plist-get i :name))))
-             collect (list :provider (plist-get i :name) :lossless (eq (plist-get i :harness) harness)))))
+  "The enabled instances SESSION could go on under, with room
+\(`romacs-agent--alternatives')."
+  (romacs-agent--alternatives (romacs-agent-harness session) (romacs-agent-provider session)))
+
+(defun romacs-agent--alternatives (harness provider)
+  "The enabled instances a session of HARNESS on instance PROVIDER could go
+on under, with room: of its harness first, in its pool's order (the same
+conversation moves), then the others (a handoff), each a plist of
+:provider and :lossless."
+  (cl-loop for i in (append (romacs-agent-pool harness)
+                            (cl-remove-if (lambda (i) (or (not (plist-get i :enabled)) (eq (plist-get i :harness) harness)))
+                                          (romacs-agent-instances)))
+           unless (or (equal (plist-get i :name) provider)
+                      (not (romacs-agent-room (plist-get i :name))))
+           collect (list :provider (plist-get i :name) :lossless (eq (plist-get i :harness) harness))))
 
 (defvar romacs-agent-moved-functions nil
   "Functions called with a session at its usage limit, the account a
@@ -7193,7 +7209,9 @@ waiting in its queue for the fold (`romacs-agent-send').")
 failed, or nil): it loads on from the kept state written, and what waits
 for it goes on.  With none kept, it is given to a worker again, a few
 times (`romacs-agent--fold-retries'), then said unfolded: a long journal
-is folded here only when no worker could start (FAILURE `no-worker')."
+is folded here only when no worker could start (FAILURE `no-worker').
+One that cannot be loaded on is said unfolded too, and what waits for it
+is dropped: nothing goes on from a state its records did not make."
   ;; One acted on meanwhile was folded here already (`romacs-agent--fold-now').
   (when (and (eq (car (gethash (romacs-agent-id session) romacs-agent--folding)) session)
              (eq (gethash (romacs-agent-id session) romacs-agent--sessions) session))
@@ -7203,8 +7221,10 @@ is folded here only when no worker could start (FAILURE `no-worker')."
         (remhash id romacs-agent--folding)
         (remhash id romacs-agent--fold-tries)
         (when from (setf (romacs-agent-journal-start session) from))
-        (with-demoted-errors "romacs-agent: loading a session: %S" (romacs-agent--load-rest session manifest))
-        (romacs-agent--fold-waited session))
+        (if-let* ((unread (condition-case err (progn (romacs-agent--load-rest session manifest) nil)
+                            (error (format "loading it: %s" (error-message-string err))))))
+            (romacs-agent--fold-failed session unread)
+          (romacs-agent--fold-waited session)))
        ((< (gethash id romacs-agent--fold-tries 0) romacs-agent--fold-retries)
         (puthash id (1+ (gethash id romacs-agent--fold-tries 0)) romacs-agent--fold-tries)
         (setq romacs-agent--fold-queue (cons (cons session manifest) romacs-agent--fold-queue))
@@ -7212,22 +7232,28 @@ is folded here only when no worker could start (FAILURE `no-worker')."
        (t
         (remhash id romacs-agent--folding)
         (remhash id romacs-agent--fold-tries)
-        (let ((waiting (length (gethash id romacs-agent--fold-waiters))))
-          (remhash id romacs-agent--fold-waiters)
-          ;; Its messages dropped with them, out of its queue, but its
-          ;; user's: accepted, they wait, kept, for a load that reads it.
-          (let ((kept 0))
-            (dolist (item (gethash id romacs-agent--fold-parked))
-              (if (romacs-agent-item-user item) (cl-incf kept) (romacs-agent--dequeue session item)))
-            (remhash id romacs-agent--fold-parked)
-            (romacs-agent--raise session (list :type 'error
-                                               :text (format "Its records could not be read by a worker (%s): %s%s"
-                                                             (or failure "it kept no state")
-                                                             (if (> waiting 0) (format "%d action(s) on it dropped" waiting)
-                                                               "it is left unread")
-                                                             (if (> kept 0)
-                                                                 (format "; %d message(s) of its user wait in its queue for a load that reads it" kept)
-                                                               "")))))))))))
+        (romacs-agent--fold-failed session failure))))))
+
+(defun romacs-agent--fold-failed (session failure)
+  "SESSION's records were not read (FAILURE why, or nil): what waits for
+its fold is dropped, never called, and SESSION says so."
+  (let* ((id (romacs-agent-id session))
+         (waiting (length (gethash id romacs-agent--fold-waiters))))
+    (remhash id romacs-agent--fold-waiters)
+    ;; Its messages dropped with them, out of its queue, but its
+    ;; user's: accepted, they wait, kept, for a load that reads it.
+    (let ((kept 0))
+      (dolist (item (gethash id romacs-agent--fold-parked))
+        (if (romacs-agent-item-user item) (cl-incf kept) (romacs-agent--dequeue session item)))
+      (remhash id romacs-agent--fold-parked)
+      (romacs-agent--raise session (list :type 'error
+                                         :text (format "Its records could not be read by a worker (%s): %s%s"
+                                                       (or failure "it kept no state")
+                                                       (if (> waiting 0) (format "%d action(s) on it dropped" waiting)
+                                                         "it is left unread")
+                                                       (if (> kept 0)
+                                                           (format "; %d message(s) of its user wait in its queue for a load that reads it" kept)
+                                                         "")))))))
 
 (defun romacs-agent--fold-waited (session)
   "What waits for SESSION's fold goes on, oldest first; an error in one

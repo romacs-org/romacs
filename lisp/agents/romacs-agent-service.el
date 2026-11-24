@@ -36,6 +36,7 @@
 (require 'romacs-agent)
 (require 'romacs-agent-rpc)
 (require 'romacs-agent-board)
+(require 'romacs-agent-summary)
 (require 'romacs-agent-wire)
 (require 'romacs-agent-events)
 (require 'romacs-agent-turns)
@@ -87,9 +88,6 @@ their ids."
 (defvar romacs-agent-service--dirty nil "The ids of the sessions whose rows may have changed.")
 (defvar romacs-agent-service--store-place nil "Where the store's rows were last looked at (`romacs-agent-rows-since').")
 (defvar romacs-agent-service--whole-at 0 "When every row was last made again.")
-(defvar romacs-agent-service--unloaded nil
-  "The board's view of the unloaded sessions (`romacs-agent-board--unloaded'),
-as the last whole pass made it and each row made since adds to it.")
 
 ;;; Places and the listener
 
@@ -157,7 +155,7 @@ user's alone, replacing only a stale socket of this user's."
       (let (delete-by-moving-to-trash) (delete-file socket))))
   (setq romacs-agent-service--listeners nil
         romacs-agent-service--peers nil romacs-agent-service--refresh-timer nil romacs-agent-service--poll-timer nil
-        romacs-agent-service--list nil romacs-agent-service--dirty nil romacs-agent-service--unloaded nil
+        romacs-agent-service--list nil romacs-agent-service--dirty nil
         romacs-agent-service--whole-at 0 romacs-agent-service--idle-timer nil)
   (clrhash romacs-agent-service--units))
 
@@ -321,63 +319,46 @@ rows share few directories.")
   "VALUE, a string cut to `romacs-agent-service--text-limit' characters, or null."
   (if (stringp value) (substring value 0 (min (length value) romacs-agent-service--text-limit)) :null))
 
-(defun romacs-agent-service-row (session key)
-  "SESSION as a row (Protocol v1, The session list), KEY its state key on
-the board; its children are counted where the rows are kept."
-  (let ((options (romacs-agent-options session)))
-    (romacs-agent-rpc-object
-     "id" (romacs-agent-id session)
-     "title" (romacs-agent-service--text (romacs-agent-title session))
-     "cwd" (romacs-agent-service--text (romacs-agent-cwd session))
-     "project" (romacs-agent-service--text (romacs-agent-service--project (romacs-agent-cwd session)))
-     "parent" (romacs-agent-service--text (plist-get options :parent))
-     "harness" (symbol-name (romacs-agent-harness session))
-     "provider" (romacs-agent-service--text (romacs-agent-provider session))
-     "model" (romacs-agent-service--text (romacs-agent-model session))
-     "effort" (romacs-agent-service--text (plist-get options :effort))
-     "state" (symbol-name (romacs-agent-state session))
-     "key" (symbol-name key)
-     "pending" (let ((approvals (romacs-agent-approvals session)))
-                 (if (hash-table-p approvals) (hash-table-count approvals) 0))
-     "queued" (or (romacs-agent-queue-length session) 0)
-     "activity" (romacs-agent-service--text (romacs-agent-activity session))
-     "turn_start" (romacs-agent-service--number (romacs-agent-turn-start session))
-     "input_seq" (or (romacs-agent-input-seq session) 0)
-     "done_seq" (or (romacs-agent-done-seq session) 0)
-     "seen_seq" (or (romacs-agent-seen-seq session) :null)
-     "settled_seq" (or (romacs-agent-settled-seq session) :null)
-     "failed" (if (romacs-agent-failed session) t :false)
-     "last_time" (romacs-agent-service--number (romacs-agent-last-time session))
-     "cost" (romacs-agent-service--number (romacs-agent-cost session))
-     "context_used" (romacs-agent-service--number (romacs-agent-context-used session))
-     "context_window" (romacs-agent-service--number (romacs-agent-context-window session))
-     "children" 0)))
+(defun romacs-agent-service-row (summary)
+  "The session SUMMARY says (`romacs-agent-summary') as a row (Protocol v1,
+The session list), its key the one every view shows; its children are
+counted where the rows are kept."
+  (romacs-agent-rpc-object
+   "id" (romacs-agent-summary-id summary)
+   "title" (romacs-agent-service--text (romacs-agent-summary-title summary))
+   "cwd" (romacs-agent-service--text (romacs-agent-summary-cwd summary))
+   "project" (romacs-agent-service--text (romacs-agent-service--project (romacs-agent-summary-cwd summary)))
+   "parent" (romacs-agent-service--text (romacs-agent-summary-parent summary))
+   "harness" (symbol-name (romacs-agent-summary-harness summary))
+   "provider" (romacs-agent-service--text (romacs-agent-summary-provider summary))
+   "model" (romacs-agent-service--text (romacs-agent-summary-model summary))
+   "effort" (romacs-agent-service--text (romacs-agent-summary-effort summary))
+   "state" (symbol-name (romacs-agent-summary-state summary))
+   "key" (symbol-name (romacs-agent-summary-state-key summary))
+   "pending" (or (romacs-agent-summary-waiting-count summary) 0)
+   "queued" (or (romacs-agent-summary-queue-length summary) 0)
+   "activity" (romacs-agent-service--text (romacs-agent-summary-active-tool summary))
+   "turn_start" (romacs-agent-service--number (romacs-agent-summary-turn-start summary))
+   "input_seq" (or (romacs-agent-summary-input-seq summary) 0)
+   "done_seq" (or (romacs-agent-summary-done-seq summary) 0)
+   "seen_seq" (or (romacs-agent-summary-seen-seq summary) :null)
+   "settled_seq" (or (romacs-agent-summary-settled-seq summary) :null)
+   "failed" (if (romacs-agent-summary-failed summary) t :false)
+   "last_time" (romacs-agent-service--number (romacs-agent-summary-last-time summary))
+   "cost" (romacs-agent-service--number (romacs-agent-summary-cost summary))
+   "context_used" (romacs-agent-service--number (romacs-agent-summary-context-used summary))
+   "context_window" (romacs-agent-service--number (romacs-agent-summary-context-window summary))
+   "children" 0))
 
 (defun romacs-agent-service--whole-rows ()
-  "Every session this machine's board shows, as rows by id, their keys the
-board's own of this editor's sessions, whatever its board shows
-\(`romacs-agent-board-source').  Its view of the unloaded ones is the
-service's own, kept for the rows made before the next whole pass: the
-board's stays the board's, as the rows it shows hold its sessions."
-  (let ((romacs-agent-board--unloaded nil) (romacs-agent-board-source romacs-agent-log-local))
-    (let* ((sessions (romacs-agent-board-source-sessions romacs-agent-log-local))
-           (rows (make-hash-table :test #'equal :size (length sessions))))
-      (setq romacs-agent-service--unloaded romacs-agent-board--unloaded)
-      (dolist (session sessions)
-        (let ((id (romacs-agent-id session)))
-          (unless (gethash id rows)
-            (puthash id (romacs-agent-service-row session (romacs-agent-board--key session)) rows))))
-      rows)))
-
-(defun romacs-agent-service--session (id)
-  "Session ID as it is now, loaded or from its row, or nil when it is gone;
-the board's view of the unloaded sessions (`romacs-agent-service--unloaded')
-made to agree, as a child's key reads its parent there."
-  (let ((session (or (romacs-agent-loaded id) (romacs-agent-store-row-session id)))
-        (unloaded (car romacs-agent-service--unloaded)))
-    (when unloaded
-      (if (and session (not (romacs-agent-loaded id))) (puthash id session unloaded) (remhash id unloaded)))
-    session))
+  "Every session of this editor's, as rows by id, from their summaries."
+  (let* ((summaries (romacs-agent-summary nil))
+         (rows (make-hash-table :test #'equal :size (length summaries))))
+    (dolist (summary summaries)
+      (let ((id (romacs-agent-summary-id summary)))
+        (unless (gethash id rows)
+          (puthash id (romacs-agent-service-row summary) rows))))
+    rows))
 
 (defun romacs-agent-service--parent (row)
   (let ((parent (and row (gethash "parent" row)))) (and (stringp parent) parent)))
@@ -386,30 +367,28 @@ made to agree, as a child's key reads its parent there."
   "The rows of IDS made again, as updates (ID . ROW) of LIST, ROW nil for a
 session gone; with each one's parent, whose key follows its workers, and,
 for one that came, went or moved, its children, whose keys follow their
-parent, and its old parent, whose count changed.  Every session of the
-batch is looked up before any key is made, as a key reads others."
+parent, and its old parent, whose count changed.  Each is read from its
+summary (`romacs-agent-summary')."
   (let ((rows (romacs-agent-service--list-rows list))
         (children (romacs-agent-service--list-children list))
-        (sessions (make-hash-table :test #'equal)) (order nil) (todo ids))
+        (summaries (make-hash-table :test #'equal)) (order nil) (todo ids))
     (while todo
       (let ((id (pop todo)))
-        (unless (gethash id sessions)
-          (let* ((session (romacs-agent-service--session id))
-                 (parent (and session (plist-get (romacs-agent-options session) :parent)))
+        (unless (gethash id summaries)
+          (let* ((summary (romacs-agent-summary id))
+                 (parent (and summary (romacs-agent-summary-parent summary)))
                  (was (gethash id rows)) (old (romacs-agent-service--parent was)))
-            (puthash id (or session :gone) sessions)
+            (puthash id (or summary :gone) summaries)
             (push id order)
             (when (stringp parent) (push parent todo))
-            (unless (and session was (equal parent old))
+            (unless (and summary was (equal parent old))
               (when old (push old todo))
               (when-let* ((kids (gethash id children)))
                 (maphash (lambda (kid _) (push kid todo)) kids)))))))
-    (let ((romacs-agent-board--unloaded romacs-agent-service--unloaded) (romacs-agent-board-source romacs-agent-log-local))
-      (mapcar (lambda (id)
-                (let ((session (gethash id sessions)))
-                  (cons id (and (not (eq session :gone))
-                                (romacs-agent-service-row session (romacs-agent-board--key session))))))
-              (nreverse order)))))
+    (mapcar (lambda (id)
+              (let ((summary (gethash id summaries)))
+                (cons id (and (not (eq summary :gone)) (romacs-agent-service-row summary)))))
+            (nreverse order))))
 
 (defun romacs-agent-service--apply (list updates)
   "Apply UPDATES, each (ID . ROW), to LIST: the children index kept, each

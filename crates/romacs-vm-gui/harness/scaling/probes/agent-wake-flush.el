@@ -3,7 +3,9 @@
 ;; N children each end a turn, then one flush hands every end on to their
 ;; idle parent: each end joins the parent's waiting ends in constant time
 ;; (the wake itself is a timer, which the probe never runs), and the
-;; flush reads them once.
+;; flush reads them once.  Each child's summary is made before: what the
+;; wakes cost is read here, not the summaries' making (a view drawn since
+;; an end makes its summary; with none, the first read does).
 (scaling-probe agent-wake-flush :n 400
   :setup (progn (scaling--agent)
                 (require 'romacs-agent-tools)
@@ -14,18 +16,20 @@
                 (let ((parent (romacs-agent--make :id "scaling-parent" :harness 'codex :title "parent"
                                                   :state 'idle)))
                   (puthash "scaling-parent" parent romacs-agent--sessions)
-                  (cons parent
-                        (cl-loop for i below n
-                                 collect (let* ((id (format "scaling-child-%d" i))
-                                                (child (romacs-agent--make
-                                                        :id id :harness 'codex :title id
-                                                        :dir (expand-file-name id (romacs-agent--state-root))
-                                                        :options (list :parent "scaling-parent")
-                                                        ;; One turn ended, as `romacs-agent--note-end' keeps it.
-                                                        :ends (list (list 1 "ok" nil)))))
-                                           (make-directory (romacs-agent-dir child) t)
-                                           (puthash id child romacs-agent--sessions)
-                                           child)))))
+                  (prog1
+                      (cons parent
+                            (cl-loop for i below n
+                                     collect (let* ((id (format "scaling-child-%d" i))
+                                                    (child (romacs-agent--make
+                                                            :id id :harness 'codex :title id
+                                                            :dir (expand-file-name id (romacs-agent--state-root))
+                                                            :options (list :parent "scaling-parent")
+                                                            ;; One turn ended, as `romacs-agent--note-end' keeps it.
+                                                            :ends (list (list 1 "ok" nil)))))
+                                               (make-directory (romacs-agent-dir child) t)
+                                               (puthash id child romacs-agent--sessions)
+                                               child)))
+                    (romacs-agent-summary nil))))
   :body (progn
           (dolist (child (cdr it))
             (romacs-agent-tools--wake child))
