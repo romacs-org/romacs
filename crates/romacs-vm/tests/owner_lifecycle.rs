@@ -812,3 +812,128 @@ fn an_idle_timer_quit_ends_its_turn_without_ending_the_owner() {
            'armed)",
     );
 }
+
+fn stop_owner(master: &mut Master) -> std::os::fd::OwnedFd {
+    master.run("(setq stopped-id (romacs--isolate-id (owner--isolate owner)))");
+    let pid = master
+        .eval("(romacs--isolate-pid stopped-id)")
+        .parse::<i32>()
+        .unwrap();
+    let pidfd = romacs_vm::host::pidfd_open(pid).expect("open test owner's pidfd");
+    master.run("(romacs--isolate-signal stopped-id 19)");
+    master.until(SETUP_TIMEOUT, "owner SIGSTOP", |_| {
+        std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|stat| {
+            stat.rsplit_once(") ")
+                .is_some_and(|(_, tail)| tail.starts_with("T "))
+        })
+    });
+    pidfd
+}
+
+#[test]
+fn shutdown_kills_a_stopped_owner_even_if_its_callback_signals() {
+    let mut master = Master::new();
+    master.run(
+        "(setq isolate-kill-timeout 10
+                      pending (owner-call owner '(lambda () (while t)))
+                      shutdown-callbacks 0)",
+    );
+    let pidfd = stop_owner(&mut master);
+    let outcome = master.eval(
+        "(isolate-on-done pending (lambda (future)
+                                    (setq shutdown-callbacks (1+ shutdown-callbacks))
+                                    (isolate-await future)))
+         (let ((shutdown (condition-case e (progn (isolate-kill-all) 'returned)
+                           (owner-killed (car e)))))
+           (list shutdown shutdown-callbacks
+                 (condition-case e (isolate-await pending 0) (isolate-error (car e)))))",
+    );
+
+    // Wait on the process identity only. Pumping deadlines could send the
+    // missing SIGKILL and hide a shutdown that leaves the owner stopped.
+    let mut watch = [rustix::event::PollFd::new(
+        &pidfd,
+        rustix::event::PollFlags::IN,
+    )];
+    let grace = rustix::event::Timespec {
+        tv_sec: 1,
+        tv_nsec: 0,
+    };
+    let exited = rustix::event::poll(&mut watch, Some(&grace)).unwrap() == 1;
+    master.run("(condition-case nil (romacs--isolate-signal stopped-id 9) (error nil))");
+
+    assert!(
+        matches!(
+            outcome.as_str(),
+            "(returned 1 owner-killed)" | "(owner-killed 1 owner-killed)"
+        ),
+        "expected one signalling completion of the killed future: {outcome}"
+    );
+    assert!(exited, "shutdown left the stopped owner alive: {outcome}");
+}
+
+#[test]
+fn a_quitting_filter_does_not_lose_the_reaped_childs_sentinel() {
+    let mut master = Master::new();
+    record_owner_events(&mut master);
+    assert_eq!(
+        master.eval(&format!(
+            r#"(isolate-await
+                 (owner-call owner '(lambda ()
+                    (let ((children (list
+                           (make-process :name "quit-filter" :command '("/bin/sh" "-c" "printf x")
+                             :connection-type 'pipe :noquery t
+                             :filter (lambda (_ _) (isolate-send 'parent 'filter) (signal 'quit nil))
+                             :sentinel (lambda (_ _) (isolate-send 'parent 'sentinel))))))
+                      {REAP_BEFORE_DISPATCH}
+                      'reaped)))
+                 15)"#,
+        )),
+        "reaped"
+    );
+    let events = master.eval(
+        "(let ((end (+ (float-time) 3)))
+           (while (and (not (memq 'sentinel owner-test-events)) (< (float-time) end))
+             (romacs--isolate-pump 0.05))
+           (reverse owner-test-events))",
+    );
+    // Inspect the owner after the idle window. The call is deliberately
+    // too late to wake a sentinel before the recorded observation.
+    let follow_up = master.eval(
+        "(isolate-await
+          (owner-call owner '(lambda ()
+              (list (mapcar #'process-name (process-list)) (romacs--proc-ticks-pending))))
+          10)",
+    );
+    assert_eq!(
+        events, "(filter sentinel)",
+        "owner's later status: {follow_up}"
+    );
+}
+
+#[test]
+fn closing_an_owner_does_not_make_a_full_job_pool_queue_work() {
+    let mut master = Master::new();
+    master.until(SETUP_TIMEOUT, "zygote preparation", |m| {
+        m.eval("(nth 1 (isolate-zygote nil))") == "ready"
+    });
+    master.run(
+        "(setq isolate-zygotes nil isolate-kill-timeout 10
+               isolate-process-limit (- (length romacs--isolates) (romacs--isolate-owners)))
+         (defun probe-pool-admission ()
+           (condition-case e
+               (let ((future (isolate-spawn '+ 1 2)))
+                 (list 'queued (isolate-future-done-p future) (and (isolate-future-isolate future) t)))
+             (isolate-process-limit (car e))))",
+    );
+    assert_eq!(
+        master.eval("(probe-pool-admission)"),
+        "isolate-process-limit"
+    );
+
+    let _stopped = stop_owner(&mut master);
+    master.run("(owner-kill owner)");
+    let actual = master.eval("(list (owner-state owner) (probe-pool-admission))");
+    master.run("(condition-case nil (romacs--isolate-signal stopped-id 9) (error nil))");
+    assert_eq!(actual, "(closing isolate-process-limit)");
+}
