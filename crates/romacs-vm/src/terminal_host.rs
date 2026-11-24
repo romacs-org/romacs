@@ -130,8 +130,9 @@ pub(crate) struct TerminalBinding {
     pub(crate) revision: Option<u64>,
     /// The windows showing the buffer that do not follow the terminal: a
     /// command moved their point off the cursor or their start off the
-    /// grid. The rest follow. Every window writer obeys it (publication,
-    /// geometry); the alternate screen clears it. Roots for collection.
+    /// grid, or its user freed it (`romacs-term-leave'), on either screen.
+    /// The rest follow. Every window writer obeys it (publication,
+    /// geometry); a switch of screens clears it. Roots for collection.
     pub(crate) away: Vec<Value>,
     pub(crate) columns: u16,
     pub(crate) rows: u16,
@@ -250,8 +251,9 @@ impl Vm {
                 index += 1;
                 continue;
             }
-            // The alternate screen has no away: its windows all follow.
-            if snapshot.alternate_screen { self.terminal_bindings[index].away.clear(); }
+            // A switch of screens returns free windows to input: the text
+            // they were freed over is gone. Within one screen they stay free.
+            if snapshot.alternate_screen != self.terminal_bindings[index].alternate { self.terminal_bindings[index].away.clear(); }
             self.prune_away(index)?;
             // Buffer point is the selected window's when it shows the buffer.
             let selected = self.selected_window_value()?;
@@ -574,10 +576,7 @@ impl Vm {
         // The route's map, then the global map, as the command loop's lookup:
         // `romacs-term-send-key' directly, or a global command the route
         // remaps to it (`self-insert-command' for non-ASCII characters).
-        // While the shell itself has the terminal (its prompt), the shell
-        // route keeps `romacs-term-shell-exceptions' for Emacs too.
-        let shell = !alternate && self.terminal_input_state(session).is_ok_and(|s| s.shell_foreground);
-        let route = value(self, if alternate { "romacs-term-alternate-map" } else if shell { "romacs-term--shell" } else { "romacs-term--passthrough" })?;
+        let route = value(self, if alternate { "romacs-term--alternate" } else { "romacs-term--passthrough" })?;
         let global = self.slots[self.names["#:vm2-global-keymap"]].value;
         // Events with default bindings, as the reader's `key-binding'; remaps
         // without, as `command-remapping'.
