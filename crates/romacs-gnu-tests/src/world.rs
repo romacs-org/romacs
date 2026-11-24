@@ -61,9 +61,11 @@ pub fn trace(out: &Path) -> ! {
             .current_dir(dir.join("p/cwd")).status()
     });
     match status {
+        // HOST(escape): ends the process: its parent sees the status
         Ok(status) => std::process::exit(status.code().unwrap_or(70)),
         Err(e) => {
             crate::emit(json!({"event": "setup", "ok": false, "phase": "world-trace", "error": e.to_string()}));
+            // HOST(escape): ends the process: its parent sees the status
             std::process::exit(3)
         }
     }
@@ -84,6 +86,7 @@ pub fn finish(vm: &mut Vm, out: &Path) -> ! {
     let written = serde_json::to_vec_pretty(&trace).map_err(std::io::Error::other).and_then(|bytes| host::write(out, bytes));
     crate::emit(json!({"event": "world-trace", "out": out, "records": records, "uncaptured": uncaptured,
                        "error": written.as_ref().err().map(ToString::to_string)}));
+    // HOST(escape): ends the process: its parent sees the status
     std::process::exit(if written.is_err() { 3 } else if uncaptured > 0 { 1 } else { 0 })
 }
 
@@ -190,10 +193,12 @@ pub fn boot(args: &crate::Args) -> (Vm, Vec<serde_json::Value>, usize) {
             vm.world_reinit();
             if let Err(e) = crate::eval(&mut vm, "(romacs-world-restart)") {
                 crate::emit(json!({"event": "setup", "ok": false, "phase": "world-restart", "error": e.1}));
+                // HOST(escape): ends the process: its parent sees the status
                 std::process::exit(3);
             }
             if let Err(error) = run_load_path(&mut vm, args) {
                 crate::emit(json!({"event": "setup", "ok": false, "phase": "load-path", "error": error}));
+                // HOST(escape): ends the process: its parent sees the status
                 std::process::exit(3);
             }
             let chain = manifest["events"]["chain"].as_array().cloned().unwrap_or_default();
@@ -214,6 +219,7 @@ pub fn boot(args: &crate::Args) -> (Vm, Vec<serde_json::Value>, usize) {
 fn build(world: &World, args: &crate::Args, count: usize) -> ! {
     if let Err(e) = world.begin_build() {
         crate::emit(json!({"event": "world-build", "ok": false, "error": e.to_string()}));
+        // HOST(escape): ends the process: its parent sees the status
         std::process::exit(3);
     }
     let built = world.build(|| {
@@ -230,10 +236,12 @@ fn build(world: &World, args: &crate::Args, count: usize) -> ! {
     match built {
         Ok(len) => {
             crate::emit(json!({"event": "world-build", "ok": true, "image_bytes": len}));
+            // HOST(escape): ends the process: its parent sees the status
             std::process::exit(0)
         }
         Err(error) => {
             crate::emit(json!({"event": "world-build", "ok": false, "error": error}));
+            // HOST(escape): ends the process: its parent sees the status
             std::process::exit(1)
         }
     }

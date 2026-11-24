@@ -5,6 +5,7 @@ fn main() {
     if let Err(e) = main_result() {
         // HOST(escape): stdout and stderr are sends another process reads
         eprintln!("vm2: {e}");
+        // HOST(escape): ends the process: its parent sees the status
         std::process::exit(1);
     }
 }

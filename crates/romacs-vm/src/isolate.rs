@@ -577,6 +577,7 @@ impl Vm {
     /// zygote ends first.
     fn fork_child_reinit(&mut self, socket: OwnedFd, zygote: i32, gate: OwnedFd) -> Result<()> {
         crate::host::forked_child_reset(zygote).map_err(|e| e.to_string())?;
+        // HOST(escape): the worker exits when its gate closes unwritten: its parent sees the status
         if !crate::host::await_gate(gate) { std::process::exit(0); }
         // The zygote's children, requests and socket are not this child's.
         self.isolates.forked.clear();
@@ -1072,6 +1073,7 @@ impl Vm {
             let shutdown = self.shutdown_background_processes();
             // HOST(escape): stdout and stderr are sends another process reads
             if let Err(error) = served.as_ref().and(shutdown.as_ref()) { eprintln!("isolate worker: {error}"); }
+            // HOST(escape): ends the process: its parent sees the status
             std::process::exit(i32::from(served.is_err() || shutdown.is_err()));
         }
         served

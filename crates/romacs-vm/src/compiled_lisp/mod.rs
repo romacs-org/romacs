@@ -160,6 +160,7 @@ pub fn configure(config: Config, compiling: Option<&Path>) {
             // in this process's temporary directory (the store's tmp/, the
             // compile environment's): a few bytes left there, read by
             // nothing. A stated limit; see `run_compile`.
+            // HOST(escape): the compile watchdog's exit, which its parent sees as the child's status
             std::process::exit(124);
         });
     }
@@ -383,6 +384,7 @@ fn run_compile(configured: &Configured, program: OsString, args: Vec<OsString>, 
             Ok(Some(status)) => break Some(status),
             Ok(None) if host::monotonic() < deadline => std::thread::sleep(std::time::Duration::from_millis(2)),
             _ => {
+                // HOST(escape): kills the child: a signal another process receives
                 let _ = child.kill();
                 // HOST(block): waits for the child to end
                 let _ = child.wait();

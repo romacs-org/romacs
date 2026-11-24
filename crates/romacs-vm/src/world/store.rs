@@ -1550,6 +1550,7 @@ fn wait_bounded(mut child: std::process::Child, timeout: std::time::Duration) ->
             Ok(Some(status)) => return Err(format!("the builder ended: {status}")),
             Ok(None) if host::monotonic() < deadline => std::thread::sleep(std::time::Duration::from_millis(50)),
             Ok(None) => {
+                // HOST(escape): kills the child: a signal another process receives
                 let _ = child.kill();
                 // HOST(block): waits for the child to end
                 let _ = child.wait();

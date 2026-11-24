@@ -2727,8 +2727,8 @@ pub fn send_packet(socket: std::os::fd::BorrowedFd<'_>, bytes: &[u8], fd: Option
 /// One packet from SOCKET, up to CAPACITY bytes, with the descriptors passed
 /// beside it (close-on-exec); None once the peer has closed. A packet the
 /// buffer cannot hold whole is an error, never a prefix.
-// HOST(take): one packet, consumed; its sockets are nonblocking (callers keep it so), SCM_RIGHTS
-// descriptors part of the take
+// HOST(block): one packet, consumed; an inherited socket whose O_NONBLOCK could not be set can wait
+// (rule 2); on socketpair's nonblocking sockets it never does: a take. SCM_RIGHTS fds are part of it
 pub fn recv_packet(socket: std::os::fd::BorrowedFd<'_>, capacity: usize) -> io::Result<Option<(Vec<u8>, Vec<OwnedFd>)>> {
     use rustix::net::{RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, ReturnFlags};
     let mut bytes = vec![0u8; capacity];

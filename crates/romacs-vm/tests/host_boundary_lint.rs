@@ -925,7 +925,8 @@ const DESCRIPTOR: &[Api] = &[
     api!("descriptor:query", "rustix::net::getsockname", "rustix::net::getpeername", "rustix::termios::tcget*",
          "rustix::termios::isatty", "libc::isatty"),
     api!("stdio", "io::stdout(", "io::stderr(", "println!", "eprintln!", "print!", "eprint!"),
-    api!("process", ".spawn(", ".output(", ".status(", ".wait(", ".try_wait(", "Connection::open*", "libc::setsid",
+    api!("process", ".spawn(", ".output(", ".status(", ".wait(", ".try_wait(", ".kill(", "process::exit",
+         "Connection::open*", "libc::setsid",
          "rustix::process::setsid", "libc::signal", "libc::sigaction", "libc::atexit", "libc::getrlimit",
          "rustix::process::getrlimit"),
 ];

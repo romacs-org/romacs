@@ -384,3 +384,21 @@ fn file(output: &File, times: FileTimes, fd: BorrowedFd<'_>) -> io::Result<()> {
         ("unclassed", "descriptor:query `let modes = rustix::termios::tcgetattr(fd);`"),
     ]));
 }
+
+#[test]
+fn an_unclassed_kill_or_exit_fails() {
+    let source = "\
+fn stop(mut child: Child) {
+    let _ = child.kill();
+    // HOST(escape): the watchdog's exit, which its parent sees as the child's status
+    std::process::exit(124);
+}
+fn give_up() {
+    std::process::exit(1);
+}
+";
+    assert_eq!(census_of("src/lib.rs", source), pairs(&[
+        ("unclassed", "process `let _ = child.kill();`"),
+        ("unclassed", "process `std::process::exit(1);`"),
+    ]));
+}

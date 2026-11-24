@@ -5,6 +5,7 @@ fn main() {
     let Some(file) = args.first() else {
         // HOST(escape): stdout and stderr are sends another process reads
         eprintln!("usage: romacs-vm-load FILE [LOAD_PATH ...]");
+        // HOST(escape): ends the process: its parent sees the status
         std::process::exit(2)
     };
     let mut vm = Vm::new();
@@ -27,6 +28,7 @@ fn main() {
     // HOST(escape): stdout and stderr are sends another process reads
     println!("{}", serde_json::to_string_pretty(&report).unwrap());
     if report["ok"] != true {
+        // HOST(escape): ends the process: its parent sees the status
         std::process::exit(1);
     }
 }

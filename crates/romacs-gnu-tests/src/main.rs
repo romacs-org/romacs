@@ -77,6 +77,7 @@ fn usage() -> ! {
          [--harness-kind mini|real] [--ert-adapter none|romacs-batch] [--reporter FILE] [--audit FILE] \
          [--world-trace OUT.json] [--world-store DIR] [--invocation EMACS]"
     );
+    // HOST(escape): ends the process: its parent sees the status
     std::process::exit(2)
 }
 
@@ -215,6 +216,7 @@ fn shown(v: romacs_vm::Local<'_>) -> String {
 
 fn panic_exit(phase: &str, detail: &str, test: Option<&str>) -> ! {
     emit(json!({"event": "panic", "phase": phase, "test": test, "detail": detail}));
+    // HOST(escape): ends the process: its parent sees the status
     std::process::exit(70)
 }
 
@@ -285,6 +287,7 @@ fn run_real(vm: &mut Vm, args: &Args, file: &str) -> ! {
             emit(
                 json!({"event": "setup", "ok": false, "phase": "test-load", "file": file, "error": e, "failed_forms": failed_forms}),
             );
+            // HOST(escape): ends the process: its parent sees the status
             std::process::exit(4);
         }
         Err(_) => panic_exit("test-load", "panic", None),
@@ -292,6 +295,7 @@ fn run_real(vm: &mut Vm, args: &Args, file: &str) -> ! {
     if let Err((panic, error)) = eval(vm, &format!("(setq ert-scoreboard-selector {})", args.selector)) {
         if panic { panic_exit("selector", &error, None); }
         emit(json!({"event": "setup", "ok": false, "phase": "selector", "error": error}));
+        // HOST(escape): ends the process: its parent sees the status
         std::process::exit(4);
     }
     let result = if let Some(path) = &args.reporter {
@@ -308,17 +312,20 @@ fn run_real(vm: &mut Vm, args: &Args, file: &str) -> ! {
     };
     match result {
         Ok(status) if status == "0" || status == "1" => {
+            // HOST(escape): ends the process: its parent sees the status
             std::process::exit(if status == "0" { 0 } else { 1 });
         }
         Ok(value) => {
             emit(
                 json!({"event": "setup", "ok": false, "phase": "reporter", "error": format!("reporter must return 0 or 1, got {value}")}),
             );
+            // HOST(escape): ends the process: its parent sees the status
             std::process::exit(4);
         }
         Err((true, e)) => panic_exit("reporter", &e, None),
         Err((false, e)) => {
             emit(json!({"event": "setup", "ok": false, "phase": "reporter", "error": e}));
+            // HOST(escape): ends the process: its parent sees the status
             std::process::exit(4);
         }
     }
@@ -331,6 +338,7 @@ fn fresh_vm(args: &Args) -> Vm {
     vm.world_begin();
     if let Err((_, error)) = eval(&mut vm, "(setq noninteractive t)") {
         emit(json!({"event": "setup", "ok": false, "phase": "batch-mode", "error": error}));
+        // HOST(escape): ends the process: its parent sees the status
         std::process::exit(3);
     }
     let quote = |text: &str| format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""));
@@ -338,6 +346,7 @@ fn fresh_vm(args: &Args) -> Vm {
     let argv: Vec<String> = std::env::args().map(|arg| quote(&arg)).collect();
     if let Err((_, error)) = eval(&mut vm, &format!("(setq command-line-args (list {}))", argv.join(" "))) {
         emit(json!({"event": "setup", "ok": false, "phase": "command-line-args", "error": error}));
+        // HOST(escape): ends the process: its parent sees the status
         std::process::exit(3);
     }
     if let Some(emacs) = &args.invocation {
@@ -346,6 +355,7 @@ fn fresh_vm(args: &Args) -> Vm {
                           quote(&name.to_string_lossy()), quote(&format!("{}/", directory.display())));
         if let Err((_, error)) = eval(&mut vm, &set) {
             emit(json!({"event": "setup", "ok": false, "phase": "invocation", "error": error}));
+            // HOST(escape): ends the process: its parent sees the status
             std::process::exit(3);
         }
     }
@@ -353,16 +363,19 @@ fn fresh_vm(args: &Args) -> Vm {
     // of 1x1 characters (ledger/divergences VM2-WIN5).
     if let Err(error) = vm.set_frame_geometry(80, 25, 1, 1) {
         emit(json!({"event": "setup", "ok": false, "phase": "batch-geometry", "error": error.to_string()}));
+        // HOST(escape): ends the process: its parent sees the status
         std::process::exit(3);
     }
     if let Err(e) = vm.set_load_path(&args.load_path) {
         emit(json!({"event": "setup", "ok": false, "phase": "load-path", "error": e}));
+        // HOST(escape): ends the process: its parent sees the status
         std::process::exit(3);
     }
     match catch_unwind(AssertUnwindSafe(|| vm.install_lisp_prelude().map(|_| ()))) {
         Ok(Ok(_)) => {}
         Ok(Err(e)) => {
             emit(json!({"event": "setup", "ok": false, "phase": "prelude", "error": e}));
+            // HOST(escape): ends the process: its parent sees the status
             std::process::exit(3);
         }
         Err(_) => panic_exit("prelude", "panic", None),
@@ -397,6 +410,7 @@ const EVALUATOR_STACK_SIZE: usize = 64 * 1024 * 1024;
 fn main() {
     if let Err(error) = romacs_vm::host::catch_user_signals() {
         emit(json!({"event": "setup", "ok": false, "phase": "user-signals", "error": error.to_string()}));
+        // HOST(escape): ends the process: its parent sees the status
         std::process::exit(3);
     }
     let evaluator = std::thread::Builder::new()
@@ -409,6 +423,7 @@ fn main() {
         Ok(Err(_)) => panic_exit("evaluator", "panic", None),
         Err(error) => {
             emit(json!({"event": "setup", "ok": false, "phase": "evaluator", "error": error.to_string()}));
+            // HOST(escape): ends the process: its parent sees the status
             std::process::exit(3);
         }
     }
@@ -423,6 +438,7 @@ fn evaluate() {
     if args.kind == HarnessKind::Real {
         if let Err(e) = native_output_to_stdout() {
             emit(json!({"event": "setup", "ok": false, "phase": "output", "error": e.to_string()}));
+            // HOST(escape): ends the process: its parent sees the status
             std::process::exit(3);
         }
     }
@@ -432,6 +448,7 @@ fn evaluate() {
         .unwrap_or_else(|| {
             // HOST(escape): stdout and stderr are sends another process reads
             eprintln!("romacs-gnu-ert: unreadable plan {}", args.plan.display());
+            // HOST(escape): ends the process: its parent sees the status
             std::process::exit(2)
         });
     let file = plan["file"].as_str().unwrap_or_else(|| usage()).to_owned();
@@ -444,6 +461,7 @@ fn evaluate() {
     load_chain(&mut vm, &args, from, args.preload.len(), &mut chain);
     emit(json!({"event": "chain", "entries": chain, "regime": if args.measurement_regime { "MEASUREMENT REGIME: retained failed bindings prefix" } else if args.ert_bootstrap { "gnu-ert" } else { "standard" }}));
     if (args.kind == HarnessKind::Real || args.ert_bootstrap) && chain.iter().any(|entry| entry["loaded"] == false && entry["retained_failed_prefix"] != true) {
+        // HOST(escape): ends the process: its parent sees the status
         std::process::exit(3);
     }
 
@@ -451,6 +469,7 @@ fn evaluate() {
         Ok(Ok(_)) => emit(json!({"event": "harness", "ok": true, "file": args.harness})),
         Ok(Err(e)) => {
             emit(json!({"event": "harness", "ok": false, "file": args.harness, "error": e}));
+            // HOST(escape): ends the process: its parent sees the status
             std::process::exit(4);
         }
         Err(_) => panic_exit("harness", "panic", None),
@@ -461,6 +480,7 @@ fn evaluate() {
             Err((true, error)) => panic_exit("ert-adapter", &error, None),
             Err((false, error)) => {
                 emit(json!({"event": "setup", "ok": false, "phase": "ert-adapter", "error": error}));
+                // HOST(escape): ends the process: its parent sees the status
                 std::process::exit(4);
             }
         }
@@ -473,6 +493,7 @@ fn evaluate() {
             Ok(Ok(_)) => emit(json!({"event": "audit", "ok": true, "file": audit})),
             Ok(Err(e)) => {
                 emit(json!({"event": "audit", "ok": false, "file": audit, "error": e}));
+                // HOST(escape): ends the process: its parent sees the status
                 std::process::exit(4);
             }
             Err(_) => panic_exit("audit", "panic", None),
@@ -536,6 +557,7 @@ fn evaluate() {
         Ok(n) => n,
         Err(e) => {
             emit(json!({"event": "setup", "ok": false, "phase": "count", "error": e}));
+            // HOST(escape): ends the process: its parent sees the status
             std::process::exit(4);
         }
     };
