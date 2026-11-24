@@ -318,6 +318,15 @@ message's record for TEXT, `interrupted' each interrupted."
     (romacs-agent-tools--flush parent)
     (should (= (length (romacs-agent-tools--wakes-parse (car delivered))) 1))))
 
+(ert-deftest romacs-agent-delegate-a-message-no-harness-takes-is-not-copied ()
+  ;; A raw byte (a Lisp caller's text) goes to no harness: copied, it
+  ;; would ride every wake of the parent after, each let go for it.
+  (romacs-agent-delegate-tests--sending a
+    (send b (string-to-multibyte (unibyte-string ?x #o351)))
+    (should-not (gethash (romacs-agent-id parent) romacs-agent-tools--copies))
+    (send b "the interface is X")
+    (should (= (length (gethash (romacs-agent-id parent) romacs-agent-tools--copies)) 1))))
+
 (ert-deftest romacs-agent-delegate-a-copy-waits-for-its-wake-delivered ()
   ;; The wake carrying a copy never reached the parent: the next carries it.
   (romacs-agent-delegate-tests--sending a

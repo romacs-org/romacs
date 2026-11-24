@@ -1015,6 +1015,23 @@ asks the woken deferred requests again (`romacs-mcp-defer')."
 
 (add-hook 'romacs-agent-event-functions #'romacs-agent-tools--wake-waits)
 
+(defun romacs-agent-tools--delegated (child arguments arrived prompted)
+  "What romacs_delegate_task ARGUMENTS, arrived at ARRIVED, answer with
+its task CHILD: its record once started (PROMPTED as
+`romacs-agent-tools--started' says), or its end for mode wait.  One
+cancelled, taken over again, is sent nothing: its record at once, its
+note saying so."
+  (if (romacs-agent-cancelled child)
+      (let ((ack (romacs-agent-tools--ack child)))
+        (puthash "note" (format "Task %s is cancelled: nothing was sent to it." (romacs-agent-id child)) ack)
+        ack)
+    (romacs-agent-tools--started
+     child (lambda ()
+             (if (equal (gethash "mode" arguments) "wait")
+                 (romacs-agent-tools--wait child (gethash "timeoutMs" arguments) arrived)
+               (romacs-agent-tools--ack child)))
+     prompted)))
+
 (defun romacs-agent-tools--delegate (arguments)
   "Start a child session on ARGUMENTS' task, or find the one this caller
 started with the same clientRequestId.  The child runs on the instance
@@ -1053,12 +1070,7 @@ with resume it goes on with that conversation of the instance's
                    cwd (romacs-agent-tools--brief (gethash "role" arguments) (gethash "task" arguments))
                    (gethash "title" arguments) provider (append start-options worktree))))
          (answer (lambda (child &optional prompted)
-                   (romacs-agent-tools--started
-                    child (lambda ()
-                            (if (equal (gethash "mode" arguments) "wait")
-                                (romacs-agent-tools--wait child (gethash "timeoutMs" arguments) arrived)
-                              (romacs-agent-tools--ack child)))
-                    prompted)))
+                   (romacs-agent-tools--delegated child arguments arrived prompted)))
          (known (and request (romacs-agent-requested parent request)))
          ;; A brief is sent: its answer waits for the task to have it.
          (briefed (let ((task (gethash "task" arguments))) (and (stringp task) (not (string-empty-p task))))))
@@ -1231,7 +1243,8 @@ and the message's id."
                        (gethash key romacs-agent-tools--generations 0)))
          (valid (lambda () (eql generation (gethash key romacs-agent-tools--generations 0)))))
     (romacs-agent-tools--tell target text (intern mode) valid (list message))
-    (when (equal kind "sibling")
+    ;; Text no harness takes is never copied: it would ride every wake after.
+    (when (and (equal kind "sibling") (romacs-agent--encodable-p (romacs-agent-item text)))
       (let ((parent (plist-get (romacs-agent-options target) :parent)))
         (puthash parent (append (gethash parent romacs-agent-tools--copies) (list (list sender target mode text)))
                  romacs-agent-tools--copies)))
