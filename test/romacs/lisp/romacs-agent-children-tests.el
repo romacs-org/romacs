@@ -116,10 +116,10 @@
       (funcall event 'completed)
       (should (equal (romacs-agent-children-tests--summary parent) ""))
       (should (equal (plist-get (car (romacs-agent-children-rows parent)) :state) "completed"))
-      ;; Finished, it stays listed.
+      ;; Finished, it stays listed until the next input.
       (romacs-agent-ui--track-children parent '(:type input))
       (romacs-agent-ui--summarize-children parent)
-      (should (= (length (romacs-agent-children-rows parent)) 1))
+      (should-not (romacs-agent-children-rows parent))
       (when romacs-agent-ui--children-timer (cancel-timer romacs-agent-ui--children-timer)))))
 
 (ert-deftest romacs-agent-children-a-subagent-failure-counts-for-its-turn ()
@@ -130,7 +130,7 @@
     (should (equal (romacs-agent-children-tests--summary parent) "1 failed"))
     (romacs-agent-ui--track-children parent '(:type input))
     (should (equal (romacs-agent-children-tests--summary parent) ""))
-    (should (equal (plist-get (car (romacs-agent-children-rows parent)) :state) "failed"))
+    (should-not (romacs-agent-children-rows parent))
     (when romacs-agent-ui--children-timer (cancel-timer romacs-agent-ui--children-timer))))
 
 (ert-deftest romacs-agent-children-a-detached-or-cancelled-child-updates-the-parent ()
@@ -243,6 +243,36 @@
     (romacs-agent-ui--summarize-children parent)
     (should (equal (plist-get (car (romacs-agent-children-rows parent)) :state) "cancelled"))
     (when romacs-agent-ui--children-timer (cancel-timer romacs-agent-ui--children-timer))))
+
+(ert-deftest romacs-agent-children-parser-ids-follow-their-worker ()
+  (romacs-agent-children-tests--with
+    (unwind-protect
+        (let ((fold (lambda (&rest events)
+                      (dolist (event (romacs-agent--apply-record-events parent events))
+                        (romacs-agent-ui-track-workers parent event)))))
+          (funcall fold '(:type tool :state started :id "bg" :name "Agent"))
+          (funcall fold '(:type task :state started :id "bg" :task "worker" :subagent t))
+          (funcall fold '(:type tool :state completed :id "bg"))
+          (funcall fold '(:type tool :state started :id "child-tool" :parent "bg"))
+          (funcall fold '(:type tool :state started :id "foreground"))
+          (funcall fold '(:type record-state :state (:streamed "child-text"))
+                   '(:type delta :parent "bg" :message "child-text"))
+          (funcall fold '(:type record-state :state (:streamed "foreground-text")))
+          (funcall fold '(:type done))
+          (funcall fold '(:type input))
+          (should (equal (plist-get (romacs-agent-ui-worker parent "bg") :state) "running"))
+          (should (equal (gethash "child-tool" (romacs-agent-tools parent)) "bg"))
+          (should (gethash "bg" (romacs-agent-tools parent)))
+          (should (gethash "child-text" (romacs-agent-streamed parent)))
+          (should-not (gethash "foreground" (romacs-agent-tools parent)))
+          (should-not (gethash "foreground-text" (romacs-agent-streamed parent)))
+          (funcall fold '(:type task :state completed :id "bg"))
+          (funcall fold '(:type done))
+          (funcall fold '(:type input))
+          (should (zerop (hash-table-count (romacs-agent-tools parent))))
+          (should (zerop (hash-table-count (romacs-agent-streamed parent))))
+          (should-not (romacs-agent-ui-worker parent "bg")))
+      (when romacs-agent-ui--children-timer (cancel-timer romacs-agent-ui--children-timer)))))
 
 ;; Past nine workers, and glyphs for states.
 
