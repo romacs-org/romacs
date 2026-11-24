@@ -731,20 +731,17 @@ impl Leaf<'_> {
     fn ts_parse_visible(&mut self, parser: Value, visible: (i64, i64), old: Option<&native::Tree>) -> R<Option<native::Tree>> {
         let p = self.ts_parser(parser)?;
         let (buffer, native) = (p.buffer, p.native.clone());
-        let parse = |leaf: &Self, stop: &crate::quit::NativeStop| {
-            let text = leaf.ts_buffer_text(buffer).filter(|_| leaf.ts_live(buffer)).map(|t| &**t);
+        loop {
+            let text = self.ts_buffer_text(buffer).filter(|_| self.ts_live(buffer)).map(|t| &**t);
             let reader = ts::Reader::new(text, ((visible.0 - 1) as usize, (visible.1 - 1) as usize));
-            native.borrow_mut().parse_until(old, &reader, stop)
-        };
-        if let Ok(tree) = parse(self, &self.native_stop()) {
-            return Ok(tree);
+            if let Ok(tree) = native.borrow_mut().parse_until(old, &reader, &self.native_stop()) {
+                return Ok(tree);
+            }
+            // Leave the parser ready for its next caller if the poll quits.
+            self.ts_parser_mut(parser).within_reparse = false;
+            self.native_poll()?;
+            self.ts_parser_mut(parser).within_reparse = true;
         }
-        // parse_until reset the native parser. Leave the Lisp parser ready for
-        // the next caller if the poll quits, or retry after an inspection.
-        self.ts_parser_mut(parser).within_reparse = false;
-        self.native_poll()?;
-        self.ts_parser_mut(parser).within_reparse = true;
-        Ok(parse(self, &crate::quit::NativeStop::never()).expect("never stopped"))
     }
 
     fn ts_reparse_ranges(&mut self, buffer: Value, visible_beg: i64, changed: Option<Vec<(u32, u32)>>) -> Value {

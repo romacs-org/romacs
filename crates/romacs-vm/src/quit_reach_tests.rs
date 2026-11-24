@@ -295,6 +295,18 @@ fn sqlite_never_quits_with_its_write_kept() {
 }
 
 #[test]
+fn tree_sitter_visible_retry_keeps_the_callers_stop() {
+    let (mut vm, _) = busy_vm();
+    assert_eq!(eval(&mut vm, "(treesit-language-available-p 'c)"), Value::TRUE);
+    eval(&mut vm, "(progn (dotimes (_ 20000) (insert \"int x;\n\")) (setq parser (treesit-parser-create 'c)))");
+    let call = prepare(&mut vm, "treesit-parser-root-node", "(list parser)");
+    // The first native stop has no Lisp quit to deliver, so parsing retries.
+    let (outcome, polls) = crate::quit::query_polls::count_once(1, || invoke(&mut vm, call));
+    assert!(outcome.is_ok(), "the visible parse retried successfully");
+    assert!(polls > 1, "the visible parse retried with quit armed");
+}
+
+#[test]
 fn tree_sitter_parse_and_query_quit() {
     let (mut vm, _) = busy_vm();
     // The system C grammar, as `tests/treesit.rs` finds it.
