@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 /// A VM with the Lisp prelude, busy running a command, and the signal its
 /// host's input thread holds.
-fn busy_vm() -> (Vm, Arc<QuitSignal>) {
+pub(super) fn busy_vm() -> (Vm, Arc<QuitSignal>) {
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
     let signal = Arc::new(QuitSignal::new());
@@ -21,7 +21,7 @@ fn busy_vm() -> (Vm, Arc<QuitSignal>) {
     (vm, signal)
 }
 
-fn eval(vm: &mut Vm, source: &str) -> Value {
+pub(super) fn eval(vm: &mut Vm, source: &str) -> Value {
     vm.eval_source_raw(source).unwrap_or_else(|e| panic!("{source}: {e}"))
 }
 
@@ -56,7 +56,7 @@ fn invoke(vm: &mut Vm, (desc, values): (&'static PrimDesc, Vec<Value>)) -> std::
     }
 }
 
-fn quit_signalled(vm: &mut Vm, outcome: &std::result::Result<Value, Fault>) -> bool {
+pub(super) fn quit_signalled(vm: &mut Vm, outcome: &std::result::Result<Value, Fault>) -> bool {
     let quit = vm.intern("quit");
     matches!(outcome, Err(Fault::Signal(condition, _)) if *condition == quit)
 }
@@ -96,6 +96,77 @@ fn json_parse_and_serialize_quit_between_values() {
     reaches("json-parse-string", setup, "(list json-in)", "t");
     reaches("json-serialize", setup, "(list json-v)", "t");
     reaches("json-parse-buffer", &format!("(progn {setup} (insert json-in) (goto-char 1))"), "nil", "(= (point) 1)");
+}
+
+#[test]
+fn leaf_poll_concat_fallback() {
+    reaches("concat", "(setq chars (make-list 20000 ?λ))", "(list chars)",
+            "(= (length chars) 20000)");
+    reaches("concat", "(setq chars (make-vector 20000 ?λ))", "(list chars)",
+            "(= (aref chars 19999) ?λ)");
+    reaches("concat", "(setq bytes (make-string 200000 255))",
+            "(list bytes \"λ\")", "(= (length bytes) 200000)");
+}
+
+#[test]
+fn leaf_poll_concat_short_cycle_keeps_its_fault() {
+    let (mut vm, signal) = busy_vm();
+    eval(&mut vm, "(progn (setq cyclic (list 65 66)) (setcdr (cdr cyclic) (cdr cyclic)) nil)");
+    let call = prepare(&mut vm, "concat", "(list cyclic)");
+    let original = call.1[0];
+    assert!(signal.interrupt());
+    let outcome = invoke(&mut vm, call);
+    assert!(matches!(outcome, Err(Fault::Circular(list)) if list == original),
+            "concat must signal circular-list with the original argument");
+    assert!(signal.due(), "the cycle error leaves the quit pending");
+}
+
+#[test]
+fn leaf_poll_concat_list_assembly() {
+    reaches("romacs--concat-list", "(setq parts (list (make-string 200000 ?a) \"b\"))",
+            "(list parts \":\")", "(= (length parts) 2)");
+}
+
+#[test]
+fn leaf_poll_list_elements() {
+    reaches("romacs--nconc-list", "(setq parts (make-list 20000 nil))",
+            "(list parts)", "(= (length parts) 20000)");
+}
+
+#[test]
+fn leaf_poll_file_name_handler_walk() {
+    reaches("find-file-name-handler", "(setq file-name-handler-alist (make-list 20000 nil))",
+            "(list \"file\" 'load)", "(= (length file-name-handler-alist) 20000)");
+    reaches("find-file-name-handler",
+            "(progn (setplist 'poll-handler (make-list 40000 nil))
+                    (setq file-name-handler-alist '((nil . poll-handler))))",
+            "(list \"file\" 'load)", "(= (length (symbol-plist 'poll-handler)) 40000)");
+}
+
+#[test]
+fn leaf_poll_hash_bytes() {
+    reaches("sxhash-equal", "(setq key (make-string 200000 ?a))", "(list key)",
+            "(= (length key) 200000)");
+    reaches("sxhash-equal", "(setq key (vector (make-string 200000 ?a)))", "(list key)", "t");
+}
+
+#[test]
+fn leaf_poll_hash_lookup_leaves_a_press_pending() {
+    use crate::Primitive::{Gethash, Puthash};
+    let (mut vm, signal) = busy_vm();
+    eval(&mut vm, "(setq a (make-string 200000 ?a) b (make-string 200000 ?a)
+                         table (make-hash-table :test 'equal))");
+    let [a, b, table] = ["a", "b", "table"].map(|name| eval(&mut vm, name));
+    assert!(signal.interrupt());
+    let insert = vm.with_kernel_stack(&[a, Value::TRUE, table], |vm, n| {
+        vm.inside_quit_scope(|vm| vm.primitive(Puthash, 0, n))
+    });
+    assert_eq!(insert.ok(), Some(Value::TRUE));
+    let lookup = vm.with_kernel_stack(&[b, table], |vm, n| {
+        vm.inside_quit_scope(|vm| vm.primitive(Gethash, 0, n))
+    });
+    assert_eq!(lookup.ok(), Some(Value::TRUE));
+    assert!(signal.due(), "table hashing and equal leave the press pending");
 }
 
 #[test]

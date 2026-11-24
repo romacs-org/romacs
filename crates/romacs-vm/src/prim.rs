@@ -756,6 +756,10 @@ mod leaf {
             whole[1..].iter().all(|b| b & 0xc0 == 0x80).then(|| crate::lstring::string_char(whole))
         }
         pub fn concat_result(&mut self, bytes: Vec<u8>, multibyte: bool, parts: &[(Value, usize)]) -> Value {
+            // Known gap for s2-concat-result-polls. Copying property runs,
+            // mapping widened offsets and scanning the finished bytes for
+            // metadata all run after the last poll. A 128 MiB unibyte part
+            // with one run spent 2.23 CPU seconds here (16.6 s/GB of input).
             let mut properties = crate::properties::Properties::new();
             for &(value, offset) in parts {
                 if let Some(data::Object::String(s) | data::Object::RawString(s)) = self.vm.object_if(value) {
@@ -776,30 +780,57 @@ mod leaf {
             self.vm.allocate_object(object)
         }
         pub fn concat_ascii(&mut self, args: &[Value]) -> Option<Value> {
-            self.concat_ascii_joined(args, None)
+            self.concat_ascii_joined::<false>(args, None).unwrap_or_else(|_| unreachable!())
         }
-        /// `concat_ascii` of ARGS with SEPARATOR between each two, or `None`
-        /// when one is not an ASCII string. Each part is looked up once.
-        pub fn concat_ascii_joined(&mut self, args: &[Value], separator: Option<Value>) -> Option<Value> {
+        /// Join ASCII parts, or return None to use concat's general path.
+        /// The result-list caller can stop while assembling its long output.
+        pub fn concat_ascii_joined<const POLL: bool>(&mut self, args: &[Value], separator: Option<Value>)
+            -> std::result::Result<Option<Value>, Fault> {
+            use crate::quit::{KERNEL_CHUNK, POLL_STEPS};
+            // ASCII validation scans a whole part or separator before the
+            // copy polls. Whole-call costs reached 0.803 s/GB for concat-list
+            // and 2.63 s/GB for concat's unpolled ASCII path.
             let ascii = |view: &crate::lstring::StrView<'_>| (view.is_multibyte() && view.len() == view.bytes().len()) || view.bytes().is_ascii();
+            let append = |bytes: &mut Vec<u8>, text: &[u8]| {
+                if POLL && text.len() > KERNEL_CHUNK {
+                    for (index, chunk) in text.chunks(KERNEL_CHUNK).enumerate() {
+                        if index != 0 && self.vm.own_stop_due() { return false; }
+                        bytes.extend_from_slice(chunk);
+                    }
+                } else {
+                    bytes.extend_from_slice(text);
+                }
+                true
+            };
             let mut parts = Vec::with_capacity(2 * args.len());
             let mut bytes = Vec::new();
-            {
+            let copied = 'join: {
                 let separator = match separator {
-                    Some(value) => Some((value, self.vm.str_view(value).filter(|view| ascii(view))?.bytes())),
+                    Some(value) => {
+                        let Some(view) = self.vm.str_view(value).filter(|view| ascii(view)) else { return Ok(None) };
+                        Some((value, view.bytes()))
+                    }
                     None => None,
                 };
                 for (index, &arg) in args.iter().enumerate() {
+                    if POLL && index != 0 && index.is_multiple_of(POLL_STEPS as usize) && self.vm.own_stop_due() {
+                        break 'join false;
+                    }
                     if let (Some((value, text)), true) = (separator, index > 0) {
                         parts.push((value, bytes.len()));
-                        bytes.extend_from_slice(text);
+                        if !append(&mut bytes, text) { break 'join false; }
                     }
-                    let view = self.vm.str_view(arg).filter(|view| ascii(view))?;
+                    let Some(view) = self.vm.str_view(arg).filter(|view| ascii(view)) else { return Ok(None) };
                     parts.push((arg, bytes.len()));
-                    bytes.extend_from_slice(view.bytes());
+                    if !append(&mut bytes, view.bytes()) { break 'join false; }
                 }
+                true
+            };
+            if !copied {
+                self.quittable(Self::native_poll)?;
+                return Ok(None);
             }
-            Some(self.concat_result(bytes, false, &parts))
+            Ok(Some(self.concat_result(bytes, false, &parts)))
         }
         pub fn clear_string(&mut self, value: Value) -> std::result::Result<Value, Fault> {
             if Vm::image_value(value) { return Err(self.read_only(value)); }
@@ -814,7 +845,23 @@ mod leaf {
             Ok(Value::NIL)
         }
         pub fn sxhash(&self, value: Value) -> Value {
-            Value::integer((self.vm.public_sxhash(value) & ((1u64 << 60)-1)) as i64).unwrap()
+            let hash = self.vm.public_sxhash::<false>(value).unwrap_or_else(|| unreachable!());
+            Self::sxhash_fixnum(hash)
+        }
+        pub fn sxhash_quittable(&mut self, value: Value) -> super::Out {
+            match self.vm.public_sxhash::<true>(value) {
+                Some(hash) => Ok(Self::sxhash_fixnum(hash)),
+                None => self.finish_sxhash_stop(value),
+            }
+        }
+        #[cold]
+        #[inline(never)]
+        fn finish_sxhash_stop(&mut self, value: Value) -> super::Out {
+            self.quittable(Self::native_poll)?;
+            Ok(self.sxhash(value))
+        }
+        fn sxhash_fixnum(hash: u64) -> Value {
+            Value::fixnum((hash & ((1u64 << 60) - 1)) as i64).unwrap_or_else(|| unreachable!())
         }
         pub fn string_to_syntax(&mut self, string: Value) -> super::Out {
             let description = self.string_view(string)?;

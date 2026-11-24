@@ -367,10 +367,28 @@ fn mix(mut x: u64) -> u64 {
 fn combine(x: u64, y: u64) -> u64 {
     (x << 4).wrapping_add(x >> 60).wrapping_add(y)
 }
-fn hash_bytes(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, &b| {
-        (h ^ b as u64).wrapping_mul(0x0100_0000_01b3)
+const HASH_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+
+#[inline]
+fn fold_hash_bytes(bytes: &[u8], hash: u64) -> u64 {
+    bytes.iter().fold(hash, |h, &b| {
+        (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
     })
+}
+
+/// Only a standalone Lisp hash supplies a stop probe. Table hashing and
+/// rehashing always finish, and use the same byte fold.
+fn hash_bytes<const POLL: bool>(bytes: &[u8], vm: &Vm) -> Option<u64> {
+    use crate::quit::KERNEL_CHUNK;
+    if !POLL || bytes.len() <= KERNEL_CHUNK {
+        return Some(fold_hash_bytes(bytes, HASH_OFFSET));
+    }
+    let mut hash = HASH_OFFSET;
+    for (index, chunk) in bytes.chunks(KERNEL_CHUNK).enumerate() {
+        if index != 0 && vm.own_stop_due() { return None; }
+        hash = fold_hash_bytes(chunk, hash);
+    }
+    Some(hash)
 }
 const SXHASH_MAX_DEPTH: usize = 3;
 const SXHASH_MAX_LEN: usize = 7;
@@ -506,52 +524,27 @@ impl Vm {
             _ => Shape::Atom,
         }
     }
-    /// GNU `sxhash_obj`; `moving` is set when the hash reads a heap index.
-    pub(super) fn sxhash(&self, v: Value, depth: usize, moving: &mut bool) -> u64 {
-        self.sxhash_mode(v, depth, moving, false)
-    }
     /// Public hashes cannot expose the arena indices repaired by table rehashing.
-    pub(super) fn public_sxhash(&self, v: Value) -> u64 {
-        self.sxhash_mode(v, 0, &mut false, true)
+    pub(super) fn public_sxhash<const POLL: bool>(&self, v: Value) -> Option<u64> {
+        self.sxhash_mode::<POLL>(v, 0, &mut false, true)
     }
-    fn sxhash_mode(&self, v: Value, depth: usize, moving: &mut bool, public: bool) -> u64 {
-        if depth > SXHASH_MAX_DEPTH {
-            return 0;
-        }
-        match self.shape(v) {
+
+    fn sxhash_mode<const POLL: bool>(&self, v: Value, depth: usize, moving: &mut bool, public: bool) -> Option<u64> {
+        if depth > SXHASH_MAX_DEPTH { return Some(0); }
+        Some(match self.shape(v) {
             Shape::Atom if public && Self::moving_reference(v) => v.tag() as u64,
             Shape::Atom => v.0,
             Shape::Float(bits) => bits,
-            Shape::Bignum(n) => hash_bytes(&n.to_signed_bytes_le()),
-            Shape::Text { bytes, .. } => hash_bytes(bytes),
-            Shape::BoolVector(bits) => combine(bits.len as u64, hash_bytes(&bits.bytes)),
-            Shape::Cons => {
-                let mut hash = 0;
-                let mut tail = v;
-                if depth < SXHASH_MAX_DEPTH {
-                    for _ in 0..SXHASH_MAX_LEN {
-                        let Ok((car, cdr)) = self.cons_pair(tail) else {
-                            break;
-                        };
-                        hash = combine(hash, self.sxhash_mode(car, depth + 1, moving, public));
-                        tail = cdr;
-                    }
-                }
-                if tail != Value::NIL {
-                    hash = combine(hash, self.sxhash_mode(tail, depth + 1, moving, public));
-                }
-                hash
-            }
-            Shape::Vector(items) | Shape::Record(items) => items
-                .iter()
-                .take(SXHASH_MAX_LEN)
-                .fold(items.len() as u64, |h, &x| {
-                    combine(h, self.sxhash_mode(x, depth + 1, moving, public))
-                }),
-            // What every two `equal' closures share, whichever way they were
-            // compared: how many values their environments hold now (a kept
-            // environment's bindings, else the captures). Nothing that
-            // moves enters it.
+            Shape::Bignum(n) => hash_bytes::<POLL>(&n.to_signed_bytes_le(), self)?,
+            Shape::Text { bytes, .. } => hash_bytes::<POLL>(bytes, self)?,
+            Shape::BoolVector(bits) => combine(bits.len as u64, hash_bytes::<POLL>(&bits.bytes, self)?),
+            Shape::Cons => self.sxhash_cons::<POLL>(v, depth, moving, public)?,
+            Shape::Vector(items) | Shape::Record(items) => items.iter().take(SXHASH_MAX_LEN)
+                .try_fold(items.len() as u64, |h, &x| {
+                    Some(combine(h, self.sxhash_mode::<POLL>(x, depth + 1, moving, public)?))
+                })?,
+            // What every two `equal' closures share: the number of bindings
+            // in a kept environment, or the number of captures.
             Shape::Closure(_, captures, _, slots) => match slots.get(2) {
                 Some(&env) => crate::closure_key::environment_values(self, env).map_or(0, |values| values.len()) as u64,
                 None => captures.len() as u64,
@@ -570,14 +563,31 @@ impl Vm {
             // What every two `equal' tables share without a walk of their
             // characters: purpose, default and how many extra slots.
             Shape::CharTable(t) => combine(
-                combine(self.sxhash_mode(t.purpose(), depth + 1, moving, public), self.sxhash_mode(t.default(), depth + 1, moving, public)),
+                combine(self.sxhash_mode::<POLL>(t.purpose(), depth + 1, moving, public)?,
+                        self.sxhash_mode::<POLL>(t.default(), depth + 1, moving, public)?),
                 t.extras().len() as u64),
             Shape::Opaque => {
                 *moving |= Self::moving_reference(v);
                 if public { 0 } else { v.0 }
             }
-        }
+        })
     }
+
+    fn sxhash_cons<const POLL: bool>(&self, mut tail: Value, depth: usize, moving: &mut bool, public: bool) -> Option<u64> {
+        let mut hash = 0;
+        if depth < SXHASH_MAX_DEPTH {
+            for _ in 0..SXHASH_MAX_LEN {
+                let Ok((car, cdr)) = self.cons_pair(tail) else { break };
+                hash = combine(hash, self.sxhash_mode::<POLL>(car, depth + 1, moving, public)?);
+                tail = cdr;
+            }
+        }
+        if tail != Value::NIL {
+            hash = combine(hash, self.sxhash_mode::<POLL>(tail, depth + 1, moving, public)?);
+        }
+        Some(hash)
+    }
+
     /// The table's hash function: (hash, depends on a moving heap index).
     fn hash_key(&self, test: Test, key: Value) -> (u64, bool) {
         let identity = || (key.0, Self::moving_reference(key));
@@ -585,12 +595,13 @@ impl Vm {
             Test::Eq => identity(),
             Test::Eql => match self.object_if(key) {
                 Some(data::Object::Float(f)) => (f.to_bits(), false),
-                Some(data::Object::Bignum(n)) => (hash_bytes(&n.to_signed_bytes_le()), false),
+                Some(data::Object::Bignum(n)) => (fold_hash_bytes(&n.to_signed_bytes_le(), HASH_OFFSET), false),
                 _ => identity(),
             },
             Test::Equal | Test::User(_, Native::EqualIncludingProperties) => {
                 let mut moving = false;
-                (self.sxhash(key, 0, &mut moving), moving)
+                let hash = self.sxhash_mode::<false>(key, 0, &mut moving, false).unwrap_or_else(|| unreachable!());
+                (hash, moving)
             }
             Test::User(_, Native::FunctionEqual) => match crate::profiler::code_identity(&self.closures, key) {
                 // A closure's compiled function is a stable index.
