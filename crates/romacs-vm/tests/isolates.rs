@@ -797,25 +797,35 @@ fn a_retired_worker_ends_without_a_wait_or_a_death_report() {
     assert!(settles(|| !process_exists(pid)), "retired worker {pid} survived");
 }
 
-/// Every condition the isolates' Lisp (isolate.el, isolate-worker.el)
+/// Every condition the isolate, worker and lifecycle Lisp
 /// settles a dead worker's jobs with, or signals itself, is an
 /// `isolate-error`, so an awaiter's handler for it catches each: one used
 /// and never defined reaches the awaiter as a peculiar error.
 #[test]
 fn every_condition_isolate_el_raises_is_an_isolate_error() {
-    let source = tree_lisp::text("vm/isolate.el") + &tree_lisp::text("vm/isolate-worker.el");
+    let lifecycle = tree_lisp::text("vm/isolate-lifecycle.el");
+    let source = tree_lisp::text("vm/isolate.el") + &tree_lisp::text("vm/isolate-worker.el") + &lifecycle;
     // `(romacs--isolate-dead ISOLATE 'NAME ...)` and `(signal 'NAME ...)`.
     let quoted = |text: &str| text.strip_prefix('\'').map(|text| {
         text.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '-').collect::<String>()
     });
+    let lifecycle_source = lifecycle.as_str();
+    let lifecycle_names = ["(death ", "'death ", "(settle "].into_iter().flat_map(|form| {
+        lifecycle_source.match_indices(form).map(move |(at, _)| {
+            let rest = &lifecycle_source[at + form.len()..];
+            rest.trim_start_matches('\'').split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '-')
+                .next().unwrap_or_default().to_owned()
+        })
+    });
     let mut names: Vec<String> = source.match_indices("romacs--isolate-dead ")
         .filter_map(|(at, marker)| source[at + marker.len()..].split_once(' ').and_then(|(_, rest)| quoted(rest)))
         .chain(source.match_indices("(signal ").filter_map(|(at, marker)| quoted(&source[at + marker.len()..])))
+        .chain(lifecycle_names)
         .filter(|name| name.starts_with("isolate-"))
         .collect();
     names.sort_unstable();
     names.dedup();
-    assert!(names.iter().any(|n| n == "isolate-world-unavailable") && names.iter().any(|n| n == "isolate-died"), "{names:?}");
+    assert!(names.iter().any(|n| n == "isolate-world-unavailable") && names.iter().any(|n| n == "isolate-died") && names.iter().any(|n| n == "isolate-killed"), "{names:?}");
     let mut vm = vm();
     for name in names {
         assert_eq!(eval(&mut vm, &format!("(and (memq 'isolate-error (get '{name} 'error-conditions)) t)")), "t",
