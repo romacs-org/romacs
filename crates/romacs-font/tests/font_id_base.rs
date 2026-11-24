@@ -27,8 +27,8 @@
 #![forbid(unsafe_code)]
 
 use romacs_display_protocol::font::{
-    FontFileAsset, FontOutlineAsset, FontReplay, FontSlantKind, ResolvedFontId,
-    ResolvedFontIdentity,
+    FontFileAsset, FontOutlineAsset, FontReplay, FontSlantKind, FontUnderline,
+    ResolvedFontAdvance, ResolvedFontId, ResolvedFontIdentity,
 };
 use romacs_font::instance::{FontIdBase, FontInstanceInterner, FontInstanceProperties};
 
@@ -45,8 +45,8 @@ fn properties() -> FontInstanceProperties {
         ascent_px: 11.0,
         descent_px: 3.0,
         space_advance_px: 8.0,
-        glyph_advance: Default::default(),
-        underline: Default::default(),
+        glyph_advance: ResolvedFontAdvance::default(),
+        underline: FontUnderline::default(),
     }
 }
 

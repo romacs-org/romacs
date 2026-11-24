@@ -17,7 +17,12 @@
 use romacs_display_protocol::pane_picture::{PaneFrame, PaneHead, PanePicture};
 use romacs_display_protocol::{Color, DisplayWindowId, FrameGlyphBuffer};
 use romacs_layout::LayoutEngine;
-use romacs_layout_input::{Face, FaceHandle, FrameSnapshot, PlacedWindowSnapshot, TextSlice, WindowSnapshot};
+use romacs_layout_input::{
+    BandStretches, CursorKinds, Decor, Face, FaceHandle, FontAlternativeState, FontSelectionState,
+    FrameChrome, FrameSnapshot, Hscroll, LineWrap, NoFont, PlacedWindowSnapshot, TextSlice,
+    UnderlineRules, WindowChrome, WindowSnapshot,
+};
+use std::sync::Arc;
 
 const SLOT: u8 = 3;
 const OWN: u64 = 5;
@@ -26,20 +31,20 @@ const MASTER: u64 = 900;
 /// A frame of one window, ID, showing plain text and an emoji with point
 /// at the start.
 fn snapshot(id: u64) -> FrameSnapshot {
-    let face = Face { decor: Default::default(), foreground: [255; 3], background: [0; 3], family: "Liberation Mono".into(), pixel_size: 20.0, weight: 400, italic: false, width: 5 };
+    let face = Face { decor: Decor::default(), foreground: [255; 3], background: [0; 3], family: "Liberation Mono".into(), pixel_size: 20.0, weight: 400, italic: false, width: 5 };
     let text = TextSlice { extends: vec![], raw: vec![], utf8: "abc \u{2764}\u{FE0F}\nnext line".into(), face_runs: vec![] };
-    let window = WindowSnapshot { underline_rules: Default::default(), band_stretches: Default::default(), id, width: 400, height: 100, start_byte: 0, point_byte: 0, buffer_version: 1,
-        mode_line: None, mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0), vscroll_px: 0, hscroll: Default::default(),
-        tab_width: 8, wrap: Default::default(), cursor_off: false, cursor: Default::default(), stretches: vec![], images: vec![], wrap_flips: vec![], line_numbers: None, chrome: Default::default(),
+    let window = WindowSnapshot { underline_rules: UnderlineRules::default(), band_stretches: BandStretches::default(), id, width: 400, height: 100, start_byte: 0, point_byte: 0, buffer_version: 1,
+        mode_line: None, mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0), vscroll_px: 0, hscroll: Hscroll::default(),
+        tab_width: 8, wrap: LineWrap::default(), cursor_off: false, cursor: CursorKinds::default(), stretches: vec![], images: vec![], wrap_flips: vec![], line_numbers: None, chrome: WindowChrome::default(),
         text, faces: vec![face] };
-    FrameSnapshot { font_selection: Default::default(), font_alternatives: Default::default(), fontsets: Default::default(), width: 400, height: 100,
+    FrameSnapshot { font_selection: FontSelectionState::default(), font_alternatives: FontAlternativeState::default(), fontsets: Arc::default(), width: 400, height: 100,
         windows: vec![PlacedWindowSnapshot { x: 0, y: 0, snapshot: window }], background_alpha: 1.0, children: vec![], tab_bar: None,
-        chrome: Default::default(), status_bar: None, no_font: Default::default() }
+        chrome: FrameChrome::default(), status_bar: None, no_font: NoFont::default() }
 }
 
 /// Window ID laid out by ENGINE, with its cursor.
 fn lay_out(engine: &mut LayoutEngine, id: u64) -> FrameGlyphBuffer {
-    engine.layout_frame(&snapshot(id), 1, Some((id, Color::from_pixel(0xffffff)))).unwrap().0
+    engine.layout_frame(&snapshot(id), 1, Some((id, Color::from_pixel(0x00ff_ffff)))).unwrap().0
 }
 
 /// Every font id FRAME names: its table's keys and ids, its characters'
@@ -91,7 +96,7 @@ fn a_laid_out_pane_round_trips_and_draws_as_the_masters_window() {
     let picture = PanePicture::from_frame(
         head,
         PaneFrame { frame: owned, animations: vec![], submitted: None },
-        DisplayWindowId::new(OWN as i64),
+        DisplayWindowId::new(OWN.cast_signed()),
     );
     let decoded = PanePicture::decode(&picture.encode(), SLOT).expect("slot SLOT's receiver accepts its owner's picture");
     assert_eq!(decoded, picture);

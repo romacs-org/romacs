@@ -58,14 +58,15 @@
 use crate::face::Face;
 use crate::font::{
     CharFontTable, FontCatalogGeneration, FontFileAsset, FontOutlineAsset, FontReplay,
-    FontSlantKind, ResolvedCharGlyph, ResolvedFont, ResolvedFontId, ResolvedFontIdentity,
+    FontSlantKind, FontUnderline, ResolvedCharGlyph, ResolvedFont, ResolvedFontAdvance,
+    ResolvedFontId, ResolvedFontIdentity,
     ResolvedFontTable, ResolvedGlyph, ResolvedGlyphId, ShapedClusterTable,
 };
 use crate::pane_picture::{
     PaneFrame, PaneHead, PanePicture, PictureError, PANE_BOX_LIMIT, PANE_PICTURE_FORMAT,
 };
 use crate::submission::SubmittedWindow;
-use crate::text_animation::{TextAnimation, TextAnimationKind};
+use crate::text_animation::{LogoColours, TextAnimation, TextAnimationKind};
 use crate::{
     BoxVerticalEdges, Color, CursorStyle, DisplaySlotId, DisplayWindowId, FaceId, FrameGlyph,
     FrameGlyphBuffer, FrameSpace, FringeBitmapData, FringeSide, GeometryPoint, GlyphRowRole,
@@ -89,7 +90,7 @@ const IMAGE: ImageId = ImageId::new(BASE + 7);
 const HEART: &str = "\u{2764}\u{FE0F}";
 
 fn head() -> PaneHead {
-    PaneHead { owner: 41, window: MASTER.get() as u64, view: 11, request: 13, v: 17, c: 19 }
+    PaneHead { owner: 41, window: MASTER.get().cast_unsigned(), view: 11, request: 13, v: 17, c: 19 }
 }
 
 fn slot(window: DisplayWindowId, row: u32, col: u16) -> DisplaySlotId {
@@ -113,8 +114,8 @@ fn font(id: u32, file: &str) -> ResolvedFont {
         ascent_px: 11.0,
         descent_px: 3.0,
         space_advance_px: 8.0,
-        glyph_advance: Default::default(),
-        underline: Default::default(),
+        glyph_advance: ResolvedFontAdvance::default(),
+        underline: FontUnderline::default(),
     }
 }
 
@@ -220,7 +221,8 @@ fn frame(window: DisplayWindowId) -> FrameGlyphBuffer {
         Box::<str>::from(HEART),
         vec![ResolvedGlyph {
             resolved_font_id: ResolvedFontId(BASE + 1), glyph_id: ResolvedGlyphId::new(1201),
-            x: 0.0, y: 0.0, x_advance: 16.0, cluster_start: 0, cluster_end: HEART.len() as u32,
+            x: 0.0, y: 0.0, x_advance: 16.0, cluster_start: 0,
+            cluster_end: u32::try_from(HEART.len()).unwrap(),
         }],
     )]))]);
     frame.fringe_bitmaps = HashMap::from_iter([(1, FringeBitmapData { bits: vec![0x8000, 0xc000], width: 2, height: 2, period: 0, align: 0 })]);
@@ -231,12 +233,12 @@ fn frame(window: DisplayWindowId) -> FrameGlyphBuffer {
 /// Window WINDOW's text animations, one of each kind, keyed as
 /// `romacs-vm`'s display keys them: (key << 32) | the window's low half.
 fn animations(window: DisplayWindowId) -> Vec<(u64, TextAnimation)> {
-    let w = window.get() as u64;
+    let w = window.get().cast_unsigned();
     vec![
         ((1 << 32) | (w & 0xffff_ffff), TextAnimation {
             window: w, top: 0, cols: 4, rows: 2, anchor: None, rise: None, fps: 25, moving: true,
             still: false,
-            kind: TextAnimationKind::Logo { cell_aspect: 0.5, epoch: 1, colours: Default::default() },
+            kind: TextAnimationKind::Logo { cell_aspect: 0.5, epoch: 1, colours: LogoColours::default() },
         }),
         ((2 << 32) | (w & 0xffff_ffff), TextAnimation {
             window: w, top: 1, cols: 8, rows: 1, anchor: Some(3), rise: Some((16.0, 16.0)), fps: 30,
@@ -251,7 +253,7 @@ fn animations(window: DisplayWindowId) -> Vec<(u64, TextAnimation)> {
 
 fn submitted(window: DisplayWindowId) -> SubmittedWindow {
     SubmittedWindow {
-        window_id: window.get() as u64,
+        window_id: window.get().cast_unsigned(),
         view_generation: 11,
         text_revision: 12,
         visible_text_bytes: vec![0..4, 8..12],
@@ -367,7 +369,7 @@ fn an_image_id_outside_the_owners_slot_is_refused() {
     assert!(through_wire(&picture()).is_ok());
     for id in [ImageId::new(7), ImageId::new(BASE + (1 << 24))] {
         let mut picture = picture();
-        for glyph in picture.glyphs.iter_mut() {
+        for glyph in &mut picture.glyphs {
             if let FrameGlyph::Image { ref mut image_id, .. } = *glyph {
                 *image_id = id;
             }
