@@ -27,9 +27,13 @@ fn install_fixture_lisp(vm: &mut Vm) {
 
 fn encode(vm: &mut Vm, roots: &str, limit: usize) -> Vec<u8> {
     let form = format!("(romacs--seed-build '{roots} {TABLE} {limit})");
-    let (backing, refusals) = vm.eval_source(&form).unwrap().cons_pair().unwrap();
+    let request = vm.compile_source(&form).unwrap();
+    // The counter includes newly compiled request code, so sample after compilation.
+    let before = vm.image_functions_materialized();
+    let (backing, refusals) = vm.execute(request).unwrap().cons_pair().unwrap();
     assert!(refusals.is_nil(), "{}", refusals.display().unwrap());
     let bytes = backing.seed_backing_bytes().unwrap();
+    assert_eq!(vm.image_functions_materialized(), before);
     assert!(bytes.starts_with(b"VM2FRZ02"));
     bytes
 }
@@ -236,9 +240,7 @@ fn pending_only_for_eager() {
         let image = romacs_vm::ImageRegion::open(&image_dir, &key).unwrap();
         let (mut mapped, _) = Vm::from_code_image(image, [0; 32]).unwrap();
         install_fixture_lisp(&mut mapped);
-        let before = mapped.image_functions_materialized();
         assert_eager_copy(&mut mapped, "mapped");
-        assert_eq!(mapped.image_functions_materialized(), before);
     });
 }
 
