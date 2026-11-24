@@ -90,6 +90,31 @@
       (should (= (how-many "width sample" (point-min) romacs-agent-log--end) 200))
       (should (equal (list width-reads window-searches) '(0 0))))))
 
+(defun romacs-agent-log-width-tests--geometry-reads (events)
+  "Draw EVENTS in the chat; return the window geometry they read."
+  (let* ((reads nil)
+         (advices (mapcar (lambda (name) (cons name (lambda (&rest _) (push name reads))))
+                          '(window-body-width get-buffer-window-list get-buffer-window))))
+    (unwind-protect
+        (progn
+          (pcase-dolist (`(,name . ,count) advices) (advice-add name :before count))
+          (dolist (event events) (romacs-agent-log--on-event romacs-agent-log--session event)))
+      (pcase-dolist (`(,name . ,count) advices) (advice-remove name count)))
+    reads))
+
+(ert-deftest romacs-agent-log-width-a-prompt-without-an-image-reads-no-window-geometry ()
+  (romacs-agent-log-width-tests--shown
+    (should (equal (romacs-agent-log-width-tests--geometry-reads
+                    '((:type input :text "a plain prompt" :seq 1 :last t)))
+                   nil))))
+
+(ert-deftest romacs-agent-log-width-a-reply-without-a-table-reads-no-window-geometry ()
+  (romacs-agent-log-width-tests--shown
+    (should (equal (romacs-agent-log-width-tests--geometry-reads
+                    '((:type delta :text "pick a | b" :message "m" :seq 1 :last t)
+                      (:type message-end :message "m" :seq 2 :last t)))
+                   nil))))
+
 (ert-deftest romacs-agent-log-width-resize-does-not-rewrite-chat ()
   (romacs-agent-log-width-tests--shown
     (draw :type 'input :text "A transcript without tables or images")
@@ -119,15 +144,23 @@
     (goto-char romacs-agent-log--divider)
     (buffer-substring (point) (line-end-position))))
 
-(ert-deftest romacs-agent-log-width-divider-uses-a-faced-stretch ()
+(ert-deftest romacs-agent-log-width-divider-rule-is-its-newline-s-extended-face ()
   (romacs-agent-log-width-tests--shown
     (let* ((divider (romacs-agent-log-width-tests--divider))
-           (stretch (text-property-not-all 0 (length divider) 'display nil divider)))
+           (newline (save-excursion (goto-char romacs-agent-log--divider) (line-end-position)))
+           (faces (ensure-list (get-text-property newline 'face))))
+      (should (eq (char-after newline) ?\n))
       (should-not (string-match-p "──" divider))
-      (should stretch)
-      (should (eq (car-safe (get-text-property stretch 'display divider)) 'space))
-      (should (memq 'romacs-agent-log-rule
-                    (ensure-list (get-text-property stretch 'face divider)))))))
+      (should-not (text-property-not-all romacs-agent-log--divider (1+ newline) 'display nil))
+      ;; What a window extends is drawn in the extending faces alone:
+      ;; one of them draws the line, in the rule's colour.
+      (should (cl-some (lambda (face)
+                         (and (facep face) (face-attribute face :extend nil t)
+                              (cl-some (lambda (line) (face-attribute face line nil t))
+                                       '(:strike-through :underline :overline))
+                              (equal (face-attribute face :foreground nil t)
+                                     (face-attribute 'romacs-agent-log-rule :foreground nil t))))
+                       faces)))))
 
 (defun romacs-agent-log-width-tests--check-state (work label face)
   "Check the divider's WORK glyph and its optional LABEL in FACE."

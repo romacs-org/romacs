@@ -428,31 +428,121 @@ them inherits."
     (draw :type 'delta :text "root text")
     (should (string-match-p "│ · completed\n[^│]*root text" (romacs-agent-log-tests--transcript)))))
 
-(ert-deftest romacs-agent-log-rule-fits-the-windows-showing-the-chat ()
+(ert-deftest romacs-agent-log-rule-is-drawn-by-each-window-showing-the-chat ()
   (romacs-agent-log-tests--with
     (ignore #'draw)
-    (let ((rule (lambda () (save-excursion (goto-char romacs-agent-log--end)
-                                           (how-many "─" (point) (line-end-position)))))
-          (chat (current-buffer)))
+    (let ((chat (current-buffer)))
       (puthash "L" chat romacs-agent-log--chats)
       (unwind-protect
           (save-window-excursion
             (delete-other-windows)
             (switch-to-buffer chat)
-            ;; The hooks run as the host delivers window changes before a
-            ;; redisplay.
             (romacs--run-window-change-functions)
-            (let ((narrow (split-window-right (- (window-total-width) 30))))
+            ;; The divider's newline, its face extended to the right edge
+            ;; of whichever window shows it, a line drawn through it; no
+            ;; display property in the chat's text below the transcript.
+            (let ((rule (save-excursion (goto-char romacs-agent-log--divider) (line-end-position))))
+              (should (memq 'romacs-agent-log-rule-line (ensure-list (get-text-property rule 'face))))
+              (should (face-attribute 'romacs-agent-log-rule-line :strike-through))
+              (should (face-attribute 'romacs-agent-log-rule-line :extend))
+              (should-not (text-property-not-all romacs-agent-log--end (point-max) 'display nil)))
+            (let ((tick (buffer-modified-tick))
+                  (narrow (split-window-right (- (window-total-width) 30))))
+              ;; A narrower window showing it, or none, rewrites nothing.
               (set-window-buffer narrow chat)
               (romacs--run-window-change-functions)
-              (let ((short (funcall rule)))
-                ;; The narrower window leaves no room for the rule to wrap in.
-                (should (< (+ romacs-agent-log--thread-cols short) (window-body-width narrow)))
-                ;; It shows another buffer: the rule fits the wider one again.
-                (set-window-buffer narrow (get-buffer-create "*romacs-agent-log-tests other*"))
-                (romacs--run-window-change-functions)
-                (should (> (funcall rule) short)))))
+              (set-window-buffer narrow (get-buffer-create "*romacs-agent-log-tests other*"))
+              (romacs--run-window-change-functions)
+              (delete-window narrow)
+              (romacs--run-window-change-functions)
+              (should (= (buffer-modified-tick) tick))))
         (remhash "L" romacs-agent-log--chats)))))
+
+(ert-deftest romacs-agent-log-the-chat-s-end-stays-on-its-last-line ()
+  (romacs-agent-log-tests--with
+    (ignore #'draw)
+    (let* ((rows "  a queued row\n")
+           (romacs-agent-log-separator-rows-function (lambda () rows)))
+      (romacs-agent-log--separator t)
+      (goto-char (point-max))
+      ;; The queue empties: the end is the divider's line, before the
+      ;; newline that draws its rule, not an empty line after it.
+      (setq rows nil)
+      (romacs-agent-log--separator)
+      (should (= (point) (1- (point-max))))
+      (should (eq (char-after) ?\n))
+      (setf (romacs-agent-state session) 'idle)
+      (romacs-agent-log--separator)
+      (should (= (point) (1- (point-max)))))))
+
+(ert-deftest romacs-agent-log-a-restored-chat-opens-on-its-last-line ()
+  ;; A restored chat holds its separator alone until a window first shows
+  ;; it; desktop puts its point back before then, at that text's end.
+  (let* ((source (romacs-agent-log-tests--source))
+         (session (romacs-agent--make :id "S-restored" :harness 'claude :state 'idle :title "restored"))
+         (buffer (romacs-agent-log-chat session t source)))
+    (unwind-protect
+        (save-window-excursion
+          (with-current-buffer buffer (goto-char (point-max)))
+          (let ((window (split-window-right)))
+            (set-window-buffer window buffer)
+            (romacs--run-window-change-functions)
+            (with-current-buffer buffer
+              (should (string-match-p "from the source" (buffer-string)))
+              (should (= (window-point window) (1- (point-max))))
+              (should (eq (char-after (window-point window)) ?\n)))))
+      (kill-buffer buffer))))
+
+(defvar desktop-buffer-ok-count)
+(defvar desktop-buffer-fail-count)
+(defvar desktop-first-buffer)
+
+(ert-deftest romacs-agent-log-a-restored-chat-s-windows-open-at-its-end ()
+  ;; Two windows saved on the divider of a long chat, restored as desktop
+  ;; and a window state do: each opens on the chat's last line, the
+  ;; transcript above it, once the chat is drawn.
+  (require 'desktop)
+  (let* ((id "S-desk")
+         (session (romacs-agent--make :id id :harness 'claude :state 'idle :title "desk"))
+         (romacs-agent--sessions (make-hash-table :test #'equal))
+         (romacs-agent-log--chats (make-hash-table :test #'equal))
+         (other (get-buffer-create "*romacs-agent-log-tests other*")))
+    (puthash id session romacs-agent--sessions)
+    (cl-letf (((symbol-function 'romacs-agent-log-source-fill)
+               (lambda (_source session)
+                 (dotimes (i 80) (romacs-agent-log-draw session (list :type 'input :text (format "prompt %d" i)))))))
+      (save-window-excursion
+        (delete-other-windows)
+        (let* ((chat (romacs-agent-log-chat session))
+               (name (buffer-name chat))
+               (divider (with-current-buffer chat (marker-position romacs-agent-log--divider)))
+               (misc (with-current-buffer chat (romacs-agent-log--desktop-save nil)))
+               (windows (list (selected-window) (split-window-right))))
+          (dolist (window windows)
+            (set-window-buffer window chat)
+            (set-window-start window divider)
+            (set-window-point window divider))
+          (let ((state (window-state-get nil t)))
+            (delete-other-windows)
+            (set-window-buffer nil other)
+            (kill-buffer chat)
+            ;; As `desktop-read' binds them around its buffers.
+            (let ((desktop-buffer-ok-count 0) (desktop-buffer-fail-count 0) (desktop-first-buffer nil))
+              (desktop-create-buffer 208 nil name 'romacs-agent-log-mode nil divider nil nil misc))
+            (window-state-put state nil 'safe)
+            (romacs--run-window-change-functions)
+            (let ((chat (get-buffer name)))
+              (with-current-buffer chat
+                (should (string-match-p "prompt 79" (buffer-string)))
+                (dolist (window (get-buffer-window-list chat nil t))
+                  (let ((lines (count-lines (window-start window) (window-point window))))
+                    (should (= (window-point window) (1- (point-max))))
+                    ;; The last line at the window's bottom, the transcript
+                    ;; filling the rows above it.
+                    (should (> lines (/ (window-body-height window) 2)))
+                    (should (<= lines (window-total-height window))))))
+              (should (= (length (get-buffer-window-list chat nil t)) 2))
+              (kill-buffer chat))))))))
 
 (ert-deftest romacs-agent-log-menu-keys-keep-the-worker-they-showed ()
   (romacs-agent-log-tests--with

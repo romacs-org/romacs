@@ -17,10 +17,16 @@
 (require 'romacs-agent-log)
 (require 'romacs-markdown)
 
+(defun romacs-agent-log-tables--window-width ()
+  "The body width of the narrowest window showing the chat, 80 when none."
+  (if-let* ((windows (get-buffer-window-list nil nil t)))
+      (apply #'min (mapcar #'window-body-width windows))
+    80))
+
 (defun romacs-agent-log-tables--width ()
   "The columns a table may take: the narrowest window showing the chat,
 less a margin."
-  (max 20 (- (romacs-agent-log--rule-width) 2)))
+  (max 20 (- (romacs-agent-log-tables--window-width) 2)))
 
 (defun romacs-agent-log-tables--pad-markup (grid)
   "In GRID, pad hidden inline markup to keep the following cells aligned."
@@ -75,14 +81,14 @@ its entry and round on the first character, the rest throughout."
 (defun romacs-agent-log-tables-draw (start end)
   "Draw each top-level pipe table of the reply START..END as a grid at
 the chat's width."
-  (when (save-excursion (goto-char start) (search-forward "|" end t))
+  (when-let* (((save-excursion (goto-char start) (search-forward "|" end t)))
+              (tables (cl-remove-if-not (lambda (block) (and (eq (car block) 'table) (eql (plist-get (nthcdr 3 block) :depth) 0)))
+                                  (romacs-markdown-blocks start end))))
     (let ((width (romacs-agent-log-tables--width)))
       ;; From the last, so the places of those before stay.
-      (dolist (block (reverse (romacs-markdown-blocks start end)))
-        (pcase-let ((`(,kind ,beg ,stop . ,plist) block))
-          (when (and (eq kind 'table) (eql (plist-get plist :depth) 0))
-            (when-let* ((grid (romacs-agent-log-tables--grid (buffer-substring-no-properties beg stop) width)))
-              (romacs-agent-log-tables--put beg stop grid))))))))
+      (pcase-dolist (`(,_ ,beg ,stop . ,_) (reverse tables))
+        (when-let* ((grid (romacs-agent-log-tables--grid (buffer-substring-no-properties beg stop) width)))
+          (romacs-agent-log-tables--put beg stop grid))))))
 
 (defun romacs-agent-log-tables-refit (&rest _)
   "Draw again each table of the chat drawn at another width than its

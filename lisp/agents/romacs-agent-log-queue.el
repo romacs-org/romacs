@@ -92,9 +92,10 @@ the word, dim: what a queued row's keys do."
              (seq-partition pairs 2) (propertize " · " 'face 'romacs-agent-log-queued)))
 
 (defun romacs-agent-log-queue-rows (items width &optional editing)
-  "ITEMS, the messages waiting, as rows WIDTH columns wide, each ending in
-a newline, under a label saying how many wait and the keys that change
-them; the empty string when none wait.  A row says its place in the
+  "ITEMS, the messages waiting, as rows WIDTH columns wide at most, each
+wrapping under its text in a narrower window and ending in a newline,
+under a label saying how many wait and the keys that change them; the
+empty string when none wait.  A row says its place in the
 order, and carries its item (`romacs-agent-log-queued') and its keys.
 EDITING, the one the composer holds, is marked, and a line under the
 rows says how it goes back."
@@ -127,7 +128,8 @@ rows says how it goes back."
                                 " " (propertize (truncate-string-to-width line room nil nil (truncate-string-ellipsis))
                                                 'face (if held 'romacs-agent-log-queued-held 'romacs-agent-log-queued))
                                 "\n")
-                        'romacs-agent-log-queued item 'keymap romacs-agent-log-queue-map)))
+                        'romacs-agent-log-queued item 'keymap romacs-agent-log-queue-map
+                        'wrap-prefix (make-string (+ 3 (string-width mark)) ?\s))))
         items ""))
      (if editing
          (propertize (concat "  " (propertize (format "%s editing %d" (romacs-agent-glyph 'queue-held) (1+ (or (cl-position editing items) 0)))
@@ -150,7 +152,7 @@ anew when the messages are others, even ones that read the same."
     (unless (and (= (length items) (length romacs-agent-log-queue--drawn))
                  (cl-every #'eq items romacs-agent-log-queue--drawn))
       (setq romacs-agent-log--rows nil romacs-agent-log-queue--drawn (copy-sequence items)))
-    (romacs-agent-log-queue-rows items (romacs-agent-log--rule-width) romacs-agent-log-queue--editing)))
+    (romacs-agent-log-queue-rows items romacs-agent-log-row-width romacs-agent-log-queue--editing)))
 
 (setq romacs-agent-log-separator-rows-function #'romacs-agent-log-queue--shown)
 
