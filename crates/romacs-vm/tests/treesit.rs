@@ -1202,8 +1202,10 @@ fn a_twin_waiting_for_a_thread_stops_when_it_can_copy() {
 fn a_query_waiting_on_a_thread_parse_quits_on_c_g() {
     // About xdisp.c's size: 1.3 MB of C.
     let mut vm = first_parse_vm("ts-quit", 32_000, true);
+    vm.leave_busy();
     vm.defer_parse().unwrap();
     vm.frame_snapshot(800, 600).unwrap();
+    vm.enter_busy();
     let parsing = vm.eval_source("(with-current-buffer \"ts-quit\" (romacs--treesit-parsing-p))").unwrap().display().unwrap();
     assert_eq!(parsing, "t", "the first parse is on its thread");
     let signal = vm.quit_signal();
@@ -1217,6 +1219,9 @@ fn a_query_waiting_on_a_thread_parse_quits_on_c_g() {
     assert!(presser.join().unwrap(), "the press was taken");
     assert_eq!(asked, "quit");
     wait_landed(&mut vm, "ts-quit");
+    let before = romacs_vm::treesit_parses_on_this_thread();
+    vm.eval_source("(treesit-parser-root-node treesit-test-parser)").unwrap();
+    assert_eq!(romacs_vm::treesit_parses_on_this_thread(), before, "the next query reused the worker's tree");
     assert_eq!(tree_is_a_parse(&mut vm, "ts-quit"), "t", "the parse ran on, and the next query has the tree");
 }
 
