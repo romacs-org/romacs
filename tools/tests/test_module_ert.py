@@ -120,6 +120,76 @@ time.sleep(30 if {hang!r} else 0)
             if state.exists():
                 self.assertEqual(state.read_text().rsplit(')', 1)[1].split()[0], 'Z')
 
+    def test_nothing_a_host_started_writes_after_its_file(self):
+        # An editor's subprocesses each run in a session of their own, and
+        # `setsid --fork' orphans its child: both write into the file's HOME
+        # after the host ends, until the runner has ended them.  Each records
+        # its pid here, by its host's.
+        writer = '''import os, pathlib, sys, time
+pidfile = pathlib.Path(sys.argv[1])
+pidfile.with_suffix(".new").write_text(str(os.getpid()))
+pidfile.with_suffix(".new").rename(pidfile)
+for count in range(100000):
+    try:
+        pathlib.Path(os.environ["HOME"], f"late-{os.getpid()}-{count}").write_text("")
+    except OSError:
+        pass
+    time.sleep(0.001)
+'''
+        fake = self.home / 'escaping-host'
+        fake.write_text(f'''#!{sys.executable}
+import os, pathlib, subprocess, sys, time
+print("HOME", os.environ["HOME"], flush=True)
+own, orphan = [pathlib.Path({str(self.home)!r}, f"{{kind}}-{{os.getpid()}}.pid") for kind in ("own", "orphan")]
+subprocess.Popen([sys.executable, "-c", {writer!r}, own], start_new_session=True)
+subprocess.run(["setsid", "--fork", sys.executable, "-c", {writer!r}, orphan], check=True)
+while not (own.exists() and orphan.exists()):
+    time.sleep(0.01)
+''')
+        fake.chmod(0o700)
+        self.addCleanup(self.kill_recorded)
+        result = self.invoke(binary=fake)
+        self.assertNotIn('Traceback', result.stderr)
+        self.assertIn('ERT complete:', result.stdout)
+        escapees = sorted(self.home.glob('*.pid'))
+        self.assertEqual(len(escapees), 4, 'two from the world build, two from the file')
+        for pidfile in escapees:
+            state = Path(f'/proc/{int(pidfile.read_text())}/stat')
+            alive = state.exists() and state.read_text().rsplit(')', 1)[1].split()[0] != 'Z'
+            self.assertFalse(alive, f'{pidfile.stem} outlived its host')
+        homes = [line.split(' ', 1)[1] for line in result.stdout.splitlines() if line.startswith('HOME ')]
+        self.assertTrue(homes, result.stdout)
+        self.assertFalse(any(Path(home).exists() for home in homes), 'a late write kept the HOME')
+
+    def kill_recorded(self):
+        for pidfile in self.home.glob('*.pid'):
+            try:
+                os.kill(int(pidfile.read_text()), signal.SIGKILL)
+            except (ProcessLookupError, ValueError):
+                pass
+
+    def test_an_orphan_that_ends_is_gone_while_its_host_runs(self):
+        # A test that waits for a detached process by its pid sees it end,
+        # as it would with init its parent: never a zombie until the file ends.
+        fake = self.home / 'waiting-host'
+        fake.write_text(f'''#!{sys.executable}
+import os, pathlib, subprocess, time
+pidfile = pathlib.Path(os.environ["HOME"], "orphan")
+subprocess.run(["setsid", "--fork", "sh", "-c", f"echo $$ > {{pidfile}}.new && mv {{pidfile}}.new {{pidfile}}"], check=True)
+while not pidfile.exists():
+    time.sleep(0.01)
+state = pathlib.Path(f"/proc/{{int(pidfile.read_text())}}/stat")
+for _ in range(500):
+    if not state.exists():
+        break
+    time.sleep(0.01)
+print("ORPHAN", "gone" if not state.exists() else "left", flush=True)
+''')
+        fake.chmod(0o700)
+        result = self.invoke(binary=fake)
+        self.assertIn('ORPHAN gone', result.stdout)
+        self.assertNotIn('ORPHAN left', result.stdout)
+
     def test_unknown_module_and_budget_refuse(self):
         select = runpy.run_path(str(ROOT / 'tools/test-ert'))
         self.assertEqual(select['module_suites']('unknown-module', select['directories'](ROOT)), [])
