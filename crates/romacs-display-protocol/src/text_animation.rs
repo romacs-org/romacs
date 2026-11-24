@@ -11,7 +11,7 @@ use crate::types::{Color, FaceId};
 /// One animation over window WINDOW's text: its ROWS by COLS cells,
 /// whose first row is the window's visual row TOP (negative when scrolled
 /// above it), starting at column 0.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TextAnimation {
     /// The window, as its glyphs name it.
     pub window: u64,
@@ -36,7 +36,7 @@ pub struct TextAnimation {
 }
 
 /// What draws the cells.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum TextAnimationKind {
     /// The Romacs mark and wordmark (romacs-logo) in cells CELL_ASPECT as
     /// wide as high, a sweep of light crossing them.  A new EPOCH starts
@@ -62,7 +62,7 @@ pub enum TextAnimationKind {
 /// The colours the logo takes from the theme: the mark's light (the
 /// `romacs-landing-mark' face's foreground) and the wordmark's (the
 /// `romacs-landing-word' face's).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LogoColours {
     pub mark: [u8; 3],
     pub word: [u8; 3],

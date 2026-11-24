@@ -76,8 +76,8 @@ struct Store {
 const MAX_FACES: usize = 4096;
 
 impl Store {
-    fn new() -> Result<Self, String> {
-        let resolver = FontResolver::new().map_err(|e| e.to_string())?;
+    fn new(base: romacs_font::instance::FontIdBase) -> Result<Self, String> {
+        let resolver = FontResolver::with_font_base(base).map_err(|e| e.to_string())?;
         let check = cfg!(test) || std::env::var_os("ROMACS_LAYOUT_CHECK").is_some_and(|v| v != "0");
         Ok(Store { retired: resolver.retired(), resolver, faces: faces::Faces::default(), cache: rows::Cache::default(), check, mismatches: 0 })
     }
@@ -186,7 +186,18 @@ impl Bars {
 }
 impl LayoutEngine {
     pub fn new() -> Result<Self, String> {
-        Ok(Self { store: Store::new()?, last: None })
+        Ok(Self { store: Store::new(romacs_font::instance::FontIdBase::MASTER)?, last: None })
+    }
+    /// An engine whose fonts intern from owner slot SLOT's base,
+    /// `(SLOT+1) << 24` (`FontIdBase::owner`): an owner VM's, whose frames
+    /// cross to the master as pane pictures.
+    ///
+    /// # Errors
+    ///
+    /// For a slot past the last, or as `new`.
+    pub fn with_font_base(slot: u8) -> Result<Self, String> {
+        let base = romacs_font::instance::FontIdBase::owner(slot).ok_or_else(|| format!("no owner font slot {slot}"))?;
+        Ok(Self { store: Store::new(base)?, last: None })
     }
     /// SNAPSHOT laid out at PRESENTATION. A frame that differs from the last
     /// one only in which cursors are off (GNU's blink, `internal-show-cursor`)

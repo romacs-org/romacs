@@ -14,6 +14,7 @@ use romacs_display_protocol::{
     ImageLoadAttempt, ImageLoadToken, ImageMaskPolicy,
     ImageRasterExtent, ImageRealization, ImageRotation, ImageSequenceId, ImageSizeSpec, ResolvedImageGeometry, RetainedImageSet,
 };
+use romacs_display_protocol::pane_picture::ImageIdSpace;
 #[cfg(test)]
 use romacs_display_protocol::{ImageNativeExtent, ImageSequenceRetirement};
 use std::cell::Cell;
@@ -368,7 +369,8 @@ impl ImageResidencyLifecycle {
 pub struct ImageCache {
     /// Budget accounting events since the last drain (texture create/free).
     accounting: Vec<crate::media_budget::MediaAccounting>,
-    /// Next image ID
+    /// How many image ids the renderer has allocated for itself (its
+    /// toolbar), in `ImageIdSpace::Renderer`.
     next_id: AtomicU32,
     /// Cached textures: id -> CachedImage
     textures: HashMap<ImageId, CachedImage>,
@@ -584,7 +586,7 @@ impl ImageCache {
         }
 
         Self {
-            next_id: AtomicU32::new(1),
+            next_id: AtomicU32::new(0),
             textures: HashMap::new(),
             states: HashMap::new(),
             loads: ImageLoadLifecycle::default(),
@@ -627,13 +629,13 @@ impl ImageCache {
     }
 
     fn allocate_image_id(&self) -> ImageId {
-        let raw = self
-            .next_id
+        self.next_id
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
                 current.checked_add(1)
             })
-            .expect("image identity space exhausted");
-        ImageId::new(raw)
+            .ok()
+            .and_then(|index| ImageIdSpace::Renderer.id(index))
+            .expect("image identity space exhausted")
     }
 
     /// Background decoder thread (pooled version)
