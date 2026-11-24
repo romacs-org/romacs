@@ -68,7 +68,7 @@ fn sqlite_load_extension(cx, db: Value, module: Value) -> Step {
 
 fn extension_expanded(cx: &mut Leaf<'_>, module: Value, saved: &[Value]) -> Next {
     let path = cx.string_text(module)?;
-    Ok(Step::Done(cx.sqlite_load_extension(saved[0], path.as_bytes())?))
+    cx.quittable(|cx| cx.sqlite_load_extension(saved[0], path.as_bytes())).map(Step::Done)
 }
 
 defsubr! { name = "sqlite-next", gnu = "sqlite.c:792", effect = Global,
