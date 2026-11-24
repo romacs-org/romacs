@@ -490,6 +490,35 @@ mod frame_tests {
         }
     }
 
+    /// A frame differing only in its status bar (the global mode line) or
+    /// its tab bar paints differently: a bar's text or face alone repaints.
+    #[test]
+    fn a_frame_band_alone_repaints() {
+        use romacs_layout_input::{StatusBarSnapshot, TabBarSnapshot, TextSlice};
+        let mut vm = romacs_vm::Vm::new();
+        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::startup::initialize(&mut vm).unwrap();
+        let painted = super::frame(&mut vm, false, 1200, 800).unwrap();
+        let text = |utf8: &str| TextSlice { extends: vec![], utf8: utf8.into(), face_runs: vec![], raw: vec![] };
+        let bar = |utf8: &str| Some(StatusBarSnapshot { x: 0, y: 760, width: 1200, height: 20, text: text(utf8),
+            face: Default::default(), faces: vec![], window: 1, focused: true, marks: Default::default() });
+        let tabs = |utf8: &str| Some(TabBarSnapshot { height: 20, text: text(utf8), face: Default::default(), faces: vec![] });
+        let mut base = (*painted.snapshot).clone();
+        (base.status_bar, base.tab_bar) = (bar(" main.rs  L1"), tabs("*scratch*"));
+        let changes: [fn(&mut romacs_layout_input::FrameSnapshot); 4] = [
+            |f| f.status_bar.as_mut().unwrap().text.utf8 = " main.rs  L2".into(),
+            |f| f.status_bar = None,
+            |f| f.tab_bar.as_mut().unwrap().text.utf8 = "*Messages*".into(),
+            |f| f.tab_bar = None,
+        ];
+        assert!(super::frames_alike(&base, &base.clone()));
+        for change in changes {
+            let mut other = base.clone();
+            change(&mut other);
+            assert!(!super::frames_alike(&base, &other));
+        }
+    }
+
     /// Selecting the buffer a window already shows resets its end, though its
     /// frame stays equal; keeping the paint must keep `window-end' too.
     #[test]
@@ -542,6 +571,8 @@ pub(crate) fn frames_alike(a: &romacs_layout_input::FrameSnapshot, b: &romacs_la
         && a.font_alternatives == b.font_alternatives && a.fontsets == b.fontsets && (a.width, a.height, a.background_alpha) == (b.width, b.height, b.background_alpha)
         && a.no_font == b.no_font
         && a.chrome == b.chrome
+        // The frame's own bands: the global mode line and the tab bar.
+        && a.status_bar == b.status_bar && a.tab_bar == b.tab_bar
         && windows_alike(&a.windows, &b.windows)
         && a.children.len() == b.children.len()
         && a.children.iter().zip(&b.children).all(|(a, b)| (a.id, a.x, a.y, a.width, a.height, a.border, a.border_color, a.background, a.background_alpha, a.radius)
