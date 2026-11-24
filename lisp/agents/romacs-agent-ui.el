@@ -363,16 +363,17 @@ foreground, as the tool's own card shows it."
           (romacs-agent-ui--children-changed session))))))
 
 (defun romacs-agent-ui--end-subagents (session next gone time)
-  "SESSION's turn ended at TIME: a subagent still running was cut, unless
-it runs on as a task, which only its harness's going (GONE) ends.  NEXT: a
-new turn starts, and last turn's failures have been seen."
+  "End SESSION's foreground workers at TIME, and background ones when GONE.
+When NEXT starts a new turn, discard the rows of finished workers."
   (when-let* ((table (romacs-agent-subagents session)))
-    (dolist (id (hash-table-keys table))
-      (let ((row (gethash id table)))
-        (cond (next (when (plist-get row :unseen) (puthash id (plist-put (copy-sequence row) :unseen nil) table)))
-              ((and (equal (plist-get row :state) "running") (or gone (not (plist-get row :task))))
-               (romacs-agent-ui--forget-task session row)
-               (puthash id (romacs-agent-ui--task-row row (list :state 'stopped :time time)) table)))))
+    (maphash (lambda (id row)
+               (let ((running (equal (plist-get row :state) "running")))
+                 (cond (next (unless running (remhash id table)))
+                       ((and running (or gone (not (plist-get row :task))))
+                        (romacs-agent-ui--forget-task session row)
+                        (puthash id (romacs-agent-ui--task-row row (list :state 'stopped :time time)) table)))))
+             table)
+    (when (zerop (hash-table-count table)) (setf (romacs-agent-subagents session) nil))
     (romacs-agent-ui--children-changed session)))
 
 (defconst romacs-agent-ui--state-statuses

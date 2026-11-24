@@ -2542,14 +2542,16 @@ keeps across runs (`:rolled-back', `:resume-at', `:renew-block', and
           ((not (eq exit :absent)) (list (list :type 'exit :status exit)))
           ((hash-table-p note) (romacs-agent--record-note-events note)))))
 
-(defun romacs-agent--apply-record-state (session state)
-  "Apply decoded STATE to SESSION's record bookkeeping."
+(defun romacs-agent--apply-record-state (session state parent)
+  "Apply decoded STATE to SESSION, from the tool PARENT when streaming."
   (cl-loop for (key value) on state by #'cddr
            do (pcase key
                 (:reply (setf (romacs-agent-reply session) value))
                 (:incoming (setf (romacs-agent-incoming session) value))
                 (:message (setf (romacs-agent-message session) value))
-                (:streamed (puthash value t (romacs-agent-streamed session)))
+                (:streamed
+                 (let ((streamed (romacs-agent-streamed session)))
+                   (puthash value (or parent (gethash value streamed) t) streamed)))
                 (:compacting (setf (romacs-agent-compacting session) value))
                 (:resume-at (setf (romacs-agent-driver-state session)
                                   (plist-put (romacs-agent-driver-state session) :resume-at value))))))
@@ -2569,10 +2571,23 @@ keeps across runs (`:rolled-back', `:resume-at', `:renew-block', and
     ('resume-fired (format "resumed on %s: its limit reset" (plist-get event :on)))
     ('resume-cancelled (format "will not resume by itself: %s" (plist-get event :why)))))
 
-(defun romacs-agent--apply-record-event (session event)
-  "Apply EVENT's bookkeeping to SESSION and return its public event, if any."
+(defun romacs-agent--retire-parser-ids (session gone)
+  "Forget SESSION's parser ids, except those of tasks still running unless GONE."
+  (let ((workers (romacs-agent-subagents session)))
+    (dolist (table (list (romacs-agent-streamed session) (romacs-agent-tools session)))
+      (if (or gone (null workers))
+          (clrhash table)
+        (maphash (lambda (id owner)
+                   (unless (or (plist-get (gethash id workers) :task)
+                               (plist-get (gethash owner workers) :task))
+                     (remhash id table)))
+                 table)))))
+
+(defun romacs-agent--apply-record-event (session event &optional next)
+  "Apply EVENT's bookkeeping and return its public event, if any.
+SESSION owns the bookkeeping.  NEXT names the parent of a streamed delta."
   (pcase (plist-get event :type)
-    ('record-state (romacs-agent--apply-record-state session (plist-get event :state)) nil)
+    ('record-state (romacs-agent--apply-record-state session (plist-get event :state) (plist-get next :parent)) nil)
     ('record-status (list :type 'status :text (romacs-agent--format-record-status event)))
     ('cwd (romacs-agent--apply-cwd-event session event))
     ('selection-ack
@@ -2600,13 +2615,16 @@ keeps across runs (`:rolled-back', `:resume-at', `:renew-block', and
      (when (eq (plist-get event :state) 'started)
        (puthash (plist-get event :id) (or (plist-get event :parent) t) (romacs-agent-tools session)))
      event)
+    ((or 'done 'exit)
+     (romacs-agent--retire-parser-ids session (eq (plist-get event :type) 'exit))
+     event)
     (_ event)))
 
 (defun romacs-agent--apply-record-events (session events)
   "Apply EVENTS' bookkeeping before notifying SESSION's observers.
 Return the public events in their original order."
-  (cl-loop for event in events
-           for public = (romacs-agent--apply-record-event session event)
+  (cl-loop for (event . rest) on events
+           for public = (romacs-agent--apply-record-event session event (car rest))
            when public collect public))
 
 (defun romacs-agent--deliver-record-events (session events seq time)
