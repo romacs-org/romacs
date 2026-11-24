@@ -239,6 +239,25 @@ mod tests {
     }
 
     #[test]
+    fn lowering_the_delay_keeps_the_next_unanswered_pings_deadline() {
+        let start = crate::host::monotonic();
+        let (short, long) = (Duration::from_millis(10), Duration::from_secs(1));
+        let mut ping = Ping::default();
+        let first = ping.went(start, long);
+        for ms in [5, 10, 15, 20] {
+            let now = at(start, ms);
+            assert!(ping.due_at(now, short, true).is_some_and(|due| due <= now));
+            ping.went(now, short);
+            ping.fold(now);
+        }
+        ping.answered(first);
+        assert!(
+            ping.wedged(at(start, 20)),
+            "ping 2 expired at 15 ms and is still unanswered after pong 1 at 20 ms"
+        );
+    }
+
+    #[test]
     fn looks_come_for_the_next_ping_or_the_wedge() {
         let (start, delay) = (crate::host::monotonic(), Duration::from_secs(1));
         let mut ping = Ping::default();
