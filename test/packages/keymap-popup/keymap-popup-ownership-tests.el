@@ -444,15 +444,60 @@
 
 (ert-deftest keymap-popup-ownership-deleted-window ()
   (keymap-popup-ownership--isolated
-    (keymap-popup (keymap-popup-ownership--map))
-    (let* ((buf (get-buffer keymap-popup--buffer-name))
-           (owned (get-buffer-window buf))
-           (ordinary (selected-window)))
-      (delete-window owned)
-      (switch-to-buffer buf)
-      (keymap-popup--refresh buf)
+    (let* ((ordinary (selected-window))
+           (exits nil)
+           (keymap-popup-exit-hook (list (lambda () (push (selected-window) exits)))))
+      (keymap-popup (keymap-popup-ownership--map))
+      (let* ((buf (get-buffer keymap-popup--buffer-name))
+             (owned (get-buffer-window buf)))
+        (delete-window owned)
+        (should-not (buffer-live-p buf))
+        (should (equal exits (list ordinary)))
+        (should (window-live-p ordinary))
+        (keymap-popup-ownership--clean-p)))))
+
+(defun keymap-popup-ownership--delete-frame (backend)
+  "Delete BACKEND's frame and check that it retires the session."
+  (keymap-popup-ownership--isolated
+    (let* ((keymap-popup-backend backend)
+           (exits nil)
+           (frame nil)
+           (keymap-popup-exit-hook (list (lambda () (push (frame-live-p frame) exits)))))
+      (keymap-popup (keymap-popup-ownership--map))
+      (let ((buf (get-buffer keymap-popup--buffer-name)))
+        (setq frame (keymap-popup--session-get buf :frame))
+        (should (frame-live-p frame))
+        (delete-frame frame t)
+        (should-not (buffer-live-p buf))
+        (should (equal exits '(nil)))
+        (keymap-popup-ownership--clean-p)))))
+
+(ert-deftest keymap-popup-ownership-deleted-frame-child ()
+  (skip-unless (display-graphic-p))
+  (keymap-popup-ownership--delete-frame #'keymap-popup-backend-child-frame))
+
+(ert-deftest keymap-popup-ownership-deleted-frame-layer ()
+  (skip-unless (and (display-graphic-p) (fboundp 'romacs-popup-show)))
+  (keymap-popup-ownership--delete-frame #'keymap-popup-backend-layer))
+
+(ert-deftest keymap-popup-ownership-exit-hook-opens-successor ()
+  (keymap-popup-ownership--isolated
+    (let* ((first (keymap-popup-ownership--map))
+           (successor (make-sparse-keymap))
+           (replacement (keymap-popup-ownership--map))
+           (keymap-popup-exit-hook
+            (list (lambda () (when successor
+                               (let ((map successor))
+                                 (setq successor nil)
+                                 (keymap-popup map)))))))
+      (keymap-set successor "z" #'ignore)
+      (keymap-popup-attach successor '("z" ("Successor" ignore)))
+      (keymap-popup first)
+      (keymap-popup replacement)
+      (should (eq (key-binding (kbd "z")) #'ignore))
+      (should-not (eq (key-binding (kbd "a")) #'ignore))
       (keymap-popup-dismiss)
-      (should (window-live-p ordinary)))))
+      (keymap-popup-ownership--clean-p))))
 
 (ert-deftest keymap-popup-ownership-graphical-cross-frame ()
   (skip-unless (display-graphic-p))

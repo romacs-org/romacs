@@ -140,8 +140,9 @@ keep it when ANSWER is non-nil and that buffer is current."
     (while child
       (romacs-gui--reset-new-normals child)
       (setq child (window-next-sibling child)))))
-(defun romacs-gui-split (horizontal)
-  (let* ((w (selected-window))
+(defun romacs-gui-split (horizontal &optional window)
+  "Split WINDOW, which defaults to the selected window, horizontally if HORIZONTAL."
+  (let* ((w (or window (selected-window)))
          (size (if horizontal (window-pixel-width w) (window-pixel-height w)))
          (half (/ size 2))
          (parent (window-parent w))
