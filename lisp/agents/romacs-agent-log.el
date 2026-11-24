@@ -1397,28 +1397,28 @@ on RET."
 
 (defun romacs-agent-log--doing (session)
   "What SESSION does now, as the separator says it: (STATE . WORDS).
-WORDS is nil when the working thread says it alone: busy or idle."
-  (pcase (cond ((romacs-agent-log--pending) 'waiting-approval)
-               ;; A plan offered waits on the user as a request does.
-               ((and (eq (romacs-agent-state session) 'idle) (not (romacs-agent-failed session))
-                     (romacs-agent-log--proceed-offered))
-                'plan-offered)
-               (t (romacs-agent-state session)))
-    ('plan-offered
-     (cons 'waiting (substitute-command-keys
-                     (concat (romacs-agent-glyph 'asks) " plan ready: \\<romacs-agent-log-mode-map>\\[romacs-agent-log-allow] proceeds, leaving plan mode · type to keep planning"))))
-    ('waiting-approval
-     (let ((question (when-let* ((ask (car (romacs-agent-log--pending))))
-                       (get-text-property (romacs-agent-log-ask-start ask) 'romacs-agent-log-questions))))
+This chat's own facts come first: a request it shows still pending, or
+a plan it offers, waits on the user, though the session's state may not
+say so yet (a remote mirror's row comes after its requests).  Else STATE
+is the session's own (`romacs-agent-doing').  WORDS is nil when the
+working thread says it alone: busy or idle."
+  (let ((state (romacs-agent-state session)) (pending (romacs-agent-log--pending)))
+    (pcase (if pending 'waiting (romacs-agent-doing session))
+      ('waiting
+       (let ((question (when-let* ((ask (car pending)))
+                         (get-text-property (romacs-agent-log-ask-start ask) 'romacs-agent-log-questions))))
+         (cons 'waiting (substitute-command-keys
+                         (concat (romacs-agent-glyph 'asks) " waits on you: \\<romacs-agent-log-mode-map>\\[romacs-agent-log-allow] "
+                                 (if question "choose" "allow") " · \\[romacs-agent-log-deny] "
+                                 (if question "decline" "deny") " · \\[romacs-agent-log-next-ask] goes to it")))))
+      ((and 'idle (guard (eq state 'idle)) (guard (romacs-agent-log--proceed-offered)))
        (cons 'waiting (substitute-command-keys
-                       (concat (romacs-agent-glyph 'asks) " waits on you: \\<romacs-agent-log-mode-map>\\[romacs-agent-log-allow] "
-                               (if question "choose" "allow") " · \\[romacs-agent-log-deny] "
-                               (if question "decline" "deny") " · \\[romacs-agent-log-next-ask] goes to it")))))
-    ;; Busy or idle, the thread's motion says; what runs, its row does.
-    ((or 'starting 'running) (cons 'working nil))
-    ;; A turn that failed and is not yet seen: said so, until the next.
-    ('idle (if (romacs-agent-failed session) (cons 'failed "failed") (cons 'idle nil)))
-    (state (cons 'idle (format "%s" state)))))
+                       (concat (romacs-agent-glyph 'asks) " plan ready: \\<romacs-agent-log-mode-map>\\[romacs-agent-log-allow] proceeds, leaving plan mode · type to keep planning"))))
+      ;; Busy or idle, the thread's motion says; what runs, its row does.
+      ('working (cons 'working nil))
+      ;; A turn that failed and is not yet seen: said so, until the next.
+      ('failed (cons 'failed "failed"))
+      (_ (cons 'idle (unless (eq state 'idle) (format "%s" state)))))))
 
 (defconst romacs-agent-log--thread-cols 8
   "Characters of the working thread that starts the separator.")
