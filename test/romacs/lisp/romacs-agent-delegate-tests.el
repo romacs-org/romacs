@@ -117,6 +117,13 @@ recorded in a private directory; `delivered' collects what wakes it."
     (let ((mark (expand-file-name (format "%s.owed" (romacs-agent-id a)) (romacs-agent--marks-dir))))
       (romacs-agent-delegate-tests--end a 5 "A done")
       (should (file-exists-p mark))
+      ;; A newer end answered on its own leaves the older one owed.
+      (setf (romacs-agent-state parent) 'running)
+      (romacs-agent--summary-stale (romacs-agent-id parent))
+      (romacs-agent-delegate-tests--end a 6 "[quiet] nothing more")
+      (should (file-exists-p mark))
+      (setf (romacs-agent-state parent) 'idle)
+      (romacs-agent--summary-stale (romacs-agent-id parent))
       (romacs-agent-tools--flush parent)
       (should delivered)
       (should-not (file-exists-p mark)))))

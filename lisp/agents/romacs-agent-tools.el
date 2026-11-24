@@ -476,14 +476,16 @@ parent's harness takes them in order."
   (when (> seq (romacs-agent-tools--woken session))
     (with-temp-file (romacs-agent-tools--woken-file session) (insert (number-to-string seq)))
     (puthash session seq romacs-agent-tools--woken-seqs)
-    (romacs-agent-tools--owed-paid session seq)
+    (romacs-agent-tools--owed-paid session)
     ;; Its summary says whether an end waits to be delivered.
     (romacs-agent--summary-stale (romacs-agent-id session))))
 
-(defun romacs-agent-tools--owed-paid (session seq)
-  "SESSION's ends through SEQ are its parent's: its newest among them, its
-`owed' mark goes (`romacs-agent-tools--hand-on')."
-  (when (>= seq (or (romacs-agent-done-seq session) 0))
+(defun romacs-agent-tools--owed-paid (session)
+  "SESSION's `owed' mark goes once none of its ends is still to be given
+to its parent (`romacs-agent-tools--hand-on'): a newer end answered
+leaves an older one still on its way marked."
+  (unless (or (gethash session romacs-agent-tools--held)
+              (cl-some (lambda (end) (romacs-agent-tools--wanted-p session (car end))) (romacs-agent-ends session)))
     (romacs-agent-mark (romacs-agent-id session) 'owed nil)))
 
 (defconst romacs-agent-tools--wake-limit 16000
@@ -721,9 +723,11 @@ read once from its `answered' file.")
 ends still on their way stay so.  UNWRITTEN: not kept yet, its caller
 writes it (`romacs-agent-tools--write-answered')."
   (puthash seq t (romacs-agent-tools--answered-table session))
-  (romacs-agent-tools--owed-paid session seq)
   (romacs-agent--summary-stale (romacs-agent-id session))
-  (unless unwritten (romacs-agent-tools--write-answered session seq)))
+  (unless unwritten
+    (romacs-agent-tools--write-answered session seq)
+    ;; Kept first: the mark goes only once a restart reads it answered.
+    (romacs-agent-tools--owed-paid session)))
 
 (defun romacs-agent-tools--answer (session seq &optional unwritten)
   "A `wait' answered with SESSION's turn end SEQ: marked so
@@ -1040,8 +1044,9 @@ its parent again."
 (add-hook 'romacs-agent-event-functions #'romacs-agent-tools--on-event)
 
 (defun romacs-agent-tools--delegate-gone (session event)
-  "SESSION, a delegated task, stopped, ended or was cancelled (EVENT): its
-parent's end held while it worked may go now (`romacs-agent-tools--release-held')."
+  "SESSION, a delegated task, stopped, ended or was cancelled (EVENT):
+its parent's end held while it worked may go now
+\(`romacs-agent-tools--release-held')."
   (when-let* (((memq (plist-get event :type) '(exit status)))
               (parent-id (plist-get (romacs-agent-options session) :parent))
               (parent (romacs-agent-loaded parent-id))
