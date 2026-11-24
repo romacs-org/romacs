@@ -1083,7 +1083,7 @@ mod leaf {
         }
         /// The registers of match group N, if it matched.
         pub(crate) fn match_group(&self, n: usize) -> Option<(usize, usize)> {
-            self.vm.regexp.groups.get(n).copied().flatten()
+            self.vm.mutator.regexp.groups.get(n).copied().flatten()
         }
         pub fn translate_match_data(&mut self, delta: i64) {
             self.vm.regexp_translate_match_data(delta);

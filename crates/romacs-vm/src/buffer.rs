@@ -816,7 +816,7 @@ impl Vm {
         let mut state = self.buffer_state(value)?.clone();
         // HOST(pure): the buffer's own state, not a process
         state.kill();
-        self.resolved_buffer = None;
+        self.mutator.resolved_buffer = None;
         *self.objects.entry_mut(index) = match &self.objects[index] {
             Object::ByteBuffer(_) => Object::ByteBuffer(Box::new(bytes::ByteBuffer::empty(state, retained))),
             Object::Buffer(b) => {
@@ -879,7 +879,7 @@ impl Vm {
     /// killed buffer signals. Resolved once per value of the slot.
     #[inline]
     pub(super) fn buffer_index(&mut self) -> Result<usize> {
-        if let Some((value, index)) = self.resolved_buffer
+        if let Some((value, index)) = self.mutator.resolved_buffer
             && value == self.slots[self.buffer_slot].value
         {
             #[cfg(any(test, debug_assertions))]
@@ -898,7 +898,7 @@ impl Vm {
         let v = self.slots[self.buffer_slot].value;
         self.require_live_buffer(v)?;
         let index = v.index(0)? - 1;
-        self.resolved_buffer = Some((v, index));
+        self.mutator.resolved_buffer = Some((v, index));
         Ok(index)
     }
     /// The record still says what resolving afresh would: a missed drop
@@ -911,7 +911,7 @@ impl Vm {
     }
     pub(super) fn ensure_buffer_writable(&mut self) -> Result<()> {
         self.buffer_index()?;
-        if self.change_prepared {
+        if self.mutator.change_prepared {
             return Ok(());
         }
         let read_only = self.slot("buffer-read-only");
