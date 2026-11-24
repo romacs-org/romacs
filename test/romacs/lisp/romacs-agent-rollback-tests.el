@@ -135,6 +135,15 @@ rolls back by the line (revert REQUEST)."
     (should (equal (file "a.txt") "two\n"))
     (should (equal (file "new.txt") "made\n"))))
 
+(ert-deftest romacs-agent-rollback-a-turn-with-no-end-checkpoint-asks-first ()
+  ;; Its end snapshot failed: what changed since its start may be the
+  ;; user's too, so it is restored only when asked (:force).
+  (cl-letf (((symbol-function 'romacs-agent-rollback--changed)
+             (lambda (_root from to) (and (equal from "start-tree") (equal to "now-tree") '("a.txt")))))
+    (let ((plan (romacs-agent-rollback--files '((20 start "start-tree" "/r")) '(20) "now-tree")))
+      (should (equal (plist-get plan :touched) '("a.txt")))
+      (should (equal (plist-get plan :clobbered) '("a.txt"))))))
+
 (ert-deftest romacs-agent-rollback-refusals ()
   (romacs-agent-rollback-tests--with (:state 'running)
     (romacs-agent-rollback-tests--journal session (romacs-agent-rollback-tests--prompt 3 "x"))
