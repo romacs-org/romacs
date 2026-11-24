@@ -1007,14 +1007,33 @@ impl Vm {
         let decoded = decode(&bytes)?;
         let length = bytes.len();
         drop(bytes);
+        self.attach_decoded(&decoded, length, backing).map_err(|(Taken::Full(e) | Taken::Malformed(e))| e)
+    }
+
+    /// What a frame's BACKING is taken as (O7m §4.2): a data graph
+    /// attached as a region, a code graph placed as private copies
+    /// (`code.rs`); a full region table, which a later take may find room
+    /// in; or malformed bytes, which no take ever reads.
+    pub(crate) fn take_backing(&mut self, backing: &Backing) -> std::result::Result<Value, Taken> {
+        let bytes = backing.bytes().map_err(|e| Taken::Malformed(e.to_string()))?;
+        if code::is_code(&bytes) {
+            return self.place_code(&Arc::new(bytes.into_owned())).map_err(Taken::Malformed);
+        }
+        let decoded = decode(&bytes).map_err(Taken::Malformed)?;
+        let length = bytes.len();
+        drop(bytes);
+        self.attach_decoded(&decoded, length, backing.clone())
+    }
+
+    fn attach_decoded(&mut self, decoded: &Decoded, length: usize, backing: Backing) -> std::result::Result<Value, Taken> {
         let Some(id) = self.region_free.pop().or_else(|| self.regions.grow()) else {
-            return Err(format!("Too many frozen regions {}", MAX_REGIONS - 1));
+            return Err(Taken::Full(format!("Too many frozen regions {}", MAX_REGIONS - 1)));
         };
         let place = Place::Region(id);
-        let symbols = self.resolve_symbols(&decoded);
-        let (conses, objects) = match self.place(&decoded, &|edge| place.value(edge, &symbols)) {
+        let symbols = self.resolve_symbols(decoded);
+        let (conses, objects) = match self.place(decoded, &|edge| place.value(edge, &symbols)) {
             Ok(placed) => placed,
-            Err(e) => { self.region_free.push(id); return Err(e); }
+            Err(e) => { self.region_free.push(id); return Err(Taken::Malformed(e)); }
         };
         let root = place.value(decoded.root, &symbols);
         self.regions.place(id, Box::new(Region { conses, objects, symbols, root, bytes: length, backing }));
@@ -1031,17 +1050,6 @@ impl Vm {
         }
         if self.region_count() >= COLLECT_AT { self.region_collect = true; }
         Ok(root)
-    }
-
-    /// What a frame's BACKING is taken as: a data graph attached as a
-    /// region, a code graph placed as private copies (`code.rs`).
-    pub(crate) fn take_backing(&mut self, backing: Backing) -> Result<Value> {
-        let bytes = backing.bytes().map_err(|e| e.to_string())?;
-        if code::is_code(&bytes) {
-            return self.place_code(&Arc::new(bytes.into_owned()));
-        }
-        drop(bytes);
-        self.attach(backing)
     }
 
     /// This VM's symbol for each of DECODED's descriptors: interned by
@@ -1129,9 +1137,13 @@ impl Vm {
         self.regions.get(id).and_then(|r| r.as_deref()).map_or(&[], |r| &r.symbols)
     }
 
-    /// The backing of a frozen value that is its region's root, for sending
-    /// without a second encoding.
+    /// The backing of a frozen value that is its region's root, or of a
+    /// frozen backing (`romacs--seed-build`), for sending without a second
+    /// encoding.
     pub(crate) fn frozen_backing(&self, v: Value) -> Option<Backing> {
+        if let Some(Object::Backing(backing)) = self.object_if(v) {
+            return Some(backing.clone());
+        }
         self.region(v).filter(|r| r.root == v).map(|r| r.backing.clone())
     }
 }
@@ -1166,6 +1178,14 @@ impl Vm {
         let f = self.functions.get(closure.function).ok_or("invalid function")?;
         Ok(if f.lazy.is_some() { "lazy" } else if f.pending.is_some() { "pending" } else if f.mapped_code.is_some() { "mapped" } else { "eager" })
     }
+}
+
+/// Why a frame's backing was not taken (`Vm::take_backing`).
+pub(crate) enum Taken {
+    /// Every region id is live: the frame waits for a later take.
+    Full(String),
+    /// The bytes are no value graph: the frame is spent.
+    Malformed(String),
 }
 
 /// Why a freeze, thaw or send did not happen.

@@ -396,6 +396,16 @@ impl Vm {
     /// collects: 1024 functions, or a quarter of the code installed, so that,
     /// as with objects (`gc_threshold`), the collections a load pays grow
     /// with what it adds rather than with what the heap already holds.
+    /// The request-owned functions alive, and the cache slots past the
+    /// image's they own: what placed code adds while it is held and gives
+    /// back once a collection finds it dropped.
+    pub(crate) fn request_code_counts(&self) -> (usize, usize) {
+        let code = &self.request_code;
+        let live = (0..self.functions.len()).filter(|&id| code.live[id] && !code.permanent[id]);
+        live.fold((0, 0), |(functions, caches), id| {
+            (functions + 1, caches + owned_caches(&self.functions[id]).filter(|&c| c >= code.image_caches).count())
+        })
+    }
     pub(super) fn code_collection_threshold(&self) -> usize {
         ((self.functions.len() - self.request_code.free.len()) / 4).max(1024)
     }

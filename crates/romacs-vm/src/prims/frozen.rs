@@ -47,3 +47,11 @@ defsubr! { name = "romacs--seed-build", gnu = "romacs:frozen", effect = Global,
 fn seed_build(cx, roots: Value, table: Value, limit: Value) {
     cx.seed_build(roots, table, limit)
 }}
+
+// The request-owned functions alive and the cache slots they own, as (FUNCTIONS CACHES): what
+// placed code (a seed's) adds while held and gives back once a collection finds it dropped.  For
+// tests and introspection.
+defsubr! { name = "romacs--request-code-counts", gnu = "romacs:frozen", effect = Reads,
+fn request_code_counts(cx) {
+    Ok(cx.request_code_counts())
+}}

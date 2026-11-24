@@ -13,6 +13,11 @@ impl Leaf<'_> {
         let limit = limit.as_integer().ok().and_then(|n| usize::try_from(n).ok()).ok_or_else(|| Fault::Wrong("natnump", limit))?;
         self.vm.seed_build(roots, table, limit).map_err(Fault::Error)
     }
+    pub(crate) fn request_code_counts(&mut self) -> Value {
+        let (functions, caches) = self.vm.request_code_counts();
+        let counts = [functions, caches].map(|n| Value::integer(i64::try_from(n).unwrap_or(i64::MAX)).unwrap_or(Value::NIL));
+        self.vm.list_value(&counts)
+    }
     pub(crate) fn frozen_p(&self, object: Value) -> bool {
         Vm::frozen(object)
     }
