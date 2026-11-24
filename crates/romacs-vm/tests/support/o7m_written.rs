@@ -3,7 +3,7 @@
 use romacs_vm::Vm;
 
 pub fn observed(vm: &mut Vm, form: &str) -> Result<String, String> {
-    vm.eval_source(form).and_then(|value| value.display())
+    vm.eval_source(form).and_then(romacs_vm::Local::display)
 }
 
 pub fn written(vm: &mut Vm, symbol: &str) -> Result<String, String> {
