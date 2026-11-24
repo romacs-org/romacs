@@ -139,18 +139,24 @@ onto the queue."
                (setq romacs--isolate-serving nil)))))))
 
 (defun romacs--isolate-run-queued ()
-  "Run the queued jobs in order, reading what arrived before each: a
-cancellation sent behind a job cancels it before it runs."
-  (while (and romacs--isolate-deferred romacs--isolate-serving
-              (not (romacs--isolate-terminated-p)))
-    ;; A signal nobody took (its job was in a leaf, or done) is stale.
-    (romacs--isolate-interrupted-p)
-    (romacs--isolate-wait 0)
-    (romacs--isolate-note-control-frames)
-    ;; A termination read with the frames starts no further job.
-    (unless (romacs--isolate-terminated-p)
-      (let ((frame (pop romacs--isolate-deferred)))
-        (romacs--isolate-run-job (nth 1 frame) (nth 2 frame))))))
+  "Run the jobs queued now in order, reading what arrived before each: a
+cancellation sent behind a job cancels it before it runs.  Jobs that
+arrive meanwhile wait for the next round, so a stream of calls holds an
+owner's process output back at most one round."
+  (romacs--isolate-wait 0)
+  (romacs--isolate-note-control-frames)
+  (let ((left (length romacs--isolate-deferred)))
+    (while (and (> left 0) romacs--isolate-deferred romacs--isolate-serving
+                (not (romacs--isolate-terminated-p)))
+      (setq left (1- left))
+      ;; A signal nobody took (its job was in a leaf, or done) is stale.
+      (romacs--isolate-interrupted-p)
+      (romacs--isolate-wait 0)
+      (romacs--isolate-note-control-frames)
+      ;; A termination read with the frames starts no further job.
+      (unless (romacs--isolate-terminated-p)
+        (let ((frame (pop romacs--isolate-deferred)))
+          (romacs--isolate-run-job (nth 1 frame) (nth 2 frame)))))))
 
 (defun romacs--isolate-serve-frames ()
   "Take every frame from the parent; run the queued jobs unless inside one."
@@ -174,7 +180,7 @@ job back more than one round."
     (romacs--isolate-interrupted-p)
     (romacs--isolate-run-forks)
     (romacs--isolate-run-queued)
-    (let ((timeout (and romacs--isolate-serving (not romacs--isolate-zygote) (romacs--isolate-run-between))))
+    (let ((timeout (and romacs--isolate-serving (not romacs--isolate-zygote) (romacs--isolate-run-turns))))
       ;; What a wait inside a job, a filter or a timer read and queued in
       ;; Rust while it answered pings: taken now, since no socket says so.
       (romacs--isolate-note-control-frames)
@@ -190,6 +196,16 @@ job back more than one round."
       (romacs--isolate-wait nil)
       (romacs--isolate-note-control-frames))))
 
+(defun romacs--isolate-run-turns ()
+  "`romacs--isolate-run-between' as a command loop runs a command: a quit
+or an error a filter, sentinel or timer lets out ends that turn, the
+error shown, never the loop.  Then 0: the loop looks again at once."
+  (condition-case err
+      (romacs--isolate-run-between)
+    ((quit error)
+     (unless (eq (car err) 'quit) (message "%s" (error-message-string err)))
+     0)))
+
 (defun romacs--isolate-run-between ()
   "What the loop runs between jobs: process output and sentinels, at most
 `owner-output-batch' calls of them (`romacs--process-dispatches'), then
@@ -204,13 +220,14 @@ wait: 0 while output may be left, else until the next timer, or nil."
 
 (defun romacs--isolate-run-output ()
   "Run process output and sentinels, at most `owner-output-batch' calls of
-them: non-nil if more may be left."
+them: non-nil if more may be left, output or status work a spent batch
+left (a reaped process's sentinel has no descriptor to wake the wait)."
   (let ((romacs--process-dispatches (romacs--owner-output-batch))
         (count 0) (more t))
     (while (and more (< count (romacs--owner-output-batch)) (not (romacs--process-spent-p))
                 (process-list) (not (romacs--isolate-terminated-p)))
       (setq more (romacs--process-idle) count (1+ count)))
-    (and more (> count 0))))
+    (or (romacs--process-spent-p) (romacs--proc-ticks-pending) (and more (> count 0)))))
 
 (defun romacs--isolate-run-forks ()
   "In a zygote: fork each child asked for.  In a child, return as a worker

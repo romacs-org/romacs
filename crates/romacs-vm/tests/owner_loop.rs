@@ -202,3 +202,157 @@ fn an_owner_whose_features_fail_to_load_is_refused() {
     assert_eq!(out, "(isolate-zygote-refused t refused isolate-zygote-refused isolate-zygote-refused)");
     eval(&mut vm, "(isolate-kill-all)");
 }
+
+/// A zygote still preparing, retired for another's room, forks the owner
+/// asked of it before it ends: the owner lives and runs its call.
+#[test]
+fn a_preparing_zygote_retired_keeps_the_owner_asked_of_it() {
+    let mut vm = vm();
+    let out = eval(&mut vm, "(let* ((isolate-zygote-limit 1) (a (owner--spawn)) (fa (owner-call a '+ 1 1))
+                                    (preparing (aref (gethash nil romacs--isolate-zygotes) 3)))
+                               (owner--spawn '(isolate))
+                               (list preparing (condition-case e (isolate-await fa 30) (isolate-error (car e))) (owner-state a)))");
+    assert_eq!(out, "(preparing 2 live)");
+    eval(&mut vm, "(isolate-kill-all)");
+}
+
+/// An idle owner runs every filter and sentinel a batch of one leaves
+/// behind, with nothing else to wake it: a reaped process's sentinel has
+/// no descriptor of its own.
+#[test]
+fn an_idle_owner_runs_the_sentinels_a_spent_batch_left() {
+    let mut vm = vm();
+    let out = eval(&mut vm, "(let* ((owner (owner--spawn)) (seen nil)
+                                    (isolate-message-functions (list (lambda (_ message) (push message seen))))
+                                    (end (+ (float-time) 15)))
+                               (isolate-await
+                                (owner-call owner '(lambda ()
+                                  (setq owner-output-batch 1)
+                                  (dotimes (i 4)
+                                    (make-process :name (format \"p%d\" i) :command '(\"/bin/sh\" \"-c\" \"printf x\")
+                                                  :connection-type 'pipe :noquery t
+                                                  :filter (lambda (p _) (isolate-send 'parent 'output))
+                                                  :sentinel (lambda (p _) (isolate-send 'parent 'sentinel))))
+                                  (let ((end (+ (float-time) 0.5))) (while (< (float-time) end) (romacs--isolate-wait 0.025)))
+                                  t))
+                                10)
+                               (while (and (< (length seen) 8) (< (float-time) end)) (romacs--isolate-pump 0.05))
+                               (list (length seen) (let ((n 0)) (dolist (m seen n) (when (eq m 'sentinel) (setq n (1+ n)))))))");
+    assert_eq!(out, "(8 4)");
+    eval(&mut vm, "(isolate-kill-all)");
+}
+
+/// A batch of one that a status notification spent runs no connection
+/// sentinel in the same pass.
+#[test]
+fn a_spent_batch_ends_its_pass_before_select() {
+    let mut vm = vm();
+    let out = eval(&mut vm, "(let* ((server (make-network-process :name \"server\" :server t :host \"127.0.0.1\" :service t
+                                                                  :family 'ipv4 :noquery t))
+                                    (port (process-contact server :service))
+                                    (owner (owner--spawn)))
+                               (prog1
+                                   (isolate-await
+                                    (owner-call owner '(lambda (port)
+                                      (defvar observed nil)
+                                      (make-process :name \"child\" :command '(\"/bin/sh\" \"-c\" \"printf x\")
+                                                    :connection-type 'pipe :noquery t
+                                                    :filter (lambda (_ _) (push 'child-output observed))
+                                                    :sentinel (lambda (_ _) (push 'child-end observed)))
+                                      (let ((end (+ (float-time) 0.2))) (while (< (float-time) end) (romacs--isolate-wait 0.01)))
+                                      (romacs--proc-select nil nil 0 nil)
+                                      (make-network-process :name \"client\" :host \"127.0.0.1\" :service port :family 'ipv4
+                                                            :nowait t :noquery t :sentinel (lambda (_ _) (push 'connected observed)))
+                                      (let ((owner-output-batch 1)) (romacs--isolate-run-between))
+                                      (length observed))
+                                                port)
+                                    10)
+                                 (delete-process server)))");
+    assert_eq!(out, "1");
+    eval(&mut vm, "(isolate-kill-all)");
+}
+
+/// A refusal whose callback signals still settles every owner asked of
+/// the zygote, and ends the zygote.
+#[test]
+fn a_refusal_callback_that_signals_strands_no_owner() {
+    let mut vm = vm();
+    let out = eval(&mut vm, "(let* ((require '(owner-test-absent-feature))
+                                    (a (owner--spawn require)) (fa (owner-call a '+ 1 1))
+                                    (b (owner--spawn require)) (fb (owner-call b '+ 2 2))
+                                    (zygote (aref (gethash require romacs--isolate-zygotes) 1)))
+                               (isolate-on-done fb (lambda (f) (isolate-await f)))
+                               (let ((end (+ (float-time) 15)))
+                                 (while (and (or (eq (aref fa 3) 'pending) (eq (aref fb 3) 'pending)) (< (float-time) end))
+                                   (condition-case nil (romacs--isolate-pump 0.05) (isolate-error nil))))
+                               (list (owner-state a) (aref fa 3) (owner-state b) (aref fb 3) (isolate-live-p zygote)))");
+    assert_eq!(out, "(refused error refused error nil)");
+    eval(&mut vm, "(isolate-kill-all)");
+}
+
+/// The wedge delay and the batch take their defaults when set out of
+/// range, a tiny positive delay too.
+#[test]
+fn owner_options_out_of_range_act_as_their_defaults() {
+    let mut vm = vm();
+    let out = eval(&mut vm, "(list (let ((owner-wedge-delay 1e-100)) (romacs--owner-wedge-delay))
+                                   (let ((owner-wedge-delay 0.0e+NaN)) (romacs--owner-wedge-delay))
+                                   (let ((owner-wedge-delay 0.01)) (romacs--owner-wedge-delay))
+                                   (let ((owner-output-batch 0)) (romacs--owner-output-batch)))");
+    assert_eq!(out, "(1.0 1.0 0.01 16)");
+}
+
+/// Killing a job child its zygote has not reported yet waits for nothing
+/// and spares the zygote and its owners.
+#[test]
+fn killing_an_unforked_job_child_spares_its_zygote_and_owners() {
+    let mut vm = vm();
+    let out = eval(&mut vm, "(let* ((owner (owner--spawn)) (record (gethash nil romacs--isolate-zygotes))
+                                    (id (romacs--isolate-id (aref record 1))))
+                               (isolate-await (owner-call owner '+ 1 1) 60)
+                               (romacs--isolate-signal id 19)
+                               (let ((killed (unwind-protect
+                                                 (let* ((child (romacs--isolate-zygote-fork record))
+                                                        (f (romacs--isolate-submit child '+ '(2 3) nil nil nil))
+                                                        (start (float-time)))
+                                                   (isolate-kill child)
+                                                   (list (< (- (float-time) start) 0.5)
+                                                         (condition-case e (isolate-await f 1) (isolate-killed (car e)))))
+                                               (romacs--isolate-signal id 18))))
+                                 (list killed (isolate-await (owner-call owner '+ 2 2) 10) (owner-state owner))))");
+    assert_eq!(out, "((t isolate-killed) 4 live)");
+    eval(&mut vm, "(isolate-kill-all)");
+}
+
+/// A quit or an error a filter or sentinel lets out between calls ends
+/// that turn, never the owner.
+#[test]
+fn a_quit_in_a_filter_between_calls_spares_the_owner() {
+    let mut vm = vm();
+    let out = eval(&mut vm, "(let ((owner (owner--spawn)))
+                               (isolate-await (owner-call owner '(lambda ()
+                                                (make-process :name \"q\" :command '(\"/bin/sh\" \"-c\" \"printf x\")
+                                                              :connection-type 'pipe :noquery t
+                                                              :filter (lambda (_ _) (signal 'quit nil))
+                                                              :sentinel (lambda (_ _) (signal 'quit nil)))
+                                                t))
+                                              10)
+                               (dotimes (_ 10) (romacs--isolate-pump 0.05))
+                               (list (isolate-await (owner-call owner '+ 2 2) 10) (owner-state owner)))");
+    assert_eq!(out, "(4 live)");
+    eval(&mut vm, "(isolate-kill-all)");
+}
+
+/// Owners count against `isolate-process-limit` among themselves, never
+/// against the pool's room: owners at the limit leave pooled jobs running.
+#[test]
+fn owners_at_the_process_limit_leave_pooled_jobs_room() {
+    let mut vm = vm();
+    let out = eval(&mut vm, "(let ((isolate-process-limit 4) (owners 0) (refused nil))
+                               (while (and (not refused) (< owners 10))
+                                 (condition-case nil (progn (owner--spawn) (setq owners (1+ owners)))
+                                   (isolate-process-limit (setq refused t))))
+                               (list refused (> owners 0) (isolate-await (isolate-spawn '+ 1 2) 30)))");
+    assert_eq!(out, "(t t 3)");
+    eval(&mut vm, "(isolate-kill-all)");
+}

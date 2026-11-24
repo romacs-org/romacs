@@ -954,19 +954,28 @@ runs its sentinel."
     (romacs--proc-ticks-acknowledge)
     (dolist (proc (process-list))
       (if (and (not held) (romacs--proc-changed proc))
-          (let ((more t))
-            (while (and more
-                        (not (romacs--process-spent-p))
-                        (not (eq (process-filter proc) t))
-                        (not (romacs--connecting-p proc))
-                        (not (eq (romacs--proc-get proc 'status) 'listen))
-                        (not (eq (process-command proc) t))
-                        (romacs--proc-get proc 'infd)
-                        (not (eq proc deleting)))
-              (let ((nread (romacs--read-process-output proc)))
-                (if (and (or (null wait-proc) (eq wait-proc proc)) (< got nread))
-                    (setq got nread))
-                (if (<= nread 0) (setq more nil))))
+          (let ((more t) (drained nil))
+            (unwind-protect
+                (progn
+                  (while (and more
+                              (not (romacs--process-spent-p))
+                              (not (eq (process-filter proc) t))
+                              (not (romacs--connecting-p proc))
+                              (not (eq (romacs--proc-get proc 'status) 'listen))
+                              (not (eq (process-command proc) t))
+                              (romacs--proc-get proc 'infd)
+                              (not (eq proc deleting)))
+                    (let ((nread (romacs--read-process-output proc)))
+                      (if (and (or (null wait-proc) (eq wait-proc proc)) (< got nread))
+                          (setq got nread))
+                      (if (<= nread 0) (setq more nil))))
+                  (setq drained t))
+              ;; A bounded pass (a worker's loop, which serves on after a
+              ;; filter's quit) keeps the status of a process whose filter
+              ;; exited pending: its sentinel has not run.  GNU loses it,
+              ;; as the master does.
+              (when (and (not drained) romacs--process-dispatches)
+                (romacs--proc-tick proc)))
             (if (romacs--process-spent-p)
                 (progn (romacs--proc-tick proc) (setq held t))
               (romacs--exec-sentinel proc (romacs--proc-status-finish proc))))))
@@ -1101,7 +1110,8 @@ reader sees what the timer changed.  Return GNU's got_some_output."
                           (if (< got-some-output nread) (setq got-some-output nread))
                           (if (= nread 0) (setq more nil)))))))
               (setq done t)))
-        (if (not done)
+        ;; With no filter or sentinel call left, the pass ends before select.
+        (if (not (or done (and (romacs--process-spent-p) (setq done t))))
             (progn
               (if (and (> got-some-output 0) (> timeout 0.01))
                   (setq timeout 0.01))
@@ -1136,8 +1146,7 @@ reader sees what the timer changed.  Return GNU's got_some_output."
                   (apply #'romacs--tls-finished (cdr ready)))
                  ((eq (romacs--proc-get ready 'status) 'listen)
                   (romacs--server-accept-connection ready))
-                 ;; With no call left, its output waits for the next round.
-                 ((not (romacs--process-spent-p))
+                 (t
                   (let ((nread (romacs--read-process-output ready t)))
                     (if (and (or (null wait-proc) (eq wait-proc ready))
                              (< got-some-output nread))

@@ -624,7 +624,7 @@ Leaving \"Default\" unchecked is equivalent with specifying a default of
              ;; lisp/vm/owner.el
              (owner-wedge-delay processes
                                 (number :match ,(lambda (_widget value)
-                                                  (and (numberp value) (< 0 value 1e6)))))
+                                                  (and (numberp value) (<= 0.01 value) (< value 1e6)))))
              (owner-output-batch processes
                                  (integer :match ,(lambda (_widget value)
                                                     (and (integerp value) (> value 0)))))

@@ -318,8 +318,8 @@ pub(crate) struct Worker {
     reported: Option<i32>,
     /// Its liveness, once it serves as an owner (`crate::owner`).
     pub(crate) ping: crate::owner::Ping,
-    /// The last signal asked of it before its zygote reported it, sent
-    /// once the report comes (`Vm::isolate_signal`).
+    /// The strongest signal asked of it before its zygote reported it,
+    /// sent once the report comes (`Vm::isolate_signal`).
     held: Option<i32>,
 }
 
@@ -977,14 +977,16 @@ impl Vm {
         Ok(self.list_value(&[kind, generation, value]))
     }
 
-    /// Send worker ID SIGNAL. One its zygote has not reported yet holds it,
-    /// the last asked, until the report (`apply_fork_reports`): its zygote
-    /// releases it then, so a kill asked before still lands.
+    /// Send worker ID SIGNAL. One its zygote has not reported yet holds it
+    /// until the report (`apply_fork_reports`), the strongest asked (SIGKILL
+    /// over SIGTERM over the rest): its zygote releases it then, so a kill
+    /// asked before still lands.
     pub(crate) fn isolate_signal(&mut self, id: u64, signal: i32) -> Result<()> {
+        let strength = |signal: i32| match signal { libc::SIGKILL => 2, libc::SIGTERM => 1, _ => 0 };
         let worker = self.isolates.workers.get_mut(&id).ok_or_else(|| format!("no isolate {id}"))?;
         if worker.status.is_some() { return Ok(()); }
         if worker.pid == 0 {
-            worker.held = Some(signal);
+            worker.held = Some(worker.held.filter(|&held| strength(held) > strength(signal)).unwrap_or(signal));
             return Ok(());
         }
         worker.signal(signal).map_err(|e| e.to_string())

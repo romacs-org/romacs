@@ -9,11 +9,13 @@ their liveness (the ping) and an owner's own flag.
   pings to it and to `crates/romacs-vm/src/quit.rs` (`poll_answering`).
 - Lifecycle, calls, state and the options are Lisp's:
   `lisp/vm/owner.el`, `lisp/vm/isolate.el`, and the loop in
-  `lisp/vm/isolate-worker.el`.
+  `lisp/vm/isolate-worker.el`. Every change to an isolate's life goes
+  through one pure transition and its edge,
+  `lisp/vm/isolate-lifecycle.el`.
 
 ## Contracts
-- Wedged means the oldest unanswered ping is `owner-wedge-delay` old,
-  nothing else. Pings go every half the delay while a call is outstanding
+- Wedged means the oldest unanswered ping is past its deadline, the
+  `owner-wedge-delay` it went under, nothing else. Pings go every half the delay while a call is outstanding
   or a ping is unanswered, so a lost ping or pong heals at the next; a
   pong answers its ping and every earlier one, and one for a ping never
   sent is no news.
@@ -28,6 +30,13 @@ their liveness (the ping) and an owner's own flag.
 - An interrupt's deadline kills no owner.
 - An owner never serves without the features it was asked for: its
   zygote's failed preparation refuses it (`romacs--isolate-unprepared`).
+- Owners count against `isolate-process-limit` when one is asked for; the
+  pool's admission, its count and its room coming alike, leaves them out
+  (`romacs--isolate-counted-p`), and no worker is ended to make an owner room.
+- No callback or `isolate-error-functions` runs before every isolate a
+  transition touched holds its next state: shutdown kills every owner first.
+- A quit or error a filter, sentinel or timer lets out between calls ends
+  that turn, never the owner (`romacs--isolate-run-turns`).
 
 ## Tests
 - `python3 tools/dev-loop romacs-vm --profile gate -E 'test(/owner|isolate|quit_reach/)'`

@@ -33,16 +33,18 @@ one unanswered.")
 A call queued behind a stream of output waits at most this many.")
 
 (defun romacs--owner-wedge-delay ()
-  "`owner-wedge-delay' when it is a positive number of seconds under a
-million, else its default, 1.0: an option set wrong never stops a pump."
-  (if (and (numberp owner-wedge-delay) (< 0 owner-wedge-delay 1e6)) owner-wedge-delay 1.0))
+  "`owner-wedge-delay' when it is a number of seconds from 0.01 to under
+a million, else its default, 1.0: an option set wrong never stops a pump."
+  (if (and (numberp owner-wedge-delay) (<= 0.01 owner-wedge-delay) (< owner-wedge-delay 1e6))
+      owner-wedge-delay
+    1.0))
 
 (defun romacs--owner-output-batch ()
   "`owner-output-batch' when it is a positive integer, else its default, 16."
   (if (and (integerp owner-output-batch) (> owner-output-batch 0)) owner-output-batch 16))
 
 ;; A call settled by its owner's kill: its outcome is unknown, it may
-;; have run (ownership design O1 §2.2).  Data: (ISOLATE).
+;; have run (ownership design O1 §2.2).  Data: (ISOLATE nil).
 (define-error 'owner-killed "Owner killed" 'isolate-killed)
 
 ;; An owner's start found features it was asked for absent.  Data:
@@ -50,9 +52,14 @@ million, else its default, 1.0: an option set wrong never stops a pump."
 (define-error 'owner-unprepared "Owner lacks the features it was started with" 'isolate-error)
 
 ;; An owner: [owner ISOLATE START], START the future of its `owner--start'.
+;; The record is the owner's identity; ISOLATE and START are its current
+;; incarnation (process, zygote, calls, ping), whose life
+;; `romacs--isolate-transition' runs.  An incarnation's death is final;
+;; the owner's need not be: a later recovery moves the record onto a new
+;; incarnation.
 (defun owner-p (object) "Non-nil for an owner." (eq (type-of object) 'owner))
 (defun owner--isolate (owner) "OWNER's isolate, in the role `owner'." (aref owner 1))
-(defun owner--start-future (owner) (aref owner 2))
+(defun owner--start-future (owner) "The future of OWNER's `owner--start'." (aref owner 2))
 
 (defun owner--spawn (&optional require)
   "Start an owner prepared with REQUIRE's features: a child of their
@@ -67,7 +74,11 @@ process; `isolate-zygote-refused' when REQUIRE's zygote was refused."
     (cond ((null zygote)
            (signal 'isolate-process-limit (list (length romacs--isolates) (isolate--process-limit))))
           ((eq (aref zygote 3) 'refused)
-           (signal 'isolate-zygote-refused (list (aref zygote 6)))))
+           (signal 'isolate-zygote-refused (list (aref zygote 6))))
+          ;; Owners count against `isolate-process-limit' among themselves
+          ;; and the pool's processes; the pool's own room leaves them out.
+          ((not (romacs--isolate-admit-p 'owner require))
+           (signal 'isolate-process-limit (list (length romacs--isolates) (isolate--process-limit)))))
     (let* ((isolate (romacs--isolate-zygote-child zygote))
            (start (progn (aset isolate 10 'owner)
                          (romacs--isolate-submit isolate 'owner--start (list require) nil nil nil)))
@@ -144,20 +155,6 @@ another look, or nil."
   "A call to owner ISOLATE went: ping it now, and look again when due."
   (let ((look (romacs--owner-watch isolate)))
     (when look (romacs--isolate-wake-at (+ (float-time) look)))))
-
-(defun romacs--owner-kill (isolate)
-  "End owner ISOLATE without waiting for it (`isolate-kill'): SIGTERM now,
-SIGKILL `isolate-kill-timeout' later (`romacs--isolate-check-deadlines').
-Its calls settle with `owner-killed' now, and `isolate-error-functions'
-hears it; its death, delivered at a later wait point, is no news then.
-One its zygote has not reported yet gets the last of the signals once it
-is (`romacs--isolate-signal').  Nil."
-  (condition-case nil (romacs--isolate-signal (romacs--isolate-id isolate) 15) (error nil))
-  (romacs--isolate-mark-ending isolate)
-  (setcdr (aref isolate 13) 15)
-  (unwind-protect (romacs--isolate-settle isolate 'owner-killed (list isolate))
-    (run-hook-with-args 'isolate-error-functions isolate 'owner-killed (list nil nil)))
-  nil)
 
 ;;;; The owner's side
 

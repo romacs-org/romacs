@@ -261,15 +261,15 @@ fn owner_become(cx) {
 // DELAY seconds (`owner-wedge-delay'), its next ping sent if one is due,
 // BUSY saying a call to it is outstanding: (WEDGED NEXT SENT ANSWERED),
 // NEXT the seconds until it needs another look, or nil. A DELAY that is
-// no positive number of seconds under a million is an error.
+// no number of seconds from 0.01 to under a million is `args-out-of-range'.
 defsubr! { name = "romacs--owner-ping", gnu = "romacs:owner", effect = Global,
 fn owner_ping(cx, isolate: Value, delay: Value, busy: Value) {
     let seconds = match delay.integer_value() {
         Some(seconds) => i32::try_from(seconds).map_or(f64::INFINITY, f64::from),
         None => cx.float_value(delay).map_err(|_| Fault::Wrong("numberp", delay))?,
     };
-    if !(seconds > 0.0 && seconds < 1e6) {
-        return Err(Fault::Error(format!("Owner wedge delay must be positive seconds under a million: {seconds}")));
+    if !(0.01..1e6).contains(&seconds) {
+        return Err(Fault::Range3(delay, cx.float(0.01), cx.float(1e6)));
     }
     cx.owner_ping(id(cx, isolate)?, std::time::Duration::from_secs_f64(seconds), busy != Value::NIL)
 }}
