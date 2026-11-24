@@ -83,3 +83,26 @@ fn layers_follow_the_selected_top_level_frame() {
                   (progn (select-frame F) (romacs--minibuffer-host))))"), "(t nil t nil)");
     });
 }
+
+#[test]
+fn windmove_down_ignores_the_inactive_hosted_minibuffer() {
+    on_loadup(|vm| {
+        vm.eval_source("(require 'romacs-complete)").unwrap();
+        assert_eq!(printed(vm, r#"(progn
+          (require 'windmove)
+          (let* ((chat (selected-window))
+                 (other (split-window-right))
+                 (composer (split-window-below))
+                 (windmove-wrap-around nil))
+            (set-window-buffer other (get-buffer-create " *other*"))
+            (set-window-buffer chat (get-buffer-create " *chat*"))
+            (set-window-buffer composer (get-buffer-create " *composer*"))
+            (when (fboundp 'romacs-complete--frame)
+              (let ((host (romacs-complete--frame)))
+                (set-frame-position host 0 (+ (window-pixel-top chat) (frame-char-height)))
+                (set-frame-size host (window-pixel-width chat) (* 3 (frame-char-height)) t)))
+            (select-window chat)
+            (windmove-down -1)
+            (eq (selected-window) composer)))"#), "t");
+    });
+}

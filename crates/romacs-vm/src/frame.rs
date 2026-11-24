@@ -840,10 +840,10 @@ impl crate::window::Windows<'_> {
         self.vm.host_minibuffer(root, host).map_err(internal)?;
         Ok(frame)
     }
-    /// `romacs--minibuffer-host': the child frame hosting the selected
-    /// frame's minibuffer window, or nil.
-    pub(crate) fn minibuffer_host(&mut self) -> Out {
-        Ok(self.vm.minibuffer_host(self.vm.selected_top_frame()).unwrap_or(Value::NIL))
+    /// The child frame hosting FRAME's top-level minibuffer, or nil.
+    pub(crate) fn minibuffer_host(&mut self, frame: Value) -> Out {
+        let frame = self.decode_live_frame(frame)?;
+        Ok(self.vm.minibuffer_host(self.vm.top_frame(frame)).unwrap_or(Value::NIL))
     }
     /// Whether FRAME (nil, the selected one) is a live child frame.
     pub(crate) fn is_child_frame(&mut self, frame: Value) -> std::result::Result<bool, Fault> {

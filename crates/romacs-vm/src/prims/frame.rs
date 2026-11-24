@@ -566,11 +566,10 @@ defsubr! { name = "romacs--status-bar-text", gnu = "romacs:frame", effect = Read
 fn romacs_status_bar_text(cx) {
     cx.windows().status_bar_text()
 }}
-// The live child frame of the selected frame's top-level frame that hosts its
-// minibuffer window, or nil when the minibuffer is not hosted in one.
+// The live child frame hosting FRAME's top-level minibuffer, if any.
 defsubr! { name = "romacs--minibuffer-host", gnu = "romacs:frame", effect = Reads,
-fn romacs_minibuffer_host(cx) {
-    cx.windows().minibuffer_host()
+fn romacs_minibuffer_host(cx; optional frame: Value) {
+    cx.windows().minibuffer_host(frame)
 }}
 
 // frame.c Fdelete_frame: delete_frame's checks, hooks and deletion.
