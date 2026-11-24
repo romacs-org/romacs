@@ -150,3 +150,47 @@ impl FontInstanceInterner {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{FontIdBase, FontInstanceInterner, FontInstanceProperties, OWNER_SLOT_SPAN};
+    use romacs_display_protocol::font::{
+        FontFileAsset, FontOutlineAsset, FontReplay, FontSlantKind, FontUnderline,
+        ResolvedFontAdvance, ResolvedFontId, ResolvedFontIdentity,
+    };
+
+    #[test]
+    #[should_panic(expected = "resolved font ID space exhausted")]
+    fn interning_refuses_to_reach_the_first_owner_slot() {
+        // Use only the last master id so the next allocation hits the real boundary.
+        let last_master_id = OWNER_SLOT_SPAN - 1;
+        let mut interner = FontInstanceInterner::with_base(FontIdBase {
+            first: last_master_id,
+            count: 1,
+        });
+        let mut intern = |file: &str| {
+            let identity = ResolvedFontIdentity::from_file(file, 0, None);
+            let asset = FontFileAsset::new(file, 0).unwrap();
+            interner.intern(
+                identity,
+                FontReplay::Swash { asset: FontOutlineAsset::File(asset) },
+                14.0,
+                || FontInstanceProperties {
+                    family: "Test".into(),
+                    full_name: None,
+                    postscript_name: None,
+                    weight: 400,
+                    slant: FontSlantKind::Normal,
+                    width: 5,
+                    ascent_px: 11.0,
+                    descent_px: 3.0,
+                    space_advance_px: 8.0,
+                    glyph_advance: ResolvedFontAdvance::default(),
+                    underline: FontUnderline::default(),
+                },
+            )
+        };
+        assert_eq!(intern("/fonts/a.ttf").id, ResolvedFontId(last_master_id));
+        intern("/fonts/b.ttf");
+    }
+}
