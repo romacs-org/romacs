@@ -155,7 +155,7 @@
     "  Failed claude · reported one"
     "  Ended claude · reported one"
     "  Idle claude · reported one"
-    "  Idle claude · reported one"
+    "  Completed claude · reported one"
     "  Idle claude · reported one"
     "  Idle claude · reported one"
     "  Working codex · remote project"))

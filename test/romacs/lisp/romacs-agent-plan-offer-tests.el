@@ -216,7 +216,7 @@
              (list (lambda (owner event) (romacs-agent-log--draw-live owner event)))))
         (romacs-agent-plan-offer-tests--offer session 41))
       (should (string-match-p "plan ready: .*proceeds, leaving plan mode · type to keep planning" (buffer-string)))
-      (should (string-match-p "Needs approval.*1 waits on you" header-line-format)))))
+      (should (string-match-p "Asks you.*1 waits on you" header-line-format)))))
 
 (provide 'romacs-agent-plan-offer-tests)
 ;;; romacs-agent-plan-offer-tests.el ends here

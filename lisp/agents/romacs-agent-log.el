@@ -68,7 +68,7 @@
 (declare-function romacs-agent-log-faces-end "romacs-agent-log-faces" (start at))
 (declare-function romacs-agent-ask-open "romacs-agent-ask" (session id questions &optional place))
 (declare-function romacs-agent-ui--header-text "romacs-agent-ui" (inputs))
-(declare-function romacs-agent-ui--header-inputs "romacs-agent-ui" (session))
+(declare-function romacs-agent-ui--header-inputs "romacs-agent-ui" (session &optional summary))
 (declare-function romacs-agents "romacs-agent-board" ())
 (declare-function romacs-agent-board-open-threads "romacs-agent-board" (session))
 (declare-function romacs-agent-ui--summarize-children "romacs-agent-ui" (session))
@@ -170,6 +170,9 @@ that extend alone: the rule's colour is inherited, not merged.")
 ;;; State
 
 (defvar-local romacs-agent-log--session nil "The session this chat shows.")
+(defvar-local romacs-agent-log--session-id nil
+  "The id of the session this chat shows: what its views read of it is
+its summary (`romacs-agent-log--summary').")
 (defvar-local romacs-agent-log--end nil
   "Marker: the transcript's end, where the next event goes.")
 (defvar-local romacs-agent-log--divider nil
@@ -424,6 +427,12 @@ policy, as SOURCE has it: no other source's requests."
 and the others of the chat's menu) act on SOURCE's sessions."
   nil)
 
+(defun romacs-agent-log--summary ()
+  "The summary of the session this chat shows (`romacs-agent-summary'), as
+its source says it, or nil."
+  (and romacs-agent-log--session-id
+       (romacs-agent-summary romacs-agent-log--session-id romacs-agent-log--source)))
+
 (cl-defgeneric romacs-agent-log-source-restorable-p (_source)
   "Whether a chat of SOURCE's is saved with the desktop and restored
 \(`romacs-agent-log-desktop-restore'): it is not, as of no source here."
@@ -433,7 +442,7 @@ and the others of the chat's menu) act on SOURCE's sessions."
   "Make SESSION the current chat's, named by its title; the session this
 editor's session commands act on (`romacs-agent-ui--session'), when they
 act on its source's."
-  (setq romacs-agent-log--session session)
+  (setq romacs-agent-log--session session romacs-agent-log--session-id (romacs-agent-id session))
   (setq-local romacs-agent-ui--session (and (romacs-agent-log--commands-p) session))
   (let ((name (romacs-agent-log--buffer-name session)))
     (unless (equal (buffer-name) name) (rename-buffer name t)))
@@ -1231,40 +1240,43 @@ why it failed; what it cost RET on it shows, never the rule."
 (defun romacs-agent-log--note (event text)
   (romacs-agent-log--line event 'note (concat "· " text) 'romacs-agent-log-note))
 
-(defun romacs-agent-log--offers-proceed-p (session event)
-  "Whether plan EVENT of SESSION is offered to proceed with by leaving plan
-mode: its driver marks it :proceed (its plan is no request), SESSION is
-in plan mode, and the plan is live, not replayed."
-  (and (plist-get event :proceed) (plist-get (romacs-agent-options session) :plan)
-       (not romacs-agent-log--replaying)))
+(defvar-local romacs-agent-log--offered nil
+  "The seq of the plan whose row this chat drew taking y, or nil.")
 
-(defun romacs-agent-log--retire-proceed ()
-  "The plan offered to proceed with is no more: its text offers nothing."
+(defun romacs-agent-log--retire-offer ()
+  "The plan row drawn taking y offers nothing more: its keys are the
+transcript's again, as any other row's."
   (save-restriction
     (widen)
-    (when-let* ((at (text-property-any (point-min) romacs-agent-log--end 'romacs-agent-log-proceed t)))
-      (let ((end (or (next-single-property-change at 'romacs-agent-log-proceed nil romacs-agent-log--end)
-                     romacs-agent-log--end)))
-        (romacs-agent-log--writing
-          (remove-text-properties at end '(romacs-agent-log-proceed nil))
-          (put-text-property at end 'keymap (or romacs-agent-log--text-map romacs-agent-log-transcript-map)))))))
+    (let ((at (point-min)))
+      (while (setq at (text-property-not-all at (point-max) 'romacs-agent-log-proceed nil))
+        (let ((end (next-single-property-change at 'romacs-agent-log-proceed nil (point-max))))
+          (romacs-agent-log--writing
+            (remove-text-properties at end '(romacs-agent-log-proceed nil))
+            (put-text-property at end 'keymap (or romacs-agent-log--text-map romacs-agent-log-transcript-map)))
+          (setq at end)))))
+  (setq romacs-agent-log--offered nil))
+
+(defun romacs-agent-log--offer-moved ()
+  "Retire the plan row drawn taking y once its session no longer offers
+that plan: replaced, proceeded with or taken back."
+  (when (and romacs-agent-log--offered (not (eql romacs-agent-log--offered (romacs-agent-log--proceed-offered))))
+    (romacs-agent-log--retire-offer)))
 
 (defun romacs-agent-log--proceed-offered ()
-  "Where the chat offers to proceed with a plan by leaving plan mode, or
-nil; however the chat is narrowed."
-  (when romacs-agent-log--end
-    (save-restriction
-      (widen)
-      (text-property-any (point-min) romacs-agent-log--end 'romacs-agent-log-proceed t))))
+  "The plan the chat's session offers to proceed with by leaving plan
+mode, its event's seq, or nil: the session's own fact
+\=(`romacs-agent-proceed')."
+  (and romacs-agent-log--session (romacs-agent-plan-offered romacs-agent-log--session)))
 
-(defun romacs-agent-log-proceed ()
-  "Proceed with the plan the chat offers: its session leaves plan mode,
-back in the mode it had, and the next message carries it out."
-  (interactive nil romacs-agent-log-mode)
-  (unless (romacs-agent-log--proceed-offered) (user-error "No plan to proceed with"))
-  (romacs-agent-set-plan (romacs-agent-menu--session) nil)
-  ;; Switched: its row offers nothing more, nor the separator.
-  (romacs-agent-log--retire-proceed)
+(defun romacs-agent-log-proceed (&optional seq)
+  "Proceed with the plan the chat's session offers, the one of event SEQ:
+interactively the plan at point, else the one offered now.  Its session
+leaves plan mode, back in the mode it had, and the next message carries
+it out."
+  (interactive (list (get-text-property (point) 'romacs-agent-log-proceed)) romacs-agent-log-mode)
+  (romacs-agent-proceed (romacs-agent-id (romacs-agent-menu--session))
+                        (or seq (romacs-agent-log--proceed-offered) (user-error "No plan to proceed with")))
   (save-restriction (widen) (romacs-agent-log--separator))
   (romacs-agent-log--header-show))
 
@@ -1293,12 +1305,15 @@ answer is written."
                                                          (plist-get event :answers))))
 
 (defun romacs-agent-log--plan (session event)
-  "Draw EVENT, SESSION's plan; offered, its text takes y, the separator
-says so."
-  (let ((text (concat (propertize (concat (romacs-agent-glyph 'plan) " Plan\n") 'face 'romacs-agent-log-prompt) (plist-get event :text))))
-    (when (romacs-agent-log--offers-proceed-p session event)
-      (romacs-agent-log--retire-proceed)
-      (setq text (propertize text 'romacs-agent-log-proceed t 'keymap romacs-agent-log-plan-map)))
+  "Draw EVENT, SESSION's plan; the one it offers to proceed with, its text
+alone takes y, for that plan (`romacs-agent-proceed'), until it offers
+another or none (`romacs-agent-log--offer-moved')."
+  (let ((text (concat (propertize (concat (romacs-agent-glyph 'plan) " Plan\n") 'face 'romacs-agent-log-prompt) (plist-get event :text)))
+        (seq (plist-get event :seq)))
+    (when (and seq (eql seq (romacs-agent-plan-offered session)))
+      (when romacs-agent-log--offered (romacs-agent-log--retire-offer))
+      (setq text (propertize text 'romacs-agent-log-proceed seq 'keymap romacs-agent-log-plan-map)
+            romacs-agent-log--offered seq))
     (romacs-agent-log--line event 'plan text)))
 
 (defun romacs-agent-log--compacted (event)
@@ -1364,7 +1379,6 @@ on RET."
     ;; Who answered: said, the block settled once its answer is written.
     ('attributed (romacs-agent-log--attributed event))
     ('answered (romacs-agent-log--answered event))
-    ('plan-switch (unless (plist-get event :on) (romacs-agent-log--retire-proceed)))
     ('plan (romacs-agent-log--plan session event))
     ('done (setq romacs-agent-log--current nil romacs-agent-log--early nil)
            (romacs-agent-log--close-asks session event 'turn-end)
@@ -1382,9 +1396,7 @@ on RET."
     ('renewed (romacs-agent-log--note event (format "renewed: a new conversation%s"
                                                     (if-let* ((why (plist-get event :why))) (format " (%s)" why) ""))))
     ('forked (romacs-agent-log--note event (format "forked from %s" (or (plist-get event :title) (plist-get event :from)))))
-    ;; A rollback takes the plan offered back with its turns.
-    ('rolled-back (romacs-agent-log--retire-proceed)
-                  (romacs-agent-log-turns-rolled-back event))
+    ('rolled-back (romacs-agent-log-turns-rolled-back event))
     ('replied (romacs-agent-log--note event (format "replied to %s" (plist-get event :message))))
     ('selection (romacs-agent-log--note event (format "%s → %s"
                                                       (romacs-agent-log--selection-label (plist-get event :from))
@@ -1411,7 +1423,7 @@ working thread says it alone: busy or idle."
                          (concat (romacs-agent-glyph 'asks) " waits on you: \\<romacs-agent-log-mode-map>\\[romacs-agent-log-allow] "
                                  (if question "choose" "allow") " · \\[romacs-agent-log-deny] "
                                  (if question "decline" "deny") " · \\[romacs-agent-log-next-ask] goes to it")))))
-      ((and 'idle (guard (eq state 'idle)) (guard (romacs-agent-log--proceed-offered)))
+      ((and 'idle (guard (eq state 'idle)) (guard (romacs-agent-plan-offer-waits session)))
        (cons 'waiting (substitute-command-keys
                        (concat (romacs-agent-glyph 'asks) " plan ready: \\<romacs-agent-log-mode-map>\\[romacs-agent-log-allow] proceeds, leaving plan mode · type to keep planning"))))
       ;; Busy or idle, the thread's motion says; what runs, its row does.
@@ -1480,7 +1492,9 @@ after the newline stays at the end."
 
 (defun romacs-agent-log--separator (&optional force)
   "Write the separator again when what the session does, or what waits to
-be sent, changed."
+be sent, changed; a plan row its session no longer offers takes y no
+more (`romacs-agent-log--offer-moved')."
+  (romacs-agent-log--offer-moved)
   (let ((doing (romacs-agent-log--doing romacs-agent-log--session))
         (rows (and romacs-agent-log-separator-rows-function (funcall romacs-agent-log-separator-rows-function))))
     (when (or force (not (equal doing romacs-agent-log--state))
@@ -1503,16 +1517,20 @@ be sent, changed."
   "What the header was last made from: made again only when it differs.")
 
 (defun romacs-agent-log--header-inputs (session)
-  "What SESSION's header reads (`romacs-agent-ui--header-inputs'), as this
-chat shows it: a plan it offers waits on the user, as a request does."
-  (let ((inputs (romacs-agent-ui--header-inputs session)))
-    (if (and (romacs-agent-log--proceed-offered) (not (memq (plist-get inputs :state) '(approval question))))
-        (plist-put (copy-sequence inputs) :state 'approval)
-      inputs)))
+  "What SESSION's header reads (`romacs-agent-ui--header-inputs'), its
+state as its summary says it when that summary is SESSION's: another
+machine's mirror, or the session this editor has loaded.  A record no
+registry holds (a transcript's, a copy) says its own, never asking the
+store for a row on each tick."
+  (romacs-agent-ui--header-inputs
+   session (and (or (not (romacs-agent-log-source-commands-p romacs-agent-log--source))
+                    (eq (romacs-agent-loaded (romacs-agent-id session)) session))
+                (romacs-agent-log--summary))))
 
 (defun romacs-agent-log--waiting-count ()
   "How many things wait on the user here: its approvals, and a plan offered."
-  (+ (length romacs-agent-log--asks) (if (romacs-agent-log--proceed-offered) 1 0)))
+  (+ (length romacs-agent-log--asks)
+     (if (and romacs-agent-log--session (romacs-agent-plan-offer-waits romacs-agent-log--session)) 1 0)))
 
 (defun romacs-agent-log--header-snapshot (session)
   "Read the values from SESSION and this chat that the header needs."
@@ -1747,7 +1765,7 @@ drew forgotten, its markers let go, its composer kept."
   (setq romacs-agent-log--current nil romacs-agent-log--early nil romacs-agent-log--asks nil
         romacs-agent-log--attributed nil romacs-agent-log--ended-asks nil
         romacs-agent-log--prompts nil romacs-agent-log--seq 0
-        romacs-agent-log--from nil romacs-agent-log--root-kind nil))
+        romacs-agent-log--from nil romacs-agent-log--root-kind nil romacs-agent-log--offered nil))
 
 (defun romacs-agent-log--archive-handoff (target)
   "Set aside the current session's visible transcript before TARGET."

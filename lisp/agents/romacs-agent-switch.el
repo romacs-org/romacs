@@ -15,6 +15,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'romacs-agent)
+(require 'romacs-agent-summary)
 (require 'romacs-agent-ui)
 (require 'romacs-agent-log)
 
@@ -42,39 +43,39 @@ own, else the one whose name differs from NAME in case alone."
   (let ((chats (seq-filter #'romacs-agent-switch--chat-p buffers)))
     (if (memq current chats) (append (delq current (copy-sequence chats)) (list current)) chats)))
 
-(defun romacs-agent-switch--annotation (session &optional pad)
-  "What a chat's candidate says of SESSION: its state, as its chat's
-header says it, harness and model, and project, each in its face, after
-PAD more columns of space."
-  (if (null session) ""
-    (pcase-let* ((`(,_ ,glyph ,word ,face) (romacs-agent-ui--state session))
-                 (harness (romacs-agent-harness session))
+(defun romacs-agent-switch--annotation (summary &optional pad)
+  "What a chat's candidate says of its session's SUMMARY: its state, as
+its chat's header says it, harness and model, and project, each in its
+face, after PAD more columns of space."
+  (if (null summary) ""
+    (pcase-let* ((`(,_ ,glyph ,word ,face) (romacs-agent-ui--state-of (romacs-agent-summary-state-key summary)
+                                                                       (romacs-agent-summary-watch-unit summary)))
+                 (harness (romacs-agent-summary-harness summary))
                  (instance (romacs-agent-ui--instance
                             (and harness (symbol-name harness)) harness
-                            (or (romacs-agent-model session) (plist-get (romacs-agent-options session) :model))
+                            (or (romacs-agent-summary-model summary) (romacs-agent-summary-selected-model summary))
                             nil))
-                 (project (file-name-nondirectory (directory-file-name (or (romacs-agent-cwd session) "")))))
+                 (project (file-name-nondirectory (directory-file-name (or (romacs-agent-summary-cwd summary) "")))))
       (concat (make-string (+ 2 (or pad 0)) ?\s)
               (string-join (delq nil (list (if glyph (romacs-agent-ui--glyph glyph word face) (propertize word 'face face))
                                            (and (not (string-empty-p instance)) (propertize instance 'face 'romacs-agent-model))
                                            (and (not (string-empty-p project)) (propertize project 'face 'romacs-agent-dim))))
                            " ")))))
 
-(defun romacs-agent-switch--table (chats)
-  "A completion table of CHATS' names in their order, category
-`romacs-agent-chat', each annotated (`romacs-agent-switch--annotation'),
-the annotations in one column (`romacs-agent-switch--column' at most)."
-  (let* ((sessions (make-hash-table :test #'equal))
-         (names (mapcar #'buffer-name chats))
-         (width (min romacs-agent-switch--column (apply #'max 0 (mapcar #'string-width names)))))
+(defun romacs-agent-switch--properties (chats)
+  "The completion metadata of CHATS' names (`completion-extra-properties'):
+category `romacs-agent-chat', each annotated (`romacs-agent-switch--annotation')
+from its session's summary, read once, the annotations in one column
+\(`romacs-agent-switch--column' at most)."
+  (let* ((summaries (make-hash-table :test #'equal))
+         (width (min romacs-agent-switch--column
+                     (apply #'max 0 (mapcar (lambda (chat) (string-width (buffer-name chat))) chats)))))
     (dolist (buffer chats)
-      (puthash (buffer-name buffer) (buffer-local-value 'romacs-agent-log--session buffer) sessions))
-    (romacs-agent--ordered-table
-     names
-     '(category . romacs-agent-chat)
-     (cons 'annotation-function
-           (lambda (name)
-             (romacs-agent-switch--annotation (gethash name sessions) (max 0 (- width (string-width name)))))))))
+      (puthash (buffer-name buffer) (with-current-buffer buffer (romacs-agent-log--summary)) summaries))
+    (list :category 'romacs-agent-chat
+          :annotation-function
+          (lambda (name)
+            (romacs-agent-switch--annotation (gethash name summaries) (max 0 (- width (string-width name))))))))
 
 ;;;###autoload
 (defun romacs-agent-switch ()
@@ -84,8 +85,8 @@ With none open, offer the board (`romacs-agents')."
   (interactive)
   (if-let* ((chats (romacs-agent-switch--chats (buffer-list) (romacs-agent-log--chat))))
       (let* ((named (mapcar (lambda (buffer) (cons (buffer-name buffer) buffer)) chats))
-             (name (completing-read (format-prompt "Agent chat" (caar named))
-                                    (romacs-agent-switch--table chats) nil t nil nil (caar named)))
+             (name (romacs-agent--read-ordered (format-prompt "Agent chat" (caar named)) (mapcar #'car named)
+                                               (romacs-agent-switch--properties chats) nil t nil nil (caar named)))
              (buffer (romacs-agent-switch--named name named)))
         (unless (romacs-agent-switch--chat-p buffer)
           (user-error "No open agent chat is named %s" name))

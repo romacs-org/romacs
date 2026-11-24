@@ -7,7 +7,7 @@
 ;; Romacs's own interface to agent sessions (romacs-agent.el), beside the
 ;; chat itself (romacs-agent-log.el, its menu romacs-agent-menu.el):
 ;;
-;; - One state for a session (`romacs-agent-ui--state'), every view's:
+;; - One state for a session (`romacs-agent-ui--state-key'), every view's:
 ;;   the header, the workers' rows and the agent board
 ;;   (romacs-agent-board.el, `romacs-agents').
 ;; - What runs under a session: its delegated sessions and its harness's
@@ -18,6 +18,7 @@
 (require 'romacs-truncate)
 (require 'cl-lib)
 (require 'romacs-agent)
+(require 'romacs-agent-summary)
 (require 'romacs-agent-glyphs)
 (require 'romacs-key-hint)
 (require 'romacs-agent-rows)
@@ -144,11 +145,11 @@ one, else nil: the workers' rows name it."
                             '("harness's own"))
              " · "))
 
-(defun romacs-agent-ui--context-share (session)
-  "How full SESSION's context is, as \"NN%\", or nil when it is not known."
-  (let ((used (romacs-agent-context-used session)) (window (romacs-agent-context-window session)))
-    (and (numberp used) (numberp window) (> window 0)
-         (format "%d%%" (round (* 100.0 (/ used (float window))))))))
+(defun romacs-agent-ui--context-share (used window)
+  "How full a context of WINDOW tokens is with USED of them, as \"NN%\",
+or nil when either is not known."
+  (and (numberp used) (numberp window) (> window 0)
+       (format "%d%%" (round (* 100.0 (/ used (float window)))))))
 
 ;;; What runs under a session
 ;;
@@ -214,17 +215,22 @@ follow, and the parent of one whose state that changed, in the next batch."
               (parent (romacs-agent-get id t)))
     (romacs-agent-ui--children-changed parent)))
 
+(defun romacs-agent-ui--put-unloaded-waiting (id live)
+  "Say whether session ID, not loaded, waits on a worker LIVE
+\(`romacs-agent-ui--unloaded-waiting'): its summary's state follows."
+  (if live (puthash id t romacs-agent-ui--unloaded-waiting) (remhash id romacs-agent-ui--unloaded-waiting))
+  (romacs-agent--summary-stale id))
+
 (defun romacs-agent-ui--worker-state-moved-p (session)
   "Announce SESSION's state or update its persisted projection's liveness."
   (let ((id (romacs-agent-id session)))
     (if (eq (gethash id romacs-agent--sessions) session)
         (progn
-          (remhash id romacs-agent-ui--unloaded-waiting)
+          (romacs-agent-ui--put-unloaded-waiting id nil)
           (romacs-agent-ui--announce session))
       (let ((previous (gethash id romacs-agent-ui--unloaded-waiting))
             (live (and (romacs-agent-ui--live-rows-p (romacs-agent-children-rows session)) t)))
-        (if live (puthash id t romacs-agent-ui--unloaded-waiting)
-          (remhash id romacs-agent-ui--unloaded-waiting))
+        (romacs-agent-ui--put-unloaded-waiting id live)
         (not (eq previous live))))))
 
 (defun romacs-agent-ui-worker (session id)
@@ -342,8 +348,11 @@ new turn starts, and last turn's failures have been seen."
   "The `status' events that change what a session's state reads.")
 
 (defun romacs-agent-ui--state-event-p (event)
-  "Whether EVENT may change its session's state (`romacs-agent-ui--state')."
-  (or (memq (plist-get event :type) '(run session input approval answered done exit unstarted settled watch-changed))
+  "Whether EVENT may change its session's state (`romacs-agent-ui--state-key'):
+a plan only when it is offered to proceed with (`romacs-agent-plan-offer')."
+  (or (memq (plist-get event :type)
+            '(run session input approval answered done exit unstarted settled watch-changed rolled-back))
+      (and (eq (plist-get event :type) 'plan) (plist-get event :proceed))
       (and (eq (plist-get event :type) 'status) (member (plist-get event :text) romacs-agent-ui--state-statuses))))
 
 (defvar romacs-agent-ui--announced (make-hash-table :test #'eq :weakness 'key)
@@ -403,11 +412,19 @@ decided once per event."
 ;; the rows: drawing, ranking and its parent's state only read it.
 
 (defun romacs-agent-ui--child-row (child)
-  "Delegated session CHILD as a row."
+  "Delegated session CHILD as a row: its state's :key, and the one it
+shows once nothing goes on in it, :inactive."
   (let* ((key (if (romacs-agent-settled-p child) 'settled (romacs-agent-ui--state-key child)))
          (unit (and (eq key 'watching) (romacs-agent-watch-unit child))))
-    (list :session child :key key :title (romacs-agent-title child) :time (romacs-agent-last-time child)
+    (list :session child :key key :inactive (romacs-agent-ui--inactive-key child key)
+          :title (romacs-agent-title child) :time (romacs-agent-last-time child)
           :unit unit :activity (and unit (nth 2 (romacs-agent-ui--state-of key unit))))))
+
+(defun romacs-agent-ui--inactive-key (session key)
+  "The state SESSION, whose state is KEY, shows once nothing goes on in it."
+  (cond ((or (memq key '(failed unstarted)) (romacs-agent-failed session)) 'failed)
+        ((> (romacs-agent-done-seq session) 0) 'completed)
+        (t 'idle)))
 
 (defun romacs-agent-ui--row-key (row)
   "Harness task ROW's state key, by its status: a failure is news until a
@@ -433,7 +450,8 @@ turn of its session starts, a completion never (its session's turn tells it)."
                        (let ((x (romacs-agent-ui--row-rank a)) (y (romacs-agent-ui--row-rank b)))
                          (if (= x y) (> (or (plist-get a :time) 0) (or (plist-get b :time) 0)) (< x y)))))
           (romacs-agent-children-summary session)
-          (romacs-agent-ui--workers-summary (romacs-agent-children-rows session)))))
+          (romacs-agent-ui--workers-summary (romacs-agent-children-rows session)))
+    (romacs-agent--summary-stale (romacs-agent-id session))))
 
 (defconst romacs-agent-ui--worker-kinds
   '((approval approval "Needs approval" romacs-agent-approval)
@@ -588,6 +606,7 @@ completion went to its parent: not news to the user."
           ((and (romacs-agent-failed session) (romacs-agent-unseen-p session) (not (romacs-agent-cancelled session)))
            'failed)
           ((memq state '(starting running)) 'working)
+          ((romacs-agent-plan-offer-waits session) 'question)
           ((eq state 'history) 'history)
           ((and (not (eq state 'ended)) (romacs-agent-watch-unit session)) 'watching)
           ((romacs-agent-ui--workers-live-p session) 'waiting)
@@ -601,10 +620,11 @@ completion went to its parent: not news to the user."
           ((eq state 'ended) 'ended)
           (t 'idle))))
 
-(defun romacs-agent-ui--state (session &optional key)
-  "SESSION's state, as (KEY GLYPH WORD FACE RANK), using KEY when given."
-  (let ((key (or key (romacs-agent-ui--state-key session))))
-    (romacs-agent-ui--state-of key (and (eq key 'watching) (romacs-agent-watch-unit session)))))
+(defun romacs-agent-ui--shown-key (key parent done failed)
+  "A session's state KEY (`romacs-agent-ui--state-key') as every view shows
+it: a delegated one whose PARENT is known and whose turn ended well
+\(DONE past 0, not FAILED) is done, where its parent's user reads it."
+  (if (and (eq key 'idle) parent (> done 0) (not failed)) 'completed key))
 
 (defun romacs-agent-ui--status-key (word)
   "A task's status WORD, as `romacs-agent-tools--status' or a harness
@@ -763,19 +783,21 @@ nothing more."
                 (cons key (romacs-agent-ui--default-effort session selection))))
         (cdr romacs-agent-ui--header-default-effort))))
 
-(defun romacs-agent-ui--header-inputs (session)
+(defun romacs-agent-ui--header-inputs (session &optional summary)
   "All that SESSION's header reads of it, a plist, with whether glyphs
 are on: the header is made from it (`romacs-agent-ui--header-text'), and
-made again when it differs."
-  (let ((options (romacs-agent-options session))
-        (switch (romacs-agent-pending-selection session))
-        (key (romacs-agent-ui--state-key session)))
+made again when it differs.  Its state is as every view of it says it,
+its SUMMARY's (`romacs-agent-summary'), when given."
+  (let* ((options (romacs-agent-options session))
+         (switch (romacs-agent-pending-selection session))
+         (key (if summary (romacs-agent-summary-state-key summary) (romacs-agent-ui--state-key session))))
     (list :harness (romacs-agent-harness session) :provider (romacs-agent-provider session)
           :mode (if (plist-get options :plan) 'plan (romacs-agent-permission-mode session))
           :model (romacs-agent-model session) :effort (romacs-agent-ui--current-effort session)
           :switch (and switch (romacs-agent-ui--selection-label switch))
           :workers (romacs-agent-children-summary session)
-          :share (romacs-agent-ui--context-share session)
+          :share (romacs-agent-ui--context-share (romacs-agent-context-used session)
+                                                 (romacs-agent-context-window session))
           :resume (romacs-agent-resume-time session)
           :state key :unit (and (eq key 'watching) (romacs-agent-watch-unit session))
           :glyphs romacs-agent-glyphs)))

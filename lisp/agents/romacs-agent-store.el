@@ -31,7 +31,7 @@
 (defconst romacs-agent-store--columns
   '(id dir harness provider model title cwd parent state last_time cost transcript
        input_seq done_seq seen_seq settled_seq attention
-       effort plan permission_mode context_used context_window resume_time seq request failed)
+       effort plan permission_mode context_used context_window resume_time seq request failed plan_offer)
   "The table's columns, in order.")
 
 (defconst romacs-agent-store--schema
@@ -40,7 +40,8 @@
        title text, cwd text, parent text, state text, last_time real, cost real, transcript text,
        input_seq integer, done_seq integer, seen_seq integer, settled_seq integer,
        attention integer, effort text, plan integer, permission_mode text, context_used integer,
-       context_window integer, resume_time real, seq integer, request text, failed integer)"
+       context_window integer, resume_time real, seq integer, request text, failed integer,
+       plan_offer integer)"
     "create index if not exists sessions_state on sessions (state)"
     "create index if not exists sessions_recent on sessions (last_time desc)"
     "create index if not exists sessions_cwd on sessions (cwd)"
@@ -53,7 +54,7 @@
     "create index if not exists commands_at on commands (at)")
   "The table and its indexes, made when the database is opened.")
 
-(defconst romacs-agent-store--version 6
+(defconst romacs-agent-store--version 7
   "The table's form (`user_version'): a database of another has its table
 made in this form, its rows kept (`romacs-agent-store--reform').")
 
@@ -311,7 +312,8 @@ moment later, unless AGAIN says this is that try."
          :resume_time (and (fboundp 'romacs-agent-resume-time) (romacs-agent-resume-time session))
          ;; The last record its kept state folded.
          :seq (romacs-agent-seq session)
-         :request (plist-get (romacs-agent-options session) :request))))
+         :request (plist-get (romacs-agent-options session) :request)
+         :plan_offer (romacs-agent-plan-offer session))))
 
 ;;; Filling it
 
@@ -370,7 +372,7 @@ manifest."
                            (let ((file (or transcript journal)))
                              (and (file-exists-p file)
                                   (float-time (file-attribute-modification-time (file-attributes file))))))
-            :cost (funcall field 'cost) :transcript transcript
+            :cost (funcall field 'cost) :plan_offer (funcall field 'plan-offer) :transcript transcript
             ;; With no kept state, its activity is at most its last record:
             ;; settled only when settled since that.
             :input_seq (if kept (funcall field 'input-seq) (romacs-agent-store--last-seq journal))
@@ -593,14 +595,15 @@ kept one), or `settled' if the user explicitly put it aside."
 
 (defconst romacs-agent-store--row-columns
   "id, dir, harness, provider, model, title, cwd, parent, state, last_time, cost, input_seq, done_seq,
- seen_seq, settled_seq, effort, plan, permission_mode, context_used, context_window, resume_time, failed"
+ seen_seq, settled_seq, effort, plan, permission_mode, context_used, context_window, resume_time, failed,
+ plan_offer"
   "The columns a session is made from its row alone (`romacs-agent-store--row-of').")
 
 (defun romacs-agent-store--row-of (row)
   "The session ROW (`romacs-agent-store--row-columns') says, made from it
 alone: one projection, whoever reads rows."
   (pcase-let ((`(,id ,dir ,harness ,provider ,model ,title ,cwd ,parent ,state ,last ,cost ,input ,done ,seen ,settled
-                 ,effort ,plan ,mode ,used ,window ,resume ,failed)
+                 ,effort ,plan ,mode ,used ,window ,resume ,failed ,offer)
                row))
     (romacs-agent--make :id id :dir dir :harness (intern harness) :provider provider :model model
                         :title title :cwd cwd
@@ -608,30 +611,37 @@ alone: one projection, whoever reads rows."
                                          (and (eql plan 1) (list :plan t)) (and resume (list :resume-at resume)))
                         :state (intern (or state "detached")) :last-time last :cost cost
                         :input-seq input :done-seq (or done 0) :seen-seq seen :settled-seq settled :failed (eql failed 1)
-                        :permission-mode mode :context-used used :context-window window)))
+                        :permission-mode mode :context-used used :context-window window :plan-offer offer)))
+
+(defun romacs-agent-store-row (id)
+  "Session ID's row (`romacs-agent-store--row-columns'), or nil."
+  (when-let* ((db (romacs-agent-store--open)))
+    (car (sqlite-select db (concat "select " romacs-agent-store--row-columns " from sessions where id = ?")
+                        (list id)))))
 
 (defun romacs-agent-store-row-session (id)
   "The session ID names, made from its row alone (none of its kept state
 read, nor its records): what a chat shows of it before it is used, its
 header's facts too.  Nil with no row.  Acting on it loads it
 \(`romacs-agent-load-session')."
-  (when-let* ((db (romacs-agent-store--open))
-              (row (car (sqlite-select db (concat "select " romacs-agent-store--row-columns
-                                                  " from sessions where id = ?")
-                                       (list id)))))
+  (when-let* ((row (romacs-agent-store-row id)))
     (romacs-agent-store--row-of row)))
+
+(defun romacs-agent-store-unloaded-rows (&optional parent)
+  "The rows (`romacs-agent-store--row-columns') of the sessions not loaded,
+newest first; with PARENT, only its direct children's."
+  (when-let* ((db (romacs-agent-store--open)))
+    (seq-remove (lambda (row) (romacs-agent-loaded (car row)))
+                (sqlite-select db (concat "select " romacs-agent-store--row-columns
+                                          " from sessions" (and parent " where parent = ?")
+                                          " order by last_time desc")
+                               (and parent (list parent))))))
 
 (defun romacs-agent-store-unloaded (&optional parent)
   "The sessions that have a row but are not loaded, newest first, each a
 session record made from its row alone: to show, not to act on (acting
 on one loads it, `romacs-agent-get').  With PARENT, only its direct children."
-  (when-let* ((db (romacs-agent-store--open)))
-    (delq nil
-          (mapcar (lambda (row) (unless (romacs-agent-loaded (car row)) (romacs-agent-store--row-of row)))
-                  (sqlite-select db (concat "select " romacs-agent-store--row-columns
-                                            " from sessions" (and parent " where parent = ?")
-                                            " order by last_time desc")
-                                 (and parent (list parent)))))))
+  (mapcar #'romacs-agent-store--row-of (romacs-agent-store-unloaded-rows parent)))
 
 ;;; The agents service's commands (doc/agent-protocol.org, Commands)
 
