@@ -387,9 +387,11 @@ yet, goes with it when given.  The whole record is romacs_task_status's."
 
 (defun romacs-agent-tools--listed-p (summary caller all)
   "Whether the task SUMMARY says is listed for CALLER, including other
-delegated tasks with ALL."
+delegated tasks with ALL.  One handed to another harness is not: its
+successor is the task."
   (let ((parent (romacs-agent-summary-parent summary)))
-    (or (equal parent caller) (and all parent))))
+    (and (not (romacs-agent-summary-handed-to summary))
+         (or (equal parent caller) (and all parent)))))
 
 (defun romacs-agent-tools--visible-prefix (prefix caller)
   "Return stored ids with PREFIX that CALLER can see in the full task list."
@@ -1464,7 +1466,11 @@ empty TEXT sends nothing.  Return how it went (`romacs-agent-tools--delivery'),
   (romacs-agent-tools--check-message-target child)
   (unless (string-empty-p (string-trim text))
     (pcase (romacs-agent-tools--delivery child mode)
-      ('steered (romacs-agent-send child text nil valid nil messages) 'steered)
+      ('steered
+       (romacs-agent-send child text nil valid nil messages)
+       ;; Into the turn now only when its harness can steer it now (a
+       ;; Codex turn once named); else it waits for that, as queued.
+       (if (and (romacs-agent--steerable-p child) (not (romacs-agent--cwd-gone-p child))) 'steered 'queued))
       ('interrupting
        ;; First in line before the cut: a turn not yet under way
        ;; (Codex's before it names it) cannot be cut, and it goes after.
@@ -1488,7 +1494,8 @@ harness runs a process a turn) is queued or sent."
   (let ((busy (memq (romacs-agent-state child) '(running waiting-approval))))
     (cond ((and busy (eq mode 'steer) (not (romacs-agent--per-turn-p child))) 'steered)
           ((and busy (eq mode 'interrupt)) 'interrupting)
-          (busy 'queued)
+          ;; Starting: it waits for the harness, as behind a turn.
+          ((or busy (eq (romacs-agent-state child) 'starting)) 'queued)
           (t 'sent))))
 
 (defconst romacs-agent-tools--send-modes '("queue" "replace" "interrupt")

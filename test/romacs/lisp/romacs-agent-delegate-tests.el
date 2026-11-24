@@ -221,6 +221,16 @@ recorded in a private directory; `delivered' collects what wakes it."
                      '("delegated a writer")))
       (delete-directory (romacs-agent-dir writer) t))))
 
+(ert-deftest romacs-agent-delegate-a-handed-off-task-is-listed-once ()
+  ;; The task goes on in its successor: the old session is no row of its own.
+  (should (romacs-agent-tools--listed-p (romacs-agent-summary--make :parent "p") "p" nil))
+  (should-not (romacs-agent-tools--listed-p (romacs-agent-summary--make :parent "p" :handed-to "x") "p" nil)))
+
+(ert-deftest romacs-agent-delegate-a-starting-task-queues ()
+  ;; Its harness not up yet: a message waits, and says so.
+  (should (eq (romacs-agent-tools--delivery (romacs-agent--make :id "s" :state 'starting) 'queue) 'queued))
+  (should (eq (romacs-agent-tools--delivery (romacs-agent--make :id "s" :state 'idle) 'queue) 'sent)))
+
 (ert-deftest romacs-agent-delegate-a-failed-resume-keeps-the-result ()
   ;; The parent cannot be resumed this moment: the result waits in its
   ;; queue for its next run, never dropped with the resume.
