@@ -80,6 +80,27 @@
       (should (equal provider "codex"))
       (should (equal options '(:model "gpt-6.1-sol"))))))
 
+(ert-deftest romacs-agent-handoff-a-task-stays-one-task ()
+  ;; A task handed to another harness: its old harness stops, its old id
+  ;; names the new session to every task action.
+  (require 'romacs-agent-tools)
+  (let* ((romacs-agent--sessions (make-hash-table :test #'equal))
+         (old (romacs-agent--make :id "old" :harness 'claude :provider "claude" :cwd "/work/" :title "Lane"
+                                  :options '(:parent "lead")))
+         (new (romacs-agent--make :id "new" :harness 'codex :provider "codex" :cwd "/work/" :title "Lane (→ codex)"
+                                  :options '(:parent "lead")))
+         (stopped nil))
+    (puthash "old" old romacs-agent--sessions)
+    (puthash "new" new romacs-agent--sessions)
+    (cl-letf (((symbol-function 'romacs-agent-start) (lambda (&rest _) new))
+              ((symbol-function 'romacs-agent--manifest-put) #'ignore)
+              ((symbol-function 'romacs-agent-stop) (lambda (s &rest _) (push s stopped)))
+              ((symbol-function 'romacs-agent-tools--resolve) #'identity))
+      (romacs-agent-handoff old '((:type input :text "build it")) "codex" nil "Go on.")
+      (should (equal stopped (list old)))
+      (should (equal (plist-get (romacs-agent-options old) :handed-to) "new"))
+      (should (eq (romacs-agent-tools--known "old") new)))))
+
 (ert-deftest romacs-agent-handoff-a-wake-is-context ()
   (require 'romacs-agent-tools)
   (let* ((child (romacs-agent-summary--make :id "11111111-0000-4000-8000-000000000000" :title "t"))

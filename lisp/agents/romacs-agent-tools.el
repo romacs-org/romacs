@@ -429,8 +429,14 @@ fails for good is the answer's error, never what its row alone says."
 
 (defun romacs-agent-tools--known (id)
   "Return the task with exact ID or a unique visible prefix matching ID
-\(`romacs-agent-tools--resolve'), to act on."
-  (romacs-agent-get (romacs-agent-tools--resolve id)))
+\(`romacs-agent-tools--resolve'), to act on: a task handed off to another
+harness, the session it goes on in (`romacs-agent-handoff')."
+  (let ((task (romacs-agent-get (romacs-agent-tools--resolve id))) (seen nil))
+    (while-let ((next (and task (not (memq task seen)) (plist-get (romacs-agent-options task) :handed-to)))
+                (successor (romacs-agent-get next)))
+      (push task seen)
+      (setq task successor))
+    task))
 
 (defun romacs-agent-tools--woken-file (session)
   (expand-file-name "woken" (romacs-agent-dir session)))
