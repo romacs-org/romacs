@@ -1460,14 +1460,13 @@ for outside Romacs) and nothing else: no task's result, no other sender's."
                           (equal (plist-get (plist-get message :from) :session) caller)))
                    messages))))
 
-(defun romacs-agent-tools--replace-waiting (target caller)
-  "Take CALLER's messages waiting for TARGET out of its queue, their kept
-records with them: a `replace' sends in their place.  One being written
-already goes."
-  (dolist (item (copy-sequence (romacs-agent-queue target)))
-    (when (and (romacs-agent-tools--sent-by-p item caller)
-               (not (memq (romacs-agent-item-held item) '(sending written))))
-      (romacs-agent--dequeue target item))))
+(defun romacs-agent-tools--waiting-from (target caller)
+  "CALLER's messages waiting for TARGET that a `replace' takes the place
+of: not one being written already."
+  ;; A copy: the queue's tail, shared, grows as the replacement is queued.
+  (cl-remove-if-not (lambda (item) (and (romacs-agent-tools--sent-by-p item caller)
+                                        (not (memq (romacs-agent-item-held item) '(sending written)))))
+                    (copy-sequence (romacs-agent-queue target))))
 
 (defun romacs-agent-tools--send-route (target caller sender)
   "Whether CALLER may send to the session the summary TARGET says, needs a
@@ -1545,11 +1544,12 @@ and the message's id."
          (kind (romacs-agent-tools--kind sender target))
          (message (romacs-agent-tools--message kind sender in-reply-to by-user))
          (delivery nil))
-    ;; Dropped now, not at dispatch: the message stays all data, so the
-    ;; store keeps it across a restart.
-    (when (equal mode "replace") (romacs-agent-tools--replace-waiting target caller))
-    (setq delivery (romacs-agent-tools--delivery target (intern mode)))
-    (romacs-agent-tools--tell target text (intern mode) nil (list message))
+    (let ((replaced (and (equal mode "replace") (romacs-agent-tools--waiting-from target caller))))
+      (setq delivery (romacs-agent-tools--delivery target (intern mode)))
+      (romacs-agent-tools--tell target text (intern mode) nil (list message))
+      ;; Its replacement admitted, they go: now, not at dispatch, so each
+      ;; message stays all data the store keeps; a refusal keeps them.
+      (dolist (item replaced) (romacs-agent--dequeue target item)))
     ;; Text no harness takes is never copied: it would ride every wake after.
     (when (and (equal kind "sibling") (romacs-agent--encodable-p (romacs-agent-item text)))
       (let ((parent (plist-get (romacs-agent-options target) :parent)))

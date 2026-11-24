@@ -393,6 +393,10 @@ message's record for TEXT, `interrupted' each interrupted."
     ;; Its older ones gone at once, not at dispatch.
     (should (= (romacs-agent-queue-length a) 1))
     (should (romacs-agent--keepable-p (car (romacs-agent-queue a))))
+    ;; A replacement refused keeps what it was to replace.
+    (cl-letf (((symbol-function 'romacs-agent-tools--tell) (lambda (&rest _) (user-error "Worktree gone"))))
+      (should-error (send a "four" "replace") :type 'user-error))
+    (should (= (romacs-agent-queue-length a) 1))
     (dotimes (_ 3) (drain a))
     ;; Only what replaced them went.
     (should (equal (mapcar #'cdr written) '("three")))))
