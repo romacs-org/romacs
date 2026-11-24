@@ -373,6 +373,7 @@ for SESSION: its end, from a prompt on."
   "e" #'undefined
   "u" #'undefined
   "D" #'undefined
+  "RET" #'romacs-agent-log-open
   "q" #'quit-window
   "r" #'romacs-agent-history-resume-this)
 

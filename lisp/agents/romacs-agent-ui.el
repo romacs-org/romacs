@@ -113,38 +113,6 @@ user.")
   "A session whose last turn ended since its chat was shown.")
 
 (defvar-local romacs-agent-ui--session nil)
-(defvar-local romacs-agent-ui--asks nil
-  "The chat's approval events by request id: what each asked.")
-
-(defun romacs-agent-ui--asks ()
-  "This chat's `romacs-agent-ui--asks', made when first wanted."
-  (or romacs-agent-ui--asks (setq romacs-agent-ui--asks (make-hash-table :test #'equal))))
-(defvar-local romacs-agent-ui--end nil
-  "Marker at the transcript's end; the composer follows it.")
-(defvar-local romacs-agent-ui--draft-images nil
-  "The image files of the message being written, in order.")
-(defvar-local romacs-agent-ui--messages nil
-  "An open message's id to (START . LENGTH): where its text starts and how
-much of it its deltas wrote.")
-(defvar-local romacs-agent-ui--faced nil
-  "An open message's id to how much of its text is faced as Markdown.")
-
-(defun romacs-agent-ui--faced ()
-  "This chat's `romacs-agent-ui--faced', made when first wanted."
-  (or romacs-agent-ui--faced (setq romacs-agent-ui--faced (make-hash-table :test #'equal))))
-(defvar-local romacs-agent-ui--shown 0
-  "The last journal record this buffer shows whole.")
-(defvar-local romacs-agent-ui--open nil
-  "The kind of block the transcript ends in: `text' (prose), a run's
-`thinking' or `sub' (a subagent's words), or nil.")
-(defvar-local romacs-agent-ui--history nil)
-(defvar-local romacs-agent-ui--composer nil
-  "The overlay at the composer's start: the live rule and the empty hint.")
-(defvar-local romacs-agent-ui--fitted nil
-  "The width the rules' fills last fitted.")
-(defvar-local romacs-agent-ui--staying nil
-  "Markers that stay before text the transcript's end takes, as a
-window's start does: where what an event draws starts.")
 
 (defun romacs-agent-ui--clock (seconds)
   "SECONDS as a clock: 12s, 4:26 or 1:02:03."

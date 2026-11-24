@@ -13,7 +13,7 @@
 (defun romacs-agent-thread-word-tests--separator ()
   "The chat's separator written again, as text."
   (romacs-agent-log--separator t)
-  (string-trim (buffer-substring-no-properties romacs-agent-log--end romacs-agent-log--input)))
+  (string-trim (buffer-substring-no-properties romacs-agent-log--end (point-max))))
 
 (ert-deftest romacs-agent-thread-word-busy-or-idle-has-no-word ()
   ;; The thread's motion says busy or idle; what runs, its row says.
@@ -24,8 +24,7 @@
     (with-temp-buffer
       (romacs-agent-log-mode)
       (setq romacs-agent-log--session session
-            romacs-agent-log--end (point-min-marker)
-            romacs-agent-log--input (point-min-marker))
+            romacs-agent-log--end (point-min-marker))
       (set-marker-insertion-type romacs-agent-log--end t)
       (let ((input (make-hash-table :test #'equal)))
         (puthash "command" "ls" input)

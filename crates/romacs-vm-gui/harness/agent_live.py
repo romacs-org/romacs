@@ -2991,16 +2991,25 @@ SUBMIT_PROBE = r"""
                  (push (list index (copy-tree answer)) s8-submit-answers)
                  (s8-submit-deliver file callback answer)))))
   (defun s8-submit-sending-face-p ()
-    (let ((start (save-excursion
-                   (goto-char romacs-agent-log--input)
+    (let* ((input (if (derived-mode-p 'romacs-agent-compose-mode)
+                      (point-min)
+                    romacs-agent-log--input))
+           (start (save-excursion
+                   (goto-char input)
                    (let ((inhibit-field-text-motion t)) (line-beginning-position)))))
-      (cl-loop for p from start to romacs-agent-log--input
+      (cl-loop for p from start to input
                thereis
                (let ((face (get-char-property p 'face))
-                     (prefix (get-char-property p 'line-prefix)))
+                     (prefix (get-char-property p 'line-prefix))
+                     ;; The mark an overlay at the start shows before it.
+                     (before (mapcar (lambda (o) (let ((s (overlay-get o 'before-string)))
+                                                   (and (stringp s) (> (length s) 0)
+                                                        (text-properties-at (1- (length s)) s))))
+                                     (overlays-in p p))))
                  (string-match-p "\\_<romacs-agent-compose-sending\\_>"
-                                 (format "%S %S" face (and (stringp prefix)
-                                                           (text-properties-at 0 prefix))))))))
+                                 (format "%S %S %S" face (and (stringp prefix)
+                                                              (text-properties-at 0 prefix))
+                                         before))))))
   (advice-add 'romacs-agent-submit :around #'s8-submit-record)
   (global-set-key [f8] (lambda () (interactive) (cl-incf s8-submit-barrier)))
   t)
@@ -3033,9 +3042,18 @@ def submit_calls(a, sid):
     return [parity_live.plist(intent) for _, intent in calls]
 
 
+def composer_buffer(chat):
+    return ("(if (fboundp 'romacs-agent-log-composer-buffer) "
+            f"(romacs-agent-log-composer-buffer {chat}) {chat})")
+
+
+COMPOSER_START = ("(if (derived-mode-p 'romacs-agent-compose-mode) (point-min) "
+                  "(marker-position romacs-agent-log--input))")
+
+
 def submit_draft(a, chat):
-    return submit_read(a, f'(with-current-buffer {chat} '
-                       '(buffer-substring-no-properties romacs-agent-log--input (point-max)))')
+    return submit_read(a, f'(with-current-buffer {composer_buffer(chat)} '
+                       f'(buffer-substring-no-properties {COMPOSER_START} (point-max)))')
 
 
 def submit_chat(a, text):
@@ -3055,19 +3073,20 @@ def submit_inputs(a, sid):
 
 def composer_submit_hold(a):
     sid, chat = submit_chat(a, SUBMIT_DRAFT)
+    buffer = composer_buffer(chat)
     release = a.root / 'submit-release'
     a.eval(f'(setq s8-submit-release {lisp(release)})')
-    a.eval(f'(with-current-buffer {chat} (add-hook (quote romacs-agent-log-draft-replaced-hook) '
+    a.eval(f'(with-current-buffer {buffer} (add-hook (quote romacs-agent-log-draft-replaced-hook) '
            '(lambda () (cl-incf s8-submit-clears)) nil t) t)')
     try:
         submit_ret(a)
         until(lambda: submit_answers(a), 10, 'submit answer held behind release file')
         draft = submit_draft(a, chat)
         assert draft == SUBMIT_DRAFT, ('draft erased before answer', draft)
-        assert submit_read(a, f'(with-current-buffer {chat} '
+        assert submit_read(a, f'(with-current-buffer {buffer} '
                            '(condition-case nil (progn (goto-char (point-max)) (insert "x") nil) '
                            '((buffer-read-only text-read-only) t)))'), 'pending draft was writable'
-        assert submit_read(a, f'(with-current-buffer {chat} (s8-submit-sending-face-p))') is not None, 'sending face missing'
+        assert submit_read(a, f'(with-current-buffer {buffer} (s8-submit-sending-face-p))') is not None, 'sending face missing'
         submit_ret(a, barrier=True)
         intents = submit_calls(a, sid)
         assert len(intents) == 1, ('second RET called submit', intents)
@@ -3179,19 +3198,43 @@ def composer(args, base, real=False):
         chat = f'(romacs-agent-log-chat {a.s(sid)})'
         a.eval(f'(progn (delete-other-windows) (romacs-agent-show {a.s(sid)}) t)')
         mark = a.eval('(with-current-buffer "*Messages*" (point-max))')
+        separate = a.eval("(fboundp 'romacs-agent-log-composer-buffer)") == 't'
+        ctrl = lambda key: ['-M', 'ctrl', '-k', key, '-m', 'ctrl']
+
+        def jump():
+            a.keys(*ctrl('c'), *ctrl('j'))
 
         def look():
-            # The composer's text, point, the end marker, point-max, the
-            # buffer's name, whether it is shown, the window's start, and
-            # whether its text shows: any invisible character, its
-            # properties, and its width as laid out in the window.
+            # Draft, point, draft start, point-max, name, selection, window
+            # start, invisibility, text properties and the laid-out text width.
+            draft = '(buffer-string)' if separate else '(romacs-agent-log--draft)'
             return parity_live.read_sexp(a.eval(
-                f'(with-current-buffer {chat} (let ((end (marker-position romacs-agent-log--input))) '
-                '(list (romacs-agent-log--draft) (point) end (point-max) (buffer-name) '
-                '(eq (window-buffer (selected-window)) (current-buffer)) (window-start (selected-window)) '
-                '(cl-loop for p from end below (point-max) thereis (invisible-p p)) '
-                '(and (< end (point-max)) (format "%S" (text-properties-at end))) '
-                '(and (< end (point-max)) (car (window-text-pixel-size (selected-window) end (point-max)))))))'))
+                f'(with-current-buffer {composer_buffer(chat)} '
+                f'(let ((start {COMPOSER_START}) (window (get-buffer-window (current-buffer)))) '
+                f'(list {draft} (point) start (point-max) (buffer-name) '
+                '(eq window (selected-window)) (and window (window-start window)) '
+                '(cl-loop for p from start below (point-max) thereis (invisible-p p)) '
+                '(and (< start (point-max)) (format "%S" (text-properties-at start))) '
+                '(and window (< start (point-max)) '
+                '(car (window-text-pixel-size window start (point-max)))))))'))
+
+        def clear_draft():
+            a.eval(f'(with-current-buffer {composer_buffer(chat)} '
+                   f'(delete-region {COMPOSER_START} (point-max)))')
+
+        def transcript_top():
+            if separate:
+                jump()
+                until(lambda: a.eval(f'(and (eq (window-buffer) {chat}) buffer-read-only)') == 't',
+                      10, 'read-only transcript selected')
+            a.keys('-M', 'alt', '<', '-m', 'alt')
+
+        def fitted(rows):
+            return a.eval(
+                f'(let ((w (get-buffer-window {composer_buffer(chat)})) '
+                f'(body (* {rows} (frame-char-height)))) '
+                '(and w (= (window-body-height w t) body) '
+                '(= (window-pixel-height w) (+ body (window-bottom-divider-width w)))))') == 't'
 
         def messages():
             return parity_live.read_sexp(a.eval(f'(with-current-buffer "*Messages*" '
@@ -3209,7 +3252,8 @@ def composer(args, base, real=False):
                 pass
             state = look()
             steps[name] = {'state': state, 'expect': expect}
-            return state[0] == expect and not state[7] and state[8] in (None, 'nil') and (state[9] or 0) > 0
+            return (state[0] == expect and state[5] and not state[7]
+                    and state[8] in (None, 'nil') and (state[9] or 0) > 0)
 
         def cleared(name):
             """Kill the composer's line, as a user would: C-a C-k."""
@@ -3219,7 +3263,7 @@ def composer(args, base, real=False):
             except RuntimeError:
                 steps[name] = {'state': look(), 'expect': ''}
                 # Cleared for the steps after, whatever the keys did.
-                a.eval(f'(with-current-buffer {chat} (delete-region romacs-agent-log--input (point-max)))')
+                clear_draft()
                 return False
             return True
 
@@ -3229,6 +3273,8 @@ def composer(args, base, real=False):
             until(lambda: a.eval(f'(romacs-agent-done-seq {a.s(sid)})') != done, 120, f'{name} answered')
             a.idle(sid)
 
+        if separate:
+            until(lambda: fitted(1), 10, 'empty composer fits one row plus the divider')
         good = [typed('before_first_prompt', 'say hello from Romacs')]
         turn('first')
         # A call is open while a turn runs: typing then, and after the turn
@@ -3241,7 +3287,8 @@ def composer(args, base, real=False):
         last_call = lambda: (lambda tail: '⎿' in tail and '❯' not in tail)(
             re.split(r'^  (?=\S)', transcript(), flags=re.M)[-1])
         until(lambda: a.state(sid) == 'running' and last_call(), 15, 'tool output last')
-        steps['output_last'] = a.eval(f'(with-current-buffer {chat} (format "%S" (text-properties-at (1- romacs-agent-log--input))))')
+        boundary = 'romacs-agent-log--end' if separate else 'romacs-agent-log--input'
+        steps['output_last'] = a.eval(f'(with-current-buffer {chat} (format "%S" (text-properties-at (1- {boundary}))))')
         good.append(typed('while_output_last', 'typed while'))
         good.append(last_call() and a.state(sid) == 'running')
         release.write_text('')
@@ -3252,11 +3299,12 @@ def composer(args, base, real=False):
         a.keys('-k', 'BackSpace', '-k', 'BackSpace')
         good.append(typed('after_del', 'x', 'say agax'))
         # The chat's keys and its actions menu, with real keys.
-        ctrl = lambda key: ['-M', 'ctrl', '-k', key, '-m', 'ctrl']
         popup = lambda: a.eval('(and (boundp (quote keymap-popup--buffer)) (buffer-live-p keymap-popup--buffer) t)') == 't'
         good.append(cleared('composer cleared for keys'))
         a.keys('a'); a.keys(*ctrl('j')); a.keys('b')
         good.append(typed('newline', '', 'a\nb'))
+        if separate:
+            until(lambda: fitted(2), 10, 'composer fits two rows plus the divider')
         a.keys(*ctrl('c'), *ctrl('o'))
         try:
             until(popup, 10, 'the actions menu')
@@ -3271,7 +3319,7 @@ def composer(args, base, real=False):
         until(lambda: a.eval(f'(romacs-agent-title {a.s(sid)})') == '"menu title"', 10, 'renamed from the menu')
         steps['renamed'] = a.eval(f'(buffer-name (romacs-agent-log-chat {a.s(sid)}))')
         good.append(steps['menu_opened'] and 'menu title' in steps['renamed'])
-        a.eval(f'(with-current-buffer {chat} (delete-region romacs-agent-log--input (point-max)))')
+        clear_draft()
         # A message queued while a turn runs is sent when it ends.
         a.keys('slow 30'); a.keys('-k', 'Return')
         until(lambda: a.state(sid) in ('running', 'starting'), 10, 'the slow turn')
@@ -3288,6 +3336,7 @@ def composer(args, base, real=False):
         a.keys('slow 200'); a.keys('-k', 'Return')
         until(lambda: a.state(sid) in ('running', 'starting'), 10, 'the long turn')
         a.keys('say after interrupt'); a.keys(*ctrl('c'), *ctrl('k'))
+        until(lambda: look()[0] == '', 10, 'interrupted composer cleared')
         until(lambda: '❯ say after interrupt' in a.chat(sid), 30, 'sent after the interrupt')
         a.idle(sid)
         steps['interrupted_then_sent'] = 'after interrupt' in a.chat(sid).split('❯ say after interrupt', 1)[-1]
@@ -3297,7 +3346,7 @@ def composer(args, base, real=False):
         a.keys('-M', 'alt', '-k', 'p', '-m', 'alt')
         good.append(typed('history_previous', '', 'say after interrupt'))
         good.append(cleared('composer cleared for transcript keys'))
-        a.keys('-M', 'alt', '<', '-m', 'alt')
+        transcript_top()
         a.keys('?')
         try:
             until(popup, 10, 'the menu from the transcript')
@@ -3321,8 +3370,13 @@ def composer(args, base, real=False):
         # after a Codex turn an interrupt ended (no result).
         a.send(sid, 'slow 30')
         until(lambda: a.state(sid) in ('running', 'starting'), 10, 'a turn to queue behind')
+        if separate:
+            a.eval(f'(setq s8b-killed-composer {composer_buffer(chat)})')
         a.eval(f'(progn (romacs-agent-send-later {a.s(sid)} "say queued unseen") '
                f'(let ((kill-buffer-query-functions nil)) (kill-buffer (romacs-agent-log-chat {a.s(sid)}))) t)')
+        if separate:
+            steps['composer_killed_with_chat'] = a.eval('(not (buffer-live-p s8b-killed-composer))') == 't'
+            good.append(steps['composer_killed_with_chat'])
         until(lambda: 'queued unseen' in (a.results(sid) or [''])[-1], 40, 'the queued message sent with no chat')
         a.idle(sid)
         a.eval(f'(progn (save-window-excursion (romacs-agent-show {a.s(sid)})) '
@@ -3336,6 +3390,9 @@ def composer(args, base, real=False):
         steps['queue_survives'] = True
         a.providers([('claude', '~/.claude')])
         # Non-ASCII typed with real keys, then sent: the harness gets it whole.
+        if separate:
+            until(lambda: a.eval(f'(eq (window-buffer) {chat})') == 't', 10, 'switched to chat')
+        jump()
         good.append(cleared('composer cleared for unicode'))
         good.append(typed('unicode_typed', f'say {UNICODE}'))
         turn('unicode')
@@ -3366,7 +3423,9 @@ def composer(args, base, real=False):
         yanked = parity_live.read_sexp(a.eval(f'(with-current-buffer {chat} (buffer-substring-no-properties (point-min) (+ (point-min) 5)))'))
         a.keys('-M', 'ctrl', '-k', 'y', '-m', 'ctrl')
         good.append(typed('yanked_transcript', '', yanked))
-        steps['after_change_hook_kept'] = a.eval(f'(with-current-buffer {chat} (and (memq (function romacs-agent-log--composer-plain) after-change-functions) t))')
+        steps['after_change_hook_kept'] = a.eval(
+            f'(with-current-buffer {composer_buffer(chat)} '
+            '(and (memq (function romacs-agent-log--composer-plain) after-change-functions) t))')
         good.append(steps['after_change_hook_kept'] == 't')
         good.append(cleared('composer killed'))
         # A long wrapped transcript: replies far wider than the window.
@@ -3380,13 +3439,16 @@ def composer(args, base, real=False):
         good.append(typed('after_recenter', ' fourth', 'third fourth'))
         a.eval(f'(progn (romacs-agent-show {a.s(sid)}) t)')
         good.append(typed('after_show_again', ' fifth', 'third fourth fifth'))
-        # Point in the transcript (M-<, as a scroll leaves it): a key typed
-        # there goes to the composer (SPC there scrolls); M-> from there
-        # reaches it too.
-        a.keys('-M', 'alt', '<', '-m', 'alt')
+        # A key typed from the top of the transcript lands in the draft.
+        transcript_top()
+        before_typing = transcript()
         good.append(typed('typed_in_transcript', '+sixth', 'third fourth fifth+sixth'))
-        a.keys('-M', 'alt', '<', '-m', 'alt')
+        if separate:
+            good.append(transcript() == before_typing)
+        transcript_top()
         a.keys('-M', 'alt', '>', '-m', 'alt')
+        if separate:
+            jump()
         good.append(typed('after_top_then_end', ' seventh', 'third fourth fifth+sixth seventh'))
         good.append(cleared('composer killed again'))
         # A session started from the board with c: its chat opens with no
@@ -3401,14 +3463,14 @@ def composer(args, base, real=False):
               10, 'session started')
         sid = next(iter(set(parity_live.read_sexp(a.eval('(mapcar (function romacs-agent-id) (romacs-agent-sessions))'))) - before))
         chat = f'(romacs-agent-log-chat {a.s(sid)})'
-        until(lambda: a.eval(f'(eq (window-buffer (selected-window)) {chat})') == 't', 10, 'home chat shown')
+        until(lambda: a.eval(f'(eq (window-buffer) {composer_buffer(chat)})') == 't', 10, 'home composer selected')
         good.append(typed('home_first_prompt', 'say hello from Romacs'))
         turn('home first')
         good.append(typed('home_session', 'say from home'))
         turn('home')
         good.append(typed('home_after_turn', 'more'))
         said = messages()
-        result = {'steps': steps, 'messages': said[-1500:], 'title': look()[4]}
+        result = {'steps': steps, 'messages': said[-1500:], 'title': look()[4], 'separate_composer': separate}
         result['failed'] = [i for i, check in enumerate(good) if not check]
         result['ok'] = all(good) and not any(word in said for word in ('unsupported', 'read-only', 'error', 'Error'))
         if not real:
@@ -4043,10 +4105,12 @@ def board_keys(args, base):
         a.keyboard_ready()
         board = '(get-buffer-window "*romacs-agents*" t)'
         shown = lambda: a.eval(f'(and {board} (frame-visible-p (window-frame {board})) t)')
-        # The session whose chat the selected window shows, if any.
+        # The session whose chat the selected window shows, or whose
+        # composer it shows below its chat, if any.
         showing = lambda: parity_live.read_sexp(a.eval(
             '(with-current-buffer (window-buffer (selected-window)) '
-            '(and (bound-and-true-p romacs-agent-ui--session) (romacs-agent-id romacs-agent-ui--session)))'))
+            "(with-current-buffer (if (derived-mode-p 'romacs-agent-compose-mode) romacs-agent-log--chat (current-buffer)) "
+            '(and (bound-and-true-p romacs-agent-ui--session) (romacs-agent-id romacs-agent-ui--session))))'))
 
         def open_board():
             # Keys must reach the frame, then the board, before one is
@@ -4257,14 +4321,16 @@ def start_picker(args, base):
             return directory
 
         def chat_shown():
-            """Whether the selected window shows a chat, its composer the place to type."""
+            """Whether the selected window shows a chat's composer, the place to type."""
             return a.eval('(with-current-buffer (window-buffer (selected-window)) '
-                          '(and (derived-mode-p (quote romacs-agent-log-mode)) romacs-agent-log--input (not (active-minibuffer-window)) t))') == 't'
+                          "(and (or (derived-mode-p 'romacs-agent-compose-mode) "
+                          "(and (derived-mode-p 'romacs-agent-log-mode) (bound-and-true-p romacs-agent-log--input))) "
+                          '(not (active-minibuffer-window)) t))') == 't'
 
         def holds(text):
-            """Whether the selected chat's composer ends with TEXT."""
-            return a.eval('(with-current-buffer (window-buffer (selected-window)) (and romacs-agent-log--input (string-suffix-p '
-                          + lisp_text(text) + ' (buffer-substring-no-properties romacs-agent-log--input (point-max)))))') == 't'
+            """Whether the selected composer ends with TEXT."""
+            return a.eval('(with-current-buffer (window-buffer (selected-window)) (string-suffix-p '
+                          + lisp_text(text) + f' (buffer-substring-no-properties {COMPOSER_START} (point-max))))') == 't'
 
         def composed(text):
             """TEXT typed in the chat a start opened: its first message."""
@@ -4748,16 +4814,17 @@ def chat_images(args, base):
         a.idle(sid)
         a.eval(f'(progn (romacs-agent-show {a.s(sid)}) (delete-other-windows) t)')
         a.keyboard_ready()
-        chat = '(window-buffer (selected-window))'
+        chat = f'(romacs-agent-log-chat {a.s(sid)})'
+        typing = composer_buffer(chat)
 
         def composer():
             return parity_live.read_sexp(a.eval(
-                f'(with-current-buffer {chat} (buffer-substring-no-properties romacs-agent-log--input (point-max)))'))
+                f'(with-current-buffer {typing} (buffer-substring-no-properties {COMPOSER_START} (point-max)))'))
 
         def drawn():
             """The composer's drawn links' files, and whether images show under it."""
             files, block = parity_live.read_sexp(a.eval(
-                f'(with-current-buffer {chat} (list (cons 0 (mapcar (lambda (o) (overlay-get o (quote romacs-agent-log-image))) '
+                f'(with-current-buffer {typing} (list (cons 0 (mapcar (lambda (o) (overlay-get o (quote romacs-agent-log-image))) '
                 '(car romacs-agent-log-images--composer))) (if (cdr romacs-agent-log-images--composer) 1 0)))'))
             return [files[1:], block == 1]
 

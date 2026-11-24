@@ -139,33 +139,26 @@
                  'accepted)))))
 
 (defun romacs-agent-submit-tests--chat (session body)
-  "Run BODY in SESSION's real chat, with a draft and a clean-up."
+  "Run BODY in the composer of SESSION's real chat, with a draft and a clean-up."
   (let ((chat (romacs-agent-log-chat session t)))
     (unwind-protect
-        (with-current-buffer chat
-          (goto-char (point-max))
+        (with-current-buffer (romacs-agent-log-composer-buffer chat)
           (insert "  say once  ")
           (funcall body))
       (kill-buffer chat))))
 
 (defun romacs-agent-submit-tests--ret ()
-  "Invoke the binding RET has at point in the chat."
+  "Invoke the binding RET has at point in the composer."
   (when-let* ((command (key-binding (kbd "RET"))) ((commandp command)))
     (call-interactively command)))
 
 (defun romacs-agent-submit-tests--draft ()
-  (buffer-substring-no-properties romacs-agent-log--input (point-max)))
+  (buffer-substring-no-properties (point-min) (point-max)))
 
 (defun romacs-agent-submit-tests--sending-face-p ()
-  (let ((start (save-excursion
-                 (goto-char romacs-agent-log--input)
-                 (let ((inhibit-field-text-motion t)) (line-beginning-position)))))
-    (cl-loop for p from start to romacs-agent-log--input
-             thereis (let ((face (get-char-property p 'face))
-                           (prefix (get-char-property p 'line-prefix)))
-                       (string-match-p "\\_<romacs-agent-compose-sending\\_>"
-                                       (format "%S %S" face (and (stringp prefix)
-                                                                 (text-properties-at 0 prefix))))))))
+  "Whether the prompt before the draft shows in the sending face."
+  (let ((mark (overlay-get romacs-agent-compose--start 'before-string)))
+    (eq (get-text-property (1- (length mark)) 'face mark) 'romacs-agent-compose-sending)))
 
 (defun romacs-agent-submit-tests--held (body)
   "Run BODY in a chat whose submit callbacks are captured for explicit release."

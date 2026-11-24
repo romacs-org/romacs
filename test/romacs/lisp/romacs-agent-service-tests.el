@@ -783,11 +783,10 @@ a state root of its own, and a service of its own on `socket'."
         (setq-local romacs-agent-log--session session
                     romacs-agent-log--source source
                     romacs-agent-log--end (point-min-marker)
-                    romacs-agent-log--input (point-min-marker)
                     romacs-agent-log--prompts nil)
         (set-marker-insertion-type romacs-agent-log--end t)
         (romacs-agent-log--separator t)
-        (goto-char (point-max))
+        (set-buffer (romacs-agent-log-composer-buffer (current-buffer)))
         (insert "sent prompt")
         (cl-flet ((answer (result error)
                     (funcall reply result error)
@@ -892,20 +891,20 @@ a state root of its own, and a service of its own on `socket'."
               (setq remote (romacs-agent-remote-chat id))
               (should (wait (string-search "answer 3" (with-current-buffer remote (buffer-string)))))
               (with-current-buffer remote
-                (goto-char (point-max))
-                (insert "from afar")
-                (romacs-agent-log-send))
+                (romacs-agent-log-in-composer
+                  (insert "from afar")
+                  (romacs-agent-log-send)))
               (should (wait (equal (car calls) '(send "from afar"))))
               (should (wait (equal (with-current-buffer remote (romacs-agent-log--draft)) "")))
               ;; Refused: the text stays the composer's.
               (cl-letf (((symbol-function 'romacs-agent--admit) (lambda (&rest _) (user-error "Its harness ended"))))
                 (with-current-buffer remote
-                  (goto-char (point-max))
-                  (insert "not sent")
-                  (romacs-agent-log-send)
-                  (should (equal (romacs-agent-log--draft) "not sent"))
-                  (should (wait (not romacs-agent-log--sending)))
-                  (should (equal (romacs-agent-log--draft) "not sent")))))
+                  (romacs-agent-log-in-composer
+                    (insert "not sent")
+                    (romacs-agent-log-send)
+                    (should (equal (romacs-agent-log--draft) "not sent"))
+                    (should (wait (not romacs-agent-log--sending)))
+                    (should (equal (romacs-agent-log--draft) "not sent"))))))
           (romacs-agent-remote-disconnect)
           (when remote (kill-buffer remote)))))))
 
