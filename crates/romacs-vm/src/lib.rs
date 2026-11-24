@@ -36,6 +36,8 @@ use interpreted_closure::{CaptureBinding, CaptureLayout, CaptureSlot};
 mod cell_pairs;
 mod oclosure;
 mod host_input;
+mod typing;
+pub use typing::{KeyOutcome, Outcome, SubmittedFrame, TypingPicture, Unattributed};
 mod quit;
 mod gap_probe;
 pub use gc_mark::{forbid_threads as forbid_gc_threads, set_workers as set_gc_workers};
@@ -1506,6 +1508,10 @@ pub struct Vm {
     /// top-level frame it came from: the next read's (host_input.rs).
     #[snapshot(at_rest)]
     deferred_event: Option<(host_input::HostEvent, Option<u64>)>,
+    /// The native keys command steps read, and the frames that showed
+    /// what the steps did (typing.rs).
+    #[snapshot(at_rest)]
+    typing: typing::Typing,
     /// The embedder's layout while one is attached (layout_host.rs).
     #[snapshot(at_rest)]
     layout_host: Option<Box<dyn layout_host::LayoutHost>>,
@@ -1877,6 +1883,16 @@ impl Vm {
     pub(crate) fn private_objects(&self) -> usize {
         self.conses.live() + self.cells.live() + self.closures.live() + self.objects.live()
     }
+    /// The specials that say how text properties are read and yanked
+    /// (textprop.c, subr.el), and the slots `get-text-property' reads.
+    fn declare_text_property_specials(&mut self) {
+        self.declare_special_raw("default-text-properties", Value::NIL);
+        self.declare_special_raw("char-property-alias-alist", Value::NIL);
+        self.textget_slots = [self.slot("char-property-alias-alist"), self.slot("default-text-properties")];
+        for name in ["text-property-default-nonsticky", "yank-excluded-properties", "yank-handled-properties"] {
+            self.specials.insert(name.into());
+        }
+    }
     pub fn new() -> Self {
         // emacs_wd is taken when Emacs starts, not when first used.
         let _ = environment::startup_directory();
@@ -1935,6 +1951,7 @@ impl Vm {
             host_input: None,
             host_wait: None,
             deferred_event: None,
+            typing: typing::Typing::default(),
             layout_host: None,
             display: None,
             visual: Box::default(),
@@ -2116,12 +2133,7 @@ impl Vm {
         vm.declare_special_raw("inhibit-eol-conversion", Value::NIL);
         vm.declare_special_raw("text-quoting-style", Value::NIL);
         vm.declare_special_raw("internal--text-quoting-flag", Value::TRUE);
-        vm.declare_special_raw("default-text-properties", Value::NIL);
-        vm.declare_special_raw("char-property-alias-alist", Value::NIL);
-        vm.textget_slots = [vm.slot("char-property-alias-alist"), vm.slot("default-text-properties")];
-        vm.specials.insert("text-property-default-nonsticky".into());
-        vm.specials.insert("yank-excluded-properties".into());
-        vm.specials.insert("yank-handled-properties".into());
+        vm.declare_text_property_specials();
         vm.declare_special_raw("font-lock-defaults", Value::NIL);
         // keyboard.c:13843: the command that entered the innermost
         // minibuffer, which read_minibuf binds (lisp/vm/minibuf.el).

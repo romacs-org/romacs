@@ -68,7 +68,7 @@ whether another must follow it (AGAIN: t, or `whole' for all the list)."
     (process-put process 'romacs-agent-client client)
     (romacs-agent-client-request
      client "agents/hello"
-     (romacs-agent-rpc-object "protocol" "romacs-agents" "version" [1 0]
+     (romacs-agent-rpc-object "protocol" "romacs-agents" "version" [1 1]
                               "client" (romacs-agent-rpc-object "name" "romacs" "version" emacs-version
                                                                 "instance" (romacs-agent-client--instance))
                               "capabilities" [])
@@ -81,6 +81,21 @@ whether another must follow it (AGAIN: t, or `whole' for all the list)."
 (defun romacs-agent-client-live-p (client)
   "Non-nil while CLIENT's connection to its service is live."
   (romacs-agent-rpc-live-p (romacs-agent-client-rpc client)))
+
+(defun romacs-agent-client-minor (client)
+  "The minor version CLIENT and its service agreed on in the welcome: nil
+before it, 0 when it names none."
+  (let* ((server (romacs-agent-client-server client))
+         (version (and (hash-table-p server) (gethash "version" server))))
+    (cond ((not (hash-table-p server)) nil)
+          ((and (vectorp version) (> (length version) 1) (integerp (aref version 1))) (aref version 1))
+          (t 0))))
+
+(defun romacs-agent-client-forget (client callback)
+  "Let CLIENT's requests that wait on CALLBACK go: a reply to one, should
+it come, is dropped."
+  (let ((pending (romacs-agent-client-pending client)))
+    (maphash (lambda (id waiting) (when (eq waiting callback) (remhash id pending))) pending)))
 
 (defun romacs-agent-client-close (client)
   "Close CLIENT's connection to its service, dropping what it held unsent.

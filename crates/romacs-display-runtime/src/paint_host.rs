@@ -124,64 +124,34 @@ impl PaintHost {
     }
 }
 
-// Enabled only by the standalone paint-host latency probe.
-// Pair by the actual read receipt, never by FIFO position: native admission
-// may discard events before delivery, so a positional side queue can invent lag.
-static TRACE_KEYS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-static KEY_TIMES: std::sync::Mutex<Vec<(romacs_display_protocol::input_progress::InputReceipt, std::time::Instant)>> =
-    std::sync::Mutex::new(Vec::new());
-
 pub fn enable_key_latency_trace() {
     let _ = TRACE_START.set(std::time::Instant::now());
-    TRACE_KEYS.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 static TRACE_START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+
+/// When the latency trace began, which its records' times count from.
+pub fn trace_origin() -> Option<std::time::Instant> {
+    TRACE_START.get().copied()
+}
+
+/// Under the latency trace, one line as FRAME's PRESENTATION draws:
+/// `{"diagnostic":"drawn","frame":F,"presentation":P,"drawn_ns":N}`, N the
+/// nanoseconds from the trace's start to DRAWN, when the render thread's
+/// present call returned (not when the compositor showed it). A reader
+/// joins a key's `latency-key` record to the first drawn presentation at
+/// or after the key's.
+pub(crate) fn trace_drawn(frame: u64, presentation: u64, drawn: romacs_display_protocol::frame_time::EventTime) {
+    if let Some(start) = TRACE_START.get() {
+        let since = drawn.saturating_since(romacs_display_protocol::frame_time::EventTime::from_observed_instant(*start));
+        eprintln!("{{\"diagnostic\":\"drawn\",\"frame\":{frame},\"presentation\":{presentation},\"drawn_ns\":{}}}", since.as_nanos());
+    }
+}
 /// Under the latency trace, one line as a GPU startup PHASE ends:
 /// `romacs-gpu: {"phase": PHASE, "ms": since the trace was enabled}`.
 pub(crate) fn trace_gpu(phase: &str) {
-    if let Some(start) = TRACE_START.get().filter(|_| TRACE_KEYS.load(std::sync::atomic::Ordering::Relaxed)) {
+    if let Some(start) = TRACE_START.get() {
         eprintln!("romacs-gpu: {{\"phase\":\"{phase}\",\"ms\":{:.1}}}", start.elapsed().as_secs_f64() * 1000.0);
     }
-}
-pub(crate) fn trace_key_enqueue(event: &crate::thread_comm::InputEvent, delivery: Option<&romacs_display_protocol::input_progress::InputDelivery>) {
-    if TRACE_KEYS.load(std::sync::atomic::Ordering::Relaxed)
-        && matches!(event, crate::thread_comm::InputEvent::Key { pressed: true, .. })
-        && let Some(delivery) = delivery {
-        let mut times = KEY_TIMES.lock().unwrap();
-        times.retain(|(receipt, _)| !receipt.taken());
-        times.push((delivery.receipt(), std::time::Instant::now()));
-    }
-}
-pub fn take_key_enqueue_time(event: &crate::thread_comm::InputEvent) -> Option<std::time::Instant> {
-    match event {
-        crate::thread_comm::InputEvent::Tracked { delivery, .. } => {
-            let actual = delivery.receipt();
-            let mut times = KEY_TIMES.lock().unwrap();
-            let index = times.iter().position(|(queued, _)| queued.same_input(&actual))?;
-            Some(times.remove(index).1)
-        }
-        _ => None,
-    }
-}
-
-#[cfg(test)]
-#[test]
-fn latency_receipt_does_not_pair_a_discarded_native_event() {
-    use crate::thread_comm::InputEvent;
-    use romacs_display_protocol::input_progress::InputDelivery;
-    let discarded = InputDelivery::new();
-    let delivered = InputDelivery::new();
-    let first = std::time::Instant::now();
-    let second = first + std::time::Duration::from_millis(1);
-    KEY_TIMES.lock().unwrap().extend([(discarded.receipt(), first), (delivered.receipt(), second)]);
-    drop(discarded);
-    let event = InputEvent::Tracked { delivery: delivered, event: Box::new(InputEvent::Key {
-        key: crate::host_types::FrontendKey::Character('k'), modifiers: 0,
-        pressed: true, emacs_frame_id: 1,
-    }) };
-    assert_eq!(take_key_enqueue_time(&event), Some(second));
-    assert_eq!(take_key_enqueue_time(&event), None, "one event has one timestamp");
-    KEY_TIMES.lock().unwrap().retain(|(receipt, _)| !receipt.taken());
 }
 
 impl PaintSender {

@@ -67,8 +67,10 @@ const SIDES: &[(&str, Side)] = &[
     ("input.clipboard_text", Through), ("input.set_clipboard_text", Through), ("input.display_animates", Through),
     ("input.native_window", Through), ("input.pointer", Through), ("input.take_key_repeats", Through),
     ("input.top_level_frames", Through), ("input.focus_frame", Through), ("input.event_frame", Through),
-    // prompt.rs: a list kept for the next wait, and the images' own flag.
-    ("input.watch_processes", Own), ("input.images_behind", Own),
+    // prompt.rs: a list kept for the next wait, and the images' own flag;
+    // the keys' latency records, a diagnostic written only under
+    // --trace-latency.
+    ("input.watch_processes", Own), ("input.images_behind", Own), ("input.typing_settled", Own),
     // terminal_service.rs: each session's mirror is locked against the
     // thread that reads its helper's pushes, and the mailbox against every
     // session's.
@@ -191,6 +193,7 @@ impl HostInput for Counted<Box<dyn HostInput>> {
         fn key_pending(&mut self) -> bool;
         fn redisplay(&mut self, frame: HostFrame) -> Result<Vec<WindowEnd>, String>;
         fn next_event(&mut self, timeout: Option<Duration>) -> Result<HostEvent, String>;
+        fn typing_settled(&mut self, outcomes: Vec<crate::KeyOutcome>) -> Vec<crate::KeyOutcome>;
         fn watch_processes(&mut self, fds: &[(std::os::fd::RawFd, i16)]);
         fn images_behind(&mut self) -> bool;
         fn clipboard_text(&mut self) -> Result<Option<String>, String>;

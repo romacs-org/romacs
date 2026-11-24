@@ -552,3 +552,20 @@ fn char_resolve_modifiers(_cx, character: Value) {
     let c = character.integer_value().ok_or_else(|| Fault::Wrong("fixnump", character))?;
     Ok(Value::integer(resolve_modifier_mask(c)).unwrap())
 }}
+
+// A command step begins: the native keys read from now are its own, until
+// a step inside it begins (typing.rs). Value: nil.
+defsubr! { name = "romacs--typing-begin", gnu = "romacs:keyboard", effect = Global,
+fn typing_begin(cx) {
+    cx.typing_begin();
+    Ok(Value::NIL)
+}}
+
+// The step that began last ends, LOCAL unless thrown out of: its keys wait
+// for the next redisplay to show what it did, or, thrown out of, belong to
+// the step around it (typing.rs). Value: nil.
+defsubr! { name = "romacs--typing-end", gnu = "romacs:keyboard", effect = Global,
+fn typing_end(cx, local: Value) {
+    cx.typing_end(local != Value::NIL);
+    Ok(Value::NIL)
+}}

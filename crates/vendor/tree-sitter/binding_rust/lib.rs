@@ -5,13 +5,10 @@
 pub mod ffi;
 mod util;
 
-#[cfg(any(
-    not(feature = "std"),
-    all(target_arch = "wasm32", target_os = "unknown")
-))]
+#[cfg(not(feature = "std"))]
 extern crate alloc;
 #[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, string::String, string::ToString, vec::Vec};
+use alloc::{string::String, string::ToString, vec::Vec};
 use core::{
     ffi::{CStr, c_char, c_void},
     fmt::{self, Write},
@@ -24,21 +21,7 @@ use core::{
 };
 #[cfg(feature = "std")]
 use std::error;
-#[cfg(all(unix, feature = "std"))]
-use std::os::fd::AsRawFd;
-#[cfg(all(windows, feature = "std"))]
-use std::os::windows::io::AsRawHandle;
-
 use tree_sitter_language::LanguageFn;
-
-#[cfg(feature = "wasm")]
-mod wasm_language;
-#[cfg(feature = "wasm")]
-#[cfg_attr(docsrs, doc(cfg(feature = "wasm")))]
-pub use wasm_language::*;
-
-#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-mod wasm_allocator;
 
 /// The latest ABI version that is supported by the current version of the
 /// library.
@@ -234,43 +217,20 @@ impl<'a> ParseOptions<'a> {
     }
 }
 
-/// A type of log message.
-#[derive(Debug, PartialEq, Eq)]
-pub enum LogType {
-    Parse,
-    Lex,
-}
-
 type FieldId = NonZeroU16;
-
-/// A callback that receives log messages during parsing.
-type Logger = Box<dyn FnMut(LogType, &str) + Send + 'static>;
-
-/// A callback that receives log messages during parsing, with relaxed constraints.
-type UnsafeLogger<'a> = Box<dyn FnMut(LogType, &str) + Send + 'a>;
 
 /// A callback that receives the parse state during parsing.
 type ParseProgressCallback<'a> = &'a mut dyn FnMut(&ParseState) -> ControlFlow<()>;
-
-pub trait Decode {
-    /// A callback that decodes the next code point from the input slice. It should return the code
-    /// point, and how many bytes were decoded.
-    fn decode(bytes: &[u8]) -> (i32, u32);
-}
 
 /// A stateful object for walking a syntax [`Tree`] efficiently.
 #[doc(alias = "TSTreeCursor")]
 pub struct TreeCursor<'tree>(ffi::TSTreeCursor, PhantomData<&'tree ()>);
 
 /// An error that occurred when trying to assign a [`Language`] to a [`Parser`].
-/// If the `wasm` feature is enabled, this can also indicate a failure to load
-/// the Wasm store.
 #[derive(Debug, PartialEq, Eq)]
 pub enum LanguageError {
     Version(usize),
     NotParseable,
-    #[cfg(feature = "wasm")]
-    Wasm,
 }
 
 /// An error that occurred in [`Parser::set_included_ranges`].
@@ -559,15 +519,7 @@ impl Parser {
             if !language.is_parseable() {
                 return Err(LanguageError::NotParseable);
             }
-            #[cfg_attr(
-                not(feature = "wasm"),
-                expect(unused_variables, reason = "only used when wasm feature is enabled")
-            )]
-            let success = unsafe { ffi::ts_parser_set_language(self.0.as_ptr(), language.0) };
-            #[cfg(feature = "wasm")]
-            if !success {
-                return Err(LanguageError::Wasm);
-            }
+            unsafe { ffi::ts_parser_set_language(self.0.as_ptr(), language.0) };
             Ok(())
         } else {
             Err(LanguageError::Version(version))
@@ -580,114 +532,6 @@ impl Parser {
     pub fn language(&self) -> Option<LanguageRef<'_>> {
         let ptr = unsafe { ffi::ts_parser_language(self.0.as_ptr()) };
         (!ptr.is_null()).then_some(LanguageRef(ptr, PhantomData))
-    }
-
-    /// Get the parser's current logger.
-    #[doc(alias = "ts_parser_logger")]
-    #[must_use]
-    pub fn logger(&self) -> Option<&Logger> {
-        let logger = unsafe { ffi::ts_parser_logger(self.0.as_ptr()) };
-        unsafe { logger.payload.cast::<Logger>().as_ref() }
-    }
-
-    /// Set the logging callback that the parser should use during parsing.
-    ///
-    /// To log through a callback that borrows non-`'static` data, see
-    /// [`set_logger_unchecked`](Parser::set_logger_unchecked).
-    #[doc(alias = "ts_parser_set_logger")]
-    pub fn set_logger(&mut self, logger: Option<Logger>) {
-        // SAFETY: `Logger` is `Send + 'static`
-        unsafe { self.set_logger_unchecked(logger) };
-    }
-
-    /// Set the logging callback, allowing the callback to borrow non-`'static`
-    /// data. See [`set_logger`](Parser::set_logger).
-    ///
-    /// # Safety
-    ///
-    /// Any data borrowed by `logger` must remain valid until the logger is
-    /// removed. Equivalently, the parser must not be used to parse once the
-    /// borrowed data has gone out of scope.
-    pub unsafe fn set_logger_unchecked(&mut self, logger: Option<UnsafeLogger<'_>>) {
-        let prev_logger = unsafe { ffi::ts_parser_logger(self.0.as_ptr()) };
-        if !prev_logger.payload.is_null() {
-            drop(unsafe { Box::from_raw(prev_logger.payload.cast::<Logger>()) });
-        }
-
-        let c_logger = if let Some(logger) = logger {
-            let container = Box::new(logger);
-
-            unsafe extern "C" fn log(
-                payload: *mut c_void,
-                c_log_type: ffi::TSLogType,
-                c_message: *const c_char,
-            ) {
-                unsafe {
-                    let callback = payload.cast::<Logger>().as_mut().unwrap();
-                    if let Ok(message) = CStr::from_ptr(c_message).to_str() {
-                        let log_type = if c_log_type == ffi::TSLogTypeParse {
-                            LogType::Parse
-                        } else {
-                            LogType::Lex
-                        };
-                        callback(log_type, message);
-                    }
-                }
-            }
-
-            let raw_container = Box::into_raw(container);
-
-            ffi::TSLogger {
-                payload: raw_container.cast::<c_void>(),
-                log: Some(log),
-            }
-        } else {
-            ffi::TSLogger {
-                payload: ptr::null_mut(),
-                log: None,
-            }
-        };
-
-        unsafe { ffi::ts_parser_set_logger(self.0.as_ptr(), c_logger) };
-    }
-
-    /// Set the destination to which the parser should write debugging graphs
-    /// during parsing. The graphs are formatted in the DOT language. You may
-    /// want to pipe these graphs directly to a `dot(1)` process in order to
-    /// generate SVG output.
-    #[doc(alias = "ts_parser_print_dot_graphs")]
-    #[cfg(not(target_os = "wasi"))]
-    #[cfg(feature = "std")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
-    pub fn print_dot_graphs(
-        &mut self,
-        #[cfg(unix)] file: &impl AsRawFd,
-        #[cfg(windows)] file: &impl AsRawHandle,
-    ) {
-        #[cfg(unix)]
-        {
-            let fd = file.as_raw_fd();
-            unsafe {
-                ffi::ts_parser_print_dot_graphs(self.0.as_ptr(), ffi::_ts_dup(fd));
-            }
-        }
-
-        #[cfg(windows)]
-        {
-            let handle = file.as_raw_handle();
-            unsafe {
-                ffi::ts_parser_print_dot_graphs(self.0.as_ptr(), ffi::_ts_dup(handle));
-            }
-        }
-    }
-
-    /// Stop the parser from printing debugging graphs while parsing.
-    #[doc(alias = "ts_parser_print_dot_graphs")]
-    #[cfg(not(target_os = "wasi"))]
-    #[cfg(feature = "std")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
-    pub fn stop_printing_dot_graphs(&mut self) {
-        unsafe { ffi::ts_parser_print_dot_graphs(self.0.as_ptr(), -1) }
     }
 
     /// Parse a slice of UTF8 text.
@@ -814,376 +658,6 @@ impl Parser {
         }
     }
 
-    /// Parse a slice of UTF16 little-endian text.
-    ///
-    /// # Arguments:
-    /// * `text` The UTF16-encoded text to parse.
-    /// * `old_tree` A previous syntax tree parsed from the same document. If the text of the
-    ///   document has changed since `old_tree` was created, then you must edit `old_tree` to match
-    ///   the new text using [`Tree::edit`].
-    pub fn parse_utf16_le(
-        &mut self,
-        input: impl AsRef<[u16]>,
-        old_tree: Option<&Tree>,
-    ) -> Option<Tree> {
-        let code_points = input.as_ref();
-        let len = code_points.len();
-        self.parse_utf16_le_with_options(
-            &mut |i, _| {
-                if i < len {
-                    &code_points[i..]
-                } else {
-                    Default::default()
-                }
-            },
-            old_tree,
-            None,
-        )
-    }
-
-    /// Parse UTF16 little-endian text provided in chunks by a callback.
-    ///
-    /// # Arguments:
-    /// * `callback` A function that takes a code point offset and position and returns a slice of
-    ///   UTF16-encoded text starting at that byte offset and position. The slices can be of any
-    ///   length. If the given position is at the end of the text, the callback should return an
-    ///   empty slice.
-    /// * `old_tree` A previous syntax tree parsed from the same document. If the text of the
-    ///   document has changed since `old_tree` was created, then you must edit `old_tree` to match
-    ///   the new text using [`Tree::edit`].
-    /// * `options` Options for parsing the text. This can be used to set a progress callback.
-    pub fn parse_utf16_le_with_options<T: AsRef<[u16]>, F: FnMut(usize, Point) -> T>(
-        &mut self,
-        callback: &mut F,
-        old_tree: Option<&Tree>,
-        options: Option<ParseOptions>,
-    ) -> Option<Tree> {
-        type Payload<'a, F, T> = (&'a mut F, Option<T>);
-
-        unsafe extern "C" fn progress(state: *mut ffi::TSParseState) -> bool {
-            unsafe {
-                let callback = (*state)
-                    .payload
-                    .cast::<ParseProgressCallback>()
-                    .as_mut()
-                    .unwrap();
-                match callback(&ParseState::from_raw(state)) {
-                    ControlFlow::Continue(()) => false,
-                    ControlFlow::Break(()) => true,
-                }
-            }
-        }
-
-        // This C function is passed to Tree-sitter as the input callback.
-        unsafe extern "C" fn read<T: AsRef<[u16]>, F: FnMut(usize, Point) -> T>(
-            payload: *mut c_void,
-            byte_offset: u32,
-            position: ffi::TSPoint,
-            bytes_read: *mut u32,
-        ) -> *const c_char {
-            unsafe {
-                let (callback, text) = payload.cast::<Payload<F, T>>().as_mut().unwrap();
-                *text = Some(callback(
-                    (byte_offset / 2) as usize,
-                    Point {
-                        row: position.row as usize,
-                        column: position.column as usize / 2,
-                    },
-                ));
-                let slice = text.as_ref().unwrap().as_ref();
-                *bytes_read = slice.len() as u32 * 2;
-                slice.as_ptr().cast::<c_char>()
-            }
-        }
-
-        let empty_options = ffi::TSParseOptions {
-            payload: ptr::null_mut(),
-            progress_callback: None,
-        };
-
-        let mut callback_ptr;
-        let parse_options = if let Some(options) = options {
-            if let Some(cb) = options.progress_callback {
-                callback_ptr = cb;
-                ffi::TSParseOptions {
-                    payload: core::ptr::addr_of_mut!(callback_ptr).cast::<c_void>(),
-                    progress_callback: Some(progress),
-                }
-            } else {
-                empty_options
-            }
-        } else {
-            empty_options
-        };
-
-        // A pointer to this payload is passed on every call to the `read` C function.
-        // The payload contains two things:
-        // 1. A reference to the rust `callback`.
-        // 2. The text that was returned from the previous call to `callback`. This allows the
-        //    callback to return owned values like vectors.
-        let mut payload: Payload<F, T> = (callback, None);
-
-        let c_input = ffi::TSInput {
-            payload: core::ptr::addr_of_mut!(payload).cast::<c_void>(),
-            read: Some(read::<T, F>),
-            encoding: ffi::TSInputEncodingUTF16LE,
-            decode: None,
-        };
-
-        let c_old_tree = old_tree.map_or(ptr::null_mut(), |t| t.0.as_ptr());
-        unsafe {
-            let c_new_tree = ffi::ts_parser_parse_with_options(
-                self.0.as_ptr(),
-                c_old_tree,
-                c_input,
-                parse_options,
-            );
-
-            NonNull::new(c_new_tree).map(Tree)
-        }
-    }
-
-    /// Parse a slice of UTF16 big-endian text.
-    ///
-    /// # Arguments:
-    /// * `text` The UTF16-encoded text to parse.
-    /// * `old_tree` A previous syntax tree parsed from the same document. If the text of the
-    ///   document has changed since `old_tree` was created, then you must edit `old_tree` to match
-    ///   the new text using [`Tree::edit`].
-    pub fn parse_utf16_be(
-        &mut self,
-        input: impl AsRef<[u16]>,
-        old_tree: Option<&Tree>,
-    ) -> Option<Tree> {
-        let code_points = input.as_ref();
-        let len = code_points.len();
-        self.parse_utf16_be_with_options(
-            &mut |i, _| if i < len { &code_points[i..] } else { &[] },
-            old_tree,
-            None,
-        )
-    }
-
-    /// Parse UTF16 big-endian text provided in chunks by a callback.
-    ///
-    /// # Arguments:
-    /// * `callback` A function that takes a code point offset and position and returns a slice of
-    ///   UTF16-encoded text starting at that byte offset and position. The slices can be of any
-    ///   length. If the given position is at the end of the text, the callback should return an
-    ///   empty slice.
-    /// * `old_tree` A previous syntax tree parsed from the same document. If the text of the
-    ///   document has changed since `old_tree` was created, then you must edit `old_tree` to match
-    ///   the new text using [`Tree::edit`].
-    /// * `options` Options for parsing the text. This can be used to set a progress callback.
-    pub fn parse_utf16_be_with_options<T: AsRef<[u16]>, F: FnMut(usize, Point) -> T>(
-        &mut self,
-        callback: &mut F,
-        old_tree: Option<&Tree>,
-        options: Option<ParseOptions>,
-    ) -> Option<Tree> {
-        type Payload<'a, F, T> = (&'a mut F, Option<T>);
-
-        // This C function is passed to Tree-sitter as the progress callback.
-        unsafe extern "C" fn progress(state: *mut ffi::TSParseState) -> bool {
-            unsafe {
-                let callback = (*state)
-                    .payload
-                    .cast::<ParseProgressCallback>()
-                    .as_mut()
-                    .unwrap();
-                match callback(&ParseState::from_raw(state)) {
-                    ControlFlow::Continue(()) => false,
-                    ControlFlow::Break(()) => true,
-                }
-            }
-        }
-
-        // This C function is passed to Tree-sitter as the input callback.
-        unsafe extern "C" fn read<T: AsRef<[u16]>, F: FnMut(usize, Point) -> T>(
-            payload: *mut c_void,
-            byte_offset: u32,
-            position: ffi::TSPoint,
-            bytes_read: *mut u32,
-        ) -> *const c_char {
-            unsafe {
-                let (callback, text) = payload.cast::<Payload<F, T>>().as_mut().unwrap();
-                *text = Some(callback(
-                    (byte_offset / 2) as usize,
-                    Point {
-                        row: position.row as usize,
-                        column: position.column as usize / 2,
-                    },
-                ));
-                let slice = text.as_ref().unwrap().as_ref();
-                *bytes_read = slice.len() as u32 * 2;
-                slice.as_ptr().cast::<c_char>()
-            }
-        }
-
-        let empty_options = ffi::TSParseOptions {
-            payload: ptr::null_mut(),
-            progress_callback: None,
-        };
-
-        let mut callback_ptr;
-        let parse_options = if let Some(options) = options {
-            if let Some(cb) = options.progress_callback {
-                callback_ptr = cb;
-                ffi::TSParseOptions {
-                    payload: core::ptr::addr_of_mut!(callback_ptr).cast::<c_void>(),
-                    progress_callback: Some(progress),
-                }
-            } else {
-                empty_options
-            }
-        } else {
-            empty_options
-        };
-
-        // A pointer to this payload is passed on every call to the `read` C function.
-        // The payload contains two things:
-        // 1. A reference to the rust `callback`.
-        // 2. The text that was returned from the previous call to `callback`. This allows the
-        //    callback to return owned values like vectors.
-        let mut payload: Payload<F, T> = (callback, None);
-
-        let c_input = ffi::TSInput {
-            payload: core::ptr::addr_of_mut!(payload).cast::<c_void>(),
-            read: Some(read::<T, F>),
-            encoding: ffi::TSInputEncodingUTF16BE,
-            decode: None,
-        };
-
-        let c_old_tree = old_tree.map_or(ptr::null_mut(), |t| t.0.as_ptr());
-        unsafe {
-            let c_new_tree = ffi::ts_parser_parse_with_options(
-                self.0.as_ptr(),
-                c_old_tree,
-                c_input,
-                parse_options,
-            );
-
-            NonNull::new(c_new_tree).map(Tree)
-        }
-    }
-
-    /// Parse text provided in chunks by a callback using a custom encoding.
-    /// This is useful for parsing text in encodings that are not UTF-8 or UTF-16.
-    ///
-    /// # Arguments:
-    /// * `callback` A function that takes a byte offset and position and returns a slice of text
-    ///   starting at that byte offset and position. The slices can be of any length. If the given
-    ///   position is at the end of the text, the callback should return an empty slice.
-    /// * `old_tree` A previous syntax tree parsed from the same document. If the text of the
-    ///   document has changed since `old_tree` was created, then you must edit `old_tree` to match
-    ///   the new text using [`Tree::edit`].
-    /// * `options` Options for parsing the text. This can be used to set a progress callback.
-    ///
-    /// Additionally, you must set the generic parameter [`D`] to a type that implements the
-    /// [`Decode`] trait. This trait has a single method, [`decode`](Decode::decode), which takes a
-    /// slice of bytes and returns a tuple of the code point and the number of bytes consumed.
-    /// The `decode` method should return `-1` for the code point if decoding fails.
-    pub fn parse_custom_encoding<D: Decode, T: AsRef<[u8]>, F: FnMut(usize, Point) -> T>(
-        &mut self,
-        callback: &mut F,
-        old_tree: Option<&Tree>,
-        options: Option<ParseOptions>,
-    ) -> Option<Tree> {
-        type Payload<'a, F, T> = (&'a mut F, Option<T>);
-
-        unsafe extern "C" fn progress(state: *mut ffi::TSParseState) -> bool {
-            unsafe {
-                let callback = (*state)
-                    .payload
-                    .cast::<ParseProgressCallback>()
-                    .as_mut()
-                    .unwrap();
-                match callback(&ParseState::from_raw(state)) {
-                    ControlFlow::Continue(()) => false,
-                    ControlFlow::Break(()) => true,
-                }
-            }
-        }
-
-        // At compile time, create a C-compatible callback that calls the custom `decode` method.
-        unsafe extern "C" fn decode_fn<D: Decode>(
-            data: *const u8,
-            len: u32,
-            code_point: *mut i32,
-        ) -> u32 {
-            unsafe {
-                let (c, len) = D::decode(core::slice::from_raw_parts(data, len as usize));
-                if let Some(code_point) = code_point.as_mut() {
-                    *code_point = c;
-                }
-                len
-            }
-        }
-
-        // This C function is passed to Tree-sitter as the input callback.
-        unsafe extern "C" fn read<T: AsRef<[u8]>, F: FnMut(usize, Point) -> T>(
-            payload: *mut c_void,
-            byte_offset: u32,
-            position: ffi::TSPoint,
-            bytes_read: *mut u32,
-        ) -> *const c_char {
-            unsafe {
-                let (callback, text) = payload.cast::<Payload<F, T>>().as_mut().unwrap();
-                *text = Some(callback(byte_offset as usize, position.into()));
-                let slice = text.as_ref().unwrap().as_ref();
-                *bytes_read = slice.len() as u32;
-                slice.as_ptr().cast::<c_char>()
-            }
-        }
-
-        let empty_options = ffi::TSParseOptions {
-            payload: ptr::null_mut(),
-            progress_callback: None,
-        };
-
-        let mut callback_ptr;
-        let parse_options = if let Some(options) = options {
-            if let Some(cb) = options.progress_callback {
-                callback_ptr = cb;
-                ffi::TSParseOptions {
-                    payload: core::ptr::addr_of_mut!(callback_ptr).cast::<c_void>(),
-                    progress_callback: Some(progress),
-                }
-            } else {
-                empty_options
-            }
-        } else {
-            empty_options
-        };
-
-        // A pointer to this payload is passed on every call to the `read` C function.
-        // The payload contains two things:
-        // 1. A reference to the rust `callback`.
-        // 2. The text that was returned from the previous call to `callback`. This allows the
-        //    callback to return owned values like vectors.
-        let mut payload: Payload<F, T> = (callback, None);
-
-        let c_input = ffi::TSInput {
-            payload: core::ptr::addr_of_mut!(payload).cast::<c_void>(),
-            read: Some(read::<T, F>),
-            encoding: ffi::TSInputEncodingCustom,
-            // Use this custom decode callback
-            decode: Some(decode_fn::<D>),
-        };
-
-        let c_old_tree = old_tree.map_or(ptr::null_mut(), |t| t.0.as_ptr());
-        unsafe {
-            let c_new_tree = ffi::ts_parser_parse_with_options(
-                self.0.as_ptr(),
-                c_old_tree,
-                c_input,
-                parse_options,
-            );
-
-            NonNull::new(c_new_tree).map(Tree)
-        }
-    }
-
     /// Instruct the parser to start the next parse from the beginning.
     ///
     /// If the parser previously failed because of a callback, then by default,
@@ -1253,19 +727,8 @@ impl Parser {
 
 impl Drop for Parser {
     fn drop(&mut self) {
-        #[cfg(feature = "std")]
-        #[cfg(not(target_os = "wasi"))]
-        {
-            self.stop_printing_dot_graphs();
-        }
-        self.set_logger(None);
         unsafe { ffi::ts_parser_delete(self.0.as_ptr()) }
     }
-}
-
-#[cfg(windows)]
-unsafe extern "C" {
-    fn _open_osfhandle(osfhandle: isize, flags: core::ffi::c_int) -> core::ffi::c_int;
 }
 
 impl Tree {
@@ -1356,33 +819,6 @@ impl Tree {
             let result = ranges.iter().copied().map(Into::into).collect();
             ts_free(ptr.cast::<c_void>());
             result
-        }
-    }
-
-    /// Print a graph of the tree to the given file descriptor.
-    /// The graph is formatted in the DOT language. You may want to pipe this
-    /// graph directly to a `dot(1)` process in order to generate SVG
-    /// output.
-    #[doc(alias = "ts_tree_print_dot_graph")]
-    #[cfg(not(target_os = "wasi"))]
-    #[cfg(feature = "std")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
-    pub fn print_dot_graph(
-        &self,
-        #[cfg(unix)] file: &impl AsRawFd,
-        #[cfg(windows)] file: &impl AsRawHandle,
-    ) {
-        #[cfg(unix)]
-        {
-            let fd = file.as_raw_fd();
-            unsafe { ffi::ts_tree_print_dot_graph(self.0.as_ptr(), fd) }
-        }
-
-        #[cfg(windows)]
-        {
-            let handle = file.as_raw_handle();
-            let fd = unsafe { _open_osfhandle(handle as isize, 0) };
-            unsafe { ffi::ts_tree_print_dot_graph(self.0.as_ptr(), fd) }
         }
     }
 }
@@ -1904,11 +1340,6 @@ impl<'tree> Node<'tree> {
         str::from_utf8(&source[self.start_byte()..self.end_byte()])
     }
 
-    #[must_use]
-    pub fn utf16_text<'a>(&self, source: &'a [u16]) -> &'a [u16] {
-        &source[self.start_byte() / 2..self.end_byte() / 2]
-    }
-
     /// Create a new [`TreeCursor`] starting from this node.
     ///
     /// Note that the given node is considered the root of the cursor,
@@ -2389,10 +1820,6 @@ impl fmt::Display for LanguageError {
             Self::NotParseable => {
                 write!(f, "Language cannot be used for parsing.")
             }
-            #[cfg(feature = "wasm")]
-            Self::Wasm => {
-                write!(f, "Failed to load the Wasm store.")
-            }
         }
     }
 }
@@ -2497,14 +1924,6 @@ pub fn format_sexp(sexp: &str, initial_indent_level: usize) -> String {
     }
 
     formatted
-}
-
-pub fn wasm_stdlib_symbols() -> impl Iterator<Item = &'static str> {
-    const WASM_STDLIB_SYMBOLS: &str = include_str!(concat!(env!("OUT_DIR"), "/stdlib-symbols.txt"));
-
-    WASM_STDLIB_SYMBOLS
-        .lines()
-        .map(|s| s.trim_matches(|c| c == '"' || c == ','))
 }
 
 unsafe extern "C" {

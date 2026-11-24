@@ -79,19 +79,23 @@ of them are in a turn."
 
 (defun romacs-agent-limits--suggestion (harness accounts pick now)
   "A line saying where HARNESS's new work goes, ACCOUNTS its pool's
-instances, PICK the pool's pick, as of NOW."
+instances, PICK the pool's pick, as of NOW: those at their limit, and
+those whose sign-in is refused (`romacs-agent-sign-in-refused')."
   (let* ((rooms (mapcar (lambda (i) (cons (plist-get i :name) (romacs-agent-room-of (plist-get i :name)))) accounts))
-         (spent (cl-remove-if (lambda (r) (romacs-agent-room (car r))) rooms))
+         (refused (cl-remove-if-not (lambda (r) (eq (plist-get (cdr r) :status) 'unavailable)) rooms))
+         (spent (cl-remove-if (lambda (r) (or (romacs-agent-room (car r)) (memq r refused))) rooms))
          (pick-name (plist-get pick :name)))
     (cond
      ((null accounts) (format "No %s account is enabled." harness))
+     ((null pick) (format "Every %s account's sign-in is refused: sign in again." harness))
      ((cl-every (lambda (r) (null (cdr r))) rooms)
       (format "No limit reported yet: new work goes to %s." pick-name))
-     ((= (length spent) (length rooms))
+     ((= (+ (length spent) (length refused)) (length rooms))
       (let ((first (car (sort (copy-sequence spent)
                               (lambda (a b) (< (or (plist-get (cdr a) :resets) most-positive-fixnum)
                                                (or (plist-get (cdr b) :resets) most-positive-fixnum)))))))
-        (format "Every %s account is at its limit: %s is back first%s." harness (car first)
+        (format "Every %s account is at its limit%s: %s is back first%s." harness
+                (if refused " or its sign-in refused" "") (car first)
                 (if (numberp (plist-get (cdr first) :resets))
                     (format ", in %s" (romacs-agent-limits--in (- (plist-get (cdr first) :resets) now)))
                   ""))))
@@ -104,6 +108,9 @@ instances, PICK the pool's pick, as of NOW."
                   "")
                 (if spent
                     (format "; %s at the limit" (mapconcat #'car spent ", "))
+                  "")
+                (if refused
+                    (format "; %s's sign-in refused" (mapconcat #'car refused ", "))
                   "")
                 "."))))))
 

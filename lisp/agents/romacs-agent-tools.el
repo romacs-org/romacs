@@ -1904,6 +1904,7 @@ new work draws on now."
                                             "providerInstanceId" (plist-get i :name)
                                             "room" (if (romacs-agent-room (plist-get i :name)) t :false)
                                             "status" (if room (symbol-name (plist-get room :status)) :null)
+                                            "reason" (or (plist-get room :reason) :null)
                                             "used" (or (plist-get room :used) :null)
                                             "resets" (or (plist-get room :resets) :null)
                                             "window" (or (plist-get room :window) :null)

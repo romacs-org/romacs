@@ -9622,6 +9622,31 @@ The function should return non-nil if the two tokens do not match.")
     ol)
   "Overlay used to highlight the matching paren.")
 
+(defun blink-matching--position (end)
+  "Find the lexical opener for the delimiter ending at END."
+  (save-excursion
+    (save-restriction
+      (syntax-propertize end)
+      (when blink-matching-paren-distance
+        (narrow-to-region
+         (max (minibuffer-prompt-end) ;(point-min) unless minibuf.
+              (- end blink-matching-paren-distance))
+         end))
+      (let ((parse-sexp-ignore-comments
+             (and parse-sexp-ignore-comments
+                  (not blink-matching-paren-dont-ignore-comments))))
+        (condition-case ()
+            (progn
+              (forward-sexp-default-function -1)
+              ;; Backward motion skips prefix chars, so step back over them.
+              (while (and (< (point) (1- end))
+                          (let ((code (syntax-after (point))))
+                            (or (eq (syntax-class code) 6)
+                                (eq (logand 1048576 (car code)) 1048576))))
+                (forward-char 1))
+              (point))
+          (error nil))))))
+
 (defun blink-matching-open ()
   "Momentarily highlight the beginning of the sexp before point."
   (interactive)
@@ -9629,31 +9654,7 @@ The function should return non-nil if the two tokens do not match.")
 	     blink-matching-paren)
     (let* ((oldpos (point))
 	   (message-log-max nil) ; Don't log messages about paren matching.
-	   (blinkpos
-            (save-excursion
-              (save-restriction
-		(syntax-propertize (point))
-                (if blink-matching-paren-distance
-                    (narrow-to-region
-                     (max (minibuffer-prompt-end) ;(point-min) unless minibuf.
-                          (- (point) blink-matching-paren-distance))
-                     oldpos))
-                (let ((parse-sexp-ignore-comments
-                       (and parse-sexp-ignore-comments
-                            (not blink-matching-paren-dont-ignore-comments))))
-                  (condition-case ()
-                      (progn
-                        (forward-sexp -1)
-                        ;; backward-sexp skips backward over prefix chars,
-                        ;; so move back to the matching paren.
-                        (while (and (< (point) (1- oldpos))
-                                    (let ((code (syntax-after (point))))
-                                      (or (eq (syntax-class code) 6)
-                                          (eq (logand 1048576 (car code))
-                                              1048576))))
-                          (forward-char 1))
-                        (point))
-                    (error nil))))))
+           (blinkpos (blink-matching--position oldpos))
            (mismatch (funcall blink-matching-check-function blinkpos oldpos)))
       (cond
        (mismatch

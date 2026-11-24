@@ -216,7 +216,7 @@ The agent board and chat headers follow.")
     ;; While a start restores, its views are told once, by the batch its
     ;; end runs (`romacs-agent-restored-hook'): not a turn of its loading
     ;; at a time, each redrawing every row.
-    (unless romacs-agent--restoring (run-hooks 'romacs-agent-ui-changed-hook))))
+    (unless romacs-agent--restoring (romacs-agent--run-hook 'romacs-agent-ui-changed-hook))))
 
 
 (defun romacs-agent-ui--flush-rows (sessions)

@@ -5,13 +5,14 @@ One private headless labwc (2560x1440, Iosevka 15 by default) and one
 `romacs-vm-gui --loadup --trace-latency` in a work directory of --files
 files.  The session opens `romacs-term` from M-x, whose shell appends
 `stty size` to a file at start and on every SIGWINCH.  Then --cycles times:
-C-x C-f, the keys of --input one by one (each waits for its
-prompt-key-latency record), C-g.  Last, after an editor command (C-g) in the terminal buffer, the
+C-x C-f, the keys of --input one by one (each waits for its own
+`latency-key' record), C-g.  Last, after an editor command (C-g) in the terminal buffer, the
 shell appends `stty size` again.
 
-Reports, per key and as p50/p95 over all keys: command (key read to
-redisplay start: Lisp, hooks and the VM snapshot), snapshot, layout,
-render wait and key->render, in ms.  The terminal probe reports the pty
+Reports, per key and as p50/p95 over all keys, in ms: key to its first
+frame (ingress to the frame's submission) and key to that frame drawn
+(joined to the render thread's `drawn' record, perkey_live `joined').
+Each key must have exactly one record of its own.  The terminal probe reports the pty
 size at creation, after the prompts, and every WINCH.  With --assert-stable
 the run fails when the pty changed size across the prompts.
 
@@ -35,6 +36,7 @@ import tempfile
 import time
 
 import live_oracle as live
+import perkey_live
 
 KEYSYMS = {'-': 'minus', '/': 'slash', ' ': 'space'}
 # Records, once, what completion the first prompt used (run in the session).
@@ -55,7 +57,7 @@ PROBE = '''
                            nil %(path)s nil 'quiet)))
                       90 t)))
 '''
-FIELDS = ('command_ns', 'snapshot_ns', 'layout_ns', 'render_ns', 'key_to_render_ns')
+FIELDS = ('key_to_first_frame_ns', 'key_to_drawn_ns')
 
 
 def records(text, kind):
@@ -174,7 +176,13 @@ def main():
                     keys('-M', 'ctrl', k, '-m', 'ctrl')
 
                 def latencies():
-                    return list(records(trace(), 'prompt-key-latency'))
+                    found = list(records(trace(), 'latency-key')) + list(records(trace(), 'drawn'))
+                    return [r for r in perkey_live.joined(found) if r.get('diagnostic') == 'latency-key']
+
+                def own(found):
+                    """The records of keys typed in the prompt: not the
+                    prompt's opener, nor a key that waited for input."""
+                    return [r for r in found if r.get('outcome') != 'opened' and r.get('unattributed') != 'awaited-input']
 
                 # A private HOME prepares its world on first start.
                 wait(lambda: any(records(trace(), 'paint')), max(args.timeout, 600), 'first frame', proc)
@@ -195,11 +203,14 @@ def main():
                         seen = len(latencies())
                         # wtype reads a leading '-' as an option.
                         keys(*(('-k', KEYSYMS[ch]) if ch in KEYSYMS else (ch,)), delay=10)
-                        wait(lambda: len(latencies()) > seen, args.timeout, f'latency record for {ch!r}', proc)
+                        wait(lambda: own(latencies()[seen:]), args.timeout, f'latency record for {ch!r}', proc)
                         time.sleep(.3)
-                        record = latencies()[-1]
-                        entry = {'cycle': cycle, 'key': ch}
-                        entry.update({f: round(record[f] / 1e6, 2) for f in FIELDS if f in record})
+                        mine = own(latencies()[seen:])
+                        if len(mine) != 1:
+                            raise RuntimeError(f'{len(mine)} records for {ch!r}: {mine}')
+                        record = mine[0]
+                        entry = {'cycle': cycle, 'key': ch, 'outcome': record.get('outcome')}
+                        entry.update({f: round(record[f] / 1e6, 2) for f in FIELDS if record.get(f) is not None})
                         report['keys'].append(entry)
                     ctrl('g')
                     time.sleep(1.5)

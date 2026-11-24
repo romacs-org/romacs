@@ -55,14 +55,8 @@ typedef uint32_t (*TSDecodeFunction)(
   int32_t *code_point
 );
 
-// Deprecated alias to be removed in ABI 16
-typedef TSDecodeFunction DecodeFunction;
-
 typedef enum TSInputEncoding {
   TSInputEncodingUTF8,
-  TSInputEncodingUTF16LE,
-  TSInputEncodingUTF16BE,
-  TSInputEncodingCustom
 } TSInputEncoding;
 
 typedef enum TSSymbolType {
@@ -101,16 +95,6 @@ typedef struct TSParseOptions {
   void *payload;
   bool (*progress_callback)(TSParseState *state);
 } TSParseOptions;
-
-typedef enum TSLogType {
-  TSLogTypeParse,
-  TSLogTypeLex,
-} TSLogType;
-
-typedef struct TSLogger {
-  void *payload;
-  void (*log)(void *payload, TSLogType log_type, const char *buffer);
-} TSLogger;
 
 /**
  * A summary of a change to a text document.
@@ -239,7 +223,7 @@ const TSRange *ts_parser_included_ranges(
  * way that exactly matches the source code changes.
  *
  * The [`TSInput`] parameter lets you specify how to read the text. It has the
- * following three fields:
+ * following fields:
  * 1. [`read`]: A function to retrieve a chunk of text at a given byte offset
  *    and (row, column) position. The function should return a pointer to the
  *    text and write its length to the [`bytes_read`] pointer. The parser does
@@ -248,12 +232,8 @@ const TSRange *ts_parser_included_ranges(
  *    [`bytes_read`] pointer to indicate the end of the document.
  * 2. [`payload`]: An arbitrary pointer that will be passed to each invocation
  *    of the [`read`] function.
- * 3. [`encoding`]: An indication of how the text is encoded. Either
- *    `TSInputEncodingUTF8`, `TSInputEncodingUTF16LE`, `TSInputEncoding16BE`,
- *    or `TSInputEncodingCustom`.
- * 4. [`decode`]: A function to read one code point from the given input. This
- *    function should return the number of bytes consumed and write the code point
- *    to the [`code_point`] pointer, or write -1 if the input is invalid.
+ * 3. [`encoding`]: Set to `TSInputEncodingUTF8`.
+ * 4. [`decode`]: Unused. Set to `NULL`.
  *
  * This function returns a syntax tree on success, and `NULL` on failure. There
  * are two possible reasons for failure:
@@ -267,7 +247,6 @@ const TSRange *ts_parser_included_ranges(
  * [`encoding`]: TSInput::encoding
  * [`bytes_read`]: TSInput::read
  * [`decode`]: TSInput::decode
- * [`code_point`]: TSDecodeFunction::code_point
  */
 TSTree *ts_parser_parse(
   TSParser *self,
@@ -303,20 +282,6 @@ TSTree *ts_parser_parse_string(
 );
 
 /**
- * Use the parser to parse some source code stored in one contiguous buffer with
- * a given encoding. The first four parameters work the same as in the
- * [`ts_parser_parse_string`] method above. The final parameter indicates whether
- * the text is encoded as UTF8 or UTF16.
- */
-TSTree *ts_parser_parse_string_encoding(
-  TSParser *self,
-  const TSTree *old_tree,
-  const char *string,
-  uint32_t length,
-  TSInputEncoding encoding
-);
-
-/**
  * Instruct the parser to start the next parse from the beginning.
  *
  * If the parser previously failed because of the progress callback, then
@@ -326,28 +291,6 @@ TSTree *ts_parser_parse_string_encoding(
  * call [`ts_parser_reset`] first.
  */
 void ts_parser_reset(TSParser *self);
-
-/**
- * Set the logger that a parser should use during parsing.
- *
- * The parser does not take ownership over the logger payload. If a logger was
- * previously assigned, the caller is responsible for releasing any memory
- * owned by the previous logger.
- */
-void ts_parser_set_logger(TSParser *self, TSLogger logger);
-
-/**
- * Get the parser's current logger.
- */
-TSLogger ts_parser_logger(const TSParser *self);
-
-/**
- * Set the file descriptor to which the parser should write debugging graphs
- * during parsing. The graphs are formatted in the DOT language. You may want
- * to pipe these graphs directly to a `dot(1)` process in order to generate
- * SVG output. You can turn off this logging by passing a negative number.
- */
-void ts_parser_print_dot_graphs(TSParser *self, int fd);
 
 /******************/
 /* Section - Tree */
@@ -436,11 +379,6 @@ TSRange *ts_tree_get_changed_ranges(
   const TSTree *new_tree,
   uint32_t *length
 );
-
-/**
- * Write a DOT graph describing the syntax tree to the given file.
- */
-void ts_tree_print_dot_graph(const TSTree *self, int file_descriptor);
 
 /******************/
 /* Section - Node */
@@ -1053,77 +991,6 @@ TSSymbol ts_lookahead_iterator_current_symbol(const TSLookaheadIterator *self);
  * [`ts_lookahead_iterator_next`] on `self` returned `true`.
 */
 const char *ts_lookahead_iterator_current_symbol_name(const TSLookaheadIterator *self);
-
-/*************************************/
-/* Section - WebAssembly Integration */
-/************************************/
-
-typedef struct wasm_engine_t TSWasmEngine;
-typedef struct TSWasmStore TSWasmStore;
-
-typedef enum {
-  TSWasmErrorKindNone = 0,
-  TSWasmErrorKindParse,
-  TSWasmErrorKindCompile,
-  TSWasmErrorKindInstantiate,
-  TSWasmErrorKindAllocate,
-} TSWasmErrorKind;
-
-typedef struct {
-  TSWasmErrorKind kind;
-  char *message;
-} TSWasmError;
-
-/**
- * Create a Wasm store.
- */
-TSWasmStore *ts_wasm_store_new(
-  TSWasmEngine *engine,
-  TSWasmError *error
-);
-
-/**
- * Free the memory associated with the given Wasm store.
- */
-void ts_wasm_store_delete(TSWasmStore *);
-
-/**
- * Create a language from a buffer of Wasm. The resulting language behaves
- * like any other Tree-sitter language, except that in order to use it with
- * a parser, that parser must have a Wasm store. Note that the language
- * can be used with any Wasm store, it doesn't need to be the same store that
- * was used to originally load it.
- */
-const TSLanguage *ts_wasm_store_load_language(
-  TSWasmStore *,
-  const char *name,
-  const char *wasm,
-  uint32_t wasm_len,
-  TSWasmError *error
-);
-
-/**
- * Get the number of languages instantiated in the given Wasm store.
- */
-size_t ts_wasm_store_language_count(const TSWasmStore *);
-
-/**
- * Check if the language came from a Wasm module. If so, then in order to use
- * this language with a Parser, that parser must have a Wasm store assigned.
- */
-bool ts_language_is_wasm(const TSLanguage *);
-
-/**
- * Assign the given Wasm store to the parser. A parser must have a Wasm store
- * in order to use Wasm languages.
- */
-void ts_parser_set_wasm_store(TSParser *, TSWasmStore *);
-
-/**
- * Remove the parser's current Wasm store and return it. This returns NULL if
- * the parser doesn't have a Wasm store.
- */
-TSWasmStore *ts_parser_take_wasm_store(TSParser *);
 
 /**********************************/
 /* Section - Global Configuration */

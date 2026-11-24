@@ -38,6 +38,7 @@ pub mod presented_pointer;
 pub mod scene;
 pub mod scroll_animation;
 pub mod scroll_input;
+pub mod submission;
 pub(crate) mod snapshot_text;
 pub mod terminal_color;
 pub mod text_animation;

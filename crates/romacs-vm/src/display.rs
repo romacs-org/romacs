@@ -9,6 +9,7 @@ mod mode_line;
 mod status_bar;
 #[path = "mini_window.rs"]
 mod mini_window;
+pub(super) use mini_window::Segment;
 #[path = "display_check.rs"]
 mod display_check;
 pub(crate) use mini_window::{buffer_of, shown_end};
@@ -582,6 +583,8 @@ impl ShownKey {
 
 #[derive(Clone, romacs_snapshot::Snapshot)]
 struct Shown {
+    view_generation: u64,
+    text_revision: Option<u64>,
     key: ShownKey,
     point: i64,
     mini: bool,
@@ -1385,6 +1388,27 @@ impl Vm {
     pub fn published_buffer_byte(&self, id: u64, display: usize) -> usize {
         self.display_state.segments(id).map_or(self.display_state.base(id) + display, |s| shown_byte(s, display))
     }
+    /// The revision of BUFFER's text: what a publication of it shows.
+    fn text_revision(&self, buffer: Value) -> Option<u64> {
+        match self.object_if(buffer)? {
+            Object::Buffer(buffer) => Some(buffer.body().edits_revision()),
+            _ => None,
+        }
+    }
+
+    /// Window ID's publication in FRAME, the one this paint lays out: how
+    /// its display bytes map to its buffer, and what it showed of it.
+    pub(crate) fn display_picture(&self, frame: &romacs_layout_input::FrameSnapshot, id: u64) -> Option<crate::TypingPicture> {
+        let snapshot = frame.windows.iter().chain(frame.children.iter().flat_map(|child| &child.windows))
+            .map(|placed| &placed.snapshot).find(|snapshot| snapshot.id == id)?;
+        if self.display_state.previous.get(&id)?.buffer_version != snapshot.buffer_version { return None; }
+        let shown = self.display_state.shown.get(&id)?;
+        let clips = snapshot.wrap == romacs_layout_input::LineWrap::Truncate || snapshot.hscroll != romacs_layout_input::Hscroll::default();
+        let mapping = (self.published_base(id), self.display_state.segments(id).unwrap_or_default().to_vec());
+        let point = (snapshot.point_byte, self.published_buffer_byte(id, snapshot.point_byte));
+        Some(crate::TypingPicture::new((id, shown.view_generation, shown.text_revision?), mapping, point, clips))
+    }
+
     /// How many times a mode-line expansion entered the evaluator: its
     /// `:eval' elements and the `%@' and `%s' specs, since the VM started.
     pub fn mode_line_evals(&self) -> u64 {
@@ -1604,7 +1628,7 @@ impl Vm {
         if !w.live() {
             return Err("window deleted during snapshot".into());
         }
-        let (id, buffer, mini) = (w.id, w.buffer, w.mini);
+        let (id, buffer, mini, view_generation) = (w.id, w.buffer, w.mini, w.shows);
         self.slots[slot].value = buffer;
         let mut shown = self.window_text(window, height, None)?;
         // The mini-window shows its overlay strings (icomplete's candidates).
@@ -1658,7 +1682,7 @@ impl Vm {
         let snapshot = self.publish_window(snapshot);
         let point = self.window_point_value(window)?.as_integer()?;
         let key = self.shown_key(window, width, height)?;
-        self.display_state.shown.insert(id, Shown { key, point, mini, len, at_zv, table: table.id, ended: None });
+        self.display_state.shown.insert(id, Shown { view_generation, text_revision: self.text_revision(self.slots[slot].value), key, point, mini, len, at_zv, table: table.id, ended: None });
         self.display_state.laid.remove(&id);
         Ok(snapshot)
     }

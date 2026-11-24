@@ -224,7 +224,7 @@ it ends."
                                         (process-exit-status process))))
                            (when (buffer-live-p buffer) (kill-buffer buffer)))
                          (romacs-agent-history--from-rows)
-                         (run-hooks 'romacs-agent-history-indexed-hook)))))))
+                         (romacs-agent--run-hook 'romacs-agent-history-indexed-hook)))))))
 
 (defun romacs-agent-history--from-rows ()
   "The listing, from the transcripts' rows: nil without them."

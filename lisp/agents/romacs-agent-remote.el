@@ -110,19 +110,15 @@ date from it: the same record for its id each time."
 
 (defun romacs-agent-remote--drawn (session units from)
   "Draw SESSION afresh: UNITS, beginning at seq FROM (nil, its start)."
-  (let ((unconfirmed (seq-filter (lambda (prompt) (get-text-property 0 'romacs-agent-remote-unconfirmed prompt))
-                                 romacs-agent-log--prompts)))
-    (romacs-agent-log--clear)
-    (romacs-agent-ui-reset-workers session)
-    (setq romacs-agent-log--from from romacs-agent-remote--earlier nil)
-    (when from
-      (romacs-agent-log--writing (save-excursion (goto-char (point-min)) (insert (romacs-agent-log--earlier-line from)))))
-    ;; What streams at its end goes on streaming: the live units that
-    ;; follow may carry on its message.
-    (let ((romacs-agent-log--closes-deferred t))
-      (dolist (unit units) (romacs-agent-remote--draw-unit session unit 'snapshot)))
-    ;; An unconfirmed send may have no journal entry to replay.
-    (setq romacs-agent-log--prompts (append unconfirmed romacs-agent-log--prompts)))
+  (romacs-agent-log--clear)
+  (romacs-agent-ui-reset-workers session)
+  (setq romacs-agent-log--from from romacs-agent-remote--earlier nil)
+  (when from
+    (romacs-agent-log--writing (save-excursion (goto-char (point-min)) (insert (romacs-agent-log--earlier-line from)))))
+  ;; What streams at its end goes on streaming: the live units that
+  ;; follow may carry on its message.
+  (let ((romacs-agent-log--closes-deferred t))
+    (dolist (unit units) (romacs-agent-remote--draw-unit session unit 'snapshot)))
   (romacs-agent-log--sync-asks session)
   (romacs-agent-log--separator t)
   (romacs-agent-log--header-show))
@@ -233,45 +229,113 @@ its mirror's approvals, each the approval event that asks it."
 (cl-defmethod romacs-agent-log-source-seen ((_source romacs-agent-remote) _session)
   nil)
 
-(defun romacs-agent-remote--command (source method params &optional on-error)
-  "Run METHOD with PARAMS on SOURCE's service.
-On error, report it and call ON-ERROR with `unconfirmed' or `refused'."
+(defun romacs-agent-remote--command (source method params &optional done)
+  "Run METHOD with PARAMS on SOURCE's service, then call DONE, when given,
+with its result and nil, or nil and its error; with no DONE, an error is
+said.  `user-error' when SOURCE is not connected."
   (let ((client (romacs-agent-remote-client source)))
     (unless (and client (romacs-agent-client-live-p client))
       (user-error (substitute-command-keys "Not connected: \\[romacs-agents-remote] connects")))
-    (romacs-agent-client-command
-     client method params
-     (lambda (_result error)
-       (when error
-         (let* ((data (gethash "data" error))
-                (unconfirmed (and (hash-table-p data) (member (gethash "kind" data) '("not-kept" "disconnected")))))
-           (message "%s%s — %s" method (if unconfirmed " delivery unconfirmed" "") (gethash "message" error))
-           (when on-error (funcall on-error (if unconfirmed 'unconfirmed 'refused)))))))))
+    (romacs-agent-client-command client method params (or done (romacs-agent-remote--said method)))))
 
-(defun romacs-agent-remote--recover-send (buffer session text outcome)
-  "Keep TEXT from a remote send of OUTCOME in BUFFER for SESSION."
-  (when (buffer-live-p buffer)
-    (with-current-buffer buffer
-      (when (eq romacs-agent-log--session session)
-        (if (eq outcome 'unconfirmed)
-            (push (propertize text 'romacs-agent-remote-unconfirmed t) romacs-agent-log--prompts)
-          (save-excursion
-            (goto-char romacs-agent-log--input)
-            (insert text (if (string-empty-p (romacs-agent-log--draft)) "" "\n\n"))))))))
+(defun romacs-agent-remote--said (method)
+  "A reply's callback for METHOD that says its error, should it fail."
+  (lambda (_result error)
+    (when error
+      (let* ((data (gethash "data" error))
+             (unconfirmed (and (hash-table-p data) (member (gethash "kind" data) '("not-kept" "disconnected")))))
+        (message "%s%s — %s" method (if unconfirmed " delivery unconfirmed" "") (gethash "message" error))))))
 
-(cl-defmethod romacs-agent-log-source-send ((source romacs-agent-remote) session text &optional when)
-  "Send SESSION TEXT through SOURCE's service, WHEN as the chat says it."
-  (unless (string-empty-p text)
-    (when (and (eq when 'interrupt) (romacs-agent-log--running-p session))
-      (romacs-agent-log-source-interrupt source session))
-    (let ((buffer (current-buffer)))
-      (romacs-agent-remote--command
-       source "agents/send"
-       (romacs-agent-rpc-object "id" (romacs-agent-id session) "text" text
-                                "mode" (if (memq when '(later interrupt)) "next" "now"))
-       (lambda (outcome) (romacs-agent-remote--recover-send buffer session text outcome)))))
-  (when (and (string-empty-p text) (eq when 'interrupt) (romacs-agent-log--running-p session))
-    (romacs-agent-log-source-interrupt source session)))
+(defconst romacs-agent-remote--unsure-kinds '("disconnected" "not-kept")
+  "The error kinds of a command that may have taken effect: the connection
+ended before its reply, or its outcome was not kept.")
+
+(defun romacs-agent-remote--unconfirmed (intent minor)
+  "The answer to INTENT, sent to a service of protocol 1.MINOR, when it is
+not known whether it went: neither accepted nor refused, its draft kept
+under its id.  From 1.1 a retry goes once while the service runs."
+  (list :draft-id (plist-get intent :draft-id) :status 'unconfirmed
+        :message (if (>= minor 1) "Unconfirmed: send again, it goes once" "The send is unconfirmed")))
+
+(defun romacs-agent-remote--submit-answer (intent result error &optional minor)
+  "The answer to INTENT, sent as `agents/send' to a service of protocol
+1.MINOR (1.1 by default) and answered with RESULT, or ERROR: accepted
+when RESULT says it was written or queued, with :queued N when it says
+its place; unconfirmed when RESULT says another state (unknown) or
+ERROR says it may have taken effect (`romacs-agent-remote--unsure-kinds');
+else refused, nothing done, for the reason its kind says
+\(`romacs-agent-submit-reason')."
+  (let* ((data (and error (gethash "data" error)))
+         (kind (and (hash-table-p data) (gethash "kind" data))))
+    (cond ((and (not error) (member (and (hash-table-p result) (gethash "state" result)) '("written" "queued")))
+           (let ((place (gethash "queued" result)))
+             (append (list :draft-id (plist-get intent :draft-id) :status 'accepted)
+                     (and (integerp place) (list :queued place)))))
+          ;; A result that says no state it took, as a command kept
+          ;; before its outcome was (unknown), may have gone.
+          ((not error) (romacs-agent-remote--unconfirmed intent (or minor 1)))
+          ((member kind romacs-agent-remote--unsure-kinds) (romacs-agent-remote--unconfirmed intent (or minor 1)))
+          (t (romacs-agent-submit-refused intent (romacs-agent-submit-reason kind) (gethash "message" error))))))
+
+(defun romacs-agent-remote--send-params (session intent minor)
+  "`agents/send''s params for INTENT to SESSION, to a service of protocol
+1.MINOR: before 1.1, which has no interrupt mode, an interrupt's text
+goes as next."
+  (romacs-agent-rpc-object "id" (romacs-agent-id session) "text" (plist-get intent :text)
+                           "mode" (if (and (< minor 1) (eq (plist-get intent :kind) 'interrupt)) "next"
+                                    (car (rassq (plist-get intent :kind) romacs-agent-submit-modes)))
+                           "images" (vconcat (plist-get intent :attachments))
+                           "draftId" (plist-get intent :draft-id)))
+
+(defconst romacs-agent-remote-submit-deadline 30
+  "Seconds a remote chat's send waits for its service's answer before it
+is unconfirmed (`romacs-agent-remote--unconfirmed').  The serving editor
+answers once it has kept the command and admitted the draft, in well
+under a second, and seconds on a host under heavy load; a peer that is
+silent past this is held up or gone.")
+
+(cl-defmethod romacs-agent-log-source-submit ((source romacs-agent-remote) session intent callback)
+  "Submit INTENT to SESSION through SOURCE's service, as `agents/send'
+under its draft id, on the one client SOURCE has now: the serving
+editor alone decides what it does, an interrupt's too, from protocol
+1.1 (`romacs-agent-client-minor'); a 1.0 service is sent
+`agents/interrupt' first.  Before the client's welcome, refused at once
+\(`owner-unavailable'): sent again, it goes then.  Answered once: by the
+service's reply, or, should it not come within
+`romacs-agent-remote-submit-deadline', unconfirmed
+\(`romacs-agent-remote--unconfirmed'); either way its client waits on no
+reply of it any more.  To a 1.0 service an interrupt may go and its
+send fail, and nothing keeps a draft from going twice."
+  (let* ((client (romacs-agent-remote-client source))
+         (minor (and client (romacs-agent-client-live-p client) (romacs-agent-client-minor client)))
+         (timer nil)
+         (interrupted (romacs-agent-remote--said "agents/interrupt"))
+         (reply nil)
+         (answer (lambda (answer)
+                   (when timer
+                     (cancel-timer timer)
+                     (setq timer nil)
+                     (romacs-agent-client-forget client reply)
+                     (romacs-agent-client-forget client interrupted)
+                     (romacs-agent-submit-answer callback answer)))))
+    (setq reply (lambda (result error) (funcall answer (romacs-agent-remote--submit-answer intent result error minor))))
+    (if (null minor)
+        (romacs-agent-submit-answer
+         callback (romacs-agent-submit-refused
+                   intent 'owner-unavailable
+                   (if (and client (romacs-agent-client-live-p client))
+                       "The service is still connecting: send again"
+                     (substitute-command-keys "Not connected: \\[romacs-agents-remote] connects"))))
+      (setq timer (run-at-time
+                   romacs-agent-remote-submit-deadline nil
+                   (lambda () (funcall answer (romacs-agent-remote--unconfirmed intent minor)))))
+      (condition-case err
+          (progn
+            (when (and (< minor 1) (eq (plist-get intent :kind) 'interrupt) (romacs-agent-log--running-p session))
+              (romacs-agent-client-command client "agents/interrupt"
+                                           (romacs-agent-rpc-object "id" (romacs-agent-id session)) interrupted))
+            (romacs-agent-client-command client "agents/send" (romacs-agent-remote--send-params session intent minor) reply))
+        (error (funcall answer (romacs-agent-submit-refused intent 'owner-unavailable (error-message-string err))))))))
 
 (cl-defmethod romacs-agent-log-source-interrupt ((source romacs-agent-remote) session)
   (romacs-agent-remote--command source "agents/interrupt" (romacs-agent-rpc-object "id" (romacs-agent-id session))))

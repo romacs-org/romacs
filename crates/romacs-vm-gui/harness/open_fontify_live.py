@@ -65,6 +65,7 @@ import time
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import live_oracle as live  # noqa: E402
+import perkey_live  # noqa: E402
 import parity_live  # noqa: E402
 
 MEASURE = r''';;; -*- lexical-binding: t -*-
@@ -156,15 +157,10 @@ def events(path):
 
 
 def latency(stderr):
-    """Romacs's --trace-latency records, in order."""
-    found = []
-    for line in stderr.read_text(errors='replace').splitlines() if stderr.exists() else []:
-        if line.startswith('{') and '"latency-key"' in line:
-            try:
-                found.append(json.loads(line))
-            except json.JSONDecodeError:
-                pass
-    return found
+    """Romacs's --trace-latency key records, in order, joined to when their
+    frames drew (perkey_live `joined')."""
+    found = perkey_live.records(stderr) if stderr.exists() else []
+    return [r for r in found if r.get('diagnostic') == 'latency-key']
 
 
 def rss(pid):
@@ -177,16 +173,14 @@ def rss(pid):
     return fields
 
 
-def ret_render(traces, shown):
-    """Romacs: RET to the observed end of the render that showed the file.
-    The tracer counts C-x C-f and the minibuffer keys read inside it as one
-    key, so this is that key's command end to render (`--trace-latency')
-    plus RET's command start to command end (MEASURE)."""
-    if not traces or not traces[-1].get('key_to_render_observed_ns'):
+def ret_render(traces):
+    """Romacs: RET to the drawn frame that showed the file. RET ends the
+    minibuffer the C-x C-f step opened, so the step's first frame after
+    it is RET's: its record, the last, from its ingress to that frame drawn
+    (`--trace-latency')."""
+    if not traces or traces[-1].get('key_to_drawn_ns') is None:
         return None
-    last = traces[-1]
-    after = (last['key_to_render_observed_ns'] - last['key_to_command_complete_ns']) / 1e9
-    return round(after + shown['post'] - shown['t0'], 4)
+    return round(traces[-1]['key_to_drawn_ns'] / 1e9, 4)
 
 
 class Session:
@@ -322,11 +316,11 @@ class Session:
                 'command_seconds': round(shown[0]['post'] - shown[0]['t0'], 4),
                 'polls': first_final['polls'],
                 'mode': shown[0]['mode'],
-                'romacs_ret_key_to_render_seconds': ret_render(traces, shown[0])}
+                'romacs_ret_key_to_render_seconds': ret_render(traces)}
 
     def key_latencies(self, argv_list, label):
         """Each key's command start to the end of its redisplay (MEASURE),
-        and, for Romacs, its enqueue to observed render."""
+        and, for Romacs, its ingress to its frame drawn."""
         rows = []
         for argv in argv_list:
             before, traced = len(self.command_events()), len(latency(self.stderr))
@@ -338,8 +332,8 @@ class Session:
             traces = latency(self.stderr)[traced:]
             rows.append({'command': event['command'], 'seconds': round(event['t1'] - event['t0'], 4),
                          'polls': event['polls'],
-                         'render_seconds': (round(traces[-1]['key_to_render_observed_ns'] / 1e9, 4)
-                                            if traces and traces[-1].get('key_to_render_observed_ns') else None)})
+                         'render_seconds': (round(traces[-1]['key_to_drawn_ns'] / 1e9, 4)
+                                            if traces and traces[-1].get('key_to_drawn_ns') is not None else None)})
         return rows
 
     def run(self):

@@ -29,9 +29,6 @@ pub type TSDecodeFunction = ::core::option::Option<
     unsafe extern "C" fn(string: *const u8, length: u32, code_point: *mut i32) -> u32,
 >;
 pub const TSInputEncodingUTF8: TSInputEncoding = 0;
-pub const TSInputEncodingUTF16LE: TSInputEncoding = 1;
-pub const TSInputEncodingUTF16BE: TSInputEncoding = 2;
-pub const TSInputEncodingCustom: TSInputEncoding = 3;
 pub type TSInputEncoding = ::core::ffi::c_uint;
 pub const TSSymbolTypeRegular: TSSymbolType = 0;
 pub const TSSymbolTypeAnonymous: TSSymbolType = 1;
@@ -80,21 +77,6 @@ pub struct TSParseOptions {
     pub payload: *mut ::core::ffi::c_void,
     pub progress_callback:
         ::core::option::Option<unsafe extern "C" fn(state: *mut TSParseState) -> bool>,
-}
-pub const TSLogTypeParse: TSLogType = 0;
-pub const TSLogTypeLex: TSLogType = 1;
-pub type TSLogType = ::core::ffi::c_uint;
-#[repr(C)]
-#[derive(Debug)]
-pub struct TSLogger {
-    pub payload: *mut ::core::ffi::c_void,
-    pub log: ::core::option::Option<
-        unsafe extern "C" fn(
-            payload: *mut ::core::ffi::c_void,
-            log_type: TSLogType,
-            buffer: *const ::core::ffi::c_char,
-        ),
-    >,
 }
 #[doc = " A summary of a change to a text document.\n\n The `start_byte` and `start_point` values must be less than or equal to the\n `old_end_byte` and `old_end_point` values, respectively. Passing an edit\n that violates these invariants may produce nonsensical results."]
 #[repr(C)]
@@ -157,7 +139,7 @@ unsafe extern "C" {
     pub fn ts_parser_included_ranges(self_: *const TSParser, count: *mut u32) -> *const TSRange;
 }
 unsafe extern "C" {
-    #[doc = " Use the parser to parse some source code and create a syntax tree.\n\n If you are parsing this document for the first time, pass `NULL` for the\n `old_tree` parameter. Otherwise, if you have already parsed an earlier\n version of this document and the document has since been edited, pass the\n previous syntax tree so that the unchanged parts of it can be reused.\n This will save time and memory. For this to work correctly, you must have\n already edited the old syntax tree using the [`ts_tree_edit`] function in a\n way that exactly matches the source code changes.\n\n The [`TSInput`] parameter lets you specify how to read the text. It has the\n following three fields:\n 1. [`read`]: A function to retrieve a chunk of text at a given byte offset\n    and (row, column) position. The function should return a pointer to the\n    text and write its length to the [`bytes_read`] pointer. The parser does\n    not take ownership of this buffer; it just borrows it until it has\n    finished reading it. The function should write a zero value to the\n    [`bytes_read`] pointer to indicate the end of the document.\n 2. [`payload`]: An arbitrary pointer that will be passed to each invocation\n    of the [`read`] function.\n 3. [`encoding`]: An indication of how the text is encoded. Either\n    `TSInputEncodingUTF8`, `TSInputEncodingUTF16LE`, `TSInputEncoding16BE`,\n    or `TSInputEncodingCustom`.\n 4. [`decode`]: A function to read one code point from the given input. This\n    function should return the number of bytes consumed and write the code point\n    to the [`code_point`] pointer, or write -1 if the input is invalid.\n\n This function returns a syntax tree on success, and `NULL` on failure. There\n are two possible reasons for failure:\n 1. The parser does not have a language assigned. Check for this using the\n    [`ts_parser_language`] function.\n 2. Parsing was cancelled due to the progress callback returning true. This callback\n    is passed in [`ts_parser_parse_with_options`] inside the [`TSParseOptions`] struct.\n\n [`read`]: TSInput::read\n [`payload`]: TSInput::payload\n [`encoding`]: TSInput::encoding\n [`bytes_read`]: TSInput::read\n [`decode`]: TSInput::decode\n [`code_point`]: TSDecodeFunction::code_point"]
+    #[doc = " Use the parser to parse some source code and create a syntax tree.\n\n If you are parsing this document for the first time, pass `NULL` for the\n `old_tree` parameter. Otherwise, if you have already parsed an earlier\n version of this document and the document has since been edited, pass the\n previous syntax tree so that the unchanged parts of it can be reused.\n This will save time and memory. For this to work correctly, you must have\n already edited the old syntax tree using the [`ts_tree_edit`] function in a\n way that exactly matches the source code changes.\n\n The [`TSInput`] parameter lets you specify how to read the text. It has the\n following fields:\n 1. [`read`]: A function to retrieve a chunk of text at a given byte offset\n    and (row, column) position. The function should return a pointer to the\n    text and write its length to the [`bytes_read`] pointer. The parser does\n    not take ownership of this buffer; it just borrows it until it has\n    finished reading it. The function should write a zero value to the\n    [`bytes_read`] pointer to indicate the end of the document.\n 2. [`payload`]: An arbitrary pointer that will be passed to each invocation\n    of the [`read`] function.\n 3. [`encoding`]: Set to `TSInputEncodingUTF8`.\n 4. [`decode`]: Unused. Set to `NULL`.\n\n This function returns a syntax tree on success, and `NULL` on failure. There\n are two possible reasons for failure:\n 1. The parser does not have a language assigned. Check for this using the\n    [`ts_parser_language`] function.\n 2. Parsing was cancelled due to the progress callback returning true. This callback\n    is passed in [`ts_parser_parse_with_options`] inside the [`TSParseOptions`] struct.\n\n [`read`]: TSInput::read\n [`payload`]: TSInput::payload\n [`encoding`]: TSInput::encoding\n [`bytes_read`]: TSInput::read\n [`decode`]: TSInput::decode"]
     pub fn ts_parser_parse(
         self_: *mut TSParser,
         old_tree: *const TSTree,
@@ -183,30 +165,8 @@ unsafe extern "C" {
     ) -> *mut TSTree;
 }
 unsafe extern "C" {
-    #[doc = " Use the parser to parse some source code stored in one contiguous buffer with\n a given encoding. The first four parameters work the same as in the\n [`ts_parser_parse_string`] method above. The final parameter indicates whether\n the text is encoded as UTF8 or UTF16."]
-    pub fn ts_parser_parse_string_encoding(
-        self_: *mut TSParser,
-        old_tree: *const TSTree,
-        string: *const ::core::ffi::c_char,
-        length: u32,
-        encoding: TSInputEncoding,
-    ) -> *mut TSTree;
-}
-unsafe extern "C" {
     #[doc = " Instruct the parser to start the next parse from the beginning.\n\n If the parser previously failed because of the progress callback, then\n by default, it will resume where it left off on the next call to\n [`ts_parser_parse`] or other parsing functions. If you don't want to resume,\n and instead intend to use this parser to parse some other document, you must\n call [`ts_parser_reset`] first."]
     pub fn ts_parser_reset(self_: *mut TSParser);
-}
-unsafe extern "C" {
-    #[doc = " Set the logger that a parser should use during parsing.\n\n The parser does not take ownership over the logger payload. If a logger was\n previously assigned, the caller is responsible for releasing any memory\n owned by the previous logger."]
-    pub fn ts_parser_set_logger(self_: *mut TSParser, logger: TSLogger);
-}
-unsafe extern "C" {
-    #[doc = " Get the parser's current logger."]
-    pub fn ts_parser_logger(self_: *const TSParser) -> TSLogger;
-}
-unsafe extern "C" {
-    #[doc = " Set the file descriptor to which the parser should write debugging graphs\n during parsing. The graphs are formatted in the DOT language. You may want\n to pipe these graphs directly to a `dot(1)` process in order to generate\n SVG output. You can turn off this logging by passing a negative number."]
-    pub fn ts_parser_print_dot_graphs(self_: *mut TSParser, fd: ::core::ffi::c_int);
 }
 unsafe extern "C" {
     #[doc = " Create a shallow copy of the syntax tree. This is very fast.\n\n You need to copy a syntax tree in order to use it on more than one thread at\n a time, as syntax trees are not thread safe."]
@@ -247,10 +207,6 @@ unsafe extern "C" {
         new_tree: *const TSTree,
         length: *mut u32,
     ) -> *mut TSRange;
-}
-unsafe extern "C" {
-    #[doc = " Write a DOT graph describing the syntax tree to the given file."]
-    pub fn ts_tree_print_dot_graph(self_: *const TSTree, file_descriptor: ::core::ffi::c_int);
 }
 unsafe extern "C" {
     #[doc = " Get the node's type as a null-terminated string."]
@@ -654,66 +610,6 @@ unsafe extern "C" {
     pub fn ts_lookahead_iterator_current_symbol_name(
         self_: *const TSLookaheadIterator,
     ) -> *const ::core::ffi::c_char;
-}
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct wasm_engine_t {
-    _unused: [u8; 0],
-}
-pub type TSWasmEngine = wasm_engine_t;
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct TSWasmStore {
-    _unused: [u8; 0],
-}
-pub const TSWasmErrorKindNone: TSWasmErrorKind = 0;
-pub const TSWasmErrorKindParse: TSWasmErrorKind = 1;
-pub const TSWasmErrorKindCompile: TSWasmErrorKind = 2;
-pub const TSWasmErrorKindInstantiate: TSWasmErrorKind = 3;
-pub const TSWasmErrorKindAllocate: TSWasmErrorKind = 4;
-pub type TSWasmErrorKind = ::core::ffi::c_uint;
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct TSWasmError {
-    pub kind: TSWasmErrorKind,
-    pub message: *mut ::core::ffi::c_char,
-}
-unsafe extern "C" {
-    #[doc = " Create a Wasm store."]
-    pub fn ts_wasm_store_new(
-        engine: *mut TSWasmEngine,
-        error: *mut TSWasmError,
-    ) -> *mut TSWasmStore;
-}
-unsafe extern "C" {
-    #[doc = " Free the memory associated with the given Wasm store."]
-    pub fn ts_wasm_store_delete(arg1: *mut TSWasmStore);
-}
-unsafe extern "C" {
-    #[doc = " Create a language from a buffer of Wasm. The resulting language behaves\n like any other Tree-sitter language, except that in order to use it with\n a parser, that parser must have a Wasm store. Note that the language\n can be used with any Wasm store, it doesn't need to be the same store that\n was used to originally load it."]
-    pub fn ts_wasm_store_load_language(
-        arg1: *mut TSWasmStore,
-        name: *const ::core::ffi::c_char,
-        wasm: *const ::core::ffi::c_char,
-        wasm_len: u32,
-        error: *mut TSWasmError,
-    ) -> *const TSLanguage;
-}
-unsafe extern "C" {
-    #[doc = " Get the number of languages instantiated in the given Wasm store."]
-    pub fn ts_wasm_store_language_count(arg1: *const TSWasmStore) -> usize;
-}
-unsafe extern "C" {
-    #[doc = " Check if the language came from a Wasm module. If so, then in order to use\n this language with a Parser, that parser must have a Wasm store assigned."]
-    pub fn ts_language_is_wasm(arg1: *const TSLanguage) -> bool;
-}
-unsafe extern "C" {
-    #[doc = " Assign the given Wasm store to the parser. A parser must have a Wasm store\n in order to use Wasm languages."]
-    pub fn ts_parser_set_wasm_store(arg1: *mut TSParser, arg2: *mut TSWasmStore);
-}
-unsafe extern "C" {
-    #[doc = " Remove the parser's current Wasm store and return it. This returns NULL if\n the parser doesn't have a Wasm store."]
-    pub fn ts_parser_take_wasm_store(arg1: *mut TSParser) -> *mut TSWasmStore;
 }
 unsafe extern "C" {
     #[doc = " Set the allocation functions used by the library.\n\n By default, Tree-sitter uses the standard libc allocation functions,\n but aborts the process when an allocation fails. This function lets\n you supply alternative allocation functions at runtime.\n\n If you pass `NULL` for any parameter, Tree-sitter will switch back to\n its default implementation of that function.\n\n If you call this function after the library has already been used, then\n you must ensure that either:\n  1. All the existing objects have been freed.\n  2. The new allocator shares its state with the old one, so it is capable\n     of freeing memory that was allocated by the old allocator."]

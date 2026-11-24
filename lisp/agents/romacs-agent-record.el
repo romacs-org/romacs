@@ -130,7 +130,12 @@ STEER is non-nil when the journal already records a turn under way."
 (defun romacs-agent--record-note-event (note)
   "Translate NOTE into its event when it names one."
   (pcase (gethash "type" note)
-    ("run" (list :type 'run))
+    ;; The instance it was launched on and the credentials stamp its launch
+    ;; found there (`romacs-agent--launch'), when said.
+    ("run" (if (eq (gethash "stamp" note 'absent) 'absent) (list :type 'run)
+             (list :type 'run :stamp (romacs-agent--value (gethash "stamp" note))
+                   :credentials (romacs-agent--value (gethash "credentials" note))
+                   :provider (romacs-agent--value (gethash "provider" note)))))
     ("answer" (romacs-agent--record-answer note))
     ("selection" (list :type 'selection
                        :from (romacs-agent--selection-of (gethash "from" note))

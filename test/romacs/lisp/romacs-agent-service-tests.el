@@ -757,38 +757,54 @@ a state root of its own, and a service of its own on `socket'."
         (kill-buffer local)
         (when remote (kill-buffer remote))))))
 
-(ert-deftest romacs-agent-service-remote-send-distinguishes-refused-from-unconfirmed ()
+(ert-deftest romacs-agent-service-remote-send-keeps-a-refused-draft-and-its-id ()
+  ;; Refused or unconfirmed, a remote draft stays in the composer under its
+  ;; draft id: sent again, it names that id, which the service sends once.
   (require 'romacs-agent-remote)
-  (let ((source (romacs-agent-remote--make :client 'test-client))
+  (let ((source (romacs-agent-remote--make
+                 :client (romacs-agent-client--make :server (romacs-agent-rpc-object "version" [1 1]))))
         (session (romacs-agent--make :id "remote-test" :harness 'claude :state 'idle))
-        (reply nil))
+        (intent (list :draft-id "d1" :kind 'send :text "t" :attachments nil))
+        (sent nil) (reply nil))
+    ;; One that may have gone is unconfirmed; the others, refusals.
+    (pcase-dolist (`(,kind . ,reason) '(("disconnected" . unconfirmed) ("not-kept" . unconfirmed)
+                                        ("unknown-session" . no-session) ("not-live" . closed)
+                                        ("bad-params" . invalid)))
+      (let ((answer (romacs-agent-remote--submit-answer
+                     intent nil (romacs-agent-rpc-object "message" "Test error"
+                                                         "data" (romacs-agent-rpc-object "kind" kind)))))
+        (should (eq (if (eq (plist-get answer :status) 'unconfirmed) 'unconfirmed (plist-get answer :reason))
+                    reason))))
     (cl-letf (((symbol-function 'romacs-agent-client-live-p) (lambda (_) t))
               ((symbol-function 'romacs-agent-client-command)
-               (lambda (_client _method _params callback) (setq reply callback))))
-      (dolist (kind '("disconnected" "not-kept" "unknown-session"))
-        (with-temp-buffer
-          (romacs-agent-log-mode)
-          (setq-local romacs-agent-log--session session
-                      romacs-agent-log--source source
-                      romacs-agent-log--end (point-min-marker)
-                      romacs-agent-log--input (point-min-marker)
-                      romacs-agent-log--prompts nil)
-          (set-marker-insertion-type romacs-agent-log--end t)
-          (romacs-agent-log--separator t)
-          (goto-char (point-max))
-          (insert "sent prompt")
-          (romacs-agent-log--deliver (lambda (text) (romacs-agent-log-source-send source session text)))
-          (insert "new draft")
-          (funcall reply nil (romacs-agent-rpc-object "message" "Test error"
-                                                      "data" (romacs-agent-rpc-object "kind" kind)))
-          (if (equal kind "unknown-session")
-              (should (equal (romacs-agent-log--draft) "sent prompt\n\nnew draft"))
-            (romacs-agent-remote--drawn session nil nil)
-            (should (equal (romacs-agent-log--draft) "new draft"))
-            (romacs-agent-log-history-previous)
-            (should (equal (romacs-agent-log--draft) "sent prompt"))
-            (romacs-agent-log-history-next)
-            (should (equal (romacs-agent-log--draft) "new draft"))))))))
+               (lambda (_client _method params callback) (push params sent) (setq reply callback))))
+      (with-temp-buffer
+        (romacs-agent-log-mode)
+        (setq-local romacs-agent-log--session session
+                    romacs-agent-log--source source
+                    romacs-agent-log--end (point-min-marker)
+                    romacs-agent-log--input (point-min-marker)
+                    romacs-agent-log--prompts nil)
+        (set-marker-insertion-type romacs-agent-log--end t)
+        (romacs-agent-log--separator t)
+        (goto-char (point-max))
+        (insert "sent prompt")
+        (cl-flet ((answer (result error)
+                    (funcall reply result error)
+                    (let ((deadline (+ (float-time) 3)))
+                      (while (and romacs-agent-log--sending (< (float-time) deadline))
+                        (accept-process-output nil 0.01)))
+                    (should-not romacs-agent-log--sending)))
+          (romacs-agent-log-send)
+          (answer nil (romacs-agent-rpc-object "message" "Test error"
+                                               "data" (romacs-agent-rpc-object "kind" "disconnected")))
+          (should (equal (romacs-agent-log--draft) "sent prompt"))
+          (romacs-agent-log-send)
+          (should (= (length sent) 2))
+          (should (stringp (gethash "draftId" (car sent))))
+          (should (equal (gethash "draftId" (car sent)) (gethash "draftId" (cadr sent))))
+          (answer (romacs-agent-rpc-object "state" "written") nil)
+          (should (equal (romacs-agent-log--draft) "")))))))
 
 (ert-deftest romacs-agent-service-command-digest-orders-nested-objects ()
   (let ((a (json-parse-string "{\"cid\":\"a\",\"rows\":[{\"b\":2,\"a\":1},null]}"))
@@ -818,8 +834,13 @@ a state root of its own, and a service of its own on `socket'."
                     (romacs-agent-client-request client method params (lambda (r e) (setq answer (list r e))))
                     (wait answer)
                     answer))))
-      (cl-letf (((symbol-function 'romacs-agent-send) (lambda (_s text &rest _) (push (list 'send text) calls) 'item))
-                ((symbol-function 'romacs-agent-send-later) (lambda (_s text &rest _) (push (list 'later text) calls) 'item))
+      (cl-letf (((symbol-function 'romacs-agent--ended-p) #'ignore)
+                ((symbol-function 'romacs-agent--admit)
+                 (lambda (_s item &rest _)
+                   (push (list (if (eq (romacs-agent-item-kind item) 'next) 'later 'send) (romacs-agent-item-text item)) calls)
+                   ;; As its write would say.
+                   (romacs-agent--draft-written (romacs-agent-item-id item))
+                   item))
                 ((symbol-function 'romacs-agent-interrupt) (lambda (_s) (push '(interrupt) calls)))
                 ;; Answered as the harness is written to: its line.
                 ((symbol-function 'romacs-agent--line)
@@ -875,14 +896,16 @@ a state root of its own, and a service of its own on `socket'."
                 (insert "from afar")
                 (romacs-agent-log-send))
               (should (wait (equal (car calls) '(send "from afar"))))
-              ;; Refused: the text is the composer's again.
-              (cl-letf (((symbol-function 'romacs-agent-send) (lambda (&rest _) (user-error "Its harness ended"))))
+              (should (wait (equal (with-current-buffer remote (romacs-agent-log--draft)) "")))
+              ;; Refused: the text stays the composer's.
+              (cl-letf (((symbol-function 'romacs-agent--admit) (lambda (&rest _) (user-error "Its harness ended"))))
                 (with-current-buffer remote
                   (goto-char (point-max))
                   (insert "not sent")
                   (romacs-agent-log-send)
-                  (should (equal (romacs-agent-log--draft) ""))
-                  (should (wait (equal (romacs-agent-log--draft) "not sent"))))))
+                  (should (equal (romacs-agent-log--draft) "not sent"))
+                  (should (wait (not romacs-agent-log--sending)))
+                  (should (equal (romacs-agent-log--draft) "not sent")))))
           (romacs-agent-remote-disconnect)
           (when remote (kill-buffer remote)))))))
 

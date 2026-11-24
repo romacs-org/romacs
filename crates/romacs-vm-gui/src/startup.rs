@@ -1615,7 +1615,7 @@ mod tests {
         let prompt = printed(&mut vm, "(with-current-buffer (window-buffer (minibuffer-window)) (buffer-string))");
         assert!(prompt.contains("(y/n"), "native close must show the keyboard quit prompt: {prompt}");
         assert!(!presentation.ready(), "must not overwrite an in-flight frame");
-        presentation.completed(1, std::time::Instant::now());
+        presentation.completed(1);
         assert!(presentation.ready(), "pending native-close prompt must redraw after the in-flight frame");
         fileio_native_keys(&mut vm, &[110]);
         assert_eq!(printed(&mut vm, "romacs-gui-quit-requested"), "nil");

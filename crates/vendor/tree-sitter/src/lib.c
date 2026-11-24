@@ -10,9 +10,3 @@
 #include "./tree_cursor.c"
 #include "./query_adapter.c"
 #include "./tree.c"
-#include "./wasm_store.c"
-
-#ifdef TREE_SITTER_WASM_STDLIB
-#include "./wasm-stdlib/libc.c"
-#include "./wasm-stdlib/stdio.c"
-#endif

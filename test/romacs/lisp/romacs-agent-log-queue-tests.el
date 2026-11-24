@@ -67,10 +67,18 @@
   "Run KEY's command in MAP, as typed."
   (call-interactively (keymap-lookup map key)))
 
+(defun romacs-agent-log-queue-tests--answered ()
+  "Wait for the chat's draft to be answered (`romacs-agent-submit')."
+  (let ((deadline (+ (float-time) 3)))
+    (while (and romacs-agent-log--sending (< (float-time) deadline))
+      (accept-process-output nil 0.01))
+    (should-not romacs-agent-log--sending)))
+
 (defun romacs-agent-log-queue-tests--queue (text)
-  "Queue TEXT as its user does: in the composer, C-c C-q."
+  "Queue TEXT as its user does: in the composer, C-c C-q, and wait for its answer."
   (romacs-agent-log-queue-tests--compose text)
-  (romacs-agent-log-queue-tests--key romacs-agent-log-mode-map "C-c C-q"))
+  (romacs-agent-log-queue-tests--key romacs-agent-log-mode-map "C-c C-q")
+  (romacs-agent-log-queue-tests--answered))
 
 (defun romacs-agent-log-queue-tests--row (n)
   "Point to the Nth queued row, by n from the transcript's end."

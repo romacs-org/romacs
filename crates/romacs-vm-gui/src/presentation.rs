@@ -37,16 +37,12 @@ pub struct Presentation {
     /// The paint submitted and not yet drawn, and when the oldest undrawn
     /// paint it stands for was submitted.
     in_flight: Option<(u64, Instant)>,
-    /// The presentations retired and when each rendered, in order, until
-    /// taken: a prompt's settled paint and the loop's next may both retire
-    /// before the loop takes them, and the trace needs each.
-    retired: Vec<(u64, Instant)>,
     /// The current stall has been reported.
     warned: bool,
 }
 
 impl Presentation {
-    pub fn new() -> Self { Self { dirty: false, in_flight: None, retired: Vec::new(), warned: false } }
+    pub fn new() -> Self { Self { dirty: false, in_flight: None, warned: false } }
 
     pub fn changed(&mut self) { self.dirty = true; }
 
@@ -145,20 +141,15 @@ impl Presentation {
         Some((presentation, since.elapsed()))
     }
 
-    /// PRESENTATION rendered AT, whether the loop saw it or a prompt
-    /// settled it first (main.rs `Lent'): it settles the paint in flight,
-    /// or an earlier one it superseded.
-    pub fn completed(&mut self, presentation: u64, at: Instant) {
-        if let Some((actual, _)) = self.in_flight.filter(|(actual, _)| *actual <= presentation) {
+    /// PRESENTATION rendered, whether the loop saw it or a prompt settled
+    /// it first (main.rs `Lent'): it settles the paint in flight, or an
+    /// earlier one it superseded.
+    pub fn completed(&mut self, presentation: u64) {
+        if self.in_flight.is_some_and(|(actual, _)| actual <= presentation) {
             self.in_flight = None;
-            self.retired.push((actual, at));
             self.warned = false;
         }
     }
-
-    /// The presentations retired since the last call, and when each rendered:
-    /// the latency trace's keys for it are complete.
-    pub fn take_retired(&mut self) -> Vec<(u64, Instant)> { std::mem::take(&mut self.retired) }
 
     /// How long to block for input while a paint is in flight: until it
     /// would count as stalled, so the stall is told when it begins. The
@@ -300,7 +291,7 @@ mod tests {
         let value = vm.eval_source("(list (buffer-string) (point))").unwrap();
         assert_eq!(value.display().unwrap(), "(\"aλΔ\" 3)");
         assert!(vm.heap_stats().collections > collections);
-        presentation.completed(1, Instant::now());
+        presentation.completed(1);
         assert!(presentation.ready());
         let snapshot = vm.frame_snapshot(1200, 800).unwrap();
         assert_eq!(snapshot.windows[0].snapshot.text.utf8, "aλΔ");
@@ -330,7 +321,7 @@ mod tests {
         assert_eq!(next.windows[0].snapshot.text.utf8, "aλ!Δ");
         assert_eq!(next.windows[0].snapshot.point_byte, 4);
         assert_ne!(snapshot, next);
-        presentation.completed(2, Instant::now());
+        presentation.completed(2);
         assert!(presentation.ready());
     }
 
@@ -364,7 +355,7 @@ mod tests {
         assert_eq!(presentation.stall_warning(stall).map(|(p, _)| p), Some(7));
         assert_eq!(presentation.stall_warning(stall), None, "one warning per stall");
         assert_eq!(presentation.wait(stall), None, "nothing polls while hidden: the render wakes the wait");
-        presentation.completed(7, Instant::now());
+        presentation.completed(7);
         assert!(presentation.ready(), "the frame drawn on showing releases the newest");
         presentation.submitted(8, Instant::now());
         std::thread::sleep(stall);
@@ -379,12 +370,12 @@ mod tests {
         presentation.changed();
         presentation.changed();
         assert!(!presentation.ready(), "input must not trigger per-command layout while rendering");
-        presentation.completed(0, Instant::now());
+        presentation.completed(0);
         assert!(!presentation.ready(), "stale completion cannot release a frame");
-        presentation.completed(1, Instant::now());
+        presentation.completed(1);
         assert!(presentation.ready(), "dirty commands must survive renderer completion");
         presentation.submitted(2, now);
-        presentation.completed(2, Instant::now());
+        presentation.completed(2);
         assert!(!presentation.ready());
     }
 }

@@ -2968,6 +2968,190 @@ def logging(args, base):
         a.close()
 
 
+# The first 100 characters of DRAFT in the agents typing rig's run.py.
+SUBMIT_DRAFT = ('Please compare the journal replay trace with the live run and summarize '
+                'where the time went before the frame was submitted. ')[:100]
+
+SUBMIT_PROBE = r"""
+(progn
+  (defvar s8-submit-calls nil)
+  (defvar s8-submit-answers nil)
+  (defvar s8-submit-release nil)
+  (defvar s8-submit-clears 0)
+  (defvar s8-submit-barrier 0)
+  (defun s8-submit-deliver (file callback answer)
+    (if (or (null file) (file-exists-p file))
+        (funcall callback answer)
+      (run-at-time 0.02 nil #'s8-submit-deliver file callback answer)))
+  (defun s8-submit-record (original session intent callback)
+    (push (list session (copy-tree intent)) s8-submit-calls)
+    (let ((index (length s8-submit-calls)) (file s8-submit-release))
+      (funcall original session intent
+               (lambda (answer)
+                 (push (list index (copy-tree answer)) s8-submit-answers)
+                 (s8-submit-deliver file callback answer)))))
+  (defun s8-submit-sending-face-p ()
+    (let ((start (save-excursion
+                   (goto-char romacs-agent-log--input)
+                   (let ((inhibit-field-text-motion t)) (line-beginning-position)))))
+      (cl-loop for p from start to romacs-agent-log--input
+               thereis
+               (let ((face (get-char-property p 'face))
+                     (prefix (get-char-property p 'line-prefix)))
+                 (string-match-p "\\_<romacs-agent-compose-sending\\_>"
+                                 (format "%S %S" face (and (stringp prefix)
+                                                           (text-properties-at 0 prefix))))))))
+  (advice-add 'romacs-agent-submit :around #'s8-submit-record)
+  (global-set-key [f8] (lambda () (interactive) (cl-incf s8-submit-barrier)))
+  t)
+"""
+
+
+def submit_read(a, form):
+    # Repeated ids and cached answers can share Lisp objects.  The probe
+    # reader needs their values without the server printer's sharing labels.
+    printed = a.eval(f'(let ((print-circle nil) (print-length nil) (print-level nil)) (prin1-to-string {form}))')
+    return parity_live.read_sexp(parity_live.read_sexp(printed))
+
+
+def submit_ret(a, barrier=False):
+    if not barrier:
+        a.keys('-k', 'Return')
+        return
+    before = submit_read(a, 's8-submit-barrier')
+    a.keys('-k', 'Return', '-k', 'F8')
+    until(lambda: submit_read(a, 's8-submit-barrier') > before, 10, 'keys after second RET ran')
+
+
+def submit_answers(a):
+    return submit_read(a, '(reverse s8-submit-answers)') or []
+
+
+def submit_calls(a, sid):
+    calls = submit_read(a, '(reverse s8-submit-calls)') or []
+    assert all(session == sid for session, _ in calls), calls
+    return [parity_live.plist(intent) for _, intent in calls]
+
+
+def submit_draft(a, chat):
+    return submit_read(a, f'(with-current-buffer {chat} '
+                       '(buffer-substring-no-properties romacs-agent-log--input (point-max)))')
+
+
+def submit_chat(a, text):
+    sid = a.start('say submit ready')
+    a.idle(sid)
+    chat = f'(romacs-agent-log-chat {a.s(sid)})'
+    a.eval(f'(progn (romacs-agent-show {a.s(sid)}) (goto-char (point-max)) t)')
+    a.keys(text)
+    until(lambda: submit_draft(a, chat) == text, 10, 'submit fixture typed')
+    return sid, chat
+
+
+def submit_inputs(a, sid):
+    return [r['in']['message']['content'] for r in a.journal(sid)
+            if isinstance(r.get('in'), dict) and r['in'].get('type') == 'user']
+
+
+def composer_submit_hold(a):
+    sid, chat = submit_chat(a, SUBMIT_DRAFT)
+    release = a.root / 'submit-release'
+    a.eval(f'(setq s8-submit-release {lisp(release)})')
+    a.eval(f'(with-current-buffer {chat} (add-hook (quote romacs-agent-log-draft-replaced-hook) '
+           '(lambda () (cl-incf s8-submit-clears)) nil t) t)')
+    try:
+        submit_ret(a)
+        until(lambda: submit_answers(a), 10, 'submit answer held behind release file')
+        draft = submit_draft(a, chat)
+        assert draft == SUBMIT_DRAFT, ('draft erased before answer', draft)
+        assert submit_read(a, f'(with-current-buffer {chat} '
+                           '(condition-case nil (progn (goto-char (point-max)) (insert "x") nil) '
+                           '((buffer-read-only text-read-only) t)))'), 'pending draft was writable'
+        assert submit_read(a, f'(with-current-buffer {chat} (s8-submit-sending-face-p))') is not None, 'sending face missing'
+        submit_ret(a, barrier=True)
+        intents = submit_calls(a, sid)
+        assert len(intents) == 1, ('second RET called submit', intents)
+        assert intents[0]['text'] == SUBMIT_DRAFT.strip(), intents
+        assert submit_read(a, 's8-submit-clears') == 0, 'draft cleared while answer was held'
+    finally:
+        release.touch()
+        a.eval('(setq s8-submit-release nil)')
+    until(lambda: submit_draft(a, chat) == '', 10, 'accepted draft cleared')
+    assert submit_read(a, 's8-submit-clears') == 1, 'draft did not clear exactly once'
+    return {'intent': intents[0], 'answers': submit_answers(a), 'clears': 1}
+
+
+def composer_submit_retry(a):
+    sid, chat = submit_chat(a, f'say {UNICODE}')
+    before = submit_inputs(a, sid)
+    os.kill(a.harness_pid(sid), signal.SIGKILL)
+    until(lambda: a.state(sid) == 'ended' and a.eval(f'(process-live-p (romacs-agent-connection {a.s(sid)}))') == 'nil',
+          20, 'harness ended')
+    mark = submit_read(a, '(with-current-buffer "*Messages*" (point-max))')
+    submit_ret(a)
+    first = until(lambda: submit_answers(a), 10, 'closed refusal')
+    answer = parity_live.plist(first[0][1])
+    assert (answer['status'], answer['reason']) == ('refused', 'closed'), answer
+    assert submit_draft(a, chat) == f'say {UNICODE}', 'refused draft lost'
+    shown = submit_read(a, f'(with-current-buffer "*Messages*" (buffer-substring-no-properties {mark} (point-max)))')
+    assert answer['message'] and answer['message'] in shown, ('refusal message missing', answer)
+    assert submit_inputs(a, sid) == before, 'refusal wrote a journal input'
+    a.eval(f'(romacs-agent-resume {a.s(sid)})')
+    a.idle(sid)
+    submit_ret(a)
+    until(lambda: len(submit_answers(a)) >= 2, 10, 'retry answered')
+    intents = submit_calls(a, sid)
+    assert len(intents) == 2 and intents[0]['draft-id'] and intents[0]['draft-id'] == intents[1]['draft-id'], intents
+    answers = submit_answers(a)
+    assert [parity_live.plist(answer)['status'] for _, answer in answers] == ['refused', 'accepted'], answers
+    until(lambda: submit_draft(a, chat) == '', 10, 'retried draft cleared')
+    expected = before + [f'say {UNICODE}']
+    until(lambda: len(submit_inputs(a, sid)) >= len(expected), 10, 'retried input journaled')
+    a.idle(sid)
+    assert submit_inputs(a, sid) == expected, submit_inputs(a, sid)
+    return {'intents': intents, 'answers': answers, 'inputs': expected[len(before):]}
+
+
+def composer_submit_twice(a):
+    sid = a.start('say submit ready')
+    a.idle(sid)
+    before = submit_inputs(a, sid)
+    a.eval('(setq s8-submit-twice-intent (list :draft-id (romacs-agent--uuid) '
+           ':kind (quote send) :text "say submit twice" :attachments nil))')
+    form = f'(progn (romacs-agent-submit {lisp_text(sid)} s8-submit-twice-intent (function ignore)) t)'
+    a.eval(form)
+    until(lambda: submit_answers(a), 10, 'first direct submit answered')
+    a.eval(form)
+    until(lambda: any(index == 2 for index, _ in submit_answers(a)), 10, 'repeated id answered')
+    expected = before + ['say submit twice']
+    until(lambda: len(submit_inputs(a, sid)) >= len(expected), 10, 'direct input journaled')
+    a.idle(sid)
+    answers = submit_answers(a)
+    assert [index for index, _ in answers] == [1, 2], ('callback counts', answers)
+    assert answers[0][1] == answers[1][1], answers
+    assert parity_live.plist(answers[0][1])['status'] == 'accepted', answers
+    intents = submit_calls(a, sid)
+    assert len(intents) == 2 and intents[0] == intents[1], intents
+    assert submit_inputs(a, sid) == expected, submit_inputs(a, sid)
+    return {'intents': intents, 'answers': answers, 'inputs': expected[len(before):]}
+
+
+def composer_submit_steps(a, steps):
+    phases = {'submit_hold': composer_submit_hold, 'submit_refuse_then_retry': composer_submit_retry,
+              'submit_twice': composer_submit_twice}
+    if a.eval("(fboundp 'romacs-agent-submit)") == 'nil':
+        steps.update({name: {'skipped': 'romacs-agent-submit unavailable'} for name in phases})
+        return True
+    a.eval(f"(eval '{SUBMIT_PROBE} t)")
+    for name, phase in phases.items():
+        a.eval('(setq s8-submit-calls nil s8-submit-answers nil)')
+        try:
+            steps[name] = {'ok': True, **phase(a)}
+        except (AssertionError, RuntimeError) as error:
+            steps[name] = {'ok': False, 'error': repr(error)}
+    return all(steps[name]['ok'] for name in phases)
+
+
 def composer_real(args, base):
     """`composer' with a real Claude Code (--claude-model): costs money."""
     return composer(args, base, real=True)
@@ -2979,9 +3163,12 @@ def composer(args, base, real=False):
     composer, and after M-> and a recenter in a long wrapped transcript;
     each time the composer holds exactly what was typed and no command
     signalled."""
-    a = Agents(args, base, 'cm')
+    a = Agents(args, base, f'cm{os.getpid()}')
     try:
+        user_manager_reachable(a.runtime)
         a.up()
+        if a.eval('(getenv "INVOCATION_ID")') != 'nil':
+            a.unit = f'romacs-server-{a.name}'
         a.work.mkdir(parents=True, exist_ok=True)
         if real:
             a.providers([('claude', args.claude_config, args.claude_program or real_program('claude'),
@@ -3224,6 +3411,8 @@ def composer(args, base, real=False):
         result = {'steps': steps, 'messages': said[-1500:], 'title': look()[4]}
         result['failed'] = [i for i, check in enumerate(good) if not check]
         result['ok'] = all(good) and not any(word in said for word in ('unsupported', 'read-only', 'error', 'Error'))
+        if not real:
+            result['ok'] = composer_submit_steps(a, steps) and result['ok']
         return result
     finally:
         a.close()

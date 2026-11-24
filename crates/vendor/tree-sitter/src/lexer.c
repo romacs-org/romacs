@@ -4,26 +4,6 @@
 
 #include "tree_sitter/api.h"
 
-#include <stdarg.h>
-#include <stdio.h>
-
-#define LOG(message, character)              \
-  if (self->logger.log) {                    \
-    snprintf(                                \
-      self->debug_buffer,                    \
-      TREE_SITTER_SERIALIZATION_BUFFER_SIZE, \
-      32 <= character && character < 127 ?   \
-        message " character:'%c'" :          \
-        message " character:%d",             \
-      character                              \
-    );                                       \
-    self->logger.log(                        \
-      self->logger.payload,                  \
-      TSLogTypeLex,                          \
-      self->debug_buffer                     \
-    );                                       \
-  }
-
 static const int32_t BYTE_ORDER_MARK = 0xFEFF;
 
 static const TSRange DEFAULT_RANGE = {
@@ -115,18 +95,13 @@ static void ts_lexer__get_lookahead(Lexer *self) {
 
   const uint8_t *chunk = (const uint8_t *)self->chunk + position_in_chunk;
 
-  if (self->input.encoding == TSInputEncodingUTF8 && chunk[0] < 0x80) {
+  if (chunk[0] < 0x80) {
     self->data.lookahead = chunk[0];
     self->lookahead_size = 1;
     return;
   }
 
-  TSDecodeFunction decode =
-    self->input.encoding == TSInputEncodingUTF8    ? ts_decode_utf8     :
-    self->input.encoding == TSInputEncodingUTF16LE ? ts_decode_utf16_le :
-    self->input.encoding == TSInputEncodingUTF16BE ? ts_decode_utf16_be : self->input.decode;
-
-  self->lookahead_size = decode(chunk, size, &self->data.lookahead);
+  self->lookahead_size = ts_decode_utf8(chunk, size, &self->data.lookahead);
 
   // If this chunk ended in the middle of a multi-byte character,
   // try again with a fresh chunk.
@@ -134,7 +109,7 @@ static void ts_lexer__get_lookahead(Lexer *self) {
     ts_lexer__get_chunk(self);
     chunk = (const uint8_t *)self->chunk;
     size = self->chunk_size;
-    self->lookahead_size = decode(chunk, size, &self->data.lookahead);
+    self->lookahead_size = ts_decode_utf8(chunk, size, &self->data.lookahead);
   }
 
   if (self->data.lookahead == TS_DECODE_ERROR) {
@@ -262,17 +237,10 @@ static void ts_lexer__advance(TSLexer *_self, bool skip) {
   Lexer *self = (Lexer *)_self;
   if (!self->chunk) return;
 
-  if (skip) {
-    LOG("skip", self->data.lookahead)
-  } else {
-    LOG("consume", self->data.lookahead)
-  }
-
   const uint32_t next_position = self->current_position.bytes + 1;
   const uint32_t current_range_end =
     self->included_ranges[self->current_included_range_index].end_byte;
   if (
-    self->input.encoding == TSInputEncodingUTF8 &&
     self->lookahead_size == 1 &&
     self->data.lookahead != '\n' &&
     next_position < current_range_end &&
@@ -363,16 +331,7 @@ static bool ts_lexer__is_at_included_range_start(const TSLexer *_self) {
   }
 }
 
-static void ts_lexer__log(const TSLexer *_self, const char *fmt, ...) {
-  Lexer *self = (Lexer *)_self;
-  va_list args;
-  va_start(args, fmt);
-  if (self->logger.log) {
-    vsnprintf(self->debug_buffer, TREE_SITTER_SERIALIZATION_BUFFER_SIZE, fmt, args);
-    self->logger.log(self->logger.payload, TSLogTypeLex, self->debug_buffer);
-  }
-  va_end(args);
-}
+static void ts_lexer__log(const TSLexer *_self, const char *fmt, ...) {}
 
 void ts_lexer_init(Lexer *self) {
   *self = (Lexer) {
@@ -393,10 +352,6 @@ void ts_lexer_init(Lexer *self) {
     .chunk_size = 0,
     .chunk_start = 0,
     .current_position = {0, {0, 0}},
-    .logger = {
-      .payload = NULL,
-      .log = NULL
-    },
     .included_ranges = NULL,
     .included_range_count = 0,
     .current_included_range_index = 0,
@@ -458,7 +413,7 @@ void ts_lexer_finish(Lexer *self, uint32_t *lookahead_end_byte) {
 
   uint32_t current_lookahead_end_byte = self->current_position.bytes + 1;
 
-  // In order to determine that a byte sequence is invalid UTF8 or UTF16,
+  // In order to determine that a byte sequence is invalid UTF-8,
   // the character decoding algorithm may have looked at the following byte.
   // Therefore, the next byte *after* the current (invalid) character
   // affects the interpretation of the current character.
@@ -507,5 +462,3 @@ TSRange *ts_lexer_included_ranges(const Lexer *self, uint32_t *count) {
   *count = self->included_range_count;
   return self->included_ranges;
 }
-
-#undef LOG

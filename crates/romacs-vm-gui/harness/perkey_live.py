@@ -20,8 +20,8 @@ starts during a phase (an image decoder, a tree-sitter parse, a process's
 watcher) does work of its own, which is not the keys'.  With --inherit the
 count takes in such threads too, as `perf stat' does by default, for the
 whole work a phase set going.  Latency sessions run without perf and
-with --trace-latency, and read key-enqueue -> render-observed samples: one
-per key, each rendered or explicitly unchanged, or the phase is refused.
+with --trace-latency, and read key-ingress -> frame-drawn samples (`joined'):
+one per key, each rendered or explicitly unchanged, or the phase is refused.
 
 A phase counts only if
   * exactly N command replies arrived, each naming the key's bound command
@@ -85,6 +85,7 @@ usage: perkey_live.py --binary PATH --output DIR [--regime loadup|workspace]
                       [--host-calls] [--setup FORM]... [--inherit] [--home DIR]
 """
 import argparse
+import bisect
 import hashlib
 import json
 import os
@@ -201,9 +202,10 @@ def latency_check(samples, keys):
     """Render times of one phase's latency-key SAMPLES, how many keys needed no
     paint, and problems.  Each of the KEYS keys must have exactly one sample,
     the phase's samples one contiguous run of key sequences, and each sample
-    either a render time or the binary's explicit `unchanged' (a frame nothing
-    changed is not repainted).  A sample with neither, such as a key with no
-    enqueue time, is refused, never dropped."""
+    either a render time (`key_to_drawn_ns', `records') or the binary's
+    explicit `unchanged' (a frame nothing changed is not repainted).  A
+    sample with neither, such as a key no frame showed, is refused, never
+    dropped."""
     problems = []
     sequences = [s.get('key_sequence') for s in samples]
     if len(samples) != keys:
@@ -212,8 +214,8 @@ def latency_check(samples, keys):
         problems.append(f'latency samples without unique key sequences: {sequences}')
     elif sequences and sorted(sequences) != list(range(min(sequences), min(sequences) + len(sequences))):
         problems.append(f'latency samples are not one run of keys: {sorted(sequences)}')
-    rendered = [s['key_to_render_observed_ns'] for s in samples if s.get('key_to_render_observed_ns') is not None]
-    unchanged = sum(1 for s in samples if s.get('key_to_render_observed_ns') is None and s.get('unchanged') is True)
+    rendered = [s['key_to_drawn_ns'] for s in samples if s.get('key_to_drawn_ns') is not None]
+    unchanged = sum(1 for s in samples if s.get('key_to_drawn_ns') is None and s.get('unchanged') is True)
     if len(rendered) + unchanged != len(samples):
         problems.append(f'{len(samples) - len(rendered) - unchanged} latency samples with no render time')
     return rendered, unchanged, problems
@@ -242,7 +244,8 @@ def percentile(values, fraction):
 
 
 def records(path):
-    """JSON objects among the lines of PATH, in order."""
+    """JSON objects among the lines of PATH, in order, the keys' joined to
+    when their frames drew (`joined')."""
     found = []
     for line in path.read_text(errors='replace').splitlines():
         if line.startswith('{'):
@@ -250,6 +253,21 @@ def records(path):
                 found.append(json.loads(line))
             except json.JSONDecodeError:
                 pass
+    return joined(found)
+
+
+def joined(found):
+    """FOUND, each `latency-key' record of a key charged a frame given
+    `key_to_drawn_ns': from its ingress to the first `drawn' record of a
+    presentation at or after its own, when the render thread's present
+    returned (both count from the trace's start); None until one drew."""
+    drawn = sorted((r['presentation'], r['drawn_ns']) for r in found if r.get('diagnostic') == 'drawn')
+    for record in found:
+        if record.get('diagnostic') != 'latency-key':
+            continue
+        presentation, ingress = record.get('presentation'), record.get('ingress_ns')
+        at = len(drawn) if presentation is None else bisect.bisect_left(drawn, (presentation, -1))
+        record['key_to_drawn_ns'] = drawn[at][1] - ingress if at < len(drawn) and ingress is not None else None
     return found
 
 
@@ -834,7 +852,7 @@ def main():
     report = {'binary': str(args.binary), 'binary_sha256': hashlib.sha256(args.binary.read_bytes()).hexdigest(),
               'regime': args.regime, 'lines': args.lines, 'sample': str(args.sample) if args.sample else None, 'keys_per_phase': args.keys, 'gap_s': args.gap,
               'counter': f"instructions:u, evaluator thread{' and the threads it starts' if args.inherit else ' alone'}, idle-subtracted",
-              'latency': 'key enqueue to render observed (--trace-latency), perf-free sessions',
+              'latency': 'key ingress to its frame drawn (--trace-latency, joined), perf-free sessions',
               'instructions_per_key': per_key(good, args.keys) if good else None,
               'refused_phases': {f'{kind}-{i}': {n: p['problems'] for n, p in r['phases'].items() if p['problems']}
                                  for kind, rs in (('counted', counted), ('latency', timed))

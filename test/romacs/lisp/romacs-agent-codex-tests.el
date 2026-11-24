@@ -507,6 +507,30 @@ journals what its harness writes."
       (should (equal (types (events "error" "willRetry" :false "error" (romacs-mcp--object "message" "r"))) '(error)))
       (should-not (events "mcpServer/startupStatus/updated" "name" "x")))))
 
+(ert-deftest romacs-agent-codex-a-refused-sign-in-is-its-failure ()
+  ;; codex-cli 0.171's app-server schema: a turn's error says why in
+  ;; codexErrorInfo, "unauthorized" when its account's sign-in is refused.
+  (let ((session (romacs-agent--make :id "c" :harness 'codex)))
+    (cl-flet ((done (info)
+                (setf (romacs-agent-driver-state session) (list :turn "t1"))
+                (cl-find 'done (romacs-agent-codex-tests--events
+                                session (romacs-mcp--object
+                                         "method" "turn/completed"
+                                         "params" (romacs-mcp--object
+                                                   "threadId" "th"
+                                                   "turn" (romacs-mcp--object
+                                                           "id" "t1" "status" "failed"
+                                                           "error" (romacs-mcp--object "message" "401 Unauthorized"
+                                                                                       "codexErrorInfo" info)))))
+                         :key (lambda (event) (plist-get event :type)))))
+      (let ((refused (done "unauthorized")))
+        (should (eq (plist-get refused :failure) 'authentication))
+        (should (equal (plist-get refused :reason) "401 Unauthorized"))
+        (should-not (plist-get refused :limit)))
+      (let ((spent (done "usageLimitExceeded")))
+        (should (plist-get spent :limit))
+        (should-not (plist-get spent :failure))))))
+
 (ert-deftest romacs-agent-codex-reports-the-configured-thread-effort ()
   (let ((session (romacs-agent--make :id "c" :harness 'codex :options '(:model "configured"))))
     (dolist (reported '("m" :null))

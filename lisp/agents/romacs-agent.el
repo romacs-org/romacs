@@ -163,14 +163,89 @@ checked: the ones not of its shape, and one named romacs, left out."
 (defvar romacs-agent-event-functions nil
   "Functions called with a session and each event it raises.")
 
+(defvar romacs-agent--held nil
+  "While drafts are admitted, and until their answers have gone out,
+\(SESSIONS OBSERVERS ANSWERS): the sessions whose `changed' waits, the
+calls of observers that would have run, and (CALLBACK . ANSWER) for
+each submit answered, each the newest first.  No observer runs inside
+an admission: the first admission makes it, and `romacs-agent--release',
+a timer the outermost one sets once its answer is kept, lets it go.")
+
+(defvar romacs-agent--admitting 0
+  "How many admissions are under way, one within another: the hold
+\(`romacs-agent--held') is let go only when none is.")
+
+(defun romacs-agent--observe (function)
+  "Call FUNCTION, an observer's call: now, or, while drafts are admitted
+and answered, once their answers have gone out (`romacs-agent--held')."
+  (if romacs-agent--held
+      (push function (nth 1 romacs-agent--held))
+    (funcall function)))
+
+(defun romacs-agent--run-hook (hook &rest args)
+  "Run HOOK, one of the module's observers' hooks, with ARGS: the one way
+they are run, now or once the answers held have gone out
+\(`romacs-agent--observe').  Hooks whose value is needed at once, or that
+are run below the module, are run directly; the test
+`romacs-agent-submit-admission-every-hook-goes-through-the-runner' names
+them."
+  (if romacs-agent--held
+      (push (lambda () (apply #'run-hook-with-args hook args)) (nth 1 romacs-agent--held))
+    (apply #'run-hook-with-args hook args)))
+
+(defun romacs-agent--run-held (functions)
+  "Call FUNCTIONS, observers' calls held, in order, each one's error or
+quit said, not passed on; should one leave by a throw, the rest are
+called from a timer, so none is lost."
+  (let ((rest functions))
+    (unwind-protect
+        (while rest
+          (let ((function (pop rest)))
+            (condition-case err (funcall function)
+              ((error quit) (message "romacs-agent: an observer: %s" (error-message-string err))))))
+      (when rest (run-at-time 0 nil #'romacs-agent--run-held rest)))))
+
+(defun romacs-agent--answered-then (callback answer)
+  "Call CALLBACK with ANSWER, the last of the answers held, then let the
+hold go on (`romacs-agent--release'), whatever the callback does."
+  (unwind-protect (funcall callback answer) (romacs-agent--release)))
+
+(defun romacs-agent--release ()
+  "Let the hold go (`romacs-agent--held'), unless an admission is under
+way (the outermost one's end calls this again).  First every answer,
+each from a timer of its own, so a callback's throw, error or quit
+touches its own answer alone; the last one's timer, after its callback,
+calls this again (`romacs-agent--answered-then'): answers that came
+meanwhile go the same way, and once none waits, the observers' calls
+are made, and each session told it changed, in order
+\(`romacs-agent--run-held').  The hold lasts until then, so what the
+answers' callbacks set off waits its turn behind what was held before."
+  (when (and romacs-agent--held (zerop romacs-agent--admitting))
+    (if-let* ((answers (reverse (nth 2 romacs-agent--held))))
+        (let ((at (current-time)) (n 0))
+          (setf (nth 2 romacs-agent--held) nil)
+          ;; Times one apart: timers due at one time run newest first.
+          (dolist (each answers)
+            (run-at-time (time-add at (* (cl-incf n) 1e-6)) nil
+                         (if (= n (length answers)) #'romacs-agent--answered-then #'funcall)
+                         (car each) (cdr each))))
+      (let ((held romacs-agent--held))
+        (setq romacs-agent--held nil)
+        (romacs-agent--run-held
+         (append (reverse (nth 1 held))
+                 (mapcar (lambda (session) (lambda () (romacs-agent--changed session))) (reverse (nth 0 held)))))))))
+
 (defun romacs-agent--changed (session)
   "Tell SESSION's views its state changed where no harness event says so
 \(a turn launched, a selection armed or in effect, its options set, its
 connection gone, its last turn seen): a `changed' event, as settling is
 a `settled' one, so every view follows one stream of events.  Whatever
 writes a field a view shows outside `romacs-agent--raise' calls this
-after the write."
-  (romacs-agent--raise session (list :type 'changed)))
+after the write.  While drafts are admitted and answered, it is said
+once, after their answers (`romacs-agent--held')."
+  (if romacs-agent--held
+      (cl-pushnew session (car romacs-agent--held))
+    (romacs-agent--raise session (list :type 'changed))))
 
 (defcustom romacs-agent-approval-policy 'allow
   "What Romacs answers when a harness asks to run a tool: `allow', every
@@ -185,7 +260,9 @@ approve) always comes to the user."
   "Functions called with a session and a request id once a user's message
 is written to its harness: before the harness has acted on it, whenever
 its journal's record is read back.  The message's `input' event carries
-the id as :request.")
+the id as :request.  One written as a draft is admitted
+\(`romacs-agent-submit') is told once the draft's answer and state are
+kept, not as the line is written.")
 
 (defun romacs-agent--slot-names (type)
   "The fields of record TYPE as defined now, or nil when it is none."
@@ -711,6 +788,9 @@ instances) is derived again when it changes.")
       callbacks for older drivers without :decode, for out and in;
   Decoder events include:
       `handshake' events (:state PLIST) fold into its startup state.
+      `done' ends a turn: :error, :text, :reason, :limit (refused at
+      its usage limit) and :failure `authentication' (its account's
+      sign-in refused, `romacs-agent-sign-in-refuse').
       `record-state' applies private bookkeeping (:state PLIST of
       :reply, :message, :streamed, :compacting, :incoming or :resume-at).
       A tool
@@ -743,6 +823,11 @@ instances) is derived again when it changes.")
       `rate-limit' event naming every window that binds the account,
       or nil when that is not known now.  An account at its limit is
       asked again and again (`romacs-agent-room-check-interval');
+  :credentials-stamp (HOME)   optional: the stamp of the account's
+      sign-in configured at HOME, its credentials file's
+      (`romacs-agent--file-stamp'), which changes as it signs in again:
+      a refused sign-in no longer holds once it does
+      (`romacs-agent-sign-in-refused');
   :presented-plan-p (SESSION ID)   optional: whether request ID is the
       plan the harness presents, its allowing taking it out of plan mode
       (`romacs-agent-respond'); a harness whose plans are no request marks
@@ -1073,7 +1158,7 @@ came in."
                                               "defaultModel" (if (plist-get (cdr row) :default-model) t :false)
                                               "defaultEffort" (or (plist-get (cdr row) :default-effort) :null)))
                                            rows)))))
-          (run-hook-with-args 'romacs-agent-models-changed-functions instance)))))
+          (romacs-agent--run-hook 'romacs-agent-models-changed-functions instance)))))
 
 (defconst romacs-agent--probe-timeout 30
   "Seconds a harness has to answer a models probe.")
@@ -1481,7 +1566,7 @@ whose supervisor ended says so: it resumes with `romacs-agent-resume'."
           ;; A stopped supervisor leaves its socket: only a connection says it listens.
           ((and (file-exists-p (romacs-agent-host-socket session)) (processp (romacs-agent--attach session 0)))
            (process-send-string (romacs-agent-connection session) line))
-          (t (user-error "Session %s has ended: resume it (r) to go on" (romacs-agent-title session))))))
+          (t (romacs-agent--message-ended session)))))
 
 (defun romacs-agent--image-caption (file)
   "The line telling a model where an attached image FILE is saved."
@@ -1701,8 +1786,8 @@ what the turn it goes on from answered; any other its MESSAGES' own
           (romacs-agent-own-turn session) (plist-get request :own))
     (romacs-agent--after-write "romacs-agent--changed" (lambda () (romacs-agent--changed session))))
   (romacs-agent--after-write "romacs-agent-input-functions"
-                            (lambda () (run-hook-with-args 'romacs-agent-input-functions
-                                                          session (plist-get request :id)))))
+                            (lambda () (romacs-agent--run-hook 'romacs-agent-input-functions
+                                                               session (plist-get request :id)))))
 
 (defun romacs-agent--input (session text &optional images messages own queued)
   "Write TEXT to SESSION's persistent harness, with the attached IMAGES.
@@ -1725,12 +1810,15 @@ Both encodings use the same request id."
     (romacs-agent--decorate-input-record record request)
     (let ((wire (let ((romacs-agent--message-images images))
                   (funcall encode session (if brief (concat brief (car prompt)) (car prompt)) id))))
-      (romacs-agent--line session wire record))
-    (romacs-agent--input-sent session request answering)))
+      (romacs-agent--sent (lambda () (romacs-agent--line session wire record))))
+    ;; Written: what fails after is said, never a failed write.
+    (romacs-agent--after-write "romacs-agent--input-sent"
+                              (lambda () (romacs-agent--input-sent session request answering)))))
 
 (defun romacs-agent--uuid-p (id)
   "Whether ID is a UUID, as Claude Code's and Codex's conversations are named."
-  (and (stringp id) (string-match-p "\\`[0-9a-f]\\{8\\}-[0-9a-f-]\\{27\\}\\'" id)))
+  (and (stringp id)
+       (string-match-p "\\`[0-9a-f]\\{8\\}\\(?:-[0-9a-f]\\{4\\}\\)\\{3\\}-[0-9a-f]\\{12\\}\\'" id)))
 
 (defun romacs-agent--native-id (session)
   "The harness's name for SESSION's conversation: an imported or a
@@ -1844,13 +1932,23 @@ ANSWERING is what the previous turn answered."
       (when (romacs-agent-title-auto session)
         (romacs-agent--title-from session (plist-get event :text))))))
 
+(defun romacs-agent--refused-text (before event)
+  "What a turn ends with whose instance refused its sign-in (EVENT): on
+which, the instance its run was launched on (BEFORE's :attempt-provider,
+`romacs-agent--attempt-provider'), and why, the harness's words."
+  (format "Sign-in refused on %s: %s" (or (plist-get before :attempt-provider) (plist-get before :provider))
+          (or (plist-get event :reason) (plist-get event :text))))
+
 (defun romacs-agent--completed-turn (before event room)
   "Return the completed turn's state from BEFORE, EVENT, and account ROOM.
 BEFORE has the session's count, provider, model, context window, cost and
 limit: a limit again while it moves on from one (`:moving') is the same
-move's, as nothing goes to its harness meanwhile."
+move's, as nothing goes to its harness meanwhile.  A turn its instance
+refused the sign-in for (EVENT's :failure `authentication') says where
+and why."
   (let ((limit (plist-get event :limit))
-        (reply (plist-get event :text))
+        (reply (if (eq (plist-get event :failure) 'authentication) (romacs-agent--refused-text before event)
+                 (plist-get event :text)))
         (cost (plist-get event :cost)))
     (list :seq (or (plist-get event :seq) 0)
           :turns (1+ (plist-get before :turns))
@@ -1893,13 +1991,42 @@ move's, as nothing goes to its harness meanwhile."
          (before (list :turns (romacs-agent-turns session) :provider provider
                        :model (romacs-agent-model session)
                        :context-window (romacs-agent-context-window session)
-                       :cost (romacs-agent-cost session) :limited (romacs-agent-limited session))))
-    (romacs-agent--apply-completed-turn session (romacs-agent--completed-turn before event room)))
+                       :cost (romacs-agent-cost session) :limited (romacs-agent-limited session)
+                       :attempt-provider (romacs-agent--attempt-provider session))))
+    (romacs-agent--apply-completed-turn session (romacs-agent--completed-turn before event room))
+    ;; Seen live only: a replay's, a copy's or a worker's fold says nothing now.
+    (when (romacs-agent--live-p session)
+      (romacs-agent--sign-in-seen session event)))
   ;; In a persistent harness the selection applies before the queued message.
   (when (and (or (romacs-agent-queue session) (romacs-agent-pending-selection session))
              (not (romacs-agent--per-turn-p session))
              (process-live-p (romacs-agent-connection session)))
     (run-at-time 0 nil #'romacs-agent--settle session)))
+
+(defun romacs-agent--attempt-provider (session)
+  "The instance SESSION's run was launched on (its run note's), else the
+one it runs on now: what its turns' sign-in says is of that one."
+  (or (plist-get (romacs-agent-driver-state session) :credentials-provider) (romacs-agent-provider session)))
+
+(defun romacs-agent--attempt-stamp (session)
+  "The credentials stamp SESSION's run was launched with (its run note's,
+`romacs-agent--run-note'), or nil when it says none (an older build's
+run, or a harness whose driver cannot say): unknown."
+  (plist-get (romacs-agent-driver-state session) :credentials-stamp))
+
+(defun romacs-agent--sign-in-seen (session event)
+  "A live turn end (EVENT) says whether the instance SESSION's run was
+launched on (`romacs-agent--attempt-provider') takes the login it was
+launched with (`romacs-agent--attempt-stamp'; an unknown one says
+nothing): refused, it is kept so (`romacs-agent-sign-in-refuse'); gone
+through, a refusal of that login is kept no more
+\(`romacs-agent-sign-in-holds')."
+  (let ((provider (romacs-agent--attempt-provider session)) (stamp (romacs-agent--attempt-stamp session)))
+    (when stamp
+      (cond ((eq (plist-get event :failure) 'authentication)
+             (romacs-agent-sign-in-refuse provider stamp (or (plist-get event :reason) (plist-get event :text))))
+            ((not (plist-get event :error))
+             (romacs-agent-sign-in-holds provider stamp))))))
 
 (defun romacs-agent--apply-session-event (session event)
   "Apply the harness identity and permission mode in EVENT to SESSION."
@@ -1927,11 +2054,20 @@ move's, as nothing goes to its harness meanwhile."
       (setf (romacs-agent-limited session) nil))
     (when model (setf (romacs-agent-model session) model))))
 
+(defun romacs-agent--run-attempt (_session event)
+  "What the run EVENT starts knows of its attempt's sign-in: its note's
+instance and credentials stamp (`romacs-agent--run-note'), else nothing."
+  (when-let* ((credentials (plist-get event :credentials))
+              ((stringp credentials))
+              (time (romacs-agent--time-of-text (plist-get event :stamp))))
+    (list :credentials-stamp (cons credentials time) :credentials-provider (plist-get event :provider))))
+
 (defun romacs-agent--apply-run-event (session event)
   "Start SESSION's run from EVENT on the currently defined driver."
   (setf (romacs-agent-driver session) nil
         (romacs-agent-renewing session) nil
-        (romacs-agent-driver-state session) (romacs-agent--driver-anew session :run (plist-get event :seq))
+        (romacs-agent-driver-state session)
+        (apply #'romacs-agent--driver-anew session :run (plist-get event :seq) (romacs-agent--run-attempt session event))
         (romacs-agent-permission-mode session) nil
         (romacs-agent-startup-pending session) nil))
 
@@ -2030,7 +2166,7 @@ move's, as nothing goes to its harness meanwhile."
   (when-let* ((time (plist-get event :time)))
     (setf (romacs-agent-last-time session) time))
   (romacs-agent--apply-event session event)
-  (run-hook-with-args 'romacs-agent-event-functions session event))
+  (romacs-agent--run-hook 'romacs-agent-event-functions session event))
 
 (defcustom romacs-agent-preambles
   '("\\`Act as the [[:alnum:] -]+ sub-agent for this task\\.?\\'"
@@ -2783,7 +2919,7 @@ INPUT-SEQ and COMPLETED-SEQ say whether the last turn is still underway."
                                         (romacs-agent-completed-seq session)))
     (romacs-agent--raise session (list :type 'status :text "attached")))
   (setf (romacs-agent-caught-up session) t)
-  (run-hook-with-args 'romacs-agent-caught-up-functions session)
+  (romacs-agent--run-hook 'romacs-agent-caught-up-functions session)
   (romacs-agent--keep-soon session)
   (romacs-agent--seen-caught-up session)
   (romacs-agent--allow-tool-calls session)
@@ -3466,12 +3602,17 @@ another, FUNCTION is tried again shortly, never run without the lock and
 never waited for on the command loop; a lock older than 10 s is a crashed
 writer's, taken over."
   (let ((lock (concat file ".lock")))
-    (make-directory (file-name-directory file) t)
-    (let ((made (file-attribute-modification-time (file-attributes lock))))
-      (when (and made (> (float-time (time-since made)) 10)) (ignore-errors (delete-directory lock))))
-    (if (condition-case nil (progn (make-directory lock) t) (file-already-exists nil))
+    (if (romacs-agent--take-lock lock)
         (unwind-protect (funcall function) (ignore-errors (delete-directory lock)))
       (run-at-time 0.2 nil #'romacs-agent--with-lock file function))))
+
+(defun romacs-agent--take-lock (lock)
+  "Take LOCK, a directory made atomically, its parent made first; one
+older than 10 s is a crashed writer's, taken over.  Whether it was got."
+  (make-directory (file-name-directory lock) t)
+  (let ((made (file-attribute-modification-time (file-attributes lock))))
+    (when (and made (> (float-time (time-since made)) 10)) (ignore-errors (delete-directory lock))))
+  (condition-case nil (progn (make-directory lock) t) (file-already-exists nil)))
 
 (defun romacs-agent--room-summary (windows time fallback)
   "Summarize WINDOWS at TIME, using FALLBACK when no window binds."
@@ -3560,7 +3701,7 @@ are refused, and the others run.  An instance it gives room again runs
       ;; Keeping can merge a newer report from disk before we wake waiters.
       (unless (eq spent (not (romacs-agent-room provider)))
         (romacs-agent--room-watch)
-        (when spent (run-hook-with-args 'romacs-agent-room-functions provider))))))
+        (when spent (romacs-agent--run-hook 'romacs-agent-room-functions provider))))))
 
 ;;; Asking spent accounts again
 
@@ -3684,15 +3825,162 @@ to the nearest 5%."
           windows))
 
 (defun romacs-agent-room-of (provider)
-  "Instance PROVIDER's last usage-limit report (`romacs-agent--room'), or nil."
-  (gethash provider (romacs-agent--room-table)))
+  "Instance PROVIDER's last usage-limit report (`romacs-agent--room'), or
+nil.  While its sign-in is refused (`romacs-agent-sign-in-refused'), its
+status reads `unavailable', with the :reason, and no reset brings it
+back; the report itself is as its usage left it."
+  (let ((room (gethash provider (romacs-agent--room-table))))
+    (if-let* ((reason (romacs-agent-sign-in-refused provider)))
+        (append (list :status 'unavailable :reason reason :resets nil)
+                (romacs-agent--without room '(:status :resets)))
+      room)))
 
 (defun romacs-agent-room (provider)
   "Whether instance PROVIDER has room: no report of its limit, or one
-not rejected, or one whose window has reset since."
+not rejected, or one whose window has reset since; none while its
+sign-in is refused (status `unavailable')."
   (let ((room (romacs-agent-room-of provider)))
-    (or (null room) (not (eq (plist-get room :status) 'rejected))
-        (and (plist-get room :resets) (> (float-time) (plist-get room :resets))))))
+    (pcase (plist-get room :status)
+      ('unavailable nil)
+      ('rejected (and (plist-get room :resets) (> (float-time) (plist-get room :resets))))
+      (_ t))))
+
+;;; Instances whose sign-in is refused
+
+;; An account whose login was refused is skipped until its user signs in
+;; again or a turn on that login goes through.  Its own file, apart from
+;; its usage (room.eld), read again by each editor as it changes.
+
+(defun romacs-agent--home-stamp (harness config-dir)
+  "HARNESS's credentials stamp of its configuration directory CONFIG-DIR
+\(nil: its default), by its driver's :credentials-stamp: a value that
+changes as its user signs in again; nil when the driver cannot say."
+  (when-let* ((stamp (plist-get (romacs-agent--driver-of harness) :credentials-stamp)))
+    (funcall stamp (romacs-agent--home harness config-dir))))
+
+;; A credentials stamp is (TRUENAME . TIME): the credentials file a
+;; driver names (`romacs-agent--file-stamp'), its links resolved, and its
+;; modification time, exact, as (TICKS . HZ).  Two harnesses' files in one
+;; directory, changed at one moment, are two logins.
+
+(defun romacs-agent--file-stamp (file)
+  "The credentials stamp of FILE, the credentials a driver keeps (its
+`:credentials-stamp'): its truename and exact modification time, or nil
+with none."
+  (let ((truename (file-truename file)))
+    (when-let* ((attributes (file-attributes truename)))
+      (cons truename (time-convert (file-attribute-modification-time attributes) 1000000000)))))
+
+(defun romacs-agent--valid-stamp-p (stamp)
+  "Whether STAMP is a credentials stamp: a truename and a time (TICKS . HZ)."
+  (and (consp stamp) (stringp (car stamp))
+       (consp (cdr stamp)) (integerp (cadr stamp)) (integerp (cddr stamp)) (> (cddr stamp) 0)))
+
+(defun romacs-agent--same-stamp-p (one other)
+  "Whether credentials stamps ONE and OTHER are one login: the same file at
+the same time.  What is no stamp (nil, malformed) is none."
+  (and (romacs-agent--valid-stamp-p one) (romacs-agent--valid-stamp-p other)
+       (equal (car one) (car other)) (time-equal-p (cdr one) (cdr other))))
+
+(defun romacs-agent--time-text (time)
+  "TIME, (TICKS . HZ), as a run note carries it: its nanoseconds since the
+epoch, a decimal integer, exact either side of it (a JSON number rounds)."
+  (number-to-string (car (time-convert time 1000000000))))
+
+(defun romacs-agent--time-of-text (text)
+  "The time TEXT says (`romacs-agent--time-text'), or nil when it says none."
+  (and (stringp text) (string-match-p "\\`-?[0-9]+\\'" text)
+       (cons (string-to-number text) 1000000000)))
+
+(defun romacs-agent--credentials-stamp (instance)
+  "Instance INSTANCE's credentials stamp now, of its configured directory
+\(`romacs-agent--home-stamp')."
+  (when-let* ((configured (romacs-agent--configured instance)))
+    (romacs-agent--home-stamp (plist-get configured :harness) (plist-get configured :config-dir))))
+
+(defun romacs-agent--sign-in-file ()
+  (expand-file-name "sign-in.eld" (romacs-agent--state-root)))
+
+(defvar romacs-agent--sign-in-cache nil
+  "The sign-in file as this editor last read it: (FILE VERSION . ENTRIES),
+VERSION its modification time and inode (each write a new file).")
+
+(defun romacs-agent--sign-in-read (file)
+  "FILE's entries, (INSTANCE STAMP . REASON) each, STAMP a credentials
+stamp (`romacs-agent--valid-stamp-p') and REASON a string: what is not
+one is skipped, so nothing read from the file can signal later."
+  (let ((kept (ignore-errors (with-temp-buffer (insert-file-contents file) (read (current-buffer))))))
+    (and (proper-list-p kept)
+         (cl-remove-if-not (lambda (entry) (and (consp entry) (stringp (car entry)) (consp (cdr entry))
+                                                (romacs-agent--valid-stamp-p (cadr entry)) (stringp (cddr entry))))
+                           kept))))
+
+(defun romacs-agent--sign-in-entries ()
+  "The refused sign-ins, as every editor has written them: the file read
+again whenever it changed since this editor last read it."
+  (let* ((file (romacs-agent--sign-in-file))
+         (attributes (file-attributes file))
+         (version (and attributes (cons (file-attribute-modification-time attributes)
+                                        (file-attribute-inode-number attributes)))))
+    (unless (and (equal (car romacs-agent--sign-in-cache) file) (equal (cadr romacs-agent--sign-in-cache) version))
+      (setq romacs-agent--sign-in-cache (cons file (cons version (and version (romacs-agent--sign-in-read file))))))
+    (cddr romacs-agent--sign-in-cache)))
+
+(defun romacs-agent-sign-in-refused (instance)
+  "Why instance INSTANCE's sign-in is refused, or nil: its login was
+refused, and is the one it has now (its credentials stamp the refused
+one's)."
+  (when-let* ((entry (assoc instance (romacs-agent--sign-in-entries)))
+              ((romacs-agent--same-stamp-p (cadr entry) (romacs-agent--credentials-stamp instance))))
+    (cddr entry)))
+
+(defconst romacs-agent--sign-in-wait 0.2
+  "Seconds a sign-in write waits for another editor's to end.  Each holds
+the lock for one read and one write of a file of a line or two, a few
+milliseconds; waited for on the command loop, it is bounded below what a
+user notices.  Not got by then, the observation is dropped: the next
+launch or turn on that login says it again.")
+
+(defun romacs-agent--sign-in-update (instance function)
+  "Make INSTANCE's entry FUNCTION's of it ((STAMP . REASON), or nil for
+none) in the sign-in file as it is now, holding its lock, waited for at
+most `romacs-agent--sign-in-wait' seconds, the file replaced whole.  The
+lock not got by then, nothing is written."
+  (let* ((file (romacs-agent--sign-in-file)) (lock (concat file ".lock"))
+         (deadline (+ (float-time) romacs-agent--sign-in-wait)) (held nil))
+    (while (and (not (setq held (romacs-agent--take-lock lock))) (< (float-time) deadline))
+      (sleep-for 0.01))
+    (when held
+      (unwind-protect
+          (let* ((entries (romacs-agent--sign-in-read file))
+                 (old (cdr (assoc instance entries)))
+                 (new (funcall function old)))
+            (unless (equal old new)
+              (setq entries (append (and new (list (cons instance new)))
+                                    (cl-remove instance entries :key #'car :test #'equal)))
+              (let ((temporary (make-temp-file (expand-file-name "sign-in-" (file-name-directory file)) nil ".tmp")))
+                (with-temp-file temporary (prin1 entries (current-buffer)))
+                (rename-file temporary file t))
+              (setq romacs-agent--sign-in-cache nil)))
+        (ignore-errors (delete-directory lock))))))
+
+(defun romacs-agent-sign-in-refuse (instance stamp reason)
+  "Instance INSTANCE refused the login of credentials STAMP, for REASON:
+skipped (`romacs-agent-room') while that login is its own.  Kept only
+while it still is, as the lock is held: a login made since says nothing
+of this one's refusal."
+  (romacs-agent--sign-in-update
+   instance (lambda (old)
+              (if (romacs-agent--same-stamp-p stamp (romacs-agent--credentials-stamp instance))
+                  (cons stamp (or reason "sign-in refused"))
+                old))))
+
+(defun romacs-agent-sign-in-holds (instance stamp)
+  "A turn on instance INSTANCE with the login of credentials STAMP went
+through: a refusal of that login is kept no more."
+  (when (assoc instance (romacs-agent--sign-in-entries))
+    (romacs-agent--sign-in-update
+     instance (lambda (old) (unless (romacs-agent--same-stamp-p (car old) stamp) old)))))
 
 (defcustom romacs-agent-pools nil
   "Each harness's accounts in the order new work draws on them: an alist
@@ -3723,10 +4011,12 @@ an instance's name, as it is."
 
 (defun romacs-agent-pool-pick (harness &optional except)
   "The instance new work of HARNESS draws on: the first of its pool with
-room, but EXCEPT; with none, the one whose limit resets first."
+room, but EXCEPT; with none, the one whose limit resets first; nil when
+every one's sign-in is refused (`romacs-agent-sign-in-refused')."
   (let ((pool (cl-remove except (romacs-agent-pool harness) :key (lambda (i) (plist-get i :name)) :test #'equal)))
     (or (cl-find-if (lambda (i) (romacs-agent-room (plist-get i :name))) pool)
-        (car (sort (copy-sequence pool)
+        (car (sort (copy-sequence (cl-remove 'unavailable pool
+                                             :key (lambda (i) (plist-get (romacs-agent-room-of (plist-get i :name)) :status))))
                    (lambda (a b) (< (or (plist-get (romacs-agent-room-of (plist-get a :name)) :resets) most-positive-fixnum)
                                     (or (plist-get (romacs-agent-room-of (plist-get b :name)) :resets) most-positive-fixnum))))))))
 
@@ -3788,7 +4078,7 @@ goes on there first, before anything waiting, as its harness comes back
 continuation is kept (`romacs-agent--enqueue-kept'), nil when none is made."
   (when limited
     (let ((item (romacs-agent--limit-continuation from to (romacs-agent-done-seq session))))
-      (run-hook-with-args
+      (romacs-agent--run-hook
        'romacs-agent-moved-functions session from to limited
        (unless (or (equal to from) (not (romacs-agent--goes-on-p session))
                    ;; Made already, a move a stop cut done again: the same one.
@@ -4303,7 +4593,8 @@ POSITION orders it, KEPT says its record is there.  FRONT: put ahead of
 what waited (`romacs-agent--enqueue-first').  USER: its user wrote it in
 a chat, theirs to change (`romacs-agent-queue-own-p').  HELD: the user
 edits it, so it and what waits behind it wait (`romacs-agent-queue-hold');
-`sending' as it is written, no longer theirs to change."
+`sending' from the moment the dispatcher takes it, `written' once it is,
+no longer theirs to change (`romacs-agent--written')."
   text images messages delivered valid kind own token turn id position kept front user held)
 
 (defun romacs-agent--turn-under-way-p (session)
@@ -4386,7 +4677,10 @@ which its harness can steer."
 A steer may pass a message waiting for a new turn.  A hold's own prompt
 waits first.  An automatic renewal supplies a message to an empty queue."
   (if-let* ((head (car (romacs-agent-queue session))))
-      (when (romacs-agent--open-p session (romacs-agent-item-token head))
+      ;; Its gate asked first: a hold predicate may wait, and what waits
+      ;; may change meanwhile, so the head is read again after.
+      (when (and (romacs-agent--open-p session (romacs-agent-item-token head))
+                 (eq head (car (romacs-agent-queue session))))
         (cond ((romacs-agent-item-held head) nil)
               ((romacs-agent--goes-p session head) head)
               ;; A steer passes what waits for a new turn, never what its
@@ -4417,16 +4711,48 @@ A steer passing the queue's head goes alone."
                  do (if (romacs-agent--wanted-item-p item) (push item parts) (push item stale)))))
     (cons (nreverse parts) stale)))
 
+(defvar romacs-agent--writing nil
+  "The queue items whose line is being written (`romacs-agent--write-queue-group').")
+
+(defun romacs-agent--written (unsure)
+  "The items being written (`romacs-agent--writing') are: `written',
+never sent or restored again, and so are the drafts they are
+\(`romacs-agent--draft-written'), or, UNSURE, `unconfirmed' ones: their
+line cut short as it went, it may not have gone, and goes no second time."
+  (let ((inhibit-quit t))
+    (dolist (part romacs-agent--writing)
+      (setf (romacs-agent-item-held part) 'written)
+      (romacs-agent--draft-written (romacs-agent-item-id part))
+      (when unsure (romacs-agent--draft-unsure (romacs-agent-item-id part))))))
+
+(defun romacs-agent--sent (write)
+  "Call WRITE, which sends a line (or starts a turn), and commit what is
+written at the moment it returns, nothing quitting between
+\(`romacs-agent--written').  A quit within WRITE commits it unsure: a
+message cut by C-g as it is sent may be lost, never sent twice."
+  (let ((inhibit-quit t))
+    (condition-case err
+        (let ((inhibit-quit nil)) (funcall write))
+      (quit (romacs-agent--written t) (signal (car err) (cdr err))))
+    (romacs-agent--written nil)))
+
 (defun romacs-agent--write-queue-group (session next parts)
-  "Write PARTS as one turn, restoring NEXT's queue record on failure."
+  "Write PARTS as one turn, restoring NEXT's queue record on a failure
+before it was written (`romacs-agent--written'), never after.  They are
+`sending' while it is written."
   (romacs-agent--unkeep-item session next)
   (condition-case err
       (progn
         (dolist (part parts) (setf (romacs-agent-item-held part) 'sending))
-        (romacs-agent--write session (romacs-agent--joined parts)))
+        (let ((romacs-agent--writing parts))
+          (romacs-agent--write session (romacs-agent--joined parts))
+          ;; A write that returned has written: committed as its line was,
+          ;; and so here should it have written no line through `romacs-agent--sent'.
+          (unless (eq (romacs-agent-item-held (car parts)) 'written) (romacs-agent--written nil))))
     ((error quit)
-     (dolist (part parts) (setf (romacs-agent-item-held part) nil))
-     (romacs-agent--keep-item session next)
+     (unless (eq (romacs-agent-item-held (car parts)) 'written)
+       (dolist (part parts) (setf (romacs-agent-item-held part) nil))
+       (romacs-agent--keep-item session next))
      (signal (car err) (cdr err)))))
 
 (defun romacs-agent--notify-delivered (parts)
@@ -4439,22 +4765,31 @@ A steer passing the queue's head goes alone."
     (when failed (signal (car failed) (cdr failed)))))
 
 (defun romacs-agent--send-queue-group (session next)
-  "Write NEXT with its group and retire the accepted and stale entries."
+  "Write NEXT with its group and retire the accepted and stale entries:
+once written, whatever follows the write."
   (pcase-let ((`(,parts . ,stale) (romacs-agent--validate-queue-group (romacs-agent-queue session) next)))
     ;; A kept row restored after the write is skipped by its journaled id.
-    (romacs-agent--write-queue-group session next parts)
-    ;; Get every accepted entry off the queue before a view or a quit can run.
-    (let ((inhibit-quit t) (romacs-agent--queue-quiet t))
-      (dolist (part (append parts stale)) (romacs-agent--dequeue session part)))
+    (unwind-protect (romacs-agent--write-queue-group session next parts)
+      ;; Get every accepted entry off the queue before a view or a quit can run.
+      (when (eq (romacs-agent-item-held (car parts)) 'written)
+        (let ((inhibit-quit t) (romacs-agent--queue-quiet t))
+          (dolist (part (append parts stale)) (romacs-agent--dequeue session part)))))
     (romacs-agent--after-write "romacs-agent--changed" (lambda () (romacs-agent--changed session)))
-    (romacs-agent--notify-delivered parts)))
+    (romacs-agent--observe (lambda () (romacs-agent--notify-delivered parts)))))
 
 (defun romacs-agent--dispatch-one (session)
-  "Send or discard the next eligible item.  Return non-nil on progress."
+  "Send or discard the next eligible item.  Return non-nil on progress.
+A queued item is captured `sending' as it is chosen, before anything can
+wait (its validator), so nothing takes it out of the queue or changes it
+meanwhile; unwritten, it is let go again."
   (when-let* ((next (romacs-agent--next-item session)))
-    (if (romacs-agent--wanted-item-p next)
-        (romacs-agent--send-queue-group session next)
-      (romacs-agent--dequeue session next))
+    (when (memq next (romacs-agent-queue session))
+      (setf (romacs-agent-item-held next) 'sending))
+    (unwind-protect
+        (if (romacs-agent--wanted-item-p next)
+            (romacs-agent--send-queue-group session next)
+          (romacs-agent--dequeue session next))
+      (when (eq (romacs-agent-item-held next) 'sending) (setf (romacs-agent-item-held next) nil)))
     t))
 
 (defun romacs-agent--dispatch (session)
@@ -4481,10 +4816,11 @@ A harness whose directory is gone runs again first, from another
 other sessions waiting for a new turn, nothing else riding on its write
 \(no images, no hold's prompt, none kept across a restart, whose record
 names the one item it was), not sent first (an interrupt's, which goes
-alone), and not held (its user edits it: what waits behind it waits)."
+alone), and not held by its user (who edits it: what waits behind it
+waits); the dispatcher's own capture of it (`sending') is no hold."
   (and (eq (romacs-agent-item-kind item) 'next) (romacs-agent-item-messages item)
        (not (or (romacs-agent-item-images item) (romacs-agent-item-own item) (romacs-agent-item-token item)
-                (romacs-agent-item-front item) (romacs-agent-item-held item) (romacs-agent--keepable-p item)))))
+                (romacs-agent-item-front item) (eq (romacs-agent-item-held item) t) (romacs-agent--keepable-p item)))))
 
 (defun romacs-agent--results-p (item)
   "Whether ITEM delivers delegated tasks' results: its text is theirs."
@@ -4524,22 +4860,44 @@ first).  One timer for however many records come meanwhile."
 (defun romacs-agent--write (session item)
   "Write ITEM to SESSION's harness: a per-turn one's starts a turn."
   (if (romacs-agent--per-turn-p session)
-      (romacs-agent--turn session (romacs-agent-item-text item) (romacs-agent-item-images item)
-                          (romacs-agent-item-messages item))
+      (romacs-agent--sent (lambda () (romacs-agent--turn session (romacs-agent-item-text item) (romacs-agent-item-images item)
+                                                      (romacs-agent-item-messages item))))
     (romacs-agent--input session (romacs-agent-item-text item) (romacs-agent-item-images item)
                          (romacs-agent-item-messages item) (romacs-agent-item-own item)
                          (romacs-agent-item-id item))))
 
+(defun romacs-agent--ended-text (session)
+  "What a refusal of SESSION, its harness ended, says."
+  (format "Session %s has ended: resume it (r) to go on" (romacs-agent-title session)))
+
 (defun romacs-agent--message-ended (session)
-  "Refuse a queued message to SESSION until its harness is resumed."
-  (user-error "Session %s has ended: resume it (r) to go on" (romacs-agent-title session)))
+  "Refuse a message or a control line to SESSION until its harness is resumed."
+  (user-error "%s" (romacs-agent--ended-text session)))
+
+(defun romacs-agent--records-ended-p (session attached)
+  "Whether SESSION's records say its harness ended: when ATTACHED, once
+the replay has finished."
+  (and (memq (romacs-agent-state session) '(ended unstarted))
+       (or (not attached) (romacs-agent-caught-up session))))
 
 (defun romacs-agent--check-message-run (session attached)
   "Refuse a message to SESSION if its records say its harness ended.
 When ATTACHED, let the replay finish before deciding."
-  (when (and (memq (romacs-agent-state session) '(ended unstarted))
-             (or (not attached) (romacs-agent-caught-up session)))
+  (when (romacs-agent--records-ended-p session attached)
     (romacs-agent--message-ended session)))
+
+(defun romacs-agent--ended-p (session)
+  "Whether SESSION's harness has ended, so no message goes until it is
+resumed (`romacs-agent--open' refuses one): its records say so, or it
+is neither attached, starting, nor has a supervisor's socket to attach
+to.  A per-turn harness's or a stopped one's never has: a message starts
+or resumes it.  A socket nothing listens on is found only by attaching."
+  (and (not (romacs-agent--per-turn-p session))
+       (not (romacs-agent-stopped session))
+       (let ((attached (process-live-p (romacs-agent-connection session))))
+         (or (romacs-agent--records-ended-p session attached)
+             (not (or attached (eq (romacs-agent-state session) 'starting)
+                      (when-let* ((socket (romacs-agent-host-socket session))) (file-exists-p socket))))))))
 
 (defun romacs-agent--open (session)
   "Start what lets SESSION's waiting messages go: a supervisor still
@@ -4549,12 +4907,11 @@ not resumed by a message: `user-error' says to resume it."
   (cond ((romacs-agent--per-turn-p session))
         ((romacs-agent-stopped session)
          (unless (process-live-p (romacs-agent-connection session)) (romacs-agent-resume session)))
-        (t (let ((attached (process-live-p (romacs-agent-connection session))))
-             (romacs-agent--check-message-run session attached)
-             (unless (or attached (eq (romacs-agent-state session) 'starting)
-                         (and (romacs-agent-host-socket session) (file-exists-p (romacs-agent-host-socket session))
-                              (processp (romacs-agent--attach session 0))))
-               (romacs-agent--message-ended session))))))
+        ((romacs-agent--ended-p session) (romacs-agent--message-ended session))
+        ;; Its socket there: attached, else nothing listens on it.
+        ((not (or (process-live-p (romacs-agent-connection session)) (eq (romacs-agent-state session) 'starting)
+                  (processp (romacs-agent--attach session 0))))
+         (romacs-agent--message-ended session))))
 
 (defun romacs-agent--admit (session item &optional first keep)
   "Put ITEM in SESSION's queue (FIRST: ahead of what waits), start what
@@ -4708,6 +5065,31 @@ shows on a command line other users can read."
            when (string-match "\\`\\([A-Za-z_][A-Za-z0-9_]*\\)=" entry)
            collect (concat "--setenv=" (match-string 1 entry))))
 
+(defun romacs-agent--before-launch (session)
+  "Make SESSION ready for its supervisor's launch (`romacs-agent--launch')."
+  (romacs-agent--fold-now session)
+  ;; A notes-only host of it is let go: this supervisor takes the lock as
+  ;; it ends, and is the one attached.
+  (romacs-agent--end-notes-host session)
+  ;; The process launching it attaches it: its relays lead here from the start.
+  (romacs-agent--route-here session)
+  (romacs-agent--set-stopped session nil)
+  ;; Its records move to SQLite before a supervisor writes any more of them.
+  (romacs-agent-events-own session))
+
+(defun romacs-agent--run-note (session)
+  "The note SESSION's supervisor journals first, where its run's records
+start: the instance it is launched on, and the credentials stamp its
+launch finds by its harness's driver in the directory the harness gets
+\(`romacs-agent--home-stamp'): a refusal or a turn gone through in this
+run is of that login (`romacs-agent--attempt-stamp')."
+  (let ((stamp (romacs-agent--home-stamp (romacs-agent-harness session) (romacs-agent-config-dir session))))
+    (json-serialize
+     (romacs-mcp--object "type" "run" "provider" (romacs-agent-provider session)
+                         ;; Its two parts: the file, and its time to the nanosecond.
+                         "credentials" (if (romacs-agent--valid-stamp-p stamp) (car stamp) :null)
+                         "stamp" (if (romacs-agent--valid-stamp-p stamp) (romacs-agent--time-text (cdr stamp)) :null)))))
+
 (defun romacs-agent--launch (session argv &optional input images)
   "Run SESSION's supervisor with harness ARGV, as a user unit when a user
 manager answers, else detached.  INPUT is a file the supervisor gives the
@@ -4720,20 +5102,12 @@ to it."
     (setf (romacs-agent-state session) 'ended)
     (romacs-agent--changed session)
     (user-error "Session %s is not started: the editor is ending" (romacs-agent-title session)))
-  (romacs-agent--fold-now session)
-  ;; A notes-only host of it is let go: this supervisor takes the lock as
-  ;; it ends, and is the one attached.
-  (romacs-agent--end-notes-host session)
-  ;; The process launching it attaches it: its relays lead here from the start.
-  (romacs-agent--route-here session)
-  (romacs-agent--set-stopped session nil)
-  ;; Its records move to SQLite before a supervisor writes any more of them.
-  (romacs-agent-events-own session)
+  (romacs-agent--before-launch session)
   (let* ((host (romacs-agent--program "romacs-agent-host"))
          (command (append (list host "--dir" (romacs-agent-dir session)
                                 "--socket" (romacs-agent-host-socket session)
                                 ;; Journaled first: where this run's records start.
-                                "--note" "{\"type\":\"run\"}")
+                                "--note" (romacs-agent--run-note session))
                           (and (romacs-agent-events-p session) (list "--store" (romacs-agent-store--file)))
                           (and input (list "--input" input))
                           (and images (list "--input-images" (json-serialize (vconcat images))))
@@ -4796,6 +5170,8 @@ start there: unknown, disabled, or its configuration directory missing."
                    (plist-get (romacs-agent--configured (romacs-agent--default-provider)) :harness)))
          (pool (and (symbolp name) name))
          (instance (or (and pool (romacs-agent-pool-pick pool))
+                       (and pool (romacs-agent-pool pool)
+                            (user-error "Every %s account's sign-in is refused: sign in again" pool))
                        (romacs-agent--configured name)
                        (user-error "No agent provider %s; configured: %s" name
                                    (mapconcat #'identity (cl-loop for i in (romacs-agent-instances)
@@ -5056,6 +5432,294 @@ while it waits.  `user-error' when its harness ended: resume it."
   (romacs-agent--admit session (romacs-agent-item text :images images :messages messages
                                                   :delivered delivered :valid valid :user user)))
 
+;;; Submitting a draft
+
+;; A draft goes to its session by one admission, `romacs-agent--submit-draft',
+;; from this editor's chat (`romacs-agent-submit') or another's through
+;; the service: answered once, never before the call returns, and by its
+;; draft id, so a draft submitted again under its id is sent once while
+;; this editor runs.
+
+(defconst romacs-agent-submit-modes
+  '(("now" . send) ("steer" . steer) ("next" . queue) ("interrupt" . interrupt))
+  "Each mode of the protocol's `agents/send' and the kind of draft it is:
+the kinds `romacs-agent-submit' takes.")
+
+(defconst romacs-agent-submit-refusals
+  '((invalid -32602 "bad-params") (no-session -32010 "unknown-session") (closed -32012 "not-live")
+    (conflict -32019 "draft-conflict") (owner-unavailable -32603 "internal"))
+  "Each reason `romacs-agent-submit' refuses for, with the protocol's error
+code and kind that say it (doc/agent-protocol.org, Errors): the service
+answers a refusal so, and a remote chat reads the reason back.")
+
+(defun romacs-agent-submit-reason (kind)
+  "The refusal reason the protocol's error KIND says: `owner-unavailable'
+for a kind no reason has, as for a send that may not have been taken."
+  (or (car (cl-find kind romacs-agent-submit-refusals :key #'caddr :test #'equal)) 'owner-unavailable))
+
+(defvar romacs-agent--submit-drafts (make-hash-table :test #'equal)
+  "Every draft `romacs-agent--submit-draft' took in this run of the
+editor, by the id of the queue item it is (`romacs-agent--submit-item-id'):
+\(STATE SESSION-ID DIGEST . WAITING).  STATE is `pending' while it is
+admitted, WAITING the callbacks of its repeats; `queued' while its
+message waits (`romacs-agent--draft-gone' lets it go should it leave the
+queue unwritten); `written' once it is (`romacs-agent--draft-written').
+A refusal is not kept: it had no effect, so a retry is a fresh attempt.
+Nothing is let go otherwise: kept for the editor's run, not across a
+restart.")
+
+(defun romacs-agent-submit-answer (callback answer)
+  "Call CALLBACK with ANSWER from a timer: after its caller returns."
+  (run-at-time 0 nil callback answer))
+
+(defun romacs-agent-submit-refused (intent reason message)
+  "The answer refusing INTENT for REASON, MESSAGE saying why to its user."
+  (list :draft-id (plist-get intent :draft-id) :status 'refused :reason reason :message message))
+
+(defun romacs-agent--intent-invalid (intent)
+  "Why INTENT is not one `romacs-agent-submit' takes, or nil: its draft id
+a UUID, its kind known (`romacs-agent-submit-modes'), its text a string
+and its attachments paths, and something to send."
+  (let ((kind (plist-get intent :kind)) (text (plist-get intent :text))
+        (attachments (plist-get intent :attachments)))
+    (cond ((not (romacs-agent--uuid-p (plist-get intent :draft-id))) "A draft id is a UUID")
+          ((not (and kind (rassq kind romacs-agent-submit-modes))) (format "No such kind of send: %s" kind))
+          ((not (and (stringp text) (proper-list-p attachments) (cl-every #'stringp attachments)))
+           "A draft is text and the paths it attaches")
+          ((and (string-empty-p text) (null attachments)) "Nothing to send: write a message first"))))
+
+(defun romacs-agent--submit-digest (session-id intent)
+  "What INTENT to SESSION-ID sends, as a hash: its session, text and
+attachments.  Its draft id named with another is another draft
+\(`conflict'); with another kind, the same, its text gone already."
+  (secure-hash 'sha1 (encode-coding-string
+                      (let ((print-length nil) (print-level nil))
+                        (prin1-to-string (list session-id (plist-get intent :text) (plist-get intent :attachments))))
+                      'utf-8)))
+
+(defun romacs-agent--submit-conflict (intent)
+  "The answer refusing INTENT, whose draft id went before with other text."
+  (romacs-agent-submit-refused
+   intent 'conflict "This draft went before, as it was then; this send did not: send again to send it as it is now"))
+
+(defun romacs-agent--submit-item-id (scope draft-id)
+  "The id of the queue item DRAFT-ID becomes for SCOPE: the draft id for
+this editor's chats; for a service peer's, a name-based UUID of SCOPE and
+DRAFT-ID, as a queue is kept by session and item id: two peers naming
+one draft id are two messages."
+  (if (null scope) draft-id
+    (let ((hash (secure-hash 'sha1 (encode-coding-string (concat scope "\0" draft-id) 'utf-8))))
+      (format "%s-%s-5%s-%x%s-%s" (substring hash 0 8) (substring hash 8 12) (substring hash 13 16)
+              (logior 8 (logand (string-to-number (substring hash 16 17) 16) 3))
+              (substring hash 17 20) (substring hash 20 32)))))
+
+(defun romacs-agent--submit-placed (session item-id draft-id)
+  "The answer accepting DRAFT-ID as it is now: with :queued N while its
+message, ITEM-ID, waits in SESSION's queue (nil: none loaded), N its place."
+  (let ((place (and session (cl-position item-id (romacs-agent-queue session) :key #'romacs-agent-item-id :test #'equal))))
+    (append (list :draft-id draft-id :status 'accepted) (and place (list :queued (1+ place))))))
+
+(defun romacs-agent--draft-written (id)
+  "The message of item ID is written: so is the draft it is, if it is one."
+  (when-let* ((draft (and id (gethash id romacs-agent--submit-drafts))))
+    (setcar draft 'written)))
+
+(defun romacs-agent--draft-unsure (id)
+  "The message of item ID may not have gone, its line cut short: the
+draft it is, if it is one, is `unconfirmed', written for a retry, which
+goes no second time."
+  (when-let* ((draft (and id (gethash id romacs-agent--submit-drafts))))
+    (setcar draft 'unconfirmed)))
+
+(defun romacs-agent-submit-unconfirmed (intent)
+  "The answer to INTENT whose message may not have gone: neither accepted
+nor refused, its draft kept, and sent again under its id, not sent."
+  (list :draft-id (plist-get intent :draft-id) :status 'unconfirmed
+        :message "Unconfirmed: cut short as it was sent, it may not have gone; it goes no second time, so edit it to send it again"))
+
+(defun romacs-agent--draft-gone (item)
+  "ITEM left its queue unwritten: the draft it is, queued, goes with it.
+One being admitted is the admission's to keep or let go."
+  (when-let* ((id (romacs-agent-item-id item))
+              (draft (gethash id romacs-agent--submit-drafts))
+              ((eq (car draft) 'queued)))
+    (remhash id romacs-agent--submit-drafts)))
+
+(defun romacs-agent--draft-edited (session item)
+  "ITEM, waiting for SESSION, says what it says now: the draft it is, if
+it is one, is that draft now (`romacs-agent-queue-edit'), so a retry of
+its new text is answered again."
+  (when-let* ((draft (gethash (romacs-agent-item-id item) romacs-agent--submit-drafts)))
+    (setf (nth 2 draft) (romacs-agent--submit-digest
+                         (romacs-agent-id session) (list :text (romacs-agent-item-text item)
+                                                         :attachments (romacs-agent-item-images item))))))
+
+(defun romacs-agent--submit-run (session intent id)
+  "Do what INTENT asks of SESSION, its message the queue item ID: `send'
+and `steer' send now, into the turn under way; `queue' once it ends;
+`interrupt' puts its message first of what waits, then interrupts the
+turn under way, last, and only once its message is admitted, as nothing
+can fail after it.  Nil when that was done; else why not, its message
+back out of the queue unless it was written."
+  (let ((item nil))
+    (condition-case err
+        (let ((interrupt (and (eq (plist-get intent :kind) 'interrupt)
+                              (memq (romacs-agent-state session) '(starting running waiting-approval))
+                              t)))
+          (setq item (romacs-agent-item (plist-get intent :text) :images (plist-get intent :attachments)
+                                        :kind (if (or interrupt (eq (plist-get intent :kind) 'queue)) 'next 'now)
+                                        :user t :id id))
+          (romacs-agent--admit session item interrupt)
+          (when (and interrupt (memq item (romacs-agent-queue session)))
+            (romacs-agent-interrupt session))
+          nil)
+      ((error quit)
+       (unless (memq (car (gethash id romacs-agent--submit-drafts)) '(written unconfirmed))
+         (when item (condition-case nil (romacs-agent--dequeue session item) ((error quit) nil))))
+       (error-message-string err)))))
+
+(defun romacs-agent--submit-settled (session intent id draft failed)
+  "The answer to INTENT, admitted to SESSION as DRAFT, the queue item ID,
+from what is so now, the one way an admission ends: accepted when its
+message is written, or waits in the queue (with its place); unconfirmed
+when its line was cut short (`romacs-agent--sent'); else refused, nothing
+done, DRAFT let go, FAILED saying why."
+  (let ((draft-id (plist-get intent :draft-id)))
+    (cond ((eq (car draft) 'written) (romacs-agent--submit-placed session id draft-id))
+          ((eq (car draft) 'unconfirmed) (romacs-agent-submit-unconfirmed intent))
+          ((cl-find id (romacs-agent-queue session) :key #'romacs-agent-item-id :test #'equal)
+           (setcar draft 'queued)
+           (romacs-agent--submit-placed session id draft-id))
+          (t (when (eq (gethash id romacs-agent--submit-drafts) draft) (remhash id romacs-agent--submit-drafts))
+             (romacs-agent-submit-refused intent 'owner-unavailable
+                                          (or failed "Taken out of its queue as it was admitted: not sent"))))))
+
+(defun romacs-agent--submit-admit (scope session intent digest answer)
+  "Admit INTENT, from SCOPE, to SESSION: one critical section with one
+exit.  Its draft is `pending' from its first step; whatever ends it, a
+signal or a quit included, its answer comes from what is so then
+\(`romacs-agent--submit-settled'), given to ANSWER and to each repeat
+waiting on it, once.  Observers are held while it runs, and after, until
+the outermost admission's answers have gone out (`romacs-agent--held')."
+  (let* ((id (romacs-agent--submit-item-id scope (plist-get intent :draft-id)))
+         (draft (list 'pending (romacs-agent-id session) digest))
+         (failed "The admission was cut short: not sent"))
+    (unless romacs-agent--held (setq romacs-agent--held (list nil nil nil)))
+    (unwind-protect
+        (let ((romacs-agent--admitting (1+ romacs-agent--admitting)))
+          (puthash id draft romacs-agent--submit-drafts)
+          (setq failed (romacs-agent--submit-run session intent id)))
+      (let ((inhibit-quit t))
+        (let ((settled (romacs-agent--submit-settled session intent id draft failed))
+              (waiting (reverse (cdddr draft))))
+          (setcdr (cddr draft) nil)
+          (funcall answer settled)
+          (dolist (each waiting) (push (cons each (copy-sequence settled)) (nth 2 romacs-agent--held)))
+          (cl-pushnew session (car romacs-agent--held))
+          (when (zerop romacs-agent--admitting) (run-at-time 0 nil #'romacs-agent--release)))))))
+
+(defun romacs-agent--submit-known (draft intent session-id id digest)
+  "What to do with INTENT for SESSION-ID, its item ID and DIGEST, whose
+draft this editor has, DRAFT (`romacs-agent--submit-drafts'): a step of
+`romacs-agent--submit-step'.  Another session's or other text is a
+`conflict'; one being admitted, waited on; one cut short as it was sent,
+unconfirmed again; else accepted again, nothing sent."
+  (cond ((not (and (equal (nth 1 draft) session-id) (equal (nth 2 draft) digest)))
+         (cons 'answer (romacs-agent--submit-conflict intent)))
+        ((eq (car draft) 'pending) (cons 'wait draft))
+        ((eq (car draft) 'unconfirmed) (cons 'answer (romacs-agent-submit-unconfirmed intent)))
+        (t (cons 'answer (romacs-agent--submit-placed (romacs-agent-loaded session-id) id
+                                                      (plist-get intent :draft-id))))))
+
+(defun romacs-agent--submit-session (session-id intent)
+  "The session SESSION-ID names, loaded if it must be, as (session .
+SESSION); or (answer . REFUSAL) when there is none or it cannot be
+found.  A quit goes on."
+  (condition-case err
+      (if-let* ((session (and (stringp session-id) (romacs-agent-get session-id))))
+          (cons 'session session)
+        (cons 'answer (romacs-agent-submit-refused intent 'no-session (format "No session %s" session-id))))
+    (error (cons 'answer (romacs-agent-submit-refused intent 'owner-unavailable (error-message-string err))))))
+
+(defun romacs-agent--submit-step (scope session-id intent)
+  "What to do with INTENT, from SCOPE, to the session SESSION-ID names:
+\(answer . ANSWER), answer it; (wait . DRAFT), wait for the answer of
+DRAFT, being admitted; `again', look again, as loading its session took
+its id meanwhile; or (admit SESSION DIGEST), admit it
+\(`romacs-agent--submit-admit').  An ended harness is `closed'."
+  (let* ((invalid (romacs-agent--intent-invalid intent))
+         (id (and (not invalid) (romacs-agent--submit-item-id scope (plist-get intent :draft-id))))
+         (digest (and id (romacs-agent--submit-digest session-id intent)))
+         (draft (and id (gethash id romacs-agent--submit-drafts))))
+    (cond (invalid (cons 'answer (romacs-agent-submit-refused intent 'invalid invalid)))
+          (draft (romacs-agent--submit-known draft intent session-id id digest))
+          (t (pcase (romacs-agent--submit-session session-id intent)
+               (`(answer . ,refused) (cons 'answer refused))
+               (`(session . ,session)
+                (cond ((gethash id romacs-agent--submit-drafts) 'again)
+                      ((romacs-agent--ended-p session)
+                       (cons 'answer (romacs-agent-submit-refused intent 'closed (romacs-agent--ended-text session))))
+                      (t (list 'admit session digest)))))))))
+
+(defun romacs-agent--submit-draft (scope session-id intent callback)
+  "Submit INTENT, a user's draft, to the session SESSION-ID names, for
+SCOPE: the service peer that sent it, nil for this editor's chats.
+Return at once; CALLBACK is called once, after, with the answer, as
+`romacs-agent-submit' says, whatever ends this, a quit included.  Every
+draft comes this way, and is known by its item id for the editor's run
+\(`romacs-agent--submit-drafts'): one being admitted makes a repeat wait
+for its answer; one queued or written gets its answer again, nothing
+sent (unconfirmed, one cut short as it was sent); one named for another
+session or with other text, `conflict'.  Its session is found, loaded
+if it must be, before it is admitted (`romacs-agent--submit-admit'); one
+whose harness ended (`romacs-agent--ended-p') is `closed', nothing done
+\(`romacs-agent--submit-step')."
+  (let ((answered nil))
+    (cl-flet ((answer (result)
+                (let ((inhibit-quit t))
+                  (unless answered
+                    (setq answered t)
+                    ;; Held, it goes out with the answers held, before their observers.
+                    (if romacs-agent--held
+                        (push (cons callback result) (nth 2 romacs-agent--held))
+                      (romacs-agent-submit-answer callback result))))))
+      (unwind-protect
+          (pcase (romacs-agent--submit-step scope session-id intent)
+            (`(answer . ,result) (answer result))
+            (`(wait . ,draft)
+             (let ((inhibit-quit t))
+               (setcdr (cddr draft) (cons callback (cdddr draft)))
+               (setq answered t)))
+            ('again
+             (setq answered t)
+             (romacs-agent--submit-draft scope session-id intent callback))
+            (`(admit ,session ,digest) (romacs-agent--submit-admit scope session intent digest #'answer)))
+        (unless answered
+          (answer (romacs-agent-submit-refused intent 'owner-unavailable "The submit was cut short: not sent"))))))
+  nil)
+
+(defun romacs-agent-submit (session-id intent callback)
+  "Submit INTENT, a user's draft, to the session SESSION-ID names, and
+return at once.  INTENT is (:draft-id ID :kind KIND :text TEXT
+:attachments FILES): ID a UUID, which the message is named by in its
+session's queue and records; KIND one of `send', `steer', `queue' or
+`interrupt' (`romacs-agent--submit-run'); FILES, images sent with TEXT;
+TEXT or FILES something to send.  CALLBACK is called once, after this
+returns, with the answer, (:draft-id ID :status STATUS ...): STATUS
+`accepted', with :queued N while it waits, N its place in the queue; or
+`refused', with :reason and :message, and nothing done.  A reason is
+`invalid', `no-session', `closed' (its harness ended: resume it),
+`conflict' (ID was sent before with other text: this text needs an id
+of its own) or `owner-unavailable'; `busy' is kept for an owner that
+refuses for now.  An id accepted before gets its answer again, nothing
+sent; one still being admitted, its answer once it has one.  This holds
+while this editor runs: its answers are not kept across a restart.
+STATUS is `unconfirmed', neither, its draft kept, when its line was cut
+short by a quit as it was written (`romacs-agent--sent'): it goes no
+second time.  A remote chat's source answers it as well when its
+service's answer is not known (`romacs-agent-remote--unconfirmed')."
+  (romacs-agent--submit-draft nil session-id intent callback))
+
 (defvar romacs-agent--queue-quiet nil
   "Non-nil while a queue is rebuilt whole: its views are told once, after.")
 
@@ -5100,6 +5764,7 @@ while it waits.  `user-error' when its harness ended: resume it."
             (romacs-agent-queue-tail session) (last (romacs-agent-queue session))))
     (cl-decf (romacs-agent-queue-length session))
     (romacs-agent--unkeep-item session item)
+    (romacs-agent--draft-gone item)
     (unless romacs-agent--queue-quiet (romacs-agent--changed session))
     t))
 
@@ -5112,7 +5777,7 @@ chat (USER) is: another session's message, Romacs's own prompt or a
 message it makes, or one a caller waits on (DELIVERED, VALID), is not."
   (and (romacs-agent-item-user item) (romacs-agent--keepable-p item)
        (not (romacs-agent-item-messages item)) (not (romacs-agent-item-own item))
-       (not (eq (romacs-agent-item-held item) 'sending))))
+       (not (memq (romacs-agent-item-held item) '(sending written)))))
 
 (defun romacs-agent--queue-mine (session item)
   "Whether ITEM waits for SESSION and is its user's to change."
@@ -5134,6 +5799,7 @@ its kept record too.  Nil when ITEM is no
 longer waiting, or not its user's to change."
   (when (romacs-agent--queue-mine session item)
     (setf (romacs-agent-item-text item) text)
+    (romacs-agent--draft-edited session item)
     ;; Its row as it is now, under the one key all its writes share: a
     ;; retry of an older write never lands after this one.
     (when (romacs-agent-item-kept item)
@@ -5223,7 +5889,9 @@ query of its own inputs, in a journal by grep."
 (defun romacs-agent--clear-queue (session)
   "Take every message out of SESSION's queue, and every one kept for it,
 loaded or not."
-  (dolist (item (romacs-agent-queue session)) (romacs-agent--dequeue session item))
+  ;; One being written goes as it is.
+  (dolist (item (romacs-agent-queue session))
+    (unless (eq (romacs-agent-item-held item) 'sending) (romacs-agent--dequeue session item)))
   (romacs-agent-store-queued-clear (romacs-agent-id session))
   (romacs-agent-mark (romacs-agent-id session) 'queued nil))
 
@@ -5646,7 +6314,7 @@ its records left it (`romacs-agent--keep-soon')."
               (romacs-agent--keep-again session seq state))
           (setf (alist-get session romacs-agent--keep-tries nil t) nil)
           (puthash session seq romacs-agent--kept)
-          (run-hook-with-args 'romacs-agent-kept-functions session state))))))
+          (romacs-agent--run-hook 'romacs-agent-kept-functions session state))))))
 
 (defun romacs-agent--keep-again (session seq state)
   "Keep SESSION's state at the editor's next idle moment as of record SEQ,
@@ -6333,14 +7001,20 @@ is folded here only when no worker could start (FAILURE `no-worker')."
         (remhash id romacs-agent--fold-tries)
         (let ((waiting (length (gethash id romacs-agent--fold-waiters))))
           (remhash id romacs-agent--fold-waiters)
-          ;; Its messages dropped with them, out of its queue.
-          (dolist (item (gethash id romacs-agent--fold-parked)) (romacs-agent--dequeue session item))
-          (remhash id romacs-agent--fold-parked)
-          (romacs-agent--raise session (list :type 'error
-                                             :text (format "Its records could not be read by a worker (%s): %s"
-                                                           (or failure "it kept no state")
-                                                           (if (> waiting 0) (format "%d action(s) on it dropped" waiting)
-                                                             "it is left unread"))))))))))
+          ;; Its messages dropped with them, out of its queue, but its
+          ;; user's: accepted, they wait, kept, for a load that reads it.
+          (let ((kept 0))
+            (dolist (item (gethash id romacs-agent--fold-parked))
+              (if (romacs-agent-item-user item) (cl-incf kept) (romacs-agent--dequeue session item)))
+            (remhash id romacs-agent--fold-parked)
+            (romacs-agent--raise session (list :type 'error
+                                               :text (format "Its records could not be read by a worker (%s): %s%s"
+                                                             (or failure "it kept no state")
+                                                             (if (> waiting 0) (format "%d action(s) on it dropped" waiting)
+                                                               "it is left unread")
+                                                             (if (> kept 0)
+                                                                 (format "; %d message(s) of its user wait in its queue for a load that reads it" kept)
+                                                               "")))))))))))
 
 (defun romacs-agent--fold-waited (session)
   "What waits for SESSION's fold goes on, oldest first; an error in one

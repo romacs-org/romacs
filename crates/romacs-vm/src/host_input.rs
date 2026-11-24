@@ -27,13 +27,19 @@ pub const QUIT_CHAR: i64 = 7;
 
 /// One redisplay request: the frozen frame, the selected window's id, and
 /// how long freezing the frame took (for latency traces).
-pub struct HostFrame {
+pub struct HostFrame<'a> {
     pub frame: romacs_layout_input::FrameSnapshot,
     pub selected: u64,
     /// The minibuffer window's id: its snapshot is the frame's last
     /// window, or a child frame's when one hosts it.
     pub minibuffer: u64,
     pub snapshot: std::time::Duration,
+    /// The pending command step's window in this frame (`Vm::typing_picture`),
+    /// for the host to say what it painted of it.
+    pub typing: Option<crate::TypingPicture>,
+    /// The host's receipt for the scene it submitted, left None when it
+    /// submitted none: either settles the pending step (typing.rs).
+    pub submission: &'a mut Option<romacs_display_protocol::submission::SubmissionReceipt>,
     /// The text animations drawn over this frame (`Vm::text_animations').
     pub text_animations: Vec<(u64, romacs_display_protocol::text_animation::TextAnimation)>,
 }
@@ -43,6 +49,9 @@ pub struct HostFrame {
 pub enum HostEvent {
     /// A complete input event, GNU's encoding (an integer or a symbol name).
     Key(CommandEvent),
+    /// A key from the platform, with the instant it was delivered
+    /// (`InputDelivery::ingress`): the command step reading it claims it.
+    NativeKey(CommandEvent, romacs_display_protocol::frame_time::EventTime),
     /// The frame was resized; the read redisplays and keeps waiting.
     Resize { width: u32, height: u32 },
     /// The frame is gone: the read signals `quit' so every level unwinds.
@@ -75,9 +84,16 @@ pub trait HostInput {
     }
     /// Paint `frame`; return the layout's window ends to commit
     /// (`Vm::display_apply_layout').
-    fn redisplay(&mut self, frame: HostFrame) -> std::result::Result<Vec<crate::WindowEnd>, String>;
+    fn redisplay(&mut self, frame: HostFrame<'_>) -> std::result::Result<Vec<crate::WindowEnd>, String>;
     /// Block until the next event, or until TIMEOUT passes (`Timeout').
     fn next_event(&mut self, timeout: Option<std::time::Duration>) -> std::result::Result<HostEvent, String>;
+    /// The native keys the evaluator settled (typing.rs), handed over as a
+    /// read settles them, so a host records a prompt's keys while it runs.
+    /// Value: those the host did not take, which `Vm::take_typing_outcomes`
+    /// gives later; by default, all.
+    fn typing_settled(&mut self, outcomes: Vec<crate::KeyOutcome>) -> Vec<crate::KeyOutcome> {
+        outcomes
+    }
 
     /// The process descriptors the next `next_event' also waits on, as
     /// wait_reading_process_output selects on them with the keyboard:
@@ -466,10 +482,26 @@ fn paint(vm: &mut Vm, started: std::time::Instant, frame: Result<romacs_layout_i
     let selected = vm.window(selected)?.id;
     let minibuffer = vm.window(vm.mini_window())?.id;
     let text_animations = vm.text_animations()?;
-    let ends = host(vm).redisplay(HostFrame { frame, selected, minibuffer, snapshot, text_animations })?;
+    let typing = vm.typing_picture(&frame);
+    let mut submission = None;
+    let ends = host(vm).redisplay(HostFrame { frame, selected, minibuffer, snapshot, text_animations, typing, submission: &mut submission })?;
+    match &submission { Some(receipt) => vm.typing_submitted(receipt), None => vm.typing_unchanged() }
+    hand_typing(vm);
     vm.display_apply_layout(&ends)?;
     vm.redisplay_done(crate::host::monotonic().saturating_duration_since(started));
     Ok(())
+}
+
+/// The keys settled so far, to the host (`HostInput::typing_settled`).
+fn hand_typing(vm: &mut Vm) {
+    let outcomes = vm.take_typing_outcomes();
+    if outcomes.is_empty() {
+        return;
+    }
+    // In the wait, or given back by `finish'.
+    let host = match vm.host_wait.as_mut() { Some(wait) => Some(wait.host.as_mut()), None => vm.host_input.as_deref_mut() };
+    let kept = match host { Some(host) => host.typing_settled(outcomes), None => outcomes };
+    vm.keep_typing_outcomes(kept);
 }
 
 /// The host's next event, waited for with the evaluator idle: a C-g typed now
@@ -538,13 +570,18 @@ fn finish(vm: &mut Vm, (waited, out): (Result<()>, Out<'_>)) -> Result<()> {
     let (event, frame) = event.expect("a wait ends with its event");
     // kbd_buffer_get_event: a key from a frame neither the last event's
     // nor selected is read after the `switch-frame' event it brings.
-    if let (HostEvent::Key(_), Some(id)) = (&event, frame)
+    if let (HostEvent::Key(_) | HostEvent::NativeKey(..), Some(id)) = (&event, frame)
         && let Some(switch) = vm.note_event_frame(id)
     {
         vm.deferred_event = Some((event, frame));
         vm.set_rooted(out.0, out.1, switch);
         return Ok(());
     }
+    // A native key is its command step's from here (typing.rs).
+    let event = match event {
+        HostEvent::NativeKey(key, ingress) => { vm.typing_read(ingress); hand_typing(vm); HostEvent::Key(key) }
+        event => event,
+    };
     // kbd_buffer_store_event: input inside `while-no-input' sets
     // `quit-flag' to `throw-on-input', for the next safepoint to throw.
     if let HostEvent::Key(_) = event {
@@ -554,6 +591,7 @@ fn finish(vm: &mut Vm, (waited, out): (Result<()>, Out<'_>)) -> Result<()> {
         HostEvent::Key(CommandEvent::Character(c)) => Value::integer(c)?,
         HostEvent::Key(CommandEvent::Named(name)) => vm.intern(&name),
         HostEvent::Timeout => Value::NIL,
+        HostEvent::NativeKey(..) => unreachable!("a native key is a key above"),
         // make_lispy_focus_in / make_lispy_focus_out: (focus-in FRAME),
         // the frame whose window it is, else the selected one.
         HostEvent::Focus(focused) => {

@@ -171,7 +171,12 @@ whole: kept, never written over or merged into."
   "A directory whose project name Claude Code would cut and hash: no
 copy is made, and the note says the conversation could not follow."
   (romacs-agent-cwd-tests--with
-    (let* ((long (expand-file-name (make-string 80 ?l) (expand-file-name (make-string 80 ?k) root)))
+    ;; Just past Claude Code's bound, whatever ROOT's length: a fixed
+    ;; padding under a long TMPDIR makes a name the file system refuses.
+    (let* ((pad (max 2 (- (+ romacs-agent--claude-project-max 4)
+                          (length (romacs-agent--claude-project root)))))
+           (long (expand-file-name (make-string (- pad (/ pad 2)) ?l)
+                                   (expand-file-name (make-string (/ pad 2) ?k) root)))
            (gone (expand-file-name "agent-1" long)))
       (make-directory long t)
       (setf (romacs-agent-cwd session) gone)
