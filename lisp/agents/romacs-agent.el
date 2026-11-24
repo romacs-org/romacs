@@ -7697,15 +7697,16 @@ ended, is no longer looked at; with none left, the timer stops."
 chosen to (`romacs-agent--to-load')."
   (romacs-agent--load dir))
 
-(defun romacs-agent--load-new ()
+(defun romacs-agent--load-new (&optional strict)
   "Load each session recorded since this process knew the others: a
 directory named by no known session's id, its records not read for one
 that is, and none left unloaded (`romacs-agent--unloaded-p').  Non-nil
-when any was loaded."
+when any was loaded.  The store not read yet: none loaded now, a later
+view asks again; STRICT, `romacs-agent-store-unread' says so."
   (let ((loaded nil))
-    ;; The store not read yet: none loaded now, a later view asks again.
-    (dolist (dir (ignore-error romacs-agent-store-unread
-                   (pcase-let ((`(,dirs . ,few) (romacs-agent--recorded-since))) (romacs-agent--to-load dirs few))))
+    (dolist (dir (condition-case err
+                     (pcase-let ((`(,dirs . ,few) (romacs-agent--recorded-since))) (romacs-agent--to-load dirs few))
+                   (romacs-agent-store-unread (when strict (signal (car err) (cdr err))))))
       (romacs-agent--load dir)
       (when (gethash (file-name-nondirectory dir) romacs-agent--sessions) (setq loaded t)))
     loaded))
@@ -7750,13 +7751,18 @@ waits for no step.")
   "Know every recorded session, and attach to those whose supervisor runs.
 A server runs this at its start, so sessions survive it; a restore
 `romacs-agent-restore-soon' began ends here, at once."
-  (let ((pending romacs-agent--restore-pending) (romacs-agent--fold-here t))
+  (let ((pending romacs-agent--restore-pending) (romacs-agent--fold-here t) (unread nil))
     ;; Its tail tells what loads now, late loads too: once.
     (setq romacs-agent--restore-pending nil romacs-agent--restoring nil romacs-agent--late-loads nil)
-    (if pending (mapc #'romacs-agent--restore-load pending) (romacs-agent--load-new))
-    (romacs-agent--fold-all-now)
-    (romacs-agent--restore-tail)
-    (when pending (romacs-agent--restore-progress 'done))))
+    (if pending (mapc #'romacs-agent--restore-load pending)
+      (condition-case nil (romacs-agent--load-new t)
+        (romacs-agent-store-unread (setq unread t))))
+    (if unread
+        ;; Not restored: the store read, it goes on (`romacs-agent--restore-later').
+        (romacs-agent--restore-later)
+      (romacs-agent--fold-all-now)
+      (romacs-agent--restore-tail)
+      (when pending (romacs-agent--restore-progress 'done)))))
 
 (defun romacs-agent-restore-soon ()
   "`romacs-agent-restore' from the command loop, `romacs-agent--restore-turn'
@@ -7777,12 +7783,7 @@ start, so sessions survive it."
              ;; session loaded as unlisted.
              (romacs-agent-store-unread
               (setq romacs-agent--restoring nil romacs-agent--rows-seen nil)
-              (add-hook 'romacs-agent-store-readable-hook #'romacs-agent--restore-when-readable)
-              ;; A read that failed for a moment has no writer to answer
-              ;; it: tried again a while later too, whichever comes first.
-              (unless (timerp romacs-agent--restore-retry)
-                (setq romacs-agent--restore-retry
-                      (run-at-time romacs-agent--restore-retry-after nil #'romacs-agent--restore-when-readable)))
+              (romacs-agent--restore-later)
               nil)
              (error (setq romacs-agent--restoring nil romacs-agent--rows-seen nil)
                     (signal (car err) (cdr err))))
@@ -7800,6 +7801,15 @@ start, so sessions survive it."
 
 (defconst romacs-agent--restore-retry-after 10
   "Seconds after which a restore an unread store held is tried again.")
+
+(defun romacs-agent--restore-later ()
+  "Restore once the store is read: when its writer says so, or, a read
+that failed for a moment having no writer to answer it, a while later,
+whichever comes first."
+  (add-hook 'romacs-agent-store-readable-hook #'romacs-agent--restore-when-readable)
+  (unless (timerp romacs-agent--restore-retry)
+    (setq romacs-agent--restore-retry
+          (run-at-time romacs-agent--restore-retry-after nil #'romacs-agent--restore-when-readable))))
 
 (defun romacs-agent--restore-when-readable ()
   "The store is read now, or a while has passed: the start's restore it

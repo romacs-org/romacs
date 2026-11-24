@@ -240,8 +240,10 @@ journal one turn long."
           (should (memq #'romacs-agent--restore-when-readable romacs-agent-store-readable-hook))
           ;; Tried again later too, should no writer answer.
           (should retry)
-          ;; A view meanwhile loads none either.
-          (should-not (romacs-agent--load-new)))
+          ;; A view meanwhile loads none either, nor takes it for restored.
+          (should-not (romacs-agent--load-new))
+          (romacs-agent-restore)
+          (should-not (eq romacs-agent--restored romacs-agent--sessions)))
         (run-hooks 'romacs-agent-store-readable-hook)
         (should-not romacs-agent-store-readable-hook)
         (should-not (romacs-agent-loaded old))
