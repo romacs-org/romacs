@@ -106,3 +106,32 @@ fn windmove_down_ignores_the_inactive_hosted_minibuffer() {
             (eq (selected-window) composer)))"#), "t");
     });
 }
+
+#[test]
+fn directional_lookup_finds_the_active_hosted_minibuffer_on_another_frame() {
+    on_loadup(|vm| {
+        assert_eq!(printed(vm, r#"(progn
+          (require 'romacs-complete)
+          (let* ((frame (selected-frame))
+                 (source (selected-window))
+                 (mini (minibuffer-window frame))
+                 (other (make-frame '((minibuffer . t))))
+                 (host (romacs-complete--frame))
+                 (target (lambda () (window-in-direction 'below source nil -1 nil t)))
+                 during)
+            (set-frame-position host 0 (+ (window-pixel-top source) (frame-char-height)))
+            (set-frame-size host (window-pixel-width source) (* 3 (frame-char-height)) t)
+            (let ((unread-command-events (list 'return))
+                  (minibuffer-setup-hook
+                   (list (lambda ()
+                           (with-selected-frame other
+                             (setq during (list (eq (selected-frame) other)
+                                                (not (eq (minibuffer-window) mini))
+                                                (eq (active-minibuffer-window) mini)
+                                                (eq (funcall target) mini))))))))
+              (read-from-minibuffer "Prompt: "))
+            (with-selected-frame other
+              (list during (active-minibuffer-window) (funcall target)))))"#),
+            "((t t t t) nil nil)");
+    });
+}

@@ -2879,10 +2879,25 @@ impl<'a> Windows<'a> {
         self.vm.display_state.version += 1;
         Ok(Value::TRUE)
     }
-    /// minibuf.c:215: the minibuffer window while a minibuffer is active.
+    /// minibuf.c:215: find the window showing the innermost prompt's buffer.
     pub(crate) fn active_minibuffer_window(&mut self) -> Out {
         self.vm.ensure_windows().map_err(internal)?;
-        Ok(if self.minibuf_level() > 0 { self.vm.window_root(MINI) } else { Value::NIL })
+        let depth = self.minibuf_level();
+        if depth <= 0 {
+            return Ok(Value::NIL);
+        }
+        let slot = self.vm.slot("romacs--minibuffer-list");
+        let list = self.vm.variable_value(slot).unwrap_or(Value::NIL);
+        let Ok((buffer, _)) = (0..depth)
+            .try_fold(list, |tail, _| self.vm.cons_pair(tail).map(|(_, rest)| rest))
+            .and_then(|entry| self.vm.cons_pair(entry))
+        else {
+            return Ok(Value::NIL);
+        };
+        Ok(self.vm.frames().into_iter()
+            .filter_map(|frame| self.vm.frame(frame).ok().map(|frame| frame.minibuffer))
+            .find(|&mini| self.vm.window(mini).is_ok_and(|w| w.live() && w.buffer == buffer))
+            .unwrap_or(Value::NIL))
     }
     /// GNU `window_list`: every frame's windows, frames in `frame-list'
     /// order, each frame's leaves in tree order, then the minibuffer window
