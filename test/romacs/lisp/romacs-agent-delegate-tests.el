@@ -200,6 +200,27 @@ recorded in a private directory; `delivered' collects what wakes it."
                          (romacs-mcp--object "taskId" (romacs-agent-id a) "requestId" "q1"))
                         :type 'user-error))))))
 
+(ert-deftest romacs-agent-delegate-a-coordinator-s-held-end-goes-when-its-task-ends-quietly ()
+  ;; Its task ends quietly, waking it not: the coordinator runs no turn
+  ;; after it, so its held end is its task's, and goes to its parent.
+  (romacs-agent-delegate-tests--family ((a nil))
+    (let ((writer (romacs-agent--make :id "wwwwwwww-0000-4000-8000-000000000001" :harness 'claude :title "writer"
+                                      :state 'running :dir (make-temp-file "w" t)
+                                      :options (list :parent (romacs-agent-id a)))))
+      (puthash (romacs-agent-id writer) writer romacs-agent--sessions)
+      (romacs-agent--index writer)
+      (romacs-agent-ui--summarize-children a)
+      (romacs-agent-delegate-tests--end a 5 "delegated a writer")
+      (romacs-agent-tools--flush parent)
+      (should-not delivered)
+      (romacs-agent-delegate-tests--end writer 3 "[quiet] nothing for you")
+      (romacs-agent-ui--summarize-children a)
+      (romacs-agent-tools--release-held a)
+      (romacs-agent-tools--flush parent)
+      (should (equal (mapcar (lambda (w) (plist-get w :result)) (romacs-agent-tools--wakes-parse (car delivered)))
+                     '("delegated a writer")))
+      (delete-directory (romacs-agent-dir writer) t))))
+
 (ert-deftest romacs-agent-delegate-a-failed-resume-keeps-the-result ()
   ;; The parent cannot be resumed this moment: the result waits in its
   ;; queue for its next run, never dropped with the resume.

@@ -777,18 +777,15 @@ the end wakes no one, and romacs_task_status still has it.")
   "Whether CHILD's turn END, (SEQ RESULT FAILED), wakes its parent: a
 failure, unless its rule, as its SUMMARY says (read when not given), is
 \"none\"; another end by its rule, unless its result is empty (a resumed
-harness's own turn) or quiet (`romacs-agent-tools--quiet'), or the tasks
-CHILD delegated still work and will wake it."
+harness's own turn) or quiet (`romacs-agent-tools--quiet').  One whose
+own tasks still work is held (`romacs-agent-tools--hand-on')."
   (let ((result (string-trim (or (nth 1 end) "")))
         (summary (or summary (romacs-agent-tools--summary-of child))))
     (pcase (romacs-agent-summary-wake-rule summary)
       ("none" nil)
       ("failure" (nth 2 end))
       (_ (or (nth 2 end)
-             (not (or (string-empty-p result) (string-prefix-p romacs-agent-tools--quiet result)
-                      ;; A coordinator waiting on its own tasks: its turn
-                      ;; after theirs ends its task (`--delegates-working-p').
-                      (romacs-agent-tools--delegates-working-p summary))))))))
+             (not (or (string-empty-p result) (string-prefix-p romacs-agent-tools--quiet result))))))))
 
 (defun romacs-agent-tools--wake-held-p (limited replaying)
   "Whether a child's ends wait to go to its parent, the one rule: at its
@@ -851,20 +848,49 @@ CHILD's, when read already."
     (when parent
       (dolist (end ends)
         (puthash child (car end) romacs-agent-tools--handed)
+        ;; A newer end of it: one held before is superseded.
+        (remhash child romacs-agent-tools--held)
         (when (romacs-agent-tools--wanted-p child (car end) summary)
-          (if (romacs-agent-tools--wakes-p child end summary)
-              (progn
-                ;; Owed to its parent till delivered: a restart meanwhile
-                ;; loads it (its mark), and hands it on again.
-                (romacs-agent-mark (romacs-agent-id child) 'owed t)
-                ;; Newest first: an end is added in constant time.
-                (push (cons child end) (gethash (romacs-agent-id parent) romacs-agent-tools--pending)))
+          (cond
+           ((not (romacs-agent-tools--wakes-p child end summary))
             ;; Done with on its own: an earlier end still waiting stays wanted.
             (romacs-agent-tools--mark-answered child (car end))
-            (puthash (car end) t (or answered (setq answered (make-hash-table)))))))
+            (puthash (car end) t (or answered (setq answered (make-hash-table)))))
+           ;; A coordinator whose own tasks still work: its turn after
+           ;; theirs ends its task; held till then, should none wake it.
+           ((and (not (nth 2 end)) (romacs-agent-tools--delegates-working-p summary))
+            (romacs-agent-mark (romacs-agent-id child) 'owed t)
+            (puthash child end romacs-agent-tools--held))
+           (t
+            ;; Owed to its parent till delivered: a restart meanwhile
+            ;; loads it (its mark), and hands it on again.
+            (romacs-agent-mark (romacs-agent-id child) 'owed t)
+            ;; Newest first: an end is added in constant time.
+            (push (cons child end) (gethash (romacs-agent-id parent) romacs-agent-tools--pending))))))
       ;; They go at once, in one walk of the new ends alone.
       (when answered (romacs-agent-tools--drop-answered child handed answered))
-      (romacs-agent-tools--wake-soon parent))))
+      (romacs-agent-tools--wake-soon parent)
+      ;; CHILD's end may have been its coordinator's last task's.
+      (romacs-agent-tools--release-held parent))))
+
+(defvar romacs-agent-tools--held (make-hash-table :test #'eq :weakness 'key)
+  "A coordinator to its end held while the tasks it delegated worked
+\(`romacs-agent-tools--hand-on').  A restart loses none: the end stays
+unanswered and its `owed' mark loads it, handed on anew.")
+
+(defun romacs-agent-tools--release-held (coordinator)
+  "Hand on COORDINATOR's held end to its parent once its tasks are done
+and none of their ends woke it: it runs no turn after them, so its held
+end is its task's."
+  (when-let* ((end (gethash coordinator romacs-agent-tools--held))
+              ((not (gethash (romacs-agent-id coordinator) romacs-agent-tools--pending)))
+              ((not (memq (romacs-agent-state coordinator) '(starting running waiting-approval))))
+              ((not (romacs-agent-tools--delegates-working-p (romacs-agent-tools--summary-of coordinator))))
+              (parent (romacs-agent-successor
+                       (romacs-agent-load-session (plist-get (romacs-agent-options coordinator) :parent)))))
+    (remhash coordinator romacs-agent-tools--held)
+    (push (cons coordinator end) (gethash (romacs-agent-id parent) romacs-agent-tools--pending))
+    (romacs-agent-tools--wake-soon parent)))
 
 (defvar romacs-agent-tools--waking (make-hash-table :test #'equal)
   "Parents whose wake is scheduled.")
