@@ -542,3 +542,81 @@ fn review_malformed_message_reported_in_both_directions() {
         },
     );
 }
+
+// Sol S6 / Opus R2-S1. Both explicit root kinds carry a single function and
+// plist pair. Either half's refusal drops the whole definition.
+#[test]
+fn review_definition_roots_carry_atomic_pairs() {
+    let mut vm = worker_vm(&worker_program());
+    eval(
+        &mut vm,
+        "(defun o7m-helper () 41)
+         (put 'o7m-helper 'o7m-prop 'kept)
+         (setq o7m-caller (lambda () (1+ (o7m-helper)))) nil",
+    );
+    let cases = [
+        ("((function o7m-helper))", "(t 1 1 kept 41)"),
+        ("((plist o7m-helper))", "(t 1 1 kept 41)"),
+        (
+            "((plist o7m-helper) (variable o7m-caller))",
+            "(t 1 1 kept 42)",
+        ),
+        (
+            "((variable o7m-caller) (plist o7m-helper))",
+            "(t 1 1 kept 42)",
+        ),
+    ];
+    let outcomes: Vec<_> = cases
+        .iter()
+        .map(|(roots, _)| seed_definition_case(&mut vm, roots))
+        .collect();
+
+    eval(&mut vm, "(put 'o7m-helper 'o7m-prop (current-buffer)) nil");
+    let bad_plist = seed_definition_case(&mut vm, "((function o7m-helper))");
+    eval(
+        &mut vm,
+        "(put 'o7m-helper 'o7m-prop 'kept)
+         (fset 'o7m-helper (let ((buffer (current-buffer))) (lambda () buffer))) nil",
+    );
+    let bad_function = seed_definition_case(&mut vm, "((plist o7m-helper))");
+
+    let expected: Vec<_> = cases
+        .iter()
+        .map(|(_, result)| ("nil".to_owned(), (*result).to_owned()))
+        .collect();
+    assert_eq!(
+        outcomes, expected,
+        "function/plist roots and both caller orders"
+    );
+    for (refusal, installed) in [bad_plist, bad_function] {
+        assert!(refusal.contains("cannot-freeze"), "{refusal}");
+        assert_eq!(installed, "(t 0 0 nil void-function)", "partial pair");
+    }
+}
+
+fn seed_definition_case(vm: &mut Vm, roots: &str) -> (String, String) {
+    let refusal = eval(
+        vm,
+        &format!("(setq o7m-held (romacs--seed-build '{roots} {TABLE} 100000)) (cdr o7m-held)"),
+    );
+    // The codec pin predates owner startup; install exactly the received
+    // function cell and plist in a fresh worker, then run the received caller.
+    let installed = send_held_seed(
+        vm,
+        "o7m-caller",
+        r"(let ((fresh (not (fboundp 'o7m-helper))) (functions 0) (plists 0))
+             (dolist (item (nth 2 seed))
+               (when (eq (nth 1 item) 'o7m-helper)
+                 (cond ((eq (car item) 'function)
+                        (fset 'o7m-helper (nth 2 item))
+                        (setq functions (1+ functions)))
+                       ((eq (car item) 'plist)
+                        (setplist 'o7m-helper (nth 2 item))
+                        (setq plists (1+ plists))))))
+             (list fresh functions plists (get 'o7m-helper 'o7m-prop)
+                   (condition-case err
+                       (if value (funcall value) (o7m-helper))
+                     (void-function (car err)))))",
+    );
+    (refusal, installed)
+}
