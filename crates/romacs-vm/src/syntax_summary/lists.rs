@@ -1,20 +1,20 @@
 //! Forward list-scan spans, using the scanner's existing suspension states.
 //!
-//! A span has two kinds of summary, each the list scanner run once across
-//! it from a continuation:
-//! - an [`Excursion`] is keyed by the lexical [`Mode`] alone and run deep
-//!   enough that it never reaches depth 0: its depth change and how far it
-//!   falls below its entry hold for any scan entered at a depth that stays
-//!   at 1 or more throughout, which makes no count event, meets no floor
-//!   and moves no `last_good';
-//! - an [`Exact`] summary is keyed by the exact entry ([`Key`]: depth and
-//!   floor too) and run with an unbounded count: it holds the count events
-//!   the span makes and where it last read at its floor, for any scan
-//!   whose count is larger.
+//! A span has two kinds of summary, both made by one run of the list
+//! scanner across it from a continuation, with an unbounded count:
+//! - an [`Exact`] summary is keyed by the exact entry ([`Key`]: mode, depth
+//!   and floor): it holds the count events the span makes and where it last
+//!   read at its floor, for any scan whose count is larger;
+//! - an [`Excursion`] is keyed by the lexical [`Mode`] alone: where the run
+//!   entered at depth 1 or more never went below 1, its depth change and
+//!   how far it fell hold for any scan entered at a depth that stays at 1
+//!   or more throughout, which makes no count event, meets no floor and
+//!   moves no `last_good'. One that fits an exact entry's depth is that
+//!   entry's summary too (`Excursion::at`).
 //!
 //! A span with neither (it ends where no key resumes, reaches the end of
 //! the text, or, exact, goes below its floor) is read by the scanner.
-use crate::syntax_scan::{Forw, ForwAt, Halt, Options, Passed, Pos, Scan, ScanAt, Scanner, Stopped, Text};
+use crate::syntax_scan::{Forw, ForwAt, Halt, Pos, Scan, ScanAt, Scanner, Stopped, Text};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 struct Comment {
@@ -126,10 +126,10 @@ impl Key {
     pub(crate) fn of(scan: &Scan, mode: Mode) -> Self {
         Self { mode, depth: scan.depth, floor: scan.min_depth }
     }
+    pub(crate) fn mode(self) -> Mode {
+        self.mode
+    }
 }
-
-/// The depth an excursion's scan is entered at: no span comes back to 0.
-const DEEP: i64 = 1 << 40;
 
 /// A span entered in a mode at a depth that stays at 1 or more: the mode
 /// it leaves, its depth change, and how far below its entry depth it goes.
@@ -150,56 +150,61 @@ pub(crate) struct Exact {
     last_good: Option<u32>,
 }
 
-/// A text whose scans never stop for a quit poll: a summary's scan, at
-/// most a leaf or two, whose caller polls before and after it. A poll
-/// inside it would have the caller make it again, and polls more frequent
-/// than a summary's scan would never let one finish.
-struct Unpolled<'a, T>(&'a T);
-impl<T: Text> Text for Unpolled<'_, T> {
-    fn char_at(&self, at: Pos) -> u32 { self.0.char_at(at) }
-    fn inc(&self, at: Pos) -> Pos { self.0.inc(at) }
-    fn dec(&self, at: Pos) -> Pos { self.0.dec(at) }
-    fn pos(&self, charpos: i64) -> Pos { self.0.pos(charpos) }
-    fn syntax(&self, at: Pos) -> i32 { self.0.syntax(at) }
-    fn table_syntax(&self, c: u32) -> i32 { self.0.table_syntax(c) }
-    fn pass(&self, at: Pos, limit: i64, plain: impl Fn(u8, i32) -> bool) -> Passed { self.0.pass(at, limit, plain) }
-}
-
 /// The scan SCAN from START to END (a character position, short of the
-/// accessible end) where it stops there, the text past END unread; none
-/// where it ends or overshoots first.
-fn across<T: Text>(scanner: &Scanner<'_, T>, scan: Scan, end: i64, sexpflag: bool) -> Option<Scan> {
+/// accessible end) where it stops there, the text past END unread: Some
+/// of it, or Some(None) where it ends or overshoots first. The scan holds
+/// the text's polls, its caller polling around it: a summary's scan, at
+/// most a leaf or two, made again after a poll would never finish under
+/// polls more frequent than it. None where a quit came due all the same.
+fn across<T: Text>(scanner: &mut Scanner<'_, T>, scan: Scan, end: i64, sexpflag: bool) -> Option<Option<Scan>> {
     // The caller has the text propertized past END: a stop for
     // propertization at END marks where the span ends, with no Lisp call.
-    let options = Options { propertize_done: Some(end), ..scanner.options };
-    let text = Unpolled(scanner.text);
-    let mut quiet = Scanner { text: &text, begv: scanner.begv, zv: scanner.zv, options, ppss: scanner.ppss,
-                              defun_start: scanner.defun_start, modiff: scanner.modiff };
-    match quiet.lists(scan, sexpflag) {
-        Err(Stopped { halt: Halt::Propertize(_, position), suspended }) if position == end => suspended.map(|scan| *scan),
-        _ => None,
+    let done = std::mem::replace(&mut scanner.options.propertize_done, Some(end));
+    let held = scanner.text.hold_polls();
+    let result = scanner.lists(scan, sexpflag);
+    scanner.text.release_polls(held);
+    scanner.options.propertize_done = done;
+    match result {
+        Err(Stopped { halt: Halt::Propertize(_, position), suspended }) if position == end => Some(suspended.map(|scan| *scan)),
+        Err(Stopped { halt: Halt::Poll, .. }) => None,
+        _ => Some(None),
     }
 }
 
-/// The excursion of START..END entered in MODE.
-pub(crate) fn excursion<T: Text>(scanner: &Scanner<'_, T>, start: Pos, end: i64, mode: Mode) -> Option<Excursion> {
-    let scan = across(scanner, mode.scan(start, (DEEP, -DEEP, -1, i64::MAX)), end, mode.sexpflag)?;
-    let flags = (mode.sexpflag, mode.ignore_comments, mode.multibyte_symbol);
-    Mode::of(&scan, flags).map(|exit| Excursion { exit, rise: scan.depth - DEEP, fall: DEEP - scan.low })
+/// The summaries of START..END entered at KEY, made by one scan: the exact
+/// one, and where KEY's depth is 1 or more and the span never takes it
+/// below 1, the excursion of KEY's mode, which that scan is. Some(None)
+/// where the span has neither; None where a quit came due first.
+pub(crate) fn summarize<T: Text>(scanner: &mut Scanner<'_, T>, start: Pos, end: i64, key: Key) -> Option<Option<(Exact, Option<Excursion>)>> {
+    let Some(scan) = across(scanner, key.mode.scan(start, (key.depth, key.floor, -1, i64::MAX)), end, key.mode.sexpflag)? else { return Some(None) };
+    Some(made(&scan, start, key))
 }
 
-/// The exact summary of START..END entered at KEY.
-pub(crate) fn exact<T: Text>(scanner: &Scanner<'_, T>, start: Pos, end: i64, key: Key) -> Option<Exact> {
-    let scan = across(scanner, key.mode.scan(start, (key.depth, key.floor, -1, i64::MAX)), end, key.mode.sexpflag)?;
+/// The summaries SCAN, made from START at KEY and stopped at the span's
+/// end, gives.
+fn made(scan: &Scan, start: Pos, key: Key) -> Option<(Exact, Option<Excursion>)> {
     let flags = (key.mode.sexpflag, key.mode.ignore_comments, key.mode.multibyte_symbol);
     let mode = Mode::of(&scan, flags)?;
     let last_good = if scan.last_good == -1 { None } else { Some(u32::try_from(scan.last_good - start.char).ok()?) };
-    Some(Exact { exit: Key::of(&scan, mode), events: i64::MAX - scan.count, last_good })
+    // At depth 1 or more throughout the scan made no count event, met no
+    // floor and moved no `last_good': what it did holds at any such depth.
+    let excursion = (key.depth >= 1 && scan.low >= 1)
+        .then(|| Excursion { exit: mode, rise: scan.depth - key.depth, fall: key.depth - scan.low });
+    Some((Exact { exit: Key::of(&scan, mode), events: i64::MAX - scan.count, last_good }, excursion))
 }
 
 impl Excursion {
     pub(crate) fn exit(self) -> Mode {
         self.exit
+    }
+    /// It as the exact summary at KEY, whose mode it is entered in, where
+    /// it `fits` KEY's depth.
+    pub(crate) fn at(self, key: Key) -> Option<Exact> {
+        self.fits(key.depth).then_some(Exact {
+            exit: Key { mode: self.exit, depth: key.depth + self.rise, floor: key.floor },
+            events: 0,
+            last_good: None,
+        })
     }
     /// Whether a scan at DEPTH crosses it at depth 1 or more throughout.
     pub(crate) fn fits(self, depth: i64) -> bool {

@@ -36,7 +36,9 @@ const PRELUDE: &str = r#"(progn
 /// A case: its name, the body of a `with-temp-buffer', and what its
 /// measured call must do in Romacs: the least number of spans of each kind
 /// (excursion, exact) it folds, the least number of characters it folds on
-/// summaries made before it, and whether it makes no leaf summary at all.
+/// summaries made before it, and whether it is warm: it summarizes at most
+/// the leaf it starts in, which a scan's first 1,024 steps read without
+/// the index, so that a scan stopped for Lisp there makes it after.
 type Case = (&'static str, &'static str, ([u64; 2], u64, bool));
 
 const CASES: &[Case] = &[
@@ -102,7 +104,7 @@ const CASES: &[Case] = &[
        (let ((copy (copy-syntax-table)))
          (put-text-property 4500 4502 'syntax-table copy)
          (list (twice (lambda () (scan-sexps 1 (point-max))))
-               (progn (modify-syntax-entry ?\( "." copy) (twice (lambda () (scan-sexps 1 (point-max)))))))"#, ([0, 1], 4000, true)),
+               (progn (modify-syntax-entry ?\( "." copy) (twice (lambda () (scan-sexps 1 (point-max)))))))"#, ([0, 1], 3000, true)),
     // So too through the parent of the table the property holds.
     ("a table in a property, its parent written", r#"(fill-to 4500 " ") (insert "()") (fill-to 9000 " ")
        (set (make-local-variable 'parse-sexp-lookup-properties) t)
@@ -110,7 +112,7 @@ const CASES: &[Case] = &[
        (let* ((parent (copy-syntax-table)) (child (table parent)))
          (put-text-property 4500 4502 'syntax-table child)
          (list (twice (lambda () (scan-sexps 1 (point-max))))
-               (progn (modify-syntax-entry ?\( "." parent) (twice (lambda () (scan-sexps 1 (point-max)))))))"#, ([0, 1], 4000, true)),
+               (progn (modify-syntax-entry ?\( "." parent) (twice (lambda () (scan-sexps 1 (point-max)))))))"#, ([0, 1], 3000, true)),
     // Counts over forty lists of about 3,000 characters, then edits.
     ("counts over long lists", r#"(dotimes (i 40) (insert (format "(defun f%d (a)\n  \"Doc (%d).\"\n" i i))
          (dotimes (j 110) (insert (format "  (list a 'b%d \"c)\" [d])\n" j))) (insert "  a)\n"))
@@ -166,9 +168,9 @@ fn forward_list_scans_match_pinned_gnu_and_fold() {
             failures.push(format!("{name}: values differ\n  GNU    {expected}\n  Romacs {actual:?}"));
         }
         let counts: Vec<u64> = folded.trim_matches(['(', ')']).split(' ').filter_map(|n| n.parse().ok()).collect();
-        if counts.len() != 4 || counts[0] < least[0] || counts[1] < least[1] || counts[2] < *reused || (*warm && counts[3] != 0) {
+        if counts.len() != 4 || counts[0] < least[0] || counts[1] < least[1] || counts[2] < *reused || (*warm && counts[3] > 1) {
             failures.push(format!("{name}: the measured call did (excursion exact reused leaf-scans) {folded}, wanted at least {least:?}, {reused} reused{}",
-                                  if *warm { ", no leaf scan" } else { "" }));
+                                  if *warm { ", at most one leaf scan" } else { "" }));
         }
     }
     assert!(failures.is_empty(), "{} failures:\n{}", failures.len(), failures.join("\n"));

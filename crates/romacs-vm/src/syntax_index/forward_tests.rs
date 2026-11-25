@@ -21,6 +21,8 @@ struct Live<'a> {
     polls: Option<u64>,
     // CELL(Plain): a test text's step count, no Value.
     steps: Cell<u64>,
+    // CELL(Plain): whether its polls are held.
+    held: Cell<bool>,
 }
 impl Text for Live<'_> {
     fn char_at(&self, at: Pos) -> u32 { self.text.get(at.byte).copied().map_or(0, u32::from) }
@@ -35,10 +37,15 @@ impl Text for Live<'_> {
     }
     fn table_syntax(&self, c: u32) -> i32 { self.table.get(c as usize).copied().unwrap_or(SWORD) }
     fn stop_due(&self) -> bool {
+        if self.held.get() {
+            return false;
+        }
         self.steps.set(self.steps.get() + 1);
         self.polls.is_some_and(|every| self.steps.get().is_multiple_of(every))
     }
     fn stop_uncounted(&self) -> bool { self.stop_due() }
+    fn hold_polls(&self) -> u32 { u32::from(self.held.replace(true)) }
+    fn release_polls(&self, held: u32) { self.held.set(held != 0); }
 }
 
 /// What a callback did: the frontier it left, and the ranges whose
@@ -76,7 +83,7 @@ fn run(mut index: Option<&mut SyntaxIndex>, text: &[u8], table: &[i32; 128], pro
     let ppss = BTreeMap::new();
     let steps = Cell::new(0);
     for _ in 0..100_000 {
-        let live = Live { text, table, properties, polls, steps: Cell::new(steps.get()) };
+        let live = Live { text, table, properties, polls, steps: Cell::new(steps.get()), held: Cell::new(false) };
         let options = Options { propertize_done: done, ..options };
         let mut scanner = Scanner { begv: live.pos(1), zv: live.pos(i64::MAX), text: &live, options, ppss: &ppss, defun_start: None, modiff: 1 };
         let args = (call.from, call.count, call.depth);
@@ -97,7 +104,8 @@ fn run(mut index: Option<&mut SyntaxIndex>, text: &[u8], table: &[i32; 128], pro
             Err(Stopped { halt: Halt::Propertize(arg, charpos), suspended }) => {
                 stops.push((arg, charpos));
                 let answer = callback(arg, charpos, properties);
-                assert!(answer.done > charpos, "a callback moves the frontier past {charpos}");
+                // parse_sexp_propertize's check: past the stop, or to the end.
+                assert!(answer.done > charpos || answer.done >= position(text.len()), "a callback moves the frontier past {charpos}");
                 done = Some(answer.done);
                 if let Some(index) = index.as_deref_mut() {
                     for (start, end) in answer.touched { index.touch(start, end); }
@@ -254,7 +262,7 @@ fn a_quit_on_entry_publishes_nothing() {
     let mut properties = vec![None; text.len()];
     let warm = run(Some(&mut index), text, &table, &mut properties, (Options::default(), None, None), call, &mut no_callback);
     let ppss = BTreeMap::new();
-    let live = Live { text, table: &table, properties: &properties, polls: Some(1), steps: Cell::new(0) };
+    let live = Live { text, table: &table, properties: &properties, polls: Some(1), steps: Cell::new(0), held: Cell::new(false) };
     let mut scanner = Scanner { begv: live.pos(1), zv: live.pos(i64::MAX), text: &live, options: Options::default(), ppss: &ppss, defun_start: None, modiff: 1 };
     let (scans, folds) = (index.stats.leaf_scans, index.stats.folds);
     let context = Context { table: 1, writes: 0, escaped_ends: false, properties: false };
@@ -271,7 +279,7 @@ fn indexed(index: &mut SyntaxIndex, text: &[u8], table: &[i32; 128], (polls, don
            resume: Option<Scan>, call: Call) -> Result<Option<i64>, Stopped<Box<Scan>>> {
     let properties = vec![None; text.len()];
     let ppss = BTreeMap::new();
-    let live = Live { text, table, properties: &properties, polls, steps: Cell::new(0) };
+    let live = Live { text, table, properties: &properties, polls, steps: Cell::new(0), held: Cell::new(false) };
     let options = Options { propertize_done: done, ..Options::default() };
     let mut scanner = Scanner { begv: live.pos(1), zv: live.pos(i64::MAX), text: &live, options, ppss: &ppss, defun_start: None, modiff: 1 };
     let context = Context { table: 1, writes: 0, escaped_ends: false, properties: done.is_some() };
@@ -328,7 +336,7 @@ fn a_frontier_on_a_cut_comes_before_a_poll_due_there() {
     let plain = {
         let properties = vec![None; text.len()];
         let ppss = BTreeMap::new();
-        let live = Live { text, table: &table, properties: &properties, polls: None, steps: Cell::new(0) };
+        let live = Live { text, table: &table, properties: &properties, polls: None, steps: Cell::new(0), held: Cell::new(false) };
         let options = Options { propertize_done: Some(17), ..Options::default() };
         let mut scanner = Scanner { begv: live.pos(1), zv: live.pos(i64::MAX), text: &live, options, ppss: &ppss, defun_start: None, modiff: 1 };
         let Err(Stopped { halt, suspended: Some(scan) }) = scanner.scan_lists(1, 1, 0, true) else { panic!("a stop at the frontier") };
@@ -371,7 +379,7 @@ fn a_fifth_table_takes_the_least_recently_used_slot() {
     let ppss = BTreeMap::new();
     let mut scan = |index: &mut SyntaxIndex, text: &[u8], k: usize, writes: u64| {
         let properties = vec![None; text.len()];
-        let live = Live { text, table: &tables[k], properties: &properties, polls: None, steps: Cell::new(0) };
+        let live = Live { text, table: &tables[k], properties: &properties, polls: None, steps: Cell::new(0), held: Cell::new(false) };
         let mut scanner = Scanner { begv: live.pos(1), zv: live.pos(i64::MAX), text: &live, options: Options::default(), ppss: &ppss, defun_start: None, modiff: 1 };
         let expected = scanner.scan_lists(call.from, call.count, call.depth, true).map_err(|stopped| stopped.halt);
         let context = Context { table: u64::try_from(k).unwrap() + 1, writes, escaped_ends: false, properties: false };

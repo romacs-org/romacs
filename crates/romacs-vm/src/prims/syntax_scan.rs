@@ -54,9 +54,11 @@ fn parse_partial_sexp(cx, from: Value, to: Value; optional targetdepth: Value, s
 
 // Counters of the current buffer's syntax summaries, the index a syntax scan carries
 // its state across, as a plist: `:served' and `:declined' for parses; `:list-served'
-// and `:list-declined' for forward list scans, counted for each run (a scan stopped
-// for Lisp counts again when it goes on); `:folds', the spans those folded by kind
-// (excursion, exact), and `:skipped', the characters they held.  Declines are alists
+// and `:list-declined' for forward list scans, counted for each run that consults the
+// index (a scan stopped for Lisp counts again when it goes on; one that ends within
+// its first 1,024 steps, or stops before it reads, consults none); `:folds', the spans
+// those folded by kind (excursion, exact), `:skipped', the characters they held, and
+// `:reused', those folded on summaries made before the call.  Declines are alists
 // of reasons and counts.  The plist also has `:leaves', `:leaf-scans', `:plain-leaves',
 // `:composed', `:evictions' (entries given up for a slot, by kind), `:context-switches',
 // `:context-evictions', `:context-invalidations' (contexts whose char-table write

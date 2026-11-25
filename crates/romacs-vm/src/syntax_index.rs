@@ -19,13 +19,15 @@
 //! the scanner does, and a change of the property drops the summaries of
 //! the leaves it touches (`TextBody::sync_syntax_properties`).
 //!
-//! One partition of leaves serves every context. A leaf prefers to end
-//! where both scanners can stop and resume exactly, which each context
-//! checks with its own table: a summary under a context needs that
-//! context's check. An edit or a property change leaves an end unchecked
-//! by all; the first check moves a cut after a possible split token at most
-//! a leaf's length on, and only a cut no context has checked moves. A cut
-//! with no such place stays unsafe for that context.
+//! One partition of leaves serves every context, cut where scans reach
+//! (`partition`): a new tree is one raw leaf, and a scan cuts the leaves it
+//! reads from it. A leaf prefers to end where both scanners can stop and
+//! resume exactly, which each context checks with its own table when a
+//! scan reaches the leaf: a summary under a context needs that context's
+//! check. An edit or a property change leaves an end unchecked by all; the
+//! first check moves a cut after a possible split token at most a leaf's
+//! length on, and only a cut no context has checked moves. A cut with no
+//! such place stays unsafe for that context.
 //!
 //! It holds no Lisp value: a derived cache, neither a root nor visited by
 //! the collector, and a copy of a text starts without one.
@@ -53,17 +55,25 @@ type Slot = (Key, Option<u32>);
 
 /// What a node keeps, under the context slot it was made in: a parse
 /// summary, or a forward list span's excursion or exact summary, none
-/// where the span has none.
+/// where the span has none, with the stamp of the list scan run that made
+/// it (`forward`).
 #[derive(Clone, Debug, romacs_snapshot::Snapshot)]
 enum Entry {
     Parse(u8, Slot, Span),
-    Excursion(u8, Mode, Option<Excursion>),
-    Exact(u8, list_summary::Key, Option<Exact>),
+    Excursion(u8, u32, Mode, Option<Excursion>),
+    Exact(u8, u32, list_summary::Key, Option<Exact>),
 }
 impl Entry {
     fn context(&self) -> u8 {
         match self {
             Self::Parse(context, ..) | Self::Excursion(context, ..) | Self::Exact(context, ..) => *context,
+        }
+    }
+    /// The stamp of the list scan run that made it.
+    fn stamp(&self) -> Option<u32> {
+        match self {
+            Self::Parse(..) => None,
+            Self::Excursion(_, stamp, ..) | Self::Exact(_, stamp, ..) => Some(*stamp),
         }
     }
     /// Its kind, as `Stats::evictions' counts them.
@@ -102,12 +112,23 @@ struct Node {
     /// A leaf's: the context slots that found no safe cut close enough to
     /// move its end to.
     unsafe_ends: u8,
+    /// A leaf not cut yet (`partition`): it serves no scan and no context
+    /// checks it, until a scan that reaches it cuts it.
+    raw: bool,
     children: Vec<Node>,
 }
 
 impl Node {
     fn leaf(chars: usize) -> Self {
         Self { chars, unchecked: EVERY, ..Self::default() }
+    }
+    fn raw(chars: usize) -> Self {
+        Self { chars, unchecked: EVERY, unsafe_ends: EVERY, raw: true, ..Self::default() }
+    }
+    /// A leaf's ends as an edit or a property change leaves them: unchecked
+    /// by every context, unsafe while it is raw.
+    fn unchecked_again(&mut self) {
+        (self.unchecked, self.unsafe_ends) = (EVERY, if self.raw { EVERY } else { 0 });
     }
     fn parse_span(&self, at: usize) -> &Span {
         let Entry::Parse(_, _, span) = &self.spans[at] else { unreachable!("a parse entry") };
@@ -122,7 +143,6 @@ impl Node {
     /// slot is taken: the kind of the one given up.
     fn remember(&mut self, entry: Entry) -> Option<usize> {
         let evicted = (self.spans.len() >= KEYS).then(|| self.spans.pop().map(|old| old.kind())).flatten();
-        self.spans.reserve_exact(1);
         self.spans.insert(0, entry);
         evicted
     }
@@ -172,6 +192,9 @@ pub(crate) struct Stats {
     /// (positive excursion, exact entry), and the characters they held.
     pub folds: [u64; 2],
     pub skipped: u64,
+    /// Of those characters, the ones whose leaf summaries the same fold
+    /// made: the rest were folded on summaries kept from before.
+    pub built: u64,
     /// Entries given up for a slot, by kind: parse, exact, excursion.
     pub evictions: [u64; 3],
     /// Scans in another context than the last; contexts given up for a new
@@ -249,11 +272,16 @@ pub(crate) struct SyntaxIndex {
     contexts: [Option<(Context, u64)>; CONTEXTS],
     tick: u64,
     current: Option<u8>,
+    /// The stamp of the list scan run now, and of runs a poll stopped,
+    /// whose entries are not seen (`forward`).
+    stamp: u32,
+    aborted: Vec<u32>,
     pub(crate) stats: Stats,
 }
 impl Default for SyntaxIndex {
     fn default() -> Self {
-        Self { leaf: LEAF, root: None, contexts: Default::default(), tick: 0, current: None, stats: Stats::default() }
+        Self { leaf: LEAF, root: None, contexts: Default::default(), tick: 0, current: None, stamp: 0, aborted: Vec::new(),
+               stats: Stats::default() }
     }
 }
 impl Clone for SyntaxIndex {
@@ -269,11 +297,10 @@ impl SyntaxIndex {
         usize::try_from(chars).is_ok_and(|chars| chars >= 4 * LEAF)
     }
 
-    /// The slot of CONTEXT, the tree cut over CHARS characters and its
-    /// ends checked for that slot: the one place that decides what kept
-    /// entries hold. A context whose write count moved loses its entries; a
+    /// The slot of CONTEXT, and a tree over CHARS characters: the one place
+    /// that decides what kept entries hold. A context whose write count moved loses its entries; a
     /// new one takes a free slot or the least recently used one's.
-    fn prepare<T: Text>(&mut self, scanner: &Scanner<'_, T>, chars: usize, context: Context) -> u8 {
+    fn prepare(&mut self, chars: usize, context: Context) -> u8 {
         let same = |kept: &Context| kept.table == context.table && kept.escaped_ends == context.escaped_ends
             && kept.properties == context.properties;
         let kept = |slot: u8| self.contexts[usize::from(slot)].as_ref();
@@ -301,9 +328,9 @@ impl SyntaxIndex {
         }
         self.current = Some(slot);
         if self.root.as_ref().is_none_or(|root| root.chars != chars) {
-            self.root = Some(Self::build(Self::cut(self.leaf, chars)));
+            // Cut where scans reach (`partition`), not all at once.
+            self.root = Some(Node::raw(chars));
         }
-        self.check_ends(scanner, slot);
         slot
     }
 
@@ -314,7 +341,9 @@ impl SyntaxIndex {
             node.drop_entries(slot);
             if node.is_leaf() {
                 node.unchecked |= 1 << slot;
-                node.unsafe_ends &= !(1 << slot);
+                if !node.raw {
+                    node.unsafe_ends &= !(1 << slot);
+                }
             } else {
                 node.children.iter_mut().for_each(|child| reset(child, slot));
                 node.sum();
@@ -359,7 +388,7 @@ impl SyntaxIndex {
         } else if !was_leaf && root.is_leaf() {
             // Every leaf went with the text.
             *root = Node::leaf(0);
-        } else if root.is_leaf() && root.chars > 2 * leaf {
+        } else if root.is_leaf() && !root.raw && root.chars > 2 * leaf {
             *root = Self::build(Self::cut(leaf, root.chars));
         }
         self.uncheck_before(start);
@@ -387,62 +416,6 @@ impl SyntaxIndex {
     pub(crate) fn forget(&mut self) {
         if let Some(root) = &mut self.root {
             forget(root);
-        }
-    }
-
-    /// Check for context slot SLOT each leaf end it has not checked. A cut
-    /// no context has checked moves past a possible split token, at most a
-    /// leaf's length on, taking those characters from the next leaves; one
-    /// with no safe cut in range, or that another context checked, is
-    /// marked unsafe for SLOT where it is.
-    fn check_ends<T: Text>(&mut self, scanner: &Scanner<'_, T>, slot: u8) {
-        let leaf_chars = self.leaf;
-        let Some(root) = &mut self.root else { return };
-        let text = scanner.text;
-        let syntax = |at: usize| text.syntax(text.pos(position(at)));
-        // Whether a scan can stop at offset AT and resume exactly.
-        let total = root.chars;
-        let safe = |at: usize| {
-            if at == 0 || at >= total {
-                return true;
-            }
-            let before = syntax(at - 1);
-            !matches!(before & 0xff, scan::SESCAPE | scan::SCHARQUOTE | scan::SMATH)
-                && !(scan::comstart_first(before) && scan::comstart_second(syntax(at)))
-        };
-        let bit = 1 << slot;
-        while let Some((start, chars, unchecked, was_unsafe)) = first_unchecked(root, 0, bit) {
-            let end = start + chars;
-            if unchecked != EVERY {
-                // Unsafe after an edit beside it: what the path keeps for SLOT,
-                // made while it was safe, is not its span's.
-                let unsafe_end = !safe(end);
-                update(root, start, unsafe_end, &mut |leaf| {
-                    leaf.unchecked &= !bit;
-                    leaf.unsafe_ends |= if unsafe_end { bit } else { 0 };
-                });
-                continue;
-            }
-            let moved = (end..=(end + leaf_chars).min(total)).find(|&at| safe(at));
-            let mut unsafe_end = moved.is_none();
-            if let Some(moved) = moved.filter(|&moved| moved > end) {
-                let mut left = moved - end;
-                while left > 0 {
-                    let mut took = 0;
-                    update(root, end, true, &mut |next| {
-                        took = next.chars.min(left);
-                        next.chars -= took;
-                    });
-                    left -= took;
-                }
-                update(root, start, true, &mut |leaf| leaf.chars += moved - end);
-                unsafe_end = false;
-            }
-            // An end that is or was unsafe: what the path keeps is not its span's.
-            update(root, start, unsafe_end || was_unsafe, &mut |leaf| {
-                leaf.unchecked = EVERY & !bit;
-                leaf.unsafe_ends = if unsafe_end { bit } else { 0 };
-            });
         }
     }
 
@@ -475,7 +448,7 @@ impl SyntaxIndex {
     /// leaf's by its scan, an inner node's from its children's.
     fn make<'a, T: Text>(counts: &mut Stats, scanner: &mut Scanner<'_, T>, (node, start, context): (&'a mut Node, usize, u8),
                          slot: Slot) -> &'a Span {
-        let span = if node.is_leaf() && node.unsafe_ends & (1 << context) != 0 {
+        let span = if node.is_leaf() && (node.raw || node.unsafe_ends & (1 << context) != 0) {
             Span::Deep
         } else if node.is_leaf() {
             counts.leaf_scans += 1;
@@ -554,8 +527,9 @@ impl SyntaxIndex {
     /// `resumable`.
     pub(crate) fn parse<T: Text>(&mut self, scanner: &mut Scanner<'_, T>, chars: usize, context: Context,
                                  from: i64, to: i64, state: &mut ParseState) -> R<bool> {
-        let context = self.prepare(scanner, chars, context);
+        let context = self.prepare(chars, context);
         let bit = 1 << context;
+        self.ready(scanner, context, (offset(from), offset(to.max(from))));
         let Self { root: Some(root), stats, .. } = self else { unreachable!("built above") };
         let (first_end, _) = safe_end(root, offset(from), bit);
         let (last_start, ..) = locate(root, offset((to - 1).max(from)), bit);
@@ -658,7 +632,7 @@ fn edit_node(node: &mut Node, start: usize, edit: &Edit, leaf: usize) {
         let receives = (start <= edit.start && edit.start < end) || edit.at_end;
         node.chars = before + after + if receives { edit.inserted } else { 0 };
         node.spans.clear();
-        (node.unchecked, node.unsafe_ends) = (EVERY, 0);
+        node.unchecked_again();
         return;
     }
     let mut at = start;
@@ -679,7 +653,7 @@ fn edit_node(node: &mut Node, start: usize, edit: &Edit, leaf: usize) {
     }
     let children = std::mem::take(&mut node.children);
     node.children = children.into_iter().filter(|child| child.chars > 0).flat_map(|child| {
-        if child.is_leaf() && child.chars > 2 * leaf {
+        if child.is_leaf() && !child.raw && child.chars > 2 * leaf {
             SyntaxIndex::cut(leaf, child.chars)
         } else if child.children.len() > FANOUT {
             Node::group(child.children)
@@ -714,32 +688,12 @@ fn update(node: &mut Node, at: usize, clear: bool, f: &mut impl FnMut(&mut Node)
     node.sum();
 }
 
-/// The first leaf under NODE (at START) whose end the context of BIT has
-/// not checked: its start, its characters, the contexts that have not
-/// checked it, and whether any found it unsafe when last checked.
-fn first_unchecked(node: &Node, start: usize, bit: u8) -> Option<(usize, usize, u8, bool)> {
-    if node.unchecked & bit == 0 {
-        return None;
-    }
-    if node.is_leaf() {
-        return Some((start, node.chars, node.unchecked, node.unsafe_ends != 0));
-    }
-    let mut at = start;
-    for child in &node.children {
-        if child.unchecked & bit != 0 {
-            return first_unchecked(child, at, bit);
-        }
-        at += child.chars;
-    }
-    None
-}
-
 /// The leaves holding the characters START..END under NODE (at NODE_START)
 /// lose their summaries and their checked ends, and so do their ancestors.
 fn touch_node(node: &mut Node, node_start: usize, start: usize, end: usize) {
     node.spans.clear();
     if node.is_leaf() {
-        (node.unchecked, node.unsafe_ends) = (EVERY, 0);
+        node.unchecked_again();
         return;
     }
     let mut at = node_start;
@@ -786,7 +740,7 @@ fn locate(root: &Node, at: usize, bit: u8) -> (usize, usize, bool) {
 fn forget(node: &mut Node) {
     node.spans.clear();
     if node.is_leaf() {
-        (node.unchecked, node.unsafe_ends) = (EVERY, 0);
+        node.unchecked_again();
     } else {
         node.children.iter_mut().for_each(forget);
         node.sum();
@@ -794,6 +748,7 @@ fn forget(node: &mut Node) {
 }
 
 mod forward;
+mod partition;
 
 #[cfg(test)]
 mod parse_tests;

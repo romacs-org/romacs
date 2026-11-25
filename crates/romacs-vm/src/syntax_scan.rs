@@ -105,6 +105,12 @@ pub(crate) trait Text {
     fn stop_uncounted(&self) -> bool {
         false
     }
+    /// Ask the quit probe no more until `release_polls`: for a bounded piece
+    /// of work whose caller polls around it. What `release_polls` takes back.
+    fn hold_polls(&self) -> u32 {
+        0
+    }
+    fn release_polls(&self, _held: u32) {}
 }
 
 /// What `Text::pass` passed: where it ended, and the syntax of the last
@@ -397,7 +403,9 @@ impl<T: Text> Scanner<'_, T> {
         *steps = steps.wrapping_add(1);
         if steps.is_multiple_of(1024) && self.text.stop_uncounted() { Err(Halt::Poll) } else { Ok(()) }
     }
-    fn update_forward(&self, charpos: i64) -> R<()> {
+    /// UPDATE_SYNTAX_TABLE_FORWARD (CHARPOS): a stop for propertization
+    /// where CHARPOS has reached `syntax-propertize--done', short of ZV.
+    pub(crate) fn update_forward(&self, charpos: i64) -> R<()> {
         // UPDATE_SYNTAX_TABLE_FORWARD's just-in-time parse_sexp_propertize.
         match self.options.propertize_done {
             Some(done) if done <= charpos && done < self.zv.char => {

@@ -53,6 +53,10 @@ struct View<'a> {
     stop: bool,
     // CELL(Plain)
     countdown: std::cell::Cell<u32>,
+    /// A forward list scan's first run hands over to the summaries at the
+    /// countdown's first end (`Listing`): 0 off, 1 armed, 2 handed over.
+    // CELL(Plain)
+    handover: std::cell::Cell<u8>,
 }
 
 /// The UTF-8 width of the character whose first byte is LEAD.
@@ -91,6 +95,10 @@ impl<'a> View<'a> {
     #[inline(never)]
     fn stop_now(&self) -> bool {
         self.countdown.set(super::quit_poll::POLL_STEPS);
+        if self.handover.get() == 1 {
+            self.handover.set(2);
+            return true;
+        }
         self.stop && self.vm.native_stop_due()
     }
     #[inline]
@@ -113,6 +121,7 @@ impl<'a> View<'a> {
             window: std::cell::Cell::new((0, &[])),
             stop,
             countdown: std::cell::Cell::new(if stop { super::quit_poll::POLL_STEPS } else { u32::MAX }),
+            handover: std::cell::Cell::new(0),
         }
     }
     /// The bytes from BYTE to the end of its chunk, the window moved
@@ -158,6 +167,15 @@ impl<'a> View<'a> {
 impl scan::Text for View<'_> {
     fn stop_uncounted(&self) -> bool {
         self.stop && self.vm.native_stop_due()
+    }
+    fn hold_polls(&self) -> u32 {
+        self.countdown.replace(u32::MAX)
+    }
+    fn release_polls(&self, held: u32) {
+        // A pass that met a pending quit asked for the next step's poll.
+        if self.countdown.get() != 1 {
+            self.countdown.set(held);
+        }
     }
     #[inline]
     fn stop_due(&self) -> bool {
@@ -328,6 +346,20 @@ struct Served {
     check: bool,
 }
 
+/// A forward list scan's use of the summaries over the runs of one call:
+/// SERVED once they serve it. Its first run is the scanner's alone where
+/// HANDOVER, until the quit probe's countdown first ends (`View::stop_now`),
+/// which FIRED records: a scan that ends sooner never consults them. Under
+/// `romacs-syntax-summaries-check', MISMATCH says how a run's two scans
+/// ended apart.
+#[derive(Default)]
+struct Listing {
+    served: Option<Served>,
+    handover: bool,
+    fired: bool,
+    mismatch: Option<String>,
+}
+
 /// A list scan's run: where it goes on from, if it stopped before, its
 /// FROM, COUNT and DEPTH, and its mode.
 struct ListCall {
@@ -344,12 +376,19 @@ impl ListCall {
         let resume = match kept { Some(Kept::Scan(scan)) => Some(*scan), _ => None };
         Self { resume, args: (int(args[0]), int(args[1]), depth), sexpflag: matches!(op, Op::ScanSexps) }
     }
-    /// The run over VIEW: folded over its summaries where SERVED says
-    /// they serve it (`indexed_lists'), else the scanner's alone.
-    fn run(&self, view: &View<'_>, scanner: &mut Scanner<'_, View<'_>>, served: Option<&Served>, mismatch: &mut Option<String>) -> ListRun {
+    /// The run over VIEW: folded over its summaries where LISTING serves
+    /// it (`indexed_lists'), else the scanner's alone, which a first run
+    /// LISTING arms stops at the quit probe's first countdown to hand over.
+    fn run(&self, view: &View<'_>, scanner: &mut Scanner<'_, View<'_>>, listing: &mut Listing) -> ListRun {
+        let Listing { served, handover, fired, mismatch } = listing;
         match served {
             Some(served) => indexed_lists(view, scanner, served, self, mismatch),
-            None => self.plain(scanner),
+            None => {
+                view.handover.set(u8::from(*handover));
+                let run = self.plain(scanner);
+                *fired = view.handover.replace(0) == 2;
+                run
+            }
         }
     }
     /// The run by the scanner alone.
@@ -710,8 +749,7 @@ impl Leaf<'_> {
         {
             return Ok(Outcome::Done(value));
         }
-        let listed = self.lists_served(op, args, index, table, options)?;
-        let mut mismatch = None;
+        let mut listing = self.listing(op, args, (index, table), options, memory.is_some())?;
         let (begv, zv, point) = self.syntax_bounds(index)?;
         let epoch = self.vm.defun_start_epoch;
         let (cached, modiff) = {
@@ -756,7 +794,7 @@ impl Leaf<'_> {
                         let count = args[0].integer_value().expect("checked");
                         scanner.forward_comment(point, count).map(|(at, found)| Result_::Comment(at, found)).map_err(scan_stopped)
                     }
-                    (Op::ScanLists | Op::ScanSexps, kept) => ListCall::of(op, args, kept).run(&view, &mut scanner, listed.as_ref(), &mut mismatch)
+                    (Op::ScanLists | Op::ScanSexps, kept) => ListCall::of(op, args, kept).run(&view, &mut scanner, &mut listing)
                         .map(Result_::Lists).map_err(scan_stopped),
                     (Op::ParsePartialSexp, kept) => {
                         let (from, to, target, stopbefore, commentstop, mut state) = parse.clone().expect("checked");
@@ -777,8 +815,9 @@ impl Leaf<'_> {
                 result => break result,
             }
             self.vm.native_poll()?;
+            self.take_over(&mut listing, op, args, (index, table), options)?;
         };
-        if let Some(mismatch) = mismatch {
+        if let Some(mismatch) = listing.mismatch {
             return Err(Fault::Error(mismatch));
         }
         let written = defun_start.filter(|&cache| Some(cache) != cached);
@@ -883,6 +922,29 @@ impl Leaf<'_> {
             properties: options.propertize_done.is_some(),
         };
         Served { context, check }
+    }
+
+    /// How a scan, OP's with ARGS, uses the summaries of the buffer at
+    /// INDEX: a forward list scan's rerun after a stop for Lisp is served
+    /// at once (`lists_served`), its first run once it hands over.
+    fn listing(&mut self, op: Op, args: &[Value], (index, table): (usize, Value), options: scan::Options, rerun: bool)
+        -> std::result::Result<Listing, Fault> {
+        if rerun {
+            return Ok(Listing { served: self.lists_served(op, args, index, table, options)?, ..Listing::default() });
+        }
+        let forward = matches!(op, Op::ScanLists | Op::ScanSexps) && args[1].integer_value().is_some_and(|count| count > 0);
+        Ok(Listing { handover: forward && matches!(self.vm.objects[index], data::Object::Buffer(_)), ..Listing::default() })
+    }
+
+    /// After a run's poll: a first run that handed over is served from
+    /// now on, where the summaries serve it.
+    fn take_over(&mut self, listing: &mut Listing, op: Op, args: &[Value], (index, table): (usize, Value), options: scan::Options)
+        -> std::result::Result<(), Fault> {
+        if std::mem::take(&mut listing.fired) {
+            listing.handover = false;
+            listing.served = self.lists_served(op, args, index, table, options)?;
+        }
+        Ok(())
     }
 
     /// Whether the summaries of the buffer at INDEX serve a forward list
@@ -1004,7 +1066,8 @@ impl Leaf<'_> {
         let items = [
             ("served", int(stats.served)), ("declined", declined), ("leaves", int(leaves as u64)),
             ("list-served", int(stats.list_served)), ("list-declined", list_declined),
-            ("folds", folds), ("skipped", int(stats.skipped)), ("evictions", evictions),
+            ("folds", folds), ("skipped", int(stats.skipped)), ("reused", int(stats.skipped.saturating_sub(stats.built))),
+            ("evictions", evictions),
             ("leaf-scans", int(stats.leaf_scans)), ("plain-leaves", int(stats.plain_leaves)),
             ("composed", int(stats.composed)), ("context-switches", int(stats.switches)),
             ("context-evictions", int(stats.context_evictions)), ("context-invalidations", int(stats.context_invalidations)),
@@ -1096,11 +1159,11 @@ mod tests {
                         (> (cdr (assq 'exact (plist-get stats :folds))) 0)
                         (plist-get stats :context-switches)))))"#).unwrap();
         // Served: the scan, the scan in another table, and the scan whose
-        // first run stopped for Lisp before it read anything; short: the
-        // one from five characters before the end, and the one an error
-        // ends at once.
+        // first run stopped for Lisp before it read anything. The one from
+        // five characters before the end, and the one an error ends at
+        // once, end within their first 1,024 steps and consult nothing.
         assert_eq!(vm.display(result).unwrap(),
-                   "((nil 7) (nil 7) (scan-error \"Containing expression ends prematurely\" 1 2) 7 (0 3 2 1 0 0 t 3))");
+                   "((nil 7) (nil 7) (scan-error \"Containing expression ends prematurely\" 1 2) 7 (0 3 0 1 0 0 t 2))");
     }
 
     /// A quit pending when an indexed list scan starts stops it there,
