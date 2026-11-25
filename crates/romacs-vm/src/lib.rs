@@ -1461,11 +1461,10 @@ pub struct Vm {
     /// entry traced while its list lives and moved with it (`Vm::weak_round`).
     #[snapshot(at_rest)]
     lambda_lists: std::collections::HashMap<u64, source_cache::LambdaList>,
-    /// The status bar's last fitted line (a `display::mode_line::Band'),
-    /// kept for a click to read (`Vm::status_bar_target'); its object
-    /// constants are traced handles.
+    /// The status bar's last fitted line, kept for a click to read
+    /// (`Vm::status_bar_target'); its object constants are traced handles.
     #[snapshot(at_rest)]
-    status_bar_line: Option<Box<dyn std::any::Any>>,
+    status_bar_line: Option<display::BarLine>,
     loader: loader::Loader,
     source_cache: source_cache::SourceCache,
     macros: HashSet<usize>,

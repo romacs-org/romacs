@@ -234,6 +234,9 @@ impl Vm {
         // Another display's font-objects are none of this one's.
         let objects = self.slot(crate::prim::FONT_OBJECTS);
         self.slots[objects].value = crate::Value::NIL;
+        // Nor is the bar it painted: its band, click map and expansion.
+        self.status_bar_line = None;
+        self.display_state.forget_status_bar();
         let display = host.map(|host| Display { host: Box::new(crate::host_calls::Counted(host)), open: false, face_fonts: rustc_hash::FxHashMap::default(), font_objects: FontObjects::default(), surfaces: Surfaces::default() });
         self.ui_set(display, |ui| &mut ui.display);
     }

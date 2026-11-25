@@ -30,10 +30,10 @@ const BAND: [&str; 1] = ["display"];
 const SEGMENT: [&str; 5] = ["romacs-segment", "romacs-pill", "romacs-pill-text", "romacs-pill-modified", "romacs-priority"];
 
 /// A piece's projected properties, by name.
-/// Each value is shared (`Rc'): a `:propertize''s values reach every piece
+/// Each value is shared (`Arc', immutable, so a band is `Send'): a `:propertize''s values reach every piece
 /// under it, merged with a string's own or not, as the one object they are
 /// (`Vm::mode_line_string' makes each once).
-pub(super) type Projected = std::rc::Rc<Vec<(&'static str, std::rc::Rc<Form>)>>;
+pub(super) type Projected = std::sync::Arc<Vec<(&'static str, std::sync::Arc<Form>)>>;
 
 /// An enclosing `:propertize''s properties the expansion keeps: its face,
 /// and for a string its PROJECTED ones.
@@ -54,6 +54,10 @@ impl Band {
     /// Whether this is the status bar's band, which reads segments.
     fn marks(&self) -> bool { self.projected.contains(&"romacs-segment") }
 }
+
+/// `Send`, as a `Vm` moving to another thread needs its status bar's
+/// last band (`Vm::status_bar_line`) to be.
+const _: fn() = || { fn send<T: Send>() {} send::<Band>(); };
 
 /// One expanded mode line: text plus face-name runs over its bytes.
 #[derive(Clone)]
@@ -223,17 +227,17 @@ fn is_cons(form: &Form) -> bool {
 
 /// What a `:propertize' PLIST gives the pieces inside it: its face and
 /// the properties of NAMES it has; none without either.
-fn propertize_of(plist: &Form, names: &'static [&'static str]) -> Option<std::rc::Rc<Propertize>> {
+fn propertize_of(plist: &Form, names: &'static [&'static str]) -> Option<std::sync::Arc<Propertize>> {
     let face = face_of(plist);
-    let projected: Vec<(&'static str, std::rc::Rc<Form>)> = match plist {
+    let projected: Vec<(&'static str, std::sync::Arc<Form>)> = match plist {
         Form::List(items) if !names.is_empty() => items.chunks(2)
             .filter_map(|pair| match (&pair[0], pair.get(1)) {
-                (Form::Sym(name), Some(value)) if !is_nil(value) => names.iter().find(|p| **p == name).map(|p| (*p, std::rc::Rc::new(value.clone()))),
+                (Form::Sym(name), Some(value)) if !is_nil(value) => names.iter().find(|p| **p == name).map(|p| (*p, std::sync::Arc::new(value.clone()))),
                 _ => None,
             }).collect(),
         _ => vec![],
     };
-    (face.is_some() || !projected.is_empty()).then(|| std::rc::Rc::new(Propertize { face, projected: std::rc::Rc::new(projected) }))
+    (face.is_some() || !projected.is_empty()).then(|| std::sync::Arc::new(Propertize { face, projected: std::sync::Arc::new(projected) }))
 }
 
 /// Whether a `:propertize' PLIST has the property NAME.
@@ -249,7 +253,7 @@ fn merged(outer: Option<&Propertize>, own: Option<&Own>) -> Option<Projected> {
     match (outer, own) {
         (None, None) => None,
         (Some(p), None) | (None, Some(p)) => Some(p.clone()),
-        (Some(outer), Some(own)) => Some(std::rc::Rc::new(outer.iter().cloned()
+        (Some(outer), Some(own)) => Some(std::sync::Arc::new(outer.iter().cloned()
             .chain(own.iter().filter(|(name, _)| !outer.iter().any(|(o, _)| o == name)).cloned()).collect())),
     }
 }
@@ -466,9 +470,9 @@ impl Vm {
             let mut projected = vec![];
             for (&name, &key) in names.iter().zip(&keys) {
                 let v = self.property_textget(value, start, key).map_err(crate::forwarded::fault_text)?;
-                if v != Value::NIL { projected.push((name, std::rc::Rc::new(Form::Object(crate::handle::FormObject::new(self, v))))); }
+                if v != Value::NIL { projected.push((name, std::sync::Arc::new(Form::Object(crate::handle::FormObject::new(self, v))))); }
             }
-            let own = Own { face: self.ml_face_name(v), projected: std::rc::Rc::new(projected) };
+            let own = Own { face: self.ml_face_name(v), projected: std::sync::Arc::new(projected) };
             let same = runs.last().is_some_and(|(_, last)| last.face == own.face && last.projected.is_empty() && own.projected.is_empty());
             if !same { runs.push((start as usize, own)); }
         }
@@ -557,7 +561,7 @@ impl Vm {
         mut field_width: i64,
         mut precision: i64,
         mut elt: Form,
-        mut props: Option<std::rc::Rc<Propertize>>,
+        mut props: Option<std::sync::Arc<Propertize>>,
         mut risky: bool,
     ) -> Result<i64> {
         if band.text.len() > 1 << 16 {

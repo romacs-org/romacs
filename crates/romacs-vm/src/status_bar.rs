@@ -97,7 +97,7 @@ impl Vm {
         let modified = matches!(self.object(buffer)?, Object::Buffer(b) if b.state.modified());
         let band = self.status_bar_band(owner, columns)?;
         // Kept for a click, which reads it as a string (`status_bar_target').
-        self.status_bar_line = band.clone().map(|band| Box::new(band) as Box<dyn std::any::Any>);
+        self.status_bar_line = band.clone().map(super::BarLine);
         let base_name = if self.named(&table, "mode-line-active").is_some() { "mode-line-active" } else { "mode-line" };
         let base = self.named(&table, base_name).ok_or("mode-line face required")?;
         let (text, runs, props, segments) = band.map_or_else(Default::default, |band| (band.text, band.runs, band.props, band.segments));
@@ -472,10 +472,7 @@ impl crate::window::Windows<'_> {
         let Some(id) = self.vm.display_state.bar_target(at) else { return Ok(Value::NIL) };
         // The kept line as a string, built now: no Lisp runs, it allocates.
         let Some(line) = self.vm.status_bar_line.take() else { return Ok(Value::NIL) };
-        let string = match line.downcast_ref::<mode_line::Band>() {
-            Some(band) => self.vm.mode_line_string(band, Value::NIL),
-            None => Ok(Value::NIL),
-        };
+        let string = self.vm.mode_line_string(&line.0, Value::NIL);
         self.vm.status_bar_line = Some(line);
         let string = string.map_err(crate::prim::Fault::Error)?;
         let slot = self.vm.slot("#:vm2-status-bar-string");

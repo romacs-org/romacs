@@ -700,3 +700,34 @@ fn a_buffers_face_remapping_reaches_its_bands() {
     let w = &frame.windows.iter().find(|w| w.snapshot.id == id).unwrap().snapshot;
     assert_eq!(w.faces[w.header_line_face.0 as usize].background, [0x65, 0x43, 0x21], "`header-line' reaches `header-line-active'");
 }
+
+/// A window system that answers nothing: enough to attach one.
+struct NoDisplay;
+impl romacs_vm::DisplayHost for NoDisplay {
+    fn window_system(&self) -> &str { "pgtk" }
+    fn display_name(&self) -> String { String::new() }
+    fn list_fonts(&mut self, _: &romacs_vm::FontQuery) -> Vec<romacs_vm::FontEntity> { vec![] }
+    fn font_families(&mut self) -> Vec<String> { vec![] }
+    fn open_font(&mut self, _: &romacs_vm::FontEntity, _: i64) -> Option<romacs_vm::OpenedFont> { None }
+    fn char_font(&mut self, _: &romacs_vm::FaceFont, _: char) -> Option<(romacs_vm::OpenedFont, u32)> { None }
+}
+
+/// The bar's click target survives a collection, and a display detached or
+/// replaced forgets it with the band and the bar's expansion: a click finds
+/// nothing until the bar is painted again.
+#[test]
+fn a_display_change_forgets_the_bars_click_target() {
+    let mut vm = session();
+    eval(&mut vm, "(setq mode-line-format '(\"main %b\"))");
+    let target = "(let ((target (romacs--status-bar-target 5))) (and target (windowp (nth 0 target)) (= (aref (nth 1 target) (nth 2 target)) ?*)))";
+    bar(&mut vm);
+    eval(&mut vm, "(garbage-collect)");
+    assert_eq!(eval(&mut vm, target), "t", "painted, a click finds its window");
+    vm.set_display_host(None);
+    assert_eq!(eval(&mut vm, "(romacs--status-bar-target 5)"), "nil", "detached, nothing");
+    vm.set_display_host(Some(Box::new(NoDisplay)));
+    assert_eq!(eval(&mut vm, "(romacs--status-bar-target 5)"), "nil", "attached, not yet painted");
+    assert!(vm.open_display(), "the new display opens");
+    bar(&mut vm);
+    assert_eq!(eval(&mut vm, target), "t", "painted again, found again");
+}
