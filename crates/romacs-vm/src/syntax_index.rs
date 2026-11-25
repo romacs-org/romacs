@@ -121,6 +121,10 @@ pub(crate) struct Stats {
     pub leaf_scans: u64,
     pub plain_leaves: u64,
     pub composed: u64,
+    /// Spans a forward list scan folded instead of reading them, by kind
+    /// (positive excursion, exact entry), and the characters they held.
+    pub folds: [u64; 2],
+    pub skipped: u64,
     /// Contexts changed.
     pub switches: u64,
     /// Takes of the property change log that found it a hull.
@@ -553,6 +557,19 @@ impl SyntaxIndex {
             _ => self.stats.list_fallbacks += 1,
         }
         result
+    }
+
+    /// `scan_lists' forward, from RESUME where a stop for Lisp or a quit
+    /// poll left it, else from FROM0 with COUNT and DEPTH. For now the
+    /// plain scanner's.
+    pub(crate) fn scan_lists<T: Text>(&mut self, scanner: &mut Scanner<'_, T>, chars: usize, context: Context,
+                                      resume: Option<scan::Scan>, (from0, count, depth): (i64, i64, i64), sexpflag: bool)
+                                      -> Result<Option<i64>, scan::Stopped<Box<scan::Scan>>> {
+        let _ = (chars, context);
+        match resume {
+            Some(scan) => scanner.lists(scan, sexpflag),
+            None => scanner.scan_lists(from0, count, depth, sexpflag),
+        }
     }
 
     fn scan_list_spans<T: Text>(scanner: &mut Scanner<'_, T>, root: &mut Node,
@@ -1073,6 +1090,9 @@ mod tests {
         assert_eq!((served, index.stats.declined[Decline::Unresumable as usize]), (start, 1));
     }
 }
+
+#[cfg(test)]
+mod forward_tests;
 
 #[cfg(test)]
 mod list_tests {

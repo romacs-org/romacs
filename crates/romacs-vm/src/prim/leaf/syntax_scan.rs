@@ -949,6 +949,17 @@ impl Leaf<'_> {
         declined
     }
 
+    /// An alist of NAMES and their counts.
+    fn syntax_alist(&mut self, counts: &[(&str, u64)]) -> Value {
+        let mut alist = Value::NIL;
+        for &(name, count) in counts.iter().rev() {
+            let name = self.intern(name);
+            let pair = self.cons(name, syntax_count(count));
+            alist = self.cons(pair, alist);
+        }
+        alist
+    }
+
     /// `romacs-syntax-summaries-stats' of the current buffer.
     pub(crate) fn syntax_summaries_stats(&mut self) -> super::super::Out {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
@@ -960,10 +971,11 @@ impl Leaf<'_> {
         let int = syntax_count;
         let declined = self.syntax_declines(&Decline::PARSE, &stats.declined);
         let list_declined = self.syntax_declines(&Decline::LISTS, &stats.list_declined);
+        let folds = self.syntax_alist(&[("excursion", stats.folds[0]), ("exact", stats.folds[1])]);
         let items = [
             ("served", int(stats.served)), ("declined", declined), ("leaves", int(leaves as u64)),
             ("list-served", int(stats.list_served)), ("list-declined", list_declined),
-            ("list-fallbacks", int(stats.list_fallbacks)),
+            ("list-fallbacks", int(stats.list_fallbacks)), ("folds", folds), ("skipped", int(stats.skipped)),
             ("leaf-scans", int(stats.leaf_scans)), ("plain-leaves", int(stats.plain_leaves)),
             ("composed", int(stats.composed)), ("context-switches", int(stats.switches)),
             ("log-overflows", int(stats.log_overflows)),
