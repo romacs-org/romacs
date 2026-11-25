@@ -30,7 +30,7 @@ impl Vm {
         if arity.is_some_and(|a| a != n) {
             return Err("wrong primitive arity".into());
         }
-        let a = self.stack[start..start + n].to_vec();
+        let a = self.mutator.stack[start..start + n].to_vec();
         match p {
             List => Ok(self.list_value(&a)),
             BareSymbol => {

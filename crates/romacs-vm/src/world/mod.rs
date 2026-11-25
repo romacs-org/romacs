@@ -149,11 +149,11 @@ impl Vm {
     /// the lowered code, whose handlers are addresses in this executable;
     /// each function is lowered again at its first call.
     pub fn world_normalize(&mut self) {
-        self.execution = crate::threaded::Program::default();
-        self.spare_programs.clear();
+        self.mutator_rest.execution = crate::threaded::Program::default();
+        self.mutator_rest.spare_programs.clear();
         // Compiled patterns' SIMD searchers hold function pointers; each is
         // compiled again at its first search.
-        self.regexp_cache = Default::default();
+        self.mutator_rest.regexp_cache = Default::default();
         // Compiled queries are the runtime's memory, made again at first use.
         self.treesit_queries = crate::treesit::query_memo::Memo::default();
         self.flat_tables.forget();

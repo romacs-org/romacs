@@ -37,8 +37,8 @@ enum Class {
 }
 use Class::{Barrier, Cache, Free, Owed, Rescanned, Root, Transient};
 
-/// Every `Vm` field, a field of its `mutator` (`mutator.rs`) counting as
-/// one of `Vm`'s: moving a field there keeps its class.
+/// Every `Vm` field, a field of its `mutator` or `mutator_rest`
+/// (`mutator.rs`) counting as one of `Vm`'s: moving a field there keeps its class.
 const FIELDS: &[(&str, Class)] = &[
     ("charsets", Root), ("standard_case_tables", Root), ("command_point", Root),
     ("change_prepared", Free),
@@ -279,15 +279,17 @@ fn differences(what: &str, named: &[(&str, Class)], found: &BTreeSet<String>) ->
 #[test]
 fn every_vm_field_and_object_variant_has_a_class() {
     let vm_body = body_of(&tokens(&source("lib.rs")), "struct", "Vm");
-    // Flattened only while Vm declares `mutator` once, as the struct alone.
-    let declared: Vec<usize> = member_declarations(&vm_body).into_iter().filter(|(name, _)| name == "mutator").map(|(_, at)| at).collect();
-    assert!(declared.len() == 1 && vm_body.get(declared[0] + 1..declared[0] + 7).is_some_and(|ty| ty == [":", "mutator", ":", ":", "Mutator", ","]),
-            "Vm declares `mutator: mutator::Mutator` once");
+    // Each flattened only while Vm declares it once, as the struct alone.
     let mut vm = members(&vm_body);
-    let mutator = members(&body_of(&tokens(&source("mutator.rs")), "struct", "Mutator"));
-    assert!(vm.remove("mutator") && !mutator.is_empty(), "Vm holds a Mutator with fields");
-    assert!(vm.is_disjoint(&mutator), "a name both on Vm and its Mutator");
-    vm.extend(mutator);
+    for (field, ty) in [("mutator", "Mutator"), ("mutator_rest", "MutatorRest")] {
+        let declared: Vec<usize> = member_declarations(&vm_body).into_iter().filter(|(name, _)| name == field).map(|(_, at)| at).collect();
+        assert!(declared.len() == 1 && vm_body.get(declared[0] + 1..declared[0] + 7).is_some_and(|t| t == [":", "mutator", ":", ":", ty, ","]),
+                "Vm declares `{field}: mutator::{ty}` once");
+        let inner = members(&body_of(&tokens(&source("mutator.rs")), "struct", ty));
+        assert!(vm.remove(field) && !inner.is_empty(), "Vm holds a {ty} with fields");
+        assert!(vm.is_disjoint(&inner), "a name both on Vm and its {ty}");
+        vm.extend(inner);
+    }
     let object = members(&body_of(&tokens(&source("data.rs")), "enum", "Object"));
     assert!(vm.len() > 100 && object.len() > 20, "the parse found too little: {} fields, {} variants", vm.len(), object.len());
     let mut problems = differences("Vm field", FIELDS, &vm);

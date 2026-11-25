@@ -872,9 +872,9 @@ impl Vm {
         start: usize,
         object: Value,
     ) -> Result<Value> {
-        let key = Key::of(self.stack[start + 1]).ok_or("symbol required")?;
+        let key = Key::of(self.mutator.stack[start + 1]).ok_or("symbol required")?;
         let at =
-            usize::try_from(self.stack[start].as_integer()?).map_err(|_| "index out of range")?;
+            usize::try_from(self.mutator.stack[start].as_integer()?).map_err(|_| "index out of range")?;
         if Self::image_string(object) {
             let text = self.string_value(object)?;
             if at <= text.chars().count() {
@@ -986,8 +986,8 @@ impl Vm {
             return self.edge_primitive(p, start, n);
         }
         // editfns.c Fbuffer_size: a given BUFFER's whole text.
-        if p == BufferSize && n == 1 && self.stack[start] != Value::NIL {
-            return match self.object_if(self.stack[start]) {
+        if p == BufferSize && n == 1 && self.mutator.stack[start] != Value::NIL {
+            return match self.object_if(self.mutator.stack[start]) {
                 Some(Object::Buffer(t)) => Value::integer(t.len_chars() as i64),
                 Some(Object::ByteBuffer(b)) => Value::integer(b.bytes.len() as i64),
                 _ => Err("buffer required".into()),
@@ -1059,7 +1059,7 @@ impl Vm {
         }
         let mut inserted_properties = properties::Properties::new();
         let inserted = if p == Insert {
-            self.insertion_text(&self.stack[start..start + n].to_vec(), &mut inserted_properties)?
+            self.insertion_text(&self.mutator.stack[start..start + n].to_vec(), &mut inserted_properties)?
         } else {
             vec![]
         };
@@ -1103,7 +1103,7 @@ impl Vm {
                 t.point = t
                     .byte_of_char(CharOffset(c.min(t.len_chars())))?
                     .clamp(accessible.start, accessible.end);
-                Ok(self.stack[start])
+                Ok(self.mutator.stack[start])
             }
             CharAfter => {
                 let b = if let Some(b) = char_after_marker {
@@ -1207,7 +1207,7 @@ impl Vm {
             DeleteRegion | Substring | Narrow => &[0, 1],
             _ => &[],
         };
-        let mut args = self.stack[start..start + n].to_vec();
+        let mut args = self.mutator.stack[start..start + n].to_vec();
         for &slot in positions {
             if let Some(&value) = args.get(slot)
                 && matches!(self.object_if(value), Some(Object::Marker(_)))
@@ -1260,7 +1260,7 @@ impl Vm {
             return self.convert_buffer_utf8(p == DecodeBufferUtf8);
         }
         if p == ByteString {
-            let b = self.stack[start..start + n]
+            let b = self.mutator.stack[start..start + n]
                 .iter()
                 .map(|v| u8::try_from(v.as_integer()?).map_err(|_| "invalid octet".into()))
                 .collect::<Result<Vec<_>>>()?;
@@ -1270,10 +1270,10 @@ impl Vm {
             return Err("wrong primitive arity".into());
         }
         if p == EncodeUtf8 {
-            return self.string_as_unibyte::<false>(self.stack[start]);
+            return self.string_as_unibyte::<false>(self.mutator.stack[start]);
         }
         if matches!(p, DecodeUtf8 | StringToBytes | IsMultibyte) {
-            let v = self.stack[start];
+            let v = self.mutator.stack[start];
             if p == IsMultibyte {
                 return Ok(if self.str_view(v).is_some_and(|view|view.is_multibyte()) { Value::TRUE } else { Value::NIL });
             }
@@ -1313,14 +1313,14 @@ impl Vm {
             if n != 1 {
                 return Err("wrong primitive arity".into());
             }
-            let args = self.stack[start..start + n].to_vec();
+            let args = self.mutator.stack[start..start + n].to_vec();
             let result = self.byte_buffer_primitive(InsertFileBytes, start, n, index, &args);
             if result.is_ok() {
                 self.display_state.version += 1;
             }
             return result;
         }
-        self.convert_buffer_utf8(self.stack[start] != Value::NIL)
+        self.convert_buffer_utf8(self.mutator.stack[start] != Value::NIL)
     }
     fn convert_buffer_utf8(&mut self, text: bool) -> Result<Value> {
         let index = self.buffer_index()?;
@@ -1495,7 +1495,7 @@ impl Vm {
         }).collect::<Result<Vec<Value>>>()?;
         let mut grafted = Default::default();
         let inserted = if p == Insert {
-            let (bytes, properties) = self.unibyte_insertion(&self.stack[start..start + n])?;
+            let (bytes, properties) = self.unibyte_insertion(&self.mutator.stack[start..start + n])?;
             grafted = properties;
             bytes
         } else if p == InsertFileBytes {
@@ -1528,7 +1528,7 @@ impl Vm {
             GotoChar => {
                 b.point = ByteOffset(args[0].as_integer()?.saturating_sub(1).max(0) as usize)
                     .clamp(r.start, r.end);
-                Ok(self.stack[start])
+                Ok(self.mutator.stack[start])
             }
             CharAfter => {
                 let at = if n == 0 || args[0] == Value::NIL {
@@ -1893,7 +1893,7 @@ mod tests {
         // those legitimate roots before asserting unreachable graph reclamation.
         vm.functions.clear();
         vm.caches.clear();
-        vm.execution = Default::default();
+        vm.mutator_rest.execution = Default::default();
         vm.collect(&mut []);
         assert_eq!(vm.heap_objects(), 0);
     }

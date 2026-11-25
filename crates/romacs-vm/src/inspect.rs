@@ -274,7 +274,7 @@ mod tests {
         assert!(!crate::host::inspect_pending(), "the walk left the inspection unanswered");
         let answer = crate::host::inspect_answer().expect("an answer");
         assert!(answer.contains(r#""fn":"next-single-char-property-change""#), "{answer}");
-        assert_eq!((vm.mutator.backtrace.frames.len(), vm.site_leaf), (depth, (0, 0)));
+        assert_eq!((vm.mutator.backtrace.frames.len(), vm.mutator_rest.site_leaf), (depth, (0, 0)));
     }
 
     /// The matcher answers an inspection without a VM to record on: a search
@@ -299,7 +299,7 @@ mod tests {
         assert!(!crate::host::inspect_pending(), "the search left the inspection unanswered");
         let answer = crate::host::inspect_answer().expect("an answer");
         assert!(answer.contains(r#""fn":"romacs--font-encoding""#), "{answer}");
-        assert_eq!((vm.mutator.backtrace.frames.len(), vm.site_leaf), (depth, (0, 0)));
+        assert_eq!((vm.mutator.backtrace.frames.len(), vm.mutator_rest.site_leaf), (depth, (0, 0)));
     }
 
     /// The store's writer has ended once the listener stops: its directory,

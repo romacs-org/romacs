@@ -11,7 +11,7 @@ impl Vm {
         } {
             return Err("wrong primitive arity".into());
         }
-        let args = self.stack[start..start + n].to_vec();
+        let args = self.mutator.stack[start..start + n].to_vec();
         if p == SetAdvertisedCallingConvention {
             // Resolve exactly as indirect-function: non-symbols are themselves,
             // unbound symbols yield nil, aliases follow function cells.

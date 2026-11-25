@@ -1274,12 +1274,12 @@ impl Vm {
             return Err(self.source_string(message)?.to_owned());
         }
         if p == DisplayDefineFace {
-            let name = self.stack[start];
+            let name = self.mutator.stack[start];
             let face = match Graph(self).view(name.0) {
                 NodeView::Symbol(s) => s.to_owned(),
                 _ => return Err("face symbol required".into()),
             };
-            let spec = self.stack[start + 1];
+            let spec = self.mutator.stack[start + 1];
             self.declare_face(name, spec)?;
             self.display_state.version += 1;
             // A new face can name text whose face no snapshot resolved yet.
@@ -1292,7 +1292,7 @@ impl Vm {
         } else {
             self.selected_window_value()?
         };
-        let argument = if n > 0 && self.stack[start] != Value::NIL { self.stack[start] } else { identity };
+        let argument = if n > 0 && self.mutator.stack[start] != Value::NIL { self.mutator.stack[start] } else { identity };
         if frame && !self.frame(argument).is_ok_and(|f| f.live) {
             return Err("unknown frame/window".into());
         }
@@ -1301,14 +1301,14 @@ impl Vm {
             // window.c Fwindow_vscroll: pixels, else canonical lines,
             // a float when not whole.
             WindowVscroll => {
-                let window = self.decode_window(if n > 0 { self.stack[start] } else { Value::NIL }, true, false)?;
-                let pixels = n > 1 && self.stack[start + 1] != Value::NIL;
+                let window = self.decode_window(if n > 0 { self.mutator.stack[start] } else { Value::NIL }, true, false)?;
+                let pixels = n > 1 && self.mutator.stack[start + 1] != Value::NIL;
                 self.window_vscroll(window, pixels)
             }
             // Fset_window_vscroll: VSCROLL lines of the frame's height, or
             // pixels, truncated, never negative; the value is the vscroll.
             SetWindowVscroll => {
-                let value = self.stack[start + 1];
+                let value = self.mutator.stack[start + 1];
                 let amount = match (value.integer_value(), self.object_if(value)) {
                     (Some(i), _) => i as f64,
                     (None, Some(Object::Float(f))) => *f,
@@ -1317,10 +1317,10 @@ impl Vm {
                         return Err(self.signal_error("wrong-type-argument", &[predicate, value], "Wrong type argument: numberp".into()));
                     }
                 };
-                let pixels = n > 2 && self.stack[start + 2] != Value::NIL;
+                let pixels = n > 2 && self.mutator.stack[start + 2] != Value::NIL;
                 let line = f64::from(self.window_state.line.max(1));
                 let next = (if pixels { amount } else { line * amount }).trunc().clamp(0.0, f64::from(u32::MAX)) as u32;
-                let window = self.decode_window(self.stack[start], true, false)?;
+                let window = self.decode_window(self.mutator.stack[start], true, false)?;
                 let building_band = self.display_state.building_band;
                 let (deferred, changed) = {
                     let w = self.window_mut(window)?;

@@ -1426,8 +1426,10 @@ pub struct Vm {
     buffer_resolutions: usize,
     /// The running mutator's context (`mutator.rs`).
     pub(crate) mutator: mutator::Mutator,
+    /// The rest of that context, which no world image holds: the engines'
+    /// parked activations and lowered code (`mutator.rs`).
     #[snapshot(at_rest)]
-    regexp_cache: regexp::PatternCache,
+    pub(crate) mutator_rest: mutator::MutatorRest,
     /// Compiled tree-sitter queries by grammar and text (`treesit::query_memo`).
     #[snapshot(at_rest)]
     treesit_queries: treesit::query_memo::Memo,
@@ -1464,17 +1466,9 @@ pub struct Vm {
     /// constants are traced handles.
     #[snapshot(at_rest)]
     status_bar_line: Option<Box<dyn std::any::Any>>,
-    execution_fatal: bool,
     loader: loader::Loader,
     source_cache: source_cache::SourceCache,
     macros: HashSet<usize>,
-    /// Active Lisp evaluation depth, shared by reentrant execution engines.
-    eval_depth: usize,
-    /// The instruction and registers of the leaf a site is running with no
-    /// activation, as addresses; (0, 0) otherwise. Lisp that leaf reaches
-    /// records the activation first (`Vm::record_site_leaf`).
-    #[snapshot(at_rest)]
-    site_leaf: (usize, usize),
     /// profiler.c's CPU and memory profilers (`profiler.rs`).
     #[snapshot(at_rest)]
     profiler: profiler::Profiler,
@@ -1635,9 +1629,6 @@ pub struct Vm {
     /// (`data::payload_bytes`), measured only for a job's budget
     /// (`Vm::job_live`).
     gc_retained_payload: usize,
-    /// Engines between entry and exit, suspended or not; those not in
-    /// `suspended` hold untraced registers and code.
-    running_engines: usize,
     /// Test mode: a moving collection at every Nth Lisp entry (`gc.rs`).
     gc_stress: gc::Stress,
     /// What the funnels have handed out (gc.rs).
@@ -1671,14 +1662,6 @@ pub struct Vm {
     special_cache: Vec<u64>,
     functions: functions::Functions,
     request_code: request_code::RequestCode,
-    #[snapshot(at_rest)]
-    execution: threaded::Program,
-    /// Programs of finished nested engine runs (registers all NIL again,
-    /// lowered code kept), reused by the next nested run
-    /// (`threaded::Vm::end_nested_execution`). Code invalidation and the
-    /// collector reach them as they reach `execution`.
-    #[snapshot(at_rest)]
-    spare_programs: Vec<threaded::Program>,
     /// By argument count, the permanent function through which native code
     /// calls Lisp (`threaded::Vm::reader_call`), compiled at first use.
     reader_trampolines: Vec<Option<usize>>,
@@ -1719,8 +1702,6 @@ pub struct Vm {
     command_set: command_set::CommandSet,
     completion_case_memo: Option<(u64, usize, std::sync::Arc<Vec<(u32, u32, i64)>>)>,
     caches: Vec<Cache>,
-    /// The register files, the running engine's current (`registers.rs`).
-    stack: registers::Registers,
     /// alloc.c's `finalizers': every finalizer not yet found unreachable.
     /// Not roots; the collector dooms those it does not reach.
     finalizers: Vec<Value>,
@@ -1732,10 +1713,6 @@ pub struct Vm {
     /// A collection found a list for `undo-outer-limit-function`, and the
     /// aftermath has not looked (`Vm::take_undo_offer`).
     undo_offers_due: bool,
-    /// Suspended engines' own state, owned here until they resume: traced and
-    /// forwarded in place, and dropped with the engine by a caught panic.
-    #[snapshot(at_rest)]
-    suspended: Vec<threaded::Suspended>,
     conditions: conditions::Registry,
     /// Embedder `Rooted` handles; see handle.rs.
     rooted: handle::RootSet,
@@ -1799,7 +1776,7 @@ impl Vm {
             #[cfg(test)]
             buffer_resolutions: 0,
             mutator: mutator::Mutator::new(),
-            regexp_cache: regexp::PatternCache::default(),
+            mutator_rest: mutator::MutatorRest::default(),
             treesit_queries: treesit::query_memo::Memo::default(),
             flat_tables: char_table::FlatTables::default(),
             shared_holders: None,
@@ -1810,12 +1787,9 @@ impl Vm {
             images: Default::default(),
             lambda_lists: Default::default(),
             status_bar_line: None,
-            execution_fatal: false,
             loader: loader::Loader::default(),
             source_cache: source_cache::SourceCache::default(),
             macros: HashSet::default(),
-            eval_depth: 0,
-            site_leaf: (0, 0),
             profiler: profiler::Profiler::default(),
             host_input: None,
             host_wait: None,
@@ -1877,7 +1851,6 @@ impl Vm {
             gc_floor: None,
             job_budget: None,
             gc_retained_payload: 0,
-            running_engines: 0,
             gc_stress: gc::Stress::from_env(),
             allocation: Default::default(),
             names: names::Names::default(),
@@ -1895,8 +1868,6 @@ impl Vm {
             special_cache: Vec::new(),
             functions: functions::Functions::default(),
             request_code: request_code::RequestCode::default(),
-            execution: threaded::Program::default(),
-            spare_programs: Vec::new(),
             reader_trampolines: Vec::new(),
             closures: Default::default(),
             cells: Default::default(),
@@ -1915,12 +1886,10 @@ impl Vm {
             command_set: command_set::CommandSet::default(),
             completion_case_memo: None,
             caches: vec![],
-            stack: registers::Registers::new(),
             finalizers: vec![],
             doomed_finalizers: Default::default(),
             post_gc_due: false,
             undo_offers_due: false,
-            suspended: vec![],
             conditions: conditions::Registry::default(),
             rooted: handle::RootSet::default(),
         };
@@ -3762,7 +3731,7 @@ impl Vm {
         }
         // The other loader primitives are lent from the engine (`loader_body`).
         if matches!(p, Provide | Featurep) {
-            let args = self.stack[start..start + n].to_vec();
+            let args = self.mutator.stack[start..start + n].to_vec();
             return self.feature_primitive(p, &args);
         }
         if matches!(p, Load | Require | Eval | Macroexpand | AutoloadDoLoad | ReadHostEvent | FormatModeLine) {
@@ -3771,7 +3740,7 @@ impl Vm {
         if p == Message {
             // The echo area holds the last message; (message nil) clears it.
             let echo = self.slot(prim::ECHO_AREA_MESSAGE);
-            if n >= 1 && self.stack[start] == Value::NIL {
+            if n >= 1 && self.mutator.stack[start] == Value::NIL {
                 self.slots[echo].value = Value::NIL;
                 return Ok(Value::NIL);
             }
@@ -3817,7 +3786,7 @@ impl Vm {
         if (p as usize) >= Primitive::CurrentBuffer as usize {
             return self.buffer_primitive(p, start, n);
         }
-        let a = &self.stack[start..start + n];
+        let a = &self.mutator.stack[start..start + n];
         let arity = match p {
             Inc | Dec | Car | Cdr | Length | Nreverse => Some(1),
             Cons => Some(2),

@@ -12,9 +12,9 @@ fn callback_collects_and_forwards_suspended_stack_in_place() {
     let function = vm.intern("collecting-reader");
     let value = vm.list_value(&[Value::NIL]);
     vm.mutator.external_roots.push(value);
-    *vm.stack.test_vec() = vec![value, function];
-    let ptr = vm.stack.as_ptr();
-    let capacity = vm.stack.test_vec().capacity();
+    *vm.mutator.stack.test_vec() = vec![value, function];
+    let ptr = vm.mutator.stack.as_ptr();
+    let capacity = vm.mutator.stack.test_vec().capacity();
     let before = vm.heap_stats().collections;
     let result = vm.reader_call(function, &[value]).unwrap();
     assert!(
@@ -23,9 +23,9 @@ fn callback_collects_and_forwards_suspended_stack_in_place() {
     );
     assert_ne!(result, value, "fixture must force forwarding");
     assert_eq!(vm.mutator.external_roots, vec![result]);
-    assert_eq!(*vm.stack, [result, function]);
-    assert_eq!(vm.stack.as_ptr(), ptr);
-    assert_eq!(vm.stack.test_vec().capacity(), capacity);
+    assert_eq!(*vm.mutator.stack, [result, function]);
+    assert_eq!(vm.mutator.stack.as_ptr(), ptr);
+    assert_eq!(vm.mutator.stack.test_vec().capacity(), capacity);
     assert_eq!(vm.cons_pair(result).unwrap().0.as_integer().unwrap(), 42);
 }
 
@@ -173,9 +173,9 @@ fn a_collection_drops_idle_programs_code_and_nested_runs_relower_it() {
     let callee = vm.intern("spare-callee");
     let first = vm.reader_call(callee, &[Value::integer(1).unwrap()]).unwrap();
     assert_eq!(vm.display(first).unwrap(), "(1 (1 . tail))");
-    assert!(vm.spare_programs.iter().any(|p| p.code_len() > 0), "a nested run leaves its program idle");
+    assert!(vm.mutator_rest.spare_programs.iter().any(|p| p.code_len() > 0), "a nested run leaves its program idle");
     vm.collect(&mut []);
-    assert!(vm.spare_programs.iter().all(|p| p.code_len() == 0), "a collection drops idle lowered code");
+    assert!(vm.mutator_rest.spare_programs.iter().all(|p| p.code_len() == 0), "a collection drops idle lowered code");
     let again = vm.reader_call(callee, &[Value::integer(2).unwrap()]).unwrap();
     assert_eq!(vm.display(again).unwrap(), "(2 (2 . tail))");
 }
@@ -207,7 +207,7 @@ fn a_panic_out_of_a_site_leaf_forgets_the_site() {
     vm.set_host_input(Some(Box::new(PanickingPoll)));
     let caught = vm.catching(|vm| vm.eval_source_raw("(spare-poll)"));
     assert!(caught.is_err(), "the host panic propagates");
-    assert_eq!(vm.site_leaf, (0, 0));
+    assert_eq!(vm.mutator_rest.site_leaf, (0, 0));
     vm.set_host_input(None);
     let poll = vm.intern("spare-poll");
     assert_eq!(vm.reader_call(poll, &[]).unwrap(), Value::NIL);
@@ -235,9 +235,9 @@ fn a_world_refuses_a_site_leaf_in_flight() {
     let mut vm = Vm::new();
     vm.world_normalize();
     assert_eq!(vm.world_quiescent(), Ok(()));
-    vm.site_leaf = (1, 1);
+    vm.mutator_rest.site_leaf = (1, 1);
     assert!(vm.world_quiescent().unwrap_err().contains("site_leaf"));
-    vm.site_leaf = (0, 0);
+    vm.mutator_rest.site_leaf = (0, 0);
 }
 
 /// A panic out of a host wait, with engines suspended by `eval' and the
@@ -252,10 +252,10 @@ fn a_panic_inside_suspended_calls_unwinds_the_suspension_state() {
     vm.set_host_input(Some(Box::new(PanickingHost)));
     let caught = vm.catching(|vm| vm.eval_source_raw("(let ((keep (list 1 2))) (eval '(read-from-minibuffer \"P: \")) keep)"));
     assert!(caught.is_err(), "the host panic propagates");
-    assert!(vm.suspended.is_empty(), "no suspended engine outlives the panic");
-    assert!(vm.stack.at_rest());
+    assert!(vm.mutator_rest.suspended.is_empty(), "no suspended engine outlives the panic");
+    assert!(vm.mutator.stack.at_rest());
     assert!(vm.mutator.external_roots.is_empty());
-    assert_eq!((vm.running_engines, vm.mutator.gc_holds, vm.mutator.rooted_write), (0, 0, false));
+    assert_eq!((vm.mutator.running_engines, vm.mutator.gc_holds, vm.mutator.rooted_write), (0, 0, false));
     assert!(vm.mutator.signal_handlers.is_empty());
     vm.set_host_input(None);
     vm.collect(&mut []);
@@ -287,7 +287,7 @@ fn a_panic_inside_a_cleanup_or_a_run_leaves_aftermath_idle() {
         let caught = vm.catching(|vm| vm.eval_source_raw(&form));
         assert!(caught.is_err(), "{name}: the host panic propagates");
         assert!(!vm.aftermath_held(), "{name}: idle again");
-        assert_eq!((vm.running_engines, vm.mutator.gc_holds), (0, 0), "{name}");
+        assert_eq!((vm.mutator.running_engines, vm.mutator.gc_holds), (0, 0), "{name}");
         vm.set_host_input(None);
         assert_finalizers_run(&mut vm, name);
     }
@@ -333,7 +333,7 @@ fn a_panic_in_a_run_at_a_request_end_leaves_aftermath_idle() {
         assert!(caught.is_err(), "{name}: the host panic propagates");
         assert!(!vm.aftermath_held(), "{name}: idle again");
         assert_eq!(vm.mutator.external_roots.len(), roots, "{name}: no root frame left behind");
-        assert_eq!((vm.running_engines, vm.mutator.gc_holds), (0, 0), "{name}");
+        assert_eq!((vm.mutator.running_engines, vm.mutator.gc_holds), (0, 0), "{name}");
         vm.set_host_input(None);
         assert_finalizers_run(&mut vm, name);
     }
@@ -413,7 +413,7 @@ fn a_reader_function_collects_under_a_suspended_engine() {
                                       (prog1 (car chars) (setq chars (cdr chars)))))))
                           kept))";
     assert_eq!(vm.eval_source(source).unwrap().display().unwrap(), "((a \"b\" (c)) (1 2))");
-    assert!(vm.suspended.is_empty(), "every engine took its state back");
+    assert!(vm.mutator_rest.suspended.is_empty(), "every engine took its state back");
 }
 
 /// A backtrace read while engines are suspended finds each frame's arguments
@@ -452,5 +452,5 @@ fn suspended_activations_name_each_engine_and_its_registers() {
                                  (while (cdr rows) (setq rows (cdr rows)))
                                  (car (cdr (car rows))))").unwrap().display().unwrap();
     assert_eq!(last, "running");
-    assert!(vm.suspended.is_empty());
+    assert!(vm.mutator_rest.suspended.is_empty());
 }

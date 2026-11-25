@@ -242,7 +242,7 @@ impl Vm {
         match &self.mutator.backtrace.frames[index].args {
             Arguments::Copied(range) => &self.mutator.backtrace.arguments[range.clone()],
             &Arguments::Registers { stack, offset, count } => {
-                &self.stack.file(stack)[offset..offset + count]
+                &self.mutator.stack.file(stack)[offset..offset + count]
             }
         }
     }
@@ -251,7 +251,7 @@ impl Vm {
         match &self.mutator.backtrace.frames.get(index)?.args {
             Arguments::Copied(range) => self.mutator.backtrace.arguments.get(range.clone()),
             &Arguments::Registers { stack, offset, count } => {
-                self.stack.file(stack).get(offset..offset.checked_add(count)?)
+                self.mutator.stack.file(stack).get(offset..offset.checked_add(count)?)
             }
         }
     }

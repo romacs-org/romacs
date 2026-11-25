@@ -73,7 +73,7 @@ impl Vm {
         pending.extend(self.world_image.obarray_symbols.iter().filter(|slot| symbols.contains_key(slot)).map(|&slot| Value::reference(slot + 1, 7)));
         for id in self.functions.image_untouched() {
             *code_marks[id].get_mut() = true;
-            for program in std::iter::once(&self.execution).chain(&self.spare_programs) {
+            for program in std::iter::once(&self.mutator_rest.execution).chain(&self.mutator_rest.spare_programs) {
                 program.trace_function(id, pending, code);
             }
         }
@@ -371,7 +371,7 @@ mod tests {
         let (callee, _) = request_function(&mut vm, "img-target");
         assert!(is_true(&mut vm, "(equal (funcall img-caller) '(new))"));
         let mut entered = Vec::new();
-        vm.execution.lowered_values(caller, &mut |_| {}, &mut |f| entered.push(f));
+        vm.mutator_rest.execution.lowered_values(caller, &mut |_| {}, &mut |f| entered.push(f));
         assert!(entered.contains(&callee), "the caller's lowered site entered the callee: {entered:?}");
         eval(&mut vm, "(setq img-target nil)");
         fulls(&mut vm);

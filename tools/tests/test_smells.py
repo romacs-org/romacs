@@ -91,9 +91,29 @@ class VmReplacementTest(unittest.TestCase):
     *e.vm = Vm::default();
     let file = mem::replace(&mut e.vm.stack, Registers::new());
     std::mem::take(&mut *self.vm);
+    let file = mem::replace(&mut e.vm.mutator.stack, Registers::new());
+    e.vm.mutator = Mutator::new();
+    std::mem::swap(&mut e.vm.mutator, &mut other);
+    if e.vm.mutator == other {}
+    e.vm.mutator_rest = MutatorRest::default();
+    let parked = std::mem::take(&mut e.vm.mutator_rest);
+    std::mem::swap(spare, &mut e.vm.mutator);
+    std::mem::swap(&mut parked, &mut vm.mutator_rest);
+    std::mem::swap(&mut files, &mut e.vm.mutator.stack);
+    std::mem::swap(spare, &mut e.vm.mutator,);
+    std::mem::swap(
+        &mut spare,
+        &mut e.vm.mutator_rest,
+    );
+    std::mem::swap(&mut pair(a, &mut e.vm.mutator), &mut other);
+    std::mem::swap(Ok::<_, ()>(&mut parked).expect("spare"), &mut vm.mutator_rest);
+    std::mem::swap(&mut a, &mut other_vm);
+    std::mem::swap(&mut spare, &mut &mut *stack);
+    std::mem::swap(spare, &mut (*vm).mutator);
+    std::mem::take(&mut (*e.vm).mutator_rest);
 }
 '''
-        self.assertEqual(smells.vm_replacements(src), [2, 3, 4, 4, 5, 5, 6])
+        self.assertEqual(smells.vm_replacements(src), [2, 3, 4, 4, 5, 5, 6, 7, 7, 8, 8, 9, 11, 11, 12, 13, 14, 15, 16, 17, 22, 25, 26])
 
     def test_tests_comments_and_ordinary_moves_are_left_alone(self):
         src = '''// Vm::new() in a comment, and "std::mem::swap(e.vm, x)" in a string
@@ -244,7 +264,7 @@ class RatchetTest(unittest.TestCase):
     def test_a_vm_replacement_in_the_engine_fails(self):
         self.assertEqual(rises(now(), now(replacements=1)), [
             'vm_replacements: 1, above the 0 of its merge-base; remove 1, or remove it: the engine never makes or '
-            'swaps a `Vm` or its `Registers`'])
+            'swaps a `Vm`, its `Mutator` or its `Registers`'])
 
     def test_a_declared_unsafe_site_is_not_counted(self):
         self.assertEqual(rises(now(), now(sites=5, declared=1)), [])

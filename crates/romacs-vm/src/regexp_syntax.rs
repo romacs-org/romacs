@@ -445,7 +445,7 @@ impl Vm {
     /// TABLE when it is a syntax table; builds no error.
     fn syntax_table_of(&self, table: Value) -> Option<&CharTable> {
         // The purpose symbol: the search slots have it once a search ran.
-        let purpose = match &self.regexp_cache.slots {
+        let purpose = match &self.mutator_rest.regexp_cache.slots {
             Some(slots) => Some(slots.syntax_table),
             None => self.names.get("syntax-table").copied(),
         };

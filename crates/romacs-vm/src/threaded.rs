@@ -785,11 +785,11 @@ impl Program {
     }
 }
 /// A suspended engine's own state, moved here while a nested call or a
-/// collection runs (`Vm::suspended`) and moved back as it resumes. The Vm owns
+/// collection runs (`MutatorRest::suspended`) and moved back as it resumes. The Vm owns
 /// it for that long, so the collector reads and rewrites it in place, with no
 /// pointer into the engine's frame and no copy. The instruction and entry
 /// buffers themselves do not move, so the addresses a suspended handler holds
-/// stay good; its registers stay where they are in `Vm::stack` (`Registers`).
+/// stay good; its registers stay where they are in `Mutator::stack` (`Registers`).
 pub(super) struct Suspended {
     code: Vec<Code>,
     entries: Vec<EntryCache>,
@@ -798,7 +798,7 @@ pub(super) struct Suspended {
     controls: Vec<Control>,
     escape: Option<Escape>,
     frames: Vec<Frame>,
-    /// Where its registers are: file FILE of `Vm::stack` (`Registers::file`),
+    /// Where its registers are: file FILE of `Mutator::stack` (`Registers::file`),
     /// the current one until something sets them aside.
     file: usize,
     /// The running activation's function, or `K_FUNCTION` in a continuation.
@@ -886,8 +886,8 @@ impl Vm {
     /// kernel's, or the stack outside any engine). Read while every engine is
     /// suspended, as in a collection (`may_collect(0)`).
     pub(crate) fn register_tops(&self) -> Vec<usize> {
-        let mut tops: Vec<Option<usize>> = vec![None; self.stack.depth() + 1];
-        for record in &self.suspended {
+        let mut tops: Vec<Option<usize>> = vec![None; self.mutator.stack.depth() + 1];
+        for record in &self.mutator_rest.suspended {
             debug_assert!(tops[record.file].is_none(), "one engine to a register file");
             tops[record.file] = Some(record.top(self.register_file(record.file), &self.functions));
         }
@@ -896,13 +896,13 @@ impl Vm {
     /// Register file I, in file order (`Registers::file`). A record's
     /// `file` always names one (`suspend_code`).
     fn register_file(&self, i: usize) -> &[Value] {
-        self.stack.file(i)
+        self.mutator.stack.file(i)
     }
     /// Every register slot a collection traces, file by file: each from 0 to
     /// its traced end (`register_tops`). Every Value in them is valid.
     pub(crate) fn register_roots(&self) -> Vec<&[Value]> {
         let tops = self.register_tops();
-        self.stack.files().zip(tops).map(|(f, t)| &f[..t]).collect()
+        self.mutator.stack.files().zip(tops).map(|(f, t)| &f[..t]).collect()
     }
     /// Before marking: NIL over every slot an engine wrote above its top since
     /// the last collection, and its `stack_used` down to the top, so no stale
@@ -910,8 +910,8 @@ impl Vm {
     pub(crate) fn clear_dead_tails(&mut self) {
         #[cfg(test)]
         let mut cleared = 0;
-        for record in &mut self.suspended {
-            let file = self.stack.file_mut(record.file);
+        for record in &mut self.mutator_rest.suspended {
+            let file = self.mutator.stack.file_mut(record.file);
             let top = record.top(file, &self.functions);
             let end = record.stack_used.clamp(top, file.len());
             file[top..end].fill(Value::NIL);
@@ -935,8 +935,8 @@ impl Vm {
         let number = |n: usize| Value::integer(i64::try_from(n).expect("an index fits i64")).expect("an index fits a fixnum");
         let [function, continuation, running] = ["function", "continuation", "running"].map(|kind| self.intern(kind));
         let mut rows = Vec::new();
-        for (engine, record) in self.suspended.iter().enumerate() {
-            let base = self.stack.file(record.file).as_ptr() as usize;
+        for (engine, record) in self.mutator_rest.suspended.iter().enumerate() {
+            let base = self.mutator.stack.file(record.file).as_ptr() as usize;
             let start = |regs: *mut Value| (regs as usize).wrapping_sub(base) / std::mem::size_of::<Value>();
             let code_of = |code: usize| if code == K_FUNCTION { Value::NIL } else { number(code) };
             let row = |kind, code: usize, regs| [number(engine), kind, code_of(code), number(record.file), number(start(regs))];
@@ -1121,10 +1121,10 @@ fn quoted(vm: &Vm, value: Value) -> Form {
 /// Ok(whether its value is non-nil), read at once.
 fn run_in_signal<'a, 'b>(m: &mut Orch<'_, 'b, 'a>, gc: Gc<'_, 'b>, form: &Form, room: i64, failed_depth: Option<usize>) -> std::result::Result<bool, ()> {
     let around = m.leaf((room, failed_depth), |e, (room, failed_depth)| {
-        let saved_depth = e.vm.eval_depth;
+        let saved_depth = e.vm.mutator.eval_depth;
         // A refused activation has already incremented GNU's depth, even though
         // no register frame was installed for it.
-        e.vm.eval_depth = failed_depth.unwrap_or(e.depth_base + e.frames.len());
+        e.vm.mutator.eval_depth = failed_depth.unwrap_or(e.depth_base + e.frames.len());
         let token = e.vm.max_ensure_room(room);
         e.vm.mutator.propagated_escape = None;
         e.vm.mutator.propagated_eval_depth = None;
@@ -1134,7 +1134,7 @@ fn run_in_signal<'a, 'b>(m: &mut Orch<'_, 'b, 'a>, gc: Gc<'_, 'b>, form: &Form, 
     lend::nested(m, gc, Nested::Form(form), around, |e, (saved_depth, token), result| {
         let replacement = e.vm.mutator.propagated_escape.take();
         if let Some(old) = token { e.vm.restore_stack_limits(old); }
-        e.vm.eval_depth = saved_depth;
+        e.vm.mutator.eval_depth = saved_depth;
         match (result, replacement) {
             (_, Some(escape)) => {
                 e.escape = Some(escape);
@@ -1635,13 +1635,13 @@ impl Vm {
     /// BODY, with the activation recorded of any leaf a site is running with
     /// none: what BODY runs or publishes sees that frame.
     pub(crate) fn with_site_leaf<T>(&mut self, body: impl FnOnce(&mut Self) -> T) -> T {
-        let site = std::mem::take(&mut self.site_leaf);
+        let site = std::mem::take(&mut self.mutator_rest.site_leaf);
         let mark = self.record_site_leaf(site);
         let result = body(self);
         if let Some(mark) = mark {
             self.trace_leave(mark);
         }
-        self.site_leaf = site;
+        self.mutator_rest.site_leaf = site;
         result
     }
     /// The activation `trace_call' would have made for the leaf at SITE.
@@ -1663,8 +1663,8 @@ impl Vm {
                 _ => return None,
             };
             let args = backtrace::Arguments::Registers {
-                stack: self.stack.depth(),
-                offset: r.add(start).offset_from(self.stack.as_ptr()) as usize,
+                stack: self.mutator.stack.depth(),
+                offset: r.add(start).offset_from(self.mutator.stack.as_ptr()) as usize,
                 count: argc,
             };
             Some(self.mutator.backtrace.enter(function, resolved, args, self.mutator.dynamic.len()))
@@ -1704,14 +1704,14 @@ impl Vm {
     /// own: keep it, registers all NIL again and lowered code intact, for the
     /// next nested run instead of reallocating, refilling and relowering.
     pub(super) fn end_nested_execution(&mut self) {
-        let program = std::mem::take(&mut self.execution);
+        let program = std::mem::take(&mut self.mutator_rest.execution);
         if !program.registers.is_empty() {
-            self.spare_programs.push(program);
+            self.mutator_rest.spare_programs.push(program);
         }
     }
     /// Every retained program: the current one and the nested spares.
     pub(super) fn programs_mut(&mut self) -> impl Iterator<Item = &mut Program> {
-        std::iter::once(&mut self.execution).chain(self.spare_programs.iter_mut())
+        std::iter::once(&mut self.mutator_rest.execution).chain(self.mutator_rest.spare_programs.iter_mut())
     }
 
     pub(crate) fn pending_eval_escape(&self) -> Option<(Value, Value)> {
@@ -1730,27 +1730,27 @@ pub(super) fn execute_args(vm: &mut Vm, function: usize, args: &[Value]) -> Resu
     // Native reentry (eval/load/macro expansion) shares the Lisp budget, but
     // receives another native stack segment before Rust can exhaust it.
     stacker::maybe_grow(256 * 1024, 2 * 1024 * 1024, || {
-        let saved = vm.eval_depth;
-        vm.eval_depth = saved.saturating_add(1);
+        let saved = vm.mutator.eval_depth;
+        vm.mutator.eval_depth = saved.saturating_add(1);
         let result = if vm.check_eval_depth().is_err() {
             let condition = vm.intern("excessive-lisp-nesting");
-            let data = vm.list_value(&[Value::integer(vm.eval_depth as i64).expect("representable eval depth")]);
+            let data = vm.list_value(&[Value::integer(vm.mutator.eval_depth as i64).expect("representable eval depth")]);
             vm.mutator.propagated_escape = Some(Escape::Signal(condition, data));
             vm.mutator.propagated_escape_hooked = false;
-            vm.mutator.propagated_eval_depth = Some(vm.eval_depth);
+            vm.mutator.propagated_eval_depth = Some(vm.mutator.eval_depth);
             Err("Lisp nesting exceeds `max-lisp-eval-depth'".into())
         } else {
             vm.outside_quit_scope(|vm| execute_args_inner(vm, function, args))
         };
-        vm.eval_depth = saved;
+        vm.mutator.eval_depth = saved;
         result
     })
 }
 /// Obtain the register file and lowered code for this entry. A failed
 /// lowering returns the program to the VM for its next entry.
 fn lower_entry_program(vm: &mut Vm, function: usize) -> Result<Program> {
-    let mut program = std::mem::take(&mut vm.execution);
-    if program.registers.is_empty() && let Some(spare) = vm.spare_programs.pop() {
+    let mut program = std::mem::take(&mut vm.mutator_rest.execution);
+    if program.registers.is_empty() && let Some(spare) = vm.mutator_rest.spare_programs.pop() {
         program = spare;
     }
     program.code.resize_with(vm.functions.len(), Code::none);
@@ -1762,8 +1762,8 @@ fn lower_entry_program(vm: &mut Vm, function: usize) -> Result<Program> {
         &mut program.free_entries,
         function,
     ) {
-        vm.execution_fatal = true;
-        vm.execution = program;
+        vm.mutator.execution_fatal = true;
+        vm.mutator_rest.execution = program;
         return Err(error);
     }
     Ok(program)
@@ -1773,7 +1773,7 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     // SAFETY: an unconverted caller's entry: its file's census rows say what
     // it keeps across the run.
     let mut gc: crate::brand::Gc<'_, '_> = unsafe { crate::brand::Gc::unchecked() };
-    vm.execution_fatal = false;
+    vm.mutator.execution_fatal = false;
     vm.require_live_function(function)?;
     if vm.functions[function].lazy.is_some() {
         // Nested macro calls get their own engines and must not consume this
@@ -1784,16 +1784,16 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         forced?;
     }
     if let Err(error) = vm.materialize_image_function(function) {
-        vm.execution_fatal = true;
+        vm.mutator.execution_fatal = true;
         return Err(error);
     }
     let mut program = lower_entry_program(vm, function)?;
     let width = vm.functions[function].regs;
     debug_assert!(args.len() <= width.max(1), "an entry passes at most its function's registers");
     let size = width.max(args.len()).checked_add(WINDOW).ok_or("register storage overflow")?.next_power_of_two();
-    vm.stack.enter(std::mem::take(&mut program.registers), size, args);
-    let regs = vm.stack.as_mut_ptr();
-    let limit = file_limit(&vm.stack);
+    vm.mutator.stack.enter(std::mem::take(&mut program.registers), size, args);
+    let regs = vm.mutator.stack.as_mut_ptr();
+    let limit = file_limit(&vm.mutator.stack);
     let mark = vm.mutator.dynamic.len();
     let handler_mark = vm.mutator.signal_handlers.len();
     let backtrace_mark = vm.mutator.backtrace.frames.len();
@@ -1802,7 +1802,7 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         stack_used: width.max(args.len()),
         limit,
         spread_end: 0,
-        depth_base: vm.eval_depth,
+        depth_base: vm.mutator.eval_depth,
         vm,
         code: program.code,
         rest: program.rest,
@@ -1833,7 +1833,7 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     };
     // This engine holds collection until it suspends; a writer's rooted
     // watcher notification does not extend into it.
-    engine.vm.running_engines += 1;
+    engine.vm.mutator.running_engines += 1;
     let rooted_write = std::mem::take(&mut engine.vm.mutator.rooted_write);
     if engine.vm.stress_due() && engine.vm.may_collect(1) {
         orchestrate(Eng::lend(&mut engine, gc.by_ref()), (), entry_collect, done);
@@ -1903,10 +1903,10 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     engine.vm.trace_leave(backtrace_mark);
     // Only entered frames can have written values: clear that prefix, not
     // the whole file (`Registers::leave`).
-    let registers = engine.vm.stack.leave(engine.stack_used);
+    let registers = engine.vm.mutator.stack.leave(engine.stack_used);
     engine.rest.values.clear();
     engine.rest.activations.clear();
-    engine.vm.execution = Program {
+    engine.vm.mutator_rest.execution = Program {
         rest: std::mem::take(&mut engine.rest),
         code: std::mem::take(&mut engine.code),
         entries: std::mem::take(&mut engine.entries),
@@ -1914,11 +1914,11 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         free_entries: std::mem::take(&mut engine.free_entries),
         registers,
     };
-    engine.vm.execution_fatal = engine.fatal_image_failure;
+    engine.vm.mutator.execution_fatal = engine.fatal_image_failure;
     engine.vm.mutator.rooted_write = rooted_write;
     // Aftermath it left pending is polled for soon by the engine it returns to.
     if engine.vm.aftermath_pending() { engine.vm.request_poll(); }
-    engine.vm.running_engines -= 1;
+    engine.vm.mutator.running_engines -= 1;
     match engine.error {
         Some(error) => Err(error),
         None => Ok(value),
@@ -2669,10 +2669,10 @@ fn depth_room_cold(e: &mut Engine<'_>, attempted: usize) -> bool {
         native_stack_failure(e, "native stack exhausted during Lisp evaluation");
         return false;
     }
-    let saved = e.vm.eval_depth;
-    e.vm.eval_depth = attempted;
+    let saved = e.vm.mutator.eval_depth;
+    e.vm.mutator.eval_depth = attempted;
     let fits = e.vm.check_eval_depth().is_ok();
-    e.vm.eval_depth = saved;
+    e.vm.mutator.eval_depth = saved;
     if !fits {
         e.failed_eval_depth = Some(attempted);
         raise(e, "excessive-lisp-nesting", &[Value::integer(attempted as i64).expect("depth")]);
@@ -2696,7 +2696,7 @@ fn frame_room(e: &mut Engine<'_>, r: *mut Value, end: usize) -> Option<*mut Valu
     if (r as usize).wrapping_add(end * slot) <= e.limit {
         Some(r)
     } else {
-        let at = (r as usize).wrapping_sub(e.vm.stack.as_ptr() as usize) / slot;
+        let at = (r as usize).wrapping_sub(e.vm.mutator.stack.as_ptr() as usize) / slot;
         grow_registers(e, r, at.checked_add(end)?.checked_add(WINDOW)?)
     }
 }
@@ -2751,8 +2751,8 @@ unsafe fn trace_call<const LISP: bool>(e: &mut Engine<'_>, r: *mut Value, pc: *c
             e.vm.mutator.backtrace.copied(std::slice::from_raw_parts(r.add(start), argc))
         } else {
             backtrace::Arguments::Registers {
-                stack: e.vm.stack.depth(),
-                offset: r.add(start).offset_from(e.vm.stack.as_ptr()) as usize,
+                stack: e.vm.mutator.stack.depth(),
+                offset: r.add(start).offset_from(e.vm.mutator.stack.as_ptr()) as usize,
                 count: argc,
             }
         };
@@ -2808,9 +2808,9 @@ fn debugger_form(vm: &Vm, args: &[Value]) -> Form {
 fn nested_with_room<'a, 'b, B: Plain>(m: &mut Orch<'_, 'b, 'a>, gc: Gc<'_, 'b>, call: Nested<'_>, b: B,
     then: impl FnOnce(&mut Engine<'a>, B, Value) + Copy + 'static) -> bool {
     let token = m.leaf((), |e, ()| {
-        let saved_depth = std::mem::replace(&mut e.vm.eval_depth, e.depth_base + e.frames.len());
+        let saved_depth = std::mem::replace(&mut e.vm.mutator.eval_depth, e.depth_base + e.frames.len());
         let token = e.vm.max_ensure_room(200);
-        e.vm.eval_depth = saved_depth;
+        e.vm.mutator.eval_depth = saved_depth;
         token
     });
     let out = nested_then(m, gc, call, b, then);
@@ -3491,7 +3491,7 @@ unsafe fn apply(
     // SAFETY: R and PC as the function's contract (`# Safety`).
     unsafe {
         enter_apply(&mut e, r, pc, start, argc);
-        let base = r.offset_from(e.vm.stack.as_ptr()) as usize;
+        let base = r.offset_from(e.vm.mutator.stack.as_ptr()) as usize;
         let at = base + e.vm.functions.get_unchecked(e.function).regs.max(1);
         // Out of line: the Result's error drop would stop the tail dispatch.
         let (r, offset) = t2_prepare_apply(&mut e, r, base + start, argc, at);
@@ -3565,8 +3565,8 @@ unsafe fn enter_frame_marked(
     unsafe {
         let en: &mut Engine<'_> = &mut e;
         // Captures/arguments have already been copied, including on lower failure.
-        let end = new.offset_from(en.vm.stack.as_ptr()) as usize + en.vm.functions[function].regs;
-        debug_assert!(end + WINDOW <= en.vm.stack.len(), "a window entered without room (`frame_room`)");
+        let end = new.offset_from(en.vm.mutator.stack.as_ptr()) as usize + en.vm.functions[function].regs;
+        debug_assert!(end + WINDOW <= en.vm.mutator.stack.len(), "a window entered without room (`frame_room`)");
         en.stack_used = en.stack_used.max(end);
         // A pending spread ends here: the next frame an engine enters is the
         // spread's callee, whose window takes it as its arguments, an autoload's
@@ -3842,7 +3842,7 @@ unsafe fn generated_step(
     // SAFETY: R and PC as the function's contract (`# Safety`).
     unsafe {
         enter_native(e, r, pc, target, start, argc);
-        let base = r.offset_from(e.vm.stack.as_ptr()) as usize;
+        let base = r.offset_from(e.vm.mutator.stack.as_ptr()) as usize;
         // A reading primitive runs Lisp: a lend, which the dispatch makes.
         if matches!(prim::generated(target), Some(prim::PrimDesc { body: prim::Body::Reader(_), .. })) {
             debug_assert_eq!(r, e.regs, "a call runs in the current frame");
@@ -3869,13 +3869,13 @@ fn read_body<'x, 'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, read: Box<
         e.vm.mutator.propagated_escape = None;
         e.vm.mutator.propagated_escape_hooked = false;
         e.vm.mutator.propagated_eval_depth = None;
-        std::mem::replace(&mut e.vm.eval_depth, e.depth_base + e.frames.len())
+        std::mem::replace(&mut e.vm.mutator.eval_depth, e.depth_base + e.frames.len())
     });
     lend::read(&mut m, gc.by_ref(), (target, start, argc), (pc, saved_depth), |e, (pc, saved_depth), step| {
         // As at a generated call's return: a requested poll is `take_step''s.
         if e.vm.region_collect { e.budget = 0; }
-        e.vm.eval_depth = saved_depth;
-        e.fatal_image_failure |= e.vm.execution_fatal;
+        e.vm.mutator.eval_depth = saved_depth;
+        e.fatal_image_failure |= e.vm.mutator.execution_fatal;
         e.code.resize_with(e.vm.functions.len(), Code::none);
         // The nested run had a file of its own, so this one did not move.
         let r = e.regs;
@@ -3969,12 +3969,12 @@ unsafe fn take_step(
         };
         // The layout goes at K, with `WINDOW` slots above it, as any window.
         let width = K_SAVED + saved.len() + args.len();
-        let offset = k.offset_from(e.vm.stack.as_ptr()) as usize;
+        let offset = k.offset_from(e.vm.mutator.stack.as_ptr()) as usize;
         let Some(need) = offset.checked_add(width).and_then(|end| end.checked_add(WINDOW)) else {
             fail(e, "register storage exhausted");
             return Continue::Stop;
         };
-        let r = if need <= e.vm.stack.len() {
+        let r = if need <= e.vm.mutator.stack.len() {
             r
         } else {
             let Some(rebased) = grow_registers(e, r, need) else {
@@ -3983,7 +3983,7 @@ unsafe fn take_step(
             };
             rebased
         };
-        let k = e.vm.stack.as_mut_ptr().add(offset);
+        let k = e.vm.mutator.stack.as_mut_ptr().add(offset);
         if !resuming {
             e.frames.push(Frame {
                 pc: pc.add(1),
@@ -4132,7 +4132,7 @@ unsafe fn t2_dispatch(
         let Some(p) = prim::legacy(target) else {
             return fail(&mut e, "invalid primitive reference");
         };
-        let base = r.offset_from(e.vm.stack.as_ptr()) as usize;
+        let base = r.offset_from(e.vm.mutator.stack.as_ptr()) as usize;
         match p {
             Primitive::Apply => {
                 enter_apply(&mut e, r, pc, start, argc);
@@ -4358,11 +4358,11 @@ pub(crate) fn primitive_target(p: Primitive) -> PrimitiveCall {
         Vector | Aref | Aset => Vm::data_primitive,
         // A list's copy grants its quit scope at its first chunk boundary
         // (`Vm::kernel_poll`), as Nreverse below; nothing else here polls.
-        CopySequence => |vm, p, start, n| if n == 1 && vm.stack[start].tag() == 3 { vm.copy_list::<true>(vm.stack[start]) } else { vm.data_primitive(p, start, n) },
+        CopySequence => |vm, p, start, n| if n == 1 && vm.mutator.stack[start].tag() == 3 { vm.copy_list::<true>(vm.mutator.stack[start]) } else { vm.data_primitive(p, start, n) },
         // Its own entry, granting its quit scope at its first chunk
         // boundary (`Vm::kernel_poll`): a shorter call never enters one.
-        Nreverse => |vm, _, start, n| if n == 1 { vm.core_nreverse::<true>(vm.stack[start]) } else { Err("wrong primitive arity".into()) },
-        EncodeUtf8 => |vm, _, start, n| if n == 1 { vm.string_as_unibyte::<true>(vm.stack[start]) } else { Err("wrong primitive arity".into()) },
+        Nreverse => |vm, _, start, n| if n == 1 { vm.core_nreverse::<true>(vm.mutator.stack[start]) } else { Err("wrong primitive arity".into()) },
+        EncodeUtf8 => |vm, _, start, n| if n == 1 { vm.string_as_unibyte::<true>(vm.mutator.stack[start]) } else { Err("wrong primitive arity".into()) },
         CacheStats | CacheClear | CacheEntries => |vm, p, _, n| vm.cache_primitive(p, n),
         ProcessLines => |vm, _, start, n| vm.process_lines(start, n),
         Format => |vm, _, start, n| vm.inside_quit_scope(|vm| vm.format_polled(start, n)),
@@ -4386,7 +4386,7 @@ pub(crate) fn primitive_target(p: Primitive) -> PrimitiveCall {
     }
 }
 fn feature_call(vm: &mut Vm, p: Primitive, start: usize, argc: usize) -> Result<Value> {
-    let args = vm.stack[start..start + argc].to_vec();
+    let args = vm.mutator.stack[start..start + argc].to_vec();
     vm.feature_primitive(p, &args)
 }
 
@@ -4527,11 +4527,11 @@ unsafe fn leaf_call(
             return enter_generated(e, r, pc, target, start, argc);
         }
         let leaf: prim::LeafBody = std::mem::transmute(en.entries.get_unchecked((*pc).site).function);
-        en.vm.site_leaf = (pc as usize, r as usize);
+        en.vm.mutator_rest.site_leaf = (pc as usize, r as usize);
         crate::gap_probe::enter(en.vm, move || prim::generated(target).map_or("(site leaf)", |d| d.name));
         let value = en.vm.leaf_value(leaf, r.add(start), argc, &mut en.leaf_fault);
         crate::gap_probe::exit(en.vm);
-        en.vm.site_leaf = (0, 0);
+        en.vm.mutator_rest.site_leaf = (0, 0);
         if value == Value::UNBOUND && en.leaf_fault.is_some() {
             return leaf_failed(e, r, pc, target, start, argc);
         }
@@ -4603,7 +4603,7 @@ unsafe fn cached_primitive(
     unsafe {
         let call = e.entries.get_unchecked((*pc).site).primitive.expect("cached primitive call");
         enter_native(&mut e, r, pc, target, start, argc);
-        let base = r.offset_from(e.vm.stack.as_ptr()) as usize;
+        let base = r.offset_from(e.vm.mutator.stack.as_ptr()) as usize;
         let p = prim::legacy(target).expect("legacy primitive");
         let Some(value) = measured_primitive_value(&mut e, p, base + start, argc, Some(call)) else {
             return Value::UNBOUND;
@@ -4632,7 +4632,7 @@ unsafe fn primitive(
     unsafe {
         let en: &mut Engine<'_> = &mut e;
         enter_native(en, r, pc, target, start, argc);
-        let base = r.offset_from(en.vm.stack.as_ptr()) as usize;
+        let base = r.offset_from(en.vm.mutator.stack.as_ptr()) as usize;
         let p = prim::legacy(target).expect("legacy primitive");
         debug_assert!(
             matches!(p, Primitive::Load | Primitive::Require | Primitive::Eval | Primitive::Macroexpand | Primitive::AutoloadDoLoad | Primitive::ReadHostEvent | Primitive::FormatModeLine | Primitive::MakeInterpretedClosure),
@@ -4651,15 +4651,15 @@ unsafe fn primitive(
 #[cold]
 #[inline(never)]
 fn grow_registers(e: &mut Engine<'_>, r: *mut Value, need: usize) -> Option<*mut Value> {
-    let size = need.max(e.vm.stack.len().checked_mul(2)?).checked_next_power_of_two()?;
-    let old_base = e.vm.stack.as_ptr() as usize;
+    let size = need.max(e.vm.mutator.stack.len().checked_mul(2)?).checked_next_power_of_two()?;
+    let old_base = e.vm.mutator.stack.as_ptr() as usize;
     let offset = |p: *mut Value| (p as usize).wrapping_sub(old_base) / std::mem::size_of::<Value>();
     let current = offset(r);
     let regs = offset(e.regs);
     let frames: Vec<usize> = e.frames.iter().map(|frame| offset(frame.regs)).collect();
-    e.vm.stack.grow(size);
-    e.limit = file_limit(&e.vm.stack);
-    let base = e.vm.stack.as_mut_ptr();
+    e.vm.mutator.stack.grow(size);
+    e.limit = file_limit(&e.vm.mutator.stack);
+    let base = e.vm.mutator.stack.as_mut_ptr();
     for (frame, offset) in e.frames.iter_mut().zip(frames) {
         frame.regs = base.wrapping_add(offset);
     }
@@ -4676,14 +4676,14 @@ fn grow_registers(e: &mut Engine<'_>, r: *mut Value, need: usize) -> Option<*mut
 #[inline(never)]
 fn force_lazy(e: &mut Engine<'_>, function: usize) -> bool {
     {
-        e.vm.execution_fatal = false;
+        e.vm.mutator.execution_fatal = false;
         e.vm.mutator.propagated_escape = None;
         e.vm.mutator.propagated_eval_depth = None;
-        let saved_depth = e.vm.eval_depth;
-        e.vm.eval_depth = e.depth_base + e.frames.len();
+        let saved_depth = e.vm.mutator.eval_depth;
+        e.vm.mutator.eval_depth = e.depth_base + e.frames.len();
         let result = lend::deferred(e, function);
-        e.vm.eval_depth = saved_depth;
-        e.fatal_image_failure |= e.vm.execution_fatal;
+        e.vm.mutator.eval_depth = saved_depth;
+        e.fatal_image_failure |= e.vm.mutator.execution_fatal;
         match result {
             Ok(()) => true,
             Err(error) => {
@@ -4965,16 +4965,16 @@ fn lambda_list(e: &mut Engine<'_>, target: Value) -> bool {
 fn nested_then<'a, 'b, B: Plain>(m: &mut Orch<'_, 'b, 'a>, gc: Gc<'_, 'b>, call: Nested<'_>, b: B,
     then: impl FnOnce(&mut Engine<'a>, B, Value) + Copy + 'static) -> bool {
     let saved_depth = m.leaf((), |e, ()| {
-        e.vm.execution_fatal = false;
+        e.vm.mutator.execution_fatal = false;
         e.vm.mutator.propagated_escape = None;
         e.vm.mutator.propagated_eval_depth = None;
         e.vm.loader.propagate += 1;
-        std::mem::replace(&mut e.vm.eval_depth, e.depth_base + e.frames.len())
+        std::mem::replace(&mut e.vm.mutator.eval_depth, e.depth_base + e.frames.len())
     });
     lend::nested(m, gc, call, (b, saved_depth), move |e, (b, saved_depth), result| {
         e.vm.loader.propagate -= 1;
-        e.vm.eval_depth = saved_depth;
-        e.fatal_image_failure |= e.vm.execution_fatal;
+        e.vm.mutator.eval_depth = saved_depth;
+        e.fatal_image_failure |= e.vm.mutator.execution_fatal;
         match result {
             Ok(value) => {
                 then(e, b, value);
@@ -5085,20 +5085,20 @@ impl Vm {
 fn loader_body<'x, 'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, (pc, call): (Pc<'x>, Box<(Primitive, usize, usize)>)) -> Continue<'x> {
     let (p, start, argc) = *call;
     let (frame, saved_depth) = m.leaf((start, argc), |e, (start, argc)| {
-        let args = e.vm.stack[start..start + argc].to_vec();
+        let args = e.vm.mutator.stack[start..start + argc].to_vec();
         let frame = e.vm.root_frame(&args);
-        e.vm.execution_fatal = false;
+        e.vm.mutator.execution_fatal = false;
         // Only an escape produced by THIS operation may be re-raised below.
         e.vm.mutator.propagated_escape = None;
         e.vm.mutator.propagated_eval_depth = None;
         e.vm.loader.propagate += 1;
-        (frame, std::mem::replace(&mut e.vm.eval_depth, e.depth_base + e.frames.len()))
+        (frame, std::mem::replace(&mut e.vm.mutator.eval_depth, e.depth_base + e.frames.len()))
     });
     let ok = lend::nested(&mut m, gc.by_ref(), Nested::Loader(p, &frame), (pc.a(), p, (start, argc), saved_depth),
         |e, (dest, p, (start, argc), saved_depth), result| {
         e.vm.loader.propagate -= 1;
-        e.vm.eval_depth = saved_depth;
-        e.fatal_image_failure |= e.vm.execution_fatal;
+        e.vm.mutator.eval_depth = saved_depth;
+        e.fatal_image_failure |= e.vm.mutator.execution_fatal;
         match result {
             Ok(value) => {
                 leave_native(e);
@@ -6055,7 +6055,7 @@ mod register_tests {
         let target = vm.slots[vm.names["f"]].value;
         let function = vm.closures[target.payload() as usize].function;
         assert!(
-            vm.execution
+            vm.mutator_rest.execution
                 .entries
                 .iter()
                 .any(|entry| entry.function == function
@@ -6088,7 +6088,7 @@ mod register_tests {
             .unwrap();
         let target = Value::reference(Primitive::Add as usize, 6);
         assert!(
-            vm.execution
+            vm.mutator_rest.execution
                 .entries
                 .iter()
                 .any(|entry| entry.target == target),
@@ -6230,9 +6230,9 @@ mod register_tests {
         let source = format!("(sort (list 3 1 2) (eval '(lambda (a b) (let* ({bindings}) (< a b)))))");
         let value = vm.eval_source(&source).unwrap().display().unwrap();
         assert_eq!(value, "(1 2 3)");
-        let grown = vm.execution.registers.len();
+        let grown = vm.mutator_rest.execution.registers.len();
         assert!(grown > FILE_START, "the predicate's frame grew the file: {grown}");
-        assert!(vm.execution.registers.iter().all(|&value| value == Value::NIL));
+        assert!(vm.mutator_rest.execution.registers.iter().all(|&value| value == Value::NIL));
     }
 
     /// What a returned call left in its registers is not a root: they lie
@@ -6305,8 +6305,8 @@ mod register_tests {
         vm.eval_source_raw(&format!("(defun cap-probe (n) (let* ({bindings}) (if (> n 0) (cap-probe (1- n)) v599)))"))
             .unwrap();
         assert_eq!(vm.eval_source("(cap-probe 300)").unwrap().as_integer().unwrap(), 599);
-        assert_eq!(vm.execution.registers.len(), FILE_START, "a 180,000-slot file was kept");
-        assert!(vm.execution.registers.iter().all(|&value| value == Value::NIL));
+        assert_eq!(vm.mutator_rest.execution.registers.len(), FILE_START, "a 180,000-slot file was kept");
+        assert!(vm.mutator_rest.execution.registers.iter().all(|&value| value == Value::NIL));
     }
 
     #[test]
@@ -6316,12 +6316,12 @@ mod register_tests {
                               (if (> n 0) (1+ (register-probe (1- n))) (+ a b c d e f))))")
             .unwrap();
         vm.eval_source_raw("(register-probe 800)").unwrap();
-        let widened = vm.execution.registers.len();
+        let widened = vm.mutator_rest.execution.registers.len();
         assert!(widened > FILE_START, "the recursion grew the file: {widened}");
-        assert!(vm.execution.registers.iter().all(|&value| value == Value::NIL));
+        assert!(vm.mutator_rest.execution.registers.iter().all(|&value| value == Value::NIL));
         vm.eval_source_raw("(register-probe 1)").unwrap();
-        assert_eq!(vm.execution.registers.len(), widened);
-        assert!(vm.execution.registers.iter().all(|&value| value == Value::NIL));
+        assert_eq!(vm.mutator_rest.execution.registers.len(), widened);
+        assert!(vm.mutator_rest.execution.registers.iter().all(|&value| value == Value::NIL));
     }
 
     #[test]
@@ -6332,14 +6332,14 @@ mod register_tests {
         let function = vm.intern("reader-probe");
         let value = vm.list_value(&[Value::NIL]);
         vm.mutator.external_roots.push(value);
-        *vm.stack.test_vec() = vec![value, function];
-        let registers = vm.stack.as_ptr();
+        *vm.mutator.stack.test_vec() = vec![value, function];
+        let registers = vm.mutator.stack.as_ptr();
         let collections = vm.gc_stats.collections;
         let result = vm.reader_call(function, &[value]).unwrap();
         assert_eq!(vm.cons_pair(result).unwrap().0.as_integer().unwrap(), 42);
         assert_eq!(vm.mutator.external_roots, vec![result]);
-        assert_eq!(*vm.stack, [result, function]);
-        assert_eq!(vm.stack.as_ptr(), registers);
+        assert_eq!(*vm.mutator.stack, [result, function]);
+        assert_eq!(vm.mutator.stack.as_ptr(), registers);
         assert!(vm.gc_stats.collections > collections);
     }
 
@@ -6380,21 +6380,21 @@ mod register_tests {
             let f = vm.compile_source(source).unwrap();
             let result = vm.execute_raw(f);
             assert_eq!(result.is_err(), index == 2, "{source}: {result:?}");
-            assert!(vm.stack.is_empty(), "idle storage must not be a root set");
-            assert!(!vm.execution.registers.is_empty());
+            assert!(vm.mutator.stack.is_empty(), "idle storage must not be a root set");
+            assert!(!vm.mutator_rest.execution.registers.is_empty());
             assert!(
-                vm.execution.registers.iter().all(|v| *v == Value::NIL),
+                vm.mutator_rest.execution.registers.iter().all(|v| *v == Value::NIL),
                 "retained storage must not hold stale moving references: {source}"
             );
         }
         let f = vm.compile_source("42").unwrap();
         vm.execute_raw(f).unwrap();
-        let allocation = vm.execution.registers.as_ptr();
-        let capacity = vm.execution.registers.capacity();
+        let allocation = vm.mutator_rest.execution.registers.as_ptr();
+        let capacity = vm.mutator_rest.execution.registers.capacity();
         for _ in 0..8 {
             assert_eq!(vm.execute_raw(f).unwrap().as_integer().unwrap(), 42);
-            assert_eq!(vm.execution.registers.as_ptr(), allocation);
-            assert_eq!(vm.execution.registers.capacity(), capacity);
+            assert_eq!(vm.mutator_rest.execution.registers.as_ptr(), allocation);
+            assert_eq!(vm.mutator_rest.execution.registers.capacity(), capacity);
         }
     }
 }

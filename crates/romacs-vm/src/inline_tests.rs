@@ -226,7 +226,7 @@ fn inline_survives_forced_moving_collection() {
         vm.inline_hits > 10000,
         "inlining was not active across collection"
     );
-    assert!(vm.execution.registers.iter().all(|v| *v == Value::NIL));
+    assert!(vm.mutator_rest.execution.registers.iter().all(|v| *v == Value::NIL));
 }
 
 #[test]
