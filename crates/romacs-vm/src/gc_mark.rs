@@ -263,7 +263,7 @@ impl Vm {
             written_slots,
             slots: &self.slots, variable_redirects: &self.variable_redirects, functions: &self.functions,
             generated_symbols: &self.generated_symbols, cell_pairs: &self.cell_pairs,
-            execution: &self.execution, spare_programs: &self.spare_programs,
+            execution: &self.mutator_rest.execution, spare_programs: &self.mutator_rest.spare_programs,
             stacks: self.register_roots(),
             in_obarray, code_marks,
         }

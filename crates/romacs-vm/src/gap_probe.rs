@@ -82,7 +82,7 @@ mod on {
         fn charge(&mut self, now: std::time::Instant, frames: impl FnOnce() -> String) {
             let wall = now.duration_since(self.last);
             self.last = now;
-            let leaf = self.stack.last().copied().unwrap_or("-");
+            let leaf = self.mutator.stack.last().copied().unwrap_or("-");
             match self.segments.iter_mut().find(|s| s.leaf == leaf) {
                 Some(segment) => {
                     segment.wall += wall;

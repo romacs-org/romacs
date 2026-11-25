@@ -704,7 +704,7 @@ impl Vm {
     pub(super) fn variable_primitive(&mut self, p: Primitive, start: usize, n: usize) -> Result<Value> {
         use Primitive::*;
         if n != if matches!(p, DefvarSetDefault | Set) { 2 } else { 1 } { return Err("wrong primitive arity".into()); }
-        let symbol = self.stack[start];
+        let symbol = self.mutator.stack[start];
         if symbol == Value::NIL || symbol == Value::TRUE {
             return match p {
                 SymbolValue => Ok(symbol),
@@ -735,7 +735,7 @@ impl Vm {
                 // ORIGINAL, not the resolved base: an alias of nil, t or a
                 // keyword is itself constant (GNU copies trapped_write).
                 if self.protected_variable_slot(original) || self.interned_keyword_slot(slot) { return Err("setting constant".into()); }
-                let value = if p == Set { self.stack[start+1] } else { Value::UNBOUND };
+                let value = if p == Set { self.mutator.stack[start+1] } else { Value::UNBOUND };
                 // A write nothing hears stores at once; a heard one waits for
                 // its engine's drain (`Vm::write_from_native`).
                 if self.mutator.deferred_writes.is_empty() && !self.variable_trapped(slot) {
@@ -780,7 +780,7 @@ impl Vm {
             DefvarBoundp if self.native_forwarding(slot).is_some() => Ok(Value::TRUE),
             DefvarSetDefault if self.native_forwarding(slot).is_some() => {
                 let fwd = self.native_forwarding(slot).unwrap();
-                let value = self.stack[start+1];
+                let value = self.mutator.stack[start+1];
                 self.set_forwarded_default(slot, fwd, value, forwarded::SetFlag::Set).map_err(forwarded::fault_text)?;
                 Ok(value)
             }
@@ -811,7 +811,7 @@ impl Vm {
             // A current binding the value itself bound is set, as GNU sets it
             // where no let shadowed (DefvarBoundp decided before the value ran).
             DefvarSetDefault => {
-                let value = self.stack[start+1];
+                let value = self.mutator.stack[start+1];
                 let shadow = if self.slots[slot].value == Value::UNBOUND { None } else {
                     // HOST(dynamic:saved): saved-binding accessor: defvar's set-default;
                     // variable_primitive checks a tracked variable first (F2)

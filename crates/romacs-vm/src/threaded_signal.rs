@@ -203,14 +203,14 @@ fn handler_callback<'a, 'b>(m: &mut Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, frame:
     let (mask, saved_depth, token) = m.leaf(group, |e, group| {
         let mask = e.vm.mutator.signal_handlers.len();
         e.vm.mutator.signal_handlers.push(SignalHandler::Mask(group));
-        let saved_depth = std::mem::replace(&mut e.vm.eval_depth, e.depth_base + e.frames.len());
+        let saved_depth = std::mem::replace(&mut e.vm.mutator.eval_depth, e.depth_base + e.frames.len());
         (mask, saved_depth, e.vm.max_ensure_room(200))
     });
     let (escaped, hooked, depth) = lend::callback(m, gc.by_ref(), &frame, (), |e, (), result| {
         let replacement = e.vm.mutator.propagated_escape.take();
         let hooked = std::mem::take(&mut e.vm.mutator.propagated_escape_hooked);
         let depth = e.vm.mutator.propagated_eval_depth.take();
-        e.fatal_image_failure |= e.vm.execution_fatal;
+        e.fatal_image_failure |= e.vm.mutator.execution_fatal;
         e.code.resize_with(e.vm.functions.len(), Code::none);
         let escaped = match (result, replacement) {
             (_, Some(escape)) => { e.escape = Some(escape); true }
@@ -228,7 +228,7 @@ fn handler_callback<'a, 'b>(m: &mut Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, frame:
     if escaped { prepare_signal(m, gc, hooked, depth); }
     m.leaf((token, saved_depth, mask), |e, (token, saved_depth, mask)| {
         if let Some(old) = token { e.vm.restore_stack_limits(old); }
-        e.vm.eval_depth = saved_depth;
+        e.vm.mutator.eval_depth = saved_depth;
         e.vm.mutator.signal_handlers.truncate(mask);
     });
     escaped

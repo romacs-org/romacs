@@ -9,7 +9,7 @@ use crate::Vm;
 /// The pattern the cache holds for SOURCE: its id, which a compile of it
 /// afresh does not share.
 fn compiled(vm: &Vm, source: &str) -> Option<PatternId> {
-    let cache = &vm.regexp_cache;
+    let cache = &vm.mutator_rest.regexp_cache;
     let slot = *cache.index.get(source.as_bytes())?.first()?;
     cache.entries[slot].as_ref().map(|e| PatternId { slot, serial: e.serial })
 }
@@ -78,7 +78,7 @@ fn a_syntax_edit_under_the_case_canon_recompiles_completion_patterns() {
     eval(&mut vm, r#"(modify-syntax-entry ?A "@" probe-syntax)"#);
     let after = eval(&mut vm, complete);
     // What a pattern compiled afresh against the tables as they are now answers.
-    vm.regexp_cache.retain(|_| false);
+    vm.mutator_rest.regexp_cache.retain(|_| false);
     let fresh = eval(&mut vm, complete);
     assert_ne!(before, fresh, "the edit changes how completion folds ?A");
     assert_eq!(after, fresh, "the kept completion pattern answers as a fresh one");
@@ -94,7 +94,7 @@ fn a_matcher_compiles_again_a_pattern_that_left_the_cache() {
     let mut matcher = vm.string_matcher(&[pattern], Translation::None, None).ok().flatten().expect("a matcher, with no syntax properties");
     let hit = vm.eval_source_raw(r#""x foo12""#).unwrap();
     assert_eq!(vm.string_matcher_matches(&mut matcher, hit).ok(), Some(true));
-    vm.regexp_cache.retain(|_| false);
+    vm.mutator_rest.regexp_cache.retain(|_| false);
     eval(&mut vm, r#"(string-match "bar" "bar")"#);
     let hit = vm.eval_source_raw(r#""x foo12""#).unwrap();
     assert_eq!(vm.string_matcher_matches(&mut matcher, hit).ok(), Some(true), "the pattern compiled again");

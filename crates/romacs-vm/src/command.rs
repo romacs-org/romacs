@@ -482,12 +482,12 @@ impl Vm {
             return Err(CommandFault::Internal("wrong primitive arity".into()));
         }
         let count = if n == 0
-            || (self.stack[start] == Value::NIL
+            || (self.mutator.stack[start] == Value::NIL
                 && matches!(p, ForwardChar | BackwardChar | BeginningOfLine | EndOfLine))
         {
             1
         } else {
-            self.stack[start].as_integer()?
+            self.mutator.stack[start].as_integer()?
         };
         if matches!(p, BeginningOfLine | EndOfLine) {
             // cmds.c: point to the field-respecting line boundary.

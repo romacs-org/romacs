@@ -76,7 +76,7 @@ impl Vm {
         error: &str,
     ) -> Option<(&'static str, Vec<Value>)> {
         use Primitive::*;
-        let arg = |vm: &Vm, i: usize| if i < argc { vm.stack[start + i] } else { Value::NIL };
+        let arg = |vm: &Vm, i: usize| if i < argc { vm.mutator.stack[start + i] } else { Value::NIL };
         if error == "wrong primitive arity" && reports_subr_arity(p) {
             return Some((
                 "wrong-number-of-arguments",

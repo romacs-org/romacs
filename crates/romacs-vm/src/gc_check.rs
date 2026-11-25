@@ -170,10 +170,10 @@ impl Vm {
             let own = id.value().index_if(7).and_then(|n| n.checked_sub(1)).is_some_and(|slot| self.obarray_symbol_names.contains_key(&slot));
             if !own { for &(key, value) in &entry.properties { values.extend([key, value]); } }
         }
-        let active = !self.stack.at_rest();
+        let active = !self.mutator.stack.at_rest();
         code.extend((0..self.request_code.live.len()).filter(|&id| self.request_code.live[id] && (active || self.request_code.permanent[id])));
         self.source_code_roots(&mut code);
-        for engine in &mut self.suspended {
+        for engine in &mut self.mutator_rest.suspended {
             engine.visit_values(&mut |v| values.push(*v));
         }
         let mut native = HashSet::default();
@@ -286,7 +286,7 @@ impl Vm {
             values.extend_from_slice(&body.values);
             code.extend_from_slice(&body.children);
         }
-        for program in std::iter::once(&self.execution).chain(&self.spare_programs) {
+        for program in std::iter::once(&self.mutator_rest.execution).chain(&self.mutator_rest.spare_programs) {
             program.lowered_values(id, &mut |v| values.push(v), &mut |f| code.push(f));
         }
     }

@@ -18,7 +18,7 @@ use crate::prim::{Leaf, ReadCall, land};
 fn from_string(call: ReadCall<'_, '_, '_, '_>) -> bool {
     let ReadCall { m, gc, start, argc, out } = call;
     let Some(spec) = m.leaf((start, argc, out), |vm, (start, argc, out)| {
-        let arg = |i: usize| if i < argc { vm.stack[start + i] } else { Value::NIL };
+        let arg = |i: usize| if i < argc { vm.mutator.stack[start + i] } else { Value::NIL };
         let (string, from, to) = (arg(0), arg(1), arg(2));
         match Leaf::new(vm).read_range(string, from, to) {
             Ok((a, b)) => {
@@ -43,7 +43,7 @@ fn from_string(call: ReadCall<'_, '_, '_, '_>) -> bool {
 fn from_stream(call: ReadCall<'_, '_, '_, '_>) -> bool {
     let ReadCall { m, gc, start, argc, out } = call;
     let Some(root) = m.leaf((start, argc, out), |vm, (start, argc, out)| {
-        let stream = if argc > 0 { vm.stack[start] } else { Value::NIL };
+        let stream = if argc > 0 { vm.mutator.stack[start] } else { Value::NIL };
         match Leaf::new(vm).read_stream(stream) {
             Ok(stream) => {
                 vm.mutator.external_roots.push(stream);
