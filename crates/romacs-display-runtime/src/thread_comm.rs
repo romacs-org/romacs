@@ -386,6 +386,11 @@ pub(crate) enum AssetCommand {
     },
     /// Retire an image after its last render presentation releases it.
     ImageRetire { image: ImageId },
+    /// OWNER died (contract A4), sent right after its DEAD state, so it
+    /// lands after the owner's uploads and before those of its slot's next
+    /// owner: its panes are torn down and SLOT's fonts and images forgotten
+    /// here, in that order. Exempt from the channel's capacity.
+    OwnerDied { owner: u64, slot: u8 },
     /// Create native model `id`: OBJ meshes drawn by the renderer's mesh
     /// pass at `view` on `background` (sRGB RGBA, alpha linear), `width`
     /// by `height` logical pixels.  It loads on its own thread.

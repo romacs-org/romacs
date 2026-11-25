@@ -213,7 +213,7 @@ impl PaintSender {
     /// When one is already installed.
     pub fn pane_sink(&self, settled: PaneSettled) -> std::sync::Arc<dyn PaneSink> {
         romacs_display_protocol::call_count::count("sender.pane_sink");
-        let installed = self.panes.install(settled);
+        let installed = self.panes.install(settled) && self.panes.connect(self.commands.clone());
         assert!(installed, "one pane sink per paint sender");
         std::sync::Arc::new(WakingPaneSink { mailbox: self.panes.clone(), proxy: self.proxy.clone() })
     }

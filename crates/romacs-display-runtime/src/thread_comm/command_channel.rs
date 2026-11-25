@@ -140,13 +140,15 @@ fn paint_frame(command: &RenderCommand) -> Option<u64> {
 
 /// Commands too small and rare to bound and never to be refused or kept
 /// waiting, though they keep their place in order: a frame's opacity
-/// setting (each setter counts, GNU's nil keeps the last scalar applied)
-/// and a window's destruction.  A producer of them never blocks on a
-/// render thread that may itself wait on the producer's input.
+/// setting (each setter counts, GNU's nil keeps the last scalar applied),
+/// a window's destruction and an owner's death (once per incarnation).  A
+/// producer of them never blocks on a render thread that may itself wait
+/// on the producer's input.
 fn exempt_from_capacity(command: &RenderCommand) -> bool {
     matches!(
         command,
         RenderCommand::Window(super::WindowCommand::SetFrameAlpha { .. } | super::WindowCommand::DestroyWindow { .. })
+            | RenderCommand::Asset(super::AssetCommand::OwnerDied { .. })
     )
 }
 

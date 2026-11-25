@@ -19,13 +19,13 @@ use crate::pane_mailbox::{Posted, Taken};
 use romacs_display_protocol::FrameGlyphBuffer;
 use romacs_display_protocol::font::FontCatalogGeneration;
 use romacs_display_protocol::foreign_pane::ForeignPaneEntry;
-use romacs_display_protocol::pane_picture::{PaneHead, PanePicture};
+use romacs_display_protocol::pane_picture::{ImageIdSpace, PaneHead, PanePicture, owner_font_slot};
 use romacs_display_protocol::pane_sink::PaneState;
 use romacs_display_protocol::RootSurfaceRect;
 use romacs_display_protocol::frame_time::FrameSample;
 use romacs_renderer_wgpu::WgpuRenderer;
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -149,6 +149,8 @@ pub(crate) struct PaneStates {
     map: HashMap<u64, PaneState>,
     /// Bumped on each change: a mirror of another revision is copied anew.
     revision: u64,
+    /// The owners whose death the command channel delivered.
+    dead: HashSet<u64>,
 }
 
 impl PaneStates {
@@ -273,12 +275,17 @@ impl PaneLayers {
         retired
     }
 
-    /// Tear every layer down, as its window goes: each held picture settled
-    /// through SETTLE; every scene the panes hold, for the renderer to free.
-    pub(crate) fn clear(&mut self, settle: &mut dyn FnMut(u64, PaneHead)) -> Vec<PageScene> {
+    /// Tear down every layer of an owner OWNS names (all, as the window
+    /// goes; a dead owner's): each held picture settled through SETTLE;
+    /// every scene the torn-down panes held, for the renderer to free.
+    pub(crate) fn clear(&mut self, owns: impl Fn(u64) -> bool, settle: &mut dyn FnMut(u64, PaneHead)) -> Vec<PageScene> {
         let mut scenes = std::mem::take(&mut self.retired);
-        for layer in std::mem::take(&mut self.layers).into_values() {
-            layer.retire(settle, &mut scenes);
+        let gone: Vec<u64> = self.layers.iter()
+            .filter(|(_, layer)| layer.identity().is_some_and(|(owner, _)| owns(owner))).map(|(&window, _)| window).collect();
+        for window in gone {
+            if let Some(layer) = self.layers.remove(&window) {
+                layer.retire(settle, &mut scenes);
+            }
         }
         scenes
     }
@@ -344,13 +351,13 @@ impl PaneLayers {
 }
 
 impl super::RenderApp {
-    /// Tear the primary window's panes down before its state goes: every
-    /// held picture settled, and every scene they hold freed while the
-    /// renderer lives.
-    pub(super) fn tear_down_panes(&mut self) {
+    /// Tear down the primary window's panes of every owner OWNS names (all,
+    /// before the window's state goes; a dead owner's): every held picture
+    /// settled, and every scene they hold freed while the renderer lives.
+    pub(super) fn tear_down_panes(&mut self, owns: impl Fn(u64) -> bool) {
         let mailbox = &self.panes;
         let Some(window) = self.frame_windows.primary_window_mut() else { return };
-        let scenes = window.render.compositor.pane_layers.clear(&mut |owner, head| mailbox.settle(owner, head));
+        let scenes = window.render.compositor.pane_layers.clear(owns, &mut |owner, head| mailbox.settle(owner, head));
         if let Some(renderer) = self.renderer.as_mut() {
             for scene in scenes {
                 scene.free(renderer);
@@ -360,7 +367,7 @@ impl super::RenderApp {
 
     /// The primary window's state, taken: its panes torn down first.
     pub(super) fn take_primary_window(&mut self) -> Option<super::frame_windows::GuiFrameWindowState> {
-        self.tear_down_panes();
+        self.tear_down_panes(|_| true);
         self.frame_windows.take_primary_window()
     }
 
@@ -374,7 +381,39 @@ impl super::RenderApp {
         for (owner, head) in superseded {
             self.panes.settle(owner, head);
         }
-        self.tear_down_panes();
+        self.tear_down_panes(|_| true);
+    }
+
+    /// Contract A4, as the drain reaches OWNER's death (`OwnerDied`), in
+    /// order with the uploads: the owner is dead to the render thread, its
+    /// panes are torn down (held pictures settled, scenes freed) so no
+    /// later frame draws its picture, and SLOT's fonts and images are
+    /// forgotten. The boundary: no picture of a dead owner is composed after
+    /// its `OwnerDied` drains; rasterized history a transition fades from
+    /// (ring textures, transition snapshots) is not recomposed, and is out
+    /// of scope.
+    pub(super) fn bury(&mut self, owner: u64, slot: u8) {
+        self.pane_states.dead.insert(owner);
+        let shown = self.frame_windows.primary_window().is_some_and(|window| window.render.compositor.pane_layers.owners().any(|drawn| drawn == owner));
+        self.tear_down_panes(|drawn| drawn == owner);
+        self.forget_slot(slot);
+        if shown && let Some(window) = self.frame_windows.primary_window_mut() {
+            window.render.compositor.current_scene_generation = super::frame_state::next_scene_generation();
+            window.render.mark_dirty();
+            window.request_redraw();
+        }
+    }
+
+    /// Forget owner slot SLOT's fonts (the primary window's atlas) and
+    /// images (the renderer's cache).
+    fn forget_slot(&mut self, slot: u8) {
+        let atlas = self.frame_windows.primary_window_mut().and_then(|window| window.render.compositor.glyph_atlas.as_mut());
+        if let Some(atlas) = atlas {
+            atlas.forget_fonts(|font| owner_font_slot(font.0) == Some(slot));
+        }
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.retire_images_where(|image| ImageIdSpace::Owner(slot).contains(image));
+        }
     }
 
     /// Ingest TAKEN: its pictures into the primary window's pane layers,
@@ -382,11 +421,16 @@ impl super::RenderApp {
     /// its states into the app's, mirrored into the layers.
     pub(super) fn ingest_panes(&mut self, taken: Taken) {
         let Taken { pictures, superseded, states } = taken;
+        for (owner, head) in superseded {
+            self.panes.settle(owner, head);
+        }
+        // A picture the round took before its owner's death drained.
+        let (gone, pictures): (Vec<Posted>, Vec<Posted>) = pictures.into_iter().partition(|posted| self.pane_states.dead.contains(&posted.owner));
+        for posted in gone {
+            self.panes.settle(posted.owner, posted.picture.head);
+        }
         let mailbox = &self.panes;
         let mut settle = |owner, head| mailbox.settle(owner, head);
-        for (owner, head) in superseded {
-            settle(owner, head);
-        }
         let Some(window) = self.frame_windows.primary_window_mut() else {
             for posted in pictures {
                 settle(posted.owner, posted.picture.head);
@@ -397,7 +441,8 @@ impl super::RenderApp {
         let compositor = &mut window.render.compositor;
         let root = compositor.current_frame.as_deref();
         let mut changed = compositor.pane_layers.ingest(root, pictures, &mut settle);
-        // A state changes the frame only for an owner whose pane it shows.
+        // A state, DEAD too, changes the frame only for an owner whose pane
+        // it shows: a dead owner's torn-down layer was its root entry's.
         let layers = &compositor.pane_layers;
         let drawn = |owner| root.is_some_and(|root| root.foreign_panes.iter().any(|entry| entry.owner == owner)) || layers.owners().any(|shown| shown == owner);
         changed |= self.pane_states.update(states, drawn);

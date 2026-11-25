@@ -191,7 +191,7 @@ fn the_hook_runs_once_per_entry_and_a_stale_catalog_draws_no_picture() {
     root.foreign_panes.push(ForeignPaneEntry { rect: Rect::new(0.0, 0.0, 60.0, 30.0), window: WINDOW + 1, owner: OWNER, view: VIEW, request: 3, cursor_off: false });
     let before = draw(&mut renderer, &mut render, &root, false);
     shown(&mut render, &root, picture(false));
-    let state = PaneState { code: PaneState::BUSY | PaneState::QUITS, since: observe_platform_now() };
+    let state = PaneState { code: PaneState::BUSY | PaneState::QUITS, since: observe_platform_now(), slot: SLOT };
     let mut states = crate::render_thread::pane_layers::PaneStates::default();
     states.update(vec![(OWNER, state)], |_| true);
     render.compositor.pane_layers.mirror(&states);
@@ -260,11 +260,214 @@ fn tearing_the_panes_down_gives_back_their_animation_scenes() {
     }
     let settled = Arc::new(Mutex::new(0));
     let count = settled.clone();
-    let scenes = render.compositor.pane_layers.clear(&mut |_, _| *count.lock().unwrap() += 1);
+    let scenes = render.compositor.pane_layers.clear(|_| true, &mut |_, _| *count.lock().unwrap() += 1);
     assert_eq!(scenes.len(), 1, "the logo's scene");
     assert_eq!(*settled.lock().unwrap(), 0, "a shown picture was settled when it was taken");
     for scene in scenes {
         scene.free(&mut renderer);
     }
     assert!(render.compositor.pane_layers.shown_all_mut().next().is_none());
+}
+
+// --- contract A4: an owner's death ---
+
+/// A render thread on a GPU whose root shows two panes, the old owner's
+/// (slot `SLOT`) and a new owner's: the old owner's picture drawn (its
+/// fonts installed) and an image of its slot loaded; its producer, its
+/// mailbox wired to the command channel as `PaintSender::pane_sink`
+/// wires it, and the heads it settled.
+struct DeadSlot {
+    app: crate::render_thread::RenderApp,
+    producer: crate::thread_comm::EmacsComms,
+    font: romacs_display_protocol::font::ResolvedFontId,
+    image: romacs_display_protocol::ImageId,
+    settled: Arc<Mutex<Vec<u64>>>,
+}
+
+fn dead_slot_app() -> DeadSlot {
+    use romacs_display_protocol::pane_picture::ImageIdSpace;
+    use romacs_display_protocol::pane_sink::PaneSink;
+    use romacs_display_protocol::{ImageLoadAttempt, ImageLoadToken};
+    let mut app = crate::render_thread::tests::make_test_app();
+    let (producer, render) = crate::thread_comm::ThreadComms::new().split();
+    app.comms = render;
+    assert!(app.panes.connect(producer.cmd_tx.clone()));
+    let settled = Arc::new(Mutex::new(Vec::new()));
+    let record = settled.clone();
+    assert!(app.panes.install(Box::new(move |_, head: PaneHead| record.lock().unwrap().push(head.v))));
+    let mut renderer = romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(W, H).expect("GPU required for the pane pass");
+    let mut root = root(false);
+    let newcomer = ForeignPaneEntry { window: WINDOW + 1, owner: OWNER + 1, ..root.foreign_panes[0] };
+    root.foreign_panes.push(newcomer);
+    let compositor = &mut app.frame_windows.primary_window_mut().unwrap().render.compositor;
+    compositor.glyph_atlas = Some(romacs_renderer_wgpu::WgpuGlyphAtlas::new(renderer.device()));
+    compositor.current_frame = Some(Arc::new(root));
+    let old = picture(false);
+    let font = *old.fonts.keys().next().expect("the picture names a font");
+    app.panes.post(OWNER, old, Arc::default());
+    app.process_commands();
+    let compositor = &mut app.frame_windows.primary_window_mut().unwrap().render.compositor;
+    let frame = Arc::clone(&compositor.pane_layers.shown_mut(WINDOW).expect("the old owner's pane").frame);
+    compositor.glyph_atlas.as_mut().unwrap().set_current_frame_fonts(frame.font_bindings());
+    let image = ImageIdSpace::Owner(SLOT).id(7).unwrap();
+    renderer.load_image_argb32_with_id(ImageLoadToken::new(image, ImageLoadAttempt::new(1).unwrap()), &[0; 4], 1, 1, 4);
+    app.renderer = Some(renderer);
+    DeadSlot { app, producer, font, image, settled }
+}
+
+fn dead() -> PaneState {
+    PaneState { code: PaneState::DEAD, since: observe_platform_now(), slot: SLOT }
+}
+
+/// A load of IMAGE (attempt ATTEMPT), as an owner's receiver sends one.
+fn load(image: romacs_display_protocol::ImageId, attempt: u64) -> crate::thread_comm::RenderCommand {
+    use romacs_display_protocol::{ImageLoadAttempt, ImageLoadToken};
+    let load = ImageLoadToken::new(image, ImageLoadAttempt::new(attempt).unwrap());
+    crate::thread_comm::RenderCommand::Asset(crate::thread_comm::AssetCommand::ImageLoadDecoded { load, decoded: Arc::new(decoded()) })
+}
+
+/// Whether IMAGE is resident once every retirement is released.
+fn resident(app: &mut crate::render_thread::RenderApp, image: romacs_display_protocol::ImageId) -> bool {
+    let renderer = app.renderer.as_mut().unwrap();
+    renderer.synchronize_retained_images(romacs_display_protocol::RetainedImageSet::default());
+    renderer.image_cache().get(image).is_some()
+}
+
+/// In one round the old owner dies and the new owner of its slot posts a
+/// picture naming the same font ids.
+fn die_and_reuse(app: &mut crate::render_thread::RenderApp) {
+    use romacs_display_protocol::pane_sink::PaneSink;
+    app.panes.state(OWNER, dead());
+    let mut reused = picture(false);
+    reused.head.owner = OWNER + 1;
+    reused.head.window = WINDOW + 1;
+    app.panes.post(OWNER + 1, reused, Arc::default());
+    app.process_commands();
+}
+
+#[test]
+fn a_dead_slots_fonts_and_images_are_gone_before_a_new_owner_of_the_slot_draws() {
+    let DeadSlot { mut app, font, image, producer: _producer, .. } = dead_slot_app();
+    let atlas_has = |app: &crate::render_thread::RenderApp| {
+        app.frame_windows.primary_window().unwrap().render.compositor.glyph_atlas.as_ref().unwrap().resolved_font(font).is_some()
+    };
+    assert!(atlas_has(&app) && app.renderer.as_ref().unwrap().image_cache().get_state(image).is_some(), "the old owner's font and image");
+    die_and_reuse(&mut app);
+    assert!(!atlas_has(&app), "the dead slot's font is gone before the new owner's picture draws");
+    assert!(!resident(&mut app, image), "and its image");
+    let layers = &mut app.frame_windows.primary_window_mut().unwrap().render.compositor.pane_layers;
+    assert!(layers.shown_mut(WINDOW + 1).is_some(), "the new owner's picture is taken");
+}
+
+/// The dead owner's pane draws empty, its composed picture gone, while the
+/// hook still runs over it with its DEAD state: the veil.
+#[test]
+fn a_dead_owner_draws_empty_under_the_hook_with_its_state() {
+    let DeadSlot { mut app, producer: _producer, .. } = dead_slot_app();
+    die_and_reuse(&mut app);
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let record = calls.clone();
+    *app.over_pane.lock().unwrap() = Box::new(move |_, _, pane: &DrawnPane, _| {
+        record.lock().unwrap().push((pane.window, pane.picture.is_some(), pane.state.map(|state| state.kind())));
+        false
+    });
+    let root = app.frame_windows.primary_window().unwrap().render.compositor.current_frame.clone().unwrap();
+    let mut renderer = app.renderer.take().unwrap();
+    let target = target(&renderer);
+    let view = target.create_view(&Default::default());
+    let render = &mut app.frame_windows.primary_window_mut().unwrap().render;
+    assert!(render.compositor.pane_layers.shown_mut(WINDOW).is_none(), "the dead owner's picture is dropped");
+    render_pane_layers(&mut renderer, render, &view, &root, (W, H)).unwrap();
+    assert_eq!(*calls.lock().unwrap(), vec![(WINDOW, false, Some(PaneState::DEAD)), (WINDOW + 1, true, None)]);
+}
+
+/// Pixels decoded as the image path decodes them: a 4x3 SVG.
+fn decoded() -> romacs_renderer_wgpu::image_cache::SemanticImageDecoded {
+    use romacs_display_protocol::image_diagnostic::{ImageDiagnosticSubject, ImageFormatName, ImageLoadIdentity};
+    use romacs_display_protocol::*;
+    use romacs_renderer_wgpu::image_cache::{SemanticImageDecoder, SemanticImageRequest, SemanticImageSource};
+    let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="4" height="3"/>"#.to_vec();
+    SemanticImageDecoder::default().decode_pixels(SemanticImageRequest {
+        source: SemanticImageSource::Data { data: EncodedBytes::new(svg), resources: romacs_renderer_wgpu::svg::SvgResourceContext::Isolated },
+        size: ImageSizeSpec::new(AxisSize::resolve(None, None), AxisSize::resolve(None, None)), rotation: ImageRotation::None,
+        realization: ImageRealization::new(1.0, 1.0, 1.0), colors: ImageColorContext::from_pixels(0, 0xffffff),
+        mask: ImageMaskPolicy::Preserve, animation: ImageAnimationPolicy::disabled(), frame: ImageFrameIndex::new(0),
+        sequence: ImageSequenceId::new(1).unwrap(), limit: ImageSizeLimit::UNLIMITED,
+        identity: ImageLoadIdentity::new(ImageFormatName::from_lisp_type("svg"), ImageDiagnosticSubject::Spec("test".into())),
+    }).unwrap()
+}
+
+/// The DEAD lands just after a round's take: its slot's retirement and
+/// then the new owner's load of a reused image id drain in that round, and
+/// the DEAD itself is taken in the next. The retirement rides the command
+/// channel with the uploads, so the new owner's image stays.
+#[test]
+fn a_death_after_the_take_keeps_the_new_owners_load() {
+    use romacs_display_protocol::pane_sink::PaneSink;
+    let DeadSlot { mut app, producer, image, .. } = dead_slot_app();
+    let (mailbox, commands) = (app.panes.clone(), producer.cmd_tx.clone());
+    let mut once = Some(());
+    *app.panes.after_take.lock().unwrap() = Some(Box::new(move || {
+        if once.take().is_some() {
+            mailbox.state(OWNER, dead());
+            commands.try_send(load(image, 2)).unwrap();
+        }
+    }));
+    app.process_commands();
+    app.process_commands();
+    assert!(resident(&mut app, image), "the new owner's image is resident");
+}
+
+/// The dead owner's upload, picture and DEAD all precede one take: its
+/// pixels are retired after they land, and the picture is settled.
+#[test]
+fn a_death_behind_its_own_upload_retires_the_upload() {
+    use romacs_display_protocol::pane_picture::ImageIdSpace;
+    use romacs_display_protocol::pane_sink::PaneSink;
+    let DeadSlot { mut app, producer, settled, .. } = dead_slot_app();
+    let fresh = ImageIdSpace::Owner(SLOT).id(8).unwrap();
+    producer.cmd_tx.try_send(load(fresh, 1)).unwrap();
+    let mut late = picture(false);
+    late.head.v = 2;
+    app.panes.post(OWNER, late, Arc::default());
+    app.panes.state(OWNER, dead());
+    app.process_commands();
+    assert!(!resident(&mut app, fresh), "the dead owner's pixels are gone");
+    assert!(settled.lock().unwrap().contains(&2), "its picture is settled");
+}
+
+/// The DEAD lands just after a round's take; that round's drain meets the
+/// death, then the new owner's load of a reused image id, while the root
+/// still names the dead owner's stand-in. From the death on, no frame
+/// draws the dead owner's picture: its pane draws nothing over the new
+/// owner's pixels.
+#[test]
+fn no_frame_after_a_death_draws_the_dead_owners_picture() {
+    use romacs_display_protocol::pane_sink::PaneSink;
+    let DeadSlot { mut app, producer, image, .. } = dead_slot_app();
+    let (mailbox, commands) = (app.panes.clone(), producer.cmd_tx.clone());
+    let mut once = Some(());
+    *app.panes.after_take.lock().unwrap() = Some(Box::new(move || {
+        if once.take().is_some() {
+            mailbox.state(OWNER, dead());
+            commands.try_send(load(image, 2)).unwrap();
+        }
+    }));
+    app.process_commands();
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let record = calls.clone();
+    *app.over_pane.lock().unwrap() = Box::new(move |_, _, pane: &DrawnPane, _| {
+        record.lock().unwrap().push((pane.window, pane.picture.is_some()));
+        false
+    });
+    let root = app.frame_windows.primary_window().unwrap().render.compositor.current_frame.clone().unwrap();
+    assert!(root.foreign_panes.iter().any(|entry| entry.owner == OWNER), "the root still names the dead owner's stand-in");
+    let mut renderer = app.renderer.take().unwrap();
+    let target = target(&renderer);
+    let view = target.create_view(&Default::default());
+    let render = &mut app.frame_windows.primary_window_mut().unwrap().render;
+    render_pane_layers(&mut renderer, render, &view, &root, (W, H)).unwrap();
+    assert!(calls.lock().unwrap().contains(&(WINDOW, false)), "the dead owner's pane draws no picture");
+    app.renderer = Some(renderer);
+    assert!(resident(&mut app, image), "the new owner's pixels are resident");
 }

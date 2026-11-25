@@ -72,6 +72,7 @@ impl RenderApp {
                 self.handle_model_update(id, req, change);
             }
             AssetCommand::ModelFree { id } => self.handle_model_free(id),
+            AssetCommand::OwnerDied { owner, slot } => self.bury(owner, slot),
             AssetCommand::DebugSimulateDeviceLoss => {
                 tracing::warn!(
                     "simulating wgpu device loss (debug): rebuilding GPU state on the next pass"

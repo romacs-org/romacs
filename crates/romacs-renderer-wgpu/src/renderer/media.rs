@@ -119,6 +119,11 @@ impl WgpuRenderer {
         self.caches.image.retire(image)
     }
 
+    /// The same, of every image OWNS names (a dead owner's slot).
+    pub fn retire_images_where(&mut self, owns: impl Fn(ImageId) -> bool) {
+        self.caches.image.retire_where(owns);
+    }
+
     /// Replace the complete set of image identities retained by render
     /// presentations, releasing any retirement whose last reference vanished.
     pub fn synchronize_retained_images(

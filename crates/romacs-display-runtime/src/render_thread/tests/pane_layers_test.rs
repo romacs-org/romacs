@@ -73,6 +73,7 @@ fn app() -> (RenderApp, EmacsComms, Arc<Mutex<Vec<u64>>>) {
         assert_eq!(owner, OWNER);
         record.lock().unwrap().push(head.v);
     })));
+    assert!(app.panes.connect(producer.cmd_tx.clone()), "a DEAD state sends the owner's death");
     producer.cmd_tx.try_send(RenderCommand::Window(WindowCommand::AdoptPrimaryFrame { frame: FrameRef::Frame(1) })).unwrap();
     app.process_commands();
     (app, producer, settled)
@@ -301,7 +302,7 @@ fn a_held_picture_is_settled_when_the_primary_window_goes() {
 // --- owners' states ---
 
 fn state(code: u32) -> romacs_display_protocol::pane_sink::PaneState {
-    romacs_display_protocol::pane_sink::PaneState { code, since: romacs_display_protocol::frame_time::observe_platform_now() }
+    romacs_display_protocol::pane_sink::PaneState { code, since: romacs_display_protocol::frame_time::observe_platform_now(), slot: 0 }
 }
 
 #[test]
@@ -361,4 +362,48 @@ fn the_over_pane_hook_outlives_a_hidden_window() {
     let layers = &app.frame_windows.primary_window().unwrap().render.compositor.pane_layers;
     let given = layers.over_pane().expect("the reopened window's pass has a hook");
     assert!(Arc::ptr_eq(given, &app.over_pane), "the app's hook, the one installed");
+}
+
+/// Contract A4: an owner's DEAD state settles its pending and held
+/// pictures exactly once, before this round's pictures, and any it posts
+/// after; its pane draws nothing while the state stays for the veil.
+#[test]
+fn a_dead_owners_pending_and_held_pictures_settle_exactly_once() {
+    use romacs_display_protocol::pane_sink::PaneState;
+    let (mut app, producer, record) = app();
+    send_root(&mut app, &producer, 1, vec![entry(3)]);
+    post(&app, picture(3, 6));
+    app.process_commands();
+    post(&app, picture(4, 7));
+    app.process_commands();
+    post(&app, picture(3, 8));
+    app.panes.state(OWNER, state(PaneState::DEAD));
+    app.process_commands();
+    assert_eq!(shown(&app), None, "the dead owner's composed picture is dropped");
+    let layers = &app.frame_windows.primary_window().unwrap().render.compositor.pane_layers;
+    assert_eq!(layers.state(OWNER).map(|state| state.kind()), Some(PaneState::DEAD), "kept while its entry shows");
+    post(&app, picture(3, 9));
+    app.process_commands();
+    assert_eq!(shown(&app), None, "nothing it posts after its death draws");
+    producer.cmd_tx.try_send(RenderCommand::Window(WindowCommand::DestroyWindow { frame: FrameRef::Frame(1) })).unwrap();
+    app.process_commands();
+    let mut all = settled(&record);
+    all.sort_unstable();
+    assert_eq!(all, vec![6, 7, 8, 9], "each once: composed, held, pending, late");
+}
+
+/// A hidden owner's death (no root entry, no layer) changes no frame.
+#[test]
+fn a_hidden_owners_death_invalidates_nothing() {
+    use romacs_display_protocol::pane_sink::PaneState;
+    let (mut app, producer, _) = app();
+    send_root(&mut app, &producer, 1, vec![entry(3)]);
+    let generation = |app: &RenderApp| app.frame_windows.primary_window().unwrap().render.compositor.current_scene_generation;
+    let before = generation(&app);
+    app.panes.state(OWNER + 1, state(PaneState::DEAD));
+    app.process_commands();
+    assert_eq!(generation(&app), before, "no scene invalidated");
+    app.panes.state(OWNER, state(PaneState::DEAD));
+    app.process_commands();
+    assert_ne!(generation(&app), before, "a shown owner's death is drawn");
 }

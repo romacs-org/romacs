@@ -44,6 +44,12 @@ pub fn owner_slot_base(slot: u8) -> Option<u32> {
     (slot <= LAST_OWNER_SLOT).then(|| (u32::from(slot) + 1) << SLOT_SHIFT)
 }
 
+/// The owner slot whose font range ID is in; None for a master font.
+#[must_use]
+pub fn owner_font_slot(id: u32) -> Option<u8> {
+    u8::try_from((id >> SLOT_SHIFT).checked_sub(1)?).ok().filter(|&slot| slot <= LAST_OWNER_SLOT)
+}
+
 /// Whether font ID is one of owner slot SLOT's.
 fn in_slot(id: u32, slot: u8) -> bool {
     id >> SLOT_SHIFT == u32::from(slot) + 1

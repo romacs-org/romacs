@@ -1621,6 +1621,25 @@ impl WgpuGlyphAtlas {
         }
     }
 
+    /// Forget every resolved font OWNS names (a dead owner's slot), so a
+    /// later owner of the same ids installs its own under them. The glyph
+    /// masks cached from a forgotten font are keyed by identities a reused
+    /// id hashes alike, so when one was installed every cached glyph goes,
+    /// once: no reused id meets a stale mask.
+    pub fn forget_fonts(&mut self, owns: impl Fn(ResolvedFontId) -> bool) {
+        let installed = self.frame_fonts.len();
+        self.frame_fonts.retain(|&id, _| !owns(id));
+        if self.frame_fonts.len() != installed {
+            self.clear();
+        }
+    }
+
+    /// The resolved font installed under ID.
+    #[must_use]
+    pub fn resolved_font(&self, id: ResolvedFontId) -> Option<&ResolvedFont> {
+        self.frame_fonts.get(&id)
+    }
+
     /// Replace face-id-keyed font bindings with the frame currently being
     /// drawn.
     ///
