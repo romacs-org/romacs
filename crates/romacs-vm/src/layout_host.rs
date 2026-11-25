@@ -16,13 +16,13 @@ impl Vm {
     /// Attach (Some) or detach (None) the host layout. While attached, a
     /// window the host has laid out is measured with it.
     pub fn set_layout_host(&mut self, host: Option<Box<dyn LayoutHost>>) {
-        self.layout_host = host.map(|host| Box::new(crate::host_calls::Counted(host)) as Box<dyn LayoutHost>);
+        let host = host.map(|host| Box::new(crate::host_calls::Counted(host)) as Box<dyn LayoutHost>);
+        self.ui_set(host, |ui| &mut ui.layout_host);
     }
-    pub(crate) fn has_layout_host(&self) -> bool { self.layout_host.is_some() }
+    pub(crate) fn has_layout_host(&self) -> bool { self.ui_ref(|ui| ui.layout_host.is_some()).unwrap_or(false) }
     /// INPUT's host geometry; an error when no host is attached.
     pub(crate) fn host_layout(&mut self, input: &MeasureInput) -> crate::Result<Measured> {
-        let host = self.layout_host.as_mut().ok_or("no layout host")?;
-        let measured = host.measure(input)?;
+        let measured = self.ui(|ui| ui.layout_host.as_mut().map(|host| host.measure(input))).flatten().ok_or("no layout host")??;
         if measured.glyphs.len() != input.text.utf8.chars().count() || measured.ascents.len() != measured.glyphs.len() || measured.fallback.len() != measured.glyphs.len() || measured.face_ascents.len() != measured.face_heights.len() || measured.face_heights.len() != input.faces.len() {
             return Err("layout host answered for other input".into());
         }
@@ -30,8 +30,7 @@ impl Vm {
     }
     /// What painting FRAME would report for its windows.
     pub(crate) fn host_lay_out(&mut self, frame: &FrameSnapshot) -> crate::Result<Vec<WindowEnd>> {
-        let host = self.layout_host.as_mut().ok_or("no layout host")?;
-        let ends = host.lay_out(frame)?;
+        let ends = self.ui(|ui| ui.layout_host.as_mut().map(|host| host.lay_out(frame))).flatten().ok_or("no layout host")??;
         if ends.len() != frame.windows.len() { return Err("layout host answered for other windows".into()); }
         Ok(ends)
     }

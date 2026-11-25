@@ -1,6 +1,78 @@
 use super::*;
 
 #[test]
+fn entry_barrier_keymap_lookup_in_unrestricted_buffer_stays_clean() {
+    let mut vm = Vm::new();
+    vm.eval_source_raw(
+        "(insert \"abcde\") (goto-char 2)
+        (setq entry-map (make-sparse-keymap)) (put-text-property 2 3 'keymap entry-map)",
+    )
+    .unwrap();
+    let property = vm.intern("keymap");
+    vm.check_buffer_entry_store(false, |vm, _| {
+        let expected = vm.slots[vm.names["entry-map"]].value;
+        assert_eq!(vm.keymap_at_point(property).ok(), Some(expected));
+    });
+}
+
+#[test]
+fn entry_barrier_keymap_lookup_temporarily_widens_and_dirties_the_buffer() {
+    let mut vm = Vm::new();
+    // At point-min, the keymap comes from the preceding, narrowed-out character.
+    vm.eval_source_raw(
+        "(insert \"abcde\") (goto-char 2)
+        (setq entry-map (make-sparse-keymap)) (put-text-property 1 2 'keymap entry-map)
+        (narrow-to-region 2 4)",
+    )
+    .unwrap();
+    let property = vm.intern("keymap");
+    vm.check_buffer_entry_store(true, |vm, index| {
+        let expected = vm.slots[vm.names["entry-map"]].value;
+        assert_eq!(vm.keymap_at_point(property).ok(), Some(expected));
+        let data::Object::Buffer(text) = &vm.objects[index] else {
+            panic!("expected a multibyte buffer")
+        };
+        assert_eq!(
+            text.accessible(),
+            coordinates::ByteOffset(1)..coordinates::ByteOffset(3)
+        );
+        assert_eq!(text.point, coordinates::ByteOffset(1));
+    });
+}
+
+#[test]
+fn entry_barrier_local_keymap_fallback_stays_clean() {
+    let mut vm = Vm::new();
+    vm.eval_source_raw(
+        "(insert \"abcde\") (goto-char 2)
+        (setq entry-map (make-sparse-keymap)) (use-local-map entry-map)",
+    )
+    .unwrap();
+    let property = vm.intern("local-map");
+    vm.check_buffer_entry_store(false, |vm, _| {
+        let expected = vm.slots[vm.names["entry-map"]].value;
+        assert_eq!(vm.keymap_at_point(property).ok(), Some(expected));
+    });
+}
+
+#[test]
+fn entry_barrier_installing_the_local_keymap_dirties_the_buffer() {
+    let mut vm = Vm::new();
+    vm.eval_source_raw("(current-buffer) (setq entry-map (make-sparse-keymap))")
+        .unwrap();
+    vm.check_buffer_entry_store(true, |vm, index| {
+        assert_eq!(
+            vm.eval_source_raw("(use-local-map entry-map)").unwrap(),
+            Value::NIL
+        );
+        let data::Object::Buffer(text) = &vm.objects[index] else {
+            panic!("expected a multibyte buffer")
+        };
+        assert_eq!(text.local_keymap, vm.slots[vm.names["entry-map"]].value);
+    });
+}
+
+#[test]
 fn make_keymap_contains_a_real_character_table() {
     let mut vm = Vm::new();
     let got = vm.eval_source_raw("(let ((m (make-keymap))) (list (car m) (char-table-p (car (cdr m))) (keymapp m) (length m)))").and_then(|v| vm.display(v));

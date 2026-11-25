@@ -119,8 +119,11 @@ TURNS), when SESSION can roll back to REQUEST with OPTIONS now; else a
          (turns (romacs-agent-rollback--turns records request)))
     (unless (cdr turns) (user-error "That prompt is no longer this session's conversation"))
     ;; A renewed conversation's first prompt carried its brief: going back
-    ;; before it would leave the conversation without one.
+    ;; before it would leave the conversation without one.  A cleared one
+    ;; carried none.
     (when (and (romacs-agent--note-p (car records) "renew")
+               (let ((brief (gethash "brief" (gethash "note" (car records)))))
+                 (and (stringp brief) (not (string-empty-p brief))))
                (equal request (cl-some #'romacs-agent--record-request records)))
       (user-error "That prompt began this renewed conversation: roll back to a later one"))
     ;; With no snapshot pending, the checkpoints are all there: refuse now.

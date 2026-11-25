@@ -6,10 +6,11 @@
 ;; The agent session protocol's framing (doc/agent-protocol.org,
 ;; Framing), shared by the agents service and its clients: one JSON-RPC
 ;; 2.0 message a line, each at most `romacs-agent-rpc-message-limit'
-;; bytes.  Sending never waits on the peer: a message the socket does not
-;; take at once waits in its connection's queue, written as the peer
-;; reads, and a peer that leaves more than `romacs-agent-rpc-queue-limit'
-;; bytes unread is closed (the one overflow signal that cannot be lost).
+;; bytes, split by the process layer as it reads (`set-process-framing').
+;; Sending never waits on the peer: what the socket does not take at once
+;; waits in its channel, written as the peer reads, and a peer that leaves
+;; more than `romacs-agent-rpc-queue-limit' bytes unread is closed (the one
+;; overflow signal that cannot be lost).
 
 ;;; Code:
 
@@ -22,33 +23,28 @@
   "The most bytes a connection may hold unsent before it is closed.")
 
 (cl-defstruct (romacs-agent-rpc (:constructor romacs-agent-rpc--make) (:copier nil))
-  "One connection: its PROCESS, the PARTIAL line read last, the messages
-waiting to be sent (QUEUE, oldest first, and their BYTES), whether the
-socket still holds part of one (HELD), and what its owner keeps (DATA)."
-  process (partial "") queue (bytes 0) held data)
-
-(defvar romacs-agent-rpc--held nil "The connections with something unsent.")
-(defvar romacs-agent-rpc--timer nil "Writes what the held connections hold.")
+  "One connection: its PROCESS and what its owner keeps (DATA)."
+  process data)
 
 (defun romacs-agent-rpc-make (process &optional data)
-  "A connection on PROCESS, keeping DATA."
+  "A connection on PROCESS, keeping DATA: PROCESS's output is framed in
+lines of at most `romacs-agent-rpc-message-limit' bytes, so its filter
+is called with the lines it read (`romacs-agent-rpc-lines')."
+  (when (processp process)
+    (set-process-framing process 'lines romacs-agent-rpc-message-limit))
   (romacs-agent-rpc--make :process process :data data))
 
 (defun romacs-agent-rpc-live-p (rpc)
   "Non-nil while RPC's process is live."
   (process-live-p (romacs-agent-rpc-process rpc)))
 
-(defun romacs-agent-rpc-lines (rpc chunk)
-  "The whole lines CHUNK completes on RPC, in order, empty ones dropped and
-the unfinished rest kept for the next chunk; `over' when a line, the rest
-included, is over `romacs-agent-rpc-message-limit' bytes (the caller
-closes the peer)."
-  (let* ((text (concat (romacs-agent-rpc-partial rpc) chunk))
-         (lines (split-string text "\n")))
-    (setf (romacs-agent-rpc-partial rpc) (car (last lines)))
-    (if (cl-some (lambda (line) (> (string-bytes line) romacs-agent-rpc-message-limit)) lines)
-        'over
-      (delete "" (butlast lines)))))
+(defun romacs-agent-rpc-lines (_rpc frames)
+  "The lines of FRAMES, what RPC's filter was called with, in order, empty
+ones dropped; `over' when one was over `romacs-agent-rpc-message-limit'
+bytes (the caller closes the peer)."
+  (if (memq 'over frames)
+      'over
+    (delete "" frames)))
 
 (defun romacs-agent-rpc-parse (line)
   "LINE, UTF-8 bytes as read, as a message (a hash table), or nil when it
@@ -92,64 +88,31 @@ no reply answers it."
 
 (defun romacs-agent-rpc-send (rpc message)
   "Send MESSAGE (a hash table) on RPC, never waiting: what the socket does
-not take now is queued, behind whatever already is.  A message over the
-limit signals, never sent broken; a connection whose queue is over its
-limit is closed.  The channel itself holds at most the rest of one
-message beside the queue.  Non-nil while RPC is live."
+not take now waits in its channel, behind whatever already does, written
+as the peer reads.  A message over the limit signals, never sent broken;
+a connection left holding more than `romacs-agent-rpc-queue-limit' bytes
+unsent once its socket took what it could is closed.  Non-nil while RPC
+is live."
   (let ((line (romacs-agent-rpc-encode message)))
     (when (> (1- (string-bytes line)) romacs-agent-rpc-message-limit)
       (error "Agent protocol message of %d bytes is over the limit" (1- (string-bytes line))))
     (when (romacs-agent-rpc-live-p rpc)
-      (if (or (romacs-agent-rpc-held rpc) (romacs-agent-rpc-queue rpc))
-          (romacs-agent-rpc--enqueue rpc line)
-        (romacs-agent-rpc--write rpc line))
+      (romacs-agent-rpc--write rpc line)
+      ;; What the peer left unread, this message's rest included.
+      (when (and (romacs-agent-rpc-live-p rpc)
+                 (> (romacs-process-unsent-bytes (romacs-agent-rpc-process rpc)) romacs-agent-rpc-queue-limit))
+        (romacs-agent-rpc-close rpc))
       (romacs-agent-rpc-live-p rpc))))
 
 (defun romacs-agent-rpc--write (rpc line)
-  "Hand LINE to RPC's socket; held when it does not take all of it."
+  "Hand LINE to RPC's channel, which writes it as the peer reads; a write
+that fails closes RPC."
   (condition-case nil
-      (unless (romacs-process-send-nowait (romacs-agent-rpc-process rpc) line)
-        (setf (romacs-agent-rpc-held rpc) t)
-        (romacs-agent-rpc--hold rpc))
+      (romacs-process-send-nowait (romacs-agent-rpc-process rpc) line)
     (error (romacs-agent-rpc-close rpc))))
-
-(defun romacs-agent-rpc--enqueue (rpc line)
-  (setf (romacs-agent-rpc-queue rpc) (nconc (romacs-agent-rpc-queue rpc) (list line))
-        (romacs-agent-rpc-bytes rpc) (+ (romacs-agent-rpc-bytes rpc) (string-bytes line)))
-  (if (> (romacs-agent-rpc-bytes rpc) romacs-agent-rpc-queue-limit)
-      (romacs-agent-rpc-close rpc)
-    (romacs-agent-rpc--hold rpc)))
-
-(defun romacs-agent-rpc--hold (rpc)
-  (unless (memq rpc romacs-agent-rpc--held) (push rpc romacs-agent-rpc--held))
-  (unless (timerp romacs-agent-rpc--timer)
-    (setq romacs-agent-rpc--timer (run-at-time 0.02 0.02 #'romacs-agent-rpc--drain))))
-
-(defun romacs-agent-rpc--drain ()
-  "Write what each held connection holds, as far as its socket takes it."
-  (dolist (rpc romacs-agent-rpc--held)
-    (if (not (romacs-agent-rpc-live-p rpc))
-        (setq romacs-agent-rpc--held (delq rpc romacs-agent-rpc--held))
-      (condition-case nil
-          (progn
-            (when (and (romacs-agent-rpc-held rpc) (romacs-process-send-nowait (romacs-agent-rpc-process rpc)))
-              (setf (romacs-agent-rpc-held rpc) nil))
-            (while (and (not (romacs-agent-rpc-held rpc)) (romacs-agent-rpc-queue rpc))
-              (let ((line (pop (romacs-agent-rpc-queue rpc))))
-                (setf (romacs-agent-rpc-bytes rpc) (- (romacs-agent-rpc-bytes rpc) (string-bytes line)))
-                (unless (romacs-process-send-nowait (romacs-agent-rpc-process rpc) line)
-                  (setf (romacs-agent-rpc-held rpc) t))))
-            (unless (or (romacs-agent-rpc-held rpc) (romacs-agent-rpc-queue rpc))
-              (setq romacs-agent-rpc--held (delq rpc romacs-agent-rpc--held))))
-        (error (romacs-agent-rpc-close rpc)))))
-  (when (and (null romacs-agent-rpc--held) (timerp romacs-agent-rpc--timer))
-    (cancel-timer romacs-agent-rpc--timer)
-    (setq romacs-agent-rpc--timer nil)))
 
 (defun romacs-agent-rpc-close (rpc)
   "Close RPC, dropping what it held unsent."
-  (setq romacs-agent-rpc--held (delq rpc romacs-agent-rpc--held))
-  (setf (romacs-agent-rpc-queue rpc) nil (romacs-agent-rpc-bytes rpc) 0 (romacs-agent-rpc-held rpc) nil)
   (when (process-live-p (romacs-agent-rpc-process rpc))
     (delete-process (romacs-agent-rpc-process rpc))))
 

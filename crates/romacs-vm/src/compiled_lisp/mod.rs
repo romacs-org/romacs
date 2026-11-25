@@ -28,7 +28,7 @@
 //! and this is no world build. Without a store every load reads source,
 //! as a GNU installation without `.elc` files.
 mod background;
-mod codec;
+pub(crate) mod codec;
 pub(crate) mod stats;
 mod tree;
 pub(crate) mod store;

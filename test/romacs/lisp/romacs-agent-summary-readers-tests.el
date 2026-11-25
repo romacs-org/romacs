@@ -401,10 +401,10 @@
                (command (lookup-key romacs-agent-menu-map (kbd "t"))))
            (should (eq command 'romacs-agent-menu-threads))
            (cl-letf (((symbol-function 'romacs-agent-show)
-                      (lambda (session action) (push (list session action) shown))))
+                      (lambda (session &optional action) (push (list session action) shown))))
              (romacs-agent-summary-readers--completion
               (list live settled) settled (lambda () (call-interactively command)))))))
-      (should (equal shown (list (list child '(display-buffer-same-window))))))))
+      (should (equal shown (list (list child nil)))))))
 
 (ert-deftest romacs-agent-summary-readers-plain-effort-completion ()
   (should (equal (romacs-agent-summary-readers--completion

@@ -455,7 +455,7 @@ impl Leaf<'_> {
             }
             match wake {
                 Wake::Read => readable.push(proc),
-                Wake::Write => self.process_flush(proc)?,
+                Wake::Write => self.process_flush_waited(proc),
                 Wake::Connect => connected.push(proc),
                 Wake::Handshake => match self.gnutls_handshake_poll(proc) {
                     super::gnutls::Handshake::Pending => {}
@@ -592,6 +592,9 @@ impl Leaf<'_> {
             }
         };
         buf.truncate(nbytes);
+        if self.channel(proc).is_some_and(|c| c.framer.is_some()) {
+            return self.process_read_framed(proc, &buf);
+        }
         let channel = self.channel_mut(proc).expect("read channel");
         let mut bytes = std::mem::take(&mut channel.carryover);
         let carried = bytes.len();
@@ -632,7 +635,7 @@ impl Leaf<'_> {
         }
         Ok(text)
     }
-    fn coding_spec_checked(&mut self, coding: Value) -> Result<Value> {
+    pub(super) fn coding_spec_checked(&mut self, coding: Value) -> Result<Value> {
         let coding = if coding == Value::NIL { self.sym("no-conversion") } else { coding };
         let spec = self.coding_spec(coding)?;
         if spec == Value::NIL {
@@ -739,19 +742,19 @@ impl Leaf<'_> {
             return Err(Fault::Error(format!("Output file descriptor of {name} is closed")));
         };
         if let Some(bytes) = bytes {
-            channel.pending.extend_from_slice(&bytes);
+            channel.pending.extend(&bytes);
         }
         self.process_flush(proc)?;
         Ok(if self.channel(proc).is_some_and(|c| c.pending.is_empty()) { Value::TRUE } else { Value::NIL })
     }
-    fn process_flush(&mut self, proc: Value) -> Result<()> {
+    pub(super) fn process_flush(&mut self, proc: Value) -> Result<()> {
         let Some(channel) = self.channel_mut(proc) else { return Ok(()) };
         let Some(fd) = channel.outfd.as_ref().map(|f| f.as_fd()) else { return Ok(()) };
         if let Some(session) = channel.tls.as_deref_mut().filter(|s| s.active) {
             // emacs_gnutls_write: the session takes the bytes into records
             // and holds what the socket does not take yet; before READY it
             // takes nothing, and the bytes wait for the handshake.
-            let written = session.flush(fd).and_then(|()| if channel.pending.is_empty() { Ok(0) } else { session.write(fd, &channel.pending) });
+            let written = session.flush(fd).and_then(|()| if channel.pending.is_empty() { Ok(0) } else { session.write(fd, channel.pending.make_contiguous()) });
             return match written {
                 Ok(n) => { channel.pending.drain(..n); Ok(()) }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Ok(()),
@@ -762,7 +765,7 @@ impl Leaf<'_> {
             };
         }
         while !channel.pending.is_empty() {
-            match sp::write(fd, &channel.pending) {
+            match sp::write(fd, channel.pending.as_slices().0) {
                 Ok(0) => break,
                 Ok(n) => { channel.pending.drain(..n); }
                 Err(error) if error.raw_os_error() == Some(libc::EPIPE) => {

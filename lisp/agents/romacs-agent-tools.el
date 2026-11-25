@@ -1292,8 +1292,15 @@ loaded, attached, and stopped by a look after."
   "Run the reaper, unless it runs."
   (unless (timerp romacs-agent-tools--reaper)
     (setq romacs-agent-tools--reaper
-          (run-at-time romacs-agent-tools--reap-every romacs-agent-tools--reap-every
-                       #'romacs-agent-tools--reap-sweep))))
+          (let ((every (romacs-agent-tools--reap-period)))
+            (run-at-time every every #'romacs-agent-tools--reap-sweep)))))
+
+(defun romacs-agent-tools--reap-period ()
+  "Seconds between the reaper's looks: `romacs-agent-tools--reap-every',
+or a task's whole idle time when that is shorter."
+  (if (numberp romacs-agent-reap-after)
+      (max 1 (min romacs-agent-tools--reap-every romacs-agent-reap-after))
+    romacs-agent-tools--reap-every))
 
 (defun romacs-agent-tools--reap-on-event (session event)
   "A task's turn ended: it may be done, so the reaper runs."

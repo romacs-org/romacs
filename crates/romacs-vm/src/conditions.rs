@@ -291,6 +291,7 @@ impl Vm {
         }
         if p == Put {
             let value = self.mutator.stack[start + 2];
+            self.mark_condition_written(id)?;
             self.conditions.put(id, y, value);
             return Ok(value);
         }
@@ -299,8 +300,17 @@ impl Vm {
         } else {
             self.mutator.stack[start + 2]
         };
+        self.define_condition(id, y, parents)
+    }
+    fn mark_condition_written(&mut self, id: SymbolId) -> Checked<()> {
+        let symbol = id.value();
+        let slot = self.plist_owner_mut(symbol).map_err(|_| Fault::wrong(self.intern_symbol("symbolp"), symbol))?;
+        self.slots.mark_written_since_restore(slot);
+        Ok(())
+    }
+    fn define_condition(&mut self, id: SymbolId, message: Value, parents: Value) -> Checked<Value> {
         let property = self.intern_symbol("error-conditions");
-        let mut ancestors = vec![x];
+        let mut ancestors = vec![id.value()];
         let parent_list = parents.tag() == 3;
         let parents = if parent_list {
             self.list_values(parents)
@@ -333,11 +343,12 @@ impl Vm {
                 }
             }
         }
+        self.mark_condition_written(id)?;
         let projection = self.list_value(&ancestors);
         self.conditions.put(id, property, projection);
         let property = self.intern_symbol("error-message");
-        self.conditions.put(id, property, y);
-        Ok(y)
+        self.conditions.put(id, property, message);
+        Ok(message)
     }
     fn message_string(&self, value: Value) -> Result<&str> {
         if Self::image_string(value) {

@@ -36,7 +36,9 @@ fn isolate_wait(cx, timeout: Value) {
 
 // (romacs--isolate-take ID): the next frame from peer ID as (KIND
 // GENERATION VALUE), with an ordinary string for `text' and `hello'
-// and frozen data for `job', `result', `error' and `message'. Nil when none waits.
+// and, for `job', `result', `error' and `message', frozen data, or private
+// copies of a code graph (a seed's).  A frame whose value cannot be read is
+// spent and taken as (frame-error GENERATION (KIND REASON)).  Nil when none waits.
 defsubr! { name = "romacs--isolate-take", gnu = "romacs:isolate", effect = Global,
 fn isolate_take(cx, isolate: Value) {
     cx.isolate_take(id(cx, isolate)?)

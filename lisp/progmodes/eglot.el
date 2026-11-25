@@ -1790,20 +1790,13 @@ received the initializing configuration.
 Each function is passed an `eglot-lsp-server' instance
 as argument.")
 
+(defvar tramp-pipe-process)
+
 (defun eglot--cmd (contact)
-  "Helper for `eglot--connect'."
-  (if (file-remote-p default-directory)
-      ;; TODO: this seems like a bug, although it’s everywhere. For
-      ;; some reason, for remote connections only, over a pipe, we
-      ;; need to turn off line buffering on the tty.
-      ;;
-      ;; Not only does this seem like there should be a better way,
-      ;; but it almost certainly doesn’t work on non-unix systems.
-      (list shell-file-name "-c"
-            (string-join (cons "stty raw > /dev/null;"
-                               (mapcar #'shell-quote-argument contact))
-                         " "))
-    contact))
+  "Helper for `eglot--connect': CONTACT's command.  Romacs: a remote
+server is a pipe at both ends (`tramp-pipe-process'), so no tty needs
+its line buffering turned off."
+  contact)
 
 (defvar-local eglot--cached-server nil
   "A cached reference to the current Eglot server.")
@@ -1848,14 +1841,11 @@ This docstring appeases checkdoc, that's all."
                    `(:process
                      ,(lambda ()
                         (let ((default-directory default-directory)
-                              ;; bug#61350: Tramp turns on a feature
-                              ;; by default that can't (yet) handle
-                              ;; very much data so we turn it off
-                              ;; unconditionally -- just for our
-                              ;; process.
-                              (tramp-use-ssh-controlmaster-options 'suppress)
-                              (tramp-ssh-controlmaster-options
-                               "-o ControlMaster=no -o ControlPath=none"))
+                              ;; Romacs: a remote server is a pipe at
+                              ;; both ends, sharing TRAMP's connection
+                              ;; as a client, never its master
+                              ;; (ledger/divergences/LISP-JSONRPC-FRAMING.md).
+                              (tramp-pipe-process t))
                           (make-process
                            :name readable-name
                            :command (setq server-info (eglot--cmd contact))
