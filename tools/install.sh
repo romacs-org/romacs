@@ -29,7 +29,8 @@ staging=''
 work=''
 min_glibc=2.39
 libraries=(libfontconfig.so.1 libfreetype.so.6 libz.so.1 libwayland-client.so.0
-           libxkbcommon.so.0 libvulkan.so.1)
+           libxkbcommon.so.0 libvulkan.so.1 libX11.so.6 libX11-xcb.so.1
+           libxcb.so.1 libXi.so.6 libxkbcommon-x11.so.0)
 
 say() { printf '\033[1m==>\033[0m %s\n' "$*"; }
 warn() { printf 'romacs: %s\n' "$*" >&2; }
@@ -77,9 +78,9 @@ package_command() {
     fi
     case " $id $id_like " in
         *' arch '*)
-            echo 'pacman -S --needed fontconfig freetype2 zlib wayland libxkbcommon vulkan-icd-loader ttf-dejavu' ;;
+            echo 'pacman -S --needed fontconfig freetype2 zlib wayland libxkbcommon libxkbcommon-x11 libx11 libxcb libxi vulkan-icd-loader ttf-dejavu' ;;
         *' debian '* | *' ubuntu '*)
-            echo 'apt-get install -y libfontconfig1 libfreetype6 zlib1g libwayland-client0 libxkbcommon0 libvulkan1 mesa-vulkan-drivers fonts-dejavu-core' ;;
+            echo 'apt-get install -y libfontconfig1 libfreetype6 zlib1g libwayland-client0 libxkbcommon0 libxkbcommon-x11-0 libx11-6 libx11-xcb1 libxcb1 libxi6 libvulkan1 mesa-vulkan-drivers fonts-dejavu-core' ;;
     esac
 }
 
@@ -165,7 +166,7 @@ report_session() {
         *":$bin:"*) ;;
         *) warn "$bin isn't on your PATH; add it to your shell's profile." ;;
     esac
-    [ -n "${WAYLAND_DISPLAY:-}" ] || warn "no Wayland session here; Romacs's window needs one (--batch doesn't)."
+    [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ] || warn "set WAYLAND_DISPLAY or DISPLAY to open a Romacs window."
     compgen -G '/usr/share/vulkan/icd.d/*.json' >/dev/null ||
         compgen -G '/etc/vulkan/icd.d/*.json' >/dev/null ||
         warn "no Vulkan driver found; install your GPU's (Arch: vulkan-radeon, vulkan-intel or nvidia-utils)."

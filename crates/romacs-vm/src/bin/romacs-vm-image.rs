@@ -4,14 +4,16 @@ use sha2::{Digest, Sha256};
 use std::path::Path;
 fn main() {
     if let Err(e) = run() {
+        // HOST(escape): stdout and stderr are sends another process reads
         eprintln!("vm2-image: {e}");
+        // HOST(escape): ends the process: its parent sees the status
         std::process::exit(1);
     }
 }
 fn run() -> Result<(), String> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args.len() == 3 && matches!(args[0].as_str(), "--code" | "--snapshot-code") {
-        // HOST(std::fs): bin adapter that builds no worlds
+        // HOST(std::fs, block): bin adapter that builds no worlds; reads its input by path, which can block
         let source = std::fs::read(&args[2]).map_err(|e| e.to_string())?;
         let input: serde_json::Value =
             serde_json::from_slice(&source).map_err(|e| e.to_string())?;
@@ -31,6 +33,7 @@ fn run() -> Result<(), String> {
         };
         let entry = vm.compile(&form)?;
         let key = vm.publish_code_image(Path::new(&args[1]), entry, config)?;
+        // HOST(escape): stdout and stderr are sends another process reads
         println!(
             "{}",
             serde_json::json!({"key":key,"config":config.iter().map(|b|format!("{b:02x}")).collect::<String>(),"abi":"VM2CODE3"})
@@ -40,7 +43,7 @@ fn run() -> Result<(), String> {
     if args.len() != 2 {
         return Err("usage: romacs-vm-image STORE INPUT.json".into());
     }
-    // HOST(std::fs): bin adapter that builds no worlds
+    // HOST(std::fs, block): bin adapter that builds no worlds; reads its input by path, which can block
     let source = std::fs::read(&args[1]).map_err(|e| e.to_string())?;
     let strings: Vec<String> = serde_json::from_slice(&source).map_err(|e| e.to_string())?;
     if strings.is_empty() {
@@ -53,6 +56,7 @@ fn run() -> Result<(), String> {
         root = builder.cons(text, root);
     }
     let key = builder.publish(Path::new(&args[0]), Sha256::digest(&source).into())?;
+    // HOST(escape): stdout and stderr are sends another process reads
     println!(
         "{}",
         serde_json::json!({"key": key, "root": strings.len()-1, "strings": strings.len(), "abi": "VM2IMG02"})

@@ -15,11 +15,11 @@
 //! expanding them again, and its joined text is found here in turn.
 use super::{Compiled, native};
 use std::collections::HashMap;
-use std::rc::Rc;
+use std::sync::Arc;
 
 /// What compiling gives: the shared query, or the compiler's error offset
 /// and GNU's description of its type.
-pub(crate) type Outcome = Result<Rc<Compiled>, (u32, &'static str)>;
+pub(crate) type Outcome = Result<Arc<Compiled>, (u32, &'static str)>;
 
 /// A loaded grammar, as the memo tells them apart: its `TSLanguage`'s
 /// address, which no other grammar can take for the session since no
@@ -49,6 +49,9 @@ struct Entry {
     used: u64,
 }
 
+/// `Send`, as a `Vm` moving to another thread needs its query memo to be.
+const _: fn() = || { fn send<T: Send>() {} send::<Memo>(); };
+
 /// The VM's compiled queries by grammar and text.
 #[derive(Default)]
 pub(crate) struct Memo {
@@ -67,7 +70,7 @@ impl Memo {
         if let Some(outcome) = self.lookup(grammar, source) {
             return outcome;
         }
-        let outcome = native::Query::new(language, source).map(|query| Rc::new(Compiled::new(query, source)));
+        let outcome = native::Query::new(language, source).map(|query| Arc::new(Compiled::new(query, source)));
         self.insert(grammar, source, outcome.clone());
         outcome
     }
@@ -106,7 +109,7 @@ impl Memo {
 #[cfg(test)]
 mod tests {
     use super::{CAPACITY, Grammar, Memo, native};
-    use std::rc::Rc;
+    use std::sync::Arc;
 
     /// The C grammar as the loader finds it (`tests/treesit.rs` needs it
     /// too): GNU's names for a bare `libtree-sitter-c`, searched as dlopen
@@ -139,8 +142,8 @@ mod tests {
         let text = b"(number_literal) @n";
         let mut memo = Memo::default();
         let (a, b, c) = (memo.compiled(&first, text).unwrap(), memo.compiled(&again, text).unwrap(), memo.compiled(&other, text).unwrap());
-        assert!(Rc::ptr_eq(&a, &b), "one grammar and text compile once");
-        assert!(!Rc::ptr_eq(&a, &c), "another load's queries are its own");
+        assert!(Arc::ptr_eq(&a, &b), "one grammar and text compile once");
+        assert!(!Arc::ptr_eq(&a, &c), "another load's queries are its own");
         assert_eq!(c.query.pattern_count(), 1);
         // A failure is kept, and given again as it was.
         assert_eq!(memo.compiled(&first, b"(bogus) @n").err(), Some((1, "Node type error at")));

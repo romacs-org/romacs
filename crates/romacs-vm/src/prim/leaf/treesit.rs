@@ -616,11 +616,13 @@ impl Leaf<'_> {
         let slice = crate::quit::QUIT_SLICE;
         loop {
             let (first, length) = { let c = core.borrow(); (c.tree.is_none(), c.visible.1 - c.visible.0) };
+            // HOST(pure): waits on a thread of this process, no outside peer (rule 5)
             let ahead = core.borrow_mut().ahead.as_mut().is_none_or(|ahead| ahead.wait(slice));
             // Only an early parse this parser can take is worth its wait.
             let early = !first || {
                 let native = native.borrow();
                 let (language, sees_all) = (native.language(), native.sees_all(u32::try_from(length).unwrap_or(u32::MAX)));
+                // HOST(pure): waits on a thread of this process, no outside peer (rule 5)
                 !self.ts_registry_mut(base).early.as_mut().is_some_and(|early| early.pending_for(language.as_ref(), sees_all) && !early.wait(slice))
             };
             // A press during the slice that got the tree quits too.
@@ -629,7 +631,7 @@ impl Leaf<'_> {
                     None => {}
                     Some(crate::threaded::Escape::Signal(condition, data)) => return Err(Fault::Signal(condition, data)),
                     Some(escape) => {
-                        self.vm.propagated_escape = Some(escape);
+                        self.vm.mutator.propagated_escape = Some(escape);
                         return Err(Fault::Escape);
                     }
                 }
@@ -731,20 +733,17 @@ impl Leaf<'_> {
     fn ts_parse_visible(&mut self, parser: Value, visible: (i64, i64), old: Option<&native::Tree>) -> R<Option<native::Tree>> {
         let p = self.ts_parser(parser)?;
         let (buffer, native) = (p.buffer, p.native.clone());
-        let parse = |leaf: &Self, stop: &crate::quit::NativeStop| {
-            let text = leaf.ts_buffer_text(buffer).filter(|_| leaf.ts_live(buffer)).map(|t| &**t);
+        loop {
+            let text = self.ts_buffer_text(buffer).filter(|_| self.ts_live(buffer)).map(|t| &**t);
             let reader = ts::Reader::new(text, ((visible.0 - 1) as usize, (visible.1 - 1) as usize));
-            native.borrow_mut().parse_until(old, &reader, stop)
-        };
-        if let Ok(tree) = parse(self, &self.native_stop()) {
-            return Ok(tree);
+            if let Ok(tree) = native.borrow_mut().parse_until(old, &reader, &self.native_stop()) {
+                return Ok(tree);
+            }
+            // Leave the parser ready for its next caller if the poll quits.
+            self.ts_parser_mut(parser).within_reparse = false;
+            self.native_poll()?;
+            self.ts_parser_mut(parser).within_reparse = true;
         }
-        // parse_until reset the native parser. Leave the Lisp parser ready for
-        // the next caller if the poll quits, or retry after an inspection.
-        self.ts_parser_mut(parser).within_reparse = false;
-        self.native_poll()?;
-        self.ts_parser_mut(parser).within_reparse = true;
-        Ok(parse(self, &crate::quit::NativeStop::never()).expect("never stopped"))
     }
 
     fn ts_reparse_ranges(&mut self, buffer: Value, visible_beg: i64, changed: Option<Vec<(u32, u32)>>) -> Value {
@@ -1232,7 +1231,7 @@ impl Leaf<'_> {
 
     /// SOURCE (a string, or a sexp expanded) compiled for LANGUAGE, or the
     /// `treesit-query-error' it signals.
-    fn ts_compile(&mut self, language: native::Language, source: Value) -> R<Rc<ts::Compiled>> {
+    fn ts_compile(&mut self, language: native::Language, source: Value) -> R<std::sync::Arc<ts::Compiled>> {
         let expanded = if self.pair(source).is_some() { Some(self.ts_query_expand_bytes(source)?) } else { None };
         let text = match &expanded { Some(e) => std::borrow::Cow::Borrowed(&e.bytes[..]), None => self.string_bytes(source)?.into() };
         match self.vm.treesit_queries.compiled(&language, &text) {
@@ -1246,7 +1245,7 @@ impl Leaf<'_> {
         }
     }
     /// treesit_ensure_query_compiled for the compiled query QUERY.
-    pub(crate) fn ts_ensure_compiled(&mut self, query: Value) -> R<Rc<ts::Compiled>> {
+    pub(crate) fn ts_ensure_compiled(&mut self, query: Value) -> R<std::sync::Arc<ts::Compiled>> {
         let q = self.ts_query(query)?;
         if let Some(compiled) = &q.compiled {
             return Ok(compiled.clone());
@@ -1446,7 +1445,7 @@ impl Leaf<'_> {
         self.ts_capture_matches(n, compiled, found, flags, fontify)
     }
 
-    fn ts_capture_matches(&mut self, n: ts::Node, compiled: Rc<ts::Compiled>, found: Vec<native::Match>,
+    fn ts_capture_matches(&mut self, n: ts::Node, compiled: std::sync::Arc<ts::Compiled>, found: Vec<native::Match>,
                           flags: i64, fontify: Option<(ts::Fontify, Value)>) -> R<Next> {
         let mut names: Vec<Option<Value>> = Vec::new();
         let (fontify, overriding) = fontify.map_or((None, Value::NIL), |(f, o)| (Some(f), o));
@@ -1611,11 +1610,9 @@ impl Leaf<'_> {
 
     /// Run TASK's predicates from where it stopped.
     fn ts_capture_run(&mut self, task: Value) -> R<Next> {
+        let compiled = self.ts_capture_state(task).compiled.clone();
         loop {
-            let (compiled, at, predicate, matches_len) = {
-                let s = self.ts_capture_state(task);
-                (s.compiled.clone(), s.at, s.predicate, s.matches.len())
-            };
+            let (at, predicate, matches_len) = { let s = self.ts_capture_state(task); (s.at, s.predicate, s.matches.len()) };
             if at >= matches_len || self.ts_fontify_boundary(task, at) {
                 return self.ts_capture_finish(task);
             }

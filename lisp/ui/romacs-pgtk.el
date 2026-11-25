@@ -211,10 +211,13 @@ them.  `pgtk-dnd-init-frame' calls this for each new frame."
     (unless (stringp target)
       (signal 'wrong-type-argument (list 'stringp target)))))
 
+(defvar romacs-pgtk--display-class nil
+  "Name of the GDK display class for the native display opened at startup.")
+
 (defun pgtk-backend-display-class (&optional _terminal)
   "Return the name of the GDK backend display class of TERMINAL."
   (interactive "")
-  (if (getenv "WAYLAND_DISPLAY") "GdkWaylandDisplay" "GdkX11Display"))
+  romacs-pgtk--display-class)
 
 (defun x-gtk-launch-uri (frame uri)
   "Launch the desktop's default application to show URI, as GTK would.

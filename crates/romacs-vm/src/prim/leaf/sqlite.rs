@@ -133,6 +133,7 @@ impl Leaf<'_> {
         if crate::host::sqlite_open(name).is_err() {
             return Ok(Value::NIL);
         }
+        // HOST(acquisition): `sqlite-open`'s connection and the file SQLite may make; host::sqlite_open is its guard
         let Some(connection) = Connection::open(name, readonly != Value::NIL, disable_uri == Value::NIL, memory) else {
             return Ok(Value::NIL);
         };
@@ -370,7 +371,13 @@ impl Leaf<'_> {
     /// passed the allowlist.
     pub(crate) fn sqlite_load_extension(&mut self, db: Value, path: &[u8]) -> Out {
         let connection = self.sqlite_connection(db)?;
-        Ok(if connection.load_extension(c_string(path)) { Value::TRUE } else { Value::NIL })
+        match connection.load_extension(c_string(path), &self.native_stop()) {
+            Ok(loaded) => Ok(if loaded { Value::TRUE } else { Value::NIL }),
+            Err(_) => {
+                self.native_poll()?;
+                Err(self.sqlite_message("interrupted"))
+            }
+        }
     }
 
     pub(crate) fn sqlite_next(&mut self, set: Value) -> Out {

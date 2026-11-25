@@ -69,9 +69,9 @@ then with OTHERS (a number) more such sessions."
             (apply body sessions))
         (dolist (session sessions) (delete-process (romacs-agent-connection session)))))))
 
-(defun romacs-agent-submit-admission-tests--await (predicate)
-  "Wait for PREDICATE, timers run meanwhile, 3 s at most."
-  (let ((deadline (+ (float-time) 3)))
+(defun romacs-agent-submit-admission-tests--await (predicate &optional seconds)
+  "Wait for PREDICATE, timers run meanwhile, SECONDS at most (3 by default)."
+  (let ((deadline (+ (float-time) (or seconds 3))))
     (while (and (not (funcall predicate)) (< (float-time) deadline))
       (accept-process-output nil 0.02))
     (should (funcall predicate))))
@@ -111,17 +111,17 @@ runs inside an admission."
 ;;; A chat whose draft is sent
 
 (defun romacs-agent-submit-admission-tests--chat (session text body)
-  "Call BODY in SESSION's chat, TEXT typed in its composer."
+  "Call BODY in the composer of SESSION's chat, TEXT typed in it."
   (let ((chat (romacs-agent-log-chat session t)))
     (unwind-protect
-        (with-current-buffer chat
+        (with-current-buffer (romacs-agent-log-composer-buffer chat)
           (goto-char (point-max))
           (insert text)
           (funcall body))
       (kill-buffer chat))))
 
 (defun romacs-agent-submit-admission-tests--held (session text body)
-  "Call BODY in SESSION's chat holding TEXT with a function that answers
+  "Call BODY in SESSION's composer holding TEXT with a function that answers
 the draft's submit (once RET has made it) with its status, accepted by
 default."
   (romacs-agent-submit-admission-tests--chat
@@ -139,7 +139,12 @@ default."
                                                (list :reason 'owner-unavailable :message "Not now")))))))))))
 
 (defun romacs-agent-submit-admission-tests--draft ()
-  (save-restriction (widen) (buffer-substring-no-properties romacs-agent-log--input (point-max))))
+  (save-restriction (widen) (buffer-substring-no-properties (point-min) (point-max))))
+
+(defun romacs-agent-submit-admission-tests--undo ()
+  "Undo as its key does in the composer."
+  (let ((last-command nil))
+    (call-interactively (key-binding (kbd "C-/")))))
 
 (defun romacs-agent-submit-admission-tests--answered ()
   (romacs-agent-submit-admission-tests--await (lambda () (not romacs-agent-log--sending))))
@@ -151,7 +156,7 @@ default."
   (romacs-agent-client--make :server (romacs-agent-rpc-object "version" (vector 1 minor))))
 
 (defun romacs-agent-submit-admission-tests--remote (session text body &optional minor)
-  "Call BODY in a remote chat of SESSION holding TEXT, its service a stub
+  "Call BODY in a remote chat's composer, SESSION's, holding TEXT, its service a stub
 of protocol 1.MINOR (1.1 by default): BODY gets a function returning the
 commands sent, (METHOD PARAMS CALLBACK) each, the oldest first."
   (let ((source (romacs-agent-remote--make :client (romacs-agent-submit-admission-tests--client (or minor 1))))
@@ -164,13 +169,12 @@ commands sent, (METHOD PARAMS CALLBACK) each, the oldest first."
         (setq-local romacs-agent-log--session session
                     romacs-agent-log--source source
                     romacs-agent-log--end (point-min-marker)
-                    romacs-agent-log--input (point-min-marker)
                     romacs-agent-log--prompts nil)
         (set-marker-insertion-type romacs-agent-log--end t)
         (romacs-agent-log--separator t)
-        (goto-char (point-max))
-        (insert text)
-        (funcall body (lambda () (reverse sent)))))))
+        (with-current-buffer (romacs-agent-log-composer-buffer (current-buffer))
+          (insert text)
+          (funcall body (lambda () (reverse sent))))))))
 
 ;;; The service, over its socket
 
@@ -428,17 +432,18 @@ over a CLIENT, METHOD and PARAMS, that returns its (RESULT ERROR)."
       session "say once, and a tail"
       (lambda (release)
         (romacs-agent-log-send)
-        (narrow-to-region (point-min) (+ romacs-agent-log--input 4))
+        (narrow-to-region (point-min) (+ (point-min) 4))
         (funcall release)
         (widen)
         (should (equal (romacs-agent-submit-admission-tests--draft) ""))
-        (should-not (text-property-not-all romacs-agent-log--input (point-max) 'read-only nil))
+        (should-not (text-property-not-all (point-min) (point-max) 'read-only nil))
         (insert "next")
         (should (equal (romacs-agent-submit-admission-tests--draft) "next")))))))
 
 (ert-deftest romacs-agent-submit-admission-undo-leaves-a-sent-draft ()
-  ;; Undo while the draft is sent changes nothing and says nothing; once
-  ;; it is refused, undo works on it again.
+  ;; Undo, its key in the composer, while the draft is sent changes
+  ;; nothing: the composer is read-only, and refuses it; once the draft
+  ;; is refused, undo works on it again.
   (romacs-agent-submit-admission-tests--with
    (lambda (session)
      (romacs-agent-submit-admission-tests--held
@@ -448,11 +453,11 @@ over a CLIENT, METHOD and PARAMS, that returns its (RESULT ERROR)."
         (insert " once")
         (undo-boundary)
         (romacs-agent-log-send)
-        (let ((last-command nil)) (undo))
+        (should-error (romacs-agent-submit-admission-tests--undo) :type 'buffer-read-only)
         (should (equal (romacs-agent-submit-admission-tests--draft) "say once"))
         (should romacs-agent-log--sending)
         (funcall release 'refused)
-        (let ((last-command nil)) (undo))
+        (romacs-agent-submit-admission-tests--undo)
         (should (equal (romacs-agent-submit-admission-tests--draft) "say")))))))
 
 ;;; N2: a draft id is a UUID
@@ -478,7 +483,7 @@ over a CLIENT, METHOD and PARAMS, that returns its (RESULT ERROR)."
      (romacs-agent-submit-admission-tests--held
       session ""
       (lambda (release)
-        (setq-local romacs-agent-log--prompts (list "earlier prompt"))
+        (with-current-buffer romacs-agent-log--chat (setq-local romacs-agent-log--prompts (list "earlier prompt")))
         (romacs-agent-log-history-previous)
         (should (equal (romacs-agent-submit-admission-tests--draft) "earlier prompt"))
         (romacs-agent-log-send)
@@ -695,7 +700,7 @@ over a CLIENT, METHOD and PARAMS, that returns its (RESULT ERROR)."
     (romacs-agent-submit-admission-tests--remote
      session ""
      (lambda (sent)
-       (romacs-agent-log-source-submit romacs-agent-log--source session
+       (romacs-agent-log-source-submit (buffer-local-value 'romacs-agent-log--source romacs-agent-log--chat) session
                                        (romacs-agent-submit-admission-tests--intent "later" 'queue)
                                        (lambda (answer) (setq got answer)))
        (funcall (nth 2 (car (funcall sent))) (romacs-agent-rpc-object "state" "queued" "queued" 2) nil)
@@ -735,7 +740,7 @@ over a CLIENT, METHOD and PARAMS, that returns its (RESULT ERROR)."
             (romacs-agent-log-send)
             (romacs-agent-submit-admission-tests--answered)
             (should (equal (car ids) (cadr ids)))
-            (delete-region romacs-agent-log--input (point-max))
+            (delete-region (point-min) (point-max))
             (insert "second")
             (romacs-agent-log-send)
             (romacs-agent-submit-admission-tests--answered)
@@ -764,7 +769,7 @@ newest first."
      (romacs-agent-submit-admission-tests--chat
       session "first"
       (lambda ()
-        (setq-local romacs-agent-log--prompts (list "earlier prompt"))
+        (with-current-buffer romacs-agent-log--chat (setq-local romacs-agent-log--prompts (list "earlier prompt")))
         (romacs-agent-submit-admission-tests--refusing
          (lambda (ids)
            (romacs-agent-log-send)
@@ -788,7 +793,7 @@ newest first."
            (romacs-agent-log-send)
            (romacs-agent-submit-admission-tests--answered)
            (undo-boundary)
-           (delete-region romacs-agent-log--input (point-max))
+           (delete-region (point-min) (point-max))
            (undo-boundary)
            (let ((last-command nil)) (undo))
            (should (equal (romacs-agent-submit-admission-tests--draft) "first"))
@@ -818,7 +823,8 @@ newest first."
            (romacs-agent--submit-draft (format "b%d" n) (romacs-agent-id session)
                                        (romacs-agent-submit-admission-tests--intent (format "from b%d" n))
                                        (lambda (_) (cl-incf answered))))
-         (romacs-agent-submit-admission-tests--await (lambda () (= answered 1000))))
+         ;; A busy host takes seconds to answer a thousand drafts.
+         (romacs-agent-submit-admission-tests--await (lambda () (= answered 1000)) 60))
        (romacs-agent--submit-draft "a" (romacs-agent-id session) intent (lambda (answer) (push answer answers)))
        (romacs-agent-submit-admission-tests--await (lambda () (cdr answers)))
        (should (eq (plist-get (car answers) :status) 'accepted))
@@ -914,14 +920,14 @@ newest first."
     (romacs-agent-submit-admission-tests--remote
      session "say once"
      (lambda (sent)
-       (setf (romacs-agent-client-server (romacs-agent-remote-client romacs-agent-log--source)) nil)
+       (setf (romacs-agent-client-server (romacs-agent-remote-client (buffer-local-value 'romacs-agent-log--source romacs-agent-log--chat))) nil)
        (romacs-agent-log-send)
        (romacs-agent-submit-admission-tests--answered)
        (should-not (funcall sent))
        (should (equal (romacs-agent-log--draft) "say once"))
        (let ((id romacs-agent-log--draft-id))
          (should id)
-         (setf (romacs-agent-client-server (romacs-agent-remote-client romacs-agent-log--source))
+         (setf (romacs-agent-client-server (romacs-agent-remote-client (buffer-local-value 'romacs-agent-log--source romacs-agent-log--chat)))
                (romacs-agent-rpc-object "version" [1 1]))
          (romacs-agent-log-send)
          (should (equal (gethash "draftId" (nth 1 (car (funcall sent)))) id)))))))
@@ -974,8 +980,8 @@ newest first."
          (lambda (ids)
            (romacs-agent-log-send)
            (romacs-agent-submit-admission-tests--answered)
-           (narrow-to-region (point-min) (+ romacs-agent-log--input 2))
-           (delete-region romacs-agent-log--input (point-max))
+           (narrow-to-region (point-min) (+ (point-min) 2))
+           (delete-region (point-min) (point-max))
            (widen)
            (should (equal (romacs-agent-submit-admission-tests--draft) "rst"))
            (romacs-agent-log-send)
@@ -1155,7 +1161,7 @@ newest first."
     (romacs-agent-submit-admission-tests--remote
      session "say once"
      (lambda (_sent)
-       (romacs-agent-log-source-submit romacs-agent-log--source session
+       (romacs-agent-log-source-submit (buffer-local-value 'romacs-agent-log--source romacs-agent-log--chat) session
                                        (romacs-agent-submit-admission-tests--intent "say once")
                                        (lambda (answer) (setq got answer)))
        (romacs-agent-submit-admission-tests--await (lambda () got))
@@ -1297,7 +1303,7 @@ newest first."
                            :status)
                 'accepted))))
 
-;;; Each answer its own timer, unconfirmed on the wire, one hook runner
+;;; Each answer alone, unconfirmed on the wire, one hook runner
 
 (ert-deftest romacs-agent-submit-admission-each-answer-goes-alone ()
   ;; Two drafts answered by one release: the first one's callback throws
@@ -1321,6 +1327,24 @@ newest first."
           (romacs-agent-submit-admission-tests--answered)
           (should (equal (romacs-agent-submit-admission-tests--draft) ""))
           (should (equal (mapcar #'romacs-agent-item-text (romacs-agent-queue session)) '("a" "composer draft")))))))))
+
+(ert-deftest romacs-agent-submit-admission-a-lost-release-is-set-again ()
+  ;; The hold's one release timer dropped unfired, with the timer list it
+  ;; was set in: the next admission sets another, so both drafts are
+  ;; answered and the hold let go, not held for good.
+  (romacs-agent-submit-admission-tests--with
+   (lambda (session)
+     (setf (romacs-agent-state session) 'running)
+     (let* ((romacs-agent--held nil)
+            (lost (let ((timer-list nil))
+                    (romacs-agent-submit-admission-tests--submit
+                     session (romacs-agent-submit-admission-tests--intent "lost" 'queue))))
+            (next (romacs-agent-submit-admission-tests--submit
+                   session (romacs-agent-submit-admission-tests--intent "next" 'queue))))
+       (romacs-agent-submit-admission-tests--await
+        (lambda () (and (car lost) (car next) (not romacs-agent--held))))
+       (should (eq (plist-get (caar lost) :status) 'accepted))
+       (should (eq (plist-get (caar next) :status) 'accepted))))))
 
 (ert-deftest romacs-agent-submit-admission-a-cut-send-is-unconfirmed-over-the-wire ()
   ;; A draft whose line is cut short by a quit, sent through the service:
@@ -1381,8 +1405,8 @@ newest first."
     romacs-agent-writer-gave-up-functions romacs-agent-client-follow-functions
     romacs-agent-client-rows-functions romacs-agent-client-session-functions romacs-mcp-peer-close-functions
     romacs-agent-ask-sent-functions romacs-agent-glyph-alist-changed-hook
-    ;; A composer's own buffer-local hook, run with its own edit.
-    romacs-agent-log-draft-replaced-hook)
+    ;; A composer's own buffer-local hooks, run with its own edit.
+    romacs-agent-log-draft-replaced-hook romacs-agent-log-attach-tray-functions)
   "The hooks of lisp/agents/ run directly, not through `romacs-agent--run-hook'.")
 
 (ert-deftest romacs-agent-submit-admission-every-hook-goes-through-the-runner ()

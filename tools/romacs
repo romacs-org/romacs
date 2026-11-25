@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# romacs -- build if needed, then open the romacs GUI on this Wayland session.
+# romacs -- build if needed, then open the GUI on this Wayland or X11 session.
 #
 #   tools/romacs [--loadup | --gnu-lisp] [--geometry WxH] [--trace-latency]
 #
@@ -52,13 +52,7 @@ if [ "${ROMACS_NO_BUILD:-}" != 1 ]; then
 fi
 [ -x "$bin" ] || { echo "romacs: no binary at $bin" >&2; exit 1; }
 
-# This session's compositor, never a guess at another one.
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
-if [ -z "${WAYLAND_DISPLAY:-}" ]; then
-    sock=$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -name 'wayland-[0-9]*' ! -name '*.lock' -type s | sort | head -1)
-    [ -n "$sock" ] && export WAYLAND_DISPLAY=$(basename "$sock")
-fi
-[ -n "${WAYLAND_DISPLAY:-}" ] || { echo "romacs: no Wayland socket in $XDG_RUNTIME_DIR" >&2; exit 1; }
 
 # GNU's Lisp from this checkout; the GUI loads loadup.el's preload chain.
 export ROMACS_LISP_DIR="$root/lisp"
@@ -70,14 +64,13 @@ unset RUST_MIN_STACK
 # unit when none runs, and ask it for a window; ROMACS_SERVER=off runs a
 # standalone session as before. Batch and installer runs stay standalone.
 server=${ROMACS_SERVER-romacs}
-case " $* " in *" --batch "*|*" --world-build "*|*" --help "*|*" --world-reset"*) server=off ;; esac
+case " $* " in *" --batch "*|*" --world-build "*|*" --help "*|*" --world-reset"*|*" --wayland "*) server=off ;; esac
 if [ "$server" != off ]; then
     # The server tells when the binary a new launch would run is rebuilt.
     export ROMACS_BUILD_WATCH="$bin"
     exec "$bin" --server "$server" "$@"
 fi
 
-echo "romacs: $bin on $WAYLAND_DISPLAY" >&2
 # stdout carries only machine-readable command replies, stderr per-frame
 # diagnostics; keep both out of the terminal, and show the log on failure.
 log_dir=${XDG_STATE_HOME:-$HOME/.local/state}/romacs

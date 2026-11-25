@@ -74,14 +74,14 @@ impl Vm {
     /// GNU eval.c:2604-2609: limits below 100 are raised, not merely read as 100.
     pub(super) fn eval_depth_limit(&mut self) -> usize {
         let old = self.eval_limit();
-        let limit = if (self.eval_depth as u128) > old.max(0) as u128 && old < 100 { 100 } else { old };
+        let limit = if (self.mutator.eval_depth as u128) > old.max(0) as u128 && old < 100 { 100 } else { old };
         if limit != old { self.set_eval_limit(limit); }
         usize::try_from(limit).unwrap_or(0)
     }
 
     /// Check an already incremented depth; entry/exit ownership stays with the engine.
     pub(super) fn check_eval_depth(&mut self) -> Result<()> {
-        if self.eval_depth > self.eval_depth_limit() {
+        if self.mutator.eval_depth > self.eval_depth_limit() {
             Err("excessive-lisp-nesting".into())
         } else {
             Ok(())
@@ -92,7 +92,7 @@ impl Vm {
     /// must restore it on every exit, in LIFO order. No Lisp call site exists
     /// yet for debugger/handler-bind; signal-hook-function borrows twenty.
     pub(super) fn max_ensure_room(&mut self, room: i64) -> Option<i64> {
-        let depth = i64::try_from(self.eval_depth).unwrap_or(i64::MAX);
+        let depth = i64::try_from(self.mutator.eval_depth).unwrap_or(i64::MAX);
         let sum = depth.checked_add(room).unwrap_or(i64::MAX);
         let old = self.eval_limit();
         let reserve = self.forwarded.integer(RESERVE);
@@ -160,19 +160,19 @@ mod tests {
             assert_eq!(value.integer_value(), Some(321), "DEPTH_LET_BINDS: {name}");
             assert_eq!(number(&mut vm, name), expected, "DEPTH_LET_RESTORES: {name}");
         }
-        assert_eq!(vm.eval_depth, 0);
+        assert_eq!(vm.mutator.eval_depth, 0);
     }
 
     #[test]
     fn limit_clamps_and_checks_strict_boundary() {
         let mut vm = Vm::new();
         limits(&mut vm, -2, 200);
-        vm.eval_depth = 99;
+        vm.mutator.eval_depth = 99;
         assert_eq!(vm.eval_depth_limit(), 100, "DEPTH_CLAMP");
         assert_eq!(number(&mut vm, "max-lisp-eval-depth"), 100);
-        vm.eval_depth = 100;
+        vm.mutator.eval_depth = 100;
         assert!(vm.check_eval_depth().is_ok(), "DEPTH_BOUNDARY_INCLUSIVE");
-        vm.eval_depth = 101;
+        vm.mutator.eval_depth = 101;
         assert!(vm.check_eval_depth().is_err(), "DEPTH_BOUNDARY");
     }
 
@@ -180,7 +180,7 @@ mod tests {
     fn reserve_borrow_and_exact_restoration_arithmetic() {
         let mut vm = Vm::new();
         limits(&mut vm, 1600, 200);
-        vm.eval_depth = 1590;
+        vm.mutator.eval_depth = 1590;
         let old = vm.max_ensure_room(50).expect("DEPTH_RESERVE_BORROW");
         assert_eq!(old, 1600, "DEPTH_RESERVE_TOKEN");
         assert_eq!(number(&mut vm, "max-lisp-eval-depth"), 1640, "DEPTH_RESERVE_RAISED");
@@ -200,9 +200,9 @@ mod tests {
     fn reserve_caps_noops_and_nested_tokens() {
         let mut vm = Vm::new();
         limits(&mut vm, 1600, 200);
-        vm.eval_depth = 1500;
+        vm.mutator.eval_depth = 1500;
         assert_eq!(vm.max_ensure_room(50), None, "DEPTH_RESERVE_NOOP");
-        vm.eval_depth = 1590;
+        vm.mutator.eval_depth = 1590;
         let outer = vm.max_ensure_room(50).expect("DEPTH_RESERVE_NESTED");
         let inner = vm.max_ensure_room(1000).unwrap();
         assert_eq!(number(&mut vm, "max-lisp-eval-depth"), 1800, "DEPTH_RESERVE_CAPPED");
@@ -220,7 +220,7 @@ mod tests {
     fn reserve_checked_sum_overflow_saturates_before_borrow() {
         let mut vm = Vm::new();
         limits(&mut vm, 1600, 200);
-        vm.eval_depth = usize::MAX;
+        vm.mutator.eval_depth = usize::MAX;
         let old = vm
             .max_ensure_room(i64::MAX)
             .expect("DEPTH_RESERVE_OVERFLOW");

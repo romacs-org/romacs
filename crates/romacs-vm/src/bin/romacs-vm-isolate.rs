@@ -6,7 +6,9 @@ use romacs_vm::Vm;
 
 fn main() {
     if let Err(error) = run() {
+        // HOST(escape): stdout and stderr are sends another process reads
         eprintln!("romacs-vm-isolate: {error}");
+        // HOST(escape): ends the process: its parent sees the status
         std::process::exit(1);
     }
 }

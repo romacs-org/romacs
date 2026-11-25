@@ -8,6 +8,7 @@
 //! and exits. With files and without `--no-wait` it returns when every
 //! file is done (`C-x #`), as emacsclient does. Options it does not know
 //! are the server's launch options, used only when it starts one.
+use romacs_display_runtime::render_thread::DisplaySelection;
 use serde_json::{Value as Json, json};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
@@ -110,13 +111,20 @@ fn unit(name: &str) -> String { format!("romacs-server-{name}") }
 /// no user manager answers. A unit that already exists is a server some
 /// other client is starting.
 fn start(request: &Request) -> Result<(), String> {
+    let display = DisplaySelection::from_env(None)?;
+    // Absent client variables must not come back from the user manager.
+    let display_vars = ["DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR", "WAYLAND_DISPLAY"];
+    let mut unset = romacs_vm::host::LAUNCH_MARKERS.to_vec();
+    unset.extend(display_vars.into_iter().filter(|name| std::env::var_os(name).is_none()));
+    if display.wayland_socket().is_none() && !unset.contains(&"WAYLAND_DISPLAY") {
+        unset.push("WAYLAND_DISPLAY");
+    }
+    unset.push("WAYLAND_SOCKET");
     let exe = std::env::current_exe().map_err(|e| format!("own executable: {e}"))?;
     let home = std::env::var_os("HOME").unwrap_or_else(|| "/".into());
     let mut command = romacs_vm::host::child("systemd-run");
     command.args(["--user", "--quiet", "--collect", "-p", "OOMPolicy=continue"])
-        // The user manager's environment is the unit's too: no launch
-        // marker of it reaches the server.
-        .args(["-p", &format!("UnsetEnvironment={}", romacs_vm::host::LAUNCH_MARKERS.join(" "))])
+        .args(["-p", &format!("UnsetEnvironment={}", unset.join(" "))])
         // An abnormal end shows a desktop notification (`--server-exited').
         // The editor ends a SIGTERM (a stop, a logout) with status 15, as
         // GNU's does: a success here.
@@ -134,7 +142,7 @@ fn start(request: &Request) -> Result<(), String> {
     // none (an API key, say) shows on a command line other users can read.
     for (key, _) in romacs_vm::host::inherited_env() {
         let key_text = key.to_string_lossy();
-        if LOCAL_ENV.contains(&key_text.as_ref()) || key_text.starts_with("LISTEN_") || key_text.contains('=') { continue; }
+        if unset.contains(&key_text.as_ref()) || LOCAL_ENV.contains(&key_text.as_ref()) || key_text.starts_with("LISTEN_") || key_text.contains('=') { continue; }
         let mut setting = std::ffi::OsString::from("--setenv=");
         setting.push(&key);
         command.arg(setting);
@@ -153,7 +161,9 @@ fn start(request: &Request) -> Result<(), String> {
         .unwrap_or_else(|| Path::new(&home).join(".local/state")).join("romacs");
     std::fs::create_dir_all(&state).map_err(|e| format!("{}: {e}", state.display()))?;
     let log = std::fs::File::create(state.join(format!("server-{}.log", request.name))).map_err(|e| e.to_string())?;
-    romacs_vm::host::child("setsid").arg("--fork").arg(&exe).args(["--serve", &request.name]).args(&launch)
+    let mut detached = romacs_vm::host::child("setsid");
+    for name in unset { detached.env_remove(name); }
+    detached.arg("--fork").arg(&exe).args(["--serve", &request.name]).args(&launch)
         .current_dir(&home).stdin(std::process::Stdio::null())
         .stdout(log.try_clone().map_err(|e| e.to_string())?).stderr(log)
         .status().map_err(|e| format!("setsid: {e}"))

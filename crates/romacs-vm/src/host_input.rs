@@ -513,8 +513,8 @@ fn next_event(vm: &mut Vm, (): ()) -> Result<(Option<(Option<u64>, u32, u32)>, b
     let timeout = deadline.map(|end| end.saturating_duration_since(crate::host::monotonic()));
     let fds = vm.process_wait_fds();
     host(vm).watch_processes(&fds);
-    let busy = vm.quit.busy();
-    for _ in 0..vm.quit.set_busy(false) {
+    let busy = vm.mutator.quit.busy();
+    for _ in 0..vm.mutator.quit.set_busy(false) {
         vm.handle_interrupt();
     }
     // A key a `switch-frame' event went before is read next.
@@ -523,7 +523,7 @@ fn next_event(vm: &mut Vm, (): ()) -> Result<(Option<(Option<u64>, u32, u32)>, b
         (None, Some((event, frame))) => (Ok(event), frame),
         (None, None) => { let event = host(vm).next_event(timeout); (event, host(vm).event_frame()) }
     };
-    vm.quit.set_busy(busy);
+    vm.mutator.quit.set_busy(busy);
     Ok(match event? {
         HostEvent::Resize { width, height } => (Some((frame, width, height)), false),
         // A completed background command ends the wait as a timeout does:
@@ -614,7 +614,7 @@ fn finish(vm: &mut Vm, (waited, out): (Result<()>, Out<'_>)) -> Result<()> {
         HostEvent::Closed => {
             // Its data tells it from a C-g's (`romacs--host-event').
             let (quit, closed) = (vm.intern("quit"), vm.intern("frame-closed"));
-            vm.propagated_escape = Some(threaded::Escape::Signal(quit, closed));
+            vm.mutator.propagated_escape = Some(threaded::Escape::Signal(quit, closed));
             return Err("quit: frame closed while reading input".into());
         }
     };

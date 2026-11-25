@@ -30,6 +30,7 @@ pub mod meter;
 pub mod model;
 pub mod modifier_policy;
 pub mod motion_spec;
+pub mod pane_picture;
 pub mod present_mapping;
 pub mod present_trace;
 pub mod presentation_origin;

@@ -33,6 +33,7 @@ impl Leaf<'_> {
             data::Object::ByteBuffer(b) => &mut b.state.modification,
             _ => unreachable!(),
         };
+        // HOST(pure): the buffer's modified flag, not a file's
         state.set_modified(flag != Value::NIL);
         if flag == autosaved { state.autosave_modiff = state.modiff; }
         // GNU's Fset_buffer_modified_p updates every mode line: packages

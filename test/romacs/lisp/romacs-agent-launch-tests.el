@@ -60,7 +60,7 @@ whatever TMPDIR is); `delivered' collects wakes."
     ;; The last look for its supervisor, with no record of one.
     (romacs-agent--attach child 0)
     (should (eq (romacs-agent-state child) 'unstarted))
-    (let ((task (romacs-agent-tools--task child)))
+    (let ((task (romacs-agent-tools--task (romacs-agent-summary (romacs-agent-id child)))))
       (should (equal (gethash "status" task) "failed"))
       (should (equal (gethash "state" task) "unstarted"))
       (should (string-match-p "never started" (gethash "result" task))))
@@ -78,7 +78,7 @@ whatever TMPDIR is); `delivered' collects wakes."
 
 (ert-deftest romacs-agent-launch-a-delegate-that-never-starts-fails-the-call ()
   (romacs-agent-launch-tests--with
-    (let ((poll (cadr (romacs-agent-tools--started child (lambda () (romacs-agent-tools--task child))))))
+    (let ((poll (cadr (romacs-agent-tools--started child (lambda () (romacs-agent-tools--task (romacs-agent-summary (romacs-agent-id child))))))))
       ;; Starting: no answer yet.
       (setf (romacs-agent-state child) 'starting)
       (should-not (funcall poll))
@@ -128,7 +128,7 @@ whatever TMPDIR is); `delivered' collects wakes."
     (should (= (length delivered) 1))
     ;; A message waiting for it does not make it running.
     (romacs-agent--enqueue child (romacs-agent-item "hello"))
-    (should (equal (romacs-agent-tools--status child) "failed"))))
+    (should (equal (romacs-agent-tools--status (romacs-agent-summary (romacs-agent-id child))) "failed"))))
 
 (ert-deftest romacs-agent-launch-waits-for-attach-as-long-as-it-tries ()
   (let ((scheduled nil) (session (romacs-agent--make :id "x" :harness 'claude)))
@@ -145,7 +145,7 @@ whatever TMPDIR is); `delivered' collects wakes."
                                                     "hostSocket" (expand-file-name "none.sock" run)))
       (let ((loaded (romacs-agent--load dir)))
         (should (eq (romacs-agent-state loaded) 'unstarted))
-        (should (equal (romacs-agent-tools--status loaded) "failed"))))))
+        (should (equal (romacs-agent-tools--status (romacs-agent-summary (romacs-agent-id loaded))) "failed"))))))
 
 (ert-deftest romacs-agent-launch-resume-begins-a-conversation-that-never-was ()
   (romacs-agent-launch-tests--with

@@ -444,6 +444,106 @@ message is sent, `romacs-agent-send' by default.")
     (should-not (romacs-agent-queue failing))
     (should (= (romacs-agent-queue-length failing) 0))))
 
+(ert-deftest romacs-agent-a-failing-head-fails-no-later-sender ()
+  ;; A message whose write failed waits first for the next chance; a
+  ;; message sent after it is not refused for that failure: it waits
+  ;; behind it, the failure said on the session, and both go once writes do.
+  (let* ((session (romacs-agent-test-attach
+                   (romacs-agent--make :id "afafafaf-0000-4000-8000-000000000000" :harness 'claude :state 'running)
+                   t))
+         (errors nil) (sent nil) (failing t)
+         (romacs-agent-event-functions
+          (list (lambda (_ event) (when (eq (plist-get event :type) 'error) (push (plist-get event :text) errors))))))
+    (unwind-protect
+        (cl-letf (((symbol-function 'romacs-agent--line)
+                   (lambda (_ object &optional _journal)
+                     (if (and failing (string-search "stuck" (json-serialize object))) (error "Gone") (push object sent))))
+                  ((symbol-function 'romacs-agent--fold-now) #'ignore))
+          (romacs-agent-send-later session "stuck")
+          (setf (romacs-agent-state session) 'idle)
+          (should-error (romacs-agent--dispatch session))
+          (romacs-agent-send session "the next message")
+          (should (= (romacs-agent-queue-length session) 2))
+          (should (equal errors '("Gone")))
+          (setq failing nil)
+          (romacs-agent--dispatch session)
+          (setf (romacs-agent-state session) 'idle)
+          (romacs-agent--dispatch session)
+          (should (= (length sent) 2))
+          (should-not (romacs-agent-queue session))
+          (should (= (romacs-agent-queue-length session) 0)))
+      (delete-process (romacs-agent-connection session)))))
+
+;; Who failed, as a dispatch fails: each test below fails a sender for
+;; another's failure, or spins, without its fix.
+
+(defmacro romacs-agent-queue-tests--failing (&rest body)
+  "BODY with `session' attached, ready and idle, `errors' the text of each
+error event raised on a session, newest first, and `sent' each line written."
+  (declare (indent 0))
+  `(let* ((session (romacs-agent-test-attach
+                    (romacs-agent--make :id "a0a0a0a0-0000-4000-8000-000000000000" :harness 'claude :state 'idle)
+                    t))
+          (errors nil) (sent nil)
+          (romacs-agent-event-functions
+           (list (lambda (_ event) (when (eq (plist-get event :type) 'error) (push (plist-get event :text) errors))))))
+     (unwind-protect
+         (romacs-agent-queue-tests--writing sent ,@body)
+       (delete-process (romacs-agent-connection session)))))
+
+(ert-deftest romacs-agent-another-sessions-failed-write-is-no-senders ()
+  ;; Another session's write failing within this one's dispatch is not
+  ;; this one's: a later failure of the sender's own is still its own,
+  ;; and no failure is left recorded after.
+  (romacs-agent-queue-tests--failing
+    (let ((other (romacs-agent-test-attach
+                  (romacs-agent--make :id "a1a1a1a1-0000-4000-8000-000000000000" :harness 'claude :state 'running)
+                  t)))
+      (unwind-protect
+          (cl-letf (((symbol-function 'romacs-agent--line)
+                     (lambda (target object &optional _journal)
+                       (if (eq target other) (error "Other gone") (push object sent)))))
+            (romacs-agent-send-later other "to the other")
+            (setf (romacs-agent-state other) 'idle)
+            (should-error (romacs-agent--dispatch other))
+            (should-not romacs-agent--failed)
+            (let ((romacs-agent-hold-functions
+                   (list (lambda (held)
+                           (when (eq held session)
+                             (ignore-errors (romacs-agent--dispatch other))
+                             (error "Hold broke"))))))
+              (should (equal (cadr (should-error (romacs-agent-send session "mine"))) "Hold broke")))
+            (should-not (romacs-agent-queue session))
+            (should-not sent))
+        (delete-process (romacs-agent-connection other))))))
+
+(ert-deftest romacs-agent-an-unencodable-renewal-does-not-spin ()
+  ;; A renewal's prompt no harness takes is let go once per dispatch: it
+  ;; is in no queue, so letting it go is no progress to go on from.
+  (romacs-agent-queue-tests--failing
+    (let ((romacs-agent--sessions (make-hash-table :test #'equal)))
+      (puthash (romacs-agent-id session) session romacs-agent--sessions)
+      (setf (romacs-agent-brief session) "brief"
+            (romacs-agent-driver-state session)
+            (list :ready t :renew-continuation (string-to-multibyte (unibyte-string ?g ?o #o351))))
+      (let ((romacs-agent-event-functions
+             (cons (lambda (_session _event) (when (> (length errors) 5) (throw 'spun t))) romacs-agent-event-functions)))
+        (should-not (catch 'spun (romacs-agent--dispatch session) nil)))
+      (should (= (length errors) 1))
+      (should-not sent))))
+
+(ert-deftest romacs-agent-a-failing-validator-fails-no-later-sender ()
+  ;; A message whose VALID signals cannot say it is wanted: it is let go,
+  ;; its failure said on the session, and the message sent after it goes.
+  (romacs-agent-queue-tests--failing
+    (setf (romacs-agent-state session) 'running)
+    (romacs-agent-send-later session "broken" nil nil (lambda () (error "No such generation")))
+    (setf (romacs-agent-state session) 'idle)
+    (romacs-agent-send session "mine")
+    (should (= (length sent) 1))
+    (should-not (romacs-agent-queue session))
+    (should (equal errors '("A message was not sent: No such generation")))))
+
 (ert-deftest romacs-agent-a-steer-is-its-turns-alone ()
   ;; Sent into a running turn, a message steers it at once; sent while
   ;; none runs (its harness starting), each waits for a turn of its own;
@@ -555,6 +655,33 @@ message is sent, `romacs-agent-send' by default.")
           (romacs-agent--clear-queue other)))
       (should-not (romacs-agent-store-queued id))
       (should-not (file-exists-p mark)))))
+
+(ert-deftest romacs-agent-a-message-json-cannot-carry-is-kept-by-no-store ()
+  ;; A raw byte (a Lisp caller's string): its row is JSON too, so it is
+  ;; not kept, the call is not refused by the store, and it is let go at
+  ;; its turn, its failure said on the session, what is behind it written.
+  (romacs-agent-test-with-store
+    (make-directory (file-name-directory (romacs-agent-store--file)) t)
+    (should (romacs-agent-store--open))
+    (let* ((id "b1b1b1b1-0000-4000-8000-000000000000")
+           (session (romacs-agent-test-attach
+                     (romacs-agent--make :id id :harness 'claude :state 'running :title "kept")
+                     t))
+           (errors nil) (sent nil)
+           (romacs-agent-event-functions
+            (list (lambda (_ event) (when (eq (plist-get event :type) 'error) (push event errors))))))
+      (unwind-protect
+          (progn
+            (romacs-agent-send-later session (string-to-multibyte (unibyte-string ?b ?a ?d #o351)) nil nil nil nil t)
+            (romacs-agent-send-later session "good" nil nil nil nil t)
+            (should (equal (mapcar #'car (romacs-agent-store-queued id)) '("good")))
+            (setf (romacs-agent-state session) 'idle)
+            (romacs-agent-queue-tests--writing sent (romacs-agent--dispatch session))
+            (should (= (length sent) 1))
+            (should (equal (gethash "content" (gethash "message" (car sent))) "good"))
+            (should-not (romacs-agent-queue session))
+            (should (= (length errors) 1)))
+        (delete-process (romacs-agent-connection session))))))
 
 (ert-deftest romacs-agent-a-limit-continuation-is-made-once ()
   ;; Sol S2: a stop after its row was kept, before the selection's manifest

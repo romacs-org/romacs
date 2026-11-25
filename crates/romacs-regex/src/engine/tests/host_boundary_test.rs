@@ -14,6 +14,7 @@ use crate::engine::syntax::{
 use crate::engine::translate::CaseTranslation;
 use crate::host;
 use std::cell::Cell;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering::Relaxed};
 
 /// `a*ab` over `aaab` matches only after backtracking out of the greedy
 /// `a*`, so the matcher reaches its quit poll at `goto_fail`.
@@ -129,17 +130,17 @@ fn dfa_class_memo_follows_the_lookup_table_write_tick() {
 /// A case table whose translation of one non-ASCII code can change.
 #[derive(Debug)]
 struct MutableCaseTable {
-    zhe_canon: Cell<u32>,
-    tick: Cell<u64>,
+    zhe_canon: AtomicU32,
+    tick: AtomicU64,
 }
 
 impl CaseTable for MutableCaseTable {
     fn translate(&self, c: u32) -> u32 {
-        if c == 0x416 { self.zhe_canon.get() } else { c }
+        if c == 0x416 { self.zhe_canon.load(Relaxed) } else { c }
     }
 
     fn write_tick(&self) -> u64 {
-        self.tick.get()
+        self.tick.load(Relaxed)
     }
 
     fn folds_into_ascii(&self, _tick: u64, _allow_walk: bool) -> Option<bool> {
@@ -155,14 +156,14 @@ impl CaseTable for MutableCaseTable {
 /// is visible exactly when the table's tick moves.
 #[test]
 fn case_translation_wide_memo_follows_the_case_table_write_tick() {
-    let table = std::rc::Rc::new(MutableCaseTable {
-        zhe_canon: Cell::new(0x416),
-        tick: Cell::new(7),
+    let table = std::sync::Arc::new(MutableCaseTable {
+        zhe_canon: AtomicU32::new(0x416),
+        tick: AtomicU64::new(7),
     });
     let translation = CaseTranslation::from_case_table(table.clone());
     assert_eq!(translation.translate(0x416), 0x416);
-    table.zhe_canon.set(0x436);
-    table.tick.set(8);
+    table.zhe_canon.store(0x436, Relaxed);
+    table.tick.store(8, Relaxed);
     assert_eq!(translation.translate(0x416), 0x436);
     assert!(translation.case_table().is_some());
 }

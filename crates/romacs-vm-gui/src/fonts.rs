@@ -69,6 +69,7 @@ pub fn register_bundled_fonts() -> Vec<String> {
 pub mod residency;
 
 pub struct Display {
+    name: String,
     resolver: FontResolver,
     /// Opened faces by file, index and pixel size, and characters' fonts by
     /// family, pixel size and character: `frame-parameters' asks for the
@@ -92,7 +93,8 @@ pub struct Display {
     /// (residency.rs).
     images: std::sync::Arc<romacs_imaging::decode::SemanticImageDecoder>,
     decoded: residency::Shared,
-    next_image: u64,
+    /// How many image ids the master has allocated.
+    next_image: u32,
     /// The decode worker: images sized from their headers decode there,
     /// off the VM, and their results wait here until taken.
     worker: Option<Worker>,
@@ -165,11 +167,14 @@ impl Worker {
 
 impl Display {
     pub fn new() -> Result<Self, String> {
-        Ok(Self { resolver: FontResolver::new().map_err(|e| e.to_string())?,
+        Ok(Self { name: "initial_terminal".into(), resolver: FontResolver::new().map_err(|e| e.to_string())?,
                   opened: HashMap::new(), chars: HashMap::new(), families: HashMap::new(), catalog: None, alpha_hook: None, visual_hook: None, lose_device_hook: None, models: None,
                   images: Default::default(), decoded: Default::default(), next_image: 0, worker: None,
                   finished: HashMap::new(), pending: Default::default(), released: Default::default(), wake: None,
                   landed: std::sync::Arc::default() })
+    }
+    pub fn with_name(self, name: String) -> Self {
+        Self { name, ..self }
     }
     /// This display, keeping decoded images' pixels in IMAGES.
     pub fn with_images(self, images: residency::Shared) -> Self {
@@ -205,11 +210,12 @@ impl Display {
         use romacs_display_protocol::image_diagnostic::{ImageDiagnosticSubject, ImageFormatName, ImageLoadIdentity};
         use romacs_display_protocol::{EncodedBytes, ImageAnimationPolicy, ImageSequenceId};
         use romacs_imaging::decode::{SemanticImageRequest, SemanticImageSource};
-        // The renderer's image ids are 32 bits; the VM's take the upper half,
-        // apart from those the renderer allocates for itself (its toolbar).
-        if self.next_image >= u64::from(u32::MAX >> 1) { return Err("too many images loaded".into()); }
+        // The master's image ids are its own space of the renderer's 32-bit
+        // ids, apart from the renderer's toolbar and the owners' slots.
+        let id = romacs_display_protocol::pane_picture::ImageIdSpace::Master.id(self.next_image)
+            .ok_or("too many images loaded")?;
         self.next_image += 1;
-        let id = (1 << 31) + self.next_image;
+        let id = u64::from(id.get());
         let (source, subject) = match query.source {
             romacs_vm::ImageSource::File(path) => {
                 let path = path.to_string_lossy().into_owned();
@@ -328,7 +334,7 @@ impl romacs_vm::DisplayHost for Display {
         "pgtk"
     }
     fn display_name(&self) -> String {
-        std::env::var("WAYLAND_DISPLAY").unwrap_or_else(|_| "wayland-0".to_owned())
+        self.name.clone()
     }
     fn list_fonts(&mut self, query: &FontQuery) -> Vec<FontEntity> {
         // The family's listing, kept: `font-info' on a face's font name asks
@@ -756,7 +762,7 @@ mod tests {
                           (progn (gui-set-selection 'CLIPBOARD \"C\") (setq desktop nil)
                                  (list (gui-get-selection 'CLIPBOARD) (gui-backend-selection-owner-p 'CLIPBOARD)))
                           (frame-edges nil 'outer-edges) (cdr (assq 'outer-size (frame-geometry)))
-                          (mouse-absolute-pixel-position) (let ((process-environment (cons \"WAYLAND_DISPLAY=wayland-0\" process-environment))) (pgtk-backend-display-class))))))");
+                          (mouse-absolute-pixel-position) (let ((romacs-pgtk--display-class \"GdkWaylandDisplay\")) (pgtk-backend-display-class))))))");
             let answer = format!("{answer} {pgtk}");
             let _ = std::fs::remove_dir_all(&home);
             answer

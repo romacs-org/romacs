@@ -3,7 +3,9 @@ use std::io::{BufRead, Read, Write};
 
 fn main() {
     if let Err(e) = main_result() {
+        // HOST(escape): stdout and stderr are sends another process reads
         eprintln!("vm2: {e}");
+        // HOST(escape): ends the process: its parent sees the status
         std::process::exit(1);
     }
 }
@@ -30,7 +32,9 @@ fn main_result() -> Result<(), String> {
         let (mut vm, entry) = Vm::from_code_image(image.clone(), config)?;
         let before = image.verified_pages();
         let result = vm.execute(entry)?;
+        // HOST(escape): stdout and stderr are sends another process reads
         println!("{}", result.display()?);
+        // HOST(escape): stdout and stderr are sends another process reads
         eprintln!(
             "{}",
             serde_json::json!({"mapped_image":args[2],"scope":"vm2-executable-world","startup_source_loads":0,"startup_compilations":0,"mapped_bytes":image.mapped_bytes(),"metadata_pages":before,"verified_pages":image.verified_pages(),"materialized_functions":vm.image_functions_materialized()})
@@ -49,6 +53,7 @@ fn main_result() -> Result<(), String> {
         vm.attach_image(image)?;
         vm.declare_special("world", world);
         let startup = vm.heap_stats();
+        // HOST(escape): stdout and stderr are sends another process reads
         eprintln!(
             "{}",
             serde_json::json!({"mapped_image": args[2], "mapped_bytes": bytes,
@@ -105,7 +110,9 @@ fn main_result() -> Result<(), String> {
         );
     }
     if stream {
+        // HOST(escape): stdout and stderr are sends another process reads
         let mut output = std::io::BufWriter::new(std::io::stdout().lock());
+        // HOST(block): reads standard input, which waits on its writer
         for input in std::io::stdin().lock().lines() {
             let input = input.map_err(|e| e.to_string())?;
             let result = serde_json::from_str::<serde_json::Value>(&input)
@@ -132,6 +139,7 @@ fn main_result() -> Result<(), String> {
         }
         if session_stats {
             let s = vm.heap_stats();
+            // HOST(escape): stdout and stderr are sends another process reads
             eprintln!(
                 "{}",
                 serde_json::json!({"collections":s.collections,"allocations":s.allocations,"reclaimed":s.reclaimed,"live_objects":s.live_objects})
@@ -140,6 +148,7 @@ fn main_result() -> Result<(), String> {
         return Ok(());
     }
     let mut input = String::new();
+    // HOST(block): reads standard input, which waits on its writer
     std::io::stdin()
         .read_to_string(&mut input)
         .map_err(|e| e.to_string())?;
@@ -153,8 +162,10 @@ fn main_result() -> Result<(), String> {
         evaluate(&mut vm, &input, dump, stats)?
     };
     if dump {
+        // HOST(escape): stdout and stderr are sends another process reads
         print!("{output}");
     } else {
+        // HOST(escape): stdout and stderr are sends another process reads
         println!("{output}");
     }
     Ok(())
@@ -185,6 +196,7 @@ fn finish(vm: &mut Vm, value: Rooted, stats: bool) -> Result<String, String> {
         // The rooted result stays live through this collection, as before.
         vm.collect_garbage();
         let live = vm.heap_stats();
+        // HOST(escape): stdout and stderr are sends another process reads
         eprintln!(
             "{{\"allocations\":{},\"collections_during_run\":{},\"reclaimed\":{},\"live_objects\":{},\"live_bytes\":{},\"capacity_bytes\":{}}}",
             allocated.allocations,

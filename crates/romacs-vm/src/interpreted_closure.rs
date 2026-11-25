@@ -3,7 +3,7 @@
 mod tests {
     use super::*;
     fn check(vm: &mut Vm, source: &str, expected: &str) {
-        vm.lazy_regime = true;
+        vm.mutator.lazy_regime = true;
         let value = vm.eval_source_raw(source).unwrap();
         assert_eq!(vm.display(value).unwrap(), expected, "{source}");
     }
@@ -11,7 +11,7 @@ mod tests {
     fn ordinary_document_is_traced_without_exposing_metadata() {
         for lazy in [false, true] {
             let mut vm = Vm::new();
-            vm.lazy_regime = lazy;
+            vm.mutator.lazy_regime = lazy;
             vm.eval_source_raw("(make-vector 20 nil) (defalias 'private-document (lambda () (:documentation (copy-sequence \"κείμενο\")) 7))").unwrap();
             vm.collect(&mut []);
             let value = vm.slots[vm.names["private-document"]].function;
@@ -179,7 +179,7 @@ mod tests {
     #[test]
     fn explicit_interpreted_body_is_compiled_only_when_called() {
         let mut vm = Vm::new();
-        vm.lazy_regime = true;
+        vm.mutator.lazy_regime = true;
         check(&mut vm, "(progn (setq deferred-constant (make-interpreted-closure nil '((let ((t nil)) 7)) '(t) nil nil)) t)", "t");
         let error = vm.eval_source_raw("(condition-case e (funcall deferred-constant) (error e))").unwrap();
         assert!(vm.display(error).unwrap().contains("constant"));
@@ -201,7 +201,7 @@ mod tests {
                 ("(make-interpreted-closure nil '(7) '(t) nil nil)", false),
             ] {
                 let mut vm = Vm::new();
-                vm.lazy_regime = lazy;
+                vm.mutator.lazy_regime = lazy;
                 vm.eval_source_raw(&format!("(setq diagnostic-function {factory})"))
                     .unwrap();
                 vm.collect(&mut []);
@@ -238,7 +238,7 @@ mod tests {
     fn ordinary_closure_slots_in_both_regimes() {
         for lazy in [false, true] {
             let mut vm = Vm::new();
-            vm.lazy_regime = lazy;
+            vm.mutator.lazy_regime = lazy;
             let value = vm.eval_source_raw(r#"
                 (setq slot-test (let ((y 5))
                   (lambda (x) "doc" (interactive (list y)) (+ x y))))"#).unwrap();
@@ -263,7 +263,7 @@ mod tests {
     fn ordinary_closure_environment_pair_shares_its_cell_across_collection() {
         for lazy in [false, true] {
             let mut vm = Vm::new();
-            vm.lazy_regime = lazy;
+            vm.mutator.lazy_regime = lazy;
             vm.set_gc_verify(true);
             vm.allocation.compact = true;
             let created = vm.eval_source_raw("
@@ -316,7 +316,7 @@ mod tests {
     fn ordinary_closures_answer_their_lambda_list() {
         for lazy in [false, true] {
             let mut vm = Vm::new();
-            vm.lazy_regime = lazy;
+            vm.mutator.lazy_regime = lazy;
             check(
                 &mut vm,
                 "(progn (defalias 'listed (lambda (a &optional b &rest c) (list a b c))) (list (aref (symbol-function 'listed) 0) (aref (let ((y 1)) (lambda (x) (+ x y))) 0) (aref (lambda () 1) 0) (listed 1)))",
@@ -577,7 +577,7 @@ impl Vm {
             lates: vec![false; names.len()],
             shadows: vec![None; names.len()],
             local_specials: specials.clone(),
-            pending_specials: self.pending_specials.clone(),
+            pending_specials: self.mutator.pending_specials.clone(),
             dynamic_scope: dynamic,
             deferred: false,
             file_level: false,
@@ -611,7 +611,7 @@ impl Vm {
         start: usize,
         n: usize,
     ) -> Result<Value> {
-        let a = self.stack[start..start + n].to_vec();
+        let a = self.mutator.stack[start..start + n].to_vec();
         self.interpreted_closure_values(p, a)
     }
     /// The closure primitives on their arguments A, already out of the file.
@@ -720,16 +720,16 @@ impl Vm {
                     values.insert(name, Value::reference(cell, 5));
                 }
                 let key_args = args.clone();
-                let (function, names) = if self.lazy_regime || self.source_load_active() {
+                let (function, names) = if self.mutator.lazy_regime || self.source_load_active() {
                     self.install_interpreted_lazy(a[1], args, &outer, &specials, a[2] == Value::NIL)?
                 } else {
                     let body = self.list_values(a[1])?.into_iter()
                         .map(|v| self.expansion_form(v, 0)).collect::<Result<Vec<_>>>()?;
-                    let saved_scope = std::mem::replace(&mut self.dynamic_scope, a[2] == Value::NIL);
-                    let saved_captures = std::mem::replace(&mut self.keep_captures, true);
+                    let saved_scope = std::mem::replace(&mut self.mutator.dynamic_scope, a[2] == Value::NIL);
+                    let saved_captures = std::mem::replace(&mut self.mutator.keep_captures, true);
                     let result = self.function(&args, &body, &outer, &specials);
-                    self.dynamic_scope = saved_scope;
-                    self.keep_captures = saved_captures;
+                    self.mutator.dynamic_scope = saved_scope;
+                    self.mutator.keep_captures = saved_captures;
                     result?
                 };
                 // fns.c internal_equal compares the closure's interactive
@@ -769,7 +769,7 @@ impl Vm {
                         Value::NIL
                     } else {
                         let form = self.expansion_form(spec, 0)?;
-                        self.keep_captures = true;
+                        self.mutator.keep_captures = true;
                         let (function, names) = self.function(&[], &[form], &outer, &specials)?;
                         let captures = names.iter().map(|name| values[name]).collect();
                         let body = self.list_value(&[spec]);

@@ -5,7 +5,7 @@ impl Vm {
     pub(crate) fn buffer_standard_case_roots(&mut self) -> crate::Result<[Value; 4]> {
         Leaf { vm: self }.standard_case_roots().map_err(|fault| {
             let (condition, data) = self.fault(fault);
-            self.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
+            self.mutator.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
             "Cannot initialize buffer case tables".to_owned()
         })
     }

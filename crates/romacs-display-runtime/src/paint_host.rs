@@ -2,7 +2,7 @@
 //! `FrameGlyphBuffer` owns both font tables; no evaluator or font handle crosses
 //! the native-thread boundary. Construct and run on the process main thread.
 
-use crate::render_thread::{self, InitialWindowReply, InitialWindowSize};
+use crate::render_thread::{self, DisplaySelection, InitialWindowReply, InitialWindowSize};
 use crate::thread_comm::{
     ClipboardCommand, ClipboardSelection, EmacsComms, FrameRef, LifecycleCommand, RenderCommand,
     RenderComms, ThreadComms, WindowCommand,
@@ -43,25 +43,16 @@ impl PaintHost {
         height: u32,
         title: String,
     ) -> Result<(Self, PaintSender), String> {
-        Self::wayland_with(socket, width, height, title, false)
+        let display = DisplaySelection::from_env(Some(socket.as_os_str()))?;
+        Self::new(&display, width, height, title, false)
     }
 
     /// A server's host: no window until [`PaintSender::realize`] asks
     /// for one, and the session outlives each window it shows. The GPU
     /// starts with the first window and stays for the next.
     #[cfg(target_os = "linux")]
-    pub fn wayland_server(
-        socket: &std::path::Path,
-        width: u32,
-        height: u32,
-        title: String,
-    ) -> Result<(Self, PaintSender), String> {
-        Self::wayland_with(socket, width, height, title, true)
-    }
-
-    #[cfg(target_os = "linux")]
-    fn wayland_with(
-        socket: &std::path::Path,
+    pub fn new(
+        display: &DisplaySelection,
         width: u32,
         height: u32,
         title: String,
@@ -70,7 +61,7 @@ impl PaintHost {
         if width == 0 || height == 0 {
             return Err("paint host size must be nonzero".into());
         }
-        let event_loop = render_thread::build_render_event_loop_wayland(socket)?;
+        let event_loop = render_thread::build_render_event_loop(display)?;
         let proxy = event_loop.create_proxy();
         let (reply, initial) = InitialWindowReply::channel(proxy.clone());
         let lifetime = reply
@@ -81,6 +72,7 @@ impl PaintHost {
         let (facts, input_rx) = crate::input_bridge::spawn(input_rx, facts_rx, crate::thread_comm::INPUT_CHANNEL_CAPACITY)
             .map_err(|error| format!("input bridge: {error}"))?;
         render.keep_alive_without_frames = server;
+        render.pixel_policy = display.pixel_policy();
         if !server {
             cmd_tx
                 .try_send(RenderCommand::Window(WindowCommand::AdoptPrimaryFrame {

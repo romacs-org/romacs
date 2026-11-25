@@ -663,7 +663,7 @@ pub fn reserved(at: usize, len: usize) -> bool {
 fn start(locked: &mut Locked) -> u8 {
     loaded::take_inventory();
     map::reserve_window();
-    // HOST(libc::getenv): the world allocator reads whether it runs in a builder at its first
+    // HOST(libc::getenv, pure): the world allocator reads whether it runs in a builder at its first
     // allocation, before host.rs can run; it zeroes freed blocks and backs its arena with a file
     // UNSAFE(std's env reads allocate, inside the allocator's first allocation: getenv is a C call)
     // SAFETY: the name is a C string literal; getenv's result is only
@@ -675,7 +675,7 @@ fn start(locked: &mut Locked) -> u8 {
     let (low, high) = if building { BUILD } else { FIRST };
     for _ in 0..8 {
         let mut random = [0u8; size_of::<usize>()];
-        // HOST(rustix::query): the world allocator picks a random arena address at its first
+        // HOST(rustix::query, pure): the world allocator picks a random arena address at its first
         // allocation; no Lisp value depends on it
         if rustix::rand::getrandom(&mut random, rustix::rand::GetRandomFlags::empty()) != Ok(random.len()) {
             break;
@@ -712,11 +712,12 @@ fn start(locked: &mut Locked) -> u8 {
 /// a C string, so the open allocates nothing.
 fn backing_file(reserve: usize) -> Option<OwnedFd> {
     let flags = rustix::fs::OFlags::TMPFILE | rustix::fs::OFlags::RDWR | rustix::fs::OFlags::CLOEXEC;
-    // HOST(rustix::file): a builder backs its arena with an unlinked memory file at its first
+    // HOST(rustix::file, acquisition): a builder backs its arena with an unlinked memory file at its first
     // allocation, before host.rs can run; no Lisp value depends on it
     let fd = rustix::fs::open(c"/dev/shm", flags, rustix::fs::Mode::from_raw_mode(0o600)).ok()?;
-    // HOST(rustix::file): a builder backs its arena with an unlinked memory file at its first
-    // allocation, before host.rs can run; no Lisp value depends on it
+    // HOST(rustix::file, escape): a builder backs its arena with an unlinked memory file at its first
+    // allocation, before host.rs can run; no Lisp value depends on it; sizing it has no inverse,
+    // though no other party sees the unlinked file
     rustix::fs::ftruncate(&fd, reserve as u64).ok()?;
     Some(fd)
 }
@@ -729,6 +730,7 @@ fn release(heap: &Heap<'_>, at: usize, len: usize) {
     if let Some(backing) = BACKING.get().filter(|_| in_backing(at)) {
         let offset = (at - heap.base) as u64;
         let punch = rustix::fs::FallocateFlags::PUNCH_HOLE | rustix::fs::FallocateFlags::KEEP_SIZE;
+        // HOST(escape): punches holes in the arena's backing file: no inverse, though no other party sees it
         let _ = rustix::fs::fallocate(backing, punch, offset, len as u64);
     } else {
         // UNSAFE(madvise on memory this module maps has no safe wrapper: rustix's is unsafe)
@@ -756,6 +758,7 @@ fn reserve() -> Option<usize> {
 /// error when the query is refused (a syscall filter may refuse it).
 fn address_space_limit() -> std::io::Result<Option<u64>> {
     let mut limit = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+    // HOST(pure): the address-space limit: a query
     // UNSAFE(rustix's getrlimit takes the call as infallible, and a refused one would read garbage)
     // SAFETY: getrlimit writes only the local it is given.
     if unsafe { libc::getrlimit(libc::RLIMIT_AS, &raw mut limit) } != 0 {
@@ -812,8 +815,9 @@ pub fn map_failure() -> Option<(&'static str, i32, bool)> {
 /// thread adopted one first, whose outcome stays said.
 fn map_image_fd(fd: BorrowedFd<'_>) -> Option<Restore> {
     let mut bytes = [0u8; size_of::<Header>()];
+    // HOST(pure): reads an image or arena file, a regular file
     let read = rustix::io::pread(fd, &mut bytes, 0);
-    // HOST(rustix::file): the world allocator checks an image is whole before it adopts it; the
+    // HOST(rustix::file, pure): the world allocator checks an image is whole before it adopts it; the
     // launcher checked that image
     let stat = rustix::fs::fstat(fd);
     let (Ok(read), Ok(stat)) = (read, stat) else { return Some(Restore::Unreadable) };
@@ -875,7 +879,7 @@ fn map_image_fd(fd: BorrowedFd<'_>) -> Option<Restore> {
 /// has, for the calling thread: the one that adopted the image, which runs
 /// the VM.
 fn start_heap_file(len: usize) {
-    // HOST(std::env::var_os): whether the file heap is asked for (ROMACS_HEAP_FILE), read once as
+    // HOST(std::env::var_os, pure): whether the file heap is asked for (ROMACS_HEAP_FILE), read once as
     // the image is adopted; not through host.rs, so that a process that asks for none records no
     // host read; no world holds it, and Lisp sees it only through romacs--arena-census
     if std::env::var_os("ROMACS_HEAP_FILE").is_some_and(|asked| asked == "1") {
@@ -1219,7 +1223,7 @@ fn copy_extents(from: BorrowedFd<'_>, to: BorrowedFd<'_>, len: usize) -> std::io
         copy_range(from, to, data, end)?;
         at = end;
     }
-    // HOST(rustix::file): copies the builder arena's backing file into the image file the builder
+    // HOST(rustix::file, escape): copies the builder arena's backing file into the image file the builder
     // opened through host
     Ok(rustix::fs::ftruncate(to, len)?)
 }
@@ -1234,7 +1238,7 @@ fn copy_range(from: BorrowedFd<'_>, to: BorrowedFd<'_>, start: u64, end: u64) ->
     while at < end {
         let (mut input, mut output) = (at, at);
         let want = usize::try_from(end - at).unwrap_or(usize::MAX);
-        // HOST(rustix::file): copies the builder arena's backing file into the image file the builder
+        // HOST(rustix::file, escape): copies the builder arena's backing file into the image file the builder
         // opened through host
         match rustix::fs::copy_file_range(from, Some(&mut input), to, Some(&mut output), want) {
             Ok(0) => return Err(ended()),
@@ -1247,12 +1251,14 @@ fn copy_range(from: BorrowedFd<'_>, to: BorrowedFd<'_>, start: u64, end: u64) ->
         }
         let mut buffer = BUFFER.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let want = buffer.len().min(want);
+        // HOST(pure): reads an image or arena file, a regular file
         let read = rustix::io::pread(from, &mut buffer[..want], at)?;
         if read == 0 {
             return Err(ended());
         }
         let mut done = 0;
         while done < read {
+            // HOST(escape): writes the image file
             done += rustix::io::pwrite(to, &buffer[done..read], at + done as u64)?;
         }
         at += read as u64;
@@ -1294,7 +1300,7 @@ fn adopted_image(arena: Published) -> bool {
 /// rest of the block stays as it is: nothing reads it, and no free list
 /// holds it.
 fn release_within(arena: Published, at: usize, len: usize) {
-    // HOST(rustix::query): the kernel's page size, the unit a discard drops; read from the
+    // HOST(rustix::query, pure): the kernel's page size, the unit a discard drops; read from the
     // auxiliary vector, it allocates nothing, and no Lisp value depends on it
     let page = rustix::param::page_size().max(PAGE);
     let (start, end) = (at.next_multiple_of(page), (at + len) / page * page);

@@ -210,7 +210,8 @@ its mirror's approvals, each the approval event that asks it."
       (maphash (lambda (handle request)
                  (puthash handle (append (list :type 'approval) (romacs-agent-wire--asked request)) approvals))
                requests)
-      (setf (romacs-agent-approvals session) approvals))))
+      (setf (romacs-agent-approvals session) approvals)
+      (romacs-agent--summary-stale id))))
 
 (cl-defmethod romacs-agent-log-source-request-event ((_source romacs-agent-remote) _session _id request)
   "REQUEST, of a mirror's approvals, is its approval event."
@@ -399,27 +400,27 @@ SOURCE's service."
   (if-let* ((client (romacs-agent-remote-client source))) (romacs-agent-client-rows client)
     (make-hash-table :test #'equal)))
 
-(cl-defmethod romacs-agent-board-source-sessions ((source romacs-agent-remote))
-  "A mirror of each row SOURCE's service lists; none is loaded here, so
-the board knows them all as shown from their rows."
-  (let ((by-id (make-hash-table :test #'equal)) (children (make-hash-table :test #'equal)) (sessions nil))
-    (maphash (lambda (_ row)
-               (let ((session (romacs-agent-remote--mirror source row)))
-                 (push session sessions)
-                 (puthash (romacs-agent-id session) session by-id)
-                 (when-let* ((parent (plist-get (romacs-agent-options session) :parent)))
-                   (push session (gethash parent children)))))
-             (romacs-agent-remote--rows source))
-    (setq romacs-agent-board--unloaded (cons by-id children))
-    sessions))
+(cl-defmethod romacs-agent-summary--entries ((source romacs-agent-remote) id)
+  "SOURCE's service's row of ID, or each row it lists, stamping its
+summary: a row changed comes as a new one.  Its record is its mirror;
+its key is the service's, whatever its parent here."
+  (let ((rows (romacs-agent-remote--rows source)))
+    (cl-flet ((entry (row) (cl-list* (gethash "id" row) row nil (lambda () (romacs-agent-remote--mirror source row)))))
+      (if id
+          (and-let* ((row (gethash id rows))) (list (entry row)))
+        (let ((entries nil))
+          (maphash (lambda (_ row) (push (entry row) entries)) rows)
+          entries)))))
 
-(cl-defmethod romacs-agent-board-source-key ((source romacs-agent-remote) session)
+(cl-defmethod romacs-agent-summary--key ((source romacs-agent-remote) session _known)
   "The key SOURCE's service made for SESSION: drawn, never derived here."
   (let ((key (gethash "key" (gethash (romacs-agent-id session) (romacs-agent-remote--rows source)))))
     (if (stringp key) (intern key) 'idle)))
 
-(cl-defmethod romacs-agent-board-source-live ((source romacs-agent-remote) session)
-  (and (gethash (romacs-agent-id session) (romacs-agent-remote--rows source)) session))
+(cl-defmethod romacs-agent-board-source-live ((source romacs-agent-remote) id)
+  "The mirror of SOURCE's session ID, while its service lists it."
+  (when-let* ((row (gethash id (romacs-agent-remote--rows source))))
+    (romacs-agent-remote--mirror source row)))
 
 (defun romacs-agent-remote--rows-changed (client _changed _removed)
   "CLIENT's list changed: the board shows it again."

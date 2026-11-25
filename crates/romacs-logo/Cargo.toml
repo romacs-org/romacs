@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 description = "The Romacs mark and wordmark, drawn in braille cells with a sweep of light"
 
+[dependencies]
+serde.workspace = true
+
 [lib]
 doctest = false
 

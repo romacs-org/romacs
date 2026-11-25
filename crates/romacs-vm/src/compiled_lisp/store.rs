@@ -329,6 +329,7 @@ pub(super) fn note_use(store: &Path, path: &Path, source: &Path) {
     let log = generation(store).join("use.log");
     if let Ok(mut file) = host::open_store_file(&log, host::StoreOpen::Append) {
         let line = format!("{}\t{}\n", path.strip_prefix(generation(store)).unwrap_or(path).display(), source.display());
+        // HOST(escape): appends a line to the compiled-Lisp store's log
         let _ = file.write_all(line.as_bytes());
     }
 }

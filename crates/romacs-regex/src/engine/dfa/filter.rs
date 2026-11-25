@@ -99,7 +99,7 @@ pub fn cold_path_enabled() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| {
         let on = !crate::engine::search::regex_knob_off(
-            // HOST(std::env::var): romacs-vm depends on this crate, so it cannot call host.rs;
+            // HOST(std::env::var, pure): romacs-vm depends on this crate, so it cannot call host.rs;
             // process-wide ROMACS_REGEX_DFA* developer knobs, read once, that select a matcher
             // strategy
             std::env::var("ROMACS_REGEX_DFA_COLD").ok().as_deref(),
@@ -122,13 +122,13 @@ pub fn dfa_mode() -> DfaMode {
 
 #[cold]
 fn read_dfa_mode() -> DfaMode {
-    // HOST(std::env::var): romacs-vm depends on this crate, so it cannot call host.rs; process-wide
+    // HOST(std::env::var, pure): romacs-vm depends on this crate, so it cannot call host.rs; process-wide
     // ROMACS_REGEX_DFA* developer knobs, read once, that select a matcher strategy
     let mode = DfaMode::parse(std::env::var("ROMACS_REGEX_DFA").ok().as_deref());
     tracing::debug!(target: "romacs::regex", ?mode, "ROMACS_REGEX_DFA");
     if mode != DfaMode::Off
         && crate::engine::search::regex_knob_on(
-            // HOST(std::env::var): romacs-vm depends on this crate, so it cannot call host.rs;
+            // HOST(std::env::var, pure): romacs-vm depends on this crate, so it cannot call host.rs;
             // process-wide ROMACS_REGEX_DFA* developer knobs, read once, that select a matcher
             // strategy
             std::env::var("ROMACS_REGEX_DFA_STATS").ok().as_deref(),
@@ -174,7 +174,7 @@ pub fn first_step_enabled() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| {
         let on = !crate::engine::search::regex_knob_off(
-            // HOST(std::env::var): romacs-vm depends on this crate, so it cannot call host.rs;
+            // HOST(std::env::var, pure): romacs-vm depends on this crate, so it cannot call host.rs;
             // process-wide ROMACS_REGEX_DFA* developer knobs, read once, that select a matcher
             // strategy
             std::env::var("ROMACS_REGEX_DFA_FIRST_STEP").ok().as_deref(),
@@ -293,11 +293,13 @@ fn register_stats_report() {
             .try_with(|cell| cell.try_borrow().map(|stats| *stats).unwrap_or_default())
             .unwrap_or_default();
         let line = format!("[romacs-regex-dfa] {stats:?}\n");
+        // HOST(escape): stdout and stderr are sends another process reads
         let _ = std::io::Write::write_all(&mut std::io::stderr().lock(), line.as_bytes());
     }
     // SAFETY: `report` is an `extern "C" fn()` that only reads this
     // thread's counters and writes one line to stderr.
     unsafe {
+        // HOST(acquisition): registers an exit hook, which writes the stats report to stderr
         libc::atexit(report);
     }
 }

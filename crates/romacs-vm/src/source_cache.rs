@@ -200,12 +200,12 @@ impl Vm {
     /// symbols it names, and which of its calls are macro calls.
     fn compile_guarded(&mut self, form: &Form) -> Result<(usize, Vec<usize>, Entry)> {
         self.macro_record.expansions = 0;
-        self.expanded_symbols.clear();
+        self.mutator.expanded_symbols.clear();
         let (function, compiled) = self.compile_request(form)?;
         self.source_cache.stats.compilations += 1;
         let mut names = NameSet::default();
         collect_symbols(form, &mut names);
-        names.extend(self.expanded_symbols.iter().cloned());
+        names.extend(self.mutator.expanded_symbols.iter().cloned());
         for f in compiled.iter().map(|&id| &self.functions[id]) {
             for op in &f.code {
                 if let Op::Global(_, s) | Op::Bind(s, _) | Op::SetGlobal(s, _)
@@ -386,7 +386,7 @@ impl Vm {
         // A loading file's form declares its value-less defvars for the
         // file's rest (`Builder::file_level'); the same text evaluated
         // elsewhere does not: they compile apart, under keys apart.
-        let file_level = self.file_level_request;
+        let file_level = self.mutator.file_level_request;
         let namespaced;
         let source = if file_level {
             namespaced = format!("\0file\0{source}");
@@ -395,7 +395,7 @@ impl Vm {
             source
         };
         if let Some(f) = self.cached_submission(source) {
-            self.file_level_request = false;
+            self.mutator.file_level_request = false;
             return Ok(f);
         }
         let k = key(source);
@@ -433,13 +433,13 @@ impl Vm {
                     match kind {
                         SpecialKind::Global => portable.declare_special_raw(name, Value::NIL),
                         SpecialKind::FileLocal => {
-                            portable.file_specials.insert(name.clone());
+                            portable.mutator.file_specials.insert(name.clone());
                         }
                         SpecialKind::Lexical => {}
                     }
                 }
-                portable.seed_file_specials = true;
-                portable.file_level_request = file_level;
+                portable.mutator.seed_file_specials = true;
+                portable.mutator.file_level_request = file_level;
                 let function = portable.compile(form)?;
                 portable.source_cache.store = self.source_cache.store.clone();
                 let disk_entry = Entry {
@@ -525,7 +525,7 @@ impl Vm {
                 // Compilation fails here with the load's condition as text;
                 // its structured escape belongs to no engine and must not
                 // outlive this request (it would replace a later signal).
-                return Err(match self.propagated_escape.take() {
+                return Err(match self.mutator.propagated_escape.take() {
                     Some(threaded::Escape::Signal(condition, data)) => {
                         let name = self.display(condition).unwrap_or_default();
                         let data = self.display(data).unwrap_or_default();
@@ -544,7 +544,7 @@ impl Vm {
         // An alias head counts as an expansion of its own (VM2's former
         // limit counted it before testing, then the macro).
         self.macro_record.expansions += 1 + usize::from(slot != head);
-        if self.expanding.len() >= 128 || self.macro_record.expansions > 4096 {
+        if self.mutator.expanding.len() >= 128 || self.macro_record.expansions > 4096 {
             return Err("macro expansion limit exceeded".into());
         }
         self.record_alias_chain(head, slot);
@@ -558,10 +558,10 @@ impl Vm {
             && self.standard_backquote(function)
             && let Ok(part) = expand::Walk::standard().template(template, 0)
         {
-            collect_symbols(&part.form, &mut self.expanded_symbols);
+            collect_symbols(&part.form, &mut self.mutator.expanded_symbols);
             return Ok(Some(part.form));
         }
-        self.expanding.push(slot);
+        self.mutator.expanding.push(slot);
         // Inside a compilation, the open builder holds collection while it
         // keeps unrooted constants. At a load's top level nothing does: ITEMS
         // are forms, whose objects are rooted, and the expander roots
@@ -573,11 +573,11 @@ impl Vm {
             // sees. Keep it structured instead of flattening it to text.
             // Eager expansion can also run inside `eval`: its Lisp condition
             // must cross back to the calling engine, not become plain text.
-            self.propagate_next = true;
+            self.mutator.propagate_next = true;
             let value = self.call_macro_expander(function, &arguments);
-            self.propagate_next = false;
+            self.mutator.propagate_next = false;
             let value = match value {
-                Err(error) => Err(match &self.propagated_escape {
+                Err(error) => Err(match &self.mutator.propagated_escape {
                     Some(threaded::Escape::Signal(condition, data)) => {
                         let (condition, data) = (*condition, *data);
                         let name = self.display(condition).unwrap_or_default();
@@ -591,9 +591,9 @@ impl Vm {
             // Converting the expansion runs no Lisp; its objects are rooted.
             self.expansion_form(value, 0)
         })();
-        self.expanding.pop();
+        self.mutator.expanding.pop();
         if let Ok(form) = &result {
-            collect_symbols(form, &mut self.expanded_symbols);
+            collect_symbols(form, &mut self.mutator.expanded_symbols);
         }
         result.map(Some)
     }

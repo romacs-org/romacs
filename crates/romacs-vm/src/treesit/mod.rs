@@ -174,6 +174,7 @@ impl Early {
                         wake: Option<std::sync::Arc<dyn Fn() + Send + Sync>>) -> Option<Self> {
         let (sender, result) = mpsc::channel();
         let grammar = language.clone();
+        // HOST(pure): starts a thread of this process, no outside resource (rule 5)
         std::thread::Builder::new().name("treesit-parse".into()).spawn(move || {
             let text = text;
             let mut parser = native::Parser::new();
@@ -191,6 +192,7 @@ impl Early {
     }
     /// Whether the thread has sent its result.
     pub(crate) fn ready(&mut self) -> bool {
+        // HOST(pure): waits on a thread of this process, no outside peer (rule 5)
         self.wait(std::time::Duration::ZERO)
     }
     /// Whether the thread has sent its result (or ended without one),
@@ -513,7 +515,7 @@ pub(crate) struct Node {
 pub(crate) struct Query {
     pub language: Value,
     pub source: Value,
-    pub compiled: Option<Rc<Compiled>>,
+    pub compiled: Option<std::sync::Arc<Compiled>>,
 }
 
 /// A compiled query and each pattern's predicates
@@ -586,7 +588,7 @@ pub(crate) enum TaskState {
 /// holds, from index 0: the parser, then per match its capture names and
 /// nodes in pairs, as MATCHES's ranges index them.
 pub(crate) struct Capture {
-    pub compiled: Rc<Compiled>,
+    pub compiled: std::sync::Arc<Compiled>,
     /// (pattern, start in `values`, capture count) per match.
     pub matches: Vec<(u32, usize, usize)>,
     pub at: usize,

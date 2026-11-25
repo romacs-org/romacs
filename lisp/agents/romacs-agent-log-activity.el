@@ -71,11 +71,10 @@ The default leaves room for the transcript and work still in progress."
 (declare-function romacs-agent-log--key "romacs-agent-log" (command &optional map))
 (declare-function romacs-agent-log--open-delegated-list "romacs-agent-log" (_button))
 
-(defun romacs-agent-log-activity--inactive-key (session key)
-  "The inactive state of SESSION, whose session state is KEY."
-  (cond ((or (memq key '(failed unstarted)) (romacs-agent-failed session)) 'failed)
-        ((> (romacs-agent-done-seq session) 0) 'completed)
-        (t 'idle)))
+(defun romacs-agent-log-activity--thread (row)
+  "The id of the delegated session worker ROW is, or nil for a harness's
+own subagent: a row as the session's record has it, or as its summary does."
+  (or (plist-get row :id) (and-let* ((child (plist-get row :session))) (romacs-agent-id child))))
 
 (defun romacs-agent-log-activity-delegated-rows (rows)
   "Return the live and inactive delegated groups for worker snapshot ROWS."
@@ -87,13 +86,10 @@ The default leaves room for the transcript and work still in progress."
   "Group unsettled delegated ROWS as (LIVE . INACTIVE), newest inactive first."
   (let (live inactive)
     (dolist (row rows)
-      (when (and (plist-get row :session) (not (eq (plist-get row :key) 'settled)))
-        (let ((key (plist-get row :key)))
-          (if (memq key romacs-agent-ui--live-keys)
-              (push row live)
-            (push (plist-put (copy-sequence row) :key
-                             (romacs-agent-log-activity--inactive-key (plist-get row :session) key))
-                  inactive)))))
+      (when (and (romacs-agent-log-activity--thread row) (not (eq (plist-get row :key) 'settled)))
+        (if (memq (plist-get row :key) romacs-agent-ui--live-keys)
+            (push row live)
+          (push (plist-put (copy-sequence row) :key (plist-get row :inactive)) inactive))))
     (cons (nreverse live)
           (sort (nreverse inactive) (lambda (a b) (> (or (plist-get a :time) 0) (or (plist-get b :time) 0)))))))
 
@@ -125,7 +121,8 @@ The default leaves room for the transcript and work still in progress."
               'romacs-agent-worker id 'romacs-agent-worker-cols cols))
 
 (defun romacs-agent-log-activity--line (title activity prefix width face &optional activity-face)
-  "Draw TITLE in FACE and ACTIVITY after PREFIX, within WIDTH.
+  "Draw TITLE in FACE and ACTIVITY after PREFIX, within WIDTH, wrapping
+under TITLE in a narrower window.
 With ACTIVITY-FACE, make room for the inactive state word before the title."
   (let* ((room (max 1 (- width (string-width (or prefix "")) 1)))
          (title-width (if (> room 14) (min 40 (/ room 2)) room))
@@ -138,7 +135,8 @@ With ACTIVITY-FACE, make room for the inactive state word before the title."
                                    (concat (propertize "  ·  " 'face 'romacs-agent-log-note)
                                            (propertize (romacs-agent-log-activity--clip activity action)
                                                        'face (or activity-face 'romacs-agent-log-note)))))
-                        'help-echo (if activity (concat title " · " activity) title)))))
+                        'help-echo (if activity (concat title " · " activity) title)
+                        'wrap-prefix (make-string (string-width (or prefix "")) ?\s)))))
 
 (defun romacs-agent-log-activity--subagent-line (row width)
   "Draw the native subagent ROW within WIDTH columns."
@@ -164,7 +162,7 @@ With ACTIVITY-FACE, make room for the inactive state word before the title."
 
 (defun romacs-agent-log-activity-delegated-line (row width)
   "Draw a delegated thread ROW in WIDTH columns, without a newline."
-  (let* ((id (romacs-agent-id (plist-get row :session)))
+  (let* ((id (romacs-agent-log-activity--thread row))
          (key (plist-get row :key))
          (unit (plist-get row :unit))
          (name (or (plist-get row :title) "Delegated thread"))

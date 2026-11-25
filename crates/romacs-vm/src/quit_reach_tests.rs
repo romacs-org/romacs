@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 /// A VM with the Lisp prelude, busy running a command, and the signal its
 /// host's input thread holds.
-fn busy_vm() -> (Vm, Arc<QuitSignal>) {
+pub(super) fn busy_vm() -> (Vm, Arc<QuitSignal>) {
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
     let signal = Arc::new(QuitSignal::new());
@@ -21,7 +21,7 @@ fn busy_vm() -> (Vm, Arc<QuitSignal>) {
     (vm, signal)
 }
 
-fn eval(vm: &mut Vm, source: &str) -> Value {
+pub(super) fn eval(vm: &mut Vm, source: &str) -> Value {
     vm.eval_source_raw(source).unwrap_or_else(|e| panic!("{source}: {e}"))
 }
 
@@ -56,7 +56,7 @@ fn invoke(vm: &mut Vm, (desc, values): (&'static PrimDesc, Vec<Value>)) -> std::
     }
 }
 
-fn quit_signalled(vm: &mut Vm, outcome: &std::result::Result<Value, Fault>) -> bool {
+pub(super) fn quit_signalled(vm: &mut Vm, outcome: &std::result::Result<Value, Fault>) -> bool {
     let quit = vm.intern("quit");
     matches!(outcome, Err(Fault::Signal(condition, _)) if *condition == quit)
 }
@@ -78,7 +78,7 @@ fn reaches(name: &str, setup: &str, args: &str, check: &str) {
     };
     assert!(quit_signalled(&mut vm, &outcome), "{name} on {args}: no quit at its poll, but {ended}");
     assert!(!signal.due(), "{name}: the press was taken");
-    vm.quit_unwinding = false;
+    vm.mutator.quit_unwinding = false;
     assert_eq!(vm.eval_source(check).unwrap().display().unwrap(), "t", "{name}: {check} after the quit");
 
     eval(&mut vm, "(setq inhibit-quit t)");
@@ -96,6 +96,136 @@ fn json_parse_and_serialize_quit_between_values() {
     reaches("json-parse-string", setup, "(list json-in)", "t");
     reaches("json-serialize", setup, "(list json-v)", "t");
     reaches("json-parse-buffer", &format!("(progn {setup} (insert json-in) (goto-char 1))"), "nil", "(= (point) 1)");
+}
+
+#[test]
+fn leaf_poll_concat_fallback() {
+    reaches("concat", "(setq chars (make-list 20000 ?λ))", "(list chars)",
+            "(= (length chars) 20000)");
+    reaches("concat", "(setq chars (make-vector 20000 ?λ))", "(list chars)",
+            "(= (aref chars 19999) ?λ)");
+    reaches("concat", "(setq bytes (make-string 200000 255))",
+            "(list bytes \"λ\")", "(= (length bytes) 200000)");
+}
+
+#[test]
+fn leaf_poll_concat_short_cycle_keeps_its_fault() {
+    let (mut vm, signal) = busy_vm();
+    eval(&mut vm, "(progn (setq cyclic (list 65 66)) (setcdr (cdr cyclic) (cdr cyclic)) nil)");
+    let call = prepare(&mut vm, "concat", "(list cyclic)");
+    let original = call.1[0];
+    assert!(signal.interrupt());
+    let outcome = invoke(&mut vm, call);
+    assert!(matches!(outcome, Err(Fault::Circular(list)) if list == original),
+            "concat must signal circular-list with the original argument");
+    assert!(signal.due(), "the cycle error leaves the quit pending");
+}
+
+#[test]
+fn leaf_poll_concat_list_assembly() {
+    reaches("romacs--concat-list", "(setq parts (list (make-string 200000 ?a) \"b\"))",
+            "(list parts \":\")", "(= (length parts) 2)");
+}
+
+#[test]
+fn concat_result_polls_during_string_metadata() {
+    let (mut vm, signal) = busy_vm();
+    let bytes = crate::text::octets_to_multibyte(&vec![255; 20000]);
+    assert!(signal.interrupt());
+    let outcome = Leaf::new(&mut vm).concat_result(bytes, true, &[]);
+    assert!(quit_signalled(&mut vm, &outcome), "result metadata scan did not quit");
+    assert!(!signal.due());
+}
+
+#[test]
+fn concat_result_polls_while_widening_properties() {
+    let (mut vm, signal) = busy_vm();
+    let part = eval(&mut vm, "(progn
+        (setq part (string-as-unibyte (make-string 20000 255)))
+        (put-text-property 1 39999 'face 'bold part)
+        part)");
+    assert_eq!(eval(&mut vm, "(multibyte-string-p part)"), Value::NIL);
+    let octets = Leaf::new(&mut vm).string_bytes(part).unwrap_or_else(|_| panic!("fixture must be a string"));
+    let mut bytes = vec![b'x'];
+    bytes.extend(crate::text::octets_to_multibyte(&octets));
+    bytes.extend_from_slice("λ".as_bytes());
+    assert!(signal.interrupt());
+    assert!(Leaf::new(&mut vm).concat_properties::<true>(&[(part, 1)], true).is_err(),
+            "the property phase must stop before metadata gets the press");
+    assert!(signal.due(), "the property phase leaves delivery to the leaf");
+    let outcome = Leaf::new(&mut vm).concat_result(bytes.clone(), true, &[(part, 1)]);
+    assert!(quit_signalled(&mut vm, &outcome), "widened result construction did not quit");
+    assert!(!signal.due());
+    vm.mutator.quit_unwinding = false;
+
+    eval(&mut vm, "(setq inhibit-quit t)");
+    assert!(signal.interrupt());
+    assert!(Leaf::new(&mut vm).concat_result(bytes, true, &[(part, 1)]).is_ok());
+    assert!(signal.due(), "the inhibited leaf leaves the host press pending");
+    assert_eq!(eval(&mut vm, "(let ((out (concat \"x\" part \"λ\")))
+        (and (= (length out) 40002)
+             (null (get-text-property 1 'face out))
+             (eq (get-text-property 2 'face out) 'bold)
+             (eq (get-text-property 39999 'face out) 'bold)
+             (null (get-text-property 40000 'face out))
+             (= (aref out 40001) ?λ)))"), Value::TRUE);
+}
+
+#[test]
+fn concat_result_polls_across_short_widened_parts() {
+    let (mut vm, signal) = busy_vm();
+    let part = eval(&mut vm, "(progn
+        (setq part (string-as-unibyte (make-string 64 255)))
+        (put-text-property 0 128 'face 'bold part)
+        part)");
+    assert_eq!(eval(&mut vm, "(multibyte-string-p part)"), Value::NIL);
+    let parts: Vec<_> = (0..256).map(|i| (part, i * 256)).collect();
+    assert!(signal.interrupt());
+    assert!(Leaf::new(&mut vm).concat_properties::<true>(&parts, true).is_err(),
+            "short widened parts must share a byte budget");
+    assert!(signal.due());
+}
+
+#[test]
+fn leaf_poll_list_elements() {
+    reaches("romacs--nconc-list", "(setq parts (make-list 20000 nil))",
+            "(list parts)", "(= (length parts) 20000)");
+}
+
+#[test]
+fn leaf_poll_file_name_handler_walk() {
+    reaches("find-file-name-handler", "(setq file-name-handler-alist (make-list 20000 nil))",
+            "(list \"file\" 'load)", "(= (length file-name-handler-alist) 20000)");
+    reaches("find-file-name-handler",
+            "(progn (setplist 'poll-handler (make-list 40000 nil))
+                    (setq file-name-handler-alist '((nil . poll-handler))))",
+            "(list \"file\" 'load)", "(= (length (symbol-plist 'poll-handler)) 40000)");
+}
+
+#[test]
+fn leaf_poll_hash_bytes() {
+    reaches("sxhash-equal", "(setq key (make-string 200000 ?a))", "(list key)",
+            "(= (length key) 200000)");
+    reaches("sxhash-equal", "(setq key (vector (make-string 200000 ?a)))", "(list key)", "t");
+}
+
+#[test]
+fn leaf_poll_hash_lookup_leaves_a_press_pending() {
+    use crate::Primitive::{Gethash, Puthash};
+    let (mut vm, signal) = busy_vm();
+    eval(&mut vm, "(setq a (make-string 200000 ?a) b (make-string 200000 ?a)
+                         table (make-hash-table :test 'equal))");
+    let [a, b, table] = ["a", "b", "table"].map(|name| eval(&mut vm, name));
+    assert!(signal.interrupt());
+    let insert = vm.with_kernel_stack(&[a, Value::TRUE, table], |vm, n| {
+        vm.inside_quit_scope(|vm| vm.primitive(Puthash, 0, n))
+    });
+    assert_eq!(insert.ok(), Some(Value::TRUE));
+    let lookup = vm.with_kernel_stack(&[b, table], |vm, n| {
+        vm.inside_quit_scope(|vm| vm.primitive(Gethash, 0, n))
+    });
+    assert_eq!(lookup.ok(), Some(Value::TRUE));
+    assert!(signal.due(), "table hashing and equal leave the press pending");
 }
 
 #[test]
@@ -126,7 +256,7 @@ fn a_native_sort_quits_and_leaves_its_list() {
 fn a_native_sort_quits_in_its_merge() {
     let (mut vm, signal) = busy_vm();
     // The scope the sort's own entry grants.
-    vm.native_quit = true;
+    vm.mutator.native_quit = true;
     let run = 4;
     let mut order = vec![4, 6, 8, 10, 5, 7, 9, 11];
     let mut pressed = false;
@@ -136,13 +266,13 @@ fn a_native_sort_quits_in_its_merge() {
     }).map(|()| Value::NIL);
     assert!(pressed, "the merge compared across runs");
     assert!(quit_signalled(&mut vm, &outcome), "the merge did not quit at its poll");
-    vm.quit_unwinding = false;
+    vm.mutator.quit_unwinding = false;
 }
 
 #[test]
 fn a_native_sort_quits_while_copying_a_merge_tail() {
     let (mut vm, signal) = busy_vm();
-    vm.native_quit = true;
+    vm.mutator.native_quit = true;
     let mut order = vec![4, 5, 6, 7, 8, 9, 10, 11, 2, 3, 12, 13, 0];
     let mut pressed = false;
     let outcome = crate::prim::prims::leaf_sequences::sort_polled(&mut Leaf::new(&mut vm), &mut order, 4, |_, a, b| {
@@ -154,7 +284,7 @@ fn a_native_sort_quits_while_copying_a_merge_tail() {
     assert!(quit_signalled(&mut vm, &outcome), "the merge tail did not poll");
     assert_eq!(order, [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 0],
                "the interrupted merge published a partial level");
-    vm.quit_unwinding = false;
+    vm.mutator.quit_unwinding = false;
 }
 
 /// A syntax table where `;` starts a comment a newline ends and `'` is an
@@ -219,6 +349,39 @@ fn sqlite_interrupts_a_long_statement() {
     reaches("sqlite-next", &setup, "(list set)", "(and (null (sqlite-next set)) (null (sqlite-more-p set)))");
 }
 
+#[test]
+fn sqlite_quits_before_loading_an_extension() {
+    let (mut vm, signal) = busy_vm();
+    eval(&mut vm, "(setq db (sqlite-open))");
+    let path = std::env::temp_dir().join(format!("romacs-missing-extension-{}", std::process::id())).join("rot13.so");
+    let call = prepare(&mut vm, "sqlite-load-extension", &format!("(list db {:?})", path.to_str().unwrap()));
+    assert!(signal.interrupt());
+    let outcome = invoke(&mut vm, call);
+    assert!(quit_signalled(&mut vm, &outcome), "quit before entering the extension loader");
+    assert!(!signal.due());
+}
+
+#[test]
+fn sqlite_extension_cancel_reverts_the_loading_flag() {
+    let (mut vm, _) = busy_vm();
+    let db = eval(&mut vm, "(setq db (sqlite-open))");
+    let conn = Leaf::new(&mut vm).sqlite_connection_of(db).unwrap_or_else(|_| panic!("open connection"));
+    let path = std::env::temp_dir().join(format!("romacs-missing-extension-{}", std::process::id())).join("rot13.so");
+    let args = format!("(list db {:?})", path.to_str().unwrap());
+    let call = prepare(&mut vm, "sqlite-load-extension", &args);
+    assert!(matches!(invoke(&mut vm, call), Ok(Value::NIL)), "a missing extension fails normally");
+    assert!(!conn.extension_loading_enabled(), "a normal load attempt leaves loading disabled");
+
+    for enabled in [false, true] {
+        conn.set_extension_loading_for_test(enabled);
+        let call = prepare(&mut vm, "sqlite-load-extension", &args);
+        let (outcome, polls) = crate::quit::query_polls::count_once(2, || invoke(&mut vm, call));
+        assert_eq!(conn.extension_loading_enabled(), enabled, "a canceled load restores the prior flag");
+        assert_eq!(polls, 2, "the loader checks quit after enabling extension loading");
+        assert!(outcome.is_err(), "the second check prevents entering the loader");
+    }
+}
+
 /// sqlite-select polls between rows only a statement that writes nothing:
 /// SQLite says which, once the statement is prepared.
 #[test]
@@ -279,8 +442,8 @@ fn sqlite_never_quits_with_its_write_kept() {
         let Some(value) = value else {
             assert_eq!(shown, Err(true), "{name}, asked before the halt: it quits");
             assert!(!signal.due(), "{name}: the quit took the press");
-            vm.quit_unwinding = false;
-            vm.propagated_escape = None;
+            vm.mutator.quit_unwinding = false;
+            vm.mutator.propagated_escape = None;
             assert_eq!(vm.eval_source("(equal (sqlite-select db \"SELECT count(*) FROM dst\") '((0)))").unwrap().display().unwrap(), "t", "{name}: the write was rolled back");
             continue;
         };
@@ -288,10 +451,22 @@ fn sqlite_never_quits_with_its_write_kept() {
         assert!(signal.due(), "{name}: the press waits for the next poll");
         assert!(vm.eval_source_raw("(sqlite-select db \"SELECT count(*) FROM dst\")").is_err(), "{name}: the form after the call quits");
         assert!(!signal.due(), "{name}: that form took the press");
-        vm.quit_unwinding = false;
-        vm.propagated_escape = None;
+        vm.mutator.quit_unwinding = false;
+        vm.mutator.propagated_escape = None;
         assert_eq!(vm.eval_source(&format!("(equal (sqlite-select db \"SELECT count(*) FROM dst\") '(({rows})))")).unwrap().display().unwrap(), "t", "{name}: the write was kept");
     }
+}
+
+#[test]
+fn tree_sitter_visible_retry_keeps_the_callers_stop() {
+    let (mut vm, _) = busy_vm();
+    assert_eq!(eval(&mut vm, "(treesit-language-available-p 'c)"), Value::TRUE);
+    eval(&mut vm, "(progn (dotimes (_ 20000) (insert \"int x;\n\")) (setq parser (treesit-parser-create 'c)))");
+    let call = prepare(&mut vm, "treesit-parser-root-node", "(list parser)");
+    // The first native stop has no Lisp quit to deliver, so parsing retries.
+    let (outcome, polls) = crate::quit::query_polls::count_once(1, || invoke(&mut vm, call));
+    assert!(outcome.is_ok(), "the visible parse retried successfully");
+    assert!(polls > 1, "the visible parse retried with quit armed");
 }
 
 #[test]
@@ -319,7 +494,7 @@ fn call_process_s_wait_quits_and_interrupts_the_child() {
     assert!(quit_signalled(&mut vm, &outcome), "the wait did not quit");
     assert!(started.elapsed() < std::time::Duration::from_secs(10), "the wait outlasted the press");
     // Under inhibit-quit the wait goes on, the press held, without spinning.
-    vm.quit_unwinding = false;
+    vm.mutator.quit_unwinding = false;
     eval(&mut vm, "(setq inhibit-quit t)");
     let call = prepare(&mut vm, "romacs--call-process-run", "(list '(\"sleep\" \"0.3\") nil \"/\" \"/dev/null\" nil nil t (cons nil nil))");
     assert!(signal.interrupt());
@@ -410,7 +585,7 @@ fn call_process_deadlines_and_debug_events_wake_their_own_waits() {
 
     // One held C-g, a debugger event while the child is silent, then a
     // second debugger event and the call budget during SIGINT cleanup.
-    vm.quit_unwinding = false;
+    vm.mutator.quit_unwinding = false;
     eval(&mut vm, "(setq inhibit-quit t debug-on-event 'sigusr1)");
     with_call_process_child(|pid, output| {
         use std::io::BufRead;
@@ -619,10 +794,10 @@ fn a_quit_scope_ends_at_lisp_entry() {
         (dotimes (i 3000) (puthash (make-list 40 i) i h))
         (hash-table-count h)))");
     // Inside a primitive's scope, as `Leaf::quittable` grants it.
-    vm.native_quit = true;
+    vm.mutator.native_quit = true;
     let count = vm.reader_call(predicate, &[]);
     assert_eq!(count.ok().and_then(Value::integer_value), Some(3000), "the Lisp ran to its end");
-    assert!(vm.native_quit, "the scope is the caller's again once the Lisp returns");
+    assert!(vm.mutator.native_quit, "the scope is the caller's again once the Lisp returns");
 }
 
 /// A kernel the engine runs for a primitive whose failures are text polls
@@ -662,9 +837,9 @@ fn kernels_the_engine_runs_quit_per_chunk() {
         // first cons: the walk polls, not only the build after it.
         if p == Append { assert_eq!(vm.allocation.consed.conses, consed, "{args}: a cons made before the quit"); }
         let quit = vm.intern("quit");
-        assert!(matches!(vm.propagated_escape, Some(crate::threaded::Escape::Signal(c, _)) if c == quit), "{p:?}: the quit is pending");
-        vm.propagated_escape = None;
-        vm.quit_unwinding = false;
+        assert!(matches!(vm.mutator.propagated_escape, Some(crate::threaded::Escape::Signal(c, _)) if c == quit), "{p:?}: the quit is pending");
+        vm.mutator.propagated_escape = None;
+        vm.mutator.quit_unwinding = false;
         eval(&mut vm, "(setq inhibit-quit t)");
         assert!(signal.interrupt());
         assert!(call(&mut vm, p, &values, true).is_ok(), "{p:?}: under inhibit-quit the call ends with a value");
@@ -681,12 +856,12 @@ fn a_native_poll_quits_inside_a_compiling_macro_expansion() {
     let (mut vm, signal) = busy_vm();
     eval(&mut vm, "(setq l (make-list 50000 'a))");
     let call = prepare(&mut vm, "prin1-to-string", "(list l)");
-    vm.compile_depth += 1;
-    vm.expanding.push(0);
+    vm.mutator.compile_depth += 1;
+    vm.mutator.expanding.push(0);
     assert!(signal.interrupt(), "a busy evaluator takes the press");
     let outcome = invoke(&mut vm, call);
     assert!(quit_signalled(&mut vm, &outcome), "the printer's poll did not quit inside the expansion");
-    vm.quit_unwinding = false;
+    vm.mutator.quit_unwinding = false;
     let inhibit = vm.slot("inhibit-quit");
     vm.slots[inhibit].value = Value::TRUE;
     let call = prepare(&mut vm, "prin1-to-string", "(list l)");
@@ -694,8 +869,8 @@ fn a_native_poll_quits_inside_a_compiling_macro_expansion() {
     assert!(invoke(&mut vm, call).is_ok(), "under inhibit-quit the print ends with a value");
     assert!(signal.due(), "inhibit-quit holds the press");
     vm.slots[inhibit].value = Value::NIL;
-    vm.expanding.pop();
-    vm.compile_depth -= 1;
+    vm.mutator.expanding.pop();
+    vm.mutator.compile_depth -= 1;
 }
 
 /// A C-g an `inhibit-quit` held, released before the call, leaves
@@ -716,13 +891,13 @@ fn a_native_poll_quits_for_a_latched_quit_flag() {
     assert!(!signal.due(), "no press, only the flag");
     assert_eq!(append(&mut vm).err().as_deref(), Some(crate::quit::ESCAPED), "append did not quit for quit-flag");
     assert_eq!(vm.slots[flag].value, Value::NIL, "the quit took the flag");
-    vm.propagated_escape = None;
-    vm.quit_unwinding = false;
+    vm.mutator.propagated_escape = None;
+    vm.mutator.quit_unwinding = false;
     let call = prepare(&mut vm, "base64-decode-string", "(list (base64-encode-string (make-string 100000 ?a) t))");
     vm.slots[flag].value = Value::TRUE;
     let outcome = invoke(&mut vm, call);
     assert!(quit_signalled(&mut vm, &outcome), "base64's probe did not stop for quit-flag");
-    vm.quit_unwinding = false;
+    vm.mutator.quit_unwinding = false;
     vm.slots[inhibit].value = Value::TRUE;
     vm.slots[flag].value = Value::TRUE;
     assert!(append(&mut vm).is_ok(), "under inhibit-quit append ends with a value");
@@ -862,8 +1037,8 @@ fn list_walks_quit_inside_their_own_scope() {
         assert!(signal.interrupt(), "a busy evaluator takes the press");
         let outcome = vm.with_kernel_stack(&[list], |vm, n| vm.inside_quit_scope(|vm| vm.primitive(p, 0, n)));
         assert_eq!(outcome.err().as_deref(), Some(crate::quit::ESCAPED), "{p:?}: no quit at its poll");
-        vm.propagated_escape = None;
-        vm.quit_unwinding = false;
+        vm.mutator.propagated_escape = None;
+        vm.mutator.quit_unwinding = false;
         assert_eq!(eval(&mut vm, "(length l)").integer_value(), Some(50000), "{p:?}: the list is whole");
         // Under inhibit-quit it runs to its end and the press waits.
         eval(&mut vm, "(setq inhibit-quit t)");
@@ -915,6 +1090,36 @@ fn call_kernel(vm: &mut Vm, p: crate::Primitive, args: &[Value], engine: bool) -
     })
 }
 
+#[test]
+fn string_as_unibyte_quits_between_byte_chunks() {
+    use crate::Primitive::EncodeUtf8;
+    use crate::quit::KERNEL_CHUNK;
+    let (mut vm, signal) = busy_vm();
+    let prefix = KERNEL_CHUNK - 3;
+    let input = eval(&mut vm, &format!(
+        "(setq input (concat (make-string {prefix} ?a)
+                            (string-as-multibyte (unibyte-string 128 255)) \"λ\"))",
+    ));
+    assert_eq!(vm.str_view(input).unwrap().len(), KERNEL_CHUNK);
+    assert!(signal.interrupt());
+    let outcome = call_kernel(&mut vm, EncodeUtf8, &[input], true);
+    assert_eq!(outcome.err().as_deref(), Some(crate::quit::ESCAPED),
+               "string-as-unibyte did not quit inside the conversion");
+    let quit = vm.intern("quit");
+    assert!(matches!(vm.mutator.propagated_escape.take(), Some(crate::threaded::Escape::Signal(c, _)) if c == quit));
+    assert!(!signal.due());
+    vm.mutator.quit_unwinding = false;
+
+    eval(&mut vm, "(setq inhibit-quit t)");
+    assert!(signal.interrupt());
+    let result = call_kernel(&mut vm, EncodeUtf8, &[input], true).unwrap();
+    let view = vm.str_view(result).unwrap();
+    assert!(!view.is_multibyte());
+    assert_eq!(&view.bytes()[..prefix], &vec![b'a'; prefix]);
+    assert_eq!(&view.bytes()[prefix..], &[128, 255, 0xce, 0xbb]);
+    assert!(signal.due());
+}
+
 /// The kernels gated at their first chunk (`Vm::kernel_poll`), each with
 /// the form making its arguments, N elements long. A press counted: through
 /// the engine's call target three chunks' worth quits at a poll, and one
@@ -923,11 +1128,11 @@ fn call_kernel(vm: &mut Vm, p: crate::Primitive, args: &[Value], engine: bool) -
 /// value too.
 #[test]
 fn gated_kernels_take_their_scope_at_their_first_chunk() {
-    use crate::Primitive::{Append, CopySequence, Max, Min, Nreverse};
+    use crate::Primitive::{Append, CopySequence, EncodeUtf8, Max, Min, Nreverse};
     const K: usize = crate::quit::KERNEL_CHUNK;
     // Each kernel, with the form making its arguments, N elements long.
     type Kernel = (crate::Primitive, fn(usize) -> String);
-    let kernels: [Kernel; 7] = [
+    let kernels: [Kernel; 8] = [
         (Nreverse, |n| format!("(list (make-list {n} 1))")),
         (CopySequence, |n| format!("(list (make-list {n} 1))")),
         (Append, |n| format!("(list (make-list {n} 1) nil)")),
@@ -935,6 +1140,7 @@ fn gated_kernels_take_their_scope_at_their_first_chunk() {
         (Append, |n| format!("(list (make-bool-vector {n} t) nil)")),
         (Min, |n| format!("(make-list {n} 1)")),
         (Max, |n| format!("(make-list {n} 1)")),
+        (EncodeUtf8, |n| format!("(list (make-string {n} ?a t))")),
     ];
     for (p, form) in kernels {
         for (n, engine) in [(3 * K, true), (K - 1, true), (3 * K, false)] {
@@ -945,7 +1151,7 @@ fn gated_kernels_take_their_scope_at_their_first_chunk() {
             if engine && n > K {
                 assert_eq!(outcome.err().as_deref(), Some(crate::quit::ESCAPED), "{p:?} of {n}: no quit at its poll");
                 let quit = vm.intern("quit");
-                assert!(matches!(vm.propagated_escape, Some(crate::threaded::Escape::Signal(c, _)) if c == quit), "{p:?}: the quit is pending");
+                assert!(matches!(vm.mutator.propagated_escape, Some(crate::threaded::Escape::Signal(c, _)) if c == quit), "{p:?}: the quit is pending");
             } else {
                 assert!(outcome.is_ok(), "{p:?} of {n} (engine {engine}): the call ends with a value");
                 assert!(signal.due(), "{p:?} of {n} (engine {engine}): the press stays pending");
@@ -965,8 +1171,8 @@ fn nreverse_polls_at_its_first_chunk() {
     assert!(signal.interrupt(), "a busy evaluator takes the press");
     let outcome = call_kernel(&mut vm, crate::Primitive::Nreverse, &args, true);
     assert_eq!(outcome.err().as_deref(), Some(crate::quit::ESCAPED), "no quit at its first chunk");
-    vm.propagated_escape = None;
-    vm.quit_unwinding = false;
+    vm.mutator.propagated_escape = None;
+    vm.mutator.quit_unwinding = false;
     assert_eq!(eval(&mut vm, "(equal (list (length l) (car l) (nth 19999 l)) '(20000 1 20000))"), Value::TRUE, "the list is whole");
 }
 
@@ -980,8 +1186,8 @@ fn nreverse_polls_at_the_step_that_finds_its_cycle() {
     assert!(signal.interrupt(), "a busy evaluator takes the press");
     let outcome = call_kernel(&mut vm, crate::Primitive::Nreverse, &args, true);
     assert_eq!(outcome.err().as_deref(), Some(crate::quit::ESCAPED), "no quit at the step that finds the cycle");
-    vm.propagated_escape = None;
-    vm.quit_unwinding = false;
+    vm.mutator.propagated_escape = None;
+    vm.mutator.quit_unwinding = false;
     let shape = eval(&mut vm, "(let ((c (nthcdr 16383 l))) (list (car l) (car c) (eq (cdr c) c) (car (nthcdr 100 l))))");
     assert_eq!(vm.display(shape).unwrap(), "(1 16384 t 101)", "the list is unmodified");
 }
@@ -1028,7 +1234,7 @@ fn call_process_quit_is_c_g_s_only_for_its_wait_s_token() {
     let outstanding = "(length (symbol-value (intern \"#:vm2-call-process-quits\")))";
     assert_eq!(vm.eval_source(outstanding).unwrap().display().unwrap(), "2", "no forged call took a token");
     assert_eq!(vm.eval_source("(condition-case nil (romacs--call-process-quit quit-test-mine) (quit 'quit))").unwrap().display().unwrap(), "quit");
-    vm.quit_unwinding = false;
+    vm.mutator.quit_unwinding = false;
     assert_eq!(vm.eval_source(outstanding).unwrap().display().unwrap(), "1", "the quit took its own token, and only it");
     eval(&mut vm, "(romacs--call-process-retire quit-test-other)");
     assert_eq!(vm.eval_source(outstanding).unwrap().display().unwrap(), "0", "a retired token is gone");
@@ -1069,8 +1275,8 @@ fn a_sqlite_error_with_a_press_waiting_is_itself() {
         assert!(signal.due(), "{name}: the press waits for the next poll");
         assert!(vm.eval_source_raw("(sqlite-select db \"SELECT count(*) FROM t\")").is_err(), "{name}: the form after the call quits");
         assert!(!signal.due(), "{name}: that form took the press");
-        vm.quit_unwinding = false;
-        vm.propagated_escape = None;
+        vm.mutator.quit_unwinding = false;
+        vm.mutator.propagated_escape = None;
         assert_eq!(vm.eval_source("(equal (sqlite-select db \"SELECT count(*) FROM t\") '((1)))").unwrap().display().unwrap(), "t", "{name}: the first row was kept");
     }
 }
@@ -1114,8 +1320,8 @@ fn a_sqlite_interrupt_not_the_handler_s_is_an_error() {
         }
         assert!(signal.due(), "{name}: the press waits for the next poll");
         assert!(vm.eval_source_raw("(sqlite-select db \"SELECT 1\")").is_err(), "{name}: the form after the call quits");
-        vm.quit_unwinding = false;
-        vm.propagated_escape = None;
+        vm.mutator.quit_unwinding = false;
+        vm.mutator.propagated_escape = None;
     }
 }
 
@@ -1157,6 +1363,6 @@ fn a_sqlite_batch_s_stop_is_each_step_s_own() {
         assert!(!quit_signalled(&mut vm, &outcome), "{name}: the later step's own interrupt");
         assert_eq!(outcome.as_ref().map(|v| vm.display(*v).unwrap_or_default()).ok().as_deref(), Some(expected), "{name}");
         assert!(signal.due(), "{name}: the press waits for the next form");
-        vm.quit_unwinding = false;
+        vm.mutator.quit_unwinding = false;
     }
 }

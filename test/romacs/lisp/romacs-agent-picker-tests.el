@@ -228,9 +228,9 @@
   "A `completing-read' giving ANSWERS in turn, each prompt, group and
 affixation it saw pushed on the list in cell ASKED."
   (lambda (prompt table &rest _)
-    (let* ((metadata (cdr (completion-metadata "" table nil)))
-           (group (alist-get 'group-function metadata))
-           (affix (alist-get 'affixation-function metadata))
+    (let* ((metadata (completion-metadata "" table nil))
+           (group (completion-metadata-get metadata 'group-function))
+           (affix (completion-metadata-get metadata 'affixation-function))
            (answer (pop (car answers))))
       (push (list prompt
                   (and group (funcall group answer nil))
@@ -270,9 +270,9 @@ affixation it saw pushed on the list in cell ASKED."
           (let ((window (selected-window)))
             (setq romacs-agent-log--filled t)
             (romacs-agent-log-draw source '(:type input :text "Earlier request" :request "old"))
-            (goto-char (point-max))
-            (insert "Draft to keep")
-            (romacs-agent-log-history-previous)
+            (romacs-agent-log-in-composer
+              (insert "Draft to keep")
+              (romacs-agent-log-history-previous))
             (should (equal (romacs-agent-log--draft) "Earlier request"))
             (cl-letf (((symbol-function 'romacs-agent--journal-end) (lambda (_) journal-end))
                       ((symbol-function 'romacs-agent-events-async)
@@ -301,7 +301,7 @@ affixation it saw pushed on the list in cell ASKED."
               (should (eq (gethash "target" romacs-agent-log--chats) buffer))
               (should-not (gethash "source" romacs-agent-log--chats))
               (should (equal (romacs-agent-log--draft) "Draft to keep"))
-              (should-not romacs-agent-log--recalled)
+              (should-not (romacs-agent-log-in-composer romacs-agent-log--recalled))
               (save-excursion
                 (goto-char (point-min))
                 (should (search-forward "Earlier request" nil t))

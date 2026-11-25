@@ -157,7 +157,7 @@ struct Editable {
 /// across registries or a parser's private view edit starts a new origin.
 #[derive(Clone)]
 pub(crate) struct Revision {
-    origin: Rc<()>,
+    origin: std::sync::Arc<()>,
     edits: u64,
 }
 
@@ -167,9 +167,12 @@ struct Comparison {
     changed: Vec<(u32, u32)>,
 }
 
+/// `Send`, as a `Vm` moving to another thread needs its trees' revisions to be.
+const _: fn() = || { fn send<T: Send>() {} send::<Revision>(); };
+
 impl Revision {
     fn new() -> Self {
-        Self { origin: Rc::new(()), edits: 0 }
+        Self { origin: std::sync::Arc::new(()), edits: 0 }
     }
 }
 
@@ -268,7 +271,7 @@ impl Tree {
     pub(crate) fn compare(&mut self, old: &Tree, included: Vec<(u32, u32)>) -> Vec<(u32, u32)> {
         let revision = old.revision();
         if let Some(published) = self.inner.get_mut().comparison.as_deref()
-            && Rc::ptr_eq(&published.old.origin, &revision.origin)
+            && std::sync::Arc::ptr_eq(&published.old.origin, &revision.origin)
             && published.old.edits == revision.edits && published.included == included
         {
             return published.changed.clone();

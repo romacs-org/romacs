@@ -136,6 +136,7 @@ mod indirect;
 use romacs_brand as brand;
 mod gc;
 mod registers;
+mod mutator;
 mod gc_check;
 mod gc_image;
 mod functions;
@@ -1175,7 +1176,7 @@ struct LazyBody {
     evaluated: bool,
     /// A deferred form of a loading file's own (`Builder::file_level`).
     file_level: bool,
-    /// Made while interpreting a source file (`Vm::interpreting_source`).
+    /// Made while interpreting a source file (`Mutator::interpreting_source`).
     interpreting: bool,
 }
 impl LazyBody {
@@ -1399,8 +1400,6 @@ pub struct Vm {
     standard_case_tables: [Value; 4],
     /// undo.c's point_before_last_command_or_undo and its buffer.
     command_point: (i64, Value),
-    /// A storage kernel runs inside insdel's bracket, which checked read-only.
-    change_prepared: bool,
     /// The slots insdel's bracket reads on every change, once resolved.
     change_slots: Option<insdel::ChangeSlots>,
     case_symbols_slot: usize,
@@ -1411,13 +1410,6 @@ pub struct Vm {
     display_state: display::DisplayState,
     window_state: window::WindowState,
     world_version: u64,
-    /// A primitive Lisp called runs a native loop that stops consistently at
-    /// its polls, so a poll may quit (`Vm::native_poll`, `Leaf::quittable`).
-    /// Off in redisplay, which never unwinds half done, and wherever Rust
-    /// reaches the same loop without a caller that would unwind. Granted at
-    /// a primitive's own entry only, and off in any Lisp or primitive entered
-    /// below it (`Vm::outside_quit_scope`).
-    native_quit: bool,
     // CELL(Plain)
     #[cfg(test)]
     variable_read_probes: std::cell::Cell<usize>,
@@ -1432,9 +1424,12 @@ pub struct Vm {
     /// Times `buffer_index` resolved the current buffer afresh.
     #[cfg(test)]
     buffer_resolutions: usize,
-    regexp: regexp::MatchState,
+    /// The running mutator's context (`mutator.rs`).
+    pub(crate) mutator: mutator::Mutator,
+    /// The rest of that context, which no world image holds: the engines'
+    /// parked activations and lowered code (`mutator.rs`).
     #[snapshot(at_rest)]
-    regexp_cache: regexp::PatternCache,
+    pub(crate) mutator_rest: mutator::MutatorRest,
     /// Compiled tree-sitter queries by grammar and text (`treesit::query_memo`).
     #[snapshot(at_rest)]
     treesit_queries: treesit::query_memo::Memo,
@@ -1471,34 +1466,12 @@ pub struct Vm {
     /// constants are traced handles.
     #[snapshot(at_rest)]
     status_bar_line: Option<Box<dyn std::any::Any>>,
-    execution_fatal: bool,
     loader: loader::Loader,
     source_cache: source_cache::SourceCache,
     macros: HashSet<usize>,
-    expanding: Vec<usize>,
-    compile_depth: usize,
-    /// Active Lisp evaluation depth, shared by reentrant execution engines.
-    eval_depth: usize,
-    /// GNU `eval` with a nil LEXICAL argument: every binding the form makes
-    /// is dynamic (src/eval.c Feval, `internal-interpreter-environment' nil).
-    dynamic_scope: bool,
-    /// An escape leaving a reentrant `eval`'s engine, re-raised by the caller's
-    /// engine. Traced by the collector while present.
-    propagated_escape: Option<threaded::Escape>,
-    /// The instruction and registers of the leaf a site is running with no
-    /// activation, as addresses; (0, 0) otherwise. Lisp that leaf reaches
-    /// records the activation first (`Vm::record_site_leaf`).
-    #[snapshot(at_rest)]
-    site_leaf: (usize, usize),
-    signal_handlers: Vec<threaded::SignalHandler>,
-    backtrace: backtrace::Backtrace,
     /// profiler.c's CPU and memory profilers (`profiler.rs`).
     #[snapshot(at_rest)]
     profiler: profiler::Profiler,
-    propagated_escape_hooked: bool,
-    propagated_eval_depth: Option<usize>,
-    /// Set immediately before executing an `eval` form; consumed by the engine.
-    propagate_next: bool,
     /// The embedder's keyboard while one is attached (host_input.rs).
     #[snapshot(at_rest)]
     host_input: Option<Box<dyn host_input::HostInput>>,
@@ -1540,8 +1513,6 @@ pub struct Vm {
     treesit_deferred: Option<Vec<u64>>,
     /// The last frame was that: the next parses, whatever it shows.
     treesit_parse_owed: bool,
-    /// The host's `C-g', shared with its input thread (quit.rs).
-    quit: std::sync::Arc<quit::QuitSignal>,
     /// keyboard.c force_quit_count: `C-g's in a row that found `quit-flag' set.
     force_quit_count: u8,
     /// The escapes deferred to a reach so far (`defer_escape`): each one`s
@@ -1566,9 +1537,6 @@ pub struct Vm {
     environment_snapshot: Option<Vec<Vec<u8>>>,
     /// SYMBOL_TRAPPED_WRITE base slots: variables with watchers (watchers.rs).
     trapped: HashSet<usize>,
-    /// Variables whose watchers run now, each trapped again as its call ends
-    /// (`Vm::notify_watchers_at`), or as a panic is caught (`Vm::catching`).
-    retrap: Vec<usize>,
     /// etc/DOC as last read, keyed by path and modification time (prims/doc.rs).
     doc_file: Option<(std::path::PathBuf, std::time::SystemTime, std::sync::Arc<prim::prims::doc::DocFile>)>,
     #[snapshot(at_rest)]
@@ -1576,73 +1544,12 @@ pub struct Vm {
     terminal_bindings: Vec<terminal_host::TerminalBinding>,
     /// The buffer list's order (buffer_order.rs): roots for collection.
     buffer_order: buffer_order::BufferOrder,
-    pending_specials: NameSet<String>,
-    /// Names a one-argument top-level `(defvar NAME)` declared in the file
-    /// being loaded: special for the rest of that file only (GNU Fdefvar,
-    /// eval.c:990-996, consing onto the `internal-interpreter-environment'
-    /// that readevalloop binds once per file). Saved and restored per load.
-    file_specials: NameSet<String>,
-    /// Set by the loader for exactly one root compilation of a file's form,
-    /// so that compilation (and nothing nested in it) starts from
-    /// `file_specials`.
-    seed_file_specials: bool,
-    /// The next built function is a loading file's form (`Builder::file_level`):
-    /// set by the loader around its top-level compile, and by a deferred
-    /// form's thunk made in one.
-    file_level_request: bool,
-    /// R215: compile `lambda' bodies lazily (GNU's non-eager load regime).
-    lazy_regime: bool,
-    /// Loading a file GNU would read as source (no compiled form,
-    /// `Vm::gnu_loads_compiled'): GNU's readevalloop interprets its forms,
-    /// so its `let's bind late (`Op::BindLate'), as `eval''s do.
-    interpreting_source: bool,
-    /// R215: compile a failing form as a deferred reach-time expansion.
-    defer_expansion_errors: bool,
-    /// Compiling for `eval', which GNU interprets: a macro call whose
-    /// expansion escapes, or a call whose function a form run before it may
-    /// still define, defers to its reach (`defer_expansion_errors'), and a
-    /// `lambda' with nothing to capture compiles at its first call.
-    evaluating: bool,
-    /// A quit (or `throw-on-input' throw) `maybe_quit' raised from C-g or
-    /// `quit-flag' is unwinding: no `catch' or `condition-case' has ended it
-    /// since. An unwind-protect cleanup that replaces it keeps it set, so
-    /// what leaves an expansion it began in is told apart from an error the
-    /// macro raised after catching a quit (`quit_watched').
-    quit_unwinding: bool,
-    /// The error objects (CONDITION . DATA) of the `no-catch'es throws that
-    /// found no live catch made, while those errors escape, the newest last:
-    /// an error with one of these very objects, made afresh for each signal,
-    /// is that throw, not one Lisp signalled (`defer_escape' holds it again
-    /// as the throw). Each retires when its error is caught; they are weak
-    /// (gc.rs), so one whose error a Rust caller discards goes at the next
-    /// collection and keeps nothing alive.
-    thrown_no_catch: Vec<Value>,
-    /// The next form compiled is a deferred call reached (`force_lazy'): its
-    /// own expansion signals there, the forms inside it defer as ever.
-    strict_root: bool,
-    /// The head of the deferred call being reached, while it compiles: with
-    /// no function, that call compiles to signal void-function at once, not
-    /// to defer again. Consumed by the call's own compilation.
-    reached_head: Option<String>,
-    /// As `reached_head', for a head no name reaches.
-    reached_generated: Option<GeneratedName>,
-    /// Set for the builder about to be created (`Builder::loader_order`).
-    loader_order_request: bool,
-    /// Consumed by the next `function` call: keep every capture register.
-    keep_captures: bool,
-    /// Consumed by the next lambda compiled: the closure slots `closure`
-    /// takes out of its body (an interactive spec and its modes), which its
-    /// structural key covers as GNU's `equal` compares them (`closure_key`).
-    closure_key_extra: Vec<Form>,
-    /// Eager `lambda' bodies being compiled around the current form.
-    lambda_depth: usize,
     /// The windows the last window change functions run saw
     /// (host_input.rs `window_change_signature').
     window_change_seen: Vec<u64>,
     /// The macro cells the open compiles expanded through, by scope
     /// (`macro_record`).
     macro_record: macro_record::MacroRecord,
-    expanded_symbols: NameSet<String>,
     #[snapshot(at_rest)]
     image: Option<std::sync::Arc<ImageRegion>>,
     /// Frozen regions by id (`frozen.rs`); index 0 is the image above.
@@ -1668,12 +1575,6 @@ pub struct Vm {
     #[snapshot(at_rest)]
     inotify: Option<std::os::fd::OwnedFd>,
     buffer_slot: usize,
-    /// The current buffer as `buffer_index` last resolved it: the slot's
-    /// value then, a live buffer, and its object index. Kept by value, not
-    /// by writer: `let` and its unwinding write the slot like any special
-    /// variable, and a different value simply resolves again. Killing a
-    /// buffer and a collection (which may move buffers) drop it.
-    resolved_buffer: Option<(Value, usize)>,
     pub(crate) multibyte_slot: usize,
     truncate_lines_slot: usize,
     /// The slots of `permanent-local' and `permanent-local-hook', the
@@ -1729,20 +1630,6 @@ pub struct Vm {
     /// (`data::payload_bytes`), measured only for a job's budget
     /// (`Vm::job_live`).
     gc_retained_payload: usize,
-    /// Open frames that keep heap Values in untraced Rust storage across a
-    /// call that can run Lisp: compiler builders and watcher notifications
-    /// from native writers (`gc.rs`, `Vm::may_collect`).
-    gc_holds: usize,
-    /// Engines between entry and exit, suspended or not; those not in
-    /// `suspended` hold untraced registers and code.
-    running_engines: usize,
-    /// The writer notifying watchers is an engine write suspended for it,
-    /// whose own Values the write roots (`threaded::watched_write`).
-    rooted_write: bool,
-    /// A native call's writes its watchers will hear (`watchers.rs`), each with
-    /// the buffer current then, until the engine that called it completes it.
-    /// Never traced: no collection runs while it holds any (`may_collect`).
-    deferred_writes: Vec<(watchers::NativeWrite, Value)>,
     /// Test mode: a moving collection at every Nth Lisp entry (`gc.rs`).
     gc_stress: gc::Stress,
     /// What the funnels have handed out (gc.rs).
@@ -1776,14 +1663,6 @@ pub struct Vm {
     special_cache: Vec<u64>,
     functions: functions::Functions,
     request_code: request_code::RequestCode,
-    #[snapshot(at_rest)]
-    execution: threaded::Program,
-    /// Programs of finished nested engine runs (registers all NIL again,
-    /// lowered code kept), reused by the next nested run
-    /// (`threaded::Vm::end_nested_execution`). Code invalidation and the
-    /// collector reach them as they reach `execution`.
-    #[snapshot(at_rest)]
-    spare_programs: Vec<threaded::Program>,
     /// By argument count, the permanent function through which native code
     /// calls Lisp (`threaded::Vm::reader_call`), compiled at first use.
     reader_trampolines: Vec<Option<usize>>,
@@ -1824,9 +1703,6 @@ pub struct Vm {
     command_set: command_set::CommandSet,
     completion_case_memo: Option<(u64, usize, std::sync::Arc<Vec<(u32, u32, i64)>>)>,
     caches: Vec<Cache>,
-    /// The register files, the running engine's current (`registers.rs`).
-    stack: registers::Registers,
-    external_roots: Vec<Value>,
     /// alloc.c's `finalizers': every finalizer not yet found unreachable.
     /// Not roots; the collector dooms those it does not reach.
     finalizers: Vec<Value>,
@@ -1838,26 +1714,6 @@ pub struct Vm {
     /// A collection found a list for `undo-outer-limit-function`, and the
     /// aftermath has not looked (`Vm::take_undo_offer`).
     undo_offers_due: bool,
-    /// Escapes being unwound, in any engine: routing takes it, the driver gives
-    /// it back. While nonzero no aftermath starts (`Vm::aftermath_held`).
-    unwinding: usize,
-    /// Runs of aftermath in progress (`Vm::run_aftermath'): while nonzero an
-    /// interrupt naming the job waits (`threaded::isolate_quit'), so
-    /// finalizers and `post-gc-hook' never take it.
-    aftermath_runs: usize,
-    /// Suspended engines' own state, owned here until they resume: traced and
-    /// forwarded in place, and dropped with the engine by a caught panic.
-    #[snapshot(at_rest)]
-    suspended: Vec<threaded::Suspended>,
-    /// Menu-item `:filter' results for the keymap walk in progress, as
-    /// (menu item, result); set and cleared around one walk, which never
-    /// collects.
-    keymap_filters: Vec<(Value, Value)>,
-    /// The first filter that walk needed: (menu item, filter, definition).
-    keymap_pending_filter: Option<(Value, Value, Value)>,
-    /// The `let` bindings in effect: (variable, saved value, buffer current
-    /// when bound, kind).
-    dynamic: Vec<(usize, Value, Value, Let)>,
     conditions: conditions::Registry,
     /// Embedder `Rooted` handles; see handle.rs.
     rooted: handle::RootSet,
@@ -1901,7 +1757,6 @@ impl Vm {
             charsets: charset::Registry::default(),
             standard_case_tables: [Value::NIL; 4],
             command_point: (0, Value::NIL),
-            change_prepared: false,
             change_slots: None,
             case_symbols_slot: usize::MAX,
             print_number_index: 0,
@@ -1909,7 +1764,6 @@ impl Vm {
             display_state: display::DisplayState::new(),
             window_state: window::WindowState::default(),
             world_version: 1,
-            native_quit: false,
             #[cfg(test)]
             variable_read_probes: std::cell::Cell::new(0),
             #[cfg(test)]
@@ -1922,8 +1776,8 @@ impl Vm {
             speculative_misses: 0,
             #[cfg(test)]
             buffer_resolutions: 0,
-            regexp: regexp::MatchState::default(),
-            regexp_cache: regexp::PatternCache::default(),
+            mutator: mutator::Mutator::new(),
+            mutator_rest: mutator::MutatorRest::default(),
             treesit_queries: treesit::query_memo::Memo::default(),
             flat_tables: char_table::FlatTables::default(),
             shared_holders: None,
@@ -1934,21 +1788,10 @@ impl Vm {
             images: Default::default(),
             lambda_lists: Default::default(),
             status_bar_line: None,
-            execution_fatal: false,
             loader: loader::Loader::default(),
             source_cache: source_cache::SourceCache::default(),
             macros: HashSet::default(),
-            expanding: vec![],
-            compile_depth: 0,
-            eval_depth: 0,
-            dynamic_scope: false,
-            propagated_escape: None,
-            site_leaf: (0, 0),
-            signal_handlers: Vec::new(),
-            backtrace: backtrace::Backtrace::default(),
             profiler: profiler::Profiler::default(),
-            propagated_escape_hooked: false,
-            propagated_eval_depth: None,
             host_input: None,
             host_wait: None,
             deferred_event: None,
@@ -1962,7 +1805,6 @@ impl Vm {
             treesit_plain: Vec::new(),
             treesit_deferred: None,
             treesit_parse_owed: false,
-            quit: gap_probe::as_hosted(std::sync::Arc::default()),
             force_quit_count: 0,
             deferred_escapes: 0,
             quit_slots: [0; 3],
@@ -1973,32 +1815,12 @@ impl Vm {
             subprocesses: subprocess::Table::default(),
             environment_snapshot: Some(environment::snapshot()),
             trapped: HashSet::default(),
-            retrap: Vec::new(),
             doc_file: None,
             terminal_host: None,
             terminal_bindings: Vec::new(),
             buffer_order: buffer_order::BufferOrder::default(),
-            propagate_next: false,
-            pending_specials: NameSet::default(),
-            file_specials: NameSet::default(),
-            seed_file_specials: false,
-            file_level_request: false,
-            lazy_regime: false,
-            interpreting_source: false,
-            defer_expansion_errors: false,
-            evaluating: false,
-            quit_unwinding: false,
-            thrown_no_catch: Vec::new(),
-            strict_root: false,
-            reached_head: None,
-            reached_generated: None,
-            loader_order_request: false,
-            keep_captures: false,
-            closure_key_extra: Vec::new(),
-            lambda_depth: 0,
             window_change_seen: Vec::new(),
             macro_record: macro_record::MacroRecord::default(),
-            expanded_symbols: NameSet::default(),
             image: None,
             regions: frozen::Regions::default(),
             region_free: Vec::new(),
@@ -2008,7 +1830,6 @@ impl Vm {
             keeper: None,
             inotify: None,
             buffer_slot: 0,
-            resolved_buffer: None,
             multibyte_slot: 0,
             truncate_lines_slot: usize::MAX,
             permanent_local_slot: usize::MAX,
@@ -2032,10 +1853,6 @@ impl Vm {
             gc_floor: None,
             job_budget: None,
             gc_retained_payload: 0,
-            gc_holds: 0,
-            running_engines: 0,
-            rooted_write: false,
-            deferred_writes: Vec::new(),
             gc_stress: gc::Stress::from_env(),
             allocation: Default::default(),
             names: names::Names::default(),
@@ -2053,8 +1870,6 @@ impl Vm {
             special_cache: Vec::new(),
             functions: functions::Functions::default(),
             request_code: request_code::RequestCode::default(),
-            execution: threaded::Program::default(),
-            spare_programs: Vec::new(),
             reader_trampolines: Vec::new(),
             closures: Default::default(),
             cells: Default::default(),
@@ -2073,18 +1888,10 @@ impl Vm {
             command_set: command_set::CommandSet::default(),
             completion_case_memo: None,
             caches: vec![],
-            stack: registers::Registers::new(),
-            external_roots: vec![],
             finalizers: vec![],
             doomed_finalizers: Default::default(),
             post_gc_due: false,
             undo_offers_due: false,
-            unwinding: 0,
-            aftermath_runs: 0,
-            suspended: vec![],
-            keymap_filters: Vec::new(),
-            keymap_pending_filter: None,
-            dynamic: vec![],
             conditions: conditions::Registry::default(),
             rooted: handle::RootSet::default(),
         };
@@ -2324,7 +2131,7 @@ impl Vm {
     pub(crate) fn special_kind(&self, name: &str) -> SpecialKind {
         if self.specials.contains(name) {
             SpecialKind::Global
-        } else if self.file_specials.contains(name) {
+        } else if self.mutator.file_specials.contains(name) {
             SpecialKind::FileLocal
         } else {
             SpecialKind::Lexical
@@ -2342,22 +2149,22 @@ impl Vm {
     fn compile_entry(
         &mut self, form: &Form, outer: &NameMap<Name, Binding>, mut specials: NameSet<String>,
     ) -> Result<(usize, Vec<Name>)> {
-        if self.compile_depth == 0 {
-            self.pending_specials.clear();
+        if self.mutator.compile_depth == 0 {
+            self.mutator.pending_specials.clear();
             self.macro_record.expansions = 0;
-            self.expanded_symbols.clear();
+            self.mutator.expanded_symbols.clear();
         }
-        self.compile_depth += 1;
-        if std::mem::take(&mut self.seed_file_specials) {
-            specials.extend(self.file_specials.iter().cloned());
+        self.mutator.compile_depth += 1;
+        if std::mem::take(&mut self.mutator.seed_file_specials) {
+            specials.extend(self.mutator.file_specials.iter().cloned());
         }
-        self.loader_order_request = true;
+        self.mutator.loader_order_request = true;
         let scope = self.open_request_scope();
         let result = self.function(&[], std::slice::from_ref(form), outer, &specials);
         self.close_scope(scope);
-        self.compile_depth -= 1;
-        if self.compile_depth == 0 {
-            self.pending_specials.clear();
+        self.mutator.compile_depth -= 1;
+        if self.mutator.compile_depth == 0 {
+            self.mutator.pending_specials.clear();
         }
         result
     }
@@ -2373,11 +2180,11 @@ impl Vm {
         outer: &NameMap<Name, Binding>,
         local_specials: &NameSet<String>,
     ) -> Result<(usize, Vec<Name>)> {
-        self.gc_holds += 1;
+        self.mutator.gc_holds += 1;
         let scope = self.open_function_scope();
         let result = self.build_function(args, body, outer, local_specials);
         self.close_scope(scope);
-        self.gc_holds -= 1;
+        self.mutator.gc_holds -= 1;
         result
     }
     fn build_function(
@@ -2387,16 +2194,16 @@ impl Vm {
         outer: &NameMap<Name, Binding>,
         local_specials: &NameSet<String>,
     ) -> Result<(usize, Vec<Name>)> {
-        let keep_captures = std::mem::take(&mut self.keep_captures);
-        let key_extra = std::mem::take(&mut self.closure_key_extra);
+        let keep_captures = std::mem::take(&mut self.mutator.keep_captures);
+        let key_extra = std::mem::take(&mut self.mutator.closure_key_extra);
         let mut b = Builder {
             code: vec![],
             next: 0,
             env: NameMap::default(),
             sites: vec![],
             local_specials: local_specials.clone(),
-            loader_order: std::mem::take(&mut self.loader_order_request),
-            file_level: std::mem::take(&mut self.file_level_request),
+            loader_order: std::mem::take(&mut self.mutator.loader_order_request),
+            file_level: std::mem::take(&mut self.mutator.file_level_request),
         };
         // Stable order is essential: HashMap iteration order is not a closure ABI.
         let mut names: Vec<_> = outer.keys().cloned().collect();
@@ -2540,9 +2347,9 @@ impl Vm {
             sites: b.sites,
             lazy: None,
             pending: None,
-            dynamic: Some(self.dynamic_scope),
+            dynamic: Some(self.mutator.dynamic_scope),
             params: Some(args.to_vec()),
-            key: closure_key::of_forms(self, &closure_key::Context { dynamic: self.dynamic_scope, names: &names, specials: local_specials }, args, body, &key_extra),
+            key: closure_key::of_forms(self, &closure_key::Context { dynamic: self.mutator.dynamic_scope, names: &names, specials: local_specials }, args, body, &key_extra),
             macros,
         });
         Ok((id, names))
@@ -2571,14 +2378,14 @@ impl Vm {
         // call: GNU's interpreter decides whether each `let' binds
         // dynamically when it runs, after the files loaded since have
         // declared their variables special (VM2-LATE-SPECIAL1).
-        if self.lazy_regime || ((self.lambda_depth > 0 || self.evaluating) && b.env.is_empty()) {
+        if self.mutator.lazy_regime || ((self.mutator.lambda_depth > 0 || self.mutator.evaluating) && b.env.is_empty()) {
             return self.lazy_lambda(b, args, body, false);
         }
         // Eager compilation keeps the lambda list and capture names, but
         // only a lazily held body keeps its source forms.
-        self.lambda_depth += 1;
+        self.mutator.lambda_depth += 1;
         let compiled = self.function(args, body, &b.env, &b.local_specials);
-        self.lambda_depth -= 1;
+        self.mutator.lambda_depth -= 1;
         let (id, names) = match compiled {
             Ok(function) => function,
             // Loading a function must not execute its body. Keep the owner's
@@ -2606,7 +2413,7 @@ impl Vm {
     /// until expansion. Each capture is reported as mutated, so no binding
     /// it can see is ever unboxed out from under the later compilation.
     fn lazy_lambda(&mut self, b: &mut Builder, args: &[Form], body: &[Form], deferred: bool) -> Result<usize> {
-        let key_extra = std::mem::take(&mut self.closure_key_extra);
+        let key_extra = std::mem::take(&mut self.mutator.closure_key_extra);
         let (arity, required, rest) = lambda_arity(args)?;
         let mut names: Vec<Name> = b.env.keys().cloned().collect();
         names.sort();
@@ -2622,12 +2429,12 @@ impl Vm {
             lates,
             shadows,
             local_specials: b.local_specials.clone(),
-            pending_specials: self.pending_specials.clone(),
-            dynamic_scope: self.dynamic_scope,
+            pending_specials: self.mutator.pending_specials.clone(),
+            dynamic_scope: self.mutator.dynamic_scope,
             deferred,
-            evaluated: self.evaluating,
+            evaluated: self.mutator.evaluating,
             file_level: deferred && b.file_level,
-            interpreting: self.interpreting_source,
+            interpreting: self.mutator.interpreting_source,
         };
         let macros = self.lazy_record();
         let id = self.install_function(Function {
@@ -2640,12 +2447,12 @@ impl Vm {
             required,
             rest,
             sites: vec![],
-            dynamic: Some(self.dynamic_scope),
+            dynamic: Some(self.mutator.dynamic_scope),
             environment: Some(self.capture_layout(&names, &b.env, &b.local_specials, None)),
             lazy: Some(Arc::new(lazy)),
             pending: None,
             params: Some(args.to_vec()),
-            key: closure_key::of_forms(self, &closure_key::Context { dynamic: self.dynamic_scope, names: &names, specials: &b.local_specials }, args, body, &key_extra),
+            key: closure_key::of_forms(self, &closure_key::Context { dynamic: self.mutator.dynamic_scope, names: &names, specials: &b.local_specials }, args, body, &key_extra),
             macros,
         });
         let regs = names.iter().map(|n| b.env[n].reg).collect();
@@ -2673,35 +2480,35 @@ impl Vm {
             _ => return Err("invalid lazy body".into()),
         };
         let outer = lazy.outer();
-        let saved_regime = std::mem::replace(&mut self.lazy_regime, true);
-        let saved_defer = std::mem::replace(&mut self.defer_expansion_errors, true);
-        let saved_strict = std::mem::replace(&mut self.strict_root, lazy.deferred);
-        let saved_scope = std::mem::replace(&mut self.dynamic_scope, lazy.dynamic_scope);
-        let saved_pending = std::mem::replace(&mut self.pending_specials, lazy.pending_specials.clone());
-        let saved_evaluating = std::mem::replace(&mut self.evaluating, lazy.evaluated);
-        let saved_interpreting = std::mem::replace(&mut self.interpreting_source, lazy.interpreting);
-        if self.compile_depth == 0 {
+        let saved_regime = std::mem::replace(&mut self.mutator.lazy_regime, true);
+        let saved_defer = std::mem::replace(&mut self.mutator.defer_expansion_errors, true);
+        let saved_strict = std::mem::replace(&mut self.mutator.strict_root, lazy.deferred);
+        let saved_scope = std::mem::replace(&mut self.mutator.dynamic_scope, lazy.dynamic_scope);
+        let saved_pending = std::mem::replace(&mut self.mutator.pending_specials, lazy.pending_specials.clone());
+        let saved_evaluating = std::mem::replace(&mut self.mutator.evaluating, lazy.evaluated);
+        let saved_interpreting = std::mem::replace(&mut self.mutator.interpreting_source, lazy.interpreting);
+        if self.mutator.compile_depth == 0 {
             self.macro_record.expansions = 0;
-            self.expanded_symbols.clear();
+            self.mutator.expanded_symbols.clear();
         }
-        self.compile_depth += 1;
-        self.keep_captures = true;
+        self.mutator.compile_depth += 1;
+        self.mutator.keep_captures = true;
         let scope = self.open_detached_scope();
         // A deferred form is evaluated at its reach, as GNU's interpreter
         // evaluates it: an unbound head is named before the arguments run.
-        self.loader_order_request = lazy.deferred;
-        self.file_level_request = lazy.file_level;
+        self.mutator.loader_order_request = lazy.deferred;
+        self.mutator.file_level_request = lazy.file_level;
         let result = self.compile_lazy_request(&lazy.args, &body, &outer, &lazy.local_specials);
         self.close_scope(scope);
-        self.keep_captures = false;
-        self.compile_depth -= 1;
-        self.lazy_regime = saved_regime;
-        self.defer_expansion_errors = saved_defer;
-        self.strict_root = saved_strict;
-        self.dynamic_scope = saved_scope;
-        self.pending_specials = saved_pending;
-        self.interpreting_source = saved_interpreting;
-        self.evaluating = saved_evaluating;
+        self.mutator.keep_captures = false;
+        self.mutator.compile_depth -= 1;
+        self.mutator.lazy_regime = saved_regime;
+        self.mutator.defer_expansion_errors = saved_defer;
+        self.mutator.strict_root = saved_strict;
+        self.mutator.dynamic_scope = saved_scope;
+        self.mutator.pending_specials = saved_pending;
+        self.mutator.interpreting_source = saved_interpreting;
+        self.mutator.evaluating = saved_evaluating;
         let (compiled, names) = result?;
         if names != lazy.names {
             return Err("lazy body changed its capture layout".into());
@@ -2728,23 +2535,23 @@ impl Vm {
         // With no function yet, it compiles as a call that signals
         // void-function before any argument runs (`reached_head'); the calls
         // in its arguments defer as ever.
-        if std::mem::take(&mut self.strict_root) {
+        if std::mem::take(&mut self.mutator.strict_root) {
             if let Form::List(items) = f {
                 match items.first() {
-                    Some(Form::Sym(head)) => self.reached_head = Some(head.clone()),
-                    Some(Form::Generated(id)) => self.reached_generated = Some(*id),
+                    Some(Form::Sym(head)) => self.mutator.reached_head = Some(head.clone()),
+                    Some(Form::Generated(id)) => self.mutator.reached_generated = Some(*id),
                     _ => {}
                 }
             }
             let result = self.expr_now(b, f);
-            self.reached_head = None;
-            self.reached_generated = None;
+            self.mutator.reached_head = None;
+            self.mutator.reached_generated = None;
             return result;
         }
-        if self.evaluating && self.defer_expansion_errors {
+        if self.mutator.evaluating && self.mutator.defer_expansion_errors {
             return self.expr_evaluated(b, f);
         }
-        if !self.defer_expansion_errors || !matches!(f, Form::List(a) if !a.is_empty()) {
+        if !self.mutator.defer_expansion_errors || !matches!(f, Form::List(a) if !a.is_empty()) {
             return self.expr_now(b, f);
         }
         let (code, next, sites) = (b.code.len(), b.next, b.sites.len());
@@ -2754,7 +2561,7 @@ impl Vm {
             Ok(r) => Ok(r),
             // A throw to a catch around the compilation is no failure of
             // this form: it leaves now, as GNU's eager expansion's would.
-            Err(error) if matches!(self.propagated_escape, Some(threaded::Escape::Throw(..))) => Err(error),
+            Err(error) if matches!(self.mutator.propagated_escape, Some(threaded::Escape::Throw(..))) => Err(error),
             Err(_) => {
                 // GNU expands this form only when evaluation reaches it, and
                 // signals then (eval.c eval_sub). Discard the partial code and
@@ -2795,19 +2602,19 @@ impl Vm {
     /// RUN with a `Boundary' innermost on the handler stack: no handler or
     /// catch around the compilation sees what it signals or throws.
     fn expanding_alone<T>(&mut self, run: impl FnOnce(&mut Self) -> T) -> T {
-        let mark = self.signal_handlers.len();
-        self.signal_handlers.push(threaded::SignalHandler::Boundary);
+        let mark = self.mutator.signal_handlers.len();
+        self.mutator.signal_handlers.push(threaded::SignalHandler::Boundary);
         let result = run(self);
-        self.signal_handlers.truncate(mark);
+        self.mutator.signal_handlers.truncate(mark);
         result
     }
     /// RUN's result, and whether it failed with a quit from C-g still
     /// unwinding out of it (`quit_unwinding'), which then still unwinds.
     fn quit_watched<T>(&mut self, run: impl FnOnce(&mut Self) -> Result<T>) -> (Result<T>, bool) {
-        let saved = std::mem::replace(&mut self.quit_unwinding, false);
+        let saved = std::mem::replace(&mut self.mutator.quit_unwinding, false);
         let result = run(self);
-        let quit = result.is_err() && self.quit_unwinding;
-        self.quit_unwinding = saved || quit;
+        let quit = result.is_err() && self.mutator.quit_unwinding;
+        self.mutator.quit_unwinding = saved || quit;
         (result, quit)
     }
     /// F, whose expansion just escaped: F expands again at its reach. When
@@ -2821,7 +2628,7 @@ impl Vm {
     /// the evaluation left some other way, ends with the request or the
     /// worker's job (`drop_deferred_escapes`): nothing later raises it.
     fn expansion_failed(&mut self, b: &mut Builder, f: &Form, quit: bool) -> Result<usize> {
-        let escape = self.propagated_escape.take();
+        let escape = self.mutator.propagated_escape.take();
         let ended = match &escape {
             Some(threaded::Escape::Error { object, .. }) => Some(*object),
             _ => None,
@@ -2846,7 +2653,7 @@ impl Vm {
             threaded::Escape::Signal(condition, data) => (false, condition, data),
             threaded::Escape::Error { object, .. } => {
                 let (condition, data) = self.cons_pair(object).ok()?;
-                match (self.thrown_no_catch.contains(&object), self.cons_pair(data)) {
+                match (self.mutator.thrown_no_catch.contains(&object), self.cons_pair(data)) {
                     (true, Ok((tag, rest))) => match self.cons_pair(rest) {
                         Ok((value, Value::NIL)) => (true, tag, value),
                         _ => (false, condition, data),
@@ -2891,7 +2698,7 @@ impl Vm {
         self.set_deferred_escape_list(&pending);
         // What is raised is the quit C-g began, still unwinding, as when
         // `maybe_quit` raised it: an expansion it leaves defers it again.
-        self.quit_unwinding = true;
+        self.mutator.quit_unwinding = true;
         Some((entry[1] != Value::NIL, entry[2], entry[3]))
     }
     /// A request or a worker's job ends: an escape still deferred was left
@@ -2904,7 +2711,7 @@ impl Vm {
     }
     /// OBJECT's error has ended: no throw's mark is kept for it.
     pub(crate) fn retire_thrown_no_catch(&mut self, object: Value) {
-        self.thrown_no_catch.retain(|&marked| marked != object);
+        self.mutator.thrown_no_catch.retain(|&marked| marked != object);
     }
     /// A call of a closure, made here, whose body is F, compiled when the
     /// call is reached (GNU expands F then, eval.c eval_sub).
@@ -3065,8 +2872,8 @@ impl Vm {
                             return self.expr(b, &Form::List(aliased));
                         }
                         let void = self.function_void(slot);
-                        if self.defer_expansion_errors && void
-                            && self.reached_generated.take_if(|reached| reached == id).is_none()
+                        if self.mutator.defer_expansion_errors && void
+                            && self.mutator.reached_generated.take_if(|reached| reached == id).is_none()
                         {
                             return Err("defer unresolved function".into());
                         }
@@ -3190,7 +2997,7 @@ impl Vm {
                         }
                         let slot = self.slot(name);
                         if rest.len() > 1 {
-                            self.pending_specials.insert(name.into());
+                            self.mutator.pending_specials.insert(name.into());
                             let quote = |form: &Form| Form::List(vec![Form::Sym("quote".into()), form.clone()]);
                             let doc = quote(rest.get(2).unwrap_or(&Form::Sym("nil".into())));
                             if head == "defconst" {
@@ -3344,7 +3151,7 @@ impl Vm {
                             // Code `eval' compiles binds as GNU's interpreter
                             // does: dynamically when the symbol is special as
                             // the binding is made (VM2-LATE-SPECIAL1).
-                            let late = cell && (self.evaluating || self.interpreting_source) && matches!(name, Name::Source(_));
+                            let late = cell && (self.mutator.evaluating || self.mutator.interpreting_source) && matches!(name, Name::Source(_));
                             let bind = (name, Binding { reg, cell, late, shadow: None });
                             if head == "let*" {
                                 let dynamic = self.bind(b, &bind);
@@ -3416,8 +3223,8 @@ impl Vm {
                             // Non-eager Lisp bodies may name a macro before its
                             // defining file is loaded. Keep that entire form
                             // unevaluated until reached, not just its arguments.
-                            if self.defer_expansion_errors && self.function_void(slot)
-                                && self.reached_head.take_if(|reached| reached == head).is_none()
+                            if self.mutator.defer_expansion_errors && self.function_void(slot)
+                                && self.mutator.reached_head.take_if(|reached| reached == head).is_none()
                             {
                                 return Err(format!("defer unresolved function {head}"));
                             }
@@ -3557,8 +3364,8 @@ impl Vm {
     /// stays a local and never takes a symbol slot.
     fn binds_dynamically(&self, b: &Builder, name: &Name, local: bool) -> bool {
         match name {
-            Name::Generated(id) => self.dynamic_scope && self.generated_symbols.contains_key(id),
-            Name::Source(n) => self.dynamic_scope || self.specials.contains(n.as_str()) || self.pending_specials.contains(n.as_str())
+            Name::Generated(id) => self.mutator.dynamic_scope && self.generated_symbols.contains_key(id),
+            Name::Source(n) => self.mutator.dynamic_scope || self.specials.contains(n.as_str()) || self.mutator.pending_specials.contains(n.as_str())
                 || (local && b.local_specials.contains(n.as_str())),
         }
     }
@@ -3756,8 +3563,8 @@ impl Vm {
     /// watchers, which may collect.
     fn unwind(&mut self, n: usize) {
         for _ in 0..n {
-            let mut escape = self.propagated_escape.take();
-            let pending = (std::mem::take(&mut self.propagated_escape_hooked), self.propagated_eval_depth.take());
+            let mut escape = self.mutator.propagated_escape.take();
+            let pending = (std::mem::take(&mut self.mutator.propagated_escape_hooked), self.mutator.propagated_eval_depth.take());
             let mut values = vec![];
             if let Some(escape) = &mut escape { escape.visit_values(&mut |value| values.push(*value)); }
             let frame = self.root_frame(&values);
@@ -3765,8 +3572,8 @@ impl Vm {
             let mut rooted = self.rooted_values(&frame).iter();
             if let Some(escape) = &mut escape { escape.visit_values(&mut |value| *value = *rooted.next().expect("each value was rooted")); }
             self.drop_frame(frame);
-            self.propagated_escape = escape;
-            (self.propagated_escape_hooked, self.propagated_eval_depth) = pending;
+            self.mutator.propagated_escape = escape;
+            (self.mutator.propagated_escape_hooked, self.mutator.propagated_eval_depth) = pending;
         }
     }
     /// GNU `unbind_to` on normal completion: a restore that signals
@@ -3788,9 +3595,9 @@ impl Vm {
     /// which reports `set'.
     pub(crate) fn unbind_one(&mut self) -> Result<()> {
         // HOST(dynamic:saved): unbind: restores the saved value as the binding ends
-        let (slot, value, owner, kind) = self.dynamic.pop().expect("compiler balances bindings");
-        let symbol = self.backtrace.bindings.last().filter(|(at, _)| *at == self.dynamic.len()).map(|(_, symbol)| *symbol);
-        self.backtrace.unbind(self.dynamic.len());
+        let (slot, value, owner, kind) = self.mutator.dynamic.pop().expect("compiler balances bindings");
+        let symbol = self.mutator.backtrace.bindings.last().filter(|(at, _)| *at == self.mutator.dynamic.len()).map(|(_, symbol)| *symbol);
+        self.mutator.backtrace.unbind(self.mutator.dynamic.len());
         let base = symbol.and_then(|symbol| symbol.index_if(7)).map(|index| index - 1);
         // A `let' moves a tracked value back unread; a watcher would see it.
         if let Some(forwarded::Fwd::Tracked(cell)) = self.native_forwarding(slot) {
@@ -3831,7 +3638,7 @@ impl Vm {
                 Some(forwarded::Fwd::Int(_)) if value.integer_value().is_none() => {
                     let (predicate, condition) = (self.intern("integerp"), self.intern("wrong-type-argument"));
                     let data = self.list_value(&[predicate, value]);
-                    self.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
+                    self.mutator.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
                     return Err(forwarded::fault_text(crate::prim::Fault::Wrong("integerp", value)));
                 }
                 Some(forwarded::Fwd::Bool(_)) => if value == Value::NIL { Value::NIL } else { Value::TRUE },
@@ -3927,7 +3734,7 @@ impl Vm {
         }
         // The other loader primitives are lent from the engine (`loader_body`).
         if matches!(p, Provide | Featurep) {
-            let args = self.stack[start..start + n].to_vec();
+            let args = self.mutator.stack[start..start + n].to_vec();
             return self.feature_primitive(p, &args);
         }
         if matches!(p, Load | Require | Eval | Macroexpand | AutoloadDoLoad | ReadHostEvent | FormatModeLine) {
@@ -3936,7 +3743,7 @@ impl Vm {
         if p == Message {
             // The echo area holds the last message; (message nil) clears it.
             let echo = self.slot(prim::ECHO_AREA_MESSAGE);
-            if n >= 1 && self.stack[start] == Value::NIL {
+            if n >= 1 && self.mutator.stack[start] == Value::NIL {
                 self.slots[echo].value = Value::NIL;
                 return Ok(Value::NIL);
             }
@@ -3957,6 +3764,7 @@ impl Vm {
                 line.extend_from_slice(view.bytes());
             }
             line.push(b'\n');
+            // HOST(escape): stdout and stderr are sends another process reads
             let _ = std::io::Write::write_all(&mut std::io::stderr().lock(), &line);
             return Ok(value);
         }
@@ -3981,7 +3789,7 @@ impl Vm {
         if (p as usize) >= Primitive::CurrentBuffer as usize {
             return self.buffer_primitive(p, start, n);
         }
-        let a = &self.stack[start..start + n];
+        let a = &self.mutator.stack[start..start + n];
         let arity = match p {
             Inc | Dec | Car | Cdr | Length | Nreverse => Some(1),
             Cons => Some(2),

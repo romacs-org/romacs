@@ -21,8 +21,7 @@
      (with-temp-buffer
        (romacs-agent-log-mode)
        (setq romacs-agent-log--session session
-             romacs-agent-log--end (point-min-marker)
-             romacs-agent-log--input (point-min-marker))
+             romacs-agent-log--end (point-min-marker))
        (set-marker-insertion-type romacs-agent-log--end t)
        (cl-flet ((draw (&rest event) (romacs-agent-log-draw session event)))
          ,@body))))

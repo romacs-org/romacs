@@ -185,6 +185,7 @@ impl Leaf<'_> {
             "spawn" => {
                 let (kind, metadata) = (String::from_utf8_lossy(&self.string_bytes(arg(0))?).into_owned(), self.string_bytes(arg(2))?);
                 let spec = self.keeper_spec(args.get(4..).unwrap_or(&[]))?;
+                // HOST(acquisition): the keeper starts a child for this session
                 let handed = self.link()?.client.spawn(&kind, small(arg(1))?, &metadata, arg(3) != Value::NIL, &spec);
                 self.keeper_handed(handed)
             }

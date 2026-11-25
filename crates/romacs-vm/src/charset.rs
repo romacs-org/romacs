@@ -141,7 +141,7 @@ pub(super) struct Record {
     pub unified: bool,
     /// The encoder/deunifier and decoder load_charset builds from the map
     /// (MAP) or unify map (OFFSET) on first use; unify-charset clears it.
-    pub tables: Option<std::rc::Rc<Tables>>,
+    pub tables: Option<std::sync::Arc<Tables>>,
 }
 
 /// GNU's per-charset mapping tables, holding code indexes, never Lisp values.
@@ -152,6 +152,9 @@ pub(crate) struct Tables {
     /// load_charset (charset, 1): index to character, the last entry wins.
     pub decoder: std::collections::BTreeMap<u32, u32>,
 }
+
+/// `Send`, as a `Vm` moving to another thread needs its charset registry to be.
+const _: fn() = || { fn send<T: Send>() {} send::<Registry>(); };
 
 impl Registry {
     pub fn native_record(&self, name: Value) -> Option<&Record> {

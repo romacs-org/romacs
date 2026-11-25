@@ -304,7 +304,7 @@ DRAIN runs the queued supervisor replies and one-shot callbacks in order."
 
 (defun romacs-agent-pool-auth-tests--task (session)
   "Read the status of the task originally started as SESSION."
-  (romacs-agent-tools--task (romacs-agent-tools--known (romacs-agent-id session))))
+  (romacs-agent-tools--task (romacs-agent-summary (romacs-agent-tools--resolve (romacs-agent-id session)))))
 
 (defun romacs-agent-pool-auth-tests--failed-task (session &rest providers)
   "Assert SESSION failed and its result explains why on each of PROVIDERS."

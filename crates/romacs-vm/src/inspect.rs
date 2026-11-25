@@ -168,7 +168,7 @@ impl Vm {
         }
     }
     fn inspect_frame(&self, index: usize, out: &mut String) {
-        let function = self.backtrace.frames[index].function;
+        let function = self.mutator.backtrace.frames[index].function;
         let symbol = self.inspect_symbol(function);
         out.push_str(r#"{"fn":"#);
         match symbol {
@@ -192,7 +192,7 @@ impl Vm {
     }
     /// The call stack as JSON, innermost frame first.
     pub(crate) fn inspect_snapshot(&self) -> String {
-        let total = self.backtrace.frames.len();
+        let total = self.mutator.backtrace.frames.len();
         let mut out = String::from(r#"{"frames":["#);
         let mut shown = 0;
         for index in (0..total).rev().take(FRAMES) {
@@ -215,6 +215,9 @@ impl Vm {
     #[cold]
     #[inline(never)]
     pub(crate) fn inspect_capture(&self) {
+        // A request (SIGUSR2, the listener) is the process's own mutator's
+        // to answer: a second one never marks it served.
+        if !self.mutator.process_signals { return; }
         let generation = crate::host::inspect_generation();
         crate::host::inspect_publish(generation, self.inspect_snapshot());
     }
@@ -249,9 +252,9 @@ mod tests {
         crate::host::inspect_request();
         let shown = crate::prim::window_shown_elements(&mut vm, window, 1, 20001);
         assert_eq!(shown.map(|(elements, _)| elements.len()).ok(), Some(20000));
-        assert!(vm.quit.due(), "redisplay took the quit");
+        assert!(vm.mutator.quit.due(), "redisplay took the quit");
         assert!(!crate::host::inspect_pending(), "redisplay left the inspection unanswered");
-        vm.native_quit = true;
+        vm.mutator.native_quit = true;
         assert!(crate::prim::window_shown_elements(&mut vm, window, 1, 20001).is_err(), "a Lisp-called motion did not quit");
     }
 
@@ -265,13 +268,13 @@ mod tests {
         vm.eval_source("(progn (insert (make-string 8000 ?x)) (put-text-property 1 8000 'display \"d\")
           (let ((i 1)) (while (< i 8000) (put-text-property i (1+ i) 'face (if (= 0 (% i 2)) 'bold 'italic)) (setq i (1+ i))))
           (defun walk-display () (next-single-char-property-change 1 'display)))").unwrap();
-        let depth = vm.backtrace.frames.len();
+        let depth = vm.mutator.backtrace.frames.len();
         crate::host::inspect_request();
         vm.eval_source("(walk-display)").unwrap();
         assert!(!crate::host::inspect_pending(), "the walk left the inspection unanswered");
         let answer = crate::host::inspect_answer().expect("an answer");
         assert!(answer.contains(r#""fn":"next-single-char-property-change""#), "{answer}");
-        assert_eq!((vm.backtrace.frames.len(), vm.site_leaf), (depth, (0, 0)));
+        assert_eq!((vm.mutator.backtrace.frames.len(), vm.mutator_rest.site_leaf), (depth, (0, 0)));
     }
 
     /// The matcher answers an inspection without a VM to record on: a search
@@ -287,7 +290,7 @@ mod tests {
           ;; Settle the poll the string's allocation asked for: it would
           ;; answer the inspection at the call's first tick instead.
           (garbage-collect))").unwrap();
-        let depth = vm.backtrace.frames.len();
+        let depth = vm.mutator.backtrace.frames.len();
         crate::host::inspect_enable(true);
         crate::host::inspect_request();
         let found = vm.eval_source("(font-of long-name)");
@@ -296,7 +299,54 @@ mod tests {
         assert!(!crate::host::inspect_pending(), "the search left the inspection unanswered");
         let answer = crate::host::inspect_answer().expect("an answer");
         assert!(answer.contains(r#""fn":"romacs--font-encoding""#), "{answer}");
-        assert_eq!((vm.backtrace.frames.len(), vm.site_leaf), (depth, (0, 0)));
+        assert_eq!((vm.mutator.backtrace.frames.len(), vm.mutator_rest.site_leaf), (depth, (0, 0)));
+    }
+
+    /// The store's writer has ended once the listener stops: its directory,
+    /// removed then, as a test's private state is, stays removed.
+    #[test]
+    fn a_stopped_listener_writes_nothing_after() {
+        let _turn = inspection();
+        let root = std::env::temp_dir().join(format!("romacs-inspect-stop-{}", std::process::id()));
+        let store = root.join("state/romacs/debug");
+        for _ in 0..20 {
+            std::fs::create_dir_all(&root).unwrap();
+            crate::host::inspect_listen(root.to_str().unwrap(), store.to_str()).unwrap();
+            crate::host::inspect_stop();
+            std::fs::remove_dir_all(&root).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            assert!(!root.exists(), "the store's writer made {} after the listener stopped", store.display());
+        }
+    }
+
+    /// A stop finds the store's writer pruning a full store: the writer ends
+    /// at its next file call rather than finish, and the store stays as the
+    /// stop left it.
+    #[test]
+    fn a_stop_ends_a_long_prune_at_once() {
+        use std::os::unix::fs::PermissionsExt;
+        let _turn = inspection();
+        let root = std::env::temp_dir().join(format!("romacs-inspect-prune-{}", std::process::id()));
+        let store = root.join("debug");
+        std::fs::create_dir_all(&store).unwrap();
+        std::fs::set_permissions(&store, std::fs::Permissions::from_mode(0o700)).unwrap();
+        for n in 0..20_000 { std::fs::write(store.join(format!("inspect-0-{n}.json")), "").unwrap(); }
+        crate::host::inspect_listen(root.to_str().unwrap(), store.to_str()).unwrap();
+        let generation = crate::host::inspect_generation();
+        crate::host::inspect_publish(generation, "{}".into());
+        let saved = store.join(format!("inspect-{}-{generation}.json", std::process::id()));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !saved.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert!(saved.exists(), "the snapshot was never saved");
+        crate::host::inspect_stop();
+        let count = || std::fs::read_dir(&store).unwrap().count();
+        let left = count();
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert_eq!(count(), left, "the writer pruned after the stop");
+        assert!(left > 1_000, "the stop waited for the whole prune: {left} files left");
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     /// A display span's end is found past every other run inside it: the walk
@@ -317,7 +367,7 @@ mod tests {
         assert!(vm.next_single_char_property_change_values(start, display, buffer, Value::NIL).is_ok());
         assert!(!crate::host::inspect_pending(), "the walk left the inspection unanswered");
         assert!(signal.interrupt(), "a busy evaluator takes the press");
-        vm.native_quit = true;
+        vm.mutator.native_quit = true;
         assert!(vm.next_single_char_property_change_values(start, display, buffer, Value::NIL).is_err(), "the walk did not quit");
     }
 }

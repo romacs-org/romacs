@@ -3,7 +3,9 @@ use romacs_vm::Vm;
 fn main() {
     let args: Vec<_> = std::env::args().skip(1).collect();
     let Some(file) = args.first() else {
+        // HOST(escape): stdout and stderr are sends another process reads
         eprintln!("usage: romacs-vm-load FILE [LOAD_PATH ...]");
+        // HOST(escape): ends the process: its parent sees the status
         std::process::exit(2)
     };
     let mut vm = Vm::new();
@@ -23,8 +25,10 @@ fn main() {
     if let Err(error) = result {
         report["error"] = error.into();
     }
+    // HOST(escape): stdout and stderr are sends another process reads
     println!("{}", serde_json::to_string_pretty(&report).unwrap());
     if report["ok"] != true {
+        // HOST(escape): ends the process: its parent sees the status
         std::process::exit(1);
     }
 }

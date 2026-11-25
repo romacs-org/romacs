@@ -141,20 +141,20 @@ impl Vm {
         };
         let (mut values, mut code) = (roots.to_vec(), Vec::new());
         values.extend(self.register_roots().into_iter().flatten().copied());
-        values.extend_from_slice(&self.external_roots);
+        values.extend_from_slice(&self.mutator.external_roots);
         values.extend(self.doomed_finalizers.iter().copied());
         values.extend(self.permanent_symbol_names.values().copied());
         self.reference_buffer_roots(&mut values);
-        if let Some(escape) = &mut self.propagated_escape { escape.visit_values(&mut |v| values.push(*v)); }
-        for handler in &mut self.signal_handlers { handler.visit_values(&mut |v| values.push(*v)); }
-        self.backtrace.visit_values(&mut |v| values.push(*v));
+        if let Some(escape) = &mut self.mutator.propagated_escape { escape.visit_values(&mut |v| values.push(*v)); }
+        for handler in &mut self.mutator.signal_handlers { handler.visit_values(&mut |v| values.push(*v)); }
+        self.mutator.backtrace.visit_values(&mut |v| values.push(*v));
         self.profiler.visit_values(&mut |v| values.push(*v));
         self.forwarded.visit_values(&mut |v| values.push(*v));
         values.extend_from_slice(&self.standard_case_tables);
         values.push(self.command_point.1);
         self.charsets.trace(&mut values);
         // HOST(dynamic:saved): verify's reference marker: the saved values are roots it reads again
-        for &(slot, old, buffer, _) in &self.dynamic {
+        for &(slot, old, buffer, _) in &self.mutator.dynamic {
             values.extend([old, self.slots[slot].value, buffer, Value::reference(slot + 1, 7)]);
         }
         // Every symbol but those of an obarray of their own is a root; a
@@ -170,10 +170,10 @@ impl Vm {
             let own = id.value().index_if(7).and_then(|n| n.checked_sub(1)).is_some_and(|slot| self.obarray_symbol_names.contains_key(&slot));
             if !own { for &(key, value) in &entry.properties { values.extend([key, value]); } }
         }
-        let active = !self.stack.at_rest();
+        let active = !self.mutator.stack.at_rest();
         code.extend((0..self.request_code.live.len()).filter(|&id| self.request_code.live[id] && (active || self.request_code.permanent[id])));
         self.source_code_roots(&mut code);
-        for engine in &mut self.suspended {
+        for engine in &mut self.mutator_rest.suspended {
             engine.visit_values(&mut |v| values.push(*v));
         }
         let mut native = HashSet::default();
@@ -286,7 +286,7 @@ impl Vm {
             values.extend_from_slice(&body.values);
             code.extend_from_slice(&body.children);
         }
-        for program in std::iter::once(&self.execution).chain(&self.spare_programs) {
+        for program in std::iter::once(&self.mutator_rest.execution).chain(&self.mutator_rest.spare_programs) {
             program.lowered_values(id, &mut |v| values.push(v), &mut |f| code.push(f));
         }
     }

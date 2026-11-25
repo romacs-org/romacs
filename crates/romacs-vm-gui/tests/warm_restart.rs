@@ -190,7 +190,7 @@ fn an_agent_chat_comes_back_on_its_session_with_its_draft() {
     let written = batch(&dir, &format!(
         "(require 'romacs-agent)
          (romacs-agent-restore)
-         (with-current-buffer (romacs-agent-show (romacs-agent-get \"0a1b2c3d-test\"))
+         (with-current-buffer (romacs-agent-log-composer-buffer (romacs-agent-show (romacs-agent-get \"0a1b2c3d-test\")))
            (goto-char (point-max)) (insert \"half a question\"))
          (wrt-print \"STRATEGY\" (plist-get (seq-find (lambda (e) (equal (plist-get e :name) \"*agent: probe chat*\"))
                                                      (plist-get (warm-restart-plan) :buffers))
@@ -206,6 +206,43 @@ fn an_agent_chat_comes_back_on_its_session_with_its_draft() {
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(tagged(&written, "STRATEGY"), "handler");
     assert_eq!(tagged(&restored, "CHATS"), "((\"*agent: probe chat*\" \"0a1b2c3d-test\" \"half a question\"))");
+}
+
+/// Two chats, the second's composer selected as the image is written: the
+/// new process gives its composer the focus back, and the first key typed
+/// lands there, never in a transcript.
+#[test]
+fn a_chat_s_composer_gets_its_focus_back_and_the_first_key() {
+    let dir = dir("agent-focus");
+    for id in ["0a1b2c3d-one", "0a1b2c3d-two"] {
+        let session = dir.join("state/romacs/agents").join(id);
+        std::fs::create_dir_all(&session).unwrap();
+        std::fs::write(session.join("manifest.json"), format!(r#"{{"id": "{id}", "harness": "claude", "cwd": "/tmp",
+            "title": "{id}", "unit": "none", "hostSocket": "/nonexistent/host.sock"}}"#)).unwrap();
+        std::fs::write(session.join("journal.jsonl"), "").unwrap();
+    }
+    let image = dir.join("a.image");
+    let written = batch(&dir, &format!(
+        "(require 'romacs-agent)
+         (romacs-agent-restore)
+         (romacs-agent-show (romacs-agent-get \"0a1b2c3d-one\"))
+         (split-window (frame-root-window) nil 'below)
+         (romacs-agent-show (romacs-agent-get \"0a1b2c3d-two\"))
+         (romacs--run-window-change-functions)
+         (wrt-print \"SAVED\" (derived-mode-p 'romacs-agent-compose-mode))
+         (warm-restart-write nil {image})", image = lisp(&image)));
+    let restored = batch(&dir, &format!(
+        "(warm-restart-restore-image {image})
+         (romacs--run-window-change-functions)
+         (let ((composer (romacs-agent-log-composer-buffer (romacs-agent-log-chat (romacs-agent-get \"0a1b2c3d-two\")))))
+           (wrt-print \"SELECTED\" (eq (window-buffer) composer))
+           (let ((unread-command-events (list (cons t ?x)))) (romacs--run-host-command))
+           (wrt-print \"TYPED\" (with-current-buffer composer (buffer-string))))",
+        image = lisp(&image)));
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(tagged(&written, "SAVED"), "romacs-agent-compose-mode");
+    assert_eq!(tagged(&restored, "SELECTED"), "t");
+    assert_eq!(tagged(&restored, "TYPED"), "\"x\"");
 }
 
 /// A generated widget buffer isn't an edit: its text alone can't work, so

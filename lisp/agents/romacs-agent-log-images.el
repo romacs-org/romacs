@@ -201,9 +201,11 @@ its row taller, which would cut through a taller image beside it."
 image links shown as their files' names, and ROWS their images' rows to
 draw under it, nil when it links none that can be shown.  The text is
 the message's still, for a copy or a search."
-  (let* ((width (romacs-agent-log-images--width))
-         (shown (romacs-agent-log-images--shown (romacs-agent-log-images-links text)
-                                                (or width (* 80 (frame-char-width))) romacs-agent-log-image-lines)))
+  (let* ((links (romacs-agent-log-images-links text))
+         ;; Measured only for a message that links an image.
+         (width (and links (romacs-agent-log-images--width)))
+         (shown (and links (romacs-agent-log-images--shown links (or width (* 80 (frame-char-width)))
+                                                           romacs-agent-log-image-lines))))
     (if (null shown) (cons text nil)
       (let ((text (copy-sequence text)))
         (pcase-dolist (`(,beg ,end ,file ,_) shown)

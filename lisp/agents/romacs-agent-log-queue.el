@@ -23,6 +23,10 @@
 
 (require 'romacs-agent-log)
 
+(declare-function romacs-agent-log--draft "romacs-agent-log-compose" ())
+(declare-function romacs-agent-log--sending-p "romacs-agent-log-compose" ())
+(declare-function romacs-agent-log-composer "romacs-agent-log-compose" ())
+
 (defface romacs-agent-log-queued '((t :inherit romacs-agent-log-note))
   "A message waiting for the turn under way to end.")
 (defface romacs-agent-log-queued-mark '((t :inherit romacs-working-waiting :weight bold))
@@ -65,7 +69,7 @@ a `user-error' when it went meanwhile, sent or dropped."
 
 (defun romacs-agent-log-queue--send-key ()
   "The key that sends from the composer, which puts an edited message back."
-  (romacs-agent-log--key 'romacs-agent-log-send 'romacs-agent-log-mode-map))
+  (romacs-agent-log--key 'romacs-agent-log-send 'romacs-agent-compose-mode-map))
 
 (defvar-keymap romacs-agent-log-queue-map
   :doc "Keys on a queued message's row."
@@ -88,9 +92,10 @@ the word, dim: what a queued row's keys do."
              (seq-partition pairs 2) (propertize " · " 'face 'romacs-agent-log-queued)))
 
 (defun romacs-agent-log-queue-rows (items width &optional editing)
-  "ITEMS, the messages waiting, as rows WIDTH columns wide, each ending in
-a newline, under a label saying how many wait and the keys that change
-them; the empty string when none wait.  A row says its place in the
+  "ITEMS, the messages waiting, as rows WIDTH columns wide at most, each
+wrapping under its text in a narrower window and ending in a newline,
+under a label saying how many wait and the keys that change them; the
+empty string when none wait.  A row says its place in the
 order, and carries its item (`romacs-agent-log-queued') and its keys.
 EDITING, the one the composer holds, is marked, and a line under the
 rows says how it goes back."
@@ -123,7 +128,8 @@ rows says how it goes back."
                                 " " (propertize (truncate-string-to-width line room nil nil (truncate-string-ellipsis))
                                                 'face (if held 'romacs-agent-log-queued-held 'romacs-agent-log-queued))
                                 "\n")
-                        'romacs-agent-log-queued item 'keymap romacs-agent-log-queue-map)))
+                        'romacs-agent-log-queued item 'keymap romacs-agent-log-queue-map
+                        'wrap-prefix (make-string (+ 3 (string-width mark)) ?\s))))
         items ""))
      (if editing
          (propertize (concat "  " (propertize (format "%s editing %d" (romacs-agent-glyph 'queue-held) (1+ (or (cl-position editing items) 0)))
@@ -146,7 +152,7 @@ anew when the messages are others, even ones that read the same."
     (unless (and (= (length items) (length romacs-agent-log-queue--drawn))
                  (cl-every #'eq items romacs-agent-log-queue--drawn))
       (setq romacs-agent-log--rows nil romacs-agent-log-queue--drawn (copy-sequence items)))
-    (romacs-agent-log-queue-rows items (romacs-agent-log--rule-width) romacs-agent-log-queue--editing)))
+    (romacs-agent-log-queue-rows items romacs-agent-log-row-width romacs-agent-log-queue--editing)))
 
 (setq romacs-agent-log-separator-rows-function #'romacs-agent-log-queue--shown)
 
@@ -158,7 +164,7 @@ anew when the messages are others, even ones that read the same."
 
 (defun romacs-agent-log-queue--goto (item)
   "Point to ITEM's row; nil when it shows none."
-  (when-let* ((at (text-property-any romacs-agent-log--end romacs-agent-log--input 'romacs-agent-log-queued item)))
+  (when-let* ((at (text-property-any romacs-agent-log--end (point-max) 'romacs-agent-log-queued item)))
     (goto-char at)))
 
 (defun romacs-agent-log-queue--target ()
@@ -212,8 +218,8 @@ with DELTA, it has no place DELTA away: a menu row's own test."
   "Whether the row at point's message cannot go to the composer: none of
 its user's there, the composer holding a draft, sending one or another
 being edited."
-  (or (romacs-agent-log-queue-not-here-p) romacs-agent-log-queue--editing romacs-agent-log--sending
-      (not (string-blank-p (buffer-substring-no-properties romacs-agent-log--input (point-max))))))
+  (or (romacs-agent-log-queue-not-here-p) romacs-agent-log-queue--editing (romacs-agent-log--sending-p)
+      (not (string-empty-p (romacs-agent-log--draft)))))
 
 (defun romacs-agent-log-queue-cannot-drop-p ()
   "Whether the row at point's message cannot be dropped: none of its
@@ -226,44 +232,49 @@ user's there, or it is the one being edited."
 where it waits meanwhile; RET there puts it back in its place.  Nothing
 while the composer's draft is sent (`romacs-agent-log--sending')."
   (interactive nil romacs-agent-log-mode)
-  (unless romacs-agent-log--sending
+  (unless (romacs-agent-log--sending-p)
     (let ((item (romacs-agent-log-queue--own (romacs-agent-log-queue--target))))
       (when romacs-agent-log-queue--editing
         (user-error "The composer holds a queued message already: %s puts it back" (romacs-agent-log-queue--send-key)))
-      (unless (string-blank-p (buffer-substring-no-properties romacs-agent-log--input (point-max)))
+      (unless (string-empty-p (romacs-agent-log--draft))
         (user-error "The composer holds a draft: send or clear it first"))
       (romacs-agent-log-queue--change 'hold item t)
       (setq romacs-agent-log-queue--editing item)
       ;; Its row says it is held, and the line under the rows how it goes
       ;; back, whatever tells views of the change.
       (romacs-agent-log--separator t)
-      (goto-char (point-max))
-      (insert (romacs-agent-item-text item)))))
+      (romacs-agent-log-in-composer
+        (goto-char (point-max))
+        (insert (romacs-agent-item-text item)))
+      ;; Edited there, when the chat is shown.
+      (when (eq (window-buffer) (current-buffer)) (romacs-agent-log-composer)))))
 
 (defun romacs-agent-log-queue-put-back ()
   "Put the message the composer holds back in its place in the queue, said
 as the composer says it; an empty composer leaves it as it was."
-  (interactive nil romacs-agent-log-mode)
-  (let ((item (or romacs-agent-log-queue--editing (user-error "The composer holds no queued message")))
-        (text (string-trim (buffer-substring-no-properties romacs-agent-log--input (point-max)))))
-    ;; Gone meanwhile (its session's records failed it): the composer's
-    ;; text is a draft again, sent by RET as any other.
-    (unless (memq item (romacs-agent-log-source-queue romacs-agent-log--source romacs-agent-log--session))
+  (interactive nil romacs-agent-compose-mode romacs-agent-log-mode)
+  (romacs-agent-log-in-chat
+    (let ((item (or romacs-agent-log-queue--editing (user-error "The composer holds no queued message")))
+          (text (romacs-agent-log--draft)))
+      ;; Gone meanwhile (its session's records failed it): the composer's
+      ;; text is a draft again, sent by RET as any other.
+      (unless (memq item (romacs-agent-log-source-queue romacs-agent-log--source romacs-agent-log--session))
+        (setq romacs-agent-log-queue--editing nil)
+        (romacs-agent-log--separator t)
+        (user-error "That message went meanwhile: the composer keeps your text as a draft"))
+      ;; Held to edit until it is back: a failure leaves the composer as it
+      ;; is, still putting it back.
+      (if (string-empty-p text)
+          (romacs-agent-log-queue--change 'hold item nil)
+        (romacs-agent-log-queue--change 'edit item text)
+        ;; As a send empties it: the composer's hooks clear its images, and
+        ;; what was pending on the draft lands nowhere.
+        (romacs-agent-log-in-composer
+          (erase-buffer)
+          (run-hooks 'romacs-agent-log-draft-replaced-hook)))
       (setq romacs-agent-log-queue--editing nil)
       (romacs-agent-log--separator t)
-      (user-error "That message went meanwhile: the composer keeps your text as a draft"))
-    ;; Held to edit until it is back: a failure leaves the composer as it
-    ;; is, still putting it back.
-    (if (string-empty-p text)
-        (romacs-agent-log-queue--change 'hold item nil)
-      (romacs-agent-log-queue--change 'edit item text)
-      ;; As a send empties it: the composer's hooks clear its images, and
-      ;; what was pending on the draft lands nowhere.
-      (delete-region romacs-agent-log--input (point-max))
-      (run-hooks 'romacs-agent-log-draft-replaced-hook))
-    (setq romacs-agent-log-queue--editing nil)
-    (romacs-agent-log--separator t)
-    (romacs-agent-log-queue--goto item)))
+      (romacs-agent-log-queue--goto item))))
 
 (defun romacs-agent-log-queue-drop ()
   "Drop the queued message at point (else the first), unsent."

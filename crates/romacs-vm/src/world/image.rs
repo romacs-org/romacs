@@ -42,15 +42,15 @@ impl Vm {
     /// Why this VM cannot be captured, or Ok when it can.
     pub fn world_quiescent(&self) -> Result<(), String> {
         let checks: [(&str, bool); 47] = [
-            ("stack", self.stack.is_empty()),
-            ("site_leaf", self.site_leaf == (0, 0)),
+            ("stack", self.mutator.stack.is_empty()),
+            ("site_leaf", self.mutator_rest.site_leaf == (0, 0)),
             ("images", self.images.is_empty()),
-            ("dynamic", self.dynamic.is_empty()),
-            ("eval_depth", self.eval_depth == 0),
-            ("external_roots", self.external_roots.is_empty()),
-            ("suspended", self.suspended.is_empty()),
-            ("signal_handlers", self.signal_handlers.is_empty()),
-            ("propagated_escape", self.propagated_escape.is_none()),
+            ("dynamic", self.mutator.dynamic.is_empty()),
+            ("eval_depth", self.mutator.eval_depth == 0),
+            ("external_roots", self.mutator.external_roots.is_empty()),
+            ("suspended", self.mutator_rest.suspended.is_empty()),
+            ("signal_handlers", self.mutator.signal_handlers.is_empty()),
+            ("propagated_escape", self.mutator.propagated_escape.is_none()),
             ("host_input", self.host_input.is_none()),
             ("host_wait", self.host_wait.is_none()),
             ("layout_host", self.layout_host.is_none()),
@@ -72,9 +72,9 @@ impl Vm {
             ("local_zone", matches!(self.local_zone, LocalZone::Process)),
             ("tracking", self.tracking.is_none()),
             ("rooted", self.rooted.is_empty()),
-            ("execution", self.execution.holds_nothing()),
-            ("spare_programs", self.spare_programs.is_empty()),
-            ("regexp_cache", self.regexp_cache.is_empty()),
+            ("execution", self.mutator_rest.execution.holds_nothing()),
+            ("spare_programs", self.mutator_rest.spare_programs.is_empty()),
+            ("regexp_cache", self.mutator_rest.regexp_cache.is_empty()),
             ("treesit_queries", self.treesit_queries.is_empty()),
             ("flat_tables", self.flat_tables.is_empty()),
             ("mode_line_forms", self.mode_line_forms.is_empty()),
@@ -84,15 +84,15 @@ impl Vm {
             ("profiler", self.profiler.is_idle()),
             // A thread of this process: the running parse of a visit.
             ("treesit_early", crate::treesit::early_idle() && !self.objects.iter().any(|o| matches!(o, crate::data::Object::Buffer(b) if b.treesit.early.is_some()))),
-            ("suspended", self.suspended.is_empty()),
+            ("suspended", self.mutator_rest.suspended.is_empty()),
             // The collector's reentry state: no engine running or suspended,
             // no frame holding Values out of its sight.
-            ("suspended_stacks", self.stack.depth() == 0),
-            ("running_engines", self.running_engines == 0),
-            ("gc_holds", self.gc_holds == 0),
-            ("unwinding", self.unwinding == 0),
-            ("rooted_write", !self.rooted_write),
-            ("deferred_writes", self.deferred_writes.is_empty()),
+            ("suspended_stacks", self.mutator.stack.depth() == 0),
+            ("running_engines", self.mutator.running_engines == 0),
+            ("gc_holds", self.mutator.gc_holds == 0),
+            ("unwinding", self.mutator.unwinding == 0),
+            ("rooted_write", !self.mutator.rooted_write),
+            ("deferred_writes", self.mutator.deferred_writes.is_empty()),
             ("unclaimed_caches", self.request_code.unclaimed_caches_empty()),
             // What laying a window out found is this process's: derived,
             // never carried (`DisplayState::laid_empty`).
@@ -175,11 +175,12 @@ const TMPFS_MAGIC: u32 = 0x0102_1994;
 /// this build with ENOSPC instead, as any failed write does. On a disk
 /// the holes stay holes.
 fn whole_in_memory(file: &std::fs::File, len: usize) -> Result<(), String> {
-    // HOST(rustix::file): the type of filesystem of the image file the builder opened through host
+    // HOST(rustix::file, pure): the type of filesystem of the image file the builder opened through host
     let in_memory = rustix::fs::fstatfs(file).map_err(|e| format!("world image: {e}"))?.f_type;
     if u32::try_from(in_memory).ok() != Some(TMPFS_MAGIC) {
         return Ok(());
     }
+    // HOST(escape): fills the image file's holes: a write with no inverse
     rustix::fs::fallocate(file, rustix::fs::FallocateFlags::empty(), 0, len as u64)
         .map_err(|e| format!("world image in memory (tmpfs): {e}"))
 }
@@ -400,11 +401,11 @@ mod tests {
             change(&mut vm);
             vm.world_quiescent().unwrap_err()
         };
-        assert!(not_captured(|vm| vm.stack.suspend()).contains("suspended_stacks"));
-        assert!(not_captured(|vm| vm.running_engines = 1).contains("running_engines"));
-        assert!(not_captured(|vm| vm.gc_holds = 1).contains("gc_holds"));
-        assert!(not_captured(|vm| vm.rooted_write = true).contains("rooted_write"));
-        assert!(not_captured(|vm| vm.deferred_writes.push((crate::watchers::NativeWrite::set(0, crate::Value::NIL), crate::Value::NIL))).contains("deferred_writes"));
+        assert!(not_captured(|vm| vm.mutator.stack.suspend()).contains("suspended_stacks"));
+        assert!(not_captured(|vm| vm.mutator.running_engines = 1).contains("running_engines"));
+        assert!(not_captured(|vm| vm.mutator.gc_holds = 1).contains("gc_holds"));
+        assert!(not_captured(|vm| vm.mutator.rooted_write = true).contains("rooted_write"));
+        assert!(not_captured(|vm| vm.mutator.deferred_writes.push((crate::watchers::NativeWrite::set(0, crate::Value::NIL), crate::Value::NIL))).contains("deferred_writes"));
         // A cache slot a builder reserved that no installed code owns.
         assert!(not_captured(|vm| { vm.install_cache(); }).contains("unclaimed_caches"));
         // A window's layout record, derived display state.

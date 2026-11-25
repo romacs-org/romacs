@@ -249,7 +249,7 @@ impl Vm {
     /// Lisp run alone, not on the host or its load, so the difference
     /// across a command pins how much Lisp that command runs.
     pub fn calls_entered(&self) -> usize {
-        self.backtrace.calls_entered()
+        self.mutator.backtrace.calls_entered()
     }
     /// How many times `where-is-internal` walked keymaps for their
     /// bindings, which its cache saves: what a test of that cache counts.

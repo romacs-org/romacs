@@ -60,7 +60,7 @@ fn main() {
         args.remove(0);
     }
     let warm = !preload.is_empty();
-    // HOST(std::fs): bin adapter that builds no worlds
+    // HOST(std::fs, pure): bin adapter that builds no worlds
     let file = std::fs::canonicalize(&args[0]).unwrap();
     let mut vm = Vm::new();
     // GNU's census oracle runs `--batch`, as the ERT runner's regime does.
@@ -79,7 +79,7 @@ fn main() {
         } else {
             for (is_form, input) in &preload {
                 let path = std::path::PathBuf::from(input);
-                // HOST(std::fs): bin adapter that builds no worlds
+                // HOST(std::fs, pure): bin adapter that builds no worlds
                 let link = if *is_form { path } else { std::fs::canonicalize(&path).unwrap_or(path) };
                 let from = vm.load_report()["steps"].as_array().map_or(0, Vec::len);
                 let result = match vm.catching(|vm| {
@@ -163,7 +163,9 @@ fn main() {
     }
     use std::io::Write;
     report["measurement"] = true.into();
+    // HOST(escape): stdout and stderr are sends another process reads
     println!("{}", serde_json::to_string(&report).unwrap());
+    // HOST(escape): stdout and stderr are sends another process reads
     std::io::stdout().flush().unwrap();
     // Diagnostic replay occurs AFTER the measured verdict and counters freeze.
     // No replay result contributes to loaded/forms_evaluated. Preserve the
@@ -213,5 +215,6 @@ fn main() {
             }
         }
     }
+    // HOST(escape): stdout and stderr are sends another process reads
     println!("{}", serde_json::to_string(&report).unwrap());
 }

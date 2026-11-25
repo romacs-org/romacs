@@ -14,6 +14,7 @@ mod cursor_runtime;
 #[path = "tests/deferred_gui_native_test.rs"]
 mod deferred_gui_native_test;
 mod device_loss;
+mod display_selection;
 mod frame_compositor;
 mod frame_cost;
 mod frame_ingest;
@@ -66,7 +67,9 @@ mod window_events;
 
 pub(crate) use bootstrap::run_render_loop_current_thread;
 #[cfg(target_os = "linux")]
-pub(crate) use bootstrap::build_render_event_loop_wayland;
+pub(crate) use bootstrap::build_render_event_loop;
+pub use display_selection::DisplaySelection;
+pub(crate) use display_selection::PixelPolicy;
 pub(crate) use startup::{
     InitialWindowLifetime, InitialWindowReceiver, InitialWindowReply, InitialWindowSize,
 };

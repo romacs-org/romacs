@@ -521,6 +521,7 @@ impl Vm {
         let memory = std::sync::Arc::new(PoolMemory { pids: std::sync::Mutex::new(pids), kilobytes: total.into() });
         let sampler = std::sync::Arc::downgrade(&memory);
         // Without the thread the figure stays as first measured.
+        // HOST(pure): starts a thread of this process, no outside resource (rule 5)
         let _ = std::thread::Builder::new().name("romacs-pool-memory".into()).stack_size(64 * 1024).spawn(move || PoolMemory::sample(sampler));
         self.isolates.pool_memory = Some(memory);
         total
@@ -533,7 +534,7 @@ impl Vm {
     /// (`Vm::catching`). O(1).
     pub(crate) fn isolate_claim(&self) -> Option<u64> {
         let (index, generation) = self.isolates.claim?;
-        matches!(self.signal_handlers.get(index), Some(&crate::threaded::SignalHandler::Job(g)) if g == generation)
+        matches!(self.mutator.signal_handlers.get(index), Some(&crate::threaded::SignalHandler::Job(g)) if g == generation)
             .then_some(generation)
     }
     /// `romacs--isolate-claim': GENERATION's job runs from here, inside the
@@ -543,8 +544,8 @@ impl Vm {
         if let Some(running) = self.isolate_claim() {
             return Err(format!("Job {running} already runs here"));
         }
-        self.isolates.claim = Some((self.signal_handlers.len(), generation));
-        self.signal_handlers.push(crate::threaded::SignalHandler::Job(generation));
+        self.isolates.claim = Some((self.mutator.signal_handlers.len(), generation));
+        self.mutator.signal_handlers.push(crate::threaded::SignalHandler::Job(generation));
         Ok(())
     }
     /// Forget a claim whose entry is gone, as a world is normalized.
@@ -581,6 +582,7 @@ impl Vm {
     /// zygote ends first.
     fn fork_child_reinit(&mut self, socket: OwnedFd, zygote: i32, gate: OwnedFd) -> Result<()> {
         crate::host::forked_child_reset(zygote).map_err(|e| e.to_string())?;
+        // HOST(escape): the worker exits when its gate closes unwritten: its parent sees the status
         if !crate::host::await_gate(gate) { std::process::exit(0); }
         // The zygote's children, requests and socket are not this child's.
         self.isolates.forked.clear();
@@ -642,6 +644,7 @@ impl Vm {
     /// ended (`process_select`), which reaches no safepoint before it waits
     /// again.
     pub(crate) fn isolate_quit_taken(&mut self) -> bool {
+        if !self.mutator.process_signals { return false; }
         // A termination quits once, whatever `inhibit-quit' says: the
         // worker's loop then ends (`romacs--isolate-terminated-p'). It
         // supersedes an interrupt still pending and the job's claim, so the
@@ -657,7 +660,7 @@ impl Vm {
         }
         // Held, not taken, while a run of aftermath masks the job: taken now
         // it would find no job to quit and be lost.
-        if self.aftermath_runs > 0 { return false; }
+        if self.mutator.aftermath_runs > 0 { return false; }
         crate::host::take_interrupt() && self.isolate_interrupt_targets_running()
     }
 
@@ -666,10 +669,10 @@ impl Vm {
     /// take (`isolate_quit_taken`), raised here since the wait's loop reaches
     /// no safepoint before it waits again. None to go on waiting.
     pub(crate) fn worker_quit(&mut self) -> Option<crate::prim::Fault> {
-        if !crate::host::interrupt_pending() || !self.isolate_quit_taken() {
+        if !self.process_interrupt_pending() || !self.isolate_quit_taken() {
             return None;
         }
-        self.quit_unwinding = true;
+        self.mutator.quit_unwinding = true;
         Some(crate::prim::Fault::Signal(self.intern("quit"), Value::NIL))
     }
 
@@ -747,6 +750,8 @@ impl Vm {
     /// beside its own descriptors, and drains it on waking; the flags, not
     /// the bytes, say what happened.
     pub(crate) fn worker_wake_fd(&self) -> Option<RawFd> {
+        // The pipe is the process's: only its own mutator drains it.
+        if !self.mutator.process_signals { return None; }
         self.isolates.parent.as_ref().and(crate::host::isolate_wake_fd())
     }
 
@@ -777,7 +782,7 @@ impl Vm {
     pub(crate) fn isolate_wait(&mut self, timeout: Option<std::time::Duration>) -> Result<bool> {
         // Interrupted or terminating: no wait, but what the sockets hold is
         // still read (the frame naming the interrupt's job is there).
-        let interrupted = crate::host::interrupt_pending() || crate::host::terminate_pending();
+        let interrupted = self.process_interrupt_pending() || (self.mutator.process_signals && crate::host::terminate_pending());
         let timeout = if interrupted { Some(std::time::Duration::ZERO) } else { timeout };
         let deadline = timeout.map(|timeout| crate::host::monotonic() + timeout);
         loop {
@@ -794,7 +799,7 @@ impl Vm {
                 crate::host::drain_isolate_wake();
                 news = true;
             }
-            let interrupted = interrupted || crate::host::interrupt_pending();
+            let interrupted = interrupted || self.process_interrupt_pending();
             if ready.is_empty() { return Ok(interrupted); }
             if let Some(parent) = &mut self.isolates.parent && ready.contains(&parent.socket.as_raw_fd()) {
                 parent.drain(|_| {}).map_err(|e| e.to_string())?;
@@ -1089,7 +1094,9 @@ impl Vm {
         let served = self.eval_source("(romacs--isolate-serve)").map(|_| ());
         if crate::host::forked_child() {
             let shutdown = self.shutdown_background_processes();
+            // HOST(escape): stdout and stderr are sends another process reads
             if let Err(error) = served.as_ref().and(shutdown.as_ref()) { eprintln!("isolate worker: {error}"); }
+            // HOST(escape): ends the process: its parent sees the status
             std::process::exit(i32::from(served.is_err() || shutdown.is_err()));
         }
         served

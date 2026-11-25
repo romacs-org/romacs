@@ -38,12 +38,12 @@ def process_running(pid):
 
 
 def exercise_history_buffers(keys, control, extended, shell, visible, check, trace, report):
-    """Real bash: M-p recalls and re-runs its last line; C-2 M-x romacs-term
+    """Real bash: C-p recalls and re-runs its last line; C-2 M-x romacs-term
     makes *romacs-term*<2>, and each name switches back to its own terminal."""
     shell('n=0')
     shell('echo HISTORY_$((++n))')
     visible('HISTORY_1')
-    keys('-M', 'alt', 'p', '-m', 'alt')
+    control('p')
     keys('-k', 'Return')
     visible('HISTORY_2')
     control('2')
@@ -57,6 +57,7 @@ def exercise_history_buffers(keys, control, extended, shell, visible, check, tra
     extended('romacs-term')
     visible('SECOND_TERMINAL')
     report['checks'].append('TERMINAL_HISTORY_AND_NUMBERED_BUFFERS')
+    report.update(status='PASS', exit=0)
 
 
 def exercise_exit_resize(process, keys, control, extended, shell, visible, capture,
@@ -136,9 +137,19 @@ def check_editor_prefix(process, keys, control, shell, visible, capture, trace, 
     keys('z')
     control('x')
     control('g')
+    # C-c is Emacs's prefix too: an undefined suffix and a quit send nothing.
+    control('c')
+    keys('z')
+    control('c')
+    control('g')
+    # C-q gives the program the next key as it is: C-x, then C-c.
+    control('q')
+    control('x')
+    control('q')
+    control('c')
     keys('TERMINAL_ONLY', '-k', 'Return')
     visible('RAW_KEYS_DONE')
-    assert received.read_bytes() == b'TERMINAL_ONLY\r', ('EDITOR_PREFIX_MUST_NOT_SEND_CHILD_BYTES', received.read_bytes())
+    assert received.read_bytes() == b'\x18\x03TERMINAL_ONLY\r', ('EDITOR_PREFIXES_MUST_NOT_SEND_CHILD_BYTES_BUT_C_Q_DOES', received.read_bytes())
     capture('terminal-cx-input-resumed')
     assert original.read_text() == 'Terminal safety sentinel\n'
     keys('-M', 'alt', '-k', 'F4', '-m', 'alt')
@@ -149,7 +160,7 @@ def check_editor_prefix(process, keys, control, shell, visible, capture, trace, 
     report.update(status='PASS', exit=0, original_file_unchanged=True,
                   received_hex=received.read_bytes().hex(),
                   checks=['C_X_SPLIT_IN_TERMINAL_INPUT', 'C_X_B_SWITCHES_BUFFER', 'C_X_O_RETURNS_TO_TERMINAL_INPUT',
-                          'C_X_PROMPT_CANCEL_UNKNOWN_AND_QUIT_NO_PTY_BYTES'])
+                          'C_X_PROMPT_CANCEL_UNKNOWN_AND_QUIT_NO_PTY_BYTES', 'C_C_PREFIX_SENDS_NOTHING', 'C_Q_SENDS_C_X_AND_C_C_RAW'])
 
 
 def term_windows(trace, marker):
@@ -232,14 +243,15 @@ def check_prompt_grow(process, keys, control, extended, shell, visible, capture,
 
 
 def check_leave(keys, control, shell, visible, capture, trace, report):
-    """C-c C-j leaves the cursor: C-p, M-<, an isearch and M-w work in the
-    scrollback as in any buffer; typing returns to the prompt and sends."""
+    """C-c C-j frees the window: C-p, M-<, an isearch and M-w work in the
+    scrollback as in any buffer, on a full-screen program's screen too;
+    typing returns to input mode and sends."""
     # The sentinel is in the output alone, not the command line.
     shell('stty -echo; printf "TOP_%s\\n" SENTINEL; seq 1 300; printf "LEAVE_READY\\n"')
     visible('LEAVE_READY')
     control('c')
     control('j')
-    visible('Terminal left at its cursor')
+    visible('Free mode')
     for _ in range(3):
         control('p')
     keys('-M', 'alt', '<', '-m', 'alt')
@@ -260,18 +272,17 @@ def check_leave(keys, control, shell, visible, capture, trace, report):
     visible('COPIED:TOP_SENTINEL')
     capture('leave-returned', cursor=False)
     report['checks'] += ['ISEARCH_AND_M_W_COPY_FROM_THE_SCROLLBACK', 'TYPING_RETURNS_TO_THE_PROMPT']
-    # Motion keys stay with Emacs at the prompt, as in shell-mode: C-p moves
-    # into the scrollback, C-n back; typing then runs at the prompt.
-    control('p')
-    control('p')
-    control('n')
+    # In input mode the prompt's C-p is bash's: it recalls the last line.
     shell('printf "TYPED_%s\\n" AWAY')
     visible('TYPED_AWAY')
-    report['checks'] += ['C_P_C_N_MOVE_AT_THE_PROMPT', 'TYPING_AFTER_MOVING_RUNS_AT_THE_PROMPT']
+    control('p')
+    keys('-k', 'Return')
+    fio.wait(lambda: sum('TYPED_AWAY' in row for row in ff.current_rows(trace())) >= 2, 30, 'C-p recalls the last command', None)
+    report['checks'].append('C_P_IS_BASH_S_IN_INPUT_MODE')
     # Up stays bash's history: the last command runs again.
     keys('-k', 'Up')
     keys('-k', 'Return')
-    fio.wait(lambda: sum('TYPED_AWAY' in row for row in ff.current_rows(trace())) >= 2, 30, 'Up recalls the last command', None)
+    fio.wait(lambda: sum('TYPED_AWAY' in row for row in ff.current_rows(trace())) >= 3, 30, 'Up recalls the last command', None)
     report['checks'].append('UP_RECALLS_BASH_HISTORY')
     # A program the shell runs in the foreground gets C-p: Python's REPL
     # recalls its own history with it.
@@ -286,6 +297,23 @@ def check_leave(keys, control, shell, visible, capture, trace, report):
     shell('printf "BACK_%s\\n" AT_BASH')
     visible('BACK_AT_BASH')
     report['checks'].append('A_FOREGROUND_REPL_GETS_C_P')
+    # Free mode on a full-screen program's screen: C-c C-j frees the window,
+    # an isearch finds the screen's text, C-c C-j returns and less takes q.
+    shell('seq 1000 1300 | less')
+    visible('1010')
+    control('c')
+    control('j')
+    visible('Free mode')
+    control('s')
+    keys('1012')
+    keys('-k', 'Return')
+    capture('free-on-the-alternate-screen', cursor=False)
+    control('c')
+    control('j')
+    keys('q')
+    shell('printf "LESS_%s\\n" DONE')
+    visible('LESS_DONE')
+    report['checks'] += ['C_C_C_J_FREES_THE_ALTERNATE_SCREEN', 'C_C_C_J_RETURNS_TO_THE_PROGRAM']
     # Out of the terminal and back, by C-x b and by C-x o: the window is on
     # the prompt again, following the output it shows.
     shell('(sleep 3; printf "BG_%s\\n" BUFFER) &')
@@ -349,11 +377,11 @@ def main():
     parser.add_argument('--colors', action='store_true')
     parser.add_argument('--editor-prefix', action='store_true')
     parser.add_argument('--leave', action='store_true',
-                        help='C-c C-j leaves the cursor for the scrollback; typing returns')
+                        help='C-c C-j frees the window (free mode); C-c C-j or typing returns')
     parser.add_argument('--prompt-grow', action='store_true',
                         help='under --loadup (fido-vertical), a growing minibuffer must not resize the pty')
     parser.add_argument('--history-buffers', action='store_true',
-                        help='M-p recalls the shell history; numeric prefixes choose the terminal')
+                        help='C-p recalls the shell history; numeric prefixes choose the terminal')
     args = parser.parse_args()
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)

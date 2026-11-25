@@ -244,7 +244,7 @@ DELAY), `stopped' each session stopped and `asleep' each reaped to sleep;
           (romacs-agent--sentinel process "killed")
           (should (romacs-agent-reaped-p session))
           (should (eq (romacs-agent-state session) 'idle))
-          (should (equal (romacs-agent-tools--status session) "completed"))
+          (should (equal (romacs-agent-tools--status (romacs-agent-summary (romacs-agent-id session))) "completed"))
           ;; Its supervisor's socket left behind is no harness running unseen.
           (should-not (romacs-agent--harness-unseen-p session))
           ;; A restart reads it asleep too.

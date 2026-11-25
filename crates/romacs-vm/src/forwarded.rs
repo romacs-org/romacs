@@ -1723,7 +1723,7 @@ impl Vm {
     /// while BUFFER was current is in effect.
     fn let_shadows_buffer_binding(&self, slot: usize, buffer: Value) -> bool {
         // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
-        self.dynamic.iter().any(|&(bound, _, owner, kind)| bound == slot && kind == Let::Default && owner == buffer)
+        self.mutator.dynamic.iter().any(|&(bound, _, owner, kind)| bound == slot && kind == Let::Default && owner == buffer)
     }
     /// GNU `set_internal` (data.c:1806): setting per-buffer variable I with
     /// no local value in BUFFER, within a `let' of its default made there,
@@ -1834,7 +1834,7 @@ impl Vm {
                     let predicate = self.intern("integerp");
                     let condition = self.intern("wrong-type-argument");
                     let data = self.list_value(&[predicate, old]);
-                    self.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
+                    self.mutator.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
                     return Err("forwarded variable wrong-type-argument integerp".into());
                 };
                 self.forwarded.ints[i as usize] = n;

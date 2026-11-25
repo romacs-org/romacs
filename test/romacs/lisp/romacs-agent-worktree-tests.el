@@ -110,11 +110,15 @@ and `romacs-agent-worktree-directory' a private directory, `home'."
   "BODY with `romacs-agent-start' recording each child it starts as (CWD
 OPTIONS) in `started', newest first, and one instance configured."
   (declare (indent 0))
-  `(let ((started nil) (romacs-agent-providers '(("claude"))))
+  `(let ((started nil) (romacs-agent-providers '(("claude")))
+         (romacs-agent--sessions (make-hash-table :test #'equal)))
      (cl-letf (((symbol-function 'romacs-agent-start)
                 (lambda (cwd _prompt _title _provider options &rest _)
                   (push (list cwd options) started)
-                  (romacs-agent--make :id "c" :harness 'claude :state 'running :input-seq 1 :cwd cwd :options options))))
+                  ;; Registered, as a session started is.
+                  (puthash "c" (romacs-agent--make :id "c" :harness 'claude :state 'running :input-seq 1 :cwd cwd
+                                                   :options options)
+                           romacs-agent--sessions))))
        ,@body)))
 
 (defun romacs-agent-worktree-tests--poll (deferred)

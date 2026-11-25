@@ -10,13 +10,13 @@ import hashlib, os, subprocess, sys
 ROOT = str(_PortablePath(_portable_os.environ['ROMACS_MUTATION_ROOT']) / 'crates/romacs-vm')
 MUTANTS = [
     ('portable-global', 'src/source_cache.rs',
-     'SpecialKind::FileLocal => {\n                            portable.file_specials.insert(name.clone());\n                        }',
+     'SpecialKind::FileLocal => {\n                            portable.mutator.file_specials.insert(name.clone());\n                        }',
      'SpecialKind::FileLocal => portable.declare_special(name, Value::NIL),'),
     ('kind-collapse', 'src/lib.rs',
-     '        } else if self.file_specials.contains(name) {\n            SpecialKind::FileLocal',
-     '        } else if self.file_specials.contains(name) {\n            SpecialKind::Global'),
+     '        } else if self.mutator.file_specials.contains(name) {\n            SpecialKind::FileLocal',
+     '        } else if self.mutator.file_specials.contains(name) {\n            SpecialKind::Global'),
     ('portable-no-seed', 'src/source_cache.rs',
-     '                portable.seed_file_specials = true;\n', ''),
+     '                portable.mutator.seed_file_specials = true;\n', ''),
 ]
 log = []
 for name, rel, old, new in MUTANTS:

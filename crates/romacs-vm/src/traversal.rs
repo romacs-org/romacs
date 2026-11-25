@@ -16,9 +16,9 @@ impl Vm {
         if n != arity {
             return Err("wrong primitive arity".into());
         }
-        let x = self.stack[start];
+        let x = self.mutator.stack[start];
         let y = if n > 1 {
-            self.stack[start + 1]
+            self.mutator.stack[start + 1]
         } else {
             Value::NIL
         };

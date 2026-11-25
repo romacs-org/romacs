@@ -395,7 +395,7 @@ JSON-RPC errors with numeric codes and =data.kind=:
    "children": 0}
   #+end_src
   Every field is present; =null= means unknown.  =key= is the session's
-  state as this machine's board shows it (=romacs-agent-board--key=),
+  state as this machine's board shows it (its summary's =state-key=),
   made by the service alone: a client draws it, never derives it.
   =pending= counts the session's pending requests.  The seqs are those a
   store row keeps: a client makes its session of a row as a row's is made.

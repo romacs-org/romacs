@@ -116,6 +116,7 @@ impl Leaf<'_> {
         // gnutls_try_handshake: a non-blocking client's records go through
         // the session from its first round.
         session.active = non_blocking;
+        let interrupts = self.vm.mutator.process_signals;
         let Some(channel) = self.channel_mut(proc) else { return Ok(self.gnutls_make_error(tls::code::PUSH_ERROR)) };
         let Some(fd) = channel.infd.as_ref().map(|f| f.as_fd()) else { return Ok(self.gnutls_make_error(tls::code::PUSH_ERROR)) };
         if channel.connecting.is_some() {
@@ -126,7 +127,7 @@ impl Leaf<'_> {
             channel.tls = Some(Box::new(session));
             return Ok(self.gnutls_make_error(tls::code::AGAIN));
         }
-        let result = if non_blocking { session.handshake_step(fd) } else { session.handshake(fd).map(|()| true) };
+        let result = if non_blocking { session.handshake_step(fd) } else { session.handshake(fd, interrupts).map(|()| true) };
         if result.is_err() { session.stage = stage::HANDSHAKE_TRIED; }
         channel.tls = Some(Box::new(session));
         match result {

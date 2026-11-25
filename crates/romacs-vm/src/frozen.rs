@@ -906,7 +906,7 @@ impl Vm {
     /// is left pending and the text returned for the refusing primitive.
     pub(crate) fn refuse_read_only(&mut self, object: Value) -> String {
         let (condition, data) = self.read_only_signal(object);
-        self.propagated_escape = Some(threaded::Escape::Signal(condition, data));
+        self.mutator.propagated_escape = Some(threaded::Escape::Signal(condition, data));
         READ_ONLY.into()
     }
 

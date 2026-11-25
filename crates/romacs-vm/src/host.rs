@@ -57,6 +57,7 @@ thread_local! {
     static BUILD: RefCell<Option<Build>> = const { RefCell::new(None) };
 }
 
+// HOST(pure): the world build's recorder: thread-local state, no host access
 pub fn mode() -> Mode {
     MODE.with(Cell::get)
 }
@@ -73,6 +74,7 @@ fn capturing() -> bool {
 
 /// Start recording a compile process's K facts on this thread
 /// (`Mode::Record`).
+// HOST(pure): the world build's recorder: thread-local state, no host access
 pub fn enter_record() {
     BUILD.with(|b| *b.borrow_mut() = Some(Build {
         pinned: Pinned { clock: SystemTime::UNIX_EPOCH, pid: 0, seed: [0; 4] }, phase: Phase::Recipe, startups: 0, dump: false,
@@ -84,6 +86,7 @@ pub fn enter_record() {
 /// Stop recording: the keyed records and the recorder's own (`record`
 /// of a kind of its caller's, such as compiled Lisp's "loaded"), in
 /// first-occurrence order, without their sites.
+// HOST(pure): the world build's recorder: thread-local state, no host access
 pub fn leave_record() -> Vec<Json> {
     MODE.with(|m| m.set(Mode::Off));
     let Some(build) = BUILD.with(|b| b.borrow_mut().take()) else { return vec![] };
@@ -223,6 +226,7 @@ fn reseed_entry() -> Option<(&'static str, Option<&'static str>)> {
 
 /// Whether the form being loaded re-seeds and may read WHAT: a P fact's
 /// name or a tracked variable's.
+// HOST(pure): the world build's recorder: thread-local state, no host access
 pub(crate) fn reseed_reads(what: &str) -> bool {
     let allowed = reseed_entry().is_some_and(|(reads, _)| reads == what);
     if allowed {
@@ -232,11 +236,13 @@ pub(crate) fn reseed_reads(what: &str) -> bool {
 }
 
 /// Whether the form being loaded is the baked build host's (`BAKED_HOST`).
+// HOST(pure): the world build's recorder: thread-local state, no host access
 pub(crate) fn at_baked_host() -> bool {
     with_build(|b| b.site.as_deref().is_some_and(|s| s.at(BAKED_HOST))).unwrap_or(false)
 }
 
 /// The variable the form being loaded re-seeds, if it is a re-seed entry.
+// HOST(pure): the world build's recorder: thread-local state, no host access
 pub(crate) fn reseed_output() -> Option<&'static str> {
     reseed_entry().and_then(|(_, output)| output)
 }
@@ -245,6 +251,7 @@ pub(crate) fn reseed_output() -> Option<&'static str> {
 /// steps, then an interactive session's, which supersede them.
 const STARTUP: [&str; 2] = ["/lisp/session/romacs-loadup-bootstrap.el", "/lisp/session/romacs-gui-loadup.el"];
 
+// HOST(pure): the world build's recorder: thread-local state, no host access
 pub fn class(fact: Fact<'_>, site: Option<&Site>) -> Class {
     match fact {
         Fact::Env(name) => if P_ENV.iter().any(|p| p.as_bytes() == name) { Class::P } else { Class::K },
@@ -291,6 +298,7 @@ fn with_build<T>(f: impl FnOnce(&mut Build) -> T) -> Option<T> {
 }
 
 /// Start recording a build on this thread, in `Phase::Init`.
+// HOST(pure): the world build's recorder: thread-local state, no host access
 pub fn enter_build(pinned: Pinned) {
     BUILD.with(|b| *b.borrow_mut() = Some(Build {
         pinned, phase: Phase::Init, startups: 0, dump: false, site: None,
@@ -301,12 +309,14 @@ pub fn enter_build(pinned: Pinned) {
 
 /// Stop recording: `{"records": [...], "uncaptured": [...]}`, in first-occurrence
 /// order. `None` when no build was recording.
+// HOST(pure): the world build's recorder: thread-local state, no host access
 pub fn leave_build() -> Option<Json> {
     MODE.with(|m| m.set(Mode::Off));
     BUILD.with(|b| b.borrow_mut().take()).map(|b| json!({"records": b.records, "uncaptured": b.uncaptured}))
 }
 
 /// The VM is made: the recipe starts.
+// HOST(pure): the world build's recorder: thread-local state, no host access
 pub fn begin_recipe() {
     with_build(|b| b.phase = Phase::Recipe);
 }
@@ -314,21 +324,25 @@ pub fn begin_recipe() {
 /// This build ends at GNU's dump point, as loadup.el does under
 /// `dump-mode`: the chain leaves its startup steps to each restored
 /// process (`romacs--dumping`). A no-op outside a build.
+// HOST(pure): the world build's recorder: thread-local state, no host access
 pub fn end_at_dump_point() {
     with_build(|b| b.dump = true);
 }
 
 /// Whether this process builds a world that ends at GNU's dump point.
+// HOST(pure): the world build's recorder: thread-local state, no host access
 pub(crate) fn dumping() -> bool {
     capturing() && with_build(|b| b.dump).unwrap_or(false)
 }
 
 /// How many startup runs a build has begun.
+// HOST(pure): the world build's recorder: thread-local state, no host access
 pub(crate) fn startups() -> usize {
     with_build(|b| b.startups).unwrap_or(0)
 }
 
 /// Whether the startup function is running in a build.
+// HOST(pure): the world build's recorder: thread-local state, no host access
 pub(crate) fn in_startup() -> bool {
     with_build(|b| b.phase == Phase::Startup).unwrap_or(false)
 }
@@ -336,6 +350,7 @@ pub(crate) fn in_startup() -> bool {
 /// `romacs--startup-phase`: enter or leave startup. The bootstrap's single
 /// run may switch, then once an interactive session's file; any other
 /// switch is noted and changes nothing. True when the phase changed.
+// HOST(pure): the world build's recorder: thread-local state, no host access
 pub(crate) fn switch_startup(on: bool) -> bool {
     with_build(|b| {
         let from = match on { true => Phase::Recipe, false => Phase::Startup };
@@ -356,6 +371,7 @@ pub(crate) fn switch_startup(on: bool) -> bool {
 pub struct SiteGuard(Option<Option<Rc<Site>>>);
 
 impl Drop for SiteGuard {
+    // HOST(pure): the world build's recorder: thread-local state, no host access
     fn drop(&mut self) {
         if let Some(previous) = self.0.take() {
             with_build(|b| b.site = previous);
@@ -366,12 +382,14 @@ impl Drop for SiteGuard {
 /// The top-level form at LINE of FILE, whose first line is HEAD, is the site
 /// of what follows until the guard drops: for an embedder that evaluates a
 /// file's forms itself.
+// HOST(pure): the world build's recorder: thread-local state, no host access
 pub fn form_site(file: &Path, line: usize, head: &str) -> SiteGuard {
     enter_site(|| Site { file: file.to_string_lossy().into_owned(), line, head: head.chars().take(80).collect() })
 }
 
 /// Make the form SITE describes the site of what follows, until the guard
 /// drops. SITE is built only in build mode.
+// HOST(pure): the world build's recorder: thread-local state, no host access
 pub(crate) fn enter_site(site: impl FnOnce() -> Site) -> SiteGuard {
     if !building() {
         return SiteGuard(None);
@@ -391,6 +409,7 @@ fn keyed_path(path: &Path, kind: &str) -> bool {
 }
 
 /// Record a K fact: KIND with FIELDS and the current site.
+// HOST(pure): the world build's recorder: thread-local state, no host access
 pub(crate) fn record(kind: &str, fields: Json) {
     with_build(|b| {
         let mut item = json!({"kind": kind, "site": b.site()});
@@ -401,6 +420,7 @@ pub(crate) fn record(kind: &str, fields: Json) {
 
 /// Note what the build cannot capture: KIND with FIELDS and the current site.
 /// The world is not published, and the launch boots without it.
+// HOST(pure): the world build's recorder: thread-local state, no host access
 pub(crate) fn note_uncaptured(kind: &str, fields: Json) {
     if !capturing() {
         return;
@@ -436,6 +456,7 @@ fn p_read(fact: Fact<'_>, what: String) {
 
 /// F's host queries, unrecorded in `Mode::Record`: for a recorder that
 /// records their outcome as one fact of its own.
+// HOST(pure): the world build's recorder: thread-local state, no host access
 pub fn unrecorded<T>(f: impl FnOnce() -> T) -> T {
     if mode() != Mode::Record {
         return f();
@@ -520,6 +541,7 @@ fn bytes(path: &Path) -> String {
 
 /// DATA as a record holds it: a string when it is UTF-8, else
 /// `{"hex": ...}`, so that distinct host byte strings stay distinct.
+// HOST(pure): the world build's recorder: thread-local state, no host access
 pub fn encoded(data: &[u8]) -> Json {
     match std::str::from_utf8(data) {
         Ok(text) => json!(text),
@@ -580,6 +602,7 @@ fn stat_json(meta: &io::Result<Metadata>) -> Json {
 
 // Environment.
 
+// HOST(pure): reads the environment, the arguments or a path: a query
 pub fn getenv(name: &str) -> Option<OsString> {
     let value = crate::flight::checked("getenv", || name.to_owned(), || env_var(OsStr::new(name)), |v| v.as_ref().map_or(u64::MAX, |v| crate::flight::digest(v.as_bytes())));
     if building() {
@@ -593,6 +616,7 @@ pub fn getenv(name: &str) -> Option<OsString> {
 /// `romacs-error`). `eprintln!("{}", value)` hands serde's pieces to
 /// unbuffered stderr a write apiece, so another thread's output (a graphics
 /// driver's warning) could land inside the line.
+// HOST(escape): a line on stderr, which launchers parse: a send
 pub fn event_line(tag: &str, value: &Json) {
     let mut line = format!("{tag}: ").into_bytes();
     let _ = serde_json::to_writer(&mut line, value);
@@ -604,6 +628,7 @@ pub fn event_line(tag: &str, value: &Json) {
 /// environment, which restore sets again (`Vm::world_reinit`): none in a
 /// world build, so a world holds no process's value and binds none; this
 /// process's otherwise.
+// HOST(pure): reads the environment, the arguments or a path: a query
 pub fn per_process_env(name: &str) -> Option<OsString> {
     if capturing() { None } else { getenv(name) }
 }
@@ -611,6 +636,7 @@ pub fn per_process_env(name: &str) -> Option<OsString> {
 /// Whether this process runs one test alone, as nextest's process per test
 /// runs each (every check runs them so): a test's world may be mapped only
 /// then (`World::for_test`).
+// HOST(pure): reads the environment, the arguments or a path: a query
 #[must_use]
 pub fn one_test_process() -> bool {
     std::env::var_os("NEXTEST_EXECUTION_MODE").is_some_and(|mode| mode == "process-per-test")
@@ -618,6 +644,7 @@ pub fn one_test_process() -> bool {
 
 /// This process's arguments after its executable's name: what a builder of
 /// a test's world runs this executable with, to run the same test again.
+// HOST(pure): reads the environment, the arguments or a path: a query
 #[must_use]
 pub fn own_arguments() -> Vec<OsString> {
     std::env::args_os().skip(1).collect()
@@ -659,6 +686,7 @@ pub const RUNTIME_RECORD: &str = "romacs-runtime-root";
 /// directory linking its lisp/ and etc/, or the tree the executable's place
 /// gives, is the same tree), and its generation. A tree that has stopped being this executable's is noted,
 /// and that build is not published; the session goes on.
+// HOST(escape): finds the runtime tree by path; on failure prints why on stderr and exits
 pub fn runtime_root() -> PathBuf {
     found_runtime().unwrap_or_else(|why| {
         eprintln!("romacs: no usable runtime tree: {why}\n  \
@@ -675,6 +703,7 @@ pub fn runtime_root() -> PathBuf {
 /// # Errors
 ///
 /// Why no runtime tree was found ([`runtime_root`]).
+// HOST(block): finds the runtime tree, reading its record by path once per process: a FIFO blocks
 pub fn runtime_lisp(path: &str) -> Result<PathBuf, String> {
     found_runtime().map(|root| root.join("lisp").join(path))
 }
@@ -735,6 +764,7 @@ fn located_runtime() -> Result<PathBuf, String> {
 
 /// `PREFIX/share/romacs` for an executable `PREFIX/bin/NAME`, when it holds a
 /// `lisp/` directory.
+// HOST(pure): reads the environment, the arguments or a path: a query
 pub(crate) fn installed_root(exe: &Path) -> Option<PathBuf> {
     let root = exe.parent()?.parent()?.join("share/romacs");
     probe(Probe::IsDir, root.join("lisp")).then_some(root)
@@ -810,6 +840,7 @@ pub const SOURCE_LINK: &str = "source";
 /// same one, as the link belongs to the runtime tree.  The checks are kinds
 /// of entry, not stats: a world built while the tree is edited stays valid
 /// when a file under it is added or renamed, or a commit touches `.git`.
+// HOST(block): finds the runtime tree, reading its record by path once per process: a FIFO blocks
 pub fn source_directory() -> Option<PathBuf> {
     source_directory_from(per_process_env("ROMACS_SOURCE_DIRECTORY"), || found_runtime().ok(), &build_root())
 }
@@ -839,6 +870,7 @@ fn source_directory_from(value: Option<OsString>, runtime: impl FnOnce() -> Opti
 /// `data-directory' and the other runtime directories are directory names
 /// as GNU's are, so file names built from them compare equal to their
 /// expansions (find-func's library completion, bug#43393's test).
+// HOST(pure): reads the environment, the arguments or a path: a query
 pub(crate) fn build_root() -> PathBuf {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     manifest.parent().and_then(Path::parent).map_or_else(|| manifest.join("../.."), Path::to_path_buf)
@@ -890,12 +922,14 @@ fn with_markers<R>(f: impl FnOnce(&mut Vec<(&'static str, OsString)>) -> R) -> R
 /// Launch marker NAME's value, the first time it is asked for: a process
 /// acts on its marker once (a lock descriptor has one owner, a parent one
 /// watch), so a second take finds none, as a removed variable did.
+// HOST(take): takes a launch marker once: host input (the environment) a second take no longer sees
 pub fn take_marker(name: &str) -> Option<OsString> {
     debug_assert!(LAUNCH_MARKERS.contains(&name), "{name} is not a launch marker");
     with_markers(|markers| markers.iter().position(|(m, _)| *m == name).map(|at| markers.remove(at).1))
 }
 
 /// Whether launch marker NAME is there to take.
+// HOST(pure): reads the environment, the arguments or a path: a query
 pub fn has_marker(name: &str) -> bool {
     debug_assert!(LAUNCH_MARKERS.contains(&name), "{name} is not a launch marker");
     with_markers(|markers| markers.iter().any(|(m, _)| *m == name))
@@ -905,12 +939,14 @@ pub fn has_marker(name: &str) -> bool {
 /// the launch markers. For a child another process starts for this one
 /// (the terminal's shell, by the keeper); `command`'s children have it
 /// already.
+// HOST(pure): reads the environment, the arguments or a path: a query
 pub fn inherited_env() -> Vec<(OsString, OsString)> {
     std::env::vars_os().filter(|(name, _)| !is_marker(name)).collect()
 }
 
 /// The process environment, in the host's order, without the launch
 /// markers: what `process-environment` starts as.
+// HOST(pure): reads the environment, the arguments or a path: a query
 pub fn env_snapshot() -> Vec<(OsString, OsString)> {
     if building() {
         p_read(Fact::Environment, "environment".into());
@@ -934,6 +970,7 @@ pub enum EnvList {
 /// A Rust lookup of NAME in a Lisp environment list. The lookup itself reads
 /// Lisp data; this marks it as a host fact, recorded with the launch value
 /// whatever list was walked. A no-op in `Mode::Off`.
+// HOST(pure): reads the environment, the arguments or a path: a query
 pub fn lisp_env(list: EnvList, name: &[u8]) {
     if building() {
         let form = match list { EnvList::Process => "process", EnvList::Initial => "initial", EnvList::Explicit => "explicit" };
@@ -943,6 +980,7 @@ pub fn lisp_env(list: EnvList, name: &[u8]) {
 
 // Files.
 
+// HOST(block): reads by path: a FIFO, socket or device can block; L1b refines a regular file to pure
 pub fn read_file(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
     credential_in_build(path.as_ref())?;
     let result = crate::flight::checked("read-file", || bytes(path.as_ref()), || std::fs::read(&path), |r| crate::flight::outcome(r, |b| crate::flight::digest(b)));
@@ -952,6 +990,7 @@ pub fn read_file(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
     result
 }
 
+// HOST(block): reads by path: a FIFO, socket or device can block; L1b refines a regular file to pure
 pub fn read_to_string(path: impl AsRef<Path>) -> io::Result<String> {
     credential_in_build(path.as_ref())?;
     let result = crate::flight::checked("read-file", || bytes(path.as_ref()), || std::fs::read_to_string(&path), |r| crate::flight::outcome(r, |b| crate::flight::digest(b.as_bytes())));
@@ -969,6 +1008,7 @@ pub enum Probe {
     IsDir,
 }
 
+// HOST(pure): a stat, a listing or a path query
 pub fn probe(kind: Probe, path: impl AsRef<Path>) -> bool {
     let path = path.as_ref();
     let observed = crate::flight::checked("probe", || bytes(path), || match kind {
@@ -982,6 +1022,7 @@ pub fn probe(kind: Probe, path: impl AsRef<Path>) -> bool {
     observed
 }
 
+// HOST(pure): a stat; the flight recorder's own retime and log are no boundary
 pub fn metadata(path: impl AsRef<Path>) -> io::Result<Metadata> {
     let absolute = flight_path(path.as_ref());
     let result = crate::flight::stat("stat", || bytes(path.as_ref()), absolute.as_deref(), false, || std::fs::metadata(&path),
@@ -998,6 +1039,7 @@ pub fn metadata(path: impl AsRef<Path>) -> io::Result<Metadata> {
 /// this answer: every process asks it again (`startup_directory`), and
 /// nothing of either stat is recorded, as a copy or restore of the store
 /// gives the builder's pinned directory another device and inode.
+// HOST(pure): stats DIR and the working directory; the flight recorder's own retime and log are no boundary
 pub fn names_working_directory(dir: &Path) -> bool {
     use std::os::unix::fs::MetadataExt;
     let stat = |path: &Path| {
@@ -1008,6 +1050,7 @@ pub fn names_working_directory(dir: &Path) -> bool {
     matches!((stat(dir), stat(Path::new("."))), (Ok(a), Ok(b)) if a.dev() == b.dev() && a.ino() == b.ino())
 }
 
+// HOST(pure): a stat; the flight recorder's own retime and log are no boundary
 pub fn symlink_metadata(path: impl AsRef<Path>) -> io::Result<Metadata> {
     let absolute = flight_path(path.as_ref());
     let result = crate::flight::stat("lstat", || bytes(path.as_ref()), absolute.as_deref(), false, || std::fs::symlink_metadata(&path),
@@ -1019,6 +1062,7 @@ pub fn symlink_metadata(path: impl AsRef<Path>) -> io::Result<Metadata> {
 }
 
 /// fstat on an output file this module opened.
+// HOST(pure): an fstat; the flight recorder's own retime and log are no boundary
 pub fn file_metadata(file: &File) -> io::Result<Metadata> {
     crate::flight::stat("fstat", String::new, None, true, || file.metadata(), |s, ns| retime_file(file, s, ns))
 }
@@ -1071,6 +1115,8 @@ impl Captured {
 }
 
 /// open(2) of PATH for reading, with FLAGS (`O_NONBLOCK`, `O_NOFOLLOW` …).
+// HOST(block): opens by path, nonblocking only when FLAGS asks: a FIFO's open can block; a regular
+// file is pure
 pub fn open_input(path: impl AsRef<Path>, flags: i32) -> io::Result<Input> {
     use std::os::unix::fs::OpenOptionsExt;
     credential_in_build(path.as_ref())?;
@@ -1130,6 +1176,7 @@ fn credential_in_build(path: &Path) -> io::Result<()> {
 }
 
 /// The kernel's random source, `/dev/urandom`.
+// HOST(pure): opens /dev/urandom, which never blocks
 pub fn random_source() -> io::Result<Input> {
     if building() {
         p_read(Fact::Seed, "random source".into());
@@ -1139,6 +1186,7 @@ pub fn random_source() -> io::Result<Input> {
 
 impl Input {
     /// fstat.
+    // HOST(pure): an fstat; the flight recorder's own retime and log are no boundary
     pub fn stat(&self) -> io::Result<Metadata> {
         let path = match &self.3 { Source::File(path) => path.as_deref(), Source::Entropy => None };
         let result = crate::flight::stat("fstat", || self.3.what(), path, false, || self.0.metadata(),
@@ -1151,6 +1199,7 @@ impl Input {
 
     /// At most LIMIT bytes from OFFSET: a seek, then reads until LIMIT or the
     /// end. An error from either discards what was read.
+    // HOST(block): reads what open_input opened: blocks on a FIFO, socket or device, pure on a regular file
     pub fn read_range(&mut self, offset: u64, limit: u64) -> io::Result<Vec<u8>> {
         let read = self.live_read_range(offset, limit);
         crate::flight::checked("read-range", || self.3.what(), || (), |()| crate::flight::outcome(&read, |b| crate::flight::digest(b)));
@@ -1173,6 +1222,7 @@ impl Input {
     }
 
     /// One read into BUFFER: the count, 0 at the end.
+    // HOST(block): reads what open_input opened: blocks on a FIFO, socket or device, pure on a regular file
     pub fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         if self.3 == Source::Entropy && crate::flight::active() {
             let bytes = crate::flight::value("entropy", || {
@@ -1195,6 +1245,7 @@ impl Input {
         Ok(bytes.len())
     }
 
+    // HOST(block): reads what open_input opened: blocks on a FIFO, socket or device, pure on a regular file
     pub fn read_exact(&mut self, buffer: &mut [u8]) -> io::Result<()> {
         if self.3 == Source::Entropy && crate::flight::active() {
             let bytes = crate::flight::value("entropy", || {
@@ -1221,6 +1272,7 @@ impl Input {
     }
 
     /// Whether the file carries an extended (POSIX or NFSv4) ACL.
+    // HOST(pure): a stat, a listing or a path query
     pub fn has_acl(&self) -> bool {
         crate::flight::checked("has-acl", || self.3.what(), || [c"system.posix_acl_access", c"system.nfs4_acl"].iter().any(|attribute| {
             rustix::fs::fgetxattr(&self.0, *attribute, &mut [0u8; 0][..]).is_ok()
@@ -1228,6 +1280,8 @@ impl Input {
     }
 
     /// close(2), with its error.
+    // HOST(escape): closes a descriptor, with no inverse (the closing rule); a regular file's read
+    // end refines to pure
     pub fn close(self) -> io::Result<()> {
         sys::close_owned(self.0.into())
     }
@@ -1235,11 +1289,13 @@ impl Input {
 
 /// A file a child process reads as its standard input: this process reads
 /// none of it.
+// HOST(acquisition): opens a file a child reads as its standard input: a descriptor made
 pub fn open_child_input(path: impl AsRef<Path>) -> io::Result<OwnedFd> {
     effect(|| format!("child input {}", bytes(path.as_ref())))?;
     File::open(path).map(OwnedFd::from)
 }
 
+// HOST(pure): a stat, a listing or a path query
 pub fn read_link(path: impl AsRef<Path>) -> io::Result<PathBuf> {
     let result = crate::flight::checked("readlink", || bytes(path.as_ref()), || std::fs::read_link(&path), |r| crate::flight::outcome(r, |p| crate::flight::digest(p.as_os_str().as_bytes())));
     if building() {
@@ -1251,6 +1307,7 @@ pub fn read_link(path: impl AsRef<Path>) -> io::Result<PathBuf> {
 
 /// The entries of PATH, as the host yields them. In build mode the listing
 /// records the names in enumeration order and how it ended (§6.3 DirList).
+// HOST(pure): a stat, a listing or a path query
 pub fn read_dir(path: impl AsRef<Path>) -> io::Result<ReadDir> {
     let result = crate::flight::checked("opendir", || bytes(path.as_ref()), || std::fs::read_dir(&path), |r| crate::flight::outcome(r, |_| 0));
     let named = flight_path(path.as_ref());
@@ -1282,6 +1339,7 @@ struct Listing {
 
 impl Iterator for ReadDir {
     type Item = io::Result<DirEntry>;
+    // HOST(pure): a stat, a listing or a path query
     fn next(&mut self) -> Option<Self::Item> {
         let listing = &self.2;
         let next = crate::flight::checked("readdir", || listing.as_deref().map(bytes).unwrap_or_default(), || self.0.next(), |next| match next {
@@ -1301,6 +1359,7 @@ impl Iterator for ReadDir {
 }
 
 impl Drop for ReadDir {
+    // HOST(escape): ends a directory stream, which std's own drop closes: no inverse (the closing rule)
     fn drop(&mut self) {
         if let Some(listing) = self.1.take() {
             let terminal = listing.end.unwrap_or_else(|| json!("stopped"));
@@ -1313,15 +1372,18 @@ impl Drop for ReadDir {
 pub struct DirEntry(std::fs::DirEntry, bool);
 
 impl DirEntry {
+    // HOST(pure): a stat, a listing or a path query
     pub fn file_name(&self) -> OsString {
         self.0.file_name()
     }
 
+    // HOST(pure): a stat, a listing or a path query
     pub fn path(&self) -> PathBuf {
         self.0.path()
     }
 
     /// The type the listing gave, else an lstat's.
+    // HOST(pure): a stat, a listing or a path query
     pub fn file_type(&self) -> io::Result<FileType> {
         let result = crate::flight::checked("entry-type", || bytes(&self.0.path()), || self.0.file_type(), |r| crate::flight::outcome(r, file_type_witness));
         if self.1 {
@@ -1334,6 +1396,7 @@ impl DirEntry {
 /// The type of the entry PATH names, not following a symlink: an lstat
 /// whose record is only the type, so the entry's times and size are not
 /// keyed facts.
+// HOST(pure): a stat, a listing or a path query
 pub fn entry_type(path: &Path) -> io::Result<FileType> {
     let result = crate::flight::checked("entry-type", || bytes(path), || std::fs::symlink_metadata(path).map(|m| m.file_type()), |r| crate::flight::outcome(r, file_type_witness));
     if building() {
@@ -1354,6 +1417,7 @@ fn entry_type_json(result: &io::Result<FileType>) -> Json {
     }
 }
 
+// HOST(pure): a stat, a listing or a path query
 pub fn canonicalize(path: impl AsRef<Path>) -> io::Result<PathBuf> {
     let result = crate::flight::checked("canonicalize", || bytes(path.as_ref()), || std::fs::canonicalize(&path), |r| crate::flight::outcome(r, |p| crate::flight::digest(p.as_os_str().as_bytes())));
     if building() {
@@ -1367,6 +1431,7 @@ pub fn canonicalize(path: impl AsRef<Path>) -> io::Result<PathBuf> {
 
 /// PATH made absolute against the working directory, lexically. A relative
 /// PATH reads the working directory, a P fact.
+// HOST(pure): a stat, a listing or a path query
 pub fn absolute(path: impl AsRef<Path>) -> io::Result<PathBuf> {
     if building() && path.as_ref().is_relative() {
         p_read(Fact::CurrentDir, format!("working directory, for {}", bytes(path.as_ref())));
@@ -1382,6 +1447,7 @@ pub enum Ids {
 }
 
 /// faccessat: whether IDS may access PATH in MODE.
+// HOST(pure): a stat, a listing or a path query
 pub fn access(path: &CStr, mode: i32, ids: Ids) -> io::Result<()> {
     let flags = match ids { Ids::Effective => rustix::fs::AtFlags::EACCESS, Ids::Real => rustix::fs::AtFlags::empty() };
     let access = || rustix::fs::accessat(rustix::fs::CWD, path, rustix::fs::Access::from_bits_retain(mode as u32), flags).map_err(os);
@@ -1405,6 +1471,7 @@ pub struct FsUsage {
     pub available: u64,
 }
 
+// HOST(pure): a stat, a listing or a path query
 pub fn statvfs(path: &CStr) -> io::Result<FsUsage> {
     let result = crate::flight::value("statvfs", || {
         rustix::fs::statvfs(path).map_err(os)
@@ -1422,6 +1489,7 @@ pub fn statvfs(path: &CStr) -> io::Result<FsUsage> {
 
 /// The type of the filesystem holding PATH: statfs's `f_type`, a magic
 /// number of linux/magic.h. A keyed probe.
+// HOST(pure): a stat, a listing or a path query
 pub fn filesystem_type(path: &Path) -> io::Result<u32> {
     // f_type is a signed word; the magic numbers are 32 bits.
     let result = crate::flight::checked("fs-type", || bytes(path), || path_c_string(path).and_then(|name| rustix::fs::statfs(&*name).map_err(os).map(|s| s.f_type as u32)),
@@ -1434,6 +1502,7 @@ pub fn filesystem_type(path: &Path) -> io::Result<u32> {
 
 /// The inode flags of DIRECTORY, opened without following a symlink
 /// (FS_IOC_GETFLAGS, linux/fs.h). A keyed probe.
+// HOST(pure): a stat, a listing or a path query
 pub fn directory_flags(directory: &Path) -> io::Result<u32> {
     let result = crate::flight::checked("dir-flags", || bytes(directory), || read_directory_flags(directory), |r| crate::flight::outcome(r, |&f| u64::from(f)));
     if building() {
@@ -1445,6 +1514,7 @@ pub fn directory_flags(directory: &Path) -> io::Result<u32> {
 /// The POSIX access ACL of the file PATH names, following a symlink: its
 /// `system.posix_acl_access' attribute, or None when it has none (its
 /// mode bits are then its ACL). A keyed probe.
+// HOST(pure): a stat, a listing or a path query
 pub fn posix_acl(path: &Path) -> io::Result<Option<Vec<u8>>> {
     const NAME: &CStr = c"system.posix_acl_access";
     let result = (|| {
@@ -1484,6 +1554,7 @@ fn path_c_string(path: &Path) -> io::Result<std::ffi::CString> {
 
 /// Set the POSIX access ACL of the file PATH names to VALUE, in its
 /// `system.posix_acl_access' form.
+// HOST(escape): changes a file's metadata others see
 pub fn set_posix_acl(path: &Path, value: &[u8]) -> io::Result<()> {
     effect(|| format!("set ACL of {}", bytes(path)))?;
     let name = path_c_string(path)?;
@@ -1495,6 +1566,7 @@ pub fn set_posix_acl(path: &Path, value: &[u8]) -> io::Result<()> {
 }
 
 /// sync(2): every pending disk update, the whole system's.
+// HOST(escape): forces disk writes (sync, fsync): a host write with no inverse
 pub fn sync_all() -> io::Result<()> {
     effect(|| "sync".into())?;
     rustix::fs::sync();
@@ -1502,6 +1574,7 @@ pub fn sync_all() -> io::Result<()> {
 }
 
 /// Close this process's standard stream FD (0, 1 or 2).
+// HOST(escape): closes stdin, stdout or stderr: the reader sees its end
 pub fn close_standard_stream(fd: i32) -> io::Result<()> {
     effect(|| format!("close standard stream {fd}"))?;
     sys::close(fd)
@@ -1526,6 +1599,7 @@ fn decoded(field: &Json) -> Option<Vec<u8>> {
 /// names, its copy one), while what was kept of it (its content, bound by
 /// its file-read records, and its length, mode, owner and mtime) stays. A
 /// copy that drops mtimes changes it.
+// HOST(pure): the world build's recorder: thread-local state, no host access
 pub fn same_fact(recorded: &Json, now: &Json) -> bool {
     let placeless = |record: &Json| {
         let mut record = record.clone();
@@ -1543,6 +1617,7 @@ pub fn same_fact(recorded: &Json, now: &Json) -> bool {
 /// The record a keyed RECORD's query makes now, its site aside: the host's
 /// present answer to the same question, asked the same way (§6.4). None for
 /// a record that asks the host nothing.
+// HOST(escape): asks a keyed query again: reads by path, and reaches runtime_root, which may exit
 pub fn replay(record: &Json) -> Option<Json> {
     let kind = record["kind"].as_str()?;
     let path = || decoded(&record["path"]).map(|bytes| PathBuf::from(OsString::from_vec(bytes)));
@@ -1634,12 +1709,14 @@ pub fn replay(record: &Json) -> Option<Json> {
 
 /// Whether RECORD is a keyed query restore must ask again: the other kinds
 /// say what the build did, not what the host answered.
+// HOST(pure): the world build's recorder: thread-local state, no host access
 pub fn keyed(record: &Json) -> bool {
     matches!(record["kind"].as_str(), Some("file-read" | "probe" | "dir-list" | "canon" | "env" | "host" | "user-db"))
 }
 
 // Process facts.
 
+// HOST(pure): a process, user or system query
 pub fn current_dir() -> io::Result<PathBuf> {
     if building() {
         p_read(Fact::CurrentDir, "working directory".into());
@@ -1652,6 +1729,7 @@ fn host_fact(fact: &str, value: Json) {
     record("host", json!({"fact": fact, "value": value}));
 }
 
+// HOST(pure): a process, user or system query
 pub fn current_exe() -> io::Result<PathBuf> {
     let result = crate::flight::checked("exe", String::new, std::env::current_exe, |r| crate::flight::outcome(r, |p| crate::flight::digest(p.as_os_str().as_bytes())));
     if building() {
@@ -1660,6 +1738,7 @@ pub fn current_exe() -> io::Result<PathBuf> {
     result
 }
 
+// HOST(pure): a process, user or system query
 pub fn pid() -> u32 {
     if capturing() {
         p_read(Fact::Pid, "pid".into());
@@ -1668,6 +1747,7 @@ pub fn pid() -> u32 {
     crate::flight::value("pid", std::process::id)
 }
 
+// HOST(pure): a process, user or system query
 pub fn uid() -> u32 {
     let uid = rustix::process::getuid().as_raw();
     if building() {
@@ -1679,6 +1759,7 @@ pub fn uid() -> u32 {
 /// Die with PARENT: SIGTERM when the thread that started this process
 /// ends, and exit now if PARENT is gone already. A child of a session
 /// thread then never outlives the session.
+// HOST(escape): sets the kernel's death signal and may exit: a process attribute the host keeps
 pub fn die_with_parent(parent: u32) {
     let _ = rustix::process::set_parent_process_death_signal(Some(rustix::process::Signal::TERM));
     if std::os::unix::process::parent_id() != parent {
@@ -1701,6 +1782,7 @@ pub enum Priority {
 /// Lower the calling thread to PRIORITY; the threads and processes it
 /// starts afterwards inherit it, so a process calls it at the start of
 /// main. Best effort.
+// HOST(escape): lowers this thread's niceness and I/O class, which its children inherit: no inverse
 pub fn lower_priority(priority: Priority) {
     const IOPRIO_CLASS_BE: libc::c_long = 2;
     const IOPRIO_CLASS_IDLE: libc::c_long = 3;
@@ -1715,12 +1797,14 @@ pub fn lower_priority(priority: Priority) {
 /// Name the calling thread NAME (the kernel keeps 15 bytes). On a
 /// process's main thread that is the process's own name, the one `ps` and
 /// `pgrep` show.
+// HOST(escape): a name `ps` shows: others observe it
 pub fn set_thread_name(name: &str) -> io::Result<()> {
     effect(|| "thread-name".into())?;
     let name = std::ffi::CString::new(name).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
     rustix::thread::set_name(&name).map_err(os)
 }
 
+// HOST(pure): a process, user or system query
 pub fn euid() -> u32 {
     let euid = rustix::process::geteuid().as_raw();
     if building() {
@@ -1729,6 +1813,7 @@ pub fn euid() -> u32 {
     euid
 }
 
+// HOST(pure): a process, user or system query
 pub fn gid() -> u32 {
     let gid = rustix::process::getgid().as_raw();
     if building() {
@@ -1737,6 +1822,7 @@ pub fn gid() -> u32 {
     gid
 }
 
+// HOST(pure): a process, user or system query
 pub fn egid() -> u32 {
     let egid = rustix::process::getegid().as_raw();
     if building() {
@@ -1747,12 +1833,14 @@ pub fn egid() -> u32 {
 
 // User database.
 
+// HOST(block): an NSS lookup, which can wait on sssd or LDAP
 pub fn user_by_uid(uid: u32, buffer: usize) -> Result<Passwd, i32> {
     let result = sys::passwd(Ok(uid), buffer);
     user_db(json!({"uid": uid}), &result);
     result
 }
 
+// HOST(block): an NSS lookup, which can wait on sssd or LDAP
 pub fn user_by_name(name: &CStr, buffer: usize) -> Result<Passwd, i32> {
     let result = sys::passwd(Err(name), buffer);
     user_db(json!({"name": encoded(name.to_bytes())}), &result);
@@ -1773,6 +1861,7 @@ fn user_db(key: Json, result: &Result<Passwd, i32>) {
 
 /// getgrgid_r into a BUFFER-byte buffer: the group's name, or the status, 0
 /// when there is none.
+// HOST(block): an NSS lookup, which can wait on sssd or LDAP
 pub fn group_by_gid(gid: u32, buffer: usize) -> Result<Vec<u8>, i32> {
     let result = sys::group(Ok(gid), buffer).and_then(|(name, _)| name.ok_or(0));
     if building() {
@@ -1783,6 +1872,7 @@ pub fn group_by_gid(gid: u32, buffer: usize) -> Result<Vec<u8>, i32> {
 }
 
 /// The group NAME names: its gid.
+// HOST(block): an NSS lookup, which can wait on sssd or LDAP
 pub fn group_by_name(name: &CStr, buffer: usize) -> Result<u32, i32> {
     let result = sys::group(Err(name), buffer).map(|(_, gid)| gid);
     if building() {
@@ -1796,6 +1886,7 @@ pub fn group_by_name(name: &CStr, buffer: usize) -> Result<u32, i32> {
 /// for, in its order, then endpwent or endgrent, as dired.c Fsystem_users and
 /// Fsystem_groups do (so NSS sources count). The walk's cursor is the C
 /// library's, shared by the process, so one walk runs at a time.
+// HOST(block): walks the account database through NSS, which can wait on sssd or LDAP
 pub fn account_names(groups: bool) -> Vec<Vec<u8>> {
     static WALK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _walk = WALK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1810,6 +1901,7 @@ pub fn account_names(groups: bool) -> Vec<Vec<u8>> {
 
 /// The kernel nodename, which GNU's gethostname returns, read without an
 /// unsafe syscall. HOSTNAME and DNS are not consulted.
+// HOST(pure): a process, user or system query
 pub fn system_name() -> io::Result<String> {
     let result = std::fs::read_to_string("/proc/sys/kernel/hostname");
     if building() {
@@ -1835,6 +1927,7 @@ pub enum Processors {
 }
 
 /// A per-process fact (`Fact::Processors`): no world is keyed on it.
+// HOST(pure): a process, user or system query
 pub fn processors(set: Processors) -> u64 {
     p_read(Fact::Processors, "processors".into());
     crate::flight::value("processors", || count_processors(set))
@@ -1861,6 +1954,7 @@ fn count_processors(set: Processors) -> u64 {
 /// probes compare work at two sizes by it. None where the kernel refuses
 /// counters (perf_event_paranoid above 2, no PMU) or cannot keep this one
 /// counting all the time: a number is always a whole count.
+// HOST(acquisition): instruction_count's first call opens this thread's perf counter, later ones read it
 pub(crate) fn thread_instructions() -> Option<u64> {
     crate::flight::value("instructions", instruction_count)
 }
@@ -1870,6 +1964,8 @@ pub(crate) fn thread_instructions() -> Option<u64> {
 /// calls. What a meter hands on to Lisp is a host result, and logged
 /// there. A session installs it as the render thread's meter too
 /// (`romacs_display_protocol::meter`).
+// HOST(acquisition): opens this thread's perf counter on its first call (a kernel event and its
+// descriptor), then reads it
 #[must_use]
 pub fn instruction_count() -> Option<u64> {
     INSTRUCTION_COUNTER.with(|counter| {
@@ -1898,6 +1994,7 @@ fn read_counter(fd: &std::os::fd::OwnedFd) -> Option<u64> {
 
 /// The kernel's clock ticks per second (`_SC_CLK_TCK`), the unit of
 /// /proc's process times.
+// HOST(pure): a clock, a meter or entropy: a query
 pub fn clock_ticks_per_second() -> u64 {
     Some(rustix::param::clock_ticks_per_second()).filter(|&n| n > 0).unwrap_or(100)
 }
@@ -1906,6 +2003,7 @@ pub fn clock_ticks_per_second() -> u64 {
 /// [`instruction_count`] is: the stall watchdog reads it on the evaluator's
 /// thread to split a span of work into running and waiting, so it is
 /// neither logged for a replay nor counted among the host calls.
+// HOST(pure): a clock, a meter or entropy: a query
 #[must_use]
 pub fn thread_cpu_time() -> std::time::Duration {
     let t = rustix::time::clock_gettime(rustix::time::ClockId::ThreadCPUTime);
@@ -1919,6 +2017,7 @@ thread_local! {
 }
 
 /// A collection on this thread took NS nanoseconds (`Vm::collect_until_key`).
+// HOST(pure): a clock, a meter or entropy: a query
 pub(crate) fn note_collection_time(ns: u64) {
     COLLECTION_NS.with(|total| total.set(total.get().saturating_add(ns)));
 }
@@ -1927,6 +2026,7 @@ pub(crate) fn note_collection_time(ns: u64) {
 /// watchdog's share of a span spent collecting.  A meter, like
 /// [`thread_cpu_time`]; collections in build mode are not timed
 /// ([`collection_clock`]), so they add nothing.
+// HOST(pure): a clock, a meter or entropy: a query
 #[must_use]
 pub fn collection_time() -> std::time::Duration {
     std::time::Duration::from_nanos(COLLECTION_NS.with(Cell::get))
@@ -1934,6 +2034,7 @@ pub fn collection_time() -> std::time::Duration {
 
 /// The time since boot, suspended time included (`CLOCK_BOOTTIME`), as
 /// GNU's get_host_uptime reads it; None where the clock is missing.
+// HOST(pure): a clock, a meter or entropy: a query
 pub fn boot_clock() -> Option<std::time::Duration> {
     crate::flight::value("boot-clock", || {
         let t = rustix::time::clock_gettime_dynamic(rustix::time::DynamicClockId::Boottime).ok()?;
@@ -1943,6 +2044,7 @@ pub fn boot_clock() -> Option<std::time::Duration> {
 
 /// sysinfo(2)'s RAM and swap totals and free amounts, in bytes:
 /// (total RAM, free RAM, total swap, free swap).
+// HOST(pure): a clock, a meter or entropy: a query
 pub fn memory_info() -> Option<[u64; 4]> {
     p_read(Fact::Machine, "memory-info".into());
     crate::flight::value("memory-info", || {
@@ -1954,6 +2056,7 @@ pub fn memory_info() -> Option<[u64; 4]> {
 
 /// getloadavg(3): the 1, 5 and 15 minute averages, as glibc derives them
 /// from sysinfo(2)'s fixed-point loads (SI_LOAD_SHIFT, 16 bits).
+// HOST(pure): a clock, a meter or entropy: a query
 pub fn load_average() -> Option<Vec<f64>> {
     p_read(Fact::Machine, "load-average".into());
     crate::flight::value("load-average", || {
@@ -1962,16 +2065,19 @@ pub fn load_average() -> Option<Vec<f64>> {
 }
 
 /// The memory page size in bytes (`getpagesize`).
+// HOST(pure): a clock, a meter or entropy: a query
 pub fn page_size() -> u64 {
     Some(rustix::param::page_size() as u64).filter(|&n| n > 0).unwrap_or(4096)
 }
 
 /// A time-zone file's bytes: `/etc/localtime`, a TZ file or a zoneinfo entry.
+// HOST(block): reads a time-zone file by path, which TZ may name: a FIFO there blocks
 pub fn zone_file(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
     read_file(path)
 }
 
 /// The wall clock; in build mode the build time.
+// HOST(pure): a clock, a meter or entropy: a query
 pub fn clock() -> SystemTime {
     if capturing() {
         p_read(Fact::Clock, "clock".into());
@@ -1983,6 +2089,7 @@ pub fn clock() -> SystemTime {
 /// The processor time this process has used, user and system, as
 /// `getrusage (RUSAGE_SELF)` sums them (GNU sysdep.c
 /// `get-internal-run-time'); in build mode none, a per-process fact.
+// HOST(pure): a clock, a meter or entropy: a query
 pub fn run_time() -> io::Result<std::time::Duration> {
     if capturing() {
         p_read(Fact::Monotonic, "run time".into());
@@ -1994,11 +2101,13 @@ pub fn run_time() -> io::Result<std::time::Duration> {
 /// The processor time this process has used, read live and never logged:
 /// for a process outside the session's own results (a mark twin's child,
 /// `twin.rs`, whose usage starts at its fork).
+// HOST(pure): a clock, a meter or entropy: a query
 pub(crate) fn live_run_time() -> io::Result<std::time::Duration> {
     sys::self_usage().map(|(user, system)| user + system)
 }
 
 /// The monotonic clock, for deadlines and measurement.
+// HOST(pure): a clock, a meter or entropy: a query
 pub fn monotonic() -> Instant {
     if building() {
         p_read(Fact::Monotonic, "monotonic clock".into());
@@ -2008,12 +2117,15 @@ pub fn monotonic() -> Instant {
 
 /// The instant a flight recording or replay counts its times from: never
 /// logged itself.
+// HOST(pure): a clock, a meter or entropy: a query
 pub(crate) fn flight_base() -> Instant {
     Instant::now()
 }
 
 /// F with every signal blocked on this thread, so threads it starts leave
 /// signals to the threads that handle them.
+// HOST(pure): this thread's own signal mask, which no other party observes (rule 5), restored
+// before it returns
 pub fn with_signals_blocked<T>(f: impl FnOnce() -> T) -> T {
     sys::with_signals_blocked(f)
 }
@@ -2021,6 +2133,7 @@ pub fn with_signals_blocked<T>(f: impl FnOnce() -> T) -> T {
 /// When a collection started, for `gc-elapsed'; none in build mode, nor in
 /// a builder whose recording has ended (its capture collects), so a world's
 /// heap never depends on how long its collections took.
+// HOST(pure): a clock, a meter or entropy: a query
 pub fn collection_clock() -> Option<Instant> {
     (!building() && !crate::world::arena::heap_is_image()).then(Instant::now)
 }
@@ -2028,6 +2141,7 @@ pub fn collection_clock() -> Option<Instant> {
 /// Now, for a timing statistic of the VM's own (`romacs-macro-invalidation-stats`):
 /// none where `collection_clock` gives none, so a world's heap never
 /// depends on how long anything took.
+// HOST(pure): a clock, a meter or entropy: a query
 #[must_use]
 pub fn stat_clock() -> Option<Instant> {
     collection_clock()
@@ -2036,6 +2150,7 @@ pub fn stat_clock() -> Option<Instant> {
 // Effects.
 
 /// Four bytes of kernel entropy; in build mode the pinned seed.
+// HOST(pure): a clock, a meter or entropy: a query
 pub fn random_seed() -> io::Result<[u8; 4]> {
     if capturing() {
         p_read(Fact::Seed, "random seed".into());
@@ -2047,6 +2162,7 @@ pub fn random_seed() -> io::Result<[u8; 4]> {
 }
 
 /// PATH opened with OPTIONS for writing only: reads go through `Input`.
+// HOST(acquisition): opens PATH for writing, which may create it
 pub fn open_output(path: impl AsRef<Path>, options: &OpenOptions) -> io::Result<File> {
     wrote(path.as_ref());
     effect(|| format!("write {}", bytes(path.as_ref())))?;
@@ -2058,6 +2174,7 @@ pub fn open_output(path: impl AsRef<Path>, options: &OpenOptions) -> io::Result<
 
 /// GNU copy-file's fast paths: share SOURCE's extents with DEST, else
 /// copy_file_range until it stops. False leaves the rest to read+write.
+// HOST(escape): changes an output file's content
 pub fn clone_file(dest: &File, source: &Input) -> bool {
     if rustix::fs::ioctl_ficlone(dest, &source.0).is_ok() {
         return true;
@@ -2067,6 +2184,7 @@ pub fn clone_file(dest: &File, source: &Input) -> bool {
     false
 }
 
+// HOST(acquisition): writes a whole file, creating it when absent (`write-region` to a new file)
 pub fn write(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> io::Result<()> {
     wrote(path.as_ref());
     effect(|| format!("write {}", self::bytes(path.as_ref())))?;
@@ -2076,6 +2194,7 @@ pub fn write(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> io::Result<()> 
     result
 }
 
+// HOST(escape): a rename or delete others see
 pub fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
     wrote(from.as_ref());
     wrote(to.as_ref());
@@ -2087,11 +2206,13 @@ pub fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
 }
 
 /// fsync the directory DIR, so a rename into it survives a host crash.
+// HOST(escape): forces disk writes (sync, fsync): a host write with no inverse
 pub fn sync_dir(dir: impl AsRef<Path>) -> io::Result<()> {
     effect(|| format!("sync directory {}", bytes(dir.as_ref())))?;
     File::open(dir)?.sync_all()
 }
 
+// HOST(escape): a rename or delete others see
 pub fn remove_file(path: impl AsRef<Path>) -> io::Result<()> {
     wrote(path.as_ref());
     effect(|| format!("delete {}", bytes(path.as_ref())))?;
@@ -2100,6 +2221,7 @@ pub fn remove_file(path: impl AsRef<Path>) -> io::Result<()> {
     result
 }
 
+// HOST(escape): a rename or delete others see
 pub fn remove_dir(path: impl AsRef<Path>) -> io::Result<()> {
     wrote(path.as_ref());
     effect(|| format!("delete directory {}", bytes(path.as_ref())))?;
@@ -2109,6 +2231,7 @@ pub fn remove_dir(path: impl AsRef<Path>) -> io::Result<()> {
 }
 
 /// mkdir with MODE before the umask.
+// HOST(acquisition): makes a file or directory name
 pub fn create_dir(path: impl AsRef<Path>, mode: u32) -> io::Result<()> {
     wrote(path.as_ref());
     effect(|| format!("make directory {}", bytes(path.as_ref())))?;
@@ -2118,6 +2241,7 @@ pub fn create_dir(path: impl AsRef<Path>, mode: u32) -> io::Result<()> {
     result
 }
 
+// HOST(acquisition): makes a file or directory name
 pub fn create_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
     wrote(path.as_ref());
     effect(|| format!("make directory {}", bytes(path.as_ref())))?;
@@ -2127,6 +2251,7 @@ pub fn create_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
     result
 }
 
+// HOST(acquisition): makes a file or directory name
 pub fn hard_link(original: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Result<()> {
     wrote(link.as_ref());
     effect(|| format!("link {}", bytes(link.as_ref())))?;
@@ -2136,6 +2261,7 @@ pub fn hard_link(original: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Resu
     result
 }
 
+// HOST(acquisition): makes a file or directory name
 pub fn symlink(target: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Result<()> {
     wrote(link.as_ref());
     effect(|| format!("symlink {}", bytes(link.as_ref())))?;
@@ -2146,15 +2272,18 @@ pub fn symlink(target: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Result<(
 
 /// ftruncate FILE to empty: `copy-file`'s replacement of an existing
 /// output, through the descriptor its caller checked (not the path).
+// HOST(escape): changes an output file's content
 pub fn truncate(file: &File) -> io::Result<()> {
     crate::flight::checked("ftruncate", String::new, || file.set_len(0), |r| crate::flight::outcome(r, |()| 0))
 }
 
+// HOST(escape): changes a file's metadata others see
 pub fn fchown(file: &File, uid: Option<u32>, gid: Option<u32>) -> io::Result<()> {
     crate::flight::checked("fchown", String::new, || std::os::unix::fs::fchown(file, uid, gid), |r| crate::flight::outcome(r, |()| 0))
 }
 
 /// fchmodat: PATH's mode bits, a symlink's own under NOFOLLOW.
+// HOST(escape): changes a file's metadata others see
 pub fn chmod(path: &CStr, mode: u32, nofollow: bool) -> io::Result<()> {
     wrote(Path::new(OsStr::from_bytes(path.to_bytes())));
     effect(|| format!("chmod {}", String::from_utf8_lossy(path.to_bytes())))?;
@@ -2166,6 +2295,7 @@ pub fn chmod(path: &CStr, mode: u32, nofollow: bool) -> io::Result<()> {
 }
 
 /// renameat2 with RENAME_NOREPLACE: EEXIST rather than replace TO.
+// HOST(escape): a rename or delete others see
 pub fn rename_noreplace(from: &CStr, to: &CStr) -> io::Result<()> {
     wrote(Path::new(OsStr::from_bytes(to.to_bytes())));
     effect(|| format!("rename {}", String::from_utf8_lossy(to.to_bytes())))?;
@@ -2180,6 +2310,7 @@ pub fn rename_noreplace(from: &CStr, to: &CStr) -> io::Result<()> {
 
 /// utimensat: both of PATH's times set to TIME (seconds, nanoseconds), or
 /// now; a symlink's own under NOFOLLOW.
+// HOST(escape): changes a file's metadata others see
 pub fn set_times(path: &CStr, time: Option<(i64, i64)>, nofollow: bool) -> io::Result<()> {
     wrote(Path::new(OsStr::from_bytes(path.to_bytes())));
     effect(|| format!("set times {}", String::from_utf8_lossy(path.to_bytes())))?;
@@ -2196,6 +2327,7 @@ pub fn set_times(path: &CStr, time: Option<(i64, i64)>, nofollow: bool) -> io::R
 
 /// mkostemp: a new close-on-exec file named TEMPLATE with its trailing
 /// XXXXXX replaced, and that name.
+// HOST(acquisition): makes a file or directory name
 pub fn temp_file(template: &Path) -> io::Result<(PathBuf, File)> {
     effect(|| format!("temporary file {}", bytes(template)))?;
     use std::os::unix::ffi::{OsStrExt, OsStringExt};
@@ -2210,6 +2342,8 @@ pub fn temp_file(template: &Path) -> io::Result<(PathBuf, File)> {
 
 /// Every child process the VM starts comes from a Command made here: a
 /// world build refuses it, as an effect it cannot capture (`child`).
+// HOST(acquisition): the world build's guard on a child: the caller's `.spawn(`, `.output(` or
+// `.status(` is classed too
 pub fn command(program: impl AsRef<OsStr>) -> io::Result<Command> {
     effect(|| format!("run {}", String::from_utf8_lossy(program.as_ref().as_bytes())))?;
     Ok(child(program))
@@ -2219,6 +2353,8 @@ pub fn command(program: impl AsRef<OsStr>) -> io::Result<Command> {
 /// markers (`LAUNCH_MARKERS`): every child of this program starts from one,
 /// through `command` when the VM starts it. A child that is to have a marker
 /// sets it.
+// HOST(pure): builds a Command in memory; the `.spawn(`, `.output(` or `.status(` at the caller
+// starts the child
 pub fn child(program: impl AsRef<OsStr>) -> Command {
     let mut command = Command::new(program);
     for marker in LAUNCH_MARKERS {
@@ -2235,6 +2371,7 @@ pub fn child(program: impl AsRef<OsStr>) -> Command {
 /// until it execs, where a fork would copy page tables whose size grows
 /// with the heap. Each of FDS must be above 2, so no descriptor is
 /// replaced before it is copied.
+// HOST(acquisition): starts a child process (a spawn)
 pub fn spawn_child(argv: &[Vec<u8>], env: &[Vec<u8>], dir: &[u8], fds: [std::os::fd::RawFd; 3]) -> io::Result<i32> {
     use std::ffi::CString;
     effect(|| format!("run {}", String::from_utf8_lossy(argv.first().map_or(&[][..], Vec::as_slice))))?;
@@ -2246,6 +2383,7 @@ pub fn spawn_child(argv: &[Vec<u8>], env: &[Vec<u8>], dir: &[u8], fds: [std::os:
 
 /// A file of a world store, opened for reading: the store's own, never a
 /// fact of a build.
+// HOST(block): a bare open by path, with no O_NONBLOCK: a FIFO there blocks; a regular file is pure
 pub fn open_world_file(path: impl AsRef<Path>) -> io::Result<File> {
     File::open(path)
 }
@@ -2281,6 +2419,8 @@ pub enum Flock {
 ///
 /// # Errors
 /// What flock(2) reports, but a `Try` lock's `EWOULDBLOCK`.
+// HOST(acquisition): a flock others see, held until its file closes; a blocking HOW also waits
+// (acquisition first)
 pub fn lock(fd: impl std::os::fd::AsFd, how: Flock) -> io::Result<bool> {
     use rustix::fs::FlockOperation as Op;
     let operation = match how {
@@ -2300,6 +2440,7 @@ pub fn lock(fd: impl std::os::fd::AsFd, how: Flock) -> io::Result<bool> {
 ///
 /// # Errors
 /// What fcntl(2) reports.
+// HOST(escape): changes a descriptor's flags: no inverse (the closing rule)
 pub fn close_on_exec(fd: impl std::os::fd::AsFd) -> io::Result<()> {
     rustix::io::fcntl_setfd(fd, rustix::io::FdFlags::CLOEXEC).map_err(io::Error::from)
 }
@@ -2308,6 +2449,7 @@ pub fn close_on_exec(fd: impl std::os::fd::AsFd) -> io::Result<()> {
 /// never blocking on what is no file (a FIFO opens at once, and is then
 /// refused), and only when it is a regular file; truncated only then. The
 /// store's own, never a fact of a build.
+// HOST(acquisition): opens a world store file as HOW, which may create it
 pub fn open_store_file(path: impl AsRef<Path>, how: StoreOpen) -> io::Result<File> {
     use std::os::unix::fs::OpenOptionsExt;
     let mut options = OpenOptions::new();
@@ -2325,6 +2467,7 @@ pub fn open_store_file(path: impl AsRef<Path>, how: StoreOpen) -> io::Result<Fil
 /// Make the world store directory DIR private to its user again (0700),
 /// when it is the user's and others may read it: store maintenance, as
 /// opening it is, no effect of a build's recipe.
+// HOST(escape): changes a file's metadata others see
 pub fn make_store_private(dir: &OwnedFd) -> io::Result<()> {
     rustix::fs::fchmod(dir, rustix::fs::Mode::from_raw_mode(0o700)).map_err(os)
 }
@@ -2337,6 +2480,7 @@ pub fn make_store_private(dir: &OwnedFd) -> io::Result<()> {
 /// symlink is followed, not even as HOME. Each directory from `/` down
 /// must be owned by this user or root, and writable by no one else unless
 /// sticky, or another user could swap what lies below it.
+// HOST(acquisition): makes a file or directory name
 pub fn open_store_dir(path: &Path, create: bool) -> io::Result<std::os::fd::OwnedFd> {
     use rustix::fs::{Mode, OFlags};
     use std::os::unix::ffi::OsStrExt;
@@ -2385,6 +2529,7 @@ pub fn open_store_dir(path: &Path, create: bool) -> io::Result<std::os::fd::Owne
 }
 
 /// Whether the directory DIR holds nothing.
+// HOST(pure): reads a world store's regular file or directory, never blocking on what is no file
 pub fn store_dir_is_empty(dir: std::os::fd::BorrowedFd<'_>) -> io::Result<bool> {
     // A copy shares DIR's offset, as the stream fdopendir made of one did.
     let copy = rustix::io::fcntl_dupfd_cloexec(dir, 0).map_err(os)?;
@@ -2401,6 +2546,7 @@ pub fn store_dir_is_empty(dir: std::os::fd::BorrowedFd<'_>) -> io::Result<bool> 
 
 /// `open_store_file` for NAME in the directory DIR: opened relative to it
 /// (openat), so nothing above is resolved again.
+// HOST(acquisition): opens a world store file as HOW, which may create it
 pub fn open_store_file_at(dir: std::os::fd::BorrowedFd<'_>, name: &str, how: StoreOpen) -> io::Result<File> {
     use rustix::fs::OFlags;
     let flags = OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC | match how {
@@ -2429,6 +2575,7 @@ fn regular_and_blocking(file: File, name: impl std::fmt::Display, how: StoreOpen
 }
 
 /// A world store's regular file at PATH, read whole (`open_store_file`).
+// HOST(pure): reads a world store's regular file or directory, never blocking on what is no file
 pub fn read_store_file(path: impl AsRef<Path>) -> io::Result<String> {
     use std::io::Read;
     let mut text = String::new();
@@ -2438,6 +2585,7 @@ pub fn read_store_file(path: impl AsRef<Path>) -> io::Result<String> {
 
 /// Write BYTES as the world store's regular file at PATH, made or
 /// emptied first (`open_store_file`).
+// HOST(acquisition): writes a whole file, creating it when absent (`write-region` to a new file)
 pub fn write_store_file(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> io::Result<()> {
     use std::io::Write;
     open_store_file(path, StoreOpen::Write { create: true, truncate: true })?.write_all(bytes.as_ref())
@@ -2445,12 +2593,14 @@ pub fn write_store_file(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> io::
 
 /// kill(2): SIGNAL to PID, a process group when negative. Signal 0 asks
 /// only whether PID exists and may be signalled.
+// HOST(escape): a signal to a process
 pub fn kill(pid: i32, signal: i32) -> io::Result<()> {
     effect(|| format!("signal {signal} to {pid}"))?;
     sys::kill(pid, signal)
 }
 
 /// A pidfd for PID, readable once it exits.
+// HOST(acquisition): a pidfd: a descriptor made
 pub fn pidfd_open(pid: i32) -> Option<OwnedFd> {
     effect(|| format!("pidfd {pid}")).ok()?;
     rustix::process::pidfd_open(rustix::process::Pid::from_raw(pid)?, rustix::process::PidfdFlags::empty()).ok()
@@ -2459,6 +2609,7 @@ pub fn pidfd_open(pid: i32) -> Option<OwnedFd> {
 /// A memfd holding BYTES, sealed against writing, shrinking and growing
 /// once written: the backing of a large frozen region (`frozen.rs`), which
 /// another process may map or read knowing the bytes cannot change.
+// HOST(acquisition): a memfd another process maps: a descriptor made
 pub fn sealed_memfd(bytes: &[u8]) -> io::Result<File> {
     use rustix::fs::MemfdFlags;
     use std::io::Write;
@@ -2474,6 +2625,7 @@ const SEALS: rustix::fs::SealFlags = rustix::fs::SealFlags::WRITE.union(rustix::
 /// FILE's bytes, when `sealed_memfd`'s seals are on it; a descriptor another
 /// process sent is refused otherwise, since its bytes could change under
 /// the reader.
+// HOST(pure): reads a world store's regular file or directory, never blocking on what is no file
 pub fn read_sealed(file: &File) -> io::Result<Vec<u8>> {
     use std::os::unix::fs::FileExt;
     if !rustix::fs::fcntl_get_seals(file).is_ok_and(|seals| seals.contains(SEALS)) {
@@ -2489,6 +2641,7 @@ pub fn read_sealed(file: &File) -> io::Result<Vec<u8>> {
 // instance per Emacs, whose descriptor the keyboard waits poll.
 
 /// inotify_init1(2), close-on-exec and nonblocking.
+// HOST(acquisition): a file-notify descriptor or watch
 pub fn inotify_init() -> io::Result<OwnedFd> {
     use rustix::fs::inotify::CreateFlags;
     effect(|| "inotify".into())?;
@@ -2496,18 +2649,21 @@ pub fn inotify_init() -> io::Result<OwnedFd> {
 }
 
 /// inotify_add_watch(2): PATH's watch descriptor on FD with MASK.
+// HOST(acquisition): a file-notify descriptor or watch
 pub fn inotify_add_watch(fd: std::os::fd::BorrowedFd<'_>, path: &CStr, mask: u32) -> io::Result<i32> {
     effect(|| format!("inotify watch {}", path.to_string_lossy()))?;
     rustix::fs::inotify::add_watch(fd, path, rustix::fs::inotify::WatchFlags::from_bits_retain(mask)).map_err(os)
 }
 
 /// inotify_rm_watch(2).
+// HOST(escape): drops a watch: no inverse
 pub fn inotify_rm_watch(fd: std::os::fd::BorrowedFd<'_>, wd: i32) -> io::Result<()> {
     rustix::fs::inotify::remove_watch(fd, wd).map_err(os)
 }
 
 /// The `struct inotify_event' records queued on FD, as their bytes; none
 /// when nothing is queued (FD is nonblocking).
+// HOST(take): the queued file-notify events, nonblocking, consumed
 pub fn inotify_read(fd: std::os::fd::BorrowedFd<'_>) -> io::Result<Vec<u8>> {
     let queued = rustix::io::ioctl_fionread(fd).map_err(os)?;
     // One record at least, whatever FIONREAD said, so a read never fails
@@ -2524,6 +2680,7 @@ pub fn inotify_read(fd: std::os::fd::BorrowedFd<'_>) -> io::Result<Vec<u8>> {
 // descriptors they pass, and the signals between them.
 
 /// FD nonblocking: a worker's inherited control socket.
+// HOST(escape): changes a descriptor's flags: no inverse (the closing rule)
 pub fn set_nonblocking(fd: std::os::fd::BorrowedFd<'_>) -> io::Result<()> {
     set_blocking(fd, false)
 }
@@ -2539,6 +2696,7 @@ fn set_blocking(fd: std::os::fd::BorrowedFd<'_>, blocking: bool) -> io::Result<(
 /// A connected pair of close-on-exec, nonblocking `SOCK_SEQPACKET` sockets:
 /// one packet per `send_packet`, received whole or not at all; a full
 /// buffer makes a send fail with `WouldBlock` rather than wait.
+// HOST(acquisition): a pipe, socket pair, eventfd or pty: a descriptor made
 pub fn socketpair() -> io::Result<(OwnedFd, OwnedFd)> {
     use rustix::net::{AddressFamily, SocketFlags, SocketType};
     effect(|| "socketpair".into())?;
@@ -2547,6 +2705,7 @@ pub fn socketpair() -> io::Result<(OwnedFd, OwnedFd)> {
 
 /// BYTES as one packet on SOCKET, with FD passed beside it (`SCM_RIGHTS`);
 /// `WouldBlock` when the peer's buffer is full (a bounded queue).
+// HOST(escape): a packet to an isolate worker: a send
 pub fn send_packet(socket: std::os::fd::BorrowedFd<'_>, bytes: &[u8], fd: Option<std::os::fd::BorrowedFd<'_>>) -> io::Result<()> {
     use rustix::net::{SendAncillaryBuffer, SendAncillaryMessage, SendFlags};
     effect(|| "sendmsg".into())?;
@@ -2568,6 +2727,8 @@ pub fn send_packet(socket: std::os::fd::BorrowedFd<'_>, bytes: &[u8], fd: Option
 /// One packet from SOCKET, up to CAPACITY bytes, with the descriptors passed
 /// beside it (close-on-exec); None once the peer has closed. A packet the
 /// buffer cannot hold whole is an error, never a prefix.
+// HOST(block): one packet, consumed; an inherited socket whose O_NONBLOCK could not be set can wait
+// (rule 2); on socketpair's nonblocking sockets it never does: a take. SCM_RIGHTS fds are part of it
 pub fn recv_packet(socket: std::os::fd::BorrowedFd<'_>, capacity: usize) -> io::Result<Option<(Vec<u8>, Vec<OwnedFd>)>> {
     use rustix::net::{RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, ReturnFlags};
     let mut bytes = vec![0u8; capacity];
@@ -2600,6 +2761,7 @@ const PIDFD_SIGNAL_PROCESS_GROUP: libc::c_uint = 1 << 2;
 /// process group (Linux 6.9 and later; `EINVAL` before). A pidfd names one
 /// process for good, so this never reaches a reused pid: a reaped process
 /// gives `ESRCH`, while its group, still alive without it, is signalled.
+// HOST(escape): a signal to a process
 pub fn pidfd_send_signal(pidfd: std::os::fd::BorrowedFd<'_>, signal: i32, group: bool) -> io::Result<()> {
     effect(|| format!("pidfd signal {signal}"))?;
     sys::pidfd_send_signal(pidfd, signal, if group { PIDFD_SIGNAL_PROCESS_GROUP } else { 0 })
@@ -2607,12 +2769,14 @@ pub fn pidfd_send_signal(pidfd: std::os::fd::BorrowedFd<'_>, signal: i32, group:
 
 /// prctl(PR_SET_PDEATHSIG): SIGNAL once the thread that made this process
 /// exits. The caller checks `parent_pid` after, for a parent gone before.
+// HOST(escape): sets the kernel's death signal: a process attribute the host keeps
 pub fn set_parent_death_signal(signal: i32) -> io::Result<()> {
     effect(|| "pdeathsig".into())?;
     let signal = rustix::process::Signal::from_named_raw(signal).ok_or_else(|| io::Error::from_raw_os_error(libc::EINVAL))?;
     rustix::process::set_parent_process_death_signal(Some(signal)).map_err(os)
 }
 
+// HOST(pure): a process, user or system query
 pub fn parent_pid() -> i32 {
     if building() {
         p_read(Fact::Pid, "ppid".into());
@@ -2655,11 +2819,13 @@ extern "C" fn note_terminate(_: libc::c_int) {
 }
 
 /// The read end of the wake pipe, once `catch_isolate_signals' made it.
+// HOST(pure): the wake pipe's descriptor number
 pub fn isolate_wake_fd() -> Option<std::os::fd::RawFd> {
     let fd = WAKE_READ.load(std::sync::atomic::Ordering::SeqCst);
     (fd >= 0).then_some(fd)
 }
 /// Empty the wake pipe: the flags, not the bytes, say what happened.
+// HOST(take): empties the wake pipe: consumed host input
 pub fn drain_isolate_wake() {
     if let Some(fd) = isolate_wake_fd() {
         sys::drain(fd);
@@ -2669,6 +2835,7 @@ pub fn drain_isolate_wake() {
 /// For `romacs--test-block' alone (prims/block_test_hooks.rs): write the
 /// file READY, then sleep SECONDS polling nothing, std's sleep retrying a
 /// signal's EINTR, so no signal ends the wait. Test builds only.
+// HOST(acquisition): the test hook that blocks, but first makes the file READY (acquisition comes first)
 #[cfg(any(test, feature = "test-hooks"))]
 pub fn test_block(ready: &Path, seconds: u64) -> io::Result<()> {
     std::fs::write(ready, b"")?;
@@ -2679,10 +2846,12 @@ pub fn test_block(ready: &Path, seconds: u64) -> io::Result<()> {
 /// A worker ends within SECONDS of its first SIGTERM: a termination is a
 /// flag its loop reads, which a worker blocked inside a primitive never
 /// does, and with its spawner gone nothing else would end it.
+// HOST(pure): a process-wide flag of this process: no host access
 pub fn limit_termination(seconds: u32) {
     TERMINATE_LIMIT.store(seconds, std::sync::atomic::Ordering::SeqCst);
 }
 
+// HOST(acquisition): installs the SIGUSR1 and SIGTERM handlers and makes the wake pipe
 pub fn catch_isolate_signals() -> io::Result<()> {
     if WAKE_READ.load(std::sync::atomic::Ordering::SeqCst) < 0 {
         use rustix::pipe::PipeFlags;
@@ -2702,6 +2871,7 @@ pub fn catch_isolate_signals() -> io::Result<()> {
 
 /// An interrupt or a termination was signalled and not yet taken: two
 /// relaxed loads, for the engine's safepoints.
+// HOST(pure): looks at a signal flag, takes nothing
 #[inline(always)]
 pub fn interrupt_pending() -> bool {
     INTERRUPT.load(std::sync::atomic::Ordering::Relaxed) || TERMINATE.load(std::sync::atomic::Ordering::Relaxed)
@@ -2709,6 +2879,7 @@ pub fn interrupt_pending() -> bool {
 /// What the engine's safepoints poll: an interrupt or termination, or a
 /// user signal that arrived since one last looked, which may be a debug
 /// event (`Vm::take_debug_event'). Three relaxed loads.
+// HOST(pure): looks at a signal flag, takes nothing
 #[inline(always)]
 pub fn safepoint_pending() -> bool {
     interrupt_pending() || USER_SIGNAL_ARRIVED.load(std::sync::atomic::Ordering::Relaxed)
@@ -2741,6 +2912,7 @@ extern "C" fn note_user_signal(signal: libc::c_int) {
     if fd >= 0 { sys::wake(fd); }
 }
 /// Forget that a user signal arrived: the safepoints stop asking.
+// HOST(pure): clears a flag of this process: no host access
 pub fn clear_user_signal_arrival() {
     USER_SIGNAL_ARRIVED.store(false, std::sync::atomic::Ordering::SeqCst);
 }
@@ -2749,16 +2921,19 @@ pub fn clear_user_signal_arrival() {
 pub const USER_SIGNAL_NAMES: [&str; 2] = [USER_SIGNAL_EVENTS[0].1, USER_SIGNAL_EVENTS[1].1];
 /// Whether a user signal of MASK is pending: one relaxed load each, for a
 /// native probe (a search, a process wait) to stop for a debug event.
+// HOST(pure): looks at a signal flag, takes nothing
 #[inline]
 pub fn user_signal_waiting(mask: u8) -> bool {
     USER_SIGNALS.iter().enumerate().any(|(i, count)| mask & 1 << i != 0 && count.load(std::sync::atomic::Ordering::Relaxed) != 0)
 }
 /// Take one pending user signal of each event in MASK: whether any was.
+// HOST(take): takes a signal the host delivered: consumed, nonblocking
 pub fn take_user_signals(mask: u8) -> bool {
     USER_SIGNALS.iter().enumerate().filter(|&(i, count)| {
         mask & 1 << i != 0 && count.fetch_update(std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst, |n| n.checked_sub(1)).is_ok()
     }).count() != 0
 }
+// HOST(acquisition): installs the SIGUSR1 and SIGUSR2 handlers
 pub fn catch_user_signals() -> io::Result<()> {
     for (signal, _) in USER_SIGNAL_EVENTS {
         sys::catch_signal(signal, note_user_signal, libc::SA_RESTART)?;
@@ -2766,6 +2941,7 @@ pub fn catch_user_signals() -> io::Result<()> {
     Ok(())
 }
 /// A pending user signal's event, SIGUSR2's first, taking it.
+// HOST(take): takes a signal the host delivered: consumed, nonblocking
 pub fn take_user_signal() -> Option<&'static str> {
     USER_SIGNALS.iter().zip(USER_SIGNAL_EVENTS).find_map(|(count, (_, event))| {
         count.fetch_update(std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst, |n| n.checked_sub(1))
@@ -2774,15 +2950,18 @@ pub fn take_user_signal() -> Option<&'static str> {
 }
 
 /// Take the pending interrupt, if any.
+// HOST(take): takes a signal the host delivered: consumed, nonblocking
 pub fn take_interrupt() -> bool {
     INTERRUPT.swap(false, std::sync::atomic::Ordering::SeqCst)
 }
+// HOST(pure): looks at a signal flag, takes nothing
 pub fn terminate_pending() -> bool {
     TERMINATE.load(std::sync::atomic::Ordering::SeqCst)
 }
 /// A termination's one `quit`: true the first time after SIGTERM, so the
 /// engine leaves the Lisp it runs once and the worker's loop can end.
 static TERMINATE_QUIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+// HOST(take): takes a signal the host delivered: consumed, nonblocking
 pub fn take_terminate_quit() -> bool {
     TERMINATE.load(std::sync::atomic::Ordering::SeqCst) && !TERMINATE_QUIT.swap(true, std::sync::atomic::Ordering::SeqCst)
 }
@@ -2794,6 +2973,7 @@ pub fn take_terminate_quit() -> bool {
 /// Its pid; the caller reaps.
 /// Spawned, never forked, as a world builder is (`World::start_builder`):
 /// no pre_exec, so no driver's atfork handler runs.
+// HOST(acquisition): starts a child process (a spawn)
 pub fn spawn_isolate(program: &Path, args: &[OsString], socket: OwnedFd) -> io::Result<i32> {
     let mut command = command(program)?;
     command.arg("--isolate").arg("0").args(args).stdin(socket).stdout(std::process::Stdio::null());
@@ -2803,6 +2983,7 @@ pub fn spawn_isolate(program: &Path, args: &[OsString], socket: OwnedFd) -> io::
 /// End this process now with CODE: no destructor, atexit handler or
 /// buffered output of it runs, so a forked child leaves nothing it shares
 /// with its parent flushed twice.
+// HOST(escape): ends the process: its parent sees it
 pub fn exit_at_once(code: i32) -> ! {
     sys::exit_at_once(code)
 }
@@ -2812,6 +2993,7 @@ static FORKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::ne
 
 /// The threads of this process other than its main thread and the
 /// caller (/proc/self/task): those a fork from the caller would lose.
+// HOST(pure): reads /proc/self/task
 pub fn other_threads() -> io::Result<Vec<i32>> {
     let (main, caller) = (std::process::id() as i32, rustix::thread::gettid().as_raw_nonzero().get());
     let mut others = Vec::new();
@@ -2826,6 +3008,7 @@ pub fn other_threads() -> io::Result<Vec<i32>> {
 /// caller and its parked main thread exists (`other_threads`): 0 in the child, whose one
 /// thread is the caller, else the child's pid. The child resets what is
 /// its own with `forked_child_reset`.
+// HOST(acquisition): starts a child process (a spawn)
 pub fn fork_isolate() -> io::Result<i32> {
     let pid = fork()?;
     if pid == 0 { FORKED.store(true, std::sync::atomic::Ordering::SeqCst); }
@@ -2841,6 +3024,7 @@ pub fn fork_isolate() -> io::Result<i32> {
 /// lazy one where the heap is in a file (`romacs_allocator::file_heap`). It
 /// dies with the forking thread, even one that ends without unwinding
 /// (`_exit`), and ends at once if that thread was gone before it could ask.
+// HOST(acquisition): starts a child process (a spawn)
 pub(crate) fn fork_threaded() -> io::Result<i32> {
     let parent = std::process::id();
     let pid = crate::world::arena::across_fork(|| romacs_allocator::file_heap::lazily(fork))?;
@@ -2857,6 +3041,7 @@ fn fork() -> io::Result<i32> {
 
 /// Whether this process is a child forked from a zygote: it ends with
 /// `exit`, since no main thread is left to return to.
+// HOST(pure): a process, user or system query
 pub fn forked_child() -> bool {
     FORKED.load(std::sync::atomic::Ordering::SeqCst)
 }
@@ -2865,6 +3050,7 @@ pub fn forked_child() -> bool {
 /// yet, a wake pipe of its own (the zygote's would wake both), SIGTERM
 /// once the zygote is gone (fork clears it), and its own instruction
 /// counter (the inherited one counts the zygote's thread).
+// HOST(acquisition): in a forked child: its own wake pipe and handlers, then its name and death signal
 pub fn forked_child_reset(zygote: i32) -> io::Result<()> {
     use std::sync::atomic::Ordering;
     set_process_name("romacs-worker")?;
@@ -2884,12 +3070,14 @@ pub fn forked_child_reset(zygote: i32) -> io::Result<()> {
 }
 
 /// The calling thread's id.
+// HOST(pure): a process, user or system query
 pub fn thread_id() -> i32 {
     crate::flight::value("tid", || rustix::thread::gettid().as_raw_nonzero().get())
 }
 
 /// The processors thread TID may run on: how many, and a digest of which;
 /// None once it is gone.
+// HOST(pure): a process, user or system query
 pub fn thread_affinity(tid: i32) -> Option<(u32, u64)> {
     use std::hash::{Hash, Hasher};
     let cpus = rustix::thread::sched_getaffinity(rustix::process::Pid::from_raw(tid)).ok()?;
@@ -2904,6 +3092,7 @@ pub fn thread_affinity(tid: i32) -> Option<(u32, u64)> {
 
 /// PID's proportional set size, in kilobytes (/proc/PID/smaps_rollup);
 /// None once it is gone.
+// HOST(pure): a process, user or system query
 pub fn process_pss(pid: i32) -> Option<u64> {
     let rollup = std::fs::read_to_string(format!("/proc/{pid}/smaps_rollup")).ok()?;
     rollup.lines().find_map(|line| line.strip_prefix("Pss:")?.split_whitespace().next()?.parse().ok())
@@ -2911,6 +3100,8 @@ pub fn process_pss(pid: i32) -> Option<u64> {
 
 /// Wait at GATE, a pipe's read end, until one byte arrives (true) or the
 /// write end closes unwritten (false); a termination ends the wait too.
+// HOST(escape): waits for the gate's byte, then closes its read end, which a later write sees as
+// EPIPE (rule 1: escape first)
 pub fn await_gate(gate: OwnedFd) -> bool {
     let mut byte = [0u8];
     loop {
@@ -2923,6 +3114,7 @@ pub fn await_gate(gate: OwnedFd) -> bool {
 }
 
 /// Open GATE, the write end `await_gate` waits on: one byte, then closed.
+// HOST(escape): writes the gate's byte, waking the process that waits
 pub fn open_gate(gate: OwnedFd) -> io::Result<()> {
     effect(|| "gate".into())?;
     rustix::io::write(&gate, &[1u8]).map(drop).map_err(os)
@@ -2931,6 +3123,7 @@ pub fn open_gate(gate: OwnedFd) -> io::Result<()> {
 /// The process umask, from /proc/self/status (GNU reads it once at
 /// startup, fileio.c realmask). Checked by a flight as the mask alone:
 /// the rest of the file (the pid, memory counters) is this process's.
+// HOST(pure): a process, user or system query
 pub fn umask() -> io::Result<u32> {
     let status = crate::flight::without(|| read_to_string("/proc/self/status"))?;
     let mask = status.lines().find_map(|line| line.strip_prefix("Umask:")).and_then(|mask| u32::from_str_radix(mask.trim(), 8).ok())
@@ -2940,12 +3133,14 @@ pub fn umask() -> io::Result<u32> {
 
 /// Name this process NAME (the kernel keeps 15 bytes): its thread-group
 /// leader's name, the one `ps` and `pgrep` show, from any of its threads.
+// HOST(escape): a name `ps` shows: others observe it
 pub fn set_process_name(name: &str) -> io::Result<()> {
     effect(|| "process-name".into())?;
     std::fs::write("/proc/self/comm", name)
 }
 
 /// `emacs_pipe`: a close-on-exec pipe (read end, write end).
+// HOST(acquisition): a pipe, socket pair, eventfd or pty: a descriptor made
 pub fn pipe() -> io::Result<(OwnedFd, OwnedFd)> {
     effect(|| "pipe".into())?;
     rustix::pipe::pipe_with(rustix::pipe::PipeFlags::CLOEXEC).map_err(os)
@@ -2969,6 +3164,7 @@ extern "C" fn note_termination(signal: libc::c_int) {
 /// its session as emacs.c terminate_due_to_signal does, with `kill-emacs':
 /// the handler notes the signal and a thread of its own calls WAKE, which
 /// a handler may not. `termination_signal' takes it.
+// HOST(acquisition): a wake pipe, its reader thread and the SIGTERM and SIGHUP handlers
 pub fn catch_termination_signals(wake: std::sync::Arc<dyn Fn() + Send + Sync>) -> io::Result<()> {
     use std::os::fd::IntoRawFd;
     let (reader, writer) = pipe()?;
@@ -3003,6 +3199,7 @@ pub fn catch_termination_signals(wake: std::sync::Arc<dyn Fn() + Send + Sync>) -
 /// every sleep. (A thread CPU-time timer itself
 /// is not used: under a zero RLIMIT_RTTIME hard limit Linux kills a
 /// thread whose CPU timer fires.) Dropping the sender ends the thread.
+// HOST(acquisition): a sampler thread with its clock and /proc descriptors, in place of a signal timer
 pub fn cpu_sampler(interval: u64, ticks: std::sync::Arc<std::sync::atomic::AtomicU64>) -> io::Result<std::sync::mpsc::Sender<()>> {
     effect(|| "cpu profiler sampler".into())?;
     let clock = sys::ThreadCpuClock::of_this_thread()?;
@@ -3053,6 +3250,7 @@ fn next_sample(due: Instant, now: Instant, period: std::time::Duration) -> Insta
 
 /// The termination signal `catch_termination_signals' noted since the
 /// last call, taken; `pending' only looks.
+// HOST(take): takes a signal the host delivered: consumed, nonblocking
 pub fn termination_signal(pending: bool) -> Option<i32> {
     use std::sync::atomic::Ordering;
     let signal = if pending { TERMINATION.load(Ordering::SeqCst) } else { TERMINATION.swap(0, Ordering::SeqCst) };
@@ -3065,20 +3263,24 @@ static MESSAGES_TO_STDERR: std::sync::atomic::AtomicBool = std::sync::atomic::At
 /// GNU's xdisp.c message_to_stderr writes only in batch; a bare VM's tools
 /// and test runners report through stderr, so that is the default, and an
 /// interactive embedder (the GUI) turns it off: its echo area is no log.
+// HOST(pure): a process-wide flag of this process: no host access
 pub fn set_messages_to_stderr(on: bool) {
     MESSAGES_TO_STDERR.store(on, std::sync::atomic::Ordering::Relaxed);
 }
 
+// HOST(pure): a process, user or system query
 pub fn messages_to_stderr() -> bool {
     MESSAGES_TO_STDERR.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// uname's release (editfns.c init_editfns).
+// HOST(pure): a process, user or system query
 pub fn os_release() -> String {
     rustix::system::uname().release().to_string_lossy().into_owned()
 }
 
 /// sysconf (_SC_ARG_MAX) / 4, GNU's crude bytes to characters (callproc.c:2249).
+// HOST(pure): a process, user or system query
 pub fn command_line_max() -> i64 {
     match sys::sysconf(libc::_SC_ARG_MAX) { n if n > 0 => n as i64 / 4, _ => 4096 }
 }
@@ -3088,16 +3290,19 @@ pub fn command_line_max() -> i64 {
 /// for the whole process.
 static DAEMON: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
+// HOST(pure): a process-wide flag of this process: no host access
 pub fn set_daemon(name: &str) {
     let _ = DAEMON.set(name.to_owned());
 }
 
 /// The name `daemonp' answers, while this process is a server.
+// HOST(pure): a process, user or system query
 pub fn daemon() -> Option<&'static str> {
     DAEMON.get().map(String::as_str)
 }
 
 /// A close-on-exec, nonblocking eventfd: a wakeup counter no file names.
+// HOST(acquisition): a pipe, socket pair, eventfd or pty: a descriptor made
 pub fn eventfd() -> io::Result<OwnedFd> {
     use rustix::event::EventfdFlags;
     effect(|| "eventfd".into())?;
@@ -3105,6 +3310,7 @@ pub fn eventfd() -> io::Result<OwnedFd> {
 }
 
 /// allocate_pty with posix_openpt: the master and the slave's name.
+// HOST(acquisition): a pipe, socket pair, eventfd or pty: a descriptor made
 pub fn allocate_pty() -> io::Result<(OwnedFd, Vec<u8>)> {
     use rustix::pty::OpenptFlags;
     effect(|| "pty".into())?;
@@ -3115,6 +3321,7 @@ pub fn allocate_pty() -> io::Result<(OwnedFd, Vec<u8>)> {
 }
 
 /// The pty slave NAME, opened without becoming the controlling terminal.
+// HOST(acquisition): a pipe, socket pair, eventfd or pty: a descriptor made
 pub fn open_tty(name: &[u8]) -> io::Result<OwnedFd> {
     effect(|| format!("terminal {}", String::from_utf8_lossy(name)))?;
     use rustix::fs::OFlags;
@@ -3125,6 +3332,7 @@ pub fn open_tty(name: &[u8]) -> io::Result<OwnedFd> {
 // Sockets.
 
 /// HOST:PORT's addresses, from the C library's resolver.
+// HOST(block): asks the resolver, which can wait on a DNS server
 pub fn resolve(host: &str, port: u16) -> io::Result<Vec<SocketAddr>> {
     effect(|| format!("resolve {host}:{port}"))?;
     use std::net::ToSocketAddrs;
@@ -3136,17 +3344,20 @@ pub fn resolve(host: &str, port: u16) -> io::Result<Vec<SocketAddr>> {
 /// is `AF_UNSPEC', `AF_INET' or `AF_INET6'; NUMERIC treats NAME as a
 /// numeric address (`AI_NUMERICHOST'), with no DNS.  Err is the
 /// resolver's reason (`gai_strerror'), or, in build mode, that no build performs it.
+// HOST(block): asks the resolver, which can wait on a DNS server
 pub fn lookup_addresses(name: &str, family: i32, numeric: bool) -> Result<Vec<std::net::IpAddr>, String> {
     effect(|| format!("resolve {name}")).map_err(|e| e.to_string())?;
     let c_name = std::ffi::CString::new(name).map_err(|_| "Name contains a NUL".to_string())?;
     sys::lookup_addresses(&c_name, family, numeric)
 }
 
+// HOST(acquisition): a socket: a listener or a connection
 pub fn listen(addr: SocketAddr) -> io::Result<TcpListener> {
     effect(|| format!("listen {addr}"))?;
     TcpListener::bind(addr)
 }
 
+// HOST(acquisition): a socket: a listener or a connection
 pub fn connect(addr: SocketAddr) -> io::Result<TcpStream> {
     effect(|| format!("connect {addr}"))?;
     TcpStream::connect(addr)
@@ -3157,16 +3368,20 @@ pub fn connect(addr: SocketAddr) -> io::Result<TcpStream> {
 /// writes the file itself, past this boundary. In a build the open is an
 /// effect, so it is not made: a definition form that opens one is deferred
 /// to restore, and any other form leaves its entry to load in the session.
+// HOST(acquisition): the world build's guard on `sqlite-open`; its `Connection::open` is classed
+// where it runs
 pub fn sqlite_open(name: &[u8]) -> io::Result<()> {
     effect(|| format!("open sqlite database {}", String::from_utf8_lossy(name)))
 }
 
 /// A listening local (Unix domain) stream socket bound to PATH.
+// HOST(acquisition): a socket: a listener or a connection
 pub fn listen_local(path: &Path) -> io::Result<std::os::unix::net::UnixListener> {
     effect(|| format!("listen {}", bytes(path)))?;
     std::os::unix::net::UnixListener::bind(path)
 }
 
+// HOST(acquisition): a socket: a listener or a connection
 pub fn connect_local(path: &Path) -> io::Result<std::os::unix::net::UnixStream> {
     effect(|| format!("connect {}", bytes(path)))?;
     std::os::unix::net::UnixStream::connect(path)
@@ -3174,6 +3389,7 @@ pub fn connect_local(path: &Path) -> io::Result<std::os::unix::net::UnixStream> 
 
 /// connect_network_socket's nonblocking connect to the local socket PATH:
 /// a close-on-exec stream socket, connected or (EINPROGRESS) connecting.
+// HOST(acquisition): a socket: a listener or a connection
 pub fn connect_local_nonblocking(path: &Path) -> io::Result<OwnedFd> {
     effect(|| format!("connect {}", bytes(path)))?;
     // sockaddr_un's sun_path holds the name and its NUL.
@@ -3198,18 +3414,21 @@ fn connect_in_progress(family: rustix::net::AddressFamily, address: &impl rustix
 }
 
 /// The C library's text for the error ERRNO (`emacs_strerror`).
+// HOST(pure): a process, user or system query
 #[must_use]
 pub fn error_text(errno: i32) -> String {
     sys::error_text(errno)
 }
 
 /// The C library's text for the signal SIGNAL, None if it has none.
+// HOST(pure): a process, user or system query
 #[must_use]
 pub fn signal_text(signal: i32) -> Option<String> {
     sys::signal_text(signal)
 }
 
 /// umask(2): replace the process's file mode creation mask with MASK.
+// HOST(escape): the umask (`set-default-file-modes`)
 pub fn set_umask(mask: u32) {
     rustix::process::umask(rustix::fs::Mode::from_raw_mode(mask));
 }
@@ -3218,6 +3437,7 @@ pub fn set_umask(mask: u32) {
 ///
 /// # Errors
 /// What close(2) reports.
+// HOST(escape): closes a descriptor, with no inverse (the closing rule)
 pub fn close_file(file: File) -> io::Result<()> {
     sys::close_owned(file.into())
 }
@@ -3227,6 +3447,7 @@ pub fn close_file(file: File) -> io::Result<()> {
 ///
 /// # Errors
 /// A refused effect, or what accept4(2) reports.
+// HOST(acquisition): a socket: a listener or a connection
 pub fn accept(listener: std::os::fd::BorrowedFd<'_>) -> io::Result<(OwnedFd, Option<rustix::net::SocketAddrAny>)> {
     effect(|| format!("accept on {}", std::os::fd::AsRawFd::as_raw_fd(&listener)))?;
     Ok(rustix::net::acceptfrom_with(listener, rustix::net::SocketFlags::CLOEXEC)?)
@@ -3234,6 +3455,7 @@ pub fn accept(listener: std::os::fd::BorrowedFd<'_>) -> io::Result<(OwnedFd, Opt
 
 /// connect_network_socket's nonblocking connect: a close-on-exec stream
 /// socket to ADDR, connected or (EINPROGRESS) connecting.
+// HOST(acquisition): a socket: a listener or a connection
 pub fn connect_nonblocking(addr: SocketAddr) -> io::Result<OwnedFd> {
     effect(|| format!("connect {addr}"))?;
     let family = match addr { SocketAddr::V4(_) => rustix::net::AddressFamily::INET, SocketAddr::V6(_) => rustix::net::AddressFamily::INET6 };
@@ -3466,6 +3688,19 @@ mod tests {
     }
     use super::*;
 
+    /// A writer that never ends holds a stop for its bound, and no longer.
+    #[test]
+    fn a_stop_waits_for_the_store_writer_at_most_its_bound() {
+        let store = InspectStore::default();
+        let started = Instant::now();
+        assert!(!store.stop(INSPECT_STOP_WAIT), "no writer said it ended");
+        let waited = started.elapsed();
+        eprintln!("a stop past its bound took {waited:?}");
+        assert!(waited >= INSPECT_STOP_WAIT && waited < std::time::Duration::from_secs(1), "{waited:?}");
+        store.end();
+        assert!(store.stop(INSPECT_STOP_WAIT), "an ended writer is seen at once");
+    }
+
     /// An unpacked release finds its runtime tree beside its `bin/`; a
     /// development binary under `target/` has none there.
     #[test]
@@ -3532,6 +3767,8 @@ pub mod call_deadline {
     }
 
     /// Call GENERATION (nonzero) starts with BUDGET before its quit.
+    // HOST(logged-inverse): the agent call's deadline: arming logs the previous pair, replay
+    // re-arms it; its waiter thread is in-process (rule 5)
     pub fn arm(signal: Arc<QuitSignal>, generation: u64, budget: Duration) {
         CURRENT.store(generation, Ordering::Release);
         let waiter = waiter();
@@ -3540,6 +3777,8 @@ pub mod call_deadline {
     }
 
     /// The call ended: its deadline, passed or not, reaches nothing more.
+    // HOST(logged-inverse): the agent call's deadline: arming logs the previous pair, replay
+    // re-arms it (L1 §2.3)
     pub fn disarm(signal: &QuitSignal) {
         CURRENT.store(0, Ordering::Release);
         if let Some(waiter) = WAITER.get() {
@@ -3549,6 +3788,7 @@ pub mod call_deadline {
         signal.set_deadline(false);
     }
 
+    // HOST(pure): looks at the deadline flags
     pub(crate) fn expired_is_current() -> bool {
         let current = CURRENT.load(Ordering::Acquire);
         current != 0 && EXPIRED.load(Ordering::Acquire) == current
@@ -3574,6 +3814,9 @@ const INSPECT_IO: std::time::Duration = std::time::Duration::from_millis(500);
 const INSPECT_PENDING: usize = 4;
 /// The snapshot files kept.
 const INSPECT_KEEP: usize = 8;
+/// How long a stop waits for the store's writer, well inside the one-second
+/// rule: on a sound disk it ends in milliseconds ([`inspect_stop`]).
+const INSPECT_STOP_WAIT: std::time::Duration = std::time::Duration::from_millis(500);
 
 #[derive(Clone)]
 struct InspectSnapshot {
@@ -3595,6 +3838,8 @@ struct InspectStore {
 struct InspectQueue {
     pending: std::collections::VecDeque<InspectSnapshot>,
     stopped: bool,
+    /// The writer has ended: it makes no file call any more.
+    ended: bool,
 }
 
 impl InspectStore {
@@ -3607,9 +3852,21 @@ impl InspectStore {
         queue.pending.push_back(snapshot);
         self.changed.notify_one();
     }
-    fn stop(&self) {
-        self.lock().stopped = true;
+    fn stopped(&self) -> bool {
+        self.lock().stopped
+    }
+    fn end(&self) {
+        self.lock().ended = true;
         self.changed.notify_all();
+    }
+    /// Stop the writer, and wait up to WAIT for it to end: whether it did.
+    fn stop(&self, wait: std::time::Duration) -> bool {
+        let mut queue = self.lock();
+        queue.stopped = true;
+        self.changed.notify_all();
+        queue = self.changed.wait_timeout_while(queue, wait, |queue| !queue.ended)
+            .map_or_else(|poisoned| poisoned.into_inner().0, |(queue, _)| queue);
+        queue.ended
     }
     /// The next snapshot to save, or None once stopped.
     fn next(&self) -> Option<InspectSnapshot> {
@@ -3654,6 +3911,7 @@ fn inspect_target_here() {
 
 /// A request this thread's evaluator has not answered. Two relaxed loads per
 /// poll; whose thread answers is read only while a request waits.
+// HOST(pure): reads the inspection state between this process's threads
 #[inline(always)]
 pub fn inspect_pending() -> bool {
     use std::sync::atomic::Ordering::Relaxed;
@@ -3662,6 +3920,7 @@ pub fn inspect_pending() -> bool {
 }
 /// Whether a listener runs or the stall watchdog watches, so that a native
 /// loop should poll for requests.
+// HOST(pure): reads the inspection state between this process's threads
 pub fn inspect_enabled() -> bool {
     INSPECT_ENABLED.load(std::sync::atomic::Ordering::Relaxed) || INSPECT_WATCHED.load(std::sync::atomic::Ordering::Relaxed)
 }
@@ -3685,6 +3944,7 @@ pub fn inspect_answer() -> Option<String> {
 /// answers inspections, unless a listener already named one
 /// (`inspect_listen'), and native loops poll for them (`inspect_enabled'),
 /// with a listener or without, for as long as the process runs.
+// HOST(pure): sets flags shared between this process's threads; the watchdog thread is the GUI's
 pub fn inspect_watch() {
     if INSPECT_TARGET.load(std::sync::atomic::Ordering::SeqCst) == 0 { inspect_target_here(); }
     INSPECT_WATCHED.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -3693,10 +3953,12 @@ pub fn inspect_watch() {
 static INSPECT_WATCHED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// Raise a request, as the stall watchdog does from its own thread, for
 /// the target's evaluator to answer at its next safe point: its generation.
+// HOST(pure): raises a request between this process's threads: no host access
 pub fn inspect_raise() -> u64 {
     INSPECT_REQUESTED.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
 }
 /// The newest answer's JSON, once it answers GENERATION or a later request.
+// HOST(pure): reads the inspection state between this process's threads
 pub fn inspect_answer_since(generation: u64) -> Option<String> {
     inspect_lock(&INSPECT_SLOT).as_ref().filter(|s| s.generation >= generation).map(|s| s.json.to_string())
 }
@@ -3707,11 +3969,13 @@ static STALLS: std::sync::Mutex<(Vec<String>, u64)> = std::sync::Mutex::new((Vec
 /// The record of a stall still going, while one is.
 static ONGOING_STALL: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 /// Keep LINE as the record of the stall still going, or none.
+// HOST(pure): keeps a stall record between this process's threads: no host access
 pub fn note_ongoing_stall(line: Option<String>) {
     *inspect_lock(&ONGOING_STALL) = line;
 }
 const STALLS_KEPT: usize = 256;
 /// Keep LINE, a stall's record, for the usage log.
+// HOST(pure): keeps a stall record between this process's threads: no host access
 pub fn note_stall(line: String) {
     let mut stalls = inspect_lock(&STALLS);
     if stalls.0.len() < STALLS_KEPT { stalls.0.push(line); } else { stalls.1 += 1; }
@@ -3721,12 +3985,15 @@ pub fn note_stall(line: String) {
 static STALL_LOOK: std::sync::OnceLock<fn()> = std::sync::OnceLock::new();
 /// Let LOOK bring the stall records up to date before the session's last
 /// take (`take_stalls').
+// HOST(pure): keeps the watchdog's look function: no host access
 pub fn on_stall_take(look: fn()) { let _ = STALL_LOOK.set(look); }
 
 /// The stalls kept since the last call, oldest first, and, when the
 /// session is ENDING, the records brought up to date first and the stall
 /// still going last (it ends inside it), and how many were dropped
 /// meanwhile.
+// HOST(escape): drains stall records kept between threads; when ENDING, the watchdog's look may
+// print a stall to stderr
 pub fn take_stalls(ending: bool) -> (Vec<String>, u64) {
     if ending && let Some(look) = STALL_LOOK.get() { look(); }
     let (mut lines, dropped) = std::mem::take(&mut *inspect_lock(&STALLS));
@@ -3735,10 +4002,12 @@ pub fn take_stalls(ending: bool) -> (Vec<String>, u64) {
 }
 
 /// The newest request, which a snapshot taken now answers.
+// HOST(pure): reads the inspection state between this process's threads
 pub fn inspect_generation() -> u64 {
     INSPECT_REQUESTED.load(std::sync::atomic::Ordering::SeqCst)
 }
 /// Publish JSON as the answer to GENERATION, then queue it for the store.
+// HOST(escape): publishes an answer a client reads, and queues it for the store's files
 pub fn inspect_publish(generation: u64, json: String) {
     let snapshot = InspectSnapshot { generation, at: Instant::now(), json: json.into() };
     *inspect_lock(&INSPECT_SLOT) = Some(snapshot.clone());
@@ -3816,7 +4085,10 @@ fn inspect_store_ready(store: &Path) -> bool {
     })
 }
 
-fn inspect_save(store: &Path, snapshot: &InspectSnapshot) -> io::Result<()> {
+/// Save SNAPSHOT in STORE, then keep the newest [`INSPECT_KEEP`]. Each file
+/// call after the first looks at LIVE first: stopped, none follows, and an
+/// unfinished snapshot's temporary file goes.
+fn inspect_save(store: &Path, snapshot: &InspectSnapshot, live: &InspectStore) -> io::Result<()> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
     let pid = std::process::id();
@@ -3826,27 +4098,35 @@ fn inspect_save(store: &Path, snapshot: &InspectSnapshot) -> io::Result<()> {
     let mut file = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temporary)?;
     write!(file, r#"{{"v":1,"pid":{pid},"time":{time},"generation":{},"snapshot":{}}}"#, snapshot.generation, snapshot.json)?;
     file.sync_all()?;
+    if live.stopped() { return std::fs::remove_file(&temporary); }
     std::fs::rename(&temporary, store.join(name))?;
     let mut saved: Vec<(SystemTime, PathBuf)> = std::fs::read_dir(store)?.filter_map(Result::ok)
+        .take_while(|_| !live.stopped())
         .filter(|entry| entry.file_name().to_string_lossy().starts_with("inspect-"))
         .filter_map(|entry| Some((entry.metadata().ok()?.modified().ok()?, entry.path())))
         .collect();
     saved.sort();
     let surplus = saved.len().saturating_sub(INSPECT_KEEP);
-    for (_, path) in &saved[..surplus] { let _ = std::fs::remove_file(path); }
+    for (_, path) in &saved[..surplus] {
+        if live.stopped() { break; }
+        let _ = std::fs::remove_file(path);
+    }
     Ok(())
 }
 
-fn inspect_store_thread(directory: PathBuf, store: std::sync::Arc<InspectStore>) {
-    if !inspect_store_ready(&directory) { return; }
-    while let Some(snapshot) = store.next() {
-        let _ = inspect_save(&directory, &snapshot);
+fn inspect_store_thread(directory: &Path, store: &InspectStore) {
+    if !store.stopped() && inspect_store_ready(directory) {
+        while let Some(snapshot) = store.next() {
+            let _ = inspect_save(directory, &snapshot, store);
+        }
     }
+    store.end();
 }
 
 /// Listen for inspect requests at DIRECTORY/inspect.sock, and keep snapshots
 /// in STORE when given. DIRECTORY is private to this user (`romacs-mcp-start'
 /// checks it). A socket no one answers on is a dead session's and is replaced.
+// HOST(acquisition): a listening socket and its store
 pub fn inspect_listen(directory: &str, store: Option<&str>) -> io::Result<()> {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     use std::os::unix::net::{UnixListener, UnixStream};
@@ -3874,7 +4154,8 @@ pub fn inspect_listen(directory: &str, store: Option<&str>) -> io::Result<()> {
         Some(directory) => {
             let store = std::sync::Arc::<InspectStore>::default();
             let storing = store.clone();
-            std::thread::Builder::new().name("romacs-inspect-store".into()).spawn(move || inspect_store_thread(directory, storing))?;
+            std::thread::Builder::new().name("romacs-inspect-store".into())
+                .spawn(move || inspect_store_thread(&directory, &storing))?;
             Some(store)
         }
         None => None,
@@ -3886,13 +4167,21 @@ pub fn inspect_listen(directory: &str, store: Option<&str>) -> io::Result<()> {
 }
 
 /// Stop listening: the threads end and the socket goes, if it is still ours.
+/// The store's writer has ended when this returns, so its directory can be
+/// removed (a test's private state is, at once): it looks at its stop before
+/// each file call, and this waits for it at most [`INSPECT_STOP_WAIT`]. Past
+/// that, a file system stalled in the one call under way, this returns anyway;
+/// that call may still complete, and the writer then ends making nothing more
+/// (it removes its own unfinished temporary file).
+// HOST(acquisition): connects to the listener to wake it (a socket, rule 1: acquisition first),
+// then removes its file
 pub fn inspect_stop() {
     use std::os::unix::fs::MetadataExt;
     use std::sync::atomic::Ordering::SeqCst;
     let Some(listener) = inspect_lock(&INSPECT_LISTENER).take() else { return };
     INSPECT_ENABLED.store(false, SeqCst);
     listener.stop.store(true, SeqCst);
-    if let Some(store) = &listener.store { store.stop(); }
+    if let Some(store) = &listener.store { store.stop(INSPECT_STOP_WAIT); }
     // The accept loop looks at its flag once a connection wakes it.
     let _ = std::os::unix::net::UnixStream::connect(&listener.path);
     let ours = std::fs::symlink_metadata(&listener.path).is_ok_and(|meta| (meta.dev(), meta.ino()) == listener.identity);
@@ -3906,6 +4195,7 @@ pub fn inspect_stop() {
 ///
 /// # Errors
 /// An effect a build did not perform, or the keeper's own refusal, in words.
+// HOST(acquisition): a connection to the keeper
 pub fn keeper_attach(path: &Path) -> Result<romacs_keeper::Client, String> {
     effect(|| format!("keeper {}", bytes(path))).map_err(|e| e.to_string())?;
     romacs_keeper::Client::attach(path)
@@ -3915,6 +4205,7 @@ pub fn keeper_attach(path: &Path) -> Result<romacs_keeper::Client, String> {
 ///
 /// # Errors
 /// An effect a build did not perform, or no keeper of the same epoch there, in words.
+// HOST(acquisition): a connection to the keeper
 pub fn keeper_reconnect(client: &mut romacs_keeper::Client) -> Result<(), String> {
     effect(|| format!("keeper {}", bytes(client.path()))).map_err(|e| e.to_string())?;
     client.reconnect()
@@ -3926,6 +4217,7 @@ pub fn keeper_reconnect(client: &mut romacs_keeper::Client) -> Result<(), String
 /// # Errors
 /// An effect a build did not perform, the keeper's refusal of PROGRAM, or no keeper of the
 /// same epoch after it, in words.
+// HOST(acquisition): has the keeper exec in place, then reconnects to it (rule 1: acquisition first)
 pub fn keeper_exec(client: &mut romacs_keeper::Client, program: &Path) -> Result<(), String> {
     effect(|| format!("keeper {} exec {}", bytes(client.path()), bytes(program))).map_err(|e| e.to_string())?;
     client.exec(program)

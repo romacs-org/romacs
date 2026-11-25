@@ -423,14 +423,47 @@ pub(crate) fn buffer_name_shown(name: &str) -> std::borrow::Cow<'_, str> {
 /// its multibyte form (`octets_to_multibyte`): each byte above 127 grows
 /// to a two-byte raw character, and the runs stretch with it.
 pub(crate) fn widened_properties(from: &properties::Properties, octets: &[u8], base: usize, into: &mut properties::Properties) {
-    if from.is_empty() { return; }
-    let widths: Vec<usize> = std::iter::once(0).chain(octets.iter().scan(0, |at, &b| { *at += if b < 128 { 1 } else { 2 }; Some(*at) })).collect();
-    for (range, values) in from.runs(ByteOffset(0)..ByteOffset(octets.len())) {
-        let range = ByteOffset(base + widths[range.start.0])..ByteOffset(base + widths[range.end.0]);
-        for (key, value) in values {
-            into.put(range.clone(), key, value);
+    let _ = widened_properties_polled(from, octets, base, into, widened_widths(|| false));
+}
+
+/// Count widened octets with a shared budget across property runs and parts.
+pub(crate) fn widened_widths(mut stopped: impl FnMut() -> bool)
+    -> impl FnMut(&[u8]) -> std::result::Result<usize, crate::quit::Stopped> {
+    let mut left = crate::quit::KERNEL_CHUNK;
+    let mut steps = crate::quit::Steps::default();
+    move |mut octets| {
+        if steps.tick() && stopped() { return Err(crate::quit::Stopped); }
+        let mut width = octets.len();
+        while !octets.is_empty() {
+            if left == 0 {
+                if stopped() { return Err(crate::quit::Stopped); }
+                left = crate::quit::KERNEL_CHUNK;
+            }
+            let count = left.min(octets.len());
+            let (chunk, rest) = octets.split_at(count);
+            width += chunk.iter().filter(|&&byte| byte >= 128).count();
+            left -= count;
+            octets = rest;
         }
+        Ok(width)
     }
+}
+
+/// The destination may be partial if WIDTH stops with a quit pending.
+pub(crate) fn widened_properties_polled(
+    from: &properties::Properties, octets: &[u8], base: usize, into: &mut properties::Properties,
+    mut width: impl FnMut(&[u8]) -> std::result::Result<usize, crate::quit::Stopped>,
+) -> std::result::Result<(), crate::quit::Stopped> {
+    if from.is_empty() { return Ok(()); }
+    let mut start = base;
+    for (range, values) in from.runs(ByteOffset(0)..ByteOffset(octets.len())) {
+        let end = start + width(&octets[range.start.0..range.end.0])?;
+        for (key, value) in values {
+            into.put(ByteOffset(start)..ByteOffset(end), key, value);
+        }
+        start = end;
+    }
+    Ok(())
 }
 
 /// The objects that name a buffer, by index in `objects` (`Vm::referrers`).
@@ -814,8 +847,9 @@ impl Vm {
         let mut retained = if has_filename { fields.clone() } else { Default::default() };
         retained.retain_locals(&kept);
         let mut state = self.buffer_state(value)?.clone();
+        // HOST(pure): the buffer's own state, not a process
         state.kill();
-        self.resolved_buffer = None;
+        self.mutator.resolved_buffer = None;
         *self.objects.entry_mut(index) = match &self.objects[index] {
             Object::ByteBuffer(_) => Object::ByteBuffer(Box::new(bytes::ByteBuffer::empty(state, retained))),
             Object::Buffer(b) => {
@@ -838,9 +872,9 @@ impl Vm {
         start: usize,
         object: Value,
     ) -> Result<Value> {
-        let key = Key::of(self.stack[start + 1]).ok_or("symbol required")?;
+        let key = Key::of(self.mutator.stack[start + 1]).ok_or("symbol required")?;
         let at =
-            usize::try_from(self.stack[start].as_integer()?).map_err(|_| "index out of range")?;
+            usize::try_from(self.mutator.stack[start].as_integer()?).map_err(|_| "index out of range")?;
         if Self::image_string(object) {
             let text = self.string_value(object)?;
             if at <= text.chars().count() {
@@ -878,7 +912,7 @@ impl Vm {
     /// killed buffer signals. Resolved once per value of the slot.
     #[inline]
     pub(super) fn buffer_index(&mut self) -> Result<usize> {
-        if let Some((value, index)) = self.resolved_buffer
+        if let Some((value, index)) = self.mutator.resolved_buffer
             && value == self.slots[self.buffer_slot].value
         {
             #[cfg(any(test, debug_assertions))]
@@ -897,7 +931,7 @@ impl Vm {
         let v = self.slots[self.buffer_slot].value;
         self.require_live_buffer(v)?;
         let index = v.index(0)? - 1;
-        self.resolved_buffer = Some((v, index));
+        self.mutator.resolved_buffer = Some((v, index));
         Ok(index)
     }
     /// The record still says what resolving afresh would: a missed drop
@@ -910,7 +944,7 @@ impl Vm {
     }
     pub(super) fn ensure_buffer_writable(&mut self) -> Result<()> {
         self.buffer_index()?;
-        if self.change_prepared {
+        if self.mutator.change_prepared {
             return Ok(());
         }
         let read_only = self.slot("buffer-read-only");
@@ -952,8 +986,8 @@ impl Vm {
             return self.edge_primitive(p, start, n);
         }
         // editfns.c Fbuffer_size: a given BUFFER's whole text.
-        if p == BufferSize && n == 1 && self.stack[start] != Value::NIL {
-            return match self.object_if(self.stack[start]) {
+        if p == BufferSize && n == 1 && self.mutator.stack[start] != Value::NIL {
+            return match self.object_if(self.mutator.stack[start]) {
                 Some(Object::Buffer(t)) => Value::integer(t.len_chars() as i64),
                 Some(Object::ByteBuffer(b)) => Value::integer(b.bytes.len() as i64),
                 _ => Err("buffer required".into()),
@@ -1025,7 +1059,7 @@ impl Vm {
         }
         let mut inserted_properties = properties::Properties::new();
         let inserted = if p == Insert {
-            self.insertion_text(&self.stack[start..start + n].to_vec(), &mut inserted_properties)?
+            self.insertion_text(&self.mutator.stack[start..start + n].to_vec(), &mut inserted_properties)?
         } else {
             vec![]
         };
@@ -1069,7 +1103,7 @@ impl Vm {
                 t.point = t
                     .byte_of_char(CharOffset(c.min(t.len_chars())))?
                     .clamp(accessible.start, accessible.end);
-                Ok(self.stack[start])
+                Ok(self.mutator.stack[start])
             }
             CharAfter => {
                 let b = if let Some(b) = char_after_marker {
@@ -1173,7 +1207,7 @@ impl Vm {
             DeleteRegion | Substring | Narrow => &[0, 1],
             _ => &[],
         };
-        let mut args = self.stack[start..start + n].to_vec();
+        let mut args = self.mutator.stack[start..start + n].to_vec();
         for &slot in positions {
             if let Some(&value) = args.get(slot)
                 && matches!(self.object_if(value), Some(Object::Marker(_)))
@@ -1197,6 +1231,26 @@ impl Vm {
             _ => Err("bytes required".into()),
         }
     }
+    pub(crate) fn string_as_unibyte<const SCOPED: bool>(&mut self, value: Value) -> Result<Value> {
+        let view = self.str_view(value).ok_or("string required")?;
+        if !view.is_multibyte() { return Ok(value); }
+        let ascii = view.len() == view.bytes().len();
+        let bytes = match lstring::unibyte_octets(view, || self.kernel_stop_due::<SCOPED>()) {
+            Ok(bytes) => bytes,
+            Err(crate::quit::Stopped) => {
+                self.kernel_poll::<SCOPED>()?;
+                let view = self.str_view(value).ok_or("string required")?;
+                lstring::unibyte_octets(view, || false).unwrap_or_else(|_| unreachable!())
+            }
+        };
+        let object = if ascii {
+            data::string_object(data::LispString::from_ascii(bytes, false))
+        } else {
+            Object::Bytes(bytes)
+        };
+        Ok(self.allocate_object(object))
+    }
+
     fn edge_primitive(&mut self, p: Primitive, start: usize, n: usize) -> Result<Value> {
         use Primitive::*;
         if matches!(p, EncodeBufferUtf8 | DecodeBufferUtf8) {
@@ -1206,7 +1260,7 @@ impl Vm {
             return self.convert_buffer_utf8(p == DecodeBufferUtf8);
         }
         if p == ByteString {
-            let b = self.stack[start..start + n]
+            let b = self.mutator.stack[start..start + n]
                 .iter()
                 .map(|v| u8::try_from(v.as_integer()?).map_err(|_| "invalid octet".into()))
                 .collect::<Result<Vec<_>>>()?;
@@ -1215,8 +1269,11 @@ impl Vm {
         if n != if p == BufferString { 0 } else { 1 } {
             return Err("wrong primitive arity".into());
         }
-        if matches!(p, EncodeUtf8 | DecodeUtf8 | StringToBytes | IsMultibyte) {
-            let v = self.stack[start];
+        if p == EncodeUtf8 {
+            return self.string_as_unibyte::<false>(self.mutator.stack[start]);
+        }
+        if matches!(p, DecodeUtf8 | StringToBytes | IsMultibyte) {
+            let v = self.mutator.stack[start];
             if p == IsMultibyte {
                 return Ok(if self.str_view(v).is_some_and(|view|view.is_multibyte()) { Value::TRUE } else { Value::NIL });
             }
@@ -1227,23 +1284,13 @@ impl Vm {
                 return Ok(self.make_lisp_string(bytes, true));
             }
             if !view.is_multibyte() { return Ok(v); }
-            let b = if p == StringToBytes {
-                let mut bytes = Vec::with_capacity(view.len());
-                for (index, code) in view.chars().enumerate() {
-                    let byte = if code > lstring::MAX_5_BYTE_CHAR { code - lstring::BYTE8_OFFSET } else { code };
-                    if code >= 128 && code <= lstring::MAX_5_BYTE_CHAR { return Err(format!("Cannot convert character at index {index} to unibyte")); }
-                    bytes.push(byte as u8);
-                }
-                bytes
-            } else {
-                let mut bytes = Vec::new();
-                for code in view.chars() {
-                    if code > lstring::MAX_5_BYTE_CHAR { bytes.push((code-lstring::BYTE8_OFFSET) as u8); }
-                    else { let mut encoded=[0;5]; let n=lstring::char_string(code,&mut encoded); bytes.extend_from_slice(&encoded[..n]); }
-                }
-                bytes
-            };
-            return Ok(self.allocate_object(data::unibyte_object(b)));
+            let mut bytes = Vec::with_capacity(view.len());
+            for (index, code) in view.chars().enumerate() {
+                let byte = if code > lstring::MAX_5_BYTE_CHAR { code - lstring::BYTE8_OFFSET } else { code };
+                if code >= 128 && code <= lstring::MAX_5_BYTE_CHAR { return Err(format!("Cannot convert character at index {index} to unibyte")); }
+                bytes.push(byte as u8);
+            }
+            return Ok(self.allocate_object(data::unibyte_object(bytes)));
         }
         let index = self.buffer_index()?;
         if p == BufferString {
@@ -1266,14 +1313,14 @@ impl Vm {
             if n != 1 {
                 return Err("wrong primitive arity".into());
             }
-            let args = self.stack[start..start + n].to_vec();
+            let args = self.mutator.stack[start..start + n].to_vec();
             let result = self.byte_buffer_primitive(InsertFileBytes, start, n, index, &args);
             if result.is_ok() {
                 self.display_state.version += 1;
             }
             return result;
         }
-        self.convert_buffer_utf8(self.stack[start] != Value::NIL)
+        self.convert_buffer_utf8(self.mutator.stack[start] != Value::NIL)
     }
     fn convert_buffer_utf8(&mut self, text: bool) -> Result<Value> {
         let index = self.buffer_index()?;
@@ -1448,7 +1495,7 @@ impl Vm {
         }).collect::<Result<Vec<Value>>>()?;
         let mut grafted = Default::default();
         let inserted = if p == Insert {
-            let (bytes, properties) = self.unibyte_insertion(&self.stack[start..start + n])?;
+            let (bytes, properties) = self.unibyte_insertion(&self.mutator.stack[start..start + n])?;
             grafted = properties;
             bytes
         } else if p == InsertFileBytes {
@@ -1481,7 +1528,7 @@ impl Vm {
             GotoChar => {
                 b.point = ByteOffset(args[0].as_integer()?.saturating_sub(1).max(0) as usize)
                     .clamp(r.start, r.end);
-                Ok(self.stack[start])
+                Ok(self.mutator.stack[start])
             }
             CharAfter => {
                 let at = if n == 0 || args[0] == Value::NIL {
@@ -1846,7 +1893,7 @@ mod tests {
         // those legitimate roots before asserting unreachable graph reclamation.
         vm.functions.clear();
         vm.caches.clear();
-        vm.execution = Default::default();
+        vm.mutator_rest.execution = Default::default();
         vm.collect(&mut []);
         assert_eq!(vm.heap_objects(), 0);
     }

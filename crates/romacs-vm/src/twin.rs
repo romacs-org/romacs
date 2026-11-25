@@ -142,6 +142,7 @@ fn child(vm: &mut Vm, write: OwnedFd, work: impl FnOnce(&mut Vm) -> Result<Vec<u
         Ok(report) => report,
         Err(text) => [b"NO".as_slice(), text.as_bytes()].concat(),
     };
+    // HOST(escape): writes to the twin's pipe
     let _ = std::fs::File::from(write).write_all(&bytes);
     crate::host::exit_at_once(0)
 }
@@ -388,6 +389,7 @@ fn settle(vm: &Vm, mut pending: Pending, deadline: Duration) -> Result<Agreed, S
 pub(crate) fn check(vm: &mut Vm, pending: Pending) {
     let collection = pending.collection;
     match settle(vm, pending, DEADLINE) {
+        // HOST(escape): stdout and stderr are sends another process reads
         Ok(Agreed { live, dead, kept_m8, kept_via, rounds, bound_rounds, bound_us, child_us }) => eprintln!("{}", serde_json::json!({
             "twin": "agreed", "collection": collection, "live": live, "dead": dead, "kept_m8": kept_m8, "kept_via": kept_via,
             "rounds": rounds, "bound_rounds": bound_rounds, "bound_us": bound_us, "child_us": child_us})),
@@ -397,6 +399,7 @@ pub(crate) fn check(vm: &mut Vm, pending: Pending) {
 
 /// The process ends: its twin and its collector disagreed about WHAT.
 fn diverged(collection: u64, what: &str) -> ! {
+    // HOST(escape): stdout and stderr are sends another process reads
     eprintln!("{}", serde_json::json!({"twin": "diverged", "collection": collection, "what": what}));
     crate::host::exit_at_once(DIVERGED)
 }

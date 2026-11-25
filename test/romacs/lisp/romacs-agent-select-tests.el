@@ -288,11 +288,14 @@
   (romacs-agent-select-tests--with (:options '(:model "a" :effort "low") :state 'idle)
     (let ((romacs-agent-providers '(("claude")))
           (romacs-agent-models '((claude ("a" :efforts ("low" "high") :default-effort "low") ("b" :efforts ("max")))))
+          (romacs-agent--sessions (make-hash-table :test #'equal))
           (asked nil))
+      (puthash (romacs-agent-id session) session romacs-agent--sessions)
       (cl-letf (((symbol-function 'romacs-agent--models-kept) #'ignore)
                 ((symbol-function 'romacs-agent--want-models) #'ignore))
        (with-temp-buffer
-        (setq romacs-agent-ui--session session romacs-agent-log--session session)
+        (setq romacs-agent-ui--session session romacs-agent-log--session session
+              romacs-agent-log--session-id (romacs-agent-id session))
         (should (equal (romacs-agent-menu--effort-label) "Effort: low"))
         ;; The efforts of the model it runs, what runs offered first.
         (cl-letf (((symbol-function 'completing-read)
@@ -312,11 +315,13 @@
         (should (equal (plist-get (romacs-agent-ui--header-inputs session) :effort) "low"))
         (setf (romacs-agent-model session) "a"
               (romacs-agent-driver-state session) '(:reported-effort ("a" . "high")))
+        (romacs-agent--changed session)
         (should (equal (romacs-agent-menu--effort-label) "Effort: high (default)"))
         (should (equal (plist-get (romacs-agent-ui--header-inputs session) :effort) "high"))
         (setf (romacs-agent-options session) '(:model "a" :effort "high"))
         ;; One armed behind a turn shows what is to come.
         (setf (romacs-agent-pending-selection session) (list :state 'armed :model "b" :effort "max"))
+        (romacs-agent--changed session)
         (should (equal (romacs-agent-menu--effort-label) "Effort: high → max"))
         ;; The menu's values in one style, never a level's colour there
         ;; (max's would read as an error); the header keeps each level's.
