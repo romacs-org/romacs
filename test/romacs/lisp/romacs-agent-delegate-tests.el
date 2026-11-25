@@ -128,6 +128,19 @@ recorded in a private directory; `delivered' collects what wakes it."
       (should delivered)
       (should-not (file-exists-p mark)))))
 
+(ert-deftest romacs-agent-delegate-a-kept-account-move-pays-the-owed-end ()
+  (romacs-agent-delegate-tests--family ((a nil))
+    (let ((mark (expand-file-name (format "%s.owed" (romacs-agent-id a)) (romacs-agent--marks-dir)))
+          (limited '(:provider "claude"))
+          (kept nil))
+      (romacs-agent-delegate-tests--end a 5 "At its limit" t)
+      (should (file-exists-p mark))
+      (romacs-agent-tools--moved a "claude" "claude2" limited (lambda (then) (setq kept then)))
+      (should (file-exists-p mark))
+      (funcall kept '(ok nil))
+      (should (file-exists-p (expand-file-name "answered" (romacs-agent-dir a))))
+      (should-not (file-exists-p mark)))))
+
 (ert-deftest romacs-agent-delegate-ends-together-wake-once ()
   (romacs-agent-delegate-tests--family ((a nil) (b nil))
     (romacs-agent-delegate-tests--end a 5 "A done")
@@ -215,6 +228,26 @@ recorded in a private directory; `delivered' collects what wakes it."
                          (romacs-mcp--object "taskId" (romacs-agent-id a) "requestId" "q1"))
                         :type 'user-error))))))
 
+(ert-deftest romacs-agent-delegate-withdrawal-and-exit-forget-asked-parents ()
+  (romacs-agent-delegate-tests--family ((a nil) (b nil))
+    (let ((romacs-agent-tools--asked-parents (make-hash-table :test #'equal)))
+      (cl-letf (((symbol-function 'romacs-agent--live-p) (lambda (_) t)))
+        (dolist (task (list a b))
+          (romacs-agent--deliver-record-events
+           task (romacs-agent--apply-record-events
+                 task '((:type approval :request-id "q" :approval-wire t :user t :questions (("Which one?")))))
+           1 0))
+        (let ((key-a (cons (romacs-agent-id a) "q")) (key-b (cons (romacs-agent-id b) "q")))
+          (should (gethash key-a romacs-agent-tools--asked-parents))
+          (should (gethash key-b romacs-agent-tools--asked-parents))
+          (romacs-agent--deliver-record-events
+           a (romacs-agent--apply-record-events a '((:type approval-withdrawn :request-id "q"))) 2 0)
+          (should-not (gethash key-a romacs-agent-tools--asked-parents))
+          (should (gethash key-b romacs-agent-tools--asked-parents))
+          (romacs-agent--deliver-record-events
+           b (romacs-agent--apply-record-events b '((:type exit :status 0))) 2 0)
+          (should-not (gethash key-b romacs-agent-tools--asked-parents)))))))
+
 (ert-deftest romacs-agent-delegate-a-coordinator-s-held-end-goes-when-its-task-ends-quietly ()
   ;; Its task ends quietly, waking it not: the coordinator runs no turn
   ;; after it, so its held end is its task's, and goes to its parent.
@@ -251,6 +284,21 @@ recorded in a private directory; `delivered' collects what wakes it."
       (should (equal (mapcar (lambda (w) (plist-get w :result)) (romacs-agent-tools--wakes-parse (car delivered)))
                      '("delegated again")))
       (delete-directory (romacs-agent-dir writer) t))))
+
+(ert-deftest romacs-agent-delegate-a-detached-task-holds-its-coordinators-end-until-stop ()
+  (romacs-agent-delegate-tests--family ((a nil) (b nil))
+    (setf (romacs-agent-options b) (list :parent (romacs-agent-id a)))
+    (romacs-agent--index b)
+    (romacs-agent-ui--summarize-children a)
+    (romacs-agent-delegate-tests--end a 5 "coordinated")
+    (should (gethash a romacs-agent-tools--held))
+    (setf (romacs-agent-state b) 'detached)
+    (romacs-agent--raise b '(:type status :text "detached"))
+    (romacs-agent-tools--flush parent)
+    (should-not delivered)
+    (romacs-agent-stop b)
+    (romacs-agent-tools--flush parent)
+    (should (equal (plist-get (romacs-agent-tools--wake-parse (car delivered)) :result) "coordinated"))))
 
 (ert-deftest romacs-agent-delegate-a-starting-task-queues ()
   ;; Its harness not up yet: a message waits, and says so.
@@ -416,6 +464,15 @@ message's record for TEXT, `interrupted' each interrupted."
     (cl-letf (((symbol-function 'romacs-agent-interrupt) (lambda (_) (user-error "No turn to interrupt yet"))))
       (should (equal (gethash "delivery" (send a "again" "interrupt")) "queued")))))
 
+(ert-deftest romacs-agent-delegate-send-reports-a-discarded-steer ()
+  (romacs-agent-delegate-tests--sending parent
+    (should (eq (romacs-agent-tools--tell a "expired" 'steer #'ignore) 'discarded))
+    (cl-letf (((symbol-function 'romacs-agent--encodable-p) #'ignore))
+      (should (equal (gethash "delivery" (send a "unencodable" "steer")) "discarded")))
+    (should-not (romacs-agent-queue a))
+    (should-not written)
+    (ignore #'drain)))
+
 (ert-deftest romacs-agent-delegate-send-steer-is-a-flag ()
   ;; steer true: into the running turn at once; false: queued; with
   ;; another mode, refused; mode steer, as it was, still steers.
@@ -465,6 +522,16 @@ message's record for TEXT, `interrupted' each interrupted."
     (dotimes (_ 3) (drain a))
     ;; Only what replaced them went.
     (should (equal (mapcar #'cdr written) '("three")))))
+
+(ert-deftest romacs-agent-delegate-an-admitted-replace-is-queued-after-write-error ()
+  (romacs-agent-delegate-tests--sending parent
+    (send a "stale")
+    (setf (romacs-agent-state a) 'idle)
+    (cl-letf (((symbol-function 'romacs-agent--input) (lambda (&rest _) (error "Write failed"))))
+      (should (equal (gethash "delivery" (send a "replacement" "replace")) "queued")))
+    (should (equal (mapcar #'romacs-agent-item-text (romacs-agent-queue a)) '("replacement")))
+    (drain a)
+    (should (equal (mapcar #'cdr written) '("replacement")))))
 
 (ert-deftest romacs-agent-delegate-a-replace-writes-none-it-replaces ()
   ;; Its turn over, its drain not yet run: a replace goes in place of what

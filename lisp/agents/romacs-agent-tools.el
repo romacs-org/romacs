@@ -153,7 +153,7 @@ call stays running until its answer is ready."
                                (when answer (romacs-agent-tools--finish session key name start (car answer) nil))
                                answer)
                            (unless ok (romacs-agent-tools--finish session key name start "signalled an error" t)))))
-                     (nth 2 value)))
+                     (nth 2 value) (nth 3 value)))
                 (romacs-agent-tools--finish session key name start value nil)
                 value))
           (unless done (romacs-agent-tools--finish session key name start "signalled an error" t)))))))
@@ -323,6 +323,8 @@ it only on failure, or never, may end and leave it asleep."
              (when-let* ((id (plist-get row :id)) (child (romacs-agent-summary id)))
                (and (member (or (romacs-agent-summary-wake-rule child) "end") '("end" "all"))
                     (or (member (romacs-agent-tools--status child) '("running" "waiting"))
+                        (and (eq (romacs-agent-summary-state child) 'detached)
+                             (not (romacs-agent-summary-cancelled child)))
                         ;; Ended, its end not yet in this session's harness.
                         (romacs-agent-summary-undelivered child)))))
            (romacs-agent-summary-children-rows summary)))
@@ -1036,7 +1038,9 @@ its parent again."
   "SESSION, a delegated task, stopped, ended or was cancelled (EVENT):
 its parent's end held while it worked may go now
 \(`romacs-agent-tools--release-held')."
-  (when-let* (((memq (plist-get event :type) '(exit status)))
+  (when-let* (((or (eq (plist-get event :type) 'exit)
+                   (and (eq (plist-get event :type) 'status)
+                        (member (plist-get event :text) '("stopped" "cancelled")))))
               (parent-id (plist-get (romacs-agent-options session) :parent))
               (parent (romacs-agent-loaded parent-id))
               ((gethash parent romacs-agent-tools--held)))
@@ -1106,13 +1110,18 @@ a turn of its own, nothing sent again."
 (defvar romacs-agent-tools--asked-parents (make-hash-table :test #'equal)
   "(TASK-ID . REQUEST-ID) its parent was told of this process: once.")
 
+(defun romacs-agent-tools--forget-ask (session request-id)
+  "Forget SESSION's notice to its parent about REQUEST-ID."
+  (let ((id (romacs-agent-id session)))
+    (when (eq (romacs-agent-loaded id) session)
+      (remhash (cons id request-id) romacs-agent-tools--asked-parents))))
+
 (defun romacs-agent-tools--ask-parent (session event)
   "Tell SESSION's parent the request EVENT, live, that waits on SESSION's
 user, once, unless SESSION's rule wakes no one or the parent is settled
-\(the user sees it in SESSION's chat): dropped once it is answered.  A
-request answered or withdrawn is forgotten here too."
-  (when (memq (plist-get event :type) '(answered approval-withdrawn))
-    (remhash (cons (romacs-agent-id session) (plist-get event :request-id)) romacs-agent-tools--asked-parents))
+\(the user sees it in SESSION's chat): dropped once it is answered."
+  (when (eq (plist-get event :type) 'answered)
+    (romacs-agent-tools--forget-ask session (plist-get event :request-id)))
   (when-let* (((eq (plist-get event :type) 'approval))
               (parent-id (plist-get (romacs-agent-options session) :parent))
               ((romacs-agent--live-p session))
@@ -1468,17 +1477,16 @@ is asked before a waiting message goes: nil drops it.  MESSAGES, when
 given, say it comes from other sessions (`romacs-agent--input').  Its
 next turn end wakes its parent by its wake rule, as its first did.  An
 empty TEXT sends nothing.  Return how it went (`romacs-agent-tools--delivery'),
-`queued' for an interrupt the turn could not take yet; nil for nothing sent."
+`queued' for an interrupt the turn could not take yet, `discarded' for a
+rejected steer, and nil for empty text."
   (romacs-agent-tools--check-message-target child)
   (unless (string-empty-p (string-trim text))
     (pcase (romacs-agent-tools--delivery child mode)
       ('steered
-       ;; Into the turn only when it was written there now (a Codex turn
-       ;; named, no switch pending); else it waits, as queued.
        (let ((item (romacs-agent-send child text nil valid nil messages)))
-         (if (or (not (memq item (romacs-agent-queue child)))
-                 (memq (romacs-agent-item-held item) '(sending written)))
-             'steered 'queued)))
+         (cond ((eq (romacs-agent-item-held item) 'written) 'steered)
+               ((memq item (romacs-agent-queue child)) 'queued)
+               (t 'discarded))))
       ('interrupting
        ;; First in line before the cut: a turn not yet under way
        ;; (Codex's before it names it) cannot be cut, and it goes after.
@@ -1623,7 +1631,14 @@ and the message's id."
         (let ((romacs-agent-tools--replacing target))
           (setq delivery (romacs-agent-tools--tell target text (intern mode) nil (list message)))
           (dolist (item replaced) (romacs-agent--dequeue target item)))
-        (romacs-agent--dispatch target)))
+        (condition-case err
+            (romacs-agent--dispatch target)
+          (error
+           (unless (cl-some (lambda (item) (memq message (romacs-agent-item-messages item)))
+                            (romacs-agent-queue target))
+             (signal (car err) (cdr err)))
+           (setq delivery 'queued)
+           (romacs-agent--raise target (list :type 'error :text (error-message-string err)))))))
     ;; Text no harness takes is never copied: it would ride every wake after.
     (when (and (equal kind "sibling") (romacs-agent--encodable-p (romacs-agent-item text)))
       (let ((parent (plist-get (romacs-agent-options target) :parent)))
@@ -2142,7 +2157,8 @@ one, and kept so once its continuation is (KEPT, as
       (funcall (or kept (lambda (then) (funcall then '(ok nil))))
                (lambda (answer)
                  (when (eq (car answer) 'ok)
-                   (dolist (seq seqs) (romacs-agent-tools--write-answered session seq))))))))
+                   (dolist (seq seqs) (romacs-agent-tools--write-answered session seq))
+                   (romacs-agent-tools--owed-paid session)))))))
 
 (add-hook 'romacs-agent-moved-functions #'romacs-agent-tools--moved)
 

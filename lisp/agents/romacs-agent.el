@@ -2256,10 +2256,13 @@ harness's, the one EVENT names when it does (`romacs-agent-switch-harness')."
                    (format "the harness exited (%s) before its turn ended" (plist-get event :status)))
         :seq (or (plist-get event :seq) 0)))
 
+(declare-function romacs-agent-tools--forget-ask "romacs-agent-tools" (session request-id))
+
 (defun romacs-agent--apply-exit-event (session event)
   "End SESSION's run from EVENT and keep any failed turn for its parent."
   (setf (romacs-agent-driver-state session) (romacs-agent--driver-anew session)
         (romacs-agent-startup-pending session) nil)
+  (maphash (lambda (id _) (romacs-agent-tools--forget-ask session id)) (romacs-agent-approvals session))
   (clrhash (romacs-agent-approvals session))
   (let ((transition (romacs-agent--exit-transition event (romacs-agent-state session)
                                                    (romacs-agent-input-seq session)
@@ -2613,7 +2616,9 @@ SESSION owns the bookkeeping.  NEXT names the parent of a streamed delta."
            (romacs-agent--without event '(:approval-wire)))
        event))
     ('approval-withdrawn
-     (remhash (plist-get event :request-id) (romacs-agent-approvals session))
+     (let ((id (plist-get event :request-id)))
+       (remhash id (romacs-agent-approvals session))
+       (romacs-agent-tools--forget-ask session id))
      nil)
     ('answered
      (remhash (plist-get event :request-id) (romacs-agent-approvals session))
@@ -6361,12 +6366,11 @@ REAPED: its task is done and it only sleeps (`romacs-agent-reaped-p'); it
 reads idle, and its next message resumes it."
   (unless reaped (romacs-agent-watch-stop session))
   (romacs-agent--set-stopped session (if reaped 'reaped t))
-  (unless reaped
-    (unless (or (process-live-p (romacs-agent-connection session))
+  (prog1 (romacs-agent--stop-harness session)
+    (unless (or reaped (process-live-p (romacs-agent-connection session))
                 (eq (romacs-agent-state session) 'starting))
       (setf (romacs-agent-state session) 'ended)
-      (romacs-agent--changed session)))
-  (romacs-agent--stop-harness session))
+      (romacs-agent--raise session (list :type 'status :text "stopped")))))
 
 (defun romacs-agent--stop-harness (session)
   "Stop SESSION's current harness without changing its stop or watch records."
