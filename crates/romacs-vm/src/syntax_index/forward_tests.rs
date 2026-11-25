@@ -286,34 +286,35 @@ fn indexed(index: &mut SyntaxIndex, text: &[u8], table: &[i32; 128], (polls, don
     index.scan_lists(&mut scanner, text.len(), context, resume, (call.from, call.count, call.depth), call.sexpflag)
 }
 
-/// A cold scan whose quit probe comes due right after its first fold, the
-/// fold whose leaf summary it made then: the run publishes nothing. Its
-/// counters are as they were but for the quit, it goes on from where it
-/// stopped to the scanner's value, and the next scan makes every summary
-/// a scan that never stopped makes, that first one included.
+/// A cold scan whose quit probe comes due right after its first fold:
+/// every probe is a commit point, so what the run built before the stop
+/// stays, and the index then equals an uninterrupted run's. The stopped
+/// run keeps its fold and its summaries, goes on from where it stopped to
+/// the scanner's value, and ends with the leaves, summaries and folds a
+/// scan that never stopped makes; a warm scan after either reuses as much.
 #[test]
-fn a_quit_after_building_a_fold_publishes_nothing() {
+fn a_stopped_run_keeps_what_it_built() {
     let text = format!("({})", "x".repeat(200));
     let (text, table) = (text.as_bytes(), lists_table());
     let call = Call { from: 1, count: 1, depth: 0, sexpflag: true };
     let mut control = SyntaxIndex { leaf: 16, ..SyntaxIndex::default() };
     let expected = indexed(&mut control, text, &table, (None, None), None, call).ok();
     let mut index = SyntaxIndex { leaf: 16, ..SyntaxIndex::default() };
-    let before = index.stats;
     // The probe's first call is on entry, its second after the first fold.
     let stopped = indexed(&mut index, text, &table, (Some(2), None), None, call);
     let Err(Stopped { halt: Halt::Poll, suspended: Some(scan) }) = stopped else { panic!("a poll after the first fold") };
     assert!(scan.from.char > 16, "the scan stopped after its first fold, at {}", scan.from.char);
-    let after = index.stats;
-    assert_eq!((after.leaf_scans, after.folds, after.skipped, after.list_served), (before.leaf_scans, before.folds, before.skipped, before.list_served),
-               "the stopped run's counts are dropped");
-    assert_eq!(after.list_declined[Decline::Quit as usize], before.list_declined[Decline::Quit as usize] + 1);
+    assert_eq!((index.stats.folds.iter().sum::<u64>(), index.stats.leaf_scans), (1, 1), "the fold and its summary stay");
+    assert_eq!(index.stats.list_declined[Decline::Quit as usize], 1);
     assert_eq!(indexed(&mut index, text, &table, (None, None), Some(*scan), call).ok(), expected, "it goes on where it stopped");
-    let mut again = SyntaxIndex { leaf: 16, ..SyntaxIndex::default() };
-    indexed(&mut again, text, &table, (Some(2), None), None, call).ok();
-    let scans = again.stats.leaf_scans;
-    indexed(&mut again, text, &table, (None, None), None, call).ok();
-    assert_eq!(again.stats.leaf_scans - scans, control.stats.leaf_scans, "the stopped run's summary is made again");
+    let state = |index: &SyntaxIndex| (index.leaves(), index.stats.leaf_scans, index.stats.folds, index.stats.skipped, index.unsafe_cuts());
+    assert_eq!(state(&index), state(&control), "leaves, summaries, folds and cuts as if it never stopped");
+    let warm = |index: &mut SyntaxIndex| {
+        let (scans, skipped) = (index.stats.leaf_scans, index.stats.skipped);
+        indexed(index, text, &table, (None, None), None, call).ok();
+        (index.stats.leaf_scans - scans, index.stats.skipped - skipped)
+    };
+    assert_eq!(warm(&mut index), warm(&mut control), "a warm scan reuses as much after either");
 }
 
 /// The fields of a forward scan's continuation the scanner reads next.
@@ -412,6 +413,23 @@ fn a_fifth_table_takes_the_least_recently_used_slot() {
     for k in 0..4 { scan(&mut index, &text, k, 0); }
     assert_eq!(scan(&mut index, &text, 0, 0), 0, "table 0 warm");
     assert_eq!(index.stats.context_evictions, 0);
+    // A fifth table's run a poll stops evicts and counts as a completed
+    // one: copies of the index, one stopped, one run through, agree.
+    let (mut stopped, mut completed) = (index.clone_for_test(), index.clone_for_test());
+    {
+        let properties = vec![None; text.len()];
+        let live = Live { text: &text, table: &tables[4], properties: &properties, polls: Some(2), steps: Cell::new(0), held: Cell::new(false) };
+        let mut scanner = Scanner { begv: live.pos(1), zv: live.pos(i64::MAX), text: &live, options: Options::default(), ppss: &ppss, defun_start: None, modiff: 1 };
+        let context = Context { table: 5, writes: 0, escaped_ends: false, properties: false };
+        let run = stopped.scan_lists(&mut scanner, text.len(), context, None, (call.from, call.count, call.depth), true);
+        assert!(matches!(run, Err(Stopped { halt: Halt::Poll, .. })), "the fifth table's run stops for a poll");
+    }
+    scan(&mut completed, &text, 4, 0);
+    assert_eq!((stopped.stats.context_evictions, stopped.stats.switches), (completed.stats.context_evictions, completed.stats.switches),
+               "evicted and counted as a completed run");
+    assert_eq!(stopped.unsafe_cuts().map(|cuts| cuts.is_some()), completed.unsafe_cuts().map(|cuts| cuts.is_some()), "the same slots taken");
+    assert_eq!(scan(&mut stopped, &text, 0, 0), scan(&mut completed, &text, 0, 0), "table 0 kept alike");
+    assert_eq!(scan(&mut stopped, &text, 1, 0) > 0, scan(&mut completed, &text, 1, 0) > 0, "table 1 gone alike");
     assert!(scan(&mut index, &text, 4, 0) > 0, "table 4 cold");
     assert_eq!(index.stats.context_evictions, 1);
     assert_eq!(scan(&mut index, &text, 0, 0), 0, "table 0, used again before table 4 came, keeps its summaries");

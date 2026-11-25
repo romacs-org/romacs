@@ -284,6 +284,14 @@ impl Default for SyntaxIndex {
                stats: Stats::default() }
     }
 }
+#[cfg(test)]
+impl SyntaxIndex {
+    /// A copy with its summaries, which `Clone` does not keep.
+    pub(crate) fn clone_for_test(&self) -> Self {
+        Self { leaf: self.leaf, root: self.root.clone(), contexts: self.contexts.clone(), tick: self.tick, current: self.current,
+               stamp: self.stamp, aborted: self.aborted.clone(), stats: self.stats }
+    }
+}
 impl Clone for SyntaxIndex {
     /// A copy of a text starts without summaries, as a cache does.
     fn clone(&self) -> Self {
