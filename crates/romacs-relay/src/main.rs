@@ -389,8 +389,9 @@ fn login_name() -> String {
 }
 
 /// The variables naming where the service's sockets and state are: given
-/// to the unit as this relay has them, so the service it starts listens
-/// where this relay looks, whatever the user manager's own say.
+/// to the unit as this relay has them, set or unset, so the service it
+/// starts listens where this relay looks, whatever the user manager's own
+/// say.
 const SERVICE_PLACES: [&str; 5] = ["XDG_RUNTIME_DIR", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"];
 
 /// The `romacs-vm-gui` beside this relay, as it was invoked (a `current`
@@ -404,56 +405,74 @@ fn vm_beside_relay() -> Result<PathBuf, String> {
 }
 
 /// The command that starts the headless service on VM as a user unit, with
-/// PLACES, each `NAME=VALUE`.
-fn start_command(vm: &Path, places: &[String]) -> Vec<String> {
+/// PLACES, each a name and its value, or none to unset it.
+fn start_command(vm: &Path, places: &[(&str, Option<String>)]) -> Vec<String> {
     let mut command: Vec<String> = ["systemd-run", "--user", "--quiet", &format!("--unit={SERVICE_UNIT}"), "-p", "Restart=on-failure"]
         .map(str::to_owned).to_vec();
-    command.extend(places.iter().map(|place| format!("--setenv={place}")));
+    command.extend(places.iter().map(|(name, value)| match value {
+        Some(value) => format!("--setenv={name}={value}"),
+        None => format!("--property=UnsetEnvironment={name}"),
+    }));
     command.extend([vm.to_string_lossy().into_owned()]);
     command.extend(["--batch", "-l", "romacs-agent-headless", "-f", "romacs-agent-headless-run"].map(str::to_owned));
     command
 }
 
-/// What COMMAND says on stderr, run within `DEADLINE`, or why it gave none.
-fn run_within(command: Vec<String>) -> String {
-    let program = command[0].clone();
-    within(DEADLINE, move || {
-        std::process::Command::new(&command[0]).args(&command[1..]).stdin(std::process::Stdio::null()).output().ok()
-    })
-    .map_or_else(|| format!("{program}: no answer within {} s", DEADLINE.as_secs()),
-                 |output| String::from_utf8_lossy(&output.stderr).trim().to_owned())
+/// What COMMAND says on stderr, run within `DEADLINE`: past it, killed and
+/// reaped, and that said.
+fn run_within(command: &[String]) -> String {
+    let child = std::process::Command::new(&command[0]).args(&command[1..])
+        .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped()).spawn();
+    let mut child = match child { Ok(child) => child, Err(error) => return format!("{}: {error}", command[0]) };
+    let begun = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if begun.elapsed() < DEADLINE => std::thread::sleep(Duration::from_millis(20)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return format!("{}: no answer within {} s", command[0], DEADLINE.as_secs());
+            }
+        }
+    }
+    let mut said = String::new();
+    if let Some(mut stderr) = child.stderr.take() { let _ = stderr.read_to_string(&mut said); }
+    said.trim().to_owned()
 }
 
 /// Start the headless service's unit; a unit failed before is reset first,
 /// and one there already is left to come up.  What systemd said, for when
 /// the service never answers.
 fn start_service() -> Result<String, String> {
-    let places: Vec<String> = SERVICE_PLACES.iter()
-        .filter_map(|name| std::env::var(name).ok().map(|value| format!("{name}={value}"))).collect();
+    let places: Vec<(&str, Option<String>)> = SERVICE_PLACES.iter().map(|name| (*name, std::env::var(name).ok())).collect();
     let command = start_command(&vm_beside_relay()?, &places);
-    run_within(["systemctl", "--user", "reset-failed", SERVICE_UNIT].map(str::to_owned).to_vec());
-    Ok(run_within(command))
+    run_within(&["systemctl", "--user", "reset-failed", SERVICE_UNIT].map(str::to_owned));
+    Ok(run_within(&command))
 }
 
-/// A connection to SERVICE, made within `DEADLINE` (a listener whose
-/// backlog is full makes a connect wait), or none.
-fn connect_within(service: &Path) -> Option<UnixStream> {
+/// A connection to SERVICE, made within LIMIT (a listener whose backlog
+/// is full makes a connect wait), or none.
+fn connect_within(service: &Path, limit: Duration) -> Option<UnixStream> {
     let service = service.to_owned();
-    within(DEADLINE, move || UnixStream::connect(service).ok())
+    within(limit, move || UnixStream::connect(service).ok())
 }
 
 /// A connection to the service at SERVICE: at once, or, when START is
 /// given and nothing answers, after START has started it, waited for
 /// `START_WAIT` at most, what it does told on stderr.
 fn reach_service(service: &Path, start: Option<&dyn Fn() -> Result<String, String>>) -> Result<UnixStream, String> {
-    if let Some(stream) = connect_within(service) { return Ok(stream) }
+    // One deadline for all of it: each connect gets what is left of it.
+    let begun = Instant::now();
+    let left = || START_WAIT.saturating_sub(begun.elapsed());
+    if let Some(stream) = connect_within(service, DEADLINE.min(left())) { return Ok(stream) }
     let Some(start) = start else { return Err(format!("{}: no agents service answers there", service.display())) };
     eprintln!("romacs-relay: no agents service at {}: starting the user unit {SERVICE_UNIT}", service.display());
-    let begun = Instant::now();
     let said = start()?;
-    while begun.elapsed() < START_WAIT {
-        if let Some(stream) = connect_within(service) { return Ok(stream) }
-        std::thread::sleep(Duration::from_millis(50));
+    while !left().is_zero() {
+        if let Some(stream) = connect_within(service, DEADLINE.min(left())) { return Ok(stream) }
+        std::thread::sleep(Duration::from_millis(50).min(left()));
     }
     Err(format!("{}: the agents service did not answer within {} s{}; see journalctl --user -u {SERVICE_UNIT}",
                 service.display(), START_WAIT.as_secs(), if said.is_empty() { String::new() } else { format!(" ({said})") }))
@@ -498,32 +517,44 @@ fn bridge(input: impl Read + Send + 'static, mut output: impl Write + Send + 'st
     if writing.set_write_timeout(Some(DEADLINE)).is_err() || writeln!(writing, "{transport}").is_err() {
         return Err("the service took not who called".into());
     }
-    let (done_tx, done) = mpsc::channel::<()>();
+    // Each side's end: none at its reader's end, else why its write failed.
+    let (done_tx, done) = mpsc::channel::<Option<String>>();
     let until_done = done_tx.clone();
     let (to_service, to_caller) = (Arc::new(Busy::new()), Arc::new(Busy::new()));
     let busy = to_service.clone();
     std::thread::spawn(move || {
         let mut reader = BufReader::new(input);
         while let Some(line) = read_line(&mut reader) {
-            if carried(&line) && busy.write(&mut writing, &line).is_err() { break }
+            if !carried(&line) { continue }
+            if let Err(error) = busy.write(&mut writing, &line) {
+                let _ = until_done.send(Some(format!("writing to the service: {error}")));
+                return;
+            }
         }
-        let _ = until_done.send(());
+        let _ = until_done.send(None);
     });
     let busy = to_caller.clone();
     std::thread::spawn(move || {
         let mut reader = BufReader::new(reading);
         while let Some(line) = read_line(&mut reader) {
-            if busy.write(&mut output, &line).is_err() { break }
+            if let Err(error) = busy.write(&mut output, &line) {
+                let _ = done_tx.send(Some(format!("writing to the caller: {error}")));
+                return;
+            }
         }
-        let _ = done_tx.send(());
+        let _ = done_tx.send(None);
     });
-    let mut stall = None;
-    while let Err(mpsc::RecvTimeoutError::Timeout) = done.recv_timeout(POLL) {
-        if to_service.stalled() { stall = Some("the service"); break }
-        if to_caller.stalled() { stall = Some("the caller"); break }
-    }
+    let ended = loop {
+        match done.recv_timeout(POLL) {
+            Ok(why) => break why,
+            Err(mpsc::RecvTimeoutError::Disconnected) => break None,
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+        }
+        if to_service.stalled() { break Some(format!("the service read nothing for {} s", DEADLINE.as_secs())) }
+        if to_caller.stalled() { break Some(format!("the caller read nothing for {} s", DEADLINE.as_secs())) }
+    };
     let _ = agents.shutdown(std::net::Shutdown::Both);
-    stall.map_or(Ok(()), |who| Err(format!("{who} read nothing for {} s", DEADLINE.as_secs())))
+    ended.map_or(Ok(()), Err)
 }
 
 /// Serve one ssh caller on stdin and stdout: the far end of
@@ -917,11 +948,14 @@ mod tests {
 
     #[test]
     fn the_service_s_unit_has_the_relay_s_places() {
-        let command = start_command(Path::new("/opt/r/bin/romacs-vm-gui"), &["XDG_RUNTIME_DIR=/run/user/7".to_owned()]);
+        let command = start_command(Path::new("/opt/r/bin/romacs-vm-gui"),
+                                    &[("XDG_RUNTIME_DIR", Some("/run/user/7".to_owned())), ("XDG_STATE_HOME", None)]);
         let at = |arg: &str| command.iter().position(|a| a == arg).unwrap();
         assert_eq!(command[..2], ["systemd-run", "--user"]);
         assert!(command.contains(&"Restart=on-failure".to_owned()));
         assert!(at("--setenv=XDG_RUNTIME_DIR=/run/user/7") < at("/opt/r/bin/romacs-vm-gui"));
+        // Unset here, unset there: never the user manager's.
+        assert!(at("--property=UnsetEnvironment=XDG_STATE_HOME") < at("/opt/r/bin/romacs-vm-gui"));
         assert_eq!(command[at("/opt/r/bin/romacs-vm-gui") + 1..],
                    ["--batch", "-l", "romacs-agent-headless", "-f", "romacs-agent-headless-run"]);
     }
