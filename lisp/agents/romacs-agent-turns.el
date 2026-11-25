@@ -385,7 +385,10 @@ never two of one."
 (defun romacs-agent-turns--ended (session event)
   "A live turn's end: SESSION's rows are caught up a moment later, by a
 batch process (`romacs-agent-turns-fill-soon'), not here."
-  (when (and (eq (plist-get event :type) 'done) (romacs-agent-dir session)
+  (when (and (or (eq (plist-get event :type) 'done)
+                 ;; A switch ends the turn its old harness was cut off in.
+                 (and (eq (plist-get event :type) 'renewed) (plist-get event :switch)))
+             (romacs-agent-dir session)
              (eq (romacs-agent-loaded (romacs-agent-id session)) session))
     (unless romacs-agent-turns--due
       (run-with-timer 2 nil (lambda () (let ((ids romacs-agent-turns--due))

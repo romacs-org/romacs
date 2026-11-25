@@ -305,6 +305,13 @@ instance configured beside it."
                                                             (make-directory dir t)
                                                             (cons name dir)))
                                            '("claude" "codex"))))
+       ;; Its records in SQLite, as every session's is once imported.
+       (puthash (romacs-agent-id session) t romacs-agent-events--imported)
+       (romacs-agent-renew-tests--journal
+        session (romacs-agent-renew-tests--prompt 5 "build the parser")
+        (romacs-agent-renew-tests--reply "u1" "the parser is built")
+        (romacs-agent-renew-tests--prompt 9 "now its tests")
+        (romacs-agent-renew-tests--reply "u2" "its tests pass"))
        ,@body)))
 
 (defun romacs-agent-renew-tests--ran-on (session harness)
@@ -485,6 +492,12 @@ instance configured beside it."
       (should (plist-get (car written) :interrupted))
       (romacs-agent-turns--event session '(:type input :seq 9 :text "brief"))
       (should (equal (plist-get (gethash session romacs-agent-turns--open) :first) 9)))))
+
+(ert-deftest romacs-agent-renew-switch-needs-its-records-in-sqlite ()
+  (romacs-agent-renew-tests--switching
+    (cl-letf (((symbol-function 'romacs-agent-events-p) #'ignore))
+      (should (string-match-p "database" (cadr (should-error (romacs-agent-switch-harness session "codex")
+                                                             :type 'user-error)))))))
 
 (ert-deftest romacs-agent-renew-switch-waits-for-a-starting-harness ()
   (romacs-agent-renew-tests--switching

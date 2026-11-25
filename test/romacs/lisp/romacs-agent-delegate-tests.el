@@ -300,6 +300,20 @@ recorded in a private directory; `delivered' collects what wakes it."
     (romacs-agent-tools--flush parent)
     (should (equal (plist-get (romacs-agent-tools--wake-parse (car delivered)) :result) "coordinated"))))
 
+(ert-deftest romacs-agent-delegate-an-unreachable-task-lets-its-coordinators-end-go ()
+  ;; Its supervisor gone without a word: once reattaching gives up, the
+  ;; coordinator's end goes on, never held for good.
+  (romacs-agent-delegate-tests--family ((a nil) (b nil))
+    (setf (romacs-agent-options b) (list :parent (romacs-agent-id a)))
+    (romacs-agent--index b)
+    (romacs-agent-ui--summarize-children a)
+    (romacs-agent-delegate-tests--end a 5 "coordinated")
+    (should (gethash a romacs-agent-tools--held))
+    (setf (romacs-agent-state b) 'detached)
+    (romacs-agent--raise b '(:type status :text "supervisor not reachable"))
+    (romacs-agent-tools--flush parent)
+    (should (equal (plist-get (romacs-agent-tools--wake-parse (car delivered)) :result) "coordinated"))))
+
 (ert-deftest romacs-agent-delegate-a-starting-task-queues ()
   ;; Its harness not up yet: a message waits, and says so.
   (should (eq (romacs-agent-tools--delivery (romacs-agent--make :id "s" :state 'starting) 'queue) 'queued))

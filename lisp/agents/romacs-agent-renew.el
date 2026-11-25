@@ -265,6 +265,10 @@ off at its limit is no obstacle: the new harness starts from the brief."
     (when (eq (plist-get target :harness) (romacs-agent-harness session))
       (user-error "%s runs %s already: move it instead" (romacs-agent-title session) (romacs-agent-harness session)))
     (unless (plist-get instance :enabled) (user-error "Agent provider %s is disabled" provider))
+    ;; Its runs' harnesses are read from its records in SQLite.
+    (unless (romacs-agent-events-p session)
+      (user-error "Session %s's records are not in the agents' database yet: switch it once they are"
+                  (romacs-agent-title session)))
     (romacs-agent--check-config-dir provider (romacs-agent--config-dir instance))
     (unless (and (romacs-agent--harness-free-p session) (not (romacs-agent-startup-pending session))
                  (not (eq (romacs-agent-state session) 'starting)))
