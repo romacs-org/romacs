@@ -474,12 +474,8 @@ fn spec_bytes(cx: &Leaf<'_>, saved: &[Value]) -> std::result::Result<Vec<u8>, Fa
 
 /// The KEYS vector (callint.c:286-292): the argument, else this-command-keys.
 fn keys(cx: &mut Leaf<'_>, saved: &[Value]) -> std::result::Result<Vec<Value>, Fault> {
-    let keys = if saved[KEYS] != Value::NIL {
-        saved[KEYS]
-    } else {
-        let symbol = cx.intern(super::keyboard::COMMAND_KEYS);
-        cx.variable_value(symbol)?.unwrap_or(Value::NIL)
-    };
+    let keys = saved[KEYS];
+    if keys == Value::NIL { return Ok(cx.command_keys().to_vec()); }
     Ok(if cx.kind(keys) == Kind::Vector { cx.vector_values(keys)? } else { vec![] })
 }
 

@@ -7,13 +7,12 @@
 ;;; Commentary:
 
 ;; Evaluated once per VM, on first use, by prims/keyboard.rs. GNU's
-;; command loop (keyboard.c command_loop_1), key reader (read_key_sequence,
-;; read_char) and keyboard macros (macros.c Fexecute_kbd_macro) call Lisp
-;; at every step, so they are Lisp here; the GNU primitives are Rust entry
-;; points into these functions. The C globals they keep are variables:
-;; `romacs--command-keys' (this_command_keys, a vector),
-;; `romacs--single-command-key-start' and `romacs--raw-command-keys' are
-;; declared by the VM, the rest below.
+;; command loop (keyboard.c command_loop_1) and keyboard macros (macros.c
+;; Fexecute_kbd_macro) call Lisp at every step, so they are Lisp here; the
+;; GNU primitives are Rust entry points into these functions. The key
+;; reader (read_key_sequence, read_char) is Rust
+;; (crates/romacs-vm/src/command_loop/), as are this command's keys (the
+;; input stream's); it calls the waits, echo and reader hooks below.
 ;;
 ;; Events come from `unread-command-events', then the executing keyboard
 ;; macro, then the host keyboard (host_input.rs) when one is attached.
@@ -63,10 +62,6 @@ commands and autoloads)."
   "macros.c at_end_of_macro_p, while `executing-kbd-macro' is non-nil."
   (or (eq executing-kbd-macro t)
       (>= executing-kbd-macro-index (length executing-kbd-macro))))
-
-(defun romacs--add-command-key (key)
-  "keyboard.c add_command_key."
-  (setq romacs--command-keys (vconcat romacs--command-keys (list key))))
 
 (defvar romacs--reading-command-keys nil
   "Non-nil while the command loop reads a command's key sequence, between
@@ -349,25 +344,6 @@ a `switch-frame' a focus change queued (`unread_switch_frame')."
   (or unread-post-input-method-events unread-command-events unread-input-method-events
       (romacs--unread-switch-frame-p)))
 
-(defun romacs--unwrap-menu-event (c)
-  "read_char's undoing of read_char_x_menu_prompt: (EVENT) is EVENT."
-  (if (and (consp c) (or (symbolp (car c)) (integerp (car c))) (null (cdr c))) (car c) c))
-
-(defun romacs--keyboard-translate (c)
-  "keyboard.c read_char: host character C through `keyboard-translate-table'.
-A nil entry, or a C beyond a string or vector table, is no translation."
-  (let ((table keyboard-translate-table))
-    (or (and (natnump c)
-             (if (char-table-p table) (characterp c)
-               (and (or (stringp table) (vectorp table)) (< c (length table))))
-             (aref table c))
-        c)))
-
-(defvar romacs--keyboard-quit nil
-  "Whether `romacs--read-char''s last event was the quit character typed on
-the host keyboard, before `keyboard-translate-table': keyboard.c
-handle_interrupt's `C-g', which sets `quit-flag' (quit.rs).")
-
 (defvar input-method-exit-on-first-char nil
   "keyboard.c `Fset's this: non-nil when the input method is to return its
 first character at once, as a `read-key-sequence' outside the command loop
@@ -378,318 +354,53 @@ binds it.")
 guidance through the prompt of its own reads, as every read that is not a
 command's binds it.")
 
+(defun romacs--read-host-input (seconds)
+  "read_char's host source, for the Rust reader: read_char's auto-saves
+for a command's keys (after `auto-save-interval' events, and while idle),
+then the host wait (`romacs--read-host-char') for at most SECONDS.  An
+event a timer or filter queued in `unread-command-events' meanwhile is
+the wait's own input, read as the keyboard's (kbd_buffer_get_event,
+keyboard.c:4169), unless the wait was read_char's auto-save `sit_for'
+\=(keyboard.c:2999), which leaves it requeued.  Value: (EVENT RECORDED
+QUIT), RECORDED when it was queued as (no-record . EVENT) and QUIT when it
+is the quit character from the keyboard; nil when the wait ended with
+none."
+  (when (and romacs--reading-command-keys (romacs--auto-save-due-p) (not (romacs--unread-p)) (not (input-pending-p)))
+    (romacs--auto-save))
+  (let* ((sit (and romacs--reading-command-keys (null seconds) (romacs--auto-save-delay)))
+         (c (romacs--read-host-char seconds sit))
+         (quit (eq c ?\C-g))
+         (recorded nil))
+    (when (and (null c) (not sit) (consp unread-command-events))
+      (setq c (car unread-command-events)
+            unread-command-events (cdr unread-command-events))
+      (cond ((and (consp c) (eq (car c) t)) (setq c (cdr c)))
+            ((and (consp c) (eq (car c) 'no-record)) (setq c (cdr c) recorded t))))
+    (and c (list c recorded quit))))
+
+(defun romacs--read-batch-input (seconds)
+  "read_char's sources without a host keyboard, for the Rust reader: a user
+signal is an event (kbd_buffer_get_event), a special one running its
+binding; else batch GNU's wait in kbd_buffer_get_event, which runs
+timers, process output and file notification events until SECONDS pass
+or, without SECONDS, for as long as one of them could queue input
+\=(`romacs--read-batch-wait'), then ends input.  Value: the event, t to
+read the queues again, or nil when SECONDS passed."
+  (let ((c (romacs--take-user-signal)))
+    (cond (c (if (romacs--special-event c) t c))
+          ((fboundp 'romacs--wait-reading-process-output)
+           (romacs--read-batch-wait seconds)
+           (cond ((romacs--unread-p) t)
+                 ((null seconds) (romacs--batch-end-of-input))))
+          (seconds nil)
+          (t (romacs--batch-end-of-input)))))
+
 (defun romacs--clear-echo ()
   "read_char's wipe of the echo area, `echo-area-clear-hook' first."
   (romacs--safe-run-hooks 'echo-area-clear-hook)
   (message nil))
 
-(defun romacs--record-char (c)
-  "keyboard.c record_char: `recent-keys' and the macro being defined leave
-out keyboard-macro input.  It counts the event too, whichever input it came
-from (keyboard.c:3583), for `auto-save-interval' and the idle auto-save."
-  (unless (or executing-kbd-macro
-              (and (boundp 'inhibit--record-char) inhibit--record-char))
-    (romacs--record-input c)
-    (setq num-nonmacro-input-events (1+ num-nonmacro-input-events))
-    (when defining-kbd-macro (romacs--store-kbd-macro-char c))))
-
-(defun romacs--call-input-method (c keymap-read)
-  "read_char's call of `input-method-function' on the character C: the
-events it returns.  Its own reads make up keys of their own, so the
-command's keys are kept from them.  Unless KEYMAP-READ, the read is not one
-of a key sequence and the method must not use the echo area."
-  (let ((keys romacs--command-keys) (start romacs--single-command-key-start))
-    (setq romacs--command-keys [] romacs--single-command-key-start 0)
-    (when (current-message) (romacs--clear-echo))
-    (prog1 (let ((input-method-use-echo-area (or input-method-use-echo-area (not keymap-read)))
-                 ;; Quail's translation is half done in the buffer: no
-                 ;; background callback runs inside it.
-                 (romacs--reading-command-keys nil))
-             (funcall input-method-function c))
-      ;; A C-g the method read was the method's key.
-      (setq romacs--command-keys keys romacs--single-command-key-start start
-            romacs--keyboard-quit nil))))
-
-(defun romacs--read-char (&optional seconds prev-event keymap-read)
-  "keyboard.c read_char: the next event, recorded as input.
-It comes from `unread-post-input-method-events', `unread-command-events'
-or `unread-input-method-events', in that order, else from the executing
-keyboard macro unless that is at its end, else from the host keyboard,
-waiting at most SECONDS when given (then nil).  With none of those and no
-host, SECONDS gives nil and its absence `end-of-file', as batch GNU's
-minibuffer reports it, raised from the innermost recursive edit when there
-is one.
-A character from anywhere but `unread-post-input-method-events' goes through
-`input-method-function' unless PREV-EVENT, the event before it in its key
-sequence, says it is not the first; that function's default `list' changes
-nothing but the echo area.  KEYMAP-READ says a key sequence is being read."
-  (let ((reread nil) (recorded nil) (post nil) (previous nil) c (again t)
-        (end (and seconds (+ (float-time) seconds))))
-   (setq romacs--keyboard-quit nil)
-   (while again
-    (setq again nil reread nil recorded nil post nil c nil)
-    (cond
-     (unread-post-input-method-events
-      (setq c (romacs--unwrap-menu-event (car unread-post-input-method-events))
-            unread-post-input-method-events (cdr unread-post-input-method-events)
-            reread t recorded t post t))
-     (unread-command-events
-      (setq c (car unread-command-events)
-            unread-command-events (cdr unread-command-events))
-      ;; (t . EVENT) is read as new input; (no-record . EVENT) was recorded.
-      (if (and (consp c) (eq (car c) t))
-          (setq c (cdr c))
-        (when (and (consp c) (eq (car c) 'no-record))
-          (setq c (cdr c) recorded t))
-        (setq reread t))
-      (when (and (consp c) (eq (cdr c) 'disabled)
-                 (or (symbolp (car c)) (integerp (car c))))
-        (setq c (car c))))
-     (unread-input-method-events
-      (setq c (romacs--unwrap-menu-event (car unread-input-method-events))
-            unread-input-method-events (cdr unread-input-method-events)
-            reread t))
-     ((and executing-kbd-macro (not (romacs--at-end-of-macro-p)))
-      (setq c (aref executing-kbd-macro executing-kbd-macro-index))
-      ;; A string's 0x80 bit is the meta modifier.
-      (when (and (stringp executing-kbd-macro) (/= 0 (logand c #x80)) (<= c #xff))
-        (setq c (logior #x8000000 (logand c #x7f))))
-      (setq executing-kbd-macro-index (1+ executing-kbd-macro-index)))
-     ;; read_char's `unread_switch_frame': a focus change's or a key
-     ;; sequence's delayed `switch-frame', read and recorded as input.
-     ((setq c (romacs--take-unread-switch-frame)))
-     ((romacs--host-input-p)
-      ;; read_char's auto-saves, for a command's keys: after
-      ;; `auto-save-interval' events, and while idle.
-      (when (and romacs--reading-command-keys (romacs--auto-save-due-p) (not (romacs--unread-p)) (not (input-pending-p)))
-        (romacs--auto-save))
-      (let ((sit (and romacs--reading-command-keys (null seconds) (romacs--auto-save-delay))))
-        (setq c (romacs--read-host-char seconds sit)
-              romacs--keyboard-quit (eq c ?\C-g))
-        ;; An event a timer or filter queued in `unread-command-events'
-        ;; while the host waited: when the wait was read_char's auto-save
-        ;; `sit_for', it is read next as a requeued event (keyboard.c:2999);
-        ;; otherwise it is the wait's own input, read as the keyboard's is
-        ;; (kbd_buffer_get_event, keyboard.c:4169).  Any other requeued
-        ;; event is read next, as GNU's wait returns on
-        ;; requeued_command_events_pending_p.
-        (when (and (null c) (not sit) (consp unread-command-events))
-          (setq c (car unread-command-events)
-                unread-command-events (cdr unread-command-events))
-          (cond ((and (consp c) (eq (car c) t)) (setq c (cdr c)))
-                ((and (consp c) (eq (car c) 'no-record)) (setq c (cdr c) recorded t)))))
-      (setq c (and c (romacs--keyboard-translate c)))
-      (if (null c)
-          (when (romacs--unread-p) (setq again t))
-        ;; An input method sees what was recorded go in, not its own output.
-        (unless recorded
-          (romacs--record-char c)
-          (setq recorded t))
-        ;; What the echo area held, for an input method to refer to.
-        (when (and input-method-function (integerp c) (>= c 32) (< c 256) (/= c 127))
-          (setq previous (current-message)
-                input-method-previous-message previous))
-        ;; read_char wipes the echo area for each event from the keyboard,
-        ;; other than help, frame and window selection events
-        ;; (keyboard.c:3231): a prompt `read-event' showed goes once its
-        ;; event comes.
-        (when (and (current-message)
-                   (not (and (consp c) (memq (car c) '(help-echo switch-frame select-window)))))
-          (romacs--clear-echo))))
-     ;; Without a host keyboard a user signal is still an event
-     ;; (kbd_buffer_get_event); a special one runs its binding and the read
-     ;; goes on, as read_char's do.
-     ((setq c (romacs--take-user-signal))
-      (when (romacs--special-event c) (setq c nil again t)))
-     ((fboundp 'romacs--wait-reading-process-output)
-      ;; Batch GNU waits here, in kbd_buffer_get_event: timers, process
-      ;; output and file notification events run until SECONDS pass or,
-      ;; without SECONDS, for as long as one of them could queue input
-      ;; (`romacs--read-batch-wait').  Input a timer or filter requeued is
-      ;; read next.
-      (romacs--read-batch-wait seconds)
-      (cond ((romacs--unread-p) (setq again t))
-            ((null seconds) (romacs--batch-end-of-input))))
-     (seconds)
-     (t (romacs--batch-end-of-input)))
-    ;; reread_for_input_method, for a printable one-byte character.
-    (when (and input-method-function (not post) (null prev-event)
-               (integerp c) (>= c 32) (< c 256) (/= c 127))
-      (if (eq input-method-function 'list)
-          (when (current-message) (romacs--clear-echo))
-        (let ((events (romacs--call-input-method c keymap-read)))
-          (if (consp events)
-              (setq c (car events)
-                    unread-post-input-method-events
-                    (nconc (cdr events) unread-post-input-method-events))
-            ;; No event: the message comes back, and the read goes on.
-            (when previous
-              (let ((message-log-max nil)) (message "%s" previous)))
-            ;; SECONDS bound the whole read, the method's time included.
-            (when end (setq seconds (max 0 (- end (float-time)))))
-            (setq c nil again t))))))
-    (when c
-      (unless recorded (romacs--record-char c))
-      ;; A read with SECONDS leaves its event out of the command's keys.
-      (when (and (null seconds)
-                 (or (not reread) (= (length romacs--command-keys) 0)))
-        (romacs--add-command-key c))
-      (setq last-input-event c))
-    c))
-
-;; keyboard.c read_filtered_event, behind read-event, read-char and
-;; read-char-exclusive (Fread_char's modifier resolution is Rust).
-(defun romacs--read-filtered-event (prompt seconds ascii-required error-nonascii input-method)
-  (when inhibit-interaction (signal 'inhibited-interaction nil))
-  ;; message_with_string's echo, which is not logged (keyboard.c:10776).
-  (when prompt (let ((message-log-max nil)) (message "%s" prompt)))
-  (let ((seconds (and (numberp seconds) seconds)) val (delayed nil))
-    (while (progn
-             ;; PREV-EVENT t keeps the input method out unless INPUT-METHOD.
-             (setq val (romacs--read-char seconds (not input-method)))
-             ;; read_char's quit: a C-g from the keyboard set `quit-flag',
-             ;; or cleared it under `inhibit-quit' and is read as a key;
-             ;; maybe_quit acts on it before the event is returned.
-             (and romacs--keyboard-quit (not inhibit-quit) (signal 'quit nil))
-             (or
-              ;; NO-SWITCH-FRAME, as ASCII-REQUIRED is for `read-char':
-              ;; a `switch-frame' is put off until the event is read.
-              (and ascii-required (eq (car-safe val) 'switch-frame)
-                   (setq delayed val))
-              (and ascii-required (not (and seconds (null val)))
-                  (progn
-                    ;; A function key with an ASCII equivalent is that
-                    ;; character, with the symbol's modifiers; a GUI key
-                    ;; (`C-M-m', romacs-editing.el) names its whole character.
-                    (when (symbolp val)
-                      (let* ((own (get val 'ascii-character))
-                             (mask (get val 'event-symbol-element-mask))
-                             (ascii (and mask (get (car mask) 'ascii-character))))
-                        (cond ((integerp own) (setq val own))
-                              ((and (integerp ascii) (integerp (car (cdr mask))))
-                               (setq val (logior ascii (car (cdr mask))))))))
-                    (and (not (integerp val))
-                         (if error-nonascii
-                             (progn (setq unread-command-events (list val))
-                                    (error "Non-character input-event"))
-                           t)))))))
-    (when delayed (romacs--set-unread-switch-frame delayed))
-    val))
-
 ;;;; read_key_sequence
-
-(defun romacs--unshifted (event)
-  "EVENT without its shift: read_key_sequence's upper-case fallback.
-Nil when EVENT is neither shifted nor an upper-case character."
-  (when translate-upper-case-key-bindings
-    (cond
-     ((integerp event)
-      (let ((char (logand event #x3fffff)))
-        (cond ((/= 0 (logand event #x2000000)) (logand event (lognot #x2000000)))
-              ((and (characterp char) (/= (downcase char) char))
-               (logior (downcase char) (logand event (lognot #x3fffff)))))))
-     ((symbolp event)
-      (let ((name (symbol-name event)))
-        ;; GNU spells modifiers in the order A-C-H-M-S-s-.
-        (when (string-match "\\`\\(?:[ACHM]-\\)*S-" name)
-          (intern (concat (substring name 0 (- (match-end 0) 2))
-                          (substring name (match-end 0))))))))))
-
-(defun romacs--lookup-event (event)
-  "EVENT as read_key_sequence looks it up: one with parameters by its head,
-unless it carries a position for `key-binding'.  (lookup-key would read
-\(NAME ARG) as a list of modifiers.)"
-  (if (and (consp event) (not (consp (car-safe (cdr event))))) (car event) event))
-
-(defun romacs--lookup-keys (keys n)
-  "The first N of KEYS, each by `romacs--lookup-event'."
-  (let ((i n) (out nil))
-    (while (> i 0)
-      (setq i (1- i))
-      (push (romacs--lookup-event (aref keys i)) out))
-    (vconcat out)))
-
-(defun romacs--subvector (keys from &optional to)
-  "The events of KEYS from index FROM to TO (default its end), as a vector."
-  (let ((i (or to (length keys))) (out nil))
-    (while (> i from)
-      (setq i (1- i))
-      (push (aref keys i) out))
-    (vconcat out)))
-
-(defun romacs--undefined-p (binding)
-  "keyboard.c test_undefined."
-  (or (null binding) (eq binding 'undefined)
-      (and (symbolp binding) (eq (command-remapping binding) 'undefined))))
-
-(defun romacs--keyremap (map)
-  "A keyboard.c keyremap scanning through MAP: [PARENT MAP START END].
-MAP is the submap of PARENT the events from START to END lead to."
-  (vector map map 0 0))
-
-(defun romacs--keyremap-reset (remap start)
-  "Restart REMAP's scan at START, from its whole map."
-  (aset remap 1 (aref remap 0))
-  (aset remap 2 start)
-  (aset remap 3 start))
-
-(defun romacs--keyremap-shift (remap diff)
-  "Move REMAP's scan by DIFF events, after a translation before it."
-  (aset remap 2 (+ (aref remap 2) diff))
-  (aset remap 3 (+ (aref remap 3) diff)))
-
-(defun romacs--keyremap-step (keys remap doit)
-  "keyboard.c keyremap_step: extend REMAP's scan of KEYS by the event at its END.
-With DOIT, when the events from START through that one are bound to an
-array (or to a function returning one), return KEYS with them replaced
-by it; the scan restarts after the replacement. Otherwise return nil:
-a prefix of a longer translation keeps START, and anything else moves
-START on by one event, where the scan restarts."
-  (let* ((start (aref remap 2)) (end (aref remap 3))
-         (next (and (keymapp (aref remap 0))
-                    (lookup-key (aref remap 1) (vector (romacs--lookup-event (aref keys end))) t))))
-    (aset remap 3 (1+ end))
-    ;; access_keymap_keyremap: a symbol whose function is an array or keymap.
-    (when (and next (symbolp next) (fboundp next)
-               (or (arrayp (symbol-function next)) (keymapp (symbol-function next))))
-      (setq next (symbol-function next)))
-    (when (and doit (functionp next))
-      (setq next (let ((current-key-remap-sequence (romacs--subvector keys start (1+ end))))
-                   (funcall next nil)))
-      (unless (or (null next) (vectorp next) (stringp next))
-        (error "Function %s returns invalid key sequence" next)))
-    (cond ((and doit (or (vectorp next) (stringp next)))
-           (romacs--keyremap-reset remap (+ start (length next)))
-           (vconcat (romacs--subvector keys 0 start) next (romacs--subvector keys (1+ end))))
-          ((keymapp next) (aset remap 1 next) nil)
-          (t (romacs--keyremap-reset remap (1+ start)) nil))))
-
-(defun romacs--translate-keys (keys n binding indec fkey keytran)
-  "read_key_sequence's translation scans once N events of KEYS are read.
-Each map scans, one event at a time, only what the map before it has
-finished with: `input-decode-map' (INDEC) up to N, the function key map
-(FKEY) up to INDEC's start while BINDING is undefined or a prefix, and
-`key-translation-map' (KEYTRAN) up to FKEY's start. The scans advance
-in place. Return KEYS with the first translation made, the scans of
-the maps before it moved by its change of length, or nil."
-  (let ((new nil))
-    (while (and (null new) (< (aref indec 3) n))
-      (setq new (romacs--keyremap-step keys indec t)))
-    (unless new
-      (if (and (not (keymapp binding)) (not (romacs--undefined-p binding))
-               (>= (aref indec 2) n))
-          ;; A complete binding with no decoding pending holds no function key.
-          (when (< (aref fkey 2) n) (romacs--keyremap-reset fkey n))
-        (while (and (null new) (< (aref fkey 3) (aref indec 2)))
-          (setq new (romacs--keyremap-step
-                     keys fkey (and (= (1+ (aref fkey 3)) n) (romacs--undefined-p binding))))
-          (when new (romacs--keyremap-shift indec (- (length new) (length keys)))))))
-    (while (and (null new) (< (aref keytran 3) (aref fkey 2)))
-      (setq new (romacs--keyremap-step keys keytran t))
-      (when new
-        (romacs--keyremap-shift indec (- (length new) (length keys)))
-        (romacs--keyremap-shift fkey (- (length new) (length keys)))))
-    new))
 
 (defvar romacs--sequence-start-functions nil
   "Functions run with no arguments once per key sequence, after its first
@@ -697,7 +408,7 @@ event is read and before it is looked up: a choice of keymaps made here
 holds for the whole sequence, whatever arrives between its keys.")
 
 (defvar romacs--key-read-functions nil
-  "Functions called with each event `romacs--read-key-sequence' reads, as
+  "Functions called with each event a key sequence's read reads, as
 it reads it.  They only observe: what the read reads, records and
 returns is as without them (key hints hide on the next key).")
 
@@ -708,202 +419,10 @@ event; one returning non-nil has taken it: the read goes on with the
 prefix pending, as if the key had not come.  Offered only where taking
 it changes nothing else (`romacs--read-key-sequence').")
 
-(defun romacs--help-event-p (event)
-  "keyboard.c help_char_p of EVENT_HEAD (EVENT): `help-char' or a member
-of `help-event-list'."
-  (let ((head (if (consp event) (car event) event)))
-    (or (eql head help-char) (memq head help-event-list))))
-
 (defvar romacs--sequence-end-functions nil
   "Functions run with no arguments when a read whose sequence started
 ends, normally or not: a choice made at its start is undone here, so a
 read nested in another's restores the outer one's.")
-
-(defun romacs--read-key-sequence (dont-downcase-last &optional command can-return-switch-frame)
-  "keyboard.c read_key_sequence: read a complete key sequence.
-Return its events as a vector, or nil at the end of an executing
-keyboard macro. Set `romacs--key-sequence-command' to its binding in the
-active keymaps (defaults included, not remapped) and
-`romacs--key-sequence-remapped' to that command's remapping.
-As GNU does, `input-decode-map' translates every sequence,
-`local-function-key-map' an undefined one and `key-translation-map' any
-one (`romacs--translate-keys'), and the sequence is then reread from its
-start, so a translation's events pass through the maps after it. An
-unbound upper-case or shifted key is looked up without its shift, and
-`this-command-keys-shift-translated' says when that was used.
-An unbound help key after a prefix ends the sequence with
-`prefix-help-command' (keyboard.c's fallback), unless COMMAND, the
-command loop's own read, offers it to `romacs--prefix-help-functions'
-and one takes it.
-A `switch-frame' event read after the first event of the sequence, or as
-its first without CAN-RETURN-SWITCH-FRAME, is kept for the read after
-the sequence (keyboard.c `delayed_switch_frame')."
-  (let ((started nil) (checkpoint nil) (clean nil) (help-command nil) (delayed nil))
-   (unwind-protect
-  (let* ((keys-start (length romacs--command-keys))
-         (indec (romacs--keyremap (and (boundp 'input-decode-map) input-decode-map)))
-         (fkey (romacs--keyremap (if (boundp 'local-function-key-map)
-                                     local-function-key-map function-key-map)))
-         (keytran (romacs--keyremap key-translation-map))
-         ;; KEYS is keyboard.c's keybuf: N events of it are read, and those
-         ;; up to MOCK (mock_input) are reread before new input. It always
-         ;; holds (max N MOCK) events.
-         (keys []) (n 0) (mock 0) (raw []) (binding nil) (first-unbound 0)
-         (upper nil) (shift-translated nil) (fake-prefixed nil) (state 'replay))
-    (setq romacs--single-command-key-start keys-start)
-    (while (eq state 'replay)
-      ;; replay_sequence: the record and the active maps start over.
-      ;; A replay rereads translated or shifted events: none of them is a
-      ;; raw event this read took, so no checkpoint stands for them.
-      (setq state 'read n 0 first-unbound most-positive-fixnum binding '(keymap) checkpoint nil
-            last-nonmenu-event nil
-            romacs--command-keys (romacs--subvector romacs--command-keys 0 keys-start))
-      ;; Read while the sequence is a prefix, or unbound with a translation
-      ;; still pending.
-      (while (and (eq state 'read)
-                  (if binding (keymapp binding) (< (aref keytran 2) n)))
-        (if (< first-unbound (aref keytran 2))
-            ;; The prefix up to FIRST-UNBOUND is unbound with no translation
-            ;; left to try: drop it and go on after it.
-            (let ((drop (1+ first-unbound)))
-              (setq keys (romacs--subvector keys drop n) mock (- n drop) state 'replay)
-              (dolist (remap (list indec fkey keytran))
-                (romacs--keyremap-reset remap (- (aref remap 2) drop))))
-          (let ((local-keys romacs--command-keys) (key nil) (again t))
-            ;; replay_key, again after a fake prefix key.
-            (while again
-              (setq again nil romacs--command-keys local-keys)
-              (cond ((< n mock)
-                     (setq key (aref keys n) checkpoint nil)
-                     (romacs--add-command-key key))
-                    ((and executing-kbd-macro (romacs--at-end-of-macro-p)
-                          (not (romacs--unread-p)))
-                     (setq state 'end))
-                    ;; A C-g read here is a key: read_key_sequence clears
-                    ;; the `quit-flag' it set (keyboard.c:11352).
-                    (t ;; A command read keeps what an event after the first
-                       ;; read would undo, should a prefix help key be taken.
-                       (when (and command (> n 0) romacs--prefix-help-functions)
-                         (setq checkpoint (list n mock binding first-unbound (copy-sequence indec)
-                                                (copy-sequence fkey) (copy-sequence keytran) upper
-                                                shift-translated fake-prefixed last-nonmenu-event
-                                                romacs--command-keys romacs--single-command-key-start raw
-                                                (and defining-kbd-macro romacs--kbd-macro-events))
-                               clean (not (or unread-command-events executing-kbd-macro
-                                              (and (boundp 'inhibit--record-char) inhibit--record-char)))))
-                       (setq key (romacs--read-char nil last-nonmenu-event t)
-                             quit-flag nil)
-                       (if (and (memq (car-safe key) '(switch-frame select-window))
-                                (or (> n 0) (not can-return-switch-frame)))
-                           ;; delayed_switch_frame: read on, the event kept.
-                           (setq delayed key again t)
-                         (setq raw (vconcat raw (list key))
-                               keys (vconcat keys (list key)))
-                         (when romacs--key-read-functions
-                           (run-hook-with-args 'romacs--key-read-functions key))
-                         ;; Once per sequence, after its first event is read
-                         ;; and before it is looked up; replays of the
-                         ;; sequence do not run it again.
-                         (unless started
-                           (setq started t)
-                           (run-hooks 'romacs--sequence-start-functions)))))
-              ;; A click in a mode line, header line or margin is looked
-              ;; up after its area, a fake prefix key.
-              (when (and (eq state 'read) (consp key) (consp (cdr key))
-                         (consp (car (cdr key))) (not (memq key fake-prefixed)))
-                (let ((area (posn-area (event-start key))))
-                  (when (and area (symbolp area))
-                    (setq keys (vconcat (romacs--subvector keys 0 n) (vector area key))
-                          mock (+ n 2) fake-prefixed (cons key fake-prefixed) again t)))))
-            (when (eq state 'read)
-              (setq binding (key-binding (romacs--lookup-keys keys (1+ n)) t t)
-                    first-unbound (if binding (max (1+ n) first-unbound) (min n first-unbound))
-                    n (1+ n)
-                    last-nonmenu-event key
-                    romacs--single-command-key-start
-                    (max 0 (- (length romacs--command-keys) n)))
-              (let ((new (romacs--translate-keys keys n binding indec fkey keytran))
-                    (lower (romacs--unshifted key)))
-                (cond
-                 ;; mock_input = diff + max (t, mock_input): all of NEW.
-                 (new (setq keys new mock (length new) state 'replay))
-                 ;; keyboard.c's integer upcase/shift fallback comes first.
-                 ((and (null binding) (>= (aref keytran 2) n) lower (integerp key))
-                  (aset keys (1- n) lower)
-                  (setq upper (cons (1- n) key) mock (max n mock)
-                        shift-translated t state 'replay))
-                 ;; `not_upcase:' an unbound help key after a prefix.
-                 ((and (null binding) (> n 1) (romacs--help-event-p key))
-                  ;; Taken only in the clean case: the raw event this read
-                  ;; took, no translation part-way or producing it.
-                  (if (and checkpoint clean (= (car checkpoint) (1- n)) (<= mock n)
-                           (>= (aref indec 2) n) (>= (aref fkey 2) n) (>= (aref keytran 2) n)
-                           (run-hook-with-args-until-success 'romacs--prefix-help-functions
-                                                             (romacs--subvector keys 0 (1- n)) key))
-                      ;; Taken: the read goes on as before the key came; the
-                      ;; macro being defined forgets the entry this read stored.
-                      (pcase-let ((`(,n0 ,mock0 ,binding0 ,unbound0 ,indec0 ,fkey0 ,keytran0 ,upper0 ,shift0
-                                    ,fake0 ,nonmenu0 ,ckeys0 ,cstart0 ,raw0 ,macro0)
-                                   checkpoint))
-                        (when (and defining-kbd-macro (eq (cdr romacs--kbd-macro-events) macro0)
-                                   (eq (car romacs--kbd-macro-events) key))
-                          (setq romacs--kbd-macro-events macro0))
-                        (setq n n0 mock mock0 binding binding0 first-unbound unbound0
-                              keys (romacs--subvector keys 0 n0) upper upper0 shift-translated shift0
-                              fake-prefixed fake0 last-nonmenu-event nonmenu0
-                              romacs--command-keys ckeys0 romacs--single-command-key-start cstart0 raw raw0)
-                        (dotimes (i 4) (aset indec i (aref indec0 i)) (aset fkey i (aref fkey0 i))
-                                 (aset keytran i (aref keytran0 i))))
-                    ;; GNU: the sequence ends, its command `prefix-help-command'
-                    ;; (read_key_sequence_cmd); its binding stays nil, so the
-                    ;; final shift restoration runs as GNU's does.
-                    (setq help-command (list prefix-help-command) state 'help)))
-                 ((and (null binding) (>= (aref keytran 2) n) lower)
-                  (aset keys (1- n) lower)
-                  (setq upper (cons (1- n) key) mock (max n mock)
-                        shift-translated t state 'replay)
-                  ;; A shifted function key goes through the function key
-                  ;; map again: S-backspace reaches DEL through backspace.
-                  (unless (integerp key)
-                    (aset fkey 2 0) (aset fkey 3 0)
-                    (aset keytran 2 0) (aset keytran 3 0))))))))))
-    (if (eq state 'end)
-        (setq keys nil)
-      (when (eq state 'help) (setq state 'read))
-      (when (and upper (= (car upper) (1- n)) (or dont-downcase-last (null binding)))
-        (aset keys (car upper) (cdr upper))
-        (setq shift-translated nil))
-      (when shift-translated (setq this-command-keys-shift-translated t))
-      ;; A translation's events are all part of the sequence, even past
-      ;; its binding.
-      (while (< n mock)
-        (romacs--add-command-key (aref keys n))
-        (setq n (1+ n)))
-      (setq keys (romacs--subvector keys 0 n)))
-    ;; read_key_sequence's end: the delayed `switch-frame' is read next.
-    (romacs--set-unread-switch-frame delayed)
-    (setq romacs--raw-command-keys raw
-          romacs--key-sequence-command (and keys (if help-command (car help-command) binding))
-          romacs--key-sequence-remapped
-          (let ((command (if help-command (car help-command) binding)))
-            (and keys (symbolp command) command (command-remapping command))))
-    keys)
-     ;; A read whose sequence started ends it, normally or not.
-     (when started (run-hooks 'romacs--sequence-end-functions)))))
-
-;; keyboard.c read_key_sequence_vs; Fread_key_sequence's string form is Rust.
-(defun romacs--read-key-sequence-vs (prompt continue-echo dont-downcase-last cmd-loop &optional can-return-switch-frame)
-  (and prompt (not (stringp prompt))
-       (signal 'wrong-type-argument (list 'stringp prompt)))
-  ;; read_key_sequence (keyboard.c:10993): an interactive read installs
-  ;; PROMPT as the start of the echo and shows it now, unlogged (echo_now).
-  (when (and prompt (not executing-kbd-macro) (not noninteractive))
-    (let ((message-log-max nil)) (message "%s" prompt)))
-  (unless continue-echo
-    (setq romacs--command-keys [] romacs--single-command-key-start 0))
-  (let ((input-method-exit-on-first-char (not cmd-loop))
-        (input-method-use-echo-area (not cmd-loop)))
-    (or (romacs--read-key-sequence dont-downcase-last nil can-return-switch-frame) [])))
 
 ;;;; command_loop_1
 
@@ -922,8 +441,8 @@ for it, else run `activate-mark-hook' after a change of buffer or text."
 (defun romacs--command-loop-resume ()
   "The start of keyboard.c command_loop_1, which also resumes the loop after
 a command signalled out of it: `post-command-hook' runs for that command."
-  (setq prefix-arg nil last-prefix-arg nil deactivate-mark nil
-        romacs--command-keys [] romacs--single-command-key-start 0)
+  (setq prefix-arg nil last-prefix-arg nil deactivate-mark nil)
+  (romacs--set-command-keys [] 0)
   (romacs--safe-run-hooks 'post-command-hook)
   (setq last-command this-command real-last-command real-this-command)
   (unless (consp last-command-event)
@@ -976,7 +495,7 @@ Return the keys read, nil at the end of an executing keyboard macro."
       (setq last-command this-command real-last-command real-this-command)
       (unless (consp last-command-event)
         (setq last-repeatable-command real-this-command))
-      (setq romacs--command-keys [] romacs--single-command-key-start 0)
+      (romacs--set-command-keys [] 0)
       (romacs--after-command-mark previous-buffer previous-tick)
       ;; A step of a session's flight recording (crate::flight).
       (romacs--flight-step this-command)

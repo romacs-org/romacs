@@ -1522,6 +1522,8 @@ impl Vm {
             rewrite(&mut s.plist);
         }
         self.forwarded.visit_values(&mut |v| rewrite(v));
+        self.streams.visit_values(&mut |v| rewrite(v));
+        self.reads.visit_values(&mut |v| rewrite(v));
         for v in &mut self.standard_case_tables { rewrite(v); }
         rewrite(&mut self.command_point.1);
         for v in self.finalizers.iter_mut().chain(self.doomed_finalizers.iter_mut()) { rewrite(v); }
@@ -2124,6 +2126,8 @@ impl Vm {
         // GNU's C globals and `buffer_defaults`: roots outside every value
         // cell (forwarded.rs). Per-buffer values are traced with their buffer.
         self.forwarded.visit_values(&mut |v| if keep(v) { pending.push(*v) });
+        self.streams.visit_values(&mut |v| if keep(v) { pending.push(*v) });
+        self.reads.visit_values(&mut |v| if keep(v) { pending.push(*v) });
         pending.extend_from_slice(&self.standard_case_tables);
         pending.push(self.command_point.1);
         self.charsets.trace(&mut pending);

@@ -6,9 +6,10 @@
 //! step (hooks, keymap lookup, the command itself), so they are Lisp here:
 //! lisp/vm/keyboard.el, the "Lisp half". Each entry point below enters it
 //! with one `Step::Call', installing it on first use so a bare `Vm::new()'
-//! stays bare. The Rust half keeps what reads no Lisp: the record of this
-//! command's keys (`this-command-keys' and its siblings, over the traced
-//! variables the Lisp half maintains), `recent-keys' recording, and `ding'.
+//! stays bare. The key reader is Rust (`crate::command_loop`): its
+//! primitives are reading ones (`Body::Reader`), and this command's keys
+//! (`this-command-keys' and its siblings) are the input stream's. The Rust
+//! half also keeps `recent-keys' recording and `ding'.
 use super::*;
 use crate::prim::leaf::Kind;
 
@@ -19,19 +20,9 @@ use crate::prim::leaf::Kind;
 /// no key has them too, as GNU's are C.
 const LISP_HALF: [&str; 3] = ["vm/hooks.el", "vm/keyboard.el", "vm/minibuf.el"];
 
-/// keyboard.c `this_command_keys' (a vector of the events read for this
-/// command), `this_single_command_key_start' and `raw_keybuf', as traced
-/// special variables: the Lisp half appends to them as it reads.
-pub(crate) const COMMAND_KEYS: &str = "romacs--command-keys";
-pub(crate) const SINGLE_KEY_START: &str = "romacs--single-command-key-start";
-pub(crate) const RAW_KEYS: &str = "romacs--raw-command-keys";
-
-/// What an entry point does with its helper's value: return it, convert
-/// it as Fread_key_sequence does, or resolve it as Fread_char does.
+/// What an entry point does with its helper's value: return it.
 pub(crate) const DONE: usize = 0;
-const EVENT_ARRAY: usize = 1;
-const CHAR: usize = 2;
-const TAILS: [Then; 3] = [done, event_array_done, resolve_char_done];
+const TAILS: [Then; 1] = [done];
 
 /// Call HELPER of the Lisp half with ARGS, installing the half first.
 pub(crate) fn enter(cx: &mut Leaf<'_>, helper: &str, args: Vec<Value>, tail: usize) -> Next {
@@ -45,15 +36,25 @@ pub(crate) fn enter(cx: &mut Leaf<'_>, helper: &str, args: Vec<Value>, tail: usi
 
 /// Evaluate the Lisp half, then continue with THEN and SAVED.
 pub(crate) fn install(cx: &mut Leaf<'_>, then: Then, saved: Vec<Value>) -> Next {
+    let form = half_form(cx)?;
+    let eval = cx.intern("eval");
+    Ok(Step::Call { f: eval, args: vec![form, Value::TRUE], then, saved })
+}
+
+/// The Lisp half as one `progn' form, for `eval'.
+fn half_form(cx: &mut Leaf<'_>) -> std::result::Result<Value, Fault> {
     let mut forms = Value::NIL;
     for half in LISP_HALF.iter().rev() {
         let form = super::lisp_half(cx, half)?;
         forms = cx.cons(form, forms);
     }
     let progn = cx.intern("progn");
-    let form = cx.cons(progn, forms);
-    let eval = cx.intern("eval");
-    Ok(Step::Call { f: eval, args: vec![form, Value::TRUE], then, saved })
+    Ok(cx.cons(progn, forms))
+}
+
+/// The Lisp half as one form, for the key reader to evaluate on first use.
+pub(crate) fn lisp_half_form(vm: &mut crate::Vm) -> std::result::Result<Value, Fault> {
+    half_form(&mut Leaf::new(vm))
 }
 
 /// Whether the Lisp half is installed in this VM.
@@ -68,23 +69,8 @@ fn installed(_: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
     Ok(Step::Call { f: saved[1], args: saved[2..].to_vec(), then: TAILS[tail], saved: vec![] })
 }
 
-/// Fread_key_sequence: the events as make_event_array gives them.
-fn event_array_done(cx: &mut Leaf<'_>, keys: Value, _: &[Value]) -> Next {
-    let keys = cx.vector_values(keys)?;
-    Ok(Step::Done(event_array(cx, &keys)))
-}
-
-/// Fread_char's tail: a character with its modifier bits resolved where
-/// they have a code of their own, or nil.
-fn resolve_char_done(_: &mut Leaf<'_>, value: Value, _: &[Value]) -> Next {
-    Ok(Step::Done(match value.integer_value() {
-        Some(c) => Value::integer(resolve_modifier_mask(c)).unwrap(),
-        None => Value::NIL,
-    }))
-}
-
 /// character.c char_resolve_modifier_mask.
-fn resolve_modifier_mask(mut c: i64) -> i64 {
+pub(crate) fn resolve_modifier_mask(mut c: i64) -> i64 {
     const CHAR_SHIFT: i64 = 0x200_0000;
     const CHAR_CTL: i64 = 0x400_0000;
     const MODIFIER_MASK: i64 = 0xfc0_0000;
@@ -151,41 +137,51 @@ fn exit_recursive_edit(cx) -> Step { enter(cx, "romacs--exit-recursive-edit", ve
 defsubr! { name = "abort-recursive-edit", gnu = "keyboard.c:1234", effect = Global,
 fn abort_recursive_edit(cx) -> Step { enter(cx, "romacs--exit-recursive-edit", vec![Value::TRUE], DONE) }}
 
+// Fread_key_sequence: the keys read (crate::command_loop), as
+// make_event_array gives them. DISABLE-TEXT-CONVERSION has no Romacs meaning.
 defsubr! { name = "read-key-sequence", gnu = "keyboard.c:11961", effect = Global,
-fn read_key_sequence(cx, prompt: Value; optional continue_echo: Value, dont_downcase_last: Value,
-                     can_return_switch_frame: Value, cmd_loop: Value, disable_text_conversion: Value) -> Step {
-    let _ = disable_text_conversion;
-    enter(cx, "romacs--read-key-sequence-vs", vec![prompt, continue_echo, dont_downcase_last, cmd_loop, can_return_switch_frame], EVENT_ARRAY)
+fn read_key_sequence(call, prompt: Value; optional continue_echo: Value, dont_downcase_last: Value,
+                     can_return_switch_frame: Value, cmd_loop: Value, disable_text_conversion: Value) -> Reader {
+    crate::command_loop::read_key_sequence_vs(call, true)
 }}
 
 defsubr! { name = "read-key-sequence-vector", gnu = "keyboard.c:12022", effect = Global,
-fn read_key_sequence_vector(cx, prompt: Value; optional continue_echo: Value, dont_downcase_last: Value,
-                            can_return_switch_frame: Value, cmd_loop: Value, disable_text_conversion: Value) -> Step {
-    let _ = disable_text_conversion;
-    enter(cx, "romacs--read-key-sequence-vs", vec![prompt, continue_echo, dont_downcase_last, cmd_loop, can_return_switch_frame], DONE)
+fn read_key_sequence_vector(call, prompt: Value; optional continue_echo: Value, dont_downcase_last: Value,
+                            can_return_switch_frame: Value, cmd_loop: Value, disable_text_conversion: Value) -> Reader {
+    crate::command_loop::read_key_sequence_vs(call, false)
+}}
+
+// The command loop's own read (lisp/vm/keyboard.el `romacs--command-loop-step'):
+// the keys, or nil at the end of an executing macro, with the binding in
+// `romacs--key-sequence-command' and its remapping in
+// `romacs--key-sequence-remapped' (keyboard.c read_key_sequence_cmd and
+// read_key_sequence_remapped).
+defsubr! { name = "romacs--read-key-sequence", gnu = "keyboard.c:10901", effect = Global,
+fn romacs_read_key_sequence(call, dont_downcase_last: Value; optional command: Value, can_return_switch_frame: Value) -> Reader {
+    crate::command_loop::read_key_sequence(call)
 }}
 
 // keyboard.c read_filtered_event (NO-SWITCH-FRAME, ASCII-REQUIRED, ERROR-NONASCII).
 defsubr! { name = "read-event", gnu = "keyboard.c:10749", effect = Global,
-fn read_event(cx; optional prompt: Value, inherit_input_method: Value, seconds: Value) -> Step {
-    enter(cx, "romacs--read-filtered-event", vec![prompt, seconds, Value::NIL, Value::NIL, inherit_input_method], DONE)
+fn read_event(call; optional prompt: Value, inherit_input_method: Value, seconds: Value) -> Reader {
+    crate::command_loop::read_filtered_event(call, false, false)
 }}
 
+// Fread_char: a character with its modifier bits resolved where they have a
+// code of their own, or nil.
 defsubr! { name = "read-char", gnu = "keyboard.c:10700", effect = Global,
-fn read_char(cx; optional prompt: Value, inherit_input_method: Value, seconds: Value) -> Step {
-    enter(cx, "romacs--read-filtered-event", vec![prompt, seconds, Value::TRUE, Value::TRUE, inherit_input_method], CHAR)
+fn read_char(call; optional prompt: Value, inherit_input_method: Value, seconds: Value) -> Reader {
+    crate::command_loop::read_filtered_event(call, true, true)
 }}
 
 defsubr! { name = "read-char-exclusive", gnu = "keyboard.c:10784", effect = Global,
-fn read_char_exclusive(cx; optional prompt: Value, inherit_input_method: Value, seconds: Value) -> Step {
-    enter(cx, "romacs--read-filtered-event", vec![prompt, seconds, Value::TRUE, Value::NIL, inherit_input_method], CHAR)
+fn read_char_exclusive(call; optional prompt: Value, inherit_input_method: Value, seconds: Value) -> Reader {
+    crate::command_loop::read_filtered_event(call, true, false)
 }}
 
 /// This command's keys, `this_command_keys[0 .. this_command_key_count]'.
 fn command_keys(cx: &mut Leaf<'_>) -> std::result::Result<Vec<Value>, Fault> {
-    let symbol = cx.intern(COMMAND_KEYS);
-    let keys = cx.variable_value(symbol)?.unwrap_or(Value::NIL);
-    if cx.kind(keys) == Kind::Vector { cx.vector_values(keys) } else { Ok(vec![]) }
+    Ok(cx.command_keys().to_vec())
 }
 
 const CHAR_META: i64 = 0x800_0000;
@@ -193,7 +189,7 @@ const CHAR_META: i64 = 0x800_0000;
 /// alloc.c make_event_array: a unibyte string when every event is a
 /// character that fits after discarding the meta bit (which moves to 0x80),
 /// else a vector.
-fn event_array(cx: &mut Leaf<'_>, events: &[Value]) -> Value {
+pub(crate) fn event_array(cx: &mut Leaf<'_>, events: &[Value]) -> Value {
     let bytes: Option<Vec<u8>> = events.iter().map(|e| {
         let c = e.integer_value()?;
         (c & (CHAR_META - 1) < 0o200).then_some((c as u8 & 0x7f) | if c & CHAR_META != 0 { 0x80 } else { 0 })
@@ -219,24 +215,19 @@ fn this_command_keys_vector(cx) {
 defsubr! { name = "this-single-command-keys", gnu = "keyboard.c:12302", effect = Reads,
 fn this_single_command_keys(cx) {
     let keys = command_keys(cx)?;
-    let symbol = cx.intern(SINGLE_KEY_START);
-    let start = cx.variable_value(symbol)?.and_then(|v| v.integer_value()).unwrap_or(0);
-    let start = usize::try_from(start).unwrap_or(0).min(keys.len());
+    let start = cx.single_command_key_start();
     Ok(cx.vector(&keys[start..]))
 }}
 
 defsubr! { name = "this-single-command-raw-keys", gnu = "keyboard.c:12316", effect = Reads,
 fn this_single_command_raw_keys(cx) {
-    let symbol = cx.intern(RAW_KEYS);
-    let keys = cx.variable_value(symbol)?.unwrap_or(Value::NIL);
-    let keys = if cx.kind(keys) == Kind::Vector { cx.vector_values(keys)? } else { vec![] };
+    let keys = cx.raw_command_keys().to_vec();
     Ok(cx.vector(&keys))
 }}
 
 defsubr! { name = "clear-this-command-keys", gnu = "keyboard.c:12329", effect = Global,
 fn clear_this_command_keys(cx; optional keep_record: Value) {
-    let symbol = cx.intern(COMMAND_KEYS);
-    cx.store_variable(symbol, Value::NIL)?;
+    cx.store_command_keys(crate::command_loop::Store::TruncateKeys(0));
     if keep_record == Value::NIL {
         cx.clear_recent_keys();
     }
@@ -259,11 +250,21 @@ fn set_this_command_keys(cx, keys: Value) {
         // terminating NUL.
         events.push(Value::integer(0).unwrap());
     }
-    let vector = cx.vector_from(std::mem::take(&mut events));
-    let symbol = cx.intern(COMMAND_KEYS);
-    cx.store_variable(symbol, vector)?;
-    let start = cx.intern(SINGLE_KEY_START);
-    cx.store_variable(start, Value::integer(0).unwrap())?;
+    cx.store_command_keys(crate::command_loop::Store::Keys(&events, 0));
+    Ok(Value::NIL)
+}}
+
+// This command's keys made KEYS, a vector, as minibuf.c:1156 restores the
+// caller's after a read; with START, the single command's keys start there,
+// as command_loop_1 clears them for the next command.
+defsubr! { name = "romacs--set-command-keys", gnu = "minibuf.c:1156", effect = Global,
+fn set_command_keys(cx, keys: Value; optional start: Value) {
+    let events = cx.vector_values(keys)?;
+    let start = match start.integer_value() {
+        Some(n) => usize::try_from(n).map_err(|_| Fault::Wrong("natnump", start))?,
+        None => cx.single_command_key_start(),
+    };
+    cx.store_command_keys(crate::command_loop::Store::Keys(&events, start));
     Ok(Value::NIL)
 }}
 
