@@ -247,12 +247,17 @@ fn a_warm_unbounded_scan_stays_served() {
     let expression = COUNTERS.replace("EXPR", r#"(with-temp-buffer
        (dotimes (i 2500) (insert (format "(defun f%d (a) \"s(\" (list a 'b))\n" i)))
        (scan-sexps 1 (point-max))
-       (list (delta (lambda () (scan-sexps 1 (point-max)))) (buffer-size)))"#);
+       (list (delta (lambda () (scan-sexps 1 (point-max)))) (delta (lambda () (scan-sexps (progn (goto-char 1) (forward-line 13) (point)) (point-max)))) (buffer-size)))"#);
     let shown = shown(&expression);
-    let [warm] = &deltas(&shown)[..] else { panic!("{shown}") };
+    let [warm, inside] = &deltas(&shown)[..] else { panic!("{shown}") };
     let size = size(&shown);
     assert!(warm[0] == 1 && warm[2] >= 1 && warm[4] >= size - 4096 && warm[5] == 0,
             "served, excursion and exact folds, skipped, reused, leaves summarized: {warm:?} of {size} characters");
+    // A count no text can use up is served from the start, as on beta:
+    // the scan from line 14, inside the first leaf, reads only to that
+    // leaf's end.
+    assert!(inside[0] == 1 && inside[4] >= size - 1100 && inside[5] == 0,
+            "from line 14: served, excursion and exact folds, skipped, reused, leaves summarized: {inside:?} of {size} characters");
 }
 
 /// cc-mode's statement-block scan, `(scan-lists BRACE 1 0)' over about

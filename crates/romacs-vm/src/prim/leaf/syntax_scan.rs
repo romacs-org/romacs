@@ -1193,6 +1193,21 @@ mod tests {
         assert_eq!(shown("t"), "(2 (2) 0 0)");
     }
 
+    /// A served parse of part of a long text cuts and checks the whole
+    /// text at once, as its cost, so that later parses over the rest find
+    /// the partition made.
+    #[test]
+    fn a_served_parse_cuts_the_whole_text() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        let result = vm.eval_source_raw(r#"(with-temp-buffer
+          (dotimes (i 2500) (insert (format "(defun f%d (a) \"s(\" (list a 'b))\n" i)))
+          (parse-partial-sexp 1 20000)
+          (list (plist-get (romacs-syntax-summaries-stats) :served)
+                (>= (* 1024 (+ 2 (plist-get (romacs-syntax-summaries-stats) :leaves))) (buffer-size))))"#).unwrap();
+        assert_eq!(vm.display(result).unwrap(), "(1 t)");
+    }
+
     /// A quit pending when the list scan primitive starts stops it before
     /// its setup, as GNU's maybe_quit does: a cold scan whose setup would
     /// stop for `internal--syntax-propertize' quits instead, calls no Lisp
