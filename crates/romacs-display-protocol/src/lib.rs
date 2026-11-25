@@ -28,6 +28,7 @@ pub mod key_repeat_log;
 pub mod menu;
 pub mod meter;
 pub mod model;
+pub mod pane_revisions;
 pub mod modifier_policy;
 pub mod motion_spec;
 pub mod pane_picture;

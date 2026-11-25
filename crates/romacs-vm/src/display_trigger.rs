@@ -9,7 +9,8 @@
 //! each publication.
 //!
 //! The walk reads, for each window the published frame shows, the record
-//! its last snapshot left (`Shown`: its `ShownKey` and point) and compares it with the window now, as reuse does
+//! its last snapshot left (`Shown`: its `ShownKey`, point and owner
+//! picture) and compares it with the window now, as reuse does
 //! (`Vm::reuse_shown`): scalars and ids, no text, no glyphs. The trigger
 //! expands no band: a window that wants one of its own (a mode line, a
 //! header line) is stale and cycles, as before K2; with the
@@ -73,9 +74,21 @@ fn first_stale(found: Option<&'static str>) -> Staleness {
 
 impl Vm {
     /// What the frame the host just accepted (painted, or found equal to
-    /// the one painted) stood for, for `display_stale` to compare.
-    pub fn display_acceptance(&mut self) -> Result<DisplayAcceptance> {
+    /// the one painted) stood for, for `display_stale` to compare;
+    /// SUBMITTED, the frame painted, when it was.
+    pub fn display_acceptance(&mut self, submitted: Option<&FrameSnapshot>) -> Result<DisplayAcceptance> {
+        if let Some(frame) = submitted { self.name_built_pictures(frame); }
         Ok(DisplayAcceptance { stamps: self.frame_stamps()?, bar: self.status_bar_expanded() })
+    }
+    /// FRAME was submitted: the pictures the snapshots of the windows it
+    /// carries, its own and its child frames', were built with are the ones
+    /// it names. A window it does not carry, and a frame found equal to the
+    /// one on screen, name nothing new.
+    fn name_built_pictures(&mut self, frame: &FrameSnapshot) {
+        let children = frame.children.iter().flat_map(|child| child.windows.iter());
+        for id in frame.windows.iter().chain(children).map(|w| w.snapshot.id) {
+            if let Some(shown) = self.display_state.shown.get_mut(&id) && let Some(built) = shown.built.take() { shown.picture = Some(built); }
+        }
     }
     fn frame_stamps(&mut self) -> Result<FrameStamps> {
         // An in-place edit of the alternative families' alist bypasses its
@@ -169,13 +182,14 @@ impl Vm {
         Ok(children)
     }
     /// What window LEAF now shows differently from its last snapshot, which
-    /// the published frame painted: its record (`ShownKey`), point and
-    /// cursor; and any band at all, which the cycle
+    /// the published frame painted: its record (`ShownKey`), point,
+    /// cursor and owner picture; and any band at all, which the cycle
     /// expands, as before K2, as the trigger expands none.
     fn stale_window(&mut self, leaf: Leaf) -> Result<Option<&'static str>> {
         let Leaf { id, window, width, height } = leaf;
         let w = self.window(window)?;
         let (forced, cursor_off, buffer, mini) = (w.force_start, w.cursor_off, w.buffer, w.mini);
+        let revisions = w.pane_revisions.clone();
         if !self.display_state.shown.contains_key(&id) || !self.display_state.previous.contains_key(&id) {
             return Ok(Some("unpublished window"));
         }
@@ -184,6 +198,7 @@ impl Vm {
         let published = &self.display_state.previous[&id];
         if cursor_off != published.cursor_off { return Ok(Some("cursor")); }
         let point = self.display_state.shown[&id].point;
+        if let Some(revisions) = revisions && self.pane_pending(id, &revisions) { return Ok(Some("owner picture")); }
         if self.window_point_value(window)?.as_integer()? != point { return Ok(Some("point")); }
         let key = self.shown_key(window, width, height)?;
         if self.display_state.shown.get(&id).is_none_or(|shown| shown.key != key) { return Ok(Some("window")); }
@@ -192,6 +207,21 @@ impl Vm {
         // No band now: one the frame painted must go.
         let painted = self.display_state.previous.get(&id).is_some_and(|p| p.mode_line.is_some() || p.header_line.is_some());
         Ok(painted.then_some("bands"))
+    }
+    /// Whether window ID's owner published a picture its frame does not
+    /// name, which the pane path has not composed: one atomic load of each
+    /// of REVISIONS (O1 §3.3). One composed already needs no root frame,
+    /// and is taken as named.
+    fn pane_pending(&mut self, id: u64, revisions: &std::sync::Arc<romacs_display_protocol::pane_revisions::PaneRevisions>) -> bool {
+        let (picture, composed) = (revisions.picture(), revisions.composed());
+        let Some(shown) = self.display_state.shown.get_mut(&id) else { return true };
+        // Another pair is a fresh view or incarnation: it named none.
+        let named = shown.picture.as_ref().filter(|(held, _)| std::sync::Arc::ptr_eq(held, revisions)).map_or(0, |&(_, picture)| picture);
+        match pane_work(named, picture, composed) {
+            PaneWork::Settled => false,
+            PaneWork::Composed => { shown.picture = Some((std::sync::Arc::clone(revisions), picture)); false }
+            PaneWork::Pending => true,
+        }
     }
     /// Whether WINDOW wants a band of its own, a header line or a mode line,
     /// as the window functions decide them. They intern the formats' names,
@@ -221,6 +251,23 @@ impl Vm {
         if !current { return Ok(Some("status bar")); }
         Ok((self.tab_bar_snapshot(accepted.stamps.frame)? != shown.tab_bar).then_some("tab bar"))
     }
+}
+
+/// What a foreign pane's pictures ask of the evaluator (O1 §3.3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PaneWork {
+    /// No picture past the one the frame names.
+    Settled,
+    /// A newer picture the pane path has composed: no root frame.
+    Composed,
+    /// A newer picture not yet composed: a root frame must name it.
+    Pending,
+}
+
+/// What PICTURE, the newest picture accepted, and COMPOSED, the newest the
+/// render thread took for composition, ask of a frame that names NAMED.
+fn pane_work(named: u64, picture: u64, composed: u64) -> PaneWork {
+    if picture <= named { PaneWork::Settled } else if composed >= picture { PaneWork::Composed } else { PaneWork::Pending }
 }
 
 /// A visible child frame as a published frame shows it
@@ -275,7 +322,7 @@ mod tests {
 
     fn publish(vm: &mut Vm) -> (FrameSnapshot, DisplayAcceptance) {
         let shown = vm.frame_snapshot(800, 400).unwrap();
-        let accepted = vm.display_acceptance().unwrap();
+        let accepted = vm.display_acceptance(Some(&shown)).unwrap();
         (shown, accepted)
     }
 
@@ -368,6 +415,99 @@ mod tests {
             assert_eq!(vm.display_stale(&shown, &accepted).unwrap(), Staleness::Outdated("bands"), "{band}");
             assert_eq!((expansions(&mut vm), vm.mode_line_evals()), (before, evals), "{band}: nothing expanded");
         }
+    }
+
+    use romacs_display_protocol::pane_revisions::PaneRevisions;
+    use std::sync::Arc;
+
+    /// The selected window shows a stand-in: its view's revisions, as
+    /// ownership's view slot hands them out.
+    fn foreign(vm: &mut Vm) -> Arc<PaneRevisions> {
+        let revisions = Arc::new(PaneRevisions::default());
+        let window = vm.selected_window_value().unwrap();
+        vm.window_mut(window).unwrap().pane_revisions = Some(revisions.clone());
+        revisions
+    }
+
+    #[test]
+    fn the_pane_rule() {
+        assert_eq!(pane_work(3, 3, 0), PaneWork::Settled);
+        assert_eq!(pane_work(3, 4, 3), PaneWork::Pending);
+        assert_eq!(pane_work(3, 4, 4), PaneWork::Composed);
+        assert_eq!(pane_work(3, 4, 5), PaneWork::Composed);
+    }
+
+    /// An owner's newer picture for a shown window, bumped on the
+    /// receiver's thread, is pending pane work, though nothing of the
+    /// window's own changed; once the render thread composed it, no root
+    /// frame is due.
+    #[test]
+    fn an_owner_picture_is_pending_until_composed() {
+        let (mut vm, _, _) = published(TEXT);
+        let revisions = foreign(&mut vm);
+        let (shown, accepted) = publish(&mut vm);
+        assert_eq!(vm.display_stale(&shown, &accepted).unwrap(), Staleness::Current, "a fresh pair is not pending");
+        let receiver = revisions.clone();
+        std::thread::spawn(move || receiver.bump_picture(1)).join().unwrap();
+        assert_eq!(vm.display_stale(&shown, &accepted).unwrap(), Staleness::Outdated("owner picture"));
+        revisions.mark_composed(1);
+        assert_eq!(vm.display_stale(&shown, &accepted).unwrap(), Staleness::Current, "composed: no root frame");
+        revisions.bump_picture(2);
+        // A frame built with it but found equal to the one on screen, so
+        // never submitted, names nothing new.
+        let built = vm.frame_snapshot(800, 400).unwrap();
+        let unsubmitted = vm.display_acceptance(None).unwrap();
+        assert_eq!(vm.display_stale(&built, &unsubmitted).unwrap(), Staleness::Outdated("owner picture"), "built, not submitted");
+        let (shown, accepted) = publish(&mut vm);
+        assert_eq!(vm.display_stale(&shown, &accepted).unwrap(), Staleness::Current, "a frame submitted since names it");
+    }
+
+    /// A frame built with a window's newer picture but found equal, so not
+    /// submitted; then a submitted frame that does not carry that window:
+    /// no frame on screen names the picture, so it is still pending.
+    #[test]
+    fn a_submitted_frame_names_only_the_pictures_it_carries() {
+        let split = "(let* ((a (selected-window)) (h (/ (window-pixel-height a) 2))) (set-window-new-pixel a h) (split-window-internal a h nil 0.5))";
+        let (mut vm, _, _) = published(&format!("{TEXT} {split}"));
+        let revisions = foreign(&mut vm);
+        let (shown, _) = publish(&mut vm);
+        revisions.bump_picture(1);
+        let built = vm.frame_snapshot(800, 400).unwrap();
+        vm.display_acceptance(None).unwrap();
+        let selected = vm.selected_window_value().unwrap();
+        let id = vm.window(selected).unwrap().id;
+        let mut without = built.clone();
+        without.windows.retain(|w| w.snapshot.id != id);
+        assert_eq!(without.windows.len() + 1, built.windows.len(), "the frame submitted leaves the window out");
+        let accepted = vm.display_acceptance(Some(&without)).unwrap();
+        assert_eq!(vm.display_stale(&shown, &accepted).unwrap(), Staleness::Outdated("owner picture"));
+    }
+
+    /// A new view or incarnation is a fresh pair at 0: it names nothing
+    /// yet and asks nothing, whatever the old one held.
+    #[test]
+    fn a_fresh_pair_is_not_pending() {
+        let (mut vm, _, _) = published(TEXT);
+        foreign(&mut vm).bump_picture(5);
+        let (shown, accepted) = publish(&mut vm);
+        let fresh = foreign(&mut vm);
+        assert_eq!(vm.display_stale(&shown, &accepted).unwrap(), Staleness::Current);
+        fresh.bump_picture(1);
+        assert_eq!(vm.display_stale(&shown, &accepted).unwrap(), Staleness::Outdated("owner picture"));
+    }
+
+    /// A window no frame shows requests nothing, whatever its owner
+    /// publishes.
+    #[test]
+    fn a_hidden_window_s_picture_requests_nothing() {
+        let (mut vm, shown, accepted) = published(TEXT);
+        let selected = vm.selected_window_value().unwrap();
+        let buffer = vm.window(selected).unwrap().buffer;
+        let hidden = vm.allocate_window(buffer).unwrap();
+        let revisions = Arc::new(PaneRevisions::default());
+        vm.window_mut(hidden).unwrap().pane_revisions = Some(revisions.clone());
+        revisions.bump_picture(3);
+        assert_eq!(vm.display_stale(&shown, &accepted).unwrap(), Staleness::Current);
     }
 
     #[test]

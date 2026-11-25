@@ -633,6 +633,23 @@ struct Shown {
     /// The key the recorded end was laid out under when redisplay recorded
     /// it since the last paint (`record_end_laid'), else KEY's.
     ended: Option<ShownKey>,
+    /// The window's pane revisions and the picture revision the frame on
+    /// screen names: one a submitted frame was built with, or one the
+    /// render thread composed (`PaneRevisions`, `Vm::display_stale'). The
+    /// pair is held, so a fresh view's pair is never taken for it.
+    picture: Option<PanePicture>,
+    /// The pair and the picture the last snapshot was built with: named
+    /// once a submitted frame carries this window (`Vm::display_acceptance').
+    built: Option<PanePicture>,
+}
+
+/// A window's pane revisions and a picture revision they held.
+type PanePicture = (std::sync::Arc<romacs_display_protocol::pane_revisions::PaneRevisions>, u64);
+
+/// WINDOW's pane revisions and the picture they now hold; None for a
+/// window showing no stand-in.
+fn pane_picture(window: &crate::window::Window) -> Option<PanePicture> {
+    window.pane_revisions.as_ref().map(|revisions| (std::sync::Arc::clone(revisions), revisions.picture()))
 }
 
 /// A reused window's bands as painted (`Vm::fresh_bands'): their text,
@@ -1768,7 +1785,7 @@ impl Vm {
         if !w.live() {
             return Err("window deleted during snapshot".into());
         }
-        let (id, buffer, mini, view_generation) = (w.id, w.buffer, w.mini, w.shows);
+        let (id, buffer, mini, view_generation, picture) = (w.id, w.buffer, w.mini, w.shows, pane_picture(w));
         self.slots[slot].value = buffer;
         let mut shown = self.window_text(window, height, None)?;
         // The mini-window shows its overlay strings (icomplete's candidates).
@@ -1822,7 +1839,9 @@ impl Vm {
         let snapshot = self.publish_window(snapshot);
         let point = self.window_point_value(window)?.as_integer()?;
         let key = self.shown_key(window, width, height)?;
-        self.display_state.shown.insert(id, Shown { view_generation, text_revision: self.text_revision(self.slots[slot].value), key, point, mini, len, at_zv, table: table.id, ended: None });
+        // The frame on screen names what it named until a frame built with
+        // this snapshot is submitted.
+        self.display_state.shown.insert(id, Shown { view_generation, text_revision: self.text_revision(self.slots[slot].value), key, point, mini, len, at_zv, table: table.id, ended: None, picture: self.display_state.shown.get(&id).and_then(|shown| shown.picture.clone()), built: picture });
         self.display_state.laid.remove(&id);
         Ok(snapshot)
     }
@@ -2629,8 +2648,9 @@ impl Vm {
         }
         let Some(bands) = self.fresh_bands(root, slot, width, height, &key)? else { return Ok(None) };
         bands.apply(&mut snapshot);
+        let picture = pane_picture(self.window(self.slots[root].value)?);
         let Some(shown) = self.display_state.shown.get_mut(&id) else { return Ok(None) };
-        shown.point = point;
+        (shown.point, shown.built) = (point, picture);
         Ok(Some(snapshot))
     }
     /// The bands of the window in ROOT expanded again over its last full

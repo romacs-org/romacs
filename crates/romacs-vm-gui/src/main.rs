@@ -2034,14 +2034,14 @@ fn evaluate(
                 // such as show-paren's runs after every key.
                 let lost = images.borrow().must_repaint(sender.as_ref());
                 let Some(next) = changed_frame(&mut vm, &previous, next, last_presentation(), lost)? else {
-                    trigger.accept(&mut vm)?;
+                    trigger.accept(&mut vm, None)?;
                     vm.redisplay_done(snapshot_start.elapsed());
                     return Ok(None)
                 };
                 trigger.changed(&mut vm, &live_presentation);
                 let presentation = next_presentation(&host)?;
                 previous = paint(&mut engine.borrow_mut(), &mut vm, sender, &images, presentation, force_gc, floor, next, &host, Wait::No, &mut paint_timings)?;
-                trigger.accept(&mut vm)?;
+                trigger.accept(&mut vm, Some(&*previous.frame.snapshot))?;
                 // The evaluator's part: the frame's snapshot, layout and
                 // submission; the render thread draws it meanwhile.
                 vm.redisplay_done(snapshot_start.elapsed());

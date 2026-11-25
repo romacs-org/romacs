@@ -24,13 +24,15 @@ impl Trigger {
     /// The trigger of a loop whose window SHOWN shows its first paint, or
     /// shows nothing yet.
     pub fn new(vm: &mut Vm, shown: bool) -> Result<Self, String> {
-        Ok(Self { accepted: shown.then(|| vm.display_acceptance()).transpose()?, verifying: None })
+        Ok(Self { accepted: shown.then(|| vm.display_acceptance(None)).transpose()?, verifying: None })
     }
 
     /// The frame on screen is the one just built, painted or found equal
     /// to the one painted: what it stands for is taken.
-    pub fn accept(&mut self, vm: &mut Vm) -> Result<(), String> {
-        self.accepted = Some(vm.display_acceptance()?);
+    /// SUBMITTED, the frame painted, when it was: the pictures the windows
+    /// it carries were built with are the ones it names.
+    pub fn accept(&mut self, vm: &mut Vm, submitted: Option<&romacs_layout_input::FrameSnapshot>) -> Result<(), String> {
+        self.accepted = Some(vm.display_acceptance(submitted)?);
         self.verifying = None;
         Ok(())
     }

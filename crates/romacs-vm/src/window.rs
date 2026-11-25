@@ -89,6 +89,13 @@ pub(super) struct Window {
     /// How many times the window's buffer changed: what a record of its
     /// display compares, as a collection moves the buffer's Value.
     pub(crate) shows: u64,
+    /// For a window showing a stand-in, its view's picture revisions,
+    /// shared with the ownership receiver and the render thread
+    /// (`PaneRevisions`): one per window id, owner incarnation and view
+    /// generation, which ownership's view slot makes, a fresh one for a
+    /// new view or incarnation. None for any other window. The redisplay
+    /// trigger reads it (`Vm::display_stale').
+    pub(crate) pane_revisions: Option<std::sync::Arc<romacs_display_protocol::pane_revisions::PaneRevisions>>,
     pub force_start: bool,
 }
 impl Window {
@@ -143,6 +150,7 @@ impl Window {
             end_distance: 0,
             end_valid: false,
             shows: 0,
+            pane_revisions: None,
             force_start: false,
         }
     }

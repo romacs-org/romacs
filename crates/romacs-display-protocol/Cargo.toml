@@ -23,6 +23,7 @@ strum.workspace = true
 tracing.workspace = true
 crossbeam-channel.workspace = true
 romacs-logo.workspace = true
+romacs-snapshot = { path = "../romacs-snapshot" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc.workspace = true
