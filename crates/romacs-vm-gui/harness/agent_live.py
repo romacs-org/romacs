@@ -576,8 +576,10 @@ def providers(args, base):
         a.idle(first)
         a.idle(other)
         started = {'default': a.config_dirs(first), 'claude2': a.config_dirs(other)}
-        # The board names each session's harness, its account on hover.
+        # The board names each session's harness, its account on hover, in
+        # their project's threads.
         hovers = parity_live.read_sexp(a.eval('(progn (require (quote romacs-agent-board)) (with-temp-buffer (romacs-agent-board-mode) '
+                                              f'(setq romacs-agent-board--project (romacs-agent-board--project {lisp(a.work)})) '
                                               '(romacs-agent-board--draw (romacs-agent-board-rows (romacs-agent-summary nil) '
                                               'nil (romacs-agent-board--view)) 120) '
                                               '(let ((pos (point-min)) (found nil)) '
@@ -585,7 +587,7 @@ def providers(args, base):
                                               '(let ((h (get-text-property pos (quote help-echo)))) '
                                               '(when (and (stringp h) (string-prefix-p "account " h)) (push (substring h 8) found)))) '
                                               'found)))'))
-        shown = sorted(set(hovers))
+        shown = sorted(set(hovers or []))
         a.eval(f'(romacs-agent-stop {a.s(other)})')
         until(lambda: a.state(other) in ('ended', 'detached'), 15, 'session ended')
         a.client('--stop=none')
@@ -3509,8 +3511,12 @@ def history(args, base):
         setting = [('claude', claude_dir), ('codex', codex_home, CODEX, [])]
         a.providers(setting)
         text = lambda form: parity_live.read_sexp(a.eval(form))
-        home = text('(progn (save-window-excursion (romacs-agents)) (with-current-buffer "*romacs-agents*" '
-                    '(buffer-substring-no-properties (point-min) (point-max))))')
+        board = lambda project: text(f'(progn (save-window-excursion (romacs-agents)) (with-current-buffer "*romacs-agents*" '
+                                     f'(romacs-agent-board--enter {project}) '
+                                     '(buffer-substring-no-properties (point-min) (point-max))))')
+        # The home board lists the project; choosing it lists its transcripts.
+        home = board('nil')
+        project = board(f'(romacs-agent-board--project {lisp(a.work)})')
         item = lambda ident: (f'(seq-find (lambda (i) (equal (plist-get i :id) {lisp_text(ident)})) '
                               '(romacs-agent-history-items))')
         views = {}
@@ -3595,7 +3601,7 @@ def history(args, base):
                 'partial-end': read(0, b1 + 3), 'whole': read(0, b1 + len(rows[2]))}
         order = lambda chat, first, then: first in chat and then in chat and chat.index(first) < chat.index(then)
         result = {
-            'home': home, 'views': {k: v[:400] for k, v in views.items()},
+            'home': home, 'project': project, 'views': {k: v[:400] for k, v in views.items()},
             'claude_argv': claude_run[-1]['argv'] if claude_run else None,
             'claude_config_dir': claude_run[-1].get('config_dir') if claude_run else None,
             'codex_resumed': codex_run[-1]['resumed'] if codex_run else None,
@@ -3603,8 +3609,9 @@ def history(args, base):
             'untouched': untouched, 'imported_again': imported_again, 'refused': refused, 'cuts': cuts,
             'twin_sockets': sockets, 'twin_runs': twin_runs, 'twin_failed': twin_failed}
         result['ok'] = bool(
-            '◇ list the files here' in home and '◇ count the lines of a.txt' in home and 'AGENTS.md' not in home
-            and home.index(a.work.name) < home.index('◇')
+            a.work.name in home and '◇ 2 transcripts' in home and '◇ list the files here' not in home
+            and '◇ list the files here' in project and '◇ count the lines of a.txt' in project and 'AGENTS.md' not in project
+            and project.index(a.work.name) < project.index('◇ list')
             and all(v.split('|')[1] == 't' for v in views.values())
             and views[cid].startswith('*history: list the files here*')
             and order(views[cid], '❯ list the files here', 'Two files') and '\n  $ ls' in views[cid]
@@ -4031,7 +4038,8 @@ PLAN_PROMPT = 'Plan how you would add the line "third" to notes.txt. Present the
 
 def board_keys(args, base):
     """The agent board by real keys (C-x C-a a, RET), a buffer in the
-    selected window: on a project, its first row opens in the board's
+    selected window: it lists projects, one with only transcripts too; RET
+    on one shows its rows, and RET again its first row opens in the board's
     window, the thread that wants the user most, else the newest (a
     delegated one folds under its parent) or, with no thread, its newest
     transcript; on "◇ N more", every transcript is shown and the board
@@ -4092,6 +4100,17 @@ def board_keys(args, base):
                    f'(re-search-forward {lisp_text(regexp)}) (beginning-of-line) t)')
             a.keys('-k', 'Return')
 
+        def line(name):
+            """The regexp of project NAME's line: its mark, then its name."""
+            return f'^▌ .*[ ]{name}  '
+
+        def enter(name):
+            """From the project list, RET on project NAME's line: its rows show."""
+            a.eval(f'(with-selected-window {board} (when romacs-agent-board--project (romacs-agent-board-projects)) t)')
+            ret_on(line(name))
+            until(lambda: a.eval(f'(with-selected-window {board} (and romacs-agent-board--project t))') == 't',
+                  15, f'{name} entered')
+
         def settled(read, want, seconds=15):
             """READ's value once it is WANT, or its last after SECONDS: a
             loaded host runs the key later than it is typed."""
@@ -4107,20 +4126,24 @@ def board_keys(args, base):
         # The transcripts are listed once their scan, aside, ends: the
         # board is drawn again then.
         until(lambda: a.eval(f'(with-selected-window {board} (save-excursion (goto-char (point-min)) '
-                             '(and (re-search-forward "^transcripts  " nil t) t)))') == 't', 30, 'transcripts listed')
-        ret_on('^transcripts  ')
+                             f'(and (re-search-forward {lisp_text(line("transcripts"))} nil t) t)))') == 't', 30, 'transcripts listed')
+        enter('transcripts')
+        a.keys('-k', 'Return')
         steps['project_without_session'] = settled(lambda: parity_live.read_sexp(a.eval(
             '(with-current-buffer (window-buffer (selected-window)) '
             '(list buffer-read-only (plist-get (bound-and-true-p romacs-agent-history--item) :path)))')) + [shown()],
             ['t', str(codex_file), 'nil'])
         open_board()
-        ret_on('^work  ')
+        enter('work')
+        a.keys('-k', 'Return')
         steps['project_with_session'] = settled(lambda: [showing(), shown()], [sids[1], 'nil'])
         steps['nested'] = parity_live.read_sexp(a.eval(
             f'(length (plist-get (seq-find (lambda (row) (equal (plist-get row :id) {lisp_text(sids[0])})) '
-            '(romacs-agent-board-rows (romacs-agent-summary nil) nil (romacs-agent-board--view))) '
+            '(romacs-agent-board-rows (romacs-agent-summary nil) nil '
+            f'(append (list :project (romacs-agent-board--project {lisp(a.work)})) (romacs-agent-board--view)))) '
             ':children))'))
         open_board()
+        enter('transcripts')
         ret_on('◇ +[0-9]+ more')
         steps['more'] = settled(lambda: [shown(), a.eval('(buffer-local-value (quote romacs-agent-board--all-history) (get-buffer "*romacs-agents*"))'),
                                          a.eval('(with-current-buffer "*romacs-agents*" (and (string-search " more  (" (buffer-string)) t))')],
@@ -4131,6 +4154,7 @@ def board_keys(args, base):
         # The board is not told until RET: a redraw (a batch of session
         # events, the store's rows, a transcript scan ending) would drop
         # its row before the key reaches it.
+        enter('work')
         hooks = "'(romacs-agent-ui-changed-hook romacs-agent-store-filled-hook romacs-agent-history-indexed-hook)"
         a.eval(f'(progn (dolist (hook {hooks}) (remove-hook hook (function romacs-agent-board--refresh))) t)')
         a.eval(f'(let ((id {lisp_text(sids[1])})) (delete-directory (romacs-agent-dir (romacs-agent-get id)) t) '
@@ -4143,7 +4167,7 @@ def board_keys(args, base):
         steps['gone'] = settled(lambda: [shown(), parity_live.read_sexp(a.eval('(current-message)'))],
                                 ['t', 'That thread is gone: the board is drawn again'])
         a.eval(f'(progn (dolist (hook {hooks}) (add-hook hook (function romacs-agent-board--refresh))) t)')
-        ret_on('^work  ')
+        ret_on(line('work'))
         steps['after_gone'] = settled(showing, sids[0])
         open_board()
         thread = lisp_text(sids[0])

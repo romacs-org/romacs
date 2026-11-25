@@ -48,7 +48,7 @@
 (defvar-local romacs-agent-board--all-history nil "Every project's transcripts show, not its newest few.")
 (defvar-local romacs-agent-board--project nil
   "The project whose threads the board shows, its directory; nil: every
-project with threads, a line each.")
+project with threads or transcripts, a line each.")
 
 (defun romacs-agent-board--view ()
   "The board's view, from its buffer's choices, for `romacs-agent-board-rows'."
@@ -222,20 +222,22 @@ then a row saying how many more, unless VIEW shows them all."
      (cl-loop for child in (romacs-agent-board--children session)
               sum (romacs-agent-board--settled-count child keys))))
 
-(defun romacs-agent-board--project-line (project threads keys marks)
-  "PROJECT, which has THREADS, as one line: what they are at and how many."
+(defun romacs-agent-board--project-line (project threads transcripts keys marks)
+  "PROJECT, which has THREADS and TRANSCRIPTS, as one line: what its
+threads are at and how many, and how many transcripts."
   (let ((all (mapcan (lambda (session) (romacs-agent-board--tree-keys session keys marks)) threads)))
-    (append project (list :keys all :folded (length all)))))
+    (append project (list :keys all :folded (length all) :transcripts (length transcripts)))))
 
 (defun romacs-agent-board--project-rows (cwd threads transcripts keys marks view settled-count)
   "Rows for project CWD and its THREADS and TRANSCRIPTS in VIEW: with no
-project chosen and no filter, its line alone when it has threads; with
-one, its threads and transcripts when it is that project."
+project chosen and no filter, its line alone when it has threads or
+transcripts; with one, its threads and transcripts when it is that project."
   (let ((project (list :kind 'project :id cwd :cwd cwd :settled-count settled-count))
         (chosen (plist-get view :project)))
     (cond
      ((plist-get view :words) (romacs-agent-board--project-threads project threads transcripts keys marks view))
-     ((null chosen) (and threads (list (romacs-agent-board--project-line project threads keys marks))))
+     ((null chosen) (and (or threads transcripts)
+                         (list (romacs-agent-board--project-line project threads transcripts keys marks))))
      ((equal chosen cwd) (romacs-agent-board--project-threads project threads transcripts keys marks view)))))
 
 (defun romacs-agent-board--project-threads (project threads transcripts keys marks view)
@@ -302,8 +304,9 @@ then the newest, with what each delegated) and, off the Settled section,
 its transcripts.  A thread shows in the section it is in, a thread above
 it dim for context.  Project rows count settled threads off that section.
 With no project chosen (VIEW's :project) and no filter, each project
-with threads shows its row alone, saying how many threads it has and
-what they are at; with one chosen, that project's rows alone.  Each row is a
+with threads or transcripts shows its row alone, saying how many threads
+it has and what they are at, or how many transcripts when it has none;
+with one chosen, that project's rows alone.  Each row is a
 plist of :kind (`project', `thread', `history', `more' or `reading', the
 transcripts' first scan under way) and :id, which names it across
 redraws; a thread's :summary is its session's."
@@ -461,9 +464,7 @@ wide as the wider mark, so rows line up whichever they show."
                            (if-let* ((count (plist-get row :settled-count)) ((> count 0)))
                                (propertize (format "  %s %d" (romacs-agent-glyph 'board-settled) count) 'face 'romacs-agent-dim)
                              "")
-                           (if-let* ((count (plist-get row :folded)))
-                               (propertize (format "  %s %d thread%s" (romacs-agent-glyph 'board-threads) count (if (= count 1) "" "s")) 'face 'romacs-agent-dim)
-                             ""))
+                           (romacs-agent-board--project-count row))
                    room)))
        (concat name
                (romacs-truncate (propertize (concat "  " (plist-get row :cwd)) 'face 'romacs-agent-dim)
@@ -479,6 +480,18 @@ wide as the wider mark, so rows line up whichever they show."
                                     (plist-get row :count))
                             'romacs-agent-dim))
     ('reading (propertize (romacs-truncate (concat "  " (romacs-agent-glyph 'board-history) " Reading harness transcripts…") width) 'face 'romacs-agent-dim))))
+
+(defun romacs-agent-board--project-count (row)
+  "How many threads project ROW's line holds, or with none, how many
+transcripts; empty off the project list."
+  (let ((threads (or (plist-get row :folded) 0))
+        (transcripts (or (plist-get row :transcripts) 0)))
+    (propertize (cond ((> threads 0)
+                       (format "  %s %d thread%s" (romacs-agent-glyph 'board-threads) threads (if (= threads 1) "" "s")))
+                      ((> transcripts 0)
+                       (format "  %s %d transcript%s" (romacs-agent-glyph 'board-history) transcripts (if (= transcripts 1) "" "s")))
+                      (t ""))
+                'face 'romacs-agent-dim)))
 
 (defun romacs-agent-board--project-mark (keys)
   "A project's mark before its name: a bar in the colour of the most
@@ -813,7 +826,7 @@ line; point on what it came from."
     (if project (romacs-agent-board-next 1) (romacs-agent-board--goto from))))
 
 (defun romacs-agent-board-projects ()
-  "Show every project with threads again, a line each."
+  "Show every project with threads or transcripts again, a line each."
   (interactive nil romacs-agent-board-mode)
   (unless romacs-agent-board--project (user-error "Every project shows already"))
   (romacs-agent-board--enter nil))

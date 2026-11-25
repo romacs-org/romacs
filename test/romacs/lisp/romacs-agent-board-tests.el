@@ -541,7 +541,7 @@ Record each chat shown in `shown' as (SESSION ACTION)."
           (should-not (romacs-agent-board--find "two"))
           (should (= listings archives 1)))))))
 
-(ert-deftest romacs-agent-board-lists-projects-with-threads ()
+(ert-deftest romacs-agent-board-lists-projects-with-threads-or-transcripts ()
   (romacs-agent-board-tests--with
     (mk "lead" "lead" 'idle 10)
     (mk "worker" "worker" 'running 20 :options '(:parent "lead"))
@@ -558,7 +558,9 @@ Record each chat shown in `shown' as (SESSION ACTION)."
                                      (plist-get row :keys) (plist-get row :folded)))
                              projects)
                      '((project "/p/one" (idle working) 2)
-                       (project "/p/two" (idle) 1))))
+                       (project "/p/two" (idle) 1)
+                       (project "/p/three" nil 0))))
+      (should (string-search "◇ 1 transcript" (romacs-agent-board--line (nth 2 projects) 100)))
       (should folder)
       (should (string-prefix-p (concat "▌ " folder " one") line))
       (should (eq (get-text-property 0 'face line) 'romacs-agent-running))
