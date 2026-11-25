@@ -46,7 +46,10 @@ impl Leaf<'_> {
         match kind {
             // Framed with the next read's bytes.
             Some(kind) => channel.framer = Some(Framer::with_rest(kind, limit, rest)),
-            None => channel.carryover = rest,
+            None => {
+                channel.rest_carried = !rest.is_empty();
+                channel.carryover = rest;
+            }
         }
         Ok(Value::NIL)
     }
@@ -70,24 +73,28 @@ impl Leaf<'_> {
     }
 
     /// process_read for a framed PROC: BUF, the bytes just read (none at
-    /// end of file, or at a pty's EIO, its end), framed.  (NBYTES . FRAMES): each frame a string
-    /// decoded by PROC's coding system, or `over' or `malformed'.
+    /// end of file, or at a pty's EIO, its end), framed.  (NBYTES . FRAMES):
+    /// each frame a string decoded by PROC's coding system, or `over' or
+    /// `malformed'.  At the end NBYTES counts a last unended line, as an
+    /// unframed read counts its carryover, so a wait sees output; the end
+    /// itself is the next read's.
     pub(super) fn process_read_framed(&mut self, proc: Value, buf: &[u8]) -> Out {
         let eof = buf.is_empty();
         let mut frames = Vec::new();
+        let mut last_line = 0;
         if let Some(channel) = self.channel_mut(proc)
             && !(eof && channel.last_block)
             && let Some(framer) = channel.framer.as_mut()
         {
             framer.push(buf, &mut frames);
             if eof {
-                framer.finish(&mut frames);
+                last_line = framer.finish(&mut frames);
                 channel.last_block = true;
             }
         }
         self.process_mut(proc).nbytes_read += buf.len() as u64;
         let list = self.frames_list(proc, frames)?;
-        let nbytes = fixnum(buf.len())?;
+        let nbytes = fixnum(buf.len() + last_line)?;
         Ok(self.cons(nbytes, list))
     }
 

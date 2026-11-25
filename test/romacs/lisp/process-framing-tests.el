@@ -151,6 +151,22 @@ PROCESS, a listener, has no output of its own to wait for."
           (process-framing-tests--until process (lambda () (equal said "bye\n"))))
       (delete-process process))))
 
+;; A last line delivered at the end of output is output: a wait for it
+;; returns, though the child lives on.
+(ert-deftest process-framing-a-last-line-ends-a-wait ()
+  (let* ((frames nil)
+         (process (make-process :name "process-framing-last" :command '("sh" "-c" "printf last; exec 1>&- 2>&-; sleep 5")
+                                :noquery t :connection-type 'pipe :coding 'no-conversion
+                                :filter (lambda (_p fs) (setq frames (append frames fs))))))
+    (unwind-protect
+        (progn
+          (set-process-framing process 'lines)
+          (with-timeout (3 (error "A wait for the last line never returned"))
+            (while (not frames) (accept-process-output process)))
+          (should (equal frames '("last")))
+          (should (process-live-p process)))
+      (delete-process process))))
+
 ;;; The agent protocol's connection
 
 (ert-deftest process-framing-rpc-lines-over-a-socket ()

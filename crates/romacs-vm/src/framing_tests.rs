@@ -188,6 +188,24 @@ fn content_length_of_any_size_never_overflows() {
 }
 
 #[test]
+fn a_stream_going_on_after_its_end_is_framed_afresh() {
+    let mut framer = Framer::new(Kind::ContentLength, None);
+    let mut out = Vec::new();
+    framer.push(b"Content-Length: 50\r\n\r\nab", &mut out);
+    assert_eq!(framer.finish(&mut out), 0);
+    // A short read after the end: no body is still expected of it.
+    framer.push(b"x", &mut out);
+    framer.push(b"\r\n\r\n", &mut out);
+    framer.push(&message("{}"), &mut out);
+    assert_eq!(out, vec![bytes("{}")]);
+    let mut lines = Framer::new(Kind::Lines, Some(2));
+    lines.push(b"toolong", &mut out);
+    assert_eq!(lines.finish(&mut out), 0);
+    lines.push(b"ok\n", &mut out);
+    assert_eq!(out, vec![bytes("{}"), Frame::Over, bytes("ok")]);
+}
+
+#[test]
 fn content_length_rest_keeps_its_header() {
     // Framing stopped in a body gives back the header with the body so far.
     let mut framer = Framer::new(Kind::ContentLength, None);

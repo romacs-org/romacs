@@ -105,15 +105,27 @@ impl Framer {
         }
     }
 
-    /// The stream ended: a last line with no LF is a frame; an incomplete
-    /// body or header is dropped.
-    pub(crate) fn finish(&mut self, out: &mut Vec<Frame>) {
-        if self.kind == Kind::Lines && self.state == State::Frame && !self.buf.is_empty() {
+    /// Whether the stream's end would make a frame of what is held: a
+    /// last line with no LF.
+    pub(crate) fn holds_line(&self) -> bool {
+        self.kind == Kind::Lines && self.state == State::Frame && !self.buf.is_empty()
+    }
+
+    /// The stream ended: a last line with no LF is a frame, whose length
+    /// is returned; an incomplete body or header is dropped.  The framer
+    /// starts afresh, should the stream go on (a pty reopened).
+    pub(crate) fn finish(&mut self, out: &mut Vec<Frame>) -> usize {
+        let line = if self.holds_line() { self.buf.len() } else { 0 };
+        if line > 0 {
             out.push(Frame::Bytes(std::mem::take(&mut self.buf)));
         }
         self.buf = Vec::new();
         self.start = 0;
         self.scan = 0;
+        if self.state != State::Broken {
+            self.state = State::Frame;
+        }
+        line
     }
 
     /// The bytes of the frame not yet complete, its header included, given

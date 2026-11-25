@@ -835,7 +835,8 @@ as the next output, but a frame being skipped as over its limit."
 
 (defun romacs-process-unsent-bytes (process)
   "The bytes PROCESS holds unsent: written as its peer reads, whenever
-Romacs waits (`romacs-process-send-nowait')."
+Romacs waits (`romacs-process-send-nowait').  Its own queue: records a
+TLS session has made of bytes already taken are not counted."
   (romacs--proc-unsent (romacs--get-process process)))
 
 ;;;; Default filter and sentinel
