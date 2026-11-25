@@ -593,6 +593,8 @@ connection object, called when the process dies.")
     ;; could use a pipe with a process filter instead of
     ;; `after-change-functions'.  Alternatively, we need a new initarg
     ;; (but maybe not a slot).
+    ;; Romacs: a process given is checked before anything is made for it.
+    (unless (functionp proc) (jsonrpc--check-pipe proc nil))
     (let* ((stderr-buffer-name (format "*%s stderr*" name))
            (stderr-buffer (jsonrpc--forwarding-buffer stderr-buffer-name "[stderr] " conn))
            (hidden-name (concat " " stderr-buffer-name)))
@@ -604,12 +606,13 @@ connection object, called when the process dies.")
                          (funcall proc)
                        (funcall proc conn))
                    proc))
+      ;; One made here, with its stderr buffer, goes if it is refused.
+      (jsonrpc--check-pipe proc stderr-buffer)
       (with-current-buffer stderr-buffer
         (ignore-errors (kill-buffer hidden-name))
         (rename-buffer hidden-name)
         (setq buffer-read-only t))
       (process-put proc 'jsonrpc-stderr stderr-buffer))
-    (jsonrpc--check-pipe proc)
     (setf (jsonrpc--process conn) proc)
     (set-process-buffer proc (get-buffer-create (format " *%s output*" name)))
     (set-process-filter proc #'jsonrpc--process-filter)
@@ -628,34 +631,23 @@ connection object, called when the process dies.")
       (setq buffer-read-only t))
     (process-put proc 'jsonrpc-connection conn)))
 
-(defun jsonrpc--check-pipe (proc)
+(defun jsonrpc--check-pipe (proc stderr-buffer)
   "Signal, saying how to fix it, unless PROC is a pipe or a socket: a
 pty's line discipline (echo, CR/LF) breaks a byte protocol, and its
-output cannot be framed."
-  (when (process-tty-name proc)
-    (error "JSON-RPC process %s runs on a pty, which cannot carry JSON-RPC: %s"
-           (process-name proc)
-           (if (file-remote-p default-directory)
-               "use a TRAMP method with direct asynchronous processes (ssh, scp, rsync, ...) \
-and make its process in jsonrpc-with-remote-pipes"
-             "make it with :connection-type 'pipe"))))
-
-(defmacro jsonrpc-with-remote-pipes (&rest body)
-  "Run BODY, which makes a JSON-RPC server's process, so that a remote
-one is a pipe: TRAMP's direct asynchronous process (an ssh child with
-`:connection-type' `pipe'), where its method has one.  Only this call
-sees it, as a connection-local `tramp-direct-async-process' t that
-comes after the user's own profiles, so their setting stays theirs."
-  `(progn
-     (require 'files-x)
-     (defvar connection-local-profile-alist)
-     (defvar connection-local-criteria-alist)
-     (let ((connection-local-profile-alist
-            (append connection-local-profile-alist
-                    '((jsonrpc--remote-pipe (tramp-direct-async-process . t)))))
-           (connection-local-criteria-alist
-            (append connection-local-criteria-alist '((nil jsonrpc--remote-pipe)))))
-       ,@body)))
+output cannot be framed.  STDERR-BUFFER non-nil, PROC and it were made
+for this connection, and are let go first."
+  (when (and (processp proc) (process-tty-name proc))
+    (let ((name (process-name proc))
+          (remote (file-remote-p default-directory)))
+      (when stderr-buffer
+        (delete-process proc)
+        (kill-buffer stderr-buffer))
+      (error "JSON-RPC process %s runs on a pty, which cannot carry JSON-RPC: %s"
+             name
+             (cond ((not remote) "make it with :connection-type 'pipe")
+                   ((bound-and-true-p tramp-pipe-process)
+                    (format "TRAMP's method for %s gives no pipe; use an ssh method (ssh, scp, rsync) on one hop" remote))
+                   (t (format "over TRAMP (%s), make it with `tramp-pipe-process' bound to t" remote)))))))
 
 (cl-defmethod jsonrpc-connection-send ((connection jsonrpc-process-connection)
                                        &rest args

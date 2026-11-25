@@ -5494,8 +5494,43 @@ a connection-local variable."
 It is not recommended to change this variable globally.  Instead, it
 should be set connection-local.")
 
+(defvar tramp-pipe-process nil
+  "Non-nil asks the `make-process' this is bound around for a pipe at
+both ends (Romacs): TRAMP's direct asynchronous process over an ssh
+method on one hop, ssh run with -T so the remote side has no pty, and
+TRAMP's own connection shared where it has one open, so a login it
+authenticated is not asked for again.  Any other route is refused
+before anything is spawned.  A byte protocol (JSON-RPC, as eglot's)
+needs this: a pty echoes what is sent and turns LF into CRLF.")
+
+(defun tramp--pipe-route (v)
+  "Signal, naming what works, unless V reaches a pipe for
+`tramp-pipe-process': an ssh method with direct asynchronous processes,
+on one hop.  Non-nil when it does."
+  (unless (and (equal (tramp-get-method-parameter v 'tramp-login-program) "ssh")
+               (member "-t" (tramp-get-method-parameter v 'tramp-direct-async))
+               (or (not (tramp-multi-hop-p v))
+                   (null (cdr (tramp-compute-multi-hops v)))))
+    (tramp-error v 'file-error
+                 "Cannot run a process on a pipe over `%s': it needs an ssh method (ssh, scp, rsync) on one hop"
+                 (tramp-make-tramp-file-name v 'noloc)))
+  t)
+
+(defun tramp--pipe-share-options (v)
+  "ssh's options to share TRAMP's own connection to V when it has one,
+never becoming its master: what `tramp-use-connection-share' gives
+TRAMP's connection, with ControlMaster no.  Empty when it shares none."
+  (let ((options (or (tramp-compat-funcall 'tramp-ssh-or-plink-options v) "")))
+    (if (string-match-p "ControlPath=none" options)
+        ""
+      (replace-regexp-in-string
+       " -o ControlPersist=[^ ]*" ""
+       (replace-regexp-in-string "ControlMaster=[^ ]*" "ControlMaster=no" options)))))
+
 (defun tramp-direct-async-process-p (&rest args)
-  "Whether direct async `make-process' can be called."
+  "Whether direct async `make-process' can be called.
+With `tramp-pipe-process', t over an ssh method on one hop, and an
+error over any other."
   (let ((v (tramp-dissect-file-name default-directory))
 	(buffer (plist-get args :buffer))
 	(stderr (plist-get args :stderr)))
@@ -5516,6 +5551,7 @@ should be set connection-local.")
 	   tramp-null-hop "direct-async-process-warned" t)
 	  (tramp-warning v msg))))
 
+    (or (and tramp-pipe-process (tramp--pipe-route v))
     (and ;; The method supports it.
          (tramp-get-method-parameter v 'tramp-direct-async)
 	 ;; It has been indicated.  We don't use the global value of
@@ -5530,7 +5566,7 @@ should be set connection-local.")
 	     (null (cdr (tramp-compute-multi-hops v))))
 	 ;; There's no remote stdout or stderr file.
 	 (or (not (stringp buffer)) (not (tramp-tramp-file-p buffer)))
-	 (or (not (stringp stderr)) (not (tramp-tramp-file-p stderr))))))
+	 (or (not (stringp stderr)) (not (tramp-tramp-file-p stderr)))))))
 
 ;; This function is used by `tramp-*-handle-make-process' and
 ;; `tramp-sh-handle-process-file' to filter local environment variables
@@ -5607,15 +5643,13 @@ processes."
 	    (append
 	     `("cd" ,(tramp-shell-quote-argument localname) "&&" "(" "env")
 	     env `(,command ")")))
-	   ;; Add remote shell if needed.  Romacs: a pipe asked for is a
-	   ;; pipe at both ends, so ssh's "-t" (a remote pty, which echoes
-	   ;; and turns LF into CRLF) is left out for one
-	   ;; (ledger/divergences/LISP-JSONRPC-FRAMING.md).
+	   ;; Add remote shell if needed.
 	   (command
 	    (if (consp (tramp-get-method-parameter v 'tramp-direct-async))
 		(append
-		 (if (eq connection-type 'pipe)
-		     (remove "-t" (tramp-get-method-parameter v 'tramp-direct-async))
+		 ;; Romacs: a pipe asked for, no remote pty (`tramp-pipe-process').
+		 (if tramp-pipe-process
+		     (cons "-T" (remove "-t" (tramp-get-method-parameter v 'tramp-direct-async)))
 		   (tramp-get-method-parameter v 'tramp-direct-async))
                  `(,(string-join command " ")))
 	      command))
@@ -5634,7 +5668,9 @@ processes."
 		(tramp-compat-make-temp-name))))
 	   (options
 	    (when sh-file-name-handler-p
-	      (tramp-compat-funcall 'tramp-ssh-controlmaster-options v)))
+	      (if tramp-pipe-process
+		  (tramp--pipe-share-options v)
+		(tramp-compat-funcall 'tramp-ssh-controlmaster-options v))))
 	   (device
 	    (when adb-file-name-handler-p
 	      (tramp-compat-funcall 'tramp-adb-get-device v)))

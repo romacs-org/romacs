@@ -59,15 +59,50 @@ time, as two reads in the same clock tick would."
     (jsonrpc-framing-tests--run-timers (lambda () (= (length received) 2)))
     (should (equal (reverse received) '(1 2)))))
 
-;; A pty cannot carry JSON-RPC: the connection refuses one and names the fix.
+;; A pty cannot carry JSON-RPC: the connection refuses one and names the
+;; fix; one it made goes with its stderr buffer, one it was given makes it
+;; no buffer.
 (ert-deftest jsonrpc-framing-a-pty-is-refused-with-its-fix ()
-  (let ((process (make-process :name "jsonrpc-framing-pty" :command '("sleep" "5")
-                               :connection-type 'pty :noquery t)))
+  (let* ((made nil)
+         (err (should-error
+               (make-instance 'jsonrpc-process-connection :name "jsonrpc-framing-pty"
+                              :process (lambda () (setq made (make-process :name "jsonrpc-framing-pty"
+                                                                           :command '("sleep" "5")
+                                                                           :connection-type 'pty :noquery t)))))))
+    (should (string-match-p ":connection-type 'pipe" (error-message-string err)))
+    (should-not (process-live-p made))
+    (should-not (get-buffer "*jsonrpc-framing-pty stderr*"))
+    (should-not (get-buffer " *jsonrpc-framing-pty stderr*")))
+  (let ((given (make-process :name "jsonrpc-framing-given" :command '("sleep" "5")
+                             :connection-type 'pty :noquery t)))
     (unwind-protect
-        (let ((err (should-error (make-instance 'jsonrpc-process-connection
-                                                :process process :name "jsonrpc-framing-pty"))))
-          (should (string-match-p ":connection-type 'pipe" (error-message-string err))))
-      (delete-process process))))
+        (progn
+          (should-error (make-instance 'jsonrpc-process-connection :name "jsonrpc-framing-given" :process given))
+          (should (process-live-p given))
+          (should-not (get-buffer "*jsonrpc-framing-given stderr*")))
+      (delete-process given))))
+
+;; TRAMP gives a pipe (`tramp-pipe-process') over an ssh method on one
+;; hop, and refuses any other route before anything is spawned.
+(ert-deftest jsonrpc-framing-tramp-refuses-a-route-with-no-pipe ()
+  (require 'tramp)
+  (dolist (dir '("/sudo::/tmp/" "/docker:none:/tmp/" "/ssh:a|ssh:b:/tmp/"))
+    (let ((default-directory dir) (tramp-pipe-process t) (before (length (process-list))))
+      (should (string-match-p "needs an ssh method"
+                              (error-message-string
+                               (should-error (make-process :name "x" :command '("true")
+                                                           :connection-type 'pipe :file-handler t)))))
+      (should (= (length (process-list)) before)))))
+
+;; The pipe shares TRAMP's own connection as a client, never its master.
+(ert-deftest jsonrpc-framing-tramp-shares-as-a-client ()
+  (require 'tramp-sh)
+  (let ((v (tramp-dissect-file-name "/ssh:localhost:/"))
+        (tramp-ssh-controlmaster-options "-o ControlMaster=auto -o ControlPath=/tmp/tramp.%%C -o ControlPersist=no"))
+    (let ((tramp-use-connection-share t))
+      (should (equal (tramp--pipe-share-options v) "-o ControlMaster=no -o ControlPath=/tmp/tramp.%%C")))
+    (let ((tramp-use-connection-share 'suppress) (tramp-ssh-controlmaster-options nil))
+      (should (equal (tramp--pipe-share-options v) "")))))
 
 (provide 'jsonrpc-framing-tests)
 ;;; jsonrpc-framing-tests.el ends here
