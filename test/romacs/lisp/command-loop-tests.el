@@ -837,7 +837,7 @@ Beta's romacs--read-key-sequence returns the down event."
 
 (ert-deftest command-loop-tests-timer-requeue-during-read ()
   "GNU translates a timed-wait requeue through keyboard-translate-table.
-Beta's romacs--read-char retries it through the unread branch."
+Romacs's read_char retries it through the unread branch."
   :expected-result (if (fboundp 'romacs--take-user-signal) :failed :passed)
   (command-loop-tests--with-input nil
     (let ((keyboard-translate-table (make-char-table 'keyboard-translate-table))
