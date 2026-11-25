@@ -103,32 +103,35 @@ session's executable."
              (process-environment (append (list (concat "ROMACS_RUNTIME_ROOT=" (directory-file-name tree))
                                                 (concat "ROMACS_LISP_DIR=" (expand-file-name "lisp" tree)))
                                           (cl-remove-if (lambda (e) (string-match-p "\\`\\(?:ROMACS_RUNTIME_ROOT\\|ROMACS_LISP_DIR\\|TEST_FILES\\|SELECTOR\\)=" e))
-                                                        process-environment)))
-             (pending ""))
+                                                        process-environment))))
         (romacs-live-test--show (format "── %s" module))
         (condition-case err
-            (romacs-live-test--launch run module tree logs pending)
+            (romacs-live-test--launch run module tree logs)
           (error (romacs-live-test--show (format "%s: the runner did not start: %s" module (error-message-string err)))
                  (push (list module 'unstarted 0 0 nil) (plist-get run :exits))
                  (romacs-live-test--next run)))))))
 
-(defun romacs-live-test--launch (run module tree logs pending)
-  "Start RUN's runner on MODULE from TREE, its logs in LOGS; PENDING is
-the output not yet a whole line.  Its end records the exit and how many
-files it reported, and how many of them did not pass."
+(defun romacs-live-test--frame (&rest args)
+  "`make-process' of ARGS, its output framed in lines."
+  (let ((process (apply #'make-process args)))
+    (set-process-framing process 'lines)
+    process))
+
+(defun romacs-live-test--launch (run module tree logs)
+  "Start RUN's runner on MODULE from TREE, its logs in LOGS, its output
+framed in lines (`set-process-framing'), each parsed and shown.  Its end
+records the exit and how many files it reported, and how many of them
+did not pass."
   (let ((seen (length (plist-get (plist-get run :result) :files))) (none nil))
-    (make-process
+    (romacs-live-test--frame
      :name (format "romacs-live-test-%s" module) :noquery t :connection-type 'pipe
      :command (romacs-live-test--command tree module logs)
-     :filter (lambda (_process text)
-               (setq pending (concat pending text))
-               (while (string-match "\n" pending)
-                 (let ((line (substring pending 0 (match-beginning 0))))
-                   (setq pending (substring pending (match-end 0)))
-                   ;; The runner's own word that the library has no suites.
-                   (when (string-match-p "No suites selected" line) (setq none t))
-                   (setf (plist-get run :result) (romacs-live-test--parse line (plist-get run :result)))
-                   (romacs-live-test--show line))))
+     :filter (lambda (_process lines)
+               (dolist (line lines)
+                 ;; The runner's own word that the library has no suites.
+                 (when (string-match-p "No suites selected" line) (setq none t))
+                 (setf (plist-get run :result) (romacs-live-test--parse line (plist-get run :result)))
+                 (romacs-live-test--show line)))
      :sentinel (lambda (process _event)
                  (unless (process-live-p process)
                    (let ((files (nthcdr seen (plist-get (plist-get run :result) :files))))

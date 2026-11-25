@@ -9,28 +9,35 @@
       (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
   (require 'romacs-agent))
 
+(defun romacs-agent-stream-tests--echo (process bytes until)
+  "Send BYTES through PROCESS, a `cat', and read its output until UNTIL
+says t."
+  (process-send-string process bytes)
+  (with-timeout (10 (error "No output from %s" process))
+    (while (not (funcall until)) (accept-process-output process 0.05))))
+
 (ert-deftest romacs-agent-stream-records-in-any-chunks ()
   ;; A record split over many chunks is handled once, whole; two in one
-  ;; chunk, each; a record's start ending a chunk waits for its rest.
+  ;; chunk, each; a record's start ending a chunk waits for its rest.  The
+  ;; attachment's framing splits what it reads (`romacs-agent--frame').
   (let* ((session (romacs-agent--make :id "s" :harness 'claude))
-         (process (make-process :name "romacs-stream-fixture" :command '("cat") :noquery t))
+         (process (make-process :name "romacs-stream-fixture" :command '("cat") :noquery t
+                                :connection-type 'pipe :coding 'no-conversion :filter #'romacs-agent--filter))
          (seen nil)
          (long (make-string 200000 ?é)))
+    (romacs-agent--frame process)
     (unwind-protect
         (cl-letf (((symbol-function 'romacs-agent--kept) #'ignore)
                   ((symbol-function 'romacs-agent--record)
                    (lambda (_s record) (push (gethash "seq" record) seen))))
           (process-put process 'romacs-agent session)
           (let ((line (encode-coding-string (concat (json-serialize (romacs-mcp--object "seq" 1 "text" long)) "\n") 'utf-8)))
-            ;; 1,000 chunks, some cutting a character's bytes.
-            (let ((step (/ (length line) 1000)))
-              (cl-loop for at from 0 below (length line) by step
-                       do (romacs-agent--filter process (substring line at (min (length line) (+ at step)))))))
-          (romacs-agent--filter process "{\"seq\":2}\n{\"seq\":3}\n{\"se")
+            (romacs-agent-stream-tests--echo process line (lambda () seen)))
+          (romacs-agent-stream-tests--echo process "{\"seq\":2}\n{\"seq\":3}\n{\"se" (lambda () (memq 3 seen)))
           (should (equal (reverse seen) '(1 2 3)))
-          (romacs-agent--filter process "q\":4}\n")
+          (romacs-agent-stream-tests--echo process "q\":4}\n" (lambda () (memq 4 seen)))
           (should (equal (reverse seen) '(1 2 3 4)))
-          (should-not (process-get process 'pending)))
+          (should-not (process-get process 'frames)))
       (delete-process process))))
 
 (ert-deftest romacs-agent-stream-journal-lines-by-offset ()
@@ -65,7 +72,7 @@
                    (lambda (_s record) (push (gethash "seq" record) seen))))
           (process-put process 'romacs-agent session)
           (process-put process 'notes-only t)
-          (romacs-agent--filter process "{\"attached\":true}\n{\"seq\":2}\n{\"seq\":3}\n")
+          (romacs-agent--filter process '("{\"attached\":true}" "{\"seq\":2}" "{\"seq\":3}"))
           (should (process-get process 'attached))
           (should (equal (reverse seen) '(2 3)))
           ;; Reported at once, in its chat: never left silent.
@@ -85,11 +92,11 @@
                    (lambda (_s record)
                      (let ((seq (gethash "seq" record)))
                        (push seq seen)
-                       (when (eql seq 1) (romacs-agent--filter process "q\":3}\n{\"seq\":4}\n"))))))
+                       (when (eql seq 1) (romacs-agent--filter process (list "{\"seq\":3}" "{\"seq\":4}")))))))
           (process-put process 'romacs-agent session)
-          (romacs-agent--filter process "{\"seq\":1}\n{\"seq\":2}\n{\"se")
+          (romacs-agent--filter process (list "{\"seq\":1}" "{\"seq\":2}"))
           (should (equal (reverse seen) '(1 2 3 4)))
-          (should-not (process-get process 'pending)))
+          (should-not (process-get process 'frames)))
       (delete-process process))))
 
 (ert-deftest romacs-agent-stream-history-keeps-the-current-manifest ()

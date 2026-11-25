@@ -2170,6 +2170,7 @@ mod leaf {
     pub(crate) mod treesit;
     pub(crate) mod inotify;
     mod process;
+    mod process_framing;
     mod call_process_wait;
     mod gnutls;
     pub(crate) use process::{CallOutput, Target, strerror};

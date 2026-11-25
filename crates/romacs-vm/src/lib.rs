@@ -53,6 +53,7 @@ mod terminal_host;
 mod terminal_keys;
 mod process_jobs;
 mod subprocess;
+mod framing;
 mod tls;
 mod html;
 mod html_entities;

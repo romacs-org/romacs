@@ -2714,6 +2714,11 @@ Fall back to normal file name handler if no Tramp file name handler exists."
 		  (tramp-file-name-equal-p v (car tramp-current-connection))
 		(setq tramp-current-connection (list v)))
 
+	      ;; Romacs: a pipe asked for is checked before any backend
+	      ;; runs, and is a pipe locally too (`tramp-pipe-process').
+	      (when (and tramp-pipe-process (eq operation 'make-process))
+		(tramp--pipe-route v)
+		(setq args (plist-put (copy-sequence args) :connection-type 'pipe)))
 	      ;; Call the backend function.
 	      (unwind-protect
 	          (if foreign
@@ -5494,8 +5499,53 @@ a connection-local variable."
 It is not recommended to change this variable globally.  Instead, it
 should be set connection-local.")
 
+(defvar tramp-pipe-process nil
+  "Non-nil asks the `make-process' this is bound around for a pipe at
+both ends (Romacs): TRAMP's direct asynchronous process over an ssh
+method on one hop, a local pipe whatever `:connection-type' says, ssh
+run with -T so the remote side has no pty, and TRAMP's own connection
+shared where it has one open, so a login it authenticated is not asked
+for again.  Any other route is refused before a backend is called.  A
+byte protocol (JSON-RPC, as eglot's) needs this: a pty echoes what is
+sent and turns LF into CRLF.")
+
+(defun tramp--pipe-route (v)
+  "Signal, naming what works, unless V reaches a pipe for
+`tramp-pipe-process': only shapes it knows pass, those of the ssh, scp
+and rsync methods, on one hop: ssh run by tramp-sh, the host its last
+login argument with no \"--\" before it, and \"-t -t\" its direct
+asynchronous arguments.  Non-nil when it does."
+  (unless (and (eq (tramp-find-foreign-file-name-handler v 'make-process)
+                   'tramp-sh-file-name-handler)
+               (equal (tramp-get-method-parameter v 'tramp-login-program) "ssh")
+               (equal (tramp-get-method-parameter v 'tramp-direct-async) '("-t" "-t"))
+               (let ((args (tramp-get-method-parameter v 'tramp-login-args)))
+                 (and (equal (car (last args)) '("%h"))
+                      (not (member "--" (flatten-tree args)))))
+               (or (not (tramp-multi-hop-p v))
+                   (null (cdr (tramp-compute-multi-hops v)))))
+    (tramp-error v 'file-error
+                 "Cannot run a process on a pipe over `%s': it needs an ssh method (ssh, scp, rsync) on one hop"
+                 (tramp-make-tramp-file-name v 'noloc)))
+  t)
+
+(defun tramp--pipe-share-options (v)
+  "ssh's options to share TRAMP's own connection to V when it has one,
+never becoming its master: what `tramp-use-connection-share' gives
+TRAMP's connection, with ControlMaster no; its suppression, as given,
+when the user suppresses sharing."
+  (let ((options (or (tramp-compat-funcall 'tramp-ssh-or-plink-options v) "")))
+    ;; A user's `suppress' stays theirs: no master is used or made.
+    (if (string-match-p "ControlPath=none" options)
+        options
+      (replace-regexp-in-string
+       " -o ControlPersist=[^ ]*" ""
+       (replace-regexp-in-string "ControlMaster=[^ ]*" "ControlMaster=no" options)))))
+
 (defun tramp-direct-async-process-p (&rest args)
-  "Whether direct async `make-process' can be called."
+  "Whether direct async `make-process' can be called.
+With `tramp-pipe-process', t over an ssh method on one hop, and an
+error over any other."
   (let ((v (tramp-dissect-file-name default-directory))
 	(buffer (plist-get args :buffer))
 	(stderr (plist-get args :stderr)))
@@ -5516,6 +5566,7 @@ should be set connection-local.")
 	   tramp-null-hop "direct-async-process-warned" t)
 	  (tramp-warning v msg))))
 
+    (or (and tramp-pipe-process (tramp--pipe-route v))
     (and ;; The method supports it.
          (tramp-get-method-parameter v 'tramp-direct-async)
 	 ;; It has been indicated.  We don't use the global value of
@@ -5530,7 +5581,7 @@ should be set connection-local.")
 	     (null (cdr (tramp-compute-multi-hops v))))
 	 ;; There's no remote stdout or stderr file.
 	 (or (not (stringp buffer)) (not (tramp-tramp-file-p buffer)))
-	 (or (not (stringp stderr)) (not (tramp-tramp-file-p stderr))))))
+	 (or (not (stringp stderr)) (not (tramp-tramp-file-p stderr)))))))
 
 ;; This function is used by `tramp-*-handle-make-process' and
 ;; `tramp-sh-handle-process-file' to filter local environment variables
@@ -5611,7 +5662,9 @@ processes."
 	   (command
 	    (if (consp (tramp-get-method-parameter v 'tramp-direct-async))
 		(append
-		 (tramp-get-method-parameter v 'tramp-direct-async)
+		 ;; Romacs: no remote pty for a pipe (`tramp-pipe-process').
+		 (unless tramp-pipe-process
+		   (tramp-get-method-parameter v 'tramp-direct-async))
                  `(,(string-join command " ")))
 	      command))
 	   (login-program (tramp-expand-args v 'tramp-login-program))
@@ -5629,7 +5682,9 @@ processes."
 		(tramp-compat-make-temp-name))))
 	   (options
 	    (when sh-file-name-handler-p
-	      (tramp-compat-funcall 'tramp-ssh-controlmaster-options v)))
+	      (if tramp-pipe-process
+		  (tramp--pipe-share-options v)
+		(tramp-compat-funcall 'tramp-ssh-controlmaster-options v))))
 	   (device
 	    (when adb-file-name-handler-p
 	      (tramp-compat-funcall 'tramp-adb-get-device v)))
@@ -5646,6 +5701,8 @@ processes."
        ;; options.
        login-args
        (append
+	;; Romacs: no remote pty, among ssh's options (`tramp-pipe-process').
+	(when tramp-pipe-process '("-T"))
 	(flatten-tree (tramp-get-method-parameter v 'tramp-async-args))
 	(flatten-tree
 	 (mapcar
@@ -5668,6 +5725,7 @@ processes."
       ;; so we reset it.
       (set-process-query-on-exit-flag p (null noquery))
       (process-put p 'remote-command orig-command)
+      (when tramp-pipe-process (process-put p 'tramp-pipe-process t))
       (when (bufferp stderr)
 	(tramp-taint-remote-process-buffer stderr))
 
