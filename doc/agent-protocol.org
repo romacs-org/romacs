@@ -828,17 +828,21 @@ was accepted on and, on =service-relay.sock=, from =agents/transport=.
   client, an i5-2520M over a tailnet with an 8.5 ms ping, a fake session
   in each private service):
 
-  | ssh to          | connect, cold | connect, master | round trip p50 | events/s | again, by itself |
-  |-----------------+---------------+-----------------+----------------+----------+------------------|
-  | localhost       | 0.27-0.39 s   | 10-14 ms        | 0.24 ms        | 16,700   | 261 ms           |
-  | the i5-2520M    | 0.28-0.34 s   | 25-41 ms        | 8.2-8.7 ms     | 4,600    | 288 ms           |
+  | ssh to       | connect, cold | connect, master | round trip p50    | events/s     | again, by itself |
+  |--------------+---------------+-----------------+-------------------+--------------+------------------|
+  | localhost    | 0.27-0.42 s   | 10-14 ms        | 0.24 ms / 1.3-1.5 | 8,100-16,700 | 261-264 ms       |
+  | the i5-2520M | 0.28-0.38 s   | 25-41 ms        | 8.7 ms / 8.2-9.2  | 4,300-4,900  | 282-291 ms       |
 
-  A connect is ssh's, then hello and the list; a round trip is a request
-  the service refuses at once; events are 2,000 units of 400 bytes from
-  the Romacs client; again is from a pipe killed to the list watched,
-  0.25 s of it the wait.  A cold connect to the i5-2520M took 2.2 to 2.9 s
-  now and then, as plain ssh did (2.5 s); its service answers a hello in
-  5 ms on the machine itself.
+  A connect is ssh's, then hello and the list.  A round trip is a
+  request the service refuses at once: a Python probe's, then the Romacs
+  client's (ms).  Events are 2,000 units of 400 bytes to the Romacs
+  client, as fast as the service raises them: they measure the service
+  more than the pipe (8,100 with the machine under load).  Again is from
+  a pipe killed to the list watched, 0.25 s of it the wait.  Not
+  explained: a connect to the i5-2520M took 2.2 to 5.7 s three times in
+  some twenty, twice the second through a new master; plain ssh's first
+  connection there took 2.5 s once.  Its service answers a hello in 5 ms
+  on the machine itself.
 
 ** The headless service
 - *Its entry.*  =romacs-vm-gui --batch -l romacs-agent-headless -f
