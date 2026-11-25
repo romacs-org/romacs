@@ -23,32 +23,31 @@
 (defconst romacs-agent-headless--wait 1
   "Seconds one wait for input lasts before the loop waits again.")
 
-(declare-function romacs-saved-settings-start "romacs-saved-settings" ())
-(declare-function romacs-init-load "romacs-init-load" (file))
-(declare-function romacs--activate-packages "romacs-loadup-bootstrap" ())
+(require 'romacs-init-load)
 
-(defun romacs-agent-headless--init-file ()
-  "The user's Romacs init file, as the GUI names it
-\(crates/romacs-vm-gui/src/user_init.rs): init.el in romacs/ under
-XDG_CONFIG_HOME when that is absolute, else under ~/.config."
-  (let ((config (getenv "XDG_CONFIG_HOME")))
-    (expand-file-name "romacs/init.el" (if (and config (file-name-absolute-p config)) config "~/.config"))))
+(declare-function romacs-saved-settings-start "romacs-saved-settings" ())
+(declare-function romacs--activate-packages "romacs-loadup-bootstrap" ())
+(defvar romacs-loadup-delayed-init-variables)
 
 (defun romacs-agent-headless--load-init ()
-  "Take the GUI's steps before its first frame: name the init file (as
-`user-init-file', its directory `user-emacs-directory'), load the saved
-settings, activate the installed packages, then load the init through
-`romacs-init-load'.  A step that fails is reported and the next goes on."
-  (let ((file (romacs-agent-headless--init-file)))
-    (setq user-init-file file user-emacs-directory (file-name-directory file))
+  "Take the GUI's per-user steps before its first frame: its per-user
+directory (`romacs-init-directory') as `user-emacs-directory', the
+settings computed from it again (`romacs-loadup-delayed-init-variables',
+the packages' directory among them), the saved settings, the installed
+packages, then its init.el through `romacs-init-load'.  A step that
+fails is reported and the next goes on."
+  (let ((file (expand-file-name "init.el" (romacs-init-directory))))
+    (setq user-emacs-directory (romacs-init-directory) user-init-file file)
+    (with-demoted-errors "romacs-agent-headless: per-user settings: %S"
+      (let ((user-emacs-directory-warning nil))
+        (mapc #'custom-reevaluate-setting romacs-loadup-delayed-init-variables)))
     (with-demoted-errors "romacs-agent-headless: saved settings: %S"
       (when (fboundp 'romacs-saved-settings-start) (romacs-saved-settings-start)))
     (with-demoted-errors "romacs-agent-headless: packages: %S"
       (when (fboundp 'romacs--activate-packages) (romacs--activate-packages)))
     (when (file-exists-p file)
-      (let ((said (if (fboundp 'romacs-init-load) (romacs-init-load file)
-                    (with-demoted-errors "%S" (load file nil t t) nil))))
-        (when (stringp said) (message "romacs-agent-headless: init failed: %s" said))))))
+      (when-let* ((said (romacs-init-load file)))
+        (message "romacs-agent-headless: init failed: %s" said)))))
 
 ;;;###autoload
 (defun romacs-agent-headless-run ()

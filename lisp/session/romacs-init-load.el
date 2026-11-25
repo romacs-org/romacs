@@ -23,6 +23,14 @@ it was in, as text; nil when it loaded.")
 (declare-function romacs--loads-in-progress "load_progress.rs" ())
 (declare-function backtrace-to-string "backtrace" (&optional frames))
 
+(defun romacs-init-directory ()
+  "Romacs's per-user directory, which holds the init file the GUI loads
+\(crates/romacs-vm-gui/src/user_init.rs): romacs/ under XDG_CONFIG_HOME
+when it names an absolute directory, else under ~/.config."
+  (let ((config (getenv-internal "XDG_CONFIG_HOME")))
+    (file-name-as-directory
+     (expand-file-name "romacs" (if (and config (string-prefix-p "/" config)) config "~/.config")))))
+
 (defun romacs-init-load (file)
   "Load the user's init FILE: nil when it loaded, else the error that
 stopped it, as the loader words one (`FILE: line N form M: FORM: ERROR'),

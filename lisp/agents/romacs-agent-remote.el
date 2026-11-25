@@ -548,10 +548,10 @@ editor makes `romacs-agent--runtime-root' 0755)."
 alone, in the agents' runtime directory; nil when a socket there would
 not fit a socket's name (ssh's digest, 40 bytes, and the suffix of its
 temporary name, 17, after it), or when ssh would read its name otherwise
-\(a space, a quote, a % or a $)."
+\(a space, a quote, a backslash, a % or a $)."
   (let ((dir (expand-file-name "ssh" (romacs-agent--runtime-root))))
     (when (and (<= (+ (string-bytes dir) 1 40 17) romacs-agent-remote--socket-path-most)
-               (not (string-match-p "[[:space:]%\"$]" dir)))
+               (not (string-match-p "[[:space:]%\"'$\\]" dir)))
       (make-directory dir t)
       (set-file-modes dir #o700)
       dir)))
@@ -747,6 +747,8 @@ shows this editor's own sessions again when it showed SOURCE's."
     (when (timerp (romacs-agent-remote-retry source)) (cancel-timer (romacs-agent-remote-retry source)))
     (when (eq source romacs-agent-remote--source)
       (setq romacs-agent-remote--source nil romacs-agent-board-source romacs-agent-log-local))
+    ;; Nor does a dial under way connect it.
+    (setf (romacs-agent-remote-dial source) nil)
     (when (romacs-agent-remote-client source) (romacs-agent-client-close (romacs-agent-remote-client source)))
     (when (process-live-p (romacs-agent-remote-relay source)) (delete-process (romacs-agent-remote-relay source)))
     (romacs-agent-board--refresh)))
@@ -774,7 +776,9 @@ service, connected unless it is.  Machines connected before stay so."
   (interactive (list (romacs-agent-remote--read-host)))
   (let* ((source (gethash host romacs-agent-remote--sources))
          (client (and source (romacs-agent-remote-client source))))
-    (if (and client (romacs-agent-client-live-p client))
+    ;; Connected where HOST is now named: shown; else connected there.
+    (if (and client (romacs-agent-client-live-p client)
+             (equal (romacs-agent-remote-place source) (cdr (assoc host (romacs-agent-remote--hosts)))))
         (setq romacs-agent-remote--source source romacs-agent-board-source source)
       (romacs-agent-remote-connect nil host)))
   (romacs-agents))
