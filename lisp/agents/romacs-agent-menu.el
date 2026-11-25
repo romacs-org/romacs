@@ -117,6 +117,23 @@ source takes this editor's commands only (`romacs-agent-log--commands-p')."
   (unless (romacs-agent-log--commands-p) (user-error "This chat's session takes no commands from here"))
   (romacs-agent-log--loaded romacs-agent-log--session))
 
+(defvar romacs-agent-ui--live-keys)
+
+(defun romacs-agent-chat-settle ()
+  "Settle this chat's thread until it is brought back from the board, and
+kill the chat (`romacs-agent-settle-recorded').  Say when its delegated
+tasks are still at work: their results wait for it."
+  (interactive nil romacs-agent-log-mode)
+  (let* ((summary (or (romacs-agent-log--summary) (user-error "This chat has no thread")))
+         (working (cl-some (lambda (child) (and (plist-get child :id)
+                                                (memq (plist-get child :key) romacs-agent-ui--live-keys)))
+                           (romacs-agent-summary-children-rows summary))))
+    (unless (romacs-agent-settle-recorded (romacs-agent-summary-id summary))
+      (user-error "That thread is gone"))
+    (kill-buffer (current-buffer))
+    (message (if working "Settled.  Its delegated tasks are still at work: their results wait until you bring it back."
+               "Settled: the board brings it back"))))
+
 (defun romacs-agent-chat-stop ()
   "Stop the session."
   (interactive nil romacs-agent-log-mode)
@@ -480,6 +497,7 @@ the session, the view."
   "F" ("Fresh conversation, briefed" romacs-agent-chat-renew)
   "r" ("Resume" romacs-agent-chat-resume :inapt-if #'romacs-agent-log--running-p)
   "x" ("Stop" romacs-agent-chat-stop)
+  "s" ("Settle and close" romacs-agent-chat-settle)
   :group "View"
   "e" ("Earlier turns" romacs-agent-log-earlier)
   "w" ("Copy the entry at point" romacs-agent-log-copy))
