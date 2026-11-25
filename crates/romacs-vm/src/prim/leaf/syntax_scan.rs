@@ -1121,7 +1121,7 @@ impl Leaf<'_> {
 
 #[cfg(test)]
 mod tests {
-    use crate::Vm;
+    use crate::{Value, Vm};
 
     #[test]
     fn list_summary_stats_report_service_by_run() {
@@ -1191,6 +1191,33 @@ mod tests {
         };
         assert_eq!(shown("nil"), "(2 nil 0 0)");
         assert_eq!(shown("t"), "(2 (2) 0 0)");
+    }
+
+    /// A quit pending when the list scan primitive starts stops it before
+    /// its setup, as GNU's maybe_quit does: a cold scan whose setup would
+    /// stop for `internal--syntax-propertize' quits instead, calls no Lisp
+    /// and cuts no leaf.
+    #[test]
+    fn a_pending_quit_stops_a_list_scan_before_its_setup() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        vm.eval_source_raw(r#"(progn (set-buffer (get-buffer-create "entry quit"))
+          (insert "x " (make-string 100000 ?x))
+          (set (make-local-variable 'parse-sexp-lookup-properties) t)
+          (set (make-local-variable 'syntax-propertize--done) 1))"#).unwrap();
+        let signal = std::sync::Arc::new(crate::QuitSignal::new());
+        vm.share_quit_signal(signal.clone());
+        vm.enter_busy();
+        assert!(signal.interrupt());
+        let args = [Value::integer(1).unwrap(), Value::integer(1).unwrap(), Value::NIL, Value::NIL, Value::NIL, Value::NIL];
+        let outcome = {
+            let mut leaf = super::Leaf { vm: &mut vm };
+            leaf.quittable(|leaf| leaf.syntax_scan(super::Op::ScanSexps, &args, Value::NIL, Value::NIL))
+        };
+        assert!(matches!(outcome, Err(_)), "the scan quits");
+        let index = vm.buffer_index().unwrap();
+        let leaves = super::buffer_text(&vm, index).syntax.borrow().leaves();
+        assert_eq!(leaves, 0, "no leaf is cut");
     }
 
     /// A quit pending when an indexed list scan starts stops it there,
