@@ -362,6 +362,17 @@ pub(crate) struct Scan {
     pub mark: Pos,
     /// The comment scan it stopped in.
     pub forw: Option<Forw>,
+    /// The lowest depth a forward list scan reached since it set it, for a
+    /// summary of how far a span falls (`crate::syntax_summary::lists`).
+    /// A stop for Lisp does not keep it.
+    pub low: i64,
+}
+impl Scan {
+    /// The position a forward scan has read to: a comment scan's own,
+    /// where it stopped in one, else FROM.
+    pub(crate) fn reached(&self) -> Pos {
+        self.forw.map_or(self.from, |forw| forw.from)
+    }
 }
 
 impl<T: Text> Scanner<'_, T> {

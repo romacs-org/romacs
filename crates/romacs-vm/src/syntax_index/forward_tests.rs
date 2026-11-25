@@ -357,10 +357,12 @@ fn randomized_forward(seed: u64, cases: u64) {
                 text.splice(start..end, inserted);
             }
             let call = random_call(&mut rng, text.len());
-            let done = match rng.below(3) {
+            // A frontier within a few leaves of FROM half the time: most calls
+            // end before one further on.
+            let done = match rng.below(4) {
                 0 => None,
                 1 => Some(i64::MAX),
-                _ => Some(position(rng.below(text.len() + 1))),
+                _ => Some(call.from.max(1) + i64::try_from(rng.below(4 * leaf + 1)).unwrap()),
             };
             let polls = rng.chance(25).then(|| 3 + rng.next() % 60);
             let callback_seed = rng.next();

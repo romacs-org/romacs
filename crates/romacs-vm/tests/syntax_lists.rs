@@ -162,11 +162,20 @@ fn forward_list_scans_match_pinned_gnu_and_fold() {
     assert!(failures.is_empty(), "{} failures:\n{}", failures.len(), failures.join("\n"));
 }
 
-/// What EXPRESSION, run in a fresh Romacs, shows.
+/// What EXPRESSION, run in a fresh Romacs, shows, from a run in which no
+/// context lost its summaries: a char-table write by any thread of the
+/// process moves the count every context is kept under, and the other
+/// tests of this process write tables.
 fn shown(expression: &str) -> String {
-    let mut vm = Vm::new();
-    vm.install_lisp_prelude().unwrap();
-    vm.eval_source(expression).and_then(romacs_vm::Local::display).unwrap_or_else(|e| panic!("{expression}: {e:?}"))
+    for _ in 0..100 {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        let shown = vm.eval_source(expression).and_then(romacs_vm::Local::display).unwrap_or_else(|e| panic!("{expression}: {e:?}"));
+        if deltas(&shown).iter().all(|delta| delta[5] == 0) {
+            return shown;
+        }
+    }
+    panic!("a char table was written during each of 100 runs");
 }
 
 /// `stat' gives a count of the buffer's index, `delta' what FORM added to
@@ -175,7 +184,8 @@ const COUNTERS: &str = r#"(progn
  (defalias 'table (lambda () (let ((st (make-char-table 'syntax-table))) (set-char-table-parent st (standard-syntax-table)) st)))
  (defalias 'under (lambda (table f) (let ((old (syntax-table))) (set-syntax-table table) (unwind-protect (funcall f) (set-syntax-table old)))))
  (defalias 'stat (lambda (key &optional sub) (let ((v (plist-get (romacs-syntax-summaries-stats) key))) (or (if sub (cdr (assq sub v)) v) 0))))
- (defalias 'counters (lambda () (list (stat :list-served) (stat :folds 'excursion) (stat :folds 'exact) (stat :skipped) (stat :leaf-scans))))
+ (defalias 'counters (lambda () (list (stat :list-served) (stat :folds 'excursion) (stat :folds 'exact) (stat :skipped) (stat :leaf-scans)
+                                      (stat :context-invalidations))))
  (defalias 'delta (lambda (f) (let ((before (counters))) (funcall f)
    (let ((after (counters)) (r nil))
      (while after (setq r (cons (- (car after) (car before)) r) after (cdr after) before (cdr before)))
@@ -183,11 +193,11 @@ const COUNTERS: &str = r#"(progn
  EXPR)"#;
 
 /// Counter deltas as numbers: served, excursion folds, exact folds,
-/// characters skipped, leaves summarized.
+/// characters skipped, leaves summarized, contexts invalidated.
 fn deltas(shown: &str) -> Vec<Vec<i64>> {
     shown.split(")").filter_map(|group| {
         let numbers: Vec<i64> = group.trim_matches(['(', ' ']).split(' ').filter_map(|n| n.parse().ok()).collect();
-        (numbers.len() == 5).then_some(numbers)
+        (numbers.len() == 6).then_some(numbers)
     }).collect()
 }
 

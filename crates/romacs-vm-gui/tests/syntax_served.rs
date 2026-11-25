@@ -61,6 +61,7 @@ fn electric_pair_scans_fold_what_the_first_ones_propertized() {
     assert_eq!(value(&actual.1), value(&expected.1), "the key's result");
     let folded = actual.1.lines().find(|line| line.starts_with("(folded")).expect("a count line");
     let counts: Vec<i64> = folded.trim_matches(['(', ')']).split(' ').skip(1).map(|n| n.parse().unwrap()).collect();
-    assert!(counts[0] >= 10 && counts[2] >= 100_000,
+    // electric-pair's scans run at depth 0 past whole forms: exact entries.
+    assert!(counts[0] + counts[1] >= 10 && counts[2] >= 100_000,
             "one key's scans folded (excursion exact skipped) {counts:?}: the later scans fold what the first propertized");
 }

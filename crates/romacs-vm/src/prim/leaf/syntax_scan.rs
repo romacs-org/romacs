@@ -328,9 +328,39 @@ struct Served {
     check: bool,
 }
 
-enum SummaryScan {
-    Parse { plain: bool },
-    Lists,
+/// A list scan's run: where it goes on from, if it stopped before, its
+/// FROM, COUNT and DEPTH, and its mode.
+struct ListCall {
+    resume: Option<scan::Scan>,
+    args: (i64, i64, i64),
+    sexpflag: bool,
+}
+type ListRun = std::result::Result<Option<i64>, scan::Stopped<Box<scan::Scan>>>;
+impl ListCall {
+    /// The run by the scanner alone.
+    fn plain(&self, scanner: &mut Scanner<'_, View<'_>>) -> ListRun {
+        match self.resume {
+            Some(scan) => scanner.lists(scan, self.sexpflag),
+            None => scanner.scan_lists(self.args.0, self.args.1, self.args.2, self.sexpflag),
+        }
+    }
+}
+
+/// CALL folded over the summaries of VIEW's text in SERVED's context.
+/// Under `romacs-syntax-summaries-check' the scanner runs it too, and
+/// where the two end apart MISMATCH says how.
+fn indexed_lists(view: &View<'_>, scanner: &mut Scanner<'_, View<'_>>, served: &Served, call: &ListCall,
+                 mismatch: &mut Option<String>) -> ListRun {
+    let Body::Multibyte(text, _) = &view.body else { unreachable!("served only in a multibyte buffer") };
+    let run = text.syntax.borrow_mut().scan_lists(scanner, text.len_chars(), served.context.clone(), call.resume, call.args, call.sexpflag);
+    if served.check {
+        let plain = call.plain(scanner);
+        let (index, scanner) = (run.as_ref().map_err(|stopped| &stopped.halt), plain.as_ref().map_err(|stopped| &stopped.halt));
+        if index != scanner && !matches!(index, Err(Halt::Poll)) && !matches!(scanner, Err(Halt::Poll)) {
+            *mismatch = Some(format!("romacs-syntax-summaries-check: list scan {:?}: index {index:?}, scanner {scanner:?}", call.args));
+        }
+    }
+    run
 }
 
 fn syntax_count(n: u64) -> Value {
@@ -404,7 +434,7 @@ fn memory_scan(values: &[Value], pos: impl Fn(i64) -> Pos) -> scan::Scan {
         at: scan::ScanAt::ALL[usize::try_from(int(0)).expect("saved label")],
         from: pos(int(1)), count: int(2), depth: int(3), min_depth: int(4), mathexit: int(5) != 0, last_good: int(6),
         c: u32::try_from(int(7)).expect("saved character"), syntax: syntax(8), code: syntax(9), comstyle: syntax(10),
-        comnested: int(11) != 0, mark: pos(int(12)), forw: memory_forw(&values[13..], pos),
+        comnested: int(11) != 0, mark: pos(int(12)), forw: memory_forw(&values[13..], pos), low: 0,
     }
 }
 
@@ -661,10 +691,12 @@ impl Leaf<'_> {
         // The scan reads the table through its flat view, kept between calls.
         self.vm.flatten_table(table);
         if memory.is_none()
-            && let Some(value) = self.initial_summary(op, args, parse.as_ref(), (index, table), options)?
+            && let Some(value) = self.initial_summary(parse.as_ref(), (index, table), options)?
         {
             return Ok(Outcome::Done(value));
         }
+        let listed = self.lists_served(op, args, index, table, options)?;
+        let mut mismatch = None;
         let (begv, zv, point) = self.syntax_bounds(index)?;
         let epoch = self.vm.defun_start_epoch;
         let (cached, modiff) = {
@@ -709,14 +741,15 @@ impl Leaf<'_> {
                         let count = args[0].integer_value().expect("checked");
                         scanner.forward_comment(point, count).map(|(at, found)| Result_::Comment(at, found)).map_err(scan_stopped)
                     }
-                    (Op::ScanLists | Op::ScanSexps, Some(Kept::Scan(scan))) => {
-                        scanner.lists(*scan, matches!(op, Op::ScanSexps)).map(Result_::Lists).map_err(scan_stopped)
-                    }
-                    (Op::ScanLists | Op::ScanSexps, _) => {
+                    (Op::ScanLists | Op::ScanSexps, kept) => {
                         let int = |v: Value| v.integer_value().expect("checked");
                         let depth = if let Op::ScanLists = op { int(args[2]) } else { 0 };
-                        scanner.scan_lists(int(args[0]), int(args[1]), depth, matches!(op, Op::ScanSexps))
-                            .map(Result_::Lists).map_err(scan_stopped)
+                        let resume = match kept { Some(Kept::Scan(scan)) => Some(*scan), _ => None };
+                        let call = ListCall { resume, args: (int(args[0]), int(args[1]), depth), sexpflag: matches!(op, Op::ScanSexps) };
+                        match &listed {
+                            Some(served) => indexed_lists(&view, &mut scanner, served, &call, &mut mismatch),
+                            None => call.plain(&mut scanner),
+                        }.map(Result_::Lists).map_err(scan_stopped)
                     }
                     (Op::ParsePartialSexp, kept) => {
                         let (from, to, target, stopbefore, commentstop, mut state) = parse.clone().expect("checked");
@@ -738,6 +771,9 @@ impl Leaf<'_> {
             }
             self.vm.native_poll()?;
         };
+        if let Some(mismatch) = mismatch {
+            return Err(Fault::Error(mismatch));
+        }
         let written = defun_start.filter(|&cache| Some(cache) != cached);
         let memory = |leaf: &mut Self, kept: Option<Kept>| {
             let fixnum = |n: i64| Value::integer(n).expect("fixnum");
@@ -798,12 +834,12 @@ impl Leaf<'_> {
     /// honoured, are propertized past TO, so that no scan of it would stop
     /// for Lisp. Counts the reason when they do not; when they do, gives
     /// the summaries the property changes since they last served.
-    fn served(&mut self, index: usize, table: Value, from: i64, to: i64, kind: SummaryScan, options: scan::Options)
+    fn served(&mut self, index: usize, table: Value, (from, to): (i64, i64), plain: bool, options: scan::Options)
         -> std::result::Result<Option<Served>, Fault> {
         if !matches!(self.vm.objects[index], data::Object::Buffer(_)) { return Ok(None); }
         let decline = if !SyntaxIndex::pays(to - from) {
             Some(Decline::Short)
-        } else if matches!(kind, SummaryScan::Parse { plain: true }) {
+        } else if plain {
             Some(Decline::Arguments)
         } else if self.syntax_var("romacs-inhibit-syntax-summaries")? != Value::NIL {
             Some(Decline::Inhibited)
@@ -815,20 +851,21 @@ impl Leaf<'_> {
         } else {
             None
         };
-        let text: &crate::text::Text = buffer_text(self.vm, index);
         if let Some(decline) = decline {
-            let stats = &mut text.syntax.borrow_mut().stats;
-            let counts: &mut [u64] = match kind {
-                SummaryScan::Parse { .. } => &mut stats.declined,
-                SummaryScan::Lists => &mut stats.list_declined,
-            };
-            counts[decline as usize] += 1;
+            buffer_text(self.vm, index).syntax.borrow_mut().stats.declined[decline as usize] += 1;
             return Ok(None);
         }
+        self.served_context(index, table, options).map(Some)
+    }
+
+    /// The context the summaries of the buffer at INDEX serve a scan in,
+    /// under TABLE and OPTIONS, the property changes since they last
+    /// served taken.
+    fn served_context(&mut self, index: usize, table: Value, options: scan::Options) -> std::result::Result<Served, Fault> {
         // Summaries hold no Values: only taking property changes needs the
         // entry, and so the barrier.
-        if text.properties.has_syntax_changes() {
-            let data::Object::Buffer(buffer) = self.vm.objects.entry_mut(index) else { unreachable!("checked above") };
+        if buffer_text(self.vm, index).properties.has_syntax_changes() {
+            let data::Object::Buffer(buffer) = self.vm.objects.entry_mut(index) else { unreachable!("a multibyte buffer") };
             buffer.sync_syntax_properties();
         }
         let check = self.syntax_var("romacs-syntax-summaries-check")? != Value::NIL;
@@ -838,7 +875,22 @@ impl Leaf<'_> {
             escaped_ends: options.comment_end_can_be_escaped,
             properties: options.propertize_done.is_some(),
         };
-        Ok(Some(Served { context, check }))
+        Ok(Served { context, check })
+    }
+
+    /// Whether the summaries of the buffer at INDEX serve a forward list
+    /// scan, OP's with ARGS: one in a multibyte buffer, not inhibited.
+    /// Every run of the scan asks, a rerun after a stop for Lisp included,
+    /// so that each takes the property changes Lisp made.
+    fn lists_served(&mut self, op: Op, args: &[Value], index: usize, table: Value, options: scan::Options)
+        -> std::result::Result<Option<Served>, Fault> {
+        let forward = matches!(op, Op::ScanLists | Op::ScanSexps) && args[1].integer_value().is_some_and(|count| count > 0);
+        if !forward || !matches!(self.vm.objects[index], data::Object::Buffer(_)) { return Ok(None); }
+        if self.syntax_var("romacs-inhibit-syntax-summaries")? != Value::NIL {
+            buffer_text(self.vm, index).syntax.borrow_mut().stats.list_declined[Decline::Inhibited as usize] += 1;
+            return Ok(None);
+        }
+        self.served_context(index, table, options).map(Some)
     }
 
     /// The variables a scan obeys, from SAVED (a rerun's flags) or read
@@ -887,11 +939,11 @@ impl Leaf<'_> {
         Ok(summarized)
     }
 
-    fn initial_summary(&mut self, op: Op, args: &[Value], parse: Option<&ParseArgs>,
+    fn initial_summary(&mut self, parse: Option<&ParseArgs>,
                        (index, table): (usize, Value), options: scan::Options) -> std::result::Result<Option<Value>, Fault> {
         if let Some((from, to, target, stopbefore, commentstop, state)) = parse {
             let plain = *target != i64::MIN || *stopbefore || *commentstop != 0;
-            if let Some(served) = self.served(index, table, *from, *to, SummaryScan::Parse { plain }, options)? {
+            if let Some(served) = self.served(index, table, (*from, *to), plain, options)? {
                 let mut state = state.clone();
                 if self.summarized(index, table, &served, options, (*from, *to), &mut state)? {
                     self.syntax_set_point(state.location)?;
@@ -899,44 +951,7 @@ impl Leaf<'_> {
                 }
             }
         }
-        if matches!(op, Op::ScanSexps)
-            && let Some(count) = args[1].integer_value().filter(|&count| SyntaxIndex::pays(count))
-        {
-            let (begv, zv, _) = self.syntax_bounds(index)?;
-            let from = self.fixnum(args[0])?;
-            if count > zv.char - from.clamp(begv.char, zv.char) {
-                return self.summarized_lists(index, table, options, from, count);
-            }
-        }
         Ok(None)
-    }
-
-    fn summarized_lists(&mut self, index: usize, table: Value, options: scan::Options,
-                        original_from: i64, count: i64) -> std::result::Result<Option<Value>, Fault> {
-        let (begv, zv, _) = self.syntax_bounds(index)?;
-        let from = original_from.clamp(begv.char, zv.char);
-        let Some(served) = self.served(index, table, from, zv.char, SummaryScan::Lists, options)? else { return Ok(None) };
-        let result = {
-            let view = View::new(self.vm, index, table, options.propertize_done.is_some(), true);
-            let Body::Multibyte(text, _) = &view.body else { return Ok(None) };
-            let mut scanner = Scanner { text: &view, begv, zv, options, ppss: &UNANSWERED, defun_start: None, modiff: 0 };
-            let mut syntax = text.syntax.borrow_mut();
-            let result = syntax.lists(&mut scanner, text.len_chars(), served.context, original_from);
-            if let Some(result) = &result
-                && served.check && !matches!(result, Err(Halt::Poll))
-            {
-                let plain = scanner.scan_lists(original_from, count, 0, true).map_err(|stopped| stopped.halt);
-                if *result != plain && !matches!(plain, Err(Halt::Poll)) {
-                    return Err(Fault::Error(format!("syntax summaries: list scan {from}..{}: index {result:?}, scanner {plain:?}", zv.char)));
-                }
-            }
-            result
-        };
-        match result {
-            Some(Ok(result)) => Ok(Some(result.map(Value::integer).transpose().map_err(Fault::Error)?.unwrap_or(Value::NIL))),
-            Some(Err(Halt::ScanError(message, a, b))) => Err(self.scan_error(message, a, b)),
-            _ => Ok(None),
-        }
     }
 
     fn syntax_declines(&mut self, reasons: &[Decline], counts: &[u64]) -> Value {
@@ -964,20 +979,28 @@ impl Leaf<'_> {
     pub(crate) fn syntax_summaries_stats(&mut self) -> super::super::Out {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
         let data::Object::Buffer(_) = &self.vm.objects[index] else { return Ok(Value::NIL) };
-        let (stats, leaves, bytes) = {
+        let (stats, leaves, bytes, unsafe_cuts) = {
             let summaries = buffer_text(self.vm, index).syntax.borrow();
-            (summaries.stats, summaries.leaves(), summaries.storage_bytes())
+            (summaries.stats, summaries.leaves(), summaries.storage_bytes(), summaries.unsafe_cuts())
         };
         let int = syntax_count;
         let declined = self.syntax_declines(&Decline::PARSE, &stats.declined);
         let list_declined = self.syntax_declines(&Decline::LISTS, &stats.list_declined);
         let folds = self.syntax_alist(&[("excursion", stats.folds[0]), ("exact", stats.folds[1])]);
+        let [parse, exact, excursion] = stats.evictions;
+        let evictions = self.syntax_alist(&[("parse", parse), ("exact", exact), ("excursion", excursion)]);
+        let unsafe_cuts = unsafe_cuts.iter().rev().fold(Value::NIL, |tail, cuts| {
+            let cuts = cuts.map_or(Value::NIL, syntax_count);
+            self.cons(cuts, tail)
+        });
         let items = [
             ("served", int(stats.served)), ("declined", declined), ("leaves", int(leaves as u64)),
             ("list-served", int(stats.list_served)), ("list-declined", list_declined),
-            ("list-fallbacks", int(stats.list_fallbacks)), ("folds", folds), ("skipped", int(stats.skipped)),
+            ("folds", folds), ("skipped", int(stats.skipped)), ("evictions", evictions),
             ("leaf-scans", int(stats.leaf_scans)), ("plain-leaves", int(stats.plain_leaves)),
             ("composed", int(stats.composed)), ("context-switches", int(stats.switches)),
+            ("context-evictions", int(stats.context_evictions)), ("context-invalidations", int(stats.context_invalidations)),
+            ("unsafe-cuts", unsafe_cuts),
             ("log-overflows", int(stats.log_overflows)),
             ("bytes", int(bytes as u64)), ("char-table-writes", int(crate::char_table::writes())),
         ];
@@ -1030,7 +1053,7 @@ mod tests {
     use crate::Vm;
 
     #[test]
-    fn list_summary_stats_report_service_and_fallback_to_plain_scanning() {
+    fn list_summary_stats_report_service_by_run() {
         let mut vm = Vm::new();
         vm.install_lisp_prelude().unwrap();
         let result = vm.eval_source_raw(r#"(with-temp-buffer
@@ -1060,12 +1083,16 @@ mod tests {
                 (let* ((stats (romacs-syntax-summaries-stats))
                        (declined (plist-get stats :list-declined)))
                   (list (plist-get stats :served) (plist-get stats :list-served)
-                        (plist-get stats :list-fallbacks)
-                        (cdr (assq 'short declined)) (cdr (assq 'context declined))
-                        (cdr (assq 'inhibited declined)) (cdr (assq 'properties declined))
-                        (cdr (assq 'quit declined))))))"#).unwrap();
+                        (cdr (assq 'short declined)) (cdr (assq 'inhibited declined))
+                        (cdr (assq 'properties declined)) (cdr (assq 'quit declined))
+                        (> (cdr (assq 'exact (plist-get stats :folds))) 0)
+                        (plist-get stats :context-switches)))))"#).unwrap();
+        // Served: the scan, the scan in another table, and the scan whose
+        // first run stopped for Lisp before it read anything; short: the
+        // one from five characters before the end, and the one an error
+        // ends at once.
         assert_eq!(vm.display(result).unwrap(),
-                   "((nil 7) (nil 7) (scan-error \"Containing expression ends prematurely\" 1 2) 7 (0 1 1 1 1 1 1 0))");
+                   "((nil 7) (nil 7) (scan-error \"Containing expression ends prematurely\" 1 2) 7 (0 3 2 1 0 0 t 3))");
     }
 
     #[test]

@@ -199,11 +199,18 @@ impl<T: Text> Scanner<'_, T> {
 
     /// scan_lists: the position reached, or None between groupings.
     pub(crate) fn scan_lists(&mut self, from0: i64, count: i64, depth: i64, sexpflag: bool) -> Result<Option<i64>, Stopped<Box<Scan>>> {
+        let scan = self.start_lists(from0, count, depth)?;
+        self.lists(scan, sexpflag)
+    }
+
+    /// The start of `scan_lists` from FROM0 with COUNT and DEPTH, after its
+    /// setup, which can stop for Lisp before it reads anything.
+    pub(crate) fn start_lists(&self, from0: i64, count: i64, depth: i64) -> Result<Scan, Stopped<Box<Scan>>> {
         let from = self.text.pos(from0.clamp(self.begv.char, self.zv.char));
         // A stop here has read nothing: the scan starts again.
         self.setup(from.char, count)?;
         let min_depth = if depth > 0 { 0 } else { depth };
-        self.lists(Scan { from, count, depth, min_depth, last_good: from0, ..Scan::default() }, sexpflag)
+        Ok(Scan { from, count, depth, min_depth, last_good: from0, ..Scan::default() })
     }
 
     /// `scan_lists` from SCAN: its start after the setup, or where a stop
@@ -211,7 +218,7 @@ impl<T: Text> Scanner<'_, T> {
     pub(crate) fn lists(&mut self, scan: Scan, sexpflag: bool) -> Result<Option<i64>, Stopped<Box<Scan>>> {
         let Scan {
             mut at, mut from, mut count, mut depth, min_depth, mut mathexit, mut last_good, mut c, mut syntax, mut code,
-            mut comstyle, mut comnested, mut mark, mut forw,
+            mut comstyle, mut comnested, mut mark, mut forw, mut low,
         } = scan;
         let stop = if count > 0 { self.zv.char } else { self.begv.char };
         let symbol = sexpflag && self.options.multibyte_syntax_as_symbol;
@@ -223,7 +230,7 @@ impl<T: Text> Scanner<'_, T> {
                     halt: $halt,
                     suspended: Some(Box::new(Scan {
                         at: $next, from, count, depth, min_depth, mathexit, last_good, c, syntax, code, comstyle,
-                        comnested, mark, forw: $forw,
+                        comnested, mark, forw: $forw, low,
                     })),
                 }
             };
@@ -242,6 +249,7 @@ impl<T: Text> Scanner<'_, T> {
         macro_rules! close {
             () => {{
                 depth -= 1;
+                low = low.min(depth);
                 if depth == 0 {
                     done!()
                 } else if depth < min_depth {
