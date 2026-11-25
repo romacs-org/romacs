@@ -602,9 +602,13 @@ connection object, called when the process dies.")
       ;; created should pick up the `stderr-buffer' just created, which
       ;; we immediately rename
       (setq proc (if (functionp proc)
-                     (if (zerop (cdr (func-arity proc)))
-                         (funcall proc)
-                       (funcall proc conn))
+                     ;; Romacs: its stderr buffer goes if it fails.
+                     (condition-case err
+                         (if (zerop (cdr (func-arity proc)))
+                             (funcall proc)
+                           (funcall proc conn))
+                       (error (kill-buffer stderr-buffer)
+                              (signal (car err) (cdr err))))
                    proc))
       ;; One made here, with its stderr buffer, goes if it is refused.
       (jsonrpc--check-pipe proc stderr-buffer)
@@ -645,8 +649,9 @@ for this connection, and are let go first."
       (error "JSON-RPC process %s runs on a pty, which cannot carry JSON-RPC: %s"
              name
              (cond ((not remote) "make it with :connection-type 'pipe")
-                   ((bound-and-true-p tramp-pipe-process)
-                    (format "TRAMP's method for %s gives no pipe; use an ssh method (ssh, scp, rsync) on one hop" remote))
+                   ;; TRAMP marks a process made with the binding.
+                   ((process-get proc 'tramp-pipe-process)
+                    (format "TRAMP gave %s a pty though a pipe was asked for" remote))
                    (t (format "over TRAMP (%s), make it with `tramp-pipe-process' bound to t" remote)))))))
 
 (cl-defmethod jsonrpc-connection-send ((connection jsonrpc-process-connection)

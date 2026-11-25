@@ -82,19 +82,37 @@ time, as two reads in the same clock tick would."
           (should-not (get-buffer "*jsonrpc-framing-given stderr*")))
       (delete-process given))))
 
-;; TRAMP gives a pipe (`tramp-pipe-process') over an ssh method on one
-;; hop, and refuses any other route before anything is spawned.
+;; TRAMP gives a pipe (`tramp-pipe-process') over the ssh, scp and rsync
+;; methods on one hop, and refuses any other route before a backend runs.
 (ert-deftest jsonrpc-framing-tramp-refuses-a-route-with-no-pipe ()
   (require 'tramp)
-  (dolist (dir '("/sudo::/tmp/" "/docker:none:/tmp/" "/ssh:a|ssh:b:/tmp/"))
-    (let ((default-directory dir) (tramp-pipe-process t) (before (length (process-list))))
+  (dolist (library '(tramp-sshfs tramp-sudoedit tramp-androidsu tramp-container))
+    (require library nil t))
+  (let ((tramp-methods (copy-tree tramp-methods)))
+    ;; An ssh method whose host is not ssh's last option, and one with
+    ;; other direct asynchronous arguments: shapes the route does not know.
+    (push `("ssh-dashes" ,@(cdr (assoc "ssh" tramp-methods))) tramp-methods)
+    (setf (cadr (assq 'tramp-login-args (cdr (assoc "ssh-dashes" tramp-methods))))
+          '(("-l" "%u") ("-e" "none") ("--") ("%h")))
+    (push `("ssh-tt" ,@(cdr (assoc "ssh" tramp-methods))) tramp-methods)
+    (setf (cadr (assq 'tramp-direct-async (cdr (assoc "ssh-tt" tramp-methods)))) '("-t" "-tt"))
+    (dolist (method '("ssh-dashes" "ssh-tt"))
       (should (string-match-p "needs an ssh method"
                               (error-message-string
-                               (should-error (make-process :name "x" :command '("true")
-                                                           :connection-type 'pipe :file-handler t)))))
-      (should (= (length (process-list)) before)))))
+                               (should-error (tramp--pipe-route
+                                              (make-tramp-file-name :method method :host "none" :localname "/tmp/")))))))
+    (dolist (dir '("/sudo::/tmp/" "/docker:none:/tmp/" "/ssh:a|ssh:b:/tmp/" "/sshfs:none:/tmp/"
+                   "/sudoedit::/tmp/" "/androidsu::/tmp/"))
+      (when (assoc (car (split-string (substring dir 1) "[:|]")) tramp-methods)
+        (let ((default-directory dir) (tramp-pipe-process t) (before (length (process-list))))
+          (should (string-match-p "needs an ssh method"
+                                  (error-message-string
+                                   (should-error (make-process :name "x" :command '("true")
+                                                               :file-handler t)))))
+          (should (= (length (process-list)) before)))))))
 
-;; The pipe shares TRAMP's own connection as a client, never its master.
+;; The pipe shares TRAMP's own connection as a client, never its master,
+;; and a user's suppression of sharing stays theirs.
 (ert-deftest jsonrpc-framing-tramp-shares-as-a-client ()
   (require 'tramp-sh)
   (let ((v (tramp-dissect-file-name "/ssh:localhost:/"))
@@ -102,7 +120,13 @@ time, as two reads in the same clock tick would."
     (let ((tramp-use-connection-share t))
       (should (equal (tramp--pipe-share-options v) "-o ControlMaster=no -o ControlPath=/tmp/tramp.%%C")))
     (let ((tramp-use-connection-share 'suppress) (tramp-ssh-controlmaster-options nil))
-      (should (equal (tramp--pipe-share-options v) "")))))
+      (should (string-match-p "ControlMaster=no -o ControlPath=none" (tramp--pipe-share-options v))))))
+
+;; A factory that fails leaves no stderr buffer behind.
+(ert-deftest jsonrpc-framing-a-failed-factory-leaves-nothing ()
+  (should-error (make-instance 'jsonrpc-process-connection :name "jsonrpc-framing-fails"
+                               :process (lambda () (error "No route"))))
+  (should-not (get-buffer "*jsonrpc-framing-fails stderr*")))
 
 (provide 'jsonrpc-framing-tests)
 ;;; jsonrpc-framing-tests.el ends here
