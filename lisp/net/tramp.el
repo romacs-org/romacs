@@ -5607,11 +5607,16 @@ processes."
 	    (append
 	     `("cd" ,(tramp-shell-quote-argument localname) "&&" "(" "env")
 	     env `(,command ")")))
-	   ;; Add remote shell if needed.
+	   ;; Add remote shell if needed.  Romacs: a pipe asked for is a
+	   ;; pipe at both ends, so ssh's "-t" (a remote pty, which echoes
+	   ;; and turns LF into CRLF) is left out for one
+	   ;; (ledger/divergences/LISP-JSONRPC-FRAMING.md).
 	   (command
 	    (if (consp (tramp-get-method-parameter v 'tramp-direct-async))
 		(append
-		 (tramp-get-method-parameter v 'tramp-direct-async)
+		 (if (eq connection-type 'pipe)
+		     (remove "-t" (tramp-get-method-parameter v 'tramp-direct-async))
+		   (tramp-get-method-parameter v 'tramp-direct-async))
                  `(,(string-join command " ")))
 	      command))
 	   (login-program (tramp-expand-args v 'tramp-login-program))

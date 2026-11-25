@@ -1856,15 +1856,18 @@ This docstring appeases checkdoc, that's all."
                               (tramp-use-ssh-controlmaster-options 'suppress)
                               (tramp-ssh-controlmaster-options
                                "-o ControlMaster=no -o ControlPath=none"))
-                          (make-process
-                           :name readable-name
-                           :command (setq server-info (eglot--cmd contact))
-                           :connection-type 'pipe
-                           :coding 'utf-8-emacs-unix
-                           :noquery t
-                           :stderr (get-buffer-create
-                                    (format "*%s stderr*" readable-name))
-                           :file-handler t)))
+                          ;; Romacs: a remote server's process is a pipe
+                          ;; (ledger/divergences/LISP-JSONRPC-FRAMING.md).
+                          (jsonrpc-with-remote-pipes
+                           (make-process
+                            :name readable-name
+                            :command (setq server-info (eglot--cmd contact))
+                            :connection-type 'pipe
+                            :coding 'utf-8-emacs-unix
+                            :noquery t
+                            :stderr (get-buffer-create
+                                     (format "*%s stderr*" readable-name))
+                            :file-handler t))))
                      ,@more-initargs)))))
          (spread (lambda (fn) (lambda (server method params)
                                 (let ((eglot--cached-server server))

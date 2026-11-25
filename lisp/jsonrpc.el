@@ -609,6 +609,7 @@ connection object, called when the process dies.")
         (rename-buffer hidden-name)
         (setq buffer-read-only t))
       (process-put proc 'jsonrpc-stderr stderr-buffer))
+    (jsonrpc--check-pipe proc)
     (setf (jsonrpc--process conn) proc)
     (set-process-buffer proc (get-buffer-create (format " *%s output*" name)))
     (set-process-filter proc #'jsonrpc--process-filter)
@@ -616,7 +617,7 @@ connection object, called when the process dies.")
     (set-process-coding-system proc 'binary 'binary)
     ;; Romacs: the process layer splits the Content-Length frames as it
     ;; reads (`set-process-framing'), so the filter is called with whole
-    ;; messages (ledger/divergences/JSONRPC-FRAMING.md).
+    ;; messages (ledger/divergences/LISP-JSONRPC-FRAMING.md).
     (set-process-framing proc 'content-length)
     (with-current-buffer (process-buffer proc)
       (set-buffer-multibyte nil)
@@ -626,6 +627,35 @@ connection object, called when the process dies.")
         (erase-buffer))
       (setq buffer-read-only t))
     (process-put proc 'jsonrpc-connection conn)))
+
+(defun jsonrpc--check-pipe (proc)
+  "Signal, saying how to fix it, unless PROC is a pipe or a socket: a
+pty's line discipline (echo, CR/LF) breaks a byte protocol, and its
+output cannot be framed."
+  (when (process-tty-name proc)
+    (error "JSON-RPC process %s runs on a pty, which cannot carry JSON-RPC: %s"
+           (process-name proc)
+           (if (file-remote-p default-directory)
+               "use a TRAMP method with direct asynchronous processes (ssh, scp, rsync, ...) \
+and make its process in jsonrpc-with-remote-pipes"
+             "make it with :connection-type 'pipe"))))
+
+(defmacro jsonrpc-with-remote-pipes (&rest body)
+  "Run BODY, which makes a JSON-RPC server's process, so that a remote
+one is a pipe: TRAMP's direct asynchronous process (an ssh child with
+`:connection-type' `pipe'), where its method has one.  Only this call
+sees it, as a connection-local `tramp-direct-async-process' t that
+comes after the user's own profiles, so their setting stays theirs."
+  `(progn
+     (require 'files-x)
+     (defvar connection-local-profile-alist)
+     (defvar connection-local-criteria-alist)
+     (let ((connection-local-profile-alist
+            (append connection-local-profile-alist
+                    '((jsonrpc--remote-pipe (tramp-direct-async-process . t)))))
+           (connection-local-criteria-alist
+            (append connection-local-criteria-alist '((nil jsonrpc--remote-pipe)))))
+       ,@body)))
 
 (cl-defmethod jsonrpc-connection-send ((connection jsonrpc-process-connection)
                                        &rest args

@@ -59,5 +59,15 @@ time, as two reads in the same clock tick would."
     (jsonrpc-framing-tests--run-timers (lambda () (= (length received) 2)))
     (should (equal (reverse received) '(1 2)))))
 
+;; A pty cannot carry JSON-RPC: the connection refuses one and names the fix.
+(ert-deftest jsonrpc-framing-a-pty-is-refused-with-its-fix ()
+  (let ((process (make-process :name "jsonrpc-framing-pty" :command '("sleep" "5")
+                               :connection-type 'pty :noquery t)))
+    (unwind-protect
+        (let ((err (should-error (make-instance 'jsonrpc-process-connection
+                                                :process process :name "jsonrpc-framing-pty"))))
+          (should (string-match-p ":connection-type 'pipe" (error-message-string err))))
+      (delete-process process))))
+
 (provide 'jsonrpc-framing-tests)
 ;;; jsonrpc-framing-tests.el ends here
