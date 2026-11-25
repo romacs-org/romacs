@@ -1108,13 +1108,18 @@ a turn of its own, nothing sent again."
 (defvar romacs-agent-tools--asked-parents (make-hash-table :test #'equal)
   "(TASK-ID . REQUEST-ID) its parent was told of this process: once.")
 
+(defun romacs-agent-tools--forget-ask (session request-id)
+  "Forget SESSION's notice to its parent about REQUEST-ID."
+  (let ((id (romacs-agent-id session)))
+    (when (eq (romacs-agent-loaded id) session)
+      (remhash (cons id request-id) romacs-agent-tools--asked-parents))))
+
 (defun romacs-agent-tools--ask-parent (session event)
   "Tell SESSION's parent the request EVENT, live, that waits on SESSION's
 user, once, unless SESSION's rule wakes no one or the parent is settled
-\(the user sees it in SESSION's chat): dropped once it is answered.  A
-request answered or withdrawn is forgotten here too."
-  (when (memq (plist-get event :type) '(answered approval-withdrawn))
-    (remhash (cons (romacs-agent-id session) (plist-get event :request-id)) romacs-agent-tools--asked-parents))
+\(the user sees it in SESSION's chat): dropped once it is answered."
+  (when (eq (plist-get event :type) 'answered)
+    (romacs-agent-tools--forget-ask session (plist-get event :request-id)))
   (when-let* (((eq (plist-get event :type) 'approval))
               (parent-id (plist-get (romacs-agent-options session) :parent))
               ((romacs-agent--live-p session))

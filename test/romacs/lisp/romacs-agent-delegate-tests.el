@@ -215,6 +215,26 @@ recorded in a private directory; `delivered' collects what wakes it."
                          (romacs-mcp--object "taskId" (romacs-agent-id a) "requestId" "q1"))
                         :type 'user-error))))))
 
+(ert-deftest romacs-agent-delegate-withdrawal-and-exit-forget-asked-parents ()
+  (romacs-agent-delegate-tests--family ((a nil) (b nil))
+    (let ((romacs-agent-tools--asked-parents (make-hash-table :test #'equal)))
+      (cl-letf (((symbol-function 'romacs-agent--live-p) (lambda (_) t)))
+        (dolist (task (list a b))
+          (romacs-agent--deliver-record-events
+           task (romacs-agent--apply-record-events
+                 task '((:type approval :request-id "q" :approval-wire t :user t :questions (("Which one?")))))
+           1 0))
+        (let ((key-a (cons (romacs-agent-id a) "q")) (key-b (cons (romacs-agent-id b) "q")))
+          (should (gethash key-a romacs-agent-tools--asked-parents))
+          (should (gethash key-b romacs-agent-tools--asked-parents))
+          (romacs-agent--deliver-record-events
+           a (romacs-agent--apply-record-events a '((:type approval-withdrawn :request-id "q"))) 2 0)
+          (should-not (gethash key-a romacs-agent-tools--asked-parents))
+          (should (gethash key-b romacs-agent-tools--asked-parents))
+          (romacs-agent--deliver-record-events
+           b (romacs-agent--apply-record-events b '((:type exit :status 0))) 2 0)
+          (should-not (gethash key-b romacs-agent-tools--asked-parents)))))))
+
 (ert-deftest romacs-agent-delegate-a-coordinator-s-held-end-goes-when-its-task-ends-quietly ()
   ;; Its task ends quietly, waking it not: the coordinator runs no turn
   ;; after it, so its held end is its task's, and goes to its parent.
