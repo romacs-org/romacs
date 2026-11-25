@@ -21,8 +21,13 @@ use romacs_display_protocol::font::FontCatalogGeneration;
 use romacs_display_protocol::foreign_pane::ForeignPaneEntry;
 use romacs_display_protocol::pane_picture::{PaneHead, PanePicture};
 use romacs_display_protocol::pane_sink::PaneState;
+use romacs_display_protocol::RootSurfaceRect;
+use romacs_display_protocol::frame_time::FrameSample;
+use romacs_renderer_wgpu::WgpuRenderer;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 /// What becomes of a picture checked against its window's entry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,6 +56,7 @@ pub(crate) fn admit(entry: Option<&ForeignPaneEntry>, catalog: FontCatalogGenera
 /// The picture a pane draws.
 pub(crate) struct Shown {
     pub head: PaneHead,
+    pub frame: Arc<FrameGlyphBuffer>,
     /// Its text animations: each swap names the set.
     pub animations: TextAnimations,
 }
@@ -68,18 +74,24 @@ impl PaneLayer {
         Some((head.owner, head.view))
     }
 
-    fn show(&mut self, mut picture: PanePicture) {
+    /// Swap PICTURE in, its animations halted unless the window is FOCUSED
+    /// and not OCCLUDED.
+    fn show(&mut self, mut picture: PanePicture, focused: bool, occluded: bool) {
         let animations = std::mem::take(&mut picture.animations);
         let head = picture.head;
+        let frame = Arc::new(picture.into_frame());
         match self.shown.as_mut() {
             Some(shown) => {
                 shown.head = head;
+                shown.frame = frame;
                 shown.animations.replace(animations);
             }
             None => {
                 let mut fresh = TextAnimations::default();
+                fresh.focus(focused);
+                fresh.occlude(occluded);
                 fresh.replace(animations);
-                self.shown = Some(Shown { head, animations: fresh });
+                self.shown = Some(Shown { head, frame, animations: fresh });
             }
         }
     }
@@ -95,6 +107,37 @@ impl PaneLayer {
             scenes.extend(shown.animations.take_retired());
         }
     }
+}
+
+/// One pane as this frame drew it, for the over-pane hook.
+#[cfg_attr(not(test), expect(dead_code, reason = "read by O1c-4's over-pane hook"))]
+pub(crate) struct DrawnPane {
+    pub owner: u64,
+    pub window: u64,
+    /// The entry's rect, in the root's logical px: the hook draws within it.
+    pub rect: RootSurfaceRect,
+    /// The head of the picture drawn; None while the pane waits for one.
+    pub picture: Option<PaneHead>,
+    /// The owner's last `PaneSink::state`; None before one.
+    pub state: Option<PaneState>,
+}
+
+/// What draws over each pane after its picture, every frame, whether or
+/// not it has one: ownership's veil (O1c-4). It keeps its own state between
+/// calls. Draws over PANE into VIEW for the frame SAMPLE dates; whether it
+/// still animates, asking for another frame.
+pub(crate) type OverPane = Box<dyn FnMut(&mut WgpuRenderer, &wgpu::TextureView, &DrawnPane, FrameSample) -> bool + Send>;
+
+/// The over-pane hook, the render app's: installed once for the app's life
+/// (`over_pane`), and shared with each window's pane pass, so a window
+/// hidden and reopened draws with it too.
+pub(crate) type SharedOverPane = Arc<Mutex<OverPane>>;
+
+/// The hook the app starts with: it draws nothing. Ownership's veil
+/// (O1c-4) is installed here.
+pub(crate) fn over_pane() -> SharedOverPane {
+    let none: OverPane = Box::new(|_, _, _, _| false);
+    Arc::new(Mutex::new(none))
 }
 
 /// Owners' states (`PaneSink::state`): the render app's, not a window's, so
@@ -127,7 +170,6 @@ impl PaneStates {
     }
 
     /// OWNER's last state.
-    #[cfg(test)]
     pub(crate) fn get(&self, owner: u64) -> Option<PaneState> {
         self.map.get(&owner).copied()
     }
@@ -141,6 +183,11 @@ pub(crate) struct PaneLayers {
     states: PaneStates,
     /// Scenes of torn-down layers' animations, for the renderer to free.
     retired: Vec<PageScene>,
+    /// The app's over-pane hook, as last shared: none before a round.
+    over_pane: Option<SharedOverPane>,
+    /// The window's focus and occlusion, which halt every pane's motion.
+    unfocused: bool,
+    occluded: bool,
 }
 
 impl PaneLayers {
@@ -150,8 +197,12 @@ impl PaneLayers {
         self.layers.get(&window)
     }
 
+    /// The picture master window WINDOW draws.
+    pub(crate) fn shown_mut(&mut self, window: u64) -> Option<&mut Shown> {
+        self.layers.get_mut(&window).and_then(|layer| layer.shown.as_mut())
+    }
+
     /// OWNER's last posted state.
-    #[cfg(test)]
     pub(crate) fn state(&self, owner: u64) -> Option<PaneState> {
         self.states.get(owner)
     }
@@ -163,9 +214,63 @@ impl PaneLayers {
         }
     }
 
+    /// Share HOOK, the app's over-pane hook, with this window's pane pass.
+    pub(crate) fn share(&mut self, hook: &SharedOverPane) {
+        if !self.over_pane.as_ref().is_some_and(|shared| Arc::ptr_eq(shared, hook)) {
+            self.over_pane = Some(Arc::clone(hook));
+        }
+    }
+
+    /// The over-pane hook this window's pane pass calls.
+    pub(crate) fn over_pane(&self) -> Option<&SharedOverPane> {
+        self.over_pane.as_ref()
+    }
+
     /// The owners the layers draw for.
     fn owners(&self) -> impl Iterator<Item = u64> + '_ {
         self.layers.values().filter_map(|layer| layer.identity().map(|(owner, _)| owner))
+    }
+
+    /// Every drawn pane's picture and animations.
+    pub(crate) fn shown_all_mut(&mut self) -> impl Iterator<Item = &mut Shown> {
+        self.layers.values_mut().filter_map(|layer| layer.shown.as_mut())
+    }
+
+    pub(crate) fn focus(&mut self, focused: bool) {
+        self.unfocused = !focused;
+        for shown in self.shown_all_mut() {
+            shown.animations.focus(focused);
+        }
+    }
+
+    pub(crate) fn occlude(&mut self, occluded: bool) {
+        self.occluded = occluded;
+        for shown in self.shown_all_mut() {
+            shown.animations.occlude(occluded);
+        }
+    }
+
+    /// Advance every pane's animations due at NOW: whether one did, and
+    /// when the next is due.
+    pub(crate) fn tick(&mut self, now: Instant) -> (bool, Option<Instant>) {
+        let (mut advanced, mut due) = (false, None::<Instant>);
+        for shown in self.shown_all_mut() {
+            advanced |= shown.animations.tick(now);
+            due = match (due, shown.animations.deadline(now)) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                (a, b) => a.or(b),
+            };
+        }
+        (advanced, due)
+    }
+
+    /// Scenes to free: torn-down layers' and ended animations'.
+    pub(crate) fn take_retired(&mut self) -> Vec<PageScene> {
+        let mut retired = std::mem::take(&mut self.retired);
+        for shown in self.shown_all_mut() {
+            retired.extend(shown.animations.take_retired());
+        }
+        retired
     }
 
     /// Tear every layer down, as its window goes: each held picture settled
@@ -230,7 +335,8 @@ impl PaneLayers {
             Admit::Swap => {
                 posted.revisions.mark_composed(head.v);
                 settle(posted.owner, head);
-                self.layers.entry(head.window).or_default().show(posted.picture);
+                let (focused, occluded) = (!self.unfocused, self.occluded);
+                self.layers.entry(head.window).or_default().show(posted.picture, focused, occluded);
                 true
             }
         }
@@ -296,6 +402,7 @@ impl super::RenderApp {
         let drawn = |owner| root.is_some_and(|root| root.foreign_panes.iter().any(|entry| entry.owner == owner)) || layers.owners().any(|shown| shown == owner);
         changed |= self.pane_states.update(states, drawn);
         compositor.pane_layers.mirror(&self.pane_states);
+        compositor.pane_layers.share(&self.over_pane);
         if changed {
             compositor.current_scene_generation = super::frame_state::next_scene_generation();
             window.render.mark_dirty();

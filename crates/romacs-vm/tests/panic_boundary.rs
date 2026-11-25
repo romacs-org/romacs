@@ -13,6 +13,8 @@ use std::path::{Path, PathBuf};
 
 /// PATH, how many, why each is safe.
 const SITES: &[(&str, usize, &str)] = &[
+    ("crates/romacs-display-runtime/src/presentation/pacing/tests.rs", 2,
+     "tests of the present-mode choice failing closed, with no VM"),
     ("crates/romacs-vm-gui/src/main.rs", 2,
      "`main` holds no VM; the evaluator thread's top: the unwinding drops the VM, and the session ends"),
     ("crates/romacs-vm/src/gc.rs", 2,

@@ -229,12 +229,19 @@ impl Running {
 }
 
 impl super::state::RenderApp {
-    /// Advance the primary window's due animations and redraw it if one
-    /// moved; when the next frame is due.
+    /// Advance the primary window's due animations, its panes' too, and
+    /// redraw it if one moved; when the next frame is due.
     pub(super) fn service_text_animations(&mut self, now: Instant) -> Option<Instant> {
         let window = self.frame_windows.primary_window_mut()?;
-        if window.render.compositor.text_animations.tick(now) { redraw(window); }
-        window.render.compositor.text_animations.deadline(now)
+        let compositor = &mut window.render.compositor;
+        let root = compositor.text_animations.tick(now);
+        let (panes, pane_due) = compositor.pane_layers.tick(now);
+        let due = compositor.text_animations.deadline(now);
+        if root || panes { redraw(window); }
+        match (due, pane_due) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
     }
 }
 

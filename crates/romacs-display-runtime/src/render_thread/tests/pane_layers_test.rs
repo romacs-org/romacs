@@ -345,3 +345,20 @@ fn an_owners_state_outlives_a_hidden_window_and_reaches_the_reopened_one() {
     send_root(&mut app, &producer, 2, vec![entry(3)]);
     assert_eq!(pane_state(&app), Some(wedged), "the hook of the reopened pane reads it");
 }
+
+/// The over-pane hook is the app's, installed once: a window hidden and
+/// reopened hands its pane pass that same hook, not the no-op.
+#[test]
+fn the_over_pane_hook_outlives_a_hidden_window() {
+    let (mut app, producer, _) = app();
+    let recording: super::OverPane = Box::new(|_, _, _, _| true);
+    *app.over_pane.lock().unwrap() = recording;
+    send_root(&mut app, &producer, 1, vec![entry(3)]);
+    producer.cmd_tx.try_send(RenderCommand::Window(WindowCommand::DestroyWindow { frame: FrameRef::Frame(1) })).unwrap();
+    app.process_commands();
+    app.frame_windows.prepare_primary(1, 800, 600, "reopened".into(), None);
+    send_root(&mut app, &producer, 2, vec![entry(3)]);
+    let layers = &app.frame_windows.primary_window().unwrap().render.compositor.pane_layers;
+    let given = layers.over_pane().expect("the reopened window's pass has a hook");
+    assert!(Arc::ptr_eq(given, &app.over_pane), "the app's hook, the one installed");
+}

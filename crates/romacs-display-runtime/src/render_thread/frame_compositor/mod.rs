@@ -179,6 +179,19 @@ pub(in crate::render_thread) type ScrollAnchorsByWindow = std::collections::Hash
 >;
 
 impl FrameCompositor {
+    /// Halt or resume the motion of the text animations, the panes' too,
+    /// as the window loses or regains focus.
+    pub(in crate::render_thread) fn focus_animations(&mut self, focused: bool) {
+        self.text_animations.focus(focused);
+        self.pane_layers.focus(focused);
+    }
+
+    /// The same, as the window is occluded or exposed.
+    pub(in crate::render_thread) fn occlude_animations(&mut self, occluded: bool) {
+        self.text_animations.occlude(occluded);
+        self.pane_layers.occlude(occluded);
+    }
+
     /// A compositor holding no scene yet.
     ///
     /// `glyph_atlas` is `None` before the wgpu device exists (and again after

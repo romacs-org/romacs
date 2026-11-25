@@ -810,6 +810,8 @@ pub(super) struct RenderApp {
     pub(super) panes: std::sync::Arc<crate::pane_mailbox::PaneMailbox>,
     /// Owners' states, the app's: they outlive the windows that show them.
     pub(super) pane_states: super::pane_layers::PaneStates,
+    /// The over-pane hook, installed once for the app's life.
+    pub(super) over_pane: super::pane_layers::SharedOverPane,
     pub(super) menu_bar: crate::menu_bar::MenuBar,
 
     /// Display-lifetime owner for decoded application icon data and native
@@ -1059,6 +1061,7 @@ impl RenderApp {
             comms,
             panes: std::sync::Arc::default(),
             pane_states: Default::default(),
+            over_pane: super::pane_layers::over_pane(),
             window_icon: crate::window_icon::WindowIconService::new(),
             presentation_observer: crate::presentation_feedback::PresentationObserver::new(),
             clipboard: Err("clipboard is unavailable before display initialization".to_owned()),
