@@ -222,6 +222,7 @@ static REAPER: Reaper = Reaper { state: std::sync::Mutex::new(Reaping { orphans:
 type Start = fn(Box<dyn FnOnce() + Send>) -> io::Result<()>;
 
 fn spawn_reaper(run: Box<dyn FnOnce() + Send>) -> io::Result<()> {
+    // HOST(pure): starts a thread of this process, no outside resource (rule 5)
     std::thread::Builder::new().name("romacs-reaper".into()).stack_size(64 * 1024).spawn(run).map(drop)
 }
 
@@ -254,6 +255,7 @@ impl Reaper {
 
     fn start(&'static self, start: Start) -> io::Result<std::fs::File> {
         let wake = std::fs::File::from(crate::host::eventfd()?);
+        // HOST(acquisition): duplicates the reaper's wake descriptor
         let read_end = wake.try_clone()?;
         start(Box::new(move || self.run(read_end)))?;
         Ok(wake)
@@ -293,6 +295,7 @@ fn reap(orphan: &Orphan) -> bool {
 fn reaped(pid: i32) -> bool {
     let Some(pid) = child(pid) else { return true };
     loop {
+        // HOST(take): reaps a finished child without blocking: its exit is consumed
         match rustix::process::waitpid(Some(pid), rustix::process::WaitOptions::NOHANG) {
             Err(rustix::io::Errno::INTR) => {}
             Ok(None) => return false,
@@ -313,15 +316,18 @@ pub(crate) fn last_error() -> io::Error {
 
 pub(crate) fn set_nonblocking(fd: BorrowedFd<'_>) -> io::Result<()> {
     let flags = rustix::fs::fcntl_getfl(fd)?;
+    // HOST(escape): changes a process descriptor's flags: no inverse (the closing rule)
     Ok(rustix::fs::fcntl_setfl(fd, flags | rustix::fs::OFlags::NONBLOCK)?)
 }
 
 pub(crate) fn dup(fd: &OwnedFd) -> io::Result<OwnedFd> {
+    // HOST(acquisition): duplicates a descriptor: a new one, which must be closed
     fd.try_clone()
 }
 
 /// The terminal modes of the pty on FD, or None if it is not one.
 pub(crate) fn terminal_modes(fd: BorrowedFd<'_>) -> Option<Termios> {
+    // HOST(pure): a terminal's modes: a query
     rustix::termios::tcgetattr(fd).ok()
 }
 
@@ -344,6 +350,7 @@ pub(crate) fn child_setup_tty(fd: BorrowedFd<'_>) {
     s.local_modes |= LocalModes::ICANON;
     s.special_codes[SpecialCodeIndex::VEOF] = 4;
     s.special_codes[SpecialCodeIndex::VEOL] = 0xff;
+    // HOST(escape): a pty's modes, which the child sees
     let _ = rustix::termios::tcsetattr(fd, OptionalActions::Now, &s);
 }
 
@@ -355,6 +362,7 @@ pub(crate) fn tty_eof_char(fd: BorrowedFd<'_>) -> u8 {
 /// A close-on-exec duplicate of FD numbered 3 or above, so placing a child's
 /// standard descriptors cannot close it first.
 fn duplicate_above_stdio(fd: BorrowedFd<'_>) -> io::Result<OwnedFd> {
+    // HOST(acquisition): duplicates a descriptor above the standard three
     Ok(rustix::io::fcntl_dupfd_cloexec(fd, 3)?)
 }
 
@@ -404,18 +412,22 @@ pub(crate) fn spawn(spec: &Spawn<'_>) -> io::Result<i32> {
     // async-signal-safe functions (setsid, ioctl, signal), allocating nothing.
     unsafe {
         command.pre_exec(move || {
+            // HOST(escape): in the forked child before exec: a session of its own
             if libc::setsid() < 0 {
                 return Err(io::Error::last_os_error());
             }
             if tty {
+                // HOST(escape): the forked child's controlling terminal, before exec; the spawn is the acquisition
                 libc::ioctl(0, libc::TIOCSCTTY, 0);
             }
             for signal in [libc::SIGINT, libc::SIGQUIT, libc::SIGPROF] {
+                // HOST(escape): in the forked child before exec: the default dispositions it starts with
                 libc::signal(signal, libc::SIG_DFL);
             }
             Ok(())
         });
     }
+    // HOST(acquisition): starts the child; host::command is its world-build guard
     let child = command.spawn()?;
     // The Child handle is dropped without waiting: the table reaps the pid.
     let pid = child.id() as i32;
@@ -437,6 +449,7 @@ pub(crate) fn accessible_directory(dir: &[u8]) -> io::Result<()> {
 pub(crate) fn wait_status(pid: i32, options: rustix::process::WaitOptions) -> Option<i32> {
     let child = child(pid)?;
     loop {
+        // HOST(take): reaps a finished child without blocking: its exit is consumed
         match rustix::process::waitpid(Some(child), rustix::process::WaitOptions::NOHANG | options) {
             Ok(Some((_, status))) => {
                 if status.exited() || status.signaled() { crate::isolate::child_reaped(pid); }
@@ -455,6 +468,7 @@ pub(crate) fn exited(pid: i32) -> bool {
     let Some(child) = child(pid) else { return true };
     let options = rustix::process::WaitIdOptions::EXITED | rustix::process::WaitIdOptions::NOHANG | rustix::process::WaitIdOptions::NOWAIT;
     loop {
+        // HOST(pure): NOHANG and NOWAIT: looks at the child's state, reaps nothing
         match rustix::process::waitid(rustix::process::WaitId::Pid(child), options) {
             Err(rustix::io::Errno::INTR) => {}
             Ok(found) => return found.is_some(),
@@ -467,6 +481,7 @@ pub(crate) fn exited(pid: i32) -> bool {
 pub(crate) fn wait_blocking(pid: i32) -> io::Result<i32> {
     let child = child(pid).ok_or(rustix::io::Errno::CHILD)?;
     loop {
+        // HOST(block): waits for the child to end (`call-process`)
         match rustix::process::waitpid(Some(child), rustix::process::WaitOptions::empty()) {
             Ok(Some((_, status))) => {
                 crate::isolate::child_reaped(pid);
@@ -486,6 +501,7 @@ pub(crate) fn child_exited(pid: i32) -> io::Result<bool> {
     let options = rustix::process::WaitIdOptions::EXITED | rustix::process::WaitIdOptions::NOHANG | rustix::process::WaitIdOptions::NOWAIT;
     loop {
         // NOHANG answers None while the child runs.
+        // HOST(pure): NOHANG and NOWAIT: looks at the child's state, reaps nothing
         match rustix::process::waitid(rustix::process::WaitId::Pid(child), options) {
             Ok(status) => return Ok(status.is_some()),
             Err(rustix::io::Errno::INTR) => {}
@@ -497,6 +513,7 @@ pub(crate) fn child_exited(pid: i32) -> io::Result<bool> {
 /// emacs_read: Ok(0) at end of file.
 pub(crate) fn read(fd: BorrowedFd<'_>, buf: &mut [u8]) -> io::Result<usize> {
     loop {
+        // HOST(take): a process's output; every caller's descriptor is nonblocking or polled ready
         match rustix::io::read(fd, &mut *buf) {
             Err(rustix::io::Errno::INTR) => {}
             read => return Ok(read?),
@@ -517,7 +534,9 @@ pub(crate) fn write(fd: BorrowedFd<'_>, buf: &[u8]) -> io::Result<usize> {
 
 /// write(2), except that a socket never raises SIGPIPE.
 fn send_or_write(fd: BorrowedFd<'_>, buf: &[u8]) -> rustix::io::Result<usize> {
+    // HOST(escape): a process or network send
     match rustix::net::send(fd, buf, rustix::net::SendFlags::NOSIGNAL) {
+        // HOST(escape): a process or network send
         Err(rustix::io::Errno::NOTSOCK) => rustix::io::write(fd, buf),
         sent => sent,
     }
@@ -535,9 +554,10 @@ pub struct ProcessWatch {
 
 impl ProcessWatch {
     pub fn start(mut fds: Vec<(RawFd, i16)>, ready: impl FnOnce() + Send + 'static) -> io::Result<Self> {
-        // HOST(std::net): ProcessWatch's cancel pair: a socket pair private to this process that
+        // HOST(std::net, acquisition): ProcessWatch's cancel pair: a socket pair private to this process that
         // stops its own poll thread; it reaches no host fact
         let (cancel, stop) = std::os::unix::net::UnixStream::pair()?;
+        // HOST(pure): starts a thread of this process, no outside resource (rule 5)
         let thread = std::thread::Builder::new().name("process-watch".into()).spawn(move || {
             use std::os::fd::AsRawFd;
             fds.push((stop.as_raw_fd(), libc::POLLIN));
@@ -558,6 +578,7 @@ impl ProcessWatch {
 impl Drop for ProcessWatch {
     fn drop(&mut self) {
         use std::io::Write;
+        // HOST(escape): wakes ProcessWatch's poll thread through its private pair: no outside party, but no inverse
         let _ = (&self.cancel).write_all(&[0]);
         if let Some(thread) = self.thread.take() { let _ = thread.join(); }
     }
@@ -570,6 +591,7 @@ pub(crate) fn poll(fds: &[(RawFd, i16)], timeout: Option<std::time::Duration>) -
         // Round up, so a wait never returns before its deadline.
         Some(d) => i32::try_from(d.as_nanos().div_ceil(1_000_000)).unwrap_or(i32::MAX),
     };
+    // HOST(block): the process wait
     // UNSAFE(rustix's poll takes borrowed descriptors; these are numbers polled across threads)
     // SAFETY: poll reads and writes the `set.len()' pollfds `set' owns. A
     // descriptor is only a number to it: one closed meanwhile answers
@@ -632,6 +654,7 @@ fn local_name(address: &rustix::net::SocketAddrAny) -> Vec<u8> {
 
 /// getsockname (LOCAL) or getpeername of the socket FD.
 pub(crate) fn socket_address(fd: BorrowedFd<'_>, local: bool) -> io::Result<Option<Address>> {
+    // HOST(pure): a socket's address: a query
     let address = if local { Some(rustix::net::getsockname(fd)?) } else { rustix::net::getpeername(fd)? };
     Ok(address.and_then(decode_sockaddr))
 }
@@ -645,6 +668,7 @@ pub(crate) fn accept(listener: BorrowedFd<'_>) -> io::Result<(OwnedFd, Option<Ad
 
 /// SO_ERROR of the socket FD: how its nonblocking connect ended.
 pub(crate) fn socket_error(fd: BorrowedFd<'_>) -> i32 {
+    // HOST(take): reads and clears SO_ERROR: a nonblocking connect's outcome, consumed
     match rustix::net::sockopt::socket_error(fd) {
         Ok(Ok(())) => 0,
         Ok(Err(error)) | Err(error) => error.raw_os_error(),
@@ -653,6 +677,7 @@ pub(crate) fn socket_error(fd: BorrowedFd<'_>) -> i32 {
 
 /// emacs_get_tty_pgrp: the foreground group of the pty on FD.
 pub(crate) fn tty_pgrp(fd: BorrowedFd<'_>) -> Option<i32> {
+    // HOST(pure): a terminal's foreground process group: a query
     rustix::termios::tcgetpgrp(fd).ok().map(rustix::process::Pid::as_raw_nonzero).map(std::num::NonZeroI32::get)
 }
 

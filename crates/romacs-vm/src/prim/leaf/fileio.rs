@@ -74,6 +74,7 @@ impl Leaf<'_> {
     }
 
     pub fn fileio_sync_output(&self, file: &std::fs::File) -> std::io::Result<()> {
+        // HOST(escape): forces a file's writes to disk: no inverse
         file.sync_all()
     }
 
@@ -97,6 +98,7 @@ impl Leaf<'_> {
                     let timeout = remaining.as_millis().clamp(1, 100) as i32;
                     let mut fds = [rustix::event::PollFd::new(&*file, rustix::event::PollFlags::OUT)];
                     let timeout = rustix::event::Timespec { tv_sec: 0, tv_nsec: i64::from(timeout) * 1_000_000 };
+                    // HOST(block): waits on a descriptor
                     match rustix::event::poll(&mut fds, Some(&timeout)) {
                         Ok(_) | Err(rustix::io::Errno::INTR) => {}
                         Err(error) => return Err(error.into()),

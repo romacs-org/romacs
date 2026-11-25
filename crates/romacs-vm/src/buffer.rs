@@ -847,6 +847,7 @@ impl Vm {
         let mut retained = if has_filename { fields.clone() } else { Default::default() };
         retained.retain_locals(&kept);
         let mut state = self.buffer_state(value)?.clone();
+        // HOST(pure): the buffer's own state, not a process
         state.kill();
         self.mutator.resolved_buffer = None;
         *self.objects.entry_mut(index) = match &self.objects[index] {

@@ -89,6 +89,7 @@ fn write_char(cx, character: Value; optional stream: Value) -> Step {
 
 defsubr! { name = "flush-standard-output", gnu = "print.c:917", effect = Global,
 fn flush_standard_output(cx) {
+    // HOST(escape): printing to t: stdout and stderr are sends
     std::io::stdout().flush().map_err(|e| Fault::Error(e.to_string()))?;
     Ok(Value::NIL)
 }}
@@ -116,6 +117,7 @@ fn output(cx: &mut Leaf<'_>, result: Value, text: Value, stream: Value) -> Next 
         // print.c strout: the string's bytes as they are (a raw-byte
         // character as its internal two-byte form, as GNU writes it).
         let bytes = cx.string_view(text)?.bytes().to_vec();
+        // HOST(escape): printing to t: stdout and stderr are sends
         std::io::stdout().write_all(&bytes).map_err(|e| Fault::Error(e.to_string()))?;
         return Ok(Step::Done(result));
     }
@@ -230,6 +232,7 @@ fn external_debugging_output(cx, character: Value) -> Step {
         bytes.extend_from_slice(&unit[..n]);
     }
     if coding == Value::NIL || chars.iter().all(|&c| c < 0x80) {
+        // HOST(escape): printing to t: stdout and stderr are sends
         std::io::stderr().write_all(&bytes).map_err(|e| Fault::Error(e.to_string()))?;
         return Ok(Step::Done(character));
     }
@@ -240,6 +243,7 @@ fn external_debugging_output(cx, character: Value) -> Step {
 
 fn debugging_encoded(cx: &mut Leaf<'_>, encoded: Value, saved: &[Value]) -> Next {
     let bytes = cx.string_view(encoded)?.bytes().to_vec();
+    // HOST(escape): printing to t: stdout and stderr are sends
     std::io::stderr().write_all(&bytes).map_err(|e| Fault::Error(e.to_string()))?;
     Ok(Step::Done(saved[0]))
 }

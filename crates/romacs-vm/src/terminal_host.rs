@@ -295,6 +295,7 @@ impl Vm {
             while !snapshot.text.is_char_boundary(next_point) { next_point -= 1; }
             let accessible = text.accessible();
             text.point = ByteOffset(next_point.clamp(accessible.start.0, accessible.end.0));
+            // HOST(pure): the buffer's modified flag, not a file's
             text.state.set_modified(false);
             if prefix != end || prefix != inserted_end {
                 self.evaporate_overlays_at(buffer, ByteOffset(prefix)..ByteOffset(inserted_end))?;

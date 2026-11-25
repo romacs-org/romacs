@@ -3877,6 +3877,7 @@ impl Vm {
                 line.extend_from_slice(view.bytes());
             }
             line.push(b'\n');
+            // HOST(escape): stdout and stderr are sends another process reads
             let _ = std::io::Write::write_all(&mut std::io::stderr().lock(), &line);
             return Ok(value);
         }

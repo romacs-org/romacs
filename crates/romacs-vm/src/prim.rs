@@ -1497,6 +1497,7 @@ mod leaf {
         }
         /// GNU calls `display-warning`, which writes to stderr in batch.
         pub fn batch_warning(&self, kind: &str, text: &str) {
+            // HOST(escape): stdout and stderr are sends another process reads
             eprintln!("Warning ({kind}): {text}");
         }
         /// The slot whose function cell symbol V names: `nil` and `t`, which

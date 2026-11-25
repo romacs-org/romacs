@@ -154,11 +154,13 @@ pub fn configure(config: Config, compiling: Option<&Path>) {
         host::die_with_parent(parent);
         std::thread::spawn(|| {
             std::thread::sleep(std::time::Duration::from_secs(600));
+            // HOST(escape): stdout and stderr are sends another process reads
             eprintln!("romacs-compile: deadline passed");
             // A nested compile this process waits on keeps its record file
             // in this process's temporary directory (the store's tmp/, the
             // compile environment's): a few bytes left there, read by
             // nothing. A stated limit; see `run_compile`.
+            // HOST(escape): the compile watchdog's exit, which its parent sees as the child's status
             std::process::exit(124);
         });
     }
@@ -189,6 +191,7 @@ pub fn nested() -> bool {
 /// file's own word (`no-byte-compile') is no failure.
 fn say_failure(configured: &Configured, path: &Path, status: &store::Status) {
     if let store::Status::Error(reason) = status && !configured.nested {
+        // HOST(escape): stdout and stderr are sends another process reads
         eprintln!("romacs-compile: {}: {reason}", path.display());
     }
 }
@@ -372,14 +375,18 @@ fn run_compile(configured: &Configured, program: OsString, args: Vec<OsString>, 
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(stderr);
+    // HOST(acquisition): starts the compile's child
     let mut child = command.spawn().ok()?;
     let deadline = host::monotonic() + std::time::Duration::from_secs(600);
     let status = loop {
+        // HOST(take): reaps a finished child without blocking: its exit is consumed
         match child.try_wait() {
             Ok(Some(status)) => break Some(status),
             Ok(None) if host::monotonic() < deadline => std::thread::sleep(std::time::Duration::from_millis(2)),
             _ => {
+                // HOST(escape): kills the child: a signal another process receives
                 let _ = child.kill();
+                // HOST(block): waits for the child to end
                 let _ = child.wait();
                 break None;
             }
@@ -666,10 +673,12 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
         let (status, units) = match walked {
             Ok(Ok(units)) => (store::Status::Compiled, units),
             Ok(Err(reason)) => {
+                // HOST(escape): stdout and stderr are sends another process reads
                 eprintln!("romacs-compile: {}: {reason}", source.display());
                 (store::Status::Source(reason), vec![])
             }
             Err(reason) => {
+                // HOST(escape): stdout and stderr are sends another process reads
                 eprintln!("romacs-compile: {}: {reason}", source.display());
                 (store::Status::Error(reason.to_string()), vec![])
             }
@@ -743,6 +752,7 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
             .filter_map(|s| s.index_if(7).map(|slot| self.symbol_names[slot - 1].clone()))
             .collect();
         if !not_inlined.is_empty() {
+            // HOST(escape): stdout and stderr are sends another process reads
             eprintln!("romacs-compile: {}: {}", source.display(), json!({"not-inlined": not_inlined}));
         }
         Ok(Ok(units))

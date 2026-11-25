@@ -903,7 +903,9 @@ fn send_string_to_terminal(cx, string: Value; optional terminal: Value) {
     let bytes = cx.string_view(string)?.bytes().to_vec();
     if !initial { return Err(Fault::Error("Device 0 is not a termcap terminal device".into())); }
     use std::io::Write;
+    // HOST(escape): terminal output: stdout is a send
     let mut out = std::io::stdout().lock();
+    // HOST(escape): terminal output: stdout is a send
     out.write_all(&bytes).and_then(|()| out.flush()).map_err(|e| Fault::Error(e.to_string()))?;
     Ok(Value::NIL)
 }}

@@ -64,6 +64,7 @@ pub(crate) fn start(load_path: Vec<String>, delay: Duration) {
     ENABLED.store(true, Ordering::Relaxed);
     static STARTED: Once = Once::new();
     STARTED.call_once(|| {
+        // HOST(pure): starts a thread of this process, no outside resource (rule 5)
         let _ = std::thread::Builder::new().name("romacs-precompile".into()).spawn(move || run(load_path));
     });
 }
@@ -145,7 +146,9 @@ fn spawn_compile(configured: &Configured, path: &Path, load_path: &[String]) {
         .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(stderr);
     // One wake when it ends; the compile process keeps its own deadline
     // and dies with this session (`PARENT`).
+    // HOST(acquisition): starts the background compile's child
     if let Ok(mut child) = command.spawn() {
+        // HOST(block): waits for the child to end
         let _ = child.wait();
     }
 }

@@ -116,6 +116,7 @@ impl Ahead {
     fn start(slot: EarlySlot, job: Job, text: FrozenText, old: Option<native::Revision>, wake: crate::process_jobs::Wake) -> Option<Self> {
         let (sender, receiver) = mpsc::channel();
         let visible = job.visible;
+        // HOST(pure): starts a thread of this process, no outside resource (rule 5)
         std::thread::Builder::new().name("treesit-reparse".into()).spawn(move || {
             let text = text;
             let old = job.old.map(native::Loose::tree);
@@ -145,10 +146,12 @@ impl Ahead {
     }
     /// Whether the thread has sent its result.
     pub(crate) fn ready(&mut self) -> bool {
+        // HOST(pure): waits on a thread of this process, no outside peer (rule 5)
         self.wait(Duration::ZERO)
     }
     /// Whether the thread has sent its result, waiting at most SLICE for it.
     pub(crate) fn wait(&mut self, slice: Duration) -> bool {
+        // HOST(pure): waits on a thread of this process, no outside peer (rule 5)
         self.result.borrow_mut().wait(slice)
     }
     /// A change of the text since the parse started. False past the limit:
