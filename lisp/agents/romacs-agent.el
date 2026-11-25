@@ -7056,6 +7056,45 @@ once, and loads on once its kept state is written."
                 ((equal (gethash key romacs-agent--requests) id)))
       (remhash key romacs-agent--requests))))
 
+(defvar romacs-agent-tools--held)
+
+(defun romacs-agent--holds-p (session)
+  "Whether SESSION holds anything only memory has: a connection, a chat,
+work queued or dispatched, an approval asked, a renewal, a start or a
+switch under way, state not yet kept, or an attach or relaunch going."
+  (or (process-live-p (romacs-agent-connection session))
+      (buffer-live-p (romacs-agent-buffer session))
+      (memq (romacs-agent-state session) '(starting running))
+      (romacs-agent-queue session) (romacs-agent-dispatch session)
+      (> (hash-table-count (romacs-agent-approvals session)) 0)
+      (romacs-agent-renewing session) (romacs-agent-startup-pending session)
+      (eq (plist-get (romacs-agent-pending-selection session) :state) 'armed)
+      (assq session romacs-agent--keeping) (assq session romacs-agent--keep-tries)
+      (gethash session romacs-agent--reattaching) (gethash session romacs-agent--attempts)
+      (gethash session romacs-agent--relaunching)
+      (and (boundp 'romacs-agent-tools--held) (gethash session romacs-agent-tools--held))
+      (romacs-agent--replay-copy-p session)))
+
+(defun romacs-agent-unload-idle ()
+  "Unload every loaded session a start would leave unloaded
+\(`romacs-agent--to-load') that holds nothing only memory has
+\(`romacs-agent--holds-p'): it is known by its row again, and loads
+when next asked for.  Its state is kept first.  Return how many were
+unloaded."
+  (interactive)
+  (romacs-agent--keep-pending)
+  (let* ((idle (seq-remove #'romacs-agent--holds-p (hash-table-values romacs-agent--sessions)))
+         (load (make-hash-table :test #'equal)))
+    (dolist (dir (romacs-agent--to-load (mapcar #'romacs-agent-dir idle)))
+      (puthash dir t load))
+    (let ((gone (seq-remove (lambda (session) (gethash (romacs-agent-dir session) load)) idle)))
+      (dolist (session gone)
+        (romacs-agent--unpublish session)
+        (remhash (romacs-agent-id session) romacs-agent--summaries))
+      (when (called-interactively-p 'interactive)
+        (message "Unloaded %d idle sessions, %d loaded" (length gone) (hash-table-count romacs-agent--sessions)))
+      (length gone))))
+
 (defun romacs-agent--load-rest (session manifest)
   "SESSION, made from MANIFEST and its kept state back: attached when its
 supervisor runs, else its journal read on here."
