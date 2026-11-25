@@ -948,6 +948,22 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
       (should (equal (romacs-agent-board-tests--activity lead) ""))
       (should-not (romacs-agent-loaded "stored")))))
 
+(ert-deftest romacs-agent-board-chat-settle-settles-and-closes ()
+  ;; C-c C-o s: the chat's thread settles, its chat goes, and a delegated
+  ;; task still at work is said.
+  (romacs-agent-board-tests--with-store
+    (let* ((lead (mk "lead" "Lead" 'idle 0 :dir root))
+           (romacs-agent-log--chats (make-hash-table :test #'equal))
+           (said nil))
+      (mk "busy" "Check" 'running 3 :options '(:parent "lead"))
+      (romacs-agent-ui--summarize-children lead)
+      (let ((chat (romacs-agent-log-chat lead)))
+        (cl-letf (((symbol-function 'message) (lambda (&rest args) (setq said (apply #'format-message args)))))
+          (with-current-buffer chat (romacs-agent-chat-settle)))
+        (should-not (buffer-live-p chat))
+        (should (romacs-agent-settled-p lead))
+        (should (string-match-p "still at work" said))))))
+
 (ert-deftest romacs-agent-board-stored-failure-keeps-its-outcome-in-chat ()
   (romacs-agent-board-tests--with-store
     (let ((lead (mk "lead" "Lead" 'idle 0 :dir root))
