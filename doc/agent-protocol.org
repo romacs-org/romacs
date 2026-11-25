@@ -817,8 +817,10 @@ was accepted on and, on =service-relay.sock=, from =agents/transport=.
   pipe ends the client connects again, after 0.25 s, doubled each time
   up to 30 s until the machine answers; it says hello and watches the
   list and the sessions it follows afresh.  A service that has not
-  listed the sessions 20 s after the connection is made is given up on
-  the same way: a live ssh link does not mean a live service.  ssh's
+  listed the sessions 20 s after the connection is made, or that leaves
+  a check unanswered 20 s, is given up on the same way: a live ssh link
+  does not mean a live service.  The check is a request any service
+  answers at once; =agents/ping=, an unknown method, is refused at once.  ssh's
   =RemoteCommand= is set to none, so a host's configuration cannot
   replace the relay; a master's socket name with a space or a =%= is
   no master.
@@ -853,7 +855,9 @@ was accepted on and, on =service-relay.sock=, from =agents/transport=.
   relay's =XDG_*= directories, so it listens where the relay looks.
   Each systemd command and each connect is bounded too.
   Hosts are in units of their own (When the service crashes or
-  restarts), so they outlive it.  Without lingering
+  restarts), so they outlive it, but for a notes-only host, which the
+  service still starts with =setsid= in its own cgroup (slice S7 takes
+  that path out).  Without lingering
   (=loginctl enable-linger=), the user's manager, and with it the
   service and the hosts, ends with the user's last login.
 - *For a machine no editor owns.*  On a machine whose editor holds the
@@ -880,7 +884,9 @@ an editor.
   the far side's relay path, or a relay URL.
 - A session id is unique only within its service.  Everything a client
   keeps of a session, its mirror, its chat and its board row, is keyed
-  by host and id together.
+  by host and id together.  The mirror and the chat are; the board's
+  caches (a row's summary, a thread's fold) are still keyed by id alone,
+  until the board draws several hosts.
 - The board shows one host's sessions at a time (=romacs-agents-remote=
   asks which); every host stays connected.  Hosts above projects in one
   board (hosts, then each host's projects, then their threads) needs the

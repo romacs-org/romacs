@@ -11,9 +11,9 @@
 ;;
 ;; `romacs-relay stdio' starts it so, as the user unit
 ;; `romacs-agents-service', when nothing answers at the service's socket.
-;; A batch start reads no init file, so it loads the user's own first: the
-;; service runs their approval policy, providers and options, as their
-;; editor would.
+;; A batch start reads no init file, so it takes the GUI's steps first
+;; (saved settings, packages, the init): the service runs the user's
+;; approval policy, providers and options, as their editor would.
 
 ;;; Code:
 
@@ -23,23 +23,32 @@
 (defconst romacs-agent-headless--wait 1
   "Seconds one wait for input lasts before the loop waits again.")
 
-(defun romacs-agent-headless--init-files ()
-  "The user's init files that exist, as an editor's start finds them:
-early-init.el in `user-emacs-directory', then ~/.emacs, ~/.emacs.el or
-that directory's init.el, the first there."
-  (let* ((dir user-emacs-directory) (early (expand-file-name "early-init.el" dir)))
-    (delq nil (list (and (file-exists-p early) early)
-                    (seq-find #'file-exists-p
-                              (list "~/.emacs" "~/.emacs.el" (expand-file-name "init.el" dir)))))))
+(declare-function romacs-saved-settings-start "romacs-saved-settings" ())
+(declare-function romacs-init-load "romacs-init-load" (file))
+(declare-function romacs--activate-packages "romacs-loadup-bootstrap" ())
+
+(defun romacs-agent-headless--init-file ()
+  "The user's Romacs init file, as the GUI names it
+\(crates/romacs-vm-gui/src/user_init.rs): init.el in romacs/ under
+XDG_CONFIG_HOME when that is absolute, else under ~/.config."
+  (let ((config (getenv "XDG_CONFIG_HOME")))
+    (expand-file-name "romacs/init.el" (if (and config (file-name-absolute-p config)) config "~/.config"))))
 
 (defun romacs-agent-headless--load-init ()
-  "Load the user's init files (`romacs-agent-headless--init-files'), the
-last one as `user-init-file'; an error in one is reported and the next
-goes on."
-  (dolist (file (romacs-agent-headless--init-files))
-    (setq user-init-file (expand-file-name file))
-    (with-demoted-errors "romacs-agent-headless: loading the init file: %S"
-      (load file nil t t))))
+  "Take the GUI's steps before its first frame: name the init file (as
+`user-init-file', its directory `user-emacs-directory'), load the saved
+settings, activate the installed packages, then load the init through
+`romacs-init-load'.  A step that fails is reported and the next goes on."
+  (let ((file (romacs-agent-headless--init-file)))
+    (setq user-init-file file user-emacs-directory (file-name-directory file))
+    (with-demoted-errors "romacs-agent-headless: saved settings: %S"
+      (when (fboundp 'romacs-saved-settings-start) (romacs-saved-settings-start)))
+    (with-demoted-errors "romacs-agent-headless: packages: %S"
+      (when (fboundp 'romacs--activate-packages) (romacs--activate-packages)))
+    (when (file-exists-p file)
+      (let ((said (if (fboundp 'romacs-init-load) (romacs-init-load file)
+                    (with-demoted-errors "%S" (load file nil t t) nil))))
+        (when (stringp said) (message "romacs-agent-headless: init failed: %s" said))))))
 
 ;;;###autoload
 (defun romacs-agent-headless-run ()

@@ -72,15 +72,18 @@ to the buffer STDERR (one of its own when nil), never into the stream."
                             :filter #'romacs-agent-client--filter
                             :sentinel #'romacs-agent-client--sentinel)
     ;; Its end said by the connection's sentinel, not in its buffer.
-    (let ((errors (make-pipe-process :name "romacs-agent-client stderr" :noquery t :sentinel #'ignore
-                                     :buffer (or stderr (generate-new-buffer " *romacs-agent-client stderr*")))))
+    (let* ((buffer (or stderr (generate-new-buffer " *romacs-agent-client stderr*")))
+           (errors (make-pipe-process :name "romacs-agent-client stderr" :noquery t :sentinel #'ignore
+                                      :buffer buffer)))
       (condition-case err
           (make-process :name "romacs-agent-client" :command place :connection-type 'pipe
                         :noquery t :coding 'no-conversion :stderr errors
                         :filter #'romacs-agent-client--filter
                         :sentinel #'romacs-agent-client--sentinel)
         ;; No command run: nothing writes to its stderr.
-        (error (delete-process errors) (signal (car err) (cdr err)))))))
+        (error (delete-process errors)
+               (unless stderr (kill-buffer buffer))
+               (signal (car err) (cdr err)))))))
 
 (defun romacs-agent-client-connect (place &optional stderr)
   "Connect to the service at PLACE, say hello and watch its list.  PLACE

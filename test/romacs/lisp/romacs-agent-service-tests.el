@@ -834,13 +834,16 @@ a state root of its own, and a service of its own on `socket'."
         (romacs-agent-remote-disconnect source)))))
 
 (ert-deftest romacs-agent-remote-a-name-is-its-latest-machine-s ()
-  ;; A name connected again names its new place; letting go of an old
-  ;; source under it lets go of nothing newer.
+  ;; A name connected again at a new place is a new machine's; letting go
+  ;; of an old source under it lets go of nothing newer.
   (require 'romacs-agent-remote)
   (let* ((romacs-agent-remote--sources (make-hash-table :test #'equal))
          (romacs-agent-remote--source nil)
          (old (romacs-agent-remote--host-source "n" "/a")))
-    (should (equal (romacs-agent-remote-place (romacs-agent-remote--host-source "n" "/b")) "/b"))
+    (should (eq (romacs-agent-remote--host-source "n" "/a") old))
+    ;; Somewhere else: another machine's, the old one let go of.
+    (should-not (eq (romacs-agent-remote--host-source "n" "/b") old))
+    (should (equal (romacs-agent-remote-place (gethash "n" romacs-agent-remote--sources)) "/b"))
     (romacs-agent-remote-disconnect old)
     (let ((new (romacs-agent-remote--host-source "n" "/c")))
       (romacs-agent-remote-disconnect old)

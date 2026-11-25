@@ -548,10 +548,10 @@ editor makes `romacs-agent--runtime-root' 0755)."
 alone, in the agents' runtime directory; nil when a socket there would
 not fit a socket's name (ssh's digest, 40 bytes, and the suffix of its
 temporary name, 17, after it), or when ssh would read its name otherwise
-\(a space or a %)."
+\(a space, a quote, a % or a $)."
   (let ((dir (expand-file-name "ssh" (romacs-agent--runtime-root))))
     (when (and (<= (+ (string-bytes dir) 1 40 17) romacs-agent-remote--socket-path-most)
-               (not (string-match-p "[[:space:]%]" dir)))
+               (not (string-match-p "[[:space:]%\"$]" dir)))
       (make-directory dir t)
       (set-file-modes dir #o700)
       dir)))
@@ -582,12 +582,14 @@ no master."
       (car (last (split-string (buffer-string) "[\r\n]+" t "[ \t]+"))))))
 
 (defun romacs-agent-remote--host-source (name place)
-  "The source of the machine NAME, now at PLACE: the one this editor keeps
-for NAME, else a new one, kept."
-  (let ((source (or (gethash name romacs-agent-remote--sources)
-                    (puthash name (romacs-agent-remote--make :name name) romacs-agent-remote--sources))))
-    (setf (romacs-agent-remote-place source) place)
-    source))
+  "The source of the machine NAME at PLACE: the one this editor keeps for
+NAME while it is at PLACE, else a new one, kept.  One kept for NAME at
+another place is another machine's: let go of, its relay with it."
+  (let ((kept (gethash name romacs-agent-remote--sources)))
+    (if (and kept (equal (romacs-agent-remote-place kept) place))
+        kept
+      (when kept (romacs-agent-remote-disconnect kept))
+      (puthash name (romacs-agent-remote--make :name name :place place) romacs-agent-remote--sources))))
 
 (defun romacs-agent-remote-connect (&optional socket host)
   "Show another machine's agent sessions on the board: HOST, a name of
@@ -673,13 +675,14 @@ the next start."
                                                                         (append (gethash "providers" result) nil)))))))
 
 (defconst romacs-agent-remote--answer-within 20
-  "Seconds a machine's service has to answer hello and list its sessions
-once connected: past them the connection is closed and made again.")
+  "Seconds a machine's service has to answer: to list its sessions once
+connected, then each check after (`romacs-agent-remote--check'); past
+them the connection is closed and made again.")
 
 (defun romacs-agent-remote--connected (source client)
   "SOURCE connected through CLIENT: each chat it shows followed through it.
-A CLIENT ended already, or whose service has not listed its sessions
-within `romacs-agent-remote--answer-within' seconds, is one that ended."
+A CLIENT ended already, or whose service stops answering
+\(`romacs-agent-remote--check'), is one that ended."
   (setf (romacs-agent-remote-client source) client)
   (if (not (romacs-agent-client-live-p client))
       (romacs-agent-remote--again source)
@@ -688,10 +691,24 @@ within `romacs-agent-remote--answer-within' seconds, is one that ended."
                (when (buffer-live-p buffer)
                  (romacs-agent-client-follow client id romacs-agent-log-turns romacs-agent-log-records)))
              (romacs-agent-remote-chats source))
-    (run-at-time romacs-agent-remote--answer-within nil
-                 (lambda () (when (and (eq client (romacs-agent-remote-client source))
-                                       (not (romacs-agent-client-revision client)))
-                              (romacs-agent-client-close client))))))
+    (romacs-agent-remote--check client source nil)))
+
+(defun romacs-agent-remote--check (client source asked)
+  "Close CLIENT, SOURCE's, when its service has not answered: its list not
+watched, or ASKED, a check's (ANSWERED), still unanswered, after
+`romacs-agent-remote--answer-within' seconds; else ask a request any
+service answers at once (an unknown method's refusal answers it too),
+and check again that long later, for as long as CLIENT is SOURCE's.  A
+live ssh link does not make a live service."
+  (run-at-time romacs-agent-remote--answer-within nil
+               (lambda ()
+                 (when (and (eq client (romacs-agent-remote-client source)) (romacs-agent-client-live-p client))
+                   (if (or (not (romacs-agent-client-revision client)) (and asked (not (car asked))))
+                       (romacs-agent-client-close client)
+                     (let ((answered (list nil)))
+                       (romacs-agent-client-request client "agents/ping" (romacs-agent-rpc-object)
+                                                    (lambda (_result _error) (setcar answered t)))
+                       (romacs-agent-remote--check client source answered)))))))
 
 (defun romacs-agent-remote--again (source)
   "Connect SOURCE again after its delay, doubled for the next time up to
