@@ -1090,6 +1090,36 @@ fn call_kernel(vm: &mut Vm, p: crate::Primitive, args: &[Value], engine: bool) -
     })
 }
 
+#[test]
+fn string_as_unibyte_quits_between_byte_chunks() {
+    use crate::Primitive::EncodeUtf8;
+    use crate::quit::KERNEL_CHUNK;
+    let (mut vm, signal) = busy_vm();
+    let prefix = KERNEL_CHUNK - 3;
+    let input = eval(&mut vm, &format!(
+        "(setq input (concat (make-string {prefix} ?a)
+                            (string-as-multibyte (unibyte-string 128 255)) \"λ\"))",
+    ));
+    assert_eq!(vm.str_view(input).unwrap().len(), KERNEL_CHUNK);
+    assert!(signal.interrupt());
+    let outcome = call_kernel(&mut vm, EncodeUtf8, &[input], true);
+    assert_eq!(outcome.err().as_deref(), Some(crate::quit::ESCAPED),
+               "string-as-unibyte did not quit inside the conversion");
+    let quit = vm.intern("quit");
+    assert!(matches!(vm.mutator.propagated_escape.take(), Some(crate::threaded::Escape::Signal(c, _)) if c == quit));
+    assert!(!signal.due());
+    vm.quit_unwinding = false;
+
+    eval(&mut vm, "(setq inhibit-quit t)");
+    assert!(signal.interrupt());
+    let result = call_kernel(&mut vm, EncodeUtf8, &[input], true).unwrap();
+    let view = vm.str_view(result).unwrap();
+    assert!(!view.is_multibyte());
+    assert_eq!(&view.bytes()[..prefix], &vec![b'a'; prefix]);
+    assert_eq!(&view.bytes()[prefix..], &[128, 255, 0xce, 0xbb]);
+    assert!(signal.due());
+}
+
 /// The kernels gated at their first chunk (`Vm::kernel_poll`), each with
 /// the form making its arguments, N elements long. A press counted: through
 /// the engine's call target three chunks' worth quits at a poll, and one
@@ -1098,11 +1128,11 @@ fn call_kernel(vm: &mut Vm, p: crate::Primitive, args: &[Value], engine: bool) -
 /// value too.
 #[test]
 fn gated_kernels_take_their_scope_at_their_first_chunk() {
-    use crate::Primitive::{Append, CopySequence, Max, Min, Nreverse};
+    use crate::Primitive::{Append, CopySequence, EncodeUtf8, Max, Min, Nreverse};
     const K: usize = crate::quit::KERNEL_CHUNK;
     // Each kernel, with the form making its arguments, N elements long.
     type Kernel = (crate::Primitive, fn(usize) -> String);
-    let kernels: [Kernel; 7] = [
+    let kernels: [Kernel; 8] = [
         (Nreverse, |n| format!("(list (make-list {n} 1))")),
         (CopySequence, |n| format!("(list (make-list {n} 1))")),
         (Append, |n| format!("(list (make-list {n} 1) nil)")),
@@ -1110,6 +1140,7 @@ fn gated_kernels_take_their_scope_at_their_first_chunk() {
         (Append, |n| format!("(list (make-bool-vector {n} t) nil)")),
         (Min, |n| format!("(make-list {n} 1)")),
         (Max, |n| format!("(make-list {n} 1)")),
+        (EncodeUtf8, |n| format!("(list (make-string {n} ?a t))")),
     ];
     for (p, form) in kernels {
         for (n, engine) in [(3 * K, true), (K - 1, true), (3 * K, false)] {

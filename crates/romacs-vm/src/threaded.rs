@@ -4362,6 +4362,7 @@ pub(crate) fn primitive_target(p: Primitive) -> PrimitiveCall {
         // Its own entry, granting its quit scope at its first chunk
         // boundary (`Vm::kernel_poll`): a shorter call never enters one.
         Nreverse => |vm, _, start, n| if n == 1 { vm.core_nreverse::<true>(vm.stack[start]) } else { Err("wrong primitive arity".into()) },
+        EncodeUtf8 => |vm, _, start, n| if n == 1 { vm.string_as_unibyte::<true>(vm.stack[start]) } else { Err("wrong primitive arity".into()) },
         CacheStats | CacheClear | CacheEntries => |vm, p, _, n| vm.cache_primitive(p, n),
         ProcessLines => |vm, _, start, n| vm.process_lines(start, n),
         Format => |vm, _, start, n| vm.inside_quit_scope(|vm| vm.format_polled(start, n)),
