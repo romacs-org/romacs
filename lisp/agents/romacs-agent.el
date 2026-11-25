@@ -2294,7 +2294,9 @@ harness's, the one EVENT names when it does (`romacs-agent-switch-harness')."
                 ;; the new one has no such turn to finish or steer.
                 (setf (romacs-agent-input-seq session) nil (romacs-agent-interrupted session) nil))
               (setf (romacs-agent-harness-session session) (plist-get event :to)
-                    (romacs-agent-brief session) (plist-get event :brief)
+                    ;; A cleared conversation has no brief to carry.
+                    (romacs-agent-brief session) (let ((brief (plist-get event :brief)))
+                                                   (and (stringp brief) (not (string-empty-p brief)) brief))
                     (romacs-agent-renewing session) (or (plist-get event :seq) t)))
     ('forked (setf (romacs-agent-options session)
                    (plist-put (copy-sequence (romacs-agent-options session))
@@ -5935,6 +5937,38 @@ found.  A quit goes on."
         (cons 'answer (romacs-agent-submit-refused intent 'no-session (format "No session %s" session-id))))
     (error (cons 'answer (romacs-agent-submit-refused intent 'owner-unavailable (error-message-string err))))))
 
+(defvar romacs-agent-slash-commands nil
+  "The slash commands a user's draft can be, whatever the session's
+harness: an alist of NAME (a string, without its slash) to (HANDLER
+DOC).  HANDLER is called with the session and the text after the name,
+trimmed, and returns what to tell the user, or signals a `user-error'
+the draft is refused with.  Defined by `romacs-agent-define-slash-command'.")
+
+(defun romacs-agent-define-slash-command (name doc handler)
+  "Make /NAME a slash command of every session (`romacs-agent-slash-commands'):
+DOC says what it does, HANDLER runs it."
+  (setf (alist-get name romacs-agent-slash-commands nil nil #'equal) (list handler doc)))
+
+(defun romacs-agent-slash-command (text)
+  "The slash command TEXT, a draft, is, as (NAME HANDLER . ARGS), or nil:
+a defined name after its slash, then nothing or a space.  Any other text
+starting with a slash (a path, a harness's own command) is a message."
+  (when (string-match "\\`/\\([[:alnum:]-]+\\)\\(?:[[:space:]]+\\(\\(?:.\\|\n\\)*\\)\\)?\\'" text)
+    (when-let* ((name (match-string 1 text))
+                (entry (alist-get name romacs-agent-slash-commands nil nil #'equal)))
+      (cons name (cons (car entry) (string-trim (or (match-string 2 text) "")))))))
+
+(defun romacs-agent--submit-slash (session intent command)
+  "Run COMMAND (`romacs-agent-slash-command') of INTENT's draft for
+SESSION, in place of sending it: the answer accepts the draft, saying
+what was done, or refuses it with the command's error."
+  (pcase-let ((`(,name ,handler . ,args) command))
+    (condition-case err
+        (let ((said (funcall handler session args)))
+          (append (list :draft-id (plist-get intent :draft-id) :status 'accepted :command name)
+                  (and (stringp said) (list :message said))))
+      (user-error (romacs-agent-submit-refused intent 'invalid (error-message-string err))))))
+
 (defun romacs-agent--submit-step (scope session-id intent)
   "What to do with INTENT, from SCOPE, to the session SESSION-ID names:
 \(answer . ANSWER), answer it; (wait . DRAFT), wait for the answer of
@@ -5951,6 +5985,10 @@ its id meanwhile; or (admit SESSION DIGEST), admit it
                (`(answer . ,refused) (cons 'answer refused))
                (`(session . ,session)
                 (cond ((gethash id romacs-agent--submit-drafts) 'again)
+                      ;; A slash command runs, whatever the harness's state.
+                      ((when-let* ((command (and (null (plist-get intent :attachments))
+                                                 (romacs-agent-slash-command (string-trim (plist-get intent :text))))))
+                         (cons 'answer (romacs-agent--submit-slash session intent command))))
                       ((romacs-agent--ended-p session)
                        (cons 'answer (romacs-agent-submit-refused intent 'closed (romacs-agent--ended-text session))))
                       (t (list 'admit session digest)))))))))

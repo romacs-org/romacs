@@ -1446,8 +1446,9 @@ on RET."
     ('exit (romacs-agent-log--exit session event))
     ('renewed (romacs-agent-log--note event (if-let* ((provider (plist-get event :provider)))
                                                 (format "switched to %s: a new conversation, briefed on this one" provider)
+                                              (if (equal (plist-get event :why) "clear") "cleared: a new conversation"
                                               (format "renewed: a new conversation%s"
-                                                      (if-let* ((why (plist-get event :why))) (format " (%s)" why) "")))))
+                                                      (if-let* ((why (plist-get event :why))) (format " (%s)" why) ""))))))
     ('forked (romacs-agent-log--note event (format "forked from %s" (or (plist-get event :title) (plist-get event :from)))))
     ('rolled-back (romacs-agent-log-turns-rolled-back event))
     ('replied (romacs-agent-log--note event (format "replied to %s" (plist-get event :message))))
@@ -2053,7 +2054,11 @@ new one."
       (when (and romacs-agent-log--sending (equal romacs-agent-log--sending (plist-get answer :draft-id)))
         (romacs-agent-log--sending-ended)
         (when (eq (plist-get answer :reason) 'conflict) (setq romacs-agent-log--draft-id nil))
-        (if (eq (plist-get answer :status) 'accepted) (romacs-agent-log--sent) (romacs-agent-log--not-sent answer))))))
+        (if (eq (plist-get answer :status) 'accepted)
+            (progn (romacs-agent-log--sent)
+                   ;; A slash command says what it did.
+                   (when-let* ((said (plist-get answer :message))) (message "%s" said)))
+          (romacs-agent-log--not-sent answer))))))
 
 (defun romacs-agent-log--submit (kind)
   "Submit the composer's draft as KIND (`romacs-agent-submit'), under its

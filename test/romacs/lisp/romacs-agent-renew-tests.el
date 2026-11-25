@@ -539,6 +539,60 @@ instance configured beside it."
     (should (= relaunched 1))
     (should (eq (romacs-agent-harness session) 'codex))))
 
+(ert-deftest romacs-agent-renew-slash-commands-are-named-ones-only ()
+  ;; A defined name after its slash, alone or with words: a command.
+  ;; Anything else starting with a slash is a message.
+  (should (equal (car (romacs-agent-slash-command "/clear")) "clear"))
+  (should (equal (cddr (romacs-agent-slash-command "/clear  now please")) "now please"))
+  (should (equal (cddr (romacs-agent-slash-command "/clear\nmore")) "more"))
+  (should-not (romacs-agent-slash-command "/home/user/file.el"))
+  (should-not (romacs-agent-slash-command "/compact"))
+  (should-not (romacs-agent-slash-command "/clearly not"))
+  (should-not (romacs-agent-slash-command "please /clear")))
+
+(defun romacs-agent-renew-tests--submit (session text)
+  "SESSION's answer to a draft of TEXT, waited for."
+  (let ((answer nil) (end (+ (float-time) 30)))
+    (romacs-agent-submit (romacs-agent-id session)
+                         (list :draft-id (romacs-agent--uuid) :kind 'send :text text :attachments nil)
+                         (lambda (result) (setq answer result)))
+    (while (and (not answer) (< (float-time) end)) (accept-process-output nil 0.05))
+    answer))
+
+(ert-deftest romacs-agent-renew-slash-clear-starts-a-new-conversation ()
+  ;; /clear: the same session in a new conversation of its harness,
+  ;; nothing of the old one carried over, the draft never sent.
+  (romacs-agent-renew-tests--with 'claude
+    (puthash (romacs-agent-id session) session romacs-agent--sessions)
+    (let ((old (romacs-agent-harness-session session))
+          (answer (romacs-agent-renew-tests--submit session "/clear")))
+      (should (eq (plist-get answer :status) 'accepted))
+      (should (equal (plist-get answer :command) "clear"))
+      (should-not (romacs-agent-queue session))
+      (let ((end (+ (float-time) 30)))
+        (while (and (= relaunched 0) (< (float-time) end)) (accept-process-output nil 0.05)))
+      (should (= relaunched 1))
+      (let ((note (car (romacs-agent-renew-tests--notes session))))
+        (should (equal (gethash "why" note) "clear"))
+        (should (equal (gethash "brief" note) "")))
+      (should-not (equal (romacs-agent-harness-session session) old))
+      (should-not (romacs-agent-brief session)))))
+
+(ert-deftest romacs-agent-renew-slash-clear-waits-for-the-turn ()
+  (romacs-agent-renew-tests--with 'claude
+    (puthash (romacs-agent-id session) session romacs-agent--sessions)
+    (setf (romacs-agent-state session) 'running)
+    (cl-letf (((symbol-function 'romacs-agent--live-p) (lambda (_) t)))
+      (should (string-match-p "once this turn ends"
+                              (plist-get (romacs-agent-renew-tests--submit session "/clear") :message)))
+      (should-not (romacs-agent-renew-tests--notes session))
+      (setf (romacs-agent-state session) 'idle)
+      (run-hook-with-args 'romacs-agent-event-functions session '(:type done))
+      (let ((end (+ (float-time) 30)))
+        (while (and (= relaunched 0) (< (float-time) end)) (accept-process-output nil 0.05)))
+      (should (= relaunched 1))
+      (should (equal (gethash "why" (car (romacs-agent-renew-tests--notes session))) "clear")))))
+
 (ert-deftest romacs-agent-renew-a-failed-write-keeps-the-brief ()
   (romacs-agent-renew-tests--with 'claude
     (romacs-agent-renew-tests--run session)
