@@ -129,8 +129,10 @@ CURRENT, its features' zygote still, `isolate-error-functions' hears it."
 worker gets SIGKILL and is not waited for, its calls settle with
 `isolate-refused' or `isolate-world-unavailable', the refusal is
 reported, and its death arrives later as any death does.  It is no
-zygote or spare from now (its role forgotten), and a world refused is
-forgotten first, so later workers boot from source."
+zygote or spare from now (its role forgotten).  A world refused is
+forgotten first, so later workers boot from source and a zygote's queued
+jobs run there; a zygote of another build fails its queued jobs with the
+refusal, since any other would be refused too."
   (when (eq (plist-get state :phase) 'live)
     (let* ((world (eq (car event) 'world-refused))
            (condition (if world 'isolate-world-unavailable 'isolate-refused))
@@ -138,10 +140,13 @@ forgotten first, so later workers boot from source."
       ;; A worker that never served is no zygote or spare from now: its
       ;; role goes at once, its record when its death comes.
       (append '(retired)
+              (and world `((forget-world ,@(cdr event))))
+              '((forget-role) (signal 9) (end 9))
+              (and (not world) (eq (plist-get state :role) 'zygote)
+                   `((orphan-children (refused ,@data))))
               (if world
-                  `((forget-world ,@(cdr event)) (forget-role) (signal 9) (end 9)
-                    (settle isolate-world-unavailable ,data))
-                `((forget-role) (signal 9) (end 9) (settle isolate-refused ,data)))
+                  `((settle isolate-world-unavailable ,data))
+                `((settle isolate-refused ,data)))
               `((hook ,condition ,data nil))))))
 
 (defun romacs--isolate-on-death (state death)
@@ -170,16 +175,19 @@ job: once none is left it lingers for, its end is due
     '(nil (end nil))))
 
 (defun romacs--isolate-on-shutdown (state)
-  "`shutdown': an isolate killed later gets SIGKILL now, retired or not,
-its subprocess groups SIGHUP, and a live one's calls settled; any other
-live one is killed as `kill' does, its death carrying the cause, so a
-zygote's children settle as killed and run nowhere else."
+  "`shutdown': every retired isolate, and every live owner, zygote or job
+child its zygote has not reported, gets SIGKILL now and is not waited
+for, its subprocess groups SIGHUP, its role forgotten, and a live one's
+calls settled; any other live worker is killed as `kill' does, its death
+carrying the cause.  A shutdown ends job children before their zygotes
+\(`romacs--isolate-shutdown-order'), so none runs elsewhere."
   (let ((phase (plist-get state :phase)))
-    (cond ((not (romacs--isolate-kills-later-p state)) (romacs--isolate-on-kill state 'shutdown))
-          ((not (memq phase '(live retired))) nil)
-          ((eq phase 'retired) '(nil (signal 9) (end 9) (hup)))
-          (t (let ((condition (romacs--isolate-killed-condition state)))
-               `(retired (signal 9) (end 9) (hup) (settle ,condition nil) (hook ,condition nil nil)))))))
+    (cond ((eq phase 'retired) '(nil (forget-role) (signal 9) (end 9) (hup)))
+          ((not (eq phase 'live)) nil)
+          ((or (romacs--isolate-kills-later-p state) (eq (plist-get state :role) 'zygote))
+           (let ((condition (romacs--isolate-killed-condition state)))
+             `(retired (forget-role) (signal 9) (end 9) (hup) (settle ,condition nil) (hook ,condition nil nil))))
+          (t (romacs--isolate-on-kill state 'shutdown)))))
 
 ;;;; Admission: pure
 
@@ -208,27 +216,31 @@ the next round's head (lifecycle §7)."
 
 (defun romacs--isolate-wait-plan (facts)
   "What a worker does once its round is done, given FACTS, a plist:
-:serving, :queued (calls noted), :forks (children asked of a zygote) and
-:zygote.  Wait, then only note what arrived (the next round's head runs
-it), unless calls or forks are already queued: then nothing."
+:serving, :queued (calls noted), :forks (children asked of a zygote),
+:zygote and :turned (its output and timers ran this round).  Wait, then
+only note what arrived (the next round's head runs it), unless calls or
+forks are already queued, or a worker ran no output this round (a child
+forked in it, its round planned as its zygote's): then nothing."
   (and (plist-get facts :serving) (not (plist-get facts :queued))
        (not (and (plist-get facts :zygote) (plist-get facts :forks)))
+       (or (plist-get facts :zygote) (plist-get facts :turned))
        '(wait note)))
 
-(defun romacs--process-status-row (stage event bounded rest)
+(defun romacs--process-status-row (stage event bounded rest registered)
   "The effects on the process a status pass is at, at STAGE (`draining'
 its output, in its `sentinel', or `between' processes), for EVENT:
 `spent' (no filter call left: it stays changed, re-ticked, the pass
 held) or `exit' (a callback left the pass), REST whether processes are
-left it has not visited.  In a BOUNDED pass (a worker's loop, which
-serves on after a quit) an exit keeps every status not yet notified
-pending: a process still draining is re-ticked, and with processes left
-the global tick is raised for them; a process whose sentinel began stays
-acknowledged, so it never replays.  Unbounded (the master), an exit does
-what GNU's does: nothing, losing them (lifecycle §8)."
+left it has not visited, REGISTERED whether the process is still in the
+process list.  In a BOUNDED pass (a worker's loop, which serves on after
+a quit) an exit keeps every status not yet notified pending: a process
+still draining and registered is re-ticked, and with processes left the
+global tick is raised for them; a process whose sentinel began, or one
+a callback deleted, leaves nothing pending.  Unbounded (the master), an
+exit does what GNU's does: nothing, losing them (lifecycle §8)."
   (cond ((eq event 'spent) '((re-tick)))
         ((not bounded) nil)
-        ((eq stage 'draining) '((re-tick)))
+        ((and (eq stage 'draining) registered) '((re-tick)))
         (rest '((raise)))))
 
 ;;;; What is known of an isolate
@@ -403,6 +415,8 @@ worker checked for its end."
                      ;; ran nothing: its job runs elsewhere, unless the
                      ;; session ends.
                      ((eq cause 'shutdown) (funcall push child '(death isolate-killed nil shutdown)))
+                     ;; Its zygote is of another build: so would any be.
+                     ((eq (car-safe cause) 'refused) (funcall push child `(death isolate-refused ,(cdr cause))))
                      (t (funcall push child '(death isolate-died nil))))))))))
 
 (defun romacs--isolate-forget-world (reason world)

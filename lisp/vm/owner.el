@@ -70,15 +70,16 @@ call fails the owner is `refused', and killed: a zygote refused meanwhile
 `isolate-zygote-refused' and the reason, a feature absent in it with
 `owner-unprepared'.  `isolate-process-limit' without room for its
 process; `isolate-zygote-refused' when REQUIRE's zygote was refused."
-  (let ((zygote (romacs--isolate-zygote-for require nil)))
+  (let ((zygote (gethash require romacs--isolate-zygotes)))
     (when (and zygote (eq (aref zygote 3) 'refused))
       (signal 'isolate-zygote-refused (list (aref zygote 6))))
     ;; The whole owner, the zygote it needs included, is admitted before
-    ;; anything changes; owners count against `isolate-process-limit'
+    ;; anything changes, the zygote registry included: at the limit it is
+    ;; refused at once.  Owners count against `isolate-process-limit'
     ;; among themselves and the pool's processes, and end no worker for
     ;; room (`romacs--isolate-admission').
     (unless (and (romacs--isolate-admit-p 'owner require (if zygote 1 2))
-                 (setq zygote (or zygote (romacs--isolate-zygote-for require t))))
+                 (setq zygote (romacs--isolate-zygote-for require t)))
       (signal 'isolate-process-limit (list (length romacs--isolates) (isolate--process-limit))))
     (let* ((isolate (romacs--isolate-zygote-child zygote))
            (start (progn (aset isolate 10 'owner)

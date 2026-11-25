@@ -3010,10 +3010,25 @@ pub fn other_threads() -> io::Result<Vec<i32>> {
 /// its own with `forked_child_reset`.
 // HOST(acquisition): starts a child process (a spawn)
 pub fn fork_isolate() -> io::Result<i32> {
-    let pid = fork()?;
-    if pid == 0 { FORKED.store(true, std::sync::atomic::Ordering::SeqCst); }
-    Ok(pid)
+    // Every signal is blocked across the fork: the parent puts its mask back
+    // at once, the child only at the end of `forked_child_reset`, so a signal
+    // sent the child meanwhile (its spawner's held SIGTERM, at the fork
+    // report) waits in the kernel instead of being cleared with the zygote's.
+    let saved = sys::block_signals();
+    let pid = fork();
+    match pid {
+        Ok(0) => {
+            FORKED.store(true, std::sync::atomic::Ordering::SeqCst);
+            *FORK_MASK.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(saved);
+        }
+        _ => sys::restore_signals(&saved),
+    }
+    pid
 }
+
+/// In a child `fork_isolate` made: the signal mask to put back once its
+/// reset is done. Only the forking thread touches it, the child's only one.
+static FORK_MASK: std::sync::Mutex<Option<sys::SignalMask>> = std::sync::Mutex::new(None);
 
 /// fork(2) from a process whose other threads run on (a mark twin's,
 /// `twin.rs`): 0 in the child, else the child's pid. The child has the
@@ -3070,6 +3085,10 @@ pub fn forked_child_reset(zygote: i32) -> io::Result<()> {
     catch_isolate_signals()?;
     INSTRUCTION_COUNTER.with(|counter| counter.replace(None));
     set_parent_death_signal(libc::SIGTERM)?;
+    // What was sent the child since the fork is its own: delivered now.
+    if let Some(mask) = FORK_MASK.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take() {
+        sys::restore_signals(&mask);
+    }
     if parent_pid() != zygote {
         return Err(io::Error::other(format!("zygote {zygote} is gone")));
     }

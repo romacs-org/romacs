@@ -204,7 +204,7 @@ signal or an owner's ping (`romacs--isolate-check-deadlines'); nil for none.")
 a hash table of the files `load-history' named.")
 (defvar romacs--isolate-world-refusal nil
   "(REASON WORLD) once a worker refused the world, which later workers
-then boot without (`romacs--isolate-world-refused').")
+then boot without (the `world-refused' row of `romacs--isolate-transition').")
 (defvar romacs--isolate-retired nil
   "In a worker: a job changed the features, so queued jobs go back to the
 spawner to run on a worker with the features they were queued for.")
@@ -313,7 +313,8 @@ when it was resolved already."
   "The worker's boot arguments for this VM's boot: the world it adopts,
 else the chain from source (a VM that booted from source, or whose world
 is gone), else a bare VM.  A worker with no world boots slower; one that
-cannot adopt the world refuses it once (`romacs--isolate-world-refused')."
+cannot adopt the world refuses it once (the `world-refused' row of
+`romacs--isolate-transition')."
   (cond ((and (eq isolate-boot 'world) isolate-world)
          (append (list "--world" (car isolate-world) (cdr isolate-world))
                  (and isolate-compiled-store (list "--compiled-store" isolate-compiled-store))))
@@ -1043,8 +1044,9 @@ features are not tried again); a spare leaves its zygote's slot."
 
 (defun isolate-zygote (require)
   "The zygote for REQUIRE's features, started now if there is none:
-(FEATURES STATE PID SPARE-PID), STATE being `preparing', `ready' or
-`refused'."
+(FEATURES STATE PID SPARE-PID BUILD), STATE being `preparing', `ready' or
+`refused', BUILD its binary identity once its hello came (the build every
+child it forks is), else nil."
   (romacs--isolate-zygote-describe
    (or (gethash require romacs--isolate-zygotes)
        (romacs--isolate-zygote-make require))))
@@ -1057,10 +1059,12 @@ features are not tried again); a spare leaves its zygote's slot."
     zygotes))
 
 (defun romacs--isolate-zygote-describe (zygote)
+  "ZYGOTE's record as `isolate-zygote' describes it."
   (let ((spare (aref zygote 4)))
     (list (aref zygote 2) (aref zygote 3)
           (romacs--isolate-pid (romacs--isolate-id (aref zygote 1)))
-          (and spare (romacs--isolate-pid (romacs--isolate-id spare))))))
+          (and spare (romacs--isolate-pid (romacs--isolate-id spare)))
+          (aref zygote 15))))
 
 ;;;; Waiting and delivery
 

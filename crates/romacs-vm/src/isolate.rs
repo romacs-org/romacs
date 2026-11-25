@@ -1118,8 +1118,8 @@ pub fn worker_socket(fd: i32, parent: Option<i32>) -> std::result::Result<OwnedF
 
 /// A worker that cannot boot as its spawner asked, for REASON: its hello
 /// over SOCKET says `unavailable` and why, in place of a boot. The spawner
-/// settles the worker's jobs with that (`romacs--isolate-world-refused` in
-/// `lisp/vm/isolate.el`) and ends the worker, rather than starting it
+/// settles the worker's jobs with that (the `world-refused` row in
+/// `lisp/vm/isolate-lifecycle.el`) and ends the worker, rather than starting it
 /// again. Until then the socket stays open, however long the spawner
 /// takes, so a job it writes meanwhile finds a worker, not a closed
 /// socket, and is settled by the refusal; and a zygote's unforked children

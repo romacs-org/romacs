@@ -75,12 +75,17 @@ fn shutdown_signals_before_it_settles_or_reports() {
     let mut vm = vm();
     assert_eq!(
         step(&mut vm, OWNER, "(shutdown)"),
-        "(retired (signal 9) (end 9) (hup) (settle owner-killed nil) (hook owner-killed nil nil))"
+        "(retired (forget-role) (signal 9) (end 9) (hup) (settle owner-killed nil) (hook owner-killed nil nil))"
     );
     assert_eq!(
         step(&mut vm, ":role owner :phase retired :signal 15 :forked nil :child t", "(shutdown)"),
-        "(nil (signal 9) (end 9) (hup))"
+        "(nil (forget-role) (signal 9) (end 9) (hup))"
     );
+    // S21: every zygote, retired or live, through one path that waits for nothing.
+    assert_eq!(step(&mut vm, ":role zygote :phase retired :signal nil :forked t :lingering t", "(shutdown)"),
+               "(nil (forget-role) (signal 9) (end 9) (hup))");
+    assert_eq!(step(&mut vm, ":role zygote :phase live :signal nil :forked t :pending t", "(shutdown)"),
+               "(retired (forget-role) (signal 9) (end 9) (hup) (settle isolate-killed nil) (hook isolate-killed nil nil))");
     assert_eq!(step(&mut vm, ":role owner :phase dead :child t", "(shutdown)"), "nil");
     assert_eq!(step(&mut vm, ":role job :phase live :forked t :pending t :child t", "(shutdown)"), "(killed (kill-wait shutdown))");
     assert_eq!(step(&mut vm, ":role job :phase live :forked t :pending t :child t", "(kill)"), "(killed (kill-wait nil))");
@@ -181,6 +186,9 @@ fn a_refused_hello_waits_for_nothing() {
     assert_eq!(step(&mut vm, ":role pool :phase live", "(world-refused why w)"),
                "(retired (forget-world why w) (forget-role) (signal 9) (end 9) (settle isolate-world-unavailable (why w)) (hook isolate-world-unavailable (why w) nil))");
     assert_eq!(step(&mut vm, ":role pool :phase retired", "(hello-refused (why text))"), "nil");
+    // A zygote of another build fails its queued jobs: any other would be refused too.
+    assert_eq!(step(&mut vm, ":role zygote :phase live", "(hello-refused (why text))"),
+               "(retired (forget-role) (signal 9) (end 9) (orphan-children (refused why text)) (settle isolate-refused (why text)) (hook isolate-refused (why text) nil))");
 }
 
 fn eval(vm: &mut Vm, source: &str) -> String {
@@ -208,7 +216,10 @@ fn a_round_takes_calls_once_then_output_before_the_next() {
     let mut vm = vm();
     assert_eq!(eval(&mut vm, "(romacs--isolate-round-plan '(:zygote nil))"), "(interrupts forks calls turns note)");
     assert_eq!(eval(&mut vm, "(romacs--isolate-round-plan '(:zygote t))"), "(interrupts forks calls note)");
-    assert_eq!(eval(&mut vm, "(romacs--isolate-wait-plan '(:serving t :queued nil))"), "(wait note)");
+    assert_eq!(eval(&mut vm, "(romacs--isolate-wait-plan '(:serving t :queued nil :turned t))"), "(wait note)");
+    assert_eq!(eval(&mut vm, "(romacs--isolate-wait-plan '(:serving t :queued nil :turned nil))"), "nil",
+               "S23: no wait in a worker round that ran no output");
+    assert_eq!(eval(&mut vm, "(romacs--isolate-wait-plan '(:serving t :zygote t))"), "(wait note)");
     assert_eq!(eval(&mut vm, "(romacs--isolate-wait-plan '(:serving t :queued t))"), "nil");
     assert_eq!(eval(&mut vm, "(romacs--isolate-wait-plan '(:serving t :zygote t :forks t))"), "nil");
     assert_eq!(eval(&mut vm, "(romacs--isolate-wait-plan '(:serving nil))"), "nil");
@@ -220,11 +231,13 @@ fn a_round_takes_calls_once_then_output_before_the_next() {
 fn a_bounded_status_pass_loses_no_status_to_an_exit() {
     let mut vm = vm();
     let row = |vm: &mut Vm, args: &str| eval(vm, &format!("(romacs--process-status-row {args})"));
-    assert_eq!(row(&mut vm, "'draining 'spent t nil"), "((re-tick))");
-    assert_eq!(row(&mut vm, "'draining 'exit t nil"), "((re-tick))");
-    assert_eq!(row(&mut vm, "'sentinel 'exit t t"), "((raise))", "the finished one stays acknowledged");
-    assert_eq!(row(&mut vm, "'sentinel 'exit t nil"), "nil", "nothing left: nothing pending");
-    assert_eq!(row(&mut vm, "'between 'exit t t"), "((raise))");
-    assert_eq!(row(&mut vm, "'draining 'exit nil t"), "nil");
-    assert_eq!(row(&mut vm, "'sentinel 'exit nil t"), "nil");
+    assert_eq!(row(&mut vm, "'draining 'spent t nil t"), "((re-tick))");
+    assert_eq!(row(&mut vm, "'draining 'exit t nil t"), "((re-tick))");
+    assert_eq!(row(&mut vm, "'draining 'exit t nil nil"), "nil", "S24: a deleted process leaves nothing pending");
+    assert_eq!(row(&mut vm, "'draining 'exit t t nil"), "((raise))");
+    assert_eq!(row(&mut vm, "'sentinel 'exit t t t"), "((raise))", "the finished one stays acknowledged");
+    assert_eq!(row(&mut vm, "'sentinel 'exit t nil t"), "nil", "nothing left: nothing pending");
+    assert_eq!(row(&mut vm, "'between 'exit t t nil"), "((raise))");
+    assert_eq!(row(&mut vm, "'draining 'exit nil t t"), "nil");
+    assert_eq!(row(&mut vm, "'sentinel 'exit nil t t"), "nil");
 }

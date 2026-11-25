@@ -962,7 +962,7 @@ status not yet notified stays pending; in the master, GNU's loss."
                 (setq current proc stage 'draining)
                 (setq got (max got (romacs--status-drain proc deleting wait-proc)))
                 (if (romacs--process-spent-p)
-                    (progn (romacs--process-status-apply (romacs--process-status-row stage 'spent t nil) proc)
+                    (progn (romacs--process-status-apply (romacs--process-status-row stage 'spent t nil t) proc)
                            (setq held t))
                   (setq stage 'sentinel)
                   (romacs--exec-sentinel proc (romacs--proc-status-finish proc)))
@@ -970,7 +970,9 @@ status not yet notified stays pending; in the master, GNU's loss."
           (setq stage nil))
       (when stage
         (romacs--process-status-apply
-         (romacs--process-status-row stage 'exit (and romacs--process-dispatches t) (and procs t)) current)))
+         (romacs--process-status-row stage 'exit (and romacs--process-dispatches t) (and procs t)
+                                     (and current (memq current (process-list)) t))
+         current)))
     got))
 
 (defun romacs--status-drain (proc deleting wait-proc)

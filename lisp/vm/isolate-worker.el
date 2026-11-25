@@ -178,10 +178,12 @@ batch of ready output."
   ;; was: its spawner waits for them.
   (while (and (or romacs--isolate-serving (and romacs--isolate-zygote romacs--isolate-forks))
               (not (romacs--isolate-terminated-p)))
-    (let ((timeout nil))
+    (let ((timeout nil) (turned nil))
       (dolist (step (romacs--isolate-round-plan (list :zygote romacs--isolate-zygote)))
+        (when (and (eq step 'turns) romacs--isolate-serving (not romacs--isolate-zygote))
+          (setq turned t))
         (setq timeout (or (romacs--isolate-round-step step) timeout)))
-      (dolist (step (romacs--isolate-wait-plan (romacs--isolate-loop-facts)))
+      (dolist (step (romacs--isolate-wait-plan (romacs--isolate-loop-facts turned)))
         (romacs--isolate-round-step step timeout))))
   ;; A zygote told to end outlives its children (they die with it),
   ;; forking no more.
@@ -191,10 +193,11 @@ batch of ready output."
       (romacs--isolate-wait nil)
       (romacs--isolate-note-control-frames))))
 
-(defun romacs--isolate-loop-facts ()
-  "What `romacs--isolate-wait-plan' knows of this worker now."
+(defun romacs--isolate-loop-facts (turned)
+  "What `romacs--isolate-wait-plan' knows of this worker now, TURNED
+whether its output and timers ran this round."
   (list :serving romacs--isolate-serving :queued (and romacs--isolate-deferred t)
-        :forks (and romacs--isolate-forks t) :zygote romacs--isolate-zygote))
+        :forks (and romacs--isolate-forks t) :zygote romacs--isolate-zygote :turned turned))
 
 (defun romacs--isolate-round-step (step &optional timeout)
   "Carry out STEP of a worker's round (`romacs--isolate-round-plan'):
@@ -236,7 +239,10 @@ wait: 0 while output may be left, else until the next timer, or nil."
 (defun romacs--isolate-run-output ()
   "Run process output and sentinels, at most `owner-output-batch' calls of
 them: non-nil if more may be left, output or status work a spent batch
-left (a reaped process's sentinel has no descriptor to wake the wait)."
+left (a reaped process's sentinel has no descriptor to wake the wait).
+With no process left, a status change pending is no work: it is
+acknowledged, and nothing is left."
+  (unless (process-list) (romacs--proc-ticks-acknowledge))
   (let ((romacs--process-dispatches (romacs--owner-output-batch))
         (count 0) (more t))
     (while (and more (< count (romacs--owner-output-batch)) (not (romacs--process-spent-p))
