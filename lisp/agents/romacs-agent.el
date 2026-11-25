@@ -2285,7 +2285,12 @@ harness's, the one EVENT names when it does (`romacs-agent-switch-harness')."
              session (list :cache-expires
                            (and (plist-get event :ttl) (plist-get event :time)
                                 (+ (plist-get event :time) (plist-get event :ttl))))))
-    ('renewed (setf (romacs-agent-harness-session session) (plist-get event :to)
+    ('renewed (when (and (plist-get event :switch)
+                         (> (or (romacs-agent-input-seq session) 0) (romacs-agent-completed-seq session)))
+                ;; A turn the old harness was cut off in is left with it:
+                ;; the new one has no such turn to finish or steer.
+                (setf (romacs-agent-input-seq session) nil (romacs-agent-interrupted session) nil))
+              (setf (romacs-agent-harness-session session) (plist-get event :to)
                     (romacs-agent-brief session) (plist-get event :brief)
                     (romacs-agent-renewing session) (or (plist-get event :seq) t)))
     ('forked (setf (romacs-agent-options session)
@@ -2650,6 +2655,9 @@ ENDS says a turn or run ended in that record."
 The original session acknowledges held notes during catch-up."
   (romacs-agent--held-echoed session record)
   (let ((seq (gethash "seq" record)))
+    (when (and (integerp seq) (gethash session romacs-agent--unplaced))
+      (remhash session romacs-agent--unplaced)
+      (setf (romacs-agent-harness session) (romacs-agent--harness-at session seq) (romacs-agent-driver session) nil))
     (when (and (integerp seq) (> seq (romacs-agent-seq session)))
       (setf (romacs-agent-seq session) seq)
       (when-let* ((cursor (romacs-agent--record-cursor record)))
@@ -2714,13 +2722,37 @@ has startup steps."
       (setf (romacs-agent-startup-pending session) (romacs-agent--step-id step))
       (romacs-agent--line session step))))
 
+(defvar romacs-agent--unplaced (make-hash-table :test #'eq :weakness 'key)
+  "Replay copies whose harness is still to be set from their first record
+\(`romacs-agent--harness-at').")
+
+(declare-function romacs-agent-events-run-harness "romacs-agent-events" (session end))
+
+(defun romacs-agent--harness-at (session seq)
+  "The harness SESSION's record SEQ ran under: the one its last run note
+up to SEQ names, else the one its records began in; for a session that
+never switched harness (`romacs-agent-switch-harness'), its own."
+  (if-let* ((start (romacs-agent--switched-from session)))
+      (or (and (romacs-agent-events-p session) (romacs-agent-events-run-harness session seq)) (intern start))
+    (romacs-agent-harness session)))
+
+(defun romacs-agent--switched-from (session)
+  "The name of the harness SESSION's records began in, once it switched
+harness (its manifest's startHarness), else nil."
+  (when-let* ((manifest (romacs-agent--manifest-of session))
+              (start (gethash "startHarness" manifest))
+              ((stringp start)))
+    start))
+
+(defun romacs-agent--manifest-of (session)
+  "SESSION's manifest as read now, or nil."
+  (and (romacs-agent-dir session)
+       (romacs-agent--read-json (expand-file-name "manifest.json" (romacs-agent-dir session)))))
+
 (defun romacs-agent--start-harness (session)
   "The harness SESSION's records began in: its manifest's `startHarness'
 once it switched harness (`romacs-agent-switch-harness'), else its own."
-  (let ((manifest (and (romacs-agent-dir session)
-                       (romacs-agent--read-json (expand-file-name "manifest.json" (romacs-agent-dir session))))))
-    (or (and manifest (stringp (gethash "startHarness" manifest)) (intern (gethash "startHarness" manifest)))
-        (romacs-agent-harness session))))
+  (if-let* ((start (romacs-agent--switched-from session))) (intern start) (romacs-agent-harness session)))
 
 (defun romacs-agent--scratch (session)
   "A copy of SESSION to replay its journal into: it parses as SESSION does,
@@ -2744,10 +2776,10 @@ nothing that waits."
           ;; The live session's: a confirmation replayed here is not this copy's.
           (romacs-agent-pending-selection scratch) nil (romacs-agent-models-request scratch) nil
           (romacs-agent-driver-state scratch) nil (romacs-agent-startup-pending scratch) nil
-          ;; Replayed from the first record: under the harness that began it.
-          (romacs-agent-harness scratch) (romacs-agent--start-harness session)
           (romacs-agent-driver scratch) nil)
     (puthash scratch t romacs-agent--copies)
+    ;; Its harness is the one its first record ran under, wherever that is.
+    (puthash scratch t romacs-agent--unplaced)
     scratch))
 
 (declare-function romacs-agent-events-note-seq "romacs-agent-events" (session type end))
@@ -5222,9 +5254,13 @@ USER: its user wrote it, theirs to change while it waits."
                        "cwd" (romacs-agent-cwd session) "title" (romacs-agent-title session)
                        "titleAuto" (if (romacs-agent-title-auto session) t :false)
                        "imported" (let ((imported (romacs-agent-imported session)))
-                                    (if imported (romacs-mcp--object "path" (plist-get imported :path)
-                                                                     "size" (plist-get imported :size))
+                                    (if imported (apply #'romacs-mcp--object "path" (plist-get imported :path)
+                                                        "size" (plist-get imported :size)
+                                                        (and (plist-get imported :harness)
+                                                             (list "harness" (symbol-name (plist-get imported :harness)))))
                                       :null))
+                       ;; Once it switched harness, the one its records began in: kept.
+                       "startHarness" (or (romacs-agent--switched-from session) :null)
                        ;; A per-turn harness's thread, known before any turn when imported.
                        "harnessSession" (or (romacs-agent-harness-session session) :null)
                        "created" (float-time) "argv" (vconcat argv)

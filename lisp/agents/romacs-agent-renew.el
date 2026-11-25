@@ -291,6 +291,9 @@ the harness its records began in; its next run is TARGET's."
                     (romacs-mcp--object "path" (plist-get imported :path) "size" (plist-get imported :size)
                                         "harness" (symbol-name (plist-get imported :harness)))
                   :null))
+    ;; A selection asked of the old harness goes with it.
+    (romacs-agent--cancel-select session)
+    (romacs-agent--manifest-put session "switch" :null)
     (setf (romacs-agent-options session) options (romacs-agent-pending-selection session) nil)))
 
 (defun romacs-agent-renew--switch-to (session target)
@@ -582,6 +585,15 @@ for the next resume, which finishes it, and SESSION's view says so."
 
 (add-hook 'romacs-agent-restored-hook #'romacs-agent-renew--restored)
 (add-hook 'romacs-agent-caught-up-functions #'romacs-agent-renew--unfinished)
+
+(defun romacs-agent-renew--loaded (session _manifest)
+  "A session loaded with no supervisor running it, by a restore, a worker's
+fold or when first asked for: a renewal it journaled is finished before
+anything resumes its old harness."
+  (unless (process-live-p (romacs-agent-connection session))
+    (romacs-agent-renew--unfinished session)))
+
+(add-hook 'romacs-agent-loaded-functions #'romacs-agent-renew--loaded)
 (add-hook 'romacs-agent-event-functions #'romacs-agent-renew--ran)
 
 (defun romacs-agent-renew--commit (session native)

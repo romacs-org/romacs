@@ -207,6 +207,19 @@ are not part of it; CLOSE ends it."
                                     " and json_extract(record, '$.note.type') = ?")
                          (list (romacs-agent-id session) end type)))))
 
+(defun romacs-agent-events-run-harness (session end)
+  "The harness SESSION's last run note up to seq END names, a symbol, or
+nil when none names one."
+  (when-let* ((db (romacs-agent-events--db))
+              (name (caar (sqlite-select
+                           db (concat "select json_extract(record, '$.note.harness') from events"
+                                      " where session = ? and kind = 'note' and seq <= ?"
+                                      " and json_extract(record, '$.note.type') = 'run'"
+                                      " and json_extract(record, '$.note.harness') is not null"
+                                      " order by seq desc limit 1")
+                           (list (romacs-agent-id session) end)))))
+    (intern name)))
+
 (defun romacs-agent-events-tail (session turns &optional end begin)
   "As `romacs-agent--journal-tail', in places that are seqs: (FROM .
 PROMPTS), FROM the seq of a prompt that started its turn with none under
