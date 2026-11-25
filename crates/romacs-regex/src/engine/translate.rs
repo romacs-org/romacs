@@ -15,7 +15,7 @@ pub struct CaseTranslation {
     byte: [std::cell::Cell<u32>; 256],
     /// The host's case-canon table ([`CaseTable`]); `None` is the built-in
     /// standard canonicalization.
-    pub(crate) table: Option<std::rc::Rc<dyn CaseTable>>,
+    pub(crate) table: Option<std::sync::Arc<dyn CaseTable>>,
     /// Memo for codes from 256 up when backed by a char-table, allocated on
     /// the first such code (see [`WideTranslationMemo`]).
     wide: std::cell::OnceCell<Box<WideTranslationMemo>>,
@@ -98,7 +98,7 @@ impl CaseTranslation {
     /// The host table behind this translation, if any.  Hosts whose table
     /// object needs tracing (romacs-core's moving collector roots the Lisp
     /// char-table) recover their own type through [`CaseTable::as_any`].
-    pub fn case_table(&self) -> Option<&std::rc::Rc<dyn CaseTable>> {
+    pub fn case_table(&self) -> Option<&std::sync::Arc<dyn CaseTable>> {
         self.table.as_ref()
     }
 
@@ -240,7 +240,7 @@ impl CaseTranslation {
     /// it cannot outlive the table the way an identity-keyed cache could.
     /// `standard()` above already applied the same lesson to the constant
     /// table; this path was simply missed.
-    pub fn from_case_table(table: std::rc::Rc<dyn CaseTable>) -> Self {
+    pub fn from_case_table(table: std::sync::Arc<dyn CaseTable>) -> Self {
         Self {
             byte: [const { std::cell::Cell::new(CASE_TRANSLATION_UNFILLED) }; 256],
             table: Some(table),
@@ -290,7 +290,10 @@ impl CaseTranslation {
         self.byte_slot(c as usize).unwrap_or(c as u32) as u8
     }
 
-    fn canonicalize_char(c: u32) -> u32 {
+    /// The standard canonicalization of code C: what [`Self::standard`]
+    /// translates it to.
+    #[must_use]
+    pub fn canonicalize_char(c: u32) -> u32 {
         emacs_downcase_compat(c as i64) as u32
     }
 }
