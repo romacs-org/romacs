@@ -93,8 +93,13 @@ fn concat_list_chars(cx: &mut Leaf<'_>, list: Value) -> std::result::Result<Vec<
     while let Some((car, cdr)) = cx.pair(tail) {
         // Concat diagnoses the first repeated cons, with the original list.
         if !seen.insert(tail.0) { return Err(Fault::Circular(list)); }
-        if !values.is_empty() && values.len().is_multiple_of(POLL_STEPS as usize) {
+        if values.len() == POLL_STEPS as usize {
+            // Precedence is already settled for every cons before the first poll.
             cx.quittable(Leaf::native_poll)?;
+            return list_elements_into(cx, tail, values).map_err(|fault| match fault {
+                Fault::Circular(_) => Fault::Circular(list),
+                other => other,
+            });
         }
         values.push(car);
         tail = cdr;
@@ -163,7 +168,7 @@ fn assemble_concat(cx: &mut Leaf<'_>, chunks: Vec<(Vec<u8>, bool)>, mut parts: V
         }
         *offset = offsets[*offset];
     }
-    Ok(cx.concat_result(bytes, multibyte, &parts))
+    cx.concat_result(bytes, multibyte, &parts)
 }
 
 fn append_concat_bytes(cx: &mut Leaf<'_>, bytes: &mut Vec<u8>, chunk: &[u8], widen: bool) -> std::result::Result<(), Fault> {
@@ -379,7 +384,10 @@ fn concat_list(cx, parts: Value; optional separator: Value) {
 
 /// The elements of LIST, a proper list a mapping function built.
 pub(super) fn list_elements(cx: &mut Leaf<'_>, list: Value) -> std::result::Result<Vec<Value>, Fault> {
-    let mut values = Vec::new();
+    list_elements_into(cx, list, Vec::new())
+}
+
+fn list_elements_into(cx: &mut Leaf<'_>, list: Value, mut values: Vec<Value>) -> std::result::Result<Vec<Value>, Fault> {
     let (mut tail, mut tortoise, mut steps) = (list, list, 0u64);
     while let Some((car, rest)) = cx.pair(tail) {
         values.push(car);

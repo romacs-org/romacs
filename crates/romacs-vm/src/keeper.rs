@@ -45,6 +45,7 @@ impl Link {
     /// A duplicate of a held descriptor, for a part of the session that
     /// talks to the resource itself (a terminal's helper).
     pub(crate) fn duplicate(&self, handle: u64, slot: usize) -> Result<OwnedFd, String> {
+        // HOST(acquisition): duplicates a descriptor the keeper holds for this session
         self.slot(handle, slot)?.try_clone().map_err(|e| e.to_string())
     }
 
@@ -55,6 +56,7 @@ impl Link {
         let ready = crate::subprocess::poll(&[(fd.as_raw_fd(), libc::POLLIN)], Some(timeout)).map_err(|e| e.to_string())?;
         if ready.first().is_none_or(|events| *events == 0) { return Ok(None); }
         let mut bytes = vec![0; max.clamp(1, 1 << 20)];
+        // HOST(acquisition): duplicates a kept descriptor to read it (rule 1: acquisition first)
         let count = std::fs::File::from(fd.try_clone().map_err(|e| e.to_string())?).read(&mut bytes).map_err(|e| e.to_string())?;
         bytes.truncate(count);
         Ok(Some(bytes))
@@ -71,6 +73,7 @@ impl Link {
         crate::host::set_nonblocking(fd.as_fd()).map_err(|e| e.to_string())?;
         let ready = crate::subprocess::poll(&[(fd.as_raw_fd(), libc::POLLOUT)], Some(timeout)).map_err(|e| e.to_string())?;
         if ready.first().is_none_or(|events| *events == 0) { return Ok(0); }
+        // HOST(acquisition): duplicates a kept descriptor to write it, an escape (rule 1: acquisition first)
         match std::fs::File::from(fd.try_clone().map_err(|e| e.to_string())?).write(bytes) {
             Ok(count) => Ok(count),
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Ok(0),

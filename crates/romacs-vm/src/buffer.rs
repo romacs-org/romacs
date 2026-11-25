@@ -423,14 +423,47 @@ pub(crate) fn buffer_name_shown(name: &str) -> std::borrow::Cow<'_, str> {
 /// its multibyte form (`octets_to_multibyte`): each byte above 127 grows
 /// to a two-byte raw character, and the runs stretch with it.
 pub(crate) fn widened_properties(from: &properties::Properties, octets: &[u8], base: usize, into: &mut properties::Properties) {
-    if from.is_empty() { return; }
-    let widths: Vec<usize> = std::iter::once(0).chain(octets.iter().scan(0, |at, &b| { *at += if b < 128 { 1 } else { 2 }; Some(*at) })).collect();
-    for (range, values) in from.runs(ByteOffset(0)..ByteOffset(octets.len())) {
-        let range = ByteOffset(base + widths[range.start.0])..ByteOffset(base + widths[range.end.0]);
-        for (key, value) in values {
-            into.put(range.clone(), key, value);
+    let _ = widened_properties_polled(from, octets, base, into, widened_widths(|| false));
+}
+
+/// Count widened octets with a shared budget across property runs and parts.
+pub(crate) fn widened_widths(mut stopped: impl FnMut() -> bool)
+    -> impl FnMut(&[u8]) -> std::result::Result<usize, crate::quit::Stopped> {
+    let mut left = crate::quit::KERNEL_CHUNK;
+    let mut steps = crate::quit::Steps::default();
+    move |mut octets| {
+        if steps.tick() && stopped() { return Err(crate::quit::Stopped); }
+        let mut width = octets.len();
+        while !octets.is_empty() {
+            if left == 0 {
+                if stopped() { return Err(crate::quit::Stopped); }
+                left = crate::quit::KERNEL_CHUNK;
+            }
+            let count = left.min(octets.len());
+            let (chunk, rest) = octets.split_at(count);
+            width += chunk.iter().filter(|&&byte| byte >= 128).count();
+            left -= count;
+            octets = rest;
         }
+        Ok(width)
     }
+}
+
+/// The destination may be partial if WIDTH stops with a quit pending.
+pub(crate) fn widened_properties_polled(
+    from: &properties::Properties, octets: &[u8], base: usize, into: &mut properties::Properties,
+    mut width: impl FnMut(&[u8]) -> std::result::Result<usize, crate::quit::Stopped>,
+) -> std::result::Result<(), crate::quit::Stopped> {
+    if from.is_empty() { return Ok(()); }
+    let mut start = base;
+    for (range, values) in from.runs(ByteOffset(0)..ByteOffset(octets.len())) {
+        let end = start + width(&octets[range.start.0..range.end.0])?;
+        for (key, value) in values {
+            into.put(ByteOffset(start)..ByteOffset(end), key, value);
+        }
+        start = end;
+    }
+    Ok(())
 }
 
 /// The objects that name a buffer, by index in `objects` (`Vm::referrers`).
@@ -814,6 +847,7 @@ impl Vm {
         let mut retained = if has_filename { fields.clone() } else { Default::default() };
         retained.retain_locals(&kept);
         let mut state = self.buffer_state(value)?.clone();
+        // HOST(pure): the buffer's own state, not a process
         state.kill();
         self.mutator.resolved_buffer = None;
         *self.objects.entry_mut(index) = match &self.objects[index] {

@@ -4,7 +4,9 @@ use romacs_vm::Vm;
 use std::io::{BufRead, Write};
 fn main() {
     let mut vm = Vm::new();
+    // HOST(escape): stdout and stderr are sends another process reads
     let mut out = std::io::BufWriter::new(std::io::stdout().lock());
+    // HOST(block): reads standard input, which waits on its writer
     for line in std::io::stdin().lock().lines() {
         let line = line.unwrap();
         let source: String = serde_json::from_str(&line).unwrap();

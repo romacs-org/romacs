@@ -283,6 +283,7 @@ fn ding(cx; optional arg: Value) -> Step {
     let noninteractive = cx.intern("noninteractive");
     if cx.variable_value(noninteractive)?.unwrap_or(Value::NIL) != Value::NIL {
         use std::io::Write;
+        // HOST(escape): `ding`'s BEL on stdout: a send
         std::io::stdout().write_all(b"\x07").map_err(|e| Fault::Error(e.to_string()))?;
         return Ok(Step::Done(Value::NIL));
     }

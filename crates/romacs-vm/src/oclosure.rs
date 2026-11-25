@@ -18,10 +18,10 @@ impl Vm {
     pub(super) fn lambda_with_metadata(
         &mut self, b: &mut Builder, args: &[Form], body: &[Form], exposed: bool,
     ) -> Result<usize> {
-        let saved = self.keep_captures;
-        self.keep_captures |= exposed;
+        let saved = self.mutator.keep_captures;
+        self.mutator.keep_captures |= exposed;
         let result = self.lambda(b, args, body);
-        self.keep_captures = saved;
+        self.mutator.keep_captures = saved;
         let result = result?;
         if exposed { self.expose_closure(b, args, body, result) } else { Ok(result) }
     }

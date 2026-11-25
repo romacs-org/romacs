@@ -128,6 +128,65 @@ fn leaf_poll_concat_list_assembly() {
 }
 
 #[test]
+fn concat_result_polls_during_string_metadata() {
+    let (mut vm, signal) = busy_vm();
+    let bytes = crate::text::octets_to_multibyte(&vec![255; 20000]);
+    assert!(signal.interrupt());
+    let outcome = Leaf::new(&mut vm).concat_result(bytes, true, &[]);
+    assert!(quit_signalled(&mut vm, &outcome), "result metadata scan did not quit");
+    assert!(!signal.due());
+}
+
+#[test]
+fn concat_result_polls_while_widening_properties() {
+    let (mut vm, signal) = busy_vm();
+    let part = eval(&mut vm, "(progn
+        (setq part (string-as-unibyte (make-string 20000 255)))
+        (put-text-property 1 39999 'face 'bold part)
+        part)");
+    assert_eq!(eval(&mut vm, "(multibyte-string-p part)"), Value::NIL);
+    let octets = Leaf::new(&mut vm).string_bytes(part).unwrap_or_else(|_| panic!("fixture must be a string"));
+    let mut bytes = vec![b'x'];
+    bytes.extend(crate::text::octets_to_multibyte(&octets));
+    bytes.extend_from_slice("λ".as_bytes());
+    assert!(signal.interrupt());
+    assert!(Leaf::new(&mut vm).concat_properties::<true>(&[(part, 1)], true).is_err(),
+            "the property phase must stop before metadata gets the press");
+    assert!(signal.due(), "the property phase leaves delivery to the leaf");
+    let outcome = Leaf::new(&mut vm).concat_result(bytes.clone(), true, &[(part, 1)]);
+    assert!(quit_signalled(&mut vm, &outcome), "widened result construction did not quit");
+    assert!(!signal.due());
+    vm.quit_unwinding = false;
+
+    eval(&mut vm, "(setq inhibit-quit t)");
+    assert!(signal.interrupt());
+    assert!(Leaf::new(&mut vm).concat_result(bytes, true, &[(part, 1)]).is_ok());
+    assert!(signal.due(), "the inhibited leaf leaves the host press pending");
+    assert_eq!(eval(&mut vm, "(let ((out (concat \"x\" part \"λ\")))
+        (and (= (length out) 40002)
+             (null (get-text-property 1 'face out))
+             (eq (get-text-property 2 'face out) 'bold)
+             (eq (get-text-property 39999 'face out) 'bold)
+             (null (get-text-property 40000 'face out))
+             (= (aref out 40001) ?λ)))"), Value::TRUE);
+}
+
+#[test]
+fn concat_result_polls_across_short_widened_parts() {
+    let (mut vm, signal) = busy_vm();
+    let part = eval(&mut vm, "(progn
+        (setq part (string-as-unibyte (make-string 64 255)))
+        (put-text-property 0 128 'face 'bold part)
+        part)");
+    assert_eq!(eval(&mut vm, "(multibyte-string-p part)"), Value::NIL);
+    let parts: Vec<_> = (0..256).map(|i| (part, i * 256)).collect();
+    assert!(signal.interrupt());
+    assert!(Leaf::new(&mut vm).concat_properties::<true>(&parts, true).is_err(),
+            "short widened parts must share a byte budget");
+    assert!(signal.due());
+}
+
+#[test]
 fn leaf_poll_list_elements() {
     reaches("romacs--nconc-list", "(setq parts (make-list 20000 nil))",
             "(list parts)", "(= (length parts) 20000)");
@@ -288,6 +347,39 @@ fn sqlite_interrupts_a_long_statement() {
     // it over from its first row.
     let setup = format!("(setq db (sqlite-open) set (sqlite-select db {query} nil 'set))");
     reaches("sqlite-next", &setup, "(list set)", "(and (null (sqlite-next set)) (null (sqlite-more-p set)))");
+}
+
+#[test]
+fn sqlite_quits_before_loading_an_extension() {
+    let (mut vm, signal) = busy_vm();
+    eval(&mut vm, "(setq db (sqlite-open))");
+    let path = std::env::temp_dir().join(format!("romacs-missing-extension-{}", std::process::id())).join("rot13.so");
+    let call = prepare(&mut vm, "sqlite-load-extension", &format!("(list db {:?})", path.to_str().unwrap()));
+    assert!(signal.interrupt());
+    let outcome = invoke(&mut vm, call);
+    assert!(quit_signalled(&mut vm, &outcome), "quit before entering the extension loader");
+    assert!(!signal.due());
+}
+
+#[test]
+fn sqlite_extension_cancel_reverts_the_loading_flag() {
+    let (mut vm, _) = busy_vm();
+    let db = eval(&mut vm, "(setq db (sqlite-open))");
+    let conn = Leaf::new(&mut vm).sqlite_connection_of(db).unwrap_or_else(|_| panic!("open connection"));
+    let path = std::env::temp_dir().join(format!("romacs-missing-extension-{}", std::process::id())).join("rot13.so");
+    let args = format!("(list db {:?})", path.to_str().unwrap());
+    let call = prepare(&mut vm, "sqlite-load-extension", &args);
+    assert!(matches!(invoke(&mut vm, call), Ok(Value::NIL)), "a missing extension fails normally");
+    assert!(!conn.extension_loading_enabled(), "a normal load attempt leaves loading disabled");
+
+    for enabled in [false, true] {
+        conn.set_extension_loading_for_test(enabled);
+        let call = prepare(&mut vm, "sqlite-load-extension", &args);
+        let (outcome, polls) = crate::quit::query_polls::count_once(2, || invoke(&mut vm, call));
+        assert_eq!(conn.extension_loading_enabled(), enabled, "a canceled load restores the prior flag");
+        assert_eq!(polls, 2, "the loader checks quit after enabling extension loading");
+        assert!(outcome.is_err(), "the second check prevents entering the loader");
+    }
 }
 
 /// sqlite-select polls between rows only a statement that writes nothing:
@@ -764,7 +856,7 @@ fn a_native_poll_quits_inside_a_compiling_macro_expansion() {
     let (mut vm, signal) = busy_vm();
     eval(&mut vm, "(setq l (make-list 50000 'a))");
     let call = prepare(&mut vm, "prin1-to-string", "(list l)");
-    vm.compile_depth += 1;
+    vm.mutator.compile_depth += 1;
     vm.expanding.push(0);
     assert!(signal.interrupt(), "a busy evaluator takes the press");
     let outcome = invoke(&mut vm, call);
@@ -778,7 +870,7 @@ fn a_native_poll_quits_inside_a_compiling_macro_expansion() {
     assert!(signal.due(), "inhibit-quit holds the press");
     vm.slots[inhibit].value = Value::NIL;
     vm.expanding.pop();
-    vm.compile_depth -= 1;
+    vm.mutator.compile_depth -= 1;
 }
 
 /// A C-g an `inhibit-quit` held, released before the call, leaves

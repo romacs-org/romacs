@@ -92,6 +92,7 @@ fn write_auto_save_list(cx, file: Value, text: Value) {
     let mut options = crate::host::OpenOptions::new();
     options.write(true).create(true).truncate(true);
     if let Ok(mut out) = crate::host::open_output(&path, &options) {
+        // HOST(escape): writes the auto-save file
         let _ = out.write_all(&bytes);
         let _ = cx.fileio_close_output(out);
     }
@@ -144,6 +145,7 @@ fn standard_stream(cx: &mut Leaf<'_>, stream: Value) -> std::result::Result<i32,
 
 fn flush(fd: i32) {
     use std::io::Write;
+    // HOST(escape): stdout and stderr are sends another process reads
     let _ = match fd { 1 => std::io::stdout().flush(), 2 => std::io::stderr().flush(), _ => Ok(()) };
 }
 

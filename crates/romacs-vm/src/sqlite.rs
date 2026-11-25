@@ -2,6 +2,7 @@
 //! only unsafe boundary: `prim/leaf/sqlite.rs` and `prims/sqlite.rs` use the
 //! safe types below. SQLite is linked from the bundled amalgamation, so no
 //! system library is required.
+use crate::quit::{NativeStop, Stopped};
 use libsqlite3_sys as ffi;
 use std::ffi::{CStr, c_int, c_void};
 use std::sync::Arc;
@@ -63,11 +64,29 @@ impl Held {
             mutex
         })
     }
+
+    fn enter_quittable(db: *mut ffi::sqlite3, stop: &NativeStop) -> Result<Self, Stopped> {
+        if !stop.armed() {
+            return Ok(Self::enter(db));
+        }
+        // UNSAFE(this module is libsqlite3-sys's one boundary: the mutex is SQLite's)
+        // SAFETY: DB stays open; try enters the mutex only on success.
+        unsafe {
+            let mutex = ffi::sqlite3_db_mutex(db);
+            loop {
+                if stop.due() { return Err(Stopped); }
+                if ffi::sqlite3_mutex_try(mutex) == ffi::SQLITE_OK {
+                    return Ok(Self(mutex));
+                }
+                std::thread::sleep(crate::quit::QUIT_SLICE);
+            }
+        }
+    }
 }
 impl Drop for Held {
     fn drop(&mut self) {
         // UNSAFE(this module is libsqlite3-sys's one boundary: the mutex is the library's)
-        // SAFETY: the mutex was entered by `Held::enter`, on this thread.
+        // SAFETY: this guard holds an acquisition by this thread.
         unsafe { ffi::sqlite3_mutex_leave(self.0) };
     }
 }
@@ -338,6 +357,9 @@ impl Connection {
     /// `sqlite3_prepare_v2` of the first statement in SQL, read for LENGTH
     /// bytes (or, with -1, to its NUL), and the bytes of SQL it used. An
     /// EXPLAIN writes nothing, whatever it explains.
+    /// Prepare stays synchronous over the SQL and schema. SQLite's
+    /// connection-wide progress callback cannot attribute a stop to the
+    /// right operation when preparation reenters SQLite.
     fn prepare_next(self: &Arc<Self>, sql: &[u8], length: c_int) -> Result<(Statement, usize), PrepareError> {
         let mut stmt = std::ptr::null_mut();
         let mut tail = std::ptr::null();
@@ -462,21 +484,60 @@ impl Statement {
     }
 }
 
+struct ExtensionLoading<'a> {
+    connection: &'a Connection,
+    setting_on_drop: c_int,
+}
+
+impl<'a> ExtensionLoading<'a> {
+    /// The caller holds the connection mutex through restoration.
+    fn enable(connection: &'a Connection) -> Option<Self> {
+        let previous = connection.extension_loading(-1)?;
+        connection.extension_loading(1)?;
+        Some(Self { connection, setting_on_drop: previous })
+    }
+}
+
+impl Drop for ExtensionLoading<'_> {
+    fn drop(&mut self) {
+        self.connection.extension_loading(self.setting_on_drop);
+    }
+}
+
 impl Connection {
+    #[cfg(test)]
+    pub(crate) fn extension_loading_enabled(&self) -> bool {
+        self.extension_loading(-1).expect("query the loading flag") != 0
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_extension_loading_for_test(&self, enabled: bool) {
+        self.extension_loading(c_int::from(enabled)).expect("set the loading flag");
+    }
+
+    fn extension_loading(&self, setting: c_int) -> Option<c_int> {
+        let mut enabled = 0;
+        // UNSAFE(this module is libsqlite3-sys's one boundary: configuration is SQLite's)
+        // SAFETY: the connection is open and the output is a live local.
+        let status = unsafe { ffi::sqlite3_db_config(self.db, ffi::SQLITE_DBCONFIG_ENABLE_LOAD_EXTENSION, setting, &raw mut enabled) };
+        (status == ffi::SQLITE_OK).then_some(enabled)
+    }
+
     /// sqlite-load-extension: load PATH with extension loading enabled only
     /// for the call; true when it loaded.
-    pub(crate) fn load_extension(&self, path: &[u8]) -> bool {
-        let Ok(path) = std::ffi::CString::new(path) else { return false };
-        // SAFETY: `db` is open; loading is re-disabled before returning.
-        unsafe {
-            let enable = ffi::SQLITE_DBCONFIG_ENABLE_LOAD_EXTENSION;
-            if ffi::sqlite3_db_config(self.db, enable, 1 as c_int, std::ptr::null_mut::<c_int>()) != ffi::SQLITE_OK {
-                return false;
-            }
-            let result = ffi::sqlite3_load_extension(self.db, path.as_ptr(), std::ptr::null(), std::ptr::null_mut());
-            ffi::sqlite3_db_config(self.db, enable, 0 as c_int, std::ptr::null_mut::<c_int>());
-            result == ffi::SQLITE_OK
-        }
+    pub(crate) fn load_extension(&self, path: &[u8], stop: &NativeStop) -> Result<bool, Stopped> {
+        let Ok(path) = std::ffi::CString::new(path) else { return Ok(false) };
+        let _held = Held::enter_quittable(self.db, stop)?;
+        let Some(mut loading) = ExtensionLoading::enable(self) else { return Ok(false) };
+        // Enabling loading can walk the prepared statements. Check again
+        // before the native initializer, where SQLite offers no stop hook.
+        if stop.armed() && stop.due() { return Err(Stopped); }
+        // After an ordinary load attempt, keep loading disabled as before.
+        loading.setting_on_drop = 0;
+        // UNSAFE(this module is libsqlite3-sys's one boundary: SQLite runs the extension initializer)
+        // SAFETY: DB is open, PATH is NUL-terminated, and the loading guard restores the flag before unlocking.
+        let result = unsafe { ffi::sqlite3_load_extension(self.db, path.as_ptr(), std::ptr::null(), std::ptr::null_mut()) };
+        Ok(result == ffi::SQLITE_OK)
     }
 }
 
@@ -533,5 +594,29 @@ impl Handle {
     }
     pub(crate) fn storage_bytes(&self) -> usize {
         std::mem::size_of::<Self>() + self.name.capacity()
+    }
+}
+
+#[cfg(test)]
+mod extension_tests {
+    use super::*;
+    use crate::quit::{QuitSignal, query_polls};
+    use std::{sync::mpsc, time::Duration};
+
+    #[test]
+    fn sqlite_extension_quits_while_waiting_for_the_connection_mutex() {
+        let db = Connection::open(b":memory:", false, false, true).expect("open SQLite");
+        let held = Held::enter(db.db);
+        let stop = NativeStop::with_test_signal(Arc::new(QuitSignal::new()));
+        let (finished, received) = mpsc::channel();
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                let result = query_polls::count_once(2, || db.load_extension(b"rot13.so", &stop));
+                finished.send(result).expect("send the result");
+            });
+            let result = received.recv_timeout(Duration::from_secs(5));
+            drop(held);
+            assert!(matches!(result, Ok((Err(Stopped), 2))), "quit on the second probe while the holder still owns the mutex");
+        });
     }
 }

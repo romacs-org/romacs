@@ -484,7 +484,7 @@ impl Vm {
         let resolved = log.writes.iter().rev().map(|&Write { slot, version, ref symbol }| {
             let started = crate::host::stat_clock();
             let reach = self.staleness(slot, Some(version));
-            // HOST(Instant::now): the scan's own clock, running only once
+            // HOST(Instant::now, pure): the scan's own clock, running only once
             // `host::stat_clock` started it, which no world builder does
             let ns = started.map_or(0, |at| u64::try_from(std::time::Instant::now().duration_since(at).as_nanos()).unwrap_or(u64::MAX));
             Invalidation { symbol: symbol.clone(), functions: reach.stale.len(), rounds: reach.rounds, joined: reach.joined, ns }

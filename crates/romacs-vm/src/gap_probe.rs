@@ -50,18 +50,18 @@ mod on {
     }
 
     fn thread_cpu() -> Duration {
-        // HOST(rustix::query): the probe's own clock, in a test build only.
+        // HOST(rustix::query, pure): the probe's own clock, in a test build only.
         let t = rustix::time::clock_gettime(rustix::time::ClockId::ThreadCPUTime);
         Duration::new(u64::try_from(t.tv_sec).unwrap_or(0), u32::try_from(t.tv_nsec).unwrap_or(0))
     }
 
     impl Probe {
         fn new() -> Self {
-            // HOST(std::env::var_os): the probe's output file, in a test build only.
+            // HOST(std::env::var_os, pure): the probe's output file, in a test build only.
             let out = std::env::var_os("ROMACS_GAP_PROBE").map(std::path::PathBuf::from);
-            // HOST(std::env::var): the probe's threshold, in a test build only.
+            // HOST(std::env::var, pure): the probe's threshold, in a test build only.
             let ms = std::env::var("ROMACS_GAP_PROBE_MS").ok().and_then(|s| s.parse().ok()).unwrap_or(50);
-            // HOST(Instant::now): the probe's own clock, in a test build only.
+            // HOST(Instant::now, pure): the probe's own clock, in a test build only.
             let now = std::time::Instant::now();
             let cpu = thread_cpu();
             Self { out, threshold: Duration::from_millis(ms), last: now, span_start: now, span_cpu: cpu,
@@ -70,7 +70,7 @@ mod on {
 
         /// The time now, and the CPU time at most a millisecond old.
         fn now(&mut self) -> std::time::Instant {
-            // HOST(Instant::now): the probe's own clock, in a test build only.
+            // HOST(Instant::now, pure): the probe's own clock, in a test build only.
             let now = std::time::Instant::now();
             if now.duration_since(self.cpu_read.0) > Duration::from_millis(1) {
                 self.cpu_read = (now, thread_cpu());
@@ -117,6 +117,7 @@ mod on {
             let line = format!("gap {:.1} {:.1} {} {:.1} {}\n", wall.as_secs_f64() * 1e3, cpu.as_secs_f64() * 1e3,
                                top.leaf, top.wall.as_secs_f64() * 1e3, if top.frames.is_empty() { "-" } else { &top.frames });
             if let Ok(mut file) = crate::host::open_output(path, crate::host::OpenOptions::new().create(true).append(true)) {
+                // HOST(escape): writes the probe's output file
                 let _ = file.write_all(line.as_bytes());
             }
         }

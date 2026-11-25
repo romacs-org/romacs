@@ -577,7 +577,7 @@ impl Vm {
             lates: vec![false; names.len()],
             shadows: vec![None; names.len()],
             local_specials: specials.clone(),
-            pending_specials: self.pending_specials.clone(),
+            pending_specials: self.mutator.pending_specials.clone(),
             dynamic_scope: dynamic,
             deferred: false,
             file_level: false,
@@ -726,10 +726,10 @@ impl Vm {
                     let body = self.list_values(a[1])?.into_iter()
                         .map(|v| self.expansion_form(v, 0)).collect::<Result<Vec<_>>>()?;
                     let saved_scope = std::mem::replace(&mut self.dynamic_scope, a[2] == Value::NIL);
-                    let saved_captures = std::mem::replace(&mut self.keep_captures, true);
+                    let saved_captures = std::mem::replace(&mut self.mutator.keep_captures, true);
                     let result = self.function(&args, &body, &outer, &specials);
                     self.dynamic_scope = saved_scope;
-                    self.keep_captures = saved_captures;
+                    self.mutator.keep_captures = saved_captures;
                     result?
                 };
                 // fns.c internal_equal compares the closure's interactive
@@ -769,7 +769,7 @@ impl Vm {
                         Value::NIL
                     } else {
                         let form = self.expansion_form(spec, 0)?;
-                        self.keep_captures = true;
+                        self.mutator.keep_captures = true;
                         let (function, names) = self.function(&[], &[form], &outer, &specials)?;
                         let captures = names.iter().map(|name| values[name]).collect();
                         let body = self.list_value(&[spec]);

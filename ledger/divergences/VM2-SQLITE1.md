@@ -8,3 +8,9 @@ follow the bundled version. Text columns are decoded by the native `utf-8`
 decoder with line-end detection, as GNU's `utf-8` coding system decodes
 them, without looking `utf-8` up: a Lisp redefinition of that coding system
 does not affect rows.
+
+`sqlite-load-extension` checks for quit while acquiring its connection
+mutex and again before entering SQLite's loader. Native extension
+initialization runs to completion because SQLite provides no stop hook
+there. Cancellation before entry restores the previous loading flag.
+After an ordinary load attempt, loading is disabled.

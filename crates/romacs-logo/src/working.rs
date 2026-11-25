@@ -11,7 +11,7 @@
 use crate::Cell;
 
 /// How the work goes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Work {
     Idle,
     Running,

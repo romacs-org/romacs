@@ -161,8 +161,9 @@ impl ImageRegion {
             return Err("image key must be 64 lowercase hexadecimal digits".into());
         }
         let manifest =
-            // HOST(std::fs): the code-image store, reached only through the vm2 adapter's --image,
-            // --code-image and --cache-store; world builds refuse images (M1)
+            // HOST(std::fs, block): the code-image store, reached only through the vm2 adapter's --image,
+            // --code-image and --cache-store; world builds refuse images (M1); a read by path, which
+            // a FIFO there would block
             std::fs::read(store.join(format!("{key}.pages"))).map_err(|e| e.to_string())?;
         let header = manifest
             .split_first_chunk::<8>()
@@ -179,10 +180,11 @@ impl ImageRegion {
         if bytes == 0 || hashes.len() != pages || !partial.is_empty() {
             return Err("invalid page manifest length".into());
         }
-        // HOST(File::open): the code-image store, reached only through the vm2 adapter's --image,
-        // --code-image and --cache-store; world builds refuse images (M1)
+        // HOST(File::open, block): the code-image store, reached only through the vm2 adapter's --image,
+        // --code-image and --cache-store; world builds refuse images (M1); an open by path, which
+        // a FIFO there would block
         let file = File::open(store.join(key)).map_err(|e| e.to_string())?;
-        // HOST(metadata): the code-image store, reached only through the vm2 adapter's --image,
+        // HOST(metadata, pure): the code-image store, reached only through the vm2 adapter's --image,
         // --code-image and --cache-store; world builds refuse images (M1)
         if file.metadata().map_err(|e| e.to_string())?.len() != bytes as u64 {
             return Err("image length differs from authenticated manifest".into());
@@ -363,17 +365,17 @@ impl ImageBuilder {
             manifest.extend_from_slice(&Sha256::digest(page));
         }
         let key = content_key(&manifest);
-        // HOST(std::fs): the code-image store, reached only through the vm2 adapter's --image,
+        // HOST(std::fs, acquisition): the code-image store, reached only through the vm2 adapter's --image,
         // --code-image and --cache-store; world builds refuse images (M1)
         std::fs::create_dir_all(store).map_err(|e| e.to_string())?;
         for (name, bytes) in [
             (format!("{key}.pages"), manifest.as_slice()),
             (key.clone(), bytes.as_slice()),
         ] {
-            // HOST(std::process::id): the code-image store, reached only through the vm2 adapter's
+            // HOST(std::process::id, pure): the code-image store, reached only through the vm2 adapter's
             // --image, --code-image and --cache-store; world builds refuse images (M1)
             let temporary = store.join(format!(".{name}-{}", std::process::id()));
-            // HOST(OpenOptions, std::fs): the code-image store, reached only through the vm2
+            // HOST(OpenOptions, std::fs, acquisition): the code-image store, reached only through the vm2
             // adapter's --image, --code-image and --cache-store; world builds refuse images (M1)
             let mut file = std::fs::OpenOptions::new()
                 .write(true)
@@ -381,32 +383,37 @@ impl ImageBuilder {
                 .open(&temporary)
                 .map_err(|e| e.to_string())?;
             let result = (|| {
+                // HOST(escape): writes the code-image store's new file
                 file.write_all(bytes).map_err(|e| e.to_string())?;
+                // HOST(escape): forces the code-image store's writes to disk: no inverse
                 file.sync_all().map_err(|e| e.to_string())?;
+                // HOST(escape): makes the code-image store's new file read-only: metadata others see
                 file.set_permissions(std::fs::Permissions::from_mode(0o444))
                     .map_err(|e| e.to_string())?;
-                // HOST(std::fs): the code-image store, reached only through the vm2 adapter's
+                // HOST(std::fs, acquisition): the code-image store, reached only through the vm2 adapter's
                 // --image, --code-image and --cache-store; world builds refuse images (M1)
                 match std::fs::hard_link(&temporary, store.join(&name)) {
                     Ok(()) => (),
                     Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                        // HOST(std::fs): the code-image store, reached only through the vm2
+                        // HOST(std::fs, block): the code-image store, reached only through the vm2
                         // adapter's --image, --code-image and --cache-store; world builds refuse
-                        // images (M1)
+                        // images (M1); a read by path, which a FIFO there would block
                         if std::fs::read(store.join(&name)).map_err(|e| e.to_string())? != bytes {
                             return Err("existing image content mismatch".into());
                         }
                     }
                     Err(e) => return Err(e.to_string()),
                 }
-                // HOST(File::open): the code-image store, reached only through the vm2 adapter's
-                // --image, --code-image and --cache-store; world builds refuse images (M1)
+                // HOST(File::open, block): the code-image store, reached only through the vm2 adapter's
+                // --image, --code-image and --cache-store; world builds refuse images (M1); a fresh
+                // open by path, which a FIFO put at that name would block
                 File::open(store)
+                    // HOST(escape): forces the code-image store's writes to disk: no inverse
                     .and_then(|d| d.sync_all())
                     .map_err(|e| e.to_string())?;
                 Ok(())
             })();
-            // HOST(std::fs): the code-image store, reached only through the vm2 adapter's --image,
+            // HOST(std::fs, escape): the code-image store, reached only through the vm2 adapter's --image,
             // --code-image and --cache-store; world builds refuse images (M1)
             let cleanup = std::fs::remove_file(temporary).map_err(|e| e.to_string());
             result?;

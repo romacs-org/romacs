@@ -755,29 +755,40 @@ mod leaf {
             let whole = bytes.get(..width)?;
             whole[1..].iter().all(|b| b & 0xc0 == 0x80).then(|| crate::lstring::string_char(whole))
         }
-        pub fn concat_result(&mut self, bytes: Vec<u8>, multibyte: bool, parts: &[(Value, usize)]) -> Value {
-            // Known gap for s2-concat-result-polls. Copying property runs,
-            // mapping widened offsets and scanning the finished bytes for
-            // metadata all run after the last poll. A 128 MiB unibyte part
-            // with one run spent 2.23 CPU seconds here (16.6 s/GB of input).
+        pub fn concat_result(&mut self, bytes: Vec<u8>, multibyte: bool, parts: &[(Value, usize)]) -> super::Out {
+            let properties = match self.concat_properties::<true>(parts, multibyte) {
+                Ok(properties) => properties,
+                Err(crate::quit::Stopped) => {
+                    self.quittable(Self::native_poll)?;
+                    self.concat_properties::<false>(parts, multibyte).unwrap_or_else(|_| unreachable!())
+                }
+            };
+            let mut string = if bytes.len() <= crate::quit::KERNEL_CHUNK {
+                data::LispString::from_bytes(bytes, multibyte)
+            } else {
+                data::LispString::from_bytes_polled(bytes, multibyte, || self.quittable(Self::native_poll))?
+            };
+            string.properties = properties;
+            Ok(self.vm.allocate_object(string.into_concat_object()))
+        }
+
+        pub(super) fn concat_properties<const POLL: bool>(&self, parts: &[(Value, usize)], multibyte: bool)
+            -> std::result::Result<crate::properties::Properties, crate::quit::Stopped> {
             let mut properties = crate::properties::Properties::new();
+            let mut width = crate::buffer::widened_widths(|| POLL && self.vm.own_stop_due());
             for &(value, offset) in parts {
                 if let Some(data::Object::String(s) | data::Object::RawString(s)) = self.vm.object_if(value) {
                     if s.properties.is_empty() { continue; }
                     if multibyte && !s.is_multibyte() {
-                        // A unibyte part widened: its runs stretch with it.
-                        crate::buffer::widened_properties(&s.properties, s.bytes(), offset, &mut properties);
+                        crate::buffer::widened_properties_polled(
+                            &s.properties, s.bytes(), offset, &mut properties, &mut width,
+                        )?;
                     } else {
                         properties.copy_into(crate::coordinates::ByteOffset(offset), &s.properties);
                     }
                 }
             }
-            if properties.is_empty() { return self.vm.make_lisp_string(bytes, multibyte); }
-            let mut string = data::LispString::from_bytes(bytes, multibyte);
-            string.properties = properties;
-            let object = if string.is_utf8() { data::Object::String(Box::new(string)) }
-                else { data::Object::RawString(Box::new(string)) };
-            self.vm.allocate_object(object)
+            Ok(properties)
         }
         pub fn concat_ascii(&mut self, args: &[Value]) -> Option<Value> {
             self.concat_ascii_joined::<false>(args, None).unwrap_or_else(|_| unreachable!())
@@ -830,7 +841,9 @@ mod leaf {
                 self.quittable(Self::native_poll)?;
                 return Ok(None);
             }
-            Ok(Some(self.concat_result(bytes, false, &parts)))
+            let mut string = data::LispString::from_ascii(bytes, false);
+            string.properties = self.concat_properties::<false>(&parts, false).unwrap_or_else(|_| unreachable!());
+            Ok(Some(self.vm.allocate_object(data::string_object(string))))
         }
         pub fn clear_string(&mut self, value: Value) -> std::result::Result<Value, Fault> {
             if Vm::image_value(value) { return Err(self.read_only(value)); }
@@ -1484,6 +1497,7 @@ mod leaf {
         }
         /// GNU calls `display-warning`, which writes to stderr in batch.
         pub fn batch_warning(&self, kind: &str, text: &str) {
+            // HOST(escape): stdout and stderr are sends another process reads
             eprintln!("Warning ({kind}): {text}");
         }
         /// The slot whose function cell symbol V names: `nil` and `t`, which

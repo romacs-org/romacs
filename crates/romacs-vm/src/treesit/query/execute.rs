@@ -230,6 +230,7 @@ impl<C: Cursor, N, Project: Fn(C::Node) -> N> Walker<'_, C, N, Project> {
             let has_wildcards = self.wildcards != 0 && symbol != ERROR;
             let has_exact = !exact.is_empty();
             if !self.active.is_empty() || has_wildcards || has_exact {
+                // HOST(pure): a query cursor's state, not a process's
                 let status = self.cursor.status();
                 let rootless = parent_overlaps && parent.is_none_or(|node| node.symbol() != ERROR);
                 self.start(symbol, exact, &status, overlaps, rootless);

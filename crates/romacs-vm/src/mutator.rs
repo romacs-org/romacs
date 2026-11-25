@@ -5,7 +5,7 @@
 //! `Mutator`, not a second `Vm`. Fields move here slice by slice; each keeps
 //! its collector class (`tests/no_remote_references.rs`) and is carried in
 //! a world image as it was on `Vm`.
-use crate::{Value, regexp};
+use crate::{Form, GeneratedName, NameSet, Value, regexp};
 
 /// What one mutator is in the middle of. Reached by field path
 /// (`vm.mutator.FIELD`), never through an accessor, so a borrow of one
@@ -28,4 +28,52 @@ pub(crate) struct Mutator {
     pub(crate) keymap_filters: Vec<(Value, Value)>,
     /// The first filter that walk needed: (menu item, filter, definition).
     pub(crate) keymap_pending_filter: Option<(Value, Value, Value)>,
+    // The compile in progress: the loader's and the compiler's state for
+    // the forms being compiled now.
+    pub(crate) compile_depth: usize,
+    pub(crate) pending_specials: NameSet<String>,
+    /// Names a one-argument top-level `(defvar NAME)` declared in the file
+    /// being loaded: special for the rest of that file only (GNU Fdefvar,
+    /// eval.c:990-996, consing onto the `internal-interpreter-environment'
+    /// that readevalloop binds once per file). Saved and restored per load.
+    pub(crate) file_specials: NameSet<String>,
+    /// Set by the loader for exactly one root compilation of a file's form,
+    /// so that compilation (and nothing nested in it) starts from
+    /// `file_specials`.
+    pub(crate) seed_file_specials: bool,
+    /// The next built function is a loading file's form (`Builder::file_level`):
+    /// set by the loader around its top-level compile, and by a deferred
+    /// form's thunk made in one.
+    pub(crate) file_level_request: bool,
+    /// Loading a file GNU would read as source (no compiled form,
+    /// `Vm::gnu_loads_compiled'): GNU's readevalloop interprets its forms,
+    /// so its `let's bind late (`Op::BindLate'), as `eval''s do.
+    pub(crate) interpreting_source: bool,
+    /// R215: compile a failing form as a deferred reach-time expansion.
+    pub(crate) defer_expansion_errors: bool,
+    /// Compiling for `eval', which GNU interprets: a macro call whose
+    /// expansion escapes, or a call whose function a form run before it may
+    /// still define, defers to its reach (`defer_expansion_errors'), and a
+    /// `lambda' with nothing to capture compiles at its first call.
+    pub(crate) evaluating: bool,
+    /// The next form compiled is a deferred call reached (`force_lazy'): its
+    /// own expansion signals there, the forms inside it defer as ever.
+    pub(crate) strict_root: bool,
+    /// The head of the deferred call being reached, while it compiles: with
+    /// no function, that call compiles to signal void-function at once, not
+    /// to defer again. Consumed by the call's own compilation.
+    pub(crate) reached_head: Option<String>,
+    /// As `reached_head', for a head no name reaches.
+    pub(crate) reached_generated: Option<GeneratedName>,
+    /// Set for the builder about to be created (`Builder::loader_order`).
+    pub(crate) loader_order_request: bool,
+    /// Consumed by the next `function` call: keep every capture register.
+    pub(crate) keep_captures: bool,
+    /// Consumed by the next lambda compiled: the closure slots `closure`
+    /// takes out of its body (an interactive spec and its modes), which its
+    /// structural key covers as GNU's `equal` compares them (`closure_key`).
+    pub(crate) closure_key_extra: Vec<Form>,
+    /// Eager `lambda' bodies being compiled around the current form.
+    pub(crate) lambda_depth: usize,
+    pub(crate) expanded_symbols: NameSet<String>,
 }

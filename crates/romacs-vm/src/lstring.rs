@@ -102,16 +102,8 @@ impl<'a> StrView<'a> {
     /// The characters in parts of about SIZE bytes, each part ending on a
     /// character boundary: a loop that polls between parts takes them whole.
     pub(crate) fn char_parts(&self, size: usize) -> impl Iterator<Item = impl Iterator<Item = u32> + 'a + use<'a>> + 'a + use<'a> {
-        let (mut rest, multibyte): (&'a [u8], bool) = (self.bytes, self.multibyte);
-        std::iter::from_fn(move || {
-            if rest.is_empty() { return None; }
-            let mut end = size.min(rest.len());
-            // A multibyte string's continuation bytes are 10xxxxxx.
-            while multibyte && end < rest.len() && rest[end] & 0xc0 == 0x80 { end += 1; }
-            let (part, tail) = rest.split_at(end);
-            rest = tail;
-            Some(chars_of(part, multibyte))
-        })
+        let multibyte = self.multibyte;
+        byte_parts(self.bytes, multibyte, size).map(move |part| chars_of(part, multibyte))
     }
 
     pub(crate) fn to_owned(&self) -> OwnedStr {
@@ -121,6 +113,18 @@ impl<'a> StrView<'a> {
             multibyte: self.multibyte,
         }
     }
+}
+
+/// Byte slices ending at character boundaries in the internal string encoding.
+pub(crate) fn byte_parts(mut rest: &[u8], multibyte: bool, size: usize) -> impl Iterator<Item = &[u8]> {
+    std::iter::from_fn(move || {
+        if rest.is_empty() { return None; }
+        let mut end = size.min(rest.len());
+        while multibyte && end < rest.len() && rest[end] & 0xc0 == 0x80 { end += 1; }
+        let (part, tail) = rest.split_at(end);
+        rest = tail;
+        Some(part)
+    })
 }
 
 /// The characters of BYTES, a multibyte string's internal text or a unibyte
