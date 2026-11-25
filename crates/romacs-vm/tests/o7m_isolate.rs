@@ -26,6 +26,7 @@ if '--parent' in args:
     args[args.index('--parent') + 1] = str(os.getpid())
 master = socket.socket(fileno=0)
 relay, peer = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+bad_message_sources = set()
 with subprocess.Popen([worker, *args], stdin=peer) as process:
     peer.close()
     while True:
@@ -54,6 +55,17 @@ with subprocess.Popen([worker, *args], stdin=peer) as process:
                                     or (mode == 'bad-result' and source is relay and kind == 3)):
                     with open(log, 'a') as evidence:
                         print(kind, generation, file=evidence)
+                    packet = packet[:9] + b'\x00BAD_MAGIC'
+                    control = []
+                if mode == 'missing-descriptor' and source is relay and kind == 3 and generation == 2:
+                    assert packet[9] & 1 and len(fds) == 1
+                    with open(log, 'a') as evidence:
+                        print(kind, generation, 'sealed without fd', file=evidence)
+                    control = []
+                if mode == 'bad-message' and kind == 5 and source not in bad_message_sources:
+                    bad_message_sources.add(source)
+                    with open(log, 'a') as evidence:
+                        print(kind, generation, 'to-worker' if source is master else 'to-master', file=evidence)
                     packet = packet[:9] + b'\x00BAD_MAGIC'
                     control = []
                 if mode == 'observe-backing' and source is master and kind == 5:
@@ -333,4 +345,200 @@ fn request_code_counts(vm: &mut Vm) -> (i64, i64) {
         functions.as_integer().unwrap(),
         caches.as_integer().unwrap(),
     )
+}
+
+fn hold_seed(vm: &mut Vm, root: &str) -> String {
+    eval(
+        vm,
+        &format!(
+            "(setq o7m-held (romacs--seed-build '((variable {root})) {TABLE} 100000)) (cdr o7m-held)"
+        ),
+    )
+}
+
+fn send_held_seed(vm: &mut Vm, root: &str, probe: &str) -> String {
+    eval(
+        vm,
+        &format!(
+            r"(let ((iso (isolate-create)))
+                (unwind-protect
+                    (progn
+                      (isolate-send iso (car o7m-held))
+                      (setq o7m-held nil)
+                      (isolate-await
+                       (isolate-spawn
+                        '(lambda ()
+                           (let ((seed (isolate-receive 2)))
+                             (if seed
+                                 (let* ((entry (assq '{root} (mapcar 'cdr (nth 2 seed))))
+                                        (value (nth 1 entry)))
+                                   {probe})
+                               'seed-missing)))
+                        :isolate iso)
+                       5))
+                  (isolate-kill iso)))"
+        ),
+    )
+}
+
+// Sol S1 / Opus B1. The backing remains rooted across ordinary and compacting GC.
+#[test]
+fn review_held_seed_survives_collection_and_send() {
+    for (length, compacting) in [(12, false), (8192, true)] {
+        let mut vm = worker_vm(&worker_program());
+        eval(
+            &mut vm,
+            &format!("(setq o7m-root (vector 'held (make-string {length} ?x))) nil"),
+        );
+        assert_eq!(hold_seed(&mut vm, "o7m-root"), "nil");
+        if compacting {
+            vm.collect_compacting();
+        } else {
+            vm.eval_source("(garbage-collect)").unwrap();
+        }
+        assert_eq!(
+            send_held_seed(
+                &mut vm,
+                "o7m-root",
+                &format!(
+                    "(list (aref value 0) (string-equal (aref value 1) (make-string {length} ?x)))"
+                )
+            ),
+            "(held t)"
+        );
+    }
+}
+
+// Sol S2. Ordinals refer to the graph tables, not the size of their record.
+// Independent transfers ensure each index reader is exercised.
+#[test]
+fn review_graph_indices_can_exceed_record_size() {
+    let mut vm = worker_vm(&worker_program());
+    eval(
+        &mut vm,
+        r#"
+        (setq o7m-functions (make-vector 42 nil) o7m-names (make-vector 12 nil))
+        (dotimes (i 42) (aset o7m-functions i (eval (list 'lambda nil i) t)))
+        (dotimes (i 12) (aset o7m-names i (make-symbol (format "o7m-g%d" i))))"#,
+    );
+    assert_eq!(hold_seed(&mut vm, "o7m-functions"), "nil");
+    let functions = send_held_seed(
+        &mut vm,
+        "o7m-functions",
+        r"(let ((valid (= (length value) 42)))
+             (dotimes (i 42) (unless (= (funcall (aref value i)) i) (setq valid nil)))
+             valid)",
+    );
+    assert_eq!(hold_seed(&mut vm, "o7m-names"), "nil");
+    let names = send_held_seed(
+        &mut vm,
+        "o7m-names",
+        r#"(let ((valid (= (length value) 12)))
+              (dotimes (i 12)
+                (let ((symbol (aref value i)))
+                  (unless (and (equal (symbol-name symbol) (format "o7m-g%d" i))
+                               (not (eq symbol (intern (symbol-name symbol)))))
+                    (setq valid nil))))
+              valid)"#,
+    );
+    assert_eq!((functions.as_str(), names.as_str()), ("t", "t"));
+}
+
+// Sol S5. A variable root names an alias but reads the base's default cell.
+#[test]
+fn review_alias_seed_carries_base_default() {
+    let mut vm = worker_vm(&worker_program());
+    assert_eq!(
+        eval(
+            &mut vm,
+            r"(defvar o7m-base 73)
+               (defvaralias 'o7m-alias 'o7m-base)
+               (make-local-variable 'o7m-base)
+               (setq o7m-base 99)
+               (list (default-value 'o7m-alias) o7m-alias)"
+        ),
+        "(73 99)"
+    );
+    assert_eq!(
+        hold_seed(&mut vm, "o7m-alias"),
+        "nil",
+        "seed refused an alias with a bound default"
+    );
+    assert_eq!(send_held_seed(&mut vm, "o7m-alias", "value"), "73");
+}
+
+// Sol S4. The original result header survives loss of its ancillary FD.
+#[test]
+fn review_sealed_result_without_fd_settles_future() {
+    in_proxy(
+        "review_sealed_result_without_fd_settles_future",
+        "missing-descriptor",
+        |vm, log| {
+            let actual = eval(
+                vm,
+                r"(let ((iso (isolate-create)))
+                     (unwind-protect
+                         (let* ((bad (isolate-spawn
+                                      '(lambda () (make-string 8192 ?x)) :isolate iso))
+                                (reason (condition-case err (isolate-await bad 5)
+                                          (error (car err))))
+                                (settled (isolate-future-done-p bad))
+                                (good (isolate-await (isolate-spawn '+ 19 23 :isolate iso) 5)))
+                           (list reason settled good))
+                       (isolate-kill iso)))",
+            );
+            assert_eq!(fs::read_to_string(log).unwrap(), "3 2 sealed without fd\n");
+            assert_eq!(actual, "(isolate-frame-error t 42)");
+        },
+    );
+}
+
+// Opus S2. Reports reach both public receive paths, ahead of a valid message.
+#[test]
+fn review_malformed_message_reported_in_both_directions() {
+    in_proxy(
+        "review_malformed_message_reported_in_both_directions",
+        "bad-message",
+        |vm, log| {
+            let actual = eval(
+                vm,
+                r"(let* ((iso (isolate-create))
+                         (seen nil)
+                        (isolate-message-functions
+                         (list (lambda (_sender frame)
+                                 (push (if (consp frame)
+                                           (list (car frame) (nth 1 frame) (car (nth 2 frame)))
+                                         frame)
+                                       seen)))))
+                     (unwind-protect
+                         (progn
+                           (isolate-send iso 'unreadable)
+                           (isolate-send iso 'good)
+                           (let ((worker
+                                  (isolate-await
+                                   (isolate-spawn
+                                    '(lambda ()
+                                       (let* ((frame (isolate-receive 2))
+                                              (next (isolate-receive 0)))
+                                         (isolate-send 'parent 'unreadable)
+                                         (isolate-send 'parent 'good)
+                                         (list (if (consp frame)
+                                                   (list (car frame) (nth 1 frame) (car (nth 2 frame)))
+                                                 frame)
+                                               next)))
+                                    :isolate iso)
+                                   5)))
+                             (list (nreverse seen) worker)))
+                       (isolate-kill iso)))",
+            );
+            assert_eq!(
+                fs::read_to_string(log).unwrap(),
+                "5 0 to-worker\n5 0 to-master\n"
+            );
+            assert_eq!(
+                actual,
+                "(((frame-error 0 message) good) ((frame-error 0 message) good))"
+            );
+        },
+    );
 }
