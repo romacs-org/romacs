@@ -730,16 +730,17 @@ impl Vm {
     }
     /// A run of the buffer at object INDEX that holds the bytes NEED and
     /// lies within its accessible bytes, readable contiguously: for a
-    /// multibyte buffer, the window its text gives (`search_window').
+    /// multibyte buffer, the window its text gives (`search_window`), read
+    /// through `&` while the flat text serves it.
     fn regexp_buffer_window(&mut self, index: usize, need: Range<usize>) -> Range<usize> {
-        match self.objects.entry_mut(index) {
-            Object::Buffer(t) => {
-                let r = t.accessible();
-                t.search_window(need, r.start.0..r.end.0)
-            }
-            Object::ByteBuffer(t) => t.restriction.start.0..t.restriction.end.0,
+        let (t, bounds) = match &self.objects[index] {
+            Object::Buffer(t) => { let r = t.accessible(); (t, r.start.0..r.end.0) }
+            Object::ByteBuffer(t) => return t.restriction.start.0..t.restriction.end.0,
             _ => unreachable!("buffer_index validates"),
-        }
+        };
+        if let Some(window) = t.flat_search_window(&bounds) { return window; }
+        let Object::Buffer(t) = self.objects.entry_mut(index) else { unreachable!("buffer_index validates") };
+        t.search_window(need, bounds)
     }
     /// WINDOW of the buffer at object INDEX, for one search.
     fn regexp_buffer_input(&self, index: usize, window: Range<usize>) -> BufferInput<'_> {

@@ -208,17 +208,20 @@ impl Vm {
     /// it is.
     fn widened<T>(&mut self, buffer: Value, read: impl FnOnce(&mut Self) -> T) -> Faulty<T> {
         let index = buffer.index(0).map_err(Fault::Error)? - 1;
-        let narrowed = match self.objects.entry_mut(index) {
-            Object::Buffer(b) => {
-                let (view, whole) = (b.accessible(), ByteOffset(0)..ByteOffset(b.len_bytes()));
-                (view != whole).then(|| { b.widen(); view })
-            }
-            Object::ByteBuffer(b) => {
-                let (view, whole) = (b.restriction.clone(), ByteOffset(0)..ByteOffset(b.bytes.len()));
-                (view != whole).then(|| { b.restriction = whole; view })
-            }
+        // An unrestricted buffer is only read: the entry is taken `&mut'
+        // only to lift a narrowing.
+        let narrowed = match &self.objects[index] {
+            Object::Buffer(b) => Some(b.accessible()).filter(|view| *view != (ByteOffset(0)..ByteOffset(b.len_bytes()))),
+            Object::ByteBuffer(b) => Some(b.restriction.clone()).filter(|view| *view != (ByteOffset(0)..ByteOffset(b.bytes.len()))),
             _ => None,
         };
+        if narrowed.is_some() {
+            match self.objects.entry_mut(index) {
+                Object::Buffer(b) => b.widen(),
+                Object::ByteBuffer(b) => b.restriction = ByteOffset(0)..ByteOffset(b.bytes.len()),
+                _ => {}
+            }
+        }
         let value = read(self);
         let Some(view) = narrowed else { return Ok(value) };
         match self.objects.entry_mut(index) {
