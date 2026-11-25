@@ -52,12 +52,13 @@ fn nested_reads_survive_moving_collections() {
                      (define-key key-translation-map [f7] (lambda (_) (push (read-key-sequence-vector nil) log) [f9]))
                      nil)");
     vm.set_gc_stress(1);
-    let got = shown(&mut vm, "(let ((unread-command-events (list 'f5 'f6 'f7 'f8)))
+    // Events with parameters, heap conses the collector moves.
+    let got = shown(&mut vm, "(let ((unread-command-events (list (list 'f5 1) (list 'f6 2) (list 'f7 3) (list 'f8 4))))
                                 (list (read-key-sequence-vector nil) (this-single-command-raw-keys)
                                       (read-key-sequence-vector nil) (this-command-keys-vector)
                                       (reverse log) ends))");
     vm.set_gc_stress(0);
-    assert_eq!(got, "([f5] [f5] [f9] [f9] ([f6] [f8]) 4)");
+    assert_eq!(got, "([(f5 1)] [(f5 1)] [f9] [f9] ([(f6 2)] [(f8 4)]) 4)");
     assert_eq!(vm.reads.depth(super::MAIN), 0, "every read's frame popped");
 }
 
