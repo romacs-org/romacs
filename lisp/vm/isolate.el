@@ -1367,11 +1367,13 @@ wait for traffic or input.  A VM without timers is pumped by its waits
   (romacs--isolate-pump 0))
 
 (defun isolate-kill-all ()
-  "Kill every live isolate, as a session's end does.  Every one is
-signalled, and every call settled, before any callback or
-`isolate-error-functions' runs: an owner, whose kill waits for nothing,
-gets SIGKILL at once, and its subprocess groups SIGHUP, since no later
-wait point is left to send them; any other is killed and waited for."
+  "Kill every isolate, as a session's end does.  Every one is signalled,
+and every call settled, before any callback or `isolate-error-functions'
+runs.  Owners, zygotes, job children their zygotes have not reported and
+every retired isolate get SIGKILL at once, their subprocess groups
+SIGHUP, and are not waited for: their deaths arrive at a later wait
+point, if one comes.  Any other live worker is killed and waited for,
+job children before their zygotes."
   (let ((waiting romacs--isolate-waiting) (resolved nil))
     (setq romacs--isolate-waiting nil)
     (dolist (future waiting)

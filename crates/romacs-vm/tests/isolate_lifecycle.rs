@@ -155,6 +155,9 @@ fn a_zygote_killed_at_shutdown_runs_no_job_elsewhere() {
                "(dead (hup) (forget) (close) (zygote-gone) (resubmit) (hook isolate-died nil t))");
     assert_eq!(step(&mut vm, ":role job :phase live", "(orphaned shutdown)"),
                "(retired (signal 9) (end nil) (settle isolate-killed nil) (hook isolate-killed nil nil))");
+    // S27: a reported child of a zygote refused at its hello settles with the refusal.
+    assert_eq!(step(&mut vm, ":role job :phase live", "(orphaned (refused why text))"),
+               "(retired (signal 9) (end nil) (settle isolate-refused (why text)) (hook isolate-refused (why text) nil))");
 }
 
 /// S19: a reply resolves its call and begins a spent worker's end in one

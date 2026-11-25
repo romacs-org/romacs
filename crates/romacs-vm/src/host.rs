@@ -3030,6 +3030,17 @@ pub fn fork_isolate() -> io::Result<i32> {
 /// reset is done. Only the forking thread touches it, the child's only one.
 static FORK_MASK: std::sync::Mutex<Option<sys::SignalMask>> = std::sync::Mutex::new(None);
 
+/// The signal mask a forked child puts back when its reset ends, however
+/// it ends (`forked_child_reset`).
+struct RestoreForkMask(Option<sys::SignalMask>);
+
+impl Drop for RestoreForkMask {
+    // HOST(pure): this thread's own signal mask, which no other party observes, put back
+    fn drop(&mut self) {
+        if let Some(mask) = self.0.take() { sys::restore_signals(&mask); }
+    }
+}
+
 /// fork(2) from a process whose other threads run on (a mark twin's,
 /// `twin.rs`): 0 in the child, else the child's pid. The child has the
 /// caller's thread alone, so a lock another thread held stays held in it:
@@ -3068,6 +3079,9 @@ pub fn forked_child() -> bool {
 // HOST(acquisition): in a forked child: its own wake pipe and handlers, then its name and death signal
 pub fn forked_child_reset(zygote: i32) -> io::Result<()> {
     use std::sync::atomic::Ordering;
+    // What was sent the child since the fork is its own: delivered once the
+    // reset is done, however it ends.
+    let _restore = RestoreForkMask(FORK_MASK.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take());
     set_process_name("romacs-worker")?;
     // Every signal the zygote had pending is the zygote's, not the child's:
     // its quits, its termination, its user signals (input the zygote never
@@ -3085,10 +3099,6 @@ pub fn forked_child_reset(zygote: i32) -> io::Result<()> {
     catch_isolate_signals()?;
     INSTRUCTION_COUNTER.with(|counter| counter.replace(None));
     set_parent_death_signal(libc::SIGTERM)?;
-    // What was sent the child since the fork is its own: delivered now.
-    if let Some(mask) = FORK_MASK.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take() {
-        sys::restore_signals(&mask);
-    }
     if parent_pid() != zygote {
         return Err(io::Error::other(format!("zygote {zygote} is gone")));
     }

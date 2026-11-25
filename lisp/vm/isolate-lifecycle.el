@@ -110,10 +110,13 @@ left retires (`romacs--isolate-on-retire')."
 
 (defun romacs--isolate-on-orphaned (cause)
   "`orphaned': a busy forked job child whose zygote died gets SIGKILL and
-its calls settle as the zygote's death (`isolate-died'), or, under
-CAUSE `shutdown', as killed with the rest."
-  (let ((condition (if (eq cause 'shutdown) 'isolate-killed 'isolate-died)))
-    `(retired (signal 9) (end nil) (settle ,condition nil) (hook ,condition nil nil))))
+its calls settle as the zygote's death (`isolate-died'); under CAUSE
+`shutdown', as killed with the rest; under CAUSE (refused . DATA), its
+zygote of another build refused at its hello, with that refusal."
+  (let* ((refused (eq (car-safe cause) 'refused))
+         (condition (cond ((eq cause 'shutdown) 'isolate-killed) (refused 'isolate-refused) (t 'isolate-died)))
+         (data (and refused (cdr cause))))
+    `(retired (signal 9) (end nil) (settle ,condition ,data) (hook ,condition ,data nil))))
 
 (defun romacs--isolate-on-refuse (state reason current)
   "`refuse': a zygote whose preparation failed for REASON ends; when it is

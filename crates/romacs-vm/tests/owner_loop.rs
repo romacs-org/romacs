@@ -356,3 +356,74 @@ fn owners_at_the_process_limit_leave_pooled_jobs_room() {
     assert_eq!(out, "(t t 3)");
     eval(&mut vm, "(isolate-kill-all)");
 }
+
+/// A stale zygote is replaced, and counts until it is reaped: an owner
+/// asked of it needs two processes, so at the limit less one it is
+/// refused, the registry and the processes unchanged, never the limit
+/// plus one.
+#[test]
+fn a_stale_zygote_counts_as_two_processes_for_an_owner() {
+    let mut vm = vm();
+    let out = eval(&mut vm, "(let* ((first (owner--spawn)))
+                               (isolate-await (owner--start-future first) 30)
+                               (let* ((record (gethash nil romacs--isolate-zygotes))
+                                      (members (copy-sequence romacs--isolates))
+                                      (outcome
+                                       (let ((isolate-process-limit (1+ (length romacs--isolates)))
+                                             (isolate-job-memory-headroom (+ isolate-job-memory-headroom 4096)))
+                                         (condition-case e (progn (owner--spawn) 'admitted)
+                                           (isolate-error (car e))))))
+                                 (list outcome (equal members romacs--isolates)
+                                       (eq record (gethash nil romacs--isolate-zygotes))
+                                       (aref (aref record 1) 3))))");
+    assert_eq!(out, "(isolate-process-limit t t live)");
+    eval(&mut vm, "(isolate-kill-all)");
+}
+
+#[path = "support/own_test.rs"]
+mod own_test;
+
+/// A zygote of another build is refused at its hello after the fork of a
+/// job queued behind it was already reported: that job settles once, with
+/// the refusal and its reason, never as the zygote's death, and runs
+/// nowhere else. The build is process-wide, so it runs in its own process.
+#[test]
+fn a_reported_job_of_a_refused_zygote_settles_with_the_refusal() {
+    const NAME: &str = "a_reported_job_of_a_refused_zygote_settles_with_the_refusal";
+    if std::env::var_os("ROMACS_OWNER_LOOP_CHILD").is_none() {
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &own_test::name(module_path!(), NAME), "--nocapture"])
+            .env("ROMACS_OWNER_LOOP_CHILD", "1")
+            .status()
+            .unwrap();
+        assert!(status.success(), "{NAME} in its own process: {status}");
+        return;
+    }
+    romacs_vm::isolate_set_build_id("owner-loop-another-master-build");
+    let mut vm = vm();
+    let out = eval(&mut vm, "(progn
+      (setq isolate-zygotes t resubmits 0
+            original-resubmit (symbol-function 'romacs--isolate-resubmit))
+      (fset 'romacs--isolate-resubmit
+            (lambda (future) (setq resubmits (1+ resubmits)) (funcall original-resubmit future)))
+      (let* ((future (isolate-spawn '+ 1 2))
+             (child (isolate-future-isolate future))
+             (zygote (aref (gethash nil romacs--isolate-zygotes) 1))
+             (until (+ (float-time) 20))
+             child-hello zygote-hello)
+        ;; Read the sockets without dispatching: the child's fork report
+        ;; and both hellos, the zygote's handled first.
+        (while (and (not (and (romacs--isolate-pid (romacs--isolate-id child)) child-hello zygote-hello))
+                    (< (float-time) until))
+          (romacs--isolate-wait 0.02)
+          (setq child-hello (or child-hello (romacs--isolate-take (romacs--isolate-id child)))
+                zygote-hello (or zygote-hello (romacs--isolate-take (romacs--isolate-id zygote)))))
+        (romacs--isolate-accept-hello zygote (nth 2 zygote-hello))
+        (list (and (romacs--isolate-pid (romacs--isolate-id child)) t)
+              (aref future 3)
+              (condition-case e (isolate-await future 0)
+                (isolate-error (list (car e) (eq 0 (string-search \"worker is another build\" (car (nth 2 e)))))))
+              resubmits)))");
+    eval(&mut vm, "(isolate-kill-all)");
+    assert_eq!(out, "(t isolate-refused (isolate-refused t) 0)");
+}
