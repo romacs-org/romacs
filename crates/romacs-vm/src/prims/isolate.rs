@@ -109,15 +109,15 @@ fn isolate_claim(cx, generation: Value) {
 
 // (romacs--isolate-interrupted-p): take the pending interrupt, if any.
 defsubr! { name = "romacs--isolate-interrupted-p", gnu = "romacs:isolate", effect = Global,
-fn isolate_interrupted_p(_cx) {
-    Ok(if crate::host::take_interrupt() { Value::TRUE } else { Value::NIL })
+fn isolate_interrupted_p(cx) {
+    Ok(if cx.process_signals() && crate::host::take_interrupt() { Value::TRUE } else { Value::NIL })
 }}
 
 // (romacs--isolate-terminated-p): a termination signal was noted, or the
 // spawner's socket has closed.
 defsubr! { name = "romacs--isolate-terminated-p", gnu = "romacs:isolate", effect = Reads,
 fn isolate_terminated_p(cx) {
-    Ok(if crate::host::terminate_pending() || cx.isolate_parent_closed() { Value::TRUE } else { Value::NIL })
+    Ok(if (cx.process_signals() && crate::host::terminate_pending()) || cx.isolate_parent_closed() { Value::TRUE } else { Value::NIL })
 }}
 
 // (romacs--isolate-hello-check TEXT PROGRAM): why a worker's hello TEXT

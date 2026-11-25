@@ -1267,7 +1267,7 @@ impl Leaf<'_> {
         let quit_symbol = self.sym("quit");
         match quit {
             Fault::Signal(condition, _) if condition == quit_symbol && !bytes.is_empty() => {
-                self.vm.quit_unwinding = false;
+                self.vm.mutator.quit_unwinding = false;
                 self.issue_requit(token);
                 let quit = self.cons(quit_symbol, token);
                 let text = self.make_string(bytes, false);

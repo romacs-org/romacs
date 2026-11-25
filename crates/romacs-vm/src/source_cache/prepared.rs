@@ -88,9 +88,9 @@ impl Vm {
         if args.len() != self.functions[function].arity {
             return Err("wrong number of arguments".into());
         }
-        self.propagate_next |= propagate;
+        self.mutator.propagate_next |= propagate;
         let outcome = threaded::execute_args(self, function, args);
-        if propagate { self.propagate_next = false; }
+        if propagate { self.mutator.propagate_next = false; }
         self.finish_request(outcome)
     }
     /// Call the fixed-arity lambda SOURCE with ARGS: a native caller's direct

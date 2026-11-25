@@ -215,6 +215,9 @@ impl Vm {
     #[cold]
     #[inline(never)]
     pub(crate) fn inspect_capture(&self) {
+        // A request (SIGUSR2, the listener) is the process's own mutator's
+        // to answer: a second one never marks it served.
+        if !self.mutator.process_signals { return; }
         let generation = crate::host::inspect_generation();
         crate::host::inspect_publish(generation, self.inspect_snapshot());
     }
@@ -249,9 +252,9 @@ mod tests {
         crate::host::inspect_request();
         let shown = crate::prim::window_shown_elements(&mut vm, window, 1, 20001);
         assert_eq!(shown.map(|(elements, _)| elements.len()).ok(), Some(20000));
-        assert!(vm.quit.due(), "redisplay took the quit");
+        assert!(vm.mutator.quit.due(), "redisplay took the quit");
         assert!(!crate::host::inspect_pending(), "redisplay left the inspection unanswered");
-        vm.native_quit = true;
+        vm.mutator.native_quit = true;
         assert!(crate::prim::window_shown_elements(&mut vm, window, 1, 20001).is_err(), "a Lisp-called motion did not quit");
     }
 
@@ -364,7 +367,7 @@ mod tests {
         assert!(vm.next_single_char_property_change_values(start, display, buffer, Value::NIL).is_ok());
         assert!(!crate::host::inspect_pending(), "the walk left the inspection unanswered");
         assert!(signal.interrupt(), "a busy evaluator takes the press");
-        vm.native_quit = true;
+        vm.mutator.native_quit = true;
         assert!(vm.next_single_char_property_change_values(start, display, buffer, Value::NIL).is_err(), "the walk did not quit");
     }
 }

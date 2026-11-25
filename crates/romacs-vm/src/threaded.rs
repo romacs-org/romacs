@@ -1127,8 +1127,8 @@ fn run_in_signal<'a, 'b>(m: &mut Orch<'_, 'b, 'a>, gc: Gc<'_, 'b>, form: &Form, 
         e.vm.eval_depth = failed_depth.unwrap_or(e.depth_base + e.frames.len());
         let token = e.vm.max_ensure_room(room);
         e.vm.mutator.propagated_escape = None;
-        e.vm.propagated_eval_depth = None;
-        e.vm.propagated_escape_hooked = false;
+        e.vm.mutator.propagated_eval_depth = None;
+        e.vm.mutator.propagated_escape_hooked = false;
         (saved_depth, token)
     });
     lend::nested(m, gc, Nested::Form(form), around, |e, (saved_depth, token), result| {
@@ -1226,7 +1226,7 @@ fn land(e: &mut Engine<'_>, original: &Option<String>) -> Option<usize> {
         ControlKind::Catch(_) | ControlKind::Condition(_) => {
             // Caught: a quit from C-g unwinding to here ends here,
             // and a throw's no-catch caught here retires its mark.
-            e.vm.quit_unwinding = false;
+            e.vm.mutator.quit_unwinding = false;
             if let Escape::Error { object, .. } = &escape {
                 e.vm.retire_thrown_no_catch(*object);
             }
@@ -1291,8 +1291,8 @@ fn leave_frame(e: &mut Engine<'_>, original: &Option<String>) -> bool {
     if e.propagate {
         e.error = Some(original.unwrap_or_else(|| "escape propagated to the eval caller".into()));
         e.vm.mutator.propagated_escape = Some(escape);
-        e.vm.propagated_escape_hooked = true;
-        e.vm.propagated_eval_depth = None;
+        e.vm.mutator.propagated_escape_hooked = true;
+        e.vm.mutator.propagated_eval_depth = None;
         return false;
     }
     e.error = Some(original.unwrap_or_else(|| match escape {
@@ -1346,7 +1346,7 @@ fn route_escape<'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, (): ()) -> 
     // above come before any control is popped, so an escape from them only
     // replaces the signal, and a debugger they enter holds nothing back.
     m.leaf((), |e, ()| {
-        e.vm.unwinding += 1;
+        e.vm.mutator.unwinding += 1;
         leave_native(e);
         e.apply_function = None;
         if let Some(mark) = e.apply_mark.take() { e.vm.trace_leave(mark); }
@@ -1622,11 +1622,11 @@ impl Vm {
         self.with_site_leaf(|vm| {
             vm.suspend_stack();
             vm.mutator.propagated_escape = None;
-            vm.propagated_escape_hooked = false;
-            vm.propagated_eval_depth = None;
-            vm.propagate_next = true;
+            vm.mutator.propagated_escape_hooked = false;
+            vm.mutator.propagated_eval_depth = None;
+            vm.mutator.propagate_next = true;
             let result = execute_args(vm, trampoline, &registers);
-            vm.propagate_next = false;
+            vm.mutator.propagate_next = false;
             vm.resume_stack();
             vm.end_nested_execution();
             result
@@ -1736,8 +1736,8 @@ pub(super) fn execute_args(vm: &mut Vm, function: usize, args: &[Value]) -> Resu
             let condition = vm.intern("excessive-lisp-nesting");
             let data = vm.list_value(&[Value::integer(vm.eval_depth as i64).expect("representable eval depth")]);
             vm.mutator.propagated_escape = Some(Escape::Signal(condition, data));
-            vm.propagated_escape_hooked = false;
-            vm.propagated_eval_depth = Some(vm.eval_depth);
+            vm.mutator.propagated_escape_hooked = false;
+            vm.mutator.propagated_eval_depth = Some(vm.eval_depth);
             Err("Lisp nesting exceeds `max-lisp-eval-depth'".into())
         } else {
             vm.outside_quit_scope(|vm| execute_args_inner(vm, function, args))
@@ -1778,9 +1778,9 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     if vm.functions[function].lazy.is_some() {
         // Nested macro calls get their own engines and must not consume this
         // execution's propagation request. The open builder holds collection.
-        let propagate = std::mem::take(&mut vm.propagate_next);
+        let propagate = std::mem::take(&mut vm.mutator.propagate_next);
         let forced = vm.force_lazy(function);
-        vm.propagate_next = propagate;
+        vm.mutator.propagate_next = propagate;
         forced?;
     }
     if let Err(error) = vm.materialize_image_function(function) {
@@ -1797,7 +1797,7 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     let mark = vm.mutator.dynamic.len();
     let handler_mark = vm.mutator.signal_handlers.len();
     let backtrace_mark = vm.mutator.backtrace.frames.len();
-    let vm_propagate = std::mem::take(&mut vm.propagate_next);
+    let vm_propagate = std::mem::take(&mut vm.mutator.propagate_next);
     let mut engine = Engine {
         stack_used: width.max(args.len()),
         limit,
@@ -1834,7 +1834,7 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     // This engine holds collection until it suspends; a writer's rooted
     // watcher notification does not extend into it.
     engine.vm.running_engines += 1;
-    let rooted_write = std::mem::take(&mut engine.vm.rooted_write);
+    let rooted_write = std::mem::take(&mut engine.vm.mutator.rooted_write);
     if engine.vm.stress_due() && engine.vm.may_collect(1) {
         orchestrate(Eng::lend(&mut engine, gc.by_ref()), (), entry_collect, done);
     }
@@ -1856,7 +1856,7 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     // GNU's eval_sub and funcall run maybe_quit before the body: a quit
     // already due ends the entry before its first instruction.
     crate::gap_probe::safepoint(Some(engine.vm));
-    let quit = if crate::host::safepoint_pending() || engine.vm.quit_due() {
+    let quit = if engine.vm.process_safepoint_pending() || engine.vm.quit_due() {
         engine.budget = 0;
         interrupt_quit(&mut engine)
     } else {
@@ -1881,7 +1881,7 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         // Routing holds aftermath once it starts unwinding (`route_escape'
         // takes the hold, this gives it back).
         let routed = orchestrate(Eng::lend(&mut engine, gc.by_ref()), (), route_escape, routed);
-        engine.vm.unwinding -= 1;
+        engine.vm.mutator.unwinding -= 1;
         let Some((regs, pc)) = routed else { break };
         // A landing resumes as any instruction does: a handler's first tick
         // polls (`land` zeroed the budget), and a cleanup runs as it is.
@@ -1915,7 +1915,7 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         registers,
     };
     engine.vm.execution_fatal = engine.fatal_image_failure;
-    engine.vm.rooted_write = rooted_write;
+    engine.vm.mutator.rooted_write = rooted_write;
     // Aftermath it left pending is polled for soon by the engine it returns to.
     if engine.vm.aftermath_pending() { engine.vm.request_poll(); }
     engine.vm.running_engines -= 1;
@@ -2411,7 +2411,7 @@ fn polled<'x, 'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, (pc, collect)
     // safepoint unless `inhibit-quit' is bound.
     let quit = m.leaf((), |e, ()| {
         crate::gap_probe::safepoint(Some(e.vm));
-        (crate::host::safepoint_pending() || e.vm.quit_poll_due()) && interrupt_quit(e).is_some()
+        (e.vm.process_safepoint_pending() || e.vm.quit_poll_due()) && interrupt_quit(e).is_some()
     });
     if quit { Continue::Stop } else { Continue::At(pc) }
 }
@@ -2421,9 +2421,9 @@ fn polled<'x, 'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, (pc, collect)
 #[cold]
 #[inline(never)]
 fn interrupt_quit(e: &mut Engine<'_>) -> Option<Value> {
-    if crate::host::interrupt_pending() && e.vm.isolate_quit_taken() {
+    if e.vm.process_interrupt_pending() && e.vm.isolate_quit_taken() {
         // A signal, not an engine failure: `condition-case' catches it.
-        e.vm.quit_unwinding = true;
+        e.vm.mutator.quit_unwinding = true;
         return Some(raise(e, "quit", &[]));
     }
     let escape = e.vm.maybe_quit()?;
@@ -3757,7 +3757,7 @@ fn drained<'x, 'b>(mut m: Orch<'_, 'b, '_>, mut gc: Gc<'_, 'b>, pc: Pc<'x>) -> C
 /// one and drops the rest, as it would have ended the call first.
 #[inline]
 fn drain_writes<'b>(m: &mut Orch<'_, 'b, '_>, gc: Gc<'_, 'b>) -> bool {
-    m.leaf((), |e, ()| e.vm.deferred_writes.is_empty()) || make_queued_writes(m, gc)
+    m.leaf((), |e, ()| e.vm.mutator.deferred_writes.is_empty()) || make_queued_writes(m, gc)
 }
 #[cold]
 #[inline(never)]
@@ -3771,8 +3771,8 @@ fn write_made(e: &mut Engine<'_>, (): (), outcome: std::result::Result<(), prim:
     let Err(fault) = outcome else { return true };
     if let Some(escape) = e.vm.mutator.propagated_escape.take() {
         e.escape = Some(escape);
-        e.escape_hooked = std::mem::take(&mut e.vm.propagated_escape_hooked);
-        e.failed_eval_depth = e.vm.propagated_eval_depth.take();
+        e.escape_hooked = std::mem::take(&mut e.vm.mutator.propagated_escape_hooked);
+        e.failed_eval_depth = e.vm.mutator.propagated_eval_depth.take();
     } else {
         let (condition, data) = e.vm.fault(fault);
         e.escape = Some(Escape::Signal(condition, data));
@@ -3867,8 +3867,8 @@ fn read_body<'x, 'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, read: Box<
     let (pc, target, start, argc) = *read;
     let saved_depth = m.leaf((), |e, ()| {
         e.vm.mutator.propagated_escape = None;
-        e.vm.propagated_escape_hooked = false;
-        e.vm.propagated_eval_depth = None;
+        e.vm.mutator.propagated_escape_hooked = false;
+        e.vm.mutator.propagated_eval_depth = None;
         std::mem::replace(&mut e.vm.eval_depth, e.depth_base + e.frames.len())
     });
     lend::read(&mut m, gc.by_ref(), (target, start, argc), (pc, saved_depth), |e, (pc, saved_depth), step| {
@@ -3884,8 +3884,8 @@ fn read_body<'x, 'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, read: Box<
         unsafe {
             if let Some(escape) = e.vm.mutator.propagated_escape.take() {
                 e.escape = Some(escape);
-                e.escape_hooked = std::mem::take(&mut e.vm.propagated_escape_hooked);
-                e.failed_eval_depth = e.vm.propagated_eval_depth.take();
+                e.escape_hooked = std::mem::take(&mut e.vm.mutator.propagated_escape_hooked);
+                e.failed_eval_depth = e.vm.mutator.propagated_eval_depth.take();
                 return Continue::Stop;
             }
             take_step(e, r, pc.get(), step)
@@ -3916,8 +3916,8 @@ unsafe fn take_step(
             // A watcher's escape, its handler search already done.
             Err(None) => {
                 e.escape = e.vm.mutator.propagated_escape.take();
-                e.escape_hooked = std::mem::take(&mut e.vm.propagated_escape_hooked);
-                e.failed_eval_depth = e.vm.propagated_eval_depth.take();
+                e.escape_hooked = std::mem::take(&mut e.vm.mutator.propagated_escape_hooked);
+                e.failed_eval_depth = e.vm.mutator.propagated_eval_depth.take();
                 return Continue::Stop;
             }
             // Collections are lends, which the dispatch makes (`continue_at`).
@@ -4042,7 +4042,7 @@ unsafe fn take_step(
 /// PC, after any writes it queued.
 #[inline]
 fn step_at<'x>(e: &Engine<'_>, pc: Pc<'x>) -> Continue<'x> {
-    if e.vm.deferred_writes.is_empty() { Continue::At(pc) } else { Continue::Drain(pc) }
+    if e.vm.mutator.deferred_writes.is_empty() { Continue::At(pc) } else { Continue::Drain(pc) }
 }
 fn handler_bind_return(_: &mut prim::Leaf<'_>, value: Value, _: &[Value]) -> prim::Next {
     Ok(prim::Step::Done(value))
@@ -4156,7 +4156,7 @@ unsafe fn t2_dispatch(
                 };
                 leave_native(&mut e);
                 *r.add((*pc).a) = value;
-                if e.vm.deferred_writes.is_empty() { advance(e, r, pc) } else { drain_at(e, Pc::new(pc.add(1))) }
+                if e.vm.mutator.deferred_writes.is_empty() { advance(e, r, pc) } else { drain_at(e, Pc::new(pc.add(1))) }
             }
         }
     }
@@ -4231,8 +4231,8 @@ unsafe fn t2_prepare_apply(
                 // `primitive_value` raises it.
                 if error == crate::quit::ESCAPED && let Some(escape) = e.vm.mutator.propagated_escape.take() {
                     e.escape = Some(escape);
-                    e.escape_hooked = std::mem::take(&mut e.vm.propagated_escape_hooked);
-                    e.failed_eval_depth = e.vm.propagated_eval_depth.take();
+                    e.escape_hooked = std::mem::take(&mut e.vm.mutator.propagated_escape_hooked);
+                    e.failed_eval_depth = e.vm.mutator.propagated_eval_depth.take();
                 }
                 e.error = Some(error);
                 return (std::ptr::null_mut(), 0);
@@ -4489,8 +4489,8 @@ fn primitive_value(
             if (p == Primitive::DefvarSetDefault || error == crate::frozen::READ_ONLY || error == crate::quit::ESCAPED)
                 && let Some(escape) = e.vm.mutator.propagated_escape.take() {
                 e.escape = Some(escape);
-                e.escape_hooked = std::mem::take(&mut e.vm.propagated_escape_hooked);
-                e.failed_eval_depth = e.vm.propagated_eval_depth.take();
+                e.escape_hooked = std::mem::take(&mut e.vm.mutator.propagated_escape_hooked);
+                e.failed_eval_depth = e.vm.mutator.propagated_eval_depth.take();
             } else if let Some((condition, data)) = e.vm.primitive_condition(p, start, argc, &error) {
                 e.escape = Some(Escape::Signal(condition, data));
             }
@@ -4538,7 +4538,7 @@ unsafe fn leaf_call(
             en.budget = 0;
         }
         *r.add((*pc).a) = value;
-        if e.vm.deferred_writes.is_empty() { advance(e, r, pc) } else { drain_at(e, Pc::new(pc.add(1))) }
+        if e.vm.mutator.deferred_writes.is_empty() { advance(e, r, pc) } else { drain_at(e, Pc::new(pc.add(1))) }
     }
 }
 /// The call a failed leaf made, recorded now: its arguments are where they
@@ -4609,7 +4609,7 @@ unsafe fn cached_primitive(
         };
         leave_native(&mut e);
         *r.add((*pc).a) = value;
-        if e.vm.deferred_writes.is_empty() { advance(e, r, pc) } else { drain_at(e, Pc::new(pc.add(1))) }
+        if e.vm.mutator.deferred_writes.is_empty() { advance(e, r, pc) } else { drain_at(e, Pc::new(pc.add(1))) }
     }
 }
 /// A call of a primitive that runs Lisp (`load`, `eval`, ...), as a lend;
@@ -4677,7 +4677,7 @@ fn force_lazy(e: &mut Engine<'_>, function: usize) -> bool {
     {
         e.vm.execution_fatal = false;
         e.vm.mutator.propagated_escape = None;
-        e.vm.propagated_eval_depth = None;
+        e.vm.mutator.propagated_eval_depth = None;
         let saved_depth = e.vm.eval_depth;
         e.vm.eval_depth = e.depth_base + e.frames.len();
         let result = lend::deferred(e, function);
@@ -4688,8 +4688,8 @@ fn force_lazy(e: &mut Engine<'_>, function: usize) -> bool {
             Err(error) => {
                 if let Some(escape) = e.vm.mutator.propagated_escape.take() {
                     e.escape = Some(escape);
-                    e.escape_hooked = std::mem::take(&mut e.vm.propagated_escape_hooked);
-                    e.failed_eval_depth = e.vm.propagated_eval_depth.take();
+                    e.escape_hooked = std::mem::take(&mut e.vm.mutator.propagated_escape_hooked);
+                    e.failed_eval_depth = e.vm.mutator.propagated_eval_depth.take();
                 } else {
                     let message = e.vm.literal(&Form::String(error));
                     match message {
@@ -4966,7 +4966,7 @@ fn nested_then<'a, 'b, B: Plain>(m: &mut Orch<'_, 'b, 'a>, gc: Gc<'_, 'b>, call:
     let saved_depth = m.leaf((), |e, ()| {
         e.vm.execution_fatal = false;
         e.vm.mutator.propagated_escape = None;
-        e.vm.propagated_eval_depth = None;
+        e.vm.mutator.propagated_eval_depth = None;
         e.vm.loader.propagate += 1;
         std::mem::replace(&mut e.vm.eval_depth, e.depth_base + e.frames.len())
     });
@@ -4991,8 +4991,8 @@ fn nested_then<'a, 'b, B: Plain>(m: &mut Orch<'_, 'b, 'a>, gc: Gc<'_, 'b>, call:
 fn carry_escape(e: &mut Engine<'_>, error: String) {
     if let Some(escape) = e.vm.mutator.propagated_escape.take() {
         e.escape = Some(escape);
-        e.escape_hooked = std::mem::take(&mut e.vm.propagated_escape_hooked);
-        e.failed_eval_depth = e.vm.propagated_eval_depth.take();
+        e.escape_hooked = std::mem::take(&mut e.vm.mutator.propagated_escape_hooked);
+        e.failed_eval_depth = e.vm.mutator.propagated_eval_depth.take();
     } else {
         e.error = Some(error);
     }
@@ -5064,11 +5064,11 @@ impl Vm {
     /// PROPAGATE its escape is the caller's.
     pub(super) fn run_aftermath(&mut self, runner: Value, propagate: bool) -> Result<Value> {
         let trampoline = self.reader_trampoline(0)?;
-        self.aftermath_runs += 1;
-        self.propagate_next = propagate;
+        self.mutator.aftermath_runs += 1;
+        self.mutator.propagate_next = propagate;
         let outcome = execute_args(self, trampoline, &[runner]);
-        self.propagate_next = false;
-        self.aftermath_runs -= 1;
+        self.mutator.propagate_next = false;
+        self.mutator.aftermath_runs -= 1;
         outcome
     }
 }
@@ -5089,7 +5089,7 @@ fn loader_body<'x, 'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, (pc, cal
         e.vm.execution_fatal = false;
         // Only an escape produced by THIS operation may be re-raised below.
         e.vm.mutator.propagated_escape = None;
-        e.vm.propagated_eval_depth = None;
+        e.vm.mutator.propagated_eval_depth = None;
         e.vm.loader.propagate += 1;
         (frame, std::mem::replace(&mut e.vm.eval_depth, e.depth_base + e.frames.len()))
     });
@@ -5109,8 +5109,8 @@ fn loader_body<'x, 'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, (pc, cal
                 // nothing has allocated since its engine stored it.
                 if let Some(escape) = e.vm.mutator.propagated_escape.take() {
                     e.escape = Some(escape);
-                    e.escape_hooked = std::mem::take(&mut e.vm.propagated_escape_hooked);
-                    e.failed_eval_depth = e.vm.propagated_eval_depth.take();
+                    e.escape_hooked = std::mem::take(&mut e.vm.mutator.propagated_escape_hooked);
+                    e.failed_eval_depth = e.vm.mutator.propagated_eval_depth.take();
                     return false;
                 }
                 if error == "native stack exhausted while compiling Lisp" {

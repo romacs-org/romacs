@@ -1459,14 +1459,14 @@ impl Vm {
     fn arm_regexp_quit(&self) -> ArmedQuit {
         let reached = self.native_quit_reached();
         let inhibit = self.slots[self.quit_slots[1]].value;
-        let presses = reached && std::sync::Arc::strong_count(&self.quit) > 1 && (inhibit == Value::NIL || inhibit == Value::UNBOUND);
+        let presses = reached && std::sync::Arc::strong_count(&self.mutator.quit) > 1 && (inhibit == Value::NIL || inhibit == Value::UNBOUND);
         let debug_events = if reached { self.debug_event_mask() } else { 0 };
-        let inspected = crate::host::inspect_enabled();
+        let inspected = self.mutator.process_signals && crate::host::inspect_enabled();
         if !(presses || debug_events != 0 || inspected) {
             return ArmedQuit(false);
         }
         let armed = Armed {
-            quit: if presses { std::sync::Arc::as_ptr(&self.quit) } else { std::ptr::null() },
+            quit: if presses { std::sync::Arc::as_ptr(&self.mutator.quit) } else { std::ptr::null() },
             debug_events,
             frames: inspected.then_some((&raw const self.mutator.backtrace, &raw const self.symbol_names)),
             probing: true,
@@ -1481,7 +1481,7 @@ impl Vm {
     fn regexp_quit(&mut self, armed: ArmedQuit) -> std::result::Result<(), Fault> {
         let polled = armed.0;
         drop(armed);
-        if !polled || !(self.quit.due() || crate::host::user_signal_waiting(self.debug_event_mask())) {
+        if !polled || !(self.mutator.quit.due() || crate::host::user_signal_waiting(self.debug_event_mask())) {
             return Ok(());
         }
         match self.maybe_quit() {

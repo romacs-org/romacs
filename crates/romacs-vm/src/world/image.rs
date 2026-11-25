@@ -90,9 +90,9 @@ impl Vm {
             ("suspended_stacks", self.stack.depth() == 0),
             ("running_engines", self.running_engines == 0),
             ("gc_holds", self.mutator.gc_holds == 0),
-            ("unwinding", self.unwinding == 0),
-            ("rooted_write", !self.rooted_write),
-            ("deferred_writes", self.deferred_writes.is_empty()),
+            ("unwinding", self.mutator.unwinding == 0),
+            ("rooted_write", !self.mutator.rooted_write),
+            ("deferred_writes", self.mutator.deferred_writes.is_empty()),
             ("unclaimed_caches", self.request_code.unclaimed_caches_empty()),
             // What laying a window out found is this process's: derived,
             // never carried (`DisplayState::laid_empty`).
@@ -404,8 +404,8 @@ mod tests {
         assert!(not_captured(|vm| vm.stack.suspend()).contains("suspended_stacks"));
         assert!(not_captured(|vm| vm.running_engines = 1).contains("running_engines"));
         assert!(not_captured(|vm| vm.mutator.gc_holds = 1).contains("gc_holds"));
-        assert!(not_captured(|vm| vm.rooted_write = true).contains("rooted_write"));
-        assert!(not_captured(|vm| vm.deferred_writes.push((crate::watchers::NativeWrite::set(0, crate::Value::NIL), crate::Value::NIL))).contains("deferred_writes"));
+        assert!(not_captured(|vm| vm.mutator.rooted_write = true).contains("rooted_write"));
+        assert!(not_captured(|vm| vm.mutator.deferred_writes.push((crate::watchers::NativeWrite::set(0, crate::Value::NIL), crate::Value::NIL))).contains("deferred_writes"));
         // A cache slot a builder reserved that no installed code owns.
         assert!(not_captured(|vm| { vm.install_cache(); }).contains("unclaimed_caches"));
         // A window's layout record, derived display state.

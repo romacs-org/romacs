@@ -12,9 +12,9 @@ impl Leaf<'_> {
     #[expect(clippy::inline_always, reason = "vconcat's entry grants it every call: out of line its short call measured +1.4 % instructions:u over the code before the poll, inlined -0.7 %")]
     #[inline(always)]
     pub(crate) fn quittable<T>(&mut self, body: impl FnOnce(&mut Self) -> std::result::Result<T, Fault>) -> std::result::Result<T, Fault> {
-        let outer = std::mem::replace(&mut self.vm.native_quit, true);
+        let outer = std::mem::replace(&mut self.vm.mutator.native_quit, true);
         let result = body(self);
-        self.vm.native_quit = outer;
+        self.vm.mutator.native_quit = outer;
         result
     }
 

@@ -5,7 +5,7 @@
 //! `Mutator`, not a second `Vm`. Fields move here slice by slice; each keeps
 //! its collector class (`tests/no_remote_references.rs`) and is carried in
 //! a world image as it was on `Vm`.
-use crate::{Form, GeneratedName, Let, NameSet, Value, backtrace, regexp, threaded};
+use crate::{Form, GeneratedName, Let, NameSet, Value, backtrace, gap_probe, quit, regexp, threaded, watchers};
 
 /// What one mutator is in the middle of. Reached by field path
 /// (`vm.mutator.FIELD`), never through an accessor, so a borrow of one
@@ -109,4 +109,54 @@ pub(crate) struct Mutator {
     /// The `let` bindings in effect: (variable, saved value, buffer current
     /// when bound, kind).
     pub(crate) dynamic: Vec<(usize, Value, Value, Let)>,
+    // Quitting and the escapes being unwound: the host's `C-g' word, and
+    // what routes a quit or an escape through the engines (quit.rs).
+    /// A primitive Lisp called runs a native loop that stops consistently at
+    /// its polls, so a poll may quit (`Vm::native_poll`, `Leaf::quittable`).
+    /// Off in redisplay, which never unwinds half done, and wherever Rust
+    /// reaches the same loop without a caller that would unwind. Granted at
+    /// a primitive's own entry only, and off in any Lisp or primitive entered
+    /// below it (`Vm::outside_quit_scope`).
+    pub(crate) native_quit: bool,
+    pub(crate) propagated_escape_hooked: bool,
+    pub(crate) propagated_eval_depth: Option<usize>,
+    /// Set immediately before executing an `eval` form; consumed by the engine.
+    pub(crate) propagate_next: bool,
+    /// The host's `C-g', shared with its input thread (quit.rs).
+    pub(crate) quit: std::sync::Arc<quit::QuitSignal>,
+    /// A quit (or `throw-on-input' throw) `maybe_quit' raised from C-g or
+    /// `quit-flag' is unwinding: no `catch' or `condition-case' has ended it
+    /// since. An unwind-protect cleanup that replaces it keeps it set, so
+    /// what leaves an expansion it began in is told apart from an error the
+    /// macro raised after catching a quit (`quit_watched').
+    pub(crate) quit_unwinding: bool,
+    /// The writer notifying watchers is an engine write suspended for it,
+    /// whose own Values the write roots (`threaded::watched_write`).
+    pub(crate) rooted_write: bool,
+    /// A native call's writes its watchers will hear (`watchers.rs`), each with
+    /// the buffer current then, until the engine that called it completes it.
+    /// Never traced: no collection runs while it holds any (`may_collect`).
+    pub(crate) deferred_writes: Vec<(watchers::NativeWrite, Value)>,
+    /// Escapes being unwound, in any engine: routing takes it, the driver gives
+    /// it back. While nonzero no aftermath starts (`Vm::aftermath_held`).
+    pub(crate) unwinding: usize,
+    /// Runs of aftermath in progress (`Vm::run_aftermath'): while nonzero an
+    /// interrupt naming the job waits (`threaded::isolate_quit'), so
+    /// finalizers and `post-gc-hook' never take it.
+    pub(crate) aftermath_runs: usize,
+    /// Whether this is its process's own mutator, the one that takes the
+    /// process's OS signals (`host.rs`'s mailbox: an isolate's interrupt and
+    /// termination, `sigusr1'/`sigusr2' events, the call deadline's slot).
+    /// True for every `Vm` made today; a second mutator in one process (a
+    /// twin, a cooperative thread) is made without it, and reads only its
+    /// own `quit` word.
+    pub(crate) process_signals: bool,
+}
+
+impl Mutator {
+    /// A fresh context: its own `C-g' word, as a hosted VM's
+    /// (`gap_probe::as_hosted`), and its process's OS signals its own.
+    pub(crate) fn new() -> Self {
+        Mutator { quit: gap_probe::as_hosted(std::sync::Arc::default()), process_signals: true, ..Self::default() }
+    }
 }
