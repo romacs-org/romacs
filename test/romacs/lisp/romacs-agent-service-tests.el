@@ -505,6 +505,7 @@ session ID in /p/, delegated by PARENT, its turns done through DONE."
   ;; `romacs-relay stdio' says the caller came over ssh; a via the service
   ;; does not know closes the connection.
   (romacs-agent-service-tests--with
+    (mk "listed" 'idle)
     (romacs-agent-service-start socket)
     (let* ((relay (expand-file-name "service-relay.sock" (file-name-directory socket)))
            (ssh (romacs-agent-service-tests--raw relay))
@@ -767,6 +768,26 @@ a state root of its own, and a service of its own on `socket'."
         (romacs-agent-remote-disconnect)
         (kill-buffer local)
         (when remote (kill-buffer remote))))))
+
+(ert-deftest romacs-agent-client-speaks-over-a-command-s-pipes ()
+  ;; A command's pipes carry the protocol as a socket does (`ssh HOST
+  ;; romacs-relay stdio'): what it says on stderr stays out of the stream,
+  ;; and its exit ends the connection.
+  (let* ((stderr (generate-new-buffer " *rsv-stderr*")) (ended nil)
+         (romacs-agent-client-ended-functions (list (lambda (client) (setq ended client))))
+         (client (romacs-agent-client-connect
+                  (list "sh" "-c" (concat "echo 'Warning: Permanently added' >&2; read hello; "
+                                          "echo '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":"
+                                          "{\"version\":[1,1],\"server\":{\"generation\":\"g\"}}}'; read watch"))
+                  stderr)))
+    (unwind-protect
+        (let ((deadline (+ (float-time) 5)))
+          (while (and (not ended) (< (float-time) deadline)) (accept-process-output nil 0.02))
+          (should (eq ended client))
+          (should (equal (romacs-agent-client-minor client) 1))
+          (should (string-search "Warning" (with-current-buffer stderr (buffer-string)))))
+      (romacs-agent-client-close client)
+      (kill-buffer stderr))))
 
 (ert-deftest romacs-agent-service-a-remote-chat-shows-what-waits ()
   ;; A question the session waits on when its remote chat opens is drawn
