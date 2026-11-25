@@ -278,3 +278,37 @@ fn a_nested_lookup_in_a_filter_survives_moving_collections() {
                (lookup-key meta [?\M-x]) (lookup-key meta [?\M-x ?y]) hits))"#, r#"(["default"] ["child"] ["parent"] ["meta"] 1 5)"#);
     assert!(vm.heap_stats().collections >= collections + 10, "each filter call must collect twice");
 }
+
+/// A filter that changes the width of a character the walk has already
+/// read (Romacs's `aset` may, GNU's refuses) and collects: the walk finds
+/// its next event by its character index in the string as it is now.
+#[test]
+fn a_filter_that_narrows_a_read_character_leaves_the_walk_at_the_next_one() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude_raw().unwrap();
+    vm.set_gc_moving(true);
+    check(&mut vm, r#"(let* ((key (copy-sequence "éab")) (hits 0) (m (make-sparse-keymap)) (p (make-sparse-keymap)))
+  (define-key p "ab" 'changed-ok)
+  (define-key m (vector ?é) (list 'menu-item "x" p :filter (lambda (d) (setq hits (1+ hits)) (aset key 0 ?x) (garbage-collect) d)))
+  (list (lookup-key m key) (append key nil) hits))"#, "(changed-ok (120 97 98) 1)");
+}
+
+/// The terminal fast path's lookups (`lookup_one_event`) put nothing on the
+/// Lisp heap: the event, or [remap EVENT], is walked where it is held.
+#[test]
+fn lookup_one_event_allocates_nothing_on_the_lisp_heap() {
+    let mut vm = Vm::new();
+    check(&mut vm, "(progn (setq m (make-sparse-keymap)) (define-key m [f5] 'five) (define-key m [remap five] 'six) (define-key m [?\\M-x] 'meta-x) nil)", "nil");
+    let map = vm.slots[vm.names["m"]].value;
+    let (f5, five) = (vm.intern("f5"), vm.intern("five"));
+    let meta_x = Value::integer((1 << 27) | i64::from(b'x')).unwrap();
+    let cases = [(f5, false, "five"), (five, true, "six"), (meta_x, false, "meta-x")];
+    // A first lookup may cache an event symbol's elements on its plist.
+    for (event, remap, _) in cases { vm.lookup_one_event(map, event, remap, !remap).unwrap(); }
+    for (event, remap, want) in cases {
+        let before = vm.allocation.allocated;
+        let binding = vm.lookup_one_event(map, event, remap, !remap).unwrap();
+        assert_eq!(vm.display(binding), Ok(want.to_owned()));
+        assert_eq!(vm.allocation.allocated, before, "lookup_one_event allocated for {want}");
+    }
+}
