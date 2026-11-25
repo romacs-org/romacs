@@ -184,12 +184,14 @@ by id of `romacs-agent-service--subscription's)."
 
 (defun romacs-agent-service--transport (rpc message)
   "Bind RPC, a relay's connection, to the caller MESSAGE names: its first
-message, `agents/transport'.  Any other first message closes it."
-  (let ((params (gethash "params" message)))
-    (if (and (equal (gethash "method" message) "agents/transport") (hash-table-p params)
+message, `agents/transport', whose via is the tailnet's or ssh's.  Any
+other first message closes it."
+  (let* ((params (gethash "params" message))
+         (via (and (hash-table-p params) (car (member (gethash "via" params) '("tailnet" "ssh"))))))
+    (if (and (equal (gethash "method" message) "agents/transport") via
              (stringp (gethash "login" params)))
         (setf (romacs-agent-service--peer-identity (romacs-agent-rpc-data rpc))
-              (romacs-agent-rpc-object "via" "tailnet" "login" (gethash "login" params)
+              (romacs-agent-rpc-object "via" via "login" (gethash "login" params)
                                        "peer" (let ((peer (gethash "peer" params))) (if (stringp peer) peer :null))))
       (romacs-agent-rpc-close rpc))))
 

@@ -501,6 +501,23 @@ session ID in /p/, delegated by PARENT, its turns done through DONE."
       (should-not (process-get unnamed 'lines))
       (delete-process named))))
 
+(ert-deftest romacs-agent-service-binds-an-ssh-caller ()
+  ;; `romacs-relay stdio' says the caller came over ssh; a via the service
+  ;; does not know closes the connection.
+  (romacs-agent-service-tests--with
+    (romacs-agent-service-start socket)
+    (let* ((relay (expand-file-name "service-relay.sock" (file-name-directory socket)))
+           (ssh (romacs-agent-service-tests--raw relay))
+           (other (romacs-agent-service-tests--raw relay)))
+      (process-send-string ssh "{\"jsonrpc\":\"2.0\",\"method\":\"agents/transport\",\"params\":{\"via\":\"ssh\",\"login\":\"me\",\"peer\":\"192.0.2.7 51234\"}}\n")
+      (process-send-string ssh "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"agents/hello\",\"params\":{\"protocol\":\"romacs-agents\",\"version\":[1,0]}}\n")
+      (should (wait (process-get ssh 'lines)))
+      (should (equal (json-serialize (gethash "identity" (gethash "result" (car (process-get ssh 'lines)))))
+                     "{\"via\":\"ssh\",\"login\":\"me\",\"peer\":\"192.0.2.7 51234\"}"))
+      (process-send-string other "{\"jsonrpc\":\"2.0\",\"method\":\"agents/transport\",\"params\":{\"via\":\"local\",\"login\":\"me\"}}\n")
+      (should (wait (not (process-live-p other))))
+      (delete-process ssh))))
+
 ;;; History
 
 (defun romacs-agent-service-tests--line (seq key value)
