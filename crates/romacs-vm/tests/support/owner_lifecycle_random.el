@@ -15,6 +15,10 @@
   (when (and (= id 1) (not (memq 3 rw-exited))) (push 3 rw-exited)))
 
 (defun rw-native ()
+  ;; A simulated process does not need wall-clock grace before SIGKILL.
+  ;; Waiting after the fixture delivered it indicates a broken model.
+  (setq isolate-kill-timeout 0)
+  (fset 'romacs--isolate-wait (lambda (&rest _) (error "virtual transport cannot wait")))
   (fset 'romacs--isolate-pid (lambda (id) (unless (= id 3) (+ 200 id))))
   (fset 'romacs--isolate-signal
         (lambda (id signal)
