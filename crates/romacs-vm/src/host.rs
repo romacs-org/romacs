@@ -3010,9 +3010,35 @@ pub fn other_threads() -> io::Result<Vec<i32>> {
 /// its own with `forked_child_reset`.
 // HOST(acquisition): starts a child process (a spawn)
 pub fn fork_isolate() -> io::Result<i32> {
-    let pid = fork()?;
-    if pid == 0 { FORKED.store(true, std::sync::atomic::Ordering::SeqCst); }
-    Ok(pid)
+    // Every signal is blocked across the fork: the parent puts its mask back
+    // at once, the child only at the end of `forked_child_reset`, so a signal
+    // sent the child meanwhile (its spawner's held SIGTERM, at the fork
+    // report) waits in the kernel instead of being cleared with the zygote's.
+    let saved = sys::block_signals();
+    let pid = fork();
+    match pid {
+        Ok(0) => {
+            FORKED.store(true, std::sync::atomic::Ordering::SeqCst);
+            *FORK_MASK.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(saved);
+        }
+        _ => sys::restore_signals(&saved),
+    }
+    pid
+}
+
+/// In a child `fork_isolate` made: the signal mask to put back once its
+/// reset is done. Only the forking thread touches it, the child's only one.
+static FORK_MASK: std::sync::Mutex<Option<sys::SignalMask>> = std::sync::Mutex::new(None);
+
+/// The signal mask a forked child puts back when its reset ends, however
+/// it ends (`forked_child_reset`).
+struct RestoreForkMask(Option<sys::SignalMask>);
+
+impl Drop for RestoreForkMask {
+    // HOST(pure): this thread's own signal mask, which no other party observes, put back
+    fn drop(&mut self) {
+        if let Some(mask) = self.0.take() { sys::restore_signals(&mask); }
+    }
 }
 
 /// fork(2) from a process whose other threads run on (a mark twin's,
@@ -3053,10 +3079,20 @@ pub fn forked_child() -> bool {
 // HOST(acquisition): in a forked child: its own wake pipe and handlers, then its name and death signal
 pub fn forked_child_reset(zygote: i32) -> io::Result<()> {
     use std::sync::atomic::Ordering;
+    // What was sent the child since the fork is its own: delivered once the
+    // reset is done, however it ends.
+    let _restore = RestoreForkMask(FORK_MASK.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take());
     set_process_name("romacs-worker")?;
+    // Every signal the zygote had pending is the zygote's, not the child's:
+    // its quits, its termination, its user signals (input the zygote never
+    // read), and an inspection asked of it.
     INTERRUPT.store(false, Ordering::SeqCst);
     TERMINATE.store(false, Ordering::SeqCst);
     TERMINATE_QUIT.store(false, Ordering::SeqCst);
+    TERMINATION.store(0, Ordering::SeqCst);
+    for count in &USER_SIGNALS { count.store(0, Ordering::SeqCst); }
+    USER_SIGNAL_ARRIVED.store(false, Ordering::SeqCst);
+    inspect_forget_inherited();
     for end in [WAKE_READ.swap(-1, Ordering::SeqCst), WAKE_WRITE.swap(-1, Ordering::SeqCst)] {
         if end >= 0 { let _ = sys::close(end); }
     }
@@ -3951,6 +3987,15 @@ pub fn inspect_watch() {
 }
 /// The stall watchdog asks for inspections (`inspect_watch').
 static INSPECT_WATCHED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// In a child just forked: no inspection is pending (one asked of the zygote
+/// is the zygote's), and none is listened or watched for, since the threads
+/// that did so are not in the child.
+fn inspect_forget_inherited() {
+    use std::sync::atomic::Ordering::SeqCst;
+    INSPECT_SERVED.store(INSPECT_REQUESTED.load(SeqCst), SeqCst);
+    INSPECT_ENABLED.store(false, SeqCst);
+    INSPECT_WATCHED.store(false, SeqCst);
+}
 /// Raise a request, as the stall watchdog does from its own thread, for
 /// the target's evaluator to answer at its next safe point: its generation.
 // HOST(pure): raises a request between this process's threads: no host access

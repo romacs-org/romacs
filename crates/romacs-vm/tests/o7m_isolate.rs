@@ -1,6 +1,7 @@
 //! O7m C3 through the master and worker Lisp over `SOCK_SEQPACKET`.
-//! The proxy forwards the worker hello under the launcher name, then
-//! replaces the frozen payload in a selected local test frame.
+//! The proxy forwards the worker's hello as it is (it names the build,
+//! which the launcher's worker shares), then replaces the frozen payload in
+//! a selected local test frame.
 #[path = "support/own_test.rs"]
 mod own_test;
 
@@ -20,7 +21,6 @@ import socket
 import subprocess
 import sys
 
-launcher = __file__
 args = sys.argv[1:]
 if '--parent' in args:
     args[args.index('--parent') + 1] = str(os.getpid())
@@ -46,11 +46,6 @@ with subprocess.Popen([worker, *args], stdin=peer) as process:
                    if (level, ty) == (socket.SOL_SOCKET, socket.SCM_RIGHTS)
                    for fd in array.array('i', data)]
             try:
-                if source is relay and kind == 1:
-                    hello = packet[10:].split(b'\n', 3)
-                    assert hello[2] == os.fsencode(os.path.realpath(worker))
-                    hello[2] = os.fsencode(os.path.realpath(launcher))
-                    packet = packet[:10] + b'\n'.join(hello)
                 if generation == 2 and ((mode == 'bad-request' and source is master and kind == 2)
                                     or (mode == 'bad-result' and source is relay and kind == 3)):
                     with open(log, 'a') as evidence:

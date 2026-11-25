@@ -506,7 +506,7 @@ fn call_process_s_wait_quits_and_interrupts_the_child() {
 
 /// A ready fd distinguishes an actual kernel poll from an immediate, empty
 /// wake for a quit or debugger event that the wait cannot take.
-fn assert_wait_reads_ready_fd(vm: &Vm, wait: crate::quit::WaitFor) {
+fn assert_wait_reads_ready_fd(vm: &mut Vm, wait: crate::quit::WaitFor) {
     use std::io::Write;
     use std::os::fd::AsRawFd;
     let (read, mut write) = std::os::unix::net::UnixStream::pair().unwrap();
@@ -612,7 +612,7 @@ fn call_process_deadlines_and_debug_events_wake_their_own_waits() {
 
     // With the second debug event pending, the stop still asks the kernel
     // for ready FDs. An unconditional wake would have returned zero here.
-    assert_wait_reads_ready_fd(&vm, crate::quit::WaitFor::ChildStop);
+    assert_wait_reads_ready_fd(&mut vm, crate::quit::WaitFor::ChildStop);
     assert_eq!(vm.quit_variables()[1], Value::NIL, "the first debugger event cleared inhibition");
     assert!(vm.take_debug_event(), "the second debugger event is pending for Lisp");
     assert!(!vm.take_debug_event(), "each debugger event was delivered once");

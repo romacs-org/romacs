@@ -386,6 +386,20 @@ pub(super) fn alarm(seconds: u32) {
     unsafe { libc::alarm(seconds) };
 }
 
+/// This thread's signal mask, as `block_signals` saved it.
+pub(super) struct SignalMask(libc::sigset_t);
+
+/// Block every signal on this thread: the mask before, for `restore_signals`.
+pub(super) fn block_signals() -> SignalMask {
+    SignalMask(set_signal_mask(None))
+}
+
+/// Put back MASK, which `block_signals` saved: a signal that arrived while
+/// it was blocked is delivered now.
+pub(super) fn restore_signals(mask: &SignalMask) {
+    set_signal_mask(Some(&mask.0));
+}
+
 /// F with every signal blocked on this thread, the mask put back however F
 /// ends.
 pub(super) fn with_signals_blocked<T>(f: impl FnOnce() -> T) -> T {

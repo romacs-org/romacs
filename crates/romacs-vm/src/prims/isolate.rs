@@ -24,14 +24,16 @@ fn isolate_post(cx, isolate: Value, kind: Value, generation: Value, value: Value
     Ok(Value::NIL)
 }}
 
-// (romacs--isolate-wait TIMEOUT): wait up to TIMEOUT seconds (nil: as
-// long as it takes, 0: look) for a frame or a worker's death; t if any.
+// (romacs--isolate-wait TIMEOUT &optional PROCESSES): wait up to TIMEOUT
+// seconds (nil: as long as it takes, 0: look) for a frame or a worker's
+// death, or with PROCESSES for any process's output or status too; t if
+// any. In a worker a ping is answered here and is no news.
 defsubr! { name = "romacs--isolate-wait", gnu = "romacs:isolate", effect = Global,
-fn isolate_wait(cx, timeout: Value) {
+fn isolate_wait(cx, timeout: Value; optional processes: Value) {
     let timeout = if timeout == Value::NIL { None } else {
         Some(cx.float_value(timeout).or_else(|_| timeout.integer_value().map(|n| n as f64).ok_or_else(|| Fault::Wrong("numberp", timeout)))?)
     };
-    cx.isolate_wait(timeout.map(|s| std::time::Duration::from_secs_f64(s.max(0.0))))
+    cx.isolate_wait(timeout.map(|s| std::time::Duration::from_secs_f64(s.max(0.0))), processes != Value::NIL)
 }}
 
 // (romacs--isolate-take ID): the next frame from peer ID as (KIND
@@ -44,7 +46,8 @@ fn isolate_take(cx, isolate: Value) {
     cx.isolate_take(id(cx, isolate)?)
 }}
 
-// (romacs--isolate-signal ID SIGNAL): SIGNAL (a number) to worker ID.
+// (romacs--isolate-signal ID SIGNAL): SIGNAL (a number) to worker ID; one
+// its zygote has not reported yet gets the last asked once it is.
 defsubr! { name = "romacs--isolate-signal", gnu = "romacs:isolate", effect = Global,
 fn isolate_signal(cx, isolate: Value, signal: Integer) {
     cx.isolate_signal(id(cx, isolate)?, signal.0)
@@ -122,11 +125,12 @@ fn isolate_terminated_p(cx) {
     Ok(if (cx.process_signals() && crate::host::terminate_pending()) || cx.isolate_parent_closed() { Value::TRUE } else { Value::NIL })
 }}
 
-// (romacs--isolate-hello-check TEXT PROGRAM): why a worker's hello TEXT
-// failed validation, or nil if its protocol and PROGRAM match.
+// (romacs--isolate-hello-check TEXT): why a worker's hello TEXT failed
+// validation, or nil if its protocol and its build (its binary identity) are
+// this process's own: a fork's is its zygote's, wherever its executable lies.
 defsubr! { name = "romacs--isolate-hello-check", gnu = "romacs:isolate", effect = Reads,
-fn isolate_hello_check(cx, text: Value, program: Value) {
-    cx.isolate_hello_check(text, program)
+fn isolate_hello_check(cx, text: Value) {
+    cx.isolate_hello_check(text)
 }}
 
 // (romacs--isolate-hello-refusal TEXT): the reason a worker's hello TEXT
@@ -245,4 +249,30 @@ fn isolate_pss(cx; optional isolate: Value) {
 defsubr! { name = "romacs--isolate-pool-memory", gnu = "romacs:isolate", effect = Global,
 fn isolate_pool_memory(cx) {
     Value::integer(cx.isolate_pool_memory() as i64).map_err(Fault::Error)
+}}
+
+// (romacs--owner-become): in a child forked to be an owner (lisp/vm/owner.el),
+// it serves for the session: its job budget goes, and every wait it makes
+// answers its spawner's pings. An error in a VM that is no worker.
+defsubr! { name = "romacs--owner-become", gnu = "romacs:owner", effect = Global,
+fn owner_become(cx) {
+    cx.owner_become()?;
+    Ok(Value::NIL)
+}}
+
+// (romacs--owner-ping ID DELAY BUSY): owner ID's liveness, judged now at
+// DELAY seconds (`owner-wedge-delay'), its next ping sent if one is due,
+// BUSY saying a call to it is outstanding: (WEDGED NEXT SENT ANSWERED),
+// NEXT the seconds until it needs another look, or nil. A DELAY that is
+// no number of seconds from 0.01 to under a million is `args-out-of-range'.
+defsubr! { name = "romacs--owner-ping", gnu = "romacs:owner", effect = Global,
+fn owner_ping(cx, isolate: Value, delay: Value, busy: Value) {
+    let seconds = match delay.integer_value() {
+        Some(seconds) => i32::try_from(seconds).map_or(f64::INFINITY, f64::from),
+        None => cx.float_value(delay).map_err(|_| Fault::Wrong("numberp", delay))?,
+    };
+    if !(0.01..1e6).contains(&seconds) {
+        return Err(Fault::Range3(delay, cx.float(0.01), cx.float(1e6)));
+    }
+    cx.owner_ping(id(cx, isolate)?, std::time::Duration::from_secs_f64(seconds), busy != Value::NIL)
 }}
