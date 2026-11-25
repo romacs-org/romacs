@@ -121,8 +121,8 @@
   "rows_wrapped": 0,
   "display_instructions_p90": 4180000,
   "step_instructions_note": "reported, not held: a full collection marks the whole session, world and libraries, and what the session ran before moves it (romacs#403); above_instructions holds what the chat adds",
-  "above_instructions": 3250000,
-  "above_instructions_note": "the highest of six forge runs (2.90-2.95M above the agents loaded, its baseline measured once settled, as a step is) and a tenth",
+  "above_instructions": 3650000,
+  "above_instructions_note": "the highest merge-queue run seen (3.31M) and a tenth: the figure is bimodal across runs of one tree (2.1-3.3M), so a tight bar bounces at random until it is made deterministic (romacs#425)",
   "windows_rebuilt_note": "a chat opens in the selected window (romacs-agent-display-function, pop-to-buffer-same-window), not a second one: one window rebuilt and laid out where two were"
  },
  "cursor-move": {
