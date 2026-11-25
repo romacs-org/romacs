@@ -74,9 +74,10 @@
     (puthash "remote" row (romacs-agent-client-rows client))
     (cons source (romacs-agent-remote--mirror source row))))
 
-(defun romacs-agent-summary-readers--board (&optional folded)
+(cl-defun romacs-agent-summary-readers--board (&optional folded (project "/p/one"))
   (with-temp-buffer
     (romacs-agent-board-mode)
+    (setq romacs-agent-board--project project)
     (setq romacs-agent-board--folds (make-hash-table :test #'equal))
     (puthash "parent" (if folded 'closed 'open) romacs-agent-board--folds)
     (romacs-agent-board--render (current-buffer) 100)
@@ -115,7 +116,7 @@
     (funcall read)))
 
 (defconst romacs-agent-summary-readers--golden-board
-  '(("/p/one" nil "one  1 needs approval · 1 asks you · 1 failed · 1 working · 1 waiting on its workers · 1 waiting on…")
+  '(("/p/one" nil "▌ one  1 needs approval · 1 asks you · 1 failed · 1 working · 1 waiting on its workers · 1 waiting …")
     ("approval" approval "  Needs ap… approval                                                         claude · reported  now")
     ("question" question "  Asks you  question                                                         claude · reported  now")
     ("failed" failed "  Failed    failed                                                           claude · reported  now")
@@ -129,7 +130,7 @@
     ("selection" idle "            selection                                                        claude · reported  now")
     ("cancelled" ended "  Ended     cancelled                                                        claude · reported  now")))
 (defconst romacs-agent-summary-readers--golden-folded
-  '(("/p/one" nil "one  1 needs approval · 1 asks you · 1 failed · 1 working · 1 waiting on its workers · 1 waiting on…")
+  '(("/p/one" nil "▌ one  1 needs approval · 1 asks you · 1 failed · 1 working · 1 waiting on its workers · 1 waiting …")
     ("approval" approval "  Needs ap… approval                                                         claude · reported  now")
     ("question" question "  Asks you  question                                                         claude · reported  now")
     ("failed" failed "  Failed    failed                                                           claude · reported  now")
@@ -142,7 +143,7 @@
     ("selection" idle "            selection                                                        claude · reported  now")
     ("cancelled" ended "  Ended     cancelled                                                        claude · reported  now")))
 (defconst romacs-agent-summary-readers--golden-remote
-  '(("/remote/project" nil "project  /remote/project  1 working")
+  '(("/remote/project" nil "▌ project  /remote/project  1 working")
     ("remote" working "  Working   remote                                         Edit              codex · remote     15s")))
 (defconst romacs-agent-summary-readers--golden-annotations
   '("  Idle claude · reported one"
@@ -188,7 +189,8 @@
     (should (equal (romacs-agent-summary-readers--board) romacs-agent-summary-readers--golden-board))
     (should (equal (romacs-agent-summary-readers--board t) romacs-agent-summary-readers--golden-folded))
     (let ((romacs-agent-board-source (car (romacs-agent-summary-readers--remote))))
-      (should (equal (romacs-agent-summary-readers--board) romacs-agent-summary-readers--golden-remote)))
+      (should (equal (romacs-agent-summary-readers--board nil "/remote/project")
+                     romacs-agent-summary-readers--golden-remote)))
     (should-not (gethash "stored" romacs-agent--sessions))))
 
 (ert-deftest romacs-agent-summary-readers-golden-labels ()
@@ -262,7 +264,8 @@
                     (lambda () (romacs-agent-summary-readers--board t)))
                    romacs-agent-summary-readers--golden-folded))
     (let ((romacs-agent-board-source (car (romacs-agent-summary-readers--remote))))
-      (should (equal (romacs-agent-summary-readers--with-trap #'romacs-agent-summary-readers--board)
+      (should (equal (romacs-agent-summary-readers--with-trap
+                      (lambda () (romacs-agent-summary-readers--board nil "/remote/project")))
                      romacs-agent-summary-readers--golden-remote)))))
 
 (defun romacs-agent-summary-readers--check-trapped-views (read expected)
