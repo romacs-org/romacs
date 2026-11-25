@@ -390,15 +390,15 @@ its source says it, or nil."
 \(`romacs-agent-log-desktop-restore'): it is not, as of no source here."
   nil)
 
-(defun romacs-agent-log--set-session (session &optional defer-header)
+(defun romacs-agent-log--set-session (session)
   "Make SESSION the current chat's, named by its title; the session this
 editor's session commands act on (`romacs-agent-ui--session'), when they
-act on its source's.  With DEFER-HEADER, the current batch refreshes it."
+act on its source's."
   (setq romacs-agent-log--session session romacs-agent-log--session-id (romacs-agent-id session))
   (setq-local romacs-agent-ui--session (and (romacs-agent-log--commands-p) session))
   (let ((name (romacs-agent-log--buffer-name session)))
     (unless (equal (buffer-name) name) (rename-buffer name t)))
-  (unless defer-header (romacs-agent-log--header-show)))
+  (romacs-agent-log--header-show))
 
 ;;; Drawing
 
@@ -1446,8 +1446,9 @@ on RET."
     ('exit (romacs-agent-log--exit session event))
     ('renewed (romacs-agent-log--note event (if-let* ((provider (plist-get event :provider)))
                                                 (format "switched to %s: a new conversation, briefed on this one" provider)
+                                              (if (equal (plist-get event :why) "clear") "cleared: a new conversation"
                                               (format "renewed: a new conversation%s"
-                                                      (if-let* ((why (plist-get event :why))) (format " (%s)" why) "")))))
+                                                      (if-let* ((why (plist-get event :why))) (format " (%s)" why) ""))))))
     ('forked (romacs-agent-log--note event (format "forked from %s" (or (plist-get event :title) (plist-get event :from)))))
     ('rolled-back (romacs-agent-log-turns-rolled-back event))
     ('replied (romacs-agent-log--note event (format "replied to %s" (plist-get event :message))))
@@ -1627,29 +1628,6 @@ HISTORY says the chat shows a read-only transcript."
 
 ;;; Events
 
-(defvar-local romacs-agent-log--chrome-timer nil
-  "The pending refresh of this chat's separator and header.")
-
-(defun romacs-agent-log--chrome-soon ()
-  "Refresh the current chat's queue, separator and header after this batch."
-  (unless romacs-agent-log--chrome-timer
-    (let ((buffer (current-buffer)) timer)
-      (setq timer
-            (run-at-time
-             0 nil
-             (lambda ()
-               (when (buffer-live-p buffer)
-                 (with-current-buffer buffer
-                   (when (eq timer romacs-agent-log--chrome-timer)
-                     (setq romacs-agent-log--chrome-timer nil)
-                     (save-restriction
-                       (widen)
-                       (romacs-agent-log--separator))
-                     (when (eq (car romacs-agent-log--state) 'working)
-                       (romacs-agent-log--tick-start))
-                     (romacs-agent-log--header-show)))))))
-      (setq romacs-agent-log--chrome-timer timer))))
-
 (defun romacs-agent-log--on-event (session event)
   "Draw SESSION's EVENT in its chat, once: a record drawn already is not."
   (when-let* ((buffer (gethash (romacs-agent-id session) romacs-agent-log--chats))
@@ -1666,11 +1644,13 @@ already is not.  Each source's live events come here."
       (unless (and (eq session romacs-agent-log--session)
                    (equal (romacs-agent-title session) romacs-agent-log--title))
         (setq romacs-agent-log--title (romacs-agent-title session))
-        (romacs-agent-log--set-session session t))
+        (romacs-agent-log--set-session session))
       (romacs-agent-log-draw session event)
       (romacs-agent-log--progress event)
       (when (and seq (plist-get event :last)) (setq romacs-agent-log--seq seq))
-      (romacs-agent-log--chrome-soon))))
+      (romacs-agent-log--separator)
+      (when (eq (car romacs-agent-log--state) 'working) (romacs-agent-log--tick-start))
+      (romacs-agent-log--header-show))))
 
 (add-hook 'romacs-agent-event-functions #'romacs-agent-log--on-event)
 
@@ -1891,22 +1871,33 @@ after a batch of events remade sessions' states (their workers')."
     (with-current-buffer (window-buffer window)
       (when (derived-mode-p 'romacs-agent-log-mode)
         (romacs-agent-log--activity-refresh)
-        (romacs-agent-log--chrome-soon)))))
+        (romacs-agent-log--header-show)))))
 
 (add-hook 'romacs-agent-ui-changed-hook #'romacs-agent-log--headers-refresh)
 
+(defcustom romacs-agent-display-function #'pop-to-buffer-same-window
+  "How an agent buffer is shown (a chat, a transcript, a call's output):
+a function called with the buffer, which selects a window showing it.
+The default takes the selected window, never another or a new one."
+  :type 'function :group 'romacs-agent)
+
+(defun romacs-agent-display (buffer &optional action)
+  "Show agent BUFFER: as `pop-to-buffer' does with ACTION when given, else
+by `romacs-agent-display-function'."
+  (if action (pop-to-buffer buffer action) (funcall romacs-agent-display-function buffer)))
+
 (defun romacs-agent-log-show (session &optional action source)
-  "Show SESSION's chat, as `pop-to-buffer' does with ACTION; SOURCE's
+  "Show SESSION's chat (`romacs-agent-display' with ACTION); SOURCE's
 session, this editor's by default."
   (let ((buffer (romacs-agent-log-chat session nil source)))
-    (pop-to-buffer buffer action)
+    (romacs-agent-display buffer action)
     (romacs-agent-log--show-end (selected-window))
     (romacs-agent-log-source-seen romacs-agent-log--source session)
     buffer))
 
 
 (defun romacs-agent-show (session &optional action source)
-  "Show SESSION's chat, as `pop-to-buffer' does with ACTION; SOURCE's
+  "Show SESSION's chat (`romacs-agent-display' with ACTION); SOURCE's
 session, this editor's by default."
   (romacs-agent-log-show session action source))
 ;; A session outlives the editor in its supervisor: a restored chat
@@ -2053,7 +2044,11 @@ new one."
       (when (and romacs-agent-log--sending (equal romacs-agent-log--sending (plist-get answer :draft-id)))
         (romacs-agent-log--sending-ended)
         (when (eq (plist-get answer :reason) 'conflict) (setq romacs-agent-log--draft-id nil))
-        (if (eq (plist-get answer :status) 'accepted) (romacs-agent-log--sent) (romacs-agent-log--not-sent answer))))))
+        (if (eq (plist-get answer :status) 'accepted)
+            (progn (romacs-agent-log--sent)
+                   ;; A slash command says what it did.
+                   (when-let* ((said (plist-get answer :message))) (message "%s" said)))
+          (romacs-agent-log--not-sent answer))))))
 
 (defun romacs-agent-log--submit (kind)
   "Submit the composer's draft as KIND (`romacs-agent-submit'), under its
@@ -2228,7 +2223,7 @@ REASON when given."
 (defun romacs-agent-log--open-delegated-thread (id)
   "Open the delegated thread with ID in this window."
   (if-let* ((child (romacs-agent-get id)))
-      (romacs-agent-show child '(display-buffer-same-window))
+      (romacs-agent-show child)
     (user-error "That delegated thread is no longer available")))
 
 (defun romacs-agent-log-copy-job-unit ()
@@ -2258,7 +2253,7 @@ REASON when given."
                (when (cdr full) (insert "\nOutput:\n" (cdr full) "\n"))
                (goto-char (point-min)))
              (view-mode 1)
-             (pop-to-buffer (current-buffer)))))
+             (romacs-agent-display (current-buffer)))))
         (t (user-error "Nothing to open here"))))
 
 (defun romacs-agent-log-copy ()

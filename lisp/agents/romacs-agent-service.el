@@ -951,6 +951,10 @@ refusal as the protocol's error for its reason
                  (list (plist-get answer :message))))
         ((eq (plist-get answer :status) 'unconfirmed) (romacs-agent-rpc-object "state" "unconfirmed"))
         ((plist-get answer :queued) (romacs-agent-rpc-object "state" "queued" "queued" (plist-get answer :queued)))
+        ;; A slash command ran: what it said goes with it.
+        ((plist-get answer :command)
+         (apply #'romacs-agent-rpc-object "state" "written" "command" (plist-get answer :command)
+                (and (plist-get answer :message) (list "message" (plist-get answer :message)))))
         (t (romacs-agent-rpc-object "state" "written"))))
 
 (defun romacs-agent-service--send (rpc params)

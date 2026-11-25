@@ -1330,3 +1330,6 @@ fn a_store_is_refused_under_a_home_or_cache_others_could_replace() {
     assert_eq!(outcome(child_of(ANCESTORS, "launch", &store).env("HOME", &home).env("XDG_CACHE_HOME", home.join("cache"))), restored());
     let _ = std::fs::remove_dir_all(&scratch);
 }
+
+#[path = "support/o7m_written_image.rs"]
+mod written_bits;

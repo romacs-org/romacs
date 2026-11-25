@@ -155,7 +155,7 @@ none, its whole thread, an imported transcript's part with it."
                            when (eq (plist-get (car rest) :type) 'renewed) do (setq last rest)
                            finally return last)))
       (let ((brief (plist-get (car tail) :brief)))
-        (append (and (stringp brief) (list (list :role 'context :text (string-trim brief))))
+        (append (and (stringp brief) (not (string-blank-p brief)) (list (list :role 'context :text (string-trim brief))))
                 (romacs-agent-handoff-items (cdr tail))))
     (romacs-agent-handoff-items (romacs-agent-handoff-thread session events))))
 
@@ -174,12 +174,14 @@ none, its whole thread, an imported transcript's part with it."
 message carrying a brief of this one; WHY says what for (journaled).
 CONTINUATION, when given, is the next prompt if no message is waiting.
 TARGET, a plist (:harness :provider :model :effort), is another harness
-to go on in (`romacs-agent-switch-harness').  Call THEN, when given, with
+to go on in (`romacs-agent-switch-harness'); (:clear t), a conversation
+of its own harness with nothing carried over (`romacs-agent-clear-soon').
+Neither asks the harness for a note.  Call THEN, when given, with
 the outcome: (:done NATIVE), NATIVE the new conversation's id or nil
 until its harness names it, or (:error MESSAGE).  Refused at once
 \(`user-error') while SESSION is busy, held, or its harness cannot renew
 this conversation."
-  (if target (romacs-agent-renew--check-switch session target) (romacs-agent-renew--check session))
+  (if (plist-get target :harness) (romacs-agent-renew--check-switch session target) (romacs-agent-renew--check session))
   (let* ((token (list why continuation target))
          (then (or then #'ignore))
          (fail (lambda (message)
@@ -209,14 +211,17 @@ this conversation."
 Call THEN with the outcome while TOKEN still owns the handoff."
   (when (eq (romacs-agent-renew--holder session) token)
     (let* ((target (nth 2 token))
-           (from (progn (unless target (romacs-agent-renew--check-obstacle session))
+           (switch (plist-get target :harness))
+           (from (progn (unless switch (romacs-agent-renew--check-obstacle session))
                         (romacs-agent--native-id session)))
-           (brief (romacs-agent-handoff-brief
-                   (if note (cons (list :role 'context :text (concat romacs-agent-renew--note-head note)) items)
-                     items)
-                   from "" nil romacs-agent-renew--head))
-           (native (funcall (if target (plist-get (romacs-agent--driver-of (plist-get target :harness)) :renew)
-                                  (romacs-agent--harness-get session :renew))
+           ;; Cleared, the new conversation starts with nothing of this one.
+           (brief (if (plist-get target :clear) ""
+                    (romacs-agent-handoff-brief
+                     (if note (cons (list :role 'context :text (concat romacs-agent-renew--note-head note)) items)
+                       items)
+                     from "" nil romacs-agent-renew--head)))
+           (native (funcall (if switch (plist-get (romacs-agent--driver-of switch) :renew)
+                              (romacs-agent--harness-get session :renew))
                             session)))
       (romacs-agent-renew--await
        session token
@@ -231,7 +236,7 @@ Call THEN with the outcome while TOKEN still owns the handoff."
                                          "why" (or (car token) :null) "brief" brief "summary" source
                                          "continue" (or (nth 1 token) :null)
                                          "context" (or (romacs-agent-context-used session) :null)
-                                         (and target (romacs-agent-renew--target-fields target)))))))
+                                         (and switch (romacs-agent-renew--target-fields target)))))))
 
 ;;; Another harness
 
@@ -614,8 +619,9 @@ names it), and it is no fork now: its next run begins the new one."
 ;;; At its turn's end
 
 (defvar romacs-agent-renew--wanted (make-hash-table :test #'eq :weakness 'key)
-  "Sessions to renew once their turn ends: to WHY, or to (:switch
-PROVIDER MODEL EFFORT NEXT) for a switch (`romacs-agent-switch-harness-soon').")
+  "Sessions to renew once their turn ends: to WHY, to (:switch PROVIDER
+MODEL EFFORT NEXT) for a switch (`romacs-agent-switch-harness-soon'), or
+to (:clear) to clear (`romacs-agent-clear-soon').")
 
 (defun romacs-agent-renew-soon (session &optional why)
   "Renew SESSION now when it is idle, else once its running turn ends.
@@ -640,6 +646,43 @@ running turn ends.  Return `now' or `soon'."
       (progn (romacs-agent-switch-harness session provider model effort next) 'now)
     (puthash session (list :switch provider model effort next) romacs-agent-renew--wanted)
     'soon))
+
+(defun romacs-agent-clear-soon (session)
+  "Clear SESSION's conversation: go on in a new one of its harness with
+nothing of this one carried over, its id, chat and task the same
+\(`romacs-agent-renew'): now when it is idle, else once its running turn
+ends.  Return `now' or `soon'."
+  (when (romacs-agent--per-turn-p session)
+    (user-error "%s starts each turn on its own: send its next message to go on" (romacs-agent-title session)))
+  ;; Its records folded first: whether its conversation must stay is theirs.
+  (when (romacs-agent--folding-p session)
+    (user-error "Session %s is still loading: clear it in a moment" (romacs-agent-title session)))
+  (romacs-agent-renew--check-obstacle session)
+  (cond ((or (romacs-agent--held-p session) (romacs-agent-startup-pending session)
+             (eq (romacs-agent-state session) 'starting))
+         (user-error "Session %s is starting, renewing or rolling back: clear it after"
+                     (romacs-agent-title session)))
+        ;; Only a turn's end is waited for: it comes.
+        ((memq (romacs-agent-state session) '(running waiting-approval))
+         (puthash session (list :clear) romacs-agent-renew--wanted)
+         'soon)
+        ((romacs-agent--harness-free-p session)
+         (romacs-agent-renew session "clear" (romacs-agent-renew--told session "Clear") nil '(:clear t))
+         'now)
+        (t (user-error "Session %s is busy: clear it after" (romacs-agent-title session)))))
+
+(defun romacs-agent-renew--told (session what)
+  "A renewal's THEN for SESSION: its failure said in its chat as WHAT's."
+  (lambda (outcome)
+    (when (eq (car outcome) :error)
+      (romacs-agent--raise session (list :type 'error :text (format "%s failed: %s" what (cadr outcome)))))))
+
+(romacs-agent-define-slash-command
+ "clear" "Start a new conversation in this session, nothing of this one carried over."
+ (lambda (session _args)
+   (pcase (romacs-agent-clear-soon session)
+     ('now "Clearing: the next message starts a new conversation")
+     (_ "Clears once this turn ends"))))
 
 (defvar romacs-agent-renew--automatic (make-hash-table :test #'eq :weakness 'key)
   "Sessions to the conversation (native id) they last renewed by
@@ -684,11 +727,22 @@ full (`romacs-agent-renew--full'), once a conversation; else nil."
 
 (defun romacs-agent-renew--at-end (session event)
   "Renew SESSION at EVENT, its turn's end, when it was wanted or its
-context is full."
+context is full.  Its harness ending instead drops a clear asked for:
+it was for the turn that ran."
+  (when (and (eq (plist-get event :type) 'exit)
+             (equal (gethash session romacs-agent-renew--wanted) '(:clear)))
+    (remhash session romacs-agent-renew--wanted)
+    (romacs-agent--raise session (list :type 'status :text "clear dropped: the harness ended")))
   (when (and (eq (plist-get event :type) 'done)
              (romacs-agent--live-p session)
              (not (romacs-agent--held-p session)))
     (when-let* ((why (romacs-agent-renew--why-now session))
+                ((not (and (eq (car-safe why) :clear)
+                           (progn (remhash session romacs-agent-renew--wanted)
+                                  (condition-case err (romacs-agent-renew session "clear" (romacs-agent-renew--told session "Clear")
+                                                                          nil '(:clear t))
+                                    (user-error (romacs-agent--raise session (list :type 'error :text (error-message-string err)))))
+                                  t))))
                 ((not (and (eq (car-safe why) :switch)
                            (progn (remhash session romacs-agent-renew--wanted)
                                   (condition-case err (apply #'romacs-agent-switch-harness session (cdr why))

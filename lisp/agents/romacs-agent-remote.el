@@ -268,9 +268,10 @@ else refused, nothing done, for the reason its kind says
   (let* ((data (and error (gethash "data" error)))
          (kind (and (hash-table-p data) (gethash "kind" data))))
     (cond ((and (not error) (member (and (hash-table-p result) (gethash "state" result)) '("written" "queued")))
-           (let ((place (gethash "queued" result)))
+           (let ((place (gethash "queued" result)) (said (gethash "message" result)))
              (append (list :draft-id (plist-get intent :draft-id) :status 'accepted)
-                     (and (integerp place) (list :queued place)))))
+                     (and (integerp place) (list :queued place))
+                     (and (stringp said) (list :message said)))))
           ;; A result that says no state it took, as a command kept
           ;; before its outcome was (unknown), may have gone.
           ((not error) (romacs-agent-remote--unconfirmed intent (or minor 1)))
@@ -458,7 +459,7 @@ prompt; its chat shown once the service lists it."
   "Show the chat of SOURCE's session ID once its service lists it, until DEADLINE."
   (cond ((not (eq source romacs-agent-remote--source)))
         ((gethash id (romacs-agent-remote--rows source))
-         (pop-to-buffer (romacs-agent-remote-chat id)))
+         (romacs-agent-display (romacs-agent-remote-chat id)))
         ((< (float-time) deadline)
          (run-at-time 0.2 nil #'romacs-agent-remote--show-when-listed source id deadline))
         (t (message "Started %s; not listed yet" id))))

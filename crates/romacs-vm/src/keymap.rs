@@ -104,7 +104,15 @@ impl Vm {
         Ok(if binding.integer_value().is_some() { Value::NIL } else { binding })
     }
     /// The local keymap of the buffer at INDEX, text or unibyte.
-    pub(crate) fn local_keymap(&mut self, index: usize) -> &mut Value {
+    pub(crate) fn local_keymap(&self, index: usize) -> &Value {
+        match &self.objects[index] {
+            Object::Buffer(buffer) => &buffer.local_keymap,
+            Object::ByteBuffer(buffer) => &buffer.local_keymap,
+            _ => unreachable!("buffer_index names a buffer"),
+        }
+    }
+    /// As `local_keymap`, to store into.
+    pub(crate) fn local_keymap_mut(&mut self, index: usize) -> &mut Value {
         match self.objects.entry_mut(index) {
             Object::Buffer(buffer) => &mut buffer.local_keymap,
             Object::ByteBuffer(buffer) => &mut buffer.local_keymap,
@@ -612,7 +620,7 @@ impl Vm {
             UseLocalMap => {
                 if args[0] != Value::NIL && self.resolve_keymap(args[0]).is_none() { return Err("keymap required".into()); }
                 let index = self.buffer_index()?;
-                *self.local_keymap(index) = args[0];
+                *self.local_keymap_mut(index) = args[0];
                 Ok(Value::NIL)
             }
             _ => unreachable!(),
