@@ -19,8 +19,12 @@ folds again after each call up to the new frontier. A leaf's summary is made
 when a scan reaches it below the frontier, by the one scan that reads it;
 the first scan after an edit reads plainly where the frontier lies inside
 a leaf. A scan that ends within its first 1,024 steps never consults the
-index, and the partition into leaves is cut, and its cuts checked, only
-where scans reach. Values, errors and the
+index, a stop for `internal--syntax-propertize` in between included (the
+steps left go on after it); a scan whose COUNT exceeds the characters from
+FROM to ZV, over four leaves or more, consults it from the start, as on
+beta. A list scan cuts the partition into leaves, and checks its cuts, only
+where it reaches; a served parse cuts and checks the whole text once.
+Values, errors and the
 order and arguments of every stop for Lisp are the scanner's.
 
 The index keeps summaries for up to four contexts (table, escaped comment
@@ -36,8 +40,8 @@ stopped for Lisp counts again when it goes on) in `:list-served` and
 characters they held in `:skipped` and, of those, the ones folded on
 summaries made before the call in `:reused`, and `:evictions`,
 `:context-switches`, `:context-evictions`, `:context-invalidations` and
-`:unsafe-cuts`. Quit is asked on entry and after every fold, as GNU's
-`maybe_quit` before a scan; a run a poll stops publishes nothing (its
+`:unsafe-cuts`. Quit is asked on entry, before the scan's setup, and
+after every fold, as GNU's `maybe_quit` before a scan; a run a poll stops publishes nothing (its
 summaries are not used again and its counts are dropped) and goes on, if
 nothing quits, where it stopped.
 The summary inhibition and checking options also apply to this path.

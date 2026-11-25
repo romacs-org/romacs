@@ -66,7 +66,8 @@ impl SyntaxIndex {
     /// the scanner's. Its value and stops are the scanner's.
     pub(crate) fn scan_lists<T: Text>(&mut self, scanner: &mut Scanner<'_, T>, chars: usize, context: Context,
                                       resume: Option<Scan>, (from0, count, depth): (i64, i64, i64), sexpflag: bool) -> Run {
-        // GNU's maybe_quit before the scan's setup.
+        // GNU's maybe_quit before the scan's setup, and the probe again
+        // where a stop left it.
         if scanner.text.stop_uncounted() {
             self.stats.list_declined[Decline::Quit as usize] += 1;
             return Err(Stopped { halt: Halt::Poll, suspended: resume.map(Box::new) });
@@ -199,20 +200,25 @@ impl SyntaxIndex {
 
     /// Fold from offset AT, a leaf boundary, towards TO, another: the
     /// offset reached, and whether the quit probe asked to stop after a
-    /// fold, which ends the folding there.
+    /// fold, which ends the folding there. A fold onto the propertize
+    /// frontier ends it too, the probe not asked: the stop for Lisp comes
+    /// first, as at the scanner's update.
     fn fold_from<T: Text>(&mut self, scanner: &mut Scanner<'_, T>, context: u8, scan: &mut Scan, range: (usize, usize),
                           flags: Flags, segment: &mut Segment) -> (usize, bool) {
         let Self { root: Some(root), stats, aborted, stamp, .. } = self else { unreachable!("prepared") };
         let look = Look { context, stamp: *stamp, aborted: aborted.as_slice() };
-        let mut polled = false;
+        let (mut polled, mut ended) = (false, false);
         let reached = Self::fold(root, 0, range, &mut |node, start| {
-            if polled {
+            if ended {
                 return false;
             }
             let folded = Self::fold_node(stats, look, &mut *scanner, (node, start), scan, flags);
             if folded {
                 segment.folds += 1;
-                polled = scanner.text.stop_uncounted();
+                ended = scanner.update_forward(scan.reached().char).is_err() || {
+                    polled = scanner.text.stop_uncounted();
+                    polled
+                };
             }
             folded
         });

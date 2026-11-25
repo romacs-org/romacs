@@ -529,7 +529,11 @@ impl SyntaxIndex {
                                  from: i64, to: i64, state: &mut ParseState) -> R<bool> {
         let context = self.prepare(chars, context);
         let bit = 1 << context;
-        self.ready(scanner, context, (offset(from), offset(to.max(from))));
+        // A served parse is long (`pays'), and parses come back over the
+        // whole text (`syntax-ppss', font-lock): the text is cut and checked
+        // whole once, as the first one's cost, not leaf by leaf as later
+        // ones reach them.
+        self.ready(scanner, context, (0, chars));
         let Self { root: Some(root), stats, .. } = self else { unreachable!("built above") };
         let (first_end, _) = safe_end(root, offset(from), bit);
         let (last_start, ..) = locate(root, offset((to - 1).max(from)), bit);
@@ -651,6 +655,21 @@ fn edit_node(node: &mut Node, start: usize, edit: &Edit, leaf: usize) {
     if !touched {
         return;
     }
+    node.spans.clear();
+    // Most edits leave every child as it was in shape: the path is
+    // recounted in place, and only one that emptied or outgrew a child
+    // rebuilds the list.
+    let reshaped = |child: &Node| child.chars == 0 || child.children.len() > FANOUT
+        || (child.is_leaf() && !child.raw && child.chars > 2 * leaf);
+    if node.children.iter().any(reshaped) {
+        reshape(node, leaf);
+    }
+    node.sum();
+}
+
+/// NODE's children with every empty one gone, every grown leaf cut and
+/// every grown node split.
+fn reshape(node: &mut Node, leaf: usize) {
     let children = std::mem::take(&mut node.children);
     node.children = children.into_iter().filter(|child| child.chars > 0).flat_map(|child| {
         if child.is_leaf() && !child.raw && child.chars > 2 * leaf {
@@ -661,8 +680,6 @@ fn edit_node(node: &mut Node, start: usize, edit: &Edit, leaf: usize) {
             vec![child]
         }
     }).collect();
-    node.spans.clear();
-    node.sum();
 }
 
 /// Apply F to the leaf holding offset AT under NODE, then recount the

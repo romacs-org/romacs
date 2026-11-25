@@ -122,11 +122,32 @@ fn a_scan_pays_little_besides_its_text() {
     let buffer = "with-temp-buffer (dotimes (_ 200) (insert \"  (defun example (arg) ;; comment here\\n\")) (goto-char 5)";
     // 3,914 and 4,034 here; in the full binary 11,487 and 11,730 a call
     // before, 4,342 and 4,461 after (pinned GNU 633 and 642).
-    for (body, bound) in [("(progn (goto-char 24) (forward-comment 1))", 4600.0), ("(scan-sexps 16 1)", 4700.0)] {
+    // A short list scan, one that ends inside its leaf, pays nothing for
+    // the summaries: 3,626 and 4,672 on beta, 3,672 and 4,753 with its
+    // entry probe and handover; 3,822 and 4,903 while every call made a
+    // view it read no position with.
+    for (body, bound) in [("(progn (goto-char 24) (forward-comment 1))", 4600.0), ("(scan-sexps 16 1)", 3750.0),
+                          ("(scan-lists 19 1 1)", 4850.0)] {
         let cost = per_call_in(&mut vm, buffer, body);
         assert!(cost < bound, "{body} costs {cost:.0} instructions a call");
     }
 }
+
+/// An edit in a text whose syntax index is cut and warm recounts the
+/// path to its leaf in place: rebuilding each node's child list on that
+/// path cost more than the rest of the edit.
+#[test]
+fn an_edit_pays_little_for_a_warm_syntax_index() {
+    let _alone = alone();
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    let buffer = "with-temp-buffer (dotimes (_ 2000) (insert \"  (defun example (arg) (list arg)) ; c\\n\")) \
+                  (scan-sexps 1 (point-max)) (scan-lists 3 1 0) (parse-partial-sexp 1 (point-max)) (goto-char 40003)";
+    // 42,800 an insertion and a deletion on beta; 23,500 in place.
+    let cost = per_call_in(&mut vm, buffer, "(progn (insert \"a\") (delete-char -1))");
+    assert!(cost < 30_000.0, "an insertion and a deletion cost {cost:.0} instructions");
+}
+
 
 /// A search reads the variable itself, not whatever its name is interned
 /// as now: uninterning `case-fold-search` and setting a new symbol of
@@ -175,3 +196,4 @@ fn proper_list_p_reads_each_cons_once() {
         (let ((c (make-list 4097 1))) (setcdr (nthcdr 4096 c) c) (safe-length c)))"),
         "(4097 12289)");
 }
+
