@@ -418,13 +418,18 @@ fn start_command(vm: &Path, places: &[(&str, Option<String>)]) -> Vec<String> {
     command
 }
 
-/// What COMMAND says on stderr, run within `DEADLINE`: past it, killed and
-/// reaped, and that said.
+/// What COMMAND says on stderr, all within `DEADLINE`: past it, it is
+/// killed and reaped, and its stderr, which a helper it left may hold open,
+/// read no longer.
 fn run_within(command: &[String]) -> String {
     let child = std::process::Command::new(&command[0]).args(&command[1..])
         .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped()).spawn();
     let mut child = match child { Ok(child) => child, Err(error) => return format!("{}: {error}", command[0]) };
+    let (said_tx, said) = mpsc::channel();
+    if let Some(mut stderr) = child.stderr.take() {
+        std::thread::spawn(move || { let mut text = String::new(); let _ = stderr.read_to_string(&mut text); let _ = said_tx.send(text); });
+    }
     let begun = Instant::now();
     loop {
         match child.try_wait() {
@@ -437,9 +442,7 @@ fn run_within(command: &[String]) -> String {
             }
         }
     }
-    let mut said = String::new();
-    if let Some(mut stderr) = child.stderr.take() { let _ = stderr.read_to_string(&mut said); }
-    said.trim().to_owned()
+    said.recv_timeout(DEADLINE.saturating_sub(begun.elapsed())).unwrap_or_default().trim().to_owned()
 }
 
 /// Start the headless service's unit; a unit failed before is reset first,
@@ -958,6 +961,13 @@ mod tests {
         assert!(at("--property=UnsetEnvironment=XDG_STATE_HOME") < at("/opt/r/bin/romacs-vm-gui"));
         assert_eq!(command[at("/opt/r/bin/romacs-vm-gui") + 1..],
                    ["--batch", "-l", "romacs-agent-headless", "-f", "romacs-agent-headless-run"]);
+    }
+
+    #[test]
+    fn a_command_is_given_its_deadline_and_said() {
+        let said = run_within(&["sh", "-c", "echo started >&2"].map(str::to_owned));
+        assert_eq!(said, "started");
+        assert!(run_within(&["/nonexistent/systemctl".to_owned()]).contains("/nonexistent/systemctl"));
     }
 
     #[test]
