@@ -531,6 +531,35 @@ mod tests {
         let key = builder.publish(&store, [42; 32]).unwrap();
         (ImageRegion::open(&store, &key).unwrap(), store)
     }
+    /// A key that is an executable image's multibyte string, its character
+    /// bound to a keymap that binds it again, looked up and defined whole:
+    /// the walk reads the mapped text once, with its bounds and pages
+    /// checked at each event but not the whole string again, so its work
+    /// grows linearly (the evaluator's instructions at N and 4N).
+    #[test]
+    fn an_image_string_key_is_walked_once() {
+        let work = |n: usize| -> f64 {
+            let mut b = ImageBuilder::default();
+            let text = b.string_raw(&"\u{e9}".repeat(n));
+            b.cons_raw(text, Value::NIL);
+            let (image, store) = stored(&b, &format!("key-walk-{n}"));
+            let mut vm = Vm::new();
+            vm.attach_image(image.clone()).unwrap();
+            vm.declare_special_raw("kw-image-key", image.string_reference_raw(0).unwrap());
+            let form = "(let ((m (make-sparse-keymap))) (define-key m (vector ?\\xe9) m) \
+                (let* ((before (romacs-instructions)) (found (eq (lookup-key m kw-image-key) m)) \
+                       (defined (progn (define-key (make-sparse-keymap) kw-image-key 'ignore) t))) \
+                  (list found defined (- (romacs-instructions) before))))";
+            let got = vm.eval_source_raw(form).and_then(|v| vm.display(v)).unwrap();
+            std::fs::remove_dir_all(store).unwrap();
+            let fields: Vec<&str> = got.trim_matches(|c| c == '(' || c == ')').split(' ').collect();
+            assert_eq!(fields[..2], ["t", "t"], "the walk reads the image key whole: {got}");
+            fields[2].parse().unwrap_or_else(|_| panic!("an instruction count: {got}"))
+        };
+        let (small, large) = (work(4000), work(16000));
+        let exponent = (large / small).ln() / 4f64.ln();
+        assert!(exponent <= 1.25, "exponent {exponent:.3} ({small} -> {large} instructions) over 1.25");
+    }
     #[test]
     fn invalid_image_edges_and_partial_records_fail_closed() {
         for (i, words) in [
