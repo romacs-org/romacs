@@ -128,6 +128,65 @@ fn leaf_poll_concat_list_assembly() {
 }
 
 #[test]
+fn concat_result_polls_during_string_metadata() {
+    let (mut vm, signal) = busy_vm();
+    let bytes = crate::text::octets_to_multibyte(&vec![255; 20000]);
+    assert!(signal.interrupt());
+    let outcome = Leaf::new(&mut vm).concat_result(bytes, true, &[]);
+    assert!(quit_signalled(&mut vm, &outcome), "result metadata scan did not quit");
+    assert!(!signal.due());
+}
+
+#[test]
+fn concat_result_polls_while_widening_properties() {
+    let (mut vm, signal) = busy_vm();
+    let part = eval(&mut vm, "(progn
+        (setq part (string-as-unibyte (make-string 20000 255)))
+        (put-text-property 1 39999 'face 'bold part)
+        part)");
+    assert_eq!(eval(&mut vm, "(multibyte-string-p part)"), Value::NIL);
+    let octets = Leaf::new(&mut vm).string_bytes(part).unwrap_or_else(|_| panic!("fixture must be a string"));
+    let mut bytes = vec![b'x'];
+    bytes.extend(crate::text::octets_to_multibyte(&octets));
+    bytes.extend_from_slice("λ".as_bytes());
+    assert!(signal.interrupt());
+    assert!(Leaf::new(&mut vm).concat_properties::<true>(&[(part, 1)], true).is_err(),
+            "the property phase must stop before metadata gets the press");
+    assert!(signal.due(), "the property phase leaves delivery to the leaf");
+    let outcome = Leaf::new(&mut vm).concat_result(bytes.clone(), true, &[(part, 1)]);
+    assert!(quit_signalled(&mut vm, &outcome), "widened result construction did not quit");
+    assert!(!signal.due());
+    vm.quit_unwinding = false;
+
+    eval(&mut vm, "(setq inhibit-quit t)");
+    assert!(signal.interrupt());
+    assert!(Leaf::new(&mut vm).concat_result(bytes, true, &[(part, 1)]).is_ok());
+    assert!(signal.due(), "the inhibited leaf leaves the host press pending");
+    assert_eq!(eval(&mut vm, "(let ((out (concat \"x\" part \"λ\")))
+        (and (= (length out) 40002)
+             (null (get-text-property 1 'face out))
+             (eq (get-text-property 2 'face out) 'bold)
+             (eq (get-text-property 39999 'face out) 'bold)
+             (null (get-text-property 40000 'face out))
+             (= (aref out 40001) ?λ)))"), Value::TRUE);
+}
+
+#[test]
+fn concat_result_polls_across_short_widened_parts() {
+    let (mut vm, signal) = busy_vm();
+    let part = eval(&mut vm, "(progn
+        (setq part (string-as-unibyte (make-string 64 255)))
+        (put-text-property 0 128 'face 'bold part)
+        part)");
+    assert_eq!(eval(&mut vm, "(multibyte-string-p part)"), Value::NIL);
+    let parts: Vec<_> = (0..256).map(|i| (part, i * 256)).collect();
+    assert!(signal.interrupt());
+    assert!(Leaf::new(&mut vm).concat_properties::<true>(&parts, true).is_err(),
+            "short widened parts must share a byte budget");
+    assert!(signal.due());
+}
+
+#[test]
 fn leaf_poll_list_elements() {
     reaches("romacs--nconc-list", "(setq parts (make-list 20000 nil))",
             "(list parts)", "(= (length parts) 20000)");
