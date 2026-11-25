@@ -174,3 +174,78 @@ fn a_filter_on_the_meta_prefix_keeps_the_meta_characters_base() {
   (prin1 (list (lookup-key m [?\M-x]) (lookup-key m "\M-x") (lookup-key m [?\M-x ?y]) hits)))"#;
     assert_eq!(printed(form), "(kw-meta-x kw-meta-x 1 3)");
 }
+
+/// A default taken ends the frame's defaults for its embedded maps: the later one's filter does not run.
+#[test]
+fn an_embedded_default_does_not_override_an_earlier_one() {
+    let form = r#"(let* ((trace nil)
+       (inner (list 'keymap (cons t (list 'menu-item "second" 'later-default :filter
+                                          (lambda (d) (push 'second trace) d)))))
+       (m (list 'keymap (cons t 'first-default) inner)))
+  (prin1 (list (lookup-key m [f8] t) trace)))"#;
+    assert_eq!(printed(form), "(first-default nil)");
+}
+
+/// A parent map is searched with what the child left of its defaults: a child that took its default keeps the parent's from running.
+#[test]
+fn a_parent_scan_inherits_the_childs_spent_default() {
+    let form = r#"(let* ((trace nil)
+       (p1 (make-sparse-keymap)) (p2 (make-sparse-keymap))
+       (parent (list 'keymap (cons t (list 'menu-item "p" p2 :filter
+                                           (lambda (d) (push 'parent trace) d)))))
+       (child (make-sparse-keymap)))
+  (define-key p1 "y" 'kw-child-y)
+  (define-key p2 "x" 'kw-parent-x)
+  (define-key child [t] 'child-default)
+  (define-key child [f8] p1)
+  (set-keymap-parent child parent)
+  (prin1 (list (lookup-key child [f8 ?x] t) (lookup-key child [f8 ?y] t) (lookup-key child [t]) trace)))"#;
+    assert_eq!(printed(form), "(nil kw-child-y child-default nil)");
+}
+
+/// A meta character whose ESC binds no keymap takes its map's default, and is too long only once it is resolved whole.
+#[test]
+fn a_meta_character_falls_back_to_its_maps_default() {
+    let form = r#"(let* ((hits 0) (m (make-sparse-keymap)))
+  (define-key m [t] (list 'menu-item "d" 'kw-default :filter (lambda (d) (setq hits (1+ hits)) d)))
+  (prin1 (list (lookup-key m [?\M-x] t) hits (lookup-key m [?\M-x ?y] t) (lookup-key m [?\M-x]) (lookup-key m "\M-xy" t) hits)))"#;
+    assert_eq!(printed(form), "(kw-default 2 1 nil 1 6)");
+}
+
+/// An advertised key with a range event is looked up as itself: the walk reads its later events live, once.
+#[test]
+fn where_is_looks_the_advertised_key_up_live() {
+    let form = r#"(progn
+(defvar kw-key nil)
+(defvar kw-count 0)
+(let* ((m (make-sparse-keymap))
+       (p (make-sparse-keymap))
+       (kw-key (vector 'f5 (cons ?x ?z) 'f6))
+       (kw-count 0))
+  (define-key p [120 f7] 'kw-dest)
+  (define-key m [f5]
+    (list 'menu-item "P" p :filter
+          (lambda (d)
+            (setq kw-count (1+ kw-count))
+            (aset kw-key 2 'f7)
+            d)))
+  (put 'kw-dest :advertised-binding kw-key)
+  (let ((answer (where-is-internal 'kw-dest (list m) t)))
+    (prin1 (list answer (eq answer kw-key) kw-key kw-count)))))"#;
+    assert_eq!(printed(form), "([f5 (120 . 122) f7] t [f5 (120 . 122) f7] 1)");
+}
+
+/// A filter changes a multibyte string key ahead of the walk, past a
+/// two-byte character: the walk reads the next event by its character
+/// index in the string as it is now.
+#[test]
+fn a_filter_that_changes_a_multibyte_key_ahead_of_the_walk_changes_the_lookup() {
+    let form = r#"(let ((key (string ?\xe9 ?a ?b))
+      (m (make-sparse-keymap))
+      (p (make-sparse-keymap)))
+  (define-key p "ac" 'kw-changed)
+  (define-key p "ab" 'kw-old)
+  (define-key m (string ?\xe9) (list 'menu-item "x" p :filter (lambda (d) (aset key 2 ?c) d)))
+  (prin1 (list (lookup-key m key) (append key nil) (multibyte-string-p key))))"#;
+    assert_eq!(printed(form), "(kw-changed (233 97 99) t)");
+}

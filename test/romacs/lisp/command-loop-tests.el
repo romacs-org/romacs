@@ -144,6 +144,14 @@
            (overriding-local-map (make-composed-keymap (list high low))))
       (should (equal (list (key-binding [f5]) hits) '(ignore 2))))))
 
+(ert-deftest command-loop-tests-textual-key-description ()
+  "GNU looks a one-string vector up as the key it describes.
+Romacs walks the string as one event (ledger/divergences/VM2-KEYSEQ-TEXT1.md)."
+  :expected-result (if (fboundp 'romacs--take-user-signal) :failed :passed)
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "C-c x") 'command-loop-tests--normalized)
+    (should (eq (lookup-key map ["C-c x"]) 'command-loop-tests--normalized))))
+
 (defun command-loop-tests--fallback ()
   (interactive)
   (push 'fallback command-loop-tests--log))
