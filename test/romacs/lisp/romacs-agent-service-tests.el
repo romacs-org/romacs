@@ -804,6 +804,48 @@ a state root of its own, and a service of its own on `socket'."
     (should (member "BatchMode=yes" romacs-agent-remote--ssh-options))
     (should (member "-T" romacs-agent-remote--ssh-options))))
 
+(ert-deftest romacs-agent-remote-a-machine-not-reached-is-tried-again ()
+  ;; No ssh to run, or a service that never answers hello: each is a
+  ;; connection that ended, tried again later, nothing left running.
+  (require 'romacs-agent-remote)
+  (let* ((romacs-agent-remote--source nil) (romacs-agent-remote--sources (make-hash-table :test #'equal))
+         (romacs-agent-remote-hosts '(("far" :ssh "far"))) (romacs-agent-remote--answer-within 0.3)
+         (inhibit-message t) (command '("/nonexistent/ssh"))
+         (stderr-pipes (lambda () (seq-filter (lambda (p) (string-prefix-p "romacs-agent-client stderr" (process-name p)))
+                                              (process-list))))
+         (before (length (funcall stderr-pipes)))
+         (source nil))
+    (cl-letf (((symbol-function 'romacs-agent-remote--ssh-command) (lambda (_place _control) command)))
+      (unwind-protect
+          (progn
+            (setq source (romacs-agent-remote-connect nil "far"))
+            (should (timerp (romacs-agent-remote-retry source)))
+            (should (= (length (funcall stderr-pipes)) before))
+            ;; Reached, but no answer: closed once its time is up.
+            (setq command '("sleep" "30"))
+            (romacs-agent-remote--open source)
+            (let ((client (romacs-agent-remote-client source)))
+              (should (romacs-agent-client-live-p client))
+              (let ((deadline (+ (float-time) 5)))
+                (while (and (romacs-agent-client-live-p client) (< (float-time) deadline))
+                  (accept-process-output nil 0.05)))
+              (should-not (romacs-agent-client-live-p client))
+              (should (timerp (romacs-agent-remote-retry source)))))
+        (romacs-agent-remote-disconnect source)))))
+
+(ert-deftest romacs-agent-remote-a-name-is-its-latest-machine-s ()
+  ;; A name connected again names its new place; letting go of an old
+  ;; source under it lets go of nothing newer.
+  (require 'romacs-agent-remote)
+  (let* ((romacs-agent-remote--sources (make-hash-table :test #'equal))
+         (romacs-agent-remote--source nil)
+         (old (romacs-agent-remote--host-source "n" "/a")))
+    (should (equal (romacs-agent-remote-place (romacs-agent-remote--host-source "n" "/b")) "/b"))
+    (romacs-agent-remote-disconnect old)
+    (let ((new (romacs-agent-remote--host-source "n" "/c")))
+      (romacs-agent-remote-disconnect old)
+      (should (eq (gethash "n" romacs-agent-remote--sources) new)))))
+
 (ert-deftest romacs-agent-service-several-machines-keep-their-own-sessions ()
   ;; Two machines connected at once, each its own client, mirrors and
   ;; chats: a session id they share is two sessions here.

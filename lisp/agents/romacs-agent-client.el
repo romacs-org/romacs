@@ -71,13 +71,16 @@ to the buffer STDERR (one of its own when nil), never into the stream."
                             :noquery t :coding 'no-conversion
                             :filter #'romacs-agent-client--filter
                             :sentinel #'romacs-agent-client--sentinel)
-    (make-process :name "romacs-agent-client" :command place :connection-type 'pipe
-                  :noquery t :coding 'no-conversion
-                  ;; Its end said by the connection's sentinel, not in its buffer.
-                  :stderr (make-pipe-process :name "romacs-agent-client stderr" :noquery t :sentinel #'ignore
-                                             :buffer (or stderr (generate-new-buffer " *romacs-agent-client stderr*")))
-                  :filter #'romacs-agent-client--filter
-                  :sentinel #'romacs-agent-client--sentinel)))
+    ;; Its end said by the connection's sentinel, not in its buffer.
+    (let ((errors (make-pipe-process :name "romacs-agent-client stderr" :noquery t :sentinel #'ignore
+                                     :buffer (or stderr (generate-new-buffer " *romacs-agent-client stderr*")))))
+      (condition-case err
+          (make-process :name "romacs-agent-client" :command place :connection-type 'pipe
+                        :noquery t :coding 'no-conversion :stderr errors
+                        :filter #'romacs-agent-client--filter
+                        :sentinel #'romacs-agent-client--sentinel)
+        ;; No command run: nothing writes to its stderr.
+        (error (delete-process errors) (signal (car err) (cdr err)))))))
 
 (defun romacs-agent-client-connect (place &optional stderr)
   "Connect to the service at PLACE, say hello and watch its list.  PLACE
@@ -124,7 +127,7 @@ it come, is dropped."
 Closing ends the connection at once: its sentinel calls each request
 still waiting on a reply with the `disconnected' error, then runs
 `romacs-agent-client-follow-functions' with (ended) for the sessions
-followed through it."
+followed through it, then `romacs-agent-client-ended-functions'."
   (romacs-agent-rpc-close (romacs-agent-client-rpc client)))
 
 (defun romacs-agent-client--sentinel (process _event)

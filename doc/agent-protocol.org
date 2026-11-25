@@ -773,7 +773,8 @@ holds no agent logic.
 - When the WebSocket drops, it closes the client connection.  The client
   says hello again and resumes, so it never keeps a dead subscription.
 - The Romacs client therefore only ever opens a Unix socket, the local
-  service's or a bridge's: there is no WebSocket or TLS in Lisp.
+  service's or a bridge's, or an ssh pipe (Transports): there is no
+  WebSocket or TLS in Lisp.
 
 * Transports
 One protocol, several transports.  Every transport carries the same
@@ -815,7 +816,12 @@ was accepted on and, on =service-relay.sock=, from =agents/transport=.
   where its name would not fit a socket's, there is no master.  When the
   pipe ends the client connects again, after 0.25 s, doubled each time
   up to 30 s until the machine answers; it says hello and watches the
-  list and the sessions it follows afresh.
+  list and the sessions it follows afresh.  A service that has not
+  listed the sessions 20 s after the connection is made is given up on
+  the same way: a live ssh link does not mean a live service.  ssh's
+  =RemoteCommand= is set to none, so a host's configuration cannot
+  replace the relay; a master's socket name with a space or a =%= is
+  no master.
 - *Measured* (build 28e8fac9 with this branch's Lisp, a Ryzen 9 5950X
   client, an i5-2520M over a tailnet with an 8.5 ms ping, a fake session
   in each private service):
@@ -834,14 +840,18 @@ was accepted on and, on =service-relay.sock=, from =agents/transport=.
 
 ** The headless service
 - *Its entry.*  =romacs-vm-gui --batch -l romacs-agent-headless -f
-  romacs-agent-headless-run= serves =service.sock= and
-  =service-relay.sock=, restores the machine's sessions and attaches to
-  their hosts, then runs its timers and connections until it is
-  stopped.  It makes no frame.
+  romacs-agent-headless-run= loads the user's init files (a batch start
+  reads none, and the service must run the user's approval policy and
+  providers), serves =service.sock= and =service-relay.sock=, restores
+  the machine's sessions and attaches to their hosts, then runs its
+  timers and connections until it is stopped.  It makes no frame.  An
+  error in the init is reported and serving goes on.
 - *Its unit.*  It runs as the transient user unit
   =romacs-agents-service= (=systemd-run --user
   --unit=romacs-agents-service -p Restart=on-failure=), started by
-  =romacs-relay stdio= with the =romacs-vm-gui= beside the relay.
+  =romacs-relay stdio= with the =romacs-vm-gui= beside the relay and the
+  relay's =XDG_*= directories, so it listens where the relay looks.
+  Each systemd command and each connect is bounded too.
   Hosts are in units of their own (When the service crashes or
   restarts), so they outlive it.  Without lingering
   (=loginctl enable-linger=), the user's manager, and with it the
