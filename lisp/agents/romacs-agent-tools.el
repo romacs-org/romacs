@@ -1475,17 +1475,16 @@ is asked before a waiting message goes: nil drops it.  MESSAGES, when
 given, say it comes from other sessions (`romacs-agent--input').  Its
 next turn end wakes its parent by its wake rule, as its first did.  An
 empty TEXT sends nothing.  Return how it went (`romacs-agent-tools--delivery'),
-`queued' for an interrupt the turn could not take yet; nil for nothing sent."
+`queued' for an interrupt the turn could not take yet, `discarded' for a
+rejected steer, and nil for empty text."
   (romacs-agent-tools--check-message-target child)
   (unless (string-empty-p (string-trim text))
     (pcase (romacs-agent-tools--delivery child mode)
       ('steered
-       ;; Into the turn only when it was written there now (a Codex turn
-       ;; named, no switch pending); else it waits, as queued.
        (let ((item (romacs-agent-send child text nil valid nil messages)))
-         (if (or (not (memq item (romacs-agent-queue child)))
-                 (memq (romacs-agent-item-held item) '(sending written)))
-             'steered 'queued)))
+         (cond ((eq (romacs-agent-item-held item) 'written) 'steered)
+               ((memq item (romacs-agent-queue child)) 'queued)
+               (t 'discarded))))
       ('interrupting
        ;; First in line before the cut: a turn not yet under way
        ;; (Codex's before it names it) cannot be cut, and it goes after.

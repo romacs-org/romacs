@@ -464,6 +464,15 @@ message's record for TEXT, `interrupted' each interrupted."
     (cl-letf (((symbol-function 'romacs-agent-interrupt) (lambda (_) (user-error "No turn to interrupt yet"))))
       (should (equal (gethash "delivery" (send a "again" "interrupt")) "queued")))))
 
+(ert-deftest romacs-agent-delegate-send-reports-a-discarded-steer ()
+  (romacs-agent-delegate-tests--sending parent
+    (should (eq (romacs-agent-tools--tell a "expired" 'steer #'ignore) 'discarded))
+    (cl-letf (((symbol-function 'romacs-agent--encodable-p) #'ignore))
+      (should (equal (gethash "delivery" (send a "unencodable" "steer")) "discarded")))
+    (should-not (romacs-agent-queue a))
+    (should-not written)
+    (ignore #'drain)))
+
 (ert-deftest romacs-agent-delegate-send-steer-is-a-flag ()
   ;; steer true: into the running turn at once; false: queued; with
   ;; another mode, refused; mode steer, as it was, still steers.
