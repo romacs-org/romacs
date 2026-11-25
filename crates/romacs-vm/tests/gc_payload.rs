@@ -7,6 +7,9 @@
 //! frozen strings make collections in step with the work and keep memory
 //! flat from N to 4N. A big vector the heap keeps, which every collection
 //! traces, paces collection by its size.
+#[path = "support/own_test.rs"]
+mod own_test;
+
 use romacs_vm::Vm;
 
 const N: usize = 300;
@@ -47,31 +50,71 @@ fn assert_collected(setup: &str, body: &str, every: usize) {
     assert!(rss_4n < rss_n + 128 * 1024, "{body}: resident {rss_n} kB after {N} runs, {rss_4n} kB after {}", 4 * N);
 }
 
+fn assert_collected_in_child(name: &str, setup: &str, body: &str, every: usize) {
+    const CHILD: &str = "ROMACS_GC_PAYLOAD_TEST_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        // VmRSS includes allocations from every test running in the process.
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &own_test::name(module_path!(), name), "--nocapture"])
+            .env(CHILD, "1")
+            .status()
+            .expect("start isolated GC payload test");
+        assert!(status.success(), "isolated GC payload test failed: {status}");
+        return;
+    }
+    assert_collected(setup, body, every);
+}
+
 #[test]
 fn copies_of_a_big_buffer_are_collected_as_they_are_made() {
-    assert_collected("nil", "(buffer-string)", 4);
+    assert_collected_in_child(
+        "copies_of_a_big_buffer_are_collected_as_they_are_made",
+        "nil",
+        "(buffer-string)",
+        4,
+    );
 }
 
 #[test]
 fn copies_between_process_waits_are_collected_as_they_are_made() {
-    assert_collected("nil", "(progn (buffer-substring (point-min) (point-max)) (accept-process-output nil 0))", 4);
+    assert_collected_in_child(
+        "copies_between_process_waits_are_collected_as_they_are_made",
+        "nil",
+        "(progn (buffer-substring (point-min) (point-max)) (accept-process-output nil 0))",
+        4,
+    );
 }
 
 #[test]
 fn strings_made_in_a_nested_eval_are_collected_as_they_are_made() {
-    assert_collected("nil", "(eval '(make-string 1048576 ?x))", 4);
+    assert_collected_in_child(
+        "strings_made_in_a_nested_eval_are_collected_as_they_are_made",
+        "nil",
+        "(eval '(make-string 1048576 ?x))",
+        4,
+    );
 }
 
 #[test]
 fn bool_vectors_are_collected_as_they_are_made() {
-    assert_collected("nil", "(make-bool-vector 8388608 nil)", 4);
+    assert_collected_in_child(
+        "bool_vectors_are_collected_as_they_are_made",
+        "nil",
+        "(make-bool-vector 8388608 nil)",
+        4,
+    );
 }
 
 /// The frozen 1 MB string is live heap too (`region_weight'), which the
 /// proportional rule paces by: a collection every dozen or so thaws.
 #[test]
 fn thawed_strings_are_collected_as_they_are_made() {
-    assert_collected("(defvar gc-payload-frozen (freeze (make-string 1048576 ?x)))", "(thaw gc-payload-frozen)", 32);
+    assert_collected_in_child(
+        "thawed_strings_are_collected_as_they_are_made",
+        "(defvar gc-payload-frozen (freeze (make-string 1048576 ?x)))",
+        "(thaw gc-payload-frozen)",
+        32,
+    );
 }
 
 /// A kept vector of ten million slots, which every collection traces,
