@@ -37,6 +37,7 @@ fn vectorlike(kind: Kind) -> bool {
             | Kind::Frame
             | Kind::Terminal
             | Kind::Thread
+            | Kind::Backing
     )
 }
 
@@ -50,6 +51,7 @@ fn string_cmp(a: &crate::lstring::OwnedStr, b: &crate::lstring::OwnedStr) -> Ord
     a.chars().cmp(b.chars())
 }
 
+// SMELL(long-function): an arm for each Object variant, each kind one decision a reader checks in place.
 fn value_cmp(
     cx: &mut Leaf<'_>,
     mut a: Value,
@@ -196,6 +198,7 @@ fn value_cmp(
             | Kind::Frame
             | Kind::Terminal
             | Kind::Thread
+            | Kind::Backing
                 if ka == kb =>
             {
                 return Ok(Ordering::Equal);

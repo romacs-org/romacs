@@ -975,8 +975,8 @@ impl TextBody {
     /// each edit, so a search after an edit costs what it reads
     /// (text_gap.rs).
     pub(crate) fn search_window(&mut self, need: Range<usize>, bounds: Range<usize>) -> Range<usize> {
-        if self.flat_current() {
-            return bounds;
+        if let Some(window) = self.flat_search_window(&bounds) {
+            return window;
         }
         let view = match &mut self.search.0 {
             Some(view) => view,
@@ -987,6 +987,11 @@ impl TextBody {
             )),
         };
         view.window(need, bounds)
+    }
+    /// The window [`Self::search_window`] gives without building or moving
+    /// the search view: BOUNDS while the flat text is current, else None.
+    pub(crate) fn flat_search_window(&self, bounds: &Range<usize>) -> Option<Range<usize>> {
+        self.flat_current().then(|| bounds.clone())
     }
     /// The bytes of WINDOW, a run [`Self::search_window`] gave since the
     /// last edit.

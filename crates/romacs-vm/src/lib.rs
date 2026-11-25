@@ -48,6 +48,7 @@ mod bidi;
 mod layout_host;
 mod display_host;
 mod session_host;
+mod ui;
 mod terminal_host;
 mod terminal_keys;
 mod process_jobs;
@@ -149,6 +150,7 @@ mod handle;
 pub use handle::{Arg, Fixed, Local, Rooted};
 mod image;
 mod frozen;
+mod function_codec;
 mod isolate;
 mod keeper;
 pub use isolate::worker_socket as isolate_worker_socket;
@@ -1297,6 +1299,7 @@ struct Slot {
     localness: Localness,
     /// Object-owned declaration flag for uninterned symbols.
     declared_special: bool,
+    written_since_restore: bool,
 }
 impl Slot {
     const fn new() -> Self {
@@ -1307,6 +1310,7 @@ impl Slot {
             plist: Value::NIL,
             localness: Localness::Never,
             declared_special: false,
+            written_since_restore: false,
         }
     }
 }
@@ -1486,9 +1490,11 @@ pub struct Vm {
     /// what the steps did (typing.rs).
     #[snapshot(at_rest)]
     typing: typing::Typing,
-    /// The embedder's layout while one is attached (layout_host.rs).
+    /// This VM's key to the UI its host attached on the host's thread
+    /// (ui.rs): the layout and session hosts live there, not in the VM.
+    /// Detach every host before moving a VM to another thread.
     #[snapshot(at_rest)]
-    layout_host: Option<Box<dyn layout_host::LayoutHost>>,
+    ui_key: Option<ui::UiKey>,
     /// The embedder's window system while one is attached (display_host.rs).
     #[snapshot(at_rest)]
     display: Option<display_host::Display>,
@@ -1496,9 +1502,6 @@ pub struct Vm {
     /// which the open display shows.
     #[snapshot(at_rest)]
     visual: Box<romacs_display_protocol::VisualConfig>,
-    /// The embedder's end of the session while one is attached (session_host.rs).
-    #[snapshot(at_rest)]
-    session_host: Option<session_host::SessionHost>,
     /// keyboard.c timer_idleness_start_time: when the command loop began
     /// waiting idle for a key, while it does.
     #[snapshot(at_rest)]
@@ -1799,10 +1802,9 @@ impl Vm {
             host_wait: None,
             deferred_event: None,
             typing: typing::Typing::default(),
-            layout_host: None,
+            ui_key: None,
             display: None,
             visual: Box::default(),
-            session_host: None,
             idle_since: None,
             redisplay_since_mark: None,
             treesit_plain: Vec::new(),
@@ -2024,11 +2026,16 @@ impl Vm {
         for name in forwarded::Forwarded::names() {
             vm.specials.insert(name.into());
         }
+        vm.finish_initialization()
+    }
+
+    fn finish_initialization(mut self) -> Self {
         // Code-image loading reuses this constructor before replacing the
         // symbol catalog. Intrinsic redirects must therefore start cold too;
         // retaining Plain here would mask an image's already-interned plist.
-        vm.variable_redirects.clear();
-        vm
+        self.variable_redirects.clear();
+        self.slots.clear_written_since_restore();
+        self
     }
     /// The symbols the VM reads by slot from its first form on, interned in
     /// this order: the quit polls', the face primitives', `debug-on-event''s
@@ -3686,6 +3693,7 @@ impl Vm {
         let buffer = owner.index_if(0)? - 1;
         Some(crate::variable_runtime::LocalEntry { buffer, at: self.local_at(buffer, base)?.ok()? })
     }
+    // SMELL(long-function): an arm for each Object variant, each kind one decision a reader checks in place.
     #[inline(never)]
     fn primitive(&mut self, p: Primitive, start: usize, n: usize) -> Result<Value> {
         use Primitive::*;
@@ -3846,6 +3854,7 @@ impl Vm {
                             | data::Object::Treesit(_)
                             | data::Object::Finalizer(_)
                             | data::Object::Thread
+                            | data::Object::Backing(_)
                             | data::Object::Process(_)
                             | data::Object::HashTable(_) => {
                                 return Err("sequence required".into());
@@ -3868,6 +3877,7 @@ impl Vm {
     pub(crate) fn display(&self, v: Value) -> Result<String> {
         self.display_depth(v, 0)
     }
+    // SMELL(long-function): an arm for each Object variant, each kind one decision a reader checks in place.
     fn display_depth(&self, v: Value, depth: usize) -> Result<String> {
         if depth > 100 {
             return Err("display depth exceeded".into());
@@ -3893,6 +3903,7 @@ impl Vm {
                 // print.c PVEC_FINALIZER.
                 data::Object::Finalizer(function) => Ok(if *function == Value::NIL { "#<finalizer used>" } else { "#<finalizer>" }.into()),
                 data::Object::Thread => Ok("#<thread>".into()),
+                data::Object::Backing(b) => Ok(format!("#<frozen-backing {} bytes>", b.len())),
                 data::Object::Process(p) => Ok(format!("#<process {}>", self.process_name_text(p))),
                 data::Object::Marker(_) => Ok(self.marker_text(v, false).unwrap_or_else(|| "#<marker>".into())),
                 data::Object::Overlay(_) => Ok("#<overlay>".into()),

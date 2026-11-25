@@ -78,7 +78,7 @@ saying so when it settled since.")
   "Open the chat of worker ID if it is still among the unsettled workers."
   (let ((child (and (member id (romacs-agent-menu--workers)) (romacs-agent-get id))))
     (if (and child (not (romacs-agent-settled-p child)))
-        (romacs-agent-show child '(display-buffer-same-window))
+        (romacs-agent-show child)
       (user-error "%s is no longer in the Workers list" (if child (romacs-agent-title child) id)))))
 
 (defun romacs-agent-menu-open-worker ()
@@ -106,8 +106,7 @@ all of them by its title and state."
          (named (mapcar (lambda (row) (cons (romacs-agent-menu--thread-line row) (romacs-agent-log-activity--thread row)))
                         rows))
          (id (cdr (assoc (romacs-agent--read-ordered "Thread: " (mapcar #'car named) nil nil t) named))))
-    (romacs-agent-show (or (romacs-agent-get id) (user-error "Thread %s is gone" id))
-                       '(display-buffer-same-window))))
+    (romacs-agent-show (or (romacs-agent-get id) (user-error "Thread %s is gone" id)))))
 
 ;;; The session's commands, as the menu offers them
 
@@ -116,6 +115,23 @@ all of them by its title and state."
 source takes this editor's commands only (`romacs-agent-log--commands-p')."
   (unless (romacs-agent-log--commands-p) (user-error "This chat's session takes no commands from here"))
   (romacs-agent-log--loaded romacs-agent-log--session))
+
+(defvar romacs-agent-ui--live-keys)
+
+(defun romacs-agent-chat-settle ()
+  "Settle this chat's thread until it is brought back from the board, and
+kill the chat (`romacs-agent-settle-recorded').  Say when its delegated
+tasks are still at work: their results wait for it."
+  (interactive nil romacs-agent-log-mode)
+  (let* ((summary (or (romacs-agent-log--summary) (user-error "This chat has no thread")))
+         (working (cl-some (lambda (child) (and (plist-get child :id)
+                                                (memq (plist-get child :key) romacs-agent-ui--live-keys)))
+                           (romacs-agent-summary-children-rows summary))))
+    (unless (romacs-agent-settle-recorded (romacs-agent-summary-id summary))
+      (user-error "That thread is gone"))
+    (kill-buffer (current-buffer))
+    (message (if working "Settled.  Its delegated tasks are still at work: their results wait until you bring it back."
+               "Settled: the board brings it back"))))
 
 (defun romacs-agent-chat-stop ()
   "Stop the session."
@@ -480,6 +496,7 @@ the session, the view."
   "F" ("Fresh conversation, briefed" romacs-agent-chat-renew)
   "r" ("Resume" romacs-agent-chat-resume :inapt-if #'romacs-agent-log--running-p)
   "x" ("Stop" romacs-agent-chat-stop)
+  "s" ("Settle and close" romacs-agent-chat-settle)
   :group "View"
   "e" ("Earlier turns" romacs-agent-log-earlier)
   "w" ("Copy the entry at point" romacs-agent-log-copy))

@@ -17,19 +17,34 @@ static LIVE: AtomicUsize = AtomicUsize::new(0);
 thread_local! {
     static TRACKING: Cell<bool> = const { Cell::new(false) };
     static TRACKED: Cell<usize> = const { Cell::new(0) };
+    static TRACKED_BYTES: Cell<usize> = const { Cell::new(0) };
 }
 
 /// What F returns; the allocations and reallocations it made on this
 /// thread, and in the whole process; and how many more bytes are live
 /// after it than before (negative when fewer).
 pub fn measure<T>(f: impl FnOnce() -> T) -> (T, usize, usize, isize) {
+    let (result, local, all, grown, _) = measure_with_bytes(f);
+    (result, local, all, grown)
+}
+
+/// Also count this thread's requested bytes, including transient allocations
+/// and the full requested size of reallocations.
+pub fn measure_with_bytes<T>(f: impl FnOnce() -> T) -> (T, usize, usize, isize, usize) {
     let (allocs, live) = (ALLOCS.load(Relaxed), LIVE.load(Relaxed));
     TRACKED.set(0);
+    TRACKED_BYTES.set(0);
     TRACKING.set(true);
     let result = f();
     TRACKING.set(false);
     let grown = LIVE.load(Relaxed).wrapping_sub(live).cast_signed();
-    (result, TRACKED.get(), ALLOCS.load(Relaxed) - allocs, grown)
+    (
+        result,
+        TRACKED.get(),
+        ALLOCS.load(Relaxed) - allocs,
+        grown,
+        TRACKED_BYTES.get(),
+    )
 }
 
 /// Count one allocation or reallocation that made GREW bytes live and
@@ -39,7 +54,12 @@ fn counted(grew: usize, shrank: usize) {
     LIVE.fetch_add(grew, Relaxed);
     LIVE.fetch_sub(shrank, Relaxed);
     // A thread's locals may be gone as it exits: then it counts nothing.
-    let _ = TRACKING.try_with(|on| if on.get() { let _ = TRACKED.try_with(|n| n.set(n.get() + 1)); });
+    let _ = TRACKING.try_with(|on| {
+        if on.get() {
+            let _ = TRACKED.try_with(|n| n.set(n.get() + 1));
+            let _ = TRACKED_BYTES.try_with(|n| n.set(n.get() + grew));
+        }
+    });
 }
 
 // UNSAFE(GlobalAlloc is an unsafe trait: an allocator promises valid, disjoint blocks)
