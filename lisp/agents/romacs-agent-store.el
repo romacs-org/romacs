@@ -15,10 +15,6 @@
 ;; session no process has loaded gets its row from its manifest and kept
 ;; state (`romacs-agent-store-fill'), no journal read: a batch process
 ;; does it once (`romacs-agent-store-fill-soon').
-;;
-;; It also keeps which projects the board shows folded (`board_folds'),
-;; the one thing in it no record holds: a table of its own, kept when the
-;; sessions' table is made again; lost with the file, every project shows.
 
 ;;; Code:
 
@@ -889,28 +885,6 @@ one.  A cancelled task's is let go."
                              (condition-case nil
                                  (and (romacs-agent-store-queued (file-name-nondirectory (directory-file-name dir))) t)
                                (romacs-agent-store-unread t)))))
-
-;;; The board's folds
-
-(defun romacs-agent-store-folded ()
-  "The projects the board shows folded, their directories; nil when
-there is no database."
-  (when-let* ((db (romacs-agent-store--open)))
-    (condition-case err (mapcar #'car (sqlite-select db "select project from board_folds"))
-      (error (message "romacs-agent-store: %s" (error-message-string err)) nil))))
-
-(defun romacs-agent-store-fold (project folded)
-  "Keep PROJECT, a directory, FOLDED on the board or not, by the writer;
-quietly nothing when the database cannot be written."
-  (romacs-agent-write 'romacs-agent-store--fold-row (list project folded) nil (list 'fold project)))
-
-(defun romacs-agent-store--fold-row (project folded)
-  "Keep PROJECT FOLDED on the board or not, here.  A failure signals."
-  (let ((db (or (romacs-agent-store--open) (error "No agents store to keep the board's folds in"))))
-    (sqlite-execute db (if folded "insert or ignore into board_folds values (?)"
-                         "delete from board_folds where project = ?")
-                    (list project))
-    t))
 
 (defvar romacs-agent-store--titles (make-hash-table :test #'equal)
   "Each session id to the title its row was last asked to say.")
