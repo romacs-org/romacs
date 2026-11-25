@@ -127,10 +127,14 @@ onto the queue."
       (let ((kind (car frame)))
         (cond ((eq kind 'job)
                (setq romacs--isolate-deferred (nconc romacs--isolate-deferred (list frame))))
+              ;; A job that could not be read is answered in its turn.
+              ((and (eq kind 'frame-error) (eq (car (nth 2 frame)) 'job))
+               (setq romacs--isolate-deferred (nconc romacs--isolate-deferred (list frame))))
               ((eq kind 'fork)
                (setq romacs--isolate-forks (nconc romacs--isolate-forks (list (nth 1 frame)))))
-              ((memq kind '(message text))
-               (let ((message (if (eq kind 'text) frame (nth 2 frame))))
+              ;; A message that could not be read arrives as its frame.
+              ((memq kind '(message text frame-error))
+               (let ((message (if (eq kind 'message) (nth 2 frame) frame)))
                  (setq romacs--isolate-inbox (nconc romacs--isolate-inbox (list message)))))
               ((eq kind 'interrupt)
                ;; For a job not yet run; one running took it at a safepoint.
@@ -156,7 +160,16 @@ owner's process output back at most one round."
       ;; A termination read with the frames starts no further job.
       (unless (romacs--isolate-terminated-p)
         (let ((frame (pop romacs--isolate-deferred)))
-          (romacs--isolate-run-job (nth 1 frame) (nth 2 frame)))))))
+          (if (eq (car frame) 'frame-error)
+              (romacs--isolate-refuse-frame (nth 1 frame) (nth 2 frame))
+            (romacs--isolate-run-job (nth 1 frame) (nth 2 frame))))))))
+
+(defun romacs--isolate-refuse-frame (generation detail)
+  "Answer the job at GENERATION, whose frame could not be read (DETAIL),
+with `isolate-frame-error'; the job itself never runs."
+  (romacs--isolate-reply generation (list 'error (romacs--isolate-frame-error-reply detail)) nil)
+  (when romacs--isolate-job-worker
+    (setq romacs--isolate-serving nil)))
 
 (defun romacs--isolate-serve-frames ()
   "Take every frame from the parent; run the queued jobs unless inside one."

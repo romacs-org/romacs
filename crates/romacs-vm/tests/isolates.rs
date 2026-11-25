@@ -188,7 +188,7 @@ fn protocol_one_is_refused_at_hello_with_the_version_mismatch() {
                (list (car e) (car (nth 2 e)) (isolate-list))))))"));
     eval(&mut vm, "(isolate-kill-all)");
     std::fs::remove_file(&script).unwrap();
-    assert_eq!(out, r#"(isolate-refused "Isolate protocol mismatch: expected 3, got 1" nil)"#);
+    assert_eq!(out, r#"(isolate-refused "Isolate protocol mismatch: expected 5, got 1" nil)"#);
 }
 
 #[test]

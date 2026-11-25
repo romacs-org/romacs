@@ -26,7 +26,7 @@ use crate::frozen::{Backing, INLINE_LIMIT};
 use std::collections::VecDeque;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 
-pub(crate) const PROTOCOL: u32 = 3;
+pub(crate) const PROTOCOL: u32 = 5;
 const HEADER: usize = 10;
 /// A packet buffer: the header, an inline frozen encoding, and slack for
 /// hello.
@@ -76,6 +76,9 @@ impl Kind {
 pub(crate) enum Payload {
     None,
     Frozen(Backing),
+    /// A frame whose value cannot be read (a sealed frame that came
+    /// without its descriptor): taken as its generation's frame error.
+    Unreadable(&'static str),
     Text(String),
     Status(i32),
     /// A `fork' frame's socket, the child's end.
@@ -168,6 +171,8 @@ impl Peer {
             Payload::Frozen(Backing::Inline(inline)) => bytes.extend_from_slice(inline),
             Payload::Frozen(Backing::Sealed(file)) => { bytes[9] = FLAG_SEALED; fd = Some(file.as_fd()); }
             Payload::Socket(socket) => fd = Some(socket.as_fd()),
+            // Only a received frame is unreadable.
+            Payload::Unreadable(reason) => return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, *reason)),
         }
         self.send_bytes(&bytes, fd, wait)
     }
@@ -258,8 +263,8 @@ impl Peer {
             Kind::Bye | Kind::Interrupt | Kind::Memory => Payload::None,
             Kind::Job | Kind::Result | Kind::Error | Kind::Message => {
                 if sealed {
-                    let fd = fds.pop().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "sealed frame without a descriptor"))?;
-                    Payload::Frozen(Backing::Sealed(std::sync::Arc::new(std::fs::File::from(fd))))
+                    fds.pop().map_or(Payload::Unreadable("sealed frame without a descriptor"),
+                                     |fd| Payload::Frozen(Backing::Sealed(std::sync::Arc::new(std::fs::File::from(fd)))))
                 } else {
                     Payload::Frozen(Backing::Inline(std::sync::Arc::new(body.to_vec())))
                 }
@@ -966,12 +971,17 @@ impl Vm {
         !orphans.is_empty()
     }
 
-    /// The next frame from peer ID as `(KIND GENERATION VALUE)`, its value
-    /// attached as a frozen region (or an ordinary string for text and
-    /// hello), or nil when none waits. A frame whose value cannot be
-    /// attached now stays queued and the error is signalled.
+    /// The next frame from peer ID as `(KIND GENERATION VALUE)`, or nil
+    /// when none waits. Its value is taken as `take_backing` says: a data
+    /// graph attached as a frozen region, a code graph placed as private
+    /// copies (or an ordinary string for text and hello). A frame whose
+    /// value is malformed is spent, and taken as `(frame-error GENERATION
+    /// (KIND REASON))` (O7m §4.2), so its receiver answers its generation
+    /// and serves the next frame. A frame that cannot be attached now, every
+    /// region id being live, stays queued and the error is signalled.
     pub(crate) fn isolate_take(&mut self, id: u64) -> Result<Value> {
         let Some(frame) = self.peer_mut(id)?.inbox.pop_front() else { return Ok(Value::NIL) };
+        let generation = Value::integer(frame.generation as i64)?;
         let value = match frame.payload {
             Payload::None => Value::NIL,
             Payload::Socket(socket) => {
@@ -980,17 +990,27 @@ impl Vm {
             }
             Payload::Text(text) => self.make_lisp_string(text.into_bytes(), true),
             Payload::Status(status) => Value::integer(i64::from(status))?,
-            Payload::Frozen(backing) => match self.attach(backing.clone()) {
+            Payload::Frozen(backing) => match self.take_backing(&backing) {
                 Ok(root) => root,
-                Err(error) => {
+                Err(crate::frozen::Taken::Full(error)) => {
                     self.peer_mut(id)?.inbox.push_front(Frame { payload: Payload::Frozen(backing), ..frame });
                     return Err(error);
                 }
+                Err(crate::frozen::Taken::Malformed(reason)) => return Ok(self.frame_error(frame.kind, generation, reason)),
             },
+            Payload::Unreadable(reason) => return Ok(self.frame_error(frame.kind, generation, reason.into())),
         };
         let kind = self.intern(frame.kind.name());
-        let generation = Value::integer(frame.generation as i64)?;
         Ok(self.list_value(&[kind, generation, value]))
+    }
+
+    /// A spent frame of KIND at GENERATION whose value could not be read,
+    /// as taken: `(frame-error GENERATION (KIND REASON))`.
+    fn frame_error(&mut self, kind: Kind, generation: Value, reason: String) -> Value {
+        let (spent, kind) = (self.intern("frame-error"), self.intern(kind.name()));
+        let reason = self.make_lisp_string(reason.into_bytes(), true);
+        let detail = self.list_value(&[kind, reason]);
+        self.list_value(&[spent, generation, detail])
     }
 
     /// Send worker ID SIGNAL. One its zygote has not reported yet holds it

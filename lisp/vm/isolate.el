@@ -151,10 +151,11 @@ A value that cannot be frozen is left out.")
 
 (defvar isolate-message-functions nil
   "Abnormal hook run in the spawner with (SENDER MESSAGE).
-SENDER is the worker's isolate.  MESSAGE is the frozen value sent by
-`isolate-send', or (text GENERATION STRING) from `isolate-send-text'.
-For that list shape, `frozen-p' on MESSAGE distinguishes frozen data
-from a text frame.  Workers take parent messages with `isolate-receive'.")
+SENDER is the worker's isolate.  MESSAGE is the value sent by
+`isolate-send' (frozen data, or a seed's private copies), the frame
+\(text GENERATION STRING) from `isolate-send-text', or the frame
+\(frame-error GENERATION (message REASON)) for a message that could not
+be read.  Workers take parent messages with `isolate-receive'.")
 
 (defvar isolate-error-functions nil
   "Abnormal hook run with (ISOLATE EVENT DATA) when a worker dies or is refused.")
@@ -222,6 +223,14 @@ spawner to run on a worker with the features they were queued for.")
 (define-error 'isolate-degraded "Isolate job would run degraded" 'isolate-error)
 ;; A zygote refused: its features' jobs run on pooled workers.  Data: (REASON).
 (define-error 'isolate-zygote-refused "Isolate zygote refused" 'isolate-error)
+;; A frame whose value could not be read: its generation's reply, from the
+;; side that read it.  Data: (KIND REASON), KIND the frame's.
+(define-error 'isolate-frame-error "Isolate frame unreadable" 'isolate-error)
+
+(defun romacs--isolate-frame-error-reply (detail)
+  "The error reply for a frame whose value could not be read: DETAIL is
+\=(KIND REASON), as `romacs--isolate-take' gives it."
+  (list 'isolate-frame-error detail nil (get 'isolate-frame-error 'error-conditions)))
 ;; The job failed, not its isolate: an `error', which its awaiter's
 ;; `error' handler catches.  Data: (BUDGET), in bytes.
 (define-error 'isolate-memory-exhausted
@@ -1150,6 +1159,9 @@ identity (`romacs--isolate-hello-check' held it to this process's)."
     (let ((id (romacs--isolate-id isolate)) frame)
       (while (and (memq isolate romacs--isolates) (setq frame (romacs--isolate-take id)))
         (let ((kind (car frame)) (generation (nth 1 frame)) (value (nth 2 frame)))
+          ;; A result that could not be read settles its job with the reason.
+          (when (and (eq kind 'frame-error) (memq (car value) '(result error)))
+            (setq kind 'error value (list (romacs--isolate-frame-error-reply value) nil)))
           (cond
            ((eq kind 'hello)
             (romacs--isolate-accept-hello isolate value))
@@ -1159,7 +1171,8 @@ identity (`romacs--isolate-hello-check' held it to this process's)."
             (romacs--isolate-step isolate (list 'answered kind generation value)))
            ((eq kind 'message)
             (run-hook-with-args 'isolate-message-functions isolate value))
-           ((eq kind 'text)
+           ;; A text frame, or a message that could not be read: the frame.
+           ((memq kind '(text frame-error))
             (run-hook-with-args 'isolate-message-functions isolate frame))
            ((eq kind 'memory)
             ;; A job child ending for growing past its budget, the one its
@@ -1296,8 +1309,9 @@ Return TEXT after sending it.  Its bytes must be valid UTF-8 and fit in
 
 (defun isolate-receive (&optional timeout)
   "In a worker: the next message from the parent, waiting up to TIMEOUT.
-Return the frozen value from `isolate-send', or (text GENERATION STRING)
-for a text frame.  Return nil if no message arrives.
+Return the frozen value from `isolate-send', (text GENERATION STRING)
+for a text frame, or (frame-error GENERATION (message REASON)) for a
+message that could not be read.  Return nil if no message arrives.
 A TIMEOUT of 0 polls: it takes what has arrived without waiting, so a
 running job can look for new requests between its own steps."
   (let ((end (and timeout (+ (float-time) timeout))))

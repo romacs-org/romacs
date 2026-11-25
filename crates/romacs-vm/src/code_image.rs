@@ -550,22 +550,41 @@ impl Vm {
     /// Decode function ID's body if it is still mapped from a code image
     /// or pending in a compiled-Lisp artifact (`decode_pending`).
     pub(super) fn materialize_image_function(&mut self, id: usize) -> Result<()> {
-        if self.functions.get(id).ok_or("invalid function")?.pending.is_some() {
-            let decoded = Arc::new(self.decode_pending(id)?);
-            self.functions.set(id, decoded);
-            return Ok(());
-        }
-        if self
-            .functions
-            .get(id)
-            .ok_or("invalid function")?
-            .mapped_code
-            .is_some()
-        {
-            let decoded = Arc::new(self.decode_image_function(id)?);
+        let f = self.functions.get(id).ok_or("invalid function")?;
+        if f.pending.is_some() || f.mapped_code.is_some() {
+            let decoded = self.function_code(id)?;
             self.functions.set(id, decoded);
         }
         Ok(())
+    }
+    /// Function ID's eager code without installing it: its own, its
+    /// pending body decoded, or its image body decoded. The function table
+    /// is left as it was, so whoever reads the code (a seed's encoding, O7m
+    /// §2.1) leaves the function's representation as it found it. A lazy
+    /// body has no code yet.
+    /// The bytes function ID's body is held in until `function_code`
+    /// decodes it: a pending body's, or a mapped body's in the image; none
+    /// for a body held decoded.
+    pub(crate) fn function_held_bytes(&self, id: usize) -> usize {
+        let Some(f) = self.functions.get(id) else { return 0 };
+        match (f.pending.as_deref(), f.mapped_code) {
+            (Some(p), _) => p.body.len(),
+            (None, Some(index)) => self.image.as_ref().and_then(|image| image.string(index).ok()).map_or(0, str::len),
+            (None, None) => 0,
+        }
+    }
+
+    pub(crate) fn function_code(&self, id: usize) -> Result<Arc<Function>> {
+        let f = self.functions.get(id).ok_or("invalid function")?;
+        if f.pending.is_some() {
+            Ok(Arc::new(self.decode_pending(id)?))
+        } else if f.mapped_code.is_some() {
+            Ok(Arc::new(self.decode_image_function(id)?))
+        } else if f.lazy.is_some() {
+            Err("a lazily held function body".into())
+        } else {
+            Ok(Arc::clone(f))
+        }
     }
     fn validate_image_function(&self, f: &Function) -> Result<()> {
         let reg = |r| r < f.regs;
