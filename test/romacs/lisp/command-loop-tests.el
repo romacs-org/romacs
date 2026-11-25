@@ -900,9 +900,8 @@ Beta's romacs--top-level reaches batch startup without a catch."
 (defvar command-loop-tests--minor-active nil)
 
 (ert-deftest command-loop-tests-prefix-wait-keeps-follow-map ()
-  "GNU dispatches through the saved prefix map.
-Beta's romacs--read-key-sequence refollows the changed map."
-  :expected-result (if (fboundp 'romacs--take-user-signal) :failed :passed)
+  "A prefix's maps are the ones taken when its first event came: a timer that
+enables a minor mode during the wait for the next key changes nothing."
   (command-loop-tests--with-input (list 24)
     (local-set-key [24 ?a] #'command-loop-tests--fallback)
     (let* ((map (make-sparse-keymap))
@@ -1042,6 +1041,99 @@ Beta's romacs--read-batch-wait resumes on the fallback timer without dispatching
     (should (equal unread-command-events '(f12)))))
 
 (defvar romacs--sequence-end-functions)
+
+(ert-deftest command-loop-tests-click-remap-point-maps ()
+  "A click's final remap reads point's maps, not the click's (keyboard.c:11866).
+Point is off the clicked character's `keymap' property, so only the local
+map's remap applies."
+  (command-loop-tests--with-input nil
+    (insert "xyz")
+    (goto-char 3)
+    (let ((map (make-sparse-keymap)))
+      (define-key map [mouse-1] #'forward-char)
+      (define-key map [remap forward-char] #'command-loop-tests--replacement)
+      (put-text-property 1 2 'keymap map)
+      (local-set-key [remap forward-char] #'command-loop-tests--fallback)
+      (cl-letf (((get 'mouse-1 'event-kind) 'mouse-click))
+        (let ((unread-command-events (list (list 'mouse-1 (command-loop-tests--posn 1)) 'f12))
+              (pre-command-hook (list (lambda () (push this-command command-loop-tests--log)))))
+          (recursive-edit))
+        (should (equal (reverse command-loop-tests--log)
+                       '(command-loop-tests--fallback fallback exit-recursive-edit)))
+        (should-not unread-command-events)))))
+
+(ert-deftest command-loop-tests-click-remap-other-buffer ()
+  "GNU remaps a click by point's maps in the clicked window's buffer.
+Beta's reader remaps it in the reading buffer; fixed in C5."
+  :expected-result (if (fboundp 'romacs--take-user-signal) :failed :passed)
+  (command-loop-tests--with-input nil
+    (let ((other (generate-new-buffer " *command-loop-click*")))
+      (unwind-protect
+          (let ((window (split-window nil nil t))
+                (map (make-sparse-keymap)))
+            (define-key map [mouse-1] #'forward-char)
+            (with-current-buffer other
+              (use-local-map (make-sparse-keymap))
+              (local-set-key [remap forward-char] #'command-loop-tests--replacement)
+              (insert "xyz")
+              (put-text-property 1 2 'keymap map)
+              (goto-char 3))
+            (local-set-key [remap forward-char] #'command-loop-tests--fallback)
+            (set-window-buffer window other)
+            (cl-letf (((get 'mouse-1 'event-kind) 'mouse-click))
+              (let ((unread-command-events
+                     (list (list 'mouse-1 (list window 1 '(0 . 0) 0 nil 1 '(0 . 0) nil '(0 . 0) '(1 . 1)))
+                           'f12)))
+                (recursive-edit)))
+            (should (equal command-loop-tests--log '(replacement))))
+        (kill-buffer other)))))
+
+(defvar command-loop-tests--remap-mode nil)
+
+(ert-deftest command-loop-tests-remap-after-translation-callout ()
+  "The final remap reads the active maps as a translation function left them."
+  (command-loop-tests--with-input (list 'f5 'f12)
+    (let* ((map (make-sparse-keymap))
+           (command-loop-tests--remap-mode nil)
+           (minor-mode-map-alist (list (cons 'command-loop-tests--remap-mode map))))
+      (define-key map [remap forward-char] #'command-loop-tests--replacement)
+      (local-set-key [f5] #'forward-char)
+      (define-key key-translation-map [f5]
+                  (lambda (_) (setq command-loop-tests--remap-mode t) nil))
+      (let ((pre-command-hook (list (lambda () (push this-command command-loop-tests--log)))))
+        (recursive-edit))
+      (should (equal (reverse command-loop-tests--log)
+                     '(command-loop-tests--replacement replacement exit-recursive-edit)))
+      (should-not unread-command-events))))
+
+(ert-deftest command-loop-tests-sequence-end-once ()
+  "Each read whose sequence started runs `romacs--sequence-end-functions'
+once, on every exit, nested reads included; a read that read nothing runs
+none."
+  (skip-unless (fboundp 'romacs--take-user-signal))
+  (command-loop-tests--with-input (list 'f5 'f6 'f7 'f8 'f12)
+    (let* ((count 0) (counts nil)
+           (romacs--sequence-end-functions (list (lambda () (setq count (1+ count))))))
+      (define-key key-translation-map [f6] (lambda (_) (throw 'escape 'translation)))
+      (local-set-key [f5] #'ignore)
+      (local-set-key [f7] (list 'menu-item "x" 'ignore :filter
+                                (lambda (binding)
+                                  (push (read-key-sequence-vector nil) command-loop-tests--log)
+                                  binding)))
+      (command-loop-tests--key)
+      (push count counts)
+      (should (eq (catch 'escape (command-loop-tests--key)) 'translation))
+      (push count counts)
+      (should (equal (command-loop-tests--key) [f7]))
+      (push count counts)
+      (let ((unread-command-events nil)
+            (executing-kbd-macro "")
+            (executing-kbd-macro-index 0))
+        (should (equal (command-loop-tests--key) [])))
+      (push count counts)
+      (should (equal (reverse counts) '(1 2 4 4)))
+      (should (equal command-loop-tests--log '([f8])))
+      (should (equal unread-command-events '(f12))))))
 
 (ert-deftest command-loop-tests-reader-cleanup-after-throw ()
   (command-loop-tests--with-input (list 'f5 'f6 'f12)
