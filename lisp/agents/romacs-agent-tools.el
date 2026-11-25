@@ -2156,7 +2156,8 @@ one, and kept so once its continuation is (KEPT, as
       (funcall (or kept (lambda (then) (funcall then '(ok nil))))
                (lambda (answer)
                  (when (eq (car answer) 'ok)
-                   (dolist (seq seqs) (romacs-agent-tools--write-answered session seq))))))))
+                   (dolist (seq seqs) (romacs-agent-tools--write-answered session seq))
+                   (romacs-agent-tools--owed-paid session)))))))
 
 (add-hook 'romacs-agent-moved-functions #'romacs-agent-tools--moved)
 
