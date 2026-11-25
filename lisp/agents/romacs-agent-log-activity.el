@@ -13,8 +13,6 @@
 (require 'subr-x)
 (require 'seq)
 (require 'ewoc)
-(require 'button)
-(require 'tooltip)
 (require 'romacs-agent)
 (require 'romacs-agent-glyphs)
 (require 'romacs-icons)
@@ -34,27 +32,11 @@
   "The secondary words of a delegated thread's state."
   :group 'romacs-agent)
 
-(defface romacs-agent-log-activity-overflow '((t :inherit (default button) :underline t))
-  "The inline link to the remaining delegated threads."
-  :group 'romacs-agent)
-
-(defface romacs-agent-log-activity-overflow-focus '((t :inherit default :inverse-video t))
-  "The focused link to the remaining delegated threads."
-  :group 'romacs-agent)
-
-(defcustom romacs-agent-log-activity-idle-cap 3
-  "Maximum number of inactive delegated threads shown above the composer.
-The default leaves room for the transcript and work still in progress."
-  :type 'natnum :group 'romacs-agent)
-
 (defvar-local romacs-agent-log-activity--view nil
   "The live chat's (EWOC START . END), or nil.")
 
 (defvar-local romacs-agent-log-activity--threads nil
   "The working threads in the live activity, from id to their marker.")
-
-(defvar-local romacs-agent-log-activity--focus-overlay nil
-  "The highlight over the overflow button at point.")
 
 (defconst romacs-agent-log-activity--cols 4
   "How many cells a native subagent's animation fills.")
@@ -69,7 +51,6 @@ The default leaves room for the transcript and work still in progress."
 (defvar romacs-agent-log-activity--ordered (make-hash-table :test #'eq :weakness 'key)
   "Delegated thread groups by the worker row snapshot that produced them.")
 (declare-function romacs-agent-log--key "romacs-agent-log" (command &optional map))
-(declare-function romacs-agent-log--open-delegated-list "romacs-agent-log" (_button))
 
 (defun romacs-agent-log-activity--thread (row)
   "The id of the delegated session worker ROW is, or nil for a harness's
@@ -192,56 +173,16 @@ With ACTIVITY-FACE, make room for the inactive state word before the title."
                         'face 'romacs-agent-log-note)
             "\n")))
 
-(defun romacs-agent-log-activity--overflow-help (&rest _)
-  "Show the overflow action in the echo area."
-  (tooltip-show-help-non-mode
-   (format "%s opens these threads on the agent board" (romacs-agent-log--key 'push-button 'button-map)))
-  nil)
-
-(defun romacs-agent-log-activity-focus ()
-  "Highlight the overflow button at point and echo its action."
-  (let ((button (button-at (point)))
-        (focus romacs-agent-log-activity--focus-overlay))
-    (cond ((and button (eq (button-get button 'action) #'romacs-agent-log--open-delegated-list))
-           (unless (and focus (eql (overlay-start focus) (button-start button))
-                        (eql (overlay-end focus) (button-end button)))
-             (when focus (delete-overlay focus))
-             (setq romacs-agent-log-activity--focus-overlay
-                   (make-overlay (button-start button) (button-end button)))
-             (overlay-put romacs-agent-log-activity--focus-overlay 'face 'romacs-agent-log-activity-overflow-focus)
-             (overlay-put romacs-agent-log-activity--focus-overlay 'after-string
-                          (concat " " (propertize (romacs-agent-log--key 'push-button 'button-map)
-                                                  'face '(romacs-agent-log-activity-idle help-key-binding))))
-             (romacs-agent-log-activity--overflow-help)))
-          (focus
-           (delete-overlay focus)
-           (setq romacs-agent-log-activity--focus-overlay nil)
-           (tooltip-show-help-non-mode nil)))))
-
-(defun romacs-agent-log-activity--delegated-heading (live hidden width)
-  "Draw a thread heading with LIVE workers and HIDDEN in overflow."
-  (let ((label (if (> live 0) (format "Threads · %d live" live) "Threads"))
-        (button (when (> hidden 0)
-                  (buttonize (propertize (format "+%d more" hidden) 'face 'romacs-agent-log-activity-overflow)
-                             #'romacs-agent-log--open-delegated-list))))
-    (concat (truncate-string-to-width
-             (concat (propertize label 'face 'romacs-agent-log-note)
-                     (when button (concat " " button)))
-             (max 1 (1- width)))
-            "\n")))
-
 (defun romacs-agent-log-activity--delegated-lines (groups width)
-  "Draw delegated thread GROUPS within WIDTH, with overflow in the heading."
-  (pcase-let* ((`(,live . ,inactive) groups)
-               (shown (seq-take inactive romacs-agent-log-activity-idle-cap))
-               (hidden (- (length inactive) (length shown))))
-    (when (or live inactive)
-      (concat (romacs-agent-log-activity--delegated-heading (length live) hidden width)
-              (mapconcat (lambda (row) (concat (romacs-agent-log-activity-delegated-line row width) "\n"))
-                         (append live shown) "")))))
+  "Draw the live threads of delegated thread GROUPS within WIDTH: those
+idle, done or failed are listed by `romacs-agent-menu-threads'."
+  (let ((live (car groups)))
+    (concat (romacs-agent-log-activity--heading "Threads" (length live) width)
+            (mapconcat (lambda (row) (concat (romacs-agent-log-activity-delegated-line row width) "\n"))
+                       live ""))))
 
 (defun romacs-agent-log-activity-lines (rows width)
-  "Render unsettled delegated threads and active subagents in ROWS within WIDTH."
+  "Render live delegated threads and active subagents in ROWS within WIDTH."
   (let ((native (seq-filter #'romacs-agent-log-activity--running-p rows)))
     (concat (romacs-agent-log-activity--delegated-lines (romacs-agent-log-activity-delegated-rows rows) width)
             (romacs-agent-log-activity--heading "Subagents" (length native) width)

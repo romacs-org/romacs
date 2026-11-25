@@ -2271,11 +2271,6 @@ REASON when given."
       (romacs-agent-show child '(display-buffer-same-window))
     (user-error "That delegated thread is no longer available")))
 
-(defun romacs-agent-log--open-delegated-list (_button)
-  "Open the board with only this chat's delegated threads."
-  (require 'romacs-agent-board)
-  (romacs-agent-board-open-threads romacs-agent-log--session))
-
 (defun romacs-agent-log-copy-job-unit ()
   "Copy the full unit name from the watched job row at point."
   (interactive nil romacs-agent-log-mode)
@@ -2526,7 +2521,6 @@ On the transcript's text:
   (add-function :filter-return (local 'filter-buffer-substring-function) #'romacs-agent-log--undecorated)
   (add-hook 'window-size-change-functions #'romacs-agent-log-tables-refit nil t)
   (romacs-agent-log-attach-setup)
-  (add-hook 'post-command-hook #'romacs-agent-log-activity-focus nil t)
   (add-hook 'after-change-functions #'romacs-agent-log--composer-plain nil t)
   (add-hook 'after-change-functions #'romacs-agent-log--draft-emptied nil t))
 

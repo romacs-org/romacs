@@ -39,15 +39,20 @@
                                  'face 'bold)))
 
 (defun romacs-agent-menu--worker-rows ()
-  "The chat's unsettled delegated rows, in panel order, each naming its
-worker by :id."
+  "The chat's live delegated rows, in panel order, each naming its worker
+by :id."
   (when-let* ((summary (romacs-agent-log--summary)))
-    (pcase-let ((`(,live . ,inactive) (romacs-agent-log-activity-delegated-rows
-                                        (romacs-agent-summary-children-rows summary))))
-      (append live inactive))))
+    (car (romacs-agent-log-activity-delegated-rows (romacs-agent-summary-children-rows summary)))))
+
+(defun romacs-agent-menu--thread-rows ()
+  "Every thread the chat delegated, settled ones too, in its rows' order,
+each with the state it shows (a settled one's, as it was left)."
+  (when-let* ((summary (romacs-agent-log--summary)))
+    (mapcar (lambda (row) (if (eq (plist-get row :key) 'settled) (plist-put (copy-sequence row) :key (plist-get row :inactive)) row))
+            (seq-filter #'romacs-agent-log-activity--thread (romacs-agent-summary-children-rows summary)))))
 
 (defun romacs-agent-menu--workers ()
-  "The ids of the chat's unsettled delegated sessions, in panel order."
+  "The ids of the chat's live delegated sessions, in panel order."
   (mapcar (lambda (row) (plist-get row :id)) (romacs-agent-menu--worker-rows)))
 
 (defvar-local romacs-agent-menu--shown nil
@@ -83,15 +88,26 @@ saying so when it settled since.")
     (romacs-agent-menu--open-worker (or (and (< -1 index 9) (aref (romacs-agent-menu--slots) index))
                                        (user-error "No such worker")))))
 
-(defun romacs-agent-menu-workers ()
-  "Open the chat of an unsettled delegated worker, chosen by its title."
+(defun romacs-agent-menu--thread-line (row)
+  "Thread ROW as a line to choose: its state's mark, its title, its state
+and its id, which makes the line its own whatever the titles."
+  (let ((state (assq (plist-get row :key) romacs-agent-log-activity--delegated-states))
+        (id (romacs-agent-log-activity--thread row)))
+    (concat (romacs-agent-glyph (nth 1 state)) " " (or (plist-get row :title) "Delegated thread") "  "
+            (propertize (or (romacs-agent-log-activity--delegated-label row) "Done") 'face 'shadow) "  "
+            (propertize (romacs-agent--short id) 'face 'shadow))))
+
+(defun romacs-agent-menu-threads ()
+  "Open the chat of a thread this chat delegated, live or not, chosen from
+all of them by its title and state."
   (interactive nil romacs-agent-log-mode)
-  (let* ((rows (or (romacs-agent-menu--worker-rows) (user-error "No unsettled delegated workers")))
+  (let* ((rows (or (romacs-agent-menu--thread-rows) (user-error "This chat delegated no threads")))
          ;; Its id makes each line its own, whatever the titles.
-         (named (mapcar (lambda (row) (cons (format "%s  %s" (plist-get row :title) (plist-get row :id)) (plist-get row :id)))
-                        rows)))
-    (romacs-agent-menu--open-worker
-     (cdr (assoc (romacs-agent--read-ordered "Worker: " (mapcar #'car named) nil nil t) named)))))
+         (named (mapcar (lambda (row) (cons (romacs-agent-menu--thread-line row) (romacs-agent-log-activity--thread row)))
+                        rows))
+         (id (cdr (assoc (romacs-agent--read-ordered "Thread: " (mapcar #'car named) nil nil t) named))))
+    (romacs-agent-show (or (romacs-agent-get id) (user-error "Thread %s is gone" id))
+                       '(display-buffer-same-window))))
 
 ;;; The session's commands, as the menu offers them
 
@@ -466,9 +482,9 @@ the session, the view."
   "7" ((lambda () (romacs-agent-menu--worker-label 6)) romacs-agent-menu-open-worker)
   "8" ((lambda () (romacs-agent-menu--worker-label 7)) romacs-agent-menu-open-worker)
   "9" ((lambda () (romacs-agent-menu--worker-label 8)) romacs-agent-menu-open-worker)
-  "o" ((lambda () (let ((n (length (romacs-agent-menu--workers))))
-                    (and (> n 9) (format "All %d workers" n))))
-       romacs-agent-menu-workers)
+  "t" ((lambda () (let ((n (length (romacs-agent-menu--thread-rows))))
+                    (and (> n 0) (format "All %d threads" n))))
+       romacs-agent-menu-threads)
   :row
   :group ("Session" :if #'romacs-agent-log--commands-p)
   "b" ("Agent board" romacs-agents)

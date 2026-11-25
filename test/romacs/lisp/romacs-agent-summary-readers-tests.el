@@ -364,7 +364,10 @@
          (cl-letf (((symbol-function 'romacs-agent-show)
                     (lambda (session &rest _) (romacs-agent-id session))))
            (should (equal (romacs-agent-summary-readers--completion
-                           '("working  working" "child  child") "child  child" #'romacs-agent-menu-workers)
+                           '("W working  Working  working" "I child  Idle  child") "I child  Idle  child"
+                           (lambda () (cl-letf (((symbol-function 'romacs-agent-glyph) (lambda (role) (if (eq role 'chip-working) "W" "I")))
+                                                ((symbol-function 'romacs-agent--short) #'identity))
+                                        (romacs-agent-menu-threads))))
                           "child"))))))))
 
 (ert-deftest romacs-agent-summary-readers-plain-effort-completion ()
