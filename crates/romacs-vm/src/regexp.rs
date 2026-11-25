@@ -434,7 +434,7 @@ impl Vm {
     fn string_matcher_search(&mut self, matcher: &mut StringMatcher, i: usize, string: Value)
         -> std::result::Result<Option<MatchRegisters>, prim::Fault> {
         let id = match matcher.patterns[i] {
-            Some(id) if self.regexp_cache.pattern(id).is_some() => id,
+            Some(id) if self.mutator_rest.regexp_cache.pattern(id).is_some() => id,
             _ => {
                 let id = self.regexp_input(matcher.sources[i])
                     .and_then(|source| self.regexp_pattern(&source, false, matcher.key, || matcher.translation.clone(), &matcher.syntax))
@@ -464,7 +464,7 @@ impl Vm {
     fn regexp_pattern(&mut self, pattern: &Input<'_>, posix: bool, key: Translation,
                       translation: impl FnOnce() -> Option<regex::CaseTranslation>, source: &syntax::SyntaxSource) -> SearchResult<PatternId> {
         let table = source.table();
-        if let Some(id) = self.regexp_cache.hit(&pattern.bytes, |e| e.multibyte == pattern.multibyte
+        if let Some(id) = self.mutator_rest.regexp_cache.hit(&pattern.bytes, |e| e.multibyte == pattern.multibyte
             && e.posix == posix && e.translation == key && e.syntax.is_none_or(|t| t == table)) {
             return Ok(id);
         }
@@ -474,20 +474,20 @@ impl Vm {
         compiled.rebind_syntax_table(&syntax::VmSyntax::new(self, source.clone()));
         let entry = CachedPattern { multibyte: pattern.multibyte, posix, translation: key, syntax: compiled.used_syntax().then_some(table),
             reads_lookup: compiled.reads_lookup(), compiled: Box::new(compiled), used: 0, serial: 0 };
-        Ok(self.regexp_cache.insert(&pattern.bytes, entry))
+        Ok(self.mutator_rest.regexp_cache.insert(&pattern.bytes, entry))
     }
 
     /// The cached pattern ID names, set for a search of MULTIBYTE text.
     #[inline(always)]
     fn regexp_aim(&mut self, id: PatternId, multibyte: bool) -> SearchResult<()> {
-        self.regexp_cache.pattern_mut(id).ok_or_else(|| Fault::Internal(STALE.into()))?.set_target_multibyte(multibyte);
+        self.mutator_rest.regexp_cache.pattern_mut(id).ok_or_else(|| Fault::Internal(STALE.into()))?.set_target_multibyte(multibyte);
         Ok(())
     }
 
     /// The cached pattern ID names, for a search to borrow where it lies.
     #[inline(always)]
     fn regexp_cached(&self, id: PatternId) -> SearchResult<&regex::CompiledPattern> {
-        self.regexp_cache.pattern(id).ok_or_else(|| Fault::Internal(STALE.into()))
+        self.mutator_rest.regexp_cache.pattern(id).ok_or_else(|| Fault::Internal(STALE.into()))
     }
 
     /// PATTERNS compiled for a search of multibyte text, each still cached:
@@ -496,7 +496,7 @@ impl Vm {
     fn regexp_compiled_all(&mut self, patterns: &[Input<'_>], source: &syntax::SyntaxSource) -> SearchResult<Vec<PatternId>> {
         for _ in 0..3 {
             let ids = patterns.iter().map(|p| self.regexp_compiled(p, true, false, false, source)).collect::<SearchResult<Vec<_>>>()?;
-            if ids.iter().all(|&id| self.regexp_cache.pattern(id).is_some()) {
+            if ids.iter().all(|&id| self.mutator_rest.regexp_cache.pattern(id).is_some()) {
                 return Ok(ids);
             }
         }
@@ -512,7 +512,7 @@ impl Vm {
     /// `clear_regexp_cache` (search.c) does for the syntax-bound ones, and
     /// after a collection, which may move the tables.
     pub(crate) fn forget_table_bound_patterns(&mut self) {
-        self.regexp_cache.retain(|e| e.syntax.is_none() && !matches!(e.translation, Translation::Completion(_)));
+        self.mutator_rest.regexp_cache.retain(|e| e.syntax.is_none() && !matches!(e.translation, Translation::Completion(_)));
     }
 
     /// GNU fast_looking_at over the current buffer's accessible text, for
@@ -887,8 +887,8 @@ impl Vm {
     }
     #[inline]
     fn search_slots(&mut self) -> &mut SearchSlots {
-        if self.regexp_cache.slots.is_none() {
-            self.regexp_cache.slots = Some(SearchSlots {
+        if self.mutator_rest.regexp_cache.slots.is_none() {
+            self.mutator_rest.regexp_cache.slots = Some(SearchSlots {
                 preserve_match_data: self.slot("inhibit-changing-match-data"),
                 match_buffer: self.slot("#:vm2-match-buffer"),
                 standard_syntax: self.slot("#:vm2-standard-syntax"),
@@ -899,7 +899,7 @@ impl Vm {
                 forward_comment: Places::new([self.slot("forward-comment-function")]),
             });
         }
-        self.regexp_cache.slots.as_mut().expect("found above")
+        self.mutator_rest.regexp_cache.slots.as_mut().expect("found above")
     }
     /// The values in the current buffer of the variables AT names among
     /// the search slots, read where they were last found while that holds.
@@ -972,10 +972,10 @@ impl Vm {
         let table = source.table();
         let slot = self.str_view(pattern).and_then(|view| {
             let multibyte = view.is_multibyte();
-            self.regexp_cache.find(view.bytes(), |e| e.multibyte == multibyte
+            self.mutator_rest.regexp_cache.find(view.bytes(), |e| e.multibyte == multibyte
                 && e.posix == posix && e.translation == key && e.syntax.is_none_or(|t| t == table))
         });
-        if let Some(id) = slot.and_then(|slot| self.regexp_cache.touch(slot, Some(multibyte))) {
+        if let Some(id) = slot.and_then(|slot| self.mutator_rest.regexp_cache.touch(slot, Some(multibyte))) {
             return Ok(id);
         }
         let pattern = self.regexp_input(pattern)?;
@@ -1010,7 +1010,7 @@ impl Vm {
     /// where the literal does, with the same folding.
     fn regexp_compiled_literal(&mut self, string: Value, multibyte: bool, posix: bool, folded: bool, source: &syntax::SyntaxSource)
         -> SearchResult<PatternId> {
-        let mut quoted = std::mem::take(&mut self.regexp_cache.quoted);
+        let mut quoted = std::mem::take(&mut self.mutator_rest.regexp_cache.quoted);
         quoted.clear();
         let view = self.str_view(string).ok_or_else(|| Fault::Wrong("stringp", string))?;
         for &byte in view.bytes() {
@@ -1021,7 +1021,7 @@ impl Vm {
         }
         let (chars, pattern_multibyte) = (view.chars + quoted.len() - view.bytes().len(), view.is_multibyte());
         let compiled = self.regexp_compiled(&Input::new(&quoted[..], chars, pattern_multibyte), multibyte, posix, folded, source);
-        self.regexp_cache.quoted = quoted;
+        self.mutator_rest.regexp_cache.quoted = quoted;
         compiled
     }
     fn regexp_group(&self, v: Value) -> SearchResult<Option<(usize, usize)>> {
@@ -1233,7 +1233,7 @@ impl Vm {
         }
         let arg = |i| {
             if i < n {
-                self.stack[start + i]
+                self.mutator.stack[start + i]
             } else {
                 Value::NIL
             }

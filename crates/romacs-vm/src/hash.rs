@@ -1140,7 +1140,7 @@ impl Vm {
         if !arity {
             return Err(HashFault::Arity(p, n));
         }
-        let args = &self.stack[start..start + n];
+        let args = &self.mutator.stack[start..start + n];
         let truth = |b: bool| if b { Value::TRUE } else { Value::NIL };
         match p {
             MakeHashTable => {

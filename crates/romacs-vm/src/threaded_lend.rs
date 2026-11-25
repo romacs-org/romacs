@@ -94,17 +94,17 @@ impl Engine<'_> {
             controls: std::mem::take(&mut self.controls),
             escape: self.escape.take(),
             frames: std::mem::take(&mut self.frames),
-            file: self.vm.stack.depth(),
+            file: self.vm.mutator.stack.depth(),
             function: self.function,
             regs: self.regs,
             stack_used: std::mem::take(&mut self.stack_used),
             spread_end: std::mem::take(&mut self.spread_end),
         };
-        self.vm.suspended.push(record);
+        self.vm.mutator_rest.suspended.push(record);
     }
     /// Take this engine's state back, as the collector left it.
     fn resume_code(&mut self) {
-        let record = self.vm.suspended.pop().expect("this engine's suspended state");
+        let record = self.vm.mutator_rest.suspended.pop().expect("this engine's suspended state");
         self.code = record.code;
         self.entries = record.entries;
         self.rest = record.rest;
@@ -119,19 +119,19 @@ impl Engine<'_> {
     /// The current frame's offset in the register stack.
     #[inline(always)]
     fn frame_base(&self) -> usize {
-        (self.regs as usize - self.vm.stack.as_ptr() as usize) / std::mem::size_of::<Value>()
+        (self.regs as usize - self.vm.mutator.stack.as_ptr() as usize) / std::mem::size_of::<Value>()
     }
     /// Register I of the current frame, bounds-checked: for orchestration's
     /// leaves, off the hot path.
     #[inline(always)]
     pub(super) fn reg(&self, i: usize) -> Value {
-        self.vm.stack[self.frame_base() + i]
+        self.vm.mutator.stack[self.frame_base() + i]
     }
     /// Set register I of the current frame, bounds-checked.
     #[inline(always)]
     pub(super) fn set_reg(&mut self, i: usize, value: Value) {
         let at = self.frame_base() + i;
-        self.vm.stack[at] = value;
+        self.vm.mutator.stack[at] = value;
     }
     /// RUN with only this engine's state and code suspended: the registers
     /// stay in place (a watcher, a reader body, a handler callback, a

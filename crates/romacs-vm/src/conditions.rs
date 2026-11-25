@@ -259,12 +259,12 @@ impl Vm {
                 ],
             });
         }
-        let x = self.stack[start];
+        let x = self.mutator.stack[start];
         if p == ErrorMessage {
             return self.error_message(x);
         }
         let id = self.symbol_id(x)?;
-        let y = self.stack[start + 1];
+        let y = self.mutator.stack[start + 1];
         // Every property except the two condition projections lives on the
         // symbol OBJECT's own plist (GNU `u.s.plist`), under any `eq` key.
         // error-conditions and error-message stay in the registry, which
@@ -279,7 +279,7 @@ impl Vm {
                 }
                 return Ok(self.symbol_property(x, y).expect("checked symbol"));
             }
-            let value = self.stack[start + 2];
+            let value = self.mutator.stack[start + 2];
             return self.put_symbol_property_checked(x, y, value).map_err(|fault| match fault {
                 annotations::PlistFault::Symbol(v) => Fault::wrong(self.intern_symbol("symbolp"), v),
                 annotations::PlistFault::Plistp(v) => Fault::wrong(self.intern_symbol("plistp"), v),
@@ -290,14 +290,14 @@ impl Vm {
             return Ok(self.get_property(id, y));
         }
         if p == Put {
-            let value = self.stack[start + 2];
+            let value = self.mutator.stack[start + 2];
             self.conditions.put(id, y, value);
             return Ok(value);
         }
-        let parents = if n == 2 || self.stack[start + 2] == Value::NIL {
+        let parents = if n == 2 || self.mutator.stack[start + 2] == Value::NIL {
             self.intern_symbol("error")
         } else {
-            self.stack[start + 2]
+            self.mutator.stack[start + 2]
         };
         let property = self.intern_symbol("error-conditions");
         let mut ancestors = vec![x];

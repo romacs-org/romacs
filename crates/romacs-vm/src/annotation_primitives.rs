@@ -862,20 +862,20 @@ impl Vm {
         use Primitive::*;
         if p == GetCharProperty {
             if !(2..=3).contains(&n) { return Err("wrong primitive arity".into()); }
-            let object = if n == 3 { self.stack[start + 2] } else { Value::NIL };
-            return self.get_char_property_values(self.stack[start], self.stack[start + 1], object);
+            let object = if n == 3 { self.mutator.stack[start + 2] } else { Value::NIL };
+            return self.get_char_property_values(self.mutator.stack[start], self.mutator.stack[start + 1], object);
         }
         if (p as usize) < MakeMarker as usize {
             return self.text_annotation_primitive(p, start, n);
         }
         let mut fixed = [Value::NIL; 5];
         let variable = if p == InsertBeforeMarkers && n > 5 {
-            Some(self.stack[start..start + n].to_vec())
+            Some(self.mutator.stack[start..start + n].to_vec())
         } else {
             None
         };
         if n <= 5 {
-            fixed[..n].copy_from_slice(&self.stack[start..start + n]);
+            fixed[..n].copy_from_slice(&self.mutator.stack[start..start + n]);
         }
         let args = variable.as_deref().unwrap_or(&fixed[..n.min(5)]);
         let arity = match p {

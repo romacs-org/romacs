@@ -138,7 +138,7 @@ fn deopt_preserves_heap_arguments_captures_and_arity() {
         vm.heap_stats().collections > before,
         "moving collector was not exercised"
     );
-    assert!(vm.execution.registers.iter().all(|v| *v == Value::NIL));
+    assert!(vm.mutator_rest.execution.registers.iter().all(|v| *v == Value::NIL));
 }
 
 #[test]

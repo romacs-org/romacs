@@ -42,7 +42,7 @@ fn opaque_rest_allocation_observation_and_compaction() {
         let answer = vm.eval_source_raw("(rest1-run)").unwrap();
         assert_eq!(answer, Value::integer(n).unwrap());
         let count = vm.heap_stats().allocations - before;
-        let capacity = vm.execution.rest_stack_capacity();
+        let capacity = vm.mutator_rest.execution.rest_stack_capacity();
         eprintln!("rest1 N={n} allocations={count} stack_capacity={capacity:?}");
         capacities.push(capacity);
         counts.push(count);

@@ -611,7 +611,7 @@ impl Vm {
         start: usize,
         n: usize,
     ) -> Result<Value> {
-        let a = self.stack[start..start + n].to_vec();
+        let a = self.mutator.stack[start..start + n].to_vec();
         self.interpreted_closure_values(p, a)
     }
     /// The closure primitives on their arguments A, already out of the file.

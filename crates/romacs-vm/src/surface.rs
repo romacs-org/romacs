@@ -10,7 +10,7 @@ impl Vm {
         if argc != 1 {
             return Err("wrong primitive arity".into());
         }
-        let value = self.stack[start];
+        let value = self.mutator.stack[start];
         let yes = match primitive {
             Primitive::Integerp => value.integer_value().is_some()
                 || matches!(self.object_if(value), Some(data::Object::Bignum(_))),

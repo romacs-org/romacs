@@ -556,7 +556,7 @@ impl Vm {
     /// handlers made since are popped, without their watchers, and no cleanup
     /// runs; what they owned (`romacs--post-gc-owned`, `inhibit-quit`, a job's
     /// claim) ends with them, and a variable whose watchers were running is
-    /// trapped again (`Vm::retrap`).
+    /// trapped again (`Mutator::retrap`).
     ///
     /// # Errors
     /// The panic's payload, if BODY panicked.
@@ -564,7 +564,7 @@ impl Vm {
     /// # Panics
     /// If an engine is running: a panic is caught outside any.
     pub fn catching<T>(&mut self, body: impl FnOnce(&mut Vm) -> T) -> std::thread::Result<T> {
-        assert_eq!(self.running_engines, 0, "a panic is caught outside any engine");
+        assert_eq!(self.mutator.running_engines, 0, "a panic is caught outside any engine");
         let mark = NestingMark {
             roots: self.mutator.external_roots.len(),
             holds: self.mutator.gc_holds,
@@ -572,7 +572,7 @@ impl Vm {
             retrap: self.mutator.retrap.len(),
             handlers: self.mutator.signal_handlers.len(),
             backtrace: self.mutator.backtrace.frames.len(),
-            eval_depth: self.eval_depth,
+            eval_depth: self.mutator.eval_depth,
             native_quit: self.mutator.native_quit,
             macro_record: self.macro_record.mark(),
         };
@@ -593,17 +593,17 @@ impl Vm {
         self.mutator.gc_holds = mark.holds;
         self.mutator.signal_handlers.truncate(mark.handlers);
         self.mutator.backtrace.leave(mark.backtrace);
-        self.eval_depth = mark.eval_depth;
+        self.mutator.eval_depth = mark.eval_depth;
         self.macro_record.restore(&mark.macro_record);
         // Outside any engine, these are all at rest.
-        self.suspended.clear();
-        self.stack.reset();
-        self.running_engines = 0;
+        self.mutator_rest.suspended.clear();
+        self.mutator.stack.reset();
+        self.mutator.running_engines = 0;
         self.mutator.unwinding = 0;
         self.mutator.aftermath_runs = 0;
         self.mutator.rooted_write = false;
         self.mutator.deferred_writes.clear();
-        self.site_leaf = (0, 0);
+        self.mutator_rest.site_leaf = (0, 0);
         // A panic in a host wait drops its host, as it did when the wait
         // kept it on the native stack.
         self.host_wait = None;
@@ -657,23 +657,23 @@ impl Vm {
     /// (tests/fixtures/reentry-sites.txt lists each call site).
     pub(crate) fn may_collect(&self, own: usize) -> bool {
         self.mutator.gc_holds == 0 && self.mutator.deferred_writes.is_empty()
-            && self.running_engines.saturating_sub(self.suspended.len()) == own
+            && self.mutator.running_engines.saturating_sub(self.mutator_rest.suspended.len()) == own
     }
     /// Set the register stack aside (`Registers::suspend`).
     pub(crate) fn suspend_stack(&mut self) {
-        self.stack.suspend();
+        self.mutator.stack.suspend();
     }
     pub(crate) fn resume_stack(&mut self) {
-        self.stack.resume();
+        self.mutator.stack.resume();
     }
     /// RUN on ARGS in the reused kernel file, the current one set aside beneath
     /// it, still traced, its allocation unmoved: the one way a native borrows
     /// register slots (a storage kernel, a property query) without touching a
     /// running engine's. RUN gets the arguments' count; they start at 0.
     pub(crate) fn with_kernel_stack<T>(&mut self, args: &[Value], run: impl FnOnce(&mut Self, usize) -> T) -> T {
-        self.stack.enter_kernel(args);
+        self.mutator.stack.enter_kernel(args);
         let out = run(self, args.len());
-        self.stack.leave_kernel();
+        self.mutator.stack.leave_kernel();
         out
     }
     /// SLOTS as a dense membership table over every symbol slot.
@@ -768,7 +768,7 @@ impl Vm {
     pub(crate) fn minor_chosen(&self) -> bool {
         // Owed where it can be paid: only a collection at a request's
         // boundary retires request code and starts the count again.
-        let code = self.stack.at_rest()
+        let code = self.mutator.stack.at_rest()
             && self.request_code.since_collection >= self.code_collection_threshold();
         !self.full_due() && !code && (self.minor_due() || (self.gc_stress.shift && self.minor_allowed()))
     }
@@ -968,7 +968,7 @@ impl Vm {
     /// engine answers for its own cleanups (`Engine::safe_runner`), and an
     /// engine that is neither fails `may_collect`.
     pub(crate) fn aftermath_held(&self) -> bool {
-        self.mutator.unwinding != 0 || self.mutator.aftermath_runs != 0 || self.suspended.iter().any(threaded::Suspended::in_cleanup)
+        self.mutator.unwinding != 0 || self.mutator.aftermath_runs != 0 || self.mutator_rest.suspended.iter().any(threaded::Suspended::in_cleanup)
     }
     /// alloc.c queue_doomed_finalizers and mark_finalizer_list: the
     /// finalizers marking has not reached are marked, with their functions,
@@ -1329,7 +1329,7 @@ impl Vm {
     fn rewrite_root_slots(&mut self, roots: &mut [Value], rewrite: &mut impl FnMut(&mut Value)) {
         // The traced register slots (`register_roots`); above the tops is NIL.
         let tops = self.register_tops();
-        let registers = self.stack.files_mut().zip(tops);
+        let registers = self.mutator.stack.files_mut().zip(tops);
         for v in roots
             .iter_mut()
             .chain(registers.flat_map(|(file, top)| file[..top].iter_mut()))
@@ -1355,7 +1355,7 @@ impl Vm {
         // The one funnel: no collection while a hold is open or an engine runs
         // unsuspended, whatever reached here. Raw code cannot suspend its own
         // engine (only the engine's lends do), so it cannot make this pass.
-        debug_assert!(self.suspended.len() <= self.running_engines, "suspended engines outnumber running ones");
+        debug_assert!(self.mutator_rest.suspended.len() <= self.mutator.running_engines, "suspended engines outnumber running ones");
         if !self.may_collect(0) {
             return false;
         }
@@ -1404,11 +1404,11 @@ impl Vm {
         lap.lap(&mut self.gc_times, Phase::Retire);
         // The code this collection traced, for the next one's pacing.
         self.gc_code = code_marks.iter().zip(&self.functions).filter(|&(&live, _)| live).map(|(_, f)| f.code.len()).sum::<usize>()
-            + self.execution.code_len()
-            + self.suspended.iter().map(threaded::Suspended::code_len).sum::<usize>();
+            + self.mutator_rest.execution.code_len()
+            + self.mutator_rest.suspended.iter().map(threaded::Suspended::code_len).sum::<usize>();
         // Only a collection with no request running retires live request
         // code; one inside an engine must not postpone the next of those.
-        if self.stack.at_rest() {
+        if self.mutator.stack.at_rest() {
             self.reset_code_count();
         }
         // Unmarked regions go now: no surviving value names one, and no weak
@@ -1602,10 +1602,10 @@ impl Vm {
                 body.values.iter_mut().for_each(|v| rewrite(v));
             }
         }
-        for program in std::iter::once(&mut self.execution).chain(self.spare_programs.iter_mut()) {
+        for program in std::iter::once(&mut self.mutator_rest.execution).chain(self.mutator_rest.spare_programs.iter_mut()) {
             program.visit_values(&mut |v| rewrite(v));
         }
-        for engine in &mut self.suspended {
+        for engine in &mut self.mutator_rest.suspended {
             engine.visit_values(&mut |v| rewrite(v));
         }
         self.conditions.visit_values(&mut |v| rewrite(v));
@@ -1952,7 +1952,7 @@ impl Vm {
         self.flat_tables.forget();
         // Finished nested runs' programs are caches: relowering what is used
         // again costs less than tracing, retiring and forwarding every copy.
-        for program in &mut self.spare_programs {
+        for program in &mut self.mutator_rest.spare_programs {
             program.forget_code();
         }
     }
@@ -1986,7 +1986,7 @@ impl Vm {
             pending.extend([old, self.slots[slot].value, buffer, Value::reference(slot + 1, 7)]);
         }
         let mut code_marks: Vec<std::sync::atomic::AtomicBool> = self.functions.iter().map(|_| false.into()).collect();
-        let active = !self.stack.at_rest();
+        let active = !self.mutator.stack.at_rest();
         let minor_changed = matches!(r#for, MarkFor::Minor).then(|| self.minor_code(&mut code_marks));
         // A minor reads the functions changed since the last collection, and
         // no other code root.
@@ -2093,7 +2093,7 @@ impl Vm {
         let keep = |v: &Value| traced(*v, in_obarray);
         let mut pending: Vec<Value> = roots.iter().copied().filter(keep).collect();
         pending.extend_from_slice(&self.mutator.external_roots);
-        for engine in &mut self.suspended {
+        for engine in &mut self.mutator_rest.suspended {
             engine.visit_state_values(&mut |v| if keep(v) { pending.push(*v) });
         }
         pending.extend(self.doomed_finalizers.iter().copied());
@@ -2150,7 +2150,7 @@ impl Vm {
     /// minor (CHANGED given) reads lowered code as it reads functions, that
     /// of the changed alone (`Suspended::minor_values`).
     fn lowered_roots(&self, changed: Option<&[usize]>, value: &mut impl FnMut(Value)) {
-        for engine in &self.suspended {
+        for engine in &self.mutator_rest.suspended {
             match changed {
                 None => engine.code_values(value),
                 Some(changed) => engine.minor_values(changed, value),
@@ -2643,7 +2643,7 @@ mod tests {
         let function = vm.closures[usize::try_from(caller.payload()).unwrap()].function;
         let young = vm.eval_source_raw("(let ((held (list 1 2))) #'(lambda () held))").unwrap();
         assert!(!vm.closures.old(usize::try_from(young.payload()).unwrap()), "made since the collection");
-        assert!(vm.execution.plant_entry(function, young), "the caller has lowered code in the idle program");
+        assert!(vm.mutator_rest.execution.plant_entry(function, young), "the caller has lowered code in the idle program");
         vm.collect_minor(&[]);
     }
 

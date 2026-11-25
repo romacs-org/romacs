@@ -699,9 +699,9 @@ mod kernel_tests {
         let mut vm = Vm::new();
         vm.set_gc_stress(0);
         let held = vm.alloc_cons(Value::NIL, Value::NIL);
-        vm.stack.test_vec().push(held);
+        vm.mutator.stack.test_vec().push(held);
         assert!(vm.edit_kernel(&[], |vm, _| { vm.collect(&mut []); Ok(Value::NIL) }).is_ok());
-        assert_eq!(vm.stack.test_vec().pop(), Some(held));
+        assert_eq!(vm.mutator.stack.test_vec().pop(), Some(held));
         assert!(!vm.conses.is_free(held.index(3).unwrap()), "the engine's register lost what it held");
     }
 }

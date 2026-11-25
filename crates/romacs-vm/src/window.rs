@@ -1544,7 +1544,7 @@ impl Vm {
         }
         let arg = |i: usize| {
             if i < n {
-                self.stack[start + i]
+                self.mutator.stack[start + i]
             } else {
                 Value::NIL
             }

@@ -19,9 +19,9 @@ impl Vm {
         -> Option<PatternId> {
         let view = self.str_view(pattern)?;
         let pattern_multibyte = view.is_multibyte();
-        let slot = self.regexp_cache.find(view.bytes(), |e| e.multibyte == pattern_multibyte
+        let slot = self.mutator_rest.regexp_cache.find(view.bytes(), |e| e.multibyte == pattern_multibyte
             && e.posix == posix && e.translation == key && e.syntax.is_none() && !e.reads_lookup)?;
-        self.regexp_cache.touch(slot, Some(multibyte))
+        self.mutator_rest.regexp_cache.touch(slot, Some(multibyte))
     }
 
     /// PATTERN against STRING with the translation KEY names (built as

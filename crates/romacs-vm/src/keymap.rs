@@ -662,7 +662,7 @@ impl Vm {
         self.ensure_keymaps();
         let valid = match p { MakeSparseKeymap => n <= 1, Keymapp | UseLocalMap | Kbd => n == 1, DefineKey => (3..=4).contains(&n), LookupKey => (2..=3).contains(&n), GlobalSetKey => n == 2, CurrentGlobalMap => n == 0, _ => false };
         if !valid { return Err("wrong primitive arity".into()); }
-        let args = self.stack[start..start + n].to_vec();
+        let args = self.mutator.stack[start..start + n].to_vec();
         match p {
             MakeSparseKeymap => Ok(self.sparse_keymap(args.first().copied().unwrap_or(Value::NIL))),
             Keymapp => Ok(if self.resolve_keymap(args[0]).is_some() || self.autoloaded_keymap(args[0]) { Value::TRUE } else { Value::NIL }),
