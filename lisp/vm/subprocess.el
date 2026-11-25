@@ -816,8 +816,9 @@ the list of frames the read completed, oldest first: each a string,
 decoded by PROCESS's coding system, the bytes as they came when that is
 `no-conversion' or `binary'.  A read that completes no frame calls
 nothing.  At end of file a last line with no newline is a frame; an
-unfinished body is dropped.  An accepted connection takes its server's
-framing.  Set it before PROCESS's output is first read: right after
+unfinished body is dropped.  A process reading a pty cannot be framed:
+make it with `:connection-type' `pipe'.  An accepted connection takes
+its server's framing.  Set it before PROCESS's output is first read: right after
 making PROCESS, before any wait.  Setting the same KIND again changes
 only LIMIT; another KIND, or nil, gives the frame not yet complete back
 as the next output, but a frame being skipped as over its limit."

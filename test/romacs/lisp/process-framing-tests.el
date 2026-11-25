@@ -107,16 +107,17 @@ PROCESS, a listener, has no output of its own to wait for."
           (should (= (romacs-process-unsent-bytes process) 0)))
       (delete-process process))))
 
-;; A pty's end is EIO, not end of file: its last line, unended, still comes.
-(ert-deftest process-framing-a-ptys-last-line-comes-once ()
-  (let* ((frames nil)
-         (process (make-process :name "process-framing-pty" :command '("printf" "a\nlast")
-                                :noquery t :connection-type 'pty :coding 'no-conversion
-                                :filter (lambda (_p fs) (setq frames (append frames fs))))))
-    (set-process-framing process 'lines)
-    (process-framing-tests--until process (lambda () (not (process-live-p process))))
-    (accept-process-output nil 0.05)
-    (should (equal (mapcar (lambda (f) (string-trim-right f "\r")) frames) '("a" "last")))))
+;; A pty ends with EIO, not end of file, and may be reopened: framing one
+;; is refused, saying why; nil on it, unframed, changes nothing.
+(ert-deftest process-framing-a-pty-is-refused ()
+  (let ((process (make-process :name "process-framing-pty" :command '("sleep" "5")
+                               :noquery t :connection-type 'pty)))
+    (unwind-protect
+        (progn
+          (should (string-match-p "pty" (cadr (should-error (set-process-framing process 'lines)))))
+          (should-not (set-process-framing process nil))
+          (should-not (process-framing process)))
+      (delete-process process))))
 
 (ert-deftest process-framing-off-in-a-body-gives-back-its-header ()
   (let* ((got nil)

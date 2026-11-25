@@ -104,9 +104,6 @@ pub(crate) struct Channel {
     pub pending: std::collections::VecDeque<u8>,
     /// `set-process-framing': output is split into frames before Lisp sees it.
     pub framer: Option<crate::framing::Framer>,
-    /// `carryover' holds the frame framing gave back when it stopped, not
-    /// a decoder's tail: a pty's end (EIO) delivers it.
-    pub rest_carried: bool,
     /// add_process_read_fd: the wait polls `infd'.
     pub reading: bool,
     /// A :nowait connection in progress (GNU's NON_BLOCKING_CONNECT_FD): the

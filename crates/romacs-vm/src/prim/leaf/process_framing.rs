@@ -31,6 +31,12 @@ impl Leaf<'_> {
             _ => return Err(Fault::Wrong("natnump", limit)),
         };
         let name = self.string_text(self.process(proc)?.get(Slot::Name))?;
+        // A pty ends with EIO, not end of file, and may be reopened: no
+        // protocol client reads one, so framing it is refused, not handled.
+        let pty = self.process(proc).map(|p| p.pty_in || p.pty_out)?;
+        if pty && kind.is_some() {
+            return Err(Fault::Error(format!("Process {name} reads a pty, which cannot be framed: make it with :connection-type 'pipe")));
+        }
         let Some(channel) = self.channel_mut(proc) else {
             return Err(Fault::Error(format!("Process {name} has no output to frame")));
         };
@@ -41,16 +47,16 @@ impl Leaf<'_> {
             framer.set_limit(limit);
             return Ok(Value::NIL);
         }
+        // Nil on an unframed process changes nothing.
+        if kind.is_none() && channel.framer.is_none() {
+            return Ok(Value::NIL);
+        }
         let mut rest = channel.framer.take().map(Framer::into_rest).unwrap_or_default();
         rest.append(&mut channel.carryover);
-        channel.rest_carried = false;
         match kind {
             // Framed with the next read's bytes.
             Some(kind) => channel.framer = Some(Framer::with_rest(kind, limit, rest)),
-            None => {
-                channel.rest_carried = !rest.is_empty();
-                channel.carryover = rest;
-            }
+            None => channel.carryover = rest,
         }
         Ok(Value::NIL)
     }
@@ -74,28 +80,28 @@ impl Leaf<'_> {
     }
 
     /// process_read for a framed PROC: BUF, the bytes just read (none at
-    /// end of file, or at a pty's EIO, its end), framed.  (NBYTES . FRAMES):
-    /// each frame a string decoded by PROC's coding system, or `over' or
-    /// `malformed'.  At the end NBYTES counts a last unended line, as an
-    /// unframed read counts its carryover, so a wait sees output; the end
-    /// itself is the next read's.
+    /// end of file), framed.  (NBYTES . FRAMES): each frame a string
+    /// decoded by PROC's coding system, or `over' or `malformed'.  At the
+    /// end NBYTES counts the frames it delivers (a last unended line, a
+    /// line a change of kind left held), as an unframed read counts its
+    /// carryover, so a wait sees output; the end itself is the next read's.
     pub(super) fn process_read_framed(&mut self, proc: Value, buf: &[u8]) -> Out {
         let eof = buf.is_empty();
         let mut frames = Vec::new();
-        let mut last_line = 0;
         if let Some(channel) = self.channel_mut(proc)
             && !(eof && channel.last_block)
             && let Some(framer) = channel.framer.as_mut()
         {
             framer.push(buf, &mut frames);
             if eof {
-                last_line = framer.finish(&mut frames);
+                framer.finish(&mut frames);
                 channel.last_block = true;
             }
         }
         self.process_mut(proc).nbytes_read += buf.len() as u64;
+        let delivered: usize = if eof { frames.iter().map(|f| if let Frame::Bytes(b) = f { b.len() } else { 0 }).sum() } else { buf.len() };
         let list = self.frames_list(proc, frames)?;
-        let nbytes = fixnum(buf.len() + last_line)?;
+        let nbytes = fixnum(delivered)?;
         Ok(self.cons(nbytes, list))
     }
 

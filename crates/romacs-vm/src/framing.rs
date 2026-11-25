@@ -107,13 +107,13 @@ impl Framer {
 
     /// Whether the stream's end would make a frame of what is held: a
     /// last line with no LF.
-    pub(crate) fn holds_line(&self) -> bool {
+    fn holds_line(&self) -> bool {
         self.kind == Kind::Lines && self.state == State::Frame && !self.buf.is_empty()
     }
 
     /// The stream ended: a last line with no LF is a frame, whose length
     /// is returned; an incomplete body or header is dropped.  The framer
-    /// starts afresh, should the stream go on (a pty reopened).
+    /// starts afresh, should the stream go on.
     pub(crate) fn finish(&mut self, out: &mut Vec<Frame>) -> usize {
         let line = if self.holds_line() { self.buf.len() } else { 0 };
         if line > 0 {

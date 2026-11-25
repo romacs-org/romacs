@@ -127,12 +127,12 @@ attach."
   (let* ((root (make-temp-file "romacs-attach-" t))
          (session (romacs-agent--make :id "bbbbbbbb-0000-4000-8000-000000000000" :harness 'claude :state 'idle
                                       :dir root :host-socket (expand-file-name "host.sock" root)))
-         (first (make-process :name "romacs-attach-first" :command '("cat") :noquery t))
+         (first (make-process :name "romacs-attach-first" :command '("cat") :noquery t :connection-type 'pipe))
          (connected 0))
     (unwind-protect
         (cl-letf (((symbol-function 'make-network-process)
                    (lambda (&rest _) (cl-incf connected)
-                     (make-process :name "romacs-attach-second" :command '("cat") :noquery t))))
+                     (make-process :name "romacs-attach-second" :command '("cat") :noquery t :connection-type 'pipe))))
           (setf (romacs-agent-connection session) first)
           ;; Attached already: the same attachment, no second one to orphan it.
           (should (eq (romacs-agent--attach session 0) first))
@@ -148,7 +148,7 @@ attach."
 
 (ert-deftest romacs-agent-reattach-a-relay-brings-its-session-back ()
   (romacs-agent-reattach-tests--with
-    (let ((peer (make-process :name "romacs-relay-fixture" :command '("cat") :noquery t))
+    (let ((peer (make-process :name "romacs-relay-fixture" :command '("cat") :noquery t :connection-type 'pipe))
           (romacs-mcp--peers nil))
       (unwind-protect
           (progn
@@ -162,7 +162,7 @@ attach."
 
 (ert-deftest romacs-agent-reattach-a-relay-with-no-supervisor-stays ()
   (romacs-agent-reattach-tests--with
-    (let ((peer (make-process :name "romacs-relay-fixture" :command '("cat") :noquery t))
+    (let ((peer (make-process :name "romacs-relay-fixture" :command '("cat") :noquery t :connection-type 'pipe))
           (romacs-mcp--peers nil) (closing 0))
       (unwind-protect
           (cl-letf (((symbol-function 'run-at-time) (lambda (&rest _) (cl-incf closing))))
@@ -188,19 +188,19 @@ attach."
       (unwind-protect
           (progn
             (dotimes (_ romacs-mcp--peer-limit)
-              (let ((p (make-process :name "romacs-owned" :command '("cat") :noquery t)))
+              (let ((p (make-process :name "romacs-owned" :command '("cat") :noquery t :connection-type 'pipe)))
                 (push p fixtures) (romacs-mcp-own-peer p) (push p romacs-mcp--peers)))
             ;; As many relays as the limit: an anonymous client still gets in.
-            (let ((client (make-process :name "romacs-client" :command '("cat") :noquery t)))
+            (let ((client (make-process :name "romacs-client" :command '("cat") :noquery t :connection-type 'pipe)))
               (push client fixtures)
               (romacs-mcp--accept 'listener client nil)
               (should (memq client romacs-mcp--peers))
               (should-not closed))
             ;; Anonymous peers alone are bounded.
             (dotimes (_ (1- romacs-mcp--peer-limit))
-              (let ((p (make-process :name "romacs-anon" :command '("cat") :noquery t)))
+              (let ((p (make-process :name "romacs-anon" :command '("cat") :noquery t :connection-type 'pipe)))
                 (push p fixtures) (push p romacs-mcp--peers)))
-            (let ((one-more (make-process :name "romacs-anon" :command '("cat") :noquery t)))
+            (let ((one-more (make-process :name "romacs-anon" :command '("cat") :noquery t :connection-type 'pipe)))
               (push one-more fixtures)
               (romacs-mcp--accept 'listener one-more nil)
               (should (equal closed (list one-more)))))

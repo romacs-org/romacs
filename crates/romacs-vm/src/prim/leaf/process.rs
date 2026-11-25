@@ -586,11 +586,6 @@ impl Leaf<'_> {
         };
         let nbytes = match read {
             Ok(n) => n,
-            // A pty's end is EIO, not end of file: a framed line left
-            // unended, or the frame framing gave back, is still delivered
-            // as its end of file would, once; the next read is its EIO.
-            Err(error) if error.raw_os_error() == Some(libc::EIO)
-                && self.channel(proc).is_some_and(|c| !c.last_block && (c.rest_carried || c.framer.as_ref().is_some_and(|f| f.holds_line()))) => 0,
             Err(error) => {
                 let errno = error.raw_os_error().unwrap_or(libc::EIO);
                 return Ok(self.cons(fixnum(-1), fixnum(errno.into())));
@@ -602,7 +597,6 @@ impl Leaf<'_> {
         }
         let channel = self.channel_mut(proc).expect("read channel");
         let mut bytes = std::mem::take(&mut channel.carryover);
-        channel.rest_carried = false;
         let carried = bytes.len();
         if nbytes == 0 {
             if channel.last_block {
