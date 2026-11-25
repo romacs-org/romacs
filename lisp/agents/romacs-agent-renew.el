@@ -658,15 +658,18 @@ ends.  Return `now' or `soon'."
   (when (romacs-agent--folding-p session)
     (user-error "Session %s is still loading: clear it in a moment" (romacs-agent-title session)))
   (romacs-agent-renew--check-obstacle session)
-  (cond ((and (romacs-agent--harness-free-p session) (not (romacs-agent--held-p session)))
-         (romacs-agent-renew session "clear" (romacs-agent-renew--told session "Clear") nil '(:clear t))
-         'now)
+  (cond ((or (romacs-agent--held-p session) (romacs-agent-startup-pending session)
+             (eq (romacs-agent-state session) 'starting))
+         (user-error "Session %s is starting, renewing or rolling back: clear it after"
+                     (romacs-agent-title session)))
         ;; Only a turn's end is waited for: it comes.
         ((memq (romacs-agent-state session) '(running waiting-approval))
          (puthash session (list :clear) romacs-agent-renew--wanted)
          'soon)
-        (t (user-error "Session %s is starting, renewing or rolling back: clear it after"
-                       (romacs-agent-title session)))))
+        ((romacs-agent--harness-free-p session)
+         (romacs-agent-renew session "clear" (romacs-agent-renew--told session "Clear") nil '(:clear t))
+         'now)
+        (t (user-error "Session %s is busy: clear it after" (romacs-agent-title session)))))
 
 (defun romacs-agent-renew--told (session what)
   "A renewal's THEN for SESSION: its failure said in its chat as WHAT's."
@@ -724,7 +727,12 @@ full (`romacs-agent-renew--full'), once a conversation; else nil."
 
 (defun romacs-agent-renew--at-end (session event)
   "Renew SESSION at EVENT, its turn's end, when it was wanted or its
-context is full."
+context is full.  Its harness ending instead drops a clear asked for:
+it was for the turn that ran."
+  (when (and (eq (plist-get event :type) 'exit)
+             (equal (gethash session romacs-agent-renew--wanted) '(:clear)))
+    (remhash session romacs-agent-renew--wanted)
+    (romacs-agent--raise session (list :type 'status :text "clear dropped: the harness ended")))
   (when (and (eq (plist-get event :type) 'done)
              (romacs-agent--live-p session)
              (not (romacs-agent--held-p session)))

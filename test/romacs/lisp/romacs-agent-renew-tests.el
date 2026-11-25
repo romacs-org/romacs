@@ -591,7 +591,15 @@ instance configured beside it."
       (let ((end (+ (float-time) 30)))
         (while (and (= relaunched 0) (< (float-time) end)) (accept-process-output nil 0.05)))
       (should (= relaunched 1))
-      (should (equal (gethash "why" (car (romacs-agent-renew-tests--notes session))) "clear")))))
+      (should (equal (gethash "why" (car (romacs-agent-renew-tests--notes session))) "clear"))
+      ;; Asked again mid-turn, then the harness ends: dropped, never run later.
+      (setf (romacs-agent-state session) 'running)
+      (romacs-agent-renew--release session (romacs-agent-renew--holder session))
+      (cl-letf (((symbol-function 'romacs-agent--held-p) #'ignore))
+        (romacs-agent-renew-tests--submit session "/clear"))
+      (should (equal (gethash session romacs-agent-renew--wanted) '(:clear)))
+      (run-hook-with-args 'romacs-agent-event-functions session '(:type exit))
+      (should-not (gethash session romacs-agent-renew--wanted)))))
 
 (ert-deftest romacs-agent-renew-slash-clear-runs-once-a-draft ()
   ;; The same draft sent again (a retry) gets the same answer, nothing
@@ -630,6 +638,10 @@ instance configured beside it."
     ;; Held by another renewal, or starting: refused, never left to wait.
     (cl-letf (((symbol-function 'romacs-agent--held-p) (lambda (_) t)))
       (should (eq (plist-get (romacs-agent-renew-tests--submit session "/clear") :status) 'refused)))
+    ;; Starting, a turn not begun: refused, not left to wait.
+    (setf (romacs-agent-state session) 'starting)
+    (should (eq (plist-get (romacs-agent-renew-tests--submit session "/clear") :status) 'refused))
+    (setf (romacs-agent-state session) 'idle)
     ;; A harness started afresh each turn: refused.
     (cl-letf (((symbol-function 'romacs-agent--per-turn-p) (lambda (_) t)))
       (should (eq (plist-get (romacs-agent-renew-tests--submit session "/clear") :status) 'refused)))
