@@ -267,6 +267,8 @@ def select(paths, root, metadata):
                     files.setdefault(f'{package}::{pathlib.PurePosixPath(user).stem}', f'includes {rest}')
                 if not users:
                     whole(package, f'{rest}: no test file names it')
+            elif rest == 'tests/all/standalone.txt' and package in test_modules.PACKAGES:
+                packages.setdefault(package, f'{rest} changed')
             else:
                 sources = sources or rust_sources(root, dirs)
                 name = pathlib.PurePosixPath(path).name
