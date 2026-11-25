@@ -323,6 +323,8 @@ it only on failure, or never, may end and leave it asleep."
              (when-let* ((id (plist-get row :id)) (child (romacs-agent-summary id)))
                (and (member (or (romacs-agent-summary-wake-rule child) "end") '("end" "all"))
                     (or (member (romacs-agent-tools--status child) '("running" "waiting"))
+                        (and (eq (romacs-agent-summary-state child) 'detached)
+                             (not (romacs-agent-summary-cancelled child)))
                         ;; Ended, its end not yet in this session's harness.
                         (romacs-agent-summary-undelivered child)))))
            (romacs-agent-summary-children-rows summary)))
@@ -1034,7 +1036,9 @@ its parent again."
   "SESSION, a delegated task, stopped, ended or was cancelled (EVENT):
 its parent's end held while it worked may go now
 \(`romacs-agent-tools--release-held')."
-  (when-let* (((memq (plist-get event :type) '(exit status)))
+  (when-let* (((or (eq (plist-get event :type) 'exit)
+                   (and (eq (plist-get event :type) 'status)
+                        (member (plist-get event :text) '("stopped" "cancelled")))))
               (parent-id (plist-get (romacs-agent-options session) :parent))
               (parent (romacs-agent-loaded parent-id))
               ((gethash parent romacs-agent-tools--held)))

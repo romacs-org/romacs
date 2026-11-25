@@ -6320,12 +6320,11 @@ REAPED: its task is done and it only sleeps (`romacs-agent-reaped-p'); it
 reads idle, and its next message resumes it."
   (unless reaped (romacs-agent-watch-stop session))
   (romacs-agent--set-stopped session (if reaped 'reaped t))
-  (unless reaped
-    (unless (or (process-live-p (romacs-agent-connection session))
+  (prog1 (romacs-agent--stop-harness session)
+    (unless (or reaped (process-live-p (romacs-agent-connection session))
                 (eq (romacs-agent-state session) 'starting))
       (setf (romacs-agent-state session) 'ended)
-      (romacs-agent--changed session)))
-  (romacs-agent--stop-harness session))
+      (romacs-agent--raise session (list :type 'status :text "stopped")))))
 
 (defun romacs-agent--stop-harness (session)
   "Stop SESSION's current harness without changing its stop or watch records."

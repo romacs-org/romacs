@@ -252,6 +252,21 @@ recorded in a private directory; `delivered' collects what wakes it."
                      '("delegated again")))
       (delete-directory (romacs-agent-dir writer) t))))
 
+(ert-deftest romacs-agent-delegate-a-detached-task-holds-its-coordinators-end-until-stop ()
+  (romacs-agent-delegate-tests--family ((a nil) (b nil))
+    (setf (romacs-agent-options b) (list :parent (romacs-agent-id a)))
+    (romacs-agent--index b)
+    (romacs-agent-ui--summarize-children a)
+    (romacs-agent-delegate-tests--end a 5 "coordinated")
+    (should (gethash a romacs-agent-tools--held))
+    (setf (romacs-agent-state b) 'detached)
+    (romacs-agent--raise b '(:type status :text "detached"))
+    (romacs-agent-tools--flush parent)
+    (should-not delivered)
+    (romacs-agent-stop b)
+    (romacs-agent-tools--flush parent)
+    (should (equal (plist-get (romacs-agent-tools--wake-parse (car delivered)) :result) "coordinated"))))
+
 (ert-deftest romacs-agent-delegate-a-starting-task-queues ()
   ;; Its harness not up yet: a message waits, and says so.
   (should (eq (romacs-agent-tools--delivery (romacs-agent--make :id "s" :state 'starting) 'queue) 'queued))
