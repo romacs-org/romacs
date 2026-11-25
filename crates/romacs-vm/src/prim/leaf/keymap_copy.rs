@@ -83,15 +83,28 @@ impl Leaf<'_> {
 }
 
 impl Leaf<'_> {
-    /// One `lookup-key' walk; Err((item, filter, definition)) names the
-    /// menu filter it still needs.
-    pub(crate) fn lookup_key_walk(&mut self, map: Value, key: Value, defaults: bool, filters: Vec<(Value, Value)>)
-        -> std::result::Result<std::result::Result<Value, (Value, Value, Value)>, Fault> {
-        self.vm.lookup_key_walk(map, key, defaults, filters).map_err(|e| {
+    /// `Vm::key_walk`: KEY's walk in MAP, run to its answer or its first
+    /// menu filter.
+    pub(crate) fn key_walk(&mut self, map: Value, key: Value, defaults: bool)
+        -> std::result::Result<(crate::keymap::KeyWalk, crate::keymap::Walked), Fault> {
+        self.vm.key_walk(map, key, defaults).map_err(|e| {
             // get_keymap and CHECK_VECTOR_OR_STRING (keymap.c lookup_key_1).
             if e == "keymap required" { Fault::Wrong("keymapp", map) }
             else if e == "key sequence string or vector required" { Fault::Wrong("arrayp", key) }
             else { Fault::Error(e) }
         })
+    }
+    /// `Vm::key_walk_resume`: WALK goes on with its filter's RESULT.
+    pub(crate) fn key_walk_resume(&mut self, walk: &mut crate::keymap::KeyWalk, result: Value)
+        -> std::result::Result<crate::keymap::Walked, Fault> {
+        self.vm.key_walk_resume(walk, result).map_err(Fault::Error)
+    }
+    /// WALK as values to keep rooted across its filter's call.
+    pub(crate) fn key_walk_values(&mut self, walk: &crate::keymap::KeyWalk) -> Vec<Value> {
+        walk.values(self.vm)
+    }
+    /// The walk VALUES hold, read again after the call.
+    pub(crate) fn key_walk_from(&mut self, values: &[Value]) -> std::result::Result<crate::keymap::KeyWalk, Fault> {
+        crate::keymap::KeyWalk::from_values(self.vm, values).map_err(Fault::Error)
     }
 }

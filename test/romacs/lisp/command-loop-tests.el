@@ -119,9 +119,7 @@
       (should (eq (seq-elt (recent-keys) (1- (length (recent-keys)))) 'f5)))))
 
 (ert-deftest command-loop-tests-shared-menu-item-reader ()
-  "GNU calls the shared filter at both occurrences.
-Beta's romacs--read-key-sequence uses lookup_key_walk's cached result."
-  :expected-result (if (fboundp 'romacs--take-user-signal) :failed :passed)
+  "GNU calls the shared filter at both occurrences."
   (command-loop-tests--with-input (list 'f5)
     (let* ((hits 0)
            (item (list 'menu-item "x" 'ignore :filter
@@ -136,9 +134,7 @@ Beta's romacs--read-key-sequence uses lookup_key_walk's cached result."
       (should-not unread-command-events))))
 
 (ert-deftest command-loop-tests-shared-menu-item-key-binding ()
-  "GNU uses the second filter result.
-Beta's lookup_key_walk caches the first by item identity."
-  :expected-result (if (fboundp 'romacs--take-user-signal) :failed :passed)
+  "GNU uses the second filter result."
   (command-loop-tests--with-input nil
     (let* ((hits 0)
            (item (list 'menu-item "x" 'ignore :filter
@@ -147,6 +143,14 @@ Beta's lookup_key_walk caches the first by item identity."
            (low (list 'keymap (cons 'f5 item)))
            (overriding-local-map (make-composed-keymap (list high low))))
       (should (equal (list (key-binding [f5]) hits) '(ignore 2))))))
+
+(ert-deftest command-loop-tests-textual-key-description ()
+  "GNU looks a one-string vector up as the key it describes.
+Romacs walks the string as one event (ledger/divergences/VM2-KEYSEQ-TEXT1.md)."
+  :expected-result (if (fboundp 'romacs--take-user-signal) :failed :passed)
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "C-c x") 'command-loop-tests--normalized)
+    (should (eq (lookup-key map ["C-c x"]) 'command-loop-tests--normalized))))
 
 (defun command-loop-tests--fallback ()
   (interactive)
@@ -172,9 +176,7 @@ Beta's lookup_key_walk caches the first by item identity."
      ,@body))
 
 (ert-deftest command-loop-tests-mutating-menu-item-reader ()
-  "GNU runs fallback once before replacement.
-Beta's romacs--read-key-sequence reaches the replacement twice via lookup_key_walk."
-  :expected-result (if (fboundp 'romacs--take-user-signal) :failed :passed)
+  "GNU runs fallback once before replacement."
   (command-loop-tests--with-input (list 'f5 'f5 'f12)
     (command-loop-tests--mutating-map
       (recursive-edit)
@@ -183,9 +185,7 @@ Beta's romacs--read-key-sequence reaches the replacement twice via lookup_key_wa
       (should-not unread-command-events))))
 
 (ert-deftest command-loop-tests-mutating-menu-item-key-binding ()
-  "GNU falls through after the mutation until the next lookup.
-Beta's lookup_key_walk restarts on the replacement."
-  :expected-result (if (fboundp 'romacs--take-user-signal) :failed :passed)
+  "GNU falls through after the mutation until the next lookup."
   (command-loop-tests--with-input nil
     (command-loop-tests--mutating-map
       (should (eq (key-binding [f5]) 'command-loop-tests--fallback))

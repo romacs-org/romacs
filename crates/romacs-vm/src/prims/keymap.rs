@@ -83,50 +83,33 @@ fn set_keymap_parent(cx, keymap: Value, parent: Value) {
 defsubr! { name = "copy-keymap", gnu = "keymap.c:1018", effect = Global,
 fn copy_keymap(cx, keymap: Value) { cx.copy_keymap(keymap, 0) }}
 
-// A `lookup-key' walk that may stop for a menu item's `:filter', which runs
-// through `filter_call'.  SAVED is [KEYMAP KEY ACCEPT-DEFAULT],
-// FIXED values of the caller's, then each (item . result) the filters gave:
-// each result joins SAVED and the walk restarts, so the pairs stay rooted
-// across the call.  Err is the call to make, THEN its continuation.
-// GNU's walk is one pass, so a filter that changes the keymaps it walks
-// (`set-transient-map' pushes onto the composed map in place) cannot change
-// which binding wins: before the first filter runs, KEYMAP's spines are
-// copied and the restarts walk the copy.
-pub(super) fn walk(cx: &mut Leaf<'_>, saved: &[Value], fixed: usize, then: crate::prim::Then) -> std::result::Result<std::result::Result<Value, Step>, Fault> {
-    let filters = saved[3 + fixed..].chunks_exact(2).map(|pair| (pair[0], pair[1])).collect();
-    match cx.lookup_key_walk(saved[0], saved[1], saved[2] != Value::NIL, filters)? {
-        Ok(binding) => Ok(Ok(binding)),
-        Err((item, filter, object)) => {
-            let mut saved = saved.to_vec();
-            if saved.len() == 3 + fixed { saved[0] = keymap_spines(cx, saved[0]); }
-            saved.push(item);
-            Ok(Err(filter_call(cx, filter, object, then, saved)))
+// A `lookup-key' walk of KEY in MAP (`Vm::key_walk'), driven from a T2
+// body: the binding it reaches, or the call of the menu filter it met.
+// That call's saved registers are FIXED, the caller's, then the walk's, and
+// THEN goes on with `resume'.
+pub(super) fn lookup(cx: &mut Leaf<'_>, fixed: &[Value], map: Value, key: Value, defaults: bool, then: crate::prim::Then) -> Walking {
+    let (walk, walked) = cx.key_walk(map, key, defaults)?;
+    Ok(stopped(cx, &walk, walked, fixed, then))
+}
+// The walk in SAVED past its caller's FIXED values, resumed with its
+// filter's RESULT, as `lookup' gives it.
+pub(super) fn resume(cx: &mut Leaf<'_>, result: Value, saved: &[Value], fixed: usize, then: crate::prim::Then) -> Walking {
+    let mut walk = cx.key_walk_from(&saved[fixed..])?;
+    let walked = cx.key_walk_resume(&mut walk, result)?;
+    Ok(stopped(cx, &walk, walked, &saved[..fixed], then))
+}
+// The binding a walk found, or the call of the filter it met.
+pub(super) type Found = std::result::Result<Value, Step>;
+pub(super) type Walking = std::result::Result<Found, Fault>;
+fn stopped(cx: &mut Leaf<'_>, walk: &crate::keymap::KeyWalk, walked: crate::keymap::Walked, fixed: &[Value], then: crate::prim::Then) -> Found {
+    match walked {
+        crate::keymap::Walked::Done(binding) => Ok(binding),
+        crate::keymap::Walked::Filter { filter, object } => {
+            let mut saved = fixed.to_vec();
+            saved.extend(cx.key_walk_values(walk));
+            Err(filter_call(cx, filter, object, then, saved))
         }
     }
-}
-// MAPS, a keymap or a list of keymaps, with each keymap's list (its
-// parent's included) and the list itself copied; bindings, prefix maps and
-// a keymap named by a symbol are shared.
-fn keymap_spines(cx: &mut Leaf<'_>, maps: Value) -> Value {
-    let keymap = cx.intern("keymap");
-    if cx.pair(maps).is_some_and(|(head, _)| head == keymap) { return copy_spine(cx, maps); }
-    let (mut elements, mut tail, limit) = (Vec::new(), maps, cx.list_limit());
-    while let Some((map, rest)) = cx.pair(tail) {
-        if elements.len() > limit { return maps; }
-        elements.push(if cx.pair(map).is_some_and(|(head, _)| head == keymap) { copy_spine(cx, map) } else { map });
-        tail = rest;
-    }
-    elements.into_iter().rev().fold(tail, |list, map| cx.cons(map, list))
-}
-// LIST's conses copied, its final cdr kept; a circular LIST as it is.
-fn copy_spine(cx: &mut Leaf<'_>, list: Value) -> Value {
-    let (mut elements, mut tail, limit) = (Vec::new(), list, cx.list_limit());
-    while let Some((element, rest)) = cx.pair(tail) {
-        if elements.len() > limit { return list; }
-        elements.push(element);
-        tail = rest;
-    }
-    elements.into_iter().rev().fold(tail, |copy, element| cx.cons(element, copy))
 }
 // The call that applies a menu item's FILTER to OBJECT, as get_keyelt does
 // (menu_item_eval_property: an error gives nil), through the prelude's
@@ -134,12 +117,6 @@ fn copy_spine(cx: &mut Leaf<'_>, list: Value) -> Value {
 pub(super) fn filter_call(cx: &mut Leaf<'_>, filter: Value, object: Value, then: crate::prim::Then, saved: Vec<Value>) -> Step {
     let f = cx.intern("romacs--menu-filter");
     Step::Call { f, args: vec![filter, object], then, saved }
-}
-// SAVED with a filter's RESULT, for STEP to walk again.
-fn filtered(cx: &mut Leaf<'_>, result: Value, saved: &[Value], step: fn(&mut Leaf<'_>, &[Value]) -> Next) -> Next {
-    let mut saved = saved.to_vec();
-    saved.push(result);
-    step(cx, &saved)
 }
 fn symbolp(cx: &Leaf<'_>, object: Value) -> bool {
     object == Value::NIL || object == Value::TRUE || cx.kind(object) == Kind::Symbol
@@ -156,20 +133,21 @@ fn command_remapping(cx, command: Value; optional position: Value, keymaps: Valu
     let maps = if keymaps == Value::NIL { cx.current_active_maps(true, position)? } else { keymaps };
     remapping(cx, maps, command, Value::NIL)
 }}
-// The binding of [remap COMMAND] in MAPS, or UNMAPPED.
+// The binding of [remap COMMAND] in MAPS, or UNMAPPED.  SAVED is UNMAPPED.
 fn remapping(cx: &mut Leaf<'_>, maps: Value, command: Value, unmapped: Value) -> Next {
     let remap = cx.intern("remap");
     let key = cx.vector(&[remap, command]);
-    remapping_step(cx, &[maps, key, Value::NIL, unmapped])
-}
-fn remapping_step(cx: &mut Leaf<'_>, saved: &[Value]) -> Next {
-    Ok(match walk(cx, saved, 1, remapping_filtered)? {
-        Ok(binding) => Step::Done(if unbound(binding) { saved[3] } else { binding }),
-        Err(call) => call,
-    })
+    let walked = lookup(cx, &[unmapped], maps, key, false, remapping_filtered)?;
+    Ok(remapped(walked, unmapped))
 }
 fn remapping_filtered(cx: &mut Leaf<'_>, result: Value, saved: &[Value]) -> Next {
-    filtered(cx, result, saved, remapping_step)
+    Ok(remapped(resume(cx, result, saved, 1, remapping_filtered)?, saved[0]))
+}
+fn remapped(walked: Found, unmapped: Value) -> Step {
+    match walked {
+        Ok(binding) => Step::Done(if unbound(binding) { unmapped } else { binding }),
+        Err(call) => call,
+    }
 }
 
 // Fcurrent_active_maps: the policy is src/active_keymaps.rs.
@@ -194,7 +172,7 @@ fn romacs_minor_mode_maps(cx) {
 // (past a symbolic prefix such as `mode-line') is looked up where it
 // clicked.  A command found is remapped as Fcommand_remapping would, in the
 // same active keymaps unless a menu filter ran Lisp since they were read.
-// SAVED is the walk's, then NO-REMAP and POSITION.
+// SAVED is NO-REMAP and POSITION, then the walk's.
 defsubr! { name = "key-binding", gnu = "keymap.c:1788", effect = Global,
 fn key_binding(cx, key: Value; optional accept_default: Value, no_remap: Value, position: Value) -> Step {
     let position = if position == Value::NIL && cx.kind(key) == Kind::Vector {
@@ -207,7 +185,8 @@ fn key_binding(cx, key: Value; optional accept_default: Value, no_remap: Value, 
         click_start(cx, event)?
     } else { position };
     let maps = cx.current_active_maps(true, position)?;
-    key_binding_step(cx, &[maps, key, accept_default, no_remap, position])
+    let walked = lookup(cx, &[no_remap, position], maps, key, accept_default != Value::NIL, key_binding_filtered)?;
+    key_bound(cx, walked, no_remap, position, Some(maps))
 }}
 // EVENT_START of EVENT if it is a mouse click with a position, else nil.
 fn click_start(cx: &mut Leaf<'_>, event: Value) -> Out {
@@ -215,57 +194,43 @@ fn click_start(cx: &mut Leaf<'_>, event: Value) -> Out {
     let kind = cx.intern("event-kind");
     Ok(if cx.symbol_property(head, kind)? == cx.intern("mouse-click") { start } else { Value::NIL })
 }
-fn key_binding_step(cx: &mut Leaf<'_>, saved: &[Value]) -> Next {
-    let binding = match walk(cx, saved, 2, key_binding_filtered)? {
+fn key_binding_filtered(cx: &mut Leaf<'_>, result: Value, saved: &[Value]) -> Next {
+    let walked = resume(cx, result, saved, 2, key_binding_filtered)?;
+    key_bound(cx, walked, saved[0], saved[1], None)
+}
+// The binding the walk found, remapped unless NO-REMAP: in MAPS, the maps it
+// was found in, or when a filter ran, in the active maps at POSITION now.
+fn key_bound(cx: &mut Leaf<'_>, walked: Found, no_remap: Value, position: Value, maps: Option<Value>) -> Next {
+    let binding = match walked {
         Ok(binding) => binding,
         Err(call) => return Ok(call),
     };
     if unbound(binding) { return Ok(Step::Done(Value::NIL)); }
-    if saved[3] != Value::NIL || !symbolp(cx, binding) { return Ok(Step::Done(binding)); }
-    let maps = if saved.len() == 5 { saved[0] } else { cx.current_active_maps(true, saved[4])? };
+    if no_remap != Value::NIL || !symbolp(cx, binding) { return Ok(Step::Done(binding)); }
+    let maps = match maps { Some(maps) => maps, None => cx.current_active_maps(true, position)? };
     remapping(cx, maps, binding, binding)
-}
-fn key_binding_filtered(cx: &mut Leaf<'_>, result: Value, saved: &[Value]) -> Next {
-    filtered(cx, result, saved, key_binding_step)
 }
 
 // Fminor_mode_key_binding: KEY's binding in each active minor mode's map,
-// highest priority first: the prefix bindings, or the first binding alone
-// when it is no prefix; a non-prefix after a prefix is ignored.  SAVED is
-// the walk's (the map in hand first), then the (MODE . KEYMAP) still to
-// look in, the map's mode and the prefixes found, newest first.
+// highest priority first: the prefixes, or the first binding alone
+// when it is no prefix; a non-prefix after a prefix is ignored.  The search
+// is KEY, ACCEPT-DEFAULT, the (MODE . KEYMAP) still to look in, the mode
+// of the map in hand and the prefixes found, newest first: a filter's
+// call saves it, then the walk's.
 defsubr! { name = "minor-mode-key-binding", gnu = "keymap.c:1857", effect = Global,
 fn minor_mode_key_binding(cx, key: Value; optional accept_default: Value) -> Step {
     let rest = cx.current_minor_mode_maps(true)?;
-    let mut saved = vec![Value::NIL, key, accept_default, rest, Value::NIL, Value::NIL];
-    if !next_minor_map(cx, &mut saved) { return Ok(Step::Done(Value::NIL)); }
-    minor_binding_step(cx, &saved)
+    minor_bindings(cx, [key, accept_default, rest, Value::NIL, Value::NIL])
 }}
-// Take the next minor mode's map in hand, if one is left.
-fn next_minor_map(cx: &Leaf<'_>, saved: &mut Vec<Value>) -> bool {
-    let Some(((mode, map), rest)) = cx.pair(saved[3]).and_then(|(entry, rest)| Some((cx.pair(entry)?, rest))) else { return false };
-    saved.truncate(6);
-    (saved[0], saved[3], saved[4]) = (map, rest, mode);
-    true
-}
-fn minor_binding_step(cx: &mut Leaf<'_>, saved: &[Value]) -> Next {
-    let mut saved = saved.to_vec();
-    loop {
-        let binding = match walk(cx, &saved, 3, minor_binding_filtered)? {
-            Ok(binding) => binding,
-            Err(call) => return Ok(call),
-        };
-        if !unbound(binding) {
-            let entry = cx.cons(saved[4], binding);
-            if cx.keymapp(binding) {
-                saved[5] = cx.cons(entry, saved[5]);
-            } else if saved[5] == Value::NIL {
-                return Ok(Step::Done(cx.cons(entry, Value::NIL)));
-            }
-        }
-        if !next_minor_map(cx, &mut saved) { break; }
+type MinorSearch = [Value; 5];
+// Look KEY up in each minor mode's map left in SEARCH.
+fn minor_bindings(cx: &mut Leaf<'_>, mut search: MinorSearch) -> Next {
+    while let Some(((mode, map), rest)) = cx.pair(search[2]).and_then(|(entry, rest)| Some((cx.pair(entry)?, rest))) {
+        (search[2], search[3]) = (rest, mode);
+        let walked = lookup(cx, &search, map, search[0], search[1] != Value::NIL, minor_binding_filtered)?;
+        if let Some(step) = minor_bound(cx, &mut search, walked) { return Ok(step); }
     }
-    let (mut prefixes, mut found) = (saved[5], Value::NIL);
+    let (mut prefixes, mut found) = (search[4], Value::NIL);
     while let Some((entry, rest)) = cx.pair(prefixes) {
         found = cx.cons(entry, found);
         prefixes = rest;
@@ -273,7 +238,26 @@ fn minor_binding_step(cx: &mut Leaf<'_>, saved: &[Value]) -> Next {
     Ok(Step::Done(found))
 }
 fn minor_binding_filtered(cx: &mut Leaf<'_>, result: Value, saved: &[Value]) -> Next {
-    filtered(cx, result, saved, minor_binding_step)
+    let mut search: MinorSearch = saved[..5].try_into().expect("a minor-mode search");
+    let walked = resume(cx, result, saved, 5, minor_binding_filtered)?;
+    if let Some(step) = minor_bound(cx, &mut search, walked) { return Ok(step); }
+    minor_bindings(cx, search)
+}
+// The search's next step once the map in hand gave WALKED: the answer when
+// it is the first binding and no prefix, the filter's call, or none.
+fn minor_bound(cx: &mut Leaf<'_>, search: &mut MinorSearch, walked: Found) -> Option<Step> {
+    let binding = match walked {
+        Ok(binding) => binding,
+        Err(call) => return Some(call),
+    };
+    if unbound(binding) { return None; }
+    let entry = cx.cons(search[3], binding);
+    if cx.keymapp(binding) {
+        search[4] = cx.cons(entry, search[4]);
+    } else if search[4] == Value::NIL {
+        return Some(Step::Done(cx.cons(entry, Value::NIL)));
+    }
+    None
 }
 
 // Fkeymap_prompt: the first string in MAP's list, searching embedded
@@ -296,19 +280,16 @@ fn keymap_prompt_in(cx: &mut Leaf<'_>, map: Value, depth: usize) -> Out {
     Err(Fault::Circular(map))
 }
 
-// Flookup_key.
+// Flookup_key.  A filter's call saves the walk.
 defsubr! { name = "lookup-key", gnu = "keymap.c:1290", effect = Global,
 fn lookup_key(cx, keymap: Value, key: Value; optional accept_default: Value) -> Step {
-    lookup_key_step(cx, &[keymap, key, accept_default])
+    Ok(looked_up(lookup(cx, &[], keymap, key, accept_default != Value::NIL, lookup_key_filtered)?))
 }}
-fn lookup_key_step(cx: &mut Leaf<'_>, saved: &[Value]) -> Next {
-    Ok(match walk(cx, saved, 0, lookup_key_filtered)? {
-        Ok(binding) => Step::Done(binding),
-        Err(call) => call,
-    })
-}
 fn lookup_key_filtered(cx: &mut Leaf<'_>, result: Value, saved: &[Value]) -> Next {
-    filtered(cx, result, saved, lookup_key_step)
+    Ok(looked_up(resume(cx, result, saved, 0, lookup_key_filtered)?))
+}
+fn looked_up(walked: Found) -> Step {
+    walked.map_or_else(|call| call, Step::Done)
 }
 
 // Frecent_keys over the events the command loop recorded; a batch session

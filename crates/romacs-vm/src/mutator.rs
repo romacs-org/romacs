@@ -22,12 +22,6 @@ pub(crate) struct Mutator {
     pub(crate) resolved_buffer: Option<(Value, usize)>,
     /// A storage kernel runs inside insdel's bracket, which checked read-only.
     pub(crate) change_prepared: bool,
-    /// Menu-item `:filter' results for the keymap walk in progress, as
-    /// (menu item, result); set and cleared around one walk, which never
-    /// collects.
-    pub(crate) keymap_filters: Vec<(Value, Value)>,
-    /// The first filter that walk needed: (menu item, filter, definition).
-    pub(crate) keymap_pending_filter: Option<(Value, Value, Value)>,
     // The compile in progress: the loader's and the compiler's state for
     // the forms being compiled now.
     pub(crate) compile_depth: usize,
@@ -171,8 +165,6 @@ impl Mutator {
             regexp: Default::default(),
             resolved_buffer: Default::default(),
             change_prepared: Default::default(),
-            keymap_filters: Default::default(),
-            keymap_pending_filter: Default::default(),
             compile_depth: Default::default(),
             pending_specials: Default::default(),
             file_specials: Default::default(),

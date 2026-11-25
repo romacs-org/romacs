@@ -289,6 +289,29 @@ impl ImageRegion {
         Ok(pair)
     }
     pub(super) fn string(&self, index: usize) -> Result<&str> {
+        let (start, end) = self.string_range(index)?;
+        self.verify(start, end)?;
+        std::str::from_utf8(self.data().get(start..end).ok_or("string outside image blob")?)
+            .map_err(|_| "image string is not UTF-8".into())
+    }
+    /// The character at byte AT of string INDEX and its width in bytes, or
+    /// None at its end, for a reader that has had the string whole from
+    /// `string`: the string's record and bounds and the pages under the
+    /// character are checked again, but not the whole text.
+    pub(super) fn string_char(&self, index: usize, at: usize) -> Result<Option<(u32, usize)>> {
+        let (start, end) = self.string_range(index)?;
+        let from = start.checked_add(at).ok_or("string offset overflow")?;
+        if from >= end {
+            return Ok(None);
+        }
+        let lead = *self.data().get(from).ok_or("string outside image blob")?;
+        let width = match lead { 0..=0x7f => 1, 0xc0..=0xdf => 2, 0xe0..=0xef => 3, _ => 4 };
+        let to = end.min(from + width);
+        self.verify(from, to)?;
+        Ok(Some(crate::lstring::string_char(&self.data()[from..to])))
+    }
+    /// String INDEX's byte range in the blob, its record checked.
+    fn string_range(&self, index: usize) -> Result<(usize, usize)> {
         if index >= self.strings {
             return Err("image string index out of range".into());
         }
@@ -306,9 +329,7 @@ impl ImageRegion {
             .checked_add(offset)
             .ok_or("string offset overflow")?;
         let end = start.checked_add(len).ok_or("string length overflow")?;
-        self.verify(start, end)?;
-        std::str::from_utf8(data.get(start..end).ok_or("string outside image blob")?)
-            .map_err(|_| "image string is not UTF-8".into())
+        Ok((start, end))
     }
 }
 
@@ -487,6 +508,14 @@ impl Vm {
             .ok_or("no image attached")?
             .string(index & !IMAGE)
     }
+    /// The character at byte AT of V, an image string (`ImageRegion::string_char`).
+    pub(crate) fn image_string_char(&self, v: Value, at: usize) -> Result<Option<(u32, usize)>> {
+        let index = v.index(0)?;
+        if index & IMAGE == 0 || crate::frozen::region_of(index) != 0 {
+            return Err("string required".into());
+        }
+        self.image.as_ref().ok_or("no image attached")?.string_char(index & !IMAGE, at)
+    }
     /// V is not a private heap object: a reference into the executable
     /// image (region 0) or a frozen region (`frozen.rs`). Such a value is
     /// never traced, moved or written.
@@ -530,6 +559,35 @@ mod tests {
         let store = std::env::temp_dir().join(format!("vm2-{label}-{}", std::process::id()));
         let key = builder.publish(&store, [42; 32]).unwrap();
         (ImageRegion::open(&store, &key).unwrap(), store)
+    }
+    /// A key that is an executable image's multibyte string, its character
+    /// bound to a keymap that binds it again, looked up and defined whole:
+    /// the walk reads the mapped text once, with its bounds and pages
+    /// checked at each event but not the whole string again, so its work
+    /// grows linearly (the evaluator's instructions at N and 4N).
+    #[test]
+    fn an_image_string_key_is_walked_once() {
+        let work = |n: usize| -> f64 {
+            let mut b = ImageBuilder::default();
+            let text = b.string_raw(&"\u{e9}".repeat(n));
+            b.cons_raw(text, Value::NIL);
+            let (image, store) = stored(&b, &format!("key-walk-{n}"));
+            let mut vm = Vm::new();
+            vm.attach_image(image.clone()).unwrap();
+            vm.declare_special_raw("kw-image-key", image.string_reference_raw(0).unwrap());
+            let form = "(let ((m (make-sparse-keymap))) (define-key m (vector ?\\xe9) m) \
+                (let* ((before (romacs-instructions)) (found (eq (lookup-key m kw-image-key) m)) \
+                       (defined (progn (define-key (make-sparse-keymap) kw-image-key 'ignore) t))) \
+                  (list found defined (- (romacs-instructions) before))))";
+            let got = vm.eval_source_raw(form).and_then(|v| vm.display(v)).unwrap();
+            std::fs::remove_dir_all(store).unwrap();
+            let fields: Vec<&str> = got.trim_matches(|c| c == '(' || c == ')').split(' ').collect();
+            assert_eq!(fields[..2], ["t", "t"], "the walk reads the image key whole: {got}");
+            fields[2].parse().unwrap_or_else(|_| panic!("an instruction count: {got}"))
+        };
+        let (small, large) = (work(4000), work(16000));
+        let exponent = (large / small).ln() / 4f64.ln();
+        assert!(exponent <= 1.25, "exponent {exponent:.3} ({small} -> {large} instructions) over 1.25");
     }
     #[test]
     fn invalid_image_edges_and_partial_records_fail_closed() {

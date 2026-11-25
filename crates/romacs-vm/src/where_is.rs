@@ -33,8 +33,9 @@ const NON_META_MODIFIERS: i64 = 0x7c0_0000;
 /// Why a walk stopped short of its value.
 pub(crate) enum Stop {
     Fault(Fault),
-    /// The menu ITEM's FILTER must be applied to OBJECT first.
-    Filter { item: Value, filter: Value, object: Value },
+    /// A menu item's FILTER must be applied to OBJECT first; WALK, the
+    /// lookup that met it, goes on with the result.
+    Filter { walk: Box<crate::keymap::KeyWalk>, filter: Value, object: Value },
 }
 impl From<Fault> for Stop {
     fn from(fault: Fault) -> Self {
