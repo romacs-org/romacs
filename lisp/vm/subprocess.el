@@ -746,9 +746,21 @@ PROC, then run and \"open\" (its handshake waited for the connection)."
       (romacs--proc-set proc 'status 'run)
       (romacs--exec-sentinel proc "open\n")))))
 
+(defvar romacs--sending-processes nil
+  "The processes a synchronous send is writing, innermost first.
+The waits leave their queues to that send (`romacs--send-process'), as
+GNU's wait never writes a write_queue: only the send writes, and it
+returns as soon as the last write succeeds, so a peer's answer to it
+reaches no filter before the send returns.  The send's own wait, on its
+process, ends once that process can take more (`romacs--proc-select'
+returns `writable').  Not in GNU.")
+
 (defun romacs--send-process (proc string)
-  "send_process: encode STRING as PROC's encoding requires, and write it,
-waiting (and reading output) while the channel is full."
+  "send_process: encode STRING as PROC's encoding requires, and write it.
+While the channel is full, wait on PROC for at most 20 ms, until it can
+take more, reading output and running filters and timers as GNU's wait
+does, but write PROC only here (`romacs--sending-processes'), returning
+right after the last write."
   (if (eq (process-type proc) 'network) (romacs--wait-while-connecting proc))
   (let ((bytes string))
     (if (multibyte-string-p string)
@@ -756,8 +768,9 @@ waiting (and reading output) while the channel is full."
           (romacs--proc-set proc 'encode coding)
           (setq bytes (encode-coding-string string coding t))))
     (if (not (romacs--proc-send proc bytes))
-        (while (not (romacs--proc-send proc nil))
-          (romacs--wait-reading-process-output 0.02 nil 0)))))
+        (let ((romacs--sending-processes (cons proc romacs--sending-processes)))
+          (while (not (romacs--proc-send proc nil))
+            (romacs--wait-reading-process-output 0.02 proc 0))))))
 
 (defun process-send-string (process string)
   "Send PROCESS the contents of STRING as input.  GNU process.c Fprocess_send_string."
@@ -1190,7 +1203,7 @@ reader sees what the timer changed.  Return GNU's got_some_output."
                 (setq got-output-end-time nil))
               (let ((ready (romacs--proc-select wait-proc (/= just-wait-proc 0) timeout read-kbd)))
                 (cond
-                 ((memq ready '(terminated input)) (setq done t))
+                 ((memq ready '(terminated input writable)) (setq done t))
                  ((null ready)
                   (if (romacs--proc-ticks-pending)
                       (setq got-some-output (max got-some-output (romacs--status-notify nil wait-proc))))

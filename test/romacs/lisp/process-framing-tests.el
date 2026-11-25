@@ -107,6 +107,37 @@ PROCESS, a listener, has no output of its own to wait for."
           (should (= (romacs-process-unsent-bytes process) 0)))
       (delete-process process))))
 
+;; A send larger than the pipe returns as soon as its last byte is written,
+;; as GNU's send_process does: a peer that answers the instant it has read
+;; the whole request is heard by the next wait, never inside the send, so a
+;; caller registers what it waits for after sending (jsonrpc, romacs#426).
+(ert-deftest process-framing-a-large-send-returns-before-its-answer ()
+  (let* ((size (* 200 1024))
+         (said nil)
+         (process (make-process :name "process-framing-answer"
+                                :command (list "sh" "-c" (format "head -c %d >/dev/null; echo answer; sleep 5" size))
+                                :noquery t :connection-type 'pipe :coding 'no-conversion
+                                :filter (lambda (_p s) (setq said (concat said s))))))
+    (unwind-protect
+        (progn
+          (process-send-string process (make-string size ?z))
+          (should-not said)
+          (process-framing-tests--until process (lambda () (equal said "answer\n"))))
+      (delete-process process))))
+
+;; A send that fills the pipe still reads what the child writes meanwhile,
+;; and its filter runs, as in GNU's send_process: a child blocked writing
+;; to Romacs reads again, and the send ends.
+(ert-deftest process-framing-a-large-send-to-an-echo-ends ()
+  (let* ((size (* 1024 1024))
+         (got 0)
+         (process (process-framing-tests--cat (lambda (_p s) (setq got (+ got (length s)))))))
+    (unwind-protect
+        (progn
+          (process-send-string process (make-string size ?z))
+          (process-framing-tests--until process (lambda () (= got size))))
+      (delete-process process))))
+
 ;; A pty ends with EIO, not end of file, and may be reopened: framing one
 ;; is refused, saying why; nil on it, unframed, changes nothing.
 (ert-deftest process-framing-a-pty-is-refused ()
