@@ -15,7 +15,7 @@ use crate::layout_host::LayoutHost;
 use crate::session_host::SessionHost;
 use crate::terminal_host::TerminalHost;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use rustc_hash::{FxBuildHasher, FxHashMap};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -36,15 +36,17 @@ impl Ui {
     }
 }
 
-/// An entry, shared between the thread's map and a borrow in progress: the
-/// map's borrow ends before an entry's starts, so a host that runs Lisp in
-/// another VM reaches that VM's entry, never this one's borrow.
+/// An entry, shared between the thread's map and a borrow in progress: for a
+/// host call (`Vm::ui`) the map's borrow ends before the entry's starts, so a
+/// host that runs Lisp in another VM reaches that VM's entry, never this
+/// one's borrow. A read that runs no host code (`Vm::ui_ref`) holds both.
 // CELL(Plain): hosts, no Lisp value.
 type UiEntry = Rc<RefCell<Ui>>;
 
 thread_local! {
-    /// This thread's UIs, by VM key.
-    static UIS: RefCell<HashMap<u64, UiEntry>> = RefCell::new(HashMap::new());
+    /// This thread's UIs, by VM key: read on every host query, so hashed
+    /// cheaply and initialised without a lazy check.
+    static UIS: RefCell<FxHashMap<u64, UiEntry>> = const { RefCell::new(FxHashMap::with_hasher(FxBuildHasher)) };
 }
 
 /// Keys never reused in the process.
@@ -96,11 +98,16 @@ impl Vm {
         Some(f(&mut ui))
     }
 
-    /// F on this VM's UI for a read that runs no host code.
+    /// F on this VM's UI for a read that runs no host code: read in place,
+    /// under the map's borrow, as F reaches no other VM.
     pub(crate) fn ui_ref<R>(&self, f: impl FnOnce(&Ui) -> R) -> Option<R> {
-        let entry = self.ui_entry()?;
-        let ui = entry.borrow();
-        Some(f(&ui))
+        let key = self.ui_key.as_ref()?.0;
+        UIS.with(|uis| {
+            let uis = uis.borrow();
+            let entry = uis.get(&key);
+            debug_assert!(entry.is_some(), "a VM with hosts attached moved to another thread: detach them first");
+            entry.map(|entry| f(&entry.borrow()))
+        })
     }
 
     /// This VM's entry, entered on this thread at its first attach.
