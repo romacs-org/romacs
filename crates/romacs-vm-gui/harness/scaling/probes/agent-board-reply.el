@@ -2,7 +2,8 @@
 
 ;; A board row for a session whose reply is N characters: the row never
 ;; reads the reply, so its cost does not grow with it.  The row is the
-;; board's own, made from the session's summary.
+;; board's own, made from the session's summary, in its project's view
+;; (with no project chosen the board shows project rows alone).
 (scaling-probe agent-board-reply :n 200000 :budget 0.1
   :setup (progn (scaling--agent)
                 (require 'romacs-agent-board)
@@ -12,5 +13,6 @@
                   (puthash (romacs-agent-id session) session romacs-agent--sessions)
                   (seq-find (lambda (row) (eq (plist-get row :kind) 'thread))
                             (romacs-agent-board-rows (list (romacs-agent-summary "scaling-reply")) nil
-                                                     (list :folds (make-hash-table :test #'equal))))))
+                                                     (list :folds (make-hash-table :test #'equal)
+                                                           :project (romacs-agent-board--project "/tmp/reply"))))))
   :body (dotimes (_ 200) (romacs-agent-board--line it 120)))
