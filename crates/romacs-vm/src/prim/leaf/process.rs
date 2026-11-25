@@ -456,8 +456,11 @@ impl Leaf<'_> {
         self.process_select_woken(&revents, &owners)
     }
     /// What the poll's REVENTS woke for OWNERS: queued writes flushed, and
-    /// process_select's answer.
+    /// process_select's answer.  Output ready is read before the send's
+    /// process is answered `writable', as GNU's wait reads it while a send
+    /// waits: the send's last bytes are not written yet.
     fn process_select_woken(&mut self, revents: &[i16], owners: &[(Value, Wake)]) -> Out {
+        let mut writable = false;
         let mut readable = Vec::new();
         let mut connected = Vec::new();
         for (&r, &(proc, wake)) in revents.iter().zip(owners) {
@@ -467,7 +470,7 @@ impl Leaf<'_> {
             match wake {
                 Wake::Read => readable.push(proc),
                 Wake::Write => self.process_flush_waited(proc),
-                Wake::Writable => return Ok(self.sym("writable")),
+                Wake::Writable => writable = true,
                 Wake::Connect => connected.push(proc),
                 Wake::Handshake => match self.gnutls_handshake_poll(proc) {
                     super::gnutls::Handshake::Pending => {}
@@ -479,6 +482,9 @@ impl Leaf<'_> {
                 },
                 Wake::Child => {}
             }
+        }
+        if writable && readable.is_empty() {
+            return Ok(self.sym("writable"));
         }
         self.process_select_ready(readable, connected)
     }

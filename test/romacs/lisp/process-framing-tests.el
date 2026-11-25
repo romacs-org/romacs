@@ -125,6 +125,26 @@ PROCESS, a listener, has no output of its own to wait for."
           (process-framing-tests--until process (lambda () (equal said "answer\n"))))
       (delete-process process))))
 
+;; Output the child wrote before it read the send's first pipeful reaches
+;; its filter before the send returns, as GNU's wait reads it while a send
+;; waits; the answer to the whole send comes after.  A timer the send's
+;; wait runs first holds it while the child writes and reads, so its one
+;; poll finds both the output and room for the rest.
+(ert-deftest process-framing-a-large-send-hears-what-came-first ()
+  (let* ((size 70000)
+         (said nil)
+         (process (make-process :name "process-framing-progress"
+                                :command (list "sh" "-c" (format "echo progress; head -c %d >/dev/null; echo answer; sleep 5" size))
+                                :noquery t :connection-type 'pipe :coding 'no-conversion
+                                :filter (lambda (_p s) (setq said (concat said s))))))
+    (unwind-protect
+        (progn
+          (run-at-time 0 nil (lambda () (let ((end (+ (float-time) 0.3))) (while (< (float-time) end)))))
+          (process-send-string process (make-string size ?z))
+          (should (equal said "progress\n"))
+          (process-framing-tests--until process (lambda () (equal said "progress\nanswer\n"))))
+      (delete-process process))))
+
 ;; A send that fills the pipe still reads what the child writes meanwhile,
 ;; and its filter runs, as in GNU's send_process: a child blocked writing
 ;; to Romacs reads again, and the send ends.
