@@ -181,7 +181,11 @@ fn protocol_one_is_refused_at_hello_with_the_version_mismatch() {
     let out = eval(&mut vm, &format!(r"
         (let ((isolate-worker-program {script:?}))
           (condition-case e (isolate-await (isolate-spawn '+ 1 2) 5)
-            (isolate-refused (list (car e) (car (nth 2 e)) (isolate-list)))))"));
+            (isolate-refused
+             (let ((end (+ (float-time) 2.0)))
+               (while (and (isolate-list) (< (float-time) end))
+                 (romacs--isolate-pump (min 0.02 (max 0 (- end (float-time))))))
+               (list (car e) (car (nth 2 e)) (isolate-list))))))"));
     eval(&mut vm, "(isolate-kill-all)");
     std::fs::remove_file(&script).unwrap();
     assert_eq!(out, r#"(isolate-refused "Isolate protocol mismatch: expected 3, got 1" nil)"#);
