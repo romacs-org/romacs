@@ -210,10 +210,17 @@
     (with-temp-buffer
       (romacs-agent-log-mode)
       (setq romacs-agent-log--session session
-            romacs-agent-log--end (copy-marker (point-min) t))
+            romacs-agent-log--end (copy-marker (point-min) t)
+            romacs-agent-log--input (point-min-marker))
+      (romacs-agent-log--separator t)
       (let ((romacs-agent-event-functions
-             (list (lambda (owner event) (romacs-agent-log--draw-live owner event)))))
-        (romacs-agent-plan-offer-tests--offer session 41))
+             (list (lambda (owner event) (romacs-agent-log--draw-live owner event))))
+            refresh)
+        (cl-letf (((symbol-function 'run-at-time)
+                   (lambda (_delay _repeat function &rest args)
+                     (setq refresh (cons function args)))))
+          (romacs-agent-plan-offer-tests--offer session 41))
+        (apply (car refresh) (cdr refresh)))
       (should (string-match-p "plan ready: .*proceeds, leaving plan mode · type to keep planning" (buffer-string)))
       (should (string-match-p "Asks you.*1 waits on you" header-line-format)))))
 

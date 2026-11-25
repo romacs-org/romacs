@@ -56,16 +56,20 @@ string, an overlay."
            (with-current-buffer chat
              (romacs-agent-log-mode)
              (setq romacs-agent-log--session session romacs-agent-ui--session session
-                   romacs-agent-log--end (point-min-marker))
+                   romacs-agent-log--end (point-min-marker) romacs-agent-log--input (point-min-marker))
              (set-marker-insertion-type romacs-agent-log--end t)
              (puthash romacs-agent-header-tests--id chat romacs-agent-log--chats)
              (romacs-agent-ui--header-refresh session)
+             (romacs-agent-header-tests--flush)
              ;; Its views know its state, as a chat's do once it is shown.
              (romacs-agent-ui--announce session)
              (setq written 0)
              ,@body)
          ;; A batch a test started runs with it, never after it.
          (when (timerp romacs-agent-ui--children-timer) (cancel-timer romacs-agent-ui--children-timer))
+         (when (buffer-live-p chat)
+           (with-current-buffer chat
+             (when (timerp romacs-agent-log--chrome-timer) (cancel-timer romacs-agent-log--chrome-timer))))
          (remhash romacs-agent-header-tests--id romacs-agent-log--chats)
          (when (buffer-live-p chat) (kill-buffer chat))))))
 
@@ -73,8 +77,14 @@ string, an overlay."
 (unless (fboundp 'romacs--run-window-change-functions)
   (load (expand-file-name "../vm/window-change.el" (file-name-directory (locate-library "romacs-agent.el"))) nil t))
 
+(defun romacs-agent-header-tests--flush ()
+  "Run the pending chat refresh as it would at the end of this batch."
+  (when (timerp romacs-agent-log--chrome-timer)
+    (timer-event-handler romacs-agent-log--chrome-timer)))
+
 (defun romacs-agent-header-tests--header ()
   "The chat's header as its buffer hands it to display."
+  (romacs-agent-header-tests--flush)
   (should (stringp header-line-format))
   (substring-no-properties header-line-format))
 
@@ -296,10 +306,12 @@ string, an overlay."
       (cl-letf (((symbol-function 'romacs-agent-children-summary)
                  (lambda (_) (propertize "Workers" 'help-echo worker))))
         (romacs-agent-ui--header-refresh session)
+      (romacs-agent-header-tests--flush)
         (should (equal (get-text-property (string-search "Workers" header-line-format) 'help-echo header-line-format)
                        "First worker"))
         (setq worker "Next worker")
         (romacs-agent-ui--header-refresh session)
+      (romacs-agent-header-tests--flush)
         (should (equal (get-text-property (string-search "Workers" header-line-format) 'help-echo header-line-format)
                        "Next worker"))))))
 
@@ -312,6 +324,7 @@ string, an overlay."
       (romacs-agent--raise session (list :type 'status :text "requesting"))
       (romacs-agent--changed session)
       (romacs-agent-ui--header-refresh session)
+      (romacs-agent-header-tests--flush)
       (should (eq header-line-format shown))
       (should (= written 0))
       ;; Its views were told its state already: the board's batch waits on nothing.
@@ -319,6 +332,7 @@ string, an overlay."
       ;; Made again, it reads the same: not written.
       (setq romacs-agent-log--header-made nil)
       (romacs-agent-ui--header-refresh session)
+      (romacs-agent-header-tests--flush)
       (should (eq header-line-format shown))
       (should (= written 0))
       ;; A copy a journal is replayed into is not the chat's session.
@@ -328,6 +342,7 @@ string, an overlay."
         (should (eq header-line-format shown)))
       ;; A change is written once.
       (romacs-agent--raise session (list :type 'usage :context-used 600000))
+      (romacs-agent-header-tests--flush)
       (should-not (eq header-line-format shown))
       (should (= written 1)))))
 

@@ -151,9 +151,12 @@ are not part of it; CLOSE ends it."
       ;; one seq are never split from each other by a page's end.
       (cons (lambda (from)
               (let* ((seq (if (consp from) (car from) -1)) (rowid (if (consp from) (cdr from) -1))
+                     ;; seq >= ? bounds the index seek: the OR alone reads
+                     ;; the session's records from its first on every page.
                      (rows (sqlite-select db (concat "select seq, record, rowid from events where session = ?"
-                                                     " and (seq > ? or (seq = ? and rowid > ?)) order by seq, rowid limit ?")
-                                          (list id seq seq rowid romacs-agent-events--page))))
+                                                     " and seq >= ? and (seq > ? or (seq = ? and rowid > ?))"
+                                                     " order by seq, rowid limit ?")
+                                          (list id seq seq seq rowid romacs-agent-events--page))))
                 (and rows (cons (mapcar #'cadr rows)
                                 (and (= (length rows) romacs-agent-events--page)
                                      (let ((last (car (last rows)))) (cons (nth 0 last) (nth 2 last))))))))
@@ -203,6 +206,19 @@ are not part of it; CLOSE ends it."
     (caar (sqlite-select db (concat "select max(seq) from events where session = ? and kind = 'note' and seq < ?"
                                     " and json_extract(record, '$.note.type') = ?")
                          (list (romacs-agent-id session) end type)))))
+
+(defun romacs-agent-events-run-harness (session end)
+  "The harness SESSION's last run note up to seq END names, a symbol, or
+nil when none names one."
+  (when-let* ((db (romacs-agent-events--db))
+              (name (caar (sqlite-select
+                           db (concat "select json_extract(record, '$.note.harness') from events"
+                                      " where session = ? and kind = 'note' and seq <= ?"
+                                      " and json_extract(record, '$.note.type') = 'run'"
+                                      " and json_extract(record, '$.note.harness') is not null"
+                                      " order by seq desc limit 1")
+                           (list (romacs-agent-id session) end)))))
+    (intern name)))
 
 (defun romacs-agent-events-tail (session turns &optional end begin)
   "As `romacs-agent--journal-tail', in places that are seqs: (FROM .

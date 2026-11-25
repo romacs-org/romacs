@@ -37,6 +37,7 @@
      (romacs-agent-log-mode)
      (setq romacs-agent-log--session ,session
            romacs-agent-log--end (point-min-marker)
+           romacs-agent-log--input (point-min-marker)
            romacs-agent-log--filled t)
      (set-marker-insertion-type romacs-agent-log--end t)
      ;; Loaded, as a session a chat shows live is.
@@ -50,41 +51,33 @@
 (defun romacs-agent-log-queue-tests--rows ()
   "The texts of the queued rows the chat shows, in order."
   (let ((at romacs-agent-log--end) (rows nil))
-    (while (setq at (text-property-not-all at (point-max) 'romacs-agent-log-queued nil))
-      (let ((end (or (next-single-property-change at 'romacs-agent-log-queued nil (point-max)) (point-max))))
+    (while (setq at (text-property-not-all at romacs-agent-log--input 'romacs-agent-log-queued nil))
+      (let ((end (or (next-single-property-change at 'romacs-agent-log-queued nil romacs-agent-log--input) romacs-agent-log--input)))
         (push (replace-regexp-in-string "\\`[ »<]*[0-9]+ +" "" (string-trim (buffer-substring-no-properties at end))) rows)
         (setq at end)))
     (nreverse rows)))
 
 (defun romacs-agent-log-queue-tests--compose (text)
-  "Make the chat's composer say TEXT, point at its end."
-  (romacs-agent-log-in-composer
-    (erase-buffer)
-    (insert text)))
-
-(defun romacs-agent-log-queue-tests--draft ()
-  "What the chat's composer says."
-  (romacs-agent-log-in-composer (buffer-string)))
+  "Make the composer say TEXT, point at its end."
+  (goto-char (point-max))
+  (delete-region romacs-agent-log--input (point-max))
+  (insert text))
 
 (defun romacs-agent-log-queue-tests--key (map key)
   "Run KEY's command in MAP, as typed."
   (call-interactively (keymap-lookup map key)))
 
-(defun romacs-agent-log-queue-tests--composer-key (key)
-  "Run KEY's command in the chat's composer, as typed there."
-  (romacs-agent-log-in-composer (romacs-agent-log-queue-tests--key romacs-agent-compose-mode-map key)))
-
 (defun romacs-agent-log-queue-tests--answered ()
   "Wait for the chat's draft to be answered (`romacs-agent-submit')."
   (let ((deadline (+ (float-time) 3)))
-    (while (and (romacs-agent-log--sending-p) (< (float-time) deadline))
+    (while (and romacs-agent-log--sending (< (float-time) deadline))
       (accept-process-output nil 0.01))
-    (should-not (romacs-agent-log--sending-p))))
+    (should-not romacs-agent-log--sending)))
 
 (defun romacs-agent-log-queue-tests--queue (text)
   "Queue TEXT as its user does: in the composer, C-c C-q, and wait for its answer."
   (romacs-agent-log-queue-tests--compose text)
-  (romacs-agent-log-queue-tests--composer-key "C-c C-q")
+  (romacs-agent-log-queue-tests--key romacs-agent-log-mode-map "C-c C-q")
   (romacs-agent-log-queue-tests--answered))
 
 (defun romacs-agent-log-queue-tests--row (n)
@@ -114,18 +107,18 @@
           ;; n twice, e: the second in the composer, held in its place.
           (romacs-agent-log-queue-tests--row 2)
           (romacs-agent-log-queue-tests--key romacs-agent-log-queue-map "e")
-          (should (equal (romacs-agent-log-queue-tests--draft) "second"))
+          (should (equal (buffer-substring-no-properties romacs-agent-log--input (point-max)) "second"))
           (should (romacs-agent-item-held (cadr (romacs-agent-queue session))))
           (should (text-property-search-backward 'romacs-agent-log-queued nil nil))
           ;; The held mark is the glyph table's, a customised one too.
           (let ((romacs-agent-glyph-alist (cons '(queue-held . "H>") romacs-agent-glyph-alist)))
             (romacs-agent-log--separator t)
-            (should (string-match-p "H>2 +second" (buffer-substring-no-properties romacs-agent-log--end (point-max)))))
+            (should (string-match-p "H>2 +second" (buffer-substring-no-properties romacs-agent-log--end romacs-agent-log--input))))
           (romacs-agent-log--separator t)
           (romacs-agent-log-queue-tests--compose "second, edited")
           ;; RET: back in its place, said anew, nothing sent.
-          (romacs-agent-log-queue-tests--composer-key "RET")
-          (should (string-empty-p (romacs-agent-log-queue-tests--draft)))
+          (romacs-agent-log-queue-tests--key romacs-agent-log-mode-map "RET")
+          (should (string-empty-p (buffer-substring-no-properties romacs-agent-log--input (point-max))))
           (should (equal (romacs-agent-log-queue-tests--rows) '("first" "second, edited" "third")))
           (should (equal (mapcar #'car (romacs-agent-store-queued id)) '("first" "second, edited" "third")))
           ;; d on the first.
@@ -139,6 +132,8 @@
           (dotimes (_ 3)
             (setf (romacs-agent-state session) 'idle)
             (romacs-agent--dispatch session))
+          (when (timerp romacs-agent-log--chrome-timer)
+            (timer-event-handler romacs-agent-log--chrome-timer))
           (should-not (romacs-agent-log-queue-tests--rows))))
       (should (equal (nreverse sent) '("second, edited" "third")))
       (should-not (romacs-agent-queue session))
@@ -161,7 +156,7 @@
         (romacs-agent--dispatch session)
         (should-not sent)
         (romacs-agent-log-queue-tests--compose "")
-        (romacs-agent-log-queue-tests--composer-key "RET")
+        (romacs-agent-log-queue-tests--key romacs-agent-log-mode-map "RET")
         (should (equal (romacs-agent-log-queue-tests--rows) '("one" "two")))
         (romacs-agent--dispatch session)
         (should (equal sent '("one")))))))
@@ -179,11 +174,11 @@
       (let ((timer-list nil) (timer-idle-list nil))
         (romacs-agent-log-queue-tests--compose "see [image](/tmp/romacs-queue-test.png)")
         (romacs--timer-check)
-        (should (romacs-agent-log-in-composer romacs-agent-log-images--composer))
-        (romacs-agent-log-queue-tests--composer-key "RET")
+        (should romacs-agent-log-images--composer)
+        (romacs-agent-log-queue-tests--key romacs-agent-log-mode-map "RET")
         (romacs--timer-check)
-        (should (string-empty-p (romacs-agent-log-queue-tests--draft)))
-        (should-not (romacs-agent-log-in-composer romacs-agent-log-images--composer))))))
+        (should (string-empty-p (buffer-substring-no-properties romacs-agent-log--input (point-max))))
+        (should-not romacs-agent-log-images--composer)))))
 
 (ert-deftest romacs-agent-log-queue-a-steer-never-passes-a-hold ()
   ;; A steer passes what waits for a new turn, not what its user holds.
@@ -220,7 +215,7 @@
       ;; numbers in a column.
       (let ((romacs-agent-glyph-alist (append '((queue-held . "H>>") (queue-other . "O")) romacs-agent-glyph-alist)))
         (romacs-agent-log--separator t)
-        (let* ((shown (buffer-substring-no-properties romacs-agent-log--end (point-max)))
+        (let* ((shown (buffer-substring-no-properties romacs-agent-log--end romacs-agent-log--input))
                (column (lambda (regexp) (and (string-match regexp shown)
                                              (- (match-beginning 1) (save-match-data
                                                                       (or (cl-position ?\n shown :end (match-beginning 1) :from-end t) -1))
@@ -246,12 +241,11 @@
       (romacs-agent-log-queue-tests--compose "a draft")
       (romacs-agent-log-queue-tests--row 1)
       (should-error (romacs-agent-log-queue-tests--key romacs-agent-log-queue-map "e") :type 'user-error)
-      (should (equal (romacs-agent-log-queue-tests--draft) "a draft")))))
+      (should (equal (buffer-substring-no-properties romacs-agent-log--input (point-max)) "a draft")))))
 
 (ert-deftest romacs-agent-log-queue-acts-only-on-the-row-at-point ()
-  ;; Off a row (at the chat's end) the menu's rows are inapt and the
-  ;; commands say where to go; on a row they act on it, and at an end a
-  ;; move is inapt.
+  ;; From the composer the menu's rows are inapt and the commands say
+  ;; where to go; on a row they act on it, and at an end a move is inapt.
   (let ((session (romacs-agent-test-attach
                   (romacs-agent--make :id "c4c4c4c4-0000-4000-8000-000000000000" :harness 'claude :state 'running)
                   t)))
@@ -289,9 +283,9 @@
       (romacs-agent--dequeue session (car (romacs-agent-queue session)))
       ;; Gone, then saved before RET: the composer's text is the draft.
       (should (equal (plist-get (romacs-agent-log--desktop-save nil) :draft) "gone soon"))
-      (should-error (romacs-agent-log-queue-tests--composer-key "RET") :type 'user-error)
+      (should-error (romacs-agent-log-queue-tests--key romacs-agent-log-mode-map "RET") :type 'user-error)
       (should-not romacs-agent-log-queue--editing)
-      (should (equal (romacs-agent-log-queue-tests--draft) "gone soon")))))
+      (should (equal (buffer-substring-no-properties romacs-agent-log--input (point-max)) "gone soon")))))
 
 ;;; What it keeps of the store's windows
 

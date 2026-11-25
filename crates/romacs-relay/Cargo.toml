@@ -1,6 +1,6 @@
 [package]
 name = "romacs-relay"
-version = "0.0.20"
+version = "0.0.21"
 edition = "2024"
 license = "GPL-3.0-or-later"
 description = "The agent session protocol over a tailnet: WebSocket to the agents service and back"

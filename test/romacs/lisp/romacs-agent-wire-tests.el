@@ -110,7 +110,8 @@ text, parsed as a client parses it (`romacs-agent-rpc-parse'), decoded."
                                      :tools (make-hash-table :test #'equal) :streamed (make-hash-table :test #'equal))))
     (with-temp-buffer
       (romacs-agent-log-mode)
-      (setq romacs-agent-log--session session romacs-agent-log--end (point-min-marker))
+      (setq romacs-agent-log--session session romacs-agent-log--end (point-min-marker)
+            romacs-agent-log--input (point-min-marker))
       (set-marker-insertion-type romacs-agent-log--end t)
       (dolist (unit units) (dolist (event unit) (romacs-agent-log-draw session event)))
       (romacs-agent-log--close-stream)

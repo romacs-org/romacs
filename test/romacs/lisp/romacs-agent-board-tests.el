@@ -16,6 +16,15 @@
 
 (defvar romacs-agent-history-per-project)
 
+(defun romacs-agent-board-tests--rows (&rest view)
+  "Return the board rows for VIEW using fresh summaries of the test sessions."
+  (romacs-agent-board-rows
+   (let ((romacs-agent--summaries (make-hash-table :test #'equal)))
+     (mapcar (lambda (session) (romacs-agent-summary (romacs-agent-id session)))
+             (hash-table-values romacs-agent--sessions)))
+   (plist-get view :history)
+   (append view (list :folds (or (plist-get view :folds) (make-hash-table :test #'equal))))))
+
 (defmacro romacs-agent-board-tests--with (&rest body)
   "BODY with a registry of its own, `mk' making a session in it (ID TITLE
 STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
@@ -33,14 +42,7 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
                    (puthash id session romacs-agent--sessions)
                    (romacs-agent--index session)
                    session))
-               (rows (&rest view)
-                 ;; Of the sessions as each test leaves them: summaries made anew.
-                 (romacs-agent-board-rows (let ((romacs-agent--summaries (make-hash-table :test #'equal)))
-                                            (mapcar (lambda (session) (romacs-agent-summary (romacs-agent-id session)))
-                                                    (hash-table-values romacs-agent--sessions)))
-                                          (plist-get view :history)
-                                          (append view (list :folds (or (plist-get view :folds)
-                                                                        (make-hash-table :test #'equal)))))))
+               (rows #'romacs-agent-board-tests--rows))
        ,@body)))
 
 (defun romacs-agent-board-tests--ids (rows)
@@ -247,6 +249,42 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
               (should (romacs-agent-settled-p (romacs-agent-get "b")))))
         (delete-directory dir t)))))
 
+(ert-deftest romacs-agent-board-settle-holds-delegated-results ()
+  (romacs-agent-board-tests--with
+    (let* ((dir (make-temp-file "romacs-board-wake-" t))
+           (lead (mk "lead" "Lead" 'idle 10 :dir dir))
+           (worker (mk "worker" "Worker" 'running 5 :dir dir :options '(:parent "lead")))
+           (romacs-agent-event-functions '(romacs-agent-tools--on-event))
+           (romacs-agent-tools--pending (make-hash-table :test #'equal))
+           (romacs-agent-tools--waking (make-hash-table :test #'equal))
+           (timer nil) (delivered nil) (notices nil))
+      (unwind-protect
+          (progn
+            (romacs-agent-ui--summarize-children lead)
+            (romacs-agent-board-tests--board
+              (cl-letf (((symbol-function 'run-at-time) (lambda (_delay _repeat then) (setq timer then)))
+                        ((symbol-function 'message)
+                         (lambda (template &rest args) (when template (push (apply #'format template args) notices))))
+                        ((symbol-function 'romacs-agent-tools--deliver)
+                         (lambda (_session text done &rest _) (push text delivered) (funcall done))))
+                (should (equal (romacs-agent-board-tests--at) "lead"))
+                (romacs-agent-tools--wake-soon lead)
+                (romacs-agent-board-settle)
+                (setf (romacs-agent-state worker) 'idle (romacs-agent-done-seq worker) 1
+                      (romacs-agent-ends worker) '((1 "Work is ready." nil)))
+                (romacs-agent-tools--wake worker)
+                (funcall (prog1 timer (setq timer nil)))
+                (should-not delivered)
+                (should (gethash "lead" romacs-agent-tools--pending))
+                (should (cl-some (lambda (notice) (string-search "still at work" notice)) notices))
+                (romacs-agent-board-toggle-settled)
+                (romacs-agent-board-settle)
+                (should timer)
+                (funcall timer)
+                (should (string-search "Work is ready." (car delivered)))
+                (should-not (gethash "lead" romacs-agent-tools--pending)))))
+        (delete-directory dir t)))))
+
 (ert-deftest romacs-agent-board-keys-fold-and-open ()
   (romacs-agent-board-tests--with
     (let ((lead (mk "lead" "lead" 'idle 10)))
@@ -395,7 +433,7 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
           ;; Nothing at work: the clock stops.
           (setf (romacs-agent-state session) 'idle)
           (romacs-agent--changed session)
-          (romacs-agent-board--redraw)
+          (romacs-agent-board--redraw t)
           (cl-letf (((symbol-function 'romacs-agent-board--shown) (lambda () (current-buffer))))
             (romacs-agent-board--tick))
           (should-not romacs-agent-board--ticker))))))
@@ -434,7 +472,8 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
                     (start (save-excursion (goto-char (window-start)) (plist-get (romacs-agent-board--row) :id))))
                 ;; A newer thread lands above both.
                 (mk "new" "new" 'idle 1)
-                (romacs-agent-board--render (current-buffer))
+                (romacs-agent-board--refresh)
+                (should (romacs-agent-board--find "new"))
                 (should (equal (plist-get (romacs-agent-board--row) :id) at))
                 (should (equal (save-excursion (goto-char (window-start)) (plist-get (romacs-agent-board--row) :id))
                                start))))
@@ -453,6 +492,35 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
           (romacs-agent-board--shown-in (selected-window))
           (romacs-agent-board--resized (selected-window))
           (should (equal (with-current-buffer other (buffer-string)) "the user's text")))))))
+
+(ert-deftest romacs-agent-board-filters-a-listing-and-skips-folded-threads ()
+  (romacs-agent-board-tests--with
+    (mk "one" "alpha" 'idle 1)
+    (mk "two" "beta" 'idle 2)
+    (let ((summary (symbol-function 'romacs-agent-summary))
+          (thread (symbol-function 'romacs-agent-board--thread))
+          (listings 0) (archives 0) (threads 0))
+      (cl-letf (((symbol-function 'romacs-agent-summary)
+                 (lambda (id &rest args)
+                   (unless id (cl-incf listings))
+                   (apply summary id args)))
+                ((symbol-function 'romacs-agent-board-source-history)
+                 (lambda (_) (cl-incf archives) nil))
+                ((symbol-function 'romacs-agent-board--thread)
+                 (lambda (&rest args) (cl-incf threads) (apply thread args)))
+                ((symbol-function 'romacs-agent-store-folded) #'ignore))
+        (with-temp-buffer
+          (romacs-agent-board-mode)
+          (puthash "/p/one" t (romacs-agent-board--folded))
+          (romacs-agent-board--redraw)
+          (should (= threads 0))
+          (should (equal (plist-get (plist-get (get-text-property (romacs-agent-board--find "/p/one") 'romacs-agent-board-row) :first) :id) "one"))
+          (dolist (word '("a" "al" "alpha"))
+            (setq romacs-agent-board--words (list word))
+            (romacs-agent-board--redraw))
+          (should (romacs-agent-board--find "one"))
+          (should-not (romacs-agent-board--find "two"))
+          (should (= listings archives 1)))))))
 
 (provide 'romacs-agent-board-tests)
 (ert-deftest romacs-agent-board-a-folded-project-shows-its-heading ()
@@ -572,46 +640,15 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
            for at = (text-property-not-all 0 (length line) 'romacs-agent-log-delegated-thread nil line)
            when at collect (cons (get-text-property at 'romacs-agent-log-delegated-thread line) line)))
 
-(defun romacs-agent-board-tests--word-face (word line)
-  "Return the faces on the first character of WORD in LINE."
-  (when-let* ((at (string-match (regexp-quote word) line)))
-    (ensure-list (get-text-property at 'face line))))
+(defun romacs-agent-board-tests--thread-rows (session)
+  "Return the all-threads menu rows for SESSION's chat."
+  (with-temp-buffer
+    (setq-local romacs-agent-log--session-id (romacs-agent-id session))
+    (romacs-agent-menu--thread-rows)))
 
-(defvar romacs-agent-log-activity-idle-cap)
-
-(defun romacs-agent-board-tests--more (text)
-  "Return the overflow row of rendered activity TEXT, if present."
-  (seq-find (lambda (line) (string-match-p "\\+[0-9]+ more\\_>" line))
-            (split-string text "\n" t)))
-
-(defun romacs-agent-board-tests--open-more (session text label)
-  "Open LABEL in SESSION's rendered activity TEXT and return the board's thread IDs."
-  (let ((romacs-agent-board--name "*romacs-board-overflow-test*")
-        (romacs-agent-board--ticker nil))
-    (unwind-protect
-        (save-window-excursion
-          (with-temp-buffer
-            (switch-to-buffer (current-buffer))
-            (romacs-agent-log-mode)
-            (setq romacs-agent-log--session session)
-            (let ((inhibit-read-only t)) (insert (romacs-agent-log--sealed text)))
-            (goto-char (point-min))
-            (should (search-forward label nil t))
-            (goto-char (match-beginning 0))
-            (cl-letf (((symbol-function 'romacs-agent-know-sessions) #'ignore)
-                      ((symbol-function 'romacs-agent-history-list) #'ignore)
-                      ((symbol-function 'romacs-agent-history-items) #'ignore))
-              (let ((action (key-binding (kbd "RET"))))
-                (should (and (symbolp action) (fboundp action) (commandp action)))
-                (should-not (eq action 'romacs-agent-log-send))
-                (call-interactively action)))
-            (with-current-buffer (window-buffer (selected-window))
-              (should (derived-mode-p 'romacs-agent-board-mode))
-              (cl-loop for row in (romacs-agent-board--shown-rows)
-                       when (eq (plist-get row :kind) 'thread)
-                       collect (plist-get row :id)))))
-      (when romacs-agent-board--ticker (cancel-timer romacs-agent-board--ticker))
-      (when-let* ((board (get-buffer romacs-agent-board--name))) (kill-buffer board)))))
+(defun romacs-agent-board-tests--thread-states (rows)
+  "Return the thread IDs and states in menu ROWS."
+  (mapcar (lambda (row) (list (plist-get row :id) (plist-get row :key))) rows))
 
 (defmacro romacs-agent-board-tests--watch-tree (&rest body)
   "Run BODY with lead, lane and writer sessions and a private watch store."
@@ -629,12 +666,15 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
             (romacs-agent-event-functions '(romacs-agent-ui--on-event)))
        (cl-letf (((symbol-function 'romacs-agent--state-root) (lambda () root))
                  ((symbol-function 'romacs-agent-tools--caller) (lambda () "writer"))
-                 ((symbol-function 'romacs-agent-watch--unit-state) (lambda (_) '("active" . "invocation"))))
+                 ((symbol-function 'romacs-agent-watch--output)
+                  (lambda (_program _args then)
+                    (funcall then "Id=forge-check.service\nActiveState=active\nInvocationID=invocation\n" 0))))
          (unwind-protect
              (progn
                (mapc #'romacs-agent-ui--children-changed (list writer lane lead))
                (romacs-agent-board-tests--flush-worker-rows)
-               (let ((reply (romacs-agent-watch--watch (romacs-mcp--object "unit" "forge-check.service"))))
+               (let* ((deferred (romacs-agent-watch--watch (romacs-mcp--object "unit" "forge-check.service")))
+                      (reply (car (funcall (nth 1 deferred)))))
                  (should (equal (gethash "watching" reply) ["forge-check.service"])))
                (romacs-agent-board-tests--flush-worker-rows)
                ,@body)
@@ -651,7 +691,7 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
     (should (equal (romacs-agent-board-tests--ids (rows))
                    '("/p/one" "lead" "lane" "writer")))))
 
-(ert-deftest romacs-agent-board-watch-end-keeps-the-idle-lane-visible ()
+(ert-deftest romacs-agent-board-watch-end-moves-idle-threads-out-of-activity ()
   (romacs-agent-board-tests--watch-tree
     (let ((before (mapcar #'romacs-agent-ui--state-key (list lead lane)))
           (watch (car (gethash "writer" romacs-agent-watch--watches))))
@@ -665,13 +705,12 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
       (should-not (gethash "writer" romacs-agent-watch--watches))
       (should (equal (list before (mapcar #'romacs-agent-ui--state-key (list lead lane writer)))
                      '((waiting waiting) (idle idle idle))))
-      (dolist (parent (list (cons lead "Lane") (cons lane "Writer")))
-        (let ((text (romacs-agent-board-tests--activity (car parent)))
-              (title (cdr parent)))
-          (should (string-match-p (concat title "[^\n]*\\_<Idle\\_>") text))
-          (should (memq 'default
-                        (romacs-agent-board-tests--word-face title text)))
-          (should-not (text-property-not-all 0 (length text) 'romacs-agent-worker nil text)))))))
+      (dolist (parent (list (list lead "lane" "Lane") (list lane "writer" "Writer")))
+        (pcase-let* ((`(,session ,id ,title) parent)
+                     (menu (romacs-agent-board-tests--thread-rows session)))
+          (should (equal (romacs-agent-board-tests--thread-states menu) (list (list id 'idle))))
+          (should (string-search (concat title "  Idle") (romacs-agent-menu--thread-line (car menu))))
+          (should (equal (romacs-agent-board-tests--activity session) "")))))))
 
 (ert-deftest romacs-agent-board-watch-and-live-child-both-show ()
   (romacs-agent-board-tests--watch-tree
@@ -689,84 +728,58 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
 (ert-deftest romacs-agent-board-activity-hides-a-thread-when-settled ()
   (romacs-agent-board-tests--with
     (let ((lead (mk "lead" "Lead" 'idle 0))
-          (done (mk "done" "Review" 'idle 1 :done-seq 2 :options '(:parent "lead"))))
+          (done (mk "done" "Review" 'running 1 :options '(:parent "lead"))))
       (mk "idle" "Standby" 'idle 2 :options '(:parent "lead"))
-      (romacs-agent-ui--summarize-children lead)
-      (should (assoc "done" (romacs-agent-board-tests--activity-rows
-                             (romacs-agent-board-tests--activity lead))))
-      (setf (romacs-agent-settled-seq done) 2)
       (romacs-agent-ui--summarize-children lead)
       (should (equal (mapcar #'car (romacs-agent-board-tests--activity-rows
                                    (romacs-agent-board-tests--activity lead)))
-                     '("idle"))))))
+                     '("done")))
+      (setf (romacs-agent-state done) 'idle
+            (romacs-agent-done-seq done) 2
+            (romacs-agent-settled-seq done) 2)
+      (romacs-agent-ui--summarize-children lead)
+      (should (equal (romacs-agent-board-tests--activity lead) ""))
+      (let ((menu (romacs-agent-board-tests--thread-rows lead)))
+        (should (equal (romacs-agent-board-tests--thread-states menu)
+                       '(("idle" idle) ("done" completed))))))))
 
-(ert-deftest romacs-agent-board-activity-lists-live-before-idle-and-finished ()
+(ert-deftest romacs-agent-board-activity-lists-live-work-and-menu-keeps-inactive-outcomes ()
   (romacs-agent-board-tests--with
     (let ((lead (mk "lead" "Lead" 'idle 0)))
       (mk "idle" "Standby" 'idle 1 :options '(:parent "lead"))
-      (mk "done" "Review" 'idle 2 :done-seq 2 :options '(:parent "lead"))
+      (mk "done" "Review" 'idle 2 :done-seq 2 :settled-seq 2 :options '(:parent "lead"))
       (mk "failure" "Build" 'idle 3 :done-seq 2 :failed t :options '(:parent "lead"))
       (mk "busy" "Check" 'running 10 :options '(:parent "lead"))
       (romacs-agent-ui--summarize-children lead)
-      (let* ((rows (romacs-agent-board-tests--activity-rows
-                    (romacs-agent-board-tests--activity lead)))
-             (busy (car rows))
-             (done (cdr (assoc "done" rows)))
-             (failure (cdr (assoc "failure" rows))))
-        (should (equal (car busy) "busy"))
-        (should (string-match-p "\\_<Working\\_>" (cdr busy)))
-        (should (text-property-not-all 0 (length (cdr busy)) 'romacs-agent-worker nil (cdr busy)))
-        (should (assoc "idle" (cdr rows)))
-        (should (and done (string-prefix-p (romacs-agent-glyph 'completed) done)))
-        (should (memq 'default
-                      (romacs-agent-board-tests--word-face "Review" done)))
-        (should (and failure (string-match-p "\\_<Failed\\_>" failure)))
-        (should (seq-intersection '(romacs-agent-error error)
-                                  (romacs-agent-board-tests--word-face "Failed" failure)))
-        (dolist (line (mapcar #'cdr (cdr rows)))
-          (should-not (text-property-not-all 0 (length line) 'romacs-agent-worker nil line)))))))
+      (let* ((rows (romacs-agent-board-tests--activity-rows (romacs-agent-board-tests--activity lead)))
+             (busy (cdar rows))
+             (menu (romacs-agent-board-tests--thread-rows lead))
+             (done (seq-find (lambda (row) (equal (plist-get row :id) "done")) menu))
+             (failure (seq-find (lambda (row) (equal (plist-get row :id) "failure")) menu)))
+        (should (equal (mapcar #'car rows) '("busy")))
+        (should (string-match-p "\\_<Working\\_>" busy))
+        (should (text-property-not-all 0 (length busy) 'romacs-agent-worker nil busy))
+        (should (equal (romacs-agent-board-tests--thread-states menu)
+                       '(("failure" failed) ("busy" working) ("idle" idle) ("done" completed))))
+        (should (equal (romacs-agent-menu--thread-line done)
+                       (concat (romacs-agent-glyph 'completed) " Review  Done  done")))
+        (should (equal (romacs-agent-menu--thread-line failure)
+                       (concat (romacs-agent-glyph 'failure) " Build  Failed  failure")))))))
 
-(ert-deftest romacs-agent-board-activity-heading-includes-overflow ()
+(ert-deftest romacs-agent-board-activity-shows-live-threads-without-overflow ()
   (romacs-agent-board-tests--with
     (let ((lead (mk "lead" "Lead" 'idle 0)))
-      (mk "busy" "Check" 'running 5 :options '(:parent "lead"))
       (dotimes (i 4)
         (mk (format "idle-%d" i) (format "Standby %d" i) 'idle i :options '(:parent "lead")))
+      (mk "done" "Review" 'idle 5 :done-seq 2 :settled-seq 2 :options '(:parent "lead"))
+      (mk "failure" "Build" 'idle 6 :done-seq 2 :failed t :options '(:parent "lead"))
+      (mk "busy" "Check" 'running 10 :options '(:parent "lead"))
       (romacs-agent-ui--summarize-children lead)
-      (let* ((romacs-agent-log-activity-idle-cap
-              (if (boundp 'romacs-agent-log-activity-idle-cap) 2 nil))
-             (text (romacs-agent-board-tests--activity lead))
-             (shown (length (romacs-agent-board-tests--activity-rows text)))
-             (more (romacs-agent-board-tests--more text))
-             (hidden (when (and more (string-match "\\+\\([0-9]+\\) more\\_>" more))
-                       (string-to-number (match-string 1 more)))))
-        (should (equal "Threads · 1 live +2 more" (car (split-string text "\n" t))))
-        (should (and hidden (= 5 (+ shown hidden))))))))
-
-(ert-deftest romacs-agent-board-activity-overflow-opens-this-sessions-threads ()
-  (romacs-agent-board-tests--with
-    (let ((lead (mk "lead" "Lead" 'idle 0))
-          (romacs-agent-log-activity-idle-cap
-           (if (boundp 'romacs-agent-log-activity-idle-cap) 2 nil)))
-      (mk "other" "Other" 'idle 0)
-      (mk "other-idle" "Standby" 'idle 0 :options '(:parent "other"))
-      (mk "old-idle" "Standby" 'idle 4 :options '(:parent "lead"))
-      (mk "new-idle" "Standby" 'idle 1 :options '(:parent "lead"))
-      (mk "next-idle" "Standby" 'idle 2 :options '(:parent "lead"))
-      (mk "older-idle" "Standby" 'idle 3 :options '(:parent "lead"))
-      (dotimes (i 3)
-        (mk (format "live-%d" i) (format "Check %d" i) 'running (+ 10 i) :options '(:parent "lead")))
-      (romacs-agent-ui--summarize-children lead)
-      (let* ((text (romacs-agent-board-tests--activity lead))
-             (more (romacs-agent-board-tests--more text)))
-        (should (equal (mapcar #'car (romacs-agent-board-tests--activity-rows text))
-                       '("live-0" "live-1" "live-2" "new-idle" "next-idle")))
-        (should (and more (string-match-p "\\+2 more\\_>" more)))
-        (should (memq 'romacs-agent-log-activity-overflow
-                      (romacs-agent-board-tests--word-face "+2 more" more)))
-        (let ((ids (romacs-agent-board-tests--open-more lead text "+2 more")))
-          (should (equal (sort (remove "lead" ids) #'string<)
-                         '("live-0" "live-1" "live-2" "new-idle" "next-idle" "old-idle" "older-idle"))))))))
+      (let ((text (romacs-agent-board-tests--activity lead)))
+        (should (equal (car (split-string text "\n" t)) "Threads (1)"))
+        (should (equal (mapcar #'car (romacs-agent-board-tests--activity-rows text)) '("busy")))
+        (should (= (length (split-string text "\n" t)) 2))
+        (should-not (string-match-p "\\+[0-9]+ more\\_>" text))))))
 
 (ert-deftest romacs-agent-board-activity-leaves-header-worker-counts-alone ()
   (romacs-agent-board-tests--with
@@ -779,9 +792,11 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
       (let* ((rows (romacs-agent-children-rows lead))
              (summary (romacs-agent-ui--workers-summary rows)))
         (should (equal (substring-no-properties summary) "1 failed · 1 threads live"))
-        (should (= (length (romacs-agent-board-tests--activity-rows
-                            (romacs-agent-board-tests--activity lead)))
-                   4))))))
+        (should (equal (mapcar #'car (romacs-agent-board-tests--activity-rows
+                                     (romacs-agent-board-tests--activity lead)))
+                       '("busy")))
+        (should (equal (romacs-agent-board-tests--thread-states (romacs-agent-board-tests--thread-rows lead))
+                       '(("failure" failed) ("busy" working) ("idle" idle) ("done" idle))))))))
 
 (ert-deftest romacs-agent-board-activity-and-menu-show-the-same-threads-in-order ()
   (romacs-agent-board-tests--with
@@ -801,7 +816,9 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
                              while (romacs-agent-menu--worker-label i)
                              collect (aref (romacs-agent-menu--slots) i))))
           (should (equal menu panel))
-          (should (equal panel '("busy" "lane" "idle"))))))))
+          (should (equal panel '("busy" "lane")))
+          (should (equal (romacs-agent-board-tests--thread-states (romacs-agent-menu--thread-rows))
+                         '(("busy" working) ("lane" waiting) ("idle" idle)))))))))
 
 (defmacro romacs-agent-board-tests--with-store (&rest body)
   "Run BODY with a private SQLite store and worker refresh batch."
@@ -822,8 +839,7 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
 
 (ert-deftest romacs-agent-board-round-two-reopened-chat-includes-stored-children ()
   (romacs-agent-board-tests--with-store
-    (let ((lead (mk "lead" "Lead" 'idle 0 :dir root))
-          (romacs-agent-log-activity-idle-cap 3))
+    (let ((lead (mk "lead" "Lead" 'idle 0 :dir root)))
       (dotimes (i 4)
         (let* ((id (format "stored-%d" i))
                (child (mk id id 'idle i :dir root :done-seq 2 :options '(:parent "lead"))))
@@ -833,13 +849,11 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
              (chat (romacs-agent-log-chat lead)))
         (unwind-protect
             (with-current-buffer chat
-              (should (equal (romacs-agent-menu--workers)
-                             '("stored-0" "stored-1" "stored-2" "stored-3"))))
-          (kill-buffer chat)))
-      (let ((text (romacs-agent-board-tests--activity lead)))
-        (should (equal (mapcar #'car (romacs-agent-board-tests--activity-rows text))
-                       '("stored-0" "stored-1" "stored-2")))
-        (should (romacs-agent-board-tests--more text))))))
+              (should (equal (romacs-agent-board-tests--thread-states (romacs-agent-menu--thread-rows))
+                             '(("stored-0" idle) ("stored-1" idle) ("stored-2" idle) ("stored-3" idle))))
+              (should-not (romacs-agent-menu--workers))
+              (should (equal (romacs-agent-board-tests--activity lead) "")))
+          (kill-buffer chat))))))
 
 (ert-deftest romacs-agent-board-round-two-watch-crosses-unloaded-ancestors ()
   (romacs-agent-board-tests--with-store
@@ -923,11 +937,15 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
       (should (romacs-agent-store--put child nil))
       (remhash "stored" romacs-agent--sessions)
       (romacs-agent-ui--summarize-children lead)
-      (should (assoc "stored" (romacs-agent-board-tests--activity-rows (romacs-agent-board-tests--activity lead))))
+      (should (equal (romacs-agent-board-tests--thread-states (romacs-agent-board-tests--thread-rows lead))
+                     '(("stored" idle))))
+      (should (equal (romacs-agent-board-tests--activity lead) ""))
       (should (romacs-agent-settle-recorded "stored" t))
       (romacs-agent-board-tests--flush-worker-rows)
       (should (romacs-agent-settled-p (romacs-agent-store-row-session "stored")))
-      (should-not (assoc "stored" (romacs-agent-board-tests--activity-rows (romacs-agent-board-tests--activity lead))))
+      (should (equal (romacs-agent-board-tests--thread-states (romacs-agent-board-tests--thread-rows lead))
+                     '(("stored" completed))))
+      (should (equal (romacs-agent-board-tests--activity lead) ""))
       (should-not (romacs-agent-loaded "stored")))))
 
 (ert-deftest romacs-agent-board-stored-failure-keeps-its-outcome-in-chat ()
@@ -937,8 +955,10 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
       (should (romacs-agent-store--put child nil))
       (remhash "failed" romacs-agent--sessions)
       (romacs-agent-ui--summarize-children lead)
-      (let ((line (cdr (assoc "failed" (romacs-agent-board-tests--activity-rows
-                                      (romacs-agent-board-tests--activity lead))))))
-        (should (and line (string-prefix-p "✗" line) (string-search "Failed" line)))))))
+      (should (equal (romacs-agent-board-tests--activity lead) ""))
+      (let* ((menu (romacs-agent-board-tests--thread-rows lead))
+             (line (romacs-agent-menu--thread-line (car menu))))
+        (should (equal (romacs-agent-board-tests--thread-states menu) '(("failed" failed))))
+        (should (equal line "✗ Build  Failed  failed"))))))
 
 ;;; romacs-agent-board-tests.el ends here

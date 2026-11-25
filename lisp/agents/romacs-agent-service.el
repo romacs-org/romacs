@@ -605,8 +605,7 @@ event saying how long it was (Framing).")
 (cl-defstruct (romacs-agent-service--subscription (:constructor romacs-agent-service--subscription-make)
                                                   (:copier nil))
   "A connection's subscription to a session: its CUTOFF seq, REVISION,
-and the requests it was told are PENDING, by harness id: each (EVENT .
-REQUEST), the approval event raised of it and its wire request."
+and the requests it was told are PENDING, by harness id."
   cutoff (revision 0) (pending (make-hash-table :test #'equal)))
 
 (defun romacs-agent-service--subscriptions (id)
@@ -752,7 +751,8 @@ event."
         ;; Taken before it is encoded: a failure never leaves it for the next.
         (remhash id romacs-agent-service--units)
         (let ((sent (romacs-agent-service--bounded events session))
-              (pending (romacs-agent-service--requests session events)))
+              (pending (romacs-agent-service--requests
+                        session events (romacs-agent-service--subscription-pending (cdar subscriptions)))))
           (pcase-dolist (`(,rpc . ,subscription) subscriptions)
             (when (and (> seq (romacs-agent-service--subscription-cutoff subscription)) (not (equal sent [])))
               (romacs-agent-service--send-unit rpc subscription id seq sent))
@@ -988,9 +988,9 @@ sent once while this editor runs."
 and its approval event, or nil."
   (let ((found nil))
     (maphash (lambda (id asked)
-               (let ((own (gethash "handle" (cdr asked))))
+               (let ((own (romacs-agent-service--request-handle asked)))
                  (when (and (equal (gethash "id" own) (gethash "id" handle)) (equal (gethash "run" own) (gethash "run" handle)))
-                   (setq found (cons id (car asked))))))
+                   (setq found (cons id (romacs-agent-service--request-event asked))))))
              (romacs-agent-service--requests session))
     found))
 
@@ -1141,21 +1141,44 @@ each with its harness and the models it offers (`romacs-agent--want-models')."
 
 ;;; Pending requests
 
-(defun romacs-agent-service--requests (session &optional events)
-  "What SESSION waits on now, by its harness's request id: each (EVENT .
-REQUEST), the approval event asking it (EVENTS' own when one is there,
-with its time), and its wire request (Pending requests)."
-  (let ((requests (make-hash-table :test #'equal)) (approvals (romacs-agent-approvals session)))
-    (when (hash-table-p approvals)
-      (maphash (lambda (id request)
-                 (let ((event (car (romacs-agent-service--asked
-                                    session (list (or (cl-find-if (lambda (event) (and (eq (plist-get event :type) 'approval)
-                                                                                       (equal (plist-get event :request-id) id)))
-                                                                  events)
-                                                      (romacs-agent-request-event session id request)))))))
-                   (puthash id (cons event (romacs-agent-service--bounded-request (romacs-agent-wire-request event))) requests)))
-               approvals))
-    requests))
+(cl-defstruct (romacs-agent-service--request (:constructor romacs-agent-service--request-make)
+                                             (:copier nil))
+  "An approval's immutable RAW value, decoded EVENT, and bounded WIRE request."
+  raw event wire)
+
+(defun romacs-agent-service--request-project (session id raw events)
+  "Project SESSION's approval ID with RAW content and any live EVENTS."
+  (let* ((live (cl-find-if (lambda (event)
+                            (and (eq (plist-get event :type) 'approval)
+                                 (equal (plist-get event :request-id) id)))
+                          events))
+         (event (car (romacs-agent-service--asked
+                      session (list (or live (romacs-agent-request-event session id raw)))))))
+    (romacs-agent-service--request-make
+     :raw raw :event event
+     :wire (romacs-agent-service--bounded-request (romacs-agent-wire-request event)))))
+
+(defun romacs-agent-service--request-kept (kept id raw)
+  "The projection in KEPT of the approval ID with unchanged RAW content."
+  (when-let* ((kept) (request (gethash id kept))
+              ((eq raw (romacs-agent-service--request-raw request))))
+    request))
+
+(defun romacs-agent-service--requests (session &optional events kept)
+  "Project SESSION's pending approvals, reusing the unchanged entries in KEPT.
+Use EVENTS' own approval when available, with its time."
+  (let* ((approvals (romacs-agent-approvals session))
+         (unchanged (and kept (= (hash-table-count kept) (hash-table-count approvals))
+                         (cl-loop for id being the hash-keys in approvals using (hash-values raw)
+                                  always (romacs-agent-service--request-kept kept id raw)))))
+    (if unchanged kept
+      (let ((requests (make-hash-table :test #'equal)))
+        (maphash (lambda (id raw)
+                   (puthash id (or (romacs-agent-service--request-kept kept id raw)
+                                   (romacs-agent-service--request-project session id raw events))
+                            requests))
+                 approvals)
+        requests))))
 
 (defun romacs-agent-service--bounded-request (request)
   "REQUEST as sent, within one message's limit: its strings cut as an
@@ -1212,24 +1235,33 @@ say, and who answered it, its note's (kept since it came):
      "reason" (or (plist-get attributed :reason) :null)
      "answers" (or (plist-get attributed :answers) (plist-get answered :answers) :null))))
 
+(defun romacs-agent-service--request-handle (request)
+  "The wire handle of a projected REQUEST."
+  (gethash "handle" (romacs-agent-service--request-wire request)))
+
 (defun romacs-agent-service--pending-changed (rpc subscription session now events)
   "Tell RPC what changed from SUBSCRIPTION's pending requests to NOW.
 SESSION and EVENTS, if any, describe how a request was resolved."
   (let ((known (romacs-agent-service--subscription-pending subscription))
         (id (romacs-agent-id session)))
-    (maphash (lambda (harness-id asked)
-               (unless (gethash harness-id now)
-                 (remhash harness-id known)
-                 (let ((params (romacs-agent-service--resolution session harness-id events)))
-                   (puthash "handle" (gethash "handle" (cdr asked)) params)
-                   (romacs-agent-service--notify rpc subscription id "agents/pending.resolved" params))))
-             (copy-hash-table known))
-    (maphash (lambda (harness-id asked)
-               (unless (gethash harness-id known)
-                 (puthash harness-id asked known)
-                 (romacs-agent-service--notify rpc subscription id "agents/pending.added"
-                                               (romacs-agent-rpc-object "request" (cdr asked)))))
-             now)))
+    (unless (eq known now)
+      (maphash (lambda (harness-id asked)
+                 (let ((next (gethash harness-id now))
+                       (handle (romacs-agent-service--request-handle asked)))
+                   (when (or (null next)
+                             (not (equal (gethash "run" handle)
+                                         (gethash "run" (romacs-agent-service--request-handle next)))))
+                     (let ((params (romacs-agent-service--resolution session harness-id events)))
+                       (puthash "handle" handle params)
+                       (romacs-agent-service--notify rpc subscription id "agents/pending.resolved" params)))))
+               known)
+      (maphash (lambda (harness-id asked)
+                 (unless (romacs-agent-service--request-kept known harness-id (romacs-agent-service--request-raw asked))
+                   (romacs-agent-service--notify
+                    rpc subscription id "agents/pending.added"
+                    (romacs-agent-rpc-object "request" (romacs-agent-service--request-wire asked)))))
+               now)
+      (setf (romacs-agent-service--subscription-pending subscription) now))))
 
 (defun romacs-agent-service--loaded (session _manifest)
   "SESSION is loaded, its records folded to its seq with no events raised
@@ -1240,7 +1272,8 @@ It reads nothing."
               (seq (romacs-agent-seq session))
               ((integerp seq))
               (subscriptions (romacs-agent-service--subscriptions id))
-              (pending (romacs-agent-service--requests session)))
+              (pending (romacs-agent-service--requests
+                        session nil (romacs-agent-service--subscription-pending (cdar subscriptions)))))
     (pcase-dolist (`(,rpc . ,subscription) subscriptions)
       (let ((cutoff (romacs-agent-service--subscription-cutoff subscription)))
         (when (> seq cutoff)
@@ -1271,7 +1304,7 @@ a session not loaded stays so."
            (subscription (romacs-agent-service--subscription-make :cutoff seq)))
       (let* ((requests (romacs-agent-service--requests session))
              (page (romacs-agent-service--pending-page
-                    rpc (list :rest (let ((asked nil)) (maphash (lambda (_ each) (push (cdr each) asked)) requests)
+                    rpc (list :rest (let ((asked nil)) (maphash (lambda (_ each) (push (romacs-agent-service--request-wire each) asked)) requests)
                                          (nreverse asked))))))
         ;; What does not fit the reply comes in pages (`agents/page').
         (puthash "pending" (gethash "pending" page) reply)

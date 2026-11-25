@@ -138,7 +138,7 @@
             (setq buffer (romacs-agent-history-open (list :path file :title "h" :harness 'claude :id "h1" :cwd "/"))))
           (with-current-buffer buffer
             (should buffer-read-only)
-            (should-not romacs-agent-log--composer)
+            (should-not romacs-agent-log--input)
             ;; Not a chat's mode: none of its composing commands applies.
             (should-not (derived-mode-p 'romacs-agent-log-mode))
             (should (string-match-p "hello there" (buffer-string)))

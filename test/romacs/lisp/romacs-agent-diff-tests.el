@@ -96,6 +96,42 @@
     (should (equal (mapcar #'caddr (romacs-agent-diff--span (append checkpoints '((14 start "f" "/r"))) nil)) '("a" nil)))
     (should-not (romacs-agent-diff--span checkpoints 99))))
 
+(ert-deftest romacs-agent-diff-failed-snapshots-release-the-queue ()
+  (romacs-agent-diff-tests--with
+    (let ((romacs-agent-diff--queues (make-hash-table :test #'equal))
+          (failed nil) (next nil)
+          (spawn (symbol-function 'make-process)) (outputs nil))
+      (cl-letf (((symbol-function 'make-process)
+                 (lambda (&rest args)
+                   (push (plist-get args :buffer) outputs)
+                   (error "Cannot start checkpoint"))))
+        (romacs-agent-diff--snapshot session 1 'start
+                                     (lambda (&rest result) (push result failed))))
+      (let ((deadline (+ (float-time) 2)))
+        (while (and (not (romacs-agent-diff--settled-p session)) (< (float-time) deadline))
+          (accept-process-output nil 0.05)))
+      (should (romacs-agent-diff--settled-p session))
+      (make-directory (romacs-agent-diff--file session))
+      (cl-letf (((symbol-function 'make-process)
+                 (lambda (&rest args)
+                   (push (plist-get args :buffer) outputs)
+                   (apply spawn args))))
+        (romacs-agent-diff--snapshot
+         session 2 'end
+         (lambda (&rest result)
+           (push result failed)
+           (delete-directory (romacs-agent-diff--file session))))
+        (romacs-agent-diff--snapshot session 3 'start
+                                     (lambda (tree _root) (setq next tree)))
+        (let ((deadline (+ (float-time) 2)))
+          (while (and (not (romacs-agent-diff--settled-p session)) (< (float-time) deadline))
+            (accept-process-output nil 0.05))))
+      (should next)
+      (should (equal (mapcar #'car (romacs-agent-diff--checkpoints session)) '(3)))
+      (should (equal failed '((nil nil) (nil nil))))
+      (should (romacs-agent-diff--settled-p session))
+      (should-not (seq-some #'buffer-live-p outputs)))))
+
 (ert-deftest romacs-agent-diff-no-git-project ()
   (let* ((plain (make-temp-file "romacs-diff-plain-" t))
          (dir (make-temp-file "romacs-diff-session-" t))

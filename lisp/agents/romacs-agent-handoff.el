@@ -3,8 +3,8 @@
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
-;; A session's thread goes on under another instance (Claude Code to Codex,
-;; or another account) as a new session started on a brief: the thread's
+;; A brief of a session's thread, for the new conversation a renewal or a
+;; switch to another harness goes on in (romacs-agent-renew): the thread's
 ;; history as context, chosen to a budget, then what to do next.  As T3
 ;; Code's context handoff does, the first request, the last request and the
 ;; last reply are always kept, the rest newest first while the budget
@@ -151,7 +151,6 @@ streamed (an imported transcript has no turn ends, only messages)."
       (close-turn))
     (nreverse items)))
 
-(declare-function romacs-agent-start "romacs-agent")
 (declare-function romacs-agent-history-events "romacs-agent-history")
 
 (defun romacs-agent-handoff-thread (session journal-events)
@@ -166,25 +165,6 @@ JOURNAL-EVENTS, what its journal holds (`romacs-agent-events')."
                              (list first (list :type 'gap :text "earlier turns of this thread left out"))))
                       (car read))))
           journal-events))
-
-(defun romacs-agent-handoff (session events provider model next &optional options)
-  "Go on with SESSION's thread, EVENTS (`romacs-agent-handoff-thread'),
-under instance PROVIDER on MODEL (nil for its own), in a new session on
-SESSION's project, to do NEXT: started on a brief of the thread
-\(`romacs-agent-handoff-brief'), with start OPTIONS besides; a task's
-parent, wake rule, role and worktree carry over.  Return the new session."
-  (let ((from (mapconcat #'identity (delq nil (list (romacs-agent-provider session)
-                                                    (or (romacs-agent-model session)
-                                                        (plist-get (romacs-agent-options session) :model))))
-                         " · ")))
-    (romacs-agent-start (romacs-agent-cwd session)
-                        (romacs-agent-handoff-brief (romacs-agent-handoff-items events) from next)
-                        (format "%s (→ %s)" (romacs-agent-title session) provider)
-                        provider (append (and model (list :model model)) options
-                                         ;; A task goes on as the same parent's, by its rule.
-                                         (cl-loop for key in '(:parent :wake :role :worktree :branch)
-                                                  when (plist-get (romacs-agent-options session) key)
-                                                  append (list key (plist-get (romacs-agent-options session) key)))))))
 
 (provide 'romacs-agent-handoff)
 ;;; romacs-agent-handoff.el ends here

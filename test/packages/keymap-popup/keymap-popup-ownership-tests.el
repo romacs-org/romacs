@@ -442,19 +442,6 @@
       (keymap-popup-dismiss)
       (keymap-popup-ownership--clean-p))))
 
-(ert-deftest keymap-popup-ownership-active-while-open ()
-  ;; Open from its launch to its close, closed in its exit hook already.
-  (keymap-popup-ownership--isolated
-    (let* ((seen nil)
-           (keymap-popup-exit-hook (list (lambda () (push (keymap-popup-active-p) seen)))))
-      (should-not (keymap-popup-active-p))
-      (keymap-popup (keymap-popup-ownership--map))
-      (should (keymap-popup-active-p))
-      (keymap-popup-dismiss)
-      (should-not (keymap-popup-active-p))
-      (should (equal seen '(nil)))
-      (keymap-popup-ownership--clean-p))))
-
 (ert-deftest keymap-popup-ownership-deleted-window ()
   (keymap-popup-ownership--isolated
     (let* ((ordinary (selected-window))

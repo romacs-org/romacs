@@ -398,6 +398,15 @@ wait gives the end it waited for once, in place of its wake."
         (should (equal (sort (mapcar (lambda (row) (gethash "taskId" row)) all) #'string<)
                        (sort (list adopted (romacs-agent-id theirs)) #'string<)))
         (should (equal (gethash "conversation" (aref mine 0)) romacs-agent-lead-tests--thread))
+        ;; A page at a time: the rest by its next offset.
+        (let ((first (romacs-agent-tools--list (romacs-agent-lead-tests--args "all" t "limit" 1))))
+          (should (= (length (gethash "tasks" first)) 1))
+          (should (= (gethash "total" first) 2))
+          (should (= (gethash "nextOffset" first) 1))
+          (let ((rest (romacs-agent-tools--list (romacs-agent-lead-tests--args "all" t "limit" 1 "offset" 1))))
+            (should (eq (gethash "nextOffset" rest) :null))
+            (should-not (equal (gethash "taskId" (aref (gethash "tasks" rest) 0))
+                               (gethash "taskId" (aref (gethash "tasks" first) 0))))))
         (should (equal (gethash "cwd" (aref mine 0)) cwd))
         ;; Its tasks still wake it, and are still its own to talk to.
         (should (equal (plist-get (romacs-agent-options (romacs-agent-get adopted)) :parent)

@@ -136,7 +136,7 @@ session as (SESSION . TEXT)."
           (romacs-agent--children (make-hash-table :test #'equal))
           (romacs-agent-watch--watches (make-hash-table :test #'equal))
           (romacs-agent-watch--timer nil)
-          (romacs-agent-tools--generations (make-hash-table :test #'equal))
+
           (romacs-agent-tools--copies (make-hash-table :test #'equal))
           (lead (romacs-agent--make :id "lead" :harness 'claude :state 'idle :title "lead" :cwd root
                                     :dir (expand-file-name "lead" root)))
@@ -249,7 +249,7 @@ that cannot be encoded waits; the next romacs_task_send to it is written
       (puthash "child" (list watch) romacs-agent-watch--watches)
       (romacs-agent-watch-bytes-tests--file index "# Held\n- 333 c " (unibyte-string #o351) " held\n")
       (setf (romacs-agent-state child) 'running)
-      (romacs-agent-watch--check-file "child" watch)
+      (romacs-agent-watch--tick)
       (romacs-agent-watch-bytes-tests--turn-ends child)
       (should (string-search "333 c" (romacs-agent-watch-bytes-tests--written lines child)))
       (should (romacs-agent-watch-bytes-tests--send child "the next message"))

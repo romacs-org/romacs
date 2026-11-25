@@ -104,6 +104,12 @@ impl PaintHost {
         self.render.input_interrupt = Some(hook);
     }
 
+    /// Open the first window maximized: for a default size the screen may
+    /// not hold (an X11 window manager shows it from its title bar down).
+    pub fn maximize_primary(&mut self) {
+        self.render.maximize_primary = true;
+    }
+
     pub fn run(self) -> Result<render_thread::RenderLoopExit, render_thread::RenderLoopError> {
         render_thread::run_render_loop_current_thread(
             self.event_loop,

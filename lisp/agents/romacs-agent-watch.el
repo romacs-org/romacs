@@ -39,8 +39,9 @@
 
 (defvar romacs-agent-watch--watches (make-hash-table :test #'equal)
   "A task's id to its watches, oldest first, each a plist: (:unit UNIT
-:output FILE :invocation ID), or (:file FILE :section HEADING :seen KEYS),
-KEYS the first words of the entries already there.")
+:output FILE :invocation ID), or (:file FILE :section HEADING :seen KEYS
+:version VERSION).  KEYS are the first words of the entries already there.
+VERSION records the file last checked here and is kept only in memory.")
 
 (defvar romacs-agent-watch--timer nil)
 
@@ -128,7 +129,7 @@ With PERSIST, write the change before publishing and scheduling it."
        (mapcar (lambda (w)
                  (if (gethash "file" w)
                      (list :file (gethash "file" w) :section (romacs-agent--value (gethash "section" w))
-                           :seen (append (gethash "seen" w) nil))
+                           :seen (append (gethash "seen" w) nil) :version nil)
                    (list :unit (gethash "unit" w)
                          :output (romacs-agent--value (gethash "output" w))
                          :invocation (romacs-agent--value (gethash "invocation" w)))))
@@ -204,42 +205,87 @@ A byte that is not UTF-8 (a character cut by the tail too) reads U+FFFD."
 
 ;;; Watching a file
 
-(defun romacs-agent-watch--entries (file section)
-  "FILE's entries under the heading SECTION (anywhere, when nil): each
-non-empty line not a heading, as (KEY . LINE), KEY its first word after a
-list marker; nil when FILE cannot be read.  A byte that is not UTF-8
-reads U+FFFD."
+(defun romacs-agent-watch--file-lines (file)
+  "Read FILE's lines as UTF-8, replacing raw bytes, or return nil if unreadable."
   (when (file-readable-p file)
     (with-temp-buffer
       (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
-      (let ((in (null section)) (entries nil))
-        (dolist (line (split-string (romacs-mcp--unicode (buffer-string)) "\n"))
-          (cond ((string-match "\\`#+[ \t]+\\(.*\\)" line)
-                 (setq in (or (null section) (equal (string-trim (match-string 1 line)) section))))
-                ((and in (string-match "\\`[ \t]*\\(?:[-*+][ \t]+\\)?\\([^ \t]+\\)" line))
-                 (push (cons (match-string 1 line) (string-trim line)) entries))))
-        (nreverse entries)))))
+      (split-string (romacs-mcp--unicode (buffer-string)) "\n"))))
 
-(defun romacs-agent-watch--check-file (id watch)
-  "Tell task ID the entries new under WATCH's section since it last
-looked, and remember what is there now (an entry gone and back is new)."
-  (let* ((entries (romacs-agent-watch--entries (plist-get watch :file) (plist-get watch :section)))
-         (new (cl-remove-if (lambda (entry) (member (car entry) (plist-get watch :seen))) entries))
-         (task (romacs-agent-get id)))
-    ;; Told first: what could not be told is not yet seen.
-    (when new
-      (romacs-agent-tools--tell
-       task (format "New under %s in %s (romacs_task_watch):\n%s"
-                    (if (plist-get watch :section) (format "\"%s\"" (plist-get watch :section)) "its lines")
-                    (plist-get watch :file) (mapconcat #'cdr new "\n"))))
-    (unless (equal (mapcar #'car entries) (plist-get watch :seen))
-      (let ((updated (mapcar (lambda (each)
-                               (if (eq each watch)
-                                   (plist-put (copy-sequence watch) :seen (mapcar #'car entries))
-                                 each))
-                             (gethash id romacs-agent-watch--watches))))
+(defun romacs-agent-watch--section-entries (lines section)
+  "The entries in LINES under SECTION, or anywhere if SECTION is nil.
+Each is (KEY . LINE), with KEY the first word after a list marker."
+  (let ((in (null section)) (entries nil))
+    (dolist (line lines (nreverse entries))
+      (cond ((string-match "\\`#+[ \t]+\\(.*\\)" line)
+             (setq in (or (null section) (equal (string-trim (match-string 1 line)) section))))
+            ((and in (string-match "\\`[ \t]*\\(?:[-*+][ \t]+\\)?\\([^ \t]+\\)" line))
+             (push (cons (match-string 1 line) (string-trim line)) entries))))))
+
+(defun romacs-agent-watch--entries (file section)
+  "Read FILE's entries under SECTION, or all sections if SECTION is nil."
+  (romacs-agent-watch--section-entries (romacs-agent-watch--file-lines file) section))
+
+(defun romacs-agent-watch--file-version (file)
+  "Return FILE's version, following a symlink to its target."
+  (let ((attributes (file-attributes file)))
+    (when (stringp (file-attribute-type attributes))
+      (setq attributes (file-attributes (file-chase-links file))))
+    (if attributes
+        (list (file-attribute-file-identifier attributes)
+              (file-attribute-size attributes)
+              (file-attribute-modification-time attributes)
+              (file-attribute-status-change-time attributes))
+      :missing)))
+
+(defun romacs-agent-watch--file-view (file)
+  "Get FILE's (VERSION . ENTRIES-FUNCTION) for one poll.
+The function reads the file once, on demand, and caches each section's entries."
+  (let ((content nil) (sections nil))
+    (cons (romacs-agent-watch--file-version file)
+          (lambda (section)
+            (let ((result (with-memoization content
+                            (condition-case err (cons :ok (romacs-agent-watch--file-lines file))
+                              (error err))))
+                  (cache (with-memoization sections (make-hash-table :test #'equal))))
+              (unless (eq (car result) :ok) (signal (car result) (cdr result)))
+              (cdr (with-memoization (gethash section cache)
+                     (cons :ok (romacs-agent-watch--section-entries (cdr result) section)))))))))
+
+(defun romacs-agent-watch--new-entries (entries seen)
+  "Return the ENTRIES with keys absent from SEEN, in file order."
+  (let ((keys (make-hash-table :test #'equal)))
+    (dolist (key seen) (puthash key t keys))
+    (cl-remove-if (lambda (entry) (gethash (car entry) keys)) entries)))
+
+(defun romacs-agent-watch--record-file (task watch keys version)
+  "Keep KEYS and VERSION for TASK's WATCH if it is still registered."
+  (let* ((id (romacs-agent-id task)) (watches (gethash id romacs-agent-watch--watches)))
+    (when (and (memq watch watches) (eq task (gethash id romacs-agent--sessions)))
+      (let* ((next (plist-put (copy-sequence watch) :seen keys))
+             (updated (cl-substitute (plist-put next :version version) watch watches :test #'eq)))
         (romacs-agent-watch--write task updated)
         (romacs-agent-watch--put id updated)))))
+
+(defun romacs-agent-watch--check-file (id watch view)
+  "Tell task ID what is new in WATCH's section of VIEW, then record it."
+  (let ((version (car view)))
+    (unless (equal version (plist-get watch :version))
+      (let* ((section (plist-get watch :section))
+             (entries (funcall (cdr view) section))
+             (keys (mapcar #'car entries))
+             (seen (plist-get watch :seen)))
+        (if (equal keys seen)
+            (setf (plist-get watch :version) version)
+          (when-let* ((task (romacs-agent-get id))
+                      ((memq watch (gethash id romacs-agent-watch--watches))))
+            ;; Told first: what could not be told is not yet seen.
+            (when-let* ((new (romacs-agent-watch--new-entries entries seen)))
+              (romacs-agent-tools--tell
+               task (format "New under %s in %s (romacs_task_watch):\n%s"
+                            (if section (format "\"%s\"" section) "its lines")
+                            (plist-get watch :file) (mapconcat #'cdr new "\n"))))
+            (romacs-agent-watch--record-file task watch keys version)))))))
 
 ;;; The reactor
 
@@ -288,6 +334,12 @@ and its exit status."
                                              (process-exit-status process))
                                   (kill-buffer buffer)))))))
 
+(defun romacs-agent-watch--show (units then)
+  "Ask systemd for UNITS and call THEN with their parsed states."
+  (romacs-agent-watch--output
+   "systemctl" (append (list "--user" "show" "-p" romacs-agent-watch--show-properties "--") units)
+   (lambda (text _exit) (funcall then (romacs-agent-watch--states text)))))
+
 (defun romacs-agent-watch--report (id watch)
   "Tell task ID that WATCH's unit ended and retire the watch once told.
 Delivery is at-least-once under I/O failure."
@@ -301,26 +353,31 @@ Delivery is at-least-once under I/O failure."
       (romacs-agent-tools--tell task (romacs-agent-watch--message watch (romacs-agent-watch--exit-text record)))
       (romacs-agent-watch--forget id (list watch)))))
 
+(defun romacs-agent-watch--check-files (watches)
+  "Poll file WATCHES in order, sharing each file's observations."
+  (let ((files (make-hash-table :test #'equal)))
+    (pcase-dolist (`(,id . ,watch) watches)
+      (when-let* ((file (plist-get watch :file)))
+        (condition-case err
+            (romacs-agent-watch--check-file
+             id watch (with-memoization (gethash file files) (romacs-agent-watch--file-view file)))
+          (error (message "romacs_task_watch: %s: %s" file (error-message-string err))))))))
+
 (defun romacs-agent-watch--tick ()
   "Look at every watched file, and ask systemd about every watched unit
 at once; report what changed."
   (let* ((all (romacs-agent-watch--all))
          (watches (cl-remove-if-not (lambda (pair) (plist-get (cdr pair) :unit)) all)))
     (romacs-agent-watch--schedule)
-    (pcase-dolist (`(,id . ,watch) all)
-      (when (plist-get watch :file)
-        ;; One file's failure (its task's harness) is no other's.
-        (condition-case err (romacs-agent-watch--check-file id watch)
-          (error (message "romacs_task_watch: %s: %s" (plist-get watch :file) (error-message-string err))))))
+    (romacs-agent-watch--check-files all)
     (when (and watches (not (process-live-p romacs-agent-watch--asking)))
       (setq romacs-agent-watch--asking
-            (romacs-agent-watch--output
-             "systemctl" (append (list "--user" "show" "-p" romacs-agent-watch--show-properties "--")
-                                 (delete-dups (mapcar (lambda (pair) (romacs-agent-watch--unit-name
-                                                                      (plist-get (cdr pair) :unit)))
-                                                      watches)))
-             (lambda (text _exit)
-               (pcase-dolist (`(,id . ,watch) (romacs-agent-watch--ended watches (romacs-agent-watch--states text)))
+            (romacs-agent-watch--show
+             (delete-dups (mapcar (lambda (pair) (romacs-agent-watch--unit-name
+                                                   (plist-get (cdr pair) :unit)))
+                                  watches))
+             (lambda (states)
+               (pcase-dolist (`(,id . ,watch) (romacs-agent-watch--ended watches states))
                  (condition-case err (romacs-agent-watch--report id watch)
                    (error (message "romacs_task_watch: %s: %s" (plist-get watch :unit)
                                    (error-message-string err)))))))))))
@@ -336,12 +393,6 @@ at once; report what changed."
              (cons 'watches (lambda (dir _manifest) (file-exists-p (expand-file-name "watches.json" dir)))))
 
 ;;; The tool
-
-(defun romacs-agent-watch--unit-state (unit)
-  "Ask systemd for full unit name UNIT's current (STATE . INVOCATION)."
-  (with-temp-buffer
-    (call-process "systemctl" nil t nil "--user" "show" "-p" romacs-agent-watch--show-properties "--" unit)
-    (gethash unit (romacs-agent-watch--states (buffer-string)))))
 
 (defun romacs-agent-watch--same-p (a b)
   "Whether watches A and B watch the same: a unit, or a file's section."
@@ -362,9 +413,11 @@ watched file may be gone)."
           (unit (list :unit (romacs-agent-watch--unit-name unit)
                       :output (and (gethash "output" arguments)
                                    (expand-file-name (gethash "output" arguments) (romacs-agent-cwd task)))))
-          (file (let ((file (expand-file-name file (romacs-agent-cwd task))) (section (gethash "section" arguments)))
+          (file (let* ((file (expand-file-name file (romacs-agent-cwd task)))
+                       (section (gethash "section" arguments))
+                       (version (unless stop (romacs-agent-watch--file-version file))))
                   (unless (or stop (file-readable-p file)) (user-error "%s cannot be read" file))
-                  (list :file file :section section
+                  (list :file file :section section :version version
                         :seen (and (not stop) (mapcar #'car (romacs-agent-watch--entries file section))))))
           (t (user-error "Name a unit or a file to watch")))))
 
@@ -382,18 +435,69 @@ Return non-nil when the task calling romacs_dev_check will be told."
 
 (setq romacs-mcp-dev-watch-function #'romacs-agent-watch--dev-check)
 
-(defun romacs-agent-watch--register (id task watch known)
-  "Register WATCH for TASK with ID, given its KNOWN watches of the same target."
-  (let* ((unit (plist-get watch :unit))
-         (status (and unit (romacs-agent-watch--unit-state unit))))
+(defun romacs-agent-watch--update (task watch stop &optional status)
+  "Update TASK's WATCH and return the tool reply.
+STOP removes the watch.  STATUS is the unit's (STATE . INVOCATION)."
+  (let* ((id (romacs-agent-id task))
+         (unit (plist-get watch :unit))
+         (known (cl-remove-if-not (lambda (w) (romacs-agent-watch--same-p w watch))
+                                  (gethash id romacs-agent-watch--watches))))
     (cond
-     ((null unit)
-      (unless known (romacs-agent-watch--add id task watch)))
+     (stop (when known (romacs-agent-watch--forget id known)))
+     ((null unit) (unless known (romacs-agent-watch--add id task watch)))
      ((romacs-agent-watch--running-p (car status))
       (unless (cl-find (cdr status) known :test #'equal :key (lambda (w) (plist-get w :invocation)))
         (romacs-agent-watch--add id task (plist-put watch :invocation (cdr status)))))
      ((null known)
-      (user-error "Unit %s is not running (%s): start it first, or read its end yourself" unit (car status))))))
+      (user-error "Unit %s is not running (%s): start it first, or read its end yourself" unit (car status))))
+    (romacs-agent-watch--reply id watch stop)))
+
+(defvar romacs-agent-watch--checking (make-hash-table :test #'equal)
+  "(TASK-ID . UNIT) to the token of its registration still checking its
+unit: a stop meanwhile drops it, and that registration installs nothing.")
+
+(defun romacs-agent-watch--register-unit (task caller watch)
+  "Defer registering TASK's unit WATCH until systemd replies to CALLER's
+request, unless a stop of it comes meanwhile."
+  (let* ((unit (plist-get watch :unit))
+         (id (romacs-agent-id task))
+         (key (cons id unit))
+         (token (list 'checking))
+         (retire (lambda ()
+                   (when (eq (gethash key romacs-agent-watch--checking) token)
+                     (remhash key romacs-agent-watch--checking)
+                     t)))
+         (states nil)
+         (deadline (+ (float-time) 10))
+         (process nil))
+    (when (gethash key romacs-agent-watch--checking)
+      (user-error "A watch on unit %s is already being checked" unit))
+    (puthash key token romacs-agent-watch--checking)
+    (condition-case err
+        (setq process (romacs-agent-watch--show
+                       (list unit) (lambda (result)
+                                     (setq states result)
+                                     (romacs-mcp-deferred-wake))))
+      ((error quit)
+       (funcall retire)
+       (signal (car err) (cdr err))))
+    (romacs-mcp-defer
+     (lambda ()
+       (cond (states
+              (unless (funcall retire)
+                (user-error "The watch on unit %s was stopped before it started" unit))
+              (unless (and (eq (gethash id romacs-agent--sessions) task) (not (romacs-agent-watch--stopped-p task)))
+                (user-error "Task %s stopped or disappeared before its watch could start" id))
+              (unless (equal id caller) (romacs-agent-tools--own task caller "watch for it"))
+              (list (romacs-agent-watch--update task watch nil (gethash unit states))))
+             ((>= (float-time) deadline)
+              (funcall retire)
+              (when (process-live-p process) (delete-process process))
+              (user-error "Timed out checking unit %s" unit))))
+     deadline
+     (lambda ()
+       (funcall retire)
+       (when (process-live-p process) (delete-process process))))))
 
 (defun romacs-agent-watch--watch (arguments)
   "Watch, or with stop no longer watch, ARGUMENTS' unit or file for the
@@ -406,20 +510,25 @@ delegated; a unit not running now is refused."
          (id (romacs-agent-id task))
          (watch (progn (unless (equal id caller) (romacs-agent-tools--own task caller "watch for it"))
                        (romacs-agent-watch--described arguments task)))
-         (known (cl-remove-if-not (lambda (w) (romacs-agent-watch--same-p w watch))
-                                  (gethash id romacs-agent-watch--watches))))
-    (if (eq (gethash "stop" arguments) t)
-        (when known (romacs-agent-watch--forget id known))
-      (romacs-agent-watch--register id task watch known))
-    (romacs-mcp--object
-     "taskId" id
-     "unit" (or (plist-get watch :unit) :null) "output" (or (plist-get watch :output) :null)
-     "file" (or (plist-get watch :file) :null) "section" (or (plist-get watch :section) :null)
-     "watching" (vconcat (mapcar #'romacs-agent-watch--named (gethash id romacs-agent-watch--watches)))
-     "next" (cond ((eq (gethash "stop" arguments) t) :null)
-                  ((plist-get watch :unit)
-                   "End your turn now: when the unit ends, its status and the output's last lines come as your next message. Do not wait on it or poll it.")
-                  (t "End your turn now: entries new in it come as your next message. Do not poll it.")))))
+         (stop (eq (gethash "stop" arguments) t)))
+    (when (and stop (plist-get watch :unit))
+      (remhash (cons id (plist-get watch :unit)) romacs-agent-watch--checking))
+    (if (and (plist-get watch :unit) (not stop))
+        (romacs-agent-watch--register-unit task caller watch)
+      (romacs-agent-watch--update task watch stop))))
+
+(defun romacs-agent-watch--reply (id watch stop)
+  "Describe the watches now kept for task ID after acting on WATCH.
+STOP means a watch was removed."
+  (romacs-mcp--object
+   "taskId" id
+   "unit" (or (plist-get watch :unit) :null) "output" (or (plist-get watch :output) :null)
+   "file" (or (plist-get watch :file) :null) "section" (or (plist-get watch :section) :null)
+   "watching" (vconcat (mapcar #'romacs-agent-watch--named (gethash id romacs-agent-watch--watches)))
+   "next" (cond (stop :null)
+                ((plist-get watch :unit)
+                 "End your turn now: when the unit ends, its status and the output's last lines come as your next message. Do not wait on it or poll it.")
+                (t "End your turn now: entries new in it come as your next message. Do not poll it."))))
 
 (romacs-mcp-register-tool
  "romacs_task_watch"

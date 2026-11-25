@@ -41,7 +41,8 @@ an error when git fails."
 first) does to the files, from CHECKPOINTS (`romacs-agent-diff--checkpoints')
 and NOW, the project's tree now: (:root ROOT :start TREE :touched NAMES
 :clobbered NAMES), the files the turns changed and those of them changed
-by anything else, between them or since.  Nil when the first turn has
+by anything else, between them or since; a turn's, when it has no end
+checkpoint, all among the clobbered.  Nil when the first turn has
 no start checkpoint."
   (let ((edges (make-hash-table :test #'equal)))
     ;; Each turn's edges by (TURN . KIND), once: no scan per turn.
@@ -54,9 +55,15 @@ no start checkpoint."
           (let* ((start (edge (car tail) 'start))
                  (next (and (cdr tail) (edge (cadr tail) 'start)))
                  ;; A turn its harness cut short has no end: the next start's, else now.
-                 (end (or (edge (car tail) 'end) next now)))
-            (when start (setq touched (append (romacs-agent-rollback--changed root start end) touched)))
+                 (end (or (edge (car tail) 'end) next now))
+                 (changed (and start (romacs-agent-rollback--changed root start end))))
+            (setq touched (append changed touched))
             (setq outside (append (romacs-agent-rollback--changed root end (or next now)) outside))
+            ;; No checkpoint of its end (cut short, or its snapshot failed):
+            ;; what changed from its start to the next one, or to now, may
+            ;; be the user's as well, so each counts as changed by
+            ;; something else, restored only when asked (:force).
+            (unless (edge (car tail) 'end) (setq outside (append changed outside)))
             (setq tail (cdr tail))))
         (setq touched (delete-dups touched))
         (let ((elsewhere (make-hash-table :test #'equal)))
