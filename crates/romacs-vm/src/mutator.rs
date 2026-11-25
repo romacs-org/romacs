@@ -5,7 +5,7 @@
 //! `Mutator`, not a second `Vm`. Fields move here slice by slice; each keeps
 //! its collector class (`tests/no_remote_references.rs`) and is carried in
 //! a world image as it was on `Vm`.
-use crate::{Form, GeneratedName, NameSet, Value, regexp};
+use crate::{Form, GeneratedName, Let, NameSet, Value, backtrace, regexp, threaded};
 
 /// What one mutator is in the middle of. Reached by field path
 /// (`vm.mutator.FIELD`), never through an accessor, so a borrow of one
@@ -76,4 +76,37 @@ pub(crate) struct Mutator {
     /// Eager `lambda' bodies being compiled around the current form.
     pub(crate) lambda_depth: usize,
     pub(crate) expanded_symbols: NameSet<String>,
+    // The bindings, handlers, activations' record and roots of the Lisp
+    // this mutator runs, and the escapes leaving it (GNU's specpdl and
+    // handler list).
+    pub(crate) expanding: Vec<usize>,
+    /// GNU `eval` with a nil LEXICAL argument: every binding the form makes
+    /// is dynamic (src/eval.c Feval, `internal-interpreter-environment' nil).
+    pub(crate) dynamic_scope: bool,
+    /// An escape leaving a reentrant `eval`'s engine, re-raised by the caller's
+    /// engine. Traced by the collector while present.
+    pub(crate) propagated_escape: Option<threaded::Escape>,
+    pub(crate) signal_handlers: Vec<threaded::SignalHandler>,
+    pub(crate) backtrace: backtrace::Backtrace,
+    /// Variables whose watchers run now, each trapped again as its call ends
+    /// (`Vm::notify_watchers_at`), or as a panic is caught (`Vm::catching`).
+    pub(crate) retrap: Vec<usize>,
+    /// R215: compile `lambda' bodies lazily (GNU's non-eager load regime).
+    pub(crate) lazy_regime: bool,
+    /// The error objects (CONDITION . DATA) of the `no-catch'es throws that
+    /// found no live catch made, while those errors escape, the newest last:
+    /// an error with one of these very objects, made afresh for each signal,
+    /// is that throw, not one Lisp signalled (`defer_escape' holds it again
+    /// as the throw). Each retires when its error is caught; they are weak
+    /// (gc.rs), so one whose error a Rust caller discards goes at the next
+    /// collection and keeps nothing alive.
+    pub(crate) thrown_no_catch: Vec<Value>,
+    /// Open frames that keep heap Values in untraced Rust storage across a
+    /// call that can run Lisp: compiler builders and watcher notifications
+    /// from native writers (`gc.rs`, `Vm::may_collect`).
+    pub(crate) gc_holds: usize,
+    pub(crate) external_roots: Vec<Value>,
+    /// The `let` bindings in effect: (variable, saved value, buffer current
+    /// when bound, kind).
+    pub(crate) dynamic: Vec<(usize, Value, Value, Let)>,
 }

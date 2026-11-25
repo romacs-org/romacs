@@ -631,7 +631,7 @@ impl Leaf<'_> {
                     None => {}
                     Some(crate::threaded::Escape::Signal(condition, data)) => return Err(Fault::Signal(condition, data)),
                     Some(escape) => {
-                        self.vm.propagated_escape = Some(escape);
+                        self.vm.mutator.propagated_escape = Some(escape);
                         return Err(Fault::Escape);
                     }
                 }

@@ -443,7 +443,7 @@ fn sqlite_never_quits_with_its_write_kept() {
             assert_eq!(shown, Err(true), "{name}, asked before the halt: it quits");
             assert!(!signal.due(), "{name}: the quit took the press");
             vm.quit_unwinding = false;
-            vm.propagated_escape = None;
+            vm.mutator.propagated_escape = None;
             assert_eq!(vm.eval_source("(equal (sqlite-select db \"SELECT count(*) FROM dst\") '((0)))").unwrap().display().unwrap(), "t", "{name}: the write was rolled back");
             continue;
         };
@@ -452,7 +452,7 @@ fn sqlite_never_quits_with_its_write_kept() {
         assert!(vm.eval_source_raw("(sqlite-select db \"SELECT count(*) FROM dst\")").is_err(), "{name}: the form after the call quits");
         assert!(!signal.due(), "{name}: that form took the press");
         vm.quit_unwinding = false;
-        vm.propagated_escape = None;
+        vm.mutator.propagated_escape = None;
         assert_eq!(vm.eval_source(&format!("(equal (sqlite-select db \"SELECT count(*) FROM dst\") '(({rows})))")).unwrap().display().unwrap(), "t", "{name}: the write was kept");
     }
 }
@@ -837,8 +837,8 @@ fn kernels_the_engine_runs_quit_per_chunk() {
         // first cons: the walk polls, not only the build after it.
         if p == Append { assert_eq!(vm.allocation.consed.conses, consed, "{args}: a cons made before the quit"); }
         let quit = vm.intern("quit");
-        assert!(matches!(vm.propagated_escape, Some(crate::threaded::Escape::Signal(c, _)) if c == quit), "{p:?}: the quit is pending");
-        vm.propagated_escape = None;
+        assert!(matches!(vm.mutator.propagated_escape, Some(crate::threaded::Escape::Signal(c, _)) if c == quit), "{p:?}: the quit is pending");
+        vm.mutator.propagated_escape = None;
         vm.quit_unwinding = false;
         eval(&mut vm, "(setq inhibit-quit t)");
         assert!(signal.interrupt());
@@ -857,7 +857,7 @@ fn a_native_poll_quits_inside_a_compiling_macro_expansion() {
     eval(&mut vm, "(setq l (make-list 50000 'a))");
     let call = prepare(&mut vm, "prin1-to-string", "(list l)");
     vm.mutator.compile_depth += 1;
-    vm.expanding.push(0);
+    vm.mutator.expanding.push(0);
     assert!(signal.interrupt(), "a busy evaluator takes the press");
     let outcome = invoke(&mut vm, call);
     assert!(quit_signalled(&mut vm, &outcome), "the printer's poll did not quit inside the expansion");
@@ -869,7 +869,7 @@ fn a_native_poll_quits_inside_a_compiling_macro_expansion() {
     assert!(invoke(&mut vm, call).is_ok(), "under inhibit-quit the print ends with a value");
     assert!(signal.due(), "inhibit-quit holds the press");
     vm.slots[inhibit].value = Value::NIL;
-    vm.expanding.pop();
+    vm.mutator.expanding.pop();
     vm.mutator.compile_depth -= 1;
 }
 
@@ -891,7 +891,7 @@ fn a_native_poll_quits_for_a_latched_quit_flag() {
     assert!(!signal.due(), "no press, only the flag");
     assert_eq!(append(&mut vm).err().as_deref(), Some(crate::quit::ESCAPED), "append did not quit for quit-flag");
     assert_eq!(vm.slots[flag].value, Value::NIL, "the quit took the flag");
-    vm.propagated_escape = None;
+    vm.mutator.propagated_escape = None;
     vm.quit_unwinding = false;
     let call = prepare(&mut vm, "base64-decode-string", "(list (base64-encode-string (make-string 100000 ?a) t))");
     vm.slots[flag].value = Value::TRUE;
@@ -1037,7 +1037,7 @@ fn list_walks_quit_inside_their_own_scope() {
         assert!(signal.interrupt(), "a busy evaluator takes the press");
         let outcome = vm.with_kernel_stack(&[list], |vm, n| vm.inside_quit_scope(|vm| vm.primitive(p, 0, n)));
         assert_eq!(outcome.err().as_deref(), Some(crate::quit::ESCAPED), "{p:?}: no quit at its poll");
-        vm.propagated_escape = None;
+        vm.mutator.propagated_escape = None;
         vm.quit_unwinding = false;
         assert_eq!(eval(&mut vm, "(length l)").integer_value(), Some(50000), "{p:?}: the list is whole");
         // Under inhibit-quit it runs to its end and the press waits.
@@ -1120,7 +1120,7 @@ fn gated_kernels_take_their_scope_at_their_first_chunk() {
             if engine && n > K {
                 assert_eq!(outcome.err().as_deref(), Some(crate::quit::ESCAPED), "{p:?} of {n}: no quit at its poll");
                 let quit = vm.intern("quit");
-                assert!(matches!(vm.propagated_escape, Some(crate::threaded::Escape::Signal(c, _)) if c == quit), "{p:?}: the quit is pending");
+                assert!(matches!(vm.mutator.propagated_escape, Some(crate::threaded::Escape::Signal(c, _)) if c == quit), "{p:?}: the quit is pending");
             } else {
                 assert!(outcome.is_ok(), "{p:?} of {n} (engine {engine}): the call ends with a value");
                 assert!(signal.due(), "{p:?} of {n} (engine {engine}): the press stays pending");
@@ -1140,7 +1140,7 @@ fn nreverse_polls_at_its_first_chunk() {
     assert!(signal.interrupt(), "a busy evaluator takes the press");
     let outcome = call_kernel(&mut vm, crate::Primitive::Nreverse, &args, true);
     assert_eq!(outcome.err().as_deref(), Some(crate::quit::ESCAPED), "no quit at its first chunk");
-    vm.propagated_escape = None;
+    vm.mutator.propagated_escape = None;
     vm.quit_unwinding = false;
     assert_eq!(eval(&mut vm, "(equal (list (length l) (car l) (nth 19999 l)) '(20000 1 20000))"), Value::TRUE, "the list is whole");
 }
@@ -1155,7 +1155,7 @@ fn nreverse_polls_at_the_step_that_finds_its_cycle() {
     assert!(signal.interrupt(), "a busy evaluator takes the press");
     let outcome = call_kernel(&mut vm, crate::Primitive::Nreverse, &args, true);
     assert_eq!(outcome.err().as_deref(), Some(crate::quit::ESCAPED), "no quit at the step that finds the cycle");
-    vm.propagated_escape = None;
+    vm.mutator.propagated_escape = None;
     vm.quit_unwinding = false;
     let shape = eval(&mut vm, "(let ((c (nthcdr 16383 l))) (list (car l) (car c) (eq (cdr c) c) (car (nthcdr 100 l))))");
     assert_eq!(vm.display(shape).unwrap(), "(1 16384 t 101)", "the list is unmodified");
@@ -1245,7 +1245,7 @@ fn a_sqlite_error_with_a_press_waiting_is_itself() {
         assert!(vm.eval_source_raw("(sqlite-select db \"SELECT count(*) FROM t\")").is_err(), "{name}: the form after the call quits");
         assert!(!signal.due(), "{name}: that form took the press");
         vm.quit_unwinding = false;
-        vm.propagated_escape = None;
+        vm.mutator.propagated_escape = None;
         assert_eq!(vm.eval_source("(equal (sqlite-select db \"SELECT count(*) FROM t\") '((1)))").unwrap().display().unwrap(), "t", "{name}: the first row was kept");
     }
 }
@@ -1290,7 +1290,7 @@ fn a_sqlite_interrupt_not_the_handler_s_is_an_error() {
         assert!(signal.due(), "{name}: the press waits for the next poll");
         assert!(vm.eval_source_raw("(sqlite-select db \"SELECT 1\")").is_err(), "{name}: the form after the call quits");
         vm.quit_unwinding = false;
-        vm.propagated_escape = None;
+        vm.mutator.propagated_escape = None;
     }
 }
 

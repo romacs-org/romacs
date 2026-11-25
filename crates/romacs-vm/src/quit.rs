@@ -296,7 +296,7 @@ impl Vm {
         match escape {
             Escape::Signal(condition, data) => crate::prim::Fault::Signal(condition, data),
             other => {
-                self.propagated_escape = Some(other);
+                self.mutator.propagated_escape = Some(other);
                 crate::prim::Fault::Escape
             }
         }
@@ -409,7 +409,7 @@ impl Vm {
         match self.maybe_quit() {
             None => Ok(()),
             Some(escape) => {
-                self.propagated_escape = Some(escape);
+                self.mutator.propagated_escape = Some(escape);
                 self.propagated_escape_hooked = false;
                 Err("Quit".into())
             }

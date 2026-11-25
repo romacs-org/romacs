@@ -45,12 +45,12 @@ impl Vm {
             ("stack", self.stack.is_empty()),
             ("site_leaf", self.site_leaf == (0, 0)),
             ("images", self.images.is_empty()),
-            ("dynamic", self.dynamic.is_empty()),
+            ("dynamic", self.mutator.dynamic.is_empty()),
             ("eval_depth", self.eval_depth == 0),
-            ("external_roots", self.external_roots.is_empty()),
+            ("external_roots", self.mutator.external_roots.is_empty()),
             ("suspended", self.suspended.is_empty()),
-            ("signal_handlers", self.signal_handlers.is_empty()),
-            ("propagated_escape", self.propagated_escape.is_none()),
+            ("signal_handlers", self.mutator.signal_handlers.is_empty()),
+            ("propagated_escape", self.mutator.propagated_escape.is_none()),
             ("host_input", self.host_input.is_none()),
             ("host_wait", self.host_wait.is_none()),
             ("layout_host", self.layout_host.is_none()),
@@ -89,7 +89,7 @@ impl Vm {
             // no frame holding Values out of its sight.
             ("suspended_stacks", self.stack.depth() == 0),
             ("running_engines", self.running_engines == 0),
-            ("gc_holds", self.gc_holds == 0),
+            ("gc_holds", self.mutator.gc_holds == 0),
             ("unwinding", self.unwinding == 0),
             ("rooted_write", !self.rooted_write),
             ("deferred_writes", self.deferred_writes.is_empty()),
@@ -403,7 +403,7 @@ mod tests {
         };
         assert!(not_captured(|vm| vm.stack.suspend()).contains("suspended_stacks"));
         assert!(not_captured(|vm| vm.running_engines = 1).contains("running_engines"));
-        assert!(not_captured(|vm| vm.gc_holds = 1).contains("gc_holds"));
+        assert!(not_captured(|vm| vm.mutator.gc_holds = 1).contains("gc_holds"));
         assert!(not_captured(|vm| vm.rooted_write = true).contains("rooted_write"));
         assert!(not_captured(|vm| vm.deferred_writes.push((crate::watchers::NativeWrite::set(0, crate::Value::NIL), crate::Value::NIL))).contains("deferred_writes"));
         // A cache slot a builder reserved that no installed code owns.

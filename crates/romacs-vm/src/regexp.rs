@@ -1468,7 +1468,7 @@ impl Vm {
         let armed = Armed {
             quit: if presses { std::sync::Arc::as_ptr(&self.quit) } else { std::ptr::null() },
             debug_events,
-            frames: inspected.then_some((&raw const self.backtrace, &raw const self.symbol_names)),
+            frames: inspected.then_some((&raw const self.mutator.backtrace, &raw const self.symbol_names)),
             probing: true,
         };
         if !ARMED.with(|cell| cell.replace(armed)).probing {

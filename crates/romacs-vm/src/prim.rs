@@ -329,10 +329,10 @@ mod leaf {
             })
         }
         fn watcher_fault(&mut self, text: String) -> Fault {
-            match self.vm.propagated_escape {
+            match self.vm.mutator.propagated_escape {
                 Some(crate::threaded::Escape::Signal(..) | crate::threaded::Escape::Error { .. }) => Fault::Escape,
                 Some(crate::threaded::Escape::Throw(..)) => {
-                    self.vm.propagated_escape = None;
+                    self.vm.mutator.propagated_escape = None;
                     Fault::Error("VM2 throw out of a variable watcher of a native write is unsupported".into())
                 }
                 _ => Fault::Error(text),
@@ -474,14 +474,14 @@ mod leaf {
             if let Some(buffer) = self.vm.named_buffer(&name) { return Ok((buffer, false)); }
             if !create { return Err(Fault::Error(format!("No buffer named {name}"))); }
             let buffer = self.vm.create_named_buffer(&name, false).map_err(|error| {
-                match self.vm.propagated_escape.take() {
+                match self.vm.mutator.propagated_escape.take() {
                     Some(crate::threaded::Escape::Signal(condition, data)) => Fault::Signal(condition, data),
                     Some(crate::threaded::Escape::Error { condition, object, .. }) => {
                         let (_, data) = self.vm.cons_pair(object).expect("normalized signal object");
                         Fault::Signal(condition, data)
                     }
                     escape => {
-                        self.vm.propagated_escape = escape;
+                        self.vm.mutator.propagated_escape = escape;
                         Fault::Error(error)
                     }
                 }
@@ -498,17 +498,17 @@ mod leaf {
             let marker = self.vm.save_excursion_data().map_err(Fault::Error)?;
             // The excursion is its caller's: not this primitive's own
             // activation, when the call recorded one.
-            let frames = &self.vm.backtrace.frames;
+            let frames = &self.vm.mutator.backtrace.frames;
             let own = frames.last().is_some_and(|frame| crate::prim::name(frame.function) == Some("romacs--save-excursion"));
             let frames = frames.len() - usize::from(own);
-            let dynamic = self.vm.dynamic.len();
+            let dynamic = self.vm.mutator.dynamic.len();
             // Only `backtrace-eval` reads it: a frame without windows records none.
             let window = self.vm.excursion_window().unwrap_or(Value::NIL);
-            self.vm.backtrace.excursion_begin(marker, window, frames, dynamic);
+            self.vm.mutator.backtrace.excursion_begin(marker, window, frames, dynamic);
             Ok(marker)
         }
         pub(crate) fn restore_excursion_data(&mut self, data: Value) -> std::result::Result<Value, Fault> {
-            self.vm.backtrace.excursion_end(data);
+            self.vm.mutator.backtrace.excursion_end(data);
             self.vm.restore_excursion_data(data).map_err(Fault::Error)
         }
         pub(crate) fn save_restriction_data(&mut self) -> std::result::Result<Value, Fault> {
@@ -1224,7 +1224,7 @@ mod leaf {
             let Some(binding) = self.vm.default_toplevel_binding(slot) else { return Ok(None) };
             self.vm.tracked_saved(slot, binding, crate::world::Access::SavedRead);
             // HOST(dynamic:saved): saved-binding accessor: checks the tracking on the entry first (F2)
-            let value = self.vm.dynamic[binding].1;
+            let value = self.vm.mutator.dynamic[binding].1;
             if value == Value::UNBOUND { Err(Fault::VoidVariable(v)) } else { Ok(Some(value)) }
         }
         /// Update only the oldest saved default, leaving all active cells intact.
@@ -1235,7 +1235,7 @@ mod leaf {
             self.vm.tracked_saved(slot, binding, crate::world::Access::SavedWrite);
             self.vm.check_boolean_default(slot, value).map_err(Fault::Error)?;
             // HOST(dynamic:saved): saved-binding accessor: checks the tracking on the entry first (F2)
-            self.vm.dynamic[binding].1 = value;
+            self.vm.mutator.dynamic[binding].1 = value;
             Ok(true)
         }
         pub fn provide_feature(&mut self, feature: Value, subfeatures: Value) -> std::result::Result<(), Fault> {
@@ -1248,7 +1248,7 @@ mod leaf {
             let Some(binding) = self.vm.local_toplevel_binding(slot, buffer) else { return Ok(None) };
             self.vm.tracked_saved(slot, binding, crate::world::Access::SavedRead);
             // HOST(dynamic:saved): saved-binding accessor: checks the tracking on the entry first (F2)
-            let value = self.vm.dynamic[binding].1;
+            let value = self.vm.mutator.dynamic[binding].1;
             if value == Value::UNBOUND { Err(Fault::VoidVariable(v)) } else { Ok(Some(value)) }
         }
         /// Replace that saved value; false when there is no such let.
@@ -1258,7 +1258,7 @@ mod leaf {
             let Some(binding) = self.vm.local_toplevel_binding(slot, buffer) else { return Ok(false) };
             self.vm.tracked_saved(slot, binding, crate::world::Access::SavedWrite);
             // HOST(dynamic:saved): saved-binding accessor: checks the tracking on the entry first (F2)
-            self.vm.dynamic[binding].1 = value;
+            self.vm.mutator.dynamic[binding].1 = value;
             Ok(true)
         }
         /// Resolve the current buffer's binding, including dynamic/local redirects.
@@ -1344,7 +1344,7 @@ mod leaf {
             }
             let slot = self.vm.indirect_variable(self.symbol_slot(v)?);
             // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
-            Ok(self.vm.dynamic.iter().any(|(bound, ..)| *bound == slot))
+            Ok(self.vm.mutator.dynamic.iter().any(|(bound, ..)| *bound == slot))
         }
         /// GNU `find_symbol_value`: the current binding through aliases,
         /// `None` when void. nil and t are their own values.
@@ -2428,7 +2428,7 @@ pub(crate) fn call_native_watcher(vm: &mut Vm, watcher: Value, args: &[Value]) -
         }
     };
     // funcall_subr passes the watcher's own signal through the write.
-    vm.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
+    vm.mutator.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
     Err(format!("variable watcher {} signalled", d.name))
 }
 /// Tag-6 payloads at or above `PRIMITIVES.len()` name generated primitives.
@@ -2481,7 +2481,7 @@ impl Vm {
             Ok(home) => home,
             Err(fault) => {
                 let (condition, data) = self.fault(fault);
-                self.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
+                self.mutator.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
                 return Err("expand-file-name signalled".into());
             }
         };
@@ -2501,7 +2501,7 @@ impl Vm {
             Ok(None) => Err("VM2 expand-file-name matching file name handler is unsupported".into()),
             Err(fault) => {
                 let (condition, data) = self.fault(fault);
-                self.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
+                self.mutator.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
                 Err("expand-file-name signalled".into())
             }
         }
@@ -2538,7 +2538,7 @@ impl Vm {
         decoded.map_err(|fault| {
             let (condition, data) = self.fault(fault);
             let text = format!("source coding detection signalled {}", self.display(condition).unwrap_or_default());
-            self.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
+            self.mutator.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
             text
         })
     }
@@ -2648,7 +2648,7 @@ impl Vm {
     /// signalled afresh, by callers that cannot resume it.
     pub(super) fn fault(&mut self, fault: Fault) -> (Value, Value) {
         match fault {
-            Fault::Escape => match self.propagated_escape.take() {
+            Fault::Escape => match self.mutator.propagated_escape.take() {
                 Some(crate::threaded::Escape::Signal(condition, data)) => (condition, data),
                 Some(crate::threaded::Escape::Error { condition, object, .. }) => {
                     (condition, self.cons_pair(object).expect("normalized signal object").1)

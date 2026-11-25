@@ -34,7 +34,7 @@ pub(crate) fn read_string<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Op
     then: impl FnOnce(&mut Vm, B, Read) -> R + Copy + 'static) -> R {
     let byte = m.leaf((root, start), |vm, (root, start)| {
         // START's byte through the string's own cursor (`Vm::str_view_from`).
-        let stream = vm.external_roots[root];
+        let stream = vm.mutator.external_roots[root];
         let all = vm.str_view(stream).expect("a string stream").bytes.len();
         all - vm.str_view_from(stream, start).expect("a string stream").bytes.len()
     });
@@ -47,7 +47,7 @@ pub(crate) fn read_string<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Op
 pub(crate) fn read_stream<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, root: usize, b: B,
     then: impl FnOnce(&mut Vm, B, Read) -> R + Copy + 'static) -> R {
     let (length, buffer) = m.leaf(root, |vm, root| {
-        let stream = vm.external_roots[root];
+        let stream = vm.mutator.external_roots[root];
         let buffer = matches!(vm.object_if(stream), Some(Object::Buffer(_) | Object::ByteBuffer(_) | Object::Marker(_)));
         (vm.str_view(stream).map(|view| view.len()), buffer)
     });
@@ -63,14 +63,14 @@ pub(crate) fn read_stream<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Gc
 /// which takes them back with `taken` once it holds the VM again.
 type Kept = std::result::Result<Option<(usize, usize, usize)>, (String, Option<(usize, usize)>)>;
 fn keep(vm: &mut Vm, (): (), read: Read) -> Kept {
-    let mut root = |value: Value| { vm.external_roots.push(value); vm.external_roots.len() - 1 };
+    let mut root = |value: Value| { vm.mutator.external_roots.push(value); vm.mutator.external_roots.len() - 1 };
     match read {
         Ok(found) => Ok(found.map(|(value, begin, end)| (root(value), begin, end))),
         Err((text, signal)) => Err((text, signal.map(|(condition, data)| (root(condition), root(data))))),
     }
 }
 fn taken(vm: &Vm, kept: Kept) -> Read {
-    let at = |root: usize| vm.external_roots[root];
+    let at = |root: usize| vm.mutator.external_roots[root];
     match kept {
         Ok(found) => Ok(found.map(|(root, begin, end)| (at(root), begin, end))),
         Err((text, signal)) => Err((text, signal.map(|(condition, data)| (at(condition), at(data))))),
@@ -83,12 +83,12 @@ impl Vm {
     /// census row: it may call Lisp (`\N{NAME}`), which may collect, under the
     /// permission minted here. The value is unrooted: root it to keep it.
     pub(crate) fn read_source_raw(&mut self, source: &str) -> Result<Option<(Value, usize)>> {
-        let mark = self.external_roots.len();
+        let mark = self.mutator.external_roots.len();
         let kept = crate::threaded::toplevel(self, source, |mut m, gc, source| read_next(&mut m, gc, source.as_bytes(), (), |vm, (), read| {
-            read.map_err(|(text, _)| text).map(|found| found.map(|(value, _, end)| { vm.external_roots.push(value); (vm.external_roots.len() - 1, end) }))
+            read.map_err(|(text, _)| text).map(|found| found.map(|(value, _, end)| { vm.mutator.external_roots.push(value); (vm.mutator.external_roots.len() - 1, end) }))
         }));
-        let read = kept.map(|found| found.map(|(root, end)| (self.external_roots[root], end)));
-        self.external_roots.truncate(mark);
+        let read = kept.map(|found| found.map(|(root, end)| (self.mutator.external_roots[root], end)));
+        self.mutator.external_roots.truncate(mark);
         read
     }
     /// Characters START to END of STRING read without the permission, so
@@ -96,11 +96,11 @@ impl Vm {
     /// it refuses. For leaves reading Romacs's own constant Lisp. The values
     /// are unrooted: use them before anything can collect.
     pub(crate) fn read_string_unlent(&mut self, string: Value, start: usize, end: usize) -> Read {
-        let mark = self.external_roots.len();
-        self.external_roots.push(string);
+        let mark = self.mutator.external_roots.len();
+        self.mutator.external_roots.push(string);
         let kept = crate::brand::without_gc(self, (mark, start, end), |mut m, spec| read_string(&mut m, None, spec, (), keep));
         let read = taken(self, kept);
-        self.external_roots.truncate(mark);
+        self.mutator.external_roots.truncate(mark);
         read
     }
 

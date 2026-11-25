@@ -614,7 +614,7 @@ fn finish(vm: &mut Vm, (waited, out): (Result<()>, Out<'_>)) -> Result<()> {
         HostEvent::Closed => {
             // Its data tells it from a C-g's (`romacs--host-event').
             let (quit, closed) = (vm.intern("quit"), vm.intern("frame-closed"));
-            vm.propagated_escape = Some(threaded::Escape::Signal(quit, closed));
+            vm.mutator.propagated_escape = Some(threaded::Escape::Signal(quit, closed));
             return Err("quit: frame closed while reading input".into());
         }
     };

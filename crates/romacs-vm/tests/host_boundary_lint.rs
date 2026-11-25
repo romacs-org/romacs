@@ -7,7 +7,7 @@
 //! accessor looks up `default-directory`'s storage. Rule 3: each site that
 //! names a variable on the B3 trace's delayed list says why, so no Rust read
 //! of one bypasses the fence. Rule 4: each site that can reach a saved value
-//! of the VM's binding stack (`vm.dynamic`) says why, so only specbind,
+//! of the VM's binding stack (`vm.mutator.dynamic`) says why, so only specbind,
 //! unbind and the saved-binding accessors, which check the fence (F2), read
 //! or write one.
 //!
@@ -198,7 +198,7 @@ const APIS: &[Api] = &[
     slot("slot:default-directory", &["lookup(\"default-directory\")"], BUFFER_ACCESSOR),
     slot("delayed-variable", DELAYED, &[]),
     api!("dynamic:saved", ".dynamic[", ".dynamic.iter*", ".dynamic.first", ".dynamic.last", ".dynamic.get*", ".dynamic.pop",
-         ".dynamic.push", "self.dynamic{", "vm.dynamic{"),
+         ".dynamic.push", "mutator.dynamic{"),
 ];
 
 /// The delayed list of the B3 world trace (`--world-trace`): startup

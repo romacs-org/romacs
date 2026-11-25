@@ -750,8 +750,8 @@ impl Vm {
         // A native poll's escape, for a caller that takes only a condition
         // (the engine takes any escape first, `primitive_value`).
         if error == crate::quit::ESCAPED
-            && let Some(crate::threaded::Escape::Signal(condition, data)) = self.propagated_escape {
-            self.propagated_escape = None;
+            && let Some(crate::threaded::Escape::Signal(condition, data)) = self.mutator.propagated_escape {
+            self.mutator.propagated_escape = None;
             return Some((condition, data));
         }
         if matches!(p, Primitive::Format | Primitive::Message) && error == "floating-point overflow" {

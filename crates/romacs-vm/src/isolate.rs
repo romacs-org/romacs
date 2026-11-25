@@ -529,7 +529,7 @@ impl Vm {
     /// (`Vm::catching`). O(1).
     pub(crate) fn isolate_claim(&self) -> Option<u64> {
         let (index, generation) = self.isolates.claim?;
-        matches!(self.signal_handlers.get(index), Some(&crate::threaded::SignalHandler::Job(g)) if g == generation)
+        matches!(self.mutator.signal_handlers.get(index), Some(&crate::threaded::SignalHandler::Job(g)) if g == generation)
             .then_some(generation)
     }
     /// `romacs--isolate-claim': GENERATION's job runs from here, inside the
@@ -539,8 +539,8 @@ impl Vm {
         if let Some(running) = self.isolate_claim() {
             return Err(format!("Job {running} already runs here"));
         }
-        self.isolates.claim = Some((self.signal_handlers.len(), generation));
-        self.signal_handlers.push(crate::threaded::SignalHandler::Job(generation));
+        self.isolates.claim = Some((self.mutator.signal_handlers.len(), generation));
+        self.mutator.signal_handlers.push(crate::threaded::SignalHandler::Job(generation));
         Ok(())
     }
     /// Forget a claim whose entry is gone, as a world is normalized.

@@ -168,7 +168,7 @@ impl Vm {
         }
     }
     fn inspect_frame(&self, index: usize, out: &mut String) {
-        let function = self.backtrace.frames[index].function;
+        let function = self.mutator.backtrace.frames[index].function;
         let symbol = self.inspect_symbol(function);
         out.push_str(r#"{"fn":"#);
         match symbol {
@@ -192,7 +192,7 @@ impl Vm {
     }
     /// The call stack as JSON, innermost frame first.
     pub(crate) fn inspect_snapshot(&self) -> String {
-        let total = self.backtrace.frames.len();
+        let total = self.mutator.backtrace.frames.len();
         let mut out = String::from(r#"{"frames":["#);
         let mut shown = 0;
         for index in (0..total).rev().take(FRAMES) {
@@ -265,13 +265,13 @@ mod tests {
         vm.eval_source("(progn (insert (make-string 8000 ?x)) (put-text-property 1 8000 'display \"d\")
           (let ((i 1)) (while (< i 8000) (put-text-property i (1+ i) 'face (if (= 0 (% i 2)) 'bold 'italic)) (setq i (1+ i))))
           (defun walk-display () (next-single-char-property-change 1 'display)))").unwrap();
-        let depth = vm.backtrace.frames.len();
+        let depth = vm.mutator.backtrace.frames.len();
         crate::host::inspect_request();
         vm.eval_source("(walk-display)").unwrap();
         assert!(!crate::host::inspect_pending(), "the walk left the inspection unanswered");
         let answer = crate::host::inspect_answer().expect("an answer");
         assert!(answer.contains(r#""fn":"next-single-char-property-change""#), "{answer}");
-        assert_eq!((vm.backtrace.frames.len(), vm.site_leaf), (depth, (0, 0)));
+        assert_eq!((vm.mutator.backtrace.frames.len(), vm.site_leaf), (depth, (0, 0)));
     }
 
     /// The matcher answers an inspection without a VM to record on: a search
@@ -287,7 +287,7 @@ mod tests {
           ;; Settle the poll the string's allocation asked for: it would
           ;; answer the inspection at the call's first tick instead.
           (garbage-collect))").unwrap();
-        let depth = vm.backtrace.frames.len();
+        let depth = vm.mutator.backtrace.frames.len();
         crate::host::inspect_enable(true);
         crate::host::inspect_request();
         let found = vm.eval_source("(font-of long-name)");
@@ -296,7 +296,7 @@ mod tests {
         assert!(!crate::host::inspect_pending(), "the search left the inspection unanswered");
         let answer = crate::host::inspect_answer().expect("an answer");
         assert!(answer.contains(r#""fn":"romacs--font-encoding""#), "{answer}");
-        assert_eq!((vm.backtrace.frames.len(), vm.site_leaf), (depth, (0, 0)));
+        assert_eq!((vm.mutator.backtrace.frames.len(), vm.site_leaf), (depth, (0, 0)));
     }
 
     /// The store's writer has ended once the listener stops: its directory,

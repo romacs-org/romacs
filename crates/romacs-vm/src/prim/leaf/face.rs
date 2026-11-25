@@ -205,7 +205,7 @@ impl Leaf<'_> {
     /// goes on through the caller, as GNU's call1 lets it.
     pub(crate) fn call_propagating(&mut self, function: Value, args: &[Value]) -> std::result::Result<(), Fault> {
         let called = self.vm.call_lisp_at_write(function, args);
-        if self.vm.propagated_escape.is_some() { return Err(Fault::Escape); }
+        if self.vm.mutator.propagated_escape.is_some() { return Err(Fault::Escape); }
         called.map_err(Fault::Error)
     }
 
@@ -224,13 +224,13 @@ impl Leaf<'_> {
         match fault {
             Fault::Signal(condition, _) if !self.vm.condition_matches(condition, error) => Err(fault),
             Fault::Escape => {
-                let swallowed = match self.vm.propagated_escape {
+                let swallowed = match self.vm.mutator.propagated_escape {
                     Some(Escape::Signal(condition, _)) => self.vm.condition_matches(condition, error),
                     Some(Escape::Error { .. }) => true,
                     _ => false,
                 };
                 if !swallowed { return Err(Fault::Escape); }
-                self.vm.propagated_escape = None;
+                self.vm.mutator.propagated_escape = None;
                 Ok(())
             }
             _ => Ok(()),

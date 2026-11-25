@@ -22,8 +22,8 @@ fn from_string(call: ReadCall<'_, '_, '_, '_>) -> bool {
         let (string, from, to) = (arg(0), arg(1), arg(2));
         match Leaf::new(vm).read_range(string, from, to) {
             Ok((a, b)) => {
-                vm.external_roots.push(string);
-                Some((vm.external_roots.len() - 1, a, b))
+                vm.mutator.external_roots.push(string);
+                Some((vm.mutator.external_roots.len() - 1, a, b))
             }
             Err(fault) => {
                 land(vm, out, Err(fault));
@@ -33,7 +33,7 @@ fn from_string(call: ReadCall<'_, '_, '_, '_>) -> bool {
     }) else { return true };
     crate::reader::read_string(m, Some(gc), spec, (out, spec.0, spec.1), |vm, (out, root, a), read| {
         let outcome = Leaf::new(vm).string_read(read, a);
-        vm.external_roots.truncate(root);
+        vm.mutator.external_roots.truncate(root);
         land(vm, out, outcome)
     })
 }
@@ -46,8 +46,8 @@ fn from_stream(call: ReadCall<'_, '_, '_, '_>) -> bool {
         let stream = if argc > 0 { vm.stack[start] } else { Value::NIL };
         match Leaf::new(vm).read_stream(stream) {
             Ok(stream) => {
-                vm.external_roots.push(stream);
-                Some(vm.external_roots.len() - 1)
+                vm.mutator.external_roots.push(stream);
+                Some(vm.mutator.external_roots.len() - 1)
             }
             Err(fault) => {
                 land(vm, out, Err(fault));
@@ -56,8 +56,8 @@ fn from_stream(call: ReadCall<'_, '_, '_, '_>) -> bool {
         }
     }) else { return true };
     crate::reader::read_stream(m, gc, root, (out, root), |vm, (out, root), read| {
-        let stream = vm.external_roots[root];
-        vm.external_roots.truncate(root);
+        let stream = vm.mutator.external_roots[root];
+        vm.mutator.external_roots.truncate(root);
         let outcome = Leaf::new(vm).stream_read(read, stream);
         land(vm, out, outcome)
     })

@@ -80,7 +80,7 @@ impl Vm {
         if self.image.is_some()
             || !self.regions_empty()
             || !self.cells.is_empty()
-            || !self.dynamic.is_empty()
+            || !self.mutator.dynamic.is_empty()
             || !self.stack.is_empty()
         {
             return Err("code image requires a private quiescent world without cells".into());

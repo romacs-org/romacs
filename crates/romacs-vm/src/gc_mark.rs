@@ -1284,11 +1284,11 @@ mod tests {
         let stale = vm.alloc_cons(Value::NIL, Value::NIL);
         vm.collect_garbage();
         let collections = vm.heap_stats().collections;
-        vm.external_roots.push(stale);
+        vm.mutator.external_roots.push(stale);
         let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| vm.collect_garbage()));
         assert!(unwound.is_err(), "verify refuses a stale reference");
         assert_eq!(vm.heap_stats().collections, collections, "nothing was collected");
-        vm.external_roots.pop();
+        vm.mutator.external_roots.pop();
         vm.collect_garbage();
         assert_eq!(vm.heap_stats().collections, collections + 1);
     }

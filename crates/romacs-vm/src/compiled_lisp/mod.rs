@@ -762,12 +762,12 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
     /// file declared special so far.
     fn compile_unit(&mut self, form: &Form, specials: NameSet<String>, names: &mut unit::Names) -> Result<Vec<u8>> {
         let saved = (std::mem::replace(&mut self.mutator.file_specials, specials),
-                     std::mem::replace(&mut self.lazy_regime, false),
+                     std::mem::replace(&mut self.mutator.lazy_regime, false),
                      std::mem::replace(&mut self.mutator.defer_expansion_errors, false));
         self.mutator.seed_file_specials = true;
         let compiled = self.compile_request(form);
         self.mutator.seed_file_specials = false;
-        (self.mutator.file_specials, self.lazy_regime, self.mutator.defer_expansion_errors) = saved;
+        (self.mutator.file_specials, self.mutator.lazy_regime, self.mutator.defer_expansion_errors) = saved;
         let (entry, _) = compiled?;
         let mut out = codec::Writer::default();
         let encoded = unit::Encoder::new(self, names).unit(entry, &mut out);

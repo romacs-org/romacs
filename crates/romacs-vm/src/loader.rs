@@ -274,7 +274,7 @@ impl Vm {
             let name = if entry == Value::NIL { directory } else { entry };
             // A name only a file name handler expands is kept as written.
             let expanded = self.expand_file_name_legacy(name, directory).unwrap_or_else(|_| {
-                self.propagated_escape = None;
+                self.mutator.propagated_escape = None;
                 name
             });
             roots.push(self.source_string(expanded)?.to_owned());
@@ -421,14 +421,14 @@ impl Vm {
     /// the expansion signals, which `eager_expansion_failure` wraps. The mark
     /// for `Self::leave_load_expansion`.
     fn enter_load_expansion(&mut self) -> usize {
-        let mark = self.signal_handlers.len();
+        let mark = self.mutator.signal_handlers.len();
         let (debug, error) = (self.intern("debug"), self.intern("error"));
         let clause = self.list_value(&[debug, error]);
-        self.signal_handlers.push(threaded::SignalHandler::Condition(clause));
+        self.mutator.signal_handlers.push(threaded::SignalHandler::Condition(clause));
         mark
     }
     fn leave_load_expansion(&mut self, mark: usize) {
-        self.signal_handlers.truncate(mark);
+        self.mutator.signal_handlers.truncate(mark);
     }
     /// A `(defvar NAME)` a top-level form has just declared:
     /// `macroexpand--all-toplevel` records it in the file's `macroexp--dynvars`
@@ -465,7 +465,7 @@ impl Vm {
     /// or another signal that is no error passes as it is, as does a throw
     /// to a catch outside the load.
     fn eager_expansion_failure(&mut self, error: String) -> String {
-        let (condition, object) = match self.propagated_escape {
+        let (condition, object) = match self.mutator.propagated_escape {
             Some(threaded::Escape::Signal(condition, data)) => {
                 let cons = self.alloc_cons(condition, data);
                 (condition, cons)
@@ -481,7 +481,7 @@ impl Vm {
         let message = format!("Eager macro-expansion failure: {printed}");
         let Ok(text) = self.literal(&Form::String(message.clone())) else { return error };
         let data = self.list_value(&[text]);
-        self.propagated_escape = Some(threaded::Escape::Signal(error_symbol, data));
+        self.mutator.propagated_escape = Some(threaded::Escape::Signal(error_symbol, data));
         message
     }
     pub(super) fn source_load_active(&self) -> bool {
@@ -519,7 +519,7 @@ impl Vm {
             }
             let condition = self.intern("error");
             let data = self.list_value(&data);
-            self.propagated_escape = Some(threaded::Escape::Signal(condition, data));
+            self.mutator.propagated_escape = Some(threaded::Escape::Signal(condition, data));
             return Err(format!("Recursive load: {}", path.display()));
         }
         Ok((named, path))
@@ -592,7 +592,7 @@ impl Vm {
         // the first regime and lazily in the second.
         let expander = self.slot("internal-macroexpand-for-load");
         let lazy = matches!(self.slots[expander].function, f if f == Value::UNBOUND || f == Value::NIL);
-        let saved_lazy = std::mem::replace(&mut self.lazy_regime, lazy);
+        let saved_lazy = std::mem::replace(&mut self.mutator.lazy_regime, lazy);
         let defer = std::mem::replace(&mut self.mutator.defer_expansion_errors, lazy);
         // GNU's readevalloop interprets a file it reads as source: its
         // `let's decide as they bind (VM2-LATE-SPECIAL1).
@@ -619,7 +619,7 @@ impl Vm {
     }
     fn leave_source_regime(&mut self) {
         let saved = self.loader.regimes.pop().expect("a source load's regime");
-        self.lazy_regime = saved.lazy;
+        self.mutator.lazy_regime = saved.lazy;
         self.mutator.defer_expansion_errors = saved.defer;
         self.mutator.interpreting_source = saved.interpreting;
         self.leave_file_specials();
@@ -652,7 +652,7 @@ impl Vm {
     /// `require' run by a macro's expansion, as `eval-when-compile' runs it,
     /// is no dependency of the file: GNU's `.elc' does not make that call.
     fn attach_require(&mut self, feature: Value) -> Result<()> {
-        if !self.expanding.is_empty() { return Ok(()); }
+        if !self.mutator.expanding.is_empty() { return Ok(()); }
         let require = self.intern("require");
         let (progress, history) = (self.slot("load-in-progress"), self.slot("current-load-list"));
         let mut from_file = self.variable_value(progress)? != Value::NIL;
@@ -790,7 +790,7 @@ fn load_file<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, path: &Path, compil
 /// `eval-buffer-list`) have no counterpart: VM2 reads the file's bytes.
 fn load_source<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, (named, path): (&str, &Path), (source, explicit): (&[u8], bool), values: &RootFrame, out: Out<'_>) -> Result<()> {
     file_shorthands(m, gc.by_ref(), source, (values, LOAD_SHORTHANDS))?;
-    let (outer, history_slot) = m.leaf((), |vm, ()| (vm.dynamic.len(), vm.slot("current-load-list")));
+    let (outer, history_slot) = m.leaf((), |vm, ()| (vm.mutator.dynamic.len(), vm.slot("current-load-list")));
     let inner = match bind_source_load(m, gc.by_ref(), values) {
         Ok(inner) => inner,
         Err(error) => {
@@ -814,7 +814,7 @@ fn bind_source_load<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, values: &Roo
         bind_named(m, gc.by_ref(), values, &[("lexical-binding", LOAD_T)])?;
     }
     bind_named(m, gc.by_ref(), values, &[("lread--unescaped-character-literals", LOAD_NIL), ("load-in-progress", LOAD_T)])?;
-    let inner = m.leaf((), |vm, ()| vm.dynamic.len());
+    let inner = m.leaf((), |vm, ()| vm.mutator.dynamic.len());
     m.leaf(values, Vm::load_history_values)?;
     bind_named(m, gc, values, &[("inhibit-file-name-operation", LOAD_NIL), ("load-file-name", LOAD_FILE), ("load-true-file-name", LOAD_FILE),
         ("read-symbol-shorthands", LOAD_SHORTHANDS), ("macroexp--dynvars", LOAD_DYNVARS), ("current-load-list", LOAD_HISTORY)])?;
@@ -895,7 +895,7 @@ fn read_failed(m: &mut Mx<'_, '_, Vm>, file: usize, path: &Path, source: &[u8], 
 fn load_compiled<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, named: &str, path: &Path, compiled: &crate::compiled_lisp::Compiled, values: &RootFrame, out: Out<'_>) -> Result<()> {
     let (outer, history_slot) = m.leaf(path, |vm, path| {
         vm.loader.active.push(path.to_owned());
-        (vm.dynamic.len(), vm.slot("current-load-list"))
+        (vm.mutator.dynamic.len(), vm.slot("current-load-list"))
     });
     if let Err(error) = bind_compiled_load(m, gc.by_ref(), values) {
         crate::threaded::unwind_to(m, gc, outer);
@@ -997,7 +997,7 @@ fn eval_toplevel_form<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, form: &For
     let mark = m.leaf((), |vm, ()| {
         vm.macro_record.expansions = 0;
         vm.mutator.expanded_symbols.clear();
-        vm.propagated_escape = None;
+        vm.mutator.propagated_escape = None;
         vm.set_heading(true);
         vm.enter_load_expansion()
     });
