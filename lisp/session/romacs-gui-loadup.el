@@ -21,6 +21,8 @@
 `string-width' counts one, so every column after it would shift."
   (setq truncate-string-ellipsis "..."))
 
+(require 'romacs-init-load)
+
 (defun romacs-gui-startup ()
   "Take the per-process startup steps of an interactive session on this display.
 The session leaves batch and has *Messages*, finds its per-user directory,
@@ -52,12 +54,7 @@ follows; `romacs-gui-loadup-after-init' ends initialization."
         ;; Romacs's is $XDG_CONFIG_HOME/romacs/, else ~/.config/romacs/, the
         ;; directory of the init file the GUI loads (user_init.rs); loading that
         ;; init sets the same value.
-        (setq user-emacs-directory
-              (let ((config (getenv-internal "XDG_CONFIG_HOME")))
-                (file-name-as-directory
-                 (expand-file-name "romacs" (if (and config (file-name-absolute-p config))
-                                                config
-                                              "~/.config")))))
+        (setq user-emacs-directory (romacs-init-directory))
         (romacs--startup-environment)
         ;; startup.el command-line (startup.el:1600, 1620): window-system
         ;; initialization and `frame-initialize' put the session on its display.
@@ -158,8 +155,7 @@ is a step of the launch screen's progress, until
   (add-hook 'after-load-functions #'romacs-gui-loadup--init-loaded))
 
 ;; The user's init is loaded, and an error that stops it said, by
-;; lisp/session/romacs-init-load.el.
-(require 'romacs-init-load)
+;; lisp/session/romacs-init-load.el (required above).
 
 (defun romacs-gui-loadup-after-init ()
   "What GNU's startup does once the init file has loaded, up to the files.

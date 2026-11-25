@@ -14,6 +14,12 @@
 //! service's `service-relay.sock` and says first who called
 //! (`agents/transport`); a caller's message naming that method is dropped.
 //!
+//! `romacs-relay stdio [--service PATH]` is the far end of an ssh pipe
+//! (`ssh HOST romacs-relay stdio`): it says to `service-relay.sock` that
+//! the caller came over ssh, then copies lines between stdin and stdout and
+//! the service, until either ends.  With the default socket and nothing
+//! answering there, it starts the headless service as a user unit first.
+//!
 //! `romacs-relay connect URL --socket PATH` runs on another machine: each
 //! connection to its local socket is carried over one WebSocket to URL
 //! (`wss://HOST/agents`), so a Romacs there speaks to a Unix socket, as it
@@ -40,7 +46,7 @@ use std::time::{Duration, Instant};
 use tungstenite::protocol::WebSocketConfig;
 use tungstenite::{Message, WebSocket};
 
-const USAGE: &str = "usage: romacs-relay serve [--socket PATH] [--service PATH] [--page FILE]\n       romacs-relay connect URL --socket PATH\n       romacs-relay check [--socket PATH]";
+const USAGE: &str = "usage: romacs-relay serve [--socket PATH] [--service PATH] [--page FILE]\n       romacs-relay stdio [--service PATH]\n       romacs-relay connect URL --socket PATH\n       romacs-relay check [--socket PATH]";
 
 /// The most bytes of one protocol message (Framing), a line or a WebSocket
 /// message alike.
@@ -250,7 +256,7 @@ fn carried(text: &str) -> bool {
 
 /// One line from READER, its newline left out: none at its end, past
 /// `MESSAGE_LIMIT`, or unended (a line cut short is no message).
-fn read_line(reader: &mut BufReader<UnixStream>) -> Option<String> {
+fn read_line(reader: &mut impl BufRead) -> Option<String> {
     let mut line = Vec::new();
     let n = reader.by_ref().take(MESSAGE_LIMIT as u64 + 2).read_until(b'\n', &mut line).ok()?;
     if n == 0 || line.last() != Some(&b'\n') { return None }
@@ -358,6 +364,227 @@ fn serve_one(mut stream: UnixStream, service: &Path, page: Option<&Path>, allowe
         }
         _ => respond(&mut stream, "404 Not Found", "text/plain", b"not found\n"),
     }
+}
+
+/// The headless agents service's user unit, which `stdio` starts.
+const SERVICE_UNIT: &str = "romacs-agents-service";
+
+/// How long `stdio` waits for a service it started to answer.
+const START_WAIT: Duration = Duration::from_secs(30);
+
+/// Who called over ssh, as `stdio` says it to the service: LOGIN, the
+/// account ssh logged into, and the client's address and port from
+/// CONNECTION (`SSH_CONNECTION`: client address, port, server address, port).
+fn ssh_transport(login: &str, connection: Option<&str>) -> Json {
+    let peer = connection.map(|text| text.split_whitespace().take(2).collect::<Vec<_>>().join(" "))
+        .filter(|peer| !peer.is_empty());
+    json!({"jsonrpc": "2.0", "method": "agents/transport", "params": {"via": "ssh", "login": login, "peer": peer}})
+}
+
+/// This process's account name: what sshd sets, else its uid.
+fn login_name() -> String {
+    std::env::var("USER").or_else(|_| std::env::var("LOGNAME")).ok()
+        .or_else(|| own_uid().ok().map(|uid| uid.to_string()))
+        .unwrap_or_default()
+}
+
+/// The variables naming where the service's sockets and state are: given
+/// to the unit as this relay has them, set or unset, so the service it
+/// starts listens where this relay looks, whatever the user manager's own
+/// say.
+const SERVICE_PLACES: [&str; 5] = ["XDG_RUNTIME_DIR", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"];
+
+/// The `romacs-vm-gui` beside this relay, as it was invoked (a `current`
+/// link kept, so the unit runs the build installed when it starts).
+fn vm_beside_relay() -> Result<PathBuf, String> {
+    let invoked = std::env::args_os().next().map(PathBuf::from).filter(|path| path.is_absolute());
+    let relay = match invoked { Some(path) => path, None => std::env::current_exe().map_err(|e| e.to_string())? };
+    let vm = relay.with_file_name("romacs-vm-gui");
+    if !vm.is_file() { return Err(format!("{}: no romacs-vm-gui beside the relay to start the service with", vm.display())) }
+    Ok(vm)
+}
+
+/// The command that starts the headless service on VM as a user unit, with
+/// PLACES, each a name and its value, or none to unset it.
+fn start_command(vm: &Path, places: &[(&str, Option<String>)]) -> Vec<String> {
+    let mut command: Vec<String> = ["systemd-run", "--user", "--quiet", &format!("--unit={SERVICE_UNIT}"), "-p", "Restart=on-failure"]
+        .map(str::to_owned).to_vec();
+    command.extend(places.iter().map(|(name, value)| match value {
+        Some(value) => format!("--setenv={name}={value}"),
+        None => format!("--property=UnsetEnvironment={name}"),
+    }));
+    command.extend([vm.to_string_lossy().into_owned()]);
+    command.extend(["--batch", "-l", "romacs-agent-headless", "-f", "romacs-agent-headless-run"].map(str::to_owned));
+    command
+}
+
+/// A file of this user's alone, already unlinked: what a command writes
+/// to it is read back through the handle, and no helper it leaves holding
+/// it keeps anyone waiting.
+fn scratch_file() -> std::io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let path = std::env::temp_dir().join(format!("romacs-relay-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+    let file = std::fs::OpenOptions::new().read(true).write(true).create_new(true).mode(0o600).open(&path)?;
+    std::fs::remove_file(&path)?;
+    Ok(file)
+}
+
+/// The most bytes of a command's stderr kept.
+const SAID_MOST: usize = 64 * 1024;
+
+/// What COMMAND says on stderr by the time it ends, within `DEADLINE`:
+/// past it, it is killed and reaped, and what it said by then kept (its
+/// first `SAID_MOST` bytes, read at their place, whatever a helper it left
+/// writes after).  With no file to keep it in, it runs saying nothing.
+fn run_within(command: &[String]) -> String {
+    use std::os::unix::fs::FileExt;
+    let said = scratch_file().ok();
+    let stderr = said.as_ref().and_then(|file| file.try_clone().ok())
+        .map_or_else(std::process::Stdio::null, std::process::Stdio::from);
+    let child = std::process::Command::new(&command[0]).args(&command[1..])
+        .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(stderr).spawn();
+    let mut child = match child { Ok(child) => child, Err(error) => return format!("{}: {error}", command[0]) };
+    let begun = Instant::now();
+    let mut late = String::new();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if begun.elapsed() < DEADLINE => std::thread::sleep(Duration::from_millis(20)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                late = format!(" ({}: no answer within {} s)", command[0], DEADLINE.as_secs());
+                break;
+            }
+        }
+    }
+    let mut text = vec![0; SAID_MOST];
+    let n = said.and_then(|file| file.read_at(&mut text, 0).ok()).unwrap_or(0);
+    format!("{}{late}", String::from_utf8_lossy(&text[..n]).trim())
+}
+
+/// Start the headless service's unit; a unit failed before is reset first,
+/// and one there already is left to come up.  What systemd said, for when
+/// the service never answers.
+fn start_service() -> Result<String, String> {
+    let places: Vec<(&str, Option<String>)> = SERVICE_PLACES.iter().map(|name| (*name, std::env::var(name).ok())).collect();
+    let command = start_command(&vm_beside_relay()?, &places);
+    run_within(&["systemctl", "--user", "reset-failed", SERVICE_UNIT].map(str::to_owned));
+    Ok(run_within(&command))
+}
+
+/// A connection to SERVICE, made within LIMIT (a listener whose backlog
+/// is full makes a connect wait), or none.
+fn connect_within(service: &Path, limit: Duration) -> Option<UnixStream> {
+    let service = service.to_owned();
+    within(limit, move || UnixStream::connect(service).ok())
+}
+
+/// A connection to the service at SERVICE: at once, or, when START is
+/// given and nothing answers, after START has started it, waited for
+/// `START_WAIT` at most, what it does told on stderr.
+fn reach_service(service: &Path, start: Option<&dyn Fn() -> Result<String, String>>) -> Result<UnixStream, String> {
+    // One deadline for all of it: each connect gets what is left of it.
+    let begun = Instant::now();
+    let left = || START_WAIT.saturating_sub(begun.elapsed());
+    if let Some(stream) = connect_within(service, DEADLINE.min(left())) { return Ok(stream) }
+    let Some(start) = start else { return Err(format!("{}: no agents service answers there", service.display())) };
+    eprintln!("romacs-relay: no agents service at {}: starting the user unit {SERVICE_UNIT}", service.display());
+    let said = start()?;
+    while !left().is_zero() {
+        if let Some(stream) = connect_within(service, DEADLINE.min(left())) { return Ok(stream) }
+        std::thread::sleep(Duration::from_millis(50).min(left()));
+    }
+    Err(format!("{}: the agents service did not answer within {} s{}; see journalctl --user -u {SERVICE_UNIT}",
+                service.display(), START_WAIT.as_secs(), if said.is_empty() { String::new() } else { format!(" ({said})") }))
+}
+
+/// When a write under way began, in microseconds since its START; 0 while
+/// none is: what tells a peer that stopped reading.
+struct Busy {
+    since: AtomicU64,
+    start: Instant,
+}
+
+impl Busy {
+    fn new() -> Self { Busy { since: AtomicU64::new(0), start: Instant::now() } }
+
+    fn now(&self) -> u64 { u64::try_from(self.start.elapsed().as_micros()).unwrap_or(u64::MAX).max(1) }
+
+    /// Write LINE to TO, marked busy meanwhile.
+    fn write(&self, to: &mut impl Write, line: &str) -> std::io::Result<()> {
+        self.since.store(self.now(), Ordering::Relaxed);
+        let wrote = writeln!(to, "{line}").and_then(|()| to.flush());
+        self.since.store(0, Ordering::Relaxed);
+        wrote
+    }
+
+    /// Whether a write has been under way longer than `DEADLINE`.
+    fn stalled(&self) -> bool {
+        let since = self.since.load(Ordering::Relaxed);
+        since != 0 && self.now().saturating_sub(since) > u64::try_from(DEADLINE.as_micros()).unwrap_or(u64::MAX)
+    }
+}
+
+/// Carry lines between INPUT and OUTPUT, a caller's, and AGENTS, the
+/// service, after TRANSPORT, until any of them ends: INPUT's lines that
+/// `carried` lets through, each to AGENTS, AGENTS' lines each to OUTPUT.
+/// Every line is read bounded, and a line's write taking longer than
+/// `DEADLINE`, either way, ends the bridge with why.  At the end AGENTS is
+/// shut; a thread still reading INPUT is left to the process's exit.
+fn bridge(input: impl Read + Send + 'static, mut output: impl Write + Send + 'static, agents: &UnixStream, transport: &Json)
+          -> Result<(), String> {
+    let (Ok(reading), Ok(mut writing)) = (agents.try_clone(), agents.try_clone()) else { return Err("the service's socket".into()) };
+    if writing.set_write_timeout(Some(DEADLINE)).is_err() || writeln!(writing, "{transport}").is_err() {
+        return Err("the service took not who called".into());
+    }
+    // Each side's end: none at its reader's end, else why its write failed.
+    let (done_tx, done) = mpsc::channel::<Option<String>>();
+    let until_done = done_tx.clone();
+    let (to_service, to_caller) = (Arc::new(Busy::new()), Arc::new(Busy::new()));
+    let busy = to_service.clone();
+    std::thread::spawn(move || {
+        let mut reader = BufReader::new(input);
+        while let Some(line) = read_line(&mut reader) {
+            if !carried(&line) { continue }
+            if let Err(error) = busy.write(&mut writing, &line) {
+                let _ = until_done.send(Some(format!("writing to the service: {error}")));
+                return;
+            }
+        }
+        let _ = until_done.send(None);
+    });
+    let busy = to_caller.clone();
+    std::thread::spawn(move || {
+        let mut reader = BufReader::new(reading);
+        while let Some(line) = read_line(&mut reader) {
+            if let Err(error) = busy.write(&mut output, &line) {
+                let _ = done_tx.send(Some(format!("writing to the caller: {error}")));
+                return;
+            }
+        }
+        let _ = done_tx.send(None);
+    });
+    let ended = loop {
+        match done.recv_timeout(POLL) {
+            Ok(why) => break why,
+            Err(mpsc::RecvTimeoutError::Disconnected) => break None,
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+        }
+        if to_service.stalled() { break Some(format!("the service read nothing for {} s", DEADLINE.as_secs())) }
+        if to_caller.stalled() { break Some(format!("the caller read nothing for {} s", DEADLINE.as_secs())) }
+    };
+    let _ = agents.shutdown(std::net::Shutdown::Both);
+    ended.map_or(Ok(()), Err)
+}
+
+/// Serve one ssh caller on stdin and stdout: the far end of
+/// `ssh HOST romacs-relay stdio`.
+fn stdio(service: &Path, start: Option<&dyn Fn() -> Result<String, String>>) -> Result<(), String> {
+    let agents = reach_service(service, start)?;
+    let connection = std::env::var("SSH_CONNECTION").ok();
+    bridge(std::io::stdin(), std::io::stdout(), &agents, &ssh_transport(&login_name(), connection.as_deref()))
 }
 
 /// This process's user: the owner of its /proc entry.
@@ -554,6 +781,15 @@ fn main() {
             let page = option("--page").map(PathBuf::from);
             (|| serve(&socket.map_or_else(default_socket, Ok)?, service.map_or_else(default_service, Ok)?, page))()
         }
+        "stdio" => {
+            let service = option("--service").map(PathBuf::from);
+            // Only the default socket is started: a named one is the caller's.
+            let start: Option<&dyn Fn() -> Result<String, String>> = if service.is_none() { Some(&start_service) } else { None };
+            // A thread may still be reading stdin: the process ends with the bridge.
+            let result = service.map_or_else(default_service, Ok).and_then(|service| stdio(&service, start));
+            if result.is_ok() { std::process::exit(0) }
+            result
+        }
         "connect" => match (rest.first().cloned(), socket) {
             (Some(url), Some(socket)) => connect(url, &socket),
             _ => Err(USAGE.into()),
@@ -721,6 +957,106 @@ mod tests {
         // A message of two lines ends the connection: neither reaches the service.
         ws.send(Message::text("{\"id\":2,\"method\":\"agents/hello\"}\n{\"id\":3}")).unwrap();
         assert!(said.recv_timeout(Duration::from_millis(500)).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_ssh_caller_is_named_by_its_account_and_address() {
+        let said = ssh_transport("me", Some("192.0.2.7 51234 192.0.2.1 22"));
+        assert_eq!(said["method"], "agents/transport");
+        assert_eq!(said["params"], json!({"via": "ssh", "login": "me", "peer": "192.0.2.7 51234"}));
+        assert_eq!(ssh_transport("me", None)["params"]["peer"], Json::Null);
+    }
+
+    #[test]
+    fn the_service_s_unit_has_the_relay_s_places() {
+        let command = start_command(Path::new("/opt/r/bin/romacs-vm-gui"),
+                                    &[("XDG_RUNTIME_DIR", Some("/run/user/7".to_owned())), ("XDG_STATE_HOME", None)]);
+        let at = |arg: &str| command.iter().position(|a| a == arg).unwrap();
+        assert_eq!(command[..2], ["systemd-run", "--user"]);
+        assert!(command.contains(&"Restart=on-failure".to_owned()));
+        assert!(at("--setenv=XDG_RUNTIME_DIR=/run/user/7") < at("/opt/r/bin/romacs-vm-gui"));
+        // Unset here, unset there: never the user manager's.
+        assert!(at("--property=UnsetEnvironment=XDG_STATE_HOME") < at("/opt/r/bin/romacs-vm-gui"));
+        assert_eq!(command[at("/opt/r/bin/romacs-vm-gui") + 1..],
+                   ["--batch", "-l", "romacs-agent-headless", "-f", "romacs-agent-headless-run"]);
+    }
+
+    #[test]
+    fn a_command_is_given_its_deadline_and_said() {
+        let said = run_within(&["sh", "-c", "echo started >&2"].map(str::to_owned));
+        assert_eq!(said, "started");
+        assert!(run_within(&["/nonexistent/systemctl".to_owned()]).contains("/nonexistent/systemctl"));
+        // Gone, a helper it left holding its stderr: what it said, at once.
+        let begun = Instant::now();
+        assert_eq!(run_within(&["sh", "-c", "(sleep 5 &); echo failed >&2"].map(str::to_owned)), "failed");
+        assert!(begun.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn a_pipe_reaches_the_service_after_its_caller_is_named_and_ends_with_it() {
+        let dir = std::env::temp_dir().join(format!("romacs-relay-stdio-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (service, said) = fake_service(&dir);
+        let agents = reach_service(&service, None).unwrap();
+        let (input, mut client_in) = UnixStream::pair().unwrap();
+        let (output, client_out) = UnixStream::pair().unwrap();
+        let transport = ssh_transport("me", Some("192.0.2.7 51234 192.0.2.1 22"));
+        let bridged = std::thread::spawn(move || bridge(input, output, &agents, &transport).unwrap());
+        let first: Json = serde_json::from_str(&said.recv_timeout(Duration::from_secs(5)).unwrap()).unwrap();
+        assert_eq!(first["params"]["via"], "ssh");
+        // A caller's own transport line is dropped; a request goes on.
+        writeln!(client_in, r#"{{"jsonrpc":"2.0","method":"agents/transport","params":{{"login":"forged"}}}}"#).unwrap();
+        writeln!(client_in, r#"{{"jsonrpc":"2.0","id":1,"method":"agents/hello"}}"#).unwrap();
+        let next: Json = serde_json::from_str(&said.recv_timeout(Duration::from_secs(5)).unwrap()).unwrap();
+        assert_eq!(next["method"], "agents/hello");
+        // The service's lines come out: the transport's echo, the hello's.
+        let mut lines = BufReader::new(client_out).lines();
+        assert!(lines.next().unwrap().unwrap().contains("agents/transport"));
+        assert!(lines.next().unwrap().unwrap().contains("agents/hello"));
+        // The caller's end is the bridge's, and the service's connection's.
+        drop(client_in);
+        bridged.join().unwrap();
+        assert!(said.recv_timeout(Duration::from_millis(500)).is_err());
+        assert!(lines.next().is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_service_ending_ends_the_pipe() {
+        let (agents, service_end) = UnixStream::pair().unwrap();
+        let (input, _client_in) = UnixStream::pair().unwrap();
+        let (output, client_out) = UnixStream::pair().unwrap();
+        let bridged = std::thread::spawn(move || bridge(input, output, &agents, &ssh_transport("me", None)).unwrap());
+        let mut lines = BufReader::new(service_end.try_clone().unwrap()).lines();
+        assert!(lines.next().unwrap().unwrap().contains("agents/transport"));
+        writeln!(&service_end, r#"{{"jsonrpc":"2.0","method":"agents/sessions.changed"}}"#).unwrap();
+        drop(service_end);
+        drop(lines);
+        // The caller's stdin still open: the bridge ends with the service.
+        bridged.join().unwrap();
+        let out: Vec<String> = BufReader::new(client_out).lines().map_while(Result::ok).collect();
+        assert_eq!(out.len(), 1);
+    }
+
+    #[test]
+    fn a_service_not_answering_is_started_and_waited_for() {
+        let dir = std::env::temp_dir().join(format!("romacs-relay-start-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let service = dir.join("service-relay.sock");
+        // A named socket is never started.
+        assert!(reach_service(&service, None).unwrap_err().contains("no agents service"));
+        let socket = service.clone();
+        let start = move || -> Result<String, String> {
+            let socket = socket.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(200));
+                let listener = UnixListener::bind(&socket).unwrap();
+                let _ = listener.accept();
+            });
+            Ok(String::new())
+        };
+        assert!(reach_service(&service, Some(&start)).is_ok());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

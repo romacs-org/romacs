@@ -501,6 +501,24 @@ session ID in /p/, delegated by PARENT, its turns done through DONE."
       (should-not (process-get unnamed 'lines))
       (delete-process named))))
 
+(ert-deftest romacs-agent-service-binds-an-ssh-caller ()
+  ;; `romacs-relay stdio' says the caller came over ssh; a via the service
+  ;; does not know closes the connection.
+  (romacs-agent-service-tests--with
+    (mk "listed" 'idle)
+    (romacs-agent-service-start socket)
+    (let* ((relay (expand-file-name "service-relay.sock" (file-name-directory socket)))
+           (ssh (romacs-agent-service-tests--raw relay))
+           (other (romacs-agent-service-tests--raw relay)))
+      (process-send-string ssh "{\"jsonrpc\":\"2.0\",\"method\":\"agents/transport\",\"params\":{\"via\":\"ssh\",\"login\":\"me\",\"peer\":\"192.0.2.7 51234\"}}\n")
+      (process-send-string ssh "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"agents/hello\",\"params\":{\"protocol\":\"romacs-agents\",\"version\":[1,0]}}\n")
+      (should (wait (process-get ssh 'lines)))
+      (should (equal (json-serialize (gethash "identity" (gethash "result" (car (process-get ssh 'lines)))))
+                     "{\"via\":\"ssh\",\"login\":\"me\",\"peer\":\"192.0.2.7 51234\"}"))
+      (process-send-string other "{\"jsonrpc\":\"2.0\",\"method\":\"agents/transport\",\"params\":{\"via\":\"local\",\"login\":\"me\"}}\n")
+      (should (wait (not (process-live-p other))))
+      (delete-process ssh))))
+
 ;;; History
 
 (defun romacs-agent-service-tests--line (seq key value)
@@ -750,6 +768,147 @@ a state root of its own, and a service of its own on `socket'."
         (romacs-agent-remote-disconnect)
         (kill-buffer local)
         (when remote (kill-buffer remote))))))
+
+(ert-deftest romacs-agent-client-speaks-over-a-command-s-pipes ()
+  ;; A command's pipes carry the protocol as a socket does (`ssh HOST
+  ;; romacs-relay stdio'): what it says on stderr stays out of the stream,
+  ;; and its exit ends the connection.
+  (let* ((stderr (generate-new-buffer " *rsv-stderr*")) (ended nil)
+         (romacs-agent-client-ended-functions (list (lambda (client) (setq ended client))))
+         (client (romacs-agent-client-connect
+                  (list "sh" "-c" (concat "echo 'Warning: Permanently added' >&2; read hello; "
+                                          "echo '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":"
+                                          "{\"version\":[1,1],\"server\":{\"generation\":\"g\"}}}'; read watch"))
+                  stderr)))
+    (unwind-protect
+        (let ((deadline (+ (float-time) 5)))
+          (while (and (not ended) (< (float-time) deadline)) (accept-process-output nil 0.02))
+          (should (eq ended client))
+          (should (equal (romacs-agent-client-minor client) 1))
+          (should (string-search "Warning" (with-current-buffer stderr (buffer-string)))))
+      (romacs-agent-client-close client)
+      (kill-buffer stderr))))
+
+(ert-deftest romacs-agent-remote-runs-ssh-as-a-pipe ()
+  ;; No pty, no prompt, a dead link found, a master connection reused; the
+  ;; remote relay as the host names it, else the default.
+  (require 'romacs-agent-remote)
+  (let ((romacs-agent-remote-ssh "ssh") (romacs-agent-remote-relay-command "romacs-relay"))
+    (should (equal (romacs-agent-remote--ssh-command '(:ssh "me@box" :relay "~/bin/romacs-relay") "/run/r/ssh")
+                   (append '("ssh") romacs-agent-remote--ssh-options romacs-agent-remote--master-options
+                           '("-o" "ControlPath=/run/r/ssh/%C" "me@box" "~/bin/romacs-relay" "stdio"))))
+    (should (equal (last (romacs-agent-remote--ssh-command '(:ssh "box") "/run/r/ssh") 2) '("romacs-relay" "stdio")))
+    ;; No place for a master's socket: none.
+    (should (member "ControlPath=none" (romacs-agent-remote--ssh-command '(:ssh "box") nil)))
+    (let ((romacs-agent-remote--socket-path-most 20)) (should-not (romacs-agent-remote--control-dir)))
+    (should (member "BatchMode=yes" romacs-agent-remote--ssh-options))
+    (should (member "-T" romacs-agent-remote--ssh-options))))
+
+(ert-deftest romacs-agent-remote-a-machine-not-reached-is-tried-again ()
+  ;; No ssh to run, or a service that never answers hello: each is a
+  ;; connection that ended, tried again later, nothing left running.
+  (require 'romacs-agent-remote)
+  (let* ((romacs-agent-remote--source nil) (romacs-agent-remote--sources (make-hash-table :test #'equal))
+         (romacs-agent-remote-hosts '(("far" :ssh "far"))) (romacs-agent-remote--answer-within 0.3)
+         (inhibit-message t) (command '("/nonexistent/ssh"))
+         (stderr-pipes (lambda () (seq-filter (lambda (p) (string-prefix-p "romacs-agent-client stderr" (process-name p)))
+                                              (process-list))))
+         (before (length (funcall stderr-pipes)))
+         (source nil))
+    (cl-letf (((symbol-function 'romacs-agent-remote--ssh-command) (lambda (_place _control) command)))
+      (unwind-protect
+          (progn
+            (setq source (romacs-agent-remote-connect nil "far"))
+            (should (timerp (romacs-agent-remote-retry source)))
+            (should (= (length (funcall stderr-pipes)) before))
+            ;; Reached, but no answer: closed once its time is up.
+            (setq command '("sleep" "30"))
+            (romacs-agent-remote--open source)
+            (let ((client (romacs-agent-remote-client source)))
+              (should (romacs-agent-client-live-p client))
+              (let ((deadline (+ (float-time) 5)))
+                (while (and (romacs-agent-client-live-p client) (< (float-time) deadline))
+                  (accept-process-output nil 0.05)))
+              (should-not (romacs-agent-client-live-p client))
+              (should (timerp (romacs-agent-remote-retry source)))))
+        (romacs-agent-remote-disconnect source)))))
+
+(ert-deftest romacs-agent-remote-a-name-is-its-latest-machine-s ()
+  ;; A name connected again at a new place is a new machine's; letting go
+  ;; of an old source under it lets go of nothing newer.
+  (require 'romacs-agent-remote)
+  (let* ((romacs-agent-remote--sources (make-hash-table :test #'equal))
+         (romacs-agent-remote--source nil)
+         (old (romacs-agent-remote--host-source "n" "/a")))
+    (should (eq (romacs-agent-remote--host-source "n" "/a") old))
+    ;; Somewhere else: another machine's, the old one let go of.
+    (should-not (eq (romacs-agent-remote--host-source "n" "/b") old))
+    (should (equal (romacs-agent-remote-place (gethash "n" romacs-agent-remote--sources)) "/b"))
+    ;; A place edited where it came from is another place too: its value
+    ;; replaced, or its string changed in place.
+    (let* ((place (list :ssh (copy-sequence "a"))) (kept (romacs-agent-remote--host-source "p" place)))
+      (setf (plist-get place :ssh) "b")
+      (should-not (eq (romacs-agent-remote--host-source "p" place) kept)))
+    (let* ((place (list :ssh (copy-sequence "a"))) (kept (romacs-agent-remote--host-source "q" place)))
+      (aset (plist-get place :ssh) 0 ?c)
+      (should-not (eq (romacs-agent-remote--host-source "q" place) kept)))
+    (romacs-agent-remote-disconnect old)
+    (let ((new (romacs-agent-remote--host-source "n" "/c")))
+      (romacs-agent-remote-disconnect old)
+      (should (eq (gethash "n" romacs-agent-remote--sources) new)))))
+
+(ert-deftest romacs-agent-service-several-machines-keep-their-own-sessions ()
+  ;; Two machines connected at once, each its own client, mirrors and
+  ;; chats: a session id they share is two sessions here.
+  (require 'romacs-agent-remote)
+  (romacs-agent-service-tests--with
+    (mk "same" 'running)
+    (romacs-agent-service-start socket)
+    (let ((romacs-agent-remote--source nil) (romacs-agent-remote--sources (make-hash-table :test #'equal))
+          (a nil) (b nil))
+      (unwind-protect
+          (progn
+            (setq a (romacs-agent-remote-connect socket "a") b (romacs-agent-remote-connect socket "b"))
+            (should (eq romacs-agent-remote--source b))
+            (should (wait (and (romacs-agent-client-revision (romacs-agent-remote-client a))
+                               (romacs-agent-client-revision (romacs-agent-remote-client b)))))
+            (should (eq (romacs-agent-remote--of (romacs-agent-remote-client a)) a))
+            (should (eq (romacs-agent-remote--of (romacs-agent-remote-client b)) b))
+            (let ((mirror-a (romacs-agent-board-source-live a "same"))
+                  (mirror-b (romacs-agent-board-source-live b "same")))
+              (should (and mirror-a mirror-b (not (eq mirror-a mirror-b)))))
+            (should-not (eq (romacs-agent-log-source-chats a) (romacs-agent-log-source-chats b))))
+        (when a (romacs-agent-remote-disconnect a))
+        (when b (romacs-agent-remote-disconnect b))))))
+
+(ert-deftest romacs-agent-service-a-remote-machine-is-connected-again ()
+  ;; Its connection ended, a machine kept is connected again once its
+  ;; service answers; let go, it is not.
+  (require 'romacs-agent-remote)
+  (romacs-agent-service-tests--with
+    (mk "busy" 'running)
+    (romacs-agent-service-start socket)
+    (let* ((romacs-agent-remote--source nil) (romacs-agent-remote--sources (make-hash-table :test #'equal))
+           (inhibit-message t)
+           (source (romacs-agent-remote-connect socket))
+           (first (romacs-agent-remote-client source)))
+      (unwind-protect
+          (progn
+            (should (wait (romacs-agent-client-revision first)))
+            (romacs-agent-service-stop)
+            (should (wait (not (romacs-agent-client-live-p first))))
+            (should (timerp (romacs-agent-remote-retry source)))
+            (romacs-agent-service-start socket)
+            (let ((deadline (+ (float-time) 8)))
+              (while (and (not (let ((client (romacs-agent-remote-client source)))
+                                 (and client (not (eq client first)) (romacs-agent-client-revision client))))
+                          (< (float-time) deadline))
+                (accept-process-output nil 0.05)))
+            (should (gethash "busy" (romacs-agent-client-rows (romacs-agent-remote-client source))))
+            (romacs-agent-remote-disconnect source)
+            (should-not (gethash socket romacs-agent-remote--sources))
+            (should-not (memq (romacs-agent-remote-retry source) timer-list)))
+        (romacs-agent-remote-disconnect source)))))
 
 (ert-deftest romacs-agent-service-a-remote-chat-shows-what-waits ()
   ;; A question the session waits on when its remote chat opens is drawn

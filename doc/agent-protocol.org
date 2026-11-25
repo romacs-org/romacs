@@ -4,8 +4,9 @@ Romacs runs coding agents as sessions.  This document designs the one
 interface every client of those sessions uses: the editor on the machine
 that runs them, an editor on another machine, and a web page on a phone.
 It states the protocol as it is today, decides where the new one is
-served, specifies version 1, the relay that makes it reachable over a
-tailnet, the clients, and the order of the work.  Status: slice 0 built.
+served, specifies version 1, the transports that carry it (a socket,
+ssh, and a relay over a tailnet), the clients, and the order of the
+work.  Status: slice 0 built.
 
 * Requirements
 
@@ -23,8 +24,8 @@ tailnet, the clients, and the order of the work.  Status: slice 0 built.
 - *Pending first.*  Pending approvals and questions are first-class
   protocol state, shown prominently by every client.  Nothing is answered
   on the user's behalf unseen.
-- *Transport-agnostic.*  The Romacs client is the same over a local socket
-  and over the relay.
+- *Transport-agnostic.*  The Romacs client is the same over a local
+  socket, over ssh and over the relay (Transports).
 - *Never block.*  Nothing blocks an editor's main VM on the network (the
   one-second rule).  Slow links get bounded transfers and resumable
   streams.
@@ -276,8 +277,10 @@ started by older builds keep working.
   - ="capabilities":[...]=.
 - *Welcome.* The reply:
   - ={"version":[1,M]}=, with M the lower of the two minors;
-  - ="server":{"host","build","generation"}=;
-  - ="identity":{"via":"local"|"tailnet","login"}=;
+  - ="server":{"host","build","generation","init_failure"}=, the last
+    what failed as the service's process loaded its user's init, or
+    null;
+  - ="identity":{"via":"local"|"tailnet"|"ssh","login"}=;
   - ="capabilities":[...]=, =capabilities= being the intersection.
 - *Before the hello,* every other method is refused (=-32002=, not
   initialized).
@@ -772,7 +775,132 @@ holds no agent logic.
 - When the WebSocket drops, it closes the client connection.  The client
   says hello again and resumes, so it never keeps a dead subscription.
 - The Romacs client therefore only ever opens a Unix socket, the local
-  service's or a bridge's: there is no WebSocket or TLS in Lisp.
+  service's or a bridge's, or an ssh pipe (Transports): there is no
+  WebSocket or TLS in Lisp.
+
+* Transports
+One protocol, several transports.  Every transport carries the same
+JSON-RPC lines, unchanged; nothing in the protocol depends on which one
+carries them.  The service learns who called only from the connection it
+was accepted on and, on =service-relay.sock=, from =agents/transport=.
+
+| Transport  | Who uses it               | Reaches the service at | Identity                 |
+|------------+---------------------------+------------------------+--------------------------|
+| socket     | an editor on this machine | =service.sock=         | =local=, by the listener |
+| ssh stdio  | Romacs on another machine | =service-relay.sock=   | =ssh=, said by the relay |
+| relay (WS) | the phone page            | =service-relay.sock=   | =tailnet=, said by relay |
+
+** SSH: =romacs-relay stdio=
+- *The pipe.*  A client runs =ssh HOST RELAY stdio= and speaks the
+  protocol's lines on the ssh process's stdin and stdout.  No port is
+  opened and no token is made: SSH is the authentication, as it is for a
+  shell.  RELAY is the far side's =romacs-relay=, by its path there (no
+  login shell is assumed to find it).
+- *On the far side*, =romacs-relay stdio [--service PATH]= connects to
+  =service-relay.sock= and says first
+  ={"jsonrpc":"2.0","method":"agents/transport","params":{"via":"ssh","login":USER,"peer":"ADDR PORT"}}=,
+  USER being the account ssh logged into and the peer the client's
+  address and port from =SSH_CONNECTION=.  It then copies stdin's lines
+  to the service and the service's lines to stdout.  It drops a client
+  line that names the transport, reads every line bounded (1 MiB), gives
+  each write a deadline, and exits when either side ends: a dead link
+  is EOF to both.
+- *Starting the service.*  When nothing answers at the socket, the relay
+  starts the headless service (below) and waits for it, 30 s at most,
+  saying on stderr what it waits for and why it gave up.
+- *The client's side.*  The pipe is a process, never a pty.  Its
+  coding is binary; ssh's stderr goes to a buffer of its own, so a
+  warning never enters the stream.  ssh runs with =BatchMode=yes= (it
+  never prompts), =ServerAliveInterval=15= and =ServerAliveCountMax=3=
+  (a dead link ends within a minute), and a =ControlMaster= with
+  =ControlPersist=, so a reconnect costs a new channel, not a new
+  handshake.  The master's socket is in the agents' runtime directory;
+  where its name would not fit a socket's, there is no master.  When the
+  pipe ends the client connects again, after 0.25 s, doubled each time
+  up to 30 s until the machine answers; it says hello and watches the
+  list and the sessions it follows afresh.  A service that has not
+  listed the sessions 20 s after the connection is made, or that leaves
+  a check unanswered 20 s, is given up on the same way: a live ssh link
+  does not mean a live service.  The check is a request any service
+  answers at once; =agents/ping=, an unknown method, is refused at once.  ssh's
+  =RemoteCommand= is set to none, so a host's configuration cannot
+  replace the relay; a master's socket name with a space or a =%= is
+  no master.
+- *Measured* (build 28e8fac9 with this branch's Lisp, a Ryzen 9 5950X
+  client, an i5-2520M over a tailnet with an 8.5 ms ping, a fake session
+  in each private service):
+
+  | ssh to       | connect, cold | connect, master | round trip p50    | events/s     | again, by itself |
+  |--------------+---------------+-----------------+-------------------+--------------+------------------|
+  | localhost    | 0.27-0.42 s   | 10-14 ms        | 0.24 ms / 1.3-1.5 | 8,100-16,700 | 261-264 ms       |
+  | the i5-2520M | 0.28-0.38 s   | 25-41 ms        | 8.7 ms / 8.2-9.2  | 4,300-4,900  | 282-291 ms       |
+
+  A connect is ssh's, then hello and the list.  A round trip is a
+  request the service refuses at once: a Python probe's, then the Romacs
+  client's (ms).  Events are 2,000 units of 400 bytes to the Romacs
+  client, as fast as the service raises them: they measure the service
+  more than the pipe (8,100 with the machine under load).  Again is from
+  a pipe killed to the list watched, 0.25 s of it the wait.  Not
+  explained: a connect to the i5-2520M took 2.2 to 5.7 s three times in
+  some twenty, twice the second through a new master; plain ssh's first
+  connection there took 2.5 s once.  Its service answers a hello in 5 ms
+  on the machine itself.
+
+** The headless service
+- *Its entry.*  =romacs-vm-gui --batch -l romacs-agent-headless -f
+  romacs-agent-headless-run= loads the user's init files (a batch start
+  reads none, and the service must run the user's approval policy and
+  providers), serves =service.sock= and =service-relay.sock=, restores
+  the machine's sessions and attaches to their hosts, then runs its
+  timers and connections until it is stopped.  It makes no frame.  A
+  batch start runs =after-init-hook= before any of this, so the entry
+  ends initialization again once the init has loaded, running only what
+  the init and its packages put on that hook.  A step that fails is
+  said on stderr and in hello's =init_failure=, and serving goes on.
+- *Its unit.*  It runs as the transient user unit
+  =romacs-agents-service= (=systemd-run --user
+  --unit=romacs-agents-service -p Restart=on-failure=), started by
+  =romacs-relay stdio= with the =romacs-vm-gui= beside the relay and the
+  relay's =XDG_*= directories, so it listens where the relay looks.
+  Each systemd command and each connect is bounded too.
+  Hosts are in units of their own (When the service crashes or
+  restarts), so they outlive it, but for a notes-only host, which the
+  service still starts with =setsid= in its own cgroup (slice S7 takes
+  that path out).  Without lingering
+  (=loginctl enable-linger=), the user's manager, and with it the
+  service and the hosts, ends with the user's last login.
+- *For a machine no editor owns.*  On a machine whose editor holds the
+  sessions, the editor keeps them until the authority handoff (slice S6)
+  moves them to the service: a host takes one attachment at a time, so
+  the headless service's attach to it is refused meanwhile.
+- *Startup:* 1.4 s to serving, 160 MB RSS, in a private HOME on the
+  Ryzen 9 5950X; 1.2 s of it is =(require 'romacs-agent-service)=,
+  nearly all =romacs-agent= and the 68 files it loads.  On the i5-2520M
+  (2011), 4.5 s cold; through ssh, from the relay's start to the hello's
+  reply, 3.3 s cold and 1.3 s warm.  Build 28e8fac9 for both.
+
+** Editor tools on another machine
+An agent's editor tools act on the Romacs that runs its session: the
+remote machine's service, which is a Romacs.  A viewer's GUI is never
+acted on unless its user attaches it to that session explicitly.  A
+connection on =service-relay.sock=, ssh or tailnet, never registers as
+an editor.
+
+** Several hosts
+- A client may hold connections to several services at once, one a
+  host.  It names each by the host's name in its list
+  (=romacs-agent-remote-hosts=): a name, and an ssh destination with
+  the far side's relay path, or a relay URL.
+- A session id is unique only within its service.  Everything a client
+  keeps of a session, its mirror, its chat and its board row, is keyed
+  by host and id together.  The mirror and the chat are; the board's
+  caches (a row's summary, a thread's fold) are still keyed by id alone,
+  until the board draws several hosts.
+- The board shows one host's sessions at a time (=romacs-agents-remote=
+  asks which); every host stays connected.  Hosts above projects in one
+  board (hosts, then each host's projects, then their threads) needs the
+  board to draw several sources at once, its rows keyed by host and id:
+  to come, over the board's projects and threads.
 
 * Clients
 
@@ -800,9 +928,9 @@ moves to the client model's accessors.
 - No UI reads the service's structs directly at any stage.
 
 ** Romacs on another machine
-=romacs-agent-remote-host= names the machine.  The editor:
-- starts =romacs-relay connect= as a subprocess;
-- opens its socket;
+=romacs-agent-remote-hosts= names the machines.  For each, the editor:
+- runs =ssh HOST RELAY stdio= (Transports), or starts
+  =romacs-relay connect= to a relay URL and opens its socket;
 - draws the board and chats as it does locally.
 
 ** The phone page
