@@ -55,25 +55,17 @@ type Slot = (Key, Option<u32>);
 
 /// What a node keeps, under the context slot it was made in: a parse
 /// summary, or a forward list span's excursion or exact summary, none
-/// where the span has none, with the stamp of the list scan run that made
-/// it (`forward`).
+/// where the span has none (`forward`).
 #[derive(Clone, Debug, romacs_snapshot::Snapshot)]
 enum Entry {
     Parse(u8, Slot, Span),
-    Excursion(u8, u32, Mode, Option<Excursion>),
-    Exact(u8, u32, list_summary::Key, Option<Exact>),
+    Excursion(u8, Mode, Option<Excursion>),
+    Exact(u8, list_summary::Key, Option<Exact>),
 }
 impl Entry {
     fn context(&self) -> u8 {
         match self {
             Self::Parse(context, ..) | Self::Excursion(context, ..) | Self::Exact(context, ..) => *context,
-        }
-    }
-    /// The stamp of the list scan run that made it.
-    fn stamp(&self) -> Option<u32> {
-        match self {
-            Self::Parse(..) => None,
-            Self::Excursion(_, stamp, ..) | Self::Exact(_, stamp, ..) => Some(*stamp),
         }
     }
     /// Its kind, as `Stats::evictions' counts them.
@@ -272,15 +264,11 @@ pub(crate) struct SyntaxIndex {
     contexts: [Option<(Context, u64)>; CONTEXTS],
     tick: u64,
     current: Option<u8>,
-    /// The stamp of the list scan run now, and of runs a poll stopped,
-    /// whose entries are not seen (`forward`).
-    stamp: u32,
-    aborted: Vec<u32>,
     pub(crate) stats: Stats,
 }
 impl Default for SyntaxIndex {
     fn default() -> Self {
-        Self { leaf: LEAF, root: None, contexts: Default::default(), tick: 0, current: None, stamp: 0, aborted: Vec::new(),
+        Self { leaf: LEAF, root: None, contexts: Default::default(), tick: 0, current: None,
                stats: Stats::default() }
     }
 }
@@ -289,7 +277,7 @@ impl SyntaxIndex {
     /// A copy with its summaries, which `Clone` does not keep.
     pub(crate) fn clone_for_test(&self) -> Self {
         Self { leaf: self.leaf, root: self.root.clone(), contexts: self.contexts.clone(), tick: self.tick, current: self.current,
-               stamp: self.stamp, aborted: self.aborted.clone(), stats: self.stats }
+               stats: self.stats }
     }
 }
 impl Clone for SyntaxIndex {

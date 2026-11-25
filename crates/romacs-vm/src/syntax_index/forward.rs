@@ -19,10 +19,10 @@
 //!
 //! The loop asks the quit probe on entry and after every fold; the scanner
 //! reading a leaf polls as it always does, and a summary's scan, at most a
-//! leaf or two, does not. A run that stops for a poll keeps the scan where
-//! its last fold or read left it and publishes nothing: the entries it made
-//! are not seen again and its counts are dropped. A run that ends, or
-//! stops for Lisp, keeps them.
+//! leaf or two, does not. Every probe is a commit point: no mutation of
+//! the index is under way when one is asked, so what a run built before a
+//! stop for a poll stays, a derived cache made from the real text, and the
+//! scan goes on, if nothing quits, where its last fold or read left it.
 use super::*;
 use crate::syntax_scan::{Halt, Pos, Scan, Stopped};
 use crate::syntax_summary::lists::{Flags, Key as ExactKey};
@@ -38,25 +38,14 @@ struct Segment {
     frontier: bool,
 }
 
-/// Runs whose entries are not to be seen, at most this many before they
-/// are swept out of the tree.
-const ABORTED: usize = 16;
 /// Leaves a scan makes ready at once from where it is: what it costs the
 /// partition stays within a few leaves of what it reads.
 const READY: usize = 16;
 
-/// How list entries are looked up and made in one run: its context slot,
-/// the run's stamp, and the stamps of runs a poll stopped.
+/// How list entries are looked up and made in one run: its context slot.
 #[derive(Clone, Copy)]
-struct Look<'a> {
+struct Look {
     context: u8,
-    stamp: u32,
-    aborted: &'a [u32],
-}
-impl Look<'_> {
-    fn sees(self, owner: u8, stamp: u32) -> bool {
-        owner == self.context && !self.aborted.contains(&stamp)
-    }
 }
 
 impl SyntaxIndex {
@@ -79,12 +68,10 @@ impl SyntaxIndex {
         if scan.count <= 0 {
             return scanner.lists(scan, sexpflag);
         }
-        self.stamp = self.stamp.wrapping_add(1);
-        let before = self.stats;
         let mut segment = Segment::default();
         let run = self.drive(scanner, (chars, context), scan, sexpflag, &mut segment);
         if matches!(run, Err(Stopped { halt: Halt::Poll, .. })) {
-            self.abort(before);
+            self.stats.list_declined[Decline::Quit as usize] += 1;
         } else if segment.folds > 0 {
             self.stats.list_served += 1;
         } else {
@@ -92,24 +79,6 @@ impl SyntaxIndex {
             self.stats.list_declined[decline as usize] += 1;
         }
         run
-    }
-
-    /// The run stamped now stopped for a poll: its entries are not seen
-    /// again and the stats are as they were BEFORE it, but for the quit.
-    fn abort(&mut self, before: Stats) {
-        self.stats = before;
-        self.stats.list_declined[Decline::Quit as usize] += 1;
-        self.aborted.push(self.stamp);
-        if self.aborted.len() > ABORTED {
-            fn sweep(node: &mut Node, aborted: &[u32]) {
-                node.spans.retain(|entry| entry.stamp().is_none_or(|stamp| !aborted.contains(&stamp)));
-                node.children.iter_mut().for_each(|child| sweep(child, aborted));
-            }
-            if let Some(root) = &mut self.root {
-                sweep(root, &self.aborted);
-            }
-            self.aborted.clear();
-        }
     }
 
     /// The loop: fold at each leaf boundary, else read to the next one.
@@ -205,8 +174,8 @@ impl SyntaxIndex {
     /// first, as at the scanner's update.
     fn fold_from<T: Text>(&mut self, scanner: &mut Scanner<'_, T>, context: u8, scan: &mut Scan, range: (usize, usize),
                           flags: Flags, segment: &mut Segment) -> (usize, bool) {
-        let Self { root: Some(root), stats, aborted, stamp, .. } = self else { unreachable!("prepared") };
-        let look = Look { context, stamp: *stamp, aborted: aborted.as_slice() };
+        let Self { root: Some(root), stats, .. } = self else { unreachable!("prepared") };
+        let look = Look { context };
         let (mut polled, mut ended) = (false, false);
         let reached = Self::fold(root, 0, range, &mut |node, start| {
             if ended {
@@ -228,7 +197,7 @@ impl SyntaxIndex {
     /// Carry SCAN across NODE, at offset START, on its excursion or its
     /// exact summary, where one qualifies, a leaf's made now where it has
     /// none: whether it did.
-    fn fold_node<T: Text>(stats: &mut Stats, look: Look<'_>, scanner: &mut Scanner<'_, T>, (node, start): (&mut Node, usize),
+    fn fold_node<T: Text>(stats: &mut Stats, look: Look, scanner: &mut Scanner<'_, T>, (node, start): (&mut Node, usize),
                           scan: &mut Scan, flags: Flags) -> bool {
         let Some(mode) = Mode::of(scan, flags) else { return false };
         let key = ExactKey::of(scan, mode);
@@ -271,7 +240,7 @@ impl SyntaxIndex {
     /// exact one, and the excursion of KEY's mode where the scan is one and
     /// the leaf keeps none for that mode. False, nothing kept, where a quit
     /// came due during the scan.
-    fn build_leaf<T: Text>(stats: &mut Stats, look: Look<'_>, scanner: &mut Scanner<'_, T>, (node, from, end): (&mut Node, Pos, Pos),
+    fn build_leaf<T: Text>(stats: &mut Stats, look: Look, scanner: &mut Scanner<'_, T>, (node, from, end): (&mut Node, Pos, Pos),
                            key: ExactKey) -> bool {
         let Some(made) = list_summary::summarize(scanner, from, end.char, key) else { return false };
         stats.leaf_scans += 1;
@@ -279,9 +248,9 @@ impl SyntaxIndex {
         if let Some(excursion) = excursion
             && Self::excursion(stats, look, &mut *node, key.mode()).is_none()
         {
-            Self::remember(stats, node, Entry::Excursion(look.context, look.stamp, key.mode(), Some(excursion)));
+            Self::remember(stats, node, Entry::Excursion(look.context, key.mode(), Some(excursion)));
         }
-        Self::remember(stats, node, Entry::Exact(look.context, look.stamp, key, exact));
+        Self::remember(stats, node, Entry::Exact(look.context, key, exact));
         true
     }
 
@@ -294,9 +263,9 @@ impl SyntaxIndex {
     /// NODE's excursion in MODE: a kept one, or an inner node's composed
     /// from what its children keep. Some(None) where the span has none;
     /// None where it is not known without reading a leaf.
-    fn excursion(stats: &mut Stats, look: Look<'_>, node: &mut Node, mode: Mode) -> Option<Option<Excursion>> {
+    fn excursion(stats: &mut Stats, look: Look, node: &mut Node, mode: Mode) -> Option<Option<Excursion>> {
         let kept = node.spans.iter().position(|entry| {
-            matches!(entry, Entry::Excursion(owner, stamp, kept, _) if look.sees(*owner, *stamp) && *kept == mode)
+            matches!(entry, Entry::Excursion(owner, kept, _) if *owner == look.context && *kept == mode)
         });
         if let Some(at) = kept {
             let at = node.hit(at);
@@ -315,7 +284,7 @@ impl SyntaxIndex {
             }));
             entry = next.exit();
         }
-        Self::remember(stats, node, Entry::Excursion(look.context, look.stamp, mode, whole));
+        Self::remember(stats, node, Entry::Excursion(look.context, mode, whole));
         let Entry::Excursion(.., span) = &node.spans[0] else { unreachable!("remembered") };
         Some(*span)
     }
@@ -324,9 +293,9 @@ impl SyntaxIndex {
     /// mode where that fits KEY's depth, or an inner node's composed from
     /// its children's. Some(None) where the span has none; None where it is
     /// not known without reading a leaf.
-    fn exact(stats: &mut Stats, look: Look<'_>, (node, start): (&mut Node, usize), key: ExactKey) -> Option<Option<Exact>> {
+    fn exact(stats: &mut Stats, look: Look, (node, start): (&mut Node, usize), key: ExactKey) -> Option<Option<Exact>> {
         let kept = node.spans.iter().position(|entry| {
-            matches!(entry, Entry::Exact(owner, stamp, kept, _) if look.sees(*owner, *stamp) && *kept == key)
+            matches!(entry, Entry::Exact(owner, kept, _) if *owner == look.context && *kept == key)
         });
         if let Some(at) = kept {
             let at = node.hit(at);
@@ -358,14 +327,14 @@ impl SyntaxIndex {
             entry = next.exit();
             at += chars;
         }
-        Self::remember(stats, node, Entry::Exact(look.context, look.stamp, key, whole));
+        Self::remember(stats, node, Entry::Exact(look.context, key, whole));
         Some(whole)
     }
 
     /// NODE's kept excursion in MODE, looked at without moving it.
-    fn kept_excursion(look: Look<'_>, node: &Node, mode: Mode) -> Option<Option<Excursion>> {
+    fn kept_excursion(look: Look, node: &Node, mode: Mode) -> Option<Option<Excursion>> {
         node.spans.iter().find_map(|entry| match entry {
-            Entry::Excursion(owner, stamp, kept, span) if look.sees(*owner, *stamp) && *kept == mode => Some(*span),
+            Entry::Excursion(owner, kept, span) if *owner == look.context && *kept == mode => Some(*span),
             _ => None,
         })
     }

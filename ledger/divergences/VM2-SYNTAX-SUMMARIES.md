@@ -41,7 +41,8 @@ characters they held in `:skipped` and, of those, the ones folded on
 summaries made before the call in `:reused`, and `:evictions`,
 `:context-switches`, `:context-evictions`, `:context-invalidations` and
 `:unsafe-cuts`. Quit is asked on entry, before the scan's setup, and
-after every fold, as GNU's `maybe_quit` before a scan; a run a poll stops publishes nothing (its
-summaries are not used again and its counts are dropped) and goes on, if
-nothing quits, where it stopped.
+after every fold, as GNU's `maybe_quit` before a scan; every probe is a commit point: no change to the index is under way when
+one is asked, so the summaries a run made before a poll stops it stay (a
+derived cache made from the real text, as a completed run would leave
+it), and the scan goes on, if nothing quits, where it stopped.
 The summary inhibition and checking options also apply to this path.
