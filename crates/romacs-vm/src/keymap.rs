@@ -476,17 +476,32 @@ impl Vm {
         }
     }
     /// KEY's event at INDEX, read from KEY as it is now.  In a string, AT is
-    /// the byte of that event when known (a reader going forward with no
-    /// callback since its last read), and is left at the next event's.
+    /// the byte of that event when the reader knows it, and is left at the
+    /// next event's: a reader keeps it while no Lisp runs, and for an
+    /// executable image's string, which never changes, across callbacks.
+    /// Unknown, it is found through the string's own character/byte
+    /// position (`str_view_from`, GNU's `string_char_to_byte`), which costs
+    /// the characters stepped since its last use, not INDEX.
     fn key_event_at(&mut self, key: Value, index: usize, at: &mut Option<usize>) -> Result<Decoded> {
-        let (event, bytes) = if let Some(view) = self.str_view(key) {
+        let short = "key sequence shorter than its length";
+        let (event, bytes) = if Self::image_string(key) {
+            // An image's literal is multibyte unless ASCII, where the two read alike.
+            let text = self.string_value(key)?.as_bytes();
+            let start = at.unwrap_or_else(|| char_byte(text, index));
+            let (c, width) = char_at(text, start).ok_or(short)?;
+            *at = Some(start + width);
+            (Value::integer(i64::from(c))?, false)
+        } else if let Some(view) = self.str_view(key) {
             let (text, multibyte) = (view.bytes(), view.is_multibyte());
-            let start = match *at { Some(byte) => byte, None => char_byte(text, multibyte, index) };
-            let (c, width) = char_at(text, multibyte, start).ok_or("key sequence shorter than its length")?;
+            let start = match *at {
+                Some(byte) => byte,
+                None => text.len() - self.str_view_from(key, index).ok_or(short)?.bytes().len(),
+            };
+            let (c, width) = if multibyte { char_at(text, start) } else { text.get(start).map(|&b| (u32::from(b), 1)) }.ok_or(short)?;
             *at = Some(start + width);
             (Value::integer(i64::from(c))?, !multibyte)
         } else { match self.object_if(key) {
-            Some(Object::Vector(v)) => (*v.get(index).ok_or("key sequence shorter than its length")?, false),
+            Some(Object::Vector(v)) => (*v.get(index).ok_or(short)?, false),
             _ => return Err("key sequence string or vector required".into()),
         }};
         self.decode_key_event(event, bytes)
@@ -633,9 +648,8 @@ impl Vm {
     }
 }
 
-/// The byte of the character at INDEX in TEXT, a string's bytes.
-fn char_byte(text: &[u8], multibyte: bool, index: usize) -> usize {
-    if !multibyte { return index; }
+/// The byte of the character at INDEX in TEXT, multibyte text.
+fn char_byte(text: &[u8], index: usize) -> usize {
     let mut byte = 0;
     for _ in 0..index {
         if byte >= text.len() { break; }
@@ -644,10 +658,10 @@ fn char_byte(text: &[u8], multibyte: bool, index: usize) -> usize {
     byte
 }
 
-/// The character at byte START of TEXT and its width in bytes.
-fn char_at(text: &[u8], multibyte: bool, start: usize) -> Option<(u32, usize)> {
+/// The character at byte START of TEXT, multibyte text, and its width.
+fn char_at(text: &[u8], start: usize) -> Option<(u32, usize)> {
     let rest = text.get(start..).filter(|rest| !rest.is_empty())?;
-    Some(if multibyte { crate::lstring::string_char(rest) } else { (u32::from(rest[0]), 1) })
+    Some(crate::lstring::string_char(rest))
 }
 
 /// keyboard.c modifier_names: the symbol for each modifier bit.

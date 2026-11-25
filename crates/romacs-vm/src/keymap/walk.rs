@@ -71,7 +71,7 @@ struct Frame {
     steps: usize,
 }
 const FRAME_VALUES: usize = 10;
-const HEADER_VALUES: usize = 8;
+const HEADER_VALUES: usize = 9;
 /// How deep embedded keymaps and parents nest.
 const DEPTH: usize = 64;
 
@@ -97,8 +97,9 @@ pub(crate) struct KeyWalk {
     /// The effective key sequence and its length, read once at the start.
     keys: Keys,
     length: usize,
-    /// The index of the key's next event to read, and while no callback
-    /// has run since the last read, that event's byte in a string key.
+    /// The index of the key's next event to read and, in a string, that
+    /// event's byte while no Lisp has run since the last read (an executable
+    /// image's string, which never changes, keeps it across callbacks).
     next: usize,
     byte: Option<usize>,
     /// The meta character the frames are looking up, its ESC first.
@@ -205,7 +206,7 @@ impl KeyWalk {
         };
         let (meta_base, meta_map) = self.meta.map_or((Value::NIL, Value::NIL), |meta| (meta.base, meta.map));
         let mut values = vec![key, count(self.length), count(self.next), meta_base, meta_map,
-                              self.event, flag(self.defaults), count(pending)];
+                              self.event, flag(self.defaults), count(pending), self.byte.map_or(Value::NIL, count)];
         for frame in &self.frames {
             let returns = RETURNS.iter().position(|r| *r == frame.returns).unwrap_or(0);
             let prefixes = vm.list_value(&frame.prefixes);
@@ -225,9 +226,9 @@ impl KeyWalk {
             prefixes: vm.list_values(f[5])?, inherit: f[6] != Value::NIL, returns: RETURNS[counted(f[7]).min(2)], steps: counted(f[8]),
             t_ok: f[9] != Value::NIL,
         })).collect::<Result<_>>()?;
-        // The callback may have changed a string key's text before `next`:
-        // its byte is found again at the next read.
-        Ok(Self { keys: Keys::Lisp(header[0]), length: counted(header[1]), next: counted(header[2]), byte: None, meta,
+        // A callback may have changed a heap string: its byte is found again.
+        let byte = (header[8] != Value::NIL && Vm::image_string(header[0])).then(|| counted(header[8]));
+        Ok(Self { keys: Keys::Lisp(header[0]), length: counted(header[1]), next: counted(header[2]), byte, meta,
                   event: header[5], defaults: header[6] != Value::NIL, frames, pending: PENDINGS[counted(header[7]).min(2)],
                   keymap: vm.keymap_symbol("keymap"), limit: vm.list_limit() })
     }
