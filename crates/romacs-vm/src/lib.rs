@@ -48,6 +48,7 @@ mod bidi;
 mod layout_host;
 mod display_host;
 mod session_host;
+mod ui;
 mod terminal_host;
 mod terminal_keys;
 mod process_jobs;
@@ -1485,9 +1486,11 @@ pub struct Vm {
     /// what the steps did (typing.rs).
     #[snapshot(at_rest)]
     typing: typing::Typing,
-    /// The embedder's layout while one is attached (layout_host.rs).
+    /// This VM's key to the UI its host attached on the host's thread
+    /// (ui.rs): the layout and session hosts live there, not in the VM.
+    /// Detach every host before moving a VM to another thread.
     #[snapshot(at_rest)]
-    layout_host: Option<Box<dyn layout_host::LayoutHost>>,
+    ui_key: Option<ui::UiKey>,
     /// The embedder's window system while one is attached (display_host.rs).
     #[snapshot(at_rest)]
     display: Option<display_host::Display>,
@@ -1495,9 +1498,6 @@ pub struct Vm {
     /// which the open display shows.
     #[snapshot(at_rest)]
     visual: Box<romacs_display_protocol::VisualConfig>,
-    /// The embedder's end of the session while one is attached (session_host.rs).
-    #[snapshot(at_rest)]
-    session_host: Option<session_host::SessionHost>,
     /// keyboard.c timer_idleness_start_time: when the command loop began
     /// waiting idle for a key, while it does.
     #[snapshot(at_rest)]
@@ -1798,10 +1798,9 @@ impl Vm {
             host_wait: None,
             deferred_event: None,
             typing: typing::Typing::default(),
-            layout_host: None,
+            ui_key: None,
             display: None,
             visual: Box::default(),
-            session_host: None,
             idle_since: None,
             redisplay_since_mark: None,
             treesit_plain: Vec::new(),

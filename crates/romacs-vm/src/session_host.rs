@@ -11,12 +11,11 @@ pub type SessionHost = Box<dyn FnMut(i32) -> std::convert::Infallible>;
 impl Vm {
     /// Attach (Some) or detach (None) the session's end.
     pub fn set_session_host(&mut self, host: Option<SessionHost>) {
-        self.session_host = host;
+        self.ui_set(host, |ui| &mut ui.session_host);
     }
-    pub(crate) fn has_session_host(&self) -> bool { self.session_host.is_some() }
+    pub(crate) fn has_session_host(&self) -> bool { self.ui_ref(|ui| ui.session_host.is_some()).unwrap_or(false) }
     /// End the session with CODE through the host, if one is attached.
     pub(crate) fn end_session(&mut self, code: i32) -> crate::Result<std::convert::Infallible> {
-        let host = self.session_host.as_mut().ok_or("no session host")?;
-        Ok(host(code))
+        Ok(self.ui(|ui| ui.session_host.as_mut().map(|host| host(code))).flatten().ok_or("no session host")?)
     }
 }
