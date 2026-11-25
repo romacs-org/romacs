@@ -390,15 +390,15 @@ its source says it, or nil."
 \(`romacs-agent-log-desktop-restore'): it is not, as of no source here."
   nil)
 
-(defun romacs-agent-log--set-session (session &optional defer-header)
+(defun romacs-agent-log--set-session (session)
   "Make SESSION the current chat's, named by its title; the session this
 editor's session commands act on (`romacs-agent-ui--session'), when they
-act on its source's.  With DEFER-HEADER, the current batch refreshes it."
+act on its source's."
   (setq romacs-agent-log--session session romacs-agent-log--session-id (romacs-agent-id session))
   (setq-local romacs-agent-ui--session (and (romacs-agent-log--commands-p) session))
   (let ((name (romacs-agent-log--buffer-name session)))
     (unless (equal (buffer-name) name) (rename-buffer name t)))
-  (unless defer-header (romacs-agent-log--header-show)))
+  (romacs-agent-log--header-show))
 
 ;;; Drawing
 
@@ -1627,29 +1627,6 @@ HISTORY says the chat shows a read-only transcript."
 
 ;;; Events
 
-(defvar-local romacs-agent-log--chrome-timer nil
-  "The pending refresh of this chat's separator and header.")
-
-(defun romacs-agent-log--chrome-soon ()
-  "Refresh the current chat's queue, separator and header after this batch."
-  (unless romacs-agent-log--chrome-timer
-    (let ((buffer (current-buffer)) timer)
-      (setq timer
-            (run-at-time
-             0 nil
-             (lambda ()
-               (when (buffer-live-p buffer)
-                 (with-current-buffer buffer
-                   (when (eq timer romacs-agent-log--chrome-timer)
-                     (setq romacs-agent-log--chrome-timer nil)
-                     (save-restriction
-                       (widen)
-                       (romacs-agent-log--separator))
-                     (when (eq (car romacs-agent-log--state) 'working)
-                       (romacs-agent-log--tick-start))
-                     (romacs-agent-log--header-show)))))))
-      (setq romacs-agent-log--chrome-timer timer))))
-
 (defun romacs-agent-log--on-event (session event)
   "Draw SESSION's EVENT in its chat, once: a record drawn already is not."
   (when-let* ((buffer (gethash (romacs-agent-id session) romacs-agent-log--chats))
@@ -1666,11 +1643,13 @@ already is not.  Each source's live events come here."
       (unless (and (eq session romacs-agent-log--session)
                    (equal (romacs-agent-title session) romacs-agent-log--title))
         (setq romacs-agent-log--title (romacs-agent-title session))
-        (romacs-agent-log--set-session session t))
+        (romacs-agent-log--set-session session))
       (romacs-agent-log-draw session event)
       (romacs-agent-log--progress event)
       (when (and seq (plist-get event :last)) (setq romacs-agent-log--seq seq))
-      (romacs-agent-log--chrome-soon))))
+      (romacs-agent-log--separator)
+      (when (eq (car romacs-agent-log--state) 'working) (romacs-agent-log--tick-start))
+      (romacs-agent-log--header-show))))
 
 (add-hook 'romacs-agent-event-functions #'romacs-agent-log--on-event)
 
@@ -1891,7 +1870,7 @@ after a batch of events remade sessions' states (their workers')."
     (with-current-buffer (window-buffer window)
       (when (derived-mode-p 'romacs-agent-log-mode)
         (romacs-agent-log--activity-refresh)
-        (romacs-agent-log--chrome-soon)))))
+        (romacs-agent-log--header-show)))))
 
 (add-hook 'romacs-agent-ui-changed-hook #'romacs-agent-log--headers-refresh)
 
