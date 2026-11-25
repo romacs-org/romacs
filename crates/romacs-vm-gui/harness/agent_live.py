@@ -1089,6 +1089,9 @@ def tour(work, delegate_target):
         ('romacs_task_send', {'taskId': '<the same taskId>', 'message': 'say again'}, lambda t: '"taskId"' in t),
         ('romacs_task_renew', {'taskId': '<the same taskId>', 'why': 'the tour'}, lambda t: '"taskId"' in t),
         ('romacs_orchestration_issues', {'hours': 1}, issues_summary),
+        # Refused, and says why: the tour's task asked nothing.
+        ('romacs_task_answer', {'taskId': '<the same taskId>', 'requestId': 'r-none'},
+         lambda t: 'No such approval request' in t),
         ('romacs_task_cancel', {'taskId': '<the same taskId>'}, lambda t: '"cancelled"' in t),
         # Refused, and says why: the tour's session received no message.
         ('romacs_task_reply', {'messageId': 'm-none', 'text': 'hello'},
@@ -1097,7 +1100,7 @@ def tour(work, delegate_target):
 
 
 # Tour steps whose call is refused, its refusal checked.
-REFUSED_IN_TOUR = {'romacs_task_reply'}
+REFUSED_IN_TOUR = {'romacs_task_reply', 'romacs_task_answer'}
 
 
 def issues_summary(text):
@@ -2673,12 +2676,13 @@ def mcp_tour(args, base):
                         and friend in private['buffers']
                         # Gnosis's refuse without a session or database (none here); romacs_task_watch
                         # without a running unit or a calling task; romacs_dev_check where no Romacs
-                        # tree is (the tour's project); romacs_attach, romacs_task_reply and
-                        # romacs_task_renew from a caller that is no agent session (the tour's client).
+                        # tree is (the tour's project); romacs_attach, romacs_task_reply,
+                        # romacs_task_renew and romacs_task_answer from a caller that is no agent
+                        # session (the tour's client).
                         and all(n.startswith('gnosis_') or n in ('romacs_call_outcome', 'romacs_restart_request',
                                                                   'romacs_task_watch', 'romacs_dev_check',
                                                                   'romacs_attach', 'romacs_task_reply',
-                                                                  'romacs_task_renew')
+                                                                  'romacs_task_renew', 'romacs_task_answer')
                                 for n in errors)
                         and task is not None)
         return result
