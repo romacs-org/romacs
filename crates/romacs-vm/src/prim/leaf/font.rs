@@ -18,24 +18,30 @@ impl Leaf<'_> {
         let object = self.writable_object(record)?;
         self.vm.objects.update_element(object, index, value).map_err(|_| Fault::Range(record, Value::integer(index as i64).unwrap()))
     }
-    /// The open display's host; None while the frame is on the initial terminal.
-    pub(crate) fn font_host(&mut self) -> Option<&mut (dyn crate::DisplayHost + 'static)> {
+    /// F on the open display's host, its fontsets brought up to date first;
+    /// None while the frame is on the initial terminal.
+    pub(crate) fn with_font_host<R>(&mut self, f: impl FnOnce(&mut (dyn crate::DisplayHost + 'static)) -> R) -> Option<R> {
         self.vm.fontset_state();
-        self.vm.window_system_host()
+        self.vm.with_window_system_host(f)
+    }
+    /// Whether the frame is on an open display, its fontsets brought up to
+    /// date first (`with_font_host`).
+    pub(crate) fn has_font_host(&mut self) -> bool {
+        self.with_font_host(|_| ()).is_some()
     }
     /// The open display's cached ASCII font name for KEY (a face's family
     /// and pixel-size bits), and its recording.
     pub(crate) fn cached_face_font(&self, key: &(String, u32, u16, bool, u16)) -> Option<String> {
-        self.vm.display.as_ref().filter(|d| d.open).and_then(|d| d.face_fonts.get(key).cloned())
+        self.vm.ui_ref(|ui| ui.display.as_ref().filter(|d| d.open).and_then(|d| d.face_fonts.get(key).cloned())).flatten()
     }
     pub(crate) fn cache_face_font(&mut self, key: (String, u32, u16, bool, u16), name: String) {
-        if let Some(display) = self.vm.display.as_mut() { display.face_fonts.insert(key, name); }
+        self.vm.with_display(|display| display.face_fonts.insert(key, name));
     }
     /// The font-object the open display made for ENTITY at its pixel size
     /// before, as font.c `font_open_entity` finds it on the entity's
     /// object list.
     pub(crate) fn cached_font_object(&mut self, entity: &crate::FontEntity, pixel_size: i64) -> Option<Value> {
-        let index = *self.vm.display.as_ref().filter(|d| d.open)?.font_objects.index.get(entity)?.get(&pixel_size)?;
+        let index = self.vm.ui_ref(|ui| ui.display.as_ref().filter(|d| d.open)?.font_objects.index.get(entity)?.get(&pixel_size).copied()).flatten()?;
         let slot = self.vm.slot(crate::prim::FONT_OBJECTS);
         match self.vm.object_if(self.vm.slots[slot].value) {
             Some(data::Object::Vector(objects)) => objects.get(index).copied(),
@@ -45,7 +51,7 @@ impl Leaf<'_> {
     /// Keep OBJECT as ENTITY's font-object at its pixel size while the
     /// display keeps its fonts.
     pub(crate) fn cache_font_object(&mut self, entity: crate::FontEntity, pixel_size: i64, object: Value) {
-        let Some(len) = self.vm.display.as_ref().filter(|d| d.open).map(|d| d.font_objects.len) else { return };
+        let Some(len) = self.vm.ui_ref(|ui| ui.display.as_ref().filter(|d| d.open).map(|d| d.font_objects.len)).flatten() else { return };
         let slot = self.vm.slot(crate::prim::FONT_OBJECTS);
         let vector = self.vm.slots[slot].value;
         let room = matches!(self.vm.object_if(vector), Some(data::Object::Vector(objects)) if objects.len() > len);
@@ -60,16 +66,16 @@ impl Leaf<'_> {
         let (objects, Some(index)) = (self.vm.slots[slot].value, i64::try_from(len).ok().and_then(|n| Value::integer(n).ok())) else { return };
         // A vector a world holds may refuse the write: the font goes uncached.
         if self.vector_set(objects, index, object).is_err() { return; }
-        if let Some(display) = self.vm.display.as_mut() {
+        self.vm.with_display(|display| {
             display.font_objects.index.entry(entity).or_default().insert(pixel_size, len);
             display.font_objects.len = len + 1;
-        }
+        });
     }
     /// The display forgot its fonts (`Fclear_font_cache`): so do their objects.
     pub(crate) fn forget_font_objects(&mut self) {
         let slot = self.vm.slot(crate::prim::FONT_OBJECTS);
         self.vm.slots[slot].value = Value::NIL;
-        if let Some(display) = self.vm.display.as_mut() { display.font_objects = crate::display_host::FontObjects::default(); }
+        self.vm.with_display(|display| display.font_objects = crate::display_host::FontObjects::default());
     }
     /// The frame's default face's font request, as painting realizes it.
     pub(crate) fn default_font_request(&self) -> std::result::Result<crate::FaceFont, Fault> {

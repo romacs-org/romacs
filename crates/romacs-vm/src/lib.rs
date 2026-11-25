@@ -1493,13 +1493,11 @@ pub struct Vm {
     #[snapshot(at_rest)]
     typing: typing::Typing,
     /// This VM's key to the UI its host attached on the host's thread
-    /// (ui.rs): the layout and session hosts live there, not in the VM.
+    /// (ui.rs): the layout, session, display and terminal hosts live
+    /// there, not in the VM.
     /// Detach every host before moving a VM to another thread.
     #[snapshot(at_rest)]
     ui_key: Option<ui::UiKey>,
-    /// The embedder's window system while one is attached (display_host.rs).
-    #[snapshot(at_rest)]
-    display: Option<display_host::Display>,
     /// The visual configuration Lisp asked for (`romacs--effect-set'),
     /// which the open display shows.
     #[snapshot(at_rest)]
@@ -1544,8 +1542,6 @@ pub struct Vm {
     trapped: HashSet<usize>,
     /// etc/DOC as last read, keyed by path and modification time (prims/doc.rs).
     doc_file: Option<(std::path::PathBuf, std::time::SystemTime, std::sync::Arc<prim::prims::doc::DocFile>)>,
-    #[snapshot(at_rest)]
-    terminal_host: Option<Box<dyn terminal_host::TerminalHost>>,
     terminal_bindings: Vec<terminal_host::TerminalBinding>,
     /// The buffer list's order (buffer_order.rs): roots for collection.
     buffer_order: buffer_order::BufferOrder,
@@ -1822,7 +1818,6 @@ impl Vm {
             deferred_event: None,
             typing: typing::Typing::default(),
             ui_key: None,
-            display: None,
             visual: Box::default(),
             idle_since: None,
             redisplay_since_mark: None,
@@ -1840,7 +1835,6 @@ impl Vm {
             environment_snapshot: Some(environment::snapshot()),
             trapped: HashSet::default(),
             doc_file: None,
-            terminal_host: None,
             terminal_bindings: Vec::new(),
             buffer_order: buffer_order::BufferOrder::default(),
             window_change_seen: Vec::new(),

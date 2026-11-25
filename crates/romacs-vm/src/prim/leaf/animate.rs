@@ -32,7 +32,7 @@ impl Leaf<'_> {
         let counts = count(self, ":done").zip(count(self, ":of"));
         let status = { let key = self.intern(":status"); self.plist_value(state, key) };
         let failed = self.kind(status) == Kind::Symbol && self.symbol_name(status).is_ok_and(|name| name == "failed");
-        let took = self.vm.window_system_host().is_some_and(|host| host.startup_progress(&shown, &said, counts, failed));
+        let took = self.vm.with_window_system_host(|host| host.startup_progress(&shown, &said, counts, failed)).unwrap_or(false);
         // Kept by the stage's symbol, a string stage's too, so two equal
         // names are one stage.
         let stage = if self.kind(stage) == Kind::Symbol { stage } else { self.intern(&shown) };
@@ -60,7 +60,7 @@ impl Leaf<'_> {
 impl Leaf<'_> {
     /// `romacs--debug-lose-device': t when the open display took the request.
     pub(crate) fn debug_lose_device(&mut self) -> Out {
-        let lost = self.vm.window_system_host().is_some_and(|host| host.lose_device());
+        let lost = self.vm.with_window_system_host(|host| host.lose_device()).unwrap_or(false);
         Ok(if lost { Value::TRUE } else { Value::NIL })
     }
 }

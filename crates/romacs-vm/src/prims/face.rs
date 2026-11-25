@@ -223,7 +223,7 @@ fn face_font(cx, face: Value; optional frame: Value, character: Value) {
     // The initial terminal realizes none, but under a graphic display
     // record (a headless GUI) its one font, "tty", is every face's
     // (ledger/divergences VM2-WIN5).
-    if cx.font_host().is_none() {
+    if !cx.has_font_host() {
         return Ok(if graphic_record(cx)? { cx.string("tty") } else { Value::NIL });
     }
     let ch = if character == Value::NIL { ' ' } else {
@@ -814,7 +814,7 @@ fn closest_font(cx: &mut Leaf<'_>, family: Option<&str>, lface: &[Value]) -> Opt
         name.and_then(|n| style_value(cx, slot, &n, false)).map_or(normal, |v| v >> 8)
     };
     let (width, weight, slant) = (style(":width", WIDTH, 100), style(":weight", WEIGHT, 80), style(":slant", SLANT, 100));
-    let fonts = cx.font_host()?.family_fonts(family);
+    let fonts = cx.with_font_host(|host| host.family_fonts(family))?;
     fonts.iter().min_by_key(|f| ((f.width - width).abs(), (f.weight - weight).abs(), (f.slant - slant).abs())).cloned()
 }
 

@@ -240,7 +240,7 @@ impl Leaf<'_> {
         // GNU's `img->face_font_size', `_height', `_width': the default
         // face's realized font's pixel size, height and average width.
         let font = self.default_font_request().ok()
-            .and_then(|request| self.font_host()?.char_font(&request, ' ')).map(|(font, _)| font);
+            .and_then(|request| self.with_font_host(|host| host.char_font(&request, ' ')).flatten()).map(|(font, _)| font);
         let (font_size, font_height, font_width) = font.as_ref().map_or((line, line, column), |f| {
             let width = if f.average_width > 0 { f.average_width } else { f.space_width };
             (f.pixel_size.max(1) as u32, (f.ascent + f.descent).max(1) as u32, width.max(1) as u32)
@@ -257,7 +257,7 @@ impl Leaf<'_> {
         let pixel = |[r, g, b]: [u8; 3]| u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b);
         (env.foreground, env.background, env.font_family) = (pixel(face.foreground), pixel(face.background), face.family.clone());
         let request = crate::FaceFont { family: face.family.clone(), pixel_size: face.pixel_size, weight: face.weight, italic: face.italic, width: face.width };
-        if let Some((f, _)) = self.font_host().and_then(|host| host.char_font(&request, ' ')) {
+        if let Some((f, _)) = self.with_font_host(|host| host.char_font(&request, ' ')).flatten() {
             let width = if f.average_width > 0 { f.average_width } else { f.space_width };
             (env.font_size, env.font_height, env.font_width) = (f.pixel_size.max(1) as u32, (f.ascent + f.descent).max(1) as u32, width.max(1) as u32);
             (env.font_ascent, env.font_descent) = (f.ascent, f.descent);
@@ -339,10 +339,8 @@ impl Leaf<'_> {
         // Each press is taken (`maybe_quit'), so a later one quits again;
         // one left untaken (the evaluator not busy) is not polled again.
         let finished = loop {
-            let finished = match self.vm.window_system_host() {
-                Some(host) => host.finish_decode(entry.facts.id, &|| quittable && signal.pressed()),
-                None => Err("Window system frame should be used".into()),
-            };
+            let finished = self.vm.with_window_system_host(|host| host.finish_decode(entry.facts.id, &|| quittable && signal.pressed()))
+                .unwrap_or_else(|| Err("Window system frame should be used".into()));
             if !finished.as_ref().is_err_and(|e| e == crate::display_host::DECODE_QUIT) { break finished; }
             self.vm.quit_fault()?;
             quittable = !signal.pressed();
@@ -368,14 +366,11 @@ impl Leaf<'_> {
         let loaded = match self.image_query(spec, env, scale)? {
             Ok((query, file)) => {
                 if let Some(file) = file { dependencies.push(Dependency::File(file)); }
-                match self.vm.window_system_host() {
-                    // A failed image is loaded again, as GNU's lookup_image
-                    // frees and reloads one; here at once, so a decode that
-                    // fails after its header does not size it again.
-                    Some(host) if retry => host.decode_image(query),
-                    Some(host) => host.begin_decode(query),
-                    None => Err("Window system frame should be used".into()),
-                }
+                // A failed image is loaded again, as GNU's lookup_image frees
+                // and reloads one; here at once, so a decode that fails after
+                // its header does not size it again.
+                self.vm.with_window_system_host(|host| if retry { host.decode_image(query) } else { host.begin_decode(query) })
+                    .unwrap_or_else(|| Err("Window system frame should be used".into()))
             }
             Err(message) => Err(message),
         };
@@ -473,7 +468,7 @@ impl Leaf<'_> {
     /// display host, and have the windows showing them redrawn.
     pub(crate) fn image_uncache(&mut self, remove: impl Fn(&ImageKey, &ImageEntry) -> bool) {
         let released = self.vm.images.retain(|k, e| !remove(k, e));
-        if let Some(host) = self.vm.window_system_host() { for id in released { host.release_image(id); } }
+        self.vm.with_window_system_host(|host| for id in released { host.release_image(id); });
         self.vm.display_state.version += 1;
     }
 
@@ -577,7 +572,7 @@ impl Leaf<'_> {
             None => return Err(Fault::Wrong("stringp", file)),
         };
         let Some(path) = self.image_find_file(&name)? else { return Ok(Value::NIL) };
-        let Some((width, height)) = self.vm.window_system_host().and_then(|host| host.image_header_size(&path)) else {
+        let Some((width, height)) = self.vm.with_window_system_host(|host| host.image_header_size(&path)).flatten() else {
             return Ok(Value::NIL);
         };
         let (width, height) = (Value::integer(i64::from(width)).unwrap(), Value::integer(i64::from(height)).unwrap());
@@ -697,8 +692,7 @@ impl crate::Vm {
     /// laid out again when one shows differently (`reshown').  The loaders' messages, for *Messages*, and
     /// whether any finished (the frame on screen shows them).
     pub fn image_completions(&mut self) -> (Vec<String>, bool) {
-        let Some(host) = self.window_system_host() else { return (vec![], false) };
-        let finished = host.finished_decodes();
+        let Some(finished) = self.with_window_system_host(|host| host.finished_decodes()) else { return (vec![], false) };
         if finished.is_empty() { return (vec![], false); }
         let (mut messages, mut relayout) = (vec![], false);
         for (id, result) in finished {

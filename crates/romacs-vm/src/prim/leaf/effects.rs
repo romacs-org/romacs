@@ -114,8 +114,7 @@ impl Vm {
     pub(crate) fn set_visual_config(&mut self, config: VisualConfig) {
         if *self.visual == config { return; }
         *self.visual = config;
-        if let Some(display) = self.display.as_mut().filter(|display| display.open) {
-            display.host.set_visual_config(&self.visual);
-        }
+        let visual = (*self.visual).clone();
+        self.with_window_system_host(|host| host.set_visual_config(&visual));
     }
 }

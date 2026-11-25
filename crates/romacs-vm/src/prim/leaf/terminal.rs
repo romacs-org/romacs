@@ -27,19 +27,22 @@ impl Leaf<'_> {
 
     /// Bind the current buffer to the terminal START makes at its size.
     fn terminal_bind(&mut self, columns: Value, rows: Value,
-                     start: impl FnOnce(&mut dyn crate::TerminalHost, Option<&crate::keeper::Link>, u16, u16) -> std::result::Result<u64, String>) -> Out {
+                     start: impl FnOnce(&mut dyn crate::TerminalHost, u16, u16) -> std::result::Result<u64, String>) -> Out {
         let buffer = self.current_buffer()?;
         let (columns, rows) = self.terminal_start_size(buffer, columns, rows)?;
         if self.vm.terminal_bindings.iter().any(|b| b.buffer == buffer) {
             return Err(Fault::Error("Buffer already owns a terminal".into()));
         }
-        let host = self.vm.terminal_host.as_mut().ok_or_else(|| Fault::Error("No terminal host attached".into()))?;
-        let session = start(host.as_mut(), self.vm.keeper.as_ref(), columns, rows).map_err(Fault::Error)?;
-        let value = i64::try_from(session).ok().and_then(|id| Value::integer(id).ok());
-        let Some(value) = value else {
-            let _ = host.close(session);
-            return Err(Fault::Error("Terminal session identity exhausted".into()));
-        };
+        let (session, value) = self.vm.with_terminal_host(|host| {
+            let session = start(host, columns, rows)?;
+            match i64::try_from(session).ok().and_then(|id| Value::integer(id).ok()) {
+                Some(value) => Ok((session, value)),
+                None => {
+                    let _ = host.close(session);
+                    Err("Terminal session identity exhausted".to_owned())
+                }
+            }
+        }).and_then(|started| started).map_err(Fault::Error)?;
         self.vm.terminal_bindings.push(TerminalBinding::new(buffer, session, columns, rows));
         self.vm.buffer_state_mut(buffer).map_err(Fault::Error)?.terminal = Some(session);
         Ok(value)
@@ -48,7 +51,7 @@ impl Leaf<'_> {
     pub(crate) fn terminal_create(&mut self, shell: Value, directory: Value, columns: Value, rows: Value) -> Out {
         let shell = self.string_text(shell)?;
         let directory = self.string_text(directory)?;
-        self.terminal_bind(columns, rows, |host, _, columns, rows| host.create(&shell, &directory, columns, rows))
+        self.terminal_bind(columns, rows, |host, columns, rows| host.create(&shell, &directory, columns, rows))
     }
 
     /// A terminal over the helper process behind keeper handle HANDLE,
@@ -56,25 +59,28 @@ impl Leaf<'_> {
     /// second, when it has one, the master of its pty.
     pub(crate) fn terminal_adopt(&mut self, handle: i64, columns: Value, rows: Value) -> Out {
         let handle = u64::try_from(handle).map_err(|_| Fault::Error("Invalid keeper handle".into()))?;
-        self.terminal_bind(columns, rows, |host, keeper, columns, rows| {
-            let keeper = keeper.ok_or("This session has no keeper attached")?;
-            host.adopt(keeper.duplicate(handle, 0)?, keeper.duplicate(handle, 1).ok(), columns, rows)
+        // The descriptors come from the keeper before the host is reached.
+        let fds = self.vm.keeper.as_ref().ok_or_else(|| "This session has no keeper attached".to_owned())
+            .and_then(|keeper| Ok((keeper.duplicate(handle, 0)?, keeper.duplicate(handle, 1).ok())));
+        self.terminal_bind(columns, rows, |host, columns, rows| {
+            let (control, pty) = fds?;
+            host.adopt(control, pty, columns, rows)
         })
     }
 
     /// The record version SESSION's helper process speaks, or nil.
     pub(crate) fn terminal_helper_version(&mut self, session: i64) -> Out {
         let id = u64::try_from(session).map_err(|_| Fault::Error("Invalid terminal session".into()))?;
-        let host = self.vm.terminal_host.as_mut().ok_or_else(|| Fault::Error("No terminal host attached".into()))?;
-        Ok(host.helper_version(id).map_or(Value::NIL, |version| Value::integer(i64::from(version)).expect("fits a fixnum")))
+        let version = self.vm.with_terminal_host(|host| host.helper_version(id)).map_err(Fault::Error)?;
+        Ok(version.map_or(Value::NIL, |version| Value::integer(i64::from(version)).expect("fits a fixnum")))
     }
 
     /// `(FULLS . DELTAS)`: how many of SESSION's updates carried the whole
     /// grid and how many a change; nil where the host has no such count.
     pub(crate) fn terminal_transport_counts(&mut self, session: i64) -> Out {
         let id = u64::try_from(session).map_err(|_| Fault::Error("Invalid terminal session".into()))?;
-        let host = self.vm.terminal_host.as_mut().ok_or_else(|| Fault::Error("No terminal host attached".into()))?;
-        Ok(match host.transport_counts(id) {
+        let counts = self.vm.with_terminal_host(|host| host.transport_counts(id)).map_err(Fault::Error)?;
+        Ok(match counts {
             Some((fulls, deltas)) => {
                 let count = |n: u64| Value::integer(i64::try_from(n).unwrap_or(i64::MAX)).map_err(Fault::Error);
                 let (fulls, deltas) = (count(fulls)?, count(deltas)?);
@@ -144,8 +150,7 @@ impl Leaf<'_> {
     pub(crate) fn terminal_close(&mut self, session: i64) -> Out {
         let id = u64::try_from(session).map_err(|_| Fault::Error("Invalid terminal session".into()))?;
         if let Some(buffer) = self.vm.terminal_bindings.iter().find(|b| b.session == id).map(|b| b.buffer) {
-            self.vm.terminal_host.as_mut().ok_or_else(|| Fault::Error("No terminal host attached".into()))?
-                .close(id).map_err(Fault::Error)?;
+            self.vm.with_terminal_host(|host| host.close(id)).and_then(|closed| closed).map_err(Fault::Error)?;
             self.vm.terminal_bindings.retain(|b| b.session != id);
             self.vm.terminal_ended(id, buffer);
         }

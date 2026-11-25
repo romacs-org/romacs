@@ -10,8 +10,10 @@
 //! (`world_quiescent` requires none), so a restored VM never names another
 //! VM's entry.
 use crate::Vm;
+use crate::display_host::{Display, DisplayHost};
 use crate::layout_host::LayoutHost;
 use crate::session_host::SessionHost;
+use crate::terminal_host::TerminalHost;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -22,12 +24,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub(crate) struct Ui {
     pub(crate) layout_host: Option<Box<dyn LayoutHost>>,
     pub(crate) session_host: Option<SessionHost>,
+    /// The window system, closed until the session opens it.
+    pub(crate) display: Option<Display>,
+    pub(crate) terminal_host: Option<Box<dyn TerminalHost>>,
 }
 
 impl Ui {
     /// Whether no host is attached.
     fn is_empty(&self) -> bool {
-        self.layout_host.is_none() && self.session_host.is_none()
+        self.layout_host.is_none() && self.session_host.is_none() && self.display.is_none() && self.terminal_host.is_none()
     }
 }
 
@@ -130,6 +135,23 @@ impl Vm {
         };
         self.ui_settle();
         drop(old);
+    }
+
+    /// F on the open display's host, None while the frame is on the
+    /// initial terminal.
+    pub(crate) fn with_window_system_host<R>(&mut self, f: impl FnOnce(&mut (dyn DisplayHost + 'static)) -> R) -> Option<R> {
+        self.ui(|ui| ui.display.as_mut().filter(|display| display.open).map(|display| f(display.host.as_mut()))).flatten()
+    }
+
+    /// F on the attached display, open or not.
+    pub(crate) fn with_display<R>(&mut self, f: impl FnOnce(&mut Display) -> R) -> Option<R> {
+        self.ui(|ui| ui.display.as_mut().map(f)).flatten()
+    }
+
+    /// F on the terminal service, or the error a terminal command gives
+    /// without one.
+    pub(crate) fn with_terminal_host<R>(&mut self, f: impl FnOnce(&mut (dyn TerminalHost + 'static)) -> R) -> Result<R, String> {
+        self.ui(|ui| ui.terminal_host.as_mut().map(|host| f(host.as_mut()))).flatten().ok_or_else(|| "No terminal host attached".into())
     }
 }
 

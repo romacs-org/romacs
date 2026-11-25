@@ -49,7 +49,7 @@ impl Leaf<'_> {
     /// `romacs-model--available-p`: whether the open display has a live
     /// GPU renderer.
     pub(crate) fn model_available(&mut self) -> Value {
-        let live = self.vm.window_system_host().is_some_and(|host| host.model_available());
+        let live = self.vm.with_window_system_host(|host| host.model_available()).unwrap_or(false);
         if live { Value::TRUE } else { Value::NIL }
     }
 
@@ -127,12 +127,14 @@ impl Leaf<'_> {
         let background = self.model_background(background)?;
         let size = (edge(width, "width")?, edge(height, "height")?);
         let count = meshes.len();
-        let display = self.vm.display.as_mut().filter(|d| d.open)
-            .ok_or_else(|| error("Native models need a graphical display"))?;
-        if !display.host.model_available() { return Err(error("No GPU renderer is live to draw native models")); }
-        let id = display.surfaces.allocate();
-        display.host.create_model(id, crate::ModelCreate { meshes, view, background, size }).map_err(error)?;
-        display.surfaces.insert(id, count);
+        let id = self.vm.with_display(|display| {
+            if !display.open { return Err(error("Native models need a graphical display")); }
+            if !display.host.model_available() { return Err(error("No GPU renderer is live to draw native models")); }
+            let id = display.surfaces.allocate();
+            display.host.create_model(id, crate::ModelCreate { meshes, view, background, size }).map_err(error)?;
+            display.surfaces.insert(id, count);
+            Ok(id)
+        }).unwrap_or_else(|| Err(error("Native models need a graphical display")))?;
         Ok(Value::integer(i64::from(id)).expect("a surface id is a fixnum"))
     }
 
@@ -140,11 +142,11 @@ impl Leaf<'_> {
     fn model_update(&mut self, id: Value, req: Value, change: impl FnOnce(&Self, usize) -> std::result::Result<ModelChange, Fault>) -> Out {
         let id = u32::try_from(natural(id, "id")?).map_err(|_| error("Model id out of range"))?;
         let req = natural(req, "request")?;
-        let meshes = self.vm.display.as_ref().and_then(|d| d.surfaces.meshes(id))
+        let meshes = self.vm.ui_ref(|ui| ui.display.as_ref().and_then(|d| d.surfaces.meshes(id))).flatten()
             .ok_or_else(|| error("Model is destroyed"))?;
         let change = change(self, meshes)?;
-        let display = self.vm.display.as_mut().filter(|d| d.open).ok_or_else(|| error("Native models need a graphical display"))?;
-        display.host.update_model(id, req, change).map_err(error)?;
+        self.vm.with_window_system_host(|host| host.update_model(id, req, change).map_err(error))
+            .ok_or_else(|| error("Native models need a graphical display"))??;
         Ok(Value::NIL)
     }
 
@@ -229,7 +231,7 @@ impl Leaf<'_> {
         let id = u32::try_from(self.model_plist_get(plist, ":id")?.integer_value()?).ok()?;
         let edge = |key| self.model_plist_get(plist, key).and_then(|v| edge(v, key).ok()).map(i64::from);
         let (width, height) = (edge(":width")?, edge(":height")?);
-        self.vm.display.as_ref()?.surfaces.meshes(id)?;
+        self.vm.ui_ref(|ui| ui.display.as_ref().and_then(|d| d.surfaces.meshes(id))).flatten()?;
         Some(romacs_layout_input::InlineImage {
             byte: 0, image: 0, surface: id, width, ascent: height, descent: 0, body_x: 0, body_y: 0,
             source: (0, 0, width, height), full: (width, height), relief: 0, relief_background: None,
@@ -242,8 +244,12 @@ impl Leaf<'_> {
     pub(crate) fn surface_destroy(&mut self, id: Value) -> Out {
         let n = id.integer_value().ok_or_else(|| Fault::Wrong("fixnump", id))?;
         let Ok(id) = u32::try_from(n) else { return Ok(Value::NIL) };
-        if let Some(display) = self.vm.display.as_mut() && display.surfaces.remove(id) {
-            display.host.free_surface(id);
+        let freed = self.vm.with_display(|display| {
+            let freed = display.surfaces.remove(id);
+            if freed { display.host.free_surface(id); }
+            freed
+        }).unwrap_or(false);
+        if freed {
             // Its glyphs show their text from the next redisplay: every
             // window republishes, as after `force-window-update' nil.
             self.vm.display_state.free_realized_faces();

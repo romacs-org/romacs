@@ -1098,7 +1098,7 @@ impl Vm {
             let preferred = rank.len() as u32;
             (rank, preferred)
         });
-        if changed && let Some(host) = self.window_system_host() { host.set_fontsets(std::sync::Arc::clone(&state)); }
+        if changed { self.with_window_system_host(|host| host.set_fontsets(std::sync::Arc::clone(&state))); }
         state
     }
     pub fn font_alternative_state(&mut self) -> Result<romacs_layout_input::FontAlternativeState> {

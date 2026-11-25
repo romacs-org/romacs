@@ -21,7 +21,7 @@ fn set_aliases(cx: &mut Leaf<'_>, aliases: Value) -> std::result::Result<(), Fau
 }
 
 fn window_system(cx: &mut Leaf<'_>) -> std::result::Result<(), Fault> {
-    if cx.font_host().is_some() { Ok(()) } else { Err(Fault::Error("Window system is not in use or not initialized".into())) }
+    if cx.has_font_host() { Ok(()) } else { Err(Fault::Error("Window system is not in use or not initialized".into())) }
 }
 
 /// A string's text in lower case (Fdowncase).
@@ -95,7 +95,7 @@ fn check_name(cx: &mut Leaf<'_>, name: Value, frame: Value) -> std::result::Resu
     cx.face_frame(frame, true)?;
     if name == Value::TRUE { return Ok(0); }
     if name == Value::NIL {
-        if cx.font_host().is_none() { return Err(Fault::Error("Can\u{2019}t use fontsets in non-GUI frames".into())); }
+        if !cx.has_font_host() { return Err(Fault::Error("Can\u{2019}t use fontsets in non-GUI frames".into())); }
         return Ok(cx.fontsets().frame);
     }
     if !matches!(cx.kind(name), Kind::String | Kind::Bytes) { return Err(Fault::Wrong("stringp", name)); }

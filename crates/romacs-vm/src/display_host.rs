@@ -234,35 +234,28 @@ impl Vm {
         // Another display's font-objects are none of this one's.
         let objects = self.slot(crate::prim::FONT_OBJECTS);
         self.slots[objects].value = crate::Value::NIL;
-        self.display = host.map(|host| Display { host: Box::new(crate::host_calls::Counted(host)), open: false, face_fonts: rustc_hash::FxHashMap::default(), font_objects: FontObjects::default(), surfaces: Surfaces::default() });
+        let display = host.map(|host| Display { host: Box::new(crate::host_calls::Counted(host)), open: false, face_fonts: rustc_hash::FxHashMap::default(), font_objects: FontObjects::default(), surfaces: Surfaces::default() });
+        self.ui_set(display, |ui| &mut ui.display);
     }
     /// Put the frame on the attached display, as GNU's window-system
     /// initialization does: from here `framep' and `window-system' answer
     /// the display's backend. False when no display is attached.
     pub fn open_display(&mut self) -> bool {
-        let Some(display) = self.display.as_mut() else { return false };
-        display.open = true;
         // What Lisp asked for before the display opened shows on it.
-        if *self.visual != romacs_display_protocol::VisualConfig::default() {
-            display.host.set_visual_config(&self.visual);
-        }
-        true
-    }
-    /// The open display's host, if the frame is on one.
-    pub(crate) fn window_system_host(&mut self) -> Option<&mut (dyn DisplayHost + 'static)> {
-        match self.display.as_mut() { Some(display) if display.open => Some(display.host.as_mut()), _ => None }
+        let visual = (*self.visual != romacs_display_protocol::VisualConfig::default()).then(|| (*self.visual).clone());
+        self.with_display(|display| {
+            display.open = true;
+            if let Some(visual) = &visual { display.host.set_visual_config(visual); }
+        }).is_some()
     }
     /// Whether the frame is on an open display: GNU's FRAME_WINDOW_P.
     pub(crate) fn window_system_open(&self) -> bool {
-        self.display.as_ref().is_some_and(|display| display.open)
+        self.ui_ref(|ui| ui.display.as_ref().is_some_and(|display| display.open)).unwrap_or(false)
     }
     /// GNU's frame type: the open display's backend symbol, else t.
     pub(crate) fn frame_type(&mut self) -> crate::Value {
-        match self.display.as_ref().filter(|display| display.open) {
-            Some(display) => {
-                let name = display.host.window_system().to_owned();
-                self.intern(&name)
-            }
+        match self.with_window_system_host(|host| host.window_system().to_owned()) {
+            Some(name) => self.intern(&name),
             None => crate::Value::TRUE,
         }
     }

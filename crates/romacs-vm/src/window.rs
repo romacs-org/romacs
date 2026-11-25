@@ -2458,7 +2458,7 @@ impl<'a> Windows<'a> {
         self.live_frame(frame)?;
         let frame = if frame == Value::NIL { self.frame() } else { frame };
         let id = self.vm.frame(frame).map_err(internal)?.id;
-        if let Some(host) = self.vm.window_system_host() { host.set_frame_alpha(id, alpha, limit); }
+        self.vm.with_window_system_host(|host| host.set_frame_alpha(id, alpha, limit));
         Ok(())
     }
     /// frame.c:286: the frame's type, t on the initial terminal and the
@@ -2565,10 +2565,7 @@ impl<'a> Windows<'a> {
     pub(crate) fn terminal_name(&mut self, object: Value) -> std::result::Result<(String, bool), Fault> {
         self.vm.ensure_windows().map_err(internal)?;
         self.terminal(object).ok_or_else(|| Fault::Wrong("terminal-live-p", object))?;
-        Ok(match self.vm.window_system_host() {
-            Some(host) => (host.display_name(), false),
-            None => ("initial_terminal".into(), true),
-        })
+        Ok(self.vm.with_window_system_host(|host| (host.display_name(), false)).unwrap_or_else(|| ("initial_terminal".into(), true)))
     }
     /// terminal.c:443: a live terminal's type, as framep's.
     pub(crate) fn terminal_live_p(&mut self, object: Value) -> Value {
