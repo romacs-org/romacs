@@ -418,19 +418,30 @@ fn start_command(vm: &Path, places: &[(&str, Option<String>)]) -> Vec<String> {
     command
 }
 
-/// What COMMAND says on stderr, all within `DEADLINE`: past it, it is
-/// killed and reaped, and its stderr, which a helper it left may hold open,
-/// read no longer.
+/// A file of this user's alone, already unlinked: what a command writes
+/// to it is read back through the handle, and no helper it leaves holding
+/// it keeps anyone waiting.
+fn scratch_file() -> std::io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let path = std::env::temp_dir().join(format!("romacs-relay-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+    let file = std::fs::OpenOptions::new().read(true).write(true).create_new(true).mode(0o600).open(&path)?;
+    std::fs::remove_file(&path)?;
+    Ok(file)
+}
+
+/// What COMMAND says on stderr by the time it ends, within `DEADLINE`:
+/// past it, it is killed and reaped, and what it said by then kept.
 fn run_within(command: &[String]) -> String {
-    let child = std::process::Command::new(&command[0]).args(&command[1..])
-        .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped()).spawn();
+    use std::io::Seek;
+    let mut said = match scratch_file() { Ok(file) => file, Err(error) => return format!("stderr: {error}") };
+    let child = said.try_clone().and_then(|stderr| {
+        std::process::Command::new(&command[0]).args(&command[1..])
+            .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(stderr).spawn()
+    });
     let mut child = match child { Ok(child) => child, Err(error) => return format!("{}: {error}", command[0]) };
-    let (said_tx, said) = mpsc::channel();
-    if let Some(mut stderr) = child.stderr.take() {
-        std::thread::spawn(move || { let mut text = String::new(); let _ = stderr.read_to_string(&mut text); let _ = said_tx.send(text); });
-    }
     let begun = Instant::now();
+    let mut late = String::new();
     loop {
         match child.try_wait() {
             Ok(Some(_)) => break,
@@ -438,11 +449,14 @@ fn run_within(command: &[String]) -> String {
             _ => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return format!("{}: no answer within {} s", command[0], DEADLINE.as_secs());
+                late = format!(" ({}: no answer within {} s)", command[0], DEADLINE.as_secs());
+                break;
             }
         }
     }
-    said.recv_timeout(DEADLINE.saturating_sub(begun.elapsed())).unwrap_or_default().trim().to_owned()
+    let mut text = String::new();
+    let _ = said.rewind().and_then(|()| said.read_to_string(&mut text));
+    format!("{}{late}", text.trim())
 }
 
 /// Start the headless service's unit; a unit failed before is reset first,
@@ -968,6 +982,10 @@ mod tests {
         let said = run_within(&["sh", "-c", "echo started >&2"].map(str::to_owned));
         assert_eq!(said, "started");
         assert!(run_within(&["/nonexistent/systemctl".to_owned()]).contains("/nonexistent/systemctl"));
+        // Gone, a helper it left holding its stderr: what it said, at once.
+        let begun = Instant::now();
+        assert_eq!(run_within(&["sh", "-c", "(sleep 5 &); echo failed >&2"].map(str::to_owned)), "failed");
+        assert!(begun.elapsed() < Duration::from_secs(2));
     }
 
     #[test]
