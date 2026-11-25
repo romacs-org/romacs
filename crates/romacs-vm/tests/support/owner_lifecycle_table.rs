@@ -691,9 +691,12 @@ fn zygote_death_settles_and_resubmits_jobs(receipt: &mut Receipt) {
         "(setq isolate-zygotes t isolate-pool-size 4)
            (isolate-zygote nil) (setq z (gethash nil romacs--isolate-zygotes) zi (aref z 1))",
     );
+    // Released, not only reported: a zygote reports a child before it opens
+    // the child's gate, and a stop between the two would hold it unrun. Its
+    // hello comes only once it runs.
     w.until(
         "ready spare for a job",
-        "(integerp (nth 3 (isolate-zygote nil)))",
+        "(let ((spare (aref z 4))) (and spare (aref spare 9) t))",
     );
     w.stop("zi");
     w.run(&format!(
@@ -1071,9 +1074,10 @@ fn shutdown_before_fork(receipt: &mut Receipt) {
 fn full_pool_with_dying_unforked_job(receipt: &mut Receipt) {
     let mut w = Walk::new(receipt);
     w.live();
+    // Released before its zygote stops, as in `zygote_death_settles_and_resubmits_jobs`.
     w.until(
-        "initial spare reported",
-        "(and (nth 3 (isolate-zygote nil)) t)",
+        "initial spare released",
+        "(let ((spare (aref (gethash nil romacs--isolate-zygotes) 4))) (and spare (aref spare 9) t))",
     );
     w.run(
         "(setq z (gethash nil romacs--isolate-zygotes) zi (aref z 1)
