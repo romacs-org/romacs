@@ -3157,6 +3157,8 @@ the lines after it waiting."
       (let* ((frames (process-get process 'frames))
              (line (car frames)))
         (process-put process 'frames (cdr frames))
+        ;; Nothing waits: no record is kept by the queue's tail.
+        (unless (cdr frames) (process-put process 'frames-tail nil))
         (let ((record (and (stringp line)
                            (ignore-errors
                              ;; JSON false and null are kept, so a tool's input
@@ -3264,12 +3266,11 @@ state, which may be most of its history."
 while it does not yet listen; the connection it replaces is let go."
   (condition-case nil
       (let ((old (romacs-agent-connection session))
-            (process (make-network-process
+            (process (romacs-agent--frame (make-network-process
                       :name (format "romacs-agent-%s" (romacs-agent--key (romacs-agent-id session)))
                       :family 'local :service (romacs-agent-host-socket session)
                       :coding 'no-conversion :noquery t
-                      :filter #'romacs-agent--filter :sentinel #'romacs-agent--sentinel)))
-        (romacs-agent--frame process)
+                      :filter #'romacs-agent--filter :sentinel #'romacs-agent--sentinel))))
         (process-put process 'romacs-agent session)
         (setf (romacs-agent-connection session) process (romacs-agent-caught-up session) nil)
         ;; From the last record seen, not the one after: a kept attachment
@@ -4405,12 +4406,12 @@ while it does not yet listen; given up, its notes stay held."
   (let ((id (romacs-agent-id session)))
     (when (eq (gethash id romacs-agent--note-hosts) t)
       (condition-case nil
-          (let ((host (make-network-process
-                       :name (format "romacs-agent-notes-%s" (romacs-agent--key id))
-                       :family 'local :service (romacs-agent-host-socket session)
-                       :coding 'no-conversion :noquery t
-                       :filter #'romacs-agent--filter :sentinel #'romacs-agent--notes-sentinel)))
-            (romacs-agent--frame host)
+          (let ((host (romacs-agent--frame
+                       (make-network-process
+                        :name (format "romacs-agent-notes-%s" (romacs-agent--key id))
+                        :family 'local :service (romacs-agent-host-socket session)
+                        :coding 'no-conversion :noquery t
+                        :filter #'romacs-agent--filter :sentinel #'romacs-agent--notes-sentinel))))
             (process-put host 'romacs-agent session)
             (process-put host 'notes-only t)
             (puthash id host romacs-agent--note-hosts)

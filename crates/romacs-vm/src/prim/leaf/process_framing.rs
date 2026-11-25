@@ -14,9 +14,10 @@ fn fixnum(n: usize) -> Result<Value> {
 
 impl Leaf<'_> {
     /// Frame PROC's output by KIND (`lines', `content-length', or nil for
-    /// none), each frame at most LIMIT bytes (nil: no limit).  Bytes read
-    /// but not yet given to Lisp move between the framer and the decoder's
-    /// carryover, so turning framing on or off loses none.
+    /// none), each frame at most LIMIT bytes (nil: no limit).  The same
+    /// kind again only changes the limit.  Otherwise bytes read but not yet
+    /// given to Lisp move between the framer and the decoder's carryover,
+    /// so turning framing on or off loses none but a frame being skipped.
     pub(crate) fn process_set_framing(&mut self, proc: Value, kind: Value, limit: Value) -> Out {
         let kind = match kind {
             Value::NIL => None,
@@ -24,15 +25,22 @@ impl Leaf<'_> {
             _ if kind == self.intern("content-length") => Some(Kind::ContentLength),
             _ => return Err(Fault::Error(format!("Unknown process framing: {}", self.symbol_name(kind).unwrap_or_default()))),
         };
-        let limit = match limit {
-            Value::NIL => None,
-            _ => Some(usize::try_from(limit.integer_value().filter(|&n| n >= 0).ok_or(Fault::Wrong("natnump", limit))?)
-                .map_err(|_| Fault::Wrong("natnump", limit))?),
+        let limit = match limit.integer_value().map(usize::try_from) {
+            _ if limit == Value::NIL => None,
+            Some(Ok(n)) => Some(n),
+            _ => return Err(Fault::Wrong("natnump", limit)),
         };
         let name = self.string_text(self.process(proc)?.get(Slot::Name))?;
         let Some(channel) = self.channel_mut(proc) else {
             return Err(Fault::Error(format!("Process {name} has no output to frame")));
         };
+        // The same kind again keeps the frame in progress, under the new limit.
+        if let (Some(kind), Some(framer)) = (kind, channel.framer.as_mut())
+            && framer.kind() == kind
+        {
+            framer.set_limit(limit);
+            return Ok(Value::NIL);
+        }
         let mut rest = channel.framer.take().map(Framer::into_rest).unwrap_or_default();
         rest.append(&mut channel.carryover);
         match kind {
@@ -61,7 +69,7 @@ impl Leaf<'_> {
     }
 
     /// process_read for a framed PROC: BUF, the bytes just read (none at
-    /// end of file), framed.  (NBYTES . FRAMES): each frame a string
+    /// end of file, or at a pty's EIO, its end), framed.  (NBYTES . FRAMES): each frame a string
     /// decoded by PROC's coding system, or `over' or `malformed'.
     pub(super) fn process_read_framed(&mut self, proc: Value, buf: &[u8]) -> Out {
         let eof = buf.is_empty();
@@ -103,6 +111,24 @@ impl Leaf<'_> {
 
     /// Whether CODING leaves bytes as they are: nil, or raw text with Unix
     /// line ends (`no-conversion', `binary').
+    /// The wait's write of what PROC holds unsent, its peer ready.  One
+    /// that fails is PROC's status change, never an error in whatever
+    /// happened to wait: as send_process on EPIPE, PROC is closed, its
+    /// status (exit 256) when it ran, and its sentinel told.
+    pub(super) fn process_flush_waited(&mut self, proc: Value) -> Result<()> {
+        if self.process_flush(proc).is_ok() {
+            return Ok(());
+        }
+        self.process_tick(proc);
+        if self.process(proc)?.get(Slot::Status) == self.intern("run") {
+            let exit = self.sym("exit");
+            let status = self.list(&[exit, fixnum(256)?]);
+            self.process_mut(proc).set(Slot::Status, status);
+        }
+        self.deactivate_process(proc);
+        Ok(())
+    }
+
     fn coding_raw(&mut self, coding: Value) -> Result<bool> {
         if coding == Value::NIL {
             return Ok(true);

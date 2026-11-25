@@ -1113,8 +1113,9 @@ that directory; a peer sending anything else is closed.  Frames follow as
 on the local socket."
   (unless (and (stringp file) (file-name-absolute-p file) (not (file-remote-p file)))
     (user-error "MCP requires an absolute local port file"))
-  (unless (and (stringp token) (>= (length token) 32) (not (string-search "\n" token)))
-    (user-error "MCP loopback token must be one line of at least 32 characters"))
+  (unless (and (stringp token) (>= (length token) 32) (not (string-search "\n" token))
+               (<= (string-bytes token) romacs-mcp--frame-limit))
+    (user-error "MCP loopback token must be one line of at least 32 characters, at most a frame"))
   (when romacs-mcp--listener (user-error "MCP is already started"))
   (server-ensure-safe-dir (file-name-directory file))
   (cl-incf romacs-mcp--generation)

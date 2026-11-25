@@ -156,3 +156,44 @@ fn a_long_line_in_small_chunks_moves_each_byte_once() {
     framer.push(b"\n", &mut out);
     assert!(matches!(&out[..], [Frame::Bytes(b)] if b.len() == 256 * 4096));
 }
+
+#[test]
+fn content_length_header_limit_whatever_the_reads() {
+    // A header block over the limit is malformed whether its end came in
+    // the same read or a later one.
+    let mut stream = b"X-Pad: ".to_vec();
+    stream.extend(vec![b'p'; HEADER_LIMIT + 100]);
+    stream.extend_from_slice(b"\r\nContent-Length: 2\r\n\r\n{}");
+    assert_eq!(frames(Kind::ContentLength, None, &[&stream]), vec![Frame::Malformed]);
+    let (a, b) = stream.split_at(HEADER_LIMIT + 1);
+    assert_eq!(frames(Kind::ContentLength, None, &[a, b]), vec![Frame::Malformed]);
+}
+
+#[test]
+fn content_length_rest_keeps_its_header() {
+    // Framing stopped in a body gives back the header with the body so far.
+    let mut framer = Framer::new(Kind::ContentLength, None);
+    let mut out = Vec::new();
+    framer.push(b"Content-Length: 5\r\n\r\nab", &mut out);
+    assert!(out.is_empty());
+    assert_eq!(framer.into_rest(), b"Content-Length: 5\r\n\r\nab");
+}
+
+#[test]
+fn a_new_limit_keeps_the_frame_in_progress() {
+    let mut framer = Framer::new(Kind::ContentLength, None);
+    let mut out = Vec::new();
+    framer.push(b"Content-Length: 5\r\n\r\nab", &mut out);
+    framer.set_limit(Some(100));
+    framer.push(b"cde", &mut out);
+    assert_eq!(out, vec![bytes("abcde")]);
+}
+
+#[test]
+fn a_large_frame_gone_gives_its_buffer_back() {
+    let mut framer = Framer::new(Kind::Lines, None);
+    let mut out = Vec::new();
+    framer.push(&vec![b'x'; 4 << 20], &mut out);
+    framer.push(b"\nsmall", &mut out);
+    assert!(framer.buf.capacity() <= KEPT_CAPACITY);
+}

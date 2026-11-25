@@ -107,6 +107,49 @@ PROCESS, a listener, has no output of its own to wait for."
           (should (= (romacs-process-unsent-bytes process) 0)))
       (delete-process process))))
 
+;; A pty's end is EIO, not end of file: its last line, unended, still comes.
+(ert-deftest process-framing-a-ptys-last-line-comes-once ()
+  (let* ((frames nil)
+         (process (make-process :name "process-framing-pty" :command '("printf" "a\nlast")
+                                :noquery t :connection-type 'pty :coding 'no-conversion
+                                :filter (lambda (_p fs) (setq frames (append frames fs))))))
+    (set-process-framing process 'lines)
+    (process-framing-tests--until process (lambda () (not (process-live-p process))))
+    (accept-process-output nil 0.05)
+    (should (equal (mapcar (lambda (f) (string-trim-right f "\r")) frames) '("a" "last")))))
+
+(ert-deftest process-framing-off-in-a-body-gives-back-its-header ()
+  (let* ((got nil)
+         (process (process-framing-tests--cat (lambda (_p x) (push x got)))))
+    (set-process-framing process 'content-length)
+    (process-send-string process "Content-Length: 2\r\n\r\n{}Content-Length: 5\r\n\r\nab")
+    (process-framing-tests--until process (lambda () got))
+    ;; The same kind again keeps the body in progress.
+    (set-process-framing process 'content-length 100)
+    (set-process-framing process nil)
+    (process-send-string process "cde")
+    (process-framing-tests--until process (lambda () (stringp (car got))))
+    (should (equal (car got) "Content-Length: 5\r\n\r\nabcde"))
+    (should (equal (cadr got) '("{}")))
+    (delete-process process)))
+
+(ert-deftest process-framing-a-failed-queued-write-is-a-status-change ()
+  ;; The child closes its input with its output still open: what the wait
+  ;; could not write ends the process, as GNU's EPIPE does, and its
+  ;; sentinel is told; nothing signals in the wait.
+  (let* ((events nil)
+         (process (make-process :name "process-framing-epipe"
+                                :command '("sh" "-c" "head -c 1 >/dev/null; exec 0<&-; sleep 10")
+                                :noquery t :connection-type 'pipe :coding 'no-conversion
+                                :sentinel (lambda (_p event) (push event events)))))
+    (unwind-protect
+        (progn
+          (romacs-process-send-nowait process (make-string (* 1024 1024) ?z))
+          (process-framing-tests--until process (lambda () events))
+          (should-not (process-live-p process))
+          (should (equal (process-status process) 'exit)))
+      (delete-process process))))
+
 ;;; The agent protocol's connection
 
 (ert-deftest process-framing-rpc-lines-over-a-socket ()

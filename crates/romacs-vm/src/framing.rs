@@ -28,12 +28,17 @@ pub(crate) enum Frame {
 /// The most bytes one Content-Length header block may take.
 const HEADER_LIMIT: usize = 8192;
 
+/// A buffer this much larger than what it holds is given back once a
+/// large frame has gone, so an idle connection keeps no large allocation.
+const KEPT_CAPACITY: usize = 1 << 16;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum State {
     /// Lines: within a line. Content-Length: within a header block.
     Frame,
-    /// In a body of this many bytes.
-    Body(usize),
+    /// In a body of this many bytes, after a header block of this many,
+    /// both still in the buffer from `start'.
+    Body(usize, usize),
     /// Skipping an over-limit frame: a line to its LF, or this many bytes.
     Skip(usize),
     /// The stream can no longer be framed.
@@ -69,6 +74,10 @@ impl Framer {
     pub(crate) fn limit(&self) -> Option<usize> {
         self.limit
     }
+    /// Bound later frames by LIMIT; the frame in progress keeps its state.
+    pub(crate) fn set_limit(&mut self, limit: Option<usize>) {
+        self.limit = limit;
+    }
     fn over(&self, len: usize) -> bool {
         self.limit.is_some_and(|limit| len > limit)
     }
@@ -90,6 +99,9 @@ impl Framer {
             self.buf.drain(..self.start);
             self.scan -= self.start;
             self.start = 0;
+            if self.buf.capacity() > KEPT_CAPACITY && self.buf.len() < self.buf.capacity() / 4 {
+                self.buf.shrink_to(self.buf.len().max(KEPT_CAPACITY));
+            }
         }
     }
 
@@ -104,8 +116,9 @@ impl Framer {
         self.scan = 0;
     }
 
-    /// The bytes of the frame not yet complete, given back when framing
-    /// stops, so the stream loses nothing.
+    /// The bytes of the frame not yet complete, its header included, given
+    /// back when framing stops or changes kind, so the stream loses nothing
+    /// but the frame being skipped.
     pub(crate) fn into_rest(mut self) -> Vec<u8> {
         if matches!(self.state, State::Skip(_) | State::Broken) {
             return Vec::new();
@@ -152,16 +165,19 @@ impl Framer {
             let avail = self.buf.len() - self.start;
             match self.state {
                 State::Frame => match self.header(out) {
-                    Some(len) if self.over(len) => {
+                    Some((len, header)) if self.over(len) => {
                         out.push(Frame::Over);
+                        self.start += header;
+                        self.scan = self.start;
                         self.state = State::Skip(len);
                     }
-                    Some(len) => self.state = State::Body(len),
+                    Some((len, header)) => self.state = State::Body(len, header),
                     None => return,
                 },
-                State::Body(len) if avail >= len => {
-                    out.push(Frame::Bytes(self.buf[self.start..self.start + len].to_vec()));
-                    self.start += len;
+                State::Body(len, header) if avail >= header + len => {
+                    let body = self.start + header;
+                    out.push(Frame::Bytes(self.buf[body..body + len].to_vec()));
+                    self.start = body + len;
                     self.scan = self.start;
                     self.state = State::Frame;
                 }
@@ -176,31 +192,36 @@ impl Framer {
                     self.state = State::Skip(len - avail);
                     return;
                 }
-                State::Body(_) | State::Broken => return,
+                State::Body(..) | State::Broken => return,
             }
         }
     }
 
-    /// The next header block's Content-Length, its block consumed, or None
-    /// while it is incomplete.  A block with no readable length is dropped
-    /// (a server's stray output); one over `HEADER_LIMIT' breaks the stream.
-    fn header(&mut self, out: &mut Vec<Frame>) -> Option<usize> {
+    /// The next header block's Content-Length and the block's own length,
+    /// the block left in the buffer, or None while it is incomplete.  A
+    /// block with no readable length is dropped (a server's stray output);
+    /// one over `HEADER_LIMIT' bytes, however its bytes came, breaks the
+    /// stream.
+    fn header(&mut self, out: &mut Vec<Frame>) -> Option<(usize, usize)> {
         loop {
             let from = self.scan.saturating_sub(3).max(self.start);
-            let Some(end) = memchr::memmem::find(&self.buf[from..], b"\r\n\r\n").map(|at| from + at) else {
+            let end = memchr::memmem::find(&self.buf[from..], b"\r\n\r\n").map(|at| from + at);
+            let block = end.unwrap_or(self.buf.len()) - self.start;
+            if block > HEADER_LIMIT {
+                out.push(Frame::Malformed);
+                self.state = State::Broken;
+                self.start = self.buf.len();
+                self.scan = self.start;
+                return None;
+            }
+            let Some(end) = end else {
                 self.scan = self.buf.len();
-                if self.buf.len() - self.start > HEADER_LIMIT {
-                    out.push(Frame::Malformed);
-                    self.state = State::Broken;
-                    self.start = self.buf.len();
-                }
                 return None;
             };
-            let length = content_length(&self.buf[self.start..end]);
-            self.start = end + 4;
-            self.scan = self.start;
-            if length.is_some() {
-                return length;
+            self.scan = end + 4;
+            match content_length(&self.buf[self.start..end]) {
+                Some(len) => return Some((len, end + 4 - self.start)),
+                None => self.start = self.scan,
             }
         }
     }

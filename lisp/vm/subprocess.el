@@ -539,9 +539,7 @@ family; nil for anything else, or for an element out of range."
         (romacs--proc-set proc 'buffer buffer)
         (romacs--proc-set proc 'sentinel (process-sentinel server))
         (romacs--proc-set proc 'filter filter)
-        (romacs--proc-attach proc connection)
-        (let ((framing (process-framing server)))
-          (if framing (set-process-framing proc (car framing) (cdr framing))))
+        (romacs--frame-as server (romacs--proc-attach proc connection))
         (romacs--proc-set proc 'status 'run)
         (romacs--proc-set proc 'decode (romacs--proc-get server 'decode))
         (romacs--proc-set proc 'encode (romacs--proc-get server 'encode))
@@ -820,8 +818,16 @@ decoded by PROCESS's coding system, the bytes as they came when that is
 nothing.  At end of file a last line with no newline is a frame; an
 unfinished body is dropped.  An accepted connection takes its server's
 framing.  Set it before PROCESS's output is first read: right after
-making PROCESS, before any wait."
+making PROCESS, before any wait.  Setting the same KIND again changes
+only LIMIT; another KIND, or nil, gives the frame not yet complete back
+as the next output, but a frame being skipped as over its limit."
   (romacs--proc-set-framing (romacs--get-process process) kind limit))
+
+(defun romacs--frame-as (server proc)
+  "Frame PROC, a connection SERVER accepted, as SERVER is framed; PROC."
+  (let ((framing (process-framing server)))
+    (if framing (set-process-framing proc (car framing) (cdr framing))))
+  proc)
 
 (defun process-framing (process)
   "PROCESS's framing (`set-process-framing'): (KIND . LIMIT), or nil."

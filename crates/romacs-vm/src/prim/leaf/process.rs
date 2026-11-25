@@ -455,10 +455,7 @@ impl Leaf<'_> {
             }
             match wake {
                 Wake::Read => readable.push(proc),
-                // A failed write drops what was queued and closes nothing
-                // the wait's caller owns: the peer's end is seen by the
-                // read side, as a status change, not as this waiter's error.
-                Wake::Write => { let _ = self.process_flush(proc); }
+                Wake::Write => self.process_flush_waited(proc)?,
                 Wake::Connect => connected.push(proc),
                 Wake::Handshake => match self.gnutls_handshake_poll(proc) {
                     super::gnutls::Handshake::Pending => {}
@@ -589,6 +586,13 @@ impl Leaf<'_> {
         };
         let nbytes = match read {
             Ok(n) => n,
+            // A pty's end is EIO, not end of file: a framed line left
+            // unended is still delivered, once.
+            Err(error) if error.raw_os_error() == Some(libc::EIO)
+                && self.channel(proc).is_some_and(|c| c.framer.is_some() && !c.last_block) =>
+            {
+                return self.process_read_framed(proc, &[]);
+            }
             Err(error) => {
                 let errno = error.raw_os_error().unwrap_or(libc::EIO);
                 return Ok(self.cons(fixnum(-1), fixnum(errno.into())));
@@ -750,7 +754,7 @@ impl Leaf<'_> {
         self.process_flush(proc)?;
         Ok(if self.channel(proc).is_some_and(|c| c.pending.is_empty()) { Value::TRUE } else { Value::NIL })
     }
-    fn process_flush(&mut self, proc: Value) -> Result<()> {
+    pub(super) fn process_flush(&mut self, proc: Value) -> Result<()> {
         let Some(channel) = self.channel_mut(proc) else { return Ok(()) };
         let Some(fd) = channel.outfd.as_ref().map(|f| f.as_fd()) else { return Ok(()) };
         if let Some(session) = channel.tls.as_deref_mut().filter(|s| s.active) {

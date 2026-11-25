@@ -90,16 +90,18 @@ no reply answers it."
   "Send MESSAGE (a hash table) on RPC, never waiting: what the socket does
 not take now waits in its channel, behind whatever already does, written
 as the peer reads.  A message over the limit signals, never sent broken;
-a connection that would hold more than `romacs-agent-rpc-queue-limit'
-bytes unsent is closed.  Non-nil while RPC is live."
+a connection left holding more than `romacs-agent-rpc-queue-limit' bytes
+unsent once its socket took what it could is closed.  Non-nil while RPC
+is live."
   (let ((line (romacs-agent-rpc-encode message)))
     (when (> (1- (string-bytes line)) romacs-agent-rpc-message-limit)
       (error "Agent protocol message of %d bytes is over the limit" (1- (string-bytes line))))
     (when (romacs-agent-rpc-live-p rpc)
-      (if (> (+ (romacs-process-unsent-bytes (romacs-agent-rpc-process rpc)) (string-bytes line))
-             romacs-agent-rpc-queue-limit)
-          (romacs-agent-rpc-close rpc)
-        (romacs-agent-rpc--write rpc line))
+      (romacs-agent-rpc--write rpc line)
+      ;; What the peer left unread, this message's rest included.
+      (when (and (romacs-agent-rpc-live-p rpc)
+                 (> (romacs-process-unsent-bytes (romacs-agent-rpc-process rpc)) romacs-agent-rpc-queue-limit))
+        (romacs-agent-rpc-close rpc))
       (romacs-agent-rpc-live-p rpc))))
 
 (defun romacs-agent-rpc--write (rpc line)

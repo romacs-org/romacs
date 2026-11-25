@@ -769,59 +769,75 @@ and delete the network process."
         (when-let* ((p (slot-value connection '-autoport-inferior))) (delete-process p))
         (funcall (jsonrpc--on-shutdown connection) connection)))))
 
-(defvar jsonrpc--in-process-filter nil
-  "Non-nil if inside `jsonrpc--process-filter'.")
-
-(cl-defun jsonrpc--process-filter (proc frames)
+(defun jsonrpc--process-filter (proc frames)
   "Called when PROC has read FRAMES, the bodies of the messages it
-completed: PROC is framed by Content-Length (`set-process-framing')."
-  (when jsonrpc--in-process-filter
-    ;; Problematic recursive process filters may happen if
-    ;; `jsonrpc-connection-receive', called by us, eventually calls
-    ;; client code which calls `process-send-string' (which see) to,
-    ;; say send a follow-up message.  If that happens to writes enough
-    ;; bytes for pending output to be received, we will lose JSONRPC
-    ;; messages.  In that case, remove recursiveness by re-scheduling
-    ;; ourselves to run from within a timer as soon as possible
-    ;; (bug#60088)
-    (run-at-time 0 nil #'jsonrpc--process-filter proc frames)
-    (cl-return-from jsonrpc--process-filter))
+completed: PROC is framed by Content-Length (`set-process-framing').
+They wait in PROC's queue, oldest first, and are read in order: a read
+inside the reading (a handler, or a warning, that waits on processes)
+adds its frames behind them, and a read cut short (an error, a quit)
+leaves the rest for a timer, so no message is lost or moved."
   (when (buffer-live-p (process-buffer proc))
-    (with-current-buffer (process-buffer proc)
-      (let ((conn (process-get proc 'jsonrpc-connection)))
-        (dolist (frame frames)
-          (if (not (stringp frame))
-              (jsonrpc--warn "Unreadable Content-Length header: nothing more is read")
-            (let ((message (condition-case-unless-debug oops
-                               (jsonrpc--json-read frame)
-                             (error
-                              (jsonrpc--warn "Invalid JSON: %s %s" (cdr oops) frame)
-                              nil))))
-              ;; Put new messages at the front of the queue, this is
-              ;; correct as the order is reversed before putting the
-              ;; timers on `timer-list'.
-              (when message
-                (push (plist-put message :jsonrpc-json frame)
-                      (process-get proc 'jsonrpc-mqueue))))))
-        ;; Now, time to notify user code of one or more messages in
-        ;; order.  Very often `jsonrpc-connection-receive' will exit
-        ;; non-locally (typically the reply to a request), so do
-        ;; this all this processing in top-level loops timer.
-        (cl-loop
-         ;; `timer-activate' orders timers by time, which is an
-         ;; very expensive operation when jsonrpc-mqueue is large,
-         ;; therefore the time object is reused for each timer
-         ;; created.
-         with time = (current-time)
-         for msg = (pop (process-get proc 'jsonrpc-mqueue)) while msg
-         do (let ((timer (timer-create)))
-              (timer-set-time timer time)
-              (timer-set-function timer
-                                  (lambda (conn msg)
-                                    (with-temp-buffer
-                                      (jsonrpc-connection-receive conn msg)))
-                                  (list conn msg))
-              (timer-activate timer)))))))
+    (jsonrpc--queue-frames proc frames)
+    (unless (process-get proc 'jsonrpc-reading)
+      (process-put proc 'jsonrpc-reading t)
+      (unwind-protect
+          (with-current-buffer (process-buffer proc)
+            (while (process-get proc 'jsonrpc-frames)
+              (jsonrpc--read-frame proc (jsonrpc--next-frame proc))))
+        (process-put proc 'jsonrpc-reading nil)
+        (jsonrpc--dispatch proc)
+        (when (process-get proc 'jsonrpc-frames)
+          (run-at-time 0 nil #'jsonrpc--process-filter proc nil))))))
+
+(defun jsonrpc--queue-frames (proc frames)
+  "Put FRAMES behind the frames PROC has waiting."
+  (when frames
+    (if (process-get proc 'jsonrpc-frames)
+        (setcdr (process-get proc 'jsonrpc-frames-tail) frames)
+      (process-put proc 'jsonrpc-frames frames))
+    (process-put proc 'jsonrpc-frames-tail (last frames))))
+
+(defun jsonrpc--next-frame (proc)
+  "Take the oldest frame PROC has waiting."
+  (let ((frames (process-get proc 'jsonrpc-frames)))
+    (process-put proc 'jsonrpc-frames (cdr frames))
+    (unless (cdr frames) (process-put proc 'jsonrpc-frames-tail nil))
+    (car frames)))
+
+(defun jsonrpc--read-frame (proc frame)
+  "Parse FRAME, one of PROC's message bodies, onto its message queue."
+  (if (not (stringp frame))
+      (jsonrpc--warn "Unreadable Content-Length header: nothing more is read")
+    (let ((message (condition-case-unless-debug oops
+                       (jsonrpc--json-read frame)
+                     (error
+                      (jsonrpc--warn "Invalid JSON: %s %s" (cdr oops) frame)
+                      nil))))
+      ;; Put new messages at the front of the queue, this is correct as
+      ;; the order is reversed before putting the timers on `timer-list'.
+      (when message
+        (push (plist-put message :jsonrpc-json frame)
+              (process-get proc 'jsonrpc-mqueue))))))
+
+(defun jsonrpc--dispatch (proc)
+  "Hand each message PROC's queue holds to its connection, in order.
+Very often `jsonrpc-connection-receive' will exit non-locally (typically
+the reply to a request), so each is handled in a timer of its own."
+  (cl-loop
+   ;; `timer-activate' orders timers by time, which is an very expensive
+   ;; operation when jsonrpc-mqueue is large, therefore the time object
+   ;; is reused for each timer created.
+   with conn = (process-get proc 'jsonrpc-connection)
+   with time = (current-time)
+   for msg = (pop (process-get proc 'jsonrpc-mqueue)) while msg
+   do (let ((timer (timer-create)))
+        (timer-set-time timer time)
+        (timer-set-function timer
+                            (lambda (conn msg)
+                              (with-temp-buffer
+                                (jsonrpc-connection-receive conn msg)))
+                            (list conn msg))
+        (timer-activate timer))))
 
 (defun jsonrpc--remove (conn id &optional deferred-spec)
   "Cancel CONN's continuations for ID, including its timer, if it exists.
