@@ -274,13 +274,21 @@
   (romacs-agent-summary-readers--with-fixtures
     (romacs-agent-summary-readers--check-trapped-views #'romacs-agent-summary-readers--labels
                                                       romacs-agent-summary-readers--golden-labels)
-    (romacs-agent-summary-readers--views
-     (gethash "parent" romacs-agent--sessions) romacs-agent-log-local
-     (lambda ()
-       (let* ((label (lambda () (romacs-agent-menu--worker-label 0)))
-              (expected (funcall label)))
-         (should (string-match-p "child" expected))
-         (should (equal (romacs-agent-summary-readers--with-trap label) expected)))))))
+    (let ((parent (gethash "parent" romacs-agent--sessions))
+          (worker (gethash "working" romacs-agent--sessions)))
+      (push (romacs-agent-ui--child-row worker) (romacs-agent-children-rows parent))
+      (romacs-agent--summary-stale "parent")
+      (romacs-agent-summary-readers--views
+       parent romacs-agent-log-local
+       (lambda ()
+         (let* ((label (lambda () (romacs-agent-menu--worker-label 0)))
+                (expected (funcall label)))
+           (should (string-match-p "working" expected))
+           (should (equal (romacs-agent-summary-readers--with-trap label) expected))
+           (should-not (romacs-agent-menu--worker-label 1))
+           (should (equal (mapcar (lambda (row) (list (plist-get row :id) (plist-get row :key)))
+                                  (romacs-agent-summary-readers--with-trap #'romacs-agent-menu--thread-rows))
+                          '(("working" working) ("child" idle))))))))))
 
 (ert-deftest romacs-agent-summary-readers-trap-switcher ()
   (romacs-agent-summary-readers--with-fixtures
@@ -323,15 +331,17 @@
     (let* ((parent (gethash "parent" romacs-agent--sessions))
            (child (gethash "child" romacs-agent--sessions))
            (other (gethash "working" romacs-agent--sessions))
-           (rows (romacs-agent-children-rows parent))
            (opened nil))
+      (setf (romacs-agent-state child) 'running)
+      (romacs-agent-ui--summarize-children parent)
       (romacs-agent-summary-readers--views
        parent romacs-agent-log-local
        (lambda ()
          (should (string-match-p "child" (romacs-agent-menu--worker-label 0)))
          (should (equal (aref (romacs-agent-menu--slots) 0) "child"))
-         (setf (romacs-agent-children-rows parent)
-               (cons (romacs-agent-ui--child-row other) rows))
+         (push (romacs-agent-ui--child-row other) (romacs-agent-children-rows parent))
+         (romacs-agent--summary-stale "parent")
+         (should (equal (romacs-agent-menu--workers) '("working" "child")))
          (cl-letf (((symbol-function 'romacs-agent-show)
                     (lambda (session &rest _) (setq opened (romacs-agent-id session)))))
            (let ((last-command-event ?1)) (romacs-agent-menu-open-worker)))))
@@ -369,6 +379,29 @@
                                                 ((symbol-function 'romacs-agent--short) #'identity))
                                         (romacs-agent-menu-threads))))
                           "child"))))))))
+
+(ert-deftest romacs-agent-summary-readers-thread-menu-opens-a-settled-thread ()
+  (romacs-agent-summary-readers--with-fixtures
+    (let ((parent (gethash "parent" romacs-agent--sessions))
+          (child (gethash "child" romacs-agent--sessions))
+          (worker (gethash "working" romacs-agent--sessions))
+          shown)
+      (setf (romacs-agent-settled-seq child) (romacs-agent-done-seq child)
+            (romacs-agent-children-rows parent)
+            (mapcar #'romacs-agent-ui--child-row (list worker child)))
+      (romacs-agent--summary-stale "parent")
+      (romacs-agent-summary-readers--views
+       parent romacs-agent-log-local
+       (lambda ()
+         (let ((live (concat (romacs-agent-glyph 'chip-working) " working  Working  working"))
+               (settled (concat (romacs-agent-glyph 'completed) " child  Done  child"))
+               (command (lookup-key romacs-agent-menu-map (kbd "t"))))
+           (should (eq command 'romacs-agent-menu-threads))
+           (cl-letf (((symbol-function 'romacs-agent-show)
+                      (lambda (session action) (push (list session action) shown))))
+             (romacs-agent-summary-readers--completion
+              (list live settled) settled (lambda () (call-interactively command)))))))
+      (should (equal shown (list (list child '(display-buffer-same-window))))))))
 
 (ert-deftest romacs-agent-summary-readers-plain-effort-completion ()
   (should (equal (romacs-agent-summary-readers--completion
