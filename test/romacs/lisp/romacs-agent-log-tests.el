@@ -276,9 +276,10 @@ them inherits."
           (goto-char start)
           (should (eq (key-binding (kbd "RET")) 'romacs-agent-log-open))
           (cl-letf (((symbol-function 'romacs-agent-show)
-                     (lambda (shown action) (setq opened (list shown action)))))
+                     (lambda (shown &optional action) (setq opened (list shown action)))))
             (call-interactively (key-binding (kbd "RET"))))
-          (should (equal opened (list child '(display-buffer-same-window)))))
+          ;; Shown as `romacs-agent-display-function' says.
+          (should (equal opened (list child nil))))
         (setf (romacs-agent-state child) 'waiting-approval)
         (romacs-agent-ui--summarize-children session)
         (romacs-agent-log--activity-refresh)
@@ -1833,4 +1834,22 @@ none when dropped.")
           (when (buffer-live-p chat) (kill-buffer chat)))))))
 
 (provide 'romacs-agent-log-tests)
+(ert-deftest romacs-agent-log-display-takes-the-selected-window ()
+  ;; An agent buffer takes the selected window by default, never a new
+  ;; one; the function is the user's to choose, and an explicit action wins.
+  (let ((buffer (generate-new-buffer " agent-display")) (called nil))
+    (unwind-protect
+        (save-window-excursion
+          (delete-other-windows)
+          (romacs-agent-display buffer)
+          (should (eq (window-buffer (selected-window)) buffer))
+          (should (= (length (window-list)) 1))
+          (let ((romacs-agent-display-function (lambda (b) (setq called b))))
+            (romacs-agent-display buffer)
+            (should (eq called buffer))
+            (setq called nil)
+            (romacs-agent-display buffer '(display-buffer-same-window))
+            (should-not called)))
+      (kill-buffer buffer))))
+
 ;;; romacs-agent-log-tests.el ends here

@@ -56,13 +56,14 @@
   "cycles": 1,
   "display_instructions": 4750000,
   "display_conses": 0,
-  "windows_rebuilt": 2,
+  "windows_rebuilt": 1,
   "band_expansions": 2,
   "layouts": 1,
   "frames_submitted": 1,
   "lines_laid": 0,
   "rows_wrapped": 0,
-  "display_instructions_p90": 4850000
+  "display_instructions_p90": 4850000,
+  "windows_rebuilt_note": "a chat opens in the selected window (romacs-agent-display-function, pop-to-buffer-same-window), not a second one: one window rebuilt and laid out where two were"
  },
  "chat-cursor": {
   "step_instructions": 2170000,
@@ -112,16 +113,17 @@
   "cycles": 1,
   "display_instructions": 4160000,
   "display_conses": 154,
-  "windows_rebuilt": 2,
+  "windows_rebuilt": 1,
   "band_expansions": 2,
-  "layouts": 2,
+  "layouts": 1,
   "frames_submitted": 0,
   "lines_laid": 0,
   "rows_wrapped": 0,
   "display_instructions_p90": 4180000,
   "step_instructions_note": "reported, not held: a full collection marks the whole session, world and libraries, and what the session ran before moves it (romacs#403); above_instructions holds what the chat adds",
   "above_instructions": 3650000,
-  "above_instructions_note": "the highest merge-queue run seen (3.31M) and a tenth: the figure is bimodal across runs of one tree (2.1-3.3M), so a tight bar bounces at random until it is made deterministic (romacs#425)"
+  "above_instructions_note": "the highest merge-queue run seen (3.31M) and a tenth: the figure is bimodal across runs of one tree (2.1-3.3M), so a tight bar bounces at random until it is made deterministic (romacs#425)",
+  "windows_rebuilt_note": "a chat opens in the selected window (romacs-agent-display-function, pop-to-buffer-same-window), not a second one: one window rebuilt and laid out where two were"
  },
  "cursor-move": {
   "step_instructions": 1860000,

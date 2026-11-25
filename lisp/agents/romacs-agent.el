@@ -2294,7 +2294,9 @@ harness's, the one EVENT names when it does (`romacs-agent-switch-harness')."
                 ;; the new one has no such turn to finish or steer.
                 (setf (romacs-agent-input-seq session) nil (romacs-agent-interrupted session) nil))
               (setf (romacs-agent-harness-session session) (plist-get event :to)
-                    (romacs-agent-brief session) (plist-get event :brief)
+                    ;; A cleared conversation has no brief to carry.
+                    (romacs-agent-brief session) (let ((brief (plist-get event :brief)))
+                                                   (and (stringp brief) (not (string-empty-p brief)) brief))
                     (romacs-agent-renewing session) (or (plist-get event :seq) t)))
     ('forked (setf (romacs-agent-options session)
                    (plist-put (copy-sequence (romacs-agent-options session))
@@ -3004,21 +3006,25 @@ passed over, unparsed; SQLite's records are all read."
                 (when (hash-table-p record) (funcall function record))))
             (goto-char (min (1+ end) (point-max))))))))))
 
-(defun romacs-agent--filter (process chunk)
-  "Handle the records PROCESS's supervisor sent, CHUNK the latest output.
-Chunks wait as a list, newest first, and are joined once a line's end is
-among them: a long line costs its length, not its length times its
-chunks.  Output that comes while records are handled (a handler waiting
-on a process) waits for them, so records are handled once each, in the
-order they were sent; `romacs-agent--drain' handles them, a turn's
-slice at a time: with one taken, the next is its timer's."
-  (let ((ends (romacs-agent--ends process)))
-    (process-put process 'pending (cons chunk (process-get process 'pending)))
-    ;; A chunk with no line's end completes no record: the drain, or its
-    ;; timer, already has every whole line there was.
-    (when (string-search "\n" chunk)
-      (process-put process 'ends (1+ ends))
-      (unless (process-get process 'drain-timer) (romacs-agent--drain process)))))
+(defun romacs-agent--filter (process frames)
+  "Handle the records PROCESS's supervisor sent, FRAMES the lines read last
+\(PROCESS is framed in lines, `romacs-agent--frame').  Lines wait in a
+queue, oldest first; lines that come while records are handled (a
+handler waiting on a process) wait behind them, so records are handled
+once each, in the order they were sent; `romacs-agent--drain' handles
+them, a turn's slice at a time: with one taken, the next is its timer's."
+  (when frames
+    (if (process-get process 'frames)
+        (setcdr (process-get process 'frames-tail) frames)
+      (process-put process 'frames frames))
+    (process-put process 'frames-tail (last frames))
+    (unless (process-get process 'drain-timer) (romacs-agent--drain process))))
+
+(defun romacs-agent--frame (process)
+  "Frame PROCESS, an attachment, in lines (`set-process-framing'), so its
+filter is called with whole records: a long one costs its length."
+  (set-process-framing process 'lines)
+  process)
 
 (defconst romacs-agent--drain-turn 0.025
   "Seconds of a supervisor's records the editor handles at a time: the
@@ -3033,16 +3039,13 @@ inside itself.  Its end, once seen, waits for them
 \(`romacs-agent--sentinel')."
   (when (romacs-agent--let-go-p process)
     ;; What replaced it is replayed them, from the last record seen.
-    (process-put process 'text nil)
-    (process-put process 'queue nil)
-    (process-put process 'pending nil)
-    (process-put process 'ends 0))
+    (process-put process 'frames nil)
+    (process-put process 'frames-tail nil))
   (unless (process-get process 'draining)
     (process-put process 'draining t)
     (let ((until (+ (float-time) romacs-agent--drain-turn)))
       (unwind-protect
-          (while (and (< (float-time) until) (romacs-agent--line-waits-p process))
-            (romacs-agent--filter-lines process until))
+          (romacs-agent--filter-lines process until)
         (process-put process 'draining nil)
         ;; What is left goes on, however the slice ended (a quit in a handler).
         (when (or (romacs-agent--output-waits-p process) (process-get process 'ended))
@@ -3051,60 +3054,9 @@ inside itself.  Its end, once seen, waits for them
       (process-put process 'ended nil)
       (romacs-agent--sentinel process nil))))
 
-(defun romacs-agent--line-waits-p (process)
-  "Whether a whole line of PROCESS's output waits to be handled: in the
-text its lines are read from (its `text', from `start'), or else in the
-chunks come since, which then become that text (`romacs-agent--join'):
-a join with a line's end waiting always ends with one."
-  (or (let ((text (process-get process 'text)))
-        (and text (string-search "\n" text (process-get process 'start)) t))
-      (and (romacs-agent--ends-wait-p process)
-           (progn (romacs-agent--join process) t))))
-
-(defun romacs-agent--ends (process)
-  "How many chunks of PROCESS's output waiting to be joined hold a line's
-end, counted as chunks come and as they are joined.  An attachment from
-before the count (code loaded into a running editor) is counted once."
-  (or (process-get process 'ends)
-      (let ((ends (cl-count-if (lambda (chunk) (string-search "\n" chunk))
-                               (append (process-get process 'queue) (process-get process 'pending)))))
-        (process-put process 'ends ends)
-        ends)))
-
-(defun romacs-agent--ends-wait-p (process)
-  "Whether a chunk of PROCESS's output waiting to be joined holds a line's
-end (`romacs-agent--ends')."
-  (> (romacs-agent--ends process) 0))
-
 (defun romacs-agent--output-waits-p (process)
-  "Whether a line of PROCESS's output may wait to be handled: one in its
-text, or chunks come since with a line's end.  Nothing is joined."
-  (or (romacs-agent--ends-wait-p process)
-      (let ((text (process-get process 'text)))
-        (and text (string-search "\n" text (process-get process 'start)) t))))
-
-(defun romacs-agent--join (process)
-  "PROCESS's text from now: the rest of its text, then its chunks waiting,
-oldest first, up to the first that holds a line's end.  Each byte is
-copied once whatever the line's length: a line in many chunks is joined
-when its end has come, never a part at a time, and a replay read faster
-than it is handled is joined a line's chunks at a time.  The chunks come
-from its `queue', made of its `pending' ones (newest first) when it is
-empty, so each is turned once."
-  (let ((queue (process-get process 'queue)) (taken nil) (end nil))
-    (while (and (not end) (or queue (process-get process 'pending)))
-      (unless queue
-        (setq queue (nreverse (process-get process 'pending)))
-        (process-put process 'pending nil))
-      (let ((chunk (pop queue)))
-        (push chunk taken)
-        (setq end (string-search "\n" chunk))))
-    (let ((text (process-get process 'text)))
-      (process-put process 'text (apply #'concat (if text (substring text (process-get process 'start)) "")
-                                        (nreverse taken))))
-    (process-put process 'start 0)
-    (process-put process 'queue queue)
-    (when end (process-put process 'ends (1- (romacs-agent--ends process))))))
+  "Whether a line of PROCESS's output waits to be handled."
+  (and (process-get process 'frames) t))
 
 (defun romacs-agent--let-go-p (process)
   "Whether PROCESS is an attachment this editor let go: ended, and another
@@ -3195,25 +3147,27 @@ INPUT-SEQ and COMPLETED-SEQ say whether the last turn is still underway."
       ('attached (romacs-agent--supervisor-attached session process)))))
 
 (defun romacs-agent--filter-lines (process until)
-  "Handle the whole lines of PROCESS's output text from its `start' until
-time UNTIL, one at least, each on its own: one whose handling signals
-is reported and the next handled, so no error loses the records after
-it.  A line is passed over as it is taken: a handler that exits
-nonlocally (a quit) leaves the lines after it waiting."
+  "Handle the lines waiting from PROCESS until time UNTIL, one at least,
+each on its own: one whose handling signals is reported and the next
+handled, so no error loses the records after it.  A line is taken off
+before it is handled: a handler that exits nonlocally (a quit) leaves
+the lines after it waiting."
   (let ((session (process-get process 'romacs-agent))
-        (text (process-get process 'text))
-        ;; One line at least, whatever finding it cost: a line whose search
-        ;; outlasts the turn's budget is still handled, never put off.
+        ;; One line at least, whatever the turn's budget.
         (first t))
-    (while (and (or first (< (float-time) until)) (string-match "\n" text (process-get process 'start)))
+    (while (and (process-get process 'frames) (or first (< (float-time) until)))
       (setq first nil)
-      (let ((line (substring text (process-get process 'start) (match-beginning 0))))
-        (process-put process 'start (match-end 0))
-        (let ((record (ignore-errors
-                        ;; JSON false and null are kept, so a tool's input
-                        ;; written back (an approval) is the one the harness sent.
-                        (json-parse-string (decode-coding-string line 'utf-8)
-                                           :object-type 'hash-table :null-object :null :false-object :false))))
+      (let* ((frames (process-get process 'frames))
+             (line (car frames)))
+        (process-put process 'frames (cdr frames))
+        ;; Nothing waits: no record is kept by the queue's tail.
+        (unless (cdr frames) (process-put process 'frames-tail nil))
+        (let ((record (and (stringp line)
+                           (ignore-errors
+                             ;; JSON false and null are kept, so a tool's input
+                             ;; written back (an approval) is the one the harness sent.
+                             (json-parse-string (decode-coding-string line 'utf-8)
+                                                :object-type 'hash-table :null-object :null :false-object :false)))))
           (condition-case err
               (romacs-agent--apply-attachment-record session process record)
             (error (romacs-agent--record-failed session err))))))))
@@ -3315,11 +3269,11 @@ state, which may be most of its history."
 while it does not yet listen; the connection it replaces is let go."
   (condition-case nil
       (let ((old (romacs-agent-connection session))
-            (process (make-network-process
+            (process (romacs-agent--frame (make-network-process
                       :name (format "romacs-agent-%s" (romacs-agent--key (romacs-agent-id session)))
                       :family 'local :service (romacs-agent-host-socket session)
                       :coding 'no-conversion :noquery t
-                      :filter #'romacs-agent--filter :sentinel #'romacs-agent--sentinel)))
+                      :filter #'romacs-agent--filter :sentinel #'romacs-agent--sentinel))))
         (process-put process 'romacs-agent session)
         (setf (romacs-agent-connection session) process (romacs-agent-caught-up session) nil)
         ;; From the last record seen, not the one after: a kept attachment
@@ -4455,11 +4409,12 @@ while it does not yet listen; given up, its notes stay held."
   (let ((id (romacs-agent-id session)))
     (when (eq (gethash id romacs-agent--note-hosts) t)
       (condition-case nil
-          (let ((host (make-network-process
-                       :name (format "romacs-agent-notes-%s" (romacs-agent--key id))
-                       :family 'local :service (romacs-agent-host-socket session)
-                       :coding 'no-conversion :noquery t
-                       :filter #'romacs-agent--filter :sentinel #'romacs-agent--notes-sentinel)))
+          (let ((host (romacs-agent--frame
+                       (make-network-process
+                        :name (format "romacs-agent-notes-%s" (romacs-agent--key id))
+                        :family 'local :service (romacs-agent-host-socket session)
+                        :coding 'no-conversion :noquery t
+                        :filter #'romacs-agent--filter :sentinel #'romacs-agent--notes-sentinel))))
             (process-put host 'romacs-agent session)
             (process-put host 'notes-only t)
             (puthash id host romacs-agent--note-hosts)
@@ -5754,7 +5709,9 @@ for a kind no reason has, as for a send that may not have been taken."
 (defvar romacs-agent--submit-drafts (make-hash-table :test #'equal)
   "Every draft `romacs-agent--submit-draft' took in this run of the
 editor, by the id of the queue item it is (`romacs-agent--submit-item-id'):
-\(STATE SESSION-ID DIGEST . WAITING).  STATE is `pending' while it is
+\(STATE SESSION-ID DIGEST . WAITING).  STATE is `command' for a slash
+command that ran (`romacs-agent-slash-command'), WAITING its answer;
+`pending' while it is
 admitted, WAITING the callbacks of its repeats; `queued' while its
 message waits (`romacs-agent--draft-gone' lets it go should it leave the
 queue unwritten); `written' once it is (`romacs-agent--draft-written').
@@ -5922,6 +5879,8 @@ unconfirmed again; else accepted again, nothing sent."
          (cons 'answer (romacs-agent--submit-conflict intent)))
         ((eq (car draft) 'pending) (cons 'wait draft))
         ((eq (car draft) 'unconfirmed) (cons 'answer (romacs-agent-submit-unconfirmed intent)))
+        ;; A slash command ran: its answer again, nothing run twice.
+        ((eq (car draft) 'command) (cons 'answer (nth 3 draft)))
         (t (cons 'answer (romacs-agent--submit-placed (romacs-agent-loaded session-id) id
                                                       (plist-get intent :draft-id))))))
 
@@ -5934,6 +5893,38 @@ found.  A quit goes on."
           (cons 'session session)
         (cons 'answer (romacs-agent-submit-refused intent 'no-session (format "No session %s" session-id))))
     (error (cons 'answer (romacs-agent-submit-refused intent 'owner-unavailable (error-message-string err))))))
+
+(defvar romacs-agent-slash-commands nil
+  "The slash commands a user's draft can be, whatever the session's
+harness: an alist of NAME (a string, without its slash) to (HANDLER
+DOC).  HANDLER is called with the session and the text after the name,
+trimmed, and returns what to tell the user, or signals a `user-error'
+the draft is refused with.  Defined by `romacs-agent-define-slash-command'.")
+
+(defun romacs-agent-define-slash-command (name doc handler)
+  "Make /NAME a slash command of every session (`romacs-agent-slash-commands'):
+DOC says what it does, HANDLER runs it."
+  (setf (alist-get name romacs-agent-slash-commands nil nil #'equal) (list handler doc)))
+
+(defun romacs-agent-slash-command (text)
+  "The slash command TEXT, a draft, is, as (NAME HANDLER . ARGS), or nil:
+a defined name after its slash, then nothing or a space.  Any other text
+starting with a slash (a path, a harness's own command) is a message."
+  (when (string-match "\\`/\\([[:alnum:]-]+\\)\\(?:[[:space:]]+\\(\\(?:.\\|\n\\)*\\)\\)?\\'" text)
+    (when-let* ((name (match-string 1 text))
+                (entry (alist-get name romacs-agent-slash-commands nil nil #'equal)))
+      (cons name (cons (car entry) (string-trim (or (match-string 2 text) "")))))))
+
+(defun romacs-agent--submit-slash (session intent command)
+  "Run COMMAND (`romacs-agent-slash-command') of INTENT's draft for
+SESSION, in place of sending it: the answer accepts the draft, saying
+what was done, or refuses it with the command's error."
+  (pcase-let ((`(,name ,handler . ,args) command))
+    (condition-case err
+        (let ((said (funcall handler session args)))
+          (append (list :draft-id (plist-get intent :draft-id) :status 'accepted :command name)
+                  (and (stringp said) (list :message said))))
+      (user-error (romacs-agent-submit-refused intent 'invalid (error-message-string err))))))
 
 (defun romacs-agent--submit-step (scope session-id intent)
   "What to do with INTENT, from SCOPE, to the session SESSION-ID names:
@@ -5951,6 +5942,16 @@ its id meanwhile; or (admit SESSION DIGEST), admit it
                (`(answer . ,refused) (cons 'answer refused))
                (`(session . ,session)
                 (cond ((gethash id romacs-agent--submit-drafts) 'again)
+                      ;; A slash command runs, whatever the harness's state;
+                      ;; accepted, its draft is known as any other's is.
+                      ((when-let* ((command (romacs-agent-slash-command (string-trim (plist-get intent :text)))))
+                         (let ((answer (if (plist-get intent :attachments)
+                                           (romacs-agent-submit-refused intent 'invalid
+                                                                        (format "/%s takes no attachments" (car command)))
+                                         (romacs-agent--submit-slash session intent command))))
+                           (when (eq (plist-get answer :status) 'accepted)
+                             (puthash id (list 'command (romacs-agent-id session) digest answer) romacs-agent--submit-drafts))
+                           (cons 'answer answer))))
                       ((romacs-agent--ended-p session)
                        (cons 'answer (romacs-agent-submit-refused intent 'closed (romacs-agent--ended-text session))))
                       (t (list 'admit session digest)))))))))

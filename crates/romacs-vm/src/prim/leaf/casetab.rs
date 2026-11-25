@@ -176,19 +176,23 @@ impl Leaf<'_> {
 
     pub fn current_case_mapping(&mut self, down: bool) -> super::super::Out {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
-        let uninitialized = match &self.vm.objects[index] {
-            Object::Buffer(b) => b.case_tables[0] == Value::NIL,
-            Object::ByteBuffer(b) => b.case_tables[0] == Value::NIL,
+        let current = match &self.vm.objects[index] {
+            Object::Buffer(b) => b.case_tables,
+            Object::ByteBuffer(b) => b.case_tables,
             _ => unreachable!(),
         };
-        if uninitialized { self.standard_case_table()?; }
-        let standard = self.vm.standard_case_tables;
-        let roots = match self.vm.objects.entry_mut(index) {
-            Object::Buffer(b) => &mut b.case_tables,
-            Object::ByteBuffer(b) => &mut b.case_tables,
-            _ => unreachable!(),
-        };
-        if uninitialized { *roots = standard; }
+        // Initialized roots are only read; the entry is taken `&mut' to
+        // install the standard ones.
+        let roots = if current[0] == Value::NIL {
+            self.standard_case_table()?;
+            let standard = self.vm.standard_case_tables;
+            match self.vm.objects.entry_mut(index) {
+                Object::Buffer(b) => b.case_tables = standard,
+                Object::ByteBuffer(b) => b.case_tables = standard,
+                _ => unreachable!(),
+            }
+            standard
+        } else { current };
         Ok(roots[if down { 0 } else { 1 }])
     }
 

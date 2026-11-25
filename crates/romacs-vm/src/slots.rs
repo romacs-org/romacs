@@ -8,7 +8,8 @@
 //! the card of the slot it reaches, one byte for `CARD` slots, and takes a
 //! new slot through `push`, which marks its card: a write that marks no
 //! card does not compile. The collector's own rewrite (`collector_iter_mut`) changes where
-//! values are, not which, and marks nothing.
+//! values are, not which, and marks nothing. Mutable slot access also sets
+//! the symbol's written-since-restore bit, which outlives collections.
 use crate::Slot;
 
 /// Slots to a card.
@@ -42,6 +43,7 @@ impl std::ops::IndexMut<usize> for Slots {
         let slot = &mut self.list[i];
         // In bounds: the cards cover every slot (`push`).
         self.cards[i / CARD] = 1;
+        slot.written_since_restore = true;
         slot
     }
 }
@@ -77,6 +79,15 @@ impl Slots {
     pub(crate) fn written(&self) -> impl Iterator<Item = std::ops::Range<usize>> + '_ {
         let len = self.list.len();
         self.cards.iter().enumerate().filter(|&(_, &card)| card != 0).map(move |(i, _)| i * CARD..((i + 1) * CARD).min(len))
+    }
+    pub(crate) fn mark_written_since_restore(&mut self, i: usize) {
+        self.list[i].written_since_restore = true;
+    }
+    /// Start the image's write history with every slot clear.
+    pub(crate) fn clear_written_since_restore(&mut self) {
+        for slot in &mut self.list {
+            slot.written_since_restore = false;
+        }
     }
     /// A collection ended: every slot's values are old.
     pub(crate) fn settle(&mut self) {

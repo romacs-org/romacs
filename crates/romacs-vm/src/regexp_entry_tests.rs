@@ -2,7 +2,68 @@
 //! text, counted: after its first call in a buffer it looks nothing up by
 //! name, reads no variable through its binding tables, converts no position
 //! Lisp does not get, copies no string and reads no syntax-table entry twice.
-use crate::Vm;
+use crate::{Vm, data::Object};
+
+#[test]
+fn entry_barrier_regexp_flat_window_stays_clean() {
+    let mut vm = Vm::new();
+    vm.eval_source_raw("(insert \"aéza\") (narrow-to-region 2 4)")
+        .unwrap();
+    vm.check_buffer_entry_store(false, |vm, index| {
+        let Object::Buffer(text) = &vm.objects[index] else {
+            panic!("expected a multibyte buffer")
+        };
+        assert_eq!(text.bytes(), "aéza".as_bytes());
+        let window = vm.regexp_buffer_window(index, 1..3);
+        assert_eq!(window, 1..4);
+        assert_eq!(vm.regexp_buffer_input(index, window).bytes, "éz".as_bytes());
+    });
+}
+
+#[test]
+fn entry_barrier_regexp_narrowed_unibyte_window_stays_clean() {
+    let mut vm = Vm::new();
+    vm.eval_source_raw("(set-buffer-multibyte nil) (insert \"abcdef\") (narrow-to-region 2 5)")
+        .unwrap();
+    vm.check_buffer_entry_store(false, |vm, index| {
+        assert!(matches!(vm.objects[index], Object::ByteBuffer(_)));
+        let window = vm.regexp_buffer_window(index, 2..3);
+        assert_eq!(window, 1..4);
+        assert_eq!(vm.regexp_buffer_input(index, window).bytes, b"bcd");
+    });
+}
+
+#[test]
+fn entry_barrier_regexp_moving_the_search_view_gap_dirties_the_buffer() {
+    let mut vm = Vm::new();
+    // The search builds the view, its gap at the end; the insertion
+    // leaves the gap after "b", inside the narrowed "ébz".
+    vm.eval_source_raw("(insert \"aéza\") (goto-char 1) (re-search-forward \"z\")
+        (goto-char 3) (insert \"b\") (narrow-to-region 2 5)")
+        .unwrap();
+    vm.check_buffer_entry_store(true, |vm, index| {
+        let before = crate::text::copied_bytes();
+        let window = vm.regexp_buffer_window(index, 1..5);
+        assert_eq!(window, 1..5);
+        // The kept view's gap moved one byte, past "b": no rebuild.
+        assert_eq!(crate::text::copied_bytes() - before, 1);
+        assert_eq!(vm.regexp_buffer_input(index, window).bytes, "\u{e9}bz".as_bytes());
+    });
+}
+
+#[test]
+fn entry_barrier_regexp_building_a_search_view_dirties_the_buffer() {
+    let mut vm = Vm::new();
+    vm.eval_source_raw("(insert \"aéza\") (narrow-to-region 2 4)")
+        .unwrap();
+    vm.check_buffer_entry_store(true, |vm, index| {
+        let before = crate::text::copied_bytes();
+        let window = vm.regexp_buffer_window(index, 1..3);
+        assert_eq!(window, 1..4);
+        assert_eq!(crate::text::copied_bytes() - before, "aéza".len());
+        assert_eq!(vm.regexp_buffer_input(index, window).bytes, "éz".as_bytes());
+    });
+}
 
 /// What the calls of one form cost.
 #[derive(Debug, PartialEq, Eq, Default)]

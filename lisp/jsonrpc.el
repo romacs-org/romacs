@@ -562,10 +562,6 @@ CONNECTION, METHOD and PARAMS as in `jsonrpc-async-request' (which see)."
   ((-process
     :initarg :process :accessor jsonrpc--process
     :documentation "Process object wrapped by the this connection.")
-   (-expected-bytes
-    :initform nil
-    :accessor jsonrpc--expected-bytes
-    :documentation "How many bytes declared by server.")
    (-on-shutdown
     :accessor jsonrpc--on-shutdown
     :initform #'ignore
@@ -597,6 +593,8 @@ connection object, called when the process dies.")
     ;; could use a pipe with a process filter instead of
     ;; `after-change-functions'.  Alternatively, we need a new initarg
     ;; (but maybe not a slot).
+    ;; Romacs: a process given is checked before anything is made for it.
+    (unless (functionp proc) (jsonrpc--check-pipe proc nil))
     (let* ((stderr-buffer-name (format "*%s stderr*" name))
            (stderr-buffer (jsonrpc--forwarding-buffer stderr-buffer-name "[stderr] " conn))
            (hidden-name (concat " " stderr-buffer-name)))
@@ -604,10 +602,16 @@ connection object, called when the process dies.")
       ;; created should pick up the `stderr-buffer' just created, which
       ;; we immediately rename
       (setq proc (if (functionp proc)
-                     (if (zerop (cdr (func-arity proc)))
-                         (funcall proc)
-                       (funcall proc conn))
+                     ;; Romacs: its stderr buffer goes if it fails.
+                     (condition-case err
+                         (if (zerop (cdr (func-arity proc)))
+                             (funcall proc)
+                           (funcall proc conn))
+                       (error (kill-buffer stderr-buffer)
+                              (signal (car err) (cdr err))))
                    proc))
+      ;; One made here, with its stderr buffer, goes if it is refused.
+      (jsonrpc--check-pipe proc stderr-buffer)
       (with-current-buffer stderr-buffer
         (ignore-errors (kill-buffer hidden-name))
         (rename-buffer hidden-name)
@@ -618,6 +622,10 @@ connection object, called when the process dies.")
     (set-process-filter proc #'jsonrpc--process-filter)
     (set-process-sentinel proc #'jsonrpc--process-sentinel)
     (set-process-coding-system proc 'binary 'binary)
+    ;; Romacs: the process layer splits the Content-Length frames as it
+    ;; reads (`set-process-framing'), so the filter is called with whole
+    ;; messages (ledger/divergences/LISP-JSONRPC-FRAMING.md).
+    (set-process-framing proc 'content-length)
     (with-current-buffer (process-buffer proc)
       (set-buffer-multibyte nil)
       (buffer-disable-undo)
@@ -626,6 +634,25 @@ connection object, called when the process dies.")
         (erase-buffer))
       (setq buffer-read-only t))
     (process-put proc 'jsonrpc-connection conn)))
+
+(defun jsonrpc--check-pipe (proc stderr-buffer)
+  "Signal, saying how to fix it, unless PROC is a pipe or a socket: a
+pty's line discipline (echo, CR/LF) breaks a byte protocol, and its
+output cannot be framed.  STDERR-BUFFER non-nil, PROC and it were made
+for this connection, and are let go first."
+  (when (and (processp proc) (process-tty-name proc))
+    (let ((name (process-name proc))
+          (remote (file-remote-p default-directory)))
+      (when stderr-buffer
+        (delete-process proc)
+        (kill-buffer stderr-buffer))
+      (error "JSON-RPC process %s runs on a pty, which cannot carry JSON-RPC: %s"
+             name
+             (cond ((not remote) "make it with :connection-type 'pipe")
+                   ;; TRAMP marks a process made with the binding.
+                   ((process-get proc 'tramp-pipe-process)
+                    (format "TRAMP gave %s a pty though a pipe was asked for" remote))
+                   (t (format "over TRAMP (%s), make it with `tramp-pipe-process' bound to t" remote)))))))
 
 (cl-defmethod jsonrpc-connection-send ((connection jsonrpc-process-connection)
                                        &rest args
@@ -701,27 +728,12 @@ and delete the network process."
 ;;;
 (define-error 'jsonrpc-error "jsonrpc-error")
 
-(defalias 'jsonrpc--json-read
-  (if (fboundp 'json-parse-buffer)
-      (lambda ()
-        (json-parse-buffer :object-type 'plist
-                           :null-object nil
-                           :false-object :json-false))
-    (require 'json)
-    (defvar json-object-type)
-    (declare-function json-read-from-string "json" (string))
-    (lambda ()
-      (let ((json-object-type 'plist))
-        ;; `json-read' can't be used because the old json API requires
-        ;; decoded input.
-        (prog1
-            (json-read-from-string
-             (decode-coding-string
-              (buffer-substring-no-properties (point) (point-max))
-              'utf-8-unix t))
-          (goto-char (point-max))))))
-  "Read JSON object in (binary unibyte) buffer from point.
-Move point to end of buffer.")
+(defun jsonrpc--json-read (body)
+  "The JSON object BODY, a message's UTF-8 bytes, as a plist."
+  (json-parse-string (decode-coding-string body 'utf-8-unix t)
+                     :object-type 'plist
+                     :null-object nil
+                     :false-object :json-false))
 
 (defalias 'jsonrpc--json-encode
   (if (fboundp 'json-serialize)
@@ -784,117 +796,82 @@ Move point to end of buffer.")
         (when-let* ((p (slot-value connection '-autoport-inferior))) (delete-process p))
         (funcall (jsonrpc--on-shutdown connection) connection)))))
 
-(defvar jsonrpc--in-process-filter nil
-  "Non-nil if inside `jsonrpc--process-filter'.")
-
-(cl-defun jsonrpc--process-filter (proc string)
-  "Called when new data STRING has arrived for PROC."
-  (when jsonrpc--in-process-filter
-    ;; Problematic recursive process filters may happen if
-    ;; `jsonrpc-connection-receive', called by us, eventually calls
-    ;; client code which calls `process-send-string' (which see) to,
-    ;; say send a follow-up message.  If that happens to writes enough
-    ;; bytes for pending output to be received, we will lose JSONRPC
-    ;; messages.  In that case, remove recursiveness by re-scheduling
-    ;; ourselves to run from within a timer as soon as possible
-    ;; (bug#60088)
-    (run-at-time 0 nil #'jsonrpc--process-filter proc string)
-    (cl-return-from jsonrpc--process-filter))
+(defun jsonrpc--process-filter (proc frames)
+  "Called when PROC has read FRAMES, the bodies of the messages it
+completed: PROC is framed by Content-Length (`set-process-framing').
+They wait in PROC's queue, oldest first, and are read in order: a read
+inside the reading (a handler, or a warning, that waits on processes)
+adds its frames behind them, and a read cut short (an error, a quit)
+leaves the rest for a timer, so no message is lost or moved."
   (when (buffer-live-p (process-buffer proc))
-    (with-current-buffer (process-buffer proc)
-      (let* ((conn (process-get proc 'jsonrpc-connection))
-             (expected-bytes (jsonrpc--expected-bytes conn)))
-        ;; Insert the text, advancing the process marker.
-        ;;
-        (save-excursion
-          (goto-char (process-mark proc))
-          (let ((inhibit-read-only t)) (insert string))
-          (set-marker (process-mark proc) (point)))
-        ;; Loop (more than one message might have arrived)
-        ;;
-        (unwind-protect
-            (let (done)
-              (while (not done)
-                (cond
-                 ((not expected-bytes)
-                  ;; Starting a new message
-                  ;;
-                  (setq expected-bytes
-                        (and (search-forward-regexp
-                              (rx bol "Content-Length: " (group (+ digit))
-                                  "\r\n"
-                                  (* (* (not (in ":\n"))) ": "
-                                     (* (not (in "\r\n"))) "\r\n")
-                                  "\r\n")
-                              (+ (point) 100)
-                              t)
-                             (string-to-number (match-string 1))))
-                  (unless expected-bytes
-                    (setq done :waiting-for-new-message)))
-                 (t
-                  ;; Attempt to complete a message body
-                  ;;
-                  (let ((available-bytes (- (position-bytes (process-mark proc))
-                                            (position-bytes (point)))))
-                    (cond
-                     ((>= available-bytes
-                          expected-bytes)
-                      (let* ((message-end (byte-to-position
-                                           (+ (position-bytes (point))
-                                              expected-bytes)))
-                             message
-                             )
-                        (unwind-protect
-                            (save-restriction
-                              (narrow-to-region (point) message-end)
-                              (setq message
-                                    (condition-case-unless-debug oops
-                                        (jsonrpc--json-read)
-                                      (error
-                                       (jsonrpc--warn "Invalid JSON: %s %s"
-                                                      (cdr oops) (buffer-string))
-                                       nil)))
-                              (when message
-                                (setq message
-                                      (plist-put message :jsonrpc-json
-                                                 (buffer-string)))
-                                ;; Put new messages at the front of the queue,
-                                ;; this is correct as the order is reversed
-                                ;; before putting the timers on `timer-list'.
-                                (push message
-                                      (process-get proc 'jsonrpc-mqueue))))
-                          (goto-char message-end)
-                          (let ((inhibit-read-only t))
-                            (delete-region (point-min) (point)))
-                          (setq expected-bytes nil))))
-                     (t
-                      ;; Message is still incomplete
-                      ;;
-                      (setq done :waiting-for-more-bytes-in-this-message))))))))
-          ;; Saved parsing state for next visit to this filter, which
-          ;; may well be a recursive one stemming from the tail call
-          ;; to `jsonrpc-connection-receive' below (bug#60088).
-          ;;
-          (setf (jsonrpc--expected-bytes conn) expected-bytes)
-          ;; Now, time to notify user code of one or more messages in
-          ;; order.  Very often `jsonrpc-connection-receive' will exit
-          ;; non-locally (typically the reply to a request), so do
-          ;; this all this processing in top-level loops timer.
-          (cl-loop
-           ;; `timer-activate' orders timers by time, which is an
-           ;; very expensive operation when jsonrpc-mqueue is large,
-           ;; therefore the time object is reused for each timer
-           ;; created.
-           with time = (current-time)
-           for msg = (pop (process-get proc 'jsonrpc-mqueue)) while msg
-           do (let ((timer (timer-create)))
-                (timer-set-time timer time)
-                (timer-set-function timer
-                                    (lambda (conn msg)
-                                      (with-temp-buffer
-                                        (jsonrpc-connection-receive conn msg)))
-                                    (list conn msg))
-                (timer-activate timer))))))))
+    (jsonrpc--queue-frames proc frames)
+    (unless (process-get proc 'jsonrpc-reading)
+      (process-put proc 'jsonrpc-reading t)
+      (unwind-protect
+          (with-current-buffer (process-buffer proc)
+            (while (process-get proc 'jsonrpc-frames)
+              (jsonrpc--read-frame proc (jsonrpc--next-frame proc))))
+        (process-put proc 'jsonrpc-reading nil)
+        (jsonrpc--dispatch proc)
+        (when (process-get proc 'jsonrpc-frames)
+          (run-at-time 0 nil #'jsonrpc--process-filter proc nil))))))
+
+(defun jsonrpc--queue-frames (proc frames)
+  "Put FRAMES behind the frames PROC has waiting."
+  (when frames
+    (if (process-get proc 'jsonrpc-frames)
+        (setcdr (process-get proc 'jsonrpc-frames-tail) frames)
+      (process-put proc 'jsonrpc-frames frames))
+    (process-put proc 'jsonrpc-frames-tail (last frames))))
+
+(defun jsonrpc--next-frame (proc)
+  "Take the oldest frame PROC has waiting."
+  (let ((frames (process-get proc 'jsonrpc-frames)))
+    (process-put proc 'jsonrpc-frames (cdr frames))
+    (unless (cdr frames) (process-put proc 'jsonrpc-frames-tail nil))
+    (car frames)))
+
+(defun jsonrpc--read-frame (proc frame)
+  "Parse FRAME, one of PROC's message bodies, onto its message queue."
+  (if (not (stringp frame))
+      (jsonrpc--warn "Unreadable Content-Length header: nothing more is read")
+    (let ((message (condition-case-unless-debug oops
+                       (jsonrpc--json-read frame)
+                     (error
+                      (jsonrpc--warn "Invalid JSON: %s %s" (cdr oops) frame)
+                      nil))))
+      ;; Put new messages at the front of the queue, this is correct as
+      ;; the order is reversed before putting the timers on `timer-list'.
+      (when message
+        (push (plist-put message :jsonrpc-json frame)
+              (process-get proc 'jsonrpc-mqueue))))))
+
+(defun jsonrpc--dispatch (proc)
+  "Hand the messages PROC's queue holds to its connection, in order.
+Very often `jsonrpc-connection-receive' will exit non-locally (typically
+the reply to a request), so each is handled in a timer of its own; the
+messages wait in PROC's deliveries, oldest first, and each timer hands
+over the oldest, so they are received in order whichever timer runs
+first."
+  (let ((messages (nreverse (process-get proc 'jsonrpc-mqueue)))
+        ;; `timer-activate' orders timers by time, which is an very
+        ;; expensive operation when jsonrpc-mqueue is large, therefore the
+        ;; time object is reused for each timer created.
+        (time (current-time)))
+    (process-put proc 'jsonrpc-mqueue nil)
+    (process-put proc 'jsonrpc-deliveries
+                 (nconc (process-get proc 'jsonrpc-deliveries) messages))
+    (dolist (_ messages)
+      (let ((timer (timer-create)))
+        (timer-set-time timer time)
+        (timer-set-function timer #'jsonrpc--deliver (list proc))
+        (timer-activate timer)))))
+
+(defun jsonrpc--deliver (proc)
+  "Hand the oldest message PROC's deliveries hold to its connection."
+  (when-let* ((msg (pop (process-get proc 'jsonrpc-deliveries))))
+    (with-temp-buffer
+      (jsonrpc-connection-receive (process-get proc 'jsonrpc-connection) msg))))
 
 (defun jsonrpc--remove (conn id &optional deferred-spec)
   "Cancel CONN's continuations for ID, including its timer, if it exists.

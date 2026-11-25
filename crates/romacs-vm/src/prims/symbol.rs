@@ -24,6 +24,12 @@ fn symbol_plist(cx, symbol: Value) {
     cx.observed_symbol_plist(symbol)
 }}
 
+// Return non-nil if SYMBOL's slot was written since image restore.
+defsubr! { name = "romacs--written-p", gnu = "romacs:symbol", effect = Reads,
+fn symbol_written_p(cx, symbol: Value) {
+    cx.symbol_written_p(symbol)
+}}
+
 defsubr! { name = "setplist", gnu = "data.c:1029", effect = Global,
 fn setplist(cx, symbol: Value, newplist: Value) {
     cx.set_symbol_plist(symbol, newplist)

@@ -1,6 +1,61 @@
 use super::*;
 
 #[test]
+fn entry_barrier_threaded_buffer_reads_stay_clean() {
+    let mut vm = Vm::new();
+    vm.eval_source_raw("(insert \"aéz\") (goto-char 2)")
+        .unwrap();
+    vm.check_buffer_entry_store(false, |vm, _| {
+        for (primitive, arg, expected) in [
+            (Primitive::Point, Value::NIL, 2),
+            (Primitive::PointMin, Value::NIL, 1),
+            (Primitive::PointMax, Value::NIL, 4),
+            (Primitive::BufferSize, Value::NIL, 3),
+            (Primitive::CharAfter, Value::NIL, i64::from(u32::from('é'))),
+            (
+                Primitive::CharAfter,
+                Value::integer(3).unwrap(),
+                i64::from(b'z'),
+            ),
+        ] {
+            assert_eq!(
+                buffer_read_value(vm, Value::reference(primitive as usize, 6), arg),
+                Some(Value::integer(expected).unwrap())
+            );
+        }
+        let goto = Value::reference(Primitive::GotoChar as usize, 6);
+        assert_eq!(buffer_read_value(vm, goto, Value::NIL), None);
+        assert_eq!(vm.point_char().ok(), Some(2));
+    });
+}
+
+#[test]
+fn entry_barrier_threaded_goto_char_in_a_unibyte_buffer_falls_back_clean() {
+    let mut vm = Vm::new();
+    vm.eval_source_raw("(set-buffer-multibyte nil) (insert \"abc\") (goto-char 2)")
+        .unwrap();
+    vm.check_buffer_entry_store(false, |vm, index| {
+        assert!(matches!(vm.objects[index], data::Object::ByteBuffer(_)));
+        let goto = Value::reference(Primitive::GotoChar as usize, 6);
+        assert_eq!(buffer_read_value(vm, goto, Value::integer(3).unwrap()), None);
+        assert_eq!(vm.point_char().ok(), Some(2));
+    });
+}
+
+#[test]
+fn entry_barrier_threaded_goto_char_dirties_the_buffer() {
+    let mut vm = Vm::new();
+    vm.eval_source_raw("(insert \"aéz\") (goto-char 2)")
+        .unwrap();
+    vm.check_buffer_entry_store(true, |vm, _| {
+        let goto = Value::reference(Primitive::GotoChar as usize, 6);
+        let destination = Value::integer(3).unwrap();
+        assert_eq!(buffer_read_value(vm, goto, destination), Some(destination));
+        assert_eq!(vm.point_char().ok(), Some(3));
+    });
+}
+
+#[test]
 fn callback_collects_and_forwards_suspended_stack_in_place() {
     let mut vm = Vm::new();
     vm.set_gc_moving(true);
