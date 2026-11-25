@@ -1398,7 +1398,8 @@ newest first."
     ;; popup and the glyph table (a user's customization).
     romacs-agent-writer-start-functions romacs-agent-writer-held-start-functions
     romacs-agent-writer-gave-up-functions romacs-agent-client-follow-functions
-    romacs-agent-client-rows-functions romacs-agent-client-session-functions romacs-mcp-peer-close-functions
+    romacs-agent-client-rows-functions romacs-agent-client-session-functions romacs-agent-client-ended-functions
+    romacs-mcp-peer-close-functions
     romacs-agent-ask-sent-functions romacs-agent-glyph-alist-changed-hook
     ;; A composer's own buffer-local hook, run with its own edit.
     romacs-agent-log-draft-replaced-hook)

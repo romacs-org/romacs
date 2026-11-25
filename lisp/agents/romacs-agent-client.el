@@ -5,7 +5,8 @@
 ;;; Commentary:
 ;; A client of the agent session protocol (doc/agent-protocol.org,
 ;; Clients): it connects to a service's socket (this machine's, or the
-;; local end of `romacs-relay connect' to another's), says hello, and
+;; local end of `romacs-relay connect' to another's) or through a
+;; command's pipes (`ssh HOST romacs-relay stdio'), says hello, and
 ;; mirrors what the service serves.  It folds nothing and has no policy
 ;; and no timer that acts: it shows what the service says.
 ;;
@@ -35,6 +36,10 @@ each in the order its revisions give, or (failed ERROR) when an open,
 the first or one to recover, is refused: nothing more comes of it until
 it is opened again.")
 
+(defvar romacs-agent-client-ended-functions nil
+  "Functions called with a client once its connection ended, after the
+requests and the sessions followed through it were told.")
+
 (defvar romacs-agent-client-instance nil
   "This process's name as a client, kept across its connections: a UUID
 made once.")
@@ -57,13 +62,36 @@ whether another must follow it (AGAIN: t, or `whole' for all the list)."
 (defun romacs-agent-client--instance ()
   (or romacs-agent-client-instance (setq romacs-agent-client-instance (romacs-agent-client--uuid))))
 
-(defun romacs-agent-client-connect (socket)
-  "Connect to the service at SOCKET, say hello and watch its list.  The client."
+(defun romacs-agent-client--process (place stderr)
+  "A connection to the service at PLACE: a socket's file name, or a
+command (a list of strings) run on pipes, never a pty, its standard error
+to the buffer STDERR (one of its own when nil), never into the stream."
+  (if (stringp place)
+      (make-network-process :name "romacs-agent-client" :family 'local :service place
+                            :noquery t :coding 'no-conversion
+                            :filter #'romacs-agent-client--filter
+                            :sentinel #'romacs-agent-client--sentinel)
+    ;; Its end said by the connection's sentinel, not in its buffer.
+    (let* ((buffer (or stderr (generate-new-buffer " *romacs-agent-client stderr*")))
+           (errors (make-pipe-process :name "romacs-agent-client stderr" :noquery t :sentinel #'ignore
+                                      :buffer buffer)))
+      (condition-case err
+          (make-process :name "romacs-agent-client" :command place :connection-type 'pipe
+                        :noquery t :coding 'no-conversion :stderr errors
+                        :filter #'romacs-agent-client--filter
+                        :sentinel #'romacs-agent-client--sentinel)
+        ;; No command run: nothing writes to its stderr.
+        (error (delete-process errors)
+               (unless stderr (kill-buffer buffer))
+               (signal (car err) (cdr err)))))))
+
+(defun romacs-agent-client-connect (place &optional stderr)
+  "Connect to the service at PLACE, say hello and watch its list.  PLACE
+is a socket's file name, or a command whose standard input and output
+carry the protocol, as `ssh HOST romacs-relay stdio' does; its standard
+error goes to the buffer STDERR.  The client."
   (let* ((client (romacs-agent-client--make))
-         (process (make-network-process :name "romacs-agent-client" :family 'local :service socket
-                                        :noquery t :coding 'no-conversion
-                                        :filter #'romacs-agent-client--filter
-                                        :sentinel #'romacs-agent-client--sentinel)))
+         (process (romacs-agent-client--process place stderr)))
     (setf (romacs-agent-client-rpc client) (romacs-agent-rpc-make process client))
     (process-put process 'romacs-agent-client client)
     (romacs-agent-client-request
@@ -102,7 +130,7 @@ it come, is dropped."
 Closing ends the connection at once: its sentinel calls each request
 still waiting on a reply with the `disconnected' error, then runs
 `romacs-agent-client-follow-functions' with (ended) for the sessions
-followed through it."
+followed through it, then `romacs-agent-client-ended-functions'."
   (romacs-agent-rpc-close (romacs-agent-client-rpc client)))
 
 (defun romacs-agent-client--sentinel (process _event)
@@ -115,7 +143,8 @@ whatever follows a session through it."
         (dolist (callback callbacks)
           (ignore-errors (funcall callback nil (romacs-agent-client--gone)))))
       (dolist (id (hash-table-keys (romacs-agent-client-follows client)))
-        (run-hook-with-args 'romacs-agent-client-follow-functions client id '(ended))))))
+        (run-hook-with-args 'romacs-agent-client-follow-functions client id '(ended)))
+      (run-hook-with-args 'romacs-agent-client-ended-functions client))))
 
 (defun romacs-agent-client--gone ()
   (romacs-agent-rpc-object "code" -32603 "message" "The service connection ended"

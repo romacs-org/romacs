@@ -505,6 +505,19 @@ fn proc_send(cx, process: Value, bytes: Value) {
     cx.process_send(process, bytes)
 }}
 
+// Frame PROCESS's output by KIND (lines, content-length or nil), each frame at most LIMIT
+// bytes (nil: none): its filter is then called with the list of whole frames a read completed.
+defsubr! { name = "romacs--proc-set-framing", gnu = "romacs:process", effect = Global,
+fn proc_set_framing(cx, process: Value, kind: Value, limit: Value) { cx.process_set_framing(process, kind, limit) }}
+
+// PROCESS's framing, (KIND . LIMIT), or nil.
+defsubr! { name = "romacs--proc-framing", gnu = "romacs:process", effect = Reads,
+fn proc_framing(cx, process: Value) { cx.process_framing(process) }}
+
+// The bytes PROCESS holds unsent, written as its peer reads.
+defsubr! { name = "romacs--proc-unsent", gnu = "romacs:process", effect = Reads,
+fn proc_unsent(cx, process: Value) { cx.process_unsent(process) }}
+
 defsubr! { name = "romacs--proc-send-eof", gnu = "process.c:7441", effect = Global,
 fn proc_send_eof(cx, process: Value) { cx.process_send_eof(process)?; Ok(process) }}
 
