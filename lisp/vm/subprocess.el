@@ -751,14 +751,14 @@ PROC, then run and \"open\" (its handshake waited for the connection)."
 The waits leave their queues to that send (`romacs--send-process'), as
 GNU's wait never writes a write_queue: only the send writes, and it
 returns as soon as the last write succeeds, so a peer's answer to it
-reaches no filter before the send returns.  The send's own wait, on its
-process, ends once that process can take more (`romacs--proc-select'
-returns `writable').  Not in GNU.")
+reaches no filter before the send returns.  The send's own wait, given
+its process as SEND-PROC, ends once that process can take more
+\(`romacs--proc-select' returns `writable').  Not in GNU.")
 
 (defun romacs--send-process (proc string)
   "send_process: encode STRING as PROC's encoding requires, and write it.
-While the channel is full, wait on PROC for at most 20 ms, until it can
-take more, reading output and running filters and timers as GNU's wait
+While the channel is full, wait at most 20 ms, until PROC can take
+more, reading output and running filters and timers as GNU's wait
 does, but write PROC only here (`romacs--sending-processes'), returning
 right after the last write."
   (if (eq (process-type proc) 'network) (romacs--wait-while-connecting proc))
@@ -770,7 +770,7 @@ right after the last write."
     (if (not (romacs--proc-send proc bytes))
         (let ((romacs--sending-processes (cons proc romacs--sending-processes)))
           (while (not (romacs--proc-send proc nil))
-            (romacs--wait-reading-process-output 0.02 proc 0))))))
+            (romacs--wait-reading-process-output 0.02 nil 0 nil proc))))))
 
 (defun process-send-string (process string)
   "Send PROCESS the contents of STRING as input.  GNU process.c Fprocess_send_string."
@@ -1139,7 +1139,7 @@ seconds until the next timer, or nil."
 
 ;;;; Waiting
 
-(defun romacs--wait-reading-process-output (limit wait-proc just-wait-proc &optional read-kbd)
+(defun romacs--wait-reading-process-output (limit wait-proc just-wait-proc &optional read-kbd send-proc)
   "process.c wait_reading_process_output, with no redisplay and no
 WAIT_FOR_CELL.  LIMIT is a positive number of seconds, `minimum' or
 `forever', or `idle': one round, which reads what is ready once and
@@ -1149,7 +1149,9 @@ due, so its caller checks those between reads.  JUST-WAIT-PROC is 0, 1
 GNU's READ_KBD -1 without a terminal: the wait ends once special
 events (file notification's among them) or requeued input wait for
 read_char, as it does on detect_input_pending, or once a timer ran, so the
-reader sees what the timer changed.  Return GNU's got_some_output."
+reader sees what the timer changed.  SEND-PROC, not in GNU, is the
+process the calling send writes (`romacs--sending-processes'): the wait
+ends once it can take more.  Return GNU's got_some_output."
   (let* ((wait (cond ((memq limit '(minimum forever idle)) limit) (t 'timeout)))
          (end-time (if (eq wait 'timeout) (+ (float-time) limit)))
          (got-some-output -1)
@@ -1201,7 +1203,7 @@ reader sees what the timer changed.  Return GNU's got_some_output."
                         (setq got-output-end-time timeout-abs))
                     (setq timeout timer-delay))
                 (setq got-output-end-time nil))
-              (let ((ready (romacs--proc-select wait-proc (/= just-wait-proc 0) timeout read-kbd)))
+              (let ((ready (romacs--proc-select wait-proc (/= just-wait-proc 0) timeout read-kbd send-proc)))
                 (cond
                  ((memq ready '(terminated input writable)) (setq done t))
                  ((null ready)

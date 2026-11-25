@@ -403,12 +403,13 @@ impl Leaf<'_> {
     /// most SECONDS (nil: forever), flush queued writes, and return the
     /// process whose channel is readable (round robin), (connect PROC ERRNO
     /// REMOTE LOCAL) for a finished :nowait connection, `writable' when
-    /// the synchronous send to WAIT_PROC can write again, t when something
-    /// else woke the wait or a status changed, or nil on timeout.
+    /// SEND_PROC, the process the waiting send writes, can take more, t
+    /// when something else woke the wait or a status changed, or nil on
+    /// timeout.
     /// With READ_KBD, as wait_reading_process_output's READ_KBD, the
     /// keyboard's other sources wake it too: queued file notification
     /// events end it with `input', unread, for read_char to handle.
-    pub(crate) fn process_select(&mut self, wait_proc: Value, just_this: bool, seconds: Option<f64>, read_kbd: bool) -> Out {
+    pub(crate) fn process_select(&mut self, wait_proc: Value, just_this: bool, seconds: Option<f64>, read_kbd: bool, send_proc: Value) -> Out {
         // Reaping closes a child's pidfd and stops reading it, so nothing
         // would wake the poll for its status change: hand that change to
         // status_notify before blocking, as GNU's SIGCHLD wakeup does.
@@ -418,7 +419,7 @@ impl Leaf<'_> {
             self.vm.subprocesses.activity += 1;
             return Ok(Value::TRUE);
         }
-        let (mut fds, owners) = self.select_set(wait_proc, just_this);
+        let (mut fds, owners) = self.select_set(wait_proc, just_this, send_proc);
         let keyboard = read_kbd.then(|| self.vm.file_notify_fd()).flatten();
         fds.extend(keyboard.map(|fd| (fd, libc::POLLIN)));
         if wait_proc != Value::NIL && just_this && !self.process_infd(wait_proc) {
@@ -452,9 +453,14 @@ impl Leaf<'_> {
         }
         self.vm.subprocesses.activity += 1;
         self.reap_children();
+        self.process_select_woken(&revents, &owners)
+    }
+    /// What the poll's REVENTS woke for OWNERS: queued writes flushed, and
+    /// process_select's answer.
+    fn process_select_woken(&mut self, revents: &[i16], owners: &[(Value, Wake)]) -> Out {
         let mut readable = Vec::new();
         let mut connected = Vec::new();
-        for (&r, &(proc, wake)) in revents.iter().zip(&owners) {
+        for (&r, &(proc, wake)) in revents.iter().zip(owners) {
             if r == 0 {
                 continue;
             }
@@ -486,8 +492,9 @@ impl Leaf<'_> {
     /// WAIT_PROC's alone when JUST_THIS, else every process's.
     /// A process a synchronous send is writing (`romacs--sending-processes')
     /// is left to that send: its queue is not the wait's to write, and only
-    /// the send's own wait, on WAIT_PROC, polls it to end once it is writable.
-    fn select_set(&mut self, wait_proc: Value, just_this: bool) -> (Vec<(RawFd, i16)>, Vec<(Value, Wake)>) {
+    /// the send's own wait, given it as SEND_PROC, polls it, to end once it
+    /// can take more.
+    fn select_set(&mut self, wait_proc: Value, just_this: bool, send_proc: Value) -> (Vec<(RawFd, i16)>, Vec<(Value, Wake)>) {
         let mut fds: Vec<(RawFd, i16)> = Vec::new();
         let mut owners: Vec<(Value, Wake)> = Vec::new();
         let candidates = if wait_proc != Value::NIL && just_this { vec![wait_proc] } else { self.process_values() };
@@ -511,7 +518,7 @@ impl Leaf<'_> {
                 owners.push((proc, Wake::Read));
             }
             let records = channel.tls.as_deref().is_some_and(|s| s.active && s.stage == crate::tls::stage::READY && s.wants_write());
-            let wake = if !synchronous { Some(Wake::Write) } else { (proc == wait_proc).then_some(Wake::Writable) };
+            let wake = if !synchronous { Some(Wake::Write) } else { (proc == send_proc).then_some(Wake::Writable) };
             if let Some(wake) = wake && (!channel.pending.is_empty() || records) && let Some(fd) = &channel.outfd {
                 fds.push((fd.as_raw_fd(), libc::POLLOUT));
                 owners.push((proc, wake));
@@ -1309,7 +1316,7 @@ impl Vm {
     /// poll events it waits for: what an owner's loop waits on beside its
     /// spawner (`romacs--isolate-wait`).
     pub(crate) fn process_fds(&mut self) -> Vec<(RawFd, i16)> {
-        Leaf::new(self).select_set(Value::NIL, false).0
+        Leaf::new(self).select_set(Value::NIL, false, Value::NIL).0
     }
 
     /// The descriptors the command loop's idle wait watches with the
