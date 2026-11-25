@@ -962,25 +962,26 @@ must not act as if its answer were delivered."
          (t (romacs-mcp--enqueue peer message))))
     (error (romacs-mcp--enqueue peer nil '(-32700 "Parse error")))))
 
-(defun romacs-mcp--filter (peer chunk)
-  "Frame bounded UTF-8 CHUNK from PEER; never invoke a tool in this callback."
+(defun romacs-mcp--filter (peer frames)
+  "Handle FRAMES, the lines PEER sent, framed as they were read
+\(`romacs-mcp--accept'); never invoke a tool in this callback.  A loopback
+peer's first line is its token, not a frame.  A line over the frame
+limit, or more than `romacs-mcp--peer-queue-limit' of them in one read,
+closes PEER, the first ones handled."
   (when (romacs-mcp--live-p peer (process-get peer 'generation))
-    (let ((text (concat (process-get peer 'input) chunk)) (frames 0))
-      ;; A loopback peer's first line is the token; it is not a frame.
-      (when (and (process-get peer 'token) (string-match "\n" text))
-        (if (equal (substring text 0 (match-beginning 0)) (process-get peer 'token))
-            (progn (process-put peer 'token nil)
-                   (setq text (substring text (match-end 0))))
-          (romacs-mcp--close peer)))
-      (if (or (not (process-live-p peer)) (> (string-bytes text) romacs-mcp--frame-limit))
-          (romacs-mcp--close peer)
-        (while (and (process-live-p peer) (not (process-get peer 'token)) (string-match "\n" text)
-                    (< frames romacs-mcp--peer-queue-limit))
-          (let ((end (match-beginning 0)))
-            (romacs-mcp--frame peer (substring text 0 end))
-            (setq text (substring text (1+ end)) frames (1+ frames))))
-        (if (and (not (process-get peer 'token)) (string-match-p "\n" text)) (romacs-mcp--close peer)
-          (process-put peer 'input text))))))
+    (cond
+     ((and (process-get peer 'token) (not (equal (car frames) (process-get peer 'token))))
+      (romacs-mcp--close peer))
+     ((memq 'over frames) (romacs-mcp--close peer))
+     (t
+      (when (process-get peer 'token)
+        (process-put peer 'token nil)
+        (setq frames (cdr frames)))
+      (let ((handled 0))
+        (while (and frames (process-live-p peer) (< handled romacs-mcp--peer-queue-limit))
+          (romacs-mcp--frame peer (pop frames))
+          (setq handled (1+ handled)))
+        (when (and frames (process-live-p peer)) (romacs-mcp--close peer)))))))
 
 (defun romacs-mcp-own-peer (peer)
   "Vouch for PEER: a layer's own connection (an agent session's relay),
@@ -998,9 +999,9 @@ relays as run never crowd out one."
     (push peer romacs-mcp--peers)
     (process-put peer 'generation romacs-mcp--generation)
     (process-put peer 'token romacs-mcp--token)
-    (process-put peer 'input (encode-coding-string "" 'no-conversion))
     (set-process-query-on-exit-flag peer nil)
     (set-process-coding-system peer 'no-conversion 'no-conversion)
+    (set-process-framing peer 'lines romacs-mcp--frame-limit)
     (set-process-filter peer #'romacs-mcp--filter)
     (set-process-sentinel peer #'romacs-mcp--sentinel)))
 

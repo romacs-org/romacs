@@ -1,0 +1,163 @@
+;;; process-framing-tests.el --- Framed process output and unsent bytes -*- lexical-binding: t; -*-
+;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
+
+;;; Commentary:
+;; `set-process-framing' over real processes and sockets: what a framed
+;; filter is called with, what an accepted connection takes from its
+;; server, what turning framing off gives back, and the agent protocol's
+;; connection (romacs-agent-rpc.el) on it.  The framer's byte cases
+;; (partial frames, limits, UTF-8 and CRLF split across reads) are its
+;; Rust tests (crates/romacs-vm/src/framing_tests.rs).
+
+;;; Code:
+
+(require 'ert)
+(require 'cl-lib)
+(require 'romacs-agent-rpc)
+
+(defun process-framing-tests--cat (filter &optional coding)
+  "A `cat' whose output FILTER gets, read with CODING (default bytes)."
+  (make-process :name "process-framing-cat" :command '("cat") :noquery t
+                :connection-type 'pipe :coding (or coding 'no-conversion) :filter filter))
+
+(defun process-framing-tests--until (process done)
+  "Read every process's output until DONE says t, at most ten seconds:
+PROCESS, a listener, has no output of its own to wait for."
+  (with-timeout (10 (error "Waited too long for %s" process))
+    (while (not (funcall done)) (accept-process-output nil 0.05))))
+
+(ert-deftest process-framing-lines-a-call-a-read ()
+  ;; Each call has whole lines only, in order; an over-limit line is `over'
+  ;; in its place; a last line with no newline comes at end of file.
+  (let* ((calls nil)
+         (process (process-framing-tests--cat (lambda (_p frames) (push frames calls)))))
+    (set-process-framing process 'lines 8)
+    (should (equal (process-framing process) '(lines . 8)))
+    (process-send-string process "one\ntwo\n0123456789\nok\nlast")
+    (process-send-eof process)
+    (process-framing-tests--until process (lambda () (not (process-live-p process))))
+    (should (cl-every (lambda (frames) (and (consp frames) (cl-every (lambda (f) (or (stringp f) (eq f 'over))) frames)))
+                      calls))
+    (should (equal (apply #'append (reverse calls)) '("one" "two" over "ok" "last")))))
+
+(ert-deftest process-framing-content-length-decodes-by-the-coding-system ()
+  ;; Bodies counted in bytes, decoded as the process's coding system says.
+  (let* ((frames nil)
+         (body (encode-coding-string "{\"t\":\"λ😀\"}" 'utf-8))
+         (process (process-framing-tests--cat (lambda (_p fs) (setq frames (append frames fs))) 'utf-8)))
+    (set-process-framing process 'content-length)
+    (process-send-string process (format "Content-Length: %d\r\nContent-Type: x\r\n\r\n%s" (length body) body))
+    (process-send-string process "Content-Length: 2\r\n\r\n{}")
+    (process-framing-tests--until process (lambda () (= (length frames) 2)))
+    (should (equal frames '("{\"t\":\"λ😀\"}" "{}")))
+    (should (multibyte-string-p (car frames)))
+    (delete-process process)))
+
+(ert-deftest process-framing-off-gives-back-the-partial-line ()
+  ;; Framing turned off: the line it held comes first in the next text.
+  (let* ((got nil)
+         (process (process-framing-tests--cat (lambda (_p x) (push x got)))))
+    (set-process-framing process 'lines)
+    (process-send-string process "a\nhalf")
+    (process-framing-tests--until process (lambda () got))
+    (should (equal got '(("a"))))
+    (set-process-framing process nil)
+    (should-not (process-framing process))
+    (process-send-string process "-rest")
+    (process-framing-tests--until process (lambda () (stringp (car got))))
+    (should (equal (car got) "half-rest"))
+    (delete-process process)))
+
+(ert-deftest process-framing-an-accepted-connection-takes-its-servers ()
+  (let* ((socket (make-temp-name (expand-file-name "pf-" temporary-file-directory)))
+         (frames nil) (accepted nil)
+         (server (make-network-process :name "process-framing-server" :family 'local :service socket
+                                       :server t :noquery t :coding 'no-conversion
+                                       :log (lambda (_server peer _m) (setq accepted peer))
+                                       :filter (lambda (_p fs) (setq frames (append frames fs)))))
+         client)
+    (unwind-protect
+        (progn
+          (set-process-framing server 'lines 1024)
+          (setq client (make-network-process :name "process-framing-client" :family 'local
+                                             :service socket :noquery t :coding 'no-conversion))
+          (process-send-string client "x\ny\n")
+          (process-framing-tests--until server (lambda () (= (length frames) 2)))
+          (should (equal frames '("x" "y")))
+          (should (equal (process-framing accepted) '(lines . 1024))))
+      (when client (delete-process client))
+      (delete-process server)
+      (ignore-errors (delete-file socket)))))
+
+(ert-deftest process-framing-unsent-bytes-drain-as-the-peer-reads ()
+  ;; A `cat' whose output is not read fills its pipes: what it cannot take
+  ;; is left unsent, never waited for, and written as it reads, whenever
+  ;; Romacs waits.
+  (let* ((got 0)
+         (process (make-process :name "process-framing-slow" :command '("cat")
+                                :noquery t :connection-type 'pipe :coding 'no-conversion
+                                :filter (lambda (_p s) (setq got (+ got (length s))))))
+         (chunk (make-string 65536 ?z)))
+    (unwind-protect
+        (progn
+          (dotimes (_ 16) (romacs-process-send-nowait process chunk))
+          (should (> (romacs-process-unsent-bytes process) 0))
+          (process-framing-tests--until process (lambda () (>= got (* 16 65536))))
+          (should (= (romacs-process-unsent-bytes process) 0)))
+      (delete-process process))))
+
+;;; The agent protocol's connection
+
+(ert-deftest process-framing-rpc-lines-over-a-socket ()
+  ;; romacs-agent-rpc's connection frames its lines natively: messages
+  ;; whole, a line over the limit closes the peer.
+  (let* ((socket (make-temp-name (expand-file-name "pf-rpc-" temporary-file-directory)))
+         (received nil) (closed nil)
+         (romacs-agent-rpc-message-limit 4096)
+         (server (make-network-process
+                  :name "process-framing-rpc" :family 'local :service socket :server t :noquery t
+                  :coding 'no-conversion
+                  :log (lambda (_server peer _m) (process-put peer 'rpc (romacs-agent-rpc-make peer)))
+                  :sentinel (lambda (p _e) (unless (process-live-p p) (setq closed t)))
+                  :filter (lambda (p frames)
+                            (let ((lines (romacs-agent-rpc-lines (process-get p 'rpc) frames)))
+                              (if (eq lines 'over)
+                                  (romacs-agent-rpc-close (process-get p 'rpc))
+                                (dolist (line lines)
+                                  (push (gethash "n" (romacs-agent-rpc-parse line)) received)))))))
+         (client (make-network-process :name "process-framing-rpc-client" :family 'local :service socket
+                                       :noquery t :coding 'no-conversion :filter #'ignore))
+         (rpc (romacs-agent-rpc-make client)))
+    (unwind-protect
+        (progn
+          (dotimes (n 200) (romacs-agent-rpc-send rpc (romacs-agent-rpc-object "n" n "pad" (make-string (* n 10) ?p))))
+          (process-framing-tests--until server (lambda () (= (length received) 200)))
+          (should (equal (nreverse received) (number-sequence 0 199)))
+          ;; Over the limit: not sent, signalled.
+          (should-error (romacs-agent-rpc-send rpc (romacs-agent-rpc-object "pad" (make-string 5000 ?p))))
+          ;; A line over the limit from a peer that does not check closes it.
+          (process-send-string client (concat (make-string 5000 ?q) "\n"))
+          (process-framing-tests--until server (lambda () closed)))
+      (delete-process client)
+      (delete-process server)
+      (ignore-errors (delete-file socket)))))
+
+(ert-deftest process-framing-rpc-closes-a-peer-that-reads-nothing ()
+  ;; What a peer leaves unread is bounded: past the queue's limit the
+  ;; connection is closed, the sender never waits.
+  (let* ((romacs-agent-rpc-queue-limit (* 256 1024))
+         (process (make-process :name "process-framing-deaf" :command '("sleep" "30") :noquery t
+                                :connection-type 'pipe :coding 'no-conversion))
+         (rpc (romacs-agent-rpc-make process))
+         (sent 0))
+    (unwind-protect
+        (progn
+          (while (and (romacs-agent-rpc-send rpc (romacs-agent-rpc-object "pad" (make-string 4000 ?p)))
+                      (< (cl-incf sent) 1000)))
+          (should (< sent 1000))
+          (should-not (process-live-p process)))
+      (delete-process process))))
+
+(provide 'process-framing-tests)
+;;; process-framing-tests.el ends here

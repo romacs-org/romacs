@@ -301,7 +301,7 @@
 replay over."
   (let ((connection (romacs-agent-connection session)))
     (process-put connection 'romacs-agent session)
-    (romacs-agent--filter connection (concat (json-serialize (romacs-mcp--object "attached" 1)) "\n"))))
+    (romacs-agent--filter connection (list (json-serialize (romacs-mcp--object "attached" 1))))))
 
 (defun romacs-agent-queue-tests--settle ()
   "Run what the editor runs once idle (a deferred dispatch or settle)."
