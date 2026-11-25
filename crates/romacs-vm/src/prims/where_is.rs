@@ -32,7 +32,13 @@ fn where_is_filtered(cx: &mut Leaf<'_>, result: Value, saved: &[Value]) -> Next 
     let mut walk = cx.key_walk_from(walk)?;
     match cx.key_walk_resume(&mut walk, result)? {
         Walked::Filter { filter, object } => Ok(where_is_filter(cx, query, &walk, filter, object)),
-        Walked::Done(binding) => where_is_step(cx, Query::from_values(query).walked(binding)),
+        Walked::Done(binding) => {
+            let mut query = Query::from_values(query);
+            match query.looked_up(cx, binding)? {
+                Some(answer) => Ok(Step::Done(answer)),
+                None => where_is_step(cx, query),
+            }
+        }
     }
 }
 

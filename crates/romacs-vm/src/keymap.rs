@@ -98,9 +98,9 @@ impl Vm {
     /// error when a menu item's `:filter' would have to run, which a caller
     /// that must not run Lisp takes as "cannot tell".
     pub(crate) fn lookup_one_event(&mut self, map: Value, event: Value, remap: bool, defaults: bool) -> Result<Value> {
-        let events = if remap { vec![self.keymap_symbol("remap"), event] } else { vec![event] };
-        let key = self.allocate_object(Object::Vector(events));
-        let binding = self.key_lookup_native(map, key, defaults)?;
+        let remap_event = self.keymap_symbol("remap");
+        let events: &[Value] = if remap { &[remap_event, event] } else { &[event] };
+        let binding = self.key_lookup_events(map, events, defaults)?;
         Ok(if binding.integer_value().is_some() { Value::NIL } else { binding })
     }
     /// The local keymap of the buffer at INDEX, text or unibyte.
@@ -469,17 +469,22 @@ impl Vm {
     }
     /// The number of events in KEY, a key sequence.
     fn key_length(&self, key: Value) -> Result<usize> {
-        if let Some(view) = self.str_view(key) { return Ok(view.chars().count()); }
+        if let Some(view) = self.str_view(key) { return Ok(view.len()); }
         match self.object_if(key) {
             Some(Object::Vector(v)) => Ok(v.len()),
             _ => Err("key sequence string or vector required".into()),
         }
     }
-    /// KEY's event at INDEX, read from KEY as it is now.
-    fn key_event_at(&mut self, key: Value, index: usize) -> Result<Decoded> {
+    /// KEY's event at INDEX, read from KEY as it is now.  In a string, AT is
+    /// the byte of that event when known (a reader going forward with no
+    /// callback since its last read), and is left at the next event's.
+    fn key_event_at(&mut self, key: Value, index: usize, at: &mut Option<usize>) -> Result<Decoded> {
         let (event, bytes) = if let Some(view) = self.str_view(key) {
-            let c = view.chars().nth(index).ok_or("key sequence shorter than its length")?;
-            (Value::integer(i64::from(c))?, !view.is_multibyte())
+            let (text, multibyte) = (view.bytes(), view.is_multibyte());
+            let start = match *at { Some(byte) => byte, None => char_byte(text, multibyte, index) };
+            let (c, width) = char_at(text, multibyte, start).ok_or("key sequence shorter than its length")?;
+            *at = Some(start + width);
+            (Value::integer(i64::from(c))?, !multibyte)
         } else { match self.object_if(key) {
             Some(Object::Vector(v)) => (*v.get(index).ok_or("key sequence shorter than its length")?, false),
             _ => return Err("key sequence string or vector required".into()),
@@ -519,9 +524,9 @@ impl Vm {
     }
     /// SEQUENCE's events as `define-key' stores them.
     fn key_events(&mut self, sequence: Value) -> Result<Vec<Value>> {
-        let mut events = vec![];
+        let (mut events, mut at) = (vec![], None);
         for index in 0..self.key_length(sequence)? {
-            match self.key_event_at(sequence, index)? {
+            match self.key_event_at(sequence, index, &mut at)? {
                 Decoded::One(event) | Decoded::Range(event) => events.push(event),
                 Decoded::Meta(prefix, base) => events.extend([prefix, base]),
             }
@@ -626,6 +631,23 @@ impl Vm {
             _ => unreachable!(),
         }
     }
+}
+
+/// The byte of the character at INDEX in TEXT, a string's bytes.
+fn char_byte(text: &[u8], multibyte: bool, index: usize) -> usize {
+    if !multibyte { return index; }
+    let mut byte = 0;
+    for _ in 0..index {
+        if byte >= text.len() { break; }
+        byte += crate::lstring::string_char(&text[byte..]).1;
+    }
+    byte
+}
+
+/// The character at byte START of TEXT and its width in bytes.
+fn char_at(text: &[u8], multibyte: bool, start: usize) -> Option<(u32, usize)> {
+    let rest = text.get(start..).filter(|rest| !rest.is_empty())?;
+    Some(if multibyte { crate::lstring::string_char(rest) } else { (u32::from(rest[0]), 1) })
 }
 
 /// keyboard.c modifier_names: the symbol for each modifier bit.
