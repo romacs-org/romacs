@@ -1231,7 +1231,7 @@ impl Leaf<'_> {
 
     /// SOURCE (a string, or a sexp expanded) compiled for LANGUAGE, or the
     /// `treesit-query-error' it signals.
-    fn ts_compile(&mut self, language: native::Language, source: Value) -> R<Rc<ts::Compiled>> {
+    fn ts_compile(&mut self, language: native::Language, source: Value) -> R<std::sync::Arc<ts::Compiled>> {
         let expanded = if self.pair(source).is_some() { Some(self.ts_query_expand_bytes(source)?) } else { None };
         let text = match &expanded { Some(e) => std::borrow::Cow::Borrowed(&e.bytes[..]), None => self.string_bytes(source)?.into() };
         match self.vm.treesit_queries.compiled(&language, &text) {
@@ -1245,7 +1245,7 @@ impl Leaf<'_> {
         }
     }
     /// treesit_ensure_query_compiled for the compiled query QUERY.
-    pub(crate) fn ts_ensure_compiled(&mut self, query: Value) -> R<Rc<ts::Compiled>> {
+    pub(crate) fn ts_ensure_compiled(&mut self, query: Value) -> R<std::sync::Arc<ts::Compiled>> {
         let q = self.ts_query(query)?;
         if let Some(compiled) = &q.compiled {
             return Ok(compiled.clone());
@@ -1445,7 +1445,7 @@ impl Leaf<'_> {
         self.ts_capture_matches(n, compiled, found, flags, fontify)
     }
 
-    fn ts_capture_matches(&mut self, n: ts::Node, compiled: Rc<ts::Compiled>, found: Vec<native::Match>,
+    fn ts_capture_matches(&mut self, n: ts::Node, compiled: std::sync::Arc<ts::Compiled>, found: Vec<native::Match>,
                           flags: i64, fontify: Option<(ts::Fontify, Value)>) -> R<Next> {
         let mut names: Vec<Option<Value>> = Vec::new();
         let (fontify, overriding) = fontify.map_or((None, Value::NIL), |(f, o)| (Some(f), o));
@@ -1610,11 +1610,9 @@ impl Leaf<'_> {
 
     /// Run TASK's predicates from where it stopped.
     fn ts_capture_run(&mut self, task: Value) -> R<Next> {
+        let compiled = self.ts_capture_state(task).compiled.clone();
         loop {
-            let (compiled, at, predicate, matches_len) = {
-                let s = self.ts_capture_state(task);
-                (s.compiled.clone(), s.at, s.predicate, s.matches.len())
-            };
+            let (at, predicate, matches_len) = { let s = self.ts_capture_state(task); (s.at, s.predicate, s.matches.len()) };
             if at >= matches_len || self.ts_fontify_boundary(task, at) {
                 return self.ts_capture_finish(task);
             }

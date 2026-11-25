@@ -515,7 +515,7 @@ pub(crate) struct Node {
 pub(crate) struct Query {
     pub language: Value,
     pub source: Value,
-    pub compiled: Option<Rc<Compiled>>,
+    pub compiled: Option<std::sync::Arc<Compiled>>,
 }
 
 /// A compiled query and each pattern's predicates
@@ -588,7 +588,7 @@ pub(crate) enum TaskState {
 /// holds, from index 0: the parser, then per match its capture names and
 /// nodes in pairs, as MATCHES's ranges index them.
 pub(crate) struct Capture {
-    pub compiled: Rc<Compiled>,
+    pub compiled: std::sync::Arc<Compiled>,
     /// (pattern, start in `values`, capture count) per match.
     pub matches: Vec<(u32, usize, usize)>,
     pub at: usize,
