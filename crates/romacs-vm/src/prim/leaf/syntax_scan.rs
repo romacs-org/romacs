@@ -1166,6 +1166,33 @@ mod tests {
                    "((nil 7) (nil 7) (scan-error \"Containing expression ends prematurely\" 1 2) 7 (0 3 0 1 0 0 t 2))");
     }
 
+    /// A short scan whose first run stops for `internal--syntax-propertize'
+    /// before it reads a character stays short: its rerun goes on with the
+    /// steps the first run had left before it would consult the summaries,
+    /// so it ends having made no leaf and read none for a summary, as the
+    /// same scan does with no properties honoured (Sol's B4 case).
+    #[test]
+    fn an_early_propertize_stop_keeps_a_short_scan_short() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        let shape = |lookup: &str| format!(r#"(with-temp-buffer
+          (insert "x " (make-string 100000 ?x))
+          (set (make-local-variable 'parse-sexp-lookup-properties) {lookup})
+          (set (make-local-variable 'syntax-propertize--done) 1)
+          (let ((calls nil))
+            (fset 'internal--syntax-propertize
+                  (lambda (pos) (push pos calls) (setq syntax-propertize--done (point-max))))
+            (list (scan-sexps 1 1) (nreverse calls)
+                  (plist-get (romacs-syntax-summaries-stats) :leaves)
+                  (plist-get (romacs-syntax-summaries-stats) :leaf-scans))))"#);
+        let mut shown = |lookup: &str| {
+            let result = vm.eval_source_raw(&shape(lookup)).unwrap();
+            vm.display(result).unwrap()
+        };
+        assert_eq!(shown("nil"), "(2 nil 0 0)");
+        assert_eq!(shown("t"), "(2 (2) 0 0)");
+    }
+
     /// A quit pending when an indexed list scan starts stops it there,
     /// through the buffer's own view: the probe is asked at once, not at
     /// the end of a countdown, so a warm scan that would fold its whole

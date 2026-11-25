@@ -358,6 +358,27 @@ fn a_frontier_on_a_cut_comes_before_a_poll_due_there() {
     assert_eq!(events, ["propertize", "poll"]);
 }
 
+/// A warm fold that reaches the frontier ends the folding there without
+/// asking the quit probe: the stop for `internal--syntax-propertize'
+/// comes first (the scanner's own update order), and the probe is asked
+/// once, on entry.
+#[test]
+fn a_fold_onto_the_frontier_does_not_ask_the_probe() {
+    let text = format!("({})", "x".repeat(100));
+    let (text, table) = (text.as_bytes(), lists_table());
+    let call = Call { from: 1, count: 1, depth: 0, sexpflag: true };
+    let mut index = SyntaxIndex { leaf: 16, ..SyntaxIndex::default() };
+    indexed(&mut index, text, &table, (None, Some(i64::MAX)), None, call).ok();
+    let (properties, ppss) = (vec![None; text.len()], BTreeMap::new());
+    let live = Live { text, table: &table, properties: &properties, polls: Some(1000), steps: Cell::new(0), held: Cell::new(false) };
+    let options = Options { propertize_done: Some(17), ..Options::default() };
+    let mut scanner = Scanner { begv: live.pos(1), zv: live.pos(i64::MAX), text: &live, options, ppss: &ppss, defun_start: None, modiff: 1 };
+    let context = Context { table: 1, writes: 0, escaped_ends: false, properties: true };
+    let run = index.scan_lists(&mut scanner, text.len(), context, None, (1, 1, 0), true);
+    assert!(matches!(run, Err(Stopped { halt: Halt::Propertize(18, 17), .. })), "the stop at the frontier: {:?}", run.map_err(|stopped| stopped.halt));
+    assert_eq!(live.steps.get(), 1, "the probe is asked on entry only");
+}
+
 /// Five tables over one text, one of them making a character next to a
 /// cut an escape: four warm, the oldest used again, then the fifth. The
 /// one used least recently gives its slot up, the one used again keeps its
