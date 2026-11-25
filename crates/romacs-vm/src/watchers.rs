@@ -66,7 +66,7 @@ impl Vm {
     /// would drain this queue inside that call.
     pub(crate) fn write_from_native(&mut self, write: NativeWrite) -> std::result::Result<(), Fault> {
         let heard = write.kind == WriteKind::Defalias || self.variable_trapped(self.indirect_variable(write.slot));
-        if !self.mutator.deferred_writes.is_empty() || (heard && self.running_engines > self.suspended.len()) {
+        if !self.mutator.deferred_writes.is_empty() || (heard && self.mutator.running_engines > self.mutator_rest.suspended.len()) {
             let buffer = self.slots[self.buffer_slot].value;
             self.mutator.deferred_writes.push((write, buffer));
             return Ok(());

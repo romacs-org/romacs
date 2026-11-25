@@ -406,7 +406,7 @@ mod tests {
         }
         let closure = vm.slots[vm.names["st-wide"]].function;
         let id = vm.closures[usize::try_from(closure.payload()).unwrap()].function;
-        let code = &vm.execution.code[id];
+        let code = &vm.mutator_rest.execution.code[id];
         let has = |handler: Handler| code.iter().any(|i| std::ptr::fn_addr_eq(i.handler, handler));
         for (name, handler) in [
             ("constant", audited::t_constant as Handler), ("constant_wide", audited::t_constant_wide),

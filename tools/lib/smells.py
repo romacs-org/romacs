@@ -25,7 +25,7 @@ What counts, summed over the workspace (`report` shows each crate's share):
   primitives_outside_prims  `defsubr! { name = ... }` declarations outside
               PRIMS (the harness's own tests and probes)
   vm_replacements  places in the engine's modules (ENGINE), outside tests,
-              that make a `Vm` or `Registers` or swap, replace or take one:
+              that make a `Vm`, `Mutator` or `Registers` or swap, replace or take one:
               a register capability would then outlive its file, which no
               type prevents (lisp-speed.md §13.6 I6). No declaration.
   generated   tracked files outside GNU's own trees and crates/vendor/ whose
@@ -124,10 +124,19 @@ DEFSUBR = re.compile(r'\bdefsubr\s*!\s*\{\s*name\s*=')
 ENGINE = re.compile(r'crates/romacs-vm/src/(?:threaded\w*|traversal)\.rs')
 TEST_FILE = re.compile(r'_tests?\.rs$')
 CFG_TEST = re.compile(r'#\s*\[\s*cfg\s*\(\s*test\s*\)\s*\]')
+# A place that holds a VM, its register file or its mutator's context: a
+# field path, its segments plain names or a parenthesized dereference
+# (`(*vm).mutator`), behind an optional `&mut` and `*`.
+PLACE = (r'(?:&\s*mut\s+)?\*?\s*(?:(?:\w+|\(\s*\*\s*[\w.]+\s*\))\s*\.\s*)*'
+         r'(?:vm|stack|mutator|mutator_rest)')
 VM_REPLACEMENT = re.compile(
-    r'\b(?:Vm|Registers)\s*::\s*(?:new|default)\b'
-    r'|\bmem\s*::\s*(?:swap|replace|take)\s*\(\s*(?:&\s*mut\s+)?\*?\s*(?:[\w.]*\.)?(?:vm|stack)\s*[,)]'
-    r'|\*\s*(?:[\w.]*\.)?vm\s*=(?!=)')
+    r'\b(?:Vm|Registers|Mutator|MutatorRest)\s*::\s*(?:new|default)\b'
+    r'|\bmem\s*::\s*(?:swap|replace|take)\s*\(\s*' + PLACE + r'\s*[,)]'
+    r'|\*\s*(?:[\w.]*\.)?vm\s*=(?!=)'
+    # The mutator holds the register file (`Mutator::stack`), its rest the
+    # parked engines and their code: replacing either whole drops what the
+    # engine's raw pointers name too.
+    r'|\.mutator(?:_rest)?\s*=(?!=)')
 CLIPPY = ('cargo', 'clippy', '--locked', '--offline', '--workspace', '--all-targets',
           '--message-format=json', '--', '-W', 'clippy::pedantic', '--cap-lints', 'warn')
 # How each count's new instance is declared where it occurs, for the failure.
@@ -139,7 +148,7 @@ DECLARE = {
     'unsafe_undocumented': 'put a `// SAFETY:` comment on the line above its `unsafe`',
     'legacy_primitives': f'declare it with `defsubr!` in {PRIMS}',
     'primitives_outside_prims': 'declare it with `SMELL(primitive): reason` in the comment lines above it',
-    'vm_replacements': 'remove it: the engine never makes or swaps a `Vm` or its `Registers`',
+    'vm_replacements': 'remove it: the engine never makes or swaps a `Vm`, its `Mutator` or its `Registers`',
     'lint': 'declare it as `#[expect({}, reason = "...")]` on the item',
 }
 
@@ -188,10 +197,40 @@ def without_tests(code):
 
 
 def vm_replacements(src):
-    """The lines of SRC, an engine module, that make or replace a `Vm` or its
-    `Registers` outside tests (`vm_replacements` above)."""
+    """The lines of SRC, an engine module, that make or replace a `Vm`, its
+    `Mutator` or `MutatorRest`, or its `Registers` outside tests
+    (`vm_replacements` above)."""
     code = without_tests(unsafe_census.lex(src)[0])
-    return [code.count('\n', 0, m.start()) + 1 for m in VM_REPLACEMENT.finditer(code)]
+    starts = [m.start() for m in VM_REPLACEMENT.finditer(code)] + list(swapped_seconds(code))
+    return sorted(code.count('\n', 0, at) + 1 for at in starts)
+
+
+SWAP = re.compile(r'\bmem\s*::\s*swap\s*\(')
+CLOSES = re.compile(r'\s*\)')
+# A replaceable place, the whole of a swap's second operand.
+REPLACEABLE = re.compile(PLACE)
+
+
+def swapped_seconds(code):
+    """Where each `mem::swap` in CODE names a replaceable second operand: the
+    whole text after its last top-level comma, up to the call's closing
+    parenthesis, a trailing comma dropped (the first operand is
+    VM_REPLACEMENT's). Only that comma splits, so a generic argument's comma
+    earlier in the call does not."""
+    for m in SWAP.finditer(code):
+        depth, comma = 0, m.end() - 1
+        for i in range(m.end(), len(code)):
+            c = code[i]
+            if c in '([{':
+                depth += 1
+            elif c in ')]}' and depth:
+                depth -= 1
+            elif c == ',' and depth == 0 and not CLOSES.match(code, i + 1):
+                comma = i
+            elif c == ')':
+                if REPLACEABLE.fullmatch(code[comma + 1:i].strip().rstrip(',').strip()):
+                    yield m.start()
+                break
 
 
 def crate_census(root, long_file_lines=LONG_FILE_LINES):

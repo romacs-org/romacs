@@ -711,17 +711,17 @@ impl Vm {
         // single argument the list's first element is the function.
         // The spread is apply's own walk: polled in the scope it grants at
         // its first chunk, its escape raised by `t2_prepare_apply`.
-        let list = self.stack[start + argc - 1];
+        let list = self.mutator.stack[start + argc - 1];
         let tail = self.list_values_polled::<true>(list)?;
-        let mut values = self.stack[start..start + argc - 1].to_vec();
+        let mut values = self.mutator.stack[start..start + argc - 1].to_vec();
         values.extend(tail);
         let target = values.first().copied().unwrap_or(Value::NIL);
         let values = values.get(1..).unwrap_or_default();
         let need = at + values.len() + crate::threaded::WINDOW;
-        if need > self.stack.len() {
+        if need > self.mutator.stack.len() {
             return Ok(Err(need));
         }
-        self.stack[at..at + values.len()].copy_from_slice(values);
+        self.mutator.stack[at..at + values.len()].copy_from_slice(values);
         Ok(Ok((target, at, values.len())))
     }
     #[inline(never)]
@@ -733,12 +733,12 @@ impl Vm {
         error: &str,
     ) -> Option<(Value, Value)> {
         let x = if argc > 0 {
-            self.stack[start]
+            self.mutator.stack[start]
         } else {
             Value::NIL
         };
         let y = if argc > 1 {
-            self.stack[start + 1]
+            self.mutator.stack[start + 1]
         } else {
             Value::NIL
         };
@@ -847,7 +847,7 @@ impl Vm {
             let predicate = self.intern("characterp");
             (
                 "wrong-type-argument",
-                vec![predicate, self.stack[start + 2]],
+                vec![predicate, self.mutator.stack[start + 2]],
             )
         } else if (error == "Attempt to store non-byte value into unibyte string" || error.starts_with("Cannot convert character at index")) {
             let message = self.make_lisp_string(error.as_bytes().to_vec(), true);
@@ -897,7 +897,7 @@ impl Vm {
             OverlaysIn => ("integer-or-marker-p", if self.scalar_position(x).is_ok() { y } else { x }),
             BufferSize => ("bufferp", x),
             Add | Sub | Mul | Div | Abs | Less | Equal | Inc | Dec | Min | Max => {
-                let value = self.stack[start..start + argc]
+                let value = self.mutator.stack[start..start + argc]
                     .iter()
                     .copied()
                     .find(|v| {
@@ -954,11 +954,11 @@ impl Vm {
             return Err("wrong primitive arity".into());
         }
         if p == Vector {
-            return Ok(self.allocate_object(Object::Vector(self.stack[start..start + n].to_vec())));
+            return Ok(self.allocate_object(Object::Vector(self.mutator.stack[start..start + n].to_vec())));
         }
-        let x = self.stack[start];
+        let x = self.mutator.stack[start];
         let y = if n > 1 {
-            self.stack[start + 1]
+            self.mutator.stack[start + 1]
         } else {
             Value::NIL
         };
@@ -1023,7 +1023,7 @@ impl Vm {
                     };
                 }
                 self.object(x)?;
-                let value = self.stack[start + 2];
+                let value = self.mutator.stack[start + 2];
                 let table_slot = self.literal_table_slot(value);
                 let object = self.writable_object(x)?;
                 match self.objects.update_element(object, index, value) {

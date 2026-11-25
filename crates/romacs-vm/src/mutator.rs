@@ -5,12 +5,12 @@
 //! `Mutator`, not a second `Vm`. Fields move here slice by slice; each keeps
 //! its collector class (`tests/no_remote_references.rs`) and is carried in
 //! a world image as it was on `Vm`.
-use crate::{Form, GeneratedName, Let, NameSet, Value, backtrace, gap_probe, quit, regexp, threaded, watchers};
+use crate::{Form, GeneratedName, Let, NameSet, Value, backtrace, gap_probe, quit, regexp, registers, threaded, watchers};
 
 /// What one mutator is in the middle of. Reached by field path
 /// (`vm.mutator.FIELD`), never through an accessor, so a borrow of one
 /// field leaves the rest of `Vm` free.
-#[derive(Default, romacs_snapshot::Snapshot)]
+#[derive(romacs_snapshot::Snapshot)]
 pub(crate) struct Mutator {
     /// search.c's match data (`m_search_regs`): the last successful match.
     pub(crate) regexp: regexp::MatchState,
@@ -151,12 +151,98 @@ pub(crate) struct Mutator {
     /// twin, a cooperative thread) is made without it, and reads only its
     /// own `quit` word.
     pub(crate) process_signals: bool,
+    // The running engines: their register files and how deep they run.
+    pub(crate) execution_fatal: bool,
+    /// Active Lisp evaluation depth, shared by reentrant execution engines.
+    pub(crate) eval_depth: usize,
+    /// Engines between entry and exit, suspended or not; those not in
+    /// `suspended` hold untraced registers and code.
+    pub(crate) running_engines: usize,
+    /// The register files, the running engine's current (`registers.rs`).
+    pub(crate) stack: registers::Registers,
 }
 
 impl Mutator {
     /// A fresh context: its own `C-g' word, as a hosted VM's
-    /// (`gap_probe::as_hosted`), and its process's OS signals its own.
+    /// (`gap_probe::as_hosted`), its process's OS signals its own, an empty
+    /// register file (`Registers::new`), and every other field empty.
     pub(crate) fn new() -> Self {
-        Mutator { quit: gap_probe::as_hosted(std::sync::Arc::default()), process_signals: true, ..Self::default() }
+        Mutator {
+            regexp: Default::default(),
+            resolved_buffer: Default::default(),
+            change_prepared: Default::default(),
+            keymap_filters: Default::default(),
+            keymap_pending_filter: Default::default(),
+            compile_depth: Default::default(),
+            pending_specials: Default::default(),
+            file_specials: Default::default(),
+            seed_file_specials: Default::default(),
+            file_level_request: Default::default(),
+            interpreting_source: Default::default(),
+            defer_expansion_errors: Default::default(),
+            evaluating: Default::default(),
+            strict_root: Default::default(),
+            reached_head: Default::default(),
+            reached_generated: Default::default(),
+            loader_order_request: Default::default(),
+            keep_captures: Default::default(),
+            closure_key_extra: Default::default(),
+            lambda_depth: Default::default(),
+            expanded_symbols: Default::default(),
+            expanding: Default::default(),
+            dynamic_scope: Default::default(),
+            propagated_escape: Default::default(),
+            signal_handlers: Default::default(),
+            backtrace: Default::default(),
+            retrap: Default::default(),
+            lazy_regime: Default::default(),
+            thrown_no_catch: Default::default(),
+            gc_holds: Default::default(),
+            external_roots: Default::default(),
+            dynamic: Default::default(),
+            native_quit: Default::default(),
+            propagated_escape_hooked: Default::default(),
+            propagated_eval_depth: Default::default(),
+            propagate_next: Default::default(),
+            quit: gap_probe::as_hosted(std::sync::Arc::default()),
+            quit_unwinding: Default::default(),
+            rooted_write: Default::default(),
+            deferred_writes: Default::default(),
+            unwinding: Default::default(),
+            aftermath_runs: Default::default(),
+            process_signals: true,
+            execution_fatal: Default::default(),
+            eval_depth: Default::default(),
+            running_engines: Default::default(),
+            stack: registers::Registers::new(),
+        }
     }
+}
+
+/// The part of a mutator's context a world image never holds, renewed at
+/// restore (`#[snapshot(at_rest)]` on `Vm::mutator_rest`): what the running
+/// engines parked, which holds addresses and lowered code. The derive lets
+/// only the image's root have at-rest fields, so it is a struct of its own
+/// beside `Mutator`; a second mutator swaps both. Checked idle before a
+/// capture (`Vm::world_quiescent`).
+#[derive(Default)]
+pub(crate) struct MutatorRest {
+    /// The instruction and registers of the leaf a site is running with no
+    /// activation, as addresses; (0, 0) otherwise. Lisp that leaf reaches
+    /// records the activation first (`Vm::record_site_leaf`).
+    pub(crate) site_leaf: (usize, usize),
+    pub(crate) execution: threaded::Program,
+    /// Programs of finished nested engine runs (registers all NIL again,
+    /// lowered code kept), reused by the next nested run
+    /// (`threaded::Vm::end_nested_execution`). Code invalidation and the
+    /// collector reach them as they reach `execution`.
+    pub(crate) spare_programs: Vec<threaded::Program>,
+    /// Suspended engines' own state, owned here until they resume: traced and
+    /// forwarded in place, and dropped with the engine by a caught panic.
+    pub(crate) suspended: Vec<threaded::Suspended>,
+    /// The compiled regexp patterns this mutator's searches use
+    /// (`regexp.rs`): their SIMD searchers hold function pointers, and a
+    /// pattern whose syntax table a collection may move goes at every
+    /// collection (`forget_table_bound_patterns`).
+    pub(crate) regexp_cache: regexp::PatternCache,
 }

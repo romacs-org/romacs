@@ -2575,10 +2575,10 @@ impl Vm {
         let mut small = [Value::NIL; 8];
         let heap;
         let args: &[Value] = if argc <= small.len() {
-            small[..argc].copy_from_slice(&self.stack[start..start + argc]);
+            small[..argc].copy_from_slice(&self.mutator.stack[start..start + argc]);
             &small[..argc]
         } else {
-            heap = self.stack[start..start + argc].to_vec();
+            heap = self.mutator.stack[start..start + argc].to_vec();
             &heap
         };
         let step = crate::gap_probe::within(self, move || d.name, |vm| no_collection(vm, |vm| {

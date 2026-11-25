@@ -51,12 +51,12 @@ impl Vm {
                     Ok(buffer)
                 }
                 else {
-                    self.kill_buffer_model(self.stack[start])?;
+                    self.kill_buffer_model(self.mutator.stack[start])?;
                     Ok(Value::NIL)
                 }
             }
             GetBuffer | SwitchToBuffer => {
-                let arg = self.stack[start];
+                let arg = self.mutator.stack[start];
                 let value = if let Some(name) = self.buffer_name_text(arg) {
                     if p == SwitchToBuffer && name.is_empty() {
                         return Err("empty buffer name".into());
@@ -79,10 +79,10 @@ impl Vm {
                 Ok(value)
             }
             ForwardLine => {
-                let count = if n == 0 || self.stack[start] == Value::NIL {
+                let count = if n == 0 || self.mutator.stack[start] == Value::NIL {
                     1
                 } else {
-                    self.stack[start].as_integer()?
+                    self.mutator.stack[start].as_integer()?
                 };
                 let index = self.buffer_index()?;
                 let shortage = match self.objects.entry_mut(index) {
@@ -114,10 +114,10 @@ impl Vm {
             MenuBarMode => {
                 let slot = self.slot("menu-bar-mode");
                 let toggle = self.intern("toggle");
-                let enabled = if n > 0 && self.stack[start] == toggle {
+                let enabled = if n > 0 && self.mutator.stack[start] == toggle {
                     self.variable_value(slot)? == Value::NIL
-                } else if n > 0 && (self.stack[start].integer_value().is_some() || matches!(self.object_if(self.stack[start]), Some(Object::Float(_)))) {
-                    !(self.number(self.stack[start])? < 1.0)
+                } else if n > 0 && (self.mutator.stack[start].integer_value().is_some() || matches!(self.object_if(self.mutator.stack[start]), Some(Object::Float(_)))) {
+                    !(self.number(self.mutator.stack[start])? < 1.0)
                 } else {
                     true
                 };
@@ -130,7 +130,7 @@ impl Vm {
                 // next redisplay (`BarKey'), from freshly converted forms.
                 self.display_state.mode_line_epoch = self.display_state.mode_line_epoch.wrapping_add(1);
                 self.mode_line_forms.clear();
-                Ok(if n == 0 { Value::NIL } else { self.stack[start] })
+                Ok(if n == 0 { Value::NIL } else { self.mutator.stack[start] })
             }
             // emacs.c Fdaemonp: a server's name, as `--fg-daemon=NAME''s.
             Daemonp => match crate::host::daemon() {
@@ -151,11 +151,11 @@ impl Vm {
     }
 
     fn eval_locate_library(&mut self, start: usize, n: usize) -> Result<Value> {
-        let name = self.source_string(self.stack[start])?.to_owned();
-        let nosuffix = n > 1 && self.stack[start + 1] != Value::NIL;
+        let name = self.source_string(self.mutator.stack[start])?.to_owned();
+        let nosuffix = n > 1 && self.mutator.stack[start + 1] != Value::NIL;
         let path_slot = self.slot("load-path");
-        let paths = if n > 2 && self.stack[start + 2] != Value::NIL {
-            self.stack[start + 2]
+        let paths = if n > 2 && self.mutator.stack[start + 2] != Value::NIL {
+            self.mutator.stack[start + 2]
         } else {
             self.variable_value(path_slot)?
         };
