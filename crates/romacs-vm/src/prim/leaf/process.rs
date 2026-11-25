@@ -760,7 +760,7 @@ impl Leaf<'_> {
             // emacs_gnutls_write: the session takes the bytes into records
             // and holds what the socket does not take yet; before READY it
             // takes nothing, and the bytes wait for the handshake.
-            let written = session.flush(fd).and_then(|()| if channel.pending.is_empty() { Ok(0) } else { session.write(fd, channel.pending.as_slices().0) });
+            let written = session.flush(fd).and_then(|()| if channel.pending.is_empty() { Ok(0) } else { session.write(fd, channel.pending.make_contiguous()) });
             return match written {
                 Ok(n) => { channel.pending.drain(..n); Ok(()) }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Ok(()),

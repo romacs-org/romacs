@@ -43,6 +43,7 @@ impl Leaf<'_> {
         }
         let mut rest = channel.framer.take().map(Framer::into_rest).unwrap_or_default();
         rest.append(&mut channel.carryover);
+        channel.rest_carried = false;
         match kind {
             // Framed with the next read's bytes.
             Some(kind) => channel.framer = Some(Framer::with_rest(kind, limit, rest)),
