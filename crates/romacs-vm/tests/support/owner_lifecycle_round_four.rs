@@ -142,6 +142,11 @@ impl WorkerLink {
         let source = env!("CARGO_BIN_EXE_romacs-vm-isolate");
         fs::copy(source, files.ready()).unwrap();
         fs::copy(source, files.go()).unwrap();
+        fs::write(
+            files.0.join(romacs_vm::host::RUNTIME_RECORD),
+            format!("{}\n", romacs_vm::host::runtime_root().display()),
+        )
+        .unwrap();
         let path = files.0.join("worker");
         symlink(files.ready(), &path).unwrap();
         Self { files, path }
@@ -156,6 +161,7 @@ impl WorkerLink {
 impl Drop for WorkerLink {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.path);
+        let _ = fs::remove_file(self.files.0.join(romacs_vm::host::RUNTIME_RECORD));
     }
 }
 
