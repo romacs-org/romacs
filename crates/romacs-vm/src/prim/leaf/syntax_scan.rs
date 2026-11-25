@@ -1260,6 +1260,40 @@ mod tests {
         assert_eq!(vm.display(result).unwrap(), "(1 t)");
     }
 
+    /// A leaf summary's scan holds its polls, the comment fast path's bulk
+    /// pass included: with a quit pending, the production view's scan of
+    /// a leaf whose comment ends a pass early (a word-syntax property at
+    /// 400) still makes the summary rather than stopping for the probe
+    /// inside it (Sol's r3 witness).
+    #[test]
+    fn a_leaf_summary_holds_the_bulk_pass_poll() {
+        use crate::syntax_scan::{self as scan, Scanner};
+        use crate::syntax_summary::lists::{Key, Mode};
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        vm.eval_source_raw(r#"(progn (set-buffer (get-buffer-create "held pass"))
+          (insert "(;" (make-string 10000 ?x) "\n)")
+          (set-syntax-table (copy-syntax-table))
+          (modify-syntax-entry ?\; "<") (modify-syntax-entry ?\n ">")
+          (put-text-property 400 401 'syntax-table '(2)))"#).unwrap();
+        let signal = std::sync::Arc::new(crate::QuitSignal::new());
+        vm.share_quit_signal(signal.clone());
+        vm.enter_busy();
+        assert!(signal.interrupt());
+        vm.mutator.native_quit = true;
+        let index = vm.buffer_index().unwrap();
+        let table = vm.buffer_syntax_table(index);
+        vm.flatten_table(table);
+        let view = super::View::new(&vm, index, table, true, true);
+        let (begv, zv) = (scan::Text::pos(&view, 1), scan::Text::pos(&view, i64::MAX));
+        let options = scan::Options { ignore_comments: true, propertize_done: Some(zv.char), ..scan::Options::default() };
+        let mut scanner = Scanner { text: &view, begv, zv, options, ppss: &super::UNANSWERED, defun_start: None, modiff: 0 };
+        let start = scanner.start_lists(1, i64::MAX, 0).ok().expect("a start");
+        let mode = Mode::of(&start, (false, true, false)).expect("a mode");
+        let summary = crate::syntax_summary::lists::summarize(&mut scanner, start.from, 1025, Key::of(&start, mode));
+        assert!(summary.is_some(), "the summary's scan held its polls");
+    }
+
     /// A quit pending when the list scan primitive starts stops it before
     /// its setup, as GNU's maybe_quit does: a cold scan whose setup would
     /// stop for `internal--syntax-propertize' quits instead, calls no Lisp
@@ -1285,6 +1319,45 @@ mod tests {
         let index = vm.buffer_index().unwrap();
         let leaves = super::buffer_text(&vm, index).syntax.borrow().leaves();
         assert_eq!(leaves, 0, "no leaf is cut");
+    }
+
+    /// A `debug-on-event' signal pending when a short list scan starts
+    /// stops it before its setup, as a pending C-g does: the entry's cheap
+    /// guard sees the signal mailbox too. It raises a real signal, so it
+    /// runs again in a child of its own.
+    #[test]
+    fn a_pending_debug_event_stops_a_list_scan_before_its_setup() {
+        const CHILD: &str = "ROMACS_SYNTAX_DEBUG_EVENT_CHILD";
+        let own = "prim::leaf::syntax_scan::tests::a_pending_debug_event_stops_a_list_scan_before_its_setup";
+        if std::env::var_os(CHILD).is_none() {
+            let out = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", own, "--nocapture"]).env(CHILD, "1").output().unwrap();
+            let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+            assert!(out.status.success() && text.contains("1 passed"), "{text}");
+            return;
+        }
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        vm.eval_source_raw(r#"(progn (set-buffer (get-buffer-create "entry event"))
+          (insert "x " (make-string 100000 ?x))
+          (set (make-local-variable 'parse-sexp-lookup-properties) t)
+          (set (make-local-variable 'syntax-propertize--done) 1)
+          (setq debug-on-event 'sigusr1))"#).unwrap();
+        crate::host::catch_user_signals().unwrap();
+        rustix::process::kill_process(rustix::process::getpid(), rustix::process::Signal::USR1).unwrap();
+        let sigusr1 = 1 << crate::host::USER_SIGNAL_NAMES.iter().position(|&name| name == "sigusr1").unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !crate::host::user_signal_waiting(sigusr1) {
+            assert!(std::time::Instant::now() < deadline, "the signal reached the mailbox");
+            std::thread::yield_now();
+        }
+        vm.enter_busy();
+        let args = [Value::integer(1).unwrap(), Value::integer(1).unwrap(), Value::NIL, Value::NIL, Value::NIL, Value::NIL];
+        let outcome = {
+            let mut leaf = super::Leaf { vm: &mut vm };
+            leaf.quittable(|leaf| leaf.syntax_scan(super::Op::ScanSexps, &args, Value::NIL, Value::NIL))
+        };
+        assert!(matches!(outcome, Err(_)), "the scan stops for the event before its setup's stop for Lisp");
     }
 
     /// A quit pending when an indexed list scan starts stops it there,

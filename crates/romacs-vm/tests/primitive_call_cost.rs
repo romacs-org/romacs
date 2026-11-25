@@ -196,4 +196,3 @@ fn proper_list_p_reads_each_cons_once() {
         (let ((c (make-list 4097 1))) (setcdr (nthcdr 4096 c) c) (safe-length c)))"),
         "(4097 12289)");
 }
-
