@@ -459,7 +459,7 @@ prompt; its chat shown once the service lists it."
   "Show the chat of SOURCE's session ID once its service lists it, until DEADLINE."
   (cond ((not (eq source romacs-agent-remote--source)))
         ((gethash id (romacs-agent-remote--rows source))
-         (pop-to-buffer (romacs-agent-remote-chat id)))
+         (romacs-agent-display (romacs-agent-remote-chat id)))
         ((< (float-time) deadline)
          (run-at-time 0.2 nil #'romacs-agent-remote--show-when-listed source id deadline))
         (t (message "Started %s; not listed yet" id))))

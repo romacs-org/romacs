@@ -1875,18 +1875,29 @@ after a batch of events remade sessions' states (their workers')."
 
 (add-hook 'romacs-agent-ui-changed-hook #'romacs-agent-log--headers-refresh)
 
+(defcustom romacs-agent-display-function #'pop-to-buffer-same-window
+  "How an agent buffer is shown (a chat, a transcript, a call's output):
+a function called with the buffer, which selects a window showing it.
+The default takes the selected window, never another or a new one."
+  :type 'function :group 'romacs-agent)
+
+(defun romacs-agent-display (buffer &optional action)
+  "Show agent BUFFER: as `pop-to-buffer' does with ACTION when given, else
+by `romacs-agent-display-function'."
+  (if action (pop-to-buffer buffer action) (funcall romacs-agent-display-function buffer)))
+
 (defun romacs-agent-log-show (session &optional action source)
-  "Show SESSION's chat, as `pop-to-buffer' does with ACTION; SOURCE's
+  "Show SESSION's chat (`romacs-agent-display' with ACTION); SOURCE's
 session, this editor's by default."
   (let ((buffer (romacs-agent-log-chat session nil source)))
-    (pop-to-buffer buffer action)
+    (romacs-agent-display buffer action)
     (romacs-agent-log--show-end (selected-window))
     (romacs-agent-log-source-seen romacs-agent-log--source session)
     buffer))
 
 
 (defun romacs-agent-show (session &optional action source)
-  "Show SESSION's chat, as `pop-to-buffer' does with ACTION; SOURCE's
+  "Show SESSION's chat (`romacs-agent-display' with ACTION); SOURCE's
 session, this editor's by default."
   (romacs-agent-log-show session action source))
 ;; A session outlives the editor in its supervisor: a restored chat
@@ -2212,7 +2223,7 @@ REASON when given."
 (defun romacs-agent-log--open-delegated-thread (id)
   "Open the delegated thread with ID in this window."
   (if-let* ((child (romacs-agent-get id)))
-      (romacs-agent-show child '(display-buffer-same-window))
+      (romacs-agent-show child)
     (user-error "That delegated thread is no longer available")))
 
 (defun romacs-agent-log-copy-job-unit ()
@@ -2242,7 +2253,7 @@ REASON when given."
                (when (cdr full) (insert "\nOutput:\n" (cdr full) "\n"))
                (goto-char (point-min)))
              (view-mode 1)
-             (pop-to-buffer (current-buffer)))))
+             (romacs-agent-display (current-buffer)))))
         (t (user-error "Nothing to open here"))))
 
 (defun romacs-agent-log-copy ()
