@@ -50,7 +50,7 @@ plan of seq 43."
 
 (defun romacs-agent-plan-offer-rules-tests--board (settled)
   "The board's thread rows as (ID KEY), its Settled section with SETTLED."
-  (let ((view (list :settled settled :folds (make-hash-table :test #'equal))))
+  (let ((view (list :project "/p/rules" :settled settled :folds (make-hash-table :test #'equal))))
     (cl-loop for row in (romacs-agent-board-rows (romacs-agent-summary nil) nil view)
              when (eq (plist-get row :kind) 'thread)
              collect (list (plist-get row :id) (plist-get row :key)))))

@@ -68,6 +68,7 @@
     (romacs-agent-plan-offer-tests--offer session 41)
     (with-temp-buffer
       (romacs-agent-board-mode)
+      (setq romacs-agent-board--project "/p/offer")
       (romacs-agent-board--render (current-buffer) 100)
       (should (string-match-p "Asks you +Plan fixture" (buffer-string))))
     (should (= 0 (hash-table-count romacs-agent-log--chats)))))

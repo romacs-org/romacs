@@ -438,7 +438,7 @@ journal one turn long."
 
 (ert-deftest romacs-agent-store-an-older-table-is-made-again-and-the-rest-kept ()
   ;; A database whose sessions table an earlier build made: made again with
-  ;; this build's columns, its rows, records and the board's folds kept.
+  ;; this build's columns, its rows, records and an unrelated table kept.
   (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
   (romacs-agent-store-tests--with
     (ignore #'record)
@@ -449,8 +449,8 @@ journal one turn long."
         (sqlite-execute db "insert into sessions values ('old', '/x', 'idle')")
         (sqlite-execute db "create table events (session text not null, seq integer not null, t real, kind text, record text not null)")
         (sqlite-execute db "insert into events values ('old', 1, 1.0, 'note', '{}')")
-        (sqlite-execute db "create table board_folds (project text primary key)")
-        (sqlite-execute db "insert into board_folds values ('/p')")
+        (sqlite-execute db "create table legacy_metadata (name text primary key)")
+        (sqlite-execute db "insert into legacy_metadata values ('kept')")
         (sqlite-pragma db "user_version = 3")
         (sqlite-close db))
       (let ((db (romacs-agent-store--open)))
@@ -458,7 +458,7 @@ journal one turn long."
         (should (member "seq" (mapcar #'cadr (sqlite-select db "pragma table_info(sessions)"))))
         (should (equal (sqlite-select db "select id, dir, state, seq from sessions") '(("old" "/x" "idle" nil))))
         (should (equal (sqlite-select db "select session, seq from events") '(("old" 1))))
-        (should (equal (sqlite-select db "select project from board_folds") '(("/p"))))))))
+        (should (equal (sqlite-select db "select name from legacy_metadata") '(("kept"))))))))
 
 (defconst romacs-agent-store-tests--older-open
   '("drop table if exists sessions"
@@ -483,8 +483,8 @@ writes: the sessions table made again in its form, the rest left.")
   ;; A store this build migrated, opened by an earlier build (a rollback),
   ;; then by this one again: the earlier one makes its sessions table
   ;; again, this one reforms it with the rows it holds; the records, what
-  ;; is imported, the turns and the board's folds are kept, and an
-  ;; imported session reads as it did.
+  ;; is imported and the turns are kept, and an imported session reads
+  ;; as it did.
   (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
   (require 'romacs-agent-events)
   (romacs-agent-store-tests--with
@@ -494,7 +494,6 @@ writes: the sessions table made again in its form, the rest left.")
       (make-directory (file-name-directory (romacs-agent-store--file)) t)
       (let ((session (romacs-agent--make :id "imp" :dir (expand-file-name "imp" root))))
         (should (romacs-agent-events-import session))
-        (romacs-agent-store-fold "/p/one/" t)
         (let* ((db (romacs-agent-store--open))
                (kept (romacs-agent-store-tests--tables db))
                (seqs (lambda ()
@@ -649,20 +648,6 @@ writes: the sessions table made again in its form, the rest left.")
             (call-interactively (keymap-lookup romacs-agent-board-mode-map "s")))))
       (should-not (romacs-agent-settled-p (romacs-agent-store-row-session kept)))
       (should-not (romacs-agent-loaded kept)))))
-
-(ert-deftest romacs-agent-store-keeps-the-board-s-folds ()
-  ;; Folded projects are kept, and kept past the sessions' table made
-  ;; again for another form of it.
-  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
-  (romacs-agent-store-tests--with
-    (romacs-agent-store-fold "/p/one" t)
-    (romacs-agent-store-fold "/p/two" t)
-    (romacs-agent-store-fold "/p/two" nil)
-    (should (equal (romacs-agent-store-folded) '("/p/one")))
-    (sqlite-pragma (cdr romacs-agent-store--db) "user_version = 0")
-    (sqlite-close (cdr romacs-agent-store--db))
-    (setq romacs-agent-store--db nil)
-    (should (equal (romacs-agent-store-folded) '("/p/one")))))
 
 ;;; romacs-agent-store-tests.el ends here
 

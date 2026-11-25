@@ -683,6 +683,8 @@ a state root of its own, and a service of its own on `socket'."
             (require 'romacs-agent-board)
             (cl-flet ((board (source)
                         (let ((romacs-agent-board-source source) (buffer (romacs-agent-board--buffer)))
+                          (with-current-buffer buffer
+                            (setq romacs-agent-board--project (abbreviate-file-name root)))
                           (romacs-agent-board--render buffer 100)
                           (funcall text buffer))))
               (should (string-search "stored" (board source)))

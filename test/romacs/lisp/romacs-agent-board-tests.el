@@ -56,9 +56,12 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
     (mk "asks" "asks" 'waiting-approval 800 :driver-state '(:asks ("r")))
     (mk "done" "done" 'idle 700 :done-seq 3)
     (mk "far" "far" 'idle 5 :cwd "/p/two/")
-    (should (equal (romacs-agent-board-tests--ids (rows))
-                   '("/p/one" "asks" "busy" "done" "new" "old" "/p/two" "far")))
-    (should (equal (plist-get (car (rows)) :keys) '(approval working completed idle idle)))))
+    (should (equal (romacs-agent-board-tests--ids (rows)) '("/p/one" "/p/two")))
+    (should (equal (romacs-agent-board-tests--ids (rows :project "/p/one"))
+                   '("/p/one" "asks" "busy" "done" "new" "old")))
+    (should (equal (romacs-agent-board-tests--ids (rows :project "/p/two")) '("/p/two" "far")))
+    (should (equal (plist-get (car (rows :project "/p/one")) :keys)
+                   '(approval working completed idle idle)))))
 
 (ert-deftest romacs-agent-board-settled-has-its-own-section ()
   (romacs-agent-board-tests--with
@@ -66,22 +69,22 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
     (mk "b" "b" 'idle 20 :done-seq 3)
     (mk "child" "child" 'idle 30 :cwd "/p/worktree/" :options '(:parent "a")
         :settled-seq romacs-agent--inactive-settlement)
-    (let* ((active (rows)) (project (car active)))
+    (let* ((active (rows :project "/p/one")) (project (car active)))
       (should (equal (romacs-agent-board-tests--ids active) '("/p/one" "b")))
       (should (equal (plist-get project :settled-count) 2))
       (should (string-match-p "✔️ 2" (romacs-agent-board--line project 80))))
     (should (equal (plist-get (car (rows :words '("b"))) :settled-count) 2))
     (let ((folds (make-hash-table :test #'equal)))
       (puthash "a" 'open folds)
-      (should (equal (romacs-agent-board-tests--ids (rows :settled t :folds folds)) '("/p/one" "a" "child"))))))
+      (should (equal (romacs-agent-board-tests--ids (rows :project "/p/one" :settled t :folds folds)) '("/p/one" "a" "child"))))))
 
 (ert-deftest romacs-agent-board-hides-an-inactive-parent-without-losing-its-child ()
   (romacs-agent-board-tests--with
     (mk "lead" "lead" 'running 10 :settled-seq romacs-agent--inactive-settlement)
     (mk "worker" "worker" 'running 5 :options '(:parent "lead"))
-    (should (equal (romacs-agent-board-tests--ids (rows)) '("/p/one" "worker")))
-    (should (equal (plist-get (car (rows)) :keys) '(working)))
-    (should (equal (romacs-agent-board-tests--ids (rows :settled t)) '("/p/one" "lead")))))
+    (should (equal (romacs-agent-board-tests--ids (rows :project "/p/one")) '("/p/one" "worker")))
+    (should (equal (plist-get (car (rows :project "/p/one")) :keys) '(working)))
+    (should (equal (romacs-agent-board-tests--ids (rows :project "/p/one" :settled t)) '("/p/one" "lead")))))
 
 (ert-deftest romacs-agent-board-children-fold-under-their-parent ()
   (romacs-agent-board-tests--with
@@ -89,18 +92,18 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
     (mk "w1" "w1" 'idle 30 :done-seq 2 :options '(:parent "lead"))
     (mk "w2" "w2" 'idle 20 :done-seq 2 :options '(:parent "lead"))
     ;; Nothing goes on under it: folded, a rollup of what is done.
-    (let ((lead (cadr (rows))))
-      (should (equal (romacs-agent-board-tests--ids (rows)) '("/p/one" "lead")))
+    (let ((lead (cadr (rows :project "/p/one"))))
+      (should (equal (romacs-agent-board-tests--ids (rows :project "/p/one")) '("/p/one" "lead")))
       (should (equal (plist-get lead :children) '(completed completed)))
       (should (equal (substring-no-properties (romacs-agent-ui--rollup (plist-get lead :children))) "2 completed")))
     ;; One works: unfolded, nested a level, what works first.
     (setf (romacs-agent-state (romacs-agent-get "w1")) 'running)
-    (should (equal (romacs-agent-board-tests--ids (rows)) '("/p/one" "lead" "w1" "w2")))
-    (should (equal (mapcar (lambda (row) (plist-get row :depth)) (cdr (rows))) '(0 1 1)))
+    (should (equal (romacs-agent-board-tests--ids (rows :project "/p/one")) '("/p/one" "lead" "w1" "w2")))
+    (should (equal (mapcar (lambda (row) (plist-get row :depth)) (cdr (rows :project "/p/one"))) '(0 1 1)))
     ;; The user's fold wins.
     (let ((folds (make-hash-table :test #'equal)))
       (puthash "lead" 'closed folds)
-      (should (equal (romacs-agent-board-tests--ids (rows :folds folds)) '("/p/one" "lead"))))))
+      (should (equal (romacs-agent-board-tests--ids (rows :project "/p/one" :folds folds)) '("/p/one" "lead"))))))
 
 (ert-deftest romacs-agent-board-filters-by-words ()
   (romacs-agent-board-tests--with
@@ -117,16 +120,18 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
 (ert-deftest romacs-agent-board-lists-transcripts-per-project ()
   (romacs-agent-board-tests--with
     (mk "a" "a" 'idle 10)
-    (let ((history (cl-loop for i below 3 collect (list :path (format "/h/%d" i) :title (format "t%d" i) :cwd "/p/one"
-                                                         :mtime (- now i))))
-          (other (list :path "/h/x" :title "x" :cwd "/p/three" :mtime now)))
-      (should (equal (romacs-agent-board-tests--ids (rows :history history))
+    (let ((history (cons (list :path "/h/x" :title "x" :cwd "/p/three" :mtime now)
+                         (cl-loop for i below 3
+                                  collect (list :path (format "/h/%d" i) :title (format "t%d" i)
+                                                :cwd "/p/one" :mtime (- now i))))))
+      (should (equal (romacs-agent-board-tests--ids (rows :project "/p/one" :history history))
                      '("/p/one" "a" "/h/0" "/h/1" (more . "/p/one"))))
-      (should (equal (romacs-agent-board-tests--ids (rows :history history :all-history t))
+      (should (equal (romacs-agent-board-tests--ids (rows :project "/p/one" :history history :all-history t))
                      '("/p/one" "a" "/h/0" "/h/1" "/h/2")))
-      (should (equal (romacs-agent-board-tests--ids (rows :history (list other)))
-                     '("/p/one" "a" "/p/three" "/h/x")))
-      (should-not (cl-find 'history (rows :history history :settled t) :key (lambda (row) (plist-get row :kind)))))))
+      (should (equal (romacs-agent-board-tests--ids (rows :project "/p/three" :history history))
+                     '("/p/three" "/h/x")))
+      (should-not (cl-find 'history (rows :project "/p/one" :history history :settled t)
+                           :key (lambda (row) (plist-get row :kind)))))))
 
 (ert-deftest romacs-agent-board-says-the-transcripts-are-being-read ()
   ;; Their first scan under way, none listed: one line says so, never an
@@ -144,7 +149,7 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
 (ert-deftest romacs-agent-board-a-line-says-provider-and-model ()
   (romacs-agent-board-tests--with
     (mk "a" "Port the theme" 'running 30 :model "claude-opus-5-5")
-    (let ((line (substring-no-properties (romacs-agent-board--line (cadr (rows)) 100))))
+    (let ((line (substring-no-properties (romacs-agent-board--line (cadr (rows :project "/p/one")) 100))))
       (should (= (string-width line) 100))
       (should (string-match-p "\\`  Working +Port the theme +claude · opus-5-5 +now *\\'" line)))))
 
@@ -169,16 +174,16 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
     (mk "w" "w" 'idle 20 :done-seq 2 :settled-seq 2 :options '(:parent "lead"))
     ;; A settled child leaves the board; the Settled section has it, under
     ;; its parent shown dim for context.
-    (should-not (plist-get (cadr (rows)) :children))
-    (should (equal (romacs-agent-board-tests--ids (rows :settled t)) '("/p/one" "lead" "w")))
-    (should (equal (mapcar (lambda (row) (plist-get row :context)) (cdr (rows :settled t))) '(t nil)))
+    (should-not (plist-get (cadr (rows :project "/p/one")) :children))
+    (should (equal (romacs-agent-board-tests--ids (rows :project "/p/one" :settled t)) '("/p/one" "lead" "w")))
+    (should (equal (mapcar (lambda (row) (plist-get row :context)) (cdr (rows :project "/p/one" :settled t))) '(t nil)))
     ;; A settled parent with a child at work: the child stays on the board.
     (setf (romacs-agent-settled-seq (romacs-agent-get "lead")) 0
           (romacs-agent-settled-seq (romacs-agent-get "w")) nil
           (romacs-agent-state (romacs-agent-get "w")) 'running)
-    (should (equal (romacs-agent-board-tests--ids (rows)) '("/p/one" "lead" "w")))
-    (should (plist-get (cadr (rows)) :context))
-    (should (equal (romacs-agent-board-tests--ids (rows :settled t)) '("/p/one" "lead")))))
+    (should (equal (romacs-agent-board-tests--ids (rows :project "/p/one")) '("/p/one" "lead" "w")))
+    (should (plist-get (cadr (rows :project "/p/one")) :context))
+    (should (equal (romacs-agent-board-tests--ids (rows :project "/p/one" :settled t)) '("/p/one" "lead")))))
 
 (ert-deftest romacs-agent-board-a-filter-leaves-no-empty-project ()
   (romacs-agent-board-tests--with
@@ -191,19 +196,20 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
 (ert-deftest romacs-agent-board-a-narrow-board-names-provider-and-model ()
   (romacs-agent-board-tests--with
     (mk "a" "Port the theme" 'running 30 :model "claude-opus-5-5")
-    (let ((line (substring-no-properties (romacs-agent-board--line (cadr (rows)) 60))))
+    (let ((line (substring-no-properties (romacs-agent-board--line (cadr (rows :project "/p/one")) 60))))
       (should (= (string-width line) 60))
       (should (string-search "claude · opus" line)))))
 
 ;;; Keys, on the board's buffer
 
-(defmacro romacs-agent-board-tests--board (&rest body)
-  "BODY in the board's buffer, drawn 100 columns wide, with the chats
-`romacs-agent-show' would show recorded in `shown', each (SESSION ACTION)."
-  (declare (indent 0))
+(defmacro romacs-agent-board-tests--board (project &rest body)
+  "Run BODY on the 100-column board in PROJECT, nil for the project list.
+Record each chat shown in `shown' as (SESSION ACTION)."
+  (declare (indent 1))
   `(let ((shown nil))
      (with-temp-buffer
        (romacs-agent-board-mode)
+       (setq romacs-agent-board--project ,project)
        (cl-letf (((symbol-function 'romacs-agent-show) (lambda (session &optional action _source) (push (list session action) shown)))
                  ((symbol-function 'romacs-agent-board--columns) (lambda (_) 100)))
          (romacs-agent-board--redraw)
@@ -221,7 +227,7 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
           (progn
             (dolist (session (hash-table-values romacs-agent--sessions))
               (setf (romacs-agent-dir session) dir))
-            (romacs-agent-board-tests--board
+            (romacs-agent-board-tests--board "/p/one"
               ;; Shown anew, on the first thread; n and p skip the lines
               ;; that are no row.
               (should (equal (romacs-agent-board-tests--at) "a"))
@@ -257,12 +263,17 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
            (romacs-agent-event-functions '(romacs-agent-tools--on-event))
            (romacs-agent-tools--pending (make-hash-table :test #'equal))
            (romacs-agent-tools--waking (make-hash-table :test #'equal))
+           (schedule (symbol-function 'run-at-time))
            (timer nil) (delivered nil) (notices nil))
       (unwind-protect
           (progn
             (romacs-agent-ui--summarize-children lead)
-            (romacs-agent-board-tests--board
-              (cl-letf (((symbol-function 'run-at-time) (lambda (_delay _repeat then) (setq timer then)))
+            (romacs-agent-board-tests--board "/p/one"
+              (cl-letf (((symbol-function 'run-at-time)
+                         (lambda (delay repeat then &rest args)
+                           (if (and (equal delay 0.5) (null repeat))
+                               (setq timer then)
+                             (apply schedule delay repeat then args))))
                         ((symbol-function 'message)
                          (lambda (template &rest args) (when template (push (apply #'format template args) notices))))
                         ((symbol-function 'romacs-agent-tools--deliver)
@@ -273,11 +284,13 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
                 (setf (romacs-agent-state worker) 'idle (romacs-agent-done-seq worker) 1
                       (romacs-agent-ends worker) '((1 "Work is ready." nil)))
                 (romacs-agent-tools--wake worker)
+                (should timer)
                 (funcall (prog1 timer (setq timer nil)))
                 (should-not delivered)
                 (should (gethash "lead" romacs-agent-tools--pending))
                 (should (cl-some (lambda (notice) (string-search "still at work" notice)) notices))
                 (romacs-agent-board-toggle-settled)
+                (should (equal (romacs-agent-board-tests--at) "lead"))
                 (romacs-agent-board-settle)
                 (should timer)
                 (funcall timer)
@@ -289,7 +302,7 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
   (romacs-agent-board-tests--with
     (let ((lead (mk "lead" "lead" 'idle 10)))
       (mk "w" "w" 'idle 20 :done-seq 2 :options '(:parent "lead"))
-      (romacs-agent-board-tests--board
+      (romacs-agent-board-tests--board "/p/one"
         (should (equal (romacs-agent-board-tests--ids (romacs-agent-board--shown-rows)) '("/p/one" "lead")))
         (romacs-agent-board-fold)
         (should (equal (romacs-agent-board-tests--ids (romacs-agent-board--shown-rows)) '("/p/one" "lead" "w")))
@@ -306,7 +319,7 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
 (ert-deftest romacs-agent-board-keys-open-what-is-there ()
   (romacs-agent-board-tests--with
     (let ((a (mk "a" "a" 'idle 10)))
-      (romacs-agent-board-tests--board
+      (romacs-agent-board-tests--board "/p/one"
         ;; A project opens its first thread.
         (goto-char (point-min))
         (romacs-agent-board-next 1)
@@ -324,7 +337,7 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
   (romacs-agent-board-tests--with
     (mk "tool" "tool" 'waiting-approval 10 :driver-state '(:asks ("r1")))
     (mk "ask" "ask" 'waiting-approval 20 :driver-state '(:asks ("q1") :questions ("q1")))
-    (romacs-agent-board-tests--board
+    (romacs-agent-board-tests--board "/p/one"
       (let ((answered nil))
         (cl-letf (((symbol-function 'romacs-agent-respond)
                    (lambda (session id allow &rest _) (push (list (romacs-agent-id session) id allow) answered))))
@@ -337,15 +350,17 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
           (should (= (length answered) 1))
           (should (= (length shown) 1)))))))
 
-(ert-deftest romacs-agent-board-filter-follows-typing ()
+(ert-deftest romacs-agent-board-filter-matches-across-projects ()
   (romacs-agent-board-tests--with
     (mk "a" "Fix the parser" 'idle 10)
     (mk "b" "Theme work" 'idle 20)
-    (romacs-agent-board-tests--board
+    (mk "c" "Theme notes" 'idle 30 :cwd "/p/two/")
+    (mk "d" "Parser notes" 'idle 40 :cwd "/p/three/")
+    (romacs-agent-board-tests--board "/p/one"
       (cl-letf (((symbol-function 'read-from-minibuffer) (lambda (&rest _) "theme")))
         (romacs-agent-board-filter))
-      (should (equal (romacs-agent-board-tests--ids (romacs-agent-board--shown-rows)) '("/p/one" "b")))
-      (should (string-search "/theme" (buffer-substring (point-min) (line-end-position 1))))
+      (should (equal (romacs-agent-board-tests--ids (romacs-agent-board--shown-rows))
+                     '("/p/one" "b" "/p/two" "c")))
       ;; C-g puts the filter back as it was.
       (cl-letf (((symbol-function 'read-from-minibuffer) (lambda (&rest _) (signal 'quit nil))))
         (romacs-agent-board-filter))
@@ -371,24 +386,24 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
     (let ((romacs-agent-board-columns
            (list (cons (lambda (row) (upcase (romacs-agent-summary-title (plist-get row :summary)))) 'fill)
                  (cons #'romacs-agent-board-time 4))))
-      (should (equal (substring-no-properties (romacs-agent-board--line (cadr (rows)) 30))
+      (should (equal (substring-no-properties (romacs-agent-board--line (cadr (rows :project "/p/one")) 30))
                      "  PORT THE THEME          2m  ")))))
 
 (ert-deftest romacs-agent-board-a-lambda-column-on-a-working-row ()
   (romacs-agent-board-tests--with
     (mk "a" "a" 'running 5)
     (let ((romacs-agent-board-columns (list (cons (lambda (_) "x") 'fill))))
-      (should (string-prefix-p "  x" (substring-no-properties (romacs-agent-board--line (cadr (rows)) 20)))))))
+      (should (string-prefix-p "  x" (substring-no-properties (romacs-agent-board--line (cadr (rows :project "/p/one")) 20)))))))
 
 (ert-deftest romacs-agent-board-a-cut-row-keeps-still ()
   ;; Too narrow for every column: no cell of it is asked again, so none
   ;; can grow the row past the board.
   (romacs-agent-board-tests--with
     (mk "a" "a" 'running 5 :activity "Read" :turn-start (- now 5))
-    (let ((line (romacs-agent-board--line (cadr (rows)) 40)))
+    (let ((line (romacs-agent-board--line (cadr (rows :project "/p/one")) 40)))
       (should (= (string-width line) 40))
       (should-not (text-property-not-all 0 (length line) 'romacs-agent-board-live nil line)))
-    (let ((line (romacs-agent-board--line (cadr (rows)) 120)))
+    (let ((line (romacs-agent-board--line (cadr (rows :project "/p/one")) 120)))
       (should (text-property-not-all 0 (length line) 'romacs-agent-board-live nil line)))))
 
 (ert-deftest romacs-agent-board-doing-and-time ()
@@ -398,12 +413,12 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
     (let ((folds (make-hash-table :test #'equal)))
       ;; Unfolded: the tool its turn runs, and how long the turn has.
       (puthash "lead" 'open folds)
-      (let ((lead (cadr (rows :folds folds))))
+      (let ((lead (cadr (rows :project "/p/one" :folds folds))))
         (should (equal (substring-no-properties (romacs-agent-board-doing lead)) "romacs_eval"))
         (should (equal (substring-no-properties (romacs-agent-board-time lead)) "1m")))
       ;; Folded: what its threads are doing.
       (puthash "lead" 'closed folds)
-      (should (equal (substring-no-properties (romacs-agent-board-doing (cadr (rows :folds folds)))) "1 completed")))))
+      (should (equal (substring-no-properties (romacs-agent-board-doing (cadr (rows :project "/p/one" :folds folds)))) "1 completed")))))
 
 (ert-deftest romacs-agent-board-activity-is-the-turn-s-last-tool ()
   (let ((session (romacs-agent--make :id "s" :harness 'claude :state 'idle))
@@ -420,7 +435,7 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
   (romacs-agent-board-tests--with
     (let ((session (mk "a" "a" 'running 5 :activity "Read" :turn-start (- now 5))))
       (mk "b" "b" 'idle 50)
-      (romacs-agent-board-tests--board
+      (romacs-agent-board-tests--board "/p/one"
         (let ((before (buffer-string)) (romacs-agent-board--ticker (run-at-time 3600 nil #'ignore)))
           (romacs-agent--raise session '(:type tool :state started :name "Bash"))
           (cl-letf (((symbol-function 'romacs-agent-board--shown) (lambda () (current-buffer))))
@@ -438,15 +453,21 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
             (romacs-agent-board--tick))
           (should-not romacs-agent-board--ticker))))))
 
-(ert-deftest romacs-agent-board-says-few-words ()
+(ert-deftest romacs-agent-board-starts-with-a-banner ()
   (romacs-agent-board-tests--with
-    (mk "a" "a" 'waiting-approval 10 :driver-state '(:asks ("r")))
-    (romacs-agent-board-tests--board
-      ;; The counts are the project's, not the title's too.
-      (goto-char (point-min))
-      (should (equal (buffer-substring-no-properties (point) (line-end-position)) "Agents"))
-      (goto-char (point-max))
-      (should (string-search "? keys" (buffer-substring-no-properties (line-beginning-position) (point-max)))))))
+    (let ((session (mk "a" "a" 'idle 10)))
+      (romacs-agent-board-tests--board nil
+        (dolist (state '(idle running))
+          (setf (romacs-agent-state session) state)
+          (romacs-agent--changed session)
+          (romacs-agent-board--redraw t)
+          (goto-char (point-min))
+          (should-not (romacs-agent-board--row))
+          (should (equal-including-properties
+                   (buffer-substring (point) (line-end-position))
+                   (romacs-working-still 100 state))))
+        (goto-char (point-max))
+        (should (string-search "? keys" (buffer-substring-no-properties (line-beginning-position) (point-max))))))))
 
 ;;; In a window
 
@@ -466,6 +487,7 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
               (should (eq (window-buffer) (get-buffer "*romacs-agents*")))
               (should (derived-mode-p 'romacs-agent-board-mode))
               (should (= romacs-agent-board--width (- (window-body-width) 3)))
+              (romacs-agent-board-open)
               (romacs-agent-board-next 30)
               (set-window-start nil (save-excursion (forward-line -10) (point)))
               (let ((at (plist-get (romacs-agent-board--row) :id))
@@ -493,7 +515,7 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
           (romacs-agent-board--resized (selected-window))
           (should (equal (with-current-buffer other (buffer-string)) "the user's text")))))))
 
-(ert-deftest romacs-agent-board-filters-a-listing-and-skips-folded-threads ()
+(ert-deftest romacs-agent-board-filter-reuses-the-project-listing ()
   (romacs-agent-board-tests--with
     (mk "one" "alpha" 'idle 1)
     (mk "two" "beta" 'idle 2)
@@ -507,14 +529,11 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
                 ((symbol-function 'romacs-agent-board-source-history)
                  (lambda (_) (cl-incf archives) nil))
                 ((symbol-function 'romacs-agent-board--thread)
-                 (lambda (&rest args) (cl-incf threads) (apply thread args)))
-                ((symbol-function 'romacs-agent-store-folded) #'ignore))
+                 (lambda (&rest args) (cl-incf threads) (apply thread args))))
         (with-temp-buffer
           (romacs-agent-board-mode)
-          (puthash "/p/one" t (romacs-agent-board--folded))
           (romacs-agent-board--redraw)
           (should (= threads 0))
-          (should (equal (plist-get (plist-get (get-text-property (romacs-agent-board--find "/p/one") 'romacs-agent-board-row) :first) :id) "one"))
           (dolist (word '("a" "al" "alpha"))
             (setq romacs-agent-board--words (list word))
             (romacs-agent-board--redraw))
@@ -522,106 +541,94 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
           (should-not (romacs-agent-board--find "two"))
           (should (= listings archives 1)))))))
 
-(provide 'romacs-agent-board-tests)
-(ert-deftest romacs-agent-board-a-folded-project-shows-its-heading ()
-  ;; Folded, a project is its row alone: how many threads and what they
-  ;; are at, a delegated one's state too; a filter shows its threads.
+(ert-deftest romacs-agent-board-lists-projects-with-threads-or-transcripts ()
   (romacs-agent-board-tests--with
     (mk "lead" "lead" 'idle 10)
-    (mk "w" "w" 'running 20 :options '(:parent "lead"))
-    (mk "o" "o" 'idle 30 :cwd "/p/two/")
-    (let ((projects (make-hash-table :test #'equal)))
-      (puthash "/p/one" t projects)
-      (let ((shown (rows :projects projects)))
-        (should (equal (romacs-agent-board-tests--ids shown) '("/p/one" "/p/two" "o")))
-        (should (= (plist-get (car shown) :folded) 2))
-        (let ((line (romacs-agent-board--line (car shown) 100)))
-          (should (string-search "▸ 2 threads" line))
-          (should (string-search (romacs-agent-ui--rollup '(working)) line))
-        ;; States in words, wider than the board: the name stays, the
-        ;; line keeps to the width, what is cut says so.
-        (let* ((words (romacs-agent-ui--rollup '(approval question working)))
-               (line (romacs-agent-board--line (list :kind 'project :cwd "/p/a-long-project-name" :folded 3
-                                                     :keys '(approval question working))
-                                               40)))
-          (should (> (string-width words) 30))
-          (should (string-prefix-p "a-long-project-name" line))
-          (should (<= (string-width line) 40))
-          (should (string-search (substring-no-properties words 0 10) line))
-          (should (string-suffix-p (truncate-string-ellipsis) line)))))
-      (should (member "lead" (romacs-agent-board-tests--ids (rows :projects projects :words '("lead"))))))))
+    (mk "worker" "worker" 'running 20 :options '(:parent "lead"))
+    (mk "other" "other" 'idle 30 :cwd "/p/two/")
+    (let* ((romacs-icons-source 'romacs)
+           (romacs-icons-ascii nil)
+           (romacs-icons--font t)
+           (folder (romacs-icon 'dired 'romacs-agent-section))
+           (history (list (list :path "/h/x" :title "x" :cwd "/p/three" :mtime now)))
+           (projects (rows :history history))
+           (line (romacs-agent-board--line (car projects) 100)))
+      (should (equal (mapcar (lambda (row)
+                               (list (plist-get row :kind) (plist-get row :id)
+                                     (plist-get row :keys) (plist-get row :folded)))
+                             projects)
+                     '((project "/p/one" (idle working) 2)
+                       (project "/p/two" (idle) 1)
+                       (project "/p/three" nil 0))))
+      (should (string-search "◇ 1 transcript" (romacs-agent-board--line (nth 2 projects) 100)))
+      (should folder)
+      (should (string-prefix-p (concat "▌ " folder " one") line))
+      (should (eq (get-text-property 0 'face line) 'romacs-agent-running))
+      (should (string-search "▸ 2 threads" line))
+      (should (string-search (romacs-agent-ui--rollup '(working)) line)))))
 
-(ert-deftest romacs-agent-board-keys-fold-projects ()
-  ;; TAB on a project folds it and back, S-TAB folds every project, then
-  ;; shows them all; the store keeps each.
+(ert-deftest romacs-agent-board-a-narrow-project-line-keeps-state-and-count ()
+  (romacs-agent-board-tests--with
+    (mk "a" "alpha" 'running 10 :cwd "/home/someone/Worktrees/romacs/a-long-project-name/")
+    (let* ((row (car (rows)))
+           (line (romacs-agent-board--line row 40))
+           (words (romacs-agent-ui--rollup '(approval question working)))
+           (crowded (romacs-agent-board--line
+                     (list :kind 'project :cwd "/p/a-long-project-name" :folded 3
+                           :keys '(approval question working))
+                     40)))
+      (should (<= (string-width line) 40))
+      (should (string-search (romacs-agent-ui--rollup '(working)) line))
+      (should (string-search "▸ 1 thread" (romacs-agent-board--line row 60)))
+      (should (> (string-width words) 30))
+      (should (string-prefix-p "▌ a-long-project-name" crowded))
+      (should (<= (string-width crowded) 40))
+      (should (eq (get-text-property 0 'face crowded) 'romacs-agent-approval))
+      (should (string-search (substring-no-properties words 0 10) crowded))
+      (should (string-suffix-p (truncate-string-ellipsis) crowded)))))
+
+(ert-deftest romacs-agent-board-keys-enter-and-leave-a-project ()
   (romacs-agent-board-tests--with
     (mk "a" "a" 'idle 10)
     (mk "b" "b" 'idle 20 :cwd "/p/two/")
-    (let ((kept (make-hash-table :test #'equal)))
-      (cl-letf (((symbol-function 'romacs-agent-store-folded) (lambda () (hash-table-keys kept)))
-                ((symbol-function 'romacs-agent-store-fold)
-                 (lambda (project folded) (if folded (puthash project t kept) (remhash project kept)))))
-        (romacs-agent-board-tests--board
-          (should (equal (romacs-agent-board-tests--ids (romacs-agent-board--shown-rows)) '("/p/one" "a" "/p/two" "b")))
-          (romacs-agent-board-previous 1)
-          (should (equal (romacs-agent-board-tests--at) "/p/one"))
-          (romacs-agent-board-fold)
-          (should (equal (romacs-agent-board-tests--ids (romacs-agent-board--shown-rows)) '("/p/one" "/p/two" "b")))
-          (should (equal (romacs-agent-board-tests--at) "/p/one"))
-          (should (equal (hash-table-keys kept) '("/p/one")))
-          (romacs-agent-board-fold)
-          (should (equal (romacs-agent-board-tests--ids (romacs-agent-board--shown-rows)) '("/p/one" "a" "/p/two" "b")))
-          ;; From a thread: every project folds, point on its heading.
+    (romacs-agent-board-tests--board nil
+      (romacs-agent-board-next 1)
+      (should (equal (romacs-agent-board-tests--at) "/p/two"))
+      (dolist (keys '(("RET" "^") ("TAB" "TAB") ("RET" "DEL")
+                      ("RET" "<backtab>") ("RET" "S-<tab>")))
+        (call-interactively (key-binding (kbd (car keys))))
+        (should (equal romacs-agent-board--project "/p/two"))
+        (should (equal (romacs-agent-board-tests--ids (romacs-agent-board--shown-rows))
+                       '("/p/two" "b")))
+        (should (equal (romacs-agent-board-tests--at) "/p/two"))
+        (should-not shown)
+        (unless (equal (cadr keys) "TAB")
           (romacs-agent-board-next 1)
-          (romacs-agent-board-cycle-projects)
-          (should (equal (romacs-agent-board-tests--ids (romacs-agent-board--shown-rows)) '("/p/one" "/p/two")))
-          (should (equal (romacs-agent-board-tests--at) "/p/one"))
-          (should (= (hash-table-count kept) 2))
-          (romacs-agent-board-cycle-projects)
-          (should (equal (romacs-agent-board-tests--ids (romacs-agent-board--shown-rows)) '("/p/one" "a" "/p/two" "b")))
-          (should (= (hash-table-count kept) 0)))
-        ;; A board shown anew reads what the store kept.
-        (puthash "/p/two" t kept)
-        (romacs-agent-board-tests--board
-          (should (equal (romacs-agent-board-tests--ids (romacs-agent-board--shown-rows)) '("/p/one" "a" "/p/two"))))))))
+          (should (equal (romacs-agent-board-tests--at) "b")))
+        (call-interactively (key-binding (kbd (cadr keys))))
+        (should-not romacs-agent-board--project)
+        (should (equal (romacs-agent-board-tests--ids (romacs-agent-board--shown-rows))
+                       '("/p/one" "/p/two")))
+        (should (equal (romacs-agent-board-tests--at) "/p/two"))))))
 
-(ert-deftest romacs-agent-board-folded-heading-past-a-filter-and-narrow ()
-  ;; Narrow, a folded heading cuts its path, never its count or state;
-  ;; under a filter TAB and S-TAB go by the folds kept; RET on a folded
-  ;; project opens the thread it would show first.
+(ert-deftest romacs-agent-board-line-motion-skips-project-rules ()
   (romacs-agent-board-tests--with
-    (mk "a" "alpha" 'running 10 :cwd "/home/someone/Worktrees/romacs/a-long-project-name/")
-    (mk "b" "beta" 'idle 20 :cwd "/p/two/")
-    (let ((kept (make-hash-table :test #'equal)))
-      (puthash "/home/someone/Worktrees/romacs/a-long-project-name" t kept)
-      (let* ((row (car (rows :projects kept)))
-             (line (romacs-agent-board--line row 40)))
-        (should (<= (string-width line) 40))
-        ;; What it is at shows before how many, which goes first.
-        (should (string-search (romacs-agent-ui--rollup '(working)) line))
-        (should (string-search "▸ 1 thread" (romacs-agent-board--line row 60))))
-      (cl-letf (((symbol-function 'romacs-agent-store-folded) (lambda () (hash-table-keys kept)))
-                ((symbol-function 'romacs-agent-store-fold)
-                 (lambda (project folded) (if folded (puthash project t kept) (remhash project kept)))))
-        (romacs-agent-board-tests--board
-          ;; RET on the folded heading: its thread.
-          (goto-char (point-min))
-          (romacs-agent-board-next 1)
-          (should (plist-get (romacs-agent-board--row) :folded))
-          (romacs-agent-board-open)
-          (should (equal (romacs-agent-id (car (car shown))) "a"))
-          ;; Filtered, both projects show their threads; S-TAB twice folds
-          ;; then shows, as kept, and TAB on a kept-folded one shows it.
-          (setq romacs-agent-board--words '("a"))
-          (romacs-agent-board-cycle-projects)
-          (should (= (hash-table-count kept) 2))
-          (romacs-agent-board-cycle-projects)
-          (should (= (hash-table-count kept) 0))
-          (romacs-agent-board-cycle-projects)
-          (goto-char (point-min))
-          (romacs-agent-board-next 1)
-          (romacs-agent-board-fold)
-          (should (= (hash-table-count kept) 1)))))))
+    (mk "a" "a" 'idle 10)
+    (mk "b" "b" 'idle 20 :cwd "/p/two/")
+    (romacs-agent-board-tests--board nil
+      (should (equal (romacs-agent-board-tests--at) "/p/one"))
+      (save-excursion
+        (forward-line 1)
+        (should-not (romacs-agent-board--row))
+        (should (equal-including-properties
+                 (buffer-substring (point) (line-end-position))
+                 (propertize (make-string 100 ?─) 'face 'romacs-agent-rule)))
+        (forward-line 1)
+        (should (equal (romacs-agent-board-tests--at) "/p/two")))
+      (call-interactively (key-binding (kbd "C-n")))
+      (should (equal (romacs-agent-board-tests--at) "/p/two"))
+      (call-interactively (key-binding (kbd "C-p")))
+      (should (equal (romacs-agent-board-tests--at) "/p/one")))))
 
 ;;; A job watched by a delegated session
 
@@ -688,7 +695,7 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
                             (romacs-agent-board-tests--activity lead)))
     (should (string-match-p "Writer[^\n]*Job · forge-check\\_>"
                             (romacs-agent-board-tests--activity lane)))
-    (should (equal (romacs-agent-board-tests--ids (rows))
+    (should (equal (romacs-agent-board-tests--ids (rows :project "/p/one"))
                    '("/p/one" "lead" "lane" "writer")))))
 
 (ert-deftest romacs-agent-board-watch-end-moves-idle-threads-out-of-activity ()
@@ -876,7 +883,7 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
             (should (eq (romacs-agent-ui--state-key lead) 'waiting))
             (should (equal (romacs-agent-board-tests--ids
                             (romacs-agent-board-rows (romacs-agent-summary nil) nil
-                                                     (list :folds (make-hash-table :test #'equal))))
+                                                     (list :project "/p/one" :folds (make-hash-table :test #'equal))))
                            '("/p/one" "lead" "middle" "lane" "writer")))
             (romacs-agent-watch--forget "writer" (gethash "writer" romacs-agent-watch--watches))
             (romacs-agent-board-tests--flush-worker-rows)
@@ -977,4 +984,5 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
         (should (equal (romacs-agent-board-tests--thread-states menu) '(("failed" failed))))
         (should (equal line "✗ Build  Failed  failed"))))))
 
+(provide 'romacs-agent-board-tests)
 ;;; romacs-agent-board-tests.el ends here
