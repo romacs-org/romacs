@@ -593,6 +593,48 @@ instance configured beside it."
       (should (= relaunched 1))
       (should (equal (gethash "why" (car (romacs-agent-renew-tests--notes session))) "clear")))))
 
+(ert-deftest romacs-agent-renew-slash-clear-runs-once-a-draft ()
+  ;; The same draft sent again (a retry) gets the same answer, nothing
+  ;; cleared twice; other text under its id is a conflict.
+  (romacs-agent-renew-tests--with 'claude
+    (puthash (romacs-agent-id session) session romacs-agent--sessions)
+    (let* ((id (romacs-agent--uuid))
+           (send (lambda (text)
+                   (let ((answer nil) (end (+ (float-time) 30)))
+                     (romacs-agent-submit (romacs-agent-id session)
+                                          (list :draft-id id :kind 'send :text text :attachments nil)
+                                          (lambda (result) (setq answer result)))
+                     (while (and (not answer) (< (float-time) end)) (accept-process-output nil 0.05))
+                     answer)))
+           (first (funcall send "/clear")))
+      (should (equal (plist-get first :command) "clear"))
+      (let ((end (+ (float-time) 30)))
+        (while (and (= relaunched 0) (< (float-time) end)) (accept-process-output nil 0.05)))
+      (should (equal (funcall send "/clear") first))
+      (should (eq (plist-get (funcall send "something else") :reason) 'conflict))
+      (accept-process-output nil 0.2)
+      (should (= relaunched 1))
+      (should (= (length (romacs-agent-renew-tests--notes session)) 1)))))
+
+(ert-deftest romacs-agent-renew-slash-clear-refusals ()
+  (romacs-agent-renew-tests--with 'claude
+    (puthash (romacs-agent-id session) session romacs-agent--sessions)
+    ;; With an image: refused, the draft kept for the user to change.
+    (let ((answer nil))
+      (romacs-agent-submit (romacs-agent-id session)
+                           (list :draft-id (romacs-agent--uuid) :kind 'interrupt :text "/clear"
+                                 :attachments (list (expand-file-name "x.png" root)))
+                           (lambda (result) (setq answer result)))
+      (let ((end (+ (float-time) 10))) (while (and (not answer) (< (float-time) end)) (accept-process-output nil 0.05)))
+      (should (eq (plist-get answer :status) 'refused)))
+    ;; Held by another renewal, or starting: refused, never left to wait.
+    (cl-letf (((symbol-function 'romacs-agent--held-p) (lambda (_) t)))
+      (should (eq (plist-get (romacs-agent-renew-tests--submit session "/clear") :status) 'refused)))
+    ;; A harness started afresh each turn: refused.
+    (cl-letf (((symbol-function 'romacs-agent--per-turn-p) (lambda (_) t)))
+      (should (eq (plist-get (romacs-agent-renew-tests--submit session "/clear") :status) 'refused)))
+    (should-not (romacs-agent-renew-tests--notes session))))
+
 (ert-deftest romacs-agent-renew-a-failed-write-keeps-the-brief ()
   (romacs-agent-renew-tests--with 'claude
     (romacs-agent-renew-tests--run session)

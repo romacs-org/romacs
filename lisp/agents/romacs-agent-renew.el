@@ -652,17 +652,33 @@ running turn ends.  Return `now' or `soon'."
 nothing of this one carried over, its id, chat and task the same
 \(`romacs-agent-renew'): now when it is idle, else once its running turn
 ends.  Return `now' or `soon'."
+  (when (romacs-agent--per-turn-p session)
+    (user-error "%s starts each turn on its own: send its next message to go on" (romacs-agent-title session)))
+  ;; Its records folded first: whether its conversation must stay is theirs.
+  (when (romacs-agent--folding-p session)
+    (user-error "Session %s is still loading: clear it in a moment" (romacs-agent-title session)))
   (romacs-agent-renew--check-obstacle session)
-  (if (and (romacs-agent--harness-free-p session) (not (romacs-agent--held-p session)))
-      (progn (romacs-agent-renew session "clear" nil nil '(:clear t)) 'now)
-    (puthash session (list :clear) romacs-agent-renew--wanted)
-    'soon))
+  (cond ((and (romacs-agent--harness-free-p session) (not (romacs-agent--held-p session)))
+         (romacs-agent-renew session "clear" (romacs-agent-renew--told session "Clear") nil '(:clear t))
+         'now)
+        ;; Only a turn's end is waited for: it comes.
+        ((memq (romacs-agent-state session) '(running waiting-approval))
+         (puthash session (list :clear) romacs-agent-renew--wanted)
+         'soon)
+        (t (user-error "Session %s is starting, renewing or rolling back: clear it after"
+                       (romacs-agent-title session)))))
+
+(defun romacs-agent-renew--told (session what)
+  "A renewal's THEN for SESSION: its failure said in its chat as WHAT's."
+  (lambda (outcome)
+    (when (eq (car outcome) :error)
+      (romacs-agent--raise session (list :type 'error :text (format "%s failed: %s" what (cadr outcome)))))))
 
 (romacs-agent-define-slash-command
  "clear" "Start a new conversation in this session, nothing of this one carried over."
  (lambda (session _args)
    (pcase (romacs-agent-clear-soon session)
-     ('now "Cleared: the next message starts a new conversation")
+     ('now "Clearing: the next message starts a new conversation")
      (_ "Clears once this turn ends"))))
 
 (defvar romacs-agent-renew--automatic (make-hash-table :test #'eq :weakness 'key)
@@ -715,7 +731,8 @@ context is full."
     (when-let* ((why (romacs-agent-renew--why-now session))
                 ((not (and (eq (car-safe why) :clear)
                            (progn (remhash session romacs-agent-renew--wanted)
-                                  (condition-case err (romacs-agent-renew session "clear" nil nil '(:clear t))
+                                  (condition-case err (romacs-agent-renew session "clear" (romacs-agent-renew--told session "Clear")
+                                                                          nil '(:clear t))
                                     (user-error (romacs-agent--raise session (list :type 'error :text (error-message-string err)))))
                                   t))))
                 ((not (and (eq (car-safe why) :switch)

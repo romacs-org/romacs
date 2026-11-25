@@ -5756,7 +5756,9 @@ for a kind no reason has, as for a send that may not have been taken."
 (defvar romacs-agent--submit-drafts (make-hash-table :test #'equal)
   "Every draft `romacs-agent--submit-draft' took in this run of the
 editor, by the id of the queue item it is (`romacs-agent--submit-item-id'):
-\(STATE SESSION-ID DIGEST . WAITING).  STATE is `pending' while it is
+\(STATE SESSION-ID DIGEST . WAITING).  STATE is `command' for a slash
+command that ran (`romacs-agent-slash-command'), WAITING its answer;
+`pending' while it is
 admitted, WAITING the callbacks of its repeats; `queued' while its
 message waits (`romacs-agent--draft-gone' lets it go should it leave the
 queue unwritten); `written' once it is (`romacs-agent--draft-written').
@@ -5924,6 +5926,8 @@ unconfirmed again; else accepted again, nothing sent."
          (cons 'answer (romacs-agent--submit-conflict intent)))
         ((eq (car draft) 'pending) (cons 'wait draft))
         ((eq (car draft) 'unconfirmed) (cons 'answer (romacs-agent-submit-unconfirmed intent)))
+        ;; A slash command ran: its answer again, nothing run twice.
+        ((eq (car draft) 'command) (cons 'answer (nth 3 draft)))
         (t (cons 'answer (romacs-agent--submit-placed (romacs-agent-loaded session-id) id
                                                       (plist-get intent :draft-id))))))
 
@@ -5985,10 +5989,16 @@ its id meanwhile; or (admit SESSION DIGEST), admit it
                (`(answer . ,refused) (cons 'answer refused))
                (`(session . ,session)
                 (cond ((gethash id romacs-agent--submit-drafts) 'again)
-                      ;; A slash command runs, whatever the harness's state.
-                      ((when-let* ((command (and (null (plist-get intent :attachments))
-                                                 (romacs-agent-slash-command (string-trim (plist-get intent :text))))))
-                         (cons 'answer (romacs-agent--submit-slash session intent command))))
+                      ;; A slash command runs, whatever the harness's state;
+                      ;; accepted, its draft is known as any other's is.
+                      ((when-let* ((command (romacs-agent-slash-command (string-trim (plist-get intent :text)))))
+                         (let ((answer (if (plist-get intent :attachments)
+                                           (romacs-agent-submit-refused intent 'invalid
+                                                                        (format "/%s takes no attachments" (car command)))
+                                         (romacs-agent--submit-slash session intent command))))
+                           (when (eq (plist-get answer :status) 'accepted)
+                             (puthash id (list 'command (romacs-agent-id session) digest answer) romacs-agent--submit-drafts))
+                           (cons 'answer answer))))
                       ((romacs-agent--ended-p session)
                        (cons 'answer (romacs-agent-submit-refused intent 'closed (romacs-agent--ended-text session))))
                       (t (list 'admit session digest)))))))))
