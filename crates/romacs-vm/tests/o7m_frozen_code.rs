@@ -622,3 +622,114 @@ fn mutually_recursive_init_functions_round_trip() {
         "(t nil nil t)"
     );
 }
+
+fn variable_refusal(vm: &mut Vm, root: &str, limit: usize) -> String {
+    eval(
+        vm,
+        &format!("(nth 2 (car (cdr (romacs--seed-build '((variable {root})) {TABLE} {limit}))))"),
+    )
+}
+
+// Sol S3. Every edge of a wide vector costs work, even repeated fixnums.
+#[test]
+fn review_vector_elements_consume_seed_budget() {
+    let mut vm = vm();
+    eval(&mut vm, "(setq o7m-wide (make-vector 8 23)) nil");
+    assert_eq!(variable_refusal(&mut vm, "o7m-wide", 128), "nil");
+    eval(&mut vm, "(setq o7m-wide (make-vector 4096 23)) nil");
+    assert_eq!(variable_refusal(&mut vm, "o7m-wide", 32_768), "nil");
+    assert_eq!(variable_refusal(&mut vm, "o7m-wide", 128), "too-large");
+}
+
+// Sol S3. A cyclic root spine must produce a refusal within a small budget.
+// Limit the child before giving it the cycle so a stalled walk cannot exhaust
+// the test host's memory.
+#[test]
+fn review_circular_roots_refused_within_budget() {
+    const CHILD: &str = "ROMACS_O7M_CIRCULAR_ROOTS_CHILD";
+    if std::env::var_os(CHILD).is_some() {
+        assert_circular_roots_refused();
+        return;
+    }
+    let name = support::test_name(
+        module_path!(),
+        "review_circular_roots_refused_within_budget",
+    );
+    let output = std::process::Command::new("/usr/bin/timeout")
+        .args([
+            "--kill-after=1s",
+            "5s",
+            "/usr/bin/prlimit",
+            "--as=536870912",
+            "--",
+        ])
+        .arg(std::env::current_exe().unwrap())
+        .args(["--exact", &name, "--nocapture"])
+        .env(CHILD, "1")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stdout.contains("running 1 test"), "{stdout}\n{stderr}");
+    assert!(
+        output.status.success(),
+        "cyclic roots did not produce a bounded refusal: {}\n{stdout}\n{stderr}",
+        output.status
+    );
+}
+
+fn assert_circular_roots_refused() {
+    let mut vm = vm();
+    eval(
+        &mut vm,
+        "(setq o7m-value 17 o7m-roots (list '(variable o7m-value))) nil",
+    );
+    assert_eq!(variable_refusal(&mut vm, "o7m-value", 64), "nil");
+    eval(&mut vm, "(setcdr o7m-roots o7m-roots) nil");
+    let actual = vm
+        .eval_source(&format!(
+            "(nth 2 (car (cdr (romacs--seed-build o7m-roots {TABLE} 64))))"
+        ))
+        .and_then(romacs_vm::Local::display);
+    match actual {
+        Ok(reason) => assert_eq!(reason, "too-large"),
+        Err(error) => assert!(
+            ["cycle", "circular", "too-large", "budget", "limit", "listp"]
+                .iter()
+                .any(|reason| error.contains(reason)),
+            "{error}"
+        ),
+    }
+}
+
+// Opus S1. The two eager definitions mention the same symbols and differ
+// mainly in opcode count. A successful large-budget build controls the fixture.
+#[test]
+fn review_eager_opcodes_consume_seed_budget() {
+    let mut vm = vm();
+    eval(
+        &mut vm,
+        r"(defvar o7m-x 0)
+           (eval '(defun o7m-small () (setq o7m-x (1+ o7m-x))) t)
+           (eval (cons 'defun (cons 'o7m-big
+                       (cons nil (make-list 20000 '(setq o7m-x (1+ o7m-x)))))) t)
+           (o7m-big) (o7m-small)",
+    );
+    for symbol in ["o7m-small", "o7m-big"] {
+        assert_eq!(
+            body_kind(&mut vm, &format!("(symbol-function '{symbol})")),
+            "eager"
+        );
+    }
+    let refusal = |vm: &mut Vm, name, limit| {
+        eval(
+            vm,
+            &format!(
+                "(nth 2 (car (cdr (romacs--seed-build '((function {name})) {TABLE} {limit}))))"
+            ),
+        )
+    };
+    assert_eq!(refusal(&mut vm, "o7m-small", 256), "nil");
+    assert_eq!(refusal(&mut vm, "o7m-big", 1_000_000), "nil");
+    assert_eq!(refusal(&mut vm, "o7m-big", 256), "too-large");
+}

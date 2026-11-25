@@ -5,6 +5,7 @@ mod gnu_lisp;
 mod own_test;
 
 pub use gnu_lisp::gnu_lisp;
+pub use own_test::name as test_name;
 
 use romacs_vm::{Vm, compiled_lisp};
 use std::{fs, path::Path, process::Command};
@@ -27,7 +28,7 @@ pub fn in_private_store(module: &str, test: &str, run: impl FnOnce(&Path)) {
     fs::remove_file(&dir).unwrap();
     fs::create_dir(&dir).unwrap();
     let output = Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", &own_test::name(module, test), "--nocapture"])
+        .args(["--exact", &test_name(module, test), "--nocapture"])
         .env(MARKER, &dir)
         .output()
         .unwrap();
