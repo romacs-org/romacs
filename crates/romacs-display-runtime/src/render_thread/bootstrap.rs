@@ -409,6 +409,7 @@ fn run_render_loop_with_startup(
     title: String,
     image_metadata: SharedImageRenderState,
     shared_monitors: SharedMonitorInfo,
+    panes: std::sync::Arc<crate::pane_mailbox::PaneMailbox>,
     poll_when_idle: bool,
 ) -> Result<super::RenderLoopExit, RenderLoopError> {
     tracing::info!("Render thread starting");
@@ -417,7 +418,7 @@ fn run_render_loop_with_startup(
     tracing::info!("Render thread entering winit event loop");
     let exit_input = comms.input_tx.clone();
     let result = startup::run(event_loop, initial, move |size| {
-        let app = RenderApp::new(
+        let mut app = RenderApp::new(
             comms,
             size.width,
             size.height,
@@ -426,6 +427,7 @@ fn run_render_loop_with_startup(
             shared_monitors,
             poll_when_idle,
         );
+        app.panes = panes;
         app
     });
     // Notify Emacs that the render thread is exiting so it can shut down gracefully.
@@ -447,6 +449,7 @@ pub(crate) fn run_render_loop_current_thread(
     title: String,
     image_metadata: SharedImageRenderState,
     shared_monitors: SharedMonitorInfo,
+    panes: std::sync::Arc<crate::pane_mailbox::PaneMailbox>,
 ) -> Result<super::RenderLoopExit, RenderLoopError> {
     run_render_loop_with_startup(
         event_loop,
@@ -455,6 +458,7 @@ pub(crate) fn run_render_loop_current_thread(
         title,
         image_metadata,
         shared_monitors,
+        panes,
         false,
     )
 }

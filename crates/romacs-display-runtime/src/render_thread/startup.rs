@@ -309,7 +309,7 @@ impl StartingApp {
                     app.cancel_gpu_startup();
                     let frame = app.frame_windows.primary_event_frame_id();
                     app.frame_windows.reject_ready(frame, &error);
-                    app.frame_windows.take_primary_window();
+                    app.take_primary_window();
                     app.frame_windows.clear_primary_mapping();
                 } else {
                     *self.outcome.borrow_mut() = Outcome::GpuFailed(error);

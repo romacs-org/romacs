@@ -368,7 +368,7 @@ impl RenderApp {
                 );
                 if self.comms.keep_alive_without_frames {
                     if is_primary {
-                        self.frame_windows.take_primary_window();
+                        self.take_primary_window();
                         self.frame_windows.clear_primary_mapping();
                     } else if emacs_fid != 0 {
                         self.frame_windows.request_destroy(emacs_fid);

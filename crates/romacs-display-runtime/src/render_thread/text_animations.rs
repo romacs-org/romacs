@@ -203,6 +203,10 @@ impl TextAnimations {
     #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool { self.running.is_empty() }
 
+    /// The keys of the animations it draws.
+    #[cfg(test)]
+    pub(crate) fn keys(&self) -> Vec<u64> { self.running.keys().copied().collect() }
+
     /// How the last painted frame drew animation ID.
     #[cfg(test)]
     pub(crate) fn drawn(&self, id: u64) -> Option<Drawn> { self.running.get(&id).and_then(|r| r.drawn) }

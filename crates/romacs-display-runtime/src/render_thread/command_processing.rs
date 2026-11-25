@@ -81,6 +81,9 @@ impl RenderApp {
             return true;
         }
         let mut should_exit = false;
+        // Residency by order: the mailbox is taken before the channel is
+        // drained, and ingested after it (pane_layers.rs).
+        let panes = self.panes.take();
 
         while let Some(cmd) = self
             .startup_commands
@@ -105,6 +108,7 @@ impl RenderApp {
                 RenderCommand::Clipboard(c) => self.handle_clipboard(c),
             }
         }
+        self.ingest_panes(panes);
 
         should_exit
     }

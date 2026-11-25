@@ -805,6 +805,11 @@ pub(super) enum SceneDraw {
 
 pub(super) struct RenderApp {
     pub(super) comms: RenderComms,
+    /// Owners' pane pictures, taken each round before the command channel
+    /// (`pane_layers.rs`): not the evaluator's seam, the ownership receiver's.
+    pub(super) panes: std::sync::Arc<crate::pane_mailbox::PaneMailbox>,
+    /// Owners' states, the app's: they outlive the windows that show them.
+    pub(super) pane_states: super::pane_layers::PaneStates,
     pub(super) menu_bar: crate::menu_bar::MenuBar,
 
     /// Display-lifetime owner for decoded application icon data and native
@@ -1052,6 +1057,8 @@ impl RenderApp {
 
         Self {
             comms,
+            panes: std::sync::Arc::default(),
+            pane_states: Default::default(),
             window_icon: crate::window_icon::WindowIconService::new(),
             presentation_observer: crate::presentation_feedback::PresentationObserver::new(),
             clipboard: Err("clipboard is unavailable before display initialization".to_owned()),
@@ -1100,17 +1107,7 @@ impl RenderApp {
                 "ROMACS_DEBUG_FIRST_FRAME_READBACK",
             )
             .is_some(),
-            debug_surface_readback_frames_remaining: std::env::var("ROMACS_DEBUG_SURFACE_READBACK")
-                .ok()
-                .and_then(|value| value.parse::<u32>().ok())
-                .filter(|count| *count > 0)
-                .unwrap_or_else(|| {
-                    if std::env::var_os("ROMACS_DEBUG_SURFACE_READBACK").is_some() {
-                        32
-                    } else {
-                        0
-                    }
-                }),
+            debug_surface_readback_frames_remaining: debug_surface_readback_frames(),
             lifecycle_flags: RenderLifecycle::new(poll_when_idle),
             frame_coordinator: super::frame_sched::FrameCoordinator::new(),
             models: romacs_renderer_wgpu::model::ModelStore::new(),
@@ -1121,3 +1118,19 @@ impl RenderApp {
 
 #[cfg(test)]
 mod tests;
+
+/// Frames to read the surface back from under `ROMACS_DEBUG_SURFACE_READBACK`:
+/// its count, 32 when it is set to anything else, none when it is unset.
+fn debug_surface_readback_frames() -> u32 {
+    std::env::var("ROMACS_DEBUG_SURFACE_READBACK")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .filter(|count| *count > 0)
+        .unwrap_or_else(|| {
+            if std::env::var_os("ROMACS_DEBUG_SURFACE_READBACK").is_some() {
+                32
+            } else {
+                0
+            }
+        })
+}

@@ -34,6 +34,8 @@ pub(crate) struct FrameCompositor {
     pub current_frame: Option<std::sync::Arc<FrameGlyphBuffer>>,
     /// Text animations drawn over the current frame at every draw.
     pub(in crate::render_thread) text_animations: super::text_animations::TextAnimations,
+    /// Owners' pane pictures drawn over the current frame.
+    pub(in crate::render_thread) pane_layers: super::pane_layers::PaneLayers,
     /// Video identities present in the root or any accepted child
     /// presentation. Rebuilt only when editor presentation data changes, so
     /// decoder wakeups do not rescan every glyph at video frame rate.
@@ -186,6 +188,7 @@ impl FrameCompositor {
         Self {
             current_frame: None,
             text_animations: Default::default(),
+            pane_layers: Default::default(),
             current_scene_generation: 0,
             child_frames: ChildFrameManager::new(),
             hidden_child_frames: HashSet::new(),
