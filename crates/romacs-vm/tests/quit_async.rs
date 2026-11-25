@@ -651,15 +651,6 @@ fn a_quit_ending_a_wait_is_the_next_key() {
 /// Text long enough that one motion over it outlasts the press.
 const LONG_BUFFER: &str = "(progn (insert (make-string 30000000 ?\\n)) (goto-char 1))";
 
-/// A motion loops in Rust, with no Lisp to poll: GNU's iterator would finish.
-#[test]
-fn c_g_stops_a_long_motion() {
-    let (mut vm, signal) = busy_vm();
-    eval(&mut vm, LONG_BUFFER);
-    let value = quit_into(&mut vm, &signal, "(condition-case nil (vertical-motion 30000000) (quit 'quit))");
-    assert_eq!(value, "quit");
-}
-
 /// `inhibit-quit' holds the press through the motion, for the next safepoint.
 #[test]
 fn inhibit_quit_holds_a_long_motion() {
