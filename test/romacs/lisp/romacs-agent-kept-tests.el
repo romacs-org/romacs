@@ -611,6 +611,17 @@ contents, so two equal states print the same."
       (should-not (romacs-agent-loaded romacs-agent-kept-tests--id))
       (should (romacs-agent-get romacs-agent-kept-tests--id)))))
 
+(ert-deftest romacs-agent-kept-a-failed-load-leaves-it-unknown ()
+  ;; A read that fails mid-load (a store read signals) leaves the session
+  ;; unknown, never half loaded: the next ask loads it whole.
+  (romacs-agent-kept-tests--with
+    (romacs-agent-kept-tests--write dir (romacs-agent-kept-tests--claude))
+    (clrhash romacs-agent--sessions)
+    (cl-letf (((symbol-function 'romacs-agent--restore-kept) (lambda (&rest _) (error "Store busy"))))
+      (should-error (romacs-agent-get romacs-agent-kept-tests--id)))
+    (should-not (romacs-agent-loaded romacs-agent-kept-tests--id))
+    (should (romacs-agent-get romacs-agent-kept-tests--id))))
+
 ;; Worker VMs as these tests see them: a job is held until `--work' runs
 ;; it in a VM of its own (private session, kept and summary tables), then
 ;; its callback.
@@ -1027,5 +1038,31 @@ says its folded state, as one made anew does."
           (should (= (romacs-agent-seq session) (length (romacs-agent-kept-tests--claude))))
           (should-not (gethash romacs-agent-kept-tests--id romacs-agent--folding))
           (should (= romacs-agent--fold-running 0)))))))
+
+(ert-deftest romacs-agent-kept-unload-idle ()
+  "Idle sessions a start would leave unloaded are let go; one with a chat,
+or one a start would load, stays loaded."
+  (let* ((romacs-agent--sessions (make-hash-table :test #'equal))
+         (romacs-agent--summaries (make-hash-table :test #'equal))
+         (romacs-agent--children (make-hash-table :test #'equal))
+         (romacs-agent--keeping nil)
+         (buffer (generate-new-buffer " unload"))
+         (make (lambda (id &rest slots)
+                 (let ((session (apply #'romacs-agent--make :id id :dir (concat "/r/" id) :state 'idle slots)))
+                   (puthash id session romacs-agent--sessions)
+                   (puthash id '(stamp nil . summary) romacs-agent--summaries)
+                   session))))
+    (unwind-protect
+        (progn
+          (funcall make "idle")
+          (funcall make "ended" :state 'ended)
+          (funcall make "chat" :buffer buffer)
+          (funcall make "marked")
+          (cl-letf (((symbol-function 'romacs-agent--to-load)
+                     (lambda (dirs) (seq-filter (lambda (dir) (string-suffix-p "marked" dir)) dirs))))
+            (should (= (romacs-agent-unload-idle) 2)))
+          (should (equal (sort (hash-table-keys romacs-agent--sessions) #'string<) '("chat" "marked")))
+          (should-not (gethash "idle" romacs-agent--summaries)))
+      (kill-buffer buffer))))
 
 ;;; romacs-agent-kept-tests.el ends here

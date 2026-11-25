@@ -116,10 +116,10 @@
       (funcall event 'completed)
       (should (equal (romacs-agent-children-tests--summary parent) ""))
       (should (equal (plist-get (car (romacs-agent-children-rows parent)) :state) "completed"))
-      ;; Finished, it stays listed.
+      ;; Finished, it stays listed until the next input.
       (romacs-agent-ui--track-children parent '(:type input))
       (romacs-agent-ui--summarize-children parent)
-      (should (= (length (romacs-agent-children-rows parent)) 1))
+      (should-not (romacs-agent-children-rows parent))
       (when romacs-agent-ui--children-timer (cancel-timer romacs-agent-ui--children-timer)))))
 
 (ert-deftest romacs-agent-children-a-subagent-failure-counts-for-its-turn ()
@@ -130,7 +130,7 @@
     (should (equal (romacs-agent-children-tests--summary parent) "1 failed"))
     (romacs-agent-ui--track-children parent '(:type input))
     (should (equal (romacs-agent-children-tests--summary parent) ""))
-    (should (equal (plist-get (car (romacs-agent-children-rows parent)) :state) "failed"))
+    (should-not (romacs-agent-children-rows parent))
     (when romacs-agent-ui--children-timer (cancel-timer romacs-agent-ui--children-timer))))
 
 (ert-deftest romacs-agent-children-a-detached-or-cancelled-child-updates-the-parent ()
@@ -162,6 +162,43 @@
             (should (eq (plist-get (car (romacs-agent-children-rows parent)) :key) 'ended)))
         (when romacs-agent-ui--children-timer (cancel-timer romacs-agent-ui--children-timer))
         (delete-directory dir t)))))
+
+(ert-deftest romacs-agent-children-cancelling-a-coordinator-cancels-its-tree ()
+  ;; A coordinator's writers stop with it: nothing under a cancelled task
+  ;; goes on editing, and each knows it after a restart.
+  (romacs-agent-children-tests--with
+    (let* ((coordinator (child 'idle))
+           (writer (romacs-agent--make :id "wwwwwwww-0000-4000-8000-000000000000" :harness 'claude :state 'running
+                                       :options (list :parent (romacs-agent-id coordinator))))
+           (dirs (list (make-temp-file "romacs-children-" t) (make-temp-file "romacs-children-" t)))
+           (stopped nil))
+      (setf (romacs-agent-dir coordinator) (car dirs) (romacs-agent-dir writer) (cadr dirs))
+      (puthash (romacs-agent-id writer) writer romacs-agent--sessions)
+      (romacs-agent--index writer)
+      (unwind-protect
+          (cl-letf (((symbol-function 'romacs-mcp--instance) #'ignore)
+                    ((symbol-function 'romacs-agent-tools--caller) (lambda () (romacs-agent-id parent)))
+                    ((symbol-function 'romacs-agent-store-unloaded-rows) #'ignore)
+                    ((symbol-function 'romacs-agent-stop) (lambda (s &rest _) (push s stopped))))
+            (romacs-agent-tools--cancel (romacs-mcp--object "taskId" (romacs-agent-id coordinator)))
+            (should (romacs-agent-cancelled coordinator))
+            (should (romacs-agent-cancelled writer))
+            ;; Under a coordinator left unloaded with no supervisor (after a
+            ;; restart), its writer still running is reached by the rows.
+            (let ((late (romacs-agent--make :id "llllllll-0000-4000-8000-000000000000" :harness 'claude :state 'running
+                                            :dir (car dirs) :options '(:parent "gone-coordinator"))))
+              (puthash (romacs-agent-id late) late romacs-agent--sessions)
+              (cl-letf (((symbol-function 'romacs-agent-store-unloaded-rows)
+                         (lambda (id) (and (equal id (romacs-agent-id coordinator)) '(("gone-coordinator")))))
+                        ((symbol-function 'romacs-agent-loaded)
+                         (lambda (id) (and (not (equal id "gone-coordinator")) (gethash id romacs-agent--sessions)))))
+                (romacs-agent--index late)
+                (setf (romacs-agent-cancelled coordinator) nil)
+                (should (memq late (romacs-agent-tools--subtree coordinator)))))
+            (should (memq writer stopped))
+            (should (file-exists-p (expand-file-name "cancelled" (cadr dirs)))))
+        (when romacs-agent-ui--children-timer (cancel-timer romacs-agent-ui--children-timer))
+        (mapc (lambda (dir) (delete-directory dir t)) dirs)))))
 
 (ert-deftest romacs-agent-children-a-cut-turn-ends-its-subagents ()
   (dolist (type '(done exit))
@@ -218,6 +255,36 @@
     (romacs-agent-ui--summarize-children parent)
     (should (equal (plist-get (car (romacs-agent-children-rows parent)) :state) "cancelled"))
     (when romacs-agent-ui--children-timer (cancel-timer romacs-agent-ui--children-timer))))
+
+(ert-deftest romacs-agent-children-parser-ids-follow-their-worker ()
+  (romacs-agent-children-tests--with
+    (unwind-protect
+        (let ((fold (lambda (&rest events)
+                      (dolist (event (romacs-agent--apply-record-events parent events))
+                        (romacs-agent-ui-track-workers parent event)))))
+          (funcall fold '(:type tool :state started :id "bg" :name "Agent"))
+          (funcall fold '(:type task :state started :id "bg" :task "worker" :subagent t))
+          (funcall fold '(:type tool :state completed :id "bg"))
+          (funcall fold '(:type tool :state started :id "child-tool" :parent "bg"))
+          (funcall fold '(:type tool :state started :id "foreground"))
+          (funcall fold '(:type record-state :state (:streamed "child-text"))
+                   '(:type delta :parent "bg" :message "child-text"))
+          (funcall fold '(:type record-state :state (:streamed "foreground-text")))
+          (funcall fold '(:type done))
+          (funcall fold '(:type input))
+          (should (equal (plist-get (romacs-agent-ui-worker parent "bg") :state) "running"))
+          (should (equal (gethash "child-tool" (romacs-agent-tools parent)) "bg"))
+          (should (gethash "bg" (romacs-agent-tools parent)))
+          (should (gethash "child-text" (romacs-agent-streamed parent)))
+          (should-not (gethash "foreground" (romacs-agent-tools parent)))
+          (should-not (gethash "foreground-text" (romacs-agent-streamed parent)))
+          (funcall fold '(:type task :state completed :id "bg"))
+          (funcall fold '(:type done))
+          (funcall fold '(:type input))
+          (should (zerop (hash-table-count (romacs-agent-tools parent))))
+          (should (zerop (hash-table-count (romacs-agent-streamed parent))))
+          (should-not (romacs-agent-ui-worker parent "bg")))
+      (when romacs-agent-ui--children-timer (cancel-timer romacs-agent-ui--children-timer)))))
 
 ;; Past nine workers, and glyphs for states.
 
@@ -308,9 +375,12 @@
       (setf (romacs-agent-state parent) 'idle (romacs-agent-dir parent) root)
       (cl-letf (((symbol-function 'romacs-agent--state-root) (lambda () root))
                 ((symbol-function 'romacs-agent-tools--caller) (lambda () "parent"))
-                ((symbol-function 'romacs-agent-watch--unit-state) (lambda (_) '("active" . "invocation"))))
+                ((symbol-function 'romacs-agent-watch--output)
+                 (lambda (_program _args then)
+                   (funcall then "Id=forge-check.service\nActiveState=active\nInvocationID=invocation\n" 0))))
         (unwind-protect
-            (let ((reply (romacs-agent-watch--watch (romacs-mcp--object "unit" "forge-check.service"))))
+            (let* ((deferred (romacs-agent-watch--watch (romacs-mcp--object "unit" "forge-check.service")))
+                   (reply (car (funcall (nth 1 deferred)))))
               (should (equal (gethash "watching" reply) ["forge-check.service"]))
               (should-not (plist-get (romacs-agent-options parent) :parent))
               (should-not (romacs-agent-children parent))

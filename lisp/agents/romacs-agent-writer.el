@@ -20,9 +20,9 @@
 ;; session before it is queued, a kept state is the session's own.  No
 ;; caller reads back a row it has just queued.
 ;;
-;; An orderly end loses nothing: an exit and a restart wait for every
-;; queued write (`romacs-agent-writer-drain'), a restart before its
-;; successor starts.  A crash loses what is still queued, a write-back
+;; An orderly exit or restart drains the queued writes and reports any
+;; that could not be saved.  A restart drains before its successor starts.
+;; A crash loses what is still queued, a write-back
 ;; window as WAL's `synchronous=NORMAL' has on power loss, kept small by
 ;; a writer that keeps up.  No queue is kept on disk: that would be a
 ;; journal again.  What such a crash can lose is Romacs's own record of
@@ -44,6 +44,8 @@
 (declare-function isolate-future-isolate "isolate")
 (declare-function isolate-retire "isolate")
 (declare-function isolate-future-done-p "isolate")
+(declare-function romacs--isolate-id "isolate" (isolate))
+(declare-function romacs--isolate-signal "crates/romacs-vm/src/prims/isolate.rs" (id signal))
 
 (defvar romacs-agent-writer-queued 'auto
   "Whether this process queues its writes to the writer: `auto', when it
@@ -103,6 +105,12 @@ them as for its own writes.")
 (defvar romacs-agent-writer--next 0 "The id of the next write.")
 (defvar romacs-agent-writer--draining nil
   "Non-nil while the writer is drained: its end sends nothing again.")
+
+(defvar romacs-agent-writer--last-answer nil
+  "Time of the last answer during a drain, or when the writer was started.")
+
+(defconst romacs-agent-writer--drain-patience 30
+  "Seconds a drain waits for the writer to make progress.")
 
 (defvar romacs-agent-writer--pending (make-hash-table)
   "The writes not answered, by id: each (ID FUNCTION ARGS DONE TRIES KEY).")
@@ -180,6 +188,8 @@ queued to be: its value when it ran here."
                          :fresh t :name "romacs-agent writer" :require romacs-agent-writer-features
                          :bindings (and romacs-agent-writer-bindings-function
                                         (funcall romacs-agent-writer-bindings-function))))
+    (when romacs-agent-writer--last-answer
+      (setq romacs-agent-writer--last-answer (float-time)))
     (isolate-on-done romacs-agent-writer--job #'romacs-agent-writer--ended))
   (isolate-future-isolate romacs-agent-writer--job))
 
@@ -322,6 +332,8 @@ and the writes waiting for room are sent."
            romacs-agent-writer--failed-last nil)
      (pcase-dolist (`(,id ,answer) answers)
        (when-let* ((entry (gethash id romacs-agent-writer--pending)))
+         (when romacs-agent-writer--last-answer
+           (setq romacs-agent-writer--last-answer (float-time)))
          (remhash id romacs-agent-writer--pending)
          (when (eq (car answer) 'error)
            (message "romacs-agent-writer: %s: %S" (nth 1 entry) (cadr answer)))
@@ -412,6 +424,31 @@ held records moving through a live host."
       (and (run-hook-with-args-until-success 'romacs-agent-writer-held-live-functions)
            (romacs-agent-writer--held-moving-p))))
 
+(defun romacs-agent-writer--stop (job)
+  "Ask JOB to stop and return zero if it stops, or exhaust the drain's tries."
+  (let ((romacs-agent-writer--here-running t))
+    (condition-case nil
+        (progn
+          (unless (isolate-future-done-p job)
+            (isolate-send (isolate-future-isolate job) (list 'romacs-agent-writer-stop))
+            (isolate-await job 1))
+          (romacs-agent-writer--ended job)
+          0)
+      (error 4))))
+
+(defun romacs-agent-writer--retire-stalled ()
+  "End the stalled writer without waiting indefinitely for it to exit."
+  (when-let* ((job romacs-agent-writer--job))
+    (let ((romacs-agent-writer--here-running t))
+      (unless (isolate-future-done-p job)
+        ;; A fresh worker runs only this job.  Signal and await separately
+        ;; to bound even the reap.
+        (ignore-errors
+          (romacs--isolate-signal (romacs--isolate-id (isolate-future-isolate job)) 9)
+          (isolate-await job 1)))
+      (when (isolate-future-done-p job)
+        (romacs-agent-writer--ended job)))))
+
 (defun romacs-agent-writer--drain-step ()
   "Move the drain one step and return the tries it used up: a writer gone
 is replaced and sent what is unanswered; one with all answered stops, so
@@ -428,13 +465,7 @@ is heard."
         (isolate-timeout tries)
         ;; A writer that cannot be waited on counts as gone.
         (error (1+ tries)))))
-   (romacs-agent-writer--job
-    (let ((job romacs-agent-writer--job))
-      (setq romacs-agent-writer--job nil)
-      (unless (isolate-future-done-p job)
-        (isolate-send (isolate-future-isolate job) (list 'romacs-agent-writer-stop))
-        (ignore-errors (isolate-await job))))
-    0)
+   (romacs-agent-writer--job (romacs-agent-writer--stop romacs-agent-writer--job))
    (t (accept-process-output nil 0.1)
       (when (fboundp (quote romacs--isolate-pump)) (romacs--isolate-pump 0))
       0)))
@@ -450,15 +481,14 @@ that made nothing."
       (when (zerop (romacs-agent-writer--here)) (setq rounds 5)))))
 
 (defun romacs-agent-writer-drain (&optional quittable)
-  "Let the writer make every write queued, however long that takes,
-saying so: the editor is ending, or handing over to its successor,
-which reads the store.  Writes the answers' callbacks queue meanwhile
-are made too.  A writer gone meanwhile is started again and sent what
-it did not answer.  The writer then stops; a later write starts
-another.  QUITTABLE: a restart is beginning, and \\[keyboard-quit]
+  "Drain queued writes and return how many were left unsaved.
+A writer that dies is retried, and a stalled one is stopped before local
+fallback.  If it has yet to exit, its writes are counted as unsaved.
+QUITTABLE: a restart is beginning, and \\[keyboard-quit]
 cancels it; the writes stay queued, made in the background."
   (when (> (romacs-agent-writer--queued) 0)
     (let ((count (romacs-agent-writer--queued)) (tries 0)
+          (romacs-agent-writer--last-answer (float-time))
           (romacs-agent-writer--draining t) (romacs-agent-writer--held-seen nil))
       (message (if quittable
                    (substitute-command-keys "Saving %d agent records... (\\[keyboard-quit] cancels the restart)")
@@ -466,9 +496,13 @@ cancels it; the writes stay queued, made in the background."
                count)
       (redisplay t)
       (romacs-agent-writer--try-failed-again)
-      (while (and (romacs-agent-writer--busy-p) (< tries 4))
+      (while (and (< tries 4) (romacs-agent-writer--busy-p)
+                  (or (null romacs-agent-writer--job)
+                      (< (- (float-time) romacs-agent-writer--last-answer)
+                         romacs-agent-writer--drain-patience)))
         (setq tries (+ tries (romacs-agent-writer--drain-step))))
-      (romacs-agent-writer--make-left-here)
+      (romacs-agent-writer--retire-stalled)
+      (unless romacs-agent-writer--job (romacs-agent-writer--make-left-here))
       (when (> (romacs-agent-writer--held) 0)
         (with-demoted-errors "romacs-agent-writer: naming what was not saved: %S"
           (run-hooks 'romacs-agent-writer-gave-up-functions)))
@@ -478,8 +512,7 @@ cancels it; the writes stay queued, made in the background."
         left))))
 
 (defun romacs-agent-writer--at-exit ()
-  "The editor is ending: every queued write is made, uninterrupted, since
-quitting now would lose them."
+  "Drain queued writes when the editor ends, with quit inhibited."
   (let ((inhibit-quit t)) (romacs-agent-writer-drain)))
 
 (defun romacs-agent-writer--before-handover ()
@@ -491,7 +524,7 @@ the session goes on with its writes still queued."
     ;; Some not saved: the successor would not read them.  The restart is
     ;; cancelled and they are made in the background, as a quit leaves them.
     (when (and left (> left 0))
-      (romacs-agent-writer--requeue)
+      (unless romacs-agent-writer--job (romacs-agent-writer--requeue))
       (user-error "Restart cancelled: %d agent records not yet written" left))))
 
 (defun romacs-agent-writer--requeue ()

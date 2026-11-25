@@ -388,26 +388,98 @@ fn nested_command_loops_settle_their_keys() {
 /// that frame's window charges it.
 #[test]
 fn a_deferred_key_is_claimed_once() {
-    let mut s = Session::new();
-    let other = s.eval("(frame-id (romacs--create-frame '((name . \"two\"))))").parse().expect("a frame id");
-    s.deliver(character('k'), Some(other), false);
-    s.command();
-    s.command();
-    s.redisplay();
-    s.expect(&[(0, "rendered")]);
+    for burst in [false, true] {
+        let mut s = Session::new();
+        let other = s.eval("(frame-id (romacs--create-frame '((name . \"two\"))))").parse().expect("a frame id");
+        s.deliver(character('k'), Some(other), burst);
+        s.command();
+        assert_eq!(s.eval("(frame-id (selected-frame))"), other.to_string());
+        assert!(s.outcomes().is_empty());
+        s.command();
+        s.redisplay();
+        s.expect(&[(0, "rendered")]);
+    }
 }
 
 /// A C-g that quits a key sequence throws out of its step: the sequence's
 /// keys still settle, each once.
 #[test]
 fn a_quit_sequence_settles_its_keys() {
+    for burst in [false, true] {
+        let mut s = Session::new();
+        s.deliver(CommandEvent::Character(24), None, burst);
+        s.deliver(CommandEvent::Character(7), None, burst);
+        s.command();
+        s.redisplay();
+        let settled = s.outcomes();
+        assert_eq!(settled.iter().map(|(i, _, _)| *i).collect::<Vec<_>>(), vec![0, 1], "settled: {settled:?}");
+    }
+}
+
+#[test]
+fn timer_unread_input_runs_before_a_pending_native_key() {
     let mut s = Session::new();
-    s.press(CommandEvent::Character(24));
-    s.press(CommandEvent::Character(7));
+    s.press_at_once(character('a'));
+    s.eval("(run-with-timer 0 nil (lambda () (push '(t . ?z) unread-command-events)))");
+    s.command();
+    assert_eq!(s.eval("(buffer-string)"), "\"hezllo\\nworld\\n\"");
+    assert!(s.outcomes().is_empty());
     s.command();
     s.redisplay();
-    let settled = s.outcomes();
-    assert_eq!(settled.iter().map(|(i, _, _)| *i).collect::<Vec<_>>(), vec![0, 1], "settled: {settled:?}");
+    assert_eq!(s.eval("(buffer-string)"), "\"hezallo\\nworld\\n\"");
+    s.expect(&[(0, "rendered")]);
+}
+
+#[test]
+fn pending_prefix_applies_input_decode_and_command_remapping() {
+    let mut s = Session::new();
+    assert!(!s.eval("(progn
+        (define-key input-decode-map [f9] [6])
+        (defun typed-remap () (interactive) (insert \"mapped\"))
+        (global-set-key [remap find-file] #'typed-remap))").starts_with("VM-ERROR"));
+    s.press_at_once(CommandEvent::Character(24));
+    s.press_at_once(named("f9"));
+    s.command();
+    s.redisplay();
+    assert_eq!(s.eval("(buffer-string)"), "\"hemappedllo\\nworld\\n\"");
+    s.expect(&[(0, "awaited-input"), (1, "rendered")]);
+}
+
+#[test]
+fn a_burst_records_and_replays_a_keyboard_macro() {
+    let mut s = Session::new();
+    for key in [24, 40, 97, 98, 24, 41, 24, 101] {
+        s.press_at_once(CommandEvent::Character(key));
+    }
+    for _ in 0..5 {
+        s.command();
+    }
+    s.redisplay();
+    assert_eq!(s.eval("(buffer-string)"), "\"heababllo\\nworld\\n\"");
+    let mut outcomes = s.outcomes();
+    outcomes.sort_by_key(|(i, _, _)| *i);
+    assert_eq!(outcomes.iter().map(|(i, _, _)| *i).collect::<Vec<_>>(), (0..8).collect::<Vec<_>>());
+}
+
+#[test]
+fn quit_is_read_after_burst_input_at_top_level_and_in_the_minibuffer() {
+    for prompt in [false, true] {
+        let mut s = Session::new();
+        assert_eq!(s.eval("(setq noninteractive nil)"), "nil");
+        if prompt { s.press_at_once(named("f7")); }
+        for key in [97, 98, 7] {
+            s.press_at_once(CommandEvent::Character(key));
+        }
+        for _ in 0..if prompt { 1 } else { 3 } {
+            s.command();
+        }
+        s.redisplay();
+        assert_eq!(s.eval("(minibuffer-depth)"), "0");
+        let expected = if prompt { "\"hello\\nworld\\n\"" } else { "\"heabllo\\nworld\\n\"" };
+        assert_eq!(s.eval("(buffer-string)"), expected);
+        let outcomes = s.outcomes();
+        assert_eq!(outcomes.iter().map(|(i, _, _)| *i).collect::<Vec<_>>(), (0..s.keys.len()).collect::<Vec<_>>());
+    }
 }
 
 /// A window deleted before the frame: the frame cannot show its step.

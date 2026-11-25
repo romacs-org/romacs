@@ -891,6 +891,9 @@ fn run() -> Result<Option<exit::Exit>, String> {
     }
     let title = if live { "romacs — VM" } else { "VM G1a" };
     let (mut host, sender) = PaintHost::new(&display, width, height, title.into(), serve.is_some())?;
+    // X11 window managers place the default size as asked, larger than a
+    // small screen: with no size given, it fills the screen instead.
+    if live && geometry.is_none() && display.wayland_socket().is_none() { host.maximize_primary(); }
     // A live session's C-g quits a busy evaluator out of band (quit.rs).
     let quit = live.then(|| std::sync::Arc::new(romacs_vm::QuitSignal::new()));
     if let Some(quit) = &quit { host.set_input_interrupt(std::sync::Arc::new(quit::QuitHook(quit.clone()))); }

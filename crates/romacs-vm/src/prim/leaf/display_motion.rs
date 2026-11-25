@@ -186,6 +186,8 @@ fn load<E: Elements>(src: &mut E, it: &mut It) -> R<Option<Elem>> {
     // Generated elements are walked again and again: a test of the cursor
     // that moves, the prefix's inside one, costs the path no count of its own.
     if it.prefix.map_or(it.index, |(_, k)| k) % POLL_ELEMENTS == 0 { src.poll()?; }
+    #[cfg(test)]
+    tests::observe_load(it);
     it.loaded = true;
     element(src, it)
 }
@@ -969,6 +971,61 @@ pub(super) fn window_end<E: Lines>(src: &mut E, cx: &Ctx, mut it: It, dy: i64) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{cell::RefCell, sync::{Arc, mpsc}, time::Duration};
+
+    struct MotionProbe {
+        delivery: Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>,
+        loads_after_press: usize,
+    }
+
+    thread_local! {
+        static MOTION_PROBE: RefCell<Option<MotionProbe>> = const { RefCell::new(None) };
+    }
+
+    pub(super) fn observe_load(it: &It) {
+        MOTION_PROBE.with_borrow_mut(|probe| {
+            let Some(probe) = probe else { return };
+            if probe.delivery.is_none() {
+                probe.loads_after_press += 1;
+            } else if matches!(it.prefix, Some((_, 1))) {
+                let (ready, delivered) = probe.delivery.take().unwrap();
+                ready.send(()).unwrap();
+                delivered.recv().unwrap();
+                probe.loads_after_press = 1;
+            }
+        });
+    }
+
+    #[test]
+    fn c_g_stops_a_long_motion() {
+        let signal = Arc::new(crate::QuitSignal::new());
+        let worker_signal = signal.clone();
+        let (ready, walking) = mpsc::channel();
+        let (delivered, resume) = mpsc::channel();
+        let (finished, outcome) = mpsc::channel();
+        let evaluator = std::thread::spawn(move || {
+            let mut vm = crate::Vm::new();
+            vm.install_lisp_prelude().unwrap();
+            vm.share_quit_signal(worker_signal);
+            vm.enter_busy();
+            vm.eval_source(&format!("(progn (insert \"abc\\ndef\\n\") (goto-char 1)
+                (setq line-prefix (make-string {} ?x)) t)", 4 * POLL_ELEMENTS)).unwrap();
+            MOTION_PROBE.set(Some(MotionProbe { delivery: Some((ready, resume)), loads_after_press: 0 }));
+            let result = vm.eval_source("(condition-case nil (vertical-motion 2) (quit 'quit))")
+                .and_then(|value| value.display());
+            let loads = MOTION_PROBE.take().unwrap().loads_after_press;
+            finished.send((result, loads)).unwrap();
+        });
+
+        // The prefix is already generated. Only the walk can poll within it.
+        walking.recv_timeout(Duration::from_secs(30)).expect("motion did not enter the prefix");
+        assert!(signal.interrupt(), "the busy evaluator takes the press");
+        delivered.send(()).unwrap();
+        let (result, loads) = outcome.recv_timeout(Duration::from_secs(2)).expect("motion hung after C-g");
+        evaluator.join().unwrap();
+        assert!((1..=POLL_ELEMENTS).contains(&loads), "motion loaded {loads} elements after C-g");
+        assert_eq!(result.unwrap(), "quit");
+    }
 
     struct Cached { polls: usize }
     impl Elements for Cached {

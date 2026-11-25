@@ -125,6 +125,7 @@ impl RenderApp {
             let attrs = winit::window::WindowAttributes::default()
                 .with_title(&title)
                 .with_surface_size(self.comms.pixel_policy.window_size(width, height))
+                .with_maximized(self.comms.maximize_primary)
                 .with_decorations(decorations_enabled)
                 .with_transparent(true);
             let attrs =

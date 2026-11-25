@@ -185,7 +185,8 @@ position, a function as `fn'."
     (with-temp-buffer
       (romacs-agent-log-mode)
       (setq romacs-agent-log--session session
-            romacs-agent-log--end (point-min-marker))
+            romacs-agent-log--end (point-min-marker)
+            romacs-agent-log--input (point-min-marker))
       (set-marker-insertion-type romacs-agent-log--end t)
       (romacs-agent-log--separator t)
       (mapcar (lambda (step)

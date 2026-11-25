@@ -114,6 +114,38 @@ user.")
   "A session whose last turn ended since its chat was shown.")
 
 (defvar-local romacs-agent-ui--session nil)
+(defvar-local romacs-agent-ui--asks nil
+  "The chat's approval events by request id: what each asked.")
+
+(defun romacs-agent-ui--asks ()
+  "This chat's `romacs-agent-ui--asks', made when first wanted."
+  (or romacs-agent-ui--asks (setq romacs-agent-ui--asks (make-hash-table :test #'equal))))
+(defvar-local romacs-agent-ui--end nil
+  "Marker at the transcript's end; the composer follows it.")
+(defvar-local romacs-agent-ui--draft-images nil
+  "The image files of the message being written, in order.")
+(defvar-local romacs-agent-ui--messages nil
+  "An open message's id to (START . LENGTH): where its text starts and how
+much of it its deltas wrote.")
+(defvar-local romacs-agent-ui--faced nil
+  "An open message's id to how much of its text is faced as Markdown.")
+
+(defun romacs-agent-ui--faced ()
+  "This chat's `romacs-agent-ui--faced', made when first wanted."
+  (or romacs-agent-ui--faced (setq romacs-agent-ui--faced (make-hash-table :test #'equal))))
+(defvar-local romacs-agent-ui--shown 0
+  "The last journal record this buffer shows whole.")
+(defvar-local romacs-agent-ui--open nil
+  "The kind of block the transcript ends in: `text' (prose), a run's
+`thinking' or `sub' (a subagent's words), or nil.")
+(defvar-local romacs-agent-ui--history nil)
+(defvar-local romacs-agent-ui--composer nil
+  "The overlay at the composer's start: the live rule and the empty hint.")
+(defvar-local romacs-agent-ui--fitted nil
+  "The width the rules' fills last fitted.")
+(defvar-local romacs-agent-ui--staying nil
+  "Markers that stay before text the transcript's end takes, as a
+window's start does: where what an event draws starts.")
 
 (defun romacs-agent-ui--clock (seconds)
   "SECONDS as a clock: 12s, 4:26 or 1:02:03."
@@ -331,16 +363,17 @@ foreground, as the tool's own card shows it."
           (romacs-agent-ui--children-changed session))))))
 
 (defun romacs-agent-ui--end-subagents (session next gone time)
-  "SESSION's turn ended at TIME: a subagent still running was cut, unless
-it runs on as a task, which only its harness's going (GONE) ends.  NEXT: a
-new turn starts, and last turn's failures have been seen."
+  "End SESSION's foreground workers at TIME, and background ones when GONE.
+When NEXT starts a new turn, discard the rows of finished workers."
   (when-let* ((table (romacs-agent-subagents session)))
-    (dolist (id (hash-table-keys table))
-      (let ((row (gethash id table)))
-        (cond (next (when (plist-get row :unseen) (puthash id (plist-put (copy-sequence row) :unseen nil) table)))
-              ((and (equal (plist-get row :state) "running") (or gone (not (plist-get row :task))))
-               (romacs-agent-ui--forget-task session row)
-               (puthash id (romacs-agent-ui--task-row row (list :state 'stopped :time time)) table)))))
+    (maphash (lambda (id row)
+               (let ((running (equal (plist-get row :state) "running")))
+                 (cond (next (unless running (remhash id table)))
+                       ((and running (or gone (not (plist-get row :task))))
+                        (romacs-agent-ui--forget-task session row)
+                        (puthash id (romacs-agent-ui--task-row row (list :state 'stopped :time time)) table)))))
+             table)
+    (when (zerop (hash-table-count table)) (setf (romacs-agent-subagents session) nil))
     (romacs-agent-ui--children-changed session)))
 
 (defconst romacs-agent-ui--state-statuses

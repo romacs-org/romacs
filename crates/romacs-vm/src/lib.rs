@@ -48,6 +48,7 @@ mod bidi;
 mod layout_host;
 mod display_host;
 mod session_host;
+mod ui;
 mod terminal_host;
 mod terminal_keys;
 mod process_jobs;
@@ -1486,9 +1487,11 @@ pub struct Vm {
     /// what the steps did (typing.rs).
     #[snapshot(at_rest)]
     typing: typing::Typing,
-    /// The embedder's layout while one is attached (layout_host.rs).
+    /// This VM's key to the UI its host attached on the host's thread
+    /// (ui.rs): the layout and session hosts live there, not in the VM.
+    /// Detach every host before moving a VM to another thread.
     #[snapshot(at_rest)]
-    layout_host: Option<Box<dyn layout_host::LayoutHost>>,
+    ui_key: Option<ui::UiKey>,
     /// The embedder's window system while one is attached (display_host.rs).
     #[snapshot(at_rest)]
     display: Option<display_host::Display>,
@@ -1496,9 +1499,6 @@ pub struct Vm {
     /// which the open display shows.
     #[snapshot(at_rest)]
     visual: Box<romacs_display_protocol::VisualConfig>,
-    /// The embedder's end of the session while one is attached (session_host.rs).
-    #[snapshot(at_rest)]
-    session_host: Option<session_host::SessionHost>,
     /// keyboard.c timer_idleness_start_time: when the command loop began
     /// waiting idle for a key, while it does.
     #[snapshot(at_rest)]
@@ -1526,6 +1526,9 @@ pub struct Vm {
     /// The slots of `debug-on-event' and of the user signal events, in
     /// host::USER_SIGNAL_NAMES's order (`Vm::debug_event_mask').
     debug_event_slots: [usize; 3],
+    /// `current-message' and `minibuffer-depth''s symbol slots, the symbols
+    /// Lisp read since startup calls (`Vm::echo_current').
+    echo_function_slots: [usize; 2],
     /// Counts keymap stores and parent changes, GNU's two flushes of the
     /// reverse-map cache `where-is-internal' keeps (keymap.c where_is_cache).
     keymap_generation: u64,
@@ -1796,10 +1799,9 @@ impl Vm {
             host_wait: None,
             deferred_event: None,
             typing: typing::Typing::default(),
-            layout_host: None,
+            ui_key: None,
             display: None,
             visual: Box::default(),
-            session_host: None,
             idle_since: None,
             redisplay_since_mark: None,
             treesit_plain: Vec::new(),
@@ -1810,6 +1812,7 @@ impl Vm {
             quit_slots: [0; 3],
             face_keys: crate::prim::FaceKeys::EMPTY,
             debug_event_slots: [0; 3],
+            echo_function_slots: [0; 2],
             keymap_generation: 0,
             process_jobs: process_jobs::Jobs::default(),
             subprocesses: subprocess::Table::default(),
@@ -1934,10 +1937,7 @@ impl Vm {
         // already-read forms compile their bindings dynamically.
         vm.specials.extend(forwarded::C_SPECIALS.iter().map(|v| v.name)
             .filter(|name| !forwarded::NOT_SPECIAL.contains(name)).map(str::to_owned));
-        vm.quit_slots = ["quit-flag", "inhibit-quit", "throw-on-input"].map(|name| vm.slot(name));
-        vm.face_keys = crate::prim::FaceKeys::new(&mut vm);
-        let [usr2, usr1] = crate::host::USER_SIGNAL_NAMES;
-        vm.debug_event_slots = ["debug-on-event", usr2, usr1].map(|name| vm.slot(name));
+        vm.capture_symbol_slots();
         vm.declare_special_raw("inhibit-eol-conversion", Value::NIL);
         vm.declare_special_raw("text-quoting-style", Value::NIL);
         vm.declare_special_raw("internal--text-quoting-flag", Value::TRUE);
@@ -2028,6 +2028,16 @@ impl Vm {
         // retaining Plain here would mask an image's already-interned plist.
         vm.variable_redirects.clear();
         vm
+    }
+    /// The symbols the VM reads by slot from its first form on, interned in
+    /// this order: the quit polls', the face primitives', `debug-on-event''s
+    /// and the user signals', and the echo guard's public functions.
+    fn capture_symbol_slots(&mut self) {
+        self.quit_slots = ["quit-flag", "inhibit-quit", "throw-on-input"].map(|name| self.slot(name));
+        self.face_keys = crate::prim::FaceKeys::new(self);
+        let [usr2, usr1] = crate::host::USER_SIGNAL_NAMES;
+        self.debug_event_slots = ["debug-on-event", usr2, usr1].map(|name| self.slot(name));
+        self.echo_function_slots = ["current-message", "minibuffer-depth"].map(|name| self.slot(name));
     }
     /// Publish a semantic function-cell write atomically with both invalidators.
     /// Slot stamps retain precise source-macro dependencies; the world epoch

@@ -210,7 +210,9 @@
     (with-temp-buffer
       (romacs-agent-log-mode)
       (setq romacs-agent-log--session session
-            romacs-agent-log--end (copy-marker (point-min) t))
+            romacs-agent-log--end (copy-marker (point-min) t)
+            romacs-agent-log--input (point-min-marker))
+      (romacs-agent-log--separator t)
       (let ((romacs-agent-event-functions
              (list (lambda (owner event) (romacs-agent-log--draw-live owner event)))))
         (romacs-agent-plan-offer-tests--offer session 41))

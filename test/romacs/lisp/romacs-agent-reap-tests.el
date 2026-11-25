@@ -15,12 +15,12 @@
 
 (defmacro romacs-agent-reap-tests--with (&rest body)
   "BODY with `review', an idle reviewer task under a unit, and `lane', an
-idle task of another role; `scheduled' collects each look's (SESSION
-DELAY), `stopped' each session stopped and `asleep' each reaped to sleep;
+idle task of another role; `scheduled' collects each reaper started (its
+period), `stopped' each session stopped and `asleep' each reaped to sleep;
 `working' says a shell runs among a task's processes."
   (declare (indent 0))
   `(let* ((romacs-agent--sessions (make-hash-table :test #'equal))
-          (romacs-agent-tools--reaping (make-hash-table :test #'equal))
+          (romacs-agent-tools--reaper nil)
           (romacs-agent-reap-after 300)
           (review (romacs-agent--make :id "r" :harness 'codex :state 'idle :unit "romacs-agent-r"
                                       :dir (make-temp-file "romacs-reap-" t)
@@ -29,35 +29,48 @@ DELAY), `stopped' each session stopped and `asleep' each reaped to sleep;
           (lane (romacs-agent--make :id "l" :harness 'claude :state 'idle :unit "romacs-agent-l"
                                     :last-time (- (float-time) 1000)
                                     :options '(:parent "lead" :role "implementation")))
-          (scheduled nil) (stopped nil) (asleep nil) (working nil))
-     (dolist (s (list review lane)) (puthash (romacs-agent-id s) s romacs-agent--sessions))
+          (scheduled nil) (stopped nil) (asleep nil) (working nil) (supervisors nil))
+     ;; Each attached to its supervisor, as a running harness is.
+     (dolist (s (list review lane))
+       (push (make-process :name "romacs-reap-supervisor" :command '("cat") :noquery t) supervisors)
+       (setf (romacs-agent-connection s) (car supervisors) (romacs-agent-caught-up s) t)
+       (puthash (romacs-agent-id s) s romacs-agent--sessions))
      (cl-letf (((symbol-function 'run-at-time)
-                (lambda (delay _repeat function session &rest _)
-                  (when (eq function #'romacs-agent-tools--reap) (push (list session delay) scheduled))))
+                (lambda (_delay repeat function &rest _)
+                  (when (eq function #'romacs-agent-tools--reap-sweep) (push repeat scheduled))
+                  (timer-create)))
                ((symbol-function 'romacs-agent-stop) (lambda (s &optional reaped) (push s stopped) (when reaped (push s asleep))))
                ((symbol-function 'romacs-agent-tools--working-p) (lambda (_s) working)))
-       (unwind-protect (progn ,@body) (delete-directory (romacs-agent-dir review) t)))))
+       (unwind-protect (progn ,@body)
+         (mapc #'delete-process supervisors)
+         (delete-directory (romacs-agent-dir review) t)))))
 
+;; One reaper looks at every task, never a timer a task: thousands of
+;; tasks recorded cost nothing while none of their harnesses runs.
 (ert-deftest romacs-agent-reap-a-delegated-task-after-its-turn ()
   (romacs-agent-reap-tests--with
-    ;; Its ends, replayed or live, schedule one look, whatever its role;
-    ;; a user's own session's none.
+    ;; A user's own session's end runs no reaper.
+    (romacs-agent-tools--reap-on-event (romacs-agent--make :id "u" :state 'idle :options nil) (list :type 'done))
+    (should-not scheduled)
+    ;; Its tasks' ends, replayed or live, whatever their role: one reaper.
     (dotimes (_ 3) (romacs-agent-tools--reap-on-event review (list :type 'done)))
     (romacs-agent-tools--reap-on-event lane (list :type 'done))
-    (romacs-agent-tools--reap-on-event (romacs-agent--make :id "u" :state 'idle :options nil) (list :type 'done))
-    (should (equal scheduled (list (list lane 300) (list review 300))))
-    ;; Stopped to sleep, not ended.
-    (romacs-agent-tools--reap review)
-    (should (equal stopped (list review)))
-    (should (equal asleep (list review)))))
+    (should (equal scheduled (list romacs-agent-tools--reap-every)))
+    ;; Stopped to sleep, not ended; with no harness left running, the
+    ;; reaper stops.
+    (romacs-agent-tools--reap-sweep)
+    (should (equal (sort (mapcar #'romacs-agent-id asleep) #'string<) '("l" "r")))
+    (should-not romacs-agent-tools--reaper)))
 
 (ert-deftest romacs-agent-reap-keeps-a-task-at-work ()
   (romacs-agent-reap-tests--with
+    (remhash "l" romacs-agent--sessions)
     (cl-flet ((reaped-p (setup)
                 (setq stopped nil)
+                (romacs-agent-tools--reap-watch)
                 (let ((saved (copy-romacs-agent review)))
                   (funcall setup)
-                  (romacs-agent-tools--reap review)
+                  (romacs-agent-tools--reap-sweep)
                   (puthash "r" saved romacs-agent--sessions)
                   (setq review saved)
                   ;; A copy shares its approvals table: none is left asked.
@@ -69,36 +82,56 @@ DELAY), `stopped' each session stopped and `asleep' each reaped to sleep;
       (should-not (reaped-p (lambda () (setf (romacs-agent-cancelled review) t))))
       (should-not (reaped-p (lambda () (setf (romacs-agent-state review) 'ended))))
       ;; A shell it started still runs (a build in the background): kept,
-      ;; looked at again a reap time later.
-      (setq scheduled nil)
+      ;; the reaper still looking.
       (should-not (reaped-p (lambda () (setq working t))))
       (setq working nil)
-      (should (equal (mapcar (lambda (look) (list (romacs-agent-id (car look)) (cadr look))) scheduled) '(("r" 300))))
-      ;; Spoken to lately: looked at again when its time is up.
-      (setq scheduled nil)
+      (should romacs-agent-tools--reaper)
+      ;; Spoken to lately: kept until its time is up.
       (should-not (reaped-p (lambda () (setf (romacs-agent-last-time review) (- (float-time) 100)))))
-      (should (= (length scheduled) 1))
-      (should (< 190 (cadr (car scheduled)) 201)))))
+      (should romacs-agent-tools--reaper)
+      (should (reaped-p #'ignore)))))
+
+(ert-deftest romacs-agent-reap-a-quiet-task-idle-its-time ()
+  ;; A restart left a finished task unloaded, its supervisor running: the
+  ;; reaper loads it when its row says it sat idle its time, and keeps
+  ;; looking at one whose time is not yet up; a user's own, never.
+  (romacs-agent-reap-tests--with
+    (clrhash romacs-agent--sessions)
+    (let ((romacs-agent--quiet (make-hash-table :test #'equal)) (loaded nil)
+          (rows (list (cons "old" (romacs-agent--make :id "old" :options '(:parent "lead") :last-time (- (float-time) 1000)))
+                      (cons "new" (romacs-agent--make :id "new" :options '(:parent "lead") :last-time (float-time)))
+                      (cons "mine" (romacs-agent--make :id "mine" :last-time 0)))))
+      (dolist (row rows) (puthash (car row) 1 romacs-agent--quiet))
+      (cl-letf (((symbol-function 'romacs-agent-store-row-session) (lambda (id) (cdr (assoc id rows))))
+                ((symbol-function 'romacs-agent-load-session) (lambda (id) (push id loaded) t)))
+        (romacs-agent-tools--reap-watch)
+        (romacs-agent-tools--reap-sweep)
+        (should (equal loaded '("old")))
+        ;; "new" still to look at: the reaper runs on.
+        (should romacs-agent-tools--reaper)))))
 
 (ert-deftest romacs-agent-reap-waits-for-what-it-was-told-and-its-replay ()
   (romacs-agent-reap-tests--with
+    (remhash "l" romacs-agent--sessions)
     ;; A message written and not yet journaled back: still at work.
     (setf (romacs-agent-requests review) 7 (romacs-agent-inputs review) 6)
-    (romacs-agent-tools--reap review)
+    (romacs-agent-tools--reap-sweep)
     (should-not stopped)
     (setf (romacs-agent-inputs review) 7)
-    ;; Attached, its replay not over: looked at again later.
-    (let ((process (make-process :name "romacs-reap-fixture" :command '("cat") :noquery t)))
-      (unwind-protect
-          (progn (setf (romacs-agent-connection review) process (romacs-agent-caught-up review) nil)
-                 (setq scheduled nil)
-                 (romacs-agent-tools--reap review)
-                 (should-not stopped)
-                 (should (equal scheduled (list (list review 300))))
-                 (setf (romacs-agent-caught-up review) t)
-                 (romacs-agent-tools--reap review)
-                 (should (equal stopped (list review))))
-        (delete-process process)))))
+    ;; Its replay not over: not yet.
+    (setf (romacs-agent-caught-up review) nil)
+    (romacs-agent-tools--reap-sweep)
+    (should-not stopped)
+    (setf (romacs-agent-caught-up review) t)
+    (romacs-agent-tools--reap-sweep)
+    (should (equal stopped (list review)))
+    ;; Detached, its unit's name kept: no harness to stop, none watched.
+    (setq stopped nil)
+    (delete-process (romacs-agent-connection review))
+    (romacs-agent-tools--reap-watch)
+    (romacs-agent-tools--reap-sweep)
+    (should-not stopped)
+    (should-not romacs-agent-tools--reaper)))
 
 (ert-deftest romacs-agent-reap-a-stopped-task-takes-its-messages-when-resumed ()
   (romacs-agent-reap-tests--with
@@ -216,9 +249,14 @@ DELAY), `stopped' each session stopped and `asleep' each reaped to sleep;
     ;; A user's own session: never.
     (should-not (romacs-agent-tools--reap-delay (romacs-agent--make :id "u" :options nil)))
     (let ((romacs-agent-reap-after nil)) (should-not (romacs-agent-tools--reap-delay lane)))
-    ;; A restart looks at the tasks already idle.
-    (romacs-agent-tools--reap-restored)
-    (should (equal (sort (mapcar (lambda (look) (romacs-agent-id (car look))) scheduled) #'string<) '("l" "r")))))
+    ;; A restart runs the reaper, once however often it says so: its
+    ;; first look finds the tasks already idle.
+    (should (memq #'romacs-agent-tools--reap-watch romacs-agent-restored-hook))
+    (romacs-agent-tools--reap-watch)
+    (romacs-agent-tools--reap-watch)
+    (should (equal scheduled (list romacs-agent-tools--reap-every)))
+    (romacs-agent-tools--reap-sweep)
+    (should (equal (sort (mapcar #'romacs-agent-id asleep) #'string<) '("l" "r")))))
 
 (ert-deftest romacs-agent-reap-a-reaped-task-sleeps-idle-and-resumes-its-conversation ()
   ;; Reaped, its harness gone: idle, not ended, here and after a restart,

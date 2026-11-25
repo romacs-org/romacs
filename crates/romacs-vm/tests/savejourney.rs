@@ -42,14 +42,18 @@ fn eval(vm: &mut Vm, text: &str) -> String {
 struct Fixture(std::path::PathBuf);
 impl Fixture {
     fn new() -> Self {
-        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let base = std::env::var_os("TMPDIR").expect("TMPDIR must name the scratch directory");
-        let path = std::path::PathBuf::from(base).join(format!(
+        Self::new_in(base.as_ref())
+    }
+    fn new_in(base: &std::path::Path) -> Self {
+        use std::os::unix::fs::DirBuilderExt;
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let path = base.join(format!(
             "savejourney-case-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
-        std::fs::create_dir(&path).unwrap();
+        std::fs::DirBuilder::new().mode(0o700).create(&path).unwrap();
         let probe = path.join("probe");
         std::fs::create_dir(&probe).unwrap();
         Self(probe)
@@ -166,7 +170,8 @@ fn filename_case_real_alternate_hardlink_is_not_case_folding() {
 #[test]
 fn filename_case_special_file_answers_as_gnu() {
     use std::os::unix::net::UnixListener;
-    let fixture = Fixture::new();
+    // The Unix socket address can be much shorter than a valid TMPDIR.
+    let fixture = Fixture::new_in(std::path::Path::new("/tmp"));
     let _listener = UnixListener::bind(fixture.0.join("socket")).unwrap();
     let mut vm = Vm::new();
     assert_eq!(

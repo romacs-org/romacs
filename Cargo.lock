@@ -3158,7 +3158,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-allocator"
-version = "0.0.20"
+version = "0.0.21"
 dependencies = [
  "libc",
  "rustix",
@@ -3168,7 +3168,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-attach"
-version = "0.0.20"
+version = "0.0.21"
 dependencies = [
  "base64",
  "image",
@@ -3182,14 +3182,14 @@ dependencies = [
 
 [[package]]
 name = "romacs-brand"
-version = "0.0.20"
+version = "0.0.21"
 dependencies = [
  "trybuild",
 ]
 
 [[package]]
 name = "romacs-display-protocol"
-version = "0.0.20"
+version = "0.0.21"
 dependencies = [
  "bitflags",
  "crossbeam-channel",
@@ -3209,7 +3209,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-display-runtime"
-version = "0.0.20"
+version = "0.0.21"
 dependencies = [
  "arboard",
  "bitflags",
@@ -3253,7 +3253,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-face"
-version = "0.0.20"
+version = "0.0.21"
 dependencies = [
  "romacs-snapshot",
  "rustc-hash 2.1.3",
@@ -3263,7 +3263,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-font"
-version = "0.0.20"
+version = "0.0.21"
 dependencies = [
  "cosmic-text",
  "fontconfig",
@@ -3284,7 +3284,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-font-materializer"
-version = "0.0.20"
+version = "0.0.21"
 dependencies = [
  "allsorts",
  "cosmic-text",
@@ -3311,7 +3311,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-grammars"
-version = "0.0.20"
+version = "0.0.21"
 dependencies = [
  "tree-sitter-bash",
  "tree-sitter-c",
@@ -3334,7 +3334,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-gui-oracle"
-version = "0.0.20"
+version = "0.0.21"
 dependencies = [
  "freetype-rs",
  "png",
@@ -3344,7 +3344,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-gui-tests"
-version = "0.0.20"
+version = "0.0.21"
 dependencies = [
  "core-foundation",
  "image",
@@ -3366,7 +3366,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-icon-font"
-version = "0.0.20"
+version = "0.0.21"
 dependencies = [
  "allsorts",
  "kurbo",
@@ -3375,7 +3375,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-imaging"
-version = "0.0.20"
+version = "0.0.21"
 dependencies = [
  "enum_dispatch",
  "flate2",
@@ -3395,7 +3395,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-infra"
-version = "0.0.20"
+version = "0.0.21"
 dependencies = [
  "getrandom 0.4.3",
  "tempfile",
@@ -3403,7 +3403,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-keeper"
-version = "0.0.20"
+version = "0.0.21"
 dependencies = [
  "libc",
  "romacs-record",
@@ -3412,7 +3412,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-layout"
-version = "0.0.20"
+version = "0.0.21"
 dependencies = [
  "romacs-display-protocol",
  "romacs-font",
@@ -3424,7 +3424,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-layout-input"
-version = "0.0.20"
+version = "0.0.21"
 dependencies = [
  "romacs-snapshot",
 ]
@@ -3438,7 +3438,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-mcp"
-version = "0.0.20"
+version = "0.0.21"
 dependencies = [
  "rusqlite",
  "serde_json",
@@ -3446,7 +3446,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-record"
-version = "0.0.20"
+version = "0.0.21"
 dependencies = [
  "memmap2",
  "rustix",
@@ -3454,7 +3454,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-regex"
-version = "0.0.20"
+version = "0.0.21"
 dependencies = [
  "libc",
  "memchr",
@@ -3472,7 +3472,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-relay"
-version = "0.0.20"
+version = "0.0.21"
 dependencies = [
  "httparse",
  "rustls",
@@ -3483,7 +3483,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-renderer-wgpu"
-version = "0.0.20"
+version = "0.0.21"
 dependencies = [
  "bytemuck",
  "cosmic-text",
@@ -3527,7 +3527,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-scene"
-version = "0.0.20"
+version = "0.0.21"
 dependencies = [
  "kurbo",
  "proptest",
@@ -3537,7 +3537,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-snapshot"
-version = "0.0.20"
+version = "0.0.21"
 dependencies = [
  "foldhash",
  "num-bigint",
@@ -3549,7 +3549,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-snapshot-derive"
-version = "0.0.20"
+version = "0.0.21"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3558,7 +3558,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-test-fonts"
-version = "0.0.20"
+version = "0.0.21"
 
 [[package]]
 name = "romacs-vm"
@@ -3617,7 +3617,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-vm-gui"
-version = "0.0.20"
+version = "0.0.21"
 dependencies = [
  "alacritty_terminal",
  "crossbeam-channel",
@@ -3649,11 +3649,11 @@ dependencies = [
 
 [[package]]
 name = "romacs-vm-gui-test-build"
-version = "0.0.20"
+version = "0.0.21"
 
 [[package]]
 name = "romacs-vm-test-build"
-version = "0.0.20"
+version = "0.0.21"
 
 [[package]]
 name = "ropey"

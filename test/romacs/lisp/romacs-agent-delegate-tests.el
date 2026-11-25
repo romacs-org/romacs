@@ -96,7 +96,9 @@ recorded in a private directory; `delivered' collects what wakes it."
                 collect `(progn (puthash (romacs-agent-id ,name) ,name romacs-agent--sessions) (romacs-agent--index ,name)))
      (cl-letf (((symbol-function 'romacs-agent-tools--deliver)
                 (lambda (_session text done &rest _) (push text delivered) (funcall done)))
-               ((symbol-function 'run-at-time) #'ignore))
+               ((symbol-function 'run-at-time) #'ignore)
+               ;; Its marks in its own directory, never a state root of its process.
+               ((symbol-function 'romacs-agent--marks-dir) (lambda () (expand-file-name "marks" root))))
        (unwind-protect (progn ,@body) (delete-directory root t)))))
 
 (defun romacs-agent-delegate-tests--end (child seq result &optional failed)
@@ -107,6 +109,37 @@ recorded in a private directory; `delivered' collects what wakes it."
   (romacs-agent--summary-stale (romacs-agent-id child))
   (push (list seq result failed) (romacs-agent-ends child))
   (romacs-agent-tools--wake child))
+
+(ert-deftest romacs-agent-delegate-an-owed-end-is-marked-till-delivered ()
+  ;; Owed to its parent, a task is marked, so a restart before delivery
+  ;; loads it and hands its end on again; delivered, the mark goes.
+  (romacs-agent-delegate-tests--family ((a nil))
+    (let ((mark (expand-file-name (format "%s.owed" (romacs-agent-id a)) (romacs-agent--marks-dir))))
+      (romacs-agent-delegate-tests--end a 5 "A done")
+      (should (file-exists-p mark))
+      ;; A newer end answered on its own leaves the older one owed.
+      (setf (romacs-agent-state parent) 'running)
+      (romacs-agent--summary-stale (romacs-agent-id parent))
+      (romacs-agent-delegate-tests--end a 6 "[quiet] nothing more")
+      (should (file-exists-p mark))
+      (setf (romacs-agent-state parent) 'idle)
+      (romacs-agent--summary-stale (romacs-agent-id parent))
+      (romacs-agent-tools--flush parent)
+      (should delivered)
+      (should-not (file-exists-p mark)))))
+
+(ert-deftest romacs-agent-delegate-a-kept-account-move-pays-the-owed-end ()
+  (romacs-agent-delegate-tests--family ((a nil))
+    (let ((mark (expand-file-name (format "%s.owed" (romacs-agent-id a)) (romacs-agent--marks-dir)))
+          (limited '(:provider "claude"))
+          (kept nil))
+      (romacs-agent-delegate-tests--end a 5 "At its limit" t)
+      (should (file-exists-p mark))
+      (romacs-agent-tools--moved a "claude" "claude2" limited (lambda (then) (setq kept then)))
+      (should (file-exists-p mark))
+      (funcall kept '(ok nil))
+      (should (file-exists-p (expand-file-name "answered" (romacs-agent-dir a))))
+      (should-not (file-exists-p mark)))))
 
 (ert-deftest romacs-agent-delegate-ends-together-wake-once ()
   (romacs-agent-delegate-tests--family ((a nil) (b nil))
@@ -119,6 +152,184 @@ recorded in a private directory; `delivered' collects what wakes it."
     ;; Handed on once.
     (romacs-agent-tools--flush parent)
     (should (= (length delivered) 1))))
+
+(ert-deftest romacs-agent-delegate-a-coordinator-ends-after-its-tasks ()
+  ;; A coordinator delegates a writer and ends its turn: it is not done,
+  ;; and its parent is not told so.  Its turn after the writer's end is
+  ;; its task's end.
+  (romacs-agent-delegate-tests--family ((a nil))
+    (let ((writer (romacs-agent--make :id "wwwwwwww-0000-4000-8000-000000000000" :harness 'claude :title "writer"
+                                      :state 'running :dir (make-temp-file "w" t)
+                                      :options (list :parent (romacs-agent-id a)))))
+      (puthash (romacs-agent-id writer) writer romacs-agent--sessions)
+      (romacs-agent--index writer)
+      (romacs-agent-ui--summarize-children a)
+      (romacs-agent-delegate-tests--end a 5 "delegated a writer")
+      (romacs-agent-tools--flush parent)
+      (should-not delivered)
+      (should (equal (romacs-agent-tools--status (romacs-agent-summary (romacs-agent-id a))) "running"))
+      ;; The writer done, its end not yet delivered to the coordinator:
+      ;; still at work.  Delivered, the coordinator's next turn ends its task.
+      (setf (romacs-agent-state writer) 'idle (romacs-agent-turns writer) 1 (romacs-agent-done-seq writer) 3)
+      (push (list 3 "written" nil) (romacs-agent-ends writer))
+      (romacs-agent--summary-stale (romacs-agent-id writer))
+      (romacs-agent-ui--summarize-children a)
+      (should (equal (romacs-agent-tools--status (romacs-agent-summary (romacs-agent-id a))) "running"))
+      (romacs-agent-tools--mark-woken writer 3)
+      (should (equal (romacs-agent-tools--status (romacs-agent-summary (romacs-agent-id a))) "completed"))
+      ;; A note (a renewal's) advancing its seq is no end to deliver.
+      (setf (romacs-agent-done-seq writer) 4)
+      (romacs-agent--summary-stale (romacs-agent-id writer))
+      (should (equal (romacs-agent-tools--status (romacs-agent-summary (romacs-agent-id a))) "completed"))
+      ;; A writer that wakes it only on failure holds nothing: its success
+      ;; would leave the coordinator asleep.
+      (setf (romacs-agent-state writer) 'running
+            (romacs-agent-options writer) (list :parent (romacs-agent-id a) :wake "failure"))
+      (romacs-agent--summary-stale (romacs-agent-id writer))
+      (should (equal (romacs-agent-tools--status (romacs-agent-summary (romacs-agent-id a))) "completed"))
+      (setf (romacs-agent-state writer) 'idle
+            (romacs-agent-options writer) (list :parent (romacs-agent-id a)))
+      (romacs-agent--summary-stale (romacs-agent-id writer))
+      (romacs-agent-delegate-tests--end a 9 "all done")
+      (romacs-agent-tools--flush parent)
+      (should (equal (mapcar (lambda (w) (plist-get w :result)) (romacs-agent-tools--wakes-parse (car delivered)))
+                     '("all done")))
+      (delete-directory (romacs-agent-dir writer) t))))
+
+(ert-deftest romacs-agent-delegate-a-task-asks-its-parent ()
+  ;; A question only a user answers blocks a task: its parent is told it
+  ;; with its request id, and answers it as the user would.
+  (romacs-agent-delegate-tests--family ((a nil))
+    (let ((answered nil) (romacs-agent-tools--asked-parents (make-hash-table :test #'equal)))
+      (puthash "q1" t (romacs-agent-approvals a))
+      (cl-letf (((symbol-function 'romacs-agent--live-p) (lambda (_) t))
+                ((symbol-function 'romacs-agent-tools--caller) (lambda () (romacs-agent-id parent)))
+                ((symbol-function 'romacs-mcp--instance) #'ignore)
+                ((symbol-function 'romacs-agent-respond)
+                 (lambda (session id allow &rest _) (push (list session id allow) answered)))
+                (romacs-agent-approval-policy 'ask))
+        (romacs-agent-tools--ask-parent a '(:type approval :request-id "q1"
+                                                  :questions (("Which one?" :header "Pick" :options ("A" "B")))))
+        (should (string-match-p "request q1:\n- Which one\\? \\[A | B\\]" (car delivered)))
+        ;; Told once: a replay's catch-up asks again, and it is not repeated.
+        (romacs-agent--set-asks a '("q1"))
+        (romacs-agent-tools--ask-parent-pending a)
+        (should (= (length delivered) 1))
+        ;; Answered, it is forgotten: the table holds what is pending alone.
+        (romacs-agent-tools--ask-parent a '(:type answered :request-id "q1"))
+        (should (zerop (hash-table-count romacs-agent-tools--asked-parents)))
+        (romacs-agent-tools--answer-request
+         (romacs-mcp--object "taskId" (romacs-agent-id a) "requestId" "q1"
+                             "answers" (romacs-mcp--object "Which one?" "B")))
+        (should (equal answered (list (list a "q1" '(:answers (("Which one?" . "B")))))))
+        ;; Only the session that delegated it may.
+        (cl-letf (((symbol-function 'romacs-agent-tools--caller) (lambda () "someone-else")))
+          (should-error (romacs-agent-tools--answer-request
+                         (romacs-mcp--object "taskId" (romacs-agent-id a) "requestId" "q1"))
+                        :type 'user-error))))))
+
+(ert-deftest romacs-agent-delegate-withdrawal-and-exit-forget-asked-parents ()
+  (romacs-agent-delegate-tests--family ((a nil) (b nil))
+    (let ((romacs-agent-tools--asked-parents (make-hash-table :test #'equal)))
+      (cl-letf (((symbol-function 'romacs-agent--live-p) (lambda (_) t)))
+        (dolist (task (list a b))
+          (romacs-agent--deliver-record-events
+           task (romacs-agent--apply-record-events
+                 task '((:type approval :request-id "q" :approval-wire t :user t :questions (("Which one?")))))
+           1 0))
+        (let ((key-a (cons (romacs-agent-id a) "q")) (key-b (cons (romacs-agent-id b) "q")))
+          (should (gethash key-a romacs-agent-tools--asked-parents))
+          (should (gethash key-b romacs-agent-tools--asked-parents))
+          (romacs-agent--deliver-record-events
+           a (romacs-agent--apply-record-events a '((:type approval-withdrawn :request-id "q"))) 2 0)
+          (should-not (gethash key-a romacs-agent-tools--asked-parents))
+          (should (gethash key-b romacs-agent-tools--asked-parents))
+          (romacs-agent--deliver-record-events
+           b (romacs-agent--apply-record-events b '((:type exit :status 0))) 2 0)
+          (should-not (gethash key-b romacs-agent-tools--asked-parents)))))))
+
+(ert-deftest romacs-agent-delegate-a-coordinator-s-held-end-goes-when-its-task-ends-quietly ()
+  ;; Its task ends quietly, waking it not: the coordinator runs no turn
+  ;; after it, so its held end is its task's, and goes to its parent.
+  (romacs-agent-delegate-tests--family ((a nil))
+    (let ((writer (romacs-agent--make :id "wwwwwwww-0000-4000-8000-000000000001" :harness 'claude :title "writer"
+                                      :state 'running :dir (make-temp-file "w" t)
+                                      :options (list :parent (romacs-agent-id a)))))
+      (puthash (romacs-agent-id writer) writer romacs-agent--sessions)
+      (romacs-agent--index writer)
+      (romacs-agent-ui--summarize-children a)
+      (romacs-agent-delegate-tests--end a 5 "delegated a writer")
+      (romacs-agent-tools--flush parent)
+      (should-not delivered)
+      (romacs-agent-delegate-tests--end writer 3 "[quiet] nothing for you")
+      (romacs-agent-ui--summarize-children a)
+      (romacs-agent-tools--release-held a)
+      (romacs-agent-tools--flush parent)
+      (should (equal (mapcar (lambda (w) (plist-get w :result)) (romacs-agent-tools--wakes-parse (car delivered)))
+                     '("delegated a writer")))
+      ;; Held again, its writer stopped by the user, no end of its own:
+      ;; the stop lets it go.
+      (setq delivered nil)
+      (setf (romacs-agent-state writer) 'running)
+      (romacs-agent--summary-stale (romacs-agent-id writer))
+      (romacs-agent-ui--summarize-children a)
+      (romacs-agent-delegate-tests--end a 7 "delegated again")
+      (romacs-agent-tools--flush parent)
+      (should-not delivered)
+      (setf (romacs-agent-state writer) 'ended)
+      (romacs-agent--summary-stale (romacs-agent-id writer))
+      (romacs-agent-ui--summarize-children a)
+      (romacs-agent-tools--delegate-gone writer '(:type status :text "stopped"))
+      (romacs-agent-tools--flush parent)
+      (should (equal (mapcar (lambda (w) (plist-get w :result)) (romacs-agent-tools--wakes-parse (car delivered)))
+                     '("delegated again")))
+      (delete-directory (romacs-agent-dir writer) t))))
+
+(ert-deftest romacs-agent-delegate-a-detached-task-holds-its-coordinators-end-until-stop ()
+  (romacs-agent-delegate-tests--family ((a nil) (b nil))
+    (setf (romacs-agent-options b) (list :parent (romacs-agent-id a)))
+    (romacs-agent--index b)
+    (romacs-agent-ui--summarize-children a)
+    (romacs-agent-delegate-tests--end a 5 "coordinated")
+    (should (gethash a romacs-agent-tools--held))
+    (setf (romacs-agent-state b) 'detached)
+    (romacs-agent--raise b '(:type status :text "detached"))
+    (romacs-agent-tools--flush parent)
+    (should-not delivered)
+    (romacs-agent-stop b)
+    (romacs-agent-tools--flush parent)
+    (should (equal (plist-get (romacs-agent-tools--wake-parse (car delivered)) :result) "coordinated"))))
+
+(ert-deftest romacs-agent-delegate-an-unreachable-task-lets-its-coordinators-end-go ()
+  ;; Its supervisor gone without a word: once reattaching gives up, the
+  ;; coordinator's end goes on, never held for good.
+  (romacs-agent-delegate-tests--family ((a nil) (b nil))
+    (setf (romacs-agent-options b) (list :parent (romacs-agent-id a)))
+    (romacs-agent--index b)
+    (romacs-agent-ui--summarize-children a)
+    (romacs-agent-delegate-tests--end a 5 "coordinated")
+    (should (gethash a romacs-agent-tools--held))
+    (setf (romacs-agent-state b) 'detached)
+    (romacs-agent--raise b '(:type status :text "supervisor not reachable"))
+    (romacs-agent-tools--flush parent)
+    (should (equal (plist-get (romacs-agent-tools--wake-parse (car delivered)) :result) "coordinated"))))
+
+(ert-deftest romacs-agent-delegate-a-starting-task-queues ()
+  ;; Its harness not up yet: a message waits, and says so.
+  (should (eq (romacs-agent-tools--delivery (romacs-agent--make :id "s" :state 'starting) 'queue) 'queued))
+  (should (eq (romacs-agent-tools--delivery (romacs-agent--make :id "s" :state 'idle) 'queue) 'sent)))
+
+(ert-deftest romacs-agent-delegate-a-failed-resume-keeps-the-result ()
+  ;; The parent cannot be resumed this moment: the result waits in its
+  ;; queue for its next run, never dropped with the resume.
+  (let ((parent (romacs-agent--make :id "p" :harness 'claude :state 'ended))
+        (admitted nil))
+    (cl-letf (((symbol-function 'romacs-agent--continue) (lambda (_) (error "Provider not configured")))
+              ((symbol-function 'romacs-agent--raise) #'ignore)
+              ((symbol-function 'romacs-agent--folding-p) #'ignore)
+              ((symbol-function 'romacs-agent--admit) (lambda (_s item &rest _) (push item admitted))))
+      (romacs-agent-tools--deliver parent "Delegated task x completed" #'ignore))
+    (should (equal (mapcar #'romacs-agent-item-text admitted) '("Delegated task x completed")))))
 
 (ert-deftest romacs-agent-delegate-a-working-parent-is-woken-after ()
   (romacs-agent-delegate-tests--family ((a nil))
@@ -231,7 +442,7 @@ message's record for TEXT, `interrupted' each interrupted."
   `(romacs-agent-delegate-tests--family ((a nil) (b nil))
      (dolist (task (list parent a b)) (romacs-agent-test-attach task))
      (dolist (task (list a b)) (setf (romacs-agent-driver-state task) (list :ready t)))
-     (let ((written nil) (messages nil) (interrupted nil) (romacs-agent-tools--generations (make-hash-table :test #'equal))
+     (let ((written nil) (messages nil) (interrupted nil)
            (romacs-agent-tools--copies (make-hash-table :test #'equal)))
        (cl-letf (((symbol-function 'romacs-agent-tools--caller) (lambda () (romacs-agent-id ,caller)))
                  ((symbol-function 'romacs-agent--input)
@@ -250,17 +461,31 @@ message's record for TEXT, `interrupted' each interrupted."
 
 (ert-deftest romacs-agent-delegate-send-steers-queues-and-interrupts ()
   (romacs-agent-delegate-tests--sending parent
-    (send a "later")
+    ;; Each answer says what became of it.
+    (should (equal (gethash "delivery" (send a "later")) "queued"))
     (should-not written)
     (should (= (romacs-agent-queue-length a) 1))
     ;; Into the running turn.
-    (send a "now" "steer")
+    (should (equal (gethash "delivery" (send a "now" "steer")) "steered"))
     (should (equal written '(("a" . "now"))))
     ;; Cut short, then first.
-    (send a "first" "interrupt")
+    (should (equal (gethash "delivery" (send a "first" "interrupt")) "interrupting"))
     (should (equal interrupted '("a")))
     (drain a)
-    (should (equal (car written) '("a" . "first")))))
+    (should (equal (car written) '("a" . "first")))
+    (setf (romacs-agent-state a) 'running)
+    ;; A turn not yet named cannot be cut: the message waits, and says so.
+    (cl-letf (((symbol-function 'romacs-agent-interrupt) (lambda (_) (user-error "No turn to interrupt yet"))))
+      (should (equal (gethash "delivery" (send a "again" "interrupt")) "queued")))))
+
+(ert-deftest romacs-agent-delegate-send-reports-a-discarded-steer ()
+  (romacs-agent-delegate-tests--sending parent
+    (should (eq (romacs-agent-tools--tell a "expired" 'steer #'ignore) 'discarded))
+    (cl-letf (((symbol-function 'romacs-agent--encodable-p) #'ignore))
+      (should (equal (gethash "delivery" (send a "unencodable" "steer")) "discarded")))
+    (should-not (romacs-agent-queue a))
+    (should-not written)
+    (ignore #'drain)))
 
 (ert-deftest romacs-agent-delegate-send-steer-is-a-flag ()
   ;; steer true: into the running turn at once; false: queued; with
@@ -298,10 +523,39 @@ message's record for TEXT, `interrupted' each interrupted."
   (romacs-agent-delegate-tests--sending parent
     (send a "one")
     (send a "two")
+    ;; Each one all data: the store keeps it across a restart.
+    (should (cl-every #'romacs-agent--keepable-p (romacs-agent-queue a)))
     (send a "three" "replace")
+    ;; Its older ones gone at once, not at dispatch.
+    (should (= (romacs-agent-queue-length a) 1))
+    (should (romacs-agent--keepable-p (car (romacs-agent-queue a))))
+    ;; A replacement refused keeps what it was to replace.
+    (cl-letf (((symbol-function 'romacs-agent-tools--tell) (lambda (&rest _) (user-error "Worktree gone"))))
+      (should-error (send a "four" "replace") :type 'user-error))
+    (should (= (romacs-agent-queue-length a) 1))
     (dotimes (_ 3) (drain a))
     ;; Only what replaced them went.
     (should (equal (mapcar #'cdr written) '("three")))))
+
+(ert-deftest romacs-agent-delegate-an-admitted-replace-is-queued-after-write-error ()
+  (romacs-agent-delegate-tests--sending parent
+    (send a "stale")
+    (setf (romacs-agent-state a) 'idle)
+    (cl-letf (((symbol-function 'romacs-agent--input) (lambda (&rest _) (error "Write failed"))))
+      (should (equal (gethash "delivery" (send a "replacement" "replace")) "queued")))
+    (should (equal (mapcar #'romacs-agent-item-text (romacs-agent-queue a)) '("replacement")))
+    (drain a)
+    (should (equal (mapcar #'cdr written) '("replacement")))))
+
+(ert-deftest romacs-agent-delegate-a-replace-writes-none-it-replaces ()
+  ;; Its turn over, its drain not yet run: a replace goes in place of what
+  ;; waits, and none of that is written first.
+  (romacs-agent-delegate-tests--sending parent
+    (send a "stale")
+    (setf (romacs-agent-state a) 'idle)
+    (send a "fresh" "replace")
+    (should (equal (mapcar #'cdr written) '("fresh")))
+    (should (= (romacs-agent-queue-length a) 0))))
 
 (ert-deftest romacs-agent-delegate-siblings-send-their-parent-copied ()
   (romacs-agent-delegate-tests--sending a
