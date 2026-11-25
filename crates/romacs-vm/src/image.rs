@@ -289,6 +289,29 @@ impl ImageRegion {
         Ok(pair)
     }
     pub(super) fn string(&self, index: usize) -> Result<&str> {
+        let (start, end) = self.string_range(index)?;
+        self.verify(start, end)?;
+        std::str::from_utf8(self.data().get(start..end).ok_or("string outside image blob")?)
+            .map_err(|_| "image string is not UTF-8".into())
+    }
+    /// The character at byte AT of string INDEX and its width in bytes, or
+    /// None at its end, for a reader that has had the string whole from
+    /// `string`: the string's record and bounds and the pages under the
+    /// character are checked again, but not the whole text.
+    pub(super) fn string_char(&self, index: usize, at: usize) -> Result<Option<(u32, usize)>> {
+        let (start, end) = self.string_range(index)?;
+        let from = start.checked_add(at).ok_or("string offset overflow")?;
+        if from >= end {
+            return Ok(None);
+        }
+        let lead = *self.data().get(from).ok_or("string outside image blob")?;
+        let width = match lead { 0..=0x7f => 1, 0xc0..=0xdf => 2, 0xe0..=0xef => 3, _ => 4 };
+        let to = end.min(from + width);
+        self.verify(from, to)?;
+        Ok(Some(crate::lstring::string_char(&self.data()[from..to])))
+    }
+    /// String INDEX's byte range in the blob, its record checked.
+    fn string_range(&self, index: usize) -> Result<(usize, usize)> {
         if index >= self.strings {
             return Err("image string index out of range".into());
         }
@@ -306,9 +329,7 @@ impl ImageRegion {
             .checked_add(offset)
             .ok_or("string offset overflow")?;
         let end = start.checked_add(len).ok_or("string length overflow")?;
-        self.verify(start, end)?;
-        std::str::from_utf8(data.get(start..end).ok_or("string outside image blob")?)
-            .map_err(|_| "image string is not UTF-8".into())
+        Ok((start, end))
     }
 }
 
@@ -486,6 +507,14 @@ impl Vm {
             .as_ref()
             .ok_or("no image attached")?
             .string(index & !IMAGE)
+    }
+    /// The character at byte AT of V, an image string (`ImageRegion::string_char`).
+    pub(crate) fn image_string_char(&self, v: Value, at: usize) -> Result<Option<(u32, usize)>> {
+        let index = v.index(0)?;
+        if index & IMAGE == 0 || crate::frozen::region_of(index) != 0 {
+            return Err("string required".into());
+        }
+        self.image.as_ref().ok_or("no image attached")?.string_char(index & !IMAGE, at)
     }
     /// V is not a private heap object: a reference into the executable
     /// image (region 0) or a frozen region (`frozen.rs`). Such a value is

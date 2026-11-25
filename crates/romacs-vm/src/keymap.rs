@@ -485,10 +485,11 @@ impl Vm {
     fn key_event_at(&mut self, key: Value, index: usize, at: &mut Option<usize>) -> Result<Decoded> {
         let short = "key sequence shorter than its length";
         let (event, bytes) = if Self::image_string(key) {
-            // An image's literal is multibyte unless ASCII, where the two read alike.
-            let text = self.string_value(key)?.as_bytes();
-            let start = at.unwrap_or_else(|| char_byte(text, index));
-            let (c, width) = char_at(text, start).ok_or(short)?;
+            // An image's literal is multibyte unless ASCII, where the two read
+            // alike.  Its first read checks it whole (`string_value`); the
+            // others read one character, its pages checked.
+            let start = match *at { Some(byte) => byte, None => char_byte(self.string_value(key)?.as_bytes(), index) };
+            let (c, width) = self.image_string_char(key, start)?.ok_or(short)?;
             *at = Some(start + width);
             (Value::integer(i64::from(c))?, false)
         } else if let Some(view) = self.str_view(key) {
