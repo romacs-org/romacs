@@ -337,6 +337,21 @@ struct ListCall {
 }
 type ListRun = std::result::Result<Option<i64>, scan::Stopped<Box<scan::Scan>>>;
 impl ListCall {
+    /// The run of OP with ARGS, going on from KEPT where it stopped.
+    fn of(op: Op, args: &[Value], kept: Option<Kept>) -> Self {
+        let int = |v: Value| v.integer_value().expect("checked");
+        let depth = if let Op::ScanLists = op { int(args[2]) } else { 0 };
+        let resume = match kept { Some(Kept::Scan(scan)) => Some(*scan), _ => None };
+        Self { resume, args: (int(args[0]), int(args[1]), depth), sexpflag: matches!(op, Op::ScanSexps) }
+    }
+    /// The run over VIEW: folded over its summaries where SERVED says
+    /// they serve it (`indexed_lists'), else the scanner's alone.
+    fn run(&self, view: &View<'_>, scanner: &mut Scanner<'_, View<'_>>, served: Option<&Served>, mismatch: &mut Option<String>) -> ListRun {
+        match served {
+            Some(served) => indexed_lists(view, scanner, served, self, mismatch),
+            None => self.plain(scanner),
+        }
+    }
     /// The run by the scanner alone.
     fn plain(&self, scanner: &mut Scanner<'_, View<'_>>) -> ListRun {
         match self.resume {
@@ -741,16 +756,8 @@ impl Leaf<'_> {
                         let count = args[0].integer_value().expect("checked");
                         scanner.forward_comment(point, count).map(|(at, found)| Result_::Comment(at, found)).map_err(scan_stopped)
                     }
-                    (Op::ScanLists | Op::ScanSexps, kept) => {
-                        let int = |v: Value| v.integer_value().expect("checked");
-                        let depth = if let Op::ScanLists = op { int(args[2]) } else { 0 };
-                        let resume = match kept { Some(Kept::Scan(scan)) => Some(*scan), _ => None };
-                        let call = ListCall { resume, args: (int(args[0]), int(args[1]), depth), sexpflag: matches!(op, Op::ScanSexps) };
-                        match &listed {
-                            Some(served) => indexed_lists(&view, &mut scanner, served, &call, &mut mismatch),
-                            None => call.plain(&mut scanner),
-                        }.map(Result_::Lists).map_err(scan_stopped)
-                    }
+                    (Op::ScanLists | Op::ScanSexps, kept) => ListCall::of(op, args, kept).run(&view, &mut scanner, listed.as_ref(), &mut mismatch)
+                        .map(Result_::Lists).map_err(scan_stopped),
                     (Op::ParsePartialSexp, kept) => {
                         let (from, to, target, stopbefore, commentstop, mut state) = parse.clone().expect("checked");
                         if let Some(Kept::Parse(suspended)) = kept {
@@ -841,7 +848,7 @@ impl Leaf<'_> {
             Some(Decline::Short)
         } else if plain {
             Some(Decline::Arguments)
-        } else if self.syntax_var("romacs-inhibit-syntax-summaries")? != Value::NIL {
+        } else if self.vm.summary_variables().map_err(Fault::Error)?[0] {
             Some(Decline::Inhibited)
         } else if let Some(done) = options.propertize_done.filter(|&done| done <= to)
             && done < self.syntax_bounds(index)?.1.char {
@@ -855,27 +862,27 @@ impl Leaf<'_> {
             buffer_text(self.vm, index).syntax.borrow_mut().stats.declined[decline as usize] += 1;
             return Ok(None);
         }
-        self.served_context(index, table, options).map(Some)
+        let [_, check] = self.vm.summary_variables().map_err(Fault::Error)?;
+        Ok(Some(self.served_context((index, table), options, check)))
     }
 
     /// The context the summaries of the buffer at INDEX serve a scan in,
     /// under TABLE and OPTIONS, the property changes since they last
     /// served taken.
-    fn served_context(&mut self, index: usize, table: Value, options: scan::Options) -> std::result::Result<Served, Fault> {
+    fn served_context(&mut self, (index, table): (usize, Value), options: scan::Options, check: bool) -> Served {
         // Summaries hold no Values: only taking property changes needs the
         // entry, and so the barrier.
         if buffer_text(self.vm, index).properties.has_syntax_changes() {
             let data::Object::Buffer(buffer) = self.vm.objects.entry_mut(index) else { unreachable!("a multibyte buffer") };
             buffer.sync_syntax_properties();
         }
-        let check = self.syntax_var("romacs-syntax-summaries-check")? != Value::NIL;
         let context = Context {
             table: self.vm.char_table_serial(table),
             writes: crate::char_table::writes(),
             escaped_ends: options.comment_end_can_be_escaped,
             properties: options.propertize_done.is_some(),
         };
-        Ok(Served { context, check })
+        Served { context, check }
     }
 
     /// Whether the summaries of the buffer at INDEX serve a forward list
@@ -886,11 +893,12 @@ impl Leaf<'_> {
         -> std::result::Result<Option<Served>, Fault> {
         let forward = matches!(op, Op::ScanLists | Op::ScanSexps) && args[1].integer_value().is_some_and(|count| count > 0);
         if !forward || !matches!(self.vm.objects[index], data::Object::Buffer(_)) { return Ok(None); }
-        if self.syntax_var("romacs-inhibit-syntax-summaries")? != Value::NIL {
+        let [inhibited, check] = self.vm.summary_variables().map_err(Fault::Error)?;
+        if inhibited {
             buffer_text(self.vm, index).syntax.borrow_mut().stats.list_declined[Decline::Inhibited as usize] += 1;
             return Ok(None);
         }
-        self.served_context(index, table, options).map(Some)
+        Ok(Some(self.served_context((index, table), options, check)))
     }
 
     /// The variables a scan obeys, from SAVED (a rerun's flags) or read

@@ -107,9 +107,16 @@ impl SyntaxIndex {
         if scan.count <= 0 {
             return scanner.lists(scan, sexpflag);
         }
-        let context = self.prepare(scanner, chars, context);
+        // A tree that describes the text gives the leaf ends a read stops
+        // at; `prepare' waits until the scan reaches one, so that a scan
+        // ending in its first leaf pays nothing more.
+        let slot = if self.root.as_ref().is_some_and(|root| root.chars == chars) {
+            None
+        } else {
+            Some(self.prepare(scanner, chars, context.clone()))
+        };
         let mut segment = Segment::default();
-        let run = self.drive(scanner, context, scan, sexpflag, &mut segment);
+        let run = self.drive(scanner, (chars, context, slot), scan, sexpflag, &mut segment);
         let decline = if segment.folds > 0 {
             None
         } else if matches!(run, Err(Stopped { halt: Halt::Poll, .. })) {
@@ -127,21 +134,27 @@ impl SyntaxIndex {
     }
 
     /// The loop: fold at each leaf boundary, else read to the next one.
-    fn drive<T: Text>(&mut self, scanner: &mut Scanner<'_, T>, context: u8, mut scan: Scan, sexpflag: bool,
-                      segment: &mut Segment) -> Run {
+    /// The tree is prepared for CONTEXT at the first boundary, unless SLOT
+    /// says it was.
+    fn drive<T: Text>(&mut self, scanner: &mut Scanner<'_, T>, (chars, context, mut slot): (usize, Context, Option<u8>),
+                      mut scan: Scan, sexpflag: bool, segment: &mut Segment) -> Run {
         let (done, zv) = (scanner.options.propertize_done, scanner.zv.char);
         let flags = (sexpflag, scanner.options.ignore_comments, scanner.options.multibyte_syntax_as_symbol);
         // A folded leaf ends before ZV, and below the frontier.
         let before_zv = offset(zv).saturating_sub(1);
         let limit = done.map_or(before_zv, |done| before_zv.min(usize::try_from(done - 1).unwrap_or(0)));
-        let bit = 1 << context;
         loop {
             let at = offset(scan.reached().char);
-            let root = self.root.as_ref().expect("prepared");
-            let (leaf_start, leaf_chars, _) = locate(root, at, bit);
-            let to = locate(root, limit, bit).0;
+            let Some(root) = self.root.as_ref() else { return scanner.lists(scan, sexpflag) };
+            let (leaf_start, leaf_chars, _) = locate(root, at, 0);
+            let to = locate(root, limit, 0).0;
             let next = leaf_start + leaf_chars;
             if leaf_start == at && at < to {
+                let Some(context) = slot else {
+                    // The cuts it checks may move: look again.
+                    slot = Some(self.prepare(scanner, chars, context.clone()));
+                    continue;
+                };
                 let (reached, polled) = self.fold_from(scanner, context, &mut scan, (at, to), flags, segment);
                 // As the scanner's update where the last span ended: the
                 // frontier first, then the poll.
@@ -207,7 +220,7 @@ impl SyntaxIndex {
         {
             span.apply(scan, end);
             stats.folds[0] += 1;
-            stats.skipped += u64::try_from(chars).expect("a text's length");
+            stats.skipped += u64::try_from(chars).unwrap_or(u64::MAX);
             return true;
         }
         let key = list_summary::Key::of(scan, mode);
@@ -216,7 +229,7 @@ impl SyntaxIndex {
         {
             span.apply(scan, from, end);
             stats.folds[1] += 1;
-            stats.skipped += u64::try_from(chars).expect("a text's length");
+            stats.skipped += u64::try_from(chars).unwrap_or(u64::MAX);
             return true;
         }
         false

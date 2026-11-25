@@ -1,6 +1,6 @@
 //! Unbounded forward list scans through the index against the plain scanner.
 use super::*;
-use super::tests::Propertied;
+use super::parse_tests::Propertied;
 use crate::syntax_scan::tests::{Plain, Rng, random_table, random_text, ALPHABET};
 use std::collections::BTreeMap;
 

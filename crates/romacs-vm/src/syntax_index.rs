@@ -41,8 +41,9 @@ const FANOUT: usize = 16;
 /// least recently used given up first. A parse key whose span closes past
 /// the bottom level can take two, general and exact.
 const KEYS: usize = 8;
-/// Contexts an index keeps entries for.
+/// Contexts an index keeps entries for, and their slots.
 pub(crate) const CONTEXTS: usize = 4;
+const SLOTS: [u8; CONTEXTS] = [0, 1, 2, 3];
 /// A bit for each context slot.
 const EVERY: u8 = (1 << CONTEXTS) - 1;
 /// What a node keeps a summary under: the key its span is entered in, and
@@ -275,18 +276,18 @@ impl SyntaxIndex {
     fn prepare<T: Text>(&mut self, scanner: &Scanner<'_, T>, chars: usize, context: Context) -> u8 {
         let same = |kept: &Context| kept.table == context.table && kept.escaped_ends == context.escaped_ends
             && kept.properties == context.properties;
-        let found = self.contexts.iter().position(|slot| slot.as_ref().is_some_and(|(kept, _)| same(kept)));
+        let kept = |slot: u8| self.contexts[usize::from(slot)].as_ref();
+        let found = SLOTS.into_iter().find(|&slot| kept(slot).is_some_and(|(kept, _)| same(kept)));
         let slot = match found {
-            Some(slot) if self.contexts[slot].as_ref().is_some_and(|(kept, _)| kept.writes == context.writes) => slot,
+            Some(slot) if kept(slot).is_some_and(|(kept, _)| kept.writes == context.writes) => slot,
             Some(slot) => {
                 self.stats.context_invalidations += 1;
                 self.reset_context(slot);
                 slot
             }
             None => {
-                let slot = (0..CONTEXTS).min_by_key(|&slot| self.contexts[slot].as_ref().map_or(0, |(_, used)| *used + 1))
-                    .expect("context slots");
-                if self.contexts[slot].is_some() {
+                let slot = SLOTS.into_iter().min_by_key(|&slot| kept(slot).map_or(0, |(_, used)| *used + 1)).unwrap_or(0);
+                if kept(slot).is_some() {
                     self.stats.context_evictions += 1;
                     self.reset_context(slot);
                 }
@@ -294,8 +295,7 @@ impl SyntaxIndex {
             }
         };
         self.tick += 1;
-        self.contexts[slot] = Some((context, self.tick));
-        let slot = u8::try_from(slot).expect("few contexts");
+        self.contexts[usize::from(slot)] = Some((context, self.tick));
         if self.current.is_some_and(|current| current != slot) {
             self.stats.switches += 1;
         }
@@ -309,7 +309,7 @@ impl SyntaxIndex {
 
     /// Context slot SLOT keeps nothing: its entries go, and every leaf end
     /// is unchecked for it.
-    fn reset_context(&mut self, slot: usize) {
+    fn reset_context(&mut self, slot: u8) {
         fn reset(node: &mut Node, slot: u8) {
             node.drop_entries(slot);
             if node.is_leaf() {
@@ -321,7 +321,7 @@ impl SyntaxIndex {
             }
         }
         if let Some(root) = &mut self.root {
-            reset(root, u8::try_from(slot).expect("few contexts"));
+            reset(root, slot);
         }
     }
 
@@ -796,7 +796,7 @@ fn forget(node: &mut Node) {
 mod forward;
 
 #[cfg(test)]
-mod tests;
+mod parse_tests;
 #[cfg(test)]
 mod forward_tests;
 #[cfg(test)]

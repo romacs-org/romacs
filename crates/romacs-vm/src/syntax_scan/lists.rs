@@ -248,8 +248,7 @@ impl<T: Text> Scanner<'_, T> {
         // close1:
         macro_rules! close {
             () => {{
-                depth -= 1;
-                low = low.min(depth);
+                depth -= 1; low = low.min(depth);
                 if depth == 0 {
                     done!()
                 } else if depth < min_depth {
