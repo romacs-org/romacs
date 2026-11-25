@@ -66,6 +66,9 @@ session's full title comes with the session.")
 clients' and the relay's; a socket is deleted only while it is ours.")
 (defvar romacs-agent-service--peers nil "The connections, as `romacs-agent-rpc's.")
 (defvar romacs-agent-service--generation nil "This service's generation: a UUID made at its start.")
+(defvar romacs-agent-service-init-failure nil
+  "What failed as this service's process loaded its user's init, as said,
+or nil: told every client in hello's server info (`init_failure').")
 
 (cl-defstruct (romacs-agent-service--list (:constructor romacs-agent-service--list-make) (:copier nil))
   "The session list as served: its REVISION; each id's ROW and its JSON
@@ -299,7 +302,8 @@ from a client, of which none is defined, is ignored."
       (romacs-agent-rpc-object
        "version" (vector major (min minor (cadr romacs-agent-service-version)))
        "server" (romacs-agent-rpc-object "host" (system-name) "build" emacs-version
-                                         "generation" romacs-agent-service--generation)
+                                         "generation" romacs-agent-service--generation
+                                         "init_failure" (or romacs-agent-service-init-failure :null))
        "identity" (romacs-agent-service--peer-identity peer)
        "capabilities" []))))
 

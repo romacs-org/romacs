@@ -277,7 +277,9 @@ started by older builds keep working.
   - ="capabilities":[...]=.
 - *Welcome.* The reply:
   - ={"version":[1,M]}=, with M the lower of the two minors;
-  - ="server":{"host","build","generation"}=;
+  - ="server":{"host","build","generation","init_failure"}=, the last
+    what failed as the service's process loaded its user's init, or
+    null;
   - ="identity":{"via":"local"|"tailnet"|"ssh","login"}=;
   - ="capabilities":[...]=, =capabilities= being the intersection.
 - *Before the hello,* every other method is refused (=-32002=, not
@@ -850,8 +852,11 @@ was accepted on and, on =service-relay.sock=, from =agents/transport=.
   reads none, and the service must run the user's approval policy and
   providers), serves =service.sock= and =service-relay.sock=, restores
   the machine's sessions and attaches to their hosts, then runs its
-  timers and connections until it is stopped.  It makes no frame.  An
-  error in the init is reported and serving goes on.
+  timers and connections until it is stopped.  It makes no frame.  A
+  batch start runs =after-init-hook= before any of this, so the entry
+  ends initialization again once the init has loaded, running only what
+  the init and its packages put on that hook.  A step that fails is
+  said on stderr and in hello's =init_failure=, and serving goes on.
 - *Its unit.*  It runs as the transient user unit
   =romacs-agents-service= (=systemd-run --user
   --unit=romacs-agents-service -p Restart=on-failure=), started by

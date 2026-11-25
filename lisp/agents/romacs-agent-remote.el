@@ -589,7 +589,8 @@ another place is another machine's: let go of, its relay with it."
     (if (and kept (equal (romacs-agent-remote-place kept) place))
         kept
       (when kept (romacs-agent-remote-disconnect kept))
-      (puthash name (romacs-agent-remote--make :name name :place place) romacs-agent-remote--sources))))
+      ;; Its own copy: PLACE edited where it came from is another place.
+      (puthash name (romacs-agent-remote--make :name name :place (copy-tree place)) romacs-agent-remote--sources))))
 
 (defun romacs-agent-remote-connect (&optional socket host)
   "Show another machine's agent sessions on the board: HOST, a name of

@@ -27,27 +27,48 @@
 
 (declare-function romacs-saved-settings-start "romacs-saved-settings" ())
 (declare-function romacs--activate-packages "romacs-loadup-bootstrap" ())
+(declare-function romacs--after-init "romacs-loadup-bootstrap" ())
 (defvar romacs-loadup-delayed-init-variables)
+
+(defun romacs-agent-headless--failed (what said)
+  "Say that WHAT failed, SAID why, on stderr and to every client of the
+service (`romacs-agent-service-init-failure')."
+  (let ((line (format "%s: %s" what said)))
+    (message "romacs-agent-headless: %s" line)
+    (setq romacs-agent-service-init-failure
+          (if romacs-agent-service-init-failure (concat romacs-agent-service-init-failure "\n" line) line))))
+
+(defmacro romacs-agent-headless--step (what &rest body)
+  "Run BODY, a startup step; an error in it is said as WHAT failing
+\(`romacs-agent-headless--failed') and the next step goes on."
+  (declare (indent 1))
+  `(condition-case err (progn ,@body)
+     (error (romacs-agent-headless--failed ,what (error-message-string err)))))
 
 (defun romacs-agent-headless--load-init ()
   "Take the GUI's per-user steps before its first frame: its per-user
 directory (`romacs-init-directory') as `user-emacs-directory', the
 settings computed from it again (`romacs-loadup-delayed-init-variables',
 the packages' directory among them), the saved settings, the installed
-packages, then its init.el through `romacs-init-load'.  A step that
-fails is reported and the next goes on."
-  (let ((file (expand-file-name "init.el" (romacs-init-directory))))
+packages, its init.el through `romacs-init-load', then the end of
+initialization (`romacs--after-init'), which a batch start took before
+any of them: only what they put on `after-init-hook' runs now.  A step
+that fails is said (`romacs-agent-headless--failed') and the next goes
+on."
+  (let ((file (expand-file-name "init.el" (romacs-init-directory)))
+        (after-init-hook nil))
     (setq user-emacs-directory (romacs-init-directory) user-init-file file)
-    (with-demoted-errors "romacs-agent-headless: per-user settings: %S"
+    (romacs-agent-headless--step "per-user settings"
       (let ((user-emacs-directory-warning nil))
         (mapc #'custom-reevaluate-setting romacs-loadup-delayed-init-variables)))
-    (with-demoted-errors "romacs-agent-headless: saved settings: %S"
+    (romacs-agent-headless--step "saved settings"
       (when (fboundp 'romacs-saved-settings-start) (romacs-saved-settings-start)))
-    (with-demoted-errors "romacs-agent-headless: packages: %S"
+    (romacs-agent-headless--step "packages"
       (when (fboundp 'romacs--activate-packages) (romacs--activate-packages)))
     (when (file-exists-p file)
       (when-let* ((said (romacs-init-load file)))
-        (message "romacs-agent-headless: init failed: %s" said)))))
+        (romacs-agent-headless--failed "init" said)))
+    (romacs-agent-headless--step "after-init-hook" (romacs--after-init))))
 
 ;;;###autoload
 (defun romacs-agent-headless-run ()

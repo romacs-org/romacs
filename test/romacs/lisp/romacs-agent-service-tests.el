@@ -844,6 +844,10 @@ a state root of its own, and a service of its own on `socket'."
     ;; Somewhere else: another machine's, the old one let go of.
     (should-not (eq (romacs-agent-remote--host-source "n" "/b") old))
     (should (equal (romacs-agent-remote-place (gethash "n" romacs-agent-remote--sources)) "/b"))
+    ;; A place edited where it came from is another place too.
+    (let* ((place (list :ssh "a")) (kept (romacs-agent-remote--host-source "p" place)))
+      (setf (plist-get place :ssh) "b")
+      (should-not (eq (romacs-agent-remote--host-source "p" place) kept)))
     (romacs-agent-remote-disconnect old)
     (let ((new (romacs-agent-remote--host-source "n" "/c")))
       (romacs-agent-remote-disconnect old)
