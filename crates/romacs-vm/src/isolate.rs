@@ -639,6 +639,7 @@ impl Vm {
     /// ended (`process_select`), which reaches no safepoint before it waits
     /// again.
     pub(crate) fn isolate_quit_taken(&mut self) -> bool {
+        if !self.mutator.process_signals { return false; }
         // A termination quits once, whatever `inhibit-quit' says: the
         // worker's loop then ends (`romacs--isolate-terminated-p'). It
         // supersedes an interrupt still pending and the job's claim, so the
@@ -654,7 +655,7 @@ impl Vm {
         }
         // Held, not taken, while a run of aftermath masks the job: taken now
         // it would find no job to quit and be lost.
-        if self.aftermath_runs > 0 { return false; }
+        if self.mutator.aftermath_runs > 0 { return false; }
         crate::host::take_interrupt() && self.isolate_interrupt_targets_running()
     }
 
@@ -663,10 +664,10 @@ impl Vm {
     /// take (`isolate_quit_taken`), raised here since the wait's loop reaches
     /// no safepoint before it waits again. None to go on waiting.
     pub(crate) fn worker_quit(&mut self) -> Option<crate::prim::Fault> {
-        if !crate::host::interrupt_pending() || !self.isolate_quit_taken() {
+        if !self.process_interrupt_pending() || !self.isolate_quit_taken() {
             return None;
         }
-        self.quit_unwinding = true;
+        self.mutator.quit_unwinding = true;
         Some(crate::prim::Fault::Signal(self.intern("quit"), Value::NIL))
     }
 
@@ -744,6 +745,8 @@ impl Vm {
     /// beside its own descriptors, and drains it on waking; the flags, not
     /// the bytes, say what happened.
     pub(crate) fn worker_wake_fd(&self) -> Option<RawFd> {
+        // The pipe is the process's: only its own mutator drains it.
+        if !self.mutator.process_signals { return None; }
         self.isolates.parent.as_ref().and(crate::host::isolate_wake_fd())
     }
 
@@ -774,7 +777,7 @@ impl Vm {
     pub(crate) fn isolate_wait(&mut self, timeout: Option<std::time::Duration>) -> Result<bool> {
         // Interrupted or terminating: no wait, but what the sockets hold is
         // still read (the frame naming the interrupt's job is there).
-        let interrupted = crate::host::interrupt_pending() || crate::host::terminate_pending();
+        let interrupted = self.process_interrupt_pending() || (self.mutator.process_signals && crate::host::terminate_pending());
         let timeout = if interrupted { Some(std::time::Duration::ZERO) } else { timeout };
         let deadline = timeout.map(|timeout| crate::host::monotonic() + timeout);
         loop {
@@ -791,7 +794,7 @@ impl Vm {
                 crate::host::drain_isolate_wake();
                 news = true;
             }
-            let interrupted = interrupted || crate::host::interrupt_pending();
+            let interrupted = interrupted || self.process_interrupt_pending();
             if ready.is_empty() { return Ok(interrupted); }
             if let Some(parent) = &mut self.isolates.parent && ready.contains(&parent.socket.as_raw_fd()) {
                 parent.drain(|_| {}).map_err(|e| e.to_string())?;

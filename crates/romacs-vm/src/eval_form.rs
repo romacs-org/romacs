@@ -144,9 +144,9 @@ impl Vm {
         self.mutator.dynamic_scope = saved;
         let (function, names) = compiled?;
         let captures: Vec<_> = names.iter().map(|name| cells[name]).collect();
-        self.propagate_next = true;
+        self.mutator.propagate_next = true;
         let result = threaded::execute_args(self, function, &captures);
-        self.propagate_next = false;
+        self.mutator.propagate_next = false;
         self.release_request_entry(function);
         result
     }

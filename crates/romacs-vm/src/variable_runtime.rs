@@ -738,7 +738,7 @@ impl Vm {
                 let value = if p == Set { self.stack[start+1] } else { Value::UNBOUND };
                 // A write nothing hears stores at once; a heard one waits for
                 // its engine's drain (`Vm::write_from_native`).
-                if self.deferred_writes.is_empty() && !self.variable_trapped(slot) {
+                if self.mutator.deferred_writes.is_empty() && !self.variable_trapped(slot) {
                     self.assign_variable(slot, value)?;
                 } else {
                     self.write_from_native(crate::watchers::NativeWrite::set(slot, value)).map_err(crate::watchers::fault_text)?;

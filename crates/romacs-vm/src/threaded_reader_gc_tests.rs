@@ -255,7 +255,7 @@ fn a_panic_inside_suspended_calls_unwinds_the_suspension_state() {
     assert!(vm.suspended.is_empty(), "no suspended engine outlives the panic");
     assert!(vm.stack.at_rest());
     assert!(vm.mutator.external_roots.is_empty());
-    assert_eq!((vm.running_engines, vm.mutator.gc_holds, vm.rooted_write), (0, 0, false));
+    assert_eq!((vm.running_engines, vm.mutator.gc_holds, vm.mutator.rooted_write), (0, 0, false));
     assert!(vm.mutator.signal_handlers.is_empty());
     vm.set_host_input(None);
     vm.collect(&mut []);

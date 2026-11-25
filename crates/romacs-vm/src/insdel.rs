@@ -467,7 +467,7 @@ impl Vm {
     /// deactivate-mark set by a change whose hooks were not inhibited.
     pub(crate) fn mark_deactivated(&mut self) -> Faulty<()> {
         let deactivate = self.change_slots().deactivate;
-        if self.variable_trapped(self.indirect_variable(deactivate)) || !self.deferred_writes.is_empty() {
+        if self.variable_trapped(self.indirect_variable(deactivate)) || !self.mutator.deferred_writes.is_empty() {
             return self.write_from_native(crate::watchers::NativeWrite::set(deactivate, Value::TRUE));
         }
         self.store_deactivated(deactivate)

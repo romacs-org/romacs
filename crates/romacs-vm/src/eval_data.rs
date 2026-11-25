@@ -18,7 +18,7 @@ impl Vm {
                 }
                 // Polled only inside its own call target's scope.
                 let (a, b) = (self.stack[start], self.stack[start + 1]);
-                let equal = if self.native_quit { self.equal_primitive(a, b)? } else { self.equal_text(a, b)? };
+                let equal = if self.mutator.native_quit { self.equal_primitive(a, b)? } else { self.equal_text(a, b)? };
                 Ok(if equal { Value::TRUE } else { Value::NIL })
             }
             Min => self.min_max::<false>(start, n, std::cmp::Ordering::Less),

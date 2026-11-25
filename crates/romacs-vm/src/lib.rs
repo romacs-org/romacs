@@ -1409,13 +1409,6 @@ pub struct Vm {
     display_state: display::DisplayState,
     window_state: window::WindowState,
     world_version: u64,
-    /// A primitive Lisp called runs a native loop that stops consistently at
-    /// its polls, so a poll may quit (`Vm::native_poll`, `Leaf::quittable`).
-    /// Off in redisplay, which never unwinds half done, and wherever Rust
-    /// reaches the same loop without a caller that would unwind. Granted at
-    /// a primitive's own entry only, and off in any Lisp or primitive entered
-    /// below it (`Vm::outside_quit_scope`).
-    native_quit: bool,
     // CELL(Plain)
     #[cfg(test)]
     variable_read_probes: std::cell::Cell<usize>,
@@ -1484,10 +1477,6 @@ pub struct Vm {
     /// profiler.c's CPU and memory profilers (`profiler.rs`).
     #[snapshot(at_rest)]
     profiler: profiler::Profiler,
-    propagated_escape_hooked: bool,
-    propagated_eval_depth: Option<usize>,
-    /// Set immediately before executing an `eval` form; consumed by the engine.
-    propagate_next: bool,
     /// The embedder's keyboard while one is attached (host_input.rs).
     #[snapshot(at_rest)]
     host_input: Option<Box<dyn host_input::HostInput>>,
@@ -1529,8 +1518,6 @@ pub struct Vm {
     treesit_deferred: Option<Vec<u64>>,
     /// The last frame was that: the next parses, whatever it shows.
     treesit_parse_owed: bool,
-    /// The host's `C-g', shared with its input thread (quit.rs).
-    quit: std::sync::Arc<quit::QuitSignal>,
     /// keyboard.c force_quit_count: `C-g's in a row that found `quit-flag' set.
     force_quit_count: u8,
     /// The escapes deferred to a reach so far (`defer_escape`): each one`s
@@ -1562,12 +1549,6 @@ pub struct Vm {
     terminal_bindings: Vec<terminal_host::TerminalBinding>,
     /// The buffer list's order (buffer_order.rs): roots for collection.
     buffer_order: buffer_order::BufferOrder,
-    /// A quit (or `throw-on-input' throw) `maybe_quit' raised from C-g or
-    /// `quit-flag' is unwinding: no `catch' or `condition-case' has ended it
-    /// since. An unwind-protect cleanup that replaces it keeps it set, so
-    /// what leaves an expansion it began in is told apart from an error the
-    /// macro raised after catching a quit (`quit_watched').
-    quit_unwinding: bool,
     /// The windows the last window change functions run saw
     /// (host_input.rs `window_change_signature').
     window_change_seen: Vec<u64>,
@@ -1657,13 +1638,6 @@ pub struct Vm {
     /// Engines between entry and exit, suspended or not; those not in
     /// `suspended` hold untraced registers and code.
     running_engines: usize,
-    /// The writer notifying watchers is an engine write suspended for it,
-    /// whose own Values the write roots (`threaded::watched_write`).
-    rooted_write: bool,
-    /// A native call's writes its watchers will hear (`watchers.rs`), each with
-    /// the buffer current then, until the engine that called it completes it.
-    /// Never traced: no collection runs while it holds any (`may_collect`).
-    deferred_writes: Vec<(watchers::NativeWrite, Value)>,
     /// Test mode: a moving collection at every Nth Lisp entry (`gc.rs`).
     gc_stress: gc::Stress,
     /// What the funnels have handed out (gc.rs).
@@ -1758,13 +1732,6 @@ pub struct Vm {
     /// A collection found a list for `undo-outer-limit-function`, and the
     /// aftermath has not looked (`Vm::take_undo_offer`).
     undo_offers_due: bool,
-    /// Escapes being unwound, in any engine: routing takes it, the driver gives
-    /// it back. While nonzero no aftermath starts (`Vm::aftermath_held`).
-    unwinding: usize,
-    /// Runs of aftermath in progress (`Vm::run_aftermath'): while nonzero an
-    /// interrupt naming the job waits (`threaded::isolate_quit'), so
-    /// finalizers and `post-gc-hook' never take it.
-    aftermath_runs: usize,
     /// Suspended engines' own state, owned here until they resume: traced and
     /// forwarded in place, and dropped with the engine by a caught panic.
     #[snapshot(at_rest)]
@@ -1819,7 +1786,6 @@ impl Vm {
             display_state: display::DisplayState::new(),
             window_state: window::WindowState::default(),
             world_version: 1,
-            native_quit: false,
             #[cfg(test)]
             variable_read_probes: std::cell::Cell::new(0),
             #[cfg(test)]
@@ -1832,7 +1798,7 @@ impl Vm {
             speculative_misses: 0,
             #[cfg(test)]
             buffer_resolutions: 0,
-            mutator: mutator::Mutator::default(),
+            mutator: mutator::Mutator::new(),
             regexp_cache: regexp::PatternCache::default(),
             treesit_queries: treesit::query_memo::Memo::default(),
             flat_tables: char_table::FlatTables::default(),
@@ -1851,8 +1817,6 @@ impl Vm {
             eval_depth: 0,
             site_leaf: (0, 0),
             profiler: profiler::Profiler::default(),
-            propagated_escape_hooked: false,
-            propagated_eval_depth: None,
             host_input: None,
             host_wait: None,
             deferred_event: None,
@@ -1866,7 +1830,6 @@ impl Vm {
             treesit_plain: Vec::new(),
             treesit_deferred: None,
             treesit_parse_owed: false,
-            quit: gap_probe::as_hosted(std::sync::Arc::default()),
             force_quit_count: 0,
             deferred_escapes: 0,
             quit_slots: [0; 3],
@@ -1881,8 +1844,6 @@ impl Vm {
             terminal_host: None,
             terminal_bindings: Vec::new(),
             buffer_order: buffer_order::BufferOrder::default(),
-            propagate_next: false,
-            quit_unwinding: false,
             window_change_seen: Vec::new(),
             macro_record: macro_record::MacroRecord::default(),
             image: None,
@@ -1918,8 +1879,6 @@ impl Vm {
             job_budget: None,
             gc_retained_payload: 0,
             running_engines: 0,
-            rooted_write: false,
-            deferred_writes: Vec::new(),
             gc_stress: gc::Stress::from_env(),
             allocation: Default::default(),
             names: names::Names::default(),
@@ -1962,8 +1921,6 @@ impl Vm {
             doomed_finalizers: Default::default(),
             post_gc_due: false,
             undo_offers_due: false,
-            unwinding: 0,
-            aftermath_runs: 0,
             suspended: vec![],
             conditions: conditions::Registry::default(),
             rooted: handle::RootSet::default(),
@@ -2684,10 +2641,10 @@ impl Vm {
     /// RUN's result, and whether it failed with a quit from C-g still
     /// unwinding out of it (`quit_unwinding'), which then still unwinds.
     fn quit_watched<T>(&mut self, run: impl FnOnce(&mut Self) -> Result<T>) -> (Result<T>, bool) {
-        let saved = std::mem::replace(&mut self.quit_unwinding, false);
+        let saved = std::mem::replace(&mut self.mutator.quit_unwinding, false);
         let result = run(self);
-        let quit = result.is_err() && self.quit_unwinding;
-        self.quit_unwinding = saved || quit;
+        let quit = result.is_err() && self.mutator.quit_unwinding;
+        self.mutator.quit_unwinding = saved || quit;
         (result, quit)
     }
     /// F, whose expansion just escaped: F expands again at its reach. When
@@ -2771,7 +2728,7 @@ impl Vm {
         self.set_deferred_escape_list(&pending);
         // What is raised is the quit C-g began, still unwinding, as when
         // `maybe_quit` raised it: an expansion it leaves defers it again.
-        self.quit_unwinding = true;
+        self.mutator.quit_unwinding = true;
         Some((entry[1] != Value::NIL, entry[2], entry[3]))
     }
     /// A request or a worker's job ends: an escape still deferred was left
@@ -3637,7 +3594,7 @@ impl Vm {
     fn unwind(&mut self, n: usize) {
         for _ in 0..n {
             let mut escape = self.mutator.propagated_escape.take();
-            let pending = (std::mem::take(&mut self.propagated_escape_hooked), self.propagated_eval_depth.take());
+            let pending = (std::mem::take(&mut self.mutator.propagated_escape_hooked), self.mutator.propagated_eval_depth.take());
             let mut values = vec![];
             if let Some(escape) = &mut escape { escape.visit_values(&mut |value| values.push(*value)); }
             let frame = self.root_frame(&values);
@@ -3646,7 +3603,7 @@ impl Vm {
             if let Some(escape) = &mut escape { escape.visit_values(&mut |value| *value = *rooted.next().expect("each value was rooted")); }
             self.drop_frame(frame);
             self.mutator.propagated_escape = escape;
-            (self.propagated_escape_hooked, self.propagated_eval_depth) = pending;
+            (self.mutator.propagated_escape_hooked, self.mutator.propagated_eval_depth) = pending;
         }
     }
     /// GNU `unbind_to` on normal completion: a restore that signals
