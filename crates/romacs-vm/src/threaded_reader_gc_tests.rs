@@ -30,6 +30,19 @@ fn entry_barrier_threaded_buffer_reads_stay_clean() {
 }
 
 #[test]
+fn entry_barrier_threaded_goto_char_in_a_unibyte_buffer_falls_back_clean() {
+    let mut vm = Vm::new();
+    vm.eval_source_raw("(set-buffer-multibyte nil) (insert \"abc\") (goto-char 2)")
+        .unwrap();
+    vm.check_buffer_entry_store(false, |vm, index| {
+        assert!(matches!(vm.objects[index], data::Object::ByteBuffer(_)));
+        let goto = Value::reference(Primitive::GotoChar as usize, 6);
+        assert_eq!(buffer_read_value(vm, goto, Value::integer(3).unwrap()), None);
+        assert_eq!(vm.point_char().ok(), Some(2));
+    });
+}
+
+#[test]
 fn entry_barrier_threaded_goto_char_dirties_the_buffer() {
     let mut vm = Vm::new();
     vm.eval_source_raw("(insert \"aéz\") (goto-char 2)")

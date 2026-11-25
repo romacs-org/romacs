@@ -4,18 +4,36 @@ use super::tests::{raw_of, sweep_whole};
 use super::*;
 
 impl crate::Vm {
+    /// Whether OPERATION stores into the current buffer's old image entry:
+    /// its DIRTY, its card and its remembering, each as WRITES says. The
+    /// entry-barrier tests of five files share it.
     pub(crate) fn check_buffer_entry_store(
         &mut self,
         writes: bool,
         operation: impl FnOnce(&mut Self, usize),
     ) {
         self.set_gc_stress(0);
-        let before = self.heap_stats().collections;
-        self.collect_compacting();
+        let card_set = |vm: &Self, index: usize| vm.objects.touched().iter().any(|run| run.contains(&index));
+        // A compaction leaves no free entry, so what OPERATION allocates
+        // goes at the table's end: padded off the buffer's card, which then
+        // marks only what is stored into its entries.
+        self.eval_source_raw("(defvar entry-barrier-pad nil)").unwrap();
+        let mut index = None;
+        for _ in 0..4 {
+            let before = self.heap_stats().collections;
+            self.collect_compacting();
+            assert_eq!(self.heap_stats().collections, before + 1);
+            let at = self.buffer_index().unwrap();
+            if at / CARD != self.objects.len() / CARD {
+                index = Some(at);
+                break;
+            }
+            self.eval_source_raw("(push (make-vector 64 nil) entry-barrier-pad)
+              (dotimes (i 64) (aset (car entry-barrier-pad) i (make-string 1 ?x)))").unwrap();
+        }
+        let index = index.expect("the buffer's card off the table's end");
         let collections = self.heap_stats().collections;
-        assert_eq!(collections, before + 1);
-        let index = self.buffer_index().unwrap();
-        assert!(self.objects.old(index) && !self.objects.stored_into(index));
+        assert!(self.objects.old(index) && !self.objects.stored_into(index) && !card_set(self, index));
 
         // Restore remembers all buffers for their shared storage. Model an
         // initially unremembered image entry at the table boundary to check
@@ -26,12 +44,12 @@ impl crate::Vm {
         assert_eq!(self.heap_stats().collections, collections);
 
         // The collection records dirty image entries before clearing DIRTY.
-        let dirty = self.objects.stored_into(index);
+        let (dirty, card) = (self.objects.stored_into(index), card_set(self, index));
         self.objects.remembered();
         assert_eq!(
-            (dirty, self.objects.is_remembered(index)),
-            (writes, writes),
-            "(DIRTY, remembered) for the old buffer entry"
+            (dirty, card, self.objects.is_remembered(index)),
+            (writes, writes, writes),
+            "(DIRTY, card, remembered) for the old buffer entry"
         );
     }
 }

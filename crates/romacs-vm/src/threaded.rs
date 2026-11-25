@@ -5481,7 +5481,8 @@ fn buffer_read_value(vm: &mut Vm, target: Value, x: Value) -> Option<Value> {
 /// The fixnum `goto-char` X of `buffer_read_value`, in the buffer at object
 /// INDEX: its one store, so the only branch that takes the entry `&mut`.
 fn buffer_goto_char(vm: &mut Vm, index: usize, x: Value) -> Option<Value> {
-    if !x.tag_is(1) {
+    // A shared look first: a unibyte buffer falls back unmarked.
+    if !x.tag_is(1) || !matches!(vm.objects.get(index), Some(data::Object::Buffer(_))) {
         return None;
     }
     let Some(data::Object::Buffer(t)) = vm.objects.get_entry_mut(index) else {

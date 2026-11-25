@@ -211,8 +211,8 @@ impl Vm {
         // An unrestricted buffer is only read: the entry is taken `&mut'
         // only to lift a narrowing.
         let narrowed = match &self.objects[index] {
-            Object::Buffer(b) => Some(b.accessible()).filter(|view| *view != (ByteOffset(0)..ByteOffset(b.len_bytes()))),
-            Object::ByteBuffer(b) => Some(b.restriction.clone()).filter(|view| *view != (ByteOffset(0)..ByteOffset(b.bytes.len()))),
+            Object::Buffer(b) => { let view = b.accessible(); (view != (ByteOffset(0)..ByteOffset(b.len_bytes()))).then_some(view) }
+            Object::ByteBuffer(b) => { let view = b.restriction.clone(); (view != (ByteOffset(0)..ByteOffset(b.bytes.len()))).then_some(view) }
             _ => None,
         };
         if narrowed.is_some() {
