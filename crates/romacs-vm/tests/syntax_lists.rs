@@ -8,6 +8,8 @@
 //! `romacs-syntax-summaries-stats', that the index folded: a missing fast
 //! path fails on the counts, never on time.
 use romacs_vm::Vm;
+#[path = "support/own_test.rs"]
+mod own_test;
 
 /// `fill-to' inserts PIECE (one character) until point is POS; `try' gives
 /// a scan's value or its error; `measured' F's value, recording in
@@ -158,7 +160,9 @@ fn romacs(source: &str) -> (Result<String, String>, String) {
 
 #[test]
 fn forward_list_scans_match_pinned_gnu_and_fold() {
-    let _alone = alone();
+    if !own_process("forward_list_scans_match_pinned_gnu_and_fold") {
+        return;
+    }
     let mut failures = Vec::new();
     for (name, body, (least, reused, warm)) in CASES {
         let source = PRELUDE.replace("EXPR", body);
@@ -176,18 +180,25 @@ fn forward_list_scans_match_pinned_gnu_and_fold() {
     assert!(failures.is_empty(), "{} failures:\n{}", failures.len(), failures.join("\n"));
 }
 
-/// This file's tests one at a time: each reads the counts of a buffer's
-/// index, which a char-table write moves, and every test writes tables.
-/// Its own target (tests/all/standalone.txt) keeps other tests' writes
-/// out, so a count that moves here is the fixture's own.
-fn alone() -> std::sync::MutexGuard<'static, ()> {
-    static ALONE: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    ALONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+/// Whether this process is the one TEST's body runs in. Each test reads
+/// the counts of a buffer's index, which any char-table write in the
+/// process moves, so its body runs in a child that runs it alone: in the
+/// parent this runs the child, asserts that it passed, and answers false.
+fn own_process(test: &str) -> bool {
+    const CHILD: &str = "ROMACS_SYNTAX_LISTS_CHILD";
+    if std::env::var(CHILD).is_ok_and(|child| child == test) {
+        return true;
+    }
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", &own_test::name(module_path!(), test), "--nocapture"])
+        .env(CHILD, test).status().unwrap();
+    assert!(status.success(), "{test} in its own process: {status}");
+    false
 }
 
 /// What EXPRESSION, run in a fresh Romacs, shows: a list whose last
 /// element is a buffer size and whose others are counter deltas, none of
-/// which may have a context lose its summaries (`alone').
+/// which may have a context lose its summaries (`own_process').
 fn shown(expression: &str) -> String {
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
@@ -230,7 +241,9 @@ fn size(shown: &str) -> i64 {
 /// it, nothing read again for a summary.
 #[test]
 fn a_warm_unbounded_scan_stays_served() {
-    let _alone = alone();
+    if !own_process("a_warm_unbounded_scan_stays_served") {
+        return;
+    }
     let expression = COUNTERS.replace("EXPR", r#"(with-temp-buffer
        (dotimes (i 2500) (insert (format "(defun f%d (a) \"s(\" (list a 'b))\n" i)))
        (scan-sexps 1 (point-max))
@@ -248,7 +261,9 @@ fn a_warm_unbounded_scan_stays_served() {
 /// summaries kept.
 #[test]
 fn a_block_scan_under_two_tables_is_served_warm() {
-    let _alone = alone();
+    if !own_process("a_block_scan_under_two_tables_is_served_warm") {
+        return;
+    }
     let expression = COUNTERS.replace("EXPR", &format!(r#"(with-temp-buffer {C_BLOCK}
        (let ((a (table)) (b (table)))
          (modify-syntax-entry ?/ ". 124b" a) (modify-syntax-entry ?* ". 23" a) (modify-syntax-entry ?\n "> b" a)
@@ -283,7 +298,9 @@ const C_BLOCK: &str = r#"(insert "int f() {\n") (dotimes (i 24000) (insert (form
 /// between two (keys-cts' no-match scans over xdisp.c).
 #[test]
 fn an_edit_at_the_top_rebuilds_only_its_path() {
-    let _alone = alone();
+    if !own_process("an_edit_at_the_top_rebuilds_only_its_path") {
+        return;
+    }
     let functions = r#"(dotimes (i 600) (insert (format "static int f%d (int a)\n{\n" i))
                         (dotimes (j 40) (insert (format "  if (a_%d) { b(\"x\"); } /* c */\n" j))) (insert "}\n\n"))"#;
     for (text, scan) in [(functions, "(scan-sexps 1 (point-max))"), (C_BLOCK, "(scan-lists 9 1 0)")] {
