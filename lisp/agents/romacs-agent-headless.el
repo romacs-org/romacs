@@ -30,13 +30,19 @@
 (declare-function romacs--after-init "romacs-loadup-bootstrap" ())
 (defvar romacs-loadup-delayed-init-variables)
 
+(defconst romacs-agent-headless--failure-most 4096
+  "The most characters of what failed that hello tells: a welcome stays
+far below the protocol's message limit.")
+
 (defun romacs-agent-headless--failed (what said)
   "Say that WHAT failed, SAID why, on stderr and to every client of the
-service (`romacs-agent-service-init-failure')."
-  (let ((line (format "%s: %s" what said)))
+service (`romacs-agent-service-init-failure', cut to
+`romacs-agent-headless--failure-most' characters)."
+  (let* ((line (format "%s: %s" what said))
+         (all (if romacs-agent-service-init-failure (concat romacs-agent-service-init-failure "\n" line) line)))
     (message "romacs-agent-headless: %s" line)
     (setq romacs-agent-service-init-failure
-          (if romacs-agent-service-init-failure (concat romacs-agent-service-init-failure "\n" line) line))))
+          (substring all 0 (min (length all) romacs-agent-headless--failure-most)))))
 
 (defmacro romacs-agent-headless--step (what &rest body)
   "Run BODY, a startup step; an error in it is said as WHAT failing

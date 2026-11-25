@@ -26,7 +26,10 @@
           (with-temp-file (expand-file-name "romacs/init.el" config)
             (insert "(error \"broken init\")\n"))
           (romacs-agent-headless--load-init)
-          (should (string-search "broken init" romacs-agent-service-init-failure)))
+          (should (string-search "broken init" romacs-agent-service-init-failure))
+          ;; However much fails, hello tells a bounded part of it.
+          (romacs-agent-headless--failed "init" (make-string 100000 ?x))
+          (should (<= (length romacs-agent-service-init-failure) romacs-agent-headless--failure-most)))
       (delete-directory config t))))
 
 (provide 'romacs-agent-headless-tests)
