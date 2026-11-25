@@ -458,7 +458,10 @@ impl Leaf<'_> {
     /// What the poll's REVENTS woke for OWNERS: queued writes flushed, and
     /// process_select's answer.  Output ready is read before the send's
     /// process is answered `writable', as GNU's wait reads it while a send
-    /// waits: the send's last bytes are not written yet.
+    /// waits: the send's last bytes are not written yet.  A :nowait
+    /// connection finished in the same poll is answered before both, and
+    /// its output can then come after the send returns (a known limit: no
+    /// caller relies on that order).
     fn process_select_woken(&mut self, revents: &[i16], owners: &[(Value, Wake)]) -> Out {
         let mut writable = false;
         let mut readable = Vec::new();
