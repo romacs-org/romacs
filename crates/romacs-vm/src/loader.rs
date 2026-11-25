@@ -934,7 +934,7 @@ fn run_compiled_units<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, path: &Pat
         let step = m.leaf((step_file, ordinal, byte, line), |vm, (file, ordinal, byte, line)| vm.loader.enter_step(file, ordinal, byte, line));
         let entry = m.leaf((compiled, &slots, index), |vm, (compiled, slots, index)| {
             let entry = vm.install_compiled_unit(compiled, slots, index);
-            vm.propagate_next |= entry.is_ok() && vm.loader.propagate != 0;
+            vm.mutator.propagate_next |= entry.is_ok() && vm.loader.propagate != 0;
             entry
         });
         let evaluated = entry.and_then(|entry| crate::threaded::run_function(m, gc.by_ref(), entry, (entry, out), finished_form));
@@ -1063,7 +1063,7 @@ fn eval_one_form<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, form: &Form, ou
         Ok(function) => function,
         Err(error) => return Err(m.leaf(error, Vm::eager_expansion_failure)),
     };
-    m.leaf((), |vm, ()| vm.propagate_next |= vm.loader.propagate != 0);
+    m.leaf((), |vm, ()| vm.mutator.propagate_next |= vm.loader.propagate != 0);
     crate::threaded::run_function(m, gc, function, (function, out), finished_form)
 }
 /// `load-with-code-conversion`'s `read-symbol-shorthands` for SOURCE (mule.el),

@@ -573,7 +573,7 @@ impl Vm {
             handlers: self.mutator.signal_handlers.len(),
             backtrace: self.mutator.backtrace.frames.len(),
             eval_depth: self.eval_depth,
-            native_quit: self.native_quit,
+            native_quit: self.mutator.native_quit,
             macro_record: self.macro_record.mark(),
         };
         let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| body(self)));
@@ -583,7 +583,7 @@ impl Vm {
         caught
     }
     fn restore_nesting(&mut self, mark: &NestingMark) {
-        self.native_quit = mark.native_quit;
+        self.mutator.native_quit = mark.native_quit;
         // Unwind bindings while the backtrace still names them.
         let trapped = std::mem::take(&mut self.trapped);
         self.unwind(self.mutator.dynamic.len().saturating_sub(mark.dynamic));
@@ -599,10 +599,10 @@ impl Vm {
         self.suspended.clear();
         self.stack.reset();
         self.running_engines = 0;
-        self.unwinding = 0;
-        self.aftermath_runs = 0;
-        self.rooted_write = false;
-        self.deferred_writes.clear();
+        self.mutator.unwinding = 0;
+        self.mutator.aftermath_runs = 0;
+        self.mutator.rooted_write = false;
+        self.mutator.deferred_writes.clear();
         self.site_leaf = (0, 0);
         // A panic in a host wait drops its host, as it did when the wait
         // kept it on the native stack.
@@ -656,7 +656,7 @@ impl Vm {
     /// storage: a binding, a `#:` slot or a [`RootFrame`]
     /// (tests/fixtures/reentry-sites.txt lists each call site).
     pub(crate) fn may_collect(&self, own: usize) -> bool {
-        self.mutator.gc_holds == 0 && self.deferred_writes.is_empty()
+        self.mutator.gc_holds == 0 && self.mutator.deferred_writes.is_empty()
             && self.running_engines.saturating_sub(self.suspended.len()) == own
     }
     /// Set the register stack aside (`Registers::suspend`).
@@ -968,7 +968,7 @@ impl Vm {
     /// engine answers for its own cleanups (`Engine::safe_runner`), and an
     /// engine that is neither fails `may_collect`.
     pub(crate) fn aftermath_held(&self) -> bool {
-        self.unwinding != 0 || self.aftermath_runs != 0 || self.suspended.iter().any(threaded::Suspended::in_cleanup)
+        self.mutator.unwinding != 0 || self.mutator.aftermath_runs != 0 || self.suspended.iter().any(threaded::Suspended::in_cleanup)
     }
     /// alloc.c queue_doomed_finalizers and mark_finalizer_list: the
     /// finalizers marking has not reached are marked, with their functions,
@@ -2766,7 +2766,7 @@ mod tests {
     #[test]
     fn catching_restores_native_quit_permission() {
         let mut vm = Vm::new();
-        assert!(vm.quit.interrupt());
+        assert!(vm.mutator.quit.interrupt());
         let panic: fn(&mut Vm) = |vm| std::panic::panic_any(vm.native_stop_due());
 
         let caught = vm.catching(|vm| vm.inside_quit_scope(panic));

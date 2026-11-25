@@ -240,9 +240,9 @@ pub(crate) fn resize<'b>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, (frame, width, 
 }
 /// A writer whose Values are rooted: its watchers are free to collect.
 fn rooted_writer<T>(vm: &mut Vm, run: impl FnOnce(&mut Vm) -> T) -> T {
-    let rooted = std::mem::replace(&mut vm.rooted_write, true);
+    let rooted = std::mem::replace(&mut vm.mutator.rooted_write, true);
     let out = run(vm);
-    vm.rooted_write = rooted;
+    vm.mutator.rooted_write = rooted;
     out
 }
 /// Bind SLOT's variable to the value rooted in FRAME at I, as `let` does.
@@ -291,9 +291,9 @@ impl Nested<'_> {
                 // collection retires it and the objects it quotes (a
                 // signal's data), where code compiled outright would stay.
                 let (function, _) = vm.compile_request(form)?;
-                vm.propagate_next = true;
+                vm.mutator.propagate_next = true;
                 let result = vm.execute_raw(function);
-                vm.propagate_next = false;
+                vm.mutator.propagate_next = false;
                 vm.release_request_entry(function);
                 result
             }

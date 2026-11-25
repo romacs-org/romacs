@@ -436,6 +436,7 @@ fn set_idle(cx, idle: Value) {
 // `debug-on-quit', so the read returns the quit into the debugger.
 defsubr! { name = "romacs--take-user-signal", gnu = "keyboard.c:8561", effect = Global,
 fn take_user_signal(cx) {
+    if !cx.process_signals() { return Ok(Value::NIL); }
     match crate::host::take_user_signal() {
         Some(event) if cx.debugs_on_event(event) => { cx.debug_event(); Ok(Value::NIL) }
         Some(event) => Ok(cx.intern(event)),

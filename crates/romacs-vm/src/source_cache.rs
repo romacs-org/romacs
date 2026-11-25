@@ -573,9 +573,9 @@ impl Vm {
             // sees. Keep it structured instead of flattening it to text.
             // Eager expansion can also run inside `eval`: its Lisp condition
             // must cross back to the calling engine, not become plain text.
-            self.propagate_next = true;
+            self.mutator.propagate_next = true;
             let value = self.call_macro_expander(function, &arguments);
-            self.propagate_next = false;
+            self.mutator.propagate_next = false;
             let value = match value {
                 Err(error) => Err(match &self.mutator.propagated_escape {
                     Some(threaded::Escape::Signal(condition, data)) => {

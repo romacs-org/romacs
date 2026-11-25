@@ -2568,7 +2568,7 @@ impl Vm {
         argc: usize,
     ) -> std::result::Result<Step, Option<(Value, Value)>> {
         let d = generated(target).expect("generated primitive");
-        debug_assert!(!self.native_quit, "{} entered inside a caller's quit scope", d.name);
+        debug_assert!(!self.mutator.native_quit, "{} entered inside a caller's quit scope", d.name);
         self.arity_check(d, target, argc)?;
         // Copied off the register stack, which the body may widen; on the
         // native stack for the common argument counts.
@@ -2616,7 +2616,7 @@ impl Vm {
     /// ARGS must point at ARGC live values.
     #[inline(never)]
     pub(crate) unsafe fn leaf_value(&mut self, f: LeafBody, args: *const Value, argc: usize, fault: &mut Option<Fault>) -> Value {
-        debug_assert!(!self.native_quit, "a site leaf entered inside a caller's quit scope");
+        debug_assert!(!self.mutator.native_quit, "a site leaf entered inside a caller's quit scope");
         let mut small = [Value::NIL; LEAF_ARGUMENTS];
         unsafe { std::ptr::copy_nonoverlapping(args, small.as_mut_ptr(), argc) };
         match no_collection(self, |vm| f(&mut Leaf::new(vm), &small[..argc])) {

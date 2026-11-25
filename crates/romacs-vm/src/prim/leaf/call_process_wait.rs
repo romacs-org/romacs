@@ -76,7 +76,7 @@ impl Leaf<'_> {
     /// token already raised) signals a plain quit, which an expansion treats
     /// as any error.
     pub(crate) fn call_process_requit(&mut self, token: Value) -> Fault {
-        if self.take_requit(token) { self.vm.quit_unwinding = true; }
+        if self.take_requit(token) { self.vm.mutator.quit_unwinding = true; }
         Fault::Signal(self.sym("quit"), Value::NIL)
     }
 
@@ -135,11 +135,11 @@ impl Leaf<'_> {
         let tick = pidfd.is_none().then_some(Self::CHILD_TICK);
         let mut deadline = grace.map(|grace| crate::host::monotonic() + grace);
         while !sp::exited(pid) {
-            if self.vm.quit.take_deadline() || self.vm.worker_quit().is_some() {
+            if self.vm.mutator.quit.take_deadline() || self.vm.worker_quit().is_some() {
                 deadline.get_or_insert_with(|| crate::host::monotonic() + Self::CANCEL_GRACE);
             }
             let left = deadline.map(|end| end.saturating_duration_since(crate::host::monotonic()));
-            if self.vm.quit.take_one() != 0 || left.is_some_and(|left| left.is_zero()) {
+            if self.vm.mutator.quit.take_one() != 0 || left.is_some_and(|left| left.is_zero()) {
                 kill(libc::SIGKILL);
                 break;
             }

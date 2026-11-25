@@ -2,6 +2,11 @@
 use super::*;
 
 impl Leaf<'_> {
+    /// Whether this is its process's own mutator, which takes the
+    /// process's OS signals (`Mutator::process_signals`).
+    pub(crate) fn process_signals(&self) -> bool {
+        self.vm.mutator.process_signals
+    }
     /// Whether `debug-on-event' names the user signal EVENT (quit.rs).
     pub(crate) fn debugs_on_event(&mut self, event: &str) -> bool {
         self.vm.debugs_on(event)
@@ -54,15 +59,18 @@ impl Leaf<'_> {
     /// now, or with GENERATION nil disarm the current one (quit.rs
     /// `deadline').
     pub(crate) fn call_deadline(&mut self, generation: Value, milliseconds: Value) -> crate::prim::Out {
+        // The process has one deadline slot, its own mutator's to arm and
+        // disarm: a second mutator's call has none.
+        if !self.vm.mutator.process_signals { return Ok(Value::NIL); }
         if generation == Value::NIL {
-            crate::host::call_deadline::disarm(&self.vm.quit);
+            crate::host::call_deadline::disarm(&self.vm.mutator.quit);
             return Ok(Value::NIL);
         }
         let generation = generation.integer_value().filter(|&g| g > 0)
             .ok_or_else(|| crate::prim::Fault::Wrong("natnump", generation))?;
         let milliseconds = milliseconds.integer_value().filter(|&m| m >= 0)
             .ok_or_else(|| crate::prim::Fault::Wrong("natnump", milliseconds))?;
-        crate::host::call_deadline::arm(self.vm.quit.clone(), generation as u64,
+        crate::host::call_deadline::arm(self.vm.mutator.quit.clone(), generation as u64,
                                    std::time::Duration::from_millis(milliseconds as u64));
         Ok(Value::TRUE)
     }

@@ -254,14 +254,15 @@ impl Session {
     }
 
     /// gnutls_try_handshake for a blocking client: rounds until done,
-    /// waiting on FD between them; an interrupt (C-g) ends it with
-    /// GNUTLS_E_INTERRUPTED for the engine's safepoint to signal.
-    pub(crate) fn handshake(&mut self, fd: BorrowedFd<'_>) -> Result<(), i32> {
+    /// waiting on FD between them; an interrupt ends it with
+    /// GNUTLS_E_INTERRUPTED for the engine's safepoint to signal, when
+    /// INTERRUPTS (the caller is its process's own mutator).
+    pub(crate) fn handshake(&mut self, fd: BorrowedFd<'_>, interrupts: bool) -> Result<(), i32> {
         loop {
             if self.handshake_step(fd)? {
                 return Ok(());
             }
-            if crate::host::interrupt_pending() {
+            if interrupts && crate::host::interrupt_pending() {
                 return Err(code::INTERRUPTED);
             }
             let events = libc::POLLIN | if self.conn.wants_write() { libc::POLLOUT } else { 0 };

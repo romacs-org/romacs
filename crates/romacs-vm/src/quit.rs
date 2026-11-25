@@ -170,7 +170,7 @@ impl Vm {
 
     /// The quit signal the host's input thread shares with this evaluator.
     pub fn quit_signal(&self) -> std::sync::Arc<QuitSignal> {
-        self.quit.clone()
+        self.mutator.quit.clone()
     }
 
     /// Whether an engine entering Lisp should poll at once: a press is
@@ -178,7 +178,7 @@ impl Vm {
     /// and a compare: every engine entry asks.
     #[inline(always)]
     pub(crate) fn quit_due(&self) -> bool {
-        let (pressed, busy) = self.quit.state();
+        let (pressed, busy) = self.mutator.quit.state();
         pressed || (busy && self.slots[self.quit_slots[0]].value != Value::NIL && self.slots[self.quit_slots[0]].value != Value::UNBOUND)
     }
 
@@ -187,7 +187,7 @@ impl Vm {
     /// kbd_buffer_store_event sets `quit-flag' to `throw-on-input').
     pub(crate) fn quit_poll_due(&self) -> bool {
         let [flag, _, throw_on_input] = self.quit_variables();
-        self.quit.due() || (self.quit.busy() && (flag != Value::NIL || throw_on_input != Value::NIL))
+        self.mutator.quit.due() || (self.mutator.quit.busy() && (flag != Value::NIL || throw_on_input != Value::NIL))
     }
 
     /// The one poll of a long native loop, between steps it can stop at,
@@ -204,7 +204,7 @@ impl Vm {
     #[cold]
     pub(crate) fn native_poll(&mut self) -> std::result::Result<(), crate::prim::Fault> {
         if crate::host::inspect_pending() { self.with_site_leaf(|vm| vm.inspect_capture()); }
-        if !self.native_quit || !self.native_quit_reached() { return Ok(()); }
+        if !self.mutator.native_quit || !self.native_quit_reached() { return Ok(()); }
         crate::gap_probe::safepoint(Some(self));
         if !self.native_quit_wanted() { return Ok(()); }
         self.quit_fault()
@@ -216,7 +216,7 @@ impl Vm {
     /// is. GNU's `maybe_quit` reads `Vquit_flag` the same way.
     fn native_quit_wanted(&self) -> bool {
         let [flag, inhibit, _] = self.quit_variables();
-        let press = (self.quit.due() || flag != Value::NIL) && inhibit == Value::NIL;
+        let press = (self.mutator.quit.due() || flag != Value::NIL) && inhibit == Value::NIL;
         press || crate::host::user_signal_waiting(self.debug_event_mask())
     }
 
@@ -231,7 +231,7 @@ impl Vm {
     #[cold]
     pub(crate) fn native_poll_text(&mut self) -> crate::Result<()> {
         if crate::host::inspect_pending() { self.with_site_leaf(|vm| vm.inspect_capture()); }
-        if !self.native_quit || !self.native_quit_reached() { return Ok(()); }
+        if !self.mutator.native_quit || !self.native_quit_reached() { return Ok(()); }
         crate::gap_probe::safepoint(Some(self));
         if !self.native_quit_wanted() { return Ok(()); }
         self.escape_pending().map_err(|_| ESCAPED.into())
@@ -253,7 +253,7 @@ impl Vm {
     /// [`Self::native_stop_due`] for a gated kernel ([`Self::kernel_poll`]):
     /// SCOPED, its own entry is the scope, whatever the flag says.
     pub(crate) fn kernel_stop_due<const SCOPED: bool>(&self) -> bool {
-        (SCOPED || self.native_quit) && self.own_stop_due()
+        (SCOPED || self.mutator.native_quit) && self.own_stop_due()
     }
 
     /// BODY outside any quit scope, the caller's restored after. A scope is
@@ -265,9 +265,9 @@ impl Vm {
     /// primitive calls by `Step::Call` runs after the scope has closed.
     #[inline]
     pub(crate) fn outside_quit_scope<T>(&mut self, body: impl FnOnce(&mut Self) -> T) -> T {
-        let outer = std::mem::replace(&mut self.native_quit, false);
+        let outer = std::mem::replace(&mut self.mutator.native_quit, false);
         let result = body(self);
-        self.native_quit = outer;
+        self.mutator.native_quit = outer;
         result
     }
 
@@ -277,9 +277,9 @@ impl Vm {
     #[expect(clippy::inline_always, reason = "format's and equal's call targets grant it every call: out of line, its closure shim showed in the short calls' instruction profiles")]
     #[inline(always)]
     pub(crate) fn inside_quit_scope<T>(&mut self, body: impl FnOnce(&mut Self) -> T) -> T {
-        let outer = std::mem::replace(&mut self.native_quit, true);
+        let outer = std::mem::replace(&mut self.mutator.native_quit, true);
         let result = body(self);
-        self.native_quit = outer;
+        self.mutator.native_quit = outer;
         result
     }
 
@@ -306,7 +306,7 @@ impl Vm {
     /// to the stop. Report a spent call budget so its owner bounds cleanup.
     pub(crate) fn native_poll_child(&mut self) -> (Option<crate::prim::Fault>, bool) {
         if crate::host::inspect_pending() { self.with_site_leaf(|vm| vm.inspect_capture()); }
-        if !self.native_quit || !self.native_quit_reached() { return (None, false); }
+        if !self.mutator.native_quit || !self.native_quit_reached() { return (None, false); }
         crate::gap_probe::safepoint(Some(self));
         if !self.quit_poll_due() && !crate::host::user_signal_waiting(self.debug_event_mask()) {
             return (None, false);
@@ -318,7 +318,7 @@ impl Vm {
     /// [`NativeStop::due`] for a loop that holds the VM borrowed: the same
     /// answer, with nothing taken from the VM to ask it.
     pub(crate) fn native_stop_due(&self) -> bool {
-        self.native_quit && self.own_stop_due()
+        self.mutator.native_quit && self.own_stop_due()
     }
 
     /// [`Self::native_stop_due`] for a walk its own primitive asked to poll
@@ -329,7 +329,7 @@ impl Vm {
         if !self.native_quit_reached() { return false; }
         crate::gap_probe::safepoint(None);
         let [flag, inhibit, _] = self.quit_variables();
-        (inhibit == Value::NIL && (self.quit.pressed() || self.quit.deadline_current() || flag != Value::NIL))
+        (inhibit == Value::NIL && (self.mutator.quit.pressed() || self.mutator.quit.deadline_current() || flag != Value::NIL))
             || crate::host::user_signal_waiting(self.debug_event_mask())
     }
 
@@ -338,9 +338,9 @@ impl Vm {
     /// asks for always ends in `quit`.
     pub(crate) fn native_stop(&self) -> NativeStop {
         let [flag, inhibit, _] = self.quit_variables();
-        let armed = self.native_quit && self.native_quit_reached();
+        let armed = self.mutator.native_quit && self.native_quit_reached();
         NativeStop {
-            quit: (armed && inhibit == Value::NIL).then(|| self.quit.clone()),
+            quit: (armed && inhibit == Value::NIL).then(|| self.mutator.quit.clone()),
             latched: armed && inhibit == Value::NIL && flag != Value::NIL,
             debug_events: if armed { self.debug_event_mask() } else { 0 },
         }
@@ -350,7 +350,7 @@ impl Vm {
     /// expansions, whose quit, a safepoint's or a native poll's, the
     /// compiler already defers to the form's reach (`expansion_failed').
     pub(crate) fn native_quit_reached(&self) -> bool {
-        self.quit.busy()
+        self.mutator.quit.busy()
     }
 
     /// GNU maybe_quit at a safepoint, with handle_interrupt for each press
@@ -363,15 +363,15 @@ impl Vm {
     }
 
     fn maybe_quit_taking(&mut self, take: fn(&QuitSignal) -> u32) -> (Option<Escape>, bool) {
-        if !self.quit.busy() {
+        if !self.mutator.quit.busy() {
             return (None, false);
         }
         self.take_debug_event();
-        for _ in 0..take(&self.quit) {
+        for _ in 0..take(&self.mutator.quit) {
             self.handle_interrupt();
         }
         // A call's budget spent is its C-g (`romacs--call-deadline').
-        let expired = self.quit.take_deadline();
+        let expired = self.mutator.quit.take_deadline();
         if expired {
             self.set_quit_variable("quit-flag", Value::TRUE);
         }
@@ -386,7 +386,7 @@ impl Vm {
         }
         // process_quit_flag.
         self.set_quit_variable("quit-flag", Value::NIL);
-        self.quit_unwinding = true;
+        self.mutator.quit_unwinding = true;
         if flag == throw_on_input {
             return (Some(Escape::Throw(flag, Value::TRUE)), expired);
         }
@@ -410,10 +410,21 @@ impl Vm {
             None => Ok(()),
             Some(escape) => {
                 self.mutator.propagated_escape = Some(escape);
-                self.propagated_escape_hooked = false;
+                self.mutator.propagated_escape_hooked = false;
                 Err("Quit".into())
             }
         }
+    }
+
+    /// An isolate's interrupt or termination is pending
+    /// (`host::interrupt_pending`), for its process's own mutator only
+    /// (`Mutator::process_signals`): a second mutator never takes it.
+    pub(crate) fn process_interrupt_pending(&self) -> bool {
+        self.mutator.process_signals && crate::host::interrupt_pending()
+    }
+    /// `host::safepoint_pending`, for its process's own mutator only.
+    pub(crate) fn process_safepoint_pending(&self) -> bool {
+        self.mutator.process_signals && crate::host::safepoint_pending()
     }
 
     /// keyboard.c handle_user_signal for a signal that arrived since the
@@ -422,6 +433,8 @@ impl Vm {
     /// and quits into the debugger ([`Self::debug_event`]); any other stays
     /// an input event for the next read. Whether one was taken.
     pub fn take_debug_event(&mut self) -> bool {
+        // A second mutator leaves the process's signals to its own one.
+        if !self.mutator.process_signals { return false; }
         crate::host::clear_user_signal_arrival();
         let taken = crate::host::take_user_signals(self.debug_event_mask());
         if taken {
@@ -431,8 +444,10 @@ impl Vm {
     }
 
     /// The user signals `debug-on-event' names, as a mask of
-    /// host::USER_SIGNAL_NAMES: what a native probe stops for.
+    /// host::USER_SIGNAL_NAMES: what a native probe stops for. None for a
+    /// mutator that is not its process's own (`Mutator::process_signals`).
     pub(crate) fn debug_event_mask(&self) -> u8 {
+        if !self.mutator.process_signals { return 0; }
         let [variable, events @ ..] = self.debug_event_slots;
         let value = self.slots[variable].value;
         events.iter().enumerate().fold(0, |mask, (i, &slot)| if value == Value::reference(slot + 1, 7) { mask | 1 << i } else { mask })
@@ -473,7 +488,7 @@ impl Vm {
     /// When `quit-flag' is `throw-on-input''s tag the read returns nothing
     /// and leaves it for the next safepoint, which throws.
     pub(crate) fn take_read_quit(&mut self) -> ReadQuit {
-        for _ in 0..self.quit.take() {
+        for _ in 0..self.mutator.quit.take() {
             self.handle_interrupt();
         }
         let [flag, _, throw_on_input] = self.quit_variables();
@@ -487,22 +502,32 @@ impl Vm {
         ReadQuit::Key
     }
 
+    /// Whether this VM's mutator is its process's own, which takes the
+    /// process's OS signals: an isolate's interrupt and termination,
+    /// `sigusr1' and `sigusr2', the call deadline (`Mutator::process_signals`).
+    /// Every VM is made so; an embedder running a second mutator in the same
+    /// process makes it without them, and presses it through its own word
+    /// (`Vm::quit_signal`).
+    pub fn set_process_signals(&mut self, own: bool) {
+        self.mutator.process_signals = own;
+    }
+
     /// Share SIGNAL with the host's input thread, the evaluator waiting for
     /// input until the host says it runs a command (`enter_busy').
     pub fn share_quit_signal(&mut self, signal: std::sync::Arc<QuitSignal>) {
         signal.set_busy(false);
-        self.quit = signal;
+        self.mutator.quit = signal;
     }
 
     /// The host runs a command: a C-g typed from now on quits it.
     pub fn enter_busy(&mut self) {
-        self.quit.set_busy(true);
+        self.mutator.quit.set_busy(true);
     }
 
     /// The host's command ended: a C-g it did not take sets `quit-flag', as
     /// GNU's handle_interrupt does, for the next read (`take_quit_key').
     pub fn leave_busy(&mut self) {
-        for _ in 0..self.quit.set_busy(false) {
+        for _ in 0..self.mutator.quit.set_busy(false) {
             self.handle_interrupt();
         }
     }
@@ -523,7 +548,7 @@ impl Vm {
             Ok(value) => Ok(Some(crate::Local::new(self, value))),
             Err(_) if quit => {
                 // The quit ends here: nothing further unwinds from it.
-                self.quit_unwinding = false;
+                self.mutator.quit_unwinding = false;
                 self.set_quit_variable("quit-flag", Value::TRUE);
                 Ok(None)
             }
@@ -540,7 +565,7 @@ impl Vm {
         if !self.quit_input_pending() {
             return false;
         }
-        for _ in 0..self.quit.take() {
+        for _ in 0..self.mutator.quit.take() {
             self.handle_interrupt();
         }
         self.set_quit_variable("quit-flag", Value::NIL);
@@ -581,11 +606,11 @@ impl Vm {
     /// a debugger event; a child being stopped leaves that event for Lisp.
     pub(crate) fn poll_for(&self, fds: &[(std::os::fd::RawFd, i16)], timeout: Option<Duration>,
                            events: WaitFor) -> std::io::Result<Vec<i16>> {
-        let active = events != WaitFor::Child || (self.native_quit && self.native_quit_reached());
+        let active = events != WaitFor::Child || (self.mutator.native_quit && self.native_quit_reached());
         let debug = if active && events != WaitFor::ChildStop { self.debug_event_mask() } else { 0 };
         let pending = || active && match events {
-            WaitFor::Input => self.quit.pressed(),
-            WaitFor::Child | WaitFor::ChildStop => self.quit.due(),
+            WaitFor::Input => self.mutator.quit.pressed(),
+            WaitFor::Child | WaitFor::ChildStop => self.mutator.quit.due(),
         };
         let wake = self.worker_wake_fd();
         let set: Vec<_> = fds.iter().copied().chain(wake.map(|fd| (fd, libc::POLLIN))).collect();
@@ -599,7 +624,7 @@ impl Vm {
         };
         // A debug event ends it too, without a host (handle_user_signal
         // interrupts GNU's select).
-        let shared = active && std::sync::Arc::strong_count(&self.quit) > 1;
+        let shared = active && std::sync::Arc::strong_count(&self.mutator.quit) > 1;
         if !shared && debug == 0 && (events == WaitFor::Input || !pending()) {
             return Ok(poll(timeout)?.0);
         }
@@ -619,7 +644,7 @@ impl Vm {
 
     /// A quit read_char would return as the quit character.
     pub(crate) fn quit_input_pending(&self) -> bool {
-        self.quit.pressed() || self.quit_variables()[0] != Value::NIL
+        self.mutator.quit.pressed() || self.quit_variables()[0] != Value::NIL
     }
 
     pub(crate) fn host_input_pending(&mut self) -> bool {

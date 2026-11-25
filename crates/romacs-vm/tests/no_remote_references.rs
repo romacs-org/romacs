@@ -42,6 +42,8 @@ use Class::{Barrier, Cache, Free, Owed, Rescanned, Root, Transient};
 const FIELDS: &[(&str, Class)] = &[
     ("charsets", Root), ("standard_case_tables", Root), ("command_point", Root),
     ("change_prepared", Free),
+    // Which mutator takes the process's OS signals (`Mutator::process_signals`).
+    ("process_signals", Free),
     ("change_slots", Free), ("case_symbols_slot", Free), ("print_number_index", Free), ("undo_list_slot", Free),
     // `Shown`'s Values are compared only while `collections` still matches, and
     // `previous` and the bar's caches go the same way; faces are hidden slots.

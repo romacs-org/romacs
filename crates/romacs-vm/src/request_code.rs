@@ -358,8 +358,8 @@ impl Vm {
     pub(super) fn finish_request(&mut self, mut outcome: Result<Value>) -> Result<Value> {
         if self.eval_depth == 0 {
             self.mutator.propagated_escape = None;
-            self.propagated_escape_hooked = false;
-            self.propagated_eval_depth = None;
+            self.mutator.propagated_escape_hooked = false;
+            self.mutator.propagated_eval_depth = None;
             self.drop_deferred_escapes();
         }
         // A request boundary: no engine's registers are live here, and any

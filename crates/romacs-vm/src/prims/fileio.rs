@@ -406,7 +406,7 @@ fn leaf_poll_handler_member() {
     let outcome = handler_member(&mut Leaf::new(&mut vm), needle, handlers).map(|_| Value::NIL);
     assert!(quit_signalled(&mut vm, &outcome), "membership did not quit");
     assert!(!signal.due());
-    vm.quit_unwinding = false;
+    vm.mutator.quit_unwinding = false;
 
     eval(&mut vm, "(setq inhibit-quit t)");
     assert!(signal.interrupt());

@@ -208,8 +208,8 @@ fn handler_callback<'a, 'b>(m: &mut Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, frame:
     });
     let (escaped, hooked, depth) = lend::callback(m, gc.by_ref(), &frame, (), |e, (), result| {
         let replacement = e.vm.mutator.propagated_escape.take();
-        let hooked = std::mem::take(&mut e.vm.propagated_escape_hooked);
-        let depth = e.vm.propagated_eval_depth.take();
+        let hooked = std::mem::take(&mut e.vm.mutator.propagated_escape_hooked);
+        let depth = e.vm.mutator.propagated_eval_depth.take();
         e.fatal_image_failure |= e.vm.execution_fatal;
         e.code.resize_with(e.vm.functions.len(), Code::none);
         let escaped = match (result, replacement) {

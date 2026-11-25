@@ -1166,7 +1166,7 @@ mod tests {
         };
         assert!(signal.interrupt(), "a busy evaluator takes the press");
         assert_eq!(read(&mut vm), 1, "the read did not quit between elements");
-        vm.quit_unwinding = false;
+        vm.mutator.quit_unwinding = false;
         vm.mutator.propagated_escape = None;
         vm.eval_source_raw("(setq inhibit-quit t)").unwrap();
         assert!(signal.interrupt(), "a busy evaluator takes the press");
