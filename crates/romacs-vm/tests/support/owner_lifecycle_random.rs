@@ -1,3 +1,4 @@
+use super::round_six::{delete_last_process_form, initial_call, initial_call_events};
 use super::{Master, REAP_BEFORE_DISPATCH, SETUP_TIMEOUT, record_owner_events};
 use std::fmt::Write;
 use std::time::Instant;
@@ -18,7 +19,10 @@ impl Random {
     }
 }
 
-#[expect(clippy::cast_possible_truncation, reason = "a pick below the event count fits usize")]
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "a pick below the event count fits usize"
+)]
 fn actions(seed: u64) -> String {
     let mut random = Random(seed);
     let mut actions = String::new();
@@ -32,13 +36,15 @@ fn actions(seed: u64) -> String {
         "orphaned",
         "refused",
         "refuse",
+        "hello-refused",
+        "world-refused",
         "death",
         "child-gone",
         "shutdown",
     ];
     let length = 4 + random.pick(36);
     for _ in 0..length {
-        let target = random.pick(7);
+        let target = random.pick(8);
         let event = events[random.pick(events.len() as u64) as usize];
         write!(actions, "({target} {event}) ").unwrap();
     }
@@ -69,7 +75,7 @@ fn seeded_transition_walk_checks_settlement_shutdown_slots_and_effect_order() {
     );
     assert_eq!(
         covered.split_whitespace().count(),
-        12,
+        14,
         "reachable event coverage: {covered}"
     );
     assert_eq!(
@@ -83,10 +89,14 @@ struct Round {
     batch: u64,
     quit: &'static str,
     late: bool,
+    early: bool,
 }
 
 impl Round {
-    #[expect(clippy::cast_possible_truncation, reason = "a pick below three fits usize")]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "a pick below three fits usize"
+    )]
     fn from_seed(seed: u64) -> Self {
         let mut random = Random(seed);
         Self {
@@ -94,6 +104,7 @@ impl Round {
             batch: 1 + random.pick(6),
             quit: ["nil", "filter", "sentinel"][random.pick(3) as usize],
             late: random.pick(2) == 1,
+            early: random.pick(4) == 0,
         }
     }
 
@@ -103,6 +114,7 @@ impl Round {
             batch,
             quit,
             late,
+            ..
         } = self;
         let launch = if *late {
             "(isolate-send 'parent 'a-enter) (isolate-receive 10)"
@@ -163,8 +175,17 @@ impl Round {
 }
 
 fn walk_round(master: &mut Master, round: &Round) -> String {
-    master.run("(setq owner (owner--spawn)) (isolate-await (owner--start-future owner) 10)");
     record_owner_events(master);
+    let early = if round.early {
+        initial_call(master);
+        assert_eq!(master.eval("(isolate-await first 15)"), "armed");
+        let events = initial_call_events(master);
+        record_owner_events(master);
+        events
+    } else {
+        master.run("(setq owner (owner--spawn)) (isolate-await (owner--start-future owner) 10)");
+        "(t t)".into()
+    };
     master.until(SETUP_TIMEOUT, "owner parked in its idle wait", |m| {
         m.eval("(cdr (assq 'state (process-attributes (plist-get (owner-describe owner) :pid))))")
             == r#""S""#
@@ -179,18 +200,27 @@ fn walk_round(master: &mut Master, round: &Round) -> String {
                 (isolate-await a 10)
                 (isolate-await b 10)",
     );
-    let result = round.check(master);
+    let output = round.check(master);
+    let deleted = master.eval(&format!(
+        "(isolate-await (owner-call owner '(lambda () {})) 15)",
+        delete_last_process_form()
+    ));
     master.run("(owner-kill owner)");
     master.until(SETUP_TIMEOUT, "walk owner reaped", |m| {
         m.eval("(owner-state owner)") == "dead"
     });
-    result
+    if early == "(t t)" && output == "nil" && deleted == "(t nil nil nil)" {
+        "nil".into()
+    } else {
+        format!("early callbacks {early}, ordering {output}, last process {deleted}")
+    }
 }
 
 #[test]
 fn seeded_worker_walk_checks_sentinels_and_output_between_calls() {
     let now = Instant::now();
     let mut master = Master::bare();
+    master.run("(setq owner-wedge-delay 300.0)");
     let start = FIRST_SEED + TRANSITION_SEQUENCES;
     let end = start + WORKER_SEQUENCES;
     eprintln!("worker walk seeds {start:#x}..{end:#x} (exclusive)");
@@ -198,7 +228,16 @@ fn seeded_worker_walk_checks_sentinels_and_output_between_calls() {
     let mut first = None;
     for seed in start..end {
         eprintln!("worker seed {seed:#x}");
-        let result = walk_round(&mut master, &Round::from_seed(seed));
+        let round = Round::from_seed(seed);
+        let result = if round.early {
+            // An already-forked spare does not inherit the zygote's
+            // current round when the owner takes it.
+            let mut cold = Master::bare();
+            cold.run("(setq owner-wedge-delay 300.0)");
+            walk_round(&mut cold, &round)
+        } else {
+            walk_round(&mut master, &round)
+        };
         if result != "nil" {
             failed += 1;
             first.get_or_insert((seed, result));
@@ -210,6 +249,6 @@ fn seeded_worker_walk_checks_sentinels_and_output_between_calls() {
     );
     assert_eq!(
         failed, 0,
-        "first failing seed and [sentinels, batch before B, events]: {first:#x?}"
+        "first failing seed and observations: {first:#x?}"
     );
 }

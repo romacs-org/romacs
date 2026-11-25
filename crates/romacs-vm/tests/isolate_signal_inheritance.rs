@@ -100,3 +100,62 @@ fn reap_before_deadline(pid: Pid) -> i32 {
         std::thread::sleep(Duration::from_millis(1));
     }
 }
+
+const CHILD_SAW_TERM: i32 = 16;
+const CHILD_LOST_TERM: i32 = 32;
+const SEND_TERM_FAILED: i32 = 64;
+
+#[test]
+fn sigterm_sent_before_forked_child_reset_still_ends_child() {
+    const TEST: &str = "sigterm_sent_before_forked_child_reset_still_ends_child";
+    if std::env::var_os(REEXEC).is_some() {
+        fork_with_child_termination();
+        return;
+    }
+
+    let test = own_test::name(module_path!(), TEST);
+    let status = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", &test, "--nocapture"])
+        .env(REEXEC, "1")
+        .status()
+        .unwrap();
+    assert!(status.success(), "{test} in its own process: {status}");
+}
+
+fn fork_with_child_termination() {
+    host::catch_isolate_signals().unwrap();
+    assert!(!host::terminate_pending());
+    let zygote = getpid().as_raw_nonzero().get();
+    let pid = host::fork_isolate().unwrap();
+    if pid == 0 {
+        terminate_before_reset(zygote);
+    }
+    let code = reap_before_deadline(Pid::from_raw(pid).unwrap());
+    assert!(
+        !host::terminate_pending(),
+        "only the child received SIGTERM"
+    );
+    assert_ne!(code, SEND_TERM_FAILED, "the child could not send SIGTERM");
+    assert_ne!(code, RESET_FAILED, "forked_child_reset failed");
+    assert_eq!(
+        code, CHILD_SAW_TERM,
+        "fork reset lost the child's own SIGTERM"
+    );
+}
+
+fn terminate_before_reset(zygote: i32) -> ! {
+    // This is the native fork/reset pair. A self-directed SIGTERM is
+    // delivered before kill returns if unmasked, or pending if masked.
+    // The worker's run loop exits on this same termination flag.
+    if kill_process(getpid(), Signal::TERM).is_err() {
+        host::exit_at_once(SEND_TERM_FAILED);
+    }
+    if host::forked_child_reset(zygote).is_err() {
+        host::exit_at_once(RESET_FAILED);
+    }
+    host::exit_at_once(if host::terminate_pending() {
+        CHILD_SAW_TERM
+    } else {
+        CHILD_LOST_TERM
+    });
+}

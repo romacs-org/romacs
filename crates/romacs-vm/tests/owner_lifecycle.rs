@@ -946,3 +946,6 @@ mod round_four;
 
 #[path = "support/owner_lifecycle_random.rs"]
 mod random_walk;
+
+#[path = "support/owner_lifecycle_round_six.rs"]
+mod round_six;

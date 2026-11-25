@@ -6,7 +6,8 @@
 (defun rw-reset ()
   (setq romacs--isolates nil romacs--isolate-waiting nil
         rw-futures nil rw-closed nil rw-exited nil rw-requeued nil
-        rw-callbacks nil rw-effects nil rw-next-frame nil rw-issues nil)
+        rw-callbacks nil rw-effects nil rw-next-frame nil rw-issues nil
+        isolate-world nil romacs--isolate-world-refusal nil)
   (clrhash romacs--isolate-zygotes))
 
 (defun rw-exit (id)
@@ -18,9 +19,17 @@
   (fset 'romacs--isolate-signal
         (lambda (id signal)
           (when (and (= signal 9) (/= id 3)) (rw-exit id))))
-  (fset 'romacs--isolate-reap (lambda (id) (rw-exit id) 0))
+  (fset 'romacs--isolate-reap (lambda (id) (and (memq id rw-exited) 0)))
   (fset 'romacs--isolate-signal-children (lambda (_id) nil))
-  (fset 'romacs--isolate-post (lambda (&rest _args) nil))
+  (fset 'romacs--isolate-post
+        (lambda (id kind &rest _args)
+          ;; The stopped zygote cannot read its bye. Other idle processes
+          ;; accept a graceful end; live children still hold their zygote.
+          (when (and (eq kind 'bye) (/= id 8)
+                     (or (/= id 1)
+                         (not (romacs--isolate-lingering-p
+                               rw-main-zygote))))
+            (rw-exit id))))
   (fset 'romacs--isolate-close (lambda (id) (push id rw-closed)))
   (fset 'romacs--isolate-take
         (lambda (id)
@@ -63,11 +72,14 @@
 (defun rw-world (variant)
   (rw-reset)
   (let* ((z (rw-add 1 'zygote (= (% variant 3) 0) nil))
-         (record (vector 'zygote z nil 'ready nil)))
+         (record (vector 'zygote z nil 'ready nil))
+         (stopped (rw-add 8 'zygote nil nil)))
+    (setq rw-main-zygote z)
+    (romacs--isolate-step stopped '(retire))
     (puthash nil record romacs--isolate-zygotes)
     (vector z (rw-add 2 'job t record) (rw-add 3 'job t record)
             (rw-add 4 'owner t record) (rw-add 5 'pool t nil)
-            (rw-add 6 'fresh t nil) (rw-add 7 nil (= (% variant 2) 0) nil))))
+            (rw-add 6 'fresh t nil) (rw-add 7 nil (= (% variant 2) 0) nil) stopped)))
 
 (defun rw-event (i op)
   (let* ((facts (romacs--isolate-facts i))
@@ -78,6 +90,12 @@
      ((eq op 'shutdown) '(shutdown))
      ((not (memq i romacs--isolates)) nil)
      ((eq op 'death) '(death isolate-died nil))
+     ((eq op 'hello-refused)
+      (and (eq phase 'live) (plist-get facts :forked)
+           '(hello-refused (build-mismatch "different build"))))
+     ((eq op 'world-refused)
+      (and (eq phase 'live) (plist-get facts :forked)
+           '(world-refused "cannot adopt world" ("world" . "key"))))
      ((eq op 'memory) (and (eq role 'job) pending '(memory (isolate-memory-exhausted nil nil nil))))
      ((eq op 'answered) (and pending (eq phase 'live) (not (eq role 'zygote))
                               (plist-get facts :forked) '(answered)))
@@ -134,11 +152,14 @@
             (notified
              (push 'effect-after-callback rw-issues))))))
 
-(defun rw-shutdown-issues ()
+(defun rw-shutdown-issues (workers)
   (when (memq 'resubmit rw-effects) (push 'shutdown-resubmitted rw-issues))
-  (dolist (i (isolate-list))
-    (when (and (memq (aref i 10) '(zygote job)) (isolate-live-p i))
-      (push 'shutdown-left-live-worker rw-issues)))
+  (dotimes (at (length workers))
+    (let ((id (romacs--isolate-id (aref workers at))))
+      ;; 3 is a fork request without a reported process. A phase change
+      ;; or closing a handle supplies no evidence of a child's exit.
+      (when (and (/= id 3) (not (memq id rw-exited)))
+        (push (list 'shutdown-left-process id) rw-issues))))
   (dolist (f rw-futures)
     (unless (isolate-future-done-p f) (push 'shutdown-left-pending-future rw-issues))))
 
@@ -153,13 +174,13 @@
           (rw-observe-futures)
           (rw-observe-slots workers)
           (rw-observe-order)
-          (when (eq (car event) 'shutdown) (rw-shutdown-issues))
+          (when (eq (car event) 'shutdown) (rw-shutdown-issues workers))
           (dolist (issue rw-issues)
-            (unless (assq issue findings)
+            (unless (assoc issue findings)
               (push (list issue at (reverse trace)) findings)))))
       (setq at (1+ at)))
     (dolist (i (isolate-list))
-      (when (and (memq i romacs--isolates) (not (isolate-live-p i)))
+      (when (memq (romacs--isolate-id i) rw-exited)
         (rw-action i '(death isolate-killed nil))))
     (setq rw-issues nil)
     (rw-observe-futures)
@@ -168,7 +189,7 @@
       (when (memq (aref i 10) '(job owner zygote))
         (push 'child-left-without-death rw-issues)))
     (dolist (issue rw-issues)
-      (unless (assq issue findings) (push (list issue at (reverse trace)) findings)))
+      (unless (assoc issue findings) (push (list issue at (reverse trace)) findings)))
     (rw-reset)
     (reverse findings)))
 
