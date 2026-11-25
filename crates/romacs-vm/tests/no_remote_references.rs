@@ -171,7 +171,7 @@ const FIELDS: &[(&str, Class)] = &[
 const VARIANTS: &[(&str, Class)] = &[
     ("SyntaxTable", Free), ("Float", Free), ("Bignum", Free),
     ("Window", Barrier), ("Frame", Barrier), ("Terminal", Barrier), ("WindowConfiguration", Barrier),
-    ("Sqlite", Free), ("Treesit", Barrier), ("Process", Barrier), ("Finalizer", Barrier), ("Thread", Free),
+    ("Sqlite", Free), ("Treesit", Barrier), ("Process", Barrier), ("Finalizer", Barrier), ("Thread", Free), ("Backing", Free),
     ("String", Barrier), ("RawString", Barrier), ("Vector", Barrier), ("BoolVector", Free), ("Record", Barrier),
     // Their nodes are shared and locked, so a node's store hooks no one entry:
     // their contents are written only through char_table.rs's funnel (`wrote`),
@@ -545,7 +545,7 @@ const ENTRIES: &[(&str, Variants)] = &[
         ("Window", &["window.rs:Window"]), ("Frame", &["frame.rs:Frame"]), ("Terminal", &["frame.rs:Terminal"]),
         ("WindowConfiguration", &["window_config.rs:WindowConfiguration"]), ("Sqlite", &["sqlite.rs:Handle"]),
         ("Treesit", &["treesit/mod.rs:Object"]),
-        ("Process", &["subprocess.rs:Process"]), ("Finalizer", &[]), ("Thread", &[]),
+        ("Process", &["subprocess.rs:Process"]), ("Finalizer", &[]), ("Thread", &[]), ("Backing", &["frozen.rs:Backing"]),
         ("String", &["data.rs:LispString"]), ("RawString", &["data.rs:LispString"]), ("Vector", &[]),
         ("BoolVector", &["bool_vector.rs:BoolVector"]), ("Record", &[]),
         ("CharTable", &["char_table.rs:CharTable"]), ("SubCharTable", &["char_table.rs:CharTableNode"]),
@@ -554,6 +554,7 @@ const ENTRIES: &[(&str, Variants)] = &[
         ("ByteBuffer", &["bytes.rs:ByteBuffer"]), ("HashTable", &["hash.rs:HashTable"]), ("Obarray", &["obarray.rs:Obarray"]),
         ("Free", &[]),
     ]),
+    ("frozen.rs:Backing", &[("Inline", &[]), ("Sealed", &[])]),
     ("treesit/mod.rs:Object", &[
         ("Parser", &["treesit/mod.rs:Parser"]), ("Node", &["treesit/mod.rs:Node"]),
         ("Query", &["treesit/mod.rs:Query"]), ("Task", &["treesit/mod.rs:Task"]),

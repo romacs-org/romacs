@@ -233,10 +233,48 @@ mod leaf {
         Process,
         Finalizer,
         Thread,
+        Backing,
         TreesitParser,
         TreesitNode,
         TreesitQuery,
         Invalid,
+    }
+    impl Kind {
+        /// What `type-of` names a value of this kind: None for a record,
+        /// whose type is its own slot, and for what is no Lisp object.
+        pub(crate) fn type_name(self) -> Option<&'static str> {
+            Some(match self {
+                Kind::Integer | Kind::Bignum => "integer",
+                Kind::Symbol => "symbol",
+                Kind::Float => "float",
+                Kind::Cons => "cons",
+                Kind::String | Kind::Bytes => "string",
+                Kind::Vector => "vector",
+                Kind::BoolVector => "bool-vector",
+                Kind::Buffer | Kind::ByteBuffer => "buffer",
+                Kind::Marker => "marker",
+                Kind::Overlay => "overlay",
+                Kind::HashTable => "hash-table",
+                Kind::Obarray => "obarray",
+                Kind::SyntaxTable | Kind::CharTable => "char-table",
+                Kind::SubCharTable => "sub-char-table",
+                Kind::Window => "window",
+                Kind::Frame => "frame",
+                Kind::Terminal => "terminal",
+                Kind::WindowConfiguration => "window-configuration",
+                Kind::Sqlite => "sqlite",
+                Kind::Process => "process",
+                Kind::Finalizer => "finalizer",
+                Kind::Thread => "thread",
+                Kind::Backing => "frozen-backing",
+                Kind::TreesitParser => "treesit-parser",
+                Kind::TreesitNode => "treesit-node",
+                Kind::TreesitQuery => "treesit-compiled-query",
+                Kind::Subr => "subr",
+                Kind::Closure => "interpreted-function",
+                Kind::Record | Kind::Cell | Kind::Unbound | Kind::Invalid => return None,
+            })
+        }
     }
 
     pub(crate) struct Leaf<'a> {
@@ -1762,43 +1800,50 @@ mod leaf {
                 7 if self.symbol_index(v).is_some() => Kind::Symbol,
                 // A private object first: an executable-image string is past
                 // the private table, so `object_if' answers None for it.
-                0 => match self.vm.object_if(v) {
-                    Some(data::Object::Float(_)) => Kind::Float,
-                    Some(data::Object::Bignum(_)) => Kind::Bignum,
-                    Some(data::Object::String(_) | data::Object::RawString(_)) => Kind::String,
-                    Some(data::Object::Bytes(_)) => Kind::Bytes,
-                    Some(data::Object::Vector(_)) => Kind::Vector,
-                    Some(data::Object::BoolVector(_)) => Kind::BoolVector,
-                    Some(data::Object::Record(_)) => Kind::Record,
-                    Some(data::Object::Buffer(_)) => Kind::Buffer,
-                    Some(data::Object::Marker(_)) => Kind::Marker,
-                    Some(data::Object::Overlay(_)) => Kind::Overlay,
-                    Some(data::Object::ByteBuffer(_)) => Kind::ByteBuffer,
-                    Some(data::Object::HashTable(_)) => Kind::HashTable,
-                    Some(data::Object::Obarray(_)) => Kind::Obarray,
-                    Some(data::Object::Free) => Kind::Invalid,
-                    Some(data::Object::SyntaxTable(_)) => Kind::SyntaxTable,
-                    Some(data::Object::CharTable(_)) => Kind::CharTable,
-                    Some(data::Object::SubCharTable(_)) => Kind::SubCharTable,
-                    Some(data::Object::MapKeymapCursor(_)) => Kind::Invalid,
-                    Some(data::Object::Window(_)) => Kind::Window,
-                    Some(data::Object::Frame(_)) => Kind::Frame,
-                    Some(data::Object::Terminal(_)) => Kind::Terminal,
-                    Some(data::Object::WindowConfiguration(_)) => Kind::WindowConfiguration,
-                    Some(data::Object::Sqlite(_)) => Kind::Sqlite,
-                    Some(data::Object::Process(_)) => Kind::Process,
-                    Some(data::Object::Finalizer(_)) => Kind::Finalizer,
-                    Some(data::Object::Thread) => Kind::Thread,
-                    Some(data::Object::Treesit(t)) => match &**t {
-                        crate::treesit::Object::Parser(_) => Kind::TreesitParser,
-                        crate::treesit::Object::Node(_) => Kind::TreesitNode,
-                        crate::treesit::Object::Query(_) => Kind::TreesitQuery,
-                        crate::treesit::Object::Task(_) => Kind::Invalid,
-                    },
-                    None if Vm::image_string(v) => Kind::String,
-                    None => Kind::Invalid,
-                },
+                0 => self.object_kind(v),
                 _ => Kind::Invalid,
+            }
+        }
+        /// The kind of the object V names, a private one or an
+        /// executable-image string.
+        #[inline]
+        fn object_kind(&self, v: Value) -> Kind {
+            match self.vm.object_if(v) {
+                Some(data::Object::Float(_)) => Kind::Float,
+                Some(data::Object::Bignum(_)) => Kind::Bignum,
+                Some(data::Object::String(_) | data::Object::RawString(_)) => Kind::String,
+                Some(data::Object::Bytes(_)) => Kind::Bytes,
+                Some(data::Object::Vector(_)) => Kind::Vector,
+                Some(data::Object::BoolVector(_)) => Kind::BoolVector,
+                Some(data::Object::Record(_)) => Kind::Record,
+                Some(data::Object::Buffer(_)) => Kind::Buffer,
+                Some(data::Object::Marker(_)) => Kind::Marker,
+                Some(data::Object::Overlay(_)) => Kind::Overlay,
+                Some(data::Object::ByteBuffer(_)) => Kind::ByteBuffer,
+                Some(data::Object::HashTable(_)) => Kind::HashTable,
+                Some(data::Object::Obarray(_)) => Kind::Obarray,
+                Some(data::Object::Free) => Kind::Invalid,
+                Some(data::Object::SyntaxTable(_)) => Kind::SyntaxTable,
+                Some(data::Object::CharTable(_)) => Kind::CharTable,
+                Some(data::Object::SubCharTable(_)) => Kind::SubCharTable,
+                Some(data::Object::MapKeymapCursor(_)) => Kind::Invalid,
+                Some(data::Object::Window(_)) => Kind::Window,
+                Some(data::Object::Frame(_)) => Kind::Frame,
+                Some(data::Object::Terminal(_)) => Kind::Terminal,
+                Some(data::Object::WindowConfiguration(_)) => Kind::WindowConfiguration,
+                Some(data::Object::Sqlite(_)) => Kind::Sqlite,
+                Some(data::Object::Process(_)) => Kind::Process,
+                Some(data::Object::Finalizer(_)) => Kind::Finalizer,
+                Some(data::Object::Thread) => Kind::Thread,
+                Some(data::Object::Backing(_)) => Kind::Backing,
+                Some(data::Object::Treesit(t)) => match &**t {
+                    crate::treesit::Object::Parser(_) => Kind::TreesitParser,
+                    crate::treesit::Object::Node(_) => Kind::TreesitNode,
+                    crate::treesit::Object::Query(_) => Kind::TreesitQuery,
+                    crate::treesit::Object::Task(_) => Kind::Invalid,
+                },
+                None if Vm::image_string(v) => Kind::String,
+                None => Kind::Invalid,
             }
         }
         pub fn dense_keymap(&mut self, prompt: Value) -> Value {
@@ -2182,6 +2227,13 @@ pub(crate) fn window_shown_elements(vm: &mut Vm, window: Value, from: i64, to: i
     Leaf::new(vm).window_shown_elements(window, from, to)
 }
 
+/// What `type-of` names V, for Rust with no leaf of its own (a seed's
+/// refusals, `frozen/seed.rs`); a record by its kind alone.
+pub(crate) fn type_name(vm: &mut Vm, v: Value) -> &'static str {
+    let kind = Leaf::new(vm).kind(v);
+    kind.type_name().unwrap_or(if kind == Kind::Record { "record" } else { "object" })
+}
+
 pub(crate) fn window_text_shows_glyphs(vm: &mut Vm, window: Value, from: usize, to: usize) -> std::result::Result<bool, Fault> {
     Leaf::new(vm).window_text_shows_glyphs(window, from, to)
 }
@@ -2389,9 +2441,23 @@ pub(crate) fn arity(value: Value) -> Option<(usize, Option<usize>)> {
     })
 }
 
-/// The generated subr declared as NAME.
+/// The subr, legacy or generated, named NAME (no two share a name, which
+/// the index checks as it is built): how
+/// Rust names a subr it calls, and how a code graph's subrs cross to
+/// another VM (`frozen/code.rs`).
 pub(crate) fn subr_named(name: &str) -> Option<Value> {
-    GENERATED.iter().position(|d| d.name == name).map(|i| Value::reference(PRIMITIVES.len() + i, 6))
+    // Built once from the static descriptors and never written again, so
+    // every mutator can read it.
+    static BY_NAME: std::sync::OnceLock<rustc_hash::FxHashMap<&'static str, usize>> = std::sync::OnceLock::new();
+    let by_name = BY_NAME.get_or_init(|| {
+        let mut by_name = rustc_hash::FxHashMap::default();
+        for (i, d) in (0..count()).filter_map(|i| Some((i, descriptor(i)?))) {
+            let earlier = by_name.insert(d.name(), i);
+            assert!(earlier.is_none(), "two subrs are named {}", d.name());
+        }
+        by_name
+    });
+    by_name.get(name).map(|&i| Value::reference(i, 6))
 }
 
 pub(crate) fn name(v: Value) -> Option<&'static str> {

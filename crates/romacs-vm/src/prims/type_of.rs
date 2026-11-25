@@ -19,37 +19,9 @@ fn classify(cx: &mut Leaf<'_>, object: Value, precise: bool) -> Out {
         Kind::Integer | Kind::Bignum => "integer",
         Kind::Symbol if precise && object == Value::NIL => "null",
         Kind::Symbol if precise && object == Value::TRUE => "boolean",
-        Kind::Symbol => "symbol",
-        Kind::Float => "float",
-        Kind::Cons => "cons",
-        Kind::String | Kind::Bytes => "string",
-        Kind::Vector => "vector",
-        Kind::BoolVector => "bool-vector",
         Kind::Record => return Ok(cx.record_type(object)),
-        Kind::Buffer | Kind::ByteBuffer => "buffer",
-        Kind::Marker => "marker",
-        Kind::Overlay => "overlay",
-        Kind::HashTable => "hash-table",
-        Kind::Obarray => "obarray",
-        Kind::SyntaxTable | Kind::CharTable => "char-table",
-        Kind::SubCharTable => "sub-char-table",
-        Kind::Window => "window",
-        Kind::Frame => "frame",
-        Kind::Terminal => "terminal",
-        Kind::WindowConfiguration => "window-configuration",
-        Kind::Sqlite => "sqlite",
-        Kind::Process => "process",
-        Kind::Finalizer => "finalizer",
-        Kind::Thread => "thread",
-        Kind::TreesitParser => "treesit-parser",
-        Kind::TreesitNode => "treesit-node",
-        Kind::TreesitQuery => "treesit-compiled-query",
         Kind::Subr if precise => if crate::prim::name(object).and_then(super::special_forms::special_form_min).is_some() { "special-form" } else { "primitive-function" },
-        Kind::Subr => "subr",
-        Kind::Closure => "interpreted-function",
-        Kind::Cell | Kind::Unbound | Kind::Invalid => {
-            return Err(Fault::Error("type-of: invalid Lisp object".into()));
-        }
+        kind => kind.type_name().ok_or_else(|| Fault::Error("type-of: invalid Lisp object".into()))?,
     };
     Ok(cx.intern(name))
 }
